@@ -71,7 +71,10 @@ async function handler(
   validateCharacterLimitForLayout(input.bodyText, input.signOff, layoutType, context);
 
   // Refuse characters the print shows as boxes (#526)
-  validatePrintableLetter(sender, input.recipient, input.bodyText, input.signOff, context);
+  validatePrintableLetter(
+    { sender, recipient: input.recipient, bodyText: input.bodyText, signOff: input.signOff, senderIsSaved: usedSavedReturnAddress },
+    context
+  );
 
   // Validate with PostGrid provider
   const { senderValidation, recipientValidation, addressWarnings } = await validateAddressesWithProvider(

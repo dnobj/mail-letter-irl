@@ -6,43 +6,55 @@
  * shows every character in the viewer's own fonts, so without this check a
  * letter could preview correctly, be paid for, and print boxes.
  *
- * PRINTABLE_RANGES keeps to the scripts Open Sans covers (Latin with
- * Vietnamese, Greek, Cyrillic and Hebrew) and to common punctuation and
- * symbols. The print check of 2026-09-30 (docs/manual-tests.md, Validation
- * Errors) printed a sample of each, and printed emoji, Chinese, Japanese,
- * Korean, Arabic, Hindi and Thai as boxes. A symbol left out here is refused
- * even if Open Sans may have it: a refusal costs a rewrite, a box costs a
- * letter.
+ * PRINTABLE_RANGES admits only what printed in the print check of 2026-09-30
+ * (#526, letter_gqVZqFrq4bTEy4Jn9N8AHK), or what Open Sans certainly draws in
+ * both its classic build and the one with Hebrew that PostGrid has. That check
+ * printed emoji, Chinese, Japanese, Korean, Arabic, Hindi and Thai as boxes.
+ * A character left out here is refused even if the font may have it: a
+ * refusal costs a rewrite, a box costs a letter. Widen a range only after a
+ * test print shows it.
+ *
+ * The text is checked as it is stored and printed, not normalized: a
+ * canonical equivalent (the angstrom sign for Å) prints only if the renderer
+ * substitutes it, which no print has shown.
  */
 
 const PRINTABLE_RANGES: ReadonlyArray<readonly [number, number]> = [
   [0x0009, 0x000a], // tab, line feed
   [0x000d, 0x000d], // carriage return
   [0x0020, 0x007e], // Basic Latin
-  [0x00a0, 0x024f], // Latin-1 Supplement, Latin Extended-A and -B
-  [0x02bb, 0x02bc], // ʻ ʼ
-  [0x02c6, 0x02c7], // ˆ ˇ
-  [0x02c9, 0x02c9], // ˉ
-  [0x02d8, 0x02dd], // ˘ ˙ ˚ ˛ ˜ ˝
-  [0x0300, 0x036f], // combining accents that NFC leaves uncomposed
-  [0x0370, 0x03ff], // Greek
-  [0x0400, 0x052f], // Cyrillic and its supplement
-  [0x0590, 0x05ff], // Hebrew
-  [0x1e00, 0x1eff], // Latin Extended Additional, with Vietnamese
-  [0x1f00, 0x1fff], // Greek Extended
-  [0x2000, 0x203b], // General Punctuation: spaces, dashes, quotes, bullets...
-  [0x203d, 0x2048], // ...without ‼ (U+203C)
-  [0x204a, 0x206f], // ...or ⁉ (U+2049), which are emoji
-  [0x20aa, 0x20ac], // ₪ ₫ €
-  [0x20b4, 0x20b4], // ₴
-  [0x20bd, 0x20bd], // ₽
-  [0x2113, 0x2113], // ℓ
-  [0x2116, 0x2116], // №
+  [0x00a0, 0x017f], // Latin-1 Supplement and Latin Extended-A
+  [0x0192, 0x0192], // ƒ
+  [0x01a0, 0x01a1], // Ơ ơ (Vietnamese)
+  [0x01af, 0x01b0], // Ư ư (Vietnamese)
+  [0x0218, 0x021b], // Ș ș Ț ț (Romanian)
+  [0x0300, 0x030c], // combining accents, grave to caron, which the print...
+  [0x031b, 0x031b], // ...composes with their letter: horn,
+  [0x0323, 0x0323], // dot below,
+  [0x0327, 0x0328], // cedilla and ogonek
+  [0x0384, 0x038a], // modern Greek, from the tonos...
+  [0x038c, 0x038c],
+  [0x038e, 0x03a1],
+  [0x03a3, 0x03ce], // ...to ώ
+  [0x0400, 0x04ff], // Cyrillic
+  [0x05b0, 0x05c7], // Hebrew points and punctuation
+  [0x05d0, 0x05ea], // Hebrew letters
+  [0x1ea0, 0x1ef9], // Vietnamese letters
+  [0x2000, 0x200f], // spaces; zero-width and direction marks, which print nothing
+  [0x2013, 0x2014], // – —
+  [0x2018, 0x201a], // ‘ ’ ‚
+  [0x201c, 0x201e], // “ ” „
+  [0x2020, 0x2022], // † ‡ •
+  [0x2026, 0x2026], // …
+  [0x2030, 0x2030], // ‰
+  [0x2032, 0x2033], // ′ ″
+  [0x2039, 0x203a], // ‹ ›
+  [0x2044, 0x2044], // fraction slash
+  [0x20ac, 0x20ac], // €
   [0x2122, 0x2122], // ™
-  [0x2126, 0x2126], // Ω
-  [0x212e, 0x212e], // ℮
-  [0xfb01, 0xfb02], // ﬁ ﬂ
-  [0xfe00, 0xfe0f], // variation selectors, drawn as nothing
+  [0x2212, 0x2212], // minus sign
+  [0xfb01, 0xfb02], // ﬁ ﬂ: the print draws its own ﬁ
+  [0xfe00, 0xfe0f], // variation selectors: after ❤ the print drew nothing for one
   [0xfeff, 0xfeff], // zero-width no-break space
 ];
 
@@ -57,22 +69,19 @@ const graphemes = new Intl.Segmenter('en', { granularity: 'grapheme' });
  * The characters in `text` that would print as boxes, each once, in the order
  * they first appear. A character is a whole grapheme, so an emoji sequence
  * (a family, a flag, a skin tone) is reported as the one symbol it shows.
- *
- * The text is checked in NFC: the print composes a letter and its accent into
- * the font's accented letter, as NFC does.
  */
 export function unprintableCharacters(text: string): string[] {
-  const found: string[] = [];
-  for (const { segment } of graphemes.segment(text.normalize('NFC'))) {
-    if (found.includes(segment)) continue;
+  const found = new Set<string>();
+  for (const { segment } of graphemes.segment(text)) {
+    if (found.has(segment)) continue;
     for (const character of segment) {
       if (!isPrintableCodePoint(character.codePointAt(0)!)) {
-        found.push(segment);
+        found.add(segment);
         break;
       }
     }
   }
-  return found;
+  return [...found];
 }
 
 /** A piece of printed text, and how the refusal names where it is. */
@@ -99,10 +108,31 @@ export function findUnprintable(texts: PrintedText[]): UnprintableField[] {
 
 const MOST_LISTED = 8;
 
+// Spaces, controls and format characters show nothing, so they are named by
+// code point alone.
+const INVISIBLE = /^[\p{White_Space}\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Cn}]+$/u;
+const LETTER_OR_EMOJI = /^[\p{L}\p{M}\p{N}\p{Extended_Pictographic}]$/u;
+
+function codePoint(character: string): string {
+  return `U+${character.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}`;
+}
+
+/**
+ * How the refusal shows a character. A lone punctuation mark or symbol also
+ * gets its code point, since it may look like one that prints: a
+ * non-breaking hyphen (U+2011) is not a hyphen.
+ */
+function shown(character: string): string {
+  const characters = [...character];
+  if (INVISIBLE.test(character)) return characters.map(codePoint).join(' ');
+  if (characters.length === 1 && !LETTER_OR_EMOJI.test(character)) return `${character} (${codePoint(character)})`;
+  return character;
+}
+
 function listed(characters: string[]): string {
-  const shown = characters.slice(0, MOST_LISTED).join(' ');
+  const list = characters.slice(0, MOST_LISTED).map(shown).join(' ');
   const more = characters.length - MOST_LISTED;
-  return more > 0 ? `${shown} and ${more} more` : shown;
+  return more > 0 ? `${list} and ${more} more` : list;
 }
 
 /**
@@ -113,7 +143,8 @@ export function unprintableRefusal(mail: 'letter' | 'postcard', found: Unprintab
   const where = found.map(({ where, characters }) => `${listed(characters)} ${where}`).join('; ');
   return (
     `Letter IRL can't print some characters in this ${mail}: ${where}. ` +
-    `Printed mail shows Latin, Greek, Cyrillic and Hebrew letters and common punctuation, and no emoji. ` +
-    `Take those characters out or put them in words, then preview again.`
+    `Printed mail shows Latin letters with common accents, modern Greek, Cyrillic, Hebrew ` +
+    `and common punctuation, and no emoji. ` +
+    `Take those characters out or write them in plain letters, then preview again.`
   );
 }

@@ -2,9 +2,9 @@
  * What printed mail can show (#526).
  *
  * PostGrid prints all our mail in Open Sans, and a character the font lacks
- * prints as an empty box. The print check of 2026-09-30 (docs/manual-tests.md,
- * Validation Errors; letter_gqVZqFrq4bTEy4Jn9N8AHK) printed every line of
- * PRINTED, and printed every character of BOXES as a box.
+ * prints as an empty box. The print check of 2026-09-30 (#526,
+ * letter_gqVZqFrq4bTEy4Jn9N8AHK) printed every line of PRINTED, and printed
+ * every character of BOXES as a box. What no print has shown is refused.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -69,25 +69,32 @@ describe('characters printed mail can show (#526)', () => {
 
   it('keeps line breaks, tabs, and accents written as combining marks', () => {
     expect(unprintableCharacters('Line one\r\nLine two\tend\n')).toEqual([]);
-    expect(unprintableCharacters('café naïve Nguyễn')).toEqual([]);
+    expect(unprintableCharacters('café naïve Nguyễn ça')).toEqual([]);
   });
 
-  it('reads a character as its canonical equivalent, as the print does', () => {
-    // The angstrom and kelvin signs are drawn as the letters Å and K.
-    expect(unprintableCharacters('5 Å, 300 K')).toEqual([]);
+  it('keeps the characters that print nothing: joiners, direction marks, variation selectors', () => {
+    expect(unprintableCharacters('©️ ™︎ a‍b ﻿ ‏')).toEqual([]);
   });
 
-  it('keeps invisible joiners and variation selectors on printable characters', () => {
-    expect(unprintableCharacters('©️ ™︎ a‍b ﻿')).toEqual([]);
+  it('refuses a canonical equivalent that no print has shown', () => {
+    // The angstrom and kelvin signs print only if the renderer substitutes Å and K.
+    expect(unprintableCharacters('5 Å, 300 K')).toEqual(['Å', 'K']);
   });
 
-  it('refuses control characters, and the double exclamation marks that are emoji', () => {
+  it('refuses letters no print has shown: pinyin tones, Sanskrit dots, polytonic Greek', () => {
+    expect(unprintableCharacters('Nǐ hǎo')).toEqual(['ǐ', 'ǎ']);
+    expect(unprintableCharacters('Kṛṣṇa')).toEqual(['ṛ', 'ṣ', 'ṇ']);
+    expect(unprintableCharacters('γνῶθι')).toEqual(['ῶ']);
+  });
+
+  it('refuses controls, direction overrides and line separators', () => {
     expect(unprintableCharacters('bell\u0007')).toEqual(['\u0007']);
-    expect(unprintableCharacters('What‼ Really⁉')).toEqual(['‼', '⁉']);
+    expect(unprintableCharacters('Pay to ‮cba')).toEqual(['‮']);
+    expect(unprintableCharacters('one two')).toEqual([' ']);
   });
 
-  it('refuses symbols Open Sans is not known to have', () => {
-    expect(unprintableCharacters('→ ✓ ★ ♥')).toEqual(['→', '✓', '★', '♥']);
+  it('refuses symbols no print has shown', () => {
+    expect(unprintableCharacters('→ ✓ ★ ♥ ‼ follow‑up')).toEqual(['→', '✓', '★', '♥', '‼', '‑']);
   });
 
   it('lists each character once, in the order it first appears', () => {
@@ -95,14 +102,18 @@ describe('characters printed mail can show (#526)', () => {
   });
 
   it('draws its ranges at the edges it names', () => {
-    expect(isPrintableCodePoint(0x024f)).toBe(true); // ɏ, the last of Latin Extended-B
-    expect(isPrintableCodePoint(0x0250)).toBe(false); // ɐ, IPA
-    expect(isPrintableCodePoint(0x203b)).toBe(true); // ※
-    expect(isPrintableCodePoint(0x203c)).toBe(false); // ‼
-    expect(isPrintableCodePoint(0x203d)).toBe(true); // ‽
-    expect(isPrintableCodePoint(0x2049)).toBe(false); // ⁉
-    expect(isPrintableCodePoint(0x1f00)).toBe(true); // ἀ, Greek Extended
-    expect(isPrintableCodePoint(0x0500)).toBe(true); // Ԁ, Cyrillic Supplement
+    expect(isPrintableCodePoint(0x017f)).toBe(true); // ſ, the last of Latin Extended-A
+    expect(isPrintableCodePoint(0x0180)).toBe(false); // ƀ, Latin Extended-B
+    expect(isPrintableCodePoint(0x0192)).toBe(true); // ƒ
+    expect(isPrintableCodePoint(0x1e9f)).toBe(false); // ẟ, just before the Vietnamese letters
+    expect(isPrintableCodePoint(0x1ea0)).toBe(true); // Ạ
+    expect(isPrintableCodePoint(0x1ef9)).toBe(true); // ỹ
+    expect(isPrintableCodePoint(0x03ce)).toBe(true); // ώ
+    expect(isPrintableCodePoint(0x03cf)).toBe(false); // Ϗ
+    expect(isPrintableCodePoint(0x05ea)).toBe(true); // ת
+    expect(isPrintableCodePoint(0x05f3)).toBe(false); // geresh, not shown to print
+    expect(isPrintableCodePoint(0x2010)).toBe(false); // hyphen, not shown to print
+    expect(isPrintableCodePoint(0x2212)).toBe(true); // minus sign
     expect(isPrintableCodePoint(0x20ac)).toBe(true); // €
     expect(isPrintableCodePoint(0x20b9)).toBe(false); // ₹, not shown to print
     expect(isPrintableCodePoint(0x0008)).toBe(false); // backspace
@@ -122,8 +133,18 @@ describe('the refusal', () => {
     expect(unprintableRefusal('letter', found)).toBe(
       "Letter IRL can't print some characters in this letter: 🎉 🎂 in the text; " +
         "王 小 明 in the recipient's address. " +
-        'Printed mail shows Latin, Greek, Cyrillic and Hebrew letters and common punctuation, and no emoji. ' +
-        'Take those characters out or put them in words, then preview again.'
+        'Printed mail shows Latin letters with common accents, modern Greek, Cyrillic, Hebrew ' +
+        'and common punctuation, and no emoji. ' +
+        'Take those characters out or write them in plain letters, then preview again.'
+    );
+  });
+
+  it('names invisible characters and look-alikes by code point', () => {
+    const found = findUnprintable([
+      { field: 'bodyText', where: 'in the text', text: 'At 7:00 PM, a follow‑up → here.' }
+    ]);
+    expect(unprintableRefusal('letter', found)).toContain(
+      'in this letter: U+202F ‑ (U+2011) → (U+2192) in the text.'
     );
   });
 
@@ -137,7 +158,7 @@ describe('the refusal', () => {
   it('finds nothing in printable text or a missing field', () => {
     expect(
       findUnprintable([
-        { field: 'bodyText', where: 'in the text', text: 'Dear Zoë, see you in Kraków.' },
+        { field: 'bodyText', where: 'in the text', text: 'Dear Zoë, see you in Kraków − or Braşov.' },
         { field: 'signOff', where: 'in the sign-off', text: undefined },
         { field: 'sender', where: "in the sender's address", text: null }
       ])

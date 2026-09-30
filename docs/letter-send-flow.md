@@ -19,13 +19,17 @@ Preview tools validate the user's input, render the appropriate widget, and crea
 Every preview tool also refuses characters the print can't show (#526). PostGrid prints all our mail
 in Open Sans, whatever font the HTML names, and prints a character the font lacks as an empty box.
 So the text and both addresses may hold:
-- Latin letters, including Vietnamese;
-- Greek, Cyrillic and Hebrew letters;
-- common punctuation and symbols.
+- Latin letters with the accents of European languages and Vietnamese;
+- modern Greek, Cyrillic and Hebrew letters;
+- common punctuation, € and ™.
 
-Emoji and every other script are refused. The refusal names each character and where it is. It
-comes before PostGrid checks the addresses, and before a postcard's picture is fetched.
-`src/services/printableText.ts` holds the ranges.
+Emoji, every other script, and anything a test print has not shown are refused (for example pinyin
+tone marks, arrows, and the non-breaking hyphen). `src/services/printableText.ts` holds the ranges.
+Widen them only after a test print shows the characters.
+
+The refusal names each character and where it is. It names invisible characters, and punctuation
+that looks like a character that prints, by code point. It comes before PostGrid checks the
+addresses, before any picture is downloaded, and before a draft is made.
 
 The preview response includes a `draftId`. Sending is a separate, explicit tool call requiring `confirm: true`.
 

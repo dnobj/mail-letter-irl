@@ -485,6 +485,13 @@ function printedAddress(address: Address): string {
     .join("\n");
 }
 
+export interface PrintedAddresses {
+  sender: Address;
+  recipient: Address;
+  /** The sender is the saved return address, which the request did not name. */
+  senderIsSaved: boolean;
+}
+
 /**
  * Refuses mail whose text or addresses hold characters the print shows as
  * empty boxes (#526). It runs before the provider checks the addresses, and
@@ -494,13 +501,16 @@ function printedAddress(address: Address): string {
 export function validatePrintableCharacters(
   mail: "letter" | "postcard",
   texts: PrintedText[],
-  sender: Address,
-  recipient: Address,
+  { sender, recipient, senderIsSaved }: PrintedAddresses,
   context: ToolContext
 ): void {
   const found = findUnprintable([
     ...texts,
-    { field: "sender", where: "in the sender's address", text: printedAddress(sender) },
+    {
+      field: "sender",
+      where: senderIsSaved ? "in your saved return address" : "in the sender's address",
+      text: printedAddress(sender)
+    },
     { field: "recipient", where: "in the recipient's address", text: printedAddress(recipient) }
   ]);
   if (found.length === 0) return;
@@ -514,25 +524,22 @@ export function validatePrintableCharacters(
     },
     "Mail holds characters the print cannot show"
   );
-  throw new Error(unprintableRefusal(mail, found));
+  // An expected refusal: logged as validation_error, not unknown_error.
+  throw Object.assign(new Error(unprintableRefusal(mail, found)), { diagnosticClass: "validation_error" });
 }
 
 /** validatePrintableCharacters for the three letter tools. */
 export function validatePrintableLetter(
-  sender: Address,
-  recipient: Address,
-  bodyText: string,
-  signOff: string,
+  letter: PrintedAddresses & { bodyText: string; signOff: string },
   context: ToolContext
 ): void {
   validatePrintableCharacters(
     "letter",
     [
-      { field: "bodyText", where: "in the text", text: bodyText },
-      { field: "signOff", where: "in the sign-off", text: signOff }
+      { field: "bodyText", where: "in the text", text: letter.bodyText },
+      { field: "signOff", where: "in the sign-off", text: letter.signOff }
     ],
-    sender,
-    recipient,
+    letter,
     context
   );
 }

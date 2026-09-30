@@ -128,6 +128,24 @@ async function handler(
     }
   }
 
+  // The checks on the addresses and the text come before the picture is
+  // downloaded and decoded, so a refusal costs no image work (#526).
+
+  // Prepare sender (use saved return address if not provided)
+  const { sender, usedSavedReturnAddress, savedReturnAddressNote } = await prepareSender(input, context);
+
+  // Validate addresses
+  validateAddresses(sender, input.recipient, context);
+
+  // Validate character limit (reduced for image layout)
+  validateCharacterLimitForLayout(input.bodyText, input.signOff, layoutType, context);
+
+  // Refuse characters the print shows as boxes (#526)
+  validatePrintableLetter(
+    { sender, recipient: input.recipient, bodyText: input.bodyText, signOff: input.signOff, senderIsSaved: usedSavedReturnAddress },
+    context
+  );
+
   // Process the image (generates both full-quality and preview versions)
   let inlineImageData: string;
   let inlineImagePreview: string;
@@ -174,18 +192,6 @@ async function handler(
     );
     throw new Error(message);
   }
-
-  // Prepare sender (use saved return address if not provided)
-  const { sender, usedSavedReturnAddress, savedReturnAddressNote } = await prepareSender(input, context);
-
-  // Validate addresses
-  validateAddresses(sender, input.recipient, context);
-
-  // Validate character limit (reduced for image layout)
-  validateCharacterLimitForLayout(input.bodyText, input.signOff, layoutType, context);
-
-  // Refuse characters the print shows as boxes (#526)
-  validatePrintableLetter(sender, input.recipient, input.bodyText, input.signOff, context);
 
   // Validate with PostGrid provider
   const { senderValidation, recipientValidation, addressWarnings } = await validateAddressesWithProvider(

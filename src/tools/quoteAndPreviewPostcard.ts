@@ -359,8 +359,7 @@ async function handler(
   validatePrintableCharacters(
     "postcard",
     [{ field: "message", where: "in the message", text: input.message }],
-    sender,
-    input.recipient,
+    { sender, recipient: input.recipient, senderIsSaved: usedSavedReturnAddress },
     context
   );
 
