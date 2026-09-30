@@ -49,7 +49,7 @@ const PRINTABLE_RANGES: ReadonlyArray<readonly [number, number]> = [
   [0x1ea0, 0x1ef9], // Vietnamese letters
   [0x2000, 0x200b], // fixed-width spaces and the zero-width space, which the font has
   [0x200c, 0x200f], // joiners and direction marks, which print nothing
-  [0x2013, 0x2014], // – — (not U+2010 or U+2011: the shipped font has no glyph for either)
+  [0x2013, 0x2014], // en and em dash (not U+2010 or U+2011: the shipped font has no glyph for either)
   [0x2018, 0x201a], // ‘ ’ ‚
   [0x201c, 0x201e], // “ ” „
   [0x2020, 0x2022], // † ‡ •
@@ -141,14 +141,14 @@ const INVISIBLE_KINDS: ReadonlyArray<readonly [RegExp, string]> = [
   [/\p{White_Space}/u, 'a special space'],
 ];
 // An emoji shows as itself: a character drawn as an emoji by default (a flag
-// is two of them), or a pictograph in an emoji sequence (❤️ is ❤ with the
+// is two of them), or a pictograph in an emoji sequence (❤\uFE0F is ❤ with the
 // emoji variation selector). A lone text symbol such as ★ or ‼, one in text
-// presentation (✔︎) or one with a mark may look like characters that print,
+// presentation (✔\uFE0E) or one with a mark may look like characters that print,
 // so it is listed as a look-alike.
 const EMOJI = /\p{Emoji_Presentation}/u;
 const PICTOGRAPHIC = /\p{Extended_Pictographic}/u;
 const EMOJI_SEQUENCE_PART = /^[\p{Extended_Pictographic}\p{Emoji_Presentation}\p{Emoji_Modifier}\u{E0020}-\u{E007F}]$/u;
-const EMOJI_JOINERS = new Set(['️', '‍']);
+const EMOJI_JOINERS = new Set(['\uFE0F', '\u200D']);
 // Scripts whose characters can look like ones that print: a character from one
 // of them is listed with its code point, so the model can tell which it is.
 const LOOK_ALIKE =

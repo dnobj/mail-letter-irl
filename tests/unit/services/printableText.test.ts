@@ -22,18 +22,18 @@ const PRINTED = [
   'Accents: café, naïve, jalapeño, Zoë, Nguyễn, façade',
   'Greek and Cyrillic: Γειά σου κόσμε / Привет, мир',
   'Hebrew: שלום עולם',
-  'Symbols: € £ ¥ © ® ™ — – “double” ‘single’ … •',
+  'Symbols: € £ ¥ © ® ™ \u2014 \u2013 “double” ‘single’ … •',
   'Test'
 ];
 
 const BOXES: Array<[string, string]> = [
-  ['emoji', '🎉 🎂 ❤️ 👍 😊'],
+  ['emoji', '🎉 🎂 ❤\uFE0F 👍 😊'],
   ['Chinese', '你好，世界'],
   ['Japanese', 'こんにちは'],
   ['Korean', '안녕하세요'],
   ['Arabic', 'مرحبا بالعالم'],
-  ['Hindi', 'नमस्ते दुनिया'],
-  ['Thai', 'สวัสดีชาวโลก']
+  ['Hindi', 'नमस\u094Dत\u0947 द\u0941निया'],
+  ['Thai', 'สว\u0E31สด\u0E35ชาวโลก']
 ];
 
 const segmenter = new Intl.Segmenter('en', { granularity: 'grapheme' });
@@ -61,7 +61,7 @@ describe('characters printed mail can show (#526)', () => {
   });
 
   it('reports an emoji sequence as the one symbol it shows', () => {
-    const family = '\u{1F469}‍\u{1F469}‍\u{1F467}';
+    const family = '\u{1F469}\u200D\u{1F469}\u200D\u{1F467}';
     const flag = '\u{1F1FA}\u{1F1F8}';
     const thumb = '\u{1F44D}\u{1F3FD}';
     expect(unprintableCharacters(`A ${family}, a ${flag} and a ${thumb}.`)).toEqual([family, flag, thumb]);
@@ -69,11 +69,11 @@ describe('characters printed mail can show (#526)', () => {
 
   it('keeps line breaks, tabs, and accents written as combining marks', () => {
     expect(unprintableCharacters('Line one\r\nLine two\tend\n')).toEqual([]);
-    expect(unprintableCharacters('café naïve Nguyễn ça')).toEqual([]);
+    expect(unprintableCharacters('cafe\u0301 nai\u0308ve Nguye\u0302\u0303n c\u0327a')).toEqual([]);
   });
 
   it('keeps the characters that print nothing: joiners, direction marks, variation selectors', () => {
-    expect(unprintableCharacters('©️ ™︎ a‍b ﻿ ‏')).toEqual([]);
+    expect(unprintableCharacters('©\uFE0F ™\uFE0E a\u200Db \uFEFF \u200F')).toEqual([]);
   });
 
   it('refuses a canonical equivalent that no print has shown', () => {
@@ -89,19 +89,19 @@ describe('characters printed mail can show (#526)', () => {
 
   it('refuses controls, direction overrides and line separators', () => {
     expect(unprintableCharacters('bell\u0007')).toEqual(['\u0007']);
-    expect(unprintableCharacters('Pay to ‮cba')).toEqual(['‮']);
-    expect(unprintableCharacters('one two')).toEqual([' ']);
+    expect(unprintableCharacters('Pay to \u202Ecba')).toEqual(['\u202E']);
+    expect(unprintableCharacters('one\u2028two')).toEqual(['\u2028']);
   });
 
   it('refuses symbols no print has shown', () => {
-    expect(unprintableCharacters('→ ✓ ★ ♥ ‼ 1‒2')).toEqual(['→', '✓', '★', '♥', '‼', '‒']);
+    expect(unprintableCharacters('→ ✓ ★ ♥ ‼ 1\u20122')).toEqual(['→', '✓', '★', '♥', '‼', '\u2012']);
   });
 
   it('refuses the hyphens and the narrow no-break space the shipped font has no glyph for', () => {
-    expect(unprintableCharacters('A follow‑up at 7:00 PM, well‐known.')).toEqual([
-      '‑',
-      ' ',
-      '‐'
+    expect(unprintableCharacters('A follow\u2011up at 7:00\u202FPM, well\u2010known.')).toEqual([
+      '\u2011',
+      '\u202F',
+      '\u2010'
     ]);
   });
 
@@ -170,11 +170,11 @@ describe('the refusal', () => {
       {
         field: 'bodyText',
         where: 'in the text',
-        text: 'At 7:00⁠PM, a 1‒2 score → Hawaiʻi, Ａ .'
+        text: 'At 7:00\u2060PM,\u2028a 1\u20122 score → Hawaiʻi, Ａ\u205F.'
       }
     ]);
     expect(unprintableRefusal('letter', found)).toContain(
-      'in this letter: a word joiner (U+2060), a line separator (U+2028), ‒ (U+2012), ' +
+      'in this letter: a word joiner (U+2060), a line separator (U+2028), \u2012 (U+2012), ' +
         '→ (U+2192), ʻ (U+02BB), Ａ (U+FF21), a medium mathematical space (U+205F) in the text.'
     );
   });
@@ -182,41 +182,41 @@ describe('the refusal', () => {
   it('shows every kind of character in the way that lets a model find it', () => {
     const found = findUnprintable([
       // Emoji as they are: by default presentation, a flag, a sequence.
-      { field: 'emoji', where: 'in A', text: '\u{1F389} \u{1F1FA}\u{1F1F8} ❤️' },
+      { field: 'emoji', where: 'in A', text: '\u{1F389} \u{1F1FA}\u{1F1F8} ❤\uFE0F' },
       // A lone text symbol, and letters of the look-alike scripts, with code points.
       { field: 'lookAlike', where: 'in B', text: '★ ‼ ῶ ԁ ׳ \u0000' },
       // A symbol in text presentation, or with a mark, is no emoji: code points.
-      { field: 'textSymbol', where: 'in B2', text: '✔︎ ★́' },
+      { field: 'textSymbol', where: 'in B2', text: '✔\uFE0E ★\u0301' },
       // A lone mark (Inherited), with its code point.
-      { field: 'mark', where: 'in C', text: '͏' },
+      { field: 'mark', where: 'in C', text: '\u034F' },
       // Invisible characters by name.
-      { field: 'invisible', where: 'in D', text: 'a b‮c⁦d⁢e f　g' },
+      { field: 'invisible', where: 'in D', text: 'a\u2029b\u202Ec\u2066d\u2062e\u202Ff\u3000g' },
       // Private-use with a joiner (not named), unassigned with a mark, and alone:
       // an unassigned character and a broken one (a lone surrogate).
-      { field: 'other', where: 'in E', text: '‍ ͸́ ￾ \uD83D' }
+      { field: 'other', where: 'in E', text: '\uE000\u200D \u0378\u0301 \uFFFE \uD83D' }
     ]);
     const refusal = unprintableRefusal('letter', found);
-    expect(refusal).toContain(': \u{1F389}, \u{1F1FA}\u{1F1F8}, ❤️ in A;');
+    expect(refusal).toContain(': \u{1F389}, \u{1F1FA}\u{1F1F8}, ❤\uFE0F in A;');
     expect(refusal).toContain(
       '; ★ (U+2605), ‼ (U+203C), ῶ (U+1FF6), ԁ (U+0501), ׳ (U+05F3), ' +
         'a control character (U+0000) in B;'
     );
-    expect(refusal).toContain('; ✔︎ (U+2714), ★́ (U+2605) in B2;');
-    expect(refusal).toContain('; ͏ (U+034F) in C;');
+    expect(refusal).toContain('; ✔\uFE0E (U+2714), ★\u0301 (U+2605) in B2;');
+    expect(refusal).toContain('; \u034F (U+034F) in C;');
     expect(refusal).toContain(
       '; a paragraph separator (U+2029), a direction override (U+202E), a direction isolate (U+2066), ' +
         'an invisible character (U+2062), a narrow no-break space (U+202F), an ideographic space (U+3000) in D;'
     );
     expect(refusal).toContain(
-      '; a private-use character (U+E000), ͸́ (U+0378), an unassigned character (U+FFFE), ' +
+      '; a private-use character (U+E000), \u0378\u0301 (U+0378), an unassigned character (U+FFFE), ' +
         'a broken character (U+D83D) in E.'
     );
   });
 
   it('gives the refused code point of a mark on a printable letter, and none to other scripts', () => {
-    const found = findUnprintable([{ field: 'bodyText', where: 'in the text', text: 'a͏ and नमस्ते' }]);
+    const found = findUnprintable([{ field: 'bodyText', where: 'in the text', text: 'a\u034F and नमस\u094Dत\u0947' }]);
     const refusal = unprintableRefusal('letter', found);
-    expect(refusal).toContain('in this letter: a͏ (U+034F), न, म');
+    expect(refusal).toContain('in this letter: a\u034F (U+034F), न, म');
     expect(refusal).not.toMatch(/U\+09[0-7]/);
   });
 
@@ -230,7 +230,7 @@ describe('the refusal', () => {
   it('finds nothing in printable text or a missing field', () => {
     expect(
       findUnprintable([
-        { field: 'bodyText', where: 'in the text', text: 'Dear Zoë, see you in Kraków − or Braşov.' },
+        { field: 'bodyText', where: 'in the text', text: 'Dear Zoë, see you in Kraków \u2212 or Braşov.' },
         { field: 'signOff', where: 'in the sign-off', text: undefined },
         { field: 'sender', where: "in the sender's address", text: null }
       ])

@@ -143,7 +143,7 @@ describe.each(LETTER_TOOLS)('%s', (_name, tool, extras, hasPicture) => {
   });
 
   it('refuses one in the sign-off', async () => {
-    await expect(run({ signOff: 'Love, Pat ❤️' })).rejects.toThrow('❤️ in the sign-off');
+    await expect(run({ signOff: 'Love, Pat ❤\uFE0F' })).rejects.toThrow('❤\uFE0F in the sign-off');
     expectNothingDone();
   });
 
@@ -173,7 +173,7 @@ describe.each(LETTER_TOOLS)('%s', (_name, tool, extras, hasPicture) => {
       ? 'lets printable text through to the picture and then the address check'
       : 'lets printable text through to the address check',
     async () => {
-      await expect(run({ bodyText: 'Dear Zoë, “thank you” — see you in Kraków.' })).rejects.toThrow(
+      await expect(run({ bodyText: 'Dear Zoë, “thank you” \u2014 see you in Kraków.' })).rejects.toThrow(
         PROVIDER_REACHED.message
       );
       expect(downloadAndProcessLetterImageWithPreview).toHaveBeenCalledTimes(hasPicture ? 1 : 0);
@@ -219,7 +219,7 @@ describe('quote_and_preview_postcard', () => {
   });
 
   it('lets printable text through to the picture', async () => {
-    await expect(run({ message: 'Grüße aus Köln — bis bald!' })).rejects.toThrow(DOWNLOAD_REACHED.message);
+    await expect(run({ message: 'Grüße aus Köln \u2014 bis bald!' })).rejects.toThrow(DOWNLOAD_REACHED.message);
     expect(downloadAndProcessPostcardImageWithPreview).toHaveBeenCalledTimes(1);
   });
 });
