@@ -9,7 +9,9 @@ import { query, transaction } from '../db/index.js';
 import type pg from 'pg';
 import { writeDiagnostic } from '../utils/diagnosticLog.js';
 import type {
+  Letter,
   LetterDraft,
+  LetterStatus,
   CreateDraftParams,
   CreateDraftResult,
   ConsumeDraftParams,
@@ -273,15 +275,28 @@ export async function getDraft(draftId: string): Promise<LetterDraft | null> {
 
 /**
  * What became of a draft, without its content (#474): who owns it, its status,
- * when it expires, and the mail it became once sent. For get_draft_status,
- * which the preview card asks where its host keeps no state for it.
+ * when it expires, its arrival dates, and the mail it became once sent, with
+ * that letter's own status, funding and dates (#535), so an answer about a
+ * sent draft says where the order stands now. For get_draft_status, which the
+ * preview card asks where its host keeps no state for it.
  */
-export async function getDraftState(
-  draftId: string
-): Promise<Pick<LetterDraft, 'draft_id' | 'user_id' | 'status' | 'expires_at' | 'consumed_letter_id'> | null> {
-  const result = await query<Pick<LetterDraft, 'draft_id' | 'user_id' | 'status' | 'expires_at' | 'consumed_letter_id'>>(
-    `SELECT draft_id, user_id, status, expires_at, consumed_letter_id
-     FROM letter_drafts WHERE draft_id = $1`,
+export interface DraftState
+  extends Pick<LetterDraft, 'draft_id' | 'user_id' | 'status' | 'expires_at' | 'consumed_letter_id' | 'arrive_by' | 'mail_on'> {
+  /** The letter the draft became; null for a draft not sent, or a letter that is not the draft owner's. */
+  letter_status: LetterStatus | null;
+  letter_funding_type: Letter['funding_type'] | null;
+  letter_arrive_by: string | null;
+  letter_mail_on: string | null;
+}
+
+export async function getDraftState(draftId: string): Promise<DraftState | null> {
+  const result = await query<DraftState>(
+    `SELECT d.draft_id, d.user_id, d.status, d.expires_at, d.consumed_letter_id, d.arrive_by, d.mail_on,
+            l.status AS letter_status, l.funding_type AS letter_funding_type,
+            l.arrive_by AS letter_arrive_by, l.mail_on AS letter_mail_on
+       FROM letter_drafts d
+       LEFT JOIN letters l ON l.letter_id = d.consumed_letter_id AND l.user_id = d.user_id
+      WHERE d.draft_id = $1`,
     [draftId]
   );
   return result.rows[0] || null;

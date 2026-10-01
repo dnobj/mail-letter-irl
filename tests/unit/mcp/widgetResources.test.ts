@@ -144,10 +144,13 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       // So is the renderer's page cleaner (#534), in both preview cards.
       const pages = (await fs.readFile(path.join(widgetDir, 'shared', 'pages.js'), 'utf-8')).replace(/\r\n/g, '\n');
       parts.push(`shared/pages.js:${createHash('sha256').update(pages).digest('hex')}`);
+      // And the Arrives picker and Cancel (#535), in both preview cards.
+      const arrives = (await fs.readFile(path.join(widgetDir, 'shared', 'arrives.js'), 'utf-8')).replace(/\r\n/g, '\n');
+      parts.push(`shared/arrives.js:${createHash('sha256').update(arrives).digest('hex')}`);
       const digest = createHash('sha256').update(parts.join('\n')).digest('hex').slice(0, 12);
       expect({ version: WIDGET_TEMPLATE_VERSION, digest }).toEqual({
-        version: 49,
-        digest: 'c533cb3607b0'
+        version: 50,
+        digest: 'c747cec93186'
       });
     });
   });

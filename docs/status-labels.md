@@ -107,7 +107,7 @@ return. The mapping is `mapStatus()` in `src/store/fileAccountStore.ts`.
 
 A `held` letter reads as `pending` to the customer on purpose: whether it was mailed is not yet known.
 
-Mail sent with an arrival date (#535) waits in the outbox, `queued`, until 09:00 New York time on its mail date. Until the outbox takes it, `get_order_status`, `list_orders` and the send's answer call it `scheduled`, with `arriveBy`, `mailOn` and `cancellable` (false for Pay & Send, whose refund a person decides). Its timeline carries a line saying when it goes to the printer. Once taken, it reads as any other letter, keeping its dates.
+Mail sent with an arrival date (#535) waits in the outbox, `queued`, until 09:00 New York time on its mail date. Until the outbox takes it, `get_order_status`, `list_orders` and the preview card's `get_draft_status` call it `scheduled`, with `arriveBy`, `mailOn` and `cancellable` (false for Pay & Send, whose refund a person decides). The send's answer calls it `scheduled` only while its mail date is ahead: sent after 09:00 New York on that day, it is due at once and reads as any send. Its timeline carries a line saying when it goes to the printer. Once taken, it reads as any other letter, keeping its dates.
 
 ---
 

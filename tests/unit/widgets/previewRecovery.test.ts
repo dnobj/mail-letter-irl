@@ -2760,3 +2760,267 @@ describe.each([LETTER, POSTCARD])('$file in ChatGPT, which keeps its own state (
     expect(harness.visible('send-button')).toBe(true);
   });
 });
+
+describe.each([LETTER, POSTCARD])('$file keeps a send with an arrival date (#535)', spec => {
+  const Noun = spec.noun === 'letter' ? 'Letter' : 'Postcard';
+  // Ahead of today, so a reopened card still waits for them: a kept send
+  // whose mail date is behind it reads as any send.
+  const daysAhead = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+  const DATES = { arriveBy: daysAhead(30), mailOn: daysAhead(20) };
+  // What the send answers for mail that waits for its mail date.
+  const scheduledSend = () => ({
+    structuredContent: { orderId: 'ord_sent_0001', currentStatus: 'scheduled', schedule: DATES, cancellable: true }
+  });
+  const offered = (draftId: string) =>
+    spec.output(draftId, {
+      arrivalWindow: { earliestArrival: '2026-10-13', latestArrival: '2026-11-30' },
+      schedule: { ...DATES, releasesAt: '2026-10-06T13:00:00.000Z', earliestArrival: '2026-10-13', latestArrival: '2026-11-30' }
+    });
+
+  it('keeps the dates with the order, then that it was cancelled from here', async () => {
+    const harness = mount(spec, {
+      toolOutput: offered('draft_host_0001'),
+      toolResponseMetadata: spec.meta(),
+      sendResponse: scheduledSend
+    });
+    await flush();
+    expect(harness.text('send-button-text')).toBe(`Schedule ${Noun}`);
+
+    await harness.click('send-button');
+    expect(harness.text('status-pill')).toBe('Scheduled');
+    expect(harness.savedStates.at(-1)).toEqual({
+      v: 1,
+      draftId: 'draft_host_0001',
+      sent: true,
+      orderId: 'ord_sent_0001',
+      schedule: DATES
+    });
+
+    await harness.click('cancel-scheduled-button');
+    await harness.click('cancel-scheduled-button');
+    expect(harness.callsTo('cancel_scheduled_mail').map(call => call.args)).toEqual([{ orderId: 'ord_sent_0001', confirm: true }]);
+    expect(harness.text('status-pill')).toBe('Cancelled');
+    expect(harness.savedStates.at(-1)).toMatchObject({ sent: true, orderId: 'ord_sent_0001', schedule: DATES, cancelled: true });
+  });
+
+  it('reopens a send with a date as scheduled, with Cancel', async () => {
+    const harness = mount(spec, {
+      widgetState: { v: 1, draftId: 'draft_host_0001', sent: true, orderId: 'ord_sent_0001', schedule: DATES }
+    });
+    await flush();
+
+    expect(harness.text('status-pill')).toBe('Scheduled');
+    expect(harness.text('id-value')).toBe('ord_sent_0001');
+    expect(harness.visible('scheduled')).toBe(true);
+    expect(harness.visible('cancel-scheduled-button')).toBe(true);
+    expect(harness.visible('send-button')).toBe(false);
+  });
+
+  it('reopens one cancelled from here as cancelled, offering nothing', async () => {
+    const harness = mount(spec, {
+      widgetState: { v: 1, draftId: 'draft_host_0001', sent: true, orderId: 'ord_sent_0001', schedule: DATES, cancelled: true }
+    });
+    await flush();
+
+    expect(harness.text('status-pill')).toBe('Cancelled');
+    expect(harness.text('scheduled-note')).toBe('Cancelled. Nothing will be mailed.');
+    expect(harness.visible('cancel-scheduled-button')).toBe(false);
+  });
+
+  it('stays cancelled when ChatGPT redraws a reopened card cancelled from here', async () => {
+    const harness = mount(spec, {
+      widgetState: { v: 1, draftId: 'draft_host_0001', sent: true, orderId: 'ord_sent_0001', schedule: DATES }
+    });
+    await flush();
+    await harness.click('cancel-scheduled-button');
+    await harness.click('cancel-scheduled-button');
+    expect(harness.text('status-pill')).toBe('Cancelled');
+
+    await harness.fireGlobals();
+
+    expect(harness.text('status-pill')).toBe('Cancelled');
+    expect(harness.visible('cancel-scheduled-button')).toBe(false);
+    expect(harness.text('scheduled-note')).toBe('Cancelled. Nothing will be mailed.');
+  });
+
+  it('takes the date field away as soon as a checkout starts', async () => {
+    const harness = mount(spec, {
+      toolOutput: { ...offered('draft_host_0001'), ...eligibility(false) },
+      toolResponseMetadata: spec.meta()
+    });
+    await flush();
+    expect(harness.visible('arrives-row')).toBe(true);
+
+    harness.holdCalls();
+    await harness.click('pay-send-button');
+    expect(harness.visible('arrives-row')).toBe(false);
+    await harness.releaseCalls();
+    expect(harness.visible('arrives-row')).toBe(false);
+  });
+
+  it('keeps what the send answers, not what it thought: taken at once, it is sent', async () => {
+    const harness = mount(spec, {
+      toolOutput: offered('draft_host_0001'),
+      toolResponseMetadata: spec.meta(),
+      sendResponse: () => ({
+        structuredContent: { orderId: 'ord_sent_0001', currentStatus: 'accepted', schedule: DATES, cancellable: false }
+      })
+    });
+    await flush();
+    await harness.click('send-button');
+
+    expect(harness.text('status-pill')).toBe('With the printer');
+    expect(harness.savedStates.at(-1)).toEqual({ v: 1, draftId: 'draft_host_0001', sent: true, orderId: 'ord_sent_0001' });
+  });
+
+  it('keeps a scheduled send that cannot be cancelled here as such, and reopens it without Cancel', async () => {
+    const harness = mount(spec, {
+      toolOutput: offered('draft_host_0001'),
+      toolResponseMetadata: spec.meta(),
+      sendResponse: () => ({
+        structuredContent: { orderId: 'ord_sent_0001', currentStatus: 'scheduled', schedule: DATES, cancellable: false }
+      })
+    });
+    await flush();
+    await harness.click('send-button');
+    expect(harness.text('status-pill')).toBe('Scheduled');
+    expect(harness.visible('cancel-scheduled-button')).toBe(false);
+    expect(harness.savedStates.at(-1)).toEqual({
+      v: 1,
+      draftId: 'draft_host_0001',
+      sent: true,
+      orderId: 'ord_sent_0001',
+      schedule: DATES,
+      cancellable: false
+    });
+
+    const reopened = mount(spec, { widgetState: harness.savedStates.at(-1) });
+    await flush();
+    expect(reopened.text('status-pill')).toBe('Scheduled');
+    expect(reopened.visible('cancel-scheduled-button')).toBe(false);
+    expect(reopened.text('scheduled-note')).toMatch(/· to cancel, email support@letterirl\.com$/);
+  });
+
+  it('reopens a send whose mail date is behind it as any send, offering nothing', async () => {
+    const harness = mount(spec, {
+      widgetState: {
+        v: 1,
+        draftId: 'draft_host_0001',
+        sent: true,
+        orderId: 'ord_sent_0001',
+        schedule: { arriveBy: '2020-01-20', mailOn: '2020-01-10' }
+      }
+    });
+    await flush();
+
+    expect(harness.text('status-pill')).toBe('With the printer');
+    expect(harness.visible('scheduled')).toBe(false);
+  });
+
+  it('drops the Scheduled block when a kept mail date passes while the card is open', async () => {
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
+    const harness = mount(spec, {
+      widgetState: {
+        v: 1,
+        draftId: 'draft_host_0001',
+        sent: true,
+        orderId: 'ord_sent_0001',
+        schedule: { arriveBy: daysAhead(10), mailOn: today }
+      }
+    });
+    await flush();
+    expect(harness.text('status-pill')).toBe('Scheduled');
+    expect(harness.visible('scheduled')).toBe(true);
+
+    // Two days on, the host redraws the card.
+    const window = harness.document.defaultView as unknown as { Date: DateConstructor };
+    const RealDate = window.Date;
+    const later = RealDate.now() + 2 * 86_400_000;
+    window.Date = class extends RealDate {
+      constructor(...args: unknown[]) {
+        super(...((args.length ? args : [later]) as [number]));
+      }
+      static now() {
+        return later;
+      }
+    } as DateConstructor;
+    await harness.fireGlobals();
+
+    expect(harness.text('status-pill')).toBe('With the printer');
+    expect(harness.visible('scheduled')).toBe(false);
+  });
+
+  it('brings the date row back when a checkout does not open', async () => {
+    const harness = mount(spec, {
+      toolOutput: { ...offered('draft_host_0001'), ...eligibility(false) },
+      toolResponseMetadata: spec.meta(),
+      failCheckouts: 1
+    });
+    await flush();
+    expect(harness.visible('arrives-row')).toBe(true);
+
+    await harness.click('pay-send-button');
+
+    expect(harness.text('pay-send-button')).toBe('Retry Pay & Send');
+    expect(harness.visible('arrives-row')).toBe(true);
+  });
+
+  it('brings back no date row the card never showed, when a checkout does not open', async () => {
+    const harness = mount(spec, {
+      toolOutput: spec.output('draft_host_0001', eligibility(false)),
+      toolResponseMetadata: spec.meta(),
+      failCheckouts: 1
+    });
+    await flush();
+    expect(harness.visible('arrives-row')).toBe(false);
+
+    await harness.click('pay-send-button');
+
+    expect(harness.text('pay-send-button')).toBe('Retry Pay & Send');
+    expect(harness.visible('arrives-row')).toBe(false);
+  });
+
+  it('brings the date row back when a checkout is refused as a possible duplicate', async () => {
+    const harness = mount(spec, {
+      toolOutput: { ...offered('draft_host_0001'), ...eligibility(false) },
+      toolResponseMetadata: spec.meta(),
+      checkoutResponse: () => ({
+        isError: true,
+        content: [{ type: 'text', text: 'Possible duplicate: This same mail was already sent.' }],
+        _meta: { 'letterirl/duplicateMail': { kind: 'sent', mailType: spec.noun, recipientName: 'Sam Rivera', ageMinutes: 4 } }
+      })
+    });
+    await flush();
+
+    await harness.click('pay-send-button');
+
+    expect(harness.text('pay-send-button')).toBe('Pay for another copy');
+    expect(harness.visible('arrives-row')).toBe(true);
+  });
+
+  it('brings the date row back when the host rejects a checkout as a possible duplicate', async () => {
+    const harness = mount(spec, {
+      toolOutput: { ...offered('draft_host_0001'), ...eligibility(false) },
+      toolResponseMetadata: spec.meta(),
+      checkoutResponse: () => {
+        throw new Error('Possible duplicate: This same mail was already sent.');
+      }
+    });
+    await flush();
+
+    await harness.click('pay-send-button');
+
+    expect(harness.text('pay-send-button')).toBe('Pay for another copy');
+    expect(harness.visible('arrives-row')).toBe(true);
+  });
+
+  it('reopens a send without a date as before', async () => {
+    const harness = mount(spec, {
+      widgetState: { v: 1, draftId: 'draft_host_0001', sent: true, orderId: 'ord_sent_0001' }
+    });
+    await flush();
+
+    expect(harness.text('status-pill')).toBe('With the printer');
+    expect(harness.visible('scheduled')).toBe(false);
+  });
+});
