@@ -311,6 +311,14 @@ The same stable provider idempotency key is reused after timeout or process rest
 - **The pause count.** While the outbox is paused, a held job not yet due is not counted as waiting behind the pause, so held mail alone does not withhold the heartbeat. Only a held job is pending, never attempted and not yet due.
 - **Status sync and stuck letters** count from `sent_at`, when the provider took the letter, not `created_at`. So mail held for weeks is still followed for 30 days after it mails, and is not called stuck for the time it waited.
 
+**A cancel by the provider (#566).** PostGrid cancels a piece only while it is `ready`, before printing, and answers `cancelled`. The status sync hands that to `failProviderCancelledLetter` (`letterJobService.ts`) instead of writing the status itself. In one transaction, under the outbox's lock order (the funding order, the letter, its jobs), and only while the letter has not already ended:
+- the letter becomes `failed`, with a history row from the sync;
+- a prepaid send's credits come back, or a gift letter comes back with the code it printed voided. This happens exactly once, through the same returns as a definite rejection;
+- a Pay & Send order, already `fulfilled` when PostGrid accepted the letter, is not moved: a person decides its refund;
+- one `provider_cancelled_mail` alert per letter (migration 043) says what happened. It is a warning when what paid came back, and critical when a refund waits for a person.
+
+A held letter cancelled after its mail day may also raise `schedule_missed_mail_day`.
+
 **Paused outbox (#444).** With `LETTER_IRL_OUTBOX_DISPATCH_ENABLED=false` on the API and the maintenance service, neither claims a job, so nothing reaches the provider. A send still commits and queues its job, and the tool answers `currentStatus: pending`, "Queued for the print provider" (mail sent with an arrival date answers `scheduled` while its mail date is ahead, as it would unpaused). Every waiting job keeps its attempts and backoff and goes out on the first maintenance run after the switch is back on. The crash sweeps still run; how a pause shows and how to rehearse it is in [operational-acceptance.md](operational-acceptance.md).
 
 Maintenance also performs image cleanup and conditionally runs six-hour provider status synchronization and daily credit/draft/payment maintenance. It closes all database and bucket clients before exit.

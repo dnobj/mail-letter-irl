@@ -240,6 +240,10 @@ https://api.postgrid.com/print-mail/v1
 | `returned` | Returned to sender (undeliverable) |
 | `canceled` | Canceled before printing |
 
+**Checked 2026-10-01 (#566):** PostGrid's tracking guide lists `ready`, `printing`, `processed_for_delivery`,
+`completed` and `cancelled`, spelled with two Ls. Probe P9a answered `cancelled`. A piece can be cancelled only
+while it is `ready`. `mapStatus` in `PostGridProvider.ts` reads both spellings; the table above is the older research.
+
 ### Get Letter Status
 
 **Endpoint:** `GET /letters/{letter_id}`

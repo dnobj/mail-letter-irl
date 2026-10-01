@@ -46,9 +46,12 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  * commerce_operator_audit_events table-wide, and the release updates only
  * letter_jobs columns already in its list (next_attempt_at, scheduled_at,
  * updated_at), so nothing to re-run.
+ *
+ * 043 adds the alert type provider_cancelled_mail (#566). The roles read
+ * commerce_operational_alerts whole, so nothing to re-run.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
-  "042_mail_job_release_audit.sql";
+  "043_provider_cancelled_alert.sql";
 
 export interface AdminProvisioningArguments {
   environment: "development" | "production";

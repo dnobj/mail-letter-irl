@@ -1224,4 +1224,182 @@ describePostgres('failed send returns the pack', () => {
     // content must never reach it.
     expect(stored).not.toMatch(/PostGrid|http|address|recipient/i);
   }, 60_000);
+
+  /**
+   * #566: PostGrid cancels a piece only while it is ready, before printing, and
+   * the status sync now reads its `cancelled`. The letter fails, what paid for
+   * it comes back exactly once, and one alert per letter says so; a Pay & Send
+   * order, already fulfilled, is left for a person to refund.
+   */
+  describe("a provider's cancel after acceptance (#566)", () => {
+    let jobs: typeof import('../../src/services/letterJobService.js');
+    const RAW = 'Letter was canceled before sending';
+
+    beforeAll(async () => {
+      jobs = await import('../../src/services/letterJobService.js');
+    });
+
+    /** As the outbox's acceptance leaves a letter (completeJob). */
+    async function accept(letterId: string): Promise<void> {
+      await pool.query(
+        `UPDATE letters SET status = 'accepted', tracking_id = $2, provider = 'postgrid', sent_at = NOW()
+         WHERE letter_id = $1`,
+        [letterId, `letter_${randomUUID().replace(/-/g, '').slice(0, 20)}`]
+      );
+    }
+
+    async function alerts(letterId: string) {
+      return (await pool.query(
+        `SELECT order_id, severity, details FROM commerce_operational_alerts
+          WHERE alert_type = 'provider_cancelled_mail' AND details->>'letterId' = $1`,
+        [letterId]
+      )).rows;
+    }
+
+    async function letterNow(letterId: string) {
+      return (await pool.query(
+        'SELECT status, provider_raw_status FROM letters WHERE letter_id = $1', [letterId]
+      )).rows[0];
+    }
+
+    it('fails a prepaid letter, gives its credits back once, and raises one warning', async () => {
+      const { userId, letterId } = await seedSpentLetter({ lotA: 2, lotB: 5, spend: 5 });
+      await accept(letterId);
+      expect(await credits(userId)).toBe(2);
+
+      await expect(jobs.failProviderCancelledLetter({ letterId, providerRawStatus: RAW })).resolves.toBe('failed');
+
+      expect(await letterNow(letterId)).toEqual({ status: 'failed', provider_raw_status: RAW });
+      expect(await credits(userId)).toBe(7);
+      const history = await pool.query(
+        'SELECT old_status, new_status, provider_raw_status, source FROM letter_status_history WHERE letter_id = $1',
+        [letterId]
+      );
+      expect(history.rows).toEqual([{ old_status: 'accepted', new_status: 'failed', provider_raw_status: RAW, source: 'sync' }]);
+      expect(await alerts(letterId)).toEqual([{
+        order_id: null,
+        severity: 'warning',
+        details: { letterId, userId, fundingType: 'prepaid_balance', refundForAPerson: false }
+      }]);
+
+      // The next sync of the same cancel finds the letter ended: nothing moves.
+      await expect(jobs.failProviderCancelledLetter({ letterId, providerRawStatus: RAW })).resolves.toBe('unchanged');
+      expect(await credits(userId)).toBe(7);
+      expect(await alerts(letterId)).toHaveLength(1);
+      expect((await pool.query('SELECT 1 FROM letter_status_history WHERE letter_id = $1', [letterId])).rowCount).toBe(1);
+    }, 60_000);
+
+    it('gives a gift letter back and voids the code it printed', async () => {
+      const GIFT_ENV = {
+        LETTER_IRL_GIFT_LETTERS_ENABLED: 'true',
+        LETTER_IRL_GIFT_DAILY_SEND_CAP: '100000',
+        LETTER_IRL_GIFT_LANDING_BASE_URL: 'https://letterirl.test'
+      };
+      const saved = Object.fromEntries(Object.keys(GIFT_ENV).map(name => [name, process.env[name]]));
+      Object.assign(process.env, GIFT_ENV);
+      try {
+        const gifts = await import('../../src/services/giftLetterService.js');
+        const drafts = await import('../../src/services/draftService.js');
+        const mailSend = await import('../../src/services/mailSendService.js');
+        const { transaction } = await import('../../src/db/index.js');
+        const userId = `user_${randomUUID()}`;
+        await pool.query('INSERT INTO users (user_id, email) VALUES ($1, $2)', [userId, `${userId}@test.invalid`]);
+        await transaction(client => gifts.grantGiftLettersWithClient(client, {
+          userId,
+          quantity: 1,
+          generationsRemaining: 2,
+          source: 'operator',
+          sourceReferenceId: `test:${randomUUID()}`
+        }));
+        const { draftId } = await drafts.createDraft({
+          userId,
+          sender: { name: 'Pat Example', addressLine1: '1 Main St', city: 'Springfield', state: 'IL', postalCode: '62701', country: 'US' },
+          recipient: { name: 'Sam Rivera', addressLine1: '350 5th Ave', city: 'New York', state: 'NY', postalCode: '10118', country: 'US' },
+          bodyText: `A gift ${randomUUID()}`,
+          signOff: 'Pat',
+          isGiftSend: true,
+          requiredCredits: 2
+        });
+        const sent = await mailSend.createMailOrderFromDraft({ draftId, userId, mailType: 'letter' });
+        const letterId = sent.letter.letter_id;
+        const code = (await pool.query('SELECT code FROM gift_codes WHERE letter_id = $1', [letterId])).rows[0].code;
+        await accept(letterId);
+
+        await expect(jobs.failProviderCancelledLetter({ letterId, providerRawStatus: RAW })).resolves.toBe('failed');
+
+        expect((await letterNow(letterId)).status).toBe('failed');
+        const back = await pool.query(
+          "SELECT generations_remaining FROM gift_letters WHERE user_id = $1 AND source = 'send_failed' AND source_reference_id = $2",
+          [userId, letterId]
+        );
+        expect(back.rows).toEqual([{ generations_remaining: 2 }]);
+        const voided = (await pool.query('SELECT status, void_reason FROM gift_codes WHERE code = $1', [code])).rows[0];
+        expect(voided).toEqual({ status: 'void', void_reason: 'send_failed' });
+        expect(await alerts(letterId)).toEqual([{
+          order_id: null,
+          severity: 'warning',
+          details: { letterId, userId, fundingType: 'gift_letter', refundForAPerson: false }
+        }]);
+      } finally {
+        for (const [name, value] of Object.entries(saved)) {
+          if (value === undefined) delete process.env[name];
+          else process.env[name] = value;
+        }
+      }
+    }, 60_000);
+
+    it('leaves a fulfilled Pay & Send order for a person to refund, with a critical alert', async () => {
+      const drafts = await import('../../src/services/draftService.js');
+      const userId = `user_${randomUUID()}`;
+      await pool.query('INSERT INTO users (user_id, email, credits) VALUES ($1, $2, 3)', [userId, `${userId}@test.invalid`]);
+      // A Pay & Send order names the draft it paid for (021's valid_order_draft).
+      const { draftId } = await drafts.createDraft({
+        userId,
+        sender: { name: 'Pat Example', addressLine1: '1 Main St', city: 'Springfield', state: 'IL', postalCode: '62701', country: 'US' },
+        recipient: { name: 'Sam Rivera', addressLine1: '350 5th Ave', city: 'New York', state: 'NY', postalCode: '10118', country: 'US' },
+        bodyText: `Paid ${randomUUID()}`,
+        signOff: 'Pat',
+        requiredCredits: 2
+      });
+      const orderId = `order-${randomUUID()}`;
+      await pool.query(
+        `INSERT INTO orders (order_id, user_id, credits, amount_cents, currency, status, order_type, product_code,
+           idempotency_key, draft_id)
+         VALUES ($1, $2, NULL, 499, 'USD', 'fulfilled', 'jit_mail', 'jit-letter', $3, $4)`,
+        [orderId, userId, `idem_${orderId}`, draftId]
+      );
+      const letterId = randomUUID();
+      await pool.query(
+        `INSERT INTO letters (letter_id, user_id, content, recipient, credits_cost, status, mail_type,
+           funding_type, funding_order_id)
+         VALUES ($1, $2, '{}', $3, 2, 'queued', 'letter', 'jit_order', $4)`,
+        [letterId, userId, JSON.stringify({ name: 'R' }), orderId]
+      );
+      await accept(letterId);
+
+      await expect(jobs.failProviderCancelledLetter({ letterId, providerRawStatus: RAW })).resolves.toBe('failed');
+
+      expect((await letterNow(letterId)).status).toBe('failed');
+      expect((await pool.query('SELECT status FROM orders WHERE order_id = $1', [orderId])).rows[0].status).toBe('fulfilled');
+      expect(await credits(userId)).toBe(3);
+      expect(await alerts(letterId)).toEqual([{
+        order_id: orderId,
+        severity: 'critical',
+        details: { letterId, userId, fundingType: 'jit_order', refundForAPerson: true }
+      }]);
+    }, 60_000);
+
+    it('leaves a letter that has already ended, or that does not exist, as it is', async () => {
+      const { userId, letterId } = await seedSpentLetter({ lotA: 4, lotB: 1, spend: 2 });
+      await accept(letterId);
+      await pool.query("UPDATE letters SET status = 'delivered' WHERE letter_id = $1", [letterId]);
+
+      await expect(jobs.failProviderCancelledLetter({ letterId, providerRawStatus: RAW })).resolves.toBe('unchanged');
+      await expect(jobs.failProviderCancelledLetter({ letterId: randomUUID(), providerRawStatus: RAW })).resolves.toBe('unchanged');
+
+      expect((await letterNow(letterId)).status).toBe('delivered');
+      expect(await credits(userId)).toBe(3);
+      expect(await alerts(letterId)).toEqual([]);
+    }, 60_000);
+  });
 });

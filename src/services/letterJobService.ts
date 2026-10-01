@@ -637,6 +637,97 @@ async function returnPrepaidCreditsForFailedLetter(
   });
 }
 
+/** The operator alert for mail the provider cancelled after accepting it (migration 043, #566). */
+export const PROVIDER_CANCELLED_ALERT = 'provider_cancelled_mail';
+
+/** Letter statuses past which nothing changes: the status sync's terminal list. */
+const ENDED_LETTER_STATUSES = ['delivered', 'returned', 'failed', 'cancelled'];
+
+/**
+ * A letter the provider cancelled after accepting it (#566): PostGrid's
+ * `cancelled`, which it allows only before a piece is printed, so nothing was
+ * mailed. The status sync calls this instead of writing the status itself.
+ *
+ * In one transaction, under the canonical lock order (the funding order, the
+ * letter, its jobs), and only while the letter has not already ended:
+ * - the letter fails, with a history row from the sync;
+ * - what paid for it comes back as for a definite rejection: a prepaid send's
+ *   credits, or the gift letter with the code it printed voided. Exactly once,
+ *   since the returns key on the letter;
+ * - a Pay & Send order was fulfilled when the provider accepted the letter,
+ *   and nothing here moves it: a person decides its refund;
+ * - one 'provider_cancelled_mail' alert per letter says so: a warning when
+ *   what paid came back, critical when a person must decide a refund.
+ *
+ * Every parameter is used once, with one type (the varchar parameter defect).
+ */
+export async function failProviderCancelledLetter(params: {
+  letterId: string;
+  providerRawStatus: string;
+}): Promise<'failed' | 'unchanged'> {
+  return transaction(async (client) => {
+    const relation = await client.query<{ funding_order_id: string | null }>(
+      'SELECT funding_order_id FROM letters WHERE letter_id = $1', [params.letterId]
+    );
+    if (!relation.rows[0]) return 'unchanged';
+    const orderId = relation.rows[0].funding_order_id || null;
+    if (orderId) {
+      await client.query('SELECT order_id FROM orders WHERE order_id = $1 FOR UPDATE', [orderId]);
+    }
+    const locked = await client.query<{
+      status: string;
+      user_id: string;
+      funding_type: string | null;
+      funding_order_id: string | null;
+    }>(
+      'SELECT status, user_id, funding_type, funding_order_id FROM letters WHERE letter_id = $1 FOR UPDATE',
+      [params.letterId]
+    );
+    const letter = locked.rows[0];
+    if (!letter || (letter.funding_order_id || null) !== orderId) {
+      throw new Error('Funding graph changed while acquiring canonical locks');
+    }
+    await client.query('SELECT job_id FROM letter_jobs WHERE letter_id = $1 ORDER BY job_id FOR UPDATE', [params.letterId]);
+    if (ENDED_LETTER_STATUSES.includes(letter.status)) return 'unchanged';
+
+    await client.query(
+      `UPDATE letters
+       SET status = 'failed', status_updated_at = NOW(), provider_raw_status = $2, updated_at = NOW()
+       WHERE letter_id = $1`,
+      [params.letterId, params.providerRawStatus]
+    );
+    await client.query(
+      `INSERT INTO letter_status_history (letter_id, old_status, new_status, provider_raw_status, source)
+       VALUES ($1, $2, 'failed', $3, 'sync')`,
+      [params.letterId, letter.status, params.providerRawStatus]
+    );
+    if (!orderId) {
+      await returnPrepaidCreditsForFailedLetter(client, params.letterId, 'provider_cancelled');
+    }
+    await client.query(
+      `INSERT INTO commerce_operational_alerts (order_id, alert_type, severity, details)
+       VALUES ($1, $2::varchar, $3::varchar,
+               jsonb_build_object('letterId', $4::text, 'userId', $5::text, 'fundingType', $6::text,
+                                  'refundForAPerson', $7::boolean))
+       ON CONFLICT DO NOTHING`,
+      [
+        orderId,
+        PROVIDER_CANCELLED_ALERT,
+        orderId ? 'critical' : 'warning',
+        params.letterId,
+        letter.user_id,
+        letter.funding_type ?? 'unknown',
+        orderId !== null
+      ]
+    );
+    writeDiagnostic('warn', 'provider.cancelled_mail', {
+      fundingType: letter.funding_type ?? 'unknown',
+      refundForAPerson: orderId !== null
+    });
+    return 'failed';
+  });
+}
+
 async function failOrRescheduleJob(
   job: LetterJob,
   result: ProviderResult,
