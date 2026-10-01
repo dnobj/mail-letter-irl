@@ -34,6 +34,7 @@ import {
   requestSendInputZ,
   getDraftStatusInputZ,
   setArrivalDateInputZ,
+  setStationeryInputZ,
   cancelScheduledMailInputZ,
   uploadPhotoChunkInputZ,
   submitFeatureRequestInputZ,
@@ -60,6 +61,7 @@ import {
   requestSendOutputZ,
   getDraftStatusOutputZ,
   setArrivalDateOutputZ,
+  setStationeryOutputZ,
   cancelScheduledMailOutputZ,
   uploadPhotoChunkOutputZ,
   submitFeatureRequestOutputZ,
@@ -175,6 +177,7 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     'clear_return_address',  // Clearing twice = no additional effect
     'confirm_uploaded_image', // Repeating the same relay overwrites with the same value
     'set_arrival_date',       // The same date twice changes nothing more (#535)
+    'set_stationery',         // The same style twice changes nothing more (#563)
     'cancel_scheduled_mail'   // A repeat answers as already cancelled (#535)
   ];
 
@@ -807,6 +810,7 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   request_send: requestSendInputZ,
   get_draft_status: getDraftStatusInputZ,
   set_arrival_date: setArrivalDateInputZ,
+  set_stationery: setStationeryInputZ,
   cancel_scheduled_mail: cancelScheduledMailInputZ,
   upload_photo_chunk: uploadPhotoChunkInputZ,
   // Feedback tools
@@ -844,6 +848,7 @@ const zodOutputSchemas: Record<ToolName, z.ZodObject<any>> = {
   request_send: requestSendOutputZ,
   get_draft_status: getDraftStatusOutputZ,
   set_arrival_date: setArrivalDateOutputZ,
+  set_stationery: setStationeryOutputZ,
   cancel_scheduled_mail: cancelScheduledMailOutputZ,
   upload_photo_chunk: uploadPhotoChunkOutputZ,
   // Feedback tools
@@ -1380,6 +1385,20 @@ const LETTER_PREVIEW_TOOLS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * A letter preview's stationery (#563), for the narration: the theme it was
+ * drawn in, and a remembered one as such, so the person hears why. Nothing
+ * for Classic by default, or while stationery is not offered.
+ */
+function stationerySentence(result: Record<string, unknown>): string {
+  const stationery = result.stationery as { theme?: unknown; source?: unknown } | undefined;
+  if (typeof stationery?.theme !== "string") return "";
+  if (stationery.source === "remembered") {
+    return ` Stationery: ${stationery.theme}, the account's last choice; stationery in the call or set_stationery changes it.`;
+  }
+  return stationery.source === "asked" ? ` Stationery: ${stationery.theme}.` : "";
+}
+
+/**
  * A held preview's dates (#535), for the narration: the sentence the preview
  * built with its own clock (its deliveryEstimate), and what a send then does.
  * Empty for mail sent at once.
@@ -1455,6 +1474,7 @@ export function summarizeToolResult(
         summary += ` Note: ${warnings.join(' ')}`;
       }
       summary += heldMailSentence(result);
+      summary += stationerySentence(result);
       return summary;
     }
     case "request_send":
@@ -1463,6 +1483,9 @@ export function summarizeToolResult(
       // The tool's own sentence, which also travels in structuredContent for
       // the apps whose model reads only that (Claude Code).
       return typeof result.message === "string" ? result.message : "The arrival date was updated.";
+    case "set_stationery":
+      // As for set_arrival_date: the tool's own sentence (#563).
+      return typeof result.message === "string" ? result.message : "The stationery was changed.";
     case "cancel_scheduled_mail":
       // As for set_arrival_date: the sentence saying what went back.
       return typeof result.message === "string" ? result.message : "The scheduled mail was cancelled.";

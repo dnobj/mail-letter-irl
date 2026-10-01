@@ -13,7 +13,7 @@ the owner's decision on #289 (2026-09-23).
 
 | Removed | Kept, without personal details |
 |---------|--------------------------------|
-| The email (replaced by a placeholder) and the saved return address | The account row, as a tombstone, so the kept records keep their links |
+| The email (replaced by a placeholder), the saved return address and the remembered stationery (#563) | The account row, as a tombstone, so the kept records keep their links |
 | The content, addresses and rendered preview of every letter | Each letter's status, tracking id, cost and dates |
 | Drafts (emptied instead when an order refers to one) | Orders, ledger lots and transactions, with their descriptions cleared |
 | Retention copies of letters and drafts | Disputes and refunds |

@@ -254,4 +254,73 @@ describePostgres('renderer version (migration 039, #534)', () => {
       expect(byId.get(classic.letter.letter_id)).not.toHaveProperty('stationery');
     }, 60_000);
   });
+
+  describe('set_stationery and the remembered theme (#563, migration 045)', () => {
+    const BOTANICAL = { theme: 'botanical' as const, dateLine: 'October 1, 2026' };
+    const PAGE = '<!DOCTYPE html><html><body data-renderer="pdf-2"><svg></svg></body></html>';
+
+    async function stateOf(draftId: string, userId: string) {
+      const draft = (await pool.query('SELECT stationery, renderer_version, preview_html FROM letter_drafts WHERE draft_id = $1', [draftId])).rows[0];
+      const theme = (await pool.query('SELECT stationery_theme FROM users WHERE user_id = $1', [userId])).rows[0].stationery_theme;
+      return { ...draft, theme };
+    }
+
+    async function seedPayAndSend(userId: string, draftId: string, status: string, expiresIn: string): Promise<void> {
+      const orderId = `order-${randomUUID()}`;
+      await pool.query(
+        `INSERT INTO orders (order_id, user_id, credits, amount_cents, currency, status, order_type, product_code,
+           idempotency_key, draft_id, checkout_expires_at)
+         VALUES ($1, $2, NULL, 499, 'USD', $3, 'jit_mail', 'jit-letter', $4, $5, NOW() + $6::interval)`,
+        [orderId, userId, status, `idem_${orderId}`, draftId, expiresIn]
+      );
+    }
+
+    it('remembers no theme by default, admits the four, and refuses any other', async () => {
+      const userId = await seedUser();
+      expect((await pool.query('SELECT stationery_theme FROM users WHERE user_id = $1', [userId])).rows[0].stationery_theme).toBeNull();
+      for (const theme of ['classic', 'monogram', 'botanical', 'celebration']) {
+        await pool.query('UPDATE users SET stationery_theme = $2 WHERE user_id = $1', [userId, theme]);
+      }
+      await expect(pool.query("UPDATE users SET stationery_theme = 'typewriter' WHERE user_id = $1", [userId]))
+        .rejects.toMatchObject({ code: '23514', constraint: 'users_stationery_theme_known' });
+    }, 60_000);
+
+    it('restyles a pending draft into a theme and back to Classic, remembering each, within the pair check', async () => {
+      const userId = await seedUser();
+      const draftId = await seedDraft(userId, 'pdf-1');
+
+      await expect(drafts.setDraftStationery(draftId, userId, { stationery: BOTANICAL, previewHtml: PAGE }))
+        .resolves.toBeNull();
+      expect(await stateOf(draftId, userId)).toEqual({ stationery: BOTANICAL, renderer_version: 'pdf-2', preview_html: PAGE, theme: 'botanical' });
+
+      await expect(drafts.setDraftStationery(draftId, userId, { stationery: { theme: 'classic' }, previewHtml: '<svg/>' }))
+        .resolves.toBeNull();
+      expect(await stateOf(draftId, userId)).toEqual({ stationery: null, renderer_version: 'pdf-1', preview_html: '<svg/>', theme: 'classic' });
+    }, 60_000);
+
+    it("leaves a sent, expired, Pay & Send or someone else's draft as it was, and remembers nothing", async () => {
+      const userId = await seedUser();
+      const other = await seedUser();
+      const change = { stationery: BOTANICAL, previewHtml: PAGE };
+
+      const sent = await seedDraft(userId, 'pdf-1');
+      await mailSend.createMailOrderFromDraft({ draftId: sent, userId, mailType: 'letter' });
+      await expect(drafts.setDraftStationery(sent, userId, change)).resolves.toBe('sent');
+
+      const expired = await seedDraft(userId, 'pdf-1');
+      await pool.query("UPDATE letter_drafts SET expires_at = NOW() - INTERVAL '1 minute' WHERE draft_id = $1", [expired]);
+      await expect(drafts.setDraftStationery(expired, userId, change)).resolves.toBe('expired');
+
+      const paying = await seedDraft(userId, 'pdf-1');
+      await seedPayAndSend(userId, paying, 'checkout_pending', '20 minutes');
+      await expect(drafts.setDraftStationery(paying, userId, change)).resolves.toBe('checkout_pending');
+
+      const theirs = await seedDraft(other, 'pdf-1');
+      await expect(drafts.setDraftStationery(theirs, userId, change)).resolves.toBe('not_found');
+
+      for (const [draftId, owner] of [[sent, userId], [expired, userId], [paying, userId], [theirs, other]]) {
+        expect(await stateOf(draftId, owner), draftId).toMatchObject({ stationery: null, renderer_version: 'pdf-1', theme: null });
+      }
+    }, 60_000);
+  });
 });

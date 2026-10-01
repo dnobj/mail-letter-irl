@@ -8,7 +8,8 @@
 import { query, transaction } from '../db/index.js';
 import type pg from 'pg';
 import { writeDiagnostic } from '../utils/diagnosticLog.js';
-import { stationeryOf } from '../render/stationery.js';
+import { stationeryOf, type Stationery } from '../render/stationery.js';
+import { rendererVersionFor } from '../render/pdf.js';
 import type {
   Letter,
   LetterDraft,
@@ -31,6 +32,24 @@ const DEFAULT_EXPIRATION_HOURS = 24;
 // ============================================================================
 
 /**
+ * A theme as a draft stores it (#563): none for Classic, and otherwise as the
+ * print reads it back (stationeryOf). One the print would not read is refused
+ * before anything is written, so a stored theme always prints.
+ */
+function storedStationery(stationery: Stationery | null | undefined): Stationery | null {
+  const themed = stationery != null && stationery.theme !== 'classic';
+  const stored = themed ? stationeryOf(stationery) : null;
+  if (themed && !stored) {
+    // The previews check a theme before it gets here, so this is a defect, classed as a refusal.
+    throw Object.assign(new Error('The stationery cannot be stored: the print would not read it back.'), {
+      code: 'STATIONERY_UNREADABLE',
+      diagnosticClass: 'validation_error'
+    });
+  }
+  return stored;
+}
+
+/**
  * Create a new draft for a letter that has been previewed and validated.
  * Called by quote_and_preview_letter after successful address validation.
  */
@@ -38,18 +57,7 @@ export async function createDraft(params: CreateDraftParams): Promise<CreateDraf
   const expiresInHours = params.expiresInHours ?? DEFAULT_EXPIRATION_HOURS;
   const expiresAt = new Date(Date.now() + expiresInHours * 60 * 60 * 1000);
   const layoutType = params.layoutType ?? 'text_only';
-  // Classic is stored as none (#563). A theme is stored as the print reads it
-  // back (stationeryOf), and one it would not read is refused before any
-  // draft exists, so a stored theme always prints.
-  const themed = params.stationery != null && params.stationery.theme !== 'classic';
-  const stationery = themed ? stationeryOf(params.stationery) : null;
-  if (themed && !stationery) {
-    // The previews check a theme before it gets here, so this is a defect, classed as a refusal.
-    throw Object.assign(new Error('The stationery cannot be stored: the print would not read it back.'), {
-      code: 'STATIONERY_UNREADABLE',
-      diagnosticClass: 'validation_error'
-    });
-  }
+  const stationery = storedStationery(params.stationery);
 
   const result = await query<LetterDraft>(
     `INSERT INTO letter_drafts (
@@ -456,27 +464,8 @@ export async function setDraftSchedule(
   now: Date = new Date()
 ): Promise<DraftScheduleRefusal | null> {
   return transaction(async client => {
-    const locked = await client.query<Pick<LetterDraft, 'status' | 'expires_at'>>(
-      'SELECT status, expires_at FROM letter_drafts WHERE draft_id = $1 AND user_id = $2 FOR UPDATE',
-      [draftId, userId]
-    );
-    const draft = locked.rows[0];
-    if (!draft) return 'not_found';
-    if (draft.status === 'consumed') return 'sent';
-    if (draft.status !== 'pending' || !(new Date(draft.expires_at).getTime() > now.getTime())) {
-      return 'expired';
-    }
-
-    const live = await client.query(
-      `SELECT 1 FROM orders
-       WHERE draft_id = $1
-         AND order_type = 'jit_mail'
-         AND status = ANY($2::varchar[])
-         AND (status <> 'checkout_pending' OR checkout_expires_at IS NULL OR checkout_expires_at > NOW())
-       LIMIT 1`,
-      [draftId, [...LIVE_PAY_AND_SEND_STATUSES]]
-    );
-    if (live.rows[0]) return 'checkout_pending';
+    const refusal = await lockChangeableDraft(client, draftId, userId, now);
+    if (refusal) return refusal;
 
     await client.query(
       `UPDATE letter_drafts
@@ -485,6 +474,112 @@ export async function setDraftSchedule(
       [draftId, schedule?.arriveBy ?? null, schedule?.mailOn ?? null]
     );
     writeDiagnostic('info', 'draft.schedule_set', { scheduled: schedule !== null });
+    return null;
+  });
+}
+
+/**
+ * Locks a draft a tool may still change (its dates, its stationery), or says
+ * why it may not: it is the caller's, pending and unexpired, with no live Pay
+ * & Send order but a checkout whose window has passed. Someone else's draft is
+ * refused as a missing one, and is not locked.
+ */
+async function lockChangeableDraft(
+  client: pg.PoolClient,
+  draftId: string,
+  userId: string,
+  now: Date
+): Promise<DraftScheduleRefusal | null> {
+  const locked = await client.query<Pick<LetterDraft, 'status' | 'expires_at'>>(
+    'SELECT status, expires_at FROM letter_drafts WHERE draft_id = $1 AND user_id = $2 FOR UPDATE',
+    [draftId, userId]
+  );
+  const draft = locked.rows[0];
+  if (!draft) return 'not_found';
+  if (draft.status === 'consumed') return 'sent';
+  if (draft.status !== 'pending' || !(new Date(draft.expires_at).getTime() > now.getTime())) {
+    return 'expired';
+  }
+
+  const live = await client.query(
+    `SELECT 1 FROM orders
+     WHERE draft_id = $1
+       AND order_type = 'jit_mail'
+       AND status = ANY($2::varchar[])
+       AND (status <> 'checkout_pending' OR checkout_expires_at IS NULL OR checkout_expires_at > NOW())
+     LIMIT 1`,
+    [draftId, [...LIVE_PAY_AND_SEND_STATUSES]]
+  );
+  return live.rows[0] ? 'checkout_pending' : null;
+}
+
+// ============================================================================
+// Stationery
+// ============================================================================
+
+/** What set_stationery reads of a draft to draw its page again (#563). */
+export interface DraftForStationery {
+  mail_type: string;
+  status: string;
+  expires_at: Date;
+  renderer_version: string | null;
+  body_text: string;
+  sign_off: string | null;
+  layout_type: string | null;
+  header_image_data: string | null;
+  inline_image_data: string | null;
+  sender: Record<string, unknown>;
+  recipient: Record<string, unknown>;
+  preview_html: string | null;
+}
+
+/** The caller's draft, as set_stationery draws it again, or null when it is not theirs or not there. */
+export async function getDraftForStationery(draftId: string, userId: string): Promise<DraftForStationery | null> {
+  const result = await query<DraftForStationery>(
+    `SELECT mail_type, status, expires_at, renderer_version, body_text, sign_off, layout_type,
+            header_image_data, inline_image_data, sender, recipient, preview_html
+     FROM letter_drafts
+     WHERE draft_id = $1 AND user_id = $2`,
+    [draftId, userId]
+  );
+  return result.rows[0] ?? null;
+}
+
+/**
+ * Restyles a letter draft (#563, set_stationery): its stationery, the renderer
+ * version that goes with it (rendererVersionFor), and its preview drawn again
+ * in it, which the caller made from the draft's own content. It changes only a draft
+ * setDraftSchedule would change, under the same lock, so a send or a Pay &
+ * Send checkout runs before or after it, never between: one that goes first
+ * leaves this refused, and one that goes second sends the new style.
+ *
+ * In the same transaction the account remembers the theme (migration 045):
+ * restyling is an explicit choice, made by the model or on the card.
+ *
+ * Returns the refusal, or null once the draft is restyled.
+ */
+export async function setDraftStationery(
+  draftId: string,
+  userId: string,
+  change: { stationery: Stationery; previewHtml: string },
+  now: Date = new Date()
+): Promise<DraftScheduleRefusal | null> {
+  const stationery = storedStationery(change.stationery);
+  // The version goes with the stationery stored (rendererVersionFor), so
+  // 044's pair check holds whatever the caller drew.
+  const rendererVersion = rendererVersionFor(stationery);
+  return transaction(async client => {
+    const refusal = await lockChangeableDraft(client, draftId, userId, now);
+    if (refusal) return refusal;
+
+    await client.query(
+      `UPDATE letter_drafts
+       SET stationery = $2::jsonb, renderer_version = $3, preview_html = $4, updated_at = NOW()
+       WHERE draft_id = $1`,
+      [draftId, stationery ? JSON.stringify(stationery) : null, rendererVersion, change.previewHtml]
+    );
+    await client.query('UPDATE users SET stationery_theme = $2 WHERE user_id = $1', [userId, change.stationery.theme]);
+    writeDiagnostic('info', 'draft.stationery_set', { theme: change.stationery.theme });
     return null;
   });
 }

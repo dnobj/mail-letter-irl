@@ -185,7 +185,7 @@
           },
           "stationery": {
             "type": "object",
-            "description": "While stationery is offered: the stationery the page was drawn in, classic unless one was asked for, with the date line, initials and headline it prints",
+            "description": "While stationery is offered: the stationery the page was drawn in, with the date line, initials and headline it prints, and why: asked for, the account's last choice, or classic by default",
             "properties": {
               "theme": {
                 "type": "string",
@@ -207,10 +207,20 @@
               "headline": {
                 "type": "string",
                 "description": "The headline it prints above the letter"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "asked",
+                  "remembered",
+                  "default"
+                ],
+                "description": "Why this stationery: asked for in the call, the account's remembered choice, or classic by default"
               }
             },
             "required": [
-              "theme"
+              "theme",
+              "source"
             ]
           },
           "previewHtml": {
@@ -565,7 +575,7 @@
           },
           "stationery": {
             "type": "object",
-            "description": "While stationery is offered: the stationery the page was drawn in, classic unless one was asked for, with the date line, initials and headline it prints",
+            "description": "While stationery is offered: the stationery the page was drawn in, with the date line, initials and headline it prints, and why: asked for, the account's last choice, or classic by default",
             "properties": {
               "theme": {
                 "type": "string",
@@ -587,10 +597,20 @@
               "headline": {
                 "type": "string",
                 "description": "The headline it prints above the letter"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "asked",
+                  "remembered",
+                  "default"
+                ],
+                "description": "Why this stationery: asked for in the call, the account's remembered choice, or classic by default"
               }
             },
             "required": [
-              "theme"
+              "theme",
+              "source"
             ]
           },
           "previewHtml": {
@@ -945,7 +965,7 @@
           },
           "stationery": {
             "type": "object",
-            "description": "While stationery is offered: the stationery the page was drawn in, classic unless one was asked for, with the date line, initials and headline it prints",
+            "description": "While stationery is offered: the stationery the page was drawn in, with the date line, initials and headline it prints, and why: asked for, the account's last choice, or classic by default",
             "properties": {
               "theme": {
                 "type": "string",
@@ -967,10 +987,20 @@
               "headline": {
                 "type": "string",
                 "description": "The headline it prints above the letter"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "asked",
+                  "remembered",
+                  "default"
+                ],
+                "description": "Why this stationery: asked for in the call, the account's remembered choice, or classic by default"
               }
             },
             "required": [
-              "theme"
+              "theme",
+              "source"
             ]
           },
           "previewHtml": {
