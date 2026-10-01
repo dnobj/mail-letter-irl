@@ -1,6 +1,6 @@
 # Deployment Guide
 
-**Last Updated:** September 23, 2026
+**Last Updated:** October 1, 2026
 **Purpose:** Release process, environment checks, boot validation rules, and migration safety
 
 Letter IRL deploys development first. Production is promoted only after automated and manual verification succeeds in development.
@@ -648,11 +648,24 @@ draw the letter or postcard before any request was made. The reason is one of:
 - `image`: an image it could not read;
 - `overflow`: a letter that no longer fits its page, or a postcard message past its half of the back;
 - `size`: a postcard size the renderer does not draw (it draws 6x9 only);
-- `render`: a drawing error.
+- `render`: anything else that failed to lay out or draw, a letter's gift card included.
 
-The log line `provider.postgrid.render_refused` names the reason and the letter id. For an unknown
-version or a drawing error, deploy a build that can print it, then resolve the letter with a retry
-(`provider_confirmed_rejected_retry`). No build prints an overflow or a size: resolve those as rejected.
+The log line `provider.postgrid.render_refused` names the reason and the letter id, and the hold's
+message says what was refused. Decide by the message, not the reason alone:
+- **Retry** when a build can print it: deploy that build, then resolve the letter with a retry
+  (`provider_confirmed_rejected_retry`). That covers:
+  - a version this build does not know;
+  - an image in a format or size our reader does not take;
+  - a drawing fault;
+  - an overflow that a renderer change caused. A letter refused as `overflow` was measured to fit when
+    it was previewed, under the same version, so a deploy changed the wrapping. Fix the renderer rather
+    than refund.
+- **Reject** when the content itself cannot print:
+  - a message that is too long in any build;
+  - a postcard size the renderer never draws;
+  - stored image data that is not an image;
+  - a gift card that runs past the page because of the sender's name ("The gift card runs ... past the
+    page's bottom margin.").
 
 Resolve it as rejected, which refunds, only when it can never be printed and no earlier attempt of the
 letter reached PostGrid, that is, every earlier hold was also `render_refused`. Check the earlier holds
