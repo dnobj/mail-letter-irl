@@ -104,6 +104,8 @@ describe('postcards printed from our own PDF (#534 Phase 4)', () => {
     expect(form.get('to[lastName]')).toBe('Rivera');
     expect(form.get('to[addressLine2]')).toBe('Ste 3300');
     expect(form.get('from[addressLine1]')).toBe('1600 Pennsylvania Ave NW');
+    // An empty field is left out, never sent as "undefined".
+    expect(form.has('from[addressLine2]')).toBe(false);
     expect(form.get('size')).toBe('9x6');
     expect(form.get('description')).toBe('Postcard to Sam Rivera');
     expect(form.has('frontHTML')).toBe(false);

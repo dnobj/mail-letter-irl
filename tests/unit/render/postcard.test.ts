@@ -106,6 +106,10 @@ describe('a postcard on our renderer', () => {
 
   it('counts blank lines inside the message, but not trailing ones, which draw nothing', () => {
     expect(back('One\n\nThree')).toMatchObject({ linesUsed: 3 });
+    // A blank line takes its pitch and draws no run.
+    expect(text('One\n\nThree').map(run => run.source)).toEqual(['One', 'Three']);
+    const [one, three] = text('One\n\nThree');
+    expect(three.baseline - one.baseline).toBeCloseTo(2 * POSTCARD_LINE_PITCH, 9);
     expect(back(`${lines(16)}\n\n\n  \n`)).toMatchObject({ linesUsed: 16 });
     expect(layoutPostcard({ message: `${lines(16)}\n\n`, image: FRONT }).overflowLines).toBe(0);
   });
