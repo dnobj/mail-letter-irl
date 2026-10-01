@@ -215,9 +215,8 @@ describe('a postcard preview drawn by our renderer', () => {
     expect(drafted().rendererVersion).toBe('pdf-1');
 
     vi.mocked(createPostcardDraft).mockClear();
-    await expect(run({ message: 'a'.repeat(RENDERED_POSTCARD_CHARACTER_CAP + 1) })).rejects.toThrow(
-      `Postcard message is too long (${RENDERED_POSTCARD_CHARACTER_CAP + 1}/${RENDERED_POSTCARD_CHARACTER_CAP} characters).`
-    );
+    expect(RENDERED_POSTCARD_CHARACTER_CAP).toBe(1_000);
+    await expect(run({ message: 'a'.repeat(1_001) })).rejects.toThrow('Postcard message is too long (1001/1000 characters).');
     expect(createPostcardDraft).not.toHaveBeenCalled();
 
     vi.stubEnv('LETTER_IRL_PRINT_RENDERER', 'html');
