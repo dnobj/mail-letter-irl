@@ -2303,11 +2303,15 @@ ChatGPT (DEV) with "Allow once", then Claude (DEV) for the MCP Apps card.
 8. [ ] A postcard: repeat steps 1, 2 and 4 with **Schedule Postcard**; leave it scheduled, or send it now
    from the admin panel (ADMIN-CMD-04) and verify it reaches PostGrid test mode.
 9. [ ] On the development website, as the same account (website #47):
-   - the dashboard and **Your Letters** show a scheduled letter as **Scheduled**, with "Mails ... · aims
-     to arrive by ..."; on **Your Letters**, opening it shows the journey standing at **Scheduled to mail**;
-   - **Cancel**, then **Yes, cancel it**, shows the API's words about what came back and the balance after;
+   - the dashboard shows a scheduled letter as **Scheduled**, with "Mails ... · aims to arrive by ..." and
+     **Cancel** on its row. **Your Letters** shows it as **Scheduled**, and opening it shows those dates,
+     **Cancel**, and the journey standing at **Scheduled to mail**;
+   - **Cancel**, then **Yes, cancel it**, shows the API's words about what came back and the balance after,
+     naming gift letters when there are any (website #50);
    - a dated preview's confirm page (from `request_send`) names the mail date, says "cancel free until it
-     goes to the printer", and its button reads **Schedule this letter**.
+     goes to the printer", and its button reads **Schedule this letter**;
+   - opened again after **Schedule this letter**, the same confirm page says "This letter is already
+     scheduled." with its dates; after a cancel, "This letter was cancelled." (website #50).
 
 **Pass criteria:** The card offers only the dates on offer, schedules and cancels from the card, and a
 reopened card shows what happened.

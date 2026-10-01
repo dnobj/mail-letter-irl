@@ -108,5 +108,7 @@
  * r27: cancel_scheduled_mail's description promises only what is sure: what
  *     paid for the mail goes back while it can still be used, and the answer
  *     says what came back (#535).
+ * r28: the same sentence names both exceptions: what paid goes back unless it
+ *     expired or was refunded while the mail waited (#562 review round 2).
  */
-export const STEERING_COPY_REV = 27;
+export const STEERING_COPY_REV = 28;

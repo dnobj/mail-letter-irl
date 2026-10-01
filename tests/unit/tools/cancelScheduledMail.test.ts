@@ -133,7 +133,9 @@ describe('cancel_scheduled_mail (#535)', () => {
     expect(cancelScheduledMailTool.description).toContain('confirm: true');
     // It promises only what is sure: part or none may come back (refunded,
     // or expired while the mail waited), which the answer says.
-    expect(cancelScheduledMailTool.description).toContain('while it can still be used; the answer says what came back.');
+    expect(cancelScheduledMailTool.description).toContain(
+      'goes back to the account unless it expired or was refunded while the mail waited; the answer says what came back.'
+    );
     expect(cancelScheduledMailTool.description).not.toMatch(/the letter it cost, or its gift letter, goes back/);
   });
 });

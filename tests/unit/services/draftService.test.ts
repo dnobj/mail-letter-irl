@@ -40,6 +40,7 @@ import {
   linkDraftToLetter,
   getDraft,
   markExpiredDrafts,
+  cleanupOldDrafts,
   cancelDraft,
   setDraftSchedule,
   LIVE_PAY_AND_SEND_STATUSES,
@@ -558,6 +559,31 @@ describe('draftService', () => {
       const count = await markExpiredDrafts();
 
       expect(count).toBe(0);
+    });
+  });
+
+  // ==========================================================================
+  // cleanupOldDrafts Tests
+  // ==========================================================================
+  describe('cleanupOldDrafts', () => {
+    it("keeps a held letter's sent draft until its own days after the mail date (#564)", async () => {
+      vi.mocked(db.query).mockResolvedValueOnce({ rows: [{ draft_id: 'd1' }], rowCount: 1, command: 'DELETE', oid: 0, fields: [] });
+      const before = Date.now();
+
+      await expect(cleanupOldDrafts(7)).resolves.toBe(1);
+
+      const [sql, params] = vi.mocked(db.query).mock.calls[0] as unknown as [string, [Date, number]];
+      expect(sql).toMatch(/NOT EXISTS \(\s*SELECT 1 FROM orders WHERE orders\.draft_id = letter_drafts\.draft_id\s*\)/);
+      expect(sql).toMatch(
+        /NOT EXISTS \(\s*SELECT 1 FROM letters\s+WHERE letters\.letter_id = letter_drafts\.consumed_letter_id\s+AND letters\.mail_on >= CURRENT_DATE - \$2::int\s*\)/
+      );
+      // The timestamp cutoff and the day count are separate parameters: one
+      // parameter cast two ways silently takes the first type.
+      expect(sql.match(/\$1/g)).toHaveLength(1);
+      expect(sql.match(/\$2/g)).toHaveLength(1);
+      expect(params[0]).toBeInstanceOf(Date);
+      expect(Math.abs(before - 7 * 24 * 60 * 60 * 1000 - params[0].getTime())).toBeLessThan(5_000);
+      expect(params[1]).toBe(7);
     });
   });
 

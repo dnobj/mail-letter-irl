@@ -17,7 +17,9 @@ import type { JobStatus, LetterStatus, OrderStatus } from './types.js';
  *   - Drafts attached to a PAID order: the same schedule.
  *   - Unsent drafts never paid for: 7 days. cleanupOldDrafts() DELETES the
  *     ones it can; purgeAbandonedDraftContent handles the ones the schema
- *     forbids deleting.
+ *     forbids deleting. cleanupOldDrafts() also deletes a sent draft with no
+ *     order 7 days after the send (its letter keeps the content), except a
+ *     held letter's, which it keeps until 7 days after the mail date (#564).
  *
  * REDACTION MOVES CONTENT TO QUARANTINE; IT DOES NOT DESTROY IT
  * Two max-effort reviews of the direct-overwrite design each found ways it
