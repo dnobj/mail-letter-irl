@@ -63,6 +63,10 @@ describePostgres('admin commands through the operator role', () => {
   const heldJobId = randomUUID();
   const failedLetterId = `letter_${randomUUID()}`;
   const failedJobId = randomUUID();
+  // Mail held to arrive by a date (#535): due in five days, as a send with a mail date creates it.
+  const heldMailLetterId = `letter_${randomUUID()}`;
+  const heldMailJobId = randomUUID();
+  const HELD_UNTIL = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
   let alertId: string;
 
   beforeAll(async () => {
@@ -140,6 +144,19 @@ describePostgres('admin commands through the operator role', () => {
          next_attempt_at, provider_outcome, last_error)
        VALUES ($1, $2, 'failed', 3, 3, NOW(), $2, NOW(), 'definite_failure', 'provider rejected: bad address')`,
       [failedJobId, failedLetterId]
+    );
+    await owner.query(
+      `INSERT INTO letters (letter_id, user_id, content, recipient, credits_cost, status, mail_type)
+       VALUES ($1, $2, '{"body":"x"}'::jsonb, '{"name":"y"}'::jsonb, 2, 'queued', 'letter')`,
+      [heldMailLetterId, userId]
+    );
+    await owner.query(
+      `INSERT INTO letter_jobs (job_id, letter_id, status, attempts, max_attempts, scheduled_at, idempotency_key,
+         next_attempt_at, provider_outcome, metadata)
+       VALUES ($1, $2, 'pending', 0, 5, $3::timestamptz, $2, $3::timestamptz, 'not_dispatched', $4::jsonb)`,
+      // The metadata as createLetterJobWithClient writes it. Not $3::text: a
+      // parameter takes one type, here timestamptz, whose text is not ISO.
+      [heldMailJobId, heldMailLetterId, HELD_UNTIL, JSON.stringify({ source: 'transactional-outbox', heldUntil: HELD_UNTIL })]
     );
     const alert = await owner.query<{ alert_id: string }>(
       `INSERT INTO commerce_operational_alerts (alert_type, severity, status, details)
@@ -318,6 +335,41 @@ describePostgres('admin commands through the operator role', () => {
     const letter = await owner.query<{ status: string }>(`SELECT status FROM letters WHERE letter_id = $1`, [failedLetterId]);
     expect(letter.rows[0].status).toBe('queued');
     await expect(confirmation('job.retry', failedJobId, {})).rejects.toMatchObject({ code: 'ADMIN_INVALID_STATE' });
+  }, 60_000);
+
+  it('sends held mail now: due at once, its hold kept, recorded once, and then no longer held (#535)', async () => {
+    const { command, fields } = await confirmation('job.dispatch_now', heldMailJobId, {}, 'customer asked to send it now');
+    expect(fields.get('phrase')).toBe(`CONFIRM ${heldMailJobId}`);
+
+    const outcome = await runner.runAdminCommand(deps(), command, heldMailJobId, fields);
+    expect(outcome).toMatchObject({ status: 'succeeded', replayed: false, result: { jobStatus: 'pending', domainReplayed: false } });
+
+    const job = await owner.query<{ status: string; provider_outcome: string; attempts: number; due: boolean; held_until: string }>(
+      `SELECT status, provider_outcome, attempts, next_attempt_at <= NOW() AS due, metadata->>'heldUntil' AS held_until
+         FROM letter_jobs WHERE job_id = $1`,
+      [heldMailJobId]
+    );
+    expect(job.rows[0]).toEqual({ status: 'pending', provider_outcome: 'not_dispatched', attempts: 0, due: true, held_until: HELD_UNTIL });
+    const letter = await owner.query<{ status: string }>(`SELECT status FROM letters WHERE letter_id = $1`, [heldMailLetterId]);
+    expect(letter.rows[0].status).toBe('queued');
+    // Migration 042 admits the operation; the hold that ended is on record.
+    const audit = await owner.query<{ operation: string; reason_code: string; before_state: Record<string, unknown> }>(
+      `SELECT operation, reason_code, before_state FROM commerce_operator_audit_events WHERE target_reference_hash = $1`,
+      [hash(heldMailJobId)]
+    );
+    expect(audit.rows).toHaveLength(1);
+    expect(audit.rows[0]).toMatchObject({
+      operation: 'mail_job_release',
+      reason_code: 'operator_released_hold',
+      before_state: { jobStatus: 'pending', heldUntil: HELD_UNTIL }
+    });
+
+    const replay = await runner.runAdminCommand(deps(), command, heldMailJobId, fields);
+    expect(replay).toMatchObject({ commandId: outcome.commandId, status: 'succeeded', replayed: true });
+    expect(await operatorAuditRows(heldMailJobId)).toBe(1);
+
+    // Due now, it is held mail no longer: a second release is refused at the preview.
+    await expect(confirmation('job.dispatch_now', heldMailJobId, {})).rejects.toMatchObject({ code: 'ADMIN_INVALID_STATE' });
   }, 60_000);
 
   it('refuses in read-only mode and without elevation, touching nothing', async () => {

@@ -665,7 +665,7 @@ describePostgres('arrive-by (migration 040, #535)', () => {
     ).rejects.toMatchObject({ code: '23505' });
   }, 60_000);
 
-  it("does not call a held letter's Pay & Send order stuck until 90 minutes after its hold ends", async () => {
+  it("does not call a held letter's Pay & Send order stuck until 90 minutes after its job falls due, and only until first tried", async () => {
     const { STUCK_ORDER_CONDITION } = await import('../../src/services/stuckOrders.js');
     const stuck = async (orderId: string) =>
       Number((await pool.query(`SELECT COUNT(*)::int AS n FROM orders WHERE order_id = $1 AND ${STUCK_ORDER_CONDITION}`, [orderId])).rows[0].n);
@@ -703,9 +703,24 @@ describePostgres('arrive-by (migration 040, #535)', () => {
     );
     expect(await stuck(orderId)).toBe(0);
 
+    // Sent now by an operator (job.dispatch_now), which moves only its next
+    // attempt: not stuck while the hourly run gets to it, stuck 90 minutes on.
+    await pool.query("UPDATE letter_jobs SET next_attempt_at = NOW() - INTERVAL '30 minutes' WHERE letter_id = $1", [letterId]);
+    expect(await stuck(orderId)).toBe(0);
+    await pool.query("UPDATE letter_jobs SET next_attempt_at = NOW() - INTERVAL '2 hours' WHERE letter_id = $1", [letterId]);
+    expect(await stuck(orderId)).toBe(1);
+
+    // Tried and waiting to try again, whatever its hold says: on its way like
+    // any other, so stuck.
+    await pool.query(
+      "UPDATE letter_jobs SET attempts = 1, next_attempt_at = NOW() + INTERVAL '10 minutes' WHERE letter_id = $1",
+      [letterId]
+    );
+    expect(await stuck(orderId)).toBe(1);
+
     // Its hold ended 3 hours ago and it has not gone: stuck.
     await pool.query(
-      "UPDATE letter_jobs SET metadata = jsonb_set(metadata, '{heldUntil}', to_jsonb((NOW() - INTERVAL '3 hours')::text)) WHERE letter_id = $1",
+      "UPDATE letter_jobs SET attempts = 0, metadata = jsonb_set(metadata, '{heldUntil}', to_jsonb((NOW() - INTERVAL '3 hours')::text)) WHERE letter_id = $1",
       [letterId]
     );
     expect(await stuck(orderId)).toBe(1);

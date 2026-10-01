@@ -565,13 +565,20 @@ export interface JobDetailForLetter {
   lastError: string | null;
   createdAt: Date;
   updatedAt: Date;
+  /**
+   * When a letter held to arrive by a date becomes due (#535): 09:00 New York
+   * time on its mail date, from the job's metadata. Null for any other job.
+   * Kept after an early release, which moves only nextAttemptAt.
+   */
+  heldUntil: Date | null;
 }
 
 export const JOB_COLUMNS = `
   j.job_id, j.status, j.provider_outcome, j.attempts, j.max_attempts, j.scheduled_at,
   j.next_attempt_at, j.locked_at, (j.provider_order_id IS NOT NULL) AS has_provider_order_id,
   j.provider_dispatch_started_at, j.held_at, j.hold_reason, j.operator_resolution, j.resolved_at,
-  left(j.last_error, 200) AS last_error, j.created_at, j.updated_at
+  left(j.last_error, 200) AS last_error, j.created_at, j.updated_at,
+  j.metadata->>'heldUntil' AS held_until
 `;
 
 export interface JobRow {
@@ -592,6 +599,14 @@ export interface JobRow {
   last_error: string | null;
   created_at: Date;
   updated_at: Date;
+  held_until: string | null;
+}
+
+/** A time the job's metadata holds, or null when there is none or it is not a time. */
+function heldUntilOf(value: string | null): Date | null {
+  if (!value) return null;
+  const at = new Date(value);
+  return Number.isNaN(at.getTime()) ? null : at;
 }
 
 export function toJobDetail(row: JobRow): JobDetailForLetter {
@@ -613,6 +628,7 @@ export function toJobDetail(row: JobRow): JobDetailForLetter {
     lastError: row.last_error,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    heldUntil: heldUntilOf(row.held_until),
   };
 }
 

@@ -7,10 +7,14 @@
  *
  * A held letter's order (#535) waits in fulfillment_pending until the letter
  * goes to the printer on its mail date, which can be weeks. It is not stuck
- * while its hold lasts, nor for 90 minutes after, while the hourly run gets to
- * it; after that it is. A held job carries metadata.heldUntil, the end of its
- * hold (letterJobService.createLetterJobWithClient), which the admin's reader
- * role can read: it reads letter_jobs whole, but not letters.mail_on.
+ * while its hold lasts, nor for 90 minutes after the job falls due, while the
+ * hourly run gets to it, and only until the run first tries it; after that it
+ * is, like any order whose letter is on its way. A held job carries
+ * metadata.heldUntil, the end of its hold
+ * (letterJobService.createLetterJobWithClient). It falls due then, or earlier
+ * when an operator sends it now (job.dispatch_now), which moves only
+ * next_attempt_at, so both are read. The admin's reader role can read them:
+ * it reads letter_jobs whole, but not letters.mail_on.
  *
  * A SQL condition on `orders`, to put in a WHERE or a FILTER.
  */
@@ -26,5 +30,7 @@ export const STUCK_ORDER_CONDITION = `status IN ('paid', 'fulfillment_pending', 
               AND held.status = 'queued'
               AND held_job.metadata->>'heldUntil' IS NOT NULL
               AND (held_job.metadata->>'heldUntil')::timestamptz > NOW() - INTERVAL '90 minutes'
+              AND held_job.attempts = 0
+              AND held_job.next_attempt_at > NOW() - INTERVAL '90 minutes'
          )
        )`;
