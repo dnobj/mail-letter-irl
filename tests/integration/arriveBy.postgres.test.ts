@@ -659,13 +659,15 @@ describePostgres('arrive-by (migration 040, #535)', () => {
 
     const seedOrder = async () => {
       const orderId = `order-${randomUUID()}`;
+      // Two hours old from the start: orders' BEFORE UPDATE trigger (021) would
+      // stamp any later UPDATE's updated_at back to NOW().
       await pool.query(
         `INSERT INTO orders (order_id, user_id, credits, amount_cents, currency, status, order_type, product_code,
-           idempotency_key, draft_id)
-         VALUES ($1, $2, NULL, 499, 'USD', 'fulfillment_pending', 'jit_mail', 'jit-letter', $3, $4)`,
+           idempotency_key, draft_id, updated_at)
+         VALUES ($1, $2, NULL, 499, 'USD', 'fulfillment_pending', 'jit_mail', 'jit-letter', $3, $4,
+                 NOW() - INTERVAL '2 hours')`,
         [orderId, userId, `idem_${orderId}`, await seedDraft(userId)]
       );
-      await pool.query("UPDATE orders SET updated_at = NOW() - INTERVAL '2 hours' WHERE order_id = $1", [orderId]);
       return orderId;
     };
 
