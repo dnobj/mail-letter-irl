@@ -195,6 +195,21 @@ describe('createMailOrderFromDraft', () => {
     expect(savedLetter?.content.rendererVersion).toBe('pdf-1');
   });
 
+  it('copies the renderer into a postcard too (#534 Phase 4)', async () => {
+    draft.mail_type = 'postcard';
+    draft.renderer_version = 'pdf-1';
+    await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'postcard' });
+    expect(savedLetter?.content).toMatchObject({ message: draft.body_text, rendererVersion: 'pdf-1' });
+  });
+
+  it("leaves a legacy postcard's content without a renderer version (#534 Phase 4)", async () => {
+    draft.mail_type = 'postcard';
+    draft.renderer_version = null;
+    await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'postcard' });
+    expect(savedLetter?.content).toHaveProperty('message');
+    expect(savedLetter?.content).not.toHaveProperty('rendererVersion');
+  });
+
   it("leaves a legacy letter's content without a renderer version (#534)", async () => {
     draft.renderer_version = null;
     await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter' });

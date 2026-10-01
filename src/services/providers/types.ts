@@ -368,6 +368,12 @@ export interface PostcardParams {
 
   /** A gift letter's card, printed across the foot of the message half. */
   giftCard?: GiftCardContent;
+
+  /**
+   * The renderer the postcard was previewed with (letters.content.rendererVersion,
+   * #534). Absent for the legacy HTML; otherwise it prints from our own PDF.
+   */
+  rendererVersion?: string;
 }
 
 /**

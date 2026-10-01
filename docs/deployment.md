@@ -1,6 +1,6 @@
 # Deployment Guide
 
-**Last Updated:** September 23, 2026
+**Last Updated:** October 1, 2026
 **Purpose:** Release process, environment checks, boot validation rules, and migration safety
 
 Letter IRL deploys development first. Production is promoted only after automated and manual verification succeeds in development.
@@ -643,16 +643,34 @@ conclusive provider evidence can finish it. Each
 ambiguous outcome raises a durable `mail_provider_outcome_ambiguous` alert.
 
 **A hold whose class is `render_refused` never reached PostGrid (#534).** Our own renderer refused to
-draw the letter before any request was made. The reason is one of:
-- a renderer version this build cannot print;
-- an image it could not read;
-- a letter that no longer fits its page;
-- a drawing error.
+draw the letter or postcard before any request was made. The reason is one of:
+- `unknown_version`: a renderer version this build cannot print;
+- `image`: an image it could not read;
+- `overflow`: a letter that no longer fits its page, or a postcard message past its half of the back;
+- `size`: a postcard size the renderer does not draw (it draws 6x9 only);
+- `render`: anything else that failed to lay out or draw, a letter's gift card included.
 
-The log line `provider.postgrid.render_refused` names the reason and the letter id. Deploy a build that
-can print it, then resolve the letter with a retry (`provider_confirmed_rejected_retry`).
+The log line `provider.postgrid.render_refused` names the reason and the letter id, and the hold's
+message says what was refused. Decide by the message, not the reason alone:
+- **Retry** when a build can print it: deploy that build, then resolve the letter with a retry
+  (`provider_confirmed_rejected_retry`). That covers:
+  - a version this build does not know;
+  - an image our reader does not take: "The image is not a JPEG or PNG data URI." or "The image's size,
+    ..., is empty or over 50 megapixels." (unless it is truly empty);
+  - a drawing fault;
+  - an overflow that a renderer change caused. A letter refused as `overflow` was measured to fit when
+    it was previewed, under the same version, so a deploy changed the wrapping. Fix the renderer rather
+    than refund.
+- **Reject** when the content itself cannot print, resolving it as rejected
+  (`provider_confirmed_rejected_refund`):
+  - a message that is too long in any build;
+  - a postcard size the renderer never draws;
+  - stored image data that is not an image. "The image is neither a JPEG nor a PNG with a readable size."
+    can be either this or a form of JPEG our reader misses, so look at the stored data before deciding;
+  - a gift card that runs past the page because of the sender's name ("The gift card runs ... past the
+    page's bottom margin.").
 
-Resolve it as rejected, which refunds, only when it can never be printed and no earlier attempt of the
+Reject, which refunds, only when it can never be printed and no earlier attempt of the
 letter reached PostGrid, that is, every earlier hold was also `render_refused`. Check the earlier holds
 before refunding: the job page shows only the latest class, because a retry clears `last_error`.
 - Each hold's class is also in its `mail_provider_outcome_ambiguous` alert.
@@ -669,6 +687,8 @@ seconds apart. How long PostGrid keeps a key is not documented (`docs/learnings/
 **Rolling back below migration 039.** Do not roll the API back to a build older than migration 039 while
 letters with `content.rendererVersion` are queued or held. An older build ignores the version and sends
 them as HTML, printed from a different layout than the person previewed.
+- Postcards set a later floor: the build that merged #545 is the first to print a postcard's version. Do
+  not roll back below it while postcards with `content.rendererVersion` are queued or held.
 
 `stripe_money_event_unmatched` covers two different situations, and they have
 different recovery paths.

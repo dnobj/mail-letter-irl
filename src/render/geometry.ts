@@ -54,3 +54,30 @@ export const LINE_PITCH = 19.2;
 export const HEADER_IMAGE_MAX_HEIGHT = inch(2);
 export const INLINE_IMAGE_MAX_HEIGHT = inch(3);
 export const IMAGE_GAP = inch(0.5);
+
+/**
+ * A 9x6 postcard as PostGrid takes it from a PDF, from #534's probe P9
+ * (test mode, 2026-10-01): two pages, front then back, each 9.25 x 6.25in,
+ * a 0.125in bleed on every side. A 9 x 6in page is refused, and both pages
+ * are flattened at 300 ppi. On the back PostGrid stamps the addresses in
+ * Open Sans 9pt from x 5.725in (from the page's edge, bleed included), and it
+ * cancels a postcard with anything drawn in their region. A back drawn only
+ * in its left half, as the legacy back is, prints.
+ */
+export const POSTCARD_WIDTH = inch(9.25);
+export const POSTCARD_HEIGHT = inch(6.25);
+export const POSTCARD_BLEED = inch(0.125);
+
+/** The back's message: the legacy back's left 4.5in, inside 0.4in of padding. */
+export const POSTCARD_MESSAGE = {
+  left: POSTCARD_BLEED + inch(0.4),
+  top: POSTCARD_BLEED + inch(0.4),
+  width: inch(4.5 - 2 * 0.4),
+  height: inch(6 - 2 * 0.4)
+} as const;
+/** Where the back's left half ends: nothing is drawn to the right of it. */
+export const POSTCARD_HALF = POSTCARD_BLEED + inch(4.5);
+
+/** The legacy back's message: 14pt at a line-height of 1.6. */
+export const POSTCARD_FONT_SIZE = 14;
+export const POSTCARD_LINE_PITCH = 22.4;

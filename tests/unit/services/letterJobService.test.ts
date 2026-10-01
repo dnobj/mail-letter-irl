@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   clientQuery: vi.fn(),
   transaction: vi.fn(),
   sendLetter: vi.fn(),
+  sendPostcard: vi.fn(),
 }));
 const { query, clientQuery, sendLetter } = mocks;
 
@@ -17,6 +18,7 @@ vi.mock('../../../src/services/providers/index.js', () => ({
   getProviderForMailType: vi.fn(async () => ({
     config: { name: 'postgrid', displayName: 'PostGrid' },
     sendLetter: mocks.sendLetter,
+    sendPostcard: mocks.sendPostcard,
   })),
 }));
 
@@ -204,6 +206,39 @@ describe('mail outbox retries', () => {
     await processLetterJob('job-1', {});
 
     expect(sendLetter).toHaveBeenCalledWith(expect.objectContaining({ rendererVersion: 'pdf-1' }));
+  });
+
+  it('hands the provider the renderer a postcard was previewed with (#534 Phase 4)', async () => {
+    const postcard = {
+      ...letter,
+      mail_type: 'postcard',
+      content: {
+        message: 'Wish you were here.',
+        sender: letter.content.sender,
+        frontImageData: 'data:image/jpeg;base64,AAAA',
+        postcardSize: '6x9',
+        rendererVersion: 'pdf-1'
+      }
+    };
+    query.mockImplementation(async (sql: string) => {
+      if (sql.includes('WITH candidate')) return { rows: [{ ...job }] };
+      if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...postcard }] };
+      return { rows: [] };
+    });
+    const base = clientQuery.getMockImplementation()!;
+    clientQuery.mockImplementation(async (sql: string, params?: unknown[]) =>
+      sql.startsWith('SELECT * FROM letters') ? { rows: [{ ...postcard }] } : base(sql, params)
+    );
+    mocks.sendPostcard.mockResolvedValue({ success: true, trackingId: 'provider-1', costCents: 100 });
+
+    await processLetterJob('job-1', {});
+
+    expect(mocks.sendPostcard).toHaveBeenCalledWith(expect.objectContaining({
+      backMessage: 'Wish you were here.',
+      size: '6x9',
+      rendererVersion: 'pdf-1'
+    }));
+    expect(sendLetter).not.toHaveBeenCalled();
   });
 
   it('prints the text validation counted: no trailing blank lines before the sign-off (#77)', async () => {

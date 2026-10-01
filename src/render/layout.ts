@@ -72,6 +72,8 @@ export interface Layout {
   width: number;
   height: number;
   pages: LayoutPage[];
+  /** The PDF's title; a letter's when absent. */
+  title?: string;
   /** How many lines the text runs past the page; 0 when it fits. */
   overflowLines: number;
 }
