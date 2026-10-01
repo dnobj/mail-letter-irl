@@ -801,26 +801,52 @@ describePostgres('arrive-by (migration 040, #535)', () => {
   it("keeps a held letter's sent draft until 7 days after its mail date, and deletes an ordinary one at 7 days (#564)", async () => {
     const userId = await seedUser();
     const heldLetter = await sendHeld(userId);
-    const plainDraft = await seedDraft(userId);
-    await mailSend.createMailOrderFromDraft({ draftId: plainDraft, userId, mailType: 'letter' });
     const heldDraft = (await pool.query('SELECT draft_id FROM letter_drafts WHERE consumed_letter_id = $1', [heldLetter])).rows[0].draft_id;
-    // Both sent a month ago, as far as the sweep can tell.
-    await pool.query(
-      "UPDATE letter_drafts SET updated_at = NOW() - INTERVAL '30 days' WHERE draft_id IN ($1, $2)",
-      [heldDraft, plainDraft]
-    );
+    const sendPlain = async () => {
+      const draftId = await seedDraft(userId);
+      await mailSend.createMailOrderFromDraft({ draftId, userId, mailType: 'letter' });
+      return draftId;
+    };
+    const oldDraft = await sendPlain();
+    const recentDraft = await sendPlain();
+    // As the sweep sees them: the held and an ordinary draft sent eight days
+    // ago, another ordinary one six. The table's trigger (004) stamps
+    // updated_at on every update, so it is off for these, inside a
+    // transaction, so a failure rolls the DISABLE back too.
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('ALTER TABLE letter_drafts DISABLE TRIGGER update_letter_drafts_updated_at');
+      await client.query(
+        "UPDATE letter_drafts SET updated_at = NOW() - INTERVAL '8 days' WHERE draft_id IN ($1, $2)",
+        [heldDraft, oldDraft]
+      );
+      await client.query("UPDATE letter_drafts SET updated_at = NOW() - INTERVAL '6 days' WHERE draft_id = $1", [recentDraft]);
+      await client.query('ALTER TABLE letter_drafts ENABLE TRIGGER update_letter_drafts_updated_at');
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
     const left = async () =>
-      (await pool.query('SELECT draft_id FROM letter_drafts WHERE draft_id IN ($1, $2)', [heldDraft, plainDraft])).rows.map(row => row.draft_id);
+      (await pool.query<{ draft_id: string }>(
+        'SELECT draft_id FROM letter_drafts WHERE draft_id IN ($1, $2, $3)',
+        [heldDraft, oldDraft, recentDraft]
+      )).rows.map(row => row.draft_id).sort();
+    const sorted = (...ids: string[]) => [...ids].sort();
 
+    // The ordinary draft goes at 7 days, not before; the held one stays.
     await drafts.cleanupOldDrafts(7);
-    expect(await left()).toEqual([heldDraft]);
+    expect(await left()).toEqual(sorted(heldDraft, recentDraft));
 
     // Seven days after its mail date, it is kept still; eight days after, it goes.
     await pool.query("UPDATE letters SET mail_on = CURRENT_DATE - 7, arrive_by = CURRENT_DATE - 5 WHERE letter_id = $1", [heldLetter]);
     await drafts.cleanupOldDrafts(7);
-    expect(await left()).toEqual([heldDraft]);
+    expect(await left()).toEqual(sorted(heldDraft, recentDraft));
     await pool.query("UPDATE letters SET mail_on = CURRENT_DATE - 8, arrive_by = CURRENT_DATE - 6 WHERE letter_id = $1", [heldLetter]);
     await drafts.cleanupOldDrafts(7);
-    expect(await left()).toEqual([]);
+    expect(await left()).toEqual([recentDraft]);
   }, 60_000);
 });

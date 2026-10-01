@@ -580,6 +580,7 @@ describe('draftService', () => {
       // The timestamp cutoff and the day count are separate parameters: one
       // parameter cast two ways silently takes the first type.
       expect(sql.match(/\$1/g)).toHaveLength(1);
+      expect(sql.match(/\$2/g)).toHaveLength(1);
       expect(params[0]).toBeInstanceOf(Date);
       expect(Math.abs(before - 7 * 24 * 60 * 60 * 1000 - params[0].getTime())).toBeLessThan(5_000);
       expect(params[1]).toBe(7);

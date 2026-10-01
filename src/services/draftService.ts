@@ -342,7 +342,7 @@ export async function markExpiredDrafts(): Promise<number> {
 /**
  * Delete drafts that are done with: sent (consumed), expired or cancelled,
  * last changed more than `olderThanDays` ago, and never paid for by an order.
- * The hourly maintenance calls it.
+ * The hourly maintenance calls it once a day.
  *
  * A sent draft whose letter waits for its mail date (#535) stays until
  * `olderThanDays` after that date: its confirmation link and a reopened card
