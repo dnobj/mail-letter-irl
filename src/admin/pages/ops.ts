@@ -149,7 +149,7 @@ ${input.mode !== "full" ? html`<p class="muted">Read-only mode: previews work, e
 <h2>Provider status sync</h2>
 <form method="get" action="/commands/mail.status_sync/preview" class="stack">
   <input type="hidden" name="target" value="letters">
-  <label for="sync-days">Letters created in the last (days)</label>
+  <label for="sync-days">Letters mailed in the last (days)</label>
   <input type="number" id="sync-days" name="days" min="1" max="90" value="30">
   <label for="sync-mode">Mode</label>
   <select id="sync-mode" name="dryRun">

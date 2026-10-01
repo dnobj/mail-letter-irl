@@ -341,6 +341,7 @@ describe("account.erase (#289)", () => {
     unredeemedGiftCodes: 1,
     seedCodeEmails: 1,
     failedJobsToCancel: 0,
+    heldMailToCancel: 0,
     ordersKept: 2,
     unusedGiftLetters: 2,
     openAlerts: 0,
@@ -466,6 +467,26 @@ describe("account.erase (#289)", () => {
       {},
     );
     expect(owed.warnings).toContainEqual(expect.stringMatching(/^2 operational alerts/));
+  });
+
+  it("counts the held mail it cancels, and warns about it only when there is some (#535)", async () => {
+    const heldWarning = /held to arrive by a date/;
+    const quiet = await erasure().command.preview(scripted(), "auth0|u1", {});
+    expect(quiet.display).toContainEqual(["Held mail cancelled", "0 letters waiting for their mail date, with nothing returned"]);
+    expect(quiet.warnings.some((warning) => heldWarning.test(warning))).toBe(false);
+
+    const held = await erasure({ readErasureScope: vi.fn().mockResolvedValue({ ...SCOPE, heldMailToCancel: 2 }) }).command.preview(
+      scripted(),
+      "auth0|u1",
+      {},
+    );
+    expect(held.summary).toMatchObject({ blocked: false, scope: { heldMailToCancel: 2 } });
+    expect(held.display).toContainEqual(["Held mail cancelled", "2 letters waiting for their mail date, with nothing returned"]);
+    expect(held.warnings).toContainEqual(
+      expect.stringMatching(/^2 letters held to arrive by a date are cancelled before they print, and nothing goes back/),
+    );
+    // Mail released before the run is due by then: it mails, and the run refuses.
+    expect(held.warnings).toContainEqual(expect.stringMatching(/comes before the hourly run that erases is due by then, so it mails instead and that run refuses the erasure/));
   });
 
   it("always warns that it is irreversible, and what the operator does by hand afterwards", async () => {

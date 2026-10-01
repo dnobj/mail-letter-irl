@@ -19,7 +19,8 @@ import {
   MAX_ERASURE_ATTEMPTS,
   UPLOADED_PHOTO_DELETE_TIMEOUT_MS,
   erasureBlocked,
-  processAccountErasures
+  processAccountErasures,
+  readErasureScope
 } from "../../../src/services/accountErasureService.js";
 
 interface Operation {
@@ -35,6 +36,8 @@ interface Script {
   failOn?: RegExp;
   /** The SQLSTATE the scripted failure carries; a check violation unless a test says otherwise. */
   failCode?: string;
+  /** Letters the held-mail cancel finds (#535). */
+  held?: string[];
 }
 
 const CLEAR = {
@@ -63,6 +66,10 @@ function scriptedClient(script: Script) {
       }
       if (text.includes("AS orders_in_flight")) {
         return { rows: [{ ...CLEAR, ...(script.blockers ?? {}) }], rowCount: 1 };
+      }
+      if (text.includes("RETURNING j.letter_id")) {
+        const held = script.held ?? [];
+        return { rows: held.map((letter_id) => ({ letter_id })), rowCount: held.length };
       }
       return { rows: [], rowCount: 2 };
     }
@@ -224,6 +231,80 @@ describe("processing queued erasures", () => {
   it("retries on every attempt before the last", async () => {
     scriptedClient({ queue: [OPERATION(MAX_ERASURE_ATTEMPTS - 2)], failOn: /^\s*UPDATE letters\b/ });
     expect(await processAccountErasures()).toEqual({ erased: 0, refused: 0, retrying: 1, failed: 0 });
+  });
+});
+
+describe("held mail (#535)", () => {
+  const flat = (text: string) => text.replace(/\s+/g, " ");
+  const HELD =
+    "l.status = 'queued' AND l.funding_type IN ('prepaid_balance', 'gift_letter') AND j.status = 'pending' " +
+    "AND j.provider_outcome = 'not_dispatched' AND j.attempts = 0 AND j.next_attempt_at > NOW() " +
+    "AND j.metadata->>'heldUntil' IS NOT NULL";
+
+  it("does not hold the account: the gate leaves held prepaid and gift mail out of both mail counts", async () => {
+    const client = scriptedClient({ queue: [OPERATION()] });
+    await processAccountErasures();
+    const gate = flat(client.statements.find((s) => s.text.includes("AS orders_in_flight"))!.text);
+    expect(gate).toContain(`AND NOT EXISTS (SELECT 1 FROM letter_jobs j WHERE j.letter_id = l.letter_id AND ${HELD}))::int AS letters_in_flight`);
+    expect(gate).toContain(`AND NOT (${HELD}))::int AS jobs_in_flight`);
+  });
+
+  it("is cancelled once the gate has passed, with its history, and counted", async () => {
+    const client = scriptedClient({ queue: [OPERATION()], held: ["ltr-1", "ltr-2"] });
+
+    expect(await processAccountErasures()).toEqual({ erased: 1, refused: 0, retrying: 0, failed: 0 });
+
+    const texts = client.statements.map((s) => s.text);
+    const gateAt = texts.findIndex((t) => t.includes("AS orders_in_flight"));
+    const cancelAt = texts.findIndex((t) => t.includes("RETURNING j.letter_id"));
+    expect(cancelAt).toBeGreaterThan(gateAt);
+    const cancel = flat(texts[cancelAt]);
+    expect(cancel).toContain("UPDATE letter_jobs j SET status = 'cancelled', completed_at = NOW(), locked_at = NULL, operator_resolution = 'account_erased', resolved_at = NOW(), updated_at = NOW() FROM letters l");
+    expect(cancel).toContain(`FROM letters l WHERE l.letter_id = j.letter_id AND l.user_id = $1 AND ${HELD} RETURNING j.letter_id`);
+    expect(client.statements[cancelAt].values).toEqual(["auth0|gone"]);
+
+    const letters = client.statements.find((s) => s.text.includes("WHERE letter_id = ANY($1::varchar[])"))!;
+    expect(flat(letters.text)).toContain("UPDATE letters SET status = 'cancelled', status_updated_at = NOW(), updated_at = NOW()");
+    expect(letters.values).toEqual([["ltr-1", "ltr-2"]]);
+    const history = client.statements.find((s) => s.text.includes("INSERT INTO letter_status_history"))!;
+    expect(flat(history.text)).toContain("SELECT held_letter, 'queued', 'cancelled', 'erasure' FROM unnest($1::text[]) AS held_letter");
+    expect(history.values).toEqual([["ltr-1", "ltr-2"]]);
+    // Before the content scrub, which finds every letter of the account.
+    expect(cancelAt).toBeLessThan(texts.findIndex((t) => t.includes("SET content = '{}'::jsonb")));
+
+    const counts = JSON.parse(String(operationUpdates(client)[0].values?.[1]));
+    expect(counts).toMatchObject({ heldMailCancelled: 2 });
+  });
+
+  it("writes nothing more when none is held", async () => {
+    const client = scriptedClient({ queue: [OPERATION()] });
+    await processAccountErasures();
+    expect(client.statements.some((s) => s.text.includes("WHERE letter_id = ANY($1::varchar[])"))).toBe(false);
+    expect(client.statements.some((s) => s.text.includes("INSERT INTO letter_status_history"))).toBe(false);
+    expect(JSON.parse(String(operationUpdates(client)[0].values?.[1]))).toMatchObject({ heldMailCancelled: 0 });
+  });
+
+  it("is counted for the preview, read through the job as the reader role can", async () => {
+    const query = vi.fn(async () => ({ rows: [{ held_mail_to_cancel: 3, failed_jobs_to_cancel: 1 }], rowCount: 1 }));
+    const scope = await readErasureScope({ query } as never, "auth0|u1");
+    expect(scope).toMatchObject({ heldMailToCancel: 3, failedJobsToCancel: 1 });
+    const [text, values] = query.mock.calls[0] as unknown as [string, unknown[]];
+    expect(flat(text)).toContain(
+      `(SELECT COUNT(l.letter_id) FROM letters l JOIN letter_jobs j ON j.letter_id = l.letter_id WHERE l.user_id = $1 AND ${HELD})::int AS held_mail_to_cancel`,
+    );
+    expect(values[0]).toBe("auth0|u1");
+    // None held reads as none, not as a missing number.
+    const none = await readErasureScope({ query: vi.fn(async () => ({ rows: [{}], rowCount: 1 })) } as never, "auth0|u1");
+    expect(none.heldMailToCancel).toBe(0);
+  });
+
+  it("is left to mail when anything else holds the account", async () => {
+    const client = scriptedClient({ queue: [OPERATION()], blockers: { disputes_open: 1 }, held: ["ltr-1"] });
+
+    expect(await processAccountErasures()).toEqual({ erased: 0, refused: 1, retrying: 0, failed: 0 });
+
+    expect(client.statements.some((s) => s.text.includes("RETURNING j.letter_id"))).toBe(false);
+    expect(client.statements.some((s) => s.text.includes("INSERT INTO letter_status_history"))).toBe(false);
   });
 });
 

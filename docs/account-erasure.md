@@ -1,6 +1,6 @@
 # Account Erasure
 
-**Last Updated:** September 24, 2026
+**Last Updated:** October 1, 2026
 **Purpose:** How a customer's request to delete their account is carried out (#289), and what the operator does by hand
 
 The privacy policy promises deletion on request. Erasure **anonymises** the account: the customer's
@@ -24,6 +24,14 @@ the owner's decision on #289 (2026-09-23).
 
 Failed mail jobs that an operator could still retry are cancelled, so nothing can mail an empty letter.
 
+Prepaid and gift mail held to arrive by a date (#535), and still waiting for its mail date, is cancelled
+before it prints. Nothing goes back, because the balance and gift letters go with the account. The
+erasure cancels it only once nothing else holds the account back, so a refused erasure leaves it to mail.
+Held mail is not cancelled when:
+- its mail date has come: it is due, and holds the account back until it mails;
+- it is Pay & Send: it is a paid order not yet mailed, and holds the account back like any other, because
+  its refund is a person's decision.
+
 The unspent balance and unused gift letters are forfeited. If the customer wants money back, refund
 **before** erasing: the erasure blocks sends on the account, and a pack refund refuses a blocked account.
 
@@ -35,13 +43,15 @@ The unspent balance and unused gift letters are forfeited. If the customer wants
 2. Under **Erase account**, choose **Preview erasing this account**. The preview shows what is still in
    flight, what will be removed and what will be kept. The command refuses while any of these holds:
    - an open checkout, or a paid order not yet mailed;
-   - a letter or mail job still on its way;
+   - a letter or mail job still on its way (prepaid and gift mail still waiting for its mail date does not
+     count: the erasure cancels it, and the preview counts it and warns);
    - an open dispute (a disputed order counts as settled once every dispute on its payment has closed,
      won or lost);
    - a refund in progress;
    - an image generation in flight.
 
-   Wait for it to settle, or settle it deliberately, then preview again. The preview also warns about open
+   Wait for it to settle, or settle it deliberately, then preview again. If the customer wants their held
+   mail sent, wait until it mails. The preview also warns about open
    operational alerts on the account's orders, such as compensation still owed after a dispute. Settle
    those first, because nothing owed can reach the account after it is erased.
 3. Elevate, then type the phrase (`CONFIRM <id>` in development, `PRODUCTION ERASE <id>` in production)
@@ -87,6 +97,8 @@ again under the account's locks first, because the account can change in the hou
 An unexpected failure is taken back whole and retried an hour later, three attempts in all. A lock
 conflict with a send in progress is retried at the next run without counting against them. A refusal by
 the gate is not retried: an open dispute can take months, and the operator queues again when it settles.
+Held mail whose mail date comes before the run is due by then, and the run erases before it sends mail,
+so that erasure is refused: queue it again once the letter has mailed.
 
 ---
 
@@ -143,4 +155,5 @@ Manual case `ERASE-01` in [Manual Tests](manual-tests.md). The PostgreSQL suite
 - every scrub, and what is kept;
 - the retry and savepoint behaviour;
 - the follow-up alert, which commits with the tombstone or not at all;
+- held mail, cancelled only once nothing else holds the account back;
 - the sign-in refusal.

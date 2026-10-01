@@ -222,7 +222,8 @@ describe('raiseMissedMailDayAlerts (#535)', () => {
     expect(params).toEqual([MISSED_MAIL_DAY_ALERT]);
     expect(flat).toContain('INSERT INTO commerce_operational_alerts (order_id, alert_type, severity, details)');
     expect(flat).toContain("SELECT held.funding_order_id, $1::varchar, 'warning'");
-    expect(flat).toContain("jsonb_build_object('letterId', held.letter_id, 'mailOn', held.mail_on::text)");
+    // The account too, so the alerts list links to it (#555 round 3).
+    expect(flat).toContain("jsonb_build_object('letterId', held.letter_id, 'mailOn', held.mail_on::text, 'userId', held.user_id)");
     expect(flat).toContain('held.mail_on IS NOT NULL');
     // Failed too: its retries ran out, or the provider refused it.
     expect(flat).toContain("held.status IN ('queued', 'processing', 'failed')");

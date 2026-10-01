@@ -75,6 +75,32 @@ export const ERASURE_FOLLOWUP_RESOLUTION = 'auth0_user_deleted';
  */
 export const ERASED_EMAIL_PATTERN = 'erased-%@erased.invalid';
 
+/**
+ * Held mail an erasure cancels (#535, the owner's default): a prepaid or gift
+ * letter waiting in the outbox for its mail date. Its job is pending, never
+ * attempted and not yet due, as the pause count reads held mail
+ * (letterJobService), and carries the hold it was created with
+ * (metadata.heldUntil, which createLetterJobWithClient writes only for held
+ * mail): a job scheduled ahead for any other reason holds the account back
+ * rather than being cancelled. Read through the job, not letters.mail_on,
+ * because the admin reader role runs the preview and holds letter_jobs whole
+ * but not that column.
+ *
+ * It does not hold the account: the erasure cancels it, and returns nothing,
+ * since the balance and gift letters go with the account. Once its hold has
+ * ended it is due and holds the account until it mails. Pay & Send held mail is
+ * not here: its order is in flight, and its refund is a person's decision.
+ *
+ * A SQL condition on `letters l` joined to its `letter_jobs j`.
+ */
+const HELD_MAIL_CONDITION = `l.status = 'queued'
+      AND l.funding_type IN ('prepaid_balance', 'gift_letter')
+      AND j.status = 'pending'
+      AND j.provider_outcome = 'not_dispatched'
+      AND j.attempts = 0
+      AND j.next_attempt_at > NOW()
+      AND j.metadata->>'heldUntil' IS NOT NULL`;
+
 /** Refunds that are over; any other status is still moving money. */
 const SETTLED_PACK_REFUND_STATUSES = ['succeeded', 'failed', 'compensated'];
 
@@ -139,7 +165,9 @@ export async function readErasureBlockers(client: SqlClient, userId: string): Pr
                ))::int AS orders_in_flight,
        (SELECT COUNT(l.letter_id) FROM letters l
          WHERE l.user_id = $1
-           AND NOT (l.status = ANY($3::varchar[])))::int AS letters_in_flight,
+           AND NOT (l.status = ANY($3::varchar[]))
+           AND NOT EXISTS (SELECT 1 FROM letter_jobs j
+                            WHERE j.letter_id = l.letter_id AND ${HELD_MAIL_CONDITION}))::int AS letters_in_flight,
        (SELECT COUNT(j.job_id) FROM letter_jobs j
           JOIN letters l ON l.letter_id = j.letter_id
          WHERE l.user_id = $1
@@ -147,7 +175,8 @@ export async function readErasureBlockers(client: SqlClient, userId: string): Pr
            AND NOT (
                  j.status = 'failed'
              AND NOT (j.provider_outcome = 'not_dispatched' AND j.attempts < j.max_attempts)
-               ))::int AS jobs_in_flight,
+               )
+           AND NOT (${HELD_MAIL_CONDITION}))::int AS jobs_in_flight,
        (SELECT COUNT(d.dispute_id) FROM stripe_disputes d
          WHERE d.resolved_at IS NULL
            AND (d.user_id = $1
@@ -191,6 +220,8 @@ export interface ErasureScope {
   unredeemedGiftCodes: number;
   seedCodeEmails: number;
   failedJobsToCancel: number;
+  /** Held prepaid and gift mail cancelled, with nothing returned (#535). */
+  heldMailToCancel: number;
   ordersKept: number;
   unusedGiftLetters: number;
   /** Open operational alerts on the account's orders, such as compensation still owed after a dispute. */
@@ -226,6 +257,9 @@ export async function readErasureScope(client: SqlClient, userId: string): Promi
        (SELECT COUNT(j.job_id) FROM letter_jobs j
           JOIN letters l ON l.letter_id = j.letter_id
          WHERE l.user_id = $1 AND j.status = 'failed')::int AS failed_jobs_to_cancel,
+       (SELECT COUNT(l.letter_id) FROM letters l
+          JOIN letter_jobs j ON j.letter_id = l.letter_id
+         WHERE l.user_id = $1 AND ${HELD_MAIL_CONDITION})::int AS held_mail_to_cancel,
        (SELECT COUNT(o.order_id) FROM orders o WHERE o.user_id = $1)::int AS orders_kept,
        (SELECT COUNT(g.gift_id) FROM gift_letters g
          WHERE g.user_id = $1 AND g.status = 'available')::int AS unused_gift_letters,
@@ -245,6 +279,7 @@ export async function readErasureScope(client: SqlClient, userId: string): Promi
     unredeemedGiftCodes: Number(row.unredeemed_gift_codes ?? 0),
     seedCodeEmails: Number(row.seed_code_emails ?? 0),
     failedJobsToCancel: Number(row.failed_jobs_to_cancel ?? 0),
+    heldMailToCancel: Number(row.held_mail_to_cancel ?? 0),
     ordersKept: Number(row.orders_kept ?? 0),
     unusedGiftLetters: Number(row.unused_gift_letters ?? 0),
     openAlerts: Number(row.open_alerts ?? 0)
@@ -352,6 +387,8 @@ export async function readErasureFollowup(client: SqlClient, userId: string): Pr
 export interface ErasureCounts {
   lettersScrubbed: number;
   jobsCancelled: number;
+  /** Held prepaid and gift mail cancelled before its mail date (#535). */
+  heldMailCancelled: number;
   draftsScrubbed: number;
   draftsDeleted: number;
   savedCopiesDeleted: number;
@@ -418,6 +455,36 @@ export async function eraseAccountWithClient(client: SqlClient, userId: string):
 
   const blockers = await readErasureBlockers(client, userId);
   if (erasureBlocked(blockers)) return { outcome: 'blocked', blockers };
+
+  // Held mail (#535) did not hold the account, so it is cancelled now, and
+  // only now: an erasure the gate refused leaves it to mail. Nothing goes back,
+  // as the balance and gift letters go with the account. Its jobs and letters
+  // are already locked above; the outbox's claim skips them (SKIP LOCKED) and,
+  // once cancelled, never takes them.
+  const held = await client.query(
+    `UPDATE letter_jobs j
+        SET status = 'cancelled', completed_at = NOW(), locked_at = NULL,
+            operator_resolution = 'account_erased', resolved_at = NOW(), updated_at = NOW()
+       FROM letters l
+      WHERE l.letter_id = j.letter_id
+        AND l.user_id = $1
+        AND ${HELD_MAIL_CONDITION}
+      RETURNING j.letter_id`,
+    [userId]
+  );
+  const heldLetterIds = (held.rows as Array<{ letter_id: string }>).map((row) => row.letter_id);
+  if (heldLetterIds.length > 0) {
+    await client.query(
+      `UPDATE letters SET status = 'cancelled', status_updated_at = NOW(), updated_at = NOW()
+        WHERE letter_id = ANY($1::varchar[])`,
+      [heldLetterIds]
+    );
+    await client.query(
+      `INSERT INTO letter_status_history (letter_id, old_status, new_status, source)
+       SELECT held_letter, 'queued', 'cancelled', 'erasure' FROM unnest($1::text[]) AS held_letter`,
+      [heldLetterIds]
+    );
+  }
 
   // Straight to deletion, not through the quarantine: the quarantine exists to
   // keep a copy, and valid_quarantine_window forbids an empty window.
@@ -541,6 +608,7 @@ export async function eraseAccountWithClient(client: SqlClient, userId: string):
     counts: {
       lettersScrubbed: letters.rowCount ?? 0,
       jobsCancelled: jobs.rowCount ?? 0,
+      heldMailCancelled: heldLetterIds.length,
       draftsScrubbed: draftsScrubbed.rowCount ?? 0,
       draftsDeleted: draftsDeleted.rowCount ?? 0,
       savedCopiesDeleted: savedCopies.rowCount ?? 0,

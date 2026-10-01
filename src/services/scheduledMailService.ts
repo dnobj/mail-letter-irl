@@ -42,7 +42,7 @@ export async function raiseMissedMailDayAlerts(): Promise<number> {
     const raised = await query(
       `INSERT INTO commerce_operational_alerts (order_id, alert_type, severity, details)
        SELECT held.funding_order_id, $1::varchar, 'warning',
-              jsonb_build_object('letterId', held.letter_id, 'mailOn', held.mail_on::text)
+              jsonb_build_object('letterId', held.letter_id, 'mailOn', held.mail_on::text, 'userId', held.user_id)
          FROM letters held
         WHERE held.mail_on IS NOT NULL
           AND held.status IN ('queued', 'processing', 'failed')

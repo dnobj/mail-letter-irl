@@ -650,7 +650,7 @@ describePostgres('arrive-by (migration 040, #535)', () => {
         order_id: null,
         severity: 'warning',
         status: 'open',
-        details: { letterId, mailOn: '2020-01-02' }
+        details: { letterId, mailOn: '2020-01-02', userId }
       }))
     );
 

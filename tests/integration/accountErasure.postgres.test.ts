@@ -353,7 +353,181 @@ describePostgres('account erasure', () => {
     return result.rowCount ?? 0;
   }
 
+  /** A letter held to arrive by a date (#535): queued, its job pending, never attempted, not due for days. */
+  async function seedHeldLetter(userId: string, funding: 'prepaid_balance' | 'gift_letter' = 'prepaid_balance'): Promise<string> {
+    const letterId = await seedLetter(userId, 'queued');
+    await owner.query('UPDATE letters SET funding_type = $2::varchar WHERE letter_id = $1', [letterId, funding]);
+    await seedJob(letterId, { status: 'pending', outcome: 'not_dispatched', attempts: 0 });
+    await holdJob(letterId);
+    return letterId;
+  }
+
+  /**
+   * Holds a letter's job as a send with a mail date creates it: due at its
+   * release, which it also carries as heldUntil. Ten days out unless a test
+   * says otherwise; a past offset is held mail whose hold has ended.
+   */
+  async function holdJob(letterId: string, offset = '10 days'): Promise<void> {
+    await owner.query(
+      `UPDATE letter_jobs
+          SET next_attempt_at = NOW() + $2::interval,
+              metadata = jsonb_build_object('source', 'transactional-outbox', 'heldUntil', (NOW() + $2::interval)::text)
+        WHERE letter_id = $1`,
+      [letterId, offset]
+    );
+  }
+
+  /** What a prepaid send consumed: a lot, the deduction, and the consumption that ties them to the letter. */
+  async function seedConsumption(userId: string, letterId: string): Promise<void> {
+    const lot = await owner.query<{ ledger_id: string }>(
+      `INSERT INTO credit_ledger (user_id, initial_amount, remaining_amount, source_type, status)
+       VALUES ($1, 10, 8, 'adjustment', 'active') RETURNING ledger_id`,
+      [userId]
+    );
+    const deduction = await owner.query<{ transaction_id: number }>(
+      `INSERT INTO credit_transactions (user_id, amount, balance_after, type, reference_type, reference_id)
+       VALUES ($1, -2, 8, 'deduction', 'letter', $2) RETURNING transaction_id`,
+      [userId, letterId]
+    );
+    await owner.query(
+      `INSERT INTO credit_consumption (transaction_id, ledger_id, amount, ledger_remaining_after) VALUES ($1, $2, 2, 8)`,
+      [deduction.rows[0].transaction_id, lot.rows[0].ledger_id]
+    );
+  }
+
+  /** What a gift send consumed: a gift letter, and the chain code minted for the card. */
+  async function seedGiftConsumption(userId: string, letterId: string): Promise<{ giftId: string; code: string }> {
+    const [gift] = await db.transaction((client) =>
+      gifts.grantGiftLettersWithClient(client, {
+        userId,
+        quantity: 1,
+        generationsRemaining: 1,
+        source: 'operator',
+        sourceReferenceId: `test:${randomUUID()}`
+      })
+    );
+    await owner.query(
+      `UPDATE gift_letters SET status = 'consumed', consumed_at = NOW(), consumed_by_letter_id = $2 WHERE gift_id = $1`,
+      [gift.gift_id, letterId]
+    );
+    const code = giftCode();
+    await owner.query(
+      `INSERT INTO gift_codes (code, gift_id, letter_id, issued_to_user_id, grants_generations_remaining, expires_at)
+       VALUES ($1, $2, $3, $4, 0, NOW() + INTERVAL '100 days')`,
+      [code, gift.gift_id, letterId, userId]
+    );
+    return { giftId: gift.gift_id, code };
+  }
+
+  async function mailState(letterId: string) {
+    const row = (
+      await owner.query(
+        `SELECT l.status AS letter, j.status AS job, j.operator_resolution AS resolution
+           FROM letters l JOIN letter_jobs j ON j.letter_id = l.letter_id WHERE l.letter_id = $1`,
+        [letterId]
+      )
+    ).rows[0];
+    return { letter: row.letter, job: row.job, resolution: row.resolution };
+  }
+
   // ------------------------------------------------------------------ tests
+
+  it('cancels held prepaid and gift mail, nothing returned, and only once nothing else holds the account (#535)', async () => {
+    const { userId } = await seedUser();
+    const prepaid = await seedHeldLetter(userId);
+    const gift = await seedHeldLetter(userId, 'gift_letter');
+    // What the two sends consumed, so a return would have something to give back.
+    await seedConsumption(userId, prepaid);
+    const giftSend = await seedGiftConsumption(userId, gift);
+
+    // Held mail alone does not hold the account, as the reader role sees it,
+    // and the preview counts what will be cancelled.
+    expect(await blockersOf(userId)).toEqual(NO_BLOCKERS);
+    const scope = await withReadOnlyTransaction(reader, (client) => erasure.readErasureScope(client, userId));
+    expect(scope.heldMailToCancel).toBe(2);
+
+    // Anything else holding the account leaves the held mail to mail.
+    const { paymentIntent } = await seedPackOrder(userId);
+    const disputeId = await seedDispute({ userId, paymentIntent, resolved: false });
+    expect(await db.transaction((client) => erasure.eraseAccountWithClient(client, userId))).toMatchObject({ outcome: 'blocked' });
+    for (const letterId of [prepaid, gift]) {
+      expect(await mailState(letterId)).toEqual({ letter: 'queued', job: 'pending', resolution: null });
+    }
+
+    // Once that settles, the erasure cancels both and records why.
+    await owner.query(`UPDATE stripe_disputes SET status = 'won', resolved_at = NOW() WHERE dispute_id = $1`, [disputeId]);
+    const outcome = await db.transaction((client) => erasure.eraseAccountWithClient(client, userId));
+    expect(outcome).toMatchObject({ outcome: 'erased', counts: { heldMailCancelled: 2 } });
+    for (const letterId of [prepaid, gift]) {
+      expect(await mailState(letterId)).toEqual({ letter: 'cancelled', job: 'cancelled', resolution: 'account_erased' });
+    }
+    const history = await owner.query(
+      `SELECT letter_id FROM letter_status_history WHERE source = 'erasure' AND letter_id = ANY($1::text[]) ORDER BY letter_id`,
+      [[prepaid, gift]]
+    );
+    expect(history.rows.map((row) => row.letter_id)).toEqual([prepaid, gift].sort());
+    // Nothing went back: no lot, transaction or gift letter returned for either letter.
+    const returned = await owner.query(
+      `SELECT 1 FROM credit_ledger WHERE source_metadata->>'letter_id' = ANY($1::text[])`,
+      [[prepaid, gift]]
+    );
+    expect(returned.rowCount).toBe(0);
+    const refunds = await owner.query(
+      `SELECT 1 FROM credit_transactions WHERE reference_id = ANY($1::text[]) AND type <> 'deduction'`,
+      [[prepaid, gift]]
+    );
+    expect(refunds.rowCount).toBe(0);
+    const giftsBack = await owner.query(
+      `SELECT 1 FROM gift_letters WHERE source = 'send_failed' AND source_reference_id = ANY($1::text[])`,
+      [[prepaid, gift]]
+    );
+    expect(giftsBack.rowCount).toBe(0);
+    const consumedGift = await owner.query<{ status: string }>(`SELECT status FROM gift_letters WHERE gift_id = $1`, [giftSend.giftId]);
+    expect(consumedGift.rows[0].status).toBe('consumed');
+    // The chain code minted for the gift letter's card goes with the unredeemed codes.
+    expect((await owner.query(`SELECT 1 FROM gift_codes WHERE code = $1`, [giftSend.code])).rowCount).toBe(0);
+  }, 60_000);
+
+  it('leaves held mail that is due, and held Pay & Send mail, holding the account (#535)', async () => {
+    const { userId } = await seedUser();
+
+    // Its hold has ended: it goes at the next run, and the account waits for it.
+    // It still carries its hold, so only its due time keeps it out.
+    const due = await seedLetter(userId, 'queued');
+    await seedJob(due, { status: 'pending', outcome: 'not_dispatched', attempts: 0 });
+    await holdJob(due, '-1 hour');
+    expect(await blockersOf(userId)).toMatchObject({ lettersInFlight: 1, jobsInFlight: 1 });
+    expect((await withReadOnlyTransaction(reader, (client) => erasure.readErasureScope(client, userId))).heldMailToCancel).toBe(0);
+    await owner.query("UPDATE letters SET status = 'accepted' WHERE letter_id = $1", [due]);
+    await owner.query("UPDATE letter_jobs SET status = 'completed', provider_outcome = 'accepted' WHERE letter_id = $1", [due]);
+
+    // Pay & Send held mail: a person decides its refund, so it holds the account.
+    const paid = await seedLetter(userId, 'queued');
+    const orderId = await seedJitOrder(userId, 'fulfillment_pending', await seedDraft(userId), paid);
+    await owner.query(
+      "UPDATE letters SET funding_type = 'jit_order', funding_order_id = $2 WHERE letter_id = $1",
+      [paid, orderId]
+    );
+    await seedJob(paid, { status: 'pending', outcome: 'not_dispatched', attempts: 0 });
+    await holdJob(paid);
+    expect(await blockersOf(userId)).toMatchObject({ ordersInFlight: 1, lettersInFlight: 1, jobsInFlight: 1 });
+    expect(await db.transaction((client) => erasure.eraseAccountWithClient(client, userId))).toMatchObject({ outcome: 'blocked' });
+    expect(await mailState(paid)).toEqual({ letter: 'queued', job: 'pending', resolution: null });
+  }, 60_000);
+
+  it('leaves a job scheduled ahead without a hold holding the account (#535)', async () => {
+    const { userId } = await seedUser();
+    // Pending, never attempted and not yet due, but not created as held mail:
+    // only a send with a mail date writes heldUntil.
+    const ahead = await seedLetter(userId, 'queued');
+    await seedJob(ahead, { status: 'pending', outcome: 'not_dispatched', attempts: 0 });
+    await owner.query("UPDATE letter_jobs SET next_attempt_at = NOW() + INTERVAL '10 days' WHERE letter_id = $1", [ahead]);
+    expect(await blockersOf(userId)).toMatchObject({ lettersInFlight: 1, jobsInFlight: 1 });
+    const scope = await withReadOnlyTransaction(reader, (client) => erasure.readErasureScope(client, userId));
+    expect(scope.heldMailToCancel).toBe(0);
+    expect(await db.transaction((client) => erasure.eraseAccountWithClient(client, userId))).toMatchObject({ outcome: 'blocked' });
+    expect(await mailState(ahead)).toEqual({ letter: 'queued', job: 'pending', resolution: null });
+  }, 60_000);
 
   it('reads each kind of money or mail in flight from the reader role, and nothing once it has settled', async () => {
     const cases: Array<{ name: string; seed: (userId: string, settled: boolean) => Promise<void>; key: keyof typeof NO_BLOCKERS }> = [
