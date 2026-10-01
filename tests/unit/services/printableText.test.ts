@@ -318,6 +318,16 @@ describe('text printed in another font (#534)', () => {
     expect(unprintableRefusal('letter', found)).toContain(': a special space (U+205F) in the text.');
   });
 
+  it("names a character by the text's font even where Open Sans would print it", () => {
+    // U+FB00 is on the Open Sans list; a font without it must name its code
+    // point, not call it a cluster with too many marks.
+    const ff = String.fromCodePoint(0xfb00);
+    const found = findUnprintable([
+      { field: 'bodyText', where: 'in the text', text: `sta${ff}`, prints: grapheme => grapheme !== ff }
+    ]);
+    expect(unprintableRefusal('letter', found)).toContain(`: ${ff} (U+FB00) in the text.`);
+  });
+
   it('says a letter carries too many marks when only the whole cluster is refused', () => {
     const acute = String.fromCodePoint(0x301);
     const found = findUnprintable([

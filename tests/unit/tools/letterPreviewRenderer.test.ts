@@ -308,6 +308,17 @@ describe('what the renderer can print', () => {
     );
   });
 
+  it('names a character Open Sans prints but Tinos lacks by its code point, not as too many marks', async () => {
+    // U+FB00, the ff ligature: on the Open Sans list, missing from Tinos.
+    const ff = String.fromCodePoint(0xfb00);
+    await expect(run('text_only', { bodyText: `We will sta${ff} it` })).rejects.toThrow(
+      `can't print some characters in this letter: ${ff} (U+FB00) in the text.`
+    );
+
+    vi.stubEnv('LETTER_IRL_PRINT_RENDERER', 'html');
+    await expect(run('text_only', { bodyText: `We will sta${ff} it` })).resolves.toMatchObject({ draftId: 'draft-1' });
+  });
+
   it('refuses a line separator, which the font draws as a box, and names it (review round 1)', async () => {
     // Apple Notes and Pages store a soft line break as U+2028.
     const lineSeparator = String.fromCodePoint(0x2028);
