@@ -545,6 +545,7 @@ describe('every tool name, for the request log', () => {
     vi.stubEnv('LETTER_IRL_SEND_CONFIRMATION_ENABLED', 'false');
     vi.stubEnv('LETTER_IRL_CARD_UPLOAD_ENABLED', 'false');
     vi.stubEnv('LETTER_IRL_IMAGE_GEN_MODE', 'off');
+    vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', 'false');
     const names = new LetterIrlServer().toolNames();
     for (const name of [
       'create_pack_checkout',
@@ -552,6 +553,7 @@ describe('every tool name, for the request log', () => {
       'generate_image_for_mail',
       'request_send',
       'upload_photo_chunk',
+      'set_arrival_date',
       'send_letter'
     ]) {
       expect(names, name).toContain(name);
@@ -566,6 +568,7 @@ describe('every tool name, for the request log', () => {
       vi.stubEnv('LETTER_IRL_SEND_CONFIRMATION_ENABLED', on);
       vi.stubEnv('LETTER_IRL_CARD_UPLOAD_ENABLED', on);
       vi.stubEnv('LETTER_IRL_IMAGE_GEN_MODE', on === 'true' ? 'on' : 'off');
+      vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', on);
       for (const app of CLIENT_PROFILE_NAMES) {
         for (const tool of new LetterIrlServer().listTools(clientProfileNamed(app))) {
           expect(names.has(tool.name), `${app} ${tool.name}`).toBe(true);

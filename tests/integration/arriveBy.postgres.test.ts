@@ -13,6 +13,10 @@ import { repositoryMigrations, validateDisposableDatabaseUrl } from './support/d
  *   a send copies them to the letter and holds the job until 09:00 New York
  *   time on the mail date: the claim, by id or not, leaves it alone
  *   a send whose mail date has passed is refused before anything is written
+ *   set_arrival_date's update (setDraftSchedule) sets, moves and clears a
+ *   pending draft's dates, leaves alone a draft that is not the caller's,
+ *   sent, expired or held by a live Pay & Send order, and waits for a send
+ *   that holds the draft's row
  *
  * Against real PostgreSQL because the constraints, the DATE type, the job's
  * timestamps and the claim's predicate are the change's whole substance, and
@@ -246,5 +250,120 @@ describePostgres('arrive-by (migration 040, #535)', () => {
     expect(letters.rowCount).toBe(0);
     const credits = (await pool.query('SELECT credits FROM users WHERE user_id = $1', [userId])).rows[0].credits;
     expect(credits).toBe(10);
+  }, 60_000);
+
+  async function datesOf(draftId: string): Promise<[string | null, string | null]> {
+    const row = (await pool.query('SELECT arrive_by, mail_on FROM letter_drafts WHERE draft_id = $1', [draftId])).rows[0];
+    return [row.arrive_by, row.mail_on];
+  }
+
+  async function seedPayAndSend(userId: string, draftId: string, status: string, expiresIn: string): Promise<string> {
+    const orderId = `order-${randomUUID()}`;
+    await pool.query(
+      `INSERT INTO orders (order_id, user_id, credits, amount_cents, currency, status, order_type, product_code,
+         idempotency_key, draft_id, checkout_expires_at)
+       VALUES ($1, $2, NULL, 499, 'USD', $3, 'jit_mail', 'jit-letter', $4, $5, NOW() + $6::interval)`,
+      [orderId, userId, status, `idem_${orderId}`, draftId, expiresIn]
+    );
+    return orderId;
+  }
+
+  it("sets, moves and clears a pending draft's dates, and a send then holds to them", async () => {
+    const userId = await seedUser();
+    const draftId = await seedDraft(userId);
+    const dates = upcoming();
+    const moved = { arriveBy: schedule.addCalendarDays(dates.arriveBy, 7), mailOn: schedule.mailOnFor(schedule.addCalendarDays(dates.arriveBy, 7), 7) };
+
+    await expect(drafts.setDraftSchedule(draftId, userId, dates)).resolves.toBeNull();
+    expect(await datesOf(draftId)).toEqual([dates.arriveBy, dates.mailOn]);
+    await expect(drafts.setDraftSchedule(draftId, userId, moved)).resolves.toBeNull();
+    expect(await datesOf(draftId)).toEqual([moved.arriveBy, moved.mailOn]);
+    await expect(drafts.setDraftSchedule(draftId, userId, null)).resolves.toBeNull();
+    expect(await datesOf(draftId)).toEqual([null, null]);
+
+    // The send reads the dates the draft has when it is sent.
+    await expect(drafts.setDraftSchedule(draftId, userId, dates)).resolves.toBeNull();
+    const result = await mailSend.createMailOrderFromDraft({ draftId, userId, mailType: 'letter' });
+    const letter = (await pool.query('SELECT arrive_by, mail_on FROM letters WHERE letter_id = $1', [result.letter.letter_id])).rows[0];
+    expect([letter.arrive_by, letter.mail_on]).toEqual([dates.arriveBy, dates.mailOn]);
+  }, 60_000);
+
+  it("leaves alone a draft that is not the caller's, missing, sent or past its expiry", async () => {
+    const userId = await seedUser();
+    const stranger = await seedUser();
+    const dates = upcoming();
+
+    const draftId = await seedDraft(userId);
+    await expect(drafts.setDraftSchedule(draftId, stranger, dates)).resolves.toBe('not_found');
+    await expect(drafts.setDraftSchedule(randomUUID(), userId, dates)).resolves.toBe('not_found');
+    await pool.query("UPDATE letter_drafts SET expires_at = NOW() - INTERVAL '1 minute' WHERE draft_id = $1", [draftId]);
+    await expect(drafts.setDraftSchedule(draftId, userId, dates)).resolves.toBe('expired');
+    expect(await datesOf(draftId)).toEqual([null, null]);
+
+    const sent = await seedDraft(userId);
+    await mailSend.createMailOrderFromDraft({ draftId: sent, userId, mailType: 'letter' });
+    await expect(drafts.setDraftSchedule(sent, userId, dates)).resolves.toBe('sent');
+    expect(await datesOf(sent)).toEqual([null, null]);
+  }, 60_000);
+
+  it('leaves alone a draft with a live Pay & Send order, but not one whose checkout can no longer be paid', async () => {
+    const userId = await seedUser();
+    const draftId = await seedDraft(userId);
+    const dates = upcoming();
+
+    const orderId = await seedPayAndSend(userId, draftId, 'checkout_pending', '20 minutes');
+    await expect(drafts.setDraftSchedule(draftId, userId, dates)).resolves.toBe('checkout_pending');
+    expect(await datesOf(draftId)).toEqual([null, null]);
+
+    // The checkout's window has passed: nothing can pay it now.
+    await pool.query("UPDATE orders SET checkout_expires_at = NOW() - INTERVAL '1 minute' WHERE order_id = $1", [orderId]);
+    await expect(drafts.setDraftSchedule(draftId, userId, dates)).resolves.toBeNull();
+    expect(await datesOf(draftId)).toEqual([dates.arriveBy, dates.mailOn]);
+
+    // Paid, and every other live state, whatever the window.
+    for (const status of ['paid', 'fulfillment_pending', 'refund_pending', 'disputed', 'held']) {
+      await pool.query('UPDATE orders SET status = $2::varchar WHERE order_id = $1', [orderId, status]);
+      await expect(drafts.setDraftSchedule(draftId, userId, null), status).resolves.toBe('checkout_pending');
+    }
+    // Over: a refunded order no longer fixes them.
+    await pool.query("UPDATE orders SET status = 'refunded' WHERE order_id = $1", [orderId]);
+    await expect(drafts.setDraftSchedule(draftId, userId, null)).resolves.toBeNull();
+    expect(await datesOf(draftId)).toEqual([null, null]);
+  }, 60_000);
+
+  it("waits for a send that holds the draft's row, then finds it sent", async () => {
+    const userId = await seedUser();
+    const draftId = await seedDraft(userId);
+    const holder = await pool.connect();
+    let open = false;
+    try {
+      await holder.query('BEGIN');
+      open = true;
+      await holder.query('SELECT 1 FROM letter_drafts WHERE draft_id = $1 FOR UPDATE', [draftId]);
+      const change = drafts.setDraftSchedule(draftId, userId, upcoming());
+
+      // Proven waiting on the lock, not merely late, before the holder commits.
+      let waiting = false;
+      for (let attempt = 0; attempt < 50 && !waiting; attempt += 1) {
+        const blocked = await pool.query(
+          `SELECT count(*)::int AS n FROM pg_stat_activity
+           WHERE wait_event_type = 'Lock' AND query LIKE '%FROM letter_drafts WHERE draft_id = $1 AND user_id = $2 FOR UPDATE%'`
+        );
+        waiting = blocked.rows[0].n > 0;
+        if (!waiting) await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      expect(waiting).toBe(true);
+
+      await holder.query("UPDATE letter_drafts SET status = 'consumed' WHERE draft_id = $1", [draftId]);
+      await holder.query('COMMIT');
+      open = false;
+      await expect(change).resolves.toBe('sent');
+      expect(await datesOf(draftId)).toEqual([null, null]);
+    } finally {
+      // A failure above leaves the row lock held: roll back, so the waiting
+      // change ends and the pool gets its client back with no transaction.
+      if (open) await holder.query('ROLLBACK').catch(() => undefined);
+      holder.release();
+    }
   }, 60_000);
 });

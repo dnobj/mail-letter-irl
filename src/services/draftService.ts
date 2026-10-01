@@ -14,6 +14,7 @@ import type {
   CreateDraftResult,
   ConsumeDraftParams,
   ConsumeDraftResult,
+  DraftSchedule,
   PostcardDraft,
   CreatePostcardDraftParams,
   CreatePostcardDraftResult,
@@ -368,6 +369,83 @@ export async function cancelDraft(draftId: string, userId: string): Promise<bool
   }
 
   return cancelled;
+}
+
+// ============================================================================
+// Arrival Dates
+// ============================================================================
+
+/**
+ * The Pay & Send orders that fix a draft's dates: any live one, as migration
+ * 023's idx_orders_active_jit_draft_unique counts them (commerceService's
+ * ACTIVE_JIT_STATUSES, which a test holds this to). Payment sends the mail
+ * with the dates the draft has, so they do not move under it.
+ */
+export const LIVE_PAY_AND_SEND_STATUSES = [
+  'checkout_pending',
+  'paid',
+  'fulfillment_pending',
+  'refund_pending',
+  'disputed',
+  'held',
+] as const;
+
+/** Why a draft's arrival date was left as it was (setDraftSchedule). */
+export type DraftScheduleRefusal = 'not_found' | 'sent' | 'expired' | 'checkout_pending';
+
+/**
+ * Sets, moves or clears a draft's arrival dates (#535, set_arrival_date):
+ * only a draft that is the caller's, still pending and unexpired, with no live
+ * Pay & Send order but a checkout whose window has passed, which can no
+ * longer be paid. The dates were checked by the caller.
+ *
+ * The draft row is locked first, as the send (mailSendService) and the Pay &
+ * Send checkout (commerceService) lock it before they read its dates, so this
+ * and either of them run one after the other. A send or checkout that goes
+ * first leaves this refused ('sent', 'checkout_pending'); one that goes second
+ * reads the new dates.
+ *
+ * Returns the refusal, or null once the dates are written. Someone else's
+ * draft is refused as a missing one, and is not locked.
+ */
+export async function setDraftSchedule(
+  draftId: string,
+  userId: string,
+  schedule: DraftSchedule | null,
+  now: Date = new Date()
+): Promise<DraftScheduleRefusal | null> {
+  return transaction(async client => {
+    const locked = await client.query<Pick<LetterDraft, 'status' | 'expires_at'>>(
+      'SELECT status, expires_at FROM letter_drafts WHERE draft_id = $1 AND user_id = $2 FOR UPDATE',
+      [draftId, userId]
+    );
+    const draft = locked.rows[0];
+    if (!draft) return 'not_found';
+    if (draft.status === 'consumed') return 'sent';
+    if (draft.status !== 'pending' || !(new Date(draft.expires_at).getTime() > now.getTime())) {
+      return 'expired';
+    }
+
+    const live = await client.query(
+      `SELECT 1 FROM orders
+       WHERE draft_id = $1
+         AND order_type = 'jit_mail'
+         AND status = ANY($2::varchar[])
+         AND (status <> 'checkout_pending' OR checkout_expires_at IS NULL OR checkout_expires_at > NOW())
+       LIMIT 1`,
+      [draftId, [...LIVE_PAY_AND_SEND_STATUSES]]
+    );
+    if (live.rows[0]) return 'checkout_pending';
+
+    await client.query(
+      `UPDATE letter_drafts
+       SET arrive_by = $2::date, mail_on = $3::date, updated_at = NOW()
+       WHERE draft_id = $1`,
+      [draftId, schedule?.arriveBy ?? null, schedule?.mailOn ?? null]
+    );
+    writeDiagnostic('info', 'draft.schedule_set', { scheduled: schedule !== null });
+    return null;
+  });
 }
 
 // ============================================================================

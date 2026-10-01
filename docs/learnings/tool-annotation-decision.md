@@ -180,7 +180,9 @@ Still non-destructive, with the reasoning: `redeem_promo_code` spends a code but
 for the customer; `generate_image_for_mail` consumes one generation and produces an image;
 `confirm_uploaded_image` overwrites only a pointer to the customer's latest upload;
 `submit_feature_request` and `upload_image` create records. The quote and preview tools create
-drafts that expire on their own.
+drafts that expire on their own, and `set_arrival_date` (#535, listed only while arrival dates are
+on) changes only such a draft's dates; it sends nothing, and the same date twice changes nothing
+more, so it is also idempotent.
 
 The `confirm: true` requirement on the send tools and the transactional idempotency (a consumed
 draft cannot be sent twice) remain the safeguards to describe in the justification. They are not a

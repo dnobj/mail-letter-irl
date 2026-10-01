@@ -41,6 +41,8 @@ import {
   getDraft,
   markExpiredDrafts,
   cancelDraft,
+  setDraftSchedule,
+  LIVE_PAY_AND_SEND_STATUSES,
 } from '../../../src/services/draftService.js';
 
 describe('draftService', () => {
@@ -589,6 +591,80 @@ describe('draftService', () => {
       const result = await cancelDraft('draft-123', testUsers.sarah.user_id);
 
       expect(result).toBe(false);
+    });
+  });
+
+  // ==========================================================================
+  // setDraftSchedule Tests (#535, set_arrival_date)
+  // ==========================================================================
+  describe('setDraftSchedule', () => {
+    const NOW = new Date('2026-10-01T14:00:00Z');
+    const DATES = { arriveBy: '2026-10-16', mailOn: '2026-10-06' };
+    const pending = { status: 'pending', expires_at: new Date('2026-10-02T09:00:00Z') };
+
+    /** A transaction whose statements answer in turn; the client is returned to read its calls. */
+    function inTransaction(...answers: Array<{ rows: unknown[] }>) {
+      const client = { query: vi.fn() };
+      for (const answer of answers) client.query.mockResolvedValueOnce(answer);
+      client.query.mockResolvedValue({ rows: [], rowCount: 1 });
+      vi.mocked(db.transaction).mockImplementation(async callback => callback(client as any));
+      return client;
+    }
+
+    it("locks the caller's draft, finds no live Pay & Send order, and writes the dates as DATE parameters", async () => {
+      const client = inTransaction({ rows: [pending] }, { rows: [] });
+
+      await expect(setDraftSchedule('draft-1', 'auth0|owner', DATES, NOW)).resolves.toBeNull();
+
+      const [lock, live, update] = client.query.mock.calls as Array<[string, unknown[]]>;
+      expect(lock[0]).toMatch(/FROM letter_drafts WHERE draft_id = \$1 AND user_id = \$2 FOR UPDATE/);
+      expect(lock[1]).toEqual(['draft-1', 'auth0|owner']);
+      expect(live[0]).toMatch(/FROM orders/);
+      expect(live[0]).toMatch(/order_type = 'jit_mail'/);
+      expect(live[0]).toMatch(/status = ANY\(\$2::varchar\[\]\)/);
+      // A checkout whose window has passed can no longer be paid.
+      expect(live[0]).toMatch(/status <> 'checkout_pending' OR checkout_expires_at IS NULL OR checkout_expires_at > NOW\(\)/);
+      expect(live[1]).toEqual(['draft-1', [...LIVE_PAY_AND_SEND_STATUSES]]);
+      expect(update[0]).toMatch(/UPDATE letter_drafts\s+SET arrive_by = \$2::date, mail_on = \$3::date, updated_at = NOW\(\)\s+WHERE draft_id = \$1/);
+      expect(update[1]).toEqual(['draft-1', '2026-10-16', '2026-10-06']);
+      expect(client.query).toHaveBeenCalledTimes(3);
+    });
+
+    it('clears the dates with NULLs', async () => {
+      const client = inTransaction({ rows: [pending] }, { rows: [] });
+
+      await expect(setDraftSchedule('draft-1', 'auth0|owner', null, NOW)).resolves.toBeNull();
+
+      expect(client.query.mock.calls[2][1]).toEqual(['draft-1', null, null]);
+    });
+
+    it.each([
+      ['a missing draft, or one that is not the caller\'s', [], 'not_found'],
+      ['a sent draft', [{ ...pending, status: 'consumed' }], 'sent'],
+      ['an expired draft', [{ ...pending, status: 'expired' }], 'expired'],
+      ['a cancelled draft', [{ ...pending, status: 'cancelled' }], 'expired'],
+      ['a pending draft past its expiry', [{ ...pending, expires_at: new Date('2026-10-01T14:00:00Z') }], 'expired']
+    ])('leaves %s alone, reading nothing more', async (_label, rows, refusal) => {
+      const client = inTransaction({ rows });
+
+      await expect(setDraftSchedule('draft-1', 'auth0|owner', DATES, NOW)).resolves.toBe(refusal);
+
+      expect(client.query).toHaveBeenCalledTimes(1);
+    });
+
+    it('leaves a draft with a live Pay & Send order alone', async () => {
+      const client = inTransaction({ rows: [pending] }, { rows: [{ '?column?': 1 }] });
+
+      await expect(setDraftSchedule('draft-1', 'auth0|owner', DATES, NOW)).resolves.toBe('checkout_pending');
+
+      expect(client.query).toHaveBeenCalledTimes(2);
+    });
+
+    it('reads the expiry against the clock it is given', async () => {
+      inTransaction({ rows: [pending] }, { rows: [] });
+      await expect(setDraftSchedule('draft-1', 'auth0|owner', DATES, new Date('2026-10-02T08:59:59Z'))).resolves.toBeNull();
+      inTransaction({ rows: [pending] });
+      await expect(setDraftSchedule('draft-1', 'auth0|owner', DATES, new Date('2026-10-02T09:00:00Z'))).resolves.toBe('expired');
     });
   });
 });

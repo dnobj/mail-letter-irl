@@ -1,5 +1,5 @@
 import { JsonSchema } from "./contracts/types.js";
-import { ARRIVE_BY_DESCRIPTION } from "./zodSchemas.js";
+import { ARRIVE_BY_DESCRIPTION, SET_ARRIVE_BY_DESCRIPTION } from "./zodSchemas.js";
 
 /** Arrive-by (#535): the preview's input, and what its output says. */
 const arriveBySchema = { type: "string", description: ARRIVE_BY_DESCRIPTION } as const;
@@ -801,6 +801,30 @@ export const requestSendOutputSchema: JsonSchema = {
         state: { type: "string" }
       }
     }
+  }
+};
+
+/** A preview's arrival date, changed without previewing again (#535). */
+export const setArrivalDateInputSchema: JsonSchema = {
+  type: "object",
+  required: ["draftId"],
+  properties: {
+    draftId: { type: "string", description: "The draftId from a letter or postcard preview" },
+    arriveBy: { type: "string", description: SET_ARRIVE_BY_DESCRIPTION }
+  }
+};
+
+export const setArrivalDateOutputSchema: JsonSchema = {
+  type: "object",
+  required: ["draftId", "deliveryEstimate", "message"],
+  properties: {
+    draftId: { type: "string" },
+    schedule: {
+      ...previewScheduleSchema,
+      description: "The draft's dates now; absent when it mails as soon as it is sent"
+    },
+    deliveryEstimate: { type: "string" },
+    message: { type: "string" }
   }
 };
 

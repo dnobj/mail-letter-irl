@@ -23,7 +23,9 @@ describe("tool scope enforcement", () => {
     ["create_mail_checkout", "mail:send"],
     ["send_letter", "mail:send"],
     // The preview card's read of its own draft (#474).
-    ["get_draft_status", "mail:read"]
+    ["get_draft_status", "mail:read"],
+    // A preview's arrival date, changed (#535): drafting, and it sends nothing.
+    ["set_arrival_date", "mail:draft"]
   ])("maps %s to %s in metadata and runtime", (toolName, scope) => {
     expect(getRequiredToolScopes(toolName)).toEqual([scope]);
     expect(() => authorizeTool(toolName, jwt([scope]), true)).not.toThrow();
