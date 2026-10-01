@@ -68,8 +68,11 @@ function pngBytes(width: number, height: number): Buffer {
 }
 
 describe('LetterPreviewCard: the page as it prints', () => {
-  it('keeps everything a real page draws, its image and stamp too, with only ids and outline links prefixed', () => {
-    const image = { bytes: pngBytes(1950, 900), mime: 'image/png' as const, width: 1950, height: 900 };
+  // Every production image letter's preview carries a JPEG (imageService's
+  // small copy); PNG is the other type the renderer reads (#542 review round 3).
+  it.each(['image/jpeg', 'image/png'] as const)('keeps everything a real page draws, its %s image and stamp too, with only ids and outline links prefixed', mime => {
+    // The renderer embeds the bytes it is given under the type it is told.
+    const image = { bytes: pngBytes(1950, 900), mime, width: 1950, height: 900 };
     const source = renderLetterPreviewDocument(
       renderPreviewSvg(
         layoutLetter({ text: 'Dear Sam,\nThe picture is below.\nPat', layoutType: 'inline_image', image }),
@@ -93,7 +96,7 @@ describe('LetterPreviewCard: the page as it prints', () => {
     });
     // What the comparison covered: outlines with negative numbers, the image, the stamp.
     expect(before.some(element => element.localName === 'path' && /-\d/.test(element.getAttribute('d') ?? ''))).toBe(true);
-    expect(shown.querySelector('image')!.getAttribute('href')).toMatch(/^data:image\/png;base64,/);
+    expect(shown.querySelector('image')!.getAttribute('href')!.startsWith(`data:${mime};base64,`)).toBe(true);
     expect(shown.querySelector('image')!.getAttribute('preserveAspectRatio')).toBe('none');
     expect(shown.querySelectorAll('text')).toHaveLength(7);
   });
