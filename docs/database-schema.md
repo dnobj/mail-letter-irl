@@ -756,7 +756,7 @@ Production provisioning and the first production connection remain separate owne
 | 38 | 038_daily_limits.sql | The daily limits' operator values, refusal counts and the API's configured values, and the `daily_limit_reached` alert type. Re-run admin provisioning after it |
 | 39 | 039_renderer_version.sql | `letter_drafts.renderer_version`: the renderer that drew a draft's preview, NULL or `pdf-1` (#534). The reader role's column grants leave it out, and the operator role's table-wide SELECT covers it; no provisioning re-run |
 | 40 | 040_arrive_by.sql | `arrive_by` and `mail_on` on `letter_drafts` and `letters`: mail held to arrive by a date (#535), with the pair and order CHECKs and `idx_letters_held_mail_on`. DATEs are read as 'YYYY-MM-DD' strings (`src/db/dateParser.ts`). No provisioning re-run, as for 039 |
-| 41 | 041_missed_mail_day_alert.sql | The `schedule_missed_mail_day` alert type (#535), restated inside the `to_regclass` guard as 038 does. No provisioning re-run: the roles read the alerts table whole |
+| 41 | 041_missed_mail_day_alert.sql | The `schedule_missed_mail_day` alert type (#535), restated inside the `to_regclass` guard as 038 does, and a partial unique index on its letter (`idx_commerce_alerts_missed_mail_day_letter`) so it is raised once per letter. No provisioning re-run: the roles read the alerts table whole |
 
 ---
 

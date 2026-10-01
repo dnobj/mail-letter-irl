@@ -161,8 +161,8 @@ ${input.mode !== "full" ? html`<p class="muted">Read-only mode: previews work, e
 <h2>Letters stuck in a non-terminal status for 14+ days</h2>
 ${table(
   "Stuck letters",
-  ["Letter", "Status", "Created", "Days"],
-  input.stuck.map((letter) => [letterLink(letter.letterId), statusBadge(letter.status), when(letter.createdAt), html`${letter.daysInStatus}`]),
+  ["Letter", "Status", "Mailed", "Days"],
+  input.stuck.map((letter) => [letterLink(letter.letterId), statusBadge(letter.status), when(letter.mailedAt), html`${letter.daysInStatus}`]),
   "none.",
 )}`;
 }

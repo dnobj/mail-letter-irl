@@ -628,8 +628,9 @@ describePostgres('arrive-by (migration 040, #535)', () => {
   it("raises one alert for held mail not at the printer by 18:00 on its mail date, and none for mail that is", async () => {
     const userId = await seedUser();
     const late = randomUUID();
+    const failed = randomUUID();
     const mailed = randomUUID();
-    for (const [letterId, status] of [[late, 'queued'], [mailed, 'accepted']] as const) {
+    for (const [letterId, status] of [[late, 'queued'], [failed, 'failed'], [mailed, 'accepted']] as const) {
       await pool.query(
         `INSERT INTO letters (letter_id, user_id, content, recipient, credits_cost, status, mail_type,
            funding_type, arrive_by, mail_on)
@@ -638,17 +639,30 @@ describePostgres('arrive-by (migration 040, #535)', () => {
       );
     }
 
-    // Every other letter in this file mails on a date still to come.
-    await expect(held.raiseMissedMailDayAlerts()).resolves.toBe(1);
+    // Every other letter in this file mails on a date still to come. A
+    // failed one missed its day as surely as a queued one.
+    await expect(held.raiseMissedMailDayAlerts()).resolves.toBe(2);
     const alerts = await pool.query(
-      "SELECT order_id, severity, status, details FROM commerce_operational_alerts WHERE alert_type = 'schedule_missed_mail_day'"
+      "SELECT order_id, severity, status, details FROM commerce_operational_alerts WHERE alert_type = 'schedule_missed_mail_day' ORDER BY details->>'letterId'"
     );
-    expect(alerts.rows).toEqual([
-      { order_id: null, severity: 'warning', status: 'open', details: { letterId: late, mailOn: '2020-01-02' } }
-    ]);
+    expect(alerts.rows).toEqual(
+      [late, failed].sort().map(letterId => ({
+        order_id: null,
+        severity: 'warning',
+        status: 'open',
+        details: { letterId, mailOn: '2020-01-02' }
+      }))
+    );
 
-    // Once per letter.
+    // Once per letter, and the index refuses a second even past the check.
     await expect(held.raiseMissedMailDayAlerts()).resolves.toBe(0);
+    await expect(
+      pool.query(
+        `INSERT INTO commerce_operational_alerts (alert_type, severity, details)
+         VALUES ('schedule_missed_mail_day', 'warning', jsonb_build_object('letterId', $1::text))`,
+        [late]
+      )
+    ).rejects.toMatchObject({ code: '23505' });
   }, 60_000);
 
   it("does not call a held letter's Pay & Send order stuck until 90 minutes after its hold ends", async () => {

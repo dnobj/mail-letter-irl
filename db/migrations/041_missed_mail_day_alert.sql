@@ -5,7 +5,8 @@
 -- on its mail date (040). If it has still not been accepted by the printer at
 -- 18:00 that day (dispatch paused, the provider down, retries running out),
 -- the hourly maintenance raises 'schedule_missed_mail_day', one per letter
--- (scheduledMailService.raiseMissedMailDayAlerts).
+-- (scheduledMailService.raiseMissedMailDayAlerts). A partial unique index on
+-- the letter keeps it one per letter even if two runs overlap.
 --
 -- commerce_operational_alerts is a 023 object, so this sits in a DO block
 -- guarded through to_regclass: the commerce ACID legacy replay runs every
@@ -31,5 +32,8 @@ BEGIN
           'schedule_missed_mail_day'
         )
       );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_commerce_alerts_missed_mail_day_letter
+      ON commerce_operational_alerts ((details->>'letterId'))
+      WHERE alert_type = 'schedule_missed_mail_day';
   END IF;
 END $$;

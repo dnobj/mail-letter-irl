@@ -35,6 +35,7 @@ describe('the admin panel\'s stuck letters (#535)', () => {
     const client = { query: vi.fn().mockResolvedValue({ rows: [] }) };
     await listStuckLetters(client as never, 14, 50);
     const [sql, params] = client.query.mock.calls[0] as [string, unknown[]];
+    expect(flat(sql)).toContain('COALESCE(sent_at, created_at) AS mailed_at');
     expect(flat(sql)).toContain('EXTRACT(DAY FROM NOW() - COALESCE(sent_at, created_at))::int AS days');
     expect(flat(sql)).toContain('AND COALESCE(sent_at, created_at) < NOW() - make_interval(days => $1::int)');
     expect(params).toEqual([14, 50]);

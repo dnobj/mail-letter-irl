@@ -24,10 +24,14 @@ export const MISSED_MAIL_DAY_ALERT = 'schedule_missed_mail_day';
 
 /**
  * Held mail that missed its mail day (#535): a letter with a mail date, not
- * yet at the printer (queued, or taken and not accepted) at 18:00 New York
- * time that day, because dispatch was paused, the provider was down or its
- * retries ran out. Raises one operator alert per letter, ever, and logs
- * schedule.missed_mail_day with how many were new.
+ * at the printer at 18:00 New York time that day: still queued (dispatch
+ * paused, the provider down), taken and not accepted, or failed (its retries
+ * ran out, or the provider refused it). Raises one operator alert per letter,
+ * ever, and logs schedule.missed_mail_day with how many were new. A letter
+ * held after an ambiguous dispatch is left out: it has its own critical alert.
+ *
+ * Once per letter: NOT EXISTS, with a partial unique index behind it (041)
+ * and ON CONFLICT DO NOTHING, so two runs at once still raise one.
  *
  * Run hourly by maintenance, after the outbox. Never throws: a task that
  * throws there skips every task after it, so a failure is logged instead.
@@ -41,7 +45,7 @@ export async function raiseMissedMailDayAlerts(): Promise<number> {
               jsonb_build_object('letterId', held.letter_id, 'mailOn', held.mail_on::text)
          FROM letters held
         WHERE held.mail_on IS NOT NULL
-          AND held.status IN ('queued', 'processing')
+          AND held.status IN ('queued', 'processing', 'failed')
           AND (held.mail_on + TIME '18:00') AT TIME ZONE 'America/New_York' < NOW()
           AND NOT EXISTS (
             SELECT 1 FROM commerce_operational_alerts seen
@@ -50,6 +54,7 @@ export async function raiseMissedMailDayAlerts(): Promise<number> {
           )
         ORDER BY held.mail_on
         LIMIT 100
+       ON CONFLICT DO NOTHING
        RETURNING alert_id`,
       [MISSED_MAIL_DAY_ALERT]
     );

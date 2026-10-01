@@ -224,10 +224,12 @@ describe('raiseMissedMailDayAlerts (#535)', () => {
     expect(flat).toContain("SELECT held.funding_order_id, $1::varchar, 'warning'");
     expect(flat).toContain("jsonb_build_object('letterId', held.letter_id, 'mailOn', held.mail_on::text)");
     expect(flat).toContain('held.mail_on IS NOT NULL');
-    expect(flat).toContain("held.status IN ('queued', 'processing')");
+    // Failed too: its retries ran out, or the provider refused it.
+    expect(flat).toContain("held.status IN ('queued', 'processing', 'failed')");
     expect(flat).toContain("(held.mail_on + TIME '18:00') AT TIME ZONE 'America/New_York' < NOW()");
-    // Once per letter, ever.
+    // Once per letter, ever, even when two runs overlap (041's unique index).
     expect(flat).toContain("NOT EXISTS ( SELECT 1 FROM commerce_operational_alerts seen WHERE seen.alert_type = $1::varchar AND seen.details->>'letterId' = held.letter_id )");
+    expect(flat).toContain('LIMIT 100 ON CONFLICT DO NOTHING RETURNING alert_id');
   });
 
   it('raises nothing quietly when nothing is late', async () => {

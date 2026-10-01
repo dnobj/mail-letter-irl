@@ -401,8 +401,8 @@ limit here if everything looks right, or leave it. Resolve the alert with a code
 
 A `schedule_missed_mail_day` alert (warning, #535) names a letter held to arrive by a date that was still not at the
 printer at 18:00 New York time on its mail date, with that date. Check whether the outbox is paused, the provider is
-down, or the letter's job ran out of retries (the job page), and put that right; the next hourly run sends it if its
-job is still due. Resolve the alert with a code such as `dispatched_late` once it has gone, or `customer_contacted`.
+down, or the letter failed: its job ran out of retries or the provider refused it (the job page). Put that right; the
+next hourly run sends it if its job is still due. Resolve the alert with a code such as `dispatched_late` once it has gone, or `customer_contacted`.
 
 Accounts without an email address (issue #319) cannot be listed until `users.email` becomes nullable or a
 provisioning-failure record exists; the panel shows only rows that exist.
