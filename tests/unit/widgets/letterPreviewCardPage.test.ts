@@ -131,8 +131,13 @@ describe('LetterPreviewCard: the page as it prints', () => {
   });
 
   it('keeps the mockup for a document without the renderer mark, even with an SVG in it', () => {
-    // A legacy gift preview carries the card page as an SVG.
-    const dom = mount(`<body>${'<svg viewBox="0 0 10 10"><rect width="10" height="10"/></svg>'}${LEGACY}</body>`);
+    // A legacy gift preview carries the card page as an SVG. Here one sits
+    // right under the body, beside text that names the mark: only the body's
+    // own attribute makes a document a renderer page.
+    const dom = mount(
+      `<body><svg viewBox="0 0 10 10"><rect width="10" height="10"/></svg>` +
+      `<div class="letter-body">My letter says data-renderer="pdf-1"</div><div class="sign-off">Bye</div></body>`
+    );
     const container = dom.window.document.getElementById('mockup-container')!;
     expect(container.querySelector('.letter-page')).toBeNull();
     expect(container.querySelector('.letter-mockup')).not.toBeNull();
