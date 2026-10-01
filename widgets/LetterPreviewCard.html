@@ -94,6 +94,8 @@
       .arrives-controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:flex-end}
       .arrives-controls input[type=date]{font:inherit;font-size:12px;color:var(--tx);background:var(--sf);border:1px solid var(--bd);border-radius:6px;padding:2px 6px}
       .arrives-controls input[type=date]:disabled{opacity:.6}
+      /* The Style row (#563) */
+      .style-controls{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;justify-content:flex-end}
       .link-button{font:inherit;font-size:11.5px;background:none;border:none;padding:0;color:var(--mut);text-decoration:underline;cursor:pointer}
       .link-button[aria-pressed=true],.link-button:disabled{color:var(--tx);text-decoration:none;cursor:default}
       .note.alert{color:var(--er);background:var(--erbg);border-color:transparent}
@@ -146,6 +148,17 @@
               <button type="button" class="link-button" id="arrives-asap" aria-pressed="true">As soon as possible</button>
             </span>
           </div>
+          <!-- Stationery (#563): shown while the preview names its stationery
+               and this card can change it. widgets/shared/style.js draws it. -->
+          <div class="info-row" id="style-row" style="display: none">
+            <span class="info-label" id="style-label">Style</span>
+            <span class="info-value style-controls" role="group" aria-labelledby="style-label">
+              <button type="button" class="link-button" data-theme="classic" aria-pressed="false">Classic</button>
+              <button type="button" class="link-button" data-theme="monogram" aria-pressed="false">Monogram</button>
+              <button type="button" class="link-button" data-theme="botanical" aria-pressed="false">Botanical</button>
+              <button type="button" class="link-button" data-theme="celebration" aria-pressed="false">Celebration</button>
+            </span>
+          </div>
           <div class="info-row">
             <span class="info-label">Status</span>
             <span class="status-pill" id="status-pill">Loading...</span>
@@ -156,6 +169,7 @@
           </div>
         </div>
         <div class="note" id="arrives-note" style="display: none" aria-live="polite"></div>
+        <div class="note" id="style-note" style="display: none" aria-live="polite"></div>
         <div class="note" id="note" style="display: none"></div>
         <!-- Shown when no result arrived (#411), or for a reopened card that
              already sent its letter or started a checkout. -->
@@ -245,12 +259,13 @@
           style="display: none"
         ></div>
       </div>
-      <p class="rev">letter t31</p>
+      <p class="rev">letter t32</p>
     </div>
 
     <!-- letter-irl:host -->
     <!-- letter-irl:pages -->
     <!-- letter-irl:arrives -->
+    <!-- letter-irl:style -->
     <script type="module">
       // The card talks to its host only through window.letterIrlHost
       // (widgets/shared/host.js, #474): window.openai in ChatGPT, MCP Apps in
@@ -332,6 +347,34 @@
           const statusPill = document.getElementById("status-pill");
           statusPill.classList.remove("ok", "alert");
           statusPill.textContent = "Cancelled";
+        },
+      });
+
+      // ---- Stationery (#563) -----------------------------------------------
+      //
+      // The Style row changes the draft's stationery through set_stationery,
+      // which answers with the page drawn again; the card shows that page in
+      // place of the preview's. It lives in widgets/shared/style.js; this card
+      // tells it what to draw, and redraws when it changes something.
+      const styleRow = window.letterIrlStyle.createStyle({
+        host,
+        row: document.getElementById("style-row"),
+        buttons: Array.from(document.querySelectorAll("#style-row [data-theme]")),
+        note: document.getElementById("style-note"),
+        readableError,
+        resultText,
+        // Not while this card sends the letter or starts paying for it.
+        idle() {
+          return !sendInProgress && !checkoutInProgress;
+        },
+        onSet() {
+          draftActedOn = true;
+        },
+        onChange() {
+          render();
+        },
+        onBusy() {
+          render();
         },
       });
 
@@ -1312,8 +1355,14 @@
         container.appendChild(view);
       }
 
+      // The preview's page as this card shows it: the one the Style row set
+      // for this draft (#563), or the preview's own.
+      function shownPreviewHtml(state) {
+        return styleRow.previewHtml(currentDraftId) ?? currentMeta().previewHtml ?? state.previewHtml;
+      }
+
       function renderLetterMockup(state) {
-        const pages = renderedPages(currentMeta().previewHtml ?? state.previewHtml);
+        const pages = renderedPages(shownPreviewHtml(state));
         if (pages) {
           renderLetterPage(state, pages);
           return;
@@ -1331,7 +1380,7 @@
 
         // Attempt to parse from previewHtml if direct fields not available
         const meta = currentMeta();
-        const previewHtml = meta.previewHtml ?? state.previewHtml;
+        const previewHtml = shownPreviewHtml(state);
         if (previewHtml) {
           // Try to extract body
           const bodyMatch = previewHtml.match(
@@ -1670,12 +1719,19 @@
           state,
           cardIsShowingDraft() && !checkoutInProgress && !settled && !sendPageShown(),
         );
+        // The Style row, on the same terms (#563).
+        styleRow.show(
+          draftId,
+          state,
+          cardIsShowingDraft() && !checkoutInProgress && !settled && !sendPageShown(),
+        );
         if (cardIsShowingDraft() && (sentOrder === "scheduled" || sentOrder === "cancelled")) {
           scheduled.show(settled.orderId, settled.schedule, sentOrder === "cancelled", settled.cancellable);
         } else if (cardIsShowingDraft()) {
           scheduled.hide();
         }
-        const settingDate = picker.busy();
+        // Either row setting something on the draft holds the Send buttons.
+        const settingDate = picker.busy() || styleRow.busy();
         const datedSend = Boolean(picker.schedule());
 
         if (!sendInProgress && !checkoutInProgress) {
@@ -1750,7 +1806,7 @@
 
       // Handle send button click - US-MCP-08
       async function handleSend() {
-        if (sendInProgress || !currentDraftId || picker.busy()) return;
+        if (sendInProgress || !currentDraftId || picker.busy() || styleRow.busy()) return;
         draftActedOn = true;
 
         const sendButton = document.getElementById("send-button");
@@ -1820,6 +1876,7 @@
             sendButton.classList.remove("loading");
             sendButtonText.innerHTML = "Letter Scheduled";
             picker.hide();
+            styleRow.hide();
             scheduled.show(orderId, sentSchedule, false, sentCancellable);
             return;
           }
@@ -1833,6 +1890,8 @@
           statusPill.classList.remove("ok", "alert");
           statusPill.classList.add("ok");
           statusPill.textContent = "With the printer";
+          // A sent letter's style can no longer change (#563).
+          styleRow.hide();
 
           // Change Draft label to Order and show order ID
           idLabel.textContent = "Order";
@@ -2111,10 +2170,11 @@
       function showPickerAgain() {
         const output = retryResult ? retryResult.output : host.toolOutput();
         picker.show(currentDraftId, output, cardIsShowingDraft() && !settledDraft() && !sendPageShown());
+        styleRow.show(currentDraftId, output, cardIsShowingDraft() && !settledDraft() && !sendPageShown());
       }
 
       async function handlePayAndSend() {
-        if (checkoutInProgress || !currentDraftId) return;
+        if (checkoutInProgress || !currentDraftId || picker.busy() || styleRow.busy()) return;
         draftActedOn = true;
         const button = document.getElementById("pay-send-button");
         const buttonText = document.getElementById("pay-send-button-text");
@@ -2123,6 +2183,7 @@
         const idValue = document.getElementById("id-value");
         checkoutInProgress = true;
         picker.hide();
+        styleRow.hide();
         errorMessage.style.display = "none";
         button.disabled = true;
         button.classList.add("loading");

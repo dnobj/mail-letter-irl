@@ -23,12 +23,18 @@ export const PAGES_PLACEHOLDER = "<!-- letter-irl:pages -->";
  * cards.
  */
 export const ARRIVES_PLACEHOLDER = "<!-- letter-irl:arrives -->";
+/**
+ * Where a card asks for widgets/shared/style.js (#563): the letter card's
+ * Style row, which changes a preview's stationery through set_stationery.
+ */
+export const STYLE_PLACEHOLDER = "<!-- letter-irl:style -->";
 
 /** The shared scripts a card may ask for: each marker, and the file put there. */
 const SHARED_SCRIPTS = [
   { marker: HOST_BRIDGE_PLACEHOLDER, file: "host.js" },
   { marker: PAGES_PLACEHOLDER, file: "pages.js" },
-  { marker: ARRIVES_PLACEHOLDER, file: "arrives.js" }
+  { marker: ARRIVES_PLACEHOLDER, file: "arrives.js" },
+  { marker: STYLE_PLACEHOLDER, file: "style.js" }
 ] as const;
 
 const cachedSources = new Map<string, string>();
