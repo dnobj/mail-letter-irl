@@ -34,7 +34,7 @@ import { getSendEligibility, type SendEligibility } from "../services/commerceSe
 import type { MailType } from "../services/types.js";
 import { callingApp, type ClientProfile } from "../auth/clientProfiles.js";
 import { letterPacksPageUrl } from "../config/sendConfirmation.js";
-import { giftCardSummary, resolveGiftSendChoice } from "./giftSendChoice.js";
+import { giftCardSummary, resolveGiftSendChoice, type GiftSendChoice } from "./giftSendChoice.js";
 import type { GiftCardState } from "../services/giftCardRenderer.js";
 import {
   DELIVERY_CLASS,
@@ -685,8 +685,8 @@ export interface CreateLetterDraftParams {
   addressWarnings?: string[];
   usedSavedReturnAddress: boolean;
   savedReturnAddressNote?: string;
-  /** The caller's sendAsGift; undefined lets the balance decide. */
-  sendAsGift?: boolean;
+  /** Whether this is a gift send, decided before the checks that depend on how it prints (letterGiftChoice). */
+  gift: GiftSendChoice;
   /** The letter as our renderer lays it out (layoutLetterForPreview), or undefined for the legacy HTML. */
   printLayout?: Layout;
   context: ToolContext;
@@ -745,6 +745,24 @@ export function previewSendEligibility(
   return isGift ? giftSendEligibility(eligibility) : eligibility;
 }
 
+/**
+ * Whether a letter preview is a gift send, decided before any check that
+ * depends on how it prints. A gift send prints on the legacy HTML until the gift page moves
+ * onto our renderer (#534), so it meets the legacy limits and Open Sans, never
+ * the renderer's; the tools pick the renderer from this. The postcard preview
+ * decides its gift the same way, before its checks.
+ */
+export async function letterGiftChoice(
+  letter: { bodyText: string; signOff: string; sendAsGift?: boolean },
+  context: ToolContext
+): Promise<GiftSendChoice> {
+  return resolveGiftSendChoice({
+    userId: context.user.userId,
+    requested: letter.sendAsGift,
+    balanceCanPay: context.user.creditsRemaining >= estimateRequiredCredits(letter.bodyText, letter.signOff)
+  });
+}
+
 export async function createLetterDraftAndBuildOutput(
   params: CreateLetterDraftParams
 ): Promise<LetterQuoteOutput> {
@@ -766,7 +784,7 @@ export async function createLetterDraftAndBuildOutput(
     addressWarnings,
     usedSavedReturnAddress,
     savedReturnAddressNote,
-    sendAsGift,
+    gift,
     printLayout,
     context
   } = params;
@@ -774,11 +792,6 @@ export async function createLetterDraftAndBuildOutput(
   // Calculate credits
   const requiredCredits = estimateRequiredCredits(bodyText, signOff);
   const available = context.user.creditsRemaining;
-  const gift = await resolveGiftSendChoice({
-    userId: context.user.userId,
-    requested: sendAsGift,
-    balanceCanPay: available >= requiredCredits
-  });
   const canSendNow = gift.isGift || available >= requiredCredits;
   const lettersRequired = Math.max(1, Math.ceil(requiredCredits / 2));
 
@@ -796,17 +809,9 @@ export async function createLetterDraftAndBuildOutput(
   );
 
   // A gift send prints on the legacy HTML until the gift page moves onto our
-  // renderer (#534), so it is held to that print's limits and font, and
-  // previewed as it prints.
+  // renderer (#534): the tools check it as such (letterGiftChoice), and it is
+  // never drawn by the renderer or recorded with its version.
   const layout = gift.isGift ? undefined : printLayout;
-  if (printLayout && gift.isGift) {
-    validateCharacterLimitForLayout(bodyText, signOff, layoutType, context, "html");
-    validatePrintableLetter(
-      { sender, recipient, bodyText, signOff, senderIsSaved: usedSavedReturnAddress },
-      context,
-      "html"
-    );
-  }
 
   // Generate preview HTML
   // Use preview images (compressed) for the HTML to reduce payload size

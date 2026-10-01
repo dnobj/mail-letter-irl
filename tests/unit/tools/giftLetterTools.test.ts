@@ -31,7 +31,7 @@ vi.mock('../../../src/services/userService.js', async importOriginal => ({
   findUser: mocks.findUser
 }));
 
-import { createLetterDraftAndBuildOutput, previewSendEligibility } from '../../../src/tools/letterHelpers.js';
+import { createLetterDraftAndBuildOutput, letterGiftChoice, previewSendEligibility } from '../../../src/tools/letterHelpers.js';
 import { clientProfileNamed, type ClientProfileName } from '../../../src/auth/clientProfiles.js';
 import { redeemPromoCodeTool } from '../../../src/tools/redeemPromoCode.js';
 import { friendlyCheckoutError } from '../../../src/tools/createMailCheckout.js';
@@ -61,15 +61,18 @@ const address = {
 };
 
 async function preview(creditsRemaining: number, sendAsGift?: boolean, app: ClientProfileName = 'chatgpt') {
+  const ctx = context(creditsRemaining, app);
+  const letter = { bodyText: 'Hello from Austin', signOff: 'Love, Sarah', sendAsGift };
   return createLetterDraftAndBuildOutput({
     sender: address,
     recipient: { ...address, name: 'Grandma' },
-    bodyText: 'Hello from Austin',
-    signOff: 'Love, Sarah',
+    bodyText: letter.bodyText,
+    signOff: letter.signOff,
     layoutType: 'text_only',
     usedSavedReturnAddress: false,
-    sendAsGift,
-    context: context(creditsRemaining, app)
+    // The tools decide the gift before their checks (#534).
+    gift: await letterGiftChoice(letter, ctx),
+    context: ctx
   });
 }
 
@@ -190,6 +193,13 @@ describe('letter preview: the gift decision', () => {
     expect(output.previewHtml).not.toContain('gift-page');
     expect(mocks.createDraft).toHaveBeenCalledWith(expect.objectContaining({ isGiftSend: false }));
     expect(output.sendEligibility.payAndSend.available).toBe(true);
+  });
+
+  it('lets a balance of exactly one letter pay, so no gift letter is used', async () => {
+    // A letter costs 2 credits: 2 can pay, so the balance decides against a gift.
+    const output = await preview(2);
+    expect(output.giftCard).toBeUndefined();
+    expect(mocks.createDraft).toHaveBeenCalledWith(expect.objectContaining({ isGiftSend: false }));
   });
 
   it('sends as a gift when asked, even with balance', async () => {

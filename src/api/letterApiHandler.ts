@@ -96,7 +96,8 @@ interface LetterRow {
   recipient: any;
   credits_cost: number;
   status: string;
-  preview_html: string | null;
+  /** Selected by the single-letter route only. */
+  preview_html?: string | null;
   tracking_id: string | null;
   created_at: Date;
   sent_at: Date | null;
@@ -130,11 +131,12 @@ async function handleListLetters(
     return;
   }
 
-  // Build query
+  // Build query. preview_html stays on the single-letter route: a page our
+  // renderer drew is about 95 KB (#534), and the list never shows it.
   let sql = `
     SELECT
       letter_id, user_id, content, recipient, credits_cost, status,
-      preview_html, tracking_id, created_at, sent_at, provider
+      tracking_id, created_at, sent_at, provider
     FROM letters
     WHERE user_id = $1
   `;

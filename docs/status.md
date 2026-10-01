@@ -1,6 +1,6 @@
 # Letter IRL Project Status
 
-**Last Updated:** September 28, 2026
+**Last Updated:** October 1, 2026
 **Purpose:** Current product scope, architecture, environment state, and open work
 
 ---
@@ -25,8 +25,9 @@ ChatGPT, Claude and other MCP apps, and manage their account on letterirl.com.
   that shows no card ([letter-send-flow.md](letter-send-flow.md)).
 - **Printing:** PostGrid prints the legacy HTML in Open Sans (#526). Our own renderer (#534) lays
   letters out in Tinos, previews the page as it prints, and uploads its own PDF. Letter previews
-  use it behind `LETTER_IRL_PRINT_RENDERER=pdf`, which is turned on in development once #540
-  merges, for PRINT-02. Gift pages and postcards are still to move onto it.
+  use it behind `LETTER_IRL_PRINT_RENDERER=pdf`, on in development since 2026-10-01 (PRINT-02's
+  previews passed; its sends wait for letters on the test account). Gift pages and postcards are
+  still to move onto it.
 - **Paying:** prepaid letter packs (2, 5 or 50 letters), bought in the conversation
   (`create_pack_checkout`) or on the website; **Pay & Send**, which buys and sends one previewed item
   in a single Stripe-hosted checkout; and promo codes. Both checkouts are external Stripe Checkout,

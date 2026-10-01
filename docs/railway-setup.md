@@ -108,6 +108,9 @@ LETTER_IRL_OPERATOR_ALERT_URL=<https URL, or unset for the admin panel's alert a
 LETTER_IRL_GIFT_LETTERS_ENABLED=<true to turn the programme on; unset keeps it off>
 LETTER_IRL_GIFT_DAILY_SEND_CAP=<gift sends per UTC day, all accounts; default 20; 0 stops them>
 LETTER_IRL_GIFT_LANDING_BASE_URL=<the website the printed QR opens; default https://letterirl.com>
+# Letter previews drawn by our own renderer, printed from our PDF (#534, docs/letter-send-flow.md).
+# Read at preview time only; a letter prints with the version its draft recorded. API service only.
+LETTER_IRL_PRINT_RENDERER=<pdf to turn it on; unset keeps the legacy HTML>
 # Photo upload through the card in apps with no file store (#474, docs/deployment.md): off unless
 # explicitly true. API service only.
 LETTER_IRL_CARD_UPLOAD_ENABLED=<true to let the upload card send photos in Claude; unset keeps it off>
