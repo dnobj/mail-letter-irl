@@ -803,7 +803,7 @@ describe('draftService stationery (#563)', () => {
       const client = inTransaction({ rows: [pending] }, { rows: [] });
 
       await expect(
-        setDraftStationery('draft-1', 'auth0|owner', { stationery: { ...BOTANICAL, source: 'asked' } as any, rendererVersion: 'pdf-2', previewHtml: PAGE }, NOW)
+        setDraftStationery('draft-1', 'auth0|owner', { stationery: { ...BOTANICAL, source: 'asked' } as any, previewHtml: PAGE }, NOW)
       ).resolves.toBeNull();
 
       const [lock, live, update, remember] = client.query.mock.calls as Array<[string, unknown[]]>;
@@ -824,7 +824,7 @@ describe('draftService stationery (#563)', () => {
       const client = inTransaction({ rows: [pending] }, { rows: [] });
 
       await expect(
-        setDraftStationery('draft-1', 'auth0|owner', { stationery: { theme: 'classic' }, rendererVersion: 'pdf-1', previewHtml: PAGE }, NOW)
+        setDraftStationery('draft-1', 'auth0|owner', { stationery: { theme: 'classic' }, previewHtml: PAGE }, NOW)
       ).resolves.toBeNull();
 
       expect(client.query.mock.calls[2][1]).toEqual(['draft-1', null, 'pdf-1', PAGE]);
@@ -840,7 +840,7 @@ describe('draftService stationery (#563)', () => {
       const client = inTransaction(...(answers as Array<{ rows: unknown[] }>));
 
       await expect(
-        setDraftStationery('draft-1', 'auth0|owner', { stationery: BOTANICAL, rendererVersion: 'pdf-2', previewHtml: PAGE }, NOW)
+        setDraftStationery('draft-1', 'auth0|owner', { stationery: BOTANICAL, previewHtml: PAGE }, NOW)
       ).resolves.toBe(refusal);
 
       expect(client.query).toHaveBeenCalledTimes(statements);
@@ -849,7 +849,7 @@ describe('draftService stationery (#563)', () => {
     it('refuses a theme the print would not read back before any statement', async () => {
       const client = inTransaction();
       await expect(
-        setDraftStationery('draft-1', 'auth0|owner', { stationery: { theme: 'floral' } as any, rendererVersion: 'pdf-2', previewHtml: PAGE }, NOW)
+        setDraftStationery('draft-1', 'auth0|owner', { stationery: { theme: 'floral' } as any, previewHtml: PAGE }, NOW)
       ).rejects.toMatchObject({ code: 'STATIONERY_UNREADABLE', diagnosticClass: 'validation_error' });
       expect(db.transaction).not.toHaveBeenCalled();
       expect(client.query).not.toHaveBeenCalled();

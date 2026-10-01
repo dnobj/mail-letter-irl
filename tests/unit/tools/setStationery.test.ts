@@ -119,7 +119,8 @@ describe('set_stationery', () => {
     const change = written();
     const botanical = { theme: 'botanical', dateLine: 'September 30, 2026', source: 'asked' };
     expect(change.stationery).toEqual(botanical);
-    expect(change.rendererVersion).toBe('pdf-2');
+    // The service records the version that goes with it (rendererVersionFor).
+    expect(Object.keys(change).sort()).toEqual(['previewHtml', 'stationery']);
     expect(inked(change.previewHtml).length).toBeGreaterThan(0);
     expect(change.previewHtml).toContain('<body data-renderer="pdf-2">');
     expect(change.previewHtml).toContain('<title>September 30, 2026\nDear Sam,\nThank you for the jam.\nLove, Pat</title>');
@@ -157,7 +158,7 @@ describe('set_stationery', () => {
     vi.mocked(getDraftForStationery).mockResolvedValue({ ...original, renderer_version: 'pdf-2', preview_html: themed.previewHtml });
     const output = await run({ stationery: 'classic' });
     const classic = written();
-    expect(classic.rendererVersion).toBe('pdf-1');
+    expect(classic.previewHtml).toContain('<body data-renderer="pdf-1">');
     expect(classic.stationery).toEqual({ theme: 'classic', source: 'asked' });
     expect(classic.previewHtml).toBe(original.preview_html);
     expect(output.message).toBe(

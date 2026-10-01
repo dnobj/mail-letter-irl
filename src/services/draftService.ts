@@ -9,6 +9,7 @@ import { query, transaction } from '../db/index.js';
 import type pg from 'pg';
 import { writeDiagnostic } from '../utils/diagnosticLog.js';
 import { stationeryOf, type Stationery } from '../render/stationery.js';
+import { rendererVersionFor } from '../render/pdf.js';
 import type {
   Letter,
   LetterDraft,
@@ -546,8 +547,8 @@ export async function getDraftForStationery(draftId: string, userId: string): Pr
 
 /**
  * Restyles a letter draft (#563, set_stationery): its stationery, the renderer
- * version that goes with it, and its preview drawn again in it, which the
- * caller made from the draft's own content. It changes only a draft
+ * version that goes with it (rendererVersionFor), and its preview drawn again
+ * in it, which the caller made from the draft's own content. It changes only a draft
  * setDraftSchedule would change, under the same lock, so a send or a Pay &
  * Send checkout runs before or after it, never between: one that goes first
  * leaves this refused, and one that goes second sends the new style.
@@ -560,10 +561,13 @@ export async function getDraftForStationery(draftId: string, userId: string): Pr
 export async function setDraftStationery(
   draftId: string,
   userId: string,
-  change: { stationery: Stationery; rendererVersion: string; previewHtml: string },
+  change: { stationery: Stationery; previewHtml: string },
   now: Date = new Date()
 ): Promise<DraftScheduleRefusal | null> {
   const stationery = storedStationery(change.stationery);
+  // The version goes with the stationery stored (rendererVersionFor), so
+  // 044's pair check holds whatever the caller drew.
+  const rendererVersion = rendererVersionFor(stationery);
   return transaction(async client => {
     const refusal = await lockChangeableDraft(client, draftId, userId, now);
     if (refusal) return refusal;
@@ -572,7 +576,7 @@ export async function setDraftStationery(
       `UPDATE letter_drafts
        SET stationery = $2::jsonb, renderer_version = $3, preview_html = $4, updated_at = NOW()
        WHERE draft_id = $1`,
-      [draftId, stationery ? JSON.stringify(stationery) : null, change.rendererVersion, change.previewHtml]
+      [draftId, stationery ? JSON.stringify(stationery) : null, rendererVersion, change.previewHtml]
     );
     await client.query('UPDATE users SET stationery_theme = $2 WHERE user_id = $1', [userId, change.stationery.theme]);
     writeDiagnostic('info', 'draft.stationery_set', { theme: change.stationery.theme });

@@ -368,3 +368,24 @@ describe("the name's titles and suffixes, where they stand (#570 review round 2)
     expect(offered({ stationery: 'monogram', monogram: `J${zeroWidth}M` }).monogram).toBe('JM');
   });
 });
+
+describe('#571 review round 1', () => {
+  it("says a refused slot's theme was remembered when the call named none", () => {
+    const ctx = context();
+    expect(() => previewStationery({ headline: 'Hooray' }, SENDER, ctx, 'pdf', 'botanical')).toThrow(
+      "The account's remembered stationery is botanical. A headline prints only on the celebration stationery."
+    );
+    expect(() => previewStationery({ monogram: 'JMS' }, SENDER, ctx, 'pdf', 'celebration')).toThrow(
+      "The account's remembered stationery is celebration. Initials print only on the monogram stationery."
+    );
+    // Asked for, the theme needs no explaining.
+    expect(() => previewStationery({ stationery: 'botanical', headline: 'Hooray' }, SENDER, ctx, 'pdf', 'monogram')).toThrow(
+      /^A headline prints only on the celebration stationery\./
+    );
+  });
+
+  it('keeps given names that are also titles elsewhere', () => {
+    expect(offered({ stationery: 'monogram' }, 'Col Needham').monogram).toBe('CN');
+    expect(offered({ stationery: 'monogram' }, 'Hon Lee').monogram).toBe('HL');
+  });
+});

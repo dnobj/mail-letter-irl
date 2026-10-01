@@ -48,15 +48,16 @@ const previewScheduleZ = z.object({
 // registerTools strips these from their shapes otherwise. Functional wording
 // only, as for gift letters.
 export const STATIONERY_DESCRIPTION =
-  "Optional. The letter's stationery: classic, a plain page (the default); monogram, initials in a ring; " +
+  "Optional. The letter's stationery: classic, a plain page; monogram, initials in a ring; " +
   "botanical, a line-drawn sprig; or celebration, confetti with an optional headline. " +
   "Each but classic prints the date at the top right. " +
-  "Use it when the user asks for a style, or names an occasion one suits; leave it out for a plain page.";
+  "Left out, the letter is in the account's last choice, or classic if it has none: name classic for a plain page. " +
+  "Use a style when the user asks for one, or names an occasion one suits.";
 export const MONOGRAM_DESCRIPTION =
-  "Optional, with stationery monogram only: the initials to print, one to three letters, such as \"JMS\". " +
+  "Optional, for the monogram stationery only: the initials to print, one to three letters, such as \"JMS\". " +
   "Leave it out to use the initials of the return address's name.";
 export const HEADLINE_DESCRIPTION =
-  "Optional, with stationery celebration only: a short line printed large above the letter, " +
+  "Optional, for the celebration stationery only: a short line printed large above the letter, " +
   "such as \"Happy Birthday, Sam!\". It must fit on one line, and takes three of the page's lines; " +
   "leave it out for confetti alone.";
 

@@ -155,7 +155,7 @@ async function handler(input: SetStationeryInput, context: ToolContext): Promise
   const rendererVersion = rendererVersionFor(stationery);
   const previewHtml = renderLetterPreviewDocument([drawn, ...after], { bodyText, signOff }, rendererVersion);
 
-  const refusal = await setDraftStationery(draftId, userId, { stationery, rendererVersion, previewHtml }, context.now());
+  const refusal = await setDraftStationery(draftId, userId, { stationery, previewHtml }, context.now());
   if (refusal) throw refused(...REFUSALS[refusal], context);
 
   context.logger.info(
@@ -171,7 +171,8 @@ export const setStationeryTool: McpToolDefinition<SetStationeryInput, SetStation
   description:
     'Change the stationery of a previewed letter without previewing it again: classic (a plain page), monogram ' +
     '(initials in a ring), botanical (a line-drawn sprig) or celebration (confetti with an optional headline). ' +
-    'Give the draftId from the preview and stationery; monogram and headline as the letter previews take them. ' +
+    'Give the draftId from the preview and stationery, with monogram and headline as the letter previews take them: ' +
+    'each call states them afresh, so a headline is kept only when given again. ' +
     'The page is drawn again, and the choice is remembered for the next letter preview. Nothing is sent by this tool.',
   readOnly: false,
   inputSchema: setStationeryInputSchema,

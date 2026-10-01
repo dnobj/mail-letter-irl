@@ -91,7 +91,7 @@ function optionalText(value: unknown, name: string, expected: string, context: T
  * without full stops ("M.D." is md).
  */
 const TITLES: ReadonlySet<string> = new Set([
-  'mr', 'mrs', 'ms', 'miss', 'mx', 'dr', 'rev', 'prof', 'sir', 'dame', 'capt', 'col', 'hon', 'fr', 'mme'
+  'mr', 'mrs', 'ms', 'miss', 'mx', 'dr', 'rev', 'prof', 'sir', 'dame', 'capt', 'fr', 'mme'
 ]);
 const SUFFIXES: ReadonlySet<string> = new Set([
   'jr', 'sr', 'jnr', 'snr', 'ii', 'iii', 'iv', 'md', 'phd', 'esq', 'dds', 'cpa', 'rn'
@@ -237,16 +237,18 @@ export function previewStationery(
   }
   const source: StationerySource = theme !== undefined ? 'asked' : remembered ? 'remembered' : 'default';
   const chosen = (theme ?? remembered ?? 'classic') as StationeryTheme;
+  // A refusal about a theme the call did not name says where it came from.
+  const remembering = source === 'remembered' ? `The account's remembered stationery is ${chosen}. ` : '';
   if (monogram !== undefined && chosen !== 'monogram') {
     throw refusal(
-      'Initials print only on the monogram stationery. Choose stationery "monogram", or leave monogram out.',
+      remembering + 'Initials print only on the monogram stationery. Choose stationery "monogram", or leave monogram out.',
       'monogram_without_theme',
       context
     );
   }
   if (headline !== undefined && chosen !== 'celebration') {
     throw refusal(
-      'A headline prints only on the celebration stationery. Choose stationery "celebration", or leave headline out.',
+      remembering + 'A headline prints only on the celebration stationery. Choose stationery "celebration", or leave headline out.',
       'headline_without_theme',
       context
     );

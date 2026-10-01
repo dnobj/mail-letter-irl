@@ -289,11 +289,11 @@ describePostgres('renderer version (migration 039, #534)', () => {
       const userId = await seedUser();
       const draftId = await seedDraft(userId, 'pdf-1');
 
-      await expect(drafts.setDraftStationery(draftId, userId, { stationery: BOTANICAL, rendererVersion: 'pdf-2', previewHtml: PAGE }))
+      await expect(drafts.setDraftStationery(draftId, userId, { stationery: BOTANICAL, previewHtml: PAGE }))
         .resolves.toBeNull();
       expect(await stateOf(draftId, userId)).toEqual({ stationery: BOTANICAL, renderer_version: 'pdf-2', preview_html: PAGE, theme: 'botanical' });
 
-      await expect(drafts.setDraftStationery(draftId, userId, { stationery: { theme: 'classic' }, rendererVersion: 'pdf-1', previewHtml: '<svg/>' }))
+      await expect(drafts.setDraftStationery(draftId, userId, { stationery: { theme: 'classic' }, previewHtml: '<svg/>' }))
         .resolves.toBeNull();
       expect(await stateOf(draftId, userId)).toEqual({ stationery: null, renderer_version: 'pdf-1', preview_html: '<svg/>', theme: 'classic' });
     }, 60_000);
@@ -301,7 +301,7 @@ describePostgres('renderer version (migration 039, #534)', () => {
     it("leaves a sent, expired, Pay & Send or someone else's draft as it was, and remembers nothing", async () => {
       const userId = await seedUser();
       const other = await seedUser();
-      const change = { stationery: BOTANICAL, rendererVersion: 'pdf-2', previewHtml: PAGE };
+      const change = { stationery: BOTANICAL, previewHtml: PAGE };
 
       const sent = await seedDraft(userId, 'pdf-1');
       await mailSend.createMailOrderFromDraft({ draftId: sent, userId, mailType: 'letter' });

@@ -80,9 +80,9 @@ describe('stationery in tools/list', () => {
       const { properties, required } = tools.get(name)!;
       expect(properties.stationery.type, name).toBe('string');
       expect(properties.stationery.enum).toEqual([...STATIONERY_THEMES]);
-      expect(properties.stationery.description).toContain('classic, a plain page (the default)');
-      expect(properties.monogram.description).toContain('with stationery monogram only');
-      expect(properties.headline.description).toContain('with stationery celebration only');
+      expect(properties.stationery.description).toContain("Left out, the letter is in the account's last choice, or classic if it has none");
+      expect(properties.monogram.description).toContain('for the monogram stationery only');
+      expect(properties.headline.description).toContain('for the celebration stationery only');
       for (const key of KEYS) expect(required ?? [], `${name} ${key}`).not.toContain(key);
     }
     for (const key of KEYS) expect(tools.get('quote_and_preview_postcard')!.properties).not.toHaveProperty(key);

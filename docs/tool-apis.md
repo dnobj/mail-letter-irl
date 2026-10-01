@@ -34,12 +34,12 @@ while the flag is off, and when no date can be scheduled.
 
 While stationery is offered (`LETTER_IRL_STATIONERY_ENABLED` on, and `LETTER_IRL_PRINT_RENDERER=pdf`,
 #563), the three letter previews also accept:
-- `stationery`: `classic` (the default, a plain page), `monogram`, `botanical` or `celebration`, in any
-  case. Every theme but Classic prints the preview's date, written out, at the top right.
-- `monogram`: with `monogram` only. One to three letters, as written; spaces and full stops are dropped.
+- `stationery`: `classic` (a plain page), `monogram`, `botanical` or `celebration`, in any case. Left
+  out, the account's last choice is used, or Classic with none, so a plain page is asked for by name. Every theme but Classic prints the preview's date, written out, at the top right.
+- `monogram`: for `monogram` only, asked for or remembered. One to three letters, as written; spaces and full stops are dropped.
   Left out, the initials of the return address's name are used, in capitals, skipping titles at its start and suffixes at its end
   ("Dr. Pat Rivera Jr." is PR).
-- `headline`: with `celebration` only. One line above the letter, which takes three of the page's lines.
+- `headline`: for `celebration` only, asked for or remembered. One line above the letter, which takes three of the page's lines.
 
 A preview that asks for no theme is drawn in the account's remembered one: the theme it last chose,
 in a preview's `stationery`, `set_stationery` or the letter card. With nothing remembered, it is
