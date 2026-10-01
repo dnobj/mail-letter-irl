@@ -51,8 +51,8 @@ export const STATIONERY_DESCRIPTION =
   "Optional. The letter's stationery: classic, a plain page; monogram, initials in a ring; " +
   "botanical, a line-drawn sprig; or celebration, confetti with an optional headline. " +
   "Each but classic prints the date at the top right. " +
-  "Left out, the letter is in the account's last choice, or classic if it has none: name classic for a plain page. " +
-  "Use a style when the user asks for one, or names an occasion one suits.";
+  "Left out, the letter is in the account's last choice, or classic if it has none. " +
+  "Leave it out unless the user asks for a style or for a plain page (classic), or names an occasion a style suits.";
 export const MONOGRAM_DESCRIPTION =
   "Optional, for the monogram stationery only: the initials to print, one to three letters, such as \"JMS\". " +
   "Leave it out to use the initials of the return address's name.";
