@@ -655,19 +655,22 @@ message says what was refused. Decide by the message, not the reason alone:
 - **Retry** when a build can print it: deploy that build, then resolve the letter with a retry
   (`provider_confirmed_rejected_retry`). That covers:
   - a version this build does not know;
-  - an image in a format or size our reader does not take;
+  - an image our reader does not take: "The image is not a JPEG or PNG data URI." or "The image's size,
+    ..., is empty or over 50 megapixels." (unless it is truly empty);
   - a drawing fault;
   - an overflow that a renderer change caused. A letter refused as `overflow` was measured to fit when
     it was previewed, under the same version, so a deploy changed the wrapping. Fix the renderer rather
     than refund.
-- **Reject** when the content itself cannot print:
+- **Reject** when the content itself cannot print, resolving it as rejected
+  (`provider_confirmed_rejected_refund`):
   - a message that is too long in any build;
   - a postcard size the renderer never draws;
-  - stored image data that is not an image;
+  - stored image data that is not an image. "The image is neither a JPEG nor a PNG with a readable size."
+    can be either this or a form of JPEG our reader misses, so look at the stored data before deciding;
   - a gift card that runs past the page because of the sender's name ("The gift card runs ... past the
     page's bottom margin.").
 
-Resolve it as rejected, which refunds, only when it can never be printed and no earlier attempt of the
+Reject, which refunds, only when it can never be printed and no earlier attempt of the
 letter reached PostGrid, that is, every earlier hold was also `render_refused`. Check the earlier holds
 before refunding: the job page shows only the latest class, because a retry clears `last_error`.
 - Each hold's class is also in its `mail_provider_outcome_ambiguous` alert.
