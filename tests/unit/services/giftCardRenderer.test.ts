@@ -7,10 +7,14 @@ import {
   giftLetterPageCopy,
   giftLetterPageSvg,
   giftPostcardBlockSvg,
+  giftPostcardStripCopy,
+  LONGEST_REDEEM_BY,
   qrPngDataUri,
   qrSvg,
   type GiftCardContent
 } from '../../../src/services/giftCardRenderer.js';
+import { loadFont } from '../../../src/render/fonts.js';
+import { shape } from '../../../src/render/glyphs.js';
 
 /**
  * The printed card (docs/gift-letters.md). The property that matters most is
@@ -172,7 +176,62 @@ describe('gift card markup', () => {
     expect(giftLetterPageCopy(unfunded, 'Pat').fine).toBeUndefined();
   });
 
+  it("gives the postcard's legacy strip and our renderer the same words, from one source (#534)", () => {
+    const escaped = (text: string) =>
+      text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+    const seed: GiftCardContent = { ...funded, code: 'PRESS2026', multiUse: true, newAccountsOnly: true };
+    for (const card of [funded, unfunded, { ...funded, code: undefined, sample: true }, seed]) {
+      const copy = giftPostcardStripCopy(card, 'Pat <Example> & Co');
+      const { html } = giftPostcardBlockSvg(card, 'Pat <Example> & Co');
+      const words = [copy.lead, ...copy.lines.map(line => line.text)];
+      // Each in the legacy strip, in the same order.
+      const at = words.map(text => html.indexOf(escaped(text)));
+      for (const [index, text] of words.entries()) expect(at[index], text).toBeGreaterThan(-1);
+      expect(at).toEqual([...at].sort((a, b) => a - b));
+      expect(html).toContain(`<strong>${escaped(copy.lead)}</strong>`);
+      expect(copy.qrUrl).toBe(card.url);
+    }
+    // The code keeps its kind, which sets its size in both: in the HTML, by its class.
+    expect(giftPostcardStripCopy(funded, 'Pat').lines).toEqual([
+      { text: 'a letter of your own, printed and mailed free. Scan, or visit letterirl.com/g and enter', kind: 'plain' },
+      { text: 'K7M2-QX9A', kind: 'code' },
+      { text: 'Redeem by December 16, 2026. One use.', kind: 'plain' }
+    ]);
+    expect(giftPostcardBlockSvg(funded, 'Pat').html).toContain('<span class="gift-block-code">K7M2-QX9A</span>');
+    expect(giftPostcardStripCopy(unfunded, 'Pat')).toEqual({
+      lead: 'Sent with Letter IRL',
+      lines: [
+        { text: 'A conversation with an AI assistant, printed and mailed.', kind: 'plain' },
+        { text: 'letterirl.com', kind: 'plain' }
+      ],
+      qrUrl: 'https://letterirl.com'
+    });
+    expect(giftPostcardStripCopy({ ...funded, code: undefined, sample: true }, 'Pat').lines[1].text).toBe('••••-••••');
+    expect(giftPostcardStripCopy(seed, 'Pat').lines.slice(1)).toEqual([
+      { text: 'PRESS2026', kind: 'code' },
+      { text: 'Redeem by December 16, 2026. New customers only. One use per person.', kind: 'plain' }
+    ]);
+    // A card with no date prints none.
+    expect(giftPostcardStripCopy({ ...funded, redeemBy: undefined }, 'Pat').lines[2].text).toBe('One use.');
+  });
+
+  it('measures the strip against the date that prints longest', () => {
+    // Every day of a year, as the strip prints it: none is wider than LONGEST_REDEEM_BY's.
+    const font = loadFont('Tinos-Regular');
+    const width = (redeemBy: string) => shape(font, giftPostcardStripCopy({ ...funded, redeemBy }, 'Pat').lines[2].text).advanceWidth;
+    const longest = width(LONGEST_REDEEM_BY);
+    expect(giftPostcardStripCopy({ ...funded, redeemBy: LONGEST_REDEEM_BY }, 'Pat').lines[2].text).toBe('Redeem by September 30, 2026. One use.');
+    let widest = 0;
+    for (let day = Date.UTC(2027, 0, 1); day < Date.UTC(2028, 0, 1); day += 24 * 60 * 60 * 1000) {
+      widest = Math.max(widest, width(new Date(day).toISOString().slice(0, 10)));
+    }
+    expect(widest).toBeLessThanOrEqual(longest);
+    expect(width('2026-05-01')).toBeLessThan(longest);
+  });
+
   it('names the sender as given, trimmed, and someone when there is no name', () => {
+    expect(giftPostcardStripCopy(funded, '  Pat Example ').lead).toBe('A gift from Pat Example:');
+    expect(giftPostcardStripCopy(funded, '   ').lead).toBe('A gift from Someone:');
     expect(giftLetterPageCopy(funded, '  Pat Example ').lede).toMatch(/^Pat Example sent this letter/);
     expect(giftLetterPageCopy(funded, '   ').lede).toMatch(/^Someone sent this letter/);
     expect(giftLetterPageCopy(unfunded, '').lede).toMatch(/^Someone wrote it/);

@@ -243,7 +243,7 @@ What keeps them equal: Principles 2-4. The renderer (#534) is server-side, so ev
 
 ## Gift Sends
 
-A gift send (`sendAsGift`) is funded by a free gift letter (each pack grants one) and prints a QR gift card: page 2 of a letter, or a strip on a postcard's back, which cuts the message to 350 characters. Pay & Send is refused for gifts. See [gift-letters.md](gift-letters.md). Gift letters are on in development and off in production; open gift launch blockers are #432, #433, #435 and #487.
+A gift send (`sendAsGift`) is funded by a free gift letter (each pack grants one) and prints a QR gift card: page 2 of a letter, or a strip on a postcard's back, which cuts the message to 350 characters on the legacy print and to 11 lines on our renderer (#534). Pay & Send is refused for gifts. See [gift-letters.md](gift-letters.md). Gift letters are on in development and off in production; open gift launch blockers are #432, #433, #435 and #487.
 
 | Concept | Gift behaviour |
 |---------|----------------|

@@ -3,8 +3,8 @@
  * LETTER_IRL_PRINT_RENDERER=pdf: the back is measured as it prints, the
  * message is checked against the renderer's font, and the draft keeps the
  * postcard's front and back as SVG, the addresses where PostGrid stamps them,
- * under the renderer's version. A gift postcard keeps the legacy HTML until
- * its strip moves over. Without the flag, previews are the legacy HTML.
+ * under the renderer's version, a gift send's card in a strip at the foot of
+ * the message. Without the flag, previews are the legacy HTML.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -276,22 +276,112 @@ describe('a postcard preview drawn by our renderer', () => {
 });
 
 describe('a gift postcard', () => {
+  const backOf = (html: string) => html.match(/<svg [\s\S]*?<\/svg>/g)![1];
+  const giftBalance = (next: Record<string, unknown>) =>
+    vi.mocked(getGiftBalance).mockResolvedValue({ available: 1, next: { giftId: 'gift-1', ...next } } as never);
+  const sender = (name: string) =>
+    address({ name, addressLine1: '1600 Pennsylvania Ave NW', city: 'Washington', state: 'DC', postalCode: '20500' });
+
   beforeEach(() => {
     vi.stubEnv('LETTER_IRL_GIFT_LETTERS_ENABLED', 'true');
-    vi.mocked(getGiftBalance).mockResolvedValue({ available: 1, next: { giftId: 'gift-1', cardState: 'funded' } } as never);
+    giftBalance({ cardState: 'funded' });
   });
 
-  it('keeps the legacy HTML and its limits until its strip moves onto the renderer', async () => {
-    const output = await run({ sendAsGift: true });
+  it('draws its card on the renderer, at the foot of the back, under pdf-1 (#534)', async () => {
+    const output = await run({ sendAsGift: true, message: 'Dear Sam,\nWish you were here.' });
     const draft = drafted();
     expect(draft.isGiftSend).toBe(true);
-    expect(draft.rendererVersion).toBeUndefined();
-    expect(draft.previewHtml).toContain('class="postcard-front"');
-    expect(draft.previewHtml).not.toContain('data-renderer');
+    expect(draft.rendererVersion).toBe('pdf-1');
+    // The card shows the postcard as it prints, card and all.
+    expect(output.previewHtml).toBe(draft.previewHtml);
+    expect(output.giftCard).toMatchObject({ state: 'funded' });
+    const back = backOf(draft.previewHtml!);
+    // The page reads the message, then the card: the sender's name, and a
+    // placeholder where the code the send mints will print.
+    const title = /<title>([^<]*)<\/title>/.exec(back)![1];
+    expect(title.startsWith('Dear Sam,\nWish you were here.\nA gift from Pat Example:\n')).toBe(true);
+    expect(title).toContain('••••-••••');
+    expect(back).toContain('#b9ad99');
+  });
+
+  it('holds 11 lines above the card, and says so when a message takes more', async () => {
+    await expect(run({ sendAsGift: true, message: lines(11) })).resolves.toMatchObject({ draftId: 'draft-1' });
+    vi.mocked(createPostcardDraft).mockClear();
+    const error = await run({ sendAsGift: true, message: lines(12) }).catch(e => e);
+    expect(error.message).toBe(
+      'Postcard message is 1 line too long for the back: it takes 12 lines and the back holds 11 above the gift card. ' +
+      'Please shorten your message to fit on the postcard back.'
+    );
+    expect(createPostcardDraft).not.toHaveBeenCalled();
+    // The legacy 350-character limit gives way, as it does without a card.
+    const message = Array.from({ length: 11 }, () => 'the quick brown fox jumps over the lazy').join('\n');
+    expect(message.length).toBeGreaterThan(350);
+    await expect(run({ sendAsGift: true, message })).resolves.toMatchObject({ draftId: 'draft-1' });
+  });
+
+  it("checks the sender's name against the renderer's font, whichever card the send prints", async () => {
+    // U+FB00 prints in Open Sans, so a paid postcard's return address may carry it.
+    await expect(run({ sender: sender(`Pat Sta${FF}ord`) })).resolves.toMatchObject({ draftId: 'draft-1' });
+    vi.mocked(downloadAndProcessPostcardImageWithPreview).mockClear();
+    await expect(run({ sendAsGift: true, sender: sender(`Pat Sta${FF}ord`) }))
+      .rejects.toThrow("in the sender's name, which the gift card prints");
+    // The plain card prints no name, but the send may print a funded one.
+    giftBalance({ cardState: 'unfunded' });
+    await expect(run({ sendAsGift: true, sender: sender(`Pat Sta${FF}ord`) }))
+      .rejects.toThrow("in the sender's name, which the gift card prints");
+    expect(downloadAndProcessPostcardImageWithPreview).not.toHaveBeenCalled();
+  });
+
+  it("refuses a sender's name too long for the card a send could print, before the picture is fetched", async () => {
+    const name = (count: number) => 'Pat Example '.repeat(count).trim();
+    await expect(run({ sendAsGift: true, sender: sender(name(7)) })).resolves.toMatchObject({ draftId: 'draft-1' });
+    vi.mocked(downloadAndProcessPostcardImageWithPreview).mockClear();
+    // This name fits the preview's card, but not a seed campaign's, which a
+    // send may print instead (longestSendCard).
+    const ctx = context();
+    const error = await run({ sendAsGift: true, sender: sender(name(10)) }, ctx).catch(e => e);
+    expect(error.message).toBe("The sender's name is too long to print on the gift card. Shorten it, then preview again.");
+    expect(error).toMatchObject({ diagnosticClass: 'validation_error' });
+    expect(ctx.logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'quote.postcard.gift_card_overflow', cause: 'name' }),
+      expect.any(String)
+    );
+    // The plain card prints no name, but the send may print a funded one.
+    giftBalance({ cardState: 'unfunded' });
+    await expect(run({ sendAsGift: true, sender: sender(name(10)) })).rejects.toThrow("The sender's name is too long");
+    expect(downloadAndProcessPostcardImageWithPreview).not.toHaveBeenCalled();
+  });
+
+  it("says when a seed campaign's code is too long for any postcard, whatever the name", async () => {
+    giftBalance({ cardState: 'funded', seed: { code: 'W'.repeat(50), endsAt: null, newAccountsOnly: false } });
+    const ctx = context();
+    const error = await run({ sendAsGift: true }, ctx).catch(e => e);
+    expect(error.message).toBe(
+      "This gift letter's card does not fit on a postcard. Send it as a letter, or set sendAsGift to false to pay from the balance."
+    );
+    expect(error).toMatchObject({ diagnosticClass: 'validation_error' });
+    expect(ctx.logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'quote.postcard.gift_card_overflow', cause: 'card' }),
+      expect.any(String)
+    );
+    // A seed code of ordinary length prints.
+    giftBalance({ cardState: 'funded', seed: { code: 'PRESS2026', endsAt: new Date('2026-12-31T00:00:00Z'), newAccountsOnly: true } });
+    await expect(run({ sendAsGift: true })).resolves.toMatchObject({ draftId: 'draft-1' });
+    expect(/<title>([^<]*)<\/title>/.exec(backOf(drafted().previewHtml!))![1]).toContain('PRESS2026');
+  });
+
+  it('keeps any size but 6x9, and every gift postcard without the flag, on the legacy HTML and its limits', async () => {
+    await run({ sendAsGift: true, size: '6x4' });
+    expect(drafted().rendererVersion).toBeUndefined();
+    vi.mocked(createPostcardDraft).mockClear();
+    await expect(run({ sendAsGift: true, size: '6x4', message: 'a'.repeat(351) })).rejects.toThrow('(351/350 characters)');
+
+    vi.stubEnv('LETTER_IRL_PRINT_RENDERER', 'html');
+    const output = await run({ sendAsGift: true });
+    expect(drafted().rendererVersion).toBeUndefined();
+    expect(drafted().previewHtml).not.toContain('data-renderer');
     // So the card keeps its own front and mockup.
     expect(output).not.toHaveProperty('previewHtml');
-    expect(output.giftCard).toMatchObject({ state: 'funded' });
-
     vi.mocked(createPostcardDraft).mockClear();
     await expect(run({ sendAsGift: true, message: 'a'.repeat(351) })).rejects.toThrow('(351/350 characters)');
     await expect(run({ sendAsGift: true, message: `We will sta${FF} it` })).resolves.toMatchObject({ draftId: 'draft-1' });

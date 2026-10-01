@@ -9,10 +9,10 @@ export type { ImageBox, Layout, LayoutPage, LetterContent, TextRun } from './lay
 export { renderPdf, RENDERER_VERSION, PRINTABLE_RENDERER_VERSIONS } from './pdf.js';
 export { GiftPageOverflow, layoutGiftPage } from './giftPage.js';
 export type { GiftPageCopy } from './giftPage.js';
-export { layoutPostcard, layoutPostcardBack } from './postcard.js';
+export { GiftStripOverflow, layoutPostcard, layoutPostcardBack } from './postcard.js';
 export { POSTCARD_STAMP } from './geometry.js';
 export type { StampGeometry } from './geometry.js';
-export type { PostcardContent } from './postcard.js';
+export type { GiftStripCopy, PostcardContent } from './postcard.js';
 export { renderPreviewSvg } from './preview.js';
 export type { PreviewOptions } from './preview.js';
 export { readImage, readImageDataUri } from './images.js';

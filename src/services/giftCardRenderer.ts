@@ -1,6 +1,7 @@
 import sharp from 'sharp';
 import { QUIET_ZONE_MODULES, qrMatrix, qrRuns } from '../render/qr.js';
 import type { GiftPageCopy } from '../render/giftPage.js';
+import type { GiftStripCopy } from '../render/postcard.js';
 
 /**
  * The printed gift card (docs/gift-letters.md): an extra page on a letter, or
@@ -256,6 +257,41 @@ export const GIFT_POSTCARD_BLOCK_CSS = `
     .gift-block-text strong { font-size: 10pt; }
     .gift-block-code { font-family: 'Courier New', monospace; font-size: 12pt; font-weight: bold;
       letter-spacing: 0.06em; }`;
+
+/**
+ * The strip's words for our renderer (#534): the same words as the legacy
+ * strip below, which a test holds them to. The lead takes a line of its own
+ * in the larger size, where the legacy strip runs it into the sentence.
+ */
+export function giftPostcardStripCopy(card: GiftCardContent, senderName: string): GiftStripCopy {
+  const sender = senderName.trim() || 'Someone';
+  if (card.state === 'unfunded') {
+    return {
+      lead: 'Sent with Letter IRL',
+      lines: [
+        { text: 'A conversation with an AI assistant, printed and mailed.', kind: 'plain' },
+        { text: card.displayUrl, kind: 'plain' }
+      ],
+      qrUrl: card.url
+    };
+  }
+  const fine = `${redeemByText(card)}${usesText(card, 'postcard')}`;
+  return {
+    lead: `A gift from ${sender}:`,
+    lines: [
+      { text: `a letter of your own, printed and mailed free. Scan, or visit ${card.displayUrl} and enter`, kind: 'plain' },
+      { text: printedCode(card), kind: 'code' },
+      { text: fine, kind: 'plain' }
+    ],
+    qrUrl: card.url
+  };
+}
+
+/**
+ * The redeem-by date that prints longest ("September 30, 2026"): a preview
+ * checks its strip fits with it, because the send fixes the real date.
+ */
+export const LONGEST_REDEEM_BY = '2026-09-30';
 
 /** The postcard's version: a strip across the bottom of the message half. */
 export function renderGiftCardPostcardBlock(

@@ -32,6 +32,7 @@ import {
   buildGiftLetterPage,
   buildGiftPostcardBlock,
   giftLetterPageCopy,
+  giftPostcardStripCopy,
   type CardFragment
 } from '../giftCardRenderer.js';
 import { giftQrFormat } from '../../config/giftLetters.js';
@@ -1314,12 +1315,8 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       if (renderer != null && !PRINTABLE_RENDERER_VERSIONS.has(renderer)) {
         throw new RenderRefusal('unknown_version', `This build cannot print renderer version "${renderer}".`);
       }
-      // The gift strip moves onto the renderer in a later #534 PR. Until then
-      // a gift postcard prints on the legacy HTML, so its card is never dropped.
-      const usePdf = renderer != null && !params.giftCard;
-      if (renderer != null && params.giftCard) {
-        this.writeOperationDiagnostic('provider.postgrid.renderer_fallback', 'create_postcard', { reason: 'gift_card' }, 'warn');
-      }
+      // A gift send prints its card in a strip on the back (renderPostcardForPrint).
+      const usePdf = renderer != null;
 
       const to = this.buildContact(params.recipientName, params.recipientAddress);
       const from = this.buildContact(
@@ -1439,9 +1436,9 @@ export class PostGridProvider implements LetterFulfillmentProvider {
 
   /**
    * The postcard drawn as it was previewed (src/render, #534 Phase 4): the
-   * front image and the back's message, never the addresses, which PostGrid
-   * stamps. Every failure here happens before any request, and is a
-   * RenderRefusal.
+   * front image, the back's message and a gift send's card, never the
+   * addresses, which PostGrid stamps. Every failure here happens before any
+   * request, and is a RenderRefusal.
    */
   private async renderPostcardForPrint(params: PostcardParams): Promise<Buffer> {
     const reason = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -1453,7 +1450,10 @@ export class PostGridProvider implements LetterFulfillmentProvider {
     }
     let layout;
     try {
-      layout = layoutPostcard({ message: params.backMessage, image });
+      // A gift send's card, with the code the send minted. A strip its words
+      // overflow (GiftStripOverflow) is held here.
+      const strip = params.giftCard ? giftPostcardStripCopy(params.giftCard, params.senderName || '') : undefined;
+      layout = layoutPostcard({ message: params.backMessage, image, strip });
     } catch (error) {
       throw new RenderRefusal('render', `The postcard could not be laid out: ${reason(error)}`);
     }

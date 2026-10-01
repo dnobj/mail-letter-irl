@@ -16,6 +16,7 @@ import * as path from 'path';
 import { inlineHostBridge } from '../../../src/mcp/widgetHost.js';
 import { layoutPostcard, POSTCARD_STAMP, renderPreviewSvg } from '../../../src/render/index.js';
 import { renderPostcardPreviewDocument } from '../../../src/services/previewService.js';
+import { giftPostcardStripCopy } from '../../../src/services/giftCardRenderer.js';
 
 const WIDGET_DIR = path.resolve(__dirname, '../../../widgets');
 
@@ -35,6 +36,22 @@ const RENDERED = renderPostcardPreviewDocument(renderPreviewSvg(
   layoutPostcard({
     message: 'Dear Sam,\nWish you were here.\nPat',
     image: { bytes: pngBytes(540, 360), mime: 'image/png', width: 540, height: 360 }
+  }),
+  {
+    addresses: { from: ['RETURN TO:', 'PAT EXAMPLE', '1 MAIN ST', 'SPRINGFIELD, IL 62701'], to: ['SAM RIVERA', '350 FIFTH AVE', 'NEW YORK, NY 10118'] },
+    stamp: { page: 1, geometry: POSTCARD_STAMP }
+  }
+));
+
+/** A gift postcard's preview: its card in a strip at the foot of the message (#534 PR 8). */
+const GIFT_RENDERED = renderPostcardPreviewDocument(renderPreviewSvg(
+  layoutPostcard({
+    message: 'Dear Sam,\nWish you were here.',
+    image: { bytes: pngBytes(540, 360), mime: 'image/png', width: 540, height: 360 },
+    strip: giftPostcardStripCopy(
+      { state: 'funded', url: 'https://letterirl.com/g', displayUrl: 'letterirl.com/g', redeemBy: '2026-12-30', sample: true },
+      'Pat Example'
+    )
   }),
   {
     addresses: { from: ['RETURN TO:', 'PAT EXAMPLE', '1 MAIN ST', 'SPRINGFIELD, IL 62701'], to: ['SAM RIVERA', '350 FIFTH AVE', 'NEW YORK, NY 10118'] },
@@ -112,6 +129,20 @@ describe('PostcardPreviewCard: the postcard as it prints', () => {
     ]);
     // Neither the legacy front nor the mockup.
     expect(document.querySelector('.postcard-front')).toBeNull();
+    expect(document.querySelector('.postcard-back-mockup')).toBeNull();
+  });
+
+  it("shows a gift postcard's card on the back, whole: the rule, the QR and its words (#534 PR 8)", () => {
+    const dom = mount({ previewHtml: GIFT_RENDERED, previewFrontHtml: LEGACY_FRONT });
+    const document = dom.window.document;
+    const original = new dom.window.DOMParser().parseFromString(GIFT_RENDERED, 'text/html').body.querySelectorAll(':scope > svg')[1];
+    const back = document.querySelector('#preview-back .postcard-page svg')!;
+    expectSameDrawing(original, back);
+    const rects = (fill: string) => back.querySelectorAll(`g[fill="${fill}"] > rect`).length;
+    expect(rects('#b9ad99')).toBe(1);
+    expect(rects('#000')).toBeGreaterThan(50);
+    expect(back.querySelector('title')!.textContent).toContain('Wish you were here.\nA gift from Pat Example:');
+    // The card's own mockup, which draws the legacy strip, is not shown beside it.
     expect(document.querySelector('.postcard-back-mockup')).toBeNull();
   });
 
