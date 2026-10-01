@@ -145,9 +145,12 @@ afterEach(() => {
 
 describe('a postcard preview drawn by our renderer', () => {
   it('records pdf-1 and keeps the front and back as SVG, the small image drawn in the printed box', async () => {
-    await run({ message: 'Dear Sam,\nWish you were here.\nPat' });
+    await run({ message: 'Dear Sam,\nWish you were here.\nPat\n\n' });
     const draft = drafted();
     expect(draft.rendererVersion).toBe('pdf-1');
+    // The draft keeps what the print lays out: the message as written and the full image.
+    expect(draft.message).toBe('Dear Sam,\nWish you were here.\nPat\n\n');
+    expect(draft.frontImageData).toBe(FULL);
     const html = draft.previewHtml!;
     expect(html).toContain('<body data-renderer="pdf-1">');
     const pages = html.match(/<svg [\s\S]*?<\/svg>/g)!;
@@ -216,11 +219,29 @@ describe('a postcard preview drawn by our renderer', () => {
 
     vi.mocked(createPostcardDraft).mockClear();
     expect(RENDERED_POSTCARD_CHARACTER_CAP).toBe(1_000);
-    await expect(run({ message: 'a'.repeat(1_001) })).rejects.toThrow('Postcard message is too long (1001/1000 characters).');
+    const ctx = context();
+    const capped = await run({ message: 'a'.repeat(1_001) }, ctx).catch(e => e);
+    expect(capped.message).toContain('Postcard message is too long (1001/1000 characters).');
+    expect(capped).toMatchObject({ diagnosticClass: 'validation_error' });
+    expect(ctx.logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'quote.postcard.exceeds_character_cap', messageLength: 1_001, maxLength: 1_000 }),
+      expect.any(String)
+    );
     expect(createPostcardDraft).not.toHaveBeenCalled();
 
     vi.stubEnv('LETTER_IRL_PRINT_RENDERER', 'html');
     await expect(run({ message })).rejects.toThrow(`Postcard message is too long (${message.length}/500 characters).`);
+  });
+
+  it('refuses what cannot print before measuring the back, as a letter does', async () => {
+    await expect(run({ message: `${lines(17)} sta${FF}` })).rejects.toThrow(`${FF} (U+FB00) in the message.`);
+    expect(downloadAndProcessPostcardImageWithPreview).not.toHaveBeenCalled();
+  });
+
+  it('keeps any size but 6x9 on the legacy HTML, as the print draws 6x9 only', async () => {
+    await run({ size: '6x4' });
+    expect(drafted().rendererVersion).toBeUndefined();
+    expect(drafted().previewHtml).not.toContain('data-renderer');
   });
 
   it("checks the message against the renderer's font, and the addresses against Open Sans", async () => {

@@ -269,8 +269,9 @@ async function handler(
     balanceCanPay: available >= requiredCredits
   });
   // A gift postcard's strip is still the legacy HTML's (#534), so a gift send
-  // keeps that print and its limits. Read once, so every check agrees.
-  const renderer = gift.isGift ? 'html' : printRenderer();
+  // keeps that print and its limits, as does any size but 6x9, which is all
+  // our renderer draws. Read once, so every check agrees.
+  const renderer = gift.isGift || size !== '6x9' ? 'html' : printRenderer();
   const messageLimit = renderer === 'pdf'
     ? RENDERED_POSTCARD_CHARACTER_CAP
     : gift.isGift ? MAX_GIFT_MESSAGE_LENGTH : MAX_MESSAGE_LENGTH;
@@ -280,43 +281,22 @@ async function handler(
     context.logger.warn(
       {
         correlationId: context.correlationId,
-        event: "quote.postcard.message_too_long",
+        event: renderer === 'pdf' ? "quote.postcard.exceeds_character_cap" : "quote.postcard.message_too_long",
         messageLength: input.message.length,
         maxLength: messageLimit
       },
       "Postcard message too long"
     );
-    throw new Error(
-      `Postcard message is too long (${input.message.length}/${messageLimit} characters). ` +
-      (gift.isGift
-        ? `A gift postcard leaves room for the gift card, so please shorten your message.`
-        : `Please shorten your message to fit on the postcard back.`)
+    // An expected refusal: logged as validation_error, not unknown_error.
+    throw Object.assign(
+      new Error(
+        `Postcard message is too long (${input.message.length}/${messageLimit} characters). ` +
+        (gift.isGift
+          ? `A gift postcard leaves room for the gift card, so please shorten your message.`
+          : `Please shorten your message to fit on the postcard back.`)
+      ),
+      { diagnosticClass: "validation_error" }
     );
-  }
-
-  // On our renderer the back is measured as it prints, before the picture
-  // is fetched: 16 lines in its left half.
-  if (renderer === 'pdf') {
-    const { page, overflowLines } = layoutPostcardBack(input.message);
-    if (overflowLines > 0) {
-      context.logger.warn(
-        {
-          correlationId: context.correlationId,
-          event: "quote.postcard.exceeds_back",
-          linesUsed: page.linesUsed,
-          linesAvailable: page.linesAvailable
-        },
-        "Postcard message runs past its half of the back"
-      );
-      throw Object.assign(
-        new Error(
-          `Postcard message is ${overflowLines} line${overflowLines === 1 ? "" : "s"} too long for the back: ` +
-          `it takes ${page.linesUsed} lines and the back holds ${page.linesAvailable}. ` +
-          `Please shorten your message to fit on the postcard back.`
-        ),
-        { diagnosticClass: "validation_error" }
-      );
-    }
   }
 
   // If sender not provided, try to use saved return address
@@ -418,6 +398,31 @@ async function handler(
     { sender, recipient: input.recipient, senderIsSaved: usedSavedReturnAddress },
     context
   );
+
+  // On our renderer the back is measured as it prints, before the picture
+  // is fetched: 16 lines in its left half.
+  if (renderer === 'pdf') {
+    const { page, overflowLines } = layoutPostcardBack(input.message);
+    if (overflowLines > 0) {
+      context.logger.warn(
+        {
+          correlationId: context.correlationId,
+          event: "quote.postcard.exceeds_back",
+          linesUsed: page.linesUsed,
+          linesAvailable: page.linesAvailable
+        },
+        "Postcard message runs past its half of the back"
+      );
+      throw Object.assign(
+        new Error(
+          `Postcard message is ${overflowLines} line${overflowLines === 1 ? "" : "s"} too long for the back: ` +
+          `it takes ${page.linesUsed} lines and the back holds ${page.linesAvailable}. ` +
+          `Please shorten your message to fit on the postcard back.`
+        ),
+        { diagnosticClass: "validation_error" }
+      );
+    }
+  }
 
   context.logger.info(
     {

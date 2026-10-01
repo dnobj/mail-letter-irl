@@ -160,7 +160,9 @@ async function handler(
     ],
     recipientSummary: { name: recipient.name, city: recipient.city, state: recipient.state },
     lettersRemaining: Math.floor(created.creditsRemaining / 2),
-    previewFrontHtml: postcard.preview_html,
+    // The front alone: a draft our renderer drew keeps both sides in one
+    // document (#534 Phase 4), which is not the front.
+    previewFrontHtml: created.draft.renderer_version ? undefined : postcard.preview_html,
     isRetry: false,
     suggestSaveReturnAddress,
     saveReturnAddressNote,

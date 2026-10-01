@@ -59,7 +59,7 @@ Probe P9 (October 1, 2026) sent PDF postcards at the only size the postcard tool
 | P9b | The same at 9 x 6 in | Refused at once: `pdf_incorrect_size_error`, "File has incorrect page dimensions 9x6 when expecting 9.25x6.25." |
 | P9c | 9.25 x 6.25 in, the back drawn only in its left half, as the legacy back is | Accepted and stayed `ready`, `pageCount` 2 |
 | P10b | Our renderer's own postcard (`layoutPostcard`): a photo covering the front, 16 lines of the message in the back's left half | Accepted and stayed `ready`; the back flattened exactly as drawn |
-| P11 | P10b's PDF, with a three-line recipient and a four-line return address | Each block kept its first baseline: "RETURN TO:" at 0.958 in with five lines below it, the recipient at 4.937 in with three |
+| P11 | P10b's PDF, with a three-line recipient and a four-line return address | Each block kept its first baseline: "RETURN TO:" at 0.958 in with the four-line return address below it, the recipient at 4.937 in with three lines |
 
 What they show:
 - A postcard PDF carries its bleed: 0.125 in on every side.

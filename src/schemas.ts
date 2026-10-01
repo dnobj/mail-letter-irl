@@ -614,8 +614,8 @@ export const quoteAndPreviewPostcardInputSchema: JsonSchema = {
     recipient: addressSchema,
     message: {
       type: "string",
-      description: "Message for back of postcard (max ~400 characters)",
-      maxLength: 500
+      description: "Message for the back of the postcard. It must fit the back: 16 lines, about 500 characters of prose",
+      maxLength: 1000
     },
     size: {
       type: "string",
