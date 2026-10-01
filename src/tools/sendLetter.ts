@@ -11,7 +11,7 @@ import { processLetterJob } from '../services/letterJobService.js';
 import { createMailOrderFromDraft } from '../services/mailSendService.js';
 import { hasReturnAddress } from '../services/returnAddressService.js';
 import type { LetterStatus } from '../services/types.js';
-import { heldSendFields, heldSendStatusText, waitsInOutbox, type HeldSendFields } from './heldSend.js';
+import { heldPastNow, heldSendFields, heldSendStatusText, waitsInOutbox, type HeldSendFields } from './heldSend.js';
 import { friendlyDraftError as sharedDraftError } from './draftErrors.js';
 import { sendToolDescription } from './previewSendStep.js';
 
@@ -95,9 +95,8 @@ async function handler(
   context.user.creditsRemaining = created.creditsRemaining;
 
   // A retry of a send already made: the letter as it stands now (#535).
-  const retryHeld = created.alreadyConsumed
-    ? heldSendFields(created.letter, waitsInOutbox(created.letter.status))
-    : undefined;
+  const retryWaiting = created.alreadyConsumed && waitsInOutbox(created.letter.status);
+  const retryHeld = created.alreadyConsumed ? heldSendFields(created.letter, retryWaiting) : undefined;
   if (created.alreadyConsumed) {
     context.logger.info(
       {
@@ -109,7 +108,7 @@ async function handler(
     );
     return {
       orderId: created.letter.letter_id,
-      currentStatus: retryHeld?.cancellable ? 'scheduled' : publicStatus(created.letter.status),
+      currentStatus: retryHeld && retryWaiting ? 'scheduled' : publicStatus(created.letter.status),
       statusTimeline: [{ timestampISO: now, statusText: 'Existing order returned (duplicate request)' }],
       recipientSummary: { name: recipient.name, city: recipient.city, state: recipient.state },
       lettersRemaining: Math.floor(created.creditsRemaining / 2),
@@ -144,18 +143,19 @@ async function handler(
   // another process took the job first. Either way it goes out from the queue.
   // Sent with an arrival date (#535): until its mail date it waits in the
   // outbox, and the dispatch above does not take it.
-  const held = heldSendFields(created.letter, !submission.claimed);
+  const waiting = heldPastNow(created.job, submission.claimed, context.now());
+  const held = heldSendFields(created.letter, waiting);
   const currentStatus: PublicStatus = submission.completed
     ? 'accepted'
-    : held?.cancellable
+    : held && waiting
       ? 'scheduled'
       : submission.retryScheduled || !submission.claimed
         ? 'pending'
         : 'failed';
   const submissionText = submission.completed
     ? 'Accepted by print provider'
-    : held?.cancellable
-      ? heldSendStatusText(held.schedule, context.now())
+    : held && waiting
+      ? heldSendStatusText(held, context.now())
       : !submission.claimed
         ? 'Queued for the print provider'
         : submission.retryScheduled
@@ -166,7 +166,7 @@ async function handler(
   if (held) {
     orderRecord.schedule = held.schedule;
     orderRecord.cancellable = held.cancellable;
-    if (held.cancellable) orderRecord.currentStatus = 'scheduled';
+    if (waiting) orderRecord.currentStatus = 'scheduled';
   }
 
   let suggestSaveReturnAddress: boolean | undefined;

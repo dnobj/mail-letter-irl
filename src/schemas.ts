@@ -307,7 +307,7 @@ export const sendLetterOutputSchema: JsonSchema = {
       properties: { arriveBy: { type: "string" }, mailOn: { type: "string" } },
       required: ["arriveBy", "mailOn"]
     },
-    cancellable: { type: "boolean", description: "With an arrival date: whether cancel_scheduled_mail can still cancel it free" },
+    cancellable: { type: "boolean", description: "With an arrival date: whether it can still be cancelled free, before it goes to the printer" },
     trackingSupport: {
       type: "string",
       enum: ["none", "estimated_only", "carrier_tracking"],
@@ -524,7 +524,7 @@ export const getOrderStatusOutputSchema: JsonSchema = {
     followUpSuggestedPrompt: { type: "string" },
     arriveBy: { type: "string", description: "Sent with an arrival date: the date it aims to arrive by, YYYY-MM-DD" },
     mailOn: { type: "string", description: "Sent with an arrival date: the day it goes to the printer, YYYY-MM-DD" },
-    cancellable: { type: "boolean", description: "With an arrival date: whether cancel_scheduled_mail can still cancel it free" },
+    cancellable: { type: "boolean", description: "With an arrival date: whether it can still be cancelled free, before it goes to the printer" },
     trackingSupport: {
       type: "string",
       enum: ["none", "estimated_only", "carrier_tracking"],
@@ -594,7 +594,7 @@ export const listOrdersOutputSchema: JsonSchema = {
           sentAt: { type: "string" },
           arriveBy: { type: "string", description: "Sent with an arrival date: the date it aims to arrive by, YYYY-MM-DD" },
           mailOn: { type: "string", description: "Sent with an arrival date: the day it goes to the printer, YYYY-MM-DD" },
-          cancellable: { type: "boolean", description: "With an arrival date: whether cancel_scheduled_mail can still cancel it free" }
+          cancellable: { type: "boolean", description: "With an arrival date: whether it can still be cancelled free, before it goes to the printer" }
         }
       }
     },
@@ -919,7 +919,7 @@ export const sendPostcardOutputSchema: JsonSchema = {
       properties: { arriveBy: { type: "string" }, mailOn: { type: "string" } },
       required: ["arriveBy", "mailOn"]
     },
-    cancellable: { type: "boolean", description: "With an arrival date: whether cancel_scheduled_mail can still cancel it free" },
+    cancellable: { type: "boolean", description: "With an arrival date: whether it can still be cancelled free, before it goes to the printer" },
     trackingSupport: {
       type: "string",
       enum: ["none", "estimated_only", "carrier_tracking"],

@@ -29,6 +29,7 @@ export class FileAccountStore {
    *
    * Database statuses: draft, queued, processing, accepted, sent, in_transit, delivered, returned, failed, cancelled
    * MCP statuses: pending, accepted, printing, in_transit, delivered, returned, failed, cancelled
+   * (and scheduled, for a queued letter with an arrival date: see fetchOrders, #535)
    */
   private mapStatus(dbStatus: string): LetterStatus {
     switch (dbStatus) {

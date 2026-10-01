@@ -1367,14 +1367,19 @@ function heldMailSentence(result: Record<string, unknown>): string {
 /**
  * The sentence for mail sent with an arrival date that still waits for its
  * mail date (#535), on a send or an order status: when it goes to the
- * printer, and that it can be cancelled until then.
+ * printer, and that it can be cancelled until then. The cancel is named only
+ * while cancel_scheduled_mail is listed (the flag); mail held before the flag
+ * went off still goes on its date.
  */
 function scheduledOrderSentence(result: Record<string, unknown>): string {
   const schedule = result.schedule as { arriveBy?: unknown; mailOn?: unknown } | undefined;
   const arriveBy = typeof schedule?.arriveBy === "string" ? schedule.arriveBy : result.arriveBy;
   const mailOn = typeof schedule?.mailOn === "string" ? schedule.mailOn : result.mailOn;
   if (typeof arriveBy !== "string" || typeof mailOn !== "string") return "";
-  const cancel = result.cancellable === true ? " It can be cancelled free until then with cancel_scheduled_mail." : "";
+  const cancel =
+    result.cancellable === true && isArriveByEnabled()
+      ? " It can be cancelled free until then with cancel_scheduled_mail."
+      : "";
   return ` ${scheduleSentence({ arriveBy, mailOn }, new Date())}${cancel}`;
 }
 

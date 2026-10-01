@@ -391,7 +391,7 @@ export const quoteAndPreviewOutputZ = z.object({
 const heldDatesZ = z.object({ arriveBy: z.string(), mailOn: z.string() });
 const HELD_SCHEDULE_DESCRIPTION =
   "Sent with an arrival date: the date it aims to arrive by and the day it goes to the printer, YYYY-MM-DD. It waits until then.";
-const CANCELLABLE_DESCRIPTION = "With an arrival date: whether cancel_scheduled_mail can still cancel it free";
+const CANCELLABLE_DESCRIPTION = "With an arrival date: whether it can still be cancelled free, before it goes to the printer";
 
 export const sendLetterOutputZ = z.object({
   orderId: z.string(),

@@ -1147,7 +1147,7 @@
           },
           "cancellable": {
             "type": "boolean",
-            "description": "With an arrival date: whether cancel_scheduled_mail can still cancel it free"
+            "description": "With an arrival date: whether it can still be cancelled free, before it goes to the printer"
           },
           "trackingSupport": {
             "type": "string",
@@ -1581,7 +1581,7 @@
           },
           "cancellable": {
             "type": "boolean",
-            "description": "With an arrival date: whether cancel_scheduled_mail can still cancel it free"
+            "description": "With an arrival date: whether it can still be cancelled free, before it goes to the printer"
           },
           "trackingSupport": {
             "type": "string",
@@ -1725,7 +1725,7 @@
                 },
                 "cancellable": {
                   "type": "boolean",
-                  "description": "With an arrival date: whether cancel_scheduled_mail can still cancel it free"
+                  "description": "With an arrival date: whether it can still be cancelled free, before it goes to the printer"
                 }
               }
             }
@@ -2269,7 +2269,7 @@
           },
           "cancellable": {
             "type": "boolean",
-            "description": "With an arrival date: whether cancel_scheduled_mail can still cancel it free"
+            "description": "With an arrival date: whether it can still be cancelled free, before it goes to the printer"
           },
           "trackingSupport": {
             "type": "string",
