@@ -105,5 +105,8 @@
  *     letter itself: orderStatus and cancellable.
  * r26: request_send (#535) carries a preview's arrival dates (schedule), and
  *     its link text says when, once sent, the mail goes to the printer.
+ * r27: cancel_scheduled_mail's description promises only what is sure: what
+ *     paid for the mail goes back while it can still be used, and the answer
+ *     says what came back (#535).
  */
-export const STEERING_COPY_REV = 26;
+export const STEERING_COPY_REV = 27;
