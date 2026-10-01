@@ -40,8 +40,9 @@ export async function createDraft(params: CreateDraftParams): Promise<CreateDraf
       user_id, sender, recipient, body_text, sign_off,
       required_credits, preview_html, sender_validation, recipient_validation,
       layout_type, header_image_data, header_image_url, inline_image_data, inline_image_url,
-      is_gift_send, renderer_version, status, expires_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'pending', $17)
+      is_gift_send, renderer_version, status, expires_at, arrive_by, mail_on
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'pending', $17,
+              $18::date, $19::date)
     RETURNING draft_id, expires_at`,
     [
       params.userId,
@@ -61,6 +62,8 @@ export async function createDraft(params: CreateDraftParams): Promise<CreateDraf
       params.isGiftSend === true,
       params.rendererVersion ?? null,
       expiresAt,
+      params.schedule?.arriveBy ?? null,
+      params.schedule?.mailOn ?? null,
     ]
   );
 
@@ -69,7 +72,8 @@ export async function createDraft(params: CreateDraftParams): Promise<CreateDraf
   writeDiagnostic('info', 'draft.created', {
     layoutType,
     expiresInHours,
-    renderer: params.rendererVersion ?? 'html'
+    renderer: params.rendererVersion ?? 'html',
+    scheduled: params.schedule !== undefined
   });
 
   return {
@@ -92,8 +96,9 @@ export async function createPostcardDraft(params: CreatePostcardDraftParams): Pr
       user_id, sender, recipient, body_text, sign_off,
       required_credits, preview_html, sender_validation, recipient_validation,
       mail_type, front_image_data, front_image_url, postcard_size,
-      is_gift_send, renderer_version, status, expires_at
-    ) VALUES ($1, $2, $3, $4, NULL, $5, $6, $7, $8, 'postcard', $9, $10, $11, $12, $13, 'pending', $14)
+      is_gift_send, renderer_version, status, expires_at, arrive_by, mail_on
+    ) VALUES ($1, $2, $3, $4, NULL, $5, $6, $7, $8, 'postcard', $9, $10, $11, $12, $13, 'pending', $14,
+              $15::date, $16::date)
     RETURNING draft_id, expires_at`,
     [
       params.userId,
@@ -110,6 +115,8 @@ export async function createPostcardDraft(params: CreatePostcardDraftParams): Pr
       params.isGiftSend === true,
       params.rendererVersion ?? null,
       expiresAt,
+      params.schedule?.arriveBy ?? null,
+      params.schedule?.mailOn ?? null,
     ]
   );
 
@@ -118,7 +125,8 @@ export async function createPostcardDraft(params: CreatePostcardDraftParams): Pr
   writeDiagnostic('info', 'draft.postcard_created', {
     postcardSize,
     expiresInHours,
-    renderer: params.rendererVersion ?? 'html'
+    renderer: params.rendererVersion ?? 'html',
+    scheduled: params.schedule !== undefined
   });
 
   return {

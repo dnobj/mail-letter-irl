@@ -19,7 +19,8 @@ import { USPS_HOLIDAYS, USPS_HOLIDAYS_THROUGH } from '../content/uspsHolidays.js
 /**
  * 'YYYY-MM-DD'. A plain string: a date from outside (a tool's input, a
  * request) must pass parseCalendarDate first, and every other function here
- * throws a RangeError on anything that is not one.
+ * throws a RangeError on anything that is not a real date written so,
+ * 2026-02-30 included.
  */
 export type CalendarDate = string;
 
@@ -47,11 +48,24 @@ function utcMidnight(year: number, month: number, day: number): Date {
   return date;
 }
 
+/** The day number (days since 1970-01-01) of a real date written 'YYYY-MM-DD', or null. */
+function realDayNumber(value: string): number | null {
+  const match = DATE_PATTERN.exec(value);
+  if (!match) return null;
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  const date = utcMidnight(year, month, day);
+  // A day past the month's end rolls over (2026-02-30 becomes March 2): only a
+  // date that survives the round trip is real.
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+    ? date.getTime() / DAY_MS
+    : null;
+}
+
 /** The day number (days since 1970-01-01) of a calendar date. */
 function dayNumber(date: CalendarDate): number {
-  const match = DATE_PATTERN.exec(date);
-  if (!match) throw new RangeError(`Not a calendar date (YYYY-MM-DD): ${date}`);
-  return utcMidnight(Number(match[1]), Number(match[2]), Number(match[3])).getTime() / DAY_MS;
+  const day = realDayNumber(date);
+  if (day === null) throw new RangeError(`Not a calendar date (YYYY-MM-DD): ${date}`);
+  return day;
 }
 
 function fromDayNumber(day: number): CalendarDate {
@@ -60,15 +74,7 @@ function fromDayNumber(day: number): CalendarDate {
 
 /** `value` as a calendar date if it is a real one written 'YYYY-MM-DD', or null. */
 export function parseCalendarDate(value: string): CalendarDate | null {
-  const match = DATE_PATTERN.exec(value);
-  if (!match) return null;
-  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
-  const date = utcMidnight(year, month, day);
-  // A day past the month's end rolls over (2026-02-30 becomes March 2): only a
-  // date that survives the round trip is real.
-  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
-    ? match[0]
-    : null;
+  return realDayNumber(value) === null ? null : value;
 }
 
 export function addCalendarDays(date: CalendarDate, days: number): CalendarDate {
@@ -136,6 +142,9 @@ export function newYorkDate(instant: Date): CalendarDate {
  * autumn change) its first, daylight-saving instance; DISPATCH_HOUR is neither.
  */
 export function newYorkTime(date: CalendarDate, hour: number): Date {
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23) {
+    throw new RangeError(`hour must be a whole hour from 0 to 23, not ${hour}`);
+  }
   // The wall-clock time written as if it were UTC, then moved by New York's
   // offset; the offset is read again at the answer, in case the first guess
   // fell on the other side of a clock change. New York's offset is a whole

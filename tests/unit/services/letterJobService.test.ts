@@ -23,6 +23,7 @@ vi.mock('../../../src/services/providers/index.js', () => ({
 }));
 
 import {
+  createLetterJobWithClient,
   lettersWaitingBehindPause,
   processDueLetterJobs,
   processLetterJob,
@@ -852,5 +853,44 @@ describe("the outbox's stop (#444)", () => {
       expect(String(query.mock.calls[0]?.[0])).toContain("SET status = 'processing'");
     }
     vi.unstubAllEnvs();
+  });
+});
+
+describe('createLetterJobWithClient: arrive-by holds (#535)', () => {
+  const letter = { letter_id: 'letter-1' } as Parameters<typeof createLetterJobWithClient>[1];
+  function jobClient() {
+    const calls: Array<{ sql: string; params: unknown[] }> = [];
+    const client = {
+      query: vi.fn(async (sql: string, params: unknown[] = []) => {
+        calls.push({ sql, params });
+        return { rows: sql.includes('INSERT INTO letter_jobs') ? [{ job_id: 'job-1', letter_id: 'letter-1' }] : [] };
+      })
+    };
+    return { client: client as unknown as Parameters<typeof createLetterJobWithClient>[0], calls };
+  }
+
+  it('holds a job until its release: both its schedule and its first attempt', async () => {
+    const { client, calls } = jobClient();
+    const notBefore = new Date('2026-10-06T13:00:00Z');
+
+    await createLetterJobWithClient(client, letter, { notBefore });
+
+    const insert = calls.find(call => call.sql.includes('INSERT INTO letter_jobs'))!;
+    expect(insert.sql).toMatch(/max_attempts, scheduled_at,\s+idempotency_key, next_attempt_at, metadata/);
+    expect(insert.sql).toMatch(/\$3, COALESCE\(\$5::timestamptz, NOW\(\)\), \$2,\s+COALESCE\(\$5::timestamptz, NOW\(\)\), \$4\)/);
+    expect(insert.params[4]).toBe(notBefore);
+    expect(JSON.parse(insert.params[3] as string)).toEqual({ source: 'transactional-outbox', heldUntil: '2026-10-06T13:00:00.000Z' });
+    // The letter is queued either way.
+    expect(calls.some(call => call.sql.includes("UPDATE letters SET status = 'queued'"))).toBe(true);
+  });
+
+  it('makes a job due now when nothing holds it', async () => {
+    const { client, calls } = jobClient();
+
+    await createLetterJobWithClient(client, letter);
+
+    const insert = calls.find(call => call.sql.includes('INSERT INTO letter_jobs'))!;
+    expect(insert.params[4]).toBeNull();
+    expect(JSON.parse(insert.params[3] as string)).toEqual({ source: 'transactional-outbox' });
   });
 });

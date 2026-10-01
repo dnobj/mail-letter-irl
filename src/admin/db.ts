@@ -1,11 +1,15 @@
 import pg from "pg";
 
+import { readDatesAsStrings } from "../db/dateParser.js";
 import type { AdminSqlClient } from "./database.js";
 import { AdminFoundationError } from "./errors.js";
 import { readAdminDatabaseIdentity } from "./queries/environment.js";
 import type { AdminEnvironment, AdminMode } from "./runtimeConfig.js";
 
 const { Pool } = pg;
+
+// Calendar dates as 'YYYY-MM-DD' strings, as the API reads them (#535).
+readDatesAsStrings();
 
 /**
  * Two pools, two roles. Reads always go through the reader role, so the page

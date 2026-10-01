@@ -81,6 +81,10 @@ The preview decides, because the preview has to show the page that will print.
 
 The draft records the decision (`letter_drafts.is_gift_send`) and `send_letter` / `send_postcard` honour it: inside the one send transaction the gift is consumed under the account lock, then the per-account and global mail caps, the daily gift budget and the #412 duplicate guard run, and a refusal rolls the gift back. Pay & Send refuses a gift draft before any charge (`DRAFT_IS_GIFT`). See [Letter Send Flow](letter-send-flow.md).
 
+Gift mail held to arrive by a date (#535) still consumes its gift letter at the send. Its card, though, is decided as of the moment it goes to the printer, 09:00 New York time on its mail date:
+- a seed campaign must still print its code then, so a letter held past the campaign's end prints its own card instead of a dead code;
+- a chain code's `LETTER_IRL_GIFT_CODE_TTL_DAYS` count from then, so the recipient gets the whole time however long the letter waited.
+
 ## Redeeming a code
 
 One entry point, [codeRedemptionService.ts](../src/services/codeRedemptionService.ts), serves every surface:
