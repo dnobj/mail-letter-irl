@@ -1,4 +1,20 @@
 import { JsonSchema } from "./contracts/types.js";
+import { ARRIVE_BY_DESCRIPTION } from "./zodSchemas.js";
+
+/** Arrive-by (#535): the preview's input, and what its output says. */
+const arriveBySchema = { type: "string", description: ARRIVE_BY_DESCRIPTION } as const;
+const previewScheduleSchema = {
+  type: "object",
+  description: "The arrival date asked for, when there was one (#535): when it goes to the printer and the dates on offer",
+  properties: {
+    arriveBy: { type: "string", description: "The date it should arrive by, YYYY-MM-DD in New York" },
+    mailOn: { type: "string", description: "The day it goes to the printer, YYYY-MM-DD" },
+    releasesAt: { type: "string", description: "ISO time the hold ends: 09:00 New York time on the mail date, sent to the printer within the hour" },
+    earliestArrival: { type: "string", description: "The first arrival date on offer, YYYY-MM-DD" },
+    latestArrival: { type: "string", description: "The last arrival date on offer, YYYY-MM-DD" }
+  },
+  required: ["arriveBy", "mailOn", "releasesAt", "earliestArrival", "latestArrival"]
+} as const;
 
 export const addressSchema: JsonSchema = {
   type: "object",
@@ -33,7 +49,8 @@ export const quoteAndPreviewLetterTextOnlyInputSchema: JsonSchema = {
     sendAsGift: {
       type: "boolean",
       description: "Set true only when the user asks to send this as their gift letter: it is free and adds a printed page with a card for the recipient. Leave it out otherwise; a gift letter is then used only if the balance cannot pay."
-    }
+    },
+    arriveBy: arriveBySchema
   }
 };
 
@@ -74,7 +91,8 @@ export const quoteAndPreviewLetterWithHeaderImageInputSchema: JsonSchema = {
     sendAsGift: {
       type: "boolean",
       description: "Set true only when the user asks to send this as their gift letter: it is free and adds a printed page with a card for the recipient. Leave it out otherwise; a gift letter is then used only if the balance cannot pay."
-    }
+    },
+    arriveBy: arriveBySchema
   }
 };
 
@@ -111,7 +129,8 @@ export const quoteAndPreviewLetterWithImageInputSchema: JsonSchema = {
     sendAsGift: {
       type: "boolean",
       description: "Set true only when the user asks to send this as their gift letter: it is free and adds a printed page with a card for the recipient. Leave it out otherwise; a gift letter is then used only if the balance cannot pay."
-    }
+    },
+    arriveBy: arriveBySchema
   }
 };
 
@@ -185,6 +204,7 @@ export const quoteAndPreviewOutputSchema: JsonSchema = {
       }
     },
     giftLettersAvailable: { type: "integer", description: "Unsent gift letters on the account, when there are any" },
+    schedule: previewScheduleSchema,
     previewHtml: { type: "string" },
     lettersRequired: { type: "number", description: "Letters required from balance (always 1 for standard letter)" },
     canSendNow: { type: "boolean" },
@@ -644,7 +664,8 @@ export const quoteAndPreviewPostcardInputSchema: JsonSchema = {
     sendAsGift: {
       type: "boolean",
       description: "Set true only when the user asks to send this as their gift letter: it is free and adds a printed page with a card for the recipient. Leave it out otherwise; a gift letter is then used only if the balance cannot pay."
-    }
+    },
+    arriveBy: arriveBySchema
   }
 };
 
@@ -661,6 +682,7 @@ export const quoteAndPreviewPostcardOutputSchema: JsonSchema = {
       }
     },
     giftLettersAvailable: { type: "integer", description: "Unsent gift letters on the account, when there are any" },
+    schedule: previewScheduleSchema,
     previewFrontHtml: { type: "string", description: "HTML preview of postcard front (image)" },
     previewBackHtml: { type: "string", description: "HTML preview of postcard back (message)" },
     previewHtml: { type: "string", description: "The postcard as it prints, front and back as SVG, when our renderer drew it (#534)" },

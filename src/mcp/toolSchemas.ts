@@ -46,7 +46,8 @@ export const toolInputSchemas = {
     recipient: addressSchema,
     bodyText: z.string(),
     signOff: z.string(),
-    sendAsGift: z.boolean().optional()
+    sendAsGift: z.boolean().optional(),
+    arriveBy: z.string().optional()
   }),
   quote_and_preview_letter_with_header_image: z.object({
     sender: addressSchema.optional(),
@@ -57,7 +58,8 @@ export const toolInputSchemas = {
     image: imageFileParamSchema.optional(),
     // Alternative: direct image URL
     imageUrl: z.string().optional(),
-    sendAsGift: z.boolean().optional()
+    sendAsGift: z.boolean().optional(),
+    arriveBy: z.string().optional()
   }),
   quote_and_preview_letter_with_image: z.object({
     sender: addressSchema.optional(),
@@ -68,7 +70,8 @@ export const toolInputSchemas = {
     image: imageFileParamSchema.optional(),
     // Alternative: direct image URL
     imageUrl: z.string().optional(),
-    sendAsGift: z.boolean().optional()
+    sendAsGift: z.boolean().optional(),
+    arriveBy: z.string().optional()
   }),
   send_letter: z.object({
     draftId: z.string(),
@@ -121,7 +124,8 @@ export const toolInputSchemas = {
     image: imageFileParamSchema.optional(),
     // Alternative: direct image URL
     imageUrl: z.string().optional(),
-    sendAsGift: z.boolean().optional()
+    sendAsGift: z.boolean().optional(),
+    arriveBy: z.string().optional()
   }),
   send_postcard: z.object({
     draftId: z.string(),

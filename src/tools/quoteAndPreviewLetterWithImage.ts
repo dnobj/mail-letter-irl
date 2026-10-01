@@ -25,6 +25,7 @@ import {
   createLetterDraftAndBuildOutput,
   type LetterQuoteOutput
 } from "./letterHelpers.js";
+import { previewSchedule } from "./arriveByInput.js";
 import { previewSendStep } from "./previewSendStep.js";
 import { downloadAndProcessLetterImageWithPreview, ImageProcessingError } from "../services/imageService.js";
 import type { ImageFileParam } from "../services/types.js";
@@ -47,6 +48,8 @@ interface QuoteAndPreviewLetterWithImageInput {
   imageUrl?: string;
   /** Send as the account's gift letter (docs/gift-letters.md). */
   sendAsGift?: boolean;
+  /** The date it should arrive by, YYYY-MM-DD (#535); served only while the flag is on. */
+  arriveBy?: string;
 }
 
 // ============================================================================
@@ -74,6 +77,10 @@ async function handler(
     },
     "Processing quote_and_preview_letter_with_image"
   );
+
+  // Arrive-by (#535): checked first, so a date that cannot be met is refused
+  // before any picture is fetched or address validated.
+  const schedule = previewSchedule(input.arriveBy, context);
 
   // Get image source - REQUIRED. A file ChatGPT resolved, then imageUrl, then
   // a recent upload through the upload card (see previewImageSource.ts).
@@ -234,6 +241,7 @@ async function handler(
     addressWarnings,
     gift,
     printLayout,
+    schedule,
     context
   });
 }

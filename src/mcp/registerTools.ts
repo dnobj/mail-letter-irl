@@ -91,6 +91,8 @@ import {
 } from "../auth/clientProfiles.js";
 import { inlineHostBridge } from "./widgetHost.js";
 import { isSendConfirmationEnabled } from "../config/sendConfirmation.js";
+import { isArriveByEnabled } from "../config/arriveBy.js";
+import { scheduleSentence } from "../tools/arriveByInput.js";
 import { uploadsThroughCard } from "../config/cardUpload.js";
 import {
   REQUEST_SEND_TOOL,
@@ -844,6 +846,26 @@ export function getZodInputShape(name: string) {
   return schema?.shape;
 }
 
+/**
+ * A tool's input as this deployment serves it. The preview tools' `arriveBy`
+ * (#535) is offered only while LETTER_IRL_ARRIVE_BY_ENABLED is on, so no model
+ * is shown a field the preview would refuse; read at each registration, so
+ * switching the flag needs a reconnect, not a deploy.
+ *
+ * Unoffered is not unaccepted: the SDK validates in strip mode and hands the
+ * handler only declared fields, so a client still holding the schema from
+ * while the flag was on (apps cache it until a refresh) would have its date
+ * dropped and its mail sent at once. While off, the four previews are served
+ * as an object that passes unknown keys through, so the preview sees the date
+ * and refuses it. Every other tool is served its raw shape, as before.
+ */
+export function getServedInputSchema(name: string): z.ZodRawShape | z.AnyZodObject | undefined {
+  const shape = getZodInputShape(name);
+  if (!shape || !("arriveBy" in shape) || isArriveByEnabled()) return shape;
+  const served = Object.fromEntries(Object.entries(shape).filter(([key]) => key !== "arriveBy")) as z.ZodRawShape;
+  return z.object(served).passthrough();
+}
+
 export function getZodOutputShape(name: string) {
   const schema = zodOutputSchemas[name as ToolName];
   return schema?.shape;
@@ -1010,7 +1032,7 @@ export async function registerLetterTools(
   // Each description in this app's words (#484).
   const toolDefs = appServer.listTools(client);
   for (const tool of toolDefs) {
-    const inputShape = getZodInputShape(tool.name);
+    const inputShape = getServedInputSchema(tool.name);
     const outputShape = getZodOutputShape(tool.name);
     if (!inputShape || !outputShape) {
       continue;
@@ -1045,7 +1067,12 @@ export async function registerLetterTools(
         // (#484); every tool has a title now.
         title: tool.title,
         description: tool.description,
-        inputSchema: inputShape,
+        // A raw shape, or for the previews while arrive-by is off a passthrough
+        // object (getServedInputSchema); the SDK normalizes either. Typed as
+        // getZodInputShape's loose result, as it always was: the SDK's
+        // generics cannot infer through the union (TS2589), and the handler
+        // below takes its arguments loosely anyway.
+        inputSchema: inputShape as ReturnType<typeof getZodInputShape>,
         outputSchema: outputShape,
         annotations,
         _meta: buildToolMeta(tool.name, tool.meta)
@@ -1297,6 +1324,20 @@ const PREVIEW_TOOLS: ReadonlySet<string> = new Set([
   "quote_and_preview_postcard"
 ]);
 
+/**
+ * A held preview's dates (#535), for the narration: the sentence the preview
+ * built with its own clock (its deliveryEstimate), and what a send then does.
+ * Empty for mail sent at once.
+ */
+function heldMailSentence(result: Record<string, unknown>): string {
+  const schedule = result.schedule as { arriveBy?: unknown; mailOn?: unknown } | undefined;
+  if (typeof schedule?.arriveBy !== "string" || typeof schedule.mailOn !== "string") return "";
+  const sentence = typeof result.deliveryEstimate === "string" && result.deliveryEstimate.startsWith("Goes to the printer")
+    ? result.deliveryEstimate
+    : scheduleSentence({ arriveBy: schedule.arriveBy, mailOn: schedule.mailOn }, new Date());
+  return ` Scheduled: ${sentence} If it is sent, it is held until then; USPS does not guarantee First-Class dates.`;
+}
+
 export function summarizeToolResult(
   toolName: string,
   result: Record<string, unknown>,
@@ -1339,6 +1380,7 @@ export function summarizeToolResult(
       if (warnings?.length) {
         summary += ` Note: ${warnings.join(' ')}`;
       }
+      summary += heldMailSentence(result);
       return summary;
     }
     case "request_send":
@@ -1405,6 +1447,7 @@ export function summarizeToolResult(
       if (warnings?.length) {
         summary += ` Note: ${warnings.join(' ')}`;
       }
+      summary += heldMailSentence(result);
       return summary;
     }
     case "send_postcard": {

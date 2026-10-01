@@ -19,6 +19,16 @@ omitted, a gift letter is used only when the balance cannot pay. A gift preview 
 (`state`: `funded` or `unfunded`, and a `description`), and any preview returns
 `giftLettersAvailable` when the account has some. Both are absent while gift letters are off.
 
+While `LETTER_IRL_ARRIVE_BY_ENABLED` is on, all four preview tools also accept an optional
+`arriveBy` (YYYY-MM-DD, #535): the date the mail should arrive by. The preview works back to the
+day it goes to the printer, holds the draft to it, and returns `schedule` (`arriveBy`, `mailOn`,
+`releasesAt`, `earliestArrival`, `latestArrival`), with `deliveryEstimate` saying when it goes to
+the printer. A date too soon, too late or not a date is refused with the dates on offer; an empty
+`arriveBy` counts as none. While the flag is off the field is not served, nor in `/manifest.json`;
+an app that cached it and passes it anyway is refused, since those four tools then pass unknown
+fields through to the preview rather than drop them
+([letter-send-flow.md](letter-send-flow.md#confirmed-send-transaction)).
+
 - `quote_and_preview_letter`: Create a free draft preview for a text-only physical letter. Requires a real U.S. recipient address, `bodyText`, and `signOff`; sender is optional when a saved return address exists. Creates a draft, so it is not read-only. Uses `ui://widgets/LetterPreviewCard.html@v<N>`.
 - `quote_and_preview_letter_with_header_image`: Create a free draft preview for a letter with a header image at the top. Accepts an attached image or `imageUrl`. Creates a draft and uses `ui://widgets/LetterHeaderImagePreviewCard.html@v<N>`, which serves the letter card under its own name so the card knows which preview to repeat (#411).
 - `quote_and_preview_letter_with_image`: Create a free draft preview for a letter with an enclosed image after the signature. Accepts an attached image or `imageUrl`. Creates a draft and uses `ui://widgets/LetterInlineImagePreviewCard.html@v<N>`, the letter card under its own name for the same reason.

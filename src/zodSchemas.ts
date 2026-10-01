@@ -17,13 +17,31 @@ const SEND_AS_GIFT_DESCRIPTION =
   "Set true only when the user asks to send this as their gift letter: it is free and adds a printed page with a card for the recipient. Leave it out otherwise; a gift letter is then used only if the balance cannot pay.";
 const sendAsGiftZ = z.boolean().optional().describe(SEND_AS_GIFT_DESCRIPTION);
 
+// Arrive-by (#535). Served only while LETTER_IRL_ARRIVE_BY_ENABLED is on:
+// registerTools strips it from the four preview tools' shapes otherwise.
+export const ARRIVE_BY_DESCRIPTION =
+  "Optional. The date the mail should arrive by, YYYY-MM-DD, such as a birthday or an event. " +
+  "Letter IRL holds the mail and sends it to the printer in time; USPS does not guarantee First-Class dates. " +
+  "Omit it to mail as soon as possible.";
+const arriveByZ = z.string().optional().describe(ARRIVE_BY_DESCRIPTION);
+
+/** A preview's arrival date (#535), when it was given one. */
+const previewScheduleZ = z.object({
+  arriveBy: z.string(),
+  mailOn: z.string(),
+  releasesAt: z.string(),
+  earliestArrival: z.string(),
+  latestArrival: z.string()
+});
+
 // Text-only letter schema
 export const quoteAndPreviewInputZ = z.object({
   sender: addressZ.optional(),  // Optional - will use saved return address if not provided
   recipient: addressZ,
   bodyText: z.string(),
   signOff: z.string(),
-  sendAsGift: sendAsGiftZ
+  sendAsGift: sendAsGiftZ,
+  arriveBy: arriveByZ
 });
 
 // ============================================================================
@@ -70,7 +88,8 @@ export const quoteAndPreviewLetterWithHeaderImageInputZ = z.object({
   image: imageFileParamZ.optional(),
   // Alternative: direct image URL
   imageUrl: z.string().optional(),
-  sendAsGift: sendAsGiftZ
+  sendAsGift: sendAsGiftZ,
+  arriveBy: arriveByZ
 });
 
 // Letter with inline image (image after signature, like enclosing a photo)
@@ -83,7 +102,8 @@ export const quoteAndPreviewLetterWithImageInputZ = z.object({
   image: imageFileParamZ.optional(),
   // Alternative: direct image URL
   imageUrl: z.string().optional(),
-  sendAsGift: sendAsGiftZ
+  sendAsGift: sendAsGiftZ,
+  arriveBy: arriveByZ
 });
 
 export const sendLetterInputZ = z.object({
@@ -184,7 +204,8 @@ export const quoteAndPreviewPostcardInputZ = z.object({
   image: imageFileParamZ.optional(),
   // Alternative: direct image URL (for when fileParams isn't available)
   imageUrl: z.string().optional(),
-  sendAsGift: sendAsGiftZ
+  sendAsGift: sendAsGiftZ,
+  arriveBy: arriveByZ
 });
 
 export const sendPostcardInputZ = z.object({
@@ -337,7 +358,8 @@ export const quoteAndPreviewOutputZ = z.object({
   recipientAddressValidation: addressValidationZ.optional(),
   addressWarnings: z.array(z.string()).optional(),
   giftCard: giftCardZ.optional(),
-  giftLettersAvailable: z.number().int().nonnegative().optional()
+  giftLettersAvailable: z.number().int().nonnegative().optional(),
+  schedule: previewScheduleZ.optional()
 });
 
 export const sendLetterOutputZ = z.object({
@@ -547,7 +569,8 @@ export const quoteAndPreviewPostcardOutputZ = z.object({
   recipientAddressValidation: addressValidationZ.optional(),
   addressWarnings: z.array(z.string()).optional(),
   giftCard: giftCardZ.optional(),
-  giftLettersAvailable: z.number().int().nonnegative().optional()
+  giftLettersAvailable: z.number().int().nonnegative().optional(),
+  schedule: previewScheduleZ.optional()
 });
 
 export const sendPostcardOutputZ = z.object({
