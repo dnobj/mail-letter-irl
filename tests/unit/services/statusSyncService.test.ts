@@ -32,9 +32,17 @@ vi.mock('../../../src/services/providers/index.js', () => {
   };
 });
 
+// A provider's cancel goes to the outbox's own transaction (#566).
+vi.mock('../../../src/services/letterJobService.js', () => {
+  return {
+    failProviderCancelledLetter: vi.fn(),
+  };
+});
+
 // Import after mocking
 import * as db from '../../../src/db/index.js';
 import { getLetterProvider } from '../../../src/services/providers/index.js';
+import { failProviderCancelledLetter } from '../../../src/services/letterJobService.js';
 import {
   syncLetterStatuses,
   getStuckLetters,
@@ -293,6 +301,70 @@ describe('statusSyncService', () => {
   // ==========================================================================
   // getStuckLetters Tests
   // ==========================================================================
+  describe("a provider's cancel (#566)", () => {
+    const cancelled = { status: 'failed', statusMessage: 'Letter was canceled before sending' };
+    const writes = () => vi.mocked(db.query).mock.calls.filter(call => /UPDATE|INSERT/.test(String(call[0])));
+
+    it('hands it to failProviderCancelledLetter, and writes nothing itself', async () => {
+      vi.mocked(db.query).mockResolvedValueOnce({
+        rows: [createLetterRowForSync({ letterId: 'letter-cancelled', trackingId: 'track-cancelled', status: 'accepted' })]
+      } as any);
+      mockProvider.getStatus.mockResolvedValueOnce(cancelled);
+      vi.mocked(failProviderCancelledLetter).mockResolvedValueOnce('failed');
+
+      const result = await syncLetterStatuses(false, 30);
+
+      expect(failProviderCancelledLetter).toHaveBeenCalledWith({
+        letterId: 'letter-cancelled',
+        providerRawStatus: 'Letter was canceled before sending'
+      });
+      expect(writes()).toEqual([]);
+      expect(result.updated).toBe(1);
+      expect(result.details).toEqual([expect.objectContaining({ letterId: 'letter-cancelled', newStatus: 'failed' })]);
+    });
+
+    it('counts nothing when the letter had already ended', async () => {
+      vi.mocked(db.query).mockResolvedValueOnce({
+        rows: [createLetterRowForSync({ letterId: 'letter-ended', trackingId: 'track-ended', status: 'accepted' })]
+      } as any);
+      mockProvider.getStatus.mockResolvedValueOnce(cancelled);
+      vi.mocked(failProviderCancelledLetter).mockResolvedValueOnce('unchanged');
+
+      const result = await syncLetterStatuses(false, 30);
+
+      expect(result.updated).toBe(0);
+      expect(result.details).toEqual([]);
+      expect(writes()).toEqual([]);
+    });
+
+    it('only reports it in a dry run', async () => {
+      vi.mocked(db.query).mockResolvedValueOnce({
+        rows: [createLetterRowForSync({ letterId: 'letter-dry', trackingId: 'track-dry', status: 'accepted' })]
+      } as any);
+      mockProvider.getStatus.mockResolvedValueOnce(cancelled);
+
+      const result = await syncLetterStatuses(true, 30);
+
+      expect(failProviderCancelledLetter).not.toHaveBeenCalled();
+      expect(result.updated).toBe(1);
+      expect(writes()).toEqual([]);
+    });
+
+    it('writes any other status itself, as before', async () => {
+      vi.mocked(db.query)
+        .mockResolvedValueOnce({
+          rows: [createLetterRowForSync({ letterId: 'letter-moving', trackingId: 'track-moving', status: 'accepted' })]
+        } as any)
+        .mockResolvedValue({ rows: [], rowCount: 1 } as any);
+      mockProvider.getStatus.mockResolvedValueOnce({ status: 'processing', statusMessage: 'Letter is being printed' });
+
+      await syncLetterStatuses(false, 30);
+
+      expect(failProviderCancelledLetter).not.toHaveBeenCalled();
+      expect(writes()).toHaveLength(2);
+    });
+  });
+
   describe('getStuckLetters', () => {
     it('should return letters stuck in non-terminal status', async () => {
       const stuckLetters = [

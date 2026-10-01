@@ -1042,8 +1042,12 @@ export class PostGridProvider implements LetterFulfillmentProvider {
   /**
    * Map PostGrid status to our standard status
    *
-   * PostGrid lifecycle: ready → rendered → processed → printed → mailed → in_transit → delivered
-   * Our lifecycle: accepted → printing → in_transit → delivered
+   * PostGrid's documented statuses (its tracking guide, checked 2026-10-01,
+   * #566): ready → printing → processed_for_delivery → completed, or cancelled,
+   * which it allows only while a piece is ready, so a cancelled piece was never
+   * printed. Probe P9a answered `cancelled`. The other keys are older names,
+   * kept so nothing that once answered them reads differently.
+   * Our lifecycle: accepted → processing → in_transit → delivered
    */
   private mapStatus(postgridStatus: string): LetterStatus['status'] {
     const statusMap: Record<string, LetterStatus['status']> = {
@@ -1051,16 +1055,19 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       'ready': 'accepted',
       'rendered': 'accepted',
       // At printer / being printed
+      'printing': 'processing',
       'processed': 'processing',
       'printed': 'processing',
       // Handed to USPS / in postal system
       'mailed': 'in_transit',
       'in_transit': 'in_transit',
-      'processed_for_delivery': 'in_transit',  // PostGrid test mode status
+      'processed_for_delivery': 'in_transit',
       // Terminal statuses
       'delivered': 'delivered',
-      'completed': 'delivered',  // PostGrid test mode uses "completed" instead of "delivered"
+      'completed': 'delivered',  // PostGrid's estimate of delivery, 10-12 days after mailing
       'returned': 'returned',
+      // Cancelled before printing: nothing was mailed (statusSyncService).
+      'cancelled': 'failed',
       'canceled': 'failed'
     };
 
@@ -1073,6 +1080,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
   private getStatusMessage(postgridStatus: string): string {
     const messageMap: Record<string, string> = {
       'ready': 'Letter is queued for processing',
+      'printing': 'Letter is being printed',
       'rendered': 'Letter PDF has been generated',
       'processed': 'Letter has been sent to printer',
       'printed': 'Letter has been printed',
@@ -1082,6 +1090,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       'delivered': 'Letter has been delivered',
       'completed': 'Letter has been delivered',  // PostGrid test mode
       'returned': 'Letter was returned to sender',
+      'cancelled': 'Letter was canceled before sending',
       'canceled': 'Letter was canceled before sending'
     };
 
