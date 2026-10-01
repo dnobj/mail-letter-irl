@@ -55,7 +55,49 @@ function mount(previewHtml: string) {
   return dom;
 }
 
+/** A PNG's signature and header: enough for the renderer to size it. */
+function pngBytes(width: number, height: number): Buffer {
+  const bytes = Buffer.alloc(33);
+  bytes.writeUInt32BE(0x89504e47, 0);
+  bytes.writeUInt32BE(0x0d0a1a0a, 4);
+  bytes.writeUInt32BE(13, 8);
+  bytes.write('IHDR', 12, 'latin1');
+  bytes.writeUInt32BE(width, 16);
+  bytes.writeUInt32BE(height, 20);
+  return bytes;
+}
+
 describe('LetterPreviewCard: the page as it prints', () => {
+  it('keeps everything a real page draws, its image and stamp too, with only ids and outline links prefixed', () => {
+    const image = { bytes: pngBytes(1950, 900), mime: 'image/png' as const, width: 1950, height: 900 };
+    const source = renderLetterPreviewDocument(
+      renderPreviewSvg(
+        layoutLetter({ text: 'Dear Sam,\nThe picture is below.\nPat', layoutType: 'inline_image', image }),
+        { addresses: { from: ['PAT EXAMPLE', '1 MAIN ST', 'SPRINGFIELD, IL 62701'], to: ['SAM RIVERA', '350 FIFTH AVE', 'SUITE 3300', 'NEW YORK, NY 10118'] } }
+      ),
+      { bodyText: 'Dear Sam,\nThe picture is below.', signOff: 'Pat' }
+    );
+    const dom = mount(source);
+    const original = new dom.window.DOMParser().parseFromString(source, 'text/html').body.querySelector('svg')!;
+    const shown = dom.window.document.querySelector('.letter-page svg')!;
+    const walk = (root: Element) => [root, ...root.querySelectorAll('*')];
+    const before = walk(original);
+    const after = walk(shown);
+    expect(after.map(element => element.localName)).toEqual(before.map(element => element.localName));
+    const prefixed = (name: string, value: string) =>
+      name === 'id' ? `lirl-page-${value}` : name === 'href' && value.startsWith('#') ? `#lirl-page-${value.slice(1)}` : value;
+    before.forEach((element, index) => {
+      const attributes = (target: Element) => [...target.attributes].map(attribute => [attribute.name, attribute.value]);
+      expect(attributes(after[index])).toEqual(attributes(element).map(([name, value]) => [name, prefixed(name, value)]));
+      if (element.children.length === 0) expect(after[index].textContent).toBe(element.textContent);
+    });
+    // What the comparison covered: outlines with negative numbers, the image, the stamp.
+    expect(before.some(element => element.localName === 'path' && /-\d/.test(element.getAttribute('d') ?? ''))).toBe(true);
+    expect(shown.querySelector('image')!.getAttribute('href')).toMatch(/^data:image\/png;base64,/);
+    expect(shown.querySelector('image')!.getAttribute('preserveAspectRatio')).toBe('none');
+    expect(shown.querySelectorAll('text')).toHaveLength(7);
+  });
+
   it("shows the renderer's page, with its outlines and the stamped addresses, and no mockup", () => {
     const dom = mount(RENDERED);
     const container = dom.window.document.getElementById('mockup-container')!;
@@ -101,12 +143,11 @@ describe('LetterPreviewCard: the page as it prints', () => {
     const document = dom.window.document;
     const view = () => document.querySelector('.letter-page-view')!;
     const zoom = () => document.querySelector('button.page-zoom') as HTMLButtonElement;
-    expect(zoom().getAttribute('aria-pressed')).toBe('false');
+    expect(zoom().hasAttribute('aria-pressed')).toBe(false);
     expect(zoom().textContent).toBe('Enlarge');
 
     zoom().click();
     expect(view().classList.contains('zoomed')).toBe(true);
-    expect(zoom().getAttribute('aria-pressed')).toBe('true');
     expect(zoom().textContent).toBe('Show smaller');
 
     // A status update re-renders the card: the page stays enlarged, and drawn once.
@@ -116,7 +157,7 @@ describe('LetterPreviewCard: the page as it prints', () => {
 
     (document.querySelector('.letter-page') as HTMLElement).click();
     expect(view().classList.contains('zoomed')).toBe(false);
-    expect(zoom().getAttribute('aria-pressed')).toBe('false');
+    expect(zoom().textContent).toBe('Enlarge');
   });
 
   it('keeps the mockup for a legacy preview, even one whose text names the mark', () => {
@@ -145,9 +186,10 @@ describe('LetterPreviewCard: the page as it prints', () => {
 
   it('shows only what the renderer draws: no script, style, handler, paint server, outside link or borrowed id', () => {
     const hostile = `<!DOCTYPE html><html><body data-renderer="pdf-1">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 612 792" onload="window.__pwned = 1" style="background:url(https://x.example/p.png)">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 612 792" onload="window.__pwned = 1" style="background:url(https://x.example/p.png)" constructor="1">
         <script>window.__pwned = 1</script>
         <foreignObject width="10" height="10"><img src="x" onerror="window.__pwned = 1"></foreignObject>
+        <rect width="612" height="792" fill="#fff" __proto__="2"/>
         <defs><path id="tr12-1" d="M0 0L1 1Z"/></defs>
         <use href="#tr12-1" x="1" y="2"/>
         <use href="https://evil.example/sprite.svg#a" x="1" y="2"/>
@@ -172,6 +214,9 @@ describe('LetterPreviewCard: the page as it prints', () => {
       for (const attribute of element.attributes) expect(allowed.has(attribute.name.toLowerCase()), attribute.name).toBe(true);
     }
     expect(page.querySelector('svg')!.hasAttribute('style')).toBe(false);
+    // Prototype names find nothing in the allow-list, rather than throwing.
+    expect(page.querySelector('svg')!.hasAttribute('constructor')).toBe(false);
+    expect(page.querySelector('rect')!.attributes).toHaveLength(3);
     expect(page.querySelector('path[d="M0 0Z"]')!.hasAttribute('fill')).toBe(false);
 
     const links = [...page.querySelectorAll('use, image')].map(element => element.getAttribute('href'));

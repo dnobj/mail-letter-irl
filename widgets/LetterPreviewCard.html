@@ -1163,22 +1163,24 @@
       const PAGE_ELEMENTS = new Set(["svg", "title", "defs", "g", "path", "use", "rect", "image", "text"]);
       const PAGE_ID = /^[A-Za-z0-9_-]{1,64}$/;
       const NUMBER = /^-?\d+(\.\d+)?$/;
-      const PAGE_ATTRIBUTES = {
-        xmlns: value => value === "http://www.w3.org/2000/svg",
-        viewbox: value => /^[\d.\s-]+$/.test(value),
-        role: value => value === "img",
-        id: value => PAGE_ID.test(value),
-        d: value => /^[MLCZ\d.\s-]*$/.test(value),
-        x: value => NUMBER.test(value),
-        y: value => NUMBER.test(value),
-        width: value => NUMBER.test(value),
-        height: value => NUMBER.test(value),
-        preserveaspectratio: value => value === "none",
-        fill: value => /^(#[0-9a-fA-F]{3,8}|none)$/.test(value),
-        "font-family": value => /^[A-Za-z0-9 ',-]+$/.test(value),
-        "font-size": value => NUMBER.test(value),
-        href: value => /^#[A-Za-z0-9_-]{1,64}$/.test(value) || /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(value)
-      };
+      // A Map, not an object: an attribute named __proto__ or constructor must
+      // find nothing, not Object.prototype (#542 review round 2).
+      const PAGE_ATTRIBUTES = new Map([
+        ["xmlns", value => value === "http://www.w3.org/2000/svg"],
+        ["viewbox", value => /^[\d.\s-]+$/.test(value)],
+        ["role", value => value === "img"],
+        ["id", value => PAGE_ID.test(value)],
+        ["d", value => /^[MLCZ\d.\s-]*$/.test(value)],
+        ["x", value => NUMBER.test(value)],
+        ["y", value => NUMBER.test(value)],
+        ["width", value => NUMBER.test(value)],
+        ["height", value => NUMBER.test(value)],
+        ["preserveaspectratio", value => value === "none"],
+        ["fill", value => /^(#[0-9a-fA-F]{3,8}|none)$/.test(value)],
+        ["font-family", value => /^[A-Za-z0-9 ',-]+$/.test(value)],
+        ["font-size", value => NUMBER.test(value)],
+        ["href", value => /^#[A-Za-z0-9_-]{1,64}$/.test(value) || /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(value)]
+      ]);
       const PAGE_ID_PREFIX = "lirl-page-";
       function cleanPage(node) {
         for (const child of Array.from(node.children)) {
@@ -1186,7 +1188,7 @@
           else child.remove();
         }
         for (const attribute of Array.from(node.attributes)) {
-          const allowed = PAGE_ATTRIBUTES[attribute.name.toLowerCase()];
+          const allowed = PAGE_ATTRIBUTES.get(attribute.name.toLowerCase());
           if (!allowed || !allowed(attribute.value)) {
             node.removeAttribute(attribute.name);
           } else if (attribute.name === "id") {
@@ -1225,8 +1227,8 @@
         zoom.type = "button";
         zoom.className = "page-zoom";
         const apply = () => {
+          // The label carries the state, so no aria-pressed as well.
           view.classList.toggle("zoomed", pageZoomed);
-          zoom.setAttribute("aria-pressed", String(pageZoomed));
           zoom.textContent = pageZoomed ? "Show smaller" : "Enlarge";
         };
         const toggle = () => {
