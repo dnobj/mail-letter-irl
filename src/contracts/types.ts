@@ -8,7 +8,8 @@ export type LetterStatus =
   | "delivered"    // Delivered
   | "returned"     // Returned to sender
   | "failed"       // Failed
-  | "cancelled";   // Cancelled
+  | "cancelled"    // Cancelled
+  | "scheduled";   // Sent with an arrival date, waiting for its mail date (#535)
 
 export type LetterLayoutType = "text_only" | "header_image" | "inline_image";
 
@@ -50,6 +51,10 @@ export interface OrderRecord {
     state: string;
   };
   previewFirstPageHtml?: string;
+  /** Sent with an arrival date (#535): the date it aims to arrive by and the day it goes to the printer. */
+  schedule?: { arriveBy: string; mailOn: string };
+  /** With a schedule: whether it can still be cancelled free (cancel_scheduled_mail decides). */
+  cancellable?: boolean;
 }
 
 export interface UserAccount {

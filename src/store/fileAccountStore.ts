@@ -3,6 +3,7 @@ import { query } from "../db/index.js";
 import { getBalance } from "../services/creditService.js";
 import { getGenerationQuota } from "../services/imageGenerationLimitService.js";
 import { isImageGenerationOff } from "../config/imageGeneration.js";
+import { heldDatesOf, scheduleSentence } from "../services/deliverySchedule.js";
 import {
   classifyDiagnosticError,
   writeDiagnostic
@@ -28,6 +29,7 @@ export class FileAccountStore {
    *
    * Database statuses: draft, queued, processing, accepted, sent, in_transit, delivered, returned, failed, cancelled
    * MCP statuses: pending, accepted, printing, in_transit, delivered, returned, failed, cancelled
+   * (and scheduled, for a queued letter with an arrival date: see fetchOrders, #535)
    */
   private mapStatus(dbStatus: string): LetterStatus {
     switch (dbStatus) {
@@ -85,7 +87,10 @@ export class FileAccountStore {
           status,
           preview_html,
           created_at,
-          sent_at
+          sent_at,
+          arrive_by,
+          mail_on,
+          funding_type
         FROM letters
         WHERE user_id = $1
         ORDER BY created_at DESC
@@ -103,6 +108,19 @@ export class FileAccountStore {
           timeline.push({
             timestampISO: row.created_at.toISOString(),
             statusText: 'Order placed'
+          });
+        }
+
+        // Sent with an arrival date (#535): until it goes to the printer it
+        // is scheduled, and free to cancel unless a Pay & Send payment bought
+        // it, whose refund a person decides. cancel_scheduled_mail decides in
+        // the end; this only says what to expect.
+        const schedule = heldDatesOf(row.arrive_by, row.mail_on);
+        const waiting = schedule !== null && row.status === 'queued';
+        if (schedule && row.created_at) {
+          timeline.push({
+            timestampISO: row.created_at.toISOString(),
+            statusText: `Scheduled: ${scheduleSentence(schedule, new Date())}`
           });
         }
 
@@ -138,14 +156,15 @@ export class FileAccountStore {
             requiredCredits: row.credits_cost || 1
           },
           statusTimeline: timeline,
-          currentStatus: this.mapStatus(row.status),
+          currentStatus: waiting ? 'scheduled' : this.mapStatus(row.status),
           creditsDeducted: row.credits_cost || 1,
           recipientSummary: {
             name: recipient.name || '',
             city: recipient.city || '',
             state: recipient.state || ''
           },
-          previewFirstPageHtml: row.preview_html || undefined
+          previewFirstPageHtml: row.preview_html || undefined,
+          ...(schedule ? { schedule, cancellable: waiting && row.funding_type !== 'jit_order' } : {})
         } as OrderRecord;
       });
     } catch (error) {

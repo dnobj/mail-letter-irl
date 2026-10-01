@@ -236,3 +236,34 @@ export function checkArrival(arriveBy: string, now: Date, settings: ScheduleSett
   const mailOn = mailOnFor(date, settings.leadDays);
   return { ok: true, arriveBy: date, mailOn, dispatchAt: dispatchAt(mailOn), earliestArrival: earliest, latestArrival: latest };
 }
+
+/**
+ * A calendar date as Letter IRL says it: "Tue, Oct 13", with the year when it
+ * is not this year in New York.
+ */
+export function describeDate(date: CalendarDate, now: Date): string {
+  const sameYear = date.slice(0, 4) === newYorkDate(now).slice(0, 4);
+  return new Intl.DateTimeFormat('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    ...(sameYear ? {} : { year: 'numeric' as const }),
+    timeZone: 'UTC'
+  }).format(new Date(`${date}T12:00:00Z`));
+}
+
+/** One sentence about held mail's two dates. */
+export function scheduleSentence(schedule: { arriveBy: CalendarDate; mailOn: CalendarDate }, now: Date): string {
+  return `Goes to the printer ${describeDate(schedule.mailOn, now)}, and aims to arrive by ${describeDate(schedule.arriveBy, now)}.`;
+}
+
+/**
+ * A letter's two arrive-by dates (#535) when both read as calendar days, or
+ * null. For saying what a letter's status is, never for deciding a send: a
+ * status answer leaves out dates it cannot read rather than refusing.
+ */
+export function heldDatesOf(arriveBy: unknown, mailOn: unknown): { arriveBy: CalendarDate; mailOn: CalendarDate } | null {
+  const arrive = typeof arriveBy === 'string' ? parseCalendarDate(arriveBy) : null;
+  const mail = typeof mailOn === 'string' ? parseCalendarDate(mailOn) : null;
+  return arrive && mail ? { arriveBy: arrive, mailOn: mail } : null;
+}
