@@ -166,7 +166,7 @@ often tools ask for permission; OpenAI describes the "important actions" level a
 judgement that already covers sending and purchases, so the annotation is the signal OpenAI asks for
 and one input to that judgement, not a switch that guarantees a prompt.
 
-Under that reading `buildAnnotations()` now marks six tools destructive:
+Under that reading `buildAnnotations()` now marks six tools destructive, and a seventh, `cancel_scheduled_mail`, while arrival dates are on (#535):
 
 | Tool | Why |
 |------|-----|

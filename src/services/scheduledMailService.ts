@@ -10,14 +10,64 @@
  */
 
 import type pg from 'pg';
-import { transaction } from '../db/index.js';
+import { query, transaction } from '../db/index.js';
 import { CREDITS_PER_LETTER } from '../config/products.js';
-import { writeDiagnostic } from '../utils/diagnosticLog.js';
+import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 import { returnConsumedCreditsForLetter } from './creditLedgerService.js';
 import { returnGiftLetterForFailedSendWithClient } from './giftLetterService.js';
 
 /** The failure code a cancel's return records (source_metadata.failure_code). */
 export const CANCELLED_BY_CUSTOMER = 'cancelled_by_customer';
+
+/** The operator alert for held mail that missed its mail day (migration 041). */
+export const MISSED_MAIL_DAY_ALERT = 'schedule_missed_mail_day';
+
+/**
+ * Held mail that missed its mail day (#535): a letter with a mail date, not
+ * at the printer at 18:00 New York time that day: still queued (dispatch
+ * paused, the provider down), taken and not accepted, or failed (its retries
+ * ran out, or the provider refused it). Raises one operator alert per letter,
+ * ever, and logs schedule.missed_mail_day with how many were new. A letter
+ * held after an ambiguous dispatch is left out: it has its own critical alert.
+ *
+ * Once per letter: NOT EXISTS, with a partial unique index behind it (041)
+ * and ON CONFLICT DO NOTHING, so two runs at once still raise one.
+ *
+ * Run hourly by maintenance, after the outbox. Never throws: a task that
+ * throws there skips every task after it, so a failure is logged instead.
+ * Returns how many alerts it raised.
+ */
+export async function raiseMissedMailDayAlerts(): Promise<number> {
+  try {
+    const raised = await query(
+      `INSERT INTO commerce_operational_alerts (order_id, alert_type, severity, details)
+       SELECT held.funding_order_id, $1::varchar, 'warning',
+              jsonb_build_object('letterId', held.letter_id, 'mailOn', held.mail_on::text)
+         FROM letters held
+        WHERE held.mail_on IS NOT NULL
+          AND held.status IN ('queued', 'processing', 'failed')
+          AND (held.mail_on + TIME '18:00') AT TIME ZONE 'America/New_York' < NOW()
+          AND NOT EXISTS (
+            SELECT 1 FROM commerce_operational_alerts seen
+             WHERE seen.alert_type = $1::varchar
+               AND seen.details->>'letterId' = held.letter_id
+          )
+        ORDER BY held.mail_on
+        LIMIT 100
+       ON CONFLICT DO NOTHING
+       RETURNING alert_id`,
+      [MISSED_MAIL_DAY_ALERT]
+    );
+    const count = raised.rowCount ?? 0;
+    if (count > 0) writeDiagnostic('error', 'schedule.missed_mail_day', { count });
+    return count;
+  } catch (error) {
+    writeDiagnostic('error', 'schedule.missed_mail_day_check_failed', {
+      errorClass: classifyDiagnosticError(error, 'database_error')
+    });
+    return 0;
+  }
+}
 
 /** Why held mail was not cancelled. */
 export type ScheduledMailRefusal =

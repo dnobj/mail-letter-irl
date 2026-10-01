@@ -62,6 +62,26 @@ describe('statusSyncService', () => {
   // ==========================================================================
   // syncLetterStatuses Tests
   // ==========================================================================
+  describe('windows counted from when a letter mailed (#535)', () => {
+    const flat = (call: unknown[]) => String(call[0]).replace(/\s+/g, ' ');
+
+    it('follows a letter for its window from sent_at, so held mail is still synced after it mails', async () => {
+      vi.mocked(db.query).mockResolvedValueOnce({ rows: [] } as any);
+      await syncLetterStatuses(true, 30);
+      expect(flat(vi.mocked(db.query).mock.calls[0])).toContain(
+        "AND COALESCE(sent_at, created_at) > NOW() - INTERVAL '30 days'"
+      );
+    });
+
+    it('counts a stuck letter from sent_at, not from the weeks it was held', async () => {
+      vi.mocked(db.query).mockResolvedValueOnce({ rows: [] } as any);
+      await getStuckLetters(14);
+      const sql = flat(vi.mocked(db.query).mock.calls[0]);
+      expect(sql).toContain('EXTRACT(DAY FROM NOW() - COALESCE(sent_at, created_at))::INTEGER as days_in_status');
+      expect(sql).toContain("AND COALESCE(sent_at, created_at) < NOW() - INTERVAL '14 days'");
+    });
+  });
+
   describe('syncLetterStatuses', () => {
     it('should return empty result when no letters need syncing', async () => {
       // Mock empty result from database

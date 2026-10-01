@@ -37,9 +37,12 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  * 040 adds arrive_by and mail_on to letter_drafts and letters (#535). The same
  * holds: the reader's lists leave them out, and the operator reads both tables
  * whole. The admin panel's letter view gains them later, with a re-run.
+ *
+ * 041 adds the alert type schedule_missed_mail_day (#535). The roles read
+ * commerce_operational_alerts whole, so nothing to re-run.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
-  "040_arrive_by.sql";
+  "041_missed_mail_day_alert.sql";
 
 export interface AdminProvisioningArguments {
   environment: "development" | "production";

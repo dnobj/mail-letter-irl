@@ -72,7 +72,10 @@ export const SCHEDULED_MAIL_REFUSALS: Record<ScheduledMailRefusal, [ScheduledMai
     "A Pay & Send order can't be cancelled here. Email support@letterirl.com from the email on your Letter IRL account, " +
       'quoting the order id; refunds are decided by a person.'
   ],
-  too_late: ['ORDER_ALREADY_MAILED', "This order has gone to the printer, or did not go out, so it can't be cancelled."],
+  too_late: [
+    'ORDER_ALREADY_MAILED',
+    "This order has gone to the printer, or did not go out, so it can't be cancelled. get_order_status shows where it is."
+  ],
   busy: [
     'ORDER_BEING_SENT',
     "This order is going to the printer right now, so it can't be cancelled. get_order_status shows where it is."

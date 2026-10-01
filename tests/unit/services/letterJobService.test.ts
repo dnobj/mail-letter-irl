@@ -784,6 +784,8 @@ describe("the outbox's stop (#444)", () => {
     vi.unstubAllEnvs();
   });
 
+  const HELD_NOT_DUE = "AND NOT (status = 'pending' AND attempts = 0 AND next_attempt_at > NOW())";
+
   it('still settles what a crash left behind, then says how much is waiting and claims nothing', async () => {
     vi.stubEnv('LETTER_IRL_OUTBOX_DISPATCH_ENABLED', 'false');
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -811,7 +813,10 @@ describe("the outbox's stop (#444)", () => {
     expect(statements[2]).toContain("status IN ('pending', 'failed')");
     expect(statements[2]).toContain("status = 'processing' AND locked_at < NOW() - INTERVAL '15 minutes'");
     expect(statements[2]).toContain('attempts < max_attempts');
-    expect(statements[2]).not.toContain('next_attempt_at');
+    // Held mail not yet due is not waiting behind the pause (#535); nothing
+    // else in the count filters on time.
+    expect(statements[2]).toContain(HELD_NOT_DUE);
+    expect(statements[2].replace(HELD_NOT_DUE, '')).not.toContain('next_attempt_at');
     expect(statements.some((sql) => sql.includes("SET status = 'processing'"))).toBe(false);
     const logged = warn.mock.calls.flat().map(String).join('\n');
     expect(logged).toContain('"event":"outbox.dispatch_paused"');
@@ -830,7 +835,8 @@ describe("the outbox's stop (#444)", () => {
     const sql = String(query.mock.calls[0]?.[0]).replace(/\s+/g, ' ');
     // The same count the paused batch logs.
     expect(sql).toContain("status = 'processing' AND locked_at < NOW() - INTERVAL '15 minutes'");
-    expect(sql).not.toContain('next_attempt_at');
+    expect(sql).toContain(HELD_NOT_DUE);
+    expect(sql.replace(HELD_NOT_DUE, '')).not.toContain('next_attempt_at');
     vi.unstubAllEnvs();
   });
 

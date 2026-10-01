@@ -171,26 +171,29 @@ export async function readRoutingRow(client: AdminSqlClient, mailType: string): 
 export interface StuckLetterView {
   letterId: string;
   status: string;
-  createdAt: Date;
+  /** When the provider took it, else when it was created: what daysInStatus counts from. */
+  mailedAt: Date;
   daysInStatus: number;
 }
 
 /** Letters with a provider reference that have not reached a terminal status. */
 export async function listStuckLetters(client: AdminSqlClient, days: number, limit: number): Promise<StuckLetterView[]> {
-  const result = await client.query<{ letter_id: string; status: string; created_at: Date; days: number }>(
-    `SELECT letter_id, status, created_at,
-            EXTRACT(DAY FROM NOW() - created_at)::int AS days
+  const result = await client.query<{ letter_id: string; status: string; mailed_at: Date; days: number }>(
+    // Counted from when the provider took the letter (sent_at), so held mail
+    // (#535) is not stuck for the weeks it waited for its mail date.
+    `SELECT letter_id, status, COALESCE(sent_at, created_at) AS mailed_at,
+            EXTRACT(DAY FROM NOW() - COALESCE(sent_at, created_at))::int AS days
      FROM letters
      WHERE status NOT IN ('delivered', 'returned', 'failed', 'cancelled')
        AND tracking_id IS NOT NULL
-       AND created_at < NOW() - make_interval(days => $1::int)
-     ORDER BY created_at ASC LIMIT $2`,
+       AND COALESCE(sent_at, created_at) < NOW() - make_interval(days => $1::int)
+     ORDER BY COALESCE(sent_at, created_at) ASC LIMIT $2`,
     [days, limit],
   );
   return result.rows.map((row) => ({
     letterId: row.letter_id,
     status: row.status,
-    createdAt: row.created_at,
+    mailedAt: row.mailed_at,
     daysInStatus: Number(row.days),
   }));
 }
