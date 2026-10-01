@@ -55,7 +55,7 @@ send. The model can't, in any app. There are three ways to send:
 - **A confirmation link.** `request_send` returns `<website>/confirm/<draftId>`:
   - There the person, signed in, sees the preview and the cost, and presses Send.
   - Nothing is sent by the tool. It is read-only and needs only `mail:draft`.
-  - Its link text says nothing is sent until the person presses Send.
+  - Its link text says nothing is sent until the person presses Send. For a preview with an arrival date (#535), it also says when, once sent, the mail goes to the printer and aims to arrive, and the answer carries the preview's `schedule`.
 - **The card's Pay & Send button, in ChatGPT only.** `create_mail_checkout` is card-only too (#475): the person sees the card, and the mail is sent when they pay. It was model-callable in ChatGPT until launch. But Codex also reaches Letter IRL through ChatGPT's own connection, where the server sees ChatGPT and no card shows the preview, and the server cannot tell the two apart. It is listed only for an app that takes purchases (the profile's `inAppPurchases`, ChatGPT today), where the card is its only caller. The server also answers it with the link, not a checkout, from any app that takes no purchases, shows no card, or can't keep card-only tools from its model. No app reaches that answer today: it guards a future profile.
 
 **Where the rule is enforced.** Hiding a tool is the app's side of the rule. The
@@ -182,6 +182,17 @@ Database constraints enforce one outbox row and one stable idempotency key per l
   - **A repeat** answers as already cancelled, and nothing more goes back.
   - **Cancelled letters free the duplicate guard**, so the same mail can be sent again.
   - **The outbox never brings a cancelled job back.** Its failure-before-dispatch path skips a job cancelled meanwhile, so a claimant that stalled past its lock cannot return it to pending.
+- **What the website sees** (`src/api/letterApiHandler.ts`, `src/api/sendConfirmationApiHandler.ts`):
+  - `GET /api/letters` and `GET /api/letters/:letterId` give each letter:
+    - `arriveBy` and `mailOn`, null without dates (dates it cannot read are left out);
+    - `scheduled`: still `queued`, waiting for its mail date;
+    - `cancellable`: scheduled, and not Pay & Send.
+
+    The list's `status` filter takes every letter status, and `scheduled` for that waiting mail. It used to refuse `accepted`, `in_transit`, `delivered`, `returned` and `held`.
+  - `POST /api/letters/:letterId/cancel` answers `letterId`, as the letters routes do. A refusal carries its reason as `code`, which the website's API client reads, and as `error`.
+  - The confirmation page's API:
+    - `GET /api/sends/:draftId` gives the draft's `schedule` (null without dates);
+    - its `POST` answers a dated send with `schedule`, `scheduled` and `cancellable`, as the send tools do. `scheduled` is true while its job is held past now. A hand-off that throws does not change that, since such a job cannot have been taken.
 - **Sending held mail early:** the admin panel's **Send held mail now** (`job.dispatch_now`, `releaseHeldLetterJobAsAdmin` in `src/services/letterJobService.ts`) makes a held letter's job due at once, so the next hourly run sends it ([Admin Panel](admin-panel-guide.md)).
   - **Only mail still held:** the job `pending`, `not_dispatched`, never attempted, carrying `metadata.heldUntil` and not yet due by the database's clock; the letter `queued`; a Pay & Send letter's order still `fulfillment_pending`. It locks the order, the letter and the job, in the outbox's order.
   - **What moves:** `next_attempt_at` and `scheduled_at`, to now. `heldUntil` keeps the original time, because the admin's operator role cannot write the job's metadata. The stuck-order condition also reads the job's next attempt and attempts, so a released Pay & Send order that has not gone is called stuck 90 minutes after its release, or as soon as a first attempt fails.

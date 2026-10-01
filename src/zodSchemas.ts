@@ -647,7 +647,11 @@ export const requestSendOutputZ = z.object({
   mailType: z.enum(["letter", "postcard"]),
   confirmationUrl: z.string().describe("Where the person checks the preview and sends it themselves"),
   expiresAtISO: z.string(),
-  recipientSummary: recipientSummaryZ
+  recipientSummary: recipientSummaryZ,
+  schedule: z
+    .object({ arriveBy: z.string(), mailOn: z.string() })
+    .optional()
+    .describe("The preview's arrival dates, YYYY-MM-DD: once sent, it waits until its mail date")
 });
 
 export const cancelScheduledMailOutputZ = z.object({

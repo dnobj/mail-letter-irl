@@ -86,6 +86,19 @@ describe("request_send", () => {
     expect(getDraft).toHaveBeenCalledWith(DRAFT_ID.toUpperCase());
   });
 
+  it("carries the preview's arrival dates, and none it cannot read (#535)", async () => {
+    vi.mocked(getDraft).mockResolvedValue(draft({ arrive_by: "2026-10-16", mail_on: "2026-10-06" }) as any);
+    expect((await requestSendTool.handler({ draftId: DRAFT_ID }, context())).schedule).toEqual({
+      arriveBy: "2026-10-16",
+      mailOn: "2026-10-06"
+    });
+    for (const dates of [{ arrive_by: "2026-10-16", mail_on: null }, { arrive_by: "16/10/2026", mail_on: "2026-10-06" }]) {
+      vi.mocked(getDraft).mockResolvedValue(draft(dates) as any);
+      const result = await requestSendTool.handler({ draftId: DRAFT_ID }, context());
+      expect(result, JSON.stringify(dates)).not.toHaveProperty("schedule");
+    }
+  });
+
   it("names a postcard as a postcard", async () => {
     vi.mocked(getDraft).mockResolvedValue(draft({ mail_type: "postcard" }) as any);
     const result = await requestSendTool.handler({ draftId: DRAFT_ID }, context());

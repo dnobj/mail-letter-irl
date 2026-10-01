@@ -31,6 +31,8 @@ import { processLetterJob } from '../services/letterJobService.js';
 import { isDuplicateMailError } from '../services/duplicateMailService.js';
 import { SpendLimitError } from '../services/betaSpendLimits.js';
 import type { LetterDraft } from '../services/types.js';
+import { draftScheduleOf } from '../services/draftSchedule.js';
+import { heldPastNow, heldSendFields, waitsInOutbox } from '../tools/heldSend.js';
 import { isDraftIdShape } from '../tools/requestSend.js';
 import {
   readRequestBody,
@@ -95,6 +97,15 @@ async function lettersAvailable(userId: string): Promise<number> {
   return Math.floor((result.rows[0]?.credits ?? 0) / 2);
 }
 
+/** The draft's arrival dates (#535), or null: the page is never refused over dates it cannot read. */
+function scheduleOf(draft: LetterDraft): { arriveBy: string; mailOn: string } | null {
+  try {
+    return draftScheduleOf(draft);
+  } catch {
+    return null;
+  }
+}
+
 async function showDraft(res: ServerResponse, draft: LetterDraft, userId: string): Promise<void> {
   const state = draftState(draft, new Date());
   writeDiagnostic('info', 'send.confirmation_viewed', { mailType: mailTypeOf(draft), state });
@@ -111,7 +122,9 @@ async function showDraft(res: ServerResponse, draft: LetterDraft, userId: string
     signOff: draft.sign_off ?? '',
     isGiftSend: draft.is_gift_send === true,
     lettersRequired: lettersRequired(draft),
-    lettersAvailable: await lettersAvailable(userId)
+    lettersAvailable: await lettersAvailable(userId),
+    // Sent with these, it waits for its mail date (#535).
+    schedule: scheduleOf(draft)
   });
 }
 
@@ -222,9 +235,10 @@ async function sendDraft(req: IncomingMessage, res: ServerResponse, draft: Lette
 
   // Committed: the letter exists and is paid for. Handing it to the printer
   // now is a courtesy; if that fails, the outbox sends it on its next run.
+  let claimed = false;
   if (!created.alreadyConsumed && created.job) {
     try {
-      await processLetterJob(created.job.job_id);
+      claimed = (await processLetterJob(created.job.job_id)).claimed;
     } catch (error) {
       writeDiagnostic('warn', 'send.confirmation_dispatch_deferred', {
         mailType,
@@ -237,10 +251,20 @@ async function sendDraft(req: IncomingMessage, res: ServerResponse, draft: Lette
     mailType,
     outcome: created.alreadyConsumed ? 'already_sent' : 'sent'
   });
+  // Sent with an arrival date (#535): whether it waits for its mail date, as
+  // the send tools say it. A dispatch that threw changes nothing here: a job
+  // held past now cannot have been taken.
+  const waiting = created.alreadyConsumed
+    ? waitsInOutbox(created.letter.status)
+    : created.job
+      ? heldPastNow(created.job, claimed, new Date())
+      : false;
+  const held = heldSendFields(created.letter, waiting);
   sendJson(res, 200, {
     orderId: created.letter.letter_id,
     alreadySent: created.alreadyConsumed,
-    lettersRemaining: Math.floor(created.creditsRemaining / 2)
+    lettersRemaining: Math.floor(created.creditsRemaining / 2),
+    ...(held ? { schedule: held.schedule, scheduled: waiting, cancellable: held.cancellable } : {})
   });
 }
 

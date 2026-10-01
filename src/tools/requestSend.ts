@@ -1,6 +1,8 @@
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
 import { requestSendInputSchema, requestSendOutputSchema } from '../schemas.js';
 import { getDraft } from '../services/draftService.js';
+import { draftScheduleOf } from '../services/draftSchedule.js';
+import type { LetterDraft } from '../services/types.js';
 import { sendConfirmationUrl } from '../config/sendConfirmation.js';
 
 /**
@@ -28,6 +30,17 @@ export interface RequestSendOutput {
   confirmationUrl: string;
   expiresAtISO: string;
   recipientSummary: { name: string; city: string; state: string };
+  /** The preview's arrival dates (#535): once sent, it waits for its mail date. */
+  schedule?: { arriveBy: string; mailOn: string };
+}
+
+/** The draft's dates, or none: a link is never refused over dates it cannot read. */
+function scheduleOf(draft: LetterDraft): { arriveBy: string; mailOn: string } | undefined {
+  try {
+    return draftScheduleOf(draft) ?? undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -95,6 +108,7 @@ async function handler(
   }
 
   const recipient = (draft.recipient ?? {}) as Record<string, unknown>;
+  const schedule = scheduleOf(draft);
   context.logger.info(
     { correlationId: context.correlationId, event: 'send.confirmation_link' },
     'Returned a send confirmation link'
@@ -109,7 +123,8 @@ async function handler(
       name: text(recipient.name),
       city: text(recipient.city),
       state: text(recipient.state)
-    }
+    },
+    ...(schedule ? { schedule } : {})
   };
 }
 

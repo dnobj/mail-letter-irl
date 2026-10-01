@@ -15,7 +15,9 @@ import {
 import { rateLimitAccount } from './middleware/rateLimit.js';
 import { requiredRestScopes } from '../auth/restScopes.js';
 import { cancelScheduledMail, type ScheduledMailRefusal } from '../services/scheduledMailService.js';
+import type { LetterStatus } from '../services/types.js';
 import { cancelledMessage } from '../tools/cancelScheduledMail.js';
+import { heldSendFields, waitsInOutbox } from '../tools/heldSend.js';
 
 /**
  * Send JSON response
@@ -113,20 +115,24 @@ export const CANCEL_REFUSAL_WORDS: Record<ScheduledMailRefusal, string> = {
  * POST /api/letters/:letterId/cancel - held mail cancelled (#535), the
  * website's cancel_scheduled_mail through the same service. 200 with what
  * went back, a repeat included; 404 for a letter that is not the caller's;
- * 409 for any other refusal, with its reason and words.
+ * 409 for any other refusal, with its reason (as `error` and `code`) and
+ * words.
  */
 async function handleCancelLetter(res: ServerResponse, authInfo: AuthInfo, letterId: string) {
   const result = await cancelScheduledMail({ letterId, userId: authInfo.userId });
   if (!result.ok) {
+    // The reason twice: `code` is what the website's API client reads, and
+    // `error` what the other routes answer.
     sendJson(res, result.refusal === 'not_found' ? 404 : 409, {
       error: result.refusal,
+      code: result.refusal,
       message: CANCEL_REFUSAL_WORDS[result.refusal]
     });
     return;
   }
   const { cancelled } = result;
   sendJson(res, 200, {
-    orderId: cancelled.letterId,
+    letterId: cancelled.letterId,
     status: 'cancelled',
     alreadyCancelled: cancelled.alreadyCancelled,
     returned: cancelled.returned,
@@ -155,6 +161,38 @@ interface LetterRow {
   created_at: Date;
   sent_at: Date | null;
   provider: string | null;
+  /** Arrival dates (#535): both 'YYYY-MM-DD', or both null. */
+  arrive_by: string | null;
+  mail_on: string | null;
+  funding_type: string | null;
+}
+
+/**
+ * What the list may be filtered by: every status a letter can have (the
+ * letters table's valid_letter_status), which the compiler keeps complete,
+ * and `scheduled` (#535): queued with an arrival date, waiting for its mail
+ * date.
+ */
+const LETTER_STATUSES: Record<LetterStatus, true> = {
+  draft: true,
+  queued: true,
+  processing: true,
+  held: true,
+  sent: true,
+  accepted: true,
+  in_transit: true,
+  delivered: true,
+  returned: true,
+  failed: true,
+  cancelled: true
+};
+export const LETTER_STATUS_FILTERS: readonly string[] = [...Object.keys(LETTER_STATUSES), 'scheduled'];
+
+/** The filter's condition, after the user's: a status, or held mail waiting for its date. */
+function statusCondition(status: string, params: unknown[]): string {
+  if (status === 'scheduled') return ` AND status = 'queued' AND mail_on IS NOT NULL`;
+  params.push(status);
+  return ` AND status = $${params.length}`;
 }
 
 /**
@@ -175,11 +213,10 @@ async function handleListLetters(
   if (offset < 0) offset = 0;
 
   // Validate status if provided
-  const validStatuses = ['draft', 'queued', 'processing', 'sent', 'failed', 'cancelled'];
-  if (status && !validStatuses.includes(status)) {
+  if (status && !LETTER_STATUS_FILTERS.includes(status)) {
     sendJson(res, 400, {
       error: 'Invalid status',
-      message: `Status must be one of: ${validStatuses.join(', ')}`
+      message: `Status must be one of: ${LETTER_STATUS_FILTERS.join(', ')}`
     });
     return;
   }
@@ -189,15 +226,14 @@ async function handleListLetters(
   let sql = `
     SELECT
       letter_id, user_id, content, recipient, credits_cost, status,
-      tracking_id, created_at, sent_at, provider
+      tracking_id, created_at, sent_at, provider, arrive_by, mail_on, funding_type
     FROM letters
     WHERE user_id = $1
   `;
   const params: any[] = [authInfo.userId];
 
   if (status) {
-    params.push(status);
-    sql += ` AND status = $${params.length}`;
+    sql += statusCondition(status, params);
   }
 
   sql += ` ORDER BY created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
@@ -211,8 +247,7 @@ async function handleListLetters(
   let countSql = `SELECT COUNT(*) FROM letters WHERE user_id = $1`;
   const countParams: any[] = [authInfo.userId];
   if (status) {
-    countParams.push(status);
-    countSql += ` AND status = $${countParams.length}`;
+    countSql += statusCondition(status, countParams);
   }
   const countResult = await query(countSql, countParams);
   const total = parseInt(countResult.rows[0].count, 10);
@@ -236,7 +271,7 @@ async function handleGetLetter(
   const result = await query<LetterRow>(`
     SELECT
       letter_id, user_id, content, recipient, credits_cost, status,
-      preview_html, tracking_id, created_at, sent_at, provider
+      preview_html, tracking_id, created_at, sent_at, provider, arrive_by, mail_on, funding_type
     FROM letters
     WHERE letter_id = $1 AND user_id = $2
   `, [letterId, authInfo.userId]);
@@ -286,6 +321,10 @@ function formatLetterResponse(row: LetterRow): any {
   // Extract recipient info from JSONB
   const recipient = row.recipient || {};
   const content = row.content || {};
+  // Sent with an arrival date (#535): it waits, queued, for its mail date,
+  // and can be cancelled free until then unless Pay & Send paid for it.
+  const waiting = waitsInOutbox(row.status as LetterStatus);
+  const held = heldSendFields(row, waiting);
 
   return {
     letterId: row.letter_id,
@@ -294,6 +333,12 @@ function formatLetterResponse(row: LetterRow): any {
     createdAt: row.created_at?.toISOString(),
     sentAt: row.sent_at?.toISOString(),
     trackingNumber: row.tracking_id,
+
+    // Arrival dates, when it was sent with them (#535)
+    arriveBy: held?.schedule.arriveBy ?? null,
+    mailOn: held?.schedule.mailOn ?? null,
+    scheduled: Boolean(held) && waiting,
+    cancellable: held?.cancellable ?? false,
 
     // Recipient summary
     recipient: {
