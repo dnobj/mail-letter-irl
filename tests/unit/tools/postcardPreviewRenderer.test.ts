@@ -288,6 +288,8 @@ describe('a gift postcard', () => {
     expect(draft.rendererVersion).toBeUndefined();
     expect(draft.previewHtml).toContain('class="postcard-front"');
     expect(draft.previewHtml).not.toContain('data-renderer');
+    // So the card keeps its own front and mockup.
+    expect(output).not.toHaveProperty('previewHtml');
     expect(output.giftCard).toMatchObject({ state: 'funded' });
 
     vi.mocked(createPostcardDraft).mockClear();

@@ -44,9 +44,10 @@ export function hostBridgeSource(widgetDir: string): string {
 
 /**
  * The card as served: the bridge, and any other shared script, inlined where
- * the card asks for it. A `</script` inside a script would end the tag early;
- * none has one, and this refuses to serve one rather than break the page
- * quietly.
+ * the card asks for it. A `</script` inside a script would end the tag early,
+ * and a `<!--` followed by `<script` would keep it from closing at all,
+ * swallowing the card's own script; none has either, and this refuses to
+ * serve one rather than break the page quietly.
  */
 export function inlineHostBridge(html: string, widgetDir: string): string {
   let served = html;
@@ -58,6 +59,9 @@ export function inlineHostBridge(html: string, widgetDir: string): string {
     }
     if (SHARED_SCRIPTS.some(script => source.includes(script.marker))) {
       throw new Error(`widgets/shared/${file} must not contain the card's marker comment`);
+    }
+    if (source.includes("<!--")) {
+      throw new Error(`widgets/shared/${file} must not contain an HTML comment opener`);
     }
     served = served.replace(marker, () => `<script>\n${source}\n    </script>`);
   }

@@ -241,8 +241,9 @@
       // card re-renders on host.onChange.
       const host = window.letterIrlHost;
       // Our renderer's pages, and the cleaner that keeps the card safe from
-      // them (widgets/shared/pages.js, #534).
-      const { renderedPages, cleanPage } = window.letterIrlPages;
+      // them (widgets/shared/pages.js, #534). Were that script not to run, the
+      // card shows no page, never an uncleaned one, and falls back to its own.
+      const { renderedPages, cleanPage } = window.letterIrlPages ?? { renderedPages: () => null, cleanPage: null };
 
       let dataLoaded = false;
       let currentDraftId = null;

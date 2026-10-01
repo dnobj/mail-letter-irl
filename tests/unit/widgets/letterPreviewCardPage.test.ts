@@ -28,11 +28,9 @@ const RENDERED = renderLetterPreviewDocument(
 
 const LEGACY = '<div class="letter-body">Hello</div><div class="sign-off">Bye</div>';
 
-function mount(previewHtml: string) {
-  const html = inlineHostBridge(
-    fs.readFileSync(path.join(WIDGET_DIR, 'LetterPreviewCard.html'), 'utf-8'),
-    WIDGET_DIR
-  );
+function mount(previewHtml: string, { withPages = true } = {}) {
+  const card = fs.readFileSync(path.join(WIDGET_DIR, 'LetterPreviewCard.html'), 'utf-8');
+  const html = inlineHostBridge(withPages ? card : card.replace('<!-- letter-irl:pages -->', ''), WIDGET_DIR);
   // jsdom does not execute module scripts; the card's script parses as a classic one.
   const runnable = html.replace('<script type="module">', '<script>');
   const dom = new JSDOM(runnable, {
@@ -207,6 +205,15 @@ describe('LetterPreviewCard: the page as it prints', () => {
     (document.querySelector('.letter-page') as HTMLElement).click();
     expect(view().classList.contains('zoomed')).toBe(false);
     expect(zoom().textContent).toBe('Enlarge');
+  });
+
+  it('falls back to the mockup, never an uncleaned page, if the shared pages did not run', () => {
+    const dom = mount(RENDERED, { withPages: false });
+    const container = dom.window.document.getElementById('mockup-container')!;
+    expect(container.querySelector('.letter-page')).toBeNull();
+    expect(container.querySelector('svg')).toBeNull();
+    // The hidden legacy text the renderer's document keeps for this.
+    expect(container.textContent).toContain('See you soon.');
   });
 
   it('keeps the mockup for a legacy preview, even one whose text names the mark', () => {

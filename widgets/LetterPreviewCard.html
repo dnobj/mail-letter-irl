@@ -1145,8 +1145,9 @@
       // Our renderer's pages, and the cleaner that keeps the card safe from
       // them (widgets/shared/pages.js, #534): a preview our renderer drew
       // gives its pages, a gift send's card the second; a legacy preview
-      // gives none and gets the mockup below.
-      const { renderedPages, cleanPage } = window.letterIrlPages;
+      // gives none and gets the mockup below. Were that script not to run,
+      // the card shows no page, never an uncleaned one, but the mockup.
+      const { renderedPages, cleanPage } = window.letterIrlPages ?? { renderedPages: () => null, cleanPage: null };
 
       // Kept across renders, so a status update does not shrink the page back.
       let pageZoomed = false;

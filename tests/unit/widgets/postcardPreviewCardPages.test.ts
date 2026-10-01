@@ -44,8 +44,9 @@ const RENDERED = renderPostcardPreviewDocument(renderPreviewSvg(
 
 const LEGACY_FRONT = '<html><body><div class="postcard-front"><img src="data:image/png;base64,AAAA" alt="Postcard front" /></div></body></html>';
 
-function mount(meta: Record<string, unknown>) {
-  const html = inlineHostBridge(fs.readFileSync(path.join(WIDGET_DIR, 'PostcardPreviewCard.html'), 'utf-8'), WIDGET_DIR);
+function mount(meta: Record<string, unknown>, { withPages = true } = {}) {
+  const card = fs.readFileSync(path.join(WIDGET_DIR, 'PostcardPreviewCard.html'), 'utf-8');
+  const html = inlineHostBridge(withPages ? card : card.replace('<!-- letter-irl:pages -->', ''), WIDGET_DIR);
   // jsdom does not execute module scripts; the card's script parses as a classic one.
   const runnable = html.replace('<script type="module">', '<script>');
   const dom = new JSDOM(runnable, {
@@ -123,6 +124,14 @@ describe('PostcardPreviewCard: the postcard as it prints', () => {
     ]);
     expect(groups[0].querySelector('svg > title')!.textContent).toBe('The front of the postcard');
     expect(groups[1].querySelector('svg > title')!.textContent).toBe('Dear Sam,\nWish you were here.\nPat');
+  });
+
+  it('falls back to its own front and mockup, never an uncleaned page, if the shared pages did not run', () => {
+    const dom = mount({ previewHtml: RENDERED, previewFrontHtml: LEGACY_FRONT }, { withPages: false });
+    const document = dom.window.document;
+    expect(document.querySelector('.postcard-page')).toBeNull();
+    expect(document.querySelector('#preview-front .postcard-front img')).not.toBeNull();
+    expect(document.querySelector('#preview-back .postcard-back-mockup')).not.toBeNull();
   });
 
   it('keeps its own front and the mockup of the back for a legacy preview', () => {

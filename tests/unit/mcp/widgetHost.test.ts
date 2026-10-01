@@ -88,6 +88,13 @@ describe("inlining the renderer's pages (#534)", () => {
       .toThrow('widgets/shared/pages.js must not contain the card\'s marker comment');
   });
 
+  it('refuses a shared script that opens an HTML comment, which could keep its tag from closing', () => {
+    expect(() => inlineHostBridge(`<body>${PAGES_PLACEHOLDER}</body>`, widgetDirWith({ 'pages.js': 'var s = "<!--<script ";' })))
+      .toThrow('widgets/shared/pages.js must not contain an HTML comment opener');
+    expect(() => inlineHostBridge(`<body>${HOST_BRIDGE_PLACEHOLDER}</body>`, widgetDirWith({ 'host.js': 'var s = "<!--";' })))
+      .toThrow('widgets/shared/host.js must not contain an HTML comment opener');
+  });
+
   it('is asked for by both preview cards', () => {
     for (const card of ['LetterPreviewCard', 'PostcardPreviewCard']) {
       const html = fs.readFileSync(path.join(WIDGET_DIR, `${card}.html`), 'utf-8');
