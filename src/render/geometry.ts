@@ -20,6 +20,15 @@ export const PAGE_HEIGHT = inch(11);
 /** Where PostGrid's white address boxes go, with a 0.1in margin on each side. */
 export const ADDRESS_ZONE = { left: inch(0.4), top: inch(0.1), right: inch(3.85), bottom: inch(2.9) } as const;
 
+/** Where and how PostGrid stamps the two addresses: each block from its first baseline down. */
+export interface StampGeometry {
+  x: number;
+  returnBaseline: number;
+  recipientBaseline: number;
+  pitch: number;
+  size: number;
+}
+
 /**
  * How PostGrid stamps the addresses into those boxes, decoded from probe P6
  * (letter_pypQkUM56Cc5s7vDRU6qe6): Open Sans at 9pt, in upper case, from x
@@ -27,13 +36,13 @@ export const ADDRESS_ZONE = { left: inch(0.4), top: inch(0.1), right: inch(3.85)
  * at 2.094in, each line 0.177in below the last. The PDF leaves the zone
  * empty; a preview draws the addresses here so the page shows what prints.
  */
-export const ADDRESS_STAMP = {
+export const ADDRESS_STAMP: StampGeometry = {
   x: inch(0.7),
   returnBaseline: inch(0.438),
   recipientBaseline: inch(2.094),
   pitch: inch(0.177),
   size: 9
-} as const;
+};
 
 /** PostGrid's white frame sits 1/8in inside the edge; nothing is drawn within 1/4in. */
 export const EDGE_CLEARANCE = inch(0.25);
@@ -77,6 +86,21 @@ export const POSTCARD_MESSAGE = {
 } as const;
 /** Where the back's left half ends: nothing is drawn to the right of it. */
 export const POSTCARD_HALF = POSTCARD_BLEED + inch(4.5);
+
+/**
+ * How PostGrid stamps a postcard's back, decoded from probes P9 and P11 (from
+ * the page's edge, bleed included): Open Sans 9pt in upper case from x
+ * 5.725in, "RETURN TO:" then the return address from baseline 0.958in, and
+ * the recipient from 4.937in, each line 0.177in below the last. Each block
+ * keeps its first baseline whatever its number of lines.
+ */
+export const POSTCARD_STAMP: StampGeometry = {
+  x: inch(5.725),
+  returnBaseline: inch(0.958),
+  recipientBaseline: inch(4.937),
+  pitch: inch(0.177),
+  size: 9
+};
 
 /** The legacy back's message: 14pt at a line-height of 1.6. */
 export const POSTCARD_FONT_SIZE = 14;

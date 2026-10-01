@@ -580,7 +580,7 @@ export function layoutLetterForPreview(
  * the printed image's, so the page is still the print's, but the preview
  * carries a few kilobytes instead of the full image.
  */
-function withDisplayImage(layout: Layout, previewDataUri: string | undefined): Layout {
+export function withDisplayImage(layout: Layout, previewDataUri: string | undefined): Layout {
   if (!previewDataUri) return layout;
   const image = readImageDataUri(previewDataUri);
   return {

@@ -772,6 +772,8 @@ export interface CreatePostcardDraftParams {
   expiresInHours?: number;        // Default: 24
   /** Funded by a gift letter and printed with its card (migration 033). */
   isGiftSend?: boolean;
+  /** The renderer that drew the preview (#534 Phase 4); absent for the legacy HTML. */
+  rendererVersion?: string;
 }
 
 export interface CreatePostcardDraftResult {

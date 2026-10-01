@@ -1,14 +1,15 @@
-import { ADDRESS_STAMP } from './geometry.js';
+import { ADDRESS_STAMP, type StampGeometry } from './geometry.js';
 import { placeGlyphs } from './glyphs.js';
 import type { Layout, LayoutPage } from './layout.js';
 
 export interface PreviewOptions {
   /**
    * The address lines PostGrid stamps, as it prints them (upper case), drawn
-   * on the first page where PostGrid stamps them. The print leaves them out:
-   * PostGrid adds them.
+   * where PostGrid stamps them. The print leaves them out: PostGrid adds them.
    */
   addresses?: { from: string[]; to: string[] };
+  /** Which page carries the stamp, and its geometry: a letter's first page unless given. */
+  stamp?: { page: number; geometry: StampGeometry };
 }
 
 const round = (value: number): number => Math.round(value * 100) / 100;
@@ -32,21 +33,25 @@ function escapeXml(text: string): string {
  * into markup unescaped.
  */
 export function renderPreviewSvg(layout: Layout, options: PreviewOptions = {}): string[] {
-  return layout.pages.map((page, index) => renderPage(layout, page, index === 0 ? options.addresses : undefined));
+  const { page: stampPage, geometry } = options.stamp ?? { page: 0, geometry: ADDRESS_STAMP };
+  return layout.pages.map((page, index) =>
+    renderPage(layout, page, index === stampPage && options.addresses ? { ...options.addresses, geometry } : undefined));
 }
 
+type Stamp = { from: string[]; to: string[]; geometry: StampGeometry };
+
 /** The addresses in PostGrid's stamp: its font, size and lines (geometry.ts). */
-function addressStamp(addresses: { from: string[]; to: string[] }): string {
+function addressStamp({ from, to, geometry }: Stamp): string {
   const lines = (texts: string[], baseline: number) => texts
-    .map((text, index) => `<text x="${round(ADDRESS_STAMP.x)}" y="${round(baseline + index * ADDRESS_STAMP.pitch)}">${escapeXml(text)}</text>`)
+    .map((text, index) => `<text x="${round(geometry.x)}" y="${round(baseline + index * geometry.pitch)}">${escapeXml(text)}</text>`)
     .join('');
-  return `<g font-family="'Open Sans', Arial, Helvetica, sans-serif" font-size="${ADDRESS_STAMP.size}" fill="#000">` +
-    lines(addresses.from, ADDRESS_STAMP.returnBaseline) +
-    lines(addresses.to, ADDRESS_STAMP.recipientBaseline) +
+  return `<g font-family="'Open Sans', Arial, Helvetica, sans-serif" font-size="${geometry.size}" fill="#000">` +
+    lines(from, geometry.returnBaseline) +
+    lines(to, geometry.recipientBaseline) +
     '</g>';
 }
 
-function renderPage(layout: Layout, page: LayoutPage, addresses?: { from: string[]; to: string[] }): string {
+function renderPage(layout: Layout, page: LayoutPage, stamp?: Stamp): string {
   const outlines = new Map<string, string>();
   const drawn: string[] = [];
   const spoken: string[] = [];
@@ -77,6 +82,6 @@ function renderPage(layout: Layout, page: LayoutPage, addresses?: { from: string
     `<defs>${defs}</defs>` +
     `<rect width="${layout.width}" height="${layout.height}" fill="#fff"/>` +
     drawn.join('') +
-    (addresses ? addressStamp(addresses) : '') +
+    (stamp ? addressStamp(stamp) : '') +
     '</svg>';
 }

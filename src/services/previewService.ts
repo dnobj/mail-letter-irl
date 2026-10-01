@@ -464,6 +464,11 @@ export function stampedAddressLines(address: Address): string[] {
     .map(line => line.trim().toUpperCase());
 }
 
+/** A postcard's return address as PostGrid stamps it: headed "RETURN TO:" (#534 probe P9). */
+export function stampedPostcardReturnLines(address: Address): string[] {
+  return ['RETURN TO:', ...stampedAddressLines(address)];
+}
+
 /**
  * The preview our own renderer draws (#534): each page as SVG, from the same
  * layout the PDF is printed from, in a minimal HTML document. The website's
@@ -481,6 +486,25 @@ export function renderLetterPreviewDocument(
 ): string {
   const trimmedBodyText = text.bodyText.replace(/\n+$/, '');
 
+  return rendererDocument(pages, `  <div hidden>
+    <div class="letter-body">${escapeHtml(trimmedBodyText)}</div>
+    <div class="sign-off">${escapeHtml(text.signOff)}</div>
+  </div>
+`);
+}
+
+/**
+ * A postcard our renderer drew (#534 Phase 4): its front and back as SVG, in
+ * the same document as a letter's, which the website's confirm page shows.
+ * No card before Phase 4 reads a postcard's document, so it carries no
+ * hidden text.
+ */
+export function renderPostcardPreviewDocument(pages: string[]): string {
+  return rendererDocument(pages, '');
+}
+
+/** The minimal document our renderer's pages are shown in, `after` closing the body. */
+function rendererDocument(pages: string[], after: string): string {
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -494,11 +518,7 @@ export function renderLetterPreviewDocument(
 </head>
 <body data-renderer="${RENDERER_VERSION}">
 ${pages.join('\n')}
-  <div hidden>
-    <div class="letter-body">${escapeHtml(trimmedBodyText)}</div>
-    <div class="sign-off">${escapeHtml(text.signOff)}</div>
-  </div>
-</body>
+${after}</body>
 </html>`;
 }
 

@@ -1682,6 +1682,11 @@ or an admin grant: the owner's step).
       twice a letter's. (Probe P8 on 2026-10-01 sent such a PDF in test mode: `pageCount` 2, the
       stamp on page 1 only, and the flattened QR decodes.)
 - [ ] A letter previewed before the flag was on prints on the legacy HTML after it.
+- [ ] A postcard preview records `pdf-1` (#534 Phase 4, PR 7a). Its confirm page shows the front, the photo
+      to the edges, and the back: the message in its left half, the addresses stamped on the right with
+      "RETURN TO:". A 16-line message makes a draft; 17 lines are refused with "Postcard message is 1 line
+      too long for the back". A gift postcard makes a legacy draft. A postcard sent in test mode prints
+      from our PDF: PostGrid accepts it with `pageCount` 2 and it stays `ready`.
 - [ ] The letter card shows the page as it prints, with the addresses where PostGrid stamps them, in
       ChatGPT and in Claude; a select enlarges it and the next restores it. A legacy preview keeps
       the mockup. (#534 Phase 3, widgets v47.) A gift send's card shows below the letter, with its
