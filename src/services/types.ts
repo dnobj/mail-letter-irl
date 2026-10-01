@@ -568,6 +568,8 @@ export interface CreateDraftParams {
   /**
    * The stationery the preview was drawn in (migration 044, #563); unset for
    * Classic. With it, rendererVersion must be 'pdf-2' (rendererVersionFor).
+   * Its slots as slotText makes them, each at most STATIONERY_SLOT_MAX_LENGTH:
+   * createDraft refuses a theme stationeryOf would not read back.
    */
   stationery?: Stationery;
 }

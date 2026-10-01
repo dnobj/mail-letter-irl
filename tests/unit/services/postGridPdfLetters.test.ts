@@ -356,11 +356,13 @@ describe('letters printed from our own PDF (#534)', () => {
       }
     }
 
-    async function drawn(stationery?: typeof BOTANICAL) {
+    async function drawn(stationery?: typeof BOTANICAL, giftCard?: typeof GIFT_CARD) {
       vi.useFakeTimers({ toFake: ['Date'] });
       vi.setSystemTime(new Date('2026-10-01T12:00:00Z'));
       try {
-        return await renderPdf(layoutLetter({ text: base.message, layoutType: 'text_only', stationery }));
+        const layout = layoutLetter({ text: base.message, layoutType: 'text_only', stationery });
+        if (giftCard) layout.pages.push(layoutGiftPage(giftLetterPageCopy(giftCard, base.senderName)));
+        return await renderPdf(layout, stationery ? STATIONERY_RENDERER_VERSION : RENDERER_VERSION);
       } finally {
         vi.useRealTimers();
       }
@@ -372,6 +374,20 @@ describe('letters printed from our own PDF (#534)', () => {
       expect(result.success).toBe(true);
       expect(pdf!.equals(await drawn(BOTANICAL))).toBe(true);
       expect(pdf!.equals(await drawn())).toBe(false);
+      // The file names the version it was drawn as (#563 review round 3).
+      expect(pdf!.toString('latin1')).toContain(`Letter IRL renderer ${STATIONERY_RENDERER_VERSION}`);
+    });
+
+    it("prints a pdf-2 gift send's themed page, then today's card page (#563 review round 3)", async () => {
+      const { result, pdf } = await printed({
+        rendererVersion: STATIONERY_RENDERER_VERSION,
+        stationery: BOTANICAL,
+        giftCard: GIFT_CARD
+      });
+
+      expect(result.success).toBe(true);
+      expect(pdf!.equals(await drawn(BOTANICAL, GIFT_CARD))).toBe(true);
+      expect(pdf!.toString('latin1')).toMatch(/\/Count 2\b/);
     });
 
     it('prints a pdf-1 letter as Classic, whatever stationery its content carries', async () => {

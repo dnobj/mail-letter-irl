@@ -36,14 +36,15 @@ export function rendererVersionFor(stationery?: Stationery | null): string {
  * preview uses. No text is handed to pdfkit, which would re-shape it word by
  * word and guess each word's direction. PostGrid flattens an uploaded page to
  * a 300 dpi image anyway (#534 Phase 0), so outlines print exactly as text
- * would, with nothing left to embed.
+ * would, with nothing left to embed. `version`, the renderer version the
+ * layout was drawn as, is named in the file's Producer.
  */
-export async function renderPdf(layout: Layout): Promise<Buffer> {
+export async function renderPdf(layout: Layout, version: string = RENDERER_VERSION): Promise<Buffer> {
   const doc = new PDFDocument({
     size: [layout.width, layout.height],
     margin: 0,
     autoFirstPage: false,
-    info: { Title: layout.title ?? 'Letter', Creator: 'Letter IRL', Producer: `Letter IRL renderer ${RENDERER_VERSION}` }
+    info: { Title: layout.title ?? 'Letter', Creator: 'Letter IRL', Producer: `Letter IRL renderer ${version}` }
   });
   const chunks: Buffer[] = [];
   const done = new Promise<Buffer>((resolve, reject) => {

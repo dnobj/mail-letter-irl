@@ -43,6 +43,7 @@ import {
   PRINTABLE_RENDERER_VERSIONS,
   readImageDataUri,
   renderPdf,
+  rendererVersionFor,
   STATIONERY_RENDERER_VERSION,
   stationeryOf,
   type Stationery
@@ -857,7 +858,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       }
     }
     try {
-      return await renderPdf(layout);
+      return await renderPdf(layout, rendererVersionFor(stationery));
     } catch (error) {
       throw new RenderRefusal('render', `The letter could not be drawn: ${reason(error)}`);
     }

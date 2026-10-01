@@ -8,6 +8,7 @@
 import { query, transaction } from '../db/index.js';
 import type pg from 'pg';
 import { writeDiagnostic } from '../utils/diagnosticLog.js';
+import { stationeryOf } from '../render/stationery.js';
 import type {
   Letter,
   LetterDraft,
@@ -37,6 +38,14 @@ export async function createDraft(params: CreateDraftParams): Promise<CreateDraf
   const expiresInHours = params.expiresInHours ?? DEFAULT_EXPIRATION_HOURS;
   const expiresAt = new Date(Date.now() + expiresInHours * 60 * 60 * 1000);
   const layoutType = params.layoutType ?? 'text_only';
+  // Classic is stored as none (#563). A theme is stored as the print reads it
+  // back (stationeryOf), and one it would not read is refused before any
+  // draft exists, so a stored theme always prints.
+  const themed = params.stationery !== undefined && params.stationery.theme !== 'classic';
+  const stationery = themed ? stationeryOf(params.stationery) : null;
+  if (themed && !stationery) {
+    throw new Error('The stationery cannot be stored: the print would not read it back.');
+  }
 
   const result = await query<LetterDraft>(
     `INSERT INTO letter_drafts (
@@ -67,8 +76,7 @@ export async function createDraft(params: CreateDraftParams): Promise<CreateDraf
       expiresAt,
       params.schedule?.arriveBy ?? null,
       params.schedule?.mailOn ?? null,
-      // Classic is stored as none (#563).
-      params.stationery && params.stationery.theme !== 'classic' ? JSON.stringify(params.stationery) : null,
+      stationery ? JSON.stringify(stationery) : null,
     ]
   );
 
