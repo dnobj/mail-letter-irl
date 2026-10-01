@@ -182,3 +182,24 @@ describe('the Style row script, held and adopting (#572 review round 1)', () => 
     expect(row.adopt('draft-1', { theme: 'celebration' }, '<html>x</html>')).toBe(false);
   });
 });
+
+describe('the Style row script, after its own restyle (#572 review round 2)', () => {
+  it("takes no status answer once it has set a style on the draft: that answer is older", async () => {
+    const callTool = vi.fn().mockResolvedValue(answer({ theme: 'botanical', dateLine: 'October 1, 2026' }, '<html>botanical</html>'));
+    const { row, click } = load({ callTool });
+    row.show('draft-1', { stationery: { theme: 'classic' } }, true);
+    click('botanical');
+    await flush();
+    await flush();
+    expect(row.stationery()).toEqual({ theme: 'botanical', dateLine: 'October 1, 2026' });
+
+    // The status answer the card asked for at its first render, landing late.
+    expect(row.adopt('draft-1', { theme: 'classic' }, '<html>classic</html>')).toBe(false);
+    expect(row.stationery()).toEqual({ theme: 'botanical', dateLine: 'October 1, 2026' });
+    expect(row.previewHtml('draft-1')).toBe('<html>botanical</html>');
+
+    // Another draft starts afresh.
+    row.show('draft-2', { stationery: { theme: 'classic' } }, true);
+    expect(row.adopt('draft-2', { theme: 'monogram' }, '<html>monogram</html>')).toBe(true);
+  });
+});

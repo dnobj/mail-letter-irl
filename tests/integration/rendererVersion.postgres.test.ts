@@ -268,6 +268,9 @@ describePostgres('renderer version (migration 039, #534)', () => {
         stationery: BOTANICAL,
         preview_html: '<svg></svg>'
       });
+      // Sent, its page is no longer read (#572 review round 2).
+      await mailSend.createMailOrderFromDraft({ draftId: themed.draftId, userId, mailType: 'letter' });
+      await expect(drafts.getDraftState(themed.draftId)).resolves.toMatchObject({ status: 'consumed', preview_html: null });
     }, 60_000);
   });
 });

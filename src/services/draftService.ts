@@ -310,7 +310,11 @@ export interface DraftState
 export async function getDraftState(draftId: string): Promise<DraftState | null> {
   const result = await query<DraftState>(
     `SELECT d.draft_id, d.user_id, d.status, d.expires_at, d.consumed_letter_id, d.arrive_by, d.mail_on,
-            d.mail_type, d.renderer_version, d.stationery, d.preview_html,
+            d.mail_type, d.renderer_version, d.stationery,
+            -- The page only where get_draft_status can give it: a letter our
+            -- renderer drew, still pending.
+            CASE WHEN d.status = 'pending' AND d.mail_type = 'letter' AND d.renderer_version IS NOT NULL
+                 THEN d.preview_html END AS preview_html,
             l.status AS letter_status, l.funding_type AS letter_funding_type,
             l.arrive_by AS letter_arrive_by, l.mail_on AS letter_mail_on
        FROM letter_drafts d

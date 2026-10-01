@@ -306,6 +306,20 @@ describe('the Style row and the sends (#563)', () => {
     expect(card.lastRequest('tools/call', 'set_stationery')).toBeDefined();
   });
 
+  it('comes back after a send that fails, even when the host redrew the card during it (#572 review round 2)', async () => {
+    const card = mount();
+    await card.show(output({ theme: 'classic', source: 'default' }));
+
+    await card.click('send-button');
+    // The host redraws while the send is out: the card hides its rows meanwhile.
+    await card.show(output({ theme: 'classic', source: 'default' }));
+    expect(card.visible('style-row')).toBe(false);
+
+    await card.answer({ result: { isError: true, content: [{ type: 'text', text: 'The printer is busy.' }] } }, 'send_letter');
+    expect(card.visible('style-row')).toBe(true);
+    expect(card.text('send-button-text')).toBe('Retry Send');
+  });
+
   it('comes back when a checkout is refused before it opens (#572 review round 1)', async () => {
     const card = mount();
     await card.show({

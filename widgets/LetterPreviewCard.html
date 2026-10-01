@@ -1936,6 +1936,9 @@
           statusPill.textContent = "Send failed";
 
           sendInProgress = false;
+          // A host redraw during the send hid the rows; they come back with
+          // the draft, which is still to send.
+          showPickerAgain();
         } finally {
           // A failed send leaves the row usable again; a sent letter has none.
           styleRow.hold(false);

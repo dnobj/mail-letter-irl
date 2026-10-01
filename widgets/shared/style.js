@@ -45,7 +45,8 @@
     // initials and headline this card last saw with each theme on this
     // draft, which come back with the theme when the person returns to it.
     // held: the card is sending the letter or starting a payment, so the
-    // row waits too.
+    // row waits too. restyled: the row set a style on this draft itself, so
+    // the server's earlier word on it (adopt) is out of date.
     var state = {
       draftId: null,
       stationery: null,
@@ -53,6 +54,7 @@
       pending: null,
       busy: false,
       held: false,
+      restyled: false,
       message: "",
       error: false,
       slots: {}
@@ -124,6 +126,7 @@
             throw new Error("The style may have changed. Make the preview again to see it.");
           }
           state.stationery = stationery;
+          state.restyled = true;
           keepSlots(stationery);
           var page = result && result._meta && result._meta.previewHtml;
           // The draft has the new style either way; without its page the card
@@ -185,6 +188,7 @@
           state.previewHtml = null;
           state.busy = false;
           state.pending = null;
+          state.restyled = false;
           state.message = "";
           state.error = false;
           state.slots = {};
@@ -204,10 +208,11 @@
       // The draft's style and page as the server says they are now
       // (get_draft_status), for a card shown its preview's first answer
       // again: the row presses it, and the page replaces the preview's. False
-      // when the row is on another draft, or setting a style, and took
-      // nothing.
+      // when the row is on another draft, setting a style, or has set one:
+      // the card asks before anyone can press, so an answer that lands after
+      // a restyle is older than it (#572 review round 2).
       adopt: function (draftId, stationery, previewHtml) {
-        if (state.draftId !== draftId || state.busy || !stationery || !isTheme(stationery.theme)) return false;
+        if (state.draftId !== draftId || state.busy || state.restyled || !stationery || !isTheme(stationery.theme)) return false;
         state.stationery = stationery;
         keepSlots(stationery);
         if (typeof previewHtml === "string" && previewHtml) state.previewHtml = previewHtml;
