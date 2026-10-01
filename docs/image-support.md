@@ -120,7 +120,7 @@ All images are validated, resized to print specifications (300 DPI), and optimiz
 | Placement | Top of letter (letterhead style) |
 
 **Text Specifications**:
-- Body text limit: 1100 characters OR 17 lines
+- Body text limit: 1100 characters OR 15 lines (the legacy HTML takes 17; a letter drawn by our renderer is measured, #534)
 - Sign-off required
 
 **Processing Pipeline**:

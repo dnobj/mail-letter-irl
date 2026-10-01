@@ -1652,11 +1652,12 @@ with `C:\letter-irl-scripts\probe-534\decode-534.mjs`, and crop its page with `e
 **Previews: passed on 2026-10-01 on development (6dc1061, flag on since 00:27 UTC), as testlirl02,
 through the development MCP server.** The sends wait for letters on that account (a test-mode pack
 or an admin grant: the owner's step).
-- [x] A text-only preview's draft records `renderer_version = 'pdf-1'`, and the log's
-      `draft.created` line carries `"renderer":"pdf-1"`. The website's confirm page shows the page in
-      Tinos, with the line breaks it prints with. (The confirm page drew the SVG page: the address zone
-      blank, no sender block, Tinos. `api-log.mjs` withholds the renderer's value, so the page is the
-      evidence.)
+- [x] The website's confirm page shows a renderer preview's page in Tinos, with the line breaks it
+      prints with. (The SVG page: the address zone blank, no sender block.)
+- [x] The log's `draft.created` line carries `"renderer":"pdf-1"` (2026-10-01 01:06 UTC, draft
+      3785aa77; `api-log.mjs` now shows the field). `createDraft` inserts the same value into
+      `renderer_version`: the unit and PostgreSQL tests prove the insert, and the database itself was
+      not queried.
 - [ ] A Pay & Send letter, which the hourly maintenance run dispatches, prints from our PDF too: the
       maintenance service builds the whole repository, `assets/fonts` included.
 - [ ] A full 26-line letter's card draws in ChatGPT. Its preview is about 95 KB of SVG in

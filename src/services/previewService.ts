@@ -29,7 +29,7 @@ export const LAYOUT_CHARACTER_LIMITS: Record<LetterLayoutType, number> = {
 // The served tool descriptions state no line counts; the refusal sentence does.
 export const LAYOUT_LINE_LIMITS_SOFT: Record<LetterLayoutType, number> = {
   text_only: 24,        // Full page of text
-  header_image: 17,     // Reduced for 2" header image
+  header_image: 15,     // Reduced for 2" header image: with the sign-off it fits our renderer's 16 (#534) and the legacy 17
   inline_image: 12,     // Reduced for 3" inline image
 };
 

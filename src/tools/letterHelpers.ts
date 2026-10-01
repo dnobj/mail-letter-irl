@@ -685,7 +685,7 @@ export interface CreateLetterDraftParams {
   addressWarnings?: string[];
   usedSavedReturnAddress: boolean;
   savedReturnAddressNote?: string;
-  /** Whether this is a gift send, decided before the checks (letterGiftChoice). */
+  /** Whether this is a gift send, decided before the checks that depend on how it prints (letterGiftChoice). */
   gift: GiftSendChoice;
   /** The letter as our renderer lays it out (layoutLetterForPreview), or undefined for the legacy HTML. */
   printLayout?: Layout;
@@ -746,8 +746,8 @@ export function previewSendEligibility(
 }
 
 /**
- * Whether a letter preview is a gift send, decided before anything is
- * checked. A gift send prints on the legacy HTML until the gift page moves
+ * Whether a letter preview is a gift send, decided before any check that
+ * depends on how it prints. A gift send prints on the legacy HTML until the gift page moves
  * onto our renderer (#534), so it meets the legacy limits and Open Sans, never
  * the renderer's; the tools pick the renderer from this. The postcard preview
  * decides its gift the same way, before its checks.
