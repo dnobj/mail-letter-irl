@@ -176,7 +176,8 @@ Temporary drafts for idempotent send operations. Prevents duplicate sends.
 | front_image_url | TEXT | YES | - | Original image URL for debugging |
 | postcard_size | VARCHAR(10) | YES | - | Postcard size: '6x9' (NULL for letters) |
 | is_gift_send | BOOLEAN | NO | false | Previewed as a gift send: funded by a gift letter and printed with its card (033) |
-| renderer_version | VARCHAR(16) | YES | - | The renderer that drew the preview: NULL for the legacy HTML, `pdf-1` for our own PDF (039, #534). The send copies it into `letters.content.rendererVersion`, and dispatch prints with it |
+| renderer_version | VARCHAR(16) | YES | - | The renderer that drew the preview: NULL for the legacy HTML, `pdf-1` for our own PDF (039, #534), `pdf-2` for our own PDF in stationery (044, #563). The send copies it into `letters.content.rendererVersion`, and dispatch prints with it |
+| stationery | JSONB | YES | - | The stationery the preview was drawn in (044, #563): `{"theme": "monogram" \| "botanical" \| "celebration", "dateLine"?, "monogram"?, "headline"?}`. NULL is Classic. Set exactly when `renderer_version` is `pdf-2`. The send copies it into `letters.content.stationery`; redaction keeps the theme and drops the slot text |
 | arrive_by | DATE | YES | - | The date the mail should arrive by, in America/New_York; NULL to mail as soon as possible (040, #535) |
 | mail_on | DATE | YES | - | The date it goes to the printer, worked back from `arrive_by` by the lead time (040, #535). The send copies both to the letter and holds its job until then |
 | created_at | TIMESTAMPTZ | NO | NOW() | Draft creation |
@@ -189,7 +190,9 @@ Temporary drafts for idempotent send operations. Prevents duplicate sends.
 - `postcard_requires_image`: Postcards must have front_image_data
 - `postcard_requires_size`: Postcards must have postcard_size
 - `valid_postcard_size`: postcard_size must be '6x4', '6x9', or '6x11'
-- `letter_drafts_renderer_version_known`: renderer_version must be NULL or 'pdf-1' (a new version extends it in its own migration)
+- `letter_drafts_renderer_version_known`: renderer_version must be NULL, 'pdf-1' or 'pdf-2' (039, then 044; a new version extends it in its own migration)
+- `letter_drafts_stationery_theme_known`: stationery's theme is 'monogram', 'botanical' or 'celebration' (044)
+- `letter_drafts_stationery_drawn_by_pdf_2`: stationery is set exactly when renderer_version is 'pdf-2' (044)
 - `letter_drafts_schedule_pair`: arrive_by and mail_on are both set or both NULL (040)
 - `letter_drafts_schedule_order`: mail_on is never after arrive_by (040)
 
@@ -757,6 +760,7 @@ Production provisioning and the first production connection remain separate owne
 | 37 | 037_personal_access_token_scopes.sql | `personal_access_tokens.scopes`: every token reads and drafts, and none sends (#470) |
 | 38 | 038_daily_limits.sql | The daily limits' operator values, refusal counts and the API's configured values, and the `daily_limit_reached` alert type. Re-run admin provisioning after it |
 | 39 | 039_renderer_version.sql | `letter_drafts.renderer_version`: the renderer that drew a draft's preview, NULL or `pdf-1` (#534). The reader role's column grants leave it out, and the operator role's table-wide SELECT covers it; no provisioning re-run |
+| 44 | 044_stationery.sql | `letter_drafts.stationery` (#563): the theme a preview was drawn in and its slot text, NULL for Classic. `renderer_version` admits `pdf-2`, set exactly when a draft has stationery. No provisioning re-run, as for 039 |
 | 40 | 040_arrive_by.sql | `arrive_by` and `mail_on` on `letter_drafts` and `letters`: mail held to arrive by a date (#535), with the pair and order CHECKs and `idx_letters_held_mail_on`. DATEs are read as 'YYYY-MM-DD' strings (`src/db/dateParser.ts`). No provisioning re-run, as for 039 |
 | 41 | 041_missed_mail_day_alert.sql | The `schedule_missed_mail_day` alert type (#535), restated inside the `to_regclass` guard as 038 does, and a partial unique index on its letter (`idx_commerce_alerts_missed_mail_day_letter`) so it is raised once per letter. No provisioning re-run: the roles read the alerts table whole |
 | 42 | 042_mail_job_release_audit.sql | The operator audit operation `mail_job_release` (#535), written when the admin panel sends held mail early (`job.dispatch_now`). Restated inside the `to_regclass` guard as 029 does. No provisioning re-run: the operator role inserts into the table whole, and the release updates only `letter_jobs` columns already granted |

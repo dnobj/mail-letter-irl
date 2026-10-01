@@ -286,6 +286,16 @@ describe('retention sweep guards (#153)', () => {
   });
 
   describe('purgePaidDraftContent specifics', () => {
+    it("saves a draft's stationery and keeps only its theme, so migration 044's pair still holds (#563)", async () => {
+      await purgePaidDraftContent();
+
+      const sql = sqlFrom(mocks.query.mock.calls[0]);
+      expect(sql).toContain("'stationery', to_jsonb(d.stationery)");
+      expect(sql).toContain(
+        "stationery = CASE WHEN stationery IS NULL THEN NULL ELSE jsonb_build_object('theme', stationery->'theme') END"
+      );
+    });
+
     it('requires an order in a PAID state, not merely an order row', async () => {
       await purgePaidDraftContent();
 
@@ -419,7 +429,7 @@ describe('retention sweep guards (#153)', () => {
       await restoreQuarantinedContent('letter_drafts', 'draft-1');
 
       const sql = sqlFrom(mocks.query.mock.calls[1]);
-      for (const jsonColumn of ['sender', 'recipient']) {
+      for (const jsonColumn of ['sender', 'recipient', 'stationery']) {
         expect(sql).toContain(`${jsonColumn} = (SELECT content->'${jsonColumn}' FROM saved)`);
       }
       for (const textColumn of ['body_text', 'header_image_data', 'inline_image_url']) {

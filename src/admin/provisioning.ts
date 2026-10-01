@@ -46,9 +46,13 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  * commerce_operator_audit_events table-wide, and the release updates only
  * letter_jobs columns already in its list (next_attempt_at, scheduled_at,
  * updated_at), so nothing to re-run.
+ *
+ * 044 adds letter_drafts.stationery (#563). As for 039, the reader role's
+ * column list leaves it out and the operator role reads letter_drafts whole,
+ * so nothing to re-run.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
-  "042_mail_job_release_audit.sql";
+  "044_stationery.sql";
 
 export interface AdminProvisioningArguments {
   environment: "development" | "production";

@@ -648,7 +648,7 @@ draw the letter or postcard before any request was made. The reason is one of:
 - `image`: an image it could not read;
 - `overflow`: a letter that no longer fits its page, or a postcard message past its half of the back;
 - `size`: a postcard size the renderer does not draw (it draws 6x9 only);
-- `render`: anything else that failed to lay out or draw, a letter's gift card included.
+- `render`: anything else that failed to lay out or draw: a letter's gift card, or its stationery (#563), included.
 
 The log line `provider.postgrid.render_refused` names the reason and the letter id, and the hold's
 message says what was refused. Decide by the message, not the reason alone:
@@ -691,6 +691,10 @@ layout than the person previewed.
 - Postcards set a later floor: the build that merged #545 is the first to print a postcard's version. Do
   not roll back below it while postcards with `content.rendererVersion` are queued or held, or postcard
   drafts with `renderer_version` are unexpired.
+- Stationery sets another (#563): migration 044's build is the first to print `pdf-2`. An older build cannot
+  print it, so it holds such a letter as `render_refused` (`unknown_version`) rather than printing it as
+  Classic. Roll back below it only with no `pdf-2` letter queued or held and no `pdf-2` draft unexpired, or
+  retry the holds once the newer build is back.
 
 `stripe_money_event_unmatched` covers two different situations, and they have
 different recovery paths.

@@ -76,9 +76,16 @@ export interface LetterParams {
 
   /**
    * The renderer the letter was previewed with (letters.content.rendererVersion,
-   * #534): absent for the legacy HTML, 'pdf-1' for src/render's PDF.
+   * #534): absent for the legacy HTML, 'pdf-1' for src/render's PDF, 'pdf-2'
+   * for its PDF in stationery (#563).
    */
   rendererVersion?: string;
+
+  /**
+   * The stationery the letter was drawn in (letters.content.stationery, #563),
+   * as stored: the print reads it with stationeryOf, for a 'pdf-2' letter only.
+   */
+  stationery?: unknown;
 }
 
 /**

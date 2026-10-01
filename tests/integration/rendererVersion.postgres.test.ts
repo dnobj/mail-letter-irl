@@ -186,4 +186,70 @@ describePostgres('renderer version (migration 039, #534)', () => {
     expect(byId.get(rendered.letter.letter_id)).toMatchObject({ version: 'pdf-1', has_key: true });
     expect(byId.get(legacy.letter.letter_id)).toMatchObject({ version: null, has_key: false });
   }, 60_000);
+
+  describe('stationery (#563, migration 044)', () => {
+    const BOTANICAL = { theme: 'botanical', dateLine: 'October 1, 2026' };
+    const base = (userId: string) => ({
+      userId,
+      sender: SENDER,
+      recipient: RECIPIENT,
+      signOff: 'Warmly, Test',
+      requiredCredits: 2,
+      previewHtml: '<svg></svg>',
+      layoutType: 'text_only' as const
+    });
+
+    it('admits a theme with pdf-2 only, pdf-2 only with a theme, and only the themes it knows', async () => {
+      const userId = await seedUser();
+      const themed = await drafts.createDraft({
+        ...base(userId),
+        bodyText: `Hello ${randomUUID()}`,
+        rendererVersion: 'pdf-2',
+        stationery: { theme: 'botanical', dateLine: 'October 1, 2026' }
+      });
+      const row = await pool.query('SELECT stationery, renderer_version FROM letter_drafts WHERE draft_id = $1', [themed.draftId]);
+      expect(row.rows[0]).toEqual({ stationery: BOTANICAL, renderer_version: 'pdf-2' });
+
+      const plain = await seedDraft(userId, 'pdf-1');
+      // A theme drawn as pdf-1, pdf-2 without a theme, and a theme no build draws.
+      await expect(pool.query('UPDATE letter_drafts SET stationery = $2::jsonb WHERE draft_id = $1', [plain, JSON.stringify(BOTANICAL)]))
+        .rejects.toMatchObject({ code: '23514', constraint: 'letter_drafts_stationery_drawn_by_pdf_2' });
+      await expect(pool.query("UPDATE letter_drafts SET renderer_version = 'pdf-2' WHERE draft_id = $1", [plain]))
+        .rejects.toMatchObject({ code: '23514', constraint: 'letter_drafts_stationery_drawn_by_pdf_2' });
+      await expect(pool.query(
+        "UPDATE letter_drafts SET renderer_version = 'pdf-2', stationery = '{\"theme\": \"typewriter\"}'::jsonb WHERE draft_id = $1",
+        [plain]
+      )).rejects.toMatchObject({ code: '23514', constraint: 'letter_drafts_stationery_theme_known' });
+      // Classic is no theme: never stored.
+      await expect(pool.query(
+        "UPDATE letter_drafts SET renderer_version = 'pdf-2', stationery = '{\"theme\": \"classic\"}'::jsonb WHERE draft_id = $1",
+        [plain]
+      )).rejects.toMatchObject({ code: '23514', constraint: 'letter_drafts_stationery_theme_known' });
+      // The legacy HTML stays without either.
+      const legacy = await seedDraft(userId, null);
+      expect((await pool.query('SELECT stationery FROM letter_drafts WHERE draft_id = $1', [legacy])).rows[0].stationery).toBeNull();
+    }, 60_000);
+
+    it('copies the stationery into the letter the send creates, and none for Classic', async () => {
+      const userId = await seedUser();
+      const themed = await drafts.createDraft({
+        ...base(userId),
+        bodyText: `Hello ${randomUUID()}`,
+        rendererVersion: 'pdf-2',
+        stationery: { theme: 'botanical', dateLine: 'October 1, 2026' }
+      });
+      const classicDraft = await seedDraft(userId, 'pdf-1');
+
+      const sent = await mailSend.createMailOrderFromDraft({ draftId: themed.draftId, userId, mailType: 'letter' });
+      const classic = await mailSend.createMailOrderFromDraft({ draftId: classicDraft, userId, mailType: 'letter' });
+
+      const stored = await pool.query<{ letter_id: string; content: Record<string, unknown> }>(
+        'SELECT letter_id, content FROM letters WHERE letter_id = ANY($1)',
+        [[sent.letter.letter_id, classic.letter.letter_id]]
+      );
+      const byId = new Map(stored.rows.map(row => [row.letter_id, row.content]));
+      expect(byId.get(sent.letter.letter_id)).toMatchObject({ rendererVersion: 'pdf-2', stationery: BOTANICAL });
+      expect(byId.get(classic.letter.letter_id)).not.toHaveProperty('stationery');
+    }, 60_000);
+  });
 });

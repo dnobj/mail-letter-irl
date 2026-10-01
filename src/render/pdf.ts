@@ -1,6 +1,7 @@
 import PDFDocument from 'pdfkit';
 import { placeGlyphs } from './glyphs.js';
 import type { Layout } from './layout.js';
+import type { Stationery } from './stationery.js';
 
 /**
  * Recorded on every draft and letter the new renderer lays out (Phase 2), so a
@@ -9,13 +10,25 @@ import type { Layout } from './layout.js';
 export const RENDERER_VERSION = 'pdf-1';
 
 /**
+ * Recorded on a letter drawn in stationery other than Classic (#563, migration
+ * 044): pdf-1 with themes. A build that cannot draw themes refuses it, so a
+ * rollback holds a themed letter instead of printing it as Classic.
+ */
+export const STATIONERY_RENDERER_VERSION = 'pdf-2';
+
+/**
  * Every renderer version this build can print. A letter keeps the version its
  * preview was drawn with however long it waits (arrive-by, #535), so a new
  * version is added here, beside the old version's renderer, never in its
  * place. A test holds this set to every value migration 039's CHECK (or its
  * successor) admits.
  */
-export const PRINTABLE_RENDERER_VERSIONS: ReadonlySet<string> = new Set([RENDERER_VERSION]);
+export const PRINTABLE_RENDERER_VERSIONS: ReadonlySet<string> = new Set([RENDERER_VERSION, STATIONERY_RENDERER_VERSION]);
+
+/** The version a preview records: pdf-2 when drawn in a theme other than Classic, else pdf-1. */
+export function rendererVersionFor(stationery?: Stationery | null): string {
+  return stationery && stationery.theme !== 'classic' ? STATIONERY_RENDERER_VERSION : RENDERER_VERSION;
+}
 
 /**
  * Draws a layout as a PDF: images as given, and every glyph filled as its

@@ -400,6 +400,28 @@ describePostgres('content retention sweep', () => {
       expect(rows[0].redacted_at).toBeNull();
     });
 
+    it("keeps a themed draft's theme, drops its slot text, and restores both (#563)", async () => {
+      const userId = await seedUser();
+      const draftId = await seedContentDraft({ daysAgo: 120, userId });
+      const stationery = { theme: 'celebration', dateLine: 'October 1, 2026', headline: SECRET_BODY.slice(0, 20) };
+      // Both at once: migration 044 holds a theme and renderer pdf-2 together.
+      await pool.query(
+        "UPDATE letter_drafts SET renderer_version = 'pdf-2', stationery = $2::jsonb WHERE draft_id = $1",
+        [draftId, JSON.stringify(stationery)]
+      );
+      await seedJitOrder({ userId, status: 'fulfilled', draftId });
+
+      expect(await retention.purgePaidDraftContent()).toBe(1);
+
+      const scrubbed = await pool.query('SELECT stationery, renderer_version FROM letter_drafts WHERE draft_id = $1', [draftId]);
+      expect(scrubbed.rows[0]).toEqual({ stationery: { theme: 'celebration' }, renderer_version: 'pdf-2' });
+      expect((await readQuarantine('letter_drafts', draftId)).content.stationery).toEqual(stationery);
+
+      expect(await retention.restoreQuarantinedContent('letter_drafts', draftId)).toBe(true);
+      const restored = await pool.query('SELECT stationery FROM letter_drafts WHERE draft_id = $1', [draftId]);
+      expect(restored.rows[0].stationery).toEqual(stationery);
+    });
+
     it('purges only quarantine rows whose recovery window has expired', async () => {
       const { letterId: fresh } = await seedSentLetter({ daysAgo: 120 });
       await retention.purgeExpiredLetterContent();

@@ -276,6 +276,29 @@ describe('draftService', () => {
       const asap = columnValues(vi.mocked(db.query).mock.calls[1]);
       expect([asap.arrive_by, asap.mail_on]).toEqual([{ value: null, cast: '::date' }, { value: null, cast: '::date' }]);
     });
+
+    it("records a letter draft's stationery as JSON, and none for Classic (#563)", async () => {
+      vi.mocked(db.query).mockResolvedValueOnce(inserted).mockResolvedValueOnce(inserted).mockResolvedValueOnce(inserted);
+      const base = {
+        userId: testUsers.sarah.user_id,
+        sender: testAddresses.validSender as unknown as Record<string, unknown>,
+        recipient: testAddresses.validRecipient as unknown as Record<string, unknown>,
+        bodyText: 'Hello',
+        signOff: 'Love',
+        requiredCredits: 2,
+      };
+      const botanical = { theme: 'botanical' as const, dateLine: 'October 1, 2026' };
+
+      await createDraft({ ...base, rendererVersion: 'pdf-2', stationery: botanical });
+      await createDraft({ ...base, rendererVersion: 'pdf-1', stationery: { theme: 'classic' } });
+      await createDraft({ ...base, rendererVersion: 'pdf-1' });
+
+      const themed = columnValues(vi.mocked(db.query).mock.calls[0]);
+      expect(themed.stationery).toEqual({ value: JSON.stringify(botanical), cast: '::jsonb' });
+      expect(themed.renderer_version).toEqual({ value: 'pdf-2', cast: null });
+      expect(columnValues(vi.mocked(db.query).mock.calls[1]).stationery).toEqual({ value: null, cast: '::jsonb' });
+      expect(columnValues(vi.mocked(db.query).mock.calls[2]).stationery).toEqual({ value: null, cast: '::jsonb' });
+    });
   });
 
   describe('createPostcardDraft', () => {
