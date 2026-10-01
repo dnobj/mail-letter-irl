@@ -293,7 +293,7 @@ describe("a theme's slots (#563)", () => {
 
   it('print as one line: tabs and line breaks become spaces, never the missing-glyph box', () => {
     expect(slotText('  Happy\nBirthday,\t\tSam!\r\n')).toBe('Happy Birthday, Sam!');
-    expect(slotText('A B C\u0085D')).toBe('A B C D');
+    expect(slotText('A\u2028B\u2029C\u0085D')).toBe('A B C D');
     for (const [theme, slot] of [['monogram', 'dateLine'], ['monogram', 'monogram'], ['celebration', 'headline']] as const) {
       const text = slot === 'monogram' ? 'A\tL' : 'Happy\nBirthday\tSam';
       const layout = letter({ theme, [slot]: text });
@@ -306,7 +306,7 @@ describe("a theme's slots (#563)", () => {
   });
 
   it('keep at most four marks on a letter, so nothing climbs out of the corner', () => {
-    const stacked = 'A' + '́'.repeat(10);
+    const stacked = 'A' + '\u0301'.repeat(10);
     expect([...slotText(stacked)].length).toBe(5);
     for (const stationery of [
       { theme: 'monogram', monogram: stacked },
@@ -323,7 +323,7 @@ describe("a theme's slots (#563)", () => {
 
   it('take a blank headline, date line or initials as none', () => {
     const plain = letter(undefined);
-    for (const blank of ['   ', '​', '\n\t']) {
+    for (const blank of ['   ', '\u200b', '\n\t']) {
       const layout = letter({ theme: 'celebration', headline: blank, dateLine: blank });
       expect(body(layout)).toEqual(body(plain));
       expect(runs(layout).filter(run => !body(layout).includes(run))).toEqual([]);
