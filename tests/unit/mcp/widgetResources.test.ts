@@ -141,10 +141,13 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       // a change to it changes what every such card sends.
       const bridge = (await fs.readFile(path.join(widgetDir, 'shared', 'host.js'), 'utf-8')).replace(/\r\n/g, '\n');
       parts.push(`shared/host.js:${createHash('sha256').update(bridge).digest('hex')}`);
+      // So is the renderer's page cleaner (#534), in both preview cards.
+      const pages = (await fs.readFile(path.join(widgetDir, 'shared', 'pages.js'), 'utf-8')).replace(/\r\n/g, '\n');
+      parts.push(`shared/pages.js:${createHash('sha256').update(pages).digest('hex')}`);
       const digest = createHash('sha256').update(parts.join('\n')).digest('hex').slice(0, 12);
       expect({ version: WIDGET_TEMPLATE_VERSION, digest }).toEqual({
-        version: 48,
-        digest: '9afbc06522a3'
+        version: 49,
+        digest: 'c533cb3607b0'
       });
     });
   });

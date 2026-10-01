@@ -1686,7 +1686,10 @@ or an admin grant: the owner's step).
       to the edges, and the back: the message in its left half, the addresses stamped on the right with
       "RETURN TO:". A 16-line message makes a draft; 17 lines are refused with "Postcard message is 1 line
       too long for the back". A gift postcard makes a legacy draft. A postcard sent in test mode prints
-      from our PDF: PostGrid accepts it with `pageCount` 2 and it stays `ready`.
+      from our PDF: PostGrid accepts it with `pageCount` 2 and it stays `ready`. (Development,
+      2026-10-01, on 2c098c1: the refusal, the draft and the confirm page's two pages passed.)
+- [ ] The postcard card shows the front and back pages in ChatGPT and in Claude, after Refresh tools to
+      widgets v49 (#534 Phase 4b). A legacy or gift postcard keeps the card's own front and mockup.
 - [ ] The letter card shows the page as it prints, with the addresses where PostGrid stamps them, in
       ChatGPT and in Claude; a select enlarges it and the next restores it. A legacy preview keeps
       the mockup. (#534 Phase 3, widgets v47.) A gift send's card shows below the letter, with its

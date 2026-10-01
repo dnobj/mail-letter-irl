@@ -78,7 +78,8 @@ function renderPage(layout: Layout, page: LayoutPage, stamp?: Stamp): string {
   }
   const defs = [...outlines].map(([id, d]) => `<path id="${id}" d="${d}"/>`).join('');
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${layout.width} ${layout.height}" role="img">` +
-    `<title>${escapeXml(spoken.join('\n'))}</title>` +
+    // A page's text is its name for screen readers; a page without text has its title.
+    `<title>${escapeXml(spoken.join('\n') || (page.title ?? ''))}</title>` +
     `<defs>${defs}</defs>` +
     `<rect width="${layout.width}" height="${layout.height}" fill="#fff"/>` +
     drawn.join('') +

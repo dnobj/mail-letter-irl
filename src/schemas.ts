@@ -663,6 +663,7 @@ export const quoteAndPreviewPostcardOutputSchema: JsonSchema = {
     giftLettersAvailable: { type: "integer", description: "Unsent gift letters on the account, when there are any" },
     previewFrontHtml: { type: "string", description: "HTML preview of postcard front (image)" },
     previewBackHtml: { type: "string", description: "HTML preview of postcard back (message)" },
+    previewHtml: { type: "string", description: "The postcard as it prints, front and back as SVG, when our renderer drew it (#534)" },
     lettersRequired: { type: "number", description: "Letters required from balance (always 1 for 6x9 postcard)" },
     canSendNow: { type: "boolean" },
     reasonCannotSend: { type: "string" },

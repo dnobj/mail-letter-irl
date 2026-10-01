@@ -205,7 +205,7 @@ A gift send is previewed like any other letter, with its card as the second page
 - Before the picture is fetched, the message is measured on the back as it prints. A message that runs past 16 lines is refused with the count: "Postcard message is 1 line too long for the back: it takes 17 lines and the back holds 16." The legacy 500-character limit gives way to a cap of 1,000 characters, which only bounds the work.
 - The message is checked against Tinos, the addresses against Open Sans, as for letters.
 - The draft records `renderer_version = 'pdf-1'`. Its `preview_html` holds the front and the back as SVG: the front laid out with the full image's box and drawn with the small copy, the back with the addresses where PostGrid stamps them ("RETURN TO:" and the return address, then the recipient, probes P9 and P11). The addresses are the ones sent, after any correction; P11 showed PostGrid upper-casing them and nothing more, and its own standardisation at stamp time is not probed. The website's confirm page shows both, where it showed only the front before.
-- The postcard card still draws its own front and back from the tool's output until it shows the pages (#534 Phase 4b).
+- The tool's output carries the same document as `previewHtml`, which goes to the card's `_meta`, and the postcard card shows its two pages (#534 Phase 4b).
 - A gift postcard keeps the legacy HTML and its limits until its strip moves onto the renderer.
 - The legacy front preview is landscape at every size (it drew a 6x9 card in portrait, cropping the picture on the confirm page).
 
