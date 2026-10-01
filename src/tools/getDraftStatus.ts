@@ -1,7 +1,10 @@
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
+import { DELIVERY_ESTIMATE } from '../content/delivery.js';
 import { getDraftStatusInputSchema, getDraftStatusOutputSchema } from '../schemas.js';
-import { getDraftState } from '../services/draftService.js';
+import { scheduleSentence } from '../services/deliverySchedule.js';
+import { getDraftState, type DraftState } from '../services/draftService.js';
 import { draftScheduleOf } from '../services/draftSchedule.js';
+import { heldSendFields, waitsInOutbox } from './heldSend.js';
 import { isDraftIdShape } from './requestSend.js';
 
 /**
@@ -16,9 +19,11 @@ import { isDraftIdShape } from './requestSend.js';
  * expired.
  *
  * It also says the draft's arrival dates (#535), which the card may have
- * changed since the preview's first answer, so a card shown that answer
- * again draws the dates the draft has, and a sent one that waits for its mail
- * date as scheduled.
+ * changed since the preview's first answer, and what they mean for delivery,
+ * so a card shown that answer again draws the dates the draft has. For a sent
+ * draft it says where the order stands, from the letter itself: scheduled
+ * while it waits for its mail date (and whether it can be cancelled),
+ * cancelled, or sent. A card never takes a draft's dates for the order's.
  *
  * Card-only (APP_ONLY_TOOLS in src/mcp/registerTools.ts): the model has no use
  * for it, and apps that keep card-only tools from the model never show it.
@@ -35,8 +40,14 @@ export interface GetDraftStatusOutput {
   status: 'ready' | 'sent' | 'expired' | 'not_found';
   /** The order the draft became, once sent. */
   orderId?: string;
-  /** The draft's arrival dates (#535), when it has them. */
+  /** Ready: the draft's arrival dates (#535). Sent: the order's, from its letter. */
   schedule?: { arriveBy: string; mailOn: string };
+  /** Ready: what the preview says about delivery with the draft's dates now. */
+  deliveryEstimate?: string;
+  /** Sent (#535): where the order stands, when its letter can be read. */
+  orderStatus?: 'scheduled' | 'cancelled' | 'sent';
+  /** Sent and scheduled: whether it can still be cancelled free (not Pay & Send). */
+  cancellable?: boolean;
 }
 
 /** The draft's dates, or none: a status answer is never refused over dates it cannot read. */
@@ -46,6 +57,25 @@ function scheduleFor(draft: Parameters<typeof draftScheduleOf>[0]): { arriveBy: 
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Where the order a sent draft became stands, from the letter itself: its
+ * dates, and scheduled while it waits for them (cancellable unless Pay &
+ * Send). Nothing when the letter cannot be read, which the card shows as
+ * plainly sent.
+ */
+function orderFields(draft: DraftState): Pick<GetDraftStatusOutput, 'schedule' | 'orderStatus' | 'cancellable'> {
+  if (draft.letter_status == null) return {};
+  const waiting = waitsInOutbox(draft.letter_status);
+  const held = heldSendFields(
+    { arrive_by: draft.letter_arrive_by, mail_on: draft.letter_mail_on, funding_type: draft.letter_funding_type },
+    waiting
+  );
+  const dates = held ? { schedule: held.schedule } : {};
+  if (draft.letter_status === 'cancelled') return { ...dates, orderStatus: 'cancelled', cancellable: false };
+  if (held && waiting) return { ...dates, orderStatus: 'scheduled', cancellable: held.cancellable };
+  return { ...dates, orderStatus: 'sent', cancellable: false };
 }
 
 async function handler(
@@ -59,12 +89,10 @@ async function handler(
   if (!draft || draft.user_id !== context.user.userId) {
     return { draftId, status: 'not_found' };
   }
-  const schedule = scheduleFor(draft);
-  const dates = schedule ? { schedule } : {};
   if (draft.status === 'consumed') {
     return draft.consumed_letter_id
-      ? { draftId, status: 'sent', orderId: draft.consumed_letter_id, ...dates }
-      : { draftId, status: 'sent', ...dates };
+      ? { draftId, status: 'sent', orderId: draft.consumed_letter_id, ...orderFields(draft) }
+      : { draftId, status: 'sent' };
   }
   const expiresAt = new Date(draft.expires_at);
   if (
@@ -74,7 +102,10 @@ async function handler(
   ) {
     return { draftId, status: 'expired' };
   }
-  return { draftId, status: 'ready', ...dates };
+  const schedule = scheduleFor(draft);
+  return schedule
+    ? { draftId, status: 'ready', schedule, deliveryEstimate: scheduleSentence(schedule, context.now()) }
+    : { draftId, status: 'ready', deliveryEstimate: DELIVERY_ESTIMATE };
 }
 
 export const getDraftStatusTool: McpToolDefinition<GetDraftStatusInput, GetDraftStatusOutput> = {
@@ -82,7 +113,7 @@ export const getDraftStatusTool: McpToolDefinition<GetDraftStatusInput, GetDraft
   title: 'Check a preview',
   description:
     "Used by Letter IRL's preview card: says whether a previewed letter or postcard is still ready to send, " +
-    'has been sent (with its order id), or has expired. It sends nothing and changes nothing.',
+    'has been sent (with its order id and where that order stands), or has expired. It sends nothing and changes nothing.',
   readOnly: true,
   inputSchema: getDraftStatusInputSchema,
   outputSchema: getDraftStatusOutputSchema,

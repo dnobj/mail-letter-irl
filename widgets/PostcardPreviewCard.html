@@ -631,17 +631,19 @@
         document.getElementById("empty-state").style.display = "block";
         const statusPill = document.getElementById("status-pill");
         const keptSchedule = arrives.scheduleOf(kept.schedule);
-        if (kept.sent && keptSchedule) {
-          // Sent with a date (#535): waiting for it, or cancelled from here.
+        // Cancelled from here: before the conversation was reopened, or
+        // since (the kept state above is what the card found on opening).
+        const keptCancelled = Boolean(kept.cancelled) || scheduled.cancelled();
+        // Sent with a date (#535): waiting for it, or cancelled from here. Once
+        // its mail date is behind it in New York, the card cannot know what
+        // became of it, and says what it says of any send.
+        if (kept.sent && keptSchedule && (keptCancelled || !arrives.mailDatePassed(keptSchedule))) {
           statusPill.classList.remove("ok", "alert");
-          // Cancelled from here: before the conversation was reopened, or
-          // since (the kept state above is what the card found on opening).
-          const cancelled = Boolean(kept.cancelled) || scheduled.cancelled();
-          statusPill.textContent = cancelled ? "Cancelled" : "Scheduled";
-          document.getElementById("empty-message").textContent = cancelled
+          statusPill.textContent = keptCancelled ? "Cancelled" : "Scheduled";
+          document.getElementById("empty-message").textContent = keptCancelled
             ? "This postcard was cancelled from this card. Nothing will be mailed."
             : "This postcard was sent from this card to go to the printer on its mail date.";
-          scheduled.show(orderId, keptSchedule, cancelled);
+          scheduled.show(orderId, keptSchedule, keptCancelled, kept.cancellable !== false);
           return;
         }
         if (kept.sent) {
@@ -762,8 +764,9 @@
       // that keeps no state for this card: MCP Apps has no widgetState, and
       // Claude hands a reopened card the preview's result again, which would
       // offer Send for mail that has gone. ChatGPT keeps the card's own state
-      // instead, so the card never asks there. {draftId, status, orderId}
-      // once the draft turns out to be sent or expired.
+      // instead, so the card never asks there. {draftId, status, orderId,
+      // schedule, orderStatus, cancellable} once the draft turns out to be
+      // sent or expired.
       let draftState = null;
       const draftStateAsked = new Set();
 
@@ -783,7 +786,14 @@
             // A draft still ready keeps its preview, with the dates it has
             // now: this card may have changed them since that preview (#535).
             if (answer.status === "ready") {
-              picker.adopt(draftId, answer.schedule);
+              // And what they mean for delivery, for the Delivery line.
+              if (
+                picker.adopt(draftId, answer.schedule) &&
+                typeof answer.deliveryEstimate === "string" &&
+                answer.deliveryEstimate
+              ) {
+                arrivalChange = { draftId, schedule: picker.schedule(), deliveryEstimate: answer.deliveryEstimate };
+              }
               render();
               return;
             }
@@ -793,6 +803,9 @@
               status: answer.status,
               orderId: typeof answer.orderId === "string" ? answer.orderId : null,
               schedule: arrives.scheduleOf(answer.schedule),
+              // Where the order stands (#535), from its letter, not the draft.
+              orderStatus: ["scheduled", "cancelled", "sent"].includes(answer.orderStatus) ? answer.orderStatus : null,
+              cancellable: answer.cancellable === true,
             };
             render();
           },
@@ -803,6 +816,17 @@
 
       function settledDraft() {
         return draftState !== null && draftState.draftId === currentDraftId ? draftState : null;
+      }
+
+      // Where a sent draft's order stands (#535), by the server's answer:
+      // "scheduled" while it waits for its mail date, "cancelled", or "sent"
+      // (anything else, an older server's answer included). A cancel made on
+      // this card since counts at once. Null for a draft not sent.
+      function sentOrderOf(settled) {
+        if (settled?.status !== "sent") return null;
+        if (settled.orderStatus === "cancelled") return "cancelled";
+        if (settled.orderStatus === "scheduled") return scheduled.cancelled() ? "cancelled" : "scheduled";
+        return "sent";
       }
 
       function showSendPage(url, draftId) {
@@ -1293,6 +1317,7 @@
         currentEligibility = sendEligibility || null;
         if (!retryResult) askDraftState(draftId);
         const settled = settledDraft();
+        const sentOrder = sentOrderOf(settled);
         if (typeof draftId === "string" && draftId && saved?.draftId !== draftId) {
           keep({ draftId });
         }
@@ -1464,9 +1489,9 @@
         if (cardIsShowingDraft()) {
           const statusPill = document.getElementById("status-pill");
           statusPill.classList.remove("ok", "alert");
-          if (settled?.status === "sent" && settled.schedule) {
+          if (sentOrder === "scheduled" || sentOrder === "cancelled") {
             // Sent with a date (#535), as the card's own send would say.
-            statusPill.textContent = scheduled.cancelled() ? "Cancelled" : "Scheduled";
+            statusPill.textContent = sentOrder === "cancelled" ? "Cancelled" : "Scheduled";
           } else if (settled?.status === "sent") {
             // The words the card uses when its own send succeeds.
             statusPill.classList.add("ok");
@@ -1494,8 +1519,10 @@
         // card on the back is.
         const noteEl = document.getElementById("note");
         const noteParts = [];
-        if (settled?.status === "sent" && settled.schedule) {
+        if (sentOrder === "scheduled") {
           noteParts.push("This postcard has already been sent, to go to the printer on its mail date.");
+        } else if (sentOrder === "cancelled") {
+          noteParts.push("This postcard was sent with a date, then cancelled. Nothing will be mailed.");
         } else if (settled?.status === "sent") {
           noteParts.push("This postcard has already been sent. Ask for its status in the chat.");
         } else if (settled?.status === "expired") {
@@ -1536,8 +1563,8 @@
           state,
           cardIsShowingDraft() && !checkoutInProgress && !settled && !sendPageShown(),
         );
-        if (cardIsShowingDraft() && settled?.status === "sent" && settled.schedule) {
-          scheduled.show(settled.orderId, settled.schedule, false);
+        if (cardIsShowingDraft() && (sentOrder === "scheduled" || sentOrder === "cancelled")) {
+          scheduled.show(settled.orderId, settled.schedule, sentOrder === "cancelled", settled.cancellable);
         } else if (cardIsShowingDraft()) {
           scheduled.hide();
         }
@@ -1641,8 +1668,6 @@
         sendButtonText.innerHTML = '<span class="spinner"></span> Sending...';
 
         const sentDraftId = currentDraftId;
-        // The draft's dates as this card last set or saw them (#535).
-        const sentSchedule = picker.schedule();
         try {
           // Call send_postcard via OpenAI callTool
           const sendArgs = { draftId: sentDraftId, confirm: true };
@@ -1667,16 +1692,24 @@
             result?.content?.[0]?.text?.match(/Order ID: ([a-f0-9-]+)/i)?.[1] ||
             null;
 
+          // Where the mail stands, as the send says (#535): sent with a date
+          // and waiting for it, it is scheduled, and can be cancelled from
+          // here until then unless Pay & Send paid for it. Not the card's own
+          // idea of the dates: the chat may have changed them.
+          const sendAnswer = toolData(result);
+          const sentSchedule =
+            sendAnswer.currentStatus === "scheduled" ? arrives.scheduleOf(sendAnswer.schedule) : null;
+          const sentCancellable = sendAnswer.cancellable === true;
+
           // A reopened conversation must not offer this postcard again.
           keep({
             draftId: sentDraftId,
             sent: true,
             ...(typeof orderId === "string" && orderId ? { orderId } : {}),
             ...(sentSchedule ? { schedule: sentSchedule } : {}),
+            ...(sentSchedule && !sentCancellable ? { cancellable: false } : {}),
           });
 
-          // Sent with a date (#535): it waits for its mail date, and can be
-          // cancelled from here until then.
           if (sentSchedule) {
             statusPill.classList.remove("ok", "alert");
             statusPill.textContent = "Scheduled";
@@ -1685,7 +1718,7 @@
             sendButton.classList.remove("loading");
             sendButtonText.innerHTML = "Postcard Scheduled";
             picker.hide();
-            scheduled.show(orderId, sentSchedule, false);
+            scheduled.show(orderId, sentSchedule, false, sentCancellable);
             return;
           }
 

@@ -10,7 +10,7 @@
  *
  * The server inlines this file into each card that asks for it, in place of
  * the card's letter-irl:arrives marker comment (src/mcp/widgetHost.ts). It
- * defines window.letterIrlArrives: describeDate, mailsLine,
+ * defines window.letterIrlArrives: describeDate, mailsLine, mailDatePassed,
  * boundsFromRefusal, closingMessage, scheduleOf, createPicker and
  * createScheduled.
  */
@@ -23,6 +23,24 @@
 
   function isCalendarDate(value) {
     return typeof value === "string" && CALENDAR_DATE.test(value);
+  }
+
+  // Today in New York as 'YYYY-MM-DD', or "" where it cannot be told.
+  function newYorkToday(now) {
+    try {
+      var parts = new Intl.DateTimeFormat("en-US", {
+        timeZone: "America/New_York",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit"
+      }).formatToParts(now);
+      var value = {};
+      for (var i = 0; i < parts.length; i++) value[parts[i].type] = parts[i].value;
+      var today = value.year + "-" + value.month + "-" + value.day;
+      return isCalendarDate(today) ? today : "";
+    } catch (error) {
+      return "";
+    }
   }
 
   function newYorkYear(now) {
@@ -50,9 +68,18 @@
       : null;
   }
 
-  // The line under a chosen date, and on mail that is waiting for it.
-  function mailsLine(schedule, now) {
-    return "Mails " + describeDate(schedule.mailOn, now) + " · cancel free until then";
+  // The line under a chosen date, and on mail that is waiting for it. Mail
+  // that cannot be cancelled here (Pay & Send) says where it can be.
+  function mailsLine(schedule, now, cancellable) {
+    var line = "Mails " + describeDate(schedule.mailOn, now);
+    return cancellable === false ? line + " · to cancel, email support@letterirl.com" : line + " · cancel free until then";
+  }
+
+  // Whether held mail's mail date is behind it in New York. A card that only
+  // kept what it sent cannot know what became of such mail since.
+  function mailDatePassed(schedule, now) {
+    var today = newYorkToday(now || new Date());
+    return Boolean(today) && schedule.mailOn < today;
   }
 
   // The dates a refusal names, such as "The earliest this can arrive is Wed,
@@ -212,11 +239,13 @@
         draw();
       },
       // The dates the server says this draft has now (get_draft_status), for a
-      // card shown again with its preview's first answer.
+      // card shown again with its preview's first answer. False when the
+      // picker is on another draft, or setting a date, and took nothing.
       adopt: function (draftId, schedule) {
-        if (state.draftId !== draftId || state.busy) return;
+        if (state.draftId !== draftId || state.busy) return false;
         state.schedule = scheduleOf(schedule);
         draw();
+        return true;
       },
       hide: hide,
       // The draft's dates as this card last set or saw them, or null.
@@ -243,7 +272,8 @@
 
   /*
    * Mail sent with a date: it waits for its mail date, and may be cancelled
-   * free until then. A first press asks; the second cancels.
+   * free until then, unless Pay & Send paid for it (cancellable false). A
+   * first press asks; the second cancels.
    *
    * options: host, block, note, button, buttonText, noun ("letter" or
    *   "postcard"), readableError(error), resultText(result),
@@ -251,14 +281,25 @@
    */
   function createScheduled(options) {
     var host = options.host;
-    var state = { orderId: null, schedule: null, confirming: false, busy: false, done: false, closed: false, message: "", error: false };
+    var state = {
+      orderId: null,
+      schedule: null,
+      cancellable: true,
+      confirming: false,
+      busy: false,
+      done: false,
+      closed: false,
+      message: "",
+      error: false
+    };
 
     function draw() {
       options.block.style.display = state.orderId ? "block" : "none";
-      var text = state.message || (state.schedule ? mailsLine(state.schedule) : "");
+      var text = state.message || (state.schedule ? mailsLine(state.schedule, undefined, state.cancellable) : "");
       options.note.textContent = text;
       options.note.classList.toggle("alert", state.error);
-      var offer = Boolean(state.orderId) && !state.done && !state.closed && typeof host.callTool === "function";
+      var offer =
+        Boolean(state.orderId) && state.cancellable && !state.done && !state.closed && typeof host.callTool === "function";
       options.button.style.display = offer ? "flex" : "none";
       options.button.disabled = state.busy;
       options.buttonText.textContent = state.busy
@@ -312,8 +353,9 @@
     });
 
     return {
-      // The order and its dates; cancelled for one this card cancelled before.
-      show: function (orderId, schedule, cancelled) {
+      // The order and its dates; cancelled for one cancelled before, and
+      // cancellable false for one that cannot be cancelled here.
+      show: function (orderId, schedule, cancelled, cancellable) {
         var shown = typeof orderId === "string" && orderId ? orderId : null;
         // Another order starts afresh; the same one keeps where it got to.
         if (shown !== state.orderId) {
@@ -326,7 +368,9 @@
         }
         state.orderId = shown;
         state.schedule = scheduleOf(schedule);
-        if (cancelled) {
+        state.cancellable = cancellable !== false;
+        // A cancel's own words, once said, stay.
+        if (cancelled && !state.done) {
           state.done = true;
           state.message = "Cancelled. Nothing will be mailed.";
         }
@@ -346,6 +390,7 @@
   window.letterIrlArrives = {
     describeDate: describeDate,
     mailsLine: mailsLine,
+    mailDatePassed: mailDatePassed,
     boundsFromRefusal: boundsFromRefusal,
     closingMessage: closingMessage,
     scheduleOf: scheduleOf,

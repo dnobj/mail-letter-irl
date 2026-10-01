@@ -21,6 +21,8 @@ import { repositoryMigrations, validateDisposableDatabaseUrl } from './support/d
  *   printer and returns its letters or gift letter exactly once, refuses
  *   what it must, answers 'busy' at once while the outbox holds the job, and
  *   frees the duplicate guard
+ *   get_draft_status's read (getDraftState) gives a sent draft's letter as
+ *   it stands, and only the draft owner's
  *
  * Against real PostgreSQL because the constraints, the DATE type, the job's
  * timestamps and the claim's predicate are the change's whole substance, and
@@ -743,6 +745,45 @@ describePostgres('arrive-by (migration 040, #535)', () => {
       if (savedSwitch === undefined) delete process.env.LETTER_IRL_OUTBOX_DISPATCH_ENABLED;
       else process.env.LETTER_IRL_OUTBOX_DISPATCH_ENABLED = savedSwitch;
     }
+  }, 60_000);
+
+  it("reads a sent draft's letter as it stands, for get_draft_status, and never another account's", async () => {
+    const userId = await seedUser();
+    const dates = upcoming();
+    const draftId = await seedDraft(userId, dates);
+    const sent = await mailSend.createMailOrderFromDraft({ draftId, userId, mailType: 'letter' });
+    const letterId = sent.letter.letter_id;
+
+    await expect(drafts.getDraftState(draftId)).resolves.toMatchObject({
+      draft_id: draftId,
+      user_id: userId,
+      status: 'consumed',
+      consumed_letter_id: letterId,
+      letter_status: 'queued',
+      letter_funding_type: 'prepaid_balance',
+      letter_arrive_by: dates.arriveBy,
+      letter_mail_on: dates.mailOn
+    });
+
+    await expect(held.cancelScheduledMail({ letterId, userId })).resolves.toMatchObject({ ok: true });
+    await expect(drafts.getDraftState(draftId)).resolves.toMatchObject({ letter_status: 'cancelled' });
+
+    // A draft not sent has no letter.
+    const pending = await seedDraft(userId, upcoming());
+    await expect(drafts.getDraftState(pending)).resolves.toMatchObject({
+      status: 'pending',
+      consumed_letter_id: null,
+      letter_status: null,
+      letter_funding_type: null,
+      letter_arrive_by: null,
+      letter_mail_on: null
+    });
+
+    // A letter that is not the draft owner's is never read.
+    const stranger = await seedUser();
+    await pool.query('UPDATE letters SET user_id = $1 WHERE letter_id = $2', [stranger, letterId]);
+    await expect(drafts.getDraftState(draftId)).resolves.toMatchObject({ consumed_letter_id: letterId, letter_status: null });
+    await expect(drafts.getDraftState(randomUUID())).resolves.toBeNull();
   }, 60_000);
 
   it('frees the duplicate guard: the same mail can be sent again once cancelled', async () => {

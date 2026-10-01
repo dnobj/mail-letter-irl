@@ -2763,7 +2763,14 @@ describe.each([LETTER, POSTCARD])('$file in ChatGPT, which keeps its own state (
 
 describe.each([LETTER, POSTCARD])('$file keeps a send with an arrival date (#535)', spec => {
   const Noun = spec.noun === 'letter' ? 'Letter' : 'Postcard';
-  const DATES = { arriveBy: '2026-10-16', mailOn: '2026-10-06' };
+  // Ahead of today, so a reopened card still waits for them: a kept send
+  // whose mail date is behind it reads as any send.
+  const daysAhead = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+  const DATES = { arriveBy: daysAhead(30), mailOn: daysAhead(20) };
+  // What the send answers for mail that waits for its mail date.
+  const scheduledSend = () => ({
+    structuredContent: { orderId: 'ord_sent_0001', currentStatus: 'scheduled', schedule: DATES, cancellable: true }
+  });
   const offered = (draftId: string) =>
     spec.output(draftId, {
       arrivalWindow: { earliestArrival: '2026-10-13', latestArrival: '2026-11-30' },
@@ -2771,7 +2778,11 @@ describe.each([LETTER, POSTCARD])('$file keeps a send with an arrival date (#535
     });
 
   it('keeps the dates with the order, then that it was cancelled from here', async () => {
-    const harness = mount(spec, { toolOutput: offered('draft_host_0001'), toolResponseMetadata: spec.meta() });
+    const harness = mount(spec, {
+      toolOutput: offered('draft_host_0001'),
+      toolResponseMetadata: spec.meta(),
+      sendResponse: scheduledSend
+    });
     await flush();
     expect(harness.text('send-button-text')).toBe(`Schedule ${Noun}`);
 
@@ -2845,6 +2856,65 @@ describe.each([LETTER, POSTCARD])('$file keeps a send with an arrival date (#535
     expect(harness.visible('arrives-row')).toBe(false);
     await harness.releaseCalls();
     expect(harness.visible('arrives-row')).toBe(false);
+  });
+
+  it('keeps what the send answers, not what it thought: taken at once, it is sent', async () => {
+    const harness = mount(spec, {
+      toolOutput: offered('draft_host_0001'),
+      toolResponseMetadata: spec.meta(),
+      sendResponse: () => ({
+        structuredContent: { orderId: 'ord_sent_0001', currentStatus: 'accepted', schedule: DATES, cancellable: false }
+      })
+    });
+    await flush();
+    await harness.click('send-button');
+
+    expect(harness.text('status-pill')).toBe('With the printer');
+    expect(harness.savedStates.at(-1)).toEqual({ v: 1, draftId: 'draft_host_0001', sent: true, orderId: 'ord_sent_0001' });
+  });
+
+  it('keeps a scheduled send that cannot be cancelled here as such, and reopens it without Cancel', async () => {
+    const harness = mount(spec, {
+      toolOutput: offered('draft_host_0001'),
+      toolResponseMetadata: spec.meta(),
+      sendResponse: () => ({
+        structuredContent: { orderId: 'ord_sent_0001', currentStatus: 'scheduled', schedule: DATES, cancellable: false }
+      })
+    });
+    await flush();
+    await harness.click('send-button');
+    expect(harness.text('status-pill')).toBe('Scheduled');
+    expect(harness.visible('cancel-scheduled-button')).toBe(false);
+    expect(harness.savedStates.at(-1)).toEqual({
+      v: 1,
+      draftId: 'draft_host_0001',
+      sent: true,
+      orderId: 'ord_sent_0001',
+      schedule: DATES,
+      cancellable: false
+    });
+
+    const reopened = mount(spec, { widgetState: harness.savedStates.at(-1) });
+    await flush();
+    expect(reopened.text('status-pill')).toBe('Scheduled');
+    expect(reopened.visible('cancel-scheduled-button')).toBe(false);
+    expect(reopened.text('scheduled-note')).toMatch(/· to cancel, email support@letterirl\.com$/);
+  });
+
+  it('reopens a send whose mail date is behind it as any send, offering nothing', async () => {
+    const harness = mount(spec, {
+      widgetState: {
+        v: 1,
+        draftId: 'draft_host_0001',
+        sent: true,
+        orderId: 'ord_sent_0001',
+        schedule: { arriveBy: '2020-01-20', mailOn: '2020-01-10' }
+      }
+    });
+    await flush();
+
+    expect(harness.text('status-pill')).toBe('With the printer');
+    expect(harness.visible('scheduled')).toBe(false);
   });
 
   it('reopens a send without a date as before', async () => {

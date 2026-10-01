@@ -643,7 +643,13 @@ export const getDraftStatusOutputZ = z.object({
   schedule: z
     .object({ arriveBy: z.string(), mailOn: z.string() })
     .optional()
-    .describe("The draft's arrival dates, YYYY-MM-DD, when it has them")
+    .describe("Arrival dates, YYYY-MM-DD: a ready draft's, or a sent order's"),
+  deliveryEstimate: z.string().optional().describe("A ready draft's delivery estimate, with its dates now"),
+  orderStatus: z
+    .enum(["scheduled", "cancelled", "sent"])
+    .optional()
+    .describe("Where a sent draft's order stands: scheduled while it waits for its mail date"),
+  cancellable: z.boolean().optional().describe("A sent draft's order: whether it can still be cancelled free")
 });
 
 export const requestSendOutputZ = z.object({

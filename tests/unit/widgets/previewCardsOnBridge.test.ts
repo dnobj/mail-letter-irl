@@ -440,6 +440,13 @@ describe.each([LETTER, POSTCARD])('$file: the arrival date (#535)', spec => {
   };
   // The card names the year only when it is not this year in New York.
   const MAILS_OCT_6 = /^Mails Tue, Oct 6(, 2026)? · cancel free until then$/;
+  // What a send answers for mail that waits for its mail date.
+  const SCHEDULED_SEND = {
+    orderId: 'ord_0001',
+    currentStatus: 'scheduled',
+    schedule: { arriveBy: '2026-10-16', mailOn: '2026-10-06' },
+    cancellable: true
+  };
 
   /** A card showing a preview that offers dates, after the handshake. */
   async function offering(extra: Json = {}) {
@@ -563,7 +570,7 @@ describe.each([LETTER, POSTCARD])('$file: the arrival date (#535)', spec => {
     const card = await offering({ schedule: HELD });
 
     await card.click('send-button');
-    await answerTool(card, spec.sendTool, { content: [], structuredContent: { orderId: 'ord_0001' } });
+    await answerTool(card, spec.sendTool, { content: [], structuredContent: SCHEDULED_SEND });
 
     expect(card.text('status-pill')).toBe('Scheduled');
     expect(card.text('id-value')).toBe('ord_0001');
@@ -598,7 +605,7 @@ describe.each([LETTER, POSTCARD])('$file: the arrival date (#535)', spec => {
   it('stops offering Cancel once the mail has gone to the printer', async () => {
     const card = await offering({ schedule: HELD });
     await card.click('send-button');
-    await answerTool(card, spec.sendTool, { content: [], structuredContent: { orderId: 'ord_0001' } });
+    await answerTool(card, spec.sendTool, { content: [], structuredContent: SCHEDULED_SEND });
     await card.click('cancel-scheduled-button');
     await card.click('cancel-scheduled-button');
 
@@ -620,7 +627,7 @@ describe.each([LETTER, POSTCARD])('$file: the arrival date (#535)', spec => {
   it('keeps Cancel after a refusal worth trying again, and closes it when nothing is left to cancel', async () => {
     const card = await offering({ schedule: HELD });
     await card.click('send-button');
-    await answerTool(card, spec.sendTool, { content: [], structuredContent: { orderId: 'ord_0001' } });
+    await answerTool(card, spec.sendTool, { content: [], structuredContent: SCHEDULED_SEND });
     await card.click('cancel-scheduled-button');
     await card.click('cancel-scheduled-button');
 
@@ -684,12 +691,74 @@ describe.each([LETTER, POSTCARD])('$file: the arrival date (#535)', spec => {
 
     await answerTool(card, 'get_draft_status', {
       content: [],
-      structuredContent: { draftId: 'draft_0001', status: 'ready', schedule: { arriveBy: '2026-10-16', mailOn: '2026-10-06' } }
+      structuredContent: {
+        draftId: 'draft_0001',
+        status: 'ready',
+        schedule: { arriveBy: '2026-10-16', mailOn: '2026-10-06' },
+        deliveryEstimate: 'Goes to the printer Tue, Oct 6, and aims to arrive by Fri, Oct 16.'
+      }
     });
 
     expect(dateInput(card).value).toBe('2026-10-16');
     expect(card.text('arrives-note')).toMatch(MAILS_OCT_6);
+    expect(card.text('delivery')).toContain('Goes to the printer Tue, Oct 6, and aims to arrive by Fri, Oct 16.');
     expect(card.text('send-button-text')).toBe(`Schedule ${Noun}`);
+  });
+
+  it('draws a date cleared since its preview, with the estimate that goes with none', async () => {
+    const card = await offering({
+      schedule: HELD,
+      deliveryEstimate: 'Goes to the printer Tue, Oct 6, and aims to arrive by Fri, Oct 16.'
+    });
+    expect(card.text('delivery')).toContain('Goes to the printer Tue, Oct 6');
+
+    await answerTool(card, 'get_draft_status', {
+      content: [],
+      structuredContent: { draftId: 'draft_0001', status: 'ready', deliveryEstimate: 'Mailed in 1-2 business days; usually arrives in 1-2 weeks' }
+    });
+
+    expect(dateInput(card).value).toBe('');
+    expect(card.visible('arrives-note')).toBe(false);
+    expect(card.text('delivery')).toContain('Mailed in 1-2 business days');
+    expect(card.text('delivery')).not.toContain('Goes to the printer');
+    expect(card.text('send-button-text')).toBe(`Send ${Noun}`);
+  });
+
+  it('says what the send answers, not what it thought: a date set from the chat is scheduled', async () => {
+    const card = await offering();
+    expect(card.text('send-button-text')).toBe(`Send ${Noun}`);
+
+    await card.click('send-button');
+    await answerTool(card, spec.sendTool, { content: [], structuredContent: SCHEDULED_SEND });
+
+    expect(card.text('status-pill')).toBe('Scheduled');
+    expect(card.text('scheduled-note')).toMatch(MAILS_OCT_6);
+    expect(card.visible('cancel-scheduled-button')).toBe(true);
+  });
+
+  it('says what the send answers, not what it thought: a date cleared from the chat goes at once', async () => {
+    const card = await offering({ schedule: HELD });
+    expect(card.text('send-button-text')).toBe(`Schedule ${Noun}`);
+
+    await card.click('send-button');
+    await answerTool(card, spec.sendTool, { content: [], structuredContent: { orderId: 'ord_0001', currentStatus: 'accepted' } });
+
+    expect(card.text('status-pill')).toBe('With the printer');
+    expect(card.text('send-button-text')).toBe(`${Noun} Sent!`);
+    expect(card.visible('scheduled')).toBe(false);
+  });
+
+  it('shows a dated send the outbox took at once as sent, with no Cancel', async () => {
+    const card = await offering({ schedule: HELD });
+
+    await card.click('send-button');
+    await answerTool(card, spec.sendTool, {
+      content: [],
+      structuredContent: { ...SCHEDULED_SEND, currentStatus: 'accepted', cancellable: false }
+    });
+
+    expect(card.text('status-pill')).toBe('With the printer');
+    expect(card.visible('scheduled')).toBe(false);
   });
 
   it('shows a draft sent with a date as scheduled, with Cancel', async () => {
@@ -701,7 +770,9 @@ describe.each([LETTER, POSTCARD])('$file: the arrival date (#535)', spec => {
         draftId: 'draft_0001',
         status: 'sent',
         orderId: 'ord_0002',
-        schedule: { arriveBy: '2026-10-16', mailOn: '2026-10-06' }
+        schedule: { arriveBy: '2026-10-16', mailOn: '2026-10-06' },
+        orderStatus: 'scheduled',
+        cancellable: true
       }
     });
 
@@ -711,6 +782,64 @@ describe.each([LETTER, POSTCARD])('$file: the arrival date (#535)', spec => {
     expect(card.visible('arrives-row')).toBe(false);
     expect(card.visible('scheduled')).toBe(true);
     expect(card.text('cancel-scheduled-button-text')).toBe(`Cancel this ${noun}`);
+
+    // Cancelled from here, it stays cancelled, in its own words, when redrawn.
+    await card.click('cancel-scheduled-button');
+    await card.click('cancel-scheduled-button');
+    await answerTool(card, 'cancel_scheduled_mail', {
+      content: [],
+      structuredContent: { status: 'cancelled', message: 'Cancelled. The letter it cost is back in the balance.' }
+    });
+    await card.toolResult({
+      content: [],
+      structuredContent: { ...spec.output('draft_0001', canSend), arrivalWindow: WINDOW },
+      _meta: spec.meta
+    });
+    expect(card.text('status-pill')).toBe('Cancelled');
+    expect(card.text('scheduled-note')).toBe('Cancelled. The letter it cost is back in the balance.');
+    expect(card.visible('cancel-scheduled-button')).toBe(false);
+    expect(card.text('note')).toContain(`This ${noun} was sent with a date, then cancelled. Nothing will be mailed.`);
+  });
+
+  const sentAnswer = (extra: Json) => ({
+    content: [],
+    structuredContent: {
+      draftId: 'draft_0001',
+      status: 'sent',
+      orderId: 'ord_0002',
+      schedule: { arriveBy: '2026-10-16', mailOn: '2026-10-06' },
+      ...extra
+    }
+  });
+
+  it('shows a Pay & Send order waiting for its date as scheduled, without Cancel', async () => {
+    const card = await offering();
+    await answerTool(card, 'get_draft_status', sentAnswer({ orderStatus: 'scheduled', cancellable: false }));
+
+    expect(card.text('status-pill')).toBe('Scheduled');
+    expect(card.visible('scheduled')).toBe(true);
+    expect(card.visible('cancel-scheduled-button')).toBe(false);
+    expect(card.text('scheduled-note')).toMatch(/^Mails Tue, Oct 6(, 2026)? · to cancel, email support@letterirl\.com$/);
+  });
+
+  it('shows an order cancelled since, from the chat or the website, as cancelled', async () => {
+    const card = await offering();
+    await answerTool(card, 'get_draft_status', sentAnswer({ orderStatus: 'cancelled', cancellable: false }));
+
+    expect(card.text('status-pill')).toBe('Cancelled');
+    expect(card.text('scheduled-note')).toBe('Cancelled. Nothing will be mailed.');
+    expect(card.visible('cancel-scheduled-button')).toBe(false);
+    expect(card.visible('send-button')).toBe(false);
+    expect(card.text('note')).toContain(`This ${noun} was sent with a date, then cancelled. Nothing will be mailed.`);
+  });
+
+  it('shows an order the outbox has taken as with the printer, whatever its dates', async () => {
+    const card = await offering();
+    await answerTool(card, 'get_draft_status', sentAnswer({ orderStatus: 'sent', cancellable: false }));
+
+    expect(card.text('status-pill')).toBe('With the printer');
+    expect(card.visible('scheduled')).toBe(false);
+    expect(card.text('note')).toContain(`This ${noun} has already been sent. Ask for its status in the chat.`);
   });
 
   it('drops the Scheduled block when the host shows another draft', async () => {
@@ -721,7 +850,9 @@ describe.each([LETTER, POSTCARD])('$file: the arrival date (#535)', spec => {
         draftId: 'draft_0001',
         status: 'sent',
         orderId: 'ord_0002',
-        schedule: { arriveBy: '2026-10-16', mailOn: '2026-10-06' }
+        schedule: { arriveBy: '2026-10-16', mailOn: '2026-10-06' },
+        orderStatus: 'scheduled',
+        cancellable: true
       }
     });
     expect(card.visible('scheduled')).toBe(true);

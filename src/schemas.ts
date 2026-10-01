@@ -797,13 +797,20 @@ export const getDraftStatusOutputSchema: JsonSchema = {
     orderId: { type: "string", description: "The order the draft became, once sent" },
     schedule: {
       type: "object",
-      description: "The draft's arrival dates, YYYY-MM-DD, when it has them",
+      description: "Arrival dates, YYYY-MM-DD: a ready draft's, or a sent order's",
       properties: {
         arriveBy: { type: "string" },
         mailOn: { type: "string" }
       },
       required: ["arriveBy", "mailOn"]
-    }
+    },
+    deliveryEstimate: { type: "string", description: "A ready draft's delivery estimate, with its dates now" },
+    orderStatus: {
+      type: "string",
+      enum: ["scheduled", "cancelled", "sent"],
+      description: "Where a sent draft's order stands: scheduled while it waits for its mail date"
+    },
+    cancellable: { type: "boolean", description: "A sent draft's order: whether it can still be cancelled free" }
   }
 };
 

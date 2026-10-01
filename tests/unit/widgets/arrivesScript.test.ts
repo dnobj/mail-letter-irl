@@ -31,10 +31,22 @@ describe('the arrival date script (#535)', () => {
     expect(arrives.describeDate('not a date', october2026)).toBe('');
   });
 
-  it('says when held mail goes to the printer, and that it can be cancelled until then', () => {
-    expect(arrives.mailsLine({ arriveBy: '2026-10-16', mailOn: '2026-10-06' }, new Date('2026-10-01T14:00:00Z'))).toBe(
-      'Mails Tue, Oct 6 · cancel free until then'
-    );
+  it('says when held mail goes to the printer, and that it can be cancelled until then, or where', () => {
+    const schedule = { arriveBy: '2026-10-16', mailOn: '2026-10-06' };
+    const october2026 = new Date('2026-10-01T14:00:00Z');
+    expect(arrives.mailsLine(schedule, october2026)).toBe('Mails Tue, Oct 6 · cancel free until then');
+    expect(arrives.mailsLine(schedule, october2026, true)).toBe('Mails Tue, Oct 6 · cancel free until then');
+    // Pay & Send: not here.
+    expect(arrives.mailsLine(schedule, october2026, false)).toBe('Mails Tue, Oct 6 · to cancel, email support@letterirl.com');
+  });
+
+  it('knows a mail date is behind it only once that day is over in New York', () => {
+    const schedule = { arriveBy: '2026-10-16', mailOn: '2026-10-06' };
+    expect(arrives.mailDatePassed(schedule, new Date('2026-10-06T12:00:00Z'))).toBe(false);
+    // 23:30 on the 6th in New York is still the mail date there.
+    expect(arrives.mailDatePassed(schedule, new Date('2026-10-07T03:30:00Z'))).toBe(false);
+    expect(arrives.mailDatePassed(schedule, new Date('2026-10-07T04:30:00Z'))).toBe(true);
+    expect(arrives.mailDatePassed(schedule, new Date('2026-09-30T12:00:00Z'))).toBe(false);
   });
 
   it('reads the dates a refusal names', () => {
