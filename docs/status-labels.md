@@ -67,13 +67,13 @@ migration `023_jit_recovery_state_machines.sql`) allows exactly the values below
 | `delivered` | Delivered (estimated in live mode) | status sync | **Yes** |
 | `returned` | Returned to sender | status sync | **Yes** |
 | `failed` | Terminal failure: a definite provider rejection, exhausted retries, an operator's rejected decision, or a PostGrid cancellation (`cancelled`, before printing: what paid comes back, and an alert is raised, #566) | the outbox; an operator decision; status sync | **Yes** |
-| `cancelled` | Stopped before dispatch because the Pay & Send payment that funded it was refunded or disputed | commerce (`stopFundedMailBeforeFinancialReversal`) | **Yes** |
+| `cancelled` | Stopped before dispatch: the Pay & Send payment that funded it was refunded or disputed, the customer cancelled mail held to a date (#535), or the account was erased | commerce (`stopFundedMailBeforeFinancialReversal`); `cancel_scheduled_mail` and its REST route; account erasure | **Yes** |
 
 `printing` is **not** a database value; the constraint rejects it. It exists only in the MCP
 vocabulary below.
 
-Status sync skips terminal letters and letters without a `tracking_id`, and stores PostGrid's raw
-status in `provider_raw_status`. Every transition is recorded in `letter_status_history`.
+Status sync skips terminal letters and letters without a `tracking_id`, and stores the provider's status
+message ("Letter was canceled before sending", not PostGrid's raw `cancelled`) in `provider_raw_status`. Every transition is recorded in `letter_status_history`.
 
 ### Legacy compatibility
 

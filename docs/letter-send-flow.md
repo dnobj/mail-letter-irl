@@ -313,9 +313,9 @@ The same stable provider idempotency key is reused after timeout or process rest
 
 **A cancel by the provider (#566).** PostGrid cancels a piece only while it is `ready`, before printing, and answers `cancelled`. The status sync hands that to `failProviderCancelledLetter` (`letterJobService.ts`) instead of writing the status itself. In one transaction, under the outbox's lock order (the funding order, the letter, its jobs), and only while the letter has not already ended:
 - the letter becomes `failed`, with a history row from the sync;
-- a prepaid send's credits come back, or a gift letter comes back with the code it printed voided. This happens exactly once, through the same returns as a definite rejection;
+- a prepaid send's credits come back, or a gift letter comes back with the code it printed voided. This happens exactly once, through the same returns as a definite rejection, and only while our record says `accepted`. A cancel after the sync saw the letter printing (`processing`) or mailed (`in_transit`) contradicts PostGrid's own lifecycle, so nothing comes back by itself and a person decides;
 - a Pay & Send order, already `fulfilled` when PostGrid accepted the letter, is not moved: a person decides its refund;
-- one `provider_cancelled_mail` alert per letter (migration 043) says what happened. It is a warning when what paid came back, and critical when a refund waits for a person.
+- one `provider_cancelled_mail` alert per letter (migration 043) says what happened, with the status our record held before. It is a warning when what paid came back, and critical when a refund waits for a person.
 
 A held letter cancelled after its mail day may also raise `schedule_missed_mail_day`.
 

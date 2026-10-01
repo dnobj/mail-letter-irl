@@ -1279,7 +1279,7 @@ describePostgres('failed send returns the pack', () => {
       expect(await alerts(letterId)).toEqual([{
         order_id: null,
         severity: 'warning',
-        details: { letterId, userId, fundingType: 'prepaid_balance', refundForAPerson: false }
+        details: { letterId, userId, fundingType: 'prepaid_balance', refundForAPerson: false, statusBefore: 'accepted' }
       }]);
 
       // The next sync of the same cancel finds the letter ended: nothing moves.
@@ -1290,10 +1290,14 @@ describePostgres('failed send returns the pack', () => {
     }, 60_000);
 
     it('gives a gift letter back and voids the code it printed', async () => {
+      // The daily caps count every letter in this schema, and are not what
+      // this case tests (giftLetters.postgres and arriveBy.postgres do the same).
       const GIFT_ENV = {
         LETTER_IRL_GIFT_LETTERS_ENABLED: 'true',
         LETTER_IRL_GIFT_DAILY_SEND_CAP: '100000',
-        LETTER_IRL_GIFT_LANDING_BASE_URL: 'https://letterirl.test'
+        LETTER_IRL_GIFT_LANDING_BASE_URL: 'https://letterirl.test',
+        LETTER_IRL_BETA_ACCOUNT_DAILY_MAIL_CAP: '1000',
+        LETTER_IRL_BETA_GLOBAL_DAILY_MAIL_CEILING: '100000'
       };
       const saved = Object.fromEntries(Object.keys(GIFT_ENV).map(name => [name, process.env[name]]));
       Object.assign(process.env, GIFT_ENV);
@@ -1338,7 +1342,7 @@ describePostgres('failed send returns the pack', () => {
         expect(await alerts(letterId)).toEqual([{
           order_id: null,
           severity: 'warning',
-          details: { letterId, userId, fundingType: 'gift_letter', refundForAPerson: false }
+          details: { letterId, userId, fundingType: 'gift_letter', refundForAPerson: false, statusBefore: 'accepted' }
         }]);
       } finally {
         for (const [name, value] of Object.entries(saved)) {
@@ -1385,7 +1389,25 @@ describePostgres('failed send returns the pack', () => {
       expect(await alerts(letterId)).toEqual([{
         order_id: orderId,
         severity: 'critical',
-        details: { letterId, userId, fundingType: 'jit_order', refundForAPerson: true }
+        details: { letterId, userId, fundingType: 'jit_order', refundForAPerson: true, statusBefore: 'accepted' }
+      }]);
+    }, 60_000);
+
+    it('leaves the credits to a person when the cancel comes after our record saw the letter mailed', async () => {
+      // PostGrid cancels only before printing, so this contradicts its own
+      // lifecycle: nothing comes back by itself, and the alert is critical.
+      const { userId, letterId } = await seedSpentLetter({ lotA: 2, lotB: 5, spend: 5 });
+      await accept(letterId);
+      await pool.query("UPDATE letters SET status = 'in_transit' WHERE letter_id = $1", [letterId]);
+
+      await expect(jobs.failProviderCancelledLetter({ letterId, providerRawStatus: RAW })).resolves.toBe('failed');
+
+      expect((await letterNow(letterId)).status).toBe('failed');
+      expect(await credits(userId)).toBe(2);
+      expect(await alerts(letterId)).toEqual([{
+        order_id: null,
+        severity: 'critical',
+        details: { letterId, userId, fundingType: 'prepaid_balance', refundForAPerson: true, statusBefore: 'in_transit' }
       }]);
     }, 60_000);
 

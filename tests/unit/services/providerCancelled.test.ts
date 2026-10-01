@@ -88,7 +88,7 @@ describe('failProviderCancelledLetter (#566)', () => {
     expect(mocks.returnGiftLetterForFailedSendWithClient).not.toHaveBeenCalled();
     const alert = calls.find(call => call.sql.startsWith('INSERT INTO commerce_operational_alerts'))!;
     expect(alert.sql).toContain('ON CONFLICT DO NOTHING');
-    expect(alert.params).toEqual([null, PROVIDER_CANCELLED_ALERT, 'warning', 'letter-1', 'user-1', 'prepaid_balance', false]);
+    expect(alert.params).toEqual([null, PROVIDER_CANCELLED_ALERT, 'warning', 'letter-1', 'user-1', 'prepaid_balance', false, 'accepted']);
     expect(PROVIDER_CANCELLED_ALERT).toBe('provider_cancelled_mail');
   });
 
@@ -122,7 +122,26 @@ describe('failProviderCancelledLetter (#566)', () => {
     // Nothing moves the order.
     expect(writes(calls)).toEqual(['UPDATE letters SET', 'INSERT INTO letter_status_history', 'INSERT INTO commerce_operational_alerts']);
     const alert = calls.find(call => call.sql.startsWith('INSERT INTO commerce_operational_alerts'))!;
-    expect(alert.params).toEqual(['order-9', PROVIDER_CANCELLED_ALERT, 'critical', 'letter-1', 'user-1', 'jit_order', true]);
+    expect(alert.params).toEqual(['order-9', PROVIDER_CANCELLED_ALERT, 'critical', 'letter-1', 'user-1', 'jit_order', true, 'accepted']);
+  });
+
+  it.each(['processing', 'in_transit'])('leaves a cancel after our record saw the letter %s to a person: nothing comes back, the alert is critical', async status => {
+    const calls = client({ ...prepaid, status });
+
+    await expect(failProviderCancelledLetter({ letterId: 'letter-1', providerRawStatus: RAW })).resolves.toBe('failed');
+
+    expect(mocks.returnConsumedCreditsForLetter).not.toHaveBeenCalled();
+    expect(mocks.returnGiftLetterForFailedSendWithClient).not.toHaveBeenCalled();
+    const alert = calls.find(call => call.sql.startsWith('INSERT INTO commerce_operational_alerts'))!;
+    expect(alert.params).toEqual([null, PROVIDER_CANCELLED_ALERT, 'critical', 'letter-1', 'user-1', 'prepaid_balance', true, status]);
+  });
+
+  it('gives back what paid for a letter recorded as sent, the legacy name for accepted', async () => {
+    client({ ...prepaid, status: 'sent' });
+
+    await expect(failProviderCancelledLetter({ letterId: 'letter-1', providerRawStatus: RAW })).resolves.toBe('failed');
+
+    expect(mocks.returnConsumedCreditsForLetter).toHaveBeenCalledTimes(1);
   });
 
   it.each(['delivered', 'returned', 'failed', 'cancelled'])('leaves a letter already %s as it is', async status => {

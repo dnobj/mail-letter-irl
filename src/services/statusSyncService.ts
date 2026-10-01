@@ -26,10 +26,9 @@ export interface StatusSyncDetail {
   error?: string;
 }
 
-/**
- * Terminal statuses that don't need to be synced anymore
- */
-const TERMINAL_STATUSES = ['delivered', 'returned', 'failed', 'cancelled'];
+// Terminal statuses are not synced: the query below skips the same list as
+// letterJobService's ENDED_LETTER_STATUSES, which failProviderCancelledLetter
+// leaves as they are.
 
 /**
  * Sync letter statuses from the fulfillment provider

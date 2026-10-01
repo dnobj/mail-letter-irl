@@ -419,7 +419,7 @@ A `provider_cancelled_mail` alert (#566) names a letter that PostGrid cancelled 
 before printing, so nothing was mailed. The status sync has already marked the letter failed.
 - **A warning:** what paid for it came back, as credits or a gift letter. Find out why PostGrid cancelled it (its
   dashboard gives the reason, such as content in the address region), and tell the customer if they need to send it again.
-- **Critical:** the letter was Pay & Send, and its order stays `fulfilled`. A person decides whether, and how, to refund it.
+- **Critical:** a person decides whether, and how, to refund it. Either the letter was Pay & Send, and its order stays `fulfilled`, or our record had already seen it printing or mailed (`statusBefore` in the details), which PostGrid's own lifecycle does not allow, so nothing came back by itself. Refunding a Pay & Send order in Stripe also raises `refunded_mail_already_dispatched`, because its job reads as accepted; this mail was never printed, so resolve that one too.
 
 Resolve the alert once that is done.
 
