@@ -3768,6 +3768,19 @@ describe('commerceService', () => {
       expect(dupState.calls).toEqual([]);
     });
 
+    it('reads the dates as the send does, so ones it could not read fail before any charge (#535)', async () => {
+      dupState.letters = [mail()];
+      // A Date, as pg without the DATE parser would give: the send would throw
+      // after the charge, so the checkout must throw first.
+      draftRow = pendingDraft({ arrive_by: '2099-01-16', mail_on: new Date('2099-01-06T00:00:00') });
+
+      await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).rejects.toThrow(
+        "letter_drafts.mail_on is not a 'YYYY-MM-DD' string"
+      );
+      expect(mocks.createJitSession).not.toHaveBeenCalled();
+      expect(dupState.calls).toEqual([]);
+    });
+
     it.each<[string, () => void, string]>([
       ['the balance can pay', () => { credits = 2; }, 'PREPAID_BALANCE_AVAILABLE'],
       ['the price is unresolved', () => {

@@ -11,7 +11,8 @@ import { assertNoRecentDuplicateMail } from './duplicateMailService.js';
 import { consumeGiftLetterForSendWithClient } from './giftLetterService.js';
 import { isGiftLettersEnabled } from '../config/giftLetters.js';
 import type { GiftCardContent } from './giftCardRenderer.js';
-import { dispatchAt, earliestMailOn, parseCalendarDate } from './deliverySchedule.js';
+import { dispatchAt, earliestMailOn } from './deliverySchedule.js';
+import { draftScheduleOf } from './draftSchedule.js';
 import { writeDiagnostic } from '../utils/diagnosticLog.js';
 import type { DraftSchedule, Letter, LetterDraft, LetterJob, Order, PostcardDraft } from './types.js';
 
@@ -91,17 +92,6 @@ function buildPostcardContent(draft: MailDraftRow): Record<string, unknown> {
 }
 
 /**
- * A DATE column as the 'YYYY-MM-DD' string src/db/dateParser.ts reads it as.
- * Anything else (a Date, from a pg without that parser) is refused rather
- * than turned into a day, because its day depends on the process's time zone.
- */
-function calendarDateColumn(value: unknown, column: string): string {
-  const date = typeof value === 'string' ? parseCalendarDate(value) : null;
-  if (!date) throw new Error(`letter_drafts.${column} is not a 'YYYY-MM-DD' string`);
-  return date;
-}
-
-/**
  * The arrive-by dates a send keeps (#535), or null to mail as soon as it can.
  * The draft's mail date must not have passed: today counts until noon New
  * York time (earliestMailOn), so a draft previewed before the cutoff and sent
@@ -112,11 +102,8 @@ function calendarDateColumn(value: unknown, column: string): string {
  * refuses a passed date before any charge.
  */
 function sendSchedule(draft: MailDraftRow, funding: MailFunding, draftId: string): DraftSchedule | null {
-  if (draft.arrive_by == null && draft.mail_on == null) return null;
-  const schedule = {
-    arriveBy: calendarDateColumn(draft.arrive_by, 'arrive_by'),
-    mailOn: calendarDateColumn(draft.mail_on, 'mail_on')
-  };
+  const schedule = draftScheduleOf(draft);
+  if (!schedule) return null;
   if (schedule.mailOn >= earliestMailOn(new Date())) return schedule;
   if (funding.type === 'jit_order') {
     writeDiagnostic('warn', 'send.schedule_missed', { funding: funding.type, mailOn: schedule.mailOn });

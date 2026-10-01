@@ -255,12 +255,12 @@ Background job tracking for letter processing.
 | status | VARCHAR(50) | NO | - | pending, processing, completed, failed, cancelled |
 | attempts | INTEGER | NO | 0 | Number of attempts |
 | max_attempts | INTEGER | NO | 3 | Retry limit |
-| scheduled_at | TIMESTAMPTZ | NO | - | When job should run |
-| started_at | TIMESTAMPTZ | YES | - | When processing started |
-| completed_at | TIMESTAMPTZ | YES | - | When finished |
+| scheduled_at | TIMESTAMP | NO | NOW() | When the job should run: for held mail (#535), the release time. Without a zone, written in the database session's zone (UTC), unlike `next_attempt_at` |
+| started_at | TIMESTAMP | YES | - | When processing started (without a zone, as `scheduled_at`) |
+| completed_at | TIMESTAMP | YES | - | When finished (without a zone, as `scheduled_at`) |
 | error_message | TEXT | YES | - | Legacy twin of `last_error`; an error class and provider status only, never provider or driver message text (migrations 031, 032) |
-| metadata | JSONB | YES | - | Job-specific data |
-| created_at | TIMESTAMPTZ | NO | NOW() | Job creation |
+| metadata | JSONB | YES | - | Job-specific data: `source`, and `heldUntil` for held mail (#535) |
+| created_at | TIMESTAMP | NO | NOW() | Job creation (without a zone, as `scheduled_at`) |
 
 **Indexes:**
 - `idx_letter_jobs_status` on status
