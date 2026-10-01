@@ -692,6 +692,9 @@ describe('arrive-by in the served schemas (#535)', () => {
 
   it('offers arriveBy on the four previews only while the flag is on', () => {
     vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', 'true');
+    // Stationery offered too (#563), so nothing else is withheld.
+    vi.stubEnv('LETTER_IRL_STATIONERY_ENABLED', 'true');
+    vi.stubEnv('LETTER_IRL_PRINT_RENDERER', 'pdf');
     for (const name of PREVIEWS) {
       const served = getServedInputSchema(name) as Record<string, { description?: string }>;
       // On: the raw shape, as declared.

@@ -110,5 +110,9 @@
  *     says what came back (#535).
  * r28: the same sentence names both exceptions: what paid goes back unless it
  *     expired or was refunded while the mail waited (#562 review round 2).
+ * r29: stationery (#563). While LETTER_IRL_STATIONERY_ENABLED is on and our
+ *     renderer draws the previews, the three letter previews take
+ *     stationery, monogram and headline, and their output says which
+ *     stationery the page was drawn in.
  */
-export const STEERING_COPY_REV = 28;
+export const STEERING_COPY_REV = 29;

@@ -26,6 +26,7 @@ import {
   type LetterQuoteOutput
 } from "./letterHelpers.js";
 import { previewSchedule } from "./arriveByInput.js";
+import { previewStationery } from "./stationeryInput.js";
 import { previewSendStep } from "./previewSendStep.js";
 import { downloadAndProcessLetterImageWithPreview, ImageProcessingError } from "../services/imageService.js";
 import type { ImageFileParam } from "../services/types.js";
@@ -50,6 +51,10 @@ interface QuoteAndPreviewLetterWithHeaderImageInput {
   sendAsGift?: boolean;
   /** The date it should arrive by, YYYY-MM-DD (#535); served only while the flag is on. */
   arriveBy?: string;
+  /** The page's theme, its initials and its headline (#563); served only while stationery is offered. */
+  stationery?: string;
+  monogram?: string;
+  headline?: string;
 }
 
 // ============================================================================
@@ -152,6 +157,10 @@ async function handler(
   const gift = await letterGiftChoice(input, context);
   const renderer = printRenderer();
 
+  // Stationery (#563): the theme and what it prints, checked before the
+  // printable check reads its initials and headline and the layout draws it.
+  const stationery = previewStationery(input, sender.name, context, renderer);
+
   // Validate character limit (reduced for header image layout)
   validateCharacterLimitForLayout(input.bodyText, input.signOff, layoutType, context, renderer);
 
@@ -160,7 +169,8 @@ async function handler(
     { sender, recipient: input.recipient, bodyText: input.bodyText, signOff: input.signOff, senderIsSaved: usedSavedReturnAddress },
     context,
     renderer,
-    gift.card
+    gift.card,
+    stationery
   );
 
   // Process the image (generates both full-quality and preview versions)
@@ -212,7 +222,7 @@ async function handler(
 
   // Our renderer measures the page with the image that prints (#534)
   const printLayout = layoutLetterForPreview(
-    { bodyText: input.bodyText, signOff: input.signOff, layoutType, imageData: headerImageData },
+    { bodyText: input.bodyText, signOff: input.signOff, layoutType, imageData: headerImageData, stationery },
     context,
     renderer
   );
@@ -242,6 +252,7 @@ async function handler(
     gift,
     printLayout,
     schedule,
+    stationery,
     context
   });
 }

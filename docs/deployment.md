@@ -651,8 +651,9 @@ draw the letter or postcard before any request was made. The reason is one of:
 - `render`: anything else that failed to lay out or draw: a letter's gift card, or its stationery (#563), included.
   Two of its messages are stationery's: "The letter was drawn in stationery this build cannot read." means
   the stored theme is not one this build reads (`stationeryOf`): look at the letter's `content.stationery`.
-  "The stationery's headline (or date line, or monogram) does not fit." was measured to fit when it was
-  previewed, under the same version, so it is an overflow a renderer change caused.
+  "The letter could not be laid out: The stationery's headline does not fit." (or `dateLine`, or
+  `monogram`: the slot's key) was measured to fit when it was previewed, under the same version, so it is
+  an overflow a renderer change caused.
 
 The log line `provider.postgrid.render_refused` names the reason and the letter id, and the hold's
 message says what was refused. Decide by the message, not the reason alone:

@@ -21,8 +21,14 @@ import {
   setArrivalDateOutputSchema,
   cancelScheduledMailInputSchema,
   cancelScheduledMailOutputSchema,
-  requestSendOutputSchema
+  requestSendOutputSchema,
+  quoteAndPreviewLetterTextOnlyInputSchema,
+  quoteAndPreviewLetterWithHeaderImageInputSchema,
+  quoteAndPreviewLetterWithImageInputSchema,
+  quoteAndPreviewOutputSchema
 } from "../../../src/schemas.js";
+import { getZodInputShape } from "../../../src/mcp/registerTools.js";
+import { STATIONERY_THEMES } from "../../../src/render/index.js";
 import { toolInputSchemas } from "../../../src/mcp/toolSchemas.js";
 import { buildManifest } from "../../../src/mcp/manifest.js";
 
@@ -251,5 +257,51 @@ describe("request_send schema (#535)", () => {
     const manifestLayer = (requestSendOutputSchema.properties as Record<string, { description?: string; required?: string[] }>).schedule;
     expect(manifestLayer.required).toEqual(["arriveBy", "mailOn"]);
     expect(served.description).toBe(manifestLayer.description);
+  });
+});
+
+describe("stationery schema (#563)", () => {
+  const LETTERS = [
+    ["quote_and_preview_letter", quoteAndPreviewLetterTextOnlyInputSchema],
+    ["quote_and_preview_letter_with_header_image", quoteAndPreviewLetterWithHeaderImageInputSchema],
+    ["quote_and_preview_letter_with_image", quoteAndPreviewLetterWithImageInputSchema]
+  ] as const;
+  const KEYS = ["stationery", "monogram", "headline"];
+
+  it.each(LETTERS)("declares stationery, monogram and headline on all three layers of %s, none required", (name, jsonSchema) => {
+    const served = getZodInputShape(name)!;
+    const properties = jsonSchema.properties as Record<string, { enum?: string[]; description?: string }>;
+    for (const key of KEYS) {
+      expect(served, key).toHaveProperty(key);
+      expect(served[key].isOptional(), key).toBe(true);
+      expect(toolInputSchemas[name].shape, key).toHaveProperty(key);
+      expect(properties, key).toHaveProperty(key);
+      expect(jsonSchema.required, key).not.toContain(key);
+      // The same words on the served layer and the manifest's.
+      expect(properties[key].description, key).toBe(served[key].description);
+    }
+    expect(properties.stationery.enum).toEqual([...STATIONERY_THEMES]);
+  });
+
+  it("declares none on the postcard, on any layer", () => {
+    for (const key of KEYS) {
+      expect(getZodInputShape("quote_and_preview_postcard"), key).not.toHaveProperty(key);
+      expect(toolInputSchemas.quote_and_preview_postcard.shape, key).not.toHaveProperty(key);
+    }
+  });
+
+  it("declares the letter previews' stationery output the same way on both served layers, optional", () => {
+    const served = quoteAndPreviewOutputZ.shape.stationery;
+    expect(served.isOptional()).toBe(true);
+    const manifestLayer = (quoteAndPreviewOutputSchema.properties as Record<string, {
+      description?: string; properties: Record<string, { enum?: string[] }>; required: string[];
+    }>).stationery;
+    const zodKeys = Object.keys(served.unwrap().shape);
+    expect(zodKeys).toEqual(["theme", "dateLine", "monogram", "headline"]);
+    expect(Object.keys(manifestLayer.properties)).toEqual(zodKeys);
+    expect(manifestLayer.required).toEqual(["theme"]);
+    expect(manifestLayer.properties.theme.enum).toEqual([...STATIONERY_THEMES]);
+    expect(served.description).toBe(manifestLayer.description);
+    expect(quoteAndPreviewPostcardOutputZ.shape).not.toHaveProperty("stationery");
   });
 });

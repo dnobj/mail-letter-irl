@@ -556,6 +556,16 @@ describe('ENV_VAR_MANIFEST', () => {
     }
   });
 
+  it('lists the stationery flag, advisory and API only, so the preflight shows where it is set (#563)', () => {
+    expect(ENV_VAR_MANIFEST.find(entry => entry.name === 'LETTER_IRL_STATIONERY_ENABLED')).toEqual({
+      name: 'LETTER_IRL_STATIONERY_ENABLED',
+      requiredIn: 'production',
+      advisory: true,
+      secret: false,
+      services: ['api']
+    });
+  });
+
   it('lists the print renderer flag, so the preflight shows where it is set (#534)', () => {
     // Advisory: absent is the intended production state until the owner
     // switches it on. API only: maintenance prints with the recorded version.

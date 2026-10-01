@@ -183,6 +183,36 @@
               "latestArrival"
             ]
           },
+          "stationery": {
+            "type": "object",
+            "description": "While stationery is offered: the stationery the page was drawn in, classic unless one was asked for, with the date line, initials and headline it prints",
+            "properties": {
+              "theme": {
+                "type": "string",
+                "enum": [
+                  "classic",
+                  "monogram",
+                  "botanical",
+                  "celebration"
+                ]
+              },
+              "dateLine": {
+                "type": "string",
+                "description": "The date it prints at the top right, as written"
+              },
+              "monogram": {
+                "type": "string",
+                "description": "The initials it prints"
+              },
+              "headline": {
+                "type": "string",
+                "description": "The headline it prints above the letter"
+              }
+            },
+            "required": [
+              "theme"
+            ]
+          },
           "previewHtml": {
             "type": "string"
           },
@@ -533,6 +563,36 @@
               "latestArrival"
             ]
           },
+          "stationery": {
+            "type": "object",
+            "description": "While stationery is offered: the stationery the page was drawn in, classic unless one was asked for, with the date line, initials and headline it prints",
+            "properties": {
+              "theme": {
+                "type": "string",
+                "enum": [
+                  "classic",
+                  "monogram",
+                  "botanical",
+                  "celebration"
+                ]
+              },
+              "dateLine": {
+                "type": "string",
+                "description": "The date it prints at the top right, as written"
+              },
+              "monogram": {
+                "type": "string",
+                "description": "The initials it prints"
+              },
+              "headline": {
+                "type": "string",
+                "description": "The headline it prints above the letter"
+              }
+            },
+            "required": [
+              "theme"
+            ]
+          },
           "previewHtml": {
             "type": "string"
           },
@@ -881,6 +941,36 @@
             "required": [
               "earliestArrival",
               "latestArrival"
+            ]
+          },
+          "stationery": {
+            "type": "object",
+            "description": "While stationery is offered: the stationery the page was drawn in, classic unless one was asked for, with the date line, initials and headline it prints",
+            "properties": {
+              "theme": {
+                "type": "string",
+                "enum": [
+                  "classic",
+                  "monogram",
+                  "botanical",
+                  "celebration"
+                ]
+              },
+              "dateLine": {
+                "type": "string",
+                "description": "The date it prints at the top right, as written"
+              },
+              "monogram": {
+                "type": "string",
+                "description": "The initials it prints"
+              },
+              "headline": {
+                "type": "string",
+                "description": "The headline it prints above the letter"
+              }
+            },
+            "required": [
+              "theme"
             ]
           },
           "previewHtml": {

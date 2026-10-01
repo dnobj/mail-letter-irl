@@ -14,6 +14,8 @@ process.env.LETTER_IRL_PUBLIC_BASE_URL = "https://api.letterirl.com";
 // the owner's word, whatever a developer's .env turns on. Set before the
 // import below, whose dotenv/config leaves a variable already set alone.
 process.env.LETTER_IRL_ARRIVE_BY_ENABLED = "false";
+// Stationery (#563) likewise.
+process.env.LETTER_IRL_STATIONERY_ENABLED = "false";
 
 const { stringifyManifest } = await import("../src/mcp/manifest.js");
 

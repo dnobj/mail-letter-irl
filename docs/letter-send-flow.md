@@ -262,6 +262,34 @@ A `pdf-1` gift send prints its card as the PDF's second page, drawn by the rende
 - `preview_html` holds the page as SVG in a minimal HTML document, which the website's confirm page and the letter card show. The page carries the addresses where PostGrid stamps them, at 9pt in upper case, as sent. It asks for Open Sans, which no card or confirm page loads, so a viewer sees a sans-serif fallback, slightly narrower than the print. The PDF leaves the addresses to PostGrid;
 - the draft records `renderer_version = 'pdf-1'`, so the letter prints as it was previewed.
 
+**Stationery on a preview (#563).** While `LETTER_IRL_STATIONERY_ENABLED` is on and the previews are
+drawn by `src/render`, the three letter previews take `stationery`, `monogram` and `headline`
+(`src/tools/stationeryInput.ts`):
+- **Served only then.** The served schemas and `/manifest.json` include them only then
+  (`withheldInputKeys`, read at each registration). Otherwise the three previews pass unknown fields
+  through, as for `arriveBy`, so a theme, initials or a headline from a cached schema is refused
+  ("Stationery is not available yet…") rather than printed on a plain page. Classic is always
+  accepted.
+- **Checked** after the sender is known and before the page is laid out:
+  - the theme is one of the four;
+  - initials go only with Monogram, a headline only with Celebration;
+  - asked-for initials are one to three letters; otherwise the return address's name gives them;
+  - a headline is one line, shrinking to 18pt and refused past it, saying how much fits, and at most
+    `STATIONERY_SLOT_MAX_LENGTH` characters as stored, so what is stored reads back;
+  - the initials and the headline are checked against Tinos, like the text;
+  - a headline takes three lines of the page, and a letter it pushes past the page is refused with
+    the counts, "…on the celebration stationery with a headline…", and the ways out.
+- **The date line** is the day of the preview on the New York calendar, written out ("October 1, 2026").
+  It prints as previewed, like a letter dated the day it was written.
+- **Recorded:**
+  - a theme other than Classic draws the preview in it;
+  - the draft records `renderer_version = 'pdf-2'` and `stationery`, each slot as it prints;
+  - the preview's document names `pdf-2`;
+  - Classic records `pdf-1` and no stationery: the page as before.
+- **Said:** the output's `stationery` names the theme and what it prints.
+
+A gift send in a theme prints its themed page, then today's card page.
+
 A gift send is previewed like any other letter, with its card as the second page (#534 PR 5). Whether a preview is a gift send is decided before the checks, because the card prints the sender's name in Tinos: a name Tinos cannot draw is refused "in the sender's name, which the gift card prints", though PostGrid could stamp it in the return address. So is a name long enough to push the card past the page's bottom margin, about a thousand characters: "The sender's name is too long to print on the gift card." Without the flag, previews are the legacy HTML. The flag is read only when a letter is previewed, so changing it never changes a letter already previewed or queued.
 
 **How a postcard preview is drawn (#534 Phase 4).** With the same flag, a postcard preview is drawn by `src/render` too:

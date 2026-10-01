@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { preprocessImageFileParam } from "./utils/imageFileParam.js";
+import { STATIONERY_THEMES } from "./render/stationery.js";
 
 export const addressZ = z.object({
   name: z.string(),
@@ -42,6 +43,47 @@ const previewScheduleZ = z.object({
   latestArrival: z.string()
 });
 
+// Stationery (#563). Served on the three letter previews only while it is
+// offered (LETTER_IRL_STATIONERY_ENABLED, with our renderer drawing them):
+// registerTools strips these from their shapes otherwise. Functional wording
+// only, as for gift letters.
+export const STATIONERY_DESCRIPTION =
+  "Optional. The letter's stationery: classic, a plain page (the default); monogram, initials in a ring; " +
+  "botanical, a line-drawn sprig; or celebration, confetti with an optional headline. " +
+  "Each but classic prints the date at the top right. " +
+  "Use it when the user asks for a style, or names an occasion one suits; leave it out for a plain page.";
+export const MONOGRAM_DESCRIPTION =
+  "Optional, with stationery monogram only: the initials to print, one to three letters, such as \"JMS\". " +
+  "Leave it out to use the initials of the return address's name.";
+export const HEADLINE_DESCRIPTION =
+  "Optional, with stationery celebration only: a short line printed large above the letter, " +
+  "such as \"Happy Birthday, Sam!\". It must fit on one line; leave it out for confetti alone.";
+
+/**
+ * A theme as asked for: its name in any case, or none for an empty string,
+ * which models send for an optional field they leave unset. Anything else is
+ * left for the enum to refuse.
+ */
+function themeName(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const name = value.trim().toLowerCase();
+  return name === "" ? undefined : name;
+}
+const stationeryZ = z.preprocess(themeName, z.enum(STATIONERY_THEMES).optional()).describe(STATIONERY_DESCRIPTION);
+const monogramZ = z.string().optional().describe(MONOGRAM_DESCRIPTION);
+const headlineZ = z.string().optional().describe(HEADLINE_DESCRIPTION);
+
+/** What a letter preview's output says of its stationery (#563). */
+export const PREVIEW_STATIONERY_DESCRIPTION =
+  "While stationery is offered: the stationery the page was drawn in, classic unless one was asked for, " +
+  "with the date line, initials and headline it prints";
+const previewStationeryZ = z.object({
+  theme: z.enum(STATIONERY_THEMES),
+  dateLine: z.string().optional(),
+  monogram: z.string().optional(),
+  headline: z.string().optional()
+});
+
 // Text-only letter schema
 export const quoteAndPreviewInputZ = z.object({
   sender: addressZ.optional(),  // Optional - will use saved return address if not provided
@@ -49,7 +91,10 @@ export const quoteAndPreviewInputZ = z.object({
   bodyText: z.string(),
   signOff: z.string(),
   sendAsGift: sendAsGiftZ,
-  arriveBy: arriveByZ
+  arriveBy: arriveByZ,
+  stationery: stationeryZ,
+  monogram: monogramZ,
+  headline: headlineZ
 });
 
 // ============================================================================
@@ -97,7 +142,10 @@ export const quoteAndPreviewLetterWithHeaderImageInputZ = z.object({
   // Alternative: direct image URL
   imageUrl: z.string().optional(),
   sendAsGift: sendAsGiftZ,
-  arriveBy: arriveByZ
+  arriveBy: arriveByZ,
+  stationery: stationeryZ,
+  monogram: monogramZ,
+  headline: headlineZ
 });
 
 // Letter with inline image (image after signature, like enclosing a photo)
@@ -111,7 +159,10 @@ export const quoteAndPreviewLetterWithImageInputZ = z.object({
   // Alternative: direct image URL
   imageUrl: z.string().optional(),
   sendAsGift: sendAsGiftZ,
-  arriveBy: arriveByZ
+  arriveBy: arriveByZ,
+  stationery: stationeryZ,
+  monogram: monogramZ,
+  headline: headlineZ
 });
 
 export const sendLetterInputZ = z.object({
@@ -384,7 +435,8 @@ export const quoteAndPreviewOutputZ = z.object({
   giftCard: giftCardZ.optional(),
   giftLettersAvailable: z.number().int().nonnegative().optional(),
   schedule: previewScheduleZ.optional(),
-  arrivalWindow: arrivalWindowZ.optional().describe(ARRIVAL_WINDOW_DESCRIPTION)
+  arrivalWindow: arrivalWindowZ.optional().describe(ARRIVAL_WINDOW_DESCRIPTION),
+  stationery: previewStationeryZ.optional().describe(PREVIEW_STATIONERY_DESCRIPTION)
 });
 
 /** Held mail's two dates (#535), on what a send and the order status say. */

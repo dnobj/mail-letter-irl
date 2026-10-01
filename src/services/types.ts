@@ -571,7 +571,7 @@ export interface CreateDraftParams {
    * Its slots as slotText makes them, each at most STATIONERY_SLOT_MAX_LENGTH:
    * createDraft refuses a theme stationeryOf would not read back.
    */
-  stationery?: Stationery;
+  stationery?: Stationery | null;
 }
 
 export interface CreateDraftResult {

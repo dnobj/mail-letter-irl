@@ -475,18 +475,20 @@ export function stampedPostcardReturnLines(address: Address): string[] {
  * confirm page shows it in a sandboxed iframe, where it scales to the frame's
  * width.
  *
- * `data-renderer` on the body names the renderer, and the letter card shows
- * the pages of a document that carries it. The text is also repeated, hidden,
+ * `data-renderer` on the body names the renderer version the pages were
+ * drawn as (pdf-2 for a theme, #563), and the letter card shows the pages of
+ * a document that carries it. The text is also repeated, hidden,
  * in the legacy preview's `letter-body` and `sign-off` elements, which a card
  * served before #534 Phase 3, still cached by an app, reads instead.
  */
 export function renderLetterPreviewDocument(
   pages: string[],
-  text: { bodyText: string; signOff: string }
+  text: { bodyText: string; signOff: string },
+  version: string = RENDERER_VERSION
 ): string {
   const trimmedBodyText = text.bodyText.replace(/\n+$/, '');
 
-  return rendererDocument(pages, `  <div hidden>
+  return rendererDocument(pages, version, `  <div hidden>
     <div class="letter-body">${escapeHtml(trimmedBodyText)}</div>
     <div class="sign-off">${escapeHtml(text.signOff)}</div>
   </div>
@@ -500,11 +502,11 @@ export function renderLetterPreviewDocument(
  * hidden text.
  */
 export function renderPostcardPreviewDocument(pages: string[]): string {
-  return rendererDocument(pages, '');
+  return rendererDocument(pages, RENDERER_VERSION, '');
 }
 
-/** The minimal document our renderer's pages are shown in, `after` closing the body. */
-function rendererDocument(pages: string[], after: string): string {
+/** The minimal document our renderer's pages are shown in, drawn as `version`, `after` closing the body. */
+function rendererDocument(pages: string[], version: string, after: string): string {
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -516,7 +518,7 @@ function rendererDocument(pages: string[], after: string): string {
     svg + svg { margin-top: 12px; }
   </style>
 </head>
-<body data-renderer="${RENDERER_VERSION}">
+<body data-renderer="${version}">
 ${pages.join('\n')}
 ${after}</body>
 </html>`;

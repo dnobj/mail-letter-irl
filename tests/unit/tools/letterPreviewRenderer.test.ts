@@ -475,3 +475,126 @@ describe('a gift send', () => {
     expect(printLayout.pages).toHaveLength(1);
   });
 });
+
+describe('stationery (#563)', () => {
+  const pages = (html: string) => html.match(/<svg [\s\S]*?<\/svg>/g) ?? [];
+  /** The strokes a theme draws in its ink: the sprig, the monogram's rings. */
+  const inked = (html: string) => html.match(/<path d="M[^"]*" fill="none" stroke="#222222"/g) ?? [];
+  const LAYOUTS = ['text_only', 'header_image', 'inline_image'] as const;
+
+  beforeEach(() => {
+    vi.stubEnv('LETTER_IRL_STATIONERY_ENABLED', 'true');
+  });
+
+  it.each(LAYOUTS)('%s: a theme draws the page in it, records pdf-2 with the stationery, and says so', async layout => {
+    processedLayout = layout === 'text_only' ? 'header_image' : layout;
+    const output = await run(layout, { stationery: 'Botanical' });
+    const draft = drafted();
+    // The preview's day in New York: 08:00 on September 30.
+    const botanical = { theme: 'botanical', dateLine: 'September 30, 2026' };
+    expect(draft.rendererVersion).toBe('pdf-2');
+    expect(draft.stationery).toEqual(botanical);
+    expect(output.stationery).toEqual(botanical);
+    const html = draft.previewHtml!;
+    expect(output.previewHtml).toBe(html);
+    expect(inked(html).length).toBeGreaterThan(0);
+    expect(html).toContain('<title>September 30, 2026\nDear Sam,\nPat</title>');
+    expect(html).toContain('<body data-renderer="pdf-2">');
+  });
+
+  it.each(LAYOUTS)('%s: Classic is the page as before, recording pdf-1, and says Classic', async layout => {
+    processedLayout = layout === 'text_only' ? 'header_image' : layout;
+    const output = await run(layout, { stationery: 'classic' });
+    const classic = drafted();
+    expect(classic.rendererVersion).toBe('pdf-1');
+    expect(output.stationery).toEqual({ theme: 'classic' });
+    expect(inked(classic.previewHtml!)).toEqual([]);
+
+    // Exactly the page the previews drew before stationery, with the flag off.
+    vi.mocked(createDraft).mockClear();
+    vi.stubEnv('LETTER_IRL_STATIONERY_ENABLED', '');
+    const before = await run(layout);
+    expect(drafted().previewHtml).toBe(classic.previewHtml);
+    expect(before).not.toHaveProperty('stationery');
+  });
+
+  it("a monogram prints the return address's initials, or the ones asked for", async () => {
+    const output = await run('text_only', { stationery: 'monogram' });
+    expect(output.stationery).toEqual({ theme: 'monogram', dateLine: 'September 30, 2026', monogram: 'PE' });
+    expect(drafted().previewHtml).toContain('<title>September 30, 2026\nPE\nDear Sam,\nPat</title>');
+    // Its double ring.
+    expect(inked(drafted().previewHtml!)).toHaveLength(2);
+
+    vi.mocked(createDraft).mockClear();
+    await run('text_only', { stationery: 'monogram', monogram: 'J. M. S.' });
+    expect(drafted().stationery).toMatchObject({ monogram: 'JMS' });
+  });
+
+  it('a headline prints above the letter, three lines of its page', async () => {
+    const output = await run('text_only', { stationery: 'celebration', headline: '  Happy   Birthday, Sam! ' });
+    expect(output.stationery).toEqual({ theme: 'celebration', dateLine: 'September 30, 2026', headline: 'Happy Birthday, Sam!' });
+    expect(drafted().previewHtml).toContain('<title>September 30, 2026\nHappy Birthday, Sam!\nDear Sam,\nPat</title>');
+  });
+
+  it('refuses a letter the headline pushes past its page, saying so and the ways out, before any draft', async () => {
+    // 24 lines: the page holds 26 in Classic, and 23 below a headline.
+    await expect(run('text_only', { stationery: 'celebration', bodyText: lines(23) })).resolves.toMatchObject({ draftId: 'draft-1' });
+    vi.mocked(createDraft).mockClear();
+
+    const ctx = context();
+    const error = await run('text_only', { stationery: 'celebration', headline: 'Happy Birthday!', bodyText: lines(23) }, ctx).catch(e => e);
+    expect(error.message).toBe(
+      'Letter is 1 line too long for one page on the celebration stationery with a headline: it takes 24 lines and the page holds 23. ' +
+        'The headline takes 3 lines: shorten the message, leave the headline out, or choose the classic stationery.'
+    );
+    expect(error).toMatchObject({ diagnosticClass: 'validation_error' });
+    expect(createDraft).not.toHaveBeenCalled();
+    expect(ctx.logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'quote.letter.exceeds_page', linesUsed: 24, linesAvailable: 23, stationery: 'celebration' }),
+      expect.any(String)
+    );
+
+    // Without a headline the theme holds what Classic does, and says nothing of it.
+    await expect(run('text_only', { stationery: 'botanical', bodyText: lines(26) })).rejects.toThrow(
+      /^Letter is 1 line too long for one page: it takes 27 lines and the page holds 26\. Please shorten your message to fit on one page\.$/
+    );
+  });
+
+  it('refuses initials and a headline the font cannot draw, naming where, before any draft', async () => {
+    const CAKE = String.fromCodePoint(0x1f382);
+    await expect(run('text_only', { stationery: 'celebration', headline: `Happy Birthday ${CAKE}` })).rejects.toThrow(/in the headline/);
+    const MIDDLE = String.fromCodePoint(0x4e2d);
+    await expect(run('text_only', { stationery: 'monogram', monogram: MIDDLE })).rejects.toThrow(/in the monogram's initials/);
+    expect(createDraft).not.toHaveBeenCalled();
+  });
+
+  it("prints a themed gift send's page in its theme, then today's card page", async () => {
+    vi.stubEnv('LETTER_IRL_GIFT_LETTERS_ENABLED', 'true');
+    vi.mocked(getGiftBalance).mockResolvedValue({ available: 1, next: { giftId: 'gift-1', cardState: 'funded' } } as never);
+    await run('text_only', { stationery: 'botanical', sendAsGift: true });
+    const draft = drafted();
+    expect(draft.isGiftSend).toBe(true);
+    expect(draft.rendererVersion).toBe('pdf-2');
+    const [letter, card] = pages(draft.previewHtml!);
+    expect(pages(draft.previewHtml!)).toHaveLength(2);
+    expect(inked(letter).length).toBeGreaterThan(0);
+    expect(inked(card)).toEqual([]);
+    expect(card).toContain('<title>A GIFT INSIDE THIS LETTER');
+  });
+
+  it('is exactly as before while not offered: no stationery said, and a stray theme refused before any draft', async () => {
+    for (const [enabled, renderer] of [['', 'pdf'], ['true', 'html']]) {
+      vi.stubEnv('LETTER_IRL_STATIONERY_ENABLED', enabled);
+      vi.stubEnv('LETTER_IRL_PRINT_RENDERER', renderer);
+      vi.mocked(createDraft).mockClear();
+      const output = await run('text_only');
+      expect(output, `${enabled} ${renderer}`).not.toHaveProperty('stationery');
+      expect(drafted().stationery).toBeUndefined();
+      expect(drafted().rendererVersion).toBe(renderer === 'pdf' ? 'pdf-1' : undefined);
+
+      vi.mocked(createDraft).mockClear();
+      await expect(run('text_only', { stationery: 'botanical' })).rejects.toThrow('Stationery is not available yet.');
+      expect(createDraft).not.toHaveBeenCalled();
+    }
+  });
+});

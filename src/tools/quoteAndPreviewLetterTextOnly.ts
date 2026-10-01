@@ -26,6 +26,7 @@ import {
   type LetterQuoteOutput
 } from "./letterHelpers.js";
 import { previewSchedule } from "./arriveByInput.js";
+import { previewStationery } from "./stationeryInput.js";
 import { previewSendStep } from "./previewSendStep.js";
 
 // ============================================================================
@@ -41,6 +42,10 @@ interface QuoteAndPreviewLetterTextOnlyInput {
   sendAsGift?: boolean;
   /** The date it should arrive by, YYYY-MM-DD (#535); served only while the flag is on. */
   arriveBy?: string;
+  /** The page's theme, its initials and its headline (#563); served only while stationery is offered. */
+  stationery?: string;
+  monogram?: string;
+  headline?: string;
 }
 
 // ============================================================================
@@ -82,6 +87,10 @@ async function handler(
   const gift = await letterGiftChoice(input, context);
   const renderer = printRenderer();
 
+  // Stationery (#563): the theme and what it prints, checked before the
+  // printable check reads its initials and headline and the layout draws it.
+  const stationery = previewStationery(input, sender.name, context, renderer);
+
   // Validate character limit
   validateCharacterLimitForLayout(input.bodyText, input.signOff, layoutType, context, renderer);
 
@@ -90,12 +99,13 @@ async function handler(
     { sender, recipient: input.recipient, bodyText: input.bodyText, signOff: input.signOff, senderIsSaved: usedSavedReturnAddress },
     context,
     renderer,
-    gift.card
+    gift.card,
+    stationery
   );
 
   // Our renderer measures the page itself (#534)
   const printLayout = layoutLetterForPreview(
-    { bodyText: input.bodyText, signOff: input.signOff, layoutType },
+    { bodyText: input.bodyText, signOff: input.signOff, layoutType, stationery },
     context,
     renderer
   );
@@ -122,6 +132,7 @@ async function handler(
     gift,
     printLayout,
     schedule,
+    stationery,
     context
   });
 }

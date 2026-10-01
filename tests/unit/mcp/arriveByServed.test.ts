@@ -112,6 +112,10 @@ describe('arriveBy in tools/list', () => {
     vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', '');
     const off = await listedTools();
     vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', 'true');
+    // Closed only while nothing is withheld: the letter previews' stationery
+    // (#563) is withheld too while it is not offered.
+    vi.stubEnv('LETTER_IRL_STATIONERY_ENABLED', 'true');
+    vi.stubEnv('LETTER_IRL_PRINT_RENDERER', 'pdf');
     const on = await listedTools();
     for (const name of PREVIEWS) {
       expect((off.get(name)?.inputSchema as { additionalProperties?: unknown }).additionalProperties, name).toBe(true);

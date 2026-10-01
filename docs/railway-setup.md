@@ -112,6 +112,8 @@ LETTER_IRL_GIFT_LANDING_BASE_URL=<the website the printed QR opens; default http
 # Read at preview time only; a letter prints with the version its draft recorded. API service only.
 LETTER_IRL_PRINT_RENDERER=<pdf to turn it on; unset keeps the legacy HTML>
 LETTER_IRL_ARRIVE_BY_ENABLED=<true to offer arrival dates on previews (#535); unset is off>
+# Stationery on the three letter previews (#563): offered only while LETTER_IRL_PRINT_RENDERER is pdf.
+LETTER_IRL_STATIONERY_ENABLED=<true to offer themes on letter previews; unset is off>
 LETTER_IRL_SCHEDULE_LEAD_DAYS=<business days from the mail date to the arrival date; default 7, production refuses less than 3>
 LETTER_IRL_SCHEDULE_HORIZON_DAYS=<calendar days ahead an arrival date may be; default 60>
 # Photo upload through the card in apps with no file store (#474, docs/deployment.md): off unless
