@@ -121,5 +121,8 @@ describe('a postcard on our renderer', () => {
     const boxes = [...pdf.matchAll(/\/MediaBox \[([^\]]+)\]/g)].map(match => match[1].trim().split(/\s+/).map(Number));
     expect(boxes).toEqual([[0, 0, 666, 450], [0, 0, 666, 450]]);
     expect(pdf).toMatch(/\/Subtype\s*\/Image/);
+    // pdfkit writes the title as an object of its own.
+    const title = /\/Title (\d+) 0 R/.exec(pdf)!;
+    expect(new RegExp(`\\n${title[1]} 0 obj\\n\\(([^)]*)\\)\\nendobj`).exec(pdf)?.[1]).toBe('Postcard');
   });
 });

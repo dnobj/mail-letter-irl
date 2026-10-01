@@ -49,6 +49,7 @@ export function layoutPostcard(content: PostcardContent): Layout {
   return {
     width: POSTCARD_WIDTH,
     height: POSTCARD_HEIGHT,
+    title: 'Postcard',
     pages: [
       { items: front, linesUsed: 0, linesAvailable: 0 },
       { items: back, linesUsed: lines.length, linesAvailable }

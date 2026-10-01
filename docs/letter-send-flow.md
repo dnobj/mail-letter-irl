@@ -191,6 +191,7 @@ A `pdf-1` gift send prints its card as the PDF's second page, drawn by the rende
 - A gift postcard still prints on the HTML until its strip moves onto the renderer.
 - Refusals hold the postcard as `render_refused`, as for letters: a version this build cannot print, an unreadable image, a message past its half of the back, or a size other than 6x9.
 - Postcard previews do not record a version yet, so every postcard still prints on the HTML.
+- The refusal of a message past its half of the back is a backstop. The postcard tool still limits characters (500, or 350 on a gift postcard), and 500 characters of short lines can wrap to more than 16. Before a postcard preview records a version, it must refuse by lines, as letters do, and check the message against Tinos.
 
 **How a preview is drawn (#534).** With `LETTER_IRL_PRINT_RENDERER=pdf`, the three letter previews are drawn by `src/render`, from the layout the PDF prints from:
 - the page is laid out with the image that prints, and a letter that runs past it is refused with the count: "Letter is 2 lines too long for one page: it takes 28 lines and the page holds 26." A page holds 26 lines of text only, 16 under a full 2-inch header image, and 13 above a full 3-inch enclosed image;

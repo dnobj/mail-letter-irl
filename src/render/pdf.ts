@@ -30,7 +30,7 @@ export async function renderPdf(layout: Layout): Promise<Buffer> {
     size: [layout.width, layout.height],
     margin: 0,
     autoFirstPage: false,
-    info: { Title: 'Letter', Creator: 'Letter IRL', Producer: `Letter IRL renderer ${RENDERER_VERSION}` }
+    info: { Title: layout.title ?? 'Letter', Creator: 'Letter IRL', Producer: `Letter IRL renderer ${RENDERER_VERSION}` }
   });
   const chunks: Buffer[] = [];
   const done = new Promise<Buffer>((resolve, reject) => {

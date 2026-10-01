@@ -53,7 +53,7 @@ import {
  * resolve it with a retry once a build that can print it is deployed.
  */
 class RenderRefusal extends Error {
-  constructor(readonly reason: 'unknown_version' | 'image' | 'overflow' | 'render', message: string) {
+  constructor(readonly reason: 'unknown_version' | 'image' | 'overflow' | 'size' | 'render', message: string) {
     super(message);
     this.name = 'RenderRefusal';
   }
@@ -1331,7 +1331,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       let response: PostGridPostcardResponse;
       if (usePdf) {
         if (size !== '6x9') {
-          throw new RenderRefusal('render', `Our renderer draws 6x9 postcards, not ${size}.`);
+          throw new RenderRefusal('size', `Our renderer draws 6x9 postcards, not ${size}.`);
         }
         const pdf = await this.renderPostcardForPrint(params);
         response = await this.apiRequest<PostGridPostcardResponse>(

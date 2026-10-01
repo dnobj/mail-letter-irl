@@ -132,6 +132,8 @@ describe('postcards printed from our own PDF (#534 Phase 4)', () => {
     expect(form.has('backHTML')).toBe(false);
     // A letter's fields mean nothing to a postcard.
     expect(form.has('addressPlacement')).toBe(false);
+    expect(form.has('color')).toBe(false);
+    expect(form.has('doubleSided')).toBe(false);
 
     const pdf = form.get('pdf') as File;
     expect(pdf.type).toBe('application/pdf');
@@ -172,7 +174,13 @@ describe('postcards printed from our own PDF (#534 Phase 4)', () => {
     ['a renderer this build does not know', { rendererVersion: 'pdf-9' }, 'unknown_version', 'pdf-9'],
     ['a message past its half of the back', { backMessage: Array.from({ length: 17 }, (_, n) => `Line ${n + 1}`).join('\n') }, 'overflow', "runs 1 line(s) past its half of the back"],
     ['an unreadable image', { frontImageBase64: 'data:image/gif;base64,R0lGODlhAQABAAAAACw=' }, 'image', "The postcard's image could not be read"],
-    ['a size our renderer does not draw', { size: '6x4' as const }, 'render', 'Our renderer draws 6x9 postcards, not 6x4.']
+    ['a size our renderer does not draw', { size: '6x4' as const }, 'size', 'Our renderer draws 6x9 postcards, not 6x4.'],
+    // Checked before the gift fallback: a version this build cannot draw is
+    // held, never printed on the HTML from a different layout.
+    ['a gift postcard of a renderer this build does not know', {
+      rendererVersion: 'pdf-9',
+      giftCard: { state: 'funded' as const, code: 'K7M2QX9A', url: 'https://example.test/g/K7M2QX9A', displayUrl: 'example.test/g' }
+    }, 'unknown_version', 'pdf-9']
   ])('holds %s, sends nothing, and says why', async (_name, change, reason, message) => {
     const fetchMock = accepted();
     vi.stubGlobal('fetch', fetchMock);
