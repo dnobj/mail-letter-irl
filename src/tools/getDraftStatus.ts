@@ -1,6 +1,7 @@
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
 import { getDraftStatusInputSchema, getDraftStatusOutputSchema } from '../schemas.js';
 import { getDraftState } from '../services/draftService.js';
+import { draftScheduleOf } from '../services/draftSchedule.js';
 import { isDraftIdShape } from './requestSend.js';
 
 /**
@@ -13,6 +14,11 @@ import { isDraftIdShape } from './requestSend.js';
  * result again, and the card would offer Send for mail that has gone. The card
  * asks this instead, and shows a sent draft as sent and an expired one as
  * expired.
+ *
+ * It also says the draft's arrival dates (#535), which the card may have
+ * changed since the preview's first answer, so a card shown that answer
+ * again draws the dates the draft has, and a sent one that waits for its mail
+ * date as scheduled.
  *
  * Card-only (APP_ONLY_TOOLS in src/mcp/registerTools.ts): the model has no use
  * for it, and apps that keep card-only tools from the model never show it.
@@ -29,6 +35,17 @@ export interface GetDraftStatusOutput {
   status: 'ready' | 'sent' | 'expired' | 'not_found';
   /** The order the draft became, once sent. */
   orderId?: string;
+  /** The draft's arrival dates (#535), when it has them. */
+  schedule?: { arriveBy: string; mailOn: string };
+}
+
+/** The draft's dates, or none: a status answer is never refused over dates it cannot read. */
+function scheduleFor(draft: Parameters<typeof draftScheduleOf>[0]): { arriveBy: string; mailOn: string } | undefined {
+  try {
+    return draftScheduleOf(draft) ?? undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 async function handler(
@@ -42,10 +59,12 @@ async function handler(
   if (!draft || draft.user_id !== context.user.userId) {
     return { draftId, status: 'not_found' };
   }
+  const schedule = scheduleFor(draft);
+  const dates = schedule ? { schedule } : {};
   if (draft.status === 'consumed') {
     return draft.consumed_letter_id
-      ? { draftId, status: 'sent', orderId: draft.consumed_letter_id }
-      : { draftId, status: 'sent' };
+      ? { draftId, status: 'sent', orderId: draft.consumed_letter_id, ...dates }
+      : { draftId, status: 'sent', ...dates };
   }
   const expiresAt = new Date(draft.expires_at);
   if (
@@ -55,7 +74,7 @@ async function handler(
   ) {
     return { draftId, status: 'expired' };
   }
-  return { draftId, status: 'ready' };
+  return { draftId, status: 'ready', ...dates };
 }
 
 export const getDraftStatusTool: McpToolDefinition<GetDraftStatusInput, GetDraftStatusOutput> = {

@@ -97,6 +97,42 @@ describe("get_draft_status (#474)", () => {
     await expect(ask({ draftId: ` ${DRAFT_ID} ` })).resolves.toEqual({ draftId: DRAFT_ID, status: "ready" });
   });
 
+  it("says the draft's arrival dates, ready or sent, so the card draws the ones it has now (#535)", async () => {
+    const dates = { arrive_by: "2026-10-16", mail_on: "2026-10-06" };
+    vi.mocked(getDraftState).mockResolvedValue(state(dates) as any);
+    await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual({
+      draftId: DRAFT_ID,
+      status: "ready",
+      schedule: { arriveBy: "2026-10-16", mailOn: "2026-10-06" }
+    });
+
+    vi.mocked(getDraftState).mockResolvedValue(state({ ...dates, status: "consumed", consumed_letter_id: ORDER_ID }) as any);
+    await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual({
+      draftId: DRAFT_ID,
+      status: "sent",
+      orderId: ORDER_ID,
+      schedule: { arriveBy: "2026-10-16", mailOn: "2026-10-06" }
+    });
+
+    vi.mocked(getDraftState).mockResolvedValue(state({ ...dates, status: "consumed" }) as any);
+    await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual({
+      draftId: DRAFT_ID,
+      status: "sent",
+      schedule: { arriveBy: "2026-10-16", mailOn: "2026-10-06" }
+    });
+  });
+
+  it("answers without dates it cannot read, rather than refusing (#535)", async () => {
+    for (const dates of [
+      { arrive_by: "2026-10-16", mail_on: null },
+      { arrive_by: new Date("2026-10-16T00:00:00Z"), mail_on: "2026-10-06" },
+      { arrive_by: "16/10/2026", mail_on: "2026-10-06" }
+    ]) {
+      vi.mocked(getDraftState).mockResolvedValue(state(dates) as any);
+      await expect(ask({ draftId: DRAFT_ID }), JSON.stringify(dates)).resolves.toEqual({ draftId: DRAFT_ID, status: "ready" });
+    }
+  });
+
   it("is read-only and says so", () => {
     expect(getDraftStatusTool.readOnly).toBe(true);
     expect(getDraftStatusTool.meta?.readOnlyHint).toBe(true);

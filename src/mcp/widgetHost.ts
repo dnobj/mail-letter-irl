@@ -17,11 +17,18 @@ export const HOST_BRIDGE_PLACEHOLDER = "<!-- letter-irl:host -->";
  * and postcard cards.
  */
 export const PAGES_PLACEHOLDER = "<!-- letter-irl:pages -->";
+/**
+ * Where a card asks for widgets/shared/arrives.js (#535): the Arrives picker
+ * and the Cancel on scheduled mail, one source for the letter and postcard
+ * cards.
+ */
+export const ARRIVES_PLACEHOLDER = "<!-- letter-irl:arrives -->";
 
 /** The shared scripts a card may ask for: each marker, and the file put there. */
 const SHARED_SCRIPTS = [
   { marker: HOST_BRIDGE_PLACEHOLDER, file: "host.js" },
-  { marker: PAGES_PLACEHOLDER, file: "pages.js" }
+  { marker: PAGES_PLACEHOLDER, file: "pages.js" },
+  { marker: ARRIVES_PLACEHOLDER, file: "arrives.js" }
 ] as const;
 
 const cachedSources = new Map<string, string>();

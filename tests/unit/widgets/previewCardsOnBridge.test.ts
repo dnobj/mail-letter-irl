@@ -426,3 +426,226 @@ describe.each([LETTER, POSTCARD])('$file asks the server what became of its draf
     expect(card.requests('tools/call').filter(message => message.params?.name === 'get_draft_status')).toEqual([]);
   });
 });
+
+describe.each([LETTER, POSTCARD])('$file: the arrival date (#535)', spec => {
+  const Noun = spec.file === 'LetterPreviewCard' ? 'Letter' : 'Postcard';
+  const noun = Noun.toLowerCase();
+  const WINDOW = { earliestArrival: '2026-10-13', latestArrival: '2026-11-30' };
+  const HELD = {
+    arriveBy: '2026-10-16',
+    mailOn: '2026-10-06',
+    releasesAt: '2026-10-06T13:00:00.000Z',
+    earliestArrival: '2026-10-13',
+    latestArrival: '2026-11-30'
+  };
+  // The card names the year only when it is not this year in New York.
+  const MAILS_OCT_6 = /^Mails Tue, Oct 6(, 2026)? · cancel free until then$/;
+
+  /** A card showing a preview that offers dates, after the handshake. */
+  async function offering(extra: Json = {}) {
+    const card = mountInMcpHost(spec);
+    await flush();
+    await card.initialize();
+    await card.toolInput(spec.args);
+    await card.toolResult({
+      content: [{ type: 'text', text: 'Preview ready.' }],
+      structuredContent: { ...spec.output('draft_0001', canSend), arrivalWindow: WINDOW, ...extra },
+      _meta: spec.meta
+    });
+    return card;
+  }
+  const dateInput = (card: Awaited<ReturnType<typeof offering>>) =>
+    card.document.getElementById('arrives-date') as HTMLInputElement;
+  async function choose(card: Awaited<ReturnType<typeof offering>>, value: string) {
+    const input = dateInput(card);
+    input.value = value;
+    input.dispatchEvent(new card.window.Event('change'));
+    await flush();
+  }
+  const answerTool = (card: Awaited<ReturnType<typeof offering>>, name: string, result: Json) =>
+    card.answer('tools/call', { result }, name);
+
+  it('offers the dates the preview names, starting from as soon as possible', async () => {
+    const card = await offering();
+
+    expect(card.visible('arrives-row')).toBe(true);
+    expect(dateInput(card).min).toBe('2026-10-13');
+    expect(dateInput(card).max).toBe('2026-11-30');
+    expect(dateInput(card).value).toBe('');
+    expect(card.document.getElementById('arrives-asap')!.getAttribute('aria-pressed')).toBe('true');
+    expect(card.visible('arrives-note')).toBe(false);
+    expect(card.text('send-button-text')).toBe(`Send ${Noun}`);
+  });
+
+  it('offers nothing while the preview names no dates', async () => {
+    const card = await showing(spec, canSend);
+    expect(card.visible('arrives-row')).toBe(false);
+    expect(card.text('send-button-text')).toBe(`Send ${Noun}`);
+  });
+
+  it('sets a chosen date on the draft, holding Send meanwhile, then offers to schedule', async () => {
+    const card = await offering();
+
+    await choose(card, '2026-10-16');
+    expect(card.lastRequest('tools/call', 'set_arrival_date')!.params.arguments).toEqual({
+      draftId: 'draft_0001',
+      arriveBy: '2026-10-16'
+    });
+    expect((card.document.getElementById('send-button') as HTMLButtonElement).disabled).toBe(true);
+    expect(dateInput(card).disabled).toBe(true);
+
+    await answerTool(card, 'set_arrival_date', {
+      content: [{ type: 'text', text: 'The arrival date is set.' }],
+      structuredContent: {
+        draftId: 'draft_0001',
+        schedule: HELD,
+        deliveryEstimate: 'Goes to the printer Tue, Oct 6, and aims to arrive by Fri, Oct 16.',
+        message: 'Nothing has been sent.'
+      }
+    });
+
+    expect(dateInput(card).value).toBe('2026-10-16');
+    expect(dateInput(card).disabled).toBe(false);
+    expect(card.text('arrives-note')).toMatch(MAILS_OCT_6);
+    expect(card.text('delivery')).toContain('Goes to the printer Tue, Oct 6, and aims to arrive by Fri, Oct 16.');
+    expect(card.text('send-button-text')).toBe(`Schedule ${Noun}`);
+    expect((card.document.getElementById('send-button') as HTMLButtonElement).disabled).toBe(false);
+    expect(card.document.getElementById('arrives-asap')!.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('clears the date with As soon as possible', async () => {
+    const card = await offering({ schedule: HELD });
+    expect(dateInput(card).value).toBe('2026-10-16');
+    expect(card.text('send-button-text')).toBe(`Schedule ${Noun}`);
+
+    await card.click('arrives-asap');
+    expect(card.lastRequest('tools/call', 'set_arrival_date')!.params.arguments).toEqual({ draftId: 'draft_0001' });
+    await answerTool(card, 'set_arrival_date', {
+      content: [],
+      structuredContent: {
+        draftId: 'draft_0001',
+        deliveryEstimate: 'Mailed in 1-2 business days; usually arrives in 1-2 weeks',
+        message: 'Nothing has been sent.'
+      }
+    });
+
+    expect(dateInput(card).value).toBe('');
+    expect(card.visible('arrives-note')).toBe(false);
+    expect(card.text('delivery')).toContain('Mailed in 1-2 business days');
+    expect(card.text('send-button-text')).toBe(`Send ${Noun}`);
+  });
+
+  it('keeps the dates it had when a date is refused, and moves to the earliest the refusal names', async () => {
+    const card = await offering();
+
+    await choose(card, '2026-10-13');
+    await answerTool(card, 'set_arrival_date', {
+      isError: true,
+      content: [
+        {
+          type: 'text',
+          text: 'The earliest this can arrive is Wed, Oct 14 (2026-10-14). Choose that date or later, or leave arriveBy out to mail as soon as possible.'
+        }
+      ]
+    });
+
+    expect(dateInput(card).value).toBe('');
+    expect(dateInput(card).min).toBe('2026-10-14');
+    expect(card.text('arrives-note')).toMatch(/^That date can't be met any more\. The earliest on offer is now Wed, Oct 14(, 2026)?\.$/);
+    expect(card.document.getElementById('arrives-note')!.classList.contains('alert')).toBe(true);
+    expect(card.text('send-button-text')).toBe(`Send ${Noun}`);
+    expect((card.document.getElementById('send-button') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('sent with a date, waits as scheduled, and is cancelled only after asking', async () => {
+    const card = await offering({ schedule: HELD });
+
+    await card.click('send-button');
+    await answerTool(card, spec.sendTool, { content: [], structuredContent: { orderId: 'ord_0001' } });
+
+    expect(card.text('status-pill')).toBe('Scheduled');
+    expect(card.text('id-value')).toBe('ord_0001');
+    expect(card.text('send-button-text')).toBe(`${Noun} Scheduled`);
+    expect(card.visible('arrives-row')).toBe(false);
+    expect(card.visible('scheduled')).toBe(true);
+    expect(card.text('scheduled-note')).toMatch(MAILS_OCT_6);
+    expect(card.text('cancel-scheduled-button-text')).toBe(`Cancel this ${noun}`);
+
+    await card.click('cancel-scheduled-button');
+    expect(card.lastRequest('tools/call', 'cancel_scheduled_mail')).toBeUndefined();
+    expect(card.text('cancel-scheduled-button-text')).toBe(`Yes, cancel this ${noun}`);
+    expect(card.text('scheduled-note')).toBe('Cancel it? Nothing is mailed, and what paid for it comes back.');
+
+    await card.click('cancel-scheduled-button');
+    expect(card.lastRequest('tools/call', 'cancel_scheduled_mail')!.params.arguments).toEqual({ orderId: 'ord_0001', confirm: true });
+    await answerTool(card, 'cancel_scheduled_mail', {
+      content: [],
+      structuredContent: {
+        status: 'cancelled',
+        alreadyCancelled: false,
+        returned: { kind: 'letters', count: 1 },
+        message: 'Cancelled. The letter it cost is back in the balance.'
+      }
+    });
+
+    expect(card.text('status-pill')).toBe('Cancelled');
+    expect(card.text('scheduled-note')).toBe('Cancelled. The letter it cost is back in the balance.');
+    expect(card.visible('cancel-scheduled-button')).toBe(false);
+  });
+
+  it('stops offering Cancel once the mail has gone to the printer', async () => {
+    const card = await offering({ schedule: HELD });
+    await card.click('send-button');
+    await answerTool(card, spec.sendTool, { content: [], structuredContent: { orderId: 'ord_0001' } });
+    await card.click('cancel-scheduled-button');
+    await card.click('cancel-scheduled-button');
+
+    await answerTool(card, 'cancel_scheduled_mail', {
+      isError: true,
+      content: [
+        {
+          type: 'text',
+          text: "This order has gone to the printer, or did not go out, so it can't be cancelled. get_order_status shows where it is."
+        }
+      ]
+    });
+
+    expect(card.text('scheduled-note')).toBe('It has gone to the printer, so it can no longer be cancelled.');
+    expect(card.visible('cancel-scheduled-button')).toBe(false);
+    expect(card.text('status-pill')).toBe('Scheduled');
+  });
+
+  it('draws the dates the draft has now, which a card shown its first preview again cannot know', async () => {
+    const card = await offering();
+
+    await answerTool(card, 'get_draft_status', {
+      content: [],
+      structuredContent: { draftId: 'draft_0001', status: 'ready', schedule: { arriveBy: '2026-10-16', mailOn: '2026-10-06' } }
+    });
+
+    expect(dateInput(card).value).toBe('2026-10-16');
+    expect(card.text('arrives-note')).toMatch(MAILS_OCT_6);
+    expect(card.text('send-button-text')).toBe(`Schedule ${Noun}`);
+  });
+
+  it('shows a draft sent with a date as scheduled, with Cancel', async () => {
+    const card = await offering();
+
+    await answerTool(card, 'get_draft_status', {
+      content: [],
+      structuredContent: {
+        draftId: 'draft_0001',
+        status: 'sent',
+        orderId: 'ord_0002',
+        schedule: { arriveBy: '2026-10-16', mailOn: '2026-10-06' }
+      }
+    });
+
+    expect(card.text('status-pill')).toBe('Scheduled');
+    expect(card.text('id-value')).toBe('ord_0002');
+    expect(card.visible('send-button')).toBe(false);
+    expect(card.visible('arrives-row')).toBe(false);
+    expect(card.visible('scheduled')).toBe(true);
+    expect(card.text('cancel-scheduled-button-text')).toBe(`Cancel this ${noun}`);
+  });
+});

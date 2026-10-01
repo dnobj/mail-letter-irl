@@ -7,7 +7,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { HOST_BRIDGE_PLACEHOLDER, inlineHostBridge, PAGES_PLACEHOLDER } from '../../../src/mcp/widgetHost.js';
+import { ARRIVES_PLACEHOLDER, HOST_BRIDGE_PLACEHOLDER, inlineHostBridge, PAGES_PLACEHOLDER } from '../../../src/mcp/widgetHost.js';
 
 const WIDGET_DIR = path.resolve(__dirname, '../../../widgets');
 const temporaryDirs: string[] = [];
@@ -62,6 +62,19 @@ describe('inlining the card host bridge', () => {
   it('refuses a bridge that carries the marker itself', () => {
     const dir = widgetDirWithBridge(`// ${HOST_BRIDGE_PLACEHOLDER}`);
     expect(() => inlineHostBridge(`<body>${HOST_BRIDGE_PLACEHOLDER}</body>`, dir)).toThrow('marker comment');
+  });
+});
+
+describe('inlining the arrival date script (#535)', () => {
+  it('puts widgets/shared/arrives.js where a card asks, once, and both preview cards ask', () => {
+    const arrives = fs.readFileSync(path.join(WIDGET_DIR, 'shared', 'arrives.js'), 'utf-8');
+    const served = inlineHostBridge(`<body>${ARRIVES_PLACEHOLDER}<script>render()</script></body>`, WIDGET_DIR);
+    expect(served).toBe(`<body><script>\n${arrives}\n    </script><script>render()</script></body>`);
+    for (const card of ['LetterPreviewCard', 'PostcardPreviewCard']) {
+      const page = inlineHostBridge(fs.readFileSync(path.join(WIDGET_DIR, `${card}.html`), 'utf-8'), WIDGET_DIR);
+      expect(page, card).not.toContain(ARRIVES_PLACEHOLDER);
+      expect(page.split(arrives).length - 1, card).toBe(1);
+    }
   });
 });
 

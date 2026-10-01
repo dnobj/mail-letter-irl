@@ -167,7 +167,7 @@
           },
           "arrivalWindow": {
             "type": "object",
-            "description": "The arrival dates that can be chosen now, while arrival dates are on (#535), for a card's date picker: what can be scheduled, not when this mail arrives",
+            "description": "The arrival dates that can be chosen now: what can be scheduled, not when this mail arrives",
             "properties": {
               "earliestArrival": {
                 "type": "string",
@@ -517,7 +517,7 @@
           },
           "arrivalWindow": {
             "type": "object",
-            "description": "The arrival dates that can be chosen now, while arrival dates are on (#535), for a card's date picker: what can be scheduled, not when this mail arrives",
+            "description": "The arrival dates that can be chosen now: what can be scheduled, not when this mail arrives",
             "properties": {
               "earliestArrival": {
                 "type": "string",
@@ -867,7 +867,7 @@
           },
           "arrivalWindow": {
             "type": "object",
-            "description": "The arrival dates that can be chosen now, while arrival dates are on (#535), for a card's date picker: what can be scheduled, not when this mail arrives",
+            "description": "The arrival dates that can be chosen now: what can be scheduled, not when this mail arrives",
             "properties": {
               "earliestArrival": {
                 "type": "string",
@@ -1943,7 +1943,7 @@
           },
           "arrivalWindow": {
             "type": "object",
-            "description": "The arrival dates that can be chosen now, while arrival dates are on (#535), for a card's date picker: what can be scheduled, not when this mail arrives",
+            "description": "The arrival dates that can be chosen now: what can be scheduled, not when this mail arrives",
             "properties": {
               "earliestArrival": {
                 "type": "string",
@@ -2254,6 +2254,22 @@
           "orderId": {
             "type": "string",
             "description": "The order the draft became, once sent"
+          },
+          "schedule": {
+            "type": "object",
+            "description": "The draft's arrival dates, YYYY-MM-DD, when it has them",
+            "properties": {
+              "arriveBy": {
+                "type": "string"
+              },
+              "mailOn": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "arriveBy",
+              "mailOn"
+            ]
           }
         }
       }

@@ -2760,3 +2760,69 @@ describe.each([LETTER, POSTCARD])('$file in ChatGPT, which keeps its own state (
     expect(harness.visible('send-button')).toBe(true);
   });
 });
+
+describe.each([LETTER, POSTCARD])('$file keeps a send with an arrival date (#535)', spec => {
+  const Noun = spec.noun === 'letter' ? 'Letter' : 'Postcard';
+  const DATES = { arriveBy: '2026-10-16', mailOn: '2026-10-06' };
+  const offered = (draftId: string) =>
+    spec.output(draftId, {
+      arrivalWindow: { earliestArrival: '2026-10-13', latestArrival: '2026-11-30' },
+      schedule: { ...DATES, releasesAt: '2026-10-06T13:00:00.000Z', earliestArrival: '2026-10-13', latestArrival: '2026-11-30' }
+    });
+
+  it('keeps the dates with the order, then that it was cancelled from here', async () => {
+    const harness = mount(spec, { toolOutput: offered('draft_host_0001'), toolResponseMetadata: spec.meta() });
+    await flush();
+    expect(harness.text('send-button-text')).toBe(`Schedule ${Noun}`);
+
+    await harness.click('send-button');
+    expect(harness.text('status-pill')).toBe('Scheduled');
+    expect(harness.savedStates.at(-1)).toEqual({
+      v: 1,
+      draftId: 'draft_host_0001',
+      sent: true,
+      orderId: 'ord_sent_0001',
+      schedule: DATES
+    });
+
+    await harness.click('cancel-scheduled-button');
+    await harness.click('cancel-scheduled-button');
+    expect(harness.callsTo('cancel_scheduled_mail').map(call => call.args)).toEqual([{ orderId: 'ord_sent_0001', confirm: true }]);
+    expect(harness.text('status-pill')).toBe('Cancelled');
+    expect(harness.savedStates.at(-1)).toMatchObject({ sent: true, orderId: 'ord_sent_0001', schedule: DATES, cancelled: true });
+  });
+
+  it('reopens a send with a date as scheduled, with Cancel', async () => {
+    const harness = mount(spec, {
+      widgetState: { v: 1, draftId: 'draft_host_0001', sent: true, orderId: 'ord_sent_0001', schedule: DATES }
+    });
+    await flush();
+
+    expect(harness.text('status-pill')).toBe('Scheduled');
+    expect(harness.text('id-value')).toBe('ord_sent_0001');
+    expect(harness.visible('scheduled')).toBe(true);
+    expect(harness.visible('cancel-scheduled-button')).toBe(true);
+    expect(harness.visible('send-button')).toBe(false);
+  });
+
+  it('reopens one cancelled from here as cancelled, offering nothing', async () => {
+    const harness = mount(spec, {
+      widgetState: { v: 1, draftId: 'draft_host_0001', sent: true, orderId: 'ord_sent_0001', schedule: DATES, cancelled: true }
+    });
+    await flush();
+
+    expect(harness.text('status-pill')).toBe('Cancelled');
+    expect(harness.text('scheduled-note')).toBe('Cancelled. Nothing will be mailed.');
+    expect(harness.visible('cancel-scheduled-button')).toBe(false);
+  });
+
+  it('reopens a send without a date as before', async () => {
+    const harness = mount(spec, {
+      widgetState: { v: 1, draftId: 'draft_host_0001', sent: true, orderId: 'ord_sent_0001' }
+    });
+    await flush();
+
+    expect(harness.text('status-pill')).toBe('With the printer');
+    expect(harness.visible('scheduled')).toBe(false);
+  });
+});

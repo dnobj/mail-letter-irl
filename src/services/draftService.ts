@@ -278,9 +278,15 @@ export async function getDraft(draftId: string): Promise<LetterDraft | null> {
  */
 export async function getDraftState(
   draftId: string
-): Promise<Pick<LetterDraft, 'draft_id' | 'user_id' | 'status' | 'expires_at' | 'consumed_letter_id'> | null> {
-  const result = await query<Pick<LetterDraft, 'draft_id' | 'user_id' | 'status' | 'expires_at' | 'consumed_letter_id'>>(
-    `SELECT draft_id, user_id, status, expires_at, consumed_letter_id
+): Promise<Pick<
+  LetterDraft,
+  'draft_id' | 'user_id' | 'status' | 'expires_at' | 'consumed_letter_id' | 'arrive_by' | 'mail_on'
+> | null> {
+  const result = await query<Pick<
+    LetterDraft,
+    'draft_id' | 'user_id' | 'status' | 'expires_at' | 'consumed_letter_id' | 'arrive_by' | 'mail_on'
+  >>(
+    `SELECT draft_id, user_id, status, expires_at, consumed_letter_id, arrive_by, mail_on
      FROM letter_drafts WHERE draft_id = $1`,
     [draftId]
   );

@@ -781,7 +781,16 @@ export const getDraftStatusOutputSchema: JsonSchema = {
   properties: {
     draftId: { type: "string" },
     status: { type: "string", enum: ["ready", "sent", "expired", "not_found"] },
-    orderId: { type: "string", description: "The order the draft became, once sent" }
+    orderId: { type: "string", description: "The order the draft became, once sent" },
+    schedule: {
+      type: "object",
+      description: "The draft's arrival dates, YYYY-MM-DD, when it has them",
+      properties: {
+        arriveBy: { type: "string" },
+        mailOn: { type: "string" }
+      },
+      required: ["arriveBy", "mailOn"]
+    }
   }
 };
 
