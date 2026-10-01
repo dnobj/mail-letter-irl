@@ -52,8 +52,8 @@ type Style = (typeof STYLE)[keyof typeof STYLE];
 /**
  * A card that would run past the bottom margin, where the letter's own text
  * stops and PostGrid's marks begin. The card's words are ours but for the
- * sender's name, so only a name hundreds of characters long makes one: the
- * preview refuses it, and a print holds it.
+ * sender's name, so only a name about a thousand characters long makes one:
+ * the preview refuses it, and a print holds it.
  */
 export class GiftPageOverflow extends Error {
   constructor(readonly overflow: number) {

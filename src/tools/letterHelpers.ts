@@ -678,7 +678,7 @@ export function validatePrintableLetter(
 /**
  * The card page ends above the bottom margin, as the letter's text does
  * (layoutGiftPage). Its other words are ours, so only the sender's name can
- * push it past, and only at hundreds of characters.
+ * push it past, and only at about a thousand characters.
  */
 function validateGiftPageFits(card: GiftCardContent, senderName: string, context: ToolContext): void {
   try {
@@ -686,7 +686,7 @@ function validateGiftPageFits(card: GiftCardContent, senderName: string, context
   } catch (error) {
     if (!(error instanceof GiftPageOverflow)) throw error;
     context.logger.warn(
-      { correlationId: context.correlationId, event: "quote.letter.gift_card_overflow", overflow: Math.round(error.overflow) },
+      { correlationId: context.correlationId, event: "quote.letter.gift_card_overflow", overflowPoints: Math.round(error.overflow) },
       "The gift card runs past the page"
     );
     throw Object.assign(

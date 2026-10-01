@@ -448,7 +448,7 @@ describe('a gift send', () => {
     expect(createDraft).not.toHaveBeenCalled();
     expect(downloadAndProcessLetterImageWithPreview).not.toHaveBeenCalled();
     expect(ctx.logger.warn).toHaveBeenCalledWith(
-      expect.objectContaining({ event: 'quote.letter.gift_card_overflow', overflow: expect.any(Number) }),
+      expect.objectContaining({ event: 'quote.letter.gift_card_overflow', overflowPoints: expect.any(Number) }),
       expect.any(String)
     );
 
