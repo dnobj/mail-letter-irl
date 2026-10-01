@@ -7,6 +7,7 @@ import {
   INLINE_IMAGE_MAX_HEIGHT, LINE_PITCH, PAGE_HEIGHT, PAGE_WIDTH, SIDE_MARGIN
 } from './geometry.js';
 import type { RenderImage } from './images.js';
+import { layoutStationery, type Stationery } from './stationery.js';
 import type { LetterLayoutType } from '../contracts/types.js';
 
 export interface LetterContent {
@@ -15,6 +16,8 @@ export interface LetterContent {
   layoutType: LetterLayoutType;
   /** The header image or the enclosed image; ignored by `text_only`. */
   image?: RenderImage;
+  /** The letter's theme and what it prints (#563); without one, Classic: today's page. */
+  stationery?: Stationery;
 }
 
 /** One line of text, drawn from `x` along `baseline`, in visual order. */
@@ -60,7 +63,21 @@ export interface RectsItem {
   rects: Array<{ x: number; top: number; width: number; height: number }>;
 }
 
-export type LayoutItem = TextRun | ImageBox | BoxItem | RectsItem;
+/**
+ * A shape from SVG path data, absolute M, L, C and Z only (what the card's
+ * sanitiser keeps), as a theme's sprig or confetti (#563).
+ */
+export interface PathItem {
+  kind: 'path';
+  d: string;
+  /** A hex colour, or 'none'. */
+  fill: string;
+  /** A hex colour; no outline without one. */
+  stroke?: string;
+  strokeWidth?: number;
+}
+
+export type LayoutItem = TextRun | ImageBox | BoxItem | RectsItem | PathItem;
 
 export interface LayoutPage {
   items: LayoutItem[];
@@ -324,21 +341,27 @@ export function baselineOffset(size: number, pitch: number): number {
  * image after it. Positions are PDF points from the page's top-left corner.
  * Lines past the page are still laid out, so `overflowLines` can say by how
  * much a letter is too long.
+ *
+ * A theme (stationery.ts) draws first, in the corner and above the body; the
+ * body then starts below anything it put there. Classic draws nothing, so its
+ * page is exactly the page without a theme.
  */
 export function layoutLetter(content: LetterContent): Layout {
   const fontName = BODY_FONT;
   const size = BODY_FONT_SIZE;
   const baseline = baselineOffset(size, LINE_PITCH);
 
-  const items: LayoutItem[] = [];
+  const theme = layoutStationery(content.stationery ?? { theme: 'classic' }, BODY_TOP);
+  const items: LayoutItem[] = [...theme.items];
+  const bodyTop = BODY_TOP + theme.bodyOffset;
   // Each branch checks the layout, so a text-only letter never places an image.
   const { image } = content;
-  let textTop = BODY_TOP;
+  let textTop = bodyTop;
   let reserved = 0;
   if (image && content.layoutType === 'header_image') {
     const box = fitImage(image, HEADER_IMAGE_MAX_HEIGHT);
-    items.push({ kind: 'image', x: SIDE_MARGIN + (CONTENT_WIDTH - box.width) / 2, top: BODY_TOP, ...box, image });
-    textTop = BODY_TOP + box.height + IMAGE_GAP;
+    items.push({ kind: 'image', x: SIDE_MARGIN + (CONTENT_WIDTH - box.width) / 2, top: bodyTop, ...box, image });
+    textTop = bodyTop + box.height + IMAGE_GAP;
   }
   const inlineBox = image && content.layoutType === 'inline_image' ? fitImage(image, INLINE_IMAGE_MAX_HEIGHT) : undefined;
   if (inlineBox) reserved = IMAGE_GAP + inlineBox.height;

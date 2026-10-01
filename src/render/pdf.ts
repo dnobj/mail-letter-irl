@@ -61,6 +61,20 @@ export async function renderPdf(layout: Layout): Promise<Buffer> {
         doc.fill(item.fill).restore();
         continue;
       }
+      if (item.kind === 'path') {
+        // SVG's miter limit is 4 and the PDF's 10: set, so a sharp join ends
+        // where the preview's does.
+        doc.save().path(item.d);
+        if (item.stroke) {
+          doc.lineWidth(item.strokeWidth ?? 1).miterLimit(4);
+          if (item.fill === 'none') doc.stroke(item.stroke);
+          else doc.fillAndStroke(item.fill, item.stroke);
+        } else if (item.fill !== 'none') {
+          doc.fill(item.fill);
+        }
+        doc.restore();
+        continue;
+      }
       for (const glyph of placeGlyphs(item)) {
         doc.save().translate(glyph.x, glyph.y).path(glyph.outline).fill('black').restore();
       }

@@ -70,6 +70,11 @@ function renderPage(layout: Layout, page: LayoutPage, stamp?: Stamp): string {
       drawn.push(`<g fill="${item.fill}">${rects.join('')}</g>`);
       continue;
     }
+    if (item.kind === 'path') {
+      const stroke = item.stroke ? ` stroke="${item.stroke}" stroke-width="${round(item.strokeWidth ?? 1)}"` : '';
+      drawn.push(`<path d="${item.d}" fill="${item.fill}"${stroke}/>`);
+      continue;
+    }
     spoken.push(item.source);
     for (const glyph of placeGlyphs(item)) {
       outlines.set(glyph.key, glyph.outline);
