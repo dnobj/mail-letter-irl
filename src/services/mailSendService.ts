@@ -82,7 +82,9 @@ function buildPostcardContent(draft: MailDraftRow): Record<string, unknown> {
     sender: draft.sender,
     frontImageData: draft.front_image_data,
     frontImageUrl: draft.front_image_url,
-    postcardSize: draft.postcard_size || '6x9'
+    postcardSize: draft.postcard_size || '6x9',
+    // As for letters: absent for the legacy HTML path (#534).
+    ...(draft.renderer_version ? { rendererVersion: draft.renderer_version } : {})
   };
 }
 

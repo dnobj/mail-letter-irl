@@ -183,6 +183,15 @@ provider acceptance. The PostGrid request uses the Letter IRL `letter_id` as `Id
 
 A `pdf-1` gift send prints its card as the PDF's second page, drawn by the renderer with the code the send minted (`letters.content.giftCard`). When our renderer refuses a letter before any request, it is held like any other failure that is not an explicit rejection, with the class `render_refused`. That happens for a version this build cannot print, an unreadable image, a letter that no longer fits its page, or a gift card it cannot lay out. Every version the database admits must be in `PRINTABLE_RENDERER_VERSIONS`, which a test checks, so a new renderer never strands letters waiting under an older one. Resolving such a hold is in [deployment.md](deployment.md).
 
+**How a postcard goes to PostGrid (#534 Phase 4).** A postcard carries the same `rendererVersion` from its draft.
+- With `pdf-1`, it prints as our own two-page PDF, front then back, each 9.25 x 6.25 in with its bleed. It is uploaded to `/postcards` as a multipart form with a 30-second budget.
+  - The front image covers the whole page.
+  - The message fills the left half of the back, 16 lines of 14 pt Tinos.
+  - The right half stays empty for PostGrid's addresses and postage: content there cancels the postcard (probe P9, [postgrid-pdf-rendering.md](learnings/postgrid-pdf-rendering.md)).
+- A gift postcard still prints on the HTML until its strip moves onto the renderer.
+- Refusals hold the postcard as `render_refused`, as for letters: a version this build cannot print, an unreadable image, a message past its half of the back, or a size other than 6x9.
+- Postcard previews do not record a version yet, so every postcard still prints on the HTML.
+
 **How a preview is drawn (#534).** With `LETTER_IRL_PRINT_RENDERER=pdf`, the three letter previews are drawn by `src/render`, from the layout the PDF prints from:
 - the page is laid out with the image that prints, and a letter that runs past it is refused with the count: "Letter is 2 lines too long for one page: it takes 28 lines and the page holds 26." A page holds 26 lines of text only, 16 under a full 2-inch header image, and 13 above a full 3-inch enclosed image;
 - the legacy character and line estimates, calibrated for Open Sans, give way to a cap of 10,000 characters, which only bounds the work;

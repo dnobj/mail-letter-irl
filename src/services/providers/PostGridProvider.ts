@@ -35,11 +35,18 @@ import {
   type CardFragment
 } from '../giftCardRenderer.js';
 import { giftQrFormat } from '../../config/giftLetters.js';
-import { layoutGiftPage, layoutLetter, PRINTABLE_RENDERER_VERSIONS, readImageDataUri, renderPdf } from '../../render/index.js';
+import {
+  layoutGiftPage,
+  layoutLetter,
+  layoutPostcard,
+  PRINTABLE_RENDERER_VERSIONS,
+  readImageDataUri,
+  renderPdf
+} from '../../render/index.js';
 
 /**
- * Our own refusal to draw a letter, before anything is sent to PostGrid
- * (#534). It is held like every failure that is not an explicit provider
+ * Our own refusal to draw a letter or postcard, before anything is sent to
+ * PostGrid (#534). It is held like every failure that is not an explicit provider
  * rejection (a retry after an ambiguous first attempt must never refund mail
  * that may have printed), but it is logged with its reason and held with the
  * class `render_refused`, so an operator can see that no request left and
@@ -73,17 +80,42 @@ function letterForm(fields: {
   doubleSided: boolean;
   pdf: Buffer;
 }): FormData {
-  const form = new FormData();
-  for (const [prefix, contact] of [['to', fields.to], ['from', fields.from]] as const) {
-    for (const [key, value] of Object.entries(contact)) {
-      if (value !== undefined && value !== '') form.append(`${prefix}[${key}]`, String(value));
-    }
-  }
+  const form = contactForm(fields.to, fields.from);
   form.append('description', fields.description);
   form.append('color', String(fields.color));
   form.append('doubleSided', String(fields.doubleSided));
   form.append('addressPlacement', 'top_first_page');
   form.append('pdf', new Blob([new Uint8Array(fields.pdf)], { type: 'application/pdf' }), 'letter.pdf');
+  return form;
+}
+
+/**
+ * A postcard as PostGrid's multipart form: the contacts beside our two-page
+ * PDF, front then back with their bleed, which PostGrid prints with the
+ * addresses and postage stamped on the back (#534 Phase 4, probe P9).
+ */
+function postcardForm(fields: {
+  to: PostGridContact;
+  from: PostGridContact;
+  description: string;
+  size: PostGridPostcardRequest['size'];
+  pdf: Buffer;
+}): FormData {
+  const form = contactForm(fields.to, fields.from);
+  form.append('description', fields.description);
+  form.append('size', fields.size);
+  form.append('pdf', new Blob([new Uint8Array(fields.pdf)], { type: 'application/pdf' }), 'postcard.pdf');
+  return form;
+}
+
+/** The contacts as bracketed form fields, `to[firstName]` and so on, empty ones left out. */
+function contactForm(to: PostGridContact, from: PostGridContact): FormData {
+  const form = new FormData();
+  for (const [prefix, contact] of [['to', to], ['from', from]] as const) {
+    for (const [key, value] of Object.entries(contact)) {
+      if (value !== undefined && value !== '') form.append(`${prefix}[${key}]`, String(value));
+    }
+  }
   return form;
 }
 
@@ -1274,37 +1306,71 @@ export class PostGridProvider implements LetterFulfillmentProvider {
         '6x11': '11x6'  // 11" tall x 6" wide -> PostGrid wants 11x6
       };
       const postGridSize = postGridSizeMap[size];
-      const giftBlock = params.giftCard
-        ? await buildGiftPostcardBlock(params.giftCard, params.senderName || '', giftQrFormat())
-        : undefined;
 
-      // Build request payload
-      const request: PostGridPostcardRequest = {
-        to: this.buildContact(params.recipientName, params.recipientAddress),
-        from: this.buildContact(
-          params.senderName || 'Letter IRL',
-          params.senderAddress || this.getDefaultSenderAddress()
-        ),
-        frontHTML: this.generatePostcardFrontHTML(params.frontImageBase64, size),
-        backHTML: this.generatePostcardBackHTML(
-          params.backMessage,
-          params.senderName,
-          params.senderAddress,
-          giftBlock
-        ),
-        size: postGridSize,
-        description: `Postcard to ${params.recipientName}`
-      };
+      // As for letters (sendLetter), the renderer the postcard was previewed
+      // with decides how it prints (#534), and one this build cannot draw
+      // holds it for an operator.
+      const renderer = params.rendererVersion;
+      if (renderer != null && !PRINTABLE_RENDERER_VERSIONS.has(renderer)) {
+        throw new RenderRefusal('unknown_version', `This build cannot print renderer version "${renderer}".`);
+      }
+      // The gift strip moves onto the renderer in a later #534 PR. Until then
+      // a gift postcard prints on the legacy HTML, so its card is never dropped.
+      const usePdf = renderer != null && !params.giftCard;
+      if (renderer != null && params.giftCard) {
+        this.writeOperationDiagnostic('provider.postgrid.renderer_fallback', 'create_postcard', { reason: 'gift_card' }, 'warn');
+      }
 
-      // Make API request
-      const response = await this.apiRequest<PostGridPostcardResponse>(
-        'POST',
-        '/postcards',
-        'create_postcard',
-        request,
-        params.idempotencyKey,
-        isUsableSubmissionResponse
+      const to = this.buildContact(params.recipientName, params.recipientAddress);
+      const from = this.buildContact(
+        params.senderName || 'Letter IRL',
+        params.senderAddress || this.getDefaultSenderAddress()
       );
+      const description = `Postcard to ${params.recipientName}`;
+
+      let response: PostGridPostcardResponse;
+      if (usePdf) {
+        if (size !== '6x9') {
+          throw new RenderRefusal('render', `Our renderer draws 6x9 postcards, not ${size}.`);
+        }
+        const pdf = await this.renderPostcardForPrint(params);
+        response = await this.apiRequest<PostGridPostcardResponse>(
+          'POST',
+          '/postcards',
+          'create_postcard',
+          postcardForm({ to, from, description, size: postGridSize, pdf }),
+          params.idempotencyKey,
+          isUsableSubmissionResponse,
+          PDF_UPLOAD_TIMEOUT_MS
+        );
+      } else {
+        const giftBlock = params.giftCard
+          ? await buildGiftPostcardBlock(params.giftCard, params.senderName || '', giftQrFormat())
+          : undefined;
+
+        const request: PostGridPostcardRequest = {
+          to,
+          from,
+          frontHTML: this.generatePostcardFrontHTML(params.frontImageBase64, size),
+          backHTML: this.generatePostcardBackHTML(
+            params.backMessage,
+            params.senderName,
+            params.senderAddress,
+            giftBlock
+          ),
+          size: postGridSize,
+          description
+        };
+
+        response = await this.apiRequest<PostGridPostcardResponse>(
+          'POST',
+          '/postcards',
+          'create_postcard',
+          request,
+          params.idempotencyKey,
+          isUsableSubmissionResponse
+        );
+      }
 
       if (this.options.verbose) {
         this.writeOperationDiagnostic('provider.postgrid.operation_succeeded', 'create_postcard', {
@@ -1334,8 +1400,16 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       };
     } catch (error) {
       const errorMessage = this.extractErrorMessage(error);
+      const refused = error instanceof RenderRefusal;
 
-      if (this.options.verbose) {
+      if (refused) {
+        // Logged whatever the verbosity: the hold alone cannot say why.
+        const letterId = typeof params.metadata?.letterId === 'string' ? params.metadata.letterId : undefined;
+        this.writeOperationDiagnostic('provider.postgrid.render_refused', 'create_postcard', {
+          reason: error.reason,
+          ...(letterId ? { letterId } : {})
+        }, 'error');
+      } else if (this.options.verbose) {
         this.writeOperationDiagnostic('provider.postgrid.operation_failed', 'create_postcard', {
           errorClass: this.classifyRequestError(error)
         }, 'error');
@@ -1349,15 +1423,47 @@ export class PostGridProvider implements LetterFulfillmentProvider {
           statusCode: error instanceof PostGridRequestError ? error.statusCode : undefined,
           retryable: error instanceof PostGridRequestError
             ? error.retryable
-            : /timeout|timed out|network|fetch failed|econnreset|socket/i.test(errorMessage),
+            : !refused && /timeout|timed out|network|fetch failed|econnreset|socket/i.test(errorMessage),
           // Only an authoritative provider rejection may compensate a paid
           // send. Everything else is held for reconciliation so a physically
           // mailed piece is never refunded or silently re-dispatched.
           submissionOutcome: error instanceof PostGridRequestError
             ? error.submissionOutcome
             : 'ambiguous',
+          // The hold's class: nothing was sent, so resolve with a retry.
+          ...(refused ? { errorClass: 'render_refused' } : {})
         }
       };
+    }
+  }
+
+  /**
+   * The postcard drawn as it was previewed (src/render, #534 Phase 4): the
+   * front image and the back's message, never the addresses, which PostGrid
+   * stamps. Every failure here happens before any request, and is a
+   * RenderRefusal.
+   */
+  private async renderPostcardForPrint(params: PostcardParams): Promise<Buffer> {
+    const reason = (error: unknown) => (error instanceof Error ? error.message : String(error));
+    let image;
+    try {
+      image = readImageDataUri(params.frontImageBase64);
+    } catch (error) {
+      throw new RenderRefusal('image', `The postcard's image could not be read: ${reason(error)}`);
+    }
+    let layout;
+    try {
+      layout = layoutPostcard({ message: params.backMessage, image });
+    } catch (error) {
+      throw new RenderRefusal('render', `The postcard could not be laid out: ${reason(error)}`);
+    }
+    if (layout.overflowLines > 0) {
+      throw new RenderRefusal('overflow', `The postcard's message runs ${layout.overflowLines} line(s) past its half of the back.`);
+    }
+    try {
+      return await renderPdf(layout);
+    } catch (error) {
+      throw new RenderRefusal('render', `The postcard could not be drawn: ${reason(error)}`);
     }
   }
 

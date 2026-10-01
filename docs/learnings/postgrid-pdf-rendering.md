@@ -1,6 +1,6 @@
 # What PostGrid does with our own PDFs (issue #534)
 
-**Date:** September 30, 2026 · **Probes:** PostGrid test mode, with development's key. The scripts are outside the repo, in `C:\letter-irl-scripts\probe-534\`: `probe-534.mjs`, `decode-534.mjs` and `extract-raster.mjs`.
+**Date:** September 30, 2026; postcards October 1, 2026 · **Probes:** PostGrid test mode, with development's key. The scripts are outside the repo, in `C:\letter-irl-scripts\probe-534\`: `probe-534.mjs`, `decode-534.mjs` and `extract-raster.mjs`.
 
 ## Why we probed
 
@@ -48,6 +48,24 @@ A preview draws the addresses the same way (`ADDRESS_STAMP` in `geometry.ts`, `s
 - The addresses come from what we send, upper-cased by JavaScript's rules (ß becomes SS). Whether PostGrid standardises an address further before stamping it is not known.
 - P6 had a three-line return address and a four-line recipient. Whether PostGrid moves the first baseline for other line counts is not known.
 - The preview asks for Open Sans, which no card or confirm page loads, so viewers see a sans-serif fallback, slightly narrower than the print.
+
+## Postcards
+
+Probe P9 (October 1, 2026) sent PDF postcards at the only size the postcard tool offers, 6x9, which PostGrid calls `9x6`. They went to `/postcards` by multipart, with the contacts, `size` and `pdf` fields.
+
+| Probe | Sent | Came back |
+|-------|------|-----------|
+| P9a | Two pages at 9.25 x 6.25 in (a 0.125 in bleed), a grid and rulers across the whole back | Accepted, then **cancelled** about six seconds later: `invalid_content`, "Content found overlapping address region." |
+| P9b | The same at 9 x 6 in | Refused at once: `pdf_incorrect_size_error`, "File has incorrect page dimensions 9x6 when expecting 9.25x6.25." |
+| P9c | 9.25 x 6.25 in, the back drawn only in its left half, as the legacy back is | Accepted and stayed `ready`, `pageCount` 2 |
+| P10b | Our renderer's own postcard (`layoutPostcard`): a photo covering the front, 16 lines of the message in the back's left half | Accepted and stayed `ready`; the back flattened exactly as drawn |
+
+What they show:
+- A postcard PDF carries its bleed: 0.125 in on every side.
+- Both pages are flattened to 300 ppi images, the front in colour, and the front keeps its bleed.
+- On the back, PostGrid stamps Open Sans 9 pt in upper case from x 5.725 in, measured from the page's edge with the bleed. "RETURN TO:" and the return address start at baseline 0.958 in, the recipient at 4.937 in, each line 0.177 in below the last.
+- The test-mode render shows no postage and no barcode.
+- PostGrid checks the back for content in its address region, after it accepts the postcard, and cancels the postcard if there is any. `src/render/postcard.ts` draws nothing right of the back's left half (`POSTCARD_HALF` in `geometry.ts`).
 
 ## What it means
 

@@ -394,6 +394,7 @@ function postcardParams(letter: Letter, job: LetterJob): PostcardParams {
     backMessage: content.message,
     size: (content.postcardSize || '6x9') as PostcardSize,
     giftCard: content.giftCard,
+    rendererVersion: content.rendererVersion,
     metadata: {
       letterId: letter.letter_id,
       userId: letter.user_id,
