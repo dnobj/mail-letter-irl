@@ -429,9 +429,11 @@ describe('retention sweep guards (#153)', () => {
       await restoreQuarantinedContent('letter_drafts', 'draft-1');
 
       const sql = sqlFrom(mocks.query.mock.calls[1]);
-      for (const jsonColumn of ['sender', 'recipient', 'stationery']) {
+      for (const jsonColumn of ['sender', 'recipient']) {
         expect(sql).toContain(`${jsonColumn} = (SELECT content->'${jsonColumn}' FROM saved)`);
       }
+      // A Classic draft's stationery comes back as SQL NULL, not JSON null (#563).
+      expect(sql).toContain("stationery = NULLIF((SELECT content->'stationery' FROM saved), 'null'::jsonb)");
       for (const textColumn of ['body_text', 'header_image_data', 'inline_image_url']) {
         expect(sql).toContain(`${textColumn} = (SELECT content->>'${textColumn}' FROM saved)`);
       }

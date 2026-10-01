@@ -717,13 +717,17 @@ export async function restoreQuarantinedContentWithClient(
     restored = result.rowCount ?? 0;
   } else {
     const assignments = DRAFT_CONTENT_COLUMNS.map(column =>
-      column === 'sender' ||
-      column === 'recipient' ||
-      column === 'sender_validation' ||
-      column === 'recipient_validation' ||
+      // The copy holds a NULL column as JSON null, which is not SQL NULL:
+      // migration 044 holds stationery to renderer pdf-2 by IS NOT NULL, so a
+      // Classic draft's must come back as SQL NULL (#563).
       column === 'stationery'
-        ? `${column} = (SELECT content->'${column}' FROM saved)`
-        : `${column} = (SELECT content->>'${column}' FROM saved)`
+        ? `${column} = NULLIF((SELECT content->'${column}' FROM saved), 'null'::jsonb)`
+        : column === 'sender' ||
+            column === 'recipient' ||
+            column === 'sender_validation' ||
+            column === 'recipient_validation'
+          ? `${column} = (SELECT content->'${column}' FROM saved)`
+          : `${column} = (SELECT content->>'${column}' FROM saved)`
     ).join(',\n              ');
     const result = await client.query(
       `WITH saved AS (
