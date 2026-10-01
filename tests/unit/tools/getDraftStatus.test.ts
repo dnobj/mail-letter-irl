@@ -14,6 +14,7 @@ vi.mock("../../../src/services/draftService.js", () => ({
   getDraftState: vi.fn()
 }));
 
+import { DELIVERY_ESTIMATE } from "../../../src/content/delivery.js";
 import { getDraftState } from "../../../src/services/draftService.js";
 import { getDraftStatusTool } from "../../../src/tools/getDraftStatus.js";
 
@@ -36,9 +37,18 @@ function state(overrides: Record<string, unknown> = {}) {
     status: "pending",
     expires_at: new Date("2026-09-28T12:00:00Z"),
     consumed_letter_id: null,
+    arrive_by: null,
+    mail_on: null,
+    // The letter it became, as the query's LEFT JOIN reads it.
+    letter_status: null,
+    letter_funding_type: null,
+    letter_arrive_by: null,
+    letter_mail_on: null,
     ...overrides
   };
 }
+
+const READY = { draftId: DRAFT_ID, status: "ready", deliveryEstimate: DELIVERY_ESTIMATE };
 
 const ask = (input: Record<string, unknown>, ctx = context()) => getDraftStatusTool.handler(input as any, ctx);
 
@@ -47,13 +57,25 @@ describe("get_draft_status (#474)", () => {
 
   it("says a draft waiting to be sent is ready", async () => {
     vi.mocked(getDraftState).mockResolvedValue(state() as any);
-    await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual({ draftId: DRAFT_ID, status: "ready" });
+    await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual(READY);
     expect(getDraftState).toHaveBeenCalledWith(DRAFT_ID);
   });
 
   it("says a sent draft was sent, with the order it became", async () => {
     vi.mocked(getDraftState).mockResolvedValue(state({ status: "consumed", consumed_letter_id: ORDER_ID }) as any);
     await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual({ draftId: DRAFT_ID, status: "sent", orderId: ORDER_ID });
+
+    // Its letter read: sent, with nothing to cancel.
+    vi.mocked(getDraftState).mockResolvedValue(
+      state({ status: "consumed", consumed_letter_id: ORDER_ID, letter_status: "accepted", letter_funding_type: "prepaid_balance" }) as any
+    );
+    await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual({
+      draftId: DRAFT_ID,
+      status: "sent",
+      orderId: ORDER_ID,
+      orderStatus: "sent",
+      cancellable: false
+    });
   });
 
   it("says a sent draft was sent even without its order", async () => {
@@ -94,7 +116,124 @@ describe("get_draft_status (#474)", () => {
 
   it("trims the id it is given", async () => {
     vi.mocked(getDraftState).mockResolvedValue(state() as any);
-    await expect(ask({ draftId: ` ${DRAFT_ID} ` })).resolves.toEqual({ draftId: DRAFT_ID, status: "ready" });
+    await expect(ask({ draftId: ` ${DRAFT_ID} ` })).resolves.toEqual(READY);
+  });
+
+  it("says a ready draft's arrival dates, and what they mean for delivery, so the card draws the ones it has now (#535)", async () => {
+    vi.mocked(getDraftState).mockResolvedValue(state({ arrive_by: "2026-10-16", mail_on: "2026-10-06" }) as any);
+    await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual({
+      draftId: DRAFT_ID,
+      status: "ready",
+      schedule: { arriveBy: "2026-10-16", mailOn: "2026-10-06" },
+      deliveryEstimate: "Goes to the printer Tue, Oct 6, and aims to arrive by Fri, Oct 16."
+    });
+  });
+
+  describe("a sent draft's order, from its letter, never the draft's dates (#535)", () => {
+    // The draft's dates differ from the letter's, so an answer shows which it read.
+    const sent = (letter: Record<string, unknown>) =>
+      state({ status: "consumed", consumed_letter_id: ORDER_ID, arrive_by: "2026-10-30", mail_on: "2026-10-20", ...letter });
+    const LETTER_DATES = { letter_arrive_by: "2026-10-16", letter_mail_on: "2026-10-06" };
+    const SCHEDULE = { arriveBy: "2026-10-16", mailOn: "2026-10-06" };
+
+    it("is scheduled and cancellable while it waits for its mail date", async () => {
+      vi.mocked(getDraftState).mockResolvedValue(sent({ letter_status: "queued", letter_funding_type: "prepaid_balance", ...LETTER_DATES }) as any);
+      await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual({
+        draftId: DRAFT_ID,
+        status: "sent",
+        orderId: ORDER_ID,
+        schedule: SCHEDULE,
+        orderStatus: "scheduled",
+        cancellable: true
+      });
+      vi.mocked(getDraftState).mockResolvedValue(sent({ letter_status: "queued", letter_funding_type: "gift_letter", ...LETTER_DATES }) as any);
+      await expect(ask({ draftId: DRAFT_ID })).resolves.toMatchObject({ orderStatus: "scheduled", cancellable: true });
+    });
+
+    it("is scheduled but not cancellable when Pay & Send paid for it", async () => {
+      vi.mocked(getDraftState).mockResolvedValue(sent({ letter_status: "queued", letter_funding_type: "jit_order", ...LETTER_DATES }) as any);
+      await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual({
+        draftId: DRAFT_ID,
+        status: "sent",
+        orderId: ORDER_ID,
+        schedule: SCHEDULE,
+        orderStatus: "scheduled",
+        cancellable: false
+      });
+    });
+
+    it("is cancelled once cancelled, from here, the chat or the website", async () => {
+      vi.mocked(getDraftState).mockResolvedValue(sent({ letter_status: "cancelled", letter_funding_type: "prepaid_balance", ...LETTER_DATES }) as any);
+      await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual({
+        draftId: DRAFT_ID,
+        status: "sent",
+        orderId: ORDER_ID,
+        schedule: SCHEDULE,
+        orderStatus: "cancelled",
+        cancellable: false
+      });
+    });
+
+    it.each(["processing", "accepted", "in_transit", "delivered", "failed"])(
+      "is sent, with nothing to cancel, once the outbox has taken it (%s)",
+      async letterStatus => {
+        vi.mocked(getDraftState).mockResolvedValue(sent({ letter_status: letterStatus, letter_funding_type: "prepaid_balance", ...LETTER_DATES }) as any);
+        await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual({
+          draftId: DRAFT_ID,
+          status: "sent",
+          orderId: ORDER_ID,
+          schedule: SCHEDULE,
+          orderStatus: "sent",
+          cancellable: false
+        });
+      }
+    );
+
+    it("is sent, with no dates, when its letter has none, whatever the draft says", async () => {
+      vi.mocked(getDraftState).mockResolvedValue(sent({ letter_status: "queued", letter_funding_type: "prepaid_balance" }) as any);
+      await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual({
+        draftId: DRAFT_ID,
+        status: "sent",
+        orderId: ORDER_ID,
+        orderStatus: "sent",
+        cancellable: false
+      });
+    });
+
+    it("says only that it was sent when its letter cannot be read", async () => {
+      vi.mocked(getDraftState).mockResolvedValue(sent({}) as any);
+      await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual({ draftId: DRAFT_ID, status: "sent", orderId: ORDER_ID });
+      vi.mocked(getDraftState).mockResolvedValue(state({ status: "consumed", arrive_by: "2026-10-30", mail_on: "2026-10-20" }) as any);
+      await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual({ draftId: DRAFT_ID, status: "sent" });
+    });
+  });
+
+  it("answers without dates it cannot read, rather than refusing (#535)", async () => {
+    for (const dates of [
+      { arrive_by: "2026-10-16", mail_on: null },
+      { arrive_by: new Date("2026-10-16T00:00:00Z"), mail_on: "2026-10-06" },
+      { arrive_by: "16/10/2026", mail_on: "2026-10-06" }
+    ]) {
+      vi.mocked(getDraftState).mockResolvedValue(state(dates) as any);
+      await expect(ask({ draftId: DRAFT_ID }), JSON.stringify(dates)).resolves.toEqual(READY);
+      vi.mocked(getDraftState).mockResolvedValue(
+        state({
+          status: "consumed",
+          consumed_letter_id: ORDER_ID,
+          letter_status: "queued",
+          letter_funding_type: "prepaid_balance",
+          letter_arrive_by: dates.arrive_by,
+          letter_mail_on: dates.mail_on
+        }) as any
+      );
+      await expect(ask({ draftId: DRAFT_ID }), JSON.stringify(dates)).resolves.toEqual({
+        draftId: DRAFT_ID,
+        status: "sent",
+        orderId: ORDER_ID,
+        orderStatus: "sent",
+        cancellable: false
+      });
+    }
   });
 
   it("is read-only and says so", () => {

@@ -27,10 +27,10 @@ const arriveByZ = z.string().optional().describe(ARRIVE_BY_DESCRIPTION);
 
 /** The arrival dates on offer (#535), on every preview while the feature is on. */
 export const ARRIVAL_WINDOW_DESCRIPTION =
-  "The arrival dates that can be chosen now, while arrival dates are on (#535), for a card's date picker: what can be scheduled, not when this mail arrives";
+  "The arrival dates that can be chosen now: what can be scheduled, not when this mail arrives";
 const arrivalWindowZ = z.object({
-  earliestArrival: z.string(),
-  latestArrival: z.string()
+  earliestArrival: z.string().describe("The first arrival date on offer, YYYY-MM-DD"),
+  latestArrival: z.string().describe("The last arrival date on offer, YYYY-MM-DD")
 });
 
 /** A preview's arrival date (#535), when it was given one. */
@@ -639,7 +639,17 @@ export const uploadPhotoChunkOutputZ = z.object({
 export const getDraftStatusOutputZ = z.object({
   draftId: z.string(),
   status: z.enum(["ready", "sent", "expired", "not_found"]),
-  orderId: z.string().optional().describe("The order the draft became, once sent")
+  orderId: z.string().optional().describe("The order the draft became, once sent"),
+  schedule: z
+    .object({ arriveBy: z.string(), mailOn: z.string() })
+    .optional()
+    .describe("Arrival dates, YYYY-MM-DD: a ready draft's, or a sent order's"),
+  deliveryEstimate: z.string().optional().describe("A ready draft's delivery estimate, with its dates now"),
+  orderStatus: z
+    .enum(["scheduled", "cancelled", "sent"])
+    .optional()
+    .describe("Where a sent draft's order stands: scheduled while it waits for its mail date"),
+  cancellable: z.boolean().optional().describe("A sent draft's order: whether it can still be cancelled free")
 });
 
 export const requestSendOutputZ = z.object({
