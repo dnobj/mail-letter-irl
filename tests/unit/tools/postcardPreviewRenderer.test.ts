@@ -181,6 +181,23 @@ describe('a postcard preview drawn by our renderer', () => {
     expect(drafted().previewHtml!.match(/<svg [\s\S]*?<\/svg>/g)![0]).not.toContain('<text');
   });
 
+  it("stamps the addresses as they are sent, after the provider's correction", async () => {
+    vi.mocked(getLetterProvider).mockReturnValue({
+      validateAddress: vi.fn(async (input: { line1: string }) =>
+        input.line1 === '350 Fifth Ave'
+          ? { status: 'corrected', verifiedAddress: { line1: '350 5th Ave', city: 'New York', state: 'NY', postalCode: '10118-0110', country: 'US' } }
+          : { status: 'verified', verifiedAddress: input })
+    } as never);
+
+    await run();
+
+    const draft = drafted();
+    expect(draft.recipient).toMatchObject({ addressLine1: '350 5th Ave', postalCode: '10118-0110' });
+    const back = draft.previewHtml!.match(/<svg [\s\S]*?<\/svg>/g)![1];
+    const stamped = [...back.matchAll(/<text x="[\d.]+" y="[\d.]+">([^<]*)<\/text>/g)].map(match => match[1]);
+    expect(stamped.slice(-3)).toEqual(['SAM RIVERA', '350 5TH AVE', 'NEW YORK, NY 10118-0110']);
+  });
+
   it("leaves the card's own front and back as they were, the front now landscape", async () => {
     const output = await run();
     expect(output.previewFrontHtml).toContain('class="postcard-front"');

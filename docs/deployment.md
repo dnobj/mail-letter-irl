@@ -685,10 +685,12 @@ Probe P7 showed PostGrid replaying the first letter for a reused key whatever th
 seconds apart. How long PostGrid keeps a key is not documented (`docs/learnings/postgrid-pdf-rendering.md`).
 
 **Rolling back below migration 039.** Do not roll the API back to a build older than migration 039 while
-letters with `content.rendererVersion` are queued or held. An older build ignores the version and sends
-them as HTML, printed from a different layout than the person previewed.
+letters with `content.rendererVersion` are queued or held, or while drafts with `renderer_version` are
+unexpired (24 hours). An older build ignores the version and sends them as HTML, printed from a different
+layout than the person previewed.
 - Postcards set a later floor: the build that merged #545 is the first to print a postcard's version. Do
-  not roll back below it while postcards with `content.rendererVersion` are queued or held.
+  not roll back below it while postcards with `content.rendererVersion` are queued or held, or postcard
+  drafts with `renderer_version` are unexpired.
 
 `stripe_money_event_unmatched` covers two different situations, and they have
 different recovery paths.
