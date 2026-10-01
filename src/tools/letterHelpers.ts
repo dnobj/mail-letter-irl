@@ -30,6 +30,7 @@ import {
   layoutLetter,
   HEADLINE_LINES,
   readImageDataUri,
+  StationeryOverflow,
   renderPreviewSvg,
   rendererVersionFor,
   type Layout,
@@ -41,6 +42,8 @@ import { callingApp, type ClientProfile } from "../auth/clientProfiles.js";
 import { letterPacksPageUrl } from "../config/sendConfirmation.js";
 import { giftCardSummary, resolveGiftSendChoice, type GiftSendChoice } from "./giftSendChoice.js";
 import { giftLetterPageCopy } from "../services/giftCardRenderer.js";
+import type { PreviewStationery } from "./stationeryInput.js";
+import { rememberStationery } from "../services/stationeryDefaultService.js";
 import {
   previewArrivalWindow,
   scheduleSentence,
@@ -131,8 +134,8 @@ export interface LetterQuoteOutput {
   schedule?: PreviewScheduleOutput;
   /** The arrival dates on offer (#535), while the feature is on: a card's date picker. */
   arrivalWindow?: ArrivalWindow;
-  /** The stationery the page was drawn in (#563), while stationery is offered: Classic unless one was asked for. */
-  stationery?: Stationery;
+  /** The stationery the page was drawn in (#563), while stationery is offered, and why: asked for, remembered, or Classic by default. */
+  stationery?: PreviewStationery;
 }
 
 // ============================================================================
@@ -542,6 +545,13 @@ export function validateCharacterLimitForLayout(
   }
 }
 
+/** A stationery slot, in words. */
+const SLOT_WORDS: Record<StationeryOverflow["slot"], string> = {
+  dateLine: "date line",
+  monogram: "initials",
+  headline: "headline"
+};
+
 const LAYOUT_LABELS: Record<LetterLayoutType, string> = {
   text_only: "",
   header_image: " with a header image",
@@ -564,12 +574,25 @@ export function layoutLetterForPreview(
 ): Layout | undefined {
   if (renderer !== 'pdf') return undefined;
   const { bodyText, signOff, layoutType, imageData, stationery } = letter;
-  const layout = layoutLetter({
-    text: letterPrintText(bodyText, signOff),
-    layoutType,
-    image: layoutType !== "text_only" && imageData ? readImageDataUri(imageData) : undefined,
-    stationery
-  });
+  let layout: Layout;
+  try {
+    layout = layoutLetter({
+      text: letterPrintText(bodyText, signOff),
+      layoutType,
+      image: layoutType !== "text_only" && imageData ? readImageDataUri(imageData) : undefined,
+      stationery
+    });
+  } catch (error) {
+    // A slot that cannot print as its theme draws it. The checks before the
+    // layout refuse each in their own words (previewStationery, and the
+    // printable check for a headline the font cannot draw); this keeps a
+    // caller that skips one from failing unclassified (#570 review round 2).
+    if (!(error instanceof StationeryOverflow)) throw error;
+    throw Object.assign(
+      new Error(`The stationery's ${SLOT_WORDS[error.slot]} does not fit. Shorten it, or choose another stationery.`),
+      { diagnosticClass: "validation_error" }
+    );
+  }
   if (layout.overflowLines === 0) return layout;
 
   const { linesUsed, linesAvailable } = layout.pages[0];
@@ -756,8 +779,8 @@ export interface CreateLetterDraftParams {
   printLayout?: Layout;
   /** The arrival date asked for, checked (previewSchedule, #535). */
   schedule?: PreviewSchedule;
-  /** The stationery asked for, checked (previewStationery, #563); undefined while it is not offered. */
-  stationery?: Stationery;
+  /** The stationery asked for or remembered, checked (chooseStationery, #563); undefined while it is not offered. */
+  stationery?: PreviewStationery;
   context: ToolContext;
 }
 
@@ -942,6 +965,20 @@ export async function createLetterDraftAndBuildOutput(
     },
     "Draft created for idempotent send"
   );
+
+  // A theme the call asked for, Classic included, is the account's choice
+  // for its next preview (#563). Only once the draft exists: a refused
+  // preview chose nothing. Not remembering never fails the preview.
+  if (stationery?.source === "asked") {
+    try {
+      await rememberStationery(context.user.userId, stationery.theme);
+    } catch (error) {
+      context.logger.warn(
+        { correlationId: context.correlationId, event: "quote.stationery_not_remembered", error: (error as Error).message },
+        "The stationery chosen was not remembered"
+      );
+    }
+  }
 
   // Build output
   // Only pass small preview images for ChatGPT widget display (~3KB each)

@@ -43,6 +43,8 @@ import {
   cleanupOldDrafts,
   cancelDraft,
   setDraftSchedule,
+  setDraftStationery,
+  getDraftForStationery,
   LIVE_PAY_AND_SEND_STATUSES,
 } from '../../../src/services/draftService.js';
 
@@ -754,6 +756,103 @@ describe('draftService', () => {
       await expect(setDraftSchedule('draft-1', 'auth0|owner', DATES, new Date('2026-10-02T08:59:59Z'))).resolves.toBeNull();
       inTransaction({ rows: [pending] });
       await expect(setDraftSchedule('draft-1', 'auth0|owner', DATES, new Date('2026-10-02T09:00:00Z'))).resolves.toBe('expired');
+    });
+  });
+});
+
+describe('draftService stationery (#563)', () => {
+  const NOW = new Date('2026-10-01T14:00:00Z');
+  const pending = { status: 'pending', expires_at: new Date('2026-10-02T09:00:00Z') };
+  const BOTANICAL = { theme: 'botanical' as const, dateLine: 'October 1, 2026' };
+  const PAGE = '<!DOCTYPE html><html><body data-renderer="pdf-2"><svg></svg></body></html>';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  /** A transaction whose statements answer in turn; the client is returned to read its calls. */
+  function inTransaction(...answers: Array<{ rows: unknown[] }>) {
+    const client = { query: vi.fn() };
+    for (const answer of answers) client.query.mockResolvedValueOnce(answer);
+    client.query.mockResolvedValue({ rows: [], rowCount: 1 });
+    vi.mocked(db.transaction).mockImplementation(async callback => callback(client as any));
+    return client;
+  }
+
+  describe('getDraftForStationery', () => {
+    it("reads the caller's draft with what its page is drawn from", async () => {
+      vi.mocked(db.query).mockResolvedValueOnce({ rows: [{ mail_type: 'letter' }] } as any);
+      await expect(getDraftForStationery('draft-1', 'auth0|owner')).resolves.toEqual({ mail_type: 'letter' });
+      const [sql, params] = vi.mocked(db.query).mock.calls[0] as [string, unknown[]];
+      for (const column of ['mail_type', 'status', 'expires_at', 'renderer_version', 'body_text', 'sign_off', 'layout_type',
+        'header_image_data', 'inline_image_data', 'sender', 'recipient', 'preview_html']) {
+        expect(sql, column).toContain(column);
+      }
+      expect(sql).toMatch(/WHERE draft_id = \$1 AND user_id = \$2/);
+      expect(params).toEqual(['draft-1', 'auth0|owner']);
+    });
+
+    it("is null for a draft that is not the caller's, or not there", async () => {
+      vi.mocked(db.query).mockResolvedValueOnce({ rows: [] } as any);
+      await expect(getDraftForStationery('draft-1', 'auth0|owner')).resolves.toBeNull();
+    });
+  });
+
+  describe('setDraftStationery', () => {
+    it('locks the draft as setDraftSchedule does, restyles it, and remembers the theme, in one transaction', async () => {
+      const client = inTransaction({ rows: [pending] }, { rows: [] });
+
+      await expect(
+        setDraftStationery('draft-1', 'auth0|owner', { stationery: { ...BOTANICAL, source: 'asked' } as any, previewHtml: PAGE }, NOW)
+      ).resolves.toBeNull();
+
+      const [lock, live, update, remember] = client.query.mock.calls as Array<[string, unknown[]]>;
+      expect(lock[0]).toMatch(/FROM letter_drafts WHERE draft_id = \$1 AND user_id = \$2 FOR UPDATE/);
+      expect(live[0]).toMatch(/FROM orders/);
+      expect(live[1]).toEqual(['draft-1', [...LIVE_PAY_AND_SEND_STATUSES]]);
+      expect(update[0]).toMatch(
+        /UPDATE letter_drafts\s+SET stationery = \$2::jsonb, renderer_version = \$3, preview_html = \$4, updated_at = NOW\(\)\s+WHERE draft_id = \$1/
+      );
+      // Stored as the print reads it back: the theme and its slots, not why it was chosen.
+      expect(update[1]).toEqual(['draft-1', JSON.stringify(BOTANICAL), 'pdf-2', PAGE]);
+      expect(remember[0]).toBe('UPDATE users SET stationery_theme = $2 WHERE user_id = $1');
+      expect(remember[1]).toEqual(['auth0|owner', 'botanical']);
+      expect(client.query).toHaveBeenCalledTimes(4);
+    });
+
+    it('stores Classic as none, with pdf-1, and remembers Classic like any theme', async () => {
+      const client = inTransaction({ rows: [pending] }, { rows: [] });
+
+      await expect(
+        setDraftStationery('draft-1', 'auth0|owner', { stationery: { theme: 'classic' }, previewHtml: PAGE }, NOW)
+      ).resolves.toBeNull();
+
+      expect(client.query.mock.calls[2][1]).toEqual(['draft-1', null, 'pdf-1', PAGE]);
+      expect(client.query.mock.calls[3][1]).toEqual(['auth0|owner', 'classic']);
+    });
+
+    it.each([
+      ['a missing draft, or one that is not the caller\'s', [{ rows: [] }], 'not_found', 1],
+      ['a sent draft', [{ rows: [{ ...pending, status: 'consumed' }] }], 'sent', 1],
+      ['a pending draft past its expiry', [{ rows: [{ ...pending, expires_at: NOW }] }], 'expired', 1],
+      ['a draft with a live Pay & Send order', [{ rows: [pending] }, { rows: [{ '?column?': 1 }] }], 'checkout_pending', 2]
+    ])('leaves %s alone, remembering nothing', async (_label, answers, refusal, statements) => {
+      const client = inTransaction(...(answers as Array<{ rows: unknown[] }>));
+
+      await expect(
+        setDraftStationery('draft-1', 'auth0|owner', { stationery: BOTANICAL, previewHtml: PAGE }, NOW)
+      ).resolves.toBe(refusal);
+
+      expect(client.query).toHaveBeenCalledTimes(statements);
+    });
+
+    it('refuses a theme the print would not read back before any statement', async () => {
+      const client = inTransaction();
+      await expect(
+        setDraftStationery('draft-1', 'auth0|owner', { stationery: { theme: 'floral' } as any, previewHtml: PAGE }, NOW)
+      ).rejects.toMatchObject({ code: 'STATIONERY_UNREADABLE', diagnosticClass: 'validation_error' });
+      expect(db.transaction).not.toHaveBeenCalled();
+      expect(client.query).not.toHaveBeenCalled();
     });
   });
 });

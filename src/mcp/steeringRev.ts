@@ -114,5 +114,9 @@
  *     renderer draws the previews, the three letter previews take
  *     stationery, monogram and headline, and their output says which
  *     stationery the page was drawn in.
+ * r30: set_stationery (#563), listed while stationery is offered, changes a
+ *     letter preview's stationery without previewing again; a preview that
+ *     asks for no theme is drawn in the account's remembered one, and its
+ *     output and narration say why (source).
  */
-export const STEERING_COPY_REV = 29;
+export const STEERING_COPY_REV = 30;

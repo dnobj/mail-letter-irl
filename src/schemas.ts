@@ -5,7 +5,10 @@ import {
   HEADLINE_DESCRIPTION,
   MONOGRAM_DESCRIPTION,
   PREVIEW_STATIONERY_DESCRIPTION,
+  STATIONERY_SOURCE_DESCRIPTION,
   SET_ARRIVE_BY_DESCRIPTION,
+  SET_STATIONERY_DESCRIPTION,
+  SET_STATIONERY_OUTPUT_DESCRIPTION,
   STATIONERY_DESCRIPTION
 } from "./zodSchemas.js";
 import { STATIONERY_THEMES } from "./render/stationery.js";
@@ -38,9 +41,10 @@ const previewStationerySchema = {
     theme: { type: "string", enum: [...STATIONERY_THEMES] },
     dateLine: { type: "string", description: "The date it prints at the top right, as written" },
     monogram: { type: "string", description: "The initials it prints" },
-    headline: { type: "string", description: "The headline it prints above the letter" }
+    headline: { type: "string", description: "The headline it prints above the letter" },
+    source: { type: "string", enum: ["asked", "remembered", "default"], description: STATIONERY_SOURCE_DESCRIPTION }
   },
-  required: ["theme"]
+  required: ["theme", "source"]
 } as const;
 
 const arrivalWindowSchema = {
@@ -946,6 +950,27 @@ export const setArrivalDateOutputSchema: JsonSchema = {
       description: "The draft's dates now; absent when it mails as soon as it is sent"
     },
     deliveryEstimate: { type: "string" },
+    message: { type: "string" }
+  }
+};
+
+export const setStationeryInputSchema: JsonSchema = {
+  type: "object",
+  required: ["draftId", "stationery"],
+  properties: {
+    draftId: { type: "string", description: "The draftId from a letter preview" },
+    stationery: { type: "string", enum: [...STATIONERY_THEMES], description: SET_STATIONERY_DESCRIPTION },
+    monogram: stationeryInputSchemas.monogram,
+    headline: stationeryInputSchemas.headline
+  }
+};
+
+export const setStationeryOutputSchema: JsonSchema = {
+  type: "object",
+  required: ["draftId", "stationery", "message"],
+  properties: {
+    draftId: { type: "string" },
+    stationery: { ...previewStationerySchema, description: SET_STATIONERY_OUTPUT_DESCRIPTION },
     message: { type: "string" }
   }
 };

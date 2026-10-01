@@ -80,9 +80,9 @@ describe('stationery in tools/list', () => {
       const { properties, required } = tools.get(name)!;
       expect(properties.stationery.type, name).toBe('string');
       expect(properties.stationery.enum).toEqual([...STATIONERY_THEMES]);
-      expect(properties.stationery.description).toContain('classic, a plain page (the default)');
-      expect(properties.monogram.description).toContain('with stationery monogram only');
-      expect(properties.headline.description).toContain('with stationery celebration only');
+      expect(properties.stationery.description).toContain("Left out, the letter is in the account's last choice, or classic if it has none");
+      expect(properties.monogram.description).toContain('for the monogram stationery only');
+      expect(properties.headline.description).toContain('for the celebration stationery only');
       for (const key of KEYS) expect(required ?? [], `${name} ${key}`).not.toContain(key);
     }
     for (const key of KEYS) expect(tools.get('quote_and_preview_postcard')!.properties).not.toHaveProperty(key);
@@ -99,11 +99,13 @@ describe('stationery in tools/list', () => {
         for (const key of KEYS) expect(offKeys, `${enabled} ${renderer} ${name}`).not.toContain(key);
         expect(offKeys).toEqual(Object.keys(on.get(name)!.properties).filter(key => !KEYS.includes(key)));
       }
-      for (const [name, schema] of on) {
+      for (const [name, schema] of off) {
         if (LETTERS.includes(name)) continue;
-        expect(off.get(name), name).toEqual(schema);
+        expect(on.get(name), name).toEqual(schema);
       }
-      expect([...off.keys()].sort()).toEqual([...on.keys()].sort());
+      // set_stationery is listed only while offered (PR 5).
+      expect([...on.keys()].filter(name => !off.has(name))).toEqual(['set_stationery']);
+      expect([...off.keys()].filter(name => !on.has(name))).toEqual([]);
     }
   });
 
@@ -146,6 +148,12 @@ describe('stationery in tools/list', () => {
     await client.callTool({ name: 'quote_and_preview_letter', arguments: { ...LETTER, stationery: null } });
     expect(received).toHaveLength(1);
     expect(received[0].stationery).toBeUndefined();
+    // And null initials or headline (#570 review round 2).
+    await client.callTool({ name: 'quote_and_preview_letter', arguments: { ...LETTER, stationery: 'celebration', monogram: null, headline: null } });
+    expect(received).toHaveLength(2);
+    expect(received[1]).toMatchObject({ stationery: 'celebration' });
+    expect(received[1].monogram).toBeUndefined();
+    expect(received[1].headline).toBeUndefined();
   });
 
   it("leaves the postcard's schema as it was, closed while arrival dates are on, stationery offered or not", async () => {
@@ -155,5 +163,38 @@ describe('stationery in tools/list', () => {
       const tools = await listedTools();
       expect(tools.get('quote_and_preview_postcard')!.additionalProperties, `${enabled} ${renderer}`).toBe(false);
     }
+  });
+});
+
+describe('set_stationery in tools/list (#563 PR 5)', () => {
+  const DRAFT_ID = '0f1e2d3c-4b5a-4978-8796-a5b4c3d2e1f0';
+
+  it('is listed while offered: a draftId and a theme required, initials and a headline as the previews take them', async () => {
+    offer('true', 'pdf');
+    const tools = await listedTools();
+    const schema = tools.get('set_stationery')!;
+    expect(Object.keys(schema.properties)).toEqual(['draftId', 'stationery', 'monogram', 'headline']);
+    expect(schema.required).toEqual(['draftId', 'stationery']);
+    expect(schema.properties.stationery.enum).toEqual([...STATIONERY_THEMES]);
+    expect(schema.properties.monogram.description).toBe(tools.get('quote_and_preview_letter')!.properties.monogram.description);
+    expect(schema.properties.headline.description).toBe(tools.get('quote_and_preview_letter')!.properties.headline.description);
+  });
+
+  it('is not listed while not offered', async () => {
+    for (const [enabled, renderer] of [['', 'pdf'], ['true', 'html']]) {
+      offer(enabled, renderer);
+      expect((await listedTools()).has('set_stationery'), `${enabled} ${renderer}`).toBe(false);
+    }
+  });
+
+  it('hands the tool its input as declared, and refuses a missing theme before it', async () => {
+    offer('true', 'pdf');
+    const client = await connected();
+    await client.callTool({ name: 'set_stationery', arguments: { draftId: DRAFT_ID, stationery: 'Monogram', monogram: 'JMS' } });
+    expect(received).toEqual([{ draftId: DRAFT_ID, stationery: 'monogram', monogram: 'JMS' }]);
+
+    const result = await client.callTool({ name: 'set_stationery', arguments: { draftId: DRAFT_ID } }).catch(error => error);
+    expect(received).toHaveLength(1);
+    expect(JSON.stringify(result)).toContain('stationery');
   });
 });

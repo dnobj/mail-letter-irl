@@ -48,15 +48,16 @@ const previewScheduleZ = z.object({
 // registerTools strips these from their shapes otherwise. Functional wording
 // only, as for gift letters.
 export const STATIONERY_DESCRIPTION =
-  "Optional. The letter's stationery: classic, a plain page (the default); monogram, initials in a ring; " +
+  "Optional. The letter's stationery: classic, a plain page; monogram, initials in a ring; " +
   "botanical, a line-drawn sprig; or celebration, confetti with an optional headline. " +
   "Each but classic prints the date at the top right. " +
-  "Use it when the user asks for a style, or names an occasion one suits; leave it out for a plain page.";
+  "Left out, the letter is in the account's last choice, or classic if it has none. " +
+  "Leave it out unless the user asks for a style or for a plain page (classic), or names an occasion a style suits.";
 export const MONOGRAM_DESCRIPTION =
-  "Optional, with stationery monogram only: the initials to print, one to three letters, such as \"JMS\". " +
+  "Optional, for the monogram stationery only: the initials to print, one to three letters, such as \"JMS\". " +
   "Leave it out to use the initials of the return address's name.";
 export const HEADLINE_DESCRIPTION =
-  "Optional, with stationery celebration only: a short line printed large above the letter, " +
+  "Optional, for the celebration stationery only: a short line printed large above the letter, " +
   "such as \"Happy Birthday, Sam!\". It must fit on one line, and takes three of the page's lines; " +
   "leave it out for confetti alone.";
 
@@ -72,18 +73,23 @@ function themeName(value: unknown): unknown {
   return name === "" ? undefined : name;
 }
 const stationeryZ = z.preprocess(themeName, z.enum(STATIONERY_THEMES).optional()).describe(STATIONERY_DESCRIPTION);
-const monogramZ = z.string().optional().describe(MONOGRAM_DESCRIPTION);
-const headlineZ = z.string().optional().describe(HEADLINE_DESCRIPTION);
+/** None for null, which models send for an optional field they leave unset (#570 review round 2). */
+const noneForNull = (value: unknown): unknown => (value === null ? undefined : value);
+const monogramZ = z.preprocess(noneForNull, z.string().optional()).describe(MONOGRAM_DESCRIPTION);
+const headlineZ = z.preprocess(noneForNull, z.string().optional()).describe(HEADLINE_DESCRIPTION);
 
 /** What a letter preview's output says of its stationery (#563). */
 export const PREVIEW_STATIONERY_DESCRIPTION =
-  "While stationery is offered: the stationery the page was drawn in, classic unless one was asked for, " +
-  "with the date line, initials and headline it prints";
+  "While stationery is offered: the stationery the page was drawn in, with the date line, initials and headline " +
+  "it prints, and why: asked for, the account's last choice, or classic by default";
+export const STATIONERY_SOURCE_DESCRIPTION =
+  "Why this stationery: asked for in the call, the account's remembered choice, or classic by default";
 const previewStationeryZ = z.object({
   theme: z.enum(STATIONERY_THEMES),
   dateLine: z.string().optional(),
   monogram: z.string().optional(),
-  headline: z.string().optional()
+  headline: z.string().optional(),
+  source: z.enum(["asked", "remembered", "default"]).describe(STATIONERY_SOURCE_DESCRIPTION)
 });
 
 // Text-only letter schema
@@ -299,6 +305,19 @@ export const SET_ARRIVE_BY_DESCRIPTION =
 export const setArrivalDateInputZ = z.object({
   draftId: z.string().describe("The draftId from a letter or postcard preview"),
   arriveBy: z.string().optional().describe(SET_ARRIVE_BY_DESCRIPTION)
+});
+
+// A letter preview's stationery, changed without previewing again (#563).
+// Listed only while stationery is offered (src/server.ts).
+export const SET_STATIONERY_DESCRIPTION =
+  "The stationery to draw the letter in: classic, a plain page; monogram, initials in a ring; " +
+  "botanical, a line-drawn sprig; or celebration, confetti with an optional headline. " +
+  "Each but classic prints the date at the top right.";
+export const setStationeryInputZ = z.object({
+  draftId: z.string().describe("The draftId from a letter preview"),
+  stationery: z.preprocess(themeName, z.enum(STATIONERY_THEMES)).describe(SET_STATIONERY_DESCRIPTION),
+  monogram: monogramZ,
+  headline: headlineZ
 });
 
 // Held mail cancelled before it goes to the printer (#535). Listed only while
@@ -742,6 +761,14 @@ export const setArrivalDateOutputZ = z.object({
   draftId: z.string(),
   schedule: previewScheduleZ.optional().describe("The draft's dates now; absent when it mails as soon as it is sent"),
   deliveryEstimate: z.string(),
+  message: z.string()
+});
+
+/** set_stationery's answer (#563); the page drawn again goes to the card in _meta. */
+export const SET_STATIONERY_OUTPUT_DESCRIPTION = "The stationery the letter is now drawn in, with the date line, initials and headline it prints";
+export const setStationeryOutputZ = z.object({
+  draftId: z.string(),
+  stationery: previewStationeryZ.describe(SET_STATIONERY_OUTPUT_DESCRIPTION),
   message: z.string()
 });
 

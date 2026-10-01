@@ -505,6 +505,22 @@ export function renderPostcardPreviewDocument(pages: string[]): string {
   return rendererDocument(pages, RENDERER_VERSION, '');
 }
 
+/**
+ * The pages of a document our renderer's pages are shown in, each `<svg>` as
+ * written; none for any other document, the legacy HTML included.
+ * set_stationery (#563) draws a letter's page again and keeps the pages after
+ * it, a gift letter's card, as they were drawn.
+ */
+export function rendererDocumentPages(html: string | null | undefined): string[] {
+  if (!html || !html.includes('<body data-renderer="')) return [];
+  return html.match(/<svg [\s\S]*?<\/svg>/g) ?? [];
+}
+
+/** The picture a rendered page shows, as its data URI: the preview's small copy of the image. */
+export function renderedPageImage(page: string): string | undefined {
+  return /<image href="(data:image\/(?:jpeg|png);base64,[A-Za-z0-9+/=]+)"/.exec(page)?.[1];
+}
+
 /** The minimal document our renderer's pages are shown in, drawn as `version`, `after` closing the body. */
 function rendererDocument(pages: string[], version: string, after: string): string {
   return `<!DOCTYPE html>

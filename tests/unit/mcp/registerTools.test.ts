@@ -766,3 +766,32 @@ describe('arrive-by in the served schemas (#535)', () => {
     }
   });
 });
+
+describe("a letter preview's narration names its stationery (#563)", () => {
+  const PREVIEW = { lettersRequired: 1, layoutType: 'text_only' };
+
+  it('names a theme asked for, and a remembered one as the account\'s last choice', () => {
+    expect(summarizeToolResult('quote_and_preview_letter', { ...PREVIEW, stationery: { theme: 'botanical', source: 'asked' } })).toMatch(
+      / Stationery: botanical\.$/
+    );
+    expect(summarizeToolResult('quote_and_preview_letter', { ...PREVIEW, stationery: { theme: 'monogram', source: 'remembered' } })).toMatch(
+      / Stationery: monogram, the account's last choice; stationery in the call or set_stationery changes it\.$/
+    );
+    // Classic asked for is named too.
+    expect(summarizeToolResult('quote_and_preview_letter', { ...PREVIEW, stationery: { theme: 'classic', source: 'asked' } })).toMatch(
+      / Stationery: classic\.$/
+    );
+  });
+
+  it('says nothing of Classic by default, or while stationery is not offered', () => {
+    const plain = summarizeToolResult('quote_and_preview_letter', PREVIEW);
+    expect(summarizeToolResult('quote_and_preview_letter', { ...PREVIEW, stationery: { theme: 'classic', source: 'default' } })).toBe(plain);
+    expect(plain).not.toContain('Stationery');
+  });
+
+  it("answers set_stationery with the tool's own sentence", () => {
+    expect(summarizeToolResult('set_stationery', { message: 'The letter is now on the botanical stationery.' })).toBe(
+      'The letter is now on the botanical stationery.'
+    );
+  });
+});

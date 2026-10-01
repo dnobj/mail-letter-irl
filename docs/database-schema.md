@@ -50,6 +50,7 @@ User accounts with credit balances and tier information.
 | created_at | TIMESTAMPTZ | NO | NOW() | Account creation |
 | updated_at | TIMESTAMPTZ | NO | NOW() | Last update (auto-trigger) |
 | erased_at | TIMESTAMPTZ | YES | NULL | Set by the account erasure (#289); sign-in refuses an erased account |
+| stationery_theme | TEXT | YES | NULL | The theme the account last chose (#563, migration 045): `classic`, `monogram`, `botanical` or `celebration`. A letter preview that asks for none is drawn in it. Erasure clears it |
 
 **Erased accounts (migration 035).** An erasure keeps the row as a tombstone, because orders, ledger
 lots, disputes and refunds keep foreign keys to it ([account-erasure.md](account-erasure.md)). The
@@ -769,6 +770,7 @@ Production provisioning and the first production connection remain separate owne
 | 42 | 042_mail_job_release_audit.sql | The operator audit operation `mail_job_release` (#535), written when the admin panel sends held mail early (`job.dispatch_now`). Restated inside the `to_regclass` guard as 029 does. No provisioning re-run: the operator role inserts into the table whole, and the release updates only `letter_jobs` columns already granted |
 | 43 | 043_provider_cancelled_alert.sql | The `provider_cancelled_mail` alert type (#566), restated inside the `to_regclass` guard as 041 does, and a partial unique index on its letter (`idx_commerce_alerts_provider_cancelled_letter`) so it is raised once per letter. No provisioning re-run: the roles read the alerts table whole |
 | 44 | 044_stationery.sql | `letter_drafts.stationery` (#563): the theme a preview was drawn in and its slot text, NULL for Classic. `renderer_version` admits `pdf-2`, set exactly when a draft has stationery. No provisioning re-run, as for 039 |
+| 45 | 045_stationery_default.sql | `users.stationery_theme` (#563): the account's remembered theme, with a CHECK on the four themes. No provisioning re-run: the reader's column list leaves it out and the operator writes only its listed columns |
 
 ---
 
