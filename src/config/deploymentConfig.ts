@@ -526,6 +526,21 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     secret: false,
     services: ['api']
   },
+  /**
+   * Letter previews drawn by our own renderer (#534, src/config/printRenderer.ts):
+   * `pdf`, or the legacy HTML when absent. Off unless set, so absence is the
+   * intended production state until the owner switches it on; listed so the
+   * preflight shows which environments have it. API only: it is read when a
+   * letter is previewed, and the version a draft records, not this flag,
+   * decides how the maintenance run prints a letter.
+   */
+  {
+    name: 'LETTER_IRL_PRINT_RENDERER',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
   {
     name: 'LETTER_IRL_GIFT_DAILY_SEND_CAP',
     requiredIn: 'production',

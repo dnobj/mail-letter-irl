@@ -21,6 +21,7 @@ import {
   validateCharacterLimitForLayout,
   validatePrintableLetter,
   layoutLetterForPreview,
+  letterGiftChoice,
   createLetterDraftAndBuildOutput,
   type LetterQuoteOutput
 } from "./letterHelpers.js";
@@ -54,8 +55,6 @@ async function handler(
   context: ToolContext
 ): Promise<LetterQuoteOutput> {
   const layoutType = 'text_only';
-  // Read once, so every check below agrees on how the letter prints (#534).
-  const renderer = printRenderer();
 
   context.logger.info(
     {
@@ -70,6 +69,11 @@ async function handler(
 
   // Validate addresses
   validateAddresses(sender, input.recipient, context);
+
+  // A gift send prints on the legacy HTML (#534): decided first, so every
+  // check below is the one its print needs, read once so they all agree.
+  const gift = await letterGiftChoice(input, context);
+  const renderer = gift.isGift ? 'html' : printRenderer();
 
   // Validate character limit
   validateCharacterLimitForLayout(input.bodyText, input.signOff, layoutType, context, renderer);
@@ -107,7 +111,7 @@ async function handler(
     senderValidation,
     recipientValidation,
     addressWarnings,
-    sendAsGift: input.sendAsGift,
+    gift,
     printLayout,
     context
   });

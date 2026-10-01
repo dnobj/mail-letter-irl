@@ -47,7 +47,7 @@ export const quoteAndPreviewLetterWithHeaderImageInputSchema: JsonSchema = {
       description: "Return address (optional - will use saved return address if not provided)"
     },
     recipient: addressSchema,
-    bodyText: { type: "string", description: "Letter body. Must not exceed 1100 characters OR 17 lines. Write as continuous paragraphs - do NOT put blank lines between sentences." },
+    bodyText: { type: "string", description: "Letter body. Must not exceed 1100 characters OR 15 lines. Write as continuous paragraphs - do NOT put blank lines between sentences." },
     signOff: { type: "string", description: "Closing/signature (e.g., 'Sincerely, Name')" },
     // Image from file attachment - OpenAI Apps SDK requires explicit schema definition
     // Schema tells OpenAI how to transform file attachments into the expected format

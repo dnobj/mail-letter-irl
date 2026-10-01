@@ -190,7 +190,7 @@ A `pdf-1` gift send still prints on the HTML, until its gift page moves onto the
 - `preview_html` holds the page as SVG in a minimal HTML document, which the website's confirm page shows; the letter card still draws its own mockup from the text hidden in it;
 - the draft records `renderer_version = 'pdf-1'`, so the letter prints as it was previewed.
 
-A gift send is previewed on the legacy HTML, held to the legacy limits and Open Sans, and records no version, until its gift page moves onto the renderer. Without the flag, previews are the legacy HTML. The flag is read only when a letter is previewed, so changing it never changes a letter already previewed or queued.
+Whether a preview is a gift send is decided before anything is checked. A gift send is previewed on the legacy HTML, meets only the legacy limits and Open Sans, and records no version, until its gift page moves onto the renderer. Without the flag, previews are the legacy HTML. The flag is read only when a letter is previewed, so changing it never changes a letter already previewed or queued.
 
 A claimed job is submitted to the provider exactly once. A successful response records the provider order ID and marks the job completed. Any outcome that does not prove what happened — `5xx`, timeout, transport loss, an unreadable body — may mean the piece was accepted and physically mailed, so it is never resubmitted: the job is held with `provider_outcome = 'ambiguous'` for operator reconciliation. Only an explicit provider rejection, which proves no mail exists, is terminal.
 

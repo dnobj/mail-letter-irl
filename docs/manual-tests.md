@@ -1634,6 +1634,8 @@ Leave the rule on in development afterwards. (It is on.)
         font's glyph list: the other superscript and subscript digits, Cyrillic to U+0513, and ⅞. By
         the decomposition rule it also admits any character whose canonical parts are admitted.
         Its tests pin both lists.
+      - **The widening (#533) passed on development on 2026-09-30 (50cfdb5).** A preview with ǐ, ǎ, ₪,
+        ⅞ and Ṛ made a draft. One with a non-breaking hyphen (U+2011) was refused, as intended.
 - [ ] Invalid address → suggestions returned
 - [x] Multi-tenant address with a suite/apartment (e.g. 350 5th Ave, Suite 8701, New York, NY 10118) → draft IS created; response carries a one-sentence note that USPS couldn't confirm the unit and mail goes out as entered (issue #200) (2026-09-28 in ChatGPT, with Suite 3300: the draft was made, and the reply said USPS confirmed the building but not the suite, and that the letter goes out as entered)
 - [x] Same building with no unit given → draft IS created with an "add the unit if you have it" note
@@ -1646,9 +1648,17 @@ Leave the rule on in development afterwards. (It is on.)
 
 On development, with `LETTER_IRL_PRINT_RENDERER=pdf`, in PostGrid test mode. Decode each printed PDF
 with `C:\letter-irl-scripts\probe-534\decode-534.mjs`, and crop its page with `extract-raster.mjs`.
-- [ ] A text-only preview's draft records `renderer_version = 'pdf-1'`, and the log's
+
+**Previews: passed on 2026-10-01 on development (6dc1061, flag on since 00:27 UTC), as testlirl02,
+through the development MCP server.** The sends wait for letters on that account (a test-mode pack
+or an admin grant: the owner's step).
+- [x] A text-only preview's draft records `renderer_version = 'pdf-1'`, and the log's
       `draft.created` line carries `"renderer":"pdf-1"`. The website's confirm page shows the page in
-      Tinos, with the line breaks it prints with.
+      Tinos, with the line breaks it prints with. (The confirm page drew the SVG page: the address zone
+      blank, no sender block, Tinos. `api-log.mjs` withholds the renderer's value, so the page is the
+      evidence.)
+- [ ] A Pay & Send letter, which the hourly maintenance run dispatches, prints from our PDF too: the
+      maintenance service builds the whole repository, `assets/fonts` included.
 - [ ] A full 26-line letter's card draws in ChatGPT. Its preview is about 95 KB of SVG in
       `_meta.previewHtml`, 15 to 20 times the legacy HTML's size.
 - [ ] Each layout sends: text only, a header image, and an enclosed image. PostGrid accepts the
@@ -1656,11 +1666,15 @@ with `C:\letter-irl-scripts\probe-534\decode-534.mjs`, and crop its page with `e
       PostGrid's Open Sans addresses in their boxes.
 - [ ] At the limit: 26 lines of text only, 16 under a full 2-inch header image and 13 above a full
       3-inch enclosed image make drafts and print on one page. One line more is refused with "Letter
-      is 1 line too long for one page".
+      is 1 line too long for one page". (Text only, previews: 25 lines and a sign-off made a draft;
+      27 and a sign-off were refused: "Letter is 2 lines too long for one page: it takes 28 lines and
+      the page holds 26.")
 - [ ] A body with a non-breaking hyphen and a line of Hebrew previews and prints. The same hyphen in
       the recipient's name is refused ("in the recipient's address"). A body with a line separator
       (U+2028, as Apple Notes stores a soft line break) is refused, naming "a line separator (U+2028)".
+      (Previews: all three behaved so; the prints wait for the sends.)
 - [ ] A gift send previews and prints on the legacy HTML, with its card, and records no version.
+      (Preview: its confirm page showed the legacy HTML with the sender block and the card page.)
 - [ ] A letter previewed before the flag was on prints on the legacy HTML after it.
 - [ ] The letter card still draws its mockup, from the text hidden in the new preview. The card
       shows the page itself in #534 Phase 3.

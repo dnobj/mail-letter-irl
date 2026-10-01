@@ -361,7 +361,7 @@
           },
           "bodyText": {
             "type": "string",
-            "description": "Letter body. Must not exceed 1100 characters OR 17 lines. Write as continuous paragraphs - do NOT put blank lines between sentences."
+            "description": "Letter body. Must not exceed 1100 characters OR 15 lines. Write as continuous paragraphs - do NOT put blank lines between sentences."
           },
           "signOff": {
             "type": "string",

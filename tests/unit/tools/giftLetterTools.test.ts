@@ -31,7 +31,7 @@ vi.mock('../../../src/services/userService.js', async importOriginal => ({
   findUser: mocks.findUser
 }));
 
-import { createLetterDraftAndBuildOutput, previewSendEligibility } from '../../../src/tools/letterHelpers.js';
+import { createLetterDraftAndBuildOutput, letterGiftChoice, previewSendEligibility } from '../../../src/tools/letterHelpers.js';
 import { clientProfileNamed, type ClientProfileName } from '../../../src/auth/clientProfiles.js';
 import { redeemPromoCodeTool } from '../../../src/tools/redeemPromoCode.js';
 import { friendlyCheckoutError } from '../../../src/tools/createMailCheckout.js';
@@ -61,15 +61,18 @@ const address = {
 };
 
 async function preview(creditsRemaining: number, sendAsGift?: boolean, app: ClientProfileName = 'chatgpt') {
+  const ctx = context(creditsRemaining, app);
+  const letter = { bodyText: 'Hello from Austin', signOff: 'Love, Sarah', sendAsGift };
   return createLetterDraftAndBuildOutput({
     sender: address,
     recipient: { ...address, name: 'Grandma' },
-    bodyText: 'Hello from Austin',
-    signOff: 'Love, Sarah',
+    bodyText: letter.bodyText,
+    signOff: letter.signOff,
     layoutType: 'text_only',
     usedSavedReturnAddress: false,
-    sendAsGift,
-    context: context(creditsRemaining, app)
+    // The tools decide the gift before their checks (#534).
+    gift: await letterGiftChoice(letter, ctx),
+    context: ctx
   });
 }
 
