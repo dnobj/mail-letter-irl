@@ -71,7 +71,7 @@ async function handler(
   validateAddresses(sender, input.recipient, context);
 
   // Decided first: a gift send's card page draws the sender's name, which
-  // must print (#534). The renderer is read once, so every check agrees.
+  // must print and fit (#534). The renderer is read once, so every check agrees.
   const gift = await letterGiftChoice(input, context);
   const renderer = printRenderer();
 
@@ -83,7 +83,7 @@ async function handler(
     { sender, recipient: input.recipient, bodyText: input.bodyText, signOff: input.signOff, senderIsSaved: usedSavedReturnAddress },
     context,
     renderer,
-    gift.isGift ? sender.name : undefined
+    gift.card
   );
 
   // Our renderer measures the page itself (#534)

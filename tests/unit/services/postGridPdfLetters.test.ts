@@ -277,6 +277,17 @@ describe('letters printed from our own PDF (#534)', () => {
     }));
   });
 
+  it('holds a gift send whose card would run off the page, and sends nothing', async () => {
+    const fetchMock = accepted();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await provider().sendLetter({ ...base, giftCard: GIFT_CARD, senderName: 'Test Sender '.repeat(125).trim() });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.error).toMatch(/The gift card could not be laid out: The gift card runs [\d.]+in past the page's bottom margin\./);
+    expect(result.metadata).toMatchObject({ submissionOutcome: 'ambiguous', retryable: false, errorClass: 'render_refused' });
+  });
+
   it('holds a letter whose renderer this build does not know, and sends nothing', async () => {
     const fetchMock = accepted();
     vi.stubGlobal('fetch', fetchMock);

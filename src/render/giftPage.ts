@@ -1,4 +1,4 @@
-import { CONTENT_WIDTH, POINTS_PER_INCH, SIDE_MARGIN } from './geometry.js';
+import { BODY_BOTTOM, CONTENT_WIDTH, POINTS_PER_INCH, SIDE_MARGIN } from './geometry.js';
 import { baselineOffset, wrapText, type LayoutItem, type LayoutPage } from './layout.js';
 import { QUIET_ZONE_MODULES, qrMatrix, qrRuns } from './qr.js';
 
@@ -31,20 +31,36 @@ const QR_GAP = inch(0.35);
 const STEPS_LEFT = INNER_LEFT + QR_SIZE + QR_GAP;
 const STEPS_WIDTH = INNER_WIDTH - QR_SIZE - QR_GAP;
 
-/** Each block's size, line pitch and the space after it, from the legacy CSS. */
+/**
+ * Each block's size, line pitch and the space after it, from the legacy CSS:
+ * every step, the code too, takes the steps' line-height of 1.4.
+ */
 const STYLE = {
   eyebrow: { size: 10, pitch: 12, after: 8 },
   title: { size: 22, pitch: 26.4, after: 12 },
   lede: { size: 12.5, pitch: 18.75, after: 20 },
   plain: { size: 12, pitch: 16.8, after: 4 },
   url: { size: 13, pitch: 18.2, after: 4 },
-  code: { size: 24, pitch: 28.8, after: 4 },
+  code: { size: 24, pitch: 33.6, after: 4 },
   fine: { size: 9.5, pitch: 13.78, after: 0 }
 } as const;
 const CODE_ABOVE = 6;
 const CLAIM_AFTER = 18;
 
 type Style = (typeof STYLE)[keyof typeof STYLE];
+
+/**
+ * A card that would run past the bottom margin, where the letter's own text
+ * stops and PostGrid's marks begin. The card's words are ours but for the
+ * sender's name, so only a name hundreds of characters long makes one: the
+ * preview refuses it, and a print holds it.
+ */
+export class GiftPageOverflow extends Error {
+  constructor(readonly overflow: number) {
+    super(`The gift card runs ${(overflow / POINTS_PER_INCH).toFixed(2)}in past the page's bottom margin.`);
+    this.name = 'GiftPageOverflow';
+  }
+}
 
 /** Lines of `text` in `style`, from `top`, as text runs; returns the height used. */
 function block(items: LayoutItem[], text: string, style: Style, left: number, width: number, top: number): number {
@@ -102,18 +118,19 @@ export function layoutGiftPage(copy: GiftPageCopy): LayoutPage {
     if (step.kind === 'code') stepTop += CODE_ABOVE;
     stepTop += block(items, step.text, style, STEPS_LEFT, STEPS_WIDTH, stepTop) + style.after;
   }
-  y += row;
+  y += row + CLAIM_AFTER;
 
   if (copy.fine !== undefined) {
-    y += CLAIM_AFTER;
     y += block(items, copy.fine, STYLE.fine, INNER_LEFT, INNER_WIDTH, y);
   }
+  const bottom = y + CARD.padY;
+  if (bottom > BODY_BOTTOM + 1e-6) throw new GiftPageOverflow(bottom - BODY_BOTTOM);
   items.unshift({
     kind: 'box',
     x: CARD.left,
     top: CARD.top,
     width: CARD.width,
-    height: y + CARD.padY - CARD.top,
+    height: bottom - CARD.top,
     radius: 12,
     stroke: '#1f1a15',
     strokeWidth: 1.5

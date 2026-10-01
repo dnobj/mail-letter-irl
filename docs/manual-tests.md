@@ -1678,7 +1678,9 @@ or an admin grant: the owner's step).
       (#534 PR 5). PostGrid accepts the upload with `pageCount` 2; the flattened second page shows the
       card with the code the send minted, clear of PostGrid's integrity QR, and its QR scans. A
       sender's name with the ff ligature (U+FB00) is refused "in the sender's name, which the gift
-      card prints".
+      card prints". A full 26-line gift letter's card draws in ChatGPT: its preview is about 150 KB,
+      twice a letter's. (Probe P8 on 2026-10-01 sent such a PDF in test mode: `pageCount` 2, the
+      stamp on page 1 only, and the flattened QR decodes.)
 - [ ] A letter previewed before the flag was on prints on the legacy HTML after it.
 - [ ] The letter card shows the page as it prints, with the addresses where PostGrid stamps them, in
       ChatGPT and in Claude; a select enlarges it and the next restores it. A legacy preview keeps

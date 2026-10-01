@@ -1,6 +1,6 @@
 # UI Widgets
 
-**Last Updated:** September 27, 2026
+**Last Updated:** October 1, 2026
 
 Letter IRL registers six OpenAI Apps SDK widgets as MCP resources with `ui://` URIs and `text/html;profile=mcp-app`. Widget template URIs are versioned (`ui://widgets/<name>.html@v<N>` via `src/mcp/widgetUris.ts`) because the native mobile apps cache widget metadata aggressively (issue #235); bump `WIDGET_TEMPLATE_VERSION` on any widget change — a digest-pinning test enforces this — and the legacy unversioned URI stays registered as a transition alias for stale clients. Tool results keep model-facing data in `structuredContent` and send large render payloads, such as preview HTML and compressed letter-image previews, through widget-only `_meta`.
 

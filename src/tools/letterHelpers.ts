@@ -25,6 +25,7 @@ import { findUnprintable, unprintableRefusal, type PrintedText } from "../servic
 import { printRenderer } from "../config/printRenderer.js";
 import {
   drawsGrapheme,
+  GiftPageOverflow,
   layoutGiftPage,
   layoutLetter,
   readImageDataUri,
@@ -38,7 +39,7 @@ import { callingApp, type ClientProfile } from "../auth/clientProfiles.js";
 import { letterPacksPageUrl } from "../config/sendConfirmation.js";
 import { giftCardSummary, resolveGiftSendChoice, type GiftSendChoice } from "./giftSendChoice.js";
 import { giftLetterPageCopy } from "../services/giftCardRenderer.js";
-import type { GiftCardState } from "../services/giftCardRenderer.js";
+import type { GiftCardContent, GiftCardState } from "../services/giftCardRenderer.js";
 import {
   DELIVERY_CLASS,
   DELIVERY_DISCLAIMER,
@@ -654,22 +655,45 @@ export function validatePrintableLetter(
   letter: PrintedAddresses & { bodyText: string; signOff: string },
   context: ToolContext,
   renderer: 'html' | 'pdf' = printRenderer(),
-  /** A gift send's sender name, which our renderer draws on the card page. */
-  giftCardName?: string
+  /** A gift send's card: our renderer draws it as the second page, with the sender's name. */
+  giftCard?: GiftCardContent
 ): void {
   const prints = renderer === "pdf" ? drawsGrapheme : undefined;
+  const card = prints ? giftCard : undefined;
   validatePrintableCharacters(
     "letter",
     [
       { field: "bodyText", where: "in the text", text: letter.bodyText, prints },
       { field: "signOff", where: "in the sign-off", text: letter.signOff, prints },
-      ...(prints && giftCardName !== undefined
-        ? [{ field: "giftCardName", where: "in the sender's name, which the gift card prints", text: giftCardName, prints }]
+      ...(card
+        ? [{ field: "giftCardName", where: "in the sender's name, which the gift card prints", text: letter.sender.name, prints }]
         : [])
     ],
     letter,
     context
   );
+  if (card) validateGiftPageFits(card, letter.sender.name, context);
+}
+
+/**
+ * The card page ends above the bottom margin, as the letter's text does
+ * (layoutGiftPage). Its other words are ours, so only the sender's name can
+ * push it past, and only at hundreds of characters.
+ */
+function validateGiftPageFits(card: GiftCardContent, senderName: string, context: ToolContext): void {
+  try {
+    layoutGiftPage(giftLetterPageCopy(card, senderName));
+  } catch (error) {
+    if (!(error instanceof GiftPageOverflow)) throw error;
+    context.logger.warn(
+      { correlationId: context.correlationId, event: "quote.letter.gift_card_overflow", overflow: Math.round(error.overflow) },
+      "The gift card runs past the page"
+    );
+    throw Object.assign(
+      new Error("The sender's name is too long to print on the gift card. Shorten it, then preview again."),
+      { diagnosticClass: "validation_error" }
+    );
+  }
 }
 
 // ============================================================================

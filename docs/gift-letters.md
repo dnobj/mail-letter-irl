@@ -1,6 +1,6 @@
 # Gift Letters
 
-**Last Updated:** 2026-09-23
+**Last Updated:** 2026-10-01
 **Purpose:** How gift letters work: the entitlement, the printed card, the codes, the cost bound, and how to run the programme
 **Status:** Built behind `LETTER_IRL_GIFT_LETTERS_ENABLED` (off by default); on in development, where GIFT-01 passed on 2026-09-23 but for the iPhone scan; not yet enabled in production
 
@@ -62,10 +62,13 @@ An ordinary campaign must grant letters. A campaign with 0 credits used to be a 
 
 - **Letters:** a page break, then the card at the top of the second sheet, ending about halfway down. PostGrid prints its integrity QR and sequence ids in the bottom-left corner of letter pages, and the card stays clear of it. The second page is an extra B&W page (about +$0.10); the letter stays single-sided and black and white.
 - **Postcards:** a strip at the foot of the left (message) half; PostGrid owns the right half. The message limit drops from 500 to 350 characters on a gift postcard.
-- **QR:** version 3 at error correction Q, 1.4in on letters and 0.95in on postcards, with a four-module quiet zone, drawn as inline SVG `<rect>` runs at render time from the code written into `letters.content.giftCard`. It is never stored as an image: `duplicateMailService` fingerprints mail by the MD5 of the image columns, and an image layout switches on colour printing.
-- **Fallback:** `LETTER_IRL_GIFT_QR_FORMAT=png` embeds a PNG instead, if a test print shows PostGrid's renderer mishandling inline SVG.
-- Print and preview draw the card with one renderer, [giftCardRenderer.ts](../src/services/giftCardRenderer.ts), so they cannot drift.
-- **On our renderer (#534):** with `LETTER_IRL_PRINT_RENDERER=pdf`, a letter's card is the PDF's second page, laid out by [giftPage.ts](../src/render/giftPage.ts) in Tinos, the letter's typeface. Its words come from `giftLetterPageCopy`, which the HTML takes them from too, and its QR is the same modules as vector rectangles from [qr.ts](../src/render/qr.ts). The preview shows that page as the second page of the letter card and the confirm page. The postcard strip stays on the HTML until postcards move to the renderer.
+- **QR:** version 3 at error correction Q, 1.4in on letters and 0.95in on postcards, with a four-module quiet zone, drawn at render time from the code written into `letters.content.giftCard`: as inline SVG `<rect>` runs in the legacy HTML, and as the same runs, filled as vector rectangles, by our renderer. It is never stored as an image: `duplicateMailService` fingerprints mail by the MD5 of the image columns, and an image layout switches on colour printing.
+- **Fallback (legacy HTML):** `LETTER_IRL_GIFT_QR_FORMAT=png` embeds a PNG instead, if a test print shows PostGrid's renderer mishandling inline SVG. Our renderer draws vector rectangles whatever it says.
+- On the legacy HTML, print and preview draw the card with one renderer, [giftCardRenderer.ts](../src/services/giftCardRenderer.ts), so they cannot drift.
+- **On our renderer (#534):** with `LETTER_IRL_PRINT_RENDERER=pdf`, a letter's card is the PDF's second page, laid out by [giftPage.ts](../src/render/giftPage.ts) in Tinos, the letter's typeface. Its words come from `giftLetterPageCopy`, which the HTML takes them from too, and its QR is the same modules as vector rectangles from [qr.ts](../src/render/qr.ts). The preview shows that page as the second page of the letter card and the confirm page.
+  - Like the letter's text, the card ends above the page's bottom margin. Only the sender's name can push it there, at well over a thousand characters, and the preview refuses such a name: "The sender's name is too long to print on the gift card." A seed campaign's longest code, 50 characters, ends the card at about 7 inches.
+  - Test-mode probe P8 (2026-10-01): PostGrid accepted the two-page PDF with `pageCount` 2, stamped the addresses on page 1 only, and the QR on the flattened page 2 decodes.
+  - The postcard strip stays on the HTML until postcards move to the renderer.
 - The **DIY** provider prints nothing itself, so it prints no card.
 
 ## Sending a gift letter

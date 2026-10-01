@@ -425,6 +425,7 @@ describe('a gift send', () => {
     );
     expect(error).toMatchObject({ diagnosticClass: 'validation_error' });
     expect(createDraft).not.toHaveBeenCalled();
+    expect(downloadAndProcessLetterImageWithPreview).not.toHaveBeenCalled();
 
     // Without a card, the name is only stamped, in Open Sans, which prints it.
     await expect(run(layout, { sender })).resolves.toMatchObject({ draftId: 'draft-1' });
@@ -435,6 +436,25 @@ describe('a gift send', () => {
     vi.stubEnv('LETTER_IRL_PRINT_RENDERER', 'html');
     await expect(run(layout, { sender, sendAsGift: true })).resolves.toMatchObject({ draftId: 'draft-1' });
     expect(drafted().rendererVersion).toBeUndefined();
+  });
+
+  it.each(['text_only', 'header_image', 'inline_image'] as const)("refuses a sender's name too long for the card (%s), before the picture is fetched", async layout => {
+    processedLayout = layout === 'inline_image' ? layout : 'header_image';
+    const sender = address({ name: 'Pat Example '.repeat(125).trim() });
+    const ctx = context();
+    const error = await run(layout, { sender, sendAsGift: true }, ctx).catch(e => e);
+    expect(error.message).toBe("The sender's name is too long to print on the gift card. Shorten it, then preview again.");
+    expect(error).toMatchObject({ diagnosticClass: 'validation_error' });
+    expect(createDraft).not.toHaveBeenCalled();
+    expect(downloadAndProcessLetterImageWithPreview).not.toHaveBeenCalled();
+    expect(ctx.logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'quote.letter.gift_card_overflow', overflow: expect.any(Number) }),
+      expect.any(String)
+    );
+
+    // The legacy HTML flows the card onto as many pages as it takes.
+    vi.stubEnv('LETTER_IRL_PRINT_RENDERER', 'html');
+    await expect(run(layout, { sender, sendAsGift: true })).resolves.toMatchObject({ draftId: 'draft-1' });
   });
 
   it("adds the card to the page the tool measured, leaving the tool's layout as it was", async () => {

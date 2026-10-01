@@ -8,16 +8,16 @@ import jsQR from 'jsqr';
 import sharp from 'sharp';
 import { inflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
-import { layoutGiftPage, layoutLetter, renderPdf, renderPreviewSvg, type GiftPageCopy } from '../../../src/render/index.js';
+import { GiftPageOverflow, layoutGiftPage, layoutLetter, renderPdf, renderPreviewSvg, type GiftPageCopy } from '../../../src/render/index.js';
 import type { BoxItem, RectsItem, TextRun } from '../../../src/render/layout.js';
-import { placeGlyphs } from '../../../src/render/glyphs.js';
+import { placeGlyphs, shape } from '../../../src/render/glyphs.js';
+import { loadFont } from '../../../src/render/fonts.js';
+import { BODY_BOTTOM } from '../../../src/render/geometry.js';
 import { QUIET_ZONE_MODULES, qrMatrix, qrRuns } from '../../../src/render/qr.js';
 import { giftLetterPageCopy, qrSvg } from '../../../src/services/giftCardRenderer.js';
 
-const FUNDED = giftLetterPageCopy(
-  { state: 'funded', code: 'K7M2QX9A', url: 'https://letterirl.com/g/K7M2QX9A', displayUrl: 'letterirl.com/g', redeemBy: '2026-12-31' },
-  'Pat Example'
-);
+const FUNDED_CARD = { state: 'funded' as const, code: 'K7M2QX9A', url: 'https://letterirl.com/g/K7M2QX9A', displayUrl: 'letterirl.com/g', redeemBy: '2026-12-31' };
+const FUNDED = giftLetterPageCopy(FUNDED_CARD, 'Pat Example');
 const UNFUNDED = giftLetterPageCopy({ state: 'unfunded', url: 'https://letterirl.com', displayUrl: 'letterirl.com' }, 'Pat Example');
 
 const inch = (inches: number) => inches * 72;
@@ -54,23 +54,25 @@ describe('the gift page on our renderer', () => {
       return [item.kind];
     });
     expect(geometry(FUNDED)).toEqual([
-      ['box', 72, 72, 468, 328.86],
+      ['box', 72, 72, 468, 333.66],
       ['A GIFT INSIDE THIS LETTER', 10, 108, 113.77],
       ['A letter for you to send', 22, 108, 145.02],
       ['Pat Example sent this letter with Letter IRL and included one more: a letter of', 12.5, 108, 176.39],
       ['your own, printed and mailed for you at no cost.', 12.5, 108, 195.14],
       // The QR's dark modules, inside its quiet zone; the steps are the taller, so the QR is centred on them.
-      ['qr', 118.9, 232.1, 197.9, 311.1],
+      ['qr', 118.9, 234.5, 197.9, 313.5],
       ['Scan the code, or visit', 12, 234, 232.75],
       ['letterirl.com/g', 13, 234, 254.59],
       ['and enter', 12, 234, 275.75],
-      ['K7M2-QX9A', 24, 234, 312.6],
-      ['Redeem by December 31, 2026. The code works once. You write your letter with your AI assistant, and', 9.5, 108, 351],
-      ['we print and mail it.', 9.5, 108, 364.78]
+      // The steps' line-height, 1.4, applies to the code too.
+      ['K7M2-QX9A', 24, 234, 315],
+      ['Redeem by December 31, 2026. The code works once. You write your letter with your AI assistant, and', 9.5, 108, 355.8],
+      ['we print and mail it.', 9.5, 108, 369.58]
     ]);
-    // Here the QR is the taller, so the steps are centred on it.
+    // Here the QR is the taller, so the steps are centred on it; the claim's
+    // 18pt margin stands even with no fine print below it.
     expect(geometry(UNFUNDED)).toEqual([
-      ['box', 72, 72, 468, 281.5],
+      ['box', 72, 72, 468, 299.5],
       ['SENT WITH LETTER IRL', 10, 108, 113.77],
       ['This letter began as a conversation', 22, 108, 145.02],
       ['Pat Example wrote it with Letter IRL, which turns a conversation with an AI', 12.5, 108, 176.39],
@@ -87,14 +89,48 @@ describe('the gift page on our renderer', () => {
       expect(run.x).toBeGreaterThanOrEqual(border.x + inch(0.5));
       expect(run.baseline).toBeGreaterThan(border.top + inch(0.45));
       expect(run.baseline).toBeLessThan(border.top + border.height - inch(0.45) + 1e-6);
-      // No line wider than the space it was wrapped to.
-      const right = Math.max(...placeGlyphs(run).map(glyph => glyph.x));
-      expect(right).toBeLessThanOrEqual(border.x + border.width - inch(0.5));
+      // No line wider than the space it was wrapped to: its last glyph ends inside.
+      const font = loadFont(run.font);
+      const right = run.x + shape(font, run.text).advanceWidth * (run.size / font.unitsPerEm);
+      expect(right).toBeLessThanOrEqual(border.x + border.width - inch(0.5) + 1e-6);
     }
     const steps = runs(FUNDED).filter(run => ['Scan the code, or visit', 'letterirl.com/g', 'and enter', 'K7M2-QX9A'].includes(run.source));
     for (const step of steps) expect(step.x).toBeCloseTo(inch(1.5) + inch(1.4) + inch(0.35), 6);
     // The card keeps the letter's one-inch margins.
     expect(border.top + border.height).toBeLessThanOrEqual(inch(10));
+  });
+
+  it('ends above the bottom margin, as the letter does, or refuses to be laid out', () => {
+    // Only the sender's name is not ours: hundreds of characters still fit.
+    const name = (length: number) => 'Pat Example '.repeat(Math.ceil(length / 12)).slice(0, length).trim();
+    const long = box(giftLetterPageCopy(FUNDED_CARD, name(900)));
+    expect(long.top + long.height).toBeLessThanOrEqual(BODY_BOTTOM);
+    expect(long.top + long.height).toBeGreaterThan(inch(9));
+    // A little longer runs a fraction of an inch past, and is refused.
+    let error: unknown;
+    try {
+      layoutGiftPage(giftLetterPageCopy(FUNDED_CARD, name(1200)));
+    } catch (thrown) {
+      error = thrown;
+    }
+    expect(error).toBeInstanceOf(GiftPageOverflow);
+    expect((error as GiftPageOverflow).overflow).toBeGreaterThan(0);
+    expect((error as GiftPageOverflow).overflow).toBeLessThan(inch(1));
+    expect((error as Error).message).toBe("The gift card runs 0.32in past the page's bottom margin.");
+  });
+
+  it("fits a seed campaign's longest code, with the shared-code and new-customer wording", () => {
+    // promo_campaigns.code is VARCHAR(50); a seed code prints as the operator chose it.
+    const code = 'SPRING-LETTERS-FROM-THE-COMMUNITY-GARDEN-CLUB-2026';
+    expect(code).toHaveLength(50);
+    const seed = { ...FUNDED_CARD, code, url: `https://letterirl.com/g/${code}`, multiUse: true, newAccountsOnly: true };
+    const copy = giftLetterPageCopy(seed, 'Pat Example');
+    expect(copy.fine).toMatch(/new/i);
+    const page = layoutGiftPage(copy);
+    const text = page.items.filter((item): item is TextRun => item.kind === 'text');
+    expect(text.filter(run => run.size === 24).map(run => run.source).join('')).toBe(code);
+    const border = page.items.find((item): item is BoxItem => item.kind === 'box')!;
+    expect(border.top + border.height).toBeLessThan(inch(7.5));
   });
 
   it('draws the QR as the legacy card did: the same modules, 1.4in square with its quiet zone', () => {
