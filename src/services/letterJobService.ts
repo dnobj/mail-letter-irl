@@ -121,13 +121,21 @@ export async function submitToProviderOnce(
 /** Insert an outbox row using the caller's transaction. */
 export async function createLetterJobWithClient(
   client: pg.PoolClient,
-  letter: Letter
+  letter: Letter,
+  /**
+   * Arrive-by mail (#535) is held until `notBefore`: the claim takes a job
+   * only once next_attempt_at has passed, the inline dispatch right after a
+   * send included. Unset, the job is due now.
+   */
+  options: { notBefore?: Date } = {}
 ): Promise<LetterJob> {
+  const notBefore = options.notBefore ?? null;
   const result = await client.query<LetterJob>(
     `INSERT INTO letter_jobs (
        job_id, letter_id, status, attempts, max_attempts, scheduled_at,
        idempotency_key, next_attempt_at, metadata
-     ) VALUES ($1, $2, 'pending', 0, $3, NOW(), $2, NOW(), $4)
+     ) VALUES ($1, $2, 'pending', 0, $3, COALESCE($5::timestamptz, NOW()), $2,
+               COALESCE($5::timestamptz, NOW()), $4)
      ON CONFLICT (letter_id) DO UPDATE
      SET updated_at = NOW()
      RETURNING *`,
@@ -135,7 +143,8 @@ export async function createLetterJobWithClient(
       randomUUID(),
       letter.letter_id,
       maxAttempts(),
-      JSON.stringify({ source: 'transactional-outbox' }),
+      JSON.stringify({ source: 'transactional-outbox', ...(notBefore ? { heldUntil: notBefore.toISOString() } : {}) }),
+      notBefore,
     ]
   );
 

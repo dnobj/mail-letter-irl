@@ -266,6 +266,56 @@ describe('consumeGiftLetterForSendWithClient', () => {
     expect(seedCodeHold({ ...live, status: 'paused', current_redemptions: 2 })).toBe('not_live');
   });
 
+  it('judges a seed campaign as of the moment held mail goes to the printer (#535)', () => {
+    const live = {
+      campaign_id: 'campaign-1',
+      code: 'JANE-SMITH',
+      status: 'active',
+      starts_at: new Date('2026-10-01T00:00:00Z'),
+      ends_at: new Date('2026-10-10T00:00:00Z'),
+      max_total_redemptions: null,
+      current_redemptions: 0,
+      gift_generations_remaining: 1
+    };
+    expect(seedCodeHold(live, new Date('2026-10-05T13:00:00Z'))).toBeNull();
+    // Ended by the time a letter held to the 12th goes to the printer.
+    expect(seedCodeHold(live, new Date('2026-10-12T13:00:00Z'))).toBe('ended');
+    // Not yet started now, but started by the mail date.
+    expect(seedCodeHold({ ...live, starts_at: new Date('2026-10-06T00:00:00Z') }, new Date('2026-10-08T13:00:00Z'))).toBeNull();
+    expect(seedCodeHold({ ...live, starts_at: new Date('2026-10-06T00:00:00Z') }, new Date('2026-10-05T13:00:00Z'))).toBe('not_started');
+  });
+
+  it("counts a held gift's chain code days from when it goes to the printer, and prints no seed code that will have ended (#535)", async () => {
+    const mailsAt = new Date(Date.now() + 20 * 86_400_000);
+    on('SELECT * FROM gift_letters', [gift({ generations_remaining: 2, card_campaign_id: 'campaign-1' })]);
+    on('FROM promo_campaigns WHERE campaign_id', [
+      {
+        campaign_id: 'campaign-1',
+        code: 'JANE-SMITH',
+        status: 'active',
+        starts_at: PAST,
+        // Live now, ended by the mail date: the letter mints its own code instead.
+        ends_at: new Date(Date.now() + 10 * 86_400_000),
+        max_total_redemptions: null,
+        current_redemptions: 0,
+        gift_generations_remaining: 1
+      }
+    ]);
+    on('INSERT INTO gift_codes', params => [{ code: params[0] }]);
+
+    const held = await consumeGiftLetterForSendWithClient(client, { userId: 'user-1', letterId: 'letter-1', mailsAt });
+
+    expect(held?.card.code).not.toBe('JANE-SMITH');
+    const expiresAt = ran('INSERT INTO gift_codes')[0].params[5] as Date;
+    expect(expiresAt.getTime()).toBe(mailsAt.getTime() + 90 * 86_400_000);
+    expect(held?.card.redeemBy).toBe(expiresAt.toISOString().slice(0, 10));
+
+    // Sent now, the same gift prints the seed code, and a minted one counts from now.
+    state.log = [];
+    const now = await consumeGiftLetterForSendWithClient(client, { userId: 'user-1', letterId: 'letter-2' });
+    expect(now?.card.code).toBe('JANE-SMITH');
+  });
+
   it('answers null when there is no gift letter to use', async () => {
     const result = await consumeGiftLetterForSendWithClient(client, { userId: 'user-1', letterId: 'letter-1' });
     expect(result).toBeNull();

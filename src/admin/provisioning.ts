@@ -33,9 +33,13 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  * list below leaves it out, and the operator role reads it through its
  * table-wide SELECT on letter_drafts, which covers new columns, so nothing
  * to re-run.
+ *
+ * 040 adds arrive_by and mail_on to letter_drafts and letters (#535). The same
+ * holds: the reader's lists leave them out, and the operator reads both tables
+ * whole. The admin panel's letter view gains them later, with a re-run.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
-  "039_renderer_version.sql";
+  "040_arrive_by.sql";
 
 export interface AdminProvisioningArguments {
   environment: "development" | "production";

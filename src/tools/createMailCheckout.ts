@@ -80,6 +80,11 @@ export function friendlyCheckoutError(error: unknown): Error {
       return friendly(
         'This draft uses a gift letter, so there is nothing to pay. Send it with the Send action.'
       );
+    case 'SCHEDULE_PASSED':
+      // Arrive-by (#535): refused before the charge, so nothing was paid.
+      return friendly(
+        'The day this mail was to go to the printer has passed, so it can no longer arrive by its date. Please create a new preview with a new arrival date.'
+      );
     case 'PREPAID_BALANCE_AVAILABLE':
       return friendly(
         'You already have enough prepaid balance to send this draft. Use the Send action.'

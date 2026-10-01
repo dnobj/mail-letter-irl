@@ -47,6 +47,7 @@ const REQUIRED = [
   'checkoutErasureRace.postgres.test.ts',
   'sendConfirmation.postgres.test.ts',
   'rendererVersion.postgres.test.ts',
+  'arriveBy.postgres.test.ts',
 ];
 
 /**

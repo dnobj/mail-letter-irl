@@ -208,6 +208,73 @@ describe('draftService', () => {
     });
   });
 
+  describe('arrive-by dates (#535)', () => {
+    const inserted = {
+      rows: [{ draft_id: 'draft-1', expires_at: new Date('2026-10-02T12:00:00Z') }],
+      rowCount: 1,
+      command: 'INSERT',
+      oid: 0,
+      fields: [],
+    };
+    /** The value each named column was inserted with. */
+    function columnValues(call: unknown[]): Record<string, unknown> {
+      const [sql, params] = call as [string, unknown[]];
+      const list = (from: number) => sql.slice(sql.indexOf('(', from) + 1, sql.indexOf(')', from)).split(',').map(item => item.trim());
+      const columns = list(0);
+      const values = list(sql.indexOf('VALUES'));
+      expect(values).toHaveLength(columns.length);
+      return Object.fromEntries(columns.map((column, index) => {
+        const placeholder = /^\$(\d+)(::\w+)?$/.exec(values[index]);
+        return [column, placeholder ? { value: params[Number(placeholder[1]) - 1], cast: placeholder[2] ?? null } : values[index]];
+      }));
+    }
+
+    it('records a letter draft\'s dates as DATE parameters, and none to mail as soon as possible', async () => {
+      vi.mocked(db.query).mockResolvedValueOnce(inserted).mockResolvedValueOnce(inserted);
+      const base = {
+        userId: testUsers.sarah.user_id,
+        sender: testAddresses.validSender as unknown as Record<string, unknown>,
+        recipient: testAddresses.validRecipient as unknown as Record<string, unknown>,
+        bodyText: 'Hello',
+        signOff: 'Love',
+        requiredCredits: 2,
+      };
+
+      await createDraft({ ...base, schedule: { arriveBy: '2026-10-16', mailOn: '2026-10-06' } });
+      await createDraft(base);
+
+      const scheduled = columnValues(vi.mocked(db.query).mock.calls[0]);
+      expect(scheduled.arrive_by).toEqual({ value: '2026-10-16', cast: '::date' });
+      expect(scheduled.mail_on).toEqual({ value: '2026-10-06', cast: '::date' });
+      const asap = columnValues(vi.mocked(db.query).mock.calls[1]);
+      expect(asap.arrive_by).toEqual({ value: null, cast: '::date' });
+      expect(asap.mail_on).toEqual({ value: null, cast: '::date' });
+    });
+
+    it('records a postcard draft\'s dates the same way', async () => {
+      vi.mocked(db.query).mockResolvedValueOnce(inserted).mockResolvedValueOnce(inserted);
+      const base = {
+        userId: testUsers.sarah.user_id,
+        sender: testAddresses.validSender as unknown as Record<string, unknown>,
+        recipient: testAddresses.validRecipient as unknown as Record<string, unknown>,
+        message: 'Wish you were here.',
+        frontImageData: 'data:image/jpeg;base64,AAAA',
+        frontImageUrl: 'https://files.example/a.jpg',
+      };
+
+      await createPostcardDraft({ ...base, schedule: { arriveBy: '2026-10-16', mailOn: '2026-10-06' } });
+      await createPostcardDraft(base);
+
+      const scheduled = columnValues(vi.mocked(db.query).mock.calls[0]);
+      expect([scheduled.arrive_by, scheduled.mail_on]).toEqual([
+        { value: '2026-10-16', cast: '::date' },
+        { value: '2026-10-06', cast: '::date' }
+      ]);
+      const asap = columnValues(vi.mocked(db.query).mock.calls[1]);
+      expect([asap.arrive_by, asap.mail_on]).toEqual([{ value: null, cast: '::date' }, { value: null, cast: '::date' }]);
+    });
+  });
+
   describe('createPostcardDraft', () => {
     it('records the renderer that drew the preview (#534 Phase 4), and none for the legacy HTML', async () => {
       const inserted = {
@@ -242,8 +309,8 @@ describe('draftService', () => {
       const parameter = Number(placeholder![1]) - 1;
       expect(rendered[parameter]).toBe('pdf-1');
       expect((vi.mocked(db.query).mock.calls[1][1] as unknown[])[parameter]).toBeNull();
-      // Every placeholder has its parameter.
-      expect(rendered).toHaveLength(Math.max(...values.map(value => Number(/^\$(\d+)$/.exec(value)?.[1] ?? 0))));
+      // Every placeholder has its parameter (a placeholder may carry a cast, as $15::date does).
+      expect(rendered).toHaveLength(Math.max(...values.map(value => Number(/^\$(\d+)(?:::\w+)?$/.exec(value)?.[1] ?? 0))));
     });
   });
 

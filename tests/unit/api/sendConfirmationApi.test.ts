@@ -393,6 +393,7 @@ describe('refusalFor (#470)', () => {
     ['DRAFT_CHECKOUT_PENDING', 409, 'checkout_open'],
     ['GIFT_LETTERS_DISABLED', 409, 'gift_unavailable'],
     ['GIFT_LETTER_UNAVAILABLE', 409, 'gift_unavailable'],
+    ['SCHEDULE_PASSED', 409, 'schedule_passed'],
     ['DRAFT_INVALID_STATE', 409, 'unsendable'],
     ['DRAFT_INCOMPLETE', 409, 'unsendable'],
     ['DRAFT_WRONG_MAIL_TYPE', 409, 'unsendable'],
@@ -403,6 +404,12 @@ describe('refusalFor (#470)', () => {
     expect(refusal.status).toBe(status);
     expect(refusal.body.error).toBe(reason);
     expect(JSON.stringify(refusal.body)).not.toContain('internal');
+  });
+
+  it('tells the person a missed mail date needs a new preview (#535)', () => {
+    expect(refusalFor(coded('SCHEDULE_PASSED')).body.message).toBe(
+      'The day this was to go to the printer has passed, so it can no longer arrive by its date. Make a new preview with a new date.'
+    );
   });
 
   it('uses the beta message for a beta refusal', () => {

@@ -177,6 +177,8 @@ Temporary drafts for idempotent send operations. Prevents duplicate sends.
 | postcard_size | VARCHAR(10) | YES | - | Postcard size: '6x9' (NULL for letters) |
 | is_gift_send | BOOLEAN | NO | false | Previewed as a gift send: funded by a gift letter and printed with its card (033) |
 | renderer_version | VARCHAR(16) | YES | - | The renderer that drew the preview: NULL for the legacy HTML, `pdf-1` for our own PDF (039, #534). The send copies it into `letters.content.rendererVersion`, and dispatch prints with it |
+| arrive_by | DATE | YES | - | The date the mail should arrive by, in America/New_York; NULL to mail as soon as possible (040, #535) |
+| mail_on | DATE | YES | - | The date it goes to the printer, worked back from `arrive_by` by the lead time (040, #535). The send copies both to the letter and holds its job until then |
 | created_at | TIMESTAMPTZ | NO | NOW() | Draft creation |
 | updated_at | TIMESTAMPTZ | NO | NOW() | Last update |
 
@@ -188,6 +190,8 @@ Temporary drafts for idempotent send operations. Prevents duplicate sends.
 - `postcard_requires_size`: Postcards must have postcard_size
 - `valid_postcard_size`: postcard_size must be '6x4', '6x9', or '6x11'
 - `letter_drafts_renderer_version_known`: renderer_version must be NULL or 'pdf-1' (a new version extends it in its own migration)
+- `letter_drafts_schedule_pair`: arrive_by and mail_on are both set or both NULL (040)
+- `letter_drafts_schedule_order`: mail_on is never after arrive_by (040)
 
 **Indexes:**
 - `idx_letter_drafts_user_pending` on (user_id, status) WHERE status='pending'
@@ -219,11 +223,18 @@ Sent letters with content and tracking.
 | created_at | TIMESTAMPTZ | NO | NOW() | Letter creation |
 | sent_at | TIMESTAMPTZ | YES | - | When sent to provider |
 | updated_at | TIMESTAMPTZ | YES | - | Last update |
+| arrive_by | DATE | YES | - | The date the mail should arrive by (America/New_York), copied from the draft at send; NULL when sent as soon as possible (040, #535) |
+| mail_on | DATE | YES | - | The date it goes to the printer; its job is held until 09:00 New York time that day (040, #535) |
 
 **Enums:**
 - `mail_type`: letter, postcard
 
+**Constraints:**
+- `letters_schedule_pair`: arrive_by and mail_on are both set or both NULL (040)
+- `letters_schedule_order`: mail_on is never after arrive_by (040)
+
 **Indexes:**
+- `idx_letters_held_mail_on` on mail_on WHERE status = 'queued' AND mail_on IS NOT NULL: mail waiting for its date (040)
 - `idx_letters_user_id` on user_id
 - `idx_letters_status` on status
 - `idx_letters_created_at` on created_at DESC
@@ -244,12 +255,12 @@ Background job tracking for letter processing.
 | status | VARCHAR(50) | NO | - | pending, processing, completed, failed, cancelled |
 | attempts | INTEGER | NO | 0 | Number of attempts |
 | max_attempts | INTEGER | NO | 3 | Retry limit |
-| scheduled_at | TIMESTAMPTZ | NO | - | When job should run |
-| started_at | TIMESTAMPTZ | YES | - | When processing started |
-| completed_at | TIMESTAMPTZ | YES | - | When finished |
+| scheduled_at | TIMESTAMP | NO | NOW() | When the job should run: for held mail (#535), the release time. Without a zone, written in the database session's zone (UTC), unlike `next_attempt_at` |
+| started_at | TIMESTAMP | YES | - | When processing started (without a zone, as `scheduled_at`) |
+| completed_at | TIMESTAMP | YES | - | When finished (without a zone, as `scheduled_at`) |
 | error_message | TEXT | YES | - | Legacy twin of `last_error`; an error class and provider status only, never provider or driver message text (migrations 031, 032) |
-| metadata | JSONB | YES | - | Job-specific data |
-| created_at | TIMESTAMPTZ | NO | NOW() | Job creation |
+| metadata | JSONB | YES | - | Job-specific data: `source`, and `heldUntil` for held mail (#535) |
+| created_at | TIMESTAMP | NO | NOW() | Job creation (without a zone, as `scheduled_at`) |
 
 **Indexes:**
 - `idx_letter_jobs_status` on status
@@ -743,6 +754,7 @@ Production provisioning and the first production connection remain separate owne
 | 37 | 037_personal_access_token_scopes.sql | `personal_access_tokens.scopes`: every token reads and drafts, and none sends (#470) |
 | 38 | 038_daily_limits.sql | The daily limits' operator values, refusal counts and the API's configured values, and the `daily_limit_reached` alert type. Re-run admin provisioning after it |
 | 39 | 039_renderer_version.sql | `letter_drafts.renderer_version`: the renderer that drew a draft's preview, NULL or `pdf-1` (#534). The reader role's column grants leave it out, and the operator role's table-wide SELECT covers it; no provisioning re-run |
+| 40 | 040_arrive_by.sql | `arrive_by` and `mail_on` on `letter_drafts` and `letters`: mail held to arrive by a date (#535), with the pair and order CHECKs and `idx_letters_held_mail_on`. DATEs are read as 'YYYY-MM-DD' strings (`src/db/dateParser.ts`). No provisioning re-run, as for 039 |
 
 ---
 

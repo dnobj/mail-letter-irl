@@ -155,6 +155,9 @@ export interface Letter {
   funding_order_id?: string;
   preview_html?: string;
   tracking_id?: string;
+  /** Arrive-by (migration 040, #535): 'YYYY-MM-DD' in New York, both or neither. */
+  arrive_by?: string | null;
+  mail_on?: string | null;
   created_at: Date;
   sent_at?: Date;
 }
@@ -514,8 +517,21 @@ export interface LetterDraft {
    * letters.content, and dispatch prints with it.
    */
   renderer_version?: string | null;
+  /**
+   * Arrive-by (migration 040, #535): the date the mail should arrive by and
+   * the date it goes to the printer, 'YYYY-MM-DD' in New York; both or
+   * neither. The send holds the job until the mail date.
+   */
+  arrive_by?: string | null;
+  mail_on?: string | null;
   created_at: Date;
   updated_at: Date;
+}
+
+/** A draft's arrive-by dates (#535), 'YYYY-MM-DD' in New York: from deliverySchedule's checkArrival. */
+export interface DraftSchedule {
+  arriveBy: string;
+  mailOn: string;
 }
 
 export interface CreateDraftParams {
@@ -539,6 +555,8 @@ export interface CreateDraftParams {
   isGiftSend?: boolean;
   /** The renderer that drew the preview, which the letter prints with (migration 039, #534); unset for the legacy HTML. */
   rendererVersion?: string;
+  /** Mail held to arrive by a date (migration 040, #535); unset to mail as soon as possible. */
+  schedule?: DraftSchedule;
 }
 
 export interface CreateDraftResult {
@@ -774,6 +792,8 @@ export interface CreatePostcardDraftParams {
   isGiftSend?: boolean;
   /** The renderer that drew the preview (#534 Phase 4); absent for the legacy HTML. */
   rendererVersion?: string;
+  /** Mail held to arrive by a date (migration 040, #535); unset to mail as soon as possible. */
+  schedule?: DraftSchedule;
 }
 
 export interface CreatePostcardDraftResult {

@@ -30,6 +30,8 @@ import {
 import { isGiftLettersEnabled } from '../config/giftLetters.js';
 import { isImageGenerationOff } from '../config/imageGeneration.js';
 import { createMailOrderFromDraftWithClient } from './mailSendService.js';
+import { draftScheduleOf } from './draftSchedule.js';
+import { earliestMailOn } from './deliverySchedule.js';
 import { assertNoRecentDuplicateMail } from './duplicateMailService.js';
 import {
   createJitCheckoutSession,
@@ -847,6 +849,13 @@ async function prepareJitOrder(
     // here, before any charge, because fulfilment runs after one.
     if (draft.is_gift_send) {
       throw Object.assign(new Error('Draft is a gift send'), { code: 'DRAFT_IS_GIFT' });
+    }
+    // Arrive-by (#535): a mail date already past is refused before the charge.
+    // After it, fulfilment mails as soon as it can (mailSendService). The send's
+    // own reader, so dates it could not read fail here, before the charge.
+    const schedule = draftScheduleOf(draft);
+    if (schedule && schedule.mailOn < earliestMailOn(new Date())) {
+      throw Object.assign(new Error('Draft has missed its mail date'), { code: 'SCHEDULE_PASSED' });
     }
 
     // ONE derivation for the whole transaction: the reprice branch and the

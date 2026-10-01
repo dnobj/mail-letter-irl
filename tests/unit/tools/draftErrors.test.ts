@@ -123,6 +123,16 @@ describe('the fall-through', () => {
 describe('mail-type wording', () => {
   const withCode = (code: string) => Object.assign(new Error('upstream'), { code });
 
+  it('says a missed mail date needs a new preview, naming the mail (#535)', () => {
+    const upstream = Object.assign(new Error('Draft d-1 was to go to the printer on 2026-10-06, which has passed'), {
+      code: 'SCHEDULE_PASSED'
+    });
+    expect(friendlyDraftError(upstream, 'd-1', 'postcard').message).toBe(
+      'The day this postcard was to go to the printer has passed, so it can no longer arrive by its date. Please preview it again with a new arrival date, or with none to send it as soon as possible.'
+    );
+    expect(friendlyDraftError(upstream, 'd-1', 'letter').message).toContain('The day this letter was to go to the printer has passed');
+  });
+
   it('points a wrong-type draft at the other tool', () => {
     expect(friendlyDraftError(withCode('DRAFT_WRONG_MAIL_TYPE'), 'd', 'letter').message).toBe(
       'This is a postcard draft. Please use send_postcard instead.'

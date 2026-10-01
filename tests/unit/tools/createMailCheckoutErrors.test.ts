@@ -65,6 +65,14 @@ describe('friendlyCheckoutError terminality (#278)', () => {
     expect((friendly as { diagnosticClass?: string }).diagnosticClass).toBe(diagnosticClass);
   });
 
+  it('refuses a missed mail date before any charge, with a new preview as the way on (#535)', () => {
+    const friendly = friendlyCheckoutError(Object.assign(new Error('Draft has missed its mail date'), { code: 'SCHEDULE_PASSED' }));
+    expect(friendly.message).toBe(
+      'The day this mail was to go to the printer has passed, so it can no longer arrive by its date. Please create a new preview with a new arrival date.'
+    );
+    expect((friendly as { code?: string }).code).toBe('SCHEDULE_PASSED');
+  });
+
   it('never leaks the internal message', () => {
     const friendly = friendlyCheckoutError(
       Object.assign(new Error('cs_private pi_private'), { code: 'PROVIDER_ERROR' })

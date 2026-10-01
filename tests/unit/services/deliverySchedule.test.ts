@@ -53,6 +53,15 @@ describe('the New York calendar', () => {
     }
   });
 
+  it('takes only a whole hour from 0 to 23', () => {
+    for (const hour of [9.25, 9.5, -1, 24, Number.NaN]) {
+      expect(() => newYorkTime('2026-10-06', hour), String(hour)).toThrow(RangeError);
+    }
+    expect(() => newYorkTime('2026-10-06', 9.5)).toThrow('hour must be a whole hour from 0 to 23, not 9.5');
+    expect(newYorkTime('2026-10-06', 0).toISOString()).toBe('2026-10-06T04:00:00.000Z');
+    expect(newYorkTime('2026-10-06', 23).toISOString()).toBe('2026-10-07T03:00:00.000Z');
+  });
+
   it('finds any hour that exists, including the first after the clocks go forward', () => {
     // 02:00 does not exist on 2027-03-14; 03:00 EDT is 07:00 UTC, which a
     // single reading of the offset (taken at the EST side) misses by an hour.
@@ -78,7 +87,16 @@ describe('the New York calendar', () => {
   });
 
   it('refuses anything but a calendar date loudly, rather than miscounting', () => {
-    for (const call of [() => isBusinessDay('2026-1-5'), () => mailOnFor('next Friday', 7), () => addCalendarDays('', 1)]) {
+    for (const call of [
+      () => isBusinessDay('2026-1-5'),
+      () => mailOnFor('next Friday', 7),
+      () => addCalendarDays('', 1),
+      // Well formed, but no such day: not rolled over into March.
+      () => isBusinessDay('2026-02-30'),
+      () => addCalendarDays('2026-02-30', 0),
+      () => mailOnFor('2026-02-30', 7),
+      () => dispatchAt('2026-02-30')
+    ]) {
       expect(call).toThrow(RangeError);
     }
     expect(() => mailOnFor('next Friday', 7)).toThrow('Not a calendar date (YYYY-MM-DD): next Friday');
@@ -269,8 +287,10 @@ describe('checking an arrival date', () => {
     expect(checkArrival('2026-10-13', NOW, { leadDays: 7, horizonDays: 5 })).toMatchObject({ ok: false, reason: 'unavailable' });
     // Equal is still a date on offer.
     expect(checkArrival('2026-10-13', NOW, { leadDays: 7, horizonDays: 12 })).toMatchObject({ ok: true, mailOn: '2026-10-01' });
-    // A date that is not one is still named as such.
+    // A date that is not one is still named as such, and a date past the
+    // latest is unavailable too, not too late.
     expect(checkArrival('soon', NOW, { leadDays: 7, horizonDays: 5 })).toMatchObject({ ok: false, reason: 'invalid_date' });
+    expect(checkArrival('2028-01-10', new Date('2027-12-21T14:00:00Z'), SETTINGS)).toMatchObject({ ok: false, reason: 'unavailable' });
   });
 
   it('uses the lead time and the horizon it is given', () => {

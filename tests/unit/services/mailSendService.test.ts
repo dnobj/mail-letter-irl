@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   deductCredits: vi.fn(),
   createOutboxJob: vi.fn(),
-  transaction: vi.fn()
+  transaction: vi.fn(),
+  diagnostics: [] as Array<{ level: string; event: string; fields: Record<string, unknown> }>
 }));
 const deductCredits = mocks.deductCredits;
 const createOutboxJob = mocks.createOutboxJob;
@@ -22,6 +23,8 @@ let transactionChain: Promise<unknown>;
 // query returns it, and every tagged query in the order it ran.
 let recentLetters: Record<string, any>[] = [];
 let duplicateQueries: Array<{ sql: string; params: any[] }> = [];
+// The letters INSERT as it ran, for the arrive-by dates (#535).
+let letterInsert: { sql: string; params: any[] } | undefined;
 
 const EMPTY_MD5 = 'd41d8cd98f00b204e9800998ecf8427e';
 
@@ -66,6 +69,7 @@ const client = {
       return { rows: commerceOrder ? [{ ...commerceOrder }] : [] };
     }
     if (sql.includes('INSERT INTO letters')) {
+      letterInsert = { sql, params: params ?? [] };
       savedLetter = {
         letter_id: params?.[0],
         user_id: params?.[1],
@@ -128,6 +132,12 @@ vi.mock('../../../src/services/creditLedgerService.js', () => ({
 vi.mock('../../../src/services/letterJobService.js', () => ({
   createLetterJobWithClient: mocks.createOutboxJob
 }));
+vi.mock('../../../src/utils/diagnosticLog.js', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../../src/utils/diagnosticLog.js')>()),
+  writeDiagnostic: (level: string, event: string, fields: Record<string, unknown> = {}) => {
+    mocks.diagnostics.push({ level, event, fields });
+  }
+}));
 
 import { createMailOrderFromDraft } from '../../../src/services/mailSendService.js';
 
@@ -143,6 +153,8 @@ describe('createMailOrderFromDraft', () => {
     lettersTodayGlobal = 0;
     recentLetters = [];
     duplicateQueries = [];
+    letterInsert = undefined;
+    mocks.diagnostics.length = 0;
     draft = {
       draft_id: 'draft-1',
       user_id: 'user-1',
@@ -184,7 +196,9 @@ describe('createMailOrderFromDraft', () => {
       client,
       expect.objectContaining({
         letter_id: result.letter.letter_id
-      })
+      }),
+      // Not held (#535): the draft names no arrival date.
+      { notBefore: undefined }
     );
     expect(result.job?.idempotency_key).toBe(result.letter.letter_id);
   });
@@ -597,6 +611,120 @@ describe('createMailOrderFromDraft', () => {
 
       await expect(send()).resolves.toMatchObject({ alreadyConsumed: true });
       expect(duplicateQueries).toEqual([]);
+    });
+  });
+
+  describe('arrive-by: mail held to its date (#535)', () => {
+    // A Thursday, 10:00 in New York: today is still a mail date.
+    const THURSDAY_MORNING = new Date('2026-10-01T14:00:00Z');
+    const send = (funding?: Parameters<typeof createMailOrderFromDraft>[0]['funding']) =>
+      createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter', ...(funding ? { funding } : {}) });
+    const dates = () => [letterInsert!.params[9], letterInsert!.params[10]];
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(THURSDAY_MORNING);
+      draft.expires_at = new Date(THURSDAY_MORNING.getTime() + 60_000);
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('copies the dates to the letter and holds its job until 09:00 New York time on the mail date', async () => {
+      draft.arrive_by = '2026-10-16';
+      draft.mail_on = '2026-10-06';
+
+      const result = await send();
+
+      expect(letterInsert!.sql).toContain('arrive_by, mail_on');
+      expect(letterInsert!.sql).toContain('$10::date, $11::date');
+      expect(dates()).toEqual(['2026-10-16', '2026-10-06']);
+      expect(createOutboxJob).toHaveBeenCalledWith(client, expect.objectContaining({ letter_id: result.letter.letter_id }), {
+        notBefore: new Date('2026-10-06T13:00:00Z')
+      });
+      // The value moved as for any send: the hold is only when it prints.
+      expect(deductCredits).toHaveBeenCalledTimes(1);
+    });
+
+    it('mails today when today is its mail date, released at once since 09:00 has passed', async () => {
+      draft.arrive_by = '2026-10-13';
+      draft.mail_on = '2026-10-01';
+
+      await send();
+
+      expect(dates()).toEqual(['2026-10-13', '2026-10-01']);
+      const [, , options] = createOutboxJob.mock.calls[0];
+      expect(options.notBefore).toEqual(new Date('2026-10-01T13:00:00Z'));
+      expect(options.notBefore.getTime()).toBeLessThan(THURSDAY_MORNING.getTime());
+    });
+
+    it('sends as soon as it can, with no dates, when the draft names none', async () => {
+      await send();
+
+      expect(dates()).toEqual([null, null]);
+      expect(createOutboxJob.mock.calls[0][2]).toEqual({ notBefore: undefined });
+    });
+
+    it('refuses a prepaid send whose mail date has passed, before any value moves', async () => {
+      for (const [now, mailOn] of [
+        ['2026-10-01T16:00:00Z', '2026-10-01'], // noon in New York, on the mail date
+        [THURSDAY_MORNING.toISOString(), '2026-09-30'] // the day before
+      ] as const) {
+        vi.setSystemTime(new Date(now));
+        draft.expires_at = new Date(Date.parse(now) + 60_000);
+        draft.arrive_by = '2026-10-12';
+        draft.mail_on = mailOn;
+
+        await expect(send()).rejects.toMatchObject({ code: 'SCHEDULE_PASSED' });
+        expect(letterInsert).toBeUndefined();
+        expect(deductCredits).not.toHaveBeenCalled();
+        expect(createOutboxJob).not.toHaveBeenCalled();
+        expect(draft.status).toBe('pending');
+      }
+    });
+
+    it('mails a paid Pay & Send order as soon as it can when its date has passed, and logs the miss', async () => {
+      vi.setSystemTime(new Date('2026-10-01T17:00:00Z')); // 13:00 in New York
+      draft.expires_at = new Date(Date.parse('2026-10-01T17:00:00Z') + 60_000);
+      draft.arrive_by = '2026-10-12';
+      draft.mail_on = '2026-10-01';
+      commerceOrder = { order_id: 'order-jit', order_type: 'jit_mail', user_id: 'user-1', draft_id: 'draft-1', status: 'paid' };
+
+      await send({ type: 'jit_order', orderId: 'order-jit' });
+
+      expect(dates()).toEqual([null, null]);
+      expect(createOutboxJob.mock.calls[0][2]).toEqual({ notBefore: undefined });
+      expect(mocks.diagnostics).toContainEqual({
+        level: 'warn',
+        event: 'send.schedule_missed',
+        fields: { funding: 'jit_order', mailOn: '2026-10-01' }
+      });
+    });
+
+    it('holds a paid Pay & Send order whose date is still ahead, like any other', async () => {
+      draft.arrive_by = '2026-10-16';
+      draft.mail_on = '2026-10-06';
+      commerceOrder = { order_id: 'order-jit', order_type: 'jit_mail', user_id: 'user-1', draft_id: 'draft-1', status: 'paid' };
+
+      await send({ type: 'jit_order', orderId: 'order-jit' });
+
+      expect(dates()).toEqual(['2026-10-16', '2026-10-06']);
+      expect(createOutboxJob.mock.calls[0][2]).toEqual({ notBefore: new Date('2026-10-06T13:00:00Z') });
+    });
+
+    it('refuses dates it cannot read as calendar days rather than guessing the day', async () => {
+      for (const [arriveBy, mailOn, column] of [
+        ['2026-10-16', new Date('2026-10-06T00:00:00'), 'mail_on'], // a Date: pg without the DATE parser
+        ['2026-10-16', null, 'mail_on'], // half a schedule
+        [null, '2026-10-06', 'arrive_by'],
+        ['2026-10-16', '2026-02-30', 'mail_on']
+      ] as const) {
+        draft.arrive_by = arriveBy;
+        draft.mail_on = mailOn;
+        await expect(send(), String(mailOn)).rejects.toThrow(`letter_drafts.${column} is not a 'YYYY-MM-DD' string`);
+        expect(letterInsert).toBeUndefined();
+      }
     });
   });
 });

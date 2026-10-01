@@ -106,6 +106,10 @@ function daysFromNow(days: number): Date {
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000);
 }
 
+function daysAfter(start: Date, days: number): Date {
+  return new Date(start.getTime() + days * 24 * 60 * 60 * 1000);
+}
+
 function isoDay(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
@@ -194,10 +198,12 @@ export type SeedCodeHold = 'not_seed' | 'not_live' | 'not_started' | 'ended' | '
  * a letter that misses the campaign's code still prints a card that works,
  * while a capped code on paper is one nobody can claim.
  */
-export function seedCodeHold(row: SeedCampaignRow): SeedCodeHold | null {
+export function seedCodeHold(row: SeedCampaignRow, at: Date = new Date()): SeedCodeHold | null {
   if (row.gift_generations_remaining === null || row.gift_generations_remaining === undefined) return 'not_seed';
   if (row.status !== 'active') return 'not_live';
-  const now = Date.now();
+  // As of `at`: now, or for held mail (#535) the moment it goes to the printer,
+  // so a campaign that ends while a letter waits never prints its dead code.
+  const now = at.getTime();
   if (new Date(row.starts_at).getTime() > now) return 'not_started';
   if (row.ends_at && new Date(row.ends_at).getTime() <= now) return 'ended';
   const cap = row.max_total_redemptions;
@@ -205,8 +211,8 @@ export function seedCodeHold(row: SeedCampaignRow): SeedCodeHold | null {
   return null;
 }
 
-function seedCodePrints(row: SeedCampaignRow | undefined): boolean {
-  return row !== undefined && seedCodeHold(row) === null;
+function seedCodePrints(row: SeedCampaignRow | undefined, at?: Date): boolean {
+  return row !== undefined && seedCodeHold(row, at) === null;
 }
 
 /**
@@ -334,9 +340,11 @@ export interface ConsumedGiftLetter {
 async function mintChainCode(
   client: TxClient,
   gift: GiftLetterRow,
-  letterId: string
+  letterId: string,
+  /** Held mail (#535): the code's days count from when it goes to the printer. */
+  mailsAt?: Date
 ): Promise<{ code: string; expiresAt: Date }> {
-  const expiresAt = daysFromNow(giftCodeTtlDays());
+  const expiresAt = mailsAt ? daysAfter(mailsAt, giftCodeTtlDays()) : daysFromNow(giftCodeTtlDays());
   // A collision in 1.1e12 is not expected; the retry is there so that one
   // cannot fail a send. A campaign whose code READS as this code is skipped
   // too: redemption tries chain codes first, so a chain code equal to a
@@ -378,7 +386,16 @@ async function mintChainCode(
  */
 export async function consumeGiftLetterForSendWithClient(
   client: TxClient,
-  params: { userId: string; letterId: string }
+  params: {
+    userId: string;
+    letterId: string;
+    /**
+     * Held mail (#535): when it goes to the printer. A seed campaign must still
+     * print its code then, and a chain code's days count from it, so a letter
+     * that waits gives its recipient the whole time.
+     */
+    mailsAt?: Date;
+  }
 ): Promise<ConsumedGiftLetter | null> {
   await lockAccountForBalanceChange(client, params.userId);
   await client.query(
@@ -412,13 +429,13 @@ export async function consumeGiftLetterForSendWithClient(
       [gift.card_campaign_id]
     );
     const row = campaign.rows[0];
-    if (seedCodePrints(row)) {
+    if (seedCodePrints(row, params.mailsAt)) {
       return { gift, card: seedCard(row!.code, row!.ends_at, row!.requires_new_user === true) };
     }
   }
 
   if (gift.generations_remaining > 0) {
-    const minted = await mintChainCode(client, gift, params.letterId);
+    const minted = await mintChainCode(client, gift, params.letterId, params.mailsAt);
     return { gift, card: fundedCard(minted.code, minted.expiresAt) };
   }
   return { gift, card: unfundedCard() };

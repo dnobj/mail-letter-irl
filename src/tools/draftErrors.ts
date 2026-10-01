@@ -61,7 +61,8 @@ export const HANDLED_DRAFT_ERROR_CODES = [
   'JIT_ORDER_INVALID',
   'JIT_ORDER_NOT_FOUND',
   'JIT_ORDER_NOT_OWNED',
-  'JIT_ORDER_NOT_PAID'
+  'JIT_ORDER_NOT_PAID',
+  'SCHEDULE_PASSED'
 ] as const;
 
 export function friendlyDraftError(
@@ -125,6 +126,12 @@ export function friendlyDraftError(
   }
   if (code === 'DRAFT_CANCELLED') {
     return new Error(`This draft was cancelled. Please create a new ${noun} draft.`);
+  }
+  // Arrive-by (#535). Upstream interpolates the draft id and the date.
+  if (code === 'SCHEDULE_PASSED') {
+    return new Error(
+      `The day this ${noun} was to go to the printer has passed, so it can no longer arrive by its date. Please preview it again with a new arrival date, or with none to send it as soon as possible.`
+    );
   }
   if (code === 'DRAFT_CHECKOUT_PENDING') {
     return new Error(

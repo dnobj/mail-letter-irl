@@ -11,7 +11,10 @@ import { assertNoRecentDuplicateMail } from './duplicateMailService.js';
 import { consumeGiftLetterForSendWithClient } from './giftLetterService.js';
 import { isGiftLettersEnabled } from '../config/giftLetters.js';
 import type { GiftCardContent } from './giftCardRenderer.js';
-import type { Letter, LetterDraft, LetterJob, Order, PostcardDraft } from './types.js';
+import { dispatchAt, earliestMailOn } from './deliverySchedule.js';
+import { draftScheduleOf } from './draftSchedule.js';
+import { writeDiagnostic } from '../utils/diagnosticLog.js';
+import type { DraftSchedule, Letter, LetterDraft, LetterJob, Order, PostcardDraft } from './types.js';
 
 export type SendMailType = 'letter' | 'postcard';
 
@@ -86,6 +89,27 @@ function buildPostcardContent(draft: MailDraftRow): Record<string, unknown> {
     // As for letters: absent for the legacy HTML path (#534).
     ...(draft.renderer_version ? { rendererVersion: draft.renderer_version } : {})
   };
+}
+
+/**
+ * The arrive-by dates a send keeps (#535), or null to mail as soon as it can.
+ * The draft's mail date must not have passed: today counts until noon New
+ * York time (earliestMailOn), so a draft previewed before the cutoff and sent
+ * after it has missed its date. A prepaid or gift send then refuses, so the
+ * person can choose a new date. A Pay & Send order has already been charged,
+ * so its mail goes as soon as it can instead (refusing would strand the
+ * money, as for the caps below), and the miss is logged; createJitCheckout
+ * refuses a passed date before any charge.
+ */
+function sendSchedule(draft: MailDraftRow, funding: MailFunding, draftId: string): DraftSchedule | null {
+  const schedule = draftScheduleOf(draft);
+  if (!schedule) return null;
+  if (schedule.mailOn >= earliestMailOn(new Date())) return schedule;
+  if (funding.type === 'jit_order') {
+    writeDiagnostic('warn', 'send.schedule_missed', { funding: funding.type, mailOn: schedule.mailOn });
+    return null;
+  }
+  throw draftError('SCHEDULE_PASSED', `Draft ${draftId} was to go to the printer on ${schedule.mailOn}, which has passed`);
 }
 
 async function loadCreditsRemaining(
@@ -232,6 +256,10 @@ export async function createMailOrderFromDraftWithClient(
     throw draftError('DRAFT_INVALID_STATE', `Draft ${params.draftId} is ${draft.status}`);
   }
 
+  // Held mail (#535): when it goes to the printer, decided before any value moves.
+  const schedule = sendSchedule(draft, funding, params.draftId);
+  const releaseAt = schedule ? dispatchAt(schedule.mailOn) : undefined;
+
   // A gift draft is funded by a gift letter instead of the balance. Pay & Send
   // ignores the flag: that path runs after Stripe has charged, and
   // createJitCheckout refuses a gift draft before any charge exists.
@@ -288,8 +316,8 @@ export async function createMailOrderFromDraftWithClient(
   const letterResult = await client.query<Letter>(
     `INSERT INTO letters (
        letter_id, user_id, content, recipient, credits_cost, status,
-       preview_html, mail_type, funding_type, funding_order_id
-     ) VALUES ($1, $2, $3, $4, $5, 'draft', $6, $7, $8, $9)
+       preview_html, mail_type, funding_type, funding_order_id, arrive_by, mail_on
+     ) VALUES ($1, $2, $3, $4, $5, 'draft', $6, $7, $8, $9, $10::date, $11::date)
      RETURNING *`,
     [
       letterId,
@@ -300,7 +328,9 @@ export async function createMailOrderFromDraftWithClient(
       draft.preview_html || null,
       params.mailType,
       fundingType,
-      funding.type === 'jit_order' ? funding.orderId : null
+      funding.type === 'jit_order' ? funding.orderId : null,
+      schedule?.arriveBy ?? null,
+      schedule?.mailOn ?? null
     ]
   );
   let letter = letterResult.rows[0];
@@ -312,7 +342,9 @@ export async function createMailOrderFromDraftWithClient(
     // serialised per account exactly as on the prepaid path.
     const consumed = await consumeGiftLetterForSendWithClient(client, {
       userId: params.userId,
-      letterId
+      letterId,
+      // Held mail's card is decided as of the day it goes to the printer.
+      mailsAt: releaseAt
     });
     if (!consumed) {
       throw draftError('GIFT_LETTER_UNAVAILABLE', `No gift letter available for draft ${params.draftId}`);
@@ -404,7 +436,7 @@ export async function createMailOrderFromDraftWithClient(
      WHERE draft_id = $2`,
     [letterId, params.draftId]
   );
-  const job = await createLetterJobWithClient(client as pg.PoolClient, letter);
+  const job = await createLetterJobWithClient(client as pg.PoolClient, letter, { notBefore: releaseAt });
 
   if (jitOrder) {
     await client.query(

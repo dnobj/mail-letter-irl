@@ -167,6 +167,24 @@ describe('createMailOrderFromDraft: gift sends', () => {
     expect(mocks.createOutboxJob).toHaveBeenCalledTimes(1);
   });
 
+  it('decides a held gift send as of the moment it goes to the printer (#535)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-10-01T14:00:00Z'));
+      draft.expires_at = new Date('2026-10-01T15:00:00Z');
+      draft.arrive_by = '2026-10-16';
+      draft.mail_on = '2026-10-06';
+
+      const result = await createMailOrderFromDraft({ draftId: 'draft-gift', userId: 'user-1', mailType: 'letter' });
+
+      const release = new Date('2026-10-06T13:00:00Z');
+      expect(mocks.consumeGift).toHaveBeenCalledWith(client, { userId: 'user-1', letterId: result.letter.letter_id, mailsAt: release });
+      expect(mocks.createOutboxJob.mock.calls[0][2]).toEqual({ notBefore: release });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('checks the caps and the duplicate guard only after the gift consumption has locked the account', async () => {
     await createMailOrderFromDraft({ draftId: 'draft-gift', userId: 'user-1', mailType: 'letter' });
     const consumeAt = calls.indexOf('consume-gift');

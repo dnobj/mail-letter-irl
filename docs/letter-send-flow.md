@@ -131,18 +131,27 @@ not a gap.
 `send_letter` and `send_postcard` call the same atomic service. Inside one PostgreSQL transaction the service:
 
 1. selects the draft `FOR UPDATE`;
-2. validates ownership, mail type, state, and expiry;
+2. validates ownership, mail type, state, and expiry, and for a draft with an arrival date that its mail date has not passed (below);
 3. returns the existing order if the draft was already consumed;
 4. inserts the Letter IRL order;
 5. locks and deducts prepaid sends from the user's ledger, or, for a draft previewed as a gift send, uses one gift letter under the same account lock and decides its card ([Gift Letters](gift-letters.md));
 6. checks the daily caps (and, for a gift send, the daily gift budget), then refuses the same mail sent recently (below), unless the caller asked for another copy;
 7. marks the draft consumed and links it to the order;
-8. inserts one `letter_jobs` outbox row;
+8. inserts one `letter_jobs` outbox row, due at once, or for held mail at 09:00 New York time on its mail date;
 9. commits.
 
 Any error rolls back every effect. An insufficient balance therefore creates no order, consumes no draft, inserts no job, and deducts no sends.
 
 Database constraints enforce one outbox row and one stable idempotency key per letter. Concurrent calls serialize on the draft lock, so the second call returns the first order.
+
+**Held mail (#535).** A draft can carry the date its mail should arrive by and the date it goes to the printer (`arrive_by` and `mail_on`, migration 040). The mail date is worked back from the arrival date by a lead time of business days, by `src/services/deliverySchedule.ts`. No preview sets them yet; that comes with the preview tools' `arriveBy`.
+- **The hold:** the send copies both dates to the letter and creates its job with `next_attempt_at` at 09:00 New York time on the mail date. `scheduled_at` records the same moment, written as a timestamp without a zone in the database session's zone. Value moves at the send, as for any letter: sends, a gift letter or a paid order.
+  - The claim takes a job only once `next_attempt_at` has passed. So neither the inline dispatch right after the send nor the hourly run touches it before then, and the first hourly run after 09:00 sends it to PostGrid as an ordinary order. No PostGrid `sendDate` is used.
+- **A passed mail date:** today counts as a mail date until noon New York time on a business day, so a draft previewed before the cutoff and sent after it has missed its date.
+  - A prepaid or gift send is then refused with `SCHEDULE_PASSED`, before anything is written: "The day this letter was to go to the printer has passed…". The person previews again with a new date.
+  - A Pay & Send checkout refuses such a draft before the charge. A paid order whose date passes before fulfilment mails as soon as it can instead, logging `send.schedule_missed`, because refusing after the charge would strand the money.
+- **A held gift letter** decides its card as of the moment it goes to the printer. A seed campaign that will have ended by then does not print its code, and a chain code's 90 days count from then ([Gift Letters](gift-letters.md)).
+- **DATE columns** are read as 'YYYY-MM-DD' strings (`src/db/dateParser.ts`). A draft whose dates are anything else is refused rather than read as some day.
 
 ## The Same Mail Twice
 
@@ -239,7 +248,7 @@ A gift letter (`funding_type = 'gift_letter'`) consumed no credits, so its compe
 
 ## Hourly Recovery
 
-Railway runs `npm run maintenance` once per hour. Outbox recovery atomically claims due rows with `FOR UPDATE SKIP LOCKED`, allowing safe concurrency. A job left in processing with a lock older than 15 minutes is treated as stale and can be reclaimed.
+Railway runs `npm run maintenance` once per hour. Outbox recovery atomically claims due rows with `FOR UPDATE SKIP LOCKED`, allowing safe concurrency. Held mail (#535) is due from 09:00 New York time on its mail date. A job left in processing with a lock older than 15 minutes is treated as stale and can be reclaimed.
 
 The same stable provider idempotency key is reused after timeout or process restart. This protects against a provider order succeeding while the application loses the response.
 

@@ -3756,13 +3756,28 @@ describe('commerceService', () => {
       ['already sent', { status: 'consumed' }, 'DRAFT_INVALID_STATE'],
       ['cancelled', { status: 'cancelled' }, 'DRAFT_INVALID_STATE'],
       ['expired', { status: 'expired' }, 'DRAFT_EXPIRED'],
-      ['past its expiry', { expires_at: new Date(Date.now() - 60_000) }, 'DRAFT_EXPIRED']
+      ['past its expiry', { expires_at: new Date(Date.now() - 60_000) }, 'DRAFT_EXPIRED'],
+      // Arrive-by (#535): refused before the charge; after it, fulfilment mails as soon as it can.
+      ['past its mail date', { arrive_by: '2020-01-13', mail_on: '2020-01-02' }, 'SCHEDULE_PASSED']
     ])('refuses a draft that is %s for that reason, never as a copy of itself', async (_label, extra, code) => {
       dupState.letters = [mail()];
       draftRow = pendingDraft(extra);
 
       await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).rejects.toMatchObject({ code });
 
+      expect(dupState.calls).toEqual([]);
+    });
+
+    it('reads the dates as the send does, so ones it could not read fail before any charge (#535)', async () => {
+      dupState.letters = [mail()];
+      // A Date, as pg without the DATE parser would give: the send would throw
+      // after the charge, so the checkout must throw first.
+      draftRow = pendingDraft({ arrive_by: '2099-01-16', mail_on: new Date('2099-01-06T00:00:00') });
+
+      await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).rejects.toThrow(
+        "letter_drafts.mail_on is not a 'YYYY-MM-DD' string"
+      );
+      expect(mocks.createJitSession).not.toHaveBeenCalled();
       expect(dupState.calls).toEqual([]);
     });
 
