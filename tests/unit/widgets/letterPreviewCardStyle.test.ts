@@ -231,7 +231,7 @@ describe('the Style row (#563)', () => {
     expect(card.drawn()).toContain('<title>Dear Sam,\nPat</title>');
   });
 
-  it('goes once the letter is sent', async () => {
+  it('goes once the letter is sent, and sets no style after', async () => {
     const card = mount();
     await card.show(output({ theme: 'classic', source: 'default' }));
 
@@ -239,6 +239,28 @@ describe('the Style row (#563)', () => {
     await card.answer({ result: { content: [], structuredContent: { orderId: 'ord_0001' } } }, 'send_letter');
 
     expect(card.visible('style-row')).toBe(false);
+    // A press that still reaches the hidden row (a host delivering it) does nothing.
+    await card.choose('botanical');
+    expect(card.lastRequest('tools/call', 'set_stationery')).toBeUndefined();
+  });
+
+  it('comes back after a send refused as a duplicate, even when the host redrew the card during it (#572 review round 3)', async () => {
+    const card = mount();
+    await card.show(output({ theme: 'classic', source: 'default' }));
+
+    await card.click('send-button');
+    await card.show(output({ theme: 'classic', source: 'default' }));
+    expect(card.visible('style-row')).toBe(false);
+    await card.answer(
+      {
+        result: {
+          isError: true,
+          content: [{ type: 'text', text: 'Possible duplicate: you sent the same letter to Sam Rivera 5 minutes ago.' }]
+        }
+      },
+      'send_letter'
+    );
+    expect(card.visible('style-row')).toBe(true);
   });
 
   it('is not on the postcard card: a postcard takes no stationery', () => {

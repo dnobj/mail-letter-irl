@@ -1842,6 +1842,8 @@
             const duplicate = duplicateDetails(result, null);
             if (duplicate) {
               showDuplicate(duplicate, "send");
+              // The draft is still to send: the rows a redraw hid come back.
+              showPickerAgain();
               return;
             }
             // Thrown with its text, where the catch below also finds the
@@ -1911,6 +1913,7 @@
           const duplicate = duplicateDetails(null, error);
           if (duplicate) {
             showDuplicate(duplicate, "send");
+            showPickerAgain();
             return;
           }
           // An error result arrives here with its text, and a host's
