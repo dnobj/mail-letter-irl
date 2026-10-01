@@ -340,8 +340,15 @@ export async function markExpiredDrafts(): Promise<number> {
 }
 
 /**
- * Delete old consumed/expired drafts.
- * Should be called periodically (e.g., weekly) by a background worker.
+ * Delete drafts that are done with: sent (consumed), expired or cancelled,
+ * last changed more than `olderThanDays` ago, and never paid for by an order.
+ * The hourly maintenance calls it once a day.
+ *
+ * A sent draft whose letter waits for its mail date (#535) stays until
+ * `olderThanDays` after that date: its confirmation link and a reopened card
+ * read the letter through it (#564), and a wait can be 60 days. The date
+ * cutoff is its own integer parameter; the timestamp one is never cast a
+ * second way.
  */
 export async function cleanupOldDrafts(olderThanDays: number = 7): Promise<number> {
   const cutoffDate = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000);
@@ -353,8 +360,13 @@ export async function cleanupOldDrafts(olderThanDays: number = 7): Promise<numbe
        AND NOT EXISTS (
          SELECT 1 FROM orders WHERE orders.draft_id = letter_drafts.draft_id
        )
+       AND NOT EXISTS (
+         SELECT 1 FROM letters
+          WHERE letters.letter_id = letter_drafts.consumed_letter_id
+            AND letters.mail_on >= CURRENT_DATE - $2::int
+       )
      RETURNING draft_id`,
-    [cutoffDate]
+    [cutoffDate, olderThanDays]
   );
 
   const count = result.rowCount ?? 0;
