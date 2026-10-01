@@ -170,7 +170,7 @@ describe("published output-schema parity (#278)", () => {
   ] as const)("declares the arrival dates on offer the same way on both served layers: %s (#535)", (name, outputZ) => {
     const arrivalWindow = (
       getManifestTool(name)?.outputSchema as {
-        properties: { arrivalWindow: { properties: Record<string, unknown>; required: string[] } };
+        properties: { arrivalWindow: { description: string; properties: Record<string, unknown>; required: string[] } };
       }
     ).properties.arrivalWindow;
     const served = outputZ.shape.arrivalWindow;
@@ -181,6 +181,9 @@ describe("published output-schema parity (#278)", () => {
     expect(zodKeys).toEqual(["earliestArrival", "latestArrival"]);
     expect(Object.keys(arrivalWindow.properties).sort()).toEqual(zodKeys);
     expect([...arrivalWindow.required].sort()).toEqual(zodKeys);
+    // Both say what it is: what can be scheduled, not when this mail arrives.
+    expect(served.description).toBe(arrivalWindow.description);
+    expect(served.description).toMatch(/not when this mail arrives/);
   });
 });
 

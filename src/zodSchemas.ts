@@ -26,6 +26,8 @@ export const ARRIVE_BY_DESCRIPTION =
 const arriveByZ = z.string().optional().describe(ARRIVE_BY_DESCRIPTION);
 
 /** The arrival dates on offer (#535), on every preview while the feature is on. */
+export const ARRIVAL_WINDOW_DESCRIPTION =
+  "The arrival dates that can be chosen now, while arrival dates are on (#535), for a card's date picker: what can be scheduled, not when this mail arrives";
 const arrivalWindowZ = z.object({
   earliestArrival: z.string(),
   latestArrival: z.string()
@@ -382,7 +384,7 @@ export const quoteAndPreviewOutputZ = z.object({
   giftCard: giftCardZ.optional(),
   giftLettersAvailable: z.number().int().nonnegative().optional(),
   schedule: previewScheduleZ.optional(),
-  arrivalWindow: arrivalWindowZ.optional()
+  arrivalWindow: arrivalWindowZ.optional().describe(ARRIVAL_WINDOW_DESCRIPTION)
 });
 
 export const sendLetterOutputZ = z.object({
@@ -594,7 +596,7 @@ export const quoteAndPreviewPostcardOutputZ = z.object({
   giftCard: giftCardZ.optional(),
   giftLettersAvailable: z.number().int().nonnegative().optional(),
   schedule: previewScheduleZ.optional(),
-  arrivalWindow: arrivalWindowZ.optional()
+  arrivalWindow: arrivalWindowZ.optional().describe(ARRIVAL_WINDOW_DESCRIPTION)
 });
 
 export const sendPostcardOutputZ = z.object({

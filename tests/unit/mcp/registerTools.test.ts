@@ -27,7 +27,7 @@ import {
   getZodOutputShape,
   summarizeToolResult
 } from '../../../src/mcp/registerTools.js';
-import { getStartedTool } from '../../../src/tools/index.js';
+import { cancelScheduledMailTool, getStartedTool, setArrivalDateTool } from '../../../src/tools/index.js';
 import { clientProfileNamed } from '../../../src/auth/clientProfiles.js';
 
 /**
@@ -401,6 +401,17 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
 
     it('should declare noauth security scheme when auth is disabled', () => {
       expect(buildToolSecuritySchemes('send_letter', false)).toEqual([{ type: 'noauth' }]);
+    });
+
+    it('lets the cards call set_arrival_date and cancel_scheduled_mail, and leaves both to the model too (#535)', () => {
+      for (const tool of [setArrivalDateTool, cancelScheduledMailTool]) {
+        // With the send rule on, which is when card-only tools are hidden.
+        const meta = buildToolMeta(tool.name, tool.meta ?? {}, true, true);
+        expect(meta['openai/widgetAccessible'], tool.name).toBe(true);
+        expect(meta.ui, tool.name).toMatchObject({ widgetAccessible: true });
+        expect(meta['openai/visibility'], tool.name).toBeUndefined();
+        expect((meta.ui as Record<string, unknown>).visibility, tool.name).toBeUndefined();
+      }
     });
 
     it('should merge securitySchemes into tool metadata', () => {

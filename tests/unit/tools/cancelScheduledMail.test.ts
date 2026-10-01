@@ -49,9 +49,9 @@ beforeEach(() => {
 });
 
 describe('the cards (#535)', () => {
-  it('may call it, for Cancel on a scheduled letter, as the model still may', () => {
+  // buildToolMeta, which also decides whether the model sees it, is proved in registerTools.test.ts.
+  it('may call it, for Cancel on a scheduled letter', () => {
     expect(cancelScheduledMailTool.meta?.['openai/widgetAccessible']).toBe(true);
-    expect(cancelScheduledMailTool.meta?.['openai/visibility']).toBeUndefined();
   });
 });
 

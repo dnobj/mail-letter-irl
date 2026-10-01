@@ -167,7 +167,7 @@
           },
           "arrivalWindow": {
             "type": "object",
-            "description": "The arrival dates on offer, on every preview while arrival dates are on (#535): a card's date picker offers them",
+            "description": "The arrival dates that can be chosen now, while arrival dates are on (#535), for a card's date picker: what can be scheduled, not when this mail arrives",
             "properties": {
               "earliestArrival": {
                 "type": "string",
@@ -517,7 +517,7 @@
           },
           "arrivalWindow": {
             "type": "object",
-            "description": "The arrival dates on offer, on every preview while arrival dates are on (#535): a card's date picker offers them",
+            "description": "The arrival dates that can be chosen now, while arrival dates are on (#535), for a card's date picker: what can be scheduled, not when this mail arrives",
             "properties": {
               "earliestArrival": {
                 "type": "string",
@@ -867,7 +867,7 @@
           },
           "arrivalWindow": {
             "type": "object",
-            "description": "The arrival dates on offer, on every preview while arrival dates are on (#535): a card's date picker offers them",
+            "description": "The arrival dates that can be chosen now, while arrival dates are on (#535), for a card's date picker: what can be scheduled, not when this mail arrives",
             "properties": {
               "earliestArrival": {
                 "type": "string",
@@ -1943,7 +1943,7 @@
           },
           "arrivalWindow": {
             "type": "object",
-            "description": "The arrival dates on offer, on every preview while arrival dates are on (#535): a card's date picker offers them",
+            "description": "The arrival dates that can be chosen now, while arrival dates are on (#535), for a card's date picker: what can be scheduled, not when this mail arrives",
             "properties": {
               "earliestArrival": {
                 "type": "string",

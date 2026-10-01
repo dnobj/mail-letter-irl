@@ -39,9 +39,9 @@ function context(now = THURSDAY_MORNING): ToolContext {
 const set = (input: Record<string, unknown>, ctx = context()) => setArrivalDateTool.handler(input as never, ctx);
 
 describe('the cards (#535)', () => {
-  it('may call it, for the Arrives picker, as the model still may', () => {
+  // buildToolMeta, which also decides whether the model sees it, is proved in registerTools.test.ts.
+  it('may call it, for the Arrives picker', () => {
     expect(setArrivalDateTool.meta?.['openai/widgetAccessible']).toBe(true);
-    expect(setArrivalDateTool.meta?.['openai/visibility']).toBeUndefined();
   });
 });
 
