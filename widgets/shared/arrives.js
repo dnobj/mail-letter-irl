@@ -114,9 +114,6 @@
     // pending: the date being set while the server answers ("" for as soon
     // as possible), so the field keeps what the person chose meanwhile.
     var state = { draftId: null, schedule: null, min: "", max: "", busy: false, pending: null, message: "", error: false };
-    // Whether show() last drew the row, so restore() brings back only a row
-    // the card took away itself.
-    var visible = false;
 
     function draw() {
       options.input.min = state.min;
@@ -225,7 +222,6 @@
           !isCalendarDate(offered.earliestArrival) ||
           !isCalendarDate(offered.latestArrival)
         ) {
-          visible = false;
           hide();
           return;
         }
@@ -239,14 +235,6 @@
           state.message = "";
           state.error = false;
         }
-        visible = true;
-        options.row.style.display = "";
-        draw();
-      },
-      // Back after the card took the row away, for a checkout that did not
-      // open: only a row show() had drawn, for the same draft.
-      restore: function () {
-        if (!visible) return;
         options.row.style.display = "";
         draw();
       },

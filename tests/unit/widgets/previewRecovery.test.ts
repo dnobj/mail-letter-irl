@@ -2965,6 +2965,25 @@ describe.each([LETTER, POSTCARD])('$file keeps a send with an arrival date (#535
     expect(harness.visible('arrives-row')).toBe(true);
   });
 
+  it('brings the date row back when the host redraws the card during a checkout that then fails', async () => {
+    const harness = mount(spec, {
+      toolOutput: { ...offered('draft_host_0001'), ...eligibility(false) },
+      toolResponseMetadata: spec.meta(),
+      failCheckouts: 1
+    });
+    await flush();
+    harness.holdCalls();
+    await harness.click('pay-send-button');
+    expect(harness.visible('arrives-row')).toBe(false);
+
+    await harness.fireGlobals();
+    expect(harness.visible('arrives-row')).toBe(false);
+    await harness.releaseCalls();
+
+    expect(harness.text('pay-send-button')).toBe('Retry Pay & Send');
+    expect(harness.visible('arrives-row')).toBe(true);
+  });
+
   it('brings back no date row the card never showed, when a checkout does not open', async () => {
     const harness = mount(spec, {
       toolOutput: spec.output('draft_host_0001', eligibility(false)),
