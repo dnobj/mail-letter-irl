@@ -366,6 +366,7 @@ function letterParams(letter: Letter, job: LetterJob): LetterParams {
     inlineImageData: content.inlineImageData,
     giftCard: content.giftCard,
     rendererVersion: content.rendererVersion,
+    stationery: content.stationery,
     metadata: {
       letterId: letter.letter_id,
       userId: letter.user_id,

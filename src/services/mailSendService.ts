@@ -75,7 +75,9 @@ function buildLetterContent(draft: MailDraftRow): Record<string, unknown> {
     inlineImageUrl: draft.inline_image_url,
     // The letter prints with the renderer its preview was drawn with (#534).
     // Absent for the legacy HTML path, so those letters' content is unchanged.
-    ...(draft.renderer_version ? { rendererVersion: draft.renderer_version } : {})
+    ...(draft.renderer_version ? { rendererVersion: draft.renderer_version } : {}),
+    // And in the stationery it was drawn in (#563); absent for Classic.
+    ...(draft.stationery ? { stationery: draft.stationery } : {})
   };
 }
 

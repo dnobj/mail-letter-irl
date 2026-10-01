@@ -8,7 +8,7 @@
 import { deflateSync } from 'node:zlib';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PostGridProvider } from '../../../src/services/providers/PostGridProvider.js';
-import { layoutGiftPage, layoutLetter, RENDERER_VERSION, renderPdf } from '../../../src/render/index.js';
+import { layoutGiftPage, layoutLetter, RENDERER_VERSION, renderPdf, STATIONERY_RENDERER_VERSION } from '../../../src/render/index.js';
 import { giftLetterPageCopy } from '../../../src/services/giftCardRenderer.js';
 
 const diagnostics = vi.hoisted(() => ({ written: [] as Array<{ level: string; event: string; fields: Record<string, unknown> }> }));
@@ -335,6 +335,97 @@ describe('letters printed from our own PDF (#534)', () => {
       event: 'provider.postgrid.render_refused',
       fields: expect.objectContaining({ reason: 'overflow' })
     }));
+  });
+
+  describe('stationery (#563)', () => {
+    const BOTANICAL = { theme: 'botanical' as const, dateLine: 'October 1, 2026' };
+
+    /** The PDF uploaded for `params`, rendered at a fixed time so it can be compared byte for byte. */
+    async function printed(params: Record<string, unknown>) {
+      const fetchMock = accepted();
+      vi.stubGlobal('fetch', fetchMock);
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-10-01T12:00:00Z'));
+      try {
+        const result = await provider().sendLetter({ ...base, ...params } as Parameters<PostGridProvider['sendLetter']>[0]);
+        const call = fetchMock.mock.calls[0] as [string, RequestInit] | undefined;
+        const pdf = call ? Buffer.from(await ((call[1].body as FormData).get('pdf') as File).arrayBuffer()) : null;
+        return { result, pdf, fetchMock };
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+
+    async function drawn(stationery?: typeof BOTANICAL, giftCard?: typeof GIFT_CARD) {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-10-01T12:00:00Z'));
+      try {
+        const layout = layoutLetter({ text: base.message, layoutType: 'text_only', stationery });
+        if (giftCard) layout.pages.push(layoutGiftPage(giftLetterPageCopy(giftCard, base.senderName)));
+        return await renderPdf(layout, stationery ? STATIONERY_RENDERER_VERSION : RENDERER_VERSION);
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+
+    it('prints a pdf-2 letter in the stationery it was drawn in', async () => {
+      const { result, pdf } = await printed({ rendererVersion: STATIONERY_RENDERER_VERSION, stationery: BOTANICAL });
+
+      expect(result.success).toBe(true);
+      expect(pdf!.equals(await drawn(BOTANICAL))).toBe(true);
+      expect(pdf!.equals(await drawn())).toBe(false);
+      // The file names the version it was drawn as (#563 review round 3).
+      expect(pdf!.toString('latin1')).toContain(`Letter IRL renderer ${STATIONERY_RENDERER_VERSION}`);
+    });
+
+    it("prints a pdf-2 gift send's themed page, then today's card page (#563 review round 3)", async () => {
+      const { result, pdf } = await printed({
+        rendererVersion: STATIONERY_RENDERER_VERSION,
+        stationery: BOTANICAL,
+        giftCard: GIFT_CARD
+      });
+
+      expect(result.success).toBe(true);
+      expect(pdf!.equals(await drawn(BOTANICAL, GIFT_CARD))).toBe(true);
+      expect(pdf!.toString('latin1')).toMatch(/\/Count 2\b/);
+    });
+
+    it('prints a pdf-1 letter as Classic, whatever stationery its content carries', async () => {
+      const { pdf } = await printed({ rendererVersion: RENDERER_VERSION, stationery: BOTANICAL });
+
+      expect(pdf!.equals(await drawn())).toBe(true);
+    });
+
+    it.each([
+      ['no stationery', undefined],
+      ['a theme this build does not draw', { theme: 'typewriter' }],
+      ['Classic, which is never stored', { theme: 'classic' }],
+      ['a slot that is not text', { theme: 'monogram', monogram: 42 }]
+    ])('holds a pdf-2 letter with %s, and sends nothing', async (_label, stationery) => {
+      diagnostics.written = [];
+      const { result, fetchMock } = await printed({ rendererVersion: STATIONERY_RENDERER_VERSION, stationery, metadata: { letterId: 'letter-s' } });
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('stationery this build cannot read');
+      expect(result.metadata).toMatchObject({ submissionOutcome: 'ambiguous', retryable: false, errorClass: 'render_refused' });
+      expect(diagnostics.written).toContainEqual(expect.objectContaining({
+        event: 'provider.postgrid.render_refused',
+        fields: expect.objectContaining({ reason: 'render', letterId: 'letter-s' })
+      }));
+    });
+
+    it('holds a pdf-2 letter whose headline no longer fits, rather than printing it otherwise', async () => {
+      const headline = 'Congratulations on your graduation and your new job in the city, from all of us!';
+      const { result, fetchMock } = await printed({
+        rendererVersion: STATIONERY_RENDERER_VERSION,
+        stationery: { theme: 'celebration', headline }
+      });
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(result.error).toContain('could not be laid out');
+      expect(result.metadata).toMatchObject({ errorClass: 'render_refused' });
+    });
   });
 
   it('can print every renderer version the database admits (migration CHECK)', async () => {

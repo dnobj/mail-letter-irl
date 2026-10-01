@@ -13,10 +13,12 @@ import { ADDRESS_ZONE, BODY_TOP, LINE_PITCH, PAGE_WIDTH, SIDE_MARGIN } from '../
 import { placeGlyphs, shape } from '../../../src/render/glyphs.js';
 import type { RenderImage } from '../../../src/render/images.js';
 import { layoutLetter, type Layout, type LayoutItem, type PathItem, type TextRun } from '../../../src/render/layout.js';
-import { renderPdf } from '../../../src/render/pdf.js';
+import {
+  PRINTABLE_RENDERER_VERSIONS, RENDERER_VERSION, rendererVersionFor, renderPdf, STATIONERY_RENDERER_VERSION
+} from '../../../src/render/pdf.js';
 import { renderPreviewSvg } from '../../../src/render/preview.js';
 import {
-  HEADLINE_LINES, headlineSize, layoutStationery, slotText, STATIONERY_CORNER, STATIONERY_THEMES, StationeryOverflow,
+  HEADLINE_LINES, headlineSize, layoutStationery, slotText, STATIONERY_CORNER, STATIONERY_THEMES, stationeryOf, StationeryOverflow,
   type Stationery, type StationeryTheme
 } from '../../../src/render/stationery.js';
 
@@ -351,5 +353,36 @@ describe("a theme's slots (#563)", () => {
 
   it('refuse a theme this build does not know, rather than draw another page', () => {
     expect(() => letter({ theme: 'typewriter' as StationeryTheme })).toThrow(/Unknown stationery theme: typewriter/);
+  });
+});
+
+describe('a stored theme (#563)', () => {
+  it('reads back a theme this build draws, with its text slots', () => {
+    const stored = { theme: 'celebration', dateLine: 'October 1, 2026', headline: 'Happy Birthday!', extra: 'ignored' };
+    expect(stationeryOf(stored)).toEqual({ theme: 'celebration', dateLine: 'October 1, 2026', headline: 'Happy Birthday!' });
+    expect(stationeryOf({ theme: 'monogram', monogram: 'AL', dateLine: null })).toEqual({ theme: 'monogram', monogram: 'AL' });
+  });
+
+  it.each([
+    ['nothing', null],
+    ['a string', 'botanical'],
+    ['an array', [{ theme: 'botanical' }]],
+    ['no theme', { dateLine: 'October 1, 2026' }],
+    ['Classic, which is stored as none', { theme: 'classic' }],
+    ['a theme this build does not draw', { theme: 'typewriter' }],
+    ['a slot that is not text', { theme: 'monogram', monogram: 42 }],
+    ['a slot far past anything that prints', { theme: 'celebration', headline: 'x'.repeat(201) }]
+  ])('reads %s as no theme', (_label, value) => {
+    expect(stationeryOf(value)).toBeNull();
+  });
+
+  it('records pdf-2 for a theme, and pdf-1 for Classic or none', () => {
+    expect(rendererVersionFor({ theme: 'botanical' })).toBe(STATIONERY_RENDERER_VERSION);
+    expect(STATIONERY_RENDERER_VERSION).toBe('pdf-2');
+    expect(rendererVersionFor({ theme: 'classic', headline: 'Hi' })).toBe(RENDERER_VERSION);
+    expect(rendererVersionFor(null)).toBe(RENDERER_VERSION);
+    expect(rendererVersionFor()).toBe(RENDERER_VERSION);
+    expect(PRINTABLE_RENDERER_VERSIONS.has(STATIONERY_RENDERER_VERSION)).toBe(true);
+    expect(PRINTABLE_RENDERER_VERSIONS.has(RENDERER_VERSION)).toBe(true);
   });
 });

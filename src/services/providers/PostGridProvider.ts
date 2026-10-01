@@ -42,7 +42,11 @@ import {
   layoutPostcard,
   PRINTABLE_RENDERER_VERSIONS,
   readImageDataUri,
-  renderPdf
+  renderPdf,
+  rendererVersionFor,
+  STATIONERY_RENDERER_VERSION,
+  stationeryOf,
+  type Stationery
 } from '../../render/index.js';
 
 /**
@@ -826,9 +830,19 @@ export class PostGridProvider implements LetterFulfillmentProvider {
     } catch (error) {
       throw new RenderRefusal('image', `The letter's image could not be read: ${reason(error)}`);
     }
+    // A letter drawn in stationery (#563) prints in it. One whose stored theme
+    // this build cannot read is refused, never printed as Classic.
+    let stationery: Stationery | undefined;
+    if (params.rendererVersion === STATIONERY_RENDERER_VERSION) {
+      const stored = stationeryOf(params.stationery);
+      if (!stored) {
+        throw new RenderRefusal('render', 'The letter was drawn in stationery this build cannot read.');
+      }
+      stationery = stored;
+    }
     let layout;
     try {
-      layout = layoutLetter({ text: params.message, layoutType, image });
+      layout = layoutLetter({ text: params.message, layoutType, image, stationery });
     } catch (error) {
       throw new RenderRefusal('render', `The letter could not be laid out: ${reason(error)}`);
     }
@@ -844,7 +858,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       }
     }
     try {
-      return await renderPdf(layout);
+      return await renderPdf(layout, rendererVersionFor(stationery));
     } catch (error) {
       throw new RenderRefusal('render', `The letter could not be drawn: ${reason(error)}`);
     }
@@ -1323,6 +1337,11 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       const renderer = params.rendererVersion;
       if (renderer != null && !PRINTABLE_RENDERER_VERSIONS.has(renderer)) {
         throw new RenderRefusal('unknown_version', `This build cannot print renderer version "${renderer}".`);
+      }
+      // Stationery is a letter's (#563): a postcard recording pdf-2 would print
+      // without it, so it is refused rather than printed otherwise.
+      if (renderer === STATIONERY_RENDERER_VERSION) {
+        throw new RenderRefusal('unknown_version', `A postcard is never drawn in stationery: renderer version "${renderer}".`);
       }
       // A gift send prints its card in a strip on the back (renderPostcardForPrint).
       const usePdf = renderer != null;

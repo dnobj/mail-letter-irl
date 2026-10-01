@@ -40,6 +40,36 @@ export interface Stationery {
   headline?: string;
 }
 
+/**
+ * The longest slot text a stored theme may carry: far past anything that
+ * prints. A draft stores its slots as slotText makes them, and only as
+ * stationeryOf reads them back (createDraft), so what is stored prints.
+ */
+export const STATIONERY_SLOT_MAX_LENGTH = 200;
+
+/**
+ * A theme read back from storage (a draft's stationery column, a letter's
+ * content): the object if its theme is one this build draws and each slot is
+ * absent or a string of sensible length, else null. Classic is stored as no
+ * theme at all, so a stored 'classic' is not a stored theme either.
+ */
+export function stationeryOf(value: unknown): Stationery | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const theme = record.theme;
+  if (typeof theme !== 'string' || theme === 'classic' || !(STATIONERY_THEMES as readonly string[]).includes(theme)) {
+    return null;
+  }
+  const stationery: Stationery = { theme: theme as StationeryTheme };
+  for (const slot of ['dateLine', 'monogram', 'headline'] as const) {
+    const text = record[slot];
+    if (text === undefined || text === null) continue;
+    if (typeof text !== 'string' || text.length > STATIONERY_SLOT_MAX_LENGTH) return null;
+    stationery[slot] = text;
+  }
+  return stationery;
+}
+
 /** What a theme adds to a page, and how far it moves the body down. */
 export interface StationeryLayout {
   items: LayoutItem[];

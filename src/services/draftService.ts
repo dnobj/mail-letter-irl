@@ -8,6 +8,7 @@
 import { query, transaction } from '../db/index.js';
 import type pg from 'pg';
 import { writeDiagnostic } from '../utils/diagnosticLog.js';
+import { stationeryOf } from '../render/stationery.js';
 import type {
   Letter,
   LetterDraft,
@@ -37,15 +38,23 @@ export async function createDraft(params: CreateDraftParams): Promise<CreateDraf
   const expiresInHours = params.expiresInHours ?? DEFAULT_EXPIRATION_HOURS;
   const expiresAt = new Date(Date.now() + expiresInHours * 60 * 60 * 1000);
   const layoutType = params.layoutType ?? 'text_only';
+  // Classic is stored as none (#563). A theme is stored as the print reads it
+  // back (stationeryOf), and one it would not read is refused before any
+  // draft exists, so a stored theme always prints.
+  const themed = params.stationery !== undefined && params.stationery.theme !== 'classic';
+  const stationery = themed ? stationeryOf(params.stationery) : null;
+  if (themed && !stationery) {
+    throw new Error('The stationery cannot be stored: the print would not read it back.');
+  }
 
   const result = await query<LetterDraft>(
     `INSERT INTO letter_drafts (
       user_id, sender, recipient, body_text, sign_off,
       required_credits, preview_html, sender_validation, recipient_validation,
       layout_type, header_image_data, header_image_url, inline_image_data, inline_image_url,
-      is_gift_send, renderer_version, status, expires_at, arrive_by, mail_on
+      is_gift_send, renderer_version, status, expires_at, arrive_by, mail_on, stationery
     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'pending', $17,
-              $18::date, $19::date)
+              $18::date, $19::date, $20::jsonb)
     RETURNING draft_id, expires_at`,
     [
       params.userId,
@@ -67,6 +76,7 @@ export async function createDraft(params: CreateDraftParams): Promise<CreateDraf
       expiresAt,
       params.schedule?.arriveBy ?? null,
       params.schedule?.mailOn ?? null,
+      stationery ? JSON.stringify(stationery) : null,
     ]
   );
 

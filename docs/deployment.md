@@ -648,7 +648,11 @@ draw the letter or postcard before any request was made. The reason is one of:
 - `image`: an image it could not read;
 - `overflow`: a letter that no longer fits its page, or a postcard message past its half of the back;
 - `size`: a postcard size the renderer does not draw (it draws 6x9 only);
-- `render`: anything else that failed to lay out or draw, a letter's gift card included.
+- `render`: anything else that failed to lay out or draw: a letter's gift card, or its stationery (#563), included.
+  Two of its messages are stationery's: "The letter was drawn in stationery this build cannot read." means
+  the stored theme is not one this build reads (`stationeryOf`): look at the letter's `content.stationery`.
+  "The stationery's headline (or date line, or monogram) does not fit." was measured to fit when it was
+  previewed, under the same version, so it is an overflow a renderer change caused.
 
 The log line `provider.postgrid.render_refused` names the reason and the letter id, and the hold's
 message says what was refused. Decide by the message, not the reason alone:
@@ -660,7 +664,10 @@ message says what was refused. Decide by the message, not the reason alone:
   - a drawing fault;
   - an overflow that a renderer change caused. A letter refused as `overflow` was measured to fit when
     it was previewed, under the same version, so a deploy changed the wrapping. Fix the renderer rather
-    than refund.
+    than refund. A stationery slot that "does not fit" is the same case;
+  - stationery this build cannot read, once a build that reads the stored theme is deployed. Stored
+    stationery is refused when the draft is made unless the print reads it back, so this means the
+    build changed, not the letter.
 - **Reject** when the content itself cannot print, resolving it as rejected
   (`provider_confirmed_rejected_refund`):
   - a message that is too long in any build;
@@ -691,6 +698,14 @@ layout than the person previewed.
 - Postcards set a later floor: the build that merged #545 is the first to print a postcard's version. Do
   not roll back below it while postcards with `content.rendererVersion` are queued or held, or postcard
   drafts with `renderer_version` are unexpired.
+- Stationery sets another (#563): migration 044's build is the first to print `pdf-2`, and the first whose
+  retention sweeps and erasure clear the `stationery` column.
+  - An older build cannot print `pdf-2`, so it holds such a letter as `render_refused` (`unknown_version`)
+    rather than printing it as Classic. Roll back only with no `pdf-2` letter queued or held, or retry the
+    holds once the newer build is back.
+  - An older build would redact a themed draft but keep its date line, initials and headline, and no later
+    sweep revisits a redacted draft. Roll back only with no `pdf-2` draft whose content is still live
+    (`redacted_at IS NULL`), not merely none unexpired: drafts expire in 24 hours, but are swept days later.
 
 `stripe_money_event_unmatched` covers two different situations, and they have
 different recovery paths.

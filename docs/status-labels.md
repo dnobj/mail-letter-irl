@@ -46,7 +46,9 @@ on (`src/services/letterJobService.ts`). After acceptance, the six-hourly status
 (`src/services/statusSyncService.ts`) applies PostGrid's lifecycle, which reuses `processing` for the
 printer stage. PostGrid's own statuses are `ready`, `printing`, `processed_for_delivery`, `completed` and
 `cancelled` (#566). It cancels a piece only while it is `ready`, before printing, so a `cancelled` piece
-fails here and what paid for it comes back (`failProviderCancelledLetter`).
+fails here (`failProviderCancelledLetter`). What paid for it comes back by itself for prepaid and gift mail our
+record still held as `accepted`; a Pay & Send letter, or one our record had seen printing or mailed, is left to a
+person, with a critical alert.
 
 ---
 
@@ -66,7 +68,7 @@ migration `023_jit_recovery_state_machines.sql`) allows exactly the values below
 | `in_transit` | Handed to USPS | status sync | No |
 | `delivered` | Delivered (estimated in live mode) | status sync | **Yes** |
 | `returned` | Returned to sender | status sync | **Yes** |
-| `failed` | Terminal failure: a definite provider rejection, exhausted retries, an operator's rejected decision, or a PostGrid cancellation (`cancelled`, before printing: what paid comes back, and an alert is raised, #566) | the outbox; an operator decision; status sync | **Yes** |
+| `failed` | Terminal failure: a definite provider rejection, exhausted retries, an operator's rejected decision, or a PostGrid cancellation (`cancelled`, before printing: an alert is raised, and what paid comes back by itself unless a person must decide, #566) | the outbox; an operator decision; status sync | **Yes** |
 | `cancelled` | Stopped before dispatch: the Pay & Send payment that funded it was refunded or disputed, the customer cancelled mail held to a date (#535), or the account was erased | commerce (`stopFundedMailBeforeFinancialReversal`); `cancel_scheduled_mail` and its REST route; account erasure | **Yes** |
 
 `printing` is **not** a database value; the constraint rejects it. It exists only in the MCP

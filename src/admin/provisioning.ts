@@ -49,9 +49,13 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  *
  * 043 adds the alert type provider_cancelled_mail (#566). The roles read
  * commerce_operational_alerts whole, so nothing to re-run.
+ *
+ * 044 adds letter_drafts.stationery (#563). As for 039, the reader role's
+ * column list leaves it out and the operator role reads letter_drafts whole,
+ * so nothing to re-run.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
-  "043_provider_cancelled_alert.sql";
+  "044_stationery.sql";
 
 export interface AdminProvisioningArguments {
   environment: "development" | "production";

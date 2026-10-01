@@ -286,6 +286,16 @@ describe('retention sweep guards (#153)', () => {
   });
 
   describe('purgePaidDraftContent specifics', () => {
+    it("saves a draft's stationery and keeps only its theme, so migration 044's pair still holds (#563)", async () => {
+      await purgePaidDraftContent();
+
+      const sql = sqlFrom(mocks.query.mock.calls[0]);
+      expect(sql).toContain("'stationery', to_jsonb(d.stationery)");
+      expect(sql).toContain(
+        "stationery = CASE WHEN stationery IS NULL THEN NULL ELSE jsonb_build_object('theme', stationery->'theme') END"
+      );
+    });
+
     it('requires an order in a PAID state, not merely an order row', async () => {
       await purgePaidDraftContent();
 
@@ -421,6 +431,11 @@ describe('retention sweep guards (#153)', () => {
       const sql = sqlFrom(mocks.query.mock.calls[1]);
       for (const jsonColumn of ['sender', 'recipient']) {
         expect(sql).toContain(`${jsonColumn} = (SELECT content->'${jsonColumn}' FROM saved)`);
+      }
+      // A nullable JSON column comes back as SQL NULL, not JSON null: for a
+      // Classic draft's stationery, migration 044's pair check needs it (#563).
+      for (const nullableJson of ['stationery', 'sender_validation', 'recipient_validation']) {
+        expect(sql).toContain(`${nullableJson} = NULLIF((SELECT content->'${nullableJson}' FROM saved), 'null'::jsonb)`);
       }
       for (const textColumn of ['body_text', 'header_image_data', 'inline_image_url']) {
         expect(sql).toContain(`${textColumn} = (SELECT content->>'${textColumn}' FROM saved)`);

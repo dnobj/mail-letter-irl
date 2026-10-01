@@ -209,6 +209,22 @@ describe('createMailOrderFromDraft', () => {
     expect(savedLetter?.content.rendererVersion).toBe('pdf-1');
   });
 
+  it('copies the stationery the preview was drawn in into the letter (#563)', async () => {
+    const botanical = { theme: 'botanical', dateLine: 'October 1, 2026' };
+    (draft as Record<string, unknown>).renderer_version = 'pdf-2';
+    (draft as Record<string, unknown>).stationery = botanical;
+    await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter' });
+    expect(savedLetter?.content).toMatchObject({ rendererVersion: 'pdf-2', stationery: botanical });
+  });
+
+  it("leaves a Classic letter's content without stationery (#563)", async () => {
+    (draft as Record<string, unknown>).renderer_version = 'pdf-1';
+    (draft as Record<string, unknown>).stationery = null;
+    await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter' });
+    expect(savedLetter?.content).toMatchObject({ rendererVersion: 'pdf-1' });
+    expect(savedLetter?.content).not.toHaveProperty('stationery');
+  });
+
   it('copies the renderer into a postcard too (#534 Phase 4)', async () => {
     draft.mail_type = 'postcard';
     draft.renderer_version = 'pdf-1';

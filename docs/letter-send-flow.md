@@ -241,9 +241,10 @@ provider acceptance. The PostGrid request uses the Letter IRL `letter_id` as `Id
 
 **How a letter goes to PostGrid (#534).** A letter prints with the renderer its preview was drawn with, recorded on the draft (`renderer_version`, migration 039) and copied into `letters.content.rendererVersion` at send:
 - without a version, as today's HTML;
-- with `pdf-1`, as our own PDF from `src/render`, uploaded as a multipart form with a 30-second budget.
+- with `pdf-1`, as our own PDF from `src/render`, uploaded as a multipart form with a 30-second budget;
+- with `pdf-2`, the same, in the stationery the preview was drawn in (`letters.content.stationery`, #563). A `pdf-2` letter whose stored stationery this build cannot read is refused (`render`), never printed as Classic.
 
-A `pdf-1` gift send prints its card as the PDF's second page, drawn by the renderer with the code the send minted (`letters.content.giftCard`). When our renderer refuses a letter before any request, it is held like any other failure that is not an explicit rejection, with the class `render_refused`. That happens for a version this build cannot print, an unreadable image, a letter that no longer fits its page, or a gift card it cannot lay out. Every version the database admits must be in `PRINTABLE_RENDERER_VERSIONS`, which a test checks, so a new renderer never strands letters waiting under an older one. Resolving such a hold is in [deployment.md](deployment.md).
+A `pdf-1` gift send prints its card as the PDF's second page, drawn by the renderer with the code the send minted (`letters.content.giftCard`). When our renderer refuses a letter before any request, it is held like any other failure that is not an explicit rejection, with the class `render_refused`. That happens for a version this build cannot print, an unreadable image, a letter that no longer fits its page, a gift card it cannot lay out, or stationery it cannot read or fit. Every version the database admits must be in `PRINTABLE_RENDERER_VERSIONS`, which a test checks, so a new renderer never strands letters waiting under an older one. Resolving such a hold is in [deployment.md](deployment.md).
 
 **How a postcard goes to PostGrid (#534 Phase 4).** A postcard carries the same `rendererVersion` from its draft.
 - With `pdf-1`, it prints as our own two-page PDF, front then back, each 9.25 x 6.25 in with its bleed. It is uploaded to `/postcards` as a multipart form with a 30-second budget.

@@ -210,6 +210,24 @@ describe('mail outbox retries', () => {
     expect(sendLetter).toHaveBeenCalledWith(expect.objectContaining({ rendererVersion: 'pdf-1' }));
   });
 
+  it('hands the provider the stationery the letter was drawn in (#563)', async () => {
+    const stationery = { theme: 'botanical', dateLine: 'October 1, 2026' };
+    const themed = { ...letter, content: { ...letter.content, rendererVersion: 'pdf-2', stationery } };
+    query.mockImplementation(async (sql: string) => {
+      if (sql.includes('WITH candidate')) return { rows: [{ ...job }] };
+      if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...themed }] };
+      return { rows: [] };
+    });
+    const base = clientQuery.getMockImplementation()!;
+    clientQuery.mockImplementation(async (sql: string, params?: unknown[]) =>
+      sql.startsWith('SELECT * FROM letters') ? { rows: [{ ...themed }] } : base(sql, params)
+    );
+
+    await processLetterJob('job-1', {});
+
+    expect(sendLetter).toHaveBeenCalledWith(expect.objectContaining({ rendererVersion: 'pdf-2', stationery }));
+  });
+
   it('hands the provider the renderer a postcard was previewed with (#534 Phase 4)', async () => {
     const postcard = {
       ...letter,

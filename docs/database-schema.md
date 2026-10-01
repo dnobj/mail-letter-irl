@@ -165,7 +165,7 @@ Temporary drafts for idempotent send operations. Prevents duplicate sends.
 | body_text | TEXT | NO | - | Letter content (message for postcards) |
 | sign_off | TEXT | YES | - | Closing text (NULL for postcards) |
 | required_credits | INTEGER | NO | - | Credits needed (> 0) |
-| preview_html | TEXT | YES | - | Generated preview: the legacy HTML, or, when `renderer_version` is `pdf-1`, the page or pages as SVG in a minimal HTML document (#534): a gift letter's card and a postcard's back are pages too |
+| preview_html | TEXT | YES | - | Generated preview: the legacy HTML, or, when `renderer_version` is `pdf-1` or `pdf-2`, the page or pages as SVG in a minimal HTML document (#534): a gift letter's card and a postcard's back are pages too, and a `pdf-2` page is drawn in its stationery (#563) |
 | sender_validation | JSONB | YES | - | Cached address validation |
 | recipient_validation | JSONB | YES | - | Cached address validation |
 | status | draft_status | NO | 'pending' | pending, consumed, expired, cancelled |
@@ -176,7 +176,8 @@ Temporary drafts for idempotent send operations. Prevents duplicate sends.
 | front_image_url | TEXT | YES | - | Original image URL for debugging |
 | postcard_size | VARCHAR(10) | YES | - | Postcard size: '6x9' (NULL for letters) |
 | is_gift_send | BOOLEAN | NO | false | Previewed as a gift send: funded by a gift letter and printed with its card (033) |
-| renderer_version | VARCHAR(16) | YES | - | The renderer that drew the preview: NULL for the legacy HTML, `pdf-1` for our own PDF (039, #534). The send copies it into `letters.content.rendererVersion`, and dispatch prints with it |
+| renderer_version | VARCHAR(16) | YES | - | The renderer that drew the preview: NULL for the legacy HTML, `pdf-1` for our own PDF (039, #534), `pdf-2` for our own PDF in stationery (044, #563). The send copies it into `letters.content.rendererVersion`, and dispatch prints with it |
+| stationery | JSONB | YES | - | The stationery the preview was drawn in (044, #563): `{"theme": "monogram" \| "botanical" \| "celebration", "dateLine"?, "monogram"?, "headline"?}`. NULL is Classic. Set exactly when `renderer_version` is `pdf-2`. The send copies it into `letters.content.stationery`; redaction keeps the theme and drops the slot text |
 | arrive_by | DATE | YES | - | The date the mail should arrive by, in America/New_York; NULL to mail as soon as possible (040, #535) |
 | mail_on | DATE | YES | - | The date it goes to the printer, worked back from `arrive_by` by the lead time (040, #535). The send copies both to the letter and holds its job until then |
 | created_at | TIMESTAMPTZ | NO | NOW() | Draft creation |
@@ -189,7 +190,9 @@ Temporary drafts for idempotent send operations. Prevents duplicate sends.
 - `postcard_requires_image`: Postcards must have front_image_data
 - `postcard_requires_size`: Postcards must have postcard_size
 - `valid_postcard_size`: postcard_size must be '6x4', '6x9', or '6x11'
-- `letter_drafts_renderer_version_known`: renderer_version must be NULL or 'pdf-1' (a new version extends it in its own migration)
+- `letter_drafts_renderer_version_known`: renderer_version must be NULL, 'pdf-1' or 'pdf-2' (039, then 044; a new version extends it in its own migration)
+- `letter_drafts_stationery_theme_known`: stationery's theme is 'monogram', 'botanical' or 'celebration' (044)
+- `letter_drafts_stationery_drawn_by_pdf_2`: stationery is set exactly when renderer_version is 'pdf-2' (044)
 - `letter_drafts_schedule_pair`: arrive_by and mail_on are both set or both NULL (040)
 - `letter_drafts_schedule_order`: mail_on is never after arrive_by (040)
 
@@ -215,7 +218,7 @@ Sent letters with content and tracking.
 | recipient | JSONB | NO | - | Recipient address |
 | credits_cost | INTEGER | NO | - | Credits charged (> 0) |
 | status | VARCHAR(50) | NO | - | draft, queued, processing, held, sent, accepted, in_transit, delivered, returned, failed, cancelled (migration 023's `valid_letter_status`) |
-| preview_html | TEXT | YES | - | The draft's preview, copied at send: legacy HTML, or the page as SVG for a `pdf-1` letter (#534) |
+| preview_html | TEXT | YES | - | The draft's preview, copied at send: legacy HTML, or the page as SVG for a `pdf-1` or `pdf-2` letter (#534, #563) |
 | tracking_id | VARCHAR(255) | YES | - | Provider tracking ID (PostGrid) |
 | provider | VARCHAR(50) | YES | - | postgrid, dummy |
 | cost_cents | INTEGER | YES | - | Actual provider cost |
@@ -527,8 +530,9 @@ in force and, for the per-account limits, the first account's id. Held mail not 
 date raises `schedule_missed_mail_day` (migration 041, #535, warning), once per letter: its `details` hold the letter id and the
 mail date, and its order is a Pay & Send letter's, else none. Mail the provider cancelled after accepting it raises
 `provider_cancelled_mail` (migration 043, #566), once per letter: a warning when what paid for it came back, critical
-when a Pay & Send refund waits for a person; its `details` hold the letter and account ids, the funding type and
-`refundForAPerson`, and its order is the Pay & Send order, else none. Each alert has a severity and a three-state lifecycle
+when a refund waits for a person (a Pay & Send letter, or one our record had already seen printing or mailed); its
+`details` hold the letter and account ids, the funding type, `refundForAPerson` and `statusBefore` (our record's status
+before the cancel), and its order is the Pay & Send order, else none. Each alert has a severity and a three-state lifecycle
 (`open`, `acknowledged`, `resolved`) whose timestamps and resolution code the constraints keep
 consistent, and the acknowledging or resolving actor is stored as a hash. One alert per source event
 and type. The panel's acknowledge and resolve commands are the only writers besides the sweeps and the
@@ -764,6 +768,7 @@ Production provisioning and the first production connection remain separate owne
 | 41 | 041_missed_mail_day_alert.sql | The `schedule_missed_mail_day` alert type (#535), restated inside the `to_regclass` guard as 038 does, and a partial unique index on its letter (`idx_commerce_alerts_missed_mail_day_letter`) so it is raised once per letter. No provisioning re-run: the roles read the alerts table whole |
 | 42 | 042_mail_job_release_audit.sql | The operator audit operation `mail_job_release` (#535), written when the admin panel sends held mail early (`job.dispatch_now`). Restated inside the `to_regclass` guard as 029 does. No provisioning re-run: the operator role inserts into the table whole, and the release updates only `letter_jobs` columns already granted |
 | 43 | 043_provider_cancelled_alert.sql | The `provider_cancelled_mail` alert type (#566), restated inside the `to_regclass` guard as 041 does, and a partial unique index on its letter (`idx_commerce_alerts_provider_cancelled_letter`) so it is raised once per letter. No provisioning re-run: the roles read the alerts table whole |
+| 44 | 044_stationery.sql | `letter_drafts.stationery` (#563): the theme a preview was drawn in and its slot text, NULL for Classic. `renderer_version` admits `pdf-2`, set exactly when a draft has stationery. No provisioning re-run, as for 039 |
 
 ---
 

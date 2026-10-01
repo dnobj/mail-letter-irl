@@ -2,6 +2,8 @@
  * Shared TypeScript types for Letter IRL services
  */
 
+import type { Stationery } from '../render/stationery.js';
+
 // ============================================================================
 // User Types
 // ============================================================================
@@ -518,6 +520,12 @@ export interface LetterDraft {
    */
   renderer_version?: string | null;
   /**
+   * The stationery the preview was drawn in (migration 044, #563): a theme and
+   * the slot text it prints, or NULL for Classic. Recorded with renderer
+   * version 'pdf-2'; the send copies it into letters.content.
+   */
+  stationery?: Stationery | null;
+  /**
    * Arrive-by (migration 040, #535): the date the mail should arrive by and
    * the date it goes to the printer, 'YYYY-MM-DD' in New York; both or
    * neither. The send holds the job until the mail date.
@@ -557,6 +565,13 @@ export interface CreateDraftParams {
   rendererVersion?: string;
   /** Mail held to arrive by a date (migration 040, #535); unset to mail as soon as possible. */
   schedule?: DraftSchedule;
+  /**
+   * The stationery the preview was drawn in (migration 044, #563); unset for
+   * Classic. With it, rendererVersion must be 'pdf-2' (rendererVersionFor).
+   * Its slots as slotText makes them, each at most STATIONERY_SLOT_MAX_LENGTH:
+   * createDraft refuses a theme stationeryOf would not read back.
+   */
+  stationery?: Stationery;
 }
 
 export interface CreateDraftResult {

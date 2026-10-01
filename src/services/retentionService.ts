@@ -216,7 +216,9 @@ const DRAFT_CONTENT_COLUMNS = [
   'header_image_data',
   'header_image_url',
   'inline_image_data',
-  'inline_image_url'
+  'inline_image_url',
+  // A theme and the slot text it prints (#563, migration 044).
+  'stationery'
 ] as const;
 
 const DRAFT_QUARANTINE_OBJECT = DRAFT_CONTENT_COLUMNS.map(
@@ -233,6 +235,10 @@ const DRAFT_QUARANTINE_OBJECT = DRAFT_CONTENT_COLUMNS.map(
  * 012/013) are all `layout != X OR col IS NOT NULL` with NO condition on the
  * row being spent, so a plain NULL violates the constraint and rolls back the
  * whole batch. The CASE preserves NULL where the column was already NULL.
+ *
+ * The stationery keeps its theme and loses its slot text (the date line, the
+ * initials, the headline), which is the content: migration 044 holds a themed
+ * draft to renderer 'pdf-2' and back, so a NULL would roll the batch back too.
  */
 export const DRAFT_REDACTION_SET = `
         SET sender = '{}'::jsonb,
@@ -248,6 +254,7 @@ export const DRAFT_REDACTION_SET = `
             header_image_url = NULL,
             inline_image_data = CASE WHEN inline_image_data IS NULL THEN NULL ELSE '' END,
             inline_image_url = NULL,
+            stationery = CASE WHEN stationery IS NULL THEN NULL ELSE jsonb_build_object('theme', stationery->'theme') END,
             redacted_at = NOW()`;
 
 /**
@@ -710,12 +717,15 @@ export async function restoreQuarantinedContentWithClient(
     restored = result.rowCount ?? 0;
   } else {
     const assignments = DRAFT_CONTENT_COLUMNS.map(column =>
-      column === 'sender' ||
-      column === 'recipient' ||
-      column === 'sender_validation' ||
-      column === 'recipient_validation'
-        ? `${column} = (SELECT content->'${column}' FROM saved)`
-        : `${column} = (SELECT content->>'${column}' FROM saved)`
+      // The copy holds a NULL column as JSON null, which is not SQL NULL, so a
+      // nullable JSON column comes back through NULLIF. For stationery it
+      // matters: migration 044 holds it to renderer pdf-2 by IS NOT NULL, so a
+      // Classic draft's must be SQL NULL again (#563).
+      column === 'stationery' || column === 'sender_validation' || column === 'recipient_validation'
+        ? `${column} = NULLIF((SELECT content->'${column}' FROM saved), 'null'::jsonb)`
+        : column === 'sender' || column === 'recipient'
+          ? `${column} = (SELECT content->'${column}' FROM saved)`
+          : `${column} = (SELECT content->>'${column}' FROM saved)`
     ).join(',\n              ');
     const result = await client.query(
       `WITH saved AS (

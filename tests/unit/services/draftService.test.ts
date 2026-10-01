@@ -276,6 +276,60 @@ describe('draftService', () => {
       const asap = columnValues(vi.mocked(db.query).mock.calls[1]);
       expect([asap.arrive_by, asap.mail_on]).toEqual([{ value: null, cast: '::date' }, { value: null, cast: '::date' }]);
     });
+
+    it("records a letter draft's stationery as JSON, and none for Classic (#563)", async () => {
+      vi.mocked(db.query).mockResolvedValueOnce(inserted).mockResolvedValueOnce(inserted).mockResolvedValueOnce(inserted);
+      const base = {
+        userId: testUsers.sarah.user_id,
+        sender: testAddresses.validSender as unknown as Record<string, unknown>,
+        recipient: testAddresses.validRecipient as unknown as Record<string, unknown>,
+        bodyText: 'Hello',
+        signOff: 'Love',
+        requiredCredits: 2,
+      };
+      const botanical = { theme: 'botanical' as const, dateLine: 'October 1, 2026' };
+
+      await createDraft({ ...base, rendererVersion: 'pdf-2', stationery: botanical });
+      await createDraft({ ...base, rendererVersion: 'pdf-1', stationery: { theme: 'classic' } });
+      await createDraft({ ...base, rendererVersion: 'pdf-1' });
+
+      const themed = columnValues(vi.mocked(db.query).mock.calls[0]);
+      expect(themed.stationery).toEqual({ value: JSON.stringify(botanical), cast: '::jsonb' });
+      expect(themed.renderer_version).toEqual({ value: 'pdf-2', cast: null });
+      expect(columnValues(vi.mocked(db.query).mock.calls[1]).stationery).toEqual({ value: null, cast: '::jsonb' });
+      expect(columnValues(vi.mocked(db.query).mock.calls[2]).stationery).toEqual({ value: null, cast: '::jsonb' });
+    });
+
+    it('stores a theme only as the print reads it back, and refuses one it would not read (#563 review round 3)', async () => {
+      vi.mocked(db.query).mockResolvedValueOnce(inserted);
+      const base = {
+        userId: testUsers.sarah.user_id,
+        sender: testAddresses.validSender as unknown as Record<string, unknown>,
+        recipient: testAddresses.validRecipient as unknown as Record<string, unknown>,
+        bodyText: 'Hello',
+        signOff: 'Love',
+        requiredCredits: 2,
+        rendererVersion: 'pdf-2'
+      };
+      // A key the print does not read is not stored.
+      const extra = { theme: 'celebration', dateLine: 'October 1, 2026', headline: 'Happy Birthday!', colour: 'red' };
+      await createDraft({ ...base, stationery: extra as unknown as Parameters<typeof createDraft>[0]['stationery'] });
+      expect(columnValues(vi.mocked(db.query).mock.calls[0]).stationery).toEqual({
+        value: JSON.stringify({ theme: 'celebration', dateLine: 'October 1, 2026', headline: 'Happy Birthday!' }),
+        cast: '::jsonb'
+      });
+
+      // A slot past the stored bound, which the print would refuse, and a theme it does not know.
+      for (const stationery of [
+        { theme: 'celebration', headline: 'Happy ' + ' '.repeat(250) + 'Birthday' },
+        { theme: 'floral' }
+      ]) {
+        await expect(
+          createDraft({ ...base, stationery: stationery as unknown as Parameters<typeof createDraft>[0]['stationery'] })
+        ).rejects.toThrow('the print would not read it back');
+      }
+      expect(db.query).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('createPostcardDraft', () => {
