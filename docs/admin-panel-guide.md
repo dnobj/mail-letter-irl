@@ -415,6 +415,14 @@ letter whose job is still due goes at the next hourly run. A failed one does not
 it has gone back: **Retry failed job** on its job page resends it where the provider definitely refused it and nothing
 was returned; otherwise tell the customer, who can send it again. Resolve the alert with a code such as `dispatched_late` once it has gone, or `customer_contacted`.
 
+A `provider_cancelled_mail` alert (#566) names a letter that PostGrid cancelled after accepting it. PostGrid cancels only
+before printing, so nothing was mailed. The status sync has already marked the letter failed.
+- **A warning:** what paid for it came back, as credits or a gift letter. Find out why PostGrid cancelled it (its
+  dashboard gives the reason, such as content in the address region), and tell the customer if they need to send it again.
+- **Critical:** a person decides whether, and how, to refund it. Either the letter was Pay & Send, and its order stays `fulfilled`, or our record had already seen it printing or mailed (`statusBefore` in the details), which PostGrid's own lifecycle does not allow, so nothing came back by itself. Refunding a Pay & Send order in Stripe also raises `refunded_mail_already_dispatched`, because its job reads as accepted; this mail was never printed, so resolve that one too.
+
+Resolve the alert once that is done.
+
 Accounts without an email address (issue #319) cannot be listed until `users.email` becomes nullable or a
 provisioning-failure record exists; the panel shows only rows that exist.
 

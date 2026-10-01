@@ -7,6 +7,7 @@
 
 import { query } from '../db/index.js';
 import { getLetterProvider } from './providers/index.js';
+import { failProviderCancelledLetter } from './letterJobService.js';
 import { carriedDiagnosticClass, classifyDiagnosticError } from '../utils/diagnosticLog.js';
 
 export interface StatusSyncResult {
@@ -25,10 +26,9 @@ export interface StatusSyncDetail {
   error?: string;
 }
 
-/**
- * Terminal statuses that don't need to be synced anymore
- */
-const TERMINAL_STATUSES = ['delivered', 'returned', 'failed', 'cancelled'];
+// Terminal statuses are not synced: the query below skips the same list as
+// letterJobService's ENDED_LETTER_STATUSES, which failProviderCancelledLetter
+// leaves as they are.
 
 /**
  * Sync letter statuses from the fulfillment provider
@@ -97,7 +97,16 @@ export async function syncLetterStatuses(
       if (providerStatus.status !== letter.status) {
         console.log(`   📝 Letter status updated: ${letter.status} → ${providerStatus.status}`);
 
-        if (!dryRun) {
+        if (!dryRun && providerStatus.status === 'failed') {
+          // Cancelled by the provider before printing (#566): the letter fails
+          // and what paid for it comes back, once, under the outbox's locks.
+          // Ended meanwhile, it is left as it is and not counted.
+          const outcome = await failProviderCancelledLetter({
+            letterId: letter.letter_id,
+            providerRawStatus: providerStatus.statusMessage
+          });
+          if (outcome === 'unchanged') continue;
+        } else if (!dryRun) {
           // Update current status
           await query(
             `UPDATE letters
