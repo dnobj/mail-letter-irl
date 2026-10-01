@@ -208,13 +208,16 @@ describePostgres('account erasure', () => {
     const userId = `auth0|erasure-${randomUUID()}`;
     const email = `erasure.${randomUUID().slice(0, 8)}@example.test`;
     await owner.query(
-      `INSERT INTO users (user_id, email, credits, credits_purchased, credits_used, return_address, return_address_validated_at)
-       VALUES ($1, $2, 4, 10, 6, $3::jsonb, $4)`,
+      `INSERT INTO users (user_id, email, credits, credits_purchased, credits_used, return_address, return_address_validated_at,
+                          stationery_theme)
+       VALUES ($1, $2, 4, 10, 6, $3::jsonb, $4, $5)`,
       [
         userId,
         email,
         extra.returnAddress ? JSON.stringify({ name: 'Jane Customer', addressLine1: '1 Secret Street', city: 'Leeds' }) : null,
-        extra.returnAddress ? new Date() : null
+        extra.returnAddress ? new Date() : null,
+        // A remembered theme (#563) goes with the address.
+        extra.returnAddress ? 'botanical' : null
       ]
     );
     return { userId, email };
@@ -788,13 +791,14 @@ describePostgres('account erasure', () => {
 
     const account = await owner.query(
       `SELECT email, return_address, return_address_validated_at, erased_at, sends_blocked_at, sends_blocked_reason,
-              credits, credits_purchased
+              credits, credits_purchased, stationery_theme
          FROM users WHERE user_id = $1`,
       [userId]
     );
     expect(account.rows[0]).toMatchObject({
       return_address: null,
       return_address_validated_at: null,
+      stationery_theme: null,
       sends_blocked_reason: 'account_erased',
       credits: 4,
       credits_purchased: 10

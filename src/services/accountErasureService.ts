@@ -586,6 +586,7 @@ export async function eraseAccountWithClient(client: SqlClient, userId: string):
         SET email = 'erased-' || gen_random_uuid()::text || '@erased.invalid',
             return_address = NULL,
             return_address_validated_at = NULL,
+            stationery_theme = NULL,
             sends_blocked_at = COALESCE(sends_blocked_at, NOW()),
             sends_blocked_reason = COALESCE(sends_blocked_reason, 'account_erased'),
             erased_at = NOW(),

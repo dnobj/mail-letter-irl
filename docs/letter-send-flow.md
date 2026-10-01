@@ -274,7 +274,7 @@ drawn by `src/render`, the three letter previews take `stationery`, `monogram` a
   - the theme is one of the four;
   - initials go only with Monogram, a headline only with Celebration;
   - asked-for initials are one to three letters; otherwise the return address's name gives them, without
-    titles or suffixes;
+    the titles before it or the suffixes after it ("Md. Rafiqul Islam" keeps its M);
   - a headline is one line, shrinking to 18pt and refused past it, saying how much fits, and at most
     `STATIONERY_SLOT_MAX_LENGTH` characters as stored, so what is stored reads back;
   - the initials and the headline are checked against Tinos, like the text;
@@ -287,9 +287,31 @@ drawn by `src/render`, the three letter previews take `stationery`, `monogram` a
   - the draft records `renderer_version = 'pdf-2'` and `stationery`, each slot as it prints;
   - the preview's document names `pdf-2`;
   - Classic records `pdf-1` and no stationery: the page as before.
-- **Said:** the output's `stationery` names the theme and what it prints.
+- **Said:** the output's `stationery` names the theme and what it prints, and `source`: `asked`,
+  `remembered` or `default`. The narration names a theme, and a remembered one as such.
+- **Remembered** (migration 045, `users.stationery_theme`):
+  - a preview that asks for no theme is drawn in the account's last choice, or Classic with none;
+  - a theme a preview asks for, Classic included, is remembered once its draft exists, so a refused
+    preview chooses nothing;
+  - only the theme is remembered, not the initials or a headline;
+  - nothing is read or written while stationery is not offered;
+  - erasure clears it.
 
 A gift send in a theme prints its themed page, then today's card page.
+
+**`set_stationery` restyles a preview** (#563, `src/tools/setStationery.ts`), listed only while
+stationery is offered:
+- **Checked as a preview's are:** the theme, initials and headline (`previewStationery`), the slots
+  against Tinos, and the page laid out again in the theme, so a headline that pushes the letter past
+  its page is refused.
+- **Drawn again from the draft:** its text, addresses and image. The page keeps the small copy of its
+  picture that the preview showed, and a gift letter's card page is kept as it was drawn
+  (`rendererDocumentPages`). Drawn back to Classic, the page is byte for byte the first preview's.
+- **One transaction** (`setDraftStationery`) locks the draft as `setDraftSchedule` does, with the same
+  refusals: not the caller's, sent, expired, or a live Pay & Send order. So a send or a checkout runs
+  before or after it, never between. It writes the stationery, `renderer_version` (`pdf-2` for a
+  theme, `pdf-1` for Classic) and `preview_html`, and remembers the theme.
+- A postcard, or a preview the legacy HTML drew, is refused: make a new preview.
 
 A gift send is previewed like any other letter, with its card as the second page (#534 PR 5). Whether a preview is a gift send is decided before the checks, because the card prints the sender's name in Tinos: a name Tinos cannot draw is refused "in the sender's name, which the gift card prints", though PostGrid could stamp it in the return address. So is a name long enough to push the card past the page's bottom margin, about a thousand characters: "The sender's name is too long to print on the gift card." Without the flag, previews are the legacy HTML. The flag is read only when a letter is previewed, so changing it never changes a letter already previewed or queued.
 

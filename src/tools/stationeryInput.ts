@@ -18,7 +18,18 @@ import {
   type StationeryTheme
 } from '../render/index.js';
 import { withoutInvisible } from '../render/bidi.js';
+import { clampMarks } from '../render/marks.js';
 import { SCHEDULE_TIME_ZONE } from '../services/deliverySchedule.js';
+import { rememberedStationery } from '../services/stationeryDefaultService.js';
+
+/**
+ * Why a preview is drawn in its theme (#563): asked for in the call, the
+ * account's remembered choice (migration 045), or Classic, the default.
+ */
+export type StationerySource = 'asked' | 'remembered' | 'default';
+
+/** A preview's stationery, and why it is that one. The draft stores the stationery alone (stationeryOf drops the rest). */
+export type PreviewStationery = Stationery & { source: StationerySource };
 
 /** The previews' three stationery arguments, as they arrive: unchecked. */
 export interface StationeryInput {
@@ -73,14 +84,28 @@ function optionalText(value: unknown, name: string, expected: string, context: T
 }
 
 /**
- * Titles and suffixes a name carries, which are no one's initials: "Dr. Pat
- * Rivera" and "Pat Rivera Jr." are both PR. Compared in lower case without
- * full stops ("M.D." is md).
+ * Titles before a name and suffixes after it, which are no one's initials:
+ * "Dr. Pat Rivera" and "Pat Rivera Jr." are both PR. Each is skipped only
+ * where it stands, a title at the start and a suffix at the end, so "Md.
+ * Rafiqul Islam", where Md. is Muhammad, keeps its M. Compared in lower case
+ * without full stops ("M.D." is md).
  */
-const NOT_INITIALS: ReadonlySet<string> = new Set([
-  'mr', 'mrs', 'ms', 'miss', 'mx', 'dr', 'rev', 'prof', 'sir', 'dame',
-  'jr', 'sr', 'ii', 'iii', 'iv', 'md', 'phd', 'esq', 'dds'
+const TITLES: ReadonlySet<string> = new Set([
+  'mr', 'mrs', 'ms', 'miss', 'mx', 'dr', 'rev', 'prof', 'sir', 'dame', 'capt', 'col', 'hon', 'fr', 'mme'
 ]);
+const SUFFIXES: ReadonlySet<string> = new Set([
+  'jr', 'sr', 'jnr', 'snr', 'ii', 'iii', 'iv', 'md', 'phd', 'esq', 'dds', 'cpa', 'rn'
+]);
+
+/** A name's words without the titles before it and the suffixes after it. */
+function nameWords(words: string[]): string[] {
+  const key = (word: string) => word.replace(/\./g, '').toLowerCase();
+  let start = 0;
+  let end = words.length;
+  while (start < end && TITLES.has(key(words[start]))) start += 1;
+  while (end > start && SUFFIXES.has(key(words[end - 1]))) end -= 1;
+  return words.slice(start, end);
+}
 
 /**
  * The initials a Monogram letter prints: the `monogram` asked for, or the
@@ -90,11 +115,11 @@ const NOT_INITIALS: ReadonlySet<string> = new Set([
  * gives its first, in capitals, but a title or a suffix; past three, the
  * first two and the last, as a first, middle and last name would.
  */
-function initialsFor(asked: string | undefined, senderName: string, context: ToolContext): string {
+function initialsFor(asked: string | undefined, senderName: string, context: ToolContext, remembered: boolean): string {
   if (asked !== undefined) {
-    // Spaces and full stops go before the marks are clamped, so no letter
-    // gathers the marks of two.
-    const letters = clusters(slotText(asked.replace(/[\s.]/gu, '')));
+    // As a slot prints it, without what prints nothing, spaces and full
+    // stops; its marks clamped again after, so no letter keeps the marks of two.
+    const letters = clusters(clampMarks(withoutInvisible(slotText(asked)).replace(/[ .]/g, '')));
     if (letters.length === 0 || letters.length > MONOGRAM_MAX_LETTERS || !letters.every(letter => LETTER.test(letter))) {
       throw refusal(
         'monogram must be one to three letters, such as "JMS". Leave it out to use the initials of the return address\'s name.',
@@ -106,9 +131,7 @@ function initialsFor(asked: string | undefined, senderName: string, context: Too
   }
   // Words split at any space or comma, with characters that print nothing
   // gone first, so neither hides a word's first letter.
-  const initials = withoutInvisible(slotText(senderName))
-    .split(/[\s,]+/u)
-    .filter(word => !NOT_INITIALS.has(word.replace(/\./g, '').toLowerCase()))
+  const initials = nameWords(withoutInvisible(slotText(senderName)).split(/[\s,]+/u).filter(word => word !== ''))
     .map(word => clusters(word)[0])
     .filter((first): first is string => first !== undefined && LETTER.test(first))
     .map(first => {
@@ -119,7 +142,8 @@ function initialsFor(asked: string | undefined, senderName: string, context: Too
     });
   if (initials.length === 0) {
     throw refusal(
-      'The monogram stationery prints initials, and the return address\'s name has none to use. ' +
+      (remembered ? "The account's remembered stationery is monogram. " : '') +
+        'The monogram stationery prints initials, and the return address\'s name has none to use. ' +
         'Pass monogram with one to three letters, such as "JMS", or choose another stationery.',
       'monogram_no_initials',
       context
@@ -177,19 +201,21 @@ function headlineFor(asked: string, context: ToolContext): string | undefined {
  * refused rather than quietly printed on a plain page: registerTools passes
  * them through to here. Classic itself is never refused, offered or not.
  *
- * Offered, a preview without `stationery` is Classic. Each theme but Classic
- * prints the date line; Monogram prints initials and Celebration an
- * optional headline, and each is refused with a theme that does not print
- * it. Whether the slots' characters print is the printable check's
- * (validatePrintableLetter), and whether the letter still fits its page,
- * below a headline, the layout's (layoutLetterForPreview).
+ * Offered, a preview without `stationery` is drawn in `remembered`, the
+ * account's last choice, or else Classic, and says which (`source`). Each
+ * theme but Classic prints the date line; Monogram prints initials and
+ * Celebration an optional headline, and each is refused with a theme that
+ * does not print it. Whether the slots' characters print is the printable
+ * check's (validatePrintableLetter), and whether the letter still fits its
+ * page, below a headline, the layout's (layoutLetterForPreview).
  */
 export function previewStationery(
   input: StationeryInput,
   senderName: string,
   context: ToolContext,
-  renderer: 'html' | 'pdf'
-): Stationery | undefined {
+  renderer: 'html' | 'pdf',
+  remembered: StationeryTheme | null = null
+): PreviewStationery | undefined {
   if (!isStationeryEnabled() || renderer !== 'pdf') {
     const asked = (value: unknown) => value !== undefined && value !== null && !(typeof value === 'string' && value.trim() === '');
     const classic = typeof input.stationery === 'string' && input.stationery.trim().toLowerCase() === 'classic';
@@ -209,7 +235,8 @@ export function previewStationery(
   if (theme !== undefined && !(STATIONERY_THEMES as readonly string[]).includes(theme)) {
     throw refusal(`stationery must be one of ${THEME_LIST}.`, 'unknown_theme', context);
   }
-  const chosen = (theme ?? 'classic') as StationeryTheme;
+  const source: StationerySource = theme !== undefined ? 'asked' : remembered ? 'remembered' : 'default';
+  const chosen = (theme ?? remembered ?? 'classic') as StationeryTheme;
   if (monogram !== undefined && chosen !== 'monogram') {
     throw refusal(
       'Initials print only on the monogram stationery. Choose stationery "monogram", or leave monogram out.',
@@ -224,13 +251,30 @@ export function previewStationery(
       context
     );
   }
-  if (chosen === 'classic') return { theme: 'classic' };
+  if (chosen === 'classic') return { theme: 'classic', source };
 
-  const stationery: Stationery = { theme: chosen, dateLine: dateLineFor(context.now()) };
-  if (chosen === 'monogram') stationery.monogram = initialsFor(monogram, senderName, context);
+  const stationery: PreviewStationery = { theme: chosen, dateLine: dateLineFor(context.now()), source };
+  if (chosen === 'monogram') stationery.monogram = initialsFor(monogram, senderName, context, source === 'remembered');
   if (chosen === 'celebration' && headline !== undefined) {
     const printed = headlineFor(headline, context);
     if (printed !== undefined) stationery.headline = printed;
   }
   return stationery;
+}
+
+/**
+ * previewStationery with the account's remembered theme, read only when it
+ * could apply: stationery is offered, and the call asks for no theme.
+ */
+export async function chooseStationery(
+  input: StationeryInput,
+  senderName: string,
+  context: ToolContext,
+  renderer: 'html' | 'pdf'
+): Promise<PreviewStationery | undefined> {
+  const asks = typeof input.stationery === 'string' ? input.stationery.trim() !== '' : input.stationery != null;
+  const remembered = isStationeryEnabled() && renderer === 'pdf' && !asks
+    ? await rememberedStationery(context.user.userId)
+    : null;
+  return previewStationery(input, senderName, context, renderer, remembered);
 }

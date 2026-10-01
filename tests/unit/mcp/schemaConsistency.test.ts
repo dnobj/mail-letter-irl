@@ -297,9 +297,9 @@ describe("stationery schema (#563)", () => {
       description?: string; properties: Record<string, { enum?: string[] }>; required: string[];
     }>).stationery;
     const zodKeys = Object.keys(served.unwrap().shape);
-    expect(zodKeys).toEqual(["theme", "dateLine", "monogram", "headline"]);
+    expect(zodKeys).toEqual(["theme", "dateLine", "monogram", "headline", "source"]);
     expect(Object.keys(manifestLayer.properties)).toEqual(zodKeys);
-    expect(manifestLayer.required).toEqual(["theme"]);
+    expect(manifestLayer.required).toEqual(["theme", "source"]);
     expect(manifestLayer.properties.theme.enum).toEqual([...STATIONERY_THEMES]);
     expect(served.description).toBe(manifestLayer.description);
     expect(quoteAndPreviewPostcardOutputZ.shape).not.toHaveProperty("stationery");

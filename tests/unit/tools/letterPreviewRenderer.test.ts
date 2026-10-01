@@ -37,6 +37,11 @@ vi.mock('../../../src/services/giftLetterService.js', async importOriginal => ({
   getGiftBalance: vi.fn()
 }));
 
+vi.mock('../../../src/services/stationeryDefaultService.js', () => ({
+  rememberedStationery: vi.fn(),
+  rememberStationery: vi.fn()
+}));
+
 vi.mock('../../../src/services/commerceService.js', async importOriginal => ({
   ...(await importOriginal<typeof import('../../../src/services/commerceService.js')>()),
   getSendEligibility: vi.fn()
@@ -49,6 +54,7 @@ import { getReturnAddress } from '../../../src/services/returnAddressService.js'
 import { downloadAndProcessLetterImageWithPreview } from '../../../src/services/imageService.js';
 import { getGiftBalance, sampleFundedCard } from '../../../src/services/giftLetterService.js';
 import { getSendEligibility } from '../../../src/services/commerceService.js';
+import { rememberedStationery, rememberStationery } from '../../../src/services/stationeryDefaultService.js';
 import { quoteAndPreviewLetterTextOnlyTool } from '../../../src/tools/quoteAndPreviewLetterTextOnly.js';
 import { quoteAndPreviewLetterWithHeaderImageTool } from '../../../src/tools/quoteAndPreviewLetterWithHeaderImage.js';
 import { quoteAndPreviewLetterWithImageTool } from '../../../src/tools/quoteAndPreviewLetterWithImage.js';
@@ -484,6 +490,8 @@ describe('stationery (#563)', () => {
 
   beforeEach(() => {
     vi.stubEnv('LETTER_IRL_STATIONERY_ENABLED', 'true');
+    vi.mocked(rememberedStationery).mockResolvedValue(null);
+    vi.mocked(rememberStationery).mockResolvedValue(undefined);
   });
 
   it.each(LAYOUTS)('%s: a theme draws the page in it, records pdf-2 with the stationery, and says so', async layout => {
@@ -491,10 +499,13 @@ describe('stationery (#563)', () => {
     const output = await run(layout, { stationery: 'Botanical' });
     const draft = drafted();
     // The preview's day in New York: 08:00 on September 30.
-    const botanical = { theme: 'botanical', dateLine: 'September 30, 2026' };
+    const botanical = { theme: 'botanical', dateLine: 'September 30, 2026', source: 'asked' };
     expect(draft.rendererVersion).toBe('pdf-2');
     expect(draft.stationery).toEqual(botanical);
     expect(output.stationery).toEqual(botanical);
+    // Asked for, so remembered for the next preview, once the draft exists.
+    expect(rememberStationery).toHaveBeenCalledWith('user-1', 'botanical');
+    expect(vi.mocked(rememberStationery).mock.invocationCallOrder[0]).toBeGreaterThan(vi.mocked(createDraft).mock.invocationCallOrder[0]);
     const html = draft.previewHtml!;
     expect(output.previewHtml).toBe(html);
     expect(inked(html).length).toBeGreaterThan(0);
@@ -507,7 +518,9 @@ describe('stationery (#563)', () => {
     const output = await run(layout, { stationery: 'classic' });
     const classic = drafted();
     expect(classic.rendererVersion).toBe('pdf-1');
-    expect(output.stationery).toEqual({ theme: 'classic' });
+    expect(output.stationery).toEqual({ theme: 'classic', source: 'asked' });
+    // Classic, asked for, is remembered like any theme.
+    expect(rememberStationery).toHaveBeenCalledWith('user-1', 'classic');
     expect(inked(classic.previewHtml!)).toEqual([]);
 
     // Exactly the page the previews drew before stationery, with the flag off.
@@ -520,7 +533,7 @@ describe('stationery (#563)', () => {
 
   it("a monogram prints the return address's initials, or the ones asked for", async () => {
     const output = await run('text_only', { stationery: 'monogram' });
-    expect(output.stationery).toEqual({ theme: 'monogram', dateLine: 'September 30, 2026', monogram: 'PE' });
+    expect(output.stationery).toEqual({ theme: 'monogram', dateLine: 'September 30, 2026', monogram: 'PE', source: 'asked' });
     expect(drafted().previewHtml).toContain('<title>September 30, 2026\nPE\nDear Sam,\nPat</title>');
     // Its double ring.
     expect(inked(drafted().previewHtml!)).toHaveLength(2);
@@ -546,7 +559,7 @@ describe('stationery (#563)', () => {
 
   it('a headline prints above the letter, three lines of its page', async () => {
     const output = await run('text_only', { stationery: 'celebration', headline: '  Happy   Birthday, Sam! ' });
-    expect(output.stationery).toEqual({ theme: 'celebration', dateLine: 'September 30, 2026', headline: 'Happy Birthday, Sam!' });
+    expect(output.stationery).toEqual({ theme: 'celebration', dateLine: 'September 30, 2026', headline: 'Happy Birthday, Sam!', source: 'asked' });
     expect(drafted().previewHtml).toContain('<title>September 30, 2026\nHappy Birthday, Sam!\nDear Sam,\nPat</title>');
   });
 
@@ -610,5 +623,53 @@ describe('stationery (#563)', () => {
       await expect(run('text_only', { stationery: 'botanical' })).rejects.toThrow('Stationery is not available yet.');
       expect(createDraft).not.toHaveBeenCalled();
     }
+    // Nothing read or remembered while not offered.
+    expect(rememberedStationery).not.toHaveBeenCalled();
+    expect(rememberStationery).not.toHaveBeenCalled();
+  });
+
+  it.each(LAYOUTS)("%s: draws a preview that asks for no theme in the remembered one, says so, and remembers nothing new (PR 5)", async layout => {
+    processedLayout = layout === 'text_only' ? 'header_image' : layout;
+    vi.mocked(rememberedStationery).mockResolvedValue('botanical');
+    const output = await run(layout);
+    expect(rememberedStationery).toHaveBeenCalledWith('user-1');
+    expect(output.stationery).toEqual({ theme: 'botanical', dateLine: 'September 30, 2026', source: 'remembered' });
+    expect(drafted().rendererVersion).toBe('pdf-2');
+    expect(rememberStationery).not.toHaveBeenCalled();
+  });
+
+  it('remembers nothing for a preview it refuses (PR 5)', async () => {
+    await expect(run('text_only', { stationery: 'celebration', headline: 'Happy Birthday!', bodyText: lines(23) })).rejects.toThrow('too long');
+    expect(rememberStationery).not.toHaveBeenCalled();
+  });
+
+  it('still makes the preview when the theme cannot be remembered (PR 5)', async () => {
+    vi.mocked(rememberStationery).mockRejectedValue(new Error('connection lost'));
+    const ctx = context();
+    await expect(run('text_only', { stationery: 'botanical' }, ctx)).resolves.toMatchObject({ draftId: 'draft-1' });
+    expect(ctx.logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'quote.stationery_not_remembered' }),
+      expect.any(String)
+    );
+  });
+});
+
+describe('a stationery slot the layout cannot fit (#570 review round 2)', () => {
+  it('is refused, classed, wherever the layout meets it, not thrown unclassified', () => {
+    const han = String.fromCodePoint(0x4e2d).repeat(60);
+    const refusal = (() => {
+      try {
+        layoutLetterForPreview(
+          { bodyText: 'Dear Sam,', signOff: 'Pat', layoutType: 'text_only', stationery: { theme: 'celebration', headline: han } },
+          context(),
+          'pdf'
+        );
+      } catch (error) {
+        return error as Error & { diagnosticClass?: string };
+      }
+      throw new Error('not refused');
+    })();
+    expect(refusal.message).toBe("The stationery's headline does not fit. Shorten it, or choose another stationery.");
+    expect(refusal.diagnosticClass).toBe('validation_error');
   });
 });

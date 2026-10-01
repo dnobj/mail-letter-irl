@@ -63,6 +63,7 @@ import type {
   generateImageForMailOutputZ,
   confirmUploadedImageOutputZ,
   setArrivalDateOutputZ,
+  setStationeryOutputZ,
   cancelScheduledMailOutputZ
 } from "../zodSchemas.js";
 import type {
@@ -89,6 +90,7 @@ import type {
   generateImageForMailTool,
   confirmUploadedImageTool,
   setArrivalDateTool,
+  setStationeryTool,
   cancelScheduledMailTool
 } from "../tools/index.js";
 
@@ -244,6 +246,9 @@ export type ConfirmUploadedImageConforms = Conforms<
 >;
 export type SetArrivalDateConforms = Conforms<
   BothDirections<z.infer<typeof setArrivalDateOutputZ>, typeof setArrivalDateTool>
+>;
+export type SetStationeryConforms = Conforms<
+  BothDirections<z.infer<typeof setStationeryOutputZ>, typeof setStationeryTool>
 >;
 export type CancelScheduledMailConforms = Conforms<
   BothDirections<z.infer<typeof cancelScheduledMailOutputZ>, typeof cancelScheduledMailTool>

@@ -5,7 +5,13 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { dateLineFor, previewStationery } from '../../../src/tools/stationeryInput.js';
+vi.mock('../../../src/services/stationeryDefaultService.js', () => ({
+  rememberedStationery: vi.fn().mockResolvedValue(null),
+  rememberStationery: vi.fn().mockResolvedValue(undefined)
+}));
+
+import { chooseStationery, dateLineFor, previewStationery } from '../../../src/tools/stationeryInput.js';
+import { rememberedStationery } from '../../../src/services/stationeryDefaultService.js';
 import { drawsGrapheme, headlineSize, STATIONERY_SLOT_MAX_LENGTH } from '../../../src/render/index.js';
 import type { ToolContext } from '../../../src/contracts/types.js';
 
@@ -82,15 +88,18 @@ describe('while stationery is not offered', () => {
 });
 
 describe('the theme', () => {
-  it('is Classic when none is asked for, with nothing it prints', () => {
-    for (const input of [{}, { stationery: '' }, { stationery: null }, { stationery: 'classic' }, { stationery: ' CLASSIC ' }]) {
-      expect(offered(input), JSON.stringify(input)).toEqual({ theme: 'classic' });
+  it('is Classic when none is asked for, by default, with nothing it prints', () => {
+    for (const input of [{}, { stationery: '' }, { stationery: null }]) {
+      expect(offered(input), JSON.stringify(input)).toEqual({ theme: 'classic', source: 'default' });
+    }
+    for (const input of [{ stationery: 'classic' }, { stationery: ' CLASSIC ' }]) {
+      expect(offered(input), JSON.stringify(input)).toEqual({ theme: 'classic', source: 'asked' });
     }
   });
 
   it('is the one asked for, in any case, with the date line every theme but Classic prints', () => {
-    expect(offered({ stationery: ' Botanical ' })).toEqual({ theme: 'botanical', dateLine: 'October 1, 2026' });
-    expect(offered({ stationery: 'celebration' })).toEqual({ theme: 'celebration', dateLine: 'October 1, 2026' });
+    expect(offered({ stationery: ' Botanical ' })).toEqual({ theme: 'botanical', dateLine: 'October 1, 2026', source: 'asked' });
+    expect(offered({ stationery: 'celebration' })).toEqual({ theme: 'celebration', dateLine: 'October 1, 2026', source: 'asked' });
   });
 
   it('refuses a theme it does not know, naming the ones it does', () => {
@@ -117,7 +126,7 @@ describe('the date line', () => {
 
 describe('the monogram', () => {
   it("is the return address's initials when none is asked for, in capitals", () => {
-    expect(offered({ stationery: 'monogram' })).toEqual({ theme: 'monogram', dateLine: 'October 1, 2026', monogram: 'PR' });
+    expect(offered({ stationery: 'monogram' })).toEqual({ theme: 'monogram', dateLine: 'October 1, 2026', monogram: 'PR', source: 'asked' });
     expect(offered({ stationery: 'monogram' }, 'pat rivera').monogram).toBe('PR');
     expect(offered({ stationery: 'monogram' }, '  Ada  ').monogram).toBe('A');
     expect(offered({ stationery: 'monogram' }, 'Mary Ann Smith').monogram).toBe('MAS');
@@ -220,7 +229,8 @@ describe('the headline', () => {
     expect(offered({ stationery: 'celebration', headline: '  Happy\n\nBirthday,   Sam!  ' })).toEqual({
       theme: 'celebration',
       dateLine: 'October 1, 2026',
-      headline: 'Happy Birthday, Sam!'
+      headline: 'Happy Birthday, Sam!',
+      source: 'asked'
     });
   });
 
@@ -269,5 +279,92 @@ describe('the headline', () => {
       expect(reason).toBe('headline_without_theme');
     }
     expect(refused({ stationery: 'celebration', headline: 42 }).reason).toBe('headline_not_text');
+  });
+});
+
+describe('the remembered theme (#563 PR 5)', () => {
+  const remembering = (input: Record<string, unknown>, remembered: Parameters<typeof previewStationery>[4], senderName = SENDER) =>
+    previewStationery(input, senderName, context(), 'pdf', remembered);
+
+  it('draws a preview that asks for none in it, and says so', () => {
+    expect(remembering({}, 'botanical')).toEqual({ theme: 'botanical', dateLine: 'October 1, 2026', source: 'remembered' });
+    expect(remembering({ stationery: '' }, 'monogram')).toEqual({ theme: 'monogram', dateLine: 'October 1, 2026', monogram: 'PR', source: 'remembered' });
+    // Classic remembered is Classic, chosen.
+    expect(remembering({}, 'classic')).toEqual({ theme: 'classic', source: 'remembered' });
+  });
+
+  it('gives way to a theme asked for, Classic included', () => {
+    expect(remembering({ stationery: 'classic' }, 'botanical')).toEqual({ theme: 'classic', source: 'asked' });
+    expect(remembering({ stationery: 'celebration' }, 'botanical')).toMatchObject({ theme: 'celebration', source: 'asked' });
+  });
+
+  it("takes the call's initials and headline when the remembered theme prints them, and refuses them otherwise", () => {
+    expect(remembering({ monogram: 'JMS' }, 'monogram')).toMatchObject({ theme: 'monogram', monogram: 'JMS', source: 'remembered' });
+    expect(remembering({ headline: 'Hooray' }, 'celebration')).toMatchObject({ theme: 'celebration', headline: 'Hooray', source: 'remembered' });
+    const ctx = context();
+    expect(() => previewStationery({ monogram: 'JMS' }, SENDER, ctx, 'pdf', 'botanical')).toThrow(
+      'Initials print only on the monogram stationery.'
+    );
+  });
+
+  it('says it is remembered when a remembered Monogram finds no initials in the name', () => {
+    const { message, reason } = (() => {
+      const ctx = context();
+      try {
+        previewStationery({}, '123 456', ctx, 'pdf', 'monogram');
+      } catch (error) {
+        return { message: (error as Error).message, reason: (vi.mocked(ctx.logger.warn).mock.calls[0][0] as unknown as { reason: string }).reason };
+      }
+      throw new Error('not refused');
+    })();
+    expect(message).toMatch(/^The account's remembered stationery is monogram\. The monogram stationery prints initials/);
+    expect(reason).toBe('monogram_no_initials');
+  });
+
+  it('is nothing while stationery is not offered', () => {
+    vi.stubEnv('LETTER_IRL_STATIONERY_ENABLED', '');
+    expect(remembering({}, 'botanical')).toBeUndefined();
+  });
+});
+
+describe('chooseStationery (#563 PR 5)', () => {
+  it('reads the remembered theme only while offered and when the call asks for none', async () => {
+    vi.mocked(rememberedStationery).mockResolvedValue('botanical');
+    await expect(chooseStationery({}, SENDER, context(), 'pdf')).resolves.toMatchObject({ theme: 'botanical', source: 'remembered' });
+    expect(rememberedStationery).toHaveBeenCalledWith('user-1');
+
+    vi.mocked(rememberedStationery).mockClear();
+    await expect(chooseStationery({ stationery: 'classic' }, SENDER, context(), 'pdf')).resolves.toEqual({ theme: 'classic', source: 'asked' });
+    await expect(chooseStationery({}, SENDER, context(), 'html')).resolves.toBeUndefined();
+    vi.stubEnv('LETTER_IRL_STATIONERY_ENABLED', '');
+    await expect(chooseStationery({}, SENDER, context(), 'pdf')).resolves.toBeUndefined();
+    expect(rememberedStationery).not.toHaveBeenCalled();
+  });
+
+  it('is Classic by default when nothing is remembered', async () => {
+    vi.mocked(rememberedStationery).mockResolvedValue(null);
+    await expect(chooseStationery({ stationery: '  ' }, SENDER, context(), 'pdf')).resolves.toEqual({ theme: 'classic', source: 'default' });
+  });
+});
+
+describe("the name's titles and suffixes, where they stand (#570 review round 2)", () => {
+  it('skips a title only at the start and a suffix only at the end', () => {
+    for (const [name, initials] of [
+      ['Md. Rafiqul Islam', 'MRI'],
+      ['Pat Rivera, M.D.', 'PR'],
+      ['Capt. Pat Rivera', 'PR'],
+      ['Pat Rivera Snr', 'PR'],
+      ['Rev. Dr. Martin Luther King Jr., PhD', 'MLK'],
+      ['Ada Dr Lovelace', 'ADL']
+    ]) {
+      expect(offered({ stationery: 'monogram' }, name).monogram, name).toBe(initials);
+    }
+  });
+
+  it('cleans asked-for initials as a slot prints them: any line break, and what prints nothing, go', () => {
+    const nextLine = String.fromCodePoint(0x85);
+    const zeroWidth = String.fromCodePoint(0x200b);
+    expect(offered({ stationery: 'monogram', monogram: `J${nextLine}M` }).monogram).toBe('JM');
+    expect(offered({ stationery: 'monogram', monogram: `J${zeroWidth}M` }).monogram).toBe('JM');
   });
 });
