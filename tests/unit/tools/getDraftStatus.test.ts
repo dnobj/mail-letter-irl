@@ -7,7 +7,7 @@
  * nothing about whether someone else's draft exists.
  */
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ToolContext } from "../../../src/contracts/types.js";
 
 vi.mock("../../../src/services/draftService.js", () => ({
@@ -239,5 +239,55 @@ describe("get_draft_status (#474)", () => {
   it("is read-only and says so", () => {
     expect(getDraftStatusTool.readOnly).toBe(true);
     expect(getDraftStatusTool.meta?.readOnlyHint).toBe(true);
+  });
+});
+
+describe("get_draft_status names a ready letter's style now (#563, #572)", () => {
+  const PAGE = '<!DOCTYPE html><html><body data-renderer="pdf-2"><svg></svg></body></html>';
+  const drawn = (overrides: Record<string, unknown> = {}) =>
+    state({ mail_type: "letter", renderer_version: "pdf-2", stationery: { theme: "botanical", dateLine: "October 1, 2026" }, preview_html: PAGE, ...overrides });
+
+  beforeEach(() => {
+    vi.mocked(getDraftState).mockReset();
+    vi.stubEnv("LETTER_IRL_STATIONERY_ENABLED", "true");
+    vi.stubEnv("LETTER_IRL_PRINT_RENDERER", "pdf");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("gives a themed draft's stationery, as the print reads it, and its page", async () => {
+    vi.mocked(getDraftState).mockResolvedValue(drawn({ stationery: { theme: "botanical", dateLine: "October 1, 2026", colour: "red" } }) as any);
+    await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual({
+      ...READY,
+      stationery: { theme: "botanical", dateLine: "October 1, 2026" },
+      previewHtml: PAGE
+    });
+  });
+
+  it("calls a page our renderer drew without a theme Classic", async () => {
+    vi.mocked(getDraftState).mockResolvedValue(drawn({ renderer_version: "pdf-1", stationery: null }) as any);
+    await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual({ ...READY, stationery: { theme: "classic" }, previewHtml: PAGE });
+  });
+
+  it("says nothing of style for a legacy page, a postcard, or while stationery is not offered", async () => {
+    for (const draft of [drawn({ renderer_version: null, stationery: null }), drawn({ mail_type: "postcard", renderer_version: "pdf-1", stationery: null })]) {
+      vi.mocked(getDraftState).mockResolvedValue(draft as any);
+      await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual(READY);
+    }
+    for (const [enabled, renderer] of [["", "pdf"], ["true", "html"]]) {
+      vi.stubEnv("LETTER_IRL_STATIONERY_ENABLED", enabled);
+      vi.stubEnv("LETTER_IRL_PRINT_RENDERER", renderer);
+      vi.mocked(getDraftState).mockResolvedValue(drawn() as any);
+      await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual(READY);
+    }
+  });
+
+  it("says nothing of style for a sent or expired draft", async () => {
+    vi.mocked(getDraftState).mockResolvedValue(drawn({ status: "consumed", consumed_letter_id: ORDER_ID }) as any);
+    await expect(ask({ draftId: DRAFT_ID })).resolves.not.toHaveProperty("stationery");
+    vi.mocked(getDraftState).mockResolvedValue(drawn({ status: "expired" }) as any);
+    await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual({ draftId: DRAFT_ID, status: "expired" });
   });
 });

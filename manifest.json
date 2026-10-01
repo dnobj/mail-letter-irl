@@ -2443,6 +2443,33 @@
           "cancellable": {
             "type": "boolean",
             "description": "A sent draft's order: whether it can still be cancelled free"
+          },
+          "stationery": {
+            "type": "object",
+            "description": "A ready letter's stationery now, while stationery is offered; its page goes to the card",
+            "properties": {
+              "theme": {
+                "type": "string",
+                "enum": [
+                  "classic",
+                  "monogram",
+                  "botanical",
+                  "celebration"
+                ]
+              },
+              "dateLine": {
+                "type": "string"
+              },
+              "monogram": {
+                "type": "string"
+              },
+              "headline": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "theme"
+            ]
           }
         }
       }

@@ -19,8 +19,11 @@ const ROW = `
   </div>
   <div id="note" style="display: none"></div>`;
 
-function load(host: Record<string, unknown>, idle: () => boolean = () => true) {
-  const dom = new JSDOM(`<body>${ROW}<script>${SOURCE}</script></body>`, { runScripts: 'dangerously' });
+/** The row as a card builds it; `extra` adds buttons before the script wires them. */
+function load(host: Record<string, unknown>, idle: () => boolean = () => true, extra = '') {
+  const dom = new JSDOM(`<body>${ROW.replace('</div>', `${extra}</div>`)}<script>${SOURCE}</script></body>`, {
+    runScripts: 'dangerously'
+  });
   const window = dom.window as any;
   const document = window.document as Document;
   const changes: unknown[] = [];
@@ -74,12 +77,10 @@ describe('the Style row script (#563)', () => {
     expect(callTool).not.toHaveBeenCalled();
 
     idle = true;
-    const { row: other, document, window } = load({ callTool });
+    // A button the card names with a theme the script does not know.
+    const { row: other, click: press } = load({ callTool }, () => true, '<button data-theme="typewriter"></button>');
     other.show('draft-1', { stationery: { theme: 'classic' } }, true);
-    const stray = document.createElement('button');
-    stray.setAttribute('data-theme', 'typewriter');
-    document.getElementById('row')!.appendChild(stray);
-    stray.dispatchEvent(new window.Event('click'));
+    press('typewriter');
     await flush();
     expect(callTool).not.toHaveBeenCalled();
   });
@@ -111,13 +112,73 @@ describe('the Style row script (#563)', () => {
     row.show('draft-1', { stationery: { theme: 'classic' } }, true);
     click('botanical');
     await flush();
-    row.show('draft-2', { stationery: { theme: 'classic' } }, true);
+    // A theme unlike both, so taking the answer would show.
+    row.show('draft-2', { stationery: { theme: 'monogram' } }, true);
     settle(answer({ theme: 'botanical' }));
     await flush();
     await flush();
     expect(changes).toEqual([]);
     expect(row.previewHtml('draft-1')).toBeNull();
-    expect(row.stationery()).toEqual({ theme: 'classic' });
+    expect(row.stationery()).toEqual({ theme: 'monogram' });
     expect(row.busy()).toBe(false);
+  });
+});
+
+describe('the Style row script, held and adopting (#572 review round 1)', () => {
+  it('holds while the card sends, saying so, and ignores a press meanwhile', async () => {
+    const callTool = vi.fn().mockResolvedValue(answer({ theme: 'botanical' }));
+    const { row, click, document } = load({ callTool });
+    row.show('draft-1', { stationery: { theme: 'classic' } }, true);
+    row.hold(true);
+    expect(document.querySelector('[data-theme="botanical"]')!.getAttribute('aria-disabled')).toBe('true');
+    click('botanical');
+    await flush();
+    expect(callTool).not.toHaveBeenCalled();
+    row.hold(false);
+    expect(document.querySelector('[data-theme="botanical"]')!.getAttribute('aria-disabled')).toBe('false');
+    click('botanical');
+    await flush();
+    expect(callTool).toHaveBeenCalledWith('set_stationery', { draftId: 'draft-1', stationery: 'botanical' });
+  });
+
+  it('does not draw a hidden row when held, so its note stays hidden', async () => {
+    // A refusal leaves a note under the row.
+    const callTool = vi.fn().mockResolvedValue({ isError: true, content: [{ type: 'text', text: 'No.' }] });
+    const { row, click, document } = load({ callTool });
+    row.show('draft-1', { stationery: { theme: 'classic' } }, true);
+    click('botanical');
+    await flush();
+    await flush();
+    expect(document.getElementById('note')!.style.display).toBe('block');
+
+    row.hide();
+    row.hold(false);
+    expect(document.getElementById('row')!.style.display).toBe('none');
+    expect(document.getElementById('note')!.style.display).toBe('none');
+  });
+
+  it("adopts the draft's style and page for its own draft, and takes nothing otherwise", () => {
+    const { row } = load({ callTool: vi.fn() });
+    row.show('draft-1', { stationery: { theme: 'classic' } }, true);
+    expect(row.adopt('draft-2', { theme: 'botanical' }, '<html>other</html>')).toBe(false);
+    expect(row.adopt('draft-1', { theme: 'typewriter' }, '<html>x</html>')).toBe(false);
+    expect(row.adopt('draft-1', null, '<html>x</html>')).toBe(false);
+    expect(row.stationery()).toEqual({ theme: 'classic' });
+
+    expect(row.adopt('draft-1', { theme: 'celebration', headline: 'Hooray' }, '<html>now</html>')).toBe(true);
+    expect(row.stationery()).toEqual({ theme: 'celebration', headline: 'Hooray' });
+    expect(row.previewHtml('draft-1')).toBe('<html>now</html>');
+    // A style without its page keeps the page it has.
+    expect(row.adopt('draft-1', { theme: 'monogram' }, undefined)).toBe(true);
+    expect(row.previewHtml('draft-1')).toBe('<html>now</html>');
+  });
+
+  it('takes nothing while it sets a style itself', async () => {
+    const callTool = vi.fn().mockReturnValue(new Promise(() => undefined));
+    const { row, click } = load({ callTool });
+    row.show('draft-1', { stationery: { theme: 'classic' } }, true);
+    click('botanical');
+    await flush();
+    expect(row.adopt('draft-1', { theme: 'celebration' }, '<html>x</html>')).toBe(false);
   });
 });

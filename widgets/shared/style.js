@@ -34,7 +34,8 @@
    *
    * options: host, row, buttons (one per theme, each with data-theme), note,
    *   readableError(error), resultText(result), idle() (whether the card may
-   *   change the draft now: not while it sends or starts a payment), onSet()
+   *   change the draft now: not while it sends or starts a payment, which it
+   *   also says with hold()), onSet()
    *   (a style is being set on the draft), onChange({ draftId, stationery }),
    *   onBusy()
    */
@@ -43,12 +44,15 @@
     // pending: the theme being set while the server answers. slots: the
     // initials and headline this card last saw with each theme on this
     // draft, which come back with the theme when the person returns to it.
+    // held: the card is sending the letter or starting a payment, so the
+    // row waits too.
     var state = {
       draftId: null,
       stationery: null,
       previewHtml: null,
       pending: null,
       busy: false,
+      held: false,
       message: "",
       error: false,
       slots: {}
@@ -61,10 +65,13 @@
 
     function draw() {
       var shown = shownTheme();
+      // aria-disabled, not disabled: a pressed button keeps keyboard focus
+      // while the server answers, and set() ignores a press meanwhile.
+      var waiting = state.busy || state.held ? "true" : "false";
       for (var i = 0; i < options.buttons.length; i++) {
         var button = options.buttons[i];
         button.setAttribute("aria-pressed", button.getAttribute("data-theme") === shown ? "true" : "false");
-        button.disabled = state.busy;
+        button.setAttribute("aria-disabled", waiting);
       }
       options.note.textContent = state.message;
       options.note.style.display = state.message ? "block" : "none";
@@ -79,7 +86,7 @@
     }
 
     function set(theme) {
-      if (state.busy || !state.draftId || typeof host.callTool !== "function" || !isTheme(theme)) return;
+      if (state.busy || state.held || !state.draftId || typeof host.callTool !== "function" || !isTheme(theme)) return;
       if (state.stationery && state.stationery.theme === theme) return;
       if (typeof options.idle === "function" && !options.idle()) return;
       var draftId = state.draftId;
@@ -107,7 +114,12 @@
             throw new Error(options.resultText(result) || "The style was not changed.");
           }
           if (state.draftId !== draftId) return;
-          var stationery = toolData(result).stationery;
+          var data = toolData(result);
+          // An answer about another draft is no answer to this one.
+          if (typeof data.draftId === "string" && data.draftId !== draftId) {
+            throw new Error("The style may have changed. Make the preview again to see it.");
+          }
+          var stationery = data.stationery;
           if (!stationery || !isTheme(stationery.theme)) {
             throw new Error("The style may have changed. Make the preview again to see it.");
           }
@@ -182,6 +194,26 @@
         draw();
       },
       hide: hide,
+      // While the card sends the letter or starts a payment (true), and after
+      // (false): the row waits, and says so.
+      hold: function (held) {
+        state.held = Boolean(held);
+        // Drawn only while shown: a hidden row keeps its note hidden.
+        if (state.draftId !== null && options.row.style.display !== "none") draw();
+      },
+      // The draft's style and page as the server says they are now
+      // (get_draft_status), for a card shown its preview's first answer
+      // again: the row presses it, and the page replaces the preview's. False
+      // when the row is on another draft, or setting a style, and took
+      // nothing.
+      adopt: function (draftId, stationery, previewHtml) {
+        if (state.draftId !== draftId || state.busy || !stationery || !isTheme(stationery.theme)) return false;
+        state.stationery = stationery;
+        keepSlots(stationery);
+        if (typeof previewHtml === "string" && previewHtml) state.previewHtml = previewHtml;
+        draw();
+        return true;
+      },
       // The page the card set for this draft, or null for its preview's own.
       previewHtml: function (draftId) {
         return state.draftId === draftId ? state.previewHtml : null;

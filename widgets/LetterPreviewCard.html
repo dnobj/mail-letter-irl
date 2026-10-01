@@ -96,6 +96,8 @@
       .arrives-controls input[type=date]:disabled{opacity:.6}
       /* The Style row (#563) */
       .style-controls{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;justify-content:flex-end}
+      .style-controls .link-button[aria-disabled=true]{cursor:default}
+      .style-controls .link-button[aria-disabled=true]:not([aria-pressed=true]){opacity:.45}
       .link-button{font:inherit;font-size:11.5px;background:none;border:none;padding:0;color:var(--mut);text-decoration:underline;cursor:pointer}
       .link-button[aria-pressed=true],.link-button:disabled{color:var(--tx);text-decoration:none;cursor:default}
       .note.alert{color:var(--er);background:var(--erbg);border-color:transparent}
@@ -836,6 +838,9 @@
             // A draft still ready keeps its preview, with the dates it has
             // now: this card may have changed them since that preview (#535).
             if (answer.status === "ready") {
+              // And the style it is in now, with its page (#563): this card,
+              // or the chat, may have restyled it since that preview.
+              styleRow.adopt(draftId, answer.stationery, result?._meta?.previewHtml);
               // And what they mean for delivery, for the Delivery line.
               if (
                 picker.adopt(draftId, answer.schedule) &&
@@ -1821,6 +1826,7 @@
 
         // Show loading state
         sendInProgress = true;
+        styleRow.hold(true);
         sendButton.disabled = true;
         sendButton.classList.add("loading");
         sendButtonText.innerHTML = '<span class="spinner"></span> Sending...';
@@ -1930,6 +1936,9 @@
           statusPill.textContent = "Send failed";
 
           sendInProgress = false;
+        } finally {
+          // A failed send leaves the row usable again; a sent letter has none.
+          styleRow.hold(false);
         }
       }
 

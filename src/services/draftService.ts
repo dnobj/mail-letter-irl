@@ -295,7 +295,11 @@ export async function getDraft(draftId: string): Promise<LetterDraft | null> {
  * preview card asks where its host keeps no state for it.
  */
 export interface DraftState
-  extends Pick<LetterDraft, 'draft_id' | 'user_id' | 'status' | 'expires_at' | 'consumed_letter_id' | 'arrive_by' | 'mail_on'> {
+  extends Pick<
+    LetterDraft,
+    | 'draft_id' | 'user_id' | 'status' | 'expires_at' | 'consumed_letter_id' | 'arrive_by' | 'mail_on'
+    | 'mail_type' | 'renderer_version' | 'stationery' | 'preview_html'
+  > {
   /** The letter the draft became; null for a draft not sent, or a letter that is not the draft owner's. */
   letter_status: LetterStatus | null;
   letter_funding_type: Letter['funding_type'] | null;
@@ -306,6 +310,7 @@ export interface DraftState
 export async function getDraftState(draftId: string): Promise<DraftState | null> {
   const result = await query<DraftState>(
     `SELECT d.draft_id, d.user_id, d.status, d.expires_at, d.consumed_letter_id, d.arrive_by, d.mail_on,
+            d.mail_type, d.renderer_version, d.stationery, d.preview_html,
             l.status AS letter_status, l.funding_type AS letter_funding_type,
             l.arrive_by AS letter_arrive_by, l.mail_on AS letter_mail_on
        FROM letter_drafts d

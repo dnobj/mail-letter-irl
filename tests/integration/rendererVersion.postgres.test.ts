@@ -253,5 +253,21 @@ describePostgres('renderer version (migration 039, #534)', () => {
       expect(byId.get(sent.letter.letter_id)).toMatchObject({ rendererVersion: 'pdf-2', stationery: BOTANICAL });
       expect(byId.get(classic.letter.letter_id)).not.toHaveProperty('stationery');
     }, 60_000);
+
+    it("gives get_draft_status what a draft's page was drawn with (#572)", async () => {
+      const userId = await seedUser();
+      const themed = await drafts.createDraft({
+        ...base(userId),
+        bodyText: `Hello ${randomUUID()}`,
+        rendererVersion: 'pdf-2',
+        stationery: { theme: 'botanical', dateLine: 'October 1, 2026' }
+      });
+      await expect(drafts.getDraftState(themed.draftId)).resolves.toMatchObject({
+        mail_type: 'letter',
+        renderer_version: 'pdf-2',
+        stationery: BOTANICAL,
+        preview_html: '<svg></svg>'
+      });
+    }, 60_000);
   });
 });
