@@ -42,8 +42,10 @@ describe('the longest card a send could print', () => {
     };
     const longest = longestSendCard({ ...chain, code: undefined, sample: true });
     let repeats = 0;
-    while (stripFits(longest, 'Pat Example '.repeat(repeats + 1).trim())) repeats += 1;
+    while (repeats < 40 && stripFits(longest, 'Pat Example '.repeat(repeats + 1).trim())) repeats += 1;
+    // About eight: a name of about 95 characters.
     expect(repeats).toBeGreaterThanOrEqual(7);
+    expect(repeats).toBeLessThanOrEqual(10);
     const name = 'Pat Example '.repeat(repeats).trim();
     const dates = Array.from({ length: 12 }, (_, month) => [1, 28].map(day =>
       `2027-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`)).flat();

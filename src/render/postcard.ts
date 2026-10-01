@@ -29,8 +29,9 @@ export interface GiftStripCopy {
 }
 
 /**
- * A strip whose words run past its fixed height. Only a long sender's name
- * makes one: the preview refuses it, and a print holds it.
+ * A strip whose words run past its fixed height: a long sender's name, or a
+ * seed campaign's long code. The preview refuses either, and a print holds
+ * one the preview never saw.
  */
 export class GiftStripOverflow extends Error {
   constructor(readonly overflow: number) {
