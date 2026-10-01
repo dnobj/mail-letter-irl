@@ -353,7 +353,115 @@ describePostgres('account erasure', () => {
     return result.rowCount ?? 0;
   }
 
+  /** A letter held to arrive by a date (#535): queued, its job pending, never attempted, not due for days. */
+  async function seedHeldLetter(userId: string, funding: 'prepaid_balance' | 'gift_letter' = 'prepaid_balance'): Promise<string> {
+    const letterId = await seedLetter(userId, 'queued');
+    await owner.query('UPDATE letters SET funding_type = $2::varchar WHERE letter_id = $1', [letterId, funding]);
+    await seedJob(letterId, { status: 'pending', outcome: 'not_dispatched', attempts: 0 });
+    await holdJob(letterId);
+    return letterId;
+  }
+
+  /** Holds a letter's job ten days, as a send with a mail date creates it: due then, with heldUntil. */
+  async function holdJob(letterId: string): Promise<void> {
+    await owner.query(
+      `UPDATE letter_jobs
+          SET next_attempt_at = NOW() + INTERVAL '10 days',
+              metadata = jsonb_build_object('source', 'transactional-outbox', 'heldUntil', (NOW() + INTERVAL '10 days')::text)
+        WHERE letter_id = $1`,
+      [letterId]
+    );
+  }
+
+  async function mailState(letterId: string) {
+    const row = (
+      await owner.query(
+        `SELECT l.status AS letter, j.status AS job, j.operator_resolution AS resolution
+           FROM letters l JOIN letter_jobs j ON j.letter_id = l.letter_id WHERE l.letter_id = $1`,
+        [letterId]
+      )
+    ).rows[0];
+    return { letter: row.letter, job: row.job, resolution: row.resolution };
+  }
+
   // ------------------------------------------------------------------ tests
+
+  it('cancels held prepaid and gift mail, nothing returned, and only once nothing else holds the account (#535)', async () => {
+    const { userId } = await seedUser();
+    const prepaid = await seedHeldLetter(userId);
+    const gift = await seedHeldLetter(userId, 'gift_letter');
+
+    // Held mail alone does not hold the account, as the reader role sees it,
+    // and the preview counts what will be cancelled.
+    expect(await blockersOf(userId)).toEqual(NO_BLOCKERS);
+    const scope = await withReadOnlyTransaction(reader, (client) => erasure.readErasureScope(client, userId));
+    expect(scope.heldMailToCancel).toBe(2);
+
+    // Anything else holding the account leaves the held mail to mail.
+    const { paymentIntent } = await seedPackOrder(userId);
+    const disputeId = await seedDispute({ userId, paymentIntent, resolved: false });
+    expect(await db.transaction((client) => erasure.eraseAccountWithClient(client, userId))).toMatchObject({ outcome: 'blocked' });
+    for (const letterId of [prepaid, gift]) {
+      expect(await mailState(letterId)).toEqual({ letter: 'queued', job: 'pending', resolution: null });
+    }
+
+    // Once that settles, the erasure cancels both and records why.
+    await owner.query(`UPDATE stripe_disputes SET status = 'won', resolved_at = NOW() WHERE dispute_id = $1`, [disputeId]);
+    const outcome = await db.transaction((client) => erasure.eraseAccountWithClient(client, userId));
+    expect(outcome).toMatchObject({ outcome: 'erased', counts: { heldMailCancelled: 2 } });
+    for (const letterId of [prepaid, gift]) {
+      expect(await mailState(letterId)).toEqual({ letter: 'cancelled', job: 'cancelled', resolution: 'account_erased' });
+    }
+    const history = await owner.query(
+      `SELECT letter_id FROM letter_status_history WHERE source = 'erasure' AND letter_id = ANY($1::text[]) ORDER BY letter_id`,
+      [[prepaid, gift]]
+    );
+    expect(history.rows.map((row) => row.letter_id)).toEqual([prepaid, gift].sort());
+    // Nothing went back: no ledger row was written for either letter.
+    const returned = await owner.query(
+      `SELECT 1 FROM credit_ledger WHERE source_metadata->>'letter_id' = ANY($1::text[])`,
+      [[prepaid, gift]]
+    );
+    expect(returned.rowCount).toBe(0);
+  }, 60_000);
+
+  it('leaves held mail that is due, and held Pay & Send mail, holding the account (#535)', async () => {
+    const { userId } = await seedUser();
+
+    // Its hold has ended: it goes at the next run, and the account waits for it.
+    const due = await seedLetter(userId, 'queued');
+    await seedJob(due, { status: 'pending', outcome: 'not_dispatched', attempts: 0 });
+    expect(await blockersOf(userId)).toMatchObject({ lettersInFlight: 1, jobsInFlight: 1 });
+    await owner.query("UPDATE letters SET status = 'accepted' WHERE letter_id = $1", [due]);
+    await owner.query("UPDATE letter_jobs SET status = 'completed', provider_outcome = 'accepted' WHERE letter_id = $1", [due]);
+
+    // Pay & Send held mail: a person decides its refund, so it holds the account.
+    const paid = await seedLetter(userId, 'queued');
+    const orderId = await seedJitOrder(userId, 'fulfillment_pending', await seedDraft(userId), paid);
+    await owner.query(
+      "UPDATE letters SET funding_type = 'jit_order', funding_order_id = $2 WHERE letter_id = $1",
+      [paid, orderId]
+    );
+    await seedJob(paid, { status: 'pending', outcome: 'not_dispatched', attempts: 0 });
+    await holdJob(paid);
+    expect(await blockersOf(userId)).toMatchObject({ ordersInFlight: 1, lettersInFlight: 1, jobsInFlight: 1 });
+    expect(await db.transaction((client) => erasure.eraseAccountWithClient(client, userId))).toMatchObject({ outcome: 'blocked' });
+    expect(await mailState(paid)).toEqual({ letter: 'queued', job: 'pending', resolution: null });
+  }, 60_000);
+
+  it('leaves a job scheduled ahead without a hold holding the account (#535)', async () => {
+    const { userId } = await seedUser();
+    // Pending, never attempted and not yet due, but not created as held mail:
+    // only a send with a mail date writes heldUntil.
+    const ahead = await seedLetter(userId, 'queued');
+    await seedJob(ahead, { status: 'pending', outcome: 'not_dispatched', attempts: 0 });
+    await owner.query("UPDATE letter_jobs SET next_attempt_at = NOW() + INTERVAL '10 days' WHERE letter_id = $1", [ahead]);
+    expect(await blockersOf(userId)).toMatchObject({ lettersInFlight: 1, jobsInFlight: 1 });
+    const scope = await withReadOnlyTransaction(reader, (client) => erasure.readErasureScope(client, userId));
+    expect(scope.heldMailToCancel).toBe(0);
+    expect(await db.transaction((client) => erasure.eraseAccountWithClient(client, userId))).toMatchObject({ outcome: 'blocked' });
+    expect(await mailState(ahead)).toEqual({ letter: 'queued', job: 'pending', resolution: null });
+  }, 60_000);
 
   it('reads each kind of money or mail in flight from the reader role, and nothing once it has settled', async () => {
     const cases: Array<{ name: string; seed: (userId: string, settled: boolean) => Promise<void>; key: keyof typeof NO_BLOCKERS }> = [

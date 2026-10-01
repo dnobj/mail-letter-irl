@@ -1,6 +1,6 @@
 # Database Schema
 
-**Last Updated:** September 24, 2026
+**Last Updated:** October 1, 2026
 **Purpose:** Complete database schema reference for all tables, indexes, constraints, and migrations
 
 This document describes the Letter IRL database schema as defined by `db/migrations` at the head of `dev` (Neon
@@ -427,7 +427,7 @@ Historical record of all status changes for letters and postcards.
 | old_status | TEXT | YES | - | Previous status (NULL for the first entry) |
 | new_status | TEXT | NO | - | New status |
 | provider_raw_status | TEXT | YES | - | The provider's own status, when the change came from it |
-| source | TEXT | NO | `'sync'` | Where the change came from: `sync`, `send`, `manual`, `webhook`, `backfill`, or `customer` for a cancel of held mail (#535) |
+| source | TEXT | NO | `'sync'` | Where the change came from: `sync`, `send`, `manual`, `webhook`, `backfill`, `customer` for a cancel of held mail, or `erasure` for held mail an account erasure cancels (#535) |
 | changed_at | TIMESTAMPTZ | NO | NOW() | When status changed |
 
 **Indexes:**
