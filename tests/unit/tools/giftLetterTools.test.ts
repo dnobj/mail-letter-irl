@@ -195,6 +195,13 @@ describe('letter preview: the gift decision', () => {
     expect(output.sendEligibility.payAndSend.available).toBe(true);
   });
 
+  it('lets a balance of exactly one letter pay, so no gift letter is used', async () => {
+    // A letter costs 2 credits: 2 can pay, so the balance decides against a gift.
+    const output = await preview(2);
+    expect(output.giftCard).toBeUndefined();
+    expect(mocks.createDraft).toHaveBeenCalledWith(expect.objectContaining({ isGiftSend: false }));
+  });
+
   it('sends as a gift when asked, even with balance', async () => {
     const output = await preview(8, true);
     expect(output.giftCard?.state).toBe('funded');

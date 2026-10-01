@@ -543,6 +543,18 @@ describe('ENV_VAR_MANIFEST', () => {
   it('approves exactly the providers production may run on', () => {
     expect(APPROVED_LIVE_PROVIDERS).toEqual(['postgrid']);
   });
+
+  it('lists the print renderer flag, so the preflight shows where it is set (#534)', () => {
+    // Advisory: absent is the intended production state until the owner
+    // switches it on. API only: maintenance prints with the recorded version.
+    expect(ENV_VAR_MANIFEST.find(entry => entry.name === 'LETTER_IRL_PRINT_RENDERER')).toEqual({
+      name: 'LETTER_IRL_PRINT_RENDERER',
+      requiredIn: 'production',
+      advisory: true,
+      secret: false,
+      services: ['api']
+    });
+  });
 });
 
 /**

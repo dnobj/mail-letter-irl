@@ -52,7 +52,11 @@ import { getSendEligibility } from '../../../src/services/commerceService.js';
 import { quoteAndPreviewLetterTextOnlyTool } from '../../../src/tools/quoteAndPreviewLetterTextOnly.js';
 import { quoteAndPreviewLetterWithHeaderImageTool } from '../../../src/tools/quoteAndPreviewLetterWithHeaderImage.js';
 import { quoteAndPreviewLetterWithImageTool } from '../../../src/tools/quoteAndPreviewLetterWithImage.js';
-import { RENDERED_LETTER_CHARACTER_CAP } from '../../../src/tools/letterHelpers.js';
+import {
+  createLetterDraftAndBuildOutput,
+  layoutLetterForPreview,
+  RENDERED_LETTER_CHARACTER_CAP
+} from '../../../src/tools/letterHelpers.js';
 import { printRenderer } from '../../../src/config/printRenderer.js';
 import type { Address, ToolContext } from '../../../src/contracts/types.js';
 
@@ -373,11 +377,39 @@ describe('a gift send', () => {
     processedLayout = 'header_image';
     await expect(run('header_image', { bodyText: lines(16), sendAsGift: true })).resolves.toMatchObject({ draftId: 'draft-1' });
     expect(drafted().rendererVersion).toBeUndefined();
+    expect(drafted().isGiftSend).toBe(true);
 
     vi.mocked(createDraft).mockClear();
     await expect(
       run('text_only', { bodyText: `We will sta${String.fromCodePoint(0xfb00)} it`, sendAsGift: true })
     ).resolves.toMatchObject({ draftId: 'draft-1' });
     expect(drafted().rendererVersion).toBeUndefined();
+    expect(drafted().isGiftSend).toBe(true);
+
+    // 14 lines above an enclosed image: the legacy print's limit, one more
+    // than the renderer's page holds.
+    vi.mocked(createDraft).mockClear();
+    processedLayout = 'inline_image';
+    await expect(run('inline_image', { bodyText: lines(13), sendAsGift: true })).resolves.toMatchObject({ draftId: 'draft-1' });
+    expect(drafted().rendererVersion).toBeUndefined();
+    expect(drafted().isGiftSend).toBe(true);
+  });
+
+  it('is never drawn or recorded with the renderer, even if a caller passes a layout', async () => {
+    const ctx = context();
+    const letter = { bodyText: 'Dear Sam,', signOff: 'Pat', layoutType: 'text_only' as const };
+    const printLayout = layoutLetterForPreview(letter, ctx, 'pdf');
+    expect(printLayout).toBeDefined();
+    await createLetterDraftAndBuildOutput({
+      ...letter,
+      sender: address({ name: 'Pat Example' }),
+      recipient: address(),
+      usedSavedReturnAddress: false,
+      gift: { isGift: true, giftLettersAvailable: 1 },
+      printLayout,
+      context: ctx
+    });
+    expect(drafted().rendererVersion).toBeUndefined();
+    expect(drafted().previewHtml).toContain("font-family: 'Times New Roman'");
   });
 });
