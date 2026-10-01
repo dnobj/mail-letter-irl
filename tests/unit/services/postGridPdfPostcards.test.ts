@@ -19,6 +19,24 @@ vi.mock('../../../src/utils/diagnosticLog.js', async importOriginal => ({
   }
 }));
 
+// The renderer as it is, but for a switch that makes its layout or its
+// drawing throw, as a missing font or a pdfkit fault would.
+const failing = vi.hoisted(() => ({ layout: false, draw: false }));
+vi.mock('../../../src/render/index.js', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../../src/render/index.js')>();
+  return {
+    ...actual,
+    layoutPostcard: (...args: Parameters<typeof actual.layoutPostcard>) => {
+      if (failing.layout) throw new Error('no font');
+      return actual.layoutPostcard(...args);
+    },
+    renderPdf: (...args: Parameters<typeof actual.renderPdf>) => {
+      if (failing.draw) return Promise.reject(new Error('pdfkit fault'));
+      return actual.renderPdf(...args);
+    }
+  };
+});
+
 function provider() {
   return new PostGridProvider(
     { name: 'postgrid', displayName: 'PostGrid', enabled: true },
@@ -85,6 +103,8 @@ describe('postcards printed from our own PDF (#534 Phase 4)', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.useRealTimers();
+    failing.layout = false;
+    failing.draw = false;
   });
 
   it('uploads the two pages as a multipart form, the contacts and the size beside them', async () => {
@@ -170,6 +190,26 @@ describe('postcards printed from our own PDF (#534 Phase 4)', () => {
       level: 'error',
       event: 'provider.postgrid.render_refused',
       fields: expect.objectContaining({ reason, letterId: 'postcard-1', operation: 'create_postcard' })
+    }));
+  });
+
+  it.each([
+    ['laid out', 'layout', "The postcard could not be laid out: no font"],
+    ['drawn', 'draw', "The postcard could not be drawn: pdfkit fault"]
+  ] as const)('holds a postcard that cannot be %s, as a refusal with its reason', async (_name, stage, message) => {
+    const fetchMock = accepted();
+    vi.stubGlobal('fetch', fetchMock);
+    diagnostics.written = [];
+    failing[stage] = true;
+
+    const result = await provider().sendPostcard({ ...base, metadata: { letterId: 'postcard-2' } });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.error).toBe(message);
+    expect(result.metadata).toMatchObject({ submissionOutcome: 'ambiguous', retryable: false, errorClass: 'render_refused' });
+    expect(diagnostics.written).toContainEqual(expect.objectContaining({
+      event: 'provider.postgrid.render_refused',
+      fields: expect.objectContaining({ reason: 'render', letterId: 'postcard-2' })
     }));
   });
 
