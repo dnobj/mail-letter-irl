@@ -797,4 +797,30 @@ describePostgres('arrive-by (migration 040, #535)', () => {
     await expect(held.cancelScheduledMail({ letterId, userId })).resolves.toMatchObject({ ok: true });
     await expect(sendHeld(userId, body)).resolves.toEqual(expect.any(String));
   }, 60_000);
+
+  it("keeps a held letter's sent draft until 7 days after its mail date, and deletes an ordinary one at 7 days (#564)", async () => {
+    const userId = await seedUser();
+    const heldLetter = await sendHeld(userId);
+    const plainDraft = await seedDraft(userId);
+    await mailSend.createMailOrderFromDraft({ draftId: plainDraft, userId, mailType: 'letter' });
+    const heldDraft = (await pool.query('SELECT draft_id FROM letter_drafts WHERE consumed_letter_id = $1', [heldLetter])).rows[0].draft_id;
+    // Both sent a month ago, as far as the sweep can tell.
+    await pool.query(
+      "UPDATE letter_drafts SET updated_at = NOW() - INTERVAL '30 days' WHERE draft_id IN ($1, $2)",
+      [heldDraft, plainDraft]
+    );
+    const left = async () =>
+      (await pool.query('SELECT draft_id FROM letter_drafts WHERE draft_id IN ($1, $2)', [heldDraft, plainDraft])).rows.map(row => row.draft_id);
+
+    await drafts.cleanupOldDrafts(7);
+    expect(await left()).toEqual([heldDraft]);
+
+    // Seven days after its mail date, it is kept still; eight days after, it goes.
+    await pool.query("UPDATE letters SET mail_on = CURRENT_DATE - 7, arrive_by = CURRENT_DATE - 5 WHERE letter_id = $1", [heldLetter]);
+    await drafts.cleanupOldDrafts(7);
+    expect(await left()).toEqual([heldDraft]);
+    await pool.query("UPDATE letters SET mail_on = CURRENT_DATE - 8, arrive_by = CURRENT_DATE - 6 WHERE letter_id = $1", [heldLetter]);
+    await drafts.cleanupOldDrafts(7);
+    expect(await left()).toEqual([]);
+  }, 60_000);
 });

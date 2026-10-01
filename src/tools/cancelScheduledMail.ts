@@ -141,7 +141,7 @@ export const cancelScheduledMailTool: McpToolDefinition<CancelScheduledMailInput
   title: 'Cancel scheduled mail',
   description:
     'Cancel a letter or postcard that was sent with an arrival date and is waiting for its mail date. ' +
-    'Free until it goes to the printer: nothing is mailed, and what paid for it goes back to the account while it can still be used; the answer says what came back. ' +
+    'Free until it goes to the printer: nothing is mailed, and what paid for it goes back to the account unless it expired or was refunded while the mail waited; the answer says what came back. ' +
     'Requires the orderId (from list_orders or the send) and confirm: true, after the person agrees, because it cannot be undone. ' +
     'Pay & Send orders and mail with no arrival date cannot be cancelled here.',
   readOnly: false,
