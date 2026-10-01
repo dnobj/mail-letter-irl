@@ -19,7 +19,7 @@ export const SET_ARRIVAL_DATE_TOOL = 'set_arrival_date';
 
 interface SetArrivalDateInput {
   draftId: string;
-  arriveBy?: string | null;
+  arriveBy?: string;
 }
 
 export interface SetArrivalDateOutput {
@@ -59,7 +59,7 @@ const REFUSALS: Record<DraftScheduleRefusal, [ArrivalDateRefusedError['code'], s
   expired: ['DRAFT_EXPIRED', 'This preview has expired. Make a new preview: the preview tools take arriveBy themselves.'],
   checkout_pending: [
     'DRAFT_CHECKOUT_PENDING',
-    "This preview's Pay & Send payment is under way, so its arrival date can't change now."
+    "This preview is tied to a Pay & Send payment, so its arrival date can't change now."
   ]
 };
 

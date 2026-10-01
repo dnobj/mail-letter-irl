@@ -61,7 +61,8 @@ import type {
   getStartedOutputZ,
   uploadImageOutputZ,
   generateImageForMailOutputZ,
-  confirmUploadedImageOutputZ
+  confirmUploadedImageOutputZ,
+  setArrivalDateOutputZ
 } from "../zodSchemas.js";
 import type {
   quoteAndPreviewLetterTextOnlyTool,
@@ -85,7 +86,8 @@ import type {
   getStartedTool,
   uploadImageTool,
   generateImageForMailTool,
-  confirmUploadedImageTool
+  confirmUploadedImageTool,
+  setArrivalDateTool
 } from "../tools/index.js";
 
 // ============================================================================
@@ -237,4 +239,7 @@ export type GenerateImageForMailConforms = Conforms<
 >;
 export type ConfirmUploadedImageConforms = Conforms<
   BothDirections<z.infer<typeof confirmUploadedImageOutputZ>, typeof confirmUploadedImageTool>
+>;
+export type SetArrivalDateConforms = Conforms<
+  BothDirections<z.infer<typeof setArrivalDateOutputZ>, typeof setArrivalDateTool>
 >;

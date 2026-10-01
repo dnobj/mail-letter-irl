@@ -335,8 +335,10 @@ describePostgres('arrive-by (migration 040, #535)', () => {
     const userId = await seedUser();
     const draftId = await seedDraft(userId);
     const holder = await pool.connect();
+    let open = false;
     try {
       await holder.query('BEGIN');
+      open = true;
       await holder.query('SELECT 1 FROM letter_drafts WHERE draft_id = $1 FOR UPDATE', [draftId]);
       const change = drafts.setDraftSchedule(draftId, userId, upcoming());
 
@@ -354,9 +356,13 @@ describePostgres('arrive-by (migration 040, #535)', () => {
 
       await holder.query("UPDATE letter_drafts SET status = 'consumed' WHERE draft_id = $1", [draftId]);
       await holder.query('COMMIT');
+      open = false;
       await expect(change).resolves.toBe('sent');
       expect(await datesOf(draftId)).toEqual([null, null]);
     } finally {
+      // A failure above leaves the row lock held: roll back, so the waiting
+      // change ends and the pool gets its client back with no transaction.
+      if (open) await holder.query('ROLLBACK').catch(() => undefined);
       holder.release();
     }
   }, 60_000);

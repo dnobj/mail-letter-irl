@@ -84,7 +84,6 @@ describe('set_arrival_date (#535)', () => {
 
   it.each([
     ['left out', {}],
-    ['null', { arriveBy: null }],
     ['empty', { arriveBy: '' }],
     ['blank', { arriveBy: '   ' }]
   ])('clears the dates when arriveBy is %s', async (_label, extra) => {
@@ -122,7 +121,7 @@ describe('set_arrival_date (#535)', () => {
     ['not_found', 'DRAFT_NOT_FOUND', "That preview wasn't found. Make a new preview, then try again."],
     ['sent', 'DRAFT_ALREADY_SENT', "This mail has already been sent, so its arrival date can't change. list_orders shows it."],
     ['expired', 'DRAFT_EXPIRED', 'This preview has expired. Make a new preview: the preview tools take arriveBy themselves.'],
-    ['checkout_pending', 'DRAFT_CHECKOUT_PENDING', "This preview's Pay & Send payment is under way, so its arrival date can't change now."]
+    ['checkout_pending', 'DRAFT_CHECKOUT_PENDING', "This preview is tied to a Pay & Send payment, so its arrival date can't change now."]
   ] as const)('refuses a draft the service left alone (%s)', async (reason, code, message) => {
     vi.mocked(setDraftSchedule).mockResolvedValue(reason);
     const ctx = context();
