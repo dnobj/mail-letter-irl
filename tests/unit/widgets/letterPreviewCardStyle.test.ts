@@ -245,22 +245,19 @@ describe('the Style row (#563)', () => {
   });
 
   it('comes back after a send refused as a duplicate, even when the host redrew the card during it (#572 review round 3)', async () => {
-    const card = mount();
-    await card.show(output({ theme: 'classic', source: 'default' }));
+    const said = 'Possible duplicate: you sent the same letter to Sam Rivera 5 minutes ago.';
+    // The tool's refusal, and the same refusal as a host's error.
+    for (const reply of [{ result: { isError: true, content: [{ type: 'text', text: said }] } }, { error: { code: -32000, message: said } }]) {
+      const card = mount();
+      await card.show(output({ theme: 'classic', source: 'default' }));
 
-    await card.click('send-button');
-    await card.show(output({ theme: 'classic', source: 'default' }));
-    expect(card.visible('style-row')).toBe(false);
-    await card.answer(
-      {
-        result: {
-          isError: true,
-          content: [{ type: 'text', text: 'Possible duplicate: you sent the same letter to Sam Rivera 5 minutes ago.' }]
-        }
-      },
-      'send_letter'
-    );
-    expect(card.visible('style-row')).toBe(true);
+      await card.click('send-button');
+      await card.show(output({ theme: 'classic', source: 'default' }));
+      expect(card.visible('style-row')).toBe(false);
+      await card.answer(reply, 'send_letter');
+      expect(card.visible('style-row'), JSON.stringify(reply)).toBe(true);
+      expect(card.text('error-message')).toContain('Send another copy only if you want two.');
+    }
   });
 
   it('is not on the postcard card: a postcard takes no stationery', () => {
