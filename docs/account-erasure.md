@@ -114,6 +114,11 @@ operator sends now (`job.dispatch_now`) between the preview and the run.
   its next tool call. One thing can still slip through in the moment the erasure commits: a tool call
   already past sign-in can write one draft. Nothing reads it, and the draft cleanup deletes it within
   about eight days.
+- **A restyle caught mid-way writes nothing back.** The remembered stationery is kept off the tombstone by
+  its two writers, a restyle and a preview made in a chosen style, which skip an erased account
+  (`AND erased_at IS NULL`). The `users_erased_tombstone` check covers only the address and the email.
+  A restyle or a new arrival date that waited on the erasure finds its draft emptied and is refused, so
+  nothing is written back into a draft no sweep visits again (#563).
 - **A checkout caught mid-way is refused.** Both checkouts read the account again after inserting their
   order, in the same transaction. The insert waits for an erasure that holds the account row, so that
   read sees the erasure, and the rollback leaves no order and no Stripe session (#449).

@@ -708,7 +708,7 @@ describe('draftService', () => {
       await expect(setDraftSchedule('draft-1', 'auth0|owner', DATES, NOW)).resolves.toBeNull();
 
       const [lock, live, update] = client.query.mock.calls as Array<[string, unknown[]]>;
-      expect(lock[0]).toMatch(/FROM letter_drafts WHERE draft_id = \$1 AND user_id = \$2 FOR UPDATE/);
+      expect(lock[0]).toMatch(/SELECT status, expires_at, redacted_at FROM letter_drafts WHERE draft_id = \$1 AND user_id = \$2 FOR UPDATE/);
       expect(lock[1]).toEqual(['draft-1', 'auth0|owner']);
       expect(live[0]).toMatch(/FROM orders/);
       expect(live[0]).toMatch(/order_type = 'jit_mail'/);
@@ -734,7 +734,9 @@ describe('draftService', () => {
       ['a sent draft', [{ ...pending, status: 'consumed' }], 'sent'],
       ['an expired draft', [{ ...pending, status: 'expired' }], 'expired'],
       ['a cancelled draft', [{ ...pending, status: 'cancelled' }], 'expired'],
-      ['a pending draft past its expiry', [{ ...pending, expires_at: new Date('2026-10-01T14:00:00Z') }], 'expired']
+      ['a pending draft past its expiry', [{ ...pending, expires_at: new Date('2026-10-01T14:00:00Z') }], 'expired'],
+      // Emptied by an erasure, still pending (#573 review round 1).
+      ['a draft an erasure emptied', [{ ...pending, redacted_at: new Date('2026-10-01T13:59:00Z') }], 'expired']
     ])('leaves %s alone, reading nothing more', async (_label, rows, refusal) => {
       const client = inTransaction({ rows });
 
@@ -836,6 +838,7 @@ describe('draftService stationery (#563)', () => {
       ['a missing draft, or one that is not the caller\'s', [{ rows: [] }], 'not_found', 1],
       ['a sent draft', [{ rows: [{ ...pending, status: 'consumed' }] }], 'sent', 1],
       ['a pending draft past its expiry', [{ rows: [{ ...pending, expires_at: NOW }] }], 'expired', 1],
+      ['a draft an erasure emptied', [{ rows: [{ ...pending, redacted_at: NOW }] }], 'expired', 1],
       ['a draft with a live Pay & Send order', [{ rows: [pending] }, { rows: [{ '?column?': 1 }] }], 'checkout_pending', 2]
     ])('leaves %s alone, remembering nothing', async (_label, answers, refusal, statements) => {
       const client = inTransaction(...(answers as Array<{ rows: unknown[] }>));
