@@ -3,6 +3,7 @@ import { loadFont, type FontName } from './fonts.js';
 import { shape } from './glyphs.js';
 import { CONTENT_WIDTH, LINE_PITCH, PAGE_WIDTH, POINTS_PER_INCH, SIDE_MARGIN } from './geometry.js';
 import type { LayoutItem, PathItem, TextRun } from './layout.js';
+import { clampMarks } from './marks.js';
 
 /**
  * Stationery (#563): themes that restyle a letter's page, drawn by this
@@ -14,10 +15,15 @@ import type { LayoutItem, PathItem, TextRun } from './layout.js';
  * reaches the body's lines, so the body lays out as in Classic, below a
  * headline when there is one.
  *
- * Ink is black and greys only: letters print with `color: false`, and probe
- * P12 showed every grey a theme uses kept exactly in PostGrid's flattened page.
- * Lines are 0.75 pt: P12 printed 0.5 to 1 pt strokes cleanly, while a 0.25 pt
- * rule came back lighter than drawn.
+ * Ink is black and greys only: letters print with `color: false`. Probe P12
+ * printed every grey it tried, from #000 to #aaa, and every tint exactly as
+ * drawn; the themes' #222 lies among them. Lines are 0.5 pt and up: P12
+ * printed 0.5 to 1 pt strokes cleanly, while a 0.25 pt rule came back lighter.
+ *
+ * A slot (the date line, the initials, the headline) prints as one line: see
+ * slotText. Each has a rule for text that will not fit: the date line and the
+ * initials shrink to a floor, the headline shrinks to its own, and past that
+ * the layout throws StationeryOverflow, which a preview turns into a refusal.
  */
 
 export const STATIONERY_THEMES = ['classic', 'monogram', 'botanical', 'celebration'] as const;
@@ -58,6 +64,7 @@ const INK = '#222222';
 const LINE_WIDTH = 0.75;
 
 const DATE_SIZE = 12;
+const DATE_MIN_SIZE = 9;
 const DATE_BASELINE = inch(0.9);
 
 const MONOGRAM_RADIUS = inch(0.45);
@@ -65,19 +72,26 @@ const MONOGRAM_CENTER: Point = [RIGHT - MONOGRAM_RADIUS, inch(1.85)];
 const MONOGRAM_SIZE = 26;
 /** The initials take at most this share of the circle's width. */
 const MONOGRAM_FILL = 0.7;
+const MONOGRAM_MAX_LETTERS = 3;
 
 const HEADLINE_SIZE = 28;
 const HEADLINE_MIN_SIZE = 18;
 /** The room a headline takes above the body, in the body's lines. */
 export const HEADLINE_LINES = 3;
 
-/** A headline too long for one line at the smallest size it prints at. */
-export class HeadlineOverflow extends Error {
-  constructor() {
-    super('The headline does not fit on one line.');
-    this.name = 'HeadlineOverflow';
+/**
+ * A slot that cannot print as its theme draws it: a headline or a date line
+ * too long for its line at the smallest size it prints at, or initials of more
+ * than three letters.
+ */
+export class StationeryOverflow extends Error {
+  constructor(readonly slot: 'dateLine' | 'monogram' | 'headline') {
+    super(`The stationery's ${slot} does not fit.`);
+    this.name = 'StationeryOverflow';
   }
 }
+
+const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 
 type Point = [number, number];
 
@@ -90,13 +104,44 @@ function width(drawn: string, size: number): number {
   return (shape(font, drawn).advanceWidth * size) / font.unitsPerEm;
 }
 
+/**
+ * A slot's text as it prints: one line. Tabs and line breaks become spaces
+ * (Tinos has no glyph for either, and a slot is shaped as one line, so each
+ * would print the font's missing-glyph box), runs of spaces collapse, the
+ * ends are trimmed, and a letter keeps at most four combining marks, as in the
+ * body. A preview checks this text, so what it checks is what prints.
+ */
+export function slotText(text: string): string {
+  return clampMarks(text.replace(/[\t\n\v\f\r\u0085\u2028\u2029]/g, ' ').replace(/ {2,}/g, ' ').trim());
+}
+
+/** Whether a slot's text, as it prints, draws anything at all. */
+function shows(text: string): boolean {
+  return visualOrder(text).trim() !== '';
+}
+
 function run(source: string, size: number, x: number, baseline: number): TextRun {
   return { kind: 'text', font: FONT, size, x, baseline, text: visualOrder(source), source };
 }
 
-/** The date line, its right edge on the body's. */
+/**
+ * The size `drawn` prints at to fit `room`: `size` if it fits, else the
+ * largest half point that does, or null below `floor`. Widths scale with the
+ * size, so the half point found always fits.
+ */
+function fitted(drawn: string, size: number, room: number, floor: number): number | null {
+  const full = width(drawn, size);
+  if (full <= room) return size;
+  const smaller = Math.floor(((size * room) / full) * 2) / 2;
+  return smaller >= floor ? smaller : null;
+}
+
+/** The date line, its right edge on the body's, shrunk to fit the corner if it must. */
 function dateLine(text: string): TextRun {
-  return run(text, DATE_SIZE, RIGHT - width(visualOrder(text), DATE_SIZE), DATE_BASELINE);
+  const drawn = visualOrder(text);
+  const size = fitted(drawn, DATE_SIZE, RIGHT - STATIONERY_CORNER.left, DATE_MIN_SIZE);
+  if (size === null) throw new StationeryOverflow('dateLine');
+  return run(text, size, RIGHT - width(drawn, size), DATE_BASELINE);
 }
 
 /** A circle as four cubics: path data with M, C and Z only, as the card's sanitiser allows. */
@@ -118,11 +163,11 @@ function line(d: string): PathItem {
  * up to MONOGRAM_SIZE. The inner ring is 0.5 pt, which P12 printed exactly.
  */
 function monogram(letters: string): LayoutItem[] {
+  if ([...graphemes.segment(letters)].length > MONOGRAM_MAX_LETTERS) throw new StationeryOverflow('monogram');
   const font = loadFont(FONT);
   const drawn = visualOrder(letters);
-  const room = MONOGRAM_FILL * 2 * MONOGRAM_RADIUS;
-  const full = width(drawn, MONOGRAM_SIZE);
-  const size = full <= room ? MONOGRAM_SIZE : Math.floor(((MONOGRAM_SIZE * room) / full) * 2) / 2;
+  // Three letters always fit at 12 pt or more, so this never comes back null.
+  const size = fitted(drawn, MONOGRAM_SIZE, MONOGRAM_FILL * 2 * MONOGRAM_RADIUS, 0)!;
   const [cx, cy] = MONOGRAM_CENTER;
   const baseline = cy + (font.capHeight * size) / font.unitsPerEm / 2;
   return [
@@ -229,37 +274,47 @@ function confettiPiece([x, y, shape, degrees, grey]: (typeof CONFETTI)[number]):
 /**
  * The size a headline prints at, on one line across the body's width: its
  * full size if it fits, else the largest half point down to the smallest
- * that does, or null when it cannot fit at all.
+ * that does, or null when it cannot fit at all. Of the text as it prints:
+ * pass it through slotText first.
  */
 export function headlineSize(text: string): number | null {
-  const full = width(visualOrder(text), HEADLINE_SIZE);
-  if (full <= CONTENT_WIDTH) return HEADLINE_SIZE;
-  const size = Math.floor(((HEADLINE_SIZE * CONTENT_WIDTH) / full) * 2) / 2;
-  return size >= HEADLINE_MIN_SIZE ? size : null;
+  return fitted(visualOrder(text), HEADLINE_SIZE, CONTENT_WIDTH, HEADLINE_MIN_SIZE);
 }
 
 /** The headline, centred above the body, in the room HEADLINE_LINES leaves. */
 function headline(text: string, top: number): TextRun {
   const size = headlineSize(text);
-  if (size === null) throw new HeadlineOverflow();
+  if (size === null) throw new StationeryOverflow('headline');
   const x = SIDE_MARGIN + (CONTENT_WIDTH - width(visualOrder(text), size)) / 2;
   return run(text, size, x, top + 1.9 * LINE_PITCH);
 }
 
 /**
  * What a theme draws on a letter's page whose body starts at `bodyTop`, and
- * how far the body moves down for it. Classic draws nothing; a slot a theme
- * does not print (a headline outside Celebration) is ignored.
+ * how far the body moves down for it. Classic draws nothing. A slot prints as
+ * slotText makes it, and not at all when that draws nothing; a slot a theme
+ * does not print (a headline outside Celebration) is ignored. A theme this
+ * build does not know is an error, never a page drawn some other way.
  */
 export function layoutStationery(stationery: Stationery, bodyTop: number): StationeryLayout {
+  if (!(STATIONERY_THEMES as readonly string[]).includes(stationery.theme)) {
+    throw new Error(`Unknown stationery theme: ${String(stationery.theme).slice(0, 32)}`);
+  }
   if (stationery.theme === 'classic') return { items: [], bodyOffset: 0 };
+  const slot = (text: string | undefined) => {
+    const printed = slotText(text ?? '');
+    return shows(printed) ? printed : null;
+  };
   const items: LayoutItem[] = [];
   if (stationery.theme === 'botanical') items.push(...sprig());
   if (stationery.theme === 'celebration') items.push(...CONFETTI.map(confettiPiece));
-  if (stationery.dateLine) items.push(dateLine(stationery.dateLine));
-  if (stationery.theme === 'monogram' && stationery.monogram) items.push(...monogram(stationery.monogram));
-  if (stationery.theme === 'celebration' && stationery.headline) {
-    items.push(headline(stationery.headline, bodyTop));
+  const date = slot(stationery.dateLine);
+  if (date) items.push(dateLine(date));
+  const initials = stationery.theme === 'monogram' ? slot(stationery.monogram) : null;
+  if (initials) items.push(...monogram(initials));
+  const occasion = stationery.theme === 'celebration' ? slot(stationery.headline) : null;
+  if (occasion) {
+    items.push(headline(occasion, bodyTop));
     return { items, bodyOffset: HEADLINE_LINES * LINE_PITCH };
   }
   return { items, bodyOffset: 0 };

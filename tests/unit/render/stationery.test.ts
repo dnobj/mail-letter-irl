@@ -5,6 +5,7 @@
  * body, which then starts lower. The PDF and the preview draw the same paths.
  */
 
+import { inflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { loadFont } from '../../../src/render/fonts.js';
@@ -15,7 +16,7 @@ import { layoutLetter, type Layout, type LayoutItem, type PathItem, type TextRun
 import { renderPdf } from '../../../src/render/pdf.js';
 import { renderPreviewSvg } from '../../../src/render/preview.js';
 import {
-  HEADLINE_LINES, HeadlineOverflow, headlineSize, layoutStationery, STATIONERY_CORNER, STATIONERY_THEMES,
+  HEADLINE_LINES, headlineSize, layoutStationery, slotText, STATIONERY_CORNER, STATIONERY_THEMES, StationeryOverflow,
   type Stationery, type StationeryTheme
 } from '../../../src/render/stationery.js';
 
@@ -45,7 +46,8 @@ function reach(item: LayoutItem): { left: number; top: number; right: number; bo
     ys = ys.concat(numbers.filter((_, index) => index % 2 === 1).map(value => value + dy));
   };
   if (item.kind === 'path') {
-    const half = (item.strokeWidth ?? 0) / 2;
+    // A miter join reaches at most the miter limit (4) times half the width.
+    const half = (item.strokeWidth ?? 0) * 2;
     add(item.d);
     return { left: Math.min(...xs) - half, top: Math.min(...ys) - half, right: Math.max(...xs) + half, bottom: Math.max(...ys) + half };
   }
@@ -198,7 +200,8 @@ describe("Celebration's headline (#563)", () => {
 
     const tooLong = 'Congratulations on your graduation and your new job in the city, from all of us!';
     expect(headlineSize(tooLong)).toBeNull();
-    expect(() => letter({ theme: 'celebration', headline: tooLong })).toThrow(HeadlineOverflow);
+    expect(() => letter({ theme: 'celebration', headline: tooLong })).toThrow(StationeryOverflow);
+    expect(() => letter({ theme: 'celebration', headline: tooLong })).toThrow(expect.objectContaining({ slot: 'headline' }));
   });
 });
 
@@ -229,5 +232,124 @@ describe("the themes' outputs (#563)", () => {
       const limits = ops.fnArray.flatMap((fn, index) => (fn === pdfjs.OPS.setMiterLimit ? [ops.argsArray[index][0]] : []));
       expect(limits).toEqual(Array(lines).fill(4));
     }
+  });
+
+  it("set each theme path's paint before the path, as PDF requires", async () => {
+    for (const theme of THEMED) {
+      const layout = letter({ theme, ...SLOTS });
+      const pdf = (await renderPdf(layout)).toString('latin1');
+      const content = [...pdf.matchAll(/stream\r?\n([\s\S]*?)\r?\nendstream/g)]
+        .map(match => {
+          const bytes = Buffer.from(match[1], 'latin1');
+          try {
+            return inflateSync(bytes).toString('latin1');
+          } catch {
+            return '';
+          }
+        })
+        .join('\n');
+      // Inside a path object (from its first m to its painting operator) only
+      // path operators may appear. Glyphs set their fill inside, one colour
+      // each, as since #534 (P5 onward printed so); so every fill colour
+      // inside is a glyph's, and no theme path sets any state inside.
+      let inside = false;
+      let strokeState = 0;
+      let fillColours = 0;
+      for (const line of content.split('\n').map(text => text.trim())) {
+        if (/ m$/.test(line)) inside = true;
+        else if (/^(S|s|f|f\*|F|B|B\*|b|b\*|n)$/.test(line)) inside = false;
+        else if (inside && / (w|M|SCN|RG|CS)$/.test(line)) strokeState++;
+        else if (inside && / scn$/.test(line)) fillColours++;
+      }
+      expect(strokeState).toBe(0);
+      expect(fillColours).toBe(runs(layout).flatMap(run => placeGlyphs(run)).length);
+      // The theme's own filled shapes (berries, confetti) are among them.
+      if (theme !== 'monogram') expect(paths(layout).some(path => path.fill !== 'none')).toBe(true);
+    }
+  });
+
+  it('paint a filled and stroked path with both, and skip a path with nothing to paint', async () => {
+    const d = 'M100 100L200 100L200 200Z';
+    const page = {
+      items: [
+        { kind: 'path', d, fill: '#555555', stroke: '#222222', strokeWidth: 1 } as PathItem,
+        { kind: 'path', d: 'M300 300L400 400', fill: 'none' } as PathItem
+      ],
+      linesUsed: 0,
+      linesAvailable: 0
+    };
+    const layout: Layout = { width: 612, height: 792, pages: [page], overflowLines: 0 };
+    const pdf = await pdfjs.getDocument({ data: new Uint8Array(await renderPdf(layout)), disableFontFace: true, isEvalSupported: false }).promise;
+    const ops = await (await pdf.getPage(1)).getOperatorList();
+    const paths = ops.fnArray.flatMap((fn, index) => (fn === pdfjs.OPS.constructPath ? [ops.argsArray[index][0]] : []));
+    expect(paths).toEqual([pdfjs.OPS.fillStroke]);
+    const [svg] = renderPreviewSvg(layout);
+    expect(svg).toContain(`<path d="${d}" fill="#555555" stroke="#222222" stroke-width="1"/>`);
+  });
+});
+
+describe("a theme's slots (#563)", () => {
+  const placedIds = (run: TextRun) => placeGlyphs(run).map(glyph => glyph.key.split('-').pop());
+
+  it('print as one line: tabs and line breaks become spaces, never the missing-glyph box', () => {
+    expect(slotText('  Happy\nBirthday,\t\tSam!\r\n')).toBe('Happy Birthday, Sam!');
+    expect(slotText('A B C\u0085D')).toBe('A B C D');
+    for (const [theme, slot] of [['monogram', 'dateLine'], ['monogram', 'monogram'], ['celebration', 'headline']] as const) {
+      const text = slot === 'monogram' ? 'A\tL' : 'Happy\nBirthday\tSam';
+      const layout = letter({ theme, [slot]: text });
+      const printed = runs(layout).find(run => run.source === slotText(text))!;
+      expect(printed).toBeDefined();
+      expect(runs(layout).some(run => run.source === text)).toBe(false);
+      // Glyph 0 is Tinos's missing-glyph box.
+      expect(placedIds(printed)).not.toContain('0');
+    }
+  });
+
+  it('keep at most four marks on a letter, so nothing climbs out of the corner', () => {
+    const stacked = 'A' + '́'.repeat(10);
+    expect([...slotText(stacked)].length).toBe(5);
+    for (const stationery of [
+      { theme: 'monogram', monogram: stacked },
+      { theme: 'botanical', dateLine: stacked }
+    ] as const) {
+      const layout = letter(stationery);
+      for (const item of items(layout).filter(item => !body(layout).includes(item))) {
+        const box = reach(item);
+        expect(box.top).toBeGreaterThanOrEqual(STATIONERY_CORNER.top);
+        expect(box.left).toBeGreaterThanOrEqual(STATIONERY_CORNER.left);
+      }
+    }
+  });
+
+  it('take a blank headline, date line or initials as none', () => {
+    const plain = letter(undefined);
+    for (const blank of ['   ', '​', '\n\t']) {
+      const layout = letter({ theme: 'celebration', headline: blank, dateLine: blank });
+      expect(body(layout)).toEqual(body(plain));
+      expect(runs(layout).filter(run => !body(layout).includes(run))).toEqual([]);
+      expect(paths(letter({ theme: 'monogram', monogram: blank }))).toEqual([]);
+    }
+  });
+
+  it('shrink a long date line to fit the corner, and refuse one that cannot fit at 9 pt', () => {
+    const long = 'Written on Wednesday, the thirtieth of September, 2026';
+    const [date] = runs(letter({ theme: 'botanical', dateLine: long })).filter(run => run.source === long);
+    expect(date.size).toBeLessThan(12);
+    expect(date.size).toBeGreaterThanOrEqual(9);
+    expect(date.x).toBeGreaterThanOrEqual(STATIONERY_CORNER.left);
+    expect(date.x + runWidth(date)).toBeCloseTo(PAGE_WIDTH - SIDE_MARGIN, 6);
+
+    const tooLong = 'Written at the kitchen table on the evening of Wednesday, the thirtieth of September';
+    expect(() => letter({ theme: 'botanical', dateLine: tooLong })).toThrow(expect.objectContaining({ slot: 'dateLine' }));
+  });
+
+  it('refuse more than three initials', () => {
+    expect(() => letter({ theme: 'monogram', monogram: 'ABCD' })).toThrow(StationeryOverflow);
+    expect(() => letter({ theme: 'monogram', monogram: 'ABCD' })).toThrow(expect.objectContaining({ slot: 'monogram' }));
+    expect(() => letter({ theme: 'monogram', monogram: 'ÅÑÉ' })).not.toThrow();
+  });
+
+  it('refuse a theme this build does not know, rather than draw another page', () => {
+    expect(() => letter({ theme: 'typewriter' as StationeryTheme })).toThrow(/Unknown stationery theme: typewriter/);
   });
 });

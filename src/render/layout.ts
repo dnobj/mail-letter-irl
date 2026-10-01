@@ -7,6 +7,7 @@ import {
   INLINE_IMAGE_MAX_HEIGHT, LINE_PITCH, PAGE_HEIGHT, PAGE_WIDTH, SIDE_MARGIN
 } from './geometry.js';
 import type { RenderImage } from './images.js';
+import { clampMarks, MARK, MAX_MARKS_PER_LETTER } from './marks.js';
 import { layoutStationery, type Stationery } from './stationery.js';
 import type { LetterLayoutType } from '../contracts/types.js';
 
@@ -104,7 +105,6 @@ export interface LineRange {
 }
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
-const MARK = /\p{M}/u;
 const WHITESPACE = /\s/u;
 
 /** The legacy HTML showed an image at most at its intrinsic CSS size: 96 px per inch. */
@@ -115,14 +115,6 @@ const TAB = '    ';
 
 /** The letter's typeface. */
 const BODY_FONT: FontName = 'Tinos-Regular';
-
-/**
- * Combining marks kept on one letter. Hebrew can carry four (a dagesh, a shin
- * dot, a vowel and a meteg); more stack upward, 2.6pt each on a capital, and
- * the first line's would reach the address boxes. Previews refuse such text
- * (drawsGrapheme); clampMarks only keeps the layout's promise.
- */
-const MAX_MARKS_PER_LETTER = 4;
 
 /**
  * Characters never drawn, whatever the font maps them to: controls other than
@@ -159,19 +151,6 @@ export function drawsGrapheme(grapheme: string): boolean {
     if (mirror && !font.hasGlyphForCodePoint(mirror.codePointAt(0)!)) return false;
   }
   return true;
-}
-
-function clampMarks(text: string): string {
-  if (!MARK.test(text)) return text;
-  let clamped = '';
-  for (const { segment } of graphemes.segment(text)) {
-    let marks = 0;
-    for (const character of segment) {
-      if (MARK.test(character) && ++marks > MAX_MARKS_PER_LETTER) continue;
-      clamped += character;
-    }
-  }
-  return clamped;
 }
 
 function fitImage(image: RenderImage, maxHeight: number): { width: number; height: number } {

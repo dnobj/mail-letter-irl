@@ -62,16 +62,20 @@ export async function renderPdf(layout: Layout): Promise<Buffer> {
         continue;
       }
       if (item.kind === 'path') {
+        const fill = item.fill === 'none' ? null : item.fill;
+        // Nothing to paint draws nothing, as in the preview.
+        if (!fill && !item.stroke) continue;
+        // The graphics state is set before the path: between a path's first
+        // operator and its painting one, PDF allows only path operators.
         // SVG's miter limit is 4 and the PDF's 10: set, so a sharp join ends
         // where the preview's does.
-        doc.save().path(item.d);
-        if (item.stroke) {
-          doc.lineWidth(item.strokeWidth ?? 1).miterLimit(4);
-          if (item.fill === 'none') doc.stroke(item.stroke);
-          else doc.fillAndStroke(item.fill, item.stroke);
-        } else if (item.fill !== 'none') {
-          doc.fill(item.fill);
-        }
+        doc.save();
+        if (item.stroke) doc.lineWidth(item.strokeWidth ?? 1).miterLimit(4).strokeColor(item.stroke);
+        if (fill) doc.fillColor(fill);
+        doc.path(item.d);
+        if (fill && item.stroke) doc.fillAndStroke();
+        else if (fill) doc.fill();
+        else doc.stroke();
         doc.restore();
         continue;
       }

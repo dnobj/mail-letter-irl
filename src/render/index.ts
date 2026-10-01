@@ -6,7 +6,7 @@
  */
 export { drawsGrapheme, layoutLetter, wrapParagraph } from './layout.js';
 export type { ImageBox, Layout, LayoutPage, LetterContent, PathItem, TextRun } from './layout.js';
-export { HEADLINE_LINES, HeadlineOverflow, headlineSize, STATIONERY_CORNER, STATIONERY_THEMES } from './stationery.js';
+export { HEADLINE_LINES, headlineSize, slotText, STATIONERY_CORNER, STATIONERY_THEMES, StationeryOverflow } from './stationery.js';
 export type { Stationery, StationeryTheme } from './stationery.js';
 export { renderPdf, RENDERER_VERSION, PRINTABLE_RENDERER_VERSIONS } from './pdf.js';
 export { GiftPageOverflow, layoutGiftPage } from './giftPage.js';
