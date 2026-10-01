@@ -1337,6 +1337,11 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       if (renderer != null && !PRINTABLE_RENDERER_VERSIONS.has(renderer)) {
         throw new RenderRefusal('unknown_version', `This build cannot print renderer version "${renderer}".`);
       }
+      // Stationery is a letter's (#563): a postcard recording pdf-2 would print
+      // without it, so it is refused rather than printed otherwise.
+      if (renderer === STATIONERY_RENDERER_VERSION) {
+        throw new RenderRefusal('unknown_version', `A postcard is never drawn in stationery: renderer version "${renderer}".`);
+      }
       // A gift send prints its card in a strip on the back (renderPostcardForPrint).
       const usePdf = renderer != null;
 

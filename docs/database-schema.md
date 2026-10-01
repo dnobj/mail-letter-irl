@@ -764,11 +764,11 @@ Production provisioning and the first production connection remain separate owne
 | 37 | 037_personal_access_token_scopes.sql | `personal_access_tokens.scopes`: every token reads and drafts, and none sends (#470) |
 | 38 | 038_daily_limits.sql | The daily limits' operator values, refusal counts and the API's configured values, and the `daily_limit_reached` alert type. Re-run admin provisioning after it |
 | 39 | 039_renderer_version.sql | `letter_drafts.renderer_version`: the renderer that drew a draft's preview, NULL or `pdf-1` (#534). The reader role's column grants leave it out, and the operator role's table-wide SELECT covers it; no provisioning re-run |
-| 44 | 044_stationery.sql | `letter_drafts.stationery` (#563): the theme a preview was drawn in and its slot text, NULL for Classic. `renderer_version` admits `pdf-2`, set exactly when a draft has stationery. No provisioning re-run, as for 039 |
 | 40 | 040_arrive_by.sql | `arrive_by` and `mail_on` on `letter_drafts` and `letters`: mail held to arrive by a date (#535), with the pair and order CHECKs and `idx_letters_held_mail_on`. DATEs are read as 'YYYY-MM-DD' strings (`src/db/dateParser.ts`). No provisioning re-run, as for 039 |
 | 41 | 041_missed_mail_day_alert.sql | The `schedule_missed_mail_day` alert type (#535), restated inside the `to_regclass` guard as 038 does, and a partial unique index on its letter (`idx_commerce_alerts_missed_mail_day_letter`) so it is raised once per letter. No provisioning re-run: the roles read the alerts table whole |
 | 42 | 042_mail_job_release_audit.sql | The operator audit operation `mail_job_release` (#535), written when the admin panel sends held mail early (`job.dispatch_now`). Restated inside the `to_regclass` guard as 029 does. No provisioning re-run: the operator role inserts into the table whole, and the release updates only `letter_jobs` columns already granted |
 | 43 | 043_provider_cancelled_alert.sql | The `provider_cancelled_mail` alert type (#566), restated inside the `to_regclass` guard as 041 does, and a partial unique index on its letter (`idx_commerce_alerts_provider_cancelled_letter`) so it is raised once per letter. No provisioning re-run: the roles read the alerts table whole |
+| 44 | 044_stationery.sql | `letter_drafts.stationery` (#563): the theme a preview was drawn in and its slot text, NULL for Classic. `renderer_version` admits `pdf-2`, set exactly when a draft has stationery. No provisioning re-run, as for 039 |
 
 ---
 

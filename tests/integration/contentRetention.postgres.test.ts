@@ -389,7 +389,8 @@ describePostgres('content retention sweep', () => {
       expect(await retention.restoreQuarantinedContent('letter_drafts', draftId)).toBe(true);
 
       const { rows } = await pool.query(
-        `SELECT sender, body_text, header_image_data, header_image_url, redacted_at
+        `SELECT sender, body_text, header_image_data, header_image_url, redacted_at,
+                stationery IS NULL AS no_stationery, sender_validation IS NULL AS no_validation
            FROM letter_drafts WHERE draft_id = $1`,
         [draftId]
       );
@@ -398,6 +399,10 @@ describePostgres('content retention sweep', () => {
       expect(rows[0].header_image_url).toBe(SECRET_IMAGE_URL);
       expect(rows[0].header_image_data).toContain('base64');
       expect(rows[0].redacted_at).toBeNull();
+      // SQL NULL again, not JSON null: a Classic draft's stationery must be,
+      // for migration 044's pair check (#563).
+      expect(rows[0].no_stationery).toBe(true);
+      expect(rows[0].no_validation).toBe(true);
     });
 
     it("keeps a themed draft's theme, drops its slot text, and restores both (#563)", async () => {

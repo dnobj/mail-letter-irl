@@ -220,11 +220,13 @@ describePostgres('renderer version (migration 039, #534)', () => {
         "UPDATE letter_drafts SET renderer_version = 'pdf-2', stationery = '{\"theme\": \"typewriter\"}'::jsonb WHERE draft_id = $1",
         [plain]
       )).rejects.toMatchObject({ code: '23514', constraint: 'letter_drafts_stationery_theme_known' });
-      // Classic is no theme: never stored.
-      await expect(pool.query(
-        "UPDATE letter_drafts SET renderer_version = 'pdf-2', stationery = '{\"theme\": \"classic\"}'::jsonb WHERE draft_id = $1",
-        [plain]
-      )).rejects.toMatchObject({ code: '23514', constraint: 'letter_drafts_stationery_theme_known' });
+      // Classic is no theme: never stored. Nor is JSON that names no theme.
+      for (const stored of ['{"theme": "classic"}', '{}', '{"theme": null}', '"botanical"', '[]']) {
+        await expect(pool.query(
+          "UPDATE letter_drafts SET renderer_version = 'pdf-2', stationery = $2::jsonb WHERE draft_id = $1",
+          [plain, stored]
+        )).rejects.toMatchObject({ code: '23514', constraint: 'letter_drafts_stationery_theme_known' });
+      }
       // The legacy HTML stays without either.
       const legacy = await seedDraft(userId, null);
       expect((await pool.query('SELECT stationery FROM letter_drafts WHERE draft_id = $1', [legacy])).rows[0].stationery).toBeNull();

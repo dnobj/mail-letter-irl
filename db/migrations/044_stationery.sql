@@ -19,10 +19,12 @@
 -- letter_drafts predates 022 and 023, so the legacy-scenario replay needs no
 -- guard here.
 
+-- The theme check COALESCEs: `->>` gives NULL for JSON that is not an object,
+-- has no theme or a null one, and a CHECK passes on NULL.
 ALTER TABLE letter_drafts
   ADD COLUMN stationery JSONB,
   ADD CONSTRAINT letter_drafts_stationery_theme_known
-    CHECK (stationery IS NULL OR stationery->>'theme' IN ('monogram', 'botanical', 'celebration'));
+    CHECK (stationery IS NULL OR COALESCE(stationery->>'theme', '') IN ('monogram', 'botanical', 'celebration'));
 
 ALTER TABLE letter_drafts
   DROP CONSTRAINT letter_drafts_renderer_version_known,

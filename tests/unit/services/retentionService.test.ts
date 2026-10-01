@@ -432,8 +432,11 @@ describe('retention sweep guards (#153)', () => {
       for (const jsonColumn of ['sender', 'recipient']) {
         expect(sql).toContain(`${jsonColumn} = (SELECT content->'${jsonColumn}' FROM saved)`);
       }
-      // A Classic draft's stationery comes back as SQL NULL, not JSON null (#563).
-      expect(sql).toContain("stationery = NULLIF((SELECT content->'stationery' FROM saved), 'null'::jsonb)");
+      // A nullable JSON column comes back as SQL NULL, not JSON null: for a
+      // Classic draft's stationery, migration 044's pair check needs it (#563).
+      for (const nullableJson of ['stationery', 'sender_validation', 'recipient_validation']) {
+        expect(sql).toContain(`${nullableJson} = NULLIF((SELECT content->'${nullableJson}' FROM saved), 'null'::jsonb)`);
+      }
       for (const textColumn of ['body_text', 'header_image_data', 'inline_image_url']) {
         expect(sql).toContain(`${textColumn} = (SELECT content->>'${textColumn}' FROM saved)`);
       }

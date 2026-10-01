@@ -183,6 +183,8 @@ describe('postcards printed from our own PDF (#534 Phase 4)', () => {
 
   it.each([
     ['a renderer this build does not know', { rendererVersion: 'pdf-9' }, 'unknown_version', 'pdf-9'],
+    // Stationery is a letter's (#563): never printed on a postcard as if it were not there.
+    ['a postcard recording stationery\'s renderer', { rendererVersion: 'pdf-2' }, 'unknown_version', 'A postcard is never drawn in stationery'],
     ['a message past its half of the back', { backMessage: Array.from({ length: 17 }, (_, n) => `Line ${n + 1}`).join('\n') }, 'overflow', "runs 1 line(s) past its half of the back"],
     ['an unreadable image', { frontImageBase64: 'data:image/gif;base64,R0lGODlhAQABAAAAACw=' }, 'image', "The postcard's image could not be read"],
     ['a size our renderer does not draw', { size: '6x4' as const }, 'size', 'Our renderer draws 6x9 postcards, not 6x4.'],
