@@ -1077,7 +1077,8 @@
               "delivered",
               "returned",
               "failed",
-              "cancelled"
+              "cancelled",
+              "scheduled"
             ]
           },
           "statusTimeline": {
@@ -1127,6 +1128,26 @@
           "isRetry": {
             "type": "boolean",
             "description": "True if this was an idempotent retry (draft already consumed)"
+          },
+          "schedule": {
+            "type": "object",
+            "description": "Sent with an arrival date: the date it aims to arrive by and the day it goes to the printer, YYYY-MM-DD. It waits until then.",
+            "properties": {
+              "arriveBy": {
+                "type": "string"
+              },
+              "mailOn": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "arriveBy",
+              "mailOn"
+            ]
+          },
+          "cancellable": {
+            "type": "boolean",
+            "description": "With an arrival date: whether it can still be cancelled free, before it goes to the printer"
           },
           "trackingSupport": {
             "type": "string",
@@ -1550,6 +1571,18 @@
           "followUpSuggestedPrompt": {
             "type": "string"
           },
+          "arriveBy": {
+            "type": "string",
+            "description": "Sent with an arrival date: the date it aims to arrive by, YYYY-MM-DD"
+          },
+          "mailOn": {
+            "type": "string",
+            "description": "Sent with an arrival date: the day it goes to the printer, YYYY-MM-DD"
+          },
+          "cancellable": {
+            "type": "boolean",
+            "description": "With an arrival date: whether it can still be cancelled free, before it goes to the printer"
+          },
           "trackingSupport": {
             "type": "string",
             "enum": [
@@ -1681,6 +1714,18 @@
                 },
                 "sentAt": {
                   "type": "string"
+                },
+                "arriveBy": {
+                  "type": "string",
+                  "description": "Sent with an arrival date: the date it aims to arrive by, YYYY-MM-DD"
+                },
+                "mailOn": {
+                  "type": "string",
+                  "description": "Sent with an arrival date: the day it goes to the printer, YYYY-MM-DD"
+                },
+                "cancellable": {
+                  "type": "boolean",
+                  "description": "With an arrival date: whether it can still be cancelled free, before it goes to the printer"
                 }
               }
             }
@@ -2151,7 +2196,8 @@
               "delivered",
               "returned",
               "failed",
-              "cancelled"
+              "cancelled",
+              "scheduled"
             ]
           },
           "statusTimeline": {
@@ -2204,6 +2250,26 @@
           "isRetry": {
             "type": "boolean",
             "description": "True if this was an idempotent retry (draft already consumed)"
+          },
+          "schedule": {
+            "type": "object",
+            "description": "Sent with an arrival date: the date it aims to arrive by and the day it goes to the printer, YYYY-MM-DD. It waits until then.",
+            "properties": {
+              "arriveBy": {
+                "type": "string"
+              },
+              "mailOn": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "arriveBy",
+              "mailOn"
+            ]
+          },
+          "cancellable": {
+            "type": "boolean",
+            "description": "With an arrival date: whether it can still be cancelled free, before it goes to the printer"
           },
           "trackingSupport": {
             "type": "string",

@@ -22,6 +22,10 @@ interface GetOrderStatusOutput {
   canSendFollowUp?: boolean;
   followUpSuggestedPrompt?: string;
   trackingSupport: "none" | "estimated_only" | "carrier_tracking";
+  /** Sent with an arrival date (#535): its dates, and whether it can still be cancelled free. */
+  arriveBy?: string;
+  mailOn?: string;
+  cancellable?: boolean;
 }
 
 
@@ -85,7 +89,10 @@ async function handler(
     recipientSummary: order.recipientSummary,
     canSendFollowUp: true,
     followUpSuggestedPrompt: `Write a follow-up letter to ${order.recipientSummary.name}.`,
-    trackingSupport: "estimated_only"
+    trackingSupport: "estimated_only",
+    ...(order.schedule
+      ? { arriveBy: order.schedule.arriveBy, mailOn: order.schedule.mailOn, cancellable: order.cancellable === true }
+      : {})
   };
 }
 

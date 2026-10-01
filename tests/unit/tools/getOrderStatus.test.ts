@@ -196,3 +196,23 @@ describe('get_order_status tool', () => {
     });
   });
 });
+
+describe('get_order_status with an arrival date (#535)', () => {
+  it('says the dates of mail sent with them, and whether it can still be cancelled free', async () => {
+    const order = createMockOrder('order-held', false);
+    order.currentStatus = 'scheduled';
+    order.schedule = { arriveBy: '2026-10-16', mailOn: '2026-10-06' };
+    order.cancellable = true;
+
+    const result = await getOrderStatusTool.handler({ orderId: 'order-held' }, createMockContext([order]));
+
+    expect(result).toMatchObject({ currentStatus: 'scheduled', arriveBy: '2026-10-16', mailOn: '2026-10-06', cancellable: true });
+  });
+
+  it('says nothing of dates for mail sent without them', async () => {
+    const result = await getOrderStatusTool.handler({ orderId: 'order-plain' }, createMockContext([createMockOrder('order-plain', false)]));
+    expect(result).not.toHaveProperty('arriveBy');
+    expect(result).not.toHaveProperty('mailOn');
+    expect(result).not.toHaveProperty('cancellable');
+  });
+});

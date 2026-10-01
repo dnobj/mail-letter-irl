@@ -6,7 +6,18 @@
 
 import type { ToolContext } from '../contracts/types.js';
 import { isArriveByEnabled, scheduleHorizonDays, scheduleLeadDays } from '../config/arriveBy.js';
-import { checkArrival, earliestArrival, latestArrival, newYorkDate, type CalendarDate } from '../services/deliverySchedule.js';
+import {
+  checkArrival,
+  describeDate,
+  earliestArrival,
+  latestArrival,
+  scheduleSentence,
+  type CalendarDate
+} from '../services/deliverySchedule.js';
+
+// The words for held mail's dates live with the schedule (the order store and
+// the sends use them too); the previews keep importing them from here.
+export { describeDate, scheduleSentence };
 import type { DraftSchedule } from '../services/types.js';
 
 /** What a preview's output says about its arrival date (zodSchemas.ts's previewScheduleZ). */
@@ -53,26 +64,6 @@ export function previewArrivalWindow(context: ToolContext): ArrivalWindow | unde
 /** A refusal the preview tools surface as the person's to fix, not a fault. */
 function refusal(message: string): Error {
   return Object.assign(new Error(message), { diagnosticClass: 'validation_error' });
-}
-
-/**
- * A calendar date as a preview says it: "Tue, Oct 13", with the year when it
- * is not this year in New York.
- */
-export function describeDate(date: CalendarDate, now: Date): string {
-  const sameYear = date.slice(0, 4) === newYorkDate(now).slice(0, 4);
-  return new Intl.DateTimeFormat('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    ...(sameYear ? {} : { year: 'numeric' as const }),
-    timeZone: 'UTC'
-  }).format(new Date(`${date}T12:00:00Z`));
-}
-
-/** The preview's one sentence about a held mail's dates. */
-export function scheduleSentence(schedule: Pick<PreviewScheduleOutput, 'arriveBy' | 'mailOn'>, now: Date): string {
-  return `Goes to the printer ${describeDate(schedule.mailOn, now)}, and aims to arrive by ${describeDate(schedule.arriveBy, now)}.`;
 }
 
 /**

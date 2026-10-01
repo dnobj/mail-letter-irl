@@ -28,6 +28,12 @@ import {
   summarizeToolResult
 } from '../../../src/mcp/registerTools.js';
 import { cancelScheduledMailTool, getStartedTool, setArrivalDateTool } from '../../../src/tools/index.js';
+import {
+  getOrderStatusOutputSchema,
+  listOrdersOutputSchema,
+  sendLetterOutputSchema,
+  sendPostcardOutputSchema
+} from '../../../src/schemas.js';
 import { clientProfileNamed } from '../../../src/auth/clientProfiles.js';
 
 /**
@@ -569,6 +575,50 @@ describe('cancel_scheduled_mail (#535)', () => {
     });
   });
 
+  it('narrates a scheduled send and order with their dates, and the cancel while it is possible', () => {
+    vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', 'true');
+    try {
+      narratesScheduledMail();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('names no cancel tool while arrival dates are off, when cancel_scheduled_mail is not listed', () => {
+    vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', '');
+    try {
+      const schedule = { arriveBy: '2026-10-16', mailOn: '2026-10-06' };
+      const letter = summarizeToolResult('send_letter', { orderId: 'ltr-1', currentStatus: 'scheduled', schedule, cancellable: true });
+      expect(letter).toMatch(/^Letter ltr-1 is scheduled\. Goes to the printer /);
+      expect(letter).not.toMatch(/cancel/);
+      const order = summarizeToolResult('get_order_status', { orderId: 'ltr-1', currentStatus: 'scheduled', ...schedule, cancellable: true });
+      expect(order).not.toMatch(/cancel/);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  function narratesScheduledMail() {
+    const schedule = { arriveBy: '2026-10-16', mailOn: '2026-10-06' };
+    const dates = /Goes to the printer Tue, Oct 6(, 2026)?, and aims to arrive by Fri, Oct 16(, 2026)?\./;
+    const letter = summarizeToolResult('send_letter', { orderId: 'ltr-1', currentStatus: 'scheduled', schedule, cancellable: true });
+    expect(letter).toMatch(/^Letter ltr-1 is scheduled\. /);
+    expect(letter).toMatch(dates);
+    expect(letter).toMatch(/It can be cancelled free until then with cancel_scheduled_mail\.$/);
+    expect(summarizeToolResult('send_postcard', { orderId: 'pc-1', currentStatus: 'scheduled', schedule, cancellable: true })).toMatch(
+      /^Postcard pc-1 is scheduled\. /
+    );
+    const order = summarizeToolResult('get_order_status', { orderId: 'ltr-1', currentStatus: 'scheduled', ...schedule, cancellable: false });
+    expect(order).toMatch(/^Latest order status: scheduled\. /);
+    expect(order).toMatch(dates);
+    expect(order).not.toMatch(/cancel/);
+    // Anything else reads as before.
+    expect(summarizeToolResult('send_letter', { orderId: 'ltr-2', currentStatus: 'accepted', schedule, cancellable: false })).toBe(
+      'Letter ltr-2 queued with status accepted.'
+    );
+    expect(summarizeToolResult('get_order_status', { currentStatus: 'delivered' })).toBe('Latest order status: delivered.');
+  }
+
   it("narrates the tool's own sentence", () => {
     const message = 'Cancelled. The letter it cost is back in the balance.';
     expect(summarizeToolResult('cancel_scheduled_mail', { orderId: 'o', message })).toBe(message);
@@ -616,6 +666,28 @@ describe('arrive-by in the served schemas (#535)', () => {
 
   afterEach(() => {
     vi.unstubAllEnvs();
+  });
+
+  it('describes cancellable without naming a tool, whatever the flag: the outputs are served either way', () => {
+    // cancel_scheduled_mail is listed only while arrival dates are on.
+    const said = 'With an arrival date: whether it can still be cancelled free, before it goes to the printer';
+    const cancellable = (shape: z.ZodRawShape | undefined) => (shape?.cancellable as z.ZodTypeAny | undefined)?.description;
+    const listed = (getZodOutputShape('list_orders')!.orders as z.ZodArray<z.AnyZodObject>).element.shape;
+    expect(cancellable(getZodOutputShape('send_letter')), 'send_letter').toBe(said);
+    expect(cancellable(getZodOutputShape('send_postcard')), 'send_postcard').toBe(said);
+    expect(cancellable(getZodOutputShape('get_order_status')), 'get_order_status').toBe(said);
+    expect(cancellable(listed), 'list_orders').toBe(said);
+    // And the manifest's layer, all of it.
+    for (const [name, schema] of [
+      ['send_letter', sendLetterOutputSchema],
+      ['send_postcard', sendPostcardOutputSchema],
+      ['get_order_status', getOrderStatusOutputSchema],
+      ['list_orders', listOrdersOutputSchema]
+    ] as const) {
+      const text = JSON.stringify(schema);
+      expect(text, name).toContain(said);
+      expect(text, name).not.toContain('cancel_scheduled_mail');
+    }
   });
 
   it('offers arriveBy on the four previews only while the flag is on', () => {

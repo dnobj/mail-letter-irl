@@ -122,3 +122,24 @@ describe('list_orders', () => {
     expect(listOrdersTool.description).not.toMatch(/credit/i);
   });
 });
+
+describe('list_orders with an arrival date (#535)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.listPackPurchases.mockResolvedValue({ purchases: [], total: 0 });
+  });
+
+  it('lists the dates of mail sent with them, and whether it can still be cancelled free, as the served schema says', async () => {
+    const held = {
+      ...mailOrder('held', '2026-09-12T10:00:00Z'),
+      currentStatus: 'scheduled',
+      schedule: { arriveBy: '2026-10-16', mailOn: '2026-10-06' },
+      cancellable: false
+    };
+    const result = await listOrdersTool.handler({}, contextWith([held, mailOrder('plain', '2026-09-11T10:00:00Z')]));
+
+    expect(result.orders[0]).toMatchObject({ orderId: 'held', status: 'scheduled', arriveBy: '2026-10-16', mailOn: '2026-10-06', cancellable: false });
+    expect(result.orders[1]).not.toHaveProperty('arriveBy');
+    expect(listOrdersOutputZ.safeParse(result).success).toBe(true);
+  });
+});

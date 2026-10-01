@@ -1364,6 +1364,25 @@ function heldMailSentence(result: Record<string, unknown>): string {
   return ` Scheduled: ${sentence} If it is sent, it is held until then; USPS does not guarantee First-Class dates.`;
 }
 
+/**
+ * The sentence for mail sent with an arrival date that still waits for its
+ * mail date (#535), on a send or an order status: when it goes to the
+ * printer, and that it can be cancelled until then. The cancel is named only
+ * while cancel_scheduled_mail is listed (the flag); mail held before the flag
+ * went off still goes on its date.
+ */
+function scheduledOrderSentence(result: Record<string, unknown>): string {
+  const schedule = result.schedule as { arriveBy?: unknown; mailOn?: unknown } | undefined;
+  const arriveBy = typeof schedule?.arriveBy === "string" ? schedule.arriveBy : result.arriveBy;
+  const mailOn = typeof schedule?.mailOn === "string" ? schedule.mailOn : result.mailOn;
+  if (typeof arriveBy !== "string" || typeof mailOn !== "string") return "";
+  const cancel =
+    result.cancellable === true && isArriveByEnabled()
+      ? " It can be cancelled free until then with cancel_scheduled_mail."
+      : "";
+  return ` ${scheduleSentence({ arriveBy, mailOn }, new Date())}${cancel}`;
+}
+
 export function summarizeToolResult(
   toolName: string,
   result: Record<string, unknown>,
@@ -1441,7 +1460,10 @@ export function summarizeToolResult(
       const status = result.currentStatus ?? "unknown";
       const order = result.orderId ?? "(no id)";
       const note = result.saveReturnAddressNote as string | undefined;
-      let summary = `Letter ${order} queued with status ${status}.`;
+      let summary =
+        status === "scheduled"
+          ? `Letter ${order} is scheduled.${scheduledOrderSentence(result)}`
+          : `Letter ${order} queued with status ${status}.`;
       if (note) {
         summary += ` ${note}`;
       }
@@ -1449,7 +1471,9 @@ export function summarizeToolResult(
     }
     case "get_order_status": {
       const status = result.currentStatus ?? "unknown";
-      return `Latest order status: ${status}.`;
+      return status === "scheduled"
+        ? `Latest order status: scheduled.${scheduledOrderSentence(result)}`
+        : `Latest order status: ${status}.`;
     }
     case "list_orders": {
       const orders = result.orders as any[];
@@ -1487,7 +1511,10 @@ export function summarizeToolResult(
       const status = result.currentStatus ?? "unknown";
       const order = result.orderId ?? "(no id)";
       const note = result.saveReturnAddressNote as string | undefined;
-      let summary = `Postcard ${order} queued with status ${status}.`;
+      let summary =
+        status === "scheduled"
+          ? `Postcard ${order} is scheduled.${scheduledOrderSentence(result)}`
+          : `Postcard ${order} queued with status ${status}.`;
       if (note) {
         summary += ` ${note}`;
       }
