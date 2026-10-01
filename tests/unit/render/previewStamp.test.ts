@@ -45,6 +45,8 @@ describe('the address stamp on a preview', () => {
       stamp: { page: 1, geometry: POSTCARD_STAMP }
     });
     expect(texts(front)).toEqual([]);
+    // A page without text is named by its title, for screen readers.
+    expect(front).toContain('<title>The front of the postcard</title>');
     // Probes P9 and P11: from x 5.725in, "RETURN TO:" at 0.958in and the
     // recipient at 4.937in, 0.177in a line, each block from its first line.
     expect(texts(back)).toEqual([

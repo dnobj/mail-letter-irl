@@ -66,6 +66,8 @@ export interface LayoutPage {
   items: LayoutItem[];
   linesUsed: number;
   linesAvailable: number;
+  /** What a page without text is called, for screen readers: a postcard's front. */
+  title?: string;
 }
 
 export interface Layout {

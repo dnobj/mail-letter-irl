@@ -77,6 +77,11 @@ interface QuoteAndPreviewPostcardInput {
 export interface QuoteAndPreviewPostcardOutput {
   previewFrontHtml: string;
   previewBackHtml: string;
+  /**
+   * The postcard as it prints, front and back, when our renderer drew it
+   * (#534): the card shows these pages instead of its own front and back.
+   */
+  previewHtml?: string;
   lettersRequired: number;  // Number of letters from balance (always 1 for postcard)
   canSendNow: boolean;
   reasonCannotSend?: string;
@@ -513,7 +518,7 @@ async function handler(
   // On our renderer the draft keeps the postcard as it prints (#534 Phase 4):
   // front and back, laid out with the full image's box and drawn with the
   // small copy, the back with the addresses where PostGrid stamps them. The
-  // website's confirm page shows it; the card still draws its own.
+  // website's confirm page and the card show it.
   const renderedHtml = renderer === 'pdf'
     ? renderPostcardPreviewDocument(renderPreviewSvg(
         withDisplayImage(
@@ -557,6 +562,7 @@ async function handler(
   const output: QuoteAndPreviewPostcardOutput = {
     previewFrontHtml,
     previewBackHtml,
+    ...(renderedHtml ? { previewHtml: renderedHtml } : {}),
     lettersRequired,
     canSendNow,
     reasonCannotSend: canSendNow ? undefined : "Not enough letters in your balance.",

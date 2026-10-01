@@ -34,6 +34,9 @@
       .postcard-front img{width:100% !important;height:auto !important;aspect-ratio:9/6;object-fit:cover}
       .preview-pane img{width:100%;max-width:100%;height:auto;border-radius:8px;border:1px solid var(--bd);aspect-ratio:9/6;object-fit:cover}
       .preview-pane.back-preview{display:flex;justify-content:center;align-items:center}
+      /* A page our renderer drew (#534): the postcard as it prints, bleed included. */
+      .postcard-page{width:100%}
+      .postcard-page svg{display:block;width:100%;height:auto;border-radius:8px;border:1px solid var(--bd);background:#fff}
 
       /* Postcard back mockup - paper artifact, cream in both themes */
       .postcard-back-mockup{width:100%;aspect-ratio:9/6;background:#fdfcf8;border:1px solid #e6e0d2;border-radius:8px;box-shadow:0 2px 8px rgba(43,36,29,.1);display:flex;overflow:hidden;color:#2b241d}
@@ -226,16 +229,20 @@
           style="display: none"
         ></div>
       </div>
-      <p class="rev">postcard t28</p>
+      <p class="rev">postcard t29</p>
     </div>
 
     <!-- letter-irl:host -->
+    <!-- letter-irl:pages -->
     <script type="module">
       // The card talks to its host only through window.letterIrlHost
       // (widgets/shared/host.js, #474): window.openai in ChatGPT, MCP Apps in
       // Claude and VS Code. Data may not be available immediately, so the
       // card re-renders on host.onChange.
       const host = window.letterIrlHost;
+      // Our renderer's pages, and the cleaner that keeps the card safe from
+      // them (widgets/shared/pages.js, #534).
+      const { renderedPages, cleanPage } = window.letterIrlPages;
 
       let dataLoaded = false;
       let currentDraftId = null;
@@ -1083,6 +1090,20 @@
         sendButton.disabled = true;
       }
 
+      /**
+       * One of the postcard's pages as it prints, cleaned. The page keeps its
+       * title for screen readers, inside a labelled group.
+       */
+      function showPage(pane, svg, label) {
+        pane.textContent = "";
+        const page = document.createElement("div");
+        page.className = "postcard-page";
+        page.setAttribute("role", "group");
+        page.setAttribute("aria-label", label);
+        page.appendChild(document.importNode(cleanPage(svg), true));
+        pane.appendChild(page);
+      }
+
       function extractBodyContent(html) {
         if (!html) return null;
         const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
@@ -1181,10 +1202,18 @@
           keep({ draftId });
         }
 
+        // A preview our renderer drew (#534) is the postcard as it prints: its
+        // front and back pages. Any other gets the legacy front and the
+        // mockup of the back.
+        const pages = renderedPages(meta.previewHtml ?? state.previewHtml);
+        const printed = pages && pages.length >= 2;
+
         // Render front preview (image)
         const previewFront = document.getElementById("preview-front");
-        const frontContent = extractBodyContent(previewFrontHtml);
-        if (frontContent) {
+        const frontContent = printed ? null : extractBodyContent(previewFrontHtml);
+        if (printed) {
+          showPage(previewFront, pages[0], "The front of your postcard, as it prints");
+        } else if (frontContent) {
           previewFront.innerHTML = frontContent;
         } else {
           previewFront.innerHTML = '<div class="preview-loading">No image preview available</div>';
@@ -1192,7 +1221,9 @@
 
         // Render back preview (postcard mockup)
         const previewBack = document.getElementById("preview-back");
-        if (message) {
+        if (printed) {
+          showPage(previewBack, pages[1], "The back of your postcard, as it prints");
+        } else if (message) {
           // Escape HTML helper
           const escapeHtml = (str) =>
             (str || "")

@@ -198,8 +198,11 @@ describe('a postcard preview drawn by our renderer', () => {
     expect(stamped.slice(-3)).toEqual(['SAM RIVERA', '350 5TH AVE', 'NEW YORK, NY 10118-0110']);
   });
 
-  it("leaves the card's own front and back as they were, the front now landscape", async () => {
+  it('gives the card the postcard as it prints, beside its own front and back, the front landscape', async () => {
     const output = await run();
+    // The draft's document: the card shows these pages (#534 Phase 4b).
+    expect(output.previewHtml).toBe(drafted().previewHtml);
+    expect(output.previewHtml).toContain('<body data-renderer="pdf-1">');
     expect(output.previewFrontHtml).toContain('class="postcard-front"');
     expect(output.previewFrontHtml).toContain('width: 810px;');
     expect(output.previewFrontHtml).toContain('height: 540px;');
@@ -296,7 +299,8 @@ describe('a gift postcard', () => {
 describe('without the flag', () => {
   it('leaves postcard previews on the legacy HTML, with no version', async () => {
     vi.stubEnv('LETTER_IRL_PRINT_RENDERER', '');
-    await run();
+    const output = await run();
+    expect(output).not.toHaveProperty('previewHtml');
     const draft = drafted();
     expect(draft.rendererVersion).toBeUndefined();
     expect(draft.previewHtml).toContain('class="postcard-front"');

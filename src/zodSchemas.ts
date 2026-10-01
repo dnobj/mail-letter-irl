@@ -177,7 +177,7 @@ export const clearReturnAddressInputZ = z.object({
 export const quoteAndPreviewPostcardInputZ = z.object({
   sender: addressZ.optional(),  // Optional - will use saved return address if not provided
   recipient: addressZ,
-  message: z.string(),
+  message: z.string().describe("Must fit the back of the postcard: 16 lines, about 500 characters of prose"),
   size: z.enum(["6x9"]).optional(),
   // Image from OpenAI fileParams - permissive to handle mobile edge cases
   // Mobile may send file_id without download_url (sediment:// protocol)

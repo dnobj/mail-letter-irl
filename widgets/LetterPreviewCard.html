@@ -224,6 +224,7 @@
     </div>
 
     <!-- letter-irl:host -->
+    <!-- letter-irl:pages -->
     <script type="module">
       // The card talks to its host only through window.letterIrlHost
       // (widgets/shared/host.js, #474): window.openai in ChatGPT, MCP Apps in
@@ -1141,68 +1142,11 @@
       const IMAGE_NOT_SHOWN_HTML =
         '<div class="image-not-shown">Image not shown on this card</div>';
 
-      /**
-       * A preview our renderer drew (#534) is the pages themselves: its body
-       * carries data-renderer, and each page is an <svg> child of the body, a
-       * gift send's card the second. A legacy preview gets the mockup below.
-       */
-      function renderedPages(previewHtml) {
-        if (typeof previewHtml !== "string" || !previewHtml.includes("data-renderer")) return null;
-        const doc = new DOMParser().parseFromString(previewHtml, "text/html");
-        if (!doc.body || !doc.body.getAttribute("data-renderer")) return null;
-        const pages = Array.from(doc.body.children).filter(node => node.localName === "svg");
-        return pages.length > 0 ? pages : null;
-      }
-
-      // Only what the renderer draws reaches the card (src/render/preview.ts):
-      // these elements, these attributes, and the values a renderer page
-      // carries. Nothing else survives: no handler, no style, no paint server,
-      // filter or link that could reach the network. Every id is prefixed, so
-      // a page cannot stand in for one of the card's own controls. The server
-      // escapes the text; this keeps the card safe even from a page that was not.
-      const PAGE_ELEMENTS = new Set(["svg", "title", "defs", "g", "path", "use", "rect", "image", "text"]);
-      const PAGE_ID = /^[A-Za-z0-9_-]{1,64}$/;
-      const NUMBER = /^-?\d+(\.\d+)?$/;
-      // A Map, not an object: an attribute named __proto__ or constructor must
-      // find nothing, not Object.prototype (#542 review round 2).
-      const PAGE_ATTRIBUTES = new Map([
-        ["xmlns", value => value === "http://www.w3.org/2000/svg"],
-        ["viewbox", value => /^[\d.\s-]+$/.test(value)],
-        ["role", value => value === "img"],
-        ["id", value => PAGE_ID.test(value)],
-        ["d", value => /^[MLCZ\d.\s-]*$/.test(value)],
-        ["x", value => NUMBER.test(value)],
-        ["y", value => NUMBER.test(value)],
-        ["width", value => NUMBER.test(value)],
-        ["height", value => NUMBER.test(value)],
-        ["preserveaspectratio", value => value === "none"],
-        ["fill", value => /^(#[0-9a-fA-F]{3,8}|none)$/.test(value)],
-        // A gift card's border (#534): a rounded, stroked rectangle.
-        ["rx", value => NUMBER.test(value)],
-        ["stroke", value => /^#[0-9a-fA-F]{3,8}$/.test(value)],
-        ["stroke-width", value => NUMBER.test(value)],
-        ["font-family", value => /^[A-Za-z0-9 ',-]+$/.test(value)],
-        ["font-size", value => NUMBER.test(value)],
-        ["href", value => /^#[A-Za-z0-9_-]{1,64}$/.test(value) || /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(value)]
-      ]);
-      const PAGE_ID_PREFIX = "lirl-page-";
-      function cleanPage(node) {
-        for (const child of Array.from(node.children)) {
-          if (PAGE_ELEMENTS.has(child.localName)) cleanPage(child);
-          else child.remove();
-        }
-        for (const attribute of Array.from(node.attributes)) {
-          const allowed = PAGE_ATTRIBUTES.get(attribute.name.toLowerCase());
-          if (!allowed || !allowed(attribute.value)) {
-            node.removeAttribute(attribute.name);
-          } else if (attribute.name === "id") {
-            node.setAttribute("id", PAGE_ID_PREFIX + attribute.value);
-          } else if (attribute.name === "href" && attribute.value.startsWith("#")) {
-            node.setAttribute("href", `#${PAGE_ID_PREFIX}${attribute.value.slice(1)}`);
-          }
-        }
-        return node;
-      }
+      // Our renderer's pages, and the cleaner that keeps the card safe from
+      // them (widgets/shared/pages.js, #534): a preview our renderer drew
+      // gives its pages, a gift send's card the second; a legacy preview
+      // gives none and gets the mockup below.
+      const { renderedPages, cleanPage } = window.letterIrlPages;
 
       // Kept across renders, so a status update does not shrink the page back.
       let pageZoomed = false;

@@ -11,33 +11,55 @@ import path from "node:path";
  * unchanged.
  */
 export const HOST_BRIDGE_PLACEHOLDER = "<!-- letter-irl:host -->";
+/**
+ * Where a card asks for widgets/shared/pages.js (#534): our renderer's pages
+ * and the cleaner that keeps a card safe from them, one source for the letter
+ * and postcard cards.
+ */
+export const PAGES_PLACEHOLDER = "<!-- letter-irl:pages -->";
 
-let cachedBridge: { dir: string; source: string } | undefined;
+/** The shared scripts a card may ask for: each marker, and the file put there. */
+const SHARED_SCRIPTS = [
+  { marker: HOST_BRIDGE_PLACEHOLDER, file: "host.js" },
+  { marker: PAGES_PLACEHOLDER, file: "pages.js" }
+] as const;
+
+const cachedSources = new Map<string, string>();
+
+/** A shared script, read once per widget directory. */
+function sharedScriptSource(widgetDir: string, file: string): string {
+  const key = path.join(widgetDir, "shared", file);
+  let source = cachedSources.get(key);
+  if (source === undefined) {
+    source = readFileSync(key, "utf-8");
+    cachedSources.set(key, source);
+  }
+  return source;
+}
 
 /** The bridge script, read once per widget directory. */
 export function hostBridgeSource(widgetDir: string): string {
-  if (cachedBridge?.dir !== widgetDir) {
-    cachedBridge = {
-      dir: widgetDir,
-      source: readFileSync(path.join(widgetDir, "shared", "host.js"), "utf-8")
-    };
-  }
-  return cachedBridge.source;
+  return sharedScriptSource(widgetDir, "host.js");
 }
 
 /**
- * The card as served: the bridge inlined where the card asks for it. A
- * `</script` inside the bridge would end the tag early; the bridge has none,
- * and this refuses to serve one rather than break the page quietly.
+ * The card as served: the bridge, and any other shared script, inlined where
+ * the card asks for it. A `</script` inside a script would end the tag early;
+ * none has one, and this refuses to serve one rather than break the page
+ * quietly.
  */
 export function inlineHostBridge(html: string, widgetDir: string): string {
-  if (!html.includes(HOST_BRIDGE_PLACEHOLDER)) return html;
-  const source = hostBridgeSource(widgetDir);
-  if (/<\/script/i.test(source)) {
-    throw new Error("widgets/shared/host.js must not contain a closing script tag");
+  let served = html;
+  for (const { marker, file } of SHARED_SCRIPTS) {
+    if (!served.includes(marker)) continue;
+    const source = sharedScriptSource(widgetDir, file);
+    if (/<\/script/i.test(source)) {
+      throw new Error(`widgets/shared/${file} must not contain a closing script tag`);
+    }
+    if (SHARED_SCRIPTS.some(script => source.includes(script.marker))) {
+      throw new Error(`widgets/shared/${file} must not contain the card's marker comment`);
+    }
+    served = served.replace(marker, () => `<script>\n${source}\n    </script>`);
   }
-  if (source.includes(HOST_BRIDGE_PLACEHOLDER)) {
-    throw new Error("widgets/shared/host.js must not contain the card's marker comment");
-  }
-  return html.replace(HOST_BRIDGE_PLACEHOLDER, () => `<script>\n${source}\n    </script>`);
+  return served;
 }

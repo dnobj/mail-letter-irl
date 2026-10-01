@@ -62,7 +62,7 @@ export function layoutPostcard(content: PostcardContent): Layout {
     width: POSTCARD_WIDTH,
     height: POSTCARD_HEIGHT,
     title: 'Postcard',
-    pages: [{ items: front, linesUsed: 0, linesAvailable: 0 }, back.page],
+    pages: [{ items: front, linesUsed: 0, linesAvailable: 0, title: 'The front of the postcard' }, back.page],
     overflowLines: back.overflowLines
   };
 }
