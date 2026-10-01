@@ -647,7 +647,10 @@
           return;
         }
         if (kept.sent) {
-          // The same words the card used when the send succeeded.
+          // The same words the card used when the send succeeded. A kept
+          // order whose mail date has passed since the last draw has no
+          // Scheduled block any more.
+          scheduled.hide();
           statusPill.classList.remove("alert");
           statusPill.classList.add("ok");
           statusPill.textContent = "With the printer";
@@ -2027,6 +2030,7 @@
             const duplicate = duplicateDetails(raw, null);
             if (duplicate) {
               showDuplicate(duplicate, "pay");
+              picker.restore();
               return;
             }
             throw new Error(resultText(raw) || "Checkout URL was not returned");
@@ -2089,8 +2093,11 @@
           const duplicate = duplicateDetails(null, error);
           if (duplicate) {
             showDuplicate(duplicate, "pay");
+            picker.restore();
             return;
           }
+          // No checkout: the date row comes back with the button.
+          picker.restore();
           errorMessage.textContent = `Unable to open checkout: ${readableError(error)}`;
           errorMessage.style.display = "block";
           button.classList.remove("loading");

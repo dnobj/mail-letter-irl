@@ -833,6 +833,17 @@ describe.each([LETTER, POSTCARD])('$file: the arrival date (#535)', spec => {
     expect(card.text('note')).toContain(`This ${noun} was sent with a date, then cancelled. Nothing will be mailed.`);
   });
 
+  it('shows no empty note for a scheduled answer without dates it can read', async () => {
+    const card = await offering();
+    await answerTool(card, 'get_draft_status', {
+      content: [],
+      structuredContent: { draftId: 'draft_0001', status: 'sent', orderId: 'ord_0002', orderStatus: 'scheduled', cancellable: true }
+    });
+
+    expect(card.text('status-pill')).toBe('Scheduled');
+    expect(card.visible('scheduled-note')).toBe(false);
+  });
+
   it('shows an order the outbox has taken as with the printer, whatever its dates', async () => {
     const card = await offering();
     await answerTool(card, 'get_draft_status', sentAnswer({ orderStatus: 'sent', cancellable: false }));
