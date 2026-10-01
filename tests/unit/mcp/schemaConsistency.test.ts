@@ -10,8 +10,15 @@ import {
   quoteAndPreviewInputZ,
   sendEligibilityZ, getPurchaseStatusOutputZ,
   setArrivalDateInputZ,
-  setArrivalDateOutputZ } from "../../../src/zodSchemas.js";
-import { setArrivalDateInputSchema, setArrivalDateOutputSchema } from "../../../src/schemas.js";
+  setArrivalDateOutputZ,
+  cancelScheduledMailInputZ,
+  cancelScheduledMailOutputZ } from "../../../src/zodSchemas.js";
+import {
+  setArrivalDateInputSchema,
+  setArrivalDateOutputSchema,
+  cancelScheduledMailInputSchema,
+  cancelScheduledMailOutputSchema
+} from "../../../src/schemas.js";
 import { toolInputSchemas } from "../../../src/mcp/toolSchemas.js";
 import { buildManifest } from "../../../src/mcp/manifest.js";
 
@@ -178,5 +185,28 @@ describe("set_arrival_date schema (#535)", () => {
 
   it("is left out of the manifest, which is generated with arrival dates off", () => {
     expect(getManifestTool("set_arrival_date")).toBeUndefined();
+  });
+});
+
+describe("cancel_scheduled_mail schema (#535)", () => {
+  it("names the same inputs in all three layers, both required", () => {
+    const zodKeys = Object.keys(cancelScheduledMailInputZ.shape);
+    expect(zodKeys).toEqual(["orderId", "confirm"]);
+    expect(Object.keys(toolInputSchemas.cancel_scheduled_mail.shape)).toEqual(zodKeys);
+    expect(Object.keys(cancelScheduledMailInputSchema.properties ?? {})).toEqual(zodKeys);
+    expect(cancelScheduledMailInputSchema.required).toEqual(zodKeys);
+    for (const key of zodKeys) {
+      expect(cancelScheduledMailInputZ.shape[key as keyof typeof cancelScheduledMailInputZ.shape].isOptional(), key).toBe(false);
+    }
+  });
+
+  it("names the same outputs in the runtime Zod schema and the JSON schema, all required", () => {
+    const zodKeys = Object.keys(cancelScheduledMailOutputZ.shape);
+    expect(Object.keys(cancelScheduledMailOutputSchema.properties ?? {})).toEqual(zodKeys);
+    expect(cancelScheduledMailOutputSchema.required).toEqual(zodKeys);
+  });
+
+  it("is left out of the manifest, which is generated with arrival dates off", () => {
+    expect(getManifestTool("cancel_scheduled_mail")).toBeUndefined();
   });
 });

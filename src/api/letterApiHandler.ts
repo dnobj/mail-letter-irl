@@ -14,6 +14,8 @@ import {
 } from './middleware/restAuth.js';
 import { rateLimitAccount } from './middleware/rateLimit.js';
 import { requiredRestScopes } from '../auth/restScopes.js';
+import { cancelScheduledMail, type ScheduledMailRefusal } from '../services/scheduledMailService.js';
+import { cancelledMessage } from '../tools/cancelScheduledMail.js';
 
 /**
  * Send JSON response
@@ -61,6 +63,13 @@ export async function handleLetterApiRequest(
       return true;
     }
 
+    // POST /api/letters/:letterId/cancel - Cancel held mail (#535)
+    const cancelMatch = pathname.match(/^\/api\/letters\/([^/]+)\/cancel$/);
+    if (cancelMatch && req.method === 'POST') {
+      await handleCancelLetter(res, authInfo, decodeURIComponent(cancelMatch[1]));
+      return true;
+    }
+
     // GET /api/letters/:letterId - Get specific letter details
     const letterMatch = pathname.match(/^\/api\/letters\/([^/]+)$/);
     if (letterMatch && req.method === 'GET') {
@@ -84,6 +93,50 @@ export async function handleLetterApiRequest(
     });
     return true;
   }
+}
+
+/**
+ * A refusal in the website's words: cancel_scheduled_mail's name the tools a
+ * model can call next, which a page has no use for.
+ */
+export const CANCEL_REFUSAL_WORDS: Record<ScheduledMailRefusal, string> = {
+  not_found: "That letter wasn't found.",
+  not_scheduled: 'Only mail scheduled to arrive by a date can be cancelled. This letter goes to the printer as soon as it can.',
+  pay_and_send:
+    "A Pay & Send order can't be cancelled here. Email support@letterirl.com from the email on your account, " +
+    'quoting the order id; refunds are decided by a person.',
+  too_late: "This letter has gone to the printer, or did not go out, so it can't be cancelled.",
+  busy: "This letter is going to the printer right now, so it can't be cancelled."
+};
+
+/**
+ * POST /api/letters/:letterId/cancel - held mail cancelled (#535), the
+ * website's cancel_scheduled_mail through the same service. 200 with what
+ * went back, a repeat included; 404 for a letter that is not the caller's;
+ * 409 for any other refusal, with its reason and words.
+ */
+async function handleCancelLetter(res: ServerResponse, authInfo: AuthInfo, letterId: string) {
+  const result = await cancelScheduledMail({ letterId, userId: authInfo.userId });
+  if (!result.ok) {
+    sendJson(res, result.refusal === 'not_found' ? 404 : 409, {
+      error: result.refusal,
+      message: CANCEL_REFUSAL_WORDS[result.refusal]
+    });
+    return;
+  }
+  const { cancelled } = result;
+  sendJson(res, 200, {
+    orderId: cancelled.letterId,
+    status: 'cancelled',
+    alreadyCancelled: cancelled.alreadyCancelled,
+    returned: cancelled.returned,
+    // What of its cost did not come back usable, for the page to show as it
+    // likes; the message says it in words.
+    shortfall: cancelled.shortfall,
+    arriveBy: cancelled.arriveBy,
+    mailOn: cancelled.mailOn,
+    message: cancelledMessage(cancelled)
+  });
 }
 
 /**

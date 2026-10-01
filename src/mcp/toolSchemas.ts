@@ -145,6 +145,11 @@ export const toolInputSchemas = {
     draftId: z.string(),
     arriveBy: z.string().optional()
   }),
+  // Held mail cancelled before it goes to the printer (#535)
+  cancel_scheduled_mail: z.object({
+    orderId: z.string(),
+    confirm: z.boolean()
+  }),
   // One chunk of a photo from the upload card (#474, phase 3)
   upload_photo_chunk: z.object({
     uploadId: z.string(),

@@ -554,6 +554,7 @@ describe('every tool name, for the request log', () => {
       'request_send',
       'upload_photo_chunk',
       'set_arrival_date',
+      'cancel_scheduled_mail',
       'send_letter'
     ]) {
       expect(names, name).toContain(name);

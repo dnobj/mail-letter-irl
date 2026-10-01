@@ -17,6 +17,10 @@ import { repositoryMigrations, validateDisposableDatabaseUrl } from './support/d
  *   pending draft's dates, leaves alone a draft that is not the caller's,
  *   sent, expired or held by a live Pay & Send order, and waits for a send
  *   that holds the draft's row
+ *   a cancel (scheduledMailService) cancels held mail before it goes to the
+ *   printer and returns its letters or gift letter exactly once, refuses
+ *   what it must, answers 'busy' at once while the outbox holds the job, and
+ *   frees the duplicate guard
  *
  * Against real PostgreSQL because the constraints, the DATE type, the job's
  * timestamps and the claim's predicate are the change's whole substance, and
@@ -62,6 +66,9 @@ describePostgres('arrive-by (migration 040, #535)', () => {
   let drafts: typeof import('../../src/services/draftService.js');
   let jobs: typeof import('../../src/services/letterJobService.js');
   let schedule: typeof import('../../src/services/deliverySchedule.js');
+  let held: typeof import('../../src/services/scheduledMailService.js');
+  let gifts: typeof import('../../src/services/giftLetterService.js');
+  let inTransaction: typeof import('../../src/db/index.js')['transaction'];
   let closeServicePool: (() => Promise<void>) | undefined;
 
   const savedCaps = {
@@ -87,6 +94,9 @@ describePostgres('arrive-by (migration 040, #535)', () => {
     drafts = await import('../../src/services/draftService.js');
     jobs = await import('../../src/services/letterJobService.js');
     schedule = await import('../../src/services/deliverySchedule.js');
+    held = await import('../../src/services/scheduledMailService.js');
+    gifts = await import('../../src/services/giftLetterService.js');
+    inTransaction = (await import('../../src/db/index.js')).transaction;
     closeServicePool = (await import('../../src/db/index.js')).closePool;
     pool = new Pool({ connectionString: scoped, max: 4 });
   }, 180_000);
@@ -129,12 +139,18 @@ describePostgres('arrive-by (migration 040, #535)', () => {
   }
 
   /** A text-only letter draft through the service; each body differs so the duplicate check (#412) stays out of it. */
-  async function seedDraft(userId: string, dates?: { arriveBy: string; mailOn: string }): Promise<string> {
+  async function seedDraft(
+    userId: string,
+    dates?: { arriveBy: string; mailOn: string },
+    bodyText = `Hello ${randomUUID()}`,
+    isGiftSend = false
+  ): Promise<string> {
     const { draftId } = await drafts.createDraft({
       userId,
       sender: SENDER,
       recipient: RECIPIENT,
-      bodyText: `Hello ${randomUUID()}`,
+      bodyText,
+      isGiftSend,
       signOff: 'Warmly, Test',
       requiredCredits: 2,
       ...(dates ? { schedule: dates } : {})
@@ -365,5 +381,259 @@ describePostgres('arrive-by (migration 040, #535)', () => {
       if (open) await holder.query('ROLLBACK').catch(() => undefined);
       holder.release();
     }
+  }, 60_000);
+
+  async function creditsOf(userId: string): Promise<number> {
+    return (await pool.query('SELECT credits FROM users WHERE user_id = $1', [userId])).rows[0].credits;
+  }
+
+  /** A held prepaid letter, sent from a fresh draft; its id. */
+  async function sendHeld(userId: string, bodyText?: string): Promise<string> {
+    const draftId = await seedDraft(userId, upcoming(), bodyText);
+    const sent = await mailSend.createMailOrderFromDraft({ draftId, userId, mailType: 'letter' });
+    return sent.letter.letter_id;
+  }
+
+  it('cancels held prepaid mail: letter and job cancelled and never claimed, its credits back once on a lot that keeps its expiry', async () => {
+    const savedSwitch = process.env.LETTER_IRL_OUTBOX_DISPATCH_ENABLED;
+    process.env.LETTER_IRL_OUTBOX_DISPATCH_ENABLED = 'true';
+    try {
+      const userId = await seedUser();
+      await pool.query(
+        "UPDATE credit_ledger SET expires_at = NOW() + INTERVAL '90 days', expiration_policy = 'days_from_activation' WHERE user_id = $1",
+        [userId]
+      );
+      const lotExpiry = (await pool.query('SELECT expires_at FROM credit_ledger WHERE user_id = $1', [userId])).rows[0].expires_at;
+      const letterId = await sendHeld(userId);
+      expect(await creditsOf(userId)).toBe(8);
+
+      // Two credits back: one letter.
+      await expect(held.cancelScheduledMail({ letterId, userId })).resolves.toMatchObject({
+        ok: true,
+        cancelled: { letterId, alreadyCancelled: false, returned: { kind: 'letters', count: 1 }, shortfall: 'none' }
+      });
+
+      const letter = (await pool.query('SELECT status FROM letters WHERE letter_id = $1', [letterId])).rows[0];
+      expect(letter.status).toBe('cancelled');
+      const job = (await pool.query(
+        'SELECT job_id, status, provider_outcome, last_error FROM letter_jobs WHERE letter_id = $1',
+        [letterId]
+      )).rows[0];
+      expect([job.status, job.provider_outcome, job.last_error]).toEqual(['cancelled', 'not_dispatched', 'cancelled_by_customer']);
+      const history = await pool.query(
+        "SELECT old_status, new_status FROM letter_status_history WHERE letter_id = $1 AND source = 'customer'",
+        [letterId]
+      );
+      expect(history.rows).toEqual([{ old_status: 'queued', new_status: 'cancelled' }]);
+
+      expect(await creditsOf(userId)).toBe(10);
+      const returned = await pool.query(
+        `SELECT initial_amount, expires_at, description, source_metadata FROM credit_ledger
+          WHERE user_id = $1 AND source_metadata->>'letter_id' = $2`,
+        [userId, letterId]
+      );
+      expect(returned.rows).toHaveLength(1);
+      expect(returned.rows[0].initial_amount).toBe(2);
+      expect(returned.rows[0].expires_at).toEqual(lotExpiry);
+      expect(returned.rows[0].description).toBe(`Returned after cancelled send ${letterId}`);
+      expect(returned.rows[0].source_metadata).toMatchObject({ reason: 'send_failed', failure_code: 'cancelled_by_customer' });
+
+      // The outbox asking for it by id finds nothing to take.
+      await expect(jobs.processLetterJob(job.job_id)).resolves.toMatchObject({ claimed: false });
+
+      // Again: answered as cancelled, and nothing more goes back.
+      await expect(held.cancelScheduledMail({ letterId, userId })).resolves.toMatchObject({
+        ok: true,
+        cancelled: { alreadyCancelled: true, returned: { count: 0 } }
+      });
+      expect(await creditsOf(userId)).toBe(10);
+      const after = await pool.query(
+        "SELECT 1 FROM credit_ledger WHERE user_id = $1 AND source_metadata->>'letter_id' = $2",
+        [userId, letterId]
+      );
+      expect(after.rowCount).toBe(1);
+    } finally {
+      if (savedSwitch === undefined) delete process.env.LETTER_IRL_OUTBOX_DISPATCH_ENABLED;
+      else process.env.LETTER_IRL_OUTBOX_DISPATCH_ENABLED = savedSwitch;
+    }
+  }, 60_000);
+
+  it("says so when what paid for it expired while it was held: the credits come back on the lot's expiry, not counted", async () => {
+    const userId = await seedUser();
+    const letterId = await sendHeld(userId);
+    // The lot it was paid from runs out while the mail waits.
+    await pool.query(
+      "UPDATE credit_ledger SET expires_at = NOW() - INTERVAL '1 minute', expiration_policy = 'days_from_activation' WHERE user_id = $1 AND source_metadata IS NULL",
+      [userId]
+    );
+
+    await expect(held.cancelScheduledMail({ letterId, userId })).resolves.toMatchObject({
+      ok: true,
+      cancelled: { alreadyCancelled: false, returned: { kind: 'letters', count: 0 }, shortfall: 'expired' }
+    });
+    // On record, as expired, so it is never returned twice; never in the
+    // cached balance or the account's history, which the ledger would not spend.
+    const back = await pool.query(
+      "SELECT initial_amount, status FROM credit_ledger WHERE user_id = $1 AND source_metadata->>'letter_id' = $2 AND expires_at <= NOW()",
+      [userId, letterId]
+    );
+    expect(back.rows).toEqual([{ initial_amount: 2, status: 'expired' }]);
+    expect(await creditsOf(userId)).toBe(8);
+    const history = await pool.query(
+      "SELECT 1 FROM credit_transactions WHERE user_id = $1 AND type = 'refund' AND reference_id = $2",
+      [userId, letterId]
+    );
+    expect(history.rowCount).toBe(0);
+  }, 60_000);
+
+  it('cancels held gift mail: the gift letter comes back once and its printed code is voided as cancelled', async () => {
+    const GIFT_ENV = {
+      LETTER_IRL_GIFT_LETTERS_ENABLED: 'true',
+      LETTER_IRL_GIFT_DAILY_SEND_CAP: '100000',
+      LETTER_IRL_GIFT_LANDING_BASE_URL: 'https://letterirl.test'
+    };
+    const saved = Object.fromEntries(Object.keys(GIFT_ENV).map(name => [name, process.env[name]]));
+    Object.assign(process.env, GIFT_ENV);
+    try {
+      const userId = await seedUser();
+      await inTransaction(client =>
+        gifts.grantGiftLettersWithClient(client, {
+          userId,
+          quantity: 1,
+          generationsRemaining: 2,
+          source: 'operator',
+          sourceReferenceId: `test:${randomUUID()}`
+        })
+      );
+      const draftId = await seedDraft(userId, upcoming(), undefined, true);
+      const sent = await mailSend.createMailOrderFromDraft({ draftId, userId, mailType: 'letter' });
+      const letterId = sent.letter.letter_id;
+      const code = (await pool.query('SELECT code, status FROM gift_codes WHERE letter_id = $1', [letterId])).rows[0];
+      expect(code.status).toBe('issued');
+
+      await expect(held.cancelScheduledMail({ letterId, userId })).resolves.toMatchObject({
+        ok: true,
+        cancelled: { alreadyCancelled: false, returned: { kind: 'gift_letter', count: 1 } }
+      });
+
+      const voided = (await pool.query('SELECT status, void_reason FROM gift_codes WHERE code = $1', [code.code])).rows[0];
+      expect(voided).toEqual({ status: 'void', void_reason: 'send_cancelled' });
+      const back = await pool.query(
+        "SELECT generations_remaining FROM gift_letters WHERE user_id = $1 AND source = 'send_failed' AND source_reference_id = $2",
+        [userId, letterId]
+      );
+      expect(back.rows).toEqual([{ generations_remaining: 2 }]);
+
+      await expect(held.cancelScheduledMail({ letterId, userId })).resolves.toMatchObject({
+        ok: true,
+        cancelled: { alreadyCancelled: true, returned: { kind: 'gift_letter', count: 0 } }
+      });
+      const once = await pool.query(
+        "SELECT 1 FROM gift_letters WHERE source = 'send_failed' AND source_reference_id = $1",
+        [letterId]
+      );
+      expect(once.rowCount).toBe(1);
+    } finally {
+      for (const [name, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  }, 60_000);
+
+  it("refuses someone else's letter, mail with no date, mail the outbox has taken, and Pay & Send, changing nothing", async () => {
+    const userId = await seedUser();
+    const stranger = await seedUser();
+
+    const letterId = await sendHeld(userId);
+    await expect(held.cancelScheduledMail({ letterId, userId: stranger })).resolves.toEqual({ ok: false, refusal: 'not_found' });
+    await expect(held.cancelScheduledMail({ letterId: randomUUID(), userId })).resolves.toEqual({ ok: false, refusal: 'not_found' });
+
+    const asap = await mailSend.createMailOrderFromDraft({ draftId: await seedDraft(userId), userId, mailType: 'letter' });
+    await expect(held.cancelScheduledMail({ letterId: asap.letter.letter_id, userId })).resolves.toEqual({
+      ok: false,
+      refusal: 'not_scheduled'
+    });
+
+    // As the claim leaves it: taken, attempted once, not yet dispatched.
+    await pool.query(
+      "UPDATE letter_jobs SET status = 'processing', attempts = 1, locked_at = NOW() WHERE letter_id = $1",
+      [letterId]
+    );
+    await expect(held.cancelScheduledMail({ letterId, userId })).resolves.toEqual({ ok: false, refusal: 'too_late' });
+    const still = (await pool.query('SELECT status FROM letters WHERE letter_id = $1', [letterId])).rows[0];
+    expect(still.status).toBe('queued');
+    expect(await creditsOf(userId)).toBe(6);
+
+    const orderId = `order-${randomUUID()}`;
+    await pool.query(
+      `INSERT INTO orders (order_id, user_id, credits, amount_cents, currency, status, order_type, product_code,
+         idempotency_key, draft_id)
+       VALUES ($1, $2, NULL, 499, 'USD', 'fulfilled', 'jit_mail', 'jit-letter', $3, $4)`,
+      [orderId, userId, `idem_${orderId}`, await seedDraft(userId)]
+    );
+    const paid = randomUUID();
+    const dates = upcoming();
+    await pool.query(
+      `INSERT INTO letters (letter_id, user_id, content, recipient, credits_cost, status, mail_type,
+         funding_type, funding_order_id, arrive_by, mail_on)
+       VALUES ($1, $2, '{}', $3, 2, 'queued', 'letter', 'jit_order', $4, $5::date, $6::date)`,
+      [paid, userId, JSON.stringify(RECIPIENT), orderId, dates.arriveBy, dates.mailOn]
+    );
+    await expect(held.cancelScheduledMail({ letterId: paid, userId })).resolves.toEqual({ ok: false, refusal: 'pay_and_send' });
+    expect((await pool.query('SELECT status FROM letters WHERE letter_id = $1', [paid])).rows[0].status).toBe('queued');
+  }, 60_000);
+
+  it("answers 'busy' at once while the outbox holds the job, and cancels once it lets go", async () => {
+    const userId = await seedUser();
+    const letterId = await sendHeld(userId);
+    const holder = await pool.connect();
+    let open = false;
+    try {
+      await holder.query('BEGIN');
+      open = true;
+      await holder.query('SELECT 1 FROM letter_jobs WHERE letter_id = $1 FOR UPDATE', [letterId]);
+      const started = Date.now();
+      await expect(held.cancelScheduledMail({ letterId, userId })).resolves.toEqual({ ok: false, refusal: 'busy' });
+      expect(Date.now() - started).toBeLessThan(5_000);
+      await holder.query('ROLLBACK');
+      open = false;
+    } finally {
+      if (open) await holder.query('ROLLBACK').catch(() => undefined);
+      holder.release();
+    }
+    expect(await creditsOf(userId)).toBe(8);
+    await expect(held.cancelScheduledMail({ letterId, userId })).resolves.toMatchObject({
+      ok: true,
+      cancelled: { alreadyCancelled: false }
+    });
+    expect(await creditsOf(userId)).toBe(10);
+  }, 60_000);
+
+  it('answers two cancels at the same moment once each: one cancels, the other finds it cancelled', async () => {
+    const userId = await seedUser();
+    const letterId = await sendHeld(userId);
+
+    const results = await Promise.all([
+      held.cancelScheduledMail({ letterId, userId }),
+      held.cancelScheduledMail({ letterId, userId })
+    ]);
+
+    expect(results.map(result => result.ok)).toEqual([true, true]);
+    const already = results.map(result => (result.ok ? result.cancelled.alreadyCancelled : null)).sort();
+    expect(already).toEqual([false, true]);
+    expect(await creditsOf(userId)).toBe(10);
+  }, 60_000);
+
+  it('frees the duplicate guard: the same mail can be sent again once cancelled', async () => {
+    const userId = await seedUser();
+    const body = `The same words ${randomUUID()}`;
+    const letterId = await sendHeld(userId, body);
+
+    // While it stands, the same mail is refused as a recent duplicate (#412).
+    await expect(sendHeld(userId, body)).rejects.toMatchObject({ code: 'DUPLICATE_RECENT_MAIL' });
+
+    await expect(held.cancelScheduledMail({ letterId, userId })).resolves.toMatchObject({ ok: true });
+    await expect(sendHeld(userId, body)).resolves.toEqual(expect.any(String));
   }, 60_000);
 });

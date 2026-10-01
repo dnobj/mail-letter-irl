@@ -1,9 +1,9 @@
 /**
  * Arrive-by as tools/list serves it (#535): a real client over an in-memory
  * transport (the cardsWire.test.ts pattern) sees `arriveBy` on the four
- * preview tools, and the set_arrival_date tool, only while
- * LETTER_IRL_ARRIVE_BY_ENABLED is on, read when the connection registers its
- * tools.
+ * preview tools, and the set_arrival_date and cancel_scheduled_mail tools, only
+ * while LETTER_IRL_ARRIVE_BY_ENABLED is on, read when the connection registers
+ * its tools.
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -24,6 +24,9 @@ const PREVIEWS = [
   'quote_and_preview_letter_with_image',
   'quote_and_preview_postcard'
 ];
+
+/** The tools listed only while the flag is on. */
+const GATED = ['set_arrival_date', 'cancel_scheduled_mail'];
 
 /** The input each call reaches the app server with, through the SDK's validation. */
 const received: Array<Record<string, unknown>> = [];
@@ -92,13 +95,13 @@ describe('arriveBy in tools/list', () => {
       expect(offProperties, name).not.toContain('arriveBy');
       expect(offProperties).toEqual(onProperties.filter(key => key !== 'arriveBy'));
     }
-    // Every other tool is served the same either way, but set_arrival_date,
-    // which is listed only while on.
+    // Every other tool is served the same either way, but the two listed only
+    // while on.
     for (const [name, tool] of on) {
-      if (PREVIEWS.includes(name) || name === 'set_arrival_date') continue;
+      if (PREVIEWS.includes(name) || GATED.includes(name)) continue;
       expect(off.get(name)?.inputSchema, name).toEqual(tool.inputSchema);
     }
-    expect([...on.keys()].filter(name => !off.has(name))).toEqual(['set_arrival_date']);
+    expect([...on.keys()].filter(name => !off.has(name)).sort()).toEqual([...GATED].sort());
     expect([...off.keys()].filter(name => !on.has(name))).toEqual([]);
   });
 
@@ -186,6 +189,44 @@ describe('set_arrival_date in tools/list', () => {
     expect(result.isError).toBeFalsy();
     expect(result.structuredContent).toEqual(cleared);
     expect(result.content).toEqual([{ type: 'text', text: cleared.message }]);
+  });
+
+  it('is listed with cancel_scheduled_mail, which needs an orderId and confirm, and is marked destructive', async () => {
+    vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', 'true');
+    const tool = (await listedTools()).get('cancel_scheduled_mail');
+    expect(tool?.title).toBe('Cancel scheduled mail');
+    const schema = tool?.inputSchema as { properties: Record<string, { type?: string }>; required?: string[] };
+    expect(Object.keys(schema.properties)).toEqual(['orderId', 'confirm']);
+    expect(schema.required).toEqual(['orderId', 'confirm']);
+    expect(schema.properties.confirm.type).toBe('boolean');
+    expect(tool?.annotations).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: false
+    });
+    vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', '');
+    expect((await listedTools()).has('cancel_scheduled_mail')).toBe(false);
+  });
+
+  it("returns a cancel's result through the served output schema", async () => {
+    vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', 'true');
+    const answer = {
+      orderId: 'ltr-1',
+      status: 'cancelled',
+      alreadyCancelled: false,
+      returned: { kind: 'gift_letter', count: 1 },
+      message: 'Cancelled. The gift letter is back in the account, to use again.'
+    };
+    const client = await connected(() => answer);
+    await client.listTools();
+
+    const result = await client.callTool({ name: 'cancel_scheduled_mail', arguments: { orderId: 'ltr-1', confirm: true } });
+
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent).toEqual(answer);
+    expect(result.content).toEqual([{ type: 'text', text: answer.message }]);
+    expect(received).toEqual([{ orderId: 'ltr-1', confirm: true }]);
   });
 
   it('is unknown to a connection made while off, so a cached call reaches nothing', async () => {

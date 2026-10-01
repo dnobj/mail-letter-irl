@@ -38,11 +38,14 @@ import {
   getDraftStatusTool,
   uploadPhotoChunkTool,
   // A preview's arrival date, changed without previewing again (#535)
-  setArrivalDateTool
+  setArrivalDateTool,
+  // Held mail cancelled before it goes to the printer (#535)
+  cancelScheduledMailTool
 } from "./tools/index.js";
 import { REQUEST_SEND_TOOL } from "./tools/requestSend.js";
 import { UPLOAD_PHOTO_CHUNK_TOOL } from "./tools/uploadPhotoChunk.js";
 import { SET_ARRIVAL_DATE_TOOL } from "./tools/setArrivalDate.js";
+import { CANCEL_SCHEDULED_MAIL_TOOL } from "./tools/cancelScheduledMail.js";
 import { isCardUploadEnabled } from "./config/cardUpload.js";
 import { isArriveByEnabled } from "./config/arriveBy.js";
 import { isSendConfirmationEnabled } from "./config/sendConfirmation.js";
@@ -85,6 +88,10 @@ const tools: McpToolDefinition<any, any>[] = [
   // A preview's arrival date, set, moved or cleared without previewing again
   // (#535). Listed only while LETTER_IRL_ARRIVE_BY_ENABLED is on.
   setArrivalDateTool,
+  // Held mail cancelled before it goes to the printer (#535), its letter or
+  // gift letter returned. Listed only while LETTER_IRL_ARRIVE_BY_ENABLED is on;
+  // the website cancels through its own route whatever the flag.
+  cancelScheduledMailTool,
   // The model's way to send, once the send rule is on (#470): a link where
   // the person sends the preview themselves. Listed only while the rule is on.
   requestSendTool,
@@ -289,9 +296,9 @@ export class LetterIrlServer {
   /**
    * The tools as one app sees them: each description in that app's words
    * (#484), the checkouts only where it takes purchases (#475), image
-   * generation only where it is allowed (#467), and set_arrival_date only
-   * while arrival dates are on (#535). Without an app, the list for an app
-   * that trusts nothing.
+   * generation only where it is allowed (#467), and set_arrival_date and
+   * cancel_scheduled_mail only while arrival dates are on (#535). Without an
+   * app, the list for an app that trusts nothing.
    */
   listTools(client: ClientProfile = callingApp(undefined)) {
     // request_send points at the confirmation page, which ships with the send
@@ -304,7 +311,7 @@ export class LetterIrlServer {
     return tools
       .filter((tool) => sendRule || tool.name !== REQUEST_SEND_TOOL)
       .filter((tool) => cardUpload || tool.name !== UPLOAD_PHOTO_CHUNK_TOOL)
-      .filter((tool) => arriveBy || tool.name !== SET_ARRIVAL_DATE_TOOL)
+      .filter((tool) => arriveBy || (tool.name !== SET_ARRIVAL_DATE_TOOL && tool.name !== CANCEL_SCHEDULED_MAIL_TOOL))
       .filter((tool) => client.inAppPurchases || !IN_APP_PURCHASE_TOOLS.has(tool.name))
       .filter((tool) => offersImageGeneration(client) || !IMAGE_GENERATION_TOOLS.has(tool.name))
       .map((tool) => ({

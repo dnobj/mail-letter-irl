@@ -759,10 +759,14 @@ async function failBeforeDispatch(job: LetterJob, error: unknown, random: () => 
       // Cast every use of $2, for the reason given in failOrRescheduleJob: the
       // uncast form is rejected by PostgreSQL, which threw this whole
       // transaction away on every pre-dispatch failure, retryable or terminal.
+      //
+      // The predicate also skips a job cancelled meanwhile: a claimant that
+      // stalled past its lock, and lost the job to a customer's cancel of held
+      // mail (#535) or a refund's cancel, must not bring it back to pending.
       `UPDATE letter_jobs SET status = $2::varchar, next_attempt_at = $3, locked_at = NULL,
          completed_at = CASE WHEN $2::varchar = 'failed' THEN NOW() ELSE NULL END,
          last_error = $4, error_message = $4, updated_at = NOW()
-       WHERE job_id = $1 AND provider_outcome = 'not_dispatched'`,
+       WHERE job_id = $1 AND provider_outcome = 'not_dispatched' AND status <> 'cancelled'`,
       [job.job_id, retryable ? 'pending' : 'failed',
         new Date(Date.now() + retryDelayMilliseconds(job.attempts, random)), errorClass]
     );

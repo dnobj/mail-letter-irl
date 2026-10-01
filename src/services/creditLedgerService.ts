@@ -799,11 +799,27 @@ export async function isLetterAlreadyCompensated(
   return consumed.rows[0]?.all_revoked === true;
 }
 
+/**
+ * Why a letter's credits go back: its send failed, or the person cancelled it
+ * while it was held (#535, scheduledMailService). Both are recorded under the
+ * reason 'send_failed', so the exactly-once marker above and the operator's
+ * retry guard (isLetterAlreadyCompensated) count either: the letter's value
+ * went back before it mailed. failure_code says which, and the descriptions,
+ * which the account's history shows, say it in words.
+ */
+export type CreditReturnCause = 'failed' | 'cancelled';
+
+/**
+ * Returns the credits re-issued, those already expired included: they are on
+ * record but neither in the balance nor in the account's history (below).
+ */
 export async function returnConsumedCreditsForLetter(
   client: Pick<pg.PoolClient, 'query'>,
-  params: { letterId: string; userId: string; failureCode: string }
+  params: { letterId: string; userId: string; failureCode: string; cause?: CreditReturnCause }
 ): Promise<number> {
   const { letterId, userId, failureCode } = params;
+  const cancelled = params.cause === 'cancelled';
+  const description = `Returned after ${cancelled ? 'cancelled' : 'failed'} send ${letterId}`;
   await lockAccountForBalanceChange(client, userId);
 
   if (await hasReturnedCreditsForLetter(client, { letterId, userId })) return 0;
@@ -819,11 +835,16 @@ export async function returnConsumedCreditsForLetter(
     status: string;
     source_reference_id: string | null;
     stripe_session_id: string | null;
+    expired: boolean;
   }>(
+    // expired is decided by the database's clock, as every balance read does
+    // (expires_at > NOW()), so a lot is never counted one way here and the
+    // other way there.
     `SELECT consumption.ledger_id, consumption.amount,
             lot.expires_at, lot.expiration_policy, lot.status,
             lot.source_reference_id,
-            lot.source_metadata->>'stripe_session_id' AS stripe_session_id
+            lot.source_metadata->>'stripe_session_id' AS stripe_session_id,
+            (lot.expires_at IS NOT NULL AND lot.expires_at <= NOW()) AS expired
        FROM credit_consumption consumption
        JOIN credit_transactions txn ON txn.transaction_id = consumption.transaction_id
        JOIN credit_ledger lot ON lot.ledger_id = consumption.ledger_id
@@ -835,7 +856,14 @@ export async function returnConsumedCreditsForLetter(
   );
   if (consumed.rows.length === 0) return 0;
 
+  // returned counts every credit re-issued; usable, those not already expired.
+  // A lot keeps its expiry, so one that ran out since the deduction (a send
+  // that failed late, or mail held to a date and cancelled, #535) comes back
+  // as 'expired': on record, so the exactly-once marker and the retry guard
+  // see it, but never in the cached balance or the account's history, which
+  // would otherwise show a letter the ledger will not spend.
   let returned = 0;
+  let usable = 0;
   for (const lot of consumed.rows) {
     if (lot.amount <= 0) continue;
     // A revoked lot was already paid back in cash. Refunding a pack zeroes its
@@ -849,7 +877,7 @@ export async function returnConsumedCreditsForLetter(
          user_id, initial_amount, remaining_amount, source_type,
          source_reference_id, source_metadata, activated_at,
          expires_at, expiration_policy, status, description, related_ledger_id
-       ) VALUES ($1, $2, $2, 'adjustment', $3, $4, NOW(), $5, $6, 'active', $7, $8)`,
+       ) VALUES ($1, $2, $2, 'adjustment', $3, $4, NOW(), $5, $6, $9, $7, $8)`,
       [
         userId,
         lot.amount,
@@ -877,31 +905,36 @@ export async function returnConsumedCreditsForLetter(
         }),
         lot.expires_at,
         lot.expiration_policy,
-        `Returned after failed send ${letterId}`,
-        lot.ledger_id
+        description,
+        lot.ledger_id,
+        lot.expired ? 'expired' : 'active'
       ]
     );
     returned += lot.amount;
+    if (!lot.expired) usable += lot.amount;
   }
   if (returned === 0) return 0;
 
-  await client.query(
-    `UPDATE users SET credits = credits + $1, updated_at = NOW() WHERE user_id = $2`,
-    [returned, userId]
-  );
+  if (usable > 0) {
+    await client.query(
+      `UPDATE users SET credits = credits + $1, updated_at = NOW() WHERE user_id = $2`,
+      [usable, userId]
+    );
 
-  // balance_after is read after the update above, so the snapshot matches the
-  // balance this transaction produced.
-  await client.query(
-    `INSERT INTO credit_transactions (
-       user_id, amount, balance_after, type, reference_type, reference_id, description
-     ) SELECT $1::varchar, $2::int, credits, 'refund', 'letter', $3::varchar, $4::text
-         FROM users WHERE user_id = $1::varchar`,
-    [userId, returned, letterId, `Returned after failed send ${letterId}`]
-  );
+    // balance_after is read after the update above, so the snapshot matches the
+    // balance this transaction produced.
+    await client.query(
+      `INSERT INTO credit_transactions (
+         user_id, amount, balance_after, type, reference_type, reference_id, description
+       ) SELECT $1::varchar, $2::int, credits, 'refund', 'letter', $3::varchar, $4::text
+           FROM users WHERE user_id = $1::varchar`,
+      [userId, usable, letterId, description]
+    );
+  }
 
-  writeDiagnostic('info', 'credits.returned_after_failed_send', {
+  writeDiagnostic('info', cancelled ? 'credits.returned_after_cancelled_send' : 'credits.returned_after_failed_send', {
     creditsReturned: returned,
+    creditsExpired: returned - usable,
     lotsRestored: consumed.rows.length
   });
 
