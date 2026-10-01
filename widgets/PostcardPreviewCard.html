@@ -164,7 +164,7 @@
           <span class="info-label">Message</span>
           <div class="message-text" id="message-text"></div>
         </div>
-        <div class="note" id="arrives-note" style="display: none"></div>
+        <div class="note" id="arrives-note" style="display: none" aria-live="polite"></div>
         <div class="note" id="note" style="display: none"></div>
         <!-- Shown when no result arrived (#411), or for a reopened card that
              already sent its postcard or started a checkout. -->
@@ -197,7 +197,7 @@
         <!-- Sent with an arrival date (#535): it waits for its mail date and
              can be cancelled free until then. -->
         <div id="scheduled" style="display: none">
-          <div class="note" id="scheduled-note"></div>
+          <div class="note" id="scheduled-note" aria-live="polite"></div>
           <button class="send-button secondary" id="cancel-scheduled-button" style="display: none">
             <span id="cancel-scheduled-button-text">Cancel this postcard</span>
           </button>
@@ -318,6 +318,9 @@
         note: document.getElementById("arrives-note"),
         readableError,
         resultText,
+        onSet() {
+          draftActedOn = true;
+        },
         onChange(change) {
           arrivalChange = change;
           render();
@@ -337,6 +340,8 @@
         resultText,
         onCancelled() {
           keep({ cancelled: true });
+          // render() redraws a reopened card from what it found kept.
+          if (resumed) resumed = { ...resumed, cancelled: true };
           const statusPill = document.getElementById("status-pill");
           statusPill.classList.remove("ok", "alert");
           statusPill.textContent = "Cancelled";
@@ -631,11 +636,12 @@
         if (kept.sent && keptSchedule) {
           // Sent with a date (#535): waiting for it, or cancelled from here.
           statusPill.classList.remove("ok", "alert");
-          statusPill.textContent = kept.cancelled ? "Cancelled" : "Scheduled";
-          document.getElementById("empty-message").textContent = kept.cancelled
+          const cancelled = Boolean(kept.cancelled) || scheduled.cancelled();
+          statusPill.textContent = cancelled ? "Cancelled" : "Scheduled";
+          document.getElementById("empty-message").textContent = cancelled
             ? "This postcard was cancelled from this card. Nothing will be mailed."
             : "This postcard was sent from this card to go to the printer on its mail date.";
-          scheduled.show(orderId, keptSchedule, Boolean(kept.cancelled));
+          scheduled.show(orderId, keptSchedule, cancelled);
           return;
         }
         if (kept.sent) {
@@ -1972,6 +1978,7 @@
         const idLabel = document.getElementById("id-label");
         const idValue = document.getElementById("id-value");
         checkoutInProgress = true;
+        picker.hide();
         errorMessage.style.display = "none";
         button.disabled = true;
         button.classList.add("loading");

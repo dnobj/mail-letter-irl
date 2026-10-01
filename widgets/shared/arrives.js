@@ -83,12 +83,15 @@
    */
   function createPicker(options) {
     var host = options.host;
-    var state = { draftId: null, schedule: null, min: "", max: "", busy: false, message: "", error: false };
+    // pending: the date being set while the server answers ("" for as soon
+    // as possible), so the field keeps what the person chose meanwhile.
+    var state = { draftId: null, schedule: null, min: "", max: "", busy: false, pending: null, message: "", error: false };
 
     function draw() {
       options.input.min = state.min;
       options.input.max = state.max;
-      options.input.value = state.schedule ? state.schedule.arriveBy : "";
+      options.input.value =
+        state.busy && state.pending !== null ? state.pending : state.schedule ? state.schedule.arriveBy : "";
       options.input.disabled = state.busy;
       options.asap.disabled = state.busy || !state.schedule;
       options.asap.setAttribute("aria-pressed", state.schedule ? "false" : "true");
@@ -102,9 +105,12 @@
       if (state.busy || !state.draftId || typeof host.callTool !== "function") return;
       var draftId = state.draftId;
       state.busy = true;
+      state.pending = arriveBy || "";
       state.message = "";
       state.error = false;
       draw();
+      // Setting a date is acting on the draft (the card keeps it).
+      if (typeof options.onSet === "function") options.onSet();
       options.onBusy();
       // Left out, the date is cleared: as soon as possible.
       var args = arriveBy ? { draftId: draftId, arriveBy: arriveBy } : { draftId: draftId };
@@ -148,6 +154,7 @@
         .then(function () {
           if (state.draftId !== draftId) return;
           state.busy = false;
+          state.pending = null;
           draw();
           options.onBusy();
         });
@@ -196,6 +203,7 @@
           state.min = offered.earliestArrival;
           state.max = offered.latestArrival;
           state.busy = false;
+          state.pending = null;
           state.message = "";
           state.error = false;
         }
@@ -218,6 +226,18 @@
         return state.busy;
       }
     };
+  }
+
+  // What a refused cancel means on the card: the refusals that leave nothing
+  // to cancel, by the words cancel_scheduled_mail uses
+  // (SCHEDULED_MAIL_REFUSALS, src/tools/cancelScheduledMail.ts). null for any
+  // other, whose own text is shown and which may be tried again.
+  function closingMessage(text) {
+    if (/has gone to the printer/i.test(text)) return "It has gone to the printer, so it can no longer be cancelled.";
+    if (/going to the printer right now/i.test(text)) return "It is going to the printer right now, so it can no longer be cancelled.";
+    if (/Only mail scheduled to arrive by a date/i.test(text)) return "It goes to the printer as soon as it can, so it can't be cancelled here.";
+    if (/Pay & Send/i.test(text)) return text;
+    return null;
   }
 
   /*
@@ -277,13 +297,9 @@
           var text = options.readableError(error);
           state.confirming = false;
           state.error = true;
-          // Gone to the printer, or going now: there is nothing left to cancel.
-          if (/printer/i.test(text)) {
-            state.closed = true;
-            state.message = "It has gone to the printer, so it can no longer be cancelled.";
-          } else {
-            state.message = text;
-          }
+          var closing = closingMessage(text);
+          state.closed = closing !== null;
+          state.message = closing || text;
         })
         .then(function () {
           state.busy = false;
@@ -316,6 +332,7 @@
     describeDate: describeDate,
     mailsLine: mailsLine,
     boundsFromRefusal: boundsFromRefusal,
+    closingMessage: closingMessage,
     scheduleOf: scheduleOf,
     createPicker: createPicker,
     createScheduled: createScheduled
