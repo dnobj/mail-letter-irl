@@ -24,13 +24,19 @@ const PREVIEWS = [
   'quote_and_preview_postcard'
 ];
 
-async function listedTools() {
+/** The input each call reaches the app server with, through the SDK's validation. */
+const received: Array<Record<string, unknown>> = [];
+
+async function connected() {
   vi.stubEnv('LETTER_IRL_REQUIRE_AUTH', 'true');
   vi.stubEnv('LETTER_IRL_OAUTH_SCOPES', 'openid email offline_access mail:read mail:draft mail:send');
   const real = new LetterIrlServer();
   const appServer = {
     listTools: (client: ClientProfile) => real.listTools(client),
-    execute: vi.fn()
+    execute: vi.fn(async (request: { input: Record<string, unknown> }) => {
+      received.push(request.input);
+      throw new Error('stopped after recording the input');
+    })
   } as unknown as LetterIrlServer;
   const server = await createMcpServer(appServer, {
     userId: 'auth0|test',
@@ -42,12 +48,23 @@ async function listedTools() {
   const client = new Client({ name: 'arrive-by-client', version: '0.0.0' });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
-  const { tools } = await client.listTools();
+  return client;
+}
+
+async function listedTools() {
+  const { tools } = await (await connected()).listTools();
   return new Map(tools.map(tool => [tool.name, tool]));
 }
 
+const LETTER = {
+  recipient: { name: 'Sam Rivera', addressLine1: '350 5th Ave', city: 'New York', state: 'NY', postalCode: '10118', country: 'US' },
+  bodyText: 'Dear Sam,',
+  signOff: 'Pat'
+};
+
 afterEach(() => {
   vi.unstubAllEnvs();
+  received.length = 0;
 });
 
 describe('arriveBy in tools/list', () => {
@@ -77,5 +94,21 @@ describe('arriveBy in tools/list', () => {
       if (PREVIEWS.includes(name)) continue;
       expect(off.get(name)?.inputSchema, name).toEqual(tool.inputSchema);
     }
+  });
+
+  it('delivers a stray arriveBy to the preview while off, so the preview refuses it, not mails at once', async () => {
+    vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', '');
+    const client = await connected();
+    // An app that cached the schema from while the flag was on.
+    await client.callTool({ name: 'quote_and_preview_letter', arguments: { ...LETTER, arriveBy: '2026-10-16' } });
+    expect(received).toHaveLength(1);
+    expect(received[0].arriveBy).toBe('2026-10-16');
+  });
+
+  it('delivers arriveBy while on, as declared', async () => {
+    vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', 'true');
+    const client = await connected();
+    await client.callTool({ name: 'quote_and_preview_letter', arguments: { ...LETTER, arriveBy: '2026-10-16' } });
+    expect(received[0].arriveBy).toBe('2026-10-16');
   });
 });

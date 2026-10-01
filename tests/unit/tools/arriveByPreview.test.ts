@@ -201,6 +201,15 @@ describe('a held letter or postcard', () => {
     expect(card.deliveryEstimate).toBe('Mailed in 1-2 business days; usually arrives in 1-2 weeks');
   });
 
+  it('treats an empty arriveBy as none, as models send for a field they leave unset', async () => {
+    for (const arriveBy of ['', '   ']) {
+      vi.mocked(createDraft).mockClear();
+      const output = await letter('text_only', { arriveBy });
+      expect(vi.mocked(createDraft).mock.calls[0][0].schedule, JSON.stringify(arriveBy)).toBeUndefined();
+      expect(output.schedule).toBeUndefined();
+    }
+  });
+
   it('accepts a date a little either side of the edges of what is on offer, and its spaces', async () => {
     await expect(letter('text_only', { arriveBy: ' 2026-10-13 ' })).resolves.toMatchObject({ schedule: { mailOn: '2026-10-01' } });
     await expect(letter('text_only', { arriveBy: '2026-11-30' })).resolves.toMatchObject({ schedule: { mailOn: '2026-11-18' } });

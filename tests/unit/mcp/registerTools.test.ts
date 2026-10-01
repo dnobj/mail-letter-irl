@@ -15,6 +15,7 @@
  */
 
 import { afterEach, describe, it, expect, vi } from 'vitest';
+import { z } from 'zod';
 import { widgetTemplateUri } from "../../../src/mcp/widgetUris.js";
 import { LetterIrlServer } from '../../../src/server.js';
 import {
@@ -22,7 +23,7 @@ import {
   buildToolMeta,
   buildToolSecuritySchemes,
   getZodInputShape,
-  getServedInputShape,
+  getServedInputSchema,
   getZodOutputShape,
   summarizeToolResult
 } from '../../../src/mcp/registerTools.js';
@@ -562,16 +563,27 @@ describe('arrive-by in the served schemas (#535)', () => {
   it('offers arriveBy on the four previews only while the flag is on', () => {
     vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', 'true');
     for (const name of PREVIEWS) {
-      expect(getServedInputShape(name), name).toHaveProperty('arriveBy');
-      expect(getServedInputShape(name)!.arriveBy.description).toContain('YYYY-MM-DD');
+      const served = getServedInputSchema(name) as Record<string, { description?: string }>;
+      // On: the raw shape, as declared.
+      expect(served, name).toBe(getZodInputShape(name));
+      expect(served.arriveBy.description).toContain('YYYY-MM-DD');
     }
     vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', '');
     for (const name of PREVIEWS) {
-      const served = getServedInputShape(name)!;
-      expect(served, name).not.toHaveProperty('arriveBy');
+      const served = getServedInputSchema(name) as z.AnyZodObject;
+      expect(served, name).toBeInstanceOf(z.ZodObject);
+      expect(served.shape, name).not.toHaveProperty('arriveBy');
       // Everything else is served as it was.
-      expect(Object.keys(served)).toEqual(Object.keys(getZodInputShape(name)!).filter(key => key !== 'arriveBy'));
+      expect(Object.keys(served.shape)).toEqual(Object.keys(getZodInputShape(name)!).filter(key => key !== 'arriveBy'));
     }
+  });
+
+  it("passes a stray arriveBy through to the preview while off, so its refusal runs, not the SDK's strip", () => {
+    vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', '');
+    const served = getServedInputSchema('quote_and_preview_letter') as z.AnyZodObject;
+    const recipient = { name: 'Sam', addressLine1: '1 Main St', city: 'X', state: 'NY', postalCode: '10001', country: 'US' };
+    const parsed = served.parse({ recipient, bodyText: 'Hi', signOff: 'Pat', arriveBy: '2026-10-16' });
+    expect(parsed.arriveBy).toBe('2026-10-16');
   });
 
   it('leaves every other tool exactly as declared, and declares arriveBy on no other', () => {
@@ -579,17 +591,22 @@ describe('arrive-by in the served schemas (#535)', () => {
     const tools = new LetterIrlServer().listTools(clientProfileNamed('chatgpt'));
     for (const tool of tools) {
       if (PREVIEWS.includes(tool.name)) continue;
-      expect(getServedInputShape(tool.name), tool.name).toBe(getZodInputShape(tool.name));
+      expect(getServedInputSchema(tool.name), tool.name).toBe(getZodInputShape(tool.name));
       expect(getZodInputShape(tool.name), tool.name).not.toHaveProperty('arriveBy');
     }
   });
 
-  it("narrates a held preview's dates, and nothing extra for mail sent at once", () => {
+  it("narrates a held preview's dates as the preview worded them, and nothing extra for mail sent at once", () => {
     const schedule = { arriveBy: '2026-10-16', mailOn: '2026-10-06', releasesAt: '2026-10-06T13:00:00.000Z', earliestArrival: '2026-10-13', latestArrival: '2026-11-30' };
+    // As a preview built it with its own clock, here a year before these dates:
+    // the narration repeats it rather than rewording it with the server's clock.
+    const deliveryEstimate = 'Goes to the printer Tue, Oct 6, 2026, and aims to arrive by Fri, Oct 16, 2026.';
     for (const name of PREVIEWS) {
-      const held = summarizeToolResult(name, { lettersRequired: 1, schedule });
-      expect(held, name).toMatch(/ Scheduled: Goes to the printer Tue, Oct 6(, 2026)?, and aims to arrive by Fri, Oct 16(, 2026)?\. It is held until then, and USPS does not guarantee First-Class dates\.$/);
-      expect(summarizeToolResult(name, { lettersRequired: 1 }), name).not.toContain('Scheduled');
+      const held = summarizeToolResult(name, { lettersRequired: 1, schedule, deliveryEstimate });
+      expect(held, name).toMatch(
+        / Scheduled: Goes to the printer Tue, Oct 6, 2026, and aims to arrive by Fri, Oct 16, 2026\. If it is sent, it is held until then; USPS does not guarantee First-Class dates\.$/
+      );
+      expect(summarizeToolResult(name, { lettersRequired: 1, deliveryEstimate: 'Mailed in 1-2 business days' }), name).not.toContain('Scheduled');
     }
   });
 });

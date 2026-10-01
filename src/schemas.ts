@@ -9,7 +9,7 @@ const previewScheduleSchema = {
   properties: {
     arriveBy: { type: "string", description: "The date it should arrive by, YYYY-MM-DD in New York" },
     mailOn: { type: "string", description: "The day it goes to the printer, YYYY-MM-DD" },
-    releasesAt: { type: "string", description: "ISO time it goes to the printer" },
+    releasesAt: { type: "string", description: "ISO time the hold ends: 09:00 New York time on the mail date, sent to the printer within the hour" },
     earliestArrival: { type: "string", description: "The first arrival date on offer, YYYY-MM-DD" },
     latestArrival: { type: "string", description: "The last arrival date on offer, YYYY-MM-DD" }
   },

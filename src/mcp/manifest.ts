@@ -4,6 +4,19 @@ import { DEFAULT_OAUTH_SCOPES } from "../auth/oauthConfig.js";
 import { buildServerInstructions } from "./serverInstructions.js";
 import { isSendConfirmationEnabled } from "../config/sendConfirmation.js";
 import { clientProfileNamed } from "../auth/clientProfiles.js";
+import { isArriveByEnabled } from "../config/arriveBy.js";
+
+/**
+ * A tool's input schema as tools/list serves it: the previews' `arriveBy`
+ * (#535) only while LETTER_IRL_ARRIVE_BY_ENABLED is on (getServedInputSchema).
+ */
+function servedInputSchema(schema: unknown): unknown {
+  const properties = (schema as { properties?: Record<string, unknown> } | undefined)?.properties;
+  if (!properties || !("arriveBy" in properties) || isArriveByEnabled()) return schema;
+  const { arriveBy: _unserved, ...served } = properties;
+  void _unserved;
+  return { ...(schema as object), properties: served };
+}
 
 function getManifestUrls(publicBaseUrlOverride?: string) {
   const publicBaseUrl =
@@ -39,7 +52,7 @@ export function buildManifest(publicBaseUrl?: string) {
   const tools = server.listTools(chatgpt).map((tool) => ({
     name: tool.name,
     description: tool.description,
-    inputSchema: tool.inputSchema,
+    inputSchema: servedInputSchema(tool.inputSchema),
     outputSchema: tool.outputSchema
   }));
 

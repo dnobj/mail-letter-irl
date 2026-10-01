@@ -97,10 +97,6 @@
           "sendAsGift": {
             "type": "boolean",
             "description": "Set true only when the user asks to send this as their gift letter: it is free and adds a printed page with a card for the recipient. Leave it out otherwise; a gift letter is then used only if the balance cannot pay."
-          },
-          "arriveBy": {
-            "type": "string",
-            "description": "Optional. The date the mail should arrive by, YYYY-MM-DD, such as a birthday or an event. Letter IRL holds the mail and sends it to the printer in time; USPS does not guarantee First-Class dates. Omit it to mail as soon as possible."
           }
         }
       },
@@ -150,7 +146,7 @@
               },
               "releasesAt": {
                 "type": "string",
-                "description": "ISO time it goes to the printer"
+                "description": "ISO time the hold ends: 09:00 New York time on the mail date, sent to the printer within the hour"
               },
               "earliestArrival": {
                 "type": "string",
@@ -433,10 +429,6 @@
           "sendAsGift": {
             "type": "boolean",
             "description": "Set true only when the user asks to send this as their gift letter: it is free and adds a printed page with a card for the recipient. Leave it out otherwise; a gift letter is then used only if the balance cannot pay."
-          },
-          "arriveBy": {
-            "type": "string",
-            "description": "Optional. The date the mail should arrive by, YYYY-MM-DD, such as a birthday or an event. Letter IRL holds the mail and sends it to the printer in time; USPS does not guarantee First-Class dates. Omit it to mail as soon as possible."
           }
         }
       },
@@ -486,7 +478,7 @@
               },
               "releasesAt": {
                 "type": "string",
-                "description": "ISO time it goes to the printer"
+                "description": "ISO time the hold ends: 09:00 New York time on the mail date, sent to the printer within the hour"
               },
               "earliestArrival": {
                 "type": "string",
@@ -769,10 +761,6 @@
           "sendAsGift": {
             "type": "boolean",
             "description": "Set true only when the user asks to send this as their gift letter: it is free and adds a printed page with a card for the recipient. Leave it out otherwise; a gift letter is then used only if the balance cannot pay."
-          },
-          "arriveBy": {
-            "type": "string",
-            "description": "Optional. The date the mail should arrive by, YYYY-MM-DD, such as a birthday or an event. Letter IRL holds the mail and sends it to the printer in time; USPS does not guarantee First-Class dates. Omit it to mail as soon as possible."
           }
         }
       },
@@ -822,7 +810,7 @@
               },
               "releasesAt": {
                 "type": "string",
-                "description": "ISO time it goes to the printer"
+                "description": "ISO time the hold ends: 09:00 New York time on the mail date, sent to the printer within the hour"
               },
               "earliestArrival": {
                 "type": "string",
@@ -1831,10 +1819,6 @@
           "sendAsGift": {
             "type": "boolean",
             "description": "Set true only when the user asks to send this as their gift letter: it is free and adds a printed page with a card for the recipient. Leave it out otherwise; a gift letter is then used only if the balance cannot pay."
-          },
-          "arriveBy": {
-            "type": "string",
-            "description": "Optional. The date the mail should arrive by, YYYY-MM-DD, such as a birthday or an event. Letter IRL holds the mail and sends it to the printer in time; USPS does not guarantee First-Class dates. Omit it to mail as soon as possible."
           }
         }
       },
@@ -1884,7 +1868,7 @@
               },
               "releasesAt": {
                 "type": "string",
-                "description": "ISO time it goes to the printer"
+                "description": "ISO time the hold ends: 09:00 New York time on the mail date, sent to the printer within the hour"
               },
               "earliestArrival": {
                 "type": "string",

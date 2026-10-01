@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +12,22 @@ const __dirname = path.dirname(__filename);
 const manifestPath = path.resolve(__dirname, "../../../manifest.json");
 
 describe("Compatibility manifest", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("offers the previews' arriveBy only while the flag is on, as tools/list does (#535)", () => {
+    const letterInput = () =>
+      (buildManifest().tools.find((tool) => tool.name === "quote_and_preview_letter")!.inputSchema as {
+        properties: Record<string, unknown>;
+      }).properties;
+    vi.stubEnv("LETTER_IRL_ARRIVE_BY_ENABLED", "");
+    expect(letterInput()).not.toHaveProperty("arriveBy");
+    expect(letterInput()).toHaveProperty("sendAsGift");
+    vi.stubEnv("LETTER_IRL_ARRIVE_BY_ENABLED", "true");
+    expect(letterInput()).toHaveProperty("arriveBy");
+  });
+
   it("should mirror the runtime tool registry", () => {
     // The manifest is ChatGPT's, and ChatGPT's list is the full one: an app
     // that takes no purchases is not offered the checkouts (#475).
@@ -32,6 +48,8 @@ describe("Compatibility manifest", () => {
   });
 
   it("should keep the checked-in manifest.json snapshot in sync", () => {
+    // Generated as production is: arrive-by off (#535).
+    vi.stubEnv("LETTER_IRL_ARRIVE_BY_ENABLED", "");
     const snapshot = fs.readFileSync(manifestPath, "utf-8");
     const previousPublicBaseUrl = process.env.LETTER_IRL_PUBLIC_BASE_URL;
     process.env.LETTER_IRL_PUBLIC_BASE_URL = "https://api.letterirl.com";

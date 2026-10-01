@@ -15,7 +15,7 @@ export interface PreviewScheduleOutput {
   arriveBy: string;
   /** The day it goes to the printer, YYYY-MM-DD. */
   mailOn: string;
-  /** When the hold ends and it goes to the printer, an ISO instant. */
+  /** When the hold ends, an ISO instant: 09:00 New York time on the mail date; the hourly run sends it to the printer within the hour. */
   releasesAt: string;
   /** The first and last dates on offer when this preview was made. */
   earliestArrival: string;
@@ -57,12 +57,15 @@ export function scheduleSentence(schedule: Pick<PreviewScheduleOutput, 'arriveBy
 /**
  * The arrival date a preview was asked for, checked: its schedule, or a
  * refusal that names the dates on offer so the person or the model can choose
- * again. Undefined when none was asked for. While the feature is off the
- * schema does not offer `arriveBy`, and a call that passes it anyway is
- * refused rather than quietly mailed at once.
+ * again. Undefined when none was asked for, an empty string included, which
+ * models send for an optional field they leave unset. While the feature is
+ * off the schema does not offer `arriveBy`, and a call that passes it anyway
+ * (an app that cached the schema) is refused rather than quietly mailed at
+ * once: registerTools passes it through to here.
  */
 export function previewSchedule(arriveBy: unknown, context: ToolContext): PreviewSchedule | undefined {
   if (arriveBy === undefined || arriveBy === null) return undefined;
+  if (typeof arriveBy === 'string' && arriveBy.trim() === '') return undefined;
   if (!isArriveByEnabled()) {
     throw refusal('Arrival dates are not available yet. Leave arriveBy out to mail as soon as possible.');
   }

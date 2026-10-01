@@ -146,7 +146,9 @@ Database constraints enforce one outbox row and one stable idempotency key per l
 
 **Held mail (#535).** A draft can carry the date its mail should arrive by and the date it goes to the printer (`arrive_by` and `mail_on`, migration 040). The mail date is worked back from the arrival date by a lead time of business days, by `src/services/deliverySchedule.ts`.
 - **The preview sets them**, from the four preview tools' optional `arriveBy` (YYYY-MM-DD, `src/tools/arriveByInput.ts`).
-  - **Only while `LETTER_IRL_ARRIVE_BY_ENABLED` is on:** the served schemas include `arriveBy` only then (`getServedInputShape`, read at each registration), and a call that passes it while the flag is off is refused: "Arrival dates are not available yet…".
+  - **Only while `LETTER_IRL_ARRIVE_BY_ENABLED` is on:** the served schemas, and `/manifest.json`, include `arriveBy` only then (`getServedInputSchema`, read at each registration).
+    - While the flag is off, the four previews are served as objects that pass unknown fields through, not the SDK's default strip. So an app that cached the field and passes it anyway reaches the preview, which refuses it ("Arrival dates are not available yet…") instead of mailing at once.
+    - An empty `arriveBy` counts as none.
   - **Checked first**, before any picture is fetched or address validated, against the lead time (`LETTER_IRL_SCHEDULE_LEAD_DAYS`, default 7 business days; development may set 0, production refuses less than 3) and the horizon (`LETTER_IRL_SCHEDULE_HORIZON_DAYS`, default 60 days).
   - **A date it cannot meet** is refused with the dates on offer: "The earliest this can arrive is Tue, Oct 13 (2026-10-13)…", "The latest arrival date on offer is…", "arriveBy must be a date written YYYY-MM-DD…", or "Arrival dates cannot be scheduled right now…".
   - **A held preview's output** carries `schedule` (`arriveBy`, `mailOn`, `releasesAt`, `earliestArrival`, `latestArrival`). Its `deliveryEstimate`, which the cards show, reads "Goes to the printer Tue, Oct 6, and aims to arrive by Fri, Oct 16." The narration says it is held until then and that USPS does not guarantee First-Class dates.
