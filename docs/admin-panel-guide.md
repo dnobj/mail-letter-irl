@@ -405,8 +405,8 @@ The job page and the letter page show that time as **held for its mail date unti
 the same until it is released. **Send held mail now**, on the job page, makes the job due at once, so the next hourly
 run sends it as an ordinary letter. Use it when the customer asks support to send it now, or to test held mail on
 development. The letter may then arrive well before the date the customer chose, and the customer can still cancel it
-until that run takes it. Only the job's next attempt moves: **held for its mail date until** keeps the original time,
-and the operator audit records the release.
+until that run takes it. Only the job's **next attempt** and **scheduled** move: **held for its mail date until** keeps
+the original time, and the operator audit records the release.
 
 A `schedule_missed_mail_day` alert (warning, #535) names a letter held to arrive by a date that was still not at the
 printer at 18:00 New York time on its mail date, with that date. Check whether the outbox is paused, the provider is

@@ -25,6 +25,10 @@ describe('STUCK_ORDER_CONDITION', () => {
     expect(sql).toContain("held.status = 'queued'");
     expect(sql).toContain("held_job.metadata->>'heldUntil' IS NOT NULL");
     expect(sql).toContain("(held_job.metadata->>'heldUntil')::timestamptz > NOW() - INTERVAL '90 minutes'");
+    // Only until it is first tried, or 90 minutes after it falls due when an
+    // operator sends it before its hold ends (job.dispatch_now).
+    expect(sql).toContain('AND held_job.attempts = 0');
+    expect(sql).toContain("AND held_job.next_attempt_at > NOW() - INTERVAL '90 minutes'");
     // letters.mail_on is not in the admin reader's column list.
     expect(sql).not.toContain('mail_on');
   });

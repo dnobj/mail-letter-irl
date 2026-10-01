@@ -111,11 +111,16 @@ describe("job.dispatch_now (#535)", () => {
       ["Job", "job-held"],
       ["Letter", "letter-1"],
       ["Account", "auth0|u1"],
-      ["Funding", "prepaid_balance"],
+      ["Funding", "prepaid balance"],
       ["Held until", `${RELEASE.toISOString()} (09:00 New York time on its mail date)`],
     ]);
     expect(preview.warnings[0]).toMatch(/^The letter goes to the printer at the next hourly maintenance run instead of on its mail date/);
     expect(preview.warnings).toContain("The customer can still cancel it until that run takes it.");
+  });
+
+  it("names a gift letter's funding in words", async () => {
+    const preview = await jobDispatchNowCommand.preview(client({ ...HELD_ROW, funding_type: "gift_letter" }), "job-held", {});
+    expect(preview.display).toContainEqual(["Funding", "a gift letter"]);
   });
 
   it("names a Pay & Send letter's order", async () => {

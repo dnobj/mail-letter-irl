@@ -238,7 +238,14 @@ export const jobDispatchNowCommand: CommandDefinition<Record<string, never>> = {
         ["Job", job.jobId],
         ["Letter", job.letterId],
         ["Account", job.userId],
-        ["Funding", job.fundingOrderId ? `Pay & Send order ${job.fundingOrderId}` : job.fundingType],
+        [
+          "Funding",
+          job.fundingOrderId
+            ? `Pay & Send order ${job.fundingOrderId}`
+            : job.fundingType === "gift_letter"
+              ? "a gift letter"
+              : "prepaid balance",
+        ],
         ["Held until", `${job.heldUntil.toISOString()} (09:00 New York time on its mail date)`],
       ],
       warnings: [
