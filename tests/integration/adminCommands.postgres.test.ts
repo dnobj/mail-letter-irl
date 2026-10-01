@@ -153,9 +153,10 @@ describePostgres('admin commands through the operator role', () => {
     await owner.query(
       `INSERT INTO letter_jobs (job_id, letter_id, status, attempts, max_attempts, scheduled_at, idempotency_key,
          next_attempt_at, provider_outcome, metadata)
-       VALUES ($1, $2, 'pending', 0, 5, $3::timestamptz, $2, $3::timestamptz, 'not_dispatched',
-               jsonb_build_object('source', 'transactional-outbox', 'heldUntil', $3::text))`,
-      [heldMailJobId, heldMailLetterId, HELD_UNTIL]
+       VALUES ($1, $2, 'pending', 0, 5, $3::timestamptz, $2, $3::timestamptz, 'not_dispatched', $4::jsonb)`,
+      // The metadata as createLetterJobWithClient writes it. Not $3::text: a
+      // parameter takes one type, here timestamptz, whose text is not ISO.
+      [heldMailJobId, heldMailLetterId, HELD_UNTIL, JSON.stringify({ source: 'transactional-outbox', heldUntil: HELD_UNTIL })]
     );
     const alert = await owner.query<{ alert_id: string }>(
       `INSERT INTO commerce_operational_alerts (alert_type, severity, status, details)
