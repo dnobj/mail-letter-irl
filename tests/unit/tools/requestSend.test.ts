@@ -99,6 +99,30 @@ describe("request_send", () => {
     }
   });
 
+  it("refuses a preview whose mail date has passed, rather than a link the page would refuse (#535)", async () => {
+    // NOW is 08:00 on Friday Sep 25 in New York: today can still be a mail date.
+    vi.mocked(getDraft).mockResolvedValue(draft({ arrive_by: "2026-10-05", mail_on: "2026-09-25" }) as any);
+    expect((await requestSendTool.handler({ draftId: DRAFT_ID }, context())).schedule).toEqual({
+      arriveBy: "2026-10-05",
+      mailOn: "2026-09-25"
+    });
+
+    vi.mocked(getDraft).mockResolvedValue(draft({ arrive_by: "2026-10-02", mail_on: "2026-09-24" }) as any);
+    const passed = await refusal({ draftId: DRAFT_ID });
+    expect(passed.code).toBe("SCHEDULE_PASSED");
+    expect(passed.message).toBe(
+      "The day this letter was to go to the printer has passed, so it can no longer arrive by its date. " +
+        "Preview it again with a new arrival date, or with none to send it as soon as possible, then ask again."
+    );
+
+    // After noon in New York, today's mail date has passed too.
+    const afternoon = { ...context(), now: () => new Date("2026-09-25T17:00:00Z") };
+    vi.mocked(getDraft).mockResolvedValue(draft({ arrive_by: "2026-10-05", mail_on: "2026-09-25", mail_type: "postcard" }) as any);
+    const late = await refusal({ draftId: DRAFT_ID }, afternoon);
+    expect(late.code).toBe("SCHEDULE_PASSED");
+    expect(late.message).toMatch(/^The day this postcard was to go to the printer has passed/);
+  });
+
   it("names a postcard as a postcard", async () => {
     vi.mocked(getDraft).mockResolvedValue(draft({ mail_type: "postcard" }) as any);
     const result = await requestSendTool.handler({ draftId: DRAFT_ID }, context());
