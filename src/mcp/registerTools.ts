@@ -91,6 +91,8 @@ import {
 } from "../auth/clientProfiles.js";
 import { inlineHostBridge } from "./widgetHost.js";
 import { isSendConfirmationEnabled } from "../config/sendConfirmation.js";
+import { isArriveByEnabled } from "../config/arriveBy.js";
+import { scheduleSentence } from "../tools/arriveByInput.js";
 import { uploadsThroughCard } from "../config/cardUpload.js";
 import {
   REQUEST_SEND_TOOL,
@@ -844,6 +846,18 @@ export function getZodInputShape(name: string) {
   return schema?.shape;
 }
 
+/**
+ * A tool's input as this deployment serves it. The preview tools' `arriveBy`
+ * (#535) is offered only while LETTER_IRL_ARRIVE_BY_ENABLED is on, so no model
+ * is shown a field the preview would refuse; read at each registration, so
+ * switching the flag needs a reconnect, not a deploy.
+ */
+export function getServedInputShape(name: string) {
+  const shape = getZodInputShape(name);
+  if (!shape || !("arriveBy" in shape) || isArriveByEnabled()) return shape;
+  return Object.fromEntries(Object.entries(shape).filter(([key]) => key !== "arriveBy")) as typeof shape;
+}
+
 export function getZodOutputShape(name: string) {
   const schema = zodOutputSchemas[name as ToolName];
   return schema?.shape;
@@ -1010,7 +1024,7 @@ export async function registerLetterTools(
   // Each description in this app's words (#484).
   const toolDefs = appServer.listTools(client);
   for (const tool of toolDefs) {
-    const inputShape = getZodInputShape(tool.name);
+    const inputShape = getServedInputShape(tool.name);
     const outputShape = getZodOutputShape(tool.name);
     if (!inputShape || !outputShape) {
       continue;
@@ -1297,6 +1311,16 @@ const PREVIEW_TOOLS: ReadonlySet<string> = new Set([
   "quote_and_preview_postcard"
 ]);
 
+/**
+ * A held preview's dates (#535), for the narration: when it goes to the
+ * printer and the date it aims to arrive by. Empty for mail sent at once.
+ */
+function heldMailSentence(result: Record<string, unknown>): string {
+  const schedule = result.schedule as { arriveBy?: unknown; mailOn?: unknown } | undefined;
+  if (typeof schedule?.arriveBy !== "string" || typeof schedule.mailOn !== "string") return "";
+  return ` Scheduled: ${scheduleSentence({ arriveBy: schedule.arriveBy, mailOn: schedule.mailOn }, new Date())} It is held until then, and USPS does not guarantee First-Class dates.`;
+}
+
 export function summarizeToolResult(
   toolName: string,
   result: Record<string, unknown>,
@@ -1339,6 +1363,7 @@ export function summarizeToolResult(
       if (warnings?.length) {
         summary += ` Note: ${warnings.join(' ')}`;
       }
+      summary += heldMailSentence(result);
       return summary;
     }
     case "request_send":
@@ -1405,6 +1430,7 @@ export function summarizeToolResult(
       if (warnings?.length) {
         summary += ` Note: ${warnings.join(' ')}`;
       }
+      summary += heldMailSentence(result);
       return summary;
     }
     case "send_postcard": {

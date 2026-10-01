@@ -541,6 +541,35 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     secret: false,
     services: ['api']
   },
+  /**
+   * Arrive-by (#535, src/config/arriveBy.ts): the preview tools offer and
+   * accept an arrival date only while the flag is on. Off unless set, so
+   * absence is the intended production state until the owner switches it on;
+   * the lead time and horizon have working defaults. Listed so the preflight
+   * shows which environments have them. API only: the send and the outbox
+   * hold and release mail by the dates on the draft, never by these.
+   */
+  {
+    name: 'LETTER_IRL_ARRIVE_BY_ENABLED',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  {
+    name: 'LETTER_IRL_SCHEDULE_LEAD_DAYS',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  {
+    name: 'LETTER_IRL_SCHEDULE_HORIZON_DAYS',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
   {
     name: 'LETTER_IRL_GIFT_DAILY_SEND_CAP',
     requiredIn: 'production',

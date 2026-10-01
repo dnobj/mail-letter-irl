@@ -111,6 +111,9 @@ LETTER_IRL_GIFT_LANDING_BASE_URL=<the website the printed QR opens; default http
 # Letter previews drawn by our own renderer, printed from our PDF (#534, docs/letter-send-flow.md).
 # Read at preview time only; a letter prints with the version its draft recorded. API service only.
 LETTER_IRL_PRINT_RENDERER=<pdf to turn it on; unset keeps the legacy HTML>
+LETTER_IRL_ARRIVE_BY_ENABLED=<true to offer arrival dates on previews (#535); unset is off>
+LETTER_IRL_SCHEDULE_LEAD_DAYS=<business days from the mail date to the arrival date; default 7, production refuses less than 3>
+LETTER_IRL_SCHEDULE_HORIZON_DAYS=<calendar days ahead an arrival date may be; default 60>
 # Photo upload through the card in apps with no file store (#474, docs/deployment.md): off unless
 # explicitly true. API service only.
 LETTER_IRL_CARD_UPLOAD_ENABLED=<true to let the upload card send photos in Claude; unset keeps it off>

@@ -97,6 +97,10 @@
           "sendAsGift": {
             "type": "boolean",
             "description": "Set true only when the user asks to send this as their gift letter: it is free and adds a printed page with a card for the recipient. Leave it out otherwise; a gift letter is then used only if the balance cannot pay."
+          },
+          "arriveBy": {
+            "type": "string",
+            "description": "Optional. The date the mail should arrive by, YYYY-MM-DD, such as a birthday or an event. Letter IRL holds the mail and sends it to the printer in time; USPS does not guarantee First-Class dates. Omit it to mail as soon as possible."
           }
         }
       },
@@ -131,6 +135,39 @@
           "giftLettersAvailable": {
             "type": "integer",
             "description": "Unsent gift letters on the account, when there are any"
+          },
+          "schedule": {
+            "type": "object",
+            "description": "The arrival date asked for, when there was one (#535): when it goes to the printer and the dates on offer",
+            "properties": {
+              "arriveBy": {
+                "type": "string",
+                "description": "The date it should arrive by, YYYY-MM-DD in New York"
+              },
+              "mailOn": {
+                "type": "string",
+                "description": "The day it goes to the printer, YYYY-MM-DD"
+              },
+              "releasesAt": {
+                "type": "string",
+                "description": "ISO time it goes to the printer"
+              },
+              "earliestArrival": {
+                "type": "string",
+                "description": "The first arrival date on offer, YYYY-MM-DD"
+              },
+              "latestArrival": {
+                "type": "string",
+                "description": "The last arrival date on offer, YYYY-MM-DD"
+              }
+            },
+            "required": [
+              "arriveBy",
+              "mailOn",
+              "releasesAt",
+              "earliestArrival",
+              "latestArrival"
+            ]
           },
           "previewHtml": {
             "type": "string"
@@ -396,6 +433,10 @@
           "sendAsGift": {
             "type": "boolean",
             "description": "Set true only when the user asks to send this as their gift letter: it is free and adds a printed page with a card for the recipient. Leave it out otherwise; a gift letter is then used only if the balance cannot pay."
+          },
+          "arriveBy": {
+            "type": "string",
+            "description": "Optional. The date the mail should arrive by, YYYY-MM-DD, such as a birthday or an event. Letter IRL holds the mail and sends it to the printer in time; USPS does not guarantee First-Class dates. Omit it to mail as soon as possible."
           }
         }
       },
@@ -430,6 +471,39 @@
           "giftLettersAvailable": {
             "type": "integer",
             "description": "Unsent gift letters on the account, when there are any"
+          },
+          "schedule": {
+            "type": "object",
+            "description": "The arrival date asked for, when there was one (#535): when it goes to the printer and the dates on offer",
+            "properties": {
+              "arriveBy": {
+                "type": "string",
+                "description": "The date it should arrive by, YYYY-MM-DD in New York"
+              },
+              "mailOn": {
+                "type": "string",
+                "description": "The day it goes to the printer, YYYY-MM-DD"
+              },
+              "releasesAt": {
+                "type": "string",
+                "description": "ISO time it goes to the printer"
+              },
+              "earliestArrival": {
+                "type": "string",
+                "description": "The first arrival date on offer, YYYY-MM-DD"
+              },
+              "latestArrival": {
+                "type": "string",
+                "description": "The last arrival date on offer, YYYY-MM-DD"
+              }
+            },
+            "required": [
+              "arriveBy",
+              "mailOn",
+              "releasesAt",
+              "earliestArrival",
+              "latestArrival"
+            ]
           },
           "previewHtml": {
             "type": "string"
@@ -695,6 +769,10 @@
           "sendAsGift": {
             "type": "boolean",
             "description": "Set true only when the user asks to send this as their gift letter: it is free and adds a printed page with a card for the recipient. Leave it out otherwise; a gift letter is then used only if the balance cannot pay."
+          },
+          "arriveBy": {
+            "type": "string",
+            "description": "Optional. The date the mail should arrive by, YYYY-MM-DD, such as a birthday or an event. Letter IRL holds the mail and sends it to the printer in time; USPS does not guarantee First-Class dates. Omit it to mail as soon as possible."
           }
         }
       },
@@ -729,6 +807,39 @@
           "giftLettersAvailable": {
             "type": "integer",
             "description": "Unsent gift letters on the account, when there are any"
+          },
+          "schedule": {
+            "type": "object",
+            "description": "The arrival date asked for, when there was one (#535): when it goes to the printer and the dates on offer",
+            "properties": {
+              "arriveBy": {
+                "type": "string",
+                "description": "The date it should arrive by, YYYY-MM-DD in New York"
+              },
+              "mailOn": {
+                "type": "string",
+                "description": "The day it goes to the printer, YYYY-MM-DD"
+              },
+              "releasesAt": {
+                "type": "string",
+                "description": "ISO time it goes to the printer"
+              },
+              "earliestArrival": {
+                "type": "string",
+                "description": "The first arrival date on offer, YYYY-MM-DD"
+              },
+              "latestArrival": {
+                "type": "string",
+                "description": "The last arrival date on offer, YYYY-MM-DD"
+              }
+            },
+            "required": [
+              "arriveBy",
+              "mailOn",
+              "releasesAt",
+              "earliestArrival",
+              "latestArrival"
+            ]
           },
           "previewHtml": {
             "type": "string"
@@ -1720,6 +1831,10 @@
           "sendAsGift": {
             "type": "boolean",
             "description": "Set true only when the user asks to send this as their gift letter: it is free and adds a printed page with a card for the recipient. Leave it out otherwise; a gift letter is then used only if the balance cannot pay."
+          },
+          "arriveBy": {
+            "type": "string",
+            "description": "Optional. The date the mail should arrive by, YYYY-MM-DD, such as a birthday or an event. Letter IRL holds the mail and sends it to the printer in time; USPS does not guarantee First-Class dates. Omit it to mail as soon as possible."
           }
         }
       },
@@ -1754,6 +1869,39 @@
           "giftLettersAvailable": {
             "type": "integer",
             "description": "Unsent gift letters on the account, when there are any"
+          },
+          "schedule": {
+            "type": "object",
+            "description": "The arrival date asked for, when there was one (#535): when it goes to the printer and the dates on offer",
+            "properties": {
+              "arriveBy": {
+                "type": "string",
+                "description": "The date it should arrive by, YYYY-MM-DD in New York"
+              },
+              "mailOn": {
+                "type": "string",
+                "description": "The day it goes to the printer, YYYY-MM-DD"
+              },
+              "releasesAt": {
+                "type": "string",
+                "description": "ISO time it goes to the printer"
+              },
+              "earliestArrival": {
+                "type": "string",
+                "description": "The first arrival date on offer, YYYY-MM-DD"
+              },
+              "latestArrival": {
+                "type": "string",
+                "description": "The last arrival date on offer, YYYY-MM-DD"
+              }
+            },
+            "required": [
+              "arriveBy",
+              "mailOn",
+              "releasesAt",
+              "earliestArrival",
+              "latestArrival"
+            ]
           },
           "previewFrontHtml": {
             "type": "string",

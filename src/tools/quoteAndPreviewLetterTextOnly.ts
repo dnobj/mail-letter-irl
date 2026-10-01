@@ -25,6 +25,7 @@ import {
   createLetterDraftAndBuildOutput,
   type LetterQuoteOutput
 } from "./letterHelpers.js";
+import { previewSchedule } from "./arriveByInput.js";
 import { previewSendStep } from "./previewSendStep.js";
 
 // ============================================================================
@@ -38,6 +39,8 @@ interface QuoteAndPreviewLetterTextOnlyInput {
   signOff: string;
   /** Send as the account's gift letter (docs/gift-letters.md). */
   sendAsGift?: boolean;
+  /** The date it should arrive by, YYYY-MM-DD (#535); served only while the flag is on. */
+  arriveBy?: string;
 }
 
 // ============================================================================
@@ -63,6 +66,10 @@ async function handler(
     },
     "Processing quote_and_preview_letter (text-only)"
   );
+
+  // Arrive-by (#535): checked first, so a date that cannot be met is refused
+  // before any picture is fetched or address validated.
+  const schedule = previewSchedule(input.arriveBy, context);
 
   // Prepare sender (use saved return address if not provided)
   const { sender, usedSavedReturnAddress, savedReturnAddressNote } = await prepareSender(input, context);
@@ -114,6 +121,7 @@ async function handler(
     addressWarnings,
     gift,
     printLayout,
+    schedule,
     context
   });
 }

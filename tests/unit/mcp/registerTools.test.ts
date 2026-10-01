@@ -14,7 +14,7 @@
  * @see https://developers.openai.com/apps-sdk/plan/tools/
  */
 
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { widgetTemplateUri } from "../../../src/mcp/widgetUris.js";
 import { LetterIrlServer } from '../../../src/server.js';
 import {
@@ -22,6 +22,7 @@ import {
   buildToolMeta,
   buildToolSecuritySchemes,
   getZodInputShape,
+  getServedInputShape,
   getZodOutputShape,
   summarizeToolResult
 } from '../../../src/mcp/registerTools.js';
@@ -543,5 +544,52 @@ describe('OpenAI Apps SDK Submission Compliance', () => {
       expect(summary({ draftId: 'd', status: 'ready' })).toBe('That preview has not been sent and can still be sent.');
       expect(summary({ draftId: 'd', status: 'not_found' })).toBe('That preview was not found.');
     });
+  });
+});
+
+describe('arrive-by in the served schemas (#535)', () => {
+  const PREVIEWS = [
+    'quote_and_preview_letter',
+    'quote_and_preview_letter_with_header_image',
+    'quote_and_preview_letter_with_image',
+    'quote_and_preview_postcard'
+  ];
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('offers arriveBy on the four previews only while the flag is on', () => {
+    vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', 'true');
+    for (const name of PREVIEWS) {
+      expect(getServedInputShape(name), name).toHaveProperty('arriveBy');
+      expect(getServedInputShape(name)!.arriveBy.description).toContain('YYYY-MM-DD');
+    }
+    vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', '');
+    for (const name of PREVIEWS) {
+      const served = getServedInputShape(name)!;
+      expect(served, name).not.toHaveProperty('arriveBy');
+      // Everything else is served as it was.
+      expect(Object.keys(served)).toEqual(Object.keys(getZodInputShape(name)!).filter(key => key !== 'arriveBy'));
+    }
+  });
+
+  it('leaves every other tool exactly as declared, and declares arriveBy on no other', () => {
+    vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', '');
+    const tools = new LetterIrlServer().listTools(clientProfileNamed('chatgpt'));
+    for (const tool of tools) {
+      if (PREVIEWS.includes(tool.name)) continue;
+      expect(getServedInputShape(tool.name), tool.name).toBe(getZodInputShape(tool.name));
+      expect(getZodInputShape(tool.name), tool.name).not.toHaveProperty('arriveBy');
+    }
+  });
+
+  it("narrates a held preview's dates, and nothing extra for mail sent at once", () => {
+    const schedule = { arriveBy: '2026-10-16', mailOn: '2026-10-06', releasesAt: '2026-10-06T13:00:00.000Z', earliestArrival: '2026-10-13', latestArrival: '2026-11-30' };
+    for (const name of PREVIEWS) {
+      const held = summarizeToolResult(name, { lettersRequired: 1, schedule });
+      expect(held, name).toMatch(/ Scheduled: Goes to the printer Tue, Oct 6(, 2026)?, and aims to arrive by Fri, Oct 16(, 2026)?\. It is held until then, and USPS does not guarantee First-Class dates\.$/);
+      expect(summarizeToolResult(name, { lettersRequired: 1 }), name).not.toContain('Scheduled');
+    }
   });
 });

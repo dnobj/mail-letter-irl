@@ -544,6 +544,18 @@ describe('ENV_VAR_MANIFEST', () => {
     expect(APPROVED_LIVE_PROVIDERS).toEqual(['postgrid']);
   });
 
+  it('lists the arrive-by flag and its two settings, API only (#535)', () => {
+    for (const name of ['LETTER_IRL_ARRIVE_BY_ENABLED', 'LETTER_IRL_SCHEDULE_LEAD_DAYS', 'LETTER_IRL_SCHEDULE_HORIZON_DAYS']) {
+      expect(ENV_VAR_MANIFEST.find(entry => entry.name === name), name).toEqual({
+        name,
+        requiredIn: 'production',
+        advisory: true,
+        secret: false,
+        services: ['api']
+      });
+    }
+  });
+
   it('lists the print renderer flag, so the preflight shows where it is set (#534)', () => {
     // Advisory: absent is the intended production state until the owner
     // switches it on. API only: maintenance prints with the recorded version.

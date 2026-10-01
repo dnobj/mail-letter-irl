@@ -39,6 +39,7 @@ import { callingApp, type ClientProfile } from "../auth/clientProfiles.js";
 import { letterPacksPageUrl } from "../config/sendConfirmation.js";
 import { giftCardSummary, resolveGiftSendChoice, type GiftSendChoice } from "./giftSendChoice.js";
 import { giftLetterPageCopy } from "../services/giftCardRenderer.js";
+import { scheduleSentence, type PreviewSchedule, type PreviewScheduleOutput } from "./arriveByInput.js";
 import type { GiftCardContent, GiftCardState } from "../services/giftCardRenderer.js";
 import {
   DELIVERY_CLASS,
@@ -118,6 +119,8 @@ export interface LetterQuoteOutput {
   giftCard?: { state: GiftCardState; description: string };
   /** Unsent gift letters on the account, when there are any. */
   giftLettersAvailable?: number;
+  /** The arrival date asked for (#535), when there was one. */
+  schedule?: PreviewScheduleOutput;
 }
 
 // ============================================================================
@@ -721,6 +724,8 @@ export interface CreateLetterDraftParams {
   gift: GiftSendChoice;
   /** The letter as our renderer lays it out (layoutLetterForPreview), or undefined for the legacy HTML. */
   printLayout?: Layout;
+  /** The arrival date asked for, checked (previewSchedule, #535). */
+  schedule?: PreviewSchedule;
   context: ToolContext;
 }
 
@@ -817,6 +822,7 @@ export async function createLetterDraftAndBuildOutput(
     savedReturnAddressNote,
     gift,
     printLayout,
+    schedule,
     context
   } = params;
 
@@ -887,6 +893,8 @@ export async function createLetterDraftAndBuildOutput(
     isGiftSend: gift.isGift,
     // The letter prints with the renderer its preview was drawn with.
     rendererVersion: layout ? RENDERER_VERSION : undefined,
+    // Held until its mail date (#535).
+    schedule: schedule?.draft,
   });
 
   context.logger.info(
@@ -909,7 +917,8 @@ export async function createLetterDraftAndBuildOutput(
     reasonCannotSend: canSendNow ? undefined : "Not enough letters in your balance.",
     sendEligibility: previewSendEligibility(available, requiredCredits, "letter", gift.isGift, callingApp(context)),
     deliveryClass: DELIVERY_CLASS,
-    deliveryEstimate: DELIVERY_ESTIMATE,
+    // A held letter's card says when it goes to the printer, not "in 1-2 days".
+    deliveryEstimate: schedule ? scheduleSentence(schedule.output, context.now()) : DELIVERY_ESTIMATE,
     deliveryDisclaimer: DELIVERY_DISCLAIMER,
     draftId: draftResult.draftId,
     draftExpiresAt: draftResult.expiresAt.toISOString(),
@@ -923,6 +932,7 @@ export async function createLetterDraftAndBuildOutput(
     addressWarnings,
     giftCard: gift.card ? giftCardSummary(gift.card.state) : undefined,
     giftLettersAvailable: gift.giftLettersAvailable > 0 ? gift.giftLettersAvailable : undefined,
+    schedule: schedule?.output,
   };
 
   // Add address validation results

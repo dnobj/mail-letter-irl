@@ -36,6 +36,7 @@ import {
 } from "../services/previewService.js";
 import { callingApp } from "../auth/clientProfiles.js";
 import { giftCardSummary, longestSendCard, resolveGiftSendChoice } from "./giftSendChoice.js";
+import { previewSchedule, scheduleSentence, type PreviewScheduleOutput } from "./arriveByInput.js";
 import { previewSendStep } from "./previewSendStep.js";
 import {
   giftPostcardBlockSvg,
@@ -79,6 +80,8 @@ interface QuoteAndPreviewPostcardInput {
   imageUrl?: string;
   /** Send as the account's gift letter (docs/gift-letters.md). */
   sendAsGift?: boolean;
+  /** The date it should arrive by, YYYY-MM-DD (#535); served only while the flag is on. */
+  arriveBy?: string;
 }
 
 export interface QuoteAndPreviewPostcardOutput {
@@ -139,6 +142,8 @@ export interface QuoteAndPreviewPostcardOutput {
   giftCard?: { state: GiftCardState; description: string };
   /** Unsent gift letters on the account, when there are any. */
   giftLettersAvailable?: number;
+  /** The arrival date asked for (#535), when there was one. */
+  schedule?: PreviewScheduleOutput;
 }
 
 // ============================================================================
@@ -171,6 +176,10 @@ async function handler(
   context: ToolContext
 ): Promise<QuoteAndPreviewPostcardOutput> {
   const size: PostcardSize = input.size ?? '6x9';
+
+  // Arrive-by (#535): checked first, so a date that cannot be met is refused
+  // before the picture is fetched or an address validated.
+  const schedule = previewSchedule(input.arriveBy, context);
 
   // Track if we used the saved return address
   let usedSavedReturnAddress = false;
@@ -563,6 +572,8 @@ async function handler(
     recipientValidation: recipientValidation ? { status: recipientValidation.status } : undefined,
     isGiftSend: gift.isGift,
     rendererVersion: renderedHtml ? RENDERER_VERSION : undefined,
+    // Held until its mail date (#535).
+    schedule: schedule?.draft,
   });
 
   context.logger.info(
@@ -584,7 +595,8 @@ async function handler(
     reasonCannotSend: canSendNow ? undefined : "Not enough letters in your balance.",
     sendEligibility,
     deliveryClass: DELIVERY_CLASS,
-    deliveryEstimate: DELIVERY_ESTIMATE,
+    // A held postcard's card says when it goes to the printer (#535).
+    deliveryEstimate: schedule ? scheduleSentence(schedule.output, context.now()) : DELIVERY_ESTIMATE,
     deliveryDisclaimer: DELIVERY_DISCLAIMER,
     draftId: draftResult.draftId,
     draftExpiresAt: draftResult.expiresAt.toISOString(),
@@ -606,6 +618,7 @@ async function handler(
     addressWarnings,
     giftCard: gift.card ? giftCardSummary(gift.card.state, 'postcard') : undefined,
     giftLettersAvailable: gift.giftLettersAvailable > 0 ? gift.giftLettersAvailable : undefined,
+    schedule: schedule?.output,
   };
 
   // Add address validation results if available

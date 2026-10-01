@@ -177,40 +177,44 @@ describePostgres('arrive-by (migration 040, #535)', () => {
   }, 60_000);
 
   it('holds a sent letter until 09:00 New York time on its mail date, and the claim leaves it alone', async () => {
-    // The outbox's switch on, so "not claimed" is the hold, not a pause (#444).
+    // The outbox's switch on, so "not claimed" is the hold, not a pause (#444);
+    // put back in a finally, so a failure here cannot leak it.
     const savedSwitch = process.env.LETTER_IRL_OUTBOX_DISPATCH_ENABLED;
     process.env.LETTER_IRL_OUTBOX_DISPATCH_ENABLED = 'true';
-    const userId = await seedUser();
-    const dates = upcoming();
-    const draftId = await seedDraft(userId, dates);
+    try {
+      const userId = await seedUser();
+      const dates = upcoming();
+      const draftId = await seedDraft(userId, dates);
 
-    const result = await mailSend.createMailOrderFromDraft({ draftId, userId, mailType: 'letter' });
+      const result = await mailSend.createMailOrderFromDraft({ draftId, userId, mailType: 'letter' });
 
-    const letter = (await pool.query('SELECT * FROM letters WHERE letter_id = $1', [result.letter.letter_id])).rows[0];
-    expect([letter.arrive_by, letter.mail_on, letter.status]).toEqual([dates.arriveBy, dates.mailOn, 'queued']);
-    const release = schedule.dispatchAt(dates.mailOn);
-    const job = (await pool.query('SELECT * FROM letter_jobs WHERE letter_id = $1', [letter.letter_id])).rows[0];
-    expect(job.status).toBe('pending');
-    expect(new Date(job.next_attempt_at).toISOString()).toBe(release.toISOString());
-    // scheduled_at is a TIMESTAMP without a zone (001), written in the
-    // session's zone, so it is compared in SQL rather than through the
-    // process's own zone.
-    const same = await pool.query<{ same: boolean }>(
-      'SELECT scheduled_at = next_attempt_at::timestamp AS same FROM letter_jobs WHERE job_id = $1',
-      [job.job_id]
-    );
-    expect(same.rows[0].same).toBe(true);
-    expect(job.metadata).toMatchObject({ source: 'transactional-outbox', heldUntil: release.toISOString() });
-    // The value moved at the send, as for any letter.
-    const credits = (await pool.query('SELECT credits FROM users WHERE user_id = $1', [userId])).rows[0].credits;
-    expect(credits).toBe(8);
+      const letter = (await pool.query('SELECT * FROM letters WHERE letter_id = $1', [result.letter.letter_id])).rows[0];
+      expect([letter.arrive_by, letter.mail_on, letter.status]).toEqual([dates.arriveBy, dates.mailOn, 'queued']);
+      const release = schedule.dispatchAt(dates.mailOn);
+      const job = (await pool.query('SELECT * FROM letter_jobs WHERE letter_id = $1', [letter.letter_id])).rows[0];
+      expect(job.status).toBe('pending');
+      expect(new Date(job.next_attempt_at).toISOString()).toBe(release.toISOString());
+      // scheduled_at is a TIMESTAMP without a zone (001), written in the
+      // session's zone, so it is compared in SQL rather than through the
+      // process's own zone.
+      const same = await pool.query<{ same: boolean }>(
+        'SELECT scheduled_at = next_attempt_at::timestamp AS same FROM letter_jobs WHERE job_id = $1',
+        [job.job_id]
+      );
+      expect(same.rows[0].same).toBe(true);
+      expect(job.metadata).toMatchObject({ source: 'transactional-outbox', heldUntil: release.toISOString() });
+      // The value moved at the send, as for any letter.
+      const credits = (await pool.query('SELECT credits FROM users WHERE user_id = $1', [userId])).rows[0].credits;
+      expect(credits).toBe(8);
 
-    // The inline dispatch after a send claims by id: not before the release.
-    await expect(jobs.processLetterJob(job.job_id)).resolves.toMatchObject({ claimed: false });
-    const after = (await pool.query('SELECT status, attempts FROM letter_jobs WHERE job_id = $1', [job.job_id])).rows[0];
-    expect(after).toEqual({ status: 'pending', attempts: 0 });
-    if (savedSwitch === undefined) delete process.env.LETTER_IRL_OUTBOX_DISPATCH_ENABLED;
-    else process.env.LETTER_IRL_OUTBOX_DISPATCH_ENABLED = savedSwitch;
+      // The inline dispatch after a send claims by id: not before the release.
+      await expect(jobs.processLetterJob(job.job_id)).resolves.toMatchObject({ claimed: false });
+      const after = (await pool.query('SELECT status, attempts FROM letter_jobs WHERE job_id = $1', [job.job_id])).rows[0];
+      expect(after).toEqual({ status: 'pending', attempts: 0 });
+    } finally {
+      if (savedSwitch === undefined) delete process.env.LETTER_IRL_OUTBOX_DISPATCH_ENABLED;
+      else process.env.LETTER_IRL_OUTBOX_DISPATCH_ENABLED = savedSwitch;
+    }
   }, 60_000);
 
   it('makes an ordinary send due at once, with no dates', async () => {
