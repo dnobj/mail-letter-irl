@@ -51,6 +51,16 @@ export async function renderPdf(layout: Layout): Promise<Buffer> {
         doc.image(item.image.bytes, item.x, item.top, options);
         continue;
       }
+      if (item.kind === 'box') {
+        doc.save().roundedRect(item.x, item.top, item.width, item.height, item.radius).lineWidth(item.strokeWidth).stroke(item.stroke).restore();
+        continue;
+      }
+      if (item.kind === 'rects') {
+        doc.save();
+        for (const rect of item.rects) doc.rect(rect.x, rect.top, rect.width, rect.height);
+        doc.fill(item.fill).restore();
+        continue;
+      }
       for (const glyph of placeGlyphs(item)) {
         doc.save().translate(glyph.x, glyph.y).path(glyph.outline).fill('black').restore();
       }

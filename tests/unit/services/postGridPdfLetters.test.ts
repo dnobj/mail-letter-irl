@@ -1,13 +1,15 @@
 /**
  * Letters printed from our own PDF (#534 PR 2). A letter whose preview was
  * drawn by src/render (rendererVersion 'pdf-1') goes to PostGrid as a
- * multipart upload of the PDF; every other letter keeps the legacy HTML.
+ * multipart upload of the PDF, a gift send's card as its second page (PR 5);
+ * every other letter keeps the legacy HTML.
  */
 
 import { deflateSync } from 'node:zlib';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PostGridProvider } from '../../../src/services/providers/PostGridProvider.js';
-import { RENDERER_VERSION } from '../../../src/render/index.js';
+import { layoutGiftPage, layoutLetter, RENDERER_VERSION, renderPdf } from '../../../src/render/index.js';
+import { giftLetterPageCopy } from '../../../src/services/giftCardRenderer.js';
 
 const diagnostics = vi.hoisted(() => ({ written: [] as Array<{ level: string; event: string; fields: Record<string, unknown> }> }));
 vi.mock('../../../src/utils/diagnosticLog.js', async importOriginal => ({
@@ -33,6 +35,14 @@ const base = {
   message: 'Dear Sam,\n\nHappy birthday.\n\nWarmly,\nTest',
   layoutType: 'text_only' as const,
   rendererVersion: RENDERER_VERSION,
+};
+
+const GIFT_CARD = {
+  state: 'funded' as const,
+  code: 'K7M2QX9A',
+  url: 'https://letterirl.com/g/K7M2QX9A',
+  displayUrl: 'letterirl.com/g',
+  redeemBy: '2026-12-16',
 };
 
 function accepted() {
@@ -111,6 +121,8 @@ describe('letters printed from our own PDF (#534)', () => {
     const bytes = Buffer.from(await pdf.arrayBuffer());
     expect(bytes.subarray(0, 5).toString('latin1')).toBe('%PDF-');
     expect(bytes.toString('latin1')).toContain(`Letter IRL renderer ${RENDERER_VERSION}`);
+    // One page: a letter without a gift card has no second.
+    expect(bytes.toString('latin1')).toMatch(/\/Count 1\b/);
   });
 
   it('draws the header image into the PDF and prints in colour', async () => {
@@ -224,30 +236,45 @@ describe('letters printed from our own PDF (#534)', () => {
     }));
   });
 
-  it('prints a gift send on the legacy HTML for now, so its card is never dropped', async () => {
+  it('prints a gift send\'s card as the PDF\'s second page, with the code the send minted', async () => {
     const fetchMock = accepted();
     vi.stubGlobal('fetch', fetchMock);
-    const giftCard = {
-      state: 'funded' as const,
-      code: 'K7M2QX9A',
-      url: 'https://letterirl.com/g/K7M2QX9A',
-      displayUrl: 'letterirl.com/g',
-      redeemBy: '2026-12-16',
-    };
+    // pdfkit writes the creation time, and an id made from it, into the file.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-01T12:00:00Z'));
+    try {
+      await expect(provider().sendLetter({ ...base, giftCard: GIFT_CARD })).resolves.toMatchObject({ success: true });
+
+      const form = (fetchMock.mock.calls[0] as [string, RequestInit])[1].body as FormData;
+      expect(form.has('html')).toBe(false);
+      const printed = Buffer.from(await (form.get('pdf') as File).arrayBuffer());
+      // Exactly the letter, then the card for this code and this sender.
+      const expected = layoutLetter({ text: base.message, layoutType: 'text_only' });
+      expected.pages.push(layoutGiftPage(giftLetterPageCopy(GIFT_CARD, base.senderName)));
+      expect(printed.equals(await renderPdf(expected))).toBe(true);
+      expect(printed.toString('latin1')).toMatch(/\/Count 2\b/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('holds a gift send whose card cannot be drawn, and sends nothing', async () => {
+    const fetchMock = accepted();
+    vi.stubGlobal('fetch', fetchMock);
 
     diagnostics.written = [];
-    await expect(provider().sendLetter({ ...base, giftCard })).resolves.toMatchObject({ success: true });
+    // Longer than the largest QR symbol holds.
+    const giftCard = { ...GIFT_CARD, url: `https://letterirl.com/g/${'K'.repeat(4000)}` };
+    const result = await provider().sendLetter({ ...base, giftCard, metadata: { letterId: 'letter-gift' } });
 
-    // The fallback is logged whether or not the provider is verbose.
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('The gift card could not be laid out');
+    expect(result.metadata).toMatchObject({ submissionOutcome: 'ambiguous', retryable: false, errorClass: 'render_refused' });
     expect(diagnostics.written).toContainEqual(expect.objectContaining({
-      level: 'warn',
-      event: 'provider.postgrid.renderer_fallback',
-      fields: expect.objectContaining({ reason: 'gift_card', operation: 'create_letter' })
+      event: 'provider.postgrid.render_refused',
+      fields: expect.objectContaining({ reason: 'render', letterId: 'letter-gift' })
     }));
-    const body = JSON.parse((fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string);
-    // The gift page, with its code printed in groups (postGridGiftCard.test.ts).
-    expect(body.html).toContain('page-break-before: always');
-    expect(body.html).toContain('K7M2-QX9A');
   });
 
   it('holds a letter whose renderer this build does not know, and sends nothing', async () => {

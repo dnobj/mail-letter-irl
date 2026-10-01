@@ -31,10 +31,11 @@ import { writeDiagnostic } from '../../utils/diagnosticLog.js';
 import {
   buildGiftLetterPage,
   buildGiftPostcardBlock,
+  giftLetterPageCopy,
   type CardFragment
 } from '../giftCardRenderer.js';
 import { giftQrFormat } from '../../config/giftLetters.js';
-import { layoutLetter, PRINTABLE_RENDERER_VERSIONS, readImageDataUri, renderPdf } from '../../render/index.js';
+import { layoutGiftPage, layoutLetter, PRINTABLE_RENDERER_VERSIONS, readImageDataUri, renderPdf } from '../../render/index.js';
 
 /**
  * Our own refusal to draw a letter, before anything is sent to PostGrid
@@ -346,12 +347,8 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       if (renderer != null && !PRINTABLE_RENDERER_VERSIONS.has(renderer)) {
         throw new RenderRefusal('unknown_version', `This build cannot print renderer version "${renderer}".`);
       }
-      // Gift pages move onto the renderer in a later #534 PR. Until then a
-      // gift send prints on the legacy HTML, so its card is never dropped.
-      const usePdf = renderer != null && !params.giftCard;
-      if (renderer != null && params.giftCard) {
-        this.writeOperationDiagnostic('provider.postgrid.renderer_fallback', 'create_letter', { reason: 'gift_card' }, 'warn');
-      }
+      // A gift send prints its card as the PDF's second page (renderForPrint).
+      const usePdf = renderer != null;
 
       const to = this.buildContact(params.recipientName, params.recipientAddress);
       const from = this.buildContact(
@@ -804,6 +801,14 @@ export class PostGridProvider implements LetterFulfillmentProvider {
     }
     if (layout.overflowLines > 0) {
       throw new RenderRefusal('overflow', `The letter runs ${layout.overflowLines} line(s) past the page.`);
+    }
+    // A gift send's card, with the code the send minted, is the second page.
+    if (params.giftCard) {
+      try {
+        layout.pages.push(layoutGiftPage(giftLetterPageCopy(params.giftCard, params.senderName || '')));
+      } catch (error) {
+        throw new RenderRefusal('render', `The gift card could not be laid out: ${reason(error)}`);
+      }
     }
     try {
       return await renderPdf(layout);

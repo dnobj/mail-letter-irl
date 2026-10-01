@@ -70,10 +70,10 @@ async function handler(
   // Validate addresses
   validateAddresses(sender, input.recipient, context);
 
-  // A gift send prints on the legacy HTML (#534): decided first, so every
-  // check below is the one its print needs, read once so they all agree.
+  // Decided first: a gift send's card page draws the sender's name, which
+  // must print (#534). The renderer is read once, so every check agrees.
   const gift = await letterGiftChoice(input, context);
-  const renderer = gift.isGift ? 'html' : printRenderer();
+  const renderer = printRenderer();
 
   // Validate character limit
   validateCharacterLimitForLayout(input.bodyText, input.signOff, layoutType, context, renderer);
@@ -82,7 +82,8 @@ async function handler(
   validatePrintableLetter(
     { sender, recipient: input.recipient, bodyText: input.bodyText, signOff: input.signOff, senderIsSaved: usedSavedReturnAddress },
     context,
-    renderer
+    renderer,
+    gift.isGift ? sender.name : undefined
   );
 
   // Our renderer measures the page itself (#534)

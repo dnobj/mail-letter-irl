@@ -1142,9 +1142,9 @@
         '<div class="image-not-shown">Image not shown on this card</div>';
 
       /**
-       * A preview our renderer drew (#534) is the page itself: its body carries
-       * data-renderer, and each page is an <svg> child of the body. Every other
-       * preview, a legacy one or a gift send's, gets the mockup below.
+       * A preview our renderer drew (#534) is the pages themselves: its body
+       * carries data-renderer, and each page is an <svg> child of the body, a
+       * gift send's card the second. A legacy preview gets the mockup below.
        */
       function renderedPages(previewHtml) {
         if (typeof previewHtml !== "string" || !previewHtml.includes("data-renderer")) return null;
@@ -1177,6 +1177,10 @@
         ["height", value => NUMBER.test(value)],
         ["preserveaspectratio", value => value === "none"],
         ["fill", value => /^(#[0-9a-fA-F]{3,8}|none)$/.test(value)],
+        // A gift card's border (#534): a rounded, stroked rectangle.
+        ["rx", value => NUMBER.test(value)],
+        ["stroke", value => /^#[0-9a-fA-F]{3,8}$/.test(value)],
+        ["stroke-width", value => NUMBER.test(value)],
         ["font-family", value => /^[A-Za-z0-9 ',-]+$/.test(value)],
         ["font-size", value => NUMBER.test(value)],
         ["href", value => /^#[A-Za-z0-9_-]{1,64}$/.test(value) || /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(value)]

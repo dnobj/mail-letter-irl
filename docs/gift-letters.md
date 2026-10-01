@@ -60,11 +60,12 @@ An ordinary campaign must grant letters. A campaign with 0 credits used to be a 
 
 ### Print
 
-- **Letters:** a page break, then the card in the upper half of the second sheet. PostGrid prints its integrity QR and sequence ids in the bottom-left corner of letter pages, and the card stays clear of it. The second page is an extra B&W page (about +$0.10); the letter stays single-sided and black and white.
+- **Letters:** a page break, then the card at the top of the second sheet, ending about halfway down. PostGrid prints its integrity QR and sequence ids in the bottom-left corner of letter pages, and the card stays clear of it. The second page is an extra B&W page (about +$0.10); the letter stays single-sided and black and white.
 - **Postcards:** a strip at the foot of the left (message) half; PostGrid owns the right half. The message limit drops from 500 to 350 characters on a gift postcard.
 - **QR:** version 3 at error correction Q, 1.4in on letters and 0.95in on postcards, with a four-module quiet zone, drawn as inline SVG `<rect>` runs at render time from the code written into `letters.content.giftCard`. It is never stored as an image: `duplicateMailService` fingerprints mail by the MD5 of the image columns, and an image layout switches on colour printing.
 - **Fallback:** `LETTER_IRL_GIFT_QR_FORMAT=png` embeds a PNG instead, if a test print shows PostGrid's renderer mishandling inline SVG.
 - Print and preview draw the card with one renderer, [giftCardRenderer.ts](../src/services/giftCardRenderer.ts), so they cannot drift.
+- **On our renderer (#534):** with `LETTER_IRL_PRINT_RENDERER=pdf`, a letter's card is the PDF's second page, laid out by [giftPage.ts](../src/render/giftPage.ts) in Tinos, the letter's typeface. Its words come from `giftLetterPageCopy`, which the HTML takes them from too, and its QR is the same modules as vector rectangles from [qr.ts](../src/render/qr.ts). The preview shows that page as the second page of the letter card and the confirm page. The postcard strip stays on the HTML until postcards move to the renderer.
 - The **DIY** provider prints nothing itself, so it prints no card.
 
 ## Sending a gift letter
