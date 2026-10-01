@@ -2286,7 +2286,8 @@ sent with an arrival date whose mail date has not come (#535).
 **Steps:**
 
 1. [ ] Open the held letter's job page. Verify that **held for its mail date until** and **next attempt** both
-   show 09:00 New York time on its mail date, and that the page offers **Preview sending now…**.
+   show the same time, 09:00 New York time on its mail date (the page shows it in UTC in the tooltip), and that
+   the page offers **Preview sending now…**.
 2. [ ] Preview. Verify the letter, the account, the funding and the hold, and the warnings. Give a reason of
    at least 8 characters and execute. Verify that **next attempt** is now, **held for its mail date until** is
    unchanged, the letter is still `queued`, and `/audit` shows the run.

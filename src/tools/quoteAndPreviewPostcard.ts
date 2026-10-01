@@ -36,7 +36,13 @@ import {
 } from "../services/previewService.js";
 import { callingApp } from "../auth/clientProfiles.js";
 import { giftCardSummary, longestSendCard, resolveGiftSendChoice } from "./giftSendChoice.js";
-import { previewSchedule, scheduleSentence, type PreviewScheduleOutput } from "./arriveByInput.js";
+import {
+  previewArrivalWindow,
+  previewSchedule,
+  scheduleSentence,
+  type ArrivalWindow,
+  type PreviewScheduleOutput
+} from "./arriveByInput.js";
 import { previewSendStep } from "./previewSendStep.js";
 import {
   giftPostcardBlockSvg,
@@ -144,6 +150,8 @@ export interface QuoteAndPreviewPostcardOutput {
   giftLettersAvailable?: number;
   /** The arrival date asked for (#535), when there was one. */
   schedule?: PreviewScheduleOutput;
+  /** The arrival dates on offer (#535), while the feature is on: a card's date picker. */
+  arrivalWindow?: ArrivalWindow;
 }
 
 // ============================================================================
@@ -619,6 +627,7 @@ async function handler(
     giftCard: gift.card ? giftCardSummary(gift.card.state, 'postcard') : undefined,
     giftLettersAvailable: gift.giftLettersAvailable > 0 ? gift.giftLettersAvailable : undefined,
     schedule: schedule?.output,
+    arrivalWindow: previewArrivalWindow(context),
   };
 
   // Add address validation results if available

@@ -98,7 +98,8 @@ An unexpected failure is taken back whole and retried an hour later, three attem
 conflict with a send in progress is retried at the next run without counting against them. A refusal by
 the gate is not retried: an open dispute can take months, and the operator queues again when it settles.
 Held mail whose mail date comes before the run is due by then, and the run erases before it sends mail,
-so that erasure is refused: queue it again once the letter has mailed.
+so that erasure is refused: queue it again once the letter has mailed. The same goes for held mail an
+operator sends now (`job.dispatch_now`) between the preview and the run.
 
 ---
 

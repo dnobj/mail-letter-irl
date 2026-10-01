@@ -16,6 +16,16 @@ const previewScheduleSchema = {
   required: ["arriveBy", "mailOn", "releasesAt", "earliestArrival", "latestArrival"]
 } as const;
 
+const arrivalWindowSchema = {
+  type: "object",
+  description: "The arrival dates on offer, on every preview while arrival dates are on (#535): a card's date picker offers them",
+  properties: {
+    earliestArrival: { type: "string", description: "The first arrival date on offer, YYYY-MM-DD" },
+    latestArrival: { type: "string", description: "The last arrival date on offer, YYYY-MM-DD" }
+  },
+  required: ["earliestArrival", "latestArrival"]
+} as const;
+
 export const addressSchema: JsonSchema = {
   type: "object",
   required: ["name", "addressLine1", "city", "state", "postalCode", "country"],
@@ -205,6 +215,7 @@ export const quoteAndPreviewOutputSchema: JsonSchema = {
     },
     giftLettersAvailable: { type: "integer", description: "Unsent gift letters on the account, when there are any" },
     schedule: previewScheduleSchema,
+    arrivalWindow: arrivalWindowSchema,
     previewHtml: { type: "string" },
     lettersRequired: { type: "number", description: "Letters required from balance (always 1 for standard letter)" },
     canSendNow: { type: "boolean" },
@@ -683,6 +694,7 @@ export const quoteAndPreviewPostcardOutputSchema: JsonSchema = {
     },
     giftLettersAvailable: { type: "integer", description: "Unsent gift letters on the account, when there are any" },
     schedule: previewScheduleSchema,
+    arrivalWindow: arrivalWindowSchema,
     previewFrontHtml: { type: "string", description: "HTML preview of postcard front (image)" },
     previewBackHtml: { type: "string", description: "HTML preview of postcard back (message)" },
     previewHtml: { type: "string", description: "The postcard as it prints, front and back as SVG, when our renderer drew it (#534)" },

@@ -48,6 +48,13 @@ beforeEach(() => {
   vi.mocked(cancelScheduledMail).mockReset().mockResolvedValue(cancelled());
 });
 
+describe('the cards (#535)', () => {
+  it('may call it, for Cancel on a scheduled letter, as the model still may', () => {
+    expect(cancelScheduledMailTool.meta?.['openai/widgetAccessible']).toBe(true);
+    expect(cancelScheduledMailTool.meta?.['openai/visibility']).toBeUndefined();
+  });
+});
+
 describe('cancel_scheduled_mail (#535)', () => {
   it("cancels the caller's held mail and says the letter is back", async () => {
     await expect(run({ orderId: ` ${ORDER} `, confirm: true })).resolves.toEqual({

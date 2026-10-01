@@ -17,7 +17,10 @@ vi.mock("../../../src/services/letterJobService.js", async (importOriginal) => (
 import { findAdminCommand } from "../../../src/admin/commands/index.js";
 import { jobDispatchNowCommand } from "../../../src/admin/commands/jobs.js";
 import type { AdminSqlClient } from "../../../src/admin/database.js";
+import { renderLetter } from "../../../src/admin/pages/accounts.js";
 import { jobActionPanel } from "../../../src/admin/pages/commands.js";
+import { renderJobDetail } from "../../../src/admin/pages/operations.js";
+import { html } from "../../../src/admin/ui/html.js";
 import { isHeldMailJob, readJob, type JobView } from "../../../src/admin/queries/jobs.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -226,6 +229,37 @@ describe("held mail on the job page (#535)", () => {
     );
     expect(failed).toContain("/commands/job.retry/preview");
     expect(failed).not.toContain("job.dispatch_now");
+  });
+
+  it("still offers an ambiguous job its resolution, and nothing else", async () => {
+    const form = String(
+      jobActionPanel({
+        job: await jobView({ status: "held", provider_outcome: "ambiguous", attempts: 1, letter_status: "held" }),
+        mode: "full",
+      }),
+    );
+    expect(form).toContain("Resolve with provider evidence");
+    expect(form).toContain('action="/commands/job.resolve/preview"');
+    expect(form).toContain('name="target" value="job-held"');
+    expect(form).not.toContain("job.dispatch_now");
+    expect(form).not.toContain("job.retry");
+  });
+
+  it("shows the hold on the job page and the letter page, and a dash for any other job", async () => {
+    const stamp = `datetime="${RELEASE.toISOString().replace("T", " ").replace(/\.\d{3}Z$/, "Z")}"`;
+    const held = await jobView();
+    const jobPage = String(renderJobDetail({ job: held, actions: html`` }));
+    expect(jobPage).toContain(`<dt>held for its mail date until</dt><dd><time ${stamp}`);
+
+    const letterPage = String(
+      renderLetter({
+        detail: { letter: { letterId: "letter-1", status: "queued" }, userId: "auth0|u1", history: [], job: held, savedCopy: null } as never,
+      }),
+    );
+    expect(letterPage).toContain(`<dt>held for its mail date until</dt><dd><time ${stamp}`);
+
+    const ordinary = String(renderJobDetail({ job: await jobView({ held_until: null }), actions: html`` }));
+    expect(ordinary).toContain('<dt>held for its mail date until</dt><dd><span class="muted">—</span></dd>');
   });
 
   it("says execution is refused in read-only mode", async () => {
