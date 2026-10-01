@@ -43,7 +43,10 @@ It also strokes a white frame 1/8 in inside the page edge. `src/render/geometry.
 - The return address starts at 0.438 in and the recipient at 2.094 in, each as name, street lines, then "CITY, ST ZIP" with a comma after the city.
 - Accents survive ("JOSÉ MUÑOZ ÑANDÚ", "DEPTO 4º").
 
-A preview draws the addresses the same way (`ADDRESS_STAMP` in `geometry.ts`, `stampedAddressLines` in `previewService.ts`), so the page shows what prints. The addresses come from what we send, in upper case. Whether PostGrid standardises an address further before stamping it was not probed.
+A preview draws the addresses the same way (`ADDRESS_STAMP` in `geometry.ts`, `stampedAddressLines` in `previewService.ts`), so the page shows what prints. What was not probed:
+- The addresses come from what we send, upper-cased by JavaScript's rules (ß becomes SS). Whether PostGrid standardises an address further before stamping it is not known.
+- P6 had a three-line return address and a four-line recipient. Whether PostGrid moves the first baseline for other line counts is not known.
+- The preview asks for Open Sans, which no card or confirm page loads, so viewers see a sans-serif fallback, slightly narrower than the print.
 
 ## What it means
 

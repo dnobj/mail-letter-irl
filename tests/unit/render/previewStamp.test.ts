@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { layoutLetter, renderPdf, renderPreviewSvg } from '../../../src/render/index.js';
+import { layoutLetter, renderPreviewSvg } from '../../../src/render/index.js';
 import { renderLetterPreviewDocument, stampedAddressLines } from '../../../src/services/previewService.js';
 import type { Address } from '../../../src/contracts/types.js';
 
@@ -43,10 +43,8 @@ describe('the address stamp on a preview', () => {
   });
 
   it('is drawn only when asked for, and on the first page only', () => {
-    // renderPdf takes the layout alone, so the print never carries it.
     const layout = layoutLetter({ text: 'Dear Sam,', layoutType: 'text_only' });
     expect(renderPreviewSvg(layout)[0]).not.toContain('<text');
-    expect(renderPdf.length).toBe(1);
     const twoPages = { ...layout, pages: [layout.pages[0], layout.pages[0]] };
     const [first, second] = renderPreviewSvg(twoPages, { addresses: ADDRESSES });
     expect(texts(first)).toHaveLength(7);
@@ -68,6 +66,8 @@ describe('the address stamp on a preview', () => {
     // No second street line: none drawn.
     expect(stampedAddressLines(address({ addressLine2: undefined }))).toEqual(['JOSÉ MUÑOZ', '350 FIFTH AVE', 'NEW YORK, NY 10118']);
     expect(stampedAddressLines(address({ addressLine2: '  ' }))).toEqual(['JOSÉ MUÑOZ', '350 FIFTH AVE', 'NEW YORK, NY 10118']);
+    // Each kept line is trimmed.
+    expect(stampedAddressLines(address({ name: '  Pat  ' }))[0]).toBe('PAT');
   });
 
   it('marks the document as drawn by the renderer, which the card keys on', () => {

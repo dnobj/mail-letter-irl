@@ -461,7 +461,7 @@ function renderInlineImagePreview(input: LayoutPreviewInput): string {
 export function stampedAddressLines(address: Address): string[] {
   return [address.name, address.addressLine1, address.addressLine2, `${address.city}, ${address.state} ${address.postalCode}`]
     .filter((line): line is string => typeof line === 'string' && line.trim() !== '')
-    .map(line => line.toUpperCase());
+    .map(line => line.trim().toUpperCase());
 }
 
 /**
