@@ -2,6 +2,7 @@ import type { CommandOutcome, CommandPreview } from "../commands/runner.js";
 import { html, join, type SafeHtml } from "../ui/html.js";
 import { formatDate } from "../ui/format.js";
 import { csrfField } from "../ui/layout.js";
+import { isHeldMailJob, type JobView } from "../queries/jobs.js";
 import { commandLink, definitionList } from "./common.js";
 
 /** The preview page: what will happen, and the confirmation form. */
@@ -148,11 +149,12 @@ ${input.mode !== "full" ? html`<p class="muted">Read-only mode: previews work, e
 }
 
 /** Forms on the job detail page that lead to previews. */
-export function jobActionPanel(input: { jobId: string; status: string; providerOutcome: string; mode: string }): SafeHtml {
-  if (input.status === "held" && input.providerOutcome === "ambiguous") {
+export function jobActionPanel(input: { job: JobView; mode: string; now?: number }): SafeHtml {
+  const { job } = input;
+  if (job.status === "held" && job.providerOutcome === "ambiguous") {
     return html`<h2>Resolve with provider evidence</h2>
 <form method="get" action="/commands/job.resolve/preview" class="stack">
-  <input type="hidden" name="target" value="${input.jobId}">
+  <input type="hidden" name="target" value="${job.jobId}">
   <label for="decision">Decision</label>
   <select id="decision" name="decision" required>
     <option value="accepted">accepted: the provider shows the mail as created</option>
@@ -171,11 +173,20 @@ export function jobActionPanel(input: { jobId: string; status: string; providerO
 </form>
 ${input.mode !== "full" ? html`<p class="muted">Read-only mode: previews work, execution is refused.</p>` : ""}`;
   }
-  if (input.status === "failed" && input.providerOutcome === "definite_failure") {
+  if (job.status === "failed" && job.providerOutcome === "definite_failure") {
     return html`<h2>Retry</h2>
 <form method="get" action="/commands/job.retry/preview" class="inline">
-  <input type="hidden" name="target" value="${input.jobId}">
+  <input type="hidden" name="target" value="${job.jobId}">
   <button type="submit">Preview retry…</button>
+</form>
+${input.mode !== "full" ? html`<p class="muted">Read-only mode: previews work, execution is refused.</p>` : ""}`;
+  }
+  if (isHeldMailJob(job, input.now)) {
+    return html`<h2>Held for its mail date</h2>
+<p>The letter waits until its mail date. Sending it now puts it in the next hourly run, so it may arrive well before the date the customer chose.</p>
+<form method="get" action="/commands/job.dispatch_now/preview" class="inline">
+  <input type="hidden" name="target" value="${job.jobId}">
+  <button type="submit">Preview sending now…</button>
 </form>
 ${input.mode !== "full" ? html`<p class="muted">Read-only mode: previews work, execution is refused.</p>` : ""}`;
   }

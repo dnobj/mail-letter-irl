@@ -244,6 +244,7 @@ ${
         ["provider outcome", statusBadge(job.providerOutcome)],
         ["attempts", html`${job.attempts} of ${job.maxAttempts}`],
         ["next attempt", when(job.nextAttemptAt)],
+        ["held for its mail date until", when(job.heldUntil)],
         ["locked", when(job.lockedAt)],
         ["provider order id", yesNo(job.hasProviderOrderId)],
         ["dispatch started", when(job.providerDispatchStartedAt)],

@@ -179,6 +179,11 @@ Database constraints enforce one outbox row and one stable idempotency key per l
   - **A repeat** answers as already cancelled, and nothing more goes back.
   - **Cancelled letters free the duplicate guard**, so the same mail can be sent again.
   - **The outbox never brings a cancelled job back.** Its failure-before-dispatch path skips a job cancelled meanwhile, so a claimant that stalled past its lock cannot return it to pending.
+- **Sending held mail early:** the admin panel's **Send held mail now** (`job.dispatch_now`, `releaseHeldLetterJobAsAdmin` in `src/services/letterJobService.ts`) makes a held letter's job due at once, so the next hourly run sends it ([Admin Panel](admin-panel-guide.md)).
+  - **Only mail still held:** the job `pending`, `not_dispatched`, never attempted, carrying `metadata.heldUntil` and not yet due by the database's clock; the letter `queued`; a Pay & Send letter's order still `fulfillment_pending`. It locks the order, the letter and the job, in the outbox's order.
+  - **What moves:** `next_attempt_at` and `scheduled_at`, to now. `heldUntil` keeps the original time, because the admin's operator role cannot write the job's metadata. So a released Pay & Send order is not called stuck until 90 minutes after its original hold, as before.
+  - **The record:** a `commerce_operator_audit_events` row, `mail_job_release` (migration 042), with the hold that ended and the operator's reason hashed. A replay with the same key returns the first outcome.
+  - The customer can still cancel the letter until the run takes it.
 - **A passed mail date:** today counts as a mail date until noon New York time on a business day, so a draft previewed before the cutoff and sent after it has missed its date.
   - A prepaid or gift send is then refused with `SCHEDULE_PASSED`, before anything is written: "The day this letter was to go to the printer has passed…". The person previews again with a new date.
   - A Pay & Send checkout refuses such a draft before the charge. A paid order whose date passes before fulfilment mails as soon as it can instead, logging `send.schedule_missed`, because refusing after the charge would strand the money.

@@ -1089,6 +1089,12 @@ export class AdminJobRetryError extends Error {
   }
 }
 
+export class AdminJobReleaseError extends Error {
+  constructor(readonly code: 'not_found' | 'invalid_state' | 'idempotency_conflict') {
+    super(code);
+  }
+}
+
 export type AmbiguousMailDecision = 'accepted' | 'retry' | 'rejected';
 export type AmbiguousMailResolution =
   | 'provider_confirmed_accepted'
@@ -1554,6 +1560,131 @@ export async function retryLetterJobAsAdmin(params: {
           orderStatus: beforeOrderStatus
         }),
         JSON.stringify({ jobStatus: 'pending', providerOutcome: 'not_dispatched', orderStatus }),
+        JSON.stringify({ operatorReasonHash: reasonHash, expectedUserHash })]
+    );
+    return { jobId: params.jobId, replayed: false };
+  });
+}
+
+/**
+ * Release held mail early (#535, the admin panel's job.dispatch_now): its job
+ * becomes due now, so the next maintenance run sends it as an ordinary letter
+ * instead of waiting for its mail date. Only mail still held: the job pending,
+ * never attempted or dispatched, carrying its hold (metadata.heldUntil, which
+ * createLetterJobWithClient writes only for held mail) and not yet due, its
+ * letter queued, and a Pay & Send letter's order still awaiting fulfilment.
+ *
+ * Only next_attempt_at and scheduled_at move. heldUntil keeps the original
+ * time, since the operator role cannot write metadata; the stuck-order
+ * condition, which reads it, then counts from the later of the two. The
+ * operator audit row records the hold that ended. Locks in the outbox's order:
+ * the order, the letter, the job. The customer can still cancel the letter
+ * until the run takes it.
+ */
+export async function releaseHeldLetterJobAsAdmin(params: {
+  jobId: string;
+  expectedUserId: string;
+  actorId: string;
+  reason: string;
+  idempotencyKey: string;
+}): Promise<{ jobId: string; replayed: boolean }> {
+  return transaction(async client => {
+    const idempotencyKeyHash = createHash('sha256').update(params.idempotencyKey).digest('hex');
+    const actorHash = createHash('sha256').update(params.actorId).digest('hex');
+    const jobHash = createHash('sha256').update(params.jobId).digest('hex');
+    const reasonHash = createHash('sha256').update(params.reason).digest('hex');
+    const expectedUserHash = createHash('sha256').update(params.expectedUserId).digest('hex');
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [params.idempotencyKey]);
+    const replay = await client.query<{
+      operation: string;
+      target_type: string;
+      target_reference_hash: string;
+      actor_subject_hash: string;
+      operator_reason_hash: string | null;
+      expected_user_hash: string | null;
+    }>(
+      `SELECT operation, target_type, target_reference_hash, actor_subject_hash,
+              provider_evidence->>'operatorReasonHash' AS operator_reason_hash,
+              provider_evidence->>'expectedUserHash' AS expected_user_hash
+       FROM commerce_operator_audit_events
+       WHERE idempotency_key_hash = $1`,
+      [idempotencyKeyHash]
+    );
+    if (replay.rows[0]) {
+      const existing = replay.rows[0];
+      if (
+        existing.operation !== 'mail_job_release' ||
+        existing.target_type !== 'letter_job' ||
+        existing.target_reference_hash !== jobHash ||
+        existing.actor_subject_hash !== actorHash ||
+        existing.operator_reason_hash !== reasonHash ||
+        existing.expected_user_hash !== expectedUserHash
+      ) {
+        throw new AdminJobReleaseError('idempotency_conflict');
+      }
+      return { jobId: params.jobId, replayed: true };
+    }
+    const relation = await client.query<{ letter_id: string; funding_order_id: string | null }>(
+      `SELECT jobs.letter_id, letters.funding_order_id FROM letter_jobs AS jobs
+       JOIN letters ON letters.letter_id = jobs.letter_id WHERE jobs.job_id = $1`, [params.jobId]
+    );
+    const ids = relation.rows[0];
+    if (!ids) throw new AdminJobReleaseError('not_found');
+    if (ids.funding_order_id) {
+      const order = await client.query<{ status: string; user_id: string }>(
+        'SELECT status, user_id FROM orders WHERE order_id = $1 FOR UPDATE', [ids.funding_order_id]
+      );
+      const fundingOrder = order.rows[0];
+      if (!fundingOrder || fundingOrder.user_id !== params.expectedUserId) {
+        throw new AdminJobReleaseError('not_found');
+      }
+      if (fundingOrder.status !== 'fulfillment_pending') throw new AdminJobReleaseError('invalid_state');
+    }
+    const letter = await client.query<{ status: string; user_id: string; funding_order_id: string | null }>(
+      'SELECT status, user_id, funding_order_id FROM letters WHERE letter_id = $1 FOR UPDATE', [ids.letter_id]
+    );
+    // Due or not by the database's clock, the one the claim reads.
+    const job = await client.query<{
+      letter_id: string;
+      status: string;
+      provider_outcome: string;
+      attempts: number;
+      operator_resolution: string | null;
+      held_until: string | null;
+      next_attempt_at: Date;
+      still_held: boolean;
+    }>(
+      `SELECT letter_id, status, provider_outcome, attempts, operator_resolution,
+              metadata->>'heldUntil' AS held_until, next_attempt_at,
+              next_attempt_at > NOW() AS still_held
+       FROM letter_jobs WHERE job_id = $1 FOR UPDATE`, [params.jobId]
+    );
+    const current = job.rows[0];
+    const held = letter.rows[0];
+    if (!current || current.letter_id !== ids.letter_id ||
+        held?.funding_order_id !== ids.funding_order_id ||
+        held?.user_id !== params.expectedUserId ||
+        held?.status !== 'queued' ||
+        current.status !== 'pending' || current.provider_outcome !== 'not_dispatched' ||
+        current.attempts !== 0 || current.operator_resolution ||
+        !current.held_until || current.still_held !== true) {
+      throw new AdminJobReleaseError('invalid_state');
+    }
+    const released = await client.query<{ next_attempt_at: Date }>(
+      `UPDATE letter_jobs SET next_attempt_at = NOW(), scheduled_at = NOW(), updated_at = NOW()
+       WHERE job_id = $1 RETURNING next_attempt_at`,
+      [params.jobId]
+    );
+    await client.query(
+      `INSERT INTO commerce_operator_audit_events
+         (idempotency_key_hash, actor_subject_hash, operation, target_type,
+          target_reference_hash, reason_code, before_state, after_state, provider_evidence)
+       VALUES ($1, $2, 'mail_job_release', 'letter_job', $3, 'operator_released_hold', $4, $5, $6)`,
+      [idempotencyKeyHash,
+        actorHash,
+        jobHash,
+        JSON.stringify({ jobStatus: 'pending', heldUntil: current.held_until, nextAttemptAt: current.next_attempt_at }),
+        JSON.stringify({ jobStatus: 'pending', nextAttemptAt: released.rows[0]?.next_attempt_at ?? null }),
         JSON.stringify({ operatorReasonHash: reasonHash, expectedUserHash })]
     );
     return { jobId: params.jobId, replayed: false };

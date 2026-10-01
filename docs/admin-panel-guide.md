@@ -1,6 +1,6 @@
 # Letter IRL Admin Panel
 
-**Last updated:** September 24, 2026
+**Last updated:** October 1, 2026
 
 The admin panel is a separate Railway service in each environment, built from this repository with
 `Dockerfile.admin`, which the service selects through its `RAILWAY_DOCKERFILE_PATH` variable (Railway has
@@ -350,6 +350,7 @@ Commands available:
 | Acknowledge / resolve alert | `commerce_operational_alerts` | `transitionCommerceAlert` (advisory lock, state machine, hashed audit) |
 | Resolve ambiguous job | `letter_jobs` held on `ambiguous` | `resolveAmbiguousLetterJobAsAdmin` (locks order → letter → job, refuses compensated letters, resolves the alert) |
 | Retry failed job | `letter_jobs` in `failed / definite_failure` | `retryLetterJobAsAdmin` (same outbox row and provider key) |
+| Send held mail now | a letter held to arrive by a date, still waiting for its mail date (#535) | `releaseHeldLetterJobAsAdmin` (locks order → letter → job; the job becomes due at once, so the next hourly run sends it; audit operation `mail_job_release`) |
 | Refund unspent letters | a fulfilled `letter_pack` order | `refundPackLetters` (#323: letters leave first, then Stripe with the stored idempotency key; one per pack). Enabled only when `LETTER_IRL_PACK_REFUND_COMMAND_ENABLED=true` on the admin service; the flag has no effect on the API |
 | Repair a missing pack grant | a fulfilled `letter_pack` order from a reconciliation finding | `repairFulfilledPackGrant` (exact match of order, session, credits and amount; idempotent) |
 | Lift send block | a blocked account | `liftSendBlock` (refused while any dispute that justifies a block stands) |
@@ -399,6 +400,14 @@ that day only add to the count on the Limits page. The API also posts a one-line
 limit here if everything looks right, or leave it. Resolve the alert with a code such as
 `limit_reviewed` or `limit_raised`.
 
+**Held mail (#535).** A letter held to arrive by a date waits in the outbox until 09:00 New York time on its mail date.
+The job page and the letter page show that time as **held for its mail date until**, and the job's **next attempt** is
+the same until it is released. **Send held mail now**, on the job page, makes the job due at once, so the next hourly
+run sends it as an ordinary letter. Use it when the customer asks support to send it now, or to test held mail on
+development. The letter may then arrive well before the date the customer chose, and the customer can still cancel it
+until that run takes it. Only the job's next attempt moves: **held for its mail date until** keeps the original time,
+and the operator audit records the release.
+
 A `schedule_missed_mail_day` alert (warning, #535) names a letter held to arrive by a date that was still not at the
 printer at 18:00 New York time on its mail date, with that date. Check whether the outbox is paused, the provider is
 down, or the letter failed: its job ran out of retries or the provider refused it (the job page). Put that right. A
@@ -409,7 +418,7 @@ was returned; otherwise tell the customer, who can send it again. Resolve the al
 Accounts without an email address (issue #319) cannot be listed until `users.email` becomes nullable or a
 provisioning-failure record exists; the panel shows only rows that exist.
 
-Manual cases: `ADMIN-CMD-01` to `ADMIN-CMD-03`.
+Manual cases: `ADMIN-CMD-01` to `ADMIN-CMD-04`.
 
 ## Production gates
 

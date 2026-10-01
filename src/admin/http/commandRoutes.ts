@@ -244,7 +244,6 @@ export function registerCommandRoutes(
         mode: context.config.mode,
         suggestedResolution: alertType === ERASURE_FOLLOWUP_ALERT ? ERASURE_FOLLOWUP_RESOLUTION : "",
       }),
-    jobActions: (context, jobId, status, providerOutcome) =>
-      jobActionPanel({ jobId, status, providerOutcome, mode: context.config.mode }),
+    jobActions: (context, job) => jobActionPanel({ job, mode: context.config.mode }),
   };
 }

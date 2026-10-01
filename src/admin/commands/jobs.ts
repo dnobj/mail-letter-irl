@@ -1,13 +1,14 @@
 import { createHash } from "node:crypto";
 
 import {
+  releaseHeldLetterJobAsAdmin,
   resolveAmbiguousLetterJobAsAdmin,
   retryLetterJobAsAdmin,
   type AmbiguousMailDecision,
   type AmbiguousMailResolution,
 } from "../../services/letterJobService.js";
 import { AdminFoundationError } from "../errors.js";
-import { readJob } from "../queries/jobs.js";
+import { isHeldMailJob, readJob } from "../queries/jobs.js";
 import { mapDomainError, type CommandDefinition } from "./runner.js";
 
 const PROVIDERS = ["postgrid", "dummy", "diy"] as const;
@@ -189,6 +190,70 @@ export const jobRetryCommand: CommandDefinition<Record<string, never>> = {
     }
     try {
       const result = await retryLetterJobAsAdmin({
+        jobId,
+        expectedUserId: String(preview.summary.userId),
+        actorId: execution.actorId,
+        reason: execution.reason,
+        idempotencyKey: execution.idempotencyKey,
+      });
+      return { jobStatus: "pending", domainReplayed: result.replayed };
+    } catch (error) {
+      throw mapDomainError(error);
+    }
+  },
+};
+
+/**
+ * Send held mail now (#535): a letter held to arrive by a date becomes due at
+ * once, and the next hourly maintenance run sends it instead of waiting for
+ * its mail date. The service refuses anything but mail still held. The
+ * operator's reason travels with the confirmation and becomes the service's
+ * reason, recorded hashed in the operator audit.
+ */
+export const jobDispatchNowCommand: CommandDefinition<Record<string, never>> = {
+  name: "job.dispatch_now",
+  title: "Send held mail now",
+  action: "job.dispatch_now",
+  targetType: "letter_job",
+  transactional: false,
+  verb: () => "DISPATCH",
+  parseInput() {
+    return {};
+  },
+  async preview(client, jobId) {
+    const job = await readJob(client, jobId);
+    if (!job) throw new AdminFoundationError("ADMIN_NOT_FOUND");
+    if (!isHeldMailJob(job) || !job.heldUntil) throw new AdminFoundationError("ADMIN_INVALID_STATE");
+    return {
+      targetId: job.jobId,
+      summary: {
+        letterId: job.letterId,
+        userId: job.userId,
+        fundingOrderId: job.fundingOrderId,
+        heldUntil: job.heldUntil.toISOString(),
+        jobStatus: job.status,
+      },
+      expectedVersion: job.updatedAt.toISOString(),
+      display: [
+        ["Job", job.jobId],
+        ["Letter", job.letterId],
+        ["Account", job.userId],
+        ["Funding", job.fundingOrderId ? `Pay & Send order ${job.fundingOrderId}` : job.fundingType],
+        ["Held until", `${job.heldUntil.toISOString()} (09:00 New York time on its mail date)`],
+      ],
+      warnings: [
+        "The letter goes to the printer at the next hourly maintenance run instead of on its mail date, so it may arrive well before the date the customer chose.",
+        "The customer can still cancel it until that run takes it.",
+        "The reason you give on this page is recorded with the release.",
+      ],
+    };
+  },
+  async execute(execution, jobId, _input, preview) {
+    if (execution.reason.length < 8 || execution.reason.length > 500) {
+      throw new AdminFoundationError("ADMIN_INVALID_REQUEST");
+    }
+    try {
+      const result = await releaseHeldLetterJobAsAdmin({
         jobId,
         expectedUserId: String(preview.summary.userId),
         actorId: execution.actorId,

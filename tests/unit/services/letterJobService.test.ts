@@ -27,6 +27,7 @@ import {
   lettersWaitingBehindPause,
   processDueLetterJobs,
   processLetterJob,
+  releaseHeldLetterJobAsAdmin,
   resolveAmbiguousLetterJobAsAdmin,
   retryLetterJobAsAdmin,
   submitToProviderOnce,
@@ -904,5 +905,179 @@ describe('createLetterJobWithClient: arrive-by holds (#535)', () => {
     const insert = calls.find(call => call.sql.includes('INSERT INTO letter_jobs'))!;
     expect(insert.params[4]).toBeNull();
     expect(JSON.parse(insert.params[3] as string)).toEqual({ source: 'transactional-outbox' });
+  });
+});
+
+describe('releaseHeldLetterJobAsAdmin: sending held mail now (#535)', () => {
+  const sha = (value: string) => createHash('sha256').update(value).digest('hex');
+  const params = {
+    jobId: 'job-held',
+    expectedUserId: 'user-1',
+    actorId: 'admin-1',
+    reason: 'customer asked to send it now',
+    idempotencyKey: 'release-held-001'
+  };
+  const HELD_JOB = {
+    letter_id: 'letter-1',
+    status: 'pending',
+    provider_outcome: 'not_dispatched',
+    attempts: 0,
+    operator_resolution: null,
+    held_until: '2026-10-16T13:00:00.000Z',
+    next_attempt_at: new Date('2026-10-16T13:00:00.000Z'),
+    still_held: true
+  };
+  const RELEASED_AT = new Date('2026-10-01T15:00:00.000Z');
+
+  interface Script {
+    fundingOrderId?: string | null;
+    order?: { status: string; user_id: string } | null;
+    letter?: Record<string, unknown>;
+    job?: Record<string, unknown>;
+    replay?: Record<string, unknown>;
+  }
+
+  function heldClient(script: Script = {}) {
+    const calls: Array<{ sql: string; params: unknown[] }> = [];
+    const fundingOrderId = script.fundingOrderId ?? null;
+    clientQuery.mockImplementation(async (sql: string, values: unknown[] = []) => {
+      calls.push({ sql, params: values });
+      if (sql.includes('FROM commerce_operator_audit_events')) return { rows: script.replay ? [script.replay] : [] };
+      if (sql.includes('SELECT jobs.letter_id')) {
+        return { rows: [{ letter_id: 'letter-1', funding_order_id: fundingOrderId }] };
+      }
+      if (sql.startsWith('SELECT status, user_id FROM orders')) {
+        return { rows: script.order === null ? [] : [script.order ?? { status: 'fulfillment_pending', user_id: 'user-1' }] };
+      }
+      if (sql.startsWith('SELECT status, user_id, funding_order_id FROM letters')) {
+        return { rows: [{ status: 'queued', user_id: 'user-1', funding_order_id: fundingOrderId, ...script.letter }] };
+      }
+      if (sql.includes('FROM letter_jobs WHERE job_id = $1 FOR UPDATE')) return { rows: [{ ...HELD_JOB, ...script.job }] };
+      if (sql.startsWith('UPDATE letter_jobs')) return { rows: [{ next_attempt_at: RELEASED_AT }] };
+      return { rows: [] };
+    });
+    return calls;
+  }
+  const writes = (calls: Array<{ sql: string }>) =>
+    calls.filter(call => /^\s*(UPDATE|INSERT|DELETE)/.test(call.sql)).map(call => call.sql.trim().split(/\s+/).slice(0, 3).join(' '));
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.transaction.mockImplementation(
+      async (callback: (client: { query: typeof clientQuery }) => Promise<unknown>) => callback({ query: clientQuery })
+    );
+  });
+
+  it('makes the job due now, moves nothing else, and records the release', async () => {
+    const calls = heldClient();
+
+    await expect(releaseHeldLetterJobAsAdmin(params)).resolves.toEqual({ jobId: 'job-held', replayed: false });
+
+    // Held or not by the database's clock, and by the hold the job carries.
+    const read = calls.find(call => call.sql.includes('FROM letter_jobs WHERE job_id = $1 FOR UPDATE'))!;
+    expect(read.sql).toContain("metadata->>'heldUntil' AS held_until");
+    expect(read.sql).toContain('next_attempt_at > NOW() AS still_held');
+    const update = calls.find(call => call.sql.startsWith('UPDATE letter_jobs'))!;
+    expect(update.sql.replace(/\s+/g, ' ')).toBe(
+      'UPDATE letter_jobs SET next_attempt_at = NOW(), scheduled_at = NOW(), updated_at = NOW() WHERE job_id = $1 RETURNING next_attempt_at'
+    );
+    expect(update.params).toEqual(['job-held']);
+    // Nothing else: not the letter, not the order, not the job's metadata.
+    expect(writes(calls)).toEqual(['UPDATE letter_jobs SET', 'INSERT INTO commerce_operator_audit_events']);
+
+    const audit = calls.find(call => call.sql.includes('INSERT INTO commerce_operator_audit_events'))!;
+    expect(audit.sql).toContain("VALUES ($1, $2, 'mail_job_release', 'letter_job', $3, 'operator_released_hold', $4, $5, $6)");
+    expect(audit.params.slice(0, 3)).toEqual([sha('release-held-001'), sha('admin-1'), sha('job-held')]);
+    expect(JSON.parse(audit.params[3] as string)).toEqual({
+      jobStatus: 'pending',
+      heldUntil: '2026-10-16T13:00:00.000Z',
+      nextAttemptAt: '2026-10-16T13:00:00.000Z'
+    });
+    expect(JSON.parse(audit.params[4] as string)).toEqual({ jobStatus: 'pending', nextAttemptAt: RELEASED_AT.toISOString() });
+    expect(JSON.parse(audit.params[5] as string)).toEqual({
+      operatorReasonHash: sha('customer asked to send it now'),
+      expectedUserHash: sha('user-1')
+    });
+  });
+
+  it("takes the idempotency key's lock first, then locks the order, the letter and the job, in the outbox's order", async () => {
+    const calls = heldClient({ fundingOrderId: 'order-1' });
+
+    await releaseHeldLetterJobAsAdmin(params);
+
+    expect(calls[0]).toEqual({ sql: 'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', params: ['release-held-001'] });
+    const at = (pattern: string) => calls.findIndex(call => call.sql.includes(pattern));
+    const order = at('FROM orders WHERE order_id = $1 FOR UPDATE');
+    const letterLock = at('FROM letters WHERE letter_id = $1 FOR UPDATE');
+    const jobLock = at('FROM letter_jobs WHERE job_id = $1 FOR UPDATE');
+    expect(order).toBeGreaterThan(at('FROM commerce_operator_audit_events'));
+    expect(order).toBeLessThan(letterLock);
+    expect(letterLock).toBeLessThan(jobLock);
+    expect(jobLock).toBeLessThan(at('UPDATE letter_jobs'));
+    expect(calls[order].params).toEqual(['order-1']);
+  });
+
+  it('releases Pay & Send held mail only while its order awaits fulfilment, and only for its account', async () => {
+    let calls = heldClient({ fundingOrderId: 'order-1', order: { status: 'refund_pending', user_id: 'user-1' } });
+    await expect(releaseHeldLetterJobAsAdmin(params)).rejects.toMatchObject({ code: 'invalid_state' });
+    expect(writes(calls)).toEqual([]);
+
+    calls = heldClient({ fundingOrderId: 'order-1', order: { status: 'fulfillment_pending', user_id: 'someone-else' } });
+    await expect(releaseHeldLetterJobAsAdmin(params)).rejects.toMatchObject({ code: 'not_found' });
+    expect(writes(calls)).toEqual([]);
+
+    calls = heldClient({ fundingOrderId: 'order-1', order: null });
+    await expect(releaseHeldLetterJobAsAdmin(params)).rejects.toMatchObject({ code: 'not_found' });
+    expect(writes(calls)).toEqual([]);
+  });
+
+  it.each([
+    ['due already: released, or past its 09:00', { job: { still_held: false } }],
+    ['not held mail at all', { job: { held_until: null } }],
+    ['attempted', { job: { attempts: 1 } }],
+    ['taken by the outbox', { job: { status: 'processing' } }],
+    ['dispatched', { job: { provider_outcome: 'dispatching' } }],
+    ['resolved by an operator', { job: { operator_resolution: 'account_erased' } }],
+    ['the job of another letter', { job: { letter_id: 'letter-2' } }],
+    ['cancelled', { letter: { status: 'cancelled' } }],
+    ["another account's", { letter: { user_id: 'someone-else' } }],
+    ['funded differently since', { letter: { funding_order_id: 'order-9' } }],
+  ])('refuses mail that is %s, writing nothing', async (_label, script) => {
+    const calls = heldClient(script as Script);
+    await expect(releaseHeldLetterJobAsAdmin(params)).rejects.toMatchObject({ code: 'invalid_state' });
+    expect(writes(calls)).toEqual([]);
+  });
+
+  it('refuses a job that does not exist', async () => {
+    clientQuery.mockImplementation(async () => ({ rows: [] }));
+    await expect(releaseHeldLetterJobAsAdmin(params)).rejects.toMatchObject({ code: 'not_found' });
+  });
+
+  it('replays an exact release without writing, and refuses the key reused for anything else', async () => {
+    const replay = {
+      operation: 'mail_job_release',
+      target_type: 'letter_job',
+      target_reference_hash: sha('job-held'),
+      actor_subject_hash: sha('admin-1'),
+      operator_reason_hash: sha('customer asked to send it now'),
+      expected_user_hash: sha('user-1')
+    };
+    const calls = heldClient({ replay });
+    await expect(releaseHeldLetterJobAsAdmin(params)).resolves.toEqual({ jobId: 'job-held', replayed: true });
+    expect(writes(calls)).toEqual([]);
+
+    for (const different of [
+      { operation: 'mail_job_retry' },
+      { target_type: 'order' },
+      { target_reference_hash: sha('job-other') },
+      { actor_subject_hash: sha('admin-2') },
+      { operator_reason_hash: sha('another reason') },
+      { expected_user_hash: sha('user-2') },
+    ]) {
+      heldClient({ replay: { ...replay, ...different } });
+      await expect(releaseHeldLetterJobAsAdmin(params), JSON.stringify(different)).rejects.toMatchObject({
+        code: 'idempotency_conflict'
+      });
+    }
   });
 });

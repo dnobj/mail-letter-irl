@@ -8,7 +8,7 @@ import { listRecentAccounts, readAccountDetail, readLetterDetail, revealAccountE
 import { listAlerts, listRecentWebhookEvents, listUnmatchedWebhookEvents, parseAlertFilter, readAlert } from "../queries/alerts.js";
 import { listAuditEvents, listCommandRuns, listOperatorAuditEvents, readCommandRun } from "../queries/audit.js";
 import { listBlockedAccounts, listDisputes } from "../queries/disputes.js";
-import { listAttentionJobs, listRecentJobs, readJob } from "../queries/jobs.js";
+import { listAttentionJobs, listRecentJobs, readJob, type JobView } from "../queries/jobs.js";
 import { lookupIdentifier, normalizeLookupTerm } from "../queries/lookup.js";
 import { readMaintenanceHealth } from "../queries/maintenance.js";
 import { readOrderDetail } from "../queries/orders.js";
@@ -28,7 +28,7 @@ import { AdminRouter } from "./router.js";
 export interface RouteExtensions {
   /** Per-target action panels supplied by the command slices. */
   alertActions?: (context: RequestContext, alertId: string, status: string, alertType: string) => SafeHtml;
-  jobActions?: (context: RequestContext, jobId: string, status: string, providerOutcome: string) => SafeHtml;
+  jobActions?: (context: RequestContext, job: JobView) => SafeHtml;
   orderActions?: (context: RequestContext, detail: OrderDetail) => SafeHtml | Promise<SafeHtml>;
   accountActions?: (context: RequestContext, detail: AccountDetail) => SafeHtml | Promise<SafeHtml>;
 }
@@ -151,9 +151,7 @@ export function registerReadRoutes(
   router.add("GET", "/jobs/:jobId", async (context) => {
     const job = await context.read((client) => readJob(client, context.params.jobId));
     if (!job) notFound();
-    const actions = extensions.jobActions
-      ? extensions.jobActions(context, job.jobId, job.status, job.providerOutcome)
-      : EMPTY_ACTIONS;
+    const actions = extensions.jobActions ? extensions.jobActions(context, job) : EMPTY_ACTIONS;
     return context.render(`Job ${job.jobId}`, renderJobDetail({ job, actions }));
   }, { name: "job" });
 

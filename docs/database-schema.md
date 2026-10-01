@@ -536,8 +536,10 @@ account erasure that raise them.
 The older operator audit table from the commerce recovery work: hashed idempotency key, actor and
 target, a reason code, before and after state, provider evidence and an outcome. `retention_expires_at`
 marks two years from the row (#395); nothing enforces it yet, and the purge is designed under #398.
-The admin panel writes `admin_audit_events` instead; this table is kept for the four operations it
-recorded.
+The admin panel writes `admin_audit_events` for every command; the services behind some commands also
+write a row here: a retried or released mail job, a resolved ambiguous job or reservation, an alert
+transition, a pack refund. `valid_commerce_operator_audit_operation` lists them; 042 added
+`mail_job_release` (#535).
 
 ### commerce_pack_refunds
 
@@ -757,6 +759,7 @@ Production provisioning and the first production connection remain separate owne
 | 39 | 039_renderer_version.sql | `letter_drafts.renderer_version`: the renderer that drew a draft's preview, NULL or `pdf-1` (#534). The reader role's column grants leave it out, and the operator role's table-wide SELECT covers it; no provisioning re-run |
 | 40 | 040_arrive_by.sql | `arrive_by` and `mail_on` on `letter_drafts` and `letters`: mail held to arrive by a date (#535), with the pair and order CHECKs and `idx_letters_held_mail_on`. DATEs are read as 'YYYY-MM-DD' strings (`src/db/dateParser.ts`). No provisioning re-run, as for 039 |
 | 41 | 041_missed_mail_day_alert.sql | The `schedule_missed_mail_day` alert type (#535), restated inside the `to_regclass` guard as 038 does, and a partial unique index on its letter (`idx_commerce_alerts_missed_mail_day_letter`) so it is raised once per letter. No provisioning re-run: the roles read the alerts table whole |
+| 42 | 042_mail_job_release_audit.sql | The operator audit operation `mail_job_release` (#535), written when the admin panel sends held mail early (`job.dispatch_now`). Restated inside the `to_regclass` guard as 029 does. No provisioning re-run: the operator role inserts into the table whole, and the release updates only `letter_jobs` columns already granted |
 
 ---
 

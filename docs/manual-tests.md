@@ -2275,6 +2275,29 @@ outside effect the owner should trigger knowingly. Step 4 not run.
 **Pass criteria:** A retry needs the exact state, a live elevation and full mode; each refusal is a stable
 code and an audit row.
 
+### ADMIN-CMD-04 — Send held mail now, and the refusals
+
+**Status:** Not run. A released letter goes to whatever provider development routes to at the next
+maintenance run, an outside effect the owner should trigger knowingly.
+
+**Preconditions:** Full mode; arrival dates on in development (`LETTER_IRL_ARRIVE_BY_ENABLED`); a letter
+sent with an arrival date whose mail date has not come (#535).
+
+**Steps:**
+
+1. [ ] Open the held letter's job page. Verify that **held for its mail date until** and **next attempt** both
+   show 09:00 New York time on its mail date, and that the page offers **Preview sending now…**.
+2. [ ] Preview. Verify the letter, the account, the funding and the hold, and the warnings. Give a reason of
+   at least 8 characters and execute. Verify that **next attempt** is now, **held for its mail date until** is
+   unchanged, the letter is still `queued`, and `/audit` shows the run.
+3. [ ] After the next maintenance run, verify that the provider accepted the letter (PostGrid test mode in
+   development).
+4. [ ] Open the job page again. Verify that it no longer offers sending now, and that
+   `/commands/job.dispatch_now/preview?target=<job>` answers `409 ADMIN_INVALID_STATE`.
+
+**Pass criteria:** Only held mail can be sent early, with a live elevation, a reason and an audit row; the
+hold's original time stays on record.
+
 ### ADMIN-STRIPE-01 — Reconciliation in development against test-mode data
 
 **Preconditions:** The development panel has a **restricted** test-mode Stripe key

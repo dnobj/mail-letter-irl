@@ -26,6 +26,25 @@ const JOB_JOINED_SQL = `
   FROM letter_jobs j JOIN letters l ON l.letter_id = j.letter_id
 `;
 
+/**
+ * Mail still waiting for its mail date (#535): the job pending, never
+ * attempted or dispatched, carrying its hold and not yet due, its letter
+ * queued. The page offers job.dispatch_now only then; the service checks the
+ * same again under its locks, by the database's clock.
+ */
+export function isHeldMailJob(job: JobView, now: number = Date.now()): boolean {
+  return (
+    job.status === "pending" &&
+    job.providerOutcome === "not_dispatched" &&
+    job.attempts === 0 &&
+    job.letterStatus === "queued" &&
+    !job.operatorResolution &&
+    job.heldUntil !== null &&
+    job.nextAttemptAt !== null &&
+    job.nextAttemptAt.getTime() > now
+  );
+}
+
 function toJobView(row: JobJoinedRow): JobView {
   return {
     ...toJobDetail(row),

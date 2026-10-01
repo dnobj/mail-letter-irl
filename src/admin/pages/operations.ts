@@ -145,6 +145,7 @@ ${definitionList([
   ["attempts", html`${job.attempts} of ${job.maxAttempts}`],
   ["scheduled", when(job.scheduledAt)],
   ["next attempt", when(job.nextAttemptAt)],
+  ["held for its mail date until", when(job.heldUntil)],
   ["locked", when(job.lockedAt)],
   ["provider order id", yesNo(job.hasProviderOrderId)],
   ["dispatch started", when(job.providerDispatchStartedAt)],

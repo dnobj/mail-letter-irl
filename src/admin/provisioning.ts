@@ -40,9 +40,15 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  *
  * 041 adds the alert type schedule_missed_mail_day (#535). The roles read
  * commerce_operational_alerts whole, so nothing to re-run.
+ *
+ * 042 adds the operator audit operation mail_job_release (#535), which
+ * job.dispatch_now writes. The operator role inserts into
+ * commerce_operator_audit_events table-wide, and the release updates only
+ * letter_jobs columns already in its list (next_attempt_at, scheduled_at,
+ * updated_at), so nothing to re-run.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
-  "041_missed_mail_day_alert.sql";
+  "042_mail_job_release_audit.sql";
 
 export interface AdminProvisioningArguments {
   environment: "development" | "production";
