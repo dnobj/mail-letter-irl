@@ -494,7 +494,7 @@ describe('returnGiftLetterForFailedSendWithClient', () => {
     const returned = await returnGiftLetterForFailedSendWithClient(client, { letterId: 'letter-1', userId: 'user-1', failureCode: 'PROVIDER_REJECTED' });
 
     expect(returned).toBe(1);
-    expect(ran("void_reason = 'send_failed'")[0].params).toEqual(['K7M2QX9A']);
+    expect(ran("SET status = 'void'")[0].params).toEqual(['K7M2QX9A', 'send_failed']);
     const insert = ran('INSERT INTO gift_letters')[0];
     expect(insert.sql).toContain("'send_failed'");
     expect(insert.params.slice(0, 3)).toEqual(['user-1', 3, 'letter-1']);
@@ -524,6 +524,22 @@ describe('returnGiftLetterForFailedSendWithClient', () => {
     expect(ran('INSERT INTO gift_letters')[0].params[7]).toBeNull();
   });
 
+  it("voids a cancelled letter's code as cancelled, and returns its gift under the same record (#535)", async () => {
+    on('SELECT * FROM gift_letters', [gift({ status: 'consumed', generations_remaining: 3 })]);
+    on('SELECT * FROM gift_codes WHERE letter_id', [{ code: 'K7M2QX9A', status: 'issued' }]);
+    const returned = await returnGiftLetterForFailedSendWithClient(client, {
+      letterId: 'letter-1',
+      userId: 'user-1',
+      failureCode: 'cancelled_by_customer',
+      cause: 'cancelled'
+    });
+
+    expect(returned).toBe(1);
+    expect(ran("SET status = 'void'")[0].params).toEqual(['K7M2QX9A', 'send_cancelled']);
+    // The same exactly-once record as a failed send, so a replay of either returns nothing.
+    expect(ran('INSERT INTO gift_letters')[0].sql).toContain("'send_failed'");
+  });
+
   it('returns nothing on a replay', async () => {
     on("source = 'send_failed' AND source_reference_id", [{ gift_id: 'returned' }]);
     expect(await returnGiftLetterForFailedSendWithClient(client, { letterId: 'letter-1', userId: 'user-1', failureCode: 'X' })).toBe(0);
@@ -542,7 +558,7 @@ describe('returnGiftLetterForFailedSendWithClient', () => {
     on('SELECT * FROM gift_letters', [gift({ status: 'consumed', source_reversed_at: PAST })]);
     on('SELECT * FROM gift_codes WHERE letter_id', [{ code: 'K7M2QX9A', status: 'issued' }]);
     expect(await returnGiftLetterForFailedSendWithClient(client, { letterId: 'letter-1', userId: 'user-1', failureCode: 'X' })).toBe(0);
-    expect(ran("void_reason = 'send_failed'")).toHaveLength(1);
+    expect(ran("SET status = 'void'")).toHaveLength(1);
     expect(ran('INSERT INTO gift_letters')).toHaveLength(0);
   });
 

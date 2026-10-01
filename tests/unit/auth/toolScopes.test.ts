@@ -25,7 +25,9 @@ describe("tool scope enforcement", () => {
     // The preview card's read of its own draft (#474).
     ["get_draft_status", "mail:read"],
     // A preview's arrival date, changed (#535): drafting, and it sends nothing.
-    ["set_arrival_date", "mail:draft"]
+    ["set_arrival_date", "mail:draft"],
+    // Held mail cancelled (#535): it only ever returns value.
+    ["cancel_scheduled_mail", "mail:draft"]
   ])("maps %s to %s in metadata and runtime", (toolName, scope) => {
     expect(getRequiredToolScopes(toolName)).toEqual([scope]);
     expect(() => authorizeTool(toolName, jwt([scope]), true)).not.toThrow();

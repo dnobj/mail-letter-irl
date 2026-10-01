@@ -91,5 +91,7 @@
  * r21: arrival dates (#535). While LETTER_IRL_ARRIVE_BY_ENABLED is on, the
  *     four previews take arriveBy and set_arrival_date is listed, to set,
  *     move or clear a preview's date without previewing again.
+ * r22: cancel_scheduled_mail (#535), listed with set_arrival_date: held mail
+ *     cancelled free until it goes to the printer, with confirm: true.
  */
-export const STEERING_COPY_REV = 21;
+export const STEERING_COPY_REV = 22;

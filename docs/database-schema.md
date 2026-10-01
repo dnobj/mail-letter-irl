@@ -422,17 +422,16 @@ Historical record of all status changes for letters and postcards.
 
 | Column | Type | Nullable | Default | Description |
 |--------|------|----------|---------|-------------|
-| id | SERIAL | NO | - | Primary key |
-| letter_id | VARCHAR(255) | NO | - | FK to letters |
-| old_status | VARCHAR(50) | YES | - | Previous status (NULL for first entry) |
-| new_status | VARCHAR(50) | NO | - | New status |
+| history_id | SERIAL | NO | - | Primary key |
+| letter_id | TEXT | NO | - | FK to letters |
+| old_status | TEXT | YES | - | Previous status (NULL for the first entry) |
+| new_status | TEXT | NO | - | New status |
+| provider_raw_status | TEXT | YES | - | The provider's own status, when the change came from it |
+| source | TEXT | NO | `'sync'` | Where the change came from: `sync`, `send`, `manual`, `webhook`, `backfill`, or `customer` for a cancel of held mail (#535) |
 | changed_at | TIMESTAMPTZ | NO | NOW() | When status changed |
-| changed_by | VARCHAR(50) | YES | - | Source of change (system, worker, admin) |
-| metadata | JSONB | YES | - | Additional context |
 
 **Indexes:**
-- `idx_letter_status_history_letter_id` on letter_id
-- `idx_letter_status_history_changed_at` on changed_at DESC
+- `idx_letter_status_history_letter_id` on (letter_id, changed_at DESC)
 
 ---
 
@@ -570,7 +569,7 @@ Single-use chain codes, one per gift letter sent with budget left: the canonical
 Crockford code (primary key, format CHECK), the gift letter and the letter it was printed on (each
 UNIQUE: the branching factor of 1 that bounds the cost), the sender, the budget it grants, a status
 (`issued`, `redeemed`, `void`), an expiry, the redeemer, and a void class (`send_failed`,
-`purchase_reversed`, `operator`).
+`send_cancelled` for held mail cancelled before it printed (#535), `purchase_reversed`, `operator`).
 
 ### image_generation_reservations
 

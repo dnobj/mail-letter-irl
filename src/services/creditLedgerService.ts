@@ -799,11 +799,23 @@ export async function isLetterAlreadyCompensated(
   return consumed.rows[0]?.all_revoked === true;
 }
 
+/**
+ * Why a letter's credits go back: its send failed, or the person cancelled it
+ * while it was held (#535, scheduledMailService). Both are recorded under the
+ * reason 'send_failed', so the exactly-once marker above and the operator's
+ * retry guard (isLetterAlreadyCompensated) count either: the letter's value
+ * went back before it mailed. failure_code says which, and the descriptions,
+ * which the account's history shows, say it in words.
+ */
+export type CreditReturnCause = 'failed' | 'cancelled';
+
 export async function returnConsumedCreditsForLetter(
   client: Pick<pg.PoolClient, 'query'>,
-  params: { letterId: string; userId: string; failureCode: string }
+  params: { letterId: string; userId: string; failureCode: string; cause?: CreditReturnCause }
 ): Promise<number> {
   const { letterId, userId, failureCode } = params;
+  const cancelled = params.cause === 'cancelled';
+  const description = `Returned after ${cancelled ? 'cancelled' : 'failed'} send ${letterId}`;
   await lockAccountForBalanceChange(client, userId);
 
   if (await hasReturnedCreditsForLetter(client, { letterId, userId })) return 0;
@@ -877,7 +889,7 @@ export async function returnConsumedCreditsForLetter(
         }),
         lot.expires_at,
         lot.expiration_policy,
-        `Returned after failed send ${letterId}`,
+        description,
         lot.ledger_id
       ]
     );
@@ -897,10 +909,10 @@ export async function returnConsumedCreditsForLetter(
        user_id, amount, balance_after, type, reference_type, reference_id, description
      ) SELECT $1::varchar, $2::int, credits, 'refund', 'letter', $3::varchar, $4::text
          FROM users WHERE user_id = $1::varchar`,
-    [userId, returned, letterId, `Returned after failed send ${letterId}`]
+    [userId, returned, letterId, description]
   );
 
-  writeDiagnostic('info', 'credits.returned_after_failed_send', {
+  writeDiagnostic('info', cancelled ? 'credits.returned_after_cancelled_send' : 'credits.returned_after_failed_send', {
     creditsReturned: returned,
     lotsRestored: consumed.rows.length
   });

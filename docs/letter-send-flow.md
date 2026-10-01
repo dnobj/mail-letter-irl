@@ -160,6 +160,24 @@ Database constraints enforce one outbox row and one stable idempotency key per l
   - **Annotations:** not read-only, not destructive (a draft sends nothing and expires on its own), and idempotent.
 - **The hold:** the send copies both dates to the letter and creates its job with `next_attempt_at` at 09:00 New York time on the mail date. `scheduled_at` records the same moment, written as a timestamp without a zone in the database session's zone. Value moves at the send, as for any letter: sends, a gift letter or a paid order.
   - The claim takes a job only once `next_attempt_at` has passed. So neither the inline dispatch right after the send nor the hourly run touches it before then, and the first hourly run after 09:00 sends it to PostGrid as an ordinary order. No PostGrid `sendDate` is used.
+- **Cancelling held mail** (`src/services/scheduledMailService.ts`): free until it goes to the printer. It is reached through `cancel_scheduled_mail { orderId, confirm: true }`, listed only while the flag is on, and through `POST /api/letters/:letterId/cancel` for the website, whatever the flag (scope `mail:draft`).
+  - **What can be cancelled:** the caller's letter with a mail date, still `queued`, whose job is `pending` and `not_dispatched`. That includes a letter past 09:00 on its mail date that the hourly run has not yet taken. Nothing outside Letter IRL is involved, since PostGrid has never seen it.
+  - **One transaction, in the outbox's lock order:**
+    - the letter (`FOR UPDATE`, which waits: its other holders are short, and a second cancel then finds it cancelled);
+    - its job (`FOR UPDATE NOWAIT`: the one holder of a job without its letter is the claim taking it to the printer, so a conflict answers "going to the printer right now");
+    - the account last, inside the return.
+  - **It writes:** the job and the letter `cancelled` (the job's `last_error` `cancelled_by_customer`), and a `letter_status_history` row with source `customer`.
+  - **What goes back:**
+    - a prepaid letter's credits, through `returnConsumedCreditsForLetter`, on lots that keep their expiry;
+    - a gift letter, through `returnGiftLetterForFailedSendWithClient`, its printed code voided as `send_cancelled`.
+    - Both use the failed send's exactly-once records (reason or source `send_failed`), so a replay returns nothing and the operator's retry guard (`isLetterAlreadyCompensated`) counts a cancel. `failure_code` and the descriptions say it was cancelled.
+  - **Refused:**
+    - someone else's or a missing letter, as not found;
+    - mail with no date;
+    - mail the outbox has taken, or that failed;
+    - Pay & Send, whose refunds a person decides (support@letterirl.com).
+  - **A repeat** answers as already cancelled, and nothing more goes back.
+  - **Cancelled letters free the duplicate guard**, so the same mail can be sent again.
 - **A passed mail date:** today counts as a mail date until noon New York time on a business day, so a draft previewed before the cutoff and sent after it has missed its date.
   - A prepaid or gift send is then refused with `SCHEDULE_PASSED`, before anything is written: "The day this letter was to go to the printer has passed…". The person previews again with a new date.
   - A Pay & Send checkout refuses such a draft before the charge. A paid order whose date passes before fulfilment mails as soon as it can instead, logging `send.schedule_missed`, because refusing after the charge would strand the money.

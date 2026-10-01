@@ -85,6 +85,8 @@ Gift mail held to arrive by a date (#535) still consumes its gift letter at the 
 - a seed campaign must still print its code then, so a letter held past the campaign's end prints its own card instead of a dead code;
 - a chain code's `LETTER_IRL_GIFT_CODE_TTL_DAYS` count from then, so the recipient gets the whole time however long the letter waited.
 
+Cancelling held gift mail before it prints (`cancel_scheduled_mail`, [letter-send-flow.md](letter-send-flow.md#confirmed-send-transaction)) returns the gift letter as a refused send does. The return uses the same `send_failed` record, so it happens once, and the code minted for the letter is voided as `send_cancelled`, since no recipient ever held it.
+
 ## Redeeming a code
 
 One entry point, [codeRedemptionService.ts](../src/services/codeRedemptionService.ts), serves every surface:

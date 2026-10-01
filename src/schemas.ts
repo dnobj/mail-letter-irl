@@ -804,6 +804,36 @@ export const requestSendOutputSchema: JsonSchema = {
   }
 };
 
+/** Held mail cancelled before it goes to the printer (#535). */
+export const cancelScheduledMailInputSchema: JsonSchema = {
+  type: "object",
+  required: ["orderId", "confirm"],
+  properties: {
+    orderId: { type: "string", description: "The orderId of the scheduled letter or postcard, from list_orders" },
+    confirm: { type: "boolean", description: "Set true once the person has agreed: a cancelled order cannot be restored" }
+  }
+};
+
+export const cancelScheduledMailOutputSchema: JsonSchema = {
+  type: "object",
+  required: ["orderId", "status", "alreadyCancelled", "returned", "message"],
+  properties: {
+    orderId: { type: "string" },
+    status: { type: "string", enum: ["cancelled"] },
+    alreadyCancelled: { type: "boolean", description: "True when it had already been cancelled: nothing changed now" },
+    returned: {
+      type: "object",
+      description: "What went back to the account",
+      required: ["kind", "count"],
+      properties: {
+        kind: { type: "string", enum: ["letters", "gift_letter"] },
+        count: { type: "integer" }
+      }
+    },
+    message: { type: "string" }
+  }
+};
+
 /** A preview's arrival date, changed without previewing again (#535). */
 export const setArrivalDateInputSchema: JsonSchema = {
   type: "object",

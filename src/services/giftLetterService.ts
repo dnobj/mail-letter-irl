@@ -629,8 +629,19 @@ export async function lookupGiftCodePublic(rawCode: string): Promise<PublicGiftC
  */
 export async function returnGiftLetterForFailedSendWithClient(
   client: TxClient,
-  params: { letterId: string; userId: string; failureCode: string }
+  params: {
+    letterId: string;
+    userId: string;
+    failureCode: string;
+    /**
+     * A customer's cancel of held mail (#535) returns the gift the same way,
+     * under the same 'send_failed' record, so a replay of either returns
+     * nothing; only the voided code's reason and the log say it was cancelled.
+     */
+    cause?: 'failed' | 'cancelled';
+  }
 ): Promise<number> {
+  const cancelled = params.cause === 'cancelled';
   await lockAccountForBalanceChange(client, params.userId);
   const already = await client.query<{ gift_id: string }>(
     `SELECT gift_id FROM gift_letters
@@ -659,9 +670,9 @@ export async function returnGiftLetterForFailedSendWithClient(
   }
   if (code?.status === 'issued') {
     await client.query(
-      `UPDATE gift_codes SET status = 'void', voided_at = NOW(), void_reason = 'send_failed'
+      `UPDATE gift_codes SET status = 'void', voided_at = NOW(), void_reason = $2
         WHERE code = $1`,
-      [code.code]
+      [code.code, cancelled ? 'send_cancelled' : 'send_failed']
     );
   }
   if (gift.source_reversed_at) return 0;
@@ -695,7 +706,9 @@ export async function returnGiftLetterForFailedSendWithClient(
       expiresAt
     ]
   );
-  writeDiagnostic('info', 'gift.returned_after_failed_send', { failureCode: params.failureCode });
+  writeDiagnostic('info', cancelled ? 'gift.returned_after_cancelled_send' : 'gift.returned_after_failed_send', {
+    failureCode: params.failureCode
+  });
   return 1;
 }
 

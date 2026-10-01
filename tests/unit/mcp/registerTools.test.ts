@@ -548,6 +548,29 @@ describe('OpenAI Apps SDK Submission Compliance', () => {
   });
 });
 
+describe('cancel_scheduled_mail (#535)', () => {
+  it('is a destructive, closed-world write that repeats safely', () => {
+    expect(buildAnnotations({ name: 'cancel_scheduled_mail', readOnly: false })).toEqual({
+      readOnlyHint: false,
+      destructiveHint: true,
+      openWorldHint: false,
+      idempotentHint: true
+    });
+  });
+
+  it("narrates the tool's own sentence", () => {
+    const message = 'Cancelled. The letter it cost is back in the balance.';
+    expect(summarizeToolResult('cancel_scheduled_mail', { orderId: 'o', message })).toBe(message);
+    expect(summarizeToolResult('cancel_scheduled_mail', { orderId: 'o' })).toBe('The scheduled mail was cancelled.');
+  });
+
+  it('has input and output shapes for registration, served as declared', () => {
+    expect(Object.keys(getZodInputShape('cancel_scheduled_mail')!)).toEqual(['orderId', 'confirm']);
+    expect(Object.keys(getZodOutputShape('cancel_scheduled_mail')!)).toEqual(['orderId', 'status', 'alreadyCancelled', 'returned', 'message']);
+    expect(getServedInputSchema('cancel_scheduled_mail')).toBe(getZodInputShape('cancel_scheduled_mail'));
+  });
+});
+
 describe('set_arrival_date (#535)', () => {
   it('is a write that is neither destructive nor open-world, and repeats safely', () => {
     expect(buildAnnotations({ name: 'set_arrival_date', readOnly: false })).toEqual({

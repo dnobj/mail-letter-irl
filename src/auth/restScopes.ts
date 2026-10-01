@@ -42,6 +42,8 @@ export const REST_ROUTE_SCOPES: readonly RestRouteScope[] = [
   { id: 'promo.redemptions', method: 'GET', path: '/api/promo/redemptions', scope: 'mail:read' },
   { id: 'letters.list', method: 'GET', path: '/api/letters', scope: 'mail:read', twin: 'list_orders' },
   { id: 'letters.get', method: 'GET', path: /^\/api\/letters\/[^/]+$/, scope: 'mail:read', twin: 'get_order_status' },
+  // Held mail cancelled (#535): it only ever returns value, like its tool.
+  { id: 'letters.cancel', method: 'POST', path: /^\/api\/letters\/[^/]+\/cancel$/, scope: 'mail:draft', twin: 'cancel_scheduled_mail' },
   { id: 'return_address.get', method: 'GET', path: '/api/return-address', scope: 'mail:read', twin: 'get_return_address' },
   { id: 'return_address.set', method: 'POST', path: '/api/return-address', scope: 'mail:draft', twin: 'set_return_address' },
   { id: 'return_address.clear', method: 'DELETE', path: '/api/return-address', scope: 'mail:draft', twin: 'clear_return_address' },

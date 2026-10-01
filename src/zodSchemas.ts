@@ -240,6 +240,13 @@ export const setArrivalDateInputZ = z.object({
   arriveBy: z.string().optional().describe(SET_ARRIVE_BY_DESCRIPTION)
 });
 
+// Held mail cancelled before it goes to the printer (#535). Listed only while
+// LETTER_IRL_ARRIVE_BY_ENABLED is on (src/server.ts).
+export const cancelScheduledMailInputZ = z.object({
+  orderId: z.string().describe("The orderId of the scheduled letter or postcard, from list_orders"),
+  confirm: z.boolean().describe("Set true once the person has agreed: a cancelled order cannot be restored")
+});
+
 // ============================================================================
 // Feature Request Schema (US-FEEDBACK-01)
 // ============================================================================
@@ -615,6 +622,17 @@ export const requestSendOutputZ = z.object({
   confirmationUrl: z.string().describe("Where the person checks the preview and sends it themselves"),
   expiresAtISO: z.string(),
   recipientSummary: recipientSummaryZ
+});
+
+export const cancelScheduledMailOutputZ = z.object({
+  orderId: z.string(),
+  status: z.enum(["cancelled"]),
+  alreadyCancelled: z.boolean().describe("True when it had already been cancelled: nothing changed now"),
+  returned: z.object({
+    kind: z.enum(["letters", "gift_letter"]),
+    count: z.number().int()
+  }).describe("What went back to the account"),
+  message: z.string()
 });
 
 export const setArrivalDateOutputZ = z.object({

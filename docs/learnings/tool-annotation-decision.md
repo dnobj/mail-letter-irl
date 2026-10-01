@@ -106,7 +106,7 @@ annotations: {
 }
 ```
 
-### Destructive Tools (clear_return_address, as decided in December 2025; six tools since September 2026, see the addendum)
+### Destructive Tools (clear_return_address, as decided in December 2025; six tools since September 2026, and `cancel_scheduled_mail` while arrival dates are on; see the addendum)
 
 ```typescript
 annotations: {
@@ -175,6 +175,7 @@ Under that reading `buildAnnotations()` now marks six tools destructive:
 | `create_mail_checkout` | Starts a payment the customer cannot undo alone, and a successful payment authorises the mail itself. |
 | `create_pack_checkout` | Starts a payment the customer cannot undo alone (refunds are discretionary). |
 | `clear_return_address` | Deletes the saved address (unchanged). |
+| `cancel_scheduled_mail` | Listed only while arrival dates are on (#535). A cancelled order cannot be restored; it must be sent again. It returns the letter, and needs `confirm: true`. |
 
 Still non-destructive, with the reasoning: `redeem_promo_code` spends a code but only adds letters
 for the customer; `generate_image_for_mail` consumes one generation and produces an image;

@@ -34,6 +34,7 @@ import {
   requestSendInputZ,
   getDraftStatusInputZ,
   setArrivalDateInputZ,
+  cancelScheduledMailInputZ,
   uploadPhotoChunkInputZ,
   submitFeatureRequestInputZ,
   getStartedInputZ,
@@ -59,6 +60,7 @@ import {
   requestSendOutputZ,
   getDraftStatusOutputZ,
   setArrivalDateOutputZ,
+  cancelScheduledMailOutputZ,
   uploadPhotoChunkOutputZ,
   submitFeatureRequestOutputZ,
   getStartedOutputZ,
@@ -171,7 +173,8 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     'set_return_address',    // Setting same address twice = no change
     'clear_return_address',  // Clearing twice = no additional effect
     'confirm_uploaded_image', // Repeating the same relay overwrites with the same value
-    'set_arrival_date'        // The same date twice changes nothing more (#535)
+    'set_arrival_date',       // The same date twice changes nothing more (#535)
+    'cancel_scheduled_mail'   // A repeat answers as already cancelled (#535)
   ];
 
   // Destructive tools. OpenAI's app-review guidance asks for destructiveHint on
@@ -193,7 +196,9 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     'set_return_address',
     'create_mail_checkout',
     'create_pack_checkout',
-    'clear_return_address'
+    'clear_return_address',
+    // A cancelled order cannot be restored: it must be sent again (#535).
+    'cancel_scheduled_mail'
   ];
 
   return {
@@ -801,6 +806,7 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   request_send: requestSendInputZ,
   get_draft_status: getDraftStatusInputZ,
   set_arrival_date: setArrivalDateInputZ,
+  cancel_scheduled_mail: cancelScheduledMailInputZ,
   upload_photo_chunk: uploadPhotoChunkInputZ,
   // Feedback tools
   submit_feature_request: submitFeatureRequestInputZ,
@@ -837,6 +843,7 @@ const zodOutputSchemas: Record<ToolName, z.ZodObject<any>> = {
   request_send: requestSendOutputZ,
   get_draft_status: getDraftStatusOutputZ,
   set_arrival_date: setArrivalDateOutputZ,
+  cancel_scheduled_mail: cancelScheduledMailOutputZ,
   upload_photo_chunk: uploadPhotoChunkOutputZ,
   // Feedback tools
   submit_feature_request: submitFeatureRequestOutputZ,
@@ -1408,6 +1415,9 @@ export function summarizeToolResult(
       // The tool's own sentence, which also travels in structuredContent for
       // the apps whose model reads only that (Claude Code).
       return typeof result.message === "string" ? result.message : "The arrival date was updated.";
+    case "cancel_scheduled_mail":
+      // As for set_arrival_date: the sentence saying what went back.
+      return typeof result.message === "string" ? result.message : "The scheduled mail was cancelled.";
     case "upload_photo_chunk":
       // Card-only: a model sees this only in an app that shows card-only
       // tools to it.
