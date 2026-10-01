@@ -722,7 +722,16 @@ export const getDraftStatusOutputZ = z.object({
     .enum(["scheduled", "cancelled", "sent"])
     .optional()
     .describe("Where a sent draft's order stands: scheduled while it waits for its mail date"),
-  cancellable: z.boolean().optional().describe("A sent draft's order: whether it can still be cancelled free")
+  cancellable: z.boolean().optional().describe("A sent draft's order: whether it can still be cancelled free"),
+  stationery: z
+    .object({
+      theme: z.enum(STATIONERY_THEMES),
+      dateLine: z.string().optional(),
+      monogram: z.string().optional(),
+      headline: z.string().optional()
+    })
+    .optional()
+    .describe("A ready letter's stationery now, while stationery is offered; its page goes to the card")
 });
 
 export const requestSendOutputZ = z.object({

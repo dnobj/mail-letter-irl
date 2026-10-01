@@ -147,10 +147,13 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       // And the Arrives picker and Cancel (#535), in both preview cards.
       const arrives = (await fs.readFile(path.join(widgetDir, 'shared', 'arrives.js'), 'utf-8')).replace(/\r\n/g, '\n');
       parts.push(`shared/arrives.js:${createHash('sha256').update(arrives).digest('hex')}`);
+      // And the Style row (#563), in the letter card.
+      const style = (await fs.readFile(path.join(widgetDir, 'shared', 'style.js'), 'utf-8')).replace(/\r\n/g, '\n');
+      parts.push(`shared/style.js:${createHash('sha256').update(style).digest('hex')}`);
       const digest = createHash('sha256').update(parts.join('\n')).digest('hex').slice(0, 12);
       expect({ version: WIDGET_TEMPLATE_VERSION, digest }).toEqual({
-        version: 52,
-        digest: 'e446d6dea72a'
+        version: 53,
+        digest: 'fad341cd6072'
       });
     });
   });

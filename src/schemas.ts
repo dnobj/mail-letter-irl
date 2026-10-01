@@ -845,7 +845,18 @@ export const getDraftStatusOutputSchema: JsonSchema = {
       enum: ["scheduled", "cancelled", "sent"],
       description: "Where a sent draft's order stands: scheduled while it waits for its mail date"
     },
-    cancellable: { type: "boolean", description: "A sent draft's order: whether it can still be cancelled free" }
+    cancellable: { type: "boolean", description: "A sent draft's order: whether it can still be cancelled free" },
+    stationery: {
+      type: "object",
+      description: "A ready letter's stationery now, while stationery is offered; its page goes to the card",
+      properties: {
+        theme: { type: "string", enum: [...STATIONERY_THEMES] },
+        dateLine: { type: "string" },
+        monogram: { type: "string" },
+        headline: { type: "string" }
+      },
+      required: ["theme"]
+    }
   }
 };
 

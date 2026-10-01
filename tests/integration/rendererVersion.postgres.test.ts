@@ -253,6 +253,25 @@ describePostgres('renderer version (migration 039, #534)', () => {
       expect(byId.get(sent.letter.letter_id)).toMatchObject({ rendererVersion: 'pdf-2', stationery: BOTANICAL });
       expect(byId.get(classic.letter.letter_id)).not.toHaveProperty('stationery');
     }, 60_000);
+
+    it("gives get_draft_status what a draft's page was drawn with (#572)", async () => {
+      const userId = await seedUser();
+      const themed = await drafts.createDraft({
+        ...base(userId),
+        bodyText: `Hello ${randomUUID()}`,
+        rendererVersion: 'pdf-2',
+        stationery: { theme: 'botanical', dateLine: 'October 1, 2026' }
+      });
+      await expect(drafts.getDraftState(themed.draftId)).resolves.toMatchObject({
+        mail_type: 'letter',
+        renderer_version: 'pdf-2',
+        stationery: BOTANICAL,
+        preview_html: '<svg></svg>'
+      });
+      // Sent, its page is no longer read (#572 review round 2).
+      await mailSend.createMailOrderFromDraft({ draftId: themed.draftId, userId, mailType: 'letter' });
+      await expect(drafts.getDraftState(themed.draftId)).resolves.toMatchObject({ status: 'consumed', preview_html: null });
+    }, 60_000);
   });
 
   describe('set_stationery and the remembered theme (#563, migration 045)', () => {

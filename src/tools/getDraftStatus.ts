@@ -3,6 +3,8 @@ import { DELIVERY_ESTIMATE } from '../content/delivery.js';
 import { getDraftStatusInputSchema, getDraftStatusOutputSchema } from '../schemas.js';
 import { scheduleSentence } from '../services/deliverySchedule.js';
 import { getDraftState, type DraftState } from '../services/draftService.js';
+import { isStationeryOffered } from '../config/stationery.js';
+import { stationeryOf, type Stationery } from '../render/stationery.js';
 import { draftScheduleOf } from '../services/draftSchedule.js';
 import { heldSendFields, waitsInOutbox } from './heldSend.js';
 import { isDraftIdShape } from './requestSend.js';
@@ -46,6 +48,13 @@ export interface GetDraftStatusOutput {
   deliveryEstimate?: string;
   /** Sent (#535): where the order stands, when its letter can be read. */
   orderStatus?: 'scheduled' | 'cancelled' | 'sent';
+  /**
+   * A ready letter's stationery now, while stationery is offered (#563):
+   * Classic for a page our renderer drew without a theme.
+   */
+  stationery?: Stationery;
+  /** With it, the page as it is now: for the card, in _meta (partitionToolResult). */
+  previewHtml?: string;
   /** Sent and scheduled: whether it can still be cancelled free (not Pay & Send). */
   cancellable?: boolean;
 }
@@ -103,9 +112,24 @@ async function handler(
     return { draftId, status: 'expired' };
   }
   const schedule = scheduleFor(draft);
-  return schedule
+  const ready: GetDraftStatusOutput = schedule
     ? { draftId, status: 'ready', schedule, deliveryEstimate: scheduleSentence(schedule, context.now()) }
     : { draftId, status: 'ready', deliveryEstimate: DELIVERY_ESTIMATE };
+  return { ...ready, ...styleNow(draft) };
+}
+
+/**
+ * A ready letter's style and page as they are now (#563), for a card shown
+ * its preview's first answer again: set_stationery may have changed both
+ * since. Only while stationery is offered, and only for a page our renderer
+ * drew (renderer_version), whose stored theme reads as the print reads it.
+ */
+function styleNow(draft: DraftState): Pick<GetDraftStatusOutput, 'stationery' | 'previewHtml'> {
+  if (!isStationeryOffered() || draft.mail_type !== 'letter' || !draft.renderer_version) return {};
+  return {
+    stationery: stationeryOf(draft.stationery) ?? { theme: 'classic' },
+    ...(draft.preview_html ? { previewHtml: draft.preview_html } : {})
+  };
 }
 
 export const getDraftStatusTool: McpToolDefinition<GetDraftStatusInput, GetDraftStatusOutput> = {
