@@ -39,7 +39,13 @@ import { callingApp, type ClientProfile } from "../auth/clientProfiles.js";
 import { letterPacksPageUrl } from "../config/sendConfirmation.js";
 import { giftCardSummary, resolveGiftSendChoice, type GiftSendChoice } from "./giftSendChoice.js";
 import { giftLetterPageCopy } from "../services/giftCardRenderer.js";
-import { scheduleSentence, type PreviewSchedule, type PreviewScheduleOutput } from "./arriveByInput.js";
+import {
+  previewArrivalWindow,
+  scheduleSentence,
+  type ArrivalWindow,
+  type PreviewSchedule,
+  type PreviewScheduleOutput
+} from "./arriveByInput.js";
 import type { GiftCardContent, GiftCardState } from "../services/giftCardRenderer.js";
 import {
   DELIVERY_CLASS,
@@ -121,6 +127,8 @@ export interface LetterQuoteOutput {
   giftLettersAvailable?: number;
   /** The arrival date asked for (#535), when there was one. */
   schedule?: PreviewScheduleOutput;
+  /** The arrival dates on offer (#535), while the feature is on: a card's date picker. */
+  arrivalWindow?: ArrivalWindow;
 }
 
 // ============================================================================
@@ -933,6 +941,7 @@ export async function createLetterDraftAndBuildOutput(
     giftCard: gift.card ? giftCardSummary(gift.card.state) : undefined,
     giftLettersAvailable: gift.giftLettersAvailable > 0 ? gift.giftLettersAvailable : undefined,
     schedule: schedule?.output,
+    arrivalWindow: previewArrivalWindow(context),
   };
 
   // Add address validation results

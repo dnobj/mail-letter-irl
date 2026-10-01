@@ -6,7 +6,7 @@
 
 import type { ToolContext } from '../contracts/types.js';
 import { isArriveByEnabled, scheduleHorizonDays, scheduleLeadDays } from '../config/arriveBy.js';
-import { checkArrival, newYorkDate, type CalendarDate } from '../services/deliverySchedule.js';
+import { checkArrival, earliestArrival, latestArrival, newYorkDate, type CalendarDate } from '../services/deliverySchedule.js';
 import type { DraftSchedule } from '../services/types.js';
 
 /** What a preview's output says about its arrival date (zodSchemas.ts's previewScheduleZ). */
@@ -22,11 +22,32 @@ export interface PreviewScheduleOutput {
   latestArrival: string;
 }
 
+/** The arrival dates on offer when a preview was made (#535): what a card's date picker offers. */
+export interface ArrivalWindow {
+  earliestArrival: string;
+  latestArrival: string;
+}
+
 export interface PreviewSchedule {
   /** For the draft. */
   draft: DraftSchedule;
   /** For the output. */
   output: PreviewScheduleOutput;
+}
+
+/**
+ * The arrival dates on offer now, on every preview while the feature is on,
+ * with a date or without, so a card can offer them before one is chosen. The
+ * same dates previewSchedule checks against. Undefined while the feature is
+ * off, and when no date can be scheduled (a horizon shorter than the lead
+ * time, or the end of the holiday list), when previewSchedule refuses any.
+ */
+export function previewArrivalWindow(context: ToolContext): ArrivalWindow | undefined {
+  if (!isArriveByEnabled()) return undefined;
+  const now = context.now();
+  const earliest = earliestArrival(now, scheduleLeadDays());
+  const latest = latestArrival(now, scheduleHorizonDays());
+  return earliest > latest ? undefined : { earliestArrival: earliest, latestArrival: latest };
 }
 
 /** A refusal the preview tools surface as the person's to fix, not a fault. */

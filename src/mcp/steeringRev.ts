@@ -93,5 +93,8 @@
  *     move or clear a preview's date without previewing again.
  * r22: cancel_scheduled_mail (#535), listed with set_arrival_date: held mail
  *     cancelled free until it goes to the printer, with confirm: true.
+ * r23: the four previews' output schema gains arrivalWindow (#535), the
+ *     arrival dates on offer while the flag is on, for the cards' picker;
+ *     set_arrival_date and cancel_scheduled_mail become callable by the cards.
  */
-export const STEERING_COPY_REV = 22;
+export const STEERING_COPY_REV = 23;

@@ -122,6 +122,8 @@ export const setArrivalDateTool: McpToolDefinition<SetArrivalDateInput, SetArriv
   meta: {
     'openai/toolInvocation/invoking': 'Setting the arrival date...',
     'openai/toolInvocation/invoked': 'Arrival date updated',
+    // The cards' Arrives picker calls it (#535).
+    'openai/widgetAccessible': true,
     // Changes only a draft's dates: a draft expires on its own and sends
     // nothing, and the same date twice changes nothing more.
     readOnlyHint: false,

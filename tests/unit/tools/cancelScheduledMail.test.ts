@@ -48,6 +48,13 @@ beforeEach(() => {
   vi.mocked(cancelScheduledMail).mockReset().mockResolvedValue(cancelled());
 });
 
+describe('the cards (#535)', () => {
+  // buildToolMeta, which also decides whether the model sees it, is proved in registerTools.test.ts.
+  it('may call it, for Cancel on a scheduled letter', () => {
+    expect(cancelScheduledMailTool.meta?.['openai/widgetAccessible']).toBe(true);
+  });
+});
+
 describe('cancel_scheduled_mail (#535)', () => {
   it("cancels the caller's held mail and says the letter is back", async () => {
     await expect(run({ orderId: ` ${ORDER} `, confirm: true })).resolves.toEqual({

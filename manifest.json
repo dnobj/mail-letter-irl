@@ -165,6 +165,24 @@
               "latestArrival"
             ]
           },
+          "arrivalWindow": {
+            "type": "object",
+            "description": "The arrival dates that can be chosen now, while arrival dates are on (#535), for a card's date picker: what can be scheduled, not when this mail arrives",
+            "properties": {
+              "earliestArrival": {
+                "type": "string",
+                "description": "The first arrival date on offer, YYYY-MM-DD"
+              },
+              "latestArrival": {
+                "type": "string",
+                "description": "The last arrival date on offer, YYYY-MM-DD"
+              }
+            },
+            "required": [
+              "earliestArrival",
+              "latestArrival"
+            ]
+          },
           "previewHtml": {
             "type": "string"
           },
@@ -497,6 +515,24 @@
               "latestArrival"
             ]
           },
+          "arrivalWindow": {
+            "type": "object",
+            "description": "The arrival dates that can be chosen now, while arrival dates are on (#535), for a card's date picker: what can be scheduled, not when this mail arrives",
+            "properties": {
+              "earliestArrival": {
+                "type": "string",
+                "description": "The first arrival date on offer, YYYY-MM-DD"
+              },
+              "latestArrival": {
+                "type": "string",
+                "description": "The last arrival date on offer, YYYY-MM-DD"
+              }
+            },
+            "required": [
+              "earliestArrival",
+              "latestArrival"
+            ]
+          },
           "previewHtml": {
             "type": "string"
           },
@@ -825,6 +861,24 @@
               "arriveBy",
               "mailOn",
               "releasesAt",
+              "earliestArrival",
+              "latestArrival"
+            ]
+          },
+          "arrivalWindow": {
+            "type": "object",
+            "description": "The arrival dates that can be chosen now, while arrival dates are on (#535), for a card's date picker: what can be scheduled, not when this mail arrives",
+            "properties": {
+              "earliestArrival": {
+                "type": "string",
+                "description": "The first arrival date on offer, YYYY-MM-DD"
+              },
+              "latestArrival": {
+                "type": "string",
+                "description": "The last arrival date on offer, YYYY-MM-DD"
+              }
+            },
+            "required": [
               "earliestArrival",
               "latestArrival"
             ]
@@ -1883,6 +1937,24 @@
               "arriveBy",
               "mailOn",
               "releasesAt",
+              "earliestArrival",
+              "latestArrival"
+            ]
+          },
+          "arrivalWindow": {
+            "type": "object",
+            "description": "The arrival dates that can be chosen now, while arrival dates are on (#535), for a card's date picker: what can be scheduled, not when this mail arrives",
+            "properties": {
+              "earliestArrival": {
+                "type": "string",
+                "description": "The first arrival date on offer, YYYY-MM-DD"
+              },
+              "latestArrival": {
+                "type": "string",
+                "description": "The last arrival date on offer, YYYY-MM-DD"
+              }
+            },
+            "required": [
               "earliestArrival",
               "latestArrival"
             ]

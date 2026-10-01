@@ -38,6 +38,13 @@ function context(now = THURSDAY_MORNING): ToolContext {
 
 const set = (input: Record<string, unknown>, ctx = context()) => setArrivalDateTool.handler(input as never, ctx);
 
+describe('the cards (#535)', () => {
+  // buildToolMeta, which also decides whether the model sees it, is proved in registerTools.test.ts.
+  it('may call it, for the Arrives picker', () => {
+    expect(setArrivalDateTool.meta?.['openai/widgetAccessible']).toBe(true);
+  });
+});
+
 describe('set_arrival_date (#535)', () => {
   beforeEach(() => {
     vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', 'true');

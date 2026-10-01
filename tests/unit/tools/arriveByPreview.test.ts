@@ -255,6 +255,48 @@ describe('a date that cannot be met', () => {
   });
 });
 
+describe('the dates on offer, for the cards (#535)', () => {
+  const WINDOW = { earliestArrival: '2026-10-13', latestArrival: '2026-11-30' };
+
+  it.each(Object.keys(LETTERS) as Array<keyof typeof LETTERS>)(
+    '%s: every preview names them, with a date or without',
+    async layout => {
+      expect((await letter(layout)).arrivalWindow).toEqual(WINDOW);
+      expect((await letter(layout, { arriveBy: '2026-10-16' })).arrivalWindow).toEqual(WINDOW);
+    }
+  );
+
+  it('postcard: the same', async () => {
+    expect((await postcard()).arrivalWindow).toEqual(WINDOW);
+    expect((await postcard({ arriveBy: '2026-10-16' })).arrivalWindow).toEqual(WINDOW);
+  });
+
+  it('are the dates a held preview checks against', async () => {
+    const output = await letter('text_only', { arriveBy: '2026-10-16' });
+    expect(output.arrivalWindow).toEqual({
+      earliestArrival: (output.schedule as Record<string, string>).earliestArrival,
+      latestArrival: (output.schedule as Record<string, string>).latestArrival
+    });
+  });
+
+  it('follow the configured lead time and horizon', async () => {
+    vi.stubEnv('LETTER_IRL_SCHEDULE_LEAD_DAYS', '0');
+    vi.stubEnv('LETTER_IRL_SCHEDULE_HORIZON_DAYS', '30');
+    expect((await letter('text_only')).arrivalWindow).toEqual({ earliestArrival: '2026-10-01', latestArrival: '2026-10-31' });
+  });
+
+  it('are left out while the feature is off, and when no date can be scheduled', async () => {
+    vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', '');
+    expect(JSON.parse(JSON.stringify(await letter('text_only')))).not.toHaveProperty('arrivalWindow');
+    expect(JSON.parse(JSON.stringify(await postcard()))).not.toHaveProperty('arrivalWindow');
+
+    vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', 'true');
+    vi.stubEnv('LETTER_IRL_SCHEDULE_HORIZON_DAYS', '5');
+    expect(JSON.parse(JSON.stringify(await letter('text_only')))).not.toHaveProperty('arrivalWindow');
+    expect(JSON.parse(JSON.stringify(await postcard()))).not.toHaveProperty('arrivalWindow');
+  });
+});
+
 describe('the settings', () => {
   it('uses the configured lead time: development may hold to today', async () => {
     vi.stubEnv('LETTER_IRL_SCHEDULE_LEAD_DAYS', '0');

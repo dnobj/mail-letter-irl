@@ -150,6 +150,8 @@ export const cancelScheduledMailTool: McpToolDefinition<CancelScheduledMailInput
   meta: {
     'openai/toolInvocation/invoking': 'Cancelling the scheduled mail...',
     'openai/toolInvocation/invoked': 'Scheduled mail cancelled',
+    // The cards' Cancel on a scheduled letter calls it (#535).
+    'openai/widgetAccessible': true,
     // Irreversible (it must be sent again to go out), and a repeat answers as
     // already cancelled.
     readOnlyHint: false,
