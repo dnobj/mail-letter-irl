@@ -134,6 +134,26 @@ describe('stationery in tools/list', () => {
       .callTool({ name: 'quote_and_preview_letter', arguments: { ...LETTER, stationery: 'floral' } })
       .catch(error => error);
     expect(received).toHaveLength(0);
-    expect(JSON.stringify(result)).toContain('celebration');
+    const said = JSON.stringify(result);
+    expect(said).toContain('stationery');
+    expect(said).toContain("received 'floral'");
+    for (const theme of STATIONERY_THEMES) expect(said, theme).toContain(`'${theme}'`);
+  });
+
+  it('hands the preview no theme for a null one, as for an empty one (review round 1)', async () => {
+    offer('true', 'pdf');
+    const client = await connected();
+    await client.callTool({ name: 'quote_and_preview_letter', arguments: { ...LETTER, stationery: null } });
+    expect(received).toHaveLength(1);
+    expect(received[0].stationery).toBeUndefined();
+  });
+
+  it("leaves the postcard's schema as it was, closed while arrival dates are on, stationery offered or not", async () => {
+    vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', 'true');
+    for (const [enabled, renderer] of [['', 'pdf'], ['true', 'html'], ['true', 'pdf']]) {
+      offer(enabled, renderer);
+      const tools = await listedTools();
+      expect(tools.get('quote_and_preview_postcard')!.additionalProperties, `${enabled} ${renderer}`).toBe(false);
+    }
   });
 });

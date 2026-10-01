@@ -8,6 +8,7 @@
 import type { ToolContext } from '../contracts/types.js';
 import { isStationeryEnabled } from '../config/stationery.js';
 import {
+  drawsGrapheme,
   headlineSize,
   slotText,
   STATIONERY_SLOT_MAX_LENGTH,
@@ -16,6 +17,7 @@ import {
   type Stationery,
   type StationeryTheme
 } from '../render/index.js';
+import { withoutInvisible } from '../render/bidi.js';
 import { SCHEDULE_TIME_ZONE } from '../services/deliverySchedule.js';
 
 /** The previews' three stationery arguments, as they arrive: unchecked. */
@@ -71,16 +73,28 @@ function optionalText(value: unknown, name: string, expected: string, context: T
 }
 
 /**
+ * Titles and suffixes a name carries, which are no one's initials: "Dr. Pat
+ * Rivera" and "Pat Rivera Jr." are both PR. Compared in lower case without
+ * full stops ("M.D." is md).
+ */
+const NOT_INITIALS: ReadonlySet<string> = new Set([
+  'mr', 'mrs', 'ms', 'miss', 'mx', 'dr', 'rev', 'prof', 'sir', 'dame',
+  'jr', 'sr', 'ii', 'iii', 'iv', 'md', 'phd', 'esq', 'dds'
+]);
+
+/**
  * The initials a Monogram letter prints: the `monogram` asked for, or the
  * initials of the return address's name. Asked for, spaces and full stops
  * are dropped ("J. M. S." is JMS) and what is left must be one to three
  * letters, as written. From the name, each word that starts with a letter
- * gives its first, in capitals; past three, the first two and the last, as a
- * first, middle and last name would.
+ * gives its first, in capitals, but a title or a suffix; past three, the
+ * first two and the last, as a first, middle and last name would.
  */
 function initialsFor(asked: string | undefined, senderName: string, context: ToolContext): string {
   if (asked !== undefined) {
-    const letters = clusters(slotText(asked).replace(/[ .]/g, ''));
+    // Spaces and full stops go before the marks are clamped, so no letter
+    // gathers the marks of two.
+    const letters = clusters(slotText(asked.replace(/[\s.]/gu, '')));
     if (letters.length === 0 || letters.length > MONOGRAM_MAX_LETTERS || !letters.every(letter => LETTER.test(letter))) {
       throw refusal(
         'monogram must be one to three letters, such as "JMS". Leave it out to use the initials of the return address\'s name.',
@@ -90,14 +104,18 @@ function initialsFor(asked: string | undefined, senderName: string, context: Too
     }
     return letters.join('');
   }
-  const initials = slotText(senderName)
-    .split(' ')
+  // Words split at any space or comma, with characters that print nothing
+  // gone first, so neither hides a word's first letter.
+  const initials = withoutInvisible(slotText(senderName))
+    .split(/[\s,]+/u)
+    .filter(word => !NOT_INITIALS.has(word.replace(/\./g, '').toLowerCase()))
     .map(word => clusters(word)[0])
     .filter((first): first is string => first !== undefined && LETTER.test(first))
     .map(first => {
-      // A letter whose capital is two (German's sharp s is SS) stays as written.
+      // A capital that is two letters (German's sharp s is SS), or one the
+      // font cannot draw, stays as written.
       const capital = first.toUpperCase();
-      return clusters(capital).length === 1 ? capital : first;
+      return clusters(capital).length === 1 && drawsGrapheme(capital) ? capital : first;
     });
   if (initials.length === 0) {
     throw refusal(
@@ -112,23 +130,33 @@ function initialsFor(asked: string | undefined, senderName: string, context: Too
 
 /**
  * Celebration's headline as it prints, or undefined when it prints nothing.
- * It prints on one line, shrinking to fit the body's width down to the
- * smallest size it prints at (headlineSize); longer, it is refused, saying
- * how much of it fits.
+ * It holds at most STATIONERY_SLOT_MAX_LENGTH characters as stored, so what a
+ * draft records reads back. It prints on one line, shrinking to fit the
+ * body's width down to the smallest size it prints at (headlineSize);
+ * longer, it is refused, saying how much of it fits. A headline holding a
+ * character the font cannot draw is left to the printable check, which every
+ * caller runs next and which names it: measured, its boxes would only say
+ * "too long".
  */
 function headlineFor(asked: string, context: ToolContext): string | undefined {
   const text = slotText(asked);
   if (visualOrder(text).trim() === '') return undefined;
-  if (text.length <= STATIONERY_SLOT_MAX_LENGTH && headlineSize(text) !== null) return text;
+  if (text.length > STATIONERY_SLOT_MAX_LENGTH) {
+    throw refusal(
+      `The headline is too long: it may hold at most ${STATIONERY_SLOT_MAX_LENGTH} characters. Shorten it, or leave headline out.`,
+      'headline_too_long',
+      context
+    );
+  }
+  const characters = clusters(text);
+  if (headlineSize(text) !== null || !characters.every(drawsGrapheme)) return text;
   // The most of its characters that fit, found by halving: a prefix fits
   // whenever a longer one does.
-  const characters = clusters(text);
   let fits = 0;
   let over = characters.length;
   while (over - fits > 1) {
     const middle = Math.floor((fits + over) / 2);
-    const prefix = characters.slice(0, middle).join('');
-    if (prefix.length <= STATIONERY_SLOT_MAX_LENGTH && headlineSize(prefix) !== null) fits = middle;
+    if (headlineSize(characters.slice(0, middle).join('')) !== null) fits = middle;
     else over = middle;
   }
   throw refusal(

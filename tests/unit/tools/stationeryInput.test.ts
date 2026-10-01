@@ -6,7 +6,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { dateLineFor, previewStationery } from '../../../src/tools/stationeryInput.js';
-import { headlineSize, STATIONERY_SLOT_MAX_LENGTH } from '../../../src/render/index.js';
+import { drawsGrapheme, headlineSize, STATIONERY_SLOT_MAX_LENGTH } from '../../../src/render/index.js';
 import type { ToolContext } from '../../../src/contracts/types.js';
 
 /** 14:00 in New York on October 1, 2026. */
@@ -133,9 +133,35 @@ describe('the monogram', () => {
     expect(offered({ stationery: 'monogram' }, `e${acute}mile zola`).monogram).toBe(`E${acute}Z`);
   });
 
-  it('keeps a letter whose capital is two letters as written', () => {
+  it('keeps a letter whose capital is two letters, or one the font cannot draw, as written', () => {
     const sharpS = String.fromCodePoint(0xdf);
     expect(offered({ stationery: 'monogram' }, `${sharpS}ophie Lane`).monogram).toBe(`${sharpS}L`);
+    // U+0264, whose capital U+A7CB Tinos has no glyph for.
+    const ramsHorn = String.fromCodePoint(0x264);
+    expect(drawsGrapheme(ramsHorn.toUpperCase())).toBe(false);
+    expect(offered({ stationery: 'monogram' }, `${ramsHorn}sa test`).monogram).toBe(`${ramsHorn}T`);
+  });
+
+  it('skips titles and suffixes, which are no one\'s initials (review round 1)', () => {
+    for (const [name, initials] of [
+      ['Dr. Pat Rivera', 'PR'],
+      ['Mrs. Pat Rivera', 'PR'],
+      ['Pat Rivera Jr.', 'PR'],
+      ['Pat Rivera III', 'PR'],
+      ['Pat Rivera, M.D.', 'PR'],
+      ['Prof Ada Byron Lovelace, PhD', 'ABL'],
+      ['Rev. Dr. Martin Luther King Jr.', 'MLK']
+    ]) {
+      expect(offered({ stationery: 'monogram' }, name).monogram, name).toBe(initials);
+    }
+  });
+
+  it('finds each word behind characters that print nothing and any space (review round 1)', () => {
+    const zeroWidth = String.fromCodePoint(0x200b);
+    const noBreak = String.fromCodePoint(0xa0);
+    expect(offered({ stationery: 'monogram' }, `${zeroWidth}Pat Rivera`).monogram).toBe('PR');
+    expect(offered({ stationery: 'monogram' }, `Pat${noBreak}Rivera`).monogram).toBe('PR');
+    expect(offered({ stationery: 'monogram' }, 'Pat\tRivera').monogram).toBe('PR');
   });
 
   it('refuses a name with no initials to use', () => {
@@ -147,6 +173,13 @@ describe('the monogram', () => {
       );
       expect(reason).toBe('monogram_no_initials');
     }
+  });
+
+  it('drops spaces before clamping marks, so no letter gathers the marks of two (review round 1)', () => {
+    const acute = String.fromCodePoint(0x301);
+    const initials = offered({ stationery: 'monogram', monogram: `a${acute.repeat(4)} ${acute.repeat(4)}` }).monogram!;
+    expect(initials).toBe(`a${acute.repeat(4)}`);
+    expect(drawsGrapheme(initials)).toBe(true);
   });
 
   it('takes the initials asked for as written, without spaces and full stops', () => {
@@ -213,8 +246,20 @@ describe('the headline', () => {
     const headline = 'Hi' + zeroWidth.repeat(STATIONERY_SLOT_MAX_LENGTH);
     expect(headlineSize(headline)).not.toBeNull();
     const { message, reason } = refused({ stationery: 'celebration', headline });
-    expect(message).toContain(`about ${STATIONERY_SLOT_MAX_LENGTH} of its ${STATIONERY_SLOT_MAX_LENGTH + 2} characters fit`);
+    expect(message).toBe(
+      `The headline is too long: it may hold at most ${STATIONERY_SLOT_MAX_LENGTH} characters. Shorten it, or leave headline out.`
+    );
     expect(reason).toBe('headline_too_long');
+    // At the bound it is measured as usual.
+    const atBound = 'Hi' + zeroWidth.repeat(STATIONERY_SLOT_MAX_LENGTH - 2);
+    expect(offered({ stationery: 'celebration', headline: atBound }).headline).toBe(atBound);
+  });
+
+  it("leaves a headline the font cannot draw to the printable check, which names its characters, rather than call it too long", () => {
+    // Each draws the font's missing-glyph box, so measured it would only be "too long".
+    const han = String.fromCodePoint(0x4e2d).repeat(60);
+    expect(headlineSize(han)).toBeNull();
+    expect(offered({ stationery: 'celebration', headline: han }).headline).toBe(han);
   });
 
   it('is refused with any other theme, or none', () => {

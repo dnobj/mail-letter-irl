@@ -530,6 +530,20 @@ describe('stationery (#563)', () => {
     expect(drafted().stationery).toMatchObject({ monogram: 'JMS' });
   });
 
+  it("a monogram takes the saved return address's initials when the call names no sender (review round 1)", async () => {
+    vi.mocked(getReturnAddress).mockResolvedValue(address({ name: 'Dr. Ada Byron Lovelace' }) as never);
+    const handler = quoteAndPreviewLetterTextOnlyTool.handler as unknown as Handler;
+    const output = await handler({ recipient: address(), bodyText: 'Dear Sam,', signOff: 'Ada', stationery: 'monogram' }, context());
+    expect(output.usedSavedReturnAddress).toBe(true);
+    expect(output.stationery).toMatchObject({ theme: 'monogram', monogram: 'ABL' });
+  });
+
+  it('refuses a headline in characters the font cannot draw for them, not as too long (review round 1)', async () => {
+    const han = String.fromCodePoint(0x4e2d).repeat(60);
+    await expect(run('text_only', { stationery: 'celebration', headline: han })).rejects.toThrow(/can't print some characters in this letter: .* in the headline/);
+    expect(createDraft).not.toHaveBeenCalled();
+  });
+
   it('a headline prints above the letter, three lines of its page', async () => {
     const output = await run('text_only', { stationery: 'celebration', headline: '  Happy   Birthday, Sam! ' });
     expect(output.stationery).toEqual({ theme: 'celebration', dateLine: 'September 30, 2026', headline: 'Happy Birthday, Sam!' });

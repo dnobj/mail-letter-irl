@@ -57,14 +57,16 @@ export const MONOGRAM_DESCRIPTION =
   "Leave it out to use the initials of the return address's name.";
 export const HEADLINE_DESCRIPTION =
   "Optional, with stationery celebration only: a short line printed large above the letter, " +
-  "such as \"Happy Birthday, Sam!\". It must fit on one line; leave it out for confetti alone.";
+  "such as \"Happy Birthday, Sam!\". It must fit on one line, and takes three of the page's lines; " +
+  "leave it out for confetti alone.";
 
 /**
- * A theme as asked for: its name in any case, or none for an empty string,
- * which models send for an optional field they leave unset. Anything else is
- * left for the enum to refuse.
+ * A theme as asked for: its name in any case, or none for an empty string or
+ * null, which models send for an optional field they leave unset. Anything
+ * else is left for the enum to refuse.
  */
 function themeName(value: unknown): unknown {
+  if (value === null) return undefined;
   if (typeof value !== "string") return value;
   const name = value.trim().toLowerCase();
   return name === "" ? undefined : name;

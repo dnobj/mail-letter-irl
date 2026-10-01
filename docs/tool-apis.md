@@ -37,7 +37,8 @@ While stationery is offered (`LETTER_IRL_STATIONERY_ENABLED` on, and `LETTER_IRL
 - `stationery`: `classic` (the default, a plain page), `monogram`, `botanical` or `celebration`, in any
   case. Every theme but Classic prints the preview's date, written out, at the top right.
 - `monogram`: with `monogram` only. One to three letters, as written; spaces and full stops are dropped.
-  Left out, the initials of the return address's name are used, in capitals.
+  Left out, the initials of the return address's name are used, in capitals, skipping titles and suffixes
+  ("Dr. Pat Rivera Jr." is PR).
 - `headline`: with `celebration` only. One line above the letter, which takes three of the page's lines.
 
 Each preview then returns `stationery` (`theme`, and the `dateLine`, `monogram` and `headline` it

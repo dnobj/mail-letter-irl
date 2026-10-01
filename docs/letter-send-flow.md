@@ -273,7 +273,8 @@ drawn by `src/render`, the three letter previews take `stationery`, `monogram` a
 - **Checked** after the sender is known and before the page is laid out:
   - the theme is one of the four;
   - initials go only with Monogram, a headline only with Celebration;
-  - asked-for initials are one to three letters; otherwise the return address's name gives them;
+  - asked-for initials are one to three letters; otherwise the return address's name gives them, without
+    titles or suffixes;
   - a headline is one line, shrinking to 18pt and refused past it, saying how much fits, and at most
     `STATIONERY_SLOT_MAX_LENGTH` characters as stored, so what is stored reads back;
   - the initials and the headline are checked against Tinos, like the text;
