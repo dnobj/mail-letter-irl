@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { JSDOM } from 'jsdom';
 import * as fs from 'fs';
 import * as path from 'path';
+import { SCHEDULED_MAIL_REFUSALS } from '../../../src/tools/cancelScheduledMail.js';
 
 const SOURCE = fs.readFileSync(path.resolve(__dirname, '../../../widgets/shared/arrives.js'), 'utf-8');
 
@@ -49,6 +50,17 @@ describe('the arrival date script (#535)', () => {
     ).toEqual({ latest: '2026-11-30' });
     expect(arrives.boundsFromRefusal('Arrival dates cannot be scheduled right now.')).toEqual({});
     expect(arrives.boundsFromRefusal(undefined)).toEqual({});
+  });
+
+  it("closes Cancel only on a refusal that leaves nothing to cancel, by cancel_scheduled_mail's own words", () => {
+    const said = (refusal: keyof typeof SCHEDULED_MAIL_REFUSALS) => SCHEDULED_MAIL_REFUSALS[refusal][1];
+    expect(arrives.closingMessage(said('too_late'))).toBe('It has gone to the printer, so it can no longer be cancelled.');
+    expect(arrives.closingMessage(said('busy'))).toBe('It is going to the printer right now, so it can no longer be cancelled.');
+    expect(arrives.closingMessage(said('not_scheduled'))).toBe("It goes to the printer as soon as it can, so it can't be cancelled here.");
+    expect(arrives.closingMessage(said('pay_and_send'))).toBe(said('pay_and_send'));
+    // Anything else is shown as it is, and may be tried again.
+    expect(arrives.closingMessage(said('not_found'))).toBeNull();
+    expect(arrives.closingMessage('The host timed out.')).toBeNull();
   });
 
   it('takes held mail only with both dates', () => {

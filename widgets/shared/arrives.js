@@ -11,7 +11,8 @@
  * The server inlines this file into each card that asks for it, in place of
  * the card's letter-irl:arrives marker comment (src/mcp/widgetHost.ts). It
  * defines window.letterIrlArrives: describeDate, mailsLine,
- * boundsFromRefusal, scheduleOf, createPicker and createScheduled.
+ * boundsFromRefusal, closingMessage, scheduleOf, createPicker and
+ * createScheduled.
  */
 (function () {
   "use strict";
@@ -78,8 +79,8 @@
    * buttons meanwhile.
    *
    * options: host, row, input, asap, note, readableError(error),
-   *   resultText(result), onChange({ draftId, schedule, deliveryEstimate }),
-   *   onBusy()
+   *   resultText(result), onSet() (a date is being set on the draft),
+   *   onChange({ draftId, schedule, deliveryEstimate }), onBusy()
    */
   function createPicker(options) {
     var host = options.host;
@@ -287,6 +288,7 @@
           if (result && result.isError) {
             throw new Error(options.resultText(result) || "It was not cancelled.");
           }
+          if (state.orderId !== orderId) return;
           var data = toolData(result);
           state.done = true;
           state.error = false;
@@ -294,6 +296,7 @@
           options.onCancelled(state.message);
         })
         .catch(function (error) {
+          if (state.orderId !== orderId) return;
           var text = options.readableError(error);
           state.confirming = false;
           state.error = true;
@@ -302,6 +305,7 @@
           state.message = closing || text;
         })
         .then(function () {
+          if (state.orderId !== orderId) return;
           state.busy = false;
           draw();
         });
@@ -310,7 +314,17 @@
     return {
       // The order and its dates; cancelled for one this card cancelled before.
       show: function (orderId, schedule, cancelled) {
-        state.orderId = typeof orderId === "string" && orderId ? orderId : null;
+        var shown = typeof orderId === "string" && orderId ? orderId : null;
+        // Another order starts afresh; the same one keeps where it got to.
+        if (shown !== state.orderId) {
+          state.confirming = false;
+          state.busy = false;
+          state.done = false;
+          state.closed = false;
+          state.message = "";
+          state.error = false;
+        }
+        state.orderId = shown;
         state.schedule = scheduleOf(schedule);
         if (cancelled) {
           state.done = true;
@@ -319,6 +333,7 @@
         draw();
       },
       hide: function () {
+        if (state.orderId === null) return;
         state.orderId = null;
         options.block.style.display = "none";
       },

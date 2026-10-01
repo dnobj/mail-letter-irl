@@ -340,8 +340,6 @@
         resultText,
         onCancelled() {
           keep({ cancelled: true });
-          // render() redraws a reopened card from what it found kept.
-          if (resumed) resumed = { ...resumed, cancelled: true };
           const statusPill = document.getElementById("status-pill");
           statusPill.classList.remove("ok", "alert");
           statusPill.textContent = "Cancelled";
@@ -636,6 +634,8 @@
         if (kept.sent && keptSchedule) {
           // Sent with a date (#535): waiting for it, or cancelled from here.
           statusPill.classList.remove("ok", "alert");
+          // Cancelled from here: before the conversation was reopened, or
+          // since (the kept state above is what the card found on opening).
           const cancelled = Boolean(kept.cancelled) || scheduled.cancelled();
           statusPill.textContent = cancelled ? "Cancelled" : "Scheduled";
           document.getElementById("empty-message").textContent = cancelled
@@ -1538,6 +1538,8 @@
         );
         if (cardIsShowingDraft() && settled?.status === "sent" && settled.schedule) {
           scheduled.show(settled.orderId, settled.schedule, false);
+        } else if (cardIsShowingDraft()) {
+          scheduled.hide();
         }
         const settingDate = picker.busy();
         const datedSend = Boolean(picker.schedule());

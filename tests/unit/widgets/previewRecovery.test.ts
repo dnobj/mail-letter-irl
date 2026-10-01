@@ -2816,6 +2816,37 @@ describe.each([LETTER, POSTCARD])('$file keeps a send with an arrival date (#535
     expect(harness.visible('cancel-scheduled-button')).toBe(false);
   });
 
+  it('stays cancelled when ChatGPT redraws a reopened card cancelled from here', async () => {
+    const harness = mount(spec, {
+      widgetState: { v: 1, draftId: 'draft_host_0001', sent: true, orderId: 'ord_sent_0001', schedule: DATES }
+    });
+    await flush();
+    await harness.click('cancel-scheduled-button');
+    await harness.click('cancel-scheduled-button');
+    expect(harness.text('status-pill')).toBe('Cancelled');
+
+    await harness.fireGlobals();
+
+    expect(harness.text('status-pill')).toBe('Cancelled');
+    expect(harness.visible('cancel-scheduled-button')).toBe(false);
+    expect(harness.text('scheduled-note')).toBe('Cancelled. Nothing will be mailed.');
+  });
+
+  it('takes the date field away as soon as a checkout starts', async () => {
+    const harness = mount(spec, {
+      toolOutput: { ...offered('draft_host_0001'), ...eligibility(false) },
+      toolResponseMetadata: spec.meta()
+    });
+    await flush();
+    expect(harness.visible('arrives-row')).toBe(true);
+
+    harness.holdCalls();
+    await harness.click('pay-send-button');
+    expect(harness.visible('arrives-row')).toBe(false);
+    await harness.releaseCalls();
+    expect(harness.visible('arrives-row')).toBe(false);
+  });
+
   it('reopens a send without a date as before', async () => {
     const harness = mount(spec, {
       widgetState: { v: 1, draftId: 'draft_host_0001', sent: true, orderId: 'ord_sent_0001' }

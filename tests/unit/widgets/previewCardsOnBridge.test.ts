@@ -493,6 +493,7 @@ describe.each([LETTER, POSTCARD])('$file: the arrival date (#535)', spec => {
     });
     expect((card.document.getElementById('send-button') as HTMLButtonElement).disabled).toBe(true);
     expect(dateInput(card).disabled).toBe(true);
+    expect(dateInput(card).value).toBe('2026-10-16');
 
     await answerTool(card, 'set_arrival_date', {
       content: [{ type: 'text', text: 'The arrival date is set.' }],
@@ -520,6 +521,7 @@ describe.each([LETTER, POSTCARD])('$file: the arrival date (#535)', spec => {
 
     await card.click('arrives-asap');
     expect(card.lastRequest('tools/call', 'set_arrival_date')!.params.arguments).toEqual({ draftId: 'draft_0001' });
+    expect(dateInput(card).value).toBe('');
     await answerTool(card, 'set_arrival_date', {
       content: [],
       structuredContent: {
@@ -615,6 +617,68 @@ describe.each([LETTER, POSTCARD])('$file: the arrival date (#535)', spec => {
     expect(card.text('status-pill')).toBe('Scheduled');
   });
 
+  it('keeps Cancel after a refusal worth trying again, and closes it when nothing is left to cancel', async () => {
+    const card = await offering({ schedule: HELD });
+    await card.click('send-button');
+    await answerTool(card, spec.sendTool, { content: [], structuredContent: { orderId: 'ord_0001' } });
+    await card.click('cancel-scheduled-button');
+    await card.click('cancel-scheduled-button');
+
+    await answerTool(card, 'cancel_scheduled_mail', {
+      isError: true,
+      content: [{ type: 'text', text: "That order wasn't found. list_orders shows the orders on this account." }]
+    });
+    expect(card.text('scheduled-note')).toBe("That order wasn't found. list_orders shows the orders on this account.");
+    expect(card.visible('cancel-scheduled-button')).toBe(true);
+    expect(card.text('cancel-scheduled-button-text')).toBe(`Cancel this ${noun}`);
+
+    await card.click('cancel-scheduled-button');
+    await card.click('cancel-scheduled-button');
+    await answerTool(card, 'cancel_scheduled_mail', {
+      isError: true,
+      content: [
+        {
+          type: 'text',
+          text: "This order is going to the printer right now, so it can't be cancelled. get_order_status shows where it is."
+        }
+      ]
+    });
+    expect(card.text('scheduled-note')).toBe('It is going to the printer right now, so it can no longer be cancelled.');
+    expect(card.visible('cancel-scheduled-button')).toBe(false);
+  });
+
+  it("keeps a draft it made itself once a date is set on it, when the host's result comes late", async () => {
+    const card = mountInMcpHost(spec);
+    await flush();
+    await card.initialize();
+    await card.toolInput(spec.args);
+    await card.runTimer(spec.waitMs);
+    await card.click('retry-button');
+    await card.answer(
+      'tools/call',
+      {
+        result: {
+          content: [],
+          structuredContent: { ...spec.output('draft_retry', canSend), arrivalWindow: WINDOW },
+          _meta: spec.meta
+        }
+      },
+      spec.tool
+    );
+    await choose(card, '2026-10-16');
+    await answerTool(card, 'set_arrival_date', { content: [], structuredContent: { draftId: 'draft_retry', schedule: HELD } });
+
+    await card.toolResult({
+      content: [],
+      structuredContent: { ...spec.output('draft_0001', canSend), arrivalWindow: WINDOW },
+      _meta: spec.meta
+    });
+
+    expect(card.text('id-value')).toBe('draft_retry');
+    expect(dateInput(card).value).toBe('2026-10-16');
+    expect(card.text('send-button-text')).toBe(`Schedule ${Noun}`);
+  });
+
   it('draws the dates the draft has now, which a card shown its first preview again cannot know', async () => {
     const card = await offering();
 
@@ -647,5 +711,30 @@ describe.each([LETTER, POSTCARD])('$file: the arrival date (#535)', spec => {
     expect(card.visible('arrives-row')).toBe(false);
     expect(card.visible('scheduled')).toBe(true);
     expect(card.text('cancel-scheduled-button-text')).toBe(`Cancel this ${noun}`);
+  });
+
+  it('drops the Scheduled block when the host shows another draft', async () => {
+    const card = await offering();
+    await answerTool(card, 'get_draft_status', {
+      content: [],
+      structuredContent: {
+        draftId: 'draft_0001',
+        status: 'sent',
+        orderId: 'ord_0002',
+        schedule: { arriveBy: '2026-10-16', mailOn: '2026-10-06' }
+      }
+    });
+    expect(card.visible('scheduled')).toBe(true);
+
+    await card.toolResult({
+      content: [],
+      structuredContent: { ...spec.output('draft_0002', canSend), arrivalWindow: WINDOW },
+      _meta: spec.meta
+    });
+
+    expect(card.text('id-value')).toBe('draft_0002');
+    expect(card.visible('scheduled')).toBe(false);
+    expect(card.visible('arrives-row')).toBe(true);
+    expect(card.visible('send-button')).toBe(true);
   });
 });
