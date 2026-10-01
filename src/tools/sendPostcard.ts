@@ -8,6 +8,7 @@ import { processLetterJob } from '../services/letterJobService.js';
 import { asPostcardDraft, createMailOrderFromDraft } from '../services/mailSendService.js';
 import { hasReturnAddress } from '../services/returnAddressService.js';
 import type { LetterStatus } from '../services/types.js';
+import { heldSendFields, heldSendStatusText, waitsInOutbox, type HeldSendFields } from './heldSend.js';
 import { friendlyDraftError as sharedDraftError } from './draftErrors.js';
 import { sendToolDescription } from './previewSendStep.js';
 
@@ -25,7 +26,8 @@ type PublicStatus =
   | 'delivered'
   | 'returned'
   | 'failed'
-  | 'cancelled';
+  | 'cancelled'
+  | 'scheduled';
 
 interface SendPostcardOutput {
   orderId: string;
@@ -39,6 +41,10 @@ interface SendPostcardOutput {
   suggestSaveReturnAddress?: boolean;
   saveReturnAddressNote?: string;
   trackingSupport: 'none' | 'estimated_only' | 'carrier_tracking';
+  /** Sent with an arrival date (#535): its dates. */
+  schedule?: HeldSendFields['schedule'];
+  /** With a schedule: whether cancel_scheduled_mail can still cancel it free. */
+  cancellable?: boolean;
 }
 
 function publicStatus(status: LetterStatus): PublicStatus {
@@ -88,15 +94,20 @@ async function handler(
   const recipient = postcard.recipient as unknown as Address;
   context.user.creditsRemaining = created.creditsRemaining;
 
+  // A retry of a send already made: the letter as it stands now (#535).
+  const retryHeld = created.alreadyConsumed
+    ? heldSendFields(created.letter, waitsInOutbox(created.letter.status))
+    : undefined;
   if (created.alreadyConsumed) {
     return {
       orderId: created.letter.letter_id,
-      currentStatus: publicStatus(created.letter.status),
+      currentStatus: retryHeld?.cancellable ? 'scheduled' : publicStatus(created.letter.status),
       statusTimeline: [{ timestampISO: now, statusText: 'Existing order returned (duplicate request)' }],
       recipientSummary: { name: recipient.name, city: recipient.city, state: recipient.state },
       lettersRemaining: Math.floor(created.creditsRemaining / 2),
       isRetry: true,
       trackingSupport: 'estimated_only',
+      ...(retryHeld ?? {}),
     };
   }
 
@@ -108,18 +119,25 @@ async function handler(
   const submission = await processLetterJob(created.job.job_id);
   // Not claimed means queued, not failed: the outbox is paused (#444), or
   // another process took the job first. Either way it goes out from the queue.
+  // Sent with an arrival date (#535): until its mail date it waits in the
+  // outbox, and the dispatch above does not take it.
+  const held = heldSendFields(created.letter, !submission.claimed);
   const currentStatus: PublicStatus = submission.completed
     ? 'accepted'
-    : submission.retryScheduled || !submission.claimed
-      ? 'pending'
-      : 'failed';
+    : held?.cancellable
+      ? 'scheduled'
+      : submission.retryScheduled || !submission.claimed
+        ? 'pending'
+        : 'failed';
   const submissionText = submission.completed
     ? 'Accepted by print provider'
-    : !submission.claimed
-      ? 'Queued for the print provider'
-      : submission.retryScheduled
-        ? 'Provider temporarily unavailable; retry scheduled'
-        : 'Provider submission failed';
+    : held?.cancellable
+      ? heldSendStatusText(held.schedule, context.now())
+      : !submission.claimed
+        ? 'Queued for the print provider'
+        : submission.retryScheduled
+          ? 'Provider temporarily unavailable; retry scheduled'
+          : 'Provider submission failed';
 
   let suggestSaveReturnAddress: boolean | undefined;
   let saveReturnAddressNote: string | undefined;
@@ -167,6 +185,7 @@ async function handler(
     suggestSaveReturnAddress,
     saveReturnAddressNote,
     trackingSupport: 'estimated_only',
+    ...(held ?? {}),
   };
 }
 

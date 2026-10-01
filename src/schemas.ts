@@ -277,7 +277,7 @@ export const sendLetterOutputSchema: JsonSchema = {
   required: ["orderId", "currentStatus", "statusTimeline", "recipientSummary", "lettersRemaining"],
   properties: {
     orderId: { type: "string" },
-    currentStatus: { type: "string", enum: ["pending", "accepted", "printing", "in_transit", "delivered", "returned", "failed", "cancelled"] },
+    currentStatus: { type: "string", enum: ["pending", "accepted", "printing", "in_transit", "delivered", "returned", "failed", "cancelled", "scheduled"] },
     statusTimeline: {
       type: "array",
       items: {
@@ -301,6 +301,13 @@ export const sendLetterOutputSchema: JsonSchema = {
     lettersRemaining: { type: "number", description: "Number of letters remaining in user's balance" },
     previewFirstPageHtml: { type: "string" },
     isRetry: { type: "boolean", description: "True if this was an idempotent retry (draft already consumed)" },
+    schedule: {
+      type: "object",
+      description: "Sent with an arrival date: the date it aims to arrive by and the day it goes to the printer, YYYY-MM-DD. It waits until then.",
+      properties: { arriveBy: { type: "string" }, mailOn: { type: "string" } },
+      required: ["arriveBy", "mailOn"]
+    },
+    cancellable: { type: "boolean", description: "With an arrival date: whether cancel_scheduled_mail can still cancel it free" },
     trackingSupport: {
       type: "string",
       enum: ["none", "estimated_only", "carrier_tracking"],
@@ -515,6 +522,9 @@ export const getOrderStatusOutputSchema: JsonSchema = {
     },
     canSendFollowUp: { type: "boolean" },
     followUpSuggestedPrompt: { type: "string" },
+    arriveBy: { type: "string", description: "Sent with an arrival date: the date it aims to arrive by, YYYY-MM-DD" },
+    mailOn: { type: "string", description: "Sent with an arrival date: the day it goes to the printer, YYYY-MM-DD" },
+    cancellable: { type: "boolean", description: "With an arrival date: whether cancel_scheduled_mail can still cancel it free" },
     trackingSupport: {
       type: "string",
       enum: ["none", "estimated_only", "carrier_tracking"],
@@ -581,7 +591,10 @@ export const listOrdersOutputSchema: JsonSchema = {
             }
           },
           status: { type: "string" },
-          sentAt: { type: "string" }
+          sentAt: { type: "string" },
+          arriveBy: { type: "string", description: "Sent with an arrival date: the date it aims to arrive by, YYYY-MM-DD" },
+          mailOn: { type: "string", description: "Sent with an arrival date: the day it goes to the printer, YYYY-MM-DD" },
+          cancellable: { type: "boolean", description: "With an arrival date: whether cancel_scheduled_mail can still cancel it free" }
         }
       }
     },
@@ -875,7 +888,7 @@ export const sendPostcardOutputSchema: JsonSchema = {
   required: ["orderId", "currentStatus", "statusTimeline", "recipientSummary", "lettersRemaining"],
   properties: {
     orderId: { type: "string" },
-    currentStatus: { type: "string", enum: ["pending", "accepted", "printing", "in_transit", "delivered", "returned", "failed", "cancelled"] },
+    currentStatus: { type: "string", enum: ["pending", "accepted", "printing", "in_transit", "delivered", "returned", "failed", "cancelled", "scheduled"] },
     statusTimeline: {
       type: "array",
       items: {
@@ -900,6 +913,13 @@ export const sendPostcardOutputSchema: JsonSchema = {
     previewFrontHtml: { type: "string" },
     previewBackHtml: { type: "string" },
     isRetry: { type: "boolean", description: "True if this was an idempotent retry (draft already consumed)" },
+    schedule: {
+      type: "object",
+      description: "Sent with an arrival date: the date it aims to arrive by and the day it goes to the printer, YYYY-MM-DD. It waits until then.",
+      properties: { arriveBy: { type: "string" }, mailOn: { type: "string" } },
+      required: ["arriveBy", "mailOn"]
+    },
+    cancellable: { type: "boolean", description: "With an arrival date: whether cancel_scheduled_mail can still cancel it free" },
     trackingSupport: {
       type: "string",
       enum: ["none", "estimated_only", "carrier_tracking"],

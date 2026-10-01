@@ -387,6 +387,12 @@ export const quoteAndPreviewOutputZ = z.object({
   arrivalWindow: arrivalWindowZ.optional().describe(ARRIVAL_WINDOW_DESCRIPTION)
 });
 
+/** Held mail's two dates (#535), on what a send and the order status say. */
+const heldDatesZ = z.object({ arriveBy: z.string(), mailOn: z.string() });
+const HELD_SCHEDULE_DESCRIPTION =
+  "Sent with an arrival date: the date it aims to arrive by and the day it goes to the printer, YYYY-MM-DD. It waits until then.";
+const CANCELLABLE_DESCRIPTION = "With an arrival date: whether cancel_scheduled_mail can still cancel it free";
+
 export const sendLetterOutputZ = z.object({
   orderId: z.string(),
   currentStatus: z.string(),
@@ -396,7 +402,9 @@ export const sendLetterOutputZ = z.object({
   isRetry: z.boolean().optional(),
   trackingSupport: trackingSupportZ.optional(),
   saveReturnAddressNote: z.string().optional(),
-  suggestSaveReturnAddress: z.boolean().optional()
+  suggestSaveReturnAddress: z.boolean().optional(),
+  schedule: heldDatesZ.optional().describe(HELD_SCHEDULE_DESCRIPTION),
+  cancellable: z.boolean().optional().describe(CANCELLABLE_DESCRIPTION)
 });
 
 export const createMailCheckoutOutputZ = z.object({
@@ -493,7 +501,10 @@ export const getOrderStatusOutputZ = z.object({
   recipientSummary: recipientSummaryZ,
   canSendFollowUp: z.boolean().optional(),
   followUpSuggestedPrompt: z.string().optional(),
-  trackingSupport: trackingSupportZ.optional()
+  trackingSupport: trackingSupportZ.optional(),
+  arriveBy: z.string().optional().describe("Sent with an arrival date: the date it aims to arrive by, YYYY-MM-DD"),
+  mailOn: z.string().optional().describe("Sent with an arrival date: the day it goes to the printer, YYYY-MM-DD"),
+  cancellable: z.boolean().optional().describe(CANCELLABLE_DESCRIPTION)
 });
 
 export const getAccountBalanceOutputZ = z.object({
@@ -517,7 +528,10 @@ export const listOrdersOutputZ = z.object({
     orderId: z.string(),
     recipient: recipientSummaryZ.optional(),
     status: z.string().optional(),
-    sentAt: z.string().optional()
+    sentAt: z.string().optional(),
+    arriveBy: z.string().optional().describe("Sent with an arrival date: the date it aims to arrive by, YYYY-MM-DD"),
+    mailOn: z.string().optional().describe("Sent with an arrival date: the day it goes to the printer, YYYY-MM-DD"),
+    cancellable: z.boolean().optional().describe(CANCELLABLE_DESCRIPTION)
   })),
   total: z.number(),
   // Letter-pack purchases, newest first, in get_purchase_status's status
@@ -608,7 +622,9 @@ export const sendPostcardOutputZ = z.object({
   isRetry: z.boolean().optional(),
   trackingSupport: trackingSupportZ.optional(),
   saveReturnAddressNote: z.string().optional(),
-  suggestSaveReturnAddress: z.boolean().optional()
+  suggestSaveReturnAddress: z.boolean().optional(),
+  schedule: heldDatesZ.optional().describe(HELD_SCHEDULE_DESCRIPTION),
+  cancellable: z.boolean().optional().describe(CANCELLABLE_DESCRIPTION)
 });
 
 export const uploadPhotoChunkOutputZ = z.object({

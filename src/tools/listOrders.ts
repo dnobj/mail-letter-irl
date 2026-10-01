@@ -18,6 +18,10 @@ interface OrderSummary {
   recipient: { name: string; city: string; state: string };
   status: string;
   sentAt: string;
+  /** Sent with an arrival date (#535): its dates, and whether it can still be cancelled free. */
+  arriveBy?: string;
+  mailOn?: string;
+  cancellable?: boolean;
 }
 
 interface ListOrdersOutput {
@@ -56,7 +60,10 @@ async function handler(
     orderId: order.orderId,
     recipient: order.recipientSummary,
     status: order.currentStatus,
-    sentAt: order.statusTimeline[0]?.timestampISO ?? ""
+    sentAt: order.statusTimeline[0]?.timestampISO ?? "",
+    ...(order.schedule
+      ? { arriveBy: order.schedule.arriveBy, mailOn: order.schedule.mailOn, cancellable: order.cancellable === true }
+      : {})
   }));
 
   // Letter-pack purchases live in the orders table, not on the user record,

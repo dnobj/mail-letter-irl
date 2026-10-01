@@ -127,3 +127,72 @@ describe.each(tools)('%s', (_name, tool) => {
     expect(result.statusTimeline.at(-1).statusText).toBe('Accepted by print provider');
   });
 });
+
+describe.each(tools)('%s with an arrival date (#535)', (name, tool) => {
+  const run = (ctx: ToolContext = context()) =>
+    (tool.handler as (input: unknown, ctx: ToolContext) => Promise<any>)({ draftId: 'draft-1', confirm: true }, ctx);
+  const DATES = { arriveBy: '2026-10-16', mailOn: '2026-10-06' };
+  function dated(overrides: Record<string, unknown> = {}) {
+    const result = created();
+    Object.assign(result.letter, { arrive_by: DATES.arriveBy, mail_on: DATES.mailOn, ...overrides });
+    return result;
+  }
+
+  beforeEach(() => vi.clearAllMocks());
+
+  it('says it is scheduled, with its dates, while it waits for its mail date', async () => {
+    mocks.createMailOrderFromDraft.mockResolvedValue(dated());
+    mocks.processLetterJob.mockResolvedValue({ claimed: false, completed: false, retryScheduled: false });
+    const ctx = context();
+
+    const output = await run(ctx);
+
+    expect(output.currentStatus).toBe('scheduled');
+    expect(output.schedule).toEqual(DATES);
+    expect(output.cancellable).toBe(true);
+    expect(output.statusTimeline.at(-1).statusText).toBe(
+      'Scheduled: Goes to the printer Tue, Oct 6, and aims to arrive by Fri, Oct 16. It can be cancelled free until then.'
+    );
+    if (name === 'send_letter') {
+      // The order this session holds says the same.
+      expect(ctx.user.orders[0]).toMatchObject({ currentStatus: 'scheduled', schedule: DATES, cancellable: true });
+    }
+  });
+
+  it('says what happened, with its dates and no cancel, once the dispatch has taken it', async () => {
+    mocks.createMailOrderFromDraft.mockResolvedValue(dated());
+    mocks.processLetterJob.mockResolvedValue({ claimed: true, completed: true, retryScheduled: false });
+
+    const output = await run();
+
+    expect(output.currentStatus).toBe('accepted');
+    expect(output.schedule).toEqual(DATES);
+    expect(output.cancellable).toBe(false);
+    expect(output.statusTimeline.at(-1).statusText).toBe('Accepted by print provider');
+  });
+
+  it('says nothing of dates for mail sent without one', async () => {
+    mocks.createMailOrderFromDraft.mockResolvedValue(created());
+    mocks.processLetterJob.mockResolvedValue({ claimed: false, completed: false, retryScheduled: false });
+
+    const output = await run();
+
+    expect(output.currentStatus).toBe('pending');
+    expect(output.statusTimeline.at(-1).statusText).toBe('Queued for the print provider');
+    expect(JSON.parse(JSON.stringify(output))).not.toHaveProperty('schedule');
+    expect(JSON.parse(JSON.stringify(output))).not.toHaveProperty('cancellable');
+  });
+
+  it('answers a retry of a dated send as the letter stands now', async () => {
+    const waiting = dated();
+    waiting.alreadyConsumed = true;
+    mocks.createMailOrderFromDraft.mockResolvedValue(waiting);
+    expect(await run()).toMatchObject({ isRetry: true, currentStatus: 'scheduled', schedule: DATES, cancellable: true });
+
+    const mailed = dated({ status: 'accepted' });
+    mailed.alreadyConsumed = true;
+    mocks.createMailOrderFromDraft.mockResolvedValue(mailed);
+    expect(await run()).toMatchObject({ isRetry: true, currentStatus: 'accepted', schedule: DATES, cancellable: false });
+    expect(mocks.processLetterJob).not.toHaveBeenCalled();
+  });
+});

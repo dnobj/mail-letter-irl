@@ -96,5 +96,9 @@
  * r23: the four previews' output schema gains arrivalWindow (#535), the
  *     arrival dates on offer while the flag is on, for the cards' picker;
  *     set_arrival_date and cancel_scheduled_mail become callable by the cards.
+ * r24: mail sent with an arrival date (#535) is "scheduled" on send_letter,
+ *     send_postcard, get_order_status and list_orders, with its dates and
+ *     whether it can be cancelled, and the send and status narration say when
+ *     it goes to the printer and that cancel_scheduled_mail can cancel it.
  */
-export const STEERING_COPY_REV = 23;
+export const STEERING_COPY_REV = 24;

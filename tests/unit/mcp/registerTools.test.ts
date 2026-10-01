@@ -569,6 +569,27 @@ describe('cancel_scheduled_mail (#535)', () => {
     });
   });
 
+  it('narrates a scheduled send and order with their dates, and the cancel while it is possible', () => {
+    const schedule = { arriveBy: '2026-10-16', mailOn: '2026-10-06' };
+    const dates = /Goes to the printer Tue, Oct 6(, 2026)?, and aims to arrive by Fri, Oct 16(, 2026)?\./;
+    const letter = summarizeToolResult('send_letter', { orderId: 'ltr-1', currentStatus: 'scheduled', schedule, cancellable: true });
+    expect(letter).toMatch(/^Letter ltr-1 is scheduled\. /);
+    expect(letter).toMatch(dates);
+    expect(letter).toMatch(/It can be cancelled free until then with cancel_scheduled_mail\.$/);
+    expect(summarizeToolResult('send_postcard', { orderId: 'pc-1', currentStatus: 'scheduled', schedule, cancellable: true })).toMatch(
+      /^Postcard pc-1 is scheduled\. /
+    );
+    const order = summarizeToolResult('get_order_status', { orderId: 'ltr-1', currentStatus: 'scheduled', ...schedule, cancellable: false });
+    expect(order).toMatch(/^Latest order status: scheduled\. /);
+    expect(order).toMatch(dates);
+    expect(order).not.toMatch(/cancel/);
+    // Anything else reads as before.
+    expect(summarizeToolResult('send_letter', { orderId: 'ltr-2', currentStatus: 'accepted', schedule, cancellable: false })).toBe(
+      'Letter ltr-2 queued with status accepted.'
+    );
+    expect(summarizeToolResult('get_order_status', { currentStatus: 'delivered' })).toBe('Latest order status: delivered.');
+  });
+
   it("narrates the tool's own sentence", () => {
     const message = 'Cancelled. The letter it cost is back in the balance.';
     expect(summarizeToolResult('cancel_scheduled_mail', { orderId: 'o', message })).toBe(message);
