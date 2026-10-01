@@ -37,6 +37,17 @@ PostGrid fills two white boxes and stamps the addresses in them. The positions a
 
 It also strokes a white frame 1/8 in inside the page edge. `src/render/geometry.ts` keeps x 0.40-3.85 in and y 0.10-2.90 in clear, and stays 0.25 in from every edge. The body starts at 3.0 in; the legacy HTML guessed 3.5 in.
 
+**The stamp itself** (probe P6, decoded line by line):
+- Open Sans Regular at 9 pt, every line in upper case, from x 0.70 in.
+- Each line sits 0.177 in below the one before.
+- The return address starts at 0.438 in and the recipient at 2.094 in, each as name, street lines, then "CITY, ST ZIP" with a comma after the city.
+- Accents survive ("JOSÉ MUÑOZ ÑANDÚ", "DEPTO 4º").
+
+A preview draws the addresses the same way (`ADDRESS_STAMP` in `geometry.ts`, `stampedAddressLines` in `previewService.ts`), so the page shows what prints. What was not probed:
+- The addresses come from what we send, upper-cased by JavaScript's rules (ß becomes SS). Whether PostGrid standardises an address further before stamping it is not known.
+- P6 had a three-line return address and a four-line recipient. Whether PostGrid moves the first baseline for other line counts is not known.
+- The preview asks for Open Sans, which no card or confirm page loads, so viewers see a sans-serif fallback, slightly narrower than the print.
+
 ## What it means
 
 - **Path P (our own PDF).** Whatever we draw prints, whatever fonts PostGrid has. The Open Sans allow-list (`src/services/printableText.ts`) still governs the addresses, which PostGrid stamps. The cost is that the print is a 300 px per inch grayscale image, not vector text. Path H, HTML with embedded fonts, also works (P1), but PostGrid decides its line breaks.

@@ -13,6 +13,7 @@
 
 import { Address, LetterLayoutType } from "../contracts/types.js";
 import { giftLetterPageSvg, type CardFragment, type GiftCardContent } from "./giftCardRenderer.js";
+import { RENDERER_VERSION } from "../render/index.js";
 
 // ============================================================================
 // Character Limits by Layout Type
@@ -452,14 +453,27 @@ function renderInlineImagePreview(input: LayoutPreviewInput): string {
 }
 
 /**
+ * An address as PostGrid stamps it on a letter (probe P6): the name, the
+ * street lines, then "CITY, ST ZIP", in upper case. A preview draws these
+ * where PostGrid will. Whether PostGrid standardises an address further
+ * before stamping it was not probed.
+ */
+export function stampedAddressLines(address: Address): string[] {
+  return [address.name, address.addressLine1, address.addressLine2, `${address.city}, ${address.state} ${address.postalCode}`]
+    .filter((line): line is string => typeof line === 'string' && line.trim() !== '')
+    .map(line => line.trim().toUpperCase());
+}
+
+/**
  * The preview our own renderer draws (#534): each page as SVG, from the same
  * layout the PDF is printed from, in a minimal HTML document. The website's
  * confirm page shows it in a sandboxed iframe, where it scales to the frame's
  * width.
  *
- * The text is repeated, hidden, in the legacy preview's `letter-body` and
- * `sign-off` elements: the letter card reads it from there until it shows
- * the page itself (#534 Phase 3).
+ * `data-renderer` on the body names the renderer, and the letter card shows
+ * the pages of a document that carries it. The text is also repeated, hidden,
+ * in the legacy preview's `letter-body` and `sign-off` elements, which a card
+ * served before #534 Phase 3, still cached by an app, reads instead.
  */
 export function renderLetterPreviewDocument(
   pages: string[],
@@ -478,7 +492,7 @@ export function renderLetterPreviewDocument(
     svg + svg { margin-top: 12px; }
   </style>
 </head>
-<body>
+<body data-renderer="${RENDERER_VERSION}">
 ${pages.join('\n')}
   <div hidden>
     <div class="letter-body">${escapeHtml(trimmedBodyText)}</div>
