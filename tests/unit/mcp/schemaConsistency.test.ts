@@ -245,6 +245,9 @@ describe("request_send schema (#535)", () => {
     const served = requestSendOutputZ.shape.schedule;
     expect(served.isOptional()).toBe(true);
     expect(Object.keys(served.unwrap().shape)).toEqual(["arriveBy", "mailOn"]);
+    // Both dates required inside, on the served layer as on the JSON one.
+    expect(served.unwrap().shape.arriveBy.isOptional()).toBe(false);
+    expect(served.unwrap().shape.mailOn.isOptional()).toBe(false);
     const manifestLayer = (requestSendOutputSchema.properties as Record<string, { description?: string; required?: string[] }>).schedule;
     expect(manifestLayer.required).toEqual(["arriveBy", "mailOn"]);
     expect(served.description).toBe(manifestLayer.description);

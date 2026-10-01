@@ -583,7 +583,7 @@ describe.each([LETTER, POSTCARD])('$file: the arrival date (#535)', spec => {
     await card.click('cancel-scheduled-button');
     expect(card.lastRequest('tools/call', 'cancel_scheduled_mail')).toBeUndefined();
     expect(card.text('cancel-scheduled-button-text')).toBe(`Yes, cancel this ${noun}`);
-    expect(card.text('scheduled-note')).toBe('Cancel it? Nothing is mailed, and what paid for it comes back.');
+    expect(card.text('scheduled-note')).toBe('Cancel it? Nothing will be mailed.');
 
     await card.click('cancel-scheduled-button');
     expect(card.lastRequest('tools/call', 'cancel_scheduled_mail')!.params.arguments).toEqual({ orderId: 'ord_0001', confirm: true });

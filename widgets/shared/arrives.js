@@ -315,7 +315,9 @@
       if (!state.confirming) {
         state.confirming = true;
         state.error = false;
-        state.message = "Cancel it? Nothing is mailed, and what paid for it comes back.";
+        // Only what is sure: the answer says what came back, which may be
+        // less than it cost (refunded, or expired while it waited).
+        state.message = "Cancel it? Nothing will be mailed.";
         draw();
         return;
       }

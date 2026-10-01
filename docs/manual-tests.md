@@ -2277,8 +2277,10 @@ code and an audit row.
 
 ### SCHEDULE-01 — An arrival date on the card, scheduled, then cancelled (#535)
 
-**Status:** Not run. Each scheduled send uses a letter of the development balance (or a gift letter) and
-gives it back on cancel; a send left scheduled goes to PostGrid test mode on its mail date.
+**Status:** Not run end to end. Each scheduled send uses a letter of the development balance (or a gift
+letter) and gives it back on cancel; a send left scheduled goes to PostGrid test mode on its mail date.
+Checked on development without a send (2026-10-01): the served letter card carries the Arrives script
+(#559), and `request_send` answers a dated preview with its `schedule` (#561).
 
 **Preconditions:** Development, `LETTER_IRL_ARRIVE_BY_ENABLED` on; letters in the test account's balance;
 ChatGPT (DEV) with "Allow once", then Claude (DEV) for the MCP Apps card.
@@ -2300,6 +2302,12 @@ ChatGPT (DEV) with "Allow once", then Claude (DEV) for the MCP Apps card.
    scheduled, with Cancel.
 8. [ ] A postcard: repeat steps 1, 2 and 4 with **Schedule Postcard**; leave it scheduled, or send it now
    from the admin panel (ADMIN-CMD-04) and verify it reaches PostGrid test mode.
+9. [ ] On the development website, as the same account (website #47):
+   - the dashboard and **Your Letters** show a scheduled letter as **Scheduled**, with "Mails ... · aims
+     to arrive by ...", and the journey stands at **Scheduled to mail**;
+   - **Cancel**, then **Yes, cancel it**, shows the API's words about what came back and the balance after;
+   - a dated preview's confirm page (from `request_send`) names the mail date, says "cancel free until it
+     goes to the printer", and its button reads **Schedule this letter**.
 
 **Pass criteria:** The card offers only the dates on offer, schedules and cancels from the card, and a
 reopened card shows what happened.
