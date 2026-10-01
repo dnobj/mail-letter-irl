@@ -110,6 +110,30 @@ describe('LetterPreviewCard: the page as it prints', () => {
     expect(shown.querySelectorAll('text')).toHaveLength(7);
   });
 
+  it.each(['monogram', 'botanical', 'celebration'] as const)("keeps a %s page whole: its theme's paths, strokes and every size of outline (#563)", theme => {
+    const layout = layoutLetter({
+      text: 'Dear Sam,\nSee you soon.\nPat',
+      layoutType: 'text_only',
+      stationery: { theme, dateLine: 'October 1, 2026', monogram: 'PE', headline: 'Happy Birthday, Sam!' }
+    });
+    const source = renderLetterPreviewDocument(
+      renderPreviewSvg(layout, { addresses: { from: ['PAT EXAMPLE'], to: ['SAM RIVERA', 'NEW YORK, NY 10118'] } }),
+      { bodyText: 'Dear Sam,\nSee you soon.', signOff: 'Pat' }
+    );
+    const dom = mount(source);
+    const [original] = new dom.window.DOMParser().parseFromString(source, 'text/html').body.querySelectorAll(':scope > svg');
+    const [shown] = dom.window.document.querySelectorAll('.letter-page svg');
+    expectSameDrawing(original, shown);
+
+    const drawn = layout.pages[0].items.filter(item => item.kind === 'path');
+    const kept = [...shown.querySelectorAll(':scope > path')];
+    expect(drawn.length).toBeGreaterThan(1);
+    expect(kept.map(path => path.getAttribute('d'))).toEqual(drawn.map(path => path.d));
+    expect(kept.some(path => path.getAttribute('stroke') === '#222222' && path.getAttribute('fill') === 'none')).toBe(theme !== 'celebration');
+    const defined = new Set([...shown.querySelectorAll('defs path')].map(path => `#${path.getAttribute('id')}`));
+    for (const link of [...shown.querySelectorAll('use')].map(use => use.getAttribute('href')!)) expect(defined.has(link)).toBe(true);
+  });
+
   it("keeps a gift send's card whole, as the second page: its border, its QR, its outlines at every size", () => {
     const layout = layoutLetter({ text: 'Dear Sam,\nSee you soon.\nPat', layoutType: 'text_only' });
     const card = {

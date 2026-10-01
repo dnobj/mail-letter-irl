@@ -33,6 +33,7 @@ declare module 'fontkit' {
     unitsPerEm: number;
     ascent: number;
     descent: number;
+    capHeight: number;
     characterSet: number[];
     hasGlyphForCodePoint(codePoint: number): boolean;
     glyphForCodePoint(codePoint: number): Glyph;

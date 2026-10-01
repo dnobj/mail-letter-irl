@@ -5,7 +5,9 @@
  * src/config/printRenderer.ts) record RENDERER_VERSION and print from its PDF.
  */
 export { drawsGrapheme, layoutLetter, wrapParagraph } from './layout.js';
-export type { ImageBox, Layout, LayoutPage, LetterContent, TextRun } from './layout.js';
+export type { ImageBox, Layout, LayoutPage, LetterContent, PathItem, TextRun } from './layout.js';
+export { HEADLINE_LINES, headlineSize, slotText, STATIONERY_CORNER, STATIONERY_THEMES, StationeryOverflow } from './stationery.js';
+export type { Stationery, StationeryTheme } from './stationery.js';
 export { renderPdf, RENDERER_VERSION, PRINTABLE_RENDERER_VERSIONS } from './pdf.js';
 export { GiftPageOverflow, layoutGiftPage } from './giftPage.js';
 export type { GiftPageCopy } from './giftPage.js';

@@ -68,6 +68,25 @@ What they show:
 - The test-mode render shows no postage and no barcode.
 - PostGrid checks the back for content in its address region, after it accepts the postcard, and cancels the postcard if there is any. `src/render/postcard.ts` draws nothing right of the back's left half (`POSTCARD_HALF` in `geometry.ts`).
 
+## Stationery (#563)
+
+Probe P12 (October 1, 2026, `letter_k7rHRrWmsn28GJy64cSLHt`) asked two questions before any theme was offered. It was one letter page from a pdfkit script (`stationery-probe-build.mjs`), sent with `color: false` and the address zone left empty.
+
+| Part | Drawn | Came back |
+|------|-------|-----------|
+| The corner | A dashed outline of 4.0-8.0 in across and 0.35-2.85 in down, a 12 pt date line, and initials in a 0.75 pt ring | Whole. PostGrid's stamp, white boxes and frame touch none of it |
+| Sprigs | Line drawings stroked at 0.5, 0.75 and 1 pt in black, and at 0.75 pt in #555, #888 and #aaa | Every one crisp, every grey distinct |
+| Confetti | Small filled shapes in #000, #444, #777 and #aaa | All four greys distinct |
+| Rules | Lines across the body at 0.25 pt (#bbb, #ccc, #ddd, #e6e6e6) and 0.5 pt (#ccc, #ddd, #e6e6e6) | All visible. 0.5 pt rules keep their exact grey over two pixel rows. 0.25 pt rules come back lighter, spread over two rows: #bbb as 219, #e6e6e6 as 241 |
+| Tints | Squares of 5%, 10%, 15%, 20%, 30% and 50% grey | Exactly the drawn values: 242, 230, 217, 204, 179, 128 |
+
+The probe stayed `ready`, with nothing cancelled. The flattened page came back 2550 x 3300 at 300 px per inch.
+
+What it means for themes (`src/render/stationery.ts`):
+- **The corner beside the envelope window is free.** Themes draw their date line, monogram, sprigs and confetti in it (`STATIONERY_CORNER`).
+- **Draw lines at 0.5 pt or more,** and in greys from #222 to #aaa. A 0.25 pt rule prints lighter than drawn.
+- **Greys print as drawn in the PDF.** Whether a 5% tint shows on paper is a question for the live print, which test mode doesn't show.
+
 ## What it means
 
 - **Path P (our own PDF).** Whatever we draw prints, whatever fonts PostGrid has. The Open Sans allow-list (`src/services/printableText.ts`) still governs the addresses, which PostGrid stamps. The cost is that the print is a 300 px per inch grayscale image, not vector text. Path H, HTML with embedded fonts, also works (P1), but PostGrid decides its line breaks.
