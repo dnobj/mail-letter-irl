@@ -11,6 +11,7 @@
 
 import type pg from 'pg';
 import { transaction } from '../db/index.js';
+import { CREDITS_PER_LETTER } from '../config/products.js';
 import { writeDiagnostic } from '../utils/diagnosticLog.js';
 import { returnConsumedCreditsForLetter } from './creditLedgerService.js';
 import { returnGiftLetterForFailedSendWithClient } from './giftLetterService.js';
@@ -31,12 +32,27 @@ export type ScheduledMailRefusal =
   /** The outbox holds it at this moment: it is going to the printer now. */
   | 'busy';
 
+/**
+ * What of its cost did not come back usable:
+ * - `none`: all of it came back;
+ * - `partial`: some, the rest having been refunded with its pack or expired;
+ * - `expired`: none usable, because what paid for it ran out while the mail
+ *   was held (a returned lot keeps its expiry);
+ * - `refunded`: none, because it had already been paid back in cash (a
+ *   revoked lot, or a gift whose purchase was reversed).
+ */
+export type ReturnShortfall = 'none' | 'partial' | 'expired' | 'refunded';
+
 export interface CancelledScheduledMail {
   letterId: string;
   /** True when it was already cancelled: nothing changed and nothing went back. */
   alreadyCancelled: boolean;
-  /** What went back: the letters it cost, or its gift letter. */
+  /**
+   * What went back usable, in the units the account shows: letters
+   * (CREDITS_PER_LETTER credits each, whole letters only), or its gift letter.
+   */
   returned: { kind: 'letters' | 'gift_letter'; count: number };
+  shortfall: ReturnShortfall;
   arriveBy: string | null;
   mailOn: string | null;
 }
@@ -48,6 +64,7 @@ export type CancelScheduledMailResult =
 interface HeldLetterRow {
   status: string;
   funding_type: string;
+  credits_cost: number;
   arrive_by: string | null;
   mail_on: string | null;
 }
@@ -115,18 +132,17 @@ export async function cancelScheduledMailWithClient(
   };
 
   const letterResult = await client.query<HeldLetterRow>(
-    `SELECT status, funding_type, arrive_by, mail_on FROM letters
+    `SELECT status, funding_type, credits_cost, arrive_by, mail_on FROM letters
       WHERE letter_id = $1 AND user_id = $2
       FOR UPDATE`,
     [params.letterId, params.userId]
   );
   const letter = letterResult.rows[0];
   if (!letter) return refuse('not_found');
-  // Refused here, holding only the letter and waiting on nothing after it, so
-  // the order-first lock order of Pay & Send's fulfilment cannot deadlock it.
-  if (letter.funding_type === 'jit_order') return refuse('pay_and_send');
-  if (letter.mail_on === null) return refuse('not_scheduled');
 
+  // Where it is first, so each answer is true of it: a letter a refund
+  // cancelled is already cancelled, and one already printed is too late,
+  // whatever paid for it or whether it had a date.
   const dates = { arriveBy: letter.arrive_by, mailOn: letter.mail_on };
   if (letter.status === 'cancelled') {
     return {
@@ -135,11 +151,16 @@ export async function cancelScheduledMailWithClient(
         letterId: params.letterId,
         alreadyCancelled: true,
         returned: { kind: returnedKind(letter.funding_type), count: 0 },
+        shortfall: 'none',
         ...dates
       }
     };
   }
   if (letter.status !== 'queued') return refuse('too_late');
+  // Refused here, holding only the letter and waiting on nothing after it, so
+  // the order-first lock order of Pay & Send's fulfilment cannot deadlock it.
+  if (letter.funding_type === 'jit_order') return refuse('pay_and_send');
+  if (letter.mail_on === null) return refuse('not_scheduled');
 
   const jobResult = await client.query<HeldJobRow>(
     `SELECT job_id, status, provider_outcome FROM letter_jobs
@@ -177,22 +198,72 @@ export async function cancelScheduledMailWithClient(
     failureCode: CANCELLED_BY_CUSTOMER,
     cause: 'cancelled' as const
   };
-  const count =
+  const back =
     letter.funding_type === 'gift_letter'
-      ? await returnGiftLetterForFailedSendWithClient(client, returnParams)
-      : await returnConsumedCreditsForLetter(client, returnParams);
+      ? await giftBack(client, returnParams)
+      : await creditsBack(client, returnParams, letter.credits_cost);
 
   writeDiagnostic('info', 'schedule.cancelled', {
     fundingType: letter.funding_type,
-    returned: count
+    returned: back.count,
+    shortfall: back.shortfall
   });
   return {
     ok: true,
     cancelled: {
       letterId: params.letterId,
       alreadyCancelled: false,
-      returned: { kind: returnedKind(letter.funding_type), count },
+      returned: { kind: returnedKind(letter.funding_type), count: back.count },
+      shortfall: back.shortfall,
       ...dates
     }
   };
+}
+
+type ReturnParams = Parameters<typeof returnConsumedCreditsForLetter>[1];
+
+async function giftBack(
+  client: Pick<pg.PoolClient, 'query'>,
+  params: ReturnParams
+): Promise<{ count: number; shortfall: ReturnShortfall }> {
+  const count = await returnGiftLetterForFailedSendWithClient(client, params);
+  // The returned gift gets a fresh lifetime at least, so it is never expired.
+  return { count, shortfall: count > 0 ? 'none' : 'refunded' };
+}
+
+/**
+ * A prepaid letter's credits back, counted in letters, and what of its cost
+ * did not come back usable. The return keeps each lot's expiry, so credits
+ * whose lot ran out while the mail was held come back already expired: they
+ * are not counted, and the shortfall says why.
+ */
+async function creditsBack(
+  client: Pick<pg.PoolClient, 'query'>,
+  params: ReturnParams,
+  creditsCost: number
+): Promise<{ count: number; shortfall: ReturnShortfall }> {
+  const credits = await returnConsumedCreditsForLetter(client, params);
+  const expired =
+    credits > 0
+      ? Number(
+          (
+            await client.query<{ expired: number }>(
+              `SELECT COALESCE(SUM(initial_amount), 0)::int AS expired
+                 FROM credit_ledger
+                WHERE user_id = $1
+                  AND source_type = 'adjustment'
+                  AND source_metadata->>'letter_id' = $2
+                  AND source_metadata->>'reason' = 'send_failed'
+                  AND expires_at IS NOT NULL
+                  AND expires_at <= NOW()`,
+              [params.userId, params.letterId]
+            )
+          ).rows[0]?.expired ?? 0
+        )
+      : 0;
+  const usable = credits - expired;
+  const count = Math.floor(usable / CREDITS_PER_LETTER);
+  const shortfall: ReturnShortfall =
+    usable >= creditsCost ? 'none' : usable > 0 ? 'partial' : expired > 0 ? 'expired' : 'refunded';
+  return { count, shortfall };
 }

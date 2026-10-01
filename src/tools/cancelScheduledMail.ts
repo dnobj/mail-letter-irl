@@ -79,15 +79,20 @@ export const SCHEDULED_MAIL_REFUSALS: Record<ScheduledMailRefusal, [ScheduledMai
   ]
 };
 
-/** What a cancel says went back. */
+/** What a cancel says went back, in letters, never credits. */
 export function cancelledMessage(cancelled: CancelledScheduledMail): string {
   if (cancelled.alreadyCancelled) {
     return 'This order was already cancelled, so nothing changed.';
   }
-  const { kind, count } = cancelled.returned;
-  if (count === 0) {
-    return 'Cancelled. Nothing went back to the account: what paid for it had already been refunded.';
+  switch (cancelled.shortfall) {
+    case 'partial':
+      return 'Cancelled. Part of what it cost is back in the balance; the rest had been refunded or had expired.';
+    case 'expired':
+      return 'Cancelled. What paid for it expired while it waited, so nothing came back to the balance.';
+    case 'refunded':
+      return 'Cancelled. Nothing went back to the account: what paid for it had already been refunded.';
   }
+  const { kind, count } = cancelled.returned;
   if (kind === 'gift_letter') return 'Cancelled. The gift letter is back in the account, to use again.';
   return `Cancelled. ${count === 1 ? 'The letter it cost is' : `The ${count} letters it cost are`} back in the balance.`;
 }

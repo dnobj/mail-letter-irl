@@ -20,7 +20,7 @@ import {
 
 const LETTER = 'ltr-1';
 const USER = 'auth0|owner';
-const HELD = { status: 'queued', funding_type: 'prepaid_balance', arrive_by: '2026-10-16', mail_on: '2026-10-06' };
+const HELD = { status: 'queued', funding_type: 'prepaid_balance', credits_cost: 2, arrive_by: '2026-10-16', mail_on: '2026-10-06' };
 const JOB = { job_id: 'job-1', status: 'pending', provider_outcome: 'not_dispatched' };
 
 /** A transaction whose statements answer in turn; the client is returned to read its calls. */
@@ -45,22 +45,24 @@ beforeEach(() => {
 });
 
 describe('cancelScheduledMail (#535)', () => {
-  it("cancels held prepaid mail: locks the caller's letter, then its job without waiting, cancels both, records it and returns the letters", async () => {
+  it("cancels held prepaid mail: locks the caller's letter, then its job without waiting, cancels both, records it and returns the letter", async () => {
     const client = inTransaction({ rows: [HELD] }, { rows: [JOB] });
 
+    // The return gives back 2 credits: one letter (CREDITS_PER_LETTER), not two.
     await expect(cancel()).resolves.toEqual({
       ok: true,
       cancelled: {
         letterId: LETTER,
         alreadyCancelled: false,
-        returned: { kind: 'letters', count: 2 },
+        returned: { kind: 'letters', count: 1 },
+        shortfall: 'none',
         arriveBy: '2026-10-16',
         mailOn: '2026-10-06'
       }
     });
 
     const [letterLock, jobLock, jobUpdate, letterUpdate, history] = client.query.mock.calls as Array<[string, unknown[]]>;
-    expect(letterLock[0]).toMatch(/FROM letters\s+WHERE letter_id = \$1 AND user_id = \$2\s+FOR UPDATE$/);
+    expect(letterLock[0]).toMatch(/SELECT status, funding_type, credits_cost, arrive_by, mail_on FROM letters\s+WHERE letter_id = \$1 AND user_id = \$2\s+FOR UPDATE$/);
     expect(letterLock[1]).toEqual([LETTER, USER]);
     expect(jobLock[0]).toMatch(/FROM letter_jobs\s+WHERE letter_id = \$1\s+FOR UPDATE NOWAIT$/);
     expect(jobUpdate[0]).toMatch(/UPDATE letter_jobs\s+SET status = 'cancelled', locked_at = NULL, completed_at = NOW\(\),\s+last_error = \$2/);
@@ -90,10 +92,44 @@ describe('cancelScheduledMail (#535)', () => {
     expect(returnConsumedCreditsForLetter).not.toHaveBeenCalled();
   });
 
-  it('says what went back when nothing could (what paid for it was refunded)', async () => {
+  it('counts as refunded what the return could not give back, asking nothing more', async () => {
     vi.mocked(returnConsumedCreditsForLetter).mockResolvedValue(0);
+    const client = inTransaction({ rows: [HELD] }, { rows: [JOB] });
+    await expect(cancel()).resolves.toMatchObject({
+      ok: true,
+      cancelled: { returned: { kind: 'letters', count: 0 }, shortfall: 'refunded' }
+    });
+    expect(client.query).toHaveBeenCalledTimes(5);
+  });
+
+  it("does not count credits that came back already expired: their lot ran out while the mail was held", async () => {
+    const client = inTransaction({ rows: [HELD] }, { rows: [JOB] }, { rows: [] }, { rows: [] }, { rows: [] }, { rows: [{ expired: 2 }] });
+
+    await expect(cancel()).resolves.toMatchObject({
+      ok: true,
+      cancelled: { returned: { kind: 'letters', count: 0 }, shortfall: 'expired' }
+    });
+    const [expiredSql, expiredParams] = client.query.mock.calls[5] as [string, unknown[]];
+    expect(expiredSql).toMatch(/SUM\(initial_amount\)[\s\S]*source_metadata->>'letter_id' = \$2[\s\S]*source_metadata->>'reason' = 'send_failed'[\s\S]*expires_at <= NOW\(\)/);
+    expect(expiredParams).toEqual([USER, LETTER]);
+  });
+
+  it('calls part of it back a partial return: a credit refunded or expired', async () => {
+    vi.mocked(returnConsumedCreditsForLetter).mockResolvedValue(1);
     inTransaction({ rows: [HELD] }, { rows: [JOB] });
-    await expect(cancel()).resolves.toMatchObject({ ok: true, cancelled: { returned: { kind: 'letters', count: 0 } } });
+    await expect(cancel()).resolves.toMatchObject({
+      ok: true,
+      cancelled: { returned: { kind: 'letters', count: 0 }, shortfall: 'partial' }
+    });
+  });
+
+  it('counts a gift that could not come back as refunded', async () => {
+    vi.mocked(returnGiftLetterForFailedSendWithClient).mockResolvedValue(0);
+    inTransaction({ rows: [{ ...HELD, funding_type: 'gift_letter' }] }, { rows: [JOB] });
+    await expect(cancel()).resolves.toMatchObject({
+      ok: true,
+      cancelled: { returned: { kind: 'gift_letter', count: 0 }, shortfall: 'refunded' }
+    });
   });
 
   it('answers a letter already cancelled as cancelled, changing and returning nothing', async () => {
@@ -105,6 +141,7 @@ describe('cancelScheduledMail (#535)', () => {
         letterId: LETTER,
         alreadyCancelled: true,
         returned: { kind: 'letters', count: 0 },
+        shortfall: 'none',
         arriveBy: '2026-10-16',
         mailOn: '2026-10-06'
       }
@@ -118,7 +155,10 @@ describe('cancelScheduledMail (#535)', () => {
     ['Pay & Send', [{ ...HELD, funding_type: 'jit_order' }], 'pay_and_send'],
     ['sent with no arrival date', [{ ...HELD, arrive_by: null, mail_on: null }], 'not_scheduled'],
     ['at the printer', [{ ...HELD, status: 'accepted' }], 'too_late'],
-    ['failed', [{ ...HELD, status: 'failed' }], 'too_late']
+    ['failed', [{ ...HELD, status: 'failed' }], 'too_late'],
+    // Where it is comes first: printed mail is too late whatever paid for it.
+    ['Pay & Send, already printed', [{ ...HELD, funding_type: 'jit_order', status: 'accepted' }], 'too_late'],
+    ['sent with no date, already printed', [{ ...HELD, arrive_by: null, mail_on: null, status: 'accepted' }], 'too_late']
   ])('refuses a letter that is %s, reading nothing more', async (_label, rows, refusal) => {
     const client = inTransaction({ rows });
 
@@ -138,6 +178,14 @@ describe('cancelScheduledMail (#535)', () => {
     await expect(cancel()).resolves.toEqual({ ok: false, refusal: 'too_late' });
     expect(client.query).toHaveBeenCalledTimes(2);
     expect(returnConsumedCreditsForLetter).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['Pay & Send cancelled by a refund', { funding_type: 'jit_order' }],
+    ['sent with no date, cancelled by a refund', { arrive_by: null, mail_on: null }]
+  ])('answers a letter that is %s as already cancelled', async (_label, overrides) => {
+    inTransaction({ rows: [{ ...HELD, ...overrides, status: 'cancelled' }] });
+    await expect(cancel()).resolves.toMatchObject({ ok: true, cancelled: { alreadyCancelled: true } });
   });
 
   it("answers 'busy' when the outbox holds the job's lock, rather than waiting", async () => {

@@ -60,6 +60,7 @@ describe('POST /api/letters/:letterId/cancel (#535)', () => {
         letterId: 'ltr 1',
         alreadyCancelled: false,
         returned: { kind: 'letters', count: 1 },
+        shortfall: 'none',
         arriveBy: '2026-10-16',
         mailOn: '2026-10-06'
       }

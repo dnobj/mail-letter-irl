@@ -43,7 +43,9 @@ function inserts(c: ReturnType<typeof client>) {
   };
 }
 
-beforeEach(() => vi.mocked(writeDiagnostic).mockClear());
+beforeEach(() => {
+  vi.mocked(writeDiagnostic).mockClear();
+});
 
 describe('returnConsumedCreditsForLetter: the cause (#535)', () => {
   it('words a cancel as a cancel, under the failed send record', async () => {

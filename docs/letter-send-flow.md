@@ -168,16 +168,17 @@ Database constraints enforce one outbox row and one stable idempotency key per l
     - the account last, inside the return.
   - **It writes:** the job and the letter `cancelled` (the job's `last_error` `cancelled_by_customer`), and a `letter_status_history` row with source `customer`.
   - **What goes back:**
-    - a prepaid letter's credits, through `returnConsumedCreditsForLetter`, on lots that keep their expiry;
+    - a prepaid letter's credits, through `returnConsumedCreditsForLetter`, on lots that keep their expiry. The answer counts them in letters (two credits each), never credits, and only those still usable. Credits whose lot ran out while the mail was held come back already expired, and the answer says so; whether a cancel should give them new life, as a gift gets, is the owner's call;
     - a gift letter, through `returnGiftLetterForFailedSendWithClient`, its printed code voided as `send_cancelled`.
     - Both use the failed send's exactly-once records (reason or source `send_failed`), so a replay returns nothing and the operator's retry guard (`isLetterAlreadyCompensated`) counts a cancel. `failure_code` and the descriptions say it was cancelled.
-  - **Refused:**
+  - **Refused**, where it is checked first so each answer is true of it (a letter a refund cancelled is already cancelled; printed mail is too late, whatever paid for it):
     - someone else's or a missing letter, as not found;
     - mail with no date;
     - mail the outbox has taken, or that failed;
     - Pay & Send, whose refunds a person decides (support@letterirl.com).
   - **A repeat** answers as already cancelled, and nothing more goes back.
   - **Cancelled letters free the duplicate guard**, so the same mail can be sent again.
+  - **The outbox never brings a cancelled job back.** Its failure-before-dispatch path skips a job cancelled meanwhile, so a claimant that stalled past its lock cannot return it to pending.
 - **A passed mail date:** today counts as a mail date until noon New York time on a business day, so a draft previewed before the cutoff and sent after it has missed its date.
   - A prepaid or gift send is then refused with `SCHEDULE_PASSED`, before anything is written: "The day this letter was to go to the printer has passed…". The person previews again with a new date.
   - A Pay & Send checkout refuses such a draft before the charge. A paid order whose date passes before fulfilment mails as soon as it can instead, logging `send.schedule_missed`, because refusing after the charge would strand the money.

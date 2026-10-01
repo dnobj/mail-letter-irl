@@ -327,6 +327,12 @@ describe('mail outbox retries', () => {
     // first and this counter stays at zero.
     expect(getProviderForMailType).toHaveBeenCalledTimes(1);
     expect(sendLetter).not.toHaveBeenCalled();
+    // A job cancelled meanwhile (#535: a customer's cancel of held mail) is
+    // never brought back to pending by a claimant that lost it.
+    const failed = clientQuery.mock.calls
+      .map(([sql]) => String(sql).replace(/\s+/g, ' '))
+      .find(sql => sql.includes('UPDATE letter_jobs SET status = $2::varchar'));
+    expect(failed).toContain("WHERE job_id = $1 AND provider_outcome = 'not_dispatched' AND status <> 'cancelled'");
     expect(clientQuery).not.toHaveBeenCalledWith(
       expect.stringContaining("SET status = 'held'"),
       expect.anything()

@@ -407,9 +407,10 @@ describePostgres('arrive-by (migration 040, #535)', () => {
       const letterId = await sendHeld(userId);
       expect(await creditsOf(userId)).toBe(8);
 
+      // Two credits back: one letter.
       await expect(held.cancelScheduledMail({ letterId, userId })).resolves.toMatchObject({
         ok: true,
-        cancelled: { letterId, alreadyCancelled: false, returned: { kind: 'letters', count: 2 } }
+        cancelled: { letterId, alreadyCancelled: false, returned: { kind: 'letters', count: 1 }, shortfall: 'none' }
       });
 
       const letter = (await pool.query('SELECT status FROM letters WHERE letter_id = $1', [letterId])).rows[0];
@@ -455,6 +456,26 @@ describePostgres('arrive-by (migration 040, #535)', () => {
       if (savedSwitch === undefined) delete process.env.LETTER_IRL_OUTBOX_DISPATCH_ENABLED;
       else process.env.LETTER_IRL_OUTBOX_DISPATCH_ENABLED = savedSwitch;
     }
+  }, 60_000);
+
+  it("says so when what paid for it expired while it was held: the credits come back on the lot's expiry, not counted", async () => {
+    const userId = await seedUser();
+    const letterId = await sendHeld(userId);
+    // The lot it was paid from runs out while the mail waits.
+    await pool.query(
+      "UPDATE credit_ledger SET expires_at = NOW() - INTERVAL '1 minute', expiration_policy = 'days_from_activation' WHERE user_id = $1 AND source_metadata IS NULL",
+      [userId]
+    );
+
+    await expect(held.cancelScheduledMail({ letterId, userId })).resolves.toMatchObject({
+      ok: true,
+      cancelled: { alreadyCancelled: false, returned: { kind: 'letters', count: 0 }, shortfall: 'expired' }
+    });
+    const back = await pool.query(
+      "SELECT initial_amount FROM credit_ledger WHERE user_id = $1 AND source_metadata->>'letter_id' = $2 AND expires_at <= NOW()",
+      [userId, letterId]
+    );
+    expect(back.rows).toEqual([{ initial_amount: 2 }]);
   }, 60_000);
 
   it('cancels held gift mail: the gift letter comes back once and its printed code is voided as cancelled', async () => {

@@ -35,6 +35,7 @@ const cancelled = (overrides: Record<string, unknown> = {}) => ({
     letterId: ORDER,
     alreadyCancelled: false,
     returned: { kind: 'letters' as const, count: 1 },
+    shortfall: 'none' as const,
     arriveBy: '2026-10-16',
     mailOn: '2026-10-06',
     ...overrides
@@ -62,9 +63,24 @@ describe('cancel_scheduled_mail (#535)', () => {
   it.each([
     [{ returned: { kind: 'letters', count: 2 } }, 'Cancelled. The 2 letters it cost are back in the balance.'],
     [{ returned: { kind: 'gift_letter', count: 1 } }, 'Cancelled. The gift letter is back in the account, to use again.'],
-    [{ returned: { kind: 'letters', count: 0 } }, 'Cancelled. Nothing went back to the account: what paid for it had already been refunded.'],
+    [
+      { returned: { kind: 'letters', count: 0 }, shortfall: 'refunded' },
+      'Cancelled. Nothing went back to the account: what paid for it had already been refunded.'
+    ],
+    [
+      { returned: { kind: 'letters', count: 0 }, shortfall: 'expired' },
+      'Cancelled. What paid for it expired while it waited, so nothing came back to the balance.'
+    ],
+    [
+      { returned: { kind: 'letters', count: 0 }, shortfall: 'partial' },
+      'Cancelled. Part of what it cost is back in the balance; the rest had been refunded or had expired.'
+    ],
+    [
+      { returned: { kind: 'gift_letter', count: 0 }, shortfall: 'refunded' },
+      'Cancelled. Nothing went back to the account: what paid for it had already been refunded.'
+    ],
     [{ alreadyCancelled: true, returned: { kind: 'letters', count: 0 } }, 'This order was already cancelled, so nothing changed.']
-  ])('says what went back (%j)', async (overrides, message) => {
+  ])('says what went back, in letters (%j)', async (overrides, message) => {
     vi.mocked(cancelScheduledMail).mockResolvedValue(cancelled(overrides));
     await expect(run({ orderId: ORDER, confirm: true })).resolves.toMatchObject({ message });
   });
