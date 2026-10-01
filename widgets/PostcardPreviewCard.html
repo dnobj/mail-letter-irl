@@ -2007,6 +2007,13 @@
         link.style.display = "flex";
       }
 
+      // The Arrives row after a checkout that did not open, drawn as render()
+      // would draw it now: a host redraw during the call took it away.
+      function showPickerAgain() {
+        const output = retryResult ? retryResult.output : host.toolOutput();
+        picker.show(currentDraftId, output, cardIsShowingDraft() && !settledDraft() && !sendPageShown());
+      }
+
       async function handlePayAndSend() {
         if (checkoutInProgress || !currentDraftId) return;
         draftActedOn = true;
@@ -2030,7 +2037,7 @@
             const duplicate = duplicateDetails(raw, null);
             if (duplicate) {
               showDuplicate(duplicate, "pay");
-              picker.restore();
+              showPickerAgain();
               return;
             }
             throw new Error(resultText(raw) || "Checkout URL was not returned");
@@ -2093,11 +2100,11 @@
           const duplicate = duplicateDetails(null, error);
           if (duplicate) {
             showDuplicate(duplicate, "pay");
-            picker.restore();
+            showPickerAgain();
             return;
           }
           // No checkout: the date row comes back with the button.
-          picker.restore();
+          showPickerAgain();
           errorMessage.textContent = `Unable to open checkout: ${readableError(error)}`;
           errorMessage.style.display = "block";
           button.classList.remove("loading");

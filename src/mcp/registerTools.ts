@@ -1276,8 +1276,17 @@ export function sendLinkText(result: RequestSendOutput): string {
   const to = result.recipientSummary?.name ? ` to ${result.recipientSummary.name}` : "";
   return (
     `Ask the person to open ${result.confirmationUrl} to check the ${what}${to} and send it themselves. ` +
+    whenSentText(result) +
     `Nothing is sent until they press Send there. The link works until ${result.expiresAtISO}.`
   );
+}
+
+/** For a preview with an arrival date (#535): when, once sent, it goes to the printer. */
+function whenSentText(result: RequestSendOutput): string {
+  const schedule = result.schedule;
+  if (typeof schedule?.arriveBy !== "string" || typeof schedule.mailOn !== "string") return "";
+  const sentence = scheduleSentence({ arriveBy: schedule.arriveBy, mailOn: schedule.mailOn }, new Date());
+  return `Once sent, it ${sentence.charAt(0).toLowerCase()}${sentence.slice(1)} `;
 }
 
 /**

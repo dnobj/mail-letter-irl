@@ -14,12 +14,14 @@ import {
   setArrivalDateInputZ,
   setArrivalDateOutputZ,
   cancelScheduledMailInputZ,
-  cancelScheduledMailOutputZ } from "../../../src/zodSchemas.js";
+  cancelScheduledMailOutputZ,
+  requestSendOutputZ } from "../../../src/zodSchemas.js";
 import {
   setArrivalDateInputSchema,
   setArrivalDateOutputSchema,
   cancelScheduledMailInputSchema,
-  cancelScheduledMailOutputSchema
+  cancelScheduledMailOutputSchema,
+  requestSendOutputSchema
 } from "../../../src/schemas.js";
 import { toolInputSchemas } from "../../../src/mcp/toolSchemas.js";
 import { buildManifest } from "../../../src/mcp/manifest.js";
@@ -231,5 +233,20 @@ describe("cancel_scheduled_mail schema (#535)", () => {
 
   it("is left out of the manifest, which is generated with arrival dates off", () => {
     expect(getManifestTool("cancel_scheduled_mail")).toBeUndefined();
+  });
+});
+
+describe("request_send schema (#535)", () => {
+  it("names the same outputs in the runtime Zod schema and the JSON schema, schedule optional with both dates", () => {
+    const zodKeys = Object.keys(requestSendOutputZ.shape);
+    expect(zodKeys).toContain("schedule");
+    expect(Object.keys(requestSendOutputSchema.properties ?? {})).toEqual(zodKeys);
+    expect(requestSendOutputSchema.required).toEqual(zodKeys.filter((key) => key !== "schedule"));
+    const served = requestSendOutputZ.shape.schedule;
+    expect(served.isOptional()).toBe(true);
+    expect(Object.keys(served.unwrap().shape)).toEqual(["arriveBy", "mailOn"]);
+    const manifestLayer = (requestSendOutputSchema.properties as Record<string, { description?: string; required?: string[] }>).schedule;
+    expect(manifestLayer.required).toEqual(["arriveBy", "mailOn"]);
+    expect(served.description).toBe(manifestLayer.description);
   });
 });

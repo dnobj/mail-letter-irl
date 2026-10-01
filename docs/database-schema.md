@@ -214,7 +214,7 @@ Sent letters with content and tracking.
 | content | JSONB | NO | - | Letter content (body, sender, etc.) |
 | recipient | JSONB | NO | - | Recipient address |
 | credits_cost | INTEGER | NO | - | Credits charged (> 0) |
-| status | VARCHAR(50) | NO | - | queued, processing, sent, failed, cancelled |
+| status | VARCHAR(50) | NO | - | draft, queued, processing, held, sent, accepted, in_transit, delivered, returned, failed, cancelled (migration 023's `valid_letter_status`) |
 | preview_html | TEXT | YES | - | The draft's preview, copied at send: legacy HTML, or the page as SVG for a `pdf-1` letter (#534) |
 | tracking_id | VARCHAR(255) | YES | - | Provider tracking ID (PostGrid) |
 | provider | VARCHAR(50) | YES | - | postgrid, dummy |

@@ -440,6 +440,15 @@ describe("the send rule in the MCP server (#470)", () => {
     expect(text).toContain("Nothing is sent until they press Send there.");
     expect(text).toContain(`The link works until ${LINK.expiresAtISO}.`);
     expect(sendLinkText({ ...LINK, recipientSummary: { name: "", city: "", state: "" } } as any)).toContain("to check the letter and send");
+    // Without dates, nothing about them.
+    expect(sendLinkText(LINK as any)).not.toMatch(/printer|arrive/);
+  });
+
+  it("says when mail with an arrival date goes to the printer once sent (#535)", () => {
+    const text = sendLinkText({ ...LINK, schedule: { arriveBy: "2026-10-16", mailOn: "2026-10-06" } } as any);
+    expect(text).toMatch(
+      /send it themselves\. Once sent, it goes to the printer Tue, Oct 6(, 2026)?, and aims to arrive by Fri, Oct 16(, 2026)?\. Nothing is sent until they press Send there\./
+    );
   });
 
   it("hides get_draft_status from the model whatever the rule, and asks for no person (#474)", () => {

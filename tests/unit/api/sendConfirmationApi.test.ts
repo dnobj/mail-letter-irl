@@ -229,7 +229,8 @@ describe('the confirmation page API (#470)', () => {
         lettersRequired: 1,
         lettersAvailable: 3,
         isGiftSend: false,
-        recipient: { name: 'Sam Rivera', addressLine1: '1 Main St', city: 'Austin', state: 'TX', postalCode: '78701' }
+        recipient: { name: 'Sam Rivera', addressLine1: '1 Main St', city: 'Austin', state: 'TX', postalCode: '78701' },
+        schedule: null
       });
       // Only the address fields the page shows.
       expect(json().recipient.country).toBeUndefined();
@@ -250,6 +251,14 @@ describe('the confirmation page API (#470)', () => {
       expect(writeSpy).toHaveBeenCalledWith('info', 'send.confirmation_viewed', { mailType: 'letter', state: expected });
     });
 
+    it("shows a draft's arrival dates, and none it cannot read (#535)", async () => {
+      signedIn();
+      vi.mocked(getDraft).mockResolvedValue(draft({ arrive_by: '2026-10-16', mail_on: '2026-10-06' }) as any);
+      expect((await call('GET')).json().schedule).toEqual({ arriveBy: '2026-10-16', mailOn: '2026-10-06' });
+      vi.mocked(getDraft).mockResolvedValue(draft({ arrive_by: '2026-10-16', mail_on: null }) as any);
+      expect((await call('GET')).json().schedule).toBeNull();
+    });
+
     it('counts a long letter and a postcard as the preview tools do', async () => {
       signedIn();
       vi.mocked(getDraft).mockResolvedValue(draft({ required_credits: 5 }) as any);
@@ -266,6 +275,10 @@ describe('the confirmation page API (#470)', () => {
       job: { job_id: 'J1' },
       creditsRemaining: 5
     };
+
+    beforeEach(() => {
+      vi.mocked(processLetterJob).mockResolvedValue({ claimed: true, completed: true, retryScheduled: false } as any);
+    });
 
     it("sends the person's own draft and hands it to the printer", async () => {
       signedIn();
@@ -314,6 +327,67 @@ describe('the confirmation page API (#470)', () => {
       const { state } = await call('POST');
       expect(state.status).toBe(200);
       expect(writeSpy).toHaveBeenCalledWith('warn', 'send.confirmation_dispatch_deferred', expect.objectContaining({ mailType: 'letter' }));
+    });
+
+    describe('with an arrival date (#535)', () => {
+      const DATES = { arrive_by: '2026-10-16', mail_on: '2026-10-06' };
+      const SCHEDULE = { arriveBy: '2026-10-16', mailOn: '2026-10-06' };
+      const held = (letter: Record<string, unknown> = {}, nextAttemptAt = new Date(Date.now() + 86_400_000)) => ({
+        ...created,
+        letter: { letter_id: 'L1', status: 'queued', funding_type: 'prepaid_balance', ...DATES, ...letter },
+        job: { job_id: 'J1', next_attempt_at: nextAttemptAt }
+      });
+
+      it('says it is scheduled, with its dates, while it waits for its mail date', async () => {
+        signedIn();
+        vi.mocked(getDraft).mockResolvedValue(draft() as any);
+        vi.mocked(createMailOrderFromDraft).mockResolvedValue(held() as any);
+        vi.mocked(processLetterJob).mockResolvedValue({ claimed: false, completed: false, retryScheduled: false } as any);
+
+        const { json } = await call('POST', '{}');
+
+        expect(json()).toEqual({
+          orderId: 'L1',
+          alreadySent: false,
+          lettersRemaining: 2,
+          schedule: SCHEDULE,
+          scheduled: true,
+          cancellable: true
+        });
+      });
+
+      it('is not scheduled once due: taken, or behind a pause', async () => {
+        signedIn();
+        vi.mocked(getDraft).mockResolvedValue(draft() as any);
+        vi.mocked(createMailOrderFromDraft).mockResolvedValue(held({}, new Date(Date.now() - 60_000)) as any);
+        vi.mocked(processLetterJob).mockResolvedValue({ claimed: false, completed: false, retryScheduled: false } as any);
+        expect((await call('POST', '{}')).json()).toMatchObject({ schedule: SCHEDULE, scheduled: false, cancellable: false });
+
+        vi.mocked(processLetterJob).mockResolvedValue({ claimed: true, completed: true, retryScheduled: false } as any);
+        expect((await call('POST', '{}')).json()).toMatchObject({ scheduled: false, cancellable: false });
+      });
+
+      it('keeps the hold when the hand-off throws: a job held past now was not taken', async () => {
+        signedIn();
+        vi.mocked(getDraft).mockResolvedValue(draft() as any);
+        vi.mocked(createMailOrderFromDraft).mockResolvedValue(held() as any);
+        vi.mocked(processLetterJob).mockRejectedValue(new Error('database away'));
+        expect((await call('POST', '{}')).json()).toMatchObject({ scheduled: true, cancellable: true });
+      });
+
+      it('answers a second press as the letter stands, and Pay & Send as not cancellable', async () => {
+        signedIn();
+        vi.mocked(getDraft).mockResolvedValue(draft() as any);
+        vi.mocked(createMailOrderFromDraft).mockResolvedValue({ ...held(), alreadyConsumed: true, job: undefined } as any);
+        expect((await call('POST', '{}')).json()).toMatchObject({ alreadySent: true, scheduled: true, cancellable: true });
+
+        vi.mocked(createMailOrderFromDraft).mockResolvedValue({ ...held({ status: 'accepted' }), alreadyConsumed: true, job: undefined } as any);
+        expect((await call('POST', '{}')).json()).toMatchObject({ schedule: SCHEDULE, scheduled: false, cancellable: false });
+
+        vi.mocked(createMailOrderFromDraft).mockResolvedValue({ ...held({ funding_type: 'jit_order' }), alreadyConsumed: true, job: undefined } as any);
+        expect((await call('POST', '{}')).json()).toMatchObject({ scheduled: true, cancellable: false });
+        expect(processLetterJob).not.toHaveBeenCalled();
+      });
     });
 
     it('refuses a body that is not JSON, before sending', async () => {

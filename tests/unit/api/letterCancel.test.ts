@@ -72,7 +72,7 @@ describe('POST /api/letters/:letterId/cancel (#535)', () => {
     expect(status).toBe(200);
     expect(cancelScheduledMail).toHaveBeenCalledWith({ letterId: 'ltr 1', userId: 'auth0|user-1' });
     expect(body).toEqual({
-      orderId: 'ltr 1',
+      letterId: 'ltr 1',
       status: 'cancelled',
       alreadyCancelled: false,
       returned: { kind: 'letters', count: 1 },
@@ -96,13 +96,14 @@ describe('POST /api/letters/:letterId/cancel (#535)', () => {
     ['pay_and_send', 409],
     ['too_late', 409],
     ['busy', 409]
-  ] as const)('answers a refusal (%s) with %i and words for a page', async (refusal, statusCode) => {
+  ] as const)('answers a refusal (%s) with %i, its code and words for a page', async (refusal, statusCode) => {
     vi.mocked(cancelScheduledMail).mockResolvedValue({ ok: false, refusal });
 
     const { status, body } = await call('POST', '/api/letters/ltr-1/cancel');
 
     expect(status).toBe(statusCode);
-    expect(body).toEqual({ error: refusal, message: CANCEL_REFUSAL_WORDS[refusal] });
+    // `code` is what the website's API client reads; `error` what the other routes answer.
+    expect(body).toEqual({ error: refusal, code: refusal, message: CANCEL_REFUSAL_WORDS[refusal] });
     // No tool names: a page has no list_orders to call.
     expect(body.message).not.toMatch(/list_orders|get_order_status|confirm: true/);
   });

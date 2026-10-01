@@ -841,6 +841,15 @@ export const requestSendOutputSchema: JsonSchema = {
         city: { type: "string" },
         state: { type: "string" }
       }
+    },
+    schedule: {
+      type: "object",
+      description: "The preview's arrival dates, YYYY-MM-DD: once sent, it waits until its mail date",
+      properties: {
+        arriveBy: { type: "string" },
+        mailOn: { type: "string" }
+      },
+      required: ["arriveBy", "mailOn"]
     }
   }
 };

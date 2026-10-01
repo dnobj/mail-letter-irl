@@ -103,5 +103,7 @@
  * r25: get_draft_status (card-only, #535) answers a ready draft's
  *     deliveryEstimate, and for a sent one where its order stands, from the
  *     letter itself: orderStatus and cancellable.
+ * r26: request_send (#535) carries a preview's arrival dates (schedule), and
+ *     its link text says when, once sent, the mail goes to the printer.
  */
-export const STEERING_COPY_REV = 25;
+export const STEERING_COPY_REV = 26;

@@ -1,6 +1,9 @@
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
 import { requestSendInputSchema, requestSendOutputSchema } from '../schemas.js';
 import { getDraft } from '../services/draftService.js';
+import { draftScheduleOf } from '../services/draftSchedule.js';
+import { earliestMailOn } from '../services/deliverySchedule.js';
+import type { LetterDraft } from '../services/types.js';
 import { sendConfirmationUrl } from '../config/sendConfirmation.js';
 
 /**
@@ -28,6 +31,17 @@ export interface RequestSendOutput {
   confirmationUrl: string;
   expiresAtISO: string;
   recipientSummary: { name: string; city: string; state: string };
+  /** The preview's arrival dates (#535): once sent, it waits for its mail date. */
+  schedule?: { arriveBy: string; mailOn: string };
+}
+
+/** The draft's dates, or none: a link is never refused over dates it cannot read. */
+function scheduleOf(draft: LetterDraft): { arriveBy: string; mailOn: string } | undefined {
+  try {
+    return draftScheduleOf(draft) ?? undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -40,7 +54,7 @@ export class SendConfirmationRefusedError extends Error {
   readonly diagnosticClass: string;
 
   constructor(
-    readonly code: 'DRAFT_NOT_FOUND' | 'DRAFT_ALREADY_SENT' | 'DRAFT_EXPIRED',
+    readonly code: 'DRAFT_NOT_FOUND' | 'DRAFT_ALREADY_SENT' | 'DRAFT_EXPIRED' | 'SCHEDULE_PASSED',
     message: string
   ) {
     super(message);
@@ -94,6 +108,19 @@ async function handler(
     );
   }
 
+  // A mail date that has passed (#535): the page would refuse the send, by
+  // the send's own rule (src/services/mailSendService.ts), so no link
+  // promises it.
+  const schedule = scheduleOf(draft);
+  if (schedule && schedule.mailOn < earliestMailOn(context.now())) {
+    const noun = draft.mail_type === 'postcard' ? 'postcard' : 'letter';
+    throw new SendConfirmationRefusedError(
+      'SCHEDULE_PASSED',
+      `The day this ${noun} was to go to the printer has passed, so it can no longer arrive by its date. ` +
+        'Preview it again with a new arrival date, or with none to send it as soon as possible, then ask again.'
+    );
+  }
+
   const recipient = (draft.recipient ?? {}) as Record<string, unknown>;
   context.logger.info(
     { correlationId: context.correlationId, event: 'send.confirmation_link' },
@@ -109,7 +136,8 @@ async function handler(
       name: text(recipient.name),
       city: text(recipient.city),
       state: text(recipient.state)
-    }
+    },
+    ...(schedule ? { schedule } : {})
   };
 }
 
