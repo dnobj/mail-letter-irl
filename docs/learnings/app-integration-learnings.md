@@ -12,7 +12,7 @@ This log captures short notes discovered while connecting Letter IRL to the Chat
 - Resolution: remove the custom session ID generator so the transport remains stateless. `Mcp-Session-Id` headers are no longer required for subsequent requests.
 
 ## 2025-11-08 — OAuth Reality Check
-- Google Identity Platform / Firebase Auth does **not** expose RFC 7591 dynamic client registration to external developers; you must create OAuth clients manually in the console, so ChatGPT’s connector flow can’t auto-register there.citestackoverflow.com/questions/30385666/which-well-known-openid-providers-is-a-new-site-expected-to-support
+- Google Identity Platform / Firebase Auth does **not** expose RFC 7591 dynamic client registration to external developers; you must create OAuth clients manually in the console, so ChatGPT’s connector flow can’t auto-register there. ([source](https://stackoverflow.com/questions/30385666/which-well-known-openid-providers-is-a-new-site-expected-to-support))
 - We added a `/oauth/register` stub that returns a pre-provisioned client ID to unblock testing, but a production deployment should rely on an identity provider that supports RFC 7591 (e.g., Auth0/Okta CIC).
 - If you want to stay on Google Cloud, the recommended best-of-breed approach is: Auth0 for identity (dynamic registration), Firestore/Cloud Run/etc. for data, with the MCP server validating Auth0-issued tokens.
 
@@ -24,7 +24,7 @@ When validating letter content, we use two tiers of limits:
 `/manifest.json` only). The tool descriptions served in `tools/list` state no line counts; a model
 learns a limit from the refusal sentence, which names it.
 - `inline_image`: 12 lines
-- `header_image`: 17 lines
+- `header_image`: 15 lines (17 until #534: with the sign-off, 15 fits both the renderer's 16 and the legacy 17)
 - `text_only`: 24 lines
 
 **Hard Limits (Validation)**: What we actually enforce during validation

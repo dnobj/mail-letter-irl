@@ -49,6 +49,13 @@
       .gift-mini-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:6.5px;font-weight:700;letter-spacing:.05em}
       .gift-page-label{position:absolute;bottom:4px;right:6px;font-size:6px;color:#a8916b;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
       .image-not-shown{width:100%;border:1px dashed #d9cdb8;border-radius:3px;padding:6px 4px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:7px;color:#8a7a64;text-align:center}
+      /* The page as it prints (#534): our renderer's SVG, with the addresses
+         where PostGrid stamps them. White, not cream: it is the print. A
+         select enlarges it to the card's width, and again restores it. */
+      .letter-page{display:block;width:100%;max-width:300px;padding:0;margin:0;border:1px solid #e6e0d2;border-radius:4px;background:#fff;box-shadow:0 2px 10px rgba(43,36,29,.12);cursor:zoom-in;position:relative;font:inherit;color:inherit}
+      .letter-page.zoomed{max-width:none;cursor:zoom-out}
+      .letter-page svg{display:block;width:100%;height:auto;border-radius:4px}
+      .letter-page svg + svg{border-top:1px dashed #d9cdb8}
 
       /* Layout badge - production color semantics kept */
       .layout-badge{position:absolute;top:7px;right:7px;font-size:6.5px;font-weight:700;letter-spacing:.1em;padding:2.5px 7px;border-radius:4px;text-transform:uppercase;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
@@ -1131,7 +1138,68 @@
       const IMAGE_NOT_SHOWN_HTML =
         '<div class="image-not-shown">Image not shown on this card</div>';
 
+      /**
+       * A preview our renderer drew (#534) is the page itself: its body carries
+       * data-renderer, and each page is an <svg> child of the body. Every other
+       * preview, a legacy one or a gift send's, gets the mockup below.
+       */
+      function renderedPages(previewHtml) {
+        if (typeof previewHtml !== "string" || !previewHtml.includes("data-renderer")) return null;
+        const doc = new DOMParser().parseFromString(previewHtml, "text/html");
+        if (!doc.body || !doc.body.getAttribute("data-renderer")) return null;
+        const pages = Array.from(doc.body.children).filter(node => node.localName === "svg");
+        return pages.length > 0 ? pages : null;
+      }
+
+      // Only what the renderer draws reaches the card: these elements, no event
+      // handlers, and links only to the page's own outlines or to an embedded
+      // PNG or JPEG. The server escapes the text; this keeps the card safe even
+      // from a page that was not.
+      const PAGE_ELEMENTS = new Set(["svg", "title", "defs", "g", "path", "use", "rect", "image", "text"]);
+      const SAFE_LINK = /^(#[A-Za-z0-9_-]+|data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+)$/;
+      function cleanPage(node) {
+        for (const child of Array.from(node.children)) {
+          if (PAGE_ELEMENTS.has(child.localName)) cleanPage(child);
+          else child.remove();
+        }
+        for (const attribute of Array.from(node.attributes)) {
+          const name = attribute.name.toLowerCase();
+          const link = name === "href" || name.endsWith(":href");
+          if (name.startsWith("on") || (link && !SAFE_LINK.test(attribute.value))) {
+            node.removeAttribute(attribute.name);
+          }
+        }
+        return node;
+      }
+
+      /** The page as it prints, with the layout's badge; a select enlarges it. */
+      function renderLetterPage(state, pages) {
+        const container = document.getElementById("mockup-container");
+        container.textContent = "";
+        const layoutType = state.layoutType || "text_only";
+        const page = document.createElement("button");
+        page.type = "button";
+        page.className = "letter-page";
+        page.setAttribute("aria-pressed", "false");
+        page.setAttribute("aria-label", "Your letter as it prints. Select to enlarge.");
+        const badge = document.createElement("span");
+        badge.className = `layout-badge ${getLayoutBadgeClass(layoutType)}`;
+        badge.textContent = getLayoutLabel(layoutType);
+        page.appendChild(badge);
+        for (const svg of pages) page.appendChild(document.importNode(cleanPage(svg), true));
+        page.addEventListener("click", () => {
+          const zoomed = page.classList.toggle("zoomed");
+          page.setAttribute("aria-pressed", String(zoomed));
+        });
+        container.appendChild(page);
+      }
+
       function renderLetterMockup(state) {
+        const pages = renderedPages(currentMeta().previewHtml ?? state.previewHtml);
+        if (pages) {
+          renderLetterPage(state, pages);
+          return;
+        }
         const container = document.getElementById("mockup-container");
         const layoutType = state.layoutType || "text_only";
 

@@ -20,6 +20,21 @@ export const PAGE_HEIGHT = inch(11);
 /** Where PostGrid's white address boxes go, with a 0.1in margin on each side. */
 export const ADDRESS_ZONE = { left: inch(0.4), top: inch(0.1), right: inch(3.85), bottom: inch(2.9) } as const;
 
+/**
+ * How PostGrid stamps the addresses into those boxes, decoded from probe P6
+ * (letter_pypQkUM56Cc5s7vDRU6qe6): Open Sans at 9pt, in upper case, from x
+ * 0.70in; the return address's first baseline at 0.438in and the recipient's
+ * at 2.094in, each line 0.177in below the last. The PDF leaves the zone
+ * empty; a preview draws the addresses here so the page shows what prints.
+ */
+export const ADDRESS_STAMP = {
+  x: inch(0.7),
+  returnBaseline: inch(0.438),
+  recipientBaseline: inch(2.094),
+  pitch: inch(0.177),
+  size: 9
+} as const;
+
 /** PostGrid's white frame sits 1/8in inside the edge; nothing is drawn within 1/4in. */
 export const EDGE_CLEARANCE = inch(0.25);
 

@@ -1,5 +1,15 @@
+import { ADDRESS_STAMP } from './geometry.js';
 import { placeGlyphs } from './glyphs.js';
 import type { Layout, LayoutPage } from './layout.js';
+
+export interface PreviewOptions {
+  /**
+   * The address lines PostGrid stamps, as it prints them (upper case), drawn
+   * on the first page where PostGrid stamps them. The print leaves them out:
+   * PostGrid adds them.
+   */
+  addresses?: { from: string[]; to: string[] };
+}
 
 const round = (value: number): number => Math.round(value * 100) / 100;
 
@@ -18,13 +28,25 @@ function escapeXml(text: string): string {
  * different SVGs can share one document (a letter and its gift page).
  *
  * The letter's text appears only as escaped `<title>` content, for screen
- * readers; it is never spliced into markup.
+ * readers, and the addresses only as escaped `<text>`; nothing is spliced
+ * into markup unescaped.
  */
-export function renderPreviewSvg(layout: Layout): string[] {
-  return layout.pages.map(page => renderPage(layout, page));
+export function renderPreviewSvg(layout: Layout, options: PreviewOptions = {}): string[] {
+  return layout.pages.map((page, index) => renderPage(layout, page, index === 0 ? options.addresses : undefined));
 }
 
-function renderPage(layout: Layout, page: LayoutPage): string {
+/** The addresses in PostGrid's stamp: its font, size and lines (geometry.ts). */
+function addressStamp(addresses: { from: string[]; to: string[] }): string {
+  const lines = (texts: string[], baseline: number) => texts
+    .map((text, index) => `<text x="${round(ADDRESS_STAMP.x)}" y="${round(baseline + index * ADDRESS_STAMP.pitch)}">${escapeXml(text)}</text>`)
+    .join('');
+  return `<g font-family="'Open Sans', Arial, Helvetica, sans-serif" font-size="${ADDRESS_STAMP.size}" fill="#000">` +
+    lines(addresses.from, ADDRESS_STAMP.returnBaseline) +
+    lines(addresses.to, ADDRESS_STAMP.recipientBaseline) +
+    '</g>';
+}
+
+function renderPage(layout: Layout, page: LayoutPage, addresses?: { from: string[]; to: string[] }): string {
   const outlines = new Map<string, string>();
   const drawn: string[] = [];
   const spoken: string[] = [];
@@ -46,5 +68,6 @@ function renderPage(layout: Layout, page: LayoutPage): string {
     `<defs>${defs}</defs>` +
     `<rect width="${layout.width}" height="${layout.height}" fill="#fff"/>` +
     drawn.join('') +
+    (addresses ? addressStamp(addresses) : '') +
     '</svg>';
 }

@@ -8,6 +8,7 @@ export { drawsGrapheme, layoutLetter, wrapParagraph } from './layout.js';
 export type { ImageBox, Layout, LayoutPage, LetterContent, TextRun } from './layout.js';
 export { renderPdf, RENDERER_VERSION, PRINTABLE_RENDERER_VERSIONS } from './pdf.js';
 export { renderPreviewSvg } from './preview.js';
+export type { PreviewOptions } from './preview.js';
 export { readImage, readImageDataUri } from './images.js';
 export type { RenderImage } from './images.js';
 export { visualOrder } from './bidi.js';

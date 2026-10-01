@@ -1677,8 +1677,13 @@ or an admin grant: the owner's step).
 - [ ] A gift send previews and prints on the legacy HTML, with its card, and records no version.
       (Preview: its confirm page showed the legacy HTML with the sender block and the card page.)
 - [ ] A letter previewed before the flag was on prints on the legacy HTML after it.
-- [ ] The letter card still draws its mockup, from the text hidden in the new preview. The card
-      shows the page itself in #534 Phase 3.
+- [ ] The letter card shows the page as it prints, with the addresses where PostGrid stamps them, in
+      ChatGPT and in Claude; a select enlarges it and the next restores it. A legacy or gift preview
+      keeps the mockup. (#534 Phase 3, widgets v47.)
+- [x] A gift send is decided before the checks that depend on how it prints (#541): on development on
+      2026-10-01 (814ad6c), a gift preview carrying the ff ligature (U+FB00, which Open Sans prints and
+      Tinos lacks) made a legacy draft, and the same text as a paid letter was refused, naming
+      "ﬀ (U+FB00)".
 
 ### Send (US-LETTER-02)
 - [x] Use draft ID from preview

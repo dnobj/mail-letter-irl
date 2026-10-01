@@ -188,6 +188,12 @@ describe('a preview drawn by our renderer', () => {
     expect(html).toContain('<title>Dear Sam,\nThank you for the jam.\nLove, Pat</title>');
     expect(html).toMatch(/<use href="#tr12-\d+"/);
     expect(output.previewHtml).toBe(html);
+    // The addresses as sent, where PostGrid stamps them, in upper case.
+    expect([...html.matchAll(/<text x="[\d.]+" y="[\d.]+">([^<]*)<\/text>/g)].map(match => match[1])).toEqual([
+      'PAT EXAMPLE', '350 FIFTH AVE', 'NEW YORK, NY 10118',
+      'SAM RIVERA', '350 FIFTH AVE', 'NEW YORK, NY 10118'
+    ]);
+    expect(html).toContain('<body data-renderer="pdf-1">');
   });
 
   it('keeps the text, hidden, where the letter card reads it', async () => {

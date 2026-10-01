@@ -911,7 +911,7 @@ See [gift-letters.md](gift-letters.md). Built behind `LETTER_IRL_GIFT_LETTERS_EN
 **So that** pricing is predictable
 
 **Acceptance Criteria:**
-- [ ] Maximum per layout (body + sign-off): 1,600 characters / 24 lines text-only, 1,100 / 17 with a header image, 800 / 12 with an enclosed image
+- [ ] Maximum per layout (body + sign-off): 1,600 characters / 24 lines text-only, 1,100 / 17 with a header image, 800 / 12 with an enclosed image (the legacy HTML; a letter drawn by our renderer is measured, and holds 26, 16 and 13 lines, #534)
 - [ ] Clear error with current count vs limit
 - [ ] Validation happens at preview time
 

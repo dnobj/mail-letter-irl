@@ -17,6 +17,7 @@ import {
   letterPrintText,
   renderLayoutPreviewHtml,
   renderLetterPreviewDocument,
+  stampedAddressLines,
   validateCharacterLimit,
 } from "../services/previewService.js";
 import { createDraft } from "../services/draftService.js";
@@ -818,7 +819,12 @@ export async function createLetterDraftAndBuildOutput(
   // Full-quality images are stored separately in the draft for PostGrid
   const previewHtml = layout
     ? renderLetterPreviewDocument(
-        renderPreviewSvg(withDisplayImage(layout, layoutType === "header_image" ? headerImagePreview : inlineImagePreview)),
+        renderPreviewSvg(
+          withDisplayImage(layout, layoutType === "header_image" ? headerImagePreview : inlineImagePreview),
+          // Where PostGrid stamps them, so the page shows what prints. These
+          // are the addresses as sent: after any correction above.
+          { addresses: { from: stampedAddressLines(sender), to: stampedAddressLines(recipient) } }
+        ),
         { bodyText, signOff }
       )
     : renderLayoutPreviewHtml({
