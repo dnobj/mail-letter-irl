@@ -28,10 +28,12 @@ import {
   GiftPageOverflow,
   layoutGiftPage,
   layoutLetter,
+  HEADLINE_LINES,
   readImageDataUri,
   renderPreviewSvg,
-  RENDERER_VERSION,
-  type Layout
+  rendererVersionFor,
+  type Layout,
+  type Stationery
 } from "../render/index.js";
 import { getSendEligibility, type SendEligibility } from "../services/commerceService.js";
 import type { MailType } from "../services/types.js";
@@ -129,6 +131,8 @@ export interface LetterQuoteOutput {
   schedule?: PreviewScheduleOutput;
   /** The arrival dates on offer (#535), while the feature is on: a card's date picker. */
   arrivalWindow?: ArrivalWindow;
+  /** The stationery the page was drawn in (#563), while stationery is offered: Classic unless one was asked for. */
+  stationery?: Stationery;
 }
 
 // ============================================================================
@@ -547,40 +551,49 @@ const LAYOUT_LABELS: Record<LetterLayoutType, string> = {
 /**
  * The letter laid out by our own renderer when previews use it (#534), or
  * undefined for the legacy HTML. `imageData` is the image that prints, so the
- * layout is the print's. A letter that runs past its page is refused, saying
- * by how many lines, before the addresses are checked or a draft is made.
+ * layout is the print's, drawn in its stationery (#563). A letter that runs
+ * past its page is refused, saying by how many lines, before the addresses
+ * are checked or a draft is made. Only Celebration's headline takes room
+ * from the body, so only it changes what fits, and a letter it pushes past
+ * the page is told so, with the ways out.
  */
 export function layoutLetterForPreview(
-  letter: { bodyText: string; signOff: string; layoutType: LetterLayoutType; imageData?: string },
+  letter: { bodyText: string; signOff: string; layoutType: LetterLayoutType; imageData?: string; stationery?: Stationery },
   context: ToolContext,
   renderer: 'html' | 'pdf' = printRenderer()
 ): Layout | undefined {
   if (renderer !== 'pdf') return undefined;
-  const { bodyText, signOff, layoutType, imageData } = letter;
+  const { bodyText, signOff, layoutType, imageData, stationery } = letter;
   const layout = layoutLetter({
     text: letterPrintText(bodyText, signOff),
     layoutType,
-    image: layoutType !== "text_only" && imageData ? readImageDataUri(imageData) : undefined
+    image: layoutType !== "text_only" && imageData ? readImageDataUri(imageData) : undefined,
+    stationery
   });
   if (layout.overflowLines === 0) return layout;
 
   const { linesUsed, linesAvailable } = layout.pages[0];
+  const headline = stationery?.theme === "celebration" && stationery.headline !== undefined;
   context.logger.warn(
     {
       correlationId: context.correlationId,
       event: "quote.letter.exceeds_page",
       layoutType,
       linesUsed,
-      linesAvailable
+      linesAvailable,
+      stationery: stationery?.theme ?? "classic"
     },
     "Letter runs past its page"
   );
   const over = layout.overflowLines;
   throw Object.assign(
     new Error(
-      `Letter is ${over} line${over === 1 ? "" : "s"} too long for one page${LAYOUT_LABELS[layoutType]}: ` +
+      `Letter is ${over} line${over === 1 ? "" : "s"} too long for one page${LAYOUT_LABELS[layoutType]}` +
+      `${headline ? " on the celebration stationery with a headline" : ""}: ` +
       `it takes ${linesUsed} lines and the page holds ${linesAvailable}. ` +
-      `Please shorten your message to fit on one page.`
+      (headline
+        ? `The headline takes ${HEADLINE_LINES} lines: shorten the message, leave the headline out, or choose the classic stationery.`
+        : `Please shorten your message to fit on one page.`)
     ),
     { diagnosticClass: "validation_error" }
   );
@@ -667,10 +680,13 @@ export function validatePrintableLetter(
   context: ToolContext,
   renderer: 'html' | 'pdf' = printRenderer(),
   /** A gift send's card: our renderer draws it as the second page, with the sender's name. */
-  giftCard?: GiftCardContent
+  giftCard?: GiftCardContent,
+  /** The page's stationery (#563): its initials and headline print in the letter's font. The date line is ours. */
+  stationery?: Stationery
 ): void {
   const prints = renderer === "pdf" ? drawsGrapheme : undefined;
   const card = prints ? giftCard : undefined;
+  const slots = prints ? stationery : undefined;
   validatePrintableCharacters(
     "letter",
     [
@@ -678,6 +694,12 @@ export function validatePrintableLetter(
       { field: "signOff", where: "in the sign-off", text: letter.signOff, prints },
       ...(card
         ? [{ field: "giftCardName", where: "in the sender's name, which the gift card prints", text: letter.sender.name, prints }]
+        : []),
+      ...(slots?.monogram !== undefined
+        ? [{ field: "monogram", where: "in the monogram's initials", text: slots.monogram, prints }]
+        : []),
+      ...(slots?.headline !== undefined
+        ? [{ field: "headline", where: "in the headline", text: slots.headline, prints }]
         : [])
     ],
     letter,
@@ -734,6 +756,8 @@ export interface CreateLetterDraftParams {
   printLayout?: Layout;
   /** The arrival date asked for, checked (previewSchedule, #535). */
   schedule?: PreviewSchedule;
+  /** The stationery asked for, checked (previewStationery, #563); undefined while it is not offered. */
+  stationery?: Stationery;
   context: ToolContext;
 }
 
@@ -831,6 +855,7 @@ export async function createLetterDraftAndBuildOutput(
     gift,
     printLayout,
     schedule,
+    stationery,
     context
   } = params;
 
@@ -869,7 +894,8 @@ export async function createLetterDraftAndBuildOutput(
           // are the addresses as sent: after any correction above.
           { addresses: { from: stampedAddressLines(sender), to: stampedAddressLines(recipient) } }
         ),
-        { bodyText, signOff }
+        { bodyText, signOff },
+        rendererVersionFor(stationery)
       )
     : renderLayoutPreviewHtml({
         sender,
@@ -899,8 +925,10 @@ export async function createLetterDraftAndBuildOutput(
     inlineImageData,
     inlineImageUrl,
     isGiftSend: gift.isGift,
-    // The letter prints with the renderer its preview was drawn with.
-    rendererVersion: layout ? RENDERER_VERSION : undefined,
+    // The letter prints with the renderer its preview was drawn with: pdf-2
+    // for a theme (#563), which the draft records with it.
+    rendererVersion: layout ? rendererVersionFor(stationery) : undefined,
+    stationery: layout ? stationery : undefined,
     // Held until its mail date (#535).
     schedule: schedule?.draft,
   });
@@ -942,6 +970,8 @@ export async function createLetterDraftAndBuildOutput(
     giftLettersAvailable: gift.giftLettersAvailable > 0 ? gift.giftLettersAvailable : undefined,
     schedule: schedule?.output,
     arrivalWindow: previewArrivalWindow(context),
+    // Only while stationery is offered (#563): otherwise the output is as before it.
+    ...(stationery ? { stationery } : {}),
   };
 
   // Add address validation results

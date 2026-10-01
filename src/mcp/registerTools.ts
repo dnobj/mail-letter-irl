@@ -96,6 +96,7 @@ import {
 import { inlineHostBridge } from "./widgetHost.js";
 import { isSendConfirmationEnabled } from "../config/sendConfirmation.js";
 import { isArriveByEnabled } from "../config/arriveBy.js";
+import { isStationeryOffered } from "../config/stationery.js";
 import { scheduleSentence } from "../tools/arriveByInput.js";
 import { uploadsThroughCard } from "../config/cardUpload.js";
 import {
@@ -862,34 +863,46 @@ export function getZodInputShape(name: string) {
 
 /**
  * A tool's input as this deployment serves it. The preview tools' `arriveBy`
- * (#535) is offered only while LETTER_IRL_ARRIVE_BY_ENABLED is on, so no model
- * is shown a field the preview would refuse; read at each registration, so
- * switching the flag needs a reconnect, not a deploy.
+ * (#535) is offered only while LETTER_IRL_ARRIVE_BY_ENABLED is on, and the
+ * letter previews' stationery (#563) only while it is offered, so no model is
+ * shown a field the preview would refuse; read at each registration, so
+ * switching a flag needs a reconnect, not a deploy.
  *
  * Unoffered is not unaccepted: the SDK validates in strip mode and hands the
  * handler only declared fields, so a client still holding the schema from
- * while the flag was on (apps cache it until a refresh) would have its date
- * dropped and its mail sent at once. While off, the four previews are served
- * as an object that passes unknown keys through, so the preview sees the date
- * and refuses it: their JSON Schema then reads `additionalProperties: true`,
- * where a raw shape's reads false (tests/unit/mcp/arriveByServed.test.ts).
- * Every other tool is served its raw shape, as before, set_arrival_date
- * included: its own arriveBy is offered with it, only while the flag is on.
+ * while a flag was on (apps cache it until a refresh) would have its date
+ * dropped and its mail sent at once, or its theme dropped and its letter
+ * printed plain. While a field is withheld, its tool is served as an object
+ * that passes unknown keys through, so the preview sees the field and
+ * refuses it: its JSON Schema then reads `additionalProperties: true`, where
+ * a raw shape's reads false (tests/unit/mcp/arriveByServed.test.ts,
+ * stationeryServed.test.ts). Every other tool is served its raw shape, as
+ * before, set_arrival_date included: its own arriveBy is offered with it,
+ * only while the flag is on.
  */
 export function getServedInputSchema(name: string): z.ZodRawShape | z.AnyZodObject | undefined {
   const shape = getZodInputShape(name);
-  if (!shape || !withholdsArriveBy(name)) return shape;
-  const served = Object.fromEntries(Object.entries(shape).filter(([key]) => key !== "arriveBy")) as z.ZodRawShape;
+  const withheld = withheldInputKeys(name);
+  if (!shape || withheld.length === 0) return shape;
+  const served = Object.fromEntries(Object.entries(shape).filter(([key]) => !withheld.includes(key))) as z.ZodRawShape;
   return z.object(served).passthrough();
 }
 
+/** The letter previews' stationery arguments (#563). */
+export const STATIONERY_INPUT_KEYS: readonly string[] = ["stationery", "monogram", "headline"];
+
 /**
- * Whether a tool is served without the previews' `arriveBy` (#535): one of
- * the four previews, while LETTER_IRL_ARRIVE_BY_ENABLED is off. tools/list
- * (getServedInputSchema) and /manifest.json both ask this, so they agree.
+ * The input fields a tool is served without, as this deployment stands: the
+ * four previews' `arriveBy` while LETTER_IRL_ARRIVE_BY_ENABLED is off (#535),
+ * and the three letter previews' stationery while it is not offered (#563).
+ * tools/list (getServedInputSchema) and /manifest.json both ask this, so
+ * they agree.
  */
-export function withholdsArriveBy(name: string): boolean {
-  return PREVIEW_TOOLS.has(name) && !isArriveByEnabled();
+export function withheldInputKeys(name: string): string[] {
+  const withheld: string[] = [];
+  if (PREVIEW_TOOLS.has(name) && !isArriveByEnabled()) withheld.push("arriveBy");
+  if (LETTER_PREVIEW_TOOLS.has(name) && !isStationeryOffered()) withheld.push(...STATIONERY_INPUT_KEYS);
+  return withheld;
 }
 
 export function getZodOutputShape(name: string) {
@@ -1357,6 +1370,13 @@ const PREVIEW_TOOLS: ReadonlySet<string> = new Set([
   "quote_and_preview_letter_with_header_image",
   "quote_and_preview_letter_with_image",
   "quote_and_preview_postcard"
+]);
+
+/** The previews that take stationery (#563): the letters. A postcard has none. */
+const LETTER_PREVIEW_TOOLS: ReadonlySet<string> = new Set([
+  "quote_and_preview_letter",
+  "quote_and_preview_letter_with_header_image",
+  "quote_and_preview_letter_with_image"
 ]);
 
 /**

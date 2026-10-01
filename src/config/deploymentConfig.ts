@@ -542,6 +542,21 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     services: ['api']
   },
   /**
+   * Stationery (#563, src/config/stationery.ts): the letter previews offer a
+   * theme only while the flag is on and LETTER_IRL_PRINT_RENDERER draws them.
+   * Off unless set, so absence is the intended production state until the
+   * owner switches it on; listed so the preflight shows which environments
+   * have it. API only: a letter prints in the stationery its draft recorded,
+   * never by this flag.
+   */
+  {
+    name: 'LETTER_IRL_STATIONERY_ENABLED',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  /**
    * Arrive-by (#535, src/config/arriveBy.ts): the preview tools offer and
    * accept an arrival date only while the flag is on. Off unless set, so
    * absence is the intended production state until the owner switches it on;

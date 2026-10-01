@@ -41,10 +41,14 @@ export async function createDraft(params: CreateDraftParams): Promise<CreateDraf
   // Classic is stored as none (#563). A theme is stored as the print reads it
   // back (stationeryOf), and one it would not read is refused before any
   // draft exists, so a stored theme always prints.
-  const themed = params.stationery !== undefined && params.stationery.theme !== 'classic';
+  const themed = params.stationery != null && params.stationery.theme !== 'classic';
   const stationery = themed ? stationeryOf(params.stationery) : null;
   if (themed && !stationery) {
-    throw new Error('The stationery cannot be stored: the print would not read it back.');
+    // The previews check a theme before it gets here, so this is a defect, classed as a refusal.
+    throw Object.assign(new Error('The stationery cannot be stored: the print would not read it back.'), {
+      code: 'STATIONERY_UNREADABLE',
+      diagnosticClass: 'validation_error'
+    });
   }
 
   const result = await query<LetterDraft>(

@@ -326,9 +326,18 @@ describe('draftService', () => {
       ]) {
         await expect(
           createDraft({ ...base, stationery: stationery as unknown as Parameters<typeof createDraft>[0]['stationery'] })
-        ).rejects.toThrow('the print would not read it back');
+        ).rejects.toMatchObject({
+          message: 'The stationery cannot be stored: the print would not read it back.',
+          code: 'STATIONERY_UNREADABLE',
+          diagnosticClass: 'validation_error'
+        });
       }
       expect(db.query).toHaveBeenCalledTimes(1);
+
+      // None is Classic, as unset is (#569 review round 4).
+      vi.mocked(db.query).mockResolvedValueOnce(inserted);
+      await createDraft({ ...base, rendererVersion: 'pdf-1', stationery: null });
+      expect(columnValues(vi.mocked(db.query).mock.calls[1]).stationery).toEqual({ value: null, cast: '::jsonb' });
     });
   });
 

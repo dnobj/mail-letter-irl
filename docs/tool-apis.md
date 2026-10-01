@@ -32,6 +32,29 @@ fields through to the preview rather than drop them
 the dates that can be chosen now, for a card's date picker, not when this mail arrives. It is left out
 while the flag is off, and when no date can be scheduled.
 
+While stationery is offered (`LETTER_IRL_STATIONERY_ENABLED` on, and `LETTER_IRL_PRINT_RENDERER=pdf`,
+#563), the three letter previews also accept:
+- `stationery`: `classic` (the default, a plain page), `monogram`, `botanical` or `celebration`, in any
+  case. Every theme but Classic prints the preview's date, written out, at the top right.
+- `monogram`: with `monogram` only. One to three letters, as written; spaces and full stops are dropped.
+  Left out, the initials of the return address's name are used, in capitals, skipping titles and suffixes
+  ("Dr. Pat Rivera Jr." is PR).
+- `headline`: with `celebration` only. One line above the letter, which takes three of the page's lines.
+
+Each preview then returns `stationery` (`theme`, and the `dateLine`, `monogram` and `headline` it
+prints), Classic when none was asked for. The refusals say what to change:
+- an unknown theme;
+- initials or a headline with a theme that does not print them;
+- initials that are not one to three letters;
+- a headline too long for its line, with how much of it fits;
+- characters the font cannot draw;
+- a letter the headline pushes past its page, with the line counts and the ways out.
+
+While stationery is not offered, the three fields are not served, nor in `/manifest.json`, and
+the output has no `stationery`. An app that cached them and passes a theme, initials or a headline
+anyway is refused rather than printed on a plain page. Classic is always accepted. Postcards take
+none of them.
+
 - `quote_and_preview_letter`: Create a free draft preview for a text-only physical letter. Requires a real U.S. recipient address, `bodyText`, and `signOff`; sender is optional when a saved return address exists. Creates a draft, so it is not read-only. Uses `ui://widgets/LetterPreviewCard.html@v<N>`.
 - `quote_and_preview_letter_with_header_image`: Create a free draft preview for a letter with a header image at the top. Accepts an attached image or `imageUrl`. Creates a draft and uses `ui://widgets/LetterHeaderImagePreviewCard.html@v<N>`, which serves the letter card under its own name so the card knows which preview to repeat (#411).
 - `quote_and_preview_letter_with_image`: Create a free draft preview for a letter with an enclosed image after the signature. Accepts an attached image or `imageUrl`. Creates a draft and uses `ui://widgets/LetterInlineImagePreviewCard.html@v<N>`, the letter card under its own name for the same reason.

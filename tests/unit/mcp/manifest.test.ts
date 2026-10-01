@@ -28,6 +28,32 @@ describe("Compatibility manifest", () => {
     expect(letterInput()).toHaveProperty("arriveBy");
   });
 
+  it("offers the letter previews' stationery only while it is offered, as tools/list does (#563)", () => {
+    const input = (name: string) =>
+      (buildManifest().tools.find((tool) => tool.name === name)!.inputSchema as {
+        properties: Record<string, { enum?: string[] }>;
+      }).properties;
+    const LETTERS = ["quote_and_preview_letter", "quote_and_preview_letter_with_header_image", "quote_and_preview_letter_with_image"];
+    // Off, and on without our renderer: none of the three.
+    for (const [enabled, renderer] of [["", "pdf"], ["true", ""]]) {
+      vi.stubEnv("LETTER_IRL_STATIONERY_ENABLED", enabled);
+      vi.stubEnv("LETTER_IRL_PRINT_RENDERER", renderer);
+      for (const name of LETTERS) {
+        for (const key of ["stationery", "monogram", "headline"]) expect(input(name), `${name} ${key}`).not.toHaveProperty(key);
+        expect(input(name), name).toHaveProperty("sendAsGift");
+      }
+    }
+    vi.stubEnv("LETTER_IRL_STATIONERY_ENABLED", "true");
+    vi.stubEnv("LETTER_IRL_PRINT_RENDERER", "pdf");
+    for (const name of LETTERS) {
+      expect(input(name).stationery.enum, name).toEqual(["classic", "monogram", "botanical", "celebration"]);
+      expect(input(name), name).toHaveProperty("monogram");
+      expect(input(name), name).toHaveProperty("headline");
+    }
+    // A postcard takes none, offered or not.
+    for (const key of ["stationery", "monogram", "headline"]) expect(input("quote_and_preview_postcard")).not.toHaveProperty(key);
+  });
+
   it("should mirror the runtime tool registry", () => {
     // The manifest is ChatGPT's, and ChatGPT's list is the full one: an app
     // that takes no purchases is not offered the checkouts (#475).
@@ -48,8 +74,9 @@ describe("Compatibility manifest", () => {
   });
 
   it("should keep the checked-in manifest.json snapshot in sync", () => {
-    // Generated as production is: arrive-by off (#535).
+    // Generated as production is: arrive-by (#535) and stationery (#563) off.
     vi.stubEnv("LETTER_IRL_ARRIVE_BY_ENABLED", "");
+    vi.stubEnv("LETTER_IRL_STATIONERY_ENABLED", "");
     const snapshot = fs.readFileSync(manifestPath, "utf-8");
     const previousPublicBaseUrl = process.env.LETTER_IRL_PUBLIC_BASE_URL;
     process.env.LETTER_IRL_PUBLIC_BASE_URL = "https://api.letterirl.com";

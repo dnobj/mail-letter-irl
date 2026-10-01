@@ -1,5 +1,14 @@
 import { JsonSchema } from "./contracts/types.js";
-import { ARRIVAL_WINDOW_DESCRIPTION, ARRIVE_BY_DESCRIPTION, SET_ARRIVE_BY_DESCRIPTION } from "./zodSchemas.js";
+import {
+  ARRIVAL_WINDOW_DESCRIPTION,
+  ARRIVE_BY_DESCRIPTION,
+  HEADLINE_DESCRIPTION,
+  MONOGRAM_DESCRIPTION,
+  PREVIEW_STATIONERY_DESCRIPTION,
+  SET_ARRIVE_BY_DESCRIPTION,
+  STATIONERY_DESCRIPTION
+} from "./zodSchemas.js";
+import { STATIONERY_THEMES } from "./render/stationery.js";
 
 /** Arrive-by (#535): the preview's input, and what its output says. */
 const arriveBySchema = { type: "string", description: ARRIVE_BY_DESCRIPTION } as const;
@@ -14,6 +23,24 @@ const previewScheduleSchema = {
     latestArrival: { type: "string", description: "The last arrival date on offer, YYYY-MM-DD" }
   },
   required: ["arriveBy", "mailOn", "releasesAt", "earliestArrival", "latestArrival"]
+} as const;
+
+/** Stationery (#563): the letter previews' input, and what their output says. */
+const stationeryInputSchemas = {
+  stationery: { type: "string", enum: [...STATIONERY_THEMES], description: STATIONERY_DESCRIPTION },
+  monogram: { type: "string", description: MONOGRAM_DESCRIPTION },
+  headline: { type: "string", description: HEADLINE_DESCRIPTION }
+} as const;
+const previewStationerySchema = {
+  type: "object",
+  description: PREVIEW_STATIONERY_DESCRIPTION,
+  properties: {
+    theme: { type: "string", enum: [...STATIONERY_THEMES] },
+    dateLine: { type: "string", description: "The date it prints at the top right, as written" },
+    monogram: { type: "string", description: "The initials it prints" },
+    headline: { type: "string", description: "The headline it prints above the letter" }
+  },
+  required: ["theme"]
 } as const;
 
 const arrivalWindowSchema = {
@@ -60,7 +87,8 @@ export const quoteAndPreviewLetterTextOnlyInputSchema: JsonSchema = {
       type: "boolean",
       description: "Set true only when the user asks to send this as their gift letter: it is free and adds a printed page with a card for the recipient. Leave it out otherwise; a gift letter is then used only if the balance cannot pay."
     },
-    arriveBy: arriveBySchema
+    arriveBy: arriveBySchema,
+    ...stationeryInputSchemas
   }
 };
 
@@ -102,7 +130,8 @@ export const quoteAndPreviewLetterWithHeaderImageInputSchema: JsonSchema = {
       type: "boolean",
       description: "Set true only when the user asks to send this as their gift letter: it is free and adds a printed page with a card for the recipient. Leave it out otherwise; a gift letter is then used only if the balance cannot pay."
     },
-    arriveBy: arriveBySchema
+    arriveBy: arriveBySchema,
+    ...stationeryInputSchemas
   }
 };
 
@@ -140,7 +169,8 @@ export const quoteAndPreviewLetterWithImageInputSchema: JsonSchema = {
       type: "boolean",
       description: "Set true only when the user asks to send this as their gift letter: it is free and adds a printed page with a card for the recipient. Leave it out otherwise; a gift letter is then used only if the balance cannot pay."
     },
-    arriveBy: arriveBySchema
+    arriveBy: arriveBySchema,
+    ...stationeryInputSchemas
   }
 };
 
@@ -216,6 +246,7 @@ export const quoteAndPreviewOutputSchema: JsonSchema = {
     giftLettersAvailable: { type: "integer", description: "Unsent gift letters on the account, when there are any" },
     schedule: previewScheduleSchema,
     arrivalWindow: arrivalWindowSchema,
+    stationery: previewStationerySchema,
     previewHtml: { type: "string" },
     lettersRequired: { type: "number", description: "Letters required from balance (always 1 for standard letter)" },
     canSendNow: { type: "boolean" },
