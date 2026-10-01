@@ -1,8 +1,13 @@
 /**
- * Days USPS does not deliver or collect mail on weekdays: the federal holidays,
- * on the day they are observed (#535). A holiday on a Saturday is observed the
- * Friday before, and one on a Sunday the Monday after, so New Year's Day 2028,
- * a Saturday, closes Friday, December 31, 2027.
+ * Weekdays the arrive-by schedule treats as closed (#535): the federal
+ * holidays, on the days they are observed. A holiday on a Sunday is observed
+ * the Monday after, and one on a Saturday the Friday before, so New Year's Day
+ * 2028 makes Friday, December 31, 2027 a closed day.
+ *
+ * USPS itself may deliver on such a Friday and close on the Saturday. Counting
+ * the Friday as closed is deliberate: it only ever mails a day earlier, and
+ * PostGrid's production may keep the federal day. Check usps.com's schedule
+ * before launch.
  *
  * A list rather than rules, so a one-off closure (a national day of mourning
  * closes post offices) can be added on the day it is announced. A test checks

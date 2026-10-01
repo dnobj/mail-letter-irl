@@ -10,11 +10,17 @@ import { USPS_HOLIDAYS, USPS_HOLIDAYS_THROUGH } from '../content/uspsHolidays.js
  * USPS does not guarantee First-Class dates, so the schedule works back from
  * the date the mail should arrive by a lead time counted in business days
  * (PostGrid prints the day after the order, transit takes one to five, and one
- * more is buffer), and the person is told it aims to arrive by then. Mail is
- * held in our outbox until 09:00 New York time on its mail date, when the
- * hourly maintenance run sends it to PostGrid as an ordinary order.
+ * more is buffer), and the person is told it aims to arrive by then. The send
+ * will hold scheduled mail in our outbox until dispatchAt, 09:00 New York time
+ * on its mail date, when the hourly maintenance run sends it to PostGrid as an
+ * ordinary order (#535's later PRs wire this).
  */
 
+/**
+ * 'YYYY-MM-DD'. A plain string: a date from outside (a tool's input, a
+ * request) must pass parseCalendarDate first, and every other function here
+ * throws a RangeError on anything that is not one.
+ */
 export type CalendarDate = string;
 
 /** The time zone every date here is a day in. */
@@ -31,10 +37,21 @@ const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 
+/**
+ * Midnight UTC on a day. Date.UTC would read years 0-99 as 1900-1999;
+ * setUTCFullYear takes the year as written.
+ */
+function utcMidnight(year: number, month: number, day: number): Date {
+  const date = new Date(0);
+  date.setUTCFullYear(year, month - 1, day);
+  return date;
+}
+
 /** The day number (days since 1970-01-01) of a calendar date. */
 function dayNumber(date: CalendarDate): number {
-  const [, year, month, day] = DATE_PATTERN.exec(date)!;
-  return Date.UTC(Number(year), Number(month) - 1, Number(day)) / DAY_MS;
+  const match = DATE_PATTERN.exec(date);
+  if (!match) throw new RangeError(`Not a calendar date (YYYY-MM-DD): ${date}`);
+  return utcMidnight(Number(match[1]), Number(match[2]), Number(match[3])).getTime() / DAY_MS;
 }
 
 function fromDayNumber(day: number): CalendarDate {
@@ -45,12 +62,12 @@ function fromDayNumber(day: number): CalendarDate {
 export function parseCalendarDate(value: string): CalendarDate | null {
   const match = DATE_PATTERN.exec(value);
   if (!match) return null;
-  const [, year, month, day] = match.map(Number);
-  const date = new Date(Date.UTC(year, month - 1, day));
-  // Date.UTC rolls 2026-02-30 over to March: only a date that survives the
-  // round trip is real.
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  const date = utcMidnight(year, month, day);
+  // A day past the month's end rolls over (2026-02-30 becomes March 2): only a
+  // date that survives the round trip is real.
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
-    ? value
+    ? match[0]
     : null;
 }
 
@@ -62,6 +79,18 @@ export function addCalendarDays(date: CalendarDate, days: number): CalendarDate 
 export function isBusinessDay(date: CalendarDate): boolean {
   const weekday = new Date(dayNumber(date) * DAY_MS).getUTCDay();
   return weekday !== 0 && weekday !== 6 && !USPS_HOLIDAYS.has(date);
+}
+
+/**
+ * A lead time or a horizon: a whole number of days from 0 to 1000. Anything
+ * else is a caller's bug, refused loudly: NaN would read as 0, a negative lead
+ * would mail after the arrival date, and Infinity would never finish.
+ */
+function dayCount(name: string, value: number): number {
+  if (!Number.isInteger(value) || value < 0 || value > 1000) {
+    throw new RangeError(`${name} must be a whole number of days from 0 to 1000, not ${value}`);
+  }
+  return value;
 }
 
 /** The business day `count` business days after (positive) or before (negative) `date`. */
@@ -86,20 +115,13 @@ const NEW_YORK = new Intl.DateTimeFormat('en-US', {
   month: '2-digit',
   day: '2-digit',
   hour: '2-digit',
-  minute: '2-digit',
-  second: '2-digit',
   hourCycle: 'h23'
 });
 
-/** The New York calendar date and wall-clock time at an instant. */
-function newYorkClock(instant: Date): { date: CalendarDate; hour: number; minute: number; second: number } {
+/** The New York calendar date and hour at an instant. */
+function newYorkClock(instant: Date): { date: CalendarDate; hour: number } {
   const parts = Object.fromEntries(NEW_YORK.formatToParts(instant).map(part => [part.type, part.value]));
-  return {
-    date: `${parts.year}-${parts.month}-${parts.day}`,
-    hour: Number(parts.hour),
-    minute: Number(parts.minute),
-    second: Number(parts.second)
-  };
+  return { date: `${parts.year}-${parts.month}-${parts.day}`, hour: Number(parts.hour) };
 }
 
 /** The New York calendar date at an instant. */
@@ -107,15 +129,21 @@ export function newYorkDate(instant: Date): CalendarDate {
   return newYorkClock(instant).date;
 }
 
-/** The instant it is `hour`:00 in New York on `date`, in daylight saving time or not. */
+/**
+ * The instant it is `hour`:00, a whole hour, in New York on `date`, in
+ * daylight saving time or not. The hour the clocks skip (02:00 on a spring
+ * change) gives 01:00 standard time, and the hour that repeats (01:00 on an
+ * autumn change) its first, daylight-saving instance; DISPATCH_HOUR is neither.
+ */
 export function newYorkTime(date: CalendarDate, hour: number): Date {
   // The wall-clock time written as if it were UTC, then moved by New York's
   // offset; the offset is read again at the answer, in case the first guess
-  // fell on the other side of a clock change.
+  // fell on the other side of a clock change. New York's offset is a whole
+  // number of hours, so every instant read here falls on the hour.
   const wall = dayNumber(date) * DAY_MS + hour * HOUR_MS;
   const offset = (instant: number) => {
     const clock = newYorkClock(new Date(instant));
-    return dayNumber(clock.date) * DAY_MS + clock.hour * HOUR_MS + clock.minute * 60_000 + clock.second * 1000 - instant;
+    return dayNumber(clock.date) * DAY_MS + clock.hour * HOUR_MS - instant;
   };
   const guess = wall - offset(wall);
   return new Date(wall - offset(guess));
@@ -127,7 +155,7 @@ export function newYorkTime(date: CalendarDate, hour: number): Date {
  * it falls on a weekend or holiday. Always a business day.
  */
 export function mailOnFor(arriveBy: CalendarDate, leadDays: number): CalendarDate {
-  return stepBusinessDays(businessDayOnOrBefore(arriveBy), -leadDays);
+  return stepBusinessDays(businessDayOnOrBefore(arriveBy), -dayCount('leadDays', leadDays));
 }
 
 /** The first date mail can go to the printer: today until the cutoff on a business day, else the next one. */
@@ -138,7 +166,7 @@ export function earliestMailOn(now: Date): CalendarDate {
 
 /** The first date mail can be scheduled to arrive by. */
 export function earliestArrival(now: Date, leadDays: number): CalendarDate {
-  return stepBusinessDays(earliestMailOn(now), leadDays);
+  return stepBusinessDays(earliestMailOn(now), dayCount('leadDays', leadDays));
 }
 
 /**
@@ -146,7 +174,7 @@ export function earliestArrival(now: Date, leadDays: number): CalendarDate {
  * and never past the end of the holiday list, where business days are unknown.
  */
 export function latestArrival(now: Date, horizonDays: number): CalendarDate {
-  const latest = addCalendarDays(newYorkDate(now), horizonDays);
+  const latest = addCalendarDays(newYorkDate(now), dayCount('horizonDays', horizonDays));
   return latest < USPS_HOLIDAYS_THROUGH ? latest : USPS_HOLIDAYS_THROUGH;
 }
 
@@ -173,7 +201,12 @@ export type ArrivalCheck =
     }
   | {
       ok: false;
-      reason: 'invalid_date' | 'too_soon' | 'too_late';
+      /**
+       * `unavailable`: no date can be scheduled now, because the earliest
+       * arrival is past the latest (a horizon shorter than the lead time, or
+       * the end of the holiday list); the two dates then mean nothing.
+       */
+      reason: 'invalid_date' | 'unavailable' | 'too_soon' | 'too_late';
       earliestArrival: CalendarDate;
       latestArrival: CalendarDate;
     };
@@ -188,6 +221,7 @@ export function checkArrival(arriveBy: string, now: Date, settings: ScheduleSett
   const latest = latestArrival(now, settings.horizonDays);
   const date = parseCalendarDate(arriveBy);
   if (!date) return { ok: false, reason: 'invalid_date', earliestArrival: earliest, latestArrival: latest };
+  if (earliest > latest) return { ok: false, reason: 'unavailable', earliestArrival: earliest, latestArrival: latest };
   if (date < earliest) return { ok: false, reason: 'too_soon', earliestArrival: earliest, latestArrival: latest };
   if (date > latest) return { ok: false, reason: 'too_late', earliestArrival: earliest, latestArrival: latest };
   const mailOn = mailOnFor(date, settings.leadDays);

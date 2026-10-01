@@ -69,9 +69,19 @@ describe('the New York calendar', () => {
   it('accepts only real dates written YYYY-MM-DD', () => {
     expect(parseCalendarDate('2026-10-16')).toBe('2026-10-16');
     expect(parseCalendarDate('2028-02-29')).toBe('2028-02-29');
-    for (const value of ['2027-02-29', '2026-02-30', '2026-13-01', '2026-00-10', '2026-10-32', '2026-1-5', '10/16/2026', '2026-10-16T09:00', '', 'tomorrow', '0099-01-01']) {
+    // A year as written: 0099 is not read as 1999, and 0100 is no leap year while 0400 is.
+    expect(parseCalendarDate('0099-01-01')).toBe('0099-01-01');
+    expect(parseCalendarDate('0400-02-29')).toBe('0400-02-29');
+    for (const value of ['2027-02-29', '0100-02-29', '2026-02-30', '2026-13-01', '2026-00-10', '2026-10-32', '2026-1-5', '10/16/2026', '2026-10-16T09:00', ' 2026-10-16', '2026-10-16\n', '', 'tomorrow']) {
       expect(parseCalendarDate(value), value).toBeNull();
     }
+  });
+
+  it('refuses anything but a calendar date loudly, rather than miscounting', () => {
+    for (const call of [() => isBusinessDay('2026-1-5'), () => mailOnFor('next Friday', 7), () => addCalendarDays('', 1)]) {
+      expect(call).toThrow(RangeError);
+    }
+    expect(() => mailOnFor('next Friday', 7)).toThrow('Not a calendar date (YYYY-MM-DD): next Friday');
   });
 });
 
@@ -231,8 +241,40 @@ describe('checking an arrival date', () => {
     }
   });
 
+  it('refuses a lead time or horizon that is not a whole number of days from 0 to 1000', () => {
+    for (const bad of [Number.NaN, -1, 1.5, Number.POSITIVE_INFINITY, 1001]) {
+      expect(() => mailOnFor('2026-10-16', bad), String(bad)).toThrow(RangeError);
+      expect(() => earliestArrival(NOW, bad), String(bad)).toThrow(RangeError);
+      expect(() => latestArrival(NOW, bad), String(bad)).toThrow(RangeError);
+      expect(() => checkArrival('2026-10-16', NOW, { leadDays: bad, horizonDays: 60 }), String(bad)).toThrow(RangeError);
+      expect(() => checkArrival('2026-10-16', NOW, { leadDays: 7, horizonDays: bad }), String(bad)).toThrow(RangeError);
+    }
+    expect(() => mailOnFor('2026-10-16', Number.NaN)).toThrow('leadDays must be a whole number of days from 0 to 1000, not NaN');
+    expect(() => latestArrival(NOW, -1)).toThrow('horizonDays must be a whole number of days from 0 to 1000, not -1');
+    // The bounds themselves are fine.
+    expect(mailOnFor('2026-10-16', 0)).toBe('2026-10-16');
+    expect(latestArrival(NOW, 0)).toBe('2026-10-01');
+    expect(() => earliestArrival(NOW, 1000)).not.toThrow();
+  });
+
+  it('says nothing can be scheduled when the earliest date is past the latest, not that one is too soon', () => {
+    // Ten days before the holiday list ends: the lead time runs past it.
+    expect(checkArrival('2027-12-31', new Date('2027-12-21T14:00:00Z'), SETTINGS)).toEqual({
+      ok: false,
+      reason: 'unavailable',
+      earliestArrival: '2028-01-03',
+      latestArrival: '2027-12-31'
+    });
+    // A horizon shorter than the lead time.
+    expect(checkArrival('2026-10-13', NOW, { leadDays: 7, horizonDays: 5 })).toMatchObject({ ok: false, reason: 'unavailable' });
+    // Equal is still a date on offer.
+    expect(checkArrival('2026-10-13', NOW, { leadDays: 7, horizonDays: 12 })).toMatchObject({ ok: true, mailOn: '2026-10-01' });
+    // A date that is not one is still named as such.
+    expect(checkArrival('soon', NOW, { leadDays: 7, horizonDays: 5 })).toMatchObject({ ok: false, reason: 'invalid_date' });
+  });
+
   it('uses the lead time and the horizon it is given', () => {
     expect(checkArrival('2026-10-02', NOW, { leadDays: 1, horizonDays: 60 })).toMatchObject({ ok: true, mailOn: '2026-10-01' });
-    expect(checkArrival('2026-10-20', NOW, { leadDays: 7, horizonDays: 10 })).toMatchObject({ ok: false, reason: 'too_late', latestArrival: '2026-10-11' });
+    expect(checkArrival('2026-10-20', NOW, { leadDays: 7, horizonDays: 15 })).toMatchObject({ ok: false, reason: 'too_late', latestArrival: '2026-10-16' });
   });
 });
