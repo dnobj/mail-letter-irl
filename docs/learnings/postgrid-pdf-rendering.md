@@ -13,6 +13,7 @@ PostGrid prints every HTML letter in Open Sans, whatever font the HTML names (#5
 | P1 | HTML whose CSS embeds Tinos as an `@font-face` data URI | Our font is used: the PDF embeds a Tinos subset as vector text, positioned as the CSS placed it |
 | P2 | A pdfkit PDF (Tinos subset, a JPEG) by multipart, `addressPlacement: top_first_page`, `color: false` | Accepted, `pageCount` 1. **The page is flattened** into one 2550x3300 grayscale image (300 px per inch). No font of ours survives. The addresses are stamped on top as vector Open Sans, 9 pt |
 | P4, P5 | PDFs from `src/render` | P4 printed Hebrew with each word's letters reversed. P5, with glyphs drawn as outlines, printed it correctly |
+| P8 | A two-page PDF from `src/render`: a letter, then a funded gift card with its QR as vector rectangles (October 1, 2026) | Accepted, `pageCount` 2. Both pages flattened at 300 px per inch; the addresses stamped on page 1 only. The QR cropped from the flattened page 2 decodes with jsQR, and its border, type and modules are crisp |
 
 Multipart needs no contact objects: `to[firstName]`, `to[addressLine1]` and the other fields work as form fields beside the `pdf` file. They are read as UTF-8. Probe P6 (`letter_pypQkUM56Cc5s7vDRU6qe6`) sent "José Muñoz Ñandú" and "Zoë Brontë":
 - PostGrid stored the names intact;

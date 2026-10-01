@@ -9,8 +9,8 @@
  *
  * It is read when a letter is previewed, never when it is sent: a letter
  * prints with the version its draft recorded, so changing this never changes
- * a letter already previewed or queued. Gift sends stay on the legacy HTML
- * until the gift page moves onto the renderer.
+ * a letter already previewed or queued. Either way a gift send prints its
+ * card as a second page.
  */
 export function printRenderer(env: NodeJS.ProcessEnv = process.env): 'html' | 'pdf' {
   return (env.LETTER_IRL_PRINT_RENDERER ?? '').trim().toLowerCase() === 'pdf' ? 'pdf' : 'html';

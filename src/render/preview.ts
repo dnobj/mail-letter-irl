@@ -56,6 +56,15 @@ function renderPage(layout: Layout, page: LayoutPage, addresses?: { from: string
       drawn.push(`<image href="${href}" x="${round(item.x)}" y="${round(item.top)}" width="${round(item.width)}" height="${round(item.height)}" preserveAspectRatio="none"/>`);
       continue;
     }
+    if (item.kind === 'box') {
+      drawn.push(`<rect x="${round(item.x)}" y="${round(item.top)}" width="${round(item.width)}" height="${round(item.height)}" rx="${round(item.radius)}" fill="none" stroke="${item.stroke}" stroke-width="${round(item.strokeWidth)}"/>`);
+      continue;
+    }
+    if (item.kind === 'rects') {
+      const rects = item.rects.map(rect => `<rect x="${round(rect.x)}" y="${round(rect.top)}" width="${round(rect.width)}" height="${round(rect.height)}"/>`);
+      drawn.push(`<g fill="${item.fill}">${rects.join('')}</g>`);
+      continue;
+    }
     spoken.push(item.source);
     for (const glyph of placeGlyphs(item)) {
       outlines.set(glyph.key, glyph.outline);

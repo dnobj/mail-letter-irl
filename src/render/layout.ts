@@ -39,8 +39,31 @@ export interface ImageBox {
   image: RenderImage;
 }
 
+/** A rounded rectangle's outline, as the gift card's border. */
+export interface BoxItem {
+  kind: 'box';
+  x: number;
+  top: number;
+  width: number;
+  height: number;
+  radius: number;
+  /** A hex colour. */
+  stroke: string;
+  strokeWidth: number;
+}
+
+/** Filled rectangles in one colour, as a QR code's modules. */
+export interface RectsItem {
+  kind: 'rects';
+  /** A hex colour. */
+  fill: string;
+  rects: Array<{ x: number; top: number; width: number; height: number }>;
+}
+
+export type LayoutItem = TextRun | ImageBox | BoxItem | RectsItem;
+
 export interface LayoutPage {
-  items: Array<TextRun | ImageBox>;
+  items: LayoutItem[];
   linesUsed: number;
   linesAvailable: number;
 }
@@ -254,6 +277,43 @@ function advanceLimit(fontName: FontName, paragraph: string, width: number, scal
   };
 }
 
+/** One wrapped line: as written, and as drawn (bidi-reordered, invisibles removed). */
+export interface WrappedLine {
+  source: string;
+  drawn: string;
+}
+
+/**
+ * `text` wrapped to `width` at `size` in the letter's font: paragraphs at
+ * line breaks, tabs as four spaces, at most four marks a letter. Bidi levels
+ * are resolved for each whole paragraph, and each line is measured exactly as
+ * it will be drawn.
+ */
+export function wrapText(text: string, size: number, width: number): WrappedLine[] {
+  const font = loadFont(BODY_FONT);
+  const scale = size / font.unitsPerEm;
+  const lines: WrappedLine[] = [];
+  const paragraphs = clampMarks(text).replace(/\r\n?/g, '\n').replace(/\t/g, TAB).split('\n');
+  for (const paragraph of paragraphs) {
+    const bidi = paragraphBidi(paragraph);
+    const measure = (start: number, end: number) => shape(font, bidi.lineVisual(start, end)).advanceWidth * scale;
+    for (const { start, end } of wrapParagraph(paragraph, width, measure, advanceLimit(BODY_FONT, paragraph, width, scale))) {
+      lines.push({ source: paragraph.slice(start, end), drawn: bidi.lineVisual(start, end) });
+    }
+  }
+  return lines;
+}
+
+/**
+ * Where a baseline sits in a line box `pitch` tall, as CSS places it: half
+ * the leading, then the ascent.
+ */
+export function baselineOffset(size: number, pitch: number): number {
+  const font = loadFont(BODY_FONT);
+  const scale = size / font.unitsPerEm;
+  return (pitch - (font.ascent - font.descent) * scale) / 2 + font.ascent * scale;
+}
+
 /**
  * Lays out a one-page letter in the three layouts the legacy HTML printed:
  * text only; a header image above the text; or the text with the enclosed
@@ -263,13 +323,10 @@ function advanceLimit(fontName: FontName, paragraph: string, width: number, scal
  */
 export function layoutLetter(content: LetterContent): Layout {
   const fontName = BODY_FONT;
-  const font = loadFont(fontName);
   const size = BODY_FONT_SIZE;
-  const scale = size / font.unitsPerEm;
-  // As CSS places a baseline inside a line box: half the leading, then the ascent.
-  const baselineOffset = (LINE_PITCH - (font.ascent - font.descent) * scale) / 2 + font.ascent * scale;
+  const baseline = baselineOffset(size, LINE_PITCH);
 
-  const items: Array<TextRun | ImageBox> = [];
+  const items: LayoutItem[] = [];
   // Each branch checks the layout, so a text-only letter never places an image.
   const { image } = content;
   let textTop = BODY_TOP;
@@ -282,21 +339,10 @@ export function layoutLetter(content: LetterContent): Layout {
   const inlineBox = image && content.layoutType === 'inline_image' ? fitImage(image, INLINE_IMAGE_MAX_HEIGHT) : undefined;
   if (inlineBox) reserved = IMAGE_GAP + inlineBox.height;
 
-  const lines: Array<{ source: string; drawn: string }> = [];
-  const paragraphs = clampMarks(content.text).replace(/\r\n?/g, '\n').replace(/\t/g, TAB).split('\n');
-  for (const paragraph of paragraphs) {
-    // Bidi levels are resolved for the whole paragraph, and each line is
-    // measured exactly as it will be drawn.
-    const bidi = paragraphBidi(paragraph);
-    const measure = (start: number, end: number) => shape(font, bidi.lineVisual(start, end)).advanceWidth * scale;
-    for (const { start, end } of wrapParagraph(paragraph, CONTENT_WIDTH, measure, advanceLimit(fontName, paragraph, CONTENT_WIDTH, scale))) {
-      lines.push({ source: paragraph.slice(start, end), drawn: bidi.lineVisual(start, end) });
-    }
-  }
-
+  const lines = wrapText(content.text, size, CONTENT_WIDTH);
   lines.forEach(({ source, drawn }, index) => {
     if (drawn.trim() === '') return;
-    items.push({ kind: 'text', font: fontName, size, x: SIDE_MARGIN, baseline: textTop + index * LINE_PITCH + baselineOffset, text: drawn, source });
+    items.push({ kind: 'text', font: fontName, size, x: SIDE_MARGIN, baseline: textTop + index * LINE_PITCH + baseline, text: drawn, source });
   });
 
   const linesAvailable = Math.max(0, Math.floor((BODY_BOTTOM - textTop - reserved + 1e-6) / LINE_PITCH));

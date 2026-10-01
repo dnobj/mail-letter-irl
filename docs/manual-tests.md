@@ -1674,16 +1674,22 @@ or an admin grant: the owner's step).
       the recipient's name is refused ("in the recipient's address"). A body with a line separator
       (U+2028, as Apple Notes stores a soft line break) is refused, naming "a line separator (U+2028)".
       (Previews: all three behaved so; the prints wait for the sends.)
-- [ ] A gift send previews and prints on the legacy HTML, with its card, and records no version.
-      (Preview: its confirm page showed the legacy HTML with the sender block and the card page.)
+- [ ] A gift send previews on the renderer with its card as the second page, and records `pdf-1`
+      (#534 PR 5). PostGrid accepts the upload with `pageCount` 2; the flattened second page shows the
+      card with the code the send minted, clear of PostGrid's integrity QR, and its QR scans. A
+      sender's name with the ff ligature (U+FB00) is refused "in the sender's name, which the gift
+      card prints". A full 26-line gift letter's card draws in ChatGPT: its preview is about 150 KB,
+      twice a letter's. (Probe P8 on 2026-10-01 sent such a PDF in test mode: `pageCount` 2, the
+      stamp on page 1 only, and the flattened QR decodes.)
 - [ ] A letter previewed before the flag was on prints on the legacy HTML after it.
 - [ ] The letter card shows the page as it prints, with the addresses where PostGrid stamps them, in
-      ChatGPT and in Claude; a select enlarges it and the next restores it. A legacy or gift preview
-      keeps the mockup. (#534 Phase 3, widgets v47.)
+      ChatGPT and in Claude; a select enlarges it and the next restores it. A legacy preview keeps
+      the mockup. (#534 Phase 3, widgets v47.) A gift send's card shows below the letter, with its
+      border and QR (#534 PR 5, widgets v48).
 - [x] A gift send is decided before the checks that depend on how it prints (#541): on development on
       2026-10-01 (814ad6c), a gift preview carrying the ff ligature (U+FB00, which Open Sans prints and
       Tinos lacks) made a legacy draft, and the same text as a paid letter was refused, naming
-      "ﬀ (U+FB00)".
+      "ﬀ (U+FB00)". Since #534 PR 5 a gift send meets the renderer's checks, so both are refused.
 
 ### Send (US-LETTER-02)
 - [x] Use draft ID from preview

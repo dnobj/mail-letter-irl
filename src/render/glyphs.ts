@@ -81,7 +81,8 @@ export function placeGlyphs(run: TextRun): PlacedGlyph[] {
   let x = run.x;
   shaped.glyphs.forEach((glyph, index) => {
     const position = shaped.positions[index];
-    const key = `${FONT_CODES[run.font] ?? run.font}${run.size}-${glyph.id}`;
+    // No dot in an id: the letter card keeps only ids of letters, digits, _ and -.
+    const key = `${FONT_CODES[run.font] ?? run.font}${String(run.size).replace('.', '_')}-${glyph.id}`;
     let outline = outlineCache.get(key);
     if (outline === undefined) {
       outline = cubicOutline(glyph.path.scale(scale, -scale));

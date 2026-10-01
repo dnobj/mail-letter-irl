@@ -3,8 +3,8 @@
  * LETTER_IRL_PRINT_RENDERER=pdf: the preview is the page as it prints, the
  * draft records the renderer's version, the page is measured rather than
  * estimated, and the text is checked against the renderer's font while the
- * addresses keep PostGrid's Open Sans. Without the flag, previews are the
- * legacy HTML, unchanged.
+ * addresses keep PostGrid's Open Sans. A gift send's card is the second
+ * page. Without the flag, previews are the legacy HTML, unchanged.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -47,7 +47,7 @@ import { createDraft } from '../../../src/services/draftService.js';
 import { getRecentUploadedImage } from '../../../src/services/recentUploadStore.js';
 import { getReturnAddress } from '../../../src/services/returnAddressService.js';
 import { downloadAndProcessLetterImageWithPreview } from '../../../src/services/imageService.js';
-import { getGiftBalance } from '../../../src/services/giftLetterService.js';
+import { getGiftBalance, sampleFundedCard } from '../../../src/services/giftLetterService.js';
 import { getSendEligibility } from '../../../src/services/commerceService.js';
 import { quoteAndPreviewLetterTextOnlyTool } from '../../../src/tools/quoteAndPreviewLetterTextOnly.js';
 import { quoteAndPreviewLetterWithHeaderImageTool } from '../../../src/tools/quoteAndPreviewLetterWithHeaderImage.js';
@@ -344,78 +344,134 @@ describe('what the renderer can print', () => {
 });
 
 describe('a gift send', () => {
+  // U+2011, which Tinos draws and Open Sans prints as a box; U+FB00, the
+  // reverse: the card and the letter print in Tinos, the addresses in Open Sans.
+  const NB_HYPHEN = String.fromCodePoint(0x2011);
+  const FF = String.fromCodePoint(0xfb00);
+  const pages = (html: string) => html.match(/<svg [\s\S]*?<\/svg>/g) ?? [];
+
   beforeEach(() => {
     vi.stubEnv('LETTER_IRL_GIFT_LETTERS_ENABLED', 'true');
     vi.mocked(getGiftBalance).mockResolvedValue({ available: 1, next: { giftId: 'gift-1', cardState: 'funded' } } as never);
   });
 
-  it('is previewed and printed on the legacy HTML, with its card, until the gift page moves over', async () => {
+  it('is previewed on our renderer, its card the second page as it prints (#534 PR 5)', async () => {
     const output = await run('text_only', { sendAsGift: true });
     const draft = drafted();
     expect(draft.isGiftSend).toBe(true);
-    expect(draft.rendererVersion).toBeUndefined();
-    expect(draft.previewHtml).toContain("font-family: 'Times New Roman'");
-    // None of our renderer's glyphs, and no hidden text for the card.
-    expect(draft.previewHtml).not.toMatch(/#tr12-\d+/);
-    expect(draft.previewHtml).not.toContain('<div hidden>');
+    expect(draft.rendererVersion).toBe('pdf-1');
+    const html = draft.previewHtml!;
+    expect(output.previewHtml).toBe(html);
+    const [letter, card] = pages(html);
+    expect(pages(html)).toHaveLength(2);
+    expect(letter).toContain('<title>Dear Sam,\nPat</title>');
+    // The card: its border, the QR's modules, the sender's name, and the
+    // placeholder where the code the send mints will print.
+    expect(card).toContain('rx="12" fill="none" stroke="#1f1a15" stroke-width="1.5"/>');
+    expect(card).toMatch(/<g fill="#000">(<rect [^>]*\/>)+<\/g>/);
+    expect(card).toContain('<title>A GIFT INSIDE THIS LETTER\nA letter for you to send\nPat Example sent this letter');
+    expect(card).toContain(`\n${'\u2022'.repeat(4)}-${'\u2022'.repeat(4)}\n`);
+    // PostGrid stamps the addresses on the first page only.
+    expect(letter).toContain('<text');
+    expect(card).not.toContain('<text');
     expect(output.giftCard).toMatchObject({ state: 'funded' });
   });
 
-  it("is held to the legacy print's limits, before the addresses are checked (review round 4)", async () => {
+  it.each(['header_image', 'inline_image'] as const)('is previewed the same way with %s', async layout => {
+    processedLayout = layout;
+    await run(layout, { bodyText: lines(3), sendAsGift: true });
+    const draft = drafted();
+    expect(draft.rendererVersion).toBe('pdf-1');
+    expect(pages(draft.previewHtml!)).toHaveLength(2);
+  });
+
+  it('draws the card a spent budget prints', async () => {
+    vi.mocked(getGiftBalance).mockResolvedValue({ available: 1, next: { giftId: 'gift-1', cardState: 'unfunded' } } as never);
+    await run('text_only', { sendAsGift: true });
+    const card = pages(drafted().previewHtml!)[1];
+    expect(card).toContain('<title>SENT WITH LETTER IRL\nThis letter began as a conversation\nPat Example wrote it');
+  });
+
+  it("meets the renderer's limits, not the legacy print's", async () => {
+    // Under a header image the page holds 16 lines; the legacy print took 17.
+    processedLayout = 'header_image';
+    await expect(run('header_image', { bodyText: lines(16), sendAsGift: true })).rejects.toThrow(
+      'Letter is 1 line too long for one page with a header image: it takes 17 lines and the page holds 16.'
+    );
+    expect(createDraft).not.toHaveBeenCalled();
+
+    // Over the legacy estimate, but every line fits the page.
     const body = Array.from({ length: 24 }, () => 'the quick brown fox jumps over the lazy dog and keeps on running far').join('\n');
-    await expect(run('text_only', { bodyText: body, sendAsGift: true })).rejects.toThrow('Letter exceeds');
-    expect(getLetterProvider).not.toHaveBeenCalled();
-    expect(createDraft).not.toHaveBeenCalled();
+    await expect(run('text_only', { bodyText: body, sendAsGift: true })).resolves.toMatchObject({ draftId: 'draft-1' });
+    expect(drafted().rendererVersion).toBe('pdf-1');
   });
 
-  it("and to Open Sans for its text, before the picture is fetched", async () => {
-    processedLayout = 'header_image';
-    await expect(
-      run('header_image', { bodyText: `A well${String.fromCodePoint(0x2011)}known road`, sendAsGift: true })
-    ).rejects.toThrow("can't print some characters");
+  it("and the renderer's font: what Tinos draws prints, what it lacks is refused", async () => {
+    await expect(run('text_only', { bodyText: `A well${NB_HYPHEN}known road`, sendAsGift: true })).resolves
+      .toMatchObject({ draftId: 'draft-1' });
+    await expect(run('text_only', { bodyText: `We will sta${FF} it`, sendAsGift: true })).rejects.toThrow(
+      `${FF} (U+FB00) in the text.`
+    );
+  });
+
+  it.each(['text_only', 'header_image', 'inline_image'] as const)("refuses a sender's name the card cannot draw (%s), and says where it prints", async layout => {
+    processedLayout = layout === 'inline_image' ? layout : 'header_image';
+    // Open Sans stamps the ligature in the return address; Tinos, which
+    // draws the card's "Pat ... sent this letter", has no glyph for it.
+    const sender = address({ name: `Pat Sta${FF}ord` });
+    const error = await run(layout, { sender, sendAsGift: true }).catch(e => e);
+    expect(error.message).toContain(
+      `can't print some characters in this letter: ${FF} (U+FB00) in the sender's name, which the gift card prints.`
+    );
+    expect(error).toMatchObject({ diagnosticClass: 'validation_error' });
+    expect(createDraft).not.toHaveBeenCalled();
     expect(downloadAndProcessLetterImageWithPreview).not.toHaveBeenCalled();
+
+    // Without a card, the name is only stamped, in Open Sans, which prints it.
+    await expect(run(layout, { sender })).resolves.toMatchObject({ draftId: 'draft-1' });
+    expect(drafted().isGiftSend).toBe(false);
+
+    // And on the legacy HTML the card prints in Open Sans too.
+    vi.mocked(createDraft).mockClear();
+    vi.stubEnv('LETTER_IRL_PRINT_RENDERER', 'html');
+    await expect(run(layout, { sender, sendAsGift: true })).resolves.toMatchObject({ draftId: 'draft-1' });
+    expect(drafted().rendererVersion).toBeUndefined();
+  });
+
+  it.each(['text_only', 'header_image', 'inline_image'] as const)("refuses a sender's name too long for the card (%s), before the picture is fetched", async layout => {
+    processedLayout = layout === 'inline_image' ? layout : 'header_image';
+    const sender = address({ name: 'Pat Example '.repeat(125).trim() });
+    const ctx = context();
+    const error = await run(layout, { sender, sendAsGift: true }, ctx).catch(e => e);
+    expect(error.message).toBe("The sender's name is too long to print on the gift card. Shorten it, then preview again.");
+    expect(error).toMatchObject({ diagnosticClass: 'validation_error' });
     expect(createDraft).not.toHaveBeenCalled();
+    expect(downloadAndProcessLetterImageWithPreview).not.toHaveBeenCalled();
+    expect(ctx.logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'quote.letter.gift_card_overflow', overflowPoints: expect.any(Number) }),
+      expect.any(String)
+    );
+
+    // The legacy HTML flows the card onto as many pages as it takes.
+    vi.stubEnv('LETTER_IRL_PRINT_RENDERER', 'html');
+    await expect(run(layout, { sender, sendAsGift: true })).resolves.toMatchObject({ draftId: 'draft-1' });
   });
 
-  it("and never to the renderer's: what the legacy print takes, a gift send keeps (review round 4)", async () => {
-    // 17 lines under a header image: the renderer's page holds 16, the legacy
-    // print 17. And the ff ligature, which Open Sans prints and Tinos lacks.
-    processedLayout = 'header_image';
-    await expect(run('header_image', { bodyText: lines(16), sendAsGift: true })).resolves.toMatchObject({ draftId: 'draft-1' });
-    expect(drafted().rendererVersion).toBeUndefined();
-    expect(drafted().isGiftSend).toBe(true);
-
-    vi.mocked(createDraft).mockClear();
-    await expect(
-      run('text_only', { bodyText: `We will sta${String.fromCodePoint(0xfb00)} it`, sendAsGift: true })
-    ).resolves.toMatchObject({ draftId: 'draft-1' });
-    expect(drafted().rendererVersion).toBeUndefined();
-    expect(drafted().isGiftSend).toBe(true);
-
-    // 14 lines above an enclosed image: the legacy print's limit, one more
-    // than the renderer's page holds.
-    vi.mocked(createDraft).mockClear();
-    processedLayout = 'inline_image';
-    await expect(run('inline_image', { bodyText: lines(13), sendAsGift: true })).resolves.toMatchObject({ draftId: 'draft-1' });
-    expect(drafted().rendererVersion).toBeUndefined();
-    expect(drafted().isGiftSend).toBe(true);
-  });
-
-  it('is never drawn or recorded with the renderer, even if a caller passes a layout', async () => {
+  it("adds the card to the page the tool measured, leaving the tool's layout as it was", async () => {
     const ctx = context();
     const letter = { bodyText: 'Dear Sam,', signOff: 'Pat', layoutType: 'text_only' as const };
-    const printLayout = layoutLetterForPreview(letter, ctx, 'pdf');
-    expect(printLayout).toBeDefined();
+    const printLayout = layoutLetterForPreview(letter, ctx, 'pdf')!;
     await createLetterDraftAndBuildOutput({
       ...letter,
       sender: address({ name: 'Pat Example' }),
       recipient: address(),
       usedSavedReturnAddress: false,
-      gift: { isGift: true, giftLettersAvailable: 1 },
+      gift: { isGift: true, card: sampleFundedCard(), giftLettersAvailable: 1 },
       printLayout,
       context: ctx
     });
-    expect(drafted().rendererVersion).toBeUndefined();
-    expect(drafted().previewHtml).toContain("font-family: 'Times New Roman'");
+    expect(drafted().rendererVersion).toBe('pdf-1');
+    expect(pages(drafted().previewHtml!)).toHaveLength(2);
+    expect(printLayout.pages).toHaveLength(1);
   });
 });

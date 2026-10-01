@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildGiftLetterPage,
   buildGiftPostcardBlock,
+  giftLetterPageCopy,
   giftLetterPageSvg,
   giftPostcardBlockSvg,
   qrPngDataUri,
@@ -149,6 +150,32 @@ describe('gift card markup', () => {
     expect(giftLetterPageSvg(unfunded, 'Sarah').html).toContain('a conversation with an AI assistant into a real letter');
     expect(giftLetterPageSvg(funded, 'Sarah').html).toContain('You write your letter with your AI assistant');
     expect(giftPostcardBlockSvg(unfunded, 'Sarah').html).toContain('A conversation with an AI assistant, printed and mailed.');
+  });
+
+  it('gives the HTML and our renderer the same words, from one source (#534)', () => {
+    const escaped = (text: string) =>
+      text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+    for (const card of [funded, unfunded, { ...funded, code: undefined, sample: true }]) {
+      const copy = giftLetterPageCopy(card, 'Pat <Example> & Co');
+      const { html } = giftLetterPageSvg(card, 'Pat <Example> & Co');
+      const words = [copy.eyebrow, copy.title, copy.lede, ...copy.steps.map(step => step.text), ...(copy.fine ? [copy.fine] : [])];
+      for (const text of words) expect(html, text).toContain(`>${escaped(text)}</`);
+      expect(copy.qrUrl).toBe(card.url);
+    }
+    // Each step keeps its kind, which sets its size in both: in the HTML, by its class.
+    expect(giftLetterPageCopy(funded, 'Pat').steps.map(step => step.kind)).toEqual(['plain', 'url', 'plain', 'code']);
+    const { html } = giftLetterPageSvg(funded, 'Pat');
+    expect(html).toContain('<p>Scan the code, or visit</p>');
+    expect(html).toContain('<p class="gift-url">letterirl.com/g</p>');
+    expect(html).toContain('<p class="gift-code">K7M2-QX9A</p>');
+    expect(giftLetterPageCopy(unfunded, 'Pat').steps.map(step => step.kind)).toEqual(['plain', 'url']);
+    expect(giftLetterPageCopy(unfunded, 'Pat').fine).toBeUndefined();
+  });
+
+  it('names the sender as given, trimmed, and someone when there is no name', () => {
+    expect(giftLetterPageCopy(funded, '  Pat Example ').lede).toMatch(/^Pat Example sent this letter/);
+    expect(giftLetterPageCopy(funded, '   ').lede).toMatch(/^Someone sent this letter/);
+    expect(giftLetterPageCopy(unfunded, '').lede).toMatch(/^Someone wrote it/);
   });
 
   it('escapes the sender name, which is customer input', () => {

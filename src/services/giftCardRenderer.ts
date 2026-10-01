@@ -1,5 +1,6 @@
-import qrcode from 'qrcode-generator';
 import sharp from 'sharp';
+import { QUIET_ZONE_MODULES, qrMatrix, qrRuns } from '../render/qr.js';
+import type { GiftPageCopy } from '../render/giftPage.js';
 
 /**
  * The printed gift card (docs/gift-letters.md): an extra page on a letter, or
@@ -47,11 +48,6 @@ export interface GiftCardContent {
 
 export type GiftQrFormat = 'svg' | 'png';
 
-/** ISO/IEC 18004 asks for a quiet zone of four modules. */
-const QUIET_ZONE_MODULES = 4;
-/** Q recovers about 25% of the symbol: enough for a crease or a scuff. */
-const ERROR_CORRECTION = 'Q' as const;
-
 const LETTER_QR_INCHES = 1.4;
 const POSTCARD_QR_INCHES = 0.95;
 
@@ -64,13 +60,6 @@ function escapeHtml(text: string): string {
     .replace(/'/g, '&#039;');
 }
 
-function matrix(text: string) {
-  const qr = qrcode(0, ERROR_CORRECTION);
-  qr.addData(text, 'Byte');
-  qr.make();
-  return qr;
-}
-
 /**
  * The QR as inline SVG: one <rect> per horizontal run of dark modules, on a
  * white ground that includes the quiet zone. Rectangles rather than a path
@@ -78,24 +67,11 @@ function matrix(text: string) {
  * handed; crispEdges stops anti-aliasing from blurring module edges.
  */
 export function qrSvg(text: string, sizeInches: number): string {
-  const qr = matrix(text);
-  const count = qr.getModuleCount();
-  const extent = count + QUIET_ZONE_MODULES * 2;
-  const rects: string[] = [];
-  for (let row = 0; row < count; row += 1) {
-    let col = 0;
-    while (col < count) {
-      if (!qr.isDark(row, col)) {
-        col += 1;
-        continue;
-      }
-      const start = col;
-      while (col < count && qr.isDark(row, col)) col += 1;
-      rects.push(
-        `<rect x="${start + QUIET_ZONE_MODULES}" y="${row + QUIET_ZONE_MODULES}" width="${col - start}" height="1"/>`
-      );
-    }
-  }
+  // The symbol and its runs come from src/render/qr.ts, which our own
+  // renderer draws the gift page's QR from too (#534).
+  const matrix = qrMatrix(text);
+  const extent = matrix.count + QUIET_ZONE_MODULES * 2;
+  const rects = qrRuns(matrix).map(run => `<rect x="${run.x}" y="${run.y}" width="${run.width}" height="1"/>`);
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${extent} ${extent}" ` +
     `width="${sizeInches}in" height="${sizeInches}in" shape-rendering="crispEdges" role="img" aria-label="QR code">` +
@@ -191,6 +167,46 @@ export const GIFT_LETTER_PAGE_CSS = `
     .gift-fine { font-size: 9.5pt; line-height: 1.45; margin: 0; }`;
 
 /**
+ * The letter page's words: one source for the legacy HTML below and for our
+ * own renderer (src/render/giftPage.ts), so the two cannot drift (#534).
+ * Plain text; each consumer escapes or draws it.
+ */
+export function giftLetterPageCopy(card: GiftCardContent, senderName: string): GiftPageCopy {
+  const sender = senderName.trim() || 'Someone';
+  if (card.state === 'unfunded') {
+    return {
+      eyebrow: 'Sent with Letter IRL',
+      title: 'This letter began as a conversation',
+      lede: `${sender} wrote it with Letter IRL, which turns a conversation with an AI assistant into a real letter, printed and mailed.`,
+      steps: [
+        { text: 'See how it works at', kind: 'plain' },
+        { text: card.displayUrl, kind: 'url' }
+      ],
+      qrUrl: card.url
+    };
+  }
+  return {
+    eyebrow: 'A gift inside this letter',
+    title: 'A letter for you to send',
+    lede: `${sender} sent this letter with Letter IRL and included one more: a letter of your own, printed and mailed for you at no cost.`,
+    steps: [
+      { text: 'Scan the code, or visit', kind: 'plain' },
+      { text: card.displayUrl, kind: 'url' },
+      { text: 'and enter', kind: 'plain' },
+      { text: printedCode(card), kind: 'code' }
+    ],
+    fine: `${redeemByText(card)}${usesText(card, 'letter')} You write your letter with your AI assistant, and we print and mail it.`,
+    qrUrl: card.url
+  };
+}
+
+const STEP_CLASS: Record<GiftPageCopy['steps'][number]['kind'], string> = {
+  plain: '',
+  url: ' class="gift-url"',
+  code: ' class="gift-code"'
+};
+
+/**
  * The letter's extra page. A page break of its own, then a card in the upper
  * half of the sheet: PostGrid prints its integrity QR and sequence ids in the
  * bottom-left corner of letter pages, and the card must stay clear of them.
@@ -203,45 +219,24 @@ export function renderGiftCardLetterPage(
   senderName: string,
   qr: string
 ): CardFragment {
-  const sender = escapeHtml(senderName.trim() || 'Someone');
-  if (card.state === 'unfunded') {
-    return {
-      css: GIFT_LETTER_PAGE_CSS,
-      html: `
-  <section class="gift-page">
-    <div class="gift-card">
-      <p class="gift-eyebrow">Sent with Letter IRL</p>
-      <h1 class="gift-title">This letter began as a conversation</h1>
-      <p class="gift-lede">${sender} wrote it with Letter IRL, which turns a conversation with an AI assistant into a real letter, printed and mailed.</p>
-      <div class="gift-claim">
-        <div class="gift-qr">${qr}</div>
-        <div class="gift-steps">
-          <p>See how it works at</p>
-          <p class="gift-url">${escapeHtml(card.displayUrl)}</p>
-        </div>
-      </div>
-    </div>
-  </section>`
-    };
-  }
+  const copy = giftLetterPageCopy(card, senderName);
+  const steps = copy.steps
+    .map(step => `\n          <p${STEP_CLASS[step.kind]}>${escapeHtml(step.text)}</p>`)
+    .join('');
+  const fine = copy.fine === undefined ? '' : `\n      <p class="gift-fine">${escapeHtml(copy.fine)}</p>`;
   return {
     css: GIFT_LETTER_PAGE_CSS,
     html: `
   <section class="gift-page">
     <div class="gift-card">
-      <p class="gift-eyebrow">A gift inside this letter</p>
-      <h1 class="gift-title">A letter for you to send</h1>
-      <p class="gift-lede">${sender} sent this letter with Letter IRL and included one more: a letter of your own, printed and mailed for you at no cost.</p>
+      <p class="gift-eyebrow">${escapeHtml(copy.eyebrow)}</p>
+      <h1 class="gift-title">${escapeHtml(copy.title)}</h1>
+      <p class="gift-lede">${escapeHtml(copy.lede)}</p>
       <div class="gift-claim">
         <div class="gift-qr">${qr}</div>
-        <div class="gift-steps">
-          <p>Scan the code, or visit</p>
-          <p class="gift-url">${escapeHtml(card.displayUrl)}</p>
-          <p>and enter</p>
-          <p class="gift-code">${escapeHtml(printedCode(card))}</p>
+        <div class="gift-steps">${steps}
         </div>
-      </div>
-      <p class="gift-fine">${escapeHtml(redeemByText(card))}${usesText(card, 'letter')} You write your letter with your AI assistant, and we print and mail it.</p>
+      </div>${fine}
     </div>
   </section>`
   };

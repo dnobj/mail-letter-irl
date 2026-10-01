@@ -1,7 +1,8 @@
 /**
  * The letter card shows the page our renderer drew (#534 Phase 3), the same
  * SVG the website's confirm page shows, instead of a mockup drawn from the
- * text. A legacy preview, and a gift send's, keep the mockup.
+ * text; a gift send's card is its second page (PR 5). A legacy preview keeps
+ * the mockup.
  *
  * This mounts the real card in jsdom (the letterPreviewCardEscaping pattern),
  * with a preview made by the real renderer and preview service.
@@ -12,8 +13,9 @@ import { JSDOM } from 'jsdom';
 import * as fs from 'fs';
 import * as path from 'path';
 import { inlineHostBridge } from '../../../src/mcp/widgetHost.js';
-import { layoutLetter, renderPreviewSvg } from '../../../src/render/index.js';
+import { layoutGiftPage, layoutLetter, renderPreviewSvg } from '../../../src/render/index.js';
 import { renderLetterPreviewDocument } from '../../../src/services/previewService.js';
+import { giftLetterPageCopy } from '../../../src/services/giftCardRenderer.js';
 
 const WIDGET_DIR = path.resolve(__dirname, '../../../widgets');
 
@@ -67,6 +69,25 @@ function pngBytes(width: number, height: number): Buffer {
   return bytes;
 }
 
+/**
+ * The page the card shows is the page it was given: the same elements, the
+ * same attributes and the same text, with only ids and outline links prefixed.
+ */
+function expectSameDrawing(original: Element, shown: Element) {
+  const walk = (root: Element) => [root, ...root.querySelectorAll('*')];
+  const before = walk(original);
+  const after = walk(shown);
+  expect(after.map(element => element.localName)).toEqual(before.map(element => element.localName));
+  const prefixed = (name: string, value: string) =>
+    name === 'id' ? `lirl-page-${value}` : name === 'href' && value.startsWith('#') ? `#lirl-page-${value.slice(1)}` : value;
+  before.forEach((element, index) => {
+    const attributes = (target: Element) => [...target.attributes].map(attribute => [attribute.name, attribute.value]);
+    expect(attributes(after[index])).toEqual(attributes(element).map(([name, value]) => [name, prefixed(name, value)]));
+    if (element.children.length === 0) expect(after[index].textContent).toBe(element.textContent);
+  });
+  return before;
+}
+
 describe('LetterPreviewCard: the page as it prints', () => {
   // Every production image letter's preview carries a JPEG (imageService's
   // small copy); PNG is the other type the renderer reads (#542 review round 3).
@@ -83,22 +104,47 @@ describe('LetterPreviewCard: the page as it prints', () => {
     const dom = mount(source);
     const original = new dom.window.DOMParser().parseFromString(source, 'text/html').body.querySelector('svg')!;
     const shown = dom.window.document.querySelector('.letter-page svg')!;
-    const walk = (root: Element) => [root, ...root.querySelectorAll('*')];
-    const before = walk(original);
-    const after = walk(shown);
-    expect(after.map(element => element.localName)).toEqual(before.map(element => element.localName));
-    const prefixed = (name: string, value: string) =>
-      name === 'id' ? `lirl-page-${value}` : name === 'href' && value.startsWith('#') ? `#lirl-page-${value.slice(1)}` : value;
-    before.forEach((element, index) => {
-      const attributes = (target: Element) => [...target.attributes].map(attribute => [attribute.name, attribute.value]);
-      expect(attributes(after[index])).toEqual(attributes(element).map(([name, value]) => [name, prefixed(name, value)]));
-      if (element.children.length === 0) expect(after[index].textContent).toBe(element.textContent);
-    });
+    const before = expectSameDrawing(original, shown);
     // What the comparison covered: outlines with negative numbers, the image, the stamp.
     expect(before.some(element => element.localName === 'path' && /-\d/.test(element.getAttribute('d') ?? ''))).toBe(true);
     expect(shown.querySelector('image')!.getAttribute('href')!.startsWith(`data:${mime};base64,`)).toBe(true);
     expect(shown.querySelector('image')!.getAttribute('preserveAspectRatio')).toBe('none');
     expect(shown.querySelectorAll('text')).toHaveLength(7);
+  });
+
+  it("keeps a gift send's card whole, as the second page: its border, its QR, its outlines at every size", () => {
+    const layout = layoutLetter({ text: 'Dear Sam,\nSee you soon.\nPat', layoutType: 'text_only' });
+    const card = {
+      state: 'funded' as const,
+      code: 'K7M2QX9A',
+      url: 'https://letterirl.com/g/K7M2QX9A',
+      displayUrl: 'letterirl.com/g',
+      redeemBy: '2026-12-16'
+    };
+    layout.pages.push(layoutGiftPage(giftLetterPageCopy(card, 'Pat Example')));
+    const source = renderLetterPreviewDocument(
+      renderPreviewSvg(layout, { addresses: { from: ['PAT EXAMPLE'], to: ['SAM RIVERA', 'NEW YORK, NY 10118'] } }),
+      { bodyText: 'Dear Sam,\nSee you soon.', signOff: 'Pat' }
+    );
+    const dom = mount(source);
+    const originals = new dom.window.DOMParser().parseFromString(source, 'text/html').body.querySelectorAll(':scope > svg');
+    const shown = dom.window.document.querySelectorAll('.letter-page svg');
+    expect(originals).toHaveLength(2);
+    expect(shown).toHaveLength(2);
+    expectSameDrawing(originals[0], shown[0]);
+    expectSameDrawing(originals[1], shown[1]);
+
+    const page = shown[1];
+    const border = page.querySelector('rect[rx]')!;
+    expect([border.getAttribute('rx'), border.getAttribute('fill'), border.getAttribute('stroke'), border.getAttribute('stroke-width')])
+      .toEqual(['12', 'none', '#1f1a15', '1.5']);
+    expect(page.querySelectorAll('g[fill="#000"] > rect').length).toBeGreaterThan(50);
+    // Every outline the card uses is defined in it, the lede's 12.5pt ones too.
+    const defined = new Set([...page.querySelectorAll('defs path')].map(path => `#${path.getAttribute('id')}`));
+    const links = [...page.querySelectorAll('use')].map(use => use.getAttribute('href')!);
+    for (const link of links) expect(defined.has(link)).toBe(true);
+    expect(links.some(link => /^#lirl-page-tr12_5-\d+$/.test(link))).toBe(true);
+    expect(page.querySelector('title')!.textContent).toContain('A GIFT INSIDE THIS LETTER');
   });
 
   it("shows the renderer's page, with its outlines and the stamped addresses, and no mockup", () => {
@@ -193,6 +239,8 @@ describe('LetterPreviewCard: the page as it prints', () => {
         <script>window.__pwned = 1</script>
         <foreignObject width="10" height="10"><img src="x" onerror="window.__pwned = 1"></foreignObject>
         <rect width="612" height="792" fill="#fff" __proto__="2"/>
+        <rect x="1" y="1" width="2" height="2" rx="calc(1px)" stroke="url(https://x.example/s.svg#s)" stroke-width="expression(1)"/>
+        <rect x="1" y="1" width="2" height="2" rx="12" fill="none" stroke="#1f1a15" stroke-width="1.5"/>
         <defs><path id="tr12-1" d="M0 0L1 1Z"/></defs>
         <use href="#tr12-1" x="1" y="2"/>
         <use href="https://evil.example/sprite.svg#a" x="1" y="2"/>
@@ -212,7 +260,7 @@ describe('LetterPreviewCard: the page as it prints', () => {
     expect(page.querySelector('foreignObject')).toBeNull();
     expect(page.querySelector('a')).toBeNull();
 
-    const allowed = new Set(['xmlns', 'viewbox', 'role', 'id', 'd', 'x', 'y', 'width', 'height', 'preserveaspectratio', 'fill', 'font-family', 'font-size', 'href']);
+    const allowed = new Set(['xmlns', 'viewbox', 'role', 'id', 'd', 'x', 'y', 'width', 'height', 'preserveaspectratio', 'fill', 'rx', 'stroke', 'stroke-width', 'font-family', 'font-size', 'href']);
     for (const element of page.querySelectorAll('svg, svg *')) {
       for (const attribute of element.attributes) expect(allowed.has(attribute.name.toLowerCase()), attribute.name).toBe(true);
     }
@@ -220,6 +268,12 @@ describe('LetterPreviewCard: the page as it prints', () => {
     // Prototype names find nothing in the allow-list, rather than throwing.
     expect(page.querySelector('svg')!.hasAttribute('constructor')).toBe(false);
     expect(page.querySelector('rect')!.attributes).toHaveLength(3);
+    // A border keeps a radius, a colour and a width, and nothing else in their place.
+    const [, hostileBorder, border] = page.querySelectorAll('rect');
+    expect([...hostileBorder.attributes].map(attribute => attribute.name)).toEqual(['x', 'y', 'width', 'height']);
+    expect([...border.attributes].map(attribute => `${attribute.name}=${attribute.value}`)).toEqual([
+      'x=1', 'y=1', 'width=2', 'height=2', 'rx=12', 'fill=none', 'stroke=#1f1a15', 'stroke-width=1.5'
+    ]);
     expect(page.querySelector('path[d="M0 0Z"]')!.hasAttribute('fill')).toBe(false);
 
     const links = [...page.querySelectorAll('use, image')].map(element => element.getAttribute('href'));

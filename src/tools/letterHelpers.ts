@@ -25,6 +25,8 @@ import { findUnprintable, unprintableRefusal, type PrintedText } from "../servic
 import { printRenderer } from "../config/printRenderer.js";
 import {
   drawsGrapheme,
+  GiftPageOverflow,
+  layoutGiftPage,
   layoutLetter,
   readImageDataUri,
   renderPreviewSvg,
@@ -36,7 +38,8 @@ import type { MailType } from "../services/types.js";
 import { callingApp, type ClientProfile } from "../auth/clientProfiles.js";
 import { letterPacksPageUrl } from "../config/sendConfirmation.js";
 import { giftCardSummary, resolveGiftSendChoice, type GiftSendChoice } from "./giftSendChoice.js";
-import type { GiftCardState } from "../services/giftCardRenderer.js";
+import { giftLetterPageCopy } from "../services/giftCardRenderer.js";
+import type { GiftCardContent, GiftCardState } from "../services/giftCardRenderer.js";
 import {
   DELIVERY_CLASS,
   DELIVERY_DISCLAIMER,
@@ -651,18 +654,46 @@ export function validatePrintableCharacters(
 export function validatePrintableLetter(
   letter: PrintedAddresses & { bodyText: string; signOff: string },
   context: ToolContext,
-  renderer: 'html' | 'pdf' = printRenderer()
+  renderer: 'html' | 'pdf' = printRenderer(),
+  /** A gift send's card: our renderer draws it as the second page, with the sender's name. */
+  giftCard?: GiftCardContent
 ): void {
   const prints = renderer === "pdf" ? drawsGrapheme : undefined;
+  const card = prints ? giftCard : undefined;
   validatePrintableCharacters(
     "letter",
     [
       { field: "bodyText", where: "in the text", text: letter.bodyText, prints },
-      { field: "signOff", where: "in the sign-off", text: letter.signOff, prints }
+      { field: "signOff", where: "in the sign-off", text: letter.signOff, prints },
+      ...(card
+        ? [{ field: "giftCardName", where: "in the sender's name, which the gift card prints", text: letter.sender.name, prints }]
+        : [])
     ],
     letter,
     context
   );
+  if (card) validateGiftPageFits(card, letter.sender.name, context);
+}
+
+/**
+ * The card page ends above the bottom margin, as the letter's text does
+ * (layoutGiftPage). Its other words are ours, so only the sender's name can
+ * push it past, and only at about a thousand characters.
+ */
+function validateGiftPageFits(card: GiftCardContent, senderName: string, context: ToolContext): void {
+  try {
+    layoutGiftPage(giftLetterPageCopy(card, senderName));
+  } catch (error) {
+    if (!(error instanceof GiftPageOverflow)) throw error;
+    context.logger.warn(
+      { correlationId: context.correlationId, event: "quote.letter.gift_card_overflow", overflowPoints: Math.round(error.overflow) },
+      "The gift card runs past the page"
+    );
+    throw Object.assign(
+      new Error("The sender's name is too long to print on the gift card. Shorten it, then preview again."),
+      { diagnosticClass: "validation_error" }
+    );
+  }
 }
 
 // ============================================================================
@@ -747,10 +778,9 @@ export function previewSendEligibility(
 }
 
 /**
- * Whether a letter preview is a gift send, decided before any check that
- * depends on how it prints. A gift send prints on the legacy HTML until the gift page moves
- * onto our renderer (#534), so it meets the legacy limits and Open Sans, never
- * the renderer's; the tools pick the renderer from this. The postcard preview
+ * Whether a letter preview is a gift send, decided before the checks: on our
+ * renderer (#534) a gift send's card page draws the sender's name, so the
+ * tools check that it prints (validatePrintableLetter). The postcard preview
  * decides its gift the same way, before its checks.
  */
 export async function letterGiftChoice(
@@ -809,10 +839,10 @@ export async function createLetterDraftAndBuildOutput(
     "Computed preview requirements"
   );
 
-  // A gift send prints on the legacy HTML until the gift page moves onto our
-  // renderer (#534): the tools check it as such (letterGiftChoice), and it is
-  // never drawn by the renderer or recorded with its version.
-  const layout = gift.isGift ? undefined : printLayout;
+  // A gift send's card is the second page, drawn as it prints (#534).
+  const layout = printLayout && gift.isGift && gift.card
+    ? { ...printLayout, pages: [...printLayout.pages, layoutGiftPage(giftLetterPageCopy(gift.card, sender.name))] }
+    : printLayout;
 
   // Generate preview HTML
   // Use preview images (compressed) for the HTML to reduce payload size
