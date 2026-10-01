@@ -35,6 +35,7 @@ vi.mock('../../../src/db/index.js', () => {
 import * as db from '../../../src/db/index.js';
 import {
   createDraft,
+  createPostcardDraft,
   consumeDraft,
   linkDraftToLetter,
   getDraft,
@@ -204,6 +205,45 @@ describe('draftService', () => {
       const parameter = Number(placeholder![1]) - 1;
       expect(rendered[parameter]).toBe('pdf-1');
       expect((vi.mocked(db.query).mock.calls[1][1] as unknown[])[parameter]).toBeNull();
+    });
+  });
+
+  describe('createPostcardDraft', () => {
+    it('records the renderer that drew the preview (#534 Phase 4), and none for the legacy HTML', async () => {
+      const inserted = {
+        rows: [{ draft_id: 'draft-1', expires_at: new Date('2026-10-02T12:00:00Z') }],
+        rowCount: 1,
+        command: 'INSERT',
+        oid: 0,
+        fields: [],
+      };
+      vi.mocked(db.query).mockResolvedValueOnce(inserted).mockResolvedValueOnce(inserted);
+      const draft = {
+        userId: testUsers.sarah.user_id,
+        sender: testAddresses.validSender as unknown as Record<string, unknown>,
+        recipient: testAddresses.validRecipient as unknown as Record<string, unknown>,
+        message: 'Wish you were here.',
+        frontImageData: 'data:image/jpeg;base64,AAAA',
+        frontImageUrl: 'https://files.example/a.jpg',
+      };
+
+      await createPostcardDraft({ ...draft, rendererVersion: 'pdf-1' });
+      await createPostcardDraft(draft);
+
+      const [sql, rendered] = vi.mocked(db.query).mock.calls[0] as [string, unknown[]];
+      const list = (from: number) => sql.slice(sql.indexOf('(', from) + 1, sql.indexOf(')', from)).split(',').map(item => item.trim());
+      const columns = list(0);
+      const values = list(sql.indexOf('VALUES'));
+      expect(values).toHaveLength(columns.length);
+      const position = columns.indexOf('renderer_version');
+      expect(position).toBeGreaterThan(-1);
+      const placeholder = /^\$(\d+)$/.exec(values[position]);
+      expect(placeholder).not.toBeNull();
+      const parameter = Number(placeholder![1]) - 1;
+      expect(rendered[parameter]).toBe('pdf-1');
+      expect((vi.mocked(db.query).mock.calls[1][1] as unknown[])[parameter]).toBeNull();
+      // Every placeholder has its parameter.
+      expect(rendered).toHaveLength(Math.max(...values.map(value => Number(/^\$(\d+)$/.exec(value)?.[1] ?? 0))));
     });
   });
 

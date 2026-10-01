@@ -14,8 +14,24 @@ import {
   previewSendEligibility,
   validateAddressesWithProvider,
   validatePrintableCharacters,
-  outputValidationStatus
+  outputValidationStatus,
+  withDisplayImage
 } from "./letterHelpers.js";
+import { printRenderer } from "../config/printRenderer.js";
+import {
+  drawsGrapheme,
+  layoutPostcard,
+  layoutPostcardBack,
+  POSTCARD_STAMP,
+  readImageDataUri,
+  renderPreviewSvg,
+  RENDERER_VERSION
+} from "../render/index.js";
+import {
+  renderPostcardPreviewDocument,
+  stampedAddressLines,
+  stampedPostcardReturnLines
+} from "../services/previewService.js";
 import { callingApp } from "../auth/clientProfiles.js";
 import { giftCardSummary, resolveGiftSendChoice } from "./giftSendChoice.js";
 import { previewSendStep } from "./previewSendStep.js";
@@ -125,6 +141,12 @@ const MAX_MESSAGE_LENGTH = 500;
  * it is a gift send.
  */
 const MAX_GIFT_MESSAGE_LENGTH = 350;
+/**
+ * On our renderer the back is measured, line by line, so the character limit
+ * only bounds the work (#534 Phase 4), as RENDERED_LETTER_CHARACTER_CAP does
+ * for letters. Sixteen full lines are about 700 characters.
+ */
+export const RENDERED_POSTCARD_CHARACTER_CAP = 1_000;
 const POSTCARD_CREDITS_COST = 2; // 2 internal credits = 1 letter/postcard
 
 // ============================================================================
@@ -246,24 +268,34 @@ async function handler(
     requested: input.sendAsGift,
     balanceCanPay: available >= requiredCredits
   });
-  const messageLimit = gift.isGift ? MAX_GIFT_MESSAGE_LENGTH : MAX_MESSAGE_LENGTH;
+  // A gift postcard's strip is still the legacy HTML's (#534), so a gift send
+  // keeps that print and its limits, as does any size but 6x9, which is all
+  // our renderer draws. Read once, so every check agrees.
+  const renderer = gift.isGift || size !== '6x9' ? 'html' : printRenderer();
+  const messageLimit = renderer === 'pdf'
+    ? RENDERED_POSTCARD_CHARACTER_CAP
+    : gift.isGift ? MAX_GIFT_MESSAGE_LENGTH : MAX_MESSAGE_LENGTH;
 
   // Validate message length
   if (input.message.length > messageLimit) {
     context.logger.warn(
       {
         correlationId: context.correlationId,
-        event: "quote.postcard.message_too_long",
+        event: renderer === 'pdf' ? "quote.postcard.exceeds_character_cap" : "quote.postcard.message_too_long",
         messageLength: input.message.length,
         maxLength: messageLimit
       },
       "Postcard message too long"
     );
-    throw new Error(
-      `Postcard message is too long (${input.message.length}/${messageLimit} characters). ` +
-      (gift.isGift
-        ? `A gift postcard leaves room for the gift card, so please shorten your message.`
-        : `Please shorten your message to fit on the postcard back.`)
+    // An expected refusal: logged as validation_error, not unknown_error.
+    throw Object.assign(
+      new Error(
+        `Postcard message is too long (${input.message.length}/${messageLimit} characters). ` +
+        (gift.isGift
+          ? `A gift postcard leaves room for the gift card, so please shorten your message.`
+          : `Please shorten your message to fit on the postcard back.`)
+      ),
+      { diagnosticClass: "validation_error" }
     );
   }
 
@@ -358,12 +390,39 @@ async function handler(
   }
 
   // Refuse characters the print shows as boxes (#526), before the picture is fetched
+  // On our renderer the message prints in its font (#534); the addresses are
+  // stamped in Open Sans either way.
   validatePrintableCharacters(
     "postcard",
-    [{ field: "message", where: "in the message", text: input.message }],
+    [{ field: "message", where: "in the message", text: input.message, prints: renderer === 'pdf' ? drawsGrapheme : undefined }],
     { sender, recipient: input.recipient, senderIsSaved: usedSavedReturnAddress },
     context
   );
+
+  // On our renderer the back is measured as it prints, before the picture
+  // is fetched: 16 lines in its left half.
+  if (renderer === 'pdf') {
+    const { page, overflowLines } = layoutPostcardBack(input.message);
+    if (overflowLines > 0) {
+      context.logger.warn(
+        {
+          correlationId: context.correlationId,
+          event: "quote.postcard.exceeds_back",
+          linesUsed: page.linesUsed,
+          linesAvailable: page.linesAvailable
+        },
+        "Postcard message runs past its half of the back"
+      );
+      throw Object.assign(
+        new Error(
+          `Postcard message is ${overflowLines} line${overflowLines === 1 ? "" : "s"} too long for the back: ` +
+          `it takes ${page.linesUsed} lines and the back holds ${page.linesAvailable}. ` +
+          `Please shorten your message to fit on the postcard back.`
+        ),
+        { diagnosticClass: "validation_error" }
+      );
+    }
+  }
 
   context.logger.info(
     {
@@ -451,6 +510,22 @@ async function handler(
   // Full-quality image is stored in draft for PostGrid printing
   const previewFrontHtml = generatePreviewFrontHtml(processedImage.previewDataUri, size);
   const previewBackHtml = generatePreviewBackHtml(input.message, sender, gift.card);
+  // On our renderer the draft keeps the postcard as it prints (#534 Phase 4):
+  // front and back, laid out with the full image's box and drawn with the
+  // small copy, the back with the addresses where PostGrid stamps them. The
+  // website's confirm page shows it; the card still draws its own.
+  const renderedHtml = renderer === 'pdf'
+    ? renderPostcardPreviewDocument(renderPreviewSvg(
+        withDisplayImage(
+          layoutPostcard({ message: input.message, image: readImageDataUri(processedImage.base64DataUri) }),
+          processedImage.previewDataUri
+        ),
+        {
+          addresses: { from: stampedPostcardReturnLines(sender), to: stampedAddressLines(input.recipient) },
+          stamp: { page: 1, geometry: POSTCARD_STAMP }
+        }
+      ))
+    : undefined;
 
   // Create draft for idempotent send
   const draftResult = await createPostcardDraft({
@@ -462,10 +537,11 @@ async function handler(
     frontImageUrl: imageSourceUrl!,
     postcardSize: size,
     requiredCredits,
-    previewHtml: previewFrontHtml,
+    previewHtml: renderedHtml ?? previewFrontHtml,
     senderValidation: senderValidation ? { status: senderValidation.status } : undefined,
     recipientValidation: recipientValidation ? { status: recipientValidation.status } : undefined,
     isGiftSend: gift.isGift,
+    rendererVersion: renderedHtml ? RENDERER_VERSION : undefined,
   });
 
   context.logger.info(
@@ -624,11 +700,19 @@ function normalizeCountryToUS(country?: string): string {
   return normalized;
 }
 
+const PREVIEW_FRONT_PIXELS: Record<PostcardSize, { width: number; height: number }> = {
+  '6x4': { width: 540, height: 360 },
+  '6x9': { width: 810, height: 540 },
+  '6x11': { width: 990, height: 540 }
+};
+
 /**
  * Generate HTML preview for postcard front (image)
  */
 function generatePreviewFrontHtml(imageBase64: string, size: PostcardSize): string {
-  const dimensions = size === '6x9' ? { width: 540, height: 810 } : { width: 540, height: 360 };
+  // Landscape, at 90 CSS pixels an inch, as PostGrid prints each size: our
+  // '6x9' is PostGrid's 9x6.
+  const dimensions = PREVIEW_FRONT_PIXELS[size];
 
   return `<!DOCTYPE html>
 <html>

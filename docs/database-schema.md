@@ -165,7 +165,7 @@ Temporary drafts for idempotent send operations. Prevents duplicate sends.
 | body_text | TEXT | NO | - | Letter content (message for postcards) |
 | sign_off | TEXT | YES | - | Closing text (NULL for postcards) |
 | required_credits | INTEGER | NO | - | Credits needed (> 0) |
-| preview_html | TEXT | YES | - | Generated preview: the legacy HTML, or, when `renderer_version` is `pdf-1`, the page as SVG in a minimal HTML document (#534) |
+| preview_html | TEXT | YES | - | Generated preview: the legacy HTML, or, when `renderer_version` is `pdf-1`, the page or pages as SVG in a minimal HTML document (#534): a gift letter's card and a postcard's back are pages too |
 | sender_validation | JSONB | YES | - | Cached address validation |
 | recipient_validation | JSONB | YES | - | Cached address validation |
 | status | draft_status | NO | 'pending' | pending, consumed, expired, cancelled |

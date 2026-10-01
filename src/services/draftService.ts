@@ -92,8 +92,8 @@ export async function createPostcardDraft(params: CreatePostcardDraftParams): Pr
       user_id, sender, recipient, body_text, sign_off,
       required_credits, preview_html, sender_validation, recipient_validation,
       mail_type, front_image_data, front_image_url, postcard_size,
-      is_gift_send, status, expires_at
-    ) VALUES ($1, $2, $3, $4, NULL, $5, $6, $7, $8, 'postcard', $9, $10, $11, $12, 'pending', $13)
+      is_gift_send, renderer_version, status, expires_at
+    ) VALUES ($1, $2, $3, $4, NULL, $5, $6, $7, $8, 'postcard', $9, $10, $11, $12, $13, 'pending', $14)
     RETURNING draft_id, expires_at`,
     [
       params.userId,
@@ -108,13 +108,18 @@ export async function createPostcardDraft(params: CreatePostcardDraftParams): Pr
       params.frontImageUrl,
       postcardSize,
       params.isGiftSend === true,
+      params.rendererVersion ?? null,
       expiresAt,
     ]
   );
 
   const draft = result.rows[0];
 
-  writeDiagnostic('info', 'draft.postcard_created', { postcardSize, expiresInHours });
+  writeDiagnostic('info', 'draft.postcard_created', {
+    postcardSize,
+    expiresInHours,
+    renderer: params.rendererVersion ?? 'html'
+  });
 
   return {
     draftId: draft.draft_id,

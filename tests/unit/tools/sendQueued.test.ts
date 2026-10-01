@@ -62,6 +62,26 @@ const tools = [
   ['send_postcard', sendPostcardTool]
 ] as const;
 
+describe("send_postcard's front (#534 Phase 4)", () => {
+  const run = () =>
+    (sendPostcardTool.handler as (input: unknown, ctx: ToolContext) => Promise<any>)({ draftId: 'draft-1', confirm: true }, context());
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.processLetterJob.mockResolvedValue({ claimed: true, completed: true, retryScheduled: false });
+  });
+
+  it("returns the legacy front, and none for a draft our renderer drew, whose document holds both sides", async () => {
+    mocks.createMailOrderFromDraft.mockResolvedValue(created());
+    expect((await run()).previewFrontHtml).toBe('<p>front</p>');
+
+    const rendered = created();
+    Object.assign(rendered.draft, { renderer_version: 'pdf-1', preview_html: '<body data-renderer="pdf-1"><svg></svg><svg></svg></body>' });
+    mocks.createMailOrderFromDraft.mockResolvedValue(rendered);
+    expect((await run()).previewFrontHtml).toBeUndefined();
+  });
+});
+
 describe.each(tools)('%s', (_name, tool) => {
   const run = () =>
     (tool.handler as (input: unknown, ctx: ToolContext) => Promise<any>)({ draftId: 'draft-1', confirm: true }, context());

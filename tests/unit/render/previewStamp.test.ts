@@ -6,8 +6,13 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { layoutLetter, renderPreviewSvg } from '../../../src/render/index.js';
-import { renderLetterPreviewDocument, stampedAddressLines } from '../../../src/services/previewService.js';
+import { layoutLetter, layoutPostcard, POSTCARD_STAMP, renderPreviewSvg } from '../../../src/render/index.js';
+import {
+  renderLetterPreviewDocument,
+  renderPostcardPreviewDocument,
+  stampedAddressLines,
+  stampedPostcardReturnLines
+} from '../../../src/services/previewService.js';
 import type { Address } from '../../../src/contracts/types.js';
 
 const ADDRESSES = {
@@ -31,6 +36,42 @@ describe('the address stamp on a preview', () => {
       { x: 50.4, y: 176.26, text: 'SUITE 3300' },
       { x: 50.4, y: 189, text: 'NEW YORK, NY 10118' }
     ]);
+  });
+
+  it("stamps a postcard's back with the postcard's geometry, on the page asked for (#534 Phase 4)", () => {
+    const image = { bytes: Buffer.alloc(0), mime: 'image/png' as const, width: 2700, height: 1800 };
+    const [front, back] = renderPreviewSvg(layoutPostcard({ message: 'Hi', image }), {
+      addresses: { from: ['RETURN TO:', ...ADDRESSES.from], to: ADDRESSES.to },
+      stamp: { page: 1, geometry: POSTCARD_STAMP }
+    });
+    expect(texts(front)).toEqual([]);
+    // Probes P9 and P11: from x 5.725in, "RETURN TO:" at 0.958in and the
+    // recipient at 4.937in, 0.177in a line, each block from its first line.
+    expect(texts(back)).toEqual([
+      { x: 412.2, y: 68.98, text: 'RETURN TO:' },
+      { x: 412.2, y: 81.72, text: 'PAT EXAMPLE' },
+      { x: 412.2, y: 94.46, text: '1600 PENNSYLVANIA AVE NW' },
+      { x: 412.2, y: 107.21, text: 'WASHINGTON, DC 20500' },
+      { x: 412.2, y: 355.46, text: 'SAM RIVERA' },
+      { x: 412.2, y: 368.21, text: '350 FIFTH AVE' },
+      { x: 412.2, y: 380.95, text: 'SUITE 3300' },
+      { x: 412.2, y: 393.7, text: 'NEW YORK, NY 10118' }
+    ]);
+    expect(back).toContain('font-size="9"');
+  });
+
+  it("heads a postcard's return address RETURN TO:, as PostGrid does", () => {
+    const sender: Address = { name: 'Pat Example', addressLine1: '1600 Pennsylvania Ave NW', city: 'Washington', state: 'DC', postalCode: '20500', country: 'US' };
+    expect(stampedPostcardReturnLines(sender)).toEqual(['RETURN TO:', ...stampedAddressLines(sender)]);
+  });
+
+  it('wraps a postcard in the same document as a letter, without the hidden letter text', () => {
+    const html = renderPostcardPreviewDocument(['<svg a></svg>', '<svg b></svg>']);
+    expect(html).toContain('<body data-renderer="pdf-1">\n<svg a></svg>\n<svg b></svg>\n</body>');
+    expect(html).not.toContain('hidden');
+    // A letter's keeps its hidden text after its pages.
+    const letter = renderLetterPreviewDocument(['<svg a></svg>'], { bodyText: 'Hi', signOff: 'P' });
+    expect(letter).toContain('<svg a></svg>\n  <div hidden>\n    <div class="letter-body">Hi</div>\n    <div class="sign-off">P</div>\n  </div>\n</body>');
   });
 
   it('escapes what the addresses carry', () => {

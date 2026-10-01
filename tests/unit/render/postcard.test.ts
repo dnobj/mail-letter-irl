@@ -6,7 +6,7 @@
 
 import { deflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
-import { layoutPostcard, renderPdf } from '../../../src/render/index.js';
+import { layoutPostcard, layoutPostcardBack, renderPdf } from '../../../src/render/index.js';
 import { loadFont } from '../../../src/render/fonts.js';
 import { shape } from '../../../src/render/glyphs.js';
 import { baselineOffset, type ImageBox, type TextRun } from '../../../src/render/layout.js';
@@ -112,6 +112,13 @@ describe('a postcard on our renderer', () => {
     expect(three.baseline - one.baseline).toBeCloseTo(2 * POSTCARD_LINE_PITCH, 9);
     expect(back(`${lines(16)}\n\n\n  \n`)).toMatchObject({ linesUsed: 16 });
     expect(layoutPostcard({ message: `${lines(16)}\n\n`, image: FRONT }).overflowLines).toBe(0);
+  });
+
+  it('measures the back alone exactly as the postcard lays it out, before any image', () => {
+    for (const message of ['Hello', lines(16), lines(19), 'One\n\nThree\n\n']) {
+      const whole = layoutPostcard({ message, image: FRONT });
+      expect(layoutPostcardBack(message)).toEqual({ page: whole.pages[1], overflowLines: whole.overflowLines });
+    }
   });
 
   it('prints as a two-page PDF of that size', async () => {
