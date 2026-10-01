@@ -665,7 +665,7 @@ describePostgres('arrive-by (migration 040, #535)', () => {
     ).rejects.toMatchObject({ code: '23505' });
   }, 60_000);
 
-  it("does not call a held letter's Pay & Send order stuck until 90 minutes after its hold ends", async () => {
+  it("does not call a held letter's Pay & Send order stuck until 90 minutes after its job falls due, and only until first tried", async () => {
     const { STUCK_ORDER_CONDITION } = await import('../../src/services/stuckOrders.js');
     const stuck = async (orderId: string) =>
       Number((await pool.query(`SELECT COUNT(*)::int AS n FROM orders WHERE order_id = $1 AND ${STUCK_ORDER_CONDITION}`, [orderId])).rows[0].n);
