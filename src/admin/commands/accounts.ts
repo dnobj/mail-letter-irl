@@ -382,7 +382,7 @@ export function createAccountCommands(overrides: Partial<AccountCommandSeams> = 
             ? ["The balance and unused gift letters are forfeited. If the customer wants money back, refund first and preview again: the erasure blocks the account, and a pack refund refuses a blocked account."]
             : []),
           ...(scope.heldMailToCancel > 0
-            ? [`${scope.heldMailToCancel} letters held to arrive by a date are cancelled before they print, and nothing goes back: the balance and gift letters go with the account. If the customer wants them sent, wait until they mail, then preview again.`]
+            ? [`${scope.heldMailToCancel} letters held to arrive by a date are cancelled before they print, and nothing goes back: the balance and gift letters go with the account. One whose mail date comes before the hourly run that erases is due by then, so it mails instead and that run refuses the erasure: queue it again once the letter has mailed. If the customer wants them sent, wait until they mail, then preview again.`]
             : []),
           ...(scope.openAlerts > 0
             ? [`${scope.openAlerts} operational alerts on this account's orders are still open, such as compensation owed after a dispute. Settle them first: the erasure keeps the orders, but nothing owed can reach the account afterwards.`]

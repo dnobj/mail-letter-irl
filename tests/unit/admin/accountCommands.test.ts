@@ -485,6 +485,8 @@ describe("account.erase (#289)", () => {
     expect(held.warnings).toContainEqual(
       expect.stringMatching(/^2 letters held to arrive by a date are cancelled before they print, and nothing goes back/),
     );
+    // Mail released before the run is due by then: it mails, and the run refuses.
+    expect(held.warnings).toContainEqual(expect.stringMatching(/comes before the hourly run that erases is due by then, so it mails instead and that run refuses the erasure/));
   });
 
   it("always warns that it is irreversible, and what the operator does by hand afterwards", async () => {
