@@ -76,6 +76,7 @@ describe('POST /api/letters/:letterId/cancel (#535)', () => {
       status: 'cancelled',
       alreadyCancelled: false,
       returned: { kind: 'letters', count: 1 },
+      shortfall: 'none',
       arriveBy: '2026-10-16',
       mailOn: '2026-10-06',
       message: 'Cancelled. The letter it cost is back in the balance.'

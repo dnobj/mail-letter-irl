@@ -168,7 +168,7 @@ Database constraints enforce one outbox row and one stable idempotency key per l
     - the account last, inside the return.
   - **It writes:** the job and the letter `cancelled` (the job's `last_error` `cancelled_by_customer`), and a `letter_status_history` row with source `customer`.
   - **What goes back:**
-    - a prepaid letter's credits, through `returnConsumedCreditsForLetter`, on lots that keep their expiry. The answer counts them in letters (two credits each), never credits, and only those still usable. Credits whose lot ran out while the mail was held come back already expired, and the answer says so; whether a cancel should give them new life, as a gift gets, is the owner's call;
+    - a prepaid letter's credits, through `returnConsumedCreditsForLetter`, on lots that keep their expiry. The answer counts them in letters (two credits each), never credits, and only those still usable. Credits whose lot ran out while the mail was held go back on record as `expired`, so they are never returned twice. They are left out of the cached balance and the account's history, which the ledger would not spend, and the answer says so; whether a cancel should give them new life, as a gift gets, is the owner's call;
     - a gift letter, through `returnGiftLetterForFailedSendWithClient`, its printed code voided as `send_cancelled`.
     - Both use the failed send's exactly-once records (reason or source `send_failed`), so a replay returns nothing and the operator's retry guard (`isLetterAlreadyCompensated`) counts a cancel. `failure_code` and the descriptions say it was cancelled.
   - **Refused**, where it is checked first so each answer is true of it (a letter a refund cancelled is already cancelled; printed mail is too late, whatever paid for it):

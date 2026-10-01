@@ -130,6 +130,9 @@ async function handleCancelLetter(res: ServerResponse, authInfo: AuthInfo, lette
     status: 'cancelled',
     alreadyCancelled: cancelled.alreadyCancelled,
     returned: cancelled.returned,
+    // What of its cost did not come back usable, for the page to show as it
+    // likes; the message says it in words.
+    shortfall: cancelled.shortfall,
     arriveBy: cancelled.arriveBy,
     mailOn: cancelled.mailOn,
     message: cancelledMessage(cancelled)

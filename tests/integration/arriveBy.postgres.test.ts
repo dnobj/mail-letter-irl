@@ -471,11 +471,19 @@ describePostgres('arrive-by (migration 040, #535)', () => {
       ok: true,
       cancelled: { alreadyCancelled: false, returned: { kind: 'letters', count: 0 }, shortfall: 'expired' }
     });
+    // On record, as expired, so it is never returned twice; never in the
+    // cached balance or the account's history, which the ledger would not spend.
     const back = await pool.query(
-      "SELECT initial_amount FROM credit_ledger WHERE user_id = $1 AND source_metadata->>'letter_id' = $2 AND expires_at <= NOW()",
+      "SELECT initial_amount, status FROM credit_ledger WHERE user_id = $1 AND source_metadata->>'letter_id' = $2 AND expires_at <= NOW()",
       [userId, letterId]
     );
-    expect(back.rows).toEqual([{ initial_amount: 2 }]);
+    expect(back.rows).toEqual([{ initial_amount: 2, status: 'expired' }]);
+    expect(await creditsOf(userId)).toBe(8);
+    const history = await pool.query(
+      "SELECT 1 FROM credit_transactions WHERE user_id = $1 AND type = 'refund' AND reference_id = $2",
+      [userId, letterId]
+    );
+    expect(history.rowCount).toBe(0);
   }, 60_000);
 
   it('cancels held gift mail: the gift letter comes back once and its printed code is voided as cancelled', async () => {
