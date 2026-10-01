@@ -40,8 +40,8 @@ export async function createDraft(params: CreateDraftParams): Promise<CreateDraf
       user_id, sender, recipient, body_text, sign_off,
       required_credits, preview_html, sender_validation, recipient_validation,
       layout_type, header_image_data, header_image_url, inline_image_data, inline_image_url,
-      is_gift_send, status, expires_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'pending', $16)
+      is_gift_send, renderer_version, status, expires_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'pending', $17)
     RETURNING draft_id, expires_at`,
     [
       params.userId,
@@ -59,13 +59,18 @@ export async function createDraft(params: CreateDraftParams): Promise<CreateDraf
       params.inlineImageData ?? null,
       params.inlineImageUrl ?? null,
       params.isGiftSend === true,
+      params.rendererVersion ?? null,
       expiresAt,
     ]
   );
 
   const draft = result.rows[0];
 
-  writeDiagnostic('info', 'draft.created', { layoutType, expiresInHours });
+  writeDiagnostic('info', 'draft.created', {
+    layoutType,
+    expiresInHours,
+    renderer: params.rendererVersion ?? 'html'
+  });
 
   return {
     draftId: draft.draft_id,

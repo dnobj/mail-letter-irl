@@ -1,5 +1,5 @@
 import LineBreaker from 'linebreak';
-import { isInvisible, paragraphBidi } from './bidi.js';
+import { isInvisible, mirrorOf, paragraphBidi } from './bidi.js';
 import { loadFont, type FontName } from './fonts.js';
 import { shape } from './glyphs.js';
 import {
@@ -69,13 +69,53 @@ const POINTS_PER_CSS_PIXEL = 72 / 96;
 /** Tabs have no glyph in Tinos; a tab becomes four spaces. */
 const TAB = '    ';
 
+/** The letter's typeface. */
+const BODY_FONT: FontName = 'Tinos-Regular';
+
 /**
  * Combining marks kept on one letter. Hebrew can carry four (a dagesh, a shin
  * dot, a vowel and a meteg); more stack upward, 2.6pt each on a capital, and
- * the first line's would reach the address boxes. The character check that
- * gates previews should refuse such text; this only keeps the layout's promise.
+ * the first line's would reach the address boxes. Previews refuse such text
+ * (drawsGrapheme); clampMarks only keeps the layout's promise.
  */
 const MAX_MARKS_PER_LETTER = 4;
+
+/**
+ * Characters never drawn, whatever the font maps them to: controls other than
+ * line breaks and tabs, format characters that are not dropped as invisible,
+ * line and paragraph separators, private use, surrogates and unassigned code
+ * points. Tinos maps some of them to a visible "control picture" box (U+2028,
+ * U+2029, and private-use U+F001-U+F00E), and U+0000 to an empty glyph that
+ * PostgreSQL then refuses to store (#540 review round 1).
+ */
+const NEVER_DRAWN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Co}\p{Cn}\p{Cs}]/u;
+const SPACE = /\p{Zs}/u;
+
+/**
+ * Whether the renderer draws a grapheme cluster as written: each character
+ * is a line break, a tab, a character that prints nothing, or one the
+ * letter's font has a glyph for (a space's glyph drawing nothing: Tinos draws
+ * U+205F as a box), and the cluster carries at most MAX_MARKS_PER_LETTER
+ * combining marks. A preview refuses text holding a cluster that fails,
+ * rather than printing a box or dropping a mark.
+ */
+export function drawsGrapheme(grapheme: string): boolean {
+  const font = loadFont(BODY_FONT);
+  let marks = 0;
+  for (const character of grapheme) {
+    if (MARK.test(character) && ++marks > MAX_MARKS_PER_LETTER) return false;
+    if (character === '\n' || character === '\r' || character === '\t' || isInvisible(character)) continue;
+    if (NEVER_DRAWN.test(character)) return false;
+    const codePoint = character.codePointAt(0)!;
+    if (!font.hasGlyphForCodePoint(codePoint)) return false;
+    if (SPACE.test(character) && font.glyphForCodePoint(codePoint).path.commands.length > 0) return false;
+    // In a right-to-left run the mirror is drawn instead (bidi.ts): Tinos has
+    // U+2215 and U+221F but not their mirrors (#540 review round 2).
+    const mirror = mirrorOf(character);
+    if (mirror && !font.hasGlyphForCodePoint(mirror.codePointAt(0)!)) return false;
+  }
+  return true;
+}
 
 function clampMarks(text: string): string {
   if (!MARK.test(text)) return text;
@@ -222,7 +262,7 @@ function advanceLimit(fontName: FontName, paragraph: string, width: number, scal
  * much a letter is too long.
  */
 export function layoutLetter(content: LetterContent): Layout {
-  const fontName: FontName = 'Tinos-Regular';
+  const fontName = BODY_FONT;
   const font = loadFont(fontName);
   const size = BODY_FONT_SIZE;
   const scale = size / font.unitsPerEm;

@@ -656,8 +656,10 @@ Resolve it as rejected, which refunds, only when it can never be printed and no 
 letter reached PostGrid, that is, every earlier hold was also `render_refused`. Check the earlier holds
 before refunding: the job page shows only the latest class, because a retry clears `last_error`.
 - Each hold's class is also in its `mail_provider_outcome_ambiguous` alert.
-- Open `/alerts?filter=all` and read the alerts whose details name the job's id. A prepaid letter's alerts
-  carry no order id, so they are not listed under its order.
+- Open `/alerts?filter=all`, then open each `mail_provider_outcome_ambiguous` alert. The list shows no
+  job id, and it pages 50 at a time. An alert's own page shows its details, with the `jobId` and the
+  `errorClass`, and how it was resolved.
+- A prepaid letter's alerts carry no order id, so they are not listed under its order.
 - If any earlier hold was not `render_refused`, treat the letter like any other ambiguous hold.
 
 A retry of a letter whose earlier attempt did reach PostGrid reuses that attempt's `Idempotency-Key`.

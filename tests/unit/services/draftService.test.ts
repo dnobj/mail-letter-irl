@@ -168,6 +168,43 @@ describe('draftService', () => {
       const queryCall = vi.mocked(db.query).mock.calls[0];
       expect(queryCall[1]).toContain('<html>Preview</html>');
     });
+
+    it('records the renderer that drew the preview (#534), and none for the legacy HTML', async () => {
+      const mockDraft = testDrafts.pending();
+      const inserted = {
+        rows: [{ draft_id: mockDraft.draft_id, expires_at: mockDraft.expires_at }],
+        rowCount: 1,
+        command: 'INSERT',
+        oid: 0,
+        fields: [],
+      };
+      vi.mocked(db.query).mockResolvedValueOnce(inserted).mockResolvedValueOnce(inserted);
+      const draft = {
+        userId: testUsers.sarah.user_id,
+        sender: testAddresses.validSender,
+        recipient: testAddresses.validRecipient,
+        bodyText: testLetterContent.shortLetter.bodyText,
+        signOff: testLetterContent.shortLetter.signOff,
+        requiredCredits: 2,
+      };
+
+      await createDraft({ ...draft, rendererVersion: 'pdf-1' });
+      await createDraft(draft);
+
+      const [sql, rendered] = vi.mocked(db.query).mock.calls[0] as [string, unknown[]];
+      const list = (from: number) => sql.slice(sql.indexOf('(', from) + 1, sql.indexOf(')', from)).split(',').map(item => item.trim());
+      const columns = list(0);
+      const values = list(sql.indexOf('VALUES'));
+      expect(values).toHaveLength(columns.length);
+      const position = columns.indexOf('renderer_version');
+      expect(position).toBeGreaterThan(-1);
+      // The column's value is a placeholder, and that parameter is the version.
+      const placeholder = /^\$(\d+)$/.exec(values[position]);
+      expect(placeholder).not.toBeNull();
+      const parameter = Number(placeholder![1]) - 1;
+      expect(rendered[parameter]).toBe('pdf-1');
+      expect((vi.mocked(db.query).mock.calls[1][1] as unknown[])[parameter]).toBeNull();
+    });
   });
 
   // ==========================================================================

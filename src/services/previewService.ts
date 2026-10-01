@@ -451,6 +451,43 @@ function renderInlineImagePreview(input: LayoutPreviewInput): string {
 </html>`;
 }
 
+/**
+ * The preview our own renderer draws (#534): each page as SVG, from the same
+ * layout the PDF is printed from, in a minimal HTML document. The website's
+ * confirm page shows it in a sandboxed iframe, where it scales to the frame's
+ * width.
+ *
+ * The text is repeated, hidden, in the legacy preview's `letter-body` and
+ * `sign-off` elements: the letter card reads it from there until it shows
+ * the page itself (#534 Phase 3).
+ */
+export function renderLetterPreviewDocument(
+  pages: string[],
+  text: { bodyText: string; signOff: string }
+): string {
+  const trimmedBodyText = text.bodyText.replace(/\n+$/, '');
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html, body { margin: 0; background: #fff; }
+    svg { display: block; width: 100%; height: auto; }
+    svg + svg { margin-top: 12px; }
+  </style>
+</head>
+<body>
+${pages.join('\n')}
+  <div hidden>
+    <div class="letter-body">${escapeHtml(trimmedBodyText)}</div>
+    <div class="sign-off">${escapeHtml(text.signOff)}</div>
+  </div>
+</body>
+</html>`;
+}
+
 // ============================================================================
 // Utilities
 // ============================================================================

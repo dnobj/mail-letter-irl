@@ -298,3 +298,51 @@ describe('the refusal', () => {
     ).toEqual([]);
   });
 });
+
+describe('text printed in another font (#534)', () => {
+  // A letter drawn by our renderer prints its text in the renderer's font:
+  // each text can name the font it prints in, and addresses keep Open Sans.
+  const onlyLowercase = (grapheme: string) => /^[a-z ]$/.test(grapheme);
+
+  it('judges each grapheme by the font the text names', () => {
+    expect(unprintableCharacters('abc Def', onlyLowercase)).toEqual(['D']);
+  });
+
+  it("names what the text's own font refuses, even a character Open Sans prints", () => {
+    // U+205F prints as a space in Open Sans; a font that refuses it must
+    // still have it named, not listed as nothing.
+    const mediumSpace = String.fromCodePoint(0x205f);
+    const found = findUnprintable([
+      { field: 'bodyText', where: 'in the text', text: `a${mediumSpace}b`, prints: grapheme => grapheme !== mediumSpace }
+    ]);
+    expect(unprintableRefusal('letter', found)).toContain(': a special space (U+205F) in the text.');
+  });
+
+  it("names a character by the text's font even where Open Sans would print it", () => {
+    // U+FB00 is on the Open Sans list; a font without it must name its code
+    // point, not call it a cluster with too many marks.
+    const ff = String.fromCodePoint(0xfb00);
+    const found = findUnprintable([
+      { field: 'bodyText', where: 'in the text', text: `sta${ff}`, prints: grapheme => grapheme !== ff }
+    ]);
+    expect(unprintableRefusal('letter', found)).toContain(`: ${ff} (U+FB00) in the text.`);
+  });
+
+  it('says a letter carries too many marks when only the whole cluster is refused', () => {
+    const acute = String.fromCodePoint(0x301);
+    const found = findUnprintable([
+      { field: 'bodyText', where: 'in the text', text: `Caf${'e' + acute.repeat(5)}`, prints: grapheme => [...grapheme].length < 6 }
+    ]);
+    expect(unprintableRefusal('letter', found)).toContain(`: ${'e' + acute.repeat(5)} (too many marks on one letter) in the text.`);
+  });
+
+  it('keeps Open Sans for a text that names no font', () => {
+    const nonBreakingHyphen = String.fromCodePoint(0x2011);
+    expect(
+      findUnprintable([
+        { field: 'bodyText', where: 'in the text', text: `well${nonBreakingHyphen}known`, prints: () => true },
+        { field: 'recipient', where: "in the recipient's address", text: `Sam${nonBreakingHyphen}Rivera` }
+      ])
+    ).toEqual([{ field: 'recipient', where: "in the recipient's address", characters: [nonBreakingHyphen] }]);
+  });
+});

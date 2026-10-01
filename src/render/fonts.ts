@@ -1,6 +1,5 @@
 import { readFileSync } from 'node:fs';
 import { create, type Font } from 'fontkit';
-import { withoutInvisible } from './bidi.js';
 
 /**
  * The fonts the renderer ships, under assets/fonts with their licences.
@@ -40,20 +39,4 @@ export function loadFont(name: FontName): Font {
     fontCache.set(name, font);
   }
   return font;
-}
-
-/**
- * The distinct characters of `text` that the font has no glyph for, in order,
- * judged as the renderer draws it: line breaks start new lines, tabs become
- * spaces, and characters that print nothing are dropped, so none of those
- * count as missing.
- */
-export function missingCharacters(name: FontName, text: string): string[] {
-  const font = loadFont(name);
-  const missing: string[] = [];
-  for (const character of withoutInvisible(text.replace(/[\r\n]/g, '').replace(/\t/g, ' '))) {
-    const codePoint = character.codePointAt(0)!;
-    if (!font.hasGlyphForCodePoint(codePoint) && !missing.includes(character)) missing.push(character);
-  }
-  return missing;
 }

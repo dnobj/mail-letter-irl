@@ -26,6 +26,11 @@
  * drew ǎ as a and a caron, ṛ as r and a dot below, ὰ as alpha and a grave, the
  * angstrom sign as Å, and yod with hiriq as its two parts. The text itself is
  * checked as it is stored and printed, not normalized.
+ *
+ * A letter drawn by our own renderer (#534) prints its text in the renderer's
+ * font instead, so its text is checked against that font (drawsGrapheme in
+ * src/render/layout.ts). Its addresses are still stamped by PostGrid in Open
+ * Sans and are checked here.
  */
 
 const PRINTABLE_RANGES: ReadonlyArray<readonly [number, number]> = [
@@ -119,21 +124,23 @@ export function isPrintableCodePoint(codePoint: number): boolean {
 
 const graphemes = new Intl.Segmenter('en', { granularity: 'grapheme' });
 
+/** Whether a grapheme cluster prints as written, in one font. */
+export type PrintsGrapheme = (grapheme: string) => boolean;
+
+/** PostGrid's Open Sans: the legacy HTML letters, postcards and every address block. */
+export const printsInOpenSans: PrintsGrapheme = grapheme =>
+  [...grapheme].every(character => isPrintableCodePoint(character.codePointAt(0)!));
+
 /**
- * The characters in `text` that would print as boxes, each once, in the order
- * they first appear. A character is a whole grapheme, so an emoji sequence
- * (a family, a flag, a skin tone) is reported as the one symbol it shows.
+ * The characters in `text` that would not print as written, each once, in
+ * the order they first appear. A character is a whole grapheme, so an emoji
+ * sequence (a family, a flag, a skin tone) is reported as the one symbol it
+ * shows.
  */
-export function unprintableCharacters(text: string): string[] {
+export function unprintableCharacters(text: string, prints: PrintsGrapheme = printsInOpenSans): string[] {
   const found = new Set<string>();
   for (const { segment } of graphemes.segment(text)) {
-    if (found.has(segment)) continue;
-    for (const character of segment) {
-      if (!isPrintableCodePoint(character.codePointAt(0)!)) {
-        found.add(segment);
-        break;
-      }
-    }
+    if (!found.has(segment) && !prints(segment)) found.add(segment);
   }
   return [...found];
 }
@@ -145,18 +152,27 @@ export interface PrintedText {
   /** For the refusal: "in the text", "in the recipient's address". */
   where: string;
   text: string | null | undefined;
+  /** The font it prints in; Open Sans unless given. */
+  prints?: PrintsGrapheme;
 }
 
 export interface UnprintableField {
   field: string;
   where: string;
   characters: string[];
+  /** The font the text prints in, which the refusal names characters by; Open Sans unless given. */
+  prints?: PrintsGrapheme;
 }
 
 /** Each piece of text that holds characters the print cannot show. */
 export function findUnprintable(texts: PrintedText[]): UnprintableField[] {
   return texts
-    .map(({ field, where, text }) => ({ field, where, characters: unprintableCharacters(text ?? '') }))
+    .map(({ field, where, text, prints }) => ({
+      field,
+      where,
+      characters: unprintableCharacters(text ?? '', prints),
+      ...(prints ? { prints } : {})
+    }))
     .filter(({ characters }) => characters.length > 0);
 }
 
@@ -214,23 +230,25 @@ function invisibleName(character: string): string {
  * How the refusal shows a character: invisible ones by name and code point,
  * emoji and other scripts as they are, and a character that may look like one
  * that prints (a non-breaking hyphen is not a hyphen) with the code points
- * that do not print.
+ * that do not print in the text's font. A cluster whose every character
+ * prints, refused only as a whole, carries too many marks (#534).
  */
-function shown(grapheme: string): string {
+function shown(grapheme: string, prints: PrintsGrapheme): string {
   const characters = [...grapheme];
-  const refused = characters.filter(character => !isPrintableCodePoint(character.codePointAt(0)!));
-  if (INVISIBLE.test(grapheme)) return refused.map(invisibleName).join(', ');
+  const refused = characters.filter(character => !prints(character));
+  if (INVISIBLE.test(grapheme)) return (refused.length > 0 ? refused : characters).map(invisibleName).join(', ');
   const emoji =
     EMOJI.test(grapheme) ||
     (characters.length > 1 &&
       PICTOGRAPHIC.test(grapheme) &&
       characters.every(character => EMOJI_JOINERS.has(character) || EMOJI_SEQUENCE_PART.test(character)));
   if (emoji || !(LOOK_ALIKE.test(grapheme) || INVISIBLE_START.test(grapheme))) return grapheme;
+  if (refused.length === 0) return `${grapheme} (too many marks on one letter)`;
   return `${grapheme} (${refused.map(codePoint).join(' ')})`;
 }
 
-function listed(characters: string[]): string {
-  const list = characters.slice(0, MOST_LISTED).map(shown).join(', ');
+function listed(characters: string[], prints: PrintsGrapheme = printsInOpenSans): string {
+  const list = characters.slice(0, MOST_LISTED).map(grapheme => shown(grapheme, prints)).join(', ');
   const more = characters.length - MOST_LISTED;
   return more > 0 ? `${list} and ${more} more` : list;
 }
@@ -240,7 +258,7 @@ function listed(characters: string[]): string {
  * as a box and where it is.
  */
 export function unprintableRefusal(mail: 'letter' | 'postcard', found: UnprintableField[]): string {
-  const where = found.map(({ where, characters }) => `${listed(characters)} ${where}`).join('; ');
+  const where = found.map(({ where, characters, prints }) => `${listed(characters, prints)} ${where}`).join('; ');
   return (
     `Letter IRL can't print some characters in this ${mail}: ${where}. ` +
     `Printed mail shows Latin letters with common accents, modern Greek, Cyrillic, Hebrew ` +

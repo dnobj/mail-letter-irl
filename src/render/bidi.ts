@@ -2,7 +2,7 @@ import bidiFactory from 'bidi-js';
 
 // The package's default export is a factory; its named exports are not
 // functions under Node's CommonJS interop.
-const { getEmbeddingLevels, getMirroredCharactersMap, getReorderSegments } = bidiFactory();
+const { getEmbeddingLevels, getMirroredCharacter, getMirroredCharactersMap, getReorderSegments } = bidiFactory();
 
 /**
  * A regular expression character class built from code-point ranges, so the
@@ -56,6 +56,14 @@ export function withoutInvisible(text: string): string {
 /** Whether a character prints nothing (see INVISIBLE). */
 export function isInvisible(character: string): boolean {
   return ONE_INVISIBLE.test(character);
+}
+
+/**
+ * The character drawn in place of `character` in a right-to-left run (a
+ * closing bracket for an opening one), or null if it has no mirror.
+ */
+export function mirrorOf(character: string): string | null {
+  return getMirroredCharacter(character) ?? null;
 }
 
 /** A paragraph whose bidi levels are resolved once, and any line of it drawn from them. */

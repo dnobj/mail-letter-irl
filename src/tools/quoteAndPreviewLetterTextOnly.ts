@@ -9,6 +9,7 @@
 
 import { Address, McpToolDefinition, ToolContext } from "../contracts/types.js";
 import { widgetTemplateUri } from "../mcp/widgetUris.js";
+import { printRenderer } from "../config/printRenderer.js";
 import {
   quoteAndPreviewLetterTextOnlyInputSchema,
   quoteAndPreviewOutputSchema
@@ -19,6 +20,7 @@ import {
   validateAddressesWithProvider,
   validateCharacterLimitForLayout,
   validatePrintableLetter,
+  layoutLetterForPreview,
   createLetterDraftAndBuildOutput,
   type LetterQuoteOutput
 } from "./letterHelpers.js";
@@ -52,6 +54,8 @@ async function handler(
   context: ToolContext
 ): Promise<LetterQuoteOutput> {
   const layoutType = 'text_only';
+  // Read once, so every check below agrees on how the letter prints (#534).
+  const renderer = printRenderer();
 
   context.logger.info(
     {
@@ -68,12 +72,20 @@ async function handler(
   validateAddresses(sender, input.recipient, context);
 
   // Validate character limit
-  validateCharacterLimitForLayout(input.bodyText, input.signOff, layoutType, context);
+  validateCharacterLimitForLayout(input.bodyText, input.signOff, layoutType, context, renderer);
 
   // Refuse characters the print shows as boxes (#526)
   validatePrintableLetter(
     { sender, recipient: input.recipient, bodyText: input.bodyText, signOff: input.signOff, senderIsSaved: usedSavedReturnAddress },
-    context
+    context,
+    renderer
+  );
+
+  // Our renderer measures the page itself (#534)
+  const printLayout = layoutLetterForPreview(
+    { bodyText: input.bodyText, signOff: input.signOff, layoutType },
+    context,
+    renderer
   );
 
   // Validate with PostGrid provider
@@ -96,6 +108,7 @@ async function handler(
     recipientValidation,
     addressWarnings,
     sendAsGift: input.sendAsGift,
+    printLayout,
     context
   });
 }

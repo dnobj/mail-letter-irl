@@ -9,6 +9,7 @@
 
 import { Address, McpToolDefinition, ToolContext } from "../contracts/types.js";
 import { widgetTemplateUri } from "../mcp/widgetUris.js";
+import { printRenderer } from "../config/printRenderer.js";
 import {
   quoteAndPreviewLetterWithImageInputSchema,
   quoteAndPreviewOutputSchema
@@ -19,6 +20,7 @@ import {
   validateAddressesWithProvider,
   validateCharacterLimitForLayout,
   validatePrintableLetter,
+  layoutLetterForPreview,
   createLetterDraftAndBuildOutput,
   type LetterQuoteOutput
 } from "./letterHelpers.js";
@@ -63,6 +65,8 @@ async function handler(
   context: ToolContext
 ): Promise<LetterQuoteOutput> {
   const layoutType = 'inline_image';
+  // Read once, so every check below agrees on how the letter prints (#534).
+  const renderer = printRenderer();
 
   context.logger.info(
     {
@@ -138,12 +142,13 @@ async function handler(
   validateAddresses(sender, input.recipient, context);
 
   // Validate character limit (reduced for image layout)
-  validateCharacterLimitForLayout(input.bodyText, input.signOff, layoutType, context);
+  validateCharacterLimitForLayout(input.bodyText, input.signOff, layoutType, context, renderer);
 
   // Refuse characters the print shows as boxes (#526)
   validatePrintableLetter(
     { sender, recipient: input.recipient, bodyText: input.bodyText, signOff: input.signOff, senderIsSaved: usedSavedReturnAddress },
-    context
+    context,
+    renderer
   );
 
   // Process the image (generates both full-quality and preview versions)
@@ -193,6 +198,13 @@ async function handler(
     throw new Error(message);
   }
 
+  // Our renderer measures the page with the image that prints (#534)
+  const printLayout = layoutLetterForPreview(
+    { bodyText: input.bodyText, signOff: input.signOff, layoutType, imageData: inlineImageData },
+    context,
+    renderer
+  );
+
   // Validate with PostGrid provider
   const { senderValidation, recipientValidation, addressWarnings } = await validateAddressesWithProvider(
     sender,
@@ -216,6 +228,7 @@ async function handler(
     recipientValidation,
     addressWarnings,
     sendAsGift: input.sendAsGift,
+    printLayout,
     context
   });
 }
