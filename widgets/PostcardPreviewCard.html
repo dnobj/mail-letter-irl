@@ -633,7 +633,7 @@
         const keptSchedule = arrives.scheduleOf(kept.schedule);
         // Cancelled from here: before the conversation was reopened, or
         // since (the kept state above is what the card found on opening).
-        const keptCancelled = Boolean(kept.cancelled) || scheduled.cancelled();
+        const keptCancelled = Boolean(kept.cancelled) || scheduled.cancelled(orderId);
         // Sent with a date (#535): waiting for it, or cancelled from here. Once
         // its mail date is behind it in New York, the card cannot know what
         // became of it, and says what it says of any send.
@@ -825,7 +825,7 @@
       function sentOrderOf(settled) {
         if (settled?.status !== "sent") return null;
         if (settled.orderStatus === "cancelled") return "cancelled";
-        if (settled.orderStatus === "scheduled") return scheduled.cancelled() ? "cancelled" : "scheduled";
+        if (settled.orderStatus === "scheduled") return scheduled.cancelled(settled.orderId) ? "cancelled" : "scheduled";
         return "sent";
       }
 

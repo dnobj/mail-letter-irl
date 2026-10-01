@@ -100,5 +100,8 @@
  *     send_postcard, get_order_status and list_orders, with its dates and
  *     whether it can be cancelled, and the send and status narration say when
  *     it goes to the printer and that cancel_scheduled_mail can cancel it.
+ * r25: get_draft_status (card-only, #535) answers a ready draft's
+ *     deliveryEstimate, and for a sent one where its order stands, from the
+ *     letter itself: orderStatus and cancellable.
  */
-export const STEERING_COPY_REV = 24;
+export const STEERING_COPY_REV = 25;

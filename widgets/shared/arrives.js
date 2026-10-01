@@ -381,8 +381,10 @@
         state.orderId = null;
         options.block.style.display = "none";
       },
-      cancelled: function () {
-        return state.done;
+      // Whether this order was cancelled on the card: only the order it
+      // holds can be, so another one asked about never reads as cancelled.
+      cancelled: function (orderId) {
+        return state.done && state.orderId !== null && state.orderId === orderId;
       }
     };
   }

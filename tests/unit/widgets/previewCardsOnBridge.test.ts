@@ -842,6 +842,65 @@ describe.each([LETTER, POSTCARD])('$file: the arrival date (#535)', spec => {
     expect(card.text('note')).toContain(`This ${noun} has already been sent. Ask for its status in the chat.`);
   });
 
+  const anotherSent = {
+    content: [],
+    structuredContent: {
+      draftId: 'draft_0002',
+      status: 'sent',
+      orderId: 'ord_0003',
+      schedule: { arriveBy: '2026-10-16', mailOn: '2026-10-06' },
+      orderStatus: 'scheduled',
+      cancellable: true
+    }
+  };
+  const showAnother = (card: Awaited<ReturnType<typeof offering>>) =>
+    card.toolResult({
+      content: [],
+      structuredContent: { ...spec.output('draft_0002', canSend), arrivalWindow: WINDOW },
+      _meta: spec.meta
+    });
+
+  it("starts afresh for another order: one cancelled is not the next one's", async () => {
+    const card = await offering();
+    await answerTool(card, 'get_draft_status', sentAnswer({ orderStatus: 'scheduled', cancellable: true }));
+    await card.click('cancel-scheduled-button');
+    await card.click('cancel-scheduled-button');
+    await answerTool(card, 'cancel_scheduled_mail', {
+      content: [],
+      structuredContent: { status: 'cancelled', message: 'Cancelled. The letter it cost is back in the balance.' }
+    });
+    expect(card.text('status-pill')).toBe('Cancelled');
+
+    await showAnother(card);
+    await answerTool(card, 'get_draft_status', anotherSent);
+
+    expect(card.text('id-value')).toBe('ord_0003');
+    expect(card.text('status-pill')).toBe('Scheduled');
+    expect(card.text('scheduled-note')).toMatch(MAILS_OCT_6);
+    expect(card.text('cancel-scheduled-button-text')).toBe(`Cancel this ${noun}`);
+  });
+
+  it("does not count a cancel's late answer for the order shown since", async () => {
+    const card = await offering();
+    await answerTool(card, 'get_draft_status', sentAnswer({ orderStatus: 'scheduled', cancellable: true }));
+    await card.click('cancel-scheduled-button');
+    await card.click('cancel-scheduled-button');
+    expect(card.lastRequest('tools/call', 'cancel_scheduled_mail')!.params.arguments).toEqual({ orderId: 'ord_0002', confirm: true });
+
+    // Before it answers, the host shows another draft, sent with a date too.
+    await showAnother(card);
+    await answerTool(card, 'get_draft_status', anotherSent);
+    await answerTool(card, 'cancel_scheduled_mail', {
+      content: [],
+      structuredContent: { status: 'cancelled', message: 'Cancelled. The letter it cost is back in the balance.' }
+    });
+
+    expect(card.text('status-pill')).toBe('Scheduled');
+    expect(card.text('scheduled-note')).toMatch(MAILS_OCT_6);
+    expect(card.visible('cancel-scheduled-button')).toBe(true);
+    expect((card.document.getElementById('cancel-scheduled-button') as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it('drops the Scheduled block when the host shows another draft', async () => {
     const card = await offering();
     await answerTool(card, 'get_draft_status', {
