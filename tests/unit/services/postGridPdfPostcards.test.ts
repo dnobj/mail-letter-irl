@@ -1,15 +1,17 @@
 /**
  * Postcards printed from our own PDF (#534 Phase 4). A postcard whose preview
  * was drawn by src/render (rendererVersion 'pdf-1') goes to PostGrid as a
- * multipart upload of a two-page PDF with its bleed, front then back; every
- * other postcard keeps the legacy HTML. Probe P9 fixed the page size and why
- * the back's right half stays empty (docs/learnings/postgrid-pdf-rendering.md).
+ * multipart upload of a two-page PDF with its bleed, front then back, a gift
+ * send's card in a strip at the foot of the message; every other postcard
+ * keeps the legacy HTML. Probe P9 fixed the page size and why the back's right
+ * half stays empty (docs/learnings/postgrid-pdf-rendering.md).
  */
 
 import { deflateSync } from 'node:zlib';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PostGridProvider } from '../../../src/services/providers/PostGridProvider.js';
 import { layoutPostcard, readImageDataUri, RENDERER_VERSION, renderPdf } from '../../../src/render/index.js';
+import { giftPostcardStripCopy } from '../../../src/services/giftCardRenderer.js';
 
 const diagnostics = vi.hoisted(() => ({ written: [] as Array<{ level: string; event: string; fields: Record<string, unknown> }> }));
 vi.mock('../../../src/utils/diagnosticLog.js', async importOriginal => ({
@@ -87,6 +89,15 @@ const base = {
   backMessage: 'Dear Sam,\nWish you were here.\nPat',
   size: '6x9' as const,
   rendererVersion: RENDERER_VERSION,
+};
+
+/** A gift send's card, with the code the send minted. */
+const giftCard = {
+  state: 'funded' as const,
+  code: 'K7M2QX9A',
+  url: 'https://letterirl.com/g/K7M2QX9A',
+  displayUrl: 'letterirl.com/g',
+  redeemBy: '2026-12-16',
 };
 
 function accepted() {
@@ -175,12 +186,11 @@ describe('postcards printed from our own PDF (#534 Phase 4)', () => {
     ['a message past its half of the back', { backMessage: Array.from({ length: 17 }, (_, n) => `Line ${n + 1}`).join('\n') }, 'overflow', "runs 1 line(s) past its half of the back"],
     ['an unreadable image', { frontImageBase64: 'data:image/gif;base64,R0lGODlhAQABAAAAACw=' }, 'image', "The postcard's image could not be read"],
     ['a size our renderer does not draw', { size: '6x4' as const }, 'size', 'Our renderer draws 6x9 postcards, not 6x4.'],
-    // Checked before the gift fallback: a version this build cannot draw is
-    // held, never printed on the HTML from a different layout.
-    ['a gift postcard of a renderer this build does not know', {
-      rendererVersion: 'pdf-9',
-      giftCard: { state: 'funded' as const, code: 'K7M2QX9A', url: 'https://example.test/g/K7M2QX9A', displayUrl: 'example.test/g' }
-    }, 'unknown_version', 'pdf-9']
+    // A gift postcard too: never printed on the HTML from a different layout.
+    ['a gift postcard of a renderer this build does not know', { rendererVersion: 'pdf-9', giftCard }, 'unknown_version', 'pdf-9'],
+    // The preview refuses such a name; a seed code it never saw can still do it.
+    ['a gift card whose words run past its strip', { giftCard, senderName: 'Pat Example '.repeat(30).trim() }, 'render',
+      "The postcard could not be laid out: The gift strip runs"]
   ])('holds %s, sends nothing, and says why', async (_name, change, reason, message) => {
     const fetchMock = accepted();
     vi.stubGlobal('fetch', fetchMock);
@@ -249,27 +259,41 @@ describe('postcards printed from our own PDF (#534 Phase 4)', () => {
     }
   });
 
-  it('prints a gift postcard on the legacy HTML for now, so its card is never dropped', async () => {
+  it("prints a gift postcard's card from our PDF: the sender's name and the code the send minted (#534)", async () => {
     const fetchMock = accepted();
     vi.stubGlobal('fetch', fetchMock);
-    const giftCard = {
-      state: 'funded' as const,
-      code: 'K7M2QX9A',
-      url: 'https://letterirl.com/g/K7M2QX9A',
-      displayUrl: 'letterirl.com/g',
-      redeemBy: '2026-12-16',
-    };
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-01T12:00:00Z'));
     diagnostics.written = [];
 
     await expect(provider().sendPostcard({ ...base, giftCard })).resolves.toMatchObject({ success: true });
 
-    // The fallback is logged whether or not the provider is verbose.
-    expect(diagnostics.written).toContainEqual(expect.objectContaining({
-      level: 'warn',
-      event: 'provider.postgrid.renderer_fallback',
-      fields: expect.objectContaining({ reason: 'gift_card', operation: 'create_postcard' })
+    const form = (fetchMock.mock.calls[0] as [string, RequestInit])[1].body as FormData;
+    expect(form.has('backHTML')).toBe(false);
+    const printed = Buffer.from(await (form.get('pdf') as File).arrayBuffer());
+    const image = readImageDataUri(base.frontImageBase64);
+    const expected = await renderPdf(layoutPostcard({
+      message: base.backMessage,
+      image,
+      strip: giftPostcardStripCopy(giftCard, 'Test Sender')
     }));
+    expect(printed.equals(expected)).toBe(true);
+    // Not the postcard without its card, nor with someone else's name on it.
+    expect(printed.equals(await renderPdf(layoutPostcard({ message: base.backMessage, image })))).toBe(false);
+    const unnamed = await renderPdf(layoutPostcard({ message: base.backMessage, image, strip: giftPostcardStripCopy(giftCard, '') }));
+    expect(printed.equals(unnamed)).toBe(false);
+    // No fallback any more.
+    expect(diagnostics.written.map(entry => entry.event)).not.toContain('provider.postgrid.renderer_fallback');
+  });
+
+  it('keeps the legacy strip on a gift postcard previewed before the renderer', async () => {
+    const fetchMock = accepted();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(provider().sendPostcard({ ...base, rendererVersion: undefined, giftCard })).resolves.toMatchObject({ success: true });
+
     const body = JSON.parse((fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string);
+    expect(body.backHTML).toContain('class="gift-block"');
     expect(body.backHTML).toContain('K7M2-QX9A');
   });
 });

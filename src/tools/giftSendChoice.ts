@@ -17,7 +17,7 @@ import {
   unfundedCard,
   type GiftBalanceSeed
 } from '../services/giftLetterService.js';
-import type { GiftCardContent, GiftCardState } from '../services/giftCardRenderer.js';
+import { LONGEST_REDEEM_BY, type GiftCardContent, type GiftCardState } from '../services/giftCardRenderer.js';
 
 export interface GiftSendChoice {
   isGift: boolean;
@@ -63,6 +63,23 @@ export async function resolveGiftSendChoice(params: {
     isGift: true,
     card: state === 'funded' ? fundedPreviewCard(balance.next?.seed) : unfundedCard(),
     giftLettersAvailable: balance.available
+  };
+}
+
+/**
+ * The longest card a send could print in place of this preview's. The send
+ * decides the card (consumeGiftLetterForSendWithClient), so its date, its
+ * wording and even whether it is funded can change after the preview: this
+ * one is funded, prints the longest date and the seed campaign's longest
+ * wording, and keeps the preview's code. A postcard's strip, whose room is
+ * fixed, is checked against it (#534).
+ */
+export function longestSendCard(card: GiftCardContent): GiftCardContent {
+  return {
+    ...(card.state === 'funded' ? card : sampleFundedCard()),
+    redeemBy: LONGEST_REDEEM_BY,
+    multiUse: true,
+    newAccountsOnly: true
   };
 }
 

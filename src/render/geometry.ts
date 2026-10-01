@@ -105,3 +105,17 @@ export const POSTCARD_STAMP: StampGeometry = {
 /** The legacy back's message: 14pt at a line-height of 1.6. */
 export const POSTCARD_FONT_SIZE = 14;
 export const POSTCARD_LINE_PITCH = 22.4;
+
+/**
+ * A gift postcard's strip (docs/gift-letters.md), at the foot of the
+ * message, from the legacy CSS: a 1pt rule, 0.14in of padding, then the QR at
+ * 0.95in, 0.18in from its words. Its height is fixed, so the message's room
+ * (11 lines) never depends on the code or the dates the strip prints.
+ */
+export const POSTCARD_STRIP = {
+  height: inch(1.75),
+  rule: 1,
+  padTop: inch(0.14),
+  qr: inch(0.95),
+  gap: inch(0.18)
+} as const;

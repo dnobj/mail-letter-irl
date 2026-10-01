@@ -222,7 +222,7 @@ and stays out when it should not (precision).
 - Tool: `quote_and_preview_postcard`
 - The image is fitted to 6×9 at 300 DPI
 - The widget shows the front (image) and the back (message)
-- Message limit: 500 characters, or 350 on a gift postcard, whose foot carries the gift card
+- Message limit: 500 characters, or 350 on a gift postcard, whose foot carries the gift card. On our own renderer (#534), 16 lines of the back, or 11 above the gift card
 
 ### Use Case 4: Check Account & Order Status
 

@@ -20,12 +20,14 @@ import {
 import { printRenderer } from "../config/printRenderer.js";
 import {
   drawsGrapheme,
+  GiftStripOverflow,
   layoutPostcard,
   layoutPostcardBack,
   POSTCARD_STAMP,
   readImageDataUri,
   renderPreviewSvg,
-  RENDERER_VERSION
+  RENDERER_VERSION,
+  type GiftStripCopy
 } from "../render/index.js";
 import {
   renderPostcardPreviewDocument,
@@ -33,9 +35,14 @@ import {
   stampedPostcardReturnLines
 } from "../services/previewService.js";
 import { callingApp } from "../auth/clientProfiles.js";
-import { giftCardSummary, resolveGiftSendChoice } from "./giftSendChoice.js";
+import { giftCardSummary, longestSendCard, resolveGiftSendChoice } from "./giftSendChoice.js";
 import { previewSendStep } from "./previewSendStep.js";
-import { giftPostcardBlockSvg, type GiftCardContent, type GiftCardState } from "../services/giftCardRenderer.js";
+import {
+  giftPostcardBlockSvg,
+  giftPostcardStripCopy,
+  type GiftCardContent,
+  type GiftCardState
+} from "../services/giftCardRenderer.js";
 import { widgetTemplateUri } from "../mcp/widgetUris.js";
 import {
   quoteAndPreviewPostcardInputSchema,
@@ -141,9 +148,10 @@ export interface QuoteAndPreviewPostcardOutput {
 const OUTPUT_TEMPLATE = widgetTemplateUri("PostcardPreviewCard");
 const MAX_MESSAGE_LENGTH = 500;
 /**
- * A gift postcard gives the foot of the message half, about 1.3in of 5.2in,
- * to the card, so its message is shorter. Checked only once the preview knows
- * it is a gift send.
+ * On the legacy print a gift postcard gives the foot of the message half,
+ * about 1.3in of 5.2in, to the card, so its message is shorter. Checked only
+ * once the preview knows it is a gift send. Our renderer counts lines instead:
+ * 11 above the card (POSTCARD_STRIP).
  */
 const MAX_GIFT_MESSAGE_LENGTH = 350;
 /**
@@ -273,10 +281,10 @@ async function handler(
     requested: input.sendAsGift,
     balanceCanPay: available >= requiredCredits
   });
-  // A gift postcard's strip is still the legacy HTML's (#534), so a gift send
-  // keeps that print and its limits, as does any size but 6x9, which is all
-  // our renderer draws. Read once, so every check agrees.
-  const renderer = gift.isGift || size !== '6x9' ? 'html' : printRenderer();
+  // Our renderer draws 6x9 postcards, gift sends and their card included
+  // (#534); any other size keeps the legacy print and its limits. Read once,
+  // so every check agrees.
+  const renderer = size !== '6x9' ? 'html' : printRenderer();
   const messageLimit = renderer === 'pdf'
     ? RENDERED_POSTCARD_CHARACTER_CAP
     : gift.isGift ? MAX_GIFT_MESSAGE_LENGTH : MAX_MESSAGE_LENGTH;
@@ -395,19 +403,27 @@ async function handler(
   }
 
   // Refuse characters the print shows as boxes (#526), before the picture is fetched
-  // On our renderer the message prints in its font (#534); the addresses are
-  // stamped in Open Sans either way.
+  // On our renderer the message prints in its font (#534), and so does the
+  // sender's name on a gift send's card, whichever card the send prints; the
+  // addresses are stamped in Open Sans either way.
+  const prints = renderer === 'pdf' ? drawsGrapheme : undefined;
   validatePrintableCharacters(
     "postcard",
-    [{ field: "message", where: "in the message", text: input.message, prints: renderer === 'pdf' ? drawsGrapheme : undefined }],
+    [
+      { field: "message", where: "in the message", text: input.message, prints },
+      ...(prints && gift.card
+        ? [{ field: "giftCardName", where: "in the sender's name, which the gift card prints", text: sender.name, prints }]
+        : [])
+    ],
     { sender, recipient: input.recipient, senderIsSaved: usedSavedReturnAddress },
     context
   );
 
   // On our renderer the back is measured as it prints, before the picture
-  // is fetched: 16 lines in its left half.
+  // is fetched: 16 lines in its left half, or 11 above a gift send's card.
+  const strip = renderer === 'pdf' && gift.card ? giftStrip(gift.card, sender.name, context) : undefined;
   if (renderer === 'pdf') {
-    const { page, overflowLines } = layoutPostcardBack(input.message);
+    const { page, overflowLines } = layoutPostcardBack(input.message, strip);
     if (overflowLines > 0) {
       context.logger.warn(
         {
@@ -421,7 +437,7 @@ async function handler(
       throw Object.assign(
         new Error(
           `Postcard message is ${overflowLines} line${overflowLines === 1 ? "" : "s"} too long for the back: ` +
-          `it takes ${page.linesUsed} lines and the back holds ${page.linesAvailable}. ` +
+          `it takes ${page.linesUsed} lines and the back holds ${page.linesAvailable}${strip ? " above the gift card" : ""}. ` +
           `Please shorten your message to fit on the postcard back.`
         ),
         { diagnosticClass: "validation_error" }
@@ -522,7 +538,7 @@ async function handler(
   const renderedHtml = renderer === 'pdf'
     ? renderPostcardPreviewDocument(renderPreviewSvg(
         withDisplayImage(
-          layoutPostcard({ message: input.message, image: readImageDataUri(processedImage.base64DataUri) }),
+          layoutPostcard({ message: input.message, image: readImageDataUri(processedImage.base64DataUri), strip }),
           processedImage.previewDataUri
         ),
         {
@@ -677,6 +693,39 @@ const REQUIRED_ADDRESS_PROPS = [
   "state",
   "country"
 ];
+
+/**
+ * A gift send's card on our renderer (#534): a strip of fixed height at the
+ * foot of the message, so its words must fit it. They are ours but for the
+ * sender's name, which must fit this card and the longest card the send could
+ * print instead (longestSendCard). A card that does not fit even without the
+ * name is a seed campaign's long code, which only a letter has room for.
+ */
+function giftStrip(card: GiftCardContent, senderName: string, context: ToolContext): GiftStripCopy {
+  const overflows = (name: string) => [card, longestSendCard(card)].some(variant => {
+    try {
+      layoutPostcardBack("", giftPostcardStripCopy(variant, name));
+      return false;
+    } catch (error) {
+      if (error instanceof GiftStripOverflow) return true;
+      throw error;
+    }
+  });
+  if (overflows(senderName)) {
+    const cause = overflows("") ? "card" : "name";
+    context.logger.warn(
+      { correlationId: context.correlationId, event: "quote.postcard.gift_card_overflow", cause },
+      "The gift card runs past its strip"
+    );
+    throw Object.assign(
+      new Error(cause === "name"
+        ? "The sender's name is too long to print on the gift card. Shorten it, then preview again."
+        : "This gift letter's card does not fit on a postcard. Send it as a letter, or set sendAsGift to false to pay from the balance."),
+      { diagnosticClass: "validation_error" }
+    );
+  }
+  return giftPostcardStripCopy(card, senderName);
+}
 
 function collectMissingAddressFields(input: { sender: Address; recipient: Address }): string[] {
   const missing: string[] = [];

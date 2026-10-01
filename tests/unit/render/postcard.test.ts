@@ -1,16 +1,18 @@
 /**
  * A 9x6 postcard drawn by our renderer (#534 Phase 4): two pages at 9.25 x
  * 6.25in with their bleed, as PostGrid takes them (probe P9), the front image
- * covering the first and the message in the back's left half.
+ * covering the first and the message in the back's left half, a gift send's
+ * card in a strip at its foot.
  */
 
 import { deflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
-import { layoutPostcard, layoutPostcardBack, renderPdf } from '../../../src/render/index.js';
+import { GiftStripOverflow, layoutPostcard, layoutPostcardBack, renderPdf, type GiftStripCopy } from '../../../src/render/index.js';
 import { loadFont } from '../../../src/render/fonts.js';
 import { shape } from '../../../src/render/glyphs.js';
-import { baselineOffset, type ImageBox, type TextRun } from '../../../src/render/layout.js';
-import { POSTCARD_HALF, POSTCARD_LINE_PITCH, POSTCARD_MESSAGE } from '../../../src/render/geometry.js';
+import { baselineOffset, type ImageBox, type RectsItem, type TextRun } from '../../../src/render/layout.js';
+import { qrMatrix } from '../../../src/render/qr.js';
+import { POSTCARD_HALF, POSTCARD_LINE_PITCH, POSTCARD_MESSAGE, POSTCARD_STRIP } from '../../../src/render/geometry.js';
 import { readImage, type RenderImage } from '../../../src/render/images.js';
 
 const inch = (inches: number) => inches * 72;
@@ -19,6 +21,33 @@ const FRONT: RenderImage = { bytes: Buffer.alloc(0), mime: 'image/jpeg', width: 
 const lines = (count: number) => Array.from({ length: count }, (_, index) => `Line ${index + 1}`).join('\n');
 const back = (message: string) => layoutPostcard({ message, image: FRONT }).pages[1];
 const text = (message: string) => back(message).items.filter((item): item is TextRun => item.kind === 'text');
+
+/** A funded gift card's strip, in the words giftPostcardStripCopy gives it. */
+const STRIP: GiftStripCopy = {
+  lead: 'A gift from Pat:',
+  lines: [
+    { text: 'a letter of your own, printed and mailed free. Scan, or visit letterirl.com/g and enter', kind: 'plain' },
+    { text: 'K7M2-QX9A', kind: 'code' },
+    { text: 'Redeem by December 16, 2026. One use.', kind: 'plain' }
+  ],
+  qrUrl: 'https://letterirl.com/g/K7M2QX9A'
+};
+/** A strip of a lead and `count` one-line plain lines. */
+const plainStrip = (count: number): GiftStripCopy => ({
+  lead: 'A gift from Pat:',
+  lines: Array.from({ length: count }, (_, index) => ({ text: `Line ${index + 1}`, kind: 'plain' as const })),
+  qrUrl: 'https://letterirl.com/g'
+});
+const giftBack = (message: string, strip: GiftStripCopy = STRIP) => layoutPostcardBack(message, strip).page;
+const rightEdge = (run: TextRun) => {
+  const font = loadFont(run.font);
+  return run.x + shape(font, run.text).advanceWidth * (run.size / font.unitsPerEm);
+};
+// The strip, from the legacy CSS: 1.75in at the foot of the message, which
+// ends 0.4in above the card's bottom edge, 0.125in of bleed below that.
+const STRIP_TOP = inch(0.525 + 5.2 - 1.75);
+const ROW_TOP = STRIP_TOP + 1 + inch(0.14);
+const ROOM = inch(1.75) - 1 - inch(0.14);
 
 /** A valid 8-bit grayscale PNG, for the PDF. */
 function png(width: number, height: number): Buffer {
@@ -121,6 +150,13 @@ describe('a postcard on our renderer', () => {
     }
   });
 
+  it('measures the back alone exactly as the postcard lays it out, a gift strip included', () => {
+    for (const message of ['Hello', lines(11), lines(13)]) {
+      const whole = layoutPostcard({ message, image: FRONT, strip: STRIP });
+      expect(layoutPostcardBack(message, STRIP)).toEqual({ page: whole.pages[1], overflowLines: whole.overflowLines });
+    }
+  });
+
   it('prints as a two-page PDF of that size', async () => {
     const image = readImage(png(300, 200));
     const pdf = (await renderPdf(layoutPostcard({ message: 'Dear Sam,\nWish you were here.', image }))).toString('latin1');
@@ -131,5 +167,111 @@ describe('a postcard on our renderer', () => {
     // pdfkit writes the title as an object of its own.
     const title = /\/Title (\d+) 0 R/.exec(pdf)!;
     expect(new RegExp(`\\n${title[1]} 0 obj\\n\\(([^)]*)\\)\\nendobj`).exec(pdf)?.[1]).toBe('Postcard');
+  });
+});
+
+describe("a gift postcard's strip on our renderer", () => {
+  it('takes the foot of the message half: 11 lines above it, where the back holds 16 without', () => {
+    expect(giftBack(lines(11))).toMatchObject({ linesUsed: 11, linesAvailable: 11 });
+    expect(layoutPostcardBack(lines(11), STRIP).overflowLines).toBe(0);
+    expect(layoutPostcardBack(lines(12), STRIP).overflowLines).toBe(1);
+    expect(layoutPostcard({ message: lines(14), image: FRONT, strip: STRIP }).overflowLines).toBe(3);
+    // The eleventh line's box ends above the strip's rule.
+    expect(inch(0.525) + 11 * POSTCARD_LINE_PITCH).toBeLessThanOrEqual(STRIP_TOP);
+    expect(STRIP_TOP).toBeCloseTo(POSTCARD_MESSAGE.top + POSTCARD_MESSAGE.height - POSTCARD_STRIP.height, 9);
+  });
+
+  it('reads the message first, then the strip: a rule, the QR, and its words in order', () => {
+    const page = giftBack('Dear Sam,\nWish you were here.');
+    expect(page.items.map(item => item.kind)).toEqual(['text', 'text', 'rects', 'rects', ...Array(page.items.length - 4).fill('text')]);
+    const runs = page.items.filter((item): item is TextRun => item.kind === 'text');
+    expect(runs.slice(0, 2).map(run => run.source)).toEqual(['Dear Sam,', 'Wish you were here.']);
+    const words = runs.slice(2).map(run => run.source.trim()).join(' ');
+    expect(words).toBe('A gift from Pat: a letter of your own, printed and mailed free. Scan, or visit letterirl.com/g and enter K7M2-QX9A Redeem by December 16, 2026. One use.');
+    // The lead at 10pt, the code at 12pt, the rest at 9pt, as the legacy CSS sizes them.
+    expect(runs.slice(2).map(run => [run.source.trim(), run.size]).filter(([, size]) => size !== 9)).toEqual([['A gift from Pat:', 10], ['K7M2-QX9A', 12]]);
+  });
+
+  it('draws the rule across the message half, at the top of the strip', () => {
+    const [rule] = giftBack('Hello').items.filter((item): item is RectsItem => item.kind === 'rects');
+    expect(rule.fill).toBe('#b9ad99');
+    expect(rule.rects).toHaveLength(1);
+    expect(rule.rects[0].x).toBeCloseTo(inch(0.525), 9);
+    expect(rule.rects[0].top).toBeCloseTo(STRIP_TOP, 9);
+    expect(rule.rects[0].width).toBeCloseTo(inch(3.7), 9);
+    expect(rule.rects[0].height).toBe(1);
+  });
+
+  it('draws the QR 0.95in square at the left, its words 0.18in beyond it, all inside the message half', () => {
+    const page = giftBack('Hello');
+    const qr = page.items.filter((item): item is RectsItem => item.kind === 'rects')[1];
+    expect(qr.fill).toBe('#000');
+    // The symbol's dark modules (its finder patterns reach three of its
+    // edges), inside a quiet zone of four modules on every side.
+    const { count } = qrMatrix(STRIP.qrUrl);
+    const module = inch(0.95) / (count + 8);
+    const left = Math.min(...qr.rects.map(rect => rect.x));
+    const right = Math.max(...qr.rects.map(rect => rect.x + rect.width));
+    const top = Math.min(...qr.rects.map(rect => rect.top));
+    const bottom = Math.max(...qr.rects.map(rect => rect.top + rect.height));
+    expect(left).toBeCloseTo(inch(0.525) + 4 * module, 1);
+    expect(right).toBeCloseTo(inch(0.525) + (count + 4) * module, 1);
+    expect(bottom - top).toBeCloseTo(count * module, 1);
+    expect(top - 4 * module).toBeGreaterThanOrEqual(ROW_TOP - 0.01);
+    expect(bottom + 4 * module).toBeLessThanOrEqual(inch(0.525 + 5.2) + 0.01);
+    const strip = page.items.filter((item): item is TextRun => item.kind === 'text').slice(1);
+    for (const run of strip) {
+      expect(run.x).toBeCloseTo(inch(0.525 + 0.95 + 0.18), 9);
+      expect(rightEdge(run)).toBeLessThanOrEqual(inch(0.525 + 3.7) + 1e-6);
+      expect(rightEdge(run)).toBeLessThan(POSTCARD_HALF);
+      expect(run.baseline).toBeGreaterThan(ROW_TOP);
+      expect(run.baseline).toBeLessThan(inch(0.525 + 5.2));
+    }
+  });
+
+  it('centres the QR and its words on each other, as the legacy CSS does', () => {
+    // Words shorter than the QR: the QR starts the row, and the words sit in its middle.
+    const short = giftBack('', plainStrip(2));
+    const shortQr = short.items.filter((item): item is RectsItem => item.kind === 'rects')[1].rects;
+    const shortRuns = short.items.filter((item): item is TextRun => item.kind === 'text');
+    const shortHeight = 13.5 + 2 * 12.15;
+    expect(shortRuns[0].baseline).toBeCloseTo(ROW_TOP + (inch(0.95) - shortHeight) / 2 + baselineOffset(10, 13.5), 6);
+    expect(shortRuns[1].baseline).toBeCloseTo(ROW_TOP + (inch(0.95) - shortHeight) / 2 + 13.5 + baselineOffset(9, 12.15), 6);
+    // Words taller than the QR: they start the row, and the QR sits in their middle.
+    const tall = giftBack('', plainStrip(6));
+    const tallQr = tall.items.filter((item): item is RectsItem => item.kind === 'rects')[1].rects;
+    const tallRuns = tall.items.filter((item): item is TextRun => item.kind === 'text');
+    const tallHeight = 13.5 + 6 * 12.15;
+    expect(tallRuns[0].baseline).toBeCloseTo(ROW_TOP + baselineOffset(10, 13.5), 6);
+    const topOf = (rects: Array<{ top: number }>) => Math.min(...rects.map(rect => rect.top));
+    // The same symbol, moved down by half the difference.
+    expect(topOf(tallQr) - topOf(shortQr)).toBeCloseTo((tallHeight - inch(0.95)) / 2, 1);
+  });
+
+  it('throws GiftStripOverflow, by how much, when its words run past its room', () => {
+    // A lead and eight lines fit: 13.5 + 8 x 12.15 = 110.7 of 114.92pt.
+    expect(() => giftBack('', plainStrip(8))).not.toThrow();
+    const error = (() => {
+      try {
+        giftBack('', plainStrip(9));
+      } catch (caught) {
+        return caught;
+      }
+      return undefined;
+    })();
+    expect(error).toBeInstanceOf(GiftStripOverflow);
+    expect((error as GiftStripOverflow).overflow).toBeCloseTo(13.5 + 9 * 12.15 - ROOM, 6);
+    expect((error as Error).message).toBe('The gift strip runs 0.11in past its room.');
+    // A long name wraps the lead until it does not fit, whatever the message.
+    expect(() => layoutPostcard({ message: 'Hi', image: FRONT, strip: { ...STRIP, lead: `A gift from ${'Pat Example '.repeat(30)}:` } }))
+      .toThrow(GiftStripOverflow);
+  });
+
+  it('prints its rule and QR as filled rectangles in the PDF', async () => {
+    const image = readImage(png(300, 200));
+    const plain = (await renderPdf(layoutPostcard({ message: 'Hello', image }))).toString('latin1');
+    const gift = (await renderPdf(layoutPostcard({ message: 'Hello', image, strip: STRIP }))).toString('latin1');
+    expect(gift).toMatch(/\/Count 2/);
+    expect(gift.length).toBeGreaterThan(plain.length);
   });
 });

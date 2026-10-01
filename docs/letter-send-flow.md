@@ -188,8 +188,8 @@ A `pdf-1` gift send prints its card as the PDF's second page, drawn by the rende
   - The front image covers the whole page.
   - The message fills the left half of the back, 16 lines of 14 pt Tinos.
   - The right half stays empty for PostGrid's addresses and postage: content there cancels the postcard (probe P9, [postgrid-pdf-rendering.md](learnings/postgrid-pdf-rendering.md)).
-- A gift postcard still prints on the HTML until its strip moves onto the renderer.
-- Refusals hold the postcard as `render_refused`, as for letters: a version this build cannot print, an unreadable image, a message past its half of the back, or a size other than 6x9.
+- A gift send's card prints in a strip 1.75 in tall at the foot of the message, drawn by the renderer with the code the send minted (`letters.content.giftCard`). The message keeps the 11 lines above it.
+- Refusals hold the postcard as `render_refused`, as for letters: a version this build cannot print, an unreadable image, a message past its half of the back, a gift card whose words run past its strip, or a size other than 6x9.
 - With the flag, a postcard preview records `pdf-1` (below). The print's overflow refusal is then a backstop: the preview measured the same back.
 
 **How a preview is drawn (#534).** With `LETTER_IRL_PRINT_RENDERER=pdf`, the three letter previews are drawn by `src/render`, from the layout the PDF prints from:
@@ -206,7 +206,9 @@ A gift send is previewed like any other letter, with its card as the second page
 - The message is checked against Tinos, the addresses against Open Sans, as for letters.
 - The draft records `renderer_version = 'pdf-1'`. Its `preview_html` holds the front and the back as SVG: the front laid out with the full image's box and drawn with the small copy, the back with the addresses where PostGrid stamps them ("RETURN TO:" and the return address, then the recipient, probes P9 and P11). The addresses are the ones sent, after any correction; P11 showed PostGrid upper-casing them and nothing more, and its own standardisation at stamp time is not probed. The website's confirm page shows both, where it showed only the front before.
 - The tool's output carries the same document as `previewHtml`, which goes to the card's `_meta`, and the postcard card shows its two pages (#534 Phase 4b).
-- A gift postcard keeps the legacy HTML and its limits until its strip moves onto the renderer.
+- A gift postcard is drawn with its card in the strip at the foot of the message (#534 PR 8), so its message has 11 lines: "it takes 12 lines and the back holds 11 above the gift card." The legacy 350-character limit gives way as the 500 does.
+- Its sender's name is checked against Tinos, as on a gift letter, whichever card the preview shows: the send decides the card, and may print a funded one where the preview showed the plain one. The name must also fit the strip, for this card and for the longest card the send could print instead (`longestSendCard`: funded, with the longest date and a seed campaign's wording). A name of about a hundred characters is refused: "The sender's name is too long to print on the gift card." A seed campaign's long code takes room from the name, and one that does not fit even without a name (only the widest codes, 49 or 50 W's) is refused whatever the name: "This gift letter's card does not fit on a postcard. Send it as a letter, or set sendAsGift to false to pay from the balance." Only a seed code the preview never saw can still overflow the strip, and that print is held.
+- Any size but 6x9, and every postcard without the flag, keeps the legacy HTML, and a gift postcard there its 350-character limit.
 - The legacy front preview is landscape at every size (it drew a 6x9 card in portrait, cropping the picture on the confirm page).
 
 A claimed job is submitted to the provider exactly once. A successful response records the provider order ID and marks the job completed. Any outcome that does not prove what happened — `5xx`, timeout, transport loss, an unreadable body — may mean the piece was accepted and physically mailed, so it is never resubmitted: the job is held with `provider_outcome = 'ambiguous'` for operator reconciliation. Only an explicit provider rejection, which proves no mail exists, is terminal.

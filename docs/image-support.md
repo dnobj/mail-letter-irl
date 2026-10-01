@@ -80,7 +80,7 @@ All images are validated, resized to print specifications (300 DPI), and optimiz
 | Supported Sizes | 6×9 only (currently) |
 
 **Text Specifications**:
-- Message limit: 500 characters on the legacy HTML; with `LETTER_IRL_PRINT_RENDERER=pdf`, 16 lines of the back, measured as they print (#534)
+- Message limit: 500 characters on the legacy HTML, 350 on a gift postcard; with `LETTER_IRL_PRINT_RENDERER=pdf`, 16 lines of the back, or 11 above a gift send's card, measured as they print (#534)
 - Printed on back of postcard
 
 **Processing Pipeline**:
