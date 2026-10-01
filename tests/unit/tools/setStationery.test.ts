@@ -130,7 +130,7 @@ describe('set_stationery', () => {
       draftId: DRAFT_ID,
       stationery: botanical,
       previewHtml: change.previewHtml,
-      message: 'The letter is now on the botanical stationery, and it is remembered for the next letter preview. Nothing has been sent.'
+      message: 'The letter is now on the botanical stationery, and the account remembers it for its next letter preview. Nothing has been sent.'
     });
     expect(getDraftForStationery).toHaveBeenCalledWith(DRAFT_ID, 'user-1');
   });
@@ -162,7 +162,7 @@ describe('set_stationery', () => {
     expect(classic.stationery).toEqual({ theme: 'classic', source: 'asked' });
     expect(classic.previewHtml).toBe(original.preview_html);
     expect(output.message).toBe(
-      'The letter is now on a plain page, the classic stationery, and it is remembered for the next letter preview. Nothing has been sent.'
+      'The letter is now on a plain page, the classic stationery, and the account remembers it for its next letter preview. Nothing has been sent.'
     );
   });
 
@@ -191,6 +191,16 @@ describe('set_stationery', () => {
     await expect(run({ stationery: 'botanical', headline: 'Hooray' })).rejects.toThrow('A headline prints only on the celebration stationery.');
     await expect(run({ stationery: 'floral' })).rejects.toThrow('stationery must be one of classic, monogram, botanical or celebration.');
     expect(setDraftStationery).not.toHaveBeenCalled();
+  });
+
+  it('refuses a call that names no theme, reading no draft (#571 review round 3)', async () => {
+    for (const input of [{}, { stationery: '' }, { stationery: '  ' }, { stationery: 7 }]) {
+      await expect(run(input)).rejects.toMatchObject({
+        code: 'STATIONERY_MISSING',
+        message: 'Name the stationery: classic, monogram, botanical or celebration.'
+      });
+    }
+    expect(getDraftForStationery).not.toHaveBeenCalled();
   });
 
   it('is refused while stationery is not offered, reading no draft', async () => {

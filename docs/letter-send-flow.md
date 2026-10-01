@@ -193,6 +193,7 @@ Database constraints enforce one outbox row and one stable idempotency key per l
   - `POST /api/letters/:letterId/cancel` answers `letterId`, as the letters routes do. A refusal carries its reason as `code`, which the website's API client reads, and as `error`.
   - The confirmation page's API:
     - `GET /api/sends/:draftId` gives the draft's `schedule` (null without dates);
+    - and its `stationery` (#563): a themed draft's theme, date line, initials and headline, read as the print reads them (`stationeryOf`), or null for Classic, a legacy preview, or a theme the print would refuse;
     - its `POST` answers a dated send with `schedule`, `scheduled` and `cancellable`, as the send tools do. `scheduled` is true while its job is held past now. A hand-off that throws does not change that, since such a job cannot have been taken.
 - **Sending held mail early:** the admin panel's **Send held mail now** (`job.dispatch_now`, `releaseHeldLetterJobAsAdmin` in `src/services/letterJobService.ts`) makes a held letter's job due at once, so the next hourly run sends it ([Admin Panel](admin-panel-guide.md)).
   - **Only mail still held:** the job `pending`, `not_dispatched`, never attempted, carrying `metadata.heldUntil` and not yet due by the database's clock; the letter `queued`; a Pay & Send letter's order still `fulfillment_pending`. It locks the order, the letter and the job, in the outbox's order.

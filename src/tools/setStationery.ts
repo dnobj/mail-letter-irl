@@ -35,7 +35,8 @@ export const SET_STATIONERY_TOOL = 'set_stationery';
 
 interface SetStationeryInput {
   draftId: string;
-  stationery?: string;
+  /** Required by the served schema; a direct call without one is refused. */
+  stationery: string;
   monogram?: string;
   headline?: string;
 }
@@ -59,6 +60,7 @@ export class StationeryRefusedError extends Error {
   constructor(
     readonly code:
       | 'STATIONERY_DISABLED'
+      | 'STATIONERY_MISSING'
       | 'DRAFT_NOT_FOUND'
       | 'DRAFT_ALREADY_SENT'
       | 'DRAFT_EXPIRED'
@@ -97,12 +99,16 @@ function refused(code: StationeryRefusedError['code'], message: string, context:
 /** What the tool says it did, for the model and the person. */
 function messageFor(stationery: Stationery): string {
   const drawn = stationery.theme === 'classic' ? 'on a plain page, the classic stationery' : `on the ${stationery.theme} stationery`;
-  return `The letter is now ${drawn}, and it is remembered for the next letter preview. Nothing has been sent.`;
+  return `The letter is now ${drawn}, and the account remembers it for its next letter preview. Nothing has been sent.`;
 }
 
 async function handler(input: SetStationeryInput, context: ToolContext): Promise<SetStationeryOutput> {
   if (!isStationeryOffered()) {
     throw refused('STATIONERY_DISABLED', 'Stationery is not available yet. The preview stays as it is.', context);
+  }
+  // A restyle names its theme: none would fall back to the remembered one.
+  if (typeof input.stationery !== 'string' || input.stationery.trim() === '') {
+    throw refused('STATIONERY_MISSING', 'Name the stationery: classic, monogram, botanical or celebration.', context);
   }
   const draftId = typeof input.draftId === 'string' ? input.draftId.trim() : '';
   const userId = context.user.userId;

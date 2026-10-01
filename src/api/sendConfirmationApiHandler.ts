@@ -32,6 +32,7 @@ import { isDuplicateMailError } from '../services/duplicateMailService.js';
 import { SpendLimitError } from '../services/betaSpendLimits.js';
 import type { LetterDraft } from '../services/types.js';
 import { draftScheduleOf } from '../services/draftSchedule.js';
+import { stationeryOf, type Stationery } from '../render/stationery.js';
 import { heldPastNow, heldSendFields, waitsInOutbox } from '../tools/heldSend.js';
 import { isDraftIdShape } from '../tools/requestSend.js';
 import {
@@ -106,6 +107,16 @@ function scheduleOf(draft: LetterDraft): { arriveBy: string; mailOn: string } | 
   }
 }
 
+/**
+ * The stationery a letter was drawn in (#563), for the page to name, or null:
+ * Classic and a legacy preview have none, and a stored theme is read as the
+ * print reads it (stationeryOf), so the page never names one the print would
+ * refuse.
+ */
+function stationeryView(draft: LetterDraft): Stationery | null {
+  return stationeryOf(draft.stationery);
+}
+
 async function showDraft(res: ServerResponse, draft: LetterDraft, userId: string): Promise<void> {
   const state = draftState(draft, new Date());
   writeDiagnostic('info', 'send.confirmation_viewed', { mailType: mailTypeOf(draft), state });
@@ -124,7 +135,9 @@ async function showDraft(res: ServerResponse, draft: LetterDraft, userId: string
     lettersRequired: lettersRequired(draft),
     lettersAvailable: await lettersAvailable(userId),
     // Sent with these, it waits for its mail date (#535).
-    schedule: scheduleOf(draft)
+    schedule: scheduleOf(draft),
+    // Drawn in this, it prints in it (#563).
+    stationery: stationeryView(draft)
   });
 }
 

@@ -578,7 +578,11 @@ export async function setDraftStationery(
        WHERE draft_id = $1`,
       [draftId, stationery ? JSON.stringify(stationery) : null, rendererVersion, change.previewHtml]
     );
-    await client.query('UPDATE users SET stationery_theme = $2 WHERE user_id = $1', [userId, change.stationery.theme]);
+    // Never on an erased account (rememberStationery).
+    await client.query('UPDATE users SET stationery_theme = $2 WHERE user_id = $1 AND erased_at IS NULL', [
+      userId,
+      change.stationery.theme
+    ]);
     writeDiagnostic('info', 'draft.stationery_set', { theme: change.stationery.theme });
     return null;
   });

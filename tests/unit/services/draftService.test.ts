@@ -815,7 +815,8 @@ describe('draftService stationery (#563)', () => {
       );
       // Stored as the print reads it back: the theme and its slots, not why it was chosen.
       expect(update[1]).toEqual(['draft-1', JSON.stringify(BOTANICAL), 'pdf-2', PAGE]);
-      expect(remember[0]).toBe('UPDATE users SET stationery_theme = $2 WHERE user_id = $1');
+      // Never on an erased account (#571 review round 3).
+      expect(remember[0]).toBe('UPDATE users SET stationery_theme = $2 WHERE user_id = $1 AND erased_at IS NULL');
       expect(remember[1]).toEqual(['auth0|owner', 'botanical']);
       expect(client.query).toHaveBeenCalledTimes(4);
     });

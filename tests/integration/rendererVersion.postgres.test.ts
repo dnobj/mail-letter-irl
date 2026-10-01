@@ -298,6 +298,19 @@ describePostgres('renderer version (migration 039, #534)', () => {
       expect(await stateOf(draftId, userId)).toEqual({ stationery: null, renderer_version: 'pdf-1', preview_html: '<svg/>', theme: 'classic' });
     }, 60_000);
 
+    it('remembers no theme on an erased account (#571 review round 3)', async () => {
+      const remembered = await import('../../src/services/stationeryDefaultService.js');
+      const userId = await seedUser();
+      await pool.query(
+        `UPDATE users SET erased_at = NOW(), email = 'erased-' || gen_random_uuid()::text || '@erased.invalid',
+                          return_address = NULL, return_address_validated_at = NULL
+          WHERE user_id = $1`,
+        [userId]
+      );
+      await remembered.rememberStationery(userId, 'botanical');
+      expect((await pool.query('SELECT stationery_theme FROM users WHERE user_id = $1', [userId])).rows[0].stationery_theme).toBeNull();
+    }, 60_000);
+
     it("leaves a sent, expired, Pay & Send or someone else's draft as it was, and remembers nothing", async () => {
       const userId = await seedUser();
       const other = await seedUser();

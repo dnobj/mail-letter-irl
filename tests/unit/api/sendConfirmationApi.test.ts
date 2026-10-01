@@ -230,7 +230,8 @@ describe('the confirmation page API (#470)', () => {
         lettersAvailable: 3,
         isGiftSend: false,
         recipient: { name: 'Sam Rivera', addressLine1: '1 Main St', city: 'Austin', state: 'TX', postalCode: '78701' },
-        schedule: null
+        schedule: null,
+        stationery: null
       });
       // Only the address fields the page shows.
       expect(json().recipient.country).toBeUndefined();
@@ -257,6 +258,17 @@ describe('the confirmation page API (#470)', () => {
       expect((await call('GET')).json().schedule).toEqual({ arriveBy: '2026-10-16', mailOn: '2026-10-06' });
       vi.mocked(getDraft).mockResolvedValue(draft({ arrive_by: '2026-10-16', mail_on: null }) as any);
       expect((await call('GET')).json().schedule).toBeNull();
+    });
+
+    it("names a themed draft's stationery as the print reads it, and none for Classic or one it cannot read (#563)", async () => {
+      signedIn();
+      const celebration = { theme: 'celebration', dateLine: 'October 1, 2026', headline: 'Happy Birthday!' };
+      vi.mocked(getDraft).mockResolvedValue(draft({ renderer_version: 'pdf-2', stationery: { ...celebration, colour: 'red' } }) as any);
+      expect((await call('GET')).json().stationery).toEqual(celebration);
+      for (const stationery of [null, { theme: 'classic' }, { theme: 'typewriter' }, { theme: 'botanical', headline: 7 }]) {
+        vi.mocked(getDraft).mockResolvedValue(draft({ renderer_version: 'pdf-2', stationery }) as any);
+        expect((await call('GET')).json().stationery, JSON.stringify(stationery)).toBeNull();
+      }
     });
 
     it('counts a long letter and a postcard as the preview tools do', async () => {

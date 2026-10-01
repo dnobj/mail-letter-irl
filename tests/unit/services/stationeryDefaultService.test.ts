@@ -33,6 +33,10 @@ describe('rememberStationery', () => {
   it('writes the theme, Classic included', async () => {
     vi.mocked(db.query).mockResolvedValue({ rows: [], rowCount: 1 } as never);
     await rememberStationery('auth0|pat', 'classic');
-    expect(db.query).toHaveBeenCalledWith('UPDATE users SET stationery_theme = $2 WHERE user_id = $1', ['auth0|pat', 'classic']);
+    // Never on an erased account (#571 review round 3).
+    expect(db.query).toHaveBeenCalledWith('UPDATE users SET stationery_theme = $2 WHERE user_id = $1 AND erased_at IS NULL', [
+      'auth0|pat',
+      'classic'
+    ]);
   });
 });
