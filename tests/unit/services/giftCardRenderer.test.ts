@@ -162,8 +162,12 @@ describe('gift card markup', () => {
       for (const text of words) expect(html, text).toContain(`>${escaped(text)}</`);
       expect(copy.qrUrl).toBe(card.url);
     }
-    // Each step keeps its kind, which sets its size in both.
+    // Each step keeps its kind, which sets its size in both: in the HTML, by its class.
     expect(giftLetterPageCopy(funded, 'Pat').steps.map(step => step.kind)).toEqual(['plain', 'url', 'plain', 'code']);
+    const { html } = giftLetterPageSvg(funded, 'Pat');
+    expect(html).toContain('<p>Scan the code, or visit</p>');
+    expect(html).toContain('<p class="gift-url">letterirl.com/g</p>');
+    expect(html).toContain('<p class="gift-code">K7M2-QX9A</p>');
     expect(giftLetterPageCopy(unfunded, 'Pat').steps.map(step => step.kind)).toEqual(['plain', 'url']);
     expect(giftLetterPageCopy(unfunded, 'Pat').fine).toBeUndefined();
   });
