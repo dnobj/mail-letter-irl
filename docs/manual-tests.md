@@ -1690,12 +1690,21 @@ or an admin grant: the owner's step).
       2026-10-01, on 2c098c1: the refusal, the draft and the confirm page's two pages passed.)
 - [ ] The postcard card shows the front and back pages in ChatGPT and in Claude, after Refresh tools to
       widgets v49 (#534 Phase 4b). A legacy postcard keeps the card's own front and mockup.
+      (ChatGPT on development, 2026-10-01, on 5999dff: passed for a testlirl02 postcard, and the letter
+      card still shows its page. Still to check: Claude, and a legacy postcard in either.)
 - [ ] A gift postcard previews on the renderer with its card in a strip at the foot of the message, and
       records `pdf-1` (#534 PR 8). The back shows the sender's name, the placeholder code and the QR;
       11 lines make a draft and 12 are refused "above the gift card". A sender's name with the ff
       ligature (U+FB00) is refused "in the sender's name, which the gift card prints". Sent in test mode,
       it prints from our PDF with the code the send minted, PostGrid keeps it `ready`, and the QR on the
-      flattened back decodes.
+      flattened back decodes. (Development, 2026-10-01, on ed9ce9d, as testlirl02, passed: 11 lines made a
+      draft and 12 were refused "above the gift card"; the ff ligature was refused in the sender's name; a
+      gift preview recorded `pdf-1` (`quote.postcard.computed giftSend=true`, then
+      `draft.postcard_created renderer=pdf-1`); and in ChatGPT the card's back shows the strip, with the
+      rule, the QR, "A gift from Pat Example:", the placeholder code and the redeem-by date. Development's
+      long website host wraps the claim sentence to three lines. Still to check: the confirm page, which
+      should show the same document in its sandboxed frame, when Claude in Chrome is connected; and the
+      test-mode send, which waits for the owner with PRINT-02's.)
 - [ ] The letter card shows the page as it prints, with the addresses where PostGrid stamps them, in
       ChatGPT and in Claude; a select enlarges it and the next restores it. A legacy preview keeps
       the mockup. (#534 Phase 3, widgets v47.) A gift send's card shows below the letter, with its
