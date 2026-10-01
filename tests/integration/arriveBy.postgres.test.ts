@@ -625,6 +625,95 @@ describePostgres('arrive-by (migration 040, #535)', () => {
     expect(await creditsOf(userId)).toBe(10);
   }, 60_000);
 
+  it("raises one alert for held mail not at the printer by 18:00 on its mail date, and none for mail that is", async () => {
+    const userId = await seedUser();
+    const late = randomUUID();
+    const mailed = randomUUID();
+    for (const [letterId, status] of [[late, 'queued'], [mailed, 'accepted']] as const) {
+      await pool.query(
+        `INSERT INTO letters (letter_id, user_id, content, recipient, credits_cost, status, mail_type,
+           funding_type, arrive_by, mail_on)
+         VALUES ($1, $2, '{}', $3, 2, $4, 'letter', 'prepaid_balance', '2020-01-13', '2020-01-02')`,
+        [letterId, userId, JSON.stringify(RECIPIENT), status]
+      );
+    }
+
+    // Every other letter in this file mails on a date still to come.
+    await expect(held.raiseMissedMailDayAlerts()).resolves.toBe(1);
+    const alerts = await pool.query(
+      "SELECT order_id, severity, status, details FROM commerce_operational_alerts WHERE alert_type = 'schedule_missed_mail_day'"
+    );
+    expect(alerts.rows).toEqual([
+      { order_id: null, severity: 'warning', status: 'open', details: { letterId: late, mailOn: '2020-01-02' } }
+    ]);
+
+    // Once per letter.
+    await expect(held.raiseMissedMailDayAlerts()).resolves.toBe(0);
+  }, 60_000);
+
+  it("does not call a held letter's Pay & Send order stuck until 90 minutes after its hold ends", async () => {
+    const { STUCK_ORDER_CONDITION } = await import('../../src/services/stuckOrders.js');
+    const stuck = async (orderId: string) =>
+      Number((await pool.query(`SELECT COUNT(*)::int AS n FROM orders WHERE order_id = $1 AND ${STUCK_ORDER_CONDITION}`, [orderId])).rows[0].n);
+    const userId = await seedUser();
+
+    const seedOrder = async () => {
+      const orderId = `order-${randomUUID()}`;
+      await pool.query(
+        `INSERT INTO orders (order_id, user_id, credits, amount_cents, currency, status, order_type, product_code,
+           idempotency_key, draft_id)
+         VALUES ($1, $2, NULL, 499, 'USD', 'fulfillment_pending', 'jit_mail', 'jit-letter', $3, $4)`,
+        [orderId, userId, `idem_${orderId}`, await seedDraft(userId)]
+      );
+      await pool.query("UPDATE orders SET updated_at = NOW() - INTERVAL '2 hours' WHERE order_id = $1", [orderId]);
+      return orderId;
+    };
+
+    // An ordinary paid order still fulfilling after 2 hours is stuck.
+    expect(await stuck(await seedOrder())).toBe(1);
+
+    // One whose letter is held to a date to come is not.
+    const orderId = await seedOrder();
+    const letterId = randomUUID();
+    const dates = upcoming();
+    await pool.query(
+      `INSERT INTO letters (letter_id, user_id, content, recipient, credits_cost, status, mail_type,
+         funding_type, funding_order_id, arrive_by, mail_on)
+       VALUES ($1, $2, '{}', $3, 2, 'draft', 'letter', 'jit_order', $4, $5::date, $6::date)`,
+      [letterId, userId, JSON.stringify(RECIPIENT), orderId, dates.arriveBy, dates.mailOn]
+    );
+    await inTransaction(client =>
+      jobs.createLetterJobWithClient(client, { letter_id: letterId } as never, { notBefore: schedule.dispatchAt(dates.mailOn) })
+    );
+    expect(await stuck(orderId)).toBe(0);
+
+    // Its hold ended 3 hours ago and it has not gone: stuck.
+    await pool.query(
+      "UPDATE letter_jobs SET metadata = jsonb_set(metadata, '{heldUntil}', to_jsonb((NOW() - INTERVAL '3 hours')::text)) WHERE letter_id = $1",
+      [letterId]
+    );
+    expect(await stuck(orderId)).toBe(1);
+  }, 60_000);
+
+  it('counts nothing held behind a pause until it is due', async () => {
+    const savedSwitch = process.env.LETTER_IRL_OUTBOX_DISPATCH_ENABLED;
+    process.env.LETTER_IRL_OUTBOX_DISPATCH_ENABLED = 'false';
+    try {
+      const userId = await seedUser();
+      const before = await jobs.lettersWaitingBehindPause();
+      expect(typeof before).toBe('number');
+
+      await sendHeld(userId);
+      await expect(jobs.lettersWaitingBehindPause()).resolves.toBe(before);
+
+      await mailSend.createMailOrderFromDraft({ draftId: await seedDraft(userId), userId, mailType: 'letter' });
+      await expect(jobs.lettersWaitingBehindPause()).resolves.toBe((before as number) + 1);
+    } finally {
+      if (savedSwitch === undefined) delete process.env.LETTER_IRL_OUTBOX_DISPATCH_ENABLED;
+      else process.env.LETTER_IRL_OUTBOX_DISPATCH_ENABLED = savedSwitch;
+    }
+  }, 60_000);
+
   it('frees the duplicate guard: the same mail can be sent again once cancelled', async () => {
     const userId = await seedUser();
     const body = `The same words ${randomUUID()}`;

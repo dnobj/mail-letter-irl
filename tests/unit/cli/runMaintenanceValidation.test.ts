@@ -24,7 +24,12 @@ const services = vi.hoisted(() => ({
   purgeExpiredFeatureRequests: vi.fn().mockResolvedValue(0),
   sendMaintenanceHeartbeat: vi.fn().mockResolvedValue('sent'),
   lettersWaitingBehindPause: vi.fn().mockResolvedValue(0),
+  raiseMissedMailDayAlerts: vi.fn().mockResolvedValue(0),
   closePool: vi.fn().mockResolvedValue(undefined)
+}));
+
+vi.mock('../../../src/services/scheduledMailService.js', () => ({
+  raiseMissedMailDayAlerts: services.raiseMissedMailDayAlerts
 }));
 
 vi.mock('../../../src/services/letterJobService.js', () => ({
@@ -143,6 +148,17 @@ describe('maintenance deployment validation', () => {
     // The heartbeat follows a finished run, and only then (#408).
     expect(services.sendMaintenanceHeartbeat).toHaveBeenCalledTimes(1);
     expect(services.sendMaintenanceHeartbeat.mock.invocationCallOrder[0]).toBeGreaterThan(
+      services.processDueLetterJobs.mock.invocationCallOrder[0]
+    );
+  });
+
+  it('raises held mail that missed its mail day after the outbox, so mail just sent is not counted (#535)', async () => {
+    stubValidDevelopment();
+
+    await expect(maintenanceEntry()).resolves.toBeUndefined();
+
+    expect(services.raiseMissedMailDayAlerts).toHaveBeenCalledTimes(1);
+    expect(services.raiseMissedMailDayAlerts.mock.invocationCallOrder[0]).toBeGreaterThan(
       services.processDueLetterJobs.mock.invocationCallOrder[0]
     );
   });

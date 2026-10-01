@@ -16,6 +16,7 @@ import {
 import { purgeExpiredRecentUploads } from '../services/recentUploadStore.js';
 import { purgeExpiredFeatureRequests } from '../services/featureRequestService.js';
 import { processAccountErasures } from '../services/accountErasureService.js';
+import { raiseMissedMailDayAlerts } from '../services/scheduledMailService.js';
 import { enabledUnlessDisabled, positiveIntegerSetting } from '../utils/envSettings.js';
 import { reconcileGenerationReservations } from '../services/imageGenerationLimitService.js';
 import {
@@ -359,6 +360,12 @@ export async function runMaintenance(): Promise<void> {
 
   const outbox = await processDueLetterJobs(batchLimit);
   console.log('[Maintenance] Outbox summary:', outbox);
+
+  // Held mail past 18:00 New York time on its mail date and still not at the
+  // printer (#535). After the outbox, so mail it just sent is not counted.
+  // Never throws, like the wrapped tasks above.
+  const missedMailDays = await raiseMissedMailDayAlerts();
+  console.log(`[Maintenance] Held mail past its mail day, newly alerted: ${missedMailDays}`);
 
   const commerce = await runCommerceMaintenance();
   console.log('[Maintenance] Commerce summary:', commerce);

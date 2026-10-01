@@ -6,16 +6,18 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../../src/db/index.js', () => ({ transaction: vi.fn() }));
+vi.mock('../../../src/db/index.js', () => ({ transaction: vi.fn(), query: vi.fn() }));
 vi.mock('../../../src/services/creditLedgerService.js', () => ({ returnConsumedCreditsForLetter: vi.fn() }));
 vi.mock('../../../src/services/giftLetterService.js', () => ({ returnGiftLetterForFailedSendWithClient: vi.fn() }));
 
-import { transaction } from '../../../src/db/index.js';
+import { query, transaction } from '../../../src/db/index.js';
 import { returnConsumedCreditsForLetter } from '../../../src/services/creditLedgerService.js';
 import { returnGiftLetterForFailedSendWithClient } from '../../../src/services/giftLetterService.js';
 import {
   CANCELLED_BY_CUSTOMER,
-  cancelScheduledMail
+  MISSED_MAIL_DAY_ALERT,
+  cancelScheduledMail,
+  raiseMissedMailDayAlerts
 } from '../../../src/services/scheduledMailService.js';
 
 const LETTER = 'ltr-1';
@@ -201,5 +203,40 @@ describe('cancelScheduledMail (#535)', () => {
   it('lets any other failure through', async () => {
     vi.mocked(transaction).mockRejectedValue(Object.assign(new Error('connection reset'), { code: '08006' }));
     await expect(cancel()).rejects.toThrow('connection reset');
+  });
+});
+
+describe('raiseMissedMailDayAlerts (#535)', () => {
+  beforeEach(() => {
+    vi.mocked(query).mockReset();
+  });
+
+  it('raises one alert per held letter not at the printer by 18:00 New York time on its mail date', async () => {
+    vi.mocked(query).mockResolvedValue({ rows: [{}, {}], rowCount: 2 } as never);
+
+    await expect(raiseMissedMailDayAlerts()).resolves.toBe(2);
+
+    const [sql, params] = vi.mocked(query).mock.calls[0] as unknown as [string, unknown[]];
+    const flat = sql.replace(/\s+/g, ' ');
+    expect(MISSED_MAIL_DAY_ALERT).toBe('schedule_missed_mail_day');
+    expect(params).toEqual([MISSED_MAIL_DAY_ALERT]);
+    expect(flat).toContain('INSERT INTO commerce_operational_alerts (order_id, alert_type, severity, details)');
+    expect(flat).toContain("SELECT held.funding_order_id, $1::varchar, 'warning'");
+    expect(flat).toContain("jsonb_build_object('letterId', held.letter_id, 'mailOn', held.mail_on::text)");
+    expect(flat).toContain('held.mail_on IS NOT NULL');
+    expect(flat).toContain("held.status IN ('queued', 'processing')");
+    expect(flat).toContain("(held.mail_on + TIME '18:00') AT TIME ZONE 'America/New_York' < NOW()");
+    // Once per letter, ever.
+    expect(flat).toContain("NOT EXISTS ( SELECT 1 FROM commerce_operational_alerts seen WHERE seen.alert_type = $1::varchar AND seen.details->>'letterId' = held.letter_id )");
+  });
+
+  it('raises nothing quietly when nothing is late', async () => {
+    vi.mocked(query).mockResolvedValue({ rows: [], rowCount: 0 } as never);
+    await expect(raiseMissedMailDayAlerts()).resolves.toBe(0);
+  });
+
+  it('never throws: a failed check is logged and the hourly run goes on', async () => {
+    vi.mocked(query).mockRejectedValue(Object.assign(new Error('relation does not exist'), { code: '42P01' }));
+    await expect(raiseMissedMailDayAlerts()).resolves.toBe(0);
   });
 });

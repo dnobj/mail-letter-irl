@@ -1,6 +1,7 @@
 import type { AdminSqlClient } from "../database.js";
 import { countAlerts, type AlertCounts } from "./alerts.js";
 import { readOutboxBacklog, type OutboxBacklog } from "./jobs.js";
+import { STUCK_ORDER_CONDITION } from "../../services/stuckOrders.js";
 
 export interface MaintenanceTaskView {
   taskName: string;
@@ -44,11 +45,11 @@ export async function readMaintenanceHealth(
             (last_error IS NOT NULL) AS has_error, updated_at
      FROM maintenance_tasks ORDER BY task_name`,
   );
-  // The same predicate the hourly maintenance logs commerce.stuck_orders_detected on.
+  // The condition the hourly maintenance logs commerce.stuck_orders_detected
+  // on, shared (src/services/stuckOrders.ts), held mail's orders included.
   const stuck = await client.query<{ stuck: string; quarantined: string }>(
     `SELECT
-       COUNT(*) FILTER (WHERE status IN ('paid', 'fulfillment_pending', 'refund_pending')
-                          AND updated_at < NOW() - INTERVAL '30 minutes')::text AS stuck,
+       COUNT(*) FILTER (WHERE ${STUCK_ORDER_CONDITION})::text AS stuck,
        COUNT(*) FILTER (WHERE last_error_code = 'PAYMENT_AMOUNT_MISMATCH')::text AS quarantined
      FROM orders`,
   );

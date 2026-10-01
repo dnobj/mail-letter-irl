@@ -903,6 +903,9 @@ export async function processLetterJob(
  * redeploy that sets the switch is one such crash (#451 review).
  */
 async function countWaitingLetterJobs(): Promise<number> {
+  // Held mail (#535) is not waiting behind a pause until its date: a job
+  // pending, never attempted and not yet due is exactly a held one (every
+  // other job is created due, and a retry has an attempt), so it is left out.
   const waiting = await query<{ count: string }>(
     `SELECT COUNT(*)::text AS count FROM letter_jobs
       WHERE attempts < max_attempts
@@ -913,7 +916,8 @@ async function countWaitingLetterJobs(): Promise<number> {
             status = 'processing'
             AND locked_at < NOW() - INTERVAL '${STALE_LOCK_MINUTES} minutes'
           )
-        )`
+        )
+        AND NOT (status = 'pending' AND attempts = 0 AND next_attempt_at > NOW())`
   );
   return Number(waiting.rows[0]?.count ?? 0);
 }

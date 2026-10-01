@@ -31,6 +31,7 @@ import { isGiftLettersEnabled } from '../config/giftLetters.js';
 import { isImageGenerationOff } from '../config/imageGeneration.js';
 import { createMailOrderFromDraftWithClient } from './mailSendService.js';
 import { draftScheduleOf } from './draftSchedule.js';
+import { STUCK_ORDER_CONDITION } from './stuckOrders.js';
 import { earliestMailOn } from './deliverySchedule.js';
 import { assertNoRecentDuplicateMail } from './duplicateMailService.js';
 import {
@@ -3830,8 +3831,7 @@ export async function runCommerceMaintenance(): Promise<CommerceMaintenanceResul
 
   const stuck = await query<{ count: string }>(
     `SELECT COUNT(*) AS count FROM orders
-     WHERE status IN ('paid', 'fulfillment_pending', 'refund_pending')
-       AND updated_at < NOW() - INTERVAL '30 minutes'`
+     WHERE ${STUCK_ORDER_CONDITION}`
   );
   const stuckOrders = Number.parseInt(stuck.rows[0]?.count || '0', 10);
   if (stuckOrders > 0) {

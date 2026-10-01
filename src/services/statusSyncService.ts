@@ -57,7 +57,9 @@ export async function syncLetterStatuses(
   // Query letters that need status sync:
   // - Not in terminal status
   // - Have a tracking_id (were sent to provider)
-  // - Created within maxAgeInDays
+  // - Mailed within maxAgeInDays: counted from sent_at, when the provider took
+  //   it, so a letter held for weeks to arrive by a date (#535) is still
+  //   followed after it mails; created_at for one not yet marked sent
   const lettersResult = await query<{
     letter_id: string;
     tracking_id: string;
@@ -69,7 +71,7 @@ export async function syncLetterStatuses(
     FROM letters
     WHERE status NOT IN ('delivered', 'returned', 'failed', 'cancelled')
       AND tracking_id IS NOT NULL
-      AND created_at > NOW() - INTERVAL '${maxAgeInDays} days'
+      AND COALESCE(sent_at, created_at) > NOW() - INTERVAL '${maxAgeInDays} days'
     ORDER BY created_at DESC
   `);
 
@@ -176,7 +178,8 @@ export async function getLetterStatusHistory(
 
 /**
  * Get letters that are stuck in non-terminal status for too long
- * Useful for admin alerting
+ * Useful for admin alerting. Counted from when the provider took the letter
+ * (sent_at), so held mail (#535) is not stuck for the weeks it waited.
  */
 export async function getStuckLetters(
   maxDaysInNonTerminal: number = 14
@@ -199,12 +202,12 @@ export async function getStuckLetters(
       tracking_id,
       status,
       created_at,
-      EXTRACT(DAY FROM NOW() - created_at)::INTEGER as days_in_status
+      EXTRACT(DAY FROM NOW() - COALESCE(sent_at, created_at))::INTEGER as days_in_status
     FROM letters
     WHERE status NOT IN ('delivered', 'returned', 'failed', 'cancelled')
       AND tracking_id IS NOT NULL
-      AND created_at < NOW() - INTERVAL '${maxDaysInNonTerminal} days'
-    ORDER BY created_at ASC
+      AND COALESCE(sent_at, created_at) < NOW() - INTERVAL '${maxDaysInNonTerminal} days'
+    ORDER BY COALESCE(sent_at, created_at) ASC
   `);
 
   return result.rows;
