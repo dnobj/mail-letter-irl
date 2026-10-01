@@ -8,7 +8,10 @@ import {
   getPurchaseStatusInputZ,
   sendLetterInputZ,
   quoteAndPreviewInputZ,
-  sendEligibilityZ, getPurchaseStatusOutputZ } from "../../../src/zodSchemas.js";
+  sendEligibilityZ, getPurchaseStatusOutputZ,
+  setArrivalDateInputZ,
+  setArrivalDateOutputZ } from "../../../src/zodSchemas.js";
+import { setArrivalDateInputSchema, setArrivalDateOutputSchema } from "../../../src/schemas.js";
 import { toolInputSchemas } from "../../../src/mcp/toolSchemas.js";
 import { buildManifest } from "../../../src/mcp/manifest.js";
 
@@ -151,5 +154,29 @@ describe("published output-schema parity (#278)", () => {
     const zodKeys = Object.keys(sendEligibilityZ.shape.payAndSend.shape).sort();
 
     expect(Object.keys(payAndSend).sort()).toEqual(zodKeys);
+  });
+});
+
+describe("set_arrival_date schema (#535)", () => {
+  it("names the same inputs in the runtime Zod schema, the MCP layer and the JSON schema, with only draftId required", () => {
+    const zodKeys = Object.keys(setArrivalDateInputZ.shape);
+    expect(zodKeys).toEqual(["draftId", "arriveBy"]);
+    expect(Object.keys(toolInputSchemas.set_arrival_date.shape)).toEqual(zodKeys);
+    expect(Object.keys(setArrivalDateInputSchema.properties ?? {})).toEqual(zodKeys);
+    expect(setArrivalDateInputSchema.required).toEqual(["draftId"]);
+    expect(setArrivalDateInputZ.shape.draftId.isOptional()).toBe(false);
+    expect(setArrivalDateInputZ.shape.arriveBy.isOptional()).toBe(true);
+    expect(toolInputSchemas.set_arrival_date.shape.arriveBy.isOptional()).toBe(true);
+  });
+
+  it("names the same outputs in the runtime Zod schema and the JSON schema, schedule optional in both", () => {
+    const zodKeys = Object.keys(setArrivalDateOutputZ.shape);
+    expect(Object.keys(setArrivalDateOutputSchema.properties ?? {})).toEqual(zodKeys);
+    expect(setArrivalDateOutputSchema.required).toEqual(zodKeys.filter((key) => key !== "schedule"));
+    expect(setArrivalDateOutputZ.shape.schedule.isOptional()).toBe(true);
+  });
+
+  it("is left out of the manifest, which is generated with arrival dates off", () => {
+    expect(getManifestTool("set_arrival_date")).toBeUndefined();
   });
 });

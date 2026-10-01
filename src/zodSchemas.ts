@@ -231,6 +231,15 @@ export const getDraftStatusInputZ = z.object({
   draftId: z.string().describe("The draftId from a letter or postcard preview")
 });
 
+// A preview's arrival date, changed without previewing again (#535). Listed
+// only while LETTER_IRL_ARRIVE_BY_ENABLED is on (src/server.ts).
+export const SET_ARRIVE_BY_DESCRIPTION =
+  "The date the mail should arrive by, YYYY-MM-DD. Leave it out to clear the date, so the mail goes to the printer as soon as it is sent.";
+export const setArrivalDateInputZ = z.object({
+  draftId: z.string().describe("The draftId from a letter or postcard preview"),
+  arriveBy: z.string().optional().describe(SET_ARRIVE_BY_DESCRIPTION)
+});
+
 // ============================================================================
 // Feature Request Schema (US-FEEDBACK-01)
 // ============================================================================
@@ -606,6 +615,13 @@ export const requestSendOutputZ = z.object({
   confirmationUrl: z.string().describe("Where the person checks the preview and sends it themselves"),
   expiresAtISO: z.string(),
   recipientSummary: recipientSummaryZ
+});
+
+export const setArrivalDateOutputZ = z.object({
+  draftId: z.string(),
+  schedule: previewScheduleZ.optional().describe("The draft's dates now; absent when it mails as soon as it is sent"),
+  deliveryEstimate: z.string(),
+  message: z.string()
 });
 
 export const submitFeatureRequestOutputZ = z.object({

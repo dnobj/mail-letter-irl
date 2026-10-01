@@ -33,6 +33,7 @@ import {
   sendPostcardInputZ,
   requestSendInputZ,
   getDraftStatusInputZ,
+  setArrivalDateInputZ,
   uploadPhotoChunkInputZ,
   submitFeatureRequestInputZ,
   getStartedInputZ,
@@ -57,6 +58,7 @@ import {
   sendPostcardOutputZ,
   requestSendOutputZ,
   getDraftStatusOutputZ,
+  setArrivalDateOutputZ,
   uploadPhotoChunkOutputZ,
   submitFeatureRequestOutputZ,
   getStartedOutputZ,
@@ -168,7 +170,8 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     'upload_photo_chunk',    // A chunk sent again changes nothing (#474)
     'set_return_address',    // Setting same address twice = no change
     'clear_return_address',  // Clearing twice = no additional effect
-    'confirm_uploaded_image' // Repeating the same relay overwrites with the same value
+    'confirm_uploaded_image', // Repeating the same relay overwrites with the same value
+    'set_arrival_date'        // The same date twice changes nothing more (#535)
   ];
 
   // Destructive tools. OpenAI's app-review guidance asks for destructiveHint on
@@ -180,7 +183,9 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
   // starts a payment the customer cannot undo alone (for Pay & Send it
   // authorises the mail itself). A spent promo code and a consumed image
   // generation are additive for the customer, and the upload relay overwrites
-  // only a pointer to the latest upload, so those stay non-destructive.
+  // only a pointer to the latest upload, so those stay non-destructive. So
+  // does set_arrival_date (#535): it changes only a draft's dates, and a draft
+  // sends nothing and expires on its own.
   // See docs/learnings/tool-annotation-decision.md (addendum, September 2026).
   const destructiveTools = [
     'send_letter',
@@ -795,6 +800,7 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   send_postcard: sendPostcardInputZ,
   request_send: requestSendInputZ,
   get_draft_status: getDraftStatusInputZ,
+  set_arrival_date: setArrivalDateInputZ,
   upload_photo_chunk: uploadPhotoChunkInputZ,
   // Feedback tools
   submit_feature_request: submitFeatureRequestInputZ,
@@ -830,6 +836,7 @@ const zodOutputSchemas: Record<ToolName, z.ZodObject<any>> = {
   send_postcard: sendPostcardOutputZ,
   request_send: requestSendOutputZ,
   get_draft_status: getDraftStatusOutputZ,
+  set_arrival_date: setArrivalDateOutputZ,
   upload_photo_chunk: uploadPhotoChunkOutputZ,
   // Feedback tools
   submit_feature_request: submitFeatureRequestOutputZ,
@@ -857,13 +864,25 @@ export function getZodInputShape(name: string) {
  * while the flag was on (apps cache it until a refresh) would have its date
  * dropped and its mail sent at once. While off, the four previews are served
  * as an object that passes unknown keys through, so the preview sees the date
- * and refuses it. Every other tool is served its raw shape, as before.
+ * and refuses it: their JSON Schema then reads `additionalProperties: true`,
+ * where a raw shape's reads false (tests/unit/mcp/arriveByServed.test.ts).
+ * Every other tool is served its raw shape, as before, set_arrival_date
+ * included: its own arriveBy is offered with it, only while the flag is on.
  */
 export function getServedInputSchema(name: string): z.ZodRawShape | z.AnyZodObject | undefined {
   const shape = getZodInputShape(name);
-  if (!shape || !("arriveBy" in shape) || isArriveByEnabled()) return shape;
+  if (!shape || !withholdsArriveBy(name)) return shape;
   const served = Object.fromEntries(Object.entries(shape).filter(([key]) => key !== "arriveBy")) as z.ZodRawShape;
   return z.object(served).passthrough();
+}
+
+/**
+ * Whether a tool is served without the previews' `arriveBy` (#535): one of
+ * the four previews, while LETTER_IRL_ARRIVE_BY_ENABLED is off. tools/list
+ * (getServedInputSchema) and /manifest.json both ask this, so they agree.
+ */
+export function withholdsArriveBy(name: string): boolean {
+  return PREVIEW_TOOLS.has(name) && !isArriveByEnabled();
 }
 
 export function getZodOutputShape(name: string) {
@@ -1385,6 +1404,10 @@ export function summarizeToolResult(
     }
     case "request_send":
       return sendLinkText(result as unknown as RequestSendOutput);
+    case "set_arrival_date":
+      // The tool's own sentence, which also travels in structuredContent for
+      // the apps whose model reads only that (Claude Code).
+      return typeof result.message === "string" ? result.message : "The arrival date was updated.";
     case "upload_photo_chunk":
       // Card-only: a model sees this only in an app that shows card-only
       // tools to it.

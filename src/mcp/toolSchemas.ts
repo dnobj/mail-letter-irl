@@ -140,6 +140,11 @@ export const toolInputSchemas = {
   get_draft_status: z.object({
     draftId: z.string()
   }),
+  // A preview's arrival date, changed without previewing again (#535)
+  set_arrival_date: z.object({
+    draftId: z.string(),
+    arriveBy: z.string().optional()
+  }),
   // One chunk of a photo from the upload card (#474, phase 3)
   upload_photo_chunk: z.object({
     uploadId: z.string(),

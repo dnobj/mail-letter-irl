@@ -23,6 +23,7 @@ export { quoteAndPreviewPostcardTool } from "./quoteAndPreviewPostcard.js";
 export { sendPostcardTool } from "./sendPostcard.js";
 export { requestSendTool } from "./requestSend.js";
 export { getDraftStatusTool } from "./getDraftStatus.js";
+export { setArrivalDateTool } from "./setArrivalDate.js";
 export { uploadPhotoChunkTool } from "./uploadPhotoChunk.js";
 
 // Feedback tools (US-FEEDBACK-01)

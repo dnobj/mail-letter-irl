@@ -204,6 +204,7 @@ import {
   revokePackLots,
   runCommerceMaintenance
 } from '../../../src/services/commerceService.js';
+import { LIVE_PAY_AND_SEND_STATUSES } from '../../../src/services/draftService.js';
 import { clearDiagnosticChangeSlot } from '../../../src/utils/diagnosticLog.js';
 
 const baseOrder = {
@@ -253,6 +254,10 @@ describe('commerceService', () => {
     expect(ACTIVE_JIT_STATUSES).toEqual([
       'checkout_pending', 'paid', 'fulfillment_pending', 'refund_pending', 'disputed', 'held'
     ]);
+  });
+
+  it("fixes a draft's arrival date while any of the same orders is live (#535)", () => {
+    expect([...LIVE_PAY_AND_SEND_STATUSES]).toEqual(ACTIVE_JIT_STATUSES);
   });
 
   it('treats every funded, reversed, disputed, or held order as terminal for checkout replay', () => {

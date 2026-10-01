@@ -1,18 +1,18 @@
 import { LetterIrlServer } from "../server.js";
-import { WIDGET_DEFINITIONS } from "./registerTools.js";
+import { WIDGET_DEFINITIONS, withholdsArriveBy } from "./registerTools.js";
 import { DEFAULT_OAUTH_SCOPES } from "../auth/oauthConfig.js";
 import { buildServerInstructions } from "./serverInstructions.js";
 import { isSendConfirmationEnabled } from "../config/sendConfirmation.js";
 import { clientProfileNamed } from "../auth/clientProfiles.js";
-import { isArriveByEnabled } from "../config/arriveBy.js";
 
 /**
- * A tool's input schema as tools/list serves it: the previews' `arriveBy`
+ * A tool's input schema as tools/list serves it: the four previews' `arriveBy`
  * (#535) only while LETTER_IRL_ARRIVE_BY_ENABLED is on (getServedInputSchema).
+ * set_arrival_date is listed only while it is on, its own arriveBy with it.
  */
-function servedInputSchema(schema: unknown): unknown {
+function servedInputSchema(name: string, schema: unknown): unknown {
   const properties = (schema as { properties?: Record<string, unknown> } | undefined)?.properties;
-  if (!properties || !("arriveBy" in properties) || isArriveByEnabled()) return schema;
+  if (!properties || !withholdsArriveBy(name)) return schema;
   const { arriveBy: _unserved, ...served } = properties;
   void _unserved;
   return { ...(schema as object), properties: served };
@@ -52,7 +52,7 @@ export function buildManifest(publicBaseUrl?: string) {
   const tools = server.listTools(chatgpt).map((tool) => ({
     name: tool.name,
     description: tool.description,
-    inputSchema: servedInputSchema(tool.inputSchema),
+    inputSchema: servedInputSchema(tool.name, tool.inputSchema),
     outputSchema: tool.outputSchema
   }));
 

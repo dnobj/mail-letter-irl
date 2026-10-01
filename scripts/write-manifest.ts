@@ -10,6 +10,11 @@ const manifestPath = path.resolve(__dirname, "..", "manifest.json");
 // submission endpoint, even when a developer's local .env points at ngrok.
 process.env.LETTER_IRL_PUBLIC_BASE_URL = "https://api.letterirl.com";
 
+// And the tools production lists: arrival dates (#535) stay off there until
+// the owner's word, whatever a developer's .env turns on. Set before the
+// import below, whose dotenv/config leaves a variable already set alone.
+process.env.LETTER_IRL_ARRIVE_BY_ENABLED = "false";
+
 const { stringifyManifest } = await import("../src/mcp/manifest.js");
 
 fs.writeFileSync(manifestPath, stringifyManifest(), "utf-8");

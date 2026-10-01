@@ -88,5 +88,8 @@
  *     link, so they say the call sends nothing and name request_send, where
  *     they said "Send a physical letter" (#516). ChatGPT and Claude keep them
  *     from the model, and their text is unchanged.
+ * r21: arrival dates (#535). While LETTER_IRL_ARRIVE_BY_ENABLED is on, the
+ *     four previews take arriveBy and set_arrival_date is listed, to set,
+ *     move or clear a preview's date without previewing again.
  */
-export const STEERING_COPY_REV = 20;
+export const STEERING_COPY_REV = 21;

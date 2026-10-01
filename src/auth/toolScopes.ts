@@ -50,6 +50,9 @@ export const TOOL_SCOPES: Record<string, ProductScope> = {
   // The preview card asks what became of its draft (#474): a read of the
   // caller's own draft, so it gates on the lightest product scope.
   get_draft_status: "mail:read",
+  // Changes a preview's arrival date (#535): part of drafting, and it sends
+  // nothing, so it sits with the drafting tools.
+  set_arrival_date: "mail:draft",
   // Keeps a photo for the account's next preview (#474, phase 3): the upload
   // card's part of drafting, so it sits with the drafting tools.
   upload_photo_chunk: "mail:draft"

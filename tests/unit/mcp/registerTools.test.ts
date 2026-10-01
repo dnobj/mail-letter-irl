@@ -548,6 +548,30 @@ describe('OpenAI Apps SDK Submission Compliance', () => {
   });
 });
 
+describe('set_arrival_date (#535)', () => {
+  it('is a write that is neither destructive nor open-world, and repeats safely', () => {
+    expect(buildAnnotations({ name: 'set_arrival_date', readOnly: false })).toEqual({
+      readOnlyHint: false,
+      destructiveHint: false,
+      openWorldHint: false,
+      idempotentHint: true
+    });
+  });
+
+  it("narrates the tool's own sentence", () => {
+    const message = 'Arrival date set. Goes to the printer Tue, Oct 6, and aims to arrive by Fri, Oct 16. Nothing has been sent.';
+    expect(summarizeToolResult('set_arrival_date', { draftId: 'd', message, deliveryEstimate: 'x' })).toBe(message);
+    expect(summarizeToolResult('set_arrival_date', { draftId: 'd' })).toBe('The arrival date was updated.');
+  });
+
+  it('has input and output shapes for registration', () => {
+    expect(Object.keys(getZodInputShape('set_arrival_date')!)).toEqual(['draftId', 'arriveBy']);
+    expect(Object.keys(getZodOutputShape('set_arrival_date')!)).toEqual(['draftId', 'schedule', 'deliveryEstimate', 'message']);
+    // Served as declared: it is listed only while the flag is on.
+    expect(getServedInputSchema('set_arrival_date')).toBe(getZodInputShape('set_arrival_date'));
+  });
+});
+
 describe('arrive-by in the served schemas (#535)', () => {
   const PREVIEWS = [
     'quote_and_preview_letter',
@@ -593,6 +617,29 @@ describe('arrive-by in the served schemas (#535)', () => {
       if (PREVIEWS.includes(tool.name)) continue;
       expect(getServedInputSchema(tool.name), tool.name).toBe(getZodInputShape(tool.name));
       expect(getZodInputShape(tool.name), tool.name).not.toHaveProperty('arriveBy');
+    }
+  });
+
+  it("words a held preview's dates with the server's clock when the preview gave no sentence of its own", () => {
+    // A result without the preview's sentence (an older result, or one whose
+    // deliveryEstimate is the ordinary one): the dates are reworded, with the
+    // year only when it is not this year in New York.
+    vi.useFakeTimers({ now: new Date('2026-10-01T14:00:00Z'), toFake: ['Date'] });
+    try {
+      const schedule = { arriveBy: '2026-10-16', mailOn: '2026-10-06' };
+      for (const name of PREVIEWS) {
+        for (const deliveryEstimate of [undefined, 'Mailed in 1-2 business days; usually arrives in 1-2 weeks']) {
+          expect(summarizeToolResult(name, { lettersRequired: 1, schedule, deliveryEstimate }), name).toMatch(
+            / Scheduled: Goes to the printer Tue, Oct 6, and aims to arrive by Fri, Oct 16\. If it is sent, it is held until then; USPS does not guarantee First-Class dates\.$/
+          );
+        }
+      }
+      vi.setSystemTime(new Date('2025-12-01T15:00:00Z'));
+      expect(summarizeToolResult('quote_and_preview_letter', { lettersRequired: 1, schedule })).toContain(
+        'Goes to the printer Tue, Oct 6, 2026, and aims to arrive by Fri, Oct 16, 2026.'
+      );
+    } finally {
+      vi.useRealTimers();
     }
   });
 
