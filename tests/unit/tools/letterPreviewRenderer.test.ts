@@ -713,6 +713,33 @@ describe('Typewriter and Handwritten (#563 PR 8b)', () => {
     expect(drafted()).toMatchObject({ isGiftSend: true, stationery: { theme: 'handwritten' } });
   });
 
+  it("says where a theme the call did not name came from, on both refusals (#575 review round 1)", async () => {
+    vi.mocked(rememberedStationery).mockResolvedValue('handwritten');
+    const greek = await run('text_only', { bodyText: `Dear Sam, ${GREEK}` }).catch(e => e);
+    expect(greek.message.startsWith("The account's remembered stationery is handwritten. Letter IRL can't print some characters")).toBe(true);
+    expect(greek.message).toMatch(/choose another stationery/);
+
+    vi.mocked(rememberedStationery).mockResolvedValue('typewriter');
+    const long = Array.from({ length: 20 }, () => 'All work and no play makes a letter long, and longer still, line after line.').join('\n');
+    await expect(run('text_only', { bodyText: long })).rejects.toThrow(
+      /^The account's remembered stationery is typewriter\. Letter is \d+ lines too long for one page on the typewriter stationery: /
+    );
+    // Asked for, it says nothing of where it came from.
+    await expect(run('text_only', { stationery: 'typewriter', bodyText: long })).rejects.toThrow(/^Letter is \d+ lines too long/);
+    expect(createDraft).not.toHaveBeenCalled();
+  });
+
+  it("suggests another stationery only when Classic would print what the theme's face cannot (#575 review round 1)", async () => {
+    const CAKE = String.fromCodePoint(0x1f382);
+    const error = await run('text_only', { stationery: 'typewriter', bodyText: `Happy birthday ${CAKE}` }).catch(e => e);
+    expect(error.message).toContain('in the text, which the typewriter stationery prints in its own typeface');
+    expect(error.message).not.toContain('choose another stationery');
+    expect(error.message.endsWith('Take those characters out or write them in plain letters, then preview again.')).toBe(true);
+    // Greek and an emoji together: Classic would not print them all either.
+    const mixed = await run('text_only', { stationery: 'handwritten', bodyText: `${GREEK} ${CAKE}` }).catch(e => e);
+    expect(mixed.message).not.toContain('choose another stationery');
+  });
+
   it("keeps the usual closing when only an address, stamped in Open Sans, cannot print", async () => {
     const CAKE = String.fromCodePoint(0x1f382);
     const error = await run('text_only', { stationery: 'handwritten', recipient: address({ name: `Sam ${CAKE}` }) }).catch(e => e);

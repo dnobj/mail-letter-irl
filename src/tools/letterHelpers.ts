@@ -44,7 +44,7 @@ import { callingApp, type ClientProfile } from "../auth/clientProfiles.js";
 import { letterPacksPageUrl } from "../config/sendConfirmation.js";
 import { giftCardSummary, resolveGiftSendChoice, type GiftSendChoice } from "./giftSendChoice.js";
 import { giftLetterPageCopy } from "../services/giftCardRenderer.js";
-import type { PreviewStationery } from "./stationeryInput.js";
+import { rememberedPrefix, type PreviewStationery } from "./stationeryInput.js";
 import { rememberStationery } from "../services/stationeryDefaultService.js";
 import {
   previewArrivalWindow,
@@ -571,7 +571,7 @@ const LAYOUT_LABELS: Record<LetterLayoutType, string> = {
  * ways out.
  */
 export function layoutLetterForPreview(
-  letter: { bodyText: string; signOff: string; layoutType: LetterLayoutType; imageData?: string; stationery?: Stationery },
+  letter: { bodyText: string; signOff: string; layoutType: LetterLayoutType; imageData?: string; stationery?: Stationery | PreviewStationery },
   context: ToolContext,
   renderer: 'html' | 'pdf' = printRenderer()
 ): Layout | undefined {
@@ -616,6 +616,8 @@ export function layoutLetterForPreview(
   const own = ownFaceTheme(stationery);
   throw Object.assign(
     new Error(
+      // A theme the call did not name says where it came from.
+      (own ? rememberedPrefix(stationery) : "") +
       `Letter is ${over} line${over === 1 ? "" : "s"} too long for one page${LAYOUT_LABELS[layoutType]}` +
       `${headline ? " on the celebration stationery with a headline" : own ? ` on the ${own} stationery` : ""}: ` +
       `it takes ${linesUsed} lines and the page holds ${linesAvailable}. ` +
@@ -724,7 +726,7 @@ export function validatePrintableLetter(
   /** A gift send's card: our renderer draws it as the second page, with the sender's name. */
   giftCard?: GiftCardContent,
   /** The page's stationery (#563): its initials and headline print in the letter's font. The date line is ours. */
-  stationery?: Stationery
+  stationery?: Stationery | PreviewStationery
 ): void {
   const prints = renderer === "pdf" ? drawsGrapheme : undefined;
   const card = prints ? giftCard : undefined;
@@ -750,7 +752,9 @@ export function validatePrintableLetter(
     ],
     letter,
     context,
-    own ? { theme: own, fields: ["bodyText", "signOff"] } : undefined
+    own
+      ? { theme: own, fields: ["bodyText", "signOff"], drawnInClassic: drawsGrapheme, remembered: rememberedPrefix(stationery) }
+      : undefined
   );
   if (card) validateGiftPageFits(card, letter.sender.name, context);
 }

@@ -311,12 +311,14 @@ A gift send in a theme prints its themed page, then today's card page.
 - each prints its date line in its face, and neither takes initials or a headline;
 - the text and sign-off are checked against that face, which draws less than Tinos:
   - Caveat has no Greek or Hebrew, almost no precomposed Vietnamese, none of the horn or caron letters
-    (Ơ, Ư, Ǎ…), no historic Cyrillic, and no arrows or mathematical signs;
+    (Ơ, Ư, Ǎ…), few historic Cyrillic letters, no arrows, and few mathematical signs;
   - Cousine lacks the fixed-width spaces, superscript and subscript digits, and a few letterlike
     symbols and ligatures;
-- a refusal names the theme ("…which the handwritten stationery prints in its own typeface") and
-  suggests another stationery; a letter its face pushes past the page is told so: "…too long for one
-  page on the typewriter stationery…", shorten it or choose Classic.
+- a refusal names the theme ("…which the handwritten stationery prints in its own typeface"), and
+  suggests another stationery when Classic would print what it cannot; a letter its face pushes past
+  the page is told so: "…too long for one page on the typewriter stationery…", shorten it or choose
+  Classic. A theme the call did not name, the account's remembered one, says so first ("The account's
+  remembered stationery is handwritten.").
 
 The fonts are Google Fonts' files, each beside its licence in `assets/fonts`.
 

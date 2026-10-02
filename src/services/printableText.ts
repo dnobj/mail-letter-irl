@@ -261,6 +261,14 @@ function listed(characters: string[], prints: PrintsGrapheme = printsInOpenSans)
 export interface ThemedFace {
   theme: string;
   fields: readonly string[];
+  /**
+   * Whether Classic's face draws a character: another stationery is
+   * suggested only when it draws every one refused in `fields` (an emoji
+   * prints in none).
+   */
+  drawnInClassic: (grapheme: string) => boolean;
+  /** Where the theme came from, when the call did not name it (rememberedPrefix); else empty. */
+  remembered?: string;
 }
 
 /**
@@ -269,13 +277,18 @@ export interface ThemedFace {
  */
 export function unprintableRefusal(mail: 'letter' | 'postcard', found: UnprintableField[], themed?: ThemedFace): string {
   const where = found.map(({ where, characters, prints }) => `${listed(characters, prints)} ${where}`).join('; ');
-  const inTheme = themed !== undefined && found.some(({ field }) => themed.fields.includes(field));
+  // The fields the theme's own face refused: the refusal says where the
+  // theme came from, and suggests another only when Classic draws them all.
+  const face = themed && found.some(({ field }) => themed.fields.includes(field)) ? themed : undefined;
+  const elsewhere = face !== undefined &&
+    found.filter(({ field }) => face.fields.includes(field)).every(({ characters }) => characters.every(face.drawnInClassic));
   return (
+    (face?.remembered ?? '') +
     `Letter IRL can't print some characters in this ${mail}: ${where}. ` +
     `Printed mail shows Latin letters with common accents, modern Greek, Cyrillic, Hebrew ` +
     `and common punctuation, and no emoji. ` +
-    (inTheme
-      ? `The ${themed.theme} stationery sets the text in its own typeface, which has fewer: choose another ` +
+    (face && elsewhere
+      ? `The ${face.theme} stationery sets the text in its own typeface, which has fewer: choose another ` +
         `stationery, or take those characters out or write them in plain letters, then preview again.`
       : `Take those characters out or write them in plain letters, then preview again.`)
   );

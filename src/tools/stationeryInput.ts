@@ -45,6 +45,14 @@ const clusters = (text: string): string[] => [...graphemes.segment(text)].map(({
 const LETTER = /^\p{L}\p{M}*$/u;
 const MONOGRAM_MAX_LETTERS = 3;
 
+/**
+ * What a refusal about a theme the call did not name starts with: where the
+ * theme came from, the account's remembered choice. Empty otherwise.
+ */
+export function rememberedPrefix(stationery: { theme: string; source?: StationerySource } | undefined): string {
+  return stationery?.source === 'remembered' ? `The account's remembered stationery is ${stationery.theme}. ` : '';
+}
+
 /** The themes, as a sentence names them: "classic, monogram, ... or handwritten". */
 export const THEME_LIST = `${STATIONERY_THEMES.slice(0, -1).join(', ')} or ${STATIONERY_THEMES[STATIONERY_THEMES.length - 1]}`;
 
@@ -239,7 +247,7 @@ export function previewStationery(
   const source: StationerySource = theme !== undefined ? 'asked' : remembered ? 'remembered' : 'default';
   const chosen = (theme ?? remembered ?? 'classic') as StationeryTheme;
   // A refusal about a theme the call did not name says where it came from.
-  const remembering = source === 'remembered' ? `The account's remembered stationery is ${chosen}. ` : '';
+  const remembering = rememberedPrefix({ theme: chosen, source });
   if (monogram !== undefined && chosen !== 'monogram') {
     throw refusal(
       remembering + 'Initials print only on the monogram stationery. Choose stationery "monogram", or leave monogram out.',
