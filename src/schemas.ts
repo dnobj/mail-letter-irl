@@ -16,7 +16,13 @@ import {
   SET_ARRIVE_BY_DESCRIPTION,
   SET_STATIONERY_DESCRIPTION,
   SET_STATIONERY_OUTPUT_DESCRIPTION,
-  STATIONERY_DESCRIPTION
+  STATIONERY_DESCRIPTION,
+  SET_POSTCARD_SIZE_DESCRIPTION,
+  SET_POSTCARD_LAYOUT_DESCRIPTION,
+  POSTCARD_CAPTION_DESCRIPTION,
+  POSTCARD_PLACE_DESCRIPTION,
+  SET_POSTCARD_STYLE_SIZE_OUTPUT_DESCRIPTION,
+  SET_POSTCARD_STYLE_CAN_SEND_DESCRIPTION
 } from "./zodSchemas.js";
 import { STATIONERY_THEMES } from "./render/stationery.js";
 
@@ -905,7 +911,11 @@ export const getDraftStatusOutputSchema: JsonSchema = {
     },
     cancellable: { type: "boolean", description: "A sent draft's order: whether it can still be cancelled free" },
     pages: { type: "integer", minimum: 2, maximum: MAX_LETTER_PAGES, description: "A ready letter of more than one page: the pages it is laid out on now" },
-    canSendNow: { type: "boolean", description: "A ready letter, while room to write is offered: whether the balance or a gift letter pays for it now" },
+    canSendNow: { type: "boolean", description: "A ready letter while room to write is offered, or a postcard while its sizes or layouts are: whether the balance or a gift letter pays for it now" },
+    size: { type: "string", enum: ["6x9", "6x4", "6x11"], description: "A ready postcard our renderer drew, while its sizes or layouts are offered: its size now. Its page goes to the card" },
+    layout: { type: "string", enum: ["full_bleed", "border", "greetings"], description: "With it, the postcard's front now" },
+    caption: { type: "string", description: "The border's caption, when it has one" },
+    place: { type: "string", description: "The place the greeting names" },
     bodyText: { type: "string", description: "A ready letter, while room to write is offered: its words now, for the card" },
     signOff: { type: "string" },
     wordsVersion: { type: "string", description: WORDS_VERSION_DESCRIPTION },
@@ -1073,6 +1083,35 @@ export const setLetterWordsOutputSchema: JsonSchema = {
     reasonCannotSend: { type: "string" },
     sendEligibility: sendEligibilitySchema,
     wordsVersion: { type: "string", description: "The version of the words now, for the next change of them" },
+    message: { type: "string" }
+  }
+};
+
+export const setPostcardStyleInputSchema: JsonSchema = {
+  type: "object",
+  required: ["draftId"],
+  properties: {
+    draftId: { type: "string", description: "The draftId from a postcard preview" },
+    // Withheld while the sizes are not offered, and the front while the layouts are not (withheldInputKeys).
+    size: { type: "string", enum: ["6x9", "6x4", "6x11"], description: SET_POSTCARD_SIZE_DESCRIPTION },
+    layout: { type: "string", enum: ["full_bleed", "border", "greetings"], description: SET_POSTCARD_LAYOUT_DESCRIPTION },
+    caption: { type: "string", description: POSTCARD_CAPTION_DESCRIPTION },
+    place: { type: "string", description: POSTCARD_PLACE_DESCRIPTION }
+  }
+};
+
+export const setPostcardStyleOutputSchema: JsonSchema = {
+  type: "object",
+  required: ["draftId", "size", "layout", "canSendNow", "sendEligibility", "message"],
+  properties: {
+    draftId: { type: "string" },
+    size: { type: "string", enum: ["6x9", "6x4", "6x11"], description: SET_POSTCARD_STYLE_SIZE_OUTPUT_DESCRIPTION },
+    layout: { type: "string", enum: ["full_bleed", "border", "greetings"], description: "The postcard's front now" },
+    caption: { type: "string", description: "The border's caption, when it has one" },
+    place: { type: "string", description: "The place the greeting names" },
+    canSendNow: { type: "boolean", description: SET_POSTCARD_STYLE_CAN_SEND_DESCRIPTION },
+    reasonCannotSend: { type: "string" },
+    sendEligibility: sendEligibilitySchema,
     message: { type: "string" }
   }
 };

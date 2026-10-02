@@ -5,12 +5,13 @@
  * Prevents duplicate sends and double-charging when AI clients retry requests.
  */
 
+import { createHash } from 'node:crypto';
 import { query, transaction } from '../db/index.js';
 import type pg from 'pg';
 import { writeDiagnostic } from '../utils/diagnosticLog.js';
 import { stationeryOf, type Stationery } from '../render/stationery.js';
 import { postcardFrontOf, type PostcardFront } from '../render/postcard.js';
-import { rendererVersionFor } from '../render/pdf.js';
+import { POSTCARD_FRONT_RENDERER_VERSION, RENDERER_VERSION, rendererVersionFor } from '../render/pdf.js';
 import { MAX_LETTER_PAGES } from '../render/geometry.js';
 import type {
   Letter,
@@ -24,6 +25,7 @@ import type {
   PostcardDraft,
   CreatePostcardDraftParams,
   CreatePostcardDraftResult,
+  PostcardSize,
 } from './types.js';
 
 // Default draft expiration: 24 hours
@@ -354,7 +356,7 @@ export interface DraftState
     LetterDraft,
     | 'draft_id' | 'user_id' | 'status' | 'expires_at' | 'consumed_letter_id' | 'arrive_by' | 'mail_on'
     | 'mail_type' | 'renderer_version' | 'stationery' | 'preview_html' | 'pages' | 'is_gift_send' | 'required_credits'
-    | 'body_text' | 'sign_off'
+    | 'body_text' | 'sign_off' | 'postcard_size' | 'postcard_front'
   > {
   /** The letter the draft became; null for a draft not sent, or a letter that is not the draft owner's. */
   letter_status: LetterStatus | null;
@@ -367,10 +369,10 @@ export async function getDraftState(draftId: string): Promise<DraftState | null>
   const result = await query<DraftState>(
     `SELECT d.draft_id, d.user_id, d.status, d.expires_at, d.consumed_letter_id, d.arrive_by, d.mail_on,
             d.mail_type, d.renderer_version, d.stationery, d.pages, d.is_gift_send, d.required_credits,
-            d.body_text, d.sign_off,
-            -- The page only where get_draft_status can give it: a letter our
-            -- renderer drew, still pending.
-            CASE WHEN d.status = 'pending' AND d.mail_type = 'letter' AND d.renderer_version IS NOT NULL
+            d.body_text, d.sign_off, d.postcard_size, d.postcard_front,
+            -- The page only where get_draft_status can give it: a letter or
+            -- postcard (#594) our renderer drew, still pending.
+            CASE WHEN d.status = 'pending' AND d.renderer_version IS NOT NULL
                  THEN d.preview_html END AS preview_html,
             l.status AS letter_status, l.funding_type AS letter_funding_type,
             l.arrive_by AS letter_arrive_by, l.mail_on AS letter_mail_on
@@ -739,6 +741,97 @@ export async function setDraftWords(
     );
     // Counts only: the words never reach the log.
     writeDiagnostic('info', 'draft.words_set', { pages: change.pages, characters: change.bodyText.length + change.signOff.length });
+    return null;
+  });
+}
+
+/** What set_postcard_style reads of a draft to draw it again (#594). */
+export interface DraftForPostcardStyle {
+  mail_type: string;
+  status: string;
+  expires_at: Date;
+  redacted_at: Date | null;
+  renderer_version: string | null;
+  body_text: string;
+  sender: unknown;
+  recipient: unknown;
+  front_image_data: string | null;
+  front_image_url: string | null;
+  postcard_size: PostcardSize | null;
+  postcard_front: unknown;
+  preview_html: string | null;
+  is_gift_send: boolean;
+  required_credits: number;
+}
+
+/** The caller's draft, as set_postcard_style draws it again, or null when it is not theirs or not there. */
+export async function getDraftForPostcardStyle(draftId: string, userId: string): Promise<DraftForPostcardStyle | null> {
+  const result = await query<DraftForPostcardStyle>(
+    `SELECT mail_type, status, expires_at, redacted_at, renderer_version, body_text, sender, recipient,
+            front_image_data, front_image_url, postcard_size, postcard_front, preview_html, is_gift_send,
+            required_credits
+     FROM letter_drafts
+     WHERE draft_id = $1 AND user_id = $2`,
+    [draftId, userId]
+  );
+  return result.rows[0] ?? null;
+}
+
+/**
+ * Restyles a postcard draft (#594, set_postcard_style): its size, its front,
+ * the renderer version that goes with the front ('pdf-3' with one, 'pdf-1'
+ * without, as migration 048 holds them), its preview drawn again, and, at a
+ * new size, its picture cropped again. Under the same lock as a stationery
+ * change, so a send or a Pay & Send checkout runs before or after it, never
+ * between: one that goes first leaves this refused, and one that goes second
+ * sends and prices the new style.
+ *
+ * `drawnFrom` is the preview the caller read, which it drew from (the back
+ * and the picture it kept): one that changed since, under another restyle,
+ * refuses this as 'changed', to be tried again. A gift postcard is a 6x9
+ * (#579): one asked to leave it is refused as 'changed' too, though the tool
+ * refuses it first.
+ *
+ * Returns the refusal, or null once the draft is restyled.
+ */
+export async function setDraftPostcardStyle(
+  draftId: string,
+  userId: string,
+  change: {
+    size: PostcardSize;
+    front: PostcardFront | null;
+    previewHtml: string;
+    /** The picture cropped again at a new size; absent, the stored one stays. */
+    frontImageData?: string;
+    drawnFrom: { previewHtml: string | null };
+  },
+  now: Date = new Date()
+): Promise<DraftRedrawRefusal | null> {
+  const front = storedPostcardFront(change.front);
+  const rendererVersion = front ? POSTCARD_FRONT_RENDERER_VERSION : RENDERER_VERSION;
+  return transaction(async client => {
+    const refusal = await lockChangeableDraft(client, draftId, userId, now);
+    if (refusal) return refusal;
+    const locked = await client.query<{ preview_md5: string | null; is_gift_send: boolean }>(
+      'SELECT md5(preview_html) AS preview_md5, is_gift_send FROM letter_drafts WHERE draft_id = $1',
+      [draftId]
+    );
+    const row = locked.rows[0];
+    const drawnFrom = change.drawnFrom.previewHtml === null ? null : createHash('md5').update(change.drawnFrom.previewHtml, 'utf8').digest('hex');
+    if (!row || row.preview_md5 !== drawnFrom || (row.is_gift_send && change.size !== '6x9')) return 'changed';
+
+    await client.query(
+      `UPDATE letter_drafts
+       SET postcard_size = $2, postcard_front = $3::jsonb, renderer_version = $4, preview_html = $5,
+           front_image_data = COALESCE($6, front_image_data), updated_at = NOW()
+       WHERE draft_id = $1`,
+      [draftId, change.size, front ? JSON.stringify(front) : null, rendererVersion, change.previewHtml, change.frontImageData ?? null]
+    );
+    writeDiagnostic('info', 'draft.postcard_style_set', {
+      size: change.size,
+      layout: front?.layout ?? 'full_bleed',
+      pictureCroppedAgain: change.frontImageData !== undefined
+    });
     return null;
   });
 }

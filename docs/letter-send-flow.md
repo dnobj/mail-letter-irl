@@ -303,6 +303,12 @@ A `pdf-1` gift send prints its card as the PDF's second page, drawn by the rende
   - The draft records the front in `postcard_front` with `pdf-3`, and full bleed records none with `pdf-1`: migration 048's checks keep the two together. The send copies the front into `letters.content.postcardFront`, and the print draws it (above).
   - A gift postcard keeps its front, with its card on the back as ever. A layout does not change the price.
   - Off, the three are not served, and the postcard is served open to unknown keys. So a front from a schema cached while they were on reaches the preview, which refuses it rather than printing the photo alone.
+- **`set_postcard_style` changes a postcard preview's size and front in place** (#594, `src/tools/setPostcardStyle.ts`). It is listed while the sizes or the layouts are offered, and the postcard maker on the card calls it.
+  - It checks a size and a front as the preview does, at the postcard's size. A kept front is measured again at a new size, and a message a smaller back cannot hold is refused. A gift postcard stays a 6x9.
+  - At the same size it draws the front again and keeps the back as it was, a gift card's strip with it.
+  - At a new size it crops the picture again and lays the back out at that size. The crop comes from the picture's source while that still opens. Otherwise it comes from the stored copy, which was cropped to the old size.
+  - `setDraftPostcardStyle` writes the size, the front, its version (`pdf-3` with a front, `pdf-1` without), the page and any picture cropped again. It does so in one `UPDATE`, under the lock a send and a Pay & Send checkout take. A preview that changed since it was read, under another restyle, refuses the write as `DRAFT_CHANGED`.
+  - It prices the postcard again: a 4x6 or 11x6 is paid with Pay & Send, and a 6x9 by a pack, as a preview prices it.
 
 **How a preview is drawn (#534).** With `LETTER_IRL_PRINT_RENDERER=pdf`, the three letter previews are drawn by `src/render`, from the layout the PDF prints from:
 - the page is laid out with the image that prints, and a letter that runs past it is refused with the count: "Letter is 2 lines too long for one page: it takes 28 lines and the page holds 26." A page holds 26 lines of text only, 16 under a full 2-inch header image, and 13 above a full 3-inch enclosed image;

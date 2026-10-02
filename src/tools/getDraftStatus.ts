@@ -10,7 +10,11 @@ import { heldSendFields, waitsInOutbox } from './heldSend.js';
 import { isDraftIdShape } from './requestSend.js';
 import { letterPayment, wordsVersionOf } from './letterHelpers.js';
 import { letterPageLimit } from '../config/roomToWrite.js';
+import { isPostcardSizesOffered } from '../config/postcardSizes.js';
+import { isPostcardLayoutsOffered } from '../config/postcardLayouts.js';
+import { postcardFrontOf } from '../render/index.js';
 import type { SendEligibility } from '../services/commerceService.js';
+import type { PostcardSize } from '../services/types.js';
 
 /**
  * What became of a preview's draft (#474), for a preview card whose host keeps
@@ -66,6 +70,15 @@ export interface GetDraftStatusOutput {
   canSendNow?: boolean;
   reasonCannotSend?: string;
   sendEligibility?: SendEligibility;
+  /**
+   * A ready postcard our renderer drew, while its sizes or layouts are
+   * offered (#594): its size and front now, which set_postcard_style may have
+   * changed since its preview's first answer; its page goes to the card.
+   */
+  size?: PostcardSize;
+  layout?: 'full_bleed' | 'border' | 'greetings';
+  caption?: string;
+  place?: string;
   /** Ready, while room to write is offered (#586): its words now, and their version, for the card. */
   bodyText?: string;
   signOff?: string;
@@ -128,7 +141,39 @@ async function handler(
   const ready: GetDraftStatusOutput = schedule
     ? { draftId, status: 'ready', schedule, deliveryEstimate: scheduleSentence(schedule, context.now()) }
     : { draftId, status: 'ready', deliveryEstimate: DELIVERY_ESTIMATE };
-  return { ...ready, ...styleNow(draft), ...pagesNow(draft), ...termsNow(draft, draftId, context), ...wordsNow(draft) };
+  return {
+    ...ready,
+    ...styleNow(draft),
+    ...pagesNow(draft),
+    ...termsNow(draft, draftId, context),
+    ...wordsNow(draft),
+    ...postcardStyleNow(draft, draftId, context)
+  };
+}
+
+/**
+ * A ready postcard's size and front now, its page and what it costs (#594),
+ * while its sizes or layouts are offered: set_postcard_style may have changed
+ * them since its preview's first answer, and a new size how it is paid. Only
+ * for a postcard our renderer drew, whose front reads as the print reads it.
+ */
+function postcardStyleNow(
+  draft: DraftState,
+  draftId: string,
+  context: ToolContext
+): Pick<GetDraftStatusOutput, 'size' | 'layout' | 'caption' | 'place' | 'previewHtml' | 'canSendNow' | 'reasonCannotSend' | 'sendEligibility'> {
+  if (draft.mail_type !== 'postcard' || !draft.renderer_version || !(isPostcardSizesOffered() || isPostcardLayoutsOffered())) return {};
+  const front = draft.postcard_front == null ? undefined : postcardFrontOf(draft.postcard_front) ?? undefined;
+  if (draft.postcard_front != null && !front) return {};
+  const size = (draft.postcard_size ?? '6x9') as PostcardSize;
+  return {
+    size,
+    layout: front?.layout ?? 'full_bleed',
+    ...(front?.layout === 'border' && front.caption !== undefined ? { caption: front.caption } : {}),
+    ...(front?.layout === 'greetings' ? { place: front.place } : {}),
+    ...(draft.preview_html ? { previewHtml: draft.preview_html } : {}),
+    ...letterPayment({ mailType: 'postcard', postcardSize: size }, Number(draft.required_credits ?? 2), draft.is_gift_send === true, context, draftId)
+  };
 }
 
 /**

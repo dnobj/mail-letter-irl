@@ -173,6 +173,14 @@ export const toolInputSchemas = {
     signOff: z.string(),
     wordsVersion: z.string().optional()
   }),
+  // A postcard preview's size and front, changed without previewing again (#594)
+  set_postcard_style: z.object({
+    draftId: z.string(),
+    size: z.string().optional(),
+    layout: z.string().optional(),
+    caption: z.string().optional(),
+    place: z.string().optional()
+  }),
   // Held mail cancelled before it goes to the printer (#535)
   cancel_scheduled_mail: z.object({
     orderId: z.string(),

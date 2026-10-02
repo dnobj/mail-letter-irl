@@ -283,6 +283,12 @@ export const postcardSixByNineZ = {
   size: z.enum(["6x9"]).optional()
 };
 
+/** A front's caption and place (#594), as the postcard preview and set_postcard_style take them. */
+export const POSTCARD_CAPTION_DESCRIPTION =
+  "For the border layout only: one handwritten line under the photo, such as \"Cape Cod, August 2026\". Leave it out for none.";
+export const POSTCARD_PLACE_DESCRIPTION =
+  "For the greetings layout only, and needed there: the place it greets from, such as \"Asheville\", printed in capitals.";
+
 export const quoteAndPreviewPostcardInputZ = z.object({
   sender: addressZ.optional(),  // Optional - will use saved return address if not provided
   recipient: addressZ,
@@ -302,12 +308,8 @@ export const quoteAndPreviewPostcardInputZ = z.object({
     "The front's layout: full_bleed (the default), the photo across the whole front; border, the photo in a white border " +
     "with a caption under it; or greetings, \"Greetings from\" a place over the photo."
   ),
-  caption: z.string().optional().describe(
-    "For the border layout only: one handwritten line under the photo, such as \"Cape Cod, August 2026\". Leave it out for none."
-  ),
-  place: z.string().optional().describe(
-    "For the greetings layout only, and needed there: the place it greets from, such as \"Asheville\", printed in capitals."
-  ),
+  caption: z.string().optional().describe(POSTCARD_CAPTION_DESCRIPTION),
+  place: z.string().optional().describe(POSTCARD_PLACE_DESCRIPTION),
   // Image from OpenAI fileParams - permissive to handle mobile edge cases
   // Mobile may send file_id without download_url (sediment:// protocol)
   image: imageFileParamZ.optional(),
@@ -373,6 +375,24 @@ export const setLetterWordsInputZ = z.object({
   bodyText: z.string().describe(SET_LETTER_WORDS_BODY_DESCRIPTION),
   signOff: z.string().describe(SET_LETTER_WORDS_SIGN_OFF_DESCRIPTION),
   wordsVersion: z.string().optional().describe(SET_LETTER_WORDS_VERSION_DESCRIPTION)
+});
+
+// A postcard preview's size and front, changed without previewing again
+// (#594). Listed only while the sizes or the layouts are offered
+// (src/server.ts); `size` is withheld while the sizes are not, and `layout`,
+// `caption` and `place` while the layouts are not (withheldInputKeys).
+export const SET_POSTCARD_SIZE_DESCRIPTION =
+  "The new size: 6x9, 6x4 for a 4 x 6 in postcard, or 6x11 for an 11 x 6 in one. Left out, the size stays. " +
+  "A 4x6 holds 11 lines on its back, a 6x9 or 11x6 16. A 4x6 or 11x6 is paid with Pay & Send, and a gift postcard stays a 6x9.";
+export const SET_POSTCARD_LAYOUT_DESCRIPTION =
+  "The new front: full_bleed, the photo across the whole front; border, the photo in a white border with a caption under it; " +
+  "or greetings, \"Greetings from\" a place over the photo. Left out, the front stays as it is.";
+export const setPostcardStyleInputZ = z.object({
+  draftId: z.string().describe("The draftId from a postcard preview"),
+  size: z.enum(["6x9", "6x4", "6x11"]).optional().describe(SET_POSTCARD_SIZE_DESCRIPTION),
+  layout: z.enum(["full_bleed", "border", "greetings"]).optional().describe(SET_POSTCARD_LAYOUT_DESCRIPTION),
+  caption: z.string().optional().describe(POSTCARD_CAPTION_DESCRIPTION),
+  place: z.string().optional().describe(POSTCARD_PLACE_DESCRIPTION)
 });
 
 // Held mail cancelled before it goes to the printer (#535). Listed only while
@@ -789,9 +809,13 @@ export const getDraftStatusOutputZ = z.object({
     .describe("Where a sent draft's order stands: scheduled while it waits for its mail date"),
   cancellable: z.boolean().optional().describe("A sent draft's order: whether it can still be cancelled free"),
   pages: z.number().int().min(2).max(MAX_LETTER_PAGES).optional().describe("A ready letter of more than one page: the pages it is laid out on now"),
-  canSendNow: z.boolean().optional().describe("A ready letter, while room to write is offered: whether the balance or a gift letter pays for it now"),
+  canSendNow: z.boolean().optional().describe("A ready letter while room to write is offered, or a postcard while its sizes or layouts are: whether the balance or a gift letter pays for it now"),
   reasonCannotSend: z.string().optional(),
   sendEligibility: sendEligibilityZ.optional(),
+  size: z.enum(["6x9", "6x4", "6x11"]).optional().describe("A ready postcard our renderer drew, while its sizes or layouts are offered: its size now. Its page goes to the card"),
+  layout: z.enum(["full_bleed", "border", "greetings"]).optional().describe("With it, the postcard's front now"),
+  caption: z.string().optional().describe("The border's caption, when it has one"),
+  place: z.string().optional().describe("The place the greeting names"),
   bodyText: z.string().optional().describe("A ready letter, while room to write is offered: its words now, for the card"),
   signOff: z.string().optional(),
   wordsVersion: z.string().optional().describe(WORDS_VERSION_DESCRIPTION),
@@ -862,6 +886,22 @@ export const setLetterWordsOutputZ = z.object({
   reasonCannotSend: z.string().optional(),
   sendEligibility: sendEligibilityZ,
   wordsVersion: z.string().describe("The version of the words now, for the next change of them"),
+  message: z.string()
+});
+
+/** set_postcard_style's answer (#594); the postcard drawn again goes to the card in _meta. */
+export const SET_POSTCARD_STYLE_SIZE_OUTPUT_DESCRIPTION = "The postcard's size now: 6x9, 6x4 (a 4x6) or 6x11 (an 11x6)";
+export const SET_POSTCARD_STYLE_CAN_SEND_DESCRIPTION =
+  "Whether the balance or a gift letter pays for the postcard as it is now: a new size can change how it is paid";
+export const setPostcardStyleOutputZ = z.object({
+  draftId: z.string(),
+  size: z.enum(["6x9", "6x4", "6x11"]).describe(SET_POSTCARD_STYLE_SIZE_OUTPUT_DESCRIPTION),
+  layout: z.enum(["full_bleed", "border", "greetings"]).describe("The postcard's front now"),
+  caption: z.string().optional().describe("The border's caption, when it has one"),
+  place: z.string().optional().describe("The place the greeting names"),
+  canSendNow: z.boolean().describe(SET_POSTCARD_STYLE_CAN_SEND_DESCRIPTION),
+  reasonCannotSend: z.string().optional(),
+  sendEligibility: sendEligibilityZ,
   message: z.string()
 });
 

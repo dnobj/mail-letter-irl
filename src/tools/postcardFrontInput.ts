@@ -118,7 +118,7 @@ function fitsLine(front: PostcardFront, size: PostcardSizeName): boolean {
  * cannot draw is left to the printable check, which names it: measured, its
  * boxes would only say "too long".
  */
-function fitted(front: PostcardFront, size: PostcardSizeName, context: ToolContext): PostcardFront {
+function fitted(front: PostcardFront, size: PostcardSizeName, context: ToolContext, kept = false): PostcardFront {
   const line = lineOf(front);
   if (!line || !clusters(line.drawn).every(line.prints) || fitsLine(front, size)) return front;
   const name = front.layout === 'border' ? 'caption' : 'place';
@@ -134,9 +134,13 @@ function fitted(front: PostcardFront, size: PostcardSizeName, context: ToolConte
     if (fitsLine(withText(characters.slice(0, middle).join('')), size)) fits = middle;
     else over = middle;
   }
+  // A line the postcard already has, measured at a new size, names itself as
+  // such, and how to give a shorter one with the size (#601 review round 1).
+  const layout = front.layout === 'border' ? 'border' : 'greetings';
   throw refusal(
-    `The ${name} is too long for its line on the front of ${SIZE_NAMES[size]} postcard: about ${fits} of its ` +
-      `${characters.length} characters fit. Shorten it.`,
+    `The ${kept ? `postcard's ` : ''}${name} is too long for its line on the front of ${SIZE_NAMES[size]} postcard: about ` +
+      `${fits} of its ${characters.length} characters fit. ` +
+      (kept ? `To change the size, give layout ${layout} and a shorter ${name} with it.` : 'Shorten it.'),
     `${name}_too_long`,
     context
   );
@@ -217,4 +221,13 @@ export function frontPrintedText(front: PostcardFront | undefined): Array<{ fiel
   return front.layout === 'border'
     ? [{ field: 'caption', where: 'in the caption, which prints in a handwriting typeface that has fewer characters', text: line.drawn, prints: line.prints }]
     : [{ field: 'place', where: 'in the place, which prints in capitals', text: line.drawn, prints: line.prints }];
+}
+
+/**
+ * A front kept as it was, measured again at another size (set_postcard_style,
+ * #594): itself when its line fits there, and otherwise refused as a preview
+ * refuses one, saying how much of it fits.
+ */
+export function fitPostcardFront(front: PostcardFront, size: PostcardSizeName, context: ToolContext): PostcardFront {
+  return fitted(front, size, context, true);
 }

@@ -560,11 +560,54 @@ export async function downloadAndProcessPostcardImageWithPreview(
   options: ImageProcessingOptions = {}
 ): Promise<ProcessedPostcardImage> {
   const download_url = 'download_url' in input ? input.download_url : input.url;
-  const targetDimensions = CONFIG.sizes[size];
 
   // 1. Download image
   const buffer = await downloadImage(download_url, options);
+  return processPostcardBuffer(buffer, size, options);
+}
 
+/**
+ * A postcard's picture cropped again at another size (#594, set_postcard_style),
+ * by the same steps as a preview's: from its source while that still opens,
+ * which keeps the whole picture to crop from, or else from the copy the draft
+ * prints from, which was cropped to its old size. `from` says which.
+ */
+export async function reprocessPostcardImage(
+  source: { url: string | null; stored: string },
+  size: PostcardSize,
+  options: ImageProcessingOptions = {}
+): Promise<ProcessedPostcardImage & { from: 'source' | 'stored' }> {
+  if (source.url) {
+    try {
+      const downloaded = await downloadImage(source.url, options);
+      return { ...(await processPostcardBuffer(downloaded, size, options)), from: 'source' };
+    } catch (error) {
+      // A link that no longer opens, or bytes that no longer make a picture:
+      // the stored copy, the picture the person approved, stands in. A busy
+      // service is said as such, as a preview says it, rather than cropping
+      // the smaller copy silently (#601 review round 1).
+      if (!(error instanceof ImageProcessingError) || error.code === 'SERVICE_BUSY') throw error;
+    }
+  }
+  return { ...(await processPostcardBuffer(storedImageBuffer(source.stored), size, options)), from: 'stored' };
+}
+
+/** The bytes of a stored `data:image/...;base64,` image. */
+function storedImageBuffer(dataUri: string): Buffer {
+  const comma = dataUri.indexOf(',');
+  if (!dataUri.startsWith('data:image/') || comma < 0 || !dataUri.slice(0, comma).endsWith(';base64')) {
+    throw new ImageProcessingError('PROCESSING_FAILED', "The postcard's stored picture cannot be read.");
+  }
+  return Buffer.from(dataUri.slice(comma + 1), 'base64');
+}
+
+/** A postcard's picture made from its bytes: the print's copy at the size, and the small copy shown. */
+async function processPostcardBuffer(
+  buffer: Buffer,
+  size: PostcardSize,
+  options: ImageProcessingOptions
+): Promise<ProcessedPostcardImage> {
+  const targetDimensions = CONFIG.sizes[size];
   return runGated(decodeGate, async () => {
     // 2. Get metadata and validate dimensions
     const metadata = await getImageMetadata(buffer);

@@ -346,3 +346,75 @@ describe("get_draft_status names a ready letter's style now (#563, #572)", () =>
     await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual({ draftId: DRAFT_ID, status: "expired" });
   });
 });
+
+describe("a ready postcard's size and front (#594)", () => {
+  const PAGE = '<!DOCTYPE html><html><body data-renderer="pdf-1"><svg></svg><svg></svg></body></html>';
+  const postcard = (overrides: Record<string, unknown> = {}) =>
+    state({
+      mail_type: "postcard",
+      renderer_version: "pdf-3",
+      postcard_size: "6x11",
+      postcard_front: { layout: "border", caption: "Cape Cod" },
+      preview_html: PAGE,
+      required_credits: 2,
+      is_gift_send: false,
+      ...overrides
+    });
+  const withBalance = () => ({ ...context(), user: { userId: "auth0|owner", creditsRemaining: 10, orders: [] } as any });
+  const offer = (flag: string) => {
+    vi.stubEnv("LETTER_IRL_PRINT_RENDERER", "pdf");
+    vi.stubEnv("JIT_PURCHASE_ENABLED", "true");
+    vi.stubEnv("LETTER_IRL_POSTCARD_SIZES_ENABLED", "");
+    vi.stubEnv("LETTER_IRL_POSTCARD_LAYOUTS_ENABLED", "");
+    vi.stubEnv(flag, "true");
+  };
+
+  beforeEach(() => vi.mocked(getDraftState).mockReset());
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("says them, with its page and what it costs now, while the sizes or the layouts are offered", async () => {
+    vi.mocked(getDraftState).mockResolvedValue(postcard() as any);
+    // Not offered: nothing of it, as before.
+    await expect(ask({ draftId: DRAFT_ID }, withBalance())).resolves.toEqual(READY);
+
+    for (const flag of ["LETTER_IRL_POSTCARD_SIZES_ENABLED", "LETTER_IRL_POSTCARD_LAYOUTS_ENABLED"]) {
+      offer(flag);
+      const answer = await ask({ draftId: DRAFT_ID }, withBalance());
+      expect(answer, flag).toMatchObject({ ...READY, size: "6x11", layout: "border", caption: "Cape Cod", previewHtml: PAGE, canSendNow: false });
+      expect(answer.reasonCannotSend).toMatch(/paid with Pay & Send/);
+      expect(answer).not.toHaveProperty("place");
+    }
+  });
+
+  it("says a greeting's place, full bleed as full bleed, and who pays a 6x9", async () => {
+    offer("LETTER_IRL_POSTCARD_LAYOUTS_ENABLED");
+    vi.mocked(getDraftState).mockResolvedValue(postcard({ postcard_size: "6x9", postcard_front: { layout: "greetings", place: "Rye" } }) as any);
+    const greeted = await ask({ draftId: DRAFT_ID }, withBalance());
+    expect(greeted).toMatchObject({ size: "6x9", layout: "greetings", place: "Rye", canSendNow: true });
+    expect(greeted).not.toHaveProperty("caption");
+    expect(greeted).not.toHaveProperty("reasonCannotSend");
+
+    vi.mocked(getDraftState).mockResolvedValue(postcard({ renderer_version: "pdf-1", postcard_size: "6x9", postcard_front: null }) as any);
+    const plain = await ask({ draftId: DRAFT_ID }, withBalance());
+    expect(plain).toMatchObject({ size: "6x9", layout: "full_bleed", canSendNow: true });
+
+    // A gift postcard is paid by its gift, whatever the balance.
+    vi.mocked(getDraftState).mockResolvedValue(postcard({ postcard_size: "6x9", is_gift_send: true }) as any);
+    await expect(ask({ draftId: DRAFT_ID })).resolves.toMatchObject({ canSendNow: true });
+  });
+
+  it("says nothing of a postcard the legacy HTML drew, of a front the print cannot read, or of a letter", async () => {
+    offer("LETTER_IRL_POSTCARD_SIZES_ENABLED");
+    for (const overrides of [
+      { renderer_version: null, preview_html: null },
+      { postcard_front: { layout: "collage" } },
+      { mail_type: "letter", renderer_version: "pdf-1", postcard_size: null, postcard_front: null }
+    ]) {
+      vi.mocked(getDraftState).mockResolvedValue(postcard(overrides) as any);
+      const answer = await ask({ draftId: DRAFT_ID }, withBalance());
+      for (const key of ["size", "layout", "previewHtml", "canSendNow"]) {
+        expect(answer, `${JSON.stringify(overrides)} ${key}`).not.toHaveProperty(key);
+      }
+    }
+  });
+});

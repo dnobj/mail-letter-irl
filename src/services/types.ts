@@ -545,6 +545,15 @@ export interface LetterDraft {
    * gift send, runs past one page; it is paid per send (#579).
    */
   pages?: number;
+  /** A postcard's size (migration 012): '6x9', or '6x4' or '6x11' (#594); null for a letter. */
+  postcard_size?: string | null;
+  /**
+   * A postcard's front when not full bleed (migration 048, #594): a border
+   * with its caption, or a greeting with its place, as postcardFrontOf reads
+   * it. Recorded with renderer version 'pdf-3'; the send copies it into
+   * letters.content.
+   */
+  postcard_front?: unknown;
   created_at: Date;
   updated_at: Date;
 }
@@ -797,6 +806,13 @@ export interface PostcardDraft {
   front_image_data: string;       // Base64 data URI
   front_image_url: string;        // Original URL for debugging
   postcard_size: PostcardSize;
+  /**
+   * The front when not full bleed (migration 048, #594): read with
+   * postcardFrontOf, and recorded with renderer version 'pdf-3'.
+   */
+  postcard_front?: unknown;
+  renderer_version?: string | null;
+  is_gift_send?: boolean;
   required_credits: number;
   preview_html?: string;
   sender_validation?: Record<string, unknown>;
