@@ -43,6 +43,8 @@ import {
   setStationeryTool,
   // A letter preview's words, changed without previewing again (#586)
   setLetterWordsTool,
+  // A postcard preview's size and front, changed without previewing again (#594)
+  setPostcardStyleTool,
   // Held mail cancelled before it goes to the printer (#535)
   cancelScheduledMailTool
 } from "./tools/index.js";
@@ -51,11 +53,14 @@ import { UPLOAD_PHOTO_CHUNK_TOOL } from "./tools/uploadPhotoChunk.js";
 import { SET_ARRIVAL_DATE_TOOL } from "./tools/setArrivalDate.js";
 import { SET_STATIONERY_TOOL } from "./tools/setStationery.js";
 import { SET_LETTER_WORDS_TOOL } from "./tools/setLetterWords.js";
+import { SET_POSTCARD_STYLE_TOOL } from "./tools/setPostcardStyle.js";
 import { CANCEL_SCHEDULED_MAIL_TOOL } from "./tools/cancelScheduledMail.js";
 import { isCardUploadEnabled } from "./config/cardUpload.js";
 import { isArriveByEnabled } from "./config/arriveBy.js";
 import { isStationeryOffered } from "./config/stationery.js";
 import { letterPageLimit } from "./config/roomToWrite.js";
+import { isPostcardSizesOffered } from "./config/postcardSizes.js";
+import { isPostcardLayoutsOffered } from "./config/postcardLayouts.js";
 import { isSendConfirmationEnabled } from "./config/sendConfirmation.js";
 import {
   McpToolDefinition,
@@ -106,6 +111,9 @@ const tools: McpToolDefinition<any, any>[] = [
   // A letter preview's words, changed without previewing again, on up to the
   // pages a preview may take (#586). Listed only while room to write is offered.
   setLetterWordsTool,
+  // A postcard preview's size and front, changed without previewing again, and
+  // priced again (#594). Listed only while the sizes or the layouts are offered.
+  setPostcardStyleTool,
   // The model's way to send, once the send rule is on (#470): a link where
   // the person sends the preview themselves. Listed only while the rule is on.
   requestSendTool,
@@ -312,8 +320,10 @@ export class LetterIrlServer {
    * (#484), the checkouts only where it takes purchases (#475), image
    * generation only where it is allowed (#467), set_arrival_date and
    * cancel_scheduled_mail only while arrival dates are on (#535), and
-   * set_stationery only while stationery is offered (#563), and
-   * set_letter_words only while room to write is (#586). Without an app,
+   * set_stationery only while stationery is offered (#563),
+   * set_letter_words only while room to write is (#586), and
+   * set_postcard_style only while the postcard sizes or layouts are (#594).
+   * Without an app,
    * the list for an app that trusts nothing.
    */
   listTools(client: ClientProfile = callingApp(undefined)) {
@@ -326,12 +336,14 @@ export class LetterIrlServer {
     const arriveBy = isArriveByEnabled();
     const stationery = isStationeryOffered();
     const roomToWrite = letterPageLimit() > 1;
+    const postcardStyles = isPostcardSizesOffered() || isPostcardLayoutsOffered();
     return tools
       .filter((tool) => sendRule || tool.name !== REQUEST_SEND_TOOL)
       .filter((tool) => cardUpload || tool.name !== UPLOAD_PHOTO_CHUNK_TOOL)
       .filter((tool) => arriveBy || (tool.name !== SET_ARRIVAL_DATE_TOOL && tool.name !== CANCEL_SCHEDULED_MAIL_TOOL))
       .filter((tool) => stationery || tool.name !== SET_STATIONERY_TOOL)
       .filter((tool) => roomToWrite || tool.name !== SET_LETTER_WORDS_TOOL)
+      .filter((tool) => postcardStyles || tool.name !== SET_POSTCARD_STYLE_TOOL)
       .filter((tool) => client.inAppPurchases || !IN_APP_PURCHASE_TOOLS.has(tool.name))
       .filter((tool) => offersImageGeneration(client) || !IMAGE_GENERATION_TOOLS.has(tool.name))
       .map((tool) => ({

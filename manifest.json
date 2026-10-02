@@ -2554,7 +2554,33 @@
           },
           "canSendNow": {
             "type": "boolean",
-            "description": "A ready letter, while room to write is offered: whether the balance or a gift letter pays for it now"
+            "description": "A ready letter while room to write is offered, or a postcard while its sizes or layouts are: whether the balance or a gift letter pays for it now"
+          },
+          "size": {
+            "type": "string",
+            "enum": [
+              "6x9",
+              "6x4",
+              "6x11"
+            ],
+            "description": "A ready postcard our renderer drew, while its sizes or layouts are offered: its size now. Its page goes to the card"
+          },
+          "layout": {
+            "type": "string",
+            "enum": [
+              "full_bleed",
+              "border",
+              "greetings"
+            ],
+            "description": "With it, the postcard's front now"
+          },
+          "caption": {
+            "type": "string",
+            "description": "The border's caption, when it has one"
+          },
+          "place": {
+            "type": "string",
+            "description": "The place the greeting names"
           },
           "bodyText": {
             "type": "string",

@@ -26,6 +26,7 @@ export { getDraftStatusTool } from "./getDraftStatus.js";
 export { setArrivalDateTool } from "./setArrivalDate.js";
 export { setStationeryTool } from "./setStationery.js";
 export { setLetterWordsTool } from "./setLetterWords.js";
+export { setPostcardStyleTool } from "./setPostcardStyle.js";
 export { cancelScheduledMailTool } from "./cancelScheduledMail.js";
 export { uploadPhotoChunkTool } from "./uploadPhotoChunk.js";
 

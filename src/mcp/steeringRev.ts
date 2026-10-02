@@ -130,5 +130,9 @@
  *     names the version of the words it replaces (wordsVersion), which the
  *     letter previews return, and a change of words its caller has not seen is
  *     refused with the words as they are now (#593 review round 1).
+ * r34: postcard sizes and layouts (#594). While each is offered, the
+ *     postcard preview takes size, or layout with its caption or place, and
+ *     set_postcard_style, listed while either is, changes them without
+ *     previewing again and says how a new size is paid.
  */
-export const STEERING_COPY_REV = 33;
+export const STEERING_COPY_REV = 34;

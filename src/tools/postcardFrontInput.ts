@@ -202,3 +202,12 @@ export function frontPrintedText(front: PostcardFront | undefined): Array<{ fiel
     ? [{ field: 'caption', where: 'in the caption', text: line.drawn, prints: line.prints }]
     : [{ field: 'place', where: 'in the place, which prints in capitals', text: line.drawn, prints: line.prints }];
 }
+
+/**
+ * A front kept as it was, measured again at another size (set_postcard_style,
+ * #594): itself when its line fits there, and otherwise refused as a preview
+ * refuses one, saying how much of it fits.
+ */
+export function fitPostcardFront(front: PostcardFront, size: PostcardSizeName, context: ToolContext): PostcardFront {
+  return fitted(front, size, context);
+}

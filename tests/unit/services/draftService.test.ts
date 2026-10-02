@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 /**
  * Unit tests for draftService
  *
@@ -46,6 +47,8 @@ import {
   setDraftStationery,
   setDraftWords,
   getDraftForStationery,
+  getDraftForPostcardStyle,
+  setDraftPostcardStyle,
   getDraftState,
   LIVE_PAY_AND_SEND_STATUSES,
 } from '../../../src/services/draftService.js';
@@ -1069,6 +1072,141 @@ describe('draftService stationery (#563)', () => {
       const client = inTransaction(...(answers as Array<{ rows: unknown[] }>));
       await expect(setDraftWords('draft-1', 'auth0|owner', { ...NEW, drawnIn: null }, NOW)).resolves.toBe(refusal);
       expect(client.query).toHaveBeenCalledTimes(statements);
+    });
+  });
+});
+
+describe('draftService postcard style (#594)', () => {
+  const NOW = new Date('2026-10-02T14:00:00Z');
+  const pending = { status: 'pending', expires_at: new Date('2026-10-03T09:00:00Z') };
+  const PAGE = '<!DOCTYPE html><html><body data-renderer="pdf-1"><svg></svg><svg></svg></body></html>';
+  const BEFORE = '<!DOCTYPE html><html><body data-renderer="pdf-1"><svg>before</svg><svg></svg></body></html>';
+  const md5 = (text: string) => createHash('md5').update(text, 'utf8').digest('hex');
+  // The preview the restyle drew from, as the lock reads it again.
+  const DRAWN = { preview_md5: md5(BEFORE), is_gift_send: false };
+  const BORDER = { layout: 'border' as const, caption: 'Cape Cod' };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  /** A transaction whose statements answer in turn; the client is returned to read its calls. */
+  function inTransaction(...answers: Array<{ rows: unknown[] }>) {
+    const client = { query: vi.fn() };
+    for (const answer of answers) client.query.mockResolvedValueOnce(answer);
+    client.query.mockResolvedValue({ rows: [], rowCount: 1 });
+    vi.mocked(db.transaction).mockImplementation(async callback => callback(client as any));
+    return client;
+  }
+
+  describe('getDraftForPostcardStyle', () => {
+    it("reads the caller's draft with what it is drawn again from", async () => {
+      vi.mocked(db.query).mockResolvedValueOnce({ rows: [{ mail_type: 'postcard' }] } as any);
+      await expect(getDraftForPostcardStyle('draft-1', 'auth0|owner')).resolves.toEqual({ mail_type: 'postcard' });
+      const [sql, params] = vi.mocked(db.query).mock.calls[0] as [string, unknown[]];
+      for (const column of ['mail_type', 'status', 'expires_at', 'redacted_at', 'renderer_version', 'body_text', 'sender', 'recipient',
+        'front_image_data', 'front_image_url', 'postcard_size', 'postcard_front', 'preview_html', 'is_gift_send', 'required_credits']) {
+        expect(sql, column).toContain(column);
+      }
+      expect(sql).toMatch(/WHERE draft_id = \$1 AND user_id = \$2/);
+      expect(params).toEqual(['draft-1', 'auth0|owner']);
+    });
+
+    it("is null for a draft that is not the caller's, or not there", async () => {
+      vi.mocked(db.query).mockResolvedValueOnce({ rows: [] } as any);
+      await expect(getDraftForPostcardStyle('draft-1', 'auth0|owner')).resolves.toBeNull();
+    });
+  });
+
+  describe('getDraftState', () => {
+    it("reads a postcard's size and front, and the page of any draft our renderer drew", async () => {
+      vi.mocked(db.query).mockResolvedValueOnce({ rows: [{ draft_id: 'draft-1' }] } as any);
+      await getDraftState('draft-1');
+      const [sql] = vi.mocked(db.query).mock.calls[0] as [string, unknown[]];
+      expect(sql).toContain('d.postcard_size, d.postcard_front');
+      expect(sql).toMatch(/CASE WHEN d\.status = 'pending' AND d\.renderer_version IS NOT NULL\s+THEN d\.preview_html END AS preview_html/);
+    });
+  });
+
+  describe('setDraftPostcardStyle', () => {
+    it('locks the draft as setDraftSchedule does, checks what it was drawn from, and restyles it', async () => {
+      const client = inTransaction({ rows: [pending] }, { rows: [] }, { rows: [DRAWN] });
+      await expect(
+        setDraftPostcardStyle(
+          'draft-1',
+          'auth0|owner',
+          { size: '6x11', front: BORDER, previewHtml: PAGE, frontImageData: 'data:image/jpeg;base64,AAAA', drawnFrom: { previewHtml: BEFORE } },
+          NOW
+        )
+      ).resolves.toBeNull();
+
+      const [lock, live, read, update] = client.query.mock.calls as Array<[string, unknown[]]>;
+      expect(lock[0]).toMatch(/FROM letter_drafts WHERE draft_id = \$1 AND user_id = \$2 FOR UPDATE/);
+      expect(live[0]).toMatch(/FROM orders/);
+      expect(live[1]).toEqual(['draft-1', [...LIVE_PAY_AND_SEND_STATUSES]]);
+      expect(read).toEqual(['SELECT md5(preview_html) AS preview_md5, is_gift_send FROM letter_drafts WHERE draft_id = $1', ['draft-1']]);
+      expect(update[0]).toMatch(
+        /UPDATE letter_drafts\s+SET postcard_size = \$2, postcard_front = \$3::jsonb, renderer_version = \$4, preview_html = \$5,\s+front_image_data = COALESCE\(\$6, front_image_data\), updated_at = NOW\(\)\s+WHERE draft_id = \$1/
+      );
+      // The front as the print reads it back, with the version 048 pairs it with.
+      expect(update[1]).toEqual(['draft-1', '6x11', JSON.stringify(BORDER), 'pdf-3', PAGE, 'data:image/jpeg;base64,AAAA']);
+      expect(client.query).toHaveBeenCalledTimes(4);
+    });
+
+    it('stores full bleed as no front, with pdf-1, and keeps the picture when none is given', async () => {
+      const client = inTransaction({ rows: [pending] }, { rows: [] }, { rows: [DRAWN] });
+      await expect(
+        setDraftPostcardStyle('draft-1', 'auth0|owner', { size: '6x9', front: null, previewHtml: PAGE, drawnFrom: { previewHtml: BEFORE } }, NOW)
+      ).resolves.toBeNull();
+      expect(client.query.mock.calls[3][1]).toEqual(['draft-1', '6x9', null, 'pdf-1', PAGE, null]);
+    });
+
+    it.each([
+      ['its preview changed under it', { ...DRAWN, preview_md5: md5(PAGE) }, '6x9'],
+      ['its preview is gone', { ...DRAWN, preview_md5: null }, '6x9'],
+      ['a gift postcard asked off 6x9', { ...DRAWN, is_gift_send: true }, '6x4']
+    ] as const)('refuses a restyle when %s, writing nothing', async (_label, row, size) => {
+      const client = inTransaction({ rows: [pending] }, { rows: [] }, { rows: [row] });
+      await expect(
+        setDraftPostcardStyle('draft-1', 'auth0|owner', { size, front: null, previewHtml: PAGE, drawnFrom: { previewHtml: BEFORE } }, NOW)
+      ).resolves.toBe('changed');
+      expect(client.query).toHaveBeenCalledTimes(3);
+    });
+
+    it('restyles a gift postcard that stays a 6x9', async () => {
+      const client = inTransaction({ rows: [pending] }, { rows: [] }, { rows: [{ ...DRAWN, is_gift_send: true }] });
+      await expect(
+        setDraftPostcardStyle('draft-1', 'auth0|owner', { size: '6x9', front: BORDER, previewHtml: PAGE, drawnFrom: { previewHtml: BEFORE } }, NOW)
+      ).resolves.toBeNull();
+      expect(client.query).toHaveBeenCalledTimes(4);
+    });
+
+    it.each([
+      ["a missing draft, or one that is not the caller's", [{ rows: [] }], 'not_found', 1],
+      ['a sent draft', [{ rows: [{ ...pending, status: 'consumed' }] }], 'sent', 1],
+      ['a pending draft past its expiry', [{ rows: [{ ...pending, expires_at: NOW }] }], 'expired', 1],
+      ['a draft an erasure emptied', [{ rows: [{ ...pending, redacted_at: NOW }] }], 'expired', 1],
+      ['a draft with a live Pay & Send order', [{ rows: [pending] }, { rows: [{ '?column?': 1 }] }], 'checkout_pending', 2]
+    ])('leaves %s alone', async (_label, answers, refusal, statements) => {
+      const client = inTransaction(...(answers as Array<{ rows: unknown[] }>));
+      await expect(
+        setDraftPostcardStyle('draft-1', 'auth0|owner', { size: '6x9', front: BORDER, previewHtml: PAGE, drawnFrom: { previewHtml: BEFORE } }, NOW)
+      ).resolves.toBe(refusal);
+      expect(client.query).toHaveBeenCalledTimes(statements);
+    });
+
+    it('refuses a front the print would not read back before any statement', async () => {
+      const client = inTransaction();
+      await expect(
+        setDraftPostcardStyle(
+          'draft-1',
+          'auth0|owner',
+          { size: '6x9', front: { layout: 'greetings' } as any, previewHtml: PAGE, drawnFrom: { previewHtml: BEFORE } },
+          NOW
+        )
+      ).rejects.toMatchObject({ code: 'POSTCARD_FRONT_UNREADABLE', diagnosticClass: 'validation_error' });
+      expect(db.transaction).not.toHaveBeenCalled();
+      expect(client.query).not.toHaveBeenCalled();
     });
   });
 });

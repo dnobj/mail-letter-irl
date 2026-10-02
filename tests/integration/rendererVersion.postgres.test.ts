@@ -710,5 +710,70 @@ describePostgres('renderer version, stationery and pages (migrations 039 and 044
       const content = await pool.query('SELECT content FROM letters WHERE letter_id = $1', [sent.letter.letter_id]);
       expect(content.rows[0].content).toMatchObject({ rendererVersion: 'pdf-3', postcardFront: GREETINGS });
     }, 60_000);
+    it('restyles a pending postcard in place: its size, front, version and picture together (#594 PR 5a)', async () => {
+      const userId = await seedUser();
+      const draftId = await seedPostcard(userId, 'pdf-1');
+      const BEFORE = '<!DOCTYPE html><html><body data-renderer="pdf-1"><svg>before</svg><svg></svg></body></html>';
+      const PAGE = '<!DOCTYPE html><html><body data-renderer="pdf-1"><svg>after</svg><svg></svg></body></html>';
+      const WIDER = 'data:image/jpeg;base64,BBBB';
+      await pool.query('UPDATE letter_drafts SET preview_html = $2 WHERE draft_id = $1', [draftId, BEFORE]);
+      const row = async () =>
+        (await pool.query(
+          'SELECT postcard_size, postcard_front, renderer_version, preview_html, front_image_data FROM letter_drafts WHERE draft_id = $1',
+          [draftId]
+        )).rows[0];
+
+      // A new size and a border: the picture cropped again with them, and pdf-3, which 048 pairs with a front.
+      await expect(drafts.setDraftPostcardStyle(draftId, userId, {
+        size: '6x11', front: BORDER, previewHtml: PAGE, frontImageData: WIDER, drawnFrom: { previewHtml: BEFORE }
+      })).resolves.toBeNull();
+      expect(await row()).toEqual({ postcard_size: '6x11', postcard_front: BORDER, renderer_version: 'pdf-3', preview_html: PAGE, front_image_data: WIDER });
+
+      // Drawn from a preview it no longer has: refused, nothing written.
+      await expect(drafts.setDraftPostcardStyle(draftId, userId, {
+        size: '6x9', front: null, previewHtml: BEFORE, drawnFrom: { previewHtml: BEFORE }
+      })).resolves.toBe('changed');
+      expect((await row()).postcard_size).toBe('6x11');
+
+      // Back to full bleed at its size: no front, pdf-1, and the picture kept.
+      await expect(drafts.setDraftPostcardStyle(draftId, userId, {
+        size: '6x11', front: null, previewHtml: BEFORE, drawnFrom: { previewHtml: PAGE }
+      })).resolves.toBeNull();
+      expect(await row()).toEqual({ postcard_size: '6x11', postcard_front: null, renderer_version: 'pdf-1', preview_html: BEFORE, front_image_data: WIDER });
+    }, 60_000);
+
+    it('keeps a gift postcard a 6x9, and leaves a sent, Pay & Send or someone else\'s postcard as it was (#594 PR 5a)', async () => {
+      const userId = await seedUser();
+      const other = await seedUser();
+      const change = { size: '6x4' as const, front: GREETINGS, previewHtml: 'after', drawnFrom: { previewHtml: null } };
+
+      const gift = await seedPostcard(userId, 'pdf-1');
+      await pool.query('UPDATE letter_drafts SET is_gift_send = true WHERE draft_id = $1', [gift]);
+      await expect(drafts.setDraftPostcardStyle(gift, userId, change)).resolves.toBe('changed');
+      // At its own size it takes a front.
+      await expect(drafts.setDraftPostcardStyle(gift, userId, { ...change, size: '6x9' })).resolves.toBeNull();
+
+      const sent = await seedPostcard(userId, 'pdf-1');
+      await mailSend.createMailOrderFromDraft({ draftId: sent, userId, mailType: 'postcard' });
+      await expect(drafts.setDraftPostcardStyle(sent, userId, change)).resolves.toBe('sent');
+
+      const paying = await seedPostcard(userId, 'pdf-1');
+      const orderId = `order-${randomUUID()}`;
+      await pool.query(
+        `INSERT INTO orders (order_id, user_id, credits, amount_cents, currency, status, order_type, product_code,
+           idempotency_key, draft_id, checkout_expires_at)
+         VALUES ($1, $2, NULL, 399, 'USD', 'checkout_pending', 'jit_mail', 'jit-postcard', $3, $4, NOW() + INTERVAL '20 minutes')`,
+        [orderId, userId, `idem_${orderId}`, paying]
+      );
+      await expect(drafts.setDraftPostcardStyle(paying, userId, change)).resolves.toBe('checkout_pending');
+
+      const theirs = await seedPostcard(other, 'pdf-1');
+      await expect(drafts.setDraftPostcardStyle(theirs, userId, change)).resolves.toBe('not_found');
+
+      for (const draftId of [gift, sent, paying, theirs]) {
+        const kept = (await pool.query('SELECT postcard_size FROM letter_drafts WHERE draft_id = $1', [draftId])).rows[0];
+        expect(kept.postcard_size, draftId).toBe('6x9');
+      }
+    }, 60_000);
   });
 });

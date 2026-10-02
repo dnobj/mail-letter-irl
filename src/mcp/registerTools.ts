@@ -37,6 +37,7 @@ import {
   setArrivalDateInputZ,
   setStationeryInputZ,
   setLetterWordsInputZ,
+  setPostcardStyleInputZ,
   cancelScheduledMailInputZ,
   uploadPhotoChunkInputZ,
   submitFeatureRequestInputZ,
@@ -65,6 +66,7 @@ import {
   setArrivalDateOutputZ,
   setStationeryOutputZ,
   setLetterWordsOutputZ,
+  setPostcardStyleOutputZ,
   cancelScheduledMailOutputZ,
   uploadPhotoChunkOutputZ,
   submitFeatureRequestOutputZ,
@@ -186,6 +188,7 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     'set_arrival_date',       // The same date twice changes nothing more (#535)
     'set_stationery',         // The same style twice changes nothing more (#563)
     'set_letter_words',       // The same words twice change nothing more (#586)
+    'set_postcard_style',     // The same size and front twice change nothing more (#594)
     'cancel_scheduled_mail'   // A repeat answers as already cancelled (#535)
   ];
 
@@ -820,6 +823,7 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   set_arrival_date: setArrivalDateInputZ,
   set_stationery: setStationeryInputZ,
   set_letter_words: setLetterWordsInputZ,
+  set_postcard_style: setPostcardStyleInputZ,
   cancel_scheduled_mail: cancelScheduledMailInputZ,
   upload_photo_chunk: uploadPhotoChunkInputZ,
   // Feedback tools
@@ -859,6 +863,7 @@ const zodOutputSchemas: Record<ToolName, z.ZodObject<any>> = {
   set_arrival_date: setArrivalDateOutputZ,
   set_stationery: setStationeryOutputZ,
   set_letter_words: setLetterWordsOutputZ,
+  set_postcard_style: setPostcardStyleOutputZ,
   cancel_scheduled_mail: cancelScheduledMailOutputZ,
   upload_photo_chunk: uploadPhotoChunkOutputZ,
   // Feedback tools
@@ -929,7 +934,8 @@ export const POSTCARD_FRONT_INPUT_KEYS: readonly string[] = ["layout", "caption"
  * The input fields a tool is served without, as this deployment stands: the
  * four previews' `arriveBy` while LETTER_IRL_ARRIVE_BY_ENABLED is off (#535),
  * the three letter previews' stationery while it is not offered (#563), and
- * the postcard preview's front while its layouts are not (#594).
+ * the postcard preview's and set_postcard_style's front while the layouts
+ * are not, and set_postcard_style's size while the sizes are not (#594).
  * tools/list (getServedInputSchema) and /manifest.json both ask this, so
  * they agree.
  */
@@ -938,6 +944,9 @@ export function withheldInputKeys(name: string): string[] {
   if (PREVIEW_TOOLS.has(name) && !isArriveByEnabled()) withheld.push("arriveBy");
   if (LETTER_PREVIEW_TOOLS.has(name) && !isStationeryOffered()) withheld.push(...STATIONERY_INPUT_KEYS);
   if (name === "quote_and_preview_postcard" && !isPostcardLayoutsOffered()) withheld.push(...POSTCARD_FRONT_INPUT_KEYS);
+  // set_postcard_style takes each only while it is offered (#594).
+  if (name === "set_postcard_style" && !isPostcardSizesOffered()) withheld.push("size");
+  if (name === "set_postcard_style" && !isPostcardLayoutsOffered()) withheld.push(...POSTCARD_FRONT_INPUT_KEYS);
   return withheld;
 }
 
@@ -1626,6 +1635,9 @@ export function summarizeToolResult(
     case "set_letter_words":
       // As for set_stationery: the tool's own sentence, with any change in pages (#586).
       return typeof result.message === "string" ? result.message : "The letter's words were changed.";
+    case "set_postcard_style":
+      // As for set_stationery: the tool's own sentence, with how a new size is paid (#594).
+      return typeof result.message === "string" ? result.message : "The postcard's size or layout was changed.";
     case "cancel_scheduled_mail":
       // As for set_arrival_date: the sentence saying what went back.
       return typeof result.message === "string" ? result.message : "The scheduled mail was cancelled.";
