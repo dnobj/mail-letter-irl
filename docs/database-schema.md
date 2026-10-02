@@ -1,6 +1,6 @@
 # Database Schema
 
-**Last Updated:** October 1, 2026
+**Last Updated:** October 2, 2026
 **Purpose:** Complete database schema reference for all tables, indexes, constraints, and migrations
 
 This document describes the Letter IRL database schema as defined by `db/migrations` at the head of `dev` (Neon
@@ -26,6 +26,7 @@ migration 021 as its immediate predecessor.
 | Daily limits | `daily_limit_overrides`, `daily_limit_refusals`, `daily_limit_defaults` |
 | Images | `image_entitlements`, `image_generation_reservations`, `recent_uploads` |
 | Gift letters | `gift_letters`, `gift_codes` |
+| Address requests | `address_requests` |
 | Retention | `redacted_content_quarantine` |
 | Admin foundation | `admin_environment_marker`, `admin_audit_events`, `admin_command_runs`, `admin_operations` |
 
@@ -610,6 +611,42 @@ only to that account's own photo in the image store ([tool-apis.md](tool-apis.md
 - The API process also holds a copy in memory, and drops it once it is older than the TTL. That is
   checked on every call and every five minutes.
 
+### address_requests
+
+An address request link (#604, concept 10): a sender asks someone for their U.S. address, and that
+person gives it, or declines, on the website, signed out (migration 049). Behind
+`LETTER_IRL_ADDRESS_REQUESTS_ENABLED`; the tools are `request_address`, `get_address_request` and
+`cancel_address_request` ([tool-apis.md](tool-apis.md)).
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| request_id | UUID | NO | gen_random_uuid() | Primary key, the `requestId` the tools take |
+| user_id | VARCHAR(255) | NO | - | The sender's account (FK users, ON DELETE CASCADE) |
+| token_hash | BYTEA | NO | - | SHA-256 of the link's token, 32 bytes, unique. The token itself is never stored: the link is shown once, in `request_address`'s answer |
+| recipient_name | TEXT | NO | - | What the sender calls the recipient (1 to 100 characters): the envelope's name unless the recipient gives another. Never shown on the page |
+| sender_first_name | TEXT | NO | - | All the page shows of the sender (1 to 40 characters) |
+| status | TEXT | NO | 'waiting' | `waiting`, `answered`, `declined` or `cancelled`. A waiting request past `expires_at` reads as expired, which is not stored |
+| address | JSONB | YES | - | The address given, in the preview tools' recipient shape. Set exactly when `status` is `answered` |
+| expires_at | TIMESTAMPTZ | NO | - | When the link stops working: `LETTER_IRL_ADDRESS_REQUEST_LINK_DAYS` (default 7) after it was made |
+| created_at | TIMESTAMPTZ | NO | NOW() | When the sender made it |
+| closed_at | TIMESTAMPTZ | YES | - | When it was answered, declined or cancelled. NULL exactly while waiting |
+
+**Constraints:**
+- `address_requests_token_hash_key`: one request per token hash
+- `valid_address_request_token_hash`: the hash is 32 bytes
+- `valid_address_request_status`: the four states above
+- `valid_address_request_address`: an address exactly when answered
+- `valid_address_request_closed`: `closed_at` exactly when not waiting
+- `valid_address_request_names`: the two names' lengths
+- `valid_address_request_expiry`: `expires_at` after `created_at`
+
+**Indexes:** `idx_address_requests_user_created` (user_id, created_at DESC), for the caps: 10 waiting
+and 20 a day per account (`LETTER_IRL_ADDRESS_REQUEST_WAITING_CAP`, `LETTER_IRL_ADDRESS_REQUEST_DAILY_CAP`).
+
+A request is answered or declined once: one UPDATE that requires `waiting` and an unexpired link.
+Account erasure deletes the account's requests ([account-erasure.md](account-erasure.md)). Erasure keeps
+the `users` row, so the cascade does not reach them. Neither admin role is granted the table.
+
 ### maintenance_tasks
 
 One row per scheduled maintenance task (`task_name` is the key) with its last start, completion,
@@ -780,6 +817,7 @@ Production provisioning and the first production connection remain separate owne
 | 46 | 046_stationery_faces.sql | Typewriter and Handwritten (#563 PR 8): `letter_drafts_stationery_theme_known` and `users_stationery_theme_known` admit `typewriter` and `handwritten`. No provisioning re-run: neither check changes what a role may read or write |
 | 47 | 047_room_to_write.sql | `letter_drafts.pages` (#586): the pages a letter prints on, 1 to 3, default 1, with `letter_drafts_pages_known` and `letter_drafts_pages_paid_per_send` (more than one page only for a letter our renderer drew, never a gift send). No provisioning re-run, as for 039 |
 | 48 | 048_postcard_fronts.sql | `letter_drafts.postcard_front` (#594): a postcard's front when not full bleed, a border with its caption or a greeting with its place, NULL for full bleed. `renderer_version` admits `pdf-3`, set exactly when a draft has a front, with `letter_drafts_postcard_front_layout_known` and `letter_drafts_postcard_front_drawn_by_pdf_3`. No provisioning re-run, as for 039 |
+| 49 | 049_address_requests.sql | `address_requests` (#604): address request links, the token stored as its SHA-256, an address exactly when answered, `closed_at` exactly when not waiting. No provisioning re-run: neither admin role is granted it |
 
 ---
 

@@ -46,7 +46,11 @@ import {
   // A postcard preview's size and front, changed without previewing again (#594)
   setPostcardStyleTool,
   // Held mail cancelled before it goes to the printer (#535)
-  cancelScheduledMailTool
+  cancelScheduledMailTool,
+  // A link asking someone for their address, and what became of it (#604)
+  requestAddressTool,
+  getAddressRequestTool,
+  cancelAddressRequestTool
 } from "./tools/index.js";
 import { REQUEST_SEND_TOOL } from "./tools/requestSend.js";
 import { UPLOAD_PHOTO_CHUNK_TOOL } from "./tools/uploadPhotoChunk.js";
@@ -55,6 +59,10 @@ import { SET_STATIONERY_TOOL } from "./tools/setStationery.js";
 import { SET_LETTER_WORDS_TOOL } from "./tools/setLetterWords.js";
 import { SET_POSTCARD_STYLE_TOOL } from "./tools/setPostcardStyle.js";
 import { CANCEL_SCHEDULED_MAIL_TOOL } from "./tools/cancelScheduledMail.js";
+import { REQUEST_ADDRESS_TOOL } from "./tools/requestAddress.js";
+import { GET_ADDRESS_REQUEST_TOOL } from "./tools/getAddressRequest.js";
+import { CANCEL_ADDRESS_REQUEST_TOOL } from "./tools/cancelAddressRequest.js";
+import { isAddressRequestsEnabled } from "./config/addressRequests.js";
 import { isCardUploadEnabled } from "./config/cardUpload.js";
 import { isArriveByEnabled } from "./config/arriveBy.js";
 import { isStationeryOffered } from "./config/stationery.js";
@@ -114,6 +122,11 @@ const tools: McpToolDefinition<any, any>[] = [
   // A postcard preview's size and front, changed without previewing again, and
   // priced again (#594). Listed only while the sizes or the layouts are offered.
   setPostcardStyleTool,
+  // A private link asking someone for their address, what became of it, and
+  // closing it (#604). Listed only while LETTER_IRL_ADDRESS_REQUESTS_ENABLED is on.
+  requestAddressTool,
+  getAddressRequestTool,
+  cancelAddressRequestTool,
   // The model's way to send, once the send rule is on (#470): a link where
   // the person sends the preview themselves. Listed only while the rule is on.
   requestSendTool,
@@ -178,6 +191,16 @@ export const IN_APP_PURCHASE_TOOLS: ReadonlySet<string> = new Set([
  * through AI models, so Claude is never offered it (#467).
  */
 export const IMAGE_GENERATION_TOOLS: ReadonlySet<string> = new Set(["generate_image_for_mail"]);
+
+/**
+ * Address requests (#604): listed only while LETTER_IRL_ADDRESS_REQUESTS_ENABLED
+ * is on, and each refuses while it is off.
+ */
+export const ADDRESS_REQUEST_TOOLS: ReadonlySet<string> = new Set([
+  REQUEST_ADDRESS_TOOL,
+  GET_ADDRESS_REQUEST_TOOL,
+  CANCEL_ADDRESS_REQUEST_TOOL
+]);
 
 /**
  * A tool's description as the calling app reads it (#484). Most tools say the
@@ -321,8 +344,9 @@ export class LetterIrlServer {
    * generation only where it is allowed (#467), set_arrival_date and
    * cancel_scheduled_mail only while arrival dates are on (#535), and
    * set_stationery only while stationery is offered (#563),
-   * set_letter_words only while room to write is (#586), and
-   * set_postcard_style only while the postcard sizes or layouts are (#594).
+   * set_letter_words only while room to write is (#586),
+   * set_postcard_style only while the postcard sizes or layouts are (#594),
+   * and the three address request tools only while those are on (#604).
    * Without an app,
    * the list for an app that trusts nothing.
    */
@@ -337,6 +361,7 @@ export class LetterIrlServer {
     const stationery = isStationeryOffered();
     const roomToWrite = letterPageLimit() > 1;
     const postcardStyles = isPostcardSizesOffered() || isPostcardLayoutsOffered();
+    const addressRequests = isAddressRequestsEnabled();
     return tools
       .filter((tool) => sendRule || tool.name !== REQUEST_SEND_TOOL)
       .filter((tool) => cardUpload || tool.name !== UPLOAD_PHOTO_CHUNK_TOOL)
@@ -344,6 +369,7 @@ export class LetterIrlServer {
       .filter((tool) => stationery || tool.name !== SET_STATIONERY_TOOL)
       .filter((tool) => roomToWrite || tool.name !== SET_LETTER_WORDS_TOOL)
       .filter((tool) => postcardStyles || tool.name !== SET_POSTCARD_STYLE_TOOL)
+      .filter((tool) => addressRequests || !ADDRESS_REQUEST_TOOLS.has(tool.name))
       .filter((tool) => client.inAppPurchases || !IN_APP_PURCHASE_TOOLS.has(tool.name))
       .filter((tool) => offersImageGeneration(client) || !IMAGE_GENERATION_TOOLS.has(tool.name))
       .map((tool) => ({

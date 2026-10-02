@@ -590,6 +590,40 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     services: ['api']
   },
   /**
+   * Address requests (#604, src/config/addressRequests.ts): the three tools
+   * are listed only while the flag is on. Off unless set, so absence is the
+   * intended production state until the owner's retention wording is in;
+   * listed so the preflight shows which environments have it. API only.
+   */
+  {
+    name: 'LETTER_IRL_ADDRESS_REQUESTS_ENABLED',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  {
+    name: 'LETTER_IRL_ADDRESS_REQUEST_LINK_DAYS',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  {
+    name: 'LETTER_IRL_ADDRESS_REQUEST_WAITING_CAP',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  {
+    name: 'LETTER_IRL_ADDRESS_REQUEST_DAILY_CAP',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  /**
    * The envelope reveal (#576, src/config/envelope.ts): the letter previews
    * tell their card it may open the page from an envelope only while the
    * flag is on. Off unless set, so absence is the intended production state

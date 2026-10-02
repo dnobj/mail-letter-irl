@@ -30,13 +30,26 @@ import { sendToolDescription } from '../../../src/tools/previewSendStep.js';
 
 // ChatGPT's list is the full one: an app that takes no purchases is not
 // offered the checkouts (#475). The other apps' text has its own suite below.
-const tools = new LetterIrlServer().listTools(clientProfileNamed('chatgpt'));
+// Listed with address requests on (#604), so the copy of the tools that flag
+// lists meets these rules too (#605 review round 1).
+const ADDRESS_REQUEST_TOOLS = ['request_address', 'get_address_request', 'cancel_address_request'];
+const tools = (() => {
+  const before = process.env.LETTER_IRL_ADDRESS_REQUESTS_ENABLED;
+  process.env.LETTER_IRL_ADDRESS_REQUESTS_ENABLED = 'true';
+  try {
+    return new LetterIrlServer().listTools(clientProfileNamed('chatgpt'));
+  } finally {
+    if (before === undefined) delete process.env.LETTER_IRL_ADDRESS_REQUESTS_ENABLED;
+    else process.env.LETTER_IRL_ADDRESS_REQUESTS_ENABLED = before;
+  }
+})();
 
 describe('tool descriptions and invocation messages', () => {
   it('registers something to check', () => {
     // Guards the two suites below against going vacuously green if listTools
     // ever returns nothing.
     expect(tools.length).toBeGreaterThan(15);
+    expect(tools.map(tool => tool.name)).toEqual(expect.arrayContaining(ADDRESS_REQUEST_TOOLS));
   });
 
   it.each(tools.map(tool => tool.name))('%s never says "credit"', name => {

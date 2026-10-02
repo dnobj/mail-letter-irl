@@ -402,6 +402,32 @@ export const cancelScheduledMailInputZ = z.object({
   confirm: z.boolean().describe("Set true once the person has agreed: a cancelled order cannot be restored")
 });
 
+// Address requests (#604). Listed only while LETTER_IRL_ADDRESS_REQUESTS_ENABLED
+// is on (src/server.ts).
+export const ADDRESS_REQUEST_RECIPIENT_NAME_DESCRIPTION =
+  "Who the address is for, as the person calls them, up to 100 characters. It goes on the envelope unless the recipient gives another name; the page never shows it";
+export const ADDRESS_REQUEST_SENDER_FIRST_NAME_DESCRIPTION =
+  "The first name the page shows as the sender's, up to 40 letters: the only thing it shows of them. Left out, the first name on the saved return address";
+export const ADDRESS_REQUEST_ID_DESCRIPTION = "The requestId from request_address";
+export const ADDRESS_REQUEST_STATES = ["waiting", "answered", "declined", "cancelled", "expired"] as const;
+export const ADDRESS_REQUEST_STATUS_DESCRIPTION =
+  "waiting; answered (the address is in recipient); declined; cancelled; or expired, when the link ran out before an answer";
+export const ADDRESS_REQUEST_RECIPIENT_DESCRIPTION =
+  "The address given, in the shape a preview tool's recipient takes: only when answered";
+
+export const requestAddressInputZ = z.object({
+  recipientName: z.string().describe(ADDRESS_REQUEST_RECIPIENT_NAME_DESCRIPTION),
+  senderFirstName: z.string().optional().describe(ADDRESS_REQUEST_SENDER_FIRST_NAME_DESCRIPTION)
+});
+
+export const getAddressRequestInputZ = z.object({
+  requestId: z.string().describe(ADDRESS_REQUEST_ID_DESCRIPTION)
+});
+
+export const cancelAddressRequestInputZ = z.object({
+  requestId: z.string().describe(ADDRESS_REQUEST_ID_DESCRIPTION)
+});
+
 // ============================================================================
 // Feature Request Schema (US-FEEDBACK-01)
 // ============================================================================
@@ -863,6 +889,32 @@ export const cancelScheduledMailOutputZ = z.object({
     kind: z.enum(["letters", "gift_letter"]),
     count: z.number().int()
   }).describe("What went back to the account"),
+  message: z.string()
+});
+
+export const requestAddressOutputZ = z.object({
+  requestId: z.string().describe("Pass it to get_address_request and cancel_address_request"),
+  status: z.enum(["waiting"]),
+  url: z.string().describe("The private link for the person to share with the recipient themselves. It is given only here"),
+  recipientName: z.string(),
+  senderFirstName: z.string().describe("All the page shows of the sender"),
+  expiresAt: z.string().describe("When the link stops working, ISO 8601"),
+  message: z.string()
+});
+
+export const getAddressRequestOutputZ = z.object({
+  requestId: z.string(),
+  status: z.enum(ADDRESS_REQUEST_STATES).describe(ADDRESS_REQUEST_STATUS_DESCRIPTION),
+  recipientName: z.string(),
+  expiresAt: z.string().describe("When the link stops, or stopped, working, ISO 8601"),
+  recipient: addressZ.optional().describe(ADDRESS_REQUEST_RECIPIENT_DESCRIPTION),
+  message: z.string()
+});
+
+export const cancelAddressRequestOutputZ = z.object({
+  requestId: z.string(),
+  status: z.enum(ADDRESS_REQUEST_STATES).describe(ADDRESS_REQUEST_STATUS_DESCRIPTION),
+  alreadyClosed: z.boolean().describe("True when it had already been answered, declined, cancelled or had expired: nothing changed"),
   message: z.string()
 });
 

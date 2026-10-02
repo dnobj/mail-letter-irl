@@ -66,7 +66,10 @@ import type {
   setStationeryOutputZ,
   setLetterWordsOutputZ,
   setPostcardStyleOutputZ,
-  cancelScheduledMailOutputZ
+  cancelScheduledMailOutputZ,
+  requestAddressOutputZ,
+  getAddressRequestOutputZ,
+  cancelAddressRequestOutputZ
 } from "../zodSchemas.js";
 import type {
   quoteAndPreviewLetterTextOnlyTool,
@@ -95,7 +98,10 @@ import type {
   setStationeryTool,
   setLetterWordsTool,
   setPostcardStyleTool,
-  cancelScheduledMailTool
+  cancelScheduledMailTool,
+  requestAddressTool,
+  getAddressRequestTool,
+  cancelAddressRequestTool
 } from "../tools/index.js";
 
 // ============================================================================
@@ -264,4 +270,13 @@ export type SetPostcardStyleConforms = Conforms<
 >;
 export type CancelScheduledMailConforms = Conforms<
   BothDirections<z.infer<typeof cancelScheduledMailOutputZ>, typeof cancelScheduledMailTool>
+>;
+export type RequestAddressConforms = Conforms<
+  BothDirections<z.infer<typeof requestAddressOutputZ>, typeof requestAddressTool>
+>;
+export type GetAddressRequestConforms = Conforms<
+  BothDirections<z.infer<typeof getAddressRequestOutputZ>, typeof getAddressRequestTool>
+>;
+export type CancelAddressRequestConforms = Conforms<
+  BothDirections<z.infer<typeof cancelAddressRequestOutputZ>, typeof cancelAddressRequestTool>
 >;

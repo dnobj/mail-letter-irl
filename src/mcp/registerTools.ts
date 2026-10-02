@@ -39,6 +39,9 @@ import {
   setLetterWordsInputZ,
   setPostcardStyleInputZ,
   cancelScheduledMailInputZ,
+  requestAddressInputZ,
+  getAddressRequestInputZ,
+  cancelAddressRequestInputZ,
   uploadPhotoChunkInputZ,
   submitFeatureRequestInputZ,
   getStartedInputZ,
@@ -68,6 +71,9 @@ import {
   setLetterWordsOutputZ,
   setPostcardStyleOutputZ,
   cancelScheduledMailOutputZ,
+  requestAddressOutputZ,
+  getAddressRequestOutputZ,
+  cancelAddressRequestOutputZ,
   uploadPhotoChunkOutputZ,
   submitFeatureRequestOutputZ,
   getStartedOutputZ,
@@ -156,7 +162,9 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     // Hands back a link; the person sends from the page it opens (#470).
     'request_send',
     // The preview card's question about its draft (#474).
-    'get_draft_status'
+    'get_draft_status',
+    // What became of an address request (#604).
+    'get_address_request'
   ];
 
   // Tools that call external APIs (PostGrid for validation or mail fulfillment)
@@ -189,7 +197,8 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     'set_stationery',         // The same style twice changes nothing more (#563)
     'set_letter_words',       // The same words twice change nothing more (#586)
     'set_postcard_style',     // The same size and front twice change nothing more (#594)
-    'cancel_scheduled_mail'   // A repeat answers as already cancelled (#535)
+    'cancel_scheduled_mail',  // A repeat answers as already cancelled (#535)
+    'cancel_address_request'  // A repeat answers as already closed (#604)
   ];
 
   // Destructive tools. OpenAI's app-review guidance asks for destructiveHint on
@@ -213,7 +222,9 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     'create_pack_checkout',
     'clear_return_address',
     // A cancelled order cannot be restored: it must be sent again (#535).
-    'cancel_scheduled_mail'
+    'cancel_scheduled_mail',
+    // A cancelled address request's link cannot be restored (#604).
+    'cancel_address_request'
   ];
 
   return {
@@ -825,6 +836,9 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   set_letter_words: setLetterWordsInputZ,
   set_postcard_style: setPostcardStyleInputZ,
   cancel_scheduled_mail: cancelScheduledMailInputZ,
+  request_address: requestAddressInputZ,
+  get_address_request: getAddressRequestInputZ,
+  cancel_address_request: cancelAddressRequestInputZ,
   upload_photo_chunk: uploadPhotoChunkInputZ,
   // Feedback tools
   submit_feature_request: submitFeatureRequestInputZ,
@@ -865,6 +879,9 @@ const zodOutputSchemas: Record<ToolName, z.ZodObject<any>> = {
   set_letter_words: setLetterWordsOutputZ,
   set_postcard_style: setPostcardStyleOutputZ,
   cancel_scheduled_mail: cancelScheduledMailOutputZ,
+  request_address: requestAddressOutputZ,
+  get_address_request: getAddressRequestOutputZ,
+  cancel_address_request: cancelAddressRequestOutputZ,
   upload_photo_chunk: uploadPhotoChunkOutputZ,
   // Feedback tools
   submit_feature_request: submitFeatureRequestOutputZ,
@@ -1576,6 +1593,13 @@ function scheduledOrderSentence(result: Record<string, unknown>): string {
   return ` ${scheduleSentence({ arriveBy, mailOn }, new Date())}${cancel}`;
 }
 
+/** An address on one line, as get_address_request's text gives it (#604). */
+function addressLine(address: Record<string, unknown>): string {
+  const part = (key: string) => (typeof address[key] === "string" ? (address[key] as string).trim() : "");
+  const street = [part("name"), part("addressLine1"), part("addressLine2")].filter(Boolean).join(", ");
+  return `${street}, ${part("city")}, ${part("state")} ${part("postalCode")}`.trim();
+}
+
 export function summarizeToolResult(
   toolName: string,
   result: Record<string, unknown>,
@@ -1783,6 +1807,17 @@ export function summarizeToolResult(
       const suggestedNextStep = result.suggestedNextStep as string;
       return suggestedNextStep || "Photo uploaded. Use the imageUrl with a preview tool.";
     }
+    case "request_address":
+      // The sentence carries the link, which is given only here (#604).
+      return typeof result.message === "string" ? result.message : "The address request is ready.";
+    case "get_address_request": {
+      // With the address once answered, for an app whose model reads only the text (#604).
+      const message = typeof result.message === "string" ? result.message : "The address request was checked.";
+      const recipient = result.recipient as Record<string, unknown> | undefined;
+      return recipient ? `${message} Address: ${addressLine(recipient)}.` : message;
+    }
+    case "cancel_address_request":
+      return typeof result.message === "string" ? result.message : "The address request was cancelled.";
     default:
       return JSON.stringify(result);
   }

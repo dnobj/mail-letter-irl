@@ -1,6 +1,7 @@
 import { clientProfileNamed, type ClientProfile } from "../auth/clientProfiles.js";
 import { uploadsThroughCard } from "../config/cardUpload.js";
 import { offersImageGeneration } from "../config/imageGeneration.js";
+import { isAddressRequestsEnabled } from "../config/addressRequests.js";
 
 const SEND_BY_MODEL =
   "Only call send_letter or send_postcard after the user has reviewed a draft and clearly confirms sending.";
@@ -82,6 +83,14 @@ function uploadLine(client: ClientProfile): string {
   return uploadsThroughCard(client) ? line + CARD_UPLOAD_NEXT_STEP : line;
 }
 
+const ADDRESSES =
+  "Use saved return addresses when available, and ask for missing real U.S. mailing addresses when required.";
+
+// Address requests (#604): only while the tools are listed.
+const ADDRESSES_OR_REQUEST =
+  "Use saved return addresses when available, and ask for missing real U.S. mailing addresses when required. " +
+  "If the person doesn't know the recipient's address, request_address makes a private link they can share for the recipient to give it; never guess an address.";
+
 function instructionLines(sendRule: boolean, client: ClientProfile): string[] {
   return [
     "Letter IRL drafts, previews, and sends real physical letters and postcards in the U.S.",
@@ -90,7 +99,7 @@ function instructionLines(sendRule: boolean, client: ClientProfile): string[] {
     "Do not say mail has been sent unless the send tool succeeds.",
     anotherCopyLine(sendRule, client),
     noResultLine(client),
-    "Use saved return addresses when available, and ask for missing real U.S. mailing addresses when required.",
+    isAddressRequestsEnabled() ? ADDRESSES_OR_REQUEST : ADDRESSES,
     "For image mail, reuse existing conversation images or hosted imageUrl values before opening upload_image.",
     imageLine(client),
     uploadLine(client),

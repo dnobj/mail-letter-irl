@@ -395,6 +395,11 @@ export interface ErasureCounts {
   accessTokensDeleted: number;
   uploadsDeleted: number;
   featureRequestsDeleted: number;
+  /**
+   * Address requests (#604), with any address a recipient gave. Not in the
+   * preview: neither admin role is granted the table (migration 049).
+   */
+  addressRequestsDeleted: number;
   seedCodeEmailsCleared: number;
   giftCodesDeleted: number;
   descriptionsCleared: number;
@@ -549,6 +554,8 @@ export async function eraseAccountWithClient(client: SqlClient, userId: string):
   const tokens = await client.query(`DELETE FROM personal_access_tokens WHERE user_id = $1`, [userId]);
   const uploads = await client.query(`DELETE FROM recent_uploads WHERE user_id = $1`, [userId]);
   const requests = await client.query(`DELETE FROM feature_requests WHERE user_id = $1`, [userId]);
+  // Erasure keeps the users row, so ON DELETE CASCADE never reaches them.
+  const addressRequests = await client.query(`DELETE FROM address_requests WHERE user_id = $1`, [userId]);
   // The address a seed code was claimed with. Clearing it frees that address
   // to claim the same campaign once more from a new account, which is the
   // price of not keeping it.
@@ -616,6 +623,7 @@ export async function eraseAccountWithClient(client: SqlClient, userId: string):
       accessTokensDeleted: tokens.rowCount ?? 0,
       uploadsDeleted: uploads.rowCount ?? 0,
       featureRequestsDeleted: requests.rowCount ?? 0,
+      addressRequestsDeleted: addressRequests.rowCount ?? 0,
       seedCodeEmailsCleared: seedEmails.rowCount ?? 0,
       giftCodesDeleted: giftCodes.rowCount ?? 0,
       descriptionsCleared: (transactionDescriptions.rowCount ?? 0) + (lotDescriptions.rowCount ?? 0)

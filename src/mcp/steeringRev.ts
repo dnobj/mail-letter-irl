@@ -134,5 +134,11 @@
  *     postcard preview takes size, or layout with its caption or place, and
  *     set_postcard_style, listed while either is, changes them without
  *     previewing again and says how a new size is paid.
+ * r35: address requests (#604). While LETTER_IRL_ADDRESS_REQUESTS_ENABLED is
+ *     on, request_address makes a private link for someone whose address the
+ *     person lacks, get_address_request returns the address once given, as a
+ *     preview's recipient, and cancel_address_request closes a waiting link.
+ *     The server instructions name request_address beside asking for an
+ *     address.
  */
-export const STEERING_COPY_REV = 34;
+export const STEERING_COPY_REV = 35;

@@ -186,6 +186,17 @@ export const toolInputSchemas = {
     orderId: z.string(),
     confirm: z.boolean()
   }),
+  // A link asking someone for their address, and what became of it (#604)
+  request_address: z.object({
+    recipientName: z.string(),
+    senderFirstName: z.string().optional()
+  }),
+  get_address_request: z.object({
+    requestId: z.string()
+  }),
+  cancel_address_request: z.object({
+    requestId: z.string()
+  }),
   // One chunk of a photo from the upload card (#474, phase 3)
   upload_photo_chunk: z.object({
     uploadId: z.string(),

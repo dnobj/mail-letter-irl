@@ -1,11 +1,11 @@
 # MCP Tool API Specifications
 
-**Last Updated:** October 1, 2026  
+**Last Updated:** October 2, 2026  
 **Purpose:** Practical reference for the MCP tools exposed by Letter IRL
 
 The runtime MCP registry is the source of truth. The checked-in `manifest.json` is generated from that registry with `npm run manifest:generate`, and submission-facing tests verify that the manifest, widget list, and runtime tool registry stay aligned.
 
-Letter IRL currently exposes **24 tools** and **6 widgets**. Four more are listed only while their switch is on: `request_send` while the send rule is on, `upload_photo_chunk` while card upload is on, and `set_arrival_date` and `cancel_scheduled_mail` while arrival dates are on. The tools are:
+Letter IRL currently exposes **24 tools** and **6 widgets**. Four more are listed only while their switch is on: `request_send` while the send rule is on, `upload_photo_chunk` while card upload is on, and `set_arrival_date` and `cancel_scheduled_mail` while arrival dates are on. So are `request_address`, `get_address_request` and `cancel_address_request`, while address requests are on (#604). The tools are:
 
 ## Onboarding
 
@@ -128,6 +128,28 @@ none of them.
 
     A front is refused as the preview refuses it. A front the postcard keeps, too long for a new size's line, says it is the postcard's own, and to give a shorter one with the size.
   - **Its description** names only what is offered: the size, the front, or both.
+
+## Address Requests
+
+Listed only while `LETTER_IRL_ADDRESS_REQUESTS_ENABLED` is on (#604, concept 10 in [letter-creator-vision.md](letter-creator-vision.md)), and each refuses while it is off (`ADDRESS_REQUESTS_OFF`). The table is `address_requests` ([database-schema.md](database-schema.md#address_requests)). The recipient's page on the website, and its public routes, come in later PRs of #604.
+
+- `request_address`: Makes a private link asking someone for their U.S. mailing address, when the person wants to send them mail and does not know it. Letter IRL never contacts the recipient: the person shares the link themselves.
+  - **Takes** `recipientName` (what the person calls them, up to 100 characters; the envelope's name unless the recipient gives another; never shown on the page) and `senderFirstName`.
+  - **The first name** is one or two words of letters, joined by a space or a hyphen, up to 40 characters, with apostrophes inside a word and a full stop only at its end ("J.") or in initials ("J.R."). The page shows it to someone the sender chose, so nothing may read as a link, and little as a message.
+  - Without `senderFirstName`, the first word of the saved return address's name is used, unless it is a title or "The" ("Dr.", "Mrs", "The Smiths"). With neither, it is refused (`SENDER_NAME_REQUIRED`).
+  - **Returns** `requestId`, `status: "waiting"`, `url` (`<website>/address#<token>`), `recipientName`, `senderFirstName`, `expiresAt` and a `message` with the link and when it stops working ("October 9 at 10:00 AM EDT").
+  - **The link** is given only here: the server keeps the SHA-256 of its 144-bit token. The token is in the fragment, which a browser never sends, so it stays out of HTTP access logs; the page posts it to the API itself.
+  - **It works** once and for `LETTER_IRL_ADDRESS_REQUEST_LINK_DAYS` days (default 7).
+  - **Caps per account:** 10 waiting (`TOO_MANY_WAITING`) and 20 in 24 hours (`TOO_MANY_TODAY`), set by `LETTER_IRL_ADDRESS_REQUEST_WAITING_CAP` and `LETTER_IRL_ADDRESS_REQUEST_DAILY_CAP`. The description says each call makes a new link counted against them.
+  - **An account erased** while the call waited for its lock is refused as any closed account is.
+  - Not read-only (it records a request), not destructive, not idempotent: each call makes a new link.
+- `get_address_request`: What became of a request, by `requestId`, for the account's own requests only (`REQUEST_NOT_FOUND`).
+  - `status` is `waiting`, `answered`, `declined`, `cancelled` or `expired` (a waiting request past `expiresAt`).
+  - Once answered, `recipient` is the address given, in the shape a preview tool's `recipient` takes, and the text gives it on one line too.
+  - Read-only. On `mail:draft`, not `mail:read`, as its answer is a third party's address.
+- `cancel_address_request`: Closes a waiting request by `requestId`, so its link stops working. One already answered, declined, cancelled or expired is left as it is (`alreadyClosed: true`). Destructive, since the link cannot be restored, and idempotent.
+
+The server instructions add, while these are listed, that `request_address` is the way when the person does not know the recipient's address, and never to guess one (steering r35).
 
 ## Account, Orders, and Return Address
 

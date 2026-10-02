@@ -61,6 +61,11 @@ export const TOOL_SCOPES: Record<string, ProductScope> = {
   // Cancels held mail (#535): it only ever returns value to the person, so it
   // sits with the drafting tools, as the issue decided.
   cancel_scheduled_mail: "mail:draft",
+  // Address requests (#604): drafting, and they send nothing. Reading one is
+  // drafting too, not mail:read: its answer is a third party's address.
+  request_address: "mail:draft",
+  get_address_request: "mail:draft",
+  cancel_address_request: "mail:draft",
   // Keeps a photo for the account's next preview (#474, phase 3): the upload
   // card's part of drafting, so it sits with the drafting tools.
   upload_photo_chunk: "mail:draft"
