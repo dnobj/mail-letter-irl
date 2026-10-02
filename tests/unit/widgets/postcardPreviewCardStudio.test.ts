@@ -380,6 +380,56 @@ describe('the postcard card as a postcard maker (#580)', () => {
     expect(text(unpriced, 'studio-cost')).toBe('Paid with Pay & Send');
   });
 
+  it('holds a dated Pay & Send order while it waits, then says it is with the printer', async () => {
+    const card = mount();
+    await card.show(
+      output({
+        arrivalWindow: WINDOW,
+        schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' },
+        canSendNow: false,
+        sendEligibility: { packPays: false, payAndSend: { available: true, amountCents: 399, currency: 'usd' }, letterPack: { available: false } }
+      }),
+      ON
+    );
+    await card.click(card.byId('pay-send-button'));
+    await card.answer(
+      { result: { content: [], structuredContent: { orderId: 'order-1', checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_1' } } },
+      'create_mail_checkout'
+    );
+    await card.click(card.byId('check-status-button'));
+    await card.answer({ result: { content: [], structuredContent: { orderId: 'order-1', purchaseStatus: 'processing' } } }, 'get_purchase_status');
+    expect(text(card, 'studio-summary')).toMatch(/^6 x 9 in · held until Fri, Oct 9(, 2026)?$/);
+    await card.click(card.byId('check-status-button'));
+    await card.answer({ result: { content: [], structuredContent: { orderId: 'order-1', purchaseStatus: 'submitted' } } }, 'get_purchase_status');
+    expect(text(card, 'studio-summary')).toBe('6 x 9 in · with the printer');
+  });
+
+  it.each([
+    ['payment_failed', 'Draft', 'the payment did not go through'],
+    ['refund_pending', 'Refunded', 'being refunded, nothing will be mailed'],
+    ['refunded', 'Refunded', 'refunded, nothing will be mailed'],
+    ['on_hold', 'On hold', 'on hold'],
+    ['cancelled', 'Cancelled', 'cancelled, nothing will be mailed']
+  ])('never promises mail for a Pay & Send order %s', async (status, stage, timing) => {
+    const card = mount();
+    await card.show(
+      output({ canSendNow: false, sendEligibility: { packPays: false, payAndSend: { available: true, amountCents: 399, currency: 'usd' }, letterPack: { available: false } } }),
+      ON
+    );
+    await card.click(card.byId('pay-send-button'));
+    await card.answer(
+      { result: { content: [], structuredContent: { orderId: 'order-1', checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_1' } } },
+      'create_mail_checkout'
+    );
+    await card.click(card.byId('check-status-button'));
+    await card.answer(
+      { result: { content: [], structuredContent: { orderId: 'order-1', purchaseStatus: status, message: 'The order stopped.' } } },
+      'get_purchase_status'
+    );
+    expect(text(card, 'studio-sub')).toBe(`${stage} · New York, NY 10118`);
+    expect(text(card, 'studio-summary')).toBe(`6 x 9 in · ${timing}`);
+  });
+
   it("takes the estimate a cleared date brings, not the dated preview's", async () => {
     const card = mount();
     await card.show(
