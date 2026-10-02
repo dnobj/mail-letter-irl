@@ -45,21 +45,25 @@ afterEach(() => {
 });
 
 describe("the studio card's switch on the wire (#580)", () => {
-  it("rides a letter preview's _meta while on, beside its page, and never reaches the model", async () => {
+  it("rides every preview's _meta while on, beside its page, and never reaches the model", async () => {
     vi.stubEnv('LETTER_IRL_STUDIO_CARD_ENABLED', 'true');
-    for (const name of ['quote_and_preview_letter', 'quote_and_preview_letter_with_header_image', 'quote_and_preview_letter_with_image']) {
+    for (const name of [
+      'quote_and_preview_letter',
+      'quote_and_preview_letter_with_header_image',
+      'quote_and_preview_letter_with_image',
+      'quote_and_preview_postcard'
+    ]) {
       const result = await (await registered(name))({}, {});
       expect(result._meta, name).toMatchObject({ 'letterirl/studioCard': true, previewHtml: '<html>page</html>' });
       expect(result.structuredContent).not.toHaveProperty('letterirl/studioCard');
     }
   });
 
-  it("is absent while off, and from a postcard's result", async () => {
+  it('is absent while off', async () => {
     vi.stubEnv('LETTER_IRL_STUDIO_CARD_ENABLED', '');
-    const off = await (await registered('quote_and_preview_letter'))({}, {});
-    expect(off._meta).not.toHaveProperty('letterirl/studioCard');
-    vi.stubEnv('LETTER_IRL_STUDIO_CARD_ENABLED', 'true');
-    const postcard = await (await registered('quote_and_preview_postcard'))({}, {});
-    expect(postcard._meta).not.toHaveProperty('letterirl/studioCard');
+    for (const name of ['quote_and_preview_letter', 'quote_and_preview_postcard']) {
+      const off = await (await registered(name))({}, {});
+      expect(off._meta, name).not.toHaveProperty('letterirl/studioCard');
+    }
   });
 });
