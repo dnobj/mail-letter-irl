@@ -429,6 +429,8 @@ describePostgres('renderer version, stationery and pages (migrations 039 and 044
 
       await expect(drafts.setDraftStationery(draftId, userId, { stationery: BOTANICAL, previewHtml: PAGE, pages: 2 })).resolves.toBeNull();
       expect(await row()).toEqual({ pages: 2, renderer_version: 'pdf-2' });
+      // get_draft_status reads them back (getDraftState).
+      await expect(drafts.getDraftState(draftId)).resolves.toMatchObject({ pages: 2 });
       await expect(drafts.setDraftStationery(draftId, userId, { stationery: { theme: 'classic' }, previewHtml: '<svg/>', pages: 1 }))
         .resolves.toBeNull();
       expect(await row()).toEqual({ pages: 1, renderer_version: 'pdf-1' });

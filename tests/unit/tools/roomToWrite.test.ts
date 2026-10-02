@@ -426,6 +426,24 @@ describe('set_stationery lays a letter out again on its pages, and prices it aga
     expect(getSendEligibility).toHaveBeenCalledWith(10, 2, { mailType: 'letter', pages: 2 });
   });
 
+  it('runs a two-page letter on to a third page, and says so', async () => {
+    // 30 wide lines are two Classic pages, and three in Typewriter's face.
+    const stored = draft({ bodyText: wide(30) });
+    expect(stored.pages).toBe(2);
+    vi.mocked(getDraftForStationery).mockResolvedValue(stored as never);
+    const output = await restyle('typewriter');
+    expect(written().pages).toBe(3);
+    expect(output).toMatchObject({ pages: 3, canSendNow: false });
+    expect(output.message).toContain('It now runs to three pages, printed on both sides, and is paid with Pay & Send.');
+    expect(getSendEligibility).toHaveBeenCalledWith(10, 2, { mailType: 'letter', pages: 3 });
+  });
+
+  it('refuses a draft whose stored preview has fewer pages than it counts, drawing nothing', async () => {
+    vi.mocked(getDraftForStationery).mockResolvedValue({ ...draft({ bodyText: lines(10) }), pages: 2 } as never);
+    await expect(restyle('botanical')).rejects.toMatchObject({ code: 'DRAFT_NOT_DRAWN' });
+    expect(setDraftStationery).not.toHaveBeenCalled();
+  });
+
   it('fits a letter back on one page, which a pack pays for', async () => {
     const typewriter = { theme: 'typewriter' as const, dateLine: 'October 2, 2026' };
     vi.mocked(getDraftForStationery).mockResolvedValue(draft({ bodyText: wide(13), stationery: typewriter }) as never);
