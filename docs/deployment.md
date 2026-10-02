@@ -650,8 +650,8 @@ ambiguous outcome raises a durable `mail_provider_outcome_ambiguous` alert.
 draw the letter or postcard before any request was made. The reason is one of:
 - `unknown_version`: a renderer version this build cannot print;
 - `image`: an image it could not read;
-- `overflow`: a letter that no longer lays out as it was previewed (it runs past its page or pages, or
-  now lays out on fewer pages than it was previewed on, #586), or a postcard message past its half of the back;
+- `overflow`: a letter that no longer lays out as it was previewed (it now lays out on more or fewer pages
+  than it was previewed on, or past three, #586), or a postcard message past its half of the back;
 - `pages`: a letter's page count no writer stores (#586): a count outside 1 to 3, or more than one page
   on the legacy HTML or beside a gift card;
 - `size`: a postcard size the renderer does not draw (it draws 6x9 only);

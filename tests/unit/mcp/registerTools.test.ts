@@ -789,17 +789,25 @@ describe("a letter preview's narration names its stationery (#563)", () => {
     expect(plain).not.toContain('Stationery');
   });
 
-  it('names the pages of a longer letter, the sheets, and Pay & Send (#586), and nothing for one page', () => {
+  it('names the pages of a longer letter and the sheets, led by Pay & Send (#586), and nothing for one page', () => {
+    const paidPerSend = { sendEligibility: { packPays: false } };
     for (const name of ['quote_and_preview_letter', 'quote_and_preview_letter_with_header_image', 'quote_and_preview_letter_with_image']) {
-      expect(summarizeToolResult(name, { ...PREVIEW, pages: 2 }), name).toMatch(
-        / A two-page letter, printed on both sides of one sheet, paid with Pay & Send\.$/
+      const two = summarizeToolResult(name, { ...PREVIEW, ...paidPerSend, pages: 2 });
+      expect(two, name).toMatch(/^Preview ready: paid with Pay & Send\. /);
+      expect(two, name).toMatch(/ A two-page letter, printed on both sides of one sheet\.$/);
+      expect(two, name).not.toContain('requires');
+      expect(summarizeToolResult(name, { ...PREVIEW, ...paidPerSend, pages: 3 }), name).toMatch(
+        / A three-page letter, printed on both sides of two sheets\.$/
       );
-      expect(summarizeToolResult(name, { ...PREVIEW, pages: 3 }), name).toMatch(
-        / A three-page letter, printed on both sides of two sheets, paid with Pay & Send\.$/
-      );
+      expect(summarizeToolResult(name, PREVIEW), name).toMatch(/^Preview ready: requires 1 letter\. /);
       expect(summarizeToolResult(name, PREVIEW), name).not.toContain('page letter');
       expect(summarizeToolResult(name, { ...PREVIEW, pages: 1 }), name).not.toContain('page letter');
     }
+    // A postcard no pack pays for (#579) is led the same way.
+    expect(summarizeToolResult('quote_and_preview_postcard', { lettersRequired: 1, ...paidPerSend })).toMatch(
+      /^Postcard preview ready: paid with Pay & Send\. /
+    );
+    expect(summarizeToolResult('quote_and_preview_postcard', { lettersRequired: 1 })).toMatch(/^Postcard preview ready: requires 1 letter\. /);
   });
 
   it("answers set_stationery with the tool's own sentence", () => {

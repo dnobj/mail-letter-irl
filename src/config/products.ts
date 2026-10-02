@@ -295,8 +295,8 @@ export const PACK_CREDITS_BY_PRODUCT: Readonly<Record<string, number>> = Object.
   PACK_PRODUCTS.map(p => [p.productCode, p.credits])
 );
 
-export function isJitPurchaseEnabled(): boolean {
-  return process.env.JIT_PURCHASE_ENABLED === 'true';
+export function isJitPurchaseEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.JIT_PURCHASE_ENABLED === 'true';
 }
 
 export function normalizedCurrency(value: string | undefined, fallback: string): string {

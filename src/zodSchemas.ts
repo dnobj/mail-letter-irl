@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { preprocessImageFileParam } from "./utils/imageFileParam.js";
 import { STATIONERY_THEMES } from "./render/stationery.js";
+import { MAX_LETTER_PAGES } from "./render/geometry.js";
 
 export const addressZ = z.object({
   name: z.string(),
@@ -474,7 +475,7 @@ export const quoteAndPreviewOutputZ = z.object({
   schedule: previewScheduleZ.optional(),
   arrivalWindow: arrivalWindowZ.optional().describe(ARRIVAL_WINDOW_DESCRIPTION),
   stationery: previewStationeryZ.optional().describe(PREVIEW_STATIONERY_DESCRIPTION),
-  pages: z.number().int().min(2).max(3).optional().describe(PREVIEW_PAGES_DESCRIPTION)
+  pages: z.number().int().min(2).max(MAX_LETTER_PAGES).optional().describe(PREVIEW_PAGES_DESCRIPTION)
 });
 
 /** Held mail's two dates (#535), on what a send and the order status say. */

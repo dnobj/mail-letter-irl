@@ -220,6 +220,27 @@ describe('a longer letter, while room to write is offered', () => {
     expect(getSendEligibility).toHaveBeenCalledWith(10, expect.any(Number), { mailType: 'letter' });
   });
 
+  it('prices a second page that only the enclosed image takes', async () => {
+    // 20 lines fit page 1 alone, but not with the 3-inch image after them.
+    vi.mocked(downloadAndProcessLetterImageWithPreview).mockResolvedValue({
+      base64DataUri: png(1950, 900),
+      previewDataUri: png(390, 180),
+      originalWidth: 1950,
+      originalHeight: 900,
+      processedWidth: 1950,
+      processedHeight: 900
+    } as never);
+    const output = await run('inline_image', { bodyText: lines(20) });
+    const draft = drafted();
+    expect(draft.pages).toBe(2);
+    expect(output.pages).toBe(2);
+    expect(getSendEligibility).toHaveBeenCalledWith(10, expect.any(Number), { mailType: 'letter', pages: 2 });
+    // The same text with no image is one page, as before.
+    vi.mocked(createDraft).mockClear();
+    await run('text_only', { bodyText: lines(20) });
+    expect(drafted().pages).toBe(1);
+  });
+
   it.each(['header_image', 'inline_image'] as const)('lays out a letter with an image (%s) on more pages too', async layout => {
     const output = await run(layout, { bodyText: lines(40) });
     expect(drafted().pages).toBe(2);

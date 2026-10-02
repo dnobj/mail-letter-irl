@@ -20,7 +20,7 @@ import { MAX_LETTER_PAGES } from '../render/geometry.js';
  * send and the print read the draft's own page count, never this.
  */
 export function isRoomToWriteOffered(env: NodeJS.ProcessEnv = process.env): boolean {
-  return offUnlessExplicitlyEnabled(ROOM_TO_WRITE_FLAG, env) && printRenderer(env) === 'pdf' && isJitPurchaseEnabled();
+  return offUnlessExplicitlyEnabled(ROOM_TO_WRITE_FLAG, env) && printRenderer(env) === 'pdf' && isJitPurchaseEnabled(env);
 }
 
 /** The most pages a preview lays a letter out on: three while room to write is offered, otherwise one. */
