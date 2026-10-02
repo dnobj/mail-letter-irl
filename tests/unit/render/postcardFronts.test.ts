@@ -6,7 +6,7 @@
  * POSTCARD_FRONT in geometry.ts holds the proportions.
  */
 
-import { inflateSync } from 'node:zlib';
+import { deflateSync, inflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import { layoutPostcard, PostcardFrontOverflow, renderPdf, renderPreviewSvg } from '../../../src/render/index.js';
 import { loadFont } from '../../../src/render/fonts.js';
@@ -14,7 +14,6 @@ import { shape } from '../../../src/render/glyphs.js';
 import { POSTCARD_BLEED, POSTCARD_FRONT, POSTCARD_GEOMETRY } from '../../../src/render/geometry.js';
 import { readImage, type RenderImage } from '../../../src/render/images.js';
 import type { ImageBox, TextRun } from '../../../src/render/layout.js';
-import { deflateSync } from 'node:zlib';
 
 /** imageService's crop for each size, at 300 dpi. */
 const CROPS = { '6x4': [1800, 1200], '6x9': [2700, 1800], '6x11': [3300, 1800] } as const;
@@ -97,21 +96,28 @@ describe('the bordered front (#594)', () => {
     for (const caption of [undefined, '', ' \n\t ']) expect(texts(front({ layout: 'border', caption }).items), String(caption)).toEqual([]);
   });
 
-  it('refuses a caption wider than the photo, saying by how much', () => {
-    const caption = 'A caption far too long to fit on the front of any postcard at all, however small the card';
+  it.each(SIZES)('refuses a %s caption just wider than the photo, though narrower than the trim, saying by how much', size => {
+    const trim = trimOf(size);
+    const photoWidth = trim.width - 2 * 0.04 * trim.width;
+    const size_ = 0.44 * 0.18 * trim.height;
+    const face = loadFont('Caveat-Regular');
+    const width = (text: string) => shape(face, text).advanceWidth * (size_ / face.unitsPerEm);
+    // The shortest run of x's wider than the photo: one x more than fits.
+    let count = 1;
+    while (width('x'.repeat(count)) <= photoWidth) count += 1;
+    expect(width('x'.repeat(count))).toBeLessThan(trim.width);
+    expect(() => front({ size, layout: 'border', caption: 'x'.repeat(count - 1) })).not.toThrow();
     const thrown = (() => {
       try {
-        front({ size: '6x4', layout: 'border', caption });
+        front({ size, layout: 'border', caption: 'x'.repeat(count) });
       } catch (error) {
         return error;
       }
     })() as PostcardFrontOverflow;
     expect(thrown).toBeInstanceOf(PostcardFrontOverflow);
     expect(thrown.part).toBe('caption');
-    expect(thrown.overflow).toBeGreaterThan(0);
-    expect(thrown.message).toMatch(/^The caption runs \d+\.\d\din past its room on the front\.$/);
-    // The same caption fits the wider 11x6's photo, or it would not be a fair test of the width.
-    expect(() => front({ size: '6x11', layout: 'border', caption: caption.slice(0, 60) })).not.toThrow();
+    expect(thrown.overflow).toBeCloseTo(width('x'.repeat(count)) - photoWidth, 6);
+    expect(thrown.message).toBe(`The caption runs ${(thrown.overflow / 72).toFixed(2)}in past its room on the front.`);
   });
 });
 
@@ -160,17 +166,29 @@ describe('the greetings front (#594)', () => {
     expect(texts(front({ layout: 'greetings' }).items).map(run => run.text)).toEqual(['Greetings from']);
   });
 
-  it('refuses a place too long to draw at its smallest size', () => {
+  it.each(SIZES)('refuses a %s place that would have to shrink below 7% of the height, saying by how much', size => {
+    const trim = trimOf(size);
+    const largest = 0.21 * trim.height;
+    const smallest = 0.07 * trim.height;
+    const room = 0.88 * trim.width;
+    const face = loadFont('Tinos-Regular');
+    const widthAt = (text: string, at: number) => shape(face, text).advanceWidth * (at / face.unitsPerEm);
+    // The shortest run of W's that would have to be drawn smaller than 7%: one more than may.
+    let count = 1;
+    while ((largest * room) / widthAt('W'.repeat(count), largest) >= smallest) count += 1;
+    const fits = texts(front({ size, layout: 'greetings', place: 'W'.repeat(count - 1) }).items)[2];
+    expect(fits.size).toBeGreaterThanOrEqual(smallest);
     const thrown = (() => {
       try {
-        front({ size: '6x4', layout: 'greetings', place: 'Llanfairpwllgwyngyllgogerychwyrndrobwllllantysiliogogogoch' });
+        front({ size, layout: 'greetings', place: 'W'.repeat(count) });
       } catch (error) {
         return error;
       }
     })() as PostcardFrontOverflow;
     expect(thrown).toBeInstanceOf(PostcardFrontOverflow);
     expect(thrown.part).toBe('place');
-    expect(thrown.overflow).toBeGreaterThan(0);
+    // How much wider than its room the place is at the smallest size.
+    expect(thrown.overflow).toBeCloseTo(widthAt('W'.repeat(count), smallest) - room, 6);
   });
 });
 
@@ -216,11 +234,22 @@ describe('the fronts as they print and preview (#594)', () => {
   });
 
   it("cuts a bordered photo to its box in the PDF, and colours the front's lettering", async () => {
-    const bordered = streams(await renderPdf(layoutPostcard({ message: 'Hi', image, layout: 'border', caption: 'Cape Cod' })));
-    // The photo is drawn inside a clip: a rectangle, then W n, before the image.
-    expect(bordered.some(stream => / re\nW n\n[\s\S]*\/I\w* Do/.test(stream))).toBe(true);
-    // The caption in #1E1A16 (0.1176, 0.1019, 0.0862).
-    expect(bordered.some(stream => /0\.1176\d* 0\.1019\d* 0\.0862\d* scn/.test(stream))).toBe(true);
+    const borderedLayout = layoutPostcard({ message: 'Hi', image, layout: 'border', caption: 'Cape Cod' });
+    const bordered = streams(await renderPdf(borderedLayout));
+    // The photo is drawn inside a clip of exactly its box (pdfkit writes
+    // numbers to six places), and the clip is closed (the second Q) before
+    // anything else on the front is drawn.
+    const { clip } = borderedLayout.pages[0].items[0] as ImageBox;
+    const number = (value: number) => String(Math.round(value * 1e6) / 1e6).replace('.', '\\.');
+    const clipped = new RegExp(
+      `^1 0 0 -1 0 ${number(borderedLayout.height)} cm\\nq\\n${number(clip!.x)} ${number(clip!.top)} ${number(clip!.width)} ${number(clip!.height)} re\\n` +
+      'W n\\nq\\n[^\\n]+ cm\\n\\/I\\d+ Do\\nQ\\nQ\\n'
+    );
+    const frontStream = bordered.find(stream => / re\n/.test(stream))!;
+    expect(frontStream).toMatch(clipped);
+    // The caption in #1E1A16 (0.1176, 0.1019, 0.0862), after the clip is closed.
+    const caption = frontStream.search(/0\.1176\d* 0\.1019\d* 0\.0862\d* scn/);
+    expect(caption).toBeGreaterThan(frontStream.indexOf('Do\nQ\nQ\n'));
 
     const greeting = streams(await renderPdf(layoutPostcard({ message: 'Hi', image, layout: 'greetings', place: 'Asheville' }))).join('\n');
     expect(greeting).toMatch(/1 1 1 scn/);

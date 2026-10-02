@@ -32,8 +32,12 @@ export interface TextRun {
   text: string;
   /** The same line as written, for text extraction and tests. */
   source: string;
-  /** A hex colour: a postcard front's lettering (#594). Black when left out. */
-  fill?: string;
+  /**
+   * A hex colour: a postcard front's lettering (#594). Black when left out.
+   * The preview writes it into an attribute as it is, so only a hex colour
+   * may be one.
+   */
+  fill?: `#${string}`;
 }
 
 export interface ImageBox {

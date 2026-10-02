@@ -197,3 +197,42 @@ describe('PostcardPreviewCard: the postcard as it prints', () => {
     expect((dom.window as unknown as { __pwned?: number }).__pwned).toBeUndefined();
   });
 });
+
+describe('PostcardPreviewCard: the front layouts (#594)', () => {
+  const ADDRESSES = { from: ['RETURN TO:', 'PAT EXAMPLE', '1 MAIN ST', 'SPRINGFIELD, IL 62701'], to: ['SAM RIVERA', '350 FIFTH AVE', 'NEW YORK, NY 10118'] };
+  const drawn = (content: { layout: 'border'; caption: string } | { layout: 'greetings'; place: string }) =>
+    renderPostcardPreviewDocument(renderPreviewSvg(
+      layoutPostcard({ message: 'Dear Sam,', image: { bytes: pngBytes(540, 360), mime: 'image/png', width: 540, height: 360 }, ...content }),
+      { addresses: ADDRESSES, stamp: { page: 1, geometry: POSTCARD_STAMP } }
+    ));
+
+  it.each([
+    [{ layout: 'border', caption: 'Cape Cod' } as const, ['#1E1A16']],
+    [{ layout: 'greetings', place: 'Asheville' } as const, ['#FFFFFF', '#A8461F', '#F6E3A1']]
+  ])('shows a %o front whole: every element, its lettering in its colours', (content, colours) => {
+    const document = drawn(content);
+    const dom = mount({ previewHtml: document, previewFrontHtml: LEGACY_FRONT });
+    const original = new dom.window.DOMParser().parseFromString(document, 'text/html').body.querySelectorAll(':scope > svg')[0];
+    const front = dom.window.document.querySelector('#preview-front .postcard-page > svg')!;
+    expectSameDrawing(original, front);
+    expect([...front.querySelectorAll('g[fill]')].map(group => group.getAttribute('fill'))).toEqual(colours);
+    for (const group of front.querySelectorAll('g[fill]')) expect(group.querySelectorAll('use').length, String(group.getAttribute('fill'))).toBeGreaterThan(3);
+  });
+
+  it("keeps a bordered photo's own viewport, and only what the renderer draws on it", () => {
+    // What a page could carry that the renderer never draws, on the viewport and its image.
+    const document = drawn({ layout: 'border', caption: 'Cape Cod' })
+      .replace(/<svg x="/, '<svg onload="parent.alert(1)" style="width:100%" x="')
+      .replace(/<image href="/, '<image onerror="parent.alert(1)" href="');
+    const dom = mount({ previewHtml: document, previewFrontHtml: LEGACY_FRONT });
+    const front = dom.window.document.querySelector('#preview-front .postcard-page > svg')!;
+    const viewport = front.querySelector(':scope > svg')!;
+    expect(viewport).not.toBeNull();
+    expect(viewport.getAttributeNames().sort()).toEqual(['height', 'width', 'x', 'y']);
+    const photo = viewport.querySelector('image')!;
+    expect(photo.getAttributeNames().sort()).toEqual(['height', 'href', 'preserveAspectRatio', 'width', 'x', 'y']);
+    // The photo is drawn larger than its box, from above it: the viewport cuts it.
+    expect(Number(photo.getAttribute('y'))).toBeLessThan(0);
+    expect(Number(photo.getAttribute('height'))).toBeGreaterThan(Number(viewport.getAttribute('height')));
+  });
+});

@@ -205,7 +205,7 @@ function oneLine(text: string | undefined): string {
 }
 
 /** One line of lettering centred on `centre`, and how wide it is drawn. */
-function centredLine(text: string, source: string, font: FontName, size: number, centre: number, baseline: number, fill: string) {
+function centredLine(text: string, source: string, font: FontName, size: number, centre: number, baseline: number, fill: `#${string}`) {
   const [line] = wrapText(text, size, Number.MAX_SAFE_INTEGER, font);
   const face = loadFont(font);
   const width = shape(face, line.drawn).advanceWidth * (size / face.unitsPerEm);
