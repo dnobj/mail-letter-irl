@@ -167,6 +167,20 @@ describe('the letter card as a studio (#580)', () => {
     expect(text(card, 'status-pill')).toBe('Ready to send');
   });
 
+  it('names the recipient as the server checked the address, and says "Your letter" with no name', async () => {
+    const checked = mount();
+    await checked.show(
+      output({ recipientAddressValidation: { originalAddress: { name: 'Ruth Reed', city: 'Tucson', state: 'AZ', postalCode: '85719' } } }),
+      ON
+    );
+    expect(text(checked, 'studio-title')).toBe('Letter to Ruth Reed');
+    expect(text(checked, 'studio-sub')).toBe('Draft · Tucson, AZ 85719');
+
+    const nameless = mount();
+    await nameless.show(output(), ON, { ...ARGS, recipient: { ...recipient, name: '  ' } });
+    expect(text(nameless, 'studio-title')).toBe('Your letter');
+  });
+
   it("moves the card's own rows into the tabs, and the page and Send beside them", async () => {
     const card = mount();
     await card.show(output({ stationery: { theme: 'classic', source: 'default' }, arrivalWindow: WINDOW }), ON);
@@ -214,8 +228,9 @@ describe('the letter card as a studio (#580)', () => {
     await card.key(card.tab('delivery'), 'Home');
     expect(card.selected()).toEqual(['style']);
     // Any other key leaves the tabs alone.
-    await card.key(card.tab('style'), 'ArrowDown');
-    expect(card.selected()).toEqual(['style']);
+    await card.key(card.tab('style'), 'ArrowRight');
+    await card.key(card.tab('words'), 'ArrowDown');
+    expect(card.selected()).toEqual(['words']);
   });
 
   it("shows the letter's words, as the call gave them, on the Words tab", async () => {
@@ -237,6 +252,62 @@ describe('the letter card as a studio (#580)', () => {
     await card.show(output({ arrivalWindow: WINDOW, schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' } }), ON);
     expect(card.selected()).toEqual(['delivery']);
     expect(text(card, 'studio-summary')).toMatch(/^black and white · held until Fri, Oct 9(, 2026)?$/);
+  });
+
+  it('holds a letter the server says is waiting for its mail date, and opens on Delivery', async () => {
+    const card = mount();
+    await card.show(output(), ON);
+    await card.answer(
+      {
+        result: {
+          content: [],
+          structuredContent: {
+            draftId: 'draft_0001',
+            status: 'sent',
+            orderId: 'order-1',
+            orderStatus: 'scheduled',
+            schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' },
+            cancellable: true
+          }
+        }
+      },
+      'get_draft_status'
+    );
+    expect(card.selected()).toEqual(['delivery']);
+    expect(text(card, 'studio-sub')).toBe('Sent · Springfield, IL 62701');
+    expect(text(card, 'studio-summary')).toMatch(/^black and white · held until Fri, Oct 9(, 2026)?$/);
+  });
+
+  it('says a letter the server says was cancelled will not be mailed, on Delivery', async () => {
+    const card = mount();
+    await card.show(output(), ON);
+    await card.answer(
+      {
+        result: {
+          content: [],
+          structuredContent: { draftId: 'draft_0001', status: 'sent', orderId: 'order-1', orderStatus: 'cancelled', schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' } }
+        }
+      },
+      'get_draft_status'
+    );
+    expect(card.selected()).toEqual(['delivery']);
+    expect(text(card, 'studio-sub')).toBe('Cancelled · Springfield, IL 62701');
+    expect(text(card, 'studio-summary')).toBe('black and white · cancelled, nothing will be mailed');
+  });
+
+  it("takes the estimate a cleared date brings, not the dated preview's", async () => {
+    const card = mount();
+    await card.show(
+      output({ arrivalWindow: WINDOW, schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' }, deliveryEstimate: 'Goes to the printer Fri, Oct 9.' }),
+      ON
+    );
+    await card.click(card.byId('arrives-asap'));
+    expect(card.lastRequest('tools/call', 'set_arrival_date')!.params.arguments).toEqual({ draftId: 'draft_0001' });
+    await card.answer(
+      { result: { content: [], structuredContent: { draftId: 'draft_0001', schedule: null, deliveryEstimate: 'Mailed in 1-2 business days', message: 'Cleared.' } } },
+      'set_arrival_date'
+    );
+    expect(text(card, 'studio-summary')).toBe('black and white · mailed in 1-2 business days');
   });
 
   it('keeps the tab the person picked when the preview changes under it', async () => {
@@ -299,11 +370,34 @@ describe('the letter card as a studio (#580)', () => {
     expect(text(styled, 'style-label')).toBe('Stationery');
   });
 
-  it('changes the style with set_stationery from the Style tab, as the row always did', async () => {
+  it('changes the style with set_stationery from the Style tab, as the row always did, and names it in the summary', async () => {
     const card = mount();
     await card.show(output({ stationery: { theme: 'classic', source: 'default' } }), ON);
+    expect(text(card, 'studio-summary')).toBe('Classic · black and white · mailed in 1-2 business days');
     await card.click(card.document.querySelector('#style-row [data-theme="botanical"]')!);
     expect(card.lastRequest('tools/call', 'set_stationery')!.params.arguments).toEqual({ draftId: 'draft_0001', stationery: 'botanical' });
+    await card.answer(
+      {
+        result: {
+          content: [{ type: 'text', text: 'Restyled.' }],
+          structuredContent: { draftId: 'draft_0001', stationery: { theme: 'botanical', dateLine: 'October 1, 2026', source: 'asked' } },
+          _meta: { previewHtml: PAGE }
+        }
+      },
+      'set_stationery'
+    );
+    expect(text(card, 'studio-summary')).toBe('Botanical · black and white · mailed in 1-2 business days');
+  });
+
+  it('names the stationery once its row has gone with the send', async () => {
+    const card = mount();
+    await card.show(output({ stationery: { theme: 'botanical', source: 'asked' } }), ON);
+    expect(card.byId('studio-style-quiet').style.display).toBe('none');
+    await card.click(card.byId('send-button'));
+    await card.answer({ result: { content: [{ type: 'text', text: 'Sent.' }], structuredContent: { orderId: 'order-1' } } }, 'send_letter');
+    expect(card.byId('style-row').style.display).toBe('none');
+    expect(card.byId('studio-style-quiet').style.display).toBe('');
+    expect(text(card, 'studio-style-quiet')).toBe('Botanical stationery, printed in black and white.');
   });
 
   it('sends with send_letter from the footer, then says it was sent', async () => {
@@ -360,6 +454,11 @@ describe('the letter card as a studio (#580)', () => {
     expect(shown()).toEqual([false, true]);
     expect(card.document.querySelector('.page-count')!.textContent).toBe('Page 2 of 2');
     expect(step.textContent).toBe('First page');
+    // From the last page, back to the first.
+    await card.click(step);
+    expect(shown()).toEqual([true, false]);
+    await card.click(step);
+    expect(shown()).toEqual([false, true]);
 
     await card.click(card.byId('send-button'));
     await card.answer({ result: { content: [{ type: 'text', text: 'Sent.' }], structuredContent: { orderId: 'order-1' } } }, 'send_letter');
@@ -379,11 +478,14 @@ describe('the letter card as a studio (#580)', () => {
 
   it('becomes a studio when a later result turns it on, and stays one', async () => {
     const card = mount();
-    await card.show(output(), { previewHtml: PAGE });
+    await card.show(output(), { previewHtml: GIFT_PAGES });
     expect(card.byId('card').classList.contains('studio')).toBe(false);
-    await card.show(output(), ON);
+    expect(card.document.querySelector('.page-tools')).toBeNull();
+    await card.show(output(), { previewHtml: GIFT_PAGES, [STUDIO]: true });
     expect(card.byId('card').classList.contains('studio')).toBe(true);
-    await card.show(output(), { previewHtml: PAGE });
+    // The page is drawn again for the studio, one page at a time.
+    expect(card.document.querySelector('.page-tools')).not.toBeNull();
+    await card.show(output(), { previewHtml: GIFT_PAGES });
     expect(card.byId('card').classList.contains('studio')).toBe(true);
     expect(card.document.querySelectorAll('.studio-hd')).toHaveLength(1);
   });
