@@ -18,6 +18,8 @@ process.env.LETTER_IRL_ARRIVE_BY_ENABLED = "false";
 process.env.LETTER_IRL_STATIONERY_ENABLED = "false";
 // And room to write (#586).
 process.env.LETTER_IRL_ROOM_TO_WRITE_ENABLED = "false";
+// And the 4x6 and 11x6 postcards (#594).
+process.env.LETTER_IRL_POSTCARD_SIZES_ENABLED = "false";
 
 const { stringifyManifest } = await import("../src/mcp/manifest.js");
 

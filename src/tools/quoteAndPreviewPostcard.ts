@@ -19,13 +19,14 @@ import {
   withDisplayImage
 } from "./letterHelpers.js";
 import { printRenderer } from "../config/printRenderer.js";
+import { offeredPostcardSizes } from "../config/postcardSizes.js";
 import { isPackPayable, type MailOption } from "../config/products.js";
 import {
   drawsGrapheme,
   GiftStripOverflow,
   layoutPostcard,
   layoutPostcardBack,
-  POSTCARD_STAMP,
+  POSTCARD_GEOMETRY,
   readImageDataUri,
   renderPreviewSvg,
   RENDERER_VERSION,
@@ -172,9 +173,19 @@ const MAX_GIFT_MESSAGE_LENGTH = 350;
 /**
  * On our renderer the back is measured, line by line, so the character limit
  * only bounds the work (#534 Phase 4), as RENDERED_LETTER_CHARACTER_CAP does
- * for letters. Sixteen full lines are about 700 characters.
+ * for letters, well above what each back holds: sixteen full lines are about
+ * 700 characters on a 6x9 and 1,000 on an 11x6, eleven about 370 on a 4x6
+ * (#594).
  */
-export const RENDERED_POSTCARD_CHARACTER_CAP = 1_000;
+export const RENDERED_POSTCARD_CHARACTER_CAPS: Readonly<Record<PostcardSize, number>> = {
+  '6x9': 1_000,
+  '6x4': 1_000,
+  '6x11': 2_000
+};
+/** The 6x9's, as it was before the other sizes. */
+export const RENDERED_POSTCARD_CHARACTER_CAP = RENDERED_POSTCARD_CHARACTER_CAPS['6x9'];
+/** Each size as a person names it, where ours put the short side first (#594). */
+const SIZE_NAMES: Readonly<Record<PostcardSize, string>> = { '6x9': 'A 6x9', '6x4': 'A 4x6', '6x11': 'An 11x6' };
 const POSTCARD_CREDITS_COST = 2; // 2 internal credits = 1 letter/postcard
 
 // ============================================================================
@@ -186,6 +197,17 @@ async function handler(
   context: ToolContext
 ): Promise<QuoteAndPreviewPostcardOutput> {
   const size: PostcardSize = input.size ?? '6x9';
+  // The 4x6 and 11x6 only while offered (#594): a size served by an older
+  // schema is refused, never printed as a 6x9.
+  if (!offeredPostcardSizes().includes(size)) {
+    throw Object.assign(
+      new Error(
+        `${Object.hasOwn(SIZE_NAMES, size) ? `${SIZE_NAMES[size]} postcard` : 'This postcard size'} is not offered here. ` +
+        `Leave size out for a 6x9 postcard.`
+      ),
+      { diagnosticClass: "validation_error" }
+    );
+  }
 
   // Arrive-by (#535): checked first, so a date that cannot be met is refused
   // before the picture is fetched or an address validated.
@@ -305,12 +327,13 @@ async function handler(
     balanceCanPay: available >= requiredCredits,
     giftCanPay: packPays
   });
-  // Our renderer draws 6x9 postcards, gift sends and their card included
-  // (#534); any other size keeps the legacy print and its limits. Read once,
-  // so every check agrees.
-  const renderer = size !== '6x9' ? 'html' : printRenderer();
+  // Our renderer draws the postcard at its size, a 6x9 gift send's card
+  // included (#534); the 4x6 and 11x6 are offered only on it (#594), so the
+  // legacy print and its limits see 6x9s alone. Read once, so every check
+  // agrees.
+  const renderer = printRenderer();
   const messageLimit = renderer === 'pdf'
-    ? RENDERED_POSTCARD_CHARACTER_CAP
+    ? RENDERED_POSTCARD_CHARACTER_CAPS[size]
     : gift.isGift ? MAX_GIFT_MESSAGE_LENGTH : MAX_MESSAGE_LENGTH;
 
   // Validate message length
@@ -444,10 +467,11 @@ async function handler(
   );
 
   // On our renderer the back is measured as it prints, before the picture
-  // is fetched: 16 lines in its left half, or 11 above a gift send's card.
+  // is fetched: 16 lines on a 6x9 or an 11x6 and 11 on a 4x6 (#594), or 11
+  // above a 6x9 gift send's card.
   const strip = renderer === 'pdf' && gift.card ? giftStrip(gift.card, sender.name, context) : undefined;
   if (renderer === 'pdf') {
-    const { page, overflowLines } = layoutPostcardBack(input.message, strip);
+    const { page, overflowLines } = layoutPostcardBack(input.message, strip, size);
     if (overflowLines > 0) {
       context.logger.warn(
         {
@@ -456,7 +480,7 @@ async function handler(
           linesUsed: page.linesUsed,
           linesAvailable: page.linesAvailable
         },
-        "Postcard message runs past its half of the back"
+        "Postcard message runs past its room on the back"
       );
       throw Object.assign(
         new Error(
@@ -555,12 +579,12 @@ async function handler(
   const renderedHtml = renderer === 'pdf'
     ? renderPostcardPreviewDocument(renderPreviewSvg(
         withDisplayImage(
-          layoutPostcard({ message: input.message, image: readImageDataUri(processedImage.base64DataUri), strip }),
+          layoutPostcard({ message: input.message, image: readImageDataUri(processedImage.base64DataUri), strip, size }),
           processedImage.previewDataUri
         ),
         {
           addresses: { from: stampedPostcardReturnLines(sender), to: stampedAddressLines(input.recipient) },
-          stamp: { page: 1, geometry: POSTCARD_STAMP }
+          stamp: { page: 1, geometry: POSTCARD_GEOMETRY[size].stamp }
         }
       ))
     : undefined;

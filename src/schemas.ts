@@ -700,6 +700,25 @@ export const listOrdersOutputSchema: JsonSchema = {
 // Postcard Schemas (US-POSTCARD-01, US-POSTCARD-02)
 // ============================================================================
 
+/**
+ * The postcard preview's `message` and `size` as /manifest.json serves them
+ * while the 4x6 and 11x6 are not offered (#594): exactly as before them, the
+ * 6x9 alone and its message's limit.
+ */
+export const postcardSixByNineProperties: Record<string, JsonSchema> = {
+  message: {
+    type: "string",
+    description: "Message for the back of the postcard. It must fit the back: 16 lines, about 500 characters of prose",
+    maxLength: 1000
+  },
+  size: {
+    type: "string",
+    enum: ["6x9"],
+    default: "6x9",
+    description: "Postcard size (currently only 6x9 is supported)"
+  }
+};
+
 export const quoteAndPreviewPostcardInputSchema: JsonSchema = {
   type: "object",
   required: ["recipient", "message"],
@@ -709,16 +728,20 @@ export const quoteAndPreviewPostcardInputSchema: JsonSchema = {
       description: "Return address (optional - will use saved return address if not provided)"
     },
     recipient: addressSchema,
+    // An 11x6's message may run to 2,000 characters (#594); the 6x9's to 1,000.
     message: {
       type: "string",
       description: "Message for the back of the postcard. It must fit the back: 16 lines, about 500 characters of prose",
-      maxLength: 1000
+      maxLength: 2000
     },
     size: {
       type: "string",
-      enum: ["6x9"],
+      enum: ["6x9", "6x4", "6x11"],
       default: "6x9",
-      description: "Postcard size (currently only 6x9 is supported)"
+      description:
+        "The postcard's size: 6x9 (the default), 6x4 for a 4 x 6 in postcard, or 6x11 for an 11 x 6 in one. " +
+        "A 4x6 holds 11 lines on its back, about 350 characters of prose; an 11x6 16 lines, about 900. " +
+        "Letter packs and gift letters pay only for a 6x9: a 4x6 or 11x6 is paid with Pay & Send."
     },
     // Image from file attachment - OpenAI Apps SDK requires explicit schema definition
     // Schema tells OpenAI how to transform file attachments into the expected format

@@ -730,6 +730,11 @@ layout than the person previewed.
   - An older build would redact a themed draft but keep its date line, initials and headline, and no later
     sweep revisits a redacted draft. Roll back only with no `pdf-2` draft whose content is still live
     (`redacted_at IS NULL`), not merely none unexpired: drafts expire in 24 hours, but are swept days later.
+- The 4x6 and 11x6 postcards set another (#594): #596's build is the first to print a `6x4` or `6x11`
+  postcard with `content.rendererVersion`. An older build holds one as `render_refused` (`size`), and the
+  Reject guidance above would then refund mail that can print. Do not roll back below it while such a
+  postcard is queued or held, or such a draft is unexpired; if one is held after all, retry it once the newer
+  build is back.
 
 `stripe_money_event_unmatched` covers two different situations, and they have
 different recovery paths.

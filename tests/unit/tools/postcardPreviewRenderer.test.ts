@@ -258,13 +258,92 @@ describe('a postcard preview drawn by our renderer', () => {
     expect(downloadAndProcessPostcardImageWithPreview).not.toHaveBeenCalled();
   });
 
-  it('keeps any size but 6x9 on the legacy HTML, as the print draws 6x9 only', async () => {
-    await run({ size: '6x4' });
-    expect(drafted().rendererVersion).toBeUndefined();
-    expect(drafted().previewHtml).not.toContain('data-renderer');
+  it('refuses a 4x6 or an 11x6 while those sizes are not offered, before anything is fetched (#594)', async () => {
+    for (const [size, named] of [['6x4', 'A 4x6'], ['6x11', 'An 11x6']] as const) {
+      const refused = await run({ size }).catch(error => error);
+      expect(refused.message, size).toBe(`${named} postcard is not offered here. Leave size out for a 6x9 postcard.`);
+      expect(refused, size).toMatchObject({ diagnosticClass: 'validation_error' });
+    }
+    expect(downloadAndProcessPostcardImageWithPreview).not.toHaveBeenCalled();
+    expect(createPostcardDraft).not.toHaveBeenCalled();
+    // The flag and Pay & Send are not enough without our renderer: the legacy
+    // back is a 9 x 6in page whatever the card.
+    vi.stubEnv('LETTER_IRL_POSTCARD_SIZES_ENABLED', 'true');
+    vi.stubEnv('JIT_PURCHASE_ENABLED', 'true');
+    vi.stubEnv('LETTER_IRL_PRINT_RENDERER', 'html');
+    await expect(run({ size: '6x4' })).rejects.toThrow('A 4x6 postcard is not offered here.');
+    // A 6x9, named or not, as before.
+    await expect(run({ size: '6x9' })).resolves.toMatchObject({ draftId: 'draft-1' });
+    expect(drafted().postcardSize).toBe('6x9');
+  });
+
+  describe('while the 4x6 and 11x6 are offered (#594)', () => {
+    beforeEach(() => {
+      vi.stubEnv('LETTER_IRL_POSTCARD_SIZES_ENABLED', 'true');
+      vi.stubEnv('JIT_PURCHASE_ENABLED', 'true');
+    });
+
+    // imageService's crop for each size, at 300 dpi; the page with its bleed;
+    // where PostGrid stamps the addresses (probe P14).
+    const SIZES = [
+      { size: '6x4' as const, crop: [1800, 1200], viewBox: '0 0 450 306', stampX: 282.6, recipientY: 211.46, held: 11 },
+      { size: '6x11' as const, crop: [3300, 1800], viewBox: '0 0 810 450', stampX: 556.2, recipientY: 355.46, held: 16 }
+    ];
+    const crop = ([width, height]: readonly number[]) => ({
+      base64DataUri: png(width, height),
+      previewDataUri: SMALL,
+      originalWidth: width,
+      originalHeight: height,
+      processedWidth: width,
+      processedHeight: height
+    });
+
+    it.each(SIZES)('previews a $size on our renderer: its pages, its stamps, its size and version on the draft', async ({ size, crop: cropped, viewBox, stampX, recipientY }) => {
+      vi.mocked(downloadAndProcessPostcardImageWithPreview).mockResolvedValue(crop(cropped) as never);
+      await run({ size, message: 'Dear Sam,\nWish you were here.\nPat' });
+      // The front cropped to its size.
+      expect(downloadAndProcessPostcardImageWithPreview).toHaveBeenCalledWith(expect.anything(), size, expect.anything());
+      const draft = drafted();
+      expect(draft).toMatchObject({ postcardSize: size, rendererVersion: 'pdf-1' });
+      const pages = draft.previewHtml!.match(/<svg [\s\S]*?<\/svg>/g)!;
+      expect(pages).toHaveLength(2);
+      for (const page of pages) expect(page).toContain(`viewBox="${viewBox}"`);
+      const stamped = [...pages[1].matchAll(/<text x="([\d.]+)" y="([\d.]+)">([^<]*)<\/text>/g)];
+      expect(stamped.map(match => Number(match[1]))).toEqual(Array(stamped.length).fill(stampX));
+      expect(stamped.find(match => match[3] === 'SAM RIVERA')?.[2]).toBe(String(recipientY));
+      expect(pages[1]).toContain('<title>Dear Sam,\nWish you were here.\nPat</title>');
+    });
+
+    it.each(SIZES)('measures a $size back at its own size: $held lines are accepted, one more refused', async ({ size, held }) => {
+      await expect(run({ size, message: lines(held) })).resolves.toMatchObject({ draftId: 'draft-1' });
+      vi.mocked(createPostcardDraft).mockClear();
+      const ctx = context();
+      await expect(run({ size, message: lines(held + 1) }, ctx)).rejects.toThrow(
+        `Postcard message is 1 line too long for the back: it takes ${held + 1} lines and the back holds ${held}.`
+      );
+      expect(ctx.logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ event: 'quote.postcard.exceeds_back', linesUsed: held + 1, linesAvailable: held }),
+        'Postcard message runs past its room on the back'
+      );
+      expect(createPostcardDraft).not.toHaveBeenCalled();
+    });
+
+    it("bounds an 11x6's message at 2,000 characters, the 6x9's and 4x6's at 1,000, so its lines govern", async () => {
+      // About 1,050 characters of prose: past the 6x9's and 4x6's caps, and
+      // about what an 11x6's 16 lines hold, so it is refused there by its lines.
+      const prose = 'the quick brown fox jumps over the lazy dog '.repeat(24).trim();
+      expect(prose.length).toBeGreaterThan(1_000);
+      await expect(run({ message: prose })).rejects.toThrow(`Postcard message is too long (${prose.length}/1000 characters).`);
+      await expect(run({ size: '6x4', message: prose })).rejects.toThrow(`(${prose.length}/1000 characters)`);
+      const elevenBySix = await run({ size: '6x11', message: prose }).then(() => null, (error: Error) => error.message);
+      expect(elevenBySix).toMatch(/^Postcard message is \d+ lines? too long for the back: it takes \d+ lines and the back holds 16\./);
+      await expect(run({ size: '6x11', message: 'a'.repeat(2_001) })).rejects.toThrow('(2001/2000 characters)');
+    });
   });
 
   it('shows a 4x6 as paid per send, though the balance could pay a 6x9 (#579)', async () => {
+    vi.stubEnv('LETTER_IRL_POSTCARD_SIZES_ENABLED', 'true');
+    vi.stubEnv('JIT_PURCHASE_ENABLED', 'true');
     // Ten credits: five letters, enough for any 6x9.
     const output = (await run({ size: '6x4' })) as { canSendNow: boolean; reasonCannotSend?: string };
     expect(output.canSendNow).toBe(false);
@@ -387,11 +466,18 @@ describe('a gift postcard', () => {
   });
 
   it('refuses a gift on any size but 6x9, and keeps every gift postcard without the flag on the legacy HTML and its limits', async () => {
-    // A gift letter pays only where a pack does (#579): a 6x9 postcard.
-    await expect(run({ sendAsGift: true, size: '6x4' })).rejects.toThrow(
-      'A gift letter pays for a one-page letter or a 6x9 postcard, not for this one.'
-    );
+    // A gift letter pays only where a pack does (#579): a 6x9 postcard. Not
+    // offered, a 4x6 is refused for its size first (#594).
+    await expect(run({ sendAsGift: true, size: '6x4' })).rejects.toThrow('A 4x6 postcard is not offered here.');
+    vi.stubEnv('LETTER_IRL_POSTCARD_SIZES_ENABLED', 'true');
+    vi.stubEnv('JIT_PURCHASE_ENABLED', 'true');
+    for (const size of ['6x4', '6x11'] as const) {
+      await expect(run({ sendAsGift: true, size }), size).rejects.toThrow(
+        'A gift letter pays for a one-page letter or a 6x9 postcard, not for this one.'
+      );
+    }
     expect(createPostcardDraft).not.toHaveBeenCalled();
+    vi.stubEnv('LETTER_IRL_POSTCARD_SIZES_ENABLED', '');
 
     vi.stubEnv('LETTER_IRL_PRINT_RENDERER', 'html');
     const output = await run({ sendAsGift: true });

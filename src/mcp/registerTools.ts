@@ -30,6 +30,7 @@ import {
   getReturnAddressInputZ,
   clearReturnAddressInputZ,
   quoteAndPreviewPostcardInputZ,
+  postcardSixByNineZ,
   sendPostcardInputZ,
   requestSendInputZ,
   getDraftStatusInputZ,
@@ -101,6 +102,7 @@ import { inlineHostBridge } from "./widgetHost.js";
 import { isSendConfirmationEnabled } from "../config/sendConfirmation.js";
 import { isArriveByEnabled } from "../config/arriveBy.js";
 import { isStationeryOffered } from "../config/stationery.js";
+import { isPostcardSizesOffered } from "../config/postcardSizes.js";
 import { ENVELOPE_REVEAL_META, isEnvelopeRevealEnabled } from "../config/envelope.js";
 import { STUDIO_CARD_META, isStudioCardEnabled } from "../config/studioCard.js";
 import { scheduleSentence } from "../tools/arriveByInput.js";
@@ -891,13 +893,29 @@ export function getZodInputShape(name: string) {
  * stationeryServed.test.ts). Every other tool is served its raw shape, as
  * before, set_arrival_date included: its own arriveBy is offered with it,
  * only while the flag is on.
+ *
+ * The postcard preview's `size` and `message` are served narrowed rather
+ * than withheld (servesPostcardSixByNineOnly): the 6x9 alone and its
+ * message's room, as before the 4x6 and 11x6 (#594). A client holding the
+ * wider schema has a 4x6 refused by validation, never printed as a 6x9.
  */
 export function getServedInputSchema(name: string): z.ZodRawShape | z.AnyZodObject | undefined {
-  const shape = getZodInputShape(name);
+  const declared = getZodInputShape(name);
+  const shape = declared && servesPostcardSixByNineOnly(name) ? { ...declared, ...postcardSixByNineZ } : declared;
   const withheld = withheldInputKeys(name);
   if (!shape || withheld.length === 0) return shape;
   const served = Object.fromEntries(Object.entries(shape).filter(([key]) => !withheld.includes(key))) as z.ZodRawShape;
   return z.object(served).passthrough();
+}
+
+/**
+ * Whether this deployment serves the postcard preview as it was before the
+ * 4x6 and 11x6 (#594): its `size` the 6x9 alone and its `message` described
+ * by the 6x9's room (in /manifest.json its limit too), while those sizes are
+ * not offered.
+ */
+export function servesPostcardSixByNineOnly(name: string): boolean {
+  return name === "quote_and_preview_postcard" && !isPostcardSizesOffered();
 }
 
 /** The letter previews' stationery arguments (#563). */
