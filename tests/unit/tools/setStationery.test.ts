@@ -73,6 +73,7 @@ function draft(options: { layoutType?: LetterLayoutType; gift?: boolean; bodyTex
     mail_type: 'letter',
     status: 'pending',
     expires_at: new Date('2026-10-01T12:00:00Z'),
+    redacted_at: null,
     renderer_version: 'pdf-1',
     body_text: bodyText,
     sign_off: signOff,
@@ -166,6 +167,46 @@ describe('set_stationery', () => {
     );
   });
 
+  it.each([['typewriter', 'cr11-'], ['handwritten', 'cv15-']] as const)(
+    'restyles to %s, setting the letter in its own typeface, recording pdf-2 (#563 PR 8b)',
+    async (theme, glyphs) => {
+      vi.mocked(getDraftForStationery).mockResolvedValue(draft());
+      const output = await run({ stationery: theme });
+      const change = written();
+      expect(change.stationery).toEqual({ theme, dateLine: 'September 30, 2026', source: 'asked' });
+      expect(change.previewHtml).toContain('<body data-renderer="pdf-2">');
+      expect(change.previewHtml).toContain(`id="${glyphs}`);
+      expect(change.previewHtml).not.toContain('id="tr12-');
+      expect(output.message).toBe(`The letter is now on the ${theme} stationery, and the account remembers it for its next letter preview. Nothing has been sent.`);
+    }
+  );
+
+  it('refuses Handwritten for text its typeface cannot draw, naming it, writing nothing; Classic and Typewriter take it (#563 PR 8b)', async () => {
+    const greek = 'Dear Sam,\n\n' + String.fromCodePoint(0x03ba, 0x03b1, 0x03bb, 0x03b7, 0x03bc, 0x03ad, 0x03c1, 0x03b1);
+    vi.mocked(getDraftForStationery).mockResolvedValue(draft({ bodyText: greek }));
+    const error = await run({ stationery: 'handwritten' }).catch(e => e);
+    expect(error.message).toContain('in the text, which the handwritten stationery prints in its own typeface');
+    expect(error.message).toMatch(/The handwritten stationery sets the text in its own typeface, which has fewer: choose another stationery/);
+    expect(error).toMatchObject({ diagnosticClass: 'validation_error' });
+    expect(setDraftStationery).not.toHaveBeenCalled();
+    await run({ stationery: 'typewriter' });
+    expect(written().stationery).toMatchObject({ theme: 'typewriter' });
+    vi.mocked(setDraftStationery).mockClear();
+    await run({ stationery: 'classic' });
+    expect(written().stationery).toEqual({ theme: 'classic', source: 'asked' });
+  });
+
+  it("refuses Typewriter for a letter its wider typeface pushes past the page, saying so and the way out (#563 PR 8b)", async () => {
+    const long = Array.from({ length: 20 }, () => 'All work and no play makes a letter long, and longer still, line after line.').join('\n');
+    vi.mocked(getDraftForStationery).mockResolvedValue(draft({ bodyText: long }));
+    await expect(run({ stationery: 'typewriter' })).rejects.toThrow(
+      /^Letter is \d+ lines too long for one page on the typewriter stationery: it takes \d+ lines and the page holds 26\. The typewriter stationery sets the text in its own typeface: shorten the message, or choose the classic stationery\.$/
+    );
+    expect(setDraftStationery).not.toHaveBeenCalled();
+    await run({ stationery: 'botanical' });
+    expect(written().stationery).toMatchObject({ theme: 'botanical' });
+  });
+
   it("prints the return address's initials on Monogram, or the ones asked for", async () => {
     vi.mocked(getDraftForStationery).mockResolvedValue(draft());
     await run({ stationery: 'monogram' });
@@ -189,7 +230,7 @@ describe('set_stationery', () => {
     const CAKE = String.fromCodePoint(0x1f382);
     await expect(run({ stationery: 'celebration', headline: `Hooray ${CAKE}` })).rejects.toThrow(/in the headline/);
     await expect(run({ stationery: 'botanical', headline: 'Hooray' })).rejects.toThrow('A headline prints only on the celebration stationery.');
-    await expect(run({ stationery: 'floral' })).rejects.toThrow('stationery must be one of classic, monogram, botanical or celebration.');
+    await expect(run({ stationery: 'floral' })).rejects.toThrow('stationery must be one of classic, monogram, botanical, celebration, typewriter or handwritten.');
     expect(setDraftStationery).not.toHaveBeenCalled();
   });
 
@@ -197,7 +238,7 @@ describe('set_stationery', () => {
     for (const input of [{}, { stationery: '' }, { stationery: '  ' }, { stationery: 7 }]) {
       await expect(run(input)).rejects.toMatchObject({
         code: 'STATIONERY_MISSING',
-        message: 'Name the stationery: classic, monogram, botanical or celebration.'
+        message: 'Name the stationery: classic, monogram, botanical, celebration, typewriter or handwritten.'
       });
     }
     expect(getDraftForStationery).not.toHaveBeenCalled();
@@ -222,6 +263,8 @@ describe('set_stationery', () => {
     ['a sent draft', {}, { status: 'consumed' }, 'DRAFT_ALREADY_SENT', "This letter has already been sent, so its stationery can't change. list_orders shows it."],
     ['an expired draft', {}, { status: 'expired' }, 'DRAFT_EXPIRED', 'This preview has expired. Make a new preview: the letter previews take stationery themselves.'],
     ['a draft past its expiry', {}, { expires_at: NOW }, 'DRAFT_EXPIRED', 'This preview has expired. Make a new preview: the letter previews take stationery themselves.'],
+    // Before its empty content is laid out (#573 review round 3).
+    ['a draft an erasure emptied', {}, { redacted_at: NOW, body_text: '', sender: {}, preview_html: null }, 'DRAFT_EXPIRED', 'This preview has expired. Make a new preview: the letter previews take stationery themselves.'],
     ['a draft the legacy HTML drew', {}, { renderer_version: null }, 'DRAFT_NOT_DRAWN', 'This preview was not drawn in a way that can take stationery. Make a new preview, with stationery if you like.']
   ])('refuses %s before drawing anything', async (_label, input, change, code, message) => {
     if (change !== undefined) vi.mocked(getDraftForStationery).mockResolvedValue(change === null ? null : { ...draft(), ...change });

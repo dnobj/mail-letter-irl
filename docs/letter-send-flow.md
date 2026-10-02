@@ -272,13 +272,15 @@ drawn by `src/render`, the three letter previews take `stationery`, `monogram` a
   ("Stationery is not available yet…") rather than printed on a plain page. Classic is always
   accepted.
 - **Checked** after the sender is known and before the page is laid out:
-  - the theme is one of the four;
+  - the theme is one of the six;
   - initials go only with Monogram, a headline only with Celebration;
   - asked-for initials are one to three letters; otherwise the return address's name gives them, without
     the titles before it or the suffixes after it ("Md. Rafiqul Islam" keeps its M);
   - a headline is one line, shrinking to 18pt and refused past it, saying how much fits, and at most
     `STATIONERY_SLOT_MAX_LENGTH` characters as stored, so what is stored reads back;
-  - the initials and the headline are checked against Tinos, like the text;
+  - the initials and the headline are checked against Tinos; the text and sign-off against the face
+    the theme sets them in (`drawsGraphemeIn`), so a theme with its own refuses what it cannot draw,
+    naming itself and suggesting another stationery;
   - a headline takes three lines of the page, and a letter it pushes past the page is refused with
     the counts, "…on the celebration stationery with a headline…", and the ways out.
 - **The date line** is the day of the preview on the New York calendar, written out ("October 1, 2026").
@@ -301,16 +303,20 @@ drawn by `src/render`, the three letter previews take `stationery`, `monogram` a
 
 A gift send in a theme prints its themed page, then today's card page.
 
-**Typewriter and Handwritten** (#563 PR 8) are drawn by the renderer, but no tool offers them yet,
-and no draft stores them (`stationeryOf` reads back only the four):
-- each sets the whole letter in a face of its own, on Classic's line pitch, so a page holds as many
-  lines (`bodyFace`):
-  - Typewriter in Cousine at 11pt, 70 characters to a line;
+**Typewriter and Handwritten** (#563 PR 8, migration 046) set the whole letter in a face of their own:
+- on Classic's line pitch, so a page holds as many lines (`bodyFace`):
+  - Typewriter in Cousine at 11pt, 70 characters to a line, so it fits fewer words than Classic;
   - Handwritten in Caveat at 15pt, with a faint 0.5pt `#aaaaaa` rule under each of the page's lines,
     left out where an enclosed image sits;
-- each prints its date line in its face;
-- the text is checked against that face (`drawsGraphemeIn`), which draws less than Tinos: Caveat has
-  no Greek or Hebrew.
+- each prints its date line in its face, and neither takes initials or a headline;
+- the text and sign-off are checked against that face, which draws less than Tinos:
+  - Caveat has no Greek or Hebrew, almost no precomposed Vietnamese, none of the horn or caron letters
+    (Ơ, Ư, Ǎ…), no historic Cyrillic, and no arrows or mathematical signs;
+  - Cousine lacks the fixed-width spaces, superscript and subscript digits, and a few letterlike
+    symbols and ligatures;
+- a refusal names the theme ("…which the handwritten stationery prints in its own typeface") and
+  suggests another stationery; a letter its face pushes past the page is told so: "…too long for one
+  page on the typewriter stationery…", shorten it or choose Classic.
 
 The fonts are Google Fonts' files, each beside its licence in `assets/fonts`.
 

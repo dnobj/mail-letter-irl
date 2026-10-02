@@ -45,7 +45,8 @@ const clusters = (text: string): string[] => [...graphemes.segment(text)].map(({
 const LETTER = /^\p{L}\p{M}*$/u;
 const MONOGRAM_MAX_LETTERS = 3;
 
-const THEME_LIST = `${STATIONERY_THEMES.slice(0, -1).join(', ')} or ${STATIONERY_THEMES[STATIONERY_THEMES.length - 1]}`;
+/** The themes, as a sentence names them: "classic, monogram, ... or handwritten". */
+export const THEME_LIST = `${STATIONERY_THEMES.slice(0, -1).join(', ')} or ${STATIONERY_THEMES[STATIONERY_THEMES.length - 1]}`;
 
 const DATE_LINE = new Intl.DateTimeFormat('en-US', {
   timeZone: SCHEDULE_TIME_ZONE,

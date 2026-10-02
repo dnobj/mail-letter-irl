@@ -100,16 +100,19 @@ describe('the theme', () => {
   it('is the one asked for, in any case, with the date line every theme but Classic prints', () => {
     expect(offered({ stationery: ' Botanical ' })).toEqual({ theme: 'botanical', dateLine: 'October 1, 2026', source: 'asked' });
     expect(offered({ stationery: 'celebration' })).toEqual({ theme: 'celebration', dateLine: 'October 1, 2026', source: 'asked' });
+    // The two with their own typeface (#563 PR 8b).
+    expect(offered({ stationery: 'Typewriter' })).toEqual({ theme: 'typewriter', dateLine: 'October 1, 2026', source: 'asked' });
+    expect(offered({ stationery: 'handwritten' })).toEqual({ theme: 'handwritten', dateLine: 'October 1, 2026', source: 'asked' });
   });
 
   it('refuses a theme it does not know, naming the ones it does', () => {
-    for (const stationery of ['floral', 'typewriter']) {
+    for (const stationery of ['floral', 'damask']) {
       const { message, reason } = refused({ stationery });
-      expect(message).toBe('stationery must be one of classic, monogram, botanical or celebration.');
+      expect(message).toBe('stationery must be one of classic, monogram, botanical, celebration, typewriter or handwritten.');
       expect(reason).toBe('unknown_theme');
     }
     const { message, reason } = refused({ stationery: ['botanical'] });
-    expect(message).toBe('stationery must be one of classic, monogram, botanical or celebration.');
+    expect(message).toBe('stationery must be one of classic, monogram, botanical, celebration, typewriter or handwritten.');
     expect(reason).toBe('stationery_not_text');
   });
 });
@@ -211,7 +214,7 @@ describe('the monogram', () => {
   });
 
   it('is refused with any other theme, or none', () => {
-    for (const stationery of [undefined, 'classic', 'botanical', 'celebration']) {
+    for (const stationery of [undefined, 'classic', 'botanical', 'celebration', 'typewriter', 'handwritten']) {
       const { message, reason } = refused({ stationery, monogram: 'PR' });
       expect(message).toBe('Initials print only on the monogram stationery. Choose stationery "monogram", or leave monogram out.');
       expect(reason).toBe('monogram_without_theme');
@@ -273,7 +276,7 @@ describe('the headline', () => {
   });
 
   it('is refused with any other theme, or none', () => {
-    for (const stationery of [undefined, 'classic', 'botanical', 'monogram']) {
+    for (const stationery of [undefined, 'classic', 'botanical', 'monogram', 'typewriter', 'handwritten']) {
       const { message, reason } = refused({ stationery, headline: 'Hello' });
       expect(message).toBe('A headline prints only on the celebration stationery. Choose stationery "celebration", or leave headline out.');
       expect(reason).toBe('headline_without_theme');

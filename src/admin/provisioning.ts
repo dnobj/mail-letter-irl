@@ -58,9 +58,12 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  * reader's users column list leaves it out; the operator reads users whole
  * and writes only the columns listed, none of them this. Erasure, which
  * clears it, runs as the database owner. So nothing to re-run.
+ *
+ * 046 widens two CHECKs to admit Typewriter and Handwritten (#563): no column
+ * or grant changes, so nothing to re-run.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
-  "045_stationery_default.sql";
+  "046_stationery_faces.sql";
 
 export interface AdminProvisioningArguments {
   environment: "development" | "production";

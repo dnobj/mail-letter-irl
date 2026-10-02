@@ -15,7 +15,7 @@
 (function () {
   "use strict";
 
-  var THEMES = ["classic", "monogram", "botanical", "celebration"];
+  var THEMES = ["classic", "monogram", "botanical", "celebration", "typewriter", "handwritten"];
 
   function isTheme(value) {
     return THEMES.indexOf(value) !== -1;

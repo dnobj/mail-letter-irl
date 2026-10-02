@@ -22,7 +22,7 @@ describe('rememberedStationery', () => {
   });
 
   it('is none for no theme, no account, or a theme this build does not draw', async () => {
-    for (const rows of [[{ stationery_theme: null }], [], [{ stationery_theme: 'typewriter' }]]) {
+    for (const rows of [[{ stationery_theme: null }], [], [{ stationery_theme: 'floral' }]]) {
       vi.mocked(db.query).mockResolvedValueOnce({ rows } as never);
       await expect(rememberedStationery('auth0|pat'), JSON.stringify(rows)).resolves.toBeNull();
     }

@@ -1,6 +1,6 @@
 /**
  * The letter card's Style row (#563): while a preview names its stationery,
- * the card offers the four styles and changes the draft's through
+ * the card offers the six styles and changes the draft's through
  * set_stationery, then draws the page the tool answers with in place of the
  * preview's. Framed by a fake MCP Apps host, as previewCardsOnBridge.test.ts
  * is: every call the card makes is a JSON-RPC request the test answers.
@@ -127,16 +127,36 @@ const restyled = (stationery: Json, previewHtml?: string) => ({
 });
 
 describe('the Style row (#563)', () => {
-  it('offers the four styles while the preview names its stationery, the one it is in pressed', async () => {
+  it('offers the six styles while the preview names its stationery, the one it is in pressed', async () => {
     const card = mount();
     await card.show(output({ theme: 'classic', source: 'default' }));
 
     expect(card.visible('style-row')).toBe(true);
     expect(Array.from(card.document.querySelectorAll('#style-row [data-theme]')).map(element => element.textContent)).toEqual([
-      'Classic', 'Monogram', 'Botanical', 'Celebration'
+      'Classic', 'Monogram', 'Botanical', 'Celebration', 'Typewriter', 'Handwritten'
+    ]);
+    expect(Array.from(card.document.querySelectorAll('#style-row [data-theme]')).map(element => element.getAttribute('data-theme'))).toEqual([
+      'classic', 'monogram', 'botanical', 'celebration', 'typewriter', 'handwritten'
     ]);
     expect(card.pressed()).toEqual(['classic']);
     expect(card.visible('style-note')).toBe(false);
+  });
+
+  it('restyles to a theme with its own typeface, and presses it (#563 PR 8b)', async () => {
+    const card = mount();
+    await card.show(output({ theme: 'handwritten', dateLine: 'October 1, 2026', source: 'asked' }));
+    expect(card.pressed()).toEqual(['handwritten']);
+
+    await card.choose('typewriter');
+    expect(card.lastRequest('tools/call', 'set_stationery')!.params.arguments).toEqual({ draftId: 'draft_0001', stationery: 'typewriter' });
+    await card.answer({
+      result: {
+        content: [],
+        structuredContent: { draftId: 'draft_0001', stationery: { theme: 'typewriter', dateLine: 'October 1, 2026', source: 'asked' } },
+        _meta: { previewHtml: BOTANICAL_PAGE }
+      }
+    });
+    expect(card.pressed()).toEqual(['typewriter']);
   });
 
   it('is hidden while the preview names no stationery, as while stationery is not offered', async () => {

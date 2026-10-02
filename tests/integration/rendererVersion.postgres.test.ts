@@ -217,9 +217,19 @@ describePostgres('renderer version (migration 039, #534)', () => {
       await expect(pool.query("UPDATE letter_drafts SET renderer_version = 'pdf-2' WHERE draft_id = $1", [plain]))
         .rejects.toMatchObject({ code: '23514', constraint: 'letter_drafts_stationery_drawn_by_pdf_2' });
       await expect(pool.query(
-        "UPDATE letter_drafts SET renderer_version = 'pdf-2', stationery = '{\"theme\": \"typewriter\"}'::jsonb WHERE draft_id = $1",
+        "UPDATE letter_drafts SET renderer_version = 'pdf-2', stationery = '{\"theme\": \"floral\"}'::jsonb WHERE draft_id = $1",
         [plain]
       )).rejects.toMatchObject({ code: '23514', constraint: 'letter_drafts_stationery_theme_known' });
+      // Typewriter and Handwritten are themes like the others (migration 046).
+      for (const theme of ['typewriter', 'handwritten']) {
+        const drawn = await seedDraft(userId, 'pdf-1');
+        await pool.query(
+          "UPDATE letter_drafts SET renderer_version = 'pdf-2', stationery = $2::jsonb WHERE draft_id = $1",
+          [drawn, JSON.stringify({ theme, dateLine: 'October 1, 2026' })]
+        );
+        expect((await pool.query('SELECT stationery FROM letter_drafts WHERE draft_id = $1', [drawn])).rows[0].stationery)
+          .toEqual({ theme, dateLine: 'October 1, 2026' });
+      }
       // Classic is no theme: never stored. Nor is JSON that names no theme.
       for (const stored of ['{"theme": "classic"}', '{}', '{"theme": null}', '"botanical"', '[]']) {
         await expect(pool.query(
@@ -294,14 +304,25 @@ describePostgres('renderer version (migration 039, #534)', () => {
       );
     }
 
-    it('remembers no theme by default, admits the four, and refuses any other', async () => {
+    it('remembers no theme by default, admits the six, and refuses any other', async () => {
       const userId = await seedUser();
       expect((await pool.query('SELECT stationery_theme FROM users WHERE user_id = $1', [userId])).rows[0].stationery_theme).toBeNull();
-      for (const theme of ['classic', 'monogram', 'botanical', 'celebration']) {
+      for (const theme of ['classic', 'monogram', 'botanical', 'celebration', 'typewriter', 'handwritten']) {
         await pool.query('UPDATE users SET stationery_theme = $2 WHERE user_id = $1', [userId, theme]);
+        expect((await pool.query('SELECT stationery_theme FROM users WHERE user_id = $1', [userId])).rows[0].stationery_theme).toBe(theme);
       }
-      await expect(pool.query("UPDATE users SET stationery_theme = 'typewriter' WHERE user_id = $1", [userId]))
+      await expect(pool.query("UPDATE users SET stationery_theme = 'floral' WHERE user_id = $1", [userId]))
         .rejects.toMatchObject({ code: '23514', constraint: 'users_stationery_theme_known' });
+    }, 60_000);
+
+    it('restyles a pending draft into Typewriter and Handwritten through set_stationery, remembering each (#563 PR 8b)', async () => {
+      const userId = await seedUser();
+      const draftId = await seedDraft(userId, 'pdf-1');
+      for (const theme of ['typewriter', 'handwritten'] as const) {
+        const stationery = { theme, dateLine: 'October 1, 2026' };
+        await expect(drafts.setDraftStationery(draftId, userId, { stationery, previewHtml: PAGE })).resolves.toBeNull();
+        expect(await stateOf(draftId, userId)).toEqual({ stationery, renderer_version: 'pdf-2', preview_html: PAGE, theme });
+      }
     }, 60_000);
 
     it('restyles a pending draft into a theme and back to Classic, remembering each, within the pair check', async () => {

@@ -654,6 +654,74 @@ describe('stationery (#563)', () => {
   });
 });
 
+describe('Typewriter and Handwritten (#563 PR 8b)', () => {
+  const GREEK = String.fromCodePoint(0x03ba, 0x03b1, 0x03bb, 0x03b7, 0x03bc, 0x03ad, 0x03c1, 0x03b1);
+
+  beforeEach(() => {
+    vi.stubEnv('LETTER_IRL_STATIONERY_ENABLED', 'true');
+    vi.mocked(rememberedStationery).mockResolvedValue(null);
+    vi.mocked(rememberStationery).mockResolvedValue(undefined);
+  });
+
+  it.each([['typewriter', 'cr11-'], ['handwritten', 'cv15-']] as const)(
+    '%s draws the letter in its own typeface, records pdf-2 with the stationery, and remembers it',
+    async (theme, glyphs) => {
+      const output = await run('text_only', { stationery: theme });
+      const draft = drafted();
+      const stationery = { theme, dateLine: 'September 30, 2026', source: 'asked' };
+      expect(draft.rendererVersion).toBe('pdf-2');
+      expect(draft.stationery).toEqual(stationery);
+      expect(output.stationery).toEqual(stationery);
+      expect(draft.previewHtml).toContain(`id="${glyphs}`);
+      expect(draft.previewHtml).not.toContain('id="tr12-');
+      expect(rememberStationery).toHaveBeenCalledWith('user-1', theme);
+    }
+  );
+
+  it("checks the text and sign-off against the theme's typeface, naming the stationery and the way out, before any draft", async () => {
+    // Classic and Typewriter print Greek; Handwritten's Caveat has none.
+    for (const theme of ['classic', 'typewriter'] as const) {
+      await expect(run('text_only', { stationery: theme, bodyText: `Dear Sam, ${GREEK}` })).resolves.toMatchObject({ draftId: 'draft-1' });
+    }
+    vi.mocked(createDraft).mockClear();
+    vi.mocked(rememberStationery).mockClear();
+    const ctx = context();
+    const error = await run('text_only', { stationery: 'handwritten', bodyText: `Dear Sam, ${GREEK}` }, ctx).catch(e => e);
+    // Each Greek letter Caveat lacks, a look-alike shown with its code point.
+    expect(error.message.startsWith("Letter IRL can't print some characters in this letter: ")).toBe(true);
+    expect(error.message).toContain('(U+03BA)');
+    expect(error.message).toContain(' in the text, which the handwritten stationery prints in its own typeface. ');
+    expect(error.message.endsWith(
+      'The handwritten stationery sets the text in its own typeface, which has fewer: choose another stationery, ' +
+        'or take those characters out or write them in plain letters, then preview again.'
+    )).toBe(true);
+    expect(error).toMatchObject({ diagnosticClass: 'validation_error' });
+    await expect(run('text_only', { stationery: 'handwritten', signOff: GREEK })).rejects.toThrow(
+      /in the sign-off, which the handwritten stationery prints in its own typeface/
+    );
+    expect(createDraft).not.toHaveBeenCalled();
+    expect(rememberStationery).not.toHaveBeenCalled();
+  });
+
+  it("keeps the usual closing when only an address, stamped in Open Sans, cannot print", async () => {
+    const CAKE = String.fromCodePoint(0x1f382);
+    const error = await run('text_only', { stationery: 'handwritten', recipient: address({ name: `Sam ${CAKE}` }) }).catch(e => e);
+    expect(error.message).toMatch(/in the recipient's address\. /);
+    expect(error.message).toMatch(/Take those characters out or write them in plain letters, then preview again\.$/);
+    expect(error.message).not.toContain('stationery');
+  });
+
+  it("says a letter the theme's typeface pushes past the page is too long on that stationery, with the ways out", async () => {
+    const long = Array.from({ length: 20 }, () => 'All work and no play makes a letter long, and longer still, line after line.').join('\n');
+    await expect(run('text_only', { stationery: 'classic', bodyText: long })).resolves.toMatchObject({ draftId: 'draft-1' });
+    vi.mocked(createDraft).mockClear();
+    await expect(run('text_only', { stationery: 'typewriter', bodyText: long })).rejects.toThrow(
+      /^Letter is \d+ lines too long for one page on the typewriter stationery: it takes \d+ lines and the page holds 26\. The typewriter stationery sets the text in its own typeface: shorten the message, or choose the classic stationery\.$/
+    );
+    expect(createDraft).not.toHaveBeenCalled();
+  });
+});
+
 describe('a stationery slot the layout cannot fit (#570 review round 2)', () => {
   it('is refused, classed, wherever the layout meets it, not thrown unclassified', () => {
     const han = String.fromCodePoint(0x4e2d).repeat(60);

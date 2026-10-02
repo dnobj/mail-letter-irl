@@ -18,13 +18,14 @@ import {
 } from '../../../src/render/pdf.js';
 import { renderPreviewSvg } from '../../../src/render/preview.js';
 import {
-  HEADLINE_LINES, headlineSize, layoutStationery, slotText, STATIONERY_CORNER, STATIONERY_THEMES, stationeryOf, StationeryOverflow,
+  HEADLINE_LINES, headlineSize, layoutStationery, slotText, STATIONERY_CORNER, stationeryOf, StationeryOverflow,
   type Stationery, type StationeryTheme
 } from '../../../src/render/stationery.js';
 
 const TEXT = 'Dear Sam,\n\nHappy birthday! I hope this year brings you everything you have been hoping for.\n\nWith love,\nAda';
 const SLOTS = { dateLine: 'October 1, 2026', monogram: 'AL', headline: 'Happy Birthday, Sam!' };
-const THEMED = STATIONERY_THEMES.filter((theme): theme is Exclude<StationeryTheme, 'classic'> => theme !== 'classic');
+/** The themes that draw in the corner and keep Classic's body; Typewriter and Handwritten are faces.test.ts's. */
+const THEMED = ['monogram', 'botanical', 'celebration'] as const satisfies ReadonlyArray<Exclude<StationeryTheme, 'classic'>>;
 
 const image = (width: number, height: number): RenderImage => ({ bytes: Buffer.alloc(0), mime: 'image/jpeg', width, height });
 const letter = (stationery?: Stationery, layoutType: 'text_only' | 'header_image' | 'inline_image' = 'text_only') =>

@@ -504,7 +504,7 @@ async function lockChangeableDraft(
   userId: string,
   now: Date
 ): Promise<DraftScheduleRefusal | null> {
-  const locked = await client.query<Pick<LetterDraft, 'status' | 'expires_at'> & { redacted_at: Date | null }>(
+  const locked = await client.query<Pick<LetterDraft, 'status' | 'expires_at' | 'redacted_at'>>(
     'SELECT status, expires_at, redacted_at FROM letter_drafts WHERE draft_id = $1 AND user_id = $2 FOR UPDATE',
     [draftId, userId]
   );
@@ -536,6 +536,7 @@ export interface DraftForStationery {
   mail_type: string;
   status: string;
   expires_at: Date;
+  redacted_at: Date | null;
   renderer_version: string | null;
   body_text: string;
   sign_off: string | null;
@@ -550,7 +551,7 @@ export interface DraftForStationery {
 /** The caller's draft, as set_stationery draws it again, or null when it is not theirs or not there. */
 export async function getDraftForStationery(draftId: string, userId: string): Promise<DraftForStationery | null> {
   const result = await query<DraftForStationery>(
-    `SELECT mail_type, status, expires_at, renderer_version, body_text, sign_off, layout_type,
+    `SELECT mail_type, status, expires_at, redacted_at, renderer_version, body_text, sign_off, layout_type,
             header_image_data, inline_image_data, sender, recipient, preview_html
      FROM letter_drafts
      WHERE draft_id = $1 AND user_id = $2`,

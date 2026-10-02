@@ -254,15 +254,29 @@ function listed(characters: string[], prints: PrintsGrapheme = printsInOpenSans)
 }
 
 /**
+ * A theme whose own typeface printed the text (#563): which theme, and the
+ * fields it prints, so a refusal of one of them says that another stationery
+ * may print what this one cannot.
+ */
+export interface ThemedFace {
+  theme: string;
+  fields: readonly string[];
+}
+
+/**
  * The sentence a preview refuses with, naming each character that would print
  * as a box and where it is.
  */
-export function unprintableRefusal(mail: 'letter' | 'postcard', found: UnprintableField[]): string {
+export function unprintableRefusal(mail: 'letter' | 'postcard', found: UnprintableField[], themed?: ThemedFace): string {
   const where = found.map(({ where, characters, prints }) => `${listed(characters, prints)} ${where}`).join('; ');
+  const inTheme = themed !== undefined && found.some(({ field }) => themed.fields.includes(field));
   return (
     `Letter IRL can't print some characters in this ${mail}: ${where}. ` +
     `Printed mail shows Latin letters with common accents, modern Greek, Cyrillic, Hebrew ` +
     `and common punctuation, and no emoji. ` +
-    `Take those characters out or write them in plain letters, then preview again.`
+    (inTheme
+      ? `The ${themed.theme} stationery sets the text in its own typeface, which has fewer: choose another ` +
+        `stationery, or take those characters out or write them in plain letters, then preview again.`
+      : `Take those characters out or write them in plain letters, then preview again.`)
   );
 }

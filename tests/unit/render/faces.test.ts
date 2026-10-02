@@ -2,7 +2,7 @@
  * Typewriter and Handwritten (#563 PR 8): themes that set the whole letter in
  * a face of their own, Cousine and Caveat, on Classic's line pitch. They print
  * a date line in their face, and Handwritten rules a faint line under each of
- * the page's lines. No tool offers them yet, and no draft stores them.
+ * the page's lines. Offered and stored like the others since PR 8b (046).
  */
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -18,14 +18,14 @@ import {
 import { rendererVersionFor, renderPdf, STATIONERY_RENDERER_VERSION } from '../../../src/render/pdf.js';
 import { renderPreviewSvg } from '../../../src/render/preview.js';
 import {
-  bodyFace, DRAWN_THEMES, layoutStationery, ruledLines, STATIONERY_CORNER, STATIONERY_THEMES, stationeryOf, type DrawnStationery
+  bodyFace, layoutStationery, ruledLines, STATIONERY_CORNER, STATIONERY_THEMES, stationeryOf, type Stationery
 } from '../../../src/render/stationery.js';
 
 const TEXT = 'Dear Sam,\n\nHappy birthday! I hope this year brings you everything you have been hoping for.\n\nWith love,\nAda';
 const DATE = 'October 1, 2026';
 
 const image = (width: number, height: number): RenderImage => ({ bytes: Buffer.alloc(0), mime: 'image/jpeg', width, height });
-const letter = (stationery?: DrawnStationery, layoutType: 'text_only' | 'header_image' | 'inline_image' = 'text_only', text = TEXT) =>
+const letter = (stationery?: Stationery, layoutType: 'text_only' | 'header_image' | 'inline_image' = 'text_only', text = TEXT) =>
   layoutLetter({ text, layoutType, image: layoutType === 'text_only' ? undefined : image(1200, 800), stationery });
 const items = (layout: Layout) => layout.pages[0].items;
 const runs = (layout: Layout) => items(layout).filter((item): item is TextRun => item.kind === 'text');
@@ -69,10 +69,20 @@ describe('the fonts (#563 PR 8)', () => {
 
 describe('the faces (#563 PR 8)', () => {
   it('are Tinos at 12 pt for Classic and the corner themes, Cousine at 11 for Typewriter, Caveat at 15 for Handwritten', () => {
-    for (const theme of STATIONERY_THEMES) expect(bodyFace(theme)).toEqual({ font: 'Tinos-Regular', size: 12 });
+    for (const theme of ['classic', 'monogram', 'botanical', 'celebration'] as const) {
+      expect(bodyFace(theme)).toEqual({ font: 'Tinos-Regular', size: 12 });
+    }
     expect(bodyFace('typewriter')).toEqual({ font: 'Cousine-Regular', size: 11 });
     expect(bodyFace('handwritten')).toEqual({ font: 'Caveat-Regular', size: 15 });
-    expect(DRAWN_THEMES).toEqual([...STATIONERY_THEMES, 'typewriter', 'handwritten']);
+    expect(STATIONERY_THEMES).toEqual(['classic', 'monogram', 'botanical', 'celebration', 'typewriter', 'handwritten']);
+  });
+
+  it("fit each face's ascent and descent inside the line pitch, so no line touches the next (#574 review round 1)", () => {
+    for (const theme of STATIONERY_THEMES) {
+      const { font, size } = bodyFace(theme);
+      const face = loadFont(font);
+      expect(((face.ascent - face.descent) * size) / face.unitsPerEm, theme).toBeLessThanOrEqual(LINE_PITCH);
+    }
   });
 
   it("set the body in the theme's face, on Classic's lines: same pitch, same room, more lines where the face is wider", () => {
@@ -100,8 +110,8 @@ describe('the faces (#563 PR 8)', () => {
 
   it("refuse a theme this build does not know before reading its face, prototype keys included", () => {
     for (const theme of ['floral', 'constructor', '__proto__', 'toString']) {
-      expect(() => bodyFace(theme as DrawnStationery['theme']), theme).toThrow(`Unknown stationery theme: ${theme}`);
-      expect(() => letter({ theme: theme as DrawnStationery['theme'] }), theme).toThrow(`Unknown stationery theme: ${theme}`);
+      expect(() => bodyFace(theme as Stationery['theme']), theme).toThrow(`Unknown stationery theme: ${theme}`);
+      expect(() => letter({ theme: theme as Stationery['theme'] }), theme).toThrow(`Unknown stationery theme: ${theme}`);
     }
   });
 
@@ -121,6 +131,8 @@ describe('the faces (#563 PR 8)', () => {
   });
 
   it("wrap Handwritten as wide as Caveat's letters allow, measured in Caveat", () => {
+    // Caveat's contextual alternates vary its letters, but the three forms of
+    // x share one advance, so a run of x's has one width for each length.
     const caveat = loadFont('Caveat-Regular');
     const advance = (caveat.glyphForCodePoint('x'.codePointAt(0)!).advanceWidth * 15) / caveat.unitsPerEm;
     const perLine = Math.floor(CONTENT_WIDTH / advance);
@@ -164,15 +176,22 @@ describe('the faces (#563 PR 8)', () => {
     while (at(text, 12) <= room) text += 'x';
     expect(at(text, 10)).toBeLessThanOrEqual(room);
     expect(() => letter({ theme: 'handwritten', dateLine: text })).toThrow(/dateLine/);
-    // And Typewriter's is 9, as the Tinos themes'.
+    // And Typewriter's is 9, as the Tinos themes': a line that fits at 9.5
+    // shrinks to it, and one that would fit only below 9 is refused
+    // (#574 review round 1).
     const cousine = loadFont('Cousine-Regular');
+    const typedAt = (text: string, size: number) => (shape(cousine, text).advanceWidth * size) / cousine.unitsPerEm;
     const typed = 'x'.repeat(Math.floor(room / ((cousine.glyphForCodePoint(120).advanceWidth * 9.5) / cousine.unitsPerEm)));
     const [small] = runs(letter({ theme: 'typewriter', dateLine: typed })).filter(run => run.baseline < BODY_TOP);
     expect(small).toMatchObject({ font: 'Cousine-Regular', size: 9.5 });
+    let tooLong = 'x';
+    while (typedAt(tooLong, 9) <= room) tooLong += 'x';
+    expect(typedAt(tooLong, 8.5)).toBeLessThanOrEqual(room);
+    expect(() => letter({ theme: 'typewriter', dateLine: tooLong })).toThrow(/dateLine/);
   });
 
   it('refuse a theme this build does not know in the corner too', () => {
-    expect(() => layoutStationery({ theme: 'floral' } as unknown as DrawnStationery, BODY_TOP)).toThrow('Unknown stationery theme: floral');
+    expect(() => layoutStationery({ theme: 'floral' } as unknown as Stationery, BODY_TOP)).toThrow('Unknown stationery theme: floral');
   });
 });
 
@@ -220,7 +239,7 @@ describe("Handwritten's rules (#563 PR 8)", () => {
   });
 
   it('are Handwritten\'s alone', () => {
-    for (const theme of DRAWN_THEMES.filter(name => name !== 'handwritten')) {
+    for (const theme of STATIONERY_THEMES.filter(name => name !== 'handwritten')) {
       expect(paths(letter({ theme })).some(path => path.stroke === '#aaaaaa' && path.strokeWidth === 0.5), theme).toBe(false);
     }
   });
@@ -272,8 +291,10 @@ describe('the outputs (#563 PR 8)', () => {
   });
 });
 
-describe('not yet stored (#563 PR 8)', () => {
-  it('reads neither theme back from storage, so no draft or letter carries one until a migration admits them', () => {
-    for (const theme of ['typewriter', 'handwritten']) expect(stationeryOf({ theme, dateLine: DATE })).toBeNull();
+describe('stored (#563 PR 8b)', () => {
+  it('reads both themes back from storage, with their date line, as the print reads the others', () => {
+    for (const theme of ['typewriter', 'handwritten'] as const) {
+      expect(stationeryOf({ theme, dateLine: DATE })).toEqual({ theme, dateLine: DATE });
+    }
   });
 });

@@ -61,9 +61,15 @@ function notFound(res: ServerResponse): void {
 
 type DraftState = 'ready' | 'sent' | 'expired';
 
+/**
+ * Where a draft stands for the page. A sent draft reads as sent even once
+ * retention has emptied it; a pending one an erasure emptied reads as expired,
+ * as the draft lock refuses it (lockChangeableDraft), never as ready with no
+ * content (#573 review round 3).
+ */
 function draftState(draft: LetterDraft, now: Date): DraftState {
   if (draft.status === 'consumed') return 'sent';
-  if (draft.status !== 'pending' || !(new Date(draft.expires_at).getTime() > now.getTime())) {
+  if (draft.status !== 'pending' || draft.redacted_at || !(new Date(draft.expires_at).getTime() > now.getTime())) {
     return 'expired';
   }
   return 'ready';

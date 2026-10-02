@@ -28,17 +28,13 @@ import { clampMarks } from './marks.js';
  * the layout throws StationeryOverflow, which a preview turns into a refusal.
  */
 
-export const STATIONERY_THEMES = ['classic', 'monogram', 'botanical', 'celebration'] as const;
-export type StationeryTheme = (typeof STATIONERY_THEMES)[number];
-
 /**
- * Every theme this renderer draws: the four above, and Typewriter and
- * Handwritten, which set the whole letter in a face of their own (#563 PR 8).
- * No tool offers the two yet, and no draft stores them (stationeryOf), until
- * a migration admits them.
+ * The themes: Classic, three that draw in the corner in Tinos, and Typewriter
+ * and Handwritten, which set the whole letter in a face of their own (#563
+ * PR 8, migration 046).
  */
-export const DRAWN_THEMES = [...STATIONERY_THEMES, 'typewriter', 'handwritten'] as const;
-export type DrawnTheme = (typeof DRAWN_THEMES)[number];
+export const STATIONERY_THEMES = ['classic', 'monogram', 'botanical', 'celebration', 'typewriter', 'handwritten'] as const;
+export type StationeryTheme = (typeof STATIONERY_THEMES)[number];
 
 /** A letter's theme and what it prints. */
 export interface Stationery {
@@ -49,11 +45,6 @@ export interface Stationery {
   monogram?: string;
   /** Celebration's headline, on one line above the body. */
   headline?: string;
-}
-
-/** A theme the renderer draws, with what it prints: any Stationery, or Typewriter or Handwritten. */
-export interface DrawnStationery extends Omit<Stationery, 'theme'> {
-  theme: DrawnTheme;
 }
 
 /** A typeface at a size. */
@@ -75,7 +66,7 @@ const TINOS_BODY: Face = { font: 'Tinos-Regular', size: BODY_FONT_SIZE };
  *   x-height is near Tinos's at 12 pt and a line holds about as much. Its
  *   ascent and descent (18.9 pt) fit inside the pitch.
  */
-const BODY_FACES: Record<DrawnTheme, Face> = {
+const BODY_FACES: Record<StationeryTheme, Face> = {
   classic: TINOS_BODY,
   monogram: TINOS_BODY,
   botanical: TINOS_BODY,
@@ -85,14 +76,14 @@ const BODY_FACES: Record<DrawnTheme, Face> = {
 };
 
 /** A theme this build does not know is an error, never a page drawn some other way. */
-function knownTheme(theme: string): asserts theme is DrawnTheme {
-  if (!(DRAWN_THEMES as readonly string[]).includes(theme)) {
+function knownTheme(theme: string): asserts theme is StationeryTheme {
+  if (!(STATIONERY_THEMES as readonly string[]).includes(theme)) {
     throw new Error(`Unknown stationery theme: ${String(theme).slice(0, 32)}`);
   }
 }
 
 /** The face a theme sets its body in: Tinos at 12 pt, as Classic, unless the theme has its own. */
-export function bodyFace(theme: DrawnTheme): Face {
+export function bodyFace(theme: StationeryTheme): Face {
   knownTheme(theme);
   return BODY_FACES[theme];
 }
@@ -160,7 +151,7 @@ const DATE_BASELINE = inch(0.9);
  * Handwritten's in Caveat a little larger than its body, down to 12, about
  * Tinos's 9 pt in height.
  */
-const DATE_FACES: Record<Exclude<DrawnTheme, 'classic'>, { face: Face; floor: number }> = {
+const DATE_FACES: Record<Exclude<StationeryTheme, 'classic'>, { face: Face; floor: number }> = {
   monogram: { face: { font: FONT, size: DATE_SIZE }, floor: DATE_MIN_SIZE },
   botanical: { face: { font: FONT, size: DATE_SIZE }, floor: DATE_MIN_SIZE },
   celebration: { face: { font: FONT, size: DATE_SIZE }, floor: DATE_MIN_SIZE },
@@ -247,7 +238,7 @@ function fitted(drawn: string, size: number, room: number, floor: number, font: 
 }
 
 /** The date line in its theme's face, its right edge on the body's, shrunk to fit the corner if it must. */
-function dateLine(text: string, theme: Exclude<DrawnTheme, 'classic'>): TextRun {
+function dateLine(text: string, theme: Exclude<StationeryTheme, 'classic'>): TextRun {
   const { face, floor } = DATE_FACES[theme];
   const drawn = visualOrder(text);
   const size = fitted(drawn, face.size, RIGHT - STATIONERY_CORNER.left, floor, face.font);
@@ -432,7 +423,7 @@ function headline(text: string, top: number): TextRun {
  * Typewriter and Handwritten draw only their date line here; their body's
  * face (bodyFace) and Handwritten's rules (ruledLines) are the layout's.
  */
-export function layoutStationery(stationery: DrawnStationery, bodyTop: number): StationeryLayout {
+export function layoutStationery(stationery: Stationery, bodyTop: number): StationeryLayout {
   knownTheme(stationery.theme);
   if (stationery.theme === 'classic') return { items: [], bodyOffset: 0 };
   const slot = (text: string | undefined) => {

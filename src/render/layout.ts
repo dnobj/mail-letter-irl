@@ -8,7 +8,7 @@ import {
 } from './geometry.js';
 import type { RenderImage } from './images.js';
 import { clampMarks, MARK, MAX_MARKS_PER_LETTER } from './marks.js';
-import { bodyFace, layoutStationery, ruledLines, type Band, type DrawnStationery } from './stationery.js';
+import { bodyFace, layoutStationery, ruledLines, type Band, type Stationery } from './stationery.js';
 import type { LetterLayoutType } from '../contracts/types.js';
 
 export interface LetterContent {
@@ -18,7 +18,7 @@ export interface LetterContent {
   /** The header image or the enclosed image; ignored by `text_only`. */
   image?: RenderImage;
   /** The letter's theme and what it prints (#563); without one, Classic: today's page. */
-  stationery?: DrawnStationery;
+  stationery?: Stationery;
 }
 
 /** One line of text, drawn from `x` along `baseline`, in visual order. */
@@ -138,7 +138,8 @@ export function drawsGrapheme(grapheme: string): boolean {
 /**
  * The check for one font: whether the renderer draws a grapheme cluster as
  * written in it. A theme with its own face (#563) checks its text against
- * that face, which may draw less than Tinos: Caveat has no Greek or Hebrew.
+ * that face, which may draw less than Tinos: Caveat has no Greek, Hebrew or
+ * Vietnamese.
  */
 export function drawsGraphemeIn(fontName: FontName): (grapheme: string) => boolean {
   return grapheme => draws(fontName, grapheme);
