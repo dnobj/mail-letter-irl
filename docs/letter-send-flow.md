@@ -109,6 +109,11 @@ grants is a change to the send rule. The `POST`:
 - runs the same service as the tools, below, so every check applies;
 - rewords the service's refusals for the page.
 
+**Mail no pack pays for (#579)** is paid on the page with Pay & Send:
+- `GET` marks it `packPays: false` and, while the draft is ready, gives its `payment`: the quote's Pay & Send (`available`, the amount and its display, or why not now), its price resolved first.
+- `POST /api/sends/:draftId/checkout`, the website's alone like the rest and `mail:send` like `create_mail_checkout`, opens the Stripe checkout (`createJitCheckout`). It returns to the page: `?paid=1` when paid, `?paid=0` when turned back. The order records those addresses, so a retry from the page reuses the page's own order, and one an app began is replaced.
+- Paying sends the mail, as everywhere else; the route itself sends nothing. Its refusals are worded for the page (`checkoutRefusalFor`), and `{ sendAnotherCopy: true }` buys another copy, as the send's body does.
+
 **Rollout.** The rule is off by default. It is turned on once:
 - the website's confirmation page is live (website #39);
 - the ChatGPT DEV regression pass has run with it on. It includes asking the model to send a preview: it must point to the card's Send button, or give the link, and never reach `send_letter` itself. Since #475 it also includes asking it to pay for one: it must point to the card's Pay & Send, and never reach `create_mail_checkout`, while the card's button still opens a checkout;

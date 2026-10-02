@@ -24,7 +24,14 @@ import { authenticateRestRequest, sendRestAuthFailure } from './middleware/restA
 import { rateLimitAccount } from './middleware/rateLimit.js';
 import { requiredRestScopes } from '../auth/restScopes.js';
 import { BETA_ACCESS_MESSAGE } from '../auth/betaAccess.js';
-import { isSendConfirmationEnabled, websiteClientId } from '../config/sendConfirmation.js';
+import {
+  confirmationCheckoutReturnUrls,
+  isSendConfirmationEnabled,
+  websiteClientId
+} from '../config/sendConfirmation.js';
+import { draftMailOption, isPackPayable, jitProductMatching } from '../config/products.js';
+import { createJitCheckout, getSendEligibility, type SendEligibility } from '../services/commerceService.js';
+import { ensurePriceCatalog } from '../services/priceCatalog.js';
 import { getDraft } from '../services/draftService.js';
 import { createMailOrderFromDraft } from '../services/mailSendService.js';
 import { processLetterJob } from '../services/letterJobService.js';
@@ -48,6 +55,8 @@ import {
 
 const SENDS_PREFIX = '/api/sends';
 const SEND_PATH = /^\/api\/sends\/([^/]+)$/;
+// The page takes the Pay & Send payment for mail no pack pays for (#579).
+const CHECKOUT_PATH = /^\/api\/sends\/([^/]+)\/checkout$/;
 
 function sendJson(res: ServerResponse, statusCode: number, body: unknown): void {
   res.statusCode = statusCode;
@@ -123,9 +132,23 @@ function stationeryView(draft: LetterDraft): Stationery | null {
   return stationeryOf(draft.stationery);
 }
 
+/**
+ * How a ready draft no pack pays for is paid on the page (#579): Pay & Send at
+ * its own price, or why not now. Null for mail a pack pays for. Its price is
+ * resolved first, so the page shows the price rather than a passing blip.
+ */
+async function paymentView(draft: LetterDraft): Promise<SendEligibility['payAndSend'] | null> {
+  const option = draftMailOption(draft);
+  if (isPackPayable(option)) return null;
+  const product = jitProductMatching(option);
+  if (product) await ensurePriceCatalog(product.productCode);
+  return getSendEligibility(0, draft.required_credits ?? 0, option).payAndSend;
+}
+
 async function showDraft(res: ServerResponse, draft: LetterDraft, userId: string): Promise<void> {
   const state = draftState(draft, new Date());
   writeDiagnostic('info', 'send.confirmation_viewed', { mailType: mailTypeOf(draft), state });
+  const payment = state === 'ready' ? await paymentView(draft) : null;
   sendJson(res, 200, {
     draftId: draft.draft_id,
     mailType: mailTypeOf(draft),
@@ -143,7 +166,10 @@ async function showDraft(res: ServerResponse, draft: LetterDraft, userId: string
     // Sent with these, it waits for its mail date (#535).
     schedule: scheduleOf(draft),
     // Drawn in this, it prints in it (#563).
-    stationery: stationeryView(draft)
+    stationery: stationeryView(draft),
+    // No pack pays for it (#579): the page takes Pay & Send instead.
+    ...(isPackPayable(draftMailOption(draft)) ? {} : { packPays: false }),
+    ...(payment ? { payment } : {})
   });
 }
 
@@ -208,8 +234,14 @@ export function refusalFor(error: unknown): Refusal {
   return refuse(500, 'send_failed', "We couldn't send it just now. Refresh this page to see whether it went out, then try again.");
 }
 
-async function sendDraft(req: IncomingMessage, res: ServerResponse, draft: LetterDraft, userId: string): Promise<void> {
-  let body: { sendAnotherCopy?: unknown } = {};
+/**
+ * The body of a send or a checkout: `{ sendAnotherCopy? }`, or empty. Null
+ * once the request has been answered, for a body too large or not JSON.
+ */
+async function readSendBody(
+  req: IncomingMessage,
+  res: ServerResponse
+): Promise<{ sendAnotherCopy?: unknown } | null> {
   let raw: string;
   try {
     raw = await readRequestBody(req, { limitBytes: JSON_API_BODY_LIMIT_BYTES });
@@ -218,19 +250,23 @@ async function sendDraft(req: IncomingMessage, res: ServerResponse, draft: Lette
     // maps it, and the boundary would answer 500 (#480 review).
     if (error instanceof RequestBodyTooLargeError) {
       sendJson(res, 413, { error: 'too_large' });
-      return;
+      return null;
     }
     throw error;
   }
-  if (raw.trim()) {
-    try {
-      const parsed = JSON.parse(raw);
-      body = parsed && typeof parsed === 'object' ? parsed : {};
-    } catch {
-      sendJson(res, 400, { error: 'invalid_json' });
-      return;
-    }
+  if (!raw.trim()) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    sendJson(res, 400, { error: 'invalid_json' });
+    return null;
   }
+}
+
+async function sendDraft(req: IncomingMessage, res: ServerResponse, draft: LetterDraft, userId: string): Promise<void> {
+  const body = await readSendBody(req, res);
+  if (!body) return;
 
   const mailType = mailTypeOf(draft);
   let created;
@@ -291,6 +327,83 @@ async function sendDraft(req: IncomingMessage, res: ServerResponse, draft: Lette
 }
 
 /**
+ * A checkout's refusal, in the page's words (#579). As refusalFor: only fixed
+ * strings and our own numbers leave here.
+ */
+export function checkoutRefusalFor(error: unknown): Refusal {
+  const refuse = (status: number, reason: string, message?: string, extra: Record<string, unknown> = {}): Refusal => ({
+    status,
+    reason,
+    body: { error: reason, ...(message ? { message } : {}), ...extra }
+  });
+
+  // The send's own refusals mean the same here.
+  if (isDuplicateMailError(error) || error instanceof SpendLimitError) return refusalFor(error);
+  switch ((error as { code?: unknown } | null)?.code) {
+    case 'ACCOUNT_SENDS_BLOCKED':
+    case 'BETA_ACCESS_DENIED':
+    case 'DRAFT_NOT_FOUND':
+    case 'DRAFT_NOT_OWNED':
+    case 'DRAFT_EXPIRED':
+    case 'SCHEDULE_PASSED':
+    case 'DRAFT_INVALID_STATE':
+      return refusalFor(error);
+    case 'DRAFT_TOO_CLOSE_TO_EXPIRY':
+      return refuse(410, 'expired', 'This preview expires too soon to pay for it. Make a new preview, then pay from there.');
+    case 'DRAFT_IS_GIFT':
+      return refuse(409, 'gift', 'This uses a gift letter, so there is nothing to pay. Press Send instead.');
+    case 'PREPAID_BALANCE_AVAILABLE':
+      return refuse(409, 'use_letters', 'You have letters for this, so there is nothing to pay. Press Send instead.');
+    case 'JIT_OPTION_NOT_SOLD':
+      return refuse(409, 'not_sold', "This can't be paid for right now. Make a new preview, then try again.");
+    case 'JIT_DISABLED':
+    case 'JIT_NOT_CONFIGURED':
+    case 'PRICE_ID_NOT_CONFIGURED':
+    case 'PROVIDER_ERROR':
+      return refuse(503, 'pay_unavailable', "Pay & Send isn't available just now. Please try again later.");
+  }
+  return refuse(500, 'checkout_failed', "We couldn't open the payment just now. Refresh this page, then try again.");
+}
+
+/**
+ * Takes the Pay & Send payment for a draft (#579): opens a Stripe checkout
+ * that returns to this page. Paying sends the mail, as the card's Pay & Send
+ * does, so nothing here sends.
+ */
+async function checkoutDraft(req: IncomingMessage, res: ServerResponse, draft: LetterDraft, userId: string): Promise<void> {
+  const body = await readSendBody(req, res);
+  if (!body) return;
+  const mailType = mailTypeOf(draft);
+  try {
+    const result = await createJitCheckout({
+      userId,
+      draftId: draft.draft_id,
+      allowDuplicate: body.sendAnotherCopy === true,
+      returnTo: confirmationCheckoutReturnUrls(draft.draft_id)
+    });
+    writeDiagnostic('info', 'send.confirmation_checkout', { mailType, status: result.status, reused: result.reused });
+    sendJson(res, 200, {
+      orderId: result.orderId,
+      status: result.status,
+      // Only while it can still be paid: a paid order has nothing to open.
+      checkoutUrl: result.status === 'checkout_pending' ? result.checkoutUrl ?? null : null,
+      amountCents: result.amountCents,
+      currency: result.currency,
+      expiresAt: result.expiresAt ?? null,
+      reused: result.reused
+    });
+  } catch (error) {
+    const refusal = checkoutRefusalFor(error);
+    writeDiagnostic(refusal.status >= 500 ? 'error' : 'info', 'send.confirmation_checkout_refused', {
+      mailType,
+      reason: refusal.reason,
+      errorClass: carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error')
+    });
+    sendJson(res, refusal.status, refusal.body);
+  }
+}
+
+/**
  * Returns true when the request was handled, false when it is not a sends
  * route.
  */
@@ -302,14 +415,15 @@ export async function handleSendConfirmationApiRequest(
   if (pathname !== SENDS_PREFIX && !pathname.startsWith(`${SENDS_PREFIX}/`)) {
     return false;
   }
-  const match = SEND_PATH.exec(pathname);
+  const checkout = CHECKOUT_PATH.exec(pathname);
+  const match = checkout ?? SEND_PATH.exec(pathname);
   // Off, the routes do not exist: the page ships with the send rule.
   if (!isSendConfirmationEnabled() || !match) {
     notFound(res);
     return true;
   }
-  if (req.method !== 'GET' && req.method !== 'POST') {
-    res.setHeader('Allow', 'GET, POST');
+  if (checkout ? req.method !== 'POST' : req.method !== 'GET' && req.method !== 'POST') {
+    res.setHeader('Allow', checkout ? 'POST' : 'GET, POST');
     sendJson(res, 405, { error: 'method_not_allowed' });
     return true;
   }
@@ -347,7 +461,9 @@ export async function handleSendConfirmationApiRequest(
     return true;
   }
 
-  if (req.method === 'GET') {
+  if (checkout) {
+    await checkoutDraft(req, res, draft, auth.user.userId);
+  } else if (req.method === 'GET') {
     await showDraft(res, draft, auth.user.userId);
   } else {
     await sendDraft(req, res, draft, auth.user.userId);

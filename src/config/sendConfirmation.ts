@@ -42,6 +42,19 @@ export function sendConfirmationUrl(draftId: string, env: NodeJS.ProcessEnv = pr
 }
 
 /**
+ * Where Stripe returns a person who paid for a draft with Pay & Send on its
+ * confirmation page (#579), or turned back: the same page, which then shows
+ * the mail going out.
+ */
+export function confirmationCheckoutReturnUrls(
+  draftId: string,
+  env: NodeJS.ProcessEnv = process.env
+): { successUrl: string; cancelUrl: string } {
+  const page = sendConfirmationUrl(draftId, env);
+  return { successUrl: `${page}?paid=1`, cancelUrl: `${page}?paid=0` };
+}
+
+/**
  * Where the person buys letter packs when the app they are in takes no
  * purchases (#484). The dashboard signs them in first and then opens this page.
  */

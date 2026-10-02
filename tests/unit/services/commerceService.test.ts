@@ -3785,6 +3785,42 @@ describe('commerceService', () => {
       );
       expect(event).toBeDefined();
     });
+
+    describe('a checkout opened from the confirmation page (#579)', () => {
+      const PAGE = {
+        successUrl: 'https://site.example/confirm/draft-1?paid=1',
+        cancelUrl: 'https://site.example/confirm/draft-1?paid=0'
+      };
+
+      it('returns the person to the page, as the new order records', async () => {
+        await createJitCheckout({ userId: 'user-1', draftId: 'draft-1', returnTo: PAGE });
+
+        expect(inserts()).toHaveLength(1);
+        const [, , , , snapshot] = inserts()[0][1] as unknown[];
+        expect(JSON.parse(String(snapshot)).stripeRequest).toEqual({ priceId: 'price-jit-letter', ...PAGE });
+        expect(mocks.createJitSession).toHaveBeenCalledWith(expect.objectContaining(PAGE));
+      });
+
+      it("reuses the page's own sessionless order when the page retries", async () => {
+        active = [sessionless({ priceId: 'price-jit-letter', ...PAGE })];
+
+        const result = await createJitCheckout({ userId: 'user-1', draftId: 'draft-1', returnTo: PAGE });
+
+        expect(result).toMatchObject({ orderId: 'order-1', reused: true });
+        expect(inserts()).toHaveLength(0);
+        expect(mocks.createJitSession).toHaveBeenCalledWith(expect.objectContaining({ orderId: 'order-1', ...PAGE }));
+      });
+
+      it('opens a fresh order when the page retries one an app began, as for a changed return address', async () => {
+        active = [sessionless(request('order-1'))];
+
+        await createJitCheckout({ userId: 'user-1', draftId: 'draft-1', returnTo: PAGE });
+
+        expect(cancels('CHECKOUT_REQUEST_CHANGED_BEFORE_SESSION')).toHaveLength(1);
+        expect(inserts()).toHaveLength(1);
+        expect(mocks.createJitSession).toHaveBeenCalledWith(expect.objectContaining(PAGE));
+      });
+    });
   });
 
   describe('the duplicate check before a new checkout (#412)', () => {
