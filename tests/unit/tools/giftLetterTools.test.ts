@@ -200,6 +200,19 @@ describe('mail no pack pays for, per app (#579)', () => {
     expect(appSendEligibility(OPTION, clientProfileNamed('claude'), 'draft-1').payAndSend).not.toHaveProperty('pageUrl');
   });
 
+  it("names the page with the letter preview's own draft, as a longer letter will need", async () => {
+    // A quote for mail no pack pays for, as a two-page letter's will be once
+    // room to write gives letters their pages.
+    mocks.createDraft.mockResolvedValue({ draftId: 'draft-7', expiresAt: new Date('2026-09-18T12:00:00Z') });
+    mocks.getGiftBalance.mockResolvedValue({ available: 0, next: undefined });
+    mocks.getSendEligibility.mockReturnValue(OPTION);
+
+    const output = await preview(0, undefined, 'claude');
+
+    expect(output.sendEligibility.payAndSend.pageUrl).toBe('https://website.example/confirm/draft-7');
+    expect(output.sendEligibility.packPays).toBe(false);
+  });
+
   it('says why such mail cannot be sent from the balance', () => {
     expect(reasonCannotSend({ mailType: 'postcard', postcardSize: '6x4' })).toBe(PAID_PER_SEND_REASON);
     expect(PAID_PER_SEND_REASON).toBe(
