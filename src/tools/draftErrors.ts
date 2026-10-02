@@ -207,7 +207,7 @@ export function friendlyDraftError(
   }
   if (code === 'JIT_PRODUCT_MISMATCH') {
     // Upstream interpolates the order id, its product code and the draft id.
-    return new Error(`That Pay & Send order paid for different mail than this ${noun} is now, so it was not sent. Please start a new checkout.`);
+    return new Error(`That Pay & Send order paid for different mail than this ${noun} is now, so it was not sent.`);
   }
 
   if (typeof code === 'string' && code.length > 0) {

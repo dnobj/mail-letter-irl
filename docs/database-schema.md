@@ -181,7 +181,7 @@ Temporary drafts for idempotent send operations. Prevents duplicate sends.
 | stationery | JSONB | YES | - | The stationery the preview was drawn in (044, #563): `{"theme": "monogram" \| "botanical" \| "celebration" \| "typewriter" \| "handwritten", "dateLine"?, "monogram"?, "headline"?}`. NULL is Classic. Set exactly when `renderer_version` is `pdf-2`. The send copies it into `letters.content.stationery`; redaction keeps the theme and drops the slot text |
 | arrive_by | DATE | YES | - | The date the mail should arrive by, in America/New_York; NULL to mail as soon as possible (040, #535) |
 | mail_on | DATE | YES | - | The date it goes to the printer, worked back from `arrive_by` by the lead time (040, #535). The send copies both to the letter and holds its job until then |
-| pages | SMALLINT | NO | 1 | The pages the letter prints on, 1 to 3, printed on both sides when more than 1 (047, #586). The send, the checkout and the confirmation page price and refuse the draft by it (`draftMailOption`): a letter of more than one page is paid per send. `createDraft` refuses a count it would not store, before writing (`DRAFT_PAGES_INVALID`) |
+| pages | SMALLINT | NO | 1 | The pages the letter prints on, 1 to 3, printed on both sides when more than 1 (047, #586). The send, the checkout and the confirmation page price and refuse the draft by it (`draftMailOption`): a letter of more than one page is paid per send. `createDraft` refuses a count it would not store, before writing (`DRAFT_PAGES_INVALID`). The send copies it into `letters.content.pages` when above one, for the print |
 | created_at | TIMESTAMPTZ | NO | NOW() | Draft creation |
 | updated_at | TIMESTAMPTZ | NO | NOW() | Last update |
 

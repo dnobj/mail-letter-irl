@@ -151,7 +151,7 @@ describe('mail-type wording', () => {
       code: 'JIT_PRODUCT_MISMATCH'
     });
     expect(friendlyDraftError(upstream, 'd-1', 'letter').message).toBe(
-      'That Pay & Send order paid for different mail than this letter is now, so it was not sent. Please start a new checkout.'
+      'That Pay & Send order paid for different mail than this letter is now, so it was not sent.'
     );
     expect(friendlyDraftError(upstream, 'd-1', 'postcard').message).toContain('than this postcard is now');
   });

@@ -319,6 +319,27 @@ describe('createMailOrderFromDraft: what packs and gift letters pay for (#579)',
     expect(calls).not.toContain('insert-letter');
   });
 
+  it('refuses the balance for a two-page letter, before any value moves (#586)', async () => {
+    draft = { ...draft, draft_id: 'draft-long', mail_type: 'letter', postcard_size: null, body_text: 'Hello', pages: 2, renderer_version: 'pdf-1' };
+    await expect(
+      createMailOrderFromDraft({ draftId: 'draft-long', userId: 'user-1', mailType: 'letter' })
+    ).rejects.toMatchObject({ code: 'PACK_CANNOT_PAY' });
+    expect(mocks.deductCredits).not.toHaveBeenCalled();
+    expect(calls).not.toContain('insert-letter');
+    expect(mocks.createOutboxJob).not.toHaveBeenCalled();
+  });
+
+  it('refuses a gift letter for a two-page letter, before the gift is spent (#586)', async () => {
+    // Migration 047 refuses this row; the send refuses it whatever stored it.
+    draft = { ...draft, draft_id: 'draft-long', mail_type: 'letter', postcard_size: null, body_text: 'Hello', pages: 2, renderer_version: 'pdf-1', is_gift_send: true };
+    await expect(
+      createMailOrderFromDraft({ draftId: 'draft-long', userId: 'user-1', mailType: 'letter' })
+    ).rejects.toMatchObject({ code: 'PACK_CANNOT_PAY' });
+    expect(mocks.consumeGift).not.toHaveBeenCalled();
+    expect(mocks.deductCredits).not.toHaveBeenCalled();
+    expect(calls).not.toContain('insert-letter');
+  });
+
   it('lets Pay & Send fund it: the rule is for packs and gift letters only', async () => {
     // Past the rule, a jit_order is looked up as ever; none exists here.
     await expect(

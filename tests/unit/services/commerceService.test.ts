@@ -3510,6 +3510,28 @@ describe('commerceService', () => {
       expect(paramsRecorded()).not.toContain('Draft expired');
     });
 
+    it('refunds a paid order whose draft is no longer the mail it paid for, as recovery finds it (#586)', async () => {
+      mocks.query.mockImplementation(async (sql: string) => {
+        if (sql.includes('SELECT * FROM orders WHERE order_id = $1 FOR UPDATE')) {
+          return { rows: [{ ...baseOrder, status: 'paid' }] };
+        }
+        return { rows: [] };
+      });
+      mocks.createMail.mockRejectedValueOnce(
+        Object.assign(new Error("Order order-1 paid for jit-letter, not draft draft-1's mail"), {
+          code: 'JIT_PRODUCT_MISMATCH',
+          diagnosticClass: 'JIT_PRODUCT_MISMATCH'
+        })
+      );
+
+      await expect(fulfillPaidOrder('order-1')).resolves.toBe(false);
+
+      const failure = mocks.query.mock.calls.find(([sql]) => String(sql).includes("last_error_code = 'RECOVERY_FAILED'"));
+      expect(String(failure![0])).toContain("status = 'refund_pending'");
+      expect(failure![1]).toEqual(['order-1', 'JIT_PRODUCT_MISMATCH']);
+      expect(paramsRecorded()).not.toContain('paid for jit-letter');
+    });
+
     it('labels an unclassified recovery failure database_error, the savepoint fallback', async () => {
       mocks.query.mockImplementation(async (sql: string) => {
         if (sql.includes('SELECT * FROM orders WHERE order_id = $1 FOR UPDATE')) {

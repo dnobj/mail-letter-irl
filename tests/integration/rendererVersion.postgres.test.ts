@@ -48,7 +48,7 @@ const SENDER = {
   country: 'US'
 };
 
-describePostgres('renderer version and stationery (migrations 039 and 044 to 046, #534, #563)', () => {
+describePostgres('renderer version, stationery and pages (migrations 039 and 044 to 047, #534, #563, #586)', () => {
   let adminPool: pg.Pool;
   let pool: pg.Pool;
   let schema: string;
