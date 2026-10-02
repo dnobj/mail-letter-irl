@@ -1,7 +1,4 @@
-import {
-  POINTS_PER_INCH, POSTCARD_FONT_SIZE, POSTCARD_HEIGHT, POSTCARD_LINE_PITCH, POSTCARD_MESSAGE, POSTCARD_STRIP,
-  POSTCARD_WIDTH
-} from './geometry.js';
+import { POINTS_PER_INCH, POSTCARD_GEOMETRY, POSTCARD_MESSAGE, POSTCARD_STRIP, type PostcardSizeName } from './geometry.js';
 import type { RenderImage } from './images.js';
 import { baselineOffset, wrapText, type Layout, type LayoutItem, type LayoutPage } from './layout.js';
 import { QUIET_ZONE_MODULES, qrMatrix, qrRuns } from './qr.js';
@@ -9,10 +6,12 @@ import { QUIET_ZONE_MODULES, qrMatrix, qrRuns } from './qr.js';
 export interface PostcardContent {
   /** The message on the back. */
   message: string;
-  /** The front image, already cropped to the card's 3:2 by imageService. */
+  /** The front image, already cropped to the card's shape by imageService. */
   image: RenderImage;
-  /** A gift postcard's strip, at the foot of the message. */
+  /** A gift postcard's strip, at the foot of the message: a 6x9 postcard's only. */
   strip?: GiftStripCopy;
+  /** Its size (#594): 6x9 when left out. */
+  size?: PostcardSizeName;
 }
 
 /**
@@ -94,14 +93,22 @@ function layoutStrip(strip: GiftStripCopy): LayoutItem[] {
 }
 
 /**
- * The back alone: the message in its left half, a gift postcard's strip at
+ * The back alone: the message in its left part, a gift postcard's strip at
  * its foot, and how many lines the message runs past. A preview measures it
  * before the front image is fetched. A strip that runs past its room throws
- * GiftStripOverflow.
+ * GiftStripOverflow. Each size has its own message box, size and pitch
+ * (POSTCARD_GEOMETRY, #594); a gift postcard is 6x9 only (#579), so a strip
+ * on another size is refused.
  */
-export function layoutPostcardBack(message: string, strip?: GiftStripCopy): { page: LayoutPage; overflowLines: number } {
-  const lines = wrapText(message.replace(/\s+$/u, ''), POSTCARD_FONT_SIZE, POSTCARD_MESSAGE.width);
-  const offset = baselineOffset(POSTCARD_FONT_SIZE, POSTCARD_LINE_PITCH);
+export function layoutPostcardBack(
+  message: string,
+  strip?: GiftStripCopy,
+  size: PostcardSizeName = '6x9'
+): { page: LayoutPage; overflowLines: number } {
+  if (strip && size !== '6x9') throw new Error(`A gift postcard is 6x9: a ${size} postcard has no room for its strip.`);
+  const geometry = POSTCARD_GEOMETRY[size];
+  const lines = wrapText(message.replace(/\s+$/u, ''), geometry.fontSize, geometry.message.width);
+  const offset = baselineOffset(geometry.fontSize, geometry.linePitch);
   // The strip is laid out first, so one that runs past its room refuses
   // before anything else; its items follow the message's, which a page's
   // title reads first.
@@ -112,16 +119,16 @@ export function layoutPostcardBack(message: string, strip?: GiftStripCopy): { pa
     items.push({
       kind: 'text',
       font: 'Tinos-Regular',
-      size: POSTCARD_FONT_SIZE,
-      x: POSTCARD_MESSAGE.left,
-      baseline: POSTCARD_MESSAGE.top + index * POSTCARD_LINE_PITCH + offset,
+      size: geometry.fontSize,
+      x: geometry.message.left,
+      baseline: geometry.message.top + index * geometry.linePitch + offset,
       text: drawn,
       source
     });
   });
   items.push(...stripItems);
-  const room = POSTCARD_MESSAGE.height - (strip ? POSTCARD_STRIP.height : 0);
-  const linesAvailable = Math.floor((room + 1e-6) / POSTCARD_LINE_PITCH);
+  const room = geometry.message.height - (strip ? POSTCARD_STRIP.height : 0);
+  const linesAvailable = Math.floor((room + 1e-6) / geometry.linePitch);
   return {
     page: { items, linesUsed: lines.length, linesAvailable },
     overflowLines: Math.max(0, lines.length - linesAvailable)
@@ -129,28 +136,30 @@ export function layoutPostcardBack(message: string, strip?: GiftStripCopy): { pa
 }
 
 /**
- * Lays out a 9x6 postcard as PostGrid prints it from a PDF (geometry.ts): the
- * front image covering the whole first page, bleed included, and the message
- * in the left half of the back, where the legacy back put it. The right half
- * stays empty: PostGrid stamps the addresses and postage there, and cancels a
+ * Lays out a postcard as PostGrid prints it from a PDF (geometry.ts), at its
+ * size (#594; 9x6 when none is given): the front image covering the whole
+ * first page, bleed included, and the message in the left part of the back,
+ * where the legacy back put it at 9x6. The rest stays empty: PostGrid stamps the addresses and postage there, and cancels a
  * postcard with anything drawn in their region. Trailing blank lines draw
  * nothing and are not counted. Lines past the message half are still laid
  * out, so `overflowLines` can say by how much a message is too long.
  */
 export function layoutPostcard(content: PostcardContent): Layout {
   const { image } = content;
+  const size = content.size ?? '6x9';
+  const page = POSTCARD_GEOMETRY[size];
   // Cover: the image fills the page, cropped evenly on its long side.
-  const scale = Math.max(POSTCARD_WIDTH / image.width, POSTCARD_HEIGHT / image.height);
+  const scale = Math.max(page.width / image.width, page.height / image.height);
   const [width, height] = [image.width * scale, image.height * scale];
   const front: LayoutItem[] = [
-    { kind: 'image', x: (POSTCARD_WIDTH - width) / 2, top: (POSTCARD_HEIGHT - height) / 2, width, height, image }
+    { kind: 'image', x: (page.width - width) / 2, top: (page.height - height) / 2, width, height, image }
   ];
 
-  const back = layoutPostcardBack(content.message, content.strip);
+  const back = layoutPostcardBack(content.message, content.strip, size);
 
   return {
-    width: POSTCARD_WIDTH,
-    height: POSTCARD_HEIGHT,
+    width: page.width,
+    height: page.height,
     title: 'Postcard',
     pages: [{ items: front, linesUsed: 0, linesAvailable: 0, title: 'The front of the postcard' }, back.page],
     overflowLines: back.overflowLines

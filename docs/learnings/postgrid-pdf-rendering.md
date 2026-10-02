@@ -1,6 +1,6 @@
 # What PostGrid does with our own PDFs (issue #534)
 
-**Date:** September 30, 2026; postcards October 1, 2026; letters of more than one page October 2, 2026 · **Probes:** PostGrid test mode, with development's key. The scripts are outside the repo, in `C:\letter-irl-scripts\probe-534\`: `probe-534.mjs`, `probe-586.mjs`, `decode-534.mjs`, `extract-raster.mjs` and `proof-pages.mjs`.
+**Date:** September 30, 2026; postcards October 1, 2026; letters of more than one page, and the 4x6 and 11x6 postcards, October 2, 2026 · **Probes:** PostGrid test mode, with development's key. The scripts are outside the repo, in `C:\letter-irl-scripts\probe-534\`: `probe-534.mjs`, `probe-586.mjs`, `decode-534.mjs`, `extract-raster.mjs`, `proof-pages.mjs` and `postcard-sizes-probe-build.mjs`.
 
 ## Why we probed
 
@@ -68,6 +68,22 @@ What they show:
 - On the back, PostGrid stamps Open Sans 9 pt in upper case from x 5.725 in, measured from the page's edge with the bleed. "RETURN TO:" and the return address start at baseline 0.958 in, the recipient at 4.937 in, each line 0.177 in below the last.
 - The test-mode render shows no postage and no barcode.
 - PostGrid checks the back for content in its address region, after it accepts the postcard, and cancels the postcard if there is any. `src/render/postcard.ts` draws nothing right of the back's left half (`POSTCARD_HALF` in `geometry.ts`).
+
+### The 4x6 and 11x6 postcards (#594)
+
+Probe P14 (October 2, 2026) asked the same questions of PostGrid's two other postcard sizes, `6x4` and `11x6`, with eight postcards from `postcard-sizes-probe-build.mjs`:
+
+| Probe | Sent | Came back |
+|-------|------|-----------|
+| P14b-6x4, P14b-11x6 | The trim size alone, 6 x 4 and 11 x 6 in | Refused at once: `pdf_incorrect_size_error`, "expecting 6.25x4.25" and "expecting 11.25x6.25" |
+| P14a-6x4, P14a-11x6 | A 0.125 in bleed, a grid across the whole back | Accepted, then **cancelled**: `invalid_content`, "Content found overlapping address region." |
+| P14c-6x4, P14c-11x6 | A 0.125 in bleed, the back drawn in its left half only, a three-line recipient and a four-line return address | Accepted and stayed `ready` |
+| P14d-6x4, P14d-11x6 | The back drawn further right: to 3.4 in of the 6 in trim, and to 6.5 in of the 11 in | Accepted and stayed `ready` |
+
+What they show, from the page's edge with the bleed:
+- Every size takes a 0.125 in bleed: 6.25 x 4.25 in for `6x4`, 9.25 x 6.25 in for `9x6` and 11.25 x 6.25 in for `11x6`.
+- PostGrid stamps Open Sans 9 pt in upper case, as at `9x6`, from x 3.925 in on a `6x4` and from x 7.725 in on an `11x6`. "RETURN TO:" is at baseline 0.958 in at every size, and the recipient is 1.313 in above the bottom edge: at 2.937 in on a `6x4`, and at 4.937 in on a `9x6` and an `11x6`.
+- The address region starts somewhere right of 3.525 in on a `6x4` and right of 6.625 in on an `11x6`; the stamps start further right still. `POSTCARD_GEOMETRY` in `geometry.ts` ends the back at 3.375 in and 6.125 in.
 
 ## Stationery (#563)
 

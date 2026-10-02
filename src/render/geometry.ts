@@ -127,3 +127,64 @@ export const POSTCARD_STRIP = {
   qr: inch(0.95),
   gap: inch(0.18)
 } as const;
+
+/** A postcard's size as a draft names it (#594): wide by tall, the long side last. */
+export type PostcardSizeName = '6x4' | '6x9' | '6x11';
+
+/** One postcard size as PostGrid takes it from a PDF, and as our back is drawn. */
+export interface PostcardGeometry {
+  /** The page, bleed included. */
+  width: number;
+  height: number;
+  /** The back's message box. */
+  message: { left: number; top: number; width: number; height: number };
+  /** Where the back's drawing ends: PostGrid's address region lies beyond it. */
+  half: number;
+  /** How PostGrid stamps the addresses, for a preview to draw them where they print. */
+  stamp: StampGeometry;
+  /** The message's size and line pitch. */
+  fontSize: number;
+  linePitch: number;
+}
+
+/**
+ * Each postcard size (#594), from probes P9 and P11 (9x6) and P14 (6x4 and
+ * 11x6, PostGrid test mode, 2026-10-02). Every size takes a 0.125in bleed:
+ * 6.25 x 4.25in, 9.25 x 6.25in and 11.25 x 6.25in, and a page of the trim
+ * size alone is refused. PostGrid stamps "RETURN TO:" from baseline 0.958in
+ * and the recipient 1.313in above the bottom edge, from x 3.925in (6x4),
+ * 5.725in (9x6) or 7.725in (11x6), and cancels a postcard with anything
+ * drawn in its address region; a back drawn to 3.4in (6x4) or 6.5in (11x6)
+ * of its trim still prints. The 6x9 back is the legacy back's, unchanged.
+ * The 4x6 back takes its left 3.25in, at 12pt as a letter's body is; the
+ * 11x6 back its left 6in, at the 6x9's 14pt.
+ */
+export const POSTCARD_GEOMETRY: Readonly<Record<PostcardSizeName, PostcardGeometry>> = {
+  '6x9': {
+    width: POSTCARD_WIDTH,
+    height: POSTCARD_HEIGHT,
+    message: POSTCARD_MESSAGE,
+    half: POSTCARD_HALF,
+    stamp: POSTCARD_STAMP,
+    fontSize: POSTCARD_FONT_SIZE,
+    linePitch: POSTCARD_LINE_PITCH
+  },
+  '6x4': {
+    width: inch(6.25),
+    height: inch(4.25),
+    message: { left: POSTCARD_BLEED + inch(0.3), top: POSTCARD_BLEED + inch(0.3), width: inch(3.25 - 2 * 0.3), height: inch(4 - 2 * 0.3) },
+    half: POSTCARD_BLEED + inch(3.25),
+    stamp: { x: inch(3.925), returnBaseline: inch(0.958), recipientBaseline: inch(2.937), pitch: inch(0.177), size: 9 },
+    fontSize: 12,
+    linePitch: 19.2
+  },
+  '6x11': {
+    width: inch(11.25),
+    height: inch(6.25),
+    message: { left: POSTCARD_BLEED + inch(0.4), top: POSTCARD_BLEED + inch(0.4), width: inch(6 - 2 * 0.4), height: inch(6 - 2 * 0.4) },
+    half: POSTCARD_BLEED + inch(6),
+    stamp: { x: inch(7.725), returnBaseline: inch(0.958), recipientBaseline: inch(4.937), pitch: inch(0.177), size: 9 },
+    fontSize: POSTCARD_FONT_SIZE,
+    linePitch: POSTCARD_LINE_PITCH
+  }
+};
