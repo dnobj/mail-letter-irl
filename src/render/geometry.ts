@@ -55,6 +55,14 @@ export const BODY_TOP = inch(3);
 /** The legacy HTML's 1in bottom margin. */
 export const BODY_BOTTOM = PAGE_HEIGHT - inch(1);
 
+/**
+ * Where the text starts on a letter's later pages (#586): 1in from the top,
+ * as on the gift page. PostGrid stamps the addresses on the first page only.
+ */
+export const CONTINUATION_TOP = inch(1);
+/** The longest letter printed (#586): three pages, two sheets printed on both sides. */
+export const MAX_LETTER_PAGES = 3;
+
 export const BODY_FONT_SIZE = 12;
 /** The legacy HTML's line-height of 1.6 at 12pt. */
 export const LINE_PITCH = 19.2;

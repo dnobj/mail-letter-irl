@@ -3,8 +3,8 @@ import { isInvisible, mirrorOf, paragraphBidi } from './bidi.js';
 import { loadFont, type FontName } from './fonts.js';
 import { shape } from './glyphs.js';
 import {
-  BODY_BOTTOM, BODY_TOP, CONTENT_WIDTH, HEADER_IMAGE_MAX_HEIGHT, IMAGE_GAP,
-  INLINE_IMAGE_MAX_HEIGHT, LINE_PITCH, PAGE_HEIGHT, PAGE_WIDTH, SIDE_MARGIN
+  BODY_BOTTOM, BODY_TOP, CONTENT_WIDTH, CONTINUATION_TOP, HEADER_IMAGE_MAX_HEIGHT, IMAGE_GAP,
+  INLINE_IMAGE_MAX_HEIGHT, LINE_PITCH, MAX_LETTER_PAGES, PAGE_HEIGHT, PAGE_WIDTH, SIDE_MARGIN
 } from './geometry.js';
 import type { RenderImage } from './images.js';
 import { clampMarks, MARK, MAX_MARKS_PER_LETTER } from './marks.js';
@@ -432,59 +432,224 @@ export function baselineOffset(size: number, pitch: number, fontName: FontName =
   return (pitch - (font.ascent - font.descent) * scale) / 2 + font.ascent * scale;
 }
 
-/**
- * Lays out a one-page letter in the three layouts the legacy HTML printed:
- * text only; a header image above the text; or the text with the enclosed
- * image after it. Positions are PDF points from the page's top-left corner.
- * Lines past the page are still laid out, so `overflowLines` can say by how
- * much a letter is too long.
- *
- * A theme (stationery.ts) draws first, in the corner and above the body; the
- * body then starts below anything it put there, in the theme's face. Classic
- * draws nothing, so its page is exactly the page without a theme. Handwritten
- * rules each line the page has room for, except where an image sits.
- */
-export function layoutLetter(content: LetterContent): Layout {
+export interface LayoutOptions {
+  /**
+   * The most pages the letter may fill (#586): 1, as every letter has been,
+   * up to MAX_LETTER_PAGES. A letter that fits one page is laid out exactly
+   * as it always was, whatever the limit.
+   */
+  maxPages?: number;
+}
+
+/** What the layout of a letter starts from: its face, its first page's top, its wrapped lines. */
+interface PreparedLetter {
+  stationery: Stationery;
+  fontName: FontName;
+  size: number;
+  baseline: number;
+  /** What the theme and a header image draw on the first page, above the text. */
+  firstPageItems: LayoutItem[];
+  /** Where the text starts on the first page. */
+  textTop: number;
+  image?: RenderImage;
+  /** The enclosed image's box, for an inline_image letter with its image. */
+  inlineBox?: { width: number; height: number };
+  lines: WrappedLine[];
+}
+
+function prepareLetter(content: LetterContent): PreparedLetter {
   const stationery = content.stationery ?? { theme: 'classic' };
   const { font: fontName, size } = bodyFace(stationery.theme);
   const baseline = baselineOffset(size, LINE_PITCH, fontName);
 
   const theme = layoutStationery(stationery, BODY_TOP);
-  const items: LayoutItem[] = [...theme.items];
+  const firstPageItems: LayoutItem[] = [...theme.items];
   const bodyTop = BODY_TOP + theme.bodyOffset;
   // Each branch checks the layout, so a text-only letter never places an image.
   const { image } = content;
   let textTop = bodyTop;
-  let reserved = 0;
   if (image && content.layoutType === 'header_image') {
     const box = fitImage(image, HEADER_IMAGE_MAX_HEIGHT);
-    items.push({ kind: 'image', x: SIDE_MARGIN + (CONTENT_WIDTH - box.width) / 2, top: bodyTop, ...box, image });
+    firstPageItems.push({ kind: 'image', x: SIDE_MARGIN + (CONTENT_WIDTH - box.width) / 2, top: bodyTop, ...box, image });
     textTop = bodyTop + box.height + IMAGE_GAP;
   }
   const inlineBox = image && content.layoutType === 'inline_image' ? fitImage(image, INLINE_IMAGE_MAX_HEIGHT) : undefined;
-  if (inlineBox) reserved = IMAGE_GAP + inlineBox.height;
-
   const lines = wrapText(content.text, size, CONTENT_WIDTH, fontName);
-  const inlineTop = textTop + lines.length * LINE_PITCH + IMAGE_GAP;
-  if (stationery.theme === 'handwritten') {
-    const covered: Band[] = inlineBox ? [{ top: inlineTop, bottom: inlineTop + inlineBox.height }] : [];
-    const rules = ruledLines(textTop, BODY_BOTTOM, baseline, covered);
+  return { stationery, fontName, size, baseline, firstPageItems, textTop, image, inlineBox, lines };
+}
+
+/** How many whole lines fit between two heights on a page. */
+function linesBetween(top: number, bottom: number): number {
+  return Math.max(0, Math.floor((bottom - top + 1e-6) / LINE_PITCH));
+}
+
+/**
+ * One page's items: Handwritten's rules (none where the image sits), the
+ * text from `top`, then the enclosed image if it is on this page.
+ */
+function pageItems(
+  letter: PreparedLetter,
+  start: LayoutItem[],
+  top: number,
+  lines: WrappedLine[],
+  inlineTop?: number
+): LayoutItem[] {
+  const items = [...start];
+  const { fontName, size, baseline, inlineBox, image } = letter;
+  if (letter.stationery.theme === 'handwritten') {
+    const covered: Band[] = inlineBox && inlineTop !== undefined ? [{ top: inlineTop, bottom: inlineTop + inlineBox.height }] : [];
+    const rules = ruledLines(top, BODY_BOTTOM, baseline, covered);
     if (rules) items.push(rules);
   }
   lines.forEach(({ source, drawn }, index) => {
     if (drawn.trim() === '') return;
-    items.push({ kind: 'text', font: fontName, size, x: SIDE_MARGIN, baseline: textTop + index * LINE_PITCH + baseline, text: drawn, source });
+    items.push({ kind: 'text', font: fontName, size, x: SIDE_MARGIN, baseline: top + index * LINE_PITCH + baseline, text: drawn, source });
   });
-
-  const linesAvailable = Math.max(0, Math.floor((BODY_BOTTOM - textTop - reserved + 1e-6) / LINE_PITCH));
-  if (inlineBox && image) {
+  if (inlineBox && image && inlineTop !== undefined) {
     items.push({ kind: 'image', x: SIDE_MARGIN + (CONTENT_WIDTH - inlineBox.width) / 2, top: inlineTop, ...inlineBox, image });
+  }
+  return items;
+}
+
+/**
+ * Lays out a letter in the three layouts the legacy HTML printed: text only;
+ * a header image above the text; or the text with the enclosed image after
+ * it. Positions are PDF points from the page's top-left corner.
+ *
+ * A theme (stationery.ts) draws first, in the corner and above the body; the
+ * body then starts below anything it put there, in the theme's face. Classic
+ * draws nothing, so its page is exactly the page without a theme. Handwritten
+ * rules each line the page has room for, except where an image sits.
+ *
+ * With `maxPages` above 1 (#586), a letter that does not fit one page flows on
+ * to further pages. Lines past the last page allowed are still laid out, on
+ * that page, so `overflowLines` can say by how much a letter is too long.
+ */
+export function layoutLetter(content: LetterContent, options: LayoutOptions = {}): Layout {
+  const maxPages = options.maxPages ?? 1;
+  if (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > MAX_LETTER_PAGES) {
+    throw new RangeError(`A letter lays out on 1 to ${MAX_LETTER_PAGES} pages, not ${maxPages}`);
+  }
+  const letter = prepareLetter(content);
+  const single = layoutOnePage(letter);
+  return maxPages === 1 || single.overflowLines === 0 ? single : flowPages(letter, maxPages);
+}
+
+/**
+ * One page, as every letter was laid out before #586: the lines from the
+ * text's top, the enclosed image after them, room kept for that image.
+ */
+function layoutOnePage(letter: PreparedLetter): Layout {
+  const { textTop, inlineBox, lines } = letter;
+  const reserved = inlineBox ? IMAGE_GAP + inlineBox.height : 0;
+  const inlineTop = inlineBox ? textTop + lines.length * LINE_PITCH + IMAGE_GAP : undefined;
+  const linesAvailable = linesBetween(textTop, BODY_BOTTOM - reserved);
+  return {
+    width: PAGE_WIDTH,
+    height: PAGE_HEIGHT,
+    pages: [{ items: pageItems(letter, letter.firstPageItems, textTop, lines, inlineTop), linesUsed: lines.length, linesAvailable }],
+    overflowLines: Math.max(0, lines.length - linesAvailable)
+  };
+}
+
+/**
+ * A letter too long for one page, over up to `maxPages` pages (#586). The
+ * theme and a header image stay on the first page; later pages start at
+ * CONTINUATION_TOP, never with the blank lines between paragraphs. The
+ * enclosed image follows the last line where it fits on that page, or starts
+ * the next page; it is never split. Lines past the last page allowed stay on
+ * it, counted in `overflowLines`, as does an image with no page left for it.
+ */
+function flowPages(letter: PreparedLetter, maxPages: number): Layout {
+  const { lines, inlineBox } = letter;
+  const placed: Array<{ top: number; lines: WrappedLine[] }> = [];
+  let overflowLines = 0;
+  let next = 0;
+  for (let index = 0; index < maxPages && next < lines.length; index += 1) {
+    if (index > 0) while (next < lines.length && lines[next].drawn.trim() === '') next += 1;
+    if (next >= lines.length) break;
+    const top = index === 0 ? letter.textTop : CONTINUATION_TOP;
+    const capacity = linesBetween(top, BODY_BOTTOM);
+    const last = index === maxPages - 1;
+    const count = last ? lines.length - next : Math.min(capacity, lines.length - next);
+    placed.push({ top, lines: lines.slice(next, next + count) });
+    next += count;
+    if (last) overflowLines = Math.max(0, count - capacity);
+  }
+
+  // The enclosed image: after the last line, or at the top of a page of its own.
+  let imagePage = -1;
+  let imageTop = 0;
+  if (inlineBox) {
+    const end = placed[placed.length - 1];
+    const after = end.top + end.lines.length * LINE_PITCH + IMAGE_GAP;
+    if (overflowLines === 0 && after + inlineBox.height <= BODY_BOTTOM + 1e-6) {
+      [imagePage, imageTop] = [placed.length - 1, after];
+    } else if (overflowLines === 0 && placed.length < maxPages) {
+      placed.push({ top: CONTINUATION_TOP, lines: [] });
+      [imagePage, imageTop] = [placed.length - 1, CONTINUATION_TOP];
+    } else {
+      // No page left for it: laid out after the last line, past the page.
+      [imagePage, imageTop] = [placed.length - 1, after];
+      overflowLines += Math.ceil((IMAGE_GAP + inlineBox.height) / LINE_PITCH);
+    }
   }
 
   return {
     width: PAGE_WIDTH,
     height: PAGE_HEIGHT,
-    pages: [{ items, linesUsed: lines.length, linesAvailable }],
-    overflowLines: Math.max(0, lines.length - linesAvailable)
+    pages: placed.map(({ top, lines: pageLines }, index) => {
+      const withImage = index === imagePage && inlineBox !== undefined;
+      const reserved = withImage ? IMAGE_GAP + inlineBox.height : 0;
+      return {
+        items: pageItems(letter, index === 0 ? letter.firstPageItems : [], top, pageLines, withImage ? imageTop : undefined),
+        linesUsed: pageLines.length,
+        linesAvailable: linesBetween(top, BODY_BOTTOM - reserved)
+      };
+    }),
+    overflowLines
+  };
+}
+
+/** What a letter's pages hold, and the room left on its last: for the card's fit meter (#586). */
+export interface PageFit {
+  /** The letter's pages, a gift page not among them. */
+  pages: number;
+  /** Sheets of paper: a letter of more than one page prints on both sides. */
+  sheets: number;
+  doubleSided: boolean;
+  /** Each page's lines: used, and how many it holds. */
+  lines: Array<{ used: number; available: number }>;
+  /** Lines still free on the last page; none for a letter that runs past its pages. */
+  roomLines: number;
+  /** About how many characters those lines hold, at the face's average width. */
+  roomCharacters: number;
+  /** About how many characters a line holds, at the face's average width. */
+  charactersPerLine: number;
+}
+
+/** Prose to average a face's character width over: letters, with their spaces. */
+const AVERAGE_SAMPLE = 'the quick brown fox jumps over the lazy dog while letters wait to be written';
+
+/**
+ * How full a letter's layout is (#586): `layout` as layoutLetter returned
+ * it, before any gift page is added; `stationery` the letter's, for its face.
+ */
+export function pageFit(layout: Layout, stationery?: Stationery): PageFit {
+  const { font: fontName, size } = bodyFace((stationery ?? { theme: 'classic' }).theme);
+  const font = loadFont(fontName);
+  const average = (shape(font, AVERAGE_SAMPLE).advanceWidth * size) / font.unitsPerEm / AVERAGE_SAMPLE.length;
+  const charactersPerLine = Math.floor(CONTENT_WIDTH / average);
+  const pages = layout.pages.length;
+  const last = layout.pages[pages - 1];
+  const roomLines = layout.overflowLines > 0 || !last ? 0 : Math.max(0, last.linesAvailable - last.linesUsed);
+  return {
+    pages,
+    sheets: pages > 1 ? Math.ceil(pages / 2) : 1,
+    doubleSided: pages > 1,
+    lines: layout.pages.map(page => ({ used: page.linesUsed, available: page.linesAvailable })),
+    roomLines,
+    roomCharacters: roomLines * charactersPerLine,
+    charactersPerLine
   };
 }
