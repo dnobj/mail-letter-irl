@@ -159,7 +159,7 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       const digest = createHash('sha256').update(parts.join('\n')).digest('hex').slice(0, 12);
       expect({ version: WIDGET_TEMPLATE_VERSION, digest }).toEqual({
         version: 63,
-        digest: '144f671807a8'
+        digest: '0f71ae65aa79'
       });
     });
   });

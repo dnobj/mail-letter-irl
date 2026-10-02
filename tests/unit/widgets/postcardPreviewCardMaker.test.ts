@@ -154,11 +154,15 @@ const pressed = (card: ReturnType<typeof mount>, selector: string) =>
 const inert = (card: ReturnType<typeof mount>, selector: string) =>
   [...card.document.querySelectorAll(selector)].map(button => button.getAttribute('aria-disabled') === 'true');
 const frontViewBox = (card: ReturnType<typeof mount>) => card.byId('preview-front').querySelector('svg')!.getAttribute('viewBox');
-/** A selector's specificity as one number: ids, then classes, attributes and pseudo-classes, then types. */
+/**
+ * A selector's specificity as one number: ids, then classes, attributes and
+ * pseudo-classes, then types. `:not()` counts only its argument.
+ */
 function specificity(selector: string): number {
-  const ids = selector.match(/#[\w-]+/g)?.length ?? 0;
-  const classes = selector.match(/\.[\w-]+|\[[^\]]*\]|(?<!:):(?!:)[\w-]+/g)?.length ?? 0;
-  const types = selector.replace(/\[[^\]]*\]|::?[\w-]+|[#.][\w-]+/g, ' ').match(/[a-z][\w-]*/gi)?.length ?? 0;
+  const bare = selector.replace(/:not\(/g, '(');
+  const ids = bare.match(/#[\w-]+/g)?.length ?? 0;
+  const classes = bare.match(/\.[\w-]+|\[[^\]]*\]|(?<!:):(?!:)[\w-]+/g)?.length ?? 0;
+  const types = bare.replace(/\[[^\]]*\]|::?[\w-]+|[#.][\w-]+/g, ' ').match(/[a-z][\w-]*/gi)?.length ?? 0;
   return ids * 1e6 + classes * 1e3 + types;
 }
 const restyled = (structuredContent: Json, page?: string) => ({
@@ -382,10 +386,12 @@ describe('the maker after #603 review round 1', () => {
     for (const template of templates.querySelectorAll('template')) templates.body.append((template as HTMLTemplateElement).content.cloneNode(true));
     const hidden = [...card.document.querySelectorAll('[hidden]'), ...templates.querySelectorAll('[hidden]')];
     expect(hidden.map(element => element.id)).toEqual(expect.arrayContaining(['studio-sizes', 'studio-front', 'studio-line']));
+    const checked = new Map<string, { laidOut: number; hidden: number }>();
     for (const element of hidden) {
       const applying = rules.filter(rule => matches(element, rule.selector));
       const hiding = applying.filter(rule => rule.value === 'none' && rule.selector.includes('[hidden]'));
-      for (const rule of applying.filter(rule => rule.value !== 'none')) {
+      const layingOut = applying.filter(rule => rule.value !== 'none');
+      for (const rule of layingOut) {
         const loses = hiding.some(hide =>
           hide.important ||
           (!rule.important && (specificity(hide.selector) > specificity(rule.selector) ||
@@ -393,6 +399,14 @@ describe('the maker after #603 review round 1', () => {
         );
         expect(loses, `${rule.selector} {display: ${rule.value}} on #${element.id || element.className}`).toBe(true);
       }
+      if (element.id) checked.set(element.id, { laidOut: layingOut.length, hidden: hiding.length });
+    }
+    // Not passed for want of anything to check (#603 review round 3): each of
+    // the maker's containers was matched by the rule that lays it out and by
+    // the [hidden] rule that hides it.
+    for (const id of ['studio-sizes', 'studio-front', 'studio-line']) {
+      expect(checked.get(id)?.laidOut, id).toBeGreaterThan(0);
+      expect(checked.get(id)?.hidden, id).toBeGreaterThan(0);
     }
   });
 
@@ -600,6 +614,22 @@ describe('the maker after #603 review round 2', () => {
     expect(card.byId('studio-style-note').classList.contains('studio-error')).toBe(false);
     expect(sendDisabled(card)).toBe(false);
     expect(card.document.activeElement).toBe(card.document.querySelector('[data-layout="full_bleed"]'));
+  });
+
+  it("keeps a size's refusal when a greeting being written is left or put back", async () => {
+    const TOO_LONG = 'The message is too long for the back of a 4x6 postcard.';
+    for (const leave of ['full', 'revert'] as const) {
+      const card = mount();
+      await card.show(output({ size: '6x9', layout: 'full_bleed' }), ON());
+      await card.click(card.document.querySelector('[data-layout="greetings"]')!);
+      await card.type('Rye');
+      await card.click(card.document.querySelector('[data-size="6x4"]')!);
+      await card.answer({ result: { isError: true, content: [{ type: 'text', text: TOO_LONG }] } }, 'set_postcard_style');
+      expect(card.byId('studio-style-note').textContent, leave).toBe(TOO_LONG);
+      await card.click(leave === 'full' ? card.document.querySelector('[data-layout="full_bleed"]')! : card.byId('studio-line-revert'));
+      expect(pressed(card, '#studio-front [data-layout]'), leave).toEqual(['Full']);
+      expect(card.byId('studio-style-note').textContent, leave).toBe(TOO_LONG);
+    }
   });
 
   it('drops a refusal with the greeting it refused when the front the postcard has is pressed', async () => {

@@ -702,7 +702,8 @@
         // { draftId, size, layout, caption, place, previewHtml, terms, byCard }.
         change: null,
         busy: false,
-        // What the maker last said, and whether it was a refusal.
+        // What the maker last said, whether it was a refusal, and whether
+        // that refusal was of a front (front) rather than a size.
         note: { draftId: null, text: "", error: false },
         // The draft the choices are for: another draft starts afresh.
         draftId: null,
@@ -784,10 +785,10 @@
         maker.editing = false;
       }
 
-      // The prompt for a place, or a refusal of what was being written, says
-      // nothing once that is left.
+      // The prompt for a place, or a refusal of the front being written, says
+      // nothing once that is left. A size's refusal stays (#603 review round 3).
       function clearMakerPrompt(draftId) {
-        if (maker.note.text === PLACE_FIRST || maker.note.error) maker.note = { draftId, text: "", error: false };
+        if (maker.note.text === PLACE_FIRST || (maker.note.error && maker.note.front)) maker.note = { draftId, text: "", error: false };
       }
 
       // The line a draft has for a layout: a border's caption or a greeting's place.
@@ -855,7 +856,7 @@
           })
           .catch((error) => {
             if (currentDraftId !== draftId) return;
-            maker.note = { draftId, text: readableError(error), error: true };
+            maker.note = { draftId, text: readableError(error), error: true, front: frontChange };
           })
           .then(() => {
             maker.busy = false;
@@ -919,7 +920,7 @@
       // maker: on the line while it shows, else on the front the postcard has.
       function putBackLine() {
         const state = withMakerChange(studioState);
-        if (!state || maker.busy) return;
+        if (!state || maker.busy || !maker.changeable) return;
         maker.drafting = null;
         maker.editing = false;
         clearMakerPrompt(state.draftId);
