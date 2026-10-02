@@ -58,3 +58,14 @@ describe('rendererDocumentPages', () => {
     expect(rendererDocumentPages(`<html><body data-renderer="pdf-1">\n</svg>\n${page}\n</body></html>`)).toEqual([page]);
   });
 });
+
+describe("the stored document's styles (#598 review round 1)", () => {
+  it("size the top-level pages only, never a page's own viewport", () => {
+    const document = renderPostcardPreviewDocument(renderPreviewSvg(layoutPostcard({ message: 'Hi', image, layout: 'border', caption: 'Rye' })));
+    const style = /<style>([\s\S]*?)<\/style>/.exec(document)![1];
+    // Every rule that names svg names it as the body's child.
+    const rules = style.split('}').map(rule => rule.trim()).filter(rule => /\bsvg\b/.test(rule));
+    expect(rules.length).toBeGreaterThan(0);
+    for (const rule of rules) expect(rule, rule).toMatch(/^body > svg( \+ body > svg| \+ svg)? \{/);
+  });
+});

@@ -236,3 +236,24 @@ describe('PostcardPreviewCard: the front layouts (#594)', () => {
     expect(Number(photo.getAttribute('height'))).toBeGreaterThan(Number(viewport.getAttribute('height')));
   });
 });
+
+describe("the cards' page styles (#598 review round 1)", () => {
+  it("size the top-level pages only, never a page's own viewport", () => {
+    // A bordered postcard's photo sits in an <svg> of its own; a rule that
+    // reached it would resize it and undo its clip in engines that apply
+    // CSS geometry to svg, as SVG 2 says.
+    for (const [card, page] of [['PostcardPreviewCard.html', 'postcard-page'], ['LetterPreviewCard.html', 'letter-page']]) {
+      const html = fs.readFileSync(path.join(WIDGET_DIR, card), 'utf-8');
+      const css = [...html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)].map(match => match[1]).join('\n');
+      // Every selector, one by one, that starts at a page and names an svg.
+      const selectors = [...css.matchAll(/([^{}]+)\{/g)]
+        .flatMap(match => match[1].split(','))
+        .map(selector => selector.trim())
+        .filter(selector => selector.startsWith(`.${page}`) && /\bsvg\b/.test(selector));
+      expect(selectors.length, card).toBeGreaterThan(0);
+      for (const selector of selectors) {
+        expect(selector, `${card}: ${selector}`).toMatch(new RegExp(`^\\.${page} > svg(\\.envelope| \\+ svg)?$`));
+      }
+    }
+  });
+});
