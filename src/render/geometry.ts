@@ -208,3 +208,39 @@ export const POSTCARD_GEOMETRY: Readonly<Record<PostcardSizeName, PostcardGeomet
     linePitch: POSTCARD_LINE_PITCH
   }
 };
+
+/**
+ * A postcard front's layout (#594): the photo across the whole front, in a
+ * white border over a caption, or under "Greetings from" a place.
+ */
+export type PostcardLayoutName = 'full_bleed' | 'border' | 'greetings';
+
+/**
+ * The fronts' layouts, after Demo 3's postcard maker (#580's canvas), in
+ * fractions of the trim, so every size draws them alike.
+ * - border: a white margin of 4% of the trim's width on the top and sides,
+ *   the photo cut to the box inside it, a gap of 2% of the trim's height, and
+ *   a strip of 18% of it for the caption: Caveat at 44% of the strip,
+ *   centred, near-black, on one line no wider than the photo.
+ * - greetings: the photo across the front; "Greetings from" in white Caveat
+ *   at 8.85% of the trim's height, its baseline 27% down; then the place in
+ *   capitals, its baseline halfway down, at up to 21% of the height and no
+ *   wider than 88% of the width (never below 7%), pale gold over a rust
+ *   shadow offset by 1.04% of the height. Tinos stands in for the canvas's
+ *   Fraunces, which no build carries.
+ */
+export const POSTCARD_FRONT = {
+  border: { margin: 0.04, gap: 0.02, strip: 0.18, captionSize: 0.44, captionColor: '#1E1A16' },
+  greetings: {
+    leadSize: 0.0885,
+    leadBaseline: 0.27,
+    leadColor: '#FFFFFF',
+    placeMaxSize: 0.21,
+    placeMinSize: 0.07,
+    placeBaseline: 0.5,
+    placeWidth: 0.88,
+    placeColor: '#F6E3A1',
+    shadowColor: '#A8461F',
+    shadowOffset: 0.0104
+  }
+} as const;

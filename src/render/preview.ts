@@ -58,7 +58,18 @@ function renderPage(layout: Layout, page: LayoutPage, stamp?: Stamp): string {
   for (const item of page.items) {
     if (item.kind === 'image') {
       const href = `data:${item.image.mime};base64,${item.image.bytes.toString('base64')}`;
-      drawn.push(`<image href="${href}" x="${round(item.x)}" y="${round(item.top)}" width="${round(item.width)}" height="${round(item.height)}" preserveAspectRatio="none"/>`);
+      if (item.clip) {
+        // A nested viewport cuts the image to its box, as the PDF's clip does;
+        // the card's cleaner keeps an svg, where it would drop a clipPath.
+        const { x, top, width, height } = item.clip;
+        drawn.push(
+          `<svg x="${round(x)}" y="${round(top)}" width="${round(width)}" height="${round(height)}">` +
+          `<image href="${href}" x="${round(item.x - x)}" y="${round(item.top - top)}" width="${round(item.width)}" height="${round(item.height)}" preserveAspectRatio="none"/>` +
+          '</svg>'
+        );
+      } else {
+        drawn.push(`<image href="${href}" x="${round(item.x)}" y="${round(item.top)}" width="${round(item.width)}" height="${round(item.height)}" preserveAspectRatio="none"/>`);
+      }
       continue;
     }
     if (item.kind === 'box') {
@@ -76,15 +87,18 @@ function renderPage(layout: Layout, page: LayoutPage, stamp?: Stamp): string {
       continue;
     }
     spoken.push(item.source);
-    for (const glyph of placeGlyphs(item)) {
+    const uses = placeGlyphs(item).map(glyph => {
       outlines.set(glyph.key, glyph.outline);
-      drawn.push(`<use href="#${glyph.key}" x="${round(glyph.x)}" y="${round(glyph.y)}"/>`);
-    }
+      return `<use href="#${glyph.key}" x="${round(glyph.x)}" y="${round(glyph.y)}"/>`;
+    });
+    // A coloured run's glyphs take its fill from a group; the rest stay black.
+    drawn.push(item.fill ? `<g fill="${item.fill}">${uses.join('')}</g>` : uses.join(''));
   }
   const defs = [...outlines].map(([id, d]) => `<path id="${id}" d="${d}"/>`).join('');
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${layout.width} ${layout.height}" role="img">` +
     // A page's text is its name for screen readers; a page without text has its title.
-    `<title>${escapeXml(spoken.join('\n') || (page.title ?? ''))}</title>` +
+    // An unspoken run (a lettering's shadow, #594) adds nothing to it.
+    `<title>${escapeXml(spoken.filter(Boolean).join('\n') || (page.title ?? ''))}</title>` +
     `<defs>${defs}</defs>` +
     `<rect width="${layout.width}" height="${layout.height}" fill="#fff"/>` +
     drawn.join('') +

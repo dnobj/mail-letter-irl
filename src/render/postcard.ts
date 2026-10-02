@@ -1,6 +1,11 @@
-import { POINTS_PER_INCH, POSTCARD_GEOMETRY, POSTCARD_MESSAGE, POSTCARD_STRIP, type PostcardSizeName } from './geometry.js';
+import { loadFont, type FontName } from './fonts.js';
+import {
+  POINTS_PER_INCH, POSTCARD_BLEED, POSTCARD_FRONT, POSTCARD_GEOMETRY, POSTCARD_MESSAGE, POSTCARD_STRIP,
+  type PostcardGeometry, type PostcardLayoutName, type PostcardSizeName
+} from './geometry.js';
+import { shape } from './glyphs.js';
 import type { RenderImage } from './images.js';
-import { baselineOffset, wrapText, type Layout, type LayoutItem, type LayoutPage } from './layout.js';
+import { baselineOffset, wrapText, type ImageBox, type Layout, type LayoutItem, type LayoutPage, type TextRun } from './layout.js';
 import { QUIET_ZONE_MODULES, qrMatrix, qrRuns } from './qr.js';
 
 export interface PostcardContent {
@@ -12,6 +17,24 @@ export interface PostcardContent {
   strip?: GiftStripCopy;
   /** Its size (#594): 6x9 when left out. */
   size?: PostcardSizeName;
+  /** Its front's layout (#594): the photo across the whole front when left out. */
+  layout?: PostcardLayoutName;
+  /** A bordered front's caption, under the photo, on one line. */
+  caption?: string;
+  /** A greetings front's place, in capitals, on one line. */
+  place?: string;
+}
+
+/**
+ * Words on a postcard's front that run past their room (#594): a caption
+ * wider than the photo, or a place too long to draw at the smallest size
+ * allowed. The preview refuses either, and a print holds one it never saw.
+ */
+export class PostcardFrontOverflow extends Error {
+  constructor(readonly part: 'caption' | 'place', readonly overflow: number) {
+    super(`The ${part} runs ${(overflow / POINTS_PER_INCH).toFixed(2)}in past its room on the front.`);
+    this.name = 'PostcardFrontOverflow';
+  }
 }
 
 /**
@@ -146,15 +169,9 @@ export function layoutPostcardBack(
  * by how much a message is too long.
  */
 export function layoutPostcard(content: PostcardContent): Layout {
-  const { image } = content;
   const size = content.size ?? '6x9';
   const page = POSTCARD_GEOMETRY[size];
-  // Cover: the image fills the page, cropped evenly on its long side.
-  const scale = Math.max(page.width / image.width, page.height / image.height);
-  const [width, height] = [image.width * scale, image.height * scale];
-  const front: LayoutItem[] = [
-    { kind: 'image', x: (page.width - width) / 2, top: (page.height - height) / 2, width, height, image }
-  ];
+  const front = layoutPostcardFront(content, page);
 
   const back = layoutPostcardBack(content.message, content.strip, size);
 
@@ -165,4 +182,104 @@ export function layoutPostcard(content: PostcardContent): Layout {
     pages: [{ items: front, linesUsed: 0, linesAvailable: 0, title: 'The front of the postcard' }, back.page],
     overflowLines: back.overflowLines
   };
+}
+
+/** A box on the page, from its top left corner. */
+interface Box {
+  x: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/** The image covering a box, cropped evenly on its long side, never squeezed. */
+function cover(image: RenderImage, box: Box): ImageBox {
+  const scale = Math.max(box.width / image.width, box.height / image.height);
+  const [width, height] = [image.width * scale, image.height * scale];
+  return { kind: 'image', x: box.x + (box.width - width) / 2, top: box.top + (box.height - height) / 2, width, height, image };
+}
+
+/** Words the front draws on one line: every run of white space one space. */
+function oneLine(text: string | undefined): string {
+  return (text ?? '').replace(/\s+/gu, ' ').trim();
+}
+
+/** One line of lettering centred on `centre`, and how wide it is drawn. */
+function centredLine(text: string, source: string, font: FontName, size: number, centre: number, baseline: number, fill: string) {
+  const [line] = wrapText(text, size, Number.MAX_SAFE_INTEGER, font);
+  const face = loadFont(font);
+  const width = shape(face, line.drawn).advanceWidth * (size / face.unitsPerEm);
+  const run: TextRun = { kind: 'text', font, size, x: centre - width / 2, baseline, text: line.drawn, source, fill };
+  return { run, width };
+}
+
+/**
+ * The front (#594), on the page with its bleed: the photo covering the
+ * whole page (full_bleed, the front every postcard had before), cut to a box
+ * inside a white border with its caption below (border), or covering the
+ * page under "Greetings from" a place (greetings). POSTCARD_FRONT holds the
+ * proportions. A caption or place that runs past its room throws
+ * PostcardFrontOverflow.
+ */
+function layoutPostcardFront(content: PostcardContent, page: PostcardGeometry): LayoutItem[] {
+  const trim: Box = {
+    x: POSTCARD_BLEED,
+    top: POSTCARD_BLEED,
+    width: page.width - 2 * POSTCARD_BLEED,
+    height: page.height - 2 * POSTCARD_BLEED
+  };
+  const layout = content.layout ?? 'full_bleed';
+  if (layout === 'border') {
+    const border = POSTCARD_FRONT.border;
+    const margin = border.margin * trim.width;
+    const strip = border.strip * trim.height;
+    const photo: Box = {
+      x: trim.x + margin,
+      top: trim.top + margin,
+      width: trim.width - 2 * margin,
+      height: trim.height - margin - border.gap * trim.height - strip
+    };
+    const items: LayoutItem[] = [{ ...cover(content.image, photo), clip: photo }];
+    const caption = oneLine(content.caption);
+    if (caption) {
+      const size = border.captionSize * strip;
+      const stripTop = trim.top + trim.height - strip;
+      const { run, width } = centredLine(
+        caption, caption, 'Caveat-Regular', size, trim.x + trim.width / 2,
+        stripTop + baselineOffset(size, strip, 'Caveat-Regular'), border.captionColor
+      );
+      if (width > photo.width + 1e-6) throw new PostcardFrontOverflow('caption', width - photo.width);
+      items.push(run);
+    }
+    return items;
+  }
+
+  const items: LayoutItem[] = [cover(content.image, { x: 0, top: 0, width: page.width, height: page.height })];
+  if (layout === 'greetings') {
+    const greetings = POSTCARD_FRONT.greetings;
+    const centre = page.width / 2;
+    const lead = 'Greetings from';
+    items.push(centredLine(
+      lead, lead, 'Caveat-Regular', greetings.leadSize * trim.height, centre,
+      trim.top + greetings.leadBaseline * trim.height, greetings.leadColor
+    ).run);
+    const place = oneLine(content.place);
+    if (place) {
+      const drawn = place.toUpperCase();
+      const largest = greetings.placeMaxSize * trim.height;
+      const room = greetings.placeWidth * trim.width;
+      const atLargest = centredLine(drawn, place, 'Tinos-Regular', largest, centre, 0, greetings.placeColor).width;
+      const size = Math.min(largest, (largest * room) / atLargest);
+      const smallest = greetings.placeMinSize * trim.height;
+      if (size < smallest - 1e-9) throw new PostcardFrontOverflow('place', (atLargest * smallest) / largest - room);
+      const baseline = trim.top + greetings.placeBaseline * trim.height;
+      const offset = greetings.shadowOffset * trim.height;
+      // The shadow first, unspoken; then the place, which a screen reader reads as written.
+      items.push(
+        centredLine(drawn, '', 'Tinos-Regular', size, centre + offset, baseline + offset, greetings.shadowColor).run,
+        centredLine(drawn, place, 'Tinos-Regular', size, centre, baseline, greetings.placeColor).run
+      );
+    }
+  }
+  return items;
 }

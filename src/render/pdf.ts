@@ -62,7 +62,14 @@ export async function renderPdf(layout: Layout, version: string = RENDERER_VERSI
         // reach the renderer re-encoded without EXIF (imageService), and this
         // keeps that assumption from mattering.
         const options = { width: item.width, height: item.height, ignoreOrientation: true } as PDFKit.Mixins.ImageOption;
-        doc.image(item.image.bytes, item.x, item.top, options);
+        if (item.clip) {
+          // Cut to its box, as the preview's own viewport cuts it.
+          doc.save().rect(item.clip.x, item.clip.top, item.clip.width, item.clip.height).clip();
+          doc.image(item.image.bytes, item.x, item.top, options);
+          doc.restore();
+        } else {
+          doc.image(item.image.bytes, item.x, item.top, options);
+        }
         continue;
       }
       if (item.kind === 'box') {
@@ -93,8 +100,9 @@ export async function renderPdf(layout: Layout, version: string = RENDERER_VERSI
         doc.restore();
         continue;
       }
+      const fill = item.fill ?? 'black';
       for (const glyph of placeGlyphs(item)) {
-        doc.save().translate(glyph.x, glyph.y).path(glyph.outline).fill('black').restore();
+        doc.save().translate(glyph.x, glyph.y).path(glyph.outline).fill(fill).restore();
       }
     }
   }
