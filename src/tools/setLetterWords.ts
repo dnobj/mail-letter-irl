@@ -123,7 +123,7 @@ function refused(code: WordsRefusedError['code'], message: string, context: Tool
  */
 function wordsChanged(given: boolean, bodyText: string, signOff: string, version: string): string {
   const why = given
-    ? "Nothing was changed: the letter's words are not the ones you last saw. They were changed on the letter card, or by another change."
+    ? "Nothing was changed: the letter's words now are not the ones that wordsVersion names. The letter card can change them too."
     : 'Nothing was changed: give wordsVersion, the version of the words this change replaces, from the preview or the last change of words.';
   const words = [bodyText.trim(), signOff.trim()].filter(Boolean).join('\n\n');
   return (
@@ -196,9 +196,13 @@ async function handler(input: SetLetterWordsInput, context: ToolContext): Promis
   // are now, unless they are the ones its caller last saw.
   const replacing = { bodyText: draft.body_text, signOff: draft.sign_off };
   const current = wordsVersionOf(replacing.bodyText, replacing.signOff);
-  if (input.wordsVersion !== current) {
-    const given = typeof input.wordsVersion === 'string' && input.wordsVersion !== '';
-    throw refused('WORDS_CHANGED', wordsChanged(given, replacing.bodyText, replacing.signOff ?? '', current), context);
+  // As a model may copy it: with spaces or quotes round it (#593 review round 2).
+  const named = typeof input.wordsVersion === 'string' ? input.wordsVersion.trim().replace(/^["']+|["']+$/g, '') : '';
+  // Words the draft has already, as when a call is retried after its answer
+  // was lost, are no change to anything unseen: the call goes through.
+  const already = bodyText === replacing.bodyText && signOff === (replacing.signOff ?? '');
+  if (named !== current && !already) {
+    throw refused('WORDS_CHANGED', wordsChanged(named !== '', replacing.bodyText, replacing.signOff ?? '', current), context);
   }
   // The pages its preview drew: its own, then any gift card's.
   const pagesBefore = Number(draft.pages ?? 1);

@@ -259,7 +259,7 @@ describe('set_letter_words', () => {
     const stale = await handler({ draftId: DRAFT_ID, bodyText: 'Dear Sam, with a P.S.', signOff: 'Pat', wordsVersion: wordsVersionOf(lines(10), 'Pat') }, context()).catch(e => e);
     expect(stale).toMatchObject({ code: 'WORDS_CHANGED' });
     expect(stale.message).toBe(
-      "Nothing was changed: the letter's words are not the ones you last saw. They were changed on the letter card, or by another change. " +
+      "Nothing was changed: the letter's words now are not the ones that wordsVersion names. The letter card can change them too. " +
         `The letter's words now are below, at wordsVersion "${now}". Make the change to these words, then call set_letter_words again with that wordsVersion.` +
         '\n\nDear Sam,\n\nChanged on the card.\n\nLove, Pat'
     );
@@ -271,9 +271,20 @@ describe('set_letter_words', () => {
     expect(unnamed.message).toContain(`wordsVersion "${now}"`);
     expect(setDraftWords).not.toHaveBeenCalled();
 
-    // Named as it is now, it goes through.
-    await handler({ draftId: DRAFT_ID, bodyText: 'Dear Sam, with a P.S.', signOff: 'Pat', wordsVersion: now }, context());
+    // Named as it is now, it goes through: copied with spaces or quotes round it too (#593 review round 2).
+    await handler({ draftId: DRAFT_ID, bodyText: 'Dear Sam, with a P.S.', signOff: 'Pat', wordsVersion: ` "${now}" ` }, context());
     expect(written().replacing).toEqual({ bodyText: 'Dear Sam,\n\nChanged on the card.', signOff: 'Love, Pat' });
+  });
+
+  it("goes through when the words are the draft's already, as when a call is retried after its answer was lost (#593 review round 2)", async () => {
+    // The first call changed them; the retry names the version from before it.
+    vi.mocked(getDraftForStationery).mockResolvedValue({ ...draft({ bodyText: lines(10) }), body_text: 'Dear Sam, with a P.S.', sign_off: 'Pat' } as never);
+    const output = await handler(
+      { draftId: DRAFT_ID, bodyText: 'Dear Sam, with a P.S.', signOff: 'Pat', wordsVersion: wordsVersionOf(lines(10), 'Pat') },
+      context()
+    );
+    expect(output.wordsVersion).toBe(wordsVersionOf('Dear Sam, with a P.S.', 'Pat'));
+    expect(written()).toMatchObject({ bodyText: 'Dear Sam, with a P.S.', replacing: { bodyText: 'Dear Sam, with a P.S.', signOff: 'Pat' } });
   });
 
   it('says a new preview can use a gift letter when the words bring it back to a page the balance cannot pay (#593 review round 1)', async () => {
