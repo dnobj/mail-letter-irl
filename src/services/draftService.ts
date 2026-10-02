@@ -489,9 +489,14 @@ export async function setDraftSchedule(
 
 /**
  * Locks a draft a tool may still change (its dates, its stationery), or says
- * why it may not: it is the caller's, pending and unexpired, with no live Pay
- * & Send order but a checkout whose window has passed. Someone else's draft is
- * refused as a missing one, and is not locked.
+ * why it may not: it is the caller's, pending, unexpired and not emptied by an
+ * erasure, with no live Pay & Send order but a checkout whose window has
+ * passed. Someone else's draft is refused as a missing one, and is not locked.
+ *
+ * An erasure empties a draft an order points at rather than deleting it, and
+ * leaves it pending; no sweep visits it again (they skip redacted rows). A
+ * change that waited on the erasure's lock reads the emptied row here and is
+ * refused, so it cannot write the letter's page back into it.
  */
 async function lockChangeableDraft(
   client: pg.PoolClient,
@@ -499,14 +504,14 @@ async function lockChangeableDraft(
   userId: string,
   now: Date
 ): Promise<DraftScheduleRefusal | null> {
-  const locked = await client.query<Pick<LetterDraft, 'status' | 'expires_at'>>(
-    'SELECT status, expires_at FROM letter_drafts WHERE draft_id = $1 AND user_id = $2 FOR UPDATE',
+  const locked = await client.query<Pick<LetterDraft, 'status' | 'expires_at'> & { redacted_at: Date | null }>(
+    'SELECT status, expires_at, redacted_at FROM letter_drafts WHERE draft_id = $1 AND user_id = $2 FOR UPDATE',
     [draftId, userId]
   );
   const draft = locked.rows[0];
   if (!draft) return 'not_found';
   if (draft.status === 'consumed') return 'sent';
-  if (draft.status !== 'pending' || !(new Date(draft.expires_at).getTime() > now.getTime())) {
+  if (draft.status !== 'pending' || draft.redacted_at || !(new Date(draft.expires_at).getTime() > now.getTime())) {
     return 'expired';
   }
 
@@ -587,7 +592,11 @@ export async function setDraftStationery(
        WHERE draft_id = $1`,
       [draftId, stationery ? JSON.stringify(stationery) : null, rendererVersion, change.previewHtml]
     );
-    await client.query('UPDATE users SET stationery_theme = $2 WHERE user_id = $1', [userId, change.stationery.theme]);
+    // Never on an erased account (rememberStationery).
+    await client.query('UPDATE users SET stationery_theme = $2 WHERE user_id = $1 AND erased_at IS NULL', [
+      userId,
+      change.stationery.theme
+    ]);
     writeDiagnostic('info', 'draft.stationery_set', { theme: change.stationery.theme });
     return null;
   });

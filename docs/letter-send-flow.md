@@ -156,7 +156,7 @@ Database constraints enforce one outbox row and one stable idempotency key per l
 - **`set_arrival_date` moves them** (`src/tools/setArrivalDate.ts`), listed only while the flag is on: it sets, moves or clears a draft's dates without previewing again.
   - **The date is checked first**, as the previews check theirs, and refused in the same words. Left out, or empty, it clears the dates, and the mail goes to the printer as soon as it is sent.
   - **One transaction** (`setDraftSchedule`, `src/services/draftService.ts`) locks the draft row first, as the send and the Pay & Send checkout lock it before they read its dates. So they run one after the other: a send or checkout that goes first leaves the change refused, and one that goes second reads the new dates.
-  - **It changes only** a draft that is the caller's, pending and unexpired, with no live Pay & Send order (any status in `ACTIVE_JIT_STATUSES`, but a checkout whose window has passed). Payment sends the mail with the dates the draft has, so they do not move under it.
+  - **It changes only** a draft that is the caller's, pending, unexpired and not emptied by an erasure, with no live Pay & Send order (any status in `ACTIVE_JIT_STATUSES`, but a checkout whose window has passed). Payment sends the mail with the dates the draft has, so they do not move under it.
   - **Its refusals** say what to do next: the preview was not found, has already been sent (`list_orders` shows it), has expired (the preview tools take `arriveBy` themselves), or is tied to a Pay & Send payment.
   - **Annotations:** not read-only, not destructive (a draft sends nothing and expires on its own), and idempotent.
   - **The cards may call it** (`openai/widgetAccessible`, MCP Apps' `ui.widgetAccessible`), and so may the model. `cancel_scheduled_mail` is the same. A result a card gets this way is the card's alone: the model does not see it ([ui-widgets.md](ui-widgets.md)).
@@ -193,6 +193,7 @@ Database constraints enforce one outbox row and one stable idempotency key per l
   - `POST /api/letters/:letterId/cancel` answers `letterId`, as the letters routes do. A refusal carries its reason as `code`, which the website's API client reads, and as `error`.
   - The confirmation page's API:
     - `GET /api/sends/:draftId` gives the draft's `schedule` (null without dates);
+    - and its `stationery` (#563): a themed draft's theme, date line, initials and headline, read as the print reads them (`stationeryOf`), or null for Classic, a legacy preview, or a theme the print would refuse;
     - its `POST` answers a dated send with `schedule`, `scheduled` and `cancellable`, as the send tools do. `scheduled` is true while its job is held past now. A hand-off that throws does not change that, since such a job cannot have been taken.
 - **Sending held mail early:** the admin panel's **Send held mail now** (`job.dispatch_now`, `releaseHeldLetterJobAsAdmin` in `src/services/letterJobService.ts`) makes a held letter's job due at once, so the next hourly run sends it ([Admin Panel](admin-panel-guide.md)).
   - **Only mail still held:** the job `pending`, `not_dispatched`, never attempted, carrying `metadata.heldUntil` and not yet due by the database's clock; the letter `queued`; a Pay & Send letter's order still `fulfillment_pending`. It locks the order, the letter and the job, in the outbox's order.
@@ -295,7 +296,8 @@ drawn by `src/render`, the three letter previews take `stationery`, `monogram` a
     preview chooses nothing;
   - only the theme is remembered, not the initials or a headline;
   - nothing is read or written while stationery is not offered;
-  - erasure clears it.
+  - erasure clears it, and both writers skip an erased account (`AND erased_at IS NULL`), so a
+    remember that waited on the erasure writes nothing ([account-erasure.md](account-erasure.md)).
 
 A gift send in a theme prints its themed page, then today's card page.
 
@@ -308,9 +310,10 @@ stationery is offered:
   picture that the preview showed, and a gift letter's card page is kept as it was drawn
   (`rendererDocumentPages`). Drawn back to Classic, the page is byte for byte the first preview's.
 - **One transaction** (`setDraftStationery`) locks the draft as `setDraftSchedule` does, with the same
-  refusals: not the caller's, sent, expired, or a live Pay & Send order. So a send or a checkout runs
-  before or after it, never between. It writes the stationery, `renderer_version` (`pdf-2` for a
-  theme, `pdf-1` for Classic) and `preview_html`, and remembers the theme.
+  refusals: not the caller's, sent, expired (or emptied by an erasure), or a live Pay & Send order.
+  So a send or a checkout runs before or after it, never between. It writes the stationery,
+  `renderer_version` (`pdf-2` for a theme, `pdf-1` for Classic) and `preview_html`, and
+  remembers the theme.
 - A postcard, or a preview the legacy HTML drew, is refused: make a new preview.
 
 A gift send is previewed like any other letter, with its card as the second page (#534 PR 5). Whether a preview is a gift send is decided before the checks, because the card prints the sender's name in Tinos: a name Tinos cannot draw is refused "in the sender's name, which the gift card prints", though PostGrid could stamp it in the return address. So is a name long enough to push the card past the page's bottom margin, about a thousand characters: "The sender's name is too long to print on the gift card." Without the flag, previews are the legacy HTML. The flag is read only when a letter is previewed, so changing it never changes a letter already previewed or queued.

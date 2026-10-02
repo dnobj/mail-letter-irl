@@ -317,6 +317,47 @@ describePostgres('renderer version (migration 039, #534)', () => {
       expect(await stateOf(draftId, userId)).toEqual({ stationery: null, renderer_version: 'pdf-1', preview_html: '<svg/>', theme: 'classic' });
     }, 60_000);
 
+    it('remembers no theme on an erased account (#571 review round 3)', async () => {
+      const remembered = await import('../../src/services/stationeryDefaultService.js');
+      const userId = await seedUser();
+      await pool.query(
+        `UPDATE users SET erased_at = NOW(), email = 'erased-' || gen_random_uuid()::text || '@erased.invalid',
+                          return_address = NULL, return_address_validated_at = NULL
+          WHERE user_id = $1`,
+        [userId]
+      );
+      await remembered.rememberStationery(userId, 'botanical');
+      expect((await pool.query('SELECT stationery_theme FROM users WHERE user_id = $1', [userId])).rows[0].stationery_theme).toBeNull();
+    }, 60_000);
+
+    it("restyles a draft but remembers nothing when the account was erased under it (#573 review round 1)", async () => {
+      const userId = await seedUser();
+      const draftId = await seedDraft(userId, 'pdf-1');
+      await pool.query(
+        `UPDATE users SET erased_at = NOW(), email = 'erased-' || gen_random_uuid()::text || '@erased.invalid',
+                          return_address = NULL, return_address_validated_at = NULL
+          WHERE user_id = $1`,
+        [userId]
+      );
+
+      await expect(drafts.setDraftStationery(draftId, userId, { stationery: BOTANICAL, previewHtml: PAGE })).resolves.toBeNull();
+      expect(await stateOf(draftId, userId)).toEqual({ stationery: BOTANICAL, renderer_version: 'pdf-2', preview_html: PAGE, theme: null });
+    }, 60_000);
+
+    it('leaves a draft an erasure emptied as it was, its dates and its style (#573 review round 1)', async () => {
+      const { DRAFT_REDACTION_SET } = await import('../../src/services/retentionService.js');
+      const userId = await seedUser();
+      const draftId = await seedDraft(userId, 'pdf-1');
+      // As the erasure empties a draft an order points at: still pending, unexpired.
+      await pool.query(`UPDATE letter_drafts ${DRAFT_REDACTION_SET} WHERE draft_id = $1`, [draftId]);
+
+      await expect(drafts.setDraftStationery(draftId, userId, { stationery: BOTANICAL, previewHtml: PAGE })).resolves.toBe('expired');
+      await expect(drafts.setDraftSchedule(draftId, userId, { arriveBy: '2026-12-01', mailOn: '2026-11-20' })).resolves.toBe('expired');
+      expect(await stateOf(draftId, userId)).toEqual({ stationery: null, renderer_version: 'pdf-1', preview_html: null, theme: null });
+      const row = (await pool.query('SELECT status, body_text, arrive_by FROM letter_drafts WHERE draft_id = $1', [draftId])).rows[0];
+      expect(row).toEqual({ status: 'pending', body_text: '', arrive_by: null });
+    }, 60_000);
+
     it("leaves a sent, expired, Pay & Send or someone else's draft as it was, and remembers nothing", async () => {
       const userId = await seedUser();
       const other = await seedUser();
