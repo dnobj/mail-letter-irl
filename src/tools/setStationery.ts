@@ -3,7 +3,7 @@ import { setStationeryInputSchema, setStationeryOutputSchema } from '../schemas.
 import { isStationeryOffered } from '../config/stationery.js';
 import { letterPageLimit } from '../config/roomToWrite.js';
 import type { SendEligibility } from '../services/commerceService.js';
-import { renderPreviewSvg, rendererVersionFor, type Stationery } from '../render/index.js';
+import { pageFit, renderPreviewSvg, rendererVersionFor, type PageFit, type Stationery } from '../render/index.js';
 import type { PreviewStationery } from './stationeryInput.js';
 import {
   getDraftForStationery,
@@ -55,6 +55,8 @@ export interface SetStationeryOutput {
   canSendNow: boolean;
   reasonCannotSend?: string;
   sendEligibility: SendEligibility;
+  /** While room to write is offered: how full its pages are now, for the card's fit line. Card-only (_meta). */
+  pageFit?: PageFit;
   message: string;
 }
 
@@ -208,6 +210,7 @@ async function handler(input: SetStationeryInput, context: ToolContext): Promise
     previewHtml,
     ...(pages > 1 ? { pages } : {}),
     ...payment,
+    ...(letterPageLimit() > 1 ? { pageFit: pageFit(layout, stationery) } : {}),
     message: messageFor(stationery, pages, pagesBefore)
   };
 }

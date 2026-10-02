@@ -39,6 +39,22 @@
    *   (a style is being set on the draft), onChange({ draftId, stationery }),
    *   onBusy()
    */
+  // What a restyle or a status answer says the letter costs now (#586): a
+  // restyle can run it on to another page, or back on to one, and with that
+  // who pays. Null when it says nothing of it, as an older server would not.
+  function termsOf(data, fit) {
+    if (!data || typeof data.canSendNow !== "boolean" || !data.sendEligibility || typeof data.sendEligibility !== "object") {
+      return null;
+    }
+    return {
+      canSendNow: data.canSendNow,
+      sendEligibility: data.sendEligibility,
+      reasonCannotSend: typeof data.reasonCannotSend === "string" ? data.reasonCannotSend : null,
+      pages: data.pages === 2 || data.pages === 3 ? data.pages : 1,
+      pageFit: fit && typeof fit === "object" ? fit : null
+    };
+  }
+
   function createStyle(options) {
     var host = options.host;
     // pending: the theme being set while the server answers. slots: the
@@ -46,11 +62,14 @@
     // draft, which come back with the theme when the person returns to it.
     // held: the card is sending the letter or starting a payment, so the
     // row waits too. restyled: the row set a style on this draft itself, so
-    // the server's earlier word on it (adopt) is out of date.
+    // the server's earlier word on it (adopt) is out of date. terms: what the
+    // letter costs now and how full its pages are, as the last restyle or
+    // status answer said (#586), or null for the preview's own.
     var state = {
       draftId: null,
       stationery: null,
       previewHtml: null,
+      terms: null,
       pending: null,
       busy: false,
       held: false,
@@ -128,6 +147,8 @@
           state.stationery = stationery;
           state.restyled = true;
           keepSlots(stationery);
+          // What it costs now, and how full its pages are (#586).
+          state.terms = termsOf(data, result && result._meta && result._meta.pageFit);
           var page = result && result._meta && result._meta.previewHtml;
           // The draft has the new style either way; without its page the card
           // keeps showing the last one and says so.
@@ -186,6 +207,7 @@
           state.draftId = draftId;
           state.stationery = offered;
           state.previewHtml = null;
+          state.terms = null;
           state.busy = false;
           state.pending = null;
           state.restyled = false;
@@ -211,13 +233,21 @@
       // when the row is on another draft, setting a style, or has set one:
       // the card asks before anyone can press, so an answer that lands after
       // a restyle is older than it (#572 review round 2).
-      adopt: function (draftId, stationery, previewHtml) {
+      // With it, what the letter costs now (#586), when the answer says.
+      adopt: function (draftId, stationery, previewHtml, answer) {
         if (state.draftId !== draftId || state.busy || state.restyled || !stationery || !isTheme(stationery.theme)) return false;
         state.stationery = stationery;
         keepSlots(stationery);
         if (typeof previewHtml === "string" && previewHtml) state.previewHtml = previewHtml;
+        var terms = termsOf(answer, null);
+        if (terms) state.terms = terms;
         draw();
         return true;
+      },
+      // What this draft costs now and how full its pages are (#586), as the
+      // last restyle or status answer said; null for the preview's own.
+      terms: function (draftId) {
+        return state.draftId === draftId ? state.terms : null;
       },
       // The page the card set for this draft, or null for its preview's own.
       previewHtml: function (draftId) {

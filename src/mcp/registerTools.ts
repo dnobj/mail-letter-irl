@@ -949,6 +949,8 @@ export function partitionToolResult(
     overview,
     purchaseStep,
     examplePrompts,
+    // How full a letter's pages are (#586), for the card's fit line.
+    pageFit,
     ...modelFacingData
   } = result;
 
@@ -987,6 +989,7 @@ export function partitionToolResult(
       ...(headerImagePreview !== undefined ? { headerImagePreview } : {}),
       ...(inlineImagePreview !== undefined ? { inlineImagePreview } : {}),
       ...(generatedImagePreview !== undefined ? { generatedImagePreview } : {}),
+      ...(pageFit !== undefined ? { pageFit } : {}),
       ...(modelFacingData.generatedImageUrl !== undefined
         ? { generatedImageUrl: modelFacingData.generatedImageUrl }
         : {})

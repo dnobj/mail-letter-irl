@@ -66,6 +66,7 @@ import { letterPrintText, renderLetterPreviewDocument, stampedAddressLines } fro
 import { sampleFundedCard } from '../../../src/services/giftLetterService.js';
 import { giftLetterPageCopy } from '../../../src/services/giftCardRenderer.js';
 import { withDisplayImage } from '../../../src/tools/letterHelpers.js';
+import { partitionToolResult } from '../../../src/mcp/registerTools.js';
 import { PAID_PER_SEND_REASON, RENDERED_LETTER_CHARACTER_CAP } from '../../../src/tools/letterHelpers.js';
 import type { Address, ToolContext } from '../../../src/contracts/types.js';
 
@@ -154,6 +155,11 @@ afterEach(() => {
 });
 
 describe('when room to write is offered', () => {
+  it('gives no fit while room to write is not offered', async () => {
+    const output = await run('text_only', { bodyText: lines(10) });
+    expect(output).not.toHaveProperty('pageFit');
+  });
+
   it('needs the flag, our renderer and Pay & Send, and then allows three pages', () => {
     expect(isRoomToWriteOffered()).toBe(false);
     expect(letterPageLimit()).toBe(1);
@@ -216,6 +222,20 @@ describe('a longer letter, while room to write is offered', () => {
       expect(quoted, String(pages)).toEqual(draftMailOption({ mail_type: 'letter', pages: stored.pages }));
       expect(jitProductMatching(quoted)?.productCode, String(pages)).toBe(product);
     }
+  });
+
+  it('gives the card how full the pages are, in _meta, never the model (#586)', async () => {
+    const output = await run('text_only', { bodyText: lines(40) });
+    expect(output.pageFit).toMatchObject({ pages: 2, sheets: 1, doubleSided: true });
+    const { structuredContent, _meta } = partitionToolResult(output);
+    expect(_meta.pageFit).toEqual(output.pageFit);
+    expect(structuredContent).not.toHaveProperty('pageFit');
+
+    // One page says the room it has left.
+    vi.mocked(createDraft).mockClear();
+    const short = await run('text_only', { bodyText: lines(10) });
+    expect(short.pageFit).toMatchObject({ pages: 1, sheets: 1, doubleSided: false });
+    expect((short.pageFit as { roomCharacters: number }).roomCharacters).toBeGreaterThan(0);
   });
 
   it('keeps a letter that fits one page as it was: one page, no pages field, a pack pays', async () => {
@@ -423,6 +443,8 @@ describe('set_stationery lays a letter out again on its pages, and prices it aga
       'The letter is now on the typewriter stationery, and the account remembers it for its next letter preview. ' +
         'It now runs to two pages, printed on both sides, and is paid with Pay & Send. Nothing has been sent.'
     );
+    // And how full its pages are now, for the card (#586).
+    expect(output.pageFit).toMatchObject({ pages: 2, sheets: 1, doubleSided: true });
     expect(getSendEligibility).toHaveBeenCalledWith(10, 2, { mailType: 'letter', pages: 2 });
   });
 

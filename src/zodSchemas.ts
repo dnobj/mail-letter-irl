@@ -742,6 +742,9 @@ export const getDraftStatusOutputZ = z.object({
     .describe("Where a sent draft's order stands: scheduled while it waits for its mail date"),
   cancellable: z.boolean().optional().describe("A sent draft's order: whether it can still be cancelled free"),
   pages: z.number().int().min(2).max(MAX_LETTER_PAGES).optional().describe("A ready letter of more than one page: the pages it is laid out on now"),
+  canSendNow: z.boolean().optional().describe("A ready letter, while room to write is offered: whether the balance or a gift letter pays for it now"),
+  reasonCannotSend: z.string().optional(),
+  sendEligibility: sendEligibilityZ.optional(),
   stationery: z
     .object({
       theme: z.enum(STATIONERY_THEMES),

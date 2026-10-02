@@ -366,6 +366,33 @@ describe('the letter card as a studio (#580)', () => {
     expect(card.byId('send-button').style.display).toBe('flex');
   });
 
+  it("says how full a letter's pages are on the Words tab, and a longer letter's pages in the footer (#586)", async () => {
+    const PAY_AND_SEND = { packPays: false, payAndSend: { available: true, amountCents: 599, currency: 'usd' }, letterPack: { available: false } };
+    const two = mount();
+    await two.show(output({ pages: 2, canSendNow: false, sendEligibility: PAY_AND_SEND }), { ...ON, pageFit: { pages: 2, sheets: 1 } });
+    expect(text(two, 'studio-fit')).toBe('Runs on to the back of the page: printed on both sides of one sheet.');
+    expect(two.byId('studio-fit').hidden).toBe(false);
+    expect(text(two, 'studio-summary')).toBe('black and white · 2 pages, both sides · mailed in 1-2 business days');
+    expect(text(two, 'studio-cost')).toBe('Pay & Send USD 5.99');
+
+    const three = mount();
+    await three.show(output({ pages: 3, canSendNow: false, sendEligibility: PAY_AND_SEND }), ON);
+    expect(text(three, 'studio-fit')).toBe('Three pages: two sheets, printed on both sides. That is the longest letter we print.');
+    expect(text(three, 'studio-summary')).toBe('black and white · 3 pages, both sides · mailed in 1-2 business days');
+
+    // One page: the room it has left, while room to write gives its fit.
+    const one = mount();
+    await one.show(output(), { ...ON, pageFit: { pages: 1, sheets: 1, roomLines: 20, roomCharacters: 1940, charactersPerLine: 97 } });
+    expect(text(one, 'studio-fit')).toBe('Fits on one page, with room for about 1,940 more characters.');
+    expect(text(one, 'studio-summary')).toBe('black and white · mailed in 1-2 business days');
+
+    // And nothing where no fit is given, as while room to write is not offered.
+    const plain = mount();
+    await plain.show(output(), ON);
+    expect(text(plain, 'studio-fit')).toBe('');
+    expect(plain.byId('studio-fit').hidden).toBe(true);
+  });
+
   it('says a letter with its picture prints in colour (#584 review round 1)', async () => {
     const card = mount();
     await card.show(output({ layoutType: 'header_image', stationery: { theme: 'classic', source: 'default' } }), ON);
