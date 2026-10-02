@@ -100,6 +100,7 @@ import { isSendConfirmationEnabled } from "../config/sendConfirmation.js";
 import { isArriveByEnabled } from "../config/arriveBy.js";
 import { isStationeryOffered } from "../config/stationery.js";
 import { ENVELOPE_REVEAL_META, isEnvelopeRevealEnabled } from "../config/envelope.js";
+import { STUDIO_CARD_META, isStudioCardEnabled } from "../config/studioCard.js";
 import { scheduleSentence } from "../tools/arriveByInput.js";
 import { uploadsThroughCard } from "../config/cardUpload.js";
 import {
@@ -1448,13 +1449,17 @@ const LETTER_PREVIEW_TOOLS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Card-only switches a tool's result carries in _meta: while the envelope
- * reveal is on (#576), the letter previews tell their card it may open the
- * page from an envelope. In _meta, never structuredContent, so never the
- * model's.
+ * Card-only switches a tool's result carries in _meta, each while its flag is
+ * on: the letter previews tell their card it may open the page from an
+ * envelope (#576), and lay itself out as a studio (#580). In _meta, never
+ * structuredContent, so never the model's.
  */
 export function cardSwitches(toolName: string): Record<string, unknown> {
-  return LETTER_PREVIEW_TOOLS.has(toolName) && isEnvelopeRevealEnabled() ? { [ENVELOPE_REVEAL_META]: true } : {};
+  if (!LETTER_PREVIEW_TOOLS.has(toolName)) return {};
+  return {
+    ...(isEnvelopeRevealEnabled() ? { [ENVELOPE_REVEAL_META]: true } : {}),
+    ...(isStudioCardEnabled() ? { [STUDIO_CARD_META]: true } : {})
+  };
 }
 
 /**

@@ -30,6 +30,8 @@ export const ARRIVES_PLACEHOLDER = "<!-- letter-irl:arrives -->";
 export const STYLE_PLACEHOLDER = "<!-- letter-irl:style -->";
 /** Where the letter card takes widgets/shared/envelope.js, the envelope reveal (#576). */
 export const ENVELOPE_PLACEHOLDER = "<!-- letter-irl:envelope -->";
+/** Where a preview card takes widgets/shared/studio.js, the studio layout (#580). */
+export const STUDIO_PLACEHOLDER = "<!-- letter-irl:studio -->";
 
 /** The shared scripts a card may ask for: each marker, and the file put there. */
 const SHARED_SCRIPTS = [
@@ -37,7 +39,8 @@ const SHARED_SCRIPTS = [
   { marker: PAGES_PLACEHOLDER, file: "pages.js" },
   { marker: ARRIVES_PLACEHOLDER, file: "arrives.js" },
   { marker: STYLE_PLACEHOLDER, file: "style.js" },
-  { marker: ENVELOPE_PLACEHOLDER, file: "envelope.js" }
+  { marker: ENVELOPE_PLACEHOLDER, file: "envelope.js" },
+  { marker: STUDIO_PLACEHOLDER, file: "studio.js" }
 ] as const;
 
 const cachedSources = new Map<string, string>();

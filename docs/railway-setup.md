@@ -116,6 +116,8 @@ LETTER_IRL_ARRIVE_BY_ENABLED=<true to offer arrival dates on previews (#535); un
 LETTER_IRL_STATIONERY_ENABLED=<true to offer themes on letter previews; unset is off>
 # The letter card's envelope reveal (#576, docs/ui-widgets.md): cards only, nothing prints differently.
 LETTER_IRL_ENVELOPE_REVEAL_ENABLED=<true to open previews from an envelope; unset is off>
+# The studio card (#580, docs/ui-widgets.md): the letter card laid out with Style, Words and Delivery tabs. Cards only.
+LETTER_IRL_STUDIO_CARD_ENABLED=<true to lay letter cards out as a studio; unset is off>
 # The mail options (#578, docs/pricing-and-credits.md): each flag sells its options through Pay & Send,
 # at their own prices, and needs their Stripe Prices below. API and maintenance services.
 LETTER_IRL_ROOM_TO_WRITE_ENABLED=<true to sell two- and three-page letters; unset is off>
