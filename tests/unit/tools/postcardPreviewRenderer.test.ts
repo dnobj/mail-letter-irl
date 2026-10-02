@@ -465,6 +465,19 @@ describe('a gift postcard', () => {
     expect(/<title>([^<]*)<\/title>/.exec(backOf(drafted().previewHtml!))![1]).toContain('PRESS2026');
   });
 
+  it('draws a front with its card: the layout on the front, the card on the back, under pdf-3 (#594)', async () => {
+    vi.stubEnv('LETTER_IRL_POSTCARD_LAYOUTS_ENABLED', 'true');
+    await run({ sendAsGift: true, message: 'Dear Sam,\nWish you were here.', layout: 'border', caption: 'Cape Cod' });
+    const draft = drafted();
+    expect(draft).toMatchObject({ isGiftSend: true, rendererVersion: 'pdf-3', postcardFront: { layout: 'border', caption: 'Cape Cod' } });
+    // Each page is a top-level svg: a bordered front holds the photo's own.
+    const [front, back] = draft.previewHtml!.match(/<svg xmlns[\s\S]*?(?=<svg xmlns|<\/body>)/g)!;
+    expect(front).toContain('<title>Cape Cod</title>');
+    const title = /<title>([^<]*)<\/title>/.exec(back)![1];
+    expect(title.startsWith('Dear Sam,\nWish you were here.\nA gift from Pat Example:\n')).toBe(true);
+    expect(back).toContain('#b9ad99');
+  });
+
   it('refuses a gift on any size but 6x9, and keeps every gift postcard without the flag on the legacy HTML and its limits', async () => {
     // A gift letter pays only where a pack does (#579): a 6x9 postcard. Not
     // offered, a 4x6 is refused for its size first (#594).
@@ -488,6 +501,63 @@ describe('a gift postcard', () => {
     vi.mocked(createPostcardDraft).mockClear();
     await expect(run({ sendAsGift: true, message: 'a'.repeat(351) })).rejects.toThrow('(351/350 characters)');
     await expect(run({ sendAsGift: true, message: `We will sta${FF} it` })).resolves.toMatchObject({ draftId: 'draft-1' });
+  });
+});
+
+describe("a postcard's front (#594)", () => {
+  beforeEach(() => {
+    vi.stubEnv('LETTER_IRL_POSTCARD_LAYOUTS_ENABLED', 'true');
+  });
+
+  const frontPage = () => drafted().previewHtml!.match(/<svg xmlns[\s\S]*?(?=<svg xmlns|<\/body>)/g)![0];
+
+  it('draws a border with its caption, and keeps it on the draft, drawn as pdf-3', async () => {
+    await run({ layout: 'border', caption: 'Cape Cod,\n August 2026' });
+    const draft = drafted();
+    expect(draft).toMatchObject({ postcardFront: { layout: 'border', caption: 'Cape Cod, August 2026' }, rendererVersion: 'pdf-3' });
+    const front = frontPage();
+    // The photo in a viewport of its own, and the caption in its colour, spoken as written.
+    expect(front).toMatch(/<svg x="[\d.]+" y="[\d.]+" width="[\d.]+" height="[\d.]+"><image href="data:image\/png;base64,/);
+    expect(front).toMatch(/<g fill="#1E1A16">(<use [^>]+\/>)+<\/g>/);
+    expect(front).toContain('<title>Cape Cod, August 2026</title>');
+  });
+
+  it('draws a greeting with its place, and keeps it on the draft, drawn as pdf-3', async () => {
+    await run({ layout: 'greetings', place: 'Asheville' });
+    expect(drafted()).toMatchObject({ postcardFront: { layout: 'greetings', place: 'Asheville' }, rendererVersion: 'pdf-3' });
+    const front = frontPage();
+    expect(front).toMatch(/<g fill="#FFFFFF">(<use [^>]+\/>)+<\/g><g fill="#A8461F">(<use [^>]+\/>)+<\/g><g fill="#F6E3A1">(<use [^>]+\/>)+<\/g>/);
+    expect(front).toContain('<title>Greetings from\nAsheville</title>');
+  });
+
+  it('keeps full bleed as before: no front on the draft, drawn as pdf-1', async () => {
+    await run({ layout: 'full_bleed' });
+    expect(drafted()).toMatchObject({ postcardFront: null, rendererVersion: 'pdf-1' });
+    expect(frontPage()).not.toContain('<g fill=');
+  });
+
+  it('refuses a caption Caveat cannot draw, naming it, before the picture is fetched', async () => {
+    // Named with its typeface, whose characters are fewer than the message's (#600 review round 1).
+    await expect(run({ layout: 'border', caption: 'Ωμέγα beach' })).rejects.toThrow(
+      'in the caption, which prints in a handwriting typeface that has fewer characters. Printed mail shows'
+    );
+    expect(downloadAndProcessPostcardImageWithPreview).not.toHaveBeenCalled();
+    expect(createPostcardDraft).not.toHaveBeenCalled();
+  });
+
+  it('refuses a front that does not fit, before the picture is fetched', async () => {
+    await expect(run({ size: '6x9', layout: 'border', caption: 'W'.repeat(60) })).rejects.toThrow(
+      /^The caption is too long for its line on the front of a 6x9 postcard: about \d+ of its 60 characters fit\. Shorten it\.$/
+    );
+    await expect(run({ layout: 'greetings' })).rejects.toThrow('The greetings layout needs a place');
+    expect(downloadAndProcessPostcardImageWithPreview).not.toHaveBeenCalled();
+  });
+
+  it('refuses any front but full bleed while the layouts are not offered, as a stray from a cached schema', async () => {
+    vi.stubEnv('LETTER_IRL_POSTCARD_LAYOUTS_ENABLED', '');
+    await expect(run({ layout: 'border', caption: 'Cape Cod' })).rejects.toThrow('Postcard layouts are not offered here');
+    await expect(run({ layout: 'full_bleed' })).resolves.toMatchObject({ draftId: 'draft-1' });
+    expect(drafted()).toMatchObject({ postcardFront: null, rendererVersion: 'pdf-1' });
   });
 });
 

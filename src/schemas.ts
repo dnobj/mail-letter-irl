@@ -743,6 +743,23 @@ export const quoteAndPreviewPostcardInputSchema: JsonSchema = {
         "A 4x6 holds 11 lines on its back, about 350 characters of prose; an 11x6 16 lines, about 900. " +
         "Letter packs and gift letters pay only for a 6x9: a 4x6 or 11x6 is paid with Pay & Send."
     },
+    // The front's layout (#594): withheld while layouts are not offered (withheldInputKeys).
+    layout: {
+      type: "string",
+      enum: ["full_bleed", "border", "greetings"],
+      default: "full_bleed",
+      description:
+        "The front's layout: full_bleed (the default), the photo across the whole front; border, the photo in a white border " +
+        "with a caption under it; or greetings, \"Greetings from\" a place over the photo."
+    },
+    caption: {
+      type: "string",
+      description: "For the border layout only: one handwritten line under the photo, such as \"Cape Cod, August 2026\". Leave it out for none."
+    },
+    place: {
+      type: "string",
+      description: "For the greetings layout only, and needed there: the place it greets from, such as \"Asheville\", printed in capitals."
+    },
     // Image from file attachment - OpenAI Apps SDK requires explicit schema definition
     // Schema tells OpenAI how to transform file attachments into the expected format
     image: {

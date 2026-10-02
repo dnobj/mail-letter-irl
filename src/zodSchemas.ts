@@ -297,6 +297,17 @@ export const quoteAndPreviewPostcardInputZ = z.object({
     "A 4x6 holds 11 lines on its back, about 350 characters of prose; an 11x6 16 lines, about 900. " +
     "Letter packs and gift letters pay only for a 6x9: a 4x6 or 11x6 is paid with Pay & Send."
   ),
+  // The front's layout (#594): withheld while layouts are not offered (withheldInputKeys).
+  layout: z.enum(["full_bleed", "border", "greetings"]).optional().describe(
+    "The front's layout: full_bleed (the default), the photo across the whole front; border, the photo in a white border " +
+    "with a caption under it; or greetings, \"Greetings from\" a place over the photo."
+  ),
+  caption: z.string().optional().describe(
+    "For the border layout only: one handwritten line under the photo, such as \"Cape Cod, August 2026\". Leave it out for none."
+  ),
+  place: z.string().optional().describe(
+    "For the greetings layout only, and needed there: the place it greets from, such as \"Asheville\", printed in capitals."
+  ),
   // Image from OpenAI fileParams - permissive to handle mobile edge cases
   // Mobile may send file_id without download_url (sediment:// protocol)
   image: imageFileParamZ.optional(),

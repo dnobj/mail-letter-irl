@@ -113,8 +113,10 @@ describe('arriveBy in tools/list', () => {
     const off = await listedTools();
     vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', 'true');
     // Closed only while nothing is withheld: the letter previews' stationery
-    // (#563) is withheld too while it is not offered.
+    // (#563) is withheld too while it is not offered, and the postcard's
+    // front while its layouts are not (#594).
     vi.stubEnv('LETTER_IRL_STATIONERY_ENABLED', 'true');
+    vi.stubEnv('LETTER_IRL_POSTCARD_LAYOUTS_ENABLED', 'true');
     vi.stubEnv('LETTER_IRL_PRINT_RENDERER', 'pdf');
     const on = await listedTools();
     for (const name of PREVIEWS) {

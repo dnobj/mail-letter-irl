@@ -9,6 +9,7 @@ import { query, transaction } from '../db/index.js';
 import type pg from 'pg';
 import { writeDiagnostic } from '../utils/diagnosticLog.js';
 import { stationeryOf, type Stationery } from '../render/stationery.js';
+import { postcardFrontOf, type PostcardFront } from '../render/postcard.js';
 import { rendererVersionFor } from '../render/pdf.js';
 import { MAX_LETTER_PAGES } from '../render/geometry.js';
 import type {
@@ -31,6 +32,25 @@ const DEFAULT_EXPIRATION_HOURS = 24;
 // ============================================================================
 // Draft Creation
 // ============================================================================
+
+/**
+ * A postcard's front as a draft stores it (#594): none for full bleed, and
+ * otherwise as the print reads it back (postcardFrontOf). One the print would
+ * not read is refused before anything is written, so a stored front always
+ * prints.
+ */
+function storedPostcardFront(front: PostcardFront | null | undefined): PostcardFront | null {
+  if (front == null) return null;
+  const stored = postcardFrontOf(front);
+  if (!stored) {
+    // The preview checks a front before it gets here, so this is a defect, classed as a refusal.
+    throw Object.assign(new Error("The postcard's front cannot be stored: the print would not read it back."), {
+      code: 'POSTCARD_FRONT_UNREADABLE',
+      diagnosticClass: 'validation_error'
+    });
+  }
+  return stored;
+}
 
 /**
  * A theme as a draft stores it (#563): none for Classic, and otherwise as the
@@ -139,15 +159,16 @@ export async function createPostcardDraft(params: CreatePostcardDraftParams): Pr
   const expiresInHours = params.expiresInHours ?? DEFAULT_EXPIRATION_HOURS;
   const expiresAt = new Date(Date.now() + expiresInHours * 60 * 60 * 1000);
   const postcardSize = params.postcardSize ?? '6x9';
+  const front = storedPostcardFront(params.postcardFront);
 
   const result = await query<PostcardDraft>(
     `INSERT INTO letter_drafts (
       user_id, sender, recipient, body_text, sign_off,
       required_credits, preview_html, sender_validation, recipient_validation,
       mail_type, front_image_data, front_image_url, postcard_size,
-      is_gift_send, renderer_version, status, expires_at, arrive_by, mail_on
+      is_gift_send, renderer_version, status, expires_at, arrive_by, mail_on, postcard_front
     ) VALUES ($1, $2, $3, $4, NULL, $5, $6, $7, $8, 'postcard', $9, $10, $11, $12, $13, 'pending', $14,
-              $15::date, $16::date)
+              $15::date, $16::date, $17::jsonb)
     RETURNING draft_id, expires_at`,
     [
       params.userId,
@@ -166,6 +187,7 @@ export async function createPostcardDraft(params: CreatePostcardDraftParams): Pr
       expiresAt,
       params.schedule?.arriveBy ?? null,
       params.schedule?.mailOn ?? null,
+      front ? JSON.stringify(front) : null,
     ]
   );
 
@@ -175,7 +197,8 @@ export async function createPostcardDraft(params: CreatePostcardDraftParams): Pr
     postcardSize,
     expiresInHours,
     renderer: params.rendererVersion ?? 'html',
-    scheduled: params.schedule !== undefined
+    scheduled: params.schedule !== undefined,
+    layout: front?.layout ?? 'full_bleed'
   });
 
   return {

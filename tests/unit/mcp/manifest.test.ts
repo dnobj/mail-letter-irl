@@ -80,6 +80,7 @@ describe("Compatibility manifest", () => {
     vi.stubEnv("LETTER_IRL_STATIONERY_ENABLED", "");
     vi.stubEnv("LETTER_IRL_ROOM_TO_WRITE_ENABLED", "");
     vi.stubEnv("LETTER_IRL_POSTCARD_SIZES_ENABLED", "");
+    vi.stubEnv("LETTER_IRL_POSTCARD_LAYOUTS_ENABLED", "");
     const snapshot = fs.readFileSync(manifestPath, "utf-8");
     const previousPublicBaseUrl = process.env.LETTER_IRL_PUBLIC_BASE_URL;
     process.env.LETTER_IRL_PUBLIC_BASE_URL = "https://api.letterirl.com";

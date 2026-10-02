@@ -3,6 +3,7 @@
  */
 
 import type { Stationery } from '../render/stationery.js';
+import type { PostcardFront } from '../render/postcard.js';
 
 // ============================================================================
 // User Types
@@ -827,6 +828,11 @@ export interface CreatePostcardDraftParams {
   rendererVersion?: string;
   /** Mail held to arrive by a date (migration 040, #535); unset to mail as soon as possible. */
   schedule?: DraftSchedule;
+  /**
+   * The front, when not full bleed (#594, migration 048): stored only as the
+   * print reads it back (postcardFrontOf), and only with rendererVersion pdf-3.
+   */
+  postcardFront?: PostcardFront | null;
 }
 
 export interface CreatePostcardDraftResult {

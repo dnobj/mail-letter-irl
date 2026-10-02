@@ -103,6 +103,7 @@ import { isSendConfirmationEnabled } from "../config/sendConfirmation.js";
 import { isArriveByEnabled } from "../config/arriveBy.js";
 import { isStationeryOffered } from "../config/stationery.js";
 import { isPostcardSizesOffered } from "../config/postcardSizes.js";
+import { isPostcardLayoutsOffered } from "../config/postcardLayouts.js";
 import { ENVELOPE_REVEAL_META, isEnvelopeRevealEnabled } from "../config/envelope.js";
 import { STUDIO_CARD_META, isStudioCardEnabled } from "../config/studioCard.js";
 import { scheduleSentence } from "../tools/arriveByInput.js";
@@ -921,10 +922,14 @@ export function servesPostcardSixByNineOnly(name: string): boolean {
 /** The letter previews' stationery arguments (#563). */
 export const STATIONERY_INPUT_KEYS: readonly string[] = ["stationery", "monogram", "headline"];
 
+/** The postcard preview's front arguments (#594). */
+export const POSTCARD_FRONT_INPUT_KEYS: readonly string[] = ["layout", "caption", "place"];
+
 /**
  * The input fields a tool is served without, as this deployment stands: the
  * four previews' `arriveBy` while LETTER_IRL_ARRIVE_BY_ENABLED is off (#535),
- * and the three letter previews' stationery while it is not offered (#563).
+ * the three letter previews' stationery while it is not offered (#563), and
+ * the postcard preview's front while its layouts are not (#594).
  * tools/list (getServedInputSchema) and /manifest.json both ask this, so
  * they agree.
  */
@@ -932,6 +937,7 @@ export function withheldInputKeys(name: string): string[] {
   const withheld: string[] = [];
   if (PREVIEW_TOOLS.has(name) && !isArriveByEnabled()) withheld.push("arriveBy");
   if (LETTER_PREVIEW_TOOLS.has(name) && !isStationeryOffered()) withheld.push(...STATIONERY_INPUT_KEYS);
+  if (name === "quote_and_preview_postcard" && !isPostcardLayoutsOffered()) withheld.push(...POSTCARD_FRONT_INPUT_KEYS);
   return withheld;
 }
 
