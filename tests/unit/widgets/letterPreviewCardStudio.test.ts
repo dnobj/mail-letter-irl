@@ -407,6 +407,23 @@ describe('the letter card as a studio (#580)', () => {
     expect(text(card, 'studio-summary')).toBe('Botanical · black and white · with the printer');
   });
 
+  it('brings the Style row back when Pay & Send cannot open a checkout', async () => {
+    const card = mount();
+    await card.show(
+      output({
+        stationery: { theme: 'botanical', source: 'asked' },
+        canSendNow: false,
+        sendEligibility: { packPays: false, payAndSend: { available: true, amountCents: 599, currency: 'usd' }, letterPack: { available: false } }
+      }),
+      ON
+    );
+    await card.click(card.byId('pay-send-button'));
+    expect(card.byId('studio-style-quiet').style.display).toBe('');
+    await card.answer({ result: { isError: true, content: [{ type: 'text', text: 'Pay & Send is not available right now.' }] } }, 'create_mail_checkout');
+    expect(card.byId('style-row').style.display).toBe('');
+    expect(card.byId('studio-style-quiet').style.display).toBe('none');
+  });
+
   it('names a Pay & Send payment without a price plainly', async () => {
     const card = mount();
     await card.show(
@@ -584,6 +601,15 @@ describe('the letter card as a studio (#580)', () => {
     expect(pages[0].querySelector('title')!.textContent).toBe('October 1, 2026\nDear Sam,\nPat');
     expect(pages.map(page => page.classList.contains('shown'))).toEqual([false, true]);
     expect(card.document.querySelector('.page-count')!.textContent).toBe('Page 2 of 2');
+  });
+
+  it('starts another draft on its first page', async () => {
+    const card = mount();
+    await card.show(output(), { previewHtml: GIFT_PAGES, [STUDIO]: true });
+    await card.click(card.document.querySelector('.page-tools .page-zoom:last-child')!);
+    expect(card.document.querySelector('.page-count')!.textContent).toBe('Page 2 of 2');
+    await card.show(output({ draftId: 'draft_0002' }), { previewHtml: GIFT_PAGES, [STUDIO]: true });
+    expect(card.document.querySelector('.page-count')!.textContent).toBe('Page 1 of 2');
   });
 
   it('names its tabs by the letter, and spaces its note as the panels do (#584 review round 1)', async () => {
