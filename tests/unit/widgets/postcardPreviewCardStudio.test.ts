@@ -71,8 +71,34 @@ async function flush(times = 8): Promise<void> {
   for (let i = 0; i < times; i += 1) await new Promise(resolve => setImmediate(resolve));
 }
 
-/** The card as served, in a fake MCP Apps host. */
-function mount() {
+/** The card as served, in ChatGPT: window.openai carries the result and its _meta. */
+function mountInChatGpt(meta: Json) {
+  const served = stampPreviewTool(
+    inlineHostBridge(fs.readFileSync(path.join(WIDGET_DIR, 'PostcardPreviewCard.html'), 'utf-8'), WIDGET_DIR),
+    'quote_and_preview_postcard'
+  );
+  const dom = new JSDOM(served.replace('<script type="module">', '<script>'), {
+    runScripts: 'dangerously',
+    beforeParse(window) {
+      (window as any).setTimeout = () => 0;
+      (window as any).clearTimeout = () => undefined;
+      (window as any).openai = {
+        theme: 'light',
+        toolInput: ARGS,
+        toolOutput: output(),
+        toolResponseMetadata: meta,
+        widgetState: null,
+        setWidgetState: async () => undefined,
+        callTool: async () => ({})
+      };
+    }
+  });
+  dom.window.dispatchEvent(new dom.window.Event('openai:set_globals'));
+  return dom.window.document;
+}
+
+/** The card as served, in a fake MCP Apps host; `still` turns on reduced motion. */
+function mount(options: { still?: boolean } = {}) {
   const served = stampPreviewTool(
     inlineHostBridge(fs.readFileSync(path.join(WIDGET_DIR, 'PostcardPreviewCard.html'), 'utf-8'), WIDGET_DIR),
     'quote_and_preview_postcard'
@@ -86,6 +112,9 @@ function mount() {
       Object.defineProperty(window.document, 'hidden', { get: () => false });
       (window as any).setTimeout = () => 0;
       (window as any).clearTimeout = () => undefined;
+      if (options.still) {
+        (window as any).matchMedia = (query: string) => ({ matches: query.includes('reduce'), addEventListener() {}, removeEventListener() {} });
+      }
     }
   });
   const window = dom.window as any;
@@ -214,15 +243,64 @@ describe('the postcard card as a postcard maker (#580)', () => {
     expect(card.side()).toBe('front');
   });
 
-  it('shows the message read-only, with what it uses of the back', async () => {
+  it('leaves the announced line alone when a redraw changes nothing (#580 maker review round 1)', async () => {
+    const card = mount();
+    await card.show(output(), ON);
+    const said = card.byId('studio-scale').firstChild;
+    await card.show(output(), ON);
+    expect(card.byId('studio-scale').firstChild).toBe(said);
+    await card.click(card.byId('studio-flip'));
+    expect(card.byId('studio-scale').firstChild).not.toBe(said);
+  });
+
+  it('turns the postcard without motion when motion is reduced, and ends a cut-short motion (#580 maker review round 1)', async () => {
+    const still = mount({ still: true });
+    await still.show(output(), ON);
+    await still.click(still.byId('studio-flip'));
+    expect(still.side()).toBe('back');
+    expect(still.byId('studio-postcard').classList.contains('flipping')).toBe(false);
+
+    const cut = mount();
+    await cut.show(output(), ON);
+    await cut.click(cut.byId('studio-flip'));
+    expect(cut.byId('studio-postcard').classList.contains('flipping')).toBe(true);
+    cut.byId('studio-postcard').dispatchEvent(new cut.window.Event('animationcancel'));
+    expect(cut.byId('studio-postcard').classList.contains('flipping')).toBe(false);
+  });
+
+  it("flips a preview our renderer did not draw: the card's own front and its mockup of the back (#580 maker review round 1)", async () => {
+    const card = mount();
+    await card.show(output(), {
+      previewFrontHtml: '<html><body><div class="postcard-front">FRONT FROM META</div></body></html>',
+      [STUDIO]: true
+    });
+    expect(card.byId('preview-front').textContent).toContain('FRONT FROM META');
+    await card.click(card.byId('studio-flip'));
+    expect(card.side()).toBe('back');
+    expect(card.byId('preview-back').querySelector('.postcard-back-mockup')).not.toBeNull();
+    expect(card.byId('preview-back').textContent).toContain('Wish you were here.');
+  });
+
+  it('becomes a postcard maker in ChatGPT, from the switch in toolResponseMetadata (#580 maker review round 1)', async () => {
+    const document = mountInChatGpt(ON);
+    await flush();
+    expect(document.getElementById('card')!.classList.contains('studio')).toBe(true);
+    expect(document.getElementById('studio-title')!.textContent).toBe('Postcard to Sam Rivera');
+
+    const off = mountInChatGpt({ previewHtml: RENDERED });
+    await flush();
+    expect(off.getElementById('card')!.classList.contains('studio')).toBe(false);
+  });
+
+  it('shows the message read-only, beside what the back holds, which is lines, not characters', async () => {
     const card = mount();
     await card.show(output(), ON);
     expect(text(card, 'studio-message')).toBe(MESSAGE);
-    expect(text(card, 'studio-count')).toBe(`${[...MESSAGE].length} of about 500 characters`);
+    expect(text(card, 'studio-count')).toBe(`${[...MESSAGE].length} characters · the back holds 16 lines, about 500 characters of prose`);
 
     const gift = mount();
     await gift.show(output({ giftCard: { state: 'funded', description: 'A free letter goes with it.' } }), ON);
-    expect(text(gift, 'studio-count')).toBe(`${[...MESSAGE].length} characters, beside the gift card`);
+    expect(text(gift, 'studio-count')).toBe(`${[...MESSAGE].length} characters · beside the gift card, the back holds 11 lines`);
 
     const none = mount();
     await none.show(output({ message: undefined }), ON, { recipient });

@@ -498,9 +498,11 @@
       function showSide() {
         const front = currentTab === "front";
         document.getElementById("studio-flip").textContent = front ? "Flip to the back" : "Show the front";
-        document.getElementById("studio-scale").textContent = front
-          ? "Drawn to scale: 6 x 9 in."
-          : "The right half is for the address and postage.";
+        // The line is announced (aria-live), so a redraw that changes nothing
+        // leaves it alone rather than reading it out again.
+        const scale = document.getElementById("studio-scale");
+        const line = front ? "Drawn to scale: 6 x 9 in." : "The right half is for the address and postage.";
+        if (scale.textContent !== line) scale.textContent = line;
       }
 
       /**
@@ -516,13 +518,19 @@
             switchTab(currentTab === "front" ? "back" : "front");
             const postcard = document.getElementById("studio-postcard");
             postcard.classList.remove("flipping");
-            void postcard.offsetWidth;
-            postcard.classList.add("flipping");
+            // With reduced motion the postcard just turns: no motion to play.
+            if (!window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) {
+              void postcard.offsetWidth;
+              postcard.classList.add("flipping");
+            }
             showSide();
           });
-          document.getElementById("studio-postcard").addEventListener("animationend", (event) => {
-            event.currentTarget.classList.remove("flipping");
-          });
+          // Done, or cut short (a hidden pane cancels it): either way it is over.
+          for (const type of ["animationend", "animationcancel"]) {
+            document.getElementById("studio-postcard").addEventListener(type, (event) => {
+              event.currentTarget.classList.remove("flipping");
+            });
+          }
         }
         studioState = state;
         const settled = settledDraft();
@@ -553,16 +561,17 @@
                   : "Draft";
         document.getElementById("studio-sub").textContent = [stage, place].filter(Boolean).join(" · ");
 
-        // The message, read-only, against what the back holds: 16 lines, about
-        // 500 characters, fewer beside a gift card.
+        // The message, read-only, beside what the back holds. The back is
+        // measured in lines (16, or 11 beside a gift card), so the count is
+        // not a budget: short lines fill it long before 500 characters do.
         const message = typeof state.message === "string" ? state.message.trim() : "";
         document.getElementById("studio-message").textContent = message || "The message is on the back.";
         const length = [...message].length;
         document.getElementById("studio-count").textContent = !message
           ? ""
           : state.giftCard
-            ? `${length} characters, beside the gift card`
-            : `${length} of about 500 characters`;
+            ? `${length} characters · beside the gift card, the back holds 11 lines`
+            : `${length} characters · the back holds 16 lines, about 500 characters of prose`;
 
         const sendEligibility = state.sendEligibility;
         const payAndSend = sendEligibility?.payAndSend;
