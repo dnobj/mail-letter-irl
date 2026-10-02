@@ -275,6 +275,27 @@ describe('the confirmation page API (#470)', () => {
       }
     });
 
+    it("names a postcard's size and front as the print reads them, and nothing of them for a letter (#594)", async () => {
+      signedIn();
+      const postcard = (overrides: Record<string, unknown>) => draft({ mail_type: 'postcard', postcard_size: '6x9', postcard_front: null, ...overrides });
+      vi.mocked(getDraft).mockResolvedValue(postcard({}) as any);
+      expect((await call('GET')).json().postcard).toEqual({ size: '6x9', layout: 'full_bleed' });
+      vi.mocked(getDraft).mockResolvedValue(postcard({ postcard_size: '6x4', renderer_version: 'pdf-3', postcard_front: { layout: 'border', caption: 'Cape Cod', extra: 1 } }) as any);
+      expect((await call('GET')).json().postcard).toEqual({ size: '6x4', layout: 'border', caption: 'Cape Cod' });
+      vi.mocked(getDraft).mockResolvedValue(postcard({ renderer_version: 'pdf-3', postcard_front: { layout: 'border' } }) as any);
+      expect((await call('GET')).json().postcard).toEqual({ size: '6x9', layout: 'border' });
+      vi.mocked(getDraft).mockResolvedValue(postcard({ postcard_size: '6x11', renderer_version: 'pdf-3', postcard_front: { layout: 'greetings', place: 'Rye' } }) as any);
+      expect((await call('GET')).json().postcard).toEqual({ size: '6x11', layout: 'greetings', place: 'Rye' });
+      // A size no writer leaves out reads as the 6x9 every postcard was before.
+      vi.mocked(getDraft).mockResolvedValue(postcard({ postcard_size: null }) as any);
+      expect((await call('GET')).json().postcard).toEqual({ size: '6x9', layout: 'full_bleed' });
+      // A front the print cannot read is not named, nor anything of a letter.
+      for (const overrides of [{ postcard_front: { layout: 'collage' } }, { mail_type: 'letter' }]) {
+        vi.mocked(getDraft).mockResolvedValue(postcard(overrides) as any);
+        expect((await call('GET')).json(), JSON.stringify(overrides)).not.toHaveProperty('postcard');
+      }
+    });
+
     it('counts a long letter and a postcard as the preview tools do', async () => {
       signedIn();
       vi.mocked(getDraft).mockResolvedValue(draft({ required_credits: 5 }) as any);

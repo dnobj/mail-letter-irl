@@ -40,6 +40,7 @@ import { SpendLimitError } from '../services/betaSpendLimits.js';
 import type { LetterDraft } from '../services/types.js';
 import { draftScheduleOf } from '../services/draftSchedule.js';
 import { stationeryOf, type Stationery } from '../render/stationery.js';
+import { postcardFrontOf } from '../render/postcard.js';
 import { heldPastNow, heldSendFields, waitsInOutbox } from '../tools/heldSend.js';
 import { isDraftIdShape } from '../tools/requestSend.js';
 import {
@@ -132,6 +133,30 @@ function stationeryView(draft: LetterDraft): Stationery | null {
   return stationeryOf(draft.stationery);
 }
 
+/** A postcard's size and front (#594), as the page names them. */
+interface PostcardView {
+  size: string;
+  layout: 'full_bleed' | 'border' | 'greetings';
+  caption?: string;
+  place?: string;
+}
+
+/**
+ * A postcard's size and front (#594), for the page to name: its size, and its
+ * front as the print reads it (postcardFrontOf), the photo alone without one.
+ * Null for a letter, and for a front the print cannot read, so the page never
+ * names one that will not print.
+ */
+function postcardView(draft: LetterDraft & { postcard_size?: string | null; postcard_front?: unknown }): PostcardView | null {
+  if (mailTypeOf(draft) !== 'postcard') return null;
+  const size = draft.postcard_size ?? '6x9';
+  if (draft.postcard_front == null) return { size, layout: 'full_bleed' };
+  const front = postcardFrontOf(draft.postcard_front);
+  if (!front) return null;
+  if (front.layout === 'greetings') return { size, layout: 'greetings', place: front.place };
+  return front.caption === undefined ? { size, layout: 'border' } : { size, layout: 'border', caption: front.caption };
+}
+
 /**
  * How a ready draft no pack pays for is paid on the page (#579): Pay & Send at
  * its own price, or why not now. Null for mail a pack pays for. Its price is
@@ -150,6 +175,7 @@ async function showDraft(res: ServerResponse, draft: LetterDraft, userId: string
   writeDiagnostic('info', 'send.confirmation_viewed', { mailType: mailTypeOf(draft), state });
   const payment = state === 'ready' ? await paymentView(draft) : null;
   const option = draftMailOption(draft);
+  const postcard = postcardView(draft);
   sendJson(res, 200, {
     draftId: draft.draft_id,
     mailType: mailTypeOf(draft),
@@ -168,6 +194,8 @@ async function showDraft(res: ServerResponse, draft: LetterDraft, userId: string
     schedule: scheduleOf(draft),
     // Drawn in this, it prints in it (#563).
     stationery: stationeryView(draft),
+    // A postcard prints at this size, with this front (#594).
+    ...(postcard ? { postcard } : {}),
     // No pack pays for it (#579): the page takes Pay & Send instead.
     ...(isPackPayable(option) ? {} : { packPays: false }),
     // A letter of more than one page (#586), printed on both sides: only then.

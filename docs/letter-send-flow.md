@@ -105,7 +105,11 @@ and press Send itself. The check holds only while the website's application
 can get tokens by nothing but a person signing in: it must stay a confidential
 client with the `authorization_code` and `refresh_token` grants alone (see
 [auth0-tenant-configuration.md](auth0-tenant-configuration.md)). A change to its
-grants is a change to the send rule. The `POST`:
+grants is a change to the send rule. The `GET` names what the page shows: the
+preview, the addresses, the cost and the balance; a letter's `stationery`
+(#563); and a postcard's `postcard`, its `size` and front (`layout`, with its
+`caption` or `place`) as the print reads them, the photo alone without a front
+(#594). A front the print cannot read is not named. The `POST`:
 - runs the same service as the tools, below, so every check applies;
 - rewords the service's refusals for the page.
 
