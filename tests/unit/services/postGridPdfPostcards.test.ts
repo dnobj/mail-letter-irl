@@ -481,6 +481,24 @@ describe('postcards drawn with a front (#594)', () => {
     }));
   });
 
+  it.each([['a border', BORDER], ['a greeting', GREETINGS]])("prints a 6x9 gift postcard with %s: its front and its card's strip, as pdf-3", async (_name, front) => {
+    const fetchMock = accepted();
+    vi.stubGlobal('fetch', fetchMock);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-01T12:00:00Z'));
+
+    await expect(provider().sendPostcard({ ...base, giftCard, rendererVersion: 'pdf-3', front })).resolves.toMatchObject({ success: true });
+
+    const form = (fetchMock.mock.calls[0] as [string, RequestInit])[1].body as FormData;
+    const printed = Buffer.from(await (form.get('pdf') as File).arrayBuffer());
+    const image = readImageDataUri(base.frontImageBase64);
+    const strip = giftPostcardStripCopy(giftCard, 'Test Sender');
+    expect(printed.equals(await renderPdf(layoutPostcard({ message: base.backMessage, image, strip, ...front }), 'pdf-3'))).toBe(true);
+    // Neither without its card, nor without its front.
+    expect(printed.equals(await renderPdf(layoutPostcard({ message: base.backMessage, image, ...front }), 'pdf-3'))).toBe(false);
+    expect(printed.equals(await renderPdf(layoutPostcard({ message: base.backMessage, image, strip }), 'pdf-3'))).toBe(false);
+  });
+
   it('prints a pdf-1 postcard full bleed, whatever front its row holds', async () => {
     const fetchMock = accepted();
     vi.stubGlobal('fetch', fetchMock);
