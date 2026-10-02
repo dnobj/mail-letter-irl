@@ -315,11 +315,13 @@ describe('a letter over several pages (#586)', () => {
   });
 
   it('lays a letter out on its own page count exactly as on the most pages (#589 review round 1)', () => {
-    // The preview lays out on up to three pages; the print on the count it stored.
-    // Both lay out letterPrintText's text, which never ends in blank lines. One
-    // that did would differ: at one page its trailing blank lines are overflow,
-    // while flowing on drops them from the top of a later page. So the counts
-    // here never end blankRuns on a blank line (a count that is a multiple of 7).
+    // A property of the layout, for text whose last line draws something. Text
+    // that ends in a line drawing nothing differs: at its own page count that
+    // line is overflow, while flowing on drops it from the top of a later page.
+    // letterPrintText trims whitespace but not invisible characters, so the
+    // print does not rely on this: it lays a letter out at the most pages, as
+    // the previews do (#589 review round 3). The counts here never end
+    // blankRuns on a blank line (a count that is a multiple of 7).
     const blankRuns = (count: number) =>
       Array.from({ length: count }, (_, index) => (index % 7 === 6 ? '' : `Line ${index + 1} of a letter`)).join('\n');
     let compared = 0;

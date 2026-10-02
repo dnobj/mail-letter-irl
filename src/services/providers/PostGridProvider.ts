@@ -868,21 +868,23 @@ export class PostGridProvider implements LetterFulfillmentProvider {
     }
     let layout;
     try {
-      layout = layoutLetter({ text: params.message, layoutType, image, stationery }, { maxPages: pages });
+      // Laid out as a preview lays it out, on up to the most pages (#586), so
+      // the letter prints as it was drawn by construction: a page count of its
+      // own would treat a last line of invisible characters otherwise (#589
+      // review round 3). A letter that fits one page is laid out as ever.
+      layout = layoutLetter({ text: params.message, layoutType, image, stationery }, { maxPages: MAX_LETTER_PAGES });
     } catch (error) {
       throw new RenderRefusal('render', `The letter could not be laid out: ${reason(error)}`);
     }
     if (layout.overflowLines > 0) {
-      throw new RenderRefusal(
-        'overflow',
-        `The letter runs ${layout.overflowLines} line(s) past ${pages === 1 ? 'the page' : `its ${pages} pages`}.`
-      );
+      throw new RenderRefusal('overflow', `The letter runs ${layout.overflowLines} line(s) past ${MAX_LETTER_PAGES} pages.`);
     }
-    // On exactly the pages it was previewed and priced on (#586): a letter that
-    // now lays out on fewer was sold for pages it would not fill. Like an
-    // overflow, its layout changed since the preview, so it is held as one: the
-    // reason alone tells an operator to fix the renderer and retry (#589 review
-    // round 1), where `pages` means a count no writer stores.
+    // On exactly the pages it was previewed and priced on (#586): one that now
+    // lays out on more would print pages nobody paid for, and on fewer was sold
+    // for pages it would not fill. Its layout changed since the preview, as an
+    // overflow's does, so it is held as one: the reason alone tells an operator
+    // to fix the renderer and retry (#589 review round 1), where `pages` means a
+    // count no writer stores.
     if (layout.pages.length !== pages) {
       throw new RenderRefusal('overflow', `The letter lays out on ${layout.pages.length} page(s), not the ${pages} it was previewed on.`);
     }

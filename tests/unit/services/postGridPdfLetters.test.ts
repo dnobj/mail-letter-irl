@@ -329,7 +329,8 @@ describe('letters printed from our own PDF (#534)', () => {
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(result.success).toBe(false);
-    expect(result.error).toContain('past the page');
+    // Laid out as a preview with room to write would be, it takes two pages.
+    expect(result.error).toBe('The letter lays out on 2 page(s), not the 1 it was previewed on.');
     expect(result.metadata).toMatchObject({ submissionOutcome: 'ambiguous', retryable: false, errorClass: 'render_refused' });
     expect(diagnostics.written).toContainEqual(expect.objectContaining({
       event: 'provider.postgrid.render_refused',
@@ -475,12 +476,38 @@ describe('letters printed from our own PDF (#534)', () => {
     it('holds a letter that runs past its pages rather than printing it clipped', async () => {
       const fetchMock = accepted();
       vi.stubGlobal('fetch', fetchMock);
-      // 26 lines fill page 1 and 33 page 2.
-      const result = await provider().sendLetter({ ...base, message: lines(26 + 33 + 4), pages: 2 });
+      diagnostics.written = [];
+      // 26 lines fill page 1 and 33 page 2: four more take a third page.
+      const longer = await provider().sendLetter({ ...base, message: lines(26 + 33 + 4), pages: 2 });
+      expect(longer.error).toBe('The letter lays out on 3 page(s), not the 2 it was previewed on.');
+      // And past three pages, the most the renderer lays out.
+      const past = await provider().sendLetter({ ...base, message: lines(26 + 33 + 33 + 4), pages: 3 });
+      expect(past.error).toBe('The letter runs 4 line(s) past 3 pages.');
 
       expect(fetchMock).not.toHaveBeenCalled();
-      expect(result.error).toBe('The letter runs 4 line(s) past its 2 pages.');
-      expect(result.metadata).toMatchObject({ errorClass: 'render_refused' });
+      for (const result of [longer, past]) expect(result.metadata).toMatchObject({ errorClass: 'render_refused' });
+      expect(diagnostics.written.filter(entry => entry.event === 'provider.postgrid.render_refused').map(entry => entry.fields.reason))
+        .toEqual(['overflow', 'overflow']);
+    });
+
+    it.each([
+      ['a zero-width space', '\u200B'],
+      ['a left-to-right mark', '\u200E'],
+      ['a word joiner', '\u2060']
+    ])('prints a letter whose last line is only %s, as its preview laid it out (#589 review round 3)', async (_label, invisible) => {
+      // A preview with room to write drops the line from the top of a page it
+      // would start; the print lays the letter out the same way, so it prints.
+      for (const [visible, pages] of [[26, 1], [26 + 33, 2]] as const) {
+        const fetchMock = accepted();
+        vi.stubGlobal('fetch', fetchMock);
+        const message = `${lines(visible)}\n${invisible}`;
+        const preview = layoutLetter({ text: message, layoutType: 'text_only' }, { maxPages: 3 });
+        expect(preview.pages).toHaveLength(pages);
+        expect(preview.overflowLines).toBe(0);
+        await expect(provider().sendLetter({ ...base, message, pages }), `${visible}`).resolves.toMatchObject({ success: true });
+        const { pdf } = await sent(fetchMock);
+        expect(pdf.toString('latin1')).toMatch(new RegExp(`/Count ${pages}\\b`));
+      }
     });
   });
 

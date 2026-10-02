@@ -675,16 +675,18 @@ content (`content.pages`, `content.rendererVersion`, `content.giftCard`, the ima
   - an overflow that a renderer change caused. A letter refused as `overflow` was measured to fit when
     it was previewed, under the same version, so a deploy changed the wrapping. Fix the renderer rather
     than refund. A stationery slot that "does not fit" is the same case, and so is a letter that "lays
-    out on N page(s), not the M it was previewed on" (#586). If the renderer was changed on purpose and
-    the letter cannot print as it was previewed, as can happen to mail held for an arrival date (#535),
-    set its `content.pages` to the count it now lays out on, retry, and settle any difference in price
-    with the customer by hand;
+    out on N page(s), not the M it was previewed on" (#586). A letter's content never changes after the
+    send, so an `overflow` of a letter always means the renderer changed. If it was changed on purpose
+    and the letter cannot print as it was previewed, as can happen to mail held for an arrival date
+    (#535), set its `content.pages` to the count it now lays out on (remove the key for one page), retry,
+    and settle any difference in price with the customer by hand. One that now runs past three pages
+    ("runs N line(s) past 3 pages") cannot print at all: reject it;
   - stationery this build cannot read, once a build that reads the stored theme is deployed. Stored
     stationery is refused when the draft is made unless the print reads it back, so this means the
     build changed, not the letter.
 - **Reject** when the content itself cannot print, resolving it as rejected
   (`provider_confirmed_rejected_refund`):
-  - a message that is too long in any build;
+  - a postcard message that is too long in any build;
   - a postcard size the renderer never draws;
   - stored image data that is not an image. "The image is neither a JPEG nor a PNG with a readable size."
     can be either this or a form of JPEG our reader misses, so look at the stored data before deciding;

@@ -254,13 +254,13 @@ provider acceptance. The PostGrid request uses the Letter IRL `letter_id` as `Id
 A `pdf-1` gift send prints its card as the PDF's second page, drawn by the renderer with the code the send minted (`letters.content.giftCard`). When our renderer refuses a letter before any request, it is held like any other failure that is not an explicit rejection, with the class `render_refused`. That happens for a version this build cannot print, an unreadable image, a letter that no longer fits its page or pages, a gift card it cannot lay out, or stationery it cannot read or fit. Every version the database admits must be in `PRINTABLE_RENDERER_VERSIONS`, which a test checks, so a new renderer never strands letters waiting under an older one. Resolving such a hold is in [deployment.md](deployment.md).
 
 **A letter of two or three pages (#586)** prints from our renderer only, on both sides of the paper. Its page count is copied into `letters.content.pages` at send, from the draft (migration 047), and only when above one.
-- The print lays it out on exactly that many pages (`maxPages`), so it reproduces the preview.
+- The print lays it out as a preview does, on up to three pages, and holds it unless it takes exactly its page count. So it reproduces the preview by construction, a last line of invisible characters included. A letter that fits one page is laid out as ever. The Dummy and DIY providers, in development only, ignore the page count.
 - `doubleSided` follows the letter's own pages, never the PDF's. A gift letter is one page, and its card keeps a sheet of its own.
 - Before any request, the print refuses (`render_refused`, reason `pages`):
   - a count outside 1 to 3;
   - more than one page on the legacy HTML or beside a gift card.
 
-  A letter that runs past its pages, or now lays out on fewer pages than it was previewed on, is an `overflow`: its layout changed since the preview.
+  A letter that now lays out on more or fewer pages than it was previewed on, or past three, is an `overflow`: its layout changed since the preview.
 - PostGrid's `pageCount` counts sides (probe P13). The cost estimate adds about 10c per page past the first, or 20c in colour, to the 10c for double-sided.
 
 **How a postcard goes to PostGrid (#534 Phase 4).** A postcard carries the same `rendererVersion` from its draft.
