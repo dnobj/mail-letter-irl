@@ -513,7 +513,24 @@ export function renderPostcardPreviewDocument(pages: string[]): string {
  */
 export function rendererDocumentPages(html: string | null | undefined): string[] {
   if (!html || !html.includes('<body data-renderer="')) return [];
-  return html.match(/<svg [\s\S]*?<\/svg>/g) ?? [];
+  // A page is a top-level <svg>, and may hold one of its own: a bordered
+  // postcard's photo in its viewport (#594). So the split counts depth,
+  // rather than ending a page at the first </svg>. Text and titles are
+  // escaped, and a data URI holds no '<', so every tag here is a real one.
+  const pages: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (const match of html.matchAll(/<svg\s|<\/svg>/g)) {
+    if (match[0] === '</svg>') {
+      if (depth === 0) continue;
+      depth -= 1;
+      if (depth === 0) pages.push(html.slice(start, match.index + match[0].length));
+    } else {
+      if (depth === 0) start = match.index;
+      depth += 1;
+    }
+  }
+  return pages;
 }
 
 /** The picture a rendered page shows, as its data URI: the preview's small copy of the image. */
@@ -530,8 +547,8 @@ function rendererDocument(pages: string[], version: string, after: string): stri
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
     html, body { margin: 0; background: #fff; }
-    svg { display: block; width: 100%; height: auto; }
-    svg + svg { margin-top: 12px; }
+    body > svg { display: block; width: 100%; height: auto; }
+    body > svg + svg { margin-top: 12px; }
   </style>
 </head>
 <body data-renderer="${version}">

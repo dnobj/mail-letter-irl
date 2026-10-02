@@ -110,7 +110,7 @@ const sendButton = (card: ReturnType<typeof mount>) => card.document.getElementB
 describe('the envelope reveal on the letter card (#576)', () => {
   it('lets presses through the envelope, and clips to its height whatever the pages: a gift letter folds to one envelope (#577 review round 1)', () => {
     const served = inlineHostBridge(fs.readFileSync(path.join(WIDGET_DIR, 'LetterPreviewCard.html'), 'utf-8'), WIDGET_DIR);
-    expect(served).toMatch(/\.letter-page svg\.envelope\{[^}]*pointer-events:none/);
+    expect(served).toMatch(/\.letter-page > svg\.envelope\{[^}]*pointer-events:none/);
     expect(served).toContain('.envelope-opening,.envelope-sealing,.envelope-sealed{container-type:inline-size}');
     // 264/612 of the width: the envelope's own height, never a share of a two-page box.
     expect(served).toContain('@keyframes envelope-unfold{from{clip-path:inset(0 0 calc(100% - 43.137cqw) 0)}to{clip-path:inset(0)}}');

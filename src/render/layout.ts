@@ -32,6 +32,12 @@ export interface TextRun {
   text: string;
   /** The same line as written, for text extraction and tests. */
   source: string;
+  /**
+   * A hex colour: a postcard front's lettering (#594). Black when left out.
+   * The preview writes it into an attribute as it is, so only a hex colour
+   * may be one.
+   */
+  fill?: `#${string}`;
 }
 
 export interface ImageBox {
@@ -41,6 +47,11 @@ export interface ImageBox {
   width: number;
   height: number;
   image: RenderImage;
+  /**
+   * The rectangle the image is cut to, when it is drawn larger: a bordered
+   * postcard front's photo (#594). The page's edge cuts it otherwise.
+   */
+  clip?: { x: number; top: number; width: number; height: number };
 }
 
 /** A rounded rectangle's outline, as the gift card's border. */
