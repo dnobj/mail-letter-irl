@@ -231,3 +231,10 @@ export function frontPrintedText(front: PostcardFront | undefined): Array<{ fiel
 export function fitPostcardFront(front: PostcardFront, size: PostcardSizeName, context: ToolContext): PostcardFront {
   return fitted(front, size, context, true);
 }
+
+/** A front as a tool's answer names it (#594): its layout, with its caption or place. */
+export function frontChoice(front: PostcardFront | undefined): { layout: PostcardLayoutChoice; caption?: string; place?: string } {
+  if (!front) return { layout: 'full_bleed' };
+  if (front.layout === 'border') return front.caption === undefined ? { layout: 'border' } : { layout: 'border', caption: front.caption };
+  return { layout: 'greetings', place: front.place };
+}

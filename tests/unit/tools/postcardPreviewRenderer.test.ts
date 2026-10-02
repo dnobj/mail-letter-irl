@@ -559,6 +559,29 @@ describe("a postcard's front (#594)", () => {
     await expect(run({ layout: 'full_bleed' })).resolves.toMatchObject({ draftId: 'draft-1' });
     expect(drafted()).toMatchObject({ postcardFront: null, rendererVersion: 'pdf-1' });
   });
+
+  it("names the front in its answer while the layouts are offered, for the postcard maker (#594 PR 5b)", async () => {
+    await expect(run({ layout: 'border', caption: 'Cape Cod' })).resolves.toMatchObject({ layout: 'border', caption: 'Cape Cod' });
+    const greeted = await run({ layout: 'greetings', place: 'Asheville' });
+    expect(greeted).toMatchObject({ layout: 'greetings', place: 'Asheville' });
+    expect(greeted).not.toHaveProperty('caption');
+    const plain = await run();
+    expect(plain).toMatchObject({ layout: 'full_bleed' });
+    for (const key of ['caption', 'place', 'size']) expect(plain, key).not.toHaveProperty(key);
+    // Not offered: nothing of it, as before.
+    vi.stubEnv('LETTER_IRL_POSTCARD_LAYOUTS_ENABLED', '');
+    expect(await run()).not.toHaveProperty('layout');
+  });
+});
+
+describe("the postcard's size in its answer (#594 PR 5b)", () => {
+  it('is named while the 4x6 and 11x6 are offered, and not otherwise', async () => {
+    expect(await run()).not.toHaveProperty('size');
+    vi.stubEnv('LETTER_IRL_POSTCARD_SIZES_ENABLED', 'true');
+    vi.stubEnv('JIT_PURCHASE_ENABLED', 'true');
+    await expect(run({ size: '6x4' })).resolves.toMatchObject({ size: '6x4' });
+    await expect(run()).resolves.toMatchObject({ size: '6x9' });
+  });
 });
 
 describe('without the flag', () => {

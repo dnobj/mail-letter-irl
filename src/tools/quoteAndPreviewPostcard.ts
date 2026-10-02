@@ -19,8 +19,9 @@ import {
   withDisplayImage
 } from "./letterHelpers.js";
 import { printRenderer } from "../config/printRenderer.js";
-import { offeredPostcardSizes } from "../config/postcardSizes.js";
-import { frontPrintedText, previewPostcardFront } from "./postcardFrontInput.js";
+import { isPostcardSizesOffered, offeredPostcardSizes } from "../config/postcardSizes.js";
+import { isPostcardLayoutsOffered } from "../config/postcardLayouts.js";
+import { frontChoice, frontPrintedText, previewPostcardFront, type PostcardLayoutChoice } from "./postcardFrontInput.js";
 import { isPackPayable, type MailOption } from "../config/products.js";
 import {
   drawsGrapheme,
@@ -161,6 +162,12 @@ export interface QuoteAndPreviewPostcardOutput {
   schedule?: PreviewScheduleOutput;
   /** The arrival dates on offer (#535), while the feature is on: a card's date picker. */
   arrivalWindow?: ArrivalWindow;
+  /** While the 4x6 and 11x6 are offered (#594): its size, which the postcard maker changes with set_postcard_style. */
+  size?: PostcardSize;
+  /** While the layouts are offered (#594): its front, with its caption or place, which the maker changes too. */
+  layout?: PostcardLayoutChoice;
+  caption?: string;
+  place?: string;
 }
 
 // ============================================================================
@@ -674,6 +681,9 @@ async function handler(
     giftLettersAvailable: gift.giftLettersAvailable > 0 ? gift.giftLettersAvailable : undefined,
     schedule: schedule?.output,
     arrivalWindow: previewArrivalWindow(context),
+    // The postcard maker's choices now, each named while it is offered (#594).
+    ...(isPostcardSizesOffered() ? { size } : {}),
+    ...(renderer === 'pdf' && isPostcardLayoutsOffered() ? frontChoice(front) : {}),
   };
 
   // Add address validation results if available

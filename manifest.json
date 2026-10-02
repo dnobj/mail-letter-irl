@@ -2187,6 +2187,32 @@
               "latestArrival"
             ]
           },
+          "size": {
+            "type": "string",
+            "enum": [
+              "6x9",
+              "6x4",
+              "6x11"
+            ],
+            "description": "While the 4x6 and 11x6 are offered: the postcard's size"
+          },
+          "layout": {
+            "type": "string",
+            "enum": [
+              "full_bleed",
+              "border",
+              "greetings"
+            ],
+            "description": "While postcard layouts are offered: the front's layout"
+          },
+          "caption": {
+            "type": "string",
+            "description": "The border's caption, when it has one"
+          },
+          "place": {
+            "type": "string",
+            "description": "The place the greeting names"
+          },
           "previewFrontHtml": {
             "type": "string",
             "description": "HTML preview of postcard front (image)"

@@ -150,6 +150,17 @@
       .studio #arrives-row input[type=date]{font-size:12.5px;padding:4px 8px;border-radius:999px}
       .studio-quiet{margin:0;font-size:12px;color:var(--mut);line-height:1.45}
       .studio-size{margin:0;font-size:13px;font-weight:600;color:var(--tx)}
+      /* The maker's size and front (#594): choices like the Arrives row's. */
+      .studio-choices{display:flex;flex-wrap:wrap;gap:6px}
+      .studio-choice{border:1px solid var(--bd);border-radius:999px;padding:5px 11px;font:inherit;font-size:12px;font-weight:600;color:var(--tx);background:var(--sf);cursor:pointer}
+      .studio-choice[aria-pressed=true]{background:var(--pri);border-color:var(--pri);color:var(--prit)}
+      .studio-choice[aria-disabled=true]{opacity:.55;cursor:default}
+      /* Hidden stays hidden though the class lays it out (#603 review round 1). */
+      .studio-choices[hidden],.studio-section[hidden],.studio-line[hidden]{display:none}
+      .studio-error{color:var(--er)}
+      .studio-choice:focus-visible,.studio-line-input:focus-visible{outline:2px solid var(--tx);outline-offset:1px}
+      .studio-line{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+      .studio-line-input{flex:1 1 120px;min-width:0;font:inherit;font-size:12.5px;color:var(--tx);background:var(--sf);border:1px solid var(--bd);border-radius:8px;padding:5px 8px}
       .studio-words{max-height:200px;overflow:auto;white-space:pre-wrap;word-wrap:break-word;font-family:Georgia,"Times New Roman",serif;font-size:13px;line-height:1.55;color:var(--tx);background:var(--sf2);border:1px solid var(--bd2);border-radius:10px;padding:10px 12px}
       .studio-ft{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;margin:0 14px;padding:12px 0 14px;border-top:1px solid var(--bd2)}
       .studio-sum{flex:1 1 160px;min-width:0;display:flex;flex-direction:column}
@@ -340,9 +351,32 @@
         </div>
         <div class="studio-side">
           <div class="studio-section">
-            <span class="studio-label">Size</span>
+            <span class="studio-label" id="studio-size-label">Size</span>
             <p class="studio-size" id="studio-size">6 x 9 in</p>
+            <!-- While the preview names its size (#594): the sizes on offer. -->
+            <div class="studio-choices" id="studio-sizes" role="group" aria-labelledby="studio-size-label" hidden>
+              <button type="button" class="studio-choice" data-size="6x4" aria-pressed="false">4 x 6 in</button>
+              <button type="button" class="studio-choice" data-size="6x9" aria-pressed="false">6 x 9 in</button>
+              <button type="button" class="studio-choice" data-size="6x11" aria-pressed="false">6 x 11 in</button>
+            </div>
           </div>
+          <!-- While the preview names its front (#594): the layouts, and the line one takes. -->
+          <div class="studio-section" id="studio-front" hidden>
+            <span class="studio-label" id="studio-front-label">Front</span>
+            <div class="studio-choices" role="group" aria-labelledby="studio-front-label">
+              <button type="button" class="studio-choice" data-layout="full_bleed" aria-pressed="false">Full</button>
+              <button type="button" class="studio-choice" data-layout="border" aria-pressed="false">Border</button>
+              <button type="button" class="studio-choice" data-layout="greetings" aria-pressed="false">Greetings</button>
+            </div>
+            <div class="studio-line" id="studio-line" hidden>
+              <label class="studio-quiet" for="studio-line-input" id="studio-line-label">Caption</label>
+              <input type="text" class="studio-line-input" id="studio-line-input" autocomplete="off" aria-describedby="studio-line-hint">
+              <button type="button" class="studio-choice" id="studio-line-apply">Update</button>
+              <button type="button" class="studio-choice" id="studio-line-revert" hidden>Put back</button>
+              <span class="studio-quiet" id="studio-line-hint"></span>
+            </div>
+          </div>
+          <p class="studio-quiet" id="studio-style-note" role="status" aria-live="polite"></p>
           <div class="studio-section">
             <span class="studio-label" id="studio-message-label">Message on the back</span>
             <div class="studio-words" id="studio-message" tabindex="0" aria-labelledby="studio-message-label"></div>
@@ -641,7 +675,354 @@
                       : "First Class";
         document.getElementById("studio-size").textContent = sizeText();
         document.getElementById("studio-summary").textContent = [sizeText(), timing].join(" · ");
+        showMakerStyle(state, !cancelled && !halted && !expired && !sent && !paid);
         showSide();
+      }
+
+      // ---- The maker's size and front (#594) --------------------------------
+      //
+      // While the preview names its size or its front, each named only while
+      // it is offered, the maker offers the choices and sets them on the
+      // draft with set_postcard_style, the tool a model would call. Its answer
+      // carries the postcard drawn again, in _meta as a preview's page is, and
+      // what it costs now, which the card shows in place of the preview's. One
+      // change at a time, none while the card sends or pays. Send and Pay &
+      // Send wait while a change is made, and while one is being written and
+      // not yet set (makerEditing), as the letter card's do while its words
+      // are: they would send the front the draft has, not this one.
+      const POSTCARD_SIZES = ["6x4", "6x9", "6x11"];
+      const POSTCARD_LAYOUTS = ["full_bleed", "border", "greetings"];
+      // Each size's sides in inches, the short side first, as sizeText names them.
+      const SIZE_INCHES = { "6x4": [4, 6], "6x9": [6, 9], "6x11": [6, 11] };
+      // The longest caption and place the tool takes (postcardFrontInput.ts).
+      const LINE_LIMITS = { border: 60, greetings: 30 };
+      const PLACE_FIRST = "Write the place it greets from, then Update.";
+      const maker = {
+        // The style last set on a draft, or that get_draft_status gave:
+        // { draftId, size, layout, caption, place, previewHtml, terms, byCard }.
+        change: null,
+        busy: false,
+        // What the maker last said, whether it was a refusal, and whether
+        // that refusal was of a front (front) rather than a size.
+        note: { draftId: null, text: "", error: false },
+        // The draft the choices are for: another draft starts afresh.
+        draftId: null,
+        // A greeting chosen whose place is still to be written.
+        drafting: null,
+        // Whether the person has typed in the line since it was filled, which
+        // a redraw keeps.
+        editing: false,
+        // Whether the draft can change now, as the last draw found it.
+        changeable: false,
+        // Whether Send and Pay & Send were last drawn waiting for the maker.
+        heldShown: false,
+        wired: false,
+      };
+
+      // What a restyle or a status answer says the postcard costs now, or
+      // null when it says nothing of it.
+      function makerTermsOf(data) {
+        if (!data || typeof data.canSendNow !== "boolean" || !data.sendEligibility || typeof data.sendEligibility !== "object") {
+          return null;
+        }
+        return {
+          canSendNow: data.canSendNow,
+          sendEligibility: data.sendEligibility,
+          reasonCannotSend: typeof data.reasonCannotSend === "string" ? data.reasonCannotSend : undefined,
+        };
+      }
+
+      // The draft's style as the maker last saw it set, over the preview's:
+      // each choice only where the preview offered it, and the price.
+      function withMakerChange(state) {
+        const change = maker.change;
+        if (!state || !change || change.draftId !== state.draftId) return state;
+        return {
+          ...state,
+          ...(POSTCARD_SIZES.includes(state.size) && change.size ? { size: change.size } : {}),
+          ...(POSTCARD_LAYOUTS.includes(state.layout) && change.layout
+            ? { layout: change.layout, caption: change.caption, place: change.place }
+            : {}),
+          ...(change.terms ?? {}),
+        };
+      }
+
+      function makerPage(draftId) {
+        return maker.change?.draftId === draftId && maker.change.previewHtml ? maker.change.previewHtml : null;
+      }
+
+      // A style the server says the draft has, with its page when one came
+      // back: from set_postcard_style (byCard), or from get_draft_status.
+      function adoptMakerChange(draftId, data, page, byCard) {
+        const before = maker.change?.draftId === draftId ? maker.change : null;
+        const layout = POSTCARD_LAYOUTS.includes(data.layout) ? data.layout : null;
+        maker.change = {
+          draftId,
+          size: POSTCARD_SIZES.includes(data.size) ? data.size : null,
+          layout,
+          caption: layout === "border" && typeof data.caption === "string" ? data.caption : undefined,
+          place: layout === "greetings" && typeof data.place === "string" ? data.place : undefined,
+          previewHtml: typeof page === "string" && page ? page : before?.previewHtml ?? null,
+          terms: makerTermsOf(data) ?? before?.terms ?? null,
+          byCard: byCard || before?.byCard === true,
+        };
+      }
+
+      // A status answer is taken only while this card has not changed the
+      // draft, nor is changing it: its own answer is newer (#603 review
+      // round 1), as the Style row and the Arrives row adopt theirs.
+      function mayAdoptStatus(draftId) {
+        return !maker.busy && !(maker.change?.draftId === draftId && maker.change.byCard);
+      }
+
+      // Another draft starts afresh: nothing written for the last carries
+      // over. Called as each draft is drawn, before Send's hold is (#603
+      // review round 2).
+      function makerFollows(draftId) {
+        if (maker.draftId === draftId) return;
+        maker.draftId = draftId;
+        maker.drafting = null;
+        maker.editing = false;
+      }
+
+      // The prompt for a place, or a refusal of the front being written, says
+      // nothing once that is left. A size's refusal stays (#603 review round 3).
+      function clearMakerPrompt(draftId) {
+        if (maker.note.text === PLACE_FIRST || (maker.note.error && maker.note.front)) maker.note = { draftId, text: "", error: false };
+      }
+
+      // The line a draft has for a layout: a border's caption or a greeting's place.
+      function storedLine(state, layout) {
+        return (layout === "border" ? state.caption : layout === "greetings" ? state.place : "") ?? "";
+      }
+
+      // Whether a change is being written and not yet set: a greeting chosen
+      // without its place, or a line typed that differs from the draft's.
+      function makerEditing() {
+        const state = withMakerChange(studioState);
+        if (!state || maker.draftId !== state.draftId) return false;
+        if (maker.drafting) return true;
+        if (!maker.editing) return false;
+        const input = document.getElementById("studio-line-input");
+        if (!input || (state.layout !== "border" && state.layout !== "greetings")) return false;
+        return input.value.trim() !== storedLine(state, state.layout).trim();
+      }
+
+      // Whether Send and Pay & Send wait for the maker.
+      function makerHolds() {
+        return maker.busy || makerEditing();
+      }
+
+      function setMakerStyle(args) {
+        const draftId = currentDraftId;
+        if (maker.busy || !maker.changeable || !draftId || typeof host.callTool !== "function") return;
+        if (sendInProgress || checkoutInProgress) return;
+        // A front set ends what was being written for it; a size leaves it as it is.
+        const frontChange = "layout" in args;
+        maker.busy = true;
+        maker.note = { draftId, text: "Drawing the postcard again.", error: false };
+        // Changing it is acting on the draft: the card keeps it from here.
+        draftActedOn = true;
+        render();
+        Promise.resolve()
+          .then(() => host.callTool("set_postcard_style", { draftId, ...args }))
+          .then((result) => {
+            // A refusal comes back as an error result, not a rejection.
+            if (result && result.isError) {
+              throw new Error(resultText(result) || "The postcard was not changed.");
+            }
+            if (currentDraftId !== draftId) return;
+            const data = toolData(result);
+            // An answer about another draft is no answer to this one.
+            if (typeof data.draftId === "string" && data.draftId !== draftId) {
+              throw new Error("The postcard may have changed. Make the preview again to see it.");
+            }
+            const page = result?._meta?.previewHtml;
+            adoptMakerChange(draftId, data, page, true);
+            if (frontChange) {
+              maker.drafting = null;
+              maker.editing = false;
+            }
+            // The draft has the new style either way; without its page the
+            // card keeps showing the last one and says so. With it, the
+            // server's own sentence is said (announced: role=status).
+            maker.note = {
+              draftId,
+              text: typeof page === "string" && page
+                ? (typeof data.message === "string" ? data.message : "")
+                : "The postcard is changed, but its page did not come back here. Make the preview again to see it.",
+              error: false,
+            };
+          })
+          .catch((error) => {
+            if (currentDraftId !== draftId) return;
+            maker.note = { draftId, text: readableError(error), error: true, front: frontChange };
+          })
+          .then(() => {
+            maker.busy = false;
+            render();
+          });
+      }
+
+      function pickSize(size) {
+        const state = withMakerChange(studioState);
+        if (!state || maker.busy || !maker.changeable || size === state.size) return;
+        setMakerStyle({ size });
+      }
+
+      function pickLayout(layout) {
+        const state = withMakerChange(studioState);
+        if (!state || maker.busy || !maker.changeable) return;
+        if (layout === "greetings" && state.layout !== "greetings") {
+          // A greeting needs its place: the line comes first. Chosen again,
+          // it keeps what has been written.
+          if (maker.drafting !== "greetings") {
+            maker.drafting = "greetings";
+            maker.editing = false;
+            maker.note = { draftId: state.draftId, text: PLACE_FIRST, error: false };
+            render();
+          }
+          document.getElementById("studio-line-input")?.focus();
+          return;
+        }
+        const wasDrafting = maker.drafting !== null;
+        maker.drafting = null;
+        if (layout === state.layout) {
+          // Back to the front it has: a greeting being written goes, and so
+          // does its prompt or its refusal.
+          if (wasDrafting) {
+            maker.editing = false;
+            clearMakerPrompt(state.draftId);
+          }
+          render();
+          return;
+        }
+        // A border may have no caption, and full bleed has none.
+        setMakerStyle({ layout });
+      }
+
+      function applyLine() {
+        const state = withMakerChange(studioState);
+        if (!state || maker.busy || !maker.changeable) return;
+        const layout = maker.drafting ?? state.layout;
+        if (layout !== "border" && layout !== "greetings") return;
+        const text = document.getElementById("studio-line-input").value.trim();
+        if (layout === "greetings" && !text) {
+          maker.note = { draftId: state.draftId, text: PLACE_FIRST, error: false };
+          render();
+          return;
+        }
+        setMakerStyle(layout === "border" ? { layout, ...(text ? { caption: text } : {}) } : { layout, place: text });
+      }
+
+      // Puts the line back as the draft has it, and leaves a greeting being
+      // written: Send then sends what the card shows. Focus stays in the
+      // maker: on the line while it shows, else on the front the postcard has.
+      function putBackLine() {
+        const state = withMakerChange(studioState);
+        if (!state || maker.busy || !maker.changeable) return;
+        maker.drafting = null;
+        maker.editing = false;
+        clearMakerPrompt(state.draftId);
+        render();
+        if (!document.getElementById("studio-line").hidden) {
+          document.getElementById("studio-line-input").focus();
+        } else {
+          document.querySelector(`#studio-front [data-layout="${state.layout}"]`)?.focus();
+        }
+      }
+
+      function wireMakerStyle() {
+        document.getElementById("studio-sizes").addEventListener("click", (event) => {
+          const button = event.target.closest?.("[data-size]");
+          if (button) pickSize(button.dataset.size);
+        });
+        document.getElementById("studio-front").addEventListener("click", (event) => {
+          const button = event.target.closest?.("[data-layout]");
+          if (button) pickLayout(button.dataset.layout);
+        });
+        document.getElementById("studio-line-apply").addEventListener("click", applyLine);
+        document.getElementById("studio-line-revert").addEventListener("click", putBackLine);
+        const input = document.getElementById("studio-line-input");
+        input.addEventListener("input", () => {
+          maker.editing = true;
+          // Send and Pay & Send wait while the line differs from the draft's:
+          // drawn again when that turns, not on every key.
+          if (makerHolds() !== maker.heldShown) render();
+        });
+        input.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" && !event.isComposing) {
+            event.preventDefault();
+            applyLine();
+          }
+        });
+      }
+
+      /**
+       * Draws the maker's choices: the sizes while the preview names its
+       * size (never for a gift postcard, which is a 6x9), the layouts and the
+       * line one takes while it names its front. `open`: whether the draft
+       * can still change, as the maker's header says (not sent, paid,
+       * cancelled or expired).
+       */
+      function showMakerStyle(state, open) {
+        const sizes = document.getElementById("studio-sizes");
+        const front = document.getElementById("studio-front");
+        if (!sizes || !front) return;
+        if (!maker.wired) {
+          maker.wired = true;
+          wireMakerStyle();
+        }
+        makerFollows(state.draftId);
+        const offersSizes = POSTCARD_SIZES.includes(state.size) && !state.giftCard;
+        const offersLayouts = POSTCARD_LAYOUTS.includes(state.layout);
+        maker.changeable =
+          open && cardIsShowingDraft() && !settledDraft() && !sendPageShown() && !sendInProgress && !checkoutInProgress && trackedOrderId === null;
+        // aria-disabled, not disabled: a pressed choice keeps keyboard focus
+        // while the server answers, and a press meanwhile does nothing, as on
+        // the letter card's Style row (style.js).
+        const inert = String(maker.busy || !maker.changeable);
+
+        sizes.hidden = !offersSizes;
+        document.getElementById("studio-size").hidden = offersSizes;
+        for (const button of sizes.querySelectorAll("[data-size]")) {
+          button.setAttribute("aria-pressed", String(button.dataset.size === state.size));
+          button.setAttribute("aria-disabled", inert);
+        }
+
+        front.hidden = !offersLayouts;
+        const layout = maker.drafting ?? state.layout;
+        for (const button of front.querySelectorAll("[data-layout]")) {
+          button.setAttribute("aria-pressed", String(button.dataset.layout === layout));
+          button.setAttribute("aria-disabled", inert);
+        }
+        const line = document.getElementById("studio-line");
+        const input = document.getElementById("studio-line-input");
+        const takesLine = offersLayouts && (layout === "border" || layout === "greetings");
+        line.hidden = !takesLine;
+        if (takesLine) {
+          document.getElementById("studio-line-label").textContent = layout === "border" ? "Caption" : "Place";
+          input.maxLength = LINE_LIMITS[layout];
+          input.placeholder = layout === "border" ? "Cape Cod, August 2026" : "Asheville";
+          // Read-only rather than disabled while a change is set: the person's place in it stays.
+          input.readOnly = inert === "true";
+          document.getElementById("studio-line-apply").setAttribute("aria-disabled", inert);
+          // The line as the draft has it, unless the person is writing one.
+          if (!maker.editing) input.value = maker.drafting ? "" : storedLine(state, layout);
+          // While what is written holds Send, the line says so, and offers
+          // to put it back (#603 review round 2).
+          const writing = makerEditing();
+          const limit = layout === "border" ? `Up to ${LINE_LIMITS.border} characters, or none.` : `Up to ${LINE_LIMITS.greetings} characters.`;
+          document.getElementById("studio-line-hint").textContent = writing ? `${limit} Sending waits until you Update or Put back.` : limit;
+          const revert = document.getElementById("studio-line-revert");
+          revert.hidden = !writing;
+          revert.setAttribute("aria-disabled", inert);
+        }
+        const note = document.getElementById("studio-style-note");
+        const said = maker.note.draftId === state.draftId ? maker.note : { text: "", error: false };
+        if (note.textContent !== said.text) note.textContent = said.text;
+        // A refusal reads as one, as the card's other notes do.
+        note.classList.toggle("studio-error", said.error === true);
       }
 
       // ---- Recovery: a preview call that never arrived (#411) -------------
@@ -1087,6 +1468,11 @@
             // A draft still ready keeps its preview, with the dates it has
             // now: this card may have changed them since that preview (#535).
             if (answer.status === "ready") {
+              // The size and front it has now, with its page and price
+              // (#594): the maker may have changed them since this preview.
+              if ((POSTCARD_SIZES.includes(answer.size) || POSTCARD_LAYOUTS.includes(answer.layout)) && mayAdoptStatus(draftId)) {
+                adoptMakerChange(draftId, answer, result?._meta?.previewHtml, false);
+              }
               // And what they mean for delivery, for the Delivery line.
               if (
                 picker.adopt(draftId, answer.schedule) &&
@@ -1551,7 +1937,8 @@
         if (retryResult && hostOutput?.draftId !== undefined && !draftActedOn) {
           retryResult = null;
         }
-        const state = retryResult ? retryResult.output : host.toolOutput();
+        // With the size and front the maker last set on it (#594), and its price.
+        const state = withMakerChange(retryResult ? retryResult.output : host.toolOutput());
 
         // Check if we have actual data
         if (!state || state.draftId === undefined) {
@@ -1615,6 +2002,8 @@
 
         // Store draftId for send button
         currentDraftId = draftId;
+        // The maker's too, before Send's hold is drawn below (#594).
+        makerFollows(draftId);
         currentEligibility = sendEligibility || null;
         if (!retryResult) askDraftState(draftId);
         const settled = settledDraft();
@@ -1626,9 +2015,10 @@
         // A preview our renderer drew (#534) is the postcard as it prints: its
         // front and back pages. Any other gets the legacy front and the
         // mockup of the back.
-        const pages = renderedPages(meta.previewHtml ?? state.previewHtml);
+        // The page the maker last drew (#594), else the preview's.
+        const pages = renderedPages(makerPage(draftId) ?? meta.previewHtml ?? state.previewHtml);
         const printed = pages && pages.length >= 2;
-        postcardInches = printed ? inchesOf(pages[0]) : [6, 9];
+        postcardInches = SIZE_INCHES[state.size] ?? (printed ? inchesOf(pages[0]) : [6, 9]);
 
         // Render front preview (image)
         const previewFront = document.getElementById("preview-front");
@@ -1879,7 +2269,9 @@
         } else if (cardIsShowingDraft()) {
           scheduled.hide();
         }
-        const settingDate = picker.busy();
+        // Setting a date or a style (#594): Send waits for the draft it sends.
+        maker.heldShown = makerHolds();
+        const settingDate = picker.busy() || maker.heldShown;
         const datedSend = Boolean(picker.schedule());
 
         if (!sendInProgress && !checkoutInProgress) {
@@ -1968,7 +2360,7 @@
 
       // Handle send button click
       async function handleSend() {
-        if (sendInProgress || !currentDraftId || picker.busy()) return;
+        if (sendInProgress || !currentDraftId || picker.busy() || makerHolds()) return;
         draftActedOn = true;
 
         const sendButton = document.getElementById("send-button");
@@ -2343,7 +2735,8 @@
       }
 
       async function handlePayAndSend() {
-        if (checkoutInProgress || !currentDraftId) return;
+        // Not while the maker sets a style (#594): the checkout prices the draft as it stands.
+        if (checkoutInProgress || !currentDraftId || makerHolds()) return;
         draftActedOn = true;
         const button = document.getElementById("pay-send-button");
         const buttonText = document.getElementById("pay-send-button-text");
