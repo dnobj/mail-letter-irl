@@ -89,6 +89,13 @@ export function friendlyCheckoutError(error: unknown): Error {
       return friendly(
         'You already have enough prepaid balance to send this draft. Use the Send action.'
       );
+    case 'JIT_OPTION_NOT_SOLD':
+      // Its option's flag is off (#578): nothing can pay for this draft now,
+      // so the way on is a new preview, which the option's absence keeps to
+      // what is sold.
+      return friendly(
+        "Pay & Send isn't available for this mail. Please create a new preview."
+      );
     case 'JIT_NOT_CONFIGURED':
     case 'PACK_AMOUNT_NOT_CONFIGURED':
     case 'PRICE_ID_NOT_CONFIGURED':

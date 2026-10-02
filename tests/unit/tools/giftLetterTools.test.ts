@@ -108,6 +108,8 @@ describe('letter preview: purchases per app', () => {
 
   it('keeps both where the app takes purchases', async () => {
     expect((await preview(0, undefined, 'chatgpt')).sendEligibility).toEqual(PRICED);
+    // Priced as a one-page letter: the mail option, not the bare mail type (#578).
+    expect(mocks.getSendEligibility).toHaveBeenLastCalledWith(0, expect.any(Number), { mailType: 'letter' });
   });
 
   it.each(['claude', 'claude_code', 'codex', 'vscode', 'hermes', 'token', 'generic'] as const)(
@@ -131,9 +133,9 @@ describe('letter preview: purchases per app', () => {
   it('builds the postcard preview the same way', () => {
     // quote_and_preview_postcard calls this helper with its mail type; the
     // source check below pins that it does.
-    expect(previewSendEligibility(0, 2, 'postcard', false, clientProfileNamed('claude'))).toEqual(NO_PURCHASES);
-    expect(mocks.getSendEligibility).toHaveBeenLastCalledWith(0, 2, 'postcard');
-    expect(previewSendEligibility(0, 2, 'postcard', false, clientProfileNamed('chatgpt'))).toEqual(PRICED);
+    expect(previewSendEligibility(0, 2, { mailType: 'postcard' }, false, clientProfileNamed('claude'))).toEqual(NO_PURCHASES);
+    expect(mocks.getSendEligibility).toHaveBeenLastCalledWith(0, 2, { mailType: 'postcard' });
+    expect(previewSendEligibility(0, 2, { mailType: 'postcard' }, false, clientProfileNamed('chatgpt'))).toEqual(PRICED);
   });
 
   it('is what quote_and_preview_postcard uses, with the calling app', async () => {
@@ -143,7 +145,7 @@ describe('letter preview: purchases per app', () => {
       'utf8'
     );
     expect(source).toMatch(
-      /previewSendEligibility\(\s*available,\s*requiredCredits,\s*"postcard",\s*gift\.isGift,\s*callingApp\(context\)\s*\)/
+      /previewSendEligibility\(\s*available,\s*requiredCredits,\s*\{\s*mailType:\s*"postcard",\s*postcardSize:\s*size\s*\},\s*gift\.isGift,\s*callingApp\(context\)\s*\)/
     );
     expect(source).not.toContain('getSendEligibility(');
   });

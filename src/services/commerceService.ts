@@ -16,9 +16,11 @@ import {
   CREDITS_PER_LETTER,
   PACK_PRODUCTS,
   formatAmountForCurrency,
-  jitProductCode,
+  jitProductFor,
+  jitProductMatching,
   normalizedCurrency,
-  packCurrency
+  packCurrency,
+  type MailOption
 } from '../config/products.js';
 import { lockAccountForBalanceChange } from './accountLock.js';
 import { addCreditsToLedgerWithClient } from './creditLedgerService.js';
@@ -40,6 +42,7 @@ import {
   createPaymentRefund,
   findPaymentRefund,
   getJitProductConfig,
+  getJitProductConfigForCode,
   getPackProductConfig,
   isJitPurchaseEnabled,
   retrieveCheckoutSession,
@@ -48,7 +51,7 @@ import {
   type CommerceProductConfig,
   type PackProductId
 } from './stripeService.js';
-import type { LetterDraft, MailType, Order, OrderStatus } from './types.js';
+import type { LetterDraft, MailType, Order, OrderStatus, PostcardSize } from './types.js';
 import {
   carriedDiagnosticClass,
   classifyDiagnosticError,
@@ -204,10 +207,37 @@ function refundRetryDelaySeconds(): number {
   );
 }
 
+/**
+ * The mail option a draft is priced as. Letters are one page until room to
+ * write records a draft's pages (#578).
+ */
+export function draftMailOption(draft: {
+  mail_type?: string | null;
+  postcard_size?: string | null;
+}): MailOption {
+  const mailType = (draft.mail_type || 'letter') as MailType;
+  return mailType === 'postcard'
+    ? { mailType, postcardSize: (draft.postcard_size || '6x9') as PostcardSize }
+    : { mailType };
+}
+
+/** Why a quote offers no Pay & Send for an option this deployment does not sell (#578). */
+export const OPTION_NOT_SOLD_REASON = "Pay & Send isn't available for this mail.";
+
+/**
+ * Kicks the catalog for a quote's product. An option this deployment does not
+ * sell kicks with its own code all the same: that is what clears whatever the
+ * catalog recorded while it was sold, before its flag went off (#278 round 8).
+ */
+function kickForOption(option: MailOption, reason: string): void {
+  const product = jitProductMatching(option);
+  if (product) kickPriceCatalog(product.productCode, reason);
+}
+
 export function getSendEligibility(
   availableCredits: number,
   requiredCredits: number,
-  mailType: MailType
+  option: MailOption
 ): SendEligibility {
   const prepaidEligible = availableCredits >= requiredCredits;
   // One enabled read per call (three separate env reads before, against this
@@ -230,8 +260,8 @@ export function getSendEligibility(
   // depends on it.
   return {
     payAndSend: jitEnabled
-      ? enabledPayAndSend(mailType, prepaidEligible)
-      : disabledPayAndSend(mailType),
+      ? enabledPayAndSend(option, prepaidEligible)
+      : disabledPayAndSend(option),
     letterPack: {
       available: true,
       purchaseUrl:
@@ -242,13 +272,13 @@ export function getSendEligibility(
   };
 }
 
-function disabledPayAndSend(mailType: MailType): SendEligibility['payAndSend'] {
+function disabledPayAndSend(option: MailOption): SendEligibility['payAndSend'] {
   // Still kick with the code: the catalog's unsold gate clears leftover
   // state recorded before the toggle - cooldowns AND memos, both mail types -
   // so neither an un-archived Price nor an archived one resurfaces stale
   // answers on re-enable. Without this, nothing would ever call with a JIT
   // code while disabled (#278 rounds 7-8).
-  kickPriceCatalog(jitProductCode(mailType), 'send_eligibility_disabled');
+  kickForOption(option, 'send_eligibility_disabled');
   return {
     available: false,
     unavailableReason: 'Pay & Send is not enabled.'
@@ -256,16 +286,21 @@ function disabledPayAndSend(mailType: MailType): SendEligibility['payAndSend'] {
 }
 
 function enabledPayAndSend(
-  mailType: MailType,
+  option: MailOption,
   prepaidEligible: boolean
 ): SendEligibility['payAndSend'] {
-  const product = getJitProductConfig(mailType);
   // The eligibility accessor owns its own warmup kick - UNGATED beyond the
   // enabled check above, which is what makes the catalog's unsold-state
   // clearing reachable: gating the kick harder meant nothing ever called with
   // a JIT code while disabled, so toggle-off leftovers survived to resurface
   // on re-enable, the exact bug the clearing exists for (#278 round 7).
-  kickPriceCatalog(product.productCode, 'send_eligibility');
+  const product = getJitProductConfig(option);
+  kickForOption(option, 'send_eligibility');
+  if (!product) {
+    // An option whose flag is off has no price: nothing to report as
+    // unpriced, and never a smaller option's price (#578).
+    return { available: false, unavailableReason: OPTION_NOT_SOLD_REASON };
+  }
   const configured = Boolean(product.priceId && product.amountCents > 0);
   if (configured) clearDiagnosticChangeSlot(`commerce.pay_and_send_unpriced:${product.productCode}`);
   const allowedWithBalance = process.env.JIT_ALLOW_WITH_PREPAID_BALANCE === 'true';
@@ -862,8 +897,14 @@ async function prepareJitOrder(
     // ONE derivation for the whole transaction: the reprice branch and the
     // insert below must price against the SAME row or they silently diverge
     // (#278 round 8).
-    const actualMailType = (draft.mail_type || 'letter') as MailType;
-    const product = getJitProductConfig(actualMailType);
+    const product = getJitProductConfig(draftMailOption(draft));
+    if (!product) {
+      // Its option's flag is off: no price exists, so nothing is sold, and a
+      // smaller option's price is never charged for it (#578).
+      throw Object.assign(new Error('Pay & Send does not sell this mail option'), {
+        code: 'JIT_OPTION_NOT_SOLD'
+      });
+    }
 
     const active = await client.query<Order>(
       `SELECT * FROM orders
@@ -1111,19 +1152,21 @@ export async function createJitCheckout(
   }
 
   // Which product is being bought decides which price must be verified, so
-  // read the draft's mail type BEFORE the money transaction (a network await
+  // read the draft's mail option BEFORE the money transaction (a network await
   // must never run inside it) and ensure exactly that product - ensuring both
   // JIT products coupled a letter checkout to a hanging postcard lookup
   // (#278 round 5). USER-SCOPED and AFTER the send-block gate: an unscoped
   // peek let any authenticated caller make another user's draft id steer
   // catalog work before authorization said no (#278 round 7). Advisory only -
-  // prepareJitOrder re-reads FOR UPDATE and owns the real ownership check.
-  const draftPeek = await query<{ mail_type: string | null }>(
-    'SELECT mail_type FROM letter_drafts WHERE draft_id = $1 AND user_id = $2',
+  // prepareJitOrder re-reads FOR UPDATE and owns the real ownership check,
+  // and refuses an option this deployment does not sell (#578).
+  const draftPeek = await query<{ mail_type: string | null; postcard_size: string | null }>(
+    'SELECT mail_type, postcard_size FROM letter_drafts WHERE draft_id = $1 AND user_id = $2',
     [params.draftId, params.userId]
   );
-  const peekedMailType = (draftPeek.rows[0]?.mail_type || 'letter') as MailType;
-  await ensurePriceCatalog(jitProductCode(peekedMailType));
+  const peekedOption = draftMailOption(draftPeek.rows[0] ?? {});
+  const peekedProduct = jitProductFor(peekedOption);
+  if (peekedProduct) await ensurePriceCatalog(peekedProduct.productCode);
 
   // Pay & Send is the one path that both charges AND mails, so both ceilings
   // apply - and both are checked HERE, before prepareJitOrder creates an order
@@ -1135,7 +1178,7 @@ export async function createJitCheckout(
   await assertMailWithinDailyCaps({ query }, params.userId, 1);
   await assertChargeWithinDailyCap(
     params.userId,
-    getJitProductConfig(peekedMailType).amountCents
+    getJitProductConfig(peekedOption)?.amountCents ?? 0
   );
 
   // The same-mail check (#412) runs inside prepareJitOrder, just before a new
@@ -1176,14 +1219,29 @@ export async function createJitCheckout(
     return asCheckoutResult(prepared.order, true);
   }
 
-  const mailType = String(prepared.order.product_snapshot.mailType || 'letter') as MailType;
   // ONE fresh derivation, as it was through round 10. Rounds 11-12 spliced
   // the row's amount together with a live price id (and then the row's price
   // id too), which round 13 showed strands a checkout on an archived Price
   // that the pre-round-11 code completed successfully. The race that
   // motivated the splice was a concurrent memo invalidation, and that
-  // machinery is gone (#278 round 13).
-  const product = getJitProductConfig(mailType);
+  // machinery is gone (#278 round 13). Derived from the order's own product,
+  // not its mail type, so an option's order is never priced as another
+  // option (#578).
+  const product = getJitProductConfigForCode(prepared.order.product_code);
+  if (!product) {
+    // Its option stopped being sold between the order and its session: a
+    // configuration fault, which cancels the order, as an unpriced one does.
+    throw await failCheckoutCreation(
+      prepared.order.order_id,
+      {
+        success: false,
+        errorCode: 'PRICE_ID_NOT_CONFIGURED',
+        diagnosticClass: 'configuration_error',
+        error: `Pay & Send no longer sells ${prepared.order.product_code}`
+      },
+      'Failed to create Pay & Send checkout'
+    );
+  }
   const urls = checkoutReturnUrls(prepared.order.order_id);
   const checkout = await createJitCheckoutSession({
     orderId: prepared.order.order_id,

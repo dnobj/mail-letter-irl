@@ -22,8 +22,9 @@
 
 import { maintenanceHeartbeatUrlInvalid } from '../services/maintenanceHeartbeat.js';
 import { operatorAlertUrlInvalid } from './operatorAlerts.js';
-import { enabledUnlessDisabled } from '../utils/envSettings.js';
+import { enabledUnlessDisabled, offUnlessExplicitlyEnabled } from '../utils/envSettings.js';
 import {
+  JIT_OPTION_PRICE_ENV_VARS,
   JIT_PRICE_ENV_VARS,
   PACK_PRICE_ENV_VARS,
   normalizedCurrency,
@@ -58,6 +59,12 @@ export interface EnvVarRequirement {
   aliases?: readonly string[];
   requiredIn: 'always' | 'production' | 'development';
   condition?: 'when-jit-enabled' | 'when-static-dcr';
+  /**
+   * A flag that must be on as well as the condition: a mail option's price is
+   * needed only while the option is sold (#578). Read as the conditions are:
+   * the boot check by its value, the cutover preflight by its name's presence.
+   */
+  flag?: string;
   /**
    * Listed so the cutover preflight can DIFF it, but absence is not a failure:
    * the code has a working default. `checkedBy` alone was not enough - it only
@@ -185,6 +192,15 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     name: price,
     requiredIn: 'production',
     condition: 'when-jit-enabled',
+    secret: false,
+    services: ['api', 'maintenance'],
+    checkedBy: 'stripe.jit_config_incomplete'
+  })),
+  ...JIT_OPTION_PRICE_ENV_VARS.map(({ priceEnv, flag }): EnvVarRequirement => ({
+    name: priceEnv,
+    requiredIn: 'production',
+    condition: 'when-jit-enabled',
+    flag,
     secret: false,
     services: ['api', 'maintenance'],
     checkedBy: 'stripe.jit_config_incomplete'
@@ -961,11 +977,22 @@ function validateStripe(
     }
 
     if (env.JIT_PURCHASE_ENABLED === 'true') {
-      for (const price of JIT_PRICE_ENV_VARS) {
+      // The options' prices join only while their flags sell them (#578), read
+      // by the same reader the product table uses.
+      const required = [
+        ...JIT_PRICE_ENV_VARS.map(price => ({ price, when: 'JIT_PURCHASE_ENABLED=true' })),
+        ...JIT_OPTION_PRICE_ENV_VARS
+          .filter(option => offUnlessExplicitlyEnabled(option.flag, env))
+          .map(option => ({
+            price: option.priceEnv,
+            when: `JIT_PURCHASE_ENABLED=true and ${option.flag} is on`
+          }))
+      ];
+      for (const { price, when } of required) {
         const problems: string[] = [];
         // Trimmed, like the catalog - see the pack loop above (#278 round 9).
         const priceValue = (env[price] ?? '').trim();
-        if (!priceValue) problems.push(`${price} is required when JIT_PURCHASE_ENABLED=true`);
+        if (!priceValue) problems.push(`${price} is required when ${when}`);
         else if (!priceValue.startsWith('price_')) problems.push(`${price} must be a Stripe price id (price_...)`);
         for (const message of problems) {
           findings.push({
@@ -1229,6 +1256,10 @@ export function validateDeploymentConfig(
     ) {
       continue;
     }
+    // The flag, as the advisory skip above: every entry carrying one today has
+    // an owning rule and never reaches this loop, so this changes nothing now
+    // and stops the next one from being demanded with its option off (#578).
+    if (entry.flag && !offUnlessExplicitlyEnabled(entry.flag, env)) continue;
     if (!resolveAliased(entry, env)) {
       findings.push({
         severity: 'error',
