@@ -122,6 +122,13 @@ export interface CreateJitCheckoutParams {
   draftId: string;
   /** The person asked for another copy of mail sent or paid for in the last 24 hours (#412). */
   allowDuplicate?: boolean;
+  /**
+   * Where Stripe returns the person, when not the purchase return page: the
+   * confirmation page, which takes the payment for mail no pack pays for
+   * (#579). Recorded with the order, so a retry from elsewhere is a new
+   * request, as a changed price is.
+   */
+  returnTo?: { successUrl: string; cancelUrl: string };
 }
 
 export interface PurchaseStatusResult {
@@ -528,8 +535,12 @@ interface JitStripeRequest {
   cancelUrl: string;
 }
 
-function jitStripeRequest(orderId: string, product: CommerceProductConfig): JitStripeRequest {
-  const urls = checkoutReturnUrls(orderId);
+function jitStripeRequest(
+  orderId: string,
+  product: CommerceProductConfig,
+  returnTo?: CreateJitCheckoutParams['returnTo']
+): JitStripeRequest {
+  const urls = returnTo ?? checkoutReturnUrls(orderId);
   return { priceId: product.priceId, successUrl: urls.successUrl, cancelUrl: urls.cancelUrl };
 }
 
@@ -997,7 +1008,7 @@ async function prepareJitOrder(
         // from before the request was recorded is judged on amount and
         // currency alone, as it always was.
         const recorded = recordedStripeRequest(existing);
-        const current = jitStripeRequest(existing.order_id, product);
+        const current = jitStripeRequest(existing.order_id, product, params.returnTo);
         const samePrice =
           existing.amount_cents === product.amountCents &&
           // The same normalizer on BOTH sides: a legacy row's padded currency
@@ -1106,7 +1117,7 @@ async function prepareJitOrder(
         params.userId,
         params.draftId,
         product.productCode,
-        JSON.stringify({ ...productSnapshot(product), stripeRequest: jitStripeRequest(orderId, product) }),
+        JSON.stringify({ ...productSnapshot(product), stripeRequest: jitStripeRequest(orderId, product, params.returnTo) }),
         product.amountCents,
         product.currency,
         `jit-checkout:${orderId}`,
@@ -1252,7 +1263,7 @@ export async function createJitCheckout(
       'Failed to create Pay & Send checkout'
     );
   }
-  const urls = checkoutReturnUrls(prepared.order.order_id);
+  const urls = params.returnTo ?? checkoutReturnUrls(prepared.order.order_id);
   const checkout = await createJitCheckoutSession({
     orderId: prepared.order.order_id,
     product,

@@ -60,7 +60,10 @@ export const REST_ROUTE_SCOPES: readonly RestRouteScope[] = [
   // what send_letter does. Both also require the website's own application
   // (src/api/sendConfirmationApiHandler.ts).
   { id: 'sends.get', method: 'GET', path: /^\/api\/sends\/[^/]+$/, scope: 'mail:read' },
-  { id: 'sends.confirm', method: 'POST', path: /^\/api\/sends\/[^/]+$/, scope: 'mail:send', twin: 'send_letter' }
+  { id: 'sends.confirm', method: 'POST', path: /^\/api\/sends\/[^/]+$/, scope: 'mail:send', twin: 'send_letter' },
+  // The page takes the Pay & Send payment for mail no pack pays for (#579),
+  // which sends it once paid: create_mail_checkout's scope.
+  { id: 'sends.checkout', method: 'POST', path: /^\/api\/sends\/[^/]+\/checkout$/, scope: 'mail:send', twin: 'create_mail_checkout' }
 ];
 
 function matches(route: RestRouteScope, method: string | undefined, pathname: string): boolean {
