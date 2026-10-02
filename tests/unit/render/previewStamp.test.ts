@@ -76,6 +76,7 @@ describe('the address stamp on a preview', () => {
       stamp: { page: 1, geometry: POSTCARD_GEOMETRY[size].stamp }
     });
     const stamped = texts(back);
+    expect(back).toContain(`<g font-family="'Open Sans', Arial, Helvetica, sans-serif" font-size="9" fill="#000">`);
     expect(stamped.map(line => line.x)).toEqual(Array(8).fill(x));
     expect(stamped.map(line => line.y)).toEqual([...returnLines, ...recipientLines]);
     expect(stamped.map(line => line.text)).toEqual(['RETURN TO:', ...ADDRESSES.from, ...ADDRESSES.to]);

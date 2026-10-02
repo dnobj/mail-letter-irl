@@ -1,10 +1,11 @@
 /**
- * A 9x6 postcard drawn by our renderer (#534 Phase 4): two pages at 9.25 x
- * 6.25in with their bleed, as PostGrid takes them (probe P9), the front image
- * covering the first and the message in the back's left half, a gift send's
- * card in a strip at its foot.
+ * A postcard drawn by our renderer (#534 Phase 4), at each of PostGrid's
+ * sizes (#594): two pages with their bleed, as PostGrid takes them (probes P9
+ * and P14), the front image covering the first and the message in the back's
+ * left part, a 6x9 gift send's card in a strip at its foot.
  */
 
+import { readFileSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import { GiftStripOverflow, layoutPostcard, layoutPostcardBack, renderPdf, type GiftStripCopy } from '../../../src/render/index.js';
@@ -12,7 +13,9 @@ import { loadFont } from '../../../src/render/fonts.js';
 import { shape } from '../../../src/render/glyphs.js';
 import { baselineOffset, type ImageBox, type RectsItem, type TextRun } from '../../../src/render/layout.js';
 import { qrMatrix } from '../../../src/render/qr.js';
-import { POSTCARD_GEOMETRY, POSTCARD_HALF, POSTCARD_LINE_PITCH, POSTCARD_MESSAGE, POSTCARD_STRIP } from '../../../src/render/geometry.js';
+import {
+  BARCODE_CLEAR_ZONE, POSTCARD_GEOMETRY, POSTCARD_HALF, POSTCARD_LINE_PITCH, POSTCARD_MESSAGE, POSTCARD_STRIP
+} from '../../../src/render/geometry.js';
 import { readImage, type RenderImage } from '../../../src/render/images.js';
 
 const inch = (inches: number) => inches * 72;
@@ -173,23 +176,33 @@ describe('a postcard on our renderer', () => {
 describe('the 4x6 and 11x6 postcards (#594)', () => {
   // From probe P14 (PostGrid test mode, 2026-10-02): the page with its 0.125in
   // bleed, how far right a back may be drawn and still print, and where
-  // PostGrid's stamps begin, each from the page's edge.
+  // PostGrid's stamps begin, each from the page's edge. `front` is the size
+  // imageService crops each front to (CONFIG.sizes, 300 dpi).
   const CASES = [
-    { size: '6x4' as const, page: [inch(6.25), inch(4.25)], held: 12, font: 12, pitch: 19.2, left: inch(0.425), half: inch(3.375), probedTo: inch(0.125 + 3.4), stampX: inch(3.925), media: [450, 306] },
-    { size: '6x11' as const, page: [inch(11.25), inch(6.25)], held: 16, font: 14, pitch: 22.4, left: inch(0.525), half: inch(6.125), probedTo: inch(0.125 + 6.5), stampX: inch(7.725), media: [810, 450] }
+    {
+      size: '6x4' as const, page: [inch(6.25), inch(4.25)], held: 11, font: 12, pitch: 19.2, left: inch(0.425), half: inch(3.375),
+      probedTo: inch(0.125 + 3.4), stampX: inch(3.925), media: [450, 306], front: { width: 1800, height: 1200 }
+    },
+    {
+      size: '6x11' as const, page: [inch(11.25), inch(6.25)], held: 16, font: 14, pitch: 22.4, left: inch(0.525), half: inch(6.125),
+      probedTo: inch(0.125 + 6.5), stampX: inch(7.725), media: [810, 450], front: { width: 3300, height: 1800 }
+    }
   ];
 
-  it.each(CASES)('is two pages of the $size page, bleed included, the front covered by the image', ({ size, page }) => {
-    const layout = layoutPostcard({ message: 'Hello', image: FRONT, size });
+  it.each(CASES)('is two pages of the $size page, bleed included, the front covered by the image', ({ size, page, front }) => {
+    const image = { ...FRONT, ...front };
+    const layout = layoutPostcard({ message: 'Hello', image, size });
     expect([layout.width, layout.height]).toEqual(page);
     expect(layout.pages.map(each => each.items.map(item => item.kind))).toEqual([['image'], ['text']]);
     const box = layout.pages[0].items[0] as ImageBox;
     expect(box.width).toBeGreaterThanOrEqual(page[0] - 1e-6);
     expect(box.height).toBeGreaterThanOrEqual(page[1] - 1e-6);
+    // Covering exactly: one side meets the page's, the other runs past it.
+    expect(Math.min(box.width - page[0], box.height - page[1])).toBeCloseTo(0, 6);
     // Cropped evenly, never squeezed.
     expect(box.x + box.width / 2).toBeCloseTo(page[0] / 2, 6);
     expect(box.top + box.height / 2).toBeCloseTo(page[1] / 2, 6);
-    expect(box.width / box.height).toBeCloseTo(FRONT.width / FRONT.height, 9);
+    expect(box.width / box.height).toBeCloseTo(image.width / image.height, 9);
   });
 
   it.each(CASES)('writes the $size message at its own size and pitch, clear of the address region', ({ size, font, pitch, left, half, probedTo, stampX }) => {
@@ -221,16 +234,36 @@ describe('the 4x6 and 11x6 postcards (#594)', () => {
   });
 
   it.each([
-    ['6x4', 0.3],
-    ['6x9', 0.4],
-    ['6x11', 0.4]
-  ] as const)("sets the %s message inside the back's left part, %sin clear of each of its edges", (size, margin) => {
+    // A 4x6's message ends at the barcode clear zone, 0.625in above its trimmed bottom.
+    ['6x4', 0.3, 0.625],
+    ['6x9', 0.4, 0.4],
+    ['6x11', 0.4, 0.4]
+  ] as const)("sets the %s message inside the back's left part, %sin from its top, left and right, %sin from its trimmed bottom", (size, margin, bottom) => {
     const { message: box, half, height } = POSTCARD_GEOMETRY[size];
     const bleed = inch(0.125);
     expect(box.left).toBeCloseTo(bleed + inch(margin), 9);
     expect(box.top).toBeCloseTo(bleed + inch(margin), 9);
     expect(box.left + box.width).toBeCloseTo(half - inch(margin), 9);
-    expect(box.top + box.height).toBeCloseTo(height - bleed - inch(margin), 9);
+    expect(box.top + box.height).toBeCloseTo(height - bleed - inch(bottom), 9);
+  });
+
+  it.each(['6x4', '6x9', '6x11'] as const)("keeps the %s message out of USPS's barcode clear zone, the trim's lower right 4.75 x 0.625in", size => {
+    expect(BARCODE_CLEAR_ZONE).toEqual({ width: inch(4.75), height: inch(0.625) });
+    const { message: box, width, height } = POSTCARD_GEOMETRY[size];
+    const bleed = inch(0.125);
+    const zone = { left: width - bleed - inch(4.75), top: height - bleed - inch(0.625) };
+    // The box ends left of the zone (a 6x9, an 11x6) or above it (a 4x6).
+    expect(box.left + box.width <= zone.left + 1e-6 || box.top + box.height <= zone.top + 1e-6).toBe(true);
+    // And so does every line a full back holds, descenders included.
+    const prose = 'a quick brown fox jumps over the lazy dog, gently, by the quay '.repeat(20);
+    const { page } = layoutPostcardBack(prose, undefined, size);
+    const held = page.items.filter((item): item is TextRun => item.kind === 'text').slice(0, page.linesAvailable);
+    expect(held).toHaveLength(page.linesAvailable);
+    for (const run of held) {
+      const face = loadFont(run.font);
+      const bottom = run.baseline - face.descent * (run.size / face.unitsPerEm);
+      expect(rightEdge(run) <= zone.left || bottom <= zone.top, `${size}: ${run.text}`).toBe(true);
+    }
   });
 
   it.each(CASES)('holds $held lines on a $size back, and counts how many more a message takes', ({ size, held }) => {
@@ -267,6 +300,21 @@ describe('the 4x6 and 11x6 postcards (#594)', () => {
     expect(POSTCARD_GEOMETRY['6x9']).toMatchObject({
       width: inch(9.25), height: inch(6.25), message: POSTCARD_MESSAGE, half: POSTCARD_HALF, fontSize: 14, linePitch: POSTCARD_LINE_PITCH
     });
+  });
+
+  // The fixture holds the 6x9 backs as layoutPostcardBack gave them at 497afe2,
+  // before #594 (a scratch script wrote it there and at 922df5f, alike). A
+  // change meant to move a 6x9 back must write it again, and say so.
+  it('lays the 6x9 back out exactly as before #594, strip or none (a golden from 497afe2)', () => {
+    const golden = JSON.parse(readFileSync(new URL('../../fixtures/postcardBacks6x9.497afe2.json', import.meta.url), 'utf8')) as {
+      strip: GiftStripCopy;
+      backs: Array<{ message: string; strip: boolean; back: ReturnType<typeof layoutPostcardBack> }>;
+    };
+    expect(golden.backs.map(each => each.strip)).toEqual([false, true, true, false, false, false, true, false, false]);
+    for (const { message, strip, back } of golden.backs) {
+      expect(layoutPostcardBack(message, strip ? golden.strip : undefined), message.slice(0, 24)).toEqual(back);
+      expect(layoutPostcardBack(message, strip ? golden.strip : undefined, '6x9'), message.slice(0, 24)).toEqual(back);
+    }
   });
 });
 
