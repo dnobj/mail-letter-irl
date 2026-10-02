@@ -2,12 +2,22 @@ import { readFileSync } from 'node:fs';
 import { create, type Font } from 'fontkit';
 
 /**
- * The fonts the renderer ships, under assets/fonts with their licences.
- * Tinos is metric-compatible with Times New Roman, which the legacy HTML
- * named, so today's line calibration carries over (SIL OFL 1.1).
+ * The fonts the renderer ships, under assets/fonts, each beside its licence
+ * (`<Family>-OFL.txt`, the SIL Open Font License 1.1):
+ * - Tinos, metric-compatible with Times New Roman, which the legacy HTML
+ *   named, so today's line calibration carries over;
+ * - Cousine, the monospace of the same family, for Typewriter (#563);
+ * - Caveat, a handwriting face, for Handwritten (#563).
+ *
+ * Each is the file Google Fonts ships: Tinos and Cousine from google/fonts
+ * (ofl/tinos, ofl/cousine), and Caveat's static Regular from
+ * googlefonts/caveat at 59745e8, the commit google/fonts takes its variable
+ * font from.
  */
 export const FONT_FILES = {
-  'Tinos-Regular': 'Tinos-Regular.ttf'
+  'Tinos-Regular': 'Tinos-Regular.ttf',
+  'Cousine-Regular': 'Cousine-Regular.ttf',
+  'Caveat-Regular': 'Caveat-Regular.ttf'
 } as const;
 
 export type FontName = keyof typeof FONT_FILES;

@@ -26,7 +26,7 @@ export interface PlacedGlyph {
 }
 
 /** Short, stable codes for the font part of glyph keys. */
-const FONT_CODES: Record<string, string> = { 'Tinos-Regular': 'tr' };
+const FONT_CODES: Record<string, string> = { 'Tinos-Regular': 'tr', 'Cousine-Regular': 'cr', 'Caveat-Regular': 'cv' };
 
 const fixed = (value: number): string => String(Math.round(value * 100) / 100);
 
