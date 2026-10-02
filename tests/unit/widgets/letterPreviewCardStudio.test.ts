@@ -131,6 +131,46 @@ function mount() {
 const ON = { previewHtml: PAGE, [STUDIO]: true };
 const text = (card: ReturnType<typeof mount>, id: string) => card.byId(id).textContent;
 
+/** The card as served, in ChatGPT: window.openai carries the result and its _meta. */
+function mountInChatGpt(meta: Json) {
+  const served = stampPreviewTool(
+    inlineHostBridge(fs.readFileSync(path.join(WIDGET_DIR, 'LetterPreviewCard.html'), 'utf-8'), WIDGET_DIR),
+    'quote_and_preview_letter'
+  );
+  const dom = new JSDOM(served.replace('<script type="module">', '<script>'), {
+    runScripts: 'dangerously',
+    beforeParse(window) {
+      (window as any).setTimeout = () => 0;
+      (window as any).clearTimeout = () => undefined;
+      (window as any).openai = {
+        theme: 'light',
+        toolInput: ARGS,
+        toolOutput: output(),
+        toolResponseMetadata: meta,
+        widgetState: null,
+        setWidgetState: async () => undefined,
+        callTool: async () => ({})
+      };
+    }
+  });
+  dom.window.dispatchEvent(new dom.window.Event('openai:set_globals'));
+  return dom.window.document;
+}
+
+describe('the letter studio in ChatGPT (#580 maker review round 1)', () => {
+  it('lays itself out from the switch in toolResponseMetadata, and not without it', async () => {
+    const document = mountInChatGpt(ON);
+    await flush();
+    expect(document.getElementById('card')!.classList.contains('studio')).toBe(true);
+    expect(document.getElementById('studio-title')!.textContent).toBe('Letter to Sam Rivera');
+    expect(document.getElementById('studio-words')!.textContent).toBe('Dear Sam,\n\nThe garden is in.\n\nLove,\nPat');
+
+    const off = mountInChatGpt({ previewHtml: PAGE });
+    await flush();
+    expect(off.getElementById('card')!.classList.contains('studio')).toBe(false);
+  });
+});
+
 describe('the letter card without the studio switch (#580)', () => {
   it('is laid out as it always was: nothing moves and the template stays a template', async () => {
     const card = mount();
