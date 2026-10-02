@@ -50,7 +50,9 @@ Two more template names serve an existing card rather than a new widget (`WIDGET
     - A footer with the cost, a summary and Send.
       - The cost reads "1 letter", "Pay & Send USD 5.99" for mail no pack pays for, "Paid USD 5.99" once a Pay & Send order is paid, or "Free: a gift letter".
       - The summary gives the stationery, the ink ("black and white", or "colour" for a letter with its picture, which prints in colour), and where the letter is: when it mails, "held until" its mail date, "with the printer", cancelled or expired.
-  - **Once sent:** the dates are the server's (`get_draft_status`) or the send's own, never the Arrives row's, since the chat may have changed them. A Pay & Send order is followed by `get_purchase_status`: paid, then sent.
+  - **Once sent:** the dates are the server's (`get_draft_status`) or the send's own, never the Arrives row's, since the chat may have changed them.
+  - **Pay & Send:** an order is followed by `get_purchase_status`: Paid (held until its mail date, if it has one), then Sent and with the printer. An order that stops says so and promises no mail: the payment did not go through, refunded, on hold, or cancelled.
+  - **Expired:** an expired preview holds no date any more.
   - **Nothing new to press:** the tabs hold the card's own rows, notes and buttons, moved from `#studio-template`'s slots. **Style** has the Style row (named Stationery there) and the layout. **Delivery** has the Arrives row, Scheduled with Cancel, the delivery line and the draft or order id. Each control calls its tool as before (Principle 2). **Words** shows the letter's text as the call gave it, read-only; to change it, the person asks in the chat.
   - **The first tab:** Style, or Delivery once the letter has a date, until the person picks a tab. A send with a date shows Delivery, where Cancel is.
   - **Tabs:** `role="tablist"`, named by the header, with one tab in the tab order, arrow keys, Home and End.

@@ -555,6 +555,15 @@
       // The page of a longer letter the studio shows, kept through a redraw
       // of the same draft, such as a restyle.
       let studioPage = { draftId: null, index: 0 };
+      // A Pay & Send order that stopped before its mail went (#579): how the
+      // studio heads it and sums it up. The pill names the status itself.
+      const HALTED_ORDERS = new Map([
+        ["payment_failed", { stage: "Draft", timing: "the payment did not go through" }],
+        ["refund_pending", { stage: "Refunded", timing: "being refunded, nothing will be mailed" }],
+        ["refunded", { stage: "Refunded", timing: "refunded, nothing will be mailed" }],
+        ["on_hold", { stage: "On hold", timing: "on hold" }],
+        ["cancelled", { stage: "Cancelled", timing: "cancelled, nothing will be mailed" }],
+      ]);
 
       // The letter's words, as the call that drew the preview gave them.
       function letterWords() {
@@ -588,6 +597,7 @@
         // The order this card's Pay & Send opened (#579), as its status last said.
         const purchase = trackedOrderId !== null ? purchaseState : null;
         const paid = purchase === "processing" || purchase === "submitted";
+        const halted = HALTED_ORDERS.get(purchase) ?? null;
         const sent = settled?.status === "sent" || sentByCard || purchase === "submitted";
         const cancelled = sentOrder === "cancelled" || (saved?.draftId === state.draftId && saved?.cancelled === true);
         const expired = settled?.status === "expired";
@@ -596,7 +606,17 @@
         const name = typeof to?.name === "string" ? to.name.trim() : "";
         document.getElementById("studio-title").textContent = name ? `Letter to ${name}` : "Your letter";
         const place = [to?.city, [to?.state, to?.postalCode].filter(Boolean).join(" ")].filter(Boolean).join(", ");
-        const stage = cancelled ? "Cancelled" : expired ? "Expired" : sent ? "Sent" : paid ? "Paid" : "Draft";
+        const stage = cancelled
+          ? "Cancelled"
+          : halted
+            ? halted.stage
+            : expired
+              ? "Expired"
+              : sent
+                ? "Sent"
+                : paid
+                  ? "Paid"
+                  : "Draft";
         document.getElementById("studio-sub").textContent = [stage, place].filter(Boolean).join(" · ");
 
         const words = letterWords();
@@ -629,32 +649,38 @@
               : `${letters} letter${letters === 1 ? "" : "s"}`;
 
         // Once sent, the dates are the server's or the send's own, never the
-        // picker's: the chat may have changed them since this preview.
+        // picker's: the chat may have changed them since this preview. A Pay &
+        // Send order with the printer has no date left to wait for, and an
+        // expired preview none to keep.
         const held =
-          settled?.status === "sent"
+          settled?.status === "sent" || purchase === "submitted"
             ? sentOrder === "scheduled"
               ? arrives.scheduleOf(settled.schedule)
               : null
-            : sentByCard
-              ? arrives.scheduleOf(saved.schedule)
-              : picker.schedule();
+            : expired
+              ? null
+              : sentByCard
+                ? arrives.scheduleOf(saved.schedule)
+                : picker.schedule();
         const estimate =
           arrivalChange?.draftId === state.draftId && arrivalChange.deliveryEstimate
             ? arrivalChange.deliveryEstimate
             : state.deliveryEstimate;
         const timing = cancelled
           ? "cancelled, nothing will be mailed"
-          : expired
-            ? "the preview has expired"
-            : held
-              ? `held until ${arrives.describeDate(held.mailOn)}`
-              : sent
-                ? "with the printer"
-                : paid
-                  ? "paid, going to the printer"
-                  : typeof estimate === "string" && estimate
-                    ? estimate.charAt(0).toLowerCase() + estimate.slice(1)
-                    : "First Class";
+          : halted
+            ? halted.timing
+            : expired
+              ? "the preview has expired"
+              : held
+                ? `held until ${arrives.describeDate(held.mailOn)}`
+                : sent
+                  ? "with the printer"
+                  : paid
+                    ? "paid, going to the printer"
+                    : typeof estimate === "string" && estimate
+                      ? estimate.charAt(0).toLowerCase() + estimate.slice(1)
+                      : "First Class";
         document.getElementById("studio-summary").textContent = [theme, ink, timing].filter(Boolean).join(" · ");
 
         studio.suggest(held || cancelled ? "delivery" : "style");

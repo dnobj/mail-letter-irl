@@ -407,6 +407,66 @@ describe('the letter card as a studio (#580)', () => {
     expect(text(card, 'studio-summary')).toBe('Botanical · black and white · with the printer');
   });
 
+  it('holds a dated Pay & Send order while it waits, then says it is with the printer (#584 review round 2)', async () => {
+    const card = mount();
+    await card.show(
+      output({
+        arrivalWindow: WINDOW,
+        schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' },
+        canSendNow: false,
+        sendEligibility: { packPays: false, payAndSend: { available: true, amountCents: 599, currency: 'usd' }, letterPack: { available: false } }
+      }),
+      ON
+    );
+    await card.click(card.byId('pay-send-button'));
+    await card.answer(
+      { result: { content: [], structuredContent: { orderId: 'order-1', checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_1' } } },
+      'create_mail_checkout'
+    );
+    await card.click(card.byId('check-status-button'));
+    await card.answer({ result: { content: [], structuredContent: { orderId: 'order-1', purchaseStatus: 'processing' } } }, 'get_purchase_status');
+    expect(text(card, 'studio-summary')).toMatch(/^black and white · held until Fri, Oct 9(, 2026)?$/);
+    await card.click(card.byId('check-status-button'));
+    await card.answer({ result: { content: [], structuredContent: { orderId: 'order-1', purchaseStatus: 'submitted' } } }, 'get_purchase_status');
+    expect(text(card, 'studio-sub')).toBe('Sent · Springfield, IL 62701');
+    expect(text(card, 'studio-summary')).toBe('black and white · with the printer');
+  });
+
+  it.each([
+    ['payment_failed', 'Draft', 'the payment did not go through'],
+    ['refund_pending', 'Refunded', 'being refunded, nothing will be mailed'],
+    ['refunded', 'Refunded', 'refunded, nothing will be mailed'],
+    ['on_hold', 'On hold', 'on hold'],
+    ['cancelled', 'Cancelled', 'cancelled, nothing will be mailed']
+  ])('never promises mail for a Pay & Send order %s (#584 review round 2)', async (status, stage, timing) => {
+    const card = mount();
+    await card.show(
+      output({ canSendNow: false, sendEligibility: { packPays: false, payAndSend: { available: true, amountCents: 599, currency: 'usd' }, letterPack: { available: false } } }),
+      ON
+    );
+    await card.click(card.byId('pay-send-button'));
+    await card.answer(
+      { result: { content: [], structuredContent: { orderId: 'order-1', checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_1' } } },
+      'create_mail_checkout'
+    );
+    await card.click(card.byId('check-status-button'));
+    await card.answer(
+      { result: { content: [], structuredContent: { orderId: 'order-1', purchaseStatus: status, message: 'The order stopped.' } } },
+      'get_purchase_status'
+    );
+    expect(text(card, 'studio-sub')).toBe(`${stage} · Springfield, IL 62701`);
+    expect(text(card, 'studio-summary')).toBe(`black and white · ${timing}`);
+  });
+
+  it('opens an expired dated preview on Style: it holds no date any more (#584 review round 2)', async () => {
+    const card = mount();
+    await card.show(output({ arrivalWindow: WINDOW, schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' } }), ON);
+    expect(card.selected()).toEqual(['delivery']);
+    await card.answer({ result: { content: [], structuredContent: { draftId: 'draft_0001', status: 'expired' } } }, 'get_draft_status');
+    expect(card.selected()).toEqual(['style']);
+    expect(text(card, 'studio-summary')).toBe('black and white · the preview has expired');
+  });
+
   it('brings the Style row back when Pay & Send cannot open a checkout', async () => {
     const card = mount();
     await card.show(
