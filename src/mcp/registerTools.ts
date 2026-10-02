@@ -1451,13 +1451,14 @@ const LETTER_PREVIEW_TOOLS: ReadonlySet<string> = new Set([
 /**
  * Card-only switches a tool's result carries in _meta, each while its flag is
  * on: the letter previews tell their card it may open the page from an
- * envelope (#576), and lay itself out as a studio (#580). In _meta, never
+ * envelope (#576), and every preview tells its card it may lay itself out as
+ * a studio (#580), the postcard's as a postcard maker. In _meta, never
  * structuredContent, so never the model's.
  */
 export function cardSwitches(toolName: string): Record<string, unknown> {
-  if (!LETTER_PREVIEW_TOOLS.has(toolName)) return {};
+  if (!PREVIEW_TOOLS.has(toolName)) return {};
   return {
-    ...(isEnvelopeRevealEnabled() ? { [ENVELOPE_REVEAL_META]: true } : {}),
+    ...(LETTER_PREVIEW_TOOLS.has(toolName) && isEnvelopeRevealEnabled() ? { [ENVELOPE_REVEAL_META]: true } : {}),
     ...(isStudioCardEnabled() ? { [STUDIO_CARD_META]: true } : {})
   };
 }

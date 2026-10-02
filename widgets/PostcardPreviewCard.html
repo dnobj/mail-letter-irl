@@ -107,6 +107,56 @@
       .preview-loading{display:flex;align-items:center;justify-content:center;min-height:100px;color:var(--faint);font-size:11.5px;width:100%}
       .rev{font-size:10px;opacity:.5;text-align:right;color:var(--mut);padding:0 14px 9px;margin:0}
       .hidden{display:none !important}
+
+      /* The postcard maker (#580): while the preview's _meta carries
+         letterirl/studioCard, widgets/shared/studio.js lays the card out from
+         #studio-template, moving the card's own rows, notes and buttons into
+         it. Nothing here applies to a card without the studio class. Two
+         columns from 560px, as the letter card. */
+      .studio .hd,.studio .preview-tabs,.studio .rows{display:none}
+      .studio #message-box{display:none !important}
+      .studio .meta{padding:0 14px}
+      .studio-hd{display:flex;align-items:center;gap:10px;padding:14px 14px 0}
+      .studio-icon{width:32px;height:32px;flex:none;border-radius:8px;background:var(--sf2);border:1px solid var(--bd2);display:flex;align-items:center;justify-content:center}
+      .studio-heading{display:flex;flex-direction:column;flex:1;min-width:0}
+      .studio-title{font-size:14px;font-weight:700;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .studio-sub{font-size:12px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .studio-hd .status-pill{flex:none;max-width:45%;text-align:right}
+      .studio-body{display:flex;flex-direction:column;gap:14px;padding:14px}
+      .studio-page{display:flex;flex-direction:column;gap:8px;min-width:0}
+      .studio-side{min-width:0;display:flex;flex-direction:column;gap:12px}
+      @media (min-width:560px){
+        .studio-body{flex-direction:row;align-items:flex-start}
+        .studio-page{flex:0 0 55%}
+        .studio-side{flex:1}
+      }
+      .studio .preview-pane{padding:0}
+      .studio-postcard{border-radius:8px}
+      .studio-postcard.flipping{animation:studio-flip .4s ease-out}
+      @keyframes studio-flip{from{transform:perspective(900px) rotateY(-90deg)}to{transform:none}}
+      @media (prefers-reduced-motion: reduce){.studio-postcard.flipping{animation:none}}
+      .studio-flip-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+      .studio-scale{font-size:11.5px;color:var(--mut);line-height:1.4}
+      .studio-flip{flex:none;border:1px solid var(--bd);border-radius:999px;background:var(--sf);color:var(--tx);font:inherit;font-size:12px;font-weight:600;padding:6px 12px;cursor:pointer}
+      .studio-flip:focus-visible,.studio-words:focus-visible{outline:2px solid var(--tx);outline-offset:1px}
+      .studio-section{display:flex;flex-direction:column;gap:6px}
+      .studio-label,.studio #arrives-row .info-label{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--mut)}
+      .studio-section .info-row{padding:6px 0}
+      .studio-section .note,.studio-side > .note{margin-top:0}
+      .studio #arrives-row{flex-direction:column;align-items:stretch;gap:8px;border-bottom:0;padding:0}
+      .studio #arrives-row .arrives-controls{justify-content:flex-start;text-align:left;gap:6px}
+      .studio #arrives-row .link-button{border:1px solid var(--bd);border-radius:999px;padding:5px 11px;font-size:12px;font-weight:600;color:var(--tx);text-decoration:none;background:var(--sf)}
+      .studio #arrives-row .link-button[aria-pressed=true]{background:var(--pri);border-color:var(--pri);color:var(--prit)}
+      .studio #arrives-row input[type=date]{font-size:12.5px;padding:4px 8px;border-radius:999px}
+      .studio-quiet{margin:0;font-size:12px;color:var(--mut);line-height:1.45}
+      .studio-size{margin:0;font-size:13px;font-weight:600;color:var(--tx)}
+      .studio-words{max-height:200px;overflow:auto;white-space:pre-wrap;word-wrap:break-word;font-family:Georgia,"Times New Roman",serif;font-size:13px;line-height:1.55;color:var(--tx);background:var(--sf2);border:1px solid var(--bd2);border-radius:10px;padding:10px 12px}
+      .studio-ft{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;margin:0 14px;padding:12px 0 14px;border-top:1px solid var(--bd2)}
+      .studio-sum{flex:1 1 160px;min-width:0;display:flex;flex-direction:column}
+      .studio-cost{font-size:14px;font-weight:700;color:var(--tx)}
+      .studio-summary{font-size:12px;color:var(--mut)}
+      .studio-ft #send-button{width:auto;flex:0 0 auto;margin:0;padding:10px 20px}
+      .studio-ft > :not(.studio-sum):not(#send-button){flex:1 1 100%}
     </style>
   </head>
   <body>
@@ -120,7 +170,7 @@
           Back (Message)
         </button>
       </div>
-      <div class="preview-container">
+      <div class="preview-container" id="preview-container">
         <div class="preview-pane front-preview" id="preview-front">
           <div class="preview-loading">Loading postcard preview&hellip;</div>
         </div>
@@ -130,11 +180,11 @@
       </div>
       <div class="meta">
         <div class="rows">
-          <div class="info-row">
+          <div class="info-row" id="cost-row">
             <span class="info-label">Cost</span>
             <span class="info-value" id="cost"></span>
           </div>
-          <div class="info-row">
+          <div class="info-row" id="delivery-row">
             <span class="info-label">Delivery</span>
             <span class="info-value" id="delivery"></span>
           </div>
@@ -147,11 +197,11 @@
               <button type="button" class="link-button" id="arrives-asap" aria-pressed="true">As soon as possible</button>
             </span>
           </div>
-          <div class="info-row">
+          <div class="info-row" id="status-row">
             <span class="info-label">Status</span>
             <span class="status-pill" id="status-pill"></span>
           </div>
-          <div class="info-row">
+          <div class="info-row" id="id-row">
             <span class="info-label" id="id-label">Draft</span>
             <span class="info-value mono" id="id-value"></span>
           </div>
@@ -263,12 +313,68 @@
           style="display: none"
         ></div>
       </div>
-      <p class="rev">postcard t31</p>
+      <p class="rev">postcard t32</p>
     </div>
+
+    <!-- The postcard maker (#580): widgets/shared/studio.js lays the card out
+         from this while the preview's _meta turns it on. Each data-slot is
+         replaced by the card's own element with that id, moved. -->
+    <template id="studio-template">
+      <div class="studio-hd">
+        <span class="studio-icon" aria-hidden="true"><span class="logo"></span></span>
+        <div class="studio-heading">
+          <span class="studio-title" id="studio-title">Your postcard</span>
+          <span class="studio-sub" id="studio-sub"></span>
+        </div>
+        <span data-slot="status-pill"></span>
+      </div>
+      <div class="studio-body" id="studio-body">
+        <div class="studio-page">
+          <div class="studio-postcard" id="studio-postcard">
+            <span data-slot="preview-container"></span>
+          </div>
+          <div class="studio-flip-row">
+            <span class="studio-scale" id="studio-scale" aria-live="polite"></span>
+            <button type="button" class="studio-flip" id="studio-flip">Flip to the back</button>
+          </div>
+        </div>
+        <div class="studio-side">
+          <div class="studio-section">
+            <span class="studio-label">Size</span>
+            <p class="studio-size" id="studio-size">6 x 9 in</p>
+          </div>
+          <div class="studio-section">
+            <span class="studio-label" id="studio-message-label">Message on the back</span>
+            <div class="studio-words" id="studio-message" tabindex="0" aria-labelledby="studio-message-label"></div>
+            <p class="studio-quiet" id="studio-count"></p>
+          </div>
+          <div class="studio-section">
+            <span data-slot="arrives-row"></span>
+            <span data-slot="arrives-note"></span>
+            <span data-slot="scheduled"></span>
+            <span data-slot="delivery-row"></span>
+            <span data-slot="id-row"></span>
+          </div>
+          <span data-slot="note"></span>
+        </div>
+      </div>
+      <div class="studio-ft">
+        <div class="studio-sum">
+          <span class="studio-cost" id="studio-cost"></span>
+          <span class="studio-summary" id="studio-summary"></span>
+        </div>
+        <span data-slot="send-button"></span>
+        <span data-slot="send-page-button"></span>
+        <span data-slot="send-page-note"></span>
+        <span data-slot="purchase-actions"></span>
+        <span data-slot="error-message"></span>
+      </div>
+    </template>
 
     <!-- letter-irl:host -->
     <!-- letter-irl:pages -->
     <!-- letter-irl:arrives -->
+    <!-- letter-irl:studio -->
     <script type="module">
       // The card talks to its host only through window.letterIrlHost
       // (widgets/shared/host.js, #474): window.openai in ChatGPT, MCP Apps in
@@ -352,8 +458,169 @@
           const statusPill = document.getElementById("status-pill");
           statusPill.classList.remove("ok", "alert");
           statusPill.textContent = "Cancelled";
+          refreshStudio();
         },
       });
+
+      // ---- The postcard maker (#580) ----------------------------------------
+      //
+      // While the preview's _meta turns it on, the card lays itself out as
+      // Demo 3's postcard maker: a header naming the postcard, the postcard as
+      // it prints beside its size, its message and its delivery, and a footer
+      // with the cost and Send. The rows, notes and buttons in it are the
+      // card's own, moved, so each still calls the tool a model would. It
+      // lives in widgets/shared/studio.js; were that script not to run, the
+      // card is laid out as it always was.
+      const studio = window.letterIrlStudio
+        ? window.letterIrlStudio.createStudio({
+            card: document.getElementById("card"),
+            template: document.getElementById("studio-template"),
+            enabled: () => currentMeta()[window.letterIrlStudio.STUDIO_META] === true,
+          })
+        : null;
+      // The preview render() last drew, for a refresh after a send.
+      let studioState = null;
+      let flipWired = false;
+      // What get_purchase_status last said of the order this card's Pay &
+      // Send opened (#579), for the maker's header and footer.
+      let purchaseState = null;
+      // A Pay & Send order that stopped before its mail went (#579): how the
+      // maker heads it and sums it up. The pill names the status itself.
+      const HALTED_ORDERS = new Map([
+        ["payment_failed", { stage: "Draft", timing: "the payment did not go through" }],
+        ["refund_pending", { stage: "Refunded", timing: "being refunded, nothing will be mailed" }],
+        ["refunded", { stage: "Refunded", timing: "refunded, nothing will be mailed" }],
+        ["on_hold", { stage: "On hold", timing: "on hold" }],
+        ["cancelled", { stage: "Cancelled", timing: "cancelled, nothing will be mailed" }],
+      ]);
+
+      // The flip says which side shows, and turns the postcard over.
+      function showSide() {
+        const front = currentTab === "front";
+        document.getElementById("studio-flip").textContent = front ? "Flip to the back" : "Show the front";
+        // The line is announced (aria-live), so a redraw that changes nothing
+        // leaves it alone rather than reading it out again.
+        const scale = document.getElementById("studio-scale");
+        const line = front ? "Drawn to scale: 6 x 9 in." : "The right half is for the address and postage.";
+        if (scale.textContent !== line) scale.textContent = line;
+      }
+
+      /**
+       * Fills the maker's header, message and footer from the preview and
+       * what the card has done. Nothing while the card is not a studio.
+       */
+      function refreshStudio(state = studioState) {
+        if (!state || !studio || !studio.update()) return;
+        if (!flipWired) {
+          flipWired = true;
+          // A view of the card, not of the mail: it changes nothing a model sets.
+          document.getElementById("studio-flip").addEventListener("click", () => {
+            switchTab(currentTab === "front" ? "back" : "front");
+            const postcard = document.getElementById("studio-postcard");
+            postcard.classList.remove("flipping");
+            // With reduced motion the postcard just turns: no motion to play.
+            if (!window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) {
+              void postcard.offsetWidth;
+              postcard.classList.add("flipping");
+            }
+            showSide();
+          });
+          // Done, or cut short (a hidden pane cancels it): either way it is over.
+          for (const type of ["animationend", "animationcancel"]) {
+            document.getElementById("studio-postcard").addEventListener(type, (event) => {
+              event.currentTarget.classList.remove("flipping");
+            });
+          }
+        }
+        studioState = state;
+        const settled = settledDraft();
+        const sentOrder = sentOrderOf(settled);
+        const sentByCard = saved?.draftId === state.draftId && saved?.sent === true;
+        // The order this card's Pay & Send opened (#579), as its status last said.
+        const purchase = trackedOrderId !== null ? purchaseState : null;
+        const paid = purchase === "processing" || purchase === "submitted";
+        const halted = HALTED_ORDERS.get(purchase) ?? null;
+        const sent = settled?.status === "sent" || sentByCard || purchase === "submitted";
+        const cancelled = sentOrder === "cancelled" || (saved?.draftId === state.draftId && saved?.cancelled === true);
+        const expired = settled?.status === "expired";
+        const name = typeof state.recipientName === "string" ? state.recipientName.trim() : "";
+        document.getElementById("studio-title").textContent = name ? `Postcard to ${name}` : "Your postcard";
+        const place = [state.recipientCity, [state.recipientState, state.recipientPostalCode].filter(Boolean).join(" ")]
+          .filter(Boolean)
+          .join(", ");
+        const stage = cancelled
+          ? "Cancelled"
+          : halted
+            ? halted.stage
+            : expired
+              ? "Expired"
+              : sent
+                ? "Sent"
+                : paid
+                  ? "Paid"
+                  : "Draft";
+        document.getElementById("studio-sub").textContent = [stage, place].filter(Boolean).join(" · ");
+
+        // The message, read-only, beside what the back holds. The back is
+        // measured in lines (16, or 11 beside a gift card), so the count is
+        // not a budget: short lines fill it long before 500 characters do.
+        const message = typeof state.message === "string" ? state.message.trim() : "";
+        document.getElementById("studio-message").textContent = message || "The message is on the back.";
+        const length = [...message].length;
+        document.getElementById("studio-count").textContent = !message
+          ? ""
+          : state.giftCard
+            ? `${length} characters · beside the gift card, the back holds 11 lines`
+            : `${length} characters · the back holds 16 lines, about 500 characters of prose`;
+
+        const sendEligibility = state.sendEligibility;
+        const payAndSend = sendEligibility?.payAndSend;
+        const letters = state.lettersRequired ?? 1;
+        document.getElementById("studio-cost").textContent = state.giftCard
+          ? "Free: a gift letter"
+          : paid
+            ? payAndSend?.amountCents
+              ? `Paid ${formatPayAmount(payAndSend)}`
+              : "Paid with Pay & Send"
+            : sendEligibility?.packPays === false
+              ? payAndSend?.amountCents
+                ? `Pay & Send ${formatPayAmount(payAndSend)}`
+                : "Paid when you send it"
+              : `${letters} letter${letters === 1 ? "" : "s"}`;
+
+        // Once sent, the dates are the server's or the send's own, never the
+        // picker's: the chat may have changed them since this preview. A Pay &
+        // Send order with the printer has no date left to wait for.
+        const held =
+          settled?.status === "sent" || purchase === "submitted"
+            ? sentOrder === "scheduled"
+              ? arrives.scheduleOf(settled.schedule)
+              : null
+            : sentByCard
+              ? arrives.scheduleOf(saved.schedule)
+              : picker.schedule();
+        const estimate =
+          arrivalChange?.draftId === state.draftId && arrivalChange.deliveryEstimate
+            ? arrivalChange.deliveryEstimate
+            : state.deliveryEstimate;
+        const timing = cancelled
+          ? "cancelled, nothing will be mailed"
+          : halted
+            ? halted.timing
+            : expired
+              ? "the preview has expired"
+              : held
+                ? `held until ${arrives.describeDate(held.mailOn)}`
+                : sent
+                  ? "with the printer"
+                  : paid
+                    ? "paid, going to the printer"
+                    : typeof estimate === "string" && estimate
+                      ? estimate.charAt(0).toLowerCase() + estimate.slice(1)
+                      : "First Class";
+        document.getElementById("studio-summary").textContent = ["6 x 9 in", timing].join(" · ");
+        showSide();
+      }
 
       // ---- Recovery: a preview call that never arrived (#411) -------------
       //
@@ -1666,6 +1933,7 @@
             document.getElementById("error-message").style.display = "none";
           }
         }
+        refreshStudio(state);
       }
 
       // Handle send button click
@@ -1796,6 +2064,9 @@
           statusPill.textContent = "Send failed";
 
           sendInProgress = false;
+        } finally {
+          // The maker's header and footer say what the send did (#580).
+          refreshStudio();
         }
       }
 
@@ -1833,6 +2104,7 @@
       function applyPurchaseStatus(status) {
         const statusPill = document.getElementById("status-pill");
         const state = status.purchaseStatus;
+        purchaseState = typeof state === "string" ? state : null;
         statusPill.classList.remove("ok", "alert");
         if (state === "submitted") {
           statusPill.classList.add("ok");
@@ -1869,6 +2141,8 @@
         // dispatches inline too, the only cost of this line is a card that
         // updates when the user returns rather than on a timer - which is why
         // this is a comment rather than a pinned test.
+        // The maker's header and footer follow the order (#580).
+        refreshStudio();
         return state === "processing" || TERMINAL_PURCHASE_STATUSES.includes(state);
       }
 

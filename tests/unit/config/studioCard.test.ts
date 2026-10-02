@@ -54,12 +54,18 @@ describe("the letter previews' studio switch", () => {
     }
   });
 
+  it('tells the postcard card it may lay itself out as a postcard maker, with no envelope', () => {
+    vi.stubEnv('LETTER_IRL_STUDIO_CARD_ENABLED', 'true');
+    vi.stubEnv('LETTER_IRL_ENVELOPE_REVEAL_ENABLED', 'true');
+    expect(cardSwitches('quote_and_preview_postcard')).toEqual({ [STUDIO_CARD_META]: true });
+  });
+
   it('says nothing while it is off, and nothing for any other tool', () => {
     vi.stubEnv('LETTER_IRL_STUDIO_CARD_ENABLED', '');
     vi.stubEnv('LETTER_IRL_ENVELOPE_REVEAL_ENABLED', '');
-    for (const name of LETTERS) expect(cardSwitches(name), name).toEqual({});
+    for (const name of [...LETTERS, 'quote_and_preview_postcard']) expect(cardSwitches(name), name).toEqual({});
     vi.stubEnv('LETTER_IRL_STUDIO_CARD_ENABLED', 'true');
-    for (const name of ['quote_and_preview_postcard', 'set_stationery', 'send_letter', 'get_draft_status', 'get_started']) {
+    for (const name of ['set_stationery', 'send_letter', 'send_postcard', 'get_draft_status', 'get_started']) {
       expect(cardSwitches(name), name).toEqual({});
     }
   });
