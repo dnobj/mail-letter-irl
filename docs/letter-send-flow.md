@@ -279,7 +279,11 @@ A `pdf-1` gift send prints its card as the PDF's second page, drawn by the rende
   - a gift card whose words run past its strip;
   - a gift card on any size but 6x9;
   - a size no writer stores, on either path.
-- With the flag, a 6x9 postcard preview records `pdf-1` (below). The print's overflow refusal is then a backstop: the preview measured the same back. The tool offers only the 6x9 until it offers the other sizes on our renderer (#594). A 4x6 or 11x6 with no renderer version prints on the legacy HTML, as before.
+- With the flag, a postcard preview records `pdf-1` (below). The print's overflow refusal is then a backstop: the preview measured the same back. A 4x6 or 11x6 with no renderer version prints on the legacy HTML, as before.
+- **The 4x6 and 11x6 are offered only while `LETTER_IRL_POSTCARD_SIZES_ENABLED`, `LETTER_IRL_PRINT_RENDERER=pdf` and Pay & Send are all on (#594).** The legacy back is a 9 x 6 in page whatever the card, so the tool never previews either on it, and none it makes reaches the legacy print.
+  - The preview crops the front to the size, measures the back at its size, and stamps the addresses where PostGrid prints them on it. The draft keeps the size.
+  - A 4x6 or 11x6 is paid with Pay & Send at its own price (`jit-postcard-4x6`, `jit-postcard-11x6`), never from a pack or as a gift letter (#579).
+  - Off, the tool's `size` is served as before, the 6x9 alone. A size from a schema cached while it was on is refused by validation, and the preview itself refuses any other size.
 
 **How a preview is drawn (#534).** With `LETTER_IRL_PRINT_RENDERER=pdf`, the three letter previews are drawn by `src/render`, from the layout the PDF prints from:
 - the page is laid out with the image that prints, and a letter that runs past it is refused with the count: "Letter is 2 lines too long for one page: it takes 28 lines and the page holds 26." A page holds 26 lines of text only, 16 under a full 2-inch header image, and 13 above a full 3-inch enclosed image;

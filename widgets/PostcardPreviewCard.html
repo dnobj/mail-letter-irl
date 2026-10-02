@@ -494,6 +494,26 @@
         ["cancelled", { stage: "Cancelled", timing: "cancelled, nothing will be mailed" }],
       ]);
 
+      // The postcard's size as it prints (#594), from the page our renderer
+      // drew: its trim is the page less its 0.125in of bleed on each side,
+      // the short side named first. Any other preview is a 6x9, the only
+      // size drawn otherwise.
+      let postcardInches = [6, 9];
+      function inchesOf(page) {
+        const box = String(page?.getAttribute?.("viewBox") ?? "").trim().split(/\s+/).map(Number);
+        if (box.length !== 4 || !box.every(Number.isFinite)) return [6, 9];
+        const sides = [box[2], box[3]].map((points) => Math.round((points / 72 - 0.25) * 4) / 4).sort((a, b) => a - b);
+        return sides.every((side) => side > 0) ? sides : [6, 9];
+      }
+      function sizeText() {
+        return `${postcardInches[0]} x ${postcardInches[1]} in`;
+      }
+      // What each size's back holds: its lines, and about how much prose.
+      const BACK_HOLDS = new Map([["4x6", "11 lines, about 350"], ["6x9", "16 lines, about 500"], ["6x11", "16 lines, about 900"]]);
+      function backHolds() {
+        return BACK_HOLDS.get(postcardInches.join("x")) ?? BACK_HOLDS.get("6x9");
+      }
+
       // The flip says which side shows, and turns the postcard over.
       function showSide() {
         const front = currentTab === "front";
@@ -501,7 +521,7 @@
         // The line is announced (aria-live), so a redraw that changes nothing
         // leaves it alone rather than reading it out again.
         const scale = document.getElementById("studio-scale");
-        const line = front ? "Drawn to scale: 6 x 9 in." : "The right half is for the address and postage.";
+        const line = front ? `Drawn to scale: ${sizeText()}.` : "The right side is for the address and postage.";
         if (scale.textContent !== line) scale.textContent = line;
       }
 
@@ -562,8 +582,9 @@
         document.getElementById("studio-sub").textContent = [stage, place].filter(Boolean).join(" · ");
 
         // The message, read-only, beside what the back holds. The back is
-        // measured in lines (16, or 11 beside a gift card), so the count is
-        // not a budget: short lines fill it long before 500 characters do.
+        // measured in lines (16 on a 6x9 or an 11x6, 11 on a 4x6 or beside a
+        // gift card, #594), so the count is not a budget: short lines fill it
+        // long before its characters run out.
         const message = typeof state.message === "string" ? state.message.trim() : "";
         document.getElementById("studio-message").textContent = message || "The message is on the back.";
         const length = [...message].length;
@@ -571,7 +592,7 @@
           ? ""
           : state.giftCard
             ? `${length} characters · beside the gift card, the back holds 11 lines`
-            : `${length} characters · the back holds 16 lines, about 500 characters of prose`;
+            : `${length} characters · the back holds ${backHolds()} characters of prose`;
 
         const sendEligibility = state.sendEligibility;
         const payAndSend = sendEligibility?.payAndSend;
@@ -618,7 +639,8 @@
                     : typeof estimate === "string" && estimate
                       ? estimate.charAt(0).toLowerCase() + estimate.slice(1)
                       : "First Class";
-        document.getElementById("studio-summary").textContent = ["6 x 9 in", timing].join(" · ");
+        document.getElementById("studio-size").textContent = sizeText();
+        document.getElementById("studio-summary").textContent = [sizeText(), timing].join(" · ");
         showSide();
       }
 
@@ -1606,6 +1628,7 @@
         // mockup of the back.
         const pages = renderedPages(meta.previewHtml ?? state.previewHtml);
         const printed = pages && pages.length >= 2;
+        postcardInches = printed ? inchesOf(pages[0]) : [6, 9];
 
         // Render front preview (image)
         const previewFront = document.getElementById("preview-front");

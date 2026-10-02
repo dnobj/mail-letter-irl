@@ -1,5 +1,6 @@
 import { LetterIrlServer } from "../server.js";
-import { WIDGET_DEFINITIONS, withheldInputKeys } from "./registerTools.js";
+import { servesPostcardSixByNineOnly, WIDGET_DEFINITIONS, withheldInputKeys } from "./registerTools.js";
+import { postcardSixByNineProperties } from "../schemas.js";
 import { DEFAULT_OAUTH_SCOPES } from "../auth/oauthConfig.js";
 import { buildServerInstructions } from "./serverInstructions.js";
 import { isSendConfirmationEnabled } from "../config/sendConfirmation.js";
@@ -10,12 +11,16 @@ import { clientProfileNamed } from "../auth/clientProfiles.js";
  * deployment withholds (withheldInputKeys): the four previews' `arriveBy`
  * (#535) while LETTER_IRL_ARRIVE_BY_ENABLED is off, and the three letter
  * previews' stationery (#563) while it is not offered. set_arrival_date is
- * listed only while arrive-by is on, its own arriveBy with it.
+ * listed only while arrive-by is on, its own arriveBy with it. The postcard
+ * preview's `message` and `size` are served as before the 4x6 and 11x6
+ * (#594) while those are not offered (servesPostcardSixByNineOnly).
  */
 function servedInputSchema(name: string, schema: unknown): unknown {
-  const properties = (schema as { properties?: Record<string, unknown> } | undefined)?.properties;
+  const declared = (schema as { properties?: Record<string, unknown> } | undefined)?.properties;
+  if (!declared) return schema;
+  const properties = servesPostcardSixByNineOnly(name) ? { ...declared, ...postcardSixByNineProperties } : declared;
   const withheld = withheldInputKeys(name);
-  if (!properties || withheld.length === 0) return schema;
+  if (properties === declared && withheld.length === 0) return schema;
   const served = Object.fromEntries(Object.entries(properties).filter(([key]) => !withheld.includes(key)));
   return { ...(schema as object), properties: served };
 }
