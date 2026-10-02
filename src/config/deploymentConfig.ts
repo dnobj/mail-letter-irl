@@ -557,6 +557,20 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     services: ['api']
   },
   /**
+   * The envelope reveal (#576, src/config/envelope.ts): the letter previews
+   * tell their card it may open the page from an envelope, and the
+   * confirmation page's API tells the website the same, only while the flag
+   * is on. Off unless set, so absence is the intended production state until
+   * the owner switches it on. API only: nothing prints differently.
+   */
+  {
+    name: 'LETTER_IRL_ENVELOPE_REVEAL_ENABLED',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  /**
    * Arrive-by (#535, src/config/arriveBy.ts): the preview tools offer and
    * accept an arrival date only while the flag is on. Off unless set, so
    * absence is the intended production state until the owner switches it on;

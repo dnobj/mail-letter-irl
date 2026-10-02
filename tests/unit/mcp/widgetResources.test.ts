@@ -150,10 +150,13 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       // And the Style row (#563), in the letter card.
       const style = (await fs.readFile(path.join(widgetDir, 'shared', 'style.js'), 'utf-8')).replace(/\r\n/g, '\n');
       parts.push(`shared/style.js:${createHash('sha256').update(style).digest('hex')}`);
+      // And the envelope reveal (#576), in the letter card.
+      const envelope = (await fs.readFile(path.join(widgetDir, 'shared', 'envelope.js'), 'utf-8')).replace(/\r\n/g, '\n');
+      parts.push(`shared/envelope.js:${createHash('sha256').update(envelope).digest('hex')}`);
       const digest = createHash('sha256').update(parts.join('\n')).digest('hex').slice(0, 12);
       expect({ version: WIDGET_TEMPLATE_VERSION, digest }).toEqual({
-        version: 54,
-        digest: '3c9fdc9f0f8c'
+        version: 55,
+        digest: '48554724ae81'
       });
     });
   });
