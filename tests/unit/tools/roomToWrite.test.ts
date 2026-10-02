@@ -245,11 +245,18 @@ describe('a longer letter, while room to write is offered', () => {
     expect(error.message).toMatch(/^Letter is far too long for three pages: \d+\/10000 characters\. Please shorten your message to fit on three pages\.$/);
   });
 
-  it('offers the theme ways out at three pages too', async () => {
+  it('judges the theme ways out at three pages too', async () => {
     vi.stubEnv('LETTER_IRL_STATIONERY_ENABLED', 'true');
-    const error = await run('text_only', { bodyText: lines(26 + 33 + 33), stationery: 'typewriter' }).catch(e => e);
+    // Each line fits Classic's measure and wraps in Typewriter's wider face: 50
+    // lines fit three Classic pages, and run past three in Typewriter.
+    const wide = Array.from({ length: 50 }, () => 'the quick brown fox jumps over the lazy dog while the letters wait patiently to be written').join('\n');
+    const error = await run('text_only', { bodyText: wide, stationery: 'typewriter' }).catch(e => e);
     expect(error.message).toContain('too long for three pages on the typewriter stationery: three pages is the longest letter we print.');
-    expect(error.message).toContain('The typewriter stationery sets the text in its own typeface');
+    expect(error.message).toContain('The typewriter stationery sets the text in its own typeface: shorten the message, or choose the classic stationery.');
+
+    // Too long on three Classic pages too: then the only way out is a shorter letter.
+    const longer = await run('text_only', { bodyText: lines(26 + 33 + 33), stationery: 'typewriter' }).catch(e => e);
+    expect(longer.message).toContain('and the letter runs past three pages on the classic stationery too: shorten the message.');
   });
 });
 

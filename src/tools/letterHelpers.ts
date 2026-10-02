@@ -966,7 +966,7 @@ export async function letterGiftChoice(
   return resolveGiftSendChoice({
     userId: context.user.userId,
     requested: letter.sendAsGift,
-    balanceCanPay: packPays && context.user.creditsRemaining >= estimateRequiredCredits(letter.bodyText, letter.signOff),
+    balanceCanPay: context.user.creditsRemaining >= estimateRequiredCredits(letter.bodyText, letter.signOff),
     ...(option === undefined ? {} : { giftCanPay: packPays })
   });
 }
