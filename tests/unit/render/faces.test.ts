@@ -13,7 +13,8 @@ import { BODY_BOTTOM, BODY_TOP, CONTENT_WIDTH, LINE_PITCH, PAGE_WIDTH, SIDE_MARG
 import { placeGlyphs, shape } from '../../../src/render/glyphs.js';
 import type { RenderImage } from '../../../src/render/images.js';
 import {
-  baselineOffset, drawsGrapheme, drawsGraphemeIn, inFace, layoutLetter, wrapText, type ImageBox, type Layout, type PathItem, type TextRun
+  baselineOffset, drawsGrapheme, drawsGraphemeIn, inFace, layoutLetter, shapedClusterCount, SHAPES_CACHE_LIMIT, wrapText,
+  type ImageBox, type Layout, type PathItem, type TextRun
 } from '../../../src/render/layout.js';
 import { rendererVersionFor, renderPdf, STATIONERY_RENDERER_VERSION } from '../../../src/render/pdf.js';
 import { renderPreviewSvg } from '../../../src/render/preview.js';
@@ -280,6 +281,24 @@ describe("a face's characters (#563 PR 8)", () => {
     expect(taken.length).toBeGreaterThan(20);
     expect(taken.length).toBeLessThan(pairs.length);
     expect(() => letter({ theme: 'handwritten' }, 'text_only', taken.join(' '))).not.toThrow();
+  });
+
+  it('keeps no more than its limit of shaped clusters per face, whatever the text (#575 review round 5)', () => {
+    const cousine = drawsGraphemeIn('Cousine-Regular');
+    // More distinct letter-and-accent clusters than the cache keeps.
+    const marks = [0x300, 0x301, 0x302, 0x303, 0x304, 0x306, 0x307, 0x308, 0x30a, 0x30b, 0x30c, 0x323, 0x327, 0x328];
+    let shaped = 0;
+    for (const base of 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ') {
+      for (const first of marks) {
+        for (const second of marks) {
+          cousine(base + String.fromCodePoint(first, second));
+          shaped += 1;
+          expect(shapedClusterCount('Cousine-Regular')).toBeLessThanOrEqual(SHAPES_CACHE_LIMIT);
+        }
+      }
+    }
+    expect(shaped).toBeGreaterThan(SHAPES_CACHE_LIMIT);
+    expect(shapedClusterCount('Cousine-Regular')).toBeGreaterThan(0);
   });
 
   it('keeps Classic\'s check as it was, and works as a callback', () => {

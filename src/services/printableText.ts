@@ -248,9 +248,12 @@ function shown(grapheme: string, prints: PrintsGrapheme): string {
   if (emoji || !(LOOK_ALIKE.test(grapheme) || INVISIBLE_START.test(grapheme))) return grapheme;
   if (refused.length === 0) {
     const marks = characters.filter(character => MARK.test(character)).length;
-    return marks > MAX_MARKS_PER_LETTER
-      ? `${grapheme} (too many marks on one letter)`
-      : `${grapheme} (an accent written apart from its letter, which this typeface cannot place)`;
+    if (marks > MAX_MARKS_PER_LETTER) return `${grapheme} (too many marks on one letter)`;
+    // The same letter written as one character may print where its separate
+    // accent cannot: say which (#575 review round 5).
+    const composed = grapheme.normalize('NFC');
+    const one = [...composed].length === 1 && prints(composed) ? `: write it as one character, ${codePoint(composed)}` : '';
+    return `${grapheme} (an accent written apart from its letter, which this typeface cannot place${one})`;
   }
   return `${grapheme} (${refused.map(codePoint).join(' ')})`;
 }

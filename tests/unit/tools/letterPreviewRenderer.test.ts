@@ -795,7 +795,13 @@ describe('Typewriter and Handwritten (#563 PR 8b)', () => {
     vi.mocked(createDraft).mockClear();
     const error = await run('text_only', { stationery: 'handwritten', bodyText: text }).catch(e => e);
     expect(error).toMatchObject({ diagnosticClass: 'validation_error' });
-    expect(error.message).toContain('(an accent written apart from its letter, which this typeface cannot place) in the text, which the handwritten stationery prints in its own typeface');
+    expect(error.message).toContain(
+      '(an accent written apart from its letter, which this typeface cannot place: write it as one character, U+00ED) ' +
+        'in the text, which the handwritten stationery prints in its own typeface'
+    );
+    // No one character to name for a letter with two accents (Yoruba).
+    const yoruba = await run('text_only', { stationery: 'handwritten', bodyText: `O${String.fromCodePoint(0x323, 0x301)}la` }).catch(e => e);
+    expect(yoruba.message).toContain('(an accent written apart from its letter, which this typeface cannot place) in the text');
     expect(error.message).toContain('choose another stationery');
     expect(createDraft).not.toHaveBeenCalled();
   });

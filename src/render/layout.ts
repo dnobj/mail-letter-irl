@@ -203,6 +203,18 @@ export function drawsGraphemeIn(fontName: FontName): (grapheme: string) => boole
 const shapesCache = new Map<FontName, Map<string, boolean>>();
 
 /**
+ * The most clusters kept per font. The text chooses them, so the cache is
+ * emptied when it fills rather than growing without end (#575 review round
+ * 5); shaping one again takes microseconds.
+ */
+export const SHAPES_CACHE_LIMIT = 4096;
+
+/** How many clusters are kept for a font, for tests. */
+export function shapedClusterCount(fontName: FontName): number {
+  return shapesCache.get(fontName)?.size ?? 0;
+}
+
+/**
  * Whether a cluster of more than one visible character, a letter and its
  * marks, shapes in a font with no missing glyph and no failure. fontkit's
  * mark positioning throws on many of Caveat's letters with a separate
@@ -219,6 +231,7 @@ function shapes(fontName: FontName, cluster: string): boolean {
     } catch {
       clean = false;
     }
+    if (cache.size >= SHAPES_CACHE_LIMIT) cache.clear();
     cache.set(cluster, clean);
   }
   return clean;
