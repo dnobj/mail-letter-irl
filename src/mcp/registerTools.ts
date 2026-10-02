@@ -1175,6 +1175,25 @@ export async function registerLetterTools(
         } catch (error) {
           // #412: a refusal the card acts on, so its details travel with it.
           if (isDuplicateMailError(error)) return buildDuplicateMailToolResult(error);
+          // #579: mail no pack pays for, sent from our card in an app that
+          // cannot open Pay & Send there. Answered as the send rule answers a
+          // send it cannot run: with the page, which takes the payment.
+          if (
+            sendRule &&
+            CARD_ONLY_SEND_TOOLS.has(tool.name) &&
+            (error as { code?: unknown } | null)?.code === "PACK_CANNOT_PAY" &&
+            !(client.inAppPurchases && client.rendersCards)
+          ) {
+            return buildSendByLinkToolResult(
+              await appServer.execute<{ draftId: unknown }, RequestSendOutput>({
+                toolName: REQUEST_SEND_TOOL,
+                input: { draftId: args.draftId },
+                userId,
+                client
+              }),
+              client.name
+            );
+          }
           throw error;
         }
         const { result, meta } = executed;
@@ -1185,7 +1204,8 @@ export async function registerLetterTools(
           summaryText += ` ${howToSendText(
             draftId,
             client,
-            cardOffersPayAndSend(result as Record<string, unknown>)
+            cardOffersPayAndSend(result as Record<string, unknown>),
+            previewPayment(result as Record<string, unknown>)
           )}`;
         }
 
@@ -1294,6 +1314,15 @@ export function buildTokenScopeToolResult(toolName: string) {
 export function sendLinkText(result: RequestSendOutput): string {
   const what = result.mailType === "postcard" ? "postcard" : "letter";
   const to = result.recipientSummary?.name ? ` to ${result.recipientSummary.name}` : "";
+  // Mail no pack pays for is paid on that page, with Pay & Send (#579).
+  if (result.paidPerSend === true) {
+    return (
+      `Ask the person to open ${result.confirmationUrl} to check the ${what}${to}, then pay for it with Pay & Send there, which sends it. ` +
+      whenSentText(result) +
+      `Letter packs and gift letters pay only for one-page letters and 6x9 postcards. ` +
+      `Nothing is sent until they pay there. The link works until ${result.expiresAtISO}.`
+    );
+  }
   return (
     `Ask the person to open ${result.confirmationUrl} to check the ${what}${to} and send it themselves. ` +
     whenSentText(result) +
@@ -1346,7 +1375,8 @@ export function buildSendByLinkToolResult(
 export function howToSendText(
   draftId: string,
   client: Pick<ClientProfile, "rendersCards" | "inAppPurchases">,
-  cardOffersPayAndSend = false
+  cardOffersPayAndSend = false,
+  pay: { packPays: boolean; payOnPage: boolean } = { packPays: true, payOnPage: false }
 ): string {
   if (!client.rendersCards) {
     return (
@@ -1357,8 +1387,31 @@ export function howToSendText(
   const how =
     client.inAppPurchases && cardOffersPayAndSend
       ? "The person pays for it and sends it with Pay & Send on the preview card; point them to it when they ask you to send it or pay for it. "
-      : "The person sends it with Send on the preview card; point them to it when they ask you to send. ";
-  return `Nothing has been sent. ${how}Only if the card is not showing, call request_send with draftId ${draftId} and give them its link.`;
+      : pay.payOnPage
+        ? "The person pays for it with Pay & Send on letterirl.com, which the preview card's button opens; point them to it when they ask you to send it or pay for it. "
+        : pay.packPays
+          ? "The person sends it with Send on the preview card; point them to it when they ask you to send. "
+          : "It is paid with Pay & Send, which is not available for it right now. ";
+  // Mail no pack pays for (#579): said, so the model does not offer a pack.
+  const packRule = pay.packPays
+    ? ""
+    : "Letter packs and gift letters pay only for one-page letters and 6x9 postcards. ";
+  return `Nothing has been sent. ${how}${packRule}Only if the card is not showing, call request_send with draftId ${draftId} and give them its link.`;
+}
+
+/**
+ * How a preview's mail is paid, as its eligibility says (#579): whether a
+ * pack pays for it, and whether the card's button opens the page that takes
+ * a Pay & Send payment.
+ */
+export function previewPayment(result: Record<string, unknown>): { packPays: boolean; payOnPage: boolean } {
+  const eligibility = result.sendEligibility as
+    | { packPays?: unknown; payAndSend?: { pageUrl?: unknown } }
+    | undefined;
+  return {
+    packPays: eligibility?.packPays !== false,
+    payOnPage: typeof eligibility?.payAndSend?.pageUrl === "string"
+  };
 }
 
 /**

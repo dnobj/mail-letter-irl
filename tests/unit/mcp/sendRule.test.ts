@@ -23,6 +23,7 @@ import {
   CARD_ONLY_SEND_TOOLS,
   howToSendText,
   PAY_AND_SEND_TOOL,
+  previewPayment,
   registerLetterTools,
   sendLinkText,
   TOKEN_SCOPE_REFUSAL
@@ -388,6 +389,26 @@ describe("the send rule in the MCP server (#470)", () => {
       sendEligibility: { payAndSend: { available: true }, letterPack: { available: true } }
     };
 
+    it("tells the model a preview no pack pays for is paid on the page Claude's card opens (#579)", async () => {
+      const { callbacks, execute } = await register(claude());
+      execute.mockResolvedValueOnce({
+        result: {
+          draftId: DRAFT_ID,
+          lettersRequired: 1,
+          canSendNow: false,
+          sendEligibility: {
+            payAndSend: { available: false, pageUrl: LINK.confirmationUrl },
+            letterPack: { available: false, purchaseUrl: "https://site.example/dashboard/letter-packs" },
+            packPays: false
+          }
+        },
+        meta: {}
+      } as any);
+      const preview = await callbacks.get("quote_and_preview_letter")!({}, {});
+      expect(preview.content[0].text).toContain("pays for it with Pay & Send on letterirl.com, which the preview card's button opens");
+      expect(preview.content[0].text).toContain("Letter packs and gift letters pay only for one-page letters and 6x9 postcards.");
+    });
+
     it("points ChatGPT at the card's Pay & Send when the card offers it", async () => {
       const { callbacks, execute } = await register(chatgpt());
       execute.mockResolvedValueOnce({ result: PAY_AND_SEND_OFFERED, meta: {} } as any);
@@ -409,6 +430,85 @@ describe("the send rule in the MCP server (#470)", () => {
       const preview = await callbacks.get("quote_and_preview_letter")!({}, {});
       expect(preview.content[0].text).not.toContain("Pay & Send");
       expect(preview.content[0].text).toContain("with Send on the preview card");
+    });
+
+    describe("mail no pack pays for (#579)", () => {
+      const packCannotPay = () =>
+        Object.assign(new Error("This postcard is paid with Pay & Send, not from the balance"), { code: "PACK_CANNOT_PAY" });
+
+      it("answers Claude's card, which cannot open Pay & Send, with the page that takes the payment", async () => {
+        const { callbacks, execute } = await register(claude());
+        execute.mockRejectedValueOnce(packCannotPay());
+        execute.mockResolvedValueOnce({ result: { ...LINK, paidPerSend: true }, meta: {} } as any);
+
+        const result = await callbacks.get("send_postcard")!({ draftId: DRAFT_ID, confirm: true }, {});
+
+        expect(execute).toHaveBeenNthCalledWith(1, expect.objectContaining({ toolName: "send_postcard" }));
+        expect(execute).toHaveBeenNthCalledWith(2, {
+          toolName: "request_send",
+          input: { draftId: DRAFT_ID },
+          userId: "auth0|user",
+          client: expect.objectContaining({ name: "claude" })
+        });
+        expect(result.isError).toBe(true);
+        // The card's marker, so it shows its button for the page.
+        expect(result.content[0].text).toBe(
+          `Not sent: Letter IRL sends mail only when the person sends it. ${sendLinkText({ ...LINK, paidPerSend: true } as any)}`
+        );
+      });
+
+      it("leaves ChatGPT's refusal as it is: its card offers Pay & Send itself", async () => {
+        const { callbacks, execute } = await register(chatgpt());
+        execute.mockRejectedValueOnce(packCannotPay());
+        await expect(callbacks.get("send_postcard")!({ draftId: DRAFT_ID, confirm: true }, {})).rejects.toMatchObject({
+          code: "PACK_CANNOT_PAY"
+        });
+        expect(execute).toHaveBeenCalledTimes(1);
+      });
+
+      it("leaves every other refusal as it is", async () => {
+        const { callbacks, execute } = await register(claude());
+        execute.mockRejectedValueOnce(Object.assign(new Error("expired"), { code: "DRAFT_EXPIRED" }));
+        await expect(callbacks.get("send_postcard")!({ draftId: DRAFT_ID, confirm: true }, {})).rejects.toMatchObject({
+          code: "DRAFT_EXPIRED"
+        });
+        expect(execute).toHaveBeenCalledTimes(1);
+      });
+
+      it("words the link for a payment there", () => {
+        const text = sendLinkText({ ...LINK, mailType: "postcard", paidPerSend: true } as any);
+        expect(text).toBe(
+          `Ask the person to open ${LINK.confirmationUrl} to check the postcard to Sam Rivera, then pay for it with Pay & Send there, which sends it. ` +
+            "Letter packs and gift letters pay only for one-page letters and 6x9 postcards. " +
+            `Nothing is sent until they pay there. The link works until ${LINK.expiresAtISO}.`
+        );
+      });
+
+      it("tells the model how the preview is paid, and never offers a pack", () => {
+        const onPage = howToSendText(DRAFT_ID, clientProfileNamed("claude"), false, { packPays: false, payOnPage: true });
+        expect(onPage).toContain("The person pays for it with Pay & Send on letterirl.com, which the preview card's button opens");
+        expect(onPage).toContain("Letter packs and gift letters pay only for one-page letters and 6x9 postcards.");
+        const inCard = howToSendText(DRAFT_ID, clientProfileNamed("chatgpt"), true, { packPays: false, payOnPage: false });
+        expect(inCard).toContain("with Pay & Send on the preview card");
+        expect(inCard).toContain("Letter packs and gift letters pay only");
+        const nowhere = howToSendText(DRAFT_ID, clientProfileNamed("chatgpt"), false, { packPays: false, payOnPage: false });
+        expect(nowhere).toContain("It is paid with Pay & Send, which is not available for it right now.");
+        expect(nowhere).not.toContain("with Send on the preview card");
+        // As before for pack-payable mail.
+        expect(howToSendText(DRAFT_ID, clientProfileNamed("claude"), false)).toContain("with Send on the preview card");
+        expect(howToSendText(DRAFT_ID, clientProfileNamed("claude"), false)).not.toContain("Letter packs");
+      });
+
+      it("reads how a preview is paid from its eligibility", () => {
+        expect(previewPayment({})).toEqual({ packPays: true, payOnPage: false });
+        expect(
+          previewPayment({ sendEligibility: { packPays: false, payAndSend: { pageUrl: "https://site.example/confirm/x" } } })
+        ).toEqual({ packPays: false, payOnPage: true });
+        expect(previewPayment({ sendEligibility: { packPays: false, payAndSend: {} } })).toEqual({
+          packPays: false,
+          payOnPage: false
+        });
+      });
     });
 
     it("names the card's Pay & Send only to an app that takes purchases, since no model can start one (#475)", () => {

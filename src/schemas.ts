@@ -221,7 +221,11 @@ const sendEligibilitySchema: JsonSchema = {
         // angles found it; schemaConsistency.test.ts now compares the layers.
         displayAmount: { type: "string" },
         productDescription: { type: "string" },
-        unavailableReason: { type: "string" }
+        unavailableReason: { type: "string" },
+        pageUrl: {
+          type: "string",
+          description: "Where the person pays for this with Pay & Send and so sends it, in an app that cannot open Pay & Send itself"
+        }
       }
     },
     letterPack: {
@@ -231,6 +235,11 @@ const sendEligibilitySchema: JsonSchema = {
         available: { type: "boolean" },
         purchaseUrl: { type: "string" }
       }
+    },
+    packPays: {
+      type: "boolean",
+      const: false,
+      description: "False when letter packs and gift letters cannot pay for this mail: it is paid with Pay & Send, whatever the balance"
     }
   }
 };
@@ -896,6 +905,11 @@ export const requestSendOutputSchema: JsonSchema = {
         mailOn: { type: "string" }
       },
       required: ["arriveBy", "mailOn"]
+    },
+    paidPerSend: {
+      type: "boolean",
+      const: true,
+      description: "Present when the person pays for it with Pay & Send on that page: letter packs and gift letters pay only for one-page letters and 6x9 postcards"
     }
   }
 };

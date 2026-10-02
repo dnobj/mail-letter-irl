@@ -200,7 +200,6 @@ import {
   PackAmountNotConfiguredError,
   createPackCheckout,
   createJitCheckout,
-  draftMailOption,
   fulfillPaidOrder,
   getSendEligibility,
   OPTION_NOT_SOLD_REASON,
@@ -210,6 +209,7 @@ import {
   revokePackLots,
   runCommerceMaintenance
 } from '../../../src/services/commerceService.js';
+import { draftMailOption } from '../../../src/config/products.js';
 import { LIVE_PAY_AND_SEND_STATUSES } from '../../../src/services/draftService.js';
 import { clearDiagnosticChangeSlot } from '../../../src/utils/diagnosticLog.js';
 
@@ -1509,6 +1509,37 @@ describe('commerceService', () => {
       expect(mocks.ensurePriceCatalog).toHaveBeenCalledWith('jit-postcard-11x6', 'send_eligibility_disabled');
     });
 
+    it('offers Pay & Send, and no pack, for an option whatever the balance (#579)', () => {
+      mocks.jitEnabled.mockReturnValue(true);
+      mocks.getJitProduct.mockReturnValue({
+        productCode: 'jit-postcard-4x6', priceId: 'price-4x6', amountCents: 399,
+        currency: 'usd', name: 'Pay & Send One 4x6 Postcard', description: 'x', mailType: 'postcard'
+      });
+
+      const eligibility = getSendEligibility(200, 2, { mailType: 'postcard', postcardSize: '6x4' });
+
+      expect(eligibility.payAndSend).toMatchObject({ available: true, amountCents: 399 });
+      expect(eligibility.letterPack.available).toBe(false);
+      expect(eligibility.packPays).toBe(false);
+    });
+
+    it('leaves pack-payable mail as it was: no packPays, the balance first', () => {
+      mocks.jitEnabled.mockReturnValue(true);
+      mocks.getJitProduct.mockReturnValue({
+        productCode: 'jit-postcard', priceId: 'price-6x9', amountCents: 499,
+        currency: 'usd', name: 'Pay & Send One Physical Postcard', description: 'x', mailType: 'postcard'
+      });
+
+      const eligibility = getSendEligibility(200, 2, { mailType: 'postcard', postcardSize: '6x9' });
+
+      expect(eligibility).not.toHaveProperty('packPays');
+      expect(eligibility.letterPack.available).toBe(true);
+      expect(eligibility.payAndSend).toMatchObject({
+        available: false,
+        unavailableReason: 'Use your existing prepaid letter balance.'
+      });
+    });
+
     it('refuses a checkout for an option this deployment does not sell, before any order', async () => {
       // The 6x9 is sold and the 4x6 is not: a checkout priced by the mail
       // type alone would sell this 4x6 as a 6x9.
@@ -1545,7 +1576,12 @@ describe('commerceService', () => {
         productCode: 'jit-postcard-4x6', priceId: 'price-4x6', amountCents: 399,
         currency: 'usd', name: 'Pay & Send One 4x6 Postcard', description: 'x', mailType: 'postcard'
       };
-      mocks.getJitProduct.mockReturnValue(optionProduct);
+      // The mail type alone would name the 6x9, so the two doubles differ:
+      // only the order's own product prices the session (#581 review r3).
+      mocks.getJitProduct.mockReturnValue({
+        productCode: 'jit-postcard', priceId: 'price-6x9', amountCents: 499,
+        currency: 'usd', name: 'Pay & Send One Physical Postcard', description: 'x', mailType: 'postcard'
+      });
       mocks.getJitProductForCode.mockReturnValue(optionProduct);
       const reusable = {
         ...baseOrder,
@@ -1575,7 +1611,7 @@ describe('commerceService', () => {
       );
     });
 
-    it("cancels an order whose option stopped being sold before its session", async () => {
+    it("cancels an order whose product is no longer sold when its session is made", async () => {
       mocks.getJitProduct.mockReturnValue({
         productCode: 'jit-postcard-4x6', priceId: 'price-4x6', amountCents: 399,
         currency: 'usd', name: 'Pay & Send One 4x6 Postcard', description: 'x', mailType: 'postcard'
@@ -3805,7 +3841,10 @@ describe('commerceService', () => {
       dupState.draft = mail();
       mocks.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
         if (sql.includes('sends_blocked_reason')) return { rows: [{ sends_blocked_reason: null }] };
-        if (sql.includes('SELECT mail_type FROM letter_drafts')) return { rows: [{ mail_type: 'letter' }] };
+        // The peek before the transaction reads the draft's option (#578).
+        if (sql.includes('SELECT mail_type, postcard_size FROM letter_drafts')) {
+          return { rows: [{ mail_type: draftRow.mail_type, postcard_size: draftRow.postcard_size ?? null }] };
+        }
         if (sql.includes('SELECT * FROM letter_drafts')) return { rows: [draftRow] };
         if (sql.includes('status = ANY($2::varchar[])')) return { rows: activeRows };
         if (sql.includes('SELECT credits FROM users')) return { rows: [{ credits }] };
@@ -3976,6 +4015,33 @@ describe('commerceService', () => {
       await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).rejects.toMatchObject({ code });
 
       expect(dupState.calls).toEqual([]);
+    });
+
+    it('opens a checkout for a 4x6 postcard whatever the balance: no pack pays for it (#579)', async () => {
+      credits = 200;
+      draftRow = pendingDraft({ mail_type: 'postcard', postcard_size: '6x4' });
+      mocks.getJitProduct.mockReturnValue({
+        productCode: 'jit-postcard-4x6', priceId: 'price-4x6', amountCents: 399, currency: 'usd',
+        name: 'Pay & Send One 4x6 Postcard', description: 'x', mailType: 'postcard'
+      });
+
+      await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).resolves.toMatchObject({
+        success: true,
+        reused: false
+      });
+
+      expect(inserted()).toBe(true);
+      // The balance is not even read for it.
+      expect(mocks.query.mock.calls.some(([sql]) => String(sql).includes('SELECT credits FROM users'))).toBe(false);
+    });
+
+    it('still refuses a 6x9 postcard the balance can pay', async () => {
+      credits = 2;
+      draftRow = pendingDraft({ mail_type: 'postcard', postcard_size: '6x9' });
+
+      await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).rejects.toMatchObject({
+        code: 'PREPAID_BALANCE_AVAILABLE'
+      });
     });
 
     it('comes after the account and cap gates', async () => {

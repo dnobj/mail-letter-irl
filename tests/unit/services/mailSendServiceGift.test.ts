@@ -264,3 +264,77 @@ describe('createMailOrderFromDraft: gift sends', () => {
     expect(savedLetter?.content.giftCard).toBeUndefined();
   });
 });
+
+describe('createMailOrderFromDraft: what packs and gift letters pay for (#579)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.LETTER_IRL_GIFT_LETTERS_ENABLED = 'true';
+    mocks.transaction.mockImplementation(async (callback: (c: typeof client) => Promise<unknown>) => callback(client));
+    savedLetter = null;
+    giftSendsToday = 1;
+    lettersTodayForUser = 1;
+    recentLetters = [];
+    calls = [];
+    mocks.deductCredits.mockResolvedValue({ user: { credits: 6 } });
+    mocks.consumeGift.mockResolvedValue({ gift: { gift_id: 'gift-1', generations_remaining: 1 }, card: FUNDED_CARD });
+    mocks.createOutboxJob.mockImplementation(async (_client: unknown, letter: Row) => ({
+      job_id: 'job-1',
+      letter_id: letter.letter_id
+    }));
+    draft = {
+      draft_id: 'draft-4x6',
+      user_id: 'user-1',
+      mail_type: 'postcard',
+      postcard_size: '6x4',
+      sender: { name: 'Sarah' },
+      recipient: { name: 'Grandma' },
+      message: 'Hello',
+      front_image_url: 'https://example.com/front.jpg',
+      required_credits: 2,
+      status: 'pending',
+      is_gift_send: false,
+      expires_at: new Date(Date.now() + 60_000)
+    };
+  });
+
+  afterEach(() => {
+    delete process.env.LETTER_IRL_GIFT_LETTERS_ENABLED;
+  });
+
+  it('refuses the balance for a 4x6 postcard, before any value moves', async () => {
+    await expect(
+      createMailOrderFromDraft({ draftId: 'draft-4x6', userId: 'user-1', mailType: 'postcard' })
+    ).rejects.toMatchObject({ code: 'PACK_CANNOT_PAY' });
+    expect(mocks.deductCredits).not.toHaveBeenCalled();
+    expect(calls).not.toContain('insert-letter');
+    expect(mocks.createOutboxJob).not.toHaveBeenCalled();
+  });
+
+  it('refuses a gift letter for an 11x6 postcard, before the gift is spent', async () => {
+    draft = { ...draft, postcard_size: '6x11', is_gift_send: true };
+    await expect(
+      createMailOrderFromDraft({ draftId: 'draft-4x6', userId: 'user-1', mailType: 'postcard' })
+    ).rejects.toMatchObject({ code: 'PACK_CANNOT_PAY' });
+    expect(mocks.consumeGift).not.toHaveBeenCalled();
+    expect(calls).not.toContain('insert-letter');
+  });
+
+  it('lets Pay & Send fund it: the rule is for packs and gift letters only', async () => {
+    // Past the rule, a jit_order is looked up as ever; none exists here.
+    await expect(
+      createMailOrderFromDraft({
+        draftId: 'draft-4x6',
+        userId: 'user-1',
+        mailType: 'postcard',
+        funding: { type: 'jit_order', orderId: 'order-1' }
+      })
+    ).rejects.toMatchObject({ code: 'JIT_ORDER_NOT_FOUND' });
+  });
+
+  it('keeps the 6x9 postcard on the balance, as before', async () => {
+    draft = { ...draft, postcard_size: '6x9' };
+    const result = await createMailOrderFromDraft({ draftId: 'draft-4x6', userId: 'user-1', mailType: 'postcard' });
+    expect(result.fundingType).toBe('prepaid_balance');
+    expect(mocks.deductCredits).toHaveBeenCalledTimes(1);
+  });
+});

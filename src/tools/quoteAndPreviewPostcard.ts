@@ -12,12 +12,14 @@
 import { Address, McpToolDefinition, ToolContext } from "../contracts/types.js";
 import {
   previewSendEligibility,
+  reasonCannotSend,
   validateAddressesWithProvider,
   validatePrintableCharacters,
   outputValidationStatus,
   withDisplayImage
 } from "./letterHelpers.js";
 import { printRenderer } from "../config/printRenderer.js";
+import { isPackPayable, type MailOption } from "../config/products.js";
 import {
   drawsGrapheme,
   GiftStripOverflow,
@@ -293,10 +295,15 @@ async function handler(
   // before the limit is checked (docs/gift-letters.md).
   const requiredCredits = POSTCARD_CREDITS_COST;
   const available = context.user.creditsRemaining;
+  // The mail option this is: its price (#578), and whether a pack or a gift
+  // letter pays for it (#579).
+  const option: MailOption = { mailType: "postcard", postcardSize: size };
+  const packPays = isPackPayable(option);
   const gift = await resolveGiftSendChoice({
     userId: context.user.userId,
     requested: input.sendAsGift,
-    balanceCanPay: available >= requiredCredits
+    balanceCanPay: available >= requiredCredits,
+    giftCanPay: packPays
   });
   // Our renderer draws 6x9 postcards, gift sends and their card included
   // (#534); any other size keeps the legacy print and its limits. Read once,
@@ -520,15 +527,8 @@ async function handler(
   const { senderValidation, recipientValidation, addressWarnings } =
     await validateAddressesWithProvider(sender, input.recipient, context, "quote.postcard");
 
-  // Check credits
-  const canSendNow = gift.isGift || available >= requiredCredits;
-  const sendEligibility = previewSendEligibility(
-    available,
-    requiredCredits,
-    { mailType: "postcard", postcardSize: size },
-    gift.isGift,
-    callingApp(context)
-  );
+  // Check credits: only where a pack pays (#579).
+  const canSendNow = gift.isGift || (packPays && available >= requiredCredits);
   const lettersRequired = 1; // User-facing: 1 letter = 1 postcard
 
   context.logger.info(
@@ -584,6 +584,16 @@ async function handler(
     schedule: schedule?.draft,
   });
 
+  // After the draft, whose page an app with no checkout pays on (#579).
+  const sendEligibility = previewSendEligibility(
+    available,
+    requiredCredits,
+    option,
+    gift.isGift,
+    callingApp(context),
+    draftResult.draftId
+  );
+
   context.logger.info(
     {
       correlationId: context.correlationId,
@@ -600,7 +610,7 @@ async function handler(
     ...(renderedHtml ? { previewHtml: renderedHtml } : {}),
     lettersRequired,
     canSendNow,
-    reasonCannotSend: canSendNow ? undefined : "Not enough letters in your balance.",
+    reasonCannotSend: canSendNow ? undefined : reasonCannotSend(option),
     sendEligibility,
     deliveryClass: DELIVERY_CLASS,
     // A held postcard's card says when it goes to the printer (#535).

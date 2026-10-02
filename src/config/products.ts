@@ -58,6 +58,21 @@ export interface MailOption {
 }
 
 /**
+ * The mail option a draft is, from its row: its mail type and postcard size.
+ * Letters are one page until room to write records a draft's pages (#578).
+ * Here, beside the option, so the send and the checkout read it alike.
+ */
+export function draftMailOption(draft: {
+  mail_type?: string | null;
+  postcard_size?: string | null;
+}): MailOption {
+  const mailType = (draft.mail_type || 'letter') as MailType;
+  return mailType === 'postcard'
+    ? { mailType, postcardSize: (draft.postcard_size || '6x9') as PostcardSize }
+    : { mailType };
+}
+
+/**
  * Internal credits per customer-facing letter.
  *
  * Credits are the ledger unit; letters are the only unit a customer sees. The
@@ -357,6 +372,18 @@ function configuredRow(
     expectedAmountCents: definition.expectedAmountCents,
     expectedCurrency: currency
   };
+}
+
+/**
+ * Whether a letter pack or a gift letter pays for this mail (#579): a one-page
+ * letter, in any layout and stationery, or a 6x9 postcard, the mail sold before
+ * the options. Everything else is paid per send through Pay & Send, at its own
+ * price. An unknown mail type is a letter, as it is priced.
+ */
+export function isPackPayable(option: MailOption): boolean {
+  return option.mailType === 'postcard'
+    ? (option.postcardSize ?? '6x9') === '6x9'
+    : (option.pages ?? 1) === 1;
 }
 
 /**

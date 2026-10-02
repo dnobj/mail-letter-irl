@@ -133,6 +133,19 @@ describe('mail-type wording', () => {
     expect(friendlyDraftError(upstream, 'd-1', 'letter').message).toContain('The day this letter was to go to the printer has passed');
   });
 
+  it('says mail no pack pays for is paid with Pay & Send, and keeps the code for the tool layer (#579)', () => {
+    const upstream = Object.assign(new Error('Draft d-1 is paid with Pay & Send, not a pack or gift letter'), {
+      code: 'PACK_CANNOT_PAY'
+    });
+    const postcard = friendlyDraftError(upstream, 'd-1', 'postcard');
+    expect(postcard.message).toBe(
+      'This postcard is paid with Pay & Send, not from the balance: letter packs and gift letters pay for one-page letters and 6x9 postcards.'
+    );
+    expect((postcard as { code?: string }).code).toBe('PACK_CANNOT_PAY');
+    expect(friendlyDraftError(upstream, 'd-1', 'letter').message).toContain('This letter is paid with Pay & Send');
+    expect(postcard.message).not.toContain('d-1');
+  });
+
   it('points a wrong-type draft at the other tool', () => {
     expect(friendlyDraftError(withCode('DRAFT_WRONG_MAIL_TYPE'), 'd', 'letter').message).toBe(
       'This is a postcard draft. Please use send_postcard instead.'

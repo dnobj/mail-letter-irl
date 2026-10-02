@@ -127,6 +127,15 @@ describe("request_send", () => {
     vi.mocked(getDraft).mockResolvedValue(draft({ mail_type: "postcard" }) as any);
     const result = await requestSendTool.handler({ draftId: DRAFT_ID }, context());
     expect(result.mailType).toBe("postcard");
+    // A 6x9 is pack-payable, as every postcard was (#579).
+    expect(result).not.toHaveProperty("paidPerSend");
+  });
+
+  it("says the page takes a Pay & Send payment for mail no pack pays for (#579)", async () => {
+    vi.mocked(getDraft).mockResolvedValue(draft({ mail_type: "postcard", postcard_size: "6x4" }) as any);
+    const result = await requestSendTool.handler({ draftId: DRAFT_ID }, context());
+    expect(result.paidPerSend).toBe(true);
+    expect(result.confirmationUrl).toBe(`https://site.example/confirm/${DRAFT_ID}`);
   });
 
   it("refuses someone else's draft in the words it uses for a missing one", async () => {

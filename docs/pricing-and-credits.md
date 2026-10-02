@@ -221,7 +221,11 @@ used in development until the owner approves them:
 - **Flags:** an option is sold only while its flag is on, as well as Pay & Send. Each flag also switches its option on, so an option is never offered without a price.
 - **Off:** with its flag off, an option has no price at all. A quote offers no Pay & Send for it, and a checkout is refused rather than charging a smaller option's price.
 - **Ordering:** a checkout is priced by the product its order recorded.
-- **Packs and gift letters** pay for one-page letters and 6x9 postcards only (#579).
+- **Packs and gift letters** pay for one-page letters and 6x9 postcards only (#579), in any layout and stationery. Every other option is paid per send with Pay & Send, whatever the balance:
+  - the quote offers no pack and no send from the balance for it;
+  - the send refuses a pack or gift letter for it (`PACK_CANNOT_PAY`);
+  - a Pay & Send checkout for it is never refused because the balance could pay.
+- **Where it is paid:** in an app that takes purchases (ChatGPT), on the card. In Claude, VS Code and for agents, on the confirmation page that the card's button and `request_send` link to.
 
 Qualifying purchases grant explicit image entitlements. The defaults are five
 per prepaid physical-mail entitlement and two future generations per completed

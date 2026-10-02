@@ -134,7 +134,7 @@ not a gap.
 2. validates ownership, mail type, state, and expiry, and for a draft with an arrival date that its mail date has not passed (below);
 3. returns the existing order if the draft was already consumed;
 4. inserts the Letter IRL order;
-5. locks and deducts prepaid sends from the user's ledger, or, for a draft previewed as a gift send, uses one gift letter under the same account lock and decides its card ([Gift Letters](gift-letters.md));
+5. locks and deducts prepaid sends from the user's ledger, or, for a draft previewed as a gift send, uses one gift letter under the same account lock and decides its card ([Gift Letters](gift-letters.md)). Neither pays for mail other than a one-page letter or a 6x9 postcard: such a draft is refused with `PACK_CANNOT_PAY` before any value moves, and is paid per send with Pay & Send (#579, [Pricing](pricing-and-credits.md));
 6. checks the daily caps (and, for a gift send, the daily gift budget), then refuses the same mail sent recently (below), unless the caller asked for another copy;
 7. marks the draft consumed and links it to the order;
 8. inserts one `letter_jobs` outbox row, due at once, or for held mail at 09:00 New York time on its mail date;

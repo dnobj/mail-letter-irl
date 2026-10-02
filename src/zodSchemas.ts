@@ -426,12 +426,20 @@ export const sendEligibilityZ = z.object({
     currency: z.string().optional(),
     displayAmount: z.string().optional(),
     productDescription: z.string().optional(),
-    unavailableReason: z.string().optional()
+    unavailableReason: z.string().optional(),
+    pageUrl: z
+      .string()
+      .optional()
+      .describe("Where the person pays for this with Pay & Send and so sends it, in an app that cannot open Pay & Send itself")
   }),
   letterPack: z.object({
     available: z.boolean(),
     purchaseUrl: z.string()
-  })
+  }),
+  packPays: z
+    .literal(false)
+    .optional()
+    .describe("False when letter packs and gift letters cannot pay for this mail: it is paid with Pay & Send, whatever the balance")
 });
 
 // A gift send's card, for the model and the preview card (docs/gift-letters.md).
@@ -747,7 +755,11 @@ export const requestSendOutputZ = z.object({
   schedule: z
     .object({ arriveBy: z.string(), mailOn: z.string() })
     .optional()
-    .describe("The preview's arrival dates, YYYY-MM-DD: once sent, it waits until its mail date")
+    .describe("The preview's arrival dates, YYYY-MM-DD: once sent, it waits until its mail date"),
+  paidPerSend: z
+    .literal(true)
+    .optional()
+    .describe("Present when the person pays for it with Pay & Send on that page: letter packs and gift letters pay only for one-page letters and 6x9 postcards")
 });
 
 export const cancelScheduledMailOutputZ = z.object({

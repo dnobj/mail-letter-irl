@@ -78,6 +78,7 @@ The preview decides, because the preview has to show the page that will print.
 
 - `sendAsGift: true` sends as a gift letter; it is refused if the account has none, or the programme is off.
 - `sendAsGift` omitted uses a gift letter **only when the balance cannot pay**. Someone with letters is never switched to a gift without asking.
+- **What a gift letter pays for (#579):** like a pack letter, only a one-page letter or a 6x9 postcard. For anything else, `sendAsGift: true` is refused with the way to pay (Pay & Send), and no gift is chosen when it is omitted. The send refuses such a draft as a gift too (`PACK_CANNOT_PAY`).
 
 The draft records the decision (`letter_drafts.is_gift_send`) and `send_letter` / `send_postcard` honour it: inside the one send transaction the gift is consumed under the account lock, then the per-account and global mail caps, the daily gift budget and the #412 duplicate guard run, and a refusal rolls the gift back. Pay & Send refuses a gift draft before any charge (`DRAFT_IS_GIFT`). See [Letter Send Flow](letter-send-flow.md).
 

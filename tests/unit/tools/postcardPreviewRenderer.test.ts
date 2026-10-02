@@ -264,6 +264,22 @@ describe('a postcard preview drawn by our renderer', () => {
     expect(drafted().previewHtml).not.toContain('data-renderer');
   });
 
+  it('shows a 4x6 as paid per send, though the balance could pay a 6x9 (#579)', async () => {
+    // Ten credits: five letters, enough for any 6x9.
+    const output = (await run({ size: '6x4' })) as { canSendNow: boolean; reasonCannotSend?: string };
+    expect(output.canSendNow).toBe(false);
+    expect(output.reasonCannotSend).toBe(
+      'Letter packs and gift letters pay for one-page letters and 6x9 postcards; this one is paid with Pay & Send.'
+    );
+    // Priced as the 4x6 it is.
+    expect(getSendEligibility).toHaveBeenCalledWith(10, expect.any(Number), { mailType: 'postcard', postcardSize: '6x4' });
+    // And the 6x9, as before.
+    vi.mocked(createPostcardDraft).mockClear();
+    const sixByNine = (await run()) as { canSendNow: boolean; reasonCannotSend?: string };
+    expect(sixByNine.canSendNow).toBe(true);
+    expect(sixByNine.reasonCannotSend).toBeUndefined();
+  });
+
   it("checks the message against the renderer's font, and the addresses against Open Sans", async () => {
     await expect(run({ message: `A well${NB_HYPHEN}known beach` })).resolves.toMatchObject({ draftId: 'draft-1' });
     await expect(run({ message: `We will sta${FF} it` })).rejects.toThrow(`${FF} (U+FB00) in the message.`);
@@ -370,11 +386,12 @@ describe('a gift postcard', () => {
     expect(/<title>([^<]*)<\/title>/.exec(backOf(drafted().previewHtml!))![1]).toContain('PRESS2026');
   });
 
-  it('keeps any size but 6x9, and every gift postcard without the flag, on the legacy HTML and its limits', async () => {
-    await run({ sendAsGift: true, size: '6x4' });
-    expect(drafted().rendererVersion).toBeUndefined();
-    vi.mocked(createPostcardDraft).mockClear();
-    await expect(run({ sendAsGift: true, size: '6x4', message: 'a'.repeat(351) })).rejects.toThrow('(351/350 characters)');
+  it('refuses a gift on any size but 6x9, and keeps every gift postcard without the flag on the legacy HTML and its limits', async () => {
+    // A gift letter pays only where a pack does (#579): a 6x9 postcard.
+    await expect(run({ sendAsGift: true, size: '6x4' })).rejects.toThrow(
+      'A gift letter pays for a one-page letter or a 6x9 postcard, not for this one.'
+    );
+    expect(createPostcardDraft).not.toHaveBeenCalled();
 
     vi.stubEnv('LETTER_IRL_PRINT_RENDERER', 'html');
     const output = await run({ sendAsGift: true });

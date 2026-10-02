@@ -939,3 +939,71 @@ describe.each([LETTER, POSTCARD])('$file: the arrival date (#535)', spec => {
     expect(card.visible('send-button')).toBe(true);
   });
 });
+
+/**
+ * Mail no pack pays for (#579), where the app takes no purchases: the server
+ * names the confirmation page, which takes a Pay & Send payment and sends it.
+ */
+const PAY_PAGE = 'https://letterirl.com/confirm/draft_0002';
+const paidPerSend = {
+  canSendNow: false,
+  reasonCannotSend: 'Letter packs and gift letters pay for one-page letters and 6x9 postcards; this one is paid with Pay & Send.',
+  sendEligibility: {
+    payAndSend: { available: false, unavailableReason: "Pay & Send isn't available in this app.", pageUrl: PAY_PAGE },
+    letterPack: { available: false, purchaseUrl: PACKS_URL },
+    packPays: false
+  }
+};
+
+describe.each([LETTER, POSTCARD])('$file: mail no pack pays for (#579)', spec => {
+  it('offers the page that takes the payment, never a pack, and opens it with ui/open-link', async () => {
+    const card = await showing(spec, paidPerSend);
+
+    expect(card.visible('pay-page-button')).toBe(true);
+    expect(card.text('pay-page-button')).toBe('Pay & Send on letterirl.com');
+    expect(card.visible('website-packs-button')).toBe(false);
+    expect(card.visible('send-button')).toBe(false);
+    expect(card.text('checkout-note')).toBe(
+      "Letter packs pay for one-page letters and 6x9 postcards. This one is paid with Pay & Send on Letter IRL's page, which sends it once you pay."
+    );
+
+    await card.click('pay-page-button');
+    expect(card.lastRequest('ui/open-link')!.params).toEqual({ url: PAY_PAGE });
+    await card.answer('ui/open-link', { result: {} });
+    expect(card.visible('error-message')).toBe(false);
+  });
+
+  it('shows the address when the host declines to open the page', async () => {
+    const card = await showing(spec, paidPerSend);
+    await card.click('pay-page-button');
+    await card.answer('ui/open-link', { result: { isError: true } });
+    expect(card.visible('error-message')).toBe(true);
+    expect(card.text('error-message')).toBe(`The page did not open. It is at ${PAY_PAGE}`);
+  });
+
+  it('offers no page for mail a pack pays for', async () => {
+    const card = await showing(spec, noLetters);
+    expect(card.visible('pay-page-button')).toBe(false);
+    expect(card.visible('website-packs-button')).toBe(true);
+  });
+
+  it('keeps Send off for it when the card has since seen letters arrive', async () => {
+    const card = await showing(spec, noLetters);
+    // Letters bought on the website for an earlier preview, in this card.
+    await card.click('website-packs-button');
+    await card.answer('ui/open-link', { result: {} });
+    await card.runTimer(3000);
+    await card.answer('tools/call', { result: { content: [], structuredContent: { lettersRemaining: 5 } } }, 'get_account_balance');
+    expect(card.visible('send-button')).toBe(true);
+
+    // Then a preview of mail no pack pays for.
+    await card.toolResult({
+      content: [{ type: 'text', text: 'Preview ready.' }],
+      structuredContent: spec.output('draft_0002', paidPerSend),
+      _meta: spec.meta
+    });
+
+    expect(card.visible('send-button')).toBe(false);
+    expect(card.visible('pay-page-button')).toBe(true);
+  });
+});

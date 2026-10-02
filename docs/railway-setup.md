@@ -178,7 +178,13 @@ with Pay & Send:
   `STRIPE_JIT_POSTCARD_11X6_PRICE_ID`.
 
 Without them, production refuses to boot and development warns. The flags stay
-unset in production until the owner approves the prices.
+unset in production until the owner approves the prices. Leave a flag unset
+rather than `false`: the cutover preflight reads variable names, not values, so a
+flag set to `false` still makes it demand that option's prices.
+
+Letter packs and gift letters pay only for one-page letters and 6x9 postcards
+(#579): the options above are always paid per send, with Pay & Send, whatever
+the balance.
 
 **Do not delete the old `*_AMOUNT_CENTS` variables until this build is the one
 serving** — the previous image's validator requires them in production, and
