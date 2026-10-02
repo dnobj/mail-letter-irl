@@ -266,17 +266,17 @@ A `pdf-1` gift send prints its card as the PDF's second page, drawn by the rende
 **How a postcard goes to PostGrid (#534 Phase 4).** A postcard carries the same `rendererVersion` from its draft.
 - With `pdf-1`, it prints as our own two-page PDF, front then back, at its size with a 0.125 in bleed (#594): 9.25 x 6.25 in for a 6x9, 6.25 x 4.25 in for a 4x6 and 11.25 x 6.25 in for an 11x6. It is uploaded to `/postcards` as a multipart form with a 30-second budget.
   - The front image covers the whole page.
-  - With `pdf-3` (#594, migration 048), the front is drawn as the preview drew it, from `letters.content.postcardFront`, which the send copies from the draft's `postcard_front`:
-    - a border: the photo cut to a box inside a white border, its caption below in Caveat;
-    - a greeting: the photo covering the page, "Greetings from" over it, and the place in capitals.
-
-    A front the print cannot read (`postcardFrontOf`) is refused (`render`), never printed full bleed. A caption or place that no longer fits is refused as an `overflow`.
   - The message fills the left part of the back:
     - a 6x9: its left half, 16 lines of 14 pt Tinos;
     - a 4x6: its left 3.25 in, above USPS's barcode clear zone, 11 lines of 12 pt;
     - an 11x6: its left 6 in, 16 lines of 14 pt.
   - The rest stays empty for PostGrid's addresses and postage: content there cancels the postcard (probes P9 and P14, [postgrid-pdf-rendering.md](learnings/postgrid-pdf-rendering.md)).
-- A gift send's card prints in a strip 1.75 in tall at the foot of the message, drawn by the renderer with the code the send minted (`letters.content.giftCard`). The message keeps the 11 lines above it. A gift postcard is a 6x9 (#579).
+- With `pdf-3` (#594, migration 048), it prints as the same two-page PDF, its front drawn as the preview drew it from `letters.content.postcardFront`, which the send copies from the draft's `postcard_front`:
+  - a border: the photo cut to a box inside a white border, its caption below in Caveat;
+  - a greeting: the photo covering the page, "Greetings from" over it, and the place in capitals.
+
+  A front the print cannot read (`postcardFrontOf`) is refused (`render`), never printed full bleed. A caption or place that no longer fits is refused as an `overflow`.
+- A gift send's card prints in a strip 1.75 in tall at the foot of the message, drawn by the renderer with the code the send minted (`letters.content.giftCard`). The message keeps the 11 lines above it. A gift postcard is a 6x9 (#579), with any front.
 - Refusals hold the postcard as `render_refused`, as for letters. The postcard is held for:
   - a version this build cannot print;
   - an unreadable image;

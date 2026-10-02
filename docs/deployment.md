@@ -696,6 +696,10 @@ and where a reason has more than one case, by the letter's stored content (`cont
 - **Reject** when the content itself cannot print, resolving it as rejected
   (`provider_confirmed_rejected_refund`):
   - a postcard message that is too long in any build;
+  - an `unknown_version` hold for a version that is the other kind of mail's: "A postcard is never drawn in
+    stationery: ..." (`pdf-2` on a postcard) or "A letter is never drawn with a postcard's front: ..." (`pdf-3`
+    on a letter, #594). This build knows the version, and no build prints it on that mail: the draft's checks
+    (migrations 044 and 048) refuse both, so the stored letter was changed by hand;
   - every `size` hold: 'A postcard cannot be printed at size "...".' (a size no writer stores), or "A gift
     postcard is 6x9, not ..." (a gift card on another size). The draft's checks (migration 012) and the
     preview and the send (#579) refuse both, so the stored letter was changed by hand;
