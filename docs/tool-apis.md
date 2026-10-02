@@ -131,7 +131,7 @@ none of them.
 
 ## Address Requests
 
-Listed only while `LETTER_IRL_ADDRESS_REQUESTS_ENABLED` is on (#604, concept 10 in [letter-creator-vision.md](letter-creator-vision.md)), and each refuses while it is off (`ADDRESS_REQUESTS_OFF`). The table is `address_requests` ([database-schema.md](database-schema.md#address_requests)). The recipient's page on the website comes in a later PR of #604; its public routes are below.
+Listed only while `LETTER_IRL_ADDRESS_REQUESTS_ENABLED` is on (#604, concept 10 in [letter-creator-vision.md](letter-creator-vision.md)), and each refuses while it is off (`ADDRESS_REQUESTS_OFF`). The table is `address_requests` ([database-schema.md](database-schema.md#address_requests)). The recipient's page is the website's `/address#<token>` (website #55); its public routes are below.
 
 - `request_address`: Makes a private link asking someone for their U.S. mailing address, when the person wants to send them mail and does not know it. Letter IRL never contacts the recipient: the person shares the link themselves.
   - **Takes** `recipientName` (what the person calls them, up to 100 characters; the envelope's name unless the recipient gives another; never shown on the page) and `senderFirstName`.
