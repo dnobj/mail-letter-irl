@@ -154,6 +154,13 @@ const pressed = (card: ReturnType<typeof mount>, selector: string) =>
 const inert = (card: ReturnType<typeof mount>, selector: string) =>
   [...card.document.querySelectorAll(selector)].map(button => button.getAttribute('aria-disabled') === 'true');
 const frontViewBox = (card: ReturnType<typeof mount>) => card.byId('preview-front').querySelector('svg')!.getAttribute('viewBox');
+/** A selector's specificity as one number: ids, then classes, attributes and pseudo-classes, then types. */
+function specificity(selector: string): number {
+  const ids = selector.match(/#[\w-]+/g)?.length ?? 0;
+  const classes = selector.match(/\.[\w-]+|\[[^\]]*\]|(?<!:):(?!:)[\w-]+/g)?.length ?? 0;
+  const types = selector.replace(/\[[^\]]*\]|::?[\w-]+|[#.][\w-]+/g, ' ').match(/[a-z][\w-]*/gi)?.length ?? 0;
+  return ids * 1e6 + classes * 1e3 + types;
+}
 const restyled = (structuredContent: Json, page?: string) => ({
   result: {
     content: [{ type: 'text', text: structuredContent.message ?? 'Changed.' }],
@@ -348,29 +355,43 @@ describe('the maker after #603 review round 1', () => {
     message: 'The postcard is now a 4x6, with the photo across the front.'
   };
 
-  it('hides what it hides: no class of a hidden element lays it out over its hidden attribute', () => {
+  it('hides what it hides: every rule that lays out a hidden element loses to a [hidden] rule for it', async () => {
     // JSDOM hides every [hidden] element whatever the author CSS says, so the
-    // cascade is checked in the stylesheet itself.
-    const served = stampPreviewTool(
-      inlineHostBridge(fs.readFileSync(path.join(WIDGET_DIR, 'PostcardPreviewCard.html'), 'utf-8'), WIDGET_DIR),
-      'quote_and_preview_postcard'
-    );
-    const css = [...served.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)].map(match => match[1]).join('\n');
-    const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, selectors, body]) => ({
-      selectors: selectors.split(',').map(selector => selector.trim()),
-      body
-    }));
-    const laysOut = (selector: string) => rules.some(rule => rule.selectors.includes(selector) && /display\s*:\s*(?!none)/.test(rule.body));
-    const hides = (selector: string) => rules.some(rule => rule.selectors.includes(`${selector}[hidden]`) && /display\s*:\s*none/.test(rule.body));
-    const document = new JSDOM(served).window.document;
-    const hidden = [
-      ...document.querySelectorAll('[hidden]'),
-      ...[...document.querySelectorAll('template')].flatMap(template => [...(template as HTMLTemplateElement).content.querySelectorAll('[hidden]')])
-    ];
+    // cascade is checked here: a rule that matches a hidden element and gives
+    // it a display must lose to a [hidden] rule that matches it too, by
+    // !important, by specificity, or by coming later.
+    const card = mount();
+    await card.show(output(), ON());
+    const css = [...card.document.querySelectorAll('style')]
+      .map(style => style.textContent ?? '')
+      .join('\n')
+      .replace(/\/\*[\s\S]*?\*\//g, '');
+    const rules = [...css.matchAll(/([^{}@]+)\{([^{}]*)\}/g)].flatMap(([, list, body], order) => {
+      const display = /display\s*:\s*([^;!}]+?)\s*(!\s*important)?\s*(?:;|$)/.exec(body);
+      return display ? list.split(',').map(selector => ({ selector: selector.trim(), value: display[1], important: Boolean(display[2]), order })) : [];
+    });
+    const matches = (element: Element, selector: string) => {
+      try {
+        return element.matches(selector);
+      } catch {
+        return false;
+      }
+    };
+    // The unmounted templates too, each in a document of its own.
+    const templates = new JSDOM(card.document.documentElement.outerHTML).window.document;
+    for (const template of templates.querySelectorAll('template')) templates.body.append((template as HTMLTemplateElement).content.cloneNode(true));
+    const hidden = [...card.document.querySelectorAll('[hidden]'), ...templates.querySelectorAll('[hidden]')];
     expect(hidden.map(element => element.id)).toEqual(expect.arrayContaining(['studio-sizes', 'studio-front', 'studio-line']));
     for (const element of hidden) {
-      for (const name of element.classList) {
-        if (laysOut(`.${name}`)) expect(hides(`.${name}`), `.${name} on #${element.id}`).toBe(true);
+      const applying = rules.filter(rule => matches(element, rule.selector));
+      const hiding = applying.filter(rule => rule.value === 'none' && rule.selector.includes('[hidden]'));
+      for (const rule of applying.filter(rule => rule.value !== 'none')) {
+        const loses = hiding.some(hide =>
+          hide.important ||
+          (!rule.important && (specificity(hide.selector) > specificity(rule.selector) ||
+            (specificity(hide.selector) === specificity(rule.selector) && hide.order > rule.order)))
+        );
+        expect(loses, `${rule.selector} {display: ${rule.value}} on #${element.id || element.className}`).toBe(true);
       }
     }
   });
@@ -516,5 +537,80 @@ describe('the maker after #603 review round 1', () => {
     await card.show(output({ layout: 'border' }), ON(drawn('6x9', { layout: 'border' })));
     expect(card.byId('studio-line-input').getAttribute('aria-describedby')).toBe('studio-line-hint');
     expect(card.byId('studio-line-hint').textContent).toBe('Up to 60 characters, or none.');
+  });
+});
+
+describe('the maker after #603 review round 2', () => {
+  const sendDisabled = (card: ReturnType<typeof mount>) => (card.byId('send-button') as HTMLButtonElement).disabled;
+  const BORDER = { layout: 'border', caption: 'Cape Cod' } as const;
+
+  it("draws another draft's Send free of what was being written for the last", async () => {
+    const greeting = mount();
+    await greeting.show(output({ layout: 'full_bleed' }), ON());
+    await greeting.click(greeting.document.querySelector('[data-layout="greetings"]')!);
+    await greeting.type('Rye');
+    expect(sendDisabled(greeting)).toBe(true);
+    // The host's result for another draft replaces the card's, as on a retry (#411).
+    await greeting.show(output({ draftId: 'draft_0002', layout: 'full_bleed' }), ON());
+    expect(sendDisabled(greeting)).toBe(false);
+    expect(pressed(greeting, '#studio-front [data-layout]')).toEqual(['Full']);
+    expect(greeting.byId('studio-line').hidden).toBe(true);
+
+    const caption = mount();
+    await caption.show(output(BORDER), ON(drawn('6x9', BORDER)));
+    await caption.type('Nantucket');
+    expect(sendDisabled(caption)).toBe(true);
+    await caption.show(output({ draftId: 'draft_0002', ...BORDER }), ON(drawn('6x9', BORDER)));
+    expect(sendDisabled(caption)).toBe(false);
+    expect((caption.byId('studio-line-input') as HTMLInputElement).value).toBe('Cape Cod');
+  });
+
+  it('says why Send waits while a caption differs, and puts the caption back', async () => {
+    const card = mount();
+    await card.show(output(BORDER), ON(drawn('6x9', BORDER)));
+    expect(card.byId('studio-line-revert').hidden).toBe(true);
+    await card.type('Nantucket');
+    expect(card.byId('studio-line-hint').textContent).toBe('Up to 60 characters, or none. Sending waits until you Update or Put back.');
+    expect(card.byId('studio-line-revert').hidden).toBe(false);
+
+    card.byId('studio-line-revert').focus();
+    await card.click(card.byId('studio-line-revert'));
+    expect((card.byId('studio-line-input') as HTMLInputElement).value).toBe('Cape Cod');
+    expect(sendDisabled(card)).toBe(false);
+    expect(card.byId('studio-line-revert').hidden).toBe(true);
+    expect(card.byId('studio-line-hint').textContent).toBe('Up to 60 characters, or none.');
+    expect(card.document.activeElement).toBe(card.byId('studio-line-input'));
+    expect(card.requests('set_postcard_style')).toEqual([]);
+  });
+
+  it('puts a greeting being written back to the front the postcard has, refusal and all', async () => {
+    const card = mount();
+    await card.show(output({ layout: 'full_bleed' }), ON());
+    await card.click(card.document.querySelector('[data-layout="greetings"]')!);
+    await card.type('Rye');
+    await card.click(card.byId('studio-line-apply'));
+    await card.answer({ result: { isError: true, content: [{ type: 'text', text: 'Too wide.' }] } }, 'set_postcard_style');
+    expect(card.byId('studio-style-note').textContent).toBe('Too wide.');
+    expect(sendDisabled(card)).toBe(true);
+
+    await card.click(card.byId('studio-line-revert'));
+    expect(pressed(card, '#studio-front [data-layout]')).toEqual(['Full']);
+    expect(card.byId('studio-line').hidden).toBe(true);
+    expect(card.byId('studio-style-note').textContent).toBe('');
+    expect(card.byId('studio-style-note').classList.contains('studio-error')).toBe(false);
+    expect(sendDisabled(card)).toBe(false);
+    expect(card.document.activeElement).toBe(card.document.querySelector('[data-layout="full_bleed"]'));
+  });
+
+  it('drops a refusal with the greeting it refused when the front the postcard has is pressed', async () => {
+    const card = mount();
+    await card.show(output({ layout: 'full_bleed' }), ON());
+    await card.click(card.document.querySelector('[data-layout="greetings"]')!);
+    await card.type('Rye');
+    await card.click(card.byId('studio-line-apply'));
+    await card.answer({ result: { isError: true, content: [{ type: 'text', text: 'Too wide.' }] } }, 'set_postcard_style');
+    await card.click(card.document.querySelector('[data-layout="full_bleed"]')!);
+    expect(card.byId('studio-style-note').textContent).toBe('');
+    expect(sendDisabled(card)).toBe(false);
   });
 });

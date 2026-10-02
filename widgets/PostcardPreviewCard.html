@@ -372,6 +372,7 @@
               <label class="studio-quiet" for="studio-line-input" id="studio-line-label">Caption</label>
               <input type="text" class="studio-line-input" id="studio-line-input" autocomplete="off" aria-describedby="studio-line-hint">
               <button type="button" class="studio-choice" id="studio-line-apply">Update</button>
+              <button type="button" class="studio-choice" id="studio-line-revert" hidden>Put back</button>
               <span class="studio-quiet" id="studio-line-hint"></span>
             </div>
           </div>
@@ -773,6 +774,22 @@
         return !maker.busy && !(maker.change?.draftId === draftId && maker.change.byCard);
       }
 
+      // Another draft starts afresh: nothing written for the last carries
+      // over. Called as each draft is drawn, before Send's hold is (#603
+      // review round 2).
+      function makerFollows(draftId) {
+        if (maker.draftId === draftId) return;
+        maker.draftId = draftId;
+        maker.drafting = null;
+        maker.editing = false;
+      }
+
+      // The prompt for a place, or a refusal of what was being written, says
+      // nothing once that is left.
+      function clearMakerPrompt(draftId) {
+        if (maker.note.text === PLACE_FIRST || maker.note.error) maker.note = { draftId, text: "", error: false };
+      }
+
       // The line a draft has for a layout: a border's caption or a greeting's place.
       function storedLine(state, layout) {
         return (layout === "border" ? state.caption : layout === "greetings" ? state.place : "") ?? "";
@@ -870,10 +887,11 @@
         const wasDrafting = maker.drafting !== null;
         maker.drafting = null;
         if (layout === state.layout) {
-          // Back to the front it has: a greeting being written goes, and so does its prompt.
+          // Back to the front it has: a greeting being written goes, and so
+          // does its prompt or its refusal.
           if (wasDrafting) {
             maker.editing = false;
-            if (maker.note.text === PLACE_FIRST) maker.note = { draftId: state.draftId, text: "", error: false };
+            clearMakerPrompt(state.draftId);
           }
           render();
           return;
@@ -896,6 +914,23 @@
         setMakerStyle(layout === "border" ? { layout, ...(text ? { caption: text } : {}) } : { layout, place: text });
       }
 
+      // Puts the line back as the draft has it, and leaves a greeting being
+      // written: Send then sends what the card shows. Focus stays in the
+      // maker: on the line while it shows, else on the front the postcard has.
+      function putBackLine() {
+        const state = withMakerChange(studioState);
+        if (!state || maker.busy) return;
+        maker.drafting = null;
+        maker.editing = false;
+        clearMakerPrompt(state.draftId);
+        render();
+        if (!document.getElementById("studio-line").hidden) {
+          document.getElementById("studio-line-input").focus();
+        } else {
+          document.querySelector(`#studio-front [data-layout="${state.layout}"]`)?.focus();
+        }
+      }
+
       function wireMakerStyle() {
         document.getElementById("studio-sizes").addEventListener("click", (event) => {
           const button = event.target.closest?.("[data-size]");
@@ -906,6 +941,7 @@
           if (button) pickLayout(button.dataset.layout);
         });
         document.getElementById("studio-line-apply").addEventListener("click", applyLine);
+        document.getElementById("studio-line-revert").addEventListener("click", putBackLine);
         const input = document.getElementById("studio-line-input");
         input.addEventListener("input", () => {
           maker.editing = true;
@@ -936,12 +972,7 @@
           maker.wired = true;
           wireMakerStyle();
         }
-        // Another draft starts afresh: nothing written for the last carries over.
-        if (maker.draftId !== state.draftId) {
-          maker.draftId = state.draftId;
-          maker.drafting = null;
-          maker.editing = false;
-        }
+        makerFollows(state.draftId);
         const offersSizes = POSTCARD_SIZES.includes(state.size) && !state.giftCard;
         const offersLayouts = POSTCARD_LAYOUTS.includes(state.layout);
         maker.changeable =
@@ -970,8 +1001,6 @@
         line.hidden = !takesLine;
         if (takesLine) {
           document.getElementById("studio-line-label").textContent = layout === "border" ? "Caption" : "Place";
-          document.getElementById("studio-line-hint").textContent =
-            layout === "border" ? `Up to ${LINE_LIMITS.border} characters, or none.` : `Up to ${LINE_LIMITS.greetings} characters.`;
           input.maxLength = LINE_LIMITS[layout];
           input.placeholder = layout === "border" ? "Cape Cod, August 2026" : "Asheville";
           // Read-only rather than disabled while a change is set: the person's place in it stays.
@@ -979,6 +1008,14 @@
           document.getElementById("studio-line-apply").setAttribute("aria-disabled", inert);
           // The line as the draft has it, unless the person is writing one.
           if (!maker.editing) input.value = maker.drafting ? "" : storedLine(state, layout);
+          // While what is written holds Send, the line says so, and offers
+          // to put it back (#603 review round 2).
+          const writing = makerEditing();
+          const limit = layout === "border" ? `Up to ${LINE_LIMITS.border} characters, or none.` : `Up to ${LINE_LIMITS.greetings} characters.`;
+          document.getElementById("studio-line-hint").textContent = writing ? `${limit} Sending waits until you Update or Put back.` : limit;
+          const revert = document.getElementById("studio-line-revert");
+          revert.hidden = !writing;
+          revert.setAttribute("aria-disabled", inert);
         }
         const note = document.getElementById("studio-style-note");
         const said = maker.note.draftId === state.draftId ? maker.note : { text: "", error: false };
@@ -1964,6 +2001,8 @@
 
         // Store draftId for send button
         currentDraftId = draftId;
+        // The maker's too, before Send's hold is drawn below (#594).
+        makerFollows(draftId);
         currentEligibility = sendEligibility || null;
         if (!retryResult) askDraftState(draftId);
         const settled = settledDraft();
