@@ -346,8 +346,18 @@ describe('validateDeploymentConfig in production', () => {
           services: ['api', 'maintenance']
         });
       }
-      // Absent in production, as it is until the owner approves: no finding.
-      expect(ruleIds(env({}))).toEqual(ruleIds(VALID_PROD));
+      // Absent in production, as it is until the owner approves, or set off:
+      // no finding names either flag, on either service.
+      const flagsOff = env({
+        LETTER_IRL_ROOM_TO_WRITE_ENABLED: 'false',
+        LETTER_IRL_POSTCARD_SIZES_ENABLED: 'false'
+      });
+      for (const surface of ['server', 'maintenance'] as const) {
+        for (const input of [VALID_PROD, flagsOff]) {
+          const messages = validateDeploymentConfig(input, surface).findings.map(f => f.message).join('\n');
+          expect(messages).not.toMatch(/ROOM_TO_WRITE|POSTCARD_SIZES/);
+        }
+      }
     });
 
     it('lists each price in the manifest behind Pay & Send and its flag', () => {
