@@ -378,6 +378,16 @@ describe('letters printed from our own PDF (#534)', () => {
       expect(pdf!.toString('latin1')).toContain(`Letter IRL renderer ${STATIONERY_RENDERER_VERSION}`);
     });
 
+    it.each([['typewriter'], ['handwritten']] as const)('prints a pdf-2 letter on the %s stationery in its own typeface (#563 PR 8b)', async theme => {
+      const stationery = { theme, dateLine: 'October 1, 2026' };
+      const { result, pdf } = await printed({ rendererVersion: STATIONERY_RENDERER_VERSION, stationery });
+
+      expect(result.success).toBe(true);
+      expect(pdf!.equals(await drawn(stationery))).toBe(true);
+      expect(pdf!.equals(await drawn(BOTANICAL))).toBe(false);
+      expect(pdf!.equals(await drawn())).toBe(false);
+    });
+
     it("prints a pdf-2 gift send's themed page, then today's card page (#563 review round 3)", async () => {
       const { result, pdf } = await printed({
         rendererVersion: STATIONERY_RENDERER_VERSION,

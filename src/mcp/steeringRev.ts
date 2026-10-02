@@ -118,5 +118,7 @@
  *     letter preview's stationery without previewing again; a preview that
  *     asks for no theme is drawn in the account's remembered one, and its
  *     output and narration say why (source).
+ * r31: the stationery descriptions and set_stationery name typewriter and
+ *     handwritten (#563 PR 8), each setting the letter in a face of its own.
  */
-export const STEERING_COPY_REV = 30;
+export const STEERING_COPY_REV = 31;

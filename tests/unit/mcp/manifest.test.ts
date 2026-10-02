@@ -46,7 +46,7 @@ describe("Compatibility manifest", () => {
     vi.stubEnv("LETTER_IRL_STATIONERY_ENABLED", "true");
     vi.stubEnv("LETTER_IRL_PRINT_RENDERER", "pdf");
     for (const name of LETTERS) {
-      expect(input(name).stationery.enum, name).toEqual(["classic", "monogram", "botanical", "celebration"]);
+      expect(input(name).stationery.enum, name).toEqual(["classic", "monogram", "botanical", "celebration", "typewriter", "handwritten"]);
       expect(input(name), name).toHaveProperty("monogram");
       expect(input(name), name).toHaveProperty("headline");
     }

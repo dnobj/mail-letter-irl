@@ -16,7 +16,7 @@ import {
 } from '../services/previewService.js';
 import { layoutLetterForPreview, validatePrintableLetter, withDisplayImage } from './letterHelpers.js';
 import { isDraftIdShape } from './requestSend.js';
-import { previewStationery } from './stationeryInput.js';
+import { previewStationery, THEME_LIST } from './stationeryInput.js';
 
 /**
  * A letter preview's stationery, changed without previewing it again (#563).
@@ -108,7 +108,7 @@ async function handler(input: SetStationeryInput, context: ToolContext): Promise
   }
   // A restyle names its theme: none would fall back to the remembered one.
   if (typeof input.stationery !== 'string' || input.stationery.trim() === '') {
-    throw refused('STATIONERY_MISSING', 'Name the stationery: classic, monogram, botanical or celebration.', context);
+    throw refused('STATIONERY_MISSING', `Name the stationery: ${THEME_LIST}.`, context);
   }
   const draftId = typeof input.draftId === 'string' ? input.draftId.trim() : '';
   const userId = context.user.userId;
@@ -117,9 +117,11 @@ async function handler(input: SetStationeryInput, context: ToolContext): Promise
   if (draft.mail_type !== 'letter') {
     throw refused('DRAFT_NOT_A_LETTER', 'Stationery is for letters. A postcard keeps its own design.', context);
   }
-  // Read before the lock, to say why at once; setDraftStationery checks again under it.
+  // Read before the lock, to say why at once; setDraftStationery checks again
+  // under it. A draft an erasure emptied is refused as the lock refuses it,
+  // before its empty content is laid out (#573 review round 3).
   if (draft.status === 'consumed') throw refused(...REFUSALS.sent, context);
-  if (draft.status !== 'pending' || !(new Date(draft.expires_at).getTime() > context.now().getTime())) {
+  if (draft.status !== 'pending' || draft.redacted_at || !(new Date(draft.expires_at).getTime() > context.now().getTime())) {
     throw refused(...REFUSALS.expired, context);
   }
   // Only a letter our renderer drew can be drawn again in a theme.
@@ -176,7 +178,8 @@ export const setStationeryTool: McpToolDefinition<SetStationeryInput, SetStation
   title: 'Change the stationery',
   description:
     'Change the stationery of a previewed letter without previewing it again: classic (a plain page), monogram ' +
-    '(initials in a ring), botanical (a line-drawn sprig) or celebration (confetti with an optional headline). ' +
+    '(initials in a ring), botanical (a line-drawn sprig), celebration (confetti with an optional headline), ' +
+    'typewriter (typed in a monospace face) or handwritten (a handwriting face on faint ruled lines). ' +
     'Give the draftId from the preview and stationery, with monogram and headline as the letter previews take them: ' +
     'each call states them afresh, so a headline is kept only when given again. ' +
     'The page is drawn again, and the choice is remembered for the next letter preview. Nothing is sent by this tool.',

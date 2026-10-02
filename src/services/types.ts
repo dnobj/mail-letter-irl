@@ -511,6 +511,12 @@ export interface LetterDraft {
   expires_at: Date;
   consumed_at?: Date;
   consumed_letter_id?: string;
+  /**
+   * When retention or an erasure emptied the draft (migration 026): its
+   * content gone, its status kept. An erasure empties a pending draft an
+   * order points at rather than deleting it, so a pending draft may carry it.
+   */
+  redacted_at?: Date | null;
   /** Sent as a gift letter (migration 033): funded by one, and prints its card. */
   is_gift_send?: boolean;
   /**

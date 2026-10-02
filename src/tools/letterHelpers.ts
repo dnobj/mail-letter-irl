@@ -21,10 +21,12 @@ import {
   validateCharacterLimit,
 } from "../services/previewService.js";
 import { createDraft } from "../services/draftService.js";
-import { findUnprintable, unprintableRefusal, type PrintedText } from "../services/printableText.js";
+import { findUnprintable, unprintableRefusal, type PrintedText, type ThemedFace } from "../services/printableText.js";
 import { printRenderer } from "../config/printRenderer.js";
 import {
+  bodyFace,
   drawsGrapheme,
+  drawsGraphemeIn,
   GiftPageOverflow,
   layoutGiftPage,
   layoutLetter,
@@ -42,7 +44,7 @@ import { callingApp, type ClientProfile } from "../auth/clientProfiles.js";
 import { letterPacksPageUrl } from "../config/sendConfirmation.js";
 import { giftCardSummary, resolveGiftSendChoice, type GiftSendChoice } from "./giftSendChoice.js";
 import { giftLetterPageCopy } from "../services/giftCardRenderer.js";
-import type { PreviewStationery } from "./stationeryInput.js";
+import { rememberedPrefix, type PreviewStationery } from "./stationeryInput.js";
 import { rememberStationery } from "../services/stationeryDefaultService.js";
 import {
   previewArrivalWindow,
@@ -563,25 +565,26 @@ const LAYOUT_LABELS: Record<LetterLayoutType, string> = {
  * undefined for the legacy HTML. `imageData` is the image that prints, so the
  * layout is the print's, drawn in its stationery (#563). A letter that runs
  * past its page is refused, saying by how many lines, before the addresses
- * are checked or a draft is made. Only Celebration's headline takes room
- * from the body, so only it changes what fits, and a letter it pushes past
- * the page is told so, with the ways out.
+ * are checked or a draft is made. Celebration's headline takes room from the
+ * body, and Typewriter and Handwritten set it in their own typeface, so they
+ * change what fits; a letter they push past the page is told so, with the
+ * ways out.
  */
 export function layoutLetterForPreview(
-  letter: { bodyText: string; signOff: string; layoutType: LetterLayoutType; imageData?: string; stationery?: Stationery },
+  letter: { bodyText: string; signOff: string; layoutType: LetterLayoutType; imageData?: string; stationery?: Stationery | PreviewStationery },
   context: ToolContext,
   renderer: 'html' | 'pdf' = printRenderer()
 ): Layout | undefined {
   if (renderer !== 'pdf') return undefined;
   const { bodyText, signOff, layoutType, imageData, stationery } = letter;
+  const content = {
+    text: letterPrintText(bodyText, signOff),
+    layoutType,
+    image: layoutType !== "text_only" && imageData ? readImageDataUri(imageData) : undefined
+  };
   let layout: Layout;
   try {
-    layout = layoutLetter({
-      text: letterPrintText(bodyText, signOff),
-      layoutType,
-      image: layoutType !== "text_only" && imageData ? readImageDataUri(imageData) : undefined,
-      stationery
-    });
+    layout = layoutLetter({ ...content, stationery });
   } catch (error) {
     // A slot that cannot print as its theme draws it. The checks before the
     // layout refuse each in their own words (previewStationery, and the
@@ -609,14 +612,28 @@ export function layoutLetterForPreview(
     "Letter runs past its page"
   );
   const over = layout.overflowLines;
+  // A theme with its own typeface (#563) sets the text to its own measure.
+  const own = ownFaceTheme(stationery);
+  // The theme's way out, leaving the headline out or choosing Classic, is
+  // offered only when the letter would fit that way (#575 review round 3).
+  const themed = headline || own !== undefined;
+  const fitsPlain = themed && layoutLetter(content).overflowLines === 0;
   throw Object.assign(
     new Error(
+      // A theme the call did not name says where it came from.
+      (themed ? rememberedPrefix(stationery) : "") +
       `Letter is ${over} line${over === 1 ? "" : "s"} too long for one page${LAYOUT_LABELS[layoutType]}` +
-      `${headline ? " on the celebration stationery with a headline" : ""}: ` +
+      `${headline ? " on the celebration stationery with a headline" : own ? ` on the ${own} stationery` : ""}: ` +
       `it takes ${linesUsed} lines and the page holds ${linesAvailable}. ` +
       (headline
-        ? `The headline takes ${HEADLINE_LINES} lines: shorten the message, leave the headline out, or choose the classic stationery.`
-        : `Please shorten your message to fit on one page.`)
+        ? fitsPlain
+          ? `The headline takes ${HEADLINE_LINES} lines: shorten the message, leave the headline out, or choose the classic stationery.`
+          : `The headline takes ${HEADLINE_LINES} lines, and the letter runs past the page without it too: shorten the message.`
+        : own
+          ? fitsPlain
+            ? `The ${own} stationery sets the text in its own typeface: shorten the message, or choose the classic stationery.`
+            : `The ${own} stationery sets the text in its own typeface, and the letter runs past the page on the classic stationery too: shorten the message.`
+          : `Please shorten your message to fit on one page.`)
     ),
     { diagnosticClass: "validation_error" }
   );
@@ -667,7 +684,9 @@ export function validatePrintableCharacters(
   mail: "letter" | "postcard",
   texts: PrintedText[],
   { sender, recipient, senderIsSaved }: PrintedAddresses,
-  context: ToolContext
+  context: ToolContext,
+  /** A theme whose own typeface prints some of `texts` (#563), for the refusal's closing. */
+  themed?: ThemedFace
 ): void {
   const found = findUnprintable([
     ...texts,
@@ -690,13 +709,23 @@ export function validatePrintableCharacters(
     "Mail holds characters the print cannot show"
   );
   // An expected refusal: logged as validation_error, not unknown_error.
-  throw Object.assign(new Error(unprintableRefusal(mail, found)), { diagnosticClass: "validation_error" });
+  throw Object.assign(new Error(unprintableRefusal(mail, found, themed)), { diagnosticClass: "validation_error" });
+}
+
+/**
+ * A theme that sets the letter's text in a typeface of its own (#563:
+ * typewriter, handwritten), or undefined for one in Classic's.
+ */
+export function ownFaceTheme(stationery: Stationery | undefined): Stationery["theme"] | undefined {
+  if (!stationery) return undefined;
+  return bodyFace(stationery.theme).font === bodyFace("classic").font ? undefined : stationery.theme;
 }
 
 /**
  * validatePrintableCharacters for the three letter tools. A letter drawn by
- * our own renderer prints its text in the renderer's font (#534); its
- * addresses are stamped in Open Sans either way.
+ * our own renderer prints its text in the renderer's font (#534), or in its
+ * theme's own typeface (#563); its addresses are stamped in Open Sans either
+ * way. The gift card, the initials and the headline print in Tinos.
  */
 export function validatePrintableLetter(
   letter: PrintedAddresses & { bodyText: string; signOff: string },
@@ -704,17 +733,21 @@ export function validatePrintableLetter(
   renderer: 'html' | 'pdf' = printRenderer(),
   /** A gift send's card: our renderer draws it as the second page, with the sender's name. */
   giftCard?: GiftCardContent,
-  /** The page's stationery (#563): its initials and headline print in the letter's font. The date line is ours. */
-  stationery?: Stationery
+  /** The page's stationery (#563): its initials and headline print in Tinos, its text in the theme's face. The date line is ours. */
+  stationery?: Stationery | PreviewStationery
 ): void {
   const prints = renderer === "pdf" ? drawsGrapheme : undefined;
   const card = prints ? giftCard : undefined;
   const slots = prints ? stationery : undefined;
+  // The text prints in its theme's typeface: one with its own is checked against it.
+  const own = prints ? ownFaceTheme(stationery) : undefined;
+  const textPrints = own ? drawsGraphemeIn(bodyFace(own).font) : prints;
+  const inFace = own ? `, which the ${own} stationery prints in its own typeface` : "";
   validatePrintableCharacters(
     "letter",
     [
-      { field: "bodyText", where: "in the text", text: letter.bodyText, prints },
-      { field: "signOff", where: "in the sign-off", text: letter.signOff, prints },
+      { field: "bodyText", where: `in the text${inFace}`, text: letter.bodyText, prints: textPrints },
+      { field: "signOff", where: `in the sign-off${inFace}`, text: letter.signOff, prints: textPrints },
       ...(card
         ? [{ field: "giftCardName", where: "in the sender's name, which the gift card prints", text: letter.sender.name, prints }]
         : []),
@@ -726,7 +759,10 @@ export function validatePrintableLetter(
         : [])
     ],
     letter,
-    context
+    context,
+    own
+      ? { theme: own, fields: ["bodyText", "signOff"], drawnInClassic: drawsGrapheme, remembered: rememberedPrefix(stationery) }
+      : undefined
   );
   if (card) validateGiftPageFits(card, letter.sender.name, context);
 }

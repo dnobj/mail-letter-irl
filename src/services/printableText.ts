@@ -28,10 +28,12 @@
  * checked as it is stored and printed, not normalized.
  *
  * A letter drawn by our own renderer (#534) prints its text in the renderer's
- * font instead, so its text is checked against that font (drawsGrapheme in
- * src/render/layout.ts). Its addresses are still stamped by PostGrid in Open
- * Sans and are checked here.
+ * font instead, Tinos or its theme's own typeface (#563), so its text is
+ * checked against that font (drawsGraphemeIn in src/render/layout.ts). Its
+ * addresses are still stamped by PostGrid in Open Sans and are checked here.
  */
+
+import { MARK, MAX_MARKS_PER_LETTER } from '../render/marks.js';
 
 const PRINTABLE_RANGES: ReadonlyArray<readonly [number, number]> = [
   [0x0009, 0x000a], // tab, line feed
@@ -231,7 +233,8 @@ function invisibleName(character: string): string {
  * emoji and other scripts as they are, and a character that may look like one
  * that prints (a non-breaking hyphen is not a hyphen) with the code points
  * that do not print in the text's font. A cluster whose every character
- * prints, refused only as a whole, carries too many marks (#534).
+ * prints, refused only as a whole, carries too many marks (#534), or marks
+ * its typeface cannot place on their letter (#575).
  */
 function shown(grapheme: string, prints: PrintsGrapheme): string {
   const characters = [...grapheme];
@@ -243,7 +246,15 @@ function shown(grapheme: string, prints: PrintsGrapheme): string {
       PICTOGRAPHIC.test(grapheme) &&
       characters.every(character => EMOJI_JOINERS.has(character) || EMOJI_SEQUENCE_PART.test(character)));
   if (emoji || !(LOOK_ALIKE.test(grapheme) || INVISIBLE_START.test(grapheme))) return grapheme;
-  if (refused.length === 0) return `${grapheme} (too many marks on one letter)`;
+  if (refused.length === 0) {
+    const marks = characters.filter(character => MARK.test(character)).length;
+    if (marks > MAX_MARKS_PER_LETTER) return `${grapheme} (too many marks on one letter)`;
+    // The same letter written as one character may print where its separate
+    // accent cannot: say which (#575 review round 5).
+    const composed = grapheme.normalize('NFC');
+    const one = [...composed].length === 1 && prints(composed) ? `: write it as one character, ${codePoint(composed)}` : '';
+    return `${grapheme} (an accent written apart from its letter, which this typeface cannot place${one})`;
+  }
   return `${grapheme} (${refused.map(codePoint).join(' ')})`;
 }
 
@@ -254,15 +265,47 @@ function listed(characters: string[], prints: PrintsGrapheme = printsInOpenSans)
 }
 
 /**
+ * A theme whose own typeface printed the text (#563): which theme, and the
+ * fields it prints, so a refusal of one of them says that another stationery
+ * may print what this one cannot.
+ */
+export interface ThemedFace {
+  theme: string;
+  fields: readonly string[];
+  /**
+   * Whether Classic's face draws a character: another stationery is
+   * suggested only when it draws every one refused in `fields` (an emoji
+   * prints in none).
+   */
+  drawnInClassic: (grapheme: string) => boolean;
+  /** Where the theme came from, when the call did not name it (rememberedPrefix); else empty. */
+  remembered?: string;
+}
+
+/**
  * The sentence a preview refuses with, naming each character that would print
  * as a box and where it is.
  */
-export function unprintableRefusal(mail: 'letter' | 'postcard', found: UnprintableField[]): string {
+export function unprintableRefusal(mail: 'letter' | 'postcard', found: UnprintableField[], themed?: ThemedFace): string {
   const where = found.map(({ where, characters, prints }) => `${listed(characters, prints)} ${where}`).join('; ');
+  // The fields the theme's own face refused: the refusal says where the
+  // theme came from, and suggests another only when Classic draws them all.
+  const face = themed && found.some(({ field }) => themed.fields.includes(field)) ? themed : undefined;
+  const elsewhere = face !== undefined &&
+    found.filter(({ field }) => face.fields.includes(field)).every(({ characters }) => characters.every(face.drawnInClassic));
+  // Another stationery mends only the theme's fields: anything else refused must go either way.
+  const others = face !== undefined && found.some(({ field }) => !face.fields.includes(field));
   return (
+    (face?.remembered ?? '') +
     `Letter IRL can't print some characters in this ${mail}: ${where}. ` +
     `Printed mail shows Latin letters with common accents, modern Greek, Cyrillic, Hebrew ` +
     `and common punctuation, and no emoji. ` +
-    `Take those characters out or write them in plain letters, then preview again.`
+    (face && elsewhere
+      ? `The ${face.theme} stationery sets the text in its own typeface, which has fewer: ` +
+        (others
+          ? `choose another stationery for the text, and take the other characters out or write them in plain letters, `
+          : `choose another stationery, or take those characters out or write them in plain letters, `) +
+        `then preview again.`
+      : `Take those characters out or write them in plain letters, then preview again.`)
   );
 }

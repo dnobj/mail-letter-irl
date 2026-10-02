@@ -242,7 +242,11 @@ describe('the confirmation page API (#470)', () => {
       ['sent', { status: 'consumed', consumed_letter_id: 'L9' }, 'L9'],
       ['expired', { status: 'expired' }, null],
       ['expired', { status: 'cancelled' }, null],
-      ['expired', { expires_at: new Date(Date.now() - 1000) }, null]
+      ['expired', { expires_at: new Date(Date.now() - 1000) }, null],
+      // A pending draft an erasure emptied is no longer to send (#573 review round 3)...
+      ['expired', { redacted_at: new Date(Date.now() - 1000), body_text: '', preview_html: null }, null],
+      // ...while a sent one the sweep emptied is still sent.
+      ['sent', { status: 'consumed', consumed_letter_id: 'L9', redacted_at: new Date(Date.now() - 1000) }, 'L9']
     ])('shows a %s draft as such', async (expected, overrides, orderId) => {
       signedIn();
       vi.mocked(getDraft).mockResolvedValue(draft(overrides) as any);
@@ -265,7 +269,7 @@ describe('the confirmation page API (#470)', () => {
       const celebration = { theme: 'celebration', dateLine: 'October 1, 2026', headline: 'Happy Birthday!' };
       vi.mocked(getDraft).mockResolvedValue(draft({ renderer_version: 'pdf-2', stationery: { ...celebration, colour: 'red' } }) as any);
       expect((await call('GET')).json().stationery).toEqual(celebration);
-      for (const stationery of [null, { theme: 'classic' }, { theme: 'typewriter' }, { theme: 'botanical', headline: 7 }]) {
+      for (const stationery of [null, { theme: 'classic' }, { theme: 'floral' }, { theme: 'botanical', headline: 7 }]) {
         vi.mocked(getDraft).mockResolvedValue(draft({ renderer_version: 'pdf-2', stationery }) as any);
         expect((await call('GET')).json().stationery, JSON.stringify(stationery)).toBeNull();
       }

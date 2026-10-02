@@ -49,7 +49,9 @@ const previewScheduleZ = z.object({
 // only, as for gift letters.
 export const STATIONERY_DESCRIPTION =
   "Optional. The letter's stationery: classic, a plain page; monogram, initials in a ring; " +
-  "botanical, a line-drawn sprig; or celebration, confetti with an optional headline. " +
+  "botanical, a line-drawn sprig; celebration, confetti with an optional headline; " +
+  "typewriter, the letter typed in a monospace face, which fits fewer words on the page; " +
+  "or handwritten, the letter in a handwriting face on faint ruled lines, which has no Greek, Hebrew or Vietnamese. " +
   "Each but classic prints the date at the top right. " +
   "Left out, the letter is in the account's last choice, or classic if it has none. " +
   "Leave it out unless the user asks for a style or for a plain page (classic), or names an occasion a style suits.";
@@ -311,7 +313,9 @@ export const setArrivalDateInputZ = z.object({
 // Listed only while stationery is offered (src/server.ts).
 export const SET_STATIONERY_DESCRIPTION =
   "The stationery to draw the letter in: classic, a plain page; monogram, initials in a ring; " +
-  "botanical, a line-drawn sprig; or celebration, confetti with an optional headline. " +
+  "botanical, a line-drawn sprig; celebration, confetti with an optional headline; " +
+  "typewriter, the letter typed in a monospace face, which fits fewer words on the page; " +
+  "or handwritten, the letter in a handwriting face on faint ruled lines, which has no Greek, Hebrew or Vietnamese. " +
   "Each but classic prints the date at the top right.";
 export const setStationeryInputZ = z.object({
   draftId: z.string().describe("The draftId from a letter preview"),

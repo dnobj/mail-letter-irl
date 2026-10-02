@@ -130,7 +130,7 @@ Each concept lists what PostGrid supports and how it reaches clients without car
 - **PostGrid:** only layout and fonts, which need #534. Colour themes print with `color: true` (about 35¢ more).
 - **Card-less clients:** a `stationery` argument on the preview tools, as an enum whose descriptions say when to use each theme.
 - **Settled by probe P12 (2026-10-01):** the top-right corner, 4.0-8.0 in across and 0.35-2.85 in down, stays clear of PostGrid's address stamp. Lines of 0.5 pt and up, and greys from #222 to #aaa, survive its flattening. See `learnings/postgrid-pdf-rendering.md`.
-- **Stage:** Next, as #563. Classic, Monogram, Botanical and Celebration are drawn by the renderer in Tinos, in black and greys; Typewriter and Handwritten wait for their fonts.
+- **Stage:** Next, as #563. Classic, Monogram, Botanical and Celebration are drawn by the renderer in Tinos, in black and greys; Typewriter and Handwritten set the letter in Cousine and Caveat (#563 PR 8).
 
 #### 2. Room to write
 - **What:** letters of two or three pages, printed double-sided.

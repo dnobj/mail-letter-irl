@@ -2,7 +2,7 @@
  * Typewriter and Handwritten (#563 PR 8): themes that set the whole letter in
  * a face of their own, Cousine and Caveat, on Classic's line pitch. They print
  * a date line in their face, and Handwritten rules a faint line under each of
- * the page's lines. No tool offers them yet, and no draft stores them.
+ * the page's lines. Offered and stored like the others since PR 8b (046).
  */
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -13,19 +13,20 @@ import { BODY_BOTTOM, BODY_TOP, CONTENT_WIDTH, LINE_PITCH, PAGE_WIDTH, SIDE_MARG
 import { placeGlyphs, shape } from '../../../src/render/glyphs.js';
 import type { RenderImage } from '../../../src/render/images.js';
 import {
-  baselineOffset, drawsGrapheme, drawsGraphemeIn, layoutLetter, wrapText, type ImageBox, type Layout, type PathItem, type TextRun
+  baselineOffset, drawsGrapheme, drawsGraphemeIn, inFace, layoutLetter, shapedClusterCount, SHAPES_CACHE_LIMIT, wrapText,
+  type ImageBox, type Layout, type PathItem, type TextRun
 } from '../../../src/render/layout.js';
 import { rendererVersionFor, renderPdf, STATIONERY_RENDERER_VERSION } from '../../../src/render/pdf.js';
 import { renderPreviewSvg } from '../../../src/render/preview.js';
 import {
-  bodyFace, DRAWN_THEMES, layoutStationery, ruledLines, STATIONERY_CORNER, STATIONERY_THEMES, stationeryOf, type DrawnStationery
+  bodyFace, layoutStationery, ruledLines, STATIONERY_CORNER, STATIONERY_THEMES, stationeryOf, type Stationery
 } from '../../../src/render/stationery.js';
 
 const TEXT = 'Dear Sam,\n\nHappy birthday! I hope this year brings you everything you have been hoping for.\n\nWith love,\nAda';
 const DATE = 'October 1, 2026';
 
 const image = (width: number, height: number): RenderImage => ({ bytes: Buffer.alloc(0), mime: 'image/jpeg', width, height });
-const letter = (stationery?: DrawnStationery, layoutType: 'text_only' | 'header_image' | 'inline_image' = 'text_only', text = TEXT) =>
+const letter = (stationery?: Stationery, layoutType: 'text_only' | 'header_image' | 'inline_image' = 'text_only', text = TEXT) =>
   layoutLetter({ text, layoutType, image: layoutType === 'text_only' ? undefined : image(1200, 800), stationery });
 const items = (layout: Layout) => layout.pages[0].items;
 const runs = (layout: Layout) => items(layout).filter((item): item is TextRun => item.kind === 'text');
@@ -69,10 +70,20 @@ describe('the fonts (#563 PR 8)', () => {
 
 describe('the faces (#563 PR 8)', () => {
   it('are Tinos at 12 pt for Classic and the corner themes, Cousine at 11 for Typewriter, Caveat at 15 for Handwritten', () => {
-    for (const theme of STATIONERY_THEMES) expect(bodyFace(theme)).toEqual({ font: 'Tinos-Regular', size: 12 });
+    for (const theme of ['classic', 'monogram', 'botanical', 'celebration'] as const) {
+      expect(bodyFace(theme)).toEqual({ font: 'Tinos-Regular', size: 12 });
+    }
     expect(bodyFace('typewriter')).toEqual({ font: 'Cousine-Regular', size: 11 });
     expect(bodyFace('handwritten')).toEqual({ font: 'Caveat-Regular', size: 15 });
-    expect(DRAWN_THEMES).toEqual([...STATIONERY_THEMES, 'typewriter', 'handwritten']);
+    expect(STATIONERY_THEMES).toEqual(['classic', 'monogram', 'botanical', 'celebration', 'typewriter', 'handwritten']);
+  });
+
+  it("fit each face's ascent and descent inside the line pitch, so no line touches the next (#574 review round 1)", () => {
+    for (const theme of STATIONERY_THEMES) {
+      const { font, size } = bodyFace(theme);
+      const face = loadFont(font);
+      expect(((face.ascent - face.descent) * size) / face.unitsPerEm, theme).toBeLessThanOrEqual(LINE_PITCH);
+    }
   });
 
   it("set the body in the theme's face, on Classic's lines: same pitch, same room, more lines where the face is wider", () => {
@@ -100,8 +111,8 @@ describe('the faces (#563 PR 8)', () => {
 
   it("refuse a theme this build does not know before reading its face, prototype keys included", () => {
     for (const theme of ['floral', 'constructor', '__proto__', 'toString']) {
-      expect(() => bodyFace(theme as DrawnStationery['theme']), theme).toThrow(`Unknown stationery theme: ${theme}`);
-      expect(() => letter({ theme: theme as DrawnStationery['theme'] }), theme).toThrow(`Unknown stationery theme: ${theme}`);
+      expect(() => bodyFace(theme as Stationery['theme']), theme).toThrow(`Unknown stationery theme: ${theme}`);
+      expect(() => letter({ theme: theme as Stationery['theme'] }), theme).toThrow(`Unknown stationery theme: ${theme}`);
     }
   });
 
@@ -121,6 +132,8 @@ describe('the faces (#563 PR 8)', () => {
   });
 
   it("wrap Handwritten as wide as Caveat's letters allow, measured in Caveat", () => {
+    // Caveat's contextual alternates vary its letters, but the three forms of
+    // x share one advance, so a run of x's has one width for each length.
     const caveat = loadFont('Caveat-Regular');
     const advance = (caveat.glyphForCodePoint('x'.codePointAt(0)!).advanceWidth * 15) / caveat.unitsPerEm;
     const perLine = Math.floor(CONTENT_WIDTH / advance);
@@ -164,15 +177,28 @@ describe('the faces (#563 PR 8)', () => {
     while (at(text, 12) <= room) text += 'x';
     expect(at(text, 10)).toBeLessThanOrEqual(room);
     expect(() => letter({ theme: 'handwritten', dateLine: text })).toThrow(/dateLine/);
-    // And Typewriter's is 9, as the Tinos themes'.
+    // And Typewriter's is 9, as the Tinos themes': a line that fits at 9.5
+    // shrinks to it, and one that would fit only below 9 is refused
+    // (#574 review round 1).
     const cousine = loadFont('Cousine-Regular');
+    const typedAt = (text: string, size: number) => (shape(cousine, text).advanceWidth * size) / cousine.unitsPerEm;
     const typed = 'x'.repeat(Math.floor(room / ((cousine.glyphForCodePoint(120).advanceWidth * 9.5) / cousine.unitsPerEm)));
     const [small] = runs(letter({ theme: 'typewriter', dateLine: typed })).filter(run => run.baseline < BODY_TOP);
     expect(small).toMatchObject({ font: 'Cousine-Regular', size: 9.5 });
+    let tooLong = 'x';
+    while (typedAt(tooLong, 9) <= room) tooLong += 'x';
+    expect(typedAt(tooLong, 8.5)).toBeLessThanOrEqual(room);
+    expect(() => letter({ theme: 'typewriter', dateLine: tooLong })).toThrow(/dateLine/);
+    // And one that fits at 9 but not at 9.5 prints at 9, the floor itself (#575 review round 3).
+    const atFloor = tooLong.slice(0, -1);
+    expect(typedAt(atFloor, 9)).toBeLessThanOrEqual(room);
+    expect(typedAt(atFloor, 9.5)).toBeGreaterThan(room);
+    const [floor] = runs(letter({ theme: 'typewriter', dateLine: atFloor })).filter(run => run.baseline < BODY_TOP);
+    expect(floor).toMatchObject({ font: 'Cousine-Regular', size: 9 });
   });
 
   it('refuse a theme this build does not know in the corner too', () => {
-    expect(() => layoutStationery({ theme: 'floral' } as unknown as DrawnStationery, BODY_TOP)).toThrow('Unknown stationery theme: floral');
+    expect(() => layoutStationery({ theme: 'floral' } as unknown as Stationery, BODY_TOP)).toThrow('Unknown stationery theme: floral');
   });
 });
 
@@ -220,7 +246,7 @@ describe("Handwritten's rules (#563 PR 8)", () => {
   });
 
   it('are Handwritten\'s alone', () => {
-    for (const theme of DRAWN_THEMES.filter(name => name !== 'handwritten')) {
+    for (const theme of STATIONERY_THEMES.filter(name => name !== 'handwritten')) {
       expect(paths(letter({ theme })).some(path => path.stroke === '#aaaaaa' && path.strokeWidth === 0.5), theme).toBe(false);
     }
   });
@@ -240,10 +266,97 @@ describe("a face's characters (#563 PR 8)", () => {
     expect(tinos('\u03c0')).toBe(true);
   });
 
+  it('refuses a letter with a separate accent the face cannot place, and takes it written as one character (#575 review round 4)', () => {
+    const ch = (...codePoints: number[]) => String.fromCodePoint(...codePoints);
+    const caveat = drawsGraphemeIn('Caveat-Regular');
+    const decomposed = `i${ch(0x301)}`;
+    // fontkit's mark positioning throws on these in Caveat; the layout would fail.
+    expect(caveat(decomposed)).toBe(false);
+    expect(caveat(`O${ch(0x323, 0x301)}`)).toBe(false);
+    expect(caveat(ch(0xed))).toBe(true);
+    for (const font of ['Tinos-Regular', 'Cousine-Regular'] as const) expect(drawsGraphemeIn(font)(decomposed), font).toBe(true);
+    // Every letter-and-accent pair Caveat takes lays out on Handwritten's page.
+    const pairs = [...'aeiounyAEIOUNYcC'].flatMap(base => [0x300, 0x301, 0x302, 0x303, 0x308, 0x327].map(mark => base + ch(mark)));
+    const taken = pairs.filter(caveat);
+    expect(taken.length).toBeGreaterThan(20);
+    expect(taken.length).toBeLessThan(pairs.length);
+    expect(() => letter({ theme: 'handwritten' }, 'text_only', taken.join(' '))).not.toThrow();
+  });
+
+  it('keeps no more than its limit of shaped clusters per face, whatever the text (#575 review round 5)', () => {
+    const cousine = drawsGraphemeIn('Cousine-Regular');
+    // More distinct letter-and-accent clusters than the cache keeps.
+    const marks = [0x300, 0x301, 0x302, 0x303, 0x304, 0x306, 0x307, 0x308, 0x30a, 0x30b, 0x30c, 0x323, 0x327, 0x328];
+    let shaped = 0;
+    for (const base of 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ') {
+      for (const first of marks) {
+        for (const second of marks) {
+          cousine(base + String.fromCodePoint(first, second));
+          shaped += 1;
+          expect(shapedClusterCount('Cousine-Regular')).toBeLessThanOrEqual(SHAPES_CACHE_LIMIT);
+        }
+      }
+    }
+    expect(shaped).toBeGreaterThan(SHAPES_CACHE_LIMIT);
+    expect(shapedClusterCount('Cousine-Regular')).toBeGreaterThan(0);
+  });
+
   it('keeps Classic\'s check as it was, and works as a callback', () => {
     for (const grapheme of ['a', '\u03c0', '\u05e9', '\u2028', '\u{1F600}']) expect(drawsGrapheme(grapheme)).toBe(drawsGraphemeIn('Tinos-Regular')(grapheme));
     expect(['a', 'b', 'c'].every(drawsGraphemeIn('Caveat-Regular'))).toBe(true);
     expect(['a', '\u03c0'].every(drawsGraphemeIn('Caveat-Regular'))).toBe(false);
+  });
+});
+
+describe("a face's look-alikes (#575 review round 3)", () => {
+  const ch = (...codePoints: number[]) => String.fromCodePoint(...codePoints);
+  const NB_HYPHEN = ch(0x2011);
+  const NARROW_NBSP = ch(0x202f);
+
+  it('draw the dashes and fixed-width spaces Tinos has as the nearest each face has, one for one', () => {
+    expect(inFace('Cousine-Regular', `e${NB_HYPHEN}mail${NARROW_NBSP}10 ${ch(0x2010)} ${ch(0x2009)}`))
+      .toBe(`e-mail${ch(0xa0)}10 -  `);
+    expect(inFace('Caveat-Regular', `e${NB_HYPHEN}mail${NARROW_NBSP}10 ${ch(0x2012)}${ch(0x2015)}${ch(0x2007)}`))
+      .toBe(`e${ch(0x2010)}mail${ch(0xa0)}10 ${ch(0x2013)}${ch(0x2014)}${ch(0xa0)}`);
+    // Classic draws them all as written.
+    const all = ch(0x2010, 0x2011, 0x2012, 0x2015, 0x202f, 0x2007, 0x2000, 0x200a);
+    expect(inFace('Tinos-Regular', all)).toBe(all);
+    for (const font of ['Cousine-Regular', 'Caveat-Regular'] as const) expect(inFace(font, all)).toHaveLength(all.length);
+  });
+
+  it('let each face take what Classic takes of them, and nothing Classic refuses', () => {
+    for (const font of ['Cousine-Regular', 'Caveat-Regular'] as const) {
+      const draws = drawsGraphemeIn(font);
+      for (const codePoint of [0x2010, 0x2011, 0x2012, 0x2015, 0x202f, 0x2007, 0x2000, 0x2003, 0x2009, 0x200a]) {
+        expect(draws(ch(codePoint)), `${font} U+${codePoint.toString(16)}`).toBe(true);
+      }
+      // A space Tinos draws as a box is refused in every face.
+      expect(draws(ch(0x205f))).toBe(false);
+      expect(drawsGrapheme(ch(0x205f))).toBe(false);
+    }
+  });
+
+  it('break lines as written: a non-breaking hyphen drawn as a hyphen still keeps its word whole', () => {
+    // 66 x's, a space, then "ab-cd": with a breakable hyphen "ab-" would end the 70-character line.
+    const text = `${'x'.repeat(66)} ab${NB_HYPHEN}cd`;
+    const lines = wrapText(text, 11, CONTENT_WIDTH, 'Cousine-Regular');
+    expect(lines.map(line => line.source)).toEqual(['x'.repeat(66), `ab${NB_HYPHEN}cd`]);
+    expect(lines[1].drawn).toBe('ab-cd');
+    // A narrow no-break space keeps its neighbours together too.
+    const spaced = wrapText(`${'x'.repeat(66)} 10${NARROW_NBSP}km`, 11, CONTENT_WIDTH, 'Cousine-Regular');
+    expect(spaced.map(line => line.source)).toEqual(['x'.repeat(66), `10${NARROW_NBSP}km`]);
+  });
+
+  it('draw every glyph, none of them the missing-glyph box, and keep the text as written for reading', () => {
+    for (const theme of ['typewriter', 'handwritten'] as const) {
+      const text = `Dear Sam,\nSee you at 10${NARROW_NBSP}am${ch(0x2009)}${ch(0x2014)} a well${NB_HYPHEN}known spot.\nPat`;
+      const layout = letter({ theme }, 'text_only', text);
+      const body = bodyRuns(layout);
+      expect(body.some(run => run.source.includes(NB_HYPHEN) && run.source.includes(NARROW_NBSP))).toBe(true);
+      for (const run of body) {
+        expect(placeGlyphs(run).every(glyph => !glyph.key.endsWith('-0')), `${theme}: ${run.source}`).toBe(true);
+      }
+    }
   });
 });
 
@@ -272,8 +385,10 @@ describe('the outputs (#563 PR 8)', () => {
   });
 });
 
-describe('not yet stored (#563 PR 8)', () => {
-  it('reads neither theme back from storage, so no draft or letter carries one until a migration admits them', () => {
-    for (const theme of ['typewriter', 'handwritten']) expect(stationeryOf({ theme, dateLine: DATE })).toBeNull();
+describe('stored (#563 PR 8b)', () => {
+  it('reads both themes back from storage, with their date line, as the print reads the others', () => {
+    for (const theme of ['typewriter', 'handwritten'] as const) {
+      expect(stationeryOf({ theme, dateLine: DATE })).toEqual({ theme, dateLine: DATE });
+    }
   });
 });

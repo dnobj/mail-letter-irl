@@ -50,9 +50,9 @@ const answer = (stationery: Record<string, unknown>, previewHtml = '<html>page</
 });
 
 describe('the Style row script (#563)', () => {
-  it('lists the four themes', () => {
+  it('lists the six themes', () => {
     const { window } = load({ callTool: vi.fn() });
-    expect(window.letterIrlStyle.THEMES).toEqual(['classic', 'monogram', 'botanical', 'celebration']);
+    expect(window.letterIrlStyle.THEMES).toEqual(['classic', 'monogram', 'botanical', 'celebration', 'typewriter', 'handwritten']);
   });
 
   it('is hidden where the host cannot call tools, or for a stationery it does not know', () => {
@@ -61,7 +61,7 @@ describe('the Style row script (#563)', () => {
     expect(noCalls.shown()).toBe(false);
 
     const unknown = load({ callTool: vi.fn() });
-    unknown.row.show('draft-1', { stationery: { theme: 'typewriter' } }, true);
+    unknown.row.show('draft-1', { stationery: { theme: 'floral' } }, true);
     expect(unknown.shown()).toBe(false);
     unknown.row.show('draft-1', { stationery: { theme: 'classic' } }, false);
     expect(unknown.shown()).toBe(false);
@@ -78,9 +78,9 @@ describe('the Style row script (#563)', () => {
 
     idle = true;
     // A button the card names with a theme the script does not know.
-    const { row: other, click: press } = load({ callTool }, () => true, '<button data-theme="typewriter"></button>');
+    const { row: other, click: press } = load({ callTool }, () => true, '<button data-theme="floral"></button>');
     other.show('draft-1', { stationery: { theme: 'classic' } }, true);
-    press('typewriter');
+    press('floral');
     await flush();
     expect(callTool).not.toHaveBeenCalled();
   });
@@ -161,7 +161,7 @@ describe('the Style row script, held and adopting (#572 review round 1)', () => 
     const { row } = load({ callTool: vi.fn() });
     row.show('draft-1', { stationery: { theme: 'classic' } }, true);
     expect(row.adopt('draft-2', { theme: 'botanical' }, '<html>other</html>')).toBe(false);
-    expect(row.adopt('draft-1', { theme: 'typewriter' }, '<html>x</html>')).toBe(false);
+    expect(row.adopt('draft-1', { theme: 'floral' }, '<html>x</html>')).toBe(false);
     expect(row.adopt('draft-1', null, '<html>x</html>')).toBe(false);
     expect(row.stationery()).toEqual({ theme: 'classic' });
 

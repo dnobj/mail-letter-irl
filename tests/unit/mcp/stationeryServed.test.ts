@@ -81,6 +81,8 @@ describe('stationery in tools/list', () => {
       expect(properties.stationery.type, name).toBe('string');
       expect(properties.stationery.enum).toEqual([...STATIONERY_THEMES]);
       expect(properties.stationery.description).toContain("Left out, the letter is in the account's last choice, or classic if it has none");
+      // Each theme is described, so a model can choose it (#563 PR 8b).
+      for (const theme of STATIONERY_THEMES) expect(properties.stationery.description, theme).toMatch(new RegExp(`\\b${theme}, `));
       expect(properties.monogram.description).toContain('for the monogram stationery only');
       expect(properties.headline.description).toContain('for the celebration stationery only');
       for (const key of KEYS) expect(required ?? [], `${name} ${key}`).not.toContain(key);
@@ -176,6 +178,7 @@ describe('set_stationery in tools/list (#563 PR 5)', () => {
     expect(Object.keys(schema.properties)).toEqual(['draftId', 'stationery', 'monogram', 'headline']);
     expect(schema.required).toEqual(['draftId', 'stationery']);
     expect(schema.properties.stationery.enum).toEqual([...STATIONERY_THEMES]);
+    for (const theme of STATIONERY_THEMES) expect(schema.properties.stationery.description, theme).toMatch(new RegExp(`\\b${theme}, `));
     expect(schema.properties.monogram.description).toBe(tools.get('quote_and_preview_letter')!.properties.monogram.description);
     expect(schema.properties.headline.description).toBe(tools.get('quote_and_preview_letter')!.properties.headline.description);
   });

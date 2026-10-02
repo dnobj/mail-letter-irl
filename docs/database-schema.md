@@ -50,7 +50,7 @@ User accounts with credit balances and tier information.
 | created_at | TIMESTAMPTZ | NO | NOW() | Account creation |
 | updated_at | TIMESTAMPTZ | NO | NOW() | Last update (auto-trigger) |
 | erased_at | TIMESTAMPTZ | YES | NULL | Set by the account erasure (#289); sign-in refuses an erased account |
-| stationery_theme | TEXT | YES | NULL | The theme the account last chose (#563, migration 045): `classic`, `monogram`, `botanical` or `celebration`. A letter preview that asks for none is drawn in it. Erasure clears it |
+| stationery_theme | TEXT | YES | NULL | The theme the account last chose (#563, migrations 045 and 046): `classic`, `monogram`, `botanical`, `celebration`, `typewriter` or `handwritten`. A letter preview that asks for none is drawn in it. Erasure clears it |
 
 **Erased accounts (migration 035).** An erasure keeps the row as a tombstone, because orders, ledger
 lots, disputes and refunds keep foreign keys to it ([account-erasure.md](account-erasure.md)). The
@@ -178,7 +178,7 @@ Temporary drafts for idempotent send operations. Prevents duplicate sends.
 | postcard_size | VARCHAR(10) | YES | - | Postcard size: '6x9' (NULL for letters) |
 | is_gift_send | BOOLEAN | NO | false | Previewed as a gift send: funded by a gift letter and printed with its card (033) |
 | renderer_version | VARCHAR(16) | YES | - | The renderer that drew the preview: NULL for the legacy HTML, `pdf-1` for our own PDF (039, #534), `pdf-2` for our own PDF in stationery (044, #563). The send copies it into `letters.content.rendererVersion`, and dispatch prints with it |
-| stationery | JSONB | YES | - | The stationery the preview was drawn in (044, #563): `{"theme": "monogram" \| "botanical" \| "celebration", "dateLine"?, "monogram"?, "headline"?}`. NULL is Classic. Set exactly when `renderer_version` is `pdf-2`. The send copies it into `letters.content.stationery`; redaction keeps the theme and drops the slot text |
+| stationery | JSONB | YES | - | The stationery the preview was drawn in (044, #563): `{"theme": "monogram" \| "botanical" \| "celebration" \| "typewriter" \| "handwritten", "dateLine"?, "monogram"?, "headline"?}`. NULL is Classic. Set exactly when `renderer_version` is `pdf-2`. The send copies it into `letters.content.stationery`; redaction keeps the theme and drops the slot text |
 | arrive_by | DATE | YES | - | The date the mail should arrive by, in America/New_York; NULL to mail as soon as possible (040, #535) |
 | mail_on | DATE | YES | - | The date it goes to the printer, worked back from `arrive_by` by the lead time (040, #535). The send copies both to the letter and holds its job until then |
 | created_at | TIMESTAMPTZ | NO | NOW() | Draft creation |
@@ -192,7 +192,7 @@ Temporary drafts for idempotent send operations. Prevents duplicate sends.
 - `postcard_requires_size`: Postcards must have postcard_size
 - `valid_postcard_size`: postcard_size must be '6x4', '6x9', or '6x11'
 - `letter_drafts_renderer_version_known`: renderer_version must be NULL, 'pdf-1' or 'pdf-2' (039, then 044; a new version extends it in its own migration)
-- `letter_drafts_stationery_theme_known`: stationery's theme is 'monogram', 'botanical' or 'celebration' (044)
+- `letter_drafts_stationery_theme_known`: stationery's theme is 'monogram', 'botanical', 'celebration', 'typewriter' or 'handwritten' (044, 046)
 - `letter_drafts_stationery_drawn_by_pdf_2`: stationery is set exactly when renderer_version is 'pdf-2' (044)
 - `letter_drafts_schedule_pair`: arrive_by and mail_on are both set or both NULL (040)
 - `letter_drafts_schedule_order`: mail_on is never after arrive_by (040)
@@ -771,6 +771,7 @@ Production provisioning and the first production connection remain separate owne
 | 43 | 043_provider_cancelled_alert.sql | The `provider_cancelled_mail` alert type (#566), restated inside the `to_regclass` guard as 041 does, and a partial unique index on its letter (`idx_commerce_alerts_provider_cancelled_letter`) so it is raised once per letter. No provisioning re-run: the roles read the alerts table whole |
 | 44 | 044_stationery.sql | `letter_drafts.stationery` (#563): the theme a preview was drawn in and its slot text, NULL for Classic. `renderer_version` admits `pdf-2`, set exactly when a draft has stationery. No provisioning re-run, as for 039 |
 | 45 | 045_stationery_default.sql | `users.stationery_theme` (#563): the account's remembered theme, with a CHECK on the four themes. No provisioning re-run: the reader's column list leaves it out and the operator writes only its listed columns |
+| 46 | 046_stationery_faces.sql | Typewriter and Handwritten (#563 PR 8): `letter_drafts_stationery_theme_known` and `users_stationery_theme_known` admit `typewriter` and `handwritten`. No provisioning re-run: neither check changes what a role may read or write |
 
 ---
 

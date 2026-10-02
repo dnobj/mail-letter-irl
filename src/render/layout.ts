@@ -8,7 +8,7 @@ import {
 } from './geometry.js';
 import type { RenderImage } from './images.js';
 import { clampMarks, MARK, MAX_MARKS_PER_LETTER } from './marks.js';
-import { bodyFace, layoutStationery, ruledLines, type Band, type DrawnStationery } from './stationery.js';
+import { bodyFace, layoutStationery, ruledLines, type Band, type Stationery } from './stationery.js';
 import type { LetterLayoutType } from '../contracts/types.js';
 
 export interface LetterContent {
@@ -18,7 +18,7 @@ export interface LetterContent {
   /** The header image or the enclosed image; ignored by `text_only`. */
   image?: RenderImage;
   /** The letter's theme and what it prints (#563); without one, Classic: today's page. */
-  stationery?: DrawnStationery;
+  stationery?: Stationery;
 }
 
 /** One line of text, drawn from `x` along `baseline`, in visual order. */
@@ -136,12 +136,105 @@ export function drawsGrapheme(grapheme: string): boolean {
 }
 
 /**
+ * Look-alikes a theme's own face draws for dashes and spaces it lacks (#575
+ * review round 3). ChatGPT's text often holds the narrow no-break space and
+ * the non-breaking hyphen, and the other fixed-width spaces and dashes turn
+ * up too. Tinos draws them all; Cousine and Caveat lack some. Each such
+ * character is drawn as the first look-alike its face has, so these themes
+ * take what Classic takes. Every entry is one UTF-16 unit for one, so a line
+ * drawn with them keeps its length. Classic's Tinos needs none: its page is
+ * as it was.
+ */
+const LOOK_ALIKES: ReadonlyArray<readonly [number, readonly number[]]> = [
+  [0x2010, [0x2d]], // hyphen: hyphen-minus
+  [0x2011, [0x2010, 0x2d]], // non-breaking hyphen: hyphen, or hyphen-minus
+  [0x2012, [0x2013, 0x2d]], // figure dash: en dash, or hyphen-minus
+  [0x2015, [0x2014]], // horizontal bar: em dash
+  [0x202f, [0xa0]], // narrow no-break space: no-break space
+  [0x2007, [0xa0]], // figure space: no-break space
+  [0x2000, [0x20]], [0x2001, [0x20]], [0x2002, [0x20]], [0x2003, [0x20]], [0x2004, [0x20]], // the other
+  [0x2005, [0x20]], [0x2006, [0x20]], [0x2008, [0x20]], [0x2009, [0x20]], [0x200a, [0x20]] //   fixed-width spaces: space
+];
+
+const lookAlikeCache = new Map<FontName, ReadonlyMap<string, string>>();
+
+/** Each character a theme's own face lacks and draws as a look-alike, with it. None for Tinos. */
+function lookAlikes(fontName: FontName): ReadonlyMap<string, string> {
+  let found = lookAlikeCache.get(fontName);
+  if (!found) {
+    const font = loadFont(fontName);
+    const map = new Map<string, string>();
+    if (fontName !== BODY_FONT) {
+      for (const [codePoint, alikes] of LOOK_ALIKES) {
+        if (font.hasGlyphForCodePoint(codePoint)) continue;
+        const alike = alikes.find(candidate => font.hasGlyphForCodePoint(candidate));
+        if (alike !== undefined) map.set(String.fromCodePoint(codePoint), String.fromCodePoint(alike));
+      }
+    }
+    lookAlikeCache.set(fontName, (found = map));
+  }
+  return found;
+}
+
+/**
+ * `text` as `fontName` draws it: each character the face lacks and has a
+ * look-alike for, replaced one for one. Lines break, and runs are ordered,
+ * as the text was written (wrapText); only the drawing changes.
+ */
+export function inFace(fontName: FontName, text: string): string {
+  const map = lookAlikes(fontName);
+  if (map.size === 0) return text;
+  let drawn = '';
+  for (const character of text) drawn += map.get(character) ?? character;
+  return drawn;
+}
+
+/**
  * The check for one font: whether the renderer draws a grapheme cluster as
- * written in it. A theme with its own face (#563) checks its text against
- * that face, which may draw less than Tinos: Caveat has no Greek or Hebrew.
+ * written in it, with the face's look-alikes. A theme with its own face
+ * (#563) checks its text against that face, which may draw less than Tinos:
+ * Caveat has no Greek, Hebrew or Vietnamese.
  */
 export function drawsGraphemeIn(fontName: FontName): (grapheme: string) => boolean {
   return grapheme => draws(fontName, grapheme);
+}
+
+/** Per font, whether a cluster of more than one character shapes cleanly. */
+const shapesCache = new Map<FontName, Map<string, boolean>>();
+
+/**
+ * The most clusters kept per font. The text chooses them, so the cache is
+ * emptied when it fills rather than growing without end (#575 review round
+ * 5); shaping one again takes microseconds.
+ */
+export const SHAPES_CACHE_LIMIT = 4096;
+
+/** How many clusters are kept for a font, for tests. */
+export function shapedClusterCount(fontName: FontName): number {
+  return shapesCache.get(fontName)?.size ?? 0;
+}
+
+/**
+ * Whether a cluster of more than one visible character, a letter and its
+ * marks, shapes in a font with no missing glyph and no failure. fontkit's
+ * mark positioning throws on many of Caveat's letters with a separate
+ * accent, such as "i" and U+0301 (#575 review round 4), where the layout
+ * would fail; a cluster that shapes alone shapes in a line too.
+ */
+function shapes(fontName: FontName, cluster: string): boolean {
+  let cache = shapesCache.get(fontName);
+  if (!cache) shapesCache.set(fontName, (cache = new Map()));
+  let clean = cache.get(cluster);
+  if (clean === undefined) {
+    try {
+      clean = shape(loadFont(fontName), cluster).glyphs.every(glyph => glyph.id !== 0);
+    } catch {
+      clean = false;
+    }
+    if (cache.size >= SHAPES_CACHE_LIMIT) cache.clear();
+    cache.set(cluster, clean);
+  }
+  return clean;
 }
 
 /**
@@ -149,13 +242,16 @@ export function drawsGraphemeIn(fontName: FontName): (grapheme: string) => boole
  * character is a line break, a tab, a character that prints nothing, or one
  * the font has a glyph for (a space's glyph drawing nothing: Tinos draws
  * U+205F as a box), and the cluster carries at most MAX_MARKS_PER_LETTER
- * combining marks. A preview refuses text holding a cluster that fails,
- * rather than printing a box or dropping a mark.
+ * combining marks, which the font can place on their letter. A preview
+ * refuses text holding a cluster that fails, rather than printing a box,
+ * dropping a mark or failing to lay out.
  */
 function draws(fontName: FontName, grapheme: string): boolean {
   const font = loadFont(fontName);
   let marks = 0;
-  for (const character of grapheme) {
+  const drawn = inFace(fontName, grapheme);
+  const visible: string[] = [];
+  for (const character of drawn) {
     if (MARK.test(character) && ++marks > MAX_MARKS_PER_LETTER) return false;
     if (character === '\n' || character === '\r' || character === '\t' || isInvisible(character)) continue;
     if (NEVER_DRAWN.test(character)) return false;
@@ -166,8 +262,9 @@ function draws(fontName: FontName, grapheme: string): boolean {
     // U+2215 and U+221F but not their mirrors (#540 review round 2).
     const mirror = mirrorOf(character);
     if (mirror && !font.hasGlyphForCodePoint(mirror.codePointAt(0)!)) return false;
+    visible.push(character);
   }
-  return true;
+  return visible.length < 2 || shapes(fontName, visible.join(''));
 }
 
 function fitImage(image: RenderImage, maxHeight: number): { width: number; height: number } {
@@ -313,9 +410,13 @@ export function wrapText(text: string, size: number, width: number, fontName: Fo
   const paragraphs = clampMarks(text).replace(/\r\n?/g, '\n').replace(/\t/g, TAB).split('\n');
   for (const paragraph of paragraphs) {
     const bidi = paragraphBidi(paragraph);
-    const measure = (start: number, end: number) => shape(font, bidi.lineVisual(start, end)).advanceWidth * scale;
-    for (const { start, end } of wrapParagraph(paragraph, width, measure, advanceLimit(fontName, paragraph, width, scale))) {
-      lines.push({ source: paragraph.slice(start, end), drawn: bidi.lineVisual(start, end) });
+    // A line is drawn with the face's look-alikes, but breaks and orders as
+    // written: a non-breaking hyphen drawn as a hyphen still never breaks.
+    const visual = (start: number, end: number) => inFace(fontName, bidi.lineVisual(start, end));
+    const measure = (start: number, end: number) => shape(font, visual(start, end)).advanceWidth * scale;
+    const limit = advanceLimit(fontName, inFace(fontName, paragraph), width, scale);
+    for (const { start, end } of wrapParagraph(paragraph, width, measure, limit)) {
+      lines.push({ source: paragraph.slice(start, end), drawn: visual(start, end) });
     }
   }
   return lines;
