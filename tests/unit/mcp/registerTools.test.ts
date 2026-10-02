@@ -789,6 +789,19 @@ describe("a letter preview's narration names its stationery (#563)", () => {
     expect(plain).not.toContain('Stationery');
   });
 
+  it('names the pages of a longer letter, the sheets, and Pay & Send (#586), and nothing for one page', () => {
+    for (const name of ['quote_and_preview_letter', 'quote_and_preview_letter_with_header_image', 'quote_and_preview_letter_with_image']) {
+      expect(summarizeToolResult(name, { ...PREVIEW, pages: 2 }), name).toMatch(
+        / A two-page letter, printed on both sides of one sheet, paid with Pay & Send\.$/
+      );
+      expect(summarizeToolResult(name, { ...PREVIEW, pages: 3 }), name).toMatch(
+        / A three-page letter, printed on both sides of two sheets, paid with Pay & Send\.$/
+      );
+      expect(summarizeToolResult(name, PREVIEW), name).not.toContain('page letter');
+      expect(summarizeToolResult(name, { ...PREVIEW, pages: 1 }), name).not.toContain('page letter');
+    }
+  });
+
   it("answers set_stationery with the tool's own sentence", () => {
     expect(summarizeToolResult('set_stationery', { message: 'The letter is now on the botanical stationery.' })).toBe(
       'The letter is now on the botanical stationery.'

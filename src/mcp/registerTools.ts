@@ -1478,6 +1478,18 @@ function stationerySentence(result: Record<string, unknown>): string {
 }
 
 /**
+ * A letter of more than one page (#586), for the narration: its pages, the
+ * sheets they print on, and that Pay & Send pays for it. Empty for one page.
+ */
+function pagesSentence(result: Record<string, unknown>): string {
+  const pages = result.pages;
+  if (pages !== 2 && pages !== 3) return "";
+  return pages === 2
+    ? " A two-page letter, printed on both sides of one sheet, paid with Pay & Send."
+    : " A three-page letter, printed on both sides of two sheets, paid with Pay & Send.";
+}
+
+/**
  * A held preview's dates (#535), for the narration: the sentence the preview
  * built with its own clock (its deliveryEstimate), and what a send then does.
  * Empty for mail sent at once.
@@ -1554,6 +1566,7 @@ export function summarizeToolResult(
       }
       summary += heldMailSentence(result);
       summary += stationerySentence(result);
+      summary += pagesSentence(result);
       return summary;
     }
     case "request_send":

@@ -120,7 +120,7 @@ LETTER_IRL_ENVELOPE_REVEAL_ENABLED=<true to open previews from an envelope; unse
 LETTER_IRL_STUDIO_CARD_ENABLED=<true to lay letter cards out as a studio; unset is off>
 # The mail options (#578, docs/pricing-and-credits.md): each flag sells its options through Pay & Send,
 # at their own prices, and needs their Stripe Prices below. API and maintenance services.
-LETTER_IRL_ROOM_TO_WRITE_ENABLED=<true to sell two- and three-page letters; unset is off>
+LETTER_IRL_ROOM_TO_WRITE_ENABLED=<true to preview and sell two- and three-page letters; unset is off>
 LETTER_IRL_POSTCARD_SIZES_ENABLED=<true to sell 4x6 and 11x6 postcards; unset is off>
 LETTER_IRL_SCHEDULE_LEAD_DAYS=<business days from the mail date to the arrival date; default 7, production refuses less than 3>
 LETTER_IRL_SCHEDULE_HORIZON_DAYS=<calendar days ahead an arrival date may be; default 60>

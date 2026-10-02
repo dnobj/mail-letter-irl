@@ -553,7 +553,7 @@ Configure development and production independently:
 - `STRIPE_JIT_LETTER_PRICE_ID` and `STRIPE_JIT_POSTCARD_PRICE_ID`
 - the mail options' prices, only while their flags are on (#578):
   `STRIPE_JIT_LETTER_TWO_PAGES_PRICE_ID` and `STRIPE_JIT_LETTER_THREE_PAGES_PRICE_ID` with
-  `LETTER_IRL_ROOM_TO_WRITE_ENABLED`, and `STRIPE_JIT_POSTCARD_4X6_PRICE_ID` and
+  `LETTER_IRL_ROOM_TO_WRITE_ENABLED` (which also lets the letter previews run to three pages, #586), and `STRIPE_JIT_POSTCARD_4X6_PRICE_ID` and
   `STRIPE_JIT_POSTCARD_11X6_PRICE_ID` with `LETTER_IRL_POSTCARD_SIZES_ENABLED`
 - `JIT_CURRENCY` (amounts come from the Stripe Prices above, not from variables).
   Pay & Send may use a different currency from the packs; each product's Price

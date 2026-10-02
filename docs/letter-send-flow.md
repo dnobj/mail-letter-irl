@@ -110,7 +110,7 @@ grants is a change to the send rule. The `POST`:
 - rewords the service's refusals for the page.
 
 **Mail no pack pays for (#579)** is paid on the page with Pay & Send:
-- `GET` marks it `packPays: false` and, while the draft is ready, gives its `payment`: the quote's Pay & Send (`available`, the amount and its display, or why not now), its price resolved first.
+- `GET` marks it `packPays: false` and, while the draft is ready, gives its `payment`: the quote's Pay & Send (`available`, the amount and its display, or why not now), its price resolved first. For a letter of more than one page (#586) it also gives `pages`, which no pack pays for; the page keys on `packPays`, not on `lettersRequired`.
 - `POST /api/sends/:draftId/checkout`, the website's alone like the rest and `mail:send` like `create_mail_checkout`, opens the Stripe checkout (`createJitCheckout`). It returns to the page: `?paid=1` when paid, `?paid=0` when turned back. The order records those addresses, so a retry from the page reuses the page's own sessionless order, and a sessionless one an app began is replaced. An order with a Stripe session already open is reused as it is, wherever that session returns: one session, one charge, and the paid webhook sends the mail either way.
 - Paying sends the mail, as everywhere else; the route itself sends nothing. Its refusals are worded for the page (`checkoutRefusalFor`), and `{ sendAnotherCopy: true }` buys another copy, as the send's body does.
 
@@ -275,7 +275,14 @@ A `pdf-1` gift send prints its card as the PDF's second page, drawn by the rende
 - The theme's corner, date and headline, and a header image, stay on the first page. Handwritten rules every page.
 - An enclosed image follows the last line where it fits, or starts a page of its own; it is never split.
 - `pageFit` says how full the letter is, for the card's fit meter.
-- Nothing passes more than one page yet: the previews, the print and the price take pages up in later PRs of #586.
+- The previews lay letters out on more than one page only while room to write is offered (below).
+
+**Room to write on a preview (#586).** While `LETTER_IRL_ROOM_TO_WRITE_ENABLED` is on, the previews are drawn by `src/render` and Pay & Send is on (`isRoomToWriteOffered`), the three letter previews lay the letter out on up to three pages (`letterPageLimit`):
+- **Recorded and priced.** The draft records the pages (`letter_drafts.pages`, migration 047), counted before any gift page. A letter of two or three pages is Pay & Send at its own price: no pack pays for it, so `canSendNow` is false and the eligibility is priced as `jit-letter-2-pages` or `jit-letter-3-pages`. The output gives `pages`, and the narration says "A two-page letter, printed on both sides of one sheet, paid with Pay & Send." A letter that fits one page is as before.
+- **Refused only past three pages:** "Letter is 6 lines too long for three pages: three pages is the longest letter we print. Please shorten your message to fit on three pages." The theme ways out are offered as on one page, at three pages. The character cap names three pages.
+- **The gift waits for the pages.** Without room to write the gift is decided first, so the printable check sees its card. With it, the gift is decided after the layout (`earlyGiftChoice`, `giftForLayout`): a gift letter pays for one page only (#579), so a longer letter is never a gift send. `sendAsGift: true` on one is refused, and none is chosen when it is left out. A gift chosen for a one-page letter then has its card's name checked (`validateGiftCardPrints`), after the image is fetched where there is one.
+- **`set_stationery` keeps a letter on its one page** until it can lay a letter out again in place. It refuses a draft of more than one page (`DRAFT_LONGER_THAN_A_PAGE`), and lays a restyle out on one page, so a theme that would run the letter on to a second is refused as too long, as before.
+- **Descriptions.** The three previews' descriptions add one sentence while it is offered (steering r32). The manifest pins the flag off.
 
 **Stationery on a preview (#563).** While `LETTER_IRL_STATIONERY_ENABLED` is on and the previews are
 drawn by `src/render`, the three letter previews take `stationery`, `monogram` and `headline`

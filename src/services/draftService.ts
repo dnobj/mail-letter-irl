@@ -570,13 +570,15 @@ export interface DraftForStationery {
   sender: Record<string, unknown>;
   recipient: Record<string, unknown>;
   preview_html: string | null;
+  /** The pages it was laid out on (migration 047, #586). */
+  pages: number;
 }
 
 /** The caller's draft, as set_stationery draws it again, or null when it is not theirs or not there. */
 export async function getDraftForStationery(draftId: string, userId: string): Promise<DraftForStationery | null> {
   const result = await query<DraftForStationery>(
     `SELECT mail_type, status, expires_at, redacted_at, renderer_version, body_text, sign_off, layout_type,
-            header_image_data, inline_image_data, sender, recipient, preview_html
+            header_image_data, inline_image_data, sender, recipient, preview_html, pages
      FROM letter_drafts
      WHERE draft_id = $1 AND user_id = $2`,
     [draftId, userId]
