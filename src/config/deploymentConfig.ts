@@ -588,6 +588,19 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     services: ['api']
   },
   /**
+   * The studio card (#580, src/config/studioCard.ts): the letter previews
+   * tell their card it may lay itself out as a studio only while the flag is
+   * on. Off unless set, so absence is the intended production state until the
+   * owner switches it on. API only: nothing prints or sends differently.
+   */
+  {
+    name: 'LETTER_IRL_STUDIO_CARD_ENABLED',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  /**
    * The mail options' flags (#578, src/config/products.ts): each sells its
    * options through Pay & Send and demands their prices above. Off unless
    * set, so absence is the intended production state until the owner approves

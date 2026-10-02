@@ -136,6 +136,60 @@
       @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
       .preview-loading{display:flex;align-items:center;justify-content:center;min-height:200px;color:var(--faint);font-size:11.5px;width:100%}
       .rev{font-size:10px;opacity:.5;text-align:right;color:var(--mut);padding:0 14px 9px;margin:0}
+
+      /* The studio card (#580): while the preview's _meta carries
+         letterirl/studioCard, widgets/shared/studio.js lays the card out from
+         #studio-template, moving the card's own rows, notes and buttons into
+         it. Nothing here applies to a card without the studio class. Two
+         columns from 560px, so the card stays under Claude's frame (about
+         700px tall, 2026-09-27). */
+      .studio .hd,.studio .bd,.studio .rows{display:none}
+      .studio .meta{padding:0 14px}
+      .studio-hd{display:flex;align-items:center;gap:10px;padding:14px 14px 0}
+      .studio-icon{width:32px;height:32px;flex:none;border-radius:8px;background:var(--sf2);border:1px solid var(--bd2);display:flex;align-items:center;justify-content:center}
+      .studio-heading{display:flex;flex-direction:column;flex:1;min-width:0}
+      .studio-title{font-size:14px;font-weight:700;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .studio-sub{font-size:12px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .studio-hd .status-pill{flex:none;max-width:45%;text-align:right}
+      .studio-body{display:flex;flex-direction:column;align-items:center;gap:14px;padding:14px}
+      .studio-page{width:100%;max-width:300px;display:flex;flex-direction:column;align-items:center}
+      .studio-side{width:100%;min-width:0;display:flex;flex-direction:column;gap:12px}
+      .studio-body.zoomed{align-items:stretch}
+      .studio-body.zoomed .studio-page{max-width:none}
+      @media (min-width:560px){
+        .studio-body{flex-direction:row;align-items:flex-start}
+        .studio-page{flex:0 0 min(300px,45%)}
+        .studio-side{flex:1}
+        .studio-body.zoomed{flex-direction:column}
+        .studio-body.zoomed .studio-page{flex:none}
+      }
+      .studio-tabs{display:flex;gap:4px;background:var(--sf2);border:1px solid var(--bd2);border-radius:12px;padding:4px}
+      .studio-tab{flex:1;min-width:0;height:32px;border:0;border-radius:9px;background:transparent;font:inherit;font-size:12.5px;font-weight:600;color:var(--mut);cursor:pointer}
+      .studio-tab[aria-selected=true]{background:var(--sf);color:var(--tx);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+      .studio-tab:focus-visible,.studio-words:focus-visible{outline:2px solid var(--tx);outline-offset:1px}
+      .studio-panel{display:flex;flex-direction:column;gap:10px}
+      .studio-panel[hidden]{display:none}
+      .studio-panel .info-row{padding:6px 0}
+      .studio-panel .note,.studio-side > .note{margin-top:0}
+      .studio #style-row,.studio #arrives-row{flex-direction:column;align-items:stretch;gap:8px;border-bottom:0;padding:0}
+      .studio #style-label,.studio #arrives-row .info-label{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase}
+      .studio #style-row .style-controls,.studio #arrives-row .arrives-controls{justify-content:flex-start;text-align:left;gap:6px}
+      .studio #style-row .link-button,.studio #arrives-row .link-button{border:1px solid var(--bd);border-radius:999px;padding:5px 11px;font-size:12px;font-weight:600;color:var(--tx);text-decoration:none;background:var(--sf)}
+      .studio #style-row .link-button[aria-pressed=true],.studio #arrives-row .link-button[aria-pressed=true]{background:var(--pri);border-color:var(--pri);color:var(--prit)}
+      .studio #arrives-row input[type=date]{font-size:12.5px;padding:4px 8px;border-radius:999px}
+      .studio-quiet{margin:0;font-size:12px;color:var(--mut);line-height:1.45}
+      .studio-words{max-height:300px;overflow:auto;white-space:pre-wrap;word-wrap:break-word;font-family:Georgia,"Times New Roman",serif;font-size:13px;line-height:1.55;color:var(--tx);background:var(--sf2);border:1px solid var(--bd2);border-radius:10px;padding:10px 12px}
+      .studio-ft{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;margin:0 14px;padding:12px 0 14px;border-top:1px solid var(--bd2)}
+      .studio-sum{flex:1 1 160px;min-width:0;display:flex;flex-direction:column}
+      .studio-cost{font-size:14px;font-weight:700;color:var(--tx)}
+      .studio-summary{font-size:12px;color:var(--mut)}
+      .studio-ft #send-button{width:auto;flex:0 0 auto;margin:0;padding:10px 20px}
+      .studio-ft > :not(.studio-sum):not(#send-button){flex:1 1 100%}
+      /* A letter of more than one page shows one page at a time. */
+      .page-tools{display:flex;align-items:center;justify-content:center;gap:10px}
+      .page-count{font-size:11px;color:var(--mut)}
+      .studio .letter-page .print-page{border-top:0}
+      .studio .letter-page .print-page:not(.shown){display:none}
     </style>
   </head>
   <body>
@@ -148,15 +202,15 @@
       </div>
       <div class="meta">
         <div class="rows">
-          <div class="info-row">
+          <div class="info-row" id="layout-row">
             <span class="info-label">Layout</span>
             <span class="info-value" id="layout-type">&mdash;</span>
           </div>
-          <div class="info-row">
+          <div class="info-row" id="cost-row">
             <span class="info-label">Cost</span>
             <span class="info-value" id="cost">&mdash;</span>
           </div>
-          <div class="info-row">
+          <div class="info-row" id="delivery-row">
             <span class="info-label">Delivery</span>
             <span class="info-value" id="delivery">&mdash;</span>
           </div>
@@ -182,11 +236,11 @@
               <button type="button" class="link-button" data-theme="handwritten" aria-pressed="false">Handwritten</button>
             </span>
           </div>
-          <div class="info-row">
+          <div class="info-row" id="status-row">
             <span class="info-label">Status</span>
             <span class="status-pill" id="status-pill">Loading...</span>
           </div>
-          <div class="info-row">
+          <div class="info-row" id="id-row">
             <span class="info-label" id="id-label">Draft</span>
             <span class="info-value mono" id="id-value">&mdash;</span>
           </div>
@@ -291,14 +345,70 @@
           style="display: none"
         ></div>
       </div>
-      <p class="rev">letter t35</p>
+      <p class="rev">letter t36</p>
     </div>
+
+    <!-- The studio card (#580): widgets/shared/studio.js lays the card out
+         from this while the preview's _meta turns it on. Each data-slot is
+         replaced by the card's own element with that id, moved. -->
+    <template id="studio-template">
+      <div class="studio-hd">
+        <span class="studio-icon" aria-hidden="true"><span class="logo"></span></span>
+        <div class="studio-heading">
+          <span class="studio-title" id="studio-title">Your letter</span>
+          <span class="studio-sub" id="studio-sub"></span>
+        </div>
+        <span data-slot="status-pill"></span>
+      </div>
+      <div class="studio-body" id="studio-body">
+        <div class="studio-page">
+          <span data-slot="mockup-container"></span>
+        </div>
+        <div class="studio-side">
+          <div class="studio-tabs" role="tablist" aria-labelledby="studio-title">
+            <button type="button" class="studio-tab" role="tab" id="studio-tab-style" aria-controls="studio-panel-style" data-tab="style">Style</button>
+            <button type="button" class="studio-tab" role="tab" id="studio-tab-words" aria-controls="studio-panel-words" data-tab="words">Words</button>
+            <button type="button" class="studio-tab" role="tab" id="studio-tab-delivery" aria-controls="studio-panel-delivery" data-tab="delivery">Delivery</button>
+          </div>
+          <div class="studio-panel" role="tabpanel" id="studio-panel-style" aria-labelledby="studio-tab-style" data-tab="style">
+            <span data-slot="style-row"></span>
+            <p class="studio-quiet" id="studio-style-quiet"></p>
+            <span data-slot="style-note"></span>
+            <span data-slot="layout-row"></span>
+          </div>
+          <div class="studio-panel" role="tabpanel" id="studio-panel-words" aria-labelledby="studio-tab-words" data-tab="words" hidden>
+            <div class="studio-words" id="studio-words" tabindex="0" aria-label="The letter's words"></div>
+            <p class="studio-quiet">To change the words, ask in the chat.</p>
+          </div>
+          <div class="studio-panel" role="tabpanel" id="studio-panel-delivery" aria-labelledby="studio-tab-delivery" data-tab="delivery" hidden>
+            <span data-slot="arrives-row"></span>
+            <span data-slot="arrives-note"></span>
+            <span data-slot="scheduled"></span>
+            <span data-slot="delivery-row"></span>
+            <span data-slot="id-row"></span>
+          </div>
+          <span data-slot="note"></span>
+        </div>
+      </div>
+      <div class="studio-ft">
+        <div class="studio-sum">
+          <span class="studio-cost" id="studio-cost"></span>
+          <span class="studio-summary" id="studio-summary"></span>
+        </div>
+        <span data-slot="send-button"></span>
+        <span data-slot="send-page-button"></span>
+        <span data-slot="send-page-note"></span>
+        <span data-slot="purchase-actions"></span>
+        <span data-slot="error-message"></span>
+      </div>
+    </template>
 
     <!-- letter-irl:host -->
     <!-- letter-irl:pages -->
     <!-- letter-irl:arrives -->
     <!-- letter-irl:style -->
     <!-- letter-irl:envelope -->
+    <!-- letter-irl:studio -->
     <script type="module">
       // The card talks to its host only through window.letterIrlHost
       // (widgets/shared/host.js, #474): window.openai in ChatGPT, MCP Apps in
@@ -380,6 +490,7 @@
           const statusPill = document.getElementById("status-pill");
           statusPill.classList.remove("ok", "alert");
           statusPill.textContent = "Cancelled";
+          refreshStudio();
         },
       });
 
@@ -420,6 +531,160 @@
           render();
         },
       });
+
+      // ---- The studio card (#580) -------------------------------------------
+      //
+      // While the preview's _meta turns it on, the card lays itself out as a
+      // studio: a header naming the letter, the page beside Style, Words and
+      // Delivery tabs, and a footer with the cost and Send. The rows, notes
+      // and buttons in it are the card's own, moved, so each still calls the
+      // tool a model would. It lives in widgets/shared/studio.js; were that
+      // script not to run, the card is laid out as it always was.
+      const studio = window.letterIrlStudio
+        ? window.letterIrlStudio.createStudio({
+            card: document.getElementById("card"),
+            template: document.getElementById("studio-template"),
+            enabled: () => currentMeta()[window.letterIrlStudio.STUDIO_META] === true,
+          })
+        : null;
+      // The preview render() last drew, for a refresh after a send.
+      let studioState = null;
+      // What get_purchase_status last said of the order this card's Pay &
+      // Send opened (#579), for the studio's header and footer.
+      let purchaseState = null;
+      // The page of a longer letter the studio shows, kept through a redraw
+      // of the same draft, such as a restyle.
+      let studioPage = { draftId: null, index: 0 };
+      // A Pay & Send order that stopped before its mail went (#579): how the
+      // studio heads it and sums it up. The pill names the status itself.
+      const HALTED_ORDERS = new Map([
+        ["payment_failed", { stage: "Draft", timing: "the payment did not go through" }],
+        ["refund_pending", { stage: "Refunded", timing: "being refunded, nothing will be mailed" }],
+        ["refunded", { stage: "Refunded", timing: "refunded, nothing will be mailed" }],
+        ["on_hold", { stage: "On hold", timing: "on hold" }],
+        ["cancelled", { stage: "Cancelled", timing: "cancelled, nothing will be mailed" }],
+      ]);
+
+      // The letter's words, as the call that drew the preview gave them.
+      function letterWords() {
+        const args = retryResult ? retryResult.args : host.toolInput();
+        const body = typeof args?.bodyText === "string" ? args.bodyText.trim() : "";
+        const signOff = typeof args?.signOff === "string" ? args.signOff.trim() : "";
+        return [body, signOff].filter(Boolean).join("\n\n");
+      }
+
+      // The stationery the page is drawn in: the Style row's pressed theme,
+      // or the preview's; null where stationery is not offered.
+      function stationeryName(state) {
+        const pressed = document.querySelector('#style-row [data-theme][aria-pressed="true"]');
+        if (pressed) return pressed.textContent.trim();
+        const theme = state.stationery?.theme;
+        return typeof theme === "string" && theme ? theme.charAt(0).toUpperCase() + theme.slice(1) : null;
+      }
+
+      /**
+       * Fills the studio's header, Words tab and footer from the preview and
+       * what the card has done, and shows the tab that matters first: Style,
+       * or Delivery once the letter has a date. Nothing while the card is
+       * not a studio.
+       */
+      function refreshStudio(state = studioState) {
+        if (!state || !studio || !studio.update()) return;
+        studioState = state;
+        const settled = settledDraft();
+        const sentOrder = sentOrderOf(settled);
+        const sentByCard = saved?.draftId === state.draftId && saved?.sent === true;
+        // The order this card's Pay & Send opened (#579), as its status last said.
+        const purchase = trackedOrderId !== null ? purchaseState : null;
+        const paid = purchase === "processing" || purchase === "submitted";
+        const halted = HALTED_ORDERS.get(purchase) ?? null;
+        const sent = settled?.status === "sent" || sentByCard || purchase === "submitted";
+        const cancelled = sentOrder === "cancelled" || (saved?.draftId === state.draftId && saved?.cancelled === true);
+        const expired = settled?.status === "expired";
+        const args = retryResult ? retryResult.args : host.toolInput();
+        const to = state.recipientAddressValidation?.originalAddress || args?.recipient || null;
+        const name = typeof to?.name === "string" ? to.name.trim() : "";
+        document.getElementById("studio-title").textContent = name ? `Letter to ${name}` : "Your letter";
+        const place = [to?.city, [to?.state, to?.postalCode].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+        const stage = cancelled
+          ? "Cancelled"
+          : halted
+            ? halted.stage
+            : expired
+              ? "Expired"
+              : sent
+                ? "Sent"
+                : paid
+                  ? "Paid"
+                  : "Draft";
+        document.getElementById("studio-sub").textContent = [stage, place].filter(Boolean).join(" · ");
+
+        const words = letterWords();
+        document.getElementById("studio-words").textContent = words || "The words are on the page.";
+
+        // Under the Style tab the row's label would repeat the tab's name.
+        document.getElementById("style-label").textContent = "Stationery";
+        // Letters print in black and greys; one with its picture prints in
+        // colour (an image layout, src/services/letterJobService.ts).
+        const ink = state.layoutType === "header_image" || state.layoutType === "inline_image" ? "colour" : "black and white";
+        // The Style tab says what the page is in when there is nothing to choose.
+        const theme = stationeryName(state);
+        const quiet = document.getElementById("studio-style-quiet");
+        quiet.textContent = theme ? `${theme} stationery, printed in ${ink}.` : `Printed in ${ink}.`;
+        quiet.style.display = document.getElementById("style-row").style.display === "none" ? "" : "none";
+
+        const sendEligibility = state.sendEligibility;
+        const payAndSend = sendEligibility?.payAndSend;
+        const letters = state.lettersRequired ?? 1;
+        document.getElementById("studio-cost").textContent = state.giftCard
+          ? "Free: a gift letter"
+          : paid
+            ? payAndSend?.amountCents
+              ? `Paid ${formatPayAmount(payAndSend)}`
+              : "Paid with Pay & Send"
+            : sendEligibility?.packPays === false
+              ? payAndSend?.amountCents
+                ? `Pay & Send ${formatPayAmount(payAndSend)}`
+                : "Paid when you send it"
+              : `${letters} letter${letters === 1 ? "" : "s"}`;
+
+        // Once sent, the dates are the server's or the send's own, never the
+        // picker's: the chat may have changed them since this preview. A Pay &
+        // Send order with the printer has no date left to wait for, and an
+        // expired preview none to keep.
+        const held =
+          settled?.status === "sent" || purchase === "submitted"
+            ? sentOrder === "scheduled"
+              ? arrives.scheduleOf(settled.schedule)
+              : null
+            : expired
+              ? null
+              : sentByCard
+                ? arrives.scheduleOf(saved.schedule)
+                : picker.schedule();
+        const estimate =
+          arrivalChange?.draftId === state.draftId && arrivalChange.deliveryEstimate
+            ? arrivalChange.deliveryEstimate
+            : state.deliveryEstimate;
+        const timing = cancelled
+          ? "cancelled, nothing will be mailed"
+          : halted
+            ? halted.timing
+            : expired
+              ? "the preview has expired"
+              : held
+                ? `held until ${arrives.describeDate(held.mailOn)}`
+                : sent
+                  ? "with the printer"
+                  : paid
+                    ? "paid, going to the printer"
+                    : typeof estimate === "string" && estimate
+                      ? estimate.charAt(0).toLowerCase() + estimate.slice(1)
+                      : "First Class";
+        document.getElementById("studio-summary").textContent = [theme, ink, timing].filter(Boolean).join(" · ");
+
+        studio.suggest(held || cancelled ? "delivery" : "style");
+      }
 
       // ---- Recovery: a preview call that never arrived (#411) -------------
       //
@@ -1373,7 +1638,9 @@
        */
       function renderLetterPage(state, pages, html) {
         const container = document.getElementById("mockup-container");
-        const key = `${currentDraftId}\n${state.layoutType || "text_only"}\n${html}`;
+        // The studio (#580) shows a letter's pages one at a time.
+        const inStudio = Boolean(studio?.on());
+        const key = `${currentDraftId}\n${state.layoutType || "text_only"}\n${inStudio}\n${html}`;
         if (shownPage && shownPage.key === key && shownPage.view.parentNode === container) {
           shownPage.label();
           return;
@@ -1390,14 +1657,37 @@
         badge.className = `layout-badge ${getLayoutBadgeClass(layoutType)}`;
         badge.textContent = getLayoutLabel(layoutType);
         page.appendChild(badge);
-        for (const svg of pages) page.appendChild(document.importNode(cleanPage(svg), true));
+        const printed = pages.map(svg => page.appendChild(document.importNode(cleanPage(svg), true)));
         const zoom = document.createElement("button");
         zoom.type = "button";
         zoom.className = "page-zoom";
+        // In the studio, a letter of more than one page (a gift letter's card
+        // page) shows one at a time, so the card keeps its height.
+        const paged = inStudio && printed.length > 1;
+        const count = document.createElement("span");
+        count.className = "page-count";
+        const step = document.createElement("button");
+        step.type = "button";
+        step.className = "page-zoom";
+        // A redraw of the same draft, such as a restyle, keeps the page shown.
+        let pageShown =
+          paged && studioPage.draftId === currentDraftId && studioPage.index < printed.length ? studioPage.index : 0;
         const apply = () => {
+          const sealed = Boolean(envelope?.sealed(currentDraftId));
           // The label carries the state, so no aria-pressed as well.
           view.classList.toggle("zoomed", pageZoomed);
-          zoom.textContent = envelope?.sealed(currentDraftId) ? "Show the letter" : pageZoomed ? "Show smaller" : "Enlarge";
+          document.getElementById("studio-body")?.classList.toggle("zoomed", pageZoomed);
+          zoom.textContent = sealed ? "Show the letter" : pageZoomed ? "Show smaller" : "Enlarge";
+          if (paged) {
+            // Sealed, the envelope's windows show the first page's addresses.
+            if (sealed) pageShown = 0;
+            studioPage = { draftId: currentDraftId, index: pageShown };
+            printed.forEach((svg, index) => svg.classList.toggle("shown", index === pageShown));
+            count.textContent = `Page ${pageShown + 1} of ${printed.length}`;
+            step.textContent = pageShown + 1 < printed.length ? "Next page" : "First page";
+            count.hidden = sealed;
+            step.hidden = sealed;
+          }
         };
         const toggle = () => {
           // A sealed letter (#576) opens rather than grows.
@@ -1407,7 +1697,19 @@
         };
         page.addEventListener("click", toggle);
         zoom.addEventListener("click", toggle);
-        view.append(page, zoom);
+        if (paged) {
+          for (const svg of printed) svg.classList.add("print-page");
+          step.addEventListener("click", () => {
+            pageShown = (pageShown + 1) % printed.length;
+            apply();
+          });
+          const tools = document.createElement("div");
+          tools.className = "page-tools";
+          tools.append(count, zoom, step);
+          view.append(page, tools);
+        } else {
+          view.append(page, zoom);
+        }
         container.appendChild(view);
         envelope?.dress(view, page, currentDraftId);
         apply();
@@ -1616,6 +1918,8 @@
         dataLoaded = true;
         const card = document.getElementById("card");
         card.classList.remove("loading");
+        // Laid out as a studio (#580) before the page is drawn into it.
+        studio?.update();
 
         const {
           lettersRequired,
@@ -1877,6 +2181,7 @@
             document.getElementById("error-message").style.display = "none";
           }
         }
+        refreshStudio(state);
       }
 
       // Handle send button click - US-MCP-08
@@ -1959,6 +2264,8 @@
             envelope?.seal(sentDraftId);
             shownPage?.label();
             scheduled.show(orderId, sentSchedule, false, sentCancellable);
+            // Where Cancel now is, in the studio (#580).
+            studio?.select("delivery");
             return;
           }
 
@@ -2021,6 +2328,8 @@
         } finally {
           // A failed send leaves the row usable again; a sent letter has none.
           styleRow.hold(false);
+          // The studio's header and footer say what the send did (#580).
+          refreshStudio();
         }
       }
 
@@ -2058,6 +2367,7 @@
       function applyPurchaseStatus(status) {
         const statusPill = document.getElementById("status-pill");
         const state = status.purchaseStatus;
+        purchaseState = typeof state === "string" ? state : null;
         statusPill.classList.remove("ok", "alert");
         if (state === "submitted") {
           statusPill.classList.add("ok");
@@ -2094,6 +2404,8 @@
         // dispatches inline too, the only cost of this line is a card that
         // updates when the user returns rather than on a timer - which is why
         // this is a comment rather than a pinned test.
+        // The studio's header and footer follow the order (#580).
+        refreshStudio();
         return state === "processing" || TERMINAL_PURCHASE_STATUSES.includes(state);
       }
 
@@ -2275,6 +2587,8 @@
         checkoutInProgress = true;
         picker.hide();
         styleRow.hide();
+        // The studio's Style tab says what the page is in, now the row has gone (#580).
+        refreshStudio();
         errorMessage.style.display = "none";
         button.disabled = true;
         button.classList.add("loading");
@@ -2362,6 +2676,9 @@
           button.disabled = false;
           buttonText.textContent = "Retry Pay & Send";
           checkoutInProgress = false;
+        } finally {
+          // The rows went with the checkout; the studio says what is left (#580).
+          refreshStudio();
         }
       }
 
