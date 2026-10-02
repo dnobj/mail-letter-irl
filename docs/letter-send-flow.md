@@ -105,7 +105,13 @@ and press Send itself. The check holds only while the website's application
 can get tokens by nothing but a person signing in: it must stay a confidential
 client with the `authorization_code` and `refresh_token` grants alone (see
 [auth0-tenant-configuration.md](auth0-tenant-configuration.md)). A change to its
-grants is a change to the send rule. The `POST`:
+grants is a change to the send rule. The `GET` names what the page shows: the
+preview, the addresses, the cost and the balance; a letter's `stationery`
+(#563); and a postcard's `postcard`, its `size` in PostGrid's naming (`6x4` is
+the 4x6) and its front (`layout`, with its `caption` or `place`) as the print
+reads them: only for a postcard drawn as `pdf-3`, the photo alone otherwise
+(#594). For a front the print cannot read, `postcard` is left out, size and
+all. The `POST`:
 - runs the same service as the tools, below, so every check applies;
 - rewords the service's refusals for the page.
 
@@ -199,6 +205,7 @@ Database constraints enforce one outbox row and one stable idempotency key per l
   - The confirmation page's API:
     - `GET /api/sends/:draftId` gives the draft's `schedule` (null without dates);
     - and its `stationery` (#563): a themed draft's theme, date line, initials and headline, read as the print reads them (`stationeryOf`), or null for Classic, a legacy preview, or a theme the print would refuse;
+    - and a postcard's `postcard` (#594): its `size` in PostGrid's naming (`6x4` is the 4x6, `6x11` the 11x6) and its front as the print reads it, left out for a letter or for a front the print cannot read;
     - its `POST` answers a dated send with `schedule`, `scheduled` and `cancellable`, as the send tools do. `scheduled` is true while its job is held past now. A hand-off that throws does not change that, since such a job cannot have been taken.
 - **Sending held mail early:** the admin panel's **Send held mail now** (`job.dispatch_now`, `releaseHeldLetterJobAsAdmin` in `src/services/letterJobService.ts`) makes a held letter's job due at once, so the next hourly run sends it ([Admin Panel](admin-panel-guide.md)).
   - **Only mail still held:** the job `pending`, `not_dispatched`, never attempted, carrying `metadata.heldUntil` and not yet due by the database's clock; the letter `queued`; a Pay & Send letter's order still `fulfillment_pending`. It locks the order, the letter and the job, in the outbox's order.
