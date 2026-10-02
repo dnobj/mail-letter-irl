@@ -208,6 +208,8 @@ describe('the postcard card as a postcard maker (#580)', () => {
     // The message is in the maker; the card's own box is hidden by the maker's styles.
     expect(card.window.getComputedStyle(card.byId('message-box')).display).toBe('none');
     expect(card.window.getComputedStyle(card.document.querySelector('.preview-tabs')!).display).toBe('none');
+    // The note beside the postcard is spaced as the sections' notes are.
+    expect(card.window.getComputedStyle(card.byId('note')).marginTop).toBe('0px');
   });
 
   it('flips the postcard to its back and to its front again, saying which side shows', async () => {
