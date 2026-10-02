@@ -604,20 +604,6 @@ const LAYOUT_LABELS: Record<LetterLayoutType, string> = {
   inline_image: " with an enclosed image"
 };
 
-/**
- * The letter laid out by our own renderer when previews use it (#534), or
- * undefined for the legacy HTML. `imageData` is the image that prints, so the
- * layout is the print's, drawn in its stationery (#563). A letter that runs
- * past its page is refused, saying by how many lines, before the addresses
- * are checked or a draft is made. Celebration's headline takes room from the
- * body, and Typewriter and Handwritten set it in their own typeface, so they
- * change what fits; a letter they push past the page is told so, with the
- * ways out.
- *
- * While room to write is offered (#586), the letter flows on to up to three
- * pages, and only a letter longer than that is refused: three pages is the
- * longest letter we print. The draft records the pages it took.
- */
 /** What a letter preview lays out: its printed text, its layout and its image. */
 function previewContent(letter: { bodyText: string; signOff: string; layoutType: LetterLayoutType; imageData?: string }) {
   return {
@@ -643,6 +629,20 @@ export function letterRunsPast(
   }
 }
 
+/**
+ * The letter laid out by our own renderer when previews use it (#534), or
+ * undefined for the legacy HTML. `imageData` is the image that prints, so the
+ * layout is the print's, drawn in its stationery (#563). A letter that runs
+ * past its page is refused, saying by how many lines, before the addresses
+ * are checked or a draft is made. Celebration's headline takes room from the
+ * body, and Typewriter and Handwritten set it in their own typeface, so they
+ * change what fits; a letter they push past the page is told so, with the
+ * ways out.
+ *
+ * While room to write is offered (#586), the letter flows on to up to three
+ * pages, and only a letter longer than that is refused: three pages is the
+ * longest letter we print. The draft records the pages it took.
+ */
 export function layoutLetterForPreview(
   letter: { bodyText: string; signOff: string; layoutType: LetterLayoutType; imageData?: string; stationery?: Stationery | PreviewStationery },
   context: ToolContext,

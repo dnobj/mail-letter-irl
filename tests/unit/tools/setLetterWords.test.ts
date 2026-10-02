@@ -276,6 +276,16 @@ describe('set_letter_words', () => {
     expect(written().replacing).toEqual({ bodyText: 'Dear Sam,\n\nChanged on the card.', signOff: 'Love, Pat' });
   });
 
+  it('refuses a stale version when only the sign-off differs: both parts make the words (#593 review round 5)', async () => {
+    vi.mocked(getDraftForStationery).mockResolvedValue({ ...draft({ bodyText: lines(10) }), body_text: 'Dear Sam, with a P.S.', sign_off: 'Love, Pat' } as never);
+    const stale = await handler(
+      { draftId: DRAFT_ID, bodyText: 'Dear Sam, with a P.S.', signOff: 'Pat', wordsVersion: wordsVersionOf(lines(10), 'Pat') },
+      context()
+    ).catch(e => e);
+    expect(stale).toMatchObject({ code: 'WORDS_CHANGED' });
+    expect(setDraftWords).not.toHaveBeenCalled();
+  });
+
   it("goes through when the words are the draft's already, as when a call is retried after its answer was lost (#593 review round 2)", async () => {
     // The first call changed them; the retry names the version from before it.
     vi.mocked(getDraftForStationery).mockResolvedValue({ ...draft({ bodyText: lines(10) }), body_text: 'Dear Sam, with a P.S.', sign_off: 'Pat' } as never);

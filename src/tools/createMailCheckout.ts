@@ -100,7 +100,7 @@ export function friendlyCheckoutError(error: unknown): Error {
       // The letter changed after its last checkout opened, and that checkout
       // is still closing at the old price (#586): nothing is charged here.
       return friendly(
-        'This letter changed after its last payment link was opened, and that link is still closing. Please try again in a few minutes.'
+        'This letter changed after its last payment link was opened, and that link is still closing. Please try again in a few minutes; it can take up to an hour.'
       );
     case 'JIT_OPTION_NOT_SOLD':
       // Its option's flag is off (#578): nothing can pay for this draft now,

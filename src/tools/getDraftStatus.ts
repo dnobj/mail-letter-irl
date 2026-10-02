@@ -149,10 +149,6 @@ function termsNow(
 }
 
 /**
- * A ready letter's pages now (#586), when more than one: set_stationery may
- * have changed them since its preview's first answer, and its price with them.
- */
-/**
  * A ready letter's words now, and their version (#586), while room to write
  * is offered: the chat may have changed them since the card's preview, and
  * the card's Words tab starts from them (#593 review round 1).
@@ -163,6 +159,10 @@ function wordsNow(draft: DraftState): Pick<GetDraftStatusOutput, 'bodyText' | 's
   return { bodyText: draft.body_text, signOff, wordsVersion: wordsVersionOf(draft.body_text, signOff) };
 }
 
+/**
+ * A ready letter's pages now (#586), when more than one: set_stationery may
+ * have changed them since its preview's first answer, and its price with them.
+ */
 function pagesNow(draft: DraftState): Pick<GetDraftStatusOutput, 'pages'> {
   const pages = Number(draft.pages ?? 1);
   return draft.mail_type === 'letter' && pages > 1 ? { pages } : {};

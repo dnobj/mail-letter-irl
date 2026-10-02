@@ -101,7 +101,7 @@ describe('friendlyCheckoutError terminality (#278)', () => {
       Object.assign(new Error('The previous checkout for this draft is still closing'), { code: 'PREVIOUS_CHECKOUT_CLOSING' })
     );
     expect(friendly.message).toBe(
-      'This letter changed after its last payment link was opened, and that link is still closing. Please try again in a few minutes.'
+      'This letter changed after its last payment link was opened, and that link is still closing. Please try again in a few minutes; it can take up to an hour.'
     );
   });
 });
