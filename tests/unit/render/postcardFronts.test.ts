@@ -86,6 +86,11 @@ describe('the bordered front (#594)', () => {
     expect(caption.baseline).toBeGreaterThan(stripTop);
     expect(caption.baseline).toBeLessThan(stripTop + strip);
     expect(caption.baseline).toBeGreaterThan((items[0] as ImageBox).clip!.top + (items[0] as ImageBox).clip!.height);
+    // Centred in the strip as a line box is: Caveat's ascent and descent
+    // around its baseline, halfway down the strip.
+    const face = loadFont('Caveat-Regular');
+    const scale = caption.size / face.unitsPerEm;
+    expect((caption.baseline - face.ascent * scale + caption.baseline - face.descent * scale) / 2).toBeCloseTo(stripTop + strip / 2, 6);
   });
 
   it('draws no caption when there is none, or only white space', () => {
@@ -228,11 +233,20 @@ describe('the fronts as they print and preview (#594)', () => {
   });
 
   it('previews a bordered photo in a viewport of its own, and the lettering in its colours', () => {
-    const [bordered] = renderPreviewSvg(layoutPostcard({ message: 'Hi', image, layout: 'border', caption: 'Cape Cod' }));
+    const borderedLayout = layoutPostcard({ message: 'Hi', image, layout: 'border', caption: 'Cape Cod' });
+    const [bordered] = renderPreviewSvg(borderedLayout);
     const trim = trimOf('6x9');
     const margin = 0.04 * trim.width;
     const round = (value: number) => Math.round(value * 100) / 100;
     expect(bordered).toContain(`<svg x="${round(trim.x + margin)}" y="${round(trim.top + margin)}" `);
+    // The image placed in the viewport's own coordinates, from its corner.
+    const box = borderedLayout.pages[0].items[0] as ImageBox;
+    expect(bordered).toContain(
+      `width="${round(box.clip!.width)}" height="${round(box.clip!.height)}"><image href="data:image/png;base64,`
+    );
+    expect(bordered).toContain(
+      `" x="${round(box.x - box.clip!.x)}" y="${round(box.top - box.clip!.top)}" width="${round(box.width)}" height="${round(box.height)}" preserveAspectRatio="none"/></svg>`
+    );
     expect(bordered).toMatch(/<svg x="[\d.]+" y="[\d.]+" width="[\d.]+" height="[\d.]+"><image href="data:image\/png;base64,[^"]+" x="-?[\d.]+" y="-?[\d.]+" width="[\d.]+" height="[\d.]+" preserveAspectRatio="none"\/><\/svg>/);
     expect(bordered).toMatch(/<g fill="#1E1A16">(<use [^>]+\/>)+<\/g>/);
     expect(bordered).toContain('<title>Cape Cod</title>');
