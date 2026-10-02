@@ -206,13 +206,31 @@ describe('the 4x6 and 11x6 postcards (#594)', () => {
       expect(right).toBeLessThanOrEqual(POSTCARD_GEOMETRY[size].message.left + POSTCARD_GEOMETRY[size].message.width + 1e-6);
       expect(right).toBeLessThan(half);
     });
+    // Each line is as full as the box allows at its size: the next line's
+    // first word would not have fitted on it.
+    const face = loadFont('Tinos-Regular');
+    const measured = (text: string) => shape(face, text).advanceWidth * (font / face.unitsPerEm);
+    for (let index = 1; index < runs.length - 1; index += 1) {
+      const next = runs[index + 1].text.trimStart().split(' ')[0];
+      expect(measured(`${runs[index].text.trimEnd()} ${next}`)).toBeGreaterThan(POSTCARD_GEOMETRY[size].message.width);
+    }
     // The back ends where P14 showed a back may be drawn, short of the stamps.
     expect(POSTCARD_GEOMETRY[size].half).toBeCloseTo(half, 9);
     expect(half).toBeLessThanOrEqual(probedTo);
     expect(half).toBeLessThan(stampX);
-    // And the message box ends inside the page's trim.
-    const box = POSTCARD_GEOMETRY[size].message;
-    expect(box.top + box.height).toBeLessThanOrEqual(POSTCARD_GEOMETRY[size].height - inch(0.125));
+  });
+
+  it.each([
+    ['6x4', 0.3],
+    ['6x9', 0.4],
+    ['6x11', 0.4]
+  ] as const)("sets the %s message inside the back's left part, %sin clear of each of its edges", (size, margin) => {
+    const { message: box, half, height } = POSTCARD_GEOMETRY[size];
+    const bleed = inch(0.125);
+    expect(box.left).toBeCloseTo(bleed + inch(margin), 9);
+    expect(box.top).toBeCloseTo(bleed + inch(margin), 9);
+    expect(box.left + box.width).toBeCloseTo(half - inch(margin), 9);
+    expect(box.top + box.height).toBeCloseTo(height - bleed - inch(margin), 9);
   });
 
   it.each(CASES)('holds $held lines on a $size back, and counts how many more a message takes', ({ size, held }) => {

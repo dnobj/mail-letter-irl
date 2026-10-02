@@ -65,6 +65,8 @@ describe('the address stamp on a preview', () => {
   it.each([
     // Probe P14: from x 3.925in on a 6x4, the recipient 1.313in above the bottom edge.
     ['6x4', 282.6, [68.98, 81.72, 94.46, 107.21], [211.46, 224.21, 236.95, 249.7]],
+    // From x 5.725in on a 9x6, as probes P9 and P11 found.
+    ['6x9', 412.2, [68.98, 81.72, 94.46, 107.21], [355.46, 368.21, 380.95, 393.7]],
     // And from x 7.725in on an 11x6, the recipient where it is on a 9x6.
     ['6x11', 556.2, [68.98, 81.72, 94.46, 107.21], [355.46, 368.21, 380.95, 393.7]]
   ] as const)('stamps a %s back where PostGrid prints it (#594)', (size, x, returnLines, recipientLines) => {
