@@ -99,6 +99,7 @@ import { inlineHostBridge } from "./widgetHost.js";
 import { isSendConfirmationEnabled } from "../config/sendConfirmation.js";
 import { isArriveByEnabled } from "../config/arriveBy.js";
 import { isStationeryOffered } from "../config/stationery.js";
+import { ENVELOPE_REVEAL_META, isEnvelopeRevealEnabled } from "../config/envelope.js";
 import { scheduleSentence } from "../tools/arriveByInput.js";
 import { uploadsThroughCard } from "../config/cardUpload.js";
 import {
@@ -1200,6 +1201,7 @@ export async function registerLetterTools(
           meta,
           !client.passesResultMetaToCards
         );
+        Object.assign(_meta, cardSwitches(tool.name));
 
         const response = {
           structuredContent,
@@ -1383,6 +1385,16 @@ const LETTER_PREVIEW_TOOLS: ReadonlySet<string> = new Set([
   "quote_and_preview_letter_with_header_image",
   "quote_and_preview_letter_with_image"
 ]);
+
+/**
+ * Card-only switches a tool's result carries in _meta: while the envelope
+ * reveal is on (#576), the letter previews tell their card it may open the
+ * page from an envelope. In _meta, never structuredContent, so never the
+ * model's.
+ */
+export function cardSwitches(toolName: string): Record<string, unknown> {
+  return LETTER_PREVIEW_TOOLS.has(toolName) && isEnvelopeRevealEnabled() ? { [ENVELOPE_REVEAL_META]: true } : {};
+}
 
 /**
  * A letter preview's stationery (#563), for the narration: the theme it was

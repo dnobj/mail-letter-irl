@@ -59,6 +59,25 @@
       .letter-page svg{display:block;width:100%;height:auto;border-radius:4px}
       .letter-page svg + svg{border-top:1px dashed #d9cdb8}
       .page-zoom{border:0;background:none;padding:2px 6px;font:inherit;font-size:11px;color:var(--mut);cursor:pointer;text-decoration:underline}
+      /* The envelope reveal (#576): over the page's top third, where a letter
+         folded in three shows through a window envelope. Every motion stays in
+         the page's box; sealed, the box is the envelope's height. */
+      .letter-page svg.envelope{position:absolute;left:0;top:0;width:100%;height:auto;border:0;border-radius:4px 4px 0 0;pointer-events:none}
+      /* The view is the size container, so a clip can be the envelope's height
+         (264/612 of the width, 43.137cqw) whatever the pages' height: a gift
+         letter's two pages fold to one envelope. */
+      .envelope-opening,.envelope-sealing,.envelope-sealed{container-type:inline-size}
+      .envelope-opening .letter-page{animation:envelope-unfold .6s ease-out .2s both}
+      .envelope-opening svg.envelope{animation:envelope-away .8s ease-out both}
+      .envelope-sealing .letter-page{animation:envelope-fold .7s ease-in both}
+      .envelope-sealing svg.envelope{animation:envelope-back .7s ease-in both}
+      .envelope-sealed .letter-page{aspect-ratio:612/264;overflow:hidden}
+      .letter-page-view.envelope-sealed .letter-page{cursor:pointer}
+      @keyframes envelope-unfold{from{clip-path:inset(0 0 calc(100% - 43.137cqw) 0)}to{clip-path:inset(0)}}
+      @keyframes envelope-away{from{opacity:1;transform:none}to{opacity:0;transform:translateY(12%)}}
+      @keyframes envelope-fold{from{clip-path:inset(0)}to{clip-path:inset(0 0 calc(100% - 43.137cqw) 0)}}
+      @keyframes envelope-back{from{opacity:0;transform:translateY(12%)}to{opacity:1;transform:none}}
+      @media (prefers-reduced-motion: reduce){.envelope-opening .letter-page,.envelope-opening svg.envelope,.envelope-sealing .letter-page,.envelope-sealing svg.envelope{animation:none}}
 
       /* Layout badge - production color semantics kept */
       .layout-badge{position:absolute;top:7px;right:7px;font-size:6.5px;font-weight:700;letter-spacing:.1em;padding:2.5px 7px;border-radius:4px;text-transform:uppercase;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
@@ -263,13 +282,14 @@
           style="display: none"
         ></div>
       </div>
-      <p class="rev">letter t33</p>
+      <p class="rev">letter t34</p>
     </div>
 
     <!-- letter-irl:host -->
     <!-- letter-irl:pages -->
     <!-- letter-irl:arrives -->
     <!-- letter-irl:style -->
+    <!-- letter-irl:envelope -->
     <script type="module">
       // The card talks to its host only through window.letterIrlHost
       // (widgets/shared/host.js, #474): window.openai in ChatGPT, MCP Apps in
@@ -360,6 +380,16 @@
       // which answers with the page drawn again; the card shows that page in
       // place of the preview's. It lives in widgets/shared/style.js; this card
       // tells it what to draw, and redraws when it changes something.
+      // The envelope reveal (#576), while the preview's _meta turns it on. It
+      // lives in widgets/shared/envelope.js; were that script not to run, the
+      // card shows the page as it always has.
+      const envelope = window.letterIrlEnvelope
+        ? window.letterIrlEnvelope.createEnvelope({
+            win: window,
+            enabled: () => currentMeta()[window.letterIrlEnvelope.ENVELOPE_META] === true,
+          })
+        : null;
+
       const styleRow = window.letterIrlStyle.createStyle({
         host,
         row: document.getElementById("style-row"),
@@ -1322,14 +1352,23 @@
 
       // Kept across renders, so a status update does not shrink the page back.
       let pageZoomed = false;
+      // The page view shown last, so a redraw that changes nothing keeps it:
+      // an envelope's opening or fold (#576) plays on rather than being cut
+      // short, and the label can say the letter is sealed.
+      let shownPage = null;
 
       /**
        * The page as it prints, with the layout's badge. The pages are a labelled
        * group that keeps each page's title, the letter's text, for screen
        * readers. A select on the page, or the button below it, enlarges it.
        */
-      function renderLetterPage(state, pages) {
+      function renderLetterPage(state, pages, html) {
         const container = document.getElementById("mockup-container");
+        const key = `${currentDraftId}\n${state.layoutType || "text_only"}\n${html}`;
+        if (shownPage && shownPage.key === key && shownPage.view.parentNode === container) {
+          shownPage.label();
+          return;
+        }
         container.textContent = "";
         const layoutType = state.layoutType || "text_only";
         const view = document.createElement("div");
@@ -1349,17 +1388,21 @@
         const apply = () => {
           // The label carries the state, so no aria-pressed as well.
           view.classList.toggle("zoomed", pageZoomed);
-          zoom.textContent = pageZoomed ? "Show smaller" : "Enlarge";
+          zoom.textContent = envelope?.sealed(currentDraftId) ? "Show the letter" : pageZoomed ? "Show smaller" : "Enlarge";
         };
         const toggle = () => {
-          pageZoomed = !pageZoomed;
+          // A sealed letter (#576) opens rather than grows.
+          if (envelope?.sealed(currentDraftId)) envelope.unseal();
+          else pageZoomed = !pageZoomed;
           apply();
         };
         page.addEventListener("click", toggle);
         zoom.addEventListener("click", toggle);
-        apply();
         view.append(page, zoom);
         container.appendChild(view);
+        envelope?.dress(view, page, currentDraftId);
+        apply();
+        shownPage = { key, view, label: apply };
       }
 
       // The preview's page as this card shows it: the one the Style row set
@@ -1369,9 +1412,10 @@
       }
 
       function renderLetterMockup(state) {
-        const pages = renderedPages(shownPreviewHtml(state));
+        const html = shownPreviewHtml(state);
+        const pages = renderedPages(html);
         if (pages) {
-          renderLetterPage(state, pages);
+          renderLetterPage(state, pages, html);
           return;
         }
         const container = document.getElementById("mockup-container");
@@ -1887,6 +1931,9 @@
             sendButtonText.innerHTML = "Letter Scheduled";
             picker.hide();
             styleRow.hide();
+            // The letter folds into its envelope (#576).
+            envelope?.seal(sentDraftId);
+            shownPage?.label();
             scheduled.show(orderId, sentSchedule, false, sentCancellable);
             return;
           }
@@ -1902,6 +1949,9 @@
           statusPill.textContent = "With the printer";
           // A sent letter's style can no longer change (#563).
           styleRow.hide();
+          // The letter folds into its envelope (#576).
+          envelope?.seal(sentDraftId);
+          shownPage?.label();
 
           // Change Draft label to Order and show order ID
           idLabel.textContent = "Order";

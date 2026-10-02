@@ -28,13 +28,16 @@ export const ARRIVES_PLACEHOLDER = "<!-- letter-irl:arrives -->";
  * Style row, which changes a preview's stationery through set_stationery.
  */
 export const STYLE_PLACEHOLDER = "<!-- letter-irl:style -->";
+/** Where the letter card takes widgets/shared/envelope.js, the envelope reveal (#576). */
+export const ENVELOPE_PLACEHOLDER = "<!-- letter-irl:envelope -->";
 
 /** The shared scripts a card may ask for: each marker, and the file put there. */
 const SHARED_SCRIPTS = [
   { marker: HOST_BRIDGE_PLACEHOLDER, file: "host.js" },
   { marker: PAGES_PLACEHOLDER, file: "pages.js" },
   { marker: ARRIVES_PLACEHOLDER, file: "arrives.js" },
-  { marker: STYLE_PLACEHOLDER, file: "style.js" }
+  { marker: STYLE_PLACEHOLDER, file: "style.js" },
+  { marker: ENVELOPE_PLACEHOLDER, file: "envelope.js" }
 ] as const;
 
 const cachedSources = new Map<string, string>();
