@@ -67,7 +67,7 @@ import { sampleFundedCard } from '../../../src/services/giftLetterService.js';
 import { giftLetterPageCopy } from '../../../src/services/giftCardRenderer.js';
 import { withDisplayImage } from '../../../src/tools/letterHelpers.js';
 import { partitionToolResult } from '../../../src/mcp/registerTools.js';
-import { PAID_PER_SEND_REASON, RENDERED_LETTER_CHARACTER_CAP } from '../../../src/tools/letterHelpers.js';
+import { PAID_PER_SEND_REASON, RENDERED_LETTER_CHARACTER_CAP, wordsVersionOf } from '../../../src/tools/letterHelpers.js';
 import type { Address, ToolContext } from '../../../src/contracts/types.js';
 
 /** A PNG's signature and header: enough for the renderer to read its size. */
@@ -158,6 +158,8 @@ describe('when room to write is offered', () => {
   it('gives no fit while room to write is not offered', async () => {
     const output = await run('text_only', { bodyText: lines(10) });
     expect(output).not.toHaveProperty('pageFit');
+    // Nor the version of the words, which only set_letter_words names (#593 review round 1).
+    expect(output).not.toHaveProperty('wordsVersion');
   });
 
   it('needs the flag, our renderer and Pay & Send, and then allows three pages', () => {
@@ -230,6 +232,8 @@ describe('a longer letter, while room to write is offered', () => {
     const { structuredContent, _meta } = partitionToolResult(output);
     expect(_meta.pageFit).toEqual(output.pageFit);
     expect(structuredContent).not.toHaveProperty('pageFit');
+    // The version of its words, for a change of them: the model's to name (#593 review round 1).
+    expect(structuredContent.wordsVersion).toBe(wordsVersionOf(lines(40), 'Pat'));
 
     // One page says the room it has left.
     vi.mocked(createDraft).mockClear();

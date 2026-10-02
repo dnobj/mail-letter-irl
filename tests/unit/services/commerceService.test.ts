@@ -1614,6 +1614,84 @@ describe('commerceService', () => {
       expect(mocks.createJitSession).not.toHaveBeenCalled();
     });
 
+    it('refuses a checkout whose letter changed its pages since the peek, before any order (#586)', async () => {
+      // A day's cap above either price, so only the change refuses it.
+      vi.stubEnv('LETTER_IRL_BETA_ACCOUNT_DAILY_CHARGE_CENTS', '100000');
+      mocks.getJitProduct.mockImplementation((({ mailType, pages }: { mailType: string; pages?: number }) =>
+        mailType === 'letter' && pages === 2
+          ? {
+              productCode: 'jit-letter-2-pages', priceId: 'price-2p', amountCents: 599,
+              currency: 'usd', name: 'Pay & Send One Two-Page Letter', description: 'x', mailType: 'letter'
+            }
+          : {
+              productCode: 'jit-letter', priceId: 'price-1p', amountCents: 499,
+              currency: 'usd', name: 'Pay & Send One Physical Letter', description: 'x', mailType: 'letter'
+            }) as never);
+      mocks.query
+        // The send block, then the peek (one page, as the caps are checked),
+        // then the locked row: new words ran it on to a second page meanwhile.
+        .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
+        .mockResolvedValueOnce({ rows: [{ mail_type: 'letter', postcard_size: null, pages: 1 }] })
+        .mockResolvedValueOnce({ rows: [{ ...DRAFT, mail_type: 'letter', postcard_size: null, pages: 2 }] })
+        .mockResolvedValue({ rows: [] });
+
+      await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' }))
+        .rejects.toMatchObject({ code: 'DRAFT_CHANGED' });
+
+      // Priced at the locked row's two pages, which is not what the caps checked.
+      expect(mocks.getJitProduct).toHaveBeenLastCalledWith({ mailType: 'letter', pages: 2 });
+      const sql = mocks.query.mock.calls.map(call => String(call[0]));
+      expect(sql.some(statement => statement.includes('INSERT INTO orders'))).toBe(false);
+      expect(mocks.createJitSession).not.toHaveBeenCalled();
+
+      // Back on to one page meanwhile is refused too: the catalog was warmed, and
+      // the caps checked, for the peek's product.
+      mocks.query.mockReset();
+      mocks.query
+        .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
+        .mockResolvedValueOnce({ rows: [{ mail_type: 'letter', postcard_size: null, pages: 2 }] })
+        .mockResolvedValueOnce({ rows: [{ ...DRAFT, mail_type: 'letter', postcard_size: null, pages: 1 }] })
+        .mockResolvedValue({ rows: [] });
+      await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' }))
+        .rejects.toMatchObject({ code: 'DRAFT_CHANGED' });
+      expect(mocks.createJitSession).not.toHaveBeenCalled();
+    });
+
+    it("refuses to reuse a closing checkout made for the letter's old pages, cancelling nothing (#593 review round 1)", async () => {
+      vi.stubEnv('LETTER_IRL_BETA_ACCOUNT_DAILY_CHARGE_CENTS', '100000');
+      mocks.getJitProduct.mockImplementation((({ mailType, pages }: { mailType: string; pages?: number }) =>
+        mailType === 'letter' && pages === 2
+          ? {
+              productCode: 'jit-letter-2-pages', priceId: 'price-2p', amountCents: 599,
+              currency: 'usd', name: 'Pay & Send One Two-Page Letter', description: 'x', mailType: 'letter'
+            }
+          : {
+              productCode: 'jit-letter', priceId: 'price-1p', amountCents: 499,
+              currency: 'usd', name: 'Pay & Send One Physical Letter', description: 'x', mailType: 'letter'
+            }) as never);
+      // Its window passed, so new words ran the letter on to a second page; its
+      // session is closing at the one-page price, and only Stripe's word cancels it.
+      const closing = {
+        ...baseOrder,
+        stripe_checkout_session_id: 'cs-old',
+        checkout_url: 'https://checkout.stripe.test/old',
+        checkout_expires_at: new Date(Date.now() - 60_000)
+      };
+      mocks.query
+        .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
+        .mockResolvedValueOnce({ rows: [{ mail_type: 'letter', postcard_size: null, pages: 2 }] })
+        .mockResolvedValueOnce({ rows: [{ ...DRAFT, mail_type: 'letter', postcard_size: null, pages: 2 }] })
+        .mockResolvedValueOnce({ rows: [closing] })
+        .mockResolvedValue({ rows: [] });
+
+      await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' }))
+        .rejects.toMatchObject({ code: 'PREVIOUS_CHECKOUT_CLOSING' });
+      expect(mocks.createJitSession).not.toHaveBeenCalled();
+      const sql = mocks.query.mock.calls.map(call => String(call[0]));
+      expect(sql.some(statement => statement.includes("status = 'cancelled'"))).toBe(false);
+      expect(sql.some(statement => statement.includes('INSERT INTO orders'))).toBe(false);
+    });
+
     it("prices a checkout by its order's product, never by its mail type", async () => {
       const optionProduct = {
         productCode: 'jit-postcard-4x6', priceId: 'price-4x6', amountCents: 399,

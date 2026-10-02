@@ -859,7 +859,9 @@ export async function createPackCheckout(
 }
 
 async function prepareJitOrder(
-  params: CreateJitCheckoutParams
+  params: CreateJitCheckoutParams,
+  /** The price the caps were checked at, from the peek (#586). */
+  checkedCents: number
 ): Promise<{ order: Order; reused: boolean }> {
   return transaction(async client => {
     const draftResult = await client.query<LetterDraft>(
@@ -919,6 +921,15 @@ async function prepareJitOrder(
         code: 'JIT_OPTION_NOT_SOLD'
       });
     }
+    // The caps were checked at the peek's price (#586): new words or a restyle
+    // since then can change the letter's pages, and so its price. Refused
+    // before any order or session, so a retry peeks again and checks the caps
+    // at the price it charges.
+    if (product.amountCents !== checkedCents) {
+      throw Object.assign(new Error('The draft changed while its checkout was being made'), {
+        code: 'DRAFT_CHANGED'
+      });
+    }
 
     const active = await client.query<Order>(
       `SELECT * FROM orders
@@ -974,7 +985,25 @@ async function prepareJitOrder(
         );
       } else if (existing.stripe_checkout_session_id || existing.checkout_url) {
         // A Stripe session already exists: the customer will pay exactly what
-        // that session says, which matches this order row. Reuse is safe.
+        // that session says, which matches this order row. Reuse is safe -
+        // unless the letter changed since (#586). New words or a restyle can
+        // change its pages, and so its product, once this checkout's window
+        // has passed (lockChangeableDraft), and that session is closing at
+        // the old price. Only Stripe's word (its webhook, or the sweep)
+        // cancels a session-bearing order, so this refuses until then rather
+        // than reuse it (#593 review round 1).
+        // Judged by the option's own code, as the peek warms it.
+        const draftProductCode = jitProductMatching(draftMailOption(draft))?.productCode;
+        if (
+          existing.status === 'checkout_pending' &&
+          existing.product_code &&
+          draftProductCode &&
+          existing.product_code !== draftProductCode
+        ) {
+          throw Object.assign(new Error('The previous checkout for this draft is still closing'), {
+            code: 'PREVIOUS_CHECKOUT_CLOSING'
+          });
+        }
         return { order: existing, reused: true };
       } else if (existing.status !== 'checkout_pending') {
         // A sessionless row in a funded/held state exists only via operator
@@ -1178,8 +1207,9 @@ export async function createJitCheckout(
   // and refuses an option this deployment does not sell (#578).
   // With its pages (#586): without them a long letter would warm the one-page
   // price and meet the charge cap at the one-page amount. A restyle can change
-  // them between this peek and the lock (#591): the order is still priced from
-  // the locked row, so only this advisory warm-up and cap check can be stale.
+  // them between this peek and the lock (#591, and new words, #586):
+  // prepareJitOrder refuses an order whose locked price is not the one the
+  // caps were checked at, so neither the warm-up nor the caps go stale.
   const draftPeek = await query<{ mail_type: string | null; postcard_size: string | null; pages: number | null }>(
     'SELECT mail_type, postcard_size, pages FROM letter_drafts WHERE draft_id = $1 AND user_id = $2',
     [params.draftId, params.userId]
@@ -1198,14 +1228,12 @@ export async function createJitCheckout(
   // inFlight is 1: the letters row is not written until fulfilment, so today's
   // count does not yet include this send.
   await assertMailWithinDailyCaps({ query }, params.userId, 1);
-  await assertChargeWithinDailyCap(
-    params.userId,
-    getJitProductConfig(peekedOption)?.amountCents ?? 0
-  );
+  const checkedCents = getJitProductConfig(peekedOption)?.amountCents ?? 0;
+  await assertChargeWithinDailyCap(params.userId, checkedCents);
 
   // The same-mail check (#412) runs inside prepareJitOrder, just before a new
   // order is inserted: only there is it known that the call buys something.
-  const prepared = await prepareJitOrder(params);
+  const prepared = await prepareJitOrder(params, checkedCents);
   // The asymmetry with prepareJitOrder's reuse branch is DELIBERATE (#279).
   //
   // That branch accepts `stripe_checkout_session_id || checkout_url`; this one

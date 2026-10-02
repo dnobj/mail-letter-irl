@@ -86,6 +86,13 @@ function mount() {
     window,
     document,
     lastRequest,
+    /** Every request of a method (and tool), oldest first. */
+    requests: (method: string, name?: string) =>
+      sent.filter(message => message.method === method && message.id !== undefined && (name === undefined || message.params?.name === name)),
+    /** Answers one request in particular. */
+    async answerTo(request: Json, reply: Json) {
+      await deliver({ id: request.id, ...reply });
+    },
     byId,
     async show(result: Json, meta: Json, args: Json = ARGS) {
       await flush();
@@ -827,5 +834,327 @@ describe('the letter card as a studio (#580)', () => {
     await card.show(output(), { previewHtml: GIFT_PAGES });
     expect(card.byId('card').classList.contains('studio')).toBe(true);
     expect(card.document.querySelectorAll('.studio-hd')).toHaveLength(1);
+  });
+});
+
+describe("the Words tab's editor (#586)", () => {
+  const FIT = { pages: 1, sheets: 1, doubleSided: false, roomLines: 20, roomCharacters: 1940, charactersPerLine: 97 };
+  const PAY_AND_SEND = { packPays: false, payAndSend: { available: true, amountCents: 599, currency: 'usd' }, letterPack: { available: false } };
+  // The preview's words carry their version, which a change of them names (#593 review round 1).
+  const VERSION = 'abcdef123456';
+  const CLASSIC = { stationery: { theme: 'classic', source: 'default' }, wordsVersion: VERSION };
+  const TWO_PAGES = document1('Dear Sam,\nPat', 'And more,\nPat');
+  /** set_letter_words' refusal of unseen words, as the model reads it: with the whole letter. */
+  const UNSEEN =
+    "Nothing was changed: the letter's words now are not the ones that wordsVersion names. The letter card can change them too. " +
+    'The letter\'s words now are below, at wordsVersion "chat00000000". Make the change to these words, then call set_letter_words again with that wordsVersion.' +
+    '\n\nDear Sam,\n\nThe chat wrote this.\n\nLove, Pat';
+  /** The draft as get_draft_status gives it: ready, with its words now. */
+  const status = (words: Json, page = PAGE) => ({
+    result: {
+      content: [],
+      structuredContent: {
+        draftId: 'draft_0001',
+        status: 'ready',
+        deliveryEstimate: 'Mailed in 1-2 business days',
+        stationery: { theme: 'classic' },
+        ...canSend,
+        ...words
+      },
+      _meta: { previewHtml: page }
+    }
+  });
+
+  /** Types into an editor field, as the person would. */
+  async function type(card: ReturnType<typeof mount>, id: string, value: string) {
+    const field = card.byId(id) as HTMLTextAreaElement;
+    field.value = value;
+    field.dispatchEvent(new card.window.Event('input'));
+    await flush();
+  }
+
+  /** The answer set_letter_words gives a letter that now runs on to two pages. */
+  const ranOn = {
+    result: {
+      content: [{ type: 'text', text: 'Changed.' }],
+      structuredContent: {
+        draftId: 'draft_0001',
+        pages: 2,
+        canSendNow: false,
+        reasonCannotSend: 'Letter packs and gift letters pay for one-page letters and 6x9 postcards; this one is paid with Pay & Send.',
+        sendEligibility: PAY_AND_SEND,
+        wordsVersion: 'fedcba654321',
+        message: "The letter's words are changed and its page is drawn again. It now runs to two pages, printed on both sides, and is paid with Pay & Send. Nothing has been sent."
+      },
+      _meta: { previewHtml: TWO_PAGES, pageFit: { pages: 2, sheets: 1, doubleSided: true, roomLines: 30, roomCharacters: 2900, charactersPerLine: 97 } }
+    }
+  };
+
+  it('offers to change the words while room to write is offered, counting the room as they are written', async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
+    await card.click(card.tab('words'));
+    expect(card.byId('studio-words-open').hidden).toBe(false);
+    expect(card.byId('studio-words-chat').hidden).toBe(true);
+    expect(card.byId('studio-words-edit').hidden).toBe(true);
+
+    await card.click(card.byId('studio-words-open'));
+    expect(card.byId('studio-words-edit').hidden).toBe(false);
+    expect(card.byId('studio-words').hidden).toBe(true);
+    expect((card.byId('studio-words-body') as HTMLTextAreaElement).value).toBe(ARGS.bodyText);
+    expect((card.byId('studio-words-signoff') as HTMLTextAreaElement).value).toBe(ARGS.signOff);
+    expect(text(card, 'studio-words-count')).toBe('About 1,940 characters left on this page.');
+
+    await type(card, 'studio-words-body', `${ARGS.bodyText} And the roses.`);
+    expect(text(card, 'studio-words-count')).toBe('About 1,925 characters left on this page.');
+    await type(card, 'studio-words-body', `${ARGS.bodyText}${'x'.repeat(2000)}`);
+    expect(text(card, 'studio-words-count')).toBe('About 60 characters past this page: Update the page to see how it runs on.');
+  });
+
+  it('sets them with set_letter_words, then draws the page, the price and the words it gave', async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
+    await card.click(card.tab('words'));
+    await card.click(card.byId('studio-words-open'));
+    await type(card, 'studio-words-body', 'Dear Sam,\n\nThe garden is in, and the roses are out.');
+    await type(card, 'studio-words-signoff', 'Love, Pat');
+
+    await card.click(card.byId('studio-words-update'));
+    expect(card.lastRequest('tools/call', 'set_letter_words')!.params.arguments).toEqual({
+      draftId: 'draft_0001',
+      bodyText: 'Dear Sam,\n\nThe garden is in, and the roses are out.',
+      signOff: 'Love, Pat',
+      // The version of the words it replaces: the preview's.
+      wordsVersion: VERSION
+    });
+    // One change at a time: the page waits, and so does the Style row.
+    expect(text(card, 'studio-words-update')).toBe('Updating the page…');
+    expect(card.byId('studio-words-update').getAttribute('aria-disabled')).toBe('true');
+    expect(card.document.querySelector('#style-row [data-theme="botanical"]')!.getAttribute('aria-disabled')).toBe('true');
+
+    await card.answer(ranOn, 'set_letter_words');
+    expect(card.byId('studio-words-edit').hidden).toBe(true);
+    expect(text(card, 'studio-words')).toBe('Dear Sam,\n\nThe garden is in, and the roses are out.\n\nLove, Pat');
+    expect(text(card, 'studio-words-note')).toBe(ranOn.result.structuredContent.message);
+    expect(text(card, 'studio-cost')).toBe('Pay & Send USD 5.99');
+    expect(text(card, 'studio-summary')).toBe('Classic · black and white · 2 pages, both sides · mailed in 1-2 business days');
+    expect(text(card, 'studio-fit')).toBe('Runs on to the back of the page: printed on both sides of one sheet.');
+    expect(card.document.querySelectorAll('#mockup-container svg')).toHaveLength(2);
+    expect(card.byId('studio-words-update').getAttribute('aria-disabled')).toBe('false');
+
+    // Opened again, it starts from the words it set, counted on the back of the page.
+    await card.click(card.byId('studio-words-open'));
+    expect((card.byId('studio-words-body') as HTMLTextAreaElement).value).toBe('Dear Sam,\n\nThe garden is in, and the roses are out.');
+    expect(text(card, 'studio-words-count')).toBe('About 2,900 characters left on the back of the page.');
+    // And a second change names the version the first gave.
+    await card.click(card.byId('studio-words-update'));
+    expect(card.lastRequest('tools/call', 'set_letter_words')!.params.arguments.wordsVersion).toBe('fedcba654321');
+  });
+
+  it('says why the words were not changed, and keeps them', async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
+    await card.click(card.tab('words'));
+    await card.click(card.byId('studio-words-open'));
+    await type(card, 'studio-words-body', 'Dear Sam,\n\nMuch longer.');
+    await card.click(card.byId('studio-words-update'));
+    await card.answer(
+      { result: { isError: true, content: [{ type: 'text', text: 'This preview has expired. Make a new preview with the words.' }] } },
+      'set_letter_words'
+    );
+    expect(text(card, 'studio-words-note')).toBe('This preview has expired. Make a new preview with the words.');
+    expect(card.byId('studio-words-note').classList.contains('alert')).toBe(true);
+    expect(card.byId('studio-words-edit').hidden).toBe(false);
+    expect((card.byId('studio-words-body') as HTMLTextAreaElement).value).toBe('Dear Sam,\n\nMuch longer.');
+    expect(text(card, 'studio-cost')).toBe('1 letter');
+  });
+
+  it("says its copy of the words is out of date when the server refuses unseen words, in its own words, keeping what was typed (#593 review rounds 2 and 3)", async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
+    await card.click(card.tab('words'));
+    await card.click(card.byId('studio-words-open'));
+    await type(card, 'studio-words-body', 'Dear Sam,\n\nMy own change.');
+    const asked = card.requests('tools/call', 'get_draft_status').length;
+    await card.click(card.byId('studio-words-update'));
+    await card.answer({ result: { isError: true, content: [{ type: 'text', text: UNSEEN }] } }, 'set_letter_words');
+    // Never the refusal written for the model, which carries the whole letter.
+    expect(text(card, 'studio-words-note')).toBe("The words were not changed: this card's copy of them is out of date. Ask in the chat to change them, or make the preview again.");
+    expect(text(card, 'studio-words-note')).not.toContain('wordsVersion');
+    expect(card.byId('studio-words-edit').hidden).toBe(false);
+    expect((card.byId('studio-words-body') as HTMLTextAreaElement).value).toBe('Dear Sam,\n\nMy own change.');
+    // It fetches nothing to catch up: the server's version check keeps the chat's words safe.
+    expect(card.requests('tools/call', 'get_draft_status')).toHaveLength(asked);
+    expect(card.document.querySelectorAll('#mockup-container svg')).toHaveLength(1);
+  });
+
+  it('says so too when the host hands the refusal back wrapped, as a rejection (#593 review round 3)', async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
+    await card.click(card.tab('words'));
+    await card.click(card.byId('studio-words-open'));
+    await card.click(card.byId('studio-words-update'));
+    // As a host that rejects the call writes it (#434): the sentence inside its own words.
+    const wrapped =
+      "Error code: INVALID_ARGUMENT; Error: RuntimeException: Error calling MCP tool: [TextContent(type='text', text=" +
+      JSON.stringify(UNSEEN) +
+      ', annotations=None, meta=None)]';
+    await card.answer({ error: { code: -32603, message: wrapped } }, 'set_letter_words');
+    expect(text(card, 'studio-words-note')).toBe("The words were not changed: this card's copy of them is out of date. Ask in the chat to change them, or make the preview again.");
+  });
+
+  it('says its copy is out of date when its preview carried no version, keeping what was typed', async () => {
+    const card = mount();
+    // A preview from before the version (#593): no wordsVersion.
+    await card.show(output({ stationery: { theme: 'classic', source: 'default' } }), { ...ON, pageFit: FIT });
+    await card.click(card.tab('words'));
+    await card.click(card.byId('studio-words-open'));
+    await type(card, 'studio-words-body', 'Dear Sam,\n\nMy own change.');
+    await card.click(card.byId('studio-words-update'));
+    expect(card.lastRequest('tools/call', 'set_letter_words')!.params.arguments).not.toHaveProperty('wordsVersion');
+    await card.answer(
+      { result: { isError: true, content: [{ type: 'text', text: 'Nothing was changed: give wordsVersion, the version of the words this change replaces.' }] } },
+      'set_letter_words'
+    );
+    expect(text(card, 'studio-words-note')).toBe("The words were not changed: this card's copy of them is out of date. Ask in the chat to change them, or make the preview again.");
+    expect((card.byId('studio-words-body') as HTMLTextAreaElement).value).toBe('Dear Sam,\n\nMy own change.');
+  });
+
+  it("shows and edits the draft's words when the card's status answer gives them changed in the chat", async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
+    await card.answer(status({ bodyText: 'Dear Sam,\n\nThe chat wrote this.', signOff: 'Pat', wordsVersion: 'chat00000000' }, TWO_PAGES), 'get_draft_status');
+    await card.click(card.tab('words'));
+    expect(text(card, 'studio-words')).toBe('Dear Sam,\n\nThe chat wrote this.\n\nPat');
+    await card.click(card.byId('studio-words-open'));
+    expect((card.byId('studio-words-body') as HTMLTextAreaElement).value).toBe('Dear Sam,\n\nThe chat wrote this.');
+    await card.click(card.byId('studio-words-update'));
+    expect(card.lastRequest('tools/call', 'set_letter_words')!.params.arguments.wordsVersion).toBe('chat00000000');
+  });
+
+  it('puts the words back as they were on Cancel', async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
+    await card.click(card.tab('words'));
+    await card.click(card.byId('studio-words-open'));
+    await type(card, 'studio-words-body', 'Something else.');
+    // Words not set yet: sending now would mail the draft's own, so Send waits.
+    expect((card.byId('send-button') as HTMLButtonElement).disabled).toBe(true);
+    await card.click(card.byId('send-button'));
+    expect(card.lastRequest('tools/call', 'send_letter')).toBeUndefined();
+    await card.click(card.byId('studio-words-cancel'));
+    expect((card.byId('send-button') as HTMLButtonElement).disabled).toBe(false);
+    // Focus goes back to Change the words, the boxes having gone.
+    expect(card.document.activeElement).toBe(card.byId('studio-words-open'));
+    expect(card.byId('studio-words-edit').hidden).toBe(true);
+    expect(card.lastRequest('tools/call', 'set_letter_words')).toBeUndefined();
+    await card.click(card.byId('studio-words-open'));
+    expect((card.byId('studio-words-body') as HTMLTextAreaElement).value).toBe(ARGS.bodyText);
+  });
+
+  it('holds Pay & Send while words are being written, as it holds Send', async () => {
+    const card = mount();
+    const TWO_FIT = { pages: 2, sheets: 1, doubleSided: true, roomLines: 10, roomCharacters: 970, charactersPerLine: 97 };
+    await card.show(output({ ...CLASSIC, pages: 2, canSendNow: false, sendEligibility: PAY_AND_SEND }), { ...ON, pageFit: TWO_FIT });
+    expect((card.byId('pay-send-button') as HTMLButtonElement).disabled).toBe(false);
+    await card.click(card.tab('words'));
+    await card.click(card.byId('studio-words-open'));
+    expect((card.byId('pay-send-button') as HTMLButtonElement).disabled).toBe(true);
+    await card.click(card.byId('pay-send-button'));
+    expect(card.lastRequest('tools/call', 'create_mail_checkout')).toBeUndefined();
+    // Counted on the back of the page, and past it.
+    expect(text(card, 'studio-words-count')).toBe('About 970 characters left on the back of the page.');
+  });
+
+  it('holds the confirmation page, where an app takes no payment, while words are being written (#593 review round 1)', async () => {
+    const card = mount();
+    const onPage = { packPays: false, payAndSend: { available: false, pageUrl: 'https://letterirl.example/send/draft_0001' }, letterPack: { available: false } };
+    const TWO_FIT = { pages: 2, sheets: 1, doubleSided: true, roomLines: 10, roomCharacters: 970, charactersPerLine: 97 };
+    await card.show(output({ ...CLASSIC, pages: 2, canSendNow: false, sendEligibility: onPage }), { ...ON, pageFit: TWO_FIT });
+    expect(card.byId('pay-page-button').style.display).toBe('flex');
+    expect((card.byId('pay-page-button') as HTMLButtonElement).disabled).toBe(false);
+    await card.click(card.tab('words'));
+    await card.click(card.byId('studio-words-open'));
+    expect((card.byId('pay-page-button') as HTMLButtonElement).disabled).toBe(true);
+    await card.click(card.byId('pay-page-button'));
+    expect(card.lastRequest('ui/open-link')).toBeUndefined();
+    await card.click(card.byId('studio-words-cancel'));
+    expect((card.byId('pay-page-button') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('counts past the third page as more than we print', async () => {
+    const card = mount();
+    const THREE_FIT = { pages: 3, sheets: 2, doubleSided: true, roomLines: 1, roomCharacters: 100, charactersPerLine: 97 };
+    await card.show(output({ ...CLASSIC, pages: 3, canSendNow: false, sendEligibility: PAY_AND_SEND }), { ...ON, pageFit: THREE_FIT });
+    await card.click(card.tab('words'));
+    await card.click(card.byId('studio-words-open'));
+    expect(text(card, 'studio-words-count')).toBe('About 100 characters left on the third page.');
+    await type(card, 'studio-words-body', `${ARGS.bodyText}${'x'.repeat(300)}`);
+    expect(text(card, 'studio-words-count')).toBe('About 200 characters past the third page, more than we print.');
+  });
+
+  it("keeps its own page and price when the status answer it asked for first arrives after the words changed", async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
+    await card.click(card.tab('words'));
+    await card.click(card.byId('studio-words-open'));
+    await type(card, 'studio-words-body', 'Dear Sam,\n\nLonger now.');
+    await card.click(card.byId('studio-words-update'));
+    await card.answer(ranOn, 'set_letter_words');
+    // The answer to the question the card asked on its first render: the page before.
+    await card.answerTo(
+      card.requests('tools/call', 'get_draft_status')[0],
+      {
+        result: {
+          content: [],
+          structuredContent: { draftId: 'draft_0001', status: 'ready', deliveryEstimate: 'Mailed in 1-2 business days', stationery: { theme: 'classic' }, ...canSend },
+          _meta: { previewHtml: PAGE }
+        }
+      }
+    );
+    expect(card.document.querySelectorAll('#mockup-container svg')).toHaveLength(2);
+    expect(text(card, 'studio-cost')).toBe('Pay & Send USD 5.99');
+  });
+
+  it('starts a new draft in the card from its own words', async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
+    await card.click(card.tab('words'));
+    await card.click(card.byId('studio-words-open'));
+    await type(card, 'studio-words-body', 'Dear Sam,\n\nLonger now.');
+    await card.click(card.byId('studio-words-update'));
+    await card.answer(ranOn, 'set_letter_words');
+    expect(text(card, 'studio-words')).toBe('Dear Sam,\n\nLonger now.\n\nLove,\nPat');
+
+    for (const time of ['once', 'again']) {
+      await card.show({ ...output(CLASSIC), draftId: 'draft_0002' }, { ...ON, pageFit: FIT });
+      expect(text(card, 'studio-words'), time).toBe('Dear Sam,\n\nThe garden is in.\n\nLove,\nPat');
+    }
+    // And its editor opens on its own words.
+    await card.click(card.byId('studio-words-open'));
+    expect((card.byId('studio-words-body') as HTMLTextAreaElement).value).toBe(ARGS.bodyText);
+  });
+
+  it('says a gift letter is one page when the words run past it', async () => {
+    const card = mount();
+    await card.show(output({ ...CLASSIC, giftCard: { state: 'funded' } }), { ...ON, pageFit: FIT });
+    await card.click(card.tab('words'));
+    await card.click(card.byId('studio-words-open'));
+    await type(card, 'studio-words-body', `${ARGS.bodyText}${'x'.repeat(2000)}`);
+    expect(text(card, 'studio-words-count')).toBe('About 60 characters past this page, and a gift letter is one page.');
+  });
+
+  it('is not offered while room to write is not, nor once the letter is sent', async () => {
+    const plain = mount();
+    await plain.show(output(CLASSIC), ON);
+    expect(plain.byId('studio-words-open').hidden).toBe(true);
+    expect(plain.byId('studio-words-chat').hidden).toBe(false);
+
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
+    await card.click(card.byId('send-button'));
+    await card.answer({ result: { content: [{ type: 'text', text: 'Sent.' }], structuredContent: { orderId: 'order-1' } } }, 'send_letter');
+    expect(card.byId('studio-words-open').hidden).toBe(true);
+    expect(card.byId('studio-words-chat').hidden).toBe(false);
   });
 });

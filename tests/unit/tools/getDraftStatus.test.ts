@@ -17,6 +17,7 @@ vi.mock("../../../src/services/draftService.js", () => ({
 import { DELIVERY_ESTIMATE } from "../../../src/content/delivery.js";
 import { getDraftState } from "../../../src/services/draftService.js";
 import { getDraftStatusTool } from "../../../src/tools/getDraftStatus.js";
+import { wordsVersionOf } from "../../../src/tools/letterHelpers.js";
 
 const DRAFT_ID = "0f1e2d3c-4b5a-4978-8796-a5b4c3d2e1f0";
 const ORDER_ID = "5a6a079a-ee06-41f5-a782-25f3016089f5";
@@ -71,7 +72,7 @@ describe("get_draft_status (#474)", () => {
   });
 
   it("says what a ready letter costs now while room to write is offered, as a restyle may have changed it (#586)", async () => {
-    const ready = state({ mail_type: "letter", renderer_version: "pdf-1", pages: 2, required_credits: 2, is_gift_send: false });
+    const ready = state({ mail_type: "letter", renderer_version: "pdf-1", pages: 2, required_credits: 2, is_gift_send: false, body_text: "Dear Sam,", sign_off: "Pat" });
     vi.mocked(getDraftState).mockResolvedValue(ready as any);
     // Not offered: the pages alone, as before.
     await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual({ ...READY, pages: 2 });
@@ -82,6 +83,8 @@ describe("get_draft_status (#474)", () => {
     try {
       const answer = await ask({ draftId: DRAFT_ID }, { ...context(), user: { userId: "auth0|owner", creditsRemaining: 10, orders: [] } as any });
       expect(answer).toMatchObject({ ...READY, pages: 2, canSendNow: false });
+      // And its words now, with their version, for the card's Words tab (#593 review round 1).
+      expect(answer).toMatchObject({ bodyText: ready.body_text, signOff: ready.sign_off, wordsVersion: wordsVersionOf(ready.body_text, ready.sign_off) });
       expect(answer.reasonCannotSend).toMatch(/paid with Pay & Send/);
       expect(answer.sendEligibility).toMatchObject({ packPays: false });
 

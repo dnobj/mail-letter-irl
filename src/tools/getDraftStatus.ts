@@ -8,7 +8,7 @@ import { stationeryOf, type Stationery } from '../render/stationery.js';
 import { draftScheduleOf } from '../services/draftSchedule.js';
 import { heldSendFields, waitsInOutbox } from './heldSend.js';
 import { isDraftIdShape } from './requestSend.js';
-import { letterPayment } from './letterHelpers.js';
+import { letterPayment, wordsVersionOf } from './letterHelpers.js';
 import { letterPageLimit } from '../config/roomToWrite.js';
 import type { SendEligibility } from '../services/commerceService.js';
 
@@ -66,6 +66,10 @@ export interface GetDraftStatusOutput {
   canSendNow?: boolean;
   reasonCannotSend?: string;
   sendEligibility?: SendEligibility;
+  /** Ready, while room to write is offered (#586): its words now, and their version, for the card. */
+  bodyText?: string;
+  signOff?: string;
+  wordsVersion?: string;
 }
 
 /** The draft's dates, or none: a status answer is never refused over dates it cannot read. */
@@ -124,7 +128,7 @@ async function handler(
   const ready: GetDraftStatusOutput = schedule
     ? { draftId, status: 'ready', schedule, deliveryEstimate: scheduleSentence(schedule, context.now()) }
     : { draftId, status: 'ready', deliveryEstimate: DELIVERY_ESTIMATE };
-  return { ...ready, ...styleNow(draft), ...pagesNow(draft), ...termsNow(draft, draftId, context) };
+  return { ...ready, ...styleNow(draft), ...pagesNow(draft), ...termsNow(draft, draftId, context), ...wordsNow(draft) };
 }
 
 /**
@@ -142,6 +146,17 @@ function termsNow(
   const pages = Number(draft.pages ?? 1);
   const option = pages > 1 ? { mailType: 'letter' as const, pages } : { mailType: 'letter' as const };
   return letterPayment(option, Number(draft.required_credits ?? 2), draft.is_gift_send === true, context, draftId);
+}
+
+/**
+ * A ready letter's words now, and their version (#586), while room to write
+ * is offered: the chat may have changed them since the card's preview, and
+ * the card's Words tab starts from them (#593 review round 1).
+ */
+function wordsNow(draft: DraftState): Pick<GetDraftStatusOutput, 'bodyText' | 'signOff' | 'wordsVersion'> {
+  if (draft.mail_type !== 'letter' || !draft.renderer_version || letterPageLimit() === 1) return {};
+  const signOff = draft.sign_off ?? '';
+  return { bodyText: draft.body_text, signOff, wordsVersion: wordsVersionOf(draft.body_text, signOff) };
 }
 
 /**

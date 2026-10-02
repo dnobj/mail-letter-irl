@@ -54,6 +54,8 @@ export const TOOL_SCOPES: Record<string, ProductScope> = {
   // nothing, so it sits with the drafting tools.
   set_arrival_date: "mail:draft",
   set_stationery: "mail:draft",
+  // Changes a preview's words (#586): drafting, and it sends nothing.
+  set_letter_words: "mail:draft",
   // Cancels held mail (#535): it only ever returns value to the person, so it
   // sits with the drafting tools, as the issue decided.
   cancel_scheduled_mail: "mail:draft",

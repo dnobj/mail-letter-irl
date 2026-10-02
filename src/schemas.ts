@@ -6,6 +6,11 @@ import {
   HEADLINE_DESCRIPTION,
   MONOGRAM_DESCRIPTION,
   PREVIEW_PAGES_DESCRIPTION,
+  WORDS_VERSION_DESCRIPTION,
+  SET_LETTER_WORDS_VERSION_DESCRIPTION,
+  SET_LETTER_WORDS_BODY_DESCRIPTION,
+  SET_LETTER_WORDS_SIGN_OFF_DESCRIPTION,
+  SET_LETTER_WORDS_CAN_SEND_DESCRIPTION,
   PREVIEW_STATIONERY_DESCRIPTION,
   STATIONERY_SOURCE_DESCRIPTION,
   SET_ARRIVE_BY_DESCRIPTION,
@@ -263,6 +268,7 @@ export const quoteAndPreviewOutputSchema: JsonSchema = {
     arrivalWindow: arrivalWindowSchema,
     stationery: previewStationerySchema,
     pages: { type: "integer", minimum: 2, maximum: MAX_LETTER_PAGES, description: PREVIEW_PAGES_DESCRIPTION },
+    wordsVersion: { type: "string", description: WORDS_VERSION_DESCRIPTION },
     previewHtml: { type: "string" },
     lettersRequired: { type: "number", description: "Letters required from balance (always 1 for standard letter)" },
     canSendNow: { type: "boolean" },
@@ -860,6 +866,9 @@ export const getDraftStatusOutputSchema: JsonSchema = {
     cancellable: { type: "boolean", description: "A sent draft's order: whether it can still be cancelled free" },
     pages: { type: "integer", minimum: 2, maximum: MAX_LETTER_PAGES, description: "A ready letter of more than one page: the pages it is laid out on now" },
     canSendNow: { type: "boolean", description: "A ready letter, while room to write is offered: whether the balance or a gift letter pays for it now" },
+    bodyText: { type: "string", description: "A ready letter, while room to write is offered: its words now, for the card" },
+    signOff: { type: "string" },
+    wordsVersion: { type: "string", description: WORDS_VERSION_DESCRIPTION },
     reasonCannotSend: { type: "string" },
     sendEligibility: sendEligibilitySchema,
     stationery: {
@@ -999,6 +1008,31 @@ export const setStationeryOutputSchema: JsonSchema = {
     },
     reasonCannotSend: { type: "string" },
     sendEligibility: sendEligibilitySchema,
+    message: { type: "string" }
+  }
+};
+
+export const setLetterWordsInputSchema: JsonSchema = {
+  type: "object",
+  required: ["draftId", "bodyText", "signOff"],
+  properties: {
+    draftId: { type: "string", description: "The draftId from a letter preview" },
+    bodyText: { type: "string", description: SET_LETTER_WORDS_BODY_DESCRIPTION },
+    signOff: { type: "string", description: SET_LETTER_WORDS_SIGN_OFF_DESCRIPTION },
+    wordsVersion: { type: "string", description: SET_LETTER_WORDS_VERSION_DESCRIPTION }
+  }
+};
+
+export const setLetterWordsOutputSchema: JsonSchema = {
+  type: "object",
+  required: ["draftId", "canSendNow", "sendEligibility", "wordsVersion", "message"],
+  properties: {
+    draftId: { type: "string" },
+    pages: { type: "integer", minimum: 2, maximum: MAX_LETTER_PAGES, description: PREVIEW_PAGES_DESCRIPTION },
+    canSendNow: { type: "boolean", description: SET_LETTER_WORDS_CAN_SEND_DESCRIPTION },
+    reasonCannotSend: { type: "string" },
+    sendEligibility: sendEligibilitySchema,
+    wordsVersion: { type: "string", description: "The version of the words now, for the next change of them" },
     message: { type: "string" }
   }
 };

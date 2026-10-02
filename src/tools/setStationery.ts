@@ -3,20 +3,14 @@ import { setStationeryInputSchema, setStationeryOutputSchema } from '../schemas.
 import { isStationeryOffered } from '../config/stationery.js';
 import { letterPageLimit } from '../config/roomToWrite.js';
 import type { SendEligibility } from '../services/commerceService.js';
-import { pageFit, renderPreviewSvg, rendererVersionFor, type PageFit, type Stationery } from '../render/index.js';
+import { pageFit, type PageFit, type Stationery } from '../render/index.js';
 import type { PreviewStationery } from './stationeryInput.js';
 import {
   getDraftForStationery,
   setDraftStationery,
-  type DraftScheduleRefusal
+  type DraftRedrawRefusal
 } from '../services/draftService.js';
-import {
-  renderedPageImage,
-  rendererDocumentPages,
-  renderLetterPreviewDocument,
-  stampedAddressLines
-} from '../services/previewService.js';
-import { layoutLetterForPreview, letterOption, letterPayment, validatePrintableLetter, withDisplayImage } from './letterHelpers.js';
+import { layoutLetterForPreview, letterOption, letterPayment, redrawLetterPreview, validatePrintableLetter } from './letterHelpers.js';
 import { isDraftIdShape } from './requestSend.js';
 import { previewStationery, THEME_LIST } from './stationeryInput.js';
 
@@ -76,7 +70,8 @@ export class StationeryRefusedError extends Error {
       | 'DRAFT_EXPIRED'
       | 'DRAFT_CHECKOUT_PENDING'
       | 'DRAFT_NOT_A_LETTER'
-      | 'DRAFT_NOT_DRAWN',
+      | 'DRAFT_NOT_DRAWN'
+      | 'DRAFT_CHANGED',
     message: string
   ) {
     super(message);
@@ -85,14 +80,16 @@ export class StationeryRefusedError extends Error {
   }
 }
 
-const REFUSALS: Record<DraftScheduleRefusal, [StationeryRefusedError['code'], string]> = {
+const REFUSALS: Record<DraftRedrawRefusal, [StationeryRefusedError['code'], string]> = {
   not_found: ['DRAFT_NOT_FOUND', "That preview wasn't found. Make a new preview, then try again."],
   sent: ['DRAFT_ALREADY_SENT', "This letter has already been sent, so its stationery can't change. list_orders shows it."],
   expired: ['DRAFT_EXPIRED', 'This preview has expired. Make a new preview: the letter previews take stationery themselves.'],
   checkout_pending: [
     'DRAFT_CHECKOUT_PENDING',
     "This preview is tied to a Pay & Send payment, so its stationery can't change now."
-  ]
+  ],
+  // Its words changed while the page was drawn again (#586).
+  changed: ['DRAFT_CHANGED', 'The letter changed while its page was being drawn again. Try the stationery again.']
 };
 
 const NOT_DRAWN =
@@ -176,25 +173,24 @@ async function handler(input: SetStationeryInput, context: ToolContext): Promise
     draft.is_gift_send ? 1 : letterPageLimit()
   )!;
 
-  // The letter's pages drawn again, as many as it takes now, with the small
-  // copy of its picture from whichever page showed it; the pages after the
-  // letter's own, a gift letter's card, as they were.
-  const stored = rendererDocumentPages(draft.preview_html);
-  const letterPages = stored.slice(0, pagesBefore);
-  const after = stored.slice(pagesBefore);
-  const image = letterPages.map(renderedPageImage).find(found => found !== undefined);
-  const drawsImage = layout.pages.some(page => page.items.some(item => item.kind === 'image'));
-  if (letterPages.length < pagesBefore || letterPages.length === 0 || (drawsImage && !image)) {
-    throw refused('DRAFT_NOT_DRAWN', NOT_DRAWN, context);
-  }
-  const drawn = renderPreviewSvg(withDisplayImage(layout, image), {
-    addresses: { from: stampedAddressLines(sender), to: stampedAddressLines(recipient) }
-  });
-  const rendererVersion = rendererVersionFor(stationery);
-  const previewHtml = renderLetterPreviewDocument([...drawn, ...after], { bodyText, signOff }, rendererVersion);
+  // The letter's pages drawn again, as many as it takes now; the pages after
+  // the letter's own, a gift letter's card, as they were.
+  const previewHtml = redrawLetterPreview(
+    { previewHtml: draft.preview_html, pages: pagesBefore },
+    layout,
+    { sender, recipient, bodyText, signOff },
+    stationery
+  );
+  if (previewHtml === null) throw refused('DRAFT_NOT_DRAWN', NOT_DRAWN, context);
   const pages = layout.pages.length;
 
-  const refusal = await setDraftStationery(draftId, userId, { stationery, previewHtml, pages }, context.now());
+  // With the words it was drawn from, refused if they changed meanwhile (#586).
+  const refusal = await setDraftStationery(
+    draftId,
+    userId,
+    { stationery, previewHtml, pages, drawnFrom: { bodyText: draft.body_text, signOff: draft.sign_off } },
+    context.now()
+  );
   if (refusal) throw refused(...REFUSALS[refusal], context);
 
   context.logger.info(

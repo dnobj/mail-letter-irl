@@ -290,6 +290,10 @@ describe('the confirmation page takes Pay & Send for mail no pack pays for (#579
       ['DRAFT_IS_GIFT', 409, 'gift'],
       ['PREPAID_BALANCE_AVAILABLE', 409, 'use_letters'],
       ['JIT_OPTION_NOT_SOLD', 409, 'not_sold'],
+      // Its pages, and so its price, changed while the payment opened (#586).
+      ['DRAFT_CHANGED', 409, 'changed'],
+      // Its last payment link is still closing at the old price (#593 review round 1).
+      ['PREVIOUS_CHECKOUT_CLOSING', 409, 'closing'],
       ['JIT_DISABLED', 503, 'pay_unavailable'],
       ['JIT_NOT_CONFIGURED', 503, 'pay_unavailable'],
       ['PRICE_ID_NOT_CONFIGURED', 503, 'pay_unavailable'],

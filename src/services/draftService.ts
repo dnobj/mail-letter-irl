@@ -331,6 +331,7 @@ export interface DraftState
     LetterDraft,
     | 'draft_id' | 'user_id' | 'status' | 'expires_at' | 'consumed_letter_id' | 'arrive_by' | 'mail_on'
     | 'mail_type' | 'renderer_version' | 'stationery' | 'preview_html' | 'pages' | 'is_gift_send' | 'required_credits'
+    | 'body_text' | 'sign_off'
   > {
   /** The letter the draft became; null for a draft not sent, or a letter that is not the draft owner's. */
   letter_status: LetterStatus | null;
@@ -343,6 +344,7 @@ export async function getDraftState(draftId: string): Promise<DraftState | null>
   const result = await query<DraftState>(
     `SELECT d.draft_id, d.user_id, d.status, d.expires_at, d.consumed_letter_id, d.arrive_by, d.mail_on,
             d.mail_type, d.renderer_version, d.stationery, d.pages, d.is_gift_send, d.required_credits,
+            d.body_text, d.sign_off,
             -- The page only where get_draft_status can give it: a letter our
             -- renderer drew, still pending.
             CASE WHEN d.status = 'pending' AND d.mail_type = 'letter' AND d.renderer_version IS NOT NULL
@@ -476,6 +478,13 @@ export const LIVE_PAY_AND_SEND_STATUSES = [
 export type DraftScheduleRefusal = 'not_found' | 'sent' | 'expired' | 'checkout_pending';
 
 /**
+ * Why a draft's page was not drawn again in place (setDraftStationery,
+ * setDraftWords): as for its dates, or 'changed', when what the page was
+ * drawn from changed under the caller (#586).
+ */
+export type DraftRedrawRefusal = DraftScheduleRefusal | 'changed';
+
+/**
  * Sets, moves or clears a draft's arrival dates (#535, set_arrival_date):
  * only a draft that is the caller's, still pending and unexpired, with no live
  * Pay & Send order but a checkout whose window has passed, which can no
@@ -512,7 +521,7 @@ export async function setDraftSchedule(
 }
 
 /**
- * Locks a draft a tool may still change (its dates, its stationery), or says
+ * Locks a draft a tool may still change (its dates, its stationery, its words), or says
  * why it may not: it is the caller's, pending, unexpired and not emptied by an
  * erasure, with no live Pay & Send order but a checkout whose window has
  * passed. Someone else's draft is refused as a missing one, and is not locked.
@@ -576,18 +585,43 @@ export interface DraftForStationery {
   is_gift_send: boolean;
   /** The letters its preview priced it at, for what a restyle says it costs. */
   required_credits: number;
+  /** The stationery as stored (null for Classic): new words are laid out in it (#586). */
+  stationery: unknown;
 }
 
 /** The caller's draft, as set_stationery draws it again, or null when it is not theirs or not there. */
 export async function getDraftForStationery(draftId: string, userId: string): Promise<DraftForStationery | null> {
   const result = await query<DraftForStationery>(
     `SELECT mail_type, status, expires_at, redacted_at, renderer_version, body_text, sign_off, layout_type,
-            header_image_data, inline_image_data, sender, recipient, preview_html, pages, is_gift_send, required_credits
+            header_image_data, inline_image_data, sender, recipient, preview_html, pages, is_gift_send, required_credits,
+            stationery
      FROM letter_drafts
      WHERE draft_id = $1 AND user_id = $2`,
     [draftId, userId]
   );
   return result.rows[0] ?? null;
+}
+
+/**
+ * What an in-place edit drew its page from, as it read the draft before the
+ * lock (#586): a restyle draws the letter's words, and new words are drawn in
+ * its stationery. Each writes what the other draws from, so whichever
+ * committed second would store a page drawn from what the first replaced.
+ * Read again under the lock; any change refuses the edit, to be tried again.
+ */
+type DrawnFrom = { words?: { bodyText: string; signOff: string | null }; stationery?: unknown };
+
+async function drawnFromChanged(client: pg.PoolClient, draftId: string, drawnFrom: DrawnFrom): Promise<boolean> {
+  const locked = await client.query<{ body_text: string; sign_off: string | null; stationery: unknown }>(
+    'SELECT body_text, sign_off, stationery FROM letter_drafts WHERE draft_id = $1',
+    [draftId]
+  );
+  const row = locked.rows[0];
+  if (!row) return true;
+  const words = drawnFrom.words;
+  if (words && (row.body_text !== words.bodyText || (row.sign_off ?? null) !== (words.signOff ?? null))) return true;
+  // Both read from the same jsonb column, so an unchanged value serialises the same.
+  return 'stationery' in drawnFrom && JSON.stringify(row.stationery ?? null) !== JSON.stringify(drawnFrom.stationery ?? null);
 }
 
 /**
@@ -601,15 +635,20 @@ export async function getDraftForStationery(draftId: string, userId: string): Pr
  * In the same transaction the account remembers the theme (migration 045):
  * restyling is an explicit choice, made by the model or on the card.
  *
- * Returns the refusal, or null once the draft is restyled.
+ * Returns the refusal, or null once the draft is restyled: 'changed' when its
+ * words changed since the caller read them (#586), as the page was drawn
+ * from those.
  */
 export async function setDraftStationery(
   draftId: string,
   userId: string,
-  /** `pages`: the pages the letter is laid out on now (#586); left as it was when absent. */
-  change: { stationery: Stationery; previewHtml: string; pages?: number },
+  /**
+   * `pages`: the pages the letter is laid out on now (#586); left as it was
+   * when absent. `drawnFrom`: the words the page was drawn from, as read.
+   */
+  change: { stationery: Stationery; previewHtml: string; pages?: number; drawnFrom: { bodyText: string; signOff: string | null } },
   now: Date = new Date()
-): Promise<DraftScheduleRefusal | null> {
+): Promise<DraftRedrawRefusal | null> {
   const stationery = storedStationery(change.stationery);
   // The version goes with the stationery stored (rendererVersionFor), so
   // 044's pair check holds whatever the caller drew.
@@ -617,6 +656,7 @@ export async function setDraftStationery(
   return transaction(async client => {
     const refusal = await lockChangeableDraft(client, draftId, userId, now);
     if (refusal) return refusal;
+    if (await drawnFromChanged(client, draftId, { words: change.drawnFrom })) return 'changed';
 
     await client.query(
       `UPDATE letter_drafts
@@ -631,6 +671,51 @@ export async function setDraftStationery(
       change.stationery.theme
     ]);
     writeDiagnostic('info', 'draft.stationery_set', { theme: change.stationery.theme });
+    return null;
+  });
+}
+
+/**
+ * A letter draft's words changed in place (#586, set_letter_words): its body
+ * and sign-off, the preview drawn again from them, which the caller laid out
+ * in the draft's own stationery, and the pages it now takes. Under the same
+ * lock as a restyle, so a send or a Pay & Send checkout runs before or after
+ * it, never between, and its price is the draft's from then on.
+ *
+ * Returns the refusal, or null once the words are changed: 'changed' when the
+ * stationery changed since the caller read it, as the page was drawn in that,
+ * or the words it replaces did (#593 review round 1).
+ */
+export async function setDraftWords(
+  draftId: string,
+  userId: string,
+  /**
+   * `drawnIn`: the stored stationery the page was drawn in, as read.
+   * `replacing`: the words it replaces, as read.
+   */
+  change: {
+    bodyText: string;
+    signOff: string;
+    previewHtml: string;
+    pages: number;
+    drawnIn: unknown;
+    replacing: { bodyText: string; signOff: string | null };
+  },
+  now: Date = new Date()
+): Promise<DraftRedrawRefusal | null> {
+  return transaction(async client => {
+    const refusal = await lockChangeableDraft(client, draftId, userId, now);
+    if (refusal) return refusal;
+    if (await drawnFromChanged(client, draftId, { words: change.replacing, stationery: change.drawnIn })) return 'changed';
+
+    await client.query(
+      `UPDATE letter_drafts
+       SET body_text = $2, sign_off = $3, preview_html = $4, pages = $5::smallint, updated_at = NOW()
+       WHERE draft_id = $1`,
+      [draftId, change.bodyText, change.signOff, change.previewHtml, change.pages]
+    );
+    // Counts only: the words never reach the log.
+    writeDiagnostic('info', 'draft.words_set', { pages: change.pages, characters: change.bodyText.length + change.signOff.length });
     return null;
   });
 }

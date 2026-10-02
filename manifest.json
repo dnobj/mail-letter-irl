@@ -231,6 +231,10 @@
             "maximum": 3,
             "description": "Present only for a letter of more than one page: the pages it prints on, both sides of the paper. No letter pack or gift letter pays for it; it is paid with Pay & Send."
           },
+          "wordsVersion": {
+            "type": "string",
+            "description": "While room to write is offered: the version of the letter's words, which set_letter_words takes to say which words it replaces"
+          },
           "previewHtml": {
             "type": "string"
           },
@@ -638,6 +642,10 @@
             "maximum": 3,
             "description": "Present only for a letter of more than one page: the pages it prints on, both sides of the paper. No letter pack or gift letter pays for it; it is paid with Pay & Send."
           },
+          "wordsVersion": {
+            "type": "string",
+            "description": "While room to write is offered: the version of the letter's words, which set_letter_words takes to say which words it replaces"
+          },
           "previewHtml": {
             "type": "string"
           },
@@ -1044,6 +1052,10 @@
             "minimum": 2,
             "maximum": 3,
             "description": "Present only for a letter of more than one page: the pages it prints on, both sides of the paper. No letter pack or gift letter pays for it; it is paid with Pay & Send."
+          },
+          "wordsVersion": {
+            "type": "string",
+            "description": "While room to write is offered: the version of the letter's words, which set_letter_words takes to say which words it replaces"
           },
           "previewHtml": {
             "type": "string"
@@ -2543,6 +2555,17 @@
           "canSendNow": {
             "type": "boolean",
             "description": "A ready letter, while room to write is offered: whether the balance or a gift letter pays for it now"
+          },
+          "bodyText": {
+            "type": "string",
+            "description": "A ready letter, while room to write is offered: its words now, for the card"
+          },
+          "signOff": {
+            "type": "string"
+          },
+          "wordsVersion": {
+            "type": "string",
+            "description": "While room to write is offered: the version of the letter's words, which set_letter_words takes to say which words it replaces"
           },
           "reasonCannotSend": {
             "type": "string"

@@ -44,6 +44,7 @@ import {
   cancelDraft,
   setDraftSchedule,
   setDraftStationery,
+  setDraftWords,
   getDraftForStationery,
   getDraftState,
   LIVE_PAY_AND_SEND_STATUSES,
@@ -813,6 +814,9 @@ describe('draftService stationery (#563)', () => {
   const pending = { status: 'pending', expires_at: new Date('2026-10-02T09:00:00Z') };
   const BOTANICAL = { theme: 'botanical' as const, dateLine: 'October 1, 2026' };
   const PAGE = '<!DOCTYPE html><html><body data-renderer="pdf-2"><svg></svg></body></html>';
+  // The words a restyle drew its page from, and the row as the lock reads them again (#586).
+  const WORDS = { bodyText: 'Dear Sam,', signOff: 'Pat' };
+  const DRAWN = { body_text: 'Dear Sam,', sign_off: 'Pat', stationery: null };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -845,7 +849,8 @@ describe('draftService stationery (#563)', () => {
       await expect(getDraftForStationery('draft-1', 'auth0|owner')).resolves.toEqual({ mail_type: 'letter' });
       const [sql, params] = vi.mocked(db.query).mock.calls[0] as [string, unknown[]];
       for (const column of ['mail_type', 'status', 'expires_at', 'redacted_at', 'renderer_version', 'body_text', 'sign_off', 'layout_type',
-        'header_image_data', 'inline_image_data', 'sender', 'recipient', 'preview_html', 'pages', 'is_gift_send', 'required_credits']) {
+        'header_image_data', 'inline_image_data', 'sender', 'recipient', 'preview_html', 'pages', 'is_gift_send', 'required_credits',
+        'stationery']) {
         expect(sql, column).toContain(column);
       }
       expect(sql).toMatch(/WHERE draft_id = \$1 AND user_id = \$2/);
@@ -860,16 +865,18 @@ describe('draftService stationery (#563)', () => {
 
   describe('setDraftStationery', () => {
     it('locks the draft as setDraftSchedule does, restyles it, and remembers the theme, in one transaction', async () => {
-      const client = inTransaction({ rows: [pending] }, { rows: [] });
+      const client = inTransaction({ rows: [pending] }, { rows: [] }, { rows: [DRAWN] });
 
       await expect(
-        setDraftStationery('draft-1', 'auth0|owner', { stationery: { ...BOTANICAL, source: 'asked' } as any, previewHtml: PAGE }, NOW)
+        setDraftStationery('draft-1', 'auth0|owner', { stationery: { ...BOTANICAL, source: 'asked' } as any, previewHtml: PAGE, drawnFrom: WORDS }, NOW)
       ).resolves.toBeNull();
 
-      const [lock, live, update, remember] = client.query.mock.calls as Array<[string, unknown[]]>;
+      const [lock, live, read, update, remember] = client.query.mock.calls as Array<[string, unknown[]]>;
       expect(lock[0]).toMatch(/FROM letter_drafts WHERE draft_id = \$1 AND user_id = \$2 FOR UPDATE/);
       expect(live[0]).toMatch(/FROM orders/);
       expect(live[1]).toEqual(['draft-1', [...LIVE_PAY_AND_SEND_STATUSES]]);
+      // What the page was drawn from, read again under the lock (#586).
+      expect(read).toEqual(['SELECT body_text, sign_off, stationery FROM letter_drafts WHERE draft_id = $1', ['draft-1']]);
       expect(update[0]).toMatch(
         /UPDATE letter_drafts\s+SET stationery = \$2::jsonb, renderer_version = \$3, preview_html = \$4,\s+pages = COALESCE\(\$5::smallint, pages\), updated_at = NOW\(\)\s+WHERE draft_id = \$1/
       );
@@ -879,26 +886,47 @@ describe('draftService stationery (#563)', () => {
       // Never on an erased account (#571 review round 3).
       expect(remember[0]).toBe('UPDATE users SET stationery_theme = $2 WHERE user_id = $1 AND erased_at IS NULL');
       expect(remember[1]).toEqual(['auth0|owner', 'botanical']);
-      expect(client.query).toHaveBeenCalledTimes(4);
+      expect(client.query).toHaveBeenCalledTimes(5);
     });
 
     it('stores Classic as none, with pdf-1, and remembers Classic like any theme', async () => {
-      const client = inTransaction({ rows: [pending] }, { rows: [] });
+      const client = inTransaction({ rows: [pending] }, { rows: [] }, { rows: [DRAWN] });
 
       await expect(
-        setDraftStationery('draft-1', 'auth0|owner', { stationery: { theme: 'classic' }, previewHtml: PAGE }, NOW)
+        setDraftStationery('draft-1', 'auth0|owner', { stationery: { theme: 'classic' }, previewHtml: PAGE, drawnFrom: WORDS }, NOW)
       ).resolves.toBeNull();
 
-      expect(client.query.mock.calls[2][1]).toEqual(['draft-1', null, 'pdf-1', PAGE, null]);
-      expect(client.query.mock.calls[3][1]).toEqual(['auth0|owner', 'classic']);
+      expect(client.query.mock.calls[3][1]).toEqual(['draft-1', null, 'pdf-1', PAGE, null]);
+      expect(client.query.mock.calls[4][1]).toEqual(['auth0|owner', 'classic']);
     });
 
     it('stores the pages a restyle laid the letter out on (#586)', async () => {
-      const client = inTransaction({ rows: [pending] }, { rows: [] });
+      const client = inTransaction({ rows: [pending] }, { rows: [] }, { rows: [DRAWN] });
       await expect(
-        setDraftStationery('draft-1', 'auth0|owner', { stationery: { ...BOTANICAL } as any, previewHtml: PAGE, pages: 2 }, NOW)
+        setDraftStationery('draft-1', 'auth0|owner', { stationery: { ...BOTANICAL } as any, previewHtml: PAGE, pages: 2, drawnFrom: WORDS }, NOW)
       ).resolves.toBeNull();
-      expect(client.query.mock.calls[2][1]).toEqual(['draft-1', JSON.stringify(BOTANICAL), 'pdf-2', PAGE, 2]);
+      expect(client.query.mock.calls[3][1]).toEqual(['draft-1', JSON.stringify(BOTANICAL), 'pdf-2', PAGE, 2]);
+    });
+
+    it.each([
+      ['its body', { body_text: 'Dear Sam, and more,' }],
+      ['its sign-off', { sign_off: 'Love, Pat' }],
+      ['its sign-off, gone', { sign_off: null }]
+    ])('refuses a restyle drawn from words that changed under it: %s (#586)', async (_label, changed) => {
+      const client = inTransaction({ rows: [pending] }, { rows: [] }, { rows: [{ ...DRAWN, ...changed }] });
+      await expect(
+        setDraftStationery('draft-1', 'auth0|owner', { stationery: BOTANICAL, previewHtml: PAGE, pages: 2, drawnFrom: WORDS }, NOW)
+      ).resolves.toBe('changed');
+      // Nothing written, nothing remembered.
+      expect(client.query).toHaveBeenCalledTimes(3);
+    });
+
+    it('takes a sign-off stored as none as the none it was drawn from', async () => {
+      const client = inTransaction({ rows: [pending] }, { rows: [] }, { rows: [{ ...DRAWN, sign_off: null }] });
+      await expect(
+        setDraftStationery('draft-1', 'auth0|owner', { stationery: BOTANICAL, previewHtml: PAGE, drawnFrom: { ...WORDS, signOff: null } }, NOW)
+      ).resolves.toBeNull();
+      expect(client.query).toHaveBeenCalledTimes(5);
     });
 
     it.each([
@@ -912,7 +940,7 @@ describe('draftService stationery (#563)', () => {
       const client = inTransaction(...(answers as Array<{ rows: unknown[] }>));
 
       await expect(
-        setDraftStationery('draft-1', 'auth0|owner', { stationery: BOTANICAL, previewHtml: PAGE }, NOW)
+        setDraftStationery('draft-1', 'auth0|owner', { stationery: BOTANICAL, previewHtml: PAGE, drawnFrom: WORDS }, NOW)
       ).resolves.toBe(refusal);
 
       expect(client.query).toHaveBeenCalledTimes(statements);
@@ -921,10 +949,73 @@ describe('draftService stationery (#563)', () => {
     it('refuses a theme the print would not read back before any statement', async () => {
       const client = inTransaction();
       await expect(
-        setDraftStationery('draft-1', 'auth0|owner', { stationery: { theme: 'floral' } as any, previewHtml: PAGE }, NOW)
+        setDraftStationery('draft-1', 'auth0|owner', { stationery: { theme: 'floral' } as any, previewHtml: PAGE, drawnFrom: WORDS }, NOW)
       ).rejects.toMatchObject({ code: 'STATIONERY_UNREADABLE', diagnosticClass: 'validation_error' });
       expect(db.transaction).not.toHaveBeenCalled();
       expect(client.query).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('setDraftWords (#586)', () => {
+    it.each([
+      ['its body', { body_text: 'Dear Sam, changed on the card,' }],
+      ['its sign-off', { sign_off: 'Love, Pat' }]
+    ])('refuses new words when the words they replace changed under them: %s (#593 review round 1)', async (_label, changed) => {
+      const client = inTransaction({ rows: [pending] }, { rows: [] }, { rows: [{ ...DRAWN, ...changed }] });
+      await expect(
+        setDraftWords('draft-1', 'auth0|owner', { bodyText: 'New', signOff: 'Pat', previewHtml: PAGE, pages: 1, drawnIn: null, replacing: WORDS }, NOW)
+      ).resolves.toBe('changed');
+      expect(client.query).toHaveBeenCalledTimes(3);
+    });
+
+    // The words it replaces, as the tool read them (#593 review round 1).
+    const NEW = { bodyText: 'Dear Sam, the garden is in.', signOff: 'Love, Pat', previewHtml: PAGE, pages: 2, replacing: WORDS };
+
+    it('locks the draft as a restyle does, checks the stationery it was drawn in, and writes the words, page and pages in one statement', async () => {
+      const client = inTransaction({ rows: [pending] }, { rows: [] }, { rows: [{ ...DRAWN, stationery: BOTANICAL }] });
+
+      await expect(setDraftWords('draft-1', 'auth0|owner', { ...NEW, drawnIn: { ...BOTANICAL } }, NOW)).resolves.toBeNull();
+
+      const [lock, live, read, update] = client.query.mock.calls as Array<[string, unknown[]]>;
+      expect(lock[0]).toMatch(/FROM letter_drafts WHERE draft_id = \$1 AND user_id = \$2 FOR UPDATE/);
+      expect(live[0]).toMatch(/FROM orders/);
+      expect(read).toEqual(['SELECT body_text, sign_off, stationery FROM letter_drafts WHERE draft_id = $1', ['draft-1']]);
+      expect(update[0]).toMatch(
+        /UPDATE letter_drafts\s+SET body_text = \$2, sign_off = \$3, preview_html = \$4, pages = \$5::smallint, updated_at = NOW\(\)\s+WHERE draft_id = \$1/
+      );
+      expect(update[1]).toEqual(['draft-1', NEW.bodyText, NEW.signOff, PAGE, 2]);
+      // Nothing remembered: the words are this letter's only.
+      expect(client.query).toHaveBeenCalledTimes(4);
+    });
+
+    it('writes words drawn on a plain page, stored as no stationery', async () => {
+      const client = inTransaction({ rows: [pending] }, { rows: [] }, { rows: [DRAWN] });
+      await expect(setDraftWords('draft-1', 'auth0|owner', { ...NEW, pages: 1, drawnIn: null }, NOW)).resolves.toBeNull();
+      expect(client.query.mock.calls[3][1]).toEqual(['draft-1', NEW.bodyText, NEW.signOff, PAGE, 1]);
+    });
+
+    it.each([
+      ['restyled', { stationery: { theme: 'typewriter', dateLine: 'October 1, 2026' } }, BOTANICAL],
+      ['given a date line again', { stationery: { ...BOTANICAL, dateLine: 'October 2, 2026' } }, BOTANICAL],
+      ['put back on a plain page', { stationery: null }, BOTANICAL],
+      ['given a theme', { stationery: BOTANICAL }, null]
+    ])('refuses words drawn in stationery that was %s under them', async (_label, changed, drawnIn) => {
+      // (#593 review round 1: the words they replace are as read here.)
+      const client = inTransaction({ rows: [pending] }, { rows: [] }, { rows: [{ ...DRAWN, ...changed }] });
+      await expect(setDraftWords('draft-1', 'auth0|owner', { ...NEW, drawnIn }, NOW)).resolves.toBe('changed');
+      expect(client.query).toHaveBeenCalledTimes(3);
+    });
+
+    it.each([
+      ['a missing draft, or one that is not the caller\'s', [{ rows: [] }], 'not_found', 1],
+      ['a sent draft', [{ rows: [{ ...pending, status: 'consumed' }] }], 'sent', 1],
+      ['a pending draft past its expiry', [{ rows: [{ ...pending, expires_at: NOW }] }], 'expired', 1],
+      ['a draft an erasure emptied', [{ rows: [{ ...pending, redacted_at: NOW }] }], 'expired', 1],
+      ['a draft with a live Pay & Send order', [{ rows: [pending] }, { rows: [{ '?column?': 1 }] }], 'checkout_pending', 2]
+    ])('leaves %s alone', async (_label, answers, refusal, statements) => {
+      const client = inTransaction(...(answers as Array<{ rows: unknown[] }>));
+      await expect(setDraftWords('draft-1', 'auth0|owner', { ...NEW, drawnIn: null }, NOW)).resolves.toBe(refusal);
+      expect(client.query).toHaveBeenCalledTimes(statements);
     });
   });
 });

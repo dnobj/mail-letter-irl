@@ -89,6 +89,19 @@ export function friendlyCheckoutError(error: unknown): Error {
       return friendly(
         'You already have enough prepaid balance to send this draft. Use the Send action.'
       );
+    case 'DRAFT_CHANGED':
+      // New words or a restyle changed its pages, and so its price, while the
+      // checkout was being made (#586): refused before any order, so a retry
+      // prices it as it is now.
+      return friendly(
+        'This letter changed while its payment was being opened, so nothing was charged. Please try again.'
+      );
+    case 'PREVIOUS_CHECKOUT_CLOSING':
+      // The letter changed after its last checkout opened, and that checkout
+      // is still closing at the old price (#586): nothing is charged here.
+      return friendly(
+        'This letter changed after its last payment link was opened, and that link is still closing. Please try again in a few minutes; it can take up to an hour.'
+      );
     case 'JIT_OPTION_NOT_SOLD':
       // Its option's flag is off (#578): nothing can pay for this draft now,
       // so the way on is a new preview, which the option's absence keeps to

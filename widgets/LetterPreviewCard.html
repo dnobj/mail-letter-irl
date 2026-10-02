@@ -179,6 +179,15 @@
       .studio #arrives-row input[type=date]{font-size:12.5px;padding:4px 8px;border-radius:999px}
       .studio-quiet{margin:0;font-size:12px;color:var(--mut);line-height:1.45}
       .studio-words{max-height:300px;overflow:auto;white-space:pre-wrap;word-wrap:break-word;font-family:Georgia,"Times New Roman",serif;font-size:13px;line-height:1.55;color:var(--tx);background:var(--sf2);border:1px solid var(--bd2);border-radius:10px;padding:10px 12px}
+      .studio-words[hidden],.studio-words-edit[hidden],.studio-panel .note[hidden],#studio-words-open[hidden]{display:none}
+      /* The Words tab's editor (#586). */
+      .studio-words-edit{display:flex;flex-direction:column;gap:6px}
+      .studio-words-edit label{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--mut)}
+      .studio-words-edit textarea{width:100%;box-sizing:border-box;font-family:Georgia,"Times New Roman",serif;font-size:13px;line-height:1.55;color:var(--tx);background:var(--sf);border:1px solid var(--bd);border-radius:10px;padding:8px 10px;resize:vertical}
+      .studio-words-actions{display:flex;flex-wrap:wrap;gap:8px}
+      .studio-panel .words-button{font:inherit;border:1px solid var(--bd);border-radius:999px;padding:5px 11px;font-size:12px;font-weight:600;color:var(--tx);background:var(--sf);cursor:pointer;align-self:flex-start}
+      .studio-panel .words-button.primary{background:var(--pri);border-color:var(--pri);color:var(--prit)}
+      .studio-panel .words-button[aria-disabled=true]{opacity:.6;cursor:default}
       .studio-ft{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;margin:0 14px;padding:12px 0 14px;border-top:1px solid var(--bd2)}
       .studio-sum{flex:1 1 160px;min-width:0;display:flex;flex-direction:column}
       .studio-cost{font-size:14px;font-weight:700;color:var(--tx)}
@@ -378,8 +387,21 @@
           </div>
           <div class="studio-panel" role="tabpanel" id="studio-panel-words" aria-labelledby="studio-tab-words" data-tab="words" hidden>
             <div class="studio-words" id="studio-words" tabindex="0" aria-label="The letter's words"></div>
+            <div class="studio-words-edit" id="studio-words-edit" hidden>
+              <label for="studio-words-body">The letter</label>
+              <textarea id="studio-words-body" rows="10" aria-describedby="studio-words-count"></textarea>
+              <label for="studio-words-signoff">Signed</label>
+              <textarea id="studio-words-signoff" rows="2"></textarea>
+              <p class="studio-quiet" id="studio-words-count" hidden></p>
+              <div class="studio-words-actions">
+                <button type="button" class="words-button primary" id="studio-words-update">Update the page</button>
+                <button type="button" class="words-button" id="studio-words-cancel">Cancel</button>
+              </div>
+            </div>
             <p class="studio-quiet" id="studio-fit" hidden></p>
-            <p class="studio-quiet">To change the words, ask in the chat.</p>
+            <p class="note" id="studio-words-note" role="status" hidden></p>
+            <button type="button" class="words-button" id="studio-words-open" hidden>Change the words</button>
+            <p class="studio-quiet" id="studio-words-chat">To change the words, ask in the chat.</p>
           </div>
           <div class="studio-panel" role="tabpanel" id="studio-panel-delivery" aria-labelledby="studio-tab-delivery" data-tab="delivery" hidden>
             <span data-slot="arrives-row"></span>
@@ -531,6 +553,10 @@
         onBusy() {
           render();
         },
+        // The Words tab's editor (#586), drawn by the studio.
+        wordsElement(id) {
+          return document.getElementById(id);
+        },
       });
 
       // ---- The studio card (#580) -------------------------------------------
@@ -566,12 +592,24 @@
         ["cancelled", { stage: "Cancelled", timing: "cancelled, nothing will be mailed" }],
       ]);
 
-      // The letter's words, as the call that drew the preview gave them.
-      function letterWords() {
+      // The letter's words: as this card last set them (#586), or as the call
+      // that drew the preview gave them.
+      function currentWords(draftId) {
+        const set = styleRow.words(draftId);
+        if (set) return set;
         const args = retryResult ? retryResult.args : host.toolInput();
-        const body = typeof args?.bodyText === "string" ? args.bodyText.trim() : "";
-        const signOff = typeof args?.signOff === "string" ? args.signOff.trim() : "";
-        return [body, signOff].filter(Boolean).join("\n\n");
+        const output = retryResult ? retryResult.output : host.toolOutput();
+        return {
+          bodyText: typeof args?.bodyText === "string" ? args.bodyText : "",
+          signOff: typeof args?.signOff === "string" ? args.signOff : "",
+          // The version a change of them names (#593 review round 1).
+          version: typeof output?.wordsVersion === "string" ? output.wordsVersion : undefined,
+        };
+      }
+
+      function letterWords(draftId) {
+        const { bodyText, signOff } = currentWords(draftId);
+        return [bodyText.trim(), signOff.trim()].filter(Boolean).join("\n\n");
       }
 
       // A letter's terms as this card last heard them (#586): a restyle, or a
@@ -596,12 +634,18 @@
 
       // How full the letter's pages are (#586), from the last restyle or the
       // preview: the Words tab's fit line. Empty where nothing says.
+      // How full the letter's pages are as last counted: by the last change
+      // this card heard of, or the preview. Null where nothing counted them.
+      function latestFit(state) {
+        const terms = styleRow.terms(state.draftId);
+        return (terms ? terms.pageFit : currentMeta().pageFit) ?? null;
+      }
+
       function fitText(state) {
         const pages = pagesOf(state);
         if (pages === 2) return "Runs on to the back of the page: printed on both sides of one sheet.";
         if (pages === 3) return "Three pages, on two sheets: the longest letter we print.";
-        const terms = styleRow.terms(state.draftId);
-        const fit = terms ? terms.pageFit : currentMeta().pageFit;
+        const fit = latestFit(state);
         const room = fit?.pages === 1 ? Number(fit.roomCharacters) : NaN;
         return Number.isFinite(room) && room > 0
           ? `Fits on one page, with room for about ${room.toLocaleString("en-US")} more characters.`
@@ -654,12 +698,18 @@
                   : "Draft";
         document.getElementById("studio-sub").textContent = [stage, place].filter(Boolean).join(" · ");
 
-        const words = letterWords();
+        const words = letterWords(state.draftId);
         document.getElementById("studio-words").textContent = words || "The words are on the page.";
         const fit = fitText(state);
         const fitLine = document.getElementById("studio-fit");
         fitLine.textContent = fit;
         fitLine.hidden = !fit;
+        // The words can change here while room to write is offered, as the
+        // preview's count says (#586), and only where the Style row shows: the
+        // card's one word on whether the draft can still change, the row goes
+        // once the letter is sent, paid for, expired or on its confirmation page.
+        const offered = Boolean(currentMeta().pageFit || styleRow.terms(state.draftId)?.pageFit);
+        styleRow.showWords(state.draftId, currentWords(state.draftId), latestFit(state), offered, Boolean(state.giftCard));
 
         // Under the Style tab the row's label would repeat the tab's name.
         document.getElementById("style-label").textContent = "Stationery";
@@ -2151,8 +2201,9 @@
         } else if (cardIsShowingDraft()) {
           scheduled.hide();
         }
-        // Either row setting something on the draft holds the Send buttons.
-        const settingDate = picker.busy() || styleRow.busy();
+        // Either row setting something on the draft holds the Send buttons,
+        // and so do words being written that are not set yet (#586).
+        const settingDate = picker.busy() || styleRow.busy() || styleRow.editing();
         const datedSend = Boolean(picker.schedule());
 
         if (!sendInProgress && !checkoutInProgress) {
@@ -2211,6 +2262,8 @@
             typeof host.openLink === "function";
           document.getElementById("pay-page-button").style.display =
             payOnPage ? "flex" : "none";
+          // Not while words are written and not set (#593 review round 1).
+          document.getElementById("pay-page-button").disabled = styleRow.editing();
           // The note describes a checkout this card opens, so it shows only
           // where there is one to open.
           const checkoutNote = document.getElementById("checkout-note");
@@ -2241,7 +2294,7 @@
 
       // Handle send button click - US-MCP-08
       async function handleSend() {
-        if (sendInProgress || !currentDraftId || picker.busy() || styleRow.busy()) return;
+        if (sendInProgress || !currentDraftId || picker.busy() || styleRow.busy() || styleRow.editing()) return;
         draftActedOn = true;
 
         const sendButton = document.getElementById("send-button");
@@ -2632,7 +2685,7 @@
       }
 
       async function handlePayAndSend() {
-        if (checkoutInProgress || !currentDraftId || picker.busy() || styleRow.busy()) return;
+        if (checkoutInProgress || !currentDraftId || picker.busy() || styleRow.busy() || styleRow.editing()) return;
         draftActedOn = true;
         const button = document.getElementById("pay-send-button");
         const buttonText = document.getElementById("pay-send-button-text");
@@ -2852,6 +2905,8 @@
       // Mail no pack pays for, in an app with no checkout (#579): the page
       // that takes the Pay & Send payment, as the server named it.
       async function handlePayPage() {
+        // The page would take the words the draft has, not the ones being written.
+        if (styleRow.editing()) return;
         const url = currentEligibility?.payAndSend?.pageUrl;
         if (!isHttpsUrl(url) || typeof host.openLink !== "function") return;
         const errorMessage = document.getElementById("error-message");
