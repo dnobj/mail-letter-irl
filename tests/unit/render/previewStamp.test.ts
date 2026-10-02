@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { layoutLetter, layoutPostcard, POSTCARD_STAMP, renderPreviewSvg } from '../../../src/render/index.js';
+import { layoutLetter, layoutPostcard, POSTCARD_GEOMETRY, POSTCARD_STAMP, renderPreviewSvg } from '../../../src/render/index.js';
 import {
   renderLetterPreviewDocument,
   renderPostcardPreviewDocument,
@@ -60,6 +60,26 @@ describe('the address stamp on a preview', () => {
       { x: 412.2, y: 393.7, text: 'NEW YORK, NY 10118' }
     ]);
     expect(back).toContain('font-size="9"');
+  });
+
+  it.each([
+    // Probe P14: from x 3.925in on a 6x4, the recipient 1.313in above the bottom edge.
+    ['6x4', 282.6, [68.98, 81.72, 94.46, 107.21], [211.46, 224.21, 236.95, 249.7]],
+    // From x 5.725in on a 9x6, as probes P9 and P11 found.
+    ['6x9', 412.2, [68.98, 81.72, 94.46, 107.21], [355.46, 368.21, 380.95, 393.7]],
+    // And from x 7.725in on an 11x6, the recipient where it is on a 9x6.
+    ['6x11', 556.2, [68.98, 81.72, 94.46, 107.21], [355.46, 368.21, 380.95, 393.7]]
+  ] as const)('stamps a %s back where PostGrid prints it (#594)', (size, x, returnLines, recipientLines) => {
+    const image = { bytes: Buffer.alloc(0), mime: 'image/png' as const, width: 2700, height: 1800 };
+    const [, back] = renderPreviewSvg(layoutPostcard({ message: 'Hi', image, size }), {
+      addresses: { from: ['RETURN TO:', ...ADDRESSES.from], to: ADDRESSES.to },
+      stamp: { page: 1, geometry: POSTCARD_GEOMETRY[size].stamp }
+    });
+    const stamped = texts(back);
+    expect(back).toContain(`<g font-family="'Open Sans', Arial, Helvetica, sans-serif" font-size="9" fill="#000">`);
+    expect(stamped.map(line => line.x)).toEqual(Array(8).fill(x));
+    expect(stamped.map(line => line.y)).toEqual([...returnLines, ...recipientLines]);
+    expect(stamped.map(line => line.text)).toEqual(['RETURN TO:', ...ADDRESSES.from, ...ADDRESSES.to]);
   });
 
   it("heads a postcard's return address RETURN TO:, as PostGrid does", () => {

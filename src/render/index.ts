@@ -15,8 +15,8 @@ export { renderPdf, RENDERER_VERSION, rendererVersionFor, PRINTABLE_RENDERER_VER
 export { GiftPageOverflow, layoutGiftPage } from './giftPage.js';
 export type { GiftPageCopy } from './giftPage.js';
 export { GiftStripOverflow, layoutPostcard, layoutPostcardBack } from './postcard.js';
-export { CONTINUATION_TOP, MAX_LETTER_PAGES, POSTCARD_STAMP } from './geometry.js';
-export type { StampGeometry } from './geometry.js';
+export { CONTINUATION_TOP, MAX_LETTER_PAGES, POSTCARD_GEOMETRY, POSTCARD_STAMP } from './geometry.js';
+export type { PostcardGeometry, PostcardSizeName, StampGeometry } from './geometry.js';
 export type { GiftStripCopy, PostcardContent } from './postcard.js';
 export { renderPreviewSvg } from './preview.js';
 export type { PreviewOptions } from './preview.js';

@@ -1,6 +1,6 @@
 # What PostGrid does with our own PDFs (issue #534)
 
-**Date:** September 30, 2026; postcards October 1, 2026; letters of more than one page October 2, 2026 · **Probes:** PostGrid test mode, with development's key. The scripts are outside the repo, in `C:\letter-irl-scripts\probe-534\`: `probe-534.mjs`, `probe-586.mjs`, `decode-534.mjs`, `extract-raster.mjs` and `proof-pages.mjs`.
+**Date:** September 30, 2026; postcards October 1, 2026; letters of more than one page, and the 4x6 and 11x6 postcards, October 2, 2026 · **Probes:** PostGrid test mode, with development's key. The scripts are outside the repo, in `C:\letter-irl-scripts\probe-534\`: `probe-534.mjs`, `probe-586.mjs`, `decode-534.mjs`, `extract-raster.mjs`, `proof-pages.mjs` and `postcard-sizes-probe-build.mjs`.
 
 ## Why we probed
 
@@ -69,6 +69,26 @@ What they show:
 - The test-mode render shows no postage and no barcode.
 - PostGrid checks the back for content in its address region, after it accepts the postcard, and cancels the postcard if there is any. `src/render/postcard.ts` draws nothing right of the back's left half (`POSTCARD_HALF` in `geometry.ts`).
 
+### The 4x6 and 11x6 postcards (#594)
+
+Probe P14 (October 2, 2026) asked the same questions of PostGrid's two other postcard sizes, `6x4` and `11x6`, with eight postcards from `postcard-sizes-probe-build.mjs`:
+
+| Probe | Sent | Came back |
+|-------|------|-----------|
+| P14b-6x4, P14b-11x6 | The trim size alone, 6 x 4 and 11 x 6 in | Refused at once: `pdf_incorrect_size_error`, "expecting 6.25x4.25" and "expecting 11.25x6.25" |
+| P14a-6x4, P14a-11x6 | A 0.125 in bleed, a grid across the whole back | Accepted, then **cancelled**: `invalid_content`, "Content found overlapping address region." |
+| P14c-6x4, P14c-11x6 | A 0.125 in bleed, the back drawn in its left half only, a three-line recipient and a four-line return address | Accepted and stayed `ready` |
+| P14d-6x4, P14d-11x6 | The back drawn further right: to 3.4 in of the 6 in trim, and to 6.5 in of the 11 in | Accepted and stayed `ready` |
+
+What they show, from the page's edge with the bleed:
+- Every size takes a 0.125 in bleed: 6.25 x 4.25 in for `6x4`, 9.25 x 6.25 in for `9x6` and 11.25 x 6.25 in for `11x6`.
+- PostGrid stamps Open Sans 9 pt in upper case, as at `9x6`, from x 3.925 in on a `6x4` and from x 7.725 in on an `11x6`. "RETURN TO:" is at baseline 0.958 in at every size, and the recipient is 1.313 in above the bottom edge: at 2.937 in on a `6x4`, and at 4.937 in on a `9x6` and an `11x6`.
+- The address region starts somewhere right of 3.525 in on a `6x4` and right of 6.625 in on an `11x6`; the stamps start further right still. `POSTCARD_GEOMETRY` in `geometry.ts` ends the back at 3.375 in and 6.125 in.
+
+What they cannot show: the test-mode render prints no postage and no barcode. USPS keeps a barcode clear zone on a card's address side (DMM 202.5.4), the trim's lower right 4.75 x 0.625 in, for the barcode its equipment may print. PostGrid's check of the address region let P14d's back, drawn into that band, print, so nothing in PostGrid's answers protects it. Every back's message stays out of it (`BARCODE_CLEAR_ZONE`, #595 review round 1):
+- a `9x6` and an `11x6` end left of it: their messages end at 4.1 in and 5.6 in of the trim, where the zone starts at 4.25 in and 6.25 in;
+- a `6x4` is too narrow for that, since its zone starts 1.25 in across. So its message ends 0.625 in above the trim's bottom edge, and the back holds 11 lines of 12 pt, not 12.
+
 ## Stationery (#563)
 
 Probe P12 (October 1, 2026, `letter_k7rHRrWmsn28GJy64cSLHt`) asked two questions before any theme was offered. It was one letter page from a pdfkit script (`stationery-probe-build.mjs`), sent with `color: false` and the address zone left empty.
@@ -114,3 +134,4 @@ Open, for a live double-sided print (the owner's call, since it costs a letter):
 
 - Whether live mode flattens the same way. The owner's live print (#534 Acceptance) will show it.
 - Colour letters (`color: true`) were not probed.
+- Where PostGrid prints postage and the barcode on a live `6x4` and `11x6`. Their backs keep out of USPS's barcode clear zone either way; a live print of each size would show whether anything else lands near the message.
