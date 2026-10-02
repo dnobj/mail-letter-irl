@@ -698,6 +698,8 @@ describe('arrive-by in the served schemas (#535)', () => {
     vi.stubEnv('LETTER_IRL_PRINT_RENDERER', 'pdf');
     vi.stubEnv('LETTER_IRL_POSTCARD_SIZES_ENABLED', 'true');
     vi.stubEnv('JIT_PURCHASE_ENABLED', 'true');
+    // And the postcard layouts (#594), so nothing is withheld from the postcard.
+    vi.stubEnv('LETTER_IRL_POSTCARD_LAYOUTS_ENABLED', 'true');
     for (const name of PREVIEWS) {
       const served = getServedInputSchema(name) as Record<string, { description?: string }>;
       // On: the raw shape, as declared.

@@ -285,11 +285,17 @@ A `pdf-1` gift send prints its card as the PDF's second page, drawn by the rende
   - a gift card on any size but 6x9;
   - a size no writer stores, on either path;
   - a `pdf-3` front the print cannot read, or one whose caption or place no longer fits (#594).
-- With the flag, a postcard preview records `pdf-1` (below). The print's overflow refusal is then a backstop: the preview measured the same back. A 4x6 or 11x6 with no renderer version prints on the legacy HTML, as before.
+- With the flag, a postcard preview records `pdf-1` (below), or `pdf-3` with a front. The print's overflow refusal is then a backstop: the preview measured the same back and the same front. A 4x6 or 11x6 with no renderer version prints on the legacy HTML, as before.
 - **The 4x6 and 11x6 are offered only while `LETTER_IRL_POSTCARD_SIZES_ENABLED`, `LETTER_IRL_PRINT_RENDERER=pdf` and Pay & Send are all on (#594).** The legacy back is a 9 x 6 in page whatever the card, so the tool never previews either on it, and none it makes reaches the legacy print.
   - The preview crops the front to the size, measures the back at its size, and stamps the addresses where PostGrid prints them on it. The draft keeps the size.
   - A 4x6 or 11x6 is paid with Pay & Send at its own price (`jit-postcard-4x6`, `jit-postcard-11x6`), never from a pack or as a gift letter (#579).
   - Off, the tool's `size` is served as before, the 6x9 alone. A size from a schema cached while it was on is refused by validation, and the preview itself refuses any other size.
+- **The postcard layouts are offered only while `LETTER_IRL_POSTCARD_LAYOUTS_ENABLED` and `LETTER_IRL_PRINT_RENDERER=pdf` are both on (#594, `isPostcardLayoutsOffered`).** The legacy HTML draws the photo alone, so the tool never previews a front on it.
+  - The preview takes `layout` (`full_bleed`, the default, `border` or `greetings`), a `caption` for a border and a `place` for a greeting (`src/tools/postcardFrontInput.ts`). Each layout takes only its own line, and a greeting needs its place.
+  - It measures the line at the postcard's size with the print's own layout, and refuses one too long, saying about how many of its characters fit. Its characters are checked as the message's are, in the face the line prints in: the caption in Caveat, the place in Tinos capitals.
+  - The draft records the front in `postcard_front` with `pdf-3`, and full bleed records none with `pdf-1`: migration 048's checks keep the two together. The send copies the front into `letters.content.postcardFront`, and the print draws it (above).
+  - A gift postcard keeps its front, with its card on the back as ever. A layout does not change the price.
+  - Off, the three are not served, and the postcard is served open to unknown keys. So a front from a schema cached while they were on reaches the preview, which refuses it rather than printing the photo alone.
 
 **How a preview is drawn (#534).** With `LETTER_IRL_PRINT_RENDERER=pdf`, the three letter previews are drawn by `src/render`, from the layout the PDF prints from:
 - the page is laid out with the image that prints, and a letter that runs past it is refused with the count: "Letter is 2 lines too long for one page: it takes 28 lines and the page holds 26." A page holds 26 lines of text only, 16 under a full 2-inch header image, and 13 above a full 3-inch enclosed image;

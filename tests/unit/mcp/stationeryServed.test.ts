@@ -158,13 +158,20 @@ describe('stationery in tools/list', () => {
     expect(received[1].headline).toBeUndefined();
   });
 
-  it("leaves the postcard's schema as it was, closed while arrival dates are on, stationery offered or not", async () => {
+  it("leaves the postcard's schema as it was, stationery offered or not", async () => {
     vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', 'true');
-    for (const [enabled, renderer] of [['', 'pdf'], ['true', 'html'], ['true', 'pdf']]) {
-      offer(enabled, renderer);
-      const tools = await listedTools();
-      expect(tools.get('quote_and_preview_postcard')!.additionalProperties, `${enabled} ${renderer}`).toBe(false);
+    // The postcard's own front (#594) is offered too, wherever our renderer draws it.
+    vi.stubEnv('LETTER_IRL_POSTCARD_LAYOUTS_ENABLED', 'true');
+    for (const renderer of ['pdf', 'html']) {
+      offer('', renderer);
+      const without = (await listedTools()).get('quote_and_preview_postcard');
+      offer('true', renderer);
+      const offered = (await listedTools()).get('quote_and_preview_postcard');
+      expect(offered, renderer).toEqual(without);
     }
+    // Closed while nothing of its own is withheld.
+    offer('true', 'pdf');
+    expect((await listedTools()).get('quote_and_preview_postcard')!.additionalProperties).toBe(false);
   });
 });
 

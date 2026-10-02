@@ -491,6 +491,60 @@ describe('a gift postcard', () => {
   });
 });
 
+describe("a postcard's front (#594)", () => {
+  beforeEach(() => {
+    vi.stubEnv('LETTER_IRL_POSTCARD_LAYOUTS_ENABLED', 'true');
+  });
+
+  const frontPage = () => drafted().previewHtml!.match(/<svg xmlns[\s\S]*?(?=<svg xmlns|<\/body>)/g)![0];
+
+  it('draws a border with its caption, and keeps it on the draft, drawn as pdf-3', async () => {
+    await run({ layout: 'border', caption: 'Cape Cod,\n August 2026' });
+    const draft = drafted();
+    expect(draft).toMatchObject({ postcardFront: { layout: 'border', caption: 'Cape Cod, August 2026' }, rendererVersion: 'pdf-3' });
+    const front = frontPage();
+    // The photo in a viewport of its own, and the caption in its colour, spoken as written.
+    expect(front).toMatch(/<svg x="[\d.]+" y="[\d.]+" width="[\d.]+" height="[\d.]+"><image href="data:image\/png;base64,/);
+    expect(front).toMatch(/<g fill="#1E1A16">(<use [^>]+\/>)+<\/g>/);
+    expect(front).toContain('<title>Cape Cod, August 2026</title>');
+  });
+
+  it('draws a greeting with its place, and keeps it on the draft, drawn as pdf-3', async () => {
+    await run({ layout: 'greetings', place: 'Asheville' });
+    expect(drafted()).toMatchObject({ postcardFront: { layout: 'greetings', place: 'Asheville' }, rendererVersion: 'pdf-3' });
+    const front = frontPage();
+    expect(front).toMatch(/<g fill="#FFFFFF">(<use [^>]+\/>)+<\/g><g fill="#A8461F">(<use [^>]+\/>)+<\/g><g fill="#F6E3A1">(<use [^>]+\/>)+<\/g>/);
+    expect(front).toContain('<title>Greetings from\nAsheville</title>');
+  });
+
+  it('keeps full bleed as before: no front on the draft, drawn as pdf-1', async () => {
+    await run({ layout: 'full_bleed' });
+    expect(drafted()).toMatchObject({ postcardFront: null, rendererVersion: 'pdf-1' });
+    expect(frontPage()).not.toContain('<g fill=');
+  });
+
+  it('refuses a caption Caveat cannot draw, naming it, before the picture is fetched', async () => {
+    await expect(run({ layout: 'border', caption: 'Ωμέγα beach' })).rejects.toThrow('in the caption');
+    expect(downloadAndProcessPostcardImageWithPreview).not.toHaveBeenCalled();
+    expect(createPostcardDraft).not.toHaveBeenCalled();
+  });
+
+  it('refuses a front that does not fit, before the picture is fetched', async () => {
+    await expect(run({ size: '6x9', layout: 'border', caption: 'W'.repeat(60) })).rejects.toThrow(
+      /^The caption is too long for its line on the front of a 6x9 postcard: about \d+ of its 60 characters fit\. Shorten it\.$/
+    );
+    await expect(run({ layout: 'greetings' })).rejects.toThrow('The greetings layout needs a place');
+    expect(downloadAndProcessPostcardImageWithPreview).not.toHaveBeenCalled();
+  });
+
+  it('refuses any front but full bleed while the layouts are not offered, as a stray from a cached schema', async () => {
+    vi.stubEnv('LETTER_IRL_POSTCARD_LAYOUTS_ENABLED', '');
+    await expect(run({ layout: 'border', caption: 'Cape Cod' })).rejects.toThrow('Postcard layouts are not offered here');
+    await expect(run({ layout: 'full_bleed' })).resolves.toMatchObject({ draftId: 'draft-1' });
+    expect(drafted()).toMatchObject({ postcardFront: null, rendererVersion: 'pdf-1' });
+  });
+});
+
 describe('without the flag', () => {
   it('leaves postcard previews on the legacy HTML, with no version', async () => {
     vi.stubEnv('LETTER_IRL_PRINT_RENDERER', '');

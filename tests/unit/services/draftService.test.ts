@@ -425,6 +425,59 @@ describe('draftService', () => {
       // Every placeholder has its parameter (a placeholder may carry a cast, as $15::date does).
       expect(rendered).toHaveLength(Math.max(...values.map(value => Number(/^\$(\d+)(?:::\w+)?$/.exec(value)?.[1] ?? 0))));
     });
+
+    it('stores a front as the print reads it back, beside its renderer, and none for full bleed (#594)', async () => {
+      const inserted = {
+        rows: [{ draft_id: 'draft-1', expires_at: new Date('2026-10-02T12:00:00Z') }],
+        rowCount: 1,
+        command: 'INSERT',
+        oid: 0,
+        fields: [],
+      };
+      vi.mocked(db.query).mockResolvedValue(inserted);
+      const draft = {
+        userId: testUsers.sarah.user_id,
+        sender: testAddresses.validSender as unknown as Record<string, unknown>,
+        recipient: testAddresses.validRecipient as unknown as Record<string, unknown>,
+        message: 'Wish you were here.',
+        frontImageData: 'data:image/jpeg;base64,AAAA',
+        frontImageUrl: 'https://files.example/a.jpg',
+      };
+
+      await createPostcardDraft({ ...draft, rendererVersion: 'pdf-3', postcardFront: { layout: 'greetings', place: 'Asheville' } });
+      await createPostcardDraft({ ...draft, rendererVersion: 'pdf-1', postcardFront: null });
+      await createPostcardDraft({ ...draft, rendererVersion: 'pdf-1' });
+
+      const [sql, withFront] = vi.mocked(db.query).mock.calls[0] as [string, unknown[]];
+      const list = (from: number) => sql.slice(sql.indexOf('(', from) + 1, sql.indexOf(')', from)).split(',').map(item => item.trim());
+      const columns = list(0);
+      const values = list(sql.indexOf('VALUES'));
+      expect(values).toHaveLength(columns.length);
+      const position = columns.indexOf('postcard_front');
+      expect(values[position]).toMatch(/^\$\d+::jsonb$/);
+      const parameter = Number(/^\$(\d+)/.exec(values[position])![1]) - 1;
+      expect(JSON.parse(withFront[parameter] as string)).toEqual({ layout: 'greetings', place: 'Asheville' });
+      expect((vi.mocked(db.query).mock.calls[1][1] as unknown[])[parameter]).toBeNull();
+      expect((vi.mocked(db.query).mock.calls[2][1] as unknown[])[parameter]).toBeNull();
+    });
+
+    it('refuses a front the print would not read back, before writing anything (#594)', async () => {
+      vi.mocked(db.query).mockClear();
+      const draft = {
+        userId: testUsers.sarah.user_id,
+        sender: testAddresses.validSender as unknown as Record<string, unknown>,
+        recipient: testAddresses.validRecipient as unknown as Record<string, unknown>,
+        message: 'Wish you were here.',
+        frontImageData: 'data:image/jpeg;base64,AAAA',
+        frontImageUrl: 'https://files.example/a.jpg',
+        rendererVersion: 'pdf-3'
+      };
+      for (const front of [{ layout: 'greetings' }, { layout: 'border', place: 'Rye' }, { layout: 'collage' }]) {
+        await expect(createPostcardDraft({ ...draft, postcardFront: front as never }), JSON.stringify(front))
+          .rejects.toMatchObject({ code: 'POSTCARD_FRONT_UNREADABLE', diagnosticClass: 'validation_error' });
+      }
+      expect(db.query).not.toHaveBeenCalled();
+    });
   });
 
   // ==========================================================================

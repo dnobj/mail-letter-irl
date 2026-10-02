@@ -18,6 +18,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createMcpServer } from '../../../src/mcp/httpServer.js';
 import { buildManifest } from '../../../src/mcp/manifest.js';
+import { withheldInputKeys } from '../../../src/mcp/registerTools.js';
 import { type ClientProfile } from '../../../src/auth/clientProfiles.js';
 import { LetterIrlServer } from '../../../src/server.js';
 
@@ -108,7 +109,8 @@ describe('the postcard size in tools/list', () => {
       // As it was served before #594: an enum of one, undescribed, and the 6x9's room.
       expect(served.properties.size, label).toEqual({ type: 'string', enum: ['6x9'] });
       expect(served.properties.message, label).toEqual({ type: 'string', description: 'Must fit the back of the postcard: 16 lines, about 500 characters of prose' });
-      expect(served.additionalProperties, label).toBe(arriveBy !== 'true');
+      // Open exactly while something is withheld: arriveBy, or the front (#594).
+      expect(served.additionalProperties, label).toBe(withheldInputKeys('quote_and_preview_postcard').length > 0);
       const { size: _offered, message: _room, ...onRest } = on.get('quote_and_preview_postcard')!.properties;
       const { size: _narrowed, message: _sixByNine, ...offRest } = served.properties;
       expect(offRest, label).toEqual(onRest);

@@ -103,6 +103,11 @@ none of them.
     - Each is drawn by our renderer at its size, and its back is measured at its size: 16 lines on a 6x9 or an 11x6, 11 on a 4x6.
     - A 4x6 or 11x6 is paid with Pay & Send at its own price, never from a pack or as a gift letter (#579).
     - While they are not offered, `size` is served as before, the 6x9 alone, and the preview refuses any other.
+  - **`layout`, `caption` and `place` (#594).** While the layouts are offered (`LETTER_IRL_POSTCARD_LAYOUTS_ENABLED`, with `LETTER_IRL_PRINT_RENDERER=pdf`), `layout` takes `full_bleed` (the default: the photo across the whole front, as before), `border` (the photo in a white border, with an optional handwritten `caption` under it) or `greetings` ("Greetings from" over the photo, with the `place` it needs, printed in capitals).
+    - Each layout takes only its own line. A caption without a border, a place without a greeting, and a greeting without a place are refused, each saying what to change.
+    - The line is measured at the postcard's size as it prints. One too long is refused, saying about how many of its characters fit; a caption longer than 60 characters, or a place longer than 30, is refused before it is measured. Its characters are checked as the message's are, in the face the line prints in.
+    - The draft records the front with `pdf-3`, and the postcard prints with it ([letter-send-flow.md](letter-send-flow.md)). A layout does not change the price, and a gift postcard keeps its front.
+    - While they are not offered, the three are not served, and a layout other than `full_bleed`, a caption or a place is refused rather than printed as the photo alone.
 - `send_postcard`: Send a postcard from a prior draft. Requires `draftId` and `confirm: true`. Idempotent retries with the same draft return the existing order rather than charging twice. Refuses the same postcard sent recently unless `sendAnotherCopy: true` is passed, as `send_letter` does. Sent with an arrival date, it answers as `send_letter` does.
 
 ## Account, Orders, and Return Address

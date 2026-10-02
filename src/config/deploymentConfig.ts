@@ -575,6 +575,21 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     services: ['api']
   },
   /**
+   * Postcard layouts (#594, src/config/postcardLayouts.ts): the postcard
+   * preview offers a border or a greeting only while the flag is on and
+   * LETTER_IRL_PRINT_RENDERER draws it. Off unless set, so absence is the
+   * intended production state until the owner switches it on; listed so the
+   * preflight shows which environments have it. API only: a postcard prints
+   * with the front its draft recorded, never by this flag.
+   */
+  {
+    name: 'LETTER_IRL_POSTCARD_LAYOUTS_ENABLED',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  /**
    * The envelope reveal (#576, src/config/envelope.ts): the letter previews
    * tell their card it may open the page from an envelope only while the
    * flag is on. Off unless set, so absence is the intended production state

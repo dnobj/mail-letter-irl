@@ -114,6 +114,9 @@ LETTER_IRL_PRINT_RENDERER=<pdf to turn it on; unset keeps the legacy HTML>
 LETTER_IRL_ARRIVE_BY_ENABLED=<true to offer arrival dates on previews (#535); unset is off>
 # Stationery on the three letter previews (#563): offered only while LETTER_IRL_PRINT_RENDERER is pdf.
 LETTER_IRL_STATIONERY_ENABLED=<true to offer themes on letter previews; unset is off>
+# Postcard layouts (#594, docs/letter-send-flow.md): a border with a caption, or "Greetings from" a place,
+# offered only while LETTER_IRL_PRINT_RENDERER is pdf. API service only: the print draws a stored front whatever the flag.
+LETTER_IRL_POSTCARD_LAYOUTS_ENABLED=<true to offer postcard layouts on postcard previews; unset is off>
 # The letter card's envelope reveal (#576, docs/ui-widgets.md): cards only, nothing prints differently.
 LETTER_IRL_ENVELOPE_REVEAL_ENABLED=<true to open previews from an envelope; unset is off>
 # The studio card (#580, docs/ui-widgets.md): the letter card laid out with Style, Words and Delivery tabs. Cards only.

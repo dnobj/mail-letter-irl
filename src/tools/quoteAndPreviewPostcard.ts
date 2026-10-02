@@ -20,6 +20,7 @@ import {
 } from "./letterHelpers.js";
 import { printRenderer } from "../config/printRenderer.js";
 import { offeredPostcardSizes } from "../config/postcardSizes.js";
+import { frontPrintedText, previewPostcardFront } from "./postcardFrontInput.js";
 import { isPackPayable, type MailOption } from "../config/products.js";
 import {
   drawsGrapheme,
@@ -29,6 +30,7 @@ import {
   POSTCARD_GEOMETRY,
   readImageDataUri,
   renderPreviewSvg,
+  POSTCARD_FRONT_RENDERER_VERSION,
   RENDERER_VERSION,
   type GiftStripCopy
 } from "../render/index.js";
@@ -82,6 +84,10 @@ interface QuoteAndPreviewPostcardInput {
   recipient: Address;
   message: string;
   size?: PostcardSize;
+  /** The front's layout, caption and place while layouts are offered (#594); checked by previewPostcardFront. */
+  layout?: unknown;
+  caption?: unknown;
+  place?: unknown;
   // Image from OpenAI fileParams - injected by MCP framework
   // Union type handles ChatGPT mobile sending '' when no file attached
   image?: ImageFileParam | string;
@@ -335,6 +341,8 @@ async function handler(
   const messageLimit = renderer === 'pdf'
     ? RENDERED_POSTCARD_CHARACTER_CAPS[size]
     : gift.isGift ? MAX_GIFT_MESSAGE_LENGTH : MAX_MESSAGE_LENGTH;
+  // The front's layout (#594), checked before the picture is fetched: undefined for full bleed.
+  const front = previewPostcardFront(input, size, context, renderer);
 
   // Validate message length
   if (input.message.length > messageLimit) {
@@ -460,7 +468,9 @@ async function handler(
       { field: "message", where: "in the message", text: input.message, prints },
       ...(prints && gift.card
         ? [{ field: "giftCardName", where: "in the sender's name, which the gift card prints", text: sender.name, prints }]
-        : [])
+        : []),
+      // A front's line, in the face and case it prints in (#594).
+      ...frontPrintedText(front)
     ],
     { sender, recipient: input.recipient, senderIsSaved: usedSavedReturnAddress },
     context
@@ -579,7 +589,7 @@ async function handler(
   const renderedHtml = renderer === 'pdf'
     ? renderPostcardPreviewDocument(renderPreviewSvg(
         withDisplayImage(
-          layoutPostcard({ message: input.message, image: readImageDataUri(processedImage.base64DataUri), strip, size }),
+          layoutPostcard({ message: input.message, image: readImageDataUri(processedImage.base64DataUri), strip, size, ...front }),
           processedImage.previewDataUri
         ),
         {
@@ -603,7 +613,9 @@ async function handler(
     senderValidation: senderValidation ? { status: senderValidation.status } : undefined,
     recipientValidation: recipientValidation ? { status: recipientValidation.status } : undefined,
     isGiftSend: gift.isGift,
-    rendererVersion: renderedHtml ? RENDERER_VERSION : undefined,
+    // A front other than full bleed is drawn as pdf-3 (#594, migration 048).
+    rendererVersion: renderedHtml ? (front ? POSTCARD_FRONT_RENDERER_VERSION : RENDERER_VERSION) : undefined,
+    postcardFront: front ?? null,
     // Held until its mail date (#535).
     schedule: schedule?.draft,
   });

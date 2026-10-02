@@ -130,6 +130,10 @@ export const toolInputSchemas = {
     message: z.string(),
     // The 4x6 and 11x6 while offered (#594); zodSchemas.ts serves each state.
     size: z.enum(["6x9", "6x4", "6x11"]).optional(),
+    // The front's layout while layouts are offered (#594).
+    layout: z.enum(["full_bleed", "border", "greetings"]).optional(),
+    caption: z.string().optional(),
+    place: z.string().optional(),
     // Image from file attachment - OpenAI Apps SDK requires explicit schema definition
     image: imageFileParamSchema.optional(),
     // Alternative: direct image URL

@@ -613,8 +613,8 @@ describePostgres('renderer version, stationery and pages (migrations 039 and 044
   });
 
   describe('postcard fronts (#594, migration 048)', () => {
-    const BORDER = { layout: 'border', caption: 'Cape Cod, August 2026' };
-    const GREETINGS = { layout: 'greetings', place: 'Asheville' };
+    const BORDER = { layout: 'border', caption: 'Cape Cod, August 2026' } as const;
+    const GREETINGS = { layout: 'greetings', place: 'Asheville' } as const;
 
     /** A pending postcard draft, as a preview stores one; each message differs, for the duplicate check (#412). */
     async function seedPostcard(userId: string, rendererVersion: string | null, front: unknown = null): Promise<string> {
@@ -680,6 +680,35 @@ describePostgres('renderer version, stationery and pages (migrations 039 and 044
       expect(byId.get(sent.letter.letter_id)).toMatchObject({ rendererVersion: 'pdf-3', postcardFront: BORDER });
       expect(byId.get(full.letter.letter_id)).toMatchObject({ rendererVersion: 'pdf-1' });
       expect(byId.get(full.letter.letter_id)).not.toHaveProperty('postcardFront');
+    }, 60_000);
+
+    it('stores the front a preview creates its draft with, beside pdf-3, for the send to copy (#594 PR 4b-2)', async () => {
+      const userId = await seedUser();
+      const postcard = () => ({
+        userId,
+        sender: SENDER,
+        recipient: RECIPIENT,
+        message: `Wish you were here ${randomUUID()}`,
+        frontImageData: 'data:image/png;base64,AAAA',
+        frontImageUrl: 'https://files.example/beach.jpg'
+      });
+      const greeted = await drafts.createPostcardDraft({ ...postcard(), rendererVersion: 'pdf-3', postcardFront: GREETINGS });
+      const plain = await drafts.createPostcardDraft({ ...postcard(), rendererVersion: 'pdf-1', postcardFront: null });
+      const stored = await pool.query<{ draft_id: string; postcard_front: unknown; renderer_version: string }>(
+        'SELECT draft_id, postcard_front, renderer_version FROM letter_drafts WHERE draft_id = ANY($1)',
+        [[greeted.draftId, plain.draftId]]
+      );
+      const byId = new Map(stored.rows.map(row => [row.draft_id, row]));
+      expect(byId.get(greeted.draftId)).toMatchObject({ postcard_front: GREETINGS, renderer_version: 'pdf-3' });
+      expect(byId.get(plain.draftId)).toMatchObject({ postcard_front: null, renderer_version: 'pdf-1' });
+
+      // The pair is the preview's to keep: a front given with another version is refused by 048, not stored.
+      await expect(drafts.createPostcardDraft({ ...postcard(), rendererVersion: 'pdf-1', postcardFront: BORDER }))
+        .rejects.toMatchObject({ code: '23514', constraint: 'letter_drafts_postcard_front_drawn_by_pdf_3' });
+
+      const sent = await mailSend.createMailOrderFromDraft({ draftId: greeted.draftId, userId, mailType: 'postcard' });
+      const content = await pool.query('SELECT content FROM letters WHERE letter_id = $1', [sent.letter.letter_id]);
+      expect(content.rows[0].content).toMatchObject({ rendererVersion: 'pdf-3', postcardFront: GREETINGS });
     }, 60_000);
   });
 });
