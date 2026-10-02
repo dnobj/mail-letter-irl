@@ -441,7 +441,8 @@ describe('set_stationery lays a letter out again on its pages, and prices it aga
   it('keeps a gift letter on one page, its card after it, and refuses a face that would run it on', async () => {
     const gift = draft({ bodyText: lines(10), gift: true });
     vi.mocked(getDraftForStationery).mockResolvedValue(gift as never);
-    const output = await restyle('botanical');
+    // An empty balance: the gift letter is what pays for it.
+    const output = await restyle('botanical', context(0));
     const change = written();
     expect(change.pages).toBe(1);
     const [, card] = svgs(change.previewHtml);
