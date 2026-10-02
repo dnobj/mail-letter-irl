@@ -1465,6 +1465,20 @@ describe('commerceService', () => {
       expect(draftMailOption({})).toEqual({ mailType: 'letter' });
     });
 
+    it("reads a letter's pages, and a postcard's never (#586)", () => {
+      expect(draftMailOption({ mail_type: 'letter', pages: 2 })).toEqual({ mailType: 'letter', pages: 2 });
+      expect(draftMailOption({ mail_type: 'letter', pages: 3 })).toEqual({ mailType: 'letter', pages: 3 });
+      // One page is the letter it always was.
+      expect(draftMailOption({ mail_type: 'letter', pages: 1 })).toEqual({ mailType: 'letter' });
+      expect(draftMailOption({ mail_type: 'letter', pages: null })).toEqual({ mailType: 'letter' });
+      // A count read back as text is still a count.
+      expect(draftMailOption({ mail_type: 'letter', pages: '2' })).toEqual({ mailType: 'letter', pages: 2 });
+      expect(draftMailOption({ mail_type: 'postcard', postcard_size: '6x9', pages: 2 })).toEqual({
+        mailType: 'postcard',
+        postcardSize: '6x9'
+      });
+    });
+
     it("quotes an option's own price, and asks for it by the option", () => {
       mocks.jitEnabled.mockReturnValue(true);
       mocks.getJitProduct.mockReturnValue({
@@ -1538,6 +1552,35 @@ describe('commerceService', () => {
         available: false,
         unavailableReason: 'Use your existing prepaid letter balance.'
       });
+    });
+
+    it("prices a long letter's checkout by its pages from the peek on: its price warmed, its amount capped (#586)", async () => {
+      // A day's limit between the one-page price and the two-page price.
+      vi.stubEnv('LETTER_IRL_BETA_ACCOUNT_DAILY_CHARGE_CENTS', '550');
+      mocks.getJitProduct.mockImplementation((({ mailType, pages }: { mailType: string; pages?: number }) =>
+        mailType === 'letter' && pages === 2
+          ? {
+              productCode: 'jit-letter-2-pages', priceId: 'price-2p', amountCents: 599,
+              currency: 'usd', name: 'Pay & Send One Two-Page Letter', description: 'x', mailType: 'letter'
+            }
+          : {
+              productCode: 'jit-letter', priceId: 'price-1p', amountCents: 499,
+              currency: 'usd', name: 'Pay & Send One Physical Letter', description: 'x', mailType: 'letter'
+            }) as never);
+      mocks.query
+        // In the order the checkout reads them: the send block, then the peek.
+        .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
+        .mockResolvedValueOnce({ rows: [{ mail_type: 'letter', postcard_size: null, pages: 2 }] })
+        .mockResolvedValue({ rows: [] });
+
+      await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' }))
+        .rejects.toMatchObject({ code: 'CHARGE_ABOVE_DAILY_CAP' });
+
+      expect(String(mocks.query.mock.calls[1][0])).toContain('SELECT mail_type, postcard_size, pages FROM letter_drafts');
+      expect(mocks.ensurePriceCatalog).toHaveBeenCalledWith('jit-letter-2-pages');
+      expect(mocks.getJitProduct).toHaveBeenCalledWith({ mailType: 'letter', pages: 2 });
+      const sql = mocks.query.mock.calls.map(call => String(call[0]));
+      expect(sql.some(statement => statement.includes('INSERT INTO orders'))).toBe(false);
     });
 
     it('refuses a checkout for an option this deployment does not sell, before any order', async () => {
@@ -3638,7 +3681,9 @@ describe('commerceService', () => {
       active = [];
       mocks.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
         if (sql.includes('sends_blocked_reason')) return { rows: [{ sends_blocked_reason: null }] };
-        if (sql.includes('SELECT mail_type FROM letter_drafts')) return { rows: [{ mail_type: 'letter' }] };
+        if (sql.includes('SELECT mail_type, postcard_size, pages FROM letter_drafts')) {
+          return { rows: [{ mail_type: 'letter', postcard_size: null, pages: 1 }] };
+        }
         if (sql.includes('SELECT * FROM letter_drafts')) {
           return {
             rows: [{
@@ -3877,9 +3922,9 @@ describe('commerceService', () => {
       dupState.draft = mail();
       mocks.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
         if (sql.includes('sends_blocked_reason')) return { rows: [{ sends_blocked_reason: null }] };
-        // The peek before the transaction reads the draft's option (#578).
-        if (sql.includes('SELECT mail_type, postcard_size FROM letter_drafts')) {
-          return { rows: [{ mail_type: draftRow.mail_type, postcard_size: draftRow.postcard_size ?? null }] };
+        // The peek before the transaction reads the draft's option (#578), with its pages (#586).
+        if (sql.includes('SELECT mail_type, postcard_size, pages FROM letter_drafts')) {
+          return { rows: [{ mail_type: draftRow.mail_type, postcard_size: draftRow.postcard_size ?? null, pages: draftRow.pages ?? 1 }] };
         }
         if (sql.includes('SELECT * FROM letter_drafts')) return { rows: [draftRow] };
         if (sql.includes('status = ANY($2::varchar[])')) return { rows: activeRows };

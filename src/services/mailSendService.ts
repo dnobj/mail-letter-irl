@@ -10,7 +10,7 @@ import { createLetterJobWithClient } from './letterJobService.js';
 import { assertNoRecentDuplicateMail } from './duplicateMailService.js';
 import { consumeGiftLetterForSendWithClient } from './giftLetterService.js';
 import { isGiftLettersEnabled } from '../config/giftLetters.js';
-import { draftMailOption, isPackPayable } from '../config/products.js';
+import { draftMailOption, isPackPayable, jitProductMatching } from '../config/products.js';
 import type { GiftCardContent } from './giftCardRenderer.js';
 import { dispatchAt, earliestMailOn } from './deliverySchedule.js';
 import { draftScheduleOf } from './draftSchedule.js';
@@ -78,7 +78,10 @@ function buildLetterContent(draft: MailDraftRow): Record<string, unknown> {
     // Absent for the legacy HTML path, so those letters' content is unchanged.
     ...(draft.renderer_version ? { rendererVersion: draft.renderer_version } : {}),
     // And in the stationery it was drawn in (#563); absent for Classic.
-    ...(draft.stationery ? { stationery: draft.stationery } : {})
+    ...(draft.stationery ? { stationery: draft.stationery } : {}),
+    // And on the pages it was laid out on, when more than one (#586); absent
+    // for a one-page letter, so its content is unchanged.
+    ...(Number(draft.pages ?? 1) > 1 ? { pages: Number(draft.pages) } : {})
   };
 }
 
@@ -314,6 +317,17 @@ export async function createMailOrderFromDraftWithClient(
     }
     if (jitOrder.status !== 'paid') {
       throw draftError('JIT_ORDER_NOT_PAID', `Order ${funding.orderId} is ${jitOrder.status}`);
+    }
+    // The order pays for the mail the draft is now (#586). A draft whose pages
+    // changed after its checkout opened is not what was paid for: refused, so
+    // fulfilment refunds the order rather than send a two-page letter at the
+    // one-page price, or the reverse.
+    const paidFor = jitProductMatching(draftMailOption(draft));
+    if (!paidFor || paidFor.productCode !== jitOrder.product_code) {
+      throw draftError(
+        'JIT_PRODUCT_MISMATCH',
+        `Order ${funding.orderId} paid for ${jitOrder.product_code}, not draft ${params.draftId}'s mail`
+      );
     }
   }
 

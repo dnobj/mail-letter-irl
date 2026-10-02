@@ -146,6 +146,16 @@ describe('mail-type wording', () => {
     expect(postcard.message).not.toContain('d-1');
   });
 
+  it('says a Pay & Send order that paid for other mail sent nothing, naming the mail (#586)', () => {
+    const upstream = Object.assign(new Error("Order o-1 paid for jit-letter, not draft d-1's mail"), {
+      code: 'JIT_PRODUCT_MISMATCH'
+    });
+    expect(friendlyDraftError(upstream, 'd-1', 'letter').message).toBe(
+      'That Pay & Send order paid for different mail than this letter is now, so it was not sent. Please start a new checkout.'
+    );
+    expect(friendlyDraftError(upstream, 'd-1', 'postcard').message).toContain('than this postcard is now');
+  });
+
   it('points a wrong-type draft at the other tool', () => {
     expect(friendlyDraftError(withCode('DRAFT_WRONG_MAIL_TYPE'), 'd', 'letter').message).toBe(
       'This is a postcard draft. Please use send_postcard instead.'

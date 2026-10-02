@@ -284,6 +284,80 @@ describePostgres('renderer version and stationery (migrations 039 and 044 to 046
     }, 60_000);
   });
 
+  describe('room to write (#586, migration 047)', () => {
+    const pagesOf = async (draftId: string) =>
+      (await pool.query<{ pages: number }>('SELECT pages FROM letter_drafts WHERE draft_id = $1', [draftId])).rows[0].pages;
+
+    it('records one page by default, admits two and three on a letter our renderer drew, and no other count', async () => {
+      const userId = await seedUser();
+      expect(await pagesOf(await seedDraft(userId, null))).toBe(1);
+
+      const drawn = await seedDraft(userId, 'pdf-1');
+      expect(await pagesOf(drawn)).toBe(1);
+      for (const pages of [2, 3, 1]) {
+        await pool.query('UPDATE letter_drafts SET pages = $2::smallint WHERE draft_id = $1', [drawn, pages]);
+        expect(await pagesOf(drawn)).toBe(pages);
+      }
+      for (const pages of [0, 4, -1]) {
+        await expect(pool.query('UPDATE letter_drafts SET pages = $2::smallint WHERE draft_id = $1', [drawn, pages]))
+          .rejects.toMatchObject({ code: '23514', constraint: 'letter_drafts_pages_known' });
+      }
+    }, 60_000);
+
+    it('admits more than one page only on a letter our renderer drew that is no gift send', async () => {
+      const userId = await seedUser();
+      const refused = { code: '23514', constraint: 'letter_drafts_pages_paid_per_send' };
+
+      // The legacy HTML draws one page, and a gift letter pays for one (#579).
+      const legacy = await seedDraft(userId, null);
+      await expect(pool.query('UPDATE letter_drafts SET pages = 2 WHERE draft_id = $1', [legacy])).rejects.toMatchObject(refused);
+      const gift = await seedDraft(userId, 'pdf-1');
+      await pool.query('UPDATE letter_drafts SET is_gift_send = TRUE WHERE draft_id = $1', [gift]);
+      await expect(pool.query('UPDATE letter_drafts SET pages = 2 WHERE draft_id = $1', [gift])).rejects.toMatchObject(refused);
+
+      // Nor does a longer letter become one: a gift send, a postcard, or the legacy HTML.
+      const long = await seedDraft(userId, 'pdf-1');
+      await pool.query('UPDATE letter_drafts SET pages = 3 WHERE draft_id = $1', [long]);
+      for (const change of [
+        'is_gift_send = TRUE',
+        // A postcard as the other postcard checks want one, so only this check refuses it.
+        "mail_type = 'postcard', postcard_size = '6x9', front_image_data = 'data:image/jpeg;base64,AA=='",
+        'renderer_version = NULL'
+      ]) {
+        await expect(pool.query(`UPDATE letter_drafts SET ${change} WHERE draft_id = $1`, [long]), change)
+          .rejects.toMatchObject(refused);
+      }
+      expect(await pagesOf(long)).toBe(3);
+    }, 60_000);
+
+    it('copies the pages a longer letter was laid out on into the letter Pay & Send creates, and none for one page', async () => {
+      const userId = await seedUser();
+      const long = await seedDraft(userId, 'pdf-1');
+      await pool.query('UPDATE letter_drafts SET pages = 2 WHERE draft_id = $1', [long]);
+      const orderId = `order-${randomUUID()}`;
+      await pool.query(
+        `INSERT INTO orders (order_id, user_id, credits, amount_cents, currency, status, order_type, product_code,
+           idempotency_key, draft_id)
+         VALUES ($1, $2, NULL, 599, 'usd', 'paid', 'jit_mail', 'jit-letter-2-pages', $3, $4)`,
+        [orderId, userId, `idem_${orderId}`, long]
+      );
+      const short = await seedDraft(userId, 'pdf-1');
+
+      const paid = await mailSend.createMailOrderFromDraft({
+        draftId: long, userId, mailType: 'letter', funding: { type: 'jit_order', orderId }
+      });
+      const prepaid = await mailSend.createMailOrderFromDraft({ draftId: short, userId, mailType: 'letter' });
+
+      const stored = await pool.query<{ letter_id: string; content: Record<string, unknown> }>(
+        'SELECT letter_id, content FROM letters WHERE letter_id = ANY($1)',
+        [[paid.letter.letter_id, prepaid.letter.letter_id]]
+      );
+      const byId = new Map(stored.rows.map(row => [row.letter_id, row.content]));
+      expect(byId.get(paid.letter.letter_id)).toMatchObject({ rendererVersion: 'pdf-1', pages: 2 });
+      expect(byId.get(prepaid.letter.letter_id)).not.toHaveProperty('pages');
+    }, 60_000);
+  });
+
   describe('set_stationery and the remembered theme (#563, migration 045)', () => {
     const BOTANICAL = { theme: 'botanical' as const, dateLine: 'October 1, 2026' };
     const PAGE = '<!DOCTYPE html><html><body data-renderer="pdf-2"><svg></svg></body></html>';

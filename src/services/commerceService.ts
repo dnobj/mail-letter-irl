@@ -1176,8 +1176,10 @@ export async function createJitCheckout(
   // catalog work before authorization said no (#278 round 7). Advisory only -
   // prepareJitOrder re-reads FOR UPDATE and owns the real ownership check,
   // and refuses an option this deployment does not sell (#578).
-  const draftPeek = await query<{ mail_type: string | null; postcard_size: string | null }>(
-    'SELECT mail_type, postcard_size FROM letter_drafts WHERE draft_id = $1 AND user_id = $2',
+  // With its pages (#586): without them a long letter would warm the one-page
+  // price and meet the charge cap at the one-page amount.
+  const draftPeek = await query<{ mail_type: string | null; postcard_size: string | null; pages: number | null }>(
+    'SELECT mail_type, postcard_size, pages FROM letter_drafts WHERE draft_id = $1 AND user_id = $2',
     [params.draftId, params.userId]
   );
   const peekedOption = draftMailOption(draftPeek.rows[0] ?? {});

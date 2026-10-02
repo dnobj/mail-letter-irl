@@ -61,9 +61,13 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  *
  * 046 widens two CHECKs to admit Typewriter and Handwritten (#563): no column
  * or grant changes, so nothing to re-run.
+ *
+ * 047 adds letter_drafts.pages (#586), with two CHECKs. As for 039, the
+ * reader role's column list leaves it out and the operator role reads
+ * letter_drafts whole, so nothing to re-run.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
-  "046_stationery_faces.sql";
+  "047_room_to_write.sql";
 
 export interface AdminProvisioningArguments {
   environment: "development" | "production";

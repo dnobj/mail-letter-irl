@@ -538,6 +538,12 @@ export interface LetterDraft {
    */
   arrive_by?: string | null;
   mail_on?: string | null;
+  /**
+   * The pages the letter prints on (migration 047, #586): 1 to 3, printed on
+   * both sides when more than 1. Only a letter our renderer drew, and never a
+   * gift send, runs past one page; it is paid per send (#579).
+   */
+  pages?: number;
   created_at: Date;
   updated_at: Date;
 }
@@ -578,6 +584,12 @@ export interface CreateDraftParams {
    * createDraft refuses a theme stationeryOf would not read back.
    */
   stationery?: Stationery | null;
+  /**
+   * The pages the letter prints on (migration 047, #586); 1 when unset. More
+   * than 1 needs our renderer (rendererVersion) and no gift send, as the
+   * database's check does: createDraft refuses anything else first.
+   */
+  pages?: number;
 }
 
 export interface CreateDraftResult {

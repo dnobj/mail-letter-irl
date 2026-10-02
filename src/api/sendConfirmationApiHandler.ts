@@ -169,8 +169,15 @@ async function showDraft(res: ServerResponse, draft: LetterDraft, userId: string
     stationery: stationeryView(draft),
     // No pack pays for it (#579): the page takes Pay & Send instead.
     ...(isPackPayable(draftMailOption(draft)) ? {} : { packPays: false }),
+    // A letter of more than one page (#586), printed on both sides: only then.
+    ...(pagesOf(draft) > 1 ? { pages: pagesOf(draft) } : {}),
     ...(payment ? { payment } : {})
   });
+}
+
+/** The pages a draft prints on (migration 047, #586): 1 for a postcard, or a letter of one page. */
+function pagesOf(draft: { mail_type?: string | null; pages?: number | null }): number {
+  return draft.mail_type === 'postcard' ? 1 : Number(draft.pages ?? 1);
 }
 
 interface Refusal {
