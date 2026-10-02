@@ -282,14 +282,19 @@ export function unprintableRefusal(mail: 'letter' | 'postcard', found: Unprintab
   const face = themed && found.some(({ field }) => themed.fields.includes(field)) ? themed : undefined;
   const elsewhere = face !== undefined &&
     found.filter(({ field }) => face.fields.includes(field)).every(({ characters }) => characters.every(face.drawnInClassic));
+  // Another stationery mends only the theme's fields: anything else refused must go either way.
+  const others = face !== undefined && found.some(({ field }) => !face.fields.includes(field));
   return (
     (face?.remembered ?? '') +
     `Letter IRL can't print some characters in this ${mail}: ${where}. ` +
     `Printed mail shows Latin letters with common accents, modern Greek, Cyrillic, Hebrew ` +
     `and common punctuation, and no emoji. ` +
     (face && elsewhere
-      ? `The ${face.theme} stationery sets the text in its own typeface, which has fewer: choose another ` +
-        `stationery, or take those characters out or write them in plain letters, then preview again.`
+      ? `The ${face.theme} stationery sets the text in its own typeface, which has fewer: ` +
+        (others
+          ? `choose another stationery for the text, and take the other characters out or write them in plain letters, `
+          : `choose another stationery, or take those characters out or write them in plain letters, `) +
+        `then preview again.`
       : `Take those characters out or write them in plain letters, then preview again.`)
   );
 }

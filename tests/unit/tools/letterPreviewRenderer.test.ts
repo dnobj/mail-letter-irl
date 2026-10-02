@@ -740,6 +740,20 @@ describe('Typewriter and Handwritten (#563 PR 8b)', () => {
     expect(mixed.message).not.toContain('choose another stationery');
   });
 
+  it('says another stationery mends only the text when an address fails too (#575 review round 2)', async () => {
+    const CAKE = String.fromCodePoint(0x1f382);
+    const error = await run('text_only', {
+      stationery: 'handwritten',
+      bodyText: `Dear Sam, ${GREEK}`,
+      recipient: address({ name: `Sam ${CAKE}` })
+    }).catch(e => e);
+    expect(error.message).toContain("in the recipient's address");
+    expect(error.message.endsWith(
+      'The handwritten stationery sets the text in its own typeface, which has fewer: choose another stationery for the text, ' +
+        'and take the other characters out or write them in plain letters, then preview again.'
+    )).toBe(true);
+  });
+
   it("keeps the usual closing when only an address, stamped in Open Sans, cannot print", async () => {
     const CAKE = String.fromCodePoint(0x1f382);
     const error = await run('text_only', { stationery: 'handwritten', recipient: address({ name: `Sam ${CAKE}` }) }).catch(e => e);
