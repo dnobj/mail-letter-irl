@@ -298,10 +298,10 @@ A `pdf-1` gift send prints its card as the PDF's second page, drawn by the rende
   - With room to write off, a restyle is laid out on one page, so a longer draft is refused as too long.
 - **`get_draft_status`** gives a ready letter's `pages` when above one, as a restyle may have changed them. While room to write is offered, it also gives what the letter costs now: `canSendNow`, `reasonCannotSend` and `sendEligibility`, the preview's own terms (`letterPayment`). A card shown its preview's first answer again then draws the price the draft has.
 - **The fit line (#586).** While room to write is offered, the previews and `set_stationery` give the card `_meta.pageFit`, which never reaches the model. It holds the pages, the sheets, double-sided, each page's lines, and the room left on the last page in lines and about how many characters. The letter card:
-  - says on the studio's Words tab how full the letter is: "Fits on one page, with room for about 1,940 more characters.", "Runs on to the back of the page: printed on both sides of one sheet." or "Three pages: two sheets, printed on both sides. That is the longest letter we print.";
+  - says on the studio's Words tab how full the letter is: "Fits on one page, with room for about 1,940 more characters.", "Runs on to the back of the page: printed on both sides of one sheet." or "Three pages, on two sheets: the longest letter we print.";
   - names a longer letter's pages in the studio's summary and the layout row: "2 pages, both sides";
   - shows its Pay & Send price as the cost;
-  - after a restyle, or a status answer, draws the price and pages the server gave, laid over the preview's.
+  - after a restyle, or a status answer, draws the price and pages the server gave, laid over the preview's. A status answer lays nothing out, so the fit line keeps the preview's count while the draft's page is still the preview's, and says nothing of room once the chat has changed it.
 - **Descriptions.** The three previews' descriptions add one sentence while it is offered (steering r32). The manifest pins the flag off.
 
 **Stationery on a preview (#563).** While `LETTER_IRL_STATIONERY_ENABLED` is on and the previews are

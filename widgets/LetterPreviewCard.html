@@ -599,7 +599,7 @@
       function fitText(state) {
         const pages = pagesOf(state);
         if (pages === 2) return "Runs on to the back of the page: printed on both sides of one sheet.";
-        if (pages === 3) return "Three pages: two sheets, printed on both sides. That is the longest letter we print.";
+        if (pages === 3) return "Three pages, on two sheets: the longest letter we print.";
         const terms = styleRow.terms(state.draftId);
         const fit = terms ? terms.pageFit : currentMeta().pageFit;
         const room = fit?.pages === 1 ? Number(fit.roomCharacters) : NaN;
@@ -1188,7 +1188,13 @@
             if (answer.status === "ready") {
               // And the style it is in now, with its page (#563): this card,
               // or the chat, may have restyled it since that preview.
-              styleRow.adopt(draftId, answer.stationery, result?._meta?.previewHtml, answer);
+              // How full its pages are (#592 review round 1): the preview's own
+              // count while its page is still the preview's; none once the chat
+              // has changed it, as the status counts nothing again.
+              const statusPage = result?._meta?.previewHtml;
+              const statusFit =
+                typeof statusPage === "string" && statusPage === currentMeta().previewHtml ? currentMeta().pageFit ?? null : null;
+              styleRow.adopt(draftId, answer.stationery, statusPage, answer, statusFit);
               // And what they mean for delivery, for the Delivery line.
               if (
                 picker.adopt(draftId, answer.schedule) &&

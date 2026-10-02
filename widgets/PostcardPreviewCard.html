@@ -1720,11 +1720,18 @@
         // A gift send is free and needs no balance (docs/gift-letters.md).
         const isGiftSend = Boolean(state.giftCard);
 
-        // Cost - lettersRequired is already in letters (1 letter = 1 postcard)
+        // Cost - lettersRequired is already in letters (1 letter = 1 postcard).
+        // Mail no pack pays for (#579), such as a 4x6 postcard, says its price,
+        // as the studio's cost does (#592 review round 1).
         const letters = lettersRequired ?? 1;
+        const costPayAndSend = sendEligibility?.payAndSend;
         document.getElementById("cost").textContent = isGiftSend
           ? "Free (gift letter)"
-          : `${letters} Letter${letters === 1 ? "" : "s"}`;
+          : sendEligibility?.packPays === false
+            ? costPayAndSend?.amountCents
+              ? `Pay & Send ${formatPayAmount(costPayAndSend)}`
+              : "Paid when you send it"
+            : `${letters} Letter${letters === 1 ? "" : "s"}`;
 
         // Delivery info. A date this card set (#535) brings its own estimate.
         const estimate =

@@ -95,6 +95,8 @@ describe("get_draft_status (#474)", () => {
       vi.mocked(getDraftState).mockResolvedValue({ ...ready, pages: 1, is_gift_send: true } as any);
       const gift = await ask({ draftId: DRAFT_ID }, { ...context(), user: { userId: "auth0|owner", creditsRemaining: 0, orders: [] } as any });
       expect(gift).toMatchObject({ canSendNow: true });
+      // The preview's own terms for a gift (giftSendEligibility): nothing to pay.
+      expect(gift.sendEligibility).toMatchObject({ payAndSend: { available: false, unavailableReason: "This uses a gift letter, so there is nothing to pay." } });
 
       // The draft's own credits, not a guess: more than the balance holds.
       vi.mocked(getDraftState).mockResolvedValue({ ...ready, pages: 1, required_credits: 12 } as any);

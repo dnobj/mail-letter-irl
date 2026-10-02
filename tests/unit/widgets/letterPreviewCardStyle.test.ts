@@ -544,6 +544,11 @@ describe('a restyle that changes the pages, and so the price (#586)', () => {
     );
     expect(card.text('cost')).toBe('Pay & Send USD 5.99');
     expect(card.text('layout-type')).toBe('Text Only · 2 pages, both sides');
+
+    // A restyle that then says nothing of it keeps that last word (#592 review round 1).
+    await card.choose('botanical');
+    await card.answer(restyled({ theme: 'botanical', dateLine: 'October 1, 2026', source: 'asked' }, BOTANICAL_PAGE));
+    expect(card.text('cost')).toBe('Pay & Send USD 5.99');
   });
 });
 

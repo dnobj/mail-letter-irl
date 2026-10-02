@@ -147,8 +147,11 @@
           state.stationery = stationery;
           state.restyled = true;
           keepSlots(stationery);
-          // What it costs now, and how full its pages are (#586).
-          state.terms = termsOf(data, result && result._meta && result._meta.pageFit);
+          // What it costs now, and how full its pages are (#586). An answer
+          // that says nothing of it, as an older server's would not, keeps
+          // the last word on it (#592 review round 1).
+          var said = termsOf(data, result && result._meta && result._meta.pageFit);
+          if (said) state.terms = said;
           var page = result && result._meta && result._meta.previewHtml;
           // The draft has the new style either way; without its page the card
           // keeps showing the last one and says so.
@@ -233,13 +236,15 @@
       // when the row is on another draft, setting a style, or has set one:
       // the card asks before anyone can press, so an answer that lands after
       // a restyle is older than it (#572 review round 2).
-      // With it, what the letter costs now (#586), when the answer says.
-      adopt: function (draftId, stationery, previewHtml, answer) {
+      // With it, what the letter costs now (#586), when the answer says, and
+      // how full its pages are as the card knows it (fit, or null when it
+      // does not: the status lays nothing out).
+      adopt: function (draftId, stationery, previewHtml, answer, fit) {
         if (state.draftId !== draftId || state.busy || state.restyled || !stationery || !isTheme(stationery.theme)) return false;
         state.stationery = stationery;
         keepSlots(stationery);
         if (typeof previewHtml === "string" && previewHtml) state.previewHtml = previewHtml;
-        var terms = termsOf(answer, null);
+        var terms = termsOf(answer, fit);
         if (terms) state.terms = terms;
         draw();
         return true;

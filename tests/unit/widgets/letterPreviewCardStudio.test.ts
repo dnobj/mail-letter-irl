@@ -377,7 +377,7 @@ describe('the letter card as a studio (#580)', () => {
 
     const three = mount();
     await three.show(output({ pages: 3, canSendNow: false, sendEligibility: PAY_AND_SEND }), ON);
-    expect(text(three, 'studio-fit')).toBe('Three pages: two sheets, printed on both sides. That is the longest letter we print.');
+    expect(text(three, 'studio-fit')).toBe('Three pages, on two sheets: the longest letter we print.');
     expect(text(three, 'studio-summary')).toBe('black and white · 3 pages, both sides · mailed in 1-2 business days');
 
     // One page: the room it has left, while room to write gives its fit.
@@ -419,6 +419,37 @@ describe('the letter card as a studio (#580)', () => {
     await restyle('botanical', 0);
     expect(text(card, 'studio-fit')).toBe('');
     expect(card.byId('studio-fit').hidden).toBe(true);
+  });
+
+  it("keeps the preview's fit through the card's status answer, and drops it once the chat has changed the page (#592 review round 1)", async () => {
+    const FIT = { pages: 1, sheets: 1, doubleSided: false, roomLines: 20, roomCharacters: 1940, charactersPerLine: 97 };
+    // The answer a host that keeps no state gets on the card's first render.
+    const status = (page: string) => ({
+      result: {
+        content: [],
+        structuredContent: {
+          draftId: 'draft_0001',
+          status: 'ready',
+          deliveryEstimate: 'Mailed in 1-2 business days',
+          stationery: { theme: 'classic' },
+          ...canSend
+        },
+        _meta: { previewHtml: page }
+      }
+    });
+
+    const same = mount();
+    await same.show(output({ stationery: { theme: 'classic', source: 'default' } }), { ...ON, pageFit: FIT });
+    await same.answer(status(PAGE), 'get_draft_status');
+    expect(text(same, 'studio-fit')).toBe('Fits on one page, with room for about 1,940 more characters.');
+    expect(same.byId('studio-fit').hidden).toBe(false);
+
+    // The chat changed the page since the preview: the status counts nothing again.
+    const changed = mount();
+    await changed.show(output({ stationery: { theme: 'classic', source: 'default' } }), { ...ON, pageFit: FIT });
+    await changed.answer(status(document1('Dear Sam, and more,\nPat')), 'get_draft_status');
+    expect(text(changed, 'studio-fit')).toBe('');
+    expect(changed.byId('studio-fit').hidden).toBe(true);
   });
 
   it('says a letter with its picture prints in colour (#584 review round 1)', async () => {

@@ -328,18 +328,23 @@ describe('the postcard card as a postcard maker (#580)', () => {
       ON
     );
     expect(text(paid, 'studio-cost')).toBe('Pay & Send USD 3.99');
+    // And the classic cost row with it (#592 review round 1).
+    expect(text(paid, 'cost')).toBe('Pay & Send USD 3.99');
 
     const unpriced = mount();
     await unpriced.show(output({ canSendNow: false, sendEligibility: { packPays: false, payAndSend: { available: false } } }), ON);
     expect(text(unpriced, 'studio-cost')).toBe('Paid when you send it');
+    expect(text(unpriced, 'cost')).toBe('Paid when you send it');
 
     const gift = mount();
     await gift.show(output({ giftCard: { state: 'funded' } }), ON);
     expect(text(gift, 'studio-cost')).toBe('Free: a gift letter');
+    expect(text(gift, 'cost')).toBe('Free (gift letter)');
 
     const two = mount();
     await two.show(output({ lettersRequired: 2 }), ON);
     expect(text(two, 'studio-cost')).toBe('2 letters');
+    expect(text(two, 'cost')).toBe('2 Letters');
   });
 
   it('sends with send_postcard from the footer, then says it was sent', async () => {
