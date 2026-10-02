@@ -2194,7 +2194,7 @@
               "6x4",
               "6x11"
             ],
-            "description": "While the 4x6 and 11x6 are offered: the postcard's size, which set_postcard_style changes"
+            "description": "While the 4x6 and 11x6 are offered: the postcard's size"
           },
           "layout": {
             "type": "string",
@@ -2203,7 +2203,7 @@
               "border",
               "greetings"
             ],
-            "description": "While postcard layouts are offered: the front's layout, which set_postcard_style changes"
+            "description": "While postcard layouts are offered: the front's layout"
           },
           "caption": {
             "type": "string",

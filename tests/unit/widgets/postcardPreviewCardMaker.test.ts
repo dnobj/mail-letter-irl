@@ -151,6 +151,8 @@ function mount() {
 const ON = (page = drawn()) => ({ previewHtml: page, [STUDIO]: true });
 const pressed = (card: ReturnType<typeof mount>, selector: string) =>
   [...card.document.querySelectorAll(selector)].filter(button => button.getAttribute('aria-pressed') === 'true').map(button => button.textContent);
+const inert = (card: ReturnType<typeof mount>, selector: string) =>
+  [...card.document.querySelectorAll(selector)].map(button => button.getAttribute('aria-disabled') === 'true');
 const frontViewBox = (card: ReturnType<typeof mount>) => card.byId('preview-front').querySelector('svg')!.getAttribute('viewBox');
 const restyled = (structuredContent: Json, page?: string) => ({
   result: {
@@ -197,7 +199,9 @@ describe('a size set on the maker (#594)', () => {
     const [request] = card.requests('set_postcard_style');
     expect(request.params.arguments).toEqual({ draftId: 'draft_0001', size: '6x4' });
     // Meanwhile: the choices and Send wait, and the maker says why.
-    expect([...card.document.querySelectorAll<HTMLButtonElement>('#studio-sizes [data-size]')].every(button => button.disabled)).toBe(true);
+    // Inert by aria-disabled, so the pressed choice keeps keyboard focus (#603 review round 1).
+    expect(inert(card, '#studio-sizes [data-size]')).toEqual([true, true, true]);
+    expect([...card.document.querySelectorAll<HTMLButtonElement>('#studio-sizes [data-size]')].some(button => button.disabled)).toBe(false);
     expect((card.byId('send-button') as HTMLButtonElement).disabled).toBe(true);
     expect(card.byId('studio-style-note').textContent).toBe('Drawing the postcard again.');
 
@@ -216,8 +220,10 @@ describe('a size set on the maker (#594)', () => {
     expect(frontViewBox(card)).toBe('0 0 450 306');
     expect(card.byId('studio-summary').textContent).toMatch(/^4 x 6 in · /);
     expect(card.byId('studio-cost').textContent).toBe('Pay & Send USD 3.99');
-    expect(card.byId('studio-style-note').textContent).toBe('');
-    expect([...card.document.querySelectorAll<HTMLButtonElement>('#studio-sizes [data-size]')].some(button => button.disabled)).toBe(false);
+    // The server's own sentence, announced (role=status).
+    expect(card.byId('studio-style-note').textContent).toBe('The postcard is now a 4x6, with the photo across the front.');
+    expect(card.byId('studio-style-note').classList.contains('studio-error')).toBe(false);
+    expect(inert(card, '#studio-sizes [data-size]')).toEqual([false, false, false]);
   });
 
   it('says a refusal in place and keeps the postcard as it was', async () => {
@@ -333,5 +339,182 @@ describe('a maker shown its preview again (#594)', () => {
     expect((card.byId('studio-line-input') as HTMLInputElement).value).toBe('Rye');
     expect(frontViewBox(card)).toBe('0 0 810 450');
     expect(card.byId('studio-cost').textContent).toBe('Pay & Send USD 3.99');
+  });
+});
+
+describe('the maker after #603 review round 1', () => {
+  const PER_SEND_4X6 = {
+    draftId: 'draft_0001', size: '6x4', layout: 'full_bleed', canSendNow: false, sendEligibility: PER_SEND,
+    message: 'The postcard is now a 4x6, with the photo across the front.'
+  };
+
+  it('hides what it hides: no class of a hidden element lays it out over its hidden attribute', () => {
+    // JSDOM hides every [hidden] element whatever the author CSS says, so the
+    // cascade is checked in the stylesheet itself.
+    const served = stampPreviewTool(
+      inlineHostBridge(fs.readFileSync(path.join(WIDGET_DIR, 'PostcardPreviewCard.html'), 'utf-8'), WIDGET_DIR),
+      'quote_and_preview_postcard'
+    );
+    const css = [...served.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)].map(match => match[1]).join('\n');
+    const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, selectors, body]) => ({
+      selectors: selectors.split(',').map(selector => selector.trim()),
+      body
+    }));
+    const laysOut = (selector: string) => rules.some(rule => rule.selectors.includes(selector) && /display\s*:\s*(?!none)/.test(rule.body));
+    const hides = (selector: string) => rules.some(rule => rule.selectors.includes(`${selector}[hidden]`) && /display\s*:\s*none/.test(rule.body));
+    const document = new JSDOM(served).window.document;
+    const hidden = [
+      ...document.querySelectorAll('[hidden]'),
+      ...[...document.querySelectorAll('template')].flatMap(template => [...(template as HTMLTemplateElement).content.querySelectorAll('[hidden]')])
+    ];
+    expect(hidden.map(element => element.id)).toEqual(expect.arrayContaining(['studio-sizes', 'studio-front', 'studio-line']));
+    for (const element of hidden) {
+      for (const name of element.classList) {
+        if (laysOut(`.${name}`)) expect(hides(`.${name}`), `.${name} on #${element.id}`).toBe(true);
+      }
+    }
+  });
+
+  it('keeps its own change when an older status answer lands after it', async () => {
+    const card = mount();
+    await card.show(output({ size: '6x9', layout: 'full_bleed' }), ON());
+    await card.click(card.document.querySelector('[data-size="6x4"]')!);
+    await card.answer(restyled(PER_SEND_4X6, drawn('6x4')), 'set_postcard_style');
+    // The status asked on the first draw answers now, with the style before the change.
+    await card.answer(
+      {
+        result: {
+          content: [{ type: 'text', text: 'Ready.' }],
+          structuredContent: { draftId: 'draft_0001', status: 'ready', size: '6x9', layout: 'full_bleed', canSendNow: true, sendEligibility: PACK },
+          _meta: { previewHtml: drawn() }
+        }
+      },
+      'get_draft_status'
+    );
+    expect(pressed(card, '#studio-sizes [data-size]')).toEqual(['4 x 6 in']);
+    expect(card.byId('studio-cost').textContent).toBe('Pay & Send USD 3.99');
+    expect(frontViewBox(card)).toBe('0 0 450 306');
+  });
+
+  it('ignores a status answer that lands while a change is made', async () => {
+    const card = mount();
+    await card.show(output({ size: '6x9', layout: 'full_bleed' }), ON());
+    await card.click(card.document.querySelector('[data-size="6x11"]')!);
+    await card.answer(
+      {
+        result: {
+          content: [{ type: 'text', text: 'Ready.' }],
+          structuredContent: { draftId: 'draft_0001', status: 'ready', size: '6x4', layout: 'full_bleed', canSendNow: false, sendEligibility: PER_SEND },
+          _meta: { previewHtml: drawn('6x4') }
+        }
+      },
+      'get_draft_status'
+    );
+    await card.answer({ result: { isError: true, content: [{ type: 'text', text: 'The postcard changed while it was being drawn again.' }] } }, 'set_postcard_style');
+    expect(pressed(card, '#studio-sizes [data-size]')).toEqual(['6 x 9 in']);
+    expect(card.byId('studio-style-note').classList.contains('studio-error')).toBe(true);
+  });
+
+  it('holds Send and Pay & Send while a greeting waits for its place, and lets them go once it is set or left', async () => {
+    const sending = mount();
+    await sending.show(output({ layout: 'full_bleed' }), ON());
+    await sending.click(sending.document.querySelector('[data-layout="greetings"]')!);
+    await sending.type('Rye');
+    expect((sending.byId('send-button') as HTMLButtonElement).disabled).toBe(true);
+    await sending.click(sending.byId('send-button'));
+    expect(sending.requests('send_postcard')).toEqual([]);
+    // Back to the front it has: the greeting and its prompt go, and Send with them.
+    await sending.click(sending.document.querySelector('[data-layout="full_bleed"]')!);
+    expect(sending.byId('studio-style-note').textContent).toBe('');
+    expect(sending.byId('studio-line').hidden).toBe(true);
+    expect((sending.byId('send-button') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('holds Pay & Send while a caption differs from the one the draft has, and not once it matches again', async () => {
+    const card = mount();
+    await card.show(
+      output({ size: '6x4', layout: 'border', caption: 'Cape Cod', canSendNow: false, sendEligibility: PER_SEND }),
+      ON(drawn('6x4', { layout: 'border', caption: 'Cape Cod' }))
+    );
+    await card.type('Nantucket');
+    expect((card.byId('pay-send-button') as HTMLButtonElement).disabled).toBe(true);
+    await card.click(card.byId('pay-send-button'));
+    expect(card.requests('create_mail_checkout')).toEqual([]);
+    await card.type('Cape Cod');
+    expect((card.byId('pay-send-button') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('keeps a caption being written through a change of size', async () => {
+    const card = mount();
+    await card.show(output({ size: '6x9', layout: 'border', caption: 'Cape Cod' }), ON(drawn('6x9', { layout: 'border', caption: 'Cape Cod' })));
+    await card.type('Nantucket');
+    await card.click(card.document.querySelector('[data-size="6x11"]')!);
+    await card.answer(
+      restyled(
+        { draftId: 'draft_0001', size: '6x11', layout: 'border', caption: 'Cape Cod', canSendNow: false, sendEligibility: PER_SEND, message: 'Resized.' },
+        drawn('6x11', { layout: 'border', caption: 'Cape Cod' })
+      ),
+      'set_postcard_style'
+    );
+    expect((card.byId('studio-line-input') as HTMLInputElement).value).toBe('Nantucket');
+  });
+
+  it('keeps the place written so far when Greetings is pressed again', async () => {
+    const card = mount();
+    await card.show(output({ layout: 'full_bleed' }), ON());
+    await card.click(card.document.querySelector('[data-layout="greetings"]')!);
+    await card.type('Rye');
+    await card.click(card.document.querySelector('[data-layout="greetings"]')!);
+    expect((card.byId('studio-line-input') as HTMLInputElement).value).toBe('Rye');
+  });
+
+  it('keeps its change through a host redraw while the change is made', async () => {
+    const card = mount();
+    await card.show(output({ size: '6x9' }), ON());
+    await card.click(card.document.querySelector('[data-size="6x4"]')!);
+    // The host sends the preview's result again meanwhile.
+    await card.show(output({ size: '6x9' }), ON());
+    await card.answer(restyled(PER_SEND_4X6, drawn('6x4')), 'set_postcard_style');
+    expect(pressed(card, '#studio-sizes [data-size]')).toEqual(['4 x 6 in']);
+    expect(frontViewBox(card)).toBe('0 0 450 306');
+  });
+
+  it('names the new size, and says the page did not come back, when an answer has no page', async () => {
+    const card = mount();
+    await card.show(output({ size: '6x9' }), ON());
+    await card.click(card.document.querySelector('[data-size="6x4"]')!);
+    await card.answer(restyled(PER_SEND_4X6), 'set_postcard_style');
+    expect(card.byId('studio-summary').textContent).toMatch(/^4 x 6 in · /);
+    expect(card.byId('studio-style-note').textContent).toBe(
+      'The postcard is changed, but its page did not come back here. Make the preview again to see it.'
+    );
+  });
+
+  it('keeps keyboard focus on the choice pressed while the change is made', async () => {
+    const card = mount();
+    await card.show(output({ size: '6x9' }), ON());
+    const button = card.document.querySelector<HTMLButtonElement>('[data-size="6x4"]')!;
+    button.focus();
+    await card.click(button);
+    expect(button.disabled).toBe(false);
+    expect(card.document.activeElement).toBe(button);
+    // A press meanwhile asks nothing more.
+    await card.click(card.document.querySelector('[data-size="6x11"]')!);
+    expect(card.requests('set_postcard_style')).toHaveLength(1);
+  });
+
+  it('does not offer a gift postcard another size, as a gift letter pays for a 6x9 only', async () => {
+    const card = mount();
+    await card.show(output({ size: '6x9', layout: 'full_bleed', giftCard: { state: 'funded', description: 'A gift card.' } }), ON());
+    expect(card.byId('studio-sizes').hidden).toBe(true);
+    expect(card.byId('studio-size').hidden).toBe(false);
+    expect(card.byId('studio-front').hidden).toBe(false);
+  });
+
+  it("names the line's limit to a screen reader", async () => {
+    const card = mount();
+    await card.show(output({ layout: 'border' }), ON(drawn('6x9', { layout: 'border' })));
+    expect(card.byId('studio-line-input').getAttribute('aria-describedby')).toBe('studio-line-hint');
+    expect(card.byId('studio-line-hint').textContent).toBe('Up to 60 characters, or none.');
   });
 });

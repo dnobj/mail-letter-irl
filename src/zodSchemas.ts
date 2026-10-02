@@ -737,8 +737,8 @@ export const clearReturnAddressOutputZ = z.object({
 });
 
 /** A postcard preview's size and front (#594), named while each is offered. */
-export const PREVIEW_POSTCARD_SIZE_DESCRIPTION = "While the 4x6 and 11x6 are offered: the postcard's size, which set_postcard_style changes";
-export const PREVIEW_POSTCARD_LAYOUT_DESCRIPTION = "While postcard layouts are offered: the front's layout, which set_postcard_style changes";
+export const PREVIEW_POSTCARD_SIZE_DESCRIPTION = "While the 4x6 and 11x6 are offered: the postcard's size";
+export const PREVIEW_POSTCARD_LAYOUT_DESCRIPTION = "While postcard layouts are offered: the front's layout";
 
 export const quoteAndPreviewPostcardOutputZ = z.object({
   lettersRequired: z.number(),
