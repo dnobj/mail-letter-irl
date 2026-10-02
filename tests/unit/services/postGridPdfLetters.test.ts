@@ -464,6 +464,7 @@ describe('letters printed from our own PDF (#534)', () => {
         expect(form.get('doubleSided')).toBe('true');
         const expected = layoutLetter({ text: lines(40), layoutType: 'text_only', stationery }, { maxPages: 2 });
         expect(expected.pages).toHaveLength(2);
+        expect(expected.pages[0].items.some(item => item.kind === 'path')).toBe(true);
         expect(expected.pages[1].items.some(item => item.kind === 'path')).toBe(false);
         expect(pdf.equals(await renderPdf(expected, STATIONERY_RENDERER_VERSION))).toBe(true);
       } finally {

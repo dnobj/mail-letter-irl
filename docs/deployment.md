@@ -662,8 +662,10 @@ draw the letter or postcard before any request was made. The reason is one of:
   `monogram`: the slot's key) was measured to fit when it was previewed, under the same version, so it is
   an overflow a renderer change caused.
 
-The log line `provider.postgrid.render_refused` names the reason and the letter id, and the hold's
-message says what was refused. Decide by the message, not the reason alone:
+The log line `provider.postgrid.render_refused` names the reason and the letter id. Neither the hold,
+which stores only its class, nor the log keeps the refusal's message; the messages quoted below are what
+each case says. Decide by the reason, and where a reason has more than one case, by the letter's stored
+content (`content.pages`, `content.rendererVersion`, `content.giftCard`, the image, the stationery):
 - **Retry** when a build can print it: deploy that build, then resolve the letter with a retry
   (`provider_confirmed_rejected_retry`). That covers:
   - a version this build does not know;
@@ -673,7 +675,10 @@ message says what was refused. Decide by the message, not the reason alone:
   - an overflow that a renderer change caused. A letter refused as `overflow` was measured to fit when
     it was previewed, under the same version, so a deploy changed the wrapping. Fix the renderer rather
     than refund. A stationery slot that "does not fit" is the same case, and so is a letter that "lays
-    out on N page(s), not the M it was previewed on" (#586);
+    out on N page(s), not the M it was previewed on" (#586). If the renderer was changed on purpose and
+    the letter cannot print as it was previewed, as can happen to mail held for an arrival date (#535),
+    set its `content.pages` to the count it now lays out on, retry, and settle any difference in price
+    with the customer by hand;
   - stationery this build cannot read, once a build that reads the stored theme is deployed. Stored
     stationery is refused when the draft is made unless the print reads it back, so this means the
     build changed, not the letter.
