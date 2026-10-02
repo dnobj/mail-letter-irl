@@ -1615,6 +1615,8 @@ describe('commerceService', () => {
     });
 
     it('refuses a checkout whose letter changed its pages since the peek, before any order (#586)', async () => {
+      // A day's cap above either price, so only the change refuses it.
+      vi.stubEnv('LETTER_IRL_BETA_ACCOUNT_DAILY_CHARGE_CENTS', '100000');
       mocks.getJitProduct.mockImplementation((({ mailType, pages }: { mailType: string; pages?: number }) =>
         mailType === 'letter' && pages === 2
           ? {
@@ -1640,6 +1642,18 @@ describe('commerceService', () => {
       expect(mocks.getJitProduct).toHaveBeenLastCalledWith({ mailType: 'letter', pages: 2 });
       const sql = mocks.query.mock.calls.map(call => String(call[0]));
       expect(sql.some(statement => statement.includes('INSERT INTO orders'))).toBe(false);
+      expect(mocks.createJitSession).not.toHaveBeenCalled();
+
+      // Back on to one page meanwhile is refused too: the catalog was warmed, and
+      // the caps checked, for the peek's product.
+      mocks.query.mockReset();
+      mocks.query
+        .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
+        .mockResolvedValueOnce({ rows: [{ mail_type: 'letter', postcard_size: null, pages: 2 }] })
+        .mockResolvedValueOnce({ rows: [{ ...DRAFT, mail_type: 'letter', postcard_size: null, pages: 1 }] })
+        .mockResolvedValue({ rows: [] });
+      await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' }))
+        .rejects.toMatchObject({ code: 'DRAFT_CHANGED' });
       expect(mocks.createJitSession).not.toHaveBeenCalled();
     });
 

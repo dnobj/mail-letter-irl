@@ -26,6 +26,9 @@ describe("tool scope enforcement", () => {
     ["get_draft_status", "mail:read"],
     // A preview's arrival date, changed (#535): drafting, and it sends nothing.
     ["set_arrival_date", "mail:draft"],
+    // A preview's style and words, changed in place (#563, #586): drafting, and they send nothing.
+    ["set_stationery", "mail:draft"],
+    ["set_letter_words", "mail:draft"],
     // Held mail cancelled (#535): it only ever returns value.
     ["cancel_scheduled_mail", "mail:draft"]
   ])("maps %s to %s in metadata and runtime", (toolName, scope) => {

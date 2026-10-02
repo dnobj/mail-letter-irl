@@ -952,6 +952,70 @@ describe("the Words tab's editor (#586)", () => {
     expect((card.byId('studio-words-body') as HTMLTextAreaElement).value).toBe(ARGS.bodyText);
   });
 
+  it('holds Pay & Send while words are being written, as it holds Send', async () => {
+    const card = mount();
+    const TWO_FIT = { pages: 2, sheets: 1, doubleSided: true, roomLines: 10, roomCharacters: 970, charactersPerLine: 97 };
+    await card.show(output({ ...CLASSIC, pages: 2, canSendNow: false, sendEligibility: PAY_AND_SEND }), { ...ON, pageFit: TWO_FIT });
+    expect((card.byId('pay-send-button') as HTMLButtonElement).disabled).toBe(false);
+    await card.click(card.tab('words'));
+    await card.click(card.byId('studio-words-open'));
+    expect((card.byId('pay-send-button') as HTMLButtonElement).disabled).toBe(true);
+    await card.click(card.byId('pay-send-button'));
+    expect(card.lastRequest('tools/call', 'create_mail_checkout')).toBeUndefined();
+    // Counted on the back of the page, and past it.
+    expect(text(card, 'studio-words-count')).toBe('About 970 characters left on the back of the page.');
+  });
+
+  it('counts past the third page as more than we print', async () => {
+    const card = mount();
+    const THREE_FIT = { pages: 3, sheets: 2, doubleSided: true, roomLines: 1, roomCharacters: 100, charactersPerLine: 97 };
+    await card.show(output({ ...CLASSIC, pages: 3, canSendNow: false, sendEligibility: PAY_AND_SEND }), { ...ON, pageFit: THREE_FIT });
+    await card.click(card.tab('words'));
+    await card.click(card.byId('studio-words-open'));
+    expect(text(card, 'studio-words-count')).toBe('About 100 characters left on the third page.');
+    await type(card, 'studio-words-body', `${ARGS.bodyText}${'x'.repeat(300)}`);
+    expect(text(card, 'studio-words-count')).toBe('About 200 characters past the third page, more than we print.');
+  });
+
+  it("keeps its own page and price when the status answer it asked for first arrives after the words changed", async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
+    await card.click(card.tab('words'));
+    await card.click(card.byId('studio-words-open'));
+    await type(card, 'studio-words-body', 'Dear Sam,\n\nLonger now.');
+    await card.click(card.byId('studio-words-update'));
+    await card.answer(ranOn, 'set_letter_words');
+    // The answer to the question the card asked on its first render: the page before.
+    await card.answer(
+      {
+        result: {
+          content: [],
+          structuredContent: { draftId: 'draft_0001', status: 'ready', deliveryEstimate: 'Mailed in 1-2 business days', stationery: { theme: 'classic' }, ...canSend },
+          _meta: { previewHtml: PAGE }
+        }
+      },
+      'get_draft_status'
+    );
+    expect(card.document.querySelectorAll('#mockup-container svg')).toHaveLength(2);
+    expect(text(card, 'studio-cost')).toBe('Pay & Send USD 5.99');
+  });
+
+  it('starts a new draft in the card from its own words', async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
+    await card.click(card.tab('words'));
+    await card.click(card.byId('studio-words-open'));
+    await type(card, 'studio-words-body', 'Dear Sam,\n\nLonger now.');
+    await card.click(card.byId('studio-words-update'));
+    await card.answer(ranOn, 'set_letter_words');
+    expect(text(card, 'studio-words')).toBe('Dear Sam,\n\nLonger now.\n\nLove,\nPat');
+
+    for (const time of ['once', 'again']) {
+      await card.show({ ...output(CLASSIC), draftId: 'draft_0002' }, { ...ON, pageFit: FIT });
+      expect(text(card, 'studio-words'), time).toBe('Dear Sam,\n\nThe garden is in.\n\nLove,\nPat');
+    }
+  });
+
   it('says a gift letter is one page when the words run past it', async () => {
     const card = mount();
     await card.show(output({ ...CLASSIC, giftCard: { state: 'funded' } }), { ...ON, pageFit: FIT });

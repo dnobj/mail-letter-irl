@@ -249,6 +249,19 @@ describe('set_letter_words', () => {
     expect(setDraftWords).not.toHaveBeenCalled();
   });
 
+  it("checks what prints in the draft's own face: Greek prints in Classic, not in Handwritten", async () => {
+    const greek = 'Αγαπητέ Sam, ο κήπος άνθισε.';
+    vi.mocked(getDraftForStationery).mockResolvedValue(draft({ bodyText: lines(4) }) as never);
+    await change(greek);
+    expect(written().bodyText).toBe(greek);
+
+    vi.mocked(setDraftWords).mockClear();
+    const handwritten = { theme: 'handwritten' as const, dateLine: 'October 2, 2026' };
+    vi.mocked(getDraftForStationery).mockResolvedValue(draft({ bodyText: lines(4), stationery: handwritten }) as never);
+    await expect(change(greek)).rejects.toThrow();
+    expect(setDraftWords).not.toHaveBeenCalled();
+  });
+
   it('is refused while room to write is not offered, before reading the draft', async () => {
     vi.stubEnv('LETTER_IRL_ROOM_TO_WRITE_ENABLED', '');
     await expect(change(lines(4))).rejects.toMatchObject({
