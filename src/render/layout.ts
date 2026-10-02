@@ -199,18 +199,46 @@ export function drawsGraphemeIn(fontName: FontName): (grapheme: string) => boole
   return grapheme => draws(fontName, grapheme);
 }
 
+/** Per font, whether a cluster of more than one character shapes cleanly. */
+const shapesCache = new Map<FontName, Map<string, boolean>>();
+
+/**
+ * Whether a cluster of more than one visible character, a letter and its
+ * marks, shapes in a font with no missing glyph and no failure. fontkit's
+ * mark positioning throws on many of Caveat's letters with a separate
+ * accent, such as "i" and U+0301 (#575 review round 4), where the layout
+ * would fail; a cluster that shapes alone shapes in a line too.
+ */
+function shapes(fontName: FontName, cluster: string): boolean {
+  let cache = shapesCache.get(fontName);
+  if (!cache) shapesCache.set(fontName, (cache = new Map()));
+  let clean = cache.get(cluster);
+  if (clean === undefined) {
+    try {
+      clean = shape(loadFont(fontName), cluster).glyphs.every(glyph => glyph.id !== 0);
+    } catch {
+      clean = false;
+    }
+    cache.set(cluster, clean);
+  }
+  return clean;
+}
+
 /**
  * Whether the renderer draws a grapheme cluster as written in a font: each
  * character is a line break, a tab, a character that prints nothing, or one
  * the font has a glyph for (a space's glyph drawing nothing: Tinos draws
  * U+205F as a box), and the cluster carries at most MAX_MARKS_PER_LETTER
- * combining marks. A preview refuses text holding a cluster that fails,
- * rather than printing a box or dropping a mark.
+ * combining marks, which the font can place on their letter. A preview
+ * refuses text holding a cluster that fails, rather than printing a box,
+ * dropping a mark or failing to lay out.
  */
 function draws(fontName: FontName, grapheme: string): boolean {
   const font = loadFont(fontName);
   let marks = 0;
-  for (const character of inFace(fontName, grapheme)) {
+  const drawn = inFace(fontName, grapheme);
+  const visible: string[] = [];
+  for (const character of drawn) {
     if (MARK.test(character) && ++marks > MAX_MARKS_PER_LETTER) return false;
     if (character === '\n' || character === '\r' || character === '\t' || isInvisible(character)) continue;
     if (NEVER_DRAWN.test(character)) return false;
@@ -221,8 +249,9 @@ function draws(fontName: FontName, grapheme: string): boolean {
     // U+2215 and U+221F but not their mirrors (#540 review round 2).
     const mirror = mirrorOf(character);
     if (mirror && !font.hasGlyphForCodePoint(mirror.codePointAt(0)!)) return false;
+    visible.push(character);
   }
-  return true;
+  return visible.length < 2 || shapes(fontName, visible.join(''));
 }
 
 function fitImage(image: RenderImage, maxHeight: number): { width: number; height: number } {

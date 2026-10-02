@@ -312,8 +312,12 @@ A gift send in a theme prints its themed page, then today's card page.
 - the text and sign-off are checked against that face, which draws less than Tinos:
   - Caveat has no Greek or Hebrew, almost no precomposed Vietnamese, no horn letters (Ơ, Ư), few of
     the caron letters beyond Latin Extended-A's (no Ǎ, Ǧ or ǰ), few historic Cyrillic letters, no
-    arrows, and few mathematical signs;
-  - Cousine lacks superscript and subscript digits, most letterlike symbols, and the ﬀ-type ligatures;
+    arrows, few mathematical signs, and none of the symbols Tinos draws (♥, ♪, ☺, ●, ■) or its box
+    and shape characters. Many of its letters cannot carry an accent written apart from them (an
+    "i" followed by U+0301, as some systems store "í"): such a letter is refused in Handwritten,
+    and the same letter written as one character (U+00ED) prints;
+  - Cousine lacks superscript and subscript digits, most letterlike symbols, and the ﬃ and ﬄ
+    ligatures;
   - neither has the non-breaking hyphen, the narrow no-break space or the other fixed-width spaces,
     which ChatGPT's text often holds; each face draws them as the nearest dash or space it has
     (`inFace`), so it takes what Classic takes of them. Lines still break as the text was written:

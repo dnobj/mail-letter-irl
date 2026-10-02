@@ -789,6 +789,17 @@ describe('Typewriter and Handwritten (#563 PR 8b)', () => {
     expect(error.message).not.toContain('stationery');
   });
 
+  it("refuses on Handwritten an accent written apart from its letter, saying so, where Classic prints it (#575 review round 4)", async () => {
+    const text = `Querida Mari${String.fromCodePoint(0x301)}a,`;
+    await expect(run('text_only', { stationery: 'classic', bodyText: text })).resolves.toMatchObject({ draftId: 'draft-1' });
+    vi.mocked(createDraft).mockClear();
+    const error = await run('text_only', { stationery: 'handwritten', bodyText: text }).catch(e => e);
+    expect(error).toMatchObject({ diagnosticClass: 'validation_error' });
+    expect(error.message).toContain('(an accent written apart from its letter, which this typeface cannot place) in the text, which the handwritten stationery prints in its own typeface');
+    expect(error.message).toContain('choose another stationery');
+    expect(createDraft).not.toHaveBeenCalled();
+  });
+
   it("keeps the usual closing when only an address, stamped in Open Sans, cannot print", async () => {
     const CAKE = String.fromCodePoint(0x1f382);
     const error = await run('text_only', { stationery: 'handwritten', recipient: address({ name: `Sam ${CAKE}` }) }).catch(e => e);

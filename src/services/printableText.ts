@@ -33,6 +33,8 @@
  * addresses are still stamped by PostGrid in Open Sans and are checked here.
  */
 
+import { MARK, MAX_MARKS_PER_LETTER } from '../render/marks.js';
+
 const PRINTABLE_RANGES: ReadonlyArray<readonly [number, number]> = [
   [0x0009, 0x000a], // tab, line feed
   [0x000d, 0x000d], // carriage return
@@ -231,7 +233,8 @@ function invisibleName(character: string): string {
  * emoji and other scripts as they are, and a character that may look like one
  * that prints (a non-breaking hyphen is not a hyphen) with the code points
  * that do not print in the text's font. A cluster whose every character
- * prints, refused only as a whole, carries too many marks (#534).
+ * prints, refused only as a whole, carries too many marks (#534), or marks
+ * its typeface cannot place on their letter (#575).
  */
 function shown(grapheme: string, prints: PrintsGrapheme): string {
   const characters = [...grapheme];
@@ -243,7 +246,12 @@ function shown(grapheme: string, prints: PrintsGrapheme): string {
       PICTOGRAPHIC.test(grapheme) &&
       characters.every(character => EMOJI_JOINERS.has(character) || EMOJI_SEQUENCE_PART.test(character)));
   if (emoji || !(LOOK_ALIKE.test(grapheme) || INVISIBLE_START.test(grapheme))) return grapheme;
-  if (refused.length === 0) return `${grapheme} (too many marks on one letter)`;
+  if (refused.length === 0) {
+    const marks = characters.filter(character => MARK.test(character)).length;
+    return marks > MAX_MARKS_PER_LETTER
+      ? `${grapheme} (too many marks on one letter)`
+      : `${grapheme} (an accent written apart from its letter, which this typeface cannot place)`;
+  }
   return `${grapheme} (${refused.map(codePoint).join(' ')})`;
 }
 

@@ -265,6 +265,23 @@ describe("a face's characters (#563 PR 8)", () => {
     expect(tinos('\u03c0')).toBe(true);
   });
 
+  it('refuses a letter with a separate accent the face cannot place, and takes it written as one character (#575 review round 4)', () => {
+    const ch = (...codePoints: number[]) => String.fromCodePoint(...codePoints);
+    const caveat = drawsGraphemeIn('Caveat-Regular');
+    const decomposed = `i${ch(0x301)}`;
+    // fontkit's mark positioning throws on these in Caveat; the layout would fail.
+    expect(caveat(decomposed)).toBe(false);
+    expect(caveat(`O${ch(0x323, 0x301)}`)).toBe(false);
+    expect(caveat(ch(0xed))).toBe(true);
+    for (const font of ['Tinos-Regular', 'Cousine-Regular'] as const) expect(drawsGraphemeIn(font)(decomposed), font).toBe(true);
+    // Every letter-and-accent pair Caveat takes lays out on Handwritten's page.
+    const pairs = [...'aeiounyAEIOUNYcC'].flatMap(base => [0x300, 0x301, 0x302, 0x303, 0x308, 0x327].map(mark => base + ch(mark)));
+    const taken = pairs.filter(caveat);
+    expect(taken.length).toBeGreaterThan(20);
+    expect(taken.length).toBeLessThan(pairs.length);
+    expect(() => letter({ theme: 'handwritten' }, 'text_only', taken.join(' '))).not.toThrow();
+  });
+
   it('keeps Classic\'s check as it was, and works as a callback', () => {
     for (const grapheme of ['a', '\u03c0', '\u05e9', '\u2028', '\u{1F600}']) expect(drawsGrapheme(grapheme)).toBe(drawsGraphemeIn('Tinos-Regular')(grapheme));
     expect(['a', 'b', 'c'].every(drawsGraphemeIn('Caveat-Regular'))).toBe(true);
