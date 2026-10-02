@@ -16,6 +16,10 @@ vi.mock('../../../src/services/addressRequestService.js', () => ({
 }));
 vi.mock('../../../src/services/providers/index.js', () => ({ getLetterProvider: vi.fn() }));
 vi.mock('../../../src/api/middleware/rateLimit.js', () => ({ rateLimitMiddlewareWithGlobal: vi.fn(() => false) }));
+vi.mock('../../../src/utils/requestBody.js', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../../src/utils/requestBody.js')>();
+  return { ...actual, readRequestBody: vi.fn(actual.readRequestBody) };
+});
 vi.mock('../../../src/utils/diagnosticLog.js', async importOriginal => ({
   ...(await importOriginal<typeof import('../../../src/utils/diagnosticLog.js')>()),
   writeDiagnostic: vi.fn()
@@ -29,7 +33,13 @@ import {
 import { getLetterProvider } from '../../../src/services/providers/index.js';
 import { rateLimitMiddlewareWithGlobal } from '../../../src/api/middleware/rateLimit.js';
 import { writeDiagnostic } from '../../../src/utils/diagnosticLog.js';
-import { givenAddressOf, handleAddressRequestApiRequest } from '../../../src/api/addressRequestApi.js';
+import {
+  givenAddressOf,
+  handleAddressRequestApiRequest,
+  resetVerificationBudgets,
+  VERIFICATIONS_PER_LINK
+} from '../../../src/api/addressRequestApi.js';
+import { readRequestBody, RequestBodyTimeoutError } from '../../../src/utils/requestBody.js';
 
 const TOKEN = 'AbCdEfGhIjKlMnOpQrStUvWx';
 const ORIGIN = 'https://letterirl.example';
@@ -81,6 +91,7 @@ beforeEach(() => {
   vi.mocked(getLetterProvider).mockReturnValue({ validateAddress } as never);
   vi.mocked(rateLimitMiddlewareWithGlobal).mockClear();
   vi.mocked(writeDiagnostic).mockClear();
+  resetVerificationBudgets();
 });
 
 afterEach(() => {
@@ -216,6 +227,27 @@ describe('the address request routes (#604)', () => {
     expect(validateAddress).not.toHaveBeenCalled();
   });
 
+  it('spends at most the budget of PostGrid checks on one link, then refuses before asking (#606 review round 1)', async () => {
+    validateAddress.mockResolvedValue({ status: 'failed', originalAddress: {}, errors: [{ message: 'Address not found' }] });
+    for (let i = 0; i < VERIFICATIONS_PER_LINK; i += 1) {
+      await expect(call('answer', { token: TOKEN, address: ADDRESS }), String(i)).resolves.toMatchObject({ status: 422 });
+    }
+    await expect(call('answer', { token: TOKEN, address: ADDRESS })).resolves.toMatchObject({
+      status: 429,
+      json: { reason: 'too_many_tries' }
+    });
+    expect(validateAddress).toHaveBeenCalledTimes(VERIFICATIONS_PER_LINK);
+    // Another link has its own budget.
+    await expect(call('answer', { token: 'ZyXwVuTsRqPoNmLkJiHgFeDc', address: ADDRESS })).resolves.toMatchObject({ status: 422 });
+    expect(validateAddress).toHaveBeenCalledTimes(VERIFICATIONS_PER_LINK + 1);
+  });
+
+  it('answers a slow upload with 408, not as a fault (#606 review round 1)', async () => {
+    vi.mocked(readRequestBody).mockRejectedValueOnce(new RequestBodyTimeoutError());
+    await expect(call('page', { token: TOKEN })).resolves.toMatchObject({ status: 408, json: { reason: 'timeout' } });
+    expect(writeDiagnostic).not.toHaveBeenCalled();
+  });
+
   it('answers a fault with nothing of the request, and logs its class only', async () => {
     vi.mocked(readAddressRequestPage).mockRejectedValueOnce(Object.assign(new Error(`timeout reading ${TOKEN}`), { code: 'ETIMEDOUT' }));
     await expect(call('page', { token: TOKEN })).resolves.toMatchObject({ status: 500, json: { reason: 'unavailable' } });
@@ -233,10 +265,12 @@ describe('the address request routes (#604)', () => {
 
 describe("the recipient's address fields (#604)", () => {
   it('takes every USPS state and territory code, in either case, and ZIP or ZIP+4', () => {
-    for (const state of ['dc', 'PR', 'gu', 'AE', 'WY']) {
+    for (const state of ['dc', 'PR', 'gu', 'AE', 'WY', 'FM', 'mh', 'PW']) {
       expect(givenAddressOf({ ...ADDRESS, state }).ok, state).toBe(true);
     }
     for (const postalCode of ['85701', '85701-1234']) expect(givenAddressOf({ ...ADDRESS, postalCode }).ok, postalCode).toBe(true);
+    // Nine digits typed without the hyphen are ZIP+4 (#606 review round 1).
+    expect(givenAddressOf({ ...ADDRESS, postalCode: '857011234' })).toMatchObject({ ok: true, address: { postalCode: '85701-1234' } });
     for (const postalCode of ['8570', '857011', '85701-12', 'ABCDE']) {
       expect(givenAddressOf({ ...ADDRESS, postalCode }), postalCode).toEqual({ ok: false, fields: ['postalCode'] });
     }

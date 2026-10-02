@@ -22,6 +22,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'http';
+import { createHash } from 'node:crypto';
 import { isAddressRequestsEnabled } from '../config/addressRequests.js';
 import {
   answerAddressRequest,
@@ -33,7 +34,7 @@ import { assessValidation } from '../services/addressVerificationPolicy.js';
 import { getLetterProvider } from '../services/providers/index.js';
 import { unprintableCharacters } from '../services/printableText.js';
 import { rateLimitMiddlewareWithGlobal } from './middleware/rateLimit.js';
-import { readRequestBody, RequestBodyTooLargeError } from '../utils/requestBody.js';
+import { readRequestBody, RequestBodyTimeoutError, RequestBodyTooLargeError } from '../utils/requestBody.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 
 export const ADDRESS_REQUEST_API_PREFIX = '/api/public/address-requests/';
@@ -42,20 +43,56 @@ export const ADDRESS_REQUEST_API_PREFIX = '/api/public/address-requests/';
 const BODY_LIMIT_BYTES = 4 * 1024;
 
 /**
- * The state and territory codes USPS delivers to, with DC and the military
- * post offices: the page offers these and nothing else.
+ * The state and territory codes USPS delivers to (Publication 28, Appendix
+ * B), with DC, the freely associated states and the military post offices:
+ * the page offers these and nothing else.
  */
 export const US_STATE_CODES: readonly string[] = [
   'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'DC', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA', 'KS',
   'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC',
   'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY',
-  'AS', 'GU', 'MP', 'PR', 'VI', 'AA', 'AE', 'AP'
+  'AS', 'GU', 'MP', 'PR', 'VI', 'FM', 'MH', 'PW', 'AA', 'AE', 'AP'
 ];
 
 /** The longest each field may be, in characters as a reader counts them. */
 export const ADDRESS_FIELD_LIMITS = { name: 100, addressLine1: 100, addressLine2: 100, city: 60 } as const;
 
 const ZIP_CODE = /^\d{5}(?:-\d{4})?$/;
+/** Nine digits typed without the hyphen, which USPS takes as ZIP+4. */
+const ZIP_NINE = /^(\d{5})(\d{4})$/;
+
+/**
+ * PostGrid verifications one link may spend in a day (#606 review round 1).
+ * An address USPS cannot reach leaves the link waiting, so without a budget
+ * one link someone made for themselves could drive paid checks at the
+ * routes' global rate. In memory, per process, as the rate limits are.
+ */
+export const VERIFICATIONS_PER_LINK = 10;
+const VERIFICATION_WINDOW_MS = 24 * 60 * 60 * 1000;
+const verificationsByLink = new Map<string, { count: number; since: number }>();
+
+/** Spends one of the link's verifications, or says it has none left. */
+function mayVerify(token: string, now = Date.now()): boolean {
+  const key = createHash('sha256').update(token, 'utf8').digest('hex');
+  const entry = verificationsByLink.get(key);
+  if (entry && now - entry.since < VERIFICATION_WINDOW_MS) {
+    if (entry.count >= VERIFICATIONS_PER_LINK) return false;
+    entry.count += 1;
+    return true;
+  }
+  if (verificationsByLink.size > 10_000) {
+    for (const [stale, { since }] of verificationsByLink) {
+      if (now - since >= VERIFICATION_WINDOW_MS) verificationsByLink.delete(stale);
+    }
+  }
+  verificationsByLink.set(key, { count: 1, since: now });
+  return true;
+}
+
+/** For tests: every link's budget back to full. */
+export function resetVerificationBudgets(): void {
+  verificationsByLink.clear();
+}
 
 /**
  * Characters no address field needs: controls, invisible format marks,
@@ -76,7 +113,7 @@ const NOT_FOUND = { reason: 'not_found' } as const;
 
 /**
  * Reads the body as JSON. Null once the request has been answered: a body too
- * large, not JSON, or not an object.
+ * large or too slow, not JSON, or not an object.
  */
 async function readBody(req: IncomingMessage, res: ServerResponse): Promise<Json | null> {
   let raw: string;
@@ -85,6 +122,11 @@ async function readBody(req: IncomingMessage, res: ServerResponse): Promise<Json
   } catch (error) {
     if (error instanceof RequestBodyTooLargeError) {
       sendJson(res, 413, { reason: 'too_large' });
+      return null;
+    }
+    // A visitor's slow or abandoned upload: theirs to retry, not a fault of ours.
+    if (error instanceof RequestBodyTimeoutError) {
+      sendJson(res, 408, { reason: 'timeout' });
       return null;
     }
     throw error;
@@ -120,7 +162,9 @@ export function givenAddressOf(raw: unknown): { ok: true; address: GivenAddress 
   const line2 = tidy(body.addressLine2);
   const city = tidy(body.city);
   const state = tidy(body.state)?.toUpperCase();
-  const postalCode = tidy(body.postalCode);
+  const typedZip = tidy(body.postalCode);
+  const nine = typedZip ? ZIP_NINE.exec(typedZip) : null;
+  const postalCode = nine ? `${nine[1]}-${nine[2]}` : typedZip;
   const fields: AddressFieldProblem[] = [];
   if (body.name !== undefined && body.name !== null && (name === undefined || !fits(name, ADDRESS_FIELD_LIMITS.name))) fields.push('name');
   if (!line1 || !fits(line1, ADDRESS_FIELD_LIMITS.addressLine1)) fields.push('addressLine1');
@@ -213,11 +257,11 @@ export async function handleAddressRequestApiRequest(
     return true;
   }
 
-  const body = await readBody(req, res);
-  if (!body) return true;
-  const token = body.token;
-
   try {
+    const body = await readBody(req, res);
+    if (!body) return true;
+    const token = body.token;
+
     if (route === 'page') {
       const page = await readAddressRequestPage(token);
       if (!page) sendJson(res, 404, NOT_FOUND);
@@ -246,6 +290,11 @@ export async function handleAddressRequestApiRequest(
     const given = givenAddressOf(body.address);
     if (!given.ok) {
       sendJson(res, 400, { reason: 'invalid', fields: given.fields });
+      return true;
+    }
+    if (typeof token !== 'string' || !mayVerify(token)) {
+      sendJson(res, 429, { reason: 'too_many_tries' });
+      writeDiagnostic('info', 'address_request.answer', { outcome: 'too_many_tries' });
       return true;
     }
     const checked = await verified(given.address);

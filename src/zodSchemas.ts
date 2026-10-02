@@ -413,7 +413,7 @@ export const ADDRESS_REQUEST_STATES = ["waiting", "answered", "declined", "cance
 export const ADDRESS_REQUEST_STATUS_DESCRIPTION =
   "waiting; answered (the address is in recipient); declined; cancelled; or expired, when the link ran out before an answer";
 export const ADDRESS_REQUEST_RECIPIENT_DESCRIPTION =
-  "The address given, in the shape a preview tool's recipient takes: only when answered";
+  "The address given, as the recipient typed it and checked as a preview checks one, in the shape a preview tool's recipient takes: only when answered";
 
 export const requestAddressInputZ = z.object({
   recipientName: z.string().describe(ADDRESS_REQUEST_RECIPIENT_NAME_DESCRIPTION),
