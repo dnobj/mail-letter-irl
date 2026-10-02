@@ -754,6 +754,41 @@ describe('Typewriter and Handwritten (#563 PR 8b)', () => {
     )).toBe(true);
   });
 
+  it("takes the narrow no-break space and the non-breaking hyphen ChatGPT writes, as Classic does (#575 review round 3)", async () => {
+    const text = `Dear Sam, see you at 10${String.fromCodePoint(0x202f)}am at the well${String.fromCodePoint(0x2011)}known spot.`;
+    for (const theme of ['classic', 'typewriter', 'handwritten'] as const) {
+      vi.mocked(createDraft).mockClear();
+      await expect(run('text_only', { stationery: theme, bodyText: text }), theme).resolves.toMatchObject({ draftId: 'draft-1' });
+      expect(drafted().previewHtml).not.toMatch(/id="[a-z]+\d+(?:_\d+)?-0"/);
+    }
+  });
+
+  it('offers the classic stationery for an overflow only when the letter fits it (#575 review round 3)', async () => {
+    // Classic holds 26 lines: 28 short lines overflow every stationery.
+    await expect(run('text_only', { stationery: 'typewriter', bodyText: lines(27) })).rejects.toThrow(
+      /^Letter is \d+ lines? too long for one page on the typewriter stationery: it takes \d+ lines and the page holds 26\. The typewriter stationery sets the text in its own typeface, and the letter runs past the page on the classic stationery too: shorten the message\.$/
+    );
+    await expect(run('text_only', { stationery: 'celebration', headline: 'Hooray', bodyText: lines(27) })).rejects.toThrow(
+      'The headline takes 3 lines, and the letter runs past the page without it too: shorten the message.'
+    );
+    expect(createDraft).not.toHaveBeenCalled();
+  });
+
+  it("says a remembered Celebration was remembered when its headline pushes the letter past the page (#575 review round 3)", async () => {
+    vi.mocked(rememberedStationery).mockResolvedValue('celebration');
+    await expect(run('text_only', { headline: 'Happy Birthday!', bodyText: lines(23) })).rejects.toThrow(
+      /^The account's remembered stationery is celebration\. Letter is 1 line too long for one page on the celebration stationery with a headline: /
+    );
+  });
+
+  it("says nothing of a remembered theme when only an address cannot print (#575 review round 3)", async () => {
+    vi.mocked(rememberedStationery).mockResolvedValue('handwritten');
+    const CAKE = String.fromCodePoint(0x1f382);
+    const error = await run('text_only', { recipient: address({ name: `Sam ${CAKE}` }) }).catch(e => e);
+    expect(error.message.startsWith("Letter IRL can't print some characters in this letter: ")).toBe(true);
+    expect(error.message).not.toContain('stationery');
+  });
+
   it("keeps the usual closing when only an address, stamped in Open Sans, cannot print", async () => {
     const CAKE = String.fromCodePoint(0x1f382);
     const error = await run('text_only', { stationery: 'handwritten', recipient: address({ name: `Sam ${CAKE}` }) }).catch(e => e);

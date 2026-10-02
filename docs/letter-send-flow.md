@@ -310,23 +310,28 @@ A gift send in a theme prints its themed page, then today's card page.
     left out where an enclosed image sits;
 - each prints its date line in its face, and neither takes initials or a headline;
 - the text and sign-off are checked against that face, which draws less than Tinos:
-  - Caveat has no Greek or Hebrew, almost no precomposed Vietnamese, none of the horn or caron letters
-    (Ơ, Ư, Ǎ…), few historic Cyrillic letters, no arrows, and few mathematical signs;
-  - Cousine lacks the fixed-width spaces, superscript and subscript digits, and a few letterlike
-    symbols and ligatures;
+  - Caveat has no Greek or Hebrew, almost no precomposed Vietnamese, no horn letters (Ơ, Ư), few of
+    the caron letters beyond Latin Extended-A's (no Ǎ, Ǧ or ǰ), few historic Cyrillic letters, no
+    arrows, and few mathematical signs;
+  - Cousine lacks superscript and subscript digits, most letterlike symbols, and the ﬀ-type ligatures;
+  - neither has the non-breaking hyphen, the narrow no-break space or the other fixed-width spaces,
+    which ChatGPT's text often holds; each face draws them as the nearest dash or space it has
+    (`inFace`), so it takes what Classic takes of them. Lines still break as the text was written:
+    a non-breaking hyphen drawn as a hyphen keeps its word whole;
 - a refusal names the theme ("…which the handwritten stationery prints in its own typeface"), and
   suggests another stationery when Classic would print what it cannot; a letter its face pushes past
-  the page is told so: "…too long for one page on the typewriter stationery…", shorten it or choose
-  Classic. A theme the call did not name, the account's remembered one, says so first ("The account's
-  remembered stationery is handwritten.").
+  the page is told so: "…too long for one page on the typewriter stationery…", with Classic offered
+  only when the letter fits it. A theme the call did not name, the account's remembered one, says so
+  first ("The account's remembered stationery is handwritten."), as does a remembered Celebration
+  whose headline pushes the letter past the page.
 
 The fonts are Google Fonts' files, each beside its licence in `assets/fonts`.
 
 **`set_stationery` restyles a preview** (#563, `src/tools/setStationery.ts`), listed only while
 stationery is offered:
 - **Checked as a preview's are:** the theme, initials and headline (`previewStationery`), the slots
-  against Tinos, and the page laid out again in the theme, so a headline that pushes the letter past
-  its page is refused.
+  against Tinos, the text in the theme's typeface, and the page laid out again in the theme, so a
+  headline or a wider typeface that pushes the letter past its page is refused.
 - **Drawn again from the draft:** its text, addresses and image. The page keeps the small copy of its
   picture that the preview showed, and a gift letter's card page is kept as it was drawn
   (`rendererDocumentPages`). Drawn back to Classic, the page is byte for byte the first preview's.

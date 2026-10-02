@@ -4,7 +4,7 @@
  * reading the bundled fonts. Letters previewed with it (LETTER_IRL_PRINT_RENDERER,
  * src/config/printRenderer.ts) record RENDERER_VERSION and print from its PDF.
  */
-export { drawsGrapheme, drawsGraphemeIn, layoutLetter, wrapParagraph } from './layout.js';
+export { drawsGrapheme, drawsGraphemeIn, inFace, layoutLetter, wrapParagraph } from './layout.js';
 export type { ImageBox, Layout, LayoutPage, LetterContent, PathItem, TextRun } from './layout.js';
 export {
   bodyFace, HEADLINE_LINES, headlineSize, slotText, STATIONERY_CORNER, STATIONERY_SLOT_MAX_LENGTH, STATIONERY_THEMES,

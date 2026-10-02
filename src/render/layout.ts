@@ -136,10 +136,64 @@ export function drawsGrapheme(grapheme: string): boolean {
 }
 
 /**
+ * Look-alikes a theme's own face draws for dashes and spaces it lacks (#575
+ * review round 3). ChatGPT's text often holds the narrow no-break space and
+ * the non-breaking hyphen, and the other fixed-width spaces and dashes turn
+ * up too. Tinos draws them all; Cousine and Caveat lack some. Each such
+ * character is drawn as the first look-alike its face has, so these themes
+ * take what Classic takes. Every entry is one UTF-16 unit for one, so a line
+ * drawn with them keeps its length. Classic's Tinos needs none: its page is
+ * as it was.
+ */
+const LOOK_ALIKES: ReadonlyArray<readonly [number, readonly number[]]> = [
+  [0x2010, [0x2d]], // hyphen: hyphen-minus
+  [0x2011, [0x2010, 0x2d]], // non-breaking hyphen: hyphen, or hyphen-minus
+  [0x2012, [0x2013, 0x2d]], // figure dash: en dash, or hyphen-minus
+  [0x2015, [0x2014]], // horizontal bar: em dash
+  [0x202f, [0xa0]], // narrow no-break space: no-break space
+  [0x2007, [0xa0]], // figure space: no-break space
+  [0x2000, [0x20]], [0x2001, [0x20]], [0x2002, [0x20]], [0x2003, [0x20]], [0x2004, [0x20]], // the other
+  [0x2005, [0x20]], [0x2006, [0x20]], [0x2008, [0x20]], [0x2009, [0x20]], [0x200a, [0x20]] //   fixed-width spaces: space
+];
+
+const lookAlikeCache = new Map<FontName, ReadonlyMap<string, string>>();
+
+/** Each character a theme's own face lacks and draws as a look-alike, with it. None for Tinos. */
+function lookAlikes(fontName: FontName): ReadonlyMap<string, string> {
+  let found = lookAlikeCache.get(fontName);
+  if (!found) {
+    const font = loadFont(fontName);
+    const map = new Map<string, string>();
+    if (fontName !== BODY_FONT) {
+      for (const [codePoint, alikes] of LOOK_ALIKES) {
+        if (font.hasGlyphForCodePoint(codePoint)) continue;
+        const alike = alikes.find(candidate => font.hasGlyphForCodePoint(candidate));
+        if (alike !== undefined) map.set(String.fromCodePoint(codePoint), String.fromCodePoint(alike));
+      }
+    }
+    lookAlikeCache.set(fontName, (found = map));
+  }
+  return found;
+}
+
+/**
+ * `text` as `fontName` draws it: each character the face lacks and has a
+ * look-alike for, replaced one for one. Lines break, and runs are ordered,
+ * as the text was written (wrapText); only the drawing changes.
+ */
+export function inFace(fontName: FontName, text: string): string {
+  const map = lookAlikes(fontName);
+  if (map.size === 0) return text;
+  let drawn = '';
+  for (const character of text) drawn += map.get(character) ?? character;
+  return drawn;
+}
+
+/**
  * The check for one font: whether the renderer draws a grapheme cluster as
- * written in it. A theme with its own face (#563) checks its text against
- * that face, which may draw less than Tinos: Caveat has no Greek, Hebrew or
- * Vietnamese.
+ * written in it, with the face's look-alikes. A theme with its own face
+ * (#563) checks its text against that face, which may draw less than Tinos:
+ * Caveat has no Greek, Hebrew or Vietnamese.
  */
 export function drawsGraphemeIn(fontName: FontName): (grapheme: string) => boolean {
   return grapheme => draws(fontName, grapheme);
@@ -156,7 +210,7 @@ export function drawsGraphemeIn(fontName: FontName): (grapheme: string) => boole
 function draws(fontName: FontName, grapheme: string): boolean {
   const font = loadFont(fontName);
   let marks = 0;
-  for (const character of grapheme) {
+  for (const character of inFace(fontName, grapheme)) {
     if (MARK.test(character) && ++marks > MAX_MARKS_PER_LETTER) return false;
     if (character === '\n' || character === '\r' || character === '\t' || isInvisible(character)) continue;
     if (NEVER_DRAWN.test(character)) return false;
@@ -314,9 +368,13 @@ export function wrapText(text: string, size: number, width: number, fontName: Fo
   const paragraphs = clampMarks(text).replace(/\r\n?/g, '\n').replace(/\t/g, TAB).split('\n');
   for (const paragraph of paragraphs) {
     const bidi = paragraphBidi(paragraph);
-    const measure = (start: number, end: number) => shape(font, bidi.lineVisual(start, end)).advanceWidth * scale;
-    for (const { start, end } of wrapParagraph(paragraph, width, measure, advanceLimit(fontName, paragraph, width, scale))) {
-      lines.push({ source: paragraph.slice(start, end), drawn: bidi.lineVisual(start, end) });
+    // A line is drawn with the face's look-alikes, but breaks and orders as
+    // written: a non-breaking hyphen drawn as a hyphen still never breaks.
+    const visual = (start: number, end: number) => inFace(fontName, bidi.lineVisual(start, end));
+    const measure = (start: number, end: number) => shape(font, visual(start, end)).advanceWidth * scale;
+    const limit = advanceLimit(fontName, inFace(fontName, paragraph), width, scale);
+    for (const { start, end } of wrapParagraph(paragraph, width, measure, limit)) {
+      lines.push({ source: paragraph.slice(start, end), drawn: visual(start, end) });
     }
   }
   return lines;

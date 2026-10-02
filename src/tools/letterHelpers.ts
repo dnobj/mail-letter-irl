@@ -577,14 +577,14 @@ export function layoutLetterForPreview(
 ): Layout | undefined {
   if (renderer !== 'pdf') return undefined;
   const { bodyText, signOff, layoutType, imageData, stationery } = letter;
+  const content = {
+    text: letterPrintText(bodyText, signOff),
+    layoutType,
+    image: layoutType !== "text_only" && imageData ? readImageDataUri(imageData) : undefined
+  };
   let layout: Layout;
   try {
-    layout = layoutLetter({
-      text: letterPrintText(bodyText, signOff),
-      layoutType,
-      image: layoutType !== "text_only" && imageData ? readImageDataUri(imageData) : undefined,
-      stationery
-    });
+    layout = layoutLetter({ ...content, stationery });
   } catch (error) {
     // A slot that cannot print as its theme draws it. The checks before the
     // layout refuse each in their own words (previewStationery, and the
@@ -614,17 +614,25 @@ export function layoutLetterForPreview(
   const over = layout.overflowLines;
   // A theme with its own typeface (#563) sets the text to its own measure.
   const own = ownFaceTheme(stationery);
+  // The theme's way out, leaving the headline out or choosing Classic, is
+  // offered only when the letter would fit that way (#575 review round 3).
+  const themed = headline || own !== undefined;
+  const fitsPlain = themed && layoutLetter(content).overflowLines === 0;
   throw Object.assign(
     new Error(
       // A theme the call did not name says where it came from.
-      (own ? rememberedPrefix(stationery) : "") +
+      (themed ? rememberedPrefix(stationery) : "") +
       `Letter is ${over} line${over === 1 ? "" : "s"} too long for one page${LAYOUT_LABELS[layoutType]}` +
       `${headline ? " on the celebration stationery with a headline" : own ? ` on the ${own} stationery` : ""}: ` +
       `it takes ${linesUsed} lines and the page holds ${linesAvailable}. ` +
       (headline
-        ? `The headline takes ${HEADLINE_LINES} lines: shorten the message, leave the headline out, or choose the classic stationery.`
+        ? fitsPlain
+          ? `The headline takes ${HEADLINE_LINES} lines: shorten the message, leave the headline out, or choose the classic stationery.`
+          : `The headline takes ${HEADLINE_LINES} lines, and the letter runs past the page without it too: shorten the message.`
         : own
-          ? `The ${own} stationery sets the text in its own typeface: shorten the message, or choose the classic stationery.`
+          ? fitsPlain
+            ? `The ${own} stationery sets the text in its own typeface: shorten the message, or choose the classic stationery.`
+            : `The ${own} stationery sets the text in its own typeface, and the letter runs past the page on the classic stationery too: shorten the message.`
           : `Please shorten your message to fit on one page.`)
     ),
     { diagnosticClass: "validation_error" }
@@ -725,7 +733,7 @@ export function validatePrintableLetter(
   renderer: 'html' | 'pdf' = printRenderer(),
   /** A gift send's card: our renderer draws it as the second page, with the sender's name. */
   giftCard?: GiftCardContent,
-  /** The page's stationery (#563): its initials and headline print in the letter's font. The date line is ours. */
+  /** The page's stationery (#563): its initials and headline print in Tinos, its text in the theme's face. The date line is ours. */
   stationery?: Stationery | PreviewStationery
 ): void {
   const prints = renderer === "pdf" ? drawsGrapheme : undefined;

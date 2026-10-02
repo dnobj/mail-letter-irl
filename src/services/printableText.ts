@@ -28,9 +28,9 @@
  * checked as it is stored and printed, not normalized.
  *
  * A letter drawn by our own renderer (#534) prints its text in the renderer's
- * font instead, so its text is checked against that font (drawsGrapheme in
- * src/render/layout.ts). Its addresses are still stamped by PostGrid in Open
- * Sans and are checked here.
+ * font instead, Tinos or its theme's own typeface (#563), so its text is
+ * checked against that font (drawsGraphemeIn in src/render/layout.ts). Its
+ * addresses are still stamped by PostGrid in Open Sans and are checked here.
  */
 
 const PRINTABLE_RANGES: ReadonlyArray<readonly [number, number]> = [

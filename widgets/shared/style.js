@@ -2,7 +2,7 @@
  * The Style row on the letter card (#563).
  *
  * While stationery is offered, a letter preview names the stationery its page
- * was drawn in (stationery). The card offers the four in a Style row and
+ * was drawn in (stationery). The card offers the six in a Style row and
  * changes the draft's through set_stationery, without previewing again. The
  * tool answers with the page drawn again, in its _meta as a preview's page
  * is, and the card shows it in place of the preview's. A theme chosen here is
