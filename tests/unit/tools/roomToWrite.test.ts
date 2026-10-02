@@ -123,6 +123,7 @@ function offer() {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubEnv('LETTER_IRL_PRINT_RENDERER', 'pdf');
+  vi.stubEnv('LETTER_IRL_ROOM_TO_WRITE_ENABLED', '');
   vi.mocked(getLetterProvider).mockReturnValue({} as never);
   vi.mocked(createDraft).mockResolvedValue({ draftId: 'draft-1', expiresAt: new Date('2026-10-03T12:00:00Z') });
   vi.mocked(getRecentUploadedImage).mockResolvedValue(null);
@@ -261,9 +262,12 @@ describe('a longer letter, while room to write is offered', () => {
     );
   });
 
-  it('names three pages in the character cap', async () => {
-    const error = await run('text_only', { bodyText: 'x'.repeat(RENDERED_LETTER_CHARACTER_CAP + 1) }).catch(e => e);
-    expect(error.message).toMatch(/^Letter is far too long for three pages: \d+\/10000 characters\. Please shorten your message to fit on three pages\.$/);
+  it('scales the character cap with the pages, and names three pages in it', async () => {
+    // Past one page's cap, but laid out and measured: it is far from fitting.
+    const over = await run('text_only', { bodyText: 'x'.repeat(RENDERED_LETTER_CHARACTER_CAP + 1) }).catch(e => e);
+    expect(over.message).not.toContain('far too long');
+    const error = await run('text_only', { bodyText: 'x'.repeat(3 * RENDERED_LETTER_CHARACTER_CAP + 1) }).catch(e => e);
+    expect(error.message).toMatch(/^Letter is far too long for three pages: \d+\/30000 characters\. Please shorten your message to fit on three pages\.$/);
   });
 
   it('judges the theme ways out at three pages too', async () => {
@@ -318,6 +322,11 @@ describe('a gift letter, while room to write is offered', () => {
     const sender = address({ name: `Pat Sta${FF}ord` });
     const error = await run('text_only', { sender, bodyText: lines(10), sendAsGift: true }).catch(e => e);
     expect(error.message).toContain(`${FF} (U+FB00) in the sender's name, which the gift card prints.`);
+    expect(createDraft).not.toHaveBeenCalled();
+
+    // A name too long for the card is refused after the layout too.
+    const tooLong = await run('text_only', { sender: address({ name: 'Pat Example '.repeat(125).trim() }), bodyText: lines(10), sendAsGift: true }).catch(e => e);
+    expect(tooLong.message).toBe("The sender's name is too long to print on the gift card. Shorten it, then preview again.");
     expect(createDraft).not.toHaveBeenCalled();
 
     // A longer letter has no card, so the name is only stamped, in Open Sans.

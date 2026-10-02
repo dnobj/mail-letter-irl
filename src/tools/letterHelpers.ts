@@ -478,9 +478,10 @@ export function outputValidationStatus(
 // ============================================================================
 
 /**
- * The most characters a letter drawn by our renderer may hold. Far more than
- * a page holds even of fully pointed Hebrew; it only bounds the layout's
- * work. The page itself is measured by layoutLetterForPreview.
+ * The most characters a letter drawn by our renderer may hold on each page it
+ * may take: one, or three while room to write is offered (#586). Far more than
+ * a page holds even of fully pointed Hebrew; it only bounds the layout's work.
+ * The pages themselves are measured by layoutLetterForPreview.
  */
 export const RENDERED_LETTER_CHARACTER_CAP = 10_000;
 
@@ -499,22 +500,26 @@ export function validateCharacterLimitForLayout(
 ): void {
   if (renderer === 'pdf') {
     const totalChars = bodyText.length + signOff.length;
-    if (totalChars <= RENDERED_LETTER_CHARACTER_CAP) return;
+    // Per page (#590 review round 3): three pages of narrow glyphs or pointed
+    // Hebrew run past one page's cap while they still fit.
+    const limit = letterPageLimit();
+    const cap = RENDERED_LETTER_CHARACTER_CAP * limit;
+    if (totalChars <= cap) return;
     context.logger.warn(
       {
         correlationId: context.correlationId,
         event: "quote.letter.exceeds_character_cap",
         layoutType,
         totalChars,
-        charLimit: RENDERED_LETTER_CHARACTER_CAP
+        charLimit: cap
       },
       "Letter exceeds the character cap"
     );
     // Three pages while room to write is offered (#586), otherwise one.
-    const pages = pageWords(letterPageLimit());
+    const pages = pageWords(limit);
     throw Object.assign(
       new Error(
-        `Letter is far too long for ${pages}: ${totalChars}/${RENDERED_LETTER_CHARACTER_CAP} characters. ` +
+        `Letter is far too long for ${pages}: ${totalChars}/${cap} characters. ` +
         `Please shorten your message to fit on ${pages}.`
       ),
       { diagnosticClass: "validation_error" }

@@ -81,11 +81,11 @@ const noneForNull = (value: unknown): unknown => (value === null ? undefined : v
 const monogramZ = z.preprocess(noneForNull, z.string().optional()).describe(MONOGRAM_DESCRIPTION);
 const headlineZ = z.preprocess(noneForNull, z.string().optional()).describe(HEADLINE_DESCRIPTION);
 
-/** What a letter preview's output says of its stationery (#563). */
 /** A letter of more than one page (#586), on the letter previews' output. */
 export const PREVIEW_PAGES_DESCRIPTION =
   "Present only for a letter of more than one page: the pages it prints on, both sides of the paper. No letter pack or gift letter pays for it; it is paid with Pay & Send.";
 
+/** What a letter preview's output says of its stationery (#563). */
 export const PREVIEW_STATIONERY_DESCRIPTION =
   "While stationery is offered: the stationery the page was drawn in, with the date line, initials and headline " +
   "it prints, and why: asked for, the account's last choice, or classic by default";
