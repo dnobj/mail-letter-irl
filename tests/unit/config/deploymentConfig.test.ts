@@ -291,6 +291,87 @@ describe('validateDeploymentConfig in production', () => {
     expect(jitMessages).toContain('POSTCARD');
   });
 
+  describe("the mail options' prices (#578)", () => {
+    const JIT_ON = {
+      JIT_PURCHASE_ENABLED: 'true',
+      STRIPE_JIT_LETTER_PRICE_ID: 'price_jit_letter_unit_fixture',
+      STRIPE_JIT_POSTCARD_PRICE_ID: 'price_jit_postcard_unit_fixture'
+    };
+    const jitFindings = (input: NodeJS.ProcessEnv) =>
+      validateDeploymentConfig(input, 'server').findings.filter(f => f.rule === 'stripe.jit_config_incomplete');
+
+    it('requires nothing more while the options are off, as production keeps them', () => {
+      expect(jitFindings(env(JIT_ON))).toEqual([]);
+      // A flag alone, without Pay & Send, requires nothing either.
+      expect(jitFindings(env({ LETTER_IRL_ROOM_TO_WRITE_ENABLED: 'true' }))).toEqual([]);
+    });
+
+    it("requires each option's price while its flag is on, naming the flag", () => {
+      const roomOn = env({ ...JIT_ON, LETTER_IRL_ROOM_TO_WRITE_ENABLED: 'true' });
+      expect(jitFindings(roomOn).map(f => [f.severity, f.message])).toEqual([
+        ['error', 'STRIPE_JIT_LETTER_TWO_PAGES_PRICE_ID is required when JIT_PURCHASE_ENABLED=true and LETTER_IRL_ROOM_TO_WRITE_ENABLED is on'],
+        ['error', 'STRIPE_JIT_LETTER_THREE_PAGES_PRICE_ID is required when JIT_PURCHASE_ENABLED=true and LETTER_IRL_ROOM_TO_WRITE_ENABLED is on']
+      ]);
+      // The flag is read as every off-unless-set flag is.
+      const sizesOn = env({
+        ...JIT_ON,
+        LETTER_IRL_POSTCARD_SIZES_ENABLED: 'yes',
+        STRIPE_JIT_POSTCARD_4X6_PRICE_ID: 'not-a-price'
+      });
+      expect(jitFindings(sizesOn).map(f => f.message)).toEqual([
+        'STRIPE_JIT_POSTCARD_4X6_PRICE_ID must be a Stripe price id (price_...)',
+        'STRIPE_JIT_POSTCARD_11X6_PRICE_ID is required when JIT_PURCHASE_ENABLED=true and LETTER_IRL_POSTCARD_SIZES_ENABLED is on'
+      ]);
+    });
+
+    it('is satisfied once the prices are set, and only warns outside production', () => {
+      const priced = env({
+        ...JIT_ON,
+        LETTER_IRL_ROOM_TO_WRITE_ENABLED: 'true',
+        STRIPE_JIT_LETTER_TWO_PAGES_PRICE_ID: 'price_two_unit_fixture',
+        STRIPE_JIT_LETTER_THREE_PAGES_PRICE_ID: 'price_three_unit_fixture'
+      });
+      expect(jitFindings(priced)).toEqual([]);
+      const dev = env({ ...JIT_ON, LETTER_IRL_POSTCARD_SIZES_ENABLED: 'true' }, VALID_DEV);
+      expect(jitFindings(dev).map(f => f.severity)).toEqual(['warning', 'warning']);
+    });
+
+    it('lists the two flags for the preflight to show, on both services, never demanded', () => {
+      for (const name of ['LETTER_IRL_ROOM_TO_WRITE_ENABLED', 'LETTER_IRL_POSTCARD_SIZES_ENABLED']) {
+        expect(ENV_VAR_MANIFEST.find(entry => entry.name === name)).toEqual({
+          name,
+          requiredIn: 'production',
+          advisory: true,
+          secret: false,
+          services: ['api', 'maintenance']
+        });
+      }
+      // Absent in production, as it is until the owner approves, or set off:
+      // no finding names either flag, on either service.
+      const flagsOff = env({
+        LETTER_IRL_ROOM_TO_WRITE_ENABLED: 'false',
+        LETTER_IRL_POSTCARD_SIZES_ENABLED: 'false'
+      });
+      for (const surface of ['server', 'maintenance'] as const) {
+        for (const input of [VALID_PROD, flagsOff]) {
+          const messages = validateDeploymentConfig(input, surface).findings.map(f => f.message).join('\n');
+          expect(messages).not.toMatch(/ROOM_TO_WRITE|POSTCARD_SIZES/);
+        }
+      }
+    });
+
+    it('lists each price in the manifest behind Pay & Send and its flag', () => {
+      expect(
+        ENV_VAR_MANIFEST.filter(entry => entry.flag).map(entry => [entry.name, entry.condition, entry.flag, entry.checkedBy])
+      ).toEqual([
+        ['STRIPE_JIT_LETTER_TWO_PAGES_PRICE_ID', 'when-jit-enabled', 'LETTER_IRL_ROOM_TO_WRITE_ENABLED', 'stripe.jit_config_incomplete'],
+        ['STRIPE_JIT_LETTER_THREE_PAGES_PRICE_ID', 'when-jit-enabled', 'LETTER_IRL_ROOM_TO_WRITE_ENABLED', 'stripe.jit_config_incomplete'],
+        ['STRIPE_JIT_POSTCARD_4X6_PRICE_ID', 'when-jit-enabled', 'LETTER_IRL_POSTCARD_SIZES_ENABLED', 'stripe.jit_config_incomplete'],
+        ['STRIPE_JIT_POSTCARD_11X6_PRICE_ID', 'when-jit-enabled', 'LETTER_IRL_POSTCARD_SIZES_ENABLED', 'stripe.jit_config_incomplete']
+      ]);
+    });
+  });
+
   it('refuses to boot production with authentication off', () => {
     // Was a warning while the CIMD cutover was staged (#160). The cohort gate
     // that the old reasoning treated as the backstop is switched off in

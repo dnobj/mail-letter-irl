@@ -1,6 +1,6 @@
 # Letter IRL Pricing & Packages
 
-**Last Updated:** September 16, 2026
+**Last Updated:** October 2, 2026
 **Purpose:** Letter pack and Pay & Send pricing, letter specifications, and refund handling
 
 ## Overview
@@ -202,6 +202,26 @@ were removed in #275 and exist nowhere in `src/`, `scripts/` or `.env.example`.
 Approving a launch price other than the pinned one requires a code edit and a
 deploy, not a Railway change.
 Payment authorizes immediate fulfillment of the immutable previewed item.
+
+### The mail options (#578, proposed)
+
+Letters longer than one page and postcards in other sizes are sold through Pay &
+Send only, each at its own price. The prices are the proposal on epic #537,
+used in development until the owner approves them:
+
+| Option | Product | Price | Flag |
+|--------|---------|-------|------|
+| One-page letter | `jit-letter` | $4.99 | none |
+| Two-page letter, double-sided | `jit-letter-2-pages` | $5.99 | `LETTER_IRL_ROOM_TO_WRITE_ENABLED` |
+| Three-page letter, double-sided | `jit-letter-3-pages` | $6.99 | `LETTER_IRL_ROOM_TO_WRITE_ENABLED` |
+| 4x6 postcard | `jit-postcard-4x6` | $3.99 | `LETTER_IRL_POSTCARD_SIZES_ENABLED` |
+| 6x9 postcard | `jit-postcard` | $4.99 | none |
+| 11x6 postcard | `jit-postcard-11x6` | $5.99 | `LETTER_IRL_POSTCARD_SIZES_ENABLED` |
+
+- **Flags:** an option is sold only while its flag is on, as well as Pay & Send. Each flag also switches its option on, so an option is never offered without a price.
+- **Off:** with its flag off, an option has no price at all. A quote offers no Pay & Send for it, and a checkout is refused rather than charging a smaller option's price.
+- **Ordering:** a checkout is priced by the product its order recorded.
+- **Packs and gift letters** pay for one-page letters and 6x9 postcards only (#579).
 
 Qualifying purchases grant explicit image entitlements. The defaults are five
 per prepaid physical-mail entitlement and two future generations per completed

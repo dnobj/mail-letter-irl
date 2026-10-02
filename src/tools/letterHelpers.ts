@@ -39,7 +39,7 @@ import {
   type Stationery
 } from "../render/index.js";
 import { getSendEligibility, type SendEligibility } from "../services/commerceService.js";
-import type { MailType } from "../services/types.js";
+import type { MailOption } from "../config/products.js";
 import { callingApp, type ClientProfile } from "../auth/clientProfiles.js";
 import { letterPacksPageUrl } from "../config/sendConfirmation.js";
 import { giftCardSummary, resolveGiftSendChoice, type GiftSendChoice } from "./giftSendChoice.js";
@@ -860,16 +860,16 @@ export function appSendEligibility(eligibility: SendEligibility, client: ClientP
 /**
  * What a preview offers for buying: Pay & Send and the letter pack button, as
  * the account, a gift send and the calling app allow (#475). Both previews,
- * letter and postcard, build it here.
+ * letter and postcard, build it here, priced as the mail option (#578).
  */
 export function previewSendEligibility(
   available: number,
   requiredCredits: number,
-  mailType: MailType,
+  option: MailOption,
   isGift: boolean,
   client: ClientProfile
 ): SendEligibility {
-  const eligibility = appSendEligibility(getSendEligibility(available, requiredCredits, mailType), client);
+  const eligibility = appSendEligibility(getSendEligibility(available, requiredCredits, option), client);
   return isGift ? giftSendEligibility(eligibility) : eligibility;
 }
 
@@ -1024,7 +1024,7 @@ export async function createLetterDraftAndBuildOutput(
     lettersRequired,
     canSendNow,
     reasonCannotSend: canSendNow ? undefined : "Not enough letters in your balance.",
-    sendEligibility: previewSendEligibility(available, requiredCredits, "letter", gift.isGift, callingApp(context)),
+    sendEligibility: previewSendEligibility(available, requiredCredits, { mailType: "letter" }, gift.isGift, callingApp(context)),
     deliveryClass: DELIVERY_CLASS,
     // A held letter's card says when it goes to the printer, not "in 1-2 days".
     deliveryEstimate: schedule ? scheduleSentence(schedule.output, context.now()) : DELIVERY_ESTIMATE,

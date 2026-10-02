@@ -13,11 +13,15 @@ import {
 } from './priceCatalog.js';
 import { BACKGROUND_REQUEST_OPTIONS, getStripeClient } from './stripeClient.js';
 import {
+  JIT_PRODUCTS,
   PACK_PRODUCTS,
   getConfiguredProduct,
+  isJitProductSold,
   jitCurrency,
-  jitProductDefinition,
+  jitProductFor,
   packCurrency,
+  type JitProductDefinition,
+  type MailOption,
   type PackProductId
 } from '../config/products.js';
 
@@ -70,11 +74,33 @@ export function getPackProductConfig(productId: PackProductId): CommerceProductC
   };
 }
 
-export function getJitProductConfig(mailType: MailType): CommerceProductConfig {
-  // The shared lookup, so the unknown-mail-type fallback policy is not
-  // written once here and once in jitProductCode - the quote path kicks and
-  // clears through one and prices through the other (#278 round 9).
-  const definition = jitProductDefinition(mailType);
+/**
+ * The Pay & Send config for a mail option, or null when this deployment sells
+ * no product that matches it (#578). Null is not the unpriced sentinel: no
+ * price exists to resolve, so a quote offers no Pay & Send and a checkout is
+ * refused, rather than charging a smaller option's price.
+ */
+export function getJitProductConfig(option: MailOption): CommerceProductConfig | null {
+  // The shared lookup, so the unknown-mail-type fallback policy is written
+  // once, in products.ts - the quote path kicks and clears through the same
+  // product it prices (#278 round 9).
+  const definition = jitProductFor(option);
+  return definition ? jitProductConfig(definition, option.mailType) : null;
+}
+
+/**
+ * The Pay & Send config for the product an order recorded, or null when it is
+ * no longer sold. A checkout is priced by the order's own product, so an
+ * option's order can never be re-priced as another option (#578).
+ */
+export function getJitProductConfigForCode(productCode: string): CommerceProductConfig | null {
+  const definition = JIT_PRODUCTS.find(product => product.productCode === productCode);
+  return definition && isJitProductSold(definition)
+    ? jitProductConfig(definition, definition.mailType)
+    : null;
+}
+
+function jitProductConfig(definition: JitProductDefinition, mailType: MailType): CommerceProductConfig {
   const configured = getConfiguredProduct(definition.productCode);
   const resolved = getResolvedPriceForProduct(definition.productCode);
   return {

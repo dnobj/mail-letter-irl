@@ -85,6 +85,7 @@ const mocks = vi.hoisted(() => ({
   retrieveSession: vi.fn(),
   jitEnabled: vi.fn(),
   getJitProduct: vi.fn(),
+  getJitProductForCode: vi.fn(),
   getPackProduct: vi.fn(),
   ensurePriceCatalog: vi.fn(),
   describeUnpriced: vi.fn(() => null)
@@ -187,6 +188,9 @@ vi.mock('../../../src/services/stripeService.js', () => ({
   retrieveCheckoutSession: mocks.retrieveSession,
   isJitPurchaseEnabled: mocks.jitEnabled,
   getJitProductConfig: mocks.getJitProduct,
+  // The checkout prices by the order's product (#578): the same double, keyed
+  // by the code the order recorded.
+  getJitProductConfigForCode: mocks.getJitProductForCode,
   getPackProductConfig: mocks.getPackProduct
 }));
 
@@ -196,8 +200,10 @@ import {
   PackAmountNotConfiguredError,
   createPackCheckout,
   createJitCheckout,
+  draftMailOption,
   fulfillPaidOrder,
   getSendEligibility,
+  OPTION_NOT_SOLD_REASON,
   processStripeWebhookEvent,
   repairFulfilledPackGrant,
   requestRefund,
@@ -267,6 +273,11 @@ describe('commerceService', () => {
   });
   beforeEach(() => {
     vi.clearAllMocks();
+    // A checkout is priced by its order's product (#578): by default the same
+    // double the quote reads, keyed by the code the order recorded.
+    mocks.getJitProductForCode.mockImplementation((code: string) =>
+      mocks.getJitProduct({ mailType: code === 'jit-postcard' ? 'postcard' : 'letter' })
+    );
     capState.chargedTodayCents = 0;
     capState.lettersTodayForUser = 0;
     capState.lettersTodayGlobal = 0;
@@ -1296,15 +1307,15 @@ describe('commerceService', () => {
         diagnosticClass: 'configuration_error'
       });
 
-      getSendEligibility(0, 2, 'letter'); // outage 1: logs
-      getSendEligibility(0, 2, 'letter'); // steady, identical: suppressed
+      getSendEligibility(0, 2, { mailType: 'letter' }); // outage 1: logs
+      getSendEligibility(0, 2, { mailType: 'letter' }); // steady, identical: suppressed
       mocks.describeUnpriced.mockReturnValue({
         productCode: 'jit-letter',
         rule: 'price.amount_mismatch',
         diagnosticClass: 'configuration_error',
         detail: 'expected 499 / stripe 599'
       });
-      getSendEligibility(0, 2, 'letter'); // a DIFFERENT fault: logs
+      getSendEligibility(0, 2, { mailType: 'letter' }); // a DIFFERENT fault: logs
 
       const lines = diag.mock.calls
         .flat()
@@ -1428,10 +1439,171 @@ describe('commerceService', () => {
     // resurface on re-enable (#278 round 7).
     mocks.jitEnabled.mockReturnValue(false);
 
-    const eligibility = getSendEligibility(0, 2, 'letter');
+    const eligibility = getSendEligibility(0, 2, { mailType: 'letter' });
 
     expect(eligibility.payAndSend.unavailableReason).toBe('Pay & Send is not enabled.');
     expect(mocks.ensurePriceCatalog).toHaveBeenCalledWith('jit-letter', 'send_eligibility_disabled');
+  });
+
+  describe('mail options, each at its own price (#578)', () => {
+    const DRAFT = {
+      draft_id: 'draft-1', user_id: 'user-1', mail_type: 'postcard', postcard_size: '6x4',
+      required_credits: 2, status: 'pending',
+      expires_at: new Date(Date.now() + 6 * 60 * 60_000)
+    };
+
+    it("reads a draft's option: its mail type and postcard size, letters one page", () => {
+      expect(draftMailOption({ mail_type: 'postcard', postcard_size: '6x11' })).toEqual({
+        mailType: 'postcard',
+        postcardSize: '6x11'
+      });
+      expect(draftMailOption({ mail_type: 'postcard', postcard_size: null })).toEqual({
+        mailType: 'postcard',
+        postcardSize: '6x9'
+      });
+      expect(draftMailOption({ mail_type: 'letter', postcard_size: '6x9' })).toEqual({ mailType: 'letter' });
+      expect(draftMailOption({})).toEqual({ mailType: 'letter' });
+    });
+
+    it("quotes an option's own price, and asks for it by the option", () => {
+      mocks.jitEnabled.mockReturnValue(true);
+      mocks.getJitProduct.mockReturnValue({
+        productCode: 'jit-postcard-4x6', priceId: 'price-4x6', amountCents: 399,
+        currency: 'usd', name: 'Pay & Send One 4x6 Postcard', description: 'x', mailType: 'postcard'
+      });
+
+      const option = { mailType: 'postcard' as const, postcardSize: '6x4' as const };
+      const eligibility = getSendEligibility(0, 2, option);
+
+      expect(mocks.getJitProduct).toHaveBeenCalledWith(option);
+      expect(eligibility.payAndSend).toMatchObject({ available: true, amountCents: 399, displayAmount: '3.99' });
+      expect(mocks.ensurePriceCatalog).toHaveBeenCalledWith('jit-postcard-4x6', 'send_eligibility');
+    });
+
+    it('offers no Pay & Send for an option this deployment does not sell, and reports no fault', () => {
+      mocks.jitEnabled.mockReturnValue(true);
+      mocks.getJitProduct.mockReturnValue(null);
+      const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const eligibility = getSendEligibility(0, 2, { mailType: 'letter', pages: 2 });
+
+        expect(eligibility.payAndSend).toEqual({ available: false, unavailableReason: OPTION_NOT_SOLD_REASON });
+        expect(OPTION_NOT_SOLD_REASON).toBe("Pay & Send isn't available for this mail.");
+        // Kicked with the option's own code all the same, so the catalog
+        // clears what it recorded while the option was sold.
+        expect(mocks.ensurePriceCatalog).toHaveBeenCalledWith('jit-letter-2-pages', 'send_eligibility');
+        const lines = [...diagnostic.mock.calls, ...warning.mock.calls].flat().map(String);
+        expect(lines.filter(line => line.includes('pay_and_send_unpriced'))).toEqual([]);
+      } finally {
+        diagnostic.mockRestore();
+        warning.mockRestore();
+      }
+    });
+
+    it("kicks with the option's code while Pay & Send is off", () => {
+      mocks.jitEnabled.mockReturnValue(false);
+
+      getSendEligibility(0, 2, { mailType: 'postcard', postcardSize: '6x11' });
+
+      expect(mocks.ensurePriceCatalog).toHaveBeenCalledWith('jit-postcard-11x6', 'send_eligibility_disabled');
+    });
+
+    it('refuses a checkout for an option this deployment does not sell, before any order', async () => {
+      // The 6x9 is sold and the 4x6 is not: a checkout priced by the mail
+      // type alone would sell this 4x6 as a 6x9.
+      mocks.getJitProduct.mockImplementation((({ postcardSize }: { postcardSize?: string }) =>
+        postcardSize === '6x4'
+          ? null
+          : {
+              productCode: 'jit-postcard', priceId: 'price-6x9', amountCents: 499,
+              currency: 'usd', name: 'Pay & Send One Physical Postcard', description: 'x', mailType: 'postcard'
+            }) as never);
+      mocks.query
+        // In the order the checkout reads them: the send block, then the peek.
+        .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
+        .mockResolvedValueOnce({ rows: [{ mail_type: 'postcard', postcard_size: '6x4' }] })
+        .mockResolvedValueOnce({ rows: [DRAFT] })
+        .mockResolvedValue({ rows: [] });
+
+      await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' }))
+        .rejects.toMatchObject({ code: 'JIT_OPTION_NOT_SOLD' });
+
+      // The peek ensures the option's own code, sold or not, so the catalog
+      // clears what it held for it; the cap reads no price for it.
+      expect(mocks.ensurePriceCatalog).toHaveBeenCalledWith('jit-postcard-4x6');
+      // Priced by the draft's own option, the locked row's last of all, and
+      // nothing inserted or opened.
+      expect(mocks.getJitProduct).toHaveBeenLastCalledWith({ mailType: 'postcard', postcardSize: '6x4' });
+      const sql = mocks.query.mock.calls.map(call => String(call[0]));
+      expect(sql.some(statement => statement.includes('INSERT INTO orders'))).toBe(false);
+      expect(mocks.createJitSession).not.toHaveBeenCalled();
+    });
+
+    it("prices a checkout by its order's product, never by its mail type", async () => {
+      const optionProduct = {
+        productCode: 'jit-postcard-4x6', priceId: 'price-4x6', amountCents: 399,
+        currency: 'usd', name: 'Pay & Send One 4x6 Postcard', description: 'x', mailType: 'postcard'
+      };
+      mocks.getJitProduct.mockReturnValue(optionProduct);
+      mocks.getJitProductForCode.mockReturnValue(optionProduct);
+      const reusable = {
+        ...baseOrder,
+        product_code: 'jit-postcard-4x6',
+        product_snapshot: { name: 'Pay & Send One 4x6 Postcard', mailType: 'postcard' },
+        amount_cents: 399,
+        stripe_checkout_session_id: 'cs-existing',
+        checkout_url: null,
+        checkout_expires_at: new Date(Date.now() + 90 * 60_000)
+      };
+      mocks.query
+        // In the order the checkout reads them: the send block, then the peek.
+        .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
+        .mockResolvedValueOnce({ rows: [{ mail_type: 'postcard', postcard_size: '6x4' }] })
+        .mockResolvedValueOnce({ rows: [DRAFT] })
+        .mockResolvedValueOnce({ rows: [reusable] })
+        .mockResolvedValue({ rows: [reusable] });
+      mocks.createJitSession.mockResolvedValue({
+        success: true, sessionId: 'cs-x', sessionUrl: 'https://s', expiresAt: new Date()
+      });
+
+      await createJitCheckout({ userId: 'user-1', draftId: 'draft-1' }).catch(() => undefined);
+
+      expect(mocks.getJitProductForCode).toHaveBeenCalledWith('jit-postcard-4x6');
+      expect(mocks.createJitSession).toHaveBeenCalledWith(
+        expect.objectContaining({ product: optionProduct })
+      );
+    });
+
+    it("cancels an order whose option stopped being sold before its session", async () => {
+      mocks.getJitProduct.mockReturnValue({
+        productCode: 'jit-postcard-4x6', priceId: 'price-4x6', amountCents: 399,
+        currency: 'usd', name: 'Pay & Send One 4x6 Postcard', description: 'x', mailType: 'postcard'
+      });
+      mocks.getJitProductForCode.mockReturnValue(null);
+      const reusable = {
+        ...baseOrder,
+        product_code: 'jit-postcard-4x6',
+        amount_cents: 399,
+        stripe_checkout_session_id: 'cs-existing',
+        checkout_url: null,
+        checkout_expires_at: new Date(Date.now() + 90 * 60_000)
+      };
+      mocks.query
+        // In the order the checkout reads them: the send block, then the peek.
+        .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
+        .mockResolvedValueOnce({ rows: [{ mail_type: 'postcard', postcard_size: '6x4' }] })
+        .mockResolvedValueOnce({ rows: [DRAFT] })
+        .mockResolvedValueOnce({ rows: [reusable] })
+        .mockResolvedValue({ rows: [{ order_id: 'order-1' }] });
+
+      await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' }))
+        .rejects.toMatchObject({ code: 'PRICE_ID_NOT_CONFIGURED', diagnosticClass: 'configuration_error' });
+
+      expect(mocks.createJitSession).not.toHaveBeenCalled();
+      const cancel = mocks.query.mock.calls.find(call => String(call[0]).includes("SET status = 'cancelled'"));
+      expect(cancel?.[1]).toEqual(['order-1', 'Pay & Send no longer sells jit-postcard-4x6', 'PRICE_ID_NOT_CONFIGURED']);
+    });
   });
 
   it('refuses to adopt a paid session whose amount disagrees with the pin', async () => {
@@ -1532,7 +1704,7 @@ describe('commerceService', () => {
         rule: 'price.inactive',
         diagnosticClass: 'configuration_error'
       })) as never);
-      mocks.getJitProduct.mockImplementation(((mailType: string) => ({
+      mocks.getJitProduct.mockImplementation((({ mailType }: { mailType: string }) => ({
         productCode: mailType === 'letter' ? 'jit-letter' : 'jit-postcard',
         priceId: 'price-jit',
         amountCents: 0,
@@ -1542,8 +1714,8 @@ describe('commerceService', () => {
       })) as never);
 
       for (let i = 0; i < 3; i += 1) {
-        getSendEligibility(0, 2, 'letter');
-        getSendEligibility(0, 1, 'postcard');
+        getSendEligibility(0, 2, { mailType: 'letter' });
+        getSendEligibility(0, 1, { mailType: 'postcard' });
       }
 
       const emitted = diagnostic.mock.calls
@@ -1570,7 +1742,7 @@ describe('commerceService', () => {
         productCode: 'jit-letter', priceId: 'price-jit', amountCents: 499,
         currency: 'usd', name: 'Pay & Send', description: 'One letter'
       });
-      getSendEligibility(0, 2, 'letter');
+      getSendEligibility(0, 2, { mailType: 'letter' });
 
       mocks.describeUnpriced.mockReturnValue({
         productCode: 'jit-letter',
@@ -1582,7 +1754,7 @@ describe('commerceService', () => {
         currency: 'usd', name: 'Pay & Send', description: 'One letter'
       });
 
-      for (let i = 0; i < 5; i += 1) getSendEligibility(0, 2, 'letter');
+      for (let i = 0; i < 5; i += 1) getSendEligibility(0, 2, { mailType: 'letter' });
 
       const emitted = diagnostic.mock.calls
         .flat()
@@ -2222,7 +2394,7 @@ describe('commerceService', () => {
   });
 
   it('reports exact server-configured Pay & Send eligibility only when enabled', () => {
-    const eligibility = getSendEligibility(0, 2, 'letter');
+    const eligibility = getSendEligibility(0, 2, { mailType: 'letter' });
     expect(eligibility).toMatchObject({
       payAndSend: {
         available: true,
@@ -2236,7 +2408,7 @@ describe('commerceService', () => {
     // what makes payAndSend.available true here, with a zero balance (#308).
     expect(eligibility).not.toHaveProperty('prepaid');
     mocks.jitEnabled.mockReturnValue(false);
-    expect(getSendEligibility(0, 2, 'letter').payAndSend).toMatchObject({
+    expect(getSendEligibility(0, 2, { mailType: 'letter' }).payAndSend).toMatchObject({
       available: false,
       unavailableReason: 'Pay & Send is not enabled.'
     });
@@ -2247,7 +2419,7 @@ describe('commerceService', () => {
     // surfaces and the stdio lane silently unavailable), and it serves the
     // display string so widgets stop dividing minor units by 100 - which is
     // 100x wrong for zero-decimal currencies (#278 round 6).
-    const eligibility = getSendEligibility(0, 2, 'letter');
+    const eligibility = getSendEligibility(0, 2, { mailType: 'letter' });
 
     expect(mocks.ensurePriceCatalog).toHaveBeenCalledWith('jit-letter', 'send_eligibility');
     expect(eligibility.payAndSend.displayAmount).toBe('4.99');
@@ -2262,7 +2434,7 @@ describe('commerceService', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     try {
       // Recovery first: the dedupe map survives between tests.
-      getSendEligibility(0, 2, 'letter');
+      getSendEligibility(0, 2, { mailType: 'letter' });
 
       // Boot race: unpriced with NO recorded failure -> synthesized
       // not_resolved -> warn.
@@ -2271,7 +2443,7 @@ describe('commerceService', () => {
         productCode: 'jit-letter', priceId: 'price-jit', amountCents: 0,
         currency: 'usd', name: 'Pay & Send', description: 'One letter'
       });
-      getSendEligibility(0, 2, 'letter');
+      getSendEligibility(0, 2, { mailType: 'letter' });
 
       const warned = warnSpy.mock.calls.flat().map(String).join('\n');
       const errored = errorSpy.mock.calls.flat().map(String).join('\n');
@@ -2304,7 +2476,7 @@ describe('commerceService', () => {
         currency: 'usd', name: 'Pay & Send', description: 'One letter'
       });
 
-      expect(getSendEligibility(0, 2, 'letter').payAndSend).toMatchObject({
+      expect(getSendEligibility(0, 2, { mailType: 'letter' }).payAndSend).toMatchObject({
         available: false,
         unavailableReason: expectedReason
       });

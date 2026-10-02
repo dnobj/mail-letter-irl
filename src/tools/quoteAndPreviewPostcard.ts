@@ -525,7 +525,7 @@ async function handler(
   const sendEligibility = previewSendEligibility(
     available,
     requiredCredits,
-    "postcard",
+    { mailType: "postcard", postcardSize: size },
     gift.isGift,
     callingApp(context)
   );

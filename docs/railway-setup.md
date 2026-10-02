@@ -116,6 +116,10 @@ LETTER_IRL_ARRIVE_BY_ENABLED=<true to offer arrival dates on previews (#535); un
 LETTER_IRL_STATIONERY_ENABLED=<true to offer themes on letter previews; unset is off>
 # The letter card's envelope reveal (#576, docs/ui-widgets.md): cards only, nothing prints differently.
 LETTER_IRL_ENVELOPE_REVEAL_ENABLED=<true to open previews from an envelope; unset is off>
+# The mail options (#578, docs/pricing-and-credits.md): each flag sells its options through Pay & Send,
+# at their own prices, and needs their Stripe Prices below. API and maintenance services.
+LETTER_IRL_ROOM_TO_WRITE_ENABLED=<true to sell two- and three-page letters; unset is off>
+LETTER_IRL_POSTCARD_SIZES_ENABLED=<true to sell 4x6 and 11x6 postcards; unset is off>
 LETTER_IRL_SCHEDULE_LEAD_DAYS=<business days from the mail date to the arrival date; default 7, production refuses less than 3>
 LETTER_IRL_SCHEDULE_HORIZON_DAYS=<calendar days ahead an arrival date may be; default 60>
 # Photo upload through the card in apps with no file store (#474, docs/deployment.md): off unless
@@ -164,6 +168,17 @@ In development set `LETTER_PROVIDER_CONFIG={"mode":"test"}`. When
 `JIT_PURCHASE_ENABLED=true`, also set `STRIPE_JIT_LETTER_PRICE_ID`,
 `STRIPE_JIT_POSTCARD_PRICE_ID`, and — if Pay & Send sells in a different
 currency from the packs — `JIT_CURRENCY`.
+
+The mail options' prices (#578) are needed only while their flags are on,
+with Pay & Send:
+
+- `LETTER_IRL_ROOM_TO_WRITE_ENABLED`: `STRIPE_JIT_LETTER_TWO_PAGES_PRICE_ID` and
+  `STRIPE_JIT_LETTER_THREE_PAGES_PRICE_ID`;
+- `LETTER_IRL_POSTCARD_SIZES_ENABLED`: `STRIPE_JIT_POSTCARD_4X6_PRICE_ID` and
+  `STRIPE_JIT_POSTCARD_11X6_PRICE_ID`.
+
+Without them, production refuses to boot and development warns. The flags stay
+unset in production until the owner approves the prices.
 
 **Do not delete the old `*_AMOUNT_CENTS` variables until this build is the one
 serving** — the previous image's validator requires them in production, and

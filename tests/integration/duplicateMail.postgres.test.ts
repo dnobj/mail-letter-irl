@@ -34,10 +34,8 @@ vi.mock('../../src/services/priceCatalog.js', async importOriginal => ({
   ensurePriceCatalog: async () => undefined
 }));
 
-vi.mock('../../src/services/stripeService.js', async importOriginal => ({
-  ...(await importOriginal<typeof import('../../src/services/stripeService.js')>()),
-  isJitPurchaseEnabled: () => true,
-  getJitProductConfig: (mailType: 'letter' | 'postcard') => ({
+function jitDouble(mailType: 'letter' | 'postcard') {
+  return {
     productCode: mailType === 'postcard' ? 'jit-postcard' : 'jit-letter',
     mailType,
     priceId: `price_test_${mailType}`,
@@ -45,7 +43,15 @@ vi.mock('../../src/services/stripeService.js', async importOriginal => ({
     currency: 'usd',
     name: 'Pay & Send',
     description: 'Test product'
-  }),
+  };
+}
+
+vi.mock('../../src/services/stripeService.js', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../src/services/stripeService.js')>()),
+  isJitPurchaseEnabled: () => true,
+  getJitProductConfig: ({ mailType }: { mailType: 'letter' | 'postcard' }) => jitDouble(mailType),
+  // The checkout prices by the order's product (#578).
+  getJitProductConfigForCode: (code: string) => jitDouble(code === 'jit-postcard' ? 'postcard' : 'letter'),
   createJitCheckoutSession: async (params: { orderId: string; expiresAt?: Date }) => {
     stripeDouble.sessions.push(params.orderId);
     return {

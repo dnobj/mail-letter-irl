@@ -31,6 +31,18 @@ vi.mock('../../src/services/priceCatalog.js', async importOriginal => ({
   ensurePriceCatalog: async () => undefined
 }));
 
+function jitDouble(mailType: 'letter' | 'postcard') {
+  return {
+    productCode: mailType === 'postcard' ? 'jit-postcard' : 'jit-letter',
+    mailType,
+    priceId: `price_test_${mailType}`,
+    amountCents: 499,
+    currency: 'usd',
+    name: 'Pay & Send',
+    description: 'Test product'
+  };
+}
+
 vi.mock('../../src/services/stripeService.js', async importOriginal => ({
   ...(await importOriginal<typeof import('../../src/services/stripeService.js')>()),
   isJitPurchaseEnabled: () => true,
@@ -43,15 +55,9 @@ vi.mock('../../src/services/stripeService.js', async importOriginal => ({
     name: 'Starter Pack',
     description: 'Test pack'
   }),
-  getJitProductConfig: (mailType: 'letter' | 'postcard') => ({
-    productCode: mailType === 'postcard' ? 'jit-postcard' : 'jit-letter',
-    mailType,
-    priceId: `price_test_${mailType}`,
-    amountCents: 499,
-    currency: 'usd',
-    name: 'Pay & Send',
-    description: 'Test product'
-  }),
+  getJitProductConfig: ({ mailType }: { mailType: 'letter' | 'postcard' }) => jitDouble(mailType),
+  // The checkout prices by the order's product (#578).
+  getJitProductConfigForCode: (code: string) => jitDouble(code === 'jit-postcard' ? 'postcard' : 'letter'),
   createPackCheckoutSession: async (params: { orderId: string }) => {
     stripeDouble.sessions.push(params.orderId);
     return {

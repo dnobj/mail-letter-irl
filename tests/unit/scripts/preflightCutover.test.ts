@@ -142,6 +142,56 @@ describe('diffManifest', () => {
     expect(withFlag.missing.map(gap => gap.note).join('\n')).toContain('JIT_PURCHASE_ENABLED is set');
   });
 
+  it("requires a mail option's price only when its flag's name is present as well (#578)", () => {
+    const OPTION_PRICES = [
+      'STRIPE_JIT_LETTER_TWO_PAGES_PRICE_ID',
+      'STRIPE_JIT_LETTER_THREE_PAGES_PRICE_ID',
+      'STRIPE_JIT_POSTCARD_4X6_PRICE_ID',
+      'STRIPE_JIT_POSTCARD_11X6_PRICE_ID'
+    ];
+    const jitNames = [
+      ...FULL_PRODUCTION_NAMES,
+      'JIT_PURCHASE_ENABLED',
+      'STRIPE_JIT_LETTER_PRICE_ID',
+      'STRIPE_JIT_POSTCARD_PRICE_ID'
+    ];
+    // Production as the owner keeps it: Pay & Send on, the options' flags absent.
+    const flagsAbsent = diffManifest(jitNames, { environment: 'production', service: 'api' });
+    expect(flagsAbsent.missing.map(gap => gap.entry.name)).toEqual([]);
+
+    // A flag alone, without Pay & Send, demands nothing either.
+    const noJit = diffManifest([...FULL_PRODUCTION_NAMES, 'LETTER_IRL_ROOM_TO_WRITE_ENABLED'], {
+      environment: 'production',
+      service: 'api'
+    });
+    expect(noJit.missing.map(gap => gap.entry.name)).toEqual([]);
+
+    const roomOn = diffManifest([...jitNames, 'LETTER_IRL_ROOM_TO_WRITE_ENABLED'], {
+      environment: 'production',
+      service: 'api'
+    });
+    expect(roomOn.missing.map(gap => gap.note)).toEqual([
+      'STRIPE_JIT_LETTER_TWO_PAGES_PRICE_ID [required because JIT_PURCHASE_ENABLED and LETTER_IRL_ROOM_TO_WRITE_ENABLED are set]',
+      'STRIPE_JIT_LETTER_THREE_PAGES_PRICE_ID [required because JIT_PURCHASE_ENABLED and LETTER_IRL_ROOM_TO_WRITE_ENABLED are set]'
+    ]);
+
+    const sizesOn = diffManifest([...jitNames, 'LETTER_IRL_POSTCARD_SIZES_ENABLED'], {
+      environment: 'production',
+      service: 'maintenance'
+    });
+    expect(sizesOn.missing.map(gap => gap.entry.name)).toEqual([
+      'STRIPE_JIT_POSTCARD_4X6_PRICE_ID',
+      'STRIPE_JIT_POSTCARD_11X6_PRICE_ID'
+    ]);
+
+    // Set, they are satisfied.
+    const allSet = diffManifest(
+      [...jitNames, 'LETTER_IRL_ROOM_TO_WRITE_ENABLED', 'LETTER_IRL_POSTCARD_SIZES_ENABLED', ...OPTION_PRICES],
+      { environment: 'production', service: 'api' }
+    );
+    expect(allSet.missing).toEqual([]);
+  });
+
   it('never requires unless-admin exemptions on deployed services', () => {
     // ADMIN_ENABLED present or not, deployed services always need Stripe.
     const diff = diffManifest(['ADMIN_ENABLED'], {

@@ -79,6 +79,14 @@ describe('friendlyCheckoutError terminality (#278)', () => {
     );
     expect(friendly.message).not.toContain('cs_private');
   });
+
+  it('refuses an option no longer sold, with a new preview as the way on (#578)', () => {
+    const friendly = friendlyCheckoutError(
+      Object.assign(new Error('Pay & Send does not sell this mail option'), { code: 'JIT_OPTION_NOT_SOLD' })
+    );
+    expect(friendly.message).toBe("Pay & Send isn't available for this mail. Please create a new preview.");
+    expect((friendly as { code?: string }).code).toBe('JIT_OPTION_NOT_SOLD');
+  });
 });
 
 /**
