@@ -123,6 +123,8 @@ LETTER_IRL_ADDRESS_REQUESTS_ENABLED=<true to list request_address, get_address_r
 LETTER_IRL_ADDRESS_REQUEST_LINK_DAYS=<days a link works, 1 to 30; default 7>
 LETTER_IRL_ADDRESS_REQUEST_WAITING_CAP=<requests an account may have waiting, 1 to 100; default 10>
 LETTER_IRL_ADDRESS_REQUEST_DAILY_CAP=<requests an account may make in 24 hours, 1 to 500; default 20>
+# Maintenance service: how long a closed address request, and any address given, is kept (#604; the owner's value).
+LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS=<days after it closes, or after its link expires unanswered, 1 to 365; default 7>
 # The letter card's envelope reveal (#576, docs/ui-widgets.md): cards only, nothing prints differently.
 LETTER_IRL_ENVELOPE_REVEAL_ENABLED=<true to open previews from an envelope; unset is off>
 # The studio card (#580, docs/ui-widgets.md): the letter card laid out with Style, Words and Delivery tabs. Cards only.

@@ -168,6 +168,52 @@ describePostgres('address requests (#604)', () => {
     expect((await pool.query(`SELECT COUNT(*)::int AS n FROM address_requests`)).rows[0].n).toBe(0);
   });
 
+  it("puts the recipient's own name on the envelope, or else the sender's name for them (#604 PR 2)", async () => {
+    const userId = await seedUser();
+    const unnamed = await made(userId, 'Grandma Ruth');
+    const { name: _name, ...withoutName } = ADDRESS;
+    await expect(service.answerAddressRequest(unnamed.token, withoutName)).resolves.toEqual({ ok: true });
+    await expect(service.getAddressRequest({ userId, requestId: unnamed.request.requestId })).resolves.toMatchObject({
+      address: { ...withoutName, name: 'Grandma Ruth' }
+    });
+
+    const named = await made(userId, 'Grandma Ruth');
+    await service.answerAddressRequest(named.token, ADDRESS);
+    await expect(service.getAddressRequest({ userId, requestId: named.request.requestId })).resolves.toMatchObject({
+      address: ADDRESS
+    });
+  });
+
+  it('sweeps requests the given days after they close, and waiting ones after their expiry (#604 PR 2)', async () => {
+    const userId = await seedUser();
+    const make = async (status: 'waiting' | 'answered' | 'declined' | 'cancelled', closedDaysAgo: number | null, expiresInDays: number) => {
+      const { request } = await made(userId);
+      await pool.query(
+        `UPDATE address_requests
+            SET status = $2::text,
+                address = CASE WHEN $2::text = 'answered' THEN $5::jsonb END,
+                created_at = NOW() - INTERVAL '30 days',
+                expires_at = NOW() + make_interval(days => $4::int),
+                closed_at = CASE WHEN $3::int IS NULL THEN NULL ELSE NOW() - make_interval(days => $3::int) END
+          WHERE request_id = $1::uuid`,
+        [request.requestId, status, closedDaysAgo, expiresInDays, JSON.stringify(ADDRESS)]
+      );
+      return request.requestId;
+    };
+    const kept = [
+      await make('answered', 6, 1),
+      await make('declined', 6, -10),
+      await make('waiting', null, -6),
+      await make('waiting', null, 3)
+    ];
+    const swept = [await make('answered', 8, 1), await make('cancelled', 8, 5), await make('waiting', null, -8)];
+
+    await expect(service.purgeClosedAddressRequests(7)).resolves.toBe(3);
+    const left = (await pool.query<{ request_id: string }>(`SELECT request_id FROM address_requests`)).rows.map(row => row.request_id);
+    expect(left.sort()).toEqual([...kept].sort());
+    for (const id of swept) expect(left).not.toContain(id);
+  });
+
   it('takes a decline once, and refuses an answer after it', async () => {
     const userId = await seedUser();
     const { request, token } = await made(userId);

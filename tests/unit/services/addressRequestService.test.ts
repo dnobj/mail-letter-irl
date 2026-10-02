@@ -19,6 +19,7 @@ import {
   declineAddressRequest,
   getAddressRequest,
   mintAddressRequestToken,
+  purgeClosedAddressRequests,
   readAddressRequestPage
 } from '../../../src/services/addressRequestService.js';
 
@@ -200,19 +201,27 @@ describe('answering and declining by the link (#604)', () => {
   const token = 'AbCdEfGhIjKlMnOpQrStUvWx';
   const hash = createHash('sha256').update(token).digest();
 
-  it('answers only a waiting, unexpired request, with the address as JSON', async () => {
+  it('answers only a waiting, unexpired request, with the address as JSON and its name beside it', async () => {
     vi.mocked(query).mockResolvedValueOnce(result([{ request_id: REQUEST_ID }]));
     await expect(answerAddressRequest(token, ADDRESS)).resolves.toEqual({ ok: true });
     const [sql, params] = vi.mocked(query).mock.calls[0];
-    expect(flat(sql)).toContain('SET status = $2, address = $3::jsonb, closed_at = NOW()');
+    expect(flat(sql)).toContain("address = $3::jsonb || jsonb_build_object('name', COALESCE($4::text, recipient_name))");
     expect(flat(sql)).toContain("WHERE token_hash = $1 AND status = 'waiting' AND expires_at > NOW()");
-    expect(params).toEqual([hash, 'answered', JSON.stringify(ADDRESS)]);
+    const { name, ...rest } = ADDRESS;
+    expect(params).toEqual([hash, 'answered', JSON.stringify(rest), name]);
+  });
+
+  it("takes the sender's name for the recipient when the recipient gives none", async () => {
+    vi.mocked(query).mockResolvedValueOnce(result([{ request_id: REQUEST_ID }]));
+    const { name: _name, ...unnamed } = ADDRESS;
+    await answerAddressRequest(token, unnamed);
+    expect(vi.mocked(query).mock.calls[0][1]).toEqual([hash, 'answered', JSON.stringify(unnamed), null]);
   });
 
   it('declines with no address', async () => {
     vi.mocked(query).mockResolvedValueOnce(result([{ request_id: REQUEST_ID }]));
     await expect(declineAddressRequest(token)).resolves.toEqual({ ok: true });
-    expect(vi.mocked(query).mock.calls[0][1]).toEqual([hash, 'declined', null]);
+    expect(vi.mocked(query).mock.calls[0][1]).toEqual([hash, 'declined', null, null]);
   });
 
   it('says why a link it did not change was refused', async () => {
@@ -241,5 +250,15 @@ describe('answering and declining by the link (#604)', () => {
       expiresAt: '2026-10-09T14:00:00.000Z'
     });
     expect(vi.mocked(query).mock.calls[0][1]).toEqual([hash]);
+  });
+});
+
+describe('the sweep (#604)', () => {
+  it('deletes requests the given days after they close, or after their expiry while waiting, and counts them', async () => {
+    vi.mocked(query).mockResolvedValueOnce({ rows: [], rowCount: 4 } as never);
+    await expect(purgeClosedAddressRequests(9)).resolves.toBe(4);
+    const [sql, params] = vi.mocked(query).mock.calls[0];
+    expect(flat(sql)).toBe('DELETE FROM address_requests WHERE COALESCE(closed_at, expires_at) < NOW() - make_interval(days => $1::int)');
+    expect(params).toEqual([9]);
   });
 });

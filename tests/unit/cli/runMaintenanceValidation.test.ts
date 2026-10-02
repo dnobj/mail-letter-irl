@@ -22,6 +22,7 @@ const services = vi.hoisted(() => ({
   runStatusSync: vi.fn().mockResolvedValue(undefined),
   purgeExpiredRecentUploads: vi.fn().mockResolvedValue(0),
   purgeExpiredFeatureRequests: vi.fn().mockResolvedValue(0),
+  purgeClosedAddressRequests: vi.fn().mockResolvedValue(0),
   sendMaintenanceHeartbeat: vi.fn().mockResolvedValue('sent'),
   lettersWaitingBehindPause: vi.fn().mockResolvedValue(0),
   raiseMissedMailDayAlerts: vi.fn().mockResolvedValue(0),
@@ -67,6 +68,9 @@ vi.mock('../../../src/workers/statusSyncWorker.js', () => ({
 }));
 vi.mock('../../../src/services/recentUploadStore.js', () => ({
   purgeExpiredRecentUploads: services.purgeExpiredRecentUploads
+}));
+vi.mock('../../../src/services/addressRequestService.js', () => ({
+  purgeClosedAddressRequests: services.purgeClosedAddressRequests
 }));
 vi.mock('../../../src/services/featureRequestService.js', () => ({
   purgeExpiredFeatureRequests: services.purgeExpiredFeatureRequests
@@ -502,6 +506,67 @@ describe('maintenance deployment validation', () => {
       releaseSweep?.();
       await expect(entry).resolves.toBeUndefined();
       expect(services.processDueLetterJobs).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  /**
+   * Issue #604. Closed address requests, and any address given with them, go
+   * the configured number of days after they close, whatever the feature's
+   * flag: same wrapper and position rule as the sweeps above.
+   */
+  describe('address requests sweep', () => {
+    afterEach(() => {
+      services.runMaintenanceTaskIfDue.mockReset().mockResolvedValue({ ran: false });
+      services.purgeClosedAddressRequests.mockReset().mockResolvedValue(0);
+    });
+
+    it('is scheduled on every hourly run, after the feature requests sweep and before the unwrapped tasks', async () => {
+      stubValidDevelopment();
+
+      await expect(maintenanceEntry()).resolves.toBeUndefined();
+
+      const names = services.runMaintenanceTaskIfDue.mock.calls.map(([name]) => name);
+      const call = services.runMaintenanceTaskIfDue.mock.calls.find(([name]) => name === 'address-requests-sweep');
+      expect(call?.[1]).toBeGreaterThan(0);
+      expect(call?.[1]).toBeLessThan(60 * 60 * 1000);
+      expect(names.indexOf('address-requests-sweep')).toBeGreaterThan(names.indexOf('feature-requests-sweep'));
+      expect(names.indexOf('address-requests-sweep')).toBeLessThan(names.indexOf('provider-status-sync'));
+    });
+
+    it('deletes after the configured days, flag or no flag, and logs a count only', async () => {
+      stubValidDevelopment();
+      vi.stubEnv('LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS', '12');
+      vi.stubEnv('LETTER_IRL_ADDRESS_REQUESTS_ENABLED', '');
+      const output = captureOutput();
+      services.purgeClosedAddressRequests.mockResolvedValueOnce(3);
+      services.runMaintenanceTaskIfDue.mockImplementation((async (name, _interval, task) =>
+        name === 'address-requests-sweep' ? { ran: true, result: await task() } : { ran: false }) as TaskRunner);
+
+      await expect(maintenanceEntry()).resolves.toBeUndefined();
+
+      expect(services.purgeClosedAddressRequests).toHaveBeenCalledWith(12);
+      const logged = output();
+      expect(logged).toContain('"event":"address_requests.swept"');
+      expect(logged).toContain('"deleted":3');
+    });
+
+    it('cannot stop the rest of maintenance, or leak what the driver said, when it fails', async () => {
+      stubValidDevelopment();
+      const output = captureOutput();
+      services.purgeClosedAddressRequests.mockRejectedValueOnce(
+        Object.assign(new Error('connect ETIMEDOUT deleting the address 1 Main St for Ruth'), { code: 'ETIMEDOUT' })
+      );
+      services.runMaintenanceTaskIfDue.mockImplementation((async (name, _interval, task) =>
+        name === 'address-requests-sweep' ? { ran: true, result: await task() } : { ran: false }) as TaskRunner);
+
+      await expect(maintenanceEntry()).resolves.toBeUndefined();
+
+      expect(services.processDueLetterJobs).toHaveBeenCalledTimes(1);
+      const logged = output();
+      expect(logged).toContain('"event":"address_requests.sweep_failed"');
+      expect(logged).toContain('"errorClass":"ETIMEDOUT"');
+      expect(logged).not.toContain('Main St');
+      expect(logged).not.toContain('Ruth');
     });
   });
 

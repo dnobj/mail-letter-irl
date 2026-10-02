@@ -131,7 +131,7 @@ none of them.
 
 ## Address Requests
 
-Listed only while `LETTER_IRL_ADDRESS_REQUESTS_ENABLED` is on (#604, concept 10 in [letter-creator-vision.md](letter-creator-vision.md)), and each refuses while it is off (`ADDRESS_REQUESTS_OFF`). The table is `address_requests` ([database-schema.md](database-schema.md#address_requests)). The recipient's page on the website, and its public routes, come in later PRs of #604.
+Listed only while `LETTER_IRL_ADDRESS_REQUESTS_ENABLED` is on (#604, concept 10 in [letter-creator-vision.md](letter-creator-vision.md)), and each refuses while it is off (`ADDRESS_REQUESTS_OFF`). The table is `address_requests` ([database-schema.md](database-schema.md#address_requests)). The recipient's page on the website comes in a later PR of #604; its public routes are below.
 
 - `request_address`: Makes a private link asking someone for their U.S. mailing address, when the person wants to send them mail and does not know it. Letter IRL never contacts the recipient: the person shares the link themselves.
   - **Takes** `recipientName` (what the person calls them, up to 100 characters; the envelope's name unless the recipient gives another; never shown on the page) and `senderFirstName`.
@@ -150,6 +150,18 @@ Listed only while `LETTER_IRL_ADDRESS_REQUESTS_ENABLED` is on (#604, concept 10 
 - `cancel_address_request`: Closes a waiting request by `requestId`, so its link stops working. One already answered, declined, cancelled or expired is left as it is (`alreadyClosed: true`). Destructive, since the link cannot be restored, and idempotent.
 
 The server instructions add, while these are listed, that `request_address` is the way when the person does not know the recipient's address, and never to guess one (steering r35).
+
+**The page's public routes** (`src/api/addressRequestApi.ts`, #604). They need no sign-in, and each takes the token in a JSON body, never in the path or the query. The page reads the token from the link's fragment.
+- `POST /api/public/address-requests/page` with `{ token }` answers `{ state, senderFirstName, expiresAt }`, nothing else.
+- `POST /api/public/address-requests/answer` with `{ token, address: { name?, addressLine1, addressLine2?, city, state, postalCode } }`:
+  - **The link is checked first,** so a used or expired one costs no verification.
+  - **The fields** are trimmed and bounded (name, lines 100 characters, city 60), with no hidden characters and nothing Open Sans cannot print. `state` is a USPS state or territory code, and `postalCode` a ZIP or ZIP+4. A wrong field answers 400 `{ reason: "invalid", fields }`.
+  - **PostGrid's verification** then runs under the preview's policy: a corrected address is kept corrected; one USPS cannot reach answers 422 `{ reason: "undeliverable", message }`; one the service cannot check goes ahead as given.
+  - An absent name or line 2 is left out. The envelope then carries the name the sender gave.
+- `POST /api/public/address-requests/decline` with `{ token }`.
+- **Outcomes:** 200 `{ ok: true }` when done. 409 `{ reason }` for a link already answered, declined, cancelled or expired. 404 `{ reason: "not_found" }` for an unknown link, and for everything while the feature is off.
+- **Limits:** a 4 KB body, and the `address_public` rate limits (20 a minute per IP, 200 in all). Answers are `no-store` and `no-referrer`.
+- **Logs** carry an outcome and an error class only: never the token, a name or an address.
 
 ## Account, Orders, and Return Address
 

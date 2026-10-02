@@ -70,6 +70,7 @@ In order, it:
   (#153). `CONTENT_RETENTION_ENABLED=false` skips the pass entirely;
 - deletes the link to a user's uploaded image 24 hours after their last upload (`recent-uploads-sweep`, #282);
 - deletes feature requests 12 months after they were submitted (`feature-requests-sweep`, #393);
+- deletes address requests, with any address a recipient gave, `LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS` (7) days after they close, or after their link expires unanswered, whatever the feature's flag (`address-requests-sweep`, #604);
 - carries out the account erasures queued from the admin panel (`account-erasures`, #289,
   [account-erasure.md](account-erasure.md));
 - retries due or stale outbox rows;
