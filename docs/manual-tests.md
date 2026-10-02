@@ -1747,7 +1747,7 @@ or an admin grant: the owner's step).
 
 **Preconditions:** Development, `LETTER_IRL_ADDRESS_REQUESTS_ENABLED` on in the API (the website's
 `/address` page has no flag of its own). A client with the (DEV) connector, or the dev CLI's tools; a
-private window, signed out, for the recipient. An answer that passes the page's field checks runs a
+private window, signed out, for the recipient. An answer that passes the API's field checks runs a
 PostGrid test-mode verification; a refused field costs none.
 
 **Steps:**
@@ -1779,9 +1779,10 @@ PostGrid test-mode verification; a refused field costs none.
     (`letter-irl-maintenance-dev`): its floor is 1 day, and 0 or a non-integer falls back to 7. Then
     `get_address_request` says "That address request wasn't found on this account. request_address
     makes a new one." Put the variable back afterwards.
-11. [ ] Last, turn the flag off (the API redeploys; refresh the client's tool list, which clients
-    cache). Verify the three tools are not listed, and that every link, even a waiting one, says
-    "This link isn't valid". Turn the flag back on.
+11. [ ] Last, make a fourth request and leave it waiting. Then turn the flag off: set it to `false` and
+    deploy the API (a variable deleted through Railway's API does not redeploy by itself), and refresh
+    the client's tool list, which clients cache. Verify the three tools are not listed, and that the
+    fourth request's link says "This link isn't valid". Turn the flag back on.
 
 **Pass criteria:** The page shows only the sender's first name and takes one address or one no thanks;
 the sender's assistant learns which, and nothing about the request appears in a URL a server logs.
