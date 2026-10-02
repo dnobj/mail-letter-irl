@@ -10,7 +10,7 @@ import {
   POSTCARD_PLACE_MAX_LENGTH,
   previewPostcardFront
 } from '../../../src/tools/postcardFrontInput.js';
-import { layoutPostcard, PostcardFrontOverflow } from '../../../src/render/index.js';
+import { layoutPostcard, POSTCARD_FRONT_TEXT_MAX_LENGTH, postcardFrontOf, PostcardFrontOverflow } from '../../../src/render/index.js';
 import type { ToolContext } from '../../../src/contracts/types.js';
 
 function context(): ToolContext {
@@ -162,6 +162,40 @@ describe('previewPostcardFront while the layouts are offered', () => {
     expect(refused(() => previewPostcardFront({ layout: 'greetings', place: place + wave }, '6x9', context(), 'pdf')).message).toBe(
       `The place is too long: it may hold at most ${POSTCARD_PLACE_MAX_LENGTH} characters. Shorten it.`
     );
+  });
+
+  it('refuses a line a stored front could not hold, though its characters are within the cap (#600 review round 2)', () => {
+    // An e with two accents written apart from it: one character of three code units.
+    const accented = String.fromCharCode(0x65, 0x323, 0x302);
+    const caption = accented.repeat(POSTCARD_CAPTION_MAX_LENGTH);
+    expect(caption.length).toBeGreaterThan(POSTCARD_FRONT_TEXT_MAX_LENGTH);
+    expect(refused(() => previewPostcardFront({ layout: 'border', caption }, '6x11', context(), 'pdf')).message).toBe(
+      `The caption is too long: it may hold at most ${POSTCARD_CAPTION_MAX_LENGTH} characters, and fewer where accents are ` +
+        'written apart from their letters. Shorten it.'
+    );
+    // Four accents on one letter: one character of five code units.
+    const stacked = String.fromCharCode(0x65, 0x301, 0x301, 0x301, 0x301);
+    expect(refused(() => previewPostcardFront({ layout: 'greetings', place: stacked.repeat(POSTCARD_PLACE_MAX_LENGTH) }, '6x4', context(), 'pdf')).message)
+      .toContain(`The place is too long: it may hold at most ${POSTCARD_PLACE_MAX_LENGTH} characters, and fewer where accents`);
+
+    // Every front the preview takes is one the print reads back.
+    const lines = [accented.repeat(40), stacked.repeat(24), String.fromCodePoint(0x1f30a).repeat(60), 'i'.repeat(60), 'Cape Cod, August 2026'];
+    let taken = 0;
+    for (const size of ['6x4', '6x9', '6x11'] as const) {
+      for (const text of lines) {
+        for (const input of [{ layout: 'border', caption: text }, { layout: 'greetings', place: text }]) {
+          let front;
+          try {
+            front = previewPostcardFront(input, size, context(), 'pdf');
+          } catch {
+            continue;
+          }
+          taken += 1;
+          expect(postcardFrontOf(front), `${size} ${input.layout} ${text.length}`).toEqual(front);
+        }
+      }
+    }
+    expect(taken).toBeGreaterThan(10);
   });
 
   it('leaves a line its face cannot draw to the printable check, unmeasured, which names the character', () => {
