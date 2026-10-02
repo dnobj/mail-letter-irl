@@ -273,11 +273,22 @@ export const clearReturnAddressInputZ = z.object({
 // Postcard Schemas (US-POSTCARD-01, US-POSTCARD-02)
 // ============================================================================
 
+/**
+ * The postcard preview's `size` as it is served while the 4x6 and 11x6 are
+ * not offered (#594): the 6x9 alone, exactly as before them.
+ */
+export const postcardSixByNineZ = z.enum(["6x9"]).optional();
+
 export const quoteAndPreviewPostcardInputZ = z.object({
   sender: addressZ.optional(),  // Optional - will use saved return address if not provided
   recipient: addressZ,
   message: z.string().describe("Must fit the back of the postcard: 16 lines, about 500 characters of prose"),
-  size: z.enum(["6x9"]).optional(),
+  // Served as postcardSixByNineZ while the 4x6 and 11x6 are not offered (#594).
+  size: z.enum(["6x9", "6x4", "6x11"]).optional().describe(
+    "The postcard's size: 6x9 (the default), 6x4 for a 4 x 6 in postcard, or 6x11 for an 11 x 6 in one. " +
+    "A 4x6 holds 11 lines on its back, about 350 characters of prose; an 11x6 16 lines, about 900. " +
+    "Letter packs and gift letters pay only for a 6x9: a 4x6 or 11x6 is paid with Pay & Send."
+  ),
   // Image from OpenAI fileParams - permissive to handle mobile edge cases
   // Mobile may send file_id without download_url (sediment:// protocol)
   image: imageFileParamZ.optional(),

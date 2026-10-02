@@ -15,7 +15,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { inlineHostBridge } from '../../../src/mcp/widgetHost.js';
 import { stampPreviewTool } from '../../../src/mcp/registerTools.js';
-import { layoutPostcard, POSTCARD_STAMP, renderPreviewSvg } from '../../../src/render/index.js';
+import { layoutPostcard, POSTCARD_GEOMETRY, POSTCARD_STAMP, renderPreviewSvg } from '../../../src/render/index.js';
 import { renderPostcardPreviewDocument } from '../../../src/services/previewService.js';
 
 const WIDGET_DIR = path.resolve(__dirname, '../../../widgets');
@@ -224,7 +224,7 @@ describe('the postcard card as a postcard maker (#580)', () => {
     await card.click(flip);
     expect(card.side()).toBe('back');
     expect(flip.textContent).toBe('Show the front');
-    expect(text(card, 'studio-scale')).toBe('The right half is for the address and postage.');
+    expect(text(card, 'studio-scale')).toBe('The right side is for the address and postage.');
     expect(card.byId('studio-postcard').classList.contains('flipping')).toBe(true);
     card.byId('studio-postcard').dispatchEvent(new card.window.Event('animationend'));
     expect(card.byId('studio-postcard').classList.contains('flipping')).toBe(false);
@@ -308,6 +308,31 @@ describe('the postcard card as a postcard maker (#580)', () => {
     await none.show(output({ message: undefined }), ON, { recipient });
     expect(text(none, 'studio-message')).toBe('The message is on the back.');
     expect(text(none, 'studio-count')).toBe('');
+  });
+
+  it.each([
+    ['6x4', '4 x 6 in', '11 lines, about 350'],
+    ['6x11', '6 x 11 in', '16 lines, about 900']
+  ] as const)('names a %s as it prints, from the page our renderer drew (#594)', async (size, named, holds) => {
+    const drawn = renderPostcardPreviewDocument(renderPreviewSvg(
+      layoutPostcard({ message: MESSAGE, image: { bytes: pngBytes(540, 360), mime: 'image/png', width: 540, height: 360 }, size }),
+      {
+        addresses: { from: ['RETURN TO:', 'PAT EXAMPLE', '1 MAIN ST', 'SPRINGFIELD, IL 62701'], to: ['SAM RIVERA', '350 FIFTH AVE', 'NEW YORK, NY 10118'] },
+        stamp: { page: 1, geometry: POSTCARD_GEOMETRY[size].stamp }
+      }
+    ));
+    const card = mount();
+    await card.show(output(), { previewHtml: drawn, [STUDIO]: true });
+    expect(text(card, 'studio-size')).toBe(named);
+    expect(text(card, 'studio-scale')).toBe(`Drawn to scale: ${named}.`);
+    expect(text(card, 'studio-summary')).toBe(`${named} · mailed in 1-2 business days`);
+    expect(text(card, 'studio-count')).toBe(`${[...MESSAGE].length} characters · the back holds ${holds} characters of prose`);
+    await card.click(card.byId('studio-flip'));
+    expect(text(card, 'studio-scale')).toBe('The right side is for the address and postage.');
+
+    // A 6x9 after it, in the same card, is named as one again.
+    await card.show(output(), ON);
+    expect(text(card, 'studio-size')).toBe('6 x 9 in');
   });
 
   it('sums the postcard up in the footer: its cost, size and when it mails', async () => {

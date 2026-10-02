@@ -218,7 +218,7 @@ used in development until the owner approves them:
 | 6x9 postcard | `jit-postcard` | $4.99 | none |
 | 11x6 postcard | `jit-postcard-11x6` | $5.99 | `LETTER_IRL_POSTCARD_SIZES_ENABLED` |
 
-- **Flags:** an option is sold only while its flag is on, as well as Pay & Send. Each flag also switches its option on, so an option is never offered without a price.
+- **Flags:** an option is sold only while its flag is on, as well as Pay & Send. Each flag also switches its option on, so an option is never offered without a price. The longer letters and the 4x6 and 11x6 postcards are offered only on our renderer as well (`LETTER_IRL_PRINT_RENDERER=pdf`, #586, #594).
 - **Off:** with its flag off, an option has no price at all. A quote offers no Pay & Send for it, and a checkout is refused rather than charging a smaller option's price.
 - **Ordering:** a checkout is priced by the product its order recorded.
 - **Fulfilment:** a paid order mails only the mail it paid for. A draft whose option no longer matches the order's product, such as a letter that changed length after its checkout opened, is refused (`JIT_PRODUCT_MISMATCH`) and the order goes to `refund_pending`, rather than mailing at another option's price (#586). A letter's pages are stored on its draft (`letter_drafts.pages`, migration 047), and every price, refusal and checkout reads them there.
