@@ -71,14 +71,17 @@ export const VERIFICATIONS_PER_LINK = 10;
 const VERIFICATION_WINDOW_MS = 24 * 60 * 60 * 1000;
 const verificationsByLink = new Map<string, { count: number; since: number }>();
 
-/** Spends one of the link's verifications, or says it has none left. */
-function mayVerify(token: string, now = Date.now()): boolean {
+/**
+ * Spends one of the link's verifications: 0, or else the seconds until the
+ * link has one again, for the 429's Retry-After.
+ */
+function verificationWait(token: string, now = Date.now()): number {
   const key = createHash('sha256').update(token, 'utf8').digest('hex');
   const entry = verificationsByLink.get(key);
   if (entry && now - entry.since < VERIFICATION_WINDOW_MS) {
-    if (entry.count >= VERIFICATIONS_PER_LINK) return false;
+    if (entry.count >= VERIFICATIONS_PER_LINK) return Math.ceil((entry.since + VERIFICATION_WINDOW_MS - now) / 1000);
     entry.count += 1;
-    return true;
+    return 0;
   }
   if (verificationsByLink.size > 10_000) {
     for (const [stale, { since }] of verificationsByLink) {
@@ -86,7 +89,7 @@ function mayVerify(token: string, now = Date.now()): boolean {
     }
   }
   verificationsByLink.set(key, { count: 1, since: now });
-  return true;
+  return 0;
 }
 
 /** For tests: every link's budget back to full. */
@@ -124,8 +127,9 @@ async function readBody(req: IncomingMessage, res: ServerResponse): Promise<Json
       sendJson(res, 413, { reason: 'too_large' });
       return null;
     }
-    // A visitor's slow or abandoned upload: theirs to retry, not a fault of ours.
-    if (error instanceof RequestBodyTimeoutError) {
+    // A visitor's slow or abandoned upload: theirs to retry, not a fault of
+    // ours, so it is answered without a log (#606 review round 2).
+    if (error instanceof RequestBodyTimeoutError || (error as NodeJS.ErrnoException | null)?.code === 'ECONNRESET') {
       sendJson(res, 408, { reason: 'timeout' });
       return null;
     }
@@ -292,7 +296,9 @@ export async function handleAddressRequestApiRequest(
       sendJson(res, 400, { reason: 'invalid', fields: given.fields });
       return true;
     }
-    if (typeof token !== 'string' || !mayVerify(token)) {
+    const wait = typeof token === 'string' ? verificationWait(token) : VERIFICATION_WINDOW_MS / 1000;
+    if (wait > 0) {
+      res.setHeader('Retry-After', String(wait));
       sendJson(res, 429, { reason: 'too_many_tries' });
       writeDiagnostic('info', 'address_request.answer', { outcome: 'too_many_tries' });
       return true;

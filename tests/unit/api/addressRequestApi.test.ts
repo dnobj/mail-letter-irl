@@ -232,19 +232,23 @@ describe('the address request routes (#604)', () => {
     for (let i = 0; i < VERIFICATIONS_PER_LINK; i += 1) {
       await expect(call('answer', { token: TOKEN, address: ADDRESS }), String(i)).resolves.toMatchObject({ status: 422 });
     }
-    await expect(call('answer', { token: TOKEN, address: ADDRESS })).resolves.toMatchObject({
-      status: 429,
-      json: { reason: 'too_many_tries' }
-    });
+    const spent = await call('answer', { token: TOKEN, address: ADDRESS });
+    expect(spent).toMatchObject({ status: 429, json: { reason: 'too_many_tries' } });
+    // When the link has a check again: within the day the budget counts.
+    const wait = Number(spent.headers['retry-after']);
+    expect(wait).toBeGreaterThan(86_000);
+    expect(wait).toBeLessThanOrEqual(86_400);
     expect(validateAddress).toHaveBeenCalledTimes(VERIFICATIONS_PER_LINK);
     // Another link has its own budget.
     await expect(call('answer', { token: 'ZyXwVuTsRqPoNmLkJiHgFeDc', address: ADDRESS })).resolves.toMatchObject({ status: 422 });
     expect(validateAddress).toHaveBeenCalledTimes(VERIFICATIONS_PER_LINK + 1);
   });
 
-  it('answers a slow upload with 408, not as a fault (#606 review round 1)', async () => {
+  it('answers a slow or abandoned upload with 408, not as a fault (#606 review rounds 1 and 2)', async () => {
     vi.mocked(readRequestBody).mockRejectedValueOnce(new RequestBodyTimeoutError());
     await expect(call('page', { token: TOKEN })).resolves.toMatchObject({ status: 408, json: { reason: 'timeout' } });
+    vi.mocked(readRequestBody).mockRejectedValueOnce(Object.assign(new Error('aborted'), { code: 'ECONNRESET' }));
+    await expect(call('answer', { token: TOKEN })).resolves.toMatchObject({ status: 408, json: { reason: 'timeout' } });
     expect(writeDiagnostic).not.toHaveBeenCalled();
   });
 
