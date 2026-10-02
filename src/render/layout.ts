@@ -3,12 +3,12 @@ import { isInvisible, mirrorOf, paragraphBidi } from './bidi.js';
 import { loadFont, type FontName } from './fonts.js';
 import { shape } from './glyphs.js';
 import {
-  BODY_BOTTOM, BODY_FONT_SIZE, BODY_TOP, CONTENT_WIDTH, HEADER_IMAGE_MAX_HEIGHT, IMAGE_GAP,
+  BODY_BOTTOM, BODY_TOP, CONTENT_WIDTH, HEADER_IMAGE_MAX_HEIGHT, IMAGE_GAP,
   INLINE_IMAGE_MAX_HEIGHT, LINE_PITCH, PAGE_HEIGHT, PAGE_WIDTH, SIDE_MARGIN
 } from './geometry.js';
 import type { RenderImage } from './images.js';
 import { clampMarks, MARK, MAX_MARKS_PER_LETTER } from './marks.js';
-import { layoutStationery, type Stationery } from './stationery.js';
+import { bodyFace, layoutStationery, ruledLines, type Band, type DrawnStationery } from './stationery.js';
 import type { LetterLayoutType } from '../contracts/types.js';
 
 export interface LetterContent {
@@ -18,7 +18,7 @@ export interface LetterContent {
   /** The header image or the enclosed image; ignored by `text_only`. */
   image?: RenderImage;
   /** The letter's theme and what it prints (#563); without one, Classic: today's page. */
-  stationery?: Stationery;
+  stationery?: DrawnStationery;
 }
 
 /** One line of text, drawn from `x` along `baseline`, in visual order. */
@@ -110,10 +110,10 @@ const WHITESPACE = /\s/u;
 /** The legacy HTML showed an image at most at its intrinsic CSS size: 96 px per inch. */
 const POINTS_PER_CSS_PIXEL = 72 / 96;
 
-/** Tabs have no glyph in Tinos; a tab becomes four spaces. */
+/** Tabs have no glyph in the letters' fonts; a tab becomes four spaces. */
 const TAB = '    ';
 
-/** The letter's typeface. */
+/** Classic's typeface, and the one a caller that names none gets (bodyFace gives a theme's). */
 const BODY_FONT: FontName = 'Tinos-Regular';
 
 /**
@@ -128,15 +128,32 @@ const NEVER_DRAWN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Co}\p{Cn}\p{Cs}]/u;
 const SPACE = /\p{Zs}/u;
 
 /**
- * Whether the renderer draws a grapheme cluster as written: each character
- * is a line break, a tab, a character that prints nothing, or one the
- * letter's font has a glyph for (a space's glyph drawing nothing: Tinos draws
+ * Whether the renderer draws a grapheme cluster as written in Tinos, Classic's
+ * font: drawsGraphemeIn for it.
+ */
+export function drawsGrapheme(grapheme: string): boolean {
+  return draws(BODY_FONT, grapheme);
+}
+
+/**
+ * The check for one font: whether the renderer draws a grapheme cluster as
+ * written in it. A theme with its own face (#563) checks its text against
+ * that face, which may draw less than Tinos: Caveat has no Greek or Hebrew.
+ */
+export function drawsGraphemeIn(fontName: FontName): (grapheme: string) => boolean {
+  return grapheme => draws(fontName, grapheme);
+}
+
+/**
+ * Whether the renderer draws a grapheme cluster as written in a font: each
+ * character is a line break, a tab, a character that prints nothing, or one
+ * the font has a glyph for (a space's glyph drawing nothing: Tinos draws
  * U+205F as a box), and the cluster carries at most MAX_MARKS_PER_LETTER
  * combining marks. A preview refuses text holding a cluster that fails,
  * rather than printing a box or dropping a mark.
  */
-export function drawsGrapheme(grapheme: string): boolean {
-  const font = loadFont(BODY_FONT);
+function draws(fontName: FontName, grapheme: string): boolean {
+  const font = loadFont(fontName);
   let marks = 0;
   for (const character of grapheme) {
     if (MARK.test(character) && ++marks > MAX_MARKS_PER_LETTER) return false;
@@ -284,20 +301,20 @@ export interface WrappedLine {
 }
 
 /**
- * `text` wrapped to `width` at `size` in the letter's font: paragraphs at
- * line breaks, tabs as four spaces, at most four marks a letter. Bidi levels
- * are resolved for each whole paragraph, and each line is measured exactly as
- * it will be drawn.
+ * `text` wrapped to `width` at `size` in `fontName` (Tinos unless named):
+ * paragraphs at line breaks, tabs as four spaces, at most four marks a letter.
+ * Bidi levels are resolved for each whole paragraph, and each line is
+ * measured exactly as it will be drawn.
  */
-export function wrapText(text: string, size: number, width: number): WrappedLine[] {
-  const font = loadFont(BODY_FONT);
+export function wrapText(text: string, size: number, width: number, fontName: FontName = BODY_FONT): WrappedLine[] {
+  const font = loadFont(fontName);
   const scale = size / font.unitsPerEm;
   const lines: WrappedLine[] = [];
   const paragraphs = clampMarks(text).replace(/\r\n?/g, '\n').replace(/\t/g, TAB).split('\n');
   for (const paragraph of paragraphs) {
     const bidi = paragraphBidi(paragraph);
     const measure = (start: number, end: number) => shape(font, bidi.lineVisual(start, end)).advanceWidth * scale;
-    for (const { start, end } of wrapParagraph(paragraph, width, measure, advanceLimit(BODY_FONT, paragraph, width, scale))) {
+    for (const { start, end } of wrapParagraph(paragraph, width, measure, advanceLimit(fontName, paragraph, width, scale))) {
       lines.push({ source: paragraph.slice(start, end), drawn: bidi.lineVisual(start, end) });
     }
   }
@@ -306,10 +323,10 @@ export function wrapText(text: string, size: number, width: number): WrappedLine
 
 /**
  * Where a baseline sits in a line box `pitch` tall, as CSS places it: half
- * the leading, then the ascent.
+ * the leading, then the ascent, of `fontName` (Tinos unless named).
  */
-export function baselineOffset(size: number, pitch: number): number {
-  const font = loadFont(BODY_FONT);
+export function baselineOffset(size: number, pitch: number, fontName: FontName = BODY_FONT): number {
+  const font = loadFont(fontName);
   const scale = size / font.unitsPerEm;
   return (pitch - (font.ascent - font.descent) * scale) / 2 + font.ascent * scale;
 }
@@ -322,15 +339,16 @@ export function baselineOffset(size: number, pitch: number): number {
  * much a letter is too long.
  *
  * A theme (stationery.ts) draws first, in the corner and above the body; the
- * body then starts below anything it put there. Classic draws nothing, so its
- * page is exactly the page without a theme.
+ * body then starts below anything it put there, in the theme's face. Classic
+ * draws nothing, so its page is exactly the page without a theme. Handwritten
+ * rules each line the page has room for, except where an image sits.
  */
 export function layoutLetter(content: LetterContent): Layout {
-  const fontName = BODY_FONT;
-  const size = BODY_FONT_SIZE;
-  const baseline = baselineOffset(size, LINE_PITCH);
+  const stationery = content.stationery ?? { theme: 'classic' };
+  const { font: fontName, size } = bodyFace(stationery.theme);
+  const baseline = baselineOffset(size, LINE_PITCH, fontName);
 
-  const theme = layoutStationery(content.stationery ?? { theme: 'classic' }, BODY_TOP);
+  const theme = layoutStationery(stationery, BODY_TOP);
   const items: LayoutItem[] = [...theme.items];
   const bodyTop = BODY_TOP + theme.bodyOffset;
   // Each branch checks the layout, so a text-only letter never places an image.
@@ -345,7 +363,13 @@ export function layoutLetter(content: LetterContent): Layout {
   const inlineBox = image && content.layoutType === 'inline_image' ? fitImage(image, INLINE_IMAGE_MAX_HEIGHT) : undefined;
   if (inlineBox) reserved = IMAGE_GAP + inlineBox.height;
 
-  const lines = wrapText(content.text, size, CONTENT_WIDTH);
+  const lines = wrapText(content.text, size, CONTENT_WIDTH, fontName);
+  const inlineTop = textTop + lines.length * LINE_PITCH + IMAGE_GAP;
+  if (stationery.theme === 'handwritten') {
+    const covered: Band[] = inlineBox ? [{ top: inlineTop, bottom: inlineTop + inlineBox.height }] : [];
+    const rules = ruledLines(textTop, BODY_BOTTOM, baseline, covered);
+    if (rules) items.push(rules);
+  }
   lines.forEach(({ source, drawn }, index) => {
     if (drawn.trim() === '') return;
     items.push({ kind: 'text', font: fontName, size, x: SIDE_MARGIN, baseline: textTop + index * LINE_PITCH + baseline, text: drawn, source });
@@ -353,8 +377,7 @@ export function layoutLetter(content: LetterContent): Layout {
 
   const linesAvailable = Math.max(0, Math.floor((BODY_BOTTOM - textTop - reserved + 1e-6) / LINE_PITCH));
   if (inlineBox && image) {
-    const top = textTop + lines.length * LINE_PITCH + IMAGE_GAP;
-    items.push({ kind: 'image', x: SIDE_MARGIN + (CONTENT_WIDTH - inlineBox.width) / 2, top, ...inlineBox, image });
+    items.push({ kind: 'image', x: SIDE_MARGIN + (CONTENT_WIDTH - inlineBox.width) / 2, top: inlineTop, ...inlineBox, image });
   }
 
   return {

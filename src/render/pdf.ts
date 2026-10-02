@@ -1,7 +1,7 @@
 import PDFDocument from 'pdfkit';
 import { placeGlyphs } from './glyphs.js';
 import type { Layout } from './layout.js';
-import type { Stationery } from './stationery.js';
+import type { DrawnStationery } from './stationery.js';
 
 /**
  * Recorded on every draft and letter the new renderer lays out (Phase 2), so a
@@ -26,7 +26,7 @@ export const STATIONERY_RENDERER_VERSION = 'pdf-2';
 export const PRINTABLE_RENDERER_VERSIONS: ReadonlySet<string> = new Set([RENDERER_VERSION, STATIONERY_RENDERER_VERSION]);
 
 /** The version a preview records: pdf-2 when drawn in a theme other than Classic, else pdf-1. */
-export function rendererVersionFor(stationery?: Stationery | null): string {
+export function rendererVersionFor(stationery?: DrawnStationery | null): string {
   return stationery && stationery.theme !== 'classic' ? STATIONERY_RENDERER_VERSION : RENDERER_VERSION;
 }
 

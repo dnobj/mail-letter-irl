@@ -352,7 +352,7 @@ describe("a theme's slots (#563)", () => {
   });
 
   it('refuse a theme this build does not know, rather than draw another page', () => {
-    expect(() => letter({ theme: 'typewriter' as StationeryTheme })).toThrow(/Unknown stationery theme: typewriter/);
+    expect(() => letter({ theme: 'floral' as StationeryTheme })).toThrow(/Unknown stationery theme: floral/);
   });
 });
 
@@ -369,7 +369,7 @@ describe('a stored theme (#563)', () => {
     ['an array', [{ theme: 'botanical' }]],
     ['no theme', { dateLine: 'October 1, 2026' }],
     ['Classic, which is stored as none', { theme: 'classic' }],
-    ['a theme this build does not draw', { theme: 'typewriter' }],
+    ['a theme this build does not draw', { theme: 'floral' }],
     ['a slot that is not text', { theme: 'monogram', monogram: 42 }],
     ['a slot far past anything that prints', { theme: 'celebration', headline: 'x'.repeat(201) }]
   ])('reads %s as no theme', (_label, value) => {

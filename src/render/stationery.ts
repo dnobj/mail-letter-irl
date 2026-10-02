@@ -1,7 +1,7 @@
 import { visualOrder } from './bidi.js';
 import { loadFont, type FontName } from './fonts.js';
 import { shape } from './glyphs.js';
-import { CONTENT_WIDTH, LINE_PITCH, PAGE_WIDTH, POINTS_PER_INCH, SIDE_MARGIN } from './geometry.js';
+import { BODY_FONT_SIZE, CONTENT_WIDTH, LINE_PITCH, PAGE_WIDTH, POINTS_PER_INCH, SIDE_MARGIN } from './geometry.js';
 import type { LayoutItem, PathItem, TextRun } from './layout.js';
 import { clampMarks } from './marks.js';
 
@@ -13,7 +13,9 @@ import { clampMarks } from './marks.js';
  * date line, and draws only in the top-right corner beside the envelope window
  * and, for Celebration's headline, above the body. Nothing a theme draws
  * reaches the body's lines, so the body lays out as in Classic, below a
- * headline when there is one.
+ * headline when there is one. Typewriter and Handwritten set the body in a
+ * face of their own instead (bodyFace), on Classic's line pitch, and
+ * Handwritten rules a faint line under each of the page's lines.
  *
  * Ink is black and greys only: letters print with `color: false`. Probe P12
  * printed every grey it tried, from #000 to #aaa, and every tint exactly as
@@ -29,6 +31,15 @@ import { clampMarks } from './marks.js';
 export const STATIONERY_THEMES = ['classic', 'monogram', 'botanical', 'celebration'] as const;
 export type StationeryTheme = (typeof STATIONERY_THEMES)[number];
 
+/**
+ * Every theme this renderer draws: the four above, and Typewriter and
+ * Handwritten, which set the whole letter in a face of their own (#563 PR 8).
+ * No tool offers the two yet, and no draft stores them (stationeryOf), until
+ * a migration admits them.
+ */
+export const DRAWN_THEMES = [...STATIONERY_THEMES, 'typewriter', 'handwritten'] as const;
+export type DrawnTheme = (typeof DRAWN_THEMES)[number];
+
 /** A letter's theme and what it prints. */
 export interface Stationery {
   theme: StationeryTheme;
@@ -38,6 +49,52 @@ export interface Stationery {
   monogram?: string;
   /** Celebration's headline, on one line above the body. */
   headline?: string;
+}
+
+/** A theme the renderer draws, with what it prints: any Stationery, or Typewriter or Handwritten. */
+export interface DrawnStationery extends Omit<Stationery, 'theme'> {
+  theme: DrawnTheme;
+}
+
+/** A typeface at a size. */
+export interface Face {
+  font: FontName;
+  size: number;
+}
+
+const TINOS_BODY: Face = { font: 'Tinos-Regular', size: BODY_FONT_SIZE };
+
+/**
+ * The face each theme sets its body in. Every theme keeps Classic's line
+ * pitch, so a page holds as many lines in each, and a letter that fits Classic
+ * but not a theme is refused by its line count.
+ * - The Tinos themes keep Classic's 12 pt.
+ * - Typewriter sets Cousine at 11 pt: 6.6 pt a character, so 70 to a line,
+ *   with an x-height near Tinos's at 12 pt.
+ * - Handwritten sets Caveat at 15 pt. It is a narrow face, so at 15 pt its
+ *   x-height is near Tinos's at 12 pt and a line holds about as much. Its
+ *   ascent and descent (18.9 pt) fit inside the pitch.
+ */
+const BODY_FACES: Record<DrawnTheme, Face> = {
+  classic: TINOS_BODY,
+  monogram: TINOS_BODY,
+  botanical: TINOS_BODY,
+  celebration: TINOS_BODY,
+  typewriter: { font: 'Cousine-Regular', size: 11 },
+  handwritten: { font: 'Caveat-Regular', size: 15 }
+};
+
+/** A theme this build does not know is an error, never a page drawn some other way. */
+function knownTheme(theme: string): asserts theme is DrawnTheme {
+  if (!(DRAWN_THEMES as readonly string[]).includes(theme)) {
+    throw new Error(`Unknown stationery theme: ${String(theme).slice(0, 32)}`);
+  }
+}
+
+/** The face a theme sets its body in: Tinos at 12 pt, as Classic, unless the theme has its own. */
+export function bodyFace(theme: DrawnTheme): Face {
+  knownTheme(theme);
+  return BODY_FACES[theme];
 }
 
 /**
@@ -97,6 +154,29 @@ const DATE_SIZE = 12;
 const DATE_MIN_SIZE = 9;
 const DATE_BASELINE = inch(0.9);
 
+/**
+ * The date line's face, and the smallest size it shrinks to: the Tinos
+ * themes' 12 pt, down to 9; Typewriter's in its body face, down to 9; and
+ * Handwritten's in Caveat a little larger than its body, down to 12, about
+ * Tinos's 9 pt in height.
+ */
+const DATE_FACES: Record<Exclude<DrawnTheme, 'classic'>, { face: Face; floor: number }> = {
+  monogram: { face: { font: FONT, size: DATE_SIZE }, floor: DATE_MIN_SIZE },
+  botanical: { face: { font: FONT, size: DATE_SIZE }, floor: DATE_MIN_SIZE },
+  celebration: { face: { font: FONT, size: DATE_SIZE }, floor: DATE_MIN_SIZE },
+  typewriter: { face: BODY_FACES.typewriter, floor: 9 },
+  handwritten: { face: { font: 'Caveat-Regular', size: 16 }, floor: 12 }
+};
+
+/**
+ * Handwritten's rules: one under each line, faint so the writing stands out.
+ * P12 printed #aaa and 0.5 pt lines as drawn. The writing rests on its rule,
+ * RULE_DROP below the baseline.
+ */
+const RULE_INK = '#aaaaaa';
+const RULE_WIDTH = 0.5;
+const RULE_DROP = 1.5;
+
 const MONOGRAM_RADIUS = inch(0.45);
 const MONOGRAM_CENTER: Point = [RIGHT - MONOGRAM_RADIUS, inch(1.85)];
 const MONOGRAM_SIZE = 26;
@@ -129,8 +209,8 @@ const fixed = (value: number): string => String(Math.round(value * 100) / 100);
 const at = ([x, y]: Point): string => `${fixed(x)} ${fixed(y)}`;
 
 /** The drawn width of text already in visual order, in points, as glyphs.ts places it. */
-function width(drawn: string, size: number): number {
-  const font = loadFont(FONT);
+function width(drawn: string, size: number, fontName: FontName = FONT): number {
+  const font = loadFont(fontName);
   return (shape(font, drawn).advanceWidth * size) / font.unitsPerEm;
 }
 
@@ -150,8 +230,8 @@ function shows(text: string): boolean {
   return visualOrder(text).trim() !== '';
 }
 
-function run(source: string, size: number, x: number, baseline: number): TextRun {
-  return { kind: 'text', font: FONT, size, x, baseline, text: visualOrder(source), source };
+function run(source: string, size: number, x: number, baseline: number, font: FontName = FONT): TextRun {
+  return { kind: 'text', font, size, x, baseline, text: visualOrder(source), source };
 }
 
 /**
@@ -159,19 +239,42 @@ function run(source: string, size: number, x: number, baseline: number): TextRun
  * largest half point that does, or null below `floor`. Widths scale with the
  * size, so the half point found always fits.
  */
-function fitted(drawn: string, size: number, room: number, floor: number): number | null {
-  const full = width(drawn, size);
+function fitted(drawn: string, size: number, room: number, floor: number, font: FontName = FONT): number | null {
+  const full = width(drawn, size, font);
   if (full <= room) return size;
   const smaller = Math.floor(((size * room) / full) * 2) / 2;
   return smaller >= floor ? smaller : null;
 }
 
-/** The date line, its right edge on the body's, shrunk to fit the corner if it must. */
-function dateLine(text: string): TextRun {
+/** The date line in its theme's face, its right edge on the body's, shrunk to fit the corner if it must. */
+function dateLine(text: string, theme: Exclude<DrawnTheme, 'classic'>): TextRun {
+  const { face, floor } = DATE_FACES[theme];
   const drawn = visualOrder(text);
-  const size = fitted(drawn, DATE_SIZE, RIGHT - STATIONERY_CORNER.left, DATE_MIN_SIZE);
+  const size = fitted(drawn, face.size, RIGHT - STATIONERY_CORNER.left, floor, face.font);
   if (size === null) throw new StationeryOverflow('dateLine');
-  return run(text, size, RIGHT - width(drawn, size), DATE_BASELINE);
+  return run(text, size, RIGHT - width(drawn, size, face.font), DATE_BASELINE, face.font);
+}
+
+/** A stretch of the page an image covers, from its top to its bottom. */
+export interface Band {
+  top: number;
+  bottom: number;
+}
+
+/**
+ * Handwritten's rules (#563): one under each line the page has room for, from
+ * `top` down to `bottom` every LINE_PITCH, across the body's width, as one
+ * path. A line whose band meets an image in `covered` has none, so no rule
+ * crosses a picture. `baseline` is where a line's baseline sits below its top.
+ */
+export function ruledLines(top: number, bottom: number, baseline: number, covered: Band[] = []): PathItem | null {
+  let d = '';
+  for (let lineTop = top; lineTop + LINE_PITCH <= bottom + 1e-6; lineTop += LINE_PITCH) {
+    if (covered.some(band => band.top < lineTop + LINE_PITCH && band.bottom > lineTop)) continue;
+    const y = lineTop + baseline + RULE_DROP;
+    d += `M${at([SIDE_MARGIN, y])}L${at([RIGHT, y])}`;
+  }
+  return d ? { kind: 'path', d, fill: 'none', stroke: RULE_INK, strokeWidth: RULE_WIDTH } : null;
 }
 
 /** A circle as four cubics: path data with M, C and Z only, as the card's sanitiser allows. */
@@ -325,11 +428,12 @@ function headline(text: string, top: number): TextRun {
  * slotText makes it, and not at all when that draws nothing; a slot a theme
  * does not print (a headline outside Celebration) is ignored. A theme this
  * build does not know is an error, never a page drawn some other way.
+ *
+ * Typewriter and Handwritten draw only their date line here; their body's
+ * face (bodyFace) and Handwritten's rules (ruledLines) are the layout's.
  */
-export function layoutStationery(stationery: Stationery, bodyTop: number): StationeryLayout {
-  if (!(STATIONERY_THEMES as readonly string[]).includes(stationery.theme)) {
-    throw new Error(`Unknown stationery theme: ${String(stationery.theme).slice(0, 32)}`);
-  }
+export function layoutStationery(stationery: DrawnStationery, bodyTop: number): StationeryLayout {
+  knownTheme(stationery.theme);
   if (stationery.theme === 'classic') return { items: [], bodyOffset: 0 };
   const slot = (text: string | undefined) => {
     const printed = slotText(text ?? '');
@@ -339,7 +443,7 @@ export function layoutStationery(stationery: Stationery, bodyTop: number): Stati
   if (stationery.theme === 'botanical') items.push(...sprig());
   if (stationery.theme === 'celebration') items.push(...CONFETTI.map(confettiPiece));
   const date = slot(stationery.dateLine);
-  if (date) items.push(dateLine(date));
+  if (date) items.push(dateLine(date, stationery.theme));
   const initials = stationery.theme === 'monogram' ? slot(stationery.monogram) : null;
   if (initials) items.push(...monogram(initials));
   const occasion = stationery.theme === 'celebration' ? slot(stationery.headline) : null;

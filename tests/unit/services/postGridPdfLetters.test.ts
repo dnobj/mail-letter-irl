@@ -398,7 +398,7 @@ describe('letters printed from our own PDF (#534)', () => {
 
     it.each([
       ['no stationery', undefined],
-      ['a theme this build does not draw', { theme: 'typewriter' }],
+      ['a theme this build does not draw', { theme: 'floral' }],
       ['Classic, which is never stored', { theme: 'classic' }],
       ['a slot that is not text', { theme: 'monogram', monogram: 42 }]
     ])('holds a pdf-2 letter with %s, and sends nothing', async (_label, stationery) => {

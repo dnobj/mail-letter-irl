@@ -301,6 +301,19 @@ drawn by `src/render`, the three letter previews take `stationery`, `monogram` a
 
 A gift send in a theme prints its themed page, then today's card page.
 
+**Typewriter and Handwritten** (#563 PR 8) are drawn by the renderer, but no tool offers them yet,
+and no draft stores them (`stationeryOf` reads back only the four):
+- each sets the whole letter in a face of its own, on Classic's line pitch, so a page holds as many
+  lines (`bodyFace`):
+  - Typewriter in Cousine at 11pt, 70 characters to a line;
+  - Handwritten in Caveat at 15pt, with a faint 0.5pt `#aaaaaa` rule under each of the page's lines,
+    left out where an enclosed image sits;
+- each prints its date line in its face;
+- the text is checked against that face (`drawsGraphemeIn`), which draws less than Tinos: Caveat has
+  no Greek or Hebrew.
+
+The fonts are Google Fonts' files, each beside its licence in `assets/fonts`.
+
 **`set_stationery` restyles a preview** (#563, `src/tools/setStationery.ts`), listed only while
 stationery is offered:
 - **Checked as a preview's are:** the theme, initials and headline (`previewStationery`), the slots
