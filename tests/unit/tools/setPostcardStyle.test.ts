@@ -252,6 +252,31 @@ describe('set_postcard_style at a new size', () => {
     expect(getSendEligibility).toHaveBeenCalledWith(10, 2, { mailType: 'postcard', postcardSize: '6x4' });
   });
 
+  it('takes a size written in capitals or with spaces, as a model may send it', async () => {
+    await expect(run({ size: ' 6X4 ' })).resolves.toMatchObject({ size: '6x4' });
+    expect(stored().size).toBe('6x4');
+  });
+
+  it('measures a front asked for with a new size at that size', async () => {
+    const fits = (caption: string, size: PostcardSize) => {
+      try {
+        layoutPostcard({ message: '', image: readImageDataUri(PRINT[size]), size, layout: 'border', caption });
+        return true;
+      } catch (error) {
+        if (error instanceof PostcardFrontOverflow) return false;
+        throw error;
+      }
+    };
+    let caption = 'W';
+    while (fits(caption + 'W', '6x11')) caption += 'W';
+    vi.mocked(getDraftForPostcardStyle).mockResolvedValue(draft({ size: '6x11' }));
+    // It fits the 11x6 it is, but not the 6x9 asked for with it.
+    await expect(refusal({ size: '6x9', layout: 'border', caption })).resolves.toMatchObject({
+      message: expect.stringMatching(/^The caption is too long for its line on the front of a 6x9 postcard/)
+    });
+    await expect(run({ layout: 'border', caption })).resolves.toMatchObject({ size: '6x11', caption });
+  });
+
   it('says a pack pays again once it is back to a 6x9', async () => {
     vi.mocked(getDraftForPostcardStyle).mockResolvedValue(draft({ size: '6x11' }));
     const output = await run({ size: '6x9' });
@@ -390,7 +415,16 @@ describe('set_postcard_style refuses', () => {
     ['an emptied draft', () => vi.mocked(getDraftForPostcardStyle).mockResolvedValue({ ...draft(), redacted_at: NOW }), {}, 'DRAFT_EXPIRED'],
     ['a legacy preview', () => vi.mocked(getDraftForPostcardStyle).mockResolvedValue({ ...draft(), renderer_version: null }), {}, 'DRAFT_NOT_DRAWN'],
     ['a preview of one page', () => vi.mocked(getDraftForPostcardStyle).mockResolvedValue({ ...draft(), preview_html: renderPostcardPreviewDocument(drawn().slice(0, 1)) }), {}, 'DRAFT_NOT_DRAWN'],
-    ['a front the print cannot read', () => vi.mocked(getDraftForPostcardStyle).mockResolvedValue({ ...draft(), postcard_front: { layout: 'collage' } }), {}, 'DRAFT_NOT_DRAWN']
+    ['a front the print cannot read', () => vi.mocked(getDraftForPostcardStyle).mockResolvedValue({ ...draft(), postcard_front: { layout: 'collage' } }), {}, 'DRAFT_NOT_DRAWN'],
+    [
+      'a front page without the picture it showed',
+      () => vi.mocked(getDraftForPostcardStyle).mockResolvedValue({
+        ...draft(),
+        preview_html: renderPostcardPreviewDocument([drawn()[0].replace(/<image [^>]*\/>/, ''), drawn()[1]])
+      }),
+      {},
+      'DRAFT_NOT_DRAWN'
+    ]
   ])('%s', async (_name, setUp, input, code) => {
     setUp();
     await expect(refusal({ layout: 'border', ...input })).resolves.toMatchObject({ code });
