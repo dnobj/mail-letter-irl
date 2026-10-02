@@ -41,7 +41,6 @@ import {
   layoutLetter,
   layoutPostcard,
   MAX_LETTER_PAGES,
-  POSTCARD_GEOMETRY,
   PRINTABLE_RENDERER_VERSIONS,
   readImageDataUri,
   renderPdf,
@@ -1378,6 +1377,11 @@ export class PostGridProvider implements LetterFulfillmentProvider {
         '6x9': '9x6',   // 9" tall x 6" wide -> PostGrid wants 9x6
         '6x11': '11x6'  // 11" tall x 6" wide -> PostGrid wants 11x6
       };
+      // A size no writer stores, as only a hand-edited row could hold, is
+      // refused before anything is drawn or sent, on either path (#594).
+      if (typeof size !== 'string' || !Object.hasOwn(postGridSizeMap, size)) {
+        throw new RenderRefusal('size', `A postcard cannot be printed at size "${String(size).slice(0, 20)}".`);
+      }
       const postGridSize = postGridSizeMap[size];
 
       // As for letters (sendLetter), the renderer the postcard was previewed
@@ -1478,7 +1482,9 @@ export class PostGridProvider implements LetterFulfillmentProvider {
         const letterId = typeof params.metadata?.letterId === 'string' ? params.metadata.letterId : undefined;
         this.writeOperationDiagnostic('provider.postgrid.render_refused', 'create_postcard', {
           reason: error.reason,
-          ...(letterId ? { letterId } : {})
+          ...(letterId ? { letterId } : {}),
+          // A size hold names the size, so an operator need not open the row.
+          ...(error.reason === 'size' ? { postcardSize: String(params.size).slice(0, 20) } : {})
         }, 'error');
       } else if (this.options.verbose) {
         this.writeOperationDiagnostic('provider.postgrid.operation_failed', 'create_postcard', {
@@ -1516,11 +1522,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
    */
   private async renderPostcardForPrint(params: PostcardParams, size: PostcardSize): Promise<Buffer> {
     const reason = (error: unknown) => (error instanceof Error ? error.message : String(error));
-    // A size no writer stores, or a gift card on anything but a 6x9 (#579),
-    // is refused before the postcard is drawn.
-    if (!Object.hasOwn(POSTCARD_GEOMETRY, size)) {
-      throw new RenderRefusal('size', `Our renderer draws no ${size} postcard.`);
-    }
+    // A gift card prints only on a 6x9 (#579): refused before it is drawn.
     if (params.giftCard && size !== '6x9') {
       throw new RenderRefusal('size', `A gift postcard is 6x9, not ${size}.`);
     }

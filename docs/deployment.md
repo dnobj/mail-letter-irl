@@ -654,8 +654,9 @@ draw the letter or postcard before any request was made. The reason is one of:
   than it was previewed on, or past three, #586), or a postcard message past its room on the back;
 - `pages`: a letter's page count no writer stores (#586): a count outside 1 to 3, or more than one page
   on the legacy HTML or beside a gift card;
-- `size`: a postcard size the renderer does not know (it draws 6x4, 6x9 and 6x11, PostGrid's 4x6, 9x6 and 11x6,
-  #594), or a gift postcard at any size but 6x9 (#579);
+- `size`: a postcard size no writer stores, on either print path, or a gift postcard at any size but 6x9
+  (#579). The sizes are `6x4`, `6x9` and `6x11`, which PostGrid calls 6x4, 9x6 and 11x6, and our renderer
+  draws all three (#594);
 - `render`: anything else that failed to lay out or draw: a letter's gift card, or its stationery (#563), included.
   Two of its messages are stationery's: "The letter was drawn in stationery this build cannot read." means
   the stored theme is not one this build reads (`stationeryOf`): look at the letter's `content.stationery`.
@@ -663,10 +664,11 @@ draw the letter or postcard before any request was made. The reason is one of:
   `monogram`: the slot's key) was measured to fit when it was previewed, under the same version, so it is
   an overflow a renderer change caused.
 
-The log line `provider.postgrid.render_refused` names the reason and the letter id. Neither the hold,
-which stores only its class, nor the log keeps the refusal's message; the messages quoted below are what
-each case says. Decide by the reason, and where a reason has more than one case, by the letter's stored
-content (`content.pages`, `content.rendererVersion`, `content.giftCard`, the image, the stationery):
+The log line `provider.postgrid.render_refused` names the reason and the letter id, and for a `size`
+hold the postcard's stored size (`postcardSize`). Neither the hold, which stores only its class, nor the
+log keeps the refusal's message; the messages quoted below are what each case says. Decide by the reason,
+and where a reason has more than one case, by the letter's stored content (`content.pages`,
+`content.postcardSize`, `content.rendererVersion`, `content.giftCard`, the image, the stationery):
 - **Retry** when a build can print it: deploy that build, then resolve the letter with a retry
   (`provider_confirmed_rejected_retry`). That covers:
   - a version this build does not know;
@@ -688,7 +690,9 @@ content (`content.pages`, `content.rendererVersion`, `content.giftCard`, the ima
 - **Reject** when the content itself cannot print, resolving it as rejected
   (`provider_confirmed_rejected_refund`):
   - a postcard message that is too long in any build;
-  - a postcard size the renderer never draws;
+  - every `size` hold: 'A postcard cannot be printed at size "...".' (a size no writer stores), or "A gift
+    postcard is 6x9, not ..." (a gift card on another size). The draft's checks (migration 012) and the
+    preview and the send (#579) refuse both, so the stored letter was changed by hand;
   - stored image data that is not an image. "The image is neither a JPEG nor a PNG with a readable size."
     can be either this or a form of JPEG our reader misses, so look at the stored data before deciding;
   - a gift card that runs past the page because of the sender's name ("The gift card runs ... past the
