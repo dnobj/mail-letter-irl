@@ -1,6 +1,6 @@
 # What PostGrid does with our own PDFs (issue #534)
 
-**Date:** September 30, 2026; postcards October 1, 2026 · **Probes:** PostGrid test mode, with development's key. The scripts are outside the repo, in `C:\letter-irl-scripts\probe-534\`: `probe-534.mjs`, `decode-534.mjs` and `extract-raster.mjs`.
+**Date:** September 30, 2026; postcards October 1, 2026; letters of more than one page October 2, 2026 · **Probes:** PostGrid test mode, with development's key. The scripts are outside the repo, in `C:\letter-irl-scripts\probe-534\`: `probe-534.mjs`, `probe-586.mjs`, `decode-534.mjs`, `extract-raster.mjs` and `proof-pages.mjs`.
 
 ## Why we probed
 

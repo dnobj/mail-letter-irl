@@ -599,7 +599,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
     const baseCost = 50; // ~$0.50 for printing/handling
     const postageCost = 73; // ~$0.73 for First-Class postage (2025 USPS rate)
     const colorExtra = params.color ? 35 : 0; // ~$0.35 extra for color
-    const doubleSided = (params.pages ?? 1) > 1;
+    const doubleSided = this.extraPagesCents(params) > 0;
     const doubleSidedExtra = doubleSided ? 10 : 0; // ~$0.10 extra for double-sided
     const extraPagesCost = this.extraPagesCents(params);
 
@@ -879,9 +879,12 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       );
     }
     // On exactly the pages it was previewed and priced on (#586): a letter that
-    // now lays out on fewer was sold for pages it would not fill.
+    // now lays out on fewer was sold for pages it would not fill. Like an
+    // overflow, its layout changed since the preview, so it is held as one: the
+    // reason alone tells an operator to fix the renderer and retry (#589 review
+    // round 1), where `pages` means a count no writer stores.
     if (layout.pages.length !== pages) {
-      throw new RenderRefusal('pages', `The letter lays out on ${layout.pages.length} page(s), not the ${pages} it was previewed on.`);
+      throw new RenderRefusal('overflow', `The letter lays out on ${layout.pages.length} page(s), not the ${pages} it was previewed on.`);
     }
     // A gift send's card, with the code the send minted, is the second page.
     if (params.giftCard) {
@@ -1142,7 +1145,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       baseCost = 120; // Color printing: ~$1.20
     }
 
-    if ((params.pages ?? 1) > 1) {
+    if (this.extraPagesCents(params) > 0) {
       baseCost += 10; // Double-sided: +$0.10
     }
 

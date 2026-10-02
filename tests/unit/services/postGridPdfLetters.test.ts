@@ -424,7 +424,7 @@ describe('letters printed from our own PDF (#534)', () => {
       }
     });
 
-    it('holds a letter that now lays out on fewer pages than it was previewed on', async () => {
+    it('holds a letter that now lays out on fewer pages than it was previewed on, as a layout that changed', async () => {
       const fetchMock = accepted();
       vi.stubGlobal('fetch', fetchMock);
       diagnostics.written = [];
@@ -433,10 +433,42 @@ describe('letters printed from our own PDF (#534)', () => {
       expect(fetchMock).not.toHaveBeenCalled();
       expect(result.error).toBe('The letter lays out on 2 page(s), not the 3 it was previewed on.');
       expect(result.metadata).toMatchObject({ errorClass: 'render_refused' });
+      // Retried once the renderer is fixed, as an overflow is: the reason says so alone.
       expect(diagnostics.written).toContainEqual(expect.objectContaining({
         event: 'provider.postgrid.render_refused',
-        fields: expect.objectContaining({ reason: 'pages' })
+        fields: expect.objectContaining({ reason: 'overflow' })
       }));
+    });
+
+    it.each([undefined, null as unknown as number])('reads a page count of %s as one page', async pages => {
+      const fetchMock = accepted();
+      vi.stubGlobal('fetch', fetchMock);
+      await expect(provider().sendLetter({ ...base, pages })).resolves.toMatchObject({ success: true, costCents: 85 });
+      const { form, pdf } = await sent(fetchMock);
+      expect(form.get('doubleSided')).toBe('false');
+      expect(pdf.toString('latin1')).toMatch(/\/Count 1\b/);
+    });
+
+    it('prints a two-page letter in its stationery, the theme on page 1 only', async () => {
+      const fetchMock = accepted();
+      vi.stubGlobal('fetch', fetchMock);
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-10-02T12:00:00Z'));
+      try {
+        const stationery = { theme: 'botanical' as const, dateLine: 'October 2, 2026' };
+        await expect(provider().sendLetter({
+          ...base, rendererVersion: STATIONERY_RENDERER_VERSION, stationery, message: lines(40), pages: 2
+        })).resolves.toMatchObject({ success: true });
+
+        const { form, pdf } = await sent(fetchMock);
+        expect(form.get('doubleSided')).toBe('true');
+        const expected = layoutLetter({ text: lines(40), layoutType: 'text_only', stationery }, { maxPages: 2 });
+        expect(expected.pages).toHaveLength(2);
+        expect(expected.pages[1].items.some(item => item.kind === 'path')).toBe(false);
+        expect(pdf.equals(await renderPdf(expected, STATIONERY_RENDERER_VERSION))).toBe(true);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('holds a letter that runs past its pages rather than printing it clipped', async () => {

@@ -650,10 +650,10 @@ ambiguous outcome raises a durable `mail_provider_outcome_ambiguous` alert.
 draw the letter or postcard before any request was made. The reason is one of:
 - `unknown_version`: a renderer version this build cannot print;
 - `image`: an image it could not read;
-- `overflow`: a letter that no longer fits its page or pages, or a postcard message past its half of the back;
-- `pages`: a letter's page count the print will not take (#586). That is a count outside 1 to 3, more
-  than one page on the legacy HTML or beside a gift card, or a letter that now lays out on fewer pages
-  than it was previewed on;
+- `overflow`: a letter that no longer lays out as it was previewed (it runs past its page or pages, or
+  now lays out on fewer pages than it was previewed on, #586), or a postcard message past its half of the back;
+- `pages`: a letter's page count no writer stores (#586): a count outside 1 to 3, or more than one page
+  on the legacy HTML or beside a gift card;
 - `size`: a postcard size the renderer does not draw (it draws 6x9 only);
 - `render`: anything else that failed to lay out or draw: a letter's gift card, or its stationery (#563), included.
   Two of its messages are stationery's: "The letter was drawn in stationery this build cannot read." means
@@ -673,7 +673,7 @@ message says what was refused. Decide by the message, not the reason alone:
   - an overflow that a renderer change caused. A letter refused as `overflow` was measured to fit when
     it was previewed, under the same version, so a deploy changed the wrapping. Fix the renderer rather
     than refund. A stationery slot that "does not fit" is the same case, and so is a letter that "lays
-    out on N page(s), not the M it was previewed on" (`pages`, #586);
+    out on N page(s), not the M it was previewed on" (#586);
   - stationery this build cannot read, once a build that reads the stored theme is deployed. Stored
     stationery is refused when the draft is made unless the print reads it back, so this means the
     build changed, not the letter.
@@ -685,9 +685,9 @@ message says what was refused. Decide by the message, not the reason alone:
     can be either this or a form of JPEG our reader misses, so look at the stored data before deciding;
   - a gift card that runs past the page because of the sender's name ("The gift card runs ... past the
     page's bottom margin.");
-  - a page count no writer stores (`pages`): "The letter's page count is not a whole number from 1 to 3.",
-    or more than one page on the legacy HTML or beside a gift card. The draft's checks (migration 047)
-    and the send refuse these, so the stored letter was changed by hand.
+  - every `pages` hold: "The letter's page count is not a whole number from 1 to 3.", or more than one
+    page on the legacy HTML or beside a gift card. The draft's checks (migration 047) and the send refuse
+    these, so the stored letter was changed by hand. The reason alone decides this one.
 
 Reject, which refunds, only when it can never be printed and no earlier attempt of the
 letter reached PostGrid, that is, every earlier hold was also `render_refused`. Check the earlier holds

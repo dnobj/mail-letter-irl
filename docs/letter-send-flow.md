@@ -257,10 +257,9 @@ A `pdf-1` gift send prints its card as the PDF's second page, drawn by the rende
 - `doubleSided` follows the letter's own pages, never the PDF's. A gift letter is one page, and its card keeps a sheet of its own.
 - Before any request, the print refuses (`render_refused`, reason `pages`):
   - a count outside 1 to 3;
-  - more than one page on the legacy HTML or beside a gift card;
-  - a letter that now lays out on fewer pages than it was previewed on.
+  - more than one page on the legacy HTML or beside a gift card.
 
-  One that runs past its pages is an `overflow`.
+  A letter that runs past its pages, or now lays out on fewer pages than it was previewed on, is an `overflow`: its layout changed since the preview.
 - PostGrid's `pageCount` counts sides (probe P13). The cost estimate adds about 10c per page past the first, or 20c in colour, to the 10c for double-sided.
 
 **How a postcard goes to PostGrid (#534 Phase 4).** A postcard carries the same `rendererVersion` from its draft.
