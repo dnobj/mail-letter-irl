@@ -372,6 +372,14 @@ describe('createMailOrderFromDraft', () => {
       commerceOrder = paidOrder('credit-pack-10');
       await expect(sendPaid()).rejects.toMatchObject({ code: 'JIT_PRODUCT_MISMATCH' });
     });
+
+    it('refuses a draft no Pay & Send product matches by name, never by a TypeError', async () => {
+      // Migration 047 allows at most three pages; a row past that matches no product.
+      draft = { ...draft, pages: 4, renderer_version: 'pdf-1' };
+      commerceOrder = paidOrder('jit-letter-3-pages');
+      await expect(sendPaid()).rejects.toMatchObject({ code: 'JIT_PRODUCT_MISMATCH', diagnosticClass: 'JIT_PRODUCT_MISMATCH' });
+      expect(createOutboxJob).not.toHaveBeenCalled();
+    });
   });
 
   it('rejects late JIT funding when prepaid funding already consumed the draft', async () => {

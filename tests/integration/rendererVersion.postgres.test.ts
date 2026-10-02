@@ -304,6 +304,28 @@ describePostgres('renderer version and stationery (migrations 039 and 044 to 046
       }
     }, 60_000);
 
+    it('stores the pages createDraft is given, one by default, and refuses a longer legacy draft before writing', async () => {
+      const userId = await seedUser();
+      const draft = {
+        userId,
+        sender: SENDER,
+        recipient: RECIPIENT,
+        signOff: 'Warmly, Test',
+        requiredCredits: 2,
+        previewHtml: '<svg></svg>',
+        layoutType: 'text_only' as const
+      };
+      const long = await drafts.createDraft({ ...draft, bodyText: `Hello ${randomUUID()}`, rendererVersion: 'pdf-1', pages: 3 });
+      const short = await drafts.createDraft({ ...draft, bodyText: `Hello ${randomUUID()}`, rendererVersion: 'pdf-1' });
+      expect(await pagesOf(long.draftId)).toBe(3);
+      expect(await pagesOf(short.draftId)).toBe(1);
+
+      const before = (await pool.query('SELECT COUNT(*)::int AS n FROM letter_drafts WHERE user_id = $1', [userId])).rows[0].n;
+      await expect(drafts.createDraft({ ...draft, bodyText: `Hello ${randomUUID()}`, pages: 2 }))
+        .rejects.toMatchObject({ code: 'DRAFT_PAGES_INVALID' });
+      expect((await pool.query('SELECT COUNT(*)::int AS n FROM letter_drafts WHERE user_id = $1', [userId])).rows[0].n).toBe(before);
+    }, 60_000);
+
     it('admits more than one page only on a letter our renderer drew that is no gift send', async () => {
       const userId = await seedUser();
       const refused = { code: '23514', constraint: 'letter_drafts_pages_paid_per_send' };

@@ -341,6 +341,49 @@ describe('draftService', () => {
       await createDraft({ ...base, rendererVersion: 'pdf-1', stationery: null });
       expect(columnValues(vi.mocked(db.query).mock.calls[1]).stationery).toEqual({ value: null, cast: '::jsonb' });
     });
+
+    describe('the pages a letter prints on (#586)', () => {
+      const base = {
+        userId: testUsers.sarah.user_id,
+        sender: testAddresses.validSender as unknown as Record<string, unknown>,
+        recipient: testAddresses.validRecipient as unknown as Record<string, unknown>,
+        bodyText: 'Hello',
+        signOff: 'Love',
+        requiredCredits: 2,
+      };
+
+      it('records the pages a preview laid the letter out on as a SMALLINT, one by default', async () => {
+        vi.mocked(db.query).mockResolvedValueOnce(inserted).mockResolvedValueOnce(inserted).mockResolvedValueOnce(inserted);
+        await createDraft({ ...base, rendererVersion: 'pdf-1', pages: 3 });
+        await createDraft({ ...base, rendererVersion: 'pdf-2', stationery: { theme: 'botanical', dateLine: 'October 2, 2026' }, pages: 2 });
+        await createDraft(base);
+        expect(columnValues(vi.mocked(db.query).mock.calls[0]).pages).toEqual({ value: 3, cast: '::smallint' });
+        expect(columnValues(vi.mocked(db.query).mock.calls[1]).pages).toEqual({ value: 2, cast: '::smallint' });
+        expect(columnValues(vi.mocked(db.query).mock.calls[2]).pages).toEqual({ value: 1, cast: '::smallint' });
+      });
+
+      it.each([
+        ['no page', { pages: 0, rendererVersion: 'pdf-1' }],
+        ['four pages', { pages: 4, rendererVersion: 'pdf-1' }],
+        ['part of a page', { pages: 1.5, rendererVersion: 'pdf-1' }],
+        ['two pages of the legacy HTML', { pages: 2 }],
+        ['two pages of a gift send', { pages: 2, rendererVersion: 'pdf-1', isGiftSend: true }]
+      ])('refuses %s before writing anything', async (_label, extra) => {
+        await expect(createDraft({ ...base, ...extra })).rejects.toMatchObject({
+          message: 'The letter cannot be stored on that many pages.',
+          code: 'DRAFT_PAGES_INVALID',
+          diagnosticClass: 'validation_error'
+        });
+        expect(db.query).not.toHaveBeenCalled();
+      });
+
+      it('takes three pages, the most the renderer lays out, and one page of a gift send', async () => {
+        vi.mocked(db.query).mockResolvedValueOnce(inserted).mockResolvedValueOnce(inserted);
+        await expect(createDraft({ ...base, rendererVersion: 'pdf-1', pages: 3 })).resolves.toMatchObject({ draftId: 'draft-1' });
+        await expect(createDraft({ ...base, rendererVersion: 'pdf-1', pages: 1, isGiftSend: true })).resolves.toMatchObject({ draftId: 'draft-1' });
+        expect(columnValues(vi.mocked(db.query).mock.calls[1]).pages).toEqual({ value: 1, cast: '::smallint' });
+      });
+    });
   });
 
   describe('createPostcardDraft', () => {
