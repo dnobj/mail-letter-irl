@@ -26,6 +26,7 @@ import { handlePATApiRequest } from "../api/patApiHandler.js";
 import { handleLetterApiRequest } from "../api/letterApiHandler.js";
 import { handleReturnAddressApiRequest } from "../api/returnAddressApiHandler.js";
 import { handleSendConfirmationApiRequest } from "../api/sendConfirmationApiHandler.js";
+import { ADDRESS_REQUEST_API_PREFIX, handleAddressRequestApiRequest } from "../api/addressRequestApi.js";
 import { handleTempImageRequest } from "../api/tempImageHandler.js";
 import {
   handleCreateCheckoutSession,
@@ -708,6 +709,18 @@ export async function startHttpServer() {
         res.statusCode = bodyErrorStatus(error);
         res.end(res.statusCode === 413 ? 'Payload too large' : 'Request timeout or error');
       }
+      return;
+    }
+
+    // The address request page's API (#604): public, signed out, the token
+    // in the body. Its own rate limits, and 404 while address requests are off.
+    if (url.pathname.startsWith(ADDRESS_REQUEST_API_PREFIX)) {
+      const origin = resolveCorsOrigin(req.headers.origin);
+      if (req.method === 'OPTIONS') {
+        respondToCorsPreflight(res, origin);
+        return;
+      }
+      await handleAddressRequestApiRequest(req, res, url.pathname, origin);
       return;
     }
 

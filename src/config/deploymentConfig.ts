@@ -624,6 +624,18 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     services: ['api']
   },
   /**
+   * How many days a closed address request, and any address given with it,
+   * is kept (#604): read by the maintenance sweep, whatever the feature's flag.
+   * The value is the owner's, with the privacy policy's wording; 7 by default.
+   */
+  {
+    name: 'LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['maintenance']
+  },
+  /**
    * The envelope reveal (#576, src/config/envelope.ts): the letter previews
    * tell their card it may open the page from an envelope only while the
    * flag is on. Off unless set, so absence is the intended production state

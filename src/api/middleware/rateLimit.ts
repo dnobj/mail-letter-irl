@@ -34,6 +34,12 @@ const GLOBAL_RATE_LIMITS: Record<string, RateLimitConfig> = {
     windowMs: 60 * 1000,      // 1 minute
     maxRequests: 100,         // 100 total per minute (protects against distributed attacks)
   },
+  // The address request page (#604): a token is 144 random bits, so this
+  // bounds load, not guessing.
+  'address_public': {
+    windowMs: 60 * 1000,
+    maxRequests: 200,
+  },
   // Backstops for the routes that had only per-identifier limits (audit A-05).
   // A per-identifier limit bounds one client; these bound everyone at once, so
   // many addresses cannot burn JWKS verification or bcrypt compares at line
@@ -146,6 +152,12 @@ export const RATE_LIMITS: Record<string, RateLimitConfig> = {
   'promo_public': {
     windowMs: 60 * 1000,      // 1 minute
     maxRequests: 10,          // 10 per minute per IP (generous for legitimate use)
+  },
+  // The address request page (#604): one read and an answer per visit, with
+  // room for corrections after a refusal.
+  'address_public': {
+    windowMs: 60 * 1000,
+    maxRequests: 20,
   },
 };
 

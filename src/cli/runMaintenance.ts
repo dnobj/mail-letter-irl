@@ -15,6 +15,8 @@ import {
 } from '../services/retentionService.js';
 import { purgeExpiredRecentUploads } from '../services/recentUploadStore.js';
 import { purgeExpiredFeatureRequests } from '../services/featureRequestService.js';
+import { purgeClosedAddressRequests } from '../services/addressRequestService.js';
+import { addressRequestRetentionDays } from '../config/addressRequests.js';
 import { processAccountErasures } from '../services/accountErasureService.js';
 import { raiseMissedMailDayAlerts } from '../services/scheduledMailService.js';
 import { enabledUnlessDisabled, positiveIntegerSetting } from '../utils/envSettings.js';
@@ -256,6 +258,45 @@ async function runFeatureRequestsSweep(): Promise<void> {
 }
 
 /**
+ * Delete address requests, and any address a recipient gave with them, the
+ * configured number of days after they close (#604). Whatever the feature's
+ * flag says: a request made while it was on is a third party's address, and
+ * switching the feature off must not keep it.
+ *
+ * Same shape as runFeatureRequestsSweep, for the same reasons, every run.
+ */
+const ADDRESS_REQUESTS_SWEEP_INTERVAL_MS = 30 * 60 * 1000;
+
+async function runAddressRequestsSweep(): Promise<void> {
+  try {
+    const sweep = await runMaintenanceTaskIfDue(
+      'address-requests-sweep',
+      ADDRESS_REQUESTS_SWEEP_INTERVAL_MS,
+      async () => {
+        try {
+          return await purgeClosedAddressRequests(addressRequestRetentionDays());
+        } catch (error) {
+          const errorClass =
+            carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error');
+          throw Object.assign(new Error(`address requests sweep failed: ${errorClass}`), {
+            diagnosticClass: errorClass
+          });
+        }
+      }
+    );
+    console.log(`[Maintenance] Address requests sweep ${sweep.ran ? 'completed' : 'not due'}`);
+    if (sweep.ran) {
+      // A count only - never a name, an address or a token.
+      writeDiagnostic('info', 'address_requests.swept', { deleted: sweep.result ?? 0 });
+    }
+  } catch (error) {
+    writeDiagnostic('error', 'address_requests.sweep_failed', {
+      errorClass: carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error')
+    });
+  }
+}
+
+/**
  * Carry out the erasures the admin panel has queued (#289). The panel's role
  * cannot scrub an account and is not meant to; this run, as the database
  * owner, does (src/services/accountErasureService.ts).
@@ -354,6 +395,8 @@ export async function runMaintenance(): Promise<void> {
   await runRecentUploadsSweep();
   // Same wrapper, same reason; it runs after the uploads sweep (#393).
   await runFeatureRequestsSweep();
+  // Same wrapper; it deletes closed address requests (#604).
+  await runAddressRequestsSweep();
   // Also wrapped. Its gate holds back any account with mail still queued, so
   // running before the outbox cannot race a send (#289).
   await runAccountErasures();

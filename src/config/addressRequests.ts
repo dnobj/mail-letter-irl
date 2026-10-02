@@ -14,7 +14,8 @@ import { offUnlessExplicitlyEnabled, positiveIntegerSetting } from '../utils/env
 export const ADDRESS_REQUEST_DEFAULTS = {
   linkDays: 7,
   waitingCap: 10,
-  dailyCap: 20
+  dailyCap: 20,
+  retentionDays: 7
 } as const;
 
 /**
@@ -44,6 +45,22 @@ export function addressRequestWaitingCap(env: NodeJS.ProcessEnv = process.env): 
     ADDRESS_REQUEST_DEFAULTS.waitingCap,
     1,
     100,
+    env
+  );
+}
+
+/**
+ * How many days a closed request is kept, with any address given with it:
+ * from when it was answered, declined or cancelled, and from its link's
+ * expiry for one never answered. The value is the owner's, with the privacy
+ * policy's wording (#604); 7 matches unsent drafts' content.
+ */
+export function addressRequestRetentionDays(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveIntegerSetting(
+    'LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS',
+    ADDRESS_REQUEST_DEFAULTS.retentionDays,
+    1,
+    365,
     env
   );
 }

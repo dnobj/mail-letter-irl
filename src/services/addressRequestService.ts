@@ -34,6 +34,9 @@ export interface RequestedAddress {
   country: 'US';
 }
 
+/** An address as the recipient gives it: the name is theirs to leave out. */
+export type GivenAddress = Omit<RequestedAddress, 'name'> & { name?: string };
+
 export interface AddressRequest {
   requestId: string;
   state: AddressRequestState;
@@ -220,17 +223,21 @@ export type CloseByTokenResult =
  */
 async function closeByToken(
   token: unknown,
-  closing: { status: 'answered'; address: RequestedAddress } | { status: 'declined' }
+  closing: { status: 'answered'; address: GivenAddress } | { status: 'declined' }
 ): Promise<CloseByTokenResult> {
   const hash = addressRequestTokenHash(token);
   if (!hash) return { ok: false, refusal: 'not_found' };
-  const address = closing.status === 'answered' ? JSON.stringify(closing.address) : null;
+  const { name, ...rest } = closing.status === 'answered' ? closing.address : { name: undefined };
+  const address = closing.status === 'answered' ? JSON.stringify(rest) : null;
+  // The name the recipient gave, else the sender's for them: the envelope's.
   const closed = await query<{ request_id: string }>(
     `UPDATE address_requests
-        SET status = $2, address = $3::jsonb, closed_at = NOW()
+        SET status = $2,
+            address = $3::jsonb || jsonb_build_object('name', COALESCE($4::text, recipient_name)),
+            closed_at = NOW()
       WHERE token_hash = $1 AND status = 'waiting' AND expires_at > NOW()
       RETURNING request_id`,
-    [hash, closing.status, address]
+    [hash, closing.status, address, name ?? null]
   );
   if (closed.rows[0]) return { ok: true };
   const page = await readAddressRequestPage(token);
@@ -239,14 +246,32 @@ async function closeByToken(
   return { ok: false, refusal: page.state === 'waiting' ? 'expired' : page.state };
 }
 
-/** The recipient gives their address. */
-export function answerAddressRequest(token: unknown, address: RequestedAddress): Promise<CloseByTokenResult> {
+/**
+ * The recipient gives their address, checked by the caller. Without a name of
+ * their own, the envelope carries the one the sender gave.
+ */
+export function answerAddressRequest(token: unknown, address: GivenAddress): Promise<CloseByTokenResult> {
   return closeByToken(token, { status: 'answered', address });
 }
 
 /** The recipient declines. */
 export function declineAddressRequest(token: unknown): Promise<CloseByTokenResult> {
   return closeByToken(token, { status: 'declined' });
+}
+
+/**
+ * Deletes requests, and any address given with them, `days` after they close:
+ * from closed_at once answered, declined or cancelled, and from expires_at
+ * for one still waiting, which keeps no closed_at. Returns how many went.
+ * Maintenance runs it every pass (#604).
+ */
+export async function purgeClosedAddressRequests(days: number): Promise<number> {
+  const result = await query(
+    `DELETE FROM address_requests
+      WHERE COALESCE(closed_at, expires_at) < NOW() - make_interval(days => $1::int)`,
+    [days]
+  );
+  return result.rowCount ?? 0;
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

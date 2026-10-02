@@ -42,7 +42,11 @@
 - Letter content, sender and recipient addresses, and draft content are kept only for the
   periods published in `docs/privacy-policy.md` (90 days after sending; unsent drafts 24 hours,
   content cleared within 7 days; uploaded image links within 48 hours of the last upload, which the
-  `recent-uploads-sweep` meets by deleting them at 24 hours; feature requests 12 months). The maintenance retention sweep (`src/services/retentionService.ts`,
+  `recent-uploads-sweep` meets by deleting them at 24 hours; feature requests 12 months). An
+  address request (#604), with any address a recipient gave through it, goes
+  `LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS` (7) days after it closes, or after its link expires
+  unanswered (`address-requests-sweep`); the policy's wording for it is the owner's, and production
+  waits for it. The maintenance retention sweep (`src/services/retentionService.ts`,
   migration 026) clears the content columns and quarantines what it clears in
   `redacted_content_quarantine` for a bounded restore window. Rows, status, timestamps and
   identifiers remain. A copy leaves the quarantine when the published period ends, counted on the
