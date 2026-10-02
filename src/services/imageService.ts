@@ -577,18 +577,19 @@ export async function reprocessPostcardImage(
   size: PostcardSize,
   options: ImageProcessingOptions = {}
 ): Promise<ProcessedPostcardImage & { from: 'source' | 'stored' }> {
-  let buffer: Buffer | undefined;
   if (source.url) {
     try {
-      buffer = await downloadImage(source.url, options);
+      const downloaded = await downloadImage(source.url, options);
+      return { ...(await processPostcardBuffer(downloaded, size, options)), from: 'source' };
     } catch (error) {
-      // A link that no longer opens, or refuses: the stored copy stands in.
-      if (!(error instanceof ImageProcessingError)) throw error;
+      // A link that no longer opens, or bytes that no longer make a picture:
+      // the stored copy, the picture the person approved, stands in. A busy
+      // service is said as such, as a preview says it, rather than cropping
+      // the smaller copy silently (#601 review round 1).
+      if (!(error instanceof ImageProcessingError) || error.code === 'SERVICE_BUSY') throw error;
     }
   }
-  const from = buffer ? 'source' : 'stored';
-  buffer ??= storedImageBuffer(source.stored);
-  return { ...(await processPostcardBuffer(buffer, size, options)), from };
+  return { ...(await processPostcardBuffer(storedImageBuffer(source.stored), size, options)), from: 'stored' };
 }
 
 /** The bytes of a stored `data:image/...;base64,` image. */

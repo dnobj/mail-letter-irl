@@ -541,6 +541,21 @@ describe('image pipeline hardening', () => {
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
+    it('crops the stored copy when the source opens but its bytes no longer make a picture (#601 review round 1)', async () => {
+      const stored = `data:image/jpeg;base64,${(await solid('jpeg', 2700, 1800)).toString('base64')}`;
+      fetchMock.mockResolvedValueOnce(responseWith(bodyOf(Buffer.from('<html>moved</html>')), { 'content-type': 'image/jpeg' }));
+      const result = await reprocessPostcardImage({ url: REMOTE, stored }, '6x11');
+      expect(result).toMatchObject({ from: 'stored', originalWidth: 2700, originalHeight: 1800 });
+    });
+
+    it('says the service is busy rather than cropping the stored copy silently (#601 review round 1)', async () => {
+      const stored = `data:image/jpeg;base64,${(await solid('jpeg', 2700, 1800)).toString('base64')}`;
+      vi.spyOn(_testing.downloadGate, 'run').mockRejectedValueOnce(new ConcurrencyGateError('image-download', 'queue_full'));
+      const error = await rejection(reprocessPostcardImage({ url: REMOTE, stored }, '6x11'));
+      expect(error.code).toBe('SERVICE_BUSY');
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
     it('refuses a stored copy it cannot read, as the image service refuses', async () => {
       for (const stored of ['', 'https://files.example/beach.jpg', 'data:text/plain;base64,AAAA', 'data:image/jpeg,raw']) {
         const error = await rejection(reprocessPostcardImage({ url: null, stored }, '6x9'));

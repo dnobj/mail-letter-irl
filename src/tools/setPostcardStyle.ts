@@ -12,7 +12,8 @@ import {
   postcardFrontOf,
   readImageDataUri,
   renderPreviewSvg,
-  type PostcardFront
+  type PostcardFront,
+  type RenderImage
 } from '../render/index.js';
 import { getDraftForPostcardStyle, setDraftPostcardStyle, type DraftRedrawRefusal } from '../services/draftService.js';
 import { ImageProcessingError, reprocessPostcardImage } from '../services/imageService.js';
@@ -267,10 +268,18 @@ async function handler(input: SetPostcardStyleInput, context: ToolContext): Prom
     throw refused('DRAFT_NOT_DRAWN', NOT_DRAWN, context);
   }
 
+  // The picture as it prints; a stored one that cannot be read is a draft
+  // that cannot be drawn again, as the print would refuse it (#601 review round 1).
+  let image: RenderImage;
+  try {
+    image = readImageDataUri(printImage);
+  } catch {
+    throw refused('DRAFT_NOT_DRAWN', NOT_DRAWN, context);
+  }
   // The front drawn again; the back too at a new size, and otherwise as it
   // was, a gift card's strip with it.
   const drawn = renderPreviewSvg(
-    withDisplayImage(layoutPostcard({ message, image: readImageDataUri(printImage), size, ...front }), displayImage),
+    withDisplayImage(layoutPostcard({ message, image, size, ...front }), displayImage),
     {
       addresses: { from: stampedPostcardReturnLines(sender), to: stampedAddressLines(recipient) },
       stamp: { page: 1, geometry: POSTCARD_GEOMETRY[size].stamp }
@@ -317,11 +326,24 @@ function frontText(front: PostcardFront | undefined): Pick<SetPostcardStyleOutpu
 export const setPostcardStyleTool: McpToolDefinition<SetPostcardStyleInput, SetPostcardStyleOutput> = {
   name: SET_POSTCARD_STYLE_TOOL,
   title: 'Change the postcard style',
-  description:
-    "Change a previewed postcard's size or front layout without previewing it again. " +
-    'Give the draftId from the preview, and the size, the layout with its caption or place, or both. ' +
-    'A size or layout left out stays as it is; a layout given replaces the front, so give its caption again to keep it. ' +
-    'The postcard is drawn again and priced again: the 4x6 and 11x6 are paid per send with Pay & Send. Nothing is sent by this tool.',
+  // In the words of what is offered, read as the tools are listed, so a model
+  // is never steered to an argument this deployment withholds (#601 review round 1).
+  description: () => {
+    const sizes = isPostcardSizesOffered();
+    const layouts = isPostcardLayoutsOffered();
+    return (
+      `Change a previewed postcard's ${sizes && layouts ? 'size or front layout' : sizes ? 'size' : 'front layout'} without previewing it again. ` +
+      `Give the draftId from the preview, and ${
+        sizes && layouts ? 'the size, the layout with its caption or place, or both' : sizes ? 'the size' : 'the layout with its caption or place'
+      }. ` +
+      (sizes && layouts ? 'A size or layout left out stays as it is. ' : '') +
+      (layouts ? 'A layout given replaces the front, so give its caption again to keep it. ' : '') +
+      (sizes
+        ? 'The postcard is drawn again and priced again: the 4x6 and 11x6 are paid per send with Pay & Send. '
+        : 'The postcard is drawn again. ') +
+      'Nothing is sent by this tool.'
+    );
+  },
   readOnly: false,
   inputSchema: setPostcardStyleInputSchema,
   outputSchema: setPostcardStyleOutputSchema,

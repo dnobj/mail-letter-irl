@@ -116,6 +116,17 @@ none of them.
   - **Records** the size, the front and the version that goes with it (`pdf-3` with a front, `pdf-1` without), under the lock a send and a Pay & Send checkout take.
   - **Returns** `size`, and `layout` with its `caption` or `place`. It also returns what the postcard costs now (`canSendNow`, `reasonCannotSend`, `sendEligibility`; a 4x6 or 11x6 is paid with Pay & Send), and a `message` that says nothing has been sent. The postcard drawn again goes to the card in `_meta`. The same style again changes nothing, and says so.
   - **Refused**, as `set_stationery` is, for a draft that is not the caller's, already sent, expired, or with a live Pay & Send order. Also for a letter (`DRAFT_NOT_A_POSTCARD`), a preview the legacy HTML drew, and a draft another change redrew meanwhile (`DRAFT_CHANGED`: try again). Sends nothing. Not read-only, not destructive, and idempotent.
+  - **Its own refusals:**
+    - neither the sizes nor the layouts offered (`POSTCARD_STYLES_DISABLED`);
+    - a call naming nothing to change (`STYLE_MISSING`);
+    - a size not offered (`SIZE_NOT_OFFERED`);
+    - a gift postcard asked off 6x9 (`GIFT_POSTCARD_SIZE`);
+    - a message too long for the new back (`MESSAGE_TOO_LONG`);
+    - a picture that cannot be cropped again (`PICTURE_UNAVAILABLE`), or the image service busy, which says so rather than cropping the smaller stored copy;
+    - a stored picture or front the print cannot read (`DRAFT_NOT_DRAWN`).
+
+    A front is refused as the preview refuses it. A front the postcard keeps, too long for a new size's line, says it is the postcard's own, and to give a shorter one with the size.
+  - **Its description** names only what is offered: the size, the front, or both.
 
 ## Account, Orders, and Return Address
 

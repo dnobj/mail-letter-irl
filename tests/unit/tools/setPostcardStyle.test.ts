@@ -252,7 +252,8 @@ describe('set_postcard_style at a new size', () => {
     expect(getSendEligibility).toHaveBeenCalledWith(10, 2, { mailType: 'postcard', postcardSize: '6x4' });
   });
 
-  it('takes a size written in capitals or with spaces, as a model may send it', async () => {
+  // The served schema's enum refuses these first; a call that reaches the tool another way may not.
+  it('takes a size written in capitals or with spaces', async () => {
     await expect(run({ size: ' 6X4 ' })).resolves.toMatchObject({ size: '6x4' });
     expect(stored().size).toBe('6x4');
   });
@@ -304,7 +305,10 @@ describe('set_postcard_style at a new size', () => {
 
     vi.mocked(getDraftForPostcardStyle).mockResolvedValue(draft({ size: '6x11', front: { layout: 'border', caption } }));
     const error = await refusal({ size: '6x9' });
-    expect(error.message).toMatch(/^The caption is too long for its line on the front of a 6x9 postcard: about \d+ of its \d+ characters fit\. Shorten it\.$/);
+    // Named as the postcard's own, with how to give a shorter one with the size (#601 review round 1).
+    expect(error.message).toMatch(
+      /^The postcard's caption is too long for its line on the front of a 6x9 postcard: about \d+ of its \d+ characters fit\. To change the size, give layout border and a shorter caption with it\.$/
+    );
     expect(setDraftPostcardStyle).not.toHaveBeenCalled();
     expect(reprocessPostcardImage).not.toHaveBeenCalled();
 
@@ -417,6 +421,12 @@ describe('set_postcard_style refuses', () => {
     ['a preview of one page', () => vi.mocked(getDraftForPostcardStyle).mockResolvedValue({ ...draft(), preview_html: renderPostcardPreviewDocument(drawn().slice(0, 1)) }), {}, 'DRAFT_NOT_DRAWN'],
     ['a front the print cannot read', () => vi.mocked(getDraftForPostcardStyle).mockResolvedValue({ ...draft(), postcard_front: { layout: 'collage' } }), {}, 'DRAFT_NOT_DRAWN'],
     [
+      'a stored picture that cannot be read',
+      () => vi.mocked(getDraftForPostcardStyle).mockResolvedValue({ ...draft(), front_image_data: 'data:image/png;base64,AAAA' }),
+      {},
+      'DRAFT_NOT_DRAWN'
+    ],
+    [
       'a front page without the picture it showed',
       () => vi.mocked(getDraftForPostcardStyle).mockResolvedValue({
         ...draft(),
@@ -446,6 +456,21 @@ describe('set_postcard_style refuses', () => {
 });
 
 describe('the set_postcard_style tool', () => {
+  it('describes only what is offered, as the tools are listed (#601 review round 1)', () => {
+    const described = () => (setPostcardStyleTool.description as () => string)();
+    offer(true, true);
+    expect(described()).toMatch(/^Change a previewed postcard's size or front layout without previewing it again\./);
+    expect(described()).toContain('A size or layout left out stays as it is.');
+    expect(described()).toContain('the 4x6 and 11x6 are paid per send with Pay & Send');
+    offer(true, false);
+    expect(described()).toMatch(/^Change a previewed postcard's size without previewing it again\. Give the draftId from the preview, and the size\./);
+    expect(described()).not.toContain('layout');
+    offer(false, true);
+    expect(described()).toMatch(/^Change a previewed postcard's front layout without previewing it again\./);
+    expect(described()).toContain('give its caption again to keep it');
+    expect(described()).not.toMatch(/size|Pay & Send/);
+  });
+
   it('is a card-callable, idempotent drafting tool', () => {
     expect(setPostcardStyleTool).toMatchObject({ name: 'set_postcard_style', readOnly: false });
     expect(setPostcardStyleTool.meta).toMatchObject({ 'openai/widgetAccessible': true, readOnlyHint: false, idempotentHint: true });
