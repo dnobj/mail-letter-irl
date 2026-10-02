@@ -298,7 +298,11 @@ describe("the send rule in the MCP server (#470)", () => {
     it("logs which app was sent to the link", async () => {
       const { callbacks } = await register(vscode());
       await callbacks.get("send_letter")!({ draftId: DRAFT_ID, confirm: true }, {});
-      expect(writeSpy).toHaveBeenCalledWith("info", "send.link_instead", { client: "vscode", mailType: "letter" });
+      expect(writeSpy).toHaveBeenCalledWith("info", "send.link_instead", {
+        client: "vscode",
+        mailType: "letter",
+        reason: "send_rule"
+      });
     });
 
     it("tells a personal access token it cannot buy letters, with no OAuth challenge", async () => {
@@ -455,6 +459,12 @@ describe("the send rule in the MCP server (#470)", () => {
         expect(result.content[0].text).toBe(
           `Not sent: Letter IRL sends mail only when the person sends it. ${sendLinkText({ ...LINK, paidPerSend: true } as any)}`
         );
+        // Told apart from the send rule's link in the log.
+        expect(writeSpy).toHaveBeenCalledWith("info", "send.link_instead", {
+          client: "claude",
+          mailType: "letter",
+          reason: "pack_cannot_pay"
+        });
       });
 
       it("leaves ChatGPT's refusal as it is: its card offers Pay & Send itself", async () => {
@@ -482,6 +492,17 @@ describe("the send rule in the MCP server (#470)", () => {
             "Letter packs and gift letters pay only for one-page letters and 6x9 postcards. " +
             `Nothing is sent until they pay there. The link works until ${LINK.expiresAtISO}.`
         );
+      });
+
+      it("tells an app with no card that the page takes the payment", () => {
+        const text = howToSendText(DRAFT_ID, clientProfileNamed("vscode"), false, { packPays: false, payOnPage: false });
+        expect(text).toBe(
+          `Nothing has been sent. To send it, call request_send with draftId ${DRAFT_ID} and give the person its link, ` +
+            "where they check it and pay for it with Pay & Send, which sends it. " +
+            "Letter packs and gift letters pay only for one-page letters and 6x9 postcards."
+        );
+        // As before for mail a pack pays for.
+        expect(howToSendText(DRAFT_ID, clientProfileNamed("vscode"))).toContain("where they check it and send it themselves.");
       });
 
       it("tells the model how the preview is paid, and never offers a pack", () => {

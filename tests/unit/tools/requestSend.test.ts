@@ -63,6 +63,8 @@ describe("request_send", () => {
     expect(requestSendTool.readOnly).toBe(true);
     expect(requestSendTool.meta.readOnlyHint).toBe(true);
     expect(requestSendTool.description).toMatch(/Nothing is sent by this tool/);
+    // The page takes a payment for mail no pack pays for (#579).
+    expect(requestSendTool.description).toContain('or pays there with Pay & Send for mail no letter pack pays for.');
   });
 
   it("returns the page where the person sends their own draft", async () => {

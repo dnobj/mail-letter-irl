@@ -1191,7 +1191,8 @@ export async function registerLetterTools(
                 userId,
                 client
               }),
-              client.name
+              client.name,
+              "pack_cannot_pay"
             );
           }
           throw error;
@@ -1347,11 +1348,15 @@ function whenSentText(result: RequestSendOutput): string {
  */
 export function buildSendByLinkToolResult(
   executed: { result: RequestSendOutput },
-  client: ClientProfileName
+  client: ClientProfileName,
+  // Why the link and not a send: the send rule, or mail no pack pays for in
+  // an app that cannot take its payment (#579).
+  reason: "send_rule" | "pack_cannot_pay" = "send_rule"
 ) {
   writeDiagnostic("info", "send.link_instead", {
     client,
-    mailType: executed.result.mailType
+    mailType: executed.result.mailType,
+    reason
   });
   return {
     isError: true,
@@ -1379,10 +1384,13 @@ export function howToSendText(
   pay: { packPays: boolean; payOnPage: boolean } = { packPays: true, payOnPage: false }
 ): string {
   if (!client.rendersCards) {
-    return (
-      `Nothing has been sent. To send it, call request_send with draftId ${draftId} and give the person its link, ` +
-      `where they check it and send it themselves.`
-    );
+    // Mail no pack pays for (#579) is paid on that page, which sends it.
+    return pay.packPays
+      ? `Nothing has been sent. To send it, call request_send with draftId ${draftId} and give the person its link, ` +
+          `where they check it and send it themselves.`
+      : `Nothing has been sent. To send it, call request_send with draftId ${draftId} and give the person its link, ` +
+          `where they check it and pay for it with Pay & Send, which sends it. ` +
+          `Letter packs and gift letters pay only for one-page letters and 6x9 postcards.`;
   }
   const how =
     client.inAppPurchases && cardOffersPayAndSend

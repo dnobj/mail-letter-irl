@@ -172,6 +172,18 @@ describe("published output-schema parity (#278)", () => {
 
     expect(Object.keys(payAndSend).sort()).toEqual(zodKeys);
   });
+  it("declares the same sendEligibility fields on both served layers, packPays alike (#579)", () => {
+    for (const name of ["quote_and_preview_letter", "quote_and_preview_postcard"]) {
+      const eligibility = (
+        getManifestTool(name)?.outputSchema as {
+          properties: { sendEligibility: { properties: Record<string, { const?: unknown; description?: string }> } };
+        }
+      ).properties.sendEligibility.properties;
+      expect(Object.keys(eligibility).sort(), name).toEqual(Object.keys(sendEligibilityZ.shape).sort());
+      expect(eligibility.packPays.const, name).toBe(false);
+      expect(eligibility.packPays.description, name).toBe(sendEligibilityZ.shape.packPays.description);
+    }
+  });
   it.each([
     ["quote_and_preview_letter", quoteAndPreviewOutputZ],
     ["quote_and_preview_postcard", quoteAndPreviewPostcardOutputZ]
