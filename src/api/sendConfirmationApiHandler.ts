@@ -152,10 +152,10 @@ interface PostcardView {
 function postcardView(draft: LetterDraft & { postcard_size?: string | null; postcard_front?: unknown }): PostcardView | null {
   if (mailTypeOf(draft) !== 'postcard') return null;
   const size = draft.postcard_size ?? '6x9';
-  // As the print reads it: a front only with the version that draws one (#602 review round 1).
-  if (draft.renderer_version !== POSTCARD_FRONT_RENDERER_VERSION || draft.postcard_front == null) {
-    return { size, layout: 'full_bleed' };
-  }
+  // As the print reads it (renderPostcardForPrint): a front only with the
+  // version that draws one, and with that version a front it must read, or
+  // the postcard is held, not printed full bleed (#602 review round 1).
+  if (draft.renderer_version !== POSTCARD_FRONT_RENDERER_VERSION) return { size, layout: 'full_bleed' };
   const front = postcardFrontOf(draft.postcard_front);
   if (!front) return null;
   if (front.layout === 'greetings') return { size, layout: 'greetings', place: front.place };

@@ -299,7 +299,12 @@ describe('the confirmation page API (#470)', () => {
         expect((await call('GET')).json().postcard, String(renderer_version)).toEqual({ size: '6x9', layout: 'full_bleed' });
       }
       // A front the print cannot read is not named, nor anything of a letter.
-      for (const overrides of [{ renderer_version: 'pdf-3', postcard_front: { layout: 'collage' } }, { mail_type: 'letter' }]) {
+      // A pdf-3 postcard with no front (which 048 refuses) is held by the print, so it is not named either.
+      for (const overrides of [
+        { renderer_version: 'pdf-3', postcard_front: { layout: 'collage' } },
+        { renderer_version: 'pdf-3', postcard_front: null },
+        { mail_type: 'letter' }
+      ]) {
         vi.mocked(getDraft).mockResolvedValue(postcard(overrides) as any);
         expect((await call('GET')).json(), JSON.stringify(overrides)).not.toHaveProperty('postcard');
       }
