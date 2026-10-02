@@ -41,6 +41,7 @@ import {
   layoutLetter,
   layoutPostcard,
   MAX_LETTER_PAGES,
+  POSTCARD_GEOMETRY,
   PRINTABLE_RENDERER_VERSIONS,
   readImageDataUri,
   renderPdf,
@@ -1403,10 +1404,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
 
       let response: PostGridPostcardResponse;
       if (usePdf) {
-        if (size !== '6x9') {
-          throw new RenderRefusal('size', `Our renderer draws 6x9 postcards, not ${size}.`);
-        }
-        const pdf = await this.renderPostcardForPrint(params);
+        const pdf = await this.renderPostcardForPrint(params, size);
         response = await this.apiRequest<PostGridPostcardResponse>(
           'POST',
           '/postcards',
@@ -1511,13 +1509,21 @@ export class PostGridProvider implements LetterFulfillmentProvider {
   }
 
   /**
-   * The postcard drawn as it was previewed (src/render, #534 Phase 4): the
-   * front image, the back's message and a gift send's card, never the
-   * addresses, which PostGrid stamps. Every failure here happens before any
-   * request, and is a RenderRefusal.
+   * The postcard drawn as it was previewed (src/render, #534 Phase 4), at its
+   * size (#594): the front image, the back's message and a gift send's card,
+   * never the addresses, which PostGrid stamps. Every failure here happens
+   * before any request, and is a RenderRefusal.
    */
-  private async renderPostcardForPrint(params: PostcardParams): Promise<Buffer> {
+  private async renderPostcardForPrint(params: PostcardParams, size: PostcardSize): Promise<Buffer> {
     const reason = (error: unknown) => (error instanceof Error ? error.message : String(error));
+    // A size no writer stores, or a gift card on anything but a 6x9 (#579),
+    // is refused before the postcard is drawn.
+    if (!Object.hasOwn(POSTCARD_GEOMETRY, size)) {
+      throw new RenderRefusal('size', `Our renderer draws no ${size} postcard.`);
+    }
+    if (params.giftCard && size !== '6x9') {
+      throw new RenderRefusal('size', `A gift postcard is 6x9, not ${size}.`);
+    }
     let image;
     try {
       image = readImageDataUri(params.frontImageBase64);
@@ -1529,12 +1535,12 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       // A gift send's card, with the code the send minted. A strip its words
       // overflow (GiftStripOverflow) is held here.
       const strip = params.giftCard ? giftPostcardStripCopy(params.giftCard, params.senderName || '') : undefined;
-      layout = layoutPostcard({ message: params.backMessage, image, strip });
+      layout = layoutPostcard({ message: params.backMessage, image, strip, size });
     } catch (error) {
       throw new RenderRefusal('render', `The postcard could not be laid out: ${reason(error)}`);
     }
     if (layout.overflowLines > 0) {
-      throw new RenderRefusal('overflow', `The postcard's message runs ${layout.overflowLines} line(s) past its half of the back.`);
+      throw new RenderRefusal('overflow', `The postcard's message runs ${layout.overflowLines} line(s) past its room on the back.`);
     }
     try {
       return await renderPdf(layout);
