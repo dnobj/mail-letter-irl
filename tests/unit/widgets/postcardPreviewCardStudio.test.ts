@@ -330,8 +330,8 @@ describe('the postcard card as a postcard maker (#580)', () => {
     await card.click(card.byId('studio-flip'));
     expect(text(card, 'studio-scale')).toBe('The right side is for the address and postage.');
 
-    // A 6x9 after it, in the same card, is named as one again.
-    await card.show(output(), ON);
+    // A preview drawn otherwise after it, in the same card, is the 6x9 it must be.
+    await card.show(output(), { [STUDIO]: true });
     expect(text(card, 'studio-size')).toBe('6 x 9 in');
   });
 

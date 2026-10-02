@@ -149,12 +149,15 @@ describe('the postcard size in /manifest.json', () => {
     expect(properties.message.maxLength).toBe(2_000);
   });
 
-  it('is the 6x9 alone while not offered, its message to 1,000 characters, as before', () => {
+  it('is the 6x9 alone while not offered, its message to 1,000 characters, as before, arrival dates on or off', () => {
     offer('true', 'pdf', 'true');
     const on = postcard();
-    for (const [flag, renderer, payAndSend] of NOT_OFFERED) {
+    // With arrival dates on, nothing is withheld from the postcard: only narrowed.
+    for (const [[flag, renderer, payAndSend], arriveBy] of NOT_OFFERED.flatMap(combo => [[combo, ''], [combo, 'true']] as const)) {
       offer(flag, renderer, payAndSend);
+      vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', arriveBy);
       const off = postcard();
+      expect(Object.hasOwn(off.properties, 'arriveBy'), arriveBy).toBe(arriveBy === 'true');
       expect(off.properties.size).toEqual({
         type: 'string',
         enum: ['6x9'],
@@ -164,7 +167,7 @@ describe('the postcard size in /manifest.json', () => {
       expect(off.properties.message.maxLength).toBe(1_000);
       expect(off.properties.message.description).toBe(on.properties.message.description);
       // In the same place among the properties.
-      expect(Object.keys(off.properties)).toEqual(Object.keys(on.properties));
+      expect(Object.keys(off.properties).filter(key => key !== 'arriveBy')).toEqual(Object.keys(on.properties));
     }
   });
 });
