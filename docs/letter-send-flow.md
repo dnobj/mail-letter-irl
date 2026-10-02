@@ -111,7 +111,7 @@ grants is a change to the send rule. The `POST`:
 
 **Mail no pack pays for (#579)** is paid on the page with Pay & Send:
 - `GET` marks it `packPays: false` and, while the draft is ready, gives its `payment`: the quote's Pay & Send (`available`, the amount and its display, or why not now), its price resolved first.
-- `POST /api/sends/:draftId/checkout`, the website's alone like the rest and `mail:send` like `create_mail_checkout`, opens the Stripe checkout (`createJitCheckout`). It returns to the page: `?paid=1` when paid, `?paid=0` when turned back. The order records those addresses, so a retry from the page reuses the page's own order, and one an app began is replaced.
+- `POST /api/sends/:draftId/checkout`, the website's alone like the rest and `mail:send` like `create_mail_checkout`, opens the Stripe checkout (`createJitCheckout`). It returns to the page: `?paid=1` when paid, `?paid=0` when turned back. The order records those addresses, so a retry from the page reuses the page's own sessionless order, and a sessionless one an app began is replaced. An order with a Stripe session already open is reused as it is, wherever that session returns: one session, one charge, and the paid webhook sends the mail either way.
 - Paying sends the mail, as everywhere else; the route itself sends nothing. Its refusals are worded for the page (`checkoutRefusalFor`), and `{ sendAnotherCopy: true }` buys another copy, as the send's body does.
 
 **Rollout.** The rule is off by default. It is turned on once:

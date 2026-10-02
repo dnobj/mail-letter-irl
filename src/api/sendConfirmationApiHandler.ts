@@ -23,7 +23,7 @@ import { query } from '../db/index.js';
 import { authenticateRestRequest, sendRestAuthFailure } from './middleware/restAuth.js';
 import { rateLimitAccount } from './middleware/rateLimit.js';
 import { requiredRestScopes } from '../auth/restScopes.js';
-import { BETA_ACCESS_MESSAGE } from '../auth/betaAccess.js';
+import { BETA_ACCESS_MESSAGE, BetaAccessDeniedError } from '../auth/betaAccess.js';
 import {
   confirmationCheckoutReturnUrls,
   isSendConfirmationEnabled,
@@ -339,6 +339,8 @@ export function checkoutRefusalFor(error: unknown): Refusal {
 
   // The send's own refusals mean the same here.
   if (isDuplicateMailError(error) || error instanceof SpendLimitError) return refusalFor(error);
+  // The checkout's beta gate throws its own type, with no code (assertBetaAccess).
+  if (error instanceof BetaAccessDeniedError) return refuse(403, 'beta', BETA_ACCESS_MESSAGE);
   switch ((error as { code?: unknown } | null)?.code) {
     case 'ACCOUNT_SENDS_BLOCKED':
     case 'BETA_ACCESS_DENIED':

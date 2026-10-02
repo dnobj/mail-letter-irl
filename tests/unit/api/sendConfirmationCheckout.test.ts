@@ -39,6 +39,7 @@ import { createJitCheckout, getSendEligibility } from '../../../src/services/com
 import { ensurePriceCatalog } from '../../../src/services/priceCatalog.js';
 import { DuplicateMailError } from '../../../src/services/duplicateMailService.js';
 import { SpendLimitError } from '../../../src/services/betaSpendLimits.js';
+import { BETA_ACCESS_MESSAGE, BetaAccessDeniedError } from '../../../src/auth/betaAccess.js';
 import {
   checkoutRefusalFor,
   handleSendConfirmationApiRequest
@@ -295,6 +296,14 @@ describe('the confirmation page takes Pay & Send for mail no pack pays for (#579
       expect(refusal.status).toBe(status);
       expect(refusal.body.error).toBe(reason);
       expect(JSON.stringify(refusal.body)).not.toContain('internal');
+    });
+
+    it("words the checkout's own beta refusal, which carries no code", () => {
+      expect(checkoutRefusalFor(new BetaAccessDeniedError())).toEqual({
+        status: 403,
+        reason: 'beta',
+        body: { error: 'beta', message: BETA_ACCESS_MESSAGE }
+      });
     });
 
     it('words the duplicate and the daily limit as the send does', () => {
