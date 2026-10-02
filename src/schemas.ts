@@ -1,9 +1,11 @@
 import { JsonSchema } from "./contracts/types.js";
+import { MAX_LETTER_PAGES } from "./render/geometry.js";
 import {
   ARRIVAL_WINDOW_DESCRIPTION,
   ARRIVE_BY_DESCRIPTION,
   HEADLINE_DESCRIPTION,
   MONOGRAM_DESCRIPTION,
+  PREVIEW_PAGES_DESCRIPTION,
   PREVIEW_STATIONERY_DESCRIPTION,
   STATIONERY_SOURCE_DESCRIPTION,
   SET_ARRIVE_BY_DESCRIPTION,
@@ -260,6 +262,7 @@ export const quoteAndPreviewOutputSchema: JsonSchema = {
     schedule: previewScheduleSchema,
     arrivalWindow: arrivalWindowSchema,
     stationery: previewStationerySchema,
+    pages: { type: "integer", minimum: 2, maximum: MAX_LETTER_PAGES, description: PREVIEW_PAGES_DESCRIPTION },
     previewHtml: { type: "string" },
     lettersRequired: { type: "number", description: "Letters required from balance (always 1 for standard letter)" },
     canSendNow: { type: "boolean" },

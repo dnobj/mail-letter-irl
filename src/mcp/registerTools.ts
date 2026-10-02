@@ -1478,6 +1478,31 @@ function stationerySentence(result: Record<string, unknown>): string {
 }
 
 /**
+ * What a preview costs, for the narration's lead: the letters it takes from
+ * the balance, or Pay & Send for mail no pack pays for (#579), such as a
+ * letter of more than one page (#586). Never "requires 1 letter" for mail no
+ * number of letters pays for (#590 review round 1).
+ */
+function previewCost(result: Record<string, unknown>, lettersRequired: number | undefined): string {
+  const eligibility = result.sendEligibility as { packPays?: unknown } | undefined;
+  if (eligibility?.packPays === false) return "paid with Pay & Send";
+  const letters = lettersRequired ?? 1;
+  return `requires ${letters} ${letters === 1 ? 'letter' : 'letters'}`;
+}
+
+/**
+ * A letter of more than one page (#586), for the narration: its pages and the
+ * sheets they print on. Empty for one page.
+ */
+function pagesSentence(result: Record<string, unknown>): string {
+  const pages = result.pages;
+  if (pages !== 2 && pages !== 3) return "";
+  return pages === 2
+    ? " A two-page letter, printed on both sides of one sheet."
+    : " A three-page letter, printed on both sides of two sheets.";
+}
+
+/**
  * A held preview's dates (#535), for the narration: the sentence the preview
  * built with its own clock (its deliveryEstimate), and what a send then does.
  * Empty for mail sent at once.
@@ -1541,7 +1566,7 @@ export function summarizeToolResult(
       // once a pack landed, and permanent in a transcript beside a card
       // reading "Ready to send". canSendNow and reasonCannotSend are still in
       // structuredContent, so the model can still offer to help buy.
-      let summary = `Preview ready: requires ${lettersRequired ?? 1} ${lettersRequired === 1 ? 'letter' : 'letters'}. The card shows whether it can be sent now and the options to proceed.`;
+      let summary = `Preview ready: ${previewCost(result, lettersRequired)}. The card shows whether it can be sent now and the options to proceed.`;
       if (layoutType && layoutType !== 'text_only') {
         summary += ` Layout: ${layoutType.replace('_', ' ')}.`;
       }
@@ -1554,6 +1579,7 @@ export function summarizeToolResult(
       }
       summary += heldMailSentence(result);
       summary += stationerySentence(result);
+      summary += pagesSentence(result);
       return summary;
     }
     case "request_send":
@@ -1627,7 +1653,7 @@ export function summarizeToolResult(
       const lettersRequired = result.lettersRequired as number | undefined;
       const usedSaved = result.usedSavedReturnAddress as boolean | undefined;
       // Same reasoning as the letter branch: no expiring claim about balance.
-      let summary = `Postcard preview ready: requires ${lettersRequired ?? 1} ${lettersRequired === 1 ? 'letter' : 'letters'}. The card shows whether it can be sent now and the options to proceed.`;
+      let summary = `Postcard preview ready: ${previewCost(result, lettersRequired)}. The card shows whether it can be sent now and the options to proceed.`;
       if (usedSaved) {
         summary += " Using your saved return address.";
       }

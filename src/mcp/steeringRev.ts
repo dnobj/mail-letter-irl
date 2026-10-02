@@ -120,5 +120,9 @@
  *     output and narration say why (source).
  * r31: the stationery descriptions and set_stationery name typewriter and
  *     handwritten (#563 PR 8), each setting the letter in a face of its own.
+ * r32: room to write (#586). While LETTER_IRL_ROOM_TO_WRITE_ENABLED is on,
+ *     with our renderer and Pay & Send, the three letter previews say a
+ *     longer letter runs on to two or three pages, paid with Pay & Send, and
+ *     their output and narration name the pages.
  */
-export const STEERING_COPY_REV = 31;
+export const STEERING_COPY_REV = 32;

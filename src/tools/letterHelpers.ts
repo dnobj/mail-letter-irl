@@ -23,6 +23,7 @@ import {
 import { createDraft } from "../services/draftService.js";
 import { findUnprintable, unprintableRefusal, type PrintedText, type ThemedFace } from "../services/printableText.js";
 import { printRenderer } from "../config/printRenderer.js";
+import { isRoomToWriteOffered, letterPageLimit } from "../config/roomToWrite.js";
 import {
   bodyFace,
   drawsGrapheme,
@@ -138,6 +139,8 @@ export interface LetterQuoteOutput {
   arrivalWindow?: ArrivalWindow;
   /** The stationery the page was drawn in (#563), while stationery is offered, and why: asked for, remembered, or Classic by default. */
   stationery?: PreviewStationery;
+  /** A letter of more than one page (#586): the pages it prints on, both sides of the paper, paid with Pay & Send. */
+  pages?: number;
 }
 
 // ============================================================================
@@ -475,9 +478,10 @@ export function outputValidationStatus(
 // ============================================================================
 
 /**
- * The most characters a letter drawn by our renderer may hold. Far more than
- * a page holds even of fully pointed Hebrew; it only bounds the layout's
- * work. The page itself is measured by layoutLetterForPreview.
+ * The most characters a letter drawn by our renderer may hold on each page it
+ * may take: one, or three while room to write is offered (#586). Far more than
+ * a page holds even of fully pointed Hebrew; it only bounds the layout's work.
+ * The pages themselves are measured by layoutLetterForPreview.
  */
 export const RENDERED_LETTER_CHARACTER_CAP = 10_000;
 
@@ -496,21 +500,27 @@ export function validateCharacterLimitForLayout(
 ): void {
   if (renderer === 'pdf') {
     const totalChars = bodyText.length + signOff.length;
-    if (totalChars <= RENDERED_LETTER_CHARACTER_CAP) return;
+    // Per page (#590 review round 3): three pages of narrow glyphs or pointed
+    // Hebrew run past one page's cap while they still fit.
+    const limit = letterPageLimit();
+    const cap = RENDERED_LETTER_CHARACTER_CAP * limit;
+    if (totalChars <= cap) return;
     context.logger.warn(
       {
         correlationId: context.correlationId,
         event: "quote.letter.exceeds_character_cap",
         layoutType,
         totalChars,
-        charLimit: RENDERED_LETTER_CHARACTER_CAP
+        charLimit: cap
       },
       "Letter exceeds the character cap"
     );
+    // Three pages while room to write is offered (#586), otherwise one.
+    const pages = pageWords(limit);
     throw Object.assign(
       new Error(
-        `Letter is far too long for one page: ${totalChars}/${RENDERED_LETTER_CHARACTER_CAP} characters. ` +
-        `Please shorten your message to fit on one page.`
+        `Letter is far too long for ${pages}: ${totalChars}/${cap} characters. ` +
+        `Please shorten your message to fit on ${pages}.`
       ),
       { diagnosticClass: "validation_error" }
     );
@@ -554,6 +564,21 @@ const SLOT_WORDS: Record<StationeryOverflow["slot"], string> = {
   headline: "headline"
 };
 
+/**
+ * The letter previews' sentence on length, while room to write is offered
+ * (#586); otherwise nothing, and the descriptions are as before.
+ */
+export function roomToWriteSentence(): string {
+  return isRoomToWriteOffered()
+    ? "A letter too long for one page runs on to a second or third page, printed on both sides and paid with Pay & Send; three pages is the longest. "
+    : "";
+}
+
+/** A page limit in words: "one page", or "three pages" while room to write is offered (#586). */
+function pageWords(limit: number): string {
+  return limit === 1 ? "one page" : `${["", "one", "two", "three"][limit] ?? limit} pages`;
+}
+
 const LAYOUT_LABELS: Record<LetterLayoutType, string> = {
   text_only: "",
   header_image: " with a header image",
@@ -569,11 +594,17 @@ const LAYOUT_LABELS: Record<LetterLayoutType, string> = {
  * body, and Typewriter and Handwritten set it in their own typeface, so they
  * change what fits; a letter they push past the page is told so, with the
  * ways out.
+ *
+ * While room to write is offered (#586), the letter flows on to up to three
+ * pages, and only a letter longer than that is refused: three pages is the
+ * longest letter we print. The draft records the pages it took.
  */
 export function layoutLetterForPreview(
   letter: { bodyText: string; signOff: string; layoutType: LetterLayoutType; imageData?: string; stationery?: Stationery | PreviewStationery },
   context: ToolContext,
-  renderer: 'html' | 'pdf' = printRenderer()
+  renderer: 'html' | 'pdf' = printRenderer(),
+  /** The most pages it may take: the previews' limit (#586), or a draft's own pages when it is drawn again. */
+  maxPages: number = letterPageLimit()
 ): Layout | undefined {
   if (renderer !== 'pdf') return undefined;
   const { bodyText, signOff, layoutType, imageData, stationery } = letter;
@@ -584,7 +615,7 @@ export function layoutLetterForPreview(
   };
   let layout: Layout;
   try {
-    layout = layoutLetter({ ...content, stationery });
+    layout = layoutLetter({ ...content, stationery }, { maxPages });
   } catch (error) {
     // A slot that cannot print as its theme draws it. The checks before the
     // layout refuse each in their own words (previewStationery, and the
@@ -598,7 +629,7 @@ export function layoutLetterForPreview(
   }
   if (layout.overflowLines === 0) return layout;
 
-  const { linesUsed, linesAvailable } = layout.pages[0];
+  const { linesUsed, linesAvailable } = layout.pages[layout.pages.length - 1];
   const headline = stationery?.theme === "celebration" && stationery.headline !== undefined;
   context.logger.warn(
     {
@@ -607,6 +638,7 @@ export function layoutLetterForPreview(
       layoutType,
       linesUsed,
       linesAvailable,
+      maxPages,
       stationery: stationery?.theme ?? "classic"
     },
     "Letter runs past its page"
@@ -617,23 +649,28 @@ export function layoutLetterForPreview(
   // The theme's way out, leaving the headline out or choosing Classic, is
   // offered only when the letter would fit that way (#575 review round 3).
   const themed = headline || own !== undefined;
-  const fitsPlain = themed && layoutLetter(content).overflowLines === 0;
+  const fitsPlain = themed && layoutLetter(content, { maxPages }).overflowLines === 0;
+  // One page says how full it is; the longest letter says only that it is (#586).
+  const longest = maxPages > 1;
+  const past = longest ? pageWords(maxPages) : "the page";
   throw Object.assign(
     new Error(
       // A theme the call did not name says where it came from.
       (themed ? rememberedPrefix(stationery) : "") +
-      `Letter is ${over} line${over === 1 ? "" : "s"} too long for one page${LAYOUT_LABELS[layoutType]}` +
+      `Letter is ${over} line${over === 1 ? "" : "s"} too long for ${pageWords(maxPages)}${LAYOUT_LABELS[layoutType]}` +
       `${headline ? " on the celebration stationery with a headline" : own ? ` on the ${own} stationery` : ""}: ` +
-      `it takes ${linesUsed} lines and the page holds ${linesAvailable}. ` +
+      (longest
+        ? `${pageWords(maxPages)} is the longest letter we print. `
+        : `it takes ${linesUsed} lines and the page holds ${linesAvailable}. `) +
       (headline
         ? fitsPlain
           ? `The headline takes ${HEADLINE_LINES} lines: shorten the message, leave the headline out, or choose the classic stationery.`
-          : `The headline takes ${HEADLINE_LINES} lines, and the letter runs past the page without it too: shorten the message.`
+          : `The headline takes ${HEADLINE_LINES} lines, and the letter runs past ${past} without it too: shorten the message.`
         : own
           ? fitsPlain
             ? `The ${own} stationery sets the text in its own typeface: shorten the message, or choose the classic stationery.`
-            : `The ${own} stationery sets the text in its own typeface, and the letter runs past the page on the classic stationery too: shorten the message.`
-          : `Please shorten your message to fit on one page.`)
+            : `The ${own} stationery sets the text in its own typeface, and the letter runs past ${past} on the classic stationery too: shorten the message.`
+          : `Please shorten your message to fit on ${pageWords(maxPages)}.`)
     ),
     { diagnosticClass: "validation_error" }
   );
@@ -765,6 +802,28 @@ export function validatePrintableLetter(
       : undefined
   );
   if (card) validateGiftPageFits(card, letter.sender.name, context);
+}
+
+/**
+ * A gift send's card, checked as validatePrintableLetter checks it: the
+ * sender's name prints in Tinos, and the card fits its page. For a gift
+ * decided after the layout (giftForLayout, #586), which the printable check
+ * ran without.
+ */
+export function validateGiftCardPrints(
+  card: GiftCardContent,
+  letter: PrintedAddresses,
+  context: ToolContext,
+  renderer: 'html' | 'pdf' = printRenderer()
+): void {
+  if (renderer !== "pdf") return;
+  validatePrintableCharacters(
+    "letter",
+    [{ field: "giftCardName", where: "in the sender's name, which the gift card prints", text: letter.sender.name, prints: drawsGrapheme }],
+    letter,
+    context
+  );
+  validateGiftPageFits(card, letter.sender.name, context);
 }
 
 /**
@@ -904,13 +963,55 @@ export function previewSendEligibility(
  */
 export async function letterGiftChoice(
   letter: { bodyText: string; signOff: string; sendAsGift?: boolean },
-  context: ToolContext
+  context: ToolContext,
+  /** The letter's option, once its pages are known (#586): a gift letter pays for one page only. */
+  option?: MailOption
 ): Promise<GiftSendChoice> {
+  const packPays = option === undefined || isPackPayable(option);
   return resolveGiftSendChoice({
     userId: context.user.userId,
     requested: letter.sendAsGift,
-    balanceCanPay: context.user.creditsRemaining >= estimateRequiredCredits(letter.bodyText, letter.signOff)
+    balanceCanPay: context.user.creditsRemaining >= estimateRequiredCredits(letter.bodyText, letter.signOff),
+    ...(option === undefined ? {} : { giftCanPay: packPays })
   });
+}
+
+/**
+ * A letter preview's gift, decided first, so the printable check sees its
+ * card (#534). Not while room to write is offered (#586): a letter may then
+ * run past one page, which no gift letter pays for (#579), so the gift waits
+ * for the layout (giftForLayout).
+ */
+export async function earlyGiftChoice(
+  letter: { bodyText: string; signOff: string; sendAsGift?: boolean },
+  context: ToolContext
+): Promise<GiftSendChoice | undefined> {
+  return letterPageLimit() > 1 ? undefined : letterGiftChoice(letter, context);
+}
+
+/**
+ * The gift, decided after the layout when it was not decided first
+ * (earlyGiftChoice): by the pages the letter takes, so a letter of more than
+ * one page is never a gift send. Its card is then checked as the printable
+ * check would have checked it.
+ */
+export async function giftForLayout(
+  early: GiftSendChoice | undefined,
+  letter: PrintedAddresses & { bodyText: string; signOff: string; sendAsGift?: boolean },
+  layout: Layout | undefined,
+  context: ToolContext,
+  renderer: 'html' | 'pdf' = printRenderer()
+): Promise<GiftSendChoice> {
+  if (early) return early;
+  const gift = await letterGiftChoice(letter, context, letterOption(layout));
+  if (gift.card) validateGiftCardPrints(gift.card, letter, context, renderer);
+  return gift;
+}
+
+/** A letter's option for its price (#579, #586): its pages, when its layout runs past one. */
+export function letterOption(layout: Layout | undefined): MailOption {
+  const pages = layout?.pages.length ?? 1;
+  return pages > 1 ? { mailType: "letter", pages } : { mailType: "letter" };
 }
 
 export async function createLetterDraftAndBuildOutput(
@@ -941,9 +1042,9 @@ export async function createLetterDraftAndBuildOutput(
     context
   } = params;
 
-  // Calculate credits, only where a pack pays (#579). A letter is one page
-  // until room to write gives its option the pages it prints.
-  const option: MailOption = { mailType: "letter" };
+  // Calculate credits, only where a pack pays (#579). The letter's option has
+  // the pages it was laid out on (#586), counted before any gift page.
+  const option = letterOption(printLayout);
   const requiredCredits = estimateRequiredCredits(bodyText, signOff);
   const available = context.user.creditsRemaining;
   const canSendNow = gift.isGift || (isPackPayable(option) && available >= requiredCredits);
@@ -1015,6 +1116,8 @@ export async function createLetterDraftAndBuildOutput(
     stationery: layout ? stationery : undefined,
     // Held until its mail date (#535).
     schedule: schedule?.draft,
+    // The pages it was laid out on (#586): it prints and is priced on them.
+    pages: option.pages ?? 1,
   });
 
   context.logger.info(
@@ -1070,6 +1173,8 @@ export async function createLetterDraftAndBuildOutput(
     arrivalWindow: previewArrivalWindow(context),
     // Only while stationery is offered (#563): otherwise the output is as before it.
     ...(stationery ? { stationery } : {}),
+    // A letter of more than one page (#586), printed on both sides: only then.
+    ...(option.pages ? { pages: option.pages } : {}),
   };
 
   // Add address validation results

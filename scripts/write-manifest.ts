@@ -16,6 +16,8 @@ process.env.LETTER_IRL_PUBLIC_BASE_URL = "https://api.letterirl.com";
 process.env.LETTER_IRL_ARRIVE_BY_ENABLED = "false";
 // Stationery (#563) likewise.
 process.env.LETTER_IRL_STATIONERY_ENABLED = "false";
+// And room to write (#586).
+process.env.LETTER_IRL_ROOM_TO_WRITE_ENABLED = "false";
 
 const { stringifyManifest } = await import("../src/mcp/manifest.js");
 

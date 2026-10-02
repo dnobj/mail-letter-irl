@@ -66,7 +66,8 @@ export class StationeryRefusedError extends Error {
       | 'DRAFT_EXPIRED'
       | 'DRAFT_CHECKOUT_PENDING'
       | 'DRAFT_NOT_A_LETTER'
-      | 'DRAFT_NOT_DRAWN',
+      | 'DRAFT_NOT_DRAWN'
+      | 'DRAFT_LONGER_THAN_A_PAGE',
     message: string
   ) {
     super(message);
@@ -126,6 +127,15 @@ async function handler(input: SetStationeryInput, context: ToolContext): Promise
   }
   // Only a letter our renderer drew can be drawn again in a theme.
   if (!draft.renderer_version) throw refused('DRAFT_NOT_DRAWN', NOT_DRAWN, context);
+  // A letter of more than one page (#586) is not restyled in place yet: its
+  // later pages, and its price, would have to be laid out again too.
+  if (Number(draft.pages ?? 1) > 1) {
+    throw refused(
+      'DRAFT_LONGER_THAN_A_PAGE',
+      "This letter runs past one page, so its stationery can't change here yet. Make a new preview in the stationery you'd like.",
+      context
+    );
+  }
 
   const sender = draft.sender as unknown as Address;
   const recipient = draft.recipient as unknown as Address;
@@ -147,7 +157,10 @@ async function handler(input: SetStationeryInput, context: ToolContext): Promise
   const layout = layoutLetterForPreview(
     { bodyText, signOff, layoutType, imageData: imageData ?? undefined, stationery },
     context,
-    'pdf'
+    'pdf',
+    // On its one page (#586): a restyle that runs on to another would change
+    // what the letter costs, so it is refused as too long, as before.
+    1
   )!;
 
   // The letter's page drawn again, with the small copy of its picture the

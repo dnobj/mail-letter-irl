@@ -20,8 +20,10 @@ import {
   validateAddressesWithProvider,
   validateCharacterLimitForLayout,
   validatePrintableLetter,
+  earlyGiftChoice,
+  giftForLayout,
   layoutLetterForPreview,
-  letterGiftChoice,
+  roomToWriteSentence,
   createLetterDraftAndBuildOutput,
   type LetterQuoteOutput
 } from "./letterHelpers.js";
@@ -153,8 +155,10 @@ async function handler(
   validateAddresses(sender, input.recipient, context);
 
   // Decided first: a gift send's card page draws the sender's name, which
-  // must print and fit (#534). The renderer is read once, so every check agrees.
-  const gift = await letterGiftChoice(input, context);
+  // must print and fit (#534). Not while room to write is offered (#586): the
+  // gift then waits for the pages (giftForLayout). The renderer is read once,
+  // so every check agrees.
+  const early = await earlyGiftChoice(input, context);
   const renderer = printRenderer();
 
   // Stationery (#563): the theme, asked for or remembered, and what it
@@ -170,7 +174,7 @@ async function handler(
     { sender, recipient: input.recipient, bodyText: input.bodyText, signOff: input.signOff, senderIsSaved: usedSavedReturnAddress },
     context,
     renderer,
-    gift.card,
+    early?.card,
     stationery
   );
 
@@ -228,6 +232,15 @@ async function handler(
     renderer
   );
 
+  // The gift, by the pages the letter takes, when it was not decided first (#586).
+  const gift = await giftForLayout(
+    early,
+    { sender, recipient: input.recipient, bodyText: input.bodyText, signOff: input.signOff, senderIsSaved: usedSavedReturnAddress, sendAsGift: input.sendAsGift },
+    printLayout,
+    context,
+    renderer
+  );
+
   // Validate with PostGrid provider
   const { senderValidation, recipientValidation, addressWarnings } = await validateAddressesWithProvider(
     sender,
@@ -271,6 +284,7 @@ export const quoteAndPreviewLetterWithImageTool: McpToolDefinition<
   // The last sentence follows the send rule and the app (#516).
   description: (client) =>
     "Preview a physical letter draft with an enclosed image after the signature. This does not send mail. Requires a real U.S. recipient mailing address. If the user refers to an image already generated, shown, or attached earlier in this conversation, call this tool first to reuse that image. Otherwise prefer a direct file attachment or explicit imageUrl. Use upload_image only after an actual failed handoff or upload problem. " +
+    roomToWriteSentence() +
     previewSendStep("send_letter", client),
   // readOnly: false because this tool creates draft records in the database
   // See docs/learnings/tool-annotation-decision.md for rationale

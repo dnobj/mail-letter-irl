@@ -74,9 +74,10 @@ describe("Compatibility manifest", () => {
   });
 
   it("should keep the checked-in manifest.json snapshot in sync", () => {
-    // Generated as production is: arrive-by (#535) and stationery (#563) off.
+    // Generated as production is: arrive-by (#535), stationery (#563) and room to write (#586) off.
     vi.stubEnv("LETTER_IRL_ARRIVE_BY_ENABLED", "");
     vi.stubEnv("LETTER_IRL_STATIONERY_ENABLED", "");
+    vi.stubEnv("LETTER_IRL_ROOM_TO_WRITE_ENABLED", "");
     const snapshot = fs.readFileSync(manifestPath, "utf-8");
     const previousPublicBaseUrl = process.env.LETTER_IRL_PUBLIC_BASE_URL;
     process.env.LETTER_IRL_PUBLIC_BASE_URL = "https://api.letterirl.com";

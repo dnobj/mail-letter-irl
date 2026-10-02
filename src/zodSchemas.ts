@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { preprocessImageFileParam } from "./utils/imageFileParam.js";
 import { STATIONERY_THEMES } from "./render/stationery.js";
+import { MAX_LETTER_PAGES } from "./render/geometry.js";
 
 export const addressZ = z.object({
   name: z.string(),
@@ -79,6 +80,10 @@ const stationeryZ = z.preprocess(themeName, z.enum(STATIONERY_THEMES).optional()
 const noneForNull = (value: unknown): unknown => (value === null ? undefined : value);
 const monogramZ = z.preprocess(noneForNull, z.string().optional()).describe(MONOGRAM_DESCRIPTION);
 const headlineZ = z.preprocess(noneForNull, z.string().optional()).describe(HEADLINE_DESCRIPTION);
+
+/** A letter of more than one page (#586), on the letter previews' output. */
+export const PREVIEW_PAGES_DESCRIPTION =
+  "Present only for a letter of more than one page: the pages it prints on, both sides of the paper. No letter pack or gift letter pays for it; it is paid with Pay & Send.";
 
 /** What a letter preview's output says of its stationery (#563). */
 export const PREVIEW_STATIONERY_DESCRIPTION =
@@ -469,7 +474,8 @@ export const quoteAndPreviewOutputZ = z.object({
   giftLettersAvailable: z.number().int().nonnegative().optional(),
   schedule: previewScheduleZ.optional(),
   arrivalWindow: arrivalWindowZ.optional().describe(ARRIVAL_WINDOW_DESCRIPTION),
-  stationery: previewStationeryZ.optional().describe(PREVIEW_STATIONERY_DESCRIPTION)
+  stationery: previewStationeryZ.optional().describe(PREVIEW_STATIONERY_DESCRIPTION),
+  pages: z.number().int().min(2).max(MAX_LETTER_PAGES).optional().describe(PREVIEW_PAGES_DESCRIPTION)
 });
 
 /** Held mail's two dates (#535), on what a send and the order status say. */
