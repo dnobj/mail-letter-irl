@@ -283,6 +283,12 @@ export const postcardSixByNineZ = {
   size: z.enum(["6x9"]).optional()
 };
 
+/** A front's caption and place (#594), as the postcard preview and set_postcard_style take them. */
+export const POSTCARD_CAPTION_DESCRIPTION =
+  "For the border layout only: one handwritten line under the photo, such as \"Cape Cod, August 2026\". Leave it out for none.";
+export const POSTCARD_PLACE_DESCRIPTION =
+  "For the greetings layout only, and needed there: the place it greets from, such as \"Asheville\", printed in capitals.";
+
 export const quoteAndPreviewPostcardInputZ = z.object({
   sender: addressZ.optional(),  // Optional - will use saved return address if not provided
   recipient: addressZ,
@@ -302,12 +308,8 @@ export const quoteAndPreviewPostcardInputZ = z.object({
     "The front's layout: full_bleed (the default), the photo across the whole front; border, the photo in a white border " +
     "with a caption under it; or greetings, \"Greetings from\" a place over the photo."
   ),
-  caption: z.string().optional().describe(
-    "For the border layout only: one handwritten line under the photo, such as \"Cape Cod, August 2026\". Leave it out for none."
-  ),
-  place: z.string().optional().describe(
-    "For the greetings layout only, and needed there: the place it greets from, such as \"Asheville\", printed in capitals."
-  ),
+  caption: z.string().optional().describe(POSTCARD_CAPTION_DESCRIPTION),
+  place: z.string().optional().describe(POSTCARD_PLACE_DESCRIPTION),
   // Image from OpenAI fileParams - permissive to handle mobile edge cases
   // Mobile may send file_id without download_url (sediment:// protocol)
   image: imageFileParamZ.optional(),
@@ -385,10 +387,6 @@ export const SET_POSTCARD_SIZE_DESCRIPTION =
 export const SET_POSTCARD_LAYOUT_DESCRIPTION =
   "The new front: full_bleed, the photo across the whole front; border, the photo in a white border with a caption under it; " +
   "or greetings, \"Greetings from\" a place over the photo. Left out, the front stays as it is.";
-export const POSTCARD_CAPTION_DESCRIPTION =
-  "For the border layout only: one handwritten line under the photo, such as \"Cape Cod, August 2026\". Leave it out for none.";
-export const POSTCARD_PLACE_DESCRIPTION =
-  "For the greetings layout only, and needed there: the place it greets from, such as \"Asheville\", printed in capitals.";
 export const setPostcardStyleInputZ = z.object({
   draftId: z.string().describe("The draftId from a postcard preview"),
   size: z.enum(["6x9", "6x4", "6x11"]).optional().describe(SET_POSTCARD_SIZE_DESCRIPTION),
