@@ -326,6 +326,103 @@ describe('the letter card as a studio (#580)', () => {
     expect(card.byId('send-button').style.display).toBe('flex');
   });
 
+  it('says a letter with its picture prints in colour (#584 review round 1)', async () => {
+    const card = mount();
+    await card.show(output({ layoutType: 'header_image', stationery: { theme: 'classic', source: 'default' } }), ON);
+    expect(text(card, 'studio-summary')).toBe('Classic · colour · mailed in 1-2 business days');
+
+    const plain = mount();
+    await plain.show(output({ layoutType: 'inline_image' }), ON);
+    expect(text(plain, 'studio-style-quiet')).toBe('Printed in colour.');
+    expect(text(plain, 'studio-summary')).toBe('colour · mailed in 1-2 business days');
+  });
+
+  it("says a letter the server has with the printer is there, whatever date its preview had (#584 review round 1)", async () => {
+    const card = mount();
+    await card.show(
+      output({ arrivalWindow: WINDOW, schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' }, deliveryEstimate: 'Goes to the printer Fri, Oct 9.' }),
+      ON
+    );
+    await card.answer(
+      { result: { content: [], structuredContent: { draftId: 'draft_0001', status: 'sent', orderId: 'order-1', orderStatus: 'sent', schedule: null } } },
+      'get_draft_status'
+    );
+    expect(text(card, 'status-pill')).toBe('With the printer');
+    expect(text(card, 'studio-sub')).toBe('Sent · Springfield, IL 62701');
+    expect(text(card, 'studio-summary')).toBe('black and white · with the printer');
+  });
+
+  it('says a letter its own send put with the printer is there, though the card had a date (#584 review round 1)', async () => {
+    const card = mount();
+    await card.show(output({ arrivalWindow: WINDOW, schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' } }), ON);
+    // The chat cleared the date before the send: the send says where the letter is.
+    await card.click(card.byId('send-button'));
+    await card.answer(
+      { result: { content: [{ type: 'text', text: 'Sent.' }], structuredContent: { orderId: 'order-1', currentStatus: 'sent' } } },
+      'send_letter'
+    );
+    expect(text(card, 'studio-summary')).toBe('black and white · with the printer');
+  });
+
+  it('says an expired preview has expired (#584 review round 1)', async () => {
+    const card = mount();
+    await card.show(output(), ON);
+    await card.answer({ result: { content: [], structuredContent: { draftId: 'draft_0001', status: 'expired' } } }, 'get_draft_status');
+    expect(text(card, 'status-pill')).toBe('Preview expired');
+    expect(text(card, 'studio-sub')).toBe('Expired · Springfield, IL 62701');
+    expect(text(card, 'studio-summary')).toBe('black and white · the preview has expired');
+  });
+
+  it('follows a Pay & Send order: the stationery once its row goes, then paid, then with the printer (#584 review round 1)', async () => {
+    const card = mount();
+    await card.show(
+      output({
+        stationery: { theme: 'botanical', source: 'asked' },
+        canSendNow: false,
+        sendEligibility: { packPays: false, payAndSend: { available: true, amountCents: 599, currency: 'usd' }, letterPack: { available: false } }
+      }),
+      ON
+    );
+    expect(text(card, 'studio-cost')).toBe('Pay & Send USD 5.99');
+    await card.click(card.byId('pay-send-button'));
+    // The Style row goes with the checkout; the tab says what the page is in.
+    expect(card.byId('style-row').style.display).toBe('none');
+    expect(card.byId('studio-style-quiet').style.display).toBe('');
+    expect(text(card, 'studio-style-quiet')).toBe('Botanical stationery, printed in black and white.');
+    await card.answer(
+      { result: { content: [], structuredContent: { orderId: 'order-1', checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_1' } } },
+      'create_mail_checkout'
+    );
+    expect(text(card, 'studio-sub')).toBe('Draft · Springfield, IL 62701');
+
+    await card.click(card.byId('check-status-button'));
+    await card.answer({ result: { content: [], structuredContent: { orderId: 'order-1', purchaseStatus: 'processing' } } }, 'get_purchase_status');
+    expect(text(card, 'studio-sub')).toBe('Paid · Springfield, IL 62701');
+    expect(text(card, 'studio-cost')).toBe('Paid USD 5.99');
+    expect(text(card, 'studio-summary')).toBe('Botanical · black and white · paid, going to the printer');
+
+    await card.click(card.byId('check-status-button'));
+    await card.answer({ result: { content: [], structuredContent: { orderId: 'order-1', purchaseStatus: 'submitted' } } }, 'get_purchase_status');
+    expect(text(card, 'studio-sub')).toBe('Sent · Springfield, IL 62701');
+    expect(text(card, 'studio-summary')).toBe('Botanical · black and white · with the printer');
+  });
+
+  it('names a Pay & Send payment without a price plainly', async () => {
+    const card = mount();
+    await card.show(
+      output({ canSendNow: false, sendEligibility: { packPays: false, payAndSend: { available: true }, letterPack: { available: false } } }),
+      ON
+    );
+    await card.click(card.byId('pay-send-button'));
+    await card.answer(
+      { result: { content: [], structuredContent: { orderId: 'order-1', checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_1' } } },
+      'create_mail_checkout'
+    );
+    await card.click(card.byId('check-status-button'));
+    await card.answer({ result: { content: [], structuredContent: { orderId: 'order-1', purchaseStatus: 'processing' } } }, 'get_purchase_status');
+    expect(text(card, 'studio-cost')).toBe('Paid with Pay & Send');
+  });
+
   it('names the price of mail no pack pays for, and a gift letter as free', async () => {
     const paid = mount();
     await paid.show(
@@ -465,6 +562,36 @@ describe('the letter card as a studio (#580)', () => {
     expect(shown()).toEqual([true, false]);
     expect((card.document.querySelector('.page-count') as HTMLElement).hidden).toBe(true);
     expect(step.hidden).toBe(true);
+  });
+
+  it('keeps the page shown through a restyle (#584 review round 1)', async () => {
+    const card = mount();
+    await card.show(output({ stationery: { theme: 'classic', source: 'default' } }), { previewHtml: GIFT_PAGES, [STUDIO]: true });
+    await card.click(card.document.querySelector('.page-tools .page-zoom:last-child')!);
+    expect(card.document.querySelector('.page-count')!.textContent).toBe('Page 2 of 2');
+    await card.click(card.document.querySelector('#style-row [data-theme="botanical"]')!);
+    await card.answer(
+      {
+        result: {
+          content: [{ type: 'text', text: 'Restyled.' }],
+          structuredContent: { draftId: 'draft_0001', stationery: { theme: 'botanical', dateLine: 'October 1, 2026', source: 'asked' } },
+          _meta: { previewHtml: document1('October 1, 2026\nDear Sam,\nPat', 'A letter for you') }
+        }
+      },
+      'set_stationery'
+    );
+    const pages = Array.from(card.document.querySelectorAll('.letter-page > svg.print-page'));
+    expect(pages[0].querySelector('title')!.textContent).toBe('October 1, 2026\nDear Sam,\nPat');
+    expect(pages.map(page => page.classList.contains('shown'))).toEqual([false, true]);
+    expect(card.document.querySelector('.page-count')!.textContent).toBe('Page 2 of 2');
+  });
+
+  it('names its tabs by the letter, and spaces its note as the panels do (#584 review round 1)', async () => {
+    const card = mount();
+    await card.show(output(), ON);
+    expect(card.document.querySelector('[role="tablist"]')!.getAttribute('aria-labelledby')).toBe('studio-title');
+    const served = inlineHostBridge(fs.readFileSync(path.join(WIDGET_DIR, 'LetterPreviewCard.html'), 'utf-8'), WIDGET_DIR);
+    expect(served).toContain('.studio-panel .note,.studio-side > .note{margin-top:0}');
   });
 
   it('grows the page across the card when it is enlarged', async () => {
