@@ -122,8 +122,8 @@ describe("the address request tools' text (#604)", () => {
   });
 
   it("says request_address's sentence, which carries the link", () => {
-    expect(summarizeToolResult('request_address', { message: 'Here is the link to send Ruth: https://x.example/address/t' })).toBe(
-      'Here is the link to send Ruth: https://x.example/address/t'
+    expect(summarizeToolResult('request_address', { message: 'Here is the link that asks Ruth for their address: https://x.example/address#t' })).toBe(
+      'Here is the link that asks Ruth for their address: https://x.example/address#t'
     );
   });
 });

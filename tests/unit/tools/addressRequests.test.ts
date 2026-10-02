@@ -163,7 +163,7 @@ describe('request_address (#604)', () => {
     }
     for (const senderFirstName of [
       'visit evil.example', 'Pat!', 'https://x.example', '1Pat', 'P'.repeat(41), 'Pat\u200B', 7,
-      'Send money now', 'Click the link', 'Jean Luc Picard', 'e.vil', 'J.R.R.R.R.'
+      'Send money now', 'Click the link', 'Jean Luc Picard', 'e.vil', 'J.R.R.R.R.', "Pat'", "'Pat", "Pat''s"
     ]) {
       await expect(refusal(run({ recipientName: 'Ruth', senderFirstName })), String(senderFirstName)).resolves.toMatchObject({
         code: 'SENDER_NAME_INVALID'
@@ -285,7 +285,7 @@ describe('the shared rules (#604)', () => {
   });
 
   it('takes first names with marks, hyphens, apostrophes and full stops', () => {
-    for (const name of ['Pat', 'Jos\u00E9', "D'Arcy", 'Anne-Marie', 'Mary Ann', 'Jean-Luc', 'J.', 'J.R.', 'J. R.', 'O\u2019Neil', 'Zo\u00EB']) {
+    for (const name of ['Pat', 'Jos\u00E9', "D'Arcy", 'Anne-Marie', 'Mary Ann', 'Jean-Luc', 'J.', 'J.R.', 'J.R', 'A.B', 'J. R.', 'J.-P.', 'O\u2019Neil', 'Zo\u00EB']) {
       expect(senderFirstNameOf(name), name).toBe(name);
     }
     expect(senderFirstNameOf(undefined)).toBeNull();

@@ -63,13 +63,14 @@ const HIDDEN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Co}\p{Cn}\p{Cs}]/u;
 
 /**
  * A first name the page may show: one or two words joined by a space or a
- * hyphen ("Mary Ann", "Anne-Marie"). A word is letters and marks with
- * apostrophes inside and a full stop only at its end ("J."), or initials
- * ("J.R."). So nothing reads as a link, and little as a message, since the
- * page shows it to someone the sender chose: "evil.example" has a full stop
- * inside a word, and three words are refused (#605 review round 1).
+ * hyphen ("Mary Ann", "Anne-Marie"). A word is letters and marks with an
+ * apostrophe only between two letters and a full stop only at its end
+ * ("J."), or initials ("J.R.", "J.R"). So nothing reads as a link, and
+ * little as a message, since the page shows it to someone the sender chose:
+ * "evil.example" has a full stop inside a word, and three words are refused
+ * (#605 review rounds 1 and 2).
  */
-const FIRST_NAME = /^(?:(?:\p{L}\.){2,4}|\p{L}[\p{L}\p{M}'\u2019]*\.?)(?:[ -](?:(?:\p{L}\.){2,4}|\p{L}[\p{L}\p{M}'\u2019]*\.?))?$/u;
+const FIRST_NAME = /^(?:\p{L}(?:\.\p{L}){1,3}\.?|\p{L}(?:[\p{L}\p{M}]|['\u2019](?=\p{L}))*\.?)(?:[ -](?:\p{L}(?:\.\p{L}){1,3}\.?|\p{L}(?:[\p{L}\p{M}]|['\u2019](?=\p{L}))*\.?))?$/u;
 
 const RECIPIENT_NAME_MAX = 100;
 const SENDER_FIRST_NAME_MAX = 40;

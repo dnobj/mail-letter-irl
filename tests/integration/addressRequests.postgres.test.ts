@@ -151,7 +151,12 @@ describePostgres('address requests (#604)', () => {
 
   it('refuses a request on an erased account, and stores nothing (#605 review round 1)', async () => {
     const userId = await seedUser();
-    await pool.query(`UPDATE users SET erased_at = NOW() WHERE user_id = $1`, [userId]);
+    // A tombstone as erasure leaves it: migration 035's users_erased_tombstone
+    // holds the email to the placeholder whenever erased_at is set.
+    await pool.query(
+      `UPDATE users SET erased_at = NOW(), email = 'erased-' || gen_random_uuid()::text || '@erased.invalid' WHERE user_id = $1`,
+      [userId]
+    );
     await expect(service.createAddressRequest({ userId, recipientName: 'Ruth', senderFirstName: 'Pat' })).resolves.toEqual({
       ok: false,
       refusal: 'account_closed'
