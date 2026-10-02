@@ -35,6 +35,7 @@ import {
   getDraftStatusInputZ,
   setArrivalDateInputZ,
   setStationeryInputZ,
+  setLetterWordsInputZ,
   cancelScheduledMailInputZ,
   uploadPhotoChunkInputZ,
   submitFeatureRequestInputZ,
@@ -62,6 +63,7 @@ import {
   getDraftStatusOutputZ,
   setArrivalDateOutputZ,
   setStationeryOutputZ,
+  setLetterWordsOutputZ,
   cancelScheduledMailOutputZ,
   uploadPhotoChunkOutputZ,
   submitFeatureRequestOutputZ,
@@ -180,6 +182,7 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     'confirm_uploaded_image', // Repeating the same relay overwrites with the same value
     'set_arrival_date',       // The same date twice changes nothing more (#535)
     'set_stationery',         // The same style twice changes nothing more (#563)
+    'set_letter_words',       // The same words twice change nothing more (#586)
     'cancel_scheduled_mail'   // A repeat answers as already cancelled (#535)
   ];
 
@@ -813,6 +816,7 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   get_draft_status: getDraftStatusInputZ,
   set_arrival_date: setArrivalDateInputZ,
   set_stationery: setStationeryInputZ,
+  set_letter_words: setLetterWordsInputZ,
   cancel_scheduled_mail: cancelScheduledMailInputZ,
   upload_photo_chunk: uploadPhotoChunkInputZ,
   // Feedback tools
@@ -851,6 +855,7 @@ const zodOutputSchemas: Record<ToolName, z.ZodObject<any>> = {
   get_draft_status: getDraftStatusOutputZ,
   set_arrival_date: setArrivalDateOutputZ,
   set_stationery: setStationeryOutputZ,
+  set_letter_words: setLetterWordsOutputZ,
   cancel_scheduled_mail: cancelScheduledMailOutputZ,
   upload_photo_chunk: uploadPhotoChunkOutputZ,
   // Feedback tools
@@ -1594,6 +1599,9 @@ export function summarizeToolResult(
     case "set_stationery":
       // As for set_arrival_date: the tool's own sentence (#563).
       return typeof result.message === "string" ? result.message : "The stationery was changed.";
+    case "set_letter_words":
+      // As for set_stationery: the tool's own sentence, with any change in pages (#586).
+      return typeof result.message === "string" ? result.message : "The letter's words were changed.";
     case "cancel_scheduled_mail":
       // As for set_arrival_date: the sentence saying what went back.
       return typeof result.message === "string" ? result.message : "The scheduled mail was cancelled.";

@@ -124,5 +124,8 @@
  *     with our renderer and Pay & Send, the three letter previews say a
  *     longer letter runs on to two or three pages, paid with Pay & Send, and
  *     their output and narration name the pages.
+ * r33: set_letter_words (#586), listed while room to write is offered,
+ *     changes a letter preview's words without previewing again, on up to
+ *     three pages, and its output and narration say what it costs now.
  */
-export const STEERING_COPY_REV = 32;
+export const STEERING_COPY_REV = 33;

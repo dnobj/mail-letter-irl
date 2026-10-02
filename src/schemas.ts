@@ -6,6 +6,9 @@ import {
   HEADLINE_DESCRIPTION,
   MONOGRAM_DESCRIPTION,
   PREVIEW_PAGES_DESCRIPTION,
+  SET_LETTER_WORDS_BODY_DESCRIPTION,
+  SET_LETTER_WORDS_SIGN_OFF_DESCRIPTION,
+  SET_LETTER_WORDS_CAN_SEND_DESCRIPTION,
   PREVIEW_STATIONERY_DESCRIPTION,
   STATIONERY_SOURCE_DESCRIPTION,
   SET_ARRIVE_BY_DESCRIPTION,
@@ -997,6 +1000,29 @@ export const setStationeryOutputSchema: JsonSchema = {
       type: "boolean",
       description: "Whether the balance or a gift letter pays for the letter as it is now: a restyle can change its pages, and so its price"
     },
+    reasonCannotSend: { type: "string" },
+    sendEligibility: sendEligibilitySchema,
+    message: { type: "string" }
+  }
+};
+
+export const setLetterWordsInputSchema: JsonSchema = {
+  type: "object",
+  required: ["draftId", "bodyText", "signOff"],
+  properties: {
+    draftId: { type: "string", description: "The draftId from a letter preview" },
+    bodyText: { type: "string", description: SET_LETTER_WORDS_BODY_DESCRIPTION },
+    signOff: { type: "string", description: SET_LETTER_WORDS_SIGN_OFF_DESCRIPTION }
+  }
+};
+
+export const setLetterWordsOutputSchema: JsonSchema = {
+  type: "object",
+  required: ["draftId", "canSendNow", "sendEligibility", "message"],
+  properties: {
+    draftId: { type: "string" },
+    pages: { type: "integer", minimum: 2, maximum: MAX_LETTER_PAGES, description: PREVIEW_PAGES_DESCRIPTION },
+    canSendNow: { type: "boolean", description: SET_LETTER_WORDS_CAN_SEND_DESCRIPTION },
     reasonCannotSend: { type: "string" },
     sendEligibility: sendEligibilitySchema,
     message: { type: "string" }

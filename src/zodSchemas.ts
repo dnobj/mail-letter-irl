@@ -329,6 +329,16 @@ export const setStationeryInputZ = z.object({
   headline: headlineZ
 });
 
+// A letter preview's words, changed without previewing again (#586). Listed
+// only while room to write is offered (src/server.ts).
+export const SET_LETTER_WORDS_BODY_DESCRIPTION = "The letter's body in full: it replaces the words the preview has";
+export const SET_LETTER_WORDS_SIGN_OFF_DESCRIPTION = "The closing and signature in full (e.g., 'Love, Pat')";
+export const setLetterWordsInputZ = z.object({
+  draftId: z.string().describe("The draftId from a letter preview"),
+  bodyText: z.string().describe(SET_LETTER_WORDS_BODY_DESCRIPTION),
+  signOff: z.string().describe(SET_LETTER_WORDS_SIGN_OFF_DESCRIPTION)
+});
+
 // Held mail cancelled before it goes to the printer (#535). Listed only while
 // LETTER_IRL_ARRIVE_BY_ENABLED is on (src/server.ts).
 export const cancelScheduledMailInputZ = z.object({
@@ -797,6 +807,18 @@ export const setStationeryOutputZ = z.object({
   stationery: previewStationeryZ.describe(SET_STATIONERY_OUTPUT_DESCRIPTION),
   pages: z.number().int().min(2).max(MAX_LETTER_PAGES).optional().describe(PREVIEW_PAGES_DESCRIPTION),
   canSendNow: z.boolean().describe("Whether the balance or a gift letter pays for the letter as it is now: a restyle can change its pages, and so its price"),
+  reasonCannotSend: z.string().optional(),
+  sendEligibility: sendEligibilityZ,
+  message: z.string()
+});
+
+/** set_letter_words' answer (#586); the page drawn again and how full it is go to the card in _meta. */
+export const SET_LETTER_WORDS_CAN_SEND_DESCRIPTION =
+  "Whether the balance or a gift letter pays for the letter as it is now: new words can change its pages, and so its price";
+export const setLetterWordsOutputZ = z.object({
+  draftId: z.string(),
+  pages: z.number().int().min(2).max(MAX_LETTER_PAGES).optional().describe(PREVIEW_PAGES_DESCRIPTION),
+  canSendNow: z.boolean().describe(SET_LETTER_WORDS_CAN_SEND_DESCRIPTION),
   reasonCannotSend: z.string().optional(),
   sendEligibility: sendEligibilityZ,
   message: z.string()

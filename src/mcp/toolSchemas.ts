@@ -161,6 +161,12 @@ export const toolInputSchemas = {
     monogram: z.string().optional(),
     headline: z.string().optional()
   }),
+  // A letter preview's words, changed without previewing again (#586)
+  set_letter_words: z.object({
+    draftId: z.string(),
+    bodyText: z.string(),
+    signOff: z.string()
+  }),
   // Held mail cancelled before it goes to the printer (#535)
   cancel_scheduled_mail: z.object({
     orderId: z.string(),

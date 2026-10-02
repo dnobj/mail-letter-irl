@@ -85,7 +85,8 @@ function draft(options: { layoutType?: LetterLayoutType; gift?: boolean; bodyTex
     preview_html: previewHtml,
     pages: 1,
     is_gift_send: options.gift === true,
-    required_credits: 2
+    required_credits: 2,
+    stationery: null
   };
 }
 
@@ -125,7 +126,9 @@ describe('set_stationery', () => {
     expect(change.stationery).toEqual(botanical);
     // The service records the version that goes with it (rendererVersionFor).
     // And the pages it is laid out on now (#586): one, as before.
-    expect(Object.keys(change).sort()).toEqual(['pages', 'previewHtml', 'stationery']);
+    expect(Object.keys(change).sort()).toEqual(['drawnFrom', 'pages', 'previewHtml', 'stationery']);
+    // With the words it was drawn from, as read, so a change under it is refused (#586).
+    expect(change.drawnFrom).toEqual({ bodyText: draft().body_text, signOff: 'Love, Pat' });
     expect(change.pages).toBe(1);
     expect(inked(change.previewHtml).length).toBeGreaterThan(0);
     expect(change.previewHtml).toContain('<body data-renderer="pdf-2">');
@@ -299,7 +302,8 @@ describe('set_stationery', () => {
     ['not_found', 'DRAFT_NOT_FOUND'],
     ['sent', 'DRAFT_ALREADY_SENT'],
     ['expired', 'DRAFT_EXPIRED'],
-    ['checkout_pending', 'DRAFT_CHECKOUT_PENDING']
+    ['checkout_pending', 'DRAFT_CHECKOUT_PENDING'],
+    ['changed', 'DRAFT_CHANGED']
   ] as const)('says why when the draft changed under the lock: %s', async (refusal, code) => {
     vi.mocked(getDraftForStationery).mockResolvedValue(draft());
     vi.mocked(setDraftStationery).mockResolvedValue(refusal);

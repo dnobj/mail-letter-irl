@@ -859,7 +859,9 @@ export async function createPackCheckout(
 }
 
 async function prepareJitOrder(
-  params: CreateJitCheckoutParams
+  params: CreateJitCheckoutParams,
+  /** The price the caps were checked at, from the peek (#586). */
+  checkedCents: number
 ): Promise<{ order: Order; reused: boolean }> {
   return transaction(async client => {
     const draftResult = await client.query<LetterDraft>(
@@ -917,6 +919,15 @@ async function prepareJitOrder(
       // smaller option's price is never charged for it (#578).
       throw Object.assign(new Error('Pay & Send does not sell this mail option'), {
         code: 'JIT_OPTION_NOT_SOLD'
+      });
+    }
+    // The caps were checked at the peek's price (#586): new words or a restyle
+    // since then can change the letter's pages, and so its price. Refused
+    // before any order or session, so a retry peeks again and checks the caps
+    // at the price it charges.
+    if (product.amountCents !== checkedCents) {
+      throw Object.assign(new Error('The draft changed while its checkout was being made'), {
+        code: 'DRAFT_CHANGED'
       });
     }
 
@@ -1178,8 +1189,9 @@ export async function createJitCheckout(
   // and refuses an option this deployment does not sell (#578).
   // With its pages (#586): without them a long letter would warm the one-page
   // price and meet the charge cap at the one-page amount. A restyle can change
-  // them between this peek and the lock (#591): the order is still priced from
-  // the locked row, so only this advisory warm-up and cap check can be stale.
+  // them between this peek and the lock (#591, and new words, #586):
+  // prepareJitOrder refuses an order whose locked price is not the one the
+  // caps were checked at, so neither the warm-up nor the caps go stale.
   const draftPeek = await query<{ mail_type: string | null; postcard_size: string | null; pages: number | null }>(
     'SELECT mail_type, postcard_size, pages FROM letter_drafts WHERE draft_id = $1 AND user_id = $2',
     [params.draftId, params.userId]
@@ -1198,14 +1210,12 @@ export async function createJitCheckout(
   // inFlight is 1: the letters row is not written until fulfilment, so today's
   // count does not yet include this send.
   await assertMailWithinDailyCaps({ query }, params.userId, 1);
-  await assertChargeWithinDailyCap(
-    params.userId,
-    getJitProductConfig(peekedOption)?.amountCents ?? 0
-  );
+  const checkedCents = getJitProductConfig(peekedOption)?.amountCents ?? 0;
+  await assertChargeWithinDailyCap(params.userId, checkedCents);
 
   // The same-mail check (#412) runs inside prepareJitOrder, just before a new
   // order is inserted: only there is it known that the call buys something.
-  const prepared = await prepareJitOrder(params);
+  const prepared = await prepareJitOrder(params, checkedCents);
   // The asymmetry with prepareJitOrder's reuse branch is DELIBERATE (#279).
   //
   // That branch accepts `stripe_checkout_session_id || checkout_url`; this one

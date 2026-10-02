@@ -41,6 +41,8 @@ import {
   setArrivalDateTool,
   // A letter preview's stationery, changed without previewing again (#563)
   setStationeryTool,
+  // A letter preview's words, changed without previewing again (#586)
+  setLetterWordsTool,
   // Held mail cancelled before it goes to the printer (#535)
   cancelScheduledMailTool
 } from "./tools/index.js";
@@ -48,10 +50,12 @@ import { REQUEST_SEND_TOOL } from "./tools/requestSend.js";
 import { UPLOAD_PHOTO_CHUNK_TOOL } from "./tools/uploadPhotoChunk.js";
 import { SET_ARRIVAL_DATE_TOOL } from "./tools/setArrivalDate.js";
 import { SET_STATIONERY_TOOL } from "./tools/setStationery.js";
+import { SET_LETTER_WORDS_TOOL } from "./tools/setLetterWords.js";
 import { CANCEL_SCHEDULED_MAIL_TOOL } from "./tools/cancelScheduledMail.js";
 import { isCardUploadEnabled } from "./config/cardUpload.js";
 import { isArriveByEnabled } from "./config/arriveBy.js";
 import { isStationeryOffered } from "./config/stationery.js";
+import { letterPageLimit } from "./config/roomToWrite.js";
 import { isSendConfirmationEnabled } from "./config/sendConfirmation.js";
 import {
   McpToolDefinition,
@@ -99,6 +103,9 @@ const tools: McpToolDefinition<any, any>[] = [
   // A letter preview's stationery, changed without previewing again, and
   // remembered for the next (#563). Listed only while stationery is offered.
   setStationeryTool,
+  // A letter preview's words, changed without previewing again, on up to the
+  // pages a preview may take (#586). Listed only while room to write is offered.
+  setLetterWordsTool,
   // The model's way to send, once the send rule is on (#470): a link where
   // the person sends the preview themselves. Listed only while the rule is on.
   requestSendTool,
@@ -305,7 +312,8 @@ export class LetterIrlServer {
    * (#484), the checkouts only where it takes purchases (#475), image
    * generation only where it is allowed (#467), set_arrival_date and
    * cancel_scheduled_mail only while arrival dates are on (#535), and
-   * set_stationery only while stationery is offered (#563). Without an app,
+   * set_stationery only while stationery is offered (#563), and
+   * set_letter_words only while room to write is (#586). Without an app,
    * the list for an app that trusts nothing.
    */
   listTools(client: ClientProfile = callingApp(undefined)) {
@@ -317,11 +325,13 @@ export class LetterIrlServer {
     const cardUpload = isCardUploadEnabled();
     const arriveBy = isArriveByEnabled();
     const stationery = isStationeryOffered();
+    const roomToWrite = letterPageLimit() > 1;
     return tools
       .filter((tool) => sendRule || tool.name !== REQUEST_SEND_TOOL)
       .filter((tool) => cardUpload || tool.name !== UPLOAD_PHOTO_CHUNK_TOOL)
       .filter((tool) => arriveBy || (tool.name !== SET_ARRIVAL_DATE_TOOL && tool.name !== CANCEL_SCHEDULED_MAIL_TOOL))
       .filter((tool) => stationery || tool.name !== SET_STATIONERY_TOOL)
+      .filter((tool) => roomToWrite || tool.name !== SET_LETTER_WORDS_TOOL)
       .filter((tool) => client.inAppPurchases || !IN_APP_PURCHASE_TOOLS.has(tool.name))
       .filter((tool) => offersImageGeneration(client) || !IMAGE_GENERATION_TOOLS.has(tool.name))
       .map((tool) => ({

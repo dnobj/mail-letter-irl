@@ -361,6 +361,9 @@ export function checkoutRefusalFor(error: unknown): Refusal {
       return refuse(409, 'use_letters', 'You have letters for this, so there is nothing to pay. Press Send instead.');
     case 'JIT_OPTION_NOT_SOLD':
       return refuse(409, 'not_sold', "This can't be paid for right now. Make a new preview, then try again.");
+    // Its pages, and so its price, changed while the payment was opening (#586).
+    case 'DRAFT_CHANGED':
+      return refuse(409, 'changed', 'This letter changed while its payment was opening. Refresh this page to see it, then pay.');
     case 'JIT_DISABLED':
     case 'JIT_NOT_CONFIGURED':
     case 'PRICE_ID_NOT_CONFIGURED':

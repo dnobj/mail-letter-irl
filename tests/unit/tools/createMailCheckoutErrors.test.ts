@@ -87,6 +87,14 @@ describe('friendlyCheckoutError terminality (#278)', () => {
     expect(friendly.message).toBe("Pay & Send isn't available for this mail. Please create a new preview.");
     expect((friendly as { code?: string }).code).toBe('JIT_OPTION_NOT_SOLD');
   });
+
+  it('says a letter that changed while its payment opened can be tried again, nothing charged (#586)', () => {
+    const friendly = friendlyCheckoutError(
+      Object.assign(new Error('The draft changed while its checkout was being made'), { code: 'DRAFT_CHANGED' })
+    );
+    expect(friendly.message).toBe('This letter changed while its payment was being opened, so nothing was charged. Please try again.');
+    expect((friendly as { code?: string }).code).toBe('DRAFT_CHANGED');
+  });
 });
 
 /**

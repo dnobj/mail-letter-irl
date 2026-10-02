@@ -15,6 +15,8 @@ import type { AddressValidationInput, AddressValidationResult } from "../service
 import {
   estimateRequiredCredits,
   letterPrintText,
+  renderedPageImage,
+  rendererDocumentPages,
   renderLayoutPreviewHtml,
   renderLetterPreviewDocument,
   stampedAddressLines,
@@ -695,6 +697,37 @@ export function withDisplayImage(layout: Layout, previewDataUri: string | undefi
       items: page.items.map(item => (item.kind === "image" ? { ...item, image } : item))
     }))
   };
+}
+
+/**
+ * A letter draft's preview drawn again from a new layout, in place (#563,
+ * #586): the letter's pages, as many as it takes now, with the small copy of
+ * its picture from whichever stored page showed it; then the pages after the
+ * letter's own, a gift letter's card, as they were. `pages` is how many of
+ * the stored pages are the letter's. Null when the stored preview cannot be
+ * drawn from: fewer pages than it counts, none, or no picture where the new
+ * layout draws one.
+ */
+export function redrawLetterPreview(
+  stored: { previewHtml: string | null; pages: number },
+  layout: Layout,
+  letter: { sender: Address; recipient: Address; bodyText: string; signOff: string },
+  stationery: Stationery | undefined
+): string | null {
+  const storedPages = rendererDocumentPages(stored.previewHtml);
+  const letterPages = storedPages.slice(0, stored.pages);
+  const after = storedPages.slice(stored.pages);
+  const image = letterPages.map(renderedPageImage).find(found => found !== undefined);
+  const drawsImage = layout.pages.some(page => page.items.some(item => item.kind === "image"));
+  if (letterPages.length < stored.pages || letterPages.length === 0 || (drawsImage && !image)) return null;
+  const drawn = renderPreviewSvg(withDisplayImage(layout, image), {
+    addresses: { from: stampedAddressLines(letter.sender), to: stampedAddressLines(letter.recipient) }
+  });
+  return renderLetterPreviewDocument(
+    [...drawn, ...after],
+    { bodyText: letter.bodyText, signOff: letter.signOff },
+    rendererVersionFor(stationery)
+  );
 }
 
 // ============================================================================

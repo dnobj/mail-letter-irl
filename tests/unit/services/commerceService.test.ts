@@ -1614,6 +1614,35 @@ describe('commerceService', () => {
       expect(mocks.createJitSession).not.toHaveBeenCalled();
     });
 
+    it('refuses a checkout whose letter changed its pages since the peek, before any order (#586)', async () => {
+      mocks.getJitProduct.mockImplementation((({ mailType, pages }: { mailType: string; pages?: number }) =>
+        mailType === 'letter' && pages === 2
+          ? {
+              productCode: 'jit-letter-2-pages', priceId: 'price-2p', amountCents: 599,
+              currency: 'usd', name: 'Pay & Send One Two-Page Letter', description: 'x', mailType: 'letter'
+            }
+          : {
+              productCode: 'jit-letter', priceId: 'price-1p', amountCents: 499,
+              currency: 'usd', name: 'Pay & Send One Physical Letter', description: 'x', mailType: 'letter'
+            }) as never);
+      mocks.query
+        // The send block, then the peek (one page, as the caps are checked),
+        // then the locked row: new words ran it on to a second page meanwhile.
+        .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
+        .mockResolvedValueOnce({ rows: [{ mail_type: 'letter', postcard_size: null, pages: 1 }] })
+        .mockResolvedValueOnce({ rows: [{ ...DRAFT, mail_type: 'letter', postcard_size: null, pages: 2 }] })
+        .mockResolvedValue({ rows: [] });
+
+      await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' }))
+        .rejects.toMatchObject({ code: 'DRAFT_CHANGED' });
+
+      // Priced at the locked row's two pages, which is not what the caps checked.
+      expect(mocks.getJitProduct).toHaveBeenLastCalledWith({ mailType: 'letter', pages: 2 });
+      const sql = mocks.query.mock.calls.map(call => String(call[0]));
+      expect(sql.some(statement => statement.includes('INSERT INTO orders'))).toBe(false);
+      expect(mocks.createJitSession).not.toHaveBeenCalled();
+    });
+
     it("prices a checkout by its order's product, never by its mail type", async () => {
       const optionProduct = {
         productCode: 'jit-postcard-4x6', priceId: 'price-4x6', amountCents: 399,
