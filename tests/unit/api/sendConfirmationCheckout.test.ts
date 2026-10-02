@@ -160,6 +160,18 @@ describe('the confirmation page takes Pay & Send for mail no pack pays for (#579
       expect(getSendEligibility).toHaveBeenCalledWith(0, 2, { mailType: 'postcard', postcardSize: '6x4' });
     });
 
+    it('prices a two-page letter as its own Pay & Send product, resolved first (#586)', async () => {
+      vi.mocked(getDraft).mockResolvedValue(
+        draft({ mail_type: 'letter', postcard_size: null, pages: 2, renderer_version: 'pdf-1' }) as never
+      );
+
+      const { json } = await call('GET', PATH);
+
+      expect(json()).toMatchObject({ packPays: false, payment: PAY, pages: 2 });
+      expect(ensurePriceCatalog).toHaveBeenCalledWith('jit-letter-2-pages');
+      expect(getSendEligibility).toHaveBeenCalledWith(0, 2, { mailType: 'letter', pages: 2 });
+    });
+
     it('says nothing new for mail a pack pays for', async () => {
       for (const row of [draft({ postcard_size: '6x9' }), draft({ mail_type: 'letter', postcard_size: null })]) {
         vi.mocked(getDraft).mockResolvedValue(row as never);

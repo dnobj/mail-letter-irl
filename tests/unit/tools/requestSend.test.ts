@@ -140,6 +140,13 @@ describe("request_send", () => {
     expect(result.confirmationUrl).toBe(`https://site.example/confirm/${DRAFT_ID}`);
   });
 
+  it("says so for a letter longer than one page, by the pages its draft records (#586)", async () => {
+    vi.mocked(getDraft).mockResolvedValue(draft({ pages: 2, renderer_version: "pdf-1" }) as any);
+    expect((await requestSendTool.handler({ draftId: DRAFT_ID }, context())).paidPerSend).toBe(true);
+    vi.mocked(getDraft).mockResolvedValue(draft({ pages: 1 }) as any);
+    expect(await requestSendTool.handler({ draftId: DRAFT_ID }, context())).not.toHaveProperty("paidPerSend");
+  });
+
   it("refuses someone else's draft in the words it uses for a missing one", async () => {
     vi.mocked(getDraft).mockResolvedValue(draft({ user_id: "auth0|someone-else" }) as any);
     const theirs = await refusal({ draftId: DRAFT_ID });

@@ -225,6 +225,24 @@ describe('createMailOrderFromDraft', () => {
     expect(savedLetter?.content).not.toHaveProperty('stationery');
   });
 
+  it('copies the pages a longer letter was laid out on into the letter, and none for one page (#586)', async () => {
+    const funding = { type: 'jit_order' as const, orderId: 'order-jit' };
+    commerceOrder = {
+      order_id: 'order-jit', order_type: 'jit_mail', product_code: 'jit-letter-3-pages',
+      user_id: 'user-1', draft_id: 'draft-1', status: 'paid'
+    };
+    draft = { ...draft, pages: 3, renderer_version: 'pdf-1' };
+    await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter', funding });
+    expect(savedLetter?.content).toMatchObject({ rendererVersion: 'pdf-1', pages: 3 });
+  });
+
+  it("leaves a one-page letter's content without pages (#586)", async () => {
+    draft = { ...draft, pages: 1, renderer_version: 'pdf-1' };
+    await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter' });
+    expect(savedLetter?.content).toMatchObject({ rendererVersion: 'pdf-1' });
+    expect(savedLetter?.content).not.toHaveProperty('pages');
+  });
+
   it('copies the renderer into a postcard too (#534 Phase 4)', async () => {
     draft.mail_type = 'postcard';
     draft.renderer_version = 'pdf-1';
@@ -286,7 +304,7 @@ describe('createMailOrderFromDraft', () => {
   it('uses paid JIT funding without mutating prepaid balance', async () => {
     commerceOrder = {
       order_id: 'order-jit',
-      order_type: 'jit_mail',
+      order_type: 'jit_mail', product_code: 'jit-letter',
       user_id: 'user-1',
       draft_id: 'draft-1',
       status: 'paid'
@@ -305,6 +323,62 @@ describe('createMailOrderFromDraft', () => {
     expect(commerceOrder).toMatchObject({
       status: 'fulfillment_pending',
       letter_id: result.letter.letter_id
+    });
+  });
+
+  describe('the mail a Pay & Send order paid for (#586)', () => {
+    const paidOrder = (productCode: string) => ({
+      order_id: 'order-jit',
+      order_type: 'jit_mail',
+      product_code: productCode,
+      user_id: 'user-1',
+      draft_id: 'draft-1',
+      status: 'paid'
+    });
+    const sendPaid = () =>
+      createMailOrderFromDraft({
+        draftId: 'draft-1',
+        userId: 'user-1',
+        mailType: 'letter',
+        funding: { type: 'jit_order', orderId: 'order-jit' }
+      });
+
+    it('sends a two-page letter its two-page order paid for', async () => {
+      draft = { ...draft, pages: 2, renderer_version: 'pdf-1' };
+      commerceOrder = paidOrder('jit-letter-2-pages');
+      await expect(sendPaid()).resolves.toMatchObject({ alreadyConsumed: false });
+      expect(createOutboxJob).toHaveBeenCalledTimes(1);
+    });
+
+    it('refuses a letter whose pages changed after its order was paid, so the order is refunded rather than sent', async () => {
+      draft = { ...draft, pages: 2, renderer_version: 'pdf-1' };
+      commerceOrder = paidOrder('jit-letter');
+      await expect(sendPaid()).rejects.toMatchObject({
+        code: 'JIT_PRODUCT_MISMATCH',
+        diagnosticClass: 'JIT_PRODUCT_MISMATCH'
+      });
+      expect(createOutboxJob).not.toHaveBeenCalled();
+      expect(savedLetter).toBeNull();
+      expect(draft.status).toBe('pending');
+    });
+
+    it('refuses the reverse too: a one-page letter on a two-page order', async () => {
+      commerceOrder = paidOrder('jit-letter-2-pages');
+      await expect(sendPaid()).rejects.toMatchObject({ code: 'JIT_PRODUCT_MISMATCH' });
+      expect(createOutboxJob).not.toHaveBeenCalled();
+    });
+
+    it('refuses an order with a product code no mail is', async () => {
+      commerceOrder = paidOrder('credit-pack-10');
+      await expect(sendPaid()).rejects.toMatchObject({ code: 'JIT_PRODUCT_MISMATCH' });
+    });
+
+    it('refuses a draft no Pay & Send product matches by name, never by a TypeError', async () => {
+      // Migration 047 allows at most three pages; a row past that matches no product.
+      draft = { ...draft, pages: 4, renderer_version: 'pdf-1' };
+      commerceOrder = paidOrder('jit-letter-3-pages');
+      await expect(sendPaid()).rejects.toMatchObject({ code: 'JIT_PRODUCT_MISMATCH', diagnosticClass: 'JIT_PRODUCT_MISMATCH' });
+      expect(createOutboxJob).not.toHaveBeenCalled();
     });
   });
 
@@ -414,7 +488,7 @@ describe('createMailOrderFromDraft', () => {
       gateUp();
       commerceOrder = {
         order_id: 'order-jit',
-        order_type: 'jit_mail',
+        order_type: 'jit_mail', product_code: 'jit-letter',
         user_id: 'user-1',
         draft_id: 'draft-1',
         status: 'paid'
@@ -525,7 +599,7 @@ describe('createMailOrderFromDraft', () => {
       lettersTodayGlobal = 99;
       commerceOrder = {
         order_id: 'order-jit',
-        order_type: 'jit_mail',
+        order_type: 'jit_mail', product_code: 'jit-letter',
         user_id: 'user-1',
         draft_id: 'draft-1',
         status: 'paid'
@@ -608,7 +682,7 @@ describe('createMailOrderFromDraft', () => {
       recentLetters = [comparableRow(draft)];
       commerceOrder = {
         order_id: 'order-jit',
-        order_type: 'jit_mail',
+        order_type: 'jit_mail', product_code: 'jit-letter',
         user_id: 'user-1',
         draft_id: 'draft-1',
         status: 'paid'
@@ -705,7 +779,7 @@ describe('createMailOrderFromDraft', () => {
       draft.expires_at = new Date(Date.parse('2026-10-01T17:00:00Z') + 60_000);
       draft.arrive_by = '2026-10-12';
       draft.mail_on = '2026-10-01';
-      commerceOrder = { order_id: 'order-jit', order_type: 'jit_mail', user_id: 'user-1', draft_id: 'draft-1', status: 'paid' };
+      commerceOrder = { order_id: 'order-jit', order_type: 'jit_mail', product_code: 'jit-letter', user_id: 'user-1', draft_id: 'draft-1', status: 'paid' };
 
       await send({ type: 'jit_order', orderId: 'order-jit' });
 
@@ -721,7 +795,7 @@ describe('createMailOrderFromDraft', () => {
     it('holds a paid Pay & Send order whose date is still ahead, like any other', async () => {
       draft.arrive_by = '2026-10-16';
       draft.mail_on = '2026-10-06';
-      commerceOrder = { order_id: 'order-jit', order_type: 'jit_mail', user_id: 'user-1', draft_id: 'draft-1', status: 'paid' };
+      commerceOrder = { order_id: 'order-jit', order_type: 'jit_mail', product_code: 'jit-letter', user_id: 'user-1', draft_id: 'draft-1', status: 'paid' };
 
       await send({ type: 'jit_order', orderId: 'order-jit' });
 

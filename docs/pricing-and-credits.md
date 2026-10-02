@@ -221,6 +221,7 @@ used in development until the owner approves them:
 - **Flags:** an option is sold only while its flag is on, as well as Pay & Send. Each flag also switches its option on, so an option is never offered without a price.
 - **Off:** with its flag off, an option has no price at all. A quote offers no Pay & Send for it, and a checkout is refused rather than charging a smaller option's price.
 - **Ordering:** a checkout is priced by the product its order recorded.
+- **Fulfilment:** a paid order mails only the mail it paid for. A draft whose option no longer matches the order's product, such as a letter that changed length after its checkout opened, is refused (`JIT_PRODUCT_MISMATCH`) and the order goes to `refund_pending`, rather than mailing at another option's price (#586). A letter's pages are stored on its draft (`letter_drafts.pages`, migration 047), and every price, refusal and checkout reads them there.
 - **Packs and gift letters** pay for one-page letters and 6x9 postcards only (#579), in any layout and stationery. Every other option is paid per send with Pay & Send, whatever the balance:
   - the quote offers no pack and no send from the balance for it;
   - the send refuses a pack or gift letter for it (`PACK_CANNOT_PAY`);

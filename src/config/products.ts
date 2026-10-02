@@ -58,18 +58,22 @@ export interface MailOption {
 }
 
 /**
- * The mail option a draft is, from its row: its mail type and postcard size.
- * Letters are one page until room to write records a draft's pages (#578).
- * Here, beside the option, so the send and the checkout read it alike.
+ * The mail option a draft is, from its row: its mail type, a letter's printed
+ * pages (migration 047, #586) and a postcard's size. Here, beside the option,
+ * so the send, the checkout and the confirmation page read it alike: a reader
+ * that loads only part of the row must load `pages` too, or a long letter is
+ * priced as one page.
  */
 export function draftMailOption(draft: {
   mail_type?: string | null;
   postcard_size?: string | null;
+  pages?: number | string | null;
 }): MailOption {
   const mailType = (draft.mail_type || 'letter') as MailType;
-  return mailType === 'postcard'
-    ? { mailType, postcardSize: (draft.postcard_size || '6x9') as PostcardSize }
-    : { mailType };
+  if (mailType === 'postcard') return { mailType, postcardSize: (draft.postcard_size || '6x9') as PostcardSize };
+  // A SMALLINT comes back from pg as a number; anything else is read as its number.
+  const pages = Number(draft.pages ?? 1);
+  return pages > 1 ? { mailType, pages } : { mailType };
 }
 
 /**
