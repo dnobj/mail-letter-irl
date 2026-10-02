@@ -40,6 +40,7 @@ import {
   layoutGiftPage,
   layoutLetter,
   layoutPostcard,
+  MAX_LETTER_PAGES,
   PRINTABLE_RENDERER_VERSIONS,
   readImageDataUri,
   renderPdf,
@@ -58,10 +59,29 @@ import {
  * resolve it with a retry once a build that can print it is deployed.
  */
 class RenderRefusal extends Error {
-  constructor(readonly reason: 'unknown_version' | 'image' | 'overflow' | 'size' | 'render', message: string) {
+  constructor(readonly reason: 'unknown_version' | 'image' | 'overflow' | 'size' | 'render' | 'pages', message: string) {
     super(message);
     this.name = 'RenderRefusal';
   }
+}
+
+/**
+ * The pages a letter prints on (#586): one unless its content says more. Only
+ * our renderer lays out more than one, and never beside a gift card, which
+ * takes a sheet of its own. Anything else is refused before any request.
+ */
+function letterPages(params: LetterParams, usePdf: boolean): number {
+  const pages = params.pages ?? 1;
+  if (!Number.isInteger(pages) || pages < 1 || pages > MAX_LETTER_PAGES) {
+    throw new RenderRefusal('pages', `The letter's page count is not a whole number from 1 to ${MAX_LETTER_PAGES}.`);
+  }
+  if (pages > 1 && !usePdf) {
+    throw new RenderRefusal('pages', 'A letter of more than one page prints only from our renderer, not the legacy HTML.');
+  }
+  if (pages > 1 && params.giftCard) {
+    throw new RenderRefusal('pages', 'A gift letter prints on one page, its card on a sheet of its own.');
+  }
+  return pages;
 }
 
 /**
@@ -386,6 +406,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       }
       // A gift send prints its card as the PDF's second page (renderForPrint).
       const usePdf = renderer != null;
+      const pages = letterPages(params, usePdf);
 
       const to = this.buildContact(params.recipientName, params.recipientAddress);
       const from = this.buildContact(
@@ -395,11 +416,13 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       const description = `Letter to ${params.recipientName}`;
       // Enable color printing for layouts with images
       const color = params.color ?? (params.layoutType !== 'text_only' && (!!params.headerImageData || !!params.inlineImageData));
-      const doubleSided = params.doubleSided ?? false;
+      // Double-sided exactly when the letter itself runs past one page (#586),
+      // never because the PDF does: a gift card keeps a sheet of its own.
+      const doubleSided = pages > 1;
 
       let response: PostGridLetterResponse;
       if (usePdf) {
-        const pdf = await this.renderForPrint(params);
+        const pdf = await this.renderForPrint(params, pages);
         response = await this.apiRequest<PostGridLetterResponse>(
           'POST',
           '/letters',
@@ -576,18 +599,21 @@ export class PostGridProvider implements LetterFulfillmentProvider {
     const baseCost = 50; // ~$0.50 for printing/handling
     const postageCost = 73; // ~$0.73 for First-Class postage (2025 USPS rate)
     const colorExtra = params.color ? 35 : 0; // ~$0.35 extra for color
-    const doubleSidedExtra = params.doubleSided ? 10 : 0; // ~$0.10 extra for double-sided
+    const doubleSided = this.extraPagesCents(params) > 0;
+    const doubleSidedExtra = doubleSided ? 10 : 0; // ~$0.10 extra for double-sided
+    const extraPagesCost = this.extraPagesCents(params);
 
     return {
       baseCostCents: baseCost,
       postageCents: postageCost,
-      servicesCents: colorExtra + doubleSidedExtra,
+      servicesCents: colorExtra + doubleSidedExtra + extraPagesCost,
       totalCents,
       breakdown: [
         { item: 'Printing & Handling', costCents: baseCost },
         { item: 'First-Class Postage', costCents: postageCost },
         ...(params.color ? [{ item: 'Color Printing', costCents: colorExtra }] : []),
-        ...(params.doubleSided ? [{ item: 'Double-Sided', costCents: doubleSidedExtra }] : [])
+        ...(doubleSided ? [{ item: 'Double-Sided', costCents: doubleSidedExtra }] : []),
+        ...(extraPagesCost > 0 ? [{ item: 'Extra Pages', costCents: extraPagesCost }] : [])
       ]
     };
   }
@@ -818,7 +844,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
    * or the renderer changed since: a refusal, never a clipped letter. Every
    * failure here happens before any request, and is a RenderRefusal.
    */
-  private async renderForPrint(params: LetterParams): Promise<Buffer> {
+  private async renderForPrint(params: LetterParams, pages: number): Promise<Buffer> {
     const layoutType = params.layoutType ?? 'text_only';
     const imageData = layoutType === 'header_image'
       ? params.headerImageData
@@ -842,12 +868,25 @@ export class PostGridProvider implements LetterFulfillmentProvider {
     }
     let layout;
     try {
-      layout = layoutLetter({ text: params.message, layoutType, image, stationery });
+      // Laid out as a preview lays it out, on up to the most pages (#586), so
+      // the letter prints as it was drawn by construction: a page count of its
+      // own would treat a last line of invisible characters otherwise (#589
+      // review round 3). A letter that fits one page is laid out as ever.
+      layout = layoutLetter({ text: params.message, layoutType, image, stationery }, { maxPages: MAX_LETTER_PAGES });
     } catch (error) {
       throw new RenderRefusal('render', `The letter could not be laid out: ${reason(error)}`);
     }
     if (layout.overflowLines > 0) {
-      throw new RenderRefusal('overflow', `The letter runs ${layout.overflowLines} line(s) past the page.`);
+      throw new RenderRefusal('overflow', `The letter runs ${layout.overflowLines} line(s) past ${MAX_LETTER_PAGES} pages.`);
+    }
+    // On exactly the pages it was previewed and priced on (#586): one that now
+    // lays out on more would print pages nobody paid for, and on fewer was sold
+    // for pages it would not fill. Its layout changed since the preview, as an
+    // overflow's does, so it is held as one: the reason alone tells an operator
+    // to fix the renderer and retry (#589 review round 1), where `pages` means a
+    // count no writer stores.
+    if (layout.pages.length !== pages) {
+      throw new RenderRefusal('overflow', `The letter lays out on ${layout.pages.length} page(s), not the ${pages} it was previewed on.`);
     }
     // A gift send's card, with the code the send minted, is the second page.
     if (params.giftCard) {
@@ -1108,11 +1147,20 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       baseCost = 120; // Color printing: ~$1.20
     }
 
-    if (params.doubleSided) {
+    if (this.extraPagesCents(params) > 0) {
       baseCost += 10; // Double-sided: +$0.10
     }
 
-    return baseCost;
+    return baseCost + this.extraPagesCents(params);
+  }
+
+  /**
+   * Pages past the first (#586): about $0.10 each in black and white and
+   * $0.20 in colour. An internal estimate, as the rest is.
+   */
+  private extraPagesCents(params: LetterParams): number {
+    const pages = params.pages ?? 1;
+    return Number.isInteger(pages) && pages > 1 ? (pages - 1) * (params.color ? 20 : 10) : 0;
   }
 
   /**

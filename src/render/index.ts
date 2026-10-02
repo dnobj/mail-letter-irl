@@ -4,8 +4,8 @@
  * reading the bundled fonts. Letters previewed with it (LETTER_IRL_PRINT_RENDERER,
  * src/config/printRenderer.ts) record RENDERER_VERSION and print from its PDF.
  */
-export { drawsGrapheme, drawsGraphemeIn, inFace, layoutLetter, wrapParagraph } from './layout.js';
-export type { ImageBox, Layout, LayoutPage, LetterContent, PathItem, TextRun } from './layout.js';
+export { drawsGrapheme, drawsGraphemeIn, inFace, layoutLetter, pageFit, wrapParagraph } from './layout.js';
+export type { ImageBox, Layout, LayoutOptions, LayoutPage, LetterContent, PageFit, PathItem, TextRun } from './layout.js';
 export {
   bodyFace, HEADLINE_LINES, headlineSize, slotText, STATIONERY_CORNER, STATIONERY_SLOT_MAX_LENGTH, STATIONERY_THEMES,
   stationeryOf, StationeryOverflow
@@ -15,7 +15,7 @@ export { renderPdf, RENDERER_VERSION, rendererVersionFor, PRINTABLE_RENDERER_VER
 export { GiftPageOverflow, layoutGiftPage } from './giftPage.js';
 export type { GiftPageCopy } from './giftPage.js';
 export { GiftStripOverflow, layoutPostcard, layoutPostcardBack } from './postcard.js';
-export { POSTCARD_STAMP } from './geometry.js';
+export { CONTINUATION_TOP, MAX_LETTER_PAGES, POSTCARD_STAMP } from './geometry.js';
 export type { StampGeometry } from './geometry.js';
 export type { GiftStripCopy, PostcardContent } from './postcard.js';
 export { renderPreviewSvg } from './preview.js';

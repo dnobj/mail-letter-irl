@@ -650,7 +650,10 @@ ambiguous outcome raises a durable `mail_provider_outcome_ambiguous` alert.
 draw the letter or postcard before any request was made. The reason is one of:
 - `unknown_version`: a renderer version this build cannot print;
 - `image`: an image it could not read;
-- `overflow`: a letter that no longer fits its page, or a postcard message past its half of the back;
+- `overflow`: a letter that no longer lays out as it was previewed (it runs past its page or pages, or
+  now lays out on fewer pages than it was previewed on, #586), or a postcard message past its half of the back;
+- `pages`: a letter's page count no writer stores (#586): a count outside 1 to 3, or more than one page
+  on the legacy HTML or beside a gift card;
 - `size`: a postcard size the renderer does not draw (it draws 6x9 only);
 - `render`: anything else that failed to lay out or draw: a letter's gift card, or its stationery (#563), included.
   Two of its messages are stationery's: "The letter was drawn in stationery this build cannot read." means
@@ -659,8 +662,10 @@ draw the letter or postcard before any request was made. The reason is one of:
   `monogram`: the slot's key) was measured to fit when it was previewed, under the same version, so it is
   an overflow a renderer change caused.
 
-The log line `provider.postgrid.render_refused` names the reason and the letter id, and the hold's
-message says what was refused. Decide by the message, not the reason alone:
+The log line `provider.postgrid.render_refused` names the reason and the letter id. Neither the hold,
+which stores only its class, nor the log keeps the refusal's message; the messages quoted below are what
+each case says. Decide by the reason, and where a reason has more than one case, by the letter's stored
+content (`content.pages`, `content.rendererVersion`, `content.giftCard`, the image, the stationery):
 - **Retry** when a build can print it: deploy that build, then resolve the letter with a retry
   (`provider_confirmed_rejected_retry`). That covers:
   - a version this build does not know;
@@ -669,18 +674,27 @@ message says what was refused. Decide by the message, not the reason alone:
   - a drawing fault;
   - an overflow that a renderer change caused. A letter refused as `overflow` was measured to fit when
     it was previewed, under the same version, so a deploy changed the wrapping. Fix the renderer rather
-    than refund. A stationery slot that "does not fit" is the same case;
+    than refund. A stationery slot that "does not fit" is the same case, and so is a letter that "lays
+    out on N page(s), not the M it was previewed on" (#586). A letter's content never changes after the
+    send, so an `overflow` of a letter always means the renderer changed. If it was changed on purpose
+    and the letter cannot print as it was previewed, as can happen to mail held for an arrival date
+    (#535), set its `content.pages` to the count it now lays out on (remove the key for one page), retry,
+    and settle any difference in price with the customer by hand. One that now runs past three pages
+    ("runs N line(s) past 3 pages") cannot print at all: reject it;
   - stationery this build cannot read, once a build that reads the stored theme is deployed. Stored
     stationery is refused when the draft is made unless the print reads it back, so this means the
     build changed, not the letter.
 - **Reject** when the content itself cannot print, resolving it as rejected
   (`provider_confirmed_rejected_refund`):
-  - a message that is too long in any build;
+  - a postcard message that is too long in any build;
   - a postcard size the renderer never draws;
   - stored image data that is not an image. "The image is neither a JPEG nor a PNG with a readable size."
     can be either this or a form of JPEG our reader misses, so look at the stored data before deciding;
   - a gift card that runs past the page because of the sender's name ("The gift card runs ... past the
-    page's bottom margin.").
+    page's bottom margin.");
+  - every `pages` hold: "The letter's page count is not a whole number from 1 to 3.", or more than one
+    page on the legacy HTML or beside a gift card. The draft's checks (migration 047) and the send refuse
+    these, so the stored letter was changed by hand. The reason alone decides this one.
 
 Reject, which refunds, only when it can never be printed and no earlier attempt of the
 letter reached PostGrid, that is, every earlier hold was also `render_refused`. Check the earlier holds

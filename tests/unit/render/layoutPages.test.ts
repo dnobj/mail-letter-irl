@@ -314,6 +314,33 @@ describe('a letter over several pages (#586)', () => {
     expect(layout.overflowLines).toBe(33 - Math.floor((BODY_BOTTOM - CONTINUATION_TOP - IMAGE_GAP - height + 1e-6) / LINE_PITCH));
   });
 
+  it('lays a letter out on its own page count exactly as on the most pages (#589 review round 1)', () => {
+    // A property of the layout, for text whose last line draws something. Text
+    // that ends in a line drawing nothing differs: at its own page count that
+    // line is overflow, while flowing on drops it from the top of a later page.
+    // letterPrintText trims whitespace but not invisible characters, so the
+    // print does not rely on this: it lays a letter out at the most pages, as
+    // the previews do (#589 review round 3). The counts here never end
+    // blankRuns on a blank line (a count that is a multiple of 7).
+    const blankRuns = (count: number) =>
+      Array.from({ length: count }, (_, index) => (index % 7 === 6 ? '' : `Line ${index + 1} of a letter`)).join('\n');
+    let compared = 0;
+    for (const stationery of [undefined, { theme: 'botanical' as const, dateLine: 'October 2, 2026' }, { theme: 'handwritten' as const, dateLine: 'October 2, 2026' }]) {
+      for (const layoutType of ['text_only', 'header_image', 'inline_image'] as const) {
+        for (const count of [20, 26, 27, 40, 45, 59, 60, 66, 80, 92]) {
+          for (const text of [numberedLines(count), blankRuns(count)]) {
+            const content: LetterContent = { text, layoutType, ...(layoutType === 'text_only' ? {} : { image }), stationery };
+            const most = layoutLetter(content, { maxPages: MAX_LETTER_PAGES });
+            if (most.overflowLines > 0) continue;
+            expect(layoutLetter(content, { maxPages: most.pages.length }), `${stationery?.theme ?? 'classic'} ${layoutType} ${count}`).toEqual(most);
+            compared += 1;
+          }
+        }
+      }
+    }
+    expect(compared).toBeGreaterThan(100);
+  });
+
   it.each([0, 4, 1.5, Number.NaN, -1])('refuses a limit of %s pages', maxPages => {
     expect(() => layoutLetter({ text: 'Hello', layoutType: 'text_only' }, { maxPages })).toThrow(RangeError);
   });

@@ -83,7 +83,7 @@ State at origin/dev 472454a (2026-09-30):
 | Print vs preview | Two separate templates: print HTML in `src/services/providers/PostGridProvider.ts:526-684`, preview HTML in `src/services/previewService.ts:280-452` |
 | Preview card | Read-only. It shows a mockup rebuilt from `previewHtml`, and every edit goes back through the chat |
 | Delivery | "Mailed in 1-2 business days; usually arrives in 1-2 weeks" (`src/content/delivery.ts`). No scheduling and no cancel |
-| PostGrid options unused | `sendDate`, `pdf`, `perforatedPage`, `returnEnvelope`, mail classes (certified, express), `mergeVariables`/templates, premium paper, self-mailers. `doubleSided` is sent, always `false` |
+| PostGrid options unused | `sendDate`, `pdf`, `perforatedPage`, `returnEnvelope`, mail classes (certified, express), `mergeVariables`/templates, premium paper, self-mailers. `doubleSided` is sent: `true` exactly when a letter runs past one page (#586) |
 | Unused design work | `example_layouts/` holds static prototypes (standard, modern, formal, personal, header-image and postcard variants) that `src` never references |
 
 ---

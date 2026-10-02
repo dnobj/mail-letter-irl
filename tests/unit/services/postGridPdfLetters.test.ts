@@ -329,12 +329,186 @@ describe('letters printed from our own PDF (#534)', () => {
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(result.success).toBe(false);
-    expect(result.error).toContain('past the page');
+    // Laid out as a preview with room to write would be, it takes two pages.
+    expect(result.error).toBe('The letter lays out on 2 page(s), not the 1 it was previewed on.');
     expect(result.metadata).toMatchObject({ submissionOutcome: 'ambiguous', retryable: false, errorClass: 'render_refused' });
     expect(diagnostics.written).toContainEqual(expect.objectContaining({
       event: 'provider.postgrid.render_refused',
       fields: expect.objectContaining({ reason: 'overflow' })
     }));
+  });
+
+  describe('letters of more than one page (#586)', () => {
+    const lines = (count: number) => Array.from({ length: count }, (_, index) => `Line ${index + 1}`).join('\n');
+
+    async function sent(fetchMock: ReturnType<typeof accepted>) {
+      const form = (fetchMock.mock.calls[0] as [string, RequestInit])[1].body as FormData;
+      return { form, pdf: Buffer.from(await (form.get('pdf') as File).arrayBuffer()) };
+    }
+
+    it.each([
+      [2, 40],
+      [3, 75]
+    ])('prints a letter of %i pages double-sided, laid out on exactly those pages', async (pages, count) => {
+      const fetchMock = accepted();
+      vi.stubGlobal('fetch', fetchMock);
+      // pdfkit writes the creation time, and an id made from it, into the file.
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-10-02T12:00:00Z'));
+      try {
+        const result = await provider().sendLetter({ ...base, message: lines(count), pages });
+        expect(result).toMatchObject({ success: true });
+        // An extra 10c to print both sides, and 10c for each page past the first.
+        expect(result.costCents).toBe(85 + 10 + 10 * (pages - 1));
+
+        const { form, pdf } = await sent(fetchMock);
+        expect(form.get('doubleSided')).toBe('true');
+        expect(form.get('addressPlacement')).toBe('top_first_page');
+        const expected = layoutLetter({ text: lines(count), layoutType: 'text_only' }, { maxPages: pages });
+        expect(expected.pages).toHaveLength(pages);
+        expect(pdf.equals(await renderPdf(expected))).toBe(true);
+        expect(pdf.toString('latin1')).toMatch(new RegExp(`/Count ${pages}\\b`));
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('prices the extra pages of a letter in colour at 20c each', async () => {
+      vi.stubGlobal('fetch', accepted());
+      // The outbox passes the colour it decided (letterJobService.letterParams).
+      const header = { ...base, layoutType: 'header_image' as const, headerImageData: pngDataUri(600, 200), color: true, message: lines(40), pages: 2 };
+      const result = await provider().sendLetter(header);
+      expect(result).toMatchObject({ success: true });
+      expect(result.costCents).toBe(120 + 10 + 20);
+    });
+
+    it('prints one page single-sided, whatever doubleSided says, and a gift card on a sheet of its own', async () => {
+      const fetchMock = accepted();
+      vi.stubGlobal('fetch', fetchMock);
+      await provider().sendLetter({ ...base, doubleSided: true });
+      await provider().sendLetter({ ...base, giftCard: GIFT_CARD, doubleSided: true, pages: 1 });
+      for (const [, init] of fetchMock.mock.calls as Array<[string, RequestInit]>) {
+        expect((init.body as FormData).get('doubleSided')).toBe('false');
+      }
+    });
+
+    it.each([
+      ['no page', 0],
+      ['four pages', 4],
+      ['part of a page', 1.5],
+      ['a count that is text', '2' as unknown as number]
+    ])('holds a letter whose page count is %s, and sends nothing', async (_label, pages) => {
+      const fetchMock = accepted();
+      vi.stubGlobal('fetch', fetchMock);
+      diagnostics.written = [];
+      const result = await provider().sendLetter({ ...base, message: lines(40), pages, metadata: { letterId: 'letter-pages' } });
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(result.error).toBe("The letter's page count is not a whole number from 1 to 3.");
+      expect(result.metadata).toMatchObject({ submissionOutcome: 'ambiguous', retryable: false, errorClass: 'render_refused' });
+      expect(diagnostics.written).toContainEqual(expect.objectContaining({
+        event: 'provider.postgrid.render_refused',
+        fields: expect.objectContaining({ reason: 'pages', letterId: 'letter-pages' })
+      }));
+    });
+
+    it('holds a longer letter on the legacy HTML, and a gift letter of more than one page', async () => {
+      const fetchMock = accepted();
+      vi.stubGlobal('fetch', fetchMock);
+      const legacy = await provider().sendLetter({ ...base, rendererVersion: undefined, message: lines(40), pages: 2 });
+      expect(legacy.error).toBe('A letter of more than one page prints only from our renderer, not the legacy HTML.');
+      const gift = await provider().sendLetter({ ...base, giftCard: GIFT_CARD, message: lines(40), pages: 2 });
+      expect(gift.error).toBe('A gift letter prints on one page, its card on a sheet of its own.');
+      expect(fetchMock).not.toHaveBeenCalled();
+      for (const result of [legacy, gift]) {
+        expect(result.metadata).toMatchObject({ submissionOutcome: 'ambiguous', retryable: false, errorClass: 'render_refused' });
+      }
+    });
+
+    it('holds a letter that now lays out on fewer pages than it was previewed on, as a layout that changed', async () => {
+      const fetchMock = accepted();
+      vi.stubGlobal('fetch', fetchMock);
+      diagnostics.written = [];
+      const result = await provider().sendLetter({ ...base, message: lines(40), pages: 3 });
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(result.error).toBe('The letter lays out on 2 page(s), not the 3 it was previewed on.');
+      expect(result.metadata).toMatchObject({ errorClass: 'render_refused' });
+      // Retried once the renderer is fixed, as an overflow is: the reason says so alone.
+      expect(diagnostics.written).toContainEqual(expect.objectContaining({
+        event: 'provider.postgrid.render_refused',
+        fields: expect.objectContaining({ reason: 'overflow' })
+      }));
+    });
+
+    it.each([undefined, null as unknown as number])('reads a page count of %s as one page', async pages => {
+      const fetchMock = accepted();
+      vi.stubGlobal('fetch', fetchMock);
+      await expect(provider().sendLetter({ ...base, pages })).resolves.toMatchObject({ success: true, costCents: 85 });
+      const { form, pdf } = await sent(fetchMock);
+      expect(form.get('doubleSided')).toBe('false');
+      expect(pdf.toString('latin1')).toMatch(/\/Count 1\b/);
+    });
+
+    it('prints a two-page letter in its stationery, the theme on page 1 only', async () => {
+      const fetchMock = accepted();
+      vi.stubGlobal('fetch', fetchMock);
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-10-02T12:00:00Z'));
+      try {
+        const stationery = { theme: 'botanical' as const, dateLine: 'October 2, 2026' };
+        await expect(provider().sendLetter({
+          ...base, rendererVersion: STATIONERY_RENDERER_VERSION, stationery, message: lines(40), pages: 2
+        })).resolves.toMatchObject({ success: true });
+
+        const { form, pdf } = await sent(fetchMock);
+        expect(form.get('doubleSided')).toBe('true');
+        const expected = layoutLetter({ text: lines(40), layoutType: 'text_only', stationery }, { maxPages: 2 });
+        expect(expected.pages).toHaveLength(2);
+        expect(expected.pages[0].items.some(item => item.kind === 'path')).toBe(true);
+        expect(expected.pages[1].items.some(item => item.kind === 'path')).toBe(false);
+        expect(pdf.equals(await renderPdf(expected, STATIONERY_RENDERER_VERSION))).toBe(true);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('holds a letter that runs past its pages rather than printing it clipped', async () => {
+      const fetchMock = accepted();
+      vi.stubGlobal('fetch', fetchMock);
+      diagnostics.written = [];
+      // 26 lines fill page 1 and 33 page 2: four more take a third page.
+      const longer = await provider().sendLetter({ ...base, message: lines(26 + 33 + 4), pages: 2 });
+      expect(longer.error).toBe('The letter lays out on 3 page(s), not the 2 it was previewed on.');
+      // And past three pages, the most the renderer lays out.
+      const past = await provider().sendLetter({ ...base, message: lines(26 + 33 + 33 + 4), pages: 3 });
+      expect(past.error).toBe('The letter runs 4 line(s) past 3 pages.');
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      for (const result of [longer, past]) expect(result.metadata).toMatchObject({ errorClass: 'render_refused' });
+      expect(diagnostics.written.filter(entry => entry.event === 'provider.postgrid.render_refused').map(entry => entry.fields.reason))
+        .toEqual(['overflow', 'overflow']);
+    });
+
+    it.each([
+      ['a zero-width space', '\u200B'],
+      ['a left-to-right mark', '\u200E'],
+      ['a word joiner', '\u2060']
+    ])('prints a letter whose last line is only %s, as its preview laid it out (#589 review round 3)', async (_label, invisible) => {
+      // A preview with room to write drops the line from the top of a page it
+      // would start; the print lays the letter out the same way, so it prints.
+      for (const [visible, pages] of [[26, 1], [26 + 33, 2]] as const) {
+        const fetchMock = accepted();
+        vi.stubGlobal('fetch', fetchMock);
+        const message = `${lines(visible)}\n${invisible}`;
+        const preview = layoutLetter({ text: message, layoutType: 'text_only' }, { maxPages: 3 });
+        expect(preview.pages).toHaveLength(pages);
+        expect(preview.overflowLines).toBe(0);
+        await expect(provider().sendLetter({ ...base, message, pages }), `${visible}`).resolves.toMatchObject({ success: true });
+        const { pdf } = await sent(fetchMock);
+        expect(pdf.toString('latin1')).toMatch(new RegExp(`/Count ${pages}\\b`));
+      }
+    });
   });
 
   describe('stationery (#563)', () => {
