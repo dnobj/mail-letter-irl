@@ -24,9 +24,11 @@ export const POSTCARD_LAYOUTS = ['full_bleed', 'border', 'greetings'] as const;
 export type PostcardLayoutChoice = (typeof POSTCARD_LAYOUTS)[number];
 
 /**
- * The longest caption and place a preview takes, in characters: longer than
- * the line holds at any size, so the line's own measure decides, and well
- * inside what a stored front may hold (POSTCARD_FRONT_TEXT_MAX_LENGTH).
+ * The longest caption and place a preview takes, in characters as a reader
+ * counts them (grapheme clusters), well inside what a stored front may hold
+ * (POSTCARD_FRONT_TEXT_MAX_LENGTH). On a 4x6 or 6x9 the line's own measure
+ * refuses less; the wider 11x6 holds a caption of 60 narrow letters and a
+ * place of 30 characters, so there these bind first (#600 review round 1).
  */
 export const POSTCARD_CAPTION_MAX_LENGTH = 60;
 export const POSTCARD_PLACE_MAX_LENGTH = 30;
@@ -71,7 +73,7 @@ function printedText(value: unknown, name: 'caption' | 'place', max: number, con
   if (typeof value !== 'string') throw refusal(`The ${name} must be text.`, `${name}_not_text`, context);
   const text = slotText(value);
   if (visualOrder(text).trim() === '') return undefined;
-  if (text.length > max) {
+  if (clusters(text).length > max) {
     throw refusal(`The ${name} is too long: it may hold at most ${max} characters. Shorten it.`, `${name}_too_long`, context);
   }
   return text;
@@ -199,6 +201,6 @@ export function frontPrintedText(front: PostcardFront | undefined): Array<{ fiel
   const line = lineOf(front);
   if (!line) return [];
   return front.layout === 'border'
-    ? [{ field: 'caption', where: 'in the caption', text: line.drawn, prints: line.prints }]
+    ? [{ field: 'caption', where: 'in the caption, which prints in a handwriting typeface that has fewer characters', text: line.drawn, prints: line.prints }]
     : [{ field: 'place', where: 'in the place, which prints in capitals', text: line.drawn, prints: line.prints }];
 }

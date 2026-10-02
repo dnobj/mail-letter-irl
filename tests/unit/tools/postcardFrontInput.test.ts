@@ -147,6 +147,23 @@ describe('previewPostcardFront while the layouts are offered', () => {
     expect(fits({ message: '', image: IMAGE, layout: 'greetings', place: place.slice(0, fitting + 1) }, '6x4')).toBe(false);
   });
 
+  it('counts the caps in characters as a reader counts them, not in code units', () => {
+    // Each wave is one character of two code units.
+    const wave = String.fromCodePoint(0x1f30a);
+    const caption = wave.repeat(POSTCARD_CAPTION_MAX_LENGTH);
+    expect(caption.length).toBe(2 * POSTCARD_CAPTION_MAX_LENGTH);
+    // Within the cap, and left to the printable check, which Caveat's lack of it meets.
+    expect(previewPostcardFront({ layout: 'border', caption }, '6x9', context(), 'pdf')).toEqual({ layout: 'border', caption });
+    expect(refused(() => previewPostcardFront({ layout: 'border', caption: caption + wave }, '6x9', context(), 'pdf')).message).toBe(
+      `The caption is too long: it may hold at most ${POSTCARD_CAPTION_MAX_LENGTH} characters. Shorten it.`
+    );
+    const place = wave.repeat(POSTCARD_PLACE_MAX_LENGTH);
+    expect(previewPostcardFront({ layout: 'greetings', place }, '6x9', context(), 'pdf')).toEqual({ layout: 'greetings', place });
+    expect(refused(() => previewPostcardFront({ layout: 'greetings', place: place + wave }, '6x9', context(), 'pdf')).message).toBe(
+      `The place is too long: it may hold at most ${POSTCARD_PLACE_MAX_LENGTH} characters. Shorten it.`
+    );
+  });
+
   it('leaves a line its face cannot draw to the printable check, unmeasured, which names the character', () => {
     // Caveat has no Greek: measured, its boxes would only say "too long".
     const caption = 'Ωμέγα '.repeat(10).trim();
@@ -159,7 +176,11 @@ describe('frontPrintedText', () => {
     expect(frontPrintedText(undefined)).toEqual([]);
     expect(frontPrintedText({ layout: 'border' })).toEqual([]);
     const [caption] = frontPrintedText({ layout: 'border', caption: 'Ω Cape Cod' });
-    expect(caption).toMatchObject({ field: 'caption', where: 'in the caption', text: 'Ω Cape Cod' });
+    expect(caption).toMatchObject({
+      field: 'caption',
+      where: 'in the caption, which prints in a handwriting typeface that has fewer characters',
+      text: 'Ω Cape Cod'
+    });
     // Caveat has no Greek; Tinos has.
     expect(caption.prints('Ω')).toBe(false);
     expect(caption.prints('C')).toBe(true);

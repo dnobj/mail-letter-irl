@@ -465,6 +465,19 @@ describe('a gift postcard', () => {
     expect(/<title>([^<]*)<\/title>/.exec(backOf(drafted().previewHtml!))![1]).toContain('PRESS2026');
   });
 
+  it('draws a front with its card: the layout on the front, the card on the back, under pdf-3 (#594)', async () => {
+    vi.stubEnv('LETTER_IRL_POSTCARD_LAYOUTS_ENABLED', 'true');
+    await run({ sendAsGift: true, message: 'Dear Sam,\nWish you were here.', layout: 'border', caption: 'Cape Cod' });
+    const draft = drafted();
+    expect(draft).toMatchObject({ isGiftSend: true, rendererVersion: 'pdf-3', postcardFront: { layout: 'border', caption: 'Cape Cod' } });
+    // Each page is a top-level svg: a bordered front holds the photo's own.
+    const [front, back] = draft.previewHtml!.match(/<svg xmlns[\s\S]*?(?=<svg xmlns|<\/body>)/g)!;
+    expect(front).toContain('<title>Cape Cod</title>');
+    const title = /<title>([^<]*)<\/title>/.exec(back)![1];
+    expect(title.startsWith('Dear Sam,\nWish you were here.\nA gift from Pat Example:\n')).toBe(true);
+    expect(back).toContain('#b9ad99');
+  });
+
   it('refuses a gift on any size but 6x9, and keeps every gift postcard without the flag on the legacy HTML and its limits', async () => {
     // A gift letter pays only where a pack does (#579): a 6x9 postcard. Not
     // offered, a 4x6 is refused for its size first (#594).
@@ -524,7 +537,10 @@ describe("a postcard's front (#594)", () => {
   });
 
   it('refuses a caption Caveat cannot draw, naming it, before the picture is fetched', async () => {
-    await expect(run({ layout: 'border', caption: 'Ωμέγα beach' })).rejects.toThrow('in the caption');
+    // Named with its typeface, whose characters are fewer than the message's (#600 review round 1).
+    await expect(run({ layout: 'border', caption: 'Ωμέγα beach' })).rejects.toThrow(
+      'in the caption, which prints in a handwriting typeface that has fewer characters. Printed mail shows'
+    );
     expect(downloadAndProcessPostcardImageWithPreview).not.toHaveBeenCalled();
     expect(createPostcardDraft).not.toHaveBeenCalled();
   });
