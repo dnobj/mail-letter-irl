@@ -128,7 +128,10 @@ export const POSTCARD_STRIP = {
   gap: inch(0.18)
 } as const;
 
-/** A postcard's size as a draft names it (#594): wide by tall, the long side last. */
+/**
+ * A postcard's size as a draft names it (#594), as PostcardSize in
+ * src/services/types.ts does: '6x9' is PostGrid's 9x6 and '6x11' its 11x6.
+ */
 export type PostcardSizeName = '6x4' | '6x9' | '6x11';
 
 /** One postcard size as PostGrid takes it from a PDF, and as our back is drawn. */

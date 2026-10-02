@@ -139,10 +139,11 @@ export function layoutPostcardBack(
  * Lays out a postcard as PostGrid prints it from a PDF (geometry.ts), at its
  * size (#594; 9x6 when none is given): the front image covering the whole
  * first page, bleed included, and the message in the left part of the back,
- * where the legacy back put it at 9x6. The rest stays empty: PostGrid stamps the addresses and postage there, and cancels a
- * postcard with anything drawn in their region. Trailing blank lines draw
- * nothing and are not counted. Lines past the message half are still laid
- * out, so `overflowLines` can say by how much a message is too long.
+ * where the legacy back put it at 9x6. The rest stays empty: PostGrid stamps
+ * the addresses and postage there, and cancels a postcard with anything drawn
+ * in their region. Trailing blank lines draw nothing and are not counted.
+ * Lines past the message box are still laid out, so `overflowLines` can say
+ * by how much a message is too long.
  */
 export function layoutPostcard(content: PostcardContent): Layout {
   const { image } = content;
