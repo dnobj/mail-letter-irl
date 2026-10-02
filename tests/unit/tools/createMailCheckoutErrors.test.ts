@@ -95,6 +95,15 @@ describe('friendlyCheckoutError terminality (#278)', () => {
     expect(friendly.message).toBe('This letter changed while its payment was being opened, so nothing was charged. Please try again.');
     expect((friendly as { code?: string }).code).toBe('DRAFT_CHANGED');
   });
+
+  it('says a letter whose last payment link is still closing can be paid again in a few minutes (#593 review round 1)', () => {
+    const friendly = friendlyCheckoutError(
+      Object.assign(new Error('The previous checkout for this draft is still closing'), { code: 'PREVIOUS_CHECKOUT_CLOSING' })
+    );
+    expect(friendly.message).toBe(
+      'This letter changed after its last payment link was opened, and that link is still closing. Please try again in a few minutes.'
+    );
+  });
 });
 
 /**

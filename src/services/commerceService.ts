@@ -985,7 +985,25 @@ async function prepareJitOrder(
         );
       } else if (existing.stripe_checkout_session_id || existing.checkout_url) {
         // A Stripe session already exists: the customer will pay exactly what
-        // that session says, which matches this order row. Reuse is safe.
+        // that session says, which matches this order row. Reuse is safe -
+        // unless the letter changed since (#586). New words or a restyle can
+        // change its pages, and so its product, once this checkout's window
+        // has passed (lockChangeableDraft), and that session is closing at
+        // the old price. Only Stripe's word (its webhook, or the sweep)
+        // cancels a session-bearing order, so this refuses until then rather
+        // than reuse it (#593 review round 1).
+        // Judged by the option's own code, as the peek warms it.
+        const draftProductCode = jitProductMatching(draftMailOption(draft))?.productCode;
+        if (
+          existing.status === 'checkout_pending' &&
+          existing.product_code &&
+          draftProductCode &&
+          existing.product_code !== draftProductCode
+        ) {
+          throw Object.assign(new Error('The previous checkout for this draft is still closing'), {
+            code: 'PREVIOUS_CHECKOUT_CLOSING'
+          });
+        }
         return { order: existing, reused: true };
       } else if (existing.status !== 'checkout_pending') {
         // A sessionless row in a funded/held state exists only via operator

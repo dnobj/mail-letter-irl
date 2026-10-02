@@ -82,6 +82,11 @@ const monogramZ = z.preprocess(noneForNull, z.string().optional()).describe(MONO
 const headlineZ = z.preprocess(noneForNull, z.string().optional()).describe(HEADLINE_DESCRIPTION);
 
 /** A letter of more than one page (#586), on the letter previews' output. */
+/** The version of a letter's words (#586), which a change of them names. */
+export const WORDS_VERSION_DESCRIPTION =
+  "While room to write is offered: the version of the letter's words, which set_letter_words takes to say which words it replaces";
+export const SET_LETTER_WORDS_VERSION_DESCRIPTION =
+  "The wordsVersion of the words this change replaces, from the preview or the last change of words. The letter card can change the words too: if they changed since, nothing is changed, and the answer gives the words as they are now";
 export const PREVIEW_PAGES_DESCRIPTION =
   "Present only for a letter of more than one page: the pages it prints on, both sides of the paper. No letter pack or gift letter pays for it; it is paid with Pay & Send.";
 
@@ -336,7 +341,8 @@ export const SET_LETTER_WORDS_SIGN_OFF_DESCRIPTION = "The closing and signature 
 export const setLetterWordsInputZ = z.object({
   draftId: z.string().describe("The draftId from a letter preview"),
   bodyText: z.string().describe(SET_LETTER_WORDS_BODY_DESCRIPTION),
-  signOff: z.string().describe(SET_LETTER_WORDS_SIGN_OFF_DESCRIPTION)
+  signOff: z.string().describe(SET_LETTER_WORDS_SIGN_OFF_DESCRIPTION),
+  wordsVersion: z.string().optional().describe(SET_LETTER_WORDS_VERSION_DESCRIPTION)
 });
 
 // Held mail cancelled before it goes to the printer (#535). Listed only while
@@ -485,7 +491,8 @@ export const quoteAndPreviewOutputZ = z.object({
   schedule: previewScheduleZ.optional(),
   arrivalWindow: arrivalWindowZ.optional().describe(ARRIVAL_WINDOW_DESCRIPTION),
   stationery: previewStationeryZ.optional().describe(PREVIEW_STATIONERY_DESCRIPTION),
-  pages: z.number().int().min(2).max(MAX_LETTER_PAGES).optional().describe(PREVIEW_PAGES_DESCRIPTION)
+  pages: z.number().int().min(2).max(MAX_LETTER_PAGES).optional().describe(PREVIEW_PAGES_DESCRIPTION),
+  wordsVersion: z.string().optional().describe(WORDS_VERSION_DESCRIPTION)
 });
 
 /** Held mail's two dates (#535), on what a send and the order status say. */
@@ -755,6 +762,9 @@ export const getDraftStatusOutputZ = z.object({
   canSendNow: z.boolean().optional().describe("A ready letter, while room to write is offered: whether the balance or a gift letter pays for it now"),
   reasonCannotSend: z.string().optional(),
   sendEligibility: sendEligibilityZ.optional(),
+  bodyText: z.string().optional().describe("A ready letter, while room to write is offered: its words now, for the card"),
+  signOff: z.string().optional(),
+  wordsVersion: z.string().optional().describe(WORDS_VERSION_DESCRIPTION),
   stationery: z
     .object({
       theme: z.enum(STATIONERY_THEMES),
@@ -821,6 +831,7 @@ export const setLetterWordsOutputZ = z.object({
   canSendNow: z.boolean().describe(SET_LETTER_WORDS_CAN_SEND_DESCRIPTION),
   reasonCannotSend: z.string().optional(),
   sendEligibility: sendEligibilityZ,
+  wordsVersion: z.string().describe("The version of the words now, for the next change of them"),
   message: z.string()
 });
 

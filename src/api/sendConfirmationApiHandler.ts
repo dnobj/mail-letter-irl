@@ -364,6 +364,9 @@ export function checkoutRefusalFor(error: unknown): Refusal {
     // Its pages, and so its price, changed while the payment was opening (#586).
     case 'DRAFT_CHANGED':
       return refuse(409, 'changed', 'This letter changed while its payment was opening. Refresh this page to see it, then pay.');
+    // It changed after its last payment link opened, which is still closing (#586).
+    case 'PREVIOUS_CHECKOUT_CLOSING':
+      return refuse(409, 'closing', 'This letter changed after its last payment link was opened, and that link is still closing. Try again in a few minutes.');
     case 'JIT_DISABLED':
     case 'JIT_NOT_CONFIGURED':
     case 'PRICE_ID_NOT_CONFIGURED':

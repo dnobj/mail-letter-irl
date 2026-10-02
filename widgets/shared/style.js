@@ -88,8 +88,10 @@
     };
 
     // The Words tab's editor (#586). editing: it is open. updating: its words
-    // are being set. set: the words this card last set on the draft, or null
-    // for the preview's. current: the words shown now. fit: how full the page
+    // are being set. set: the words this card last set on the draft, or the
+    // server last gave it, or null for the preview's; each { bodyText,
+    // signOff, version }, the version a change of them names (#593 review
+    // round 1). current: the words shown now. fit: how full the page
     // is for them. editable: the card may change them now. gift: a gift
     // letter, which stays on one page.
     var words = {
@@ -289,6 +291,12 @@
       if (typeof body.focus === "function") body.focus();
     }
 
+    // Focus goes back to Change the words, the boxes having gone.
+    function focusOpen() {
+      var open = element("studio-words-open");
+      if (open && !open.hidden && typeof open.focus === "function") open.focus();
+    }
+
     function closeWords() {
       if (words.updating) return;
       words.editing = false;
@@ -296,6 +304,51 @@
       words.error = false;
       drawWords();
       options.onBusy();
+      focusOpen();
+    }
+
+    /*
+     * After a refusal, the draft as the server has it now (#593 review round
+     * 1). The chat may have changed its words since this card showed them,
+     * which the card never sees: then the editor opens again on the words the
+     * draft has, with its page and price, and says why. Otherwise the
+     * refusal's own words stand.
+     */
+    function reloadAfterRefusal(draftId, startedFrom) {
+      if (typeof host.callTool !== "function") return undefined;
+      return Promise.resolve()
+        .then(function () {
+          return host.callTool("get_draft_status", { draftId: draftId });
+        })
+        .then(function (result) {
+          if (state.draftId !== draftId || !result || result.isError) return;
+          var data = toolData(result);
+          if (data.draftId !== draftId || data.status !== "ready") return;
+          if (typeof data.bodyText !== "string" || typeof data.signOff !== "string" || typeof data.wordsVersion !== "string") return;
+          if (startedFrom && data.wordsVersion === startedFrom.version) return;
+          var page = result._meta && result._meta.previewHtml;
+          if (typeof page === "string" && page) state.previewHtml = page;
+          if (data.stationery && isTheme(data.stationery.theme)) {
+            state.stationery = data.stationery;
+            keepSlots(data.stationery);
+          }
+          // The status lays nothing out, so it says nothing of how full the page is.
+          var said = termsOf(data, null);
+          if (said) state.terms = said;
+          state.restyled = true;
+          words.set = { bodyText: data.bodyText, signOff: data.signOff, version: data.wordsVersion };
+          words.current = words.set;
+          element("studio-words-body").value = data.bodyText;
+          element("studio-words-signoff").value = data.signOff;
+          words.editing = true;
+          words.error = true;
+          words.message =
+            "The letter's words were changed in the chat since this card showed them. Here they are now: make your change again.";
+          options.onChange({ draftId: draftId, stationery: state.stationery });
+        })
+        .catch(function () {
+          // The refusal's own words stand.
+        });
     }
 
     // The words as written in the editor, set on the draft (#586). The page
@@ -306,6 +359,11 @@
       var draftId = state.draftId;
       var bodyText = element("studio-words-body").value;
       var signOff = element("studio-words-signoff").value;
+      // The words it replaces: their version, so a change made elsewhere since
+      // is not overwritten unseen (#593 review round 1).
+      var startedFrom = words.current;
+      var args = { draftId: draftId, bodyText: bodyText, signOff: signOff };
+      if (startedFrom && typeof startedFrom.version === "string") args.wordsVersion = startedFrom.version;
       state.busy = true;
       words.updating = true;
       words.message = "";
@@ -317,7 +375,7 @@
       options.onBusy();
       Promise.resolve()
         .then(function () {
-          return host.callTool("set_letter_words", { draftId: draftId, bodyText: bodyText, signOff: signOff });
+          return host.callTool("set_letter_words", args);
         })
         .then(function (result) {
           // A refusal comes back as an error result, not a rejection.
@@ -331,7 +389,11 @@
             throw new Error("The words may have changed. Make the preview again to see them.");
           }
           state.restyled = true;
-          words.set = { bodyText: bodyText, signOff: signOff };
+          words.set = {
+            bodyText: bodyText,
+            signOff: signOff,
+            version: typeof data.wordsVersion === "string" ? data.wordsVersion : undefined
+          };
           words.editing = false;
           // What it costs now, and how full its pages are.
           var said = termsOf(data, result && result._meta && result._meta.pageFit);
@@ -348,9 +410,12 @@
           options.onChange({ draftId: draftId, stationery: state.stationery });
         })
         .catch(function (error) {
-          if (state.draftId !== draftId) return;
+          if (state.draftId !== draftId) return undefined;
           words.error = true;
           words.message = options.readableError(error);
+          // Said at once, while the card asks how the draft is now.
+          drawWords();
+          return reloadAfterRefusal(draftId, startedFrom);
         })
         .then(function () {
           if (state.draftId !== draftId) return;
@@ -359,6 +424,7 @@
           draw();
           drawWords();
           options.onBusy();
+          if (!words.editing) focusOpen();
         });
     }
 
@@ -428,6 +494,7 @@
       // (editable: room to write is offered and the draft can still change);
       // and whether it is a gift letter. Only while the row is the draft's.
       showWords: function (draftId, current, fit, editable, gift) {
+        // { bodyText, signOff, version }: the version is the preview's, or the last change's.
         words.current = current && typeof current.bodyText === "string" && typeof current.signOff === "string" ? current : null;
         words.fit = fit && typeof fit === "object" ? fit : null;
         words.gift = gift === true;
@@ -460,6 +527,11 @@
         if (typeof previewHtml === "string" && previewHtml) state.previewHtml = previewHtml;
         var terms = termsOf(answer, fit);
         if (terms) state.terms = terms;
+        // And its words now (#593 review round 1): the chat may have changed
+        // them since the preview, and the Words tab shows and edits these.
+        if (answer && typeof answer.bodyText === "string" && typeof answer.signOff === "string" && typeof answer.wordsVersion === "string") {
+          words.set = { bodyText: answer.bodyText, signOff: answer.signOff, version: answer.wordsVersion };
+        }
         draw();
         return true;
       },

@@ -69,9 +69,11 @@ describe('set_letter_words in tools/list (#586)', () => {
     offer('true', 'pdf', 'true');
     const tool = (await listedTools()).get('set_letter_words')!;
     const schema = tool.inputSchema as Schema;
-    expect(Object.keys(schema.properties)).toEqual(['draftId', 'bodyText', 'signOff']);
+    expect(Object.keys(schema.properties)).toEqual(['draftId', 'bodyText', 'signOff', 'wordsVersion']);
     expect(schema.required).toEqual(['draftId', 'bodyText', 'signOff']);
     expect(schema.properties.bodyText.description).toMatch(/in full/);
+    // The version of the words it replaces: optional to the schema, refused without by the tool, which gives the words (#593 review round 1).
+    expect(schema.properties.wordsVersion.description).toMatch(/the answer gives the words as they are now/);
     // Changes a draft only: not read-only, not destructive, idempotent.
     expect(tool.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false, idempotentHint: true });
   });

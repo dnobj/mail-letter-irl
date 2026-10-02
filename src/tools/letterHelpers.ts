@@ -7,6 +7,7 @@
  * - quoteAndPreviewLetterWithImage
  */
 
+import { createHash } from "node:crypto";
 import { Address, ToolContext, LetterLayoutType } from "../contracts/types.js";
 import { getReturnAddress } from "../services/returnAddressService.js";
 import { getLetterProvider } from "../services/providers/index.js";
@@ -147,6 +148,8 @@ export interface LetterQuoteOutput {
   pages?: number;
   /** While room to write is offered (#586): how full its pages are, for the card's fit line. Card-only (_meta). */
   pageFit?: PageFit;
+  /** While room to write is offered (#586): the version of these words, which set_letter_words takes to say which words it replaces. */
+  wordsVersion?: string;
 }
 
 // ============================================================================
@@ -492,6 +495,16 @@ export function outputValidationStatus(
 export const RENDERED_LETTER_CHARACTER_CAP = 10_000;
 
 /**
+ * A version of a letter's words (#586): the same words give the same version.
+ * A change of words names the version it replaces, so one made on the card
+ * and one made in the chat, neither of which sees the other's call (#366),
+ * cannot overwrite each other unseen (#593 review round 1).
+ */
+export function wordsVersionOf(bodyText: string, signOff: string | null | undefined): string {
+  return createHash("sha256").update(JSON.stringify([bodyText, signOff ?? ""])).digest("hex").slice(0, 12);
+}
+
+/**
  * Refuses a letter too long for its page, before anything else is checked.
  * The legacy HTML's limits are estimates (previewService.ts). A letter drawn
  * by our own renderer is measured once its image is known, so here it only
@@ -605,6 +618,31 @@ const LAYOUT_LABELS: Record<LetterLayoutType, string> = {
  * pages, and only a letter longer than that is refused: three pages is the
  * longest letter we print. The draft records the pages it took.
  */
+/** What a letter preview lays out: its printed text, its layout and its image. */
+function previewContent(letter: { bodyText: string; signOff: string; layoutType: LetterLayoutType; imageData?: string }) {
+  return {
+    text: letterPrintText(letter.bodyText, letter.signOff),
+    layoutType: letter.layoutType,
+    image: letter.layoutType !== "text_only" && letter.imageData ? readImageDataUri(letter.imageData) : undefined
+  };
+}
+
+/**
+ * Whether a letter runs past `maxPages` (#586), for a refusal in a caller's
+ * own words: a gift letter's, held to one page. Stationery that cannot print
+ * is left to the layout to say.
+ */
+export function letterRunsPast(
+  letter: { bodyText: string; signOff: string; layoutType: LetterLayoutType; imageData?: string; stationery?: Stationery | PreviewStationery },
+  maxPages: number
+): boolean {
+  try {
+    return layoutLetter({ ...previewContent(letter), stationery: letter.stationery }, { maxPages }).overflowLines > 0;
+  } catch {
+    return false;
+  }
+}
+
 export function layoutLetterForPreview(
   letter: { bodyText: string; signOff: string; layoutType: LetterLayoutType; imageData?: string; stationery?: Stationery | PreviewStationery },
   context: ToolContext,
@@ -613,12 +651,8 @@ export function layoutLetterForPreview(
   maxPages: number = letterPageLimit()
 ): Layout | undefined {
   if (renderer !== 'pdf') return undefined;
-  const { bodyText, signOff, layoutType, imageData, stationery } = letter;
-  const content = {
-    text: letterPrintText(bodyText, signOff),
-    layoutType,
-    image: layoutType !== "text_only" && imageData ? readImageDataUri(imageData) : undefined
-  };
+  const { layoutType, stationery } = letter;
+  const content = previewContent(letter);
   let layout: Layout;
   try {
     layout = layoutLetter({ ...content, stationery }, { maxPages });
@@ -1244,7 +1278,10 @@ export async function createLetterDraftAndBuildOutput(
     ...(option.pages ? { pages: option.pages } : {}),
     // And how full its pages are, for the card's fit line, while room to write
     // is offered: counted before any gift page, in the theme's face.
-    ...(printLayout && letterPageLimit() > 1 ? { pageFit: pageFit(printLayout, stationery) } : {}),
+    // With the version of its words, which a change of them names (#586).
+    ...(printLayout && letterPageLimit() > 1
+      ? { pageFit: pageFit(printLayout, stationery), wordsVersion: wordsVersionOf(bodyText, signOff) }
+      : {}),
   };
 
   // Add address validation results

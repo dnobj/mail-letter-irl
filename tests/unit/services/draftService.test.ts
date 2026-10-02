@@ -957,7 +957,19 @@ describe('draftService stationery (#563)', () => {
   });
 
   describe('setDraftWords (#586)', () => {
-    const NEW = { bodyText: 'Dear Sam, the garden is in.', signOff: 'Love, Pat', previewHtml: PAGE, pages: 2 };
+    it.each([
+      ['its body', { body_text: 'Dear Sam, changed on the card,' }],
+      ['its sign-off', { sign_off: 'Love, Pat' }]
+    ])('refuses new words when the words they replace changed under them: %s (#593 review round 1)', async (_label, changed) => {
+      const client = inTransaction({ rows: [pending] }, { rows: [] }, { rows: [{ ...DRAWN, ...changed }] });
+      await expect(
+        setDraftWords('draft-1', 'auth0|owner', { bodyText: 'New', signOff: 'Pat', previewHtml: PAGE, pages: 1, drawnIn: null, replacing: WORDS }, NOW)
+      ).resolves.toBe('changed');
+      expect(client.query).toHaveBeenCalledTimes(3);
+    });
+
+    // The words it replaces, as the tool read them (#593 review round 1).
+    const NEW = { bodyText: 'Dear Sam, the garden is in.', signOff: 'Love, Pat', previewHtml: PAGE, pages: 2, replacing: WORDS };
 
     it('locks the draft as a restyle does, checks the stationery it was drawn in, and writes the words, page and pages in one statement', async () => {
       const client = inTransaction({ rows: [pending] }, { rows: [] }, { rows: [{ ...DRAWN, stationery: BOTANICAL }] });
@@ -988,6 +1000,7 @@ describe('draftService stationery (#563)', () => {
       ['put back on a plain page', { stationery: null }, BOTANICAL],
       ['given a theme', { stationery: BOTANICAL }, null]
     ])('refuses words drawn in stationery that was %s under them', async (_label, changed, drawnIn) => {
+      // (#593 review round 1: the words they replace are as read here.)
       const client = inTransaction({ rows: [pending] }, { rows: [] }, { rows: [{ ...DRAWN, ...changed }] });
       await expect(setDraftWords('draft-1', 'auth0|owner', { ...NEW, drawnIn }, NOW)).resolves.toBe('changed');
       expect(client.query).toHaveBeenCalledTimes(3);

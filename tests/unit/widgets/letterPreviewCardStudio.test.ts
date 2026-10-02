@@ -833,8 +833,25 @@ describe('the letter card as a studio (#580)', () => {
 describe("the Words tab's editor (#586)", () => {
   const FIT = { pages: 1, sheets: 1, doubleSided: false, roomLines: 20, roomCharacters: 1940, charactersPerLine: 97 };
   const PAY_AND_SEND = { packPays: false, payAndSend: { available: true, amountCents: 599, currency: 'usd' }, letterPack: { available: false } };
-  const CLASSIC = { stationery: { theme: 'classic', source: 'default' } };
+  // The preview's words carry their version, which a change of them names (#593 review round 1).
+  const VERSION = 'abcdef123456';
+  const CLASSIC = { stationery: { theme: 'classic', source: 'default' }, wordsVersion: VERSION };
   const TWO_PAGES = document1('Dear Sam,\nPat', 'And more,\nPat');
+  /** The draft as get_draft_status gives it: ready, with its words now. */
+  const status = (words: Json, page = PAGE) => ({
+    result: {
+      content: [],
+      structuredContent: {
+        draftId: 'draft_0001',
+        status: 'ready',
+        deliveryEstimate: 'Mailed in 1-2 business days',
+        stationery: { theme: 'classic' },
+        ...canSend,
+        ...words
+      },
+      _meta: { previewHtml: page }
+    }
+  });
 
   /** Types into an editor field, as the person would. */
   async function type(card: ReturnType<typeof mount>, id: string, value: string) {
@@ -854,6 +871,7 @@ describe("the Words tab's editor (#586)", () => {
         canSendNow: false,
         reasonCannotSend: 'Letter packs and gift letters pay for one-page letters and 6x9 postcards; this one is paid with Pay & Send.',
         sendEligibility: PAY_AND_SEND,
+        wordsVersion: 'fedcba654321',
         message: "The letter's words are changed and its page is drawn again. It now runs to two pages, printed on both sides, and is paid with Pay & Send. Nothing has been sent."
       },
       _meta: { previewHtml: TWO_PAGES, pageFit: { pages: 2, sheets: 1, doubleSided: true, roomLines: 30, roomCharacters: 2900, charactersPerLine: 97 } }
@@ -893,7 +911,9 @@ describe("the Words tab's editor (#586)", () => {
     expect(card.lastRequest('tools/call', 'set_letter_words')!.params.arguments).toEqual({
       draftId: 'draft_0001',
       bodyText: 'Dear Sam,\n\nThe garden is in, and the roses are out.',
-      signOff: 'Love, Pat'
+      signOff: 'Love, Pat',
+      // The version of the words it replaces: the preview's.
+      wordsVersion: VERSION
     });
     // One change at a time: the page waits, and so does the Style row.
     expect(text(card, 'studio-words-update')).toBe('Updating the page…');
@@ -914,6 +934,9 @@ describe("the Words tab's editor (#586)", () => {
     await card.click(card.byId('studio-words-open'));
     expect((card.byId('studio-words-body') as HTMLTextAreaElement).value).toBe('Dear Sam,\n\nThe garden is in, and the roses are out.');
     expect(text(card, 'studio-words-count')).toBe('About 2,900 characters left on the back of the page.');
+    // And a second change names the version the first gave.
+    await card.click(card.byId('studio-words-update'));
+    expect(card.lastRequest('tools/call', 'set_letter_words')!.params.arguments.wordsVersion).toBe('fedcba654321');
   });
 
   it('says why the words were not changed, and keeps them', async () => {
@@ -927,11 +950,51 @@ describe("the Words tab's editor (#586)", () => {
       { result: { isError: true, content: [{ type: 'text', text: 'This preview has expired. Make a new preview with the words.' }] } },
       'set_letter_words'
     );
+    // Said at once, while the card asks how the draft is now.
+    expect(text(card, 'studio-words-note')).toBe('This preview has expired. Make a new preview with the words.');
+    // Its words are the ones the editor started from: the refusal stands.
+    await card.answer(status({ bodyText: ARGS.bodyText, signOff: ARGS.signOff, wordsVersion: VERSION }), 'get_draft_status');
     expect(text(card, 'studio-words-note')).toBe('This preview has expired. Make a new preview with the words.');
     expect(card.byId('studio-words-note').classList.contains('alert')).toBe(true);
     expect(card.byId('studio-words-edit').hidden).toBe(false);
     expect((card.byId('studio-words-body') as HTMLTextAreaElement).value).toBe('Dear Sam,\n\nMuch longer.');
     expect(text(card, 'studio-cost')).toBe('1 letter');
+  });
+
+  it('opens again on the words the chat gave them, when a change was refused because they changed there', async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
+    await card.click(card.tab('words'));
+    await card.click(card.byId('studio-words-open'));
+    await type(card, 'studio-words-body', 'Dear Sam,\n\nMy own change.');
+    await card.click(card.byId('studio-words-update'));
+    await card.answer({ result: { isError: true, content: [{ type: 'text', text: 'Nothing was changed: the words changed.' }] } }, 'set_letter_words');
+    await card.answer(
+      status({ bodyText: 'Dear Sam,\n\nThe chat wrote this.', signOff: 'Love, Pat', wordsVersion: 'chat00000000', pages: 2, canSendNow: false, sendEligibility: PAY_AND_SEND }, TWO_PAGES),
+      'get_draft_status'
+    );
+    expect(card.byId('studio-words-edit').hidden).toBe(false);
+    expect((card.byId('studio-words-body') as HTMLTextAreaElement).value).toBe('Dear Sam,\n\nThe chat wrote this.');
+    expect((card.byId('studio-words-signoff') as HTMLTextAreaElement).value).toBe('Love, Pat');
+    expect(text(card, 'studio-words-note')).toBe("The letter's words were changed in the chat since this card showed them. Here they are now: make your change again.");
+    // With the page and price the draft has now.
+    expect(card.document.querySelectorAll('#mockup-container svg')).toHaveLength(2);
+    expect(text(card, 'studio-cost')).toBe('Pay & Send USD 5.99');
+    // The next change names the version they have.
+    await card.click(card.byId('studio-words-update'));
+    expect(card.lastRequest('tools/call', 'set_letter_words')!.params.arguments.wordsVersion).toBe('chat00000000');
+  });
+
+  it("shows and edits the draft's words when the card's status answer gives them changed in the chat", async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
+    await card.answer(status({ bodyText: 'Dear Sam,\n\nThe chat wrote this.', signOff: 'Pat', wordsVersion: 'chat00000000' }, TWO_PAGES), 'get_draft_status');
+    await card.click(card.tab('words'));
+    expect(text(card, 'studio-words')).toBe('Dear Sam,\n\nThe chat wrote this.\n\nPat');
+    await card.click(card.byId('studio-words-open'));
+    expect((card.byId('studio-words-body') as HTMLTextAreaElement).value).toBe('Dear Sam,\n\nThe chat wrote this.');
+    await card.click(card.byId('studio-words-update'));
+    expect(card.lastRequest('tools/call', 'set_letter_words')!.params.arguments.wordsVersion).toBe('chat00000000');
   });
 
   it('puts the words back as they were on Cancel', async () => {
@@ -946,6 +1009,8 @@ describe("the Words tab's editor (#586)", () => {
     expect(card.lastRequest('tools/call', 'send_letter')).toBeUndefined();
     await card.click(card.byId('studio-words-cancel'));
     expect((card.byId('send-button') as HTMLButtonElement).disabled).toBe(false);
+    // Focus goes back to Change the words, the boxes having gone.
+    expect(card.document.activeElement).toBe(card.byId('studio-words-open'));
     expect(card.byId('studio-words-edit').hidden).toBe(true);
     expect(card.lastRequest('tools/call', 'set_letter_words')).toBeUndefined();
     await card.click(card.byId('studio-words-open'));
@@ -964,6 +1029,22 @@ describe("the Words tab's editor (#586)", () => {
     expect(card.lastRequest('tools/call', 'create_mail_checkout')).toBeUndefined();
     // Counted on the back of the page, and past it.
     expect(text(card, 'studio-words-count')).toBe('About 970 characters left on the back of the page.');
+  });
+
+  it('holds the confirmation page, where an app takes no payment, while words are being written (#593 review round 1)', async () => {
+    const card = mount();
+    const onPage = { packPays: false, payAndSend: { available: false, pageUrl: 'https://letterirl.example/send/draft_0001' }, letterPack: { available: false } };
+    const TWO_FIT = { pages: 2, sheets: 1, doubleSided: true, roomLines: 10, roomCharacters: 970, charactersPerLine: 97 };
+    await card.show(output({ ...CLASSIC, pages: 2, canSendNow: false, sendEligibility: onPage }), { ...ON, pageFit: TWO_FIT });
+    expect(card.byId('pay-page-button').style.display).toBe('flex');
+    expect((card.byId('pay-page-button') as HTMLButtonElement).disabled).toBe(false);
+    await card.click(card.tab('words'));
+    await card.click(card.byId('studio-words-open'));
+    expect((card.byId('pay-page-button') as HTMLButtonElement).disabled).toBe(true);
+    await card.click(card.byId('pay-page-button'));
+    expect(card.lastRequest('ui/open-link')).toBeUndefined();
+    await card.click(card.byId('studio-words-cancel'));
+    expect((card.byId('pay-page-button') as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('counts past the third page as more than we print', async () => {

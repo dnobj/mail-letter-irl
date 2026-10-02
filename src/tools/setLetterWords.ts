@@ -1,16 +1,21 @@
 import type { Address, LetterLayoutType, McpToolDefinition, ToolContext } from '../contracts/types.js';
 import { setLetterWordsInputSchema, setLetterWordsOutputSchema } from '../schemas.js';
 import { letterPageLimit } from '../config/roomToWrite.js';
+import { isGiftLettersEnabled } from '../config/giftLetters.js';
 import type { SendEligibility } from '../services/commerceService.js';
-import { pageFit, stationeryOf, type PageFit } from '../render/index.js';
+import { getGiftBalance } from '../services/giftLetterService.js';
+import { pageFit, stationeryOf, type Layout, type PageFit } from '../render/index.js';
 import { getDraftForStationery, setDraftWords, type DraftRedrawRefusal } from '../services/draftService.js';
 import {
   layoutLetterForPreview,
   letterOption,
   letterPayment,
+  letterRunsPast,
   redrawLetterPreview,
+  RENDERED_LETTER_CHARACTER_CAP,
   validateCharacterLimitForLayout,
-  validatePrintableLetter
+  validatePrintableLetter,
+  wordsVersionOf
 } from './letterHelpers.js';
 import { isDraftIdShape } from './requestSend.js';
 
@@ -23,6 +28,11 @@ import { isDraftIdShape } from './requestSend.js';
  * sent (setDraftWords). A gift letter stays on one page: it pays for one page
  * only (#579). Nothing is sent here.
  *
+ * A change names the version of the words it replaces (wordsVersion): the card
+ * and the chat can each change them, and neither sees the other's call (#366),
+ * so a change of words its caller has not seen is refused, with the words as
+ * they are now (#593 review round 1).
+ *
  * Listed only while room to write is offered (src/server.ts), and refused
  * while it is not, for an app that cached the list. The letter card's Words
  * tab calls it too.
@@ -33,6 +43,8 @@ interface SetLetterWordsInput {
   draftId: string;
   bodyText: string;
   signOff: string;
+  /** The version of the words this change replaces, from the preview or the last change. */
+  wordsVersion?: string;
 }
 
 export interface SetLetterWordsOutput {
@@ -47,12 +59,15 @@ export interface SetLetterWordsOutput {
   sendEligibility: SendEligibility;
   /** How full its pages are now, for the card's fit line. Card-only (_meta). */
   pageFit: PageFit;
+  /** The version of the words now, for the next change of them. */
+  wordsVersion: string;
   message: string;
 }
 
 /**
  * Refusals the model can act on. Like set_stationery's, none repeats the
- * draft id or the words, and the code doubles as the log's class.
+ * draft id, and the code doubles as the log's class. Only WORDS_CHANGED gives
+ * the words, as they are now: the caller's own read of them.
  */
 export class WordsRefusedError extends Error {
   readonly diagnosticClass: string;
@@ -61,6 +76,7 @@ export class WordsRefusedError extends Error {
     readonly code:
       | 'WORDS_DISABLED'
       | 'WORDS_MISSING'
+      | 'WORDS_CHANGED'
       | 'DRAFT_NOT_FOUND'
       | 'DRAFT_ALREADY_SENT'
       | 'DRAFT_EXPIRED'
@@ -82,7 +98,7 @@ const REFUSALS: Record<DraftRedrawRefusal, [WordsRefusedError['code'], string]> 
   sent: ['DRAFT_ALREADY_SENT', "This letter has already been sent, so its words can't change. list_orders shows it."],
   expired: ['DRAFT_EXPIRED', 'This preview has expired. Make a new preview with the words.'],
   checkout_pending: ['DRAFT_CHECKOUT_PENDING', "This preview is tied to a Pay & Send payment, so its words can't change now."],
-  // Its stationery changed while the page was drawn again.
+  // Its stationery, or its words, changed while the page was drawn again.
   changed: ['DRAFT_CHANGED', 'The letter changed while its page was being drawn again. Try the words again.']
 };
 
@@ -100,17 +116,49 @@ function refused(code: WordsRefusedError['code'], message: string, context: Tool
   return new WordsRefusedError(code, message);
 }
 
+/**
+ * Why a change of words its caller has not seen was refused, with the words as
+ * they are now and their version: the conversation's read of words the card
+ * changed, which the model never sees (#366).
+ */
+function wordsChanged(given: boolean, bodyText: string, signOff: string, version: string): string {
+  const why = given
+    ? "Nothing was changed: the letter's words are not the ones you last saw. They were changed on the letter card, or by another change."
+    : 'Nothing was changed: give wordsVersion, the version of the words this change replaces, from the preview or the last change of words.';
+  const words = [bodyText.trim(), signOff.trim()].filter(Boolean).join('\n\n');
+  return (
+    `${why} The letter's words now are below, at wordsVersion "${version}". ` +
+    `Make the change to these words, then call set_letter_words again with that wordsVersion.\n\n${words}`
+  );
+}
+
 const PAGE_WORDS = ['', 'one page', 'two pages', 'three pages'];
 
 /** What the tool says it did, and what changed in the letter's pages, and so its price. */
-function messageFor(pages: number, pagesBefore: number): string {
+function messageFor(pages: number, pagesBefore: number, note: string): string {
   const length =
     pages === pagesBefore
       ? ''
       : pages === 1
         ? ' It now fits on one page, which a letter pack pays for.'
         : ` It now runs to ${PAGE_WORDS[pages]}, printed on both sides, and is paid with Pay & Send.`;
-  return `The letter's words are changed and its page is drawn again.${length} Nothing has been sent.`;
+  return `The letter's words are changed and its page is drawn again.${length}${note} Nothing has been sent.`;
+}
+
+/**
+ * Back on one page, a letter its balance cannot pay may be one the account's
+ * gift letter can (#579). Only a preview decides a gift, so say a new preview
+ * would offer it, when the account has one (#593 review round 1).
+ */
+async function giftLetterNote(context: ToolContext): Promise<string> {
+  if (!isGiftLettersEnabled()) return '';
+  try {
+    const balance = await getGiftBalance(context.user.userId);
+    return balance.available > 0 ? ' A new preview of it can use your gift letter.' : '';
+  } catch {
+    // The words are changed either way; saying nothing never fails that.
+    return '';
+  }
 }
 
 async function handler(input: SetLetterWordsInput, context: ToolContext): Promise<SetLetterWordsOutput> {
@@ -143,6 +191,15 @@ async function handler(input: SetLetterWordsInput, context: ToolContext): Promis
   }
   // Only a letter our renderer drew can be drawn again with new words.
   if (!draft.renderer_version) throw refused('DRAFT_NOT_DRAWN', NOT_DRAWN, context);
+
+  // The words it replaces, by their version: refused, with the words as they
+  // are now, unless they are the ones its caller last saw.
+  const replacing = { bodyText: draft.body_text, signOff: draft.sign_off };
+  const current = wordsVersionOf(replacing.bodyText, replacing.signOff);
+  if (input.wordsVersion !== current) {
+    const given = typeof input.wordsVersion === 'string' && input.wordsVersion !== '';
+    throw refused('WORDS_CHANGED', wordsChanged(given, replacing.bodyText, replacing.signOff ?? '', current), context);
+  }
   // The pages its preview drew: its own, then any gift card's.
   const pagesBefore = Number(draft.pages ?? 1);
 
@@ -151,22 +208,29 @@ async function handler(input: SetLetterWordsInput, context: ToolContext): Promis
   const layoutType = (draft.layout_type ?? 'text_only') as LetterLayoutType;
   // In the stationery it is drawn in now, as the print reads it back.
   const stationery = stationeryOf(draft.stationery) ?? undefined;
+  const imageData = layoutType === 'header_image'
+    ? draft.header_image_data
+    : layoutType === 'inline_image' ? draft.inline_image_data : null;
+  const letter = { bodyText, signOff, layoutType, imageData: imageData ?? undefined, stationery };
+  // A gift letter pays for one page only (#579): its words are held to one
+  // page and refused in a gift's words when they run past it, never priced
+  // again (#593 review round 1).
+  const gift = draft.is_gift_send === true;
+  if (gift && bodyText.length + signOff.length > RENDERED_LETTER_CHARACTER_CAP) {
+    throw refused('GIFT_LETTER_ONE_PAGE', GIFT_ONE_PAGE, context);
+  }
 
   // As a preview checks its words: their length, what prints, then the page.
   validateCharacterLimitForLayout(bodyText, signOff, layoutType, context, 'pdf');
   validatePrintableLetter({ sender, recipient, bodyText, signOff, senderIsSaved: false }, context, 'pdf', undefined, stationery);
-  const imageData = layoutType === 'header_image'
-    ? draft.header_image_data
-    : layoutType === 'inline_image' ? draft.inline_image_data : null;
-  const layout = layoutLetterForPreview(
-    { bodyText, signOff, layoutType, imageData: imageData ?? undefined, stationery },
-    context,
-    'pdf',
-    limit
-  )!;
+  let layout: Layout;
+  try {
+    layout = layoutLetterForPreview(letter, context, 'pdf', gift ? 1 : limit)!;
+  } catch (error) {
+    if (gift && letterRunsPast(letter, 1)) throw refused('GIFT_LETTER_ONE_PAGE', GIFT_ONE_PAGE, context);
+    throw error;
+  }
   const pages = layout.pages.length;
-  // A gift letter pays for one page only (#579): never priced again here.
-  if (draft.is_gift_send && pages > 1) throw refused('GIFT_LETTER_ONE_PAGE', GIFT_ONE_PAGE, context);
 
   // The letter's pages drawn again, as many as it takes now; the pages after
   // the letter's own, a gift letter's card, as they were.
@@ -178,11 +242,12 @@ async function handler(input: SetLetterWordsInput, context: ToolContext): Promis
   );
   if (previewHtml === null) throw refused('DRAFT_NOT_DRAWN', NOT_DRAWN, context);
 
-  // With the stationery it was drawn in, refused if that changed meanwhile.
+  // With the stationery it was drawn in and the words it replaces, refused if
+  // either changed meanwhile.
   const refusal = await setDraftWords(
     draftId,
     userId,
-    { bodyText, signOff, previewHtml, pages, drawnIn: draft.stationery },
+    { bodyText, signOff, previewHtml, pages, drawnIn: draft.stationery, replacing },
     context.now()
   );
   if (refusal) throw refused(...REFUSALS[refusal], context);
@@ -194,14 +259,16 @@ async function handler(input: SetLetterWordsInput, context: ToolContext): Promis
   );
   // Priced as it stands now: the pages are the draft's, as the send and the
   // checkout read them.
-  const payment = letterPayment(letterOption(layout), Number(draft.required_credits ?? 2), draft.is_gift_send === true, context, draftId);
+  const payment = letterPayment(letterOption(layout), Number(draft.required_credits ?? 2), gift, context, draftId);
+  const note = pages === 1 && pagesBefore > 1 && !payment.canSendNow && !gift ? await giftLetterNote(context) : '';
   return {
     draftId,
     previewHtml,
     ...(pages > 1 ? { pages } : {}),
     ...payment,
     pageFit: pageFit(layout, stationery),
-    message: messageFor(pages, pagesBefore)
+    wordsVersion: wordsVersionOf(bodyText, signOff),
+    message: messageFor(pages, pagesBefore, note)
   };
 }
 
@@ -210,9 +277,11 @@ export const setLetterWordsTool: McpToolDefinition<SetLetterWordsInput, SetLette
   title: "Change the letter's words",
   description:
     'Change the words of a previewed letter without previewing it again. Give the draftId from the preview, ' +
-    'and bodyText and signOff in full, as the letter previews take them. The letter is laid out again in its stationery ' +
-    'on up to three pages: a longer letter prints on both sides and is paid with Pay & Send, and a gift letter stays on one page. ' +
-    "The letter card's Words tab can change the words too. Nothing is sent by this tool.",
+    'bodyText and signOff in full, as the letter previews take them, and the wordsVersion of the words being replaced, ' +
+    'from the preview or the last change of words. The letter card can change the words too: if they changed since you ' +
+    'saw them, nothing is changed, and the answer gives the words as they are now. The letter is laid out again in its ' +
+    'stationery on up to three pages: a longer letter prints on both sides and is paid with Pay & Send, and a gift letter ' +
+    'stays on one page. Nothing is sent by this tool.',
   readOnly: false,
   inputSchema: setLetterWordsInputSchema,
   outputSchema: setLetterWordsOutputSchema,
@@ -221,8 +290,9 @@ export const setLetterWordsTool: McpToolDefinition<SetLetterWordsInput, SetLette
     'openai/toolInvocation/invoked': 'Words changed',
     // The letter card's Words tab calls it.
     'openai/widgetAccessible': true,
-    // Changes only a draft's words: a draft expires on its own and sends
-    // nothing, and the same words twice change nothing more.
+    // Changes only a draft's words, and only words its caller has seen
+    // (wordsVersion), which that caller can set again: a draft expires on its
+    // own and sends nothing, and the same words twice change nothing more.
     readOnlyHint: false,
     idempotentHint: true
   },

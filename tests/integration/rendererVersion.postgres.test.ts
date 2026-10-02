@@ -535,45 +535,57 @@ describePostgres('renderer version, stationery and pages (migrations 039 and 044
     const words = async (draftId: string) =>
       (await pool.query('SELECT body_text, sign_off, preview_html, pages, stationery FROM letter_drafts WHERE draft_id = $1', [draftId])).rows[0];
 
+    /** The words a seeded draft has, as a change of them names what it replaces (#593 review round 1). */
+    const seeded = (draftId: string) => ({ bodyText: `Hello ${draftId}`, signOff: 'Warmly, Test' });
+
     it('writes the words, the page and the pages, and 047 refuses two pages on a gift send', async () => {
       const userId = await seedUser();
       const draftId = await seedDraft(userId, 'pdf-1');
       await expect(
-        drafts.setDraftWords(draftId, userId, { bodyText: 'Dear Sam,\n\nMore.', signOff: 'Love, Pat', previewHtml: PAGE, pages: 2, drawnIn: null })
+        drafts.setDraftWords(draftId, userId, {
+          bodyText: 'Dear Sam,\n\nMore.', signOff: 'Love, Pat', previewHtml: PAGE, pages: 2, drawnIn: null, replacing: seeded(draftId)
+        })
       ).resolves.toBeNull();
       expect(await words(draftId)).toEqual({ body_text: 'Dear Sam,\n\nMore.', sign_off: 'Love, Pat', preview_html: PAGE, pages: 2, stationery: null });
-      // get_draft_status reads the pages back (getDraftState).
-      await expect(drafts.getDraftState(draftId)).resolves.toMatchObject({ pages: 2 });
+      // get_draft_status reads the pages and the words back (getDraftState).
+      await expect(drafts.getDraftState(draftId)).resolves.toMatchObject({ pages: 2, body_text: 'Dear Sam,\n\nMore.', sign_off: 'Love, Pat' });
 
       const gift = await seedDraft(userId, 'pdf-1');
       await pool.query('UPDATE letter_drafts SET is_gift_send = TRUE WHERE draft_id = $1', [gift]);
-      await expect(drafts.setDraftWords(gift, userId, { bodyText: 'Long', signOff: 'Pat', previewHtml: PAGE, pages: 2, drawnIn: null }))
-        .rejects.toMatchObject({ code: '23514', constraint: 'letter_drafts_pages_paid_per_send' });
+      await expect(
+        drafts.setDraftWords(gift, userId, { bodyText: 'Long', signOff: 'Pat', previewHtml: PAGE, pages: 2, drawnIn: null, replacing: seeded(gift) })
+      ).rejects.toMatchObject({ code: '23514', constraint: 'letter_drafts_pages_paid_per_send' });
     }, 60_000);
 
-    it('refuses a restyle drawn from words that changed under it, and words drawn in stationery that changed', async () => {
+    it('refuses a restyle drawn from words that changed under it, and words drawn in stationery, or over words, that changed', async () => {
       const userId = await seedUser();
       const draftId = await seedDraft(userId, 'pdf-1');
-      const before = { bodyText: `Hello ${draftId}`, signOff: 'Warmly, Test' };
+      const before = seeded(draftId);
+      const newWords = { bodyText: 'New words', signOff: 'Love' };
 
       // New words land first: a restyle drawn from the old ones is refused, and changes nothing.
-      await expect(drafts.setDraftWords(draftId, userId, { bodyText: 'New words', signOff: 'Love', previewHtml: PAGE, pages: 1, drawnIn: null }))
+      await expect(drafts.setDraftWords(draftId, userId, { ...newWords, previewHtml: PAGE, pages: 1, drawnIn: null, replacing: before }))
         .resolves.toBeNull();
       await expect(drafts.setDraftStationery(draftId, userId, { stationery: BOTANICAL, previewHtml: '<svg/>', drawnFrom: before }))
         .resolves.toBe('changed');
       expect(await words(draftId)).toMatchObject({ body_text: 'New words', stationery: null, preview_html: PAGE });
       expect((await pool.query('SELECT stationery_theme FROM users WHERE user_id = $1', [userId])).rows[0].stationery_theme).toBeNull();
 
+      // And other words over the old ones are refused too: the card's change and the chat's cannot overwrite each other unseen.
+      await expect(drafts.setDraftWords(draftId, userId, { bodyText: 'Other', signOff: 'Pat', previewHtml: PAGE, pages: 1, drawnIn: null, replacing: before }))
+        .resolves.toBe('changed');
+      expect(await words(draftId)).toMatchObject({ body_text: 'New words' });
+
       // Drawn from the words it has, the restyle goes through.
-      await expect(drafts.setDraftStationery(draftId, userId, { stationery: BOTANICAL, previewHtml: '<svg/>', drawnFrom: { bodyText: 'New words', signOff: 'Love' } }))
+      await expect(drafts.setDraftStationery(draftId, userId, { stationery: BOTANICAL, previewHtml: '<svg/>', drawnFrom: newWords }))
         .resolves.toBeNull();
 
       // Now words drawn on the plain page it had are refused; drawn in the stationery read back, they go through.
-      await expect(drafts.setDraftWords(draftId, userId, { bodyText: 'Newer', signOff: 'Love', previewHtml: PAGE, pages: 1, drawnIn: null }))
+      await expect(drafts.setDraftWords(draftId, userId, { bodyText: 'Newer', signOff: 'Love', previewHtml: PAGE, pages: 1, drawnIn: null, replacing: newWords }))
         .resolves.toBe('changed');
       expect(await words(draftId)).toMatchObject({ body_text: 'New words', stationery: BOTANICAL });
       const stored = (await words(draftId)).stationery;
-      await expect(drafts.setDraftWords(draftId, userId, { bodyText: 'Newer', signOff: 'Love', previewHtml: PAGE, pages: 1, drawnIn: stored }))
+      await expect(drafts.setDraftWords(draftId, userId, { bodyText: 'Newer', signOff: 'Love', previewHtml: PAGE, pages: 1, drawnIn: stored, replacing: newWords }))
         .resolves.toBeNull();
       expect(await words(draftId)).toMatchObject({ body_text: 'Newer', stationery: BOTANICAL });
     }, 60_000);
@@ -581,18 +593,18 @@ describePostgres('renderer version, stationery and pages (migrations 039 and 044
     it("leaves a sent, expired or someone else's draft as it was", async () => {
       const userId = await seedUser();
       const other = await seedUser();
-      const change = { bodyText: 'New words', signOff: 'Love', previewHtml: PAGE, pages: 1, drawnIn: null };
+      const change = (draftId: string) => ({ bodyText: 'New words', signOff: 'Love', previewHtml: PAGE, pages: 1, drawnIn: null, replacing: seeded(draftId) });
 
       const sent = await seedDraft(userId, 'pdf-1');
       await mailSend.createMailOrderFromDraft({ draftId: sent, userId, mailType: 'letter' });
-      await expect(drafts.setDraftWords(sent, userId, change)).resolves.toBe('sent');
+      await expect(drafts.setDraftWords(sent, userId, change(sent))).resolves.toBe('sent');
 
       const expired = await seedDraft(userId, 'pdf-1');
       await pool.query("UPDATE letter_drafts SET expires_at = NOW() - INTERVAL '1 minute' WHERE draft_id = $1", [expired]);
-      await expect(drafts.setDraftWords(expired, userId, change)).resolves.toBe('expired');
+      await expect(drafts.setDraftWords(expired, userId, change(expired))).resolves.toBe('expired');
 
       const theirs = await seedDraft(other, 'pdf-1');
-      await expect(drafts.setDraftWords(theirs, userId, change)).resolves.toBe('not_found');
+      await expect(drafts.setDraftWords(theirs, userId, change(theirs))).resolves.toBe('not_found');
 
       for (const draftId of [sent, expired, theirs]) {
         expect((await words(draftId)).body_text, draftId).toBe(`Hello ${draftId}`);

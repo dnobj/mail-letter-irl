@@ -15,6 +15,11 @@ vi.mock('../../../src/services/draftService.js', async importOriginal => ({
   setDraftWords: vi.fn()
 }));
 
+vi.mock('../../../src/services/giftLetterService.js', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../../src/services/giftLetterService.js')>()),
+  getGiftBalance: vi.fn()
+}));
+
 vi.mock('../../../src/services/commerceService.js', async importOriginal => ({
   ...(await importOriginal<typeof import('../../../src/services/commerceService.js')>()),
   getSendEligibility: vi.fn()
@@ -28,7 +33,8 @@ import { layoutGiftPage, layoutLetter, readImageDataUri, renderPreviewSvg, type 
 import { letterPrintText, renderLetterPreviewDocument, stampedAddressLines } from '../../../src/services/previewService.js';
 import { sampleFundedCard } from '../../../src/services/giftLetterService.js';
 import { giftLetterPageCopy } from '../../../src/services/giftCardRenderer.js';
-import { PAID_PER_SEND_REASON, withDisplayImage } from '../../../src/tools/letterHelpers.js';
+import { PAID_PER_SEND_REASON, withDisplayImage, wordsVersionOf } from '../../../src/tools/letterHelpers.js';
+import { getGiftBalance } from '../../../src/services/giftLetterService.js';
 import type { Address, ToolContext } from '../../../src/contracts/types.js';
 
 const DRAFT_ID = '0f1e2d3c-4b5a-4978-8796-a5b4c3d2e1f0';
@@ -112,7 +118,14 @@ function draft(options: { bodyText: string; stationery?: Stationery; gift?: bool
 
 type Handler = (input: unknown, ctx: ToolContext) => Promise<Record<string, unknown>>;
 const handler = setLetterWordsTool.handler as unknown as Handler;
-const change = (bodyText: string, ctx = context(), signOff = 'Love, Pat') => handler({ draftId: DRAFT_ID, bodyText, signOff }, ctx);
+/** The version of the words the mocked draft has now: what a caller that saw them names (#593 review round 1). */
+async function versionNow(): Promise<string | undefined> {
+  const read = vi.mocked(getDraftForStationery).getMockImplementation();
+  const found = read ? ((await read(DRAFT_ID, 'user-1')) as { body_text: string; sign_off: string | null } | null) : null;
+  return found ? wordsVersionOf(found.body_text, found.sign_off) : undefined;
+}
+const change = async (bodyText: string, ctx = context(), signOff = 'Love, Pat') =>
+  handler({ draftId: DRAFT_ID, bodyText, signOff, wordsVersion: await versionNow() }, ctx);
 const svgs = (html: string) => html.match(/<svg [\s\S]*?<\/svg>/g) ?? [];
 
 /** The one change written: what setDraftWords was given. */
@@ -153,6 +166,8 @@ describe('set_letter_words', () => {
 
     const words = written();
     expect(words).toMatchObject({ bodyText: 'Dear Sam,\n\nThe garden is in.', signOff: 'Love, Pat', pages: 1, drawnIn: null });
+    // The words it replaces, as read, so a change under it is refused (#593 review round 1).
+    expect(words.replacing).toEqual({ bodyText: lines(10), signOff: 'Pat' });
     expect(svgs(words.previewHtml)).toHaveLength(1);
     expect(words.previewHtml).toContain('<body data-renderer="pdf-1">');
     // The page's title is its printed lines.
@@ -164,6 +179,9 @@ describe('set_letter_words', () => {
     expect(output).not.toHaveProperty('reasonCannotSend');
     expect(output.pageFit).toMatchObject({ pages: 1, sheets: 1, doubleSided: false });
     expect(output.message).toBe("The letter's words are changed and its page is drawn again. Nothing has been sent.");
+    // The new words' version, for the next change.
+    expect(output.wordsVersion).toBe(wordsVersionOf('Dear Sam,\n\nThe garden is in.', 'Love, Pat'));
+    expect(output.wordsVersion).not.toBe(await versionNow());
     expect(getSendEligibility).toHaveBeenCalledWith(10, 2, { mailType: 'letter' });
   });
 
@@ -220,6 +238,10 @@ describe('set_letter_words', () => {
     expect(output.sendEligibility).toMatchObject({ payAndSend: { available: false } });
 
     vi.mocked(setDraftWords).mockClear();
+    // Past three pages, and past the character cap, it is still a gift letter's refusal (#593 review round 1).
+    for (const long of [lines(200), 'x'.repeat(10_001), 'x'.repeat(30_001)]) {
+      await expect(change(long, context(0)), long.slice(0, 12)).rejects.toMatchObject({ code: 'GIFT_LETTER_ONE_PAGE' });
+    }
     const error = await change(lines(40), context(0)).catch(e => e);
     expect(error).toMatchObject({ code: 'GIFT_LETTER_ONE_PAGE' });
     expect(error.message).toBe(
@@ -227,6 +249,48 @@ describe('set_letter_words', () => {
         'Shorten them to fit one page, or make a new preview to send it another way.'
     );
     expect(setDraftWords).not.toHaveBeenCalled();
+  });
+
+  it("refuses a change of words its caller has not seen, and gives the words as they are now (#593 review round 1)", async () => {
+    vi.mocked(getDraftForStationery).mockResolvedValue({ ...draft({ bodyText: lines(10) }), body_text: 'Dear Sam,\n\nChanged on the card.', sign_off: 'Love, Pat' } as never);
+    const now = wordsVersionOf('Dear Sam,\n\nChanged on the card.', 'Love, Pat');
+
+    // Named, but not the words it has now.
+    const stale = await handler({ draftId: DRAFT_ID, bodyText: 'Dear Sam, with a P.S.', signOff: 'Pat', wordsVersion: wordsVersionOf(lines(10), 'Pat') }, context()).catch(e => e);
+    expect(stale).toMatchObject({ code: 'WORDS_CHANGED' });
+    expect(stale.message).toBe(
+      "Nothing was changed: the letter's words are not the ones you last saw. They were changed on the letter card, or by another change. " +
+        `The letter's words now are below, at wordsVersion "${now}". Make the change to these words, then call set_letter_words again with that wordsVersion.` +
+        '\n\nDear Sam,\n\nChanged on the card.\n\nLove, Pat'
+    );
+
+    // Not named at all.
+    const unnamed = await handler({ draftId: DRAFT_ID, bodyText: 'Dear Sam, with a P.S.', signOff: 'Pat' }, context()).catch(e => e);
+    expect(unnamed).toMatchObject({ code: 'WORDS_CHANGED' });
+    expect(unnamed.message).toMatch(/^Nothing was changed: give wordsVersion, the version of the words this change replaces/);
+    expect(unnamed.message).toContain(`wordsVersion "${now}"`);
+    expect(setDraftWords).not.toHaveBeenCalled();
+
+    // Named as it is now, it goes through.
+    await handler({ draftId: DRAFT_ID, bodyText: 'Dear Sam, with a P.S.', signOff: 'Pat', wordsVersion: now }, context());
+    expect(written().replacing).toEqual({ bodyText: 'Dear Sam,\n\nChanged on the card.', signOff: 'Love, Pat' });
+  });
+
+  it('says a new preview can use a gift letter when the words bring it back to a page the balance cannot pay (#593 review round 1)', async () => {
+    vi.stubEnv('LETTER_IRL_GIFT_LETTERS_ENABLED', 'true');
+    vi.mocked(getGiftBalance).mockResolvedValue({ available: 1 } as never);
+    vi.mocked(getDraftForStationery).mockResolvedValue(draft({ bodyText: lines(40) }) as never);
+    const output = await change(lines(10), context(0));
+    expect(output.message).toBe(
+      "The letter's words are changed and its page is drawn again. It now fits on one page, which a letter pack pays for. " +
+        'A new preview of it can use your gift letter. Nothing has been sent.'
+    );
+
+    // None on hand, or a balance that pays: nothing said of it.
+    vi.mocked(getGiftBalance).mockResolvedValue({ available: 0 } as never);
+    expect((await change(lines(10), context(0))).message).not.toContain('gift letter');
+    vi.mocked(getGiftBalance).mockResolvedValue({ available: 1 } as never);
+    expect((await change(lines(10), context(10))).message).not.toContain('gift letter');
   });
 
   it('draws the enclosed picture again from the small copy its preview showed', async () => {
@@ -283,7 +347,7 @@ describe('set_letter_words', () => {
   ])('refuses %s, writing nothing', async (_label, overrides, input, code) => {
     vi.mocked(getDraftForStationery).mockResolvedValue(overrides ? ({ ...draft({ bodyText: lines(10) }), ...overrides } as never) : null);
     const ctx = context();
-    await expect(handler({ draftId: DRAFT_ID, bodyText: lines(4), signOff: 'Pat', ...input }, ctx)).rejects.toMatchObject({ code });
+    await expect(handler({ draftId: DRAFT_ID, bodyText: lines(4), signOff: 'Pat', wordsVersion: await versionNow(), ...input }, ctx)).rejects.toMatchObject({ code });
     expect(setDraftWords).not.toHaveBeenCalled();
     expect(ctx.logger.warn).toHaveBeenCalledWith(expect.objectContaining({ event: 'draft.words_refused', reason: code }), expect.any(String));
   });
@@ -320,6 +384,16 @@ describe('set_letter_words', () => {
     expect(structuredContent).not.toHaveProperty('pageFit');
     expect(_meta).toMatchObject({ previewHtml: output.previewHtml, pageFit: output.pageFit });
     expect(structuredContent).toMatchObject({ draftId: DRAFT_ID, pages: 2, canSendNow: false });
+  });
+
+  it('versions the words by both their parts, and the same words alike', () => {
+    expect(wordsVersionOf('Dear Sam,', 'Pat')).toBe(wordsVersionOf('Dear Sam,', 'Pat'));
+    expect(wordsVersionOf('Dear Sam,', 'Pat')).not.toBe(wordsVersionOf('Dear Sam!', 'Pat'));
+    expect(wordsVersionOf('Dear Sam,', 'Pat')).not.toBe(wordsVersionOf('Dear Sam,', 'Love, Pat'));
+    // A sign-off stored as none is the empty one the card and the model give.
+    expect(wordsVersionOf('Dear Sam,', null)).toBe(wordsVersionOf('Dear Sam,', ''));
+    // The parts are kept apart: moving text between them is a change.
+    expect(wordsVersionOf('Dear Sam, Pat', '')).not.toBe(wordsVersionOf('Dear Sam,', ' Pat'));
   });
 
   it('is card-callable, idempotent and not read-only', () => {

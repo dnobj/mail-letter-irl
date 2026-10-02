@@ -331,6 +331,7 @@ export interface DraftState
     LetterDraft,
     | 'draft_id' | 'user_id' | 'status' | 'expires_at' | 'consumed_letter_id' | 'arrive_by' | 'mail_on'
     | 'mail_type' | 'renderer_version' | 'stationery' | 'preview_html' | 'pages' | 'is_gift_send' | 'required_credits'
+    | 'body_text' | 'sign_off'
   > {
   /** The letter the draft became; null for a draft not sent, or a letter that is not the draft owner's. */
   letter_status: LetterStatus | null;
@@ -343,6 +344,7 @@ export async function getDraftState(draftId: string): Promise<DraftState | null>
   const result = await query<DraftState>(
     `SELECT d.draft_id, d.user_id, d.status, d.expires_at, d.consumed_letter_id, d.arrive_by, d.mail_on,
             d.mail_type, d.renderer_version, d.stationery, d.pages, d.is_gift_send, d.required_credits,
+            d.body_text, d.sign_off,
             -- The page only where get_draft_status can give it: a letter our
             -- renderer drew, still pending.
             CASE WHEN d.status = 'pending' AND d.mail_type = 'letter' AND d.renderer_version IS NOT NULL
@@ -607,7 +609,7 @@ export async function getDraftForStationery(draftId: string, userId: string): Pr
  * committed second would store a page drawn from what the first replaced.
  * Read again under the lock; any change refuses the edit, to be tried again.
  */
-type DrawnFrom = { words: { bodyText: string; signOff: string | null } } | { stationery: unknown };
+type DrawnFrom = { words?: { bodyText: string; signOff: string | null }; stationery?: unknown };
 
 async function drawnFromChanged(client: pg.PoolClient, draftId: string, drawnFrom: DrawnFrom): Promise<boolean> {
   const locked = await client.query<{ body_text: string; sign_off: string | null; stationery: unknown }>(
@@ -616,11 +618,10 @@ async function drawnFromChanged(client: pg.PoolClient, draftId: string, drawnFro
   );
   const row = locked.rows[0];
   if (!row) return true;
-  if ('words' in drawnFrom) {
-    return row.body_text !== drawnFrom.words.bodyText || (row.sign_off ?? null) !== (drawnFrom.words.signOff ?? null);
-  }
+  const words = drawnFrom.words;
+  if (words && (row.body_text !== words.bodyText || (row.sign_off ?? null) !== (words.signOff ?? null))) return true;
   // Both read from the same jsonb column, so an unchanged value serialises the same.
-  return JSON.stringify(row.stationery ?? null) !== JSON.stringify(drawnFrom.stationery ?? null);
+  return 'stationery' in drawnFrom && JSON.stringify(row.stationery ?? null) !== JSON.stringify(drawnFrom.stationery ?? null);
 }
 
 /**
@@ -682,19 +683,30 @@ export async function setDraftStationery(
  * it, never between, and its price is the draft's from then on.
  *
  * Returns the refusal, or null once the words are changed: 'changed' when the
- * stationery changed since the caller read it, as the page was drawn in that.
+ * stationery changed since the caller read it, as the page was drawn in that,
+ * or the words it replaces did (#593 review round 1).
  */
 export async function setDraftWords(
   draftId: string,
   userId: string,
-  /** `drawnIn`: the stored stationery the page was drawn in, as read. */
-  change: { bodyText: string; signOff: string; previewHtml: string; pages: number; drawnIn: unknown },
+  /**
+   * `drawnIn`: the stored stationery the page was drawn in, as read.
+   * `replacing`: the words it replaces, as read.
+   */
+  change: {
+    bodyText: string;
+    signOff: string;
+    previewHtml: string;
+    pages: number;
+    drawnIn: unknown;
+    replacing: { bodyText: string; signOff: string | null };
+  },
   now: Date = new Date()
 ): Promise<DraftRedrawRefusal | null> {
   return transaction(async client => {
     const refusal = await lockChangeableDraft(client, draftId, userId, now);
     if (refusal) return refusal;
-    if (await drawnFromChanged(client, draftId, { stationery: change.drawnIn })) return 'changed';
+    if (await drawnFromChanged(client, draftId, { words: change.replacing, stationery: change.drawnIn })) return 'changed';
 
     await client.query(
       `UPDATE letter_drafts

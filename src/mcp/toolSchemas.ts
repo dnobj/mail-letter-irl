@@ -165,7 +165,8 @@ export const toolInputSchemas = {
   set_letter_words: z.object({
     draftId: z.string(),
     bodyText: z.string(),
-    signOff: z.string()
+    signOff: z.string(),
+    wordsVersion: z.string().optional()
   }),
   // Held mail cancelled before it goes to the printer (#535)
   cancel_scheduled_mail: z.object({

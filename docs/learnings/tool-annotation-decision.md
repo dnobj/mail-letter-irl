@@ -185,6 +185,14 @@ drafts that expire on their own, and `set_arrival_date` (#535, listed only while
 on) changes only such a draft's dates; it sends nothing, and the same date twice changes nothing
 more, so it is also idempotent.
 
+`set_stationery` (#563) and `set_letter_words` (#586) are non-destructive and idempotent on the same
+grounds: each changes only a draft, which sends nothing and expires on its own. `set_letter_words`
+replaces the person's words in place, which reads like `set_return_address`, but only words its
+caller has seen: a change names the version of the words it replaces (`wordsVersion`) and is refused,
+with the words as they are now, if they changed since, on the letter card or in the chat. So the
+caller can always set the words it replaced back, unlike a saved address overwritten unseen (#593
+review round 1).
+
 The `confirm: true` requirement on the send tools and the transactional idempotency (a consumed
 draft cannot be sent twice) remain the safeguards to describe in the justification. They are not a
 reason to omit the annotation. `buildAnnotations()` is what fills the MCP `annotations` block ChatGPT

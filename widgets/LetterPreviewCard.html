@@ -389,10 +389,10 @@
             <div class="studio-words" id="studio-words" tabindex="0" aria-label="The letter's words"></div>
             <div class="studio-words-edit" id="studio-words-edit" hidden>
               <label for="studio-words-body">The letter</label>
-              <textarea id="studio-words-body" rows="10"></textarea>
+              <textarea id="studio-words-body" rows="10" aria-describedby="studio-words-count"></textarea>
               <label for="studio-words-signoff">Signed</label>
               <textarea id="studio-words-signoff" rows="2"></textarea>
-              <p class="studio-quiet" id="studio-words-count" aria-live="polite" hidden></p>
+              <p class="studio-quiet" id="studio-words-count" hidden></p>
               <div class="studio-words-actions">
                 <button type="button" class="words-button primary" id="studio-words-update">Update the page</button>
                 <button type="button" class="words-button" id="studio-words-cancel">Cancel</button>
@@ -598,9 +598,12 @@
         const set = styleRow.words(draftId);
         if (set) return set;
         const args = retryResult ? retryResult.args : host.toolInput();
+        const output = retryResult ? retryResult.output : host.toolOutput();
         return {
           bodyText: typeof args?.bodyText === "string" ? args.bodyText : "",
           signOff: typeof args?.signOff === "string" ? args.signOff : "",
+          // The version a change of them names (#593 review round 1).
+          version: typeof output?.wordsVersion === "string" ? output.wordsVersion : undefined,
         };
       }
 
@@ -702,10 +705,11 @@
         fitLine.textContent = fit;
         fitLine.hidden = !fit;
         // The words can change here while room to write is offered, as the
-        // preview's count says, and the draft is still a draft (#586).
+        // preview's count says (#586), and only where the Style row shows: the
+        // card's one word on whether the draft can still change, the row goes
+        // once the letter is sent, paid for, expired or on its confirmation page.
         const offered = Boolean(currentMeta().pageFit || styleRow.terms(state.draftId)?.pageFit);
-        const changeable = !sent && !paid && !halted && !expired && !cancelled && !sendPageShown();
-        styleRow.showWords(state.draftId, currentWords(state.draftId), latestFit(state), offered && changeable, Boolean(state.giftCard));
+        styleRow.showWords(state.draftId, currentWords(state.draftId), latestFit(state), offered, Boolean(state.giftCard));
 
         // Under the Style tab the row's label would repeat the tab's name.
         document.getElementById("style-label").textContent = "Stationery";
@@ -2258,6 +2262,8 @@
             typeof host.openLink === "function";
           document.getElementById("pay-page-button").style.display =
             payOnPage ? "flex" : "none";
+          // Not while words are written and not set (#593 review round 1).
+          document.getElementById("pay-page-button").disabled = styleRow.editing();
           // The note describes a checkout this card opens, so it shows only
           // where there is one to open.
           const checkoutNote = document.getElementById("checkout-note");
@@ -2899,6 +2905,8 @@
       // Mail no pack pays for, in an app with no checkout (#579): the page
       // that takes the Pay & Send payment, as the server named it.
       async function handlePayPage() {
+        // The page would take the words the draft has, not the ones being written.
+        if (styleRow.editing()) return;
         const url = currentEligibility?.payAndSend?.pageUrl;
         if (!isHttpsUrl(url) || typeof host.openLink !== "function") return;
         const errorMessage = document.getElementById("error-message");
