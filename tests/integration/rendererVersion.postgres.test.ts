@@ -713,7 +713,8 @@ describePostgres('renderer version, stationery and pages (migrations 039 and 044
     it('restyles a pending postcard in place: its size, front, version and picture together (#594 PR 5a)', async () => {
       const userId = await seedUser();
       const draftId = await seedPostcard(userId, 'pdf-1');
-      const BEFORE = '<!DOCTYPE html><html><body data-renderer="pdf-1"><svg>before</svg><svg></svg></body></html>';
+      // Not ASCII: the guard compares the database's md5 of the page with Node's (#601 review round 3).
+      const BEFORE = '<!DOCTYPE html><html><body data-renderer="pdf-1"><svg>before: café, Ωμέγα</svg><svg></svg></body></html>';
       const PAGE = '<!DOCTYPE html><html><body data-renderer="pdf-1"><svg>after</svg><svg></svg></body></html>';
       const WIDER = 'data:image/jpeg;base64,BBBB';
       await pool.query('UPDATE letter_drafts SET preview_html = $2 WHERE draft_id = $1', [draftId, BEFORE]);
@@ -748,10 +749,14 @@ describePostgres('renderer version, stationery and pages (migrations 039 and 044
       const change = { size: '6x4' as const, front: GREETINGS, previewHtml: 'after', drawnFrom: { previewHtml: null } };
 
       const gift = await seedPostcard(userId, 'pdf-1');
-      await pool.query('UPDATE letter_drafts SET is_gift_send = true WHERE draft_id = $1', [gift]);
-      await expect(drafts.setDraftPostcardStyle(gift, userId, change)).resolves.toBe('changed');
-      // At its own size it takes a front.
-      await expect(drafts.setDraftPostcardStyle(gift, userId, { ...change, size: '6x9' })).resolves.toBeNull();
+      // Drawn from its own page, so only the gift's size refuses it (#601 review round 3).
+      await pool.query("UPDATE letter_drafts SET is_gift_send = true, preview_html = 'the gift page' WHERE draft_id = $1", [gift]);
+      const giftChange = { ...change, drawnFrom: { previewHtml: 'the gift page' } };
+      await expect(drafts.setDraftPostcardStyle(gift, userId, giftChange)).resolves.toBe('changed');
+      // At its own size it takes a front, with the version that draws one.
+      await expect(drafts.setDraftPostcardStyle(gift, userId, { ...giftChange, size: '6x9' })).resolves.toBeNull();
+      const restyled = (await pool.query('SELECT postcard_front, renderer_version FROM letter_drafts WHERE draft_id = $1', [gift])).rows[0];
+      expect(restyled).toEqual({ postcard_front: GREETINGS, renderer_version: 'pdf-3' });
 
       const sent = await seedPostcard(userId, 'pdf-1');
       await mailSend.createMailOrderFromDraft({ draftId: sent, userId, mailType: 'postcard' });
