@@ -250,6 +250,24 @@ describe('createMailOrderFromDraft', () => {
     expect(savedLetter?.content).toMatchObject({ message: draft.body_text, rendererVersion: 'pdf-1' });
   });
 
+  it('copies the front a postcard was drawn with into the letter (#594)', async () => {
+    const front = { layout: 'greetings', place: 'Asheville' };
+    draft.mail_type = 'postcard';
+    draft.renderer_version = 'pdf-3';
+    (draft as Record<string, unknown>).postcard_front = front;
+    await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'postcard' });
+    expect(savedLetter?.content).toMatchObject({ rendererVersion: 'pdf-3', postcardFront: front });
+  });
+
+  it("leaves a full-bleed postcard's content without a front (#594)", async () => {
+    draft.mail_type = 'postcard';
+    draft.renderer_version = 'pdf-1';
+    (draft as Record<string, unknown>).postcard_front = null;
+    await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'postcard' });
+    expect(savedLetter?.content).toMatchObject({ rendererVersion: 'pdf-1' });
+    expect(savedLetter?.content).not.toHaveProperty('postcardFront');
+  });
+
   it("leaves a legacy postcard's content without a renderer version (#534 Phase 4)", async () => {
     draft.mail_type = 'postcard';
     draft.renderer_version = null;
