@@ -149,6 +149,7 @@ async function showDraft(res: ServerResponse, draft: LetterDraft, userId: string
   const state = draftState(draft, new Date());
   writeDiagnostic('info', 'send.confirmation_viewed', { mailType: mailTypeOf(draft), state });
   const payment = state === 'ready' ? await paymentView(draft) : null;
+  const option = draftMailOption(draft);
   sendJson(res, 200, {
     draftId: draft.draft_id,
     mailType: mailTypeOf(draft),
@@ -168,7 +169,9 @@ async function showDraft(res: ServerResponse, draft: LetterDraft, userId: string
     // Drawn in this, it prints in it (#563).
     stationery: stationeryView(draft),
     // No pack pays for it (#579): the page takes Pay & Send instead.
-    ...(isPackPayable(draftMailOption(draft)) ? {} : { packPays: false }),
+    ...(isPackPayable(option) ? {} : { packPays: false }),
+    // A letter of more than one page (#586), printed on both sides: only then.
+    ...(option.pages ? { pages: option.pages } : {}),
     ...(payment ? { payment } : {})
   });
 }

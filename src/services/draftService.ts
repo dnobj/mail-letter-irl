@@ -10,6 +10,7 @@ import type pg from 'pg';
 import { writeDiagnostic } from '../utils/diagnosticLog.js';
 import { stationeryOf, type Stationery } from '../render/stationery.js';
 import { rendererVersionFor } from '../render/pdf.js';
+import { MAX_LETTER_PAGES } from '../render/geometry.js';
 import type {
   Letter,
   LetterDraft,
@@ -50,6 +51,26 @@ function storedStationery(stationery: Stationery | null | undefined): Stationery
 }
 
 /**
+ * The pages a letter draft records (#586): one unless its preview laid it out
+ * on more, and never more than the renderer lays out. More than one only on a
+ * letter our renderer drew and never on a gift send, whose free letter pays
+ * for one page: migration 047's checks hold any writer to that. Refused here,
+ * before anything is written.
+ */
+function storedPages(params: CreateDraftParams): number {
+  const pages = params.pages ?? 1;
+  const known = Number.isInteger(pages) && pages >= 1 && pages <= MAX_LETTER_PAGES;
+  if (!known || (pages > 1 && (params.rendererVersion == null || params.isGiftSend === true))) {
+    // The previews lay a letter out before it gets here, so this is a defect, classed as a refusal.
+    throw Object.assign(new Error('The letter cannot be stored on that many pages.'), {
+      code: 'DRAFT_PAGES_INVALID',
+      diagnosticClass: 'validation_error'
+    });
+  }
+  return pages;
+}
+
+/**
  * Create a new draft for a letter that has been previewed and validated.
  * Called by quote_and_preview_letter after successful address validation.
  */
@@ -58,15 +79,16 @@ export async function createDraft(params: CreateDraftParams): Promise<CreateDraf
   const expiresAt = new Date(Date.now() + expiresInHours * 60 * 60 * 1000);
   const layoutType = params.layoutType ?? 'text_only';
   const stationery = storedStationery(params.stationery);
+  const pages = storedPages(params);
 
   const result = await query<LetterDraft>(
     `INSERT INTO letter_drafts (
       user_id, sender, recipient, body_text, sign_off,
       required_credits, preview_html, sender_validation, recipient_validation,
       layout_type, header_image_data, header_image_url, inline_image_data, inline_image_url,
-      is_gift_send, renderer_version, status, expires_at, arrive_by, mail_on, stationery
+      is_gift_send, renderer_version, status, expires_at, arrive_by, mail_on, stationery, pages
     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'pending', $17,
-              $18::date, $19::date, $20::jsonb)
+              $18::date, $19::date, $20::jsonb, $21::smallint)
     RETURNING draft_id, expires_at`,
     [
       params.userId,
@@ -89,6 +111,7 @@ export async function createDraft(params: CreateDraftParams): Promise<CreateDraf
       params.schedule?.arriveBy ?? null,
       params.schedule?.mailOn ?? null,
       stationery ? JSON.stringify(stationery) : null,
+      pages,
     ]
   );
 
@@ -98,7 +121,8 @@ export async function createDraft(params: CreateDraftParams): Promise<CreateDraf
     layoutType,
     expiresInHours,
     renderer: params.rendererVersion ?? 'html',
-    scheduled: params.schedule !== undefined
+    scheduled: params.schedule !== undefined,
+    pages
   });
 
   return {

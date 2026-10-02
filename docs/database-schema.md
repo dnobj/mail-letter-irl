@@ -181,6 +181,7 @@ Temporary drafts for idempotent send operations. Prevents duplicate sends.
 | stationery | JSONB | YES | - | The stationery the preview was drawn in (044, #563): `{"theme": "monogram" \| "botanical" \| "celebration" \| "typewriter" \| "handwritten", "dateLine"?, "monogram"?, "headline"?}`. NULL is Classic. Set exactly when `renderer_version` is `pdf-2`. The send copies it into `letters.content.stationery`; redaction keeps the theme and drops the slot text |
 | arrive_by | DATE | YES | - | The date the mail should arrive by, in America/New_York; NULL to mail as soon as possible (040, #535) |
 | mail_on | DATE | YES | - | The date it goes to the printer, worked back from `arrive_by` by the lead time (040, #535). The send copies both to the letter and holds its job until then |
+| pages | SMALLINT | NO | 1 | The pages the letter prints on, 1 to 3, printed on both sides when more than 1 (047, #586). The send, the checkout and the confirmation page price and refuse the draft by it (`draftMailOption`): a letter of more than one page is paid per send. `createDraft` refuses a count it would not store, before writing (`DRAFT_PAGES_INVALID`). The send copies it into `letters.content.pages` when above one, for the print |
 | created_at | TIMESTAMPTZ | NO | NOW() | Draft creation |
 | updated_at | TIMESTAMPTZ | NO | NOW() | Last update |
 
@@ -196,6 +197,8 @@ Temporary drafts for idempotent send operations. Prevents duplicate sends.
 - `letter_drafts_stationery_drawn_by_pdf_2`: stationery is set exactly when renderer_version is 'pdf-2' (044)
 - `letter_drafts_schedule_pair`: arrive_by and mail_on are both set or both NULL (040)
 - `letter_drafts_schedule_order`: mail_on is never after arrive_by (040)
+- `letter_drafts_pages_known`: pages is 1 to 3 (047)
+- `letter_drafts_pages_paid_per_send`: more than one page only for a letter our renderer drew (renderer_version set), never a gift send (047, #586)
 
 **Indexes:**
 - `idx_letter_drafts_user_pending` on (user_id, status) WHERE status='pending'
@@ -772,6 +775,7 @@ Production provisioning and the first production connection remain separate owne
 | 44 | 044_stationery.sql | `letter_drafts.stationery` (#563): the theme a preview was drawn in and its slot text, NULL for Classic. `renderer_version` admits `pdf-2`, set exactly when a draft has stationery. No provisioning re-run, as for 039 |
 | 45 | 045_stationery_default.sql | `users.stationery_theme` (#563): the account's remembered theme, with a CHECK on the four themes. No provisioning re-run: the reader's column list leaves it out and the operator writes only its listed columns |
 | 46 | 046_stationery_faces.sql | Typewriter and Handwritten (#563 PR 8): `letter_drafts_stationery_theme_known` and `users_stationery_theme_known` admit `typewriter` and `handwritten`. No provisioning re-run: neither check changes what a role may read or write |
+| 47 | 047_room_to_write.sql | `letter_drafts.pages` (#586): the pages a letter prints on, 1 to 3, default 1, with `letter_drafts_pages_known` and `letter_drafts_pages_paid_per_send` (more than one page only for a letter our renderer drew, never a gift send). No provisioning re-run, as for 039 |
 
 ---
 

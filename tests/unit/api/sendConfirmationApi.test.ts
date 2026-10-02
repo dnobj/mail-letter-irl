@@ -282,6 +282,20 @@ describe('the confirmation page API (#470)', () => {
       vi.mocked(getDraft).mockResolvedValue(draft({ mail_type: 'postcard', required_credits: 4 }) as any);
       expect((await call('GET')).json().lettersRequired).toBe(1);
     });
+
+    it('names the pages of a letter longer than one, which no pack pays for, and nothing otherwise (#586)', async () => {
+      signedIn();
+      vi.mocked(getDraft).mockResolvedValue(draft({ pages: 2, renderer_version: 'pdf-1' }) as any);
+      const two = (await call('GET')).json();
+      expect(two.pages).toBe(2);
+      expect(two.packPays).toBe(false);
+      vi.mocked(getDraft).mockResolvedValue(draft({ pages: 3, renderer_version: 'pdf-1' }) as any);
+      expect((await call('GET')).json().pages).toBe(3);
+      for (const overrides of [{ pages: 1 }, {}, { mail_type: 'postcard', pages: 2 }]) {
+        vi.mocked(getDraft).mockResolvedValue(draft(overrides) as any);
+        expect((await call('GET')).json(), JSON.stringify(overrides)).not.toHaveProperty('pages');
+      }
+    });
   });
 
   describe('POST', () => {

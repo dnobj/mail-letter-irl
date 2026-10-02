@@ -249,6 +249,7 @@ provider acceptance. The PostGrid request uses the Letter IRL `letter_id` as `Id
 - without a version, as today's HTML;
 - with `pdf-1`, as our own PDF from `src/render`, uploaded as a multipart form with a 30-second budget;
 - with `pdf-2`, the same, in the stationery the preview was drawn in (`letters.content.stationery`, #563). A `pdf-2` letter whose stored stationery this build cannot read is refused (`render`), never printed as Classic.
+- a letter of more than one page (#586) also carries its page count, from the draft (migration 047): `letters.content.pages`, written only when above one.
 
 A `pdf-1` gift send prints its card as the PDF's second page, drawn by the renderer with the code the send minted (`letters.content.giftCard`). When our renderer refuses a letter before any request, it is held like any other failure that is not an explicit rejection, with the class `render_refused`. That happens for a version this build cannot print, an unreadable image, a letter that no longer fits its page, a gift card it cannot lay out, or stationery it cannot read or fit. Every version the database admits must be in `PRINTABLE_RENDERER_VERSIONS`, which a test checks, so a new renderer never strands letters waiting under an older one. Resolving such a hold is in [deployment.md](deployment.md).
 

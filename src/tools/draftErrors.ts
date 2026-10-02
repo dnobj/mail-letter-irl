@@ -62,6 +62,7 @@ export const HANDLED_DRAFT_ERROR_CODES = [
   'JIT_ORDER_NOT_FOUND',
   'JIT_ORDER_NOT_OWNED',
   'JIT_ORDER_NOT_PAID',
+  'JIT_PRODUCT_MISMATCH',
   'PACK_CANNOT_PAY',
   'SCHEDULE_PASSED'
 ] as const;
@@ -203,6 +204,10 @@ export function friendlyDraftError(
   if (code === 'JIT_ORDER_NOT_PAID') {
     // Upstream: `Order ${id} is ${jitOrder.status}` - a raw status column.
     return new Error('That Pay & Send checkout has not completed yet. Please finish the payment and try again.');
+  }
+  if (code === 'JIT_PRODUCT_MISMATCH') {
+    // Upstream interpolates the order id, its product code and the draft id.
+    return new Error(`That Pay & Send order paid for different mail than this ${noun} is now, so it was not sent.`);
   }
 
   if (typeof code === 'string' && code.length > 0) {
