@@ -390,7 +390,8 @@ describePostgres('content retention sweep', () => {
 
       const { rows } = await pool.query(
         `SELECT sender, body_text, header_image_data, header_image_url, redacted_at,
-                stationery IS NULL AS no_stationery, sender_validation IS NULL AS no_validation
+                stationery IS NULL AS no_stationery, postcard_front IS NULL AS no_front,
+                sender_validation IS NULL AS no_validation
            FROM letter_drafts WHERE draft_id = $1`,
         [draftId]
       );
@@ -402,7 +403,33 @@ describePostgres('content retention sweep', () => {
       // SQL NULL again, not JSON null: a Classic draft's stationery must be,
       // for migration 044's pair check (#563).
       expect(rows[0].no_stationery).toBe(true);
+      // And so must a full-bleed postcard's front, for migration 048's (#594).
+      expect(rows[0].no_front).toBe(true);
       expect(rows[0].no_validation).toBe(true);
+    });
+
+    it.each([
+      [{ layout: 'border', caption: 'Cape Cod with Sam, August 2026' }, { layout: 'border' }],
+      [{ layout: 'greetings', place: 'Asheville' }, { layout: 'greetings' }]
+    ])("keeps a postcard's layout, drops its caption or place, and restores both (#594): %o", async (front, kept) => {
+      const userId = await seedUser();
+      const draftId = await seedContentDraft({ daysAgo: 120, userId, layout: 'postcard' });
+      // Both at once: migration 048 holds a front and renderer pdf-3 together.
+      await pool.query(
+        "UPDATE letter_drafts SET renderer_version = 'pdf-3', postcard_front = $2::jsonb WHERE draft_id = $1",
+        [draftId, JSON.stringify(front)]
+      );
+      await seedJitOrder({ userId, status: 'fulfilled', draftId });
+
+      expect(await retention.purgePaidDraftContent()).toBe(1);
+
+      const scrubbed = await pool.query('SELECT postcard_front, renderer_version FROM letter_drafts WHERE draft_id = $1', [draftId]);
+      expect(scrubbed.rows[0]).toEqual({ postcard_front: kept, renderer_version: 'pdf-3' });
+      expect((await readQuarantine('letter_drafts', draftId)).content.postcard_front).toEqual(front);
+
+      expect(await retention.restoreQuarantinedContent('letter_drafts', draftId)).toBe(true);
+      const restored = await pool.query('SELECT postcard_front FROM letter_drafts WHERE draft_id = $1', [draftId]);
+      expect(restored.rows[0].postcard_front).toEqual(front);
     });
 
     it("keeps a themed draft's theme, drops its slot text, and restores both (#563)", async () => {

@@ -611,4 +611,75 @@ describePostgres('renderer version, stationery and pages (migrations 039 and 044
       }
     }, 60_000);
   });
+
+  describe('postcard fronts (#594, migration 048)', () => {
+    const BORDER = { layout: 'border', caption: 'Cape Cod, August 2026' };
+    const GREETINGS = { layout: 'greetings', place: 'Asheville' };
+
+    /** A pending postcard draft, as a preview stores one; each message differs, for the duplicate check (#412). */
+    async function seedPostcard(userId: string, rendererVersion: string | null, front: unknown = null): Promise<string> {
+      const draftId = randomUUID();
+      await pool.query(
+        `INSERT INTO letter_drafts (
+           draft_id, user_id, sender, recipient, body_text, required_credits, expires_at, status,
+           mail_type, front_image_data, postcard_size, renderer_version, postcard_front
+         ) VALUES ($1, $2, $3, $4, $5, 2, NOW() + INTERVAL '1 day', 'pending',
+                   'postcard', 'data:image/png;base64,AAAA', '6x9', $6, $7::jsonb)`,
+        [draftId, userId, JSON.stringify(SENDER), JSON.stringify(RECIPIENT), `Wish you were here ${draftId}`, rendererVersion,
+          front === null ? null : JSON.stringify(front)]
+      );
+      return draftId;
+    }
+
+    it('admits a front with pdf-3 only, pdf-3 only with a front, a front only on a postcard, and only the layouts it knows', async () => {
+      const userId = await seedUser();
+      for (const front of [BORDER, GREETINGS, { layout: 'border' }]) {
+        const drawn = await seedPostcard(userId, 'pdf-3', front);
+        const row = await pool.query('SELECT postcard_front, renderer_version FROM letter_drafts WHERE draft_id = $1', [drawn]);
+        expect(row.rows[0]).toEqual({ postcard_front: front, renderer_version: 'pdf-3' });
+      }
+      // Full bleed, as every postcard before: no front, and pdf-1 or the legacy HTML.
+      for (const version of ['pdf-1', null]) {
+        const plain = await seedPostcard(userId, version);
+        expect((await pool.query('SELECT postcard_front FROM letter_drafts WHERE draft_id = $1', [plain])).rows[0].postcard_front).toBeNull();
+      }
+
+      // A front drawn as pdf-1, and pdf-3 without a front.
+      await expect(seedPostcard(userId, 'pdf-1', BORDER))
+        .rejects.toMatchObject({ code: '23514', constraint: 'letter_drafts_postcard_front_drawn_by_pdf_3' });
+      await expect(seedPostcard(userId, 'pdf-3'))
+        .rejects.toMatchObject({ code: '23514', constraint: 'letter_drafts_postcard_front_drawn_by_pdf_3' });
+      // A layout no build draws, or JSON that names none.
+      for (const stored of ['{"layout": "collage"}', '{"layout": "full_bleed"}', '{}', '{"layout": null}', '"border"', '[]']) {
+        await expect(seedPostcard(userId, 'pdf-3', JSON.parse(stored)), stored)
+          .rejects.toMatchObject({ code: '23514', constraint: 'letter_drafts_postcard_front_layout_known' });
+      }
+      // A letter never has one, even drawn as pdf-3.
+      const letterDraft = await seedDraft(userId, 'pdf-1');
+      await expect(pool.query(
+        "UPDATE letter_drafts SET renderer_version = 'pdf-3', postcard_front = $2::jsonb WHERE draft_id = $1",
+        [letterDraft, JSON.stringify(BORDER)]
+      )).rejects.toMatchObject({ code: '23514', constraint: 'letter_drafts_postcard_front_layout_known' });
+      // pdf-3 is a version the check admits, and pdf-2 still is.
+      await expect(seedDraft(userId, 'pdf-4')).rejects.toMatchObject({ code: '23514', constraint: 'letter_drafts_renderer_version_known' });
+    }, 60_000);
+
+    it('copies the front into the letter the send creates, and none for full bleed', async () => {
+      const userId = await seedUser();
+      const bordered = await seedPostcard(userId, 'pdf-3', BORDER);
+      const plain = await seedPostcard(userId, 'pdf-1');
+
+      const sent = await mailSend.createMailOrderFromDraft({ draftId: bordered, userId, mailType: 'postcard' });
+      const full = await mailSend.createMailOrderFromDraft({ draftId: plain, userId, mailType: 'postcard' });
+
+      const stored = await pool.query<{ letter_id: string; content: Record<string, unknown> }>(
+        'SELECT letter_id, content FROM letters WHERE letter_id = ANY($1)',
+        [[sent.letter.letter_id, full.letter.letter_id]]
+      );
+      const byId = new Map(stored.rows.map(row => [row.letter_id, row.content]));
+      expect(byId.get(sent.letter.letter_id)).toMatchObject({ rendererVersion: 'pdf-3', postcardFront: BORDER });
+      expect(byId.get(full.letter.letter_id)).toMatchObject({ rendererVersion: 'pdf-1' });
+      expect(byId.get(full.letter.letter_id)).not.toHaveProperty('postcardFront');
+    }, 60_000);
+  });
 });

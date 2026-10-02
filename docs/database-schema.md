@@ -166,7 +166,7 @@ Temporary drafts for idempotent send operations. Prevents duplicate sends.
 | body_text | TEXT | NO | - | Letter content (message for postcards) |
 | sign_off | TEXT | YES | - | Closing text (NULL for postcards) |
 | required_credits | INTEGER | NO | - | Credits needed (> 0) |
-| preview_html | TEXT | YES | - | Generated preview: the legacy HTML, or, when `renderer_version` is `pdf-1` or `pdf-2`, the page or pages as SVG in a minimal HTML document (#534): a gift letter's card and a postcard's back are pages too, and a `pdf-2` page is drawn in its stationery (#563) |
+| preview_html | TEXT | YES | - | Generated preview: the legacy HTML, or, when `renderer_version` is `pdf-1`, `pdf-2` or `pdf-3`, the page or pages as SVG in a minimal HTML document (#534): a gift letter's card and a postcard's back are pages too, a `pdf-2` page is drawn in its stationery (#563), and a `pdf-3` postcard's front with its border or greeting (#594) |
 | sender_validation | JSONB | YES | - | Cached address validation |
 | recipient_validation | JSONB | YES | - | Cached address validation |
 | status | draft_status | NO | 'pending' | pending, consumed, expired, cancelled |
@@ -177,8 +177,9 @@ Temporary drafts for idempotent send operations. Prevents duplicate sends.
 | front_image_url | TEXT | YES | - | Original image URL for debugging |
 | postcard_size | VARCHAR(10) | YES | - | Postcard size: '6x9' (NULL for letters) |
 | is_gift_send | BOOLEAN | NO | false | Previewed as a gift send: funded by a gift letter and printed with its card (033) |
-| renderer_version | VARCHAR(16) | YES | - | The renderer that drew the preview: NULL for the legacy HTML, `pdf-1` for our own PDF (039, #534), `pdf-2` for our own PDF in stationery (044, #563). The send copies it into `letters.content.rendererVersion`, and dispatch prints with it |
+| renderer_version | VARCHAR(16) | YES | - | The renderer that drew the preview: NULL for the legacy HTML, `pdf-1` for our own PDF (039, #534), `pdf-2` for our own PDF in stationery (044, #563), `pdf-3` for a postcard with a front other than full bleed (048, #594). The send copies it into `letters.content.rendererVersion`, and dispatch prints with it |
 | stationery | JSONB | YES | - | The stationery the preview was drawn in (044, #563): `{"theme": "monogram" \| "botanical" \| "celebration" \| "typewriter" \| "handwritten", "dateLine"?, "monogram"?, "headline"?}`. NULL is Classic. Set exactly when `renderer_version` is `pdf-2`. The send copies it into `letters.content.stationery`; redaction keeps the theme and drops the slot text |
+| postcard_front | JSONB | YES | - | A postcard's front, when not full bleed (048, #594): `{"layout": "border", "caption"?}` (the photo in a white border over its caption) or `{"layout": "greetings", "place"}`. NULL is full bleed. Set exactly when `renderer_version` is `pdf-3`, and only on a postcard. The send copies it into `letters.content.postcardFront`, and the print reads it (`postcardFrontOf`); redaction keeps the layout and drops the caption or place |
 | arrive_by | DATE | YES | - | The date the mail should arrive by, in America/New_York; NULL to mail as soon as possible (040, #535) |
 | mail_on | DATE | YES | - | The date it goes to the printer, worked back from `arrive_by` by the lead time (040, #535). The send copies both to the letter and holds its job until then |
 | pages | SMALLINT | NO | 1 | The pages the letter prints on, 1 to 3, printed on both sides when more than 1 (047, #586). The send, the checkout and the confirmation page price and refuse the draft by it (`draftMailOption`): a letter of more than one page is paid per send. `createDraft` refuses a count it would not store, before writing (`DRAFT_PAGES_INVALID`). The send copies it into `letters.content.pages` when above one, for the print |
@@ -192,9 +193,11 @@ Temporary drafts for idempotent send operations. Prevents duplicate sends.
 - `postcard_requires_image`: Postcards must have front_image_data
 - `postcard_requires_size`: Postcards must have postcard_size
 - `valid_postcard_size`: postcard_size must be '6x4', '6x9', or '6x11'
-- `letter_drafts_renderer_version_known`: renderer_version must be NULL, 'pdf-1' or 'pdf-2' (039, then 044; a new version extends it in its own migration)
+- `letter_drafts_renderer_version_known`: renderer_version must be NULL, 'pdf-1', 'pdf-2' or 'pdf-3' (039, then 044 and 048; a new version extends it in its own migration)
 - `letter_drafts_stationery_theme_known`: stationery's theme is 'monogram', 'botanical', 'celebration', 'typewriter' or 'handwritten' (044, 046)
 - `letter_drafts_stationery_drawn_by_pdf_2`: stationery is set exactly when renderer_version is 'pdf-2' (044)
+- `letter_drafts_postcard_front_layout_known`: a postcard_front is a postcard's, and its layout is 'border' or 'greetings' (048)
+- `letter_drafts_postcard_front_drawn_by_pdf_3`: postcard_front is set exactly when renderer_version is 'pdf-3' (048)
 - `letter_drafts_schedule_pair`: arrive_by and mail_on are both set or both NULL (040)
 - `letter_drafts_schedule_order`: mail_on is never after arrive_by (040)
 - `letter_drafts_pages_known`: pages is 1 to 3 (047)
@@ -776,6 +779,7 @@ Production provisioning and the first production connection remain separate owne
 | 45 | 045_stationery_default.sql | `users.stationery_theme` (#563): the account's remembered theme, with a CHECK on the four themes. No provisioning re-run: the reader's column list leaves it out and the operator writes only its listed columns |
 | 46 | 046_stationery_faces.sql | Typewriter and Handwritten (#563 PR 8): `letter_drafts_stationery_theme_known` and `users_stationery_theme_known` admit `typewriter` and `handwritten`. No provisioning re-run: neither check changes what a role may read or write |
 | 47 | 047_room_to_write.sql | `letter_drafts.pages` (#586): the pages a letter prints on, 1 to 3, default 1, with `letter_drafts_pages_known` and `letter_drafts_pages_paid_per_send` (more than one page only for a letter our renderer drew, never a gift send). No provisioning re-run, as for 039 |
+| 48 | 048_postcard_fronts.sql | `letter_drafts.postcard_front` (#594): a postcard's front when not full bleed, a border with its caption or a greeting with its place, NULL for full bleed. `renderer_version` admits `pdf-3`, set exactly when a draft has a front, with `letter_drafts_postcard_front_layout_known` and `letter_drafts_postcard_front_drawn_by_pdf_3`. No provisioning re-run, as for 039 |
 
 ---
 

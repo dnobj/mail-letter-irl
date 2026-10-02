@@ -279,7 +279,38 @@ describe('mail outbox retries', () => {
       size: '6x9',
       rendererVersion: 'pdf-1'
     }));
+    expect(mocks.sendPostcard.mock.calls[0][0].front).toBeUndefined();
     expect(sendLetter).not.toHaveBeenCalled();
+  });
+
+  it('hands the provider the front a postcard was drawn with (#594)', async () => {
+    const postcardFront = { layout: 'border', caption: 'Cape Cod, August 2026' };
+    const postcard = {
+      ...letter,
+      mail_type: 'postcard',
+      content: {
+        message: 'Wish you were here.',
+        sender: letter.content.sender,
+        frontImageData: 'data:image/jpeg;base64,AAAA',
+        postcardSize: '6x4',
+        rendererVersion: 'pdf-3',
+        postcardFront
+      }
+    };
+    query.mockImplementation(async (sql: string) => {
+      if (sql.includes('WITH candidate')) return { rows: [{ ...job }] };
+      if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...postcard }] };
+      return { rows: [] };
+    });
+    const base = clientQuery.getMockImplementation()!;
+    clientQuery.mockImplementation(async (sql: string, params?: unknown[]) =>
+      sql.startsWith('SELECT * FROM letters') ? { rows: [{ ...postcard }] } : base(sql, params)
+    );
+    mocks.sendPostcard.mockResolvedValue({ success: true, trackingId: 'provider-1', costCents: 100 });
+
+    await processLetterJob('job-1', {});
+
+    expect(mocks.sendPostcard).toHaveBeenCalledWith(expect.objectContaining({ size: '6x4', rendererVersion: 'pdf-3', front: postcardFront }));
   });
 
   it('prints the text validation counted: no trailing blank lines before the sign-off (#77)', async () => {

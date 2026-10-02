@@ -218,7 +218,9 @@ const DRAFT_CONTENT_COLUMNS = [
   'inline_image_data',
   'inline_image_url',
   // A theme and the slot text it prints (#563, migration 044).
-  'stationery'
+  'stationery',
+  // A postcard's front and the caption or place it prints (#594, migration 048).
+  'postcard_front'
 ] as const;
 
 const DRAFT_QUARANTINE_OBJECT = DRAFT_CONTENT_COLUMNS.map(
@@ -239,6 +241,8 @@ const DRAFT_QUARANTINE_OBJECT = DRAFT_CONTENT_COLUMNS.map(
  * The stationery keeps its theme and loses its slot text (the date line, the
  * initials, the headline), which is the content: migration 044 holds a themed
  * draft to renderer 'pdf-2' and back, so a NULL would roll the batch back too.
+ * A postcard's front keeps its layout and loses its caption or place, for the
+ * same reason (#594, migration 048 and 'pdf-3').
  */
 export const DRAFT_REDACTION_SET = `
         SET sender = '{}'::jsonb,
@@ -255,6 +259,7 @@ export const DRAFT_REDACTION_SET = `
             inline_image_data = CASE WHEN inline_image_data IS NULL THEN NULL ELSE '' END,
             inline_image_url = NULL,
             stationery = CASE WHEN stationery IS NULL THEN NULL ELSE jsonb_build_object('theme', stationery->'theme') END,
+            postcard_front = CASE WHEN postcard_front IS NULL THEN NULL ELSE jsonb_build_object('layout', postcard_front->'layout') END,
             redacted_at = NOW()`;
 
 /**
@@ -720,8 +725,9 @@ export async function restoreQuarantinedContentWithClient(
       // The copy holds a NULL column as JSON null, which is not SQL NULL, so a
       // nullable JSON column comes back through NULLIF. For stationery it
       // matters: migration 044 holds it to renderer pdf-2 by IS NOT NULL, so a
-      // Classic draft's must be SQL NULL again (#563).
-      column === 'stationery' || column === 'sender_validation' || column === 'recipient_validation'
+      // Classic draft's must be SQL NULL again (#563). So does a full-bleed
+      // postcard's front, which migration 048 holds to pdf-3 (#594).
+      column === 'stationery' || column === 'postcard_front' || column === 'sender_validation' || column === 'recipient_validation'
         ? `${column} = NULLIF((SELECT content->'${column}' FROM saved), 'null'::jsonb)`
         : column === 'sender' || column === 'recipient'
           ? `${column} = (SELECT content->'${column}' FROM saved)`

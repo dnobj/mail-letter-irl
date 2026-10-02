@@ -307,6 +307,22 @@ describe('letters printed from our own PDF (#534)', () => {
     }));
   });
 
+  it("holds a letter recording a postcard front's renderer, pdf-3, and sends nothing (#594)", async () => {
+    const fetchMock = accepted();
+    vi.stubGlobal('fetch', fetchMock);
+
+    diagnostics.written = [];
+    const result = await provider().sendLetter({ ...base, rendererVersion: 'pdf-3', metadata: { letterId: 'letter-3' } });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.error).toBe('A letter is never drawn with a postcard\'s front: renderer version "pdf-3".');
+    expect(result.metadata).toMatchObject({ submissionOutcome: 'ambiguous', retryable: false, errorClass: 'render_refused' });
+    expect(diagnostics.written).toContainEqual(expect.objectContaining({
+      event: 'provider.postgrid.render_refused',
+      fields: expect.objectContaining({ reason: 'unknown_version', letterId: 'letter-3' })
+    }));
+  });
+
   it('never marks a refusal retryable, even when its message reads like a transport failure', async () => {
     const fetchMock = accepted();
     vi.stubGlobal('fetch', fetchMock);

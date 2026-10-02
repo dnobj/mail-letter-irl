@@ -25,6 +25,46 @@ export interface PostcardContent {
   place?: string;
 }
 
+/** The longest caption or place a stored front may hold (#594): far past what either line draws. */
+export const POSTCARD_FRONT_TEXT_MAX_LENGTH = 120;
+
+/**
+ * A front other than full bleed (#594), as a draft and a letter store it
+ * (migration 048): the photo in a border over its caption, or Greetings from
+ * a place.
+ */
+export type PostcardFront = { layout: 'border'; caption?: string } | { layout: 'greetings'; place: string };
+
+/**
+ * The front a stored value describes, or null when it is not one this build
+ * draws: not an object, an unknown layout, a greeting without its place, a
+ * caption on a greeting or a place on a border, or text that is not text or
+ * is too long. The print reads a 'pdf-3' postcard's front with this, and
+ * holds one it cannot read rather than printing it full bleed.
+ */
+export function postcardFrontOf(value: unknown): PostcardFront | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  // undefined when absent, null when present but not text this build draws.
+  const textOf = (key: 'caption' | 'place'): string | undefined | null => {
+    const text = record[key];
+    if (text === undefined || text === null) return undefined;
+    return typeof text === 'string' && text.length <= POSTCARD_FRONT_TEXT_MAX_LENGTH ? text : null;
+  };
+  const caption = textOf('caption');
+  const place = textOf('place');
+  if (caption === null || place === null) return null;
+  if (record.layout === 'border') {
+    if (place !== undefined) return null;
+    return caption === undefined ? { layout: 'border' } : { layout: 'border', caption };
+  }
+  if (record.layout === 'greetings') {
+    if (caption !== undefined || place === undefined || place.trim() === '') return null;
+    return { layout: 'greetings', place };
+  }
+  return null;
+}
+
 /**
  * Words on a postcard's front that run past their room (#594): a caption
  * wider than the photo, or a place too long to draw at the smallest size

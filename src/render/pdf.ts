@@ -17,13 +17,25 @@ export const RENDERER_VERSION = 'pdf-1';
 export const STATIONERY_RENDERER_VERSION = 'pdf-2';
 
 /**
+ * Recorded on a postcard drawn with a front other than full bleed (#594,
+ * migration 048): pdf-1 with a border or a greeting. A build that cannot draw
+ * fronts refuses it, so a rollback holds such a postcard instead of printing
+ * it full bleed.
+ */
+export const POSTCARD_FRONT_RENDERER_VERSION = 'pdf-3';
+
+/**
  * Every renderer version this build can print. A letter keeps the version its
  * preview was drawn with however long it waits (arrive-by, #535), so a new
  * version is added here, beside the old version's renderer, never in its
  * place. A test holds this set to every value migration 039's CHECK (or its
  * successor) admits.
  */
-export const PRINTABLE_RENDERER_VERSIONS: ReadonlySet<string> = new Set([RENDERER_VERSION, STATIONERY_RENDERER_VERSION]);
+export const PRINTABLE_RENDERER_VERSIONS: ReadonlySet<string> = new Set([
+  RENDERER_VERSION,
+  STATIONERY_RENDERER_VERSION,
+  POSTCARD_FRONT_RENDERER_VERSION
+]);
 
 /** The version a preview records: pdf-2 when drawn in a theme other than Classic, else pdf-1. */
 export function rendererVersionFor(stationery?: Stationery | null): string {

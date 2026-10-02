@@ -392,6 +392,13 @@ export interface PostcardParams {
    * #534). Absent for the legacy HTML; otherwise it prints from our own PDF.
    */
   rendererVersion?: string;
+
+  /**
+   * The front the postcard was drawn with (letters.content.postcardFront,
+   * #594), as stored: the print reads it with postcardFrontOf, for a 'pdf-3'
+   * postcard only. Absent for full bleed.
+   */
+  front?: unknown;
 }
 
 /**
