@@ -808,6 +808,8 @@ describe("a letter preview's narration names its stationery (#563)", () => {
       /^Postcard preview ready: paid with Pay & Send\. /
     );
     expect(summarizeToolResult('quote_and_preview_postcard', { lettersRequired: 1 })).toMatch(/^Postcard preview ready: requires 1 letter\. /);
+    // A result without its count reads as one letter, in the singular.
+    expect(summarizeToolResult('quote_and_preview_letter', { layoutType: 'text_only' })).toMatch(/^Preview ready: requires 1 letter\. /);
   });
 
   it("answers set_stationery with the tool's own sentence", () => {

@@ -1486,7 +1486,8 @@ function stationerySentence(result: Record<string, unknown>): string {
 function previewCost(result: Record<string, unknown>, lettersRequired: number | undefined): string {
   const eligibility = result.sendEligibility as { packPays?: unknown } | undefined;
   if (eligibility?.packPays === false) return "paid with Pay & Send";
-  return `requires ${lettersRequired ?? 1} ${lettersRequired === 1 ? 'letter' : 'letters'}`;
+  const letters = lettersRequired ?? 1;
+  return `requires ${letters} ${letters === 1 ? 'letter' : 'letters'}`;
 }
 
 /**
