@@ -223,6 +223,12 @@ describe('postcards printed from our own PDF (#534 Phase 4)', () => {
       fields: expect.objectContaining({ reason: 'size', letterId: 'postcard-3', postcardSize: '6x4' })
     }));
 
+    // A size that is not text, as stored, cut to 20 characters.
+    diagnostics.written = [];
+    await provider().sendPostcard({ ...base, size: ['6x9'] as unknown as '6x4', metadata: { letterId: 'postcard-5' } });
+    await provider().sendPostcard({ ...base, size: 'x'.repeat(30) as unknown as '6x4', metadata: { letterId: 'postcard-6' } });
+    expect(diagnostics.written.map(entry => entry.fields.postcardSize)).toEqual(['["6x9"]', 'x'.repeat(20)]);
+
     diagnostics.written = [];
     await provider().sendPostcard({ ...base, backMessage: lines(17), metadata: { letterId: 'postcard-4' } });
     const overflow = diagnostics.written.find(entry => entry.event === 'provider.postgrid.render_refused');
@@ -254,7 +260,8 @@ describe('postcards printed from our own PDF (#534 Phase 4)', () => {
     ['a size no writer stores', { size: '5x7' as unknown as '6x4' }, 'size', 'A postcard cannot be printed at size "5x7".'],
     ['a size no writer stores, on the legacy HTML too', { size: '5x7' as unknown as '6x4', rendererVersion: undefined }, 'size', 'A postcard cannot be printed at size "5x7".'],
     ['a size that names a property every object has', { size: '__proto__' as unknown as '6x4' }, 'size', 'A postcard cannot be printed at size "__proto__".'],
-    ['a size that is not text', { size: ['6x9'] as unknown as '6x4' }, 'size', 'A postcard cannot be printed at size "6x9".'],
+    // Shown as stored, never as the 6x9 it reads like.
+    ['a size that is not text', { size: ['6x9'] as unknown as '6x4' }, 'size', 'A postcard cannot be printed at size ["6x9"].'],
     // Refused for its size before its image is read.
     ['an unknown size with an unreadable image', { size: '5x7' as unknown as '6x4', frontImageBase64: 'data:image/gif;base64,R0lGODlhAQABAAAAACw=' }, 'size', 'A postcard cannot be printed at size "5x7".'],
     // A gift postcard is 6x9 (#579): its card is never squeezed onto another size.

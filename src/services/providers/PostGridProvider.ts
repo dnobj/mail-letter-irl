@@ -66,6 +66,15 @@ class RenderRefusal extends Error {
 }
 
 /**
+ * A stored postcard size as an operator should read it (#596 review round 2):
+ * text as it is, anything else as JSON, so a hand-edited ["6x9"] never reads
+ * as the 6x9 it is not. Cut to 20 characters.
+ */
+function storedSize(size: unknown): string {
+  return (typeof size === 'string' ? size : JSON.stringify(size) ?? String(size)).slice(0, 20);
+}
+
+/**
  * The pages a letter prints on (#586): one unless its content says more. Only
  * our renderer lays out more than one, and never beside a gift card, which
  * takes a sheet of its own. Anything else is refused before any request.
@@ -1380,7 +1389,8 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       // A size no writer stores, as only a hand-edited row could hold, is
       // refused before anything is drawn or sent, on either path (#594).
       if (typeof size !== 'string' || !Object.hasOwn(postGridSizeMap, size)) {
-        throw new RenderRefusal('size', `A postcard cannot be printed at size "${String(size).slice(0, 20)}".`);
+        const shown = typeof size === 'string' ? `"${storedSize(size)}"` : storedSize(size);
+        throw new RenderRefusal('size', `A postcard cannot be printed at size ${shown}.`);
       }
       const postGridSize = postGridSizeMap[size];
 
@@ -1484,7 +1494,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
           reason: error.reason,
           ...(letterId ? { letterId } : {}),
           // A size hold names the size, so an operator need not open the row.
-          ...(error.reason === 'size' ? { postcardSize: String(params.size).slice(0, 20) } : {})
+          ...(error.reason === 'size' ? { postcardSize: storedSize(params.size) } : {})
         }, 'error');
       } else if (this.options.verbose) {
         this.writeOperationDiagnostic('provider.postgrid.operation_failed', 'create_postcard', {
