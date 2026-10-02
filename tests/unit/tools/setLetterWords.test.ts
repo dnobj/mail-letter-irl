@@ -284,6 +284,8 @@ describe('set_letter_words', () => {
       context()
     );
     expect(output.wordsVersion).toBe(wordsVersionOf('Dear Sam, with a P.S.', 'Pat'));
+    // Said as no change, which it is (#593 review round 3).
+    expect(output.message).toBe('The letter already has these words, so nothing changed. Nothing has been sent.');
     expect(written()).toMatchObject({ bodyText: 'Dear Sam, with a P.S.', replacing: { bodyText: 'Dear Sam, with a P.S.', signOff: 'Pat' } });
   });
 

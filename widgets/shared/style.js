@@ -93,10 +93,7 @@
     // signOff, version }, the version a change of them names (#593 review
     // round 1). current: the words shown now. fit: how full the page
     // is for them. editable: the card may change them now. gift: a gift
-    // letter, which stays on one page. showDraft: the draft's words, changed
-    // elsewhere, are shown above the boxes, which keep what was typed.
-    // checked: the card asked the server for this draft's words since it
-    // showed it (#593 review round 2).
+    // letter, which stays on one page.
     var words = {
       editing: false,
       updating: false,
@@ -105,8 +102,6 @@
       fit: null,
       editable: false,
       gift: false,
-      showDraft: false,
-      checked: false,
       message: "",
       error: false
     };
@@ -262,9 +257,7 @@
       var note = element("studio-words-note");
       var update = element("studio-words-update");
       element("studio-words-edit").hidden = !editing;
-      // While editing, the words show only when they changed elsewhere: above
-      // the boxes, which keep what the person typed.
-      if (view) view.hidden = editing && !words.showDraft;
+      if (view) view.hidden = editing;
       element("studio-words-open").hidden = !words.editable || editing;
       if (chat) chat.hidden = words.editable;
       // aria-disabled, as the Style row's: a press meanwhile is ignored.
@@ -290,38 +283,12 @@
       body.value = words.current.bodyText;
       signOff.value = words.current.signOff;
       words.editing = true;
-      words.showDraft = false;
       words.message = "";
       words.error = false;
       drawWords();
       // The card holds its Send buttons while words are being written.
       options.onBusy();
       if (typeof body.focus === "function") body.focus();
-      // Once a draft, the card asks the server for its words now: the chat
-      // may have changed them, which a card in ChatGPT never hears of (#593
-      // review round 2).
-      if (words.checked) return;
-      words.checked = true;
-      var draftId = state.draftId;
-      var opened = { bodyText: body.value, signOff: signOff.value };
-      refreshWords(draftId, words.current).then(function (outcome) {
-        if (state.draftId !== draftId || outcome !== "changed") return;
-        if (words.editing && !words.updating) {
-          if (body.value === opened.bodyText && signOff.value === opened.signOff) {
-            // Nothing typed yet: the boxes take the draft's words.
-            body.value = words.current.bodyText;
-            signOff.value = words.current.signOff;
-            words.error = false;
-            words.message = "The letter's words were changed in the chat since this card showed them: these are its words now.";
-          } else {
-            words.showDraft = true;
-            words.error = true;
-            words.message = "The letter's words were changed in the chat since this card showed them: they are above. Make your change to them, then Update the page.";
-          }
-        }
-        options.onChange({ draftId: draftId, stationery: state.stationery });
-        drawWords();
-      });
     }
 
     // Focus goes back to Change the words, the boxes having gone.
@@ -333,54 +300,11 @@
     function closeWords() {
       if (words.updating) return;
       words.editing = false;
-      words.showDraft = false;
       words.message = "";
       words.error = false;
       drawWords();
       options.onBusy();
       focusOpen();
-    }
-
-    /*
-     * The draft's words as the server has them now (#593 review rounds 1 and
-     * 2): asked when the editor first opens, and after a refused change. The
-     * chat may have changed them since this card showed them, which the card
-     * never sees. When their version is not the one the editor started from,
-     * the card takes the draft's words, page and price; the caller decides
-     * what the boxes show. Resolves to "changed"; to "versioned" when only
-     * the version was new to the card (the same words, from a preview that
-     * carried none); or to false when it learned nothing.
-     */
-    function refreshWords(draftId, startedFrom) {
-      if (typeof host.callTool !== "function") return Promise.resolve(false);
-      return Promise.resolve()
-        .then(function () {
-          return host.callTool("get_draft_status", { draftId: draftId });
-        })
-        .then(function (result) {
-          if (state.draftId !== draftId || !result || result.isError) return false;
-          var data = toolData(result);
-          if (data.draftId !== draftId || data.status !== "ready") return false;
-          if (typeof data.bodyText !== "string" || typeof data.signOff !== "string" || typeof data.wordsVersion !== "string") return false;
-          if (startedFrom && data.wordsVersion === startedFrom.version) return false;
-          var sameWords = Boolean(startedFrom) && data.bodyText === startedFrom.bodyText && data.signOff === startedFrom.signOff;
-          var page = result._meta && result._meta.previewHtml;
-          if (typeof page === "string" && page) state.previewHtml = page;
-          if (data.stationery && isTheme(data.stationery.theme)) {
-            state.stationery = data.stationery;
-            keepSlots(data.stationery);
-          }
-          // The status lays nothing out, so it says nothing of how full the page is.
-          var said = termsOf(data, null);
-          if (said) state.terms = said;
-          state.restyled = true;
-          words.set = { bodyText: data.bodyText, signOff: data.signOff, version: data.wordsVersion };
-          words.current = words.set;
-          return sameWords ? "versioned" : "changed";
-        })
-        .catch(function () {
-          return false;
-        });
     }
 
     // The words as written in the editor, set on the draft (#586). The page
@@ -427,7 +351,6 @@
             version: typeof data.wordsVersion === "string" ? data.wordsVersion : undefined
           };
           words.editing = false;
-          words.showDraft = false;
           // What it costs now, and how full its pages are.
           var said = termsOf(data, result && result._meta && result._meta.pageFit);
           if (said) state.terms = said;
@@ -443,35 +366,16 @@
           options.onChange({ draftId: draftId, stationery: state.stationery });
         })
         .catch(function (error) {
-          if (state.draftId !== draftId) return undefined;
-          // A refusal of words the card has not seen (WORDS_CHANGED) is
+          if (state.draftId !== draftId) return;
+          words.error = true;
+          var said = options.readableError(error);
+          // A refusal of words this card had not seen (WORDS_CHANGED) is
           // written for the model, with the whole letter: the card says it in
-          // its own words instead (#593 review round 2).
-          var raw = error && typeof error.message === "string" ? error.message : "";
-          var unseen = raw.indexOf("Nothing was changed:") === 0;
-          words.error = !unseen;
-          words.message = unseen
-            ? "The letter's words changed since this card showed them. Getting them now\u2026"
-            : options.readableError(error);
-          // Said at once, while the card asks how the draft is now.
-          drawWords();
-          return refreshWords(draftId, startedFrom).then(function (outcome) {
-            if (state.draftId !== draftId) return;
-            if (outcome === "changed") {
-              // The boxes keep what was typed; the draft's words show above.
-              words.showDraft = true;
-              words.error = true;
-              words.message = "The letter's words were changed in the chat since this card showed them: they are above. Make your change to them, then Update the page.";
-              options.onChange({ draftId: draftId, stationery: state.stationery });
-            } else if (outcome === "versioned") {
-              words.error = false;
-              words.message = "This card now has the version of the letter's words: Update the page again.";
-            } else if (unseen) {
-              words.error = true;
-              words.message =
-                "The words were not changed: they changed since this card showed them, and the card could not get them now. Make the preview again to see them.";
-            }
-          });
+          // its own words, and keeps what was typed (#593 review rounds 2 and
+          // 3). Found anywhere in the text, as a host may wrap it (#434). The
+          // server's version check is what keeps a change made elsewhere
+          // from being overwritten; the card fetches nothing to catch up.
+          words.message = said.indexOf("Nothing was changed:") !== -1 ? "The words were not changed: this card's copy of them is out of date. Ask in the chat to change them, or make the preview again." : said;
         })
         .then(function () {
           if (state.draftId !== draftId) return;
@@ -528,8 +432,6 @@
           words.editing = false;
           words.updating = false;
           words.set = null;
-          words.showDraft = false;
-          words.checked = false;
           words.message = "";
           words.error = false;
           keepSlots(offered);

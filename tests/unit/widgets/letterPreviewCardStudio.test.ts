@@ -962,10 +962,6 @@ describe("the Words tab's editor (#586)", () => {
       { result: { isError: true, content: [{ type: 'text', text: 'This preview has expired. Make a new preview with the words.' }] } },
       'set_letter_words'
     );
-    // Said at once, while the card asks how the draft is now.
-    expect(text(card, 'studio-words-note')).toBe('This preview has expired. Make a new preview with the words.');
-    // Its words are the ones the editor started from: the refusal stands.
-    await card.answer(status({ bodyText: ARGS.bodyText, signOff: ARGS.signOff, wordsVersion: VERSION }), 'get_draft_status');
     expect(text(card, 'studio-words-note')).toBe('This preview has expired. Make a new preview with the words.');
     expect(card.byId('studio-words-note').classList.contains('alert')).toBe(true);
     expect(card.byId('studio-words-edit').hidden).toBe(false);
@@ -973,51 +969,41 @@ describe("the Words tab's editor (#586)", () => {
     expect(text(card, 'studio-cost')).toBe('1 letter');
   });
 
-  it('opens again on the words the chat gave them, when a change was refused because they changed there', async () => {
+  it("says its copy of the words is out of date when the server refuses unseen words, in its own words, keeping what was typed (#593 review rounds 2 and 3)", async () => {
     const card = mount();
     await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
     await card.click(card.tab('words'));
     await card.click(card.byId('studio-words-open'));
     await type(card, 'studio-words-body', 'Dear Sam,\n\nMy own change.');
-    await card.click(card.byId('studio-words-update'));
-    await card.answer({ result: { isError: true, content: [{ type: 'text', text: UNSEEN } ] } }, 'set_letter_words');
-    // The refusal is written for the model, with the whole letter: the card says it in its own words.
-    expect(text(card, 'studio-words-note')).toBe("The letter's words changed since this card showed them. Getting them now\u2026");
-    await card.answer(
-      status({ bodyText: 'Dear Sam,\n\nThe chat wrote this.', signOff: 'Love, Pat', wordsVersion: 'chat00000000', pages: 2, canSendNow: false, sendEligibility: PAY_AND_SEND }, TWO_PAGES),
-      'get_draft_status'
-    );
-    // The boxes keep what was typed; the draft's words show above them (#593 review round 2).
-    expect(card.byId('studio-words-edit').hidden).toBe(false);
-    expect((card.byId('studio-words-body') as HTMLTextAreaElement).value).toBe('Dear Sam,\n\nMy own change.');
-    expect(card.byId('studio-words').hidden).toBe(false);
-    expect(text(card, 'studio-words')).toBe('Dear Sam,\n\nThe chat wrote this.\n\nLove, Pat');
-    expect(text(card, 'studio-words-note')).toBe("The letter's words were changed in the chat since this card showed them: they are above. Make your change to them, then Update the page.");
-    expect(text(card, 'studio-words-note')).not.toContain('wordsVersion');
-    // With the page and price the draft has now.
-    expect(card.document.querySelectorAll('#mockup-container svg')).toHaveLength(2);
-    expect(text(card, 'studio-cost')).toBe('Pay & Send USD 5.99');
-    // The next change names the version they have.
-    await card.click(card.byId('studio-words-update'));
-    expect(card.lastRequest('tools/call', 'set_letter_words')!.params.arguments.wordsVersion).toBe('chat00000000');
-  });
-
-  it("says it could not get the words when the card cannot ask, never the model's refusal", async () => {
-    const card = mount();
-    await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
-    await card.click(card.tab('words'));
-    await card.click(card.byId('studio-words-open'));
-    await type(card, 'studio-words-body', 'Dear Sam,\n\nMy own change.');
+    const asked = card.requests('tools/call', 'get_draft_status').length;
     await card.click(card.byId('studio-words-update'));
     await card.answer({ result: { isError: true, content: [{ type: 'text', text: UNSEEN }] } }, 'set_letter_words');
-    await card.answer({ result: { isError: true, content: [{ type: 'text', text: 'The host refused.' }] } }, 'get_draft_status');
-    expect(text(card, 'studio-words-note')).toBe(
-      'The words were not changed: they changed since this card showed them, and the card could not get them now. Make the preview again to see them.'
-    );
+    // Never the refusal written for the model, which carries the whole letter.
+    expect(text(card, 'studio-words-note')).toBe("The words were not changed: this card's copy of them is out of date. Ask in the chat to change them, or make the preview again.");
+    expect(text(card, 'studio-words-note')).not.toContain('wordsVersion');
+    expect(card.byId('studio-words-edit').hidden).toBe(false);
     expect((card.byId('studio-words-body') as HTMLTextAreaElement).value).toBe('Dear Sam,\n\nMy own change.');
+    // It fetches nothing to catch up: the server's version check keeps the chat's words safe.
+    expect(card.requests('tools/call', 'get_draft_status')).toHaveLength(asked);
+    expect(card.document.querySelectorAll('#mockup-container svg')).toHaveLength(1);
   });
 
-  it('takes the version of the words when its preview had none, keeping what was typed', async () => {
+  it('says so too when the host hands the refusal back wrapped, as a rejection (#593 review round 3)', async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
+    await card.click(card.tab('words'));
+    await card.click(card.byId('studio-words-open'));
+    await card.click(card.byId('studio-words-update'));
+    // As a host that rejects the call writes it (#434): the sentence inside its own words.
+    const wrapped =
+      "Error code: INVALID_ARGUMENT; Error: RuntimeException: Error calling MCP tool: [TextContent(type='text', text=" +
+      JSON.stringify(UNSEEN) +
+      ', annotations=None, meta=None)]';
+    await card.answer({ error: { code: -32603, message: wrapped } }, 'set_letter_words');
+    expect(text(card, 'studio-words-note')).toBe("The words were not changed: this card's copy of them is out of date. Ask in the chat to change them, or make the preview again.");
+  });
+
+  it('says its copy is out of date when its preview carried no version, keeping what was typed', async () => {
     const card = mount();
     // A preview from before the version (#593): no wordsVersion.
     await card.show(output({ stationery: { theme: 'classic', source: 'default' } }), { ...ON, pageFit: FIT });
@@ -1030,44 +1016,8 @@ describe("the Words tab's editor (#586)", () => {
       { result: { isError: true, content: [{ type: 'text', text: 'Nothing was changed: give wordsVersion, the version of the words this change replaces.' }] } },
       'set_letter_words'
     );
-    // Its words are the preview's: only the version was new to the card.
-    await card.answer(status({ bodyText: ARGS.bodyText, signOff: ARGS.signOff, wordsVersion: 'first0000000' }), 'get_draft_status');
-    expect(text(card, 'studio-words-note')).toBe("This card now has the version of the letter's words: Update the page again.");
+    expect(text(card, 'studio-words-note')).toBe("The words were not changed: this card's copy of them is out of date. Ask in the chat to change them, or make the preview again.");
     expect((card.byId('studio-words-body') as HTMLTextAreaElement).value).toBe('Dear Sam,\n\nMy own change.');
-    await card.click(card.byId('studio-words-update'));
-    expect(card.lastRequest('tools/call', 'set_letter_words')!.params.arguments.wordsVersion).toBe('first0000000');
-  });
-
-  it('asks for the words when the editor first opens, and takes the chat\'s into boxes not yet typed in (#593 review round 2)', async () => {
-    const card = mount();
-    await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
-    await card.click(card.tab('words'));
-    const asked = card.requests('tools/call', 'get_draft_status').length;
-    await card.click(card.byId('studio-words-open'));
-    expect(card.requests('tools/call', 'get_draft_status')).toHaveLength(asked + 1);
-    await card.answer(status({ bodyText: 'Dear Sam,\n\nThe chat wrote this.', signOff: 'Pat', wordsVersion: 'chat00000000' }), 'get_draft_status');
-    expect((card.byId('studio-words-body') as HTMLTextAreaElement).value).toBe('Dear Sam,\n\nThe chat wrote this.');
-    expect((card.byId('studio-words-signoff') as HTMLTextAreaElement).value).toBe('Pat');
-    expect(text(card, 'studio-words-note')).toBe("The letter's words were changed in the chat since this card showed them: these are its words now.");
-    // Asked once a draft: opened again, the card does not ask again.
-    await card.click(card.byId('studio-words-cancel'));
-    await card.click(card.byId('studio-words-open'));
-    expect(card.requests('tools/call', 'get_draft_status')).toHaveLength(asked + 1);
-    await card.click(card.byId('studio-words-update'));
-    expect(card.lastRequest('tools/call', 'set_letter_words')!.params.arguments.wordsVersion).toBe('chat00000000');
-  });
-
-  it('keeps what was typed when the words the editor opened on turn out changed in the chat', async () => {
-    const card = mount();
-    await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
-    await card.click(card.tab('words'));
-    await card.click(card.byId('studio-words-open'));
-    await type(card, 'studio-words-body', 'Dear Sam,\n\nTyped before the answer.');
-    await card.answer(status({ bodyText: 'Dear Sam,\n\nThe chat wrote this.', signOff: 'Pat', wordsVersion: 'chat00000000' }), 'get_draft_status');
-    expect((card.byId('studio-words-body') as HTMLTextAreaElement).value).toBe('Dear Sam,\n\nTyped before the answer.');
-    expect(card.byId('studio-words').hidden).toBe(false);
-    expect(text(card, 'studio-words')).toBe('Dear Sam,\n\nThe chat wrote this.\n\nPat');
-    expect(text(card, 'studio-words-note')).toBe("The letter's words were changed in the chat since this card showed them: they are above. Make your change to them, then Update the page.");
   });
 
   it("shows and edits the draft's words when the card's status answer gives them changed in the chat", async () => {
@@ -1180,12 +1130,9 @@ describe("the Words tab's editor (#586)", () => {
       await card.show({ ...output(CLASSIC), draftId: 'draft_0002' }, { ...ON, pageFit: FIT });
       expect(text(card, 'studio-words'), time).toBe('Dear Sam,\n\nThe garden is in.\n\nLove,\nPat');
     }
-    // And its editor asks for its own words when it first opens (#593 review round 2).
-    const before = card.requests('tools/call', 'get_draft_status').length;
+    // And its editor opens on its own words.
     await card.click(card.byId('studio-words-open'));
-    const asked = card.requests('tools/call', 'get_draft_status');
-    expect(asked).toHaveLength(before + 1);
-    expect(asked[asked.length - 1].params.arguments).toEqual({ draftId: 'draft_0002' });
+    expect((card.byId('studio-words-body') as HTMLTextAreaElement).value).toBe(ARGS.bodyText);
   });
 
   it('says a gift letter is one page when the words run past it', async () => {

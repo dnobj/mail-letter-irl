@@ -135,7 +135,9 @@ function wordsChanged(given: boolean, bodyText: string, signOff: string, version
 const PAGE_WORDS = ['', 'one page', 'two pages', 'three pages'];
 
 /** What the tool says it did, and what changed in the letter's pages, and so its price. */
-function messageFor(pages: number, pagesBefore: number, note: string): string {
+function messageFor(pages: number, pagesBefore: number, note: string, already: boolean): string {
+  // A call retried after its answer was lost changes nothing: said so (#593 review round 3).
+  if (already) return 'The letter already has these words, so nothing changed. Nothing has been sent.';
   const length =
     pages === pagesBefore
       ? ''
@@ -272,7 +274,7 @@ async function handler(input: SetLetterWordsInput, context: ToolContext): Promis
     ...payment,
     pageFit: pageFit(layout, stationery),
     wordsVersion: wordsVersionOf(bodyText, signOff),
-    message: messageFor(pages, pagesBefore, note)
+    message: messageFor(pages, pagesBefore, note, already)
   };
 }
 
