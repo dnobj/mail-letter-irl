@@ -30,7 +30,12 @@ describe("tool scope enforcement", () => {
     ["set_stationery", "mail:draft"],
     ["set_letter_words", "mail:draft"],
     // Held mail cancelled (#535): it only ever returns value.
-    ["cancel_scheduled_mail", "mail:draft"]
+    ["cancel_scheduled_mail", "mail:draft"],
+    // Address requests (#604): drafting, reading one too, as its answer is a
+    // third party's address, never mail:read alone.
+    ["request_address", "mail:draft"],
+    ["get_address_request", "mail:draft"],
+    ["cancel_address_request", "mail:draft"]
   ])("maps %s to %s in metadata and runtime", (toolName, scope) => {
     expect(getRequiredToolScopes(toolName)).toEqual([scope]);
     expect(() => authorizeTool(toolName, jwt([scope]), true)).not.toThrow();

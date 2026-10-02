@@ -88,13 +88,13 @@ describe('address request tokens (#604)', () => {
 describe('making a request (#604)', () => {
   it('locks the account, counts within the caps, and stores the hash of the token it returns', async () => {
     vi.stubEnv('LETTER_IRL_ADDRESS_REQUEST_LINK_DAYS', '5');
-    const client = inTransaction([], [{ waiting: 9, today: 19 }], [row()]);
+    const client = inTransaction([{ erased_at: null }], [{ waiting: 9, today: 19 }], [row()]);
     const created = await createAddressRequest({ userId: 'auth0|sender', recipientName: 'Ruth', senderFirstName: 'Pat' });
     expect(created.ok).toBe(true);
     if (!created.ok) return;
 
     const [lock, counts, insert] = client.query.mock.calls;
-    expect(flat(lock[0])).toBe('SELECT user_id FROM users WHERE user_id = $1 FOR UPDATE');
+    expect(flat(lock[0])).toBe('SELECT erased_at FROM users WHERE user_id = $1 FOR UPDATE');
     expect(lock[1]).toEqual(['auth0|sender']);
     expect(flat(counts[0])).toContain("COUNT(*) FILTER (WHERE status = 'waiting' AND expires_at > NOW())::int AS waiting");
     expect(flat(counts[0])).toContain("COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours')::int AS today");
@@ -119,7 +119,7 @@ describe('making a request (#604)', () => {
   it('refuses at the waiting cap before the daily one, and inserts nothing', async () => {
     vi.stubEnv('LETTER_IRL_ADDRESS_REQUEST_WAITING_CAP', '3');
     vi.stubEnv('LETTER_IRL_ADDRESS_REQUEST_DAILY_CAP', '4');
-    let client = inTransaction([], [{ waiting: 3, today: 4 }]);
+    let client = inTransaction([{ erased_at: null }], [{ waiting: 3, today: 4 }]);
     await expect(createAddressRequest({ userId: 'u', recipientName: 'R', senderFirstName: 'P' })).resolves.toEqual({
       ok: false,
       refusal: 'waiting_cap',
@@ -127,13 +127,24 @@ describe('making a request (#604)', () => {
     });
     expect(client.query).toHaveBeenCalledTimes(2);
 
-    client = inTransaction([], [{ waiting: 2, today: 4 }]);
+    client = inTransaction([{ erased_at: null }], [{ waiting: 2, today: 4 }]);
     await expect(createAddressRequest({ userId: 'u', recipientName: 'R', senderFirstName: 'P' })).resolves.toEqual({
       ok: false,
       refusal: 'daily_cap',
       cap: 4
     });
     expect(client.query).toHaveBeenCalledTimes(2);
+  });
+
+  it('refuses an account erased, or gone, by the time it holds the lock, and inserts nothing (#605 review round 1)', async () => {
+    for (const account of [[{ erased_at: new Date('2026-10-02T13:59:00Z') }], []]) {
+      const client = inTransaction(account, [{ waiting: 0, today: 0 }], [row()]);
+      await expect(createAddressRequest({ userId: 'u', recipientName: 'R', senderFirstName: 'P' })).resolves.toEqual({
+        ok: false,
+        refusal: 'account_closed'
+      });
+      expect(client.query).toHaveBeenCalledTimes(1);
+    }
   });
 });
 

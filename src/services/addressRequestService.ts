@@ -20,7 +20,6 @@ import {
   addressRequestLinkDays,
   addressRequestWaitingCap
 } from '../config/addressRequests.js';
-import { lockAccountForBalanceChange } from './accountLock.js';
 
 export type AddressRequestState = 'waiting' | 'answered' | 'declined' | 'cancelled' | 'expired';
 
@@ -105,12 +104,15 @@ function requestOf(row: AddressRequestRow): AddressRequest {
 
 export type CreateAddressRequestResult =
   | { ok: true; request: AddressRequest; token: string }
-  | { ok: false; refusal: 'waiting_cap' | 'daily_cap'; cap: number };
+  | { ok: false; refusal: 'waiting_cap' | 'daily_cap'; cap: number }
+  | { ok: false; refusal: 'account_closed' };
 
 /**
  * Makes a request for the account, within its caps: so many waiting at once,
  * and so many in 24 hours. The account row is locked first, so two requests
- * at once cannot both pass a cap with one place left.
+ * at once cannot both pass a cap with one place left, and an erasure that
+ * commits while this waits for the lock leaves nothing to ask for: erasure
+ * locks the same row (#605 review round 1, the #449 race).
  */
 export async function createAddressRequest(params: {
   userId: string;
@@ -121,7 +123,11 @@ export async function createAddressRequest(params: {
   const dailyCap = addressRequestDailyCap();
   const linkDays = addressRequestLinkDays();
   return transaction(async (client) => {
-    await lockAccountForBalanceChange(client, params.userId);
+    const account = await client.query<{ erased_at: Date | null }>(
+      'SELECT erased_at FROM users WHERE user_id = $1 FOR UPDATE',
+      [params.userId]
+    );
+    if (!account.rows[0] || account.rows[0].erased_at) return { ok: false, refusal: 'account_closed' } as const;
     const counts = await client.query<{ waiting: number; today: number }>(
       `SELECT COUNT(*) FILTER (WHERE status = 'waiting' AND expires_at > NOW())::int AS waiting,
               COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours')::int AS today

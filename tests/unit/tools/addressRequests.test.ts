@@ -14,6 +14,8 @@ vi.mock('../../../src/services/addressRequestService.js', () => ({
 }));
 vi.mock('../../../src/services/returnAddressService.js', () => ({ getReturnAddress: vi.fn() }));
 
+import { AccountErasedError } from '../../../src/auth/accountErased.js';
+
 import {
   cancelAddressRequest,
   createAddressRequest,
@@ -28,7 +30,7 @@ import {
   AddressRequestRefusedError,
   addressRequestUrl,
   firstNameFromSaved,
-  linkDay,
+  linkExpiry,
   recipientNameOf,
   senderFirstNameOf
 } from '../../../src/tools/addressRequestShared.js';
@@ -102,14 +104,14 @@ describe('request_address (#604)', () => {
     expect(output).toEqual({
       requestId: REQUEST_ID,
       status: 'waiting',
-      url: `https://letterirl.example/address/${TOKEN}`,
+      url: `https://letterirl.example/address#${TOKEN}`,
       recipientName: 'Ruth Example',
       senderFirstName: 'Pat',
       expiresAt: '2026-10-09T14:00:00.000Z',
       message:
-        `Here is the link to send Ruth Example: https://letterirl.example/address/${TOKEN} ` +
+        `Here is the link that asks Ruth Example for their address: https://letterirl.example/address#${TOKEN} ` +
         "Letter IRL doesn't send it: share it with Ruth Example yourself, by text or email. " +
-        'It works once, until October 9, and the page shows only the first name Pat. ' +
+        'It works once, until October 9 at 10:00 AM EDT, and the page shows only the first name Pat. ' +
         'Once Ruth Example answers, the mail can be previewed with their address.'
     });
   });
@@ -135,6 +137,11 @@ describe('request_address (#604)', () => {
     expect(createAddressRequest).toHaveBeenCalledTimes(1);
   });
 
+  it('refuses an account erased while it waited for the lock, as every closed account is refused', async () => {
+    vi.mocked(createAddressRequest).mockResolvedValueOnce({ ok: false, refusal: 'account_closed' });
+    await expect(run({ recipientName: 'Ruth', senderFirstName: 'Pat' })).rejects.toBeInstanceOf(AccountErasedError);
+  });
+
   it('refuses each cap with what to do', async () => {
     vi.mocked(createAddressRequest).mockResolvedValueOnce({ ok: false, refusal: 'waiting_cap', cap: 10 });
     await expect(refusal(run({ recipientName: 'Ruth', senderFirstName: 'Pat' }))).resolves.toEqual({
@@ -154,7 +161,10 @@ describe('request_address (#604)', () => {
         code: 'RECIPIENT_NAME_INVALID'
       });
     }
-    for (const senderFirstName of ['visit evil.example', 'Pat!', 'https://x.example', '1Pat', 'P'.repeat(41), 'Pat\u200B', 7]) {
+    for (const senderFirstName of [
+      'visit evil.example', 'Pat!', 'https://x.example', '1Pat', 'P'.repeat(41), 'Pat\u200B', 7,
+      'Send money now', 'Click the link', 'Jean Luc Picard', 'e.vil', 'J.R.R.R.R.'
+    ]) {
       await expect(refusal(run({ recipientName: 'Ruth', senderFirstName })), String(senderFirstName)).resolves.toMatchObject({
         code: 'SENDER_NAME_INVALID'
       });
@@ -175,6 +185,7 @@ describe('request_address (#604)', () => {
     expect(description).toContain('Letter IRL never contacts them');
     expect(description).toContain('for 5 days');
     expect(description).toContain('Do not use it for an address the person already has');
+    expect(description).toContain('Each call makes a new link, and an account may make 20 a day, so make one per recipient.');
   });
 });
 
@@ -182,7 +193,7 @@ describe('get_address_request (#604)', () => {
   const run = (input: Record<string, unknown>) => getAddressRequestTool.handler(input as never, context());
 
   it.each([
-    ['waiting', {}, "Ruth hasn't answered yet. The link works until October 9."],
+    ['waiting', {}, "Ruth hasn't answered yet. The link works until October 9 at 10:00 AM EDT."],
     ['declined', { closedAt: '2026-10-03T10:00:00.000Z' }, 'Ruth chose not to share an address.'],
     ['cancelled', { closedAt: '2026-10-03T10:00:00.000Z' }, 'This request was cancelled, so its link no longer works.'],
     ['expired', {}, 'The link expired before Ruth answered. A new request makes a new link.']
@@ -269,12 +280,12 @@ describe('cancel_address_request (#604)', () => {
 describe('the shared rules (#604)', () => {
   it('builds the link on the website, without a trailing slash', () => {
     expect(addressRequestUrl(TOKEN, { LETTER_IRL_WEBSITE_BASE_URL: 'https://letterirl.example/' } as never)).toBe(
-      `https://letterirl.example/address/${TOKEN}`
+      `https://letterirl.example/address#${TOKEN}`
     );
   });
 
   it('takes first names with marks, hyphens, apostrophes and full stops', () => {
-    for (const name of ['Pat', 'Jos\u00E9', "D'Arcy", 'Anne-Marie', 'Mary Ann', 'J.', 'O\u2019Neil', 'Zo\u00EB']) {
+    for (const name of ['Pat', 'Jos\u00E9', "D'Arcy", 'Anne-Marie', 'Mary Ann', 'Jean-Luc', 'J.', 'J.R.', 'J. R.', 'O\u2019Neil', 'Zo\u00EB']) {
       expect(senderFirstNameOf(name), name).toBe(name);
     }
     expect(senderFirstNameOf(undefined)).toBeNull();
@@ -285,11 +296,15 @@ describe('the shared rules (#604)', () => {
     expect(firstNameFromSaved('Pat Sender')).toBe('Pat');
     expect(firstNameFromSaved('  Jos\u00E9  Garc\u00EDa ')).toBe('Jos\u00E9');
     expect(firstNameFromSaved('ACME, Inc.')).toBeNull();
+    for (const titled of ['Dr. Pat Sender', 'Mrs. Ruth Example', 'Mr Pat Sender', 'MS. PAT', 'The Smiths']) {
+      expect(firstNameFromSaved(titled), titled).toBeNull();
+    }
     expect(firstNameFromSaved(undefined)).toBeNull();
   });
 
-  it('names the day a link stops working as New York has it', () => {
-    expect(linkDay('2026-10-10T02:00:00.000Z')).toBe('October 9');
+  it('names when a link stops working as New York has it, with plain spaces', () => {
+    expect(linkExpiry('2026-10-10T02:00:00.000Z')).toBe('October 9 at 10:00 PM EDT');
+    expect(linkExpiry('2026-12-01T15:30:00.000Z')).toBe('December 1 at 10:30 AM EST');
   });
 
   it('keeps a recipient name of up to 100 characters, counted as a reader does', () => {

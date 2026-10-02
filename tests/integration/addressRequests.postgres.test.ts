@@ -131,6 +131,38 @@ describePostgres('address requests (#604)', () => {
     await expect(service.declineAddressRequest(token)).resolves.toEqual({ ok: false, refusal: 'answered' });
   });
 
+  it('lets a cancel and an answer at once leave one outcome, each told the other won', async () => {
+    const userId = await seedUser();
+    const { request, token } = await made(userId);
+    const [cancelled, answered] = await Promise.all([
+      service.cancelAddressRequest({ userId, requestId: request.requestId }),
+      service.answerAddressRequest(token, ADDRESS)
+    ]);
+    const stored = await service.getAddressRequest({ userId, requestId: request.requestId });
+    if (answered.ok) {
+      expect(stored?.state).toBe('answered');
+      expect(cancelled).toMatchObject({ ok: true, alreadyClosed: true, request: { state: 'answered' } });
+    } else {
+      expect(answered).toEqual({ ok: false, refusal: 'cancelled' });
+      expect(cancelled).toMatchObject({ ok: true, alreadyClosed: false });
+      expect(stored).toMatchObject({ state: 'cancelled', address: null });
+    }
+  });
+
+  it('refuses a request on an erased account, and stores nothing (#605 review round 1)', async () => {
+    const userId = await seedUser();
+    await pool.query(`UPDATE users SET erased_at = NOW() WHERE user_id = $1`, [userId]);
+    await expect(service.createAddressRequest({ userId, recipientName: 'Ruth', senderFirstName: 'Pat' })).resolves.toEqual({
+      ok: false,
+      refusal: 'account_closed'
+    });
+    await expect(service.createAddressRequest({ userId: `auth0|${randomUUID()}`, recipientName: 'Ruth', senderFirstName: 'Pat' })).resolves.toEqual({
+      ok: false,
+      refusal: 'account_closed'
+    });
+    expect((await pool.query(`SELECT COUNT(*)::int AS n FROM address_requests`)).rows[0].n).toBe(0);
+  });
+
   it('takes a decline once, and refuses an answer after it', async () => {
     const userId = await seedUser();
     const { request, token } = await made(userId);

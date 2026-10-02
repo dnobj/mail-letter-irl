@@ -1,13 +1,14 @@
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
-import { addressRequestLinkDays } from '../config/addressRequests.js';
+import { addressRequestDailyCap, addressRequestLinkDays } from '../config/addressRequests.js';
 import { requestAddressInputSchema, requestAddressOutputSchema } from '../schemas.js';
 import { createAddressRequest } from '../services/addressRequestService.js';
 import { getReturnAddress } from '../services/returnAddressService.js';
+import { AccountErasedError } from '../auth/accountErased.js';
 import {
   AddressRequestRefusedError,
   addressRequestUrl,
   firstNameFromSaved,
-  linkDay,
+  linkExpiry,
   recipientNameOf,
   requireAddressRequests,
   senderFirstNameOf
@@ -57,6 +58,8 @@ async function handler(input: RequestAddressInput, context: ToolContext): Promis
 
   const created = await createAddressRequest({ userId: context.user.userId, recipientName, senderFirstName });
   if (!created.ok) {
+    // Erased while this waited for the account's lock.
+    if (created.refusal === 'account_closed') throw new AccountErasedError();
     throw created.refusal === 'waiting_cap'
       ? new AddressRequestRefusedError(
           'TOO_MANY_WAITING',
@@ -83,20 +86,22 @@ async function handler(input: RequestAddressInput, context: ToolContext): Promis
     senderFirstName,
     expiresAt: request.expiresAt,
     message:
-      `Here is the link to send ${recipientName}: ${url} ` +
+      `Here is the link that asks ${recipientName} for their address: ${url} ` +
       `Letter IRL doesn't send it: share it with ${recipientName} yourself, by text or email. ` +
-      `It works once, until ${linkDay(request.expiresAt)}, and the page shows only the first name ${senderFirstName}. ` +
+      `It works once, until ${linkExpiry(request.expiresAt)}, and the page shows only the first name ${senderFirstName}. ` +
       `Once ${recipientName} answers, the mail can be previewed with their address.`
   };
 }
 
 function describe(): string {
   const days = addressRequestLinkDays();
+  const daily = addressRequestDailyCap();
   return (
     "Use this when the person wants to send mail to someone whose U.S. mailing address they don't know. " +
     'It makes a private link for the person to share with that recipient themselves: Letter IRL never contacts them. ' +
     'The page the link opens shows only the sender\'s first name, and the recipient types their address there or declines. ' +
     `The link works once and for ${days} days. It is free and sends nothing. ` +
+    `Each call makes a new link, and an account may make ${daily} a day, so make one per recipient. ` +
     'Keep the letter\'s words in the conversation. When the person says the recipient has answered, call get_address_request with the requestId: ' +
     'once answered, it returns the address as recipient, ready for a preview tool. ' +
     'Do not use it for an address the person already has, or to look an address up.'

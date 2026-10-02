@@ -44,9 +44,13 @@ export function requireAddressRequests(): void {
   }
 }
 
-/** The page the person shares: the website's, with the link's token. */
+/**
+ * The page the person shares: the website's, with the link's token in the
+ * fragment. A browser never sends a fragment, so the token stays out of every
+ * HTTP access log; the page posts it to the API itself (#605 review round 1).
+ */
 export function addressRequestUrl(token: string, env: NodeJS.ProcessEnv = process.env): string {
-  return `${websiteBaseUrl(env)}/address/${token}`;
+  return `${websiteBaseUrl(env)}/address#${token}`;
 }
 
 /**
@@ -58,13 +62,14 @@ export function addressRequestUrl(token: string, env: NodeJS.ProcessEnv = proces
 const HIDDEN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Co}\p{Cn}\p{Cs}]/u;
 
 /**
- * A first name the page may show: up to three words of letters and marks,
- * joined by a space or a hyphen, each with apostrophes inside and a full
- * stop only at its end ("J."). Nothing that reads as a link or a message,
- * since the page shows it to someone the sender chose: "evil.example" has a
- * full stop inside a word.
+ * A first name the page may show: one or two words joined by a space or a
+ * hyphen ("Mary Ann", "Anne-Marie"). A word is letters and marks with
+ * apostrophes inside and a full stop only at its end ("J."), or initials
+ * ("J.R."). So nothing reads as a link, and little as a message, since the
+ * page shows it to someone the sender chose: "evil.example" has a full stop
+ * inside a word, and three words are refused (#605 review round 1).
  */
-const FIRST_NAME = /^\p{L}[\p{L}\p{M}'\u2019]*\.?(?:[ -]\p{L}[\p{L}\p{M}'\u2019]*\.?){0,2}$/u;
+const FIRST_NAME = /^(?:(?:\p{L}\.){2,4}|\p{L}[\p{L}\p{M}'\u2019]*\.?)(?:[ -](?:(?:\p{L}\.){2,4}|\p{L}[\p{L}\p{M}'\u2019]*\.?))?$/u;
 
 const RECIPIENT_NAME_MAX = 100;
 const SENDER_FIRST_NAME_MAX = 40;
@@ -100,23 +105,43 @@ export function senderFirstNameOf(raw: unknown): string | null {
   if (name === null || !isFirstName(name)) {
     throw new AddressRequestRefusedError(
       'SENDER_NAME_INVALID',
-      `Give the sender's first name alone, in letters, up to ${SENDER_FIRST_NAME_MAX}: the page shows it as who is asking.`
+      `Give the sender's first name alone, in one or two words of letters, up to ${SENDER_FIRST_NAME_MAX} characters: the page shows it as who is asking.`
     );
   }
   return name;
 }
 
+/**
+ * Words a saved name can start with that are not a first name: a title or
+ * "The" ("Dr. Pat Sender", "The Smiths"). With one, the tool asks for the
+ * first name instead (#605 review round 1).
+ */
+const NOT_FIRST_NAMES = new Set(['mr', 'mrs', 'ms', 'mx', 'miss', 'dr', 'prof', 'rev', 'fr', 'sir', 'dame', 'lord', 'lady', 'the']);
+
 /** The first word of the saved return address's name, when it reads as a first name. */
 export function firstNameFromSaved(name: string | undefined | null): string | null {
   const first = typeof name === 'string' ? tidy(name).split(' ')[0] : '';
-  return first && isFirstName(first) ? first : null;
+  if (!first || NOT_FIRST_NAMES.has(first.replace(/\.$/, '').toLowerCase())) return null;
+  return isFirstName(first) ? first : null;
 }
 
-const LINK_DAY = new Intl.DateTimeFormat('en-US', { month: 'long', day: 'numeric', timeZone: 'America/New_York' });
+const LINK_EXPIRY = new Intl.DateTimeFormat('en-US', {
+  month: 'long',
+  day: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
+  timeZone: 'America/New_York',
+  timeZoneName: 'short'
+});
 
-/** The day a link stops working, as a person says it: "October 9". */
-export function linkDay(iso: string): string {
-  return LINK_DAY.format(new Date(iso));
+/**
+ * When a link stops working, as a person says it: "October 9 at 10:00 AM
+ * EDT". Built from its parts, so no narrow space ICU puts before AM reaches
+ * the text.
+ */
+export function linkExpiry(iso: string): string {
+  const part = Object.fromEntries(LINK_EXPIRY.formatToParts(new Date(iso)).map(({ type, value }) => [type, value]));
+  return `${part.month} ${part.day} at ${part.hour}:${part.minute} ${part.dayPeriod} ${part.timeZoneName}`;
 }
 
 /** What a request's state means, in a sentence for the person. */
@@ -124,7 +149,7 @@ export function addressRequestMessage(request: AddressRequest): string {
   const who = request.recipientName;
   switch (request.state) {
     case 'waiting':
-      return `${who} hasn't answered yet. The link works until ${linkDay(request.expiresAt)}.`;
+      return `${who} hasn't answered yet. The link works until ${linkExpiry(request.expiresAt)}.`;
     case 'answered':
       return `${who} gave their address, so the mail can be previewed with it now.`;
     case 'declined':
