@@ -70,6 +70,49 @@ describe("get_draft_status (#474)", () => {
     }
   });
 
+  it("says what a ready letter costs now while room to write is offered, as a restyle may have changed it (#586)", async () => {
+    const ready = state({ mail_type: "letter", renderer_version: "pdf-1", pages: 2, required_credits: 2, is_gift_send: false });
+    vi.mocked(getDraftState).mockResolvedValue(ready as any);
+    // Not offered: the pages alone, as before.
+    await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual({ ...READY, pages: 2 });
+
+    vi.stubEnv("LETTER_IRL_ROOM_TO_WRITE_ENABLED", "true");
+    vi.stubEnv("LETTER_IRL_PRINT_RENDERER", "pdf");
+    vi.stubEnv("JIT_PURCHASE_ENABLED", "true");
+    try {
+      const answer = await ask({ draftId: DRAFT_ID }, { ...context(), user: { userId: "auth0|owner", creditsRemaining: 10, orders: [] } as any });
+      expect(answer).toMatchObject({ ...READY, pages: 2, canSendNow: false });
+      expect(answer.reasonCannotSend).toMatch(/paid with Pay & Send/);
+      expect(answer.sendEligibility).toMatchObject({ packPays: false });
+
+      // One page, which the balance pays.
+      vi.mocked(getDraftState).mockResolvedValue({ ...ready, pages: 1 } as any);
+      const one = await ask({ draftId: DRAFT_ID }, { ...context(), user: { userId: "auth0|owner", creditsRemaining: 10, orders: [] } as any });
+      expect(one).toMatchObject({ canSendNow: true });
+      expect(one).not.toHaveProperty("pages");
+
+      // A gift letter, which its gift pays for whatever the balance (#579).
+      vi.mocked(getDraftState).mockResolvedValue({ ...ready, pages: 1, is_gift_send: true } as any);
+      const gift = await ask({ draftId: DRAFT_ID }, { ...context(), user: { userId: "auth0|owner", creditsRemaining: 0, orders: [] } as any });
+      expect(gift).toMatchObject({ canSendNow: true });
+      // The preview's own terms for a gift (giftSendEligibility): nothing to pay.
+      expect(gift.sendEligibility).toMatchObject({ payAndSend: { available: false, unavailableReason: "This uses a gift letter, so there is nothing to pay." } });
+
+      // The draft's own credits, not a guess: more than the balance holds.
+      vi.mocked(getDraftState).mockResolvedValue({ ...ready, pages: 1, required_credits: 12 } as any);
+      const short = await ask({ draftId: DRAFT_ID }, { ...context(), user: { userId: "auth0|owner", creditsRemaining: 10, orders: [] } as any });
+      expect(short).toMatchObject({ canSendNow: false });
+
+      // A postcard, or a letter the legacy HTML drew, says nothing of it.
+      for (const overrides of [{ mail_type: "postcard" }, { renderer_version: null }]) {
+        vi.mocked(getDraftState).mockResolvedValue({ ...ready, ...overrides } as any);
+        expect(await ask({ draftId: DRAFT_ID }), JSON.stringify(overrides)).not.toHaveProperty("canSendNow");
+      }
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("says a sent draft was sent, with the order it became", async () => {
     vi.mocked(getDraftState).mockResolvedValue(state({ status: "consumed", consumed_letter_id: ORDER_ID }) as any);
     await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual({ draftId: DRAFT_ID, status: "sent", orderId: ORDER_ID });

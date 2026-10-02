@@ -366,6 +366,92 @@ describe('the letter card as a studio (#580)', () => {
     expect(card.byId('send-button').style.display).toBe('flex');
   });
 
+  it("says how full a letter's pages are on the Words tab, and a longer letter's pages in the footer (#586)", async () => {
+    const PAY_AND_SEND = { packPays: false, payAndSend: { available: true, amountCents: 599, currency: 'usd' }, letterPack: { available: false } };
+    const two = mount();
+    await two.show(output({ pages: 2, canSendNow: false, sendEligibility: PAY_AND_SEND }), { ...ON, pageFit: { pages: 2, sheets: 1 } });
+    expect(text(two, 'studio-fit')).toBe('Runs on to the back of the page: printed on both sides of one sheet.');
+    expect(two.byId('studio-fit').hidden).toBe(false);
+    expect(text(two, 'studio-summary')).toBe('black and white · 2 pages, both sides · mailed in 1-2 business days');
+    expect(text(two, 'studio-cost')).toBe('Pay & Send USD 5.99');
+
+    const three = mount();
+    await three.show(output({ pages: 3, canSendNow: false, sendEligibility: PAY_AND_SEND }), ON);
+    expect(text(three, 'studio-fit')).toBe('Three pages, on two sheets: the longest letter we print.');
+    expect(text(three, 'studio-summary')).toBe('black and white · 3 pages, both sides · mailed in 1-2 business days');
+
+    // One page: the room it has left, while room to write gives its fit.
+    const one = mount();
+    await one.show(output(), { ...ON, pageFit: { pages: 1, sheets: 1, roomLines: 20, roomCharacters: 1940, charactersPerLine: 97 } });
+    expect(text(one, 'studio-fit')).toBe('Fits on one page, with room for about 1,940 more characters.');
+    expect(text(one, 'studio-summary')).toBe('black and white · mailed in 1-2 business days');
+
+    // And nothing where no fit is given, as while room to write is not offered.
+    const plain = mount();
+    await plain.show(output(), ON);
+    expect(text(plain, 'studio-fit')).toBe('');
+    expect(plain.byId('studio-fit').hidden).toBe(true);
+  });
+
+  it('says how full the page is after a restyle, from what the restyle gave (#586)', async () => {
+    const card = mount();
+    const fit = (roomCharacters: number) => ({ pages: 1, sheets: 1, doubleSided: false, roomLines: Math.ceil(roomCharacters / 64), roomCharacters, charactersPerLine: 64 });
+    await card.show(output({ stationery: { theme: 'classic', source: 'default' } }), { ...ON, pageFit: fit(1940) });
+    expect(text(card, 'studio-fit')).toBe('Fits on one page, with room for about 1,940 more characters.');
+
+    const restyle = async (theme: string, roomCharacters: number) => {
+      await card.click(card.byId('style-row').querySelector(`[data-theme="${theme}"]`)!);
+      await card.answer(
+        {
+          result: {
+            content: [],
+            structuredContent: { draftId: 'draft_0001', stationery: { theme, dateLine: 'October 1, 2026', source: 'asked' }, ...canSend, message: 'Restyled.' },
+            _meta: { previewHtml: PAGE, pageFit: fit(roomCharacters) }
+          }
+        },
+        'set_stationery'
+      );
+    };
+    await restyle('typewriter', 512);
+    expect(text(card, 'studio-fit')).toBe('Fits on one page, with room for about 512 more characters.');
+
+    // A page with no room left says nothing of room.
+    await restyle('botanical', 0);
+    expect(text(card, 'studio-fit')).toBe('');
+    expect(card.byId('studio-fit').hidden).toBe(true);
+  });
+
+  it("keeps the preview's fit through the card's status answer, and drops it once the chat has changed the page (#592 review round 1)", async () => {
+    const FIT = { pages: 1, sheets: 1, doubleSided: false, roomLines: 20, roomCharacters: 1940, charactersPerLine: 97 };
+    // The answer a host that keeps no state gets on the card's first render.
+    const status = (page: string) => ({
+      result: {
+        content: [],
+        structuredContent: {
+          draftId: 'draft_0001',
+          status: 'ready',
+          deliveryEstimate: 'Mailed in 1-2 business days',
+          stationery: { theme: 'classic' },
+          ...canSend
+        },
+        _meta: { previewHtml: page }
+      }
+    });
+
+    const same = mount();
+    await same.show(output({ stationery: { theme: 'classic', source: 'default' } }), { ...ON, pageFit: FIT });
+    await same.answer(status(PAGE), 'get_draft_status');
+    expect(text(same, 'studio-fit')).toBe('Fits on one page, with room for about 1,940 more characters.');
+    expect(same.byId('studio-fit').hidden).toBe(false);
+
+    // The chat changed the page since the preview: the status counts nothing again.
+    const changed = mount();
+    await changed.show(output({ stationery: { theme: 'classic', source: 'default' } }), { ...ON, pageFit: FIT });
+    await changed.answer(status(document1('Dear Sam, and more,\nPat')), 'get_draft_status');
+    expect(text(changed, 'studio-fit')).toBe('');
+    expect(changed.byId('studio-fit').hidden).toBe(true);
+  });
+
   it('says a letter with its picture prints in colour (#584 review round 1)', async () => {
     const card = mount();
     await card.show(output({ layoutType: 'header_image', stationery: { theme: 'classic', source: 'default' } }), ON);

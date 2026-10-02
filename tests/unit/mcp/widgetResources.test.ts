@@ -158,8 +158,8 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       parts.push(`shared/studio.js:${createHash('sha256').update(studio).digest('hex')}`);
       const digest = createHash('sha256').update(parts.join('\n')).digest('hex').slice(0, 12);
       expect({ version: WIDGET_TEMPLATE_VERSION, digest }).toEqual({
-        version: 58,
-        digest: '23c8d01cd82d'
+        version: 59,
+        digest: '5586aa229481'
       });
     });
   });
@@ -411,6 +411,8 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
         overview: 'x',
         purchaseStep: 'x',
         examplePrompts: ['x'],
+        // How full a letter's pages are, for the card's fit line (#586).
+        pageFit: { pages: 1 },
         // Control: a field partitionToolResult must leave alone, so this
         // derivation fails loudly if it ever stops removing anything.
         draftId: 'x'
@@ -418,6 +420,7 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       const { structuredContent } = partitionToolResult({ ...probe });
       const removed = Object.keys(probe).filter(key => !(key in structuredContent));
       expect(removed).toContain('generatedImagePreview');
+      expect(removed).toContain('pageFit');
       expect(removed).not.toContain('draftId');
       return new Set(removed);
     })();

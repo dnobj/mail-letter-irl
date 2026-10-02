@@ -8,6 +8,9 @@ import { stationeryOf, type Stationery } from '../render/stationery.js';
 import { draftScheduleOf } from '../services/draftSchedule.js';
 import { heldSendFields, waitsInOutbox } from './heldSend.js';
 import { isDraftIdShape } from './requestSend.js';
+import { letterPayment } from './letterHelpers.js';
+import { letterPageLimit } from '../config/roomToWrite.js';
+import type { SendEligibility } from '../services/commerceService.js';
 
 /**
  * What became of a preview's draft (#474), for a preview card whose host keeps
@@ -59,6 +62,10 @@ export interface GetDraftStatusOutput {
   cancellable?: boolean;
   /** Ready: a letter of more than one page (#586), the pages it is laid out on now. */
   pages?: number;
+  /** Ready, while room to write is offered (#586): what it costs now, as a restyle may have changed it. */
+  canSendNow?: boolean;
+  reasonCannotSend?: string;
+  sendEligibility?: SendEligibility;
 }
 
 /** The draft's dates, or none: a status answer is never refused over dates it cannot read. */
@@ -117,7 +124,24 @@ async function handler(
   const ready: GetDraftStatusOutput = schedule
     ? { draftId, status: 'ready', schedule, deliveryEstimate: scheduleSentence(schedule, context.now()) }
     : { draftId, status: 'ready', deliveryEstimate: DELIVERY_ESTIMATE };
-  return { ...ready, ...styleNow(draft), ...pagesNow(draft) };
+  return { ...ready, ...styleNow(draft), ...pagesNow(draft), ...termsNow(draft, draftId, context) };
+}
+
+/**
+ * What a ready letter drawn by our renderer costs now (#586), while room to
+ * write is offered: a restyle may have changed its pages since its preview's
+ * first answer, and with them who pays. The preview's own terms
+ * (letterPayment), for the balance as it is now.
+ */
+function termsNow(
+  draft: DraftState,
+  draftId: string,
+  context: ToolContext
+): Pick<GetDraftStatusOutput, 'canSendNow' | 'reasonCannotSend' | 'sendEligibility'> {
+  if (draft.mail_type !== 'letter' || !draft.renderer_version || letterPageLimit() === 1) return {};
+  const pages = Number(draft.pages ?? 1);
+  const option = pages > 1 ? { mailType: 'letter' as const, pages } : { mailType: 'letter' as const };
+  return letterPayment(option, Number(draft.required_credits ?? 2), draft.is_gift_send === true, context, draftId);
 }
 
 /**

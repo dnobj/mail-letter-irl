@@ -859,6 +859,9 @@ export const getDraftStatusOutputSchema: JsonSchema = {
     },
     cancellable: { type: "boolean", description: "A sent draft's order: whether it can still be cancelled free" },
     pages: { type: "integer", minimum: 2, maximum: MAX_LETTER_PAGES, description: "A ready letter of more than one page: the pages it is laid out on now" },
+    canSendNow: { type: "boolean", description: "A ready letter, while room to write is offered: whether the balance or a gift letter pays for it now" },
+    reasonCannotSend: { type: "string" },
+    sendEligibility: sendEligibilitySchema,
     stationery: {
       type: "object",
       description: "A ready letter's stationery now, while stationery is offered; its page goes to the card",

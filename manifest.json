@@ -2540,6 +2540,72 @@
             "maximum": 3,
             "description": "A ready letter of more than one page: the pages it is laid out on now"
           },
+          "canSendNow": {
+            "type": "boolean",
+            "description": "A ready letter, while room to write is offered: whether the balance or a gift letter pays for it now"
+          },
+          "reasonCannotSend": {
+            "type": "string"
+          },
+          "sendEligibility": {
+            "type": "object",
+            "required": [
+              "payAndSend",
+              "letterPack"
+            ],
+            "properties": {
+              "payAndSend": {
+                "type": "object",
+                "required": [
+                  "available"
+                ],
+                "properties": {
+                  "available": {
+                    "type": "boolean"
+                  },
+                  "amountCents": {
+                    "type": "integer"
+                  },
+                  "currency": {
+                    "type": "string"
+                  },
+                  "displayAmount": {
+                    "type": "string"
+                  },
+                  "productDescription": {
+                    "type": "string"
+                  },
+                  "unavailableReason": {
+                    "type": "string"
+                  },
+                  "pageUrl": {
+                    "type": "string",
+                    "description": "Where the person pays for this with Pay & Send and so sends it, in an app that cannot open Pay & Send itself"
+                  }
+                }
+              },
+              "letterPack": {
+                "type": "object",
+                "required": [
+                  "available",
+                  "purchaseUrl"
+                ],
+                "properties": {
+                  "available": {
+                    "type": "boolean"
+                  },
+                  "purchaseUrl": {
+                    "type": "string"
+                  }
+                }
+              },
+              "packPays": {
+                "type": "boolean",
+                "const": false,
+                "description": "False when letter packs and gift letters cannot pay for this mail: it is paid with Pay & Send, whatever the balance"
+              }
+            }
+          },
           "stationery": {
             "type": "object",
             "description": "A ready letter's stationery now, while stationery is offered; its page goes to the card",

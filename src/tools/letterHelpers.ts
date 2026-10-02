@@ -32,11 +32,13 @@ import {
   layoutGiftPage,
   layoutLetter,
   HEADLINE_LINES,
+  pageFit,
   readImageDataUri,
   StationeryOverflow,
   renderPreviewSvg,
   rendererVersionFor,
   type Layout,
+  type PageFit,
   type Stationery
 } from "../render/index.js";
 import { getSendEligibility, type SendEligibility } from "../services/commerceService.js";
@@ -141,6 +143,8 @@ export interface LetterQuoteOutput {
   stationery?: PreviewStationery;
   /** A letter of more than one page (#586): the pages it prints on, both sides of the paper, paid with Pay & Send. */
   pages?: number;
+  /** While room to write is offered (#586): how full its pages are, for the card's fit line. Card-only (_meta). */
+  pageFit?: PageFit;
 }
 
 // ============================================================================
@@ -1205,6 +1209,9 @@ export async function createLetterDraftAndBuildOutput(
     ...(stationery ? { stationery } : {}),
     // A letter of more than one page (#586), printed on both sides: only then.
     ...(option.pages ? { pages: option.pages } : {}),
+    // And how full its pages are, for the card's fit line, while room to write
+    // is offered: counted before any gift page, in the theme's face.
+    ...(printLayout && letterPageLimit() > 1 ? { pageFit: pageFit(printLayout, stationery) } : {}),
   };
 
   // Add address validation results

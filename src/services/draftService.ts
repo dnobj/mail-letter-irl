@@ -330,7 +330,7 @@ export interface DraftState
   extends Pick<
     LetterDraft,
     | 'draft_id' | 'user_id' | 'status' | 'expires_at' | 'consumed_letter_id' | 'arrive_by' | 'mail_on'
-    | 'mail_type' | 'renderer_version' | 'stationery' | 'preview_html' | 'pages'
+    | 'mail_type' | 'renderer_version' | 'stationery' | 'preview_html' | 'pages' | 'is_gift_send' | 'required_credits'
   > {
   /** The letter the draft became; null for a draft not sent, or a letter that is not the draft owner's. */
   letter_status: LetterStatus | null;
@@ -342,7 +342,7 @@ export interface DraftState
 export async function getDraftState(draftId: string): Promise<DraftState | null> {
   const result = await query<DraftState>(
     `SELECT d.draft_id, d.user_id, d.status, d.expires_at, d.consumed_letter_id, d.arrive_by, d.mail_on,
-            d.mail_type, d.renderer_version, d.stationery, d.pages,
+            d.mail_type, d.renderer_version, d.stationery, d.pages, d.is_gift_send, d.required_credits,
             -- The page only where get_draft_status can give it: a letter our
             -- renderer drew, still pending.
             CASE WHEN d.status = 'pending' AND d.mail_type = 'letter' AND d.renderer_version IS NOT NULL

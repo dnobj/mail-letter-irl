@@ -378,6 +378,7 @@
           </div>
           <div class="studio-panel" role="tabpanel" id="studio-panel-words" aria-labelledby="studio-tab-words" data-tab="words" hidden>
             <div class="studio-words" id="studio-words" tabindex="0" aria-label="The letter's words"></div>
+            <p class="studio-quiet" id="studio-fit" hidden></p>
             <p class="studio-quiet">To change the words, ask in the chat.</p>
           </div>
           <div class="studio-panel" role="tabpanel" id="studio-panel-delivery" aria-labelledby="studio-tab-delivery" data-tab="delivery" hidden>
@@ -573,6 +574,40 @@
         return [body, signOff].filter(Boolean).join("\n\n");
       }
 
+      // A letter's terms as this card last heard them (#586): a restyle, or a
+      // status answer, may have changed its pages since the preview, and with
+      // them who pays. Laid over the preview's answer, so the card draws one
+      // price everywhere.
+      function withTerms(output) {
+        const terms = output && typeof output.draftId === "string" ? styleRow.terms(output.draftId) : null;
+        if (!terms) return output;
+        const latestTerms = { ...output, canSendNow: terms.canSendNow, sendEligibility: terms.sendEligibility };
+        if (terms.reasonCannotSend) latestTerms.reasonCannotSend = terms.reasonCannotSend;
+        else delete latestTerms.reasonCannotSend;
+        if (terms.pages > 1) latestTerms.pages = terms.pages;
+        else delete latestTerms.pages;
+        return latestTerms;
+      }
+
+      // The pages a letter prints on (#586): one unless it says more.
+      function pagesOf(state) {
+        return state?.pages === 2 || state?.pages === 3 ? state.pages : 1;
+      }
+
+      // How full the letter's pages are (#586), from the last restyle or the
+      // preview: the Words tab's fit line. Empty where nothing says.
+      function fitText(state) {
+        const pages = pagesOf(state);
+        if (pages === 2) return "Runs on to the back of the page: printed on both sides of one sheet.";
+        if (pages === 3) return "Three pages, on two sheets: the longest letter we print.";
+        const terms = styleRow.terms(state.draftId);
+        const fit = terms ? terms.pageFit : currentMeta().pageFit;
+        const room = fit?.pages === 1 ? Number(fit.roomCharacters) : NaN;
+        return Number.isFinite(room) && room > 0
+          ? `Fits on one page, with room for about ${room.toLocaleString("en-US")} more characters.`
+          : "";
+      }
+
       // The stationery the page is drawn in: the Style row's pressed theme,
       // or the preview's; null where stationery is not offered.
       function stationeryName(state) {
@@ -621,6 +656,10 @@
 
         const words = letterWords();
         document.getElementById("studio-words").textContent = words || "The words are on the page.";
+        const fit = fitText(state);
+        const fitLine = document.getElementById("studio-fit");
+        fitLine.textContent = fit;
+        fitLine.hidden = !fit;
 
         // Under the Style tab the row's label would repeat the tab's name.
         document.getElementById("style-label").textContent = "Stationery";
@@ -681,7 +720,10 @@
                     : typeof estimate === "string" && estimate
                       ? estimate.charAt(0).toLowerCase() + estimate.slice(1)
                       : "First Class";
-        document.getElementById("studio-summary").textContent = [theme, ink, timing].filter(Boolean).join(" · ");
+        const pages = pagesOf(state);
+        document.getElementById("studio-summary").textContent = [theme, ink, pages > 1 ? `${pages} pages, both sides` : null, timing]
+          .filter(Boolean)
+          .join(" · ");
 
         studio.suggest(held || cancelled ? "delivery" : "style");
       }
@@ -1146,7 +1188,13 @@
             if (answer.status === "ready") {
               // And the style it is in now, with its page (#563): this card,
               // or the chat, may have restyled it since that preview.
-              styleRow.adopt(draftId, answer.stationery, result?._meta?.previewHtml);
+              // How full its pages are (#592 review round 1): the preview's own
+              // count while its page is still the preview's; none once the chat
+              // has changed it, as the status counts nothing again.
+              const statusPage = result?._meta?.previewHtml;
+              const statusFit =
+                typeof statusPage === "string" && statusPage === currentMeta().previewHtml ? currentMeta().pageFit ?? null : null;
+              styleRow.adopt(draftId, answer.stationery, statusPage, answer, statusFit);
               // And what they mean for delivery, for the Delivery line.
               if (
                 picker.adopt(draftId, answer.schedule) &&
@@ -1888,7 +1936,7 @@
         if (retryResult && hostOutput?.draftId !== undefined && !draftActedOn) {
           retryResult = null;
         }
-        const state = retryResult ? retryResult.output : host.toolOutput();
+        const state = withTerms(retryResult ? retryResult.output : host.toolOutput());
 
         // Check if we have actual data
         if (!state || state.draftId === undefined) {
@@ -1954,17 +2002,24 @@
           header_image: "Header Image",
           inline_image: "Inline Image",
         };
+        // With its pages, for a longer letter (#586).
         document.getElementById("layout-type").textContent =
-          layoutLabels[layoutType] || "Text Only";
+          (layoutLabels[layoutType] || "Text Only") + (pagesOf(state) > 1 ? ` · ${pagesOf(state)} pages, both sides` : "");
 
         // A gift send is free and needs no balance (docs/gift-letters.md).
         const isGiftSend = Boolean(state.giftCard);
 
         // Cost - lettersRequired is already in letters (1 letter = 1 standard letter)
+        // Mail no pack pays for (#579), such as a longer letter (#586), says its price.
         const letters = lettersRequired ?? 1;
+        const costPayAndSend = sendEligibility?.payAndSend;
         document.getElementById("cost").textContent = isGiftSend
           ? "Free (gift letter)"
-          : `${letters} Letter${letters === 1 ? "" : "s"}`;
+          : sendEligibility?.packPays === false
+            ? costPayAndSend?.amountCents
+              ? `Pay & Send ${formatPayAmount(costPayAndSend)}`
+              : "Paid when you send it"
+            : `${letters} Letter${letters === 1 ? "" : "s"}`;
 
         // Delivery info. A date this card set (#535) brings its own estimate.
         const estimate =

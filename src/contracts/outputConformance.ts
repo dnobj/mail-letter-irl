@@ -134,7 +134,9 @@ type MetaPartitioned =
   | "title"
   | "overview"
   | "purchaseStep"
-  | "examplePrompts";
+  | "examplePrompts"
+  // the letter card's fit line (#586)
+  | "pageFit";
 
 type UndeclaredKeys<Output, Schema> = Exclude<keyof Output, keyof Schema | MetaPartitioned>;
 
