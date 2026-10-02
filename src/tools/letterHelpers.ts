@@ -1008,6 +1008,27 @@ export async function giftForLayout(
   return gift;
 }
 
+/**
+ * What a letter preview's draft costs as it stands, and whether the balance
+ * pays: the terms a preview gives (createLetterDraftAndBuildOutput), for a
+ * draft whose pages a restyle changed (#586). A gift letter is paid for.
+ */
+export function letterPayment(
+  option: MailOption,
+  requiredCredits: number,
+  isGift: boolean,
+  context: ToolContext,
+  draftId: string
+): { canSendNow: boolean; reasonCannotSend?: string; sendEligibility: SendEligibility } {
+  const available = context.user.creditsRemaining;
+  const canSendNow = isGift || (isPackPayable(option) && available >= requiredCredits);
+  return {
+    canSendNow,
+    ...(canSendNow ? {} : { reasonCannotSend: reasonCannotSend(option) }),
+    sendEligibility: previewSendEligibility(available, requiredCredits, option, isGift, callingApp(context), draftId)
+  };
+}
+
 /** A letter's option for its price (#579, #586): its pages, when its layout runs past one. */
 export function letterOption(layout: Layout | undefined): MailOption {
   const pages = layout?.pages.length ?? 1;

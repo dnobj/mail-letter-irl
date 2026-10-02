@@ -57,6 +57,8 @@ export interface GetDraftStatusOutput {
   previewHtml?: string;
   /** Sent and scheduled: whether it can still be cancelled free (not Pay & Send). */
   cancellable?: boolean;
+  /** Ready: a letter of more than one page (#586), the pages it is laid out on now. */
+  pages?: number;
 }
 
 /** The draft's dates, or none: a status answer is never refused over dates it cannot read. */
@@ -115,7 +117,16 @@ async function handler(
   const ready: GetDraftStatusOutput = schedule
     ? { draftId, status: 'ready', schedule, deliveryEstimate: scheduleSentence(schedule, context.now()) }
     : { draftId, status: 'ready', deliveryEstimate: DELIVERY_ESTIMATE };
-  return { ...ready, ...styleNow(draft) };
+  return { ...ready, ...styleNow(draft), ...pagesNow(draft) };
+}
+
+/**
+ * A ready letter's pages now (#586), when more than one: set_stationery may
+ * have changed them since its preview's first answer, and its price with them.
+ */
+function pagesNow(draft: DraftState): Pick<GetDraftStatusOutput, 'pages'> {
+  const pages = Number(draft.pages ?? 1);
+  return draft.mail_type === 'letter' && pages > 1 ? { pages } : {};
 }
 
 /**

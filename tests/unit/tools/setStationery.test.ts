@@ -82,7 +82,10 @@ function draft(options: { layoutType?: LetterLayoutType; gift?: boolean; bodyTex
     inline_image_data: layoutType === 'inline_image' ? FULL : null,
     sender: SENDER as unknown as Record<string, unknown>,
     recipient: RECIPIENT as unknown as Record<string, unknown>,
-    preview_html: previewHtml
+    preview_html: previewHtml,
+    pages: 1,
+    is_gift_send: options.gift === true,
+    required_credits: 2
   };
 }
 
@@ -121,18 +124,25 @@ describe('set_stationery', () => {
     const botanical = { theme: 'botanical', dateLine: 'September 30, 2026', source: 'asked' };
     expect(change.stationery).toEqual(botanical);
     // The service records the version that goes with it (rendererVersionFor).
-    expect(Object.keys(change).sort()).toEqual(['previewHtml', 'stationery']);
+    // And the pages it is laid out on now (#586): one, as before.
+    expect(Object.keys(change).sort()).toEqual(['pages', 'previewHtml', 'stationery']);
+    expect(change.pages).toBe(1);
     expect(inked(change.previewHtml).length).toBeGreaterThan(0);
     expect(change.previewHtml).toContain('<body data-renderer="pdf-2">');
     expect(change.previewHtml).toContain('<title>September 30, 2026\nDear Sam,\nThank you for the jam.\nLove, Pat</title>');
     // The addresses where PostGrid stamps them, as before.
     expect(change.previewHtml).toContain('>SAM RIVERA</text>');
-    expect(output).toEqual({
+    expect(output).toMatchObject({
       draftId: DRAFT_ID,
       stationery: botanical,
       previewHtml: change.previewHtml,
+      // What it costs as it stands (#586): one page, which the balance pays.
+      canSendNow: true,
+      sendEligibility: expect.any(Object),
       message: 'The letter is now on the botanical stationery, and the account remembers it for its next letter preview. Nothing has been sent.'
     });
+    expect(output).not.toHaveProperty('pages');
+    expect(output).not.toHaveProperty('reasonCannotSend');
     expect(getDraftForStationery).toHaveBeenCalledWith(DRAFT_ID, 'user-1');
   });
 

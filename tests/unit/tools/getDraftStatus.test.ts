@@ -61,6 +61,15 @@ describe("get_draft_status (#474)", () => {
     expect(getDraftState).toHaveBeenCalledWith(DRAFT_ID);
   });
 
+  it("names a ready letter's pages when it has more than one, as set_stationery may have changed them (#586)", async () => {
+    vi.mocked(getDraftState).mockResolvedValue(state({ mail_type: "letter", pages: 2 }) as any);
+    await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual({ ...READY, pages: 2 });
+    for (const overrides of [{ mail_type: "letter", pages: 1 }, { mail_type: "letter" }, { mail_type: "postcard", pages: 2 }]) {
+      vi.mocked(getDraftState).mockResolvedValue(state(overrides) as any);
+      await expect(ask({ draftId: DRAFT_ID }), JSON.stringify(overrides)).resolves.toEqual(READY);
+    }
+  });
+
   it("says a sent draft was sent, with the order it became", async () => {
     vi.mocked(getDraftState).mockResolvedValue(state({ status: "consumed", consumed_letter_id: ORDER_ID }) as any);
     await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual({ draftId: DRAFT_ID, status: "sent", orderId: ORDER_ID });

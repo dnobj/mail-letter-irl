@@ -61,6 +61,11 @@ import { quoteAndPreviewLetterWithImageTool } from '../../../src/tools/quoteAndP
 import { setStationeryTool } from '../../../src/tools/setStationery.js';
 import { isRoomToWriteOffered, letterPageLimit } from '../../../src/config/roomToWrite.js';
 import { draftMailOption, jitProductMatching } from '../../../src/config/products.js';
+import { layoutGiftPage, layoutLetter, readImageDataUri, renderPreviewSvg, type Stationery } from '../../../src/render/index.js';
+import { letterPrintText, renderLetterPreviewDocument, stampedAddressLines } from '../../../src/services/previewService.js';
+import { sampleFundedCard } from '../../../src/services/giftLetterService.js';
+import { giftLetterPageCopy } from '../../../src/services/giftCardRenderer.js';
+import { withDisplayImage } from '../../../src/tools/letterHelpers.js';
 import { PAID_PER_SEND_REASON, RENDERED_LETTER_CHARACTER_CAP } from '../../../src/tools/letterHelpers.js';
 import type { Address, ToolContext } from '../../../src/contracts/types.js';
 
@@ -265,7 +270,7 @@ describe('a longer letter, while room to write is offered', () => {
   it('scales the character cap with the pages, and names three pages in it', async () => {
     // Past one page's cap, but laid out and measured: it is far from fitting.
     const over = await run('text_only', { bodyText: 'x'.repeat(RENDERED_LETTER_CHARACTER_CAP + 1) }).catch(e => e);
-    expect(over.message).not.toContain('far too long');
+    expect(over.message).toMatch(/^Letter is \d+ lines too long for three pages: three pages is the longest letter we print\./);
     const error = await run('text_only', { bodyText: 'x'.repeat(3 * RENDERED_LETTER_CHARACTER_CAP + 1) }).catch(e => e);
     expect(error.message).toMatch(/^Letter is far too long for three pages: \d+\/30000 characters\. Please shorten your message to fit on three pages\.$/);
   });
@@ -335,27 +340,60 @@ describe('a gift letter, while room to write is offered', () => {
   });
 });
 
-describe('set_stationery, until a longer letter can be restyled in place', () => {
+describe('set_stationery lays a letter out again on its pages, and prices it again (#586)', () => {
   const sender = { name: 'Pat Example', addressLine1: '1 Main St', city: 'Springfield', state: 'IL', postalCode: '62701', country: 'US' };
-  const draft = (overrides: Record<string, unknown> = {}) => ({
-    mail_type: 'letter',
-    status: 'pending',
-    expires_at: new Date('2026-10-03T12:00:00Z'),
-    redacted_at: null,
-    renderer_version: 'pdf-1',
-    body_text: lines(20),
-    sign_off: 'Pat',
-    layout_type: 'text_only',
-    header_image_data: null,
-    inline_image_data: null,
-    sender,
-    recipient: address(),
-    preview_html: '<!DOCTYPE html><html><body data-renderer="pdf-1"><svg></svg></body></html>',
-    pages: 1,
-    ...overrides
-  });
-  const restyle = (stationery: string) =>
-    (setStationeryTool.handler as unknown as Handler)({ draftId: '0f1e2d3c-4b5a-4978-8796-a5b4c3d2e1f0', stationery }, context());
+  /** Lines that fit Classic's measure and wrap in Typewriter's wider face. */
+  const wide = (count: number) =>
+    Array.from({ length: count }, () => 'the quick brown fox jumps over the lazy dog while the letters wait patiently to be written').join('\n');
+  const FULL_INLINE = png(1950, 900);
+  const SMALL_INLINE = png(390, 180);
+
+  /** A pending letter draft, and the preview a preview tool drew for it on its own pages. */
+  function draft(options: { bodyText: string; stationery?: Stationery; gift?: boolean; inline?: boolean }) {
+    const layoutType = options.inline ? 'inline_image' : 'text_only';
+    const layout = layoutLetter(
+      {
+        text: letterPrintText(options.bodyText, 'Pat'),
+        layoutType,
+        ...(options.inline ? { image: readImageDataUri(FULL_INLINE) } : {}),
+        ...(options.stationery ? { stationery: options.stationery } : {})
+      },
+      { maxPages: 3 }
+    );
+    expect(layout.overflowLines).toBe(0);
+    const pages = options.gift ? [...layout.pages, layoutGiftPage(giftLetterPageCopy(sampleFundedCard(), sender.name))] : layout.pages;
+    const previewHtml = renderLetterPreviewDocument(
+      renderPreviewSvg(withDisplayImage({ ...layout, pages }, options.inline ? SMALL_INLINE : undefined), {
+        addresses: { from: stampedAddressLines(sender as Address), to: stampedAddressLines(address()) }
+      }),
+      { bodyText: options.bodyText, signOff: 'Pat' }
+    );
+    return {
+      mail_type: 'letter',
+      status: 'pending',
+      expires_at: new Date('2026-10-03T12:00:00Z'),
+      redacted_at: null,
+      renderer_version: options.stationery ? 'pdf-2' : 'pdf-1',
+      body_text: options.bodyText,
+      sign_off: 'Pat',
+      layout_type: layoutType,
+      header_image_data: null,
+      inline_image_data: options.inline ? FULL_INLINE : null,
+      sender,
+      recipient: address(),
+      preview_html: previewHtml,
+      pages: layout.pages.length,
+      is_gift_send: options.gift === true,
+      required_credits: 2
+    };
+  }
+  const restyle = (stationery: string, ctx = context(10)) =>
+    (setStationeryTool.handler as unknown as Handler)({ draftId: '0f1e2d3c-4b5a-4978-8796-a5b4c3d2e1f0', stationery }, ctx);
+  const svgs = (html: string) => html.match(/<svg [\s\S]*?<\/svg>/g) ?? [];
+  function written() {
+    expect(setDraftStationery).toHaveBeenCalledTimes(1);
+    return vi.mocked(setDraftStationery).mock.calls[0][2];
+  }
 
   beforeEach(() => {
     offer();
@@ -363,22 +401,77 @@ describe('set_stationery, until a longer letter can be restyled in place', () =>
     vi.mocked(setDraftStationery).mockResolvedValue(null);
   });
 
-  it('refuses a letter of more than one page, before drawing anything', async () => {
-    vi.mocked(getDraftForStationery).mockResolvedValue(draft({ pages: 2, body_text: lines(40) }) as never);
-    await expect(restyle('botanical')).rejects.toMatchObject({
-      code: 'DRAFT_LONGER_THAN_A_PAGE',
-      message: "This letter runs past one page, so its stationery can't change here yet. Make a new preview in the stationery you'd like."
-    });
+  it('restyles a two-page letter on its pages, and keeps it paid with Pay & Send', async () => {
+    vi.mocked(getDraftForStationery).mockResolvedValue(draft({ bodyText: lines(40) }) as never);
+    const output = await restyle('botanical');
+    const change = written();
+    expect(change.pages).toBe(2);
+    expect(svgs(change.previewHtml)).toHaveLength(2);
+    expect(output).toMatchObject({ pages: 2, canSendNow: false, reasonCannotSend: PAID_PER_SEND_REASON });
+    expect(output.message).toBe('The letter is now on the botanical stationery, and the account remembers it for its next letter preview. Nothing has been sent.');
+    expect(getSendEligibility).toHaveBeenCalledWith(10, 2, { mailType: 'letter', pages: 2 });
+  });
+
+  it('runs a one-page letter on to a second page in a wider face, and prices it as Pay & Send', async () => {
+    vi.mocked(getDraftForStationery).mockResolvedValue(draft({ bodyText: wide(13) }) as never);
+    const output = await restyle('typewriter');
+    const change = written();
+    expect(change.pages).toBe(2);
+    expect(svgs(change.previewHtml)).toHaveLength(2);
+    expect(output).toMatchObject({ pages: 2, canSendNow: false, reasonCannotSend: PAID_PER_SEND_REASON });
+    expect(output.message).toBe(
+      'The letter is now on the typewriter stationery, and the account remembers it for its next letter preview. ' +
+        'It now runs to two pages, printed on both sides, and is paid with Pay & Send. Nothing has been sent.'
+    );
+    expect(getSendEligibility).toHaveBeenCalledWith(10, 2, { mailType: 'letter', pages: 2 });
+  });
+
+  it('fits a letter back on one page, which a pack pays for', async () => {
+    const typewriter = { theme: 'typewriter' as const, dateLine: 'October 2, 2026' };
+    vi.mocked(getDraftForStationery).mockResolvedValue(draft({ bodyText: wide(13), stationery: typewriter }) as never);
+    const output = await restyle('classic');
+    expect(written().pages).toBe(1);
+    expect(output).not.toHaveProperty('pages');
+    expect(output).toMatchObject({ canSendNow: true });
+    expect(output).not.toHaveProperty('reasonCannotSend');
+    expect(output.message).toContain('It now fits on one page, which a letter pack pays for.');
+    expect(getSendEligibility).toHaveBeenCalledWith(10, 2, { mailType: 'letter' });
+  });
+
+  it('keeps a gift letter on one page, its card after it, and refuses a face that would run it on', async () => {
+    const gift = draft({ bodyText: lines(10), gift: true });
+    vi.mocked(getDraftForStationery).mockResolvedValue(gift as never);
+    const output = await restyle('botanical');
+    const change = written();
+    expect(change.pages).toBe(1);
+    const [, card] = svgs(change.previewHtml);
+    expect(card).toBe(svgs(gift.preview_html)[1]);
+    expect(output).toMatchObject({ canSendNow: true });
+
+    vi.mocked(setDraftStationery).mockClear();
+    vi.mocked(getDraftForStationery).mockResolvedValue(draft({ bodyText: wide(13), gift: true }) as never);
+    const error = await restyle('typewriter').catch(e => e);
+    expect(error.message).toMatch(/too long for one page on the typewriter stationery/);
     expect(setDraftStationery).not.toHaveBeenCalled();
   });
 
-  it('refuses a restyle that would run on to a second page, as too long for its one page', async () => {
-    // Each line fits Classic's measure and wraps in Typewriter's wider face:
-    // 13 lines are 26 there, and the sign-off is one too many for its page.
-    const long = Array.from({ length: 13 }, () => 'the quick brown fox jumps over the lazy dog while the letters wait patiently to be written').join('\n');
-    vi.mocked(getDraftForStationery).mockResolvedValue(draft({ body_text: long }) as never);
-    const error = await restyle('typewriter').catch(e => e);
-    expect(error.message).toMatch(/too long for one page on the typewriter stationery/);
+  it('draws the picture from whichever page showed it', async () => {
+    // 20 lines and the sign-off fill page 1; the enclosed image takes page 2.
+    const stored = draft({ bodyText: lines(20), inline: true });
+    expect(stored.pages).toBe(2);
+    vi.mocked(getDraftForStationery).mockResolvedValue(stored as never);
+    await restyle('botanical');
+    const change = written();
+    expect(change.pages).toBe(2);
+    expect(change.previewHtml).toContain(SMALL_INLINE);
+    expect(change.previewHtml).not.toContain(FULL_INLINE);
+  });
+
+  it('with room to write off, lays a restyle out on one page: a longer draft is refused as too long', async () => {
+    vi.stubEnv('LETTER_IRL_ROOM_TO_WRITE_ENABLED', '');
+    vi.mocked(getDraftForStationery).mockResolvedValue(draft({ bodyText: lines(40) }) as never);
+    const error = await restyle('botanical').catch(e => e);
+    expect(error.message).toMatch(/too long for one page/);
     expect(setDraftStationery).not.toHaveBeenCalled();
   });
 });

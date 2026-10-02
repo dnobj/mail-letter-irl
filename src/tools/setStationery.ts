@@ -1,6 +1,8 @@
 import type { Address, LetterLayoutType, McpToolDefinition, ToolContext } from '../contracts/types.js';
 import { setStationeryInputSchema, setStationeryOutputSchema } from '../schemas.js';
 import { isStationeryOffered } from '../config/stationery.js';
+import { letterPageLimit } from '../config/roomToWrite.js';
+import type { SendEligibility } from '../services/commerceService.js';
 import { renderPreviewSvg, rendererVersionFor, type Stationery } from '../render/index.js';
 import type { PreviewStationery } from './stationeryInput.js';
 import {
@@ -14,7 +16,7 @@ import {
   renderLetterPreviewDocument,
   stampedAddressLines
 } from '../services/previewService.js';
-import { layoutLetterForPreview, validatePrintableLetter, withDisplayImage } from './letterHelpers.js';
+import { layoutLetterForPreview, letterOption, letterPayment, validatePrintableLetter, withDisplayImage } from './letterHelpers.js';
 import { isDraftIdShape } from './requestSend.js';
 import { previewStationery, THEME_LIST } from './stationeryInput.js';
 
@@ -47,6 +49,12 @@ export interface SetStationeryOutput {
   stationery: PreviewStationery;
   /** The preview drawn again: for the card, in _meta, never the model's (partitionToolResult). */
   previewHtml: string;
+  /** A letter of more than one page (#586): the pages it is laid out on now. */
+  pages?: number;
+  /** What it costs now (#586): a restyle can change its pages, and so its price. */
+  canSendNow: boolean;
+  reasonCannotSend?: string;
+  sendEligibility: SendEligibility;
   message: string;
 }
 
@@ -66,8 +74,7 @@ export class StationeryRefusedError extends Error {
       | 'DRAFT_EXPIRED'
       | 'DRAFT_CHECKOUT_PENDING'
       | 'DRAFT_NOT_A_LETTER'
-      | 'DRAFT_NOT_DRAWN'
-      | 'DRAFT_LONGER_THAN_A_PAGE',
+      | 'DRAFT_NOT_DRAWN',
     message: string
   ) {
     super(message);
@@ -97,10 +104,21 @@ function refused(code: StationeryRefusedError['code'], message: string, context:
   return new StationeryRefusedError(code, message);
 }
 
-/** What the tool says it did, for the model and the person. */
-function messageFor(stationery: Stationery): string {
+const PAGE_WORDS = ['', 'one page', 'two pages', 'three pages'];
+
+/**
+ * What the tool says it did, for the model and the person, and what changed
+ * in the letter's pages, and so its price (#586).
+ */
+function messageFor(stationery: Stationery, pages: number, pagesBefore: number): string {
   const drawn = stationery.theme === 'classic' ? 'on a plain page, the classic stationery' : `on the ${stationery.theme} stationery`;
-  return `The letter is now ${drawn}, and the account remembers it for its next letter preview. Nothing has been sent.`;
+  const length =
+    pages === pagesBefore
+      ? ''
+      : pages === 1
+        ? ' It now fits on one page, which a letter pack pays for.'
+        : ` It now runs to ${PAGE_WORDS[pages]}, printed on both sides, and is paid with Pay & Send.`;
+  return `The letter is now ${drawn}, and the account remembers it for its next letter preview.${length} Nothing has been sent.`;
 }
 
 async function handler(input: SetStationeryInput, context: ToolContext): Promise<SetStationeryOutput> {
@@ -127,15 +145,8 @@ async function handler(input: SetStationeryInput, context: ToolContext): Promise
   }
   // Only a letter our renderer drew can be drawn again in a theme.
   if (!draft.renderer_version) throw refused('DRAFT_NOT_DRAWN', NOT_DRAWN, context);
-  // A letter of more than one page (#586) is not restyled in place yet: its
-  // later pages, and its price, would have to be laid out again too.
-  if (Number(draft.pages ?? 1) > 1) {
-    throw refused(
-      'DRAFT_LONGER_THAN_A_PAGE',
-      "This letter runs past one page, so its stationery can't change here yet. Make a new preview in the stationery you'd like.",
-      context
-    );
-  }
+  // The pages its preview drew (#586): its own, then any gift card's.
+  const pagesBefore = Number(draft.pages ?? 1);
 
   const sender = draft.sender as unknown as Address;
   const recipient = draft.recipient as unknown as Address;
@@ -158,32 +169,47 @@ async function handler(input: SetStationeryInput, context: ToolContext): Promise
     { bodyText, signOff, layoutType, imageData: imageData ?? undefined, stationery },
     context,
     'pdf',
-    // On its one page (#586): a restyle that runs on to another would change
-    // what the letter costs, so it is refused as too long, as before.
-    1
+    // On as many pages as a preview may take (#586), and a gift letter on one:
+    // it pays for one page only (#579), so a theme that runs it past is refused.
+    draft.is_gift_send ? 1 : letterPageLimit()
   )!;
 
-  // The letter's page drawn again, with the small copy of its picture the
-  // preview showed; the pages after it, a gift letter's card, as they were.
-  const [page, ...after] = rendererDocumentPages(draft.preview_html);
-  const image = page ? renderedPageImage(page) : undefined;
-  if (!page || (layout.pages[0].items.some(item => item.kind === 'image') && !image)) {
+  // The letter's pages drawn again, as many as it takes now, with the small
+  // copy of its picture from whichever page showed it; the pages after the
+  // letter's own, a gift letter's card, as they were.
+  const stored = rendererDocumentPages(draft.preview_html);
+  const letterPages = stored.slice(0, pagesBefore);
+  const after = stored.slice(pagesBefore);
+  const image = letterPages.map(renderedPageImage).find(found => found !== undefined);
+  const drawsImage = layout.pages.some(page => page.items.some(item => item.kind === 'image'));
+  if (letterPages.length < pagesBefore || letterPages.length === 0 || (drawsImage && !image)) {
     throw refused('DRAFT_NOT_DRAWN', NOT_DRAWN, context);
   }
-  const [drawn] = renderPreviewSvg(withDisplayImage(layout, image), {
+  const drawn = renderPreviewSvg(withDisplayImage(layout, image), {
     addresses: { from: stampedAddressLines(sender), to: stampedAddressLines(recipient) }
   });
   const rendererVersion = rendererVersionFor(stationery);
-  const previewHtml = renderLetterPreviewDocument([drawn, ...after], { bodyText, signOff }, rendererVersion);
+  const previewHtml = renderLetterPreviewDocument([...drawn, ...after], { bodyText, signOff }, rendererVersion);
+  const pages = layout.pages.length;
 
-  const refusal = await setDraftStationery(draftId, userId, { stationery, previewHtml }, context.now());
+  const refusal = await setDraftStationery(draftId, userId, { stationery, previewHtml, pages }, context.now());
   if (refusal) throw refused(...REFUSALS[refusal], context);
 
   context.logger.info(
-    { correlationId: context.correlationId, event: 'draft.stationery_changed', theme: stationery.theme },
+    { correlationId: context.correlationId, event: 'draft.stationery_changed', theme: stationery.theme, pages, pagesBefore },
     'A preview was restyled'
   );
-  return { draftId, stationery, previewHtml, message: messageFor(stationery) };
+  // Priced as it stands now: the pages are the draft's, as the send and the
+  // checkout read them (#586).
+  const payment = letterPayment(letterOption(layout), Number(draft.required_credits ?? 2), draft.is_gift_send === true, context, draftId);
+  return {
+    draftId,
+    stationery,
+    previewHtml,
+    ...(pages > 1 ? { pages } : {}),
+    ...payment,
+    message: messageFor(stationery, pages, pagesBefore)
+  };
 }
 
 export const setStationeryTool: McpToolDefinition<SetStationeryInput, SetStationeryOutput> = {
