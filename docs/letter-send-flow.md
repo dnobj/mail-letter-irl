@@ -264,13 +264,22 @@ A `pdf-1` gift send prints its card as the PDF's second page, drawn by the rende
 - PostGrid's `pageCount` counts sides (probe P13). The cost estimate adds about 10c per page past the first, or 20c in colour, to the 10c for double-sided.
 
 **How a postcard goes to PostGrid (#534 Phase 4).** A postcard carries the same `rendererVersion` from its draft.
-- With `pdf-1`, it prints as our own two-page PDF, front then back, each 9.25 x 6.25 in with its bleed. It is uploaded to `/postcards` as a multipart form with a 30-second budget.
+- With `pdf-1`, it prints as our own two-page PDF, front then back, at its size with a 0.125 in bleed (#594): 9.25 x 6.25 in for a 6x9, 6.25 x 4.25 in for a 4x6 and 11.25 x 6.25 in for an 11x6. It is uploaded to `/postcards` as a multipart form with a 30-second budget.
   - The front image covers the whole page.
-  - The message fills the left half of the back, 16 lines of 14 pt Tinos.
-  - The right half stays empty for PostGrid's addresses and postage: content there cancels the postcard (probe P9, [postgrid-pdf-rendering.md](learnings/postgrid-pdf-rendering.md)).
-- A gift send's card prints in a strip 1.75 in tall at the foot of the message, drawn by the renderer with the code the send minted (`letters.content.giftCard`). The message keeps the 11 lines above it.
-- Refusals hold the postcard as `render_refused`, as for letters: a version this build cannot print, an unreadable image, a message past its half of the back, a gift card whose words run past its strip, or a size other than 6x9.
-- With the flag, a postcard preview records `pdf-1` (below). The print's overflow refusal is then a backstop: the preview measured the same back.
+  - The message fills the left part of the back:
+    - a 6x9: its left half, 16 lines of 14 pt Tinos;
+    - a 4x6: its left 3.25 in, above USPS's barcode clear zone, 11 lines of 12 pt;
+    - an 11x6: its left 6 in, 16 lines of 14 pt.
+  - The rest stays empty for PostGrid's addresses and postage: content there cancels the postcard (probes P9 and P14, [postgrid-pdf-rendering.md](learnings/postgrid-pdf-rendering.md)).
+- A gift send's card prints in a strip 1.75 in tall at the foot of the message, drawn by the renderer with the code the send minted (`letters.content.giftCard`). The message keeps the 11 lines above it. A gift postcard is a 6x9 (#579).
+- Refusals hold the postcard as `render_refused`, as for letters. The postcard is held for:
+  - a version this build cannot print;
+  - an unreadable image;
+  - a message past its room on the back;
+  - a gift card whose words run past its strip;
+  - a gift card on any size but 6x9;
+  - a size no writer stores, on either path.
+- With the flag, a 6x9 postcard preview records `pdf-1` (below). The print's overflow refusal is then a backstop: the preview measured the same back. The tool offers only the 6x9 until it offers the other sizes on our renderer (#594). A 4x6 or 11x6 with no renderer version prints on the legacy HTML, as before.
 
 **How a preview is drawn (#534).** With `LETTER_IRL_PRINT_RENDERER=pdf`, the three letter previews are drawn by `src/render`, from the layout the PDF prints from:
 - the page is laid out with the image that prints, and a letter that runs past it is refused with the count: "Letter is 2 lines too long for one page: it takes 28 lines and the page holds 26." A page holds 26 lines of text only, 16 under a full 2-inch header image, and 13 above a full 3-inch enclosed image;

@@ -4,13 +4,14 @@
  * multipart upload of a two-page PDF with its bleed, front then back, a gift
  * send's card in a strip at the foot of the message; every other postcard
  * keeps the legacy HTML. Probe P9 fixed the page size and why the back's right
- * half stays empty (docs/learnings/postgrid-pdf-rendering.md).
+ * half stays empty, and probe P14 the same for the 4x6 and 11x6 (#594)
+ * (docs/learnings/postgrid-pdf-rendering.md).
  */
 
 import { deflateSync } from 'node:zlib';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PostGridProvider } from '../../../src/services/providers/PostGridProvider.js';
-import { layoutPostcard, readImageDataUri, RENDERER_VERSION, renderPdf } from '../../../src/render/index.js';
+import { layoutPostcard, layoutPostcardBack, readImageDataUri, RENDERER_VERSION, renderPdf } from '../../../src/render/index.js';
 import { giftPostcardStripCopy } from '../../../src/services/giftCardRenderer.js';
 
 const diagnostics = vi.hoisted(() => ({ written: [] as Array<{ level: string; event: string; fields: Record<string, unknown> }> }));
@@ -91,6 +92,9 @@ const base = {
   rendererVersion: RENDERER_VERSION,
 };
 
+/** A message of `count` short lines. */
+const lines = (count: number) => Array.from({ length: count }, (_, n) => `Line ${n + 1}`).join('\n');
+
 /** A gift send's card, with the code the send minted. */
 const giftCard = {
   state: 'funded' as const,
@@ -170,6 +174,68 @@ describe('postcards printed from our own PDF (#534 Phase 4)', () => {
     expect(printed.equals(expected)).toBe(true);
   });
 
+  it.each([
+    { size: '6x4' as const, postGrid: '6x4', media: '0 0 450 306' },
+    { size: '6x11' as const, postGrid: '11x6', media: '0 0 810 450' }
+  ])("prints a $size postcard from our PDF: its own page, PostGrid's $postGrid, exactly its layout (#594)", async ({ size, postGrid, media }) => {
+    const fetchMock = accepted();
+    vi.stubGlobal('fetch', fetchMock);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-01T12:00:00Z'));
+
+    await expect(provider().sendPostcard({ ...base, size })).resolves.toMatchObject({ success: true, trackingId: 'postcard_abc' });
+
+    const form = (fetchMock.mock.calls[0] as [string, RequestInit])[1].body as FormData;
+    expect(form.get('size')).toBe(postGrid);
+    expect(form.has('frontHTML')).toBe(false);
+    expect(form.has('backHTML')).toBe(false);
+    const printed = Buffer.from(await (form.get('pdf') as File).arrayBuffer());
+    // The page with its bleed, as probe P14 found PostGrid takes it.
+    expect([...printed.toString('latin1').matchAll(/\/MediaBox \[([^\]]+)\]/g)].map(match => match[1].trim())).toEqual([media, media]);
+    const image = readImageDataUri(base.frontImageBase64);
+    expect(printed.equals(await renderPdf(layoutPostcard({ message: base.backMessage, image, size })))).toBe(true);
+    // Not the same postcard laid out at 6x9.
+    expect(printed.equals(await renderPdf(layoutPostcard({ message: base.backMessage, image })))).toBe(false);
+  });
+
+  it('prints an 11x6 whose message a 6x9 could not hold, and holds the same message on a 6x9', async () => {
+    const prose = `Dear Sam,\n${'the quick brown fox jumps over the lazy dog '.repeat(19)}`;
+    // The premise: too long for a 6x9's back, not for an 11x6's.
+    expect(layoutPostcardBack(prose, undefined, '6x9').overflowLines).toBeGreaterThan(0);
+    expect(layoutPostcardBack(prose, undefined, '6x11').overflowLines).toBe(0);
+    const fetchMock = accepted();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(provider().sendPostcard({ ...base, size: '6x11', backMessage: prose })).resolves.toMatchObject({ success: true });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const held = await provider().sendPostcard({ ...base, size: '6x9', backMessage: prose });
+    expect(held).toMatchObject({ success: false, metadata: { errorClass: 'render_refused' } });
+    expect(held.error).toContain('past its room on the back');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("names the size in a size hold's log line, and only there", async () => {
+    vi.stubGlobal('fetch', accepted());
+    diagnostics.written = [];
+    await provider().sendPostcard({ ...base, size: '6x4', giftCard, metadata: { letterId: 'postcard-3' } });
+    expect(diagnostics.written).toContainEqual(expect.objectContaining({
+      event: 'provider.postgrid.render_refused',
+      fields: expect.objectContaining({ reason: 'size', letterId: 'postcard-3', postcardSize: '6x4' })
+    }));
+
+    // A size that is not text, as stored, cut to 20 characters.
+    diagnostics.written = [];
+    await provider().sendPostcard({ ...base, size: ['6x9'] as unknown as '6x4', metadata: { letterId: 'postcard-5' } });
+    await provider().sendPostcard({ ...base, size: 'x'.repeat(30) as unknown as '6x4', metadata: { letterId: 'postcard-6' } });
+    expect(diagnostics.written.map(entry => entry.fields.postcardSize)).toEqual(['["6x9"]', 'x'.repeat(20)]);
+
+    diagnostics.written = [];
+    await provider().sendPostcard({ ...base, backMessage: lines(17), metadata: { letterId: 'postcard-4' } });
+    const overflow = diagnostics.written.find(entry => entry.event === 'provider.postgrid.render_refused');
+    expect(overflow?.fields).toMatchObject({ reason: 'overflow', letterId: 'postcard-4' });
+    expect(overflow?.fields).not.toHaveProperty('postcardSize');
+  });
+
   it('gives an upload thirty seconds, not the JSON budget, before calling it ambiguous', async () => {
     const aborted = Object.assign(new Error('The operation was aborted'), { name: 'AbortError' });
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(aborted));
@@ -185,9 +251,22 @@ describe('postcards printed from our own PDF (#534 Phase 4)', () => {
     ['a renderer this build does not know', { rendererVersion: 'pdf-9' }, 'unknown_version', 'pdf-9'],
     // Stationery is a letter's (#563): never printed on a postcard as if it were not there.
     ['a postcard recording stationery\'s renderer', { rendererVersion: 'pdf-2' }, 'unknown_version', 'A postcard is never drawn in stationery'],
-    ['a message past its half of the back', { backMessage: Array.from({ length: 17 }, (_, n) => `Line ${n + 1}`).join('\n') }, 'overflow', "runs 1 line(s) past its half of the back"],
+    ['a message past its half of the back', { backMessage: lines(17) }, 'overflow', 'runs 1 line(s) past its room on the back'],
+    // Each size holds its own lines (#594): 11 on a 4x6, 16 on an 11x6.
+    ['a 4x6 message past its room', { size: '6x4' as const, backMessage: lines(12) }, 'overflow', 'runs 1 line(s) past its room on the back'],
+    ['an 11x6 message past its room', { size: '6x11' as const, backMessage: lines(17) }, 'overflow', 'runs 1 line(s) past its room on the back'],
     ['an unreadable image', { frontImageBase64: 'data:image/gif;base64,R0lGODlhAQABAAAAACw=' }, 'image', "The postcard's image could not be read"],
-    ['a size our renderer does not draw', { size: '6x4' as const }, 'size', 'Our renderer draws 6x9 postcards, not 6x4.'],
+    // A size no writer stores, as only a hand-edited row could hold, on either path.
+    ['a size no writer stores', { size: '5x7' as unknown as '6x4' }, 'size', 'A postcard cannot be printed at size "5x7".'],
+    ['a size no writer stores, on the legacy HTML too', { size: '5x7' as unknown as '6x4', rendererVersion: undefined }, 'size', 'A postcard cannot be printed at size "5x7".'],
+    ['a size that names a property every object has', { size: '__proto__' as unknown as '6x4' }, 'size', 'A postcard cannot be printed at size "__proto__".'],
+    // Shown as stored, never as the 6x9 it reads like.
+    ['a size that is not text', { size: ['6x9'] as unknown as '6x4' }, 'size', 'A postcard cannot be printed at size ["6x9"].'],
+    // Refused for its size before its image is read.
+    ['an unknown size with an unreadable image', { size: '5x7' as unknown as '6x4', frontImageBase64: 'data:image/gif;base64,R0lGODlhAQABAAAAACw=' }, 'size', 'A postcard cannot be printed at size "5x7".'],
+    // A gift postcard is 6x9 (#579): its card is never squeezed onto another size.
+    ['a gift postcard at 4x6', { size: '6x4' as const, giftCard }, 'size', 'A gift postcard is 6x9, not 6x4.'],
+    ['a gift postcard at 11x6', { size: '6x11' as const, giftCard }, 'size', 'A gift postcard is 6x9, not 6x11.'],
     // A gift postcard too: never printed on the HTML from a different layout.
     ['a gift postcard of a renderer this build does not know', { rendererVersion: 'pdf-9', giftCard }, 'unknown_version', 'pdf-9'],
     // The preview refuses such a name; a seed code it never saw can still do it.
@@ -259,6 +338,30 @@ describe('postcards printed from our own PDF (#534 Phase 4)', () => {
       expect(body.backHTML).toContain('Wish you were here.');
       expect(body.size).toBe('9x6');
     }
+  });
+
+  it.each([
+    ['6x4', '6x4', '6in', '4in'],
+    ['6x11', '11x6', '11in', '6in']
+  ] as const)('keeps the legacy HTML for a %s postcard with no renderer version', async (size, postGrid, width, height) => {
+    const fetchMock = accepted();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(provider().sendPostcard({ ...base, size, rendererVersion: undefined })).resolves.toMatchObject({ success: true });
+
+    const init = (fetchMock.mock.calls[0] as [string, RequestInit])[1];
+    expect(init.headers).toEqual({
+      'x-api-key': 'test-key',
+      'Content-Type': 'application/json',
+      'Idempotency-Key': 'postcard-stable-id'
+    });
+    const body = JSON.parse(init.body as string);
+    expect(Object.keys(body)).toEqual(['to', 'from', 'frontHTML', 'backHTML', 'size', 'description']);
+    expect(body.size).toBe(postGrid);
+    // The front at the card's own size, as before.
+    expect(body.frontHTML).toContain(`width: ${width};`);
+    expect(body.frontHTML).toContain(`height: ${height};`);
+    expect(body.backHTML).toContain('Wish you were here.');
   });
 
   it("prints a gift postcard's card from our PDF: the sender's name and the code the send minted (#534)", async () => {

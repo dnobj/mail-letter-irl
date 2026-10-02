@@ -303,8 +303,12 @@ describe('the 4x6 and 11x6 postcards (#594)', () => {
   });
 
   // The fixture holds the 6x9 backs as layoutPostcardBack gave them at 497afe2,
-  // before #594 (a scratch script wrote it there and at 922df5f, alike). A
-  // change meant to move a 6x9 back must write it again, and say so.
+  // before #594 (a scratch script wrote it there and at 922df5f, alike). Its
+  // shape is { strip, backs: [{ message, strip, back }] }, written with
+  // JSON.stringify(value, null, 1), where `back` is
+  // layoutPostcardBack(message, strip ? fixture.strip : undefined). A change
+  // meant to move a 6x9 back must write it again that way, under the name of
+  // the commit that wrote it, and say so.
   it('lays the 6x9 back out exactly as before #594, strip or none (a golden from 497afe2)', () => {
     const golden = JSON.parse(readFileSync(new URL('../../fixtures/postcardBacks6x9.497afe2.json', import.meta.url), 'utf8')) as {
       strip: GiftStripCopy;

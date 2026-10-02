@@ -151,7 +151,7 @@ export interface PostcardGeometry {
 }
 
 /**
- * USPS's barcode clear zone (DMM 202.5.4): the lower right of a card's
+ * USPS's barcode clear zone (DMM 202.5.1.1): the lower right of a card's
  * address side, from 4.75in left of its right edge and 0.625in up from its
  * bottom, kept free for the barcode USPS may print there. PostGrid's test
  * mode prints no barcode, so probe P14 could not show it, and its check of
