@@ -330,7 +330,7 @@ export interface DraftState
   extends Pick<
     LetterDraft,
     | 'draft_id' | 'user_id' | 'status' | 'expires_at' | 'consumed_letter_id' | 'arrive_by' | 'mail_on'
-    | 'mail_type' | 'renderer_version' | 'stationery' | 'preview_html'
+    | 'mail_type' | 'renderer_version' | 'stationery' | 'preview_html' | 'pages'
   > {
   /** The letter the draft became; null for a draft not sent, or a letter that is not the draft owner's. */
   letter_status: LetterStatus | null;
@@ -342,7 +342,7 @@ export interface DraftState
 export async function getDraftState(draftId: string): Promise<DraftState | null> {
   const result = await query<DraftState>(
     `SELECT d.draft_id, d.user_id, d.status, d.expires_at, d.consumed_letter_id, d.arrive_by, d.mail_on,
-            d.mail_type, d.renderer_version, d.stationery,
+            d.mail_type, d.renderer_version, d.stationery, d.pages,
             -- The page only where get_draft_status can give it: a letter our
             -- renderer drew, still pending.
             CASE WHEN d.status = 'pending' AND d.mail_type = 'letter' AND d.renderer_version IS NOT NULL
@@ -572,13 +572,17 @@ export interface DraftForStationery {
   preview_html: string | null;
   /** The pages it was laid out on (migration 047, #586). */
   pages: number;
+  /** A gift letter pays for one page only (#579): its restyle stays on one. */
+  is_gift_send: boolean;
+  /** The letters its preview priced it at, for what a restyle says it costs. */
+  required_credits: number;
 }
 
 /** The caller's draft, as set_stationery draws it again, or null when it is not theirs or not there. */
 export async function getDraftForStationery(draftId: string, userId: string): Promise<DraftForStationery | null> {
   const result = await query<DraftForStationery>(
     `SELECT mail_type, status, expires_at, redacted_at, renderer_version, body_text, sign_off, layout_type,
-            header_image_data, inline_image_data, sender, recipient, preview_html, pages
+            header_image_data, inline_image_data, sender, recipient, preview_html, pages, is_gift_send, required_credits
      FROM letter_drafts
      WHERE draft_id = $1 AND user_id = $2`,
     [draftId, userId]
@@ -602,7 +606,8 @@ export async function getDraftForStationery(draftId: string, userId: string): Pr
 export async function setDraftStationery(
   draftId: string,
   userId: string,
-  change: { stationery: Stationery; previewHtml: string },
+  /** `pages`: the pages the letter is laid out on now (#586); left as it was when absent. */
+  change: { stationery: Stationery; previewHtml: string; pages?: number },
   now: Date = new Date()
 ): Promise<DraftScheduleRefusal | null> {
   const stationery = storedStationery(change.stationery);
@@ -615,9 +620,10 @@ export async function setDraftStationery(
 
     await client.query(
       `UPDATE letter_drafts
-       SET stationery = $2::jsonb, renderer_version = $3, preview_html = $4, updated_at = NOW()
+       SET stationery = $2::jsonb, renderer_version = $3, preview_html = $4,
+           pages = COALESCE($5::smallint, pages), updated_at = NOW()
        WHERE draft_id = $1`,
-      [draftId, stationery ? JSON.stringify(stationery) : null, rendererVersion, change.previewHtml]
+      [draftId, stationery ? JSON.stringify(stationery) : null, rendererVersion, change.previewHtml, change.pages ?? null]
     );
     // Never on an erased account (rememberStationery).
     await client.query('UPDATE users SET stationery_theme = $2 WHERE user_id = $1 AND erased_at IS NULL', [

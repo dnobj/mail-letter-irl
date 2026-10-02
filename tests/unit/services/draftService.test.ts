@@ -832,7 +832,7 @@ describe('draftService stationery (#563)', () => {
       await expect(getDraftForStationery('draft-1', 'auth0|owner')).resolves.toEqual({ mail_type: 'letter' });
       const [sql, params] = vi.mocked(db.query).mock.calls[0] as [string, unknown[]];
       for (const column of ['mail_type', 'status', 'expires_at', 'redacted_at', 'renderer_version', 'body_text', 'sign_off', 'layout_type',
-        'header_image_data', 'inline_image_data', 'sender', 'recipient', 'preview_html']) {
+        'header_image_data', 'inline_image_data', 'sender', 'recipient', 'preview_html', 'pages', 'is_gift_send', 'required_credits']) {
         expect(sql, column).toContain(column);
       }
       expect(sql).toMatch(/WHERE draft_id = \$1 AND user_id = \$2/);
@@ -858,10 +858,11 @@ describe('draftService stationery (#563)', () => {
       expect(live[0]).toMatch(/FROM orders/);
       expect(live[1]).toEqual(['draft-1', [...LIVE_PAY_AND_SEND_STATUSES]]);
       expect(update[0]).toMatch(
-        /UPDATE letter_drafts\s+SET stationery = \$2::jsonb, renderer_version = \$3, preview_html = \$4, updated_at = NOW\(\)\s+WHERE draft_id = \$1/
+        /UPDATE letter_drafts\s+SET stationery = \$2::jsonb, renderer_version = \$3, preview_html = \$4,\s+pages = COALESCE\(\$5::smallint, pages\), updated_at = NOW\(\)\s+WHERE draft_id = \$1/
       );
       // Stored as the print reads it back: the theme and its slots, not why it was chosen.
-      expect(update[1]).toEqual(['draft-1', JSON.stringify(BOTANICAL), 'pdf-2', PAGE]);
+      // No pages given: the draft keeps its own (#586).
+      expect(update[1]).toEqual(['draft-1', JSON.stringify(BOTANICAL), 'pdf-2', PAGE, null]);
       // Never on an erased account (#571 review round 3).
       expect(remember[0]).toBe('UPDATE users SET stationery_theme = $2 WHERE user_id = $1 AND erased_at IS NULL');
       expect(remember[1]).toEqual(['auth0|owner', 'botanical']);
@@ -875,8 +876,16 @@ describe('draftService stationery (#563)', () => {
         setDraftStationery('draft-1', 'auth0|owner', { stationery: { theme: 'classic' }, previewHtml: PAGE }, NOW)
       ).resolves.toBeNull();
 
-      expect(client.query.mock.calls[2][1]).toEqual(['draft-1', null, 'pdf-1', PAGE]);
+      expect(client.query.mock.calls[2][1]).toEqual(['draft-1', null, 'pdf-1', PAGE, null]);
       expect(client.query.mock.calls[3][1]).toEqual(['auth0|owner', 'classic']);
+    });
+
+    it('stores the pages a restyle laid the letter out on (#586)', async () => {
+      const client = inTransaction({ rows: [pending] }, { rows: [] });
+      await expect(
+        setDraftStationery('draft-1', 'auth0|owner', { stationery: { ...BOTANICAL } as any, previewHtml: PAGE, pages: 2 }, NOW)
+      ).resolves.toBeNull();
+      expect(client.query.mock.calls[2][1]).toEqual(['draft-1', JSON.stringify(BOTANICAL), 'pdf-2', PAGE, 2]);
     });
 
     it.each([

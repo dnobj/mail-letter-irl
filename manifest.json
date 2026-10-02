@@ -2534,6 +2534,12 @@
             "type": "boolean",
             "description": "A sent draft's order: whether it can still be cancelled free"
           },
+          "pages": {
+            "type": "integer",
+            "minimum": 2,
+            "maximum": 3,
+            "description": "A ready letter of more than one page: the pages it is laid out on now"
+          },
           "stationery": {
             "type": "object",
             "description": "A ready letter's stationery now, while stationery is offered; its page goes to the card",

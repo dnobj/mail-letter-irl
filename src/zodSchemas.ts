@@ -741,6 +741,7 @@ export const getDraftStatusOutputZ = z.object({
     .optional()
     .describe("Where a sent draft's order stands: scheduled while it waits for its mail date"),
   cancellable: z.boolean().optional().describe("A sent draft's order: whether it can still be cancelled free"),
+  pages: z.number().int().min(2).max(MAX_LETTER_PAGES).optional().describe("A ready letter of more than one page: the pages it is laid out on now"),
   stationery: z
     .object({
       theme: z.enum(STATIONERY_THEMES),
@@ -791,6 +792,10 @@ export const SET_STATIONERY_OUTPUT_DESCRIPTION = "The stationery the letter is n
 export const setStationeryOutputZ = z.object({
   draftId: z.string(),
   stationery: previewStationeryZ.describe(SET_STATIONERY_OUTPUT_DESCRIPTION),
+  pages: z.number().int().min(2).max(MAX_LETTER_PAGES).optional().describe(PREVIEW_PAGES_DESCRIPTION),
+  canSendNow: z.boolean().describe("Whether the balance or a gift letter pays for the letter as it is now: a restyle can change its pages, and so its price"),
+  reasonCannotSend: z.string().optional(),
+  sendEligibility: sendEligibilityZ,
   message: z.string()
 });
 

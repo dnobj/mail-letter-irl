@@ -1177,7 +1177,9 @@ export async function createJitCheckout(
   // prepareJitOrder re-reads FOR UPDATE and owns the real ownership check,
   // and refuses an option this deployment does not sell (#578).
   // With its pages (#586): without them a long letter would warm the one-page
-  // price and meet the charge cap at the one-page amount.
+  // price and meet the charge cap at the one-page amount. A restyle can change
+  // them between this peek and the lock (#591): the order is still priced from
+  // the locked row, so only this advisory warm-up and cap check can be stale.
   const draftPeek = await query<{ mail_type: string | null; postcard_size: string | null; pages: number | null }>(
     'SELECT mail_type, postcard_size, pages FROM letter_drafts WHERE draft_id = $1 AND user_id = $2',
     [params.draftId, params.userId]

@@ -858,6 +858,7 @@ export const getDraftStatusOutputSchema: JsonSchema = {
       description: "Where a sent draft's order stands: scheduled while it waits for its mail date"
     },
     cancellable: { type: "boolean", description: "A sent draft's order: whether it can still be cancelled free" },
+    pages: { type: "integer", minimum: 2, maximum: MAX_LETTER_PAGES, description: "A ready letter of more than one page: the pages it is laid out on now" },
     stationery: {
       type: "object",
       description: "A ready letter's stationery now, while stationery is offered; its page goes to the card",
@@ -984,10 +985,17 @@ export const setStationeryInputSchema: JsonSchema = {
 
 export const setStationeryOutputSchema: JsonSchema = {
   type: "object",
-  required: ["draftId", "stationery", "message"],
+  required: ["draftId", "stationery", "canSendNow", "sendEligibility", "message"],
   properties: {
     draftId: { type: "string" },
     stationery: { ...previewStationerySchema, description: SET_STATIONERY_OUTPUT_DESCRIPTION },
+    pages: { type: "integer", minimum: 2, maximum: MAX_LETTER_PAGES, description: PREVIEW_PAGES_DESCRIPTION },
+    canSendNow: {
+      type: "boolean",
+      description: "Whether the balance or a gift letter pays for the letter as it is now: a restyle can change its pages, and so its price"
+    },
+    reasonCannotSend: { type: "string" },
+    sendEligibility: sendEligibilitySchema,
     message: { type: "string" }
   }
 };

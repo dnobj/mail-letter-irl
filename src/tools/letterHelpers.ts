@@ -1008,6 +1008,36 @@ export async function giftForLayout(
   return gift;
 }
 
+/**
+ * Whether a letter can be sent now without paying: a gift letter pays for it,
+ * or the balance does, for mail a pack pays for (#579). The preview and a
+ * restyle (#586) share it, so they cannot drift (#591 review round 1).
+ */
+function canSendNowFor(option: MailOption, requiredCredits: number, isGift: boolean, available: number): boolean {
+  return isGift || (isPackPayable(option) && available >= requiredCredits);
+}
+
+/**
+ * What a letter preview's draft costs as it stands, and whether the balance
+ * pays: the terms a preview gives (createLetterDraftAndBuildOutput), for a
+ * draft whose pages a restyle changed (#586). A gift letter is paid for.
+ */
+export function letterPayment(
+  option: MailOption,
+  requiredCredits: number,
+  isGift: boolean,
+  context: ToolContext,
+  draftId: string
+): { canSendNow: boolean; reasonCannotSend?: string; sendEligibility: SendEligibility } {
+  const available = context.user.creditsRemaining;
+  const canSendNow = canSendNowFor(option, requiredCredits, isGift, available);
+  return {
+    canSendNow,
+    ...(canSendNow ? {} : { reasonCannotSend: reasonCannotSend(option) }),
+    sendEligibility: previewSendEligibility(available, requiredCredits, option, isGift, callingApp(context), draftId)
+  };
+}
+
 /** A letter's option for its price (#579, #586): its pages, when its layout runs past one. */
 export function letterOption(layout: Layout | undefined): MailOption {
   const pages = layout?.pages.length ?? 1;
@@ -1047,7 +1077,7 @@ export async function createLetterDraftAndBuildOutput(
   const option = letterOption(printLayout);
   const requiredCredits = estimateRequiredCredits(bodyText, signOff);
   const available = context.user.creditsRemaining;
-  const canSendNow = gift.isGift || (isPackPayable(option) && available >= requiredCredits);
+  const canSendNow = canSendNowFor(option, requiredCredits, gift.isGift, available);
   const lettersRequired = Math.max(1, Math.ceil(requiredCredits / 2));
 
   context.logger.info(

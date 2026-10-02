@@ -421,6 +421,32 @@ describePostgres('renderer version, stationery and pages (migrations 039 and 044
       }
     }, 60_000);
 
+    it('stores the pages a restyle laid the letter out on, and keeps them when none are given (#586)', async () => {
+      const userId = await seedUser();
+      const draftId = await seedDraft(userId, 'pdf-1');
+      const row = async () =>
+        (await pool.query('SELECT pages, renderer_version FROM letter_drafts WHERE draft_id = $1', [draftId])).rows[0];
+
+      await expect(drafts.setDraftStationery(draftId, userId, { stationery: BOTANICAL, previewHtml: PAGE, pages: 2 })).resolves.toBeNull();
+      expect(await row()).toEqual({ pages: 2, renderer_version: 'pdf-2' });
+      // get_draft_status reads them back (getDraftState).
+      await expect(drafts.getDraftState(draftId)).resolves.toMatchObject({ pages: 2 });
+      await expect(drafts.setDraftStationery(draftId, userId, { stationery: { theme: 'classic' }, previewHtml: '<svg/>', pages: 1 }))
+        .resolves.toBeNull();
+      expect(await row()).toEqual({ pages: 1, renderer_version: 'pdf-1' });
+
+      // A restyle that names no pages leaves the draft's own.
+      await pool.query('UPDATE letter_drafts SET pages = 3 WHERE draft_id = $1', [draftId]);
+      await expect(drafts.setDraftStationery(draftId, userId, { stationery: BOTANICAL, previewHtml: PAGE })).resolves.toBeNull();
+      expect(await row()).toEqual({ pages: 3, renderer_version: 'pdf-2' });
+
+      // A gift letter pays for one page: migration 047 refuses more, whatever a caller passes.
+      const gift = await seedDraft(userId, 'pdf-1');
+      await pool.query('UPDATE letter_drafts SET is_gift_send = TRUE WHERE draft_id = $1', [gift]);
+      await expect(drafts.setDraftStationery(gift, userId, { stationery: BOTANICAL, previewHtml: PAGE, pages: 2 }))
+        .rejects.toMatchObject({ code: '23514', constraint: 'letter_drafts_pages_paid_per_send' });
+    }, 60_000);
+
     it('restyles a pending draft into a theme and back to Classic, remembering each, within the pair check', async () => {
       const userId = await seedUser();
       const draftId = await seedDraft(userId, 'pdf-1');
