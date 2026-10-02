@@ -1502,8 +1502,6 @@
         dataLoaded = true;
         const card = document.getElementById("card");
         card.classList.remove("loading");
-        // Laid out as a postcard maker (#580) before the postcard is drawn into it.
-        studio?.update();
 
         // Get preview HTML from toolResponseMetadata or toolOutput
         const meta = currentMeta();

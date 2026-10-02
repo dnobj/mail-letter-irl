@@ -203,13 +203,15 @@ describe('the postcard card as a postcard maker (#580)', () => {
     expect(flip.textContent).toBe('Flip to the back');
   });
 
-  it('keeps the side shown through a redraw', async () => {
+  it('keeps the side shown through a redraw, and turns once a press after it', async () => {
     const card = mount();
     await card.show(output(), ON);
     await card.click(card.byId('studio-flip'));
     await card.show(output(), ON);
     expect(card.side()).toBe('back');
     expect(card.byId('studio-flip').textContent).toBe('Show the front');
+    await card.click(card.byId('studio-flip'));
+    expect(card.side()).toBe('front');
   });
 
   it('shows the message read-only, with what it uses of the back', async () => {
