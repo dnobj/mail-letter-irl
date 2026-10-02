@@ -703,6 +703,16 @@ describe('Typewriter and Handwritten (#563 PR 8b)', () => {
     expect(rememberStationery).not.toHaveBeenCalled();
   });
 
+  it("checks a gift card's name in Tinos, which prints the card, whatever face the letter is in", async () => {
+    vi.stubEnv('LETTER_IRL_GIFT_LETTERS_ENABLED', 'true');
+    vi.mocked(getGiftBalance).mockResolvedValue({ available: 1, next: { giftId: 'gift-1', cardState: 'funded' } } as never);
+    // A Greek name: the card (Tinos) and the address stamp (Open Sans) print it; Caveat could not.
+    const name = String.fromCodePoint(0x0393, 0x03b9, 0x03ce, 0x03c1, 0x03b3, 0x03bf, 0x03c2);
+    await expect(run('text_only', { stationery: 'handwritten', sendAsGift: true, sender: address({ name }) }))
+      .resolves.toMatchObject({ draftId: 'draft-1' });
+    expect(drafted()).toMatchObject({ isGiftSend: true, stationery: { theme: 'handwritten' } });
+  });
+
   it("keeps the usual closing when only an address, stamped in Open Sans, cannot print", async () => {
     const CAKE = String.fromCodePoint(0x1f382);
     const error = await run('text_only', { stationery: 'handwritten', recipient: address({ name: `Sam ${CAKE}` }) }).catch(e => e);
