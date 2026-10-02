@@ -22,7 +22,9 @@ import {
   POSTCARD_CAPTION_DESCRIPTION,
   POSTCARD_PLACE_DESCRIPTION,
   SET_POSTCARD_STYLE_SIZE_OUTPUT_DESCRIPTION,
-  SET_POSTCARD_STYLE_CAN_SEND_DESCRIPTION
+  SET_POSTCARD_STYLE_CAN_SEND_DESCRIPTION,
+  PREVIEW_POSTCARD_SIZE_DESCRIPTION,
+  PREVIEW_POSTCARD_LAYOUT_DESCRIPTION
 } from "./zodSchemas.js";
 import { STATIONERY_THEMES } from "./render/stationery.js";
 
@@ -807,6 +809,10 @@ export const quoteAndPreviewPostcardOutputSchema: JsonSchema = {
     giftLettersAvailable: { type: "integer", description: "Unsent gift letters on the account, when there are any" },
     schedule: previewScheduleSchema,
     arrivalWindow: arrivalWindowSchema,
+    size: { type: "string", enum: ["6x9", "6x4", "6x11"], description: PREVIEW_POSTCARD_SIZE_DESCRIPTION },
+    layout: { type: "string", enum: ["full_bleed", "border", "greetings"], description: PREVIEW_POSTCARD_LAYOUT_DESCRIPTION },
+    caption: { type: "string", description: "The border's caption, when it has one" },
+    place: { type: "string", description: "The place the greeting names" },
     previewFrontHtml: { type: "string", description: "HTML preview of postcard front (image)" },
     previewBackHtml: { type: "string", description: "HTML preview of postcard back (message)" },
     previewHtml: { type: "string", description: "The postcard as it prints, front and back as SVG, when our renderer drew it (#534)" },

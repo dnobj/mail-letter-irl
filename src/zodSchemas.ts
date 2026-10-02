@@ -736,6 +736,10 @@ export const clearReturnAddressOutputZ = z.object({
   message: z.string()
 });
 
+/** A postcard preview's size and front (#594), named while each is offered. */
+export const PREVIEW_POSTCARD_SIZE_DESCRIPTION = "While the 4x6 and 11x6 are offered: the postcard's size, which set_postcard_style changes";
+export const PREVIEW_POSTCARD_LAYOUT_DESCRIPTION = "While postcard layouts are offered: the front's layout, which set_postcard_style changes";
+
 export const quoteAndPreviewPostcardOutputZ = z.object({
   lettersRequired: z.number(),
   canSendNow: z.boolean(),
@@ -768,7 +772,12 @@ export const quoteAndPreviewPostcardOutputZ = z.object({
   giftCard: giftCardZ.optional(),
   giftLettersAvailable: z.number().int().nonnegative().optional(),
   schedule: previewScheduleZ.optional(),
-  arrivalWindow: arrivalWindowZ.optional().describe(ARRIVAL_WINDOW_DESCRIPTION)
+  arrivalWindow: arrivalWindowZ.optional().describe(ARRIVAL_WINDOW_DESCRIPTION),
+  // The postcard maker's choices now, each while it is offered (#594).
+  size: z.enum(["6x9", "6x4", "6x11"]).optional().describe(PREVIEW_POSTCARD_SIZE_DESCRIPTION),
+  layout: z.enum(["full_bleed", "border", "greetings"]).optional().describe(PREVIEW_POSTCARD_LAYOUT_DESCRIPTION),
+  caption: z.string().optional().describe("The border's caption, when it has one"),
+  place: z.string().optional().describe("The place the greeting names")
 });
 
 export const sendPostcardOutputZ = z.object({
