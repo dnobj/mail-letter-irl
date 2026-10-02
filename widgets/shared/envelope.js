@@ -1,7 +1,7 @@
 /*
  * The envelope reveal on the letter card (#576).
  *
- * While a letter preview's _meta carries letter-irl/envelopeReveal, the card
+ * While a letter preview's _meta carries letterirl/envelopeReveal, the card
  * opens the page from a window envelope the first time it shows a draft, and
  * folds the page back into it once the letter is sent: the sealed envelope
  * stays, its windows showing the addresses. A press on it shows the letter
@@ -21,7 +21,7 @@
 (function () {
   "use strict";
 
-  var ENVELOPE_META = "letter-irl/envelopeReveal";
+  var ENVELOPE_META = "letterirl/envelopeReveal";
   var NS = "http://www.w3.org/2000/svg";
 
   // The page's width and its top third, in points (8.5 in by 11/3 in).

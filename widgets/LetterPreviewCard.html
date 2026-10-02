@@ -63,14 +63,19 @@
          folded in three shows through a window envelope. Every motion stays in
          the page's box; sealed, the box is the envelope's height. */
       .letter-page svg.envelope{position:absolute;left:0;top:0;width:100%;height:auto;border:0;border-radius:4px 4px 0 0;pointer-events:none}
+      /* The view is the size container, so a clip can be the envelope's height
+         (264/612 of the width, 43.137cqw) whatever the pages' height: a gift
+         letter's two pages fold to one envelope. */
+      .envelope-opening,.envelope-sealing,.envelope-sealed{container-type:inline-size}
       .envelope-opening .letter-page{animation:envelope-unfold .6s ease-out .2s both}
       .envelope-opening svg.envelope{animation:envelope-away .8s ease-out both}
       .envelope-sealing .letter-page{animation:envelope-fold .7s ease-in both}
       .envelope-sealing svg.envelope{animation:envelope-back .7s ease-in both}
-      .envelope-sealed .letter-page{aspect-ratio:612/264;overflow:hidden;cursor:pointer}
-      @keyframes envelope-unfold{from{clip-path:inset(0 0 66.67% 0)}to{clip-path:inset(0)}}
+      .envelope-sealed .letter-page{aspect-ratio:612/264;overflow:hidden}
+      .letter-page-view.envelope-sealed .letter-page{cursor:pointer}
+      @keyframes envelope-unfold{from{clip-path:inset(0 0 calc(100% - 43.137cqw) 0)}to{clip-path:inset(0)}}
       @keyframes envelope-away{from{opacity:1;transform:none}to{opacity:0;transform:translateY(12%)}}
-      @keyframes envelope-fold{from{clip-path:inset(0)}to{clip-path:inset(0 0 66.67% 0)}}
+      @keyframes envelope-fold{from{clip-path:inset(0)}to{clip-path:inset(0 0 calc(100% - 43.137cqw) 0)}}
       @keyframes envelope-back{from{opacity:0;transform:translateY(12%)}to{opacity:1;transform:none}}
       @media (prefers-reduced-motion: reduce){.envelope-opening .letter-page,.envelope-opening svg.envelope,.envelope-sealing .letter-page,.envelope-sealing svg.envelope{animation:none}}
 
@@ -1347,16 +1352,23 @@
 
       // Kept across renders, so a status update does not shrink the page back.
       let pageZoomed = false;
-      // The page view's label, kept so a send can say the letter is sealed (#576).
-      let sealedLabel = () => {};
+      // The page view shown last, so a redraw that changes nothing keeps it:
+      // an envelope's opening or fold (#576) plays on rather than being cut
+      // short, and the label can say the letter is sealed.
+      let shownPage = null;
 
       /**
        * The page as it prints, with the layout's badge. The pages are a labelled
        * group that keeps each page's title, the letter's text, for screen
        * readers. A select on the page, or the button below it, enlarges it.
        */
-      function renderLetterPage(state, pages) {
+      function renderLetterPage(state, pages, html) {
         const container = document.getElementById("mockup-container");
+        const key = `${currentDraftId}\n${state.layoutType || "text_only"}\n${html}`;
+        if (shownPage && shownPage.key === key && shownPage.view.parentNode === container) {
+          shownPage.label();
+          return;
+        }
         container.textContent = "";
         const layoutType = state.layoutType || "text_only";
         const view = document.createElement("div");
@@ -1390,7 +1402,7 @@
         container.appendChild(view);
         envelope?.dress(view, page, currentDraftId);
         apply();
-        sealedLabel = apply;
+        shownPage = { key, view, label: apply };
       }
 
       // The preview's page as this card shows it: the one the Style row set
@@ -1400,9 +1412,10 @@
       }
 
       function renderLetterMockup(state) {
-        const pages = renderedPages(shownPreviewHtml(state));
+        const html = shownPreviewHtml(state);
+        const pages = renderedPages(html);
         if (pages) {
-          renderLetterPage(state, pages);
+          renderLetterPage(state, pages, html);
           return;
         }
         const container = document.getElementById("mockup-container");
@@ -1920,7 +1933,7 @@
             styleRow.hide();
             // The letter folds into its envelope (#576).
             envelope?.seal(sentDraftId);
-            sealedLabel();
+            shownPage?.label();
             scheduled.show(orderId, sentSchedule, false, sentCancellable);
             return;
           }
@@ -1938,7 +1951,7 @@
           styleRow.hide();
           // The letter folds into its envelope (#576).
           envelope?.seal(sentDraftId);
-          sealedLabel();
+          shownPage?.label();
 
           // Change Draft label to Order and show order ID
           idLabel.textContent = "Order";

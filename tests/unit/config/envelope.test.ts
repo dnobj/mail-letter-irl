@@ -40,7 +40,7 @@ describe("the letter previews' card switch", () => {
   it('tells the letter card it may open the page from an envelope while the reveal is on', () => {
     vi.stubEnv('LETTER_IRL_ENVELOPE_REVEAL_ENABLED', 'true');
     for (const name of LETTERS) expect(cardSwitches(name), name).toEqual({ [ENVELOPE_REVEAL_META]: true });
-    expect(ENVELOPE_REVEAL_META).toBe('letter-irl/envelopeReveal');
+    expect(ENVELOPE_REVEAL_META).toBe('letterirl/envelopeReveal');
   });
 
   it('says nothing while it is off, and nothing for any other tool', () => {

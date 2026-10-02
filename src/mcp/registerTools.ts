@@ -1380,6 +1380,12 @@ const PREVIEW_TOOLS: ReadonlySet<string> = new Set([
 ]);
 
 /** The previews that take stationery (#563): the letters. A postcard has none. */
+const LETTER_PREVIEW_TOOLS: ReadonlySet<string> = new Set([
+  "quote_and_preview_letter",
+  "quote_and_preview_letter_with_header_image",
+  "quote_and_preview_letter_with_image"
+]);
+
 /**
  * Card-only switches a tool's result carries in _meta: while the envelope
  * reveal is on (#576), the letter previews tell their card it may open the
@@ -1389,12 +1395,6 @@ const PREVIEW_TOOLS: ReadonlySet<string> = new Set([
 export function cardSwitches(toolName: string): Record<string, unknown> {
   return LETTER_PREVIEW_TOOLS.has(toolName) && isEnvelopeRevealEnabled() ? { [ENVELOPE_REVEAL_META]: true } : {};
 }
-
-const LETTER_PREVIEW_TOOLS: ReadonlySet<string> = new Set([
-  "quote_and_preview_letter",
-  "quote_and_preview_letter_with_header_image",
-  "quote_and_preview_letter_with_image"
-]);
 
 /**
  * A letter preview's stationery (#563), for the narration: the theme it was

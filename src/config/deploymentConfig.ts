@@ -558,10 +558,9 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
   },
   /**
    * The envelope reveal (#576, src/config/envelope.ts): the letter previews
-   * tell their card it may open the page from an envelope, and the
-   * confirmation page's API tells the website the same, only while the flag
-   * is on. Off unless set, so absence is the intended production state until
-   * the owner switches it on. API only: nothing prints differently.
+   * tell their card it may open the page from an envelope only while the
+   * flag is on. Off unless set, so absence is the intended production state
+   * until the owner switches it on. API only: nothing prints differently.
    */
   {
     name: 'LETTER_IRL_ENVELOPE_REVEAL_ENABLED',

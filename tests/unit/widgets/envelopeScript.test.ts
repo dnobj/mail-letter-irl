@@ -42,14 +42,12 @@ function load(options: { enabled?: boolean; still?: boolean } = {}) {
     container.appendChild(view);
     return { view, page };
   };
-  const ended = (page: Element) => page.parentElement!.dispatchEvent(Object.assign(new window.Event('animationend', { bubbles: true }), {}));
   return {
     window,
     envelope,
     draw,
     timers,
     end: (page: Element) => page.dispatchEvent(new window.Event('animationend', { bubbles: true })),
-    ended,
     setEnabled: (value: boolean) => {
       enabled = value;
     },
@@ -60,7 +58,7 @@ function load(options: { enabled?: boolean; still?: boolean } = {}) {
 
 describe('the envelope reveal script (#576)', () => {
   it('names the meta key the previews set', () => {
-    expect(load().window.letterIrlEnvelope.ENVELOPE_META).toBe('letter-irl/envelopeReveal');
+    expect(load().window.letterIrlEnvelope.ENVELOPE_META).toBe('letterirl/envelopeReveal');
   });
 
   it('draws a window envelope over the page\'s top third: two windows at the addresses, a stamp, hidden from screen readers', () => {

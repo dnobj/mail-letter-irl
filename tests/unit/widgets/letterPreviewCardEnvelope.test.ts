@@ -13,7 +13,7 @@ import { inlineHostBridge } from '../../../src/mcp/widgetHost.js';
 import { stampPreviewTool } from '../../../src/mcp/registerTools.js';
 
 const WIDGET_DIR = path.resolve(__dirname, '../../../widgets');
-const REVEAL = 'letter-irl/envelopeReveal';
+const REVEAL = 'letterirl/envelopeReveal';
 
 type Json = Record<string, any>;
 
@@ -108,6 +108,60 @@ const ON = { previewHtml: PAGE, [REVEAL]: true };
 const sendButton = (card: ReturnType<typeof mount>) => card.document.getElementById('send-button')!;
 
 describe('the envelope reveal on the letter card (#576)', () => {
+  it('lets presses through the envelope, and clips to its height whatever the pages: a gift letter folds to one envelope (#577 review round 1)', () => {
+    const served = inlineHostBridge(fs.readFileSync(path.join(WIDGET_DIR, 'LetterPreviewCard.html'), 'utf-8'), WIDGET_DIR);
+    expect(served).toMatch(/\.letter-page svg\.envelope\{[^}]*pointer-events:none/);
+    expect(served).toContain('.envelope-opening,.envelope-sealing,.envelope-sealed{container-type:inline-size}');
+    // 264/612 of the width: the envelope's own height, never a share of a two-page box.
+    expect(served).toContain('@keyframes envelope-unfold{from{clip-path:inset(0 0 calc(100% - 43.137cqw) 0)}to{clip-path:inset(0)}}');
+    expect(served).toContain('@keyframes envelope-fold{from{clip-path:inset(0)}to{clip-path:inset(0 0 calc(100% - 43.137cqw) 0)}}');
+    expect(served).not.toContain('66.67%');
+    expect((612 * 0.43137).toFixed(1)).toBe('264.0');
+  });
+
+  it("plays the opening on through a redraw that changes nothing: the card's own get_draft_status answer, or the host's (#577 review round 1)", async () => {
+    const card = mount();
+    await card.show(ON);
+    const opening = card.view();
+    expect(card.states()).toEqual(['envelope-opening']);
+    await card.answer(
+      { result: { content: [], structuredContent: { draftId: 'draft_0001', status: 'ready', deliveryEstimate: 'Mailed in 1-2 business days' } } },
+      'get_draft_status'
+    );
+    expect(card.view()).toBe(opening);
+    expect(card.states()).toEqual(['envelope-opening']);
+    await card.show(ON);
+    expect(card.view()).toBe(opening);
+    expect(card.states()).toEqual(['envelope-opening']);
+    card.end();
+    expect(card.states()).toEqual([]);
+  });
+
+  it('plays the fold on through a redraw too (#577 review round 1)', async () => {
+    const card = mount();
+    await card.show(ON);
+    card.end();
+    await card.click(sendButton(card));
+    await card.answer({ result: { content: [], structuredContent: { orderId: 'ord_0001' } } }, 'send_letter');
+    const folding = card.view();
+    expect(card.states()).toEqual(['envelope-sealing']);
+    await card.show(ON);
+    expect(card.view()).toBe(folding);
+    expect(card.states()).toEqual(['envelope-sealing']);
+    card.end();
+    expect(card.states()).toEqual(['envelope-sealed']);
+  });
+
+  it('draws the page anew when it changes, and does not open it again', async () => {
+    const card = mount();
+    await card.show(ON);
+    card.end();
+    const before = card.view();
+    await card.show({ ...ON, previewHtml: PAGE.replace('Dear Sam,\nPat', 'Dear Sam,\nAgain,\nPat') });
+    expect(card.view()).not.toBe(before);
+    expect(card.states()).toEqual([]);
+  });
+
   it("opens the page from the envelope the first time it shows a draft, while the preview's _meta turns it on", async () => {
     const card = mount();
     await card.show(ON);
