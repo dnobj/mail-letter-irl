@@ -41,6 +41,7 @@ import type { LetterDraft } from '../services/types.js';
 import { draftScheduleOf } from '../services/draftSchedule.js';
 import { stationeryOf, type Stationery } from '../render/stationery.js';
 import { postcardFrontOf } from '../render/postcard.js';
+import { POSTCARD_FRONT_RENDERER_VERSION } from '../render/pdf.js';
 import { heldPastNow, heldSendFields, waitsInOutbox } from '../tools/heldSend.js';
 import { isDraftIdShape } from '../tools/requestSend.js';
 import {
@@ -143,14 +144,18 @@ interface PostcardView {
 
 /**
  * A postcard's size and front (#594), for the page to name: its size, and its
- * front as the print reads it (postcardFrontOf), the photo alone without one.
- * Null for a letter, and for a front the print cannot read, so the page never
- * names one that will not print.
+ * front as the print reads it, only for a postcard drawn as 'pdf-3' and
+ * through postcardFrontOf (PostGridProvider.renderPostcardForPrint), the photo
+ * alone otherwise. Null for a letter, and for a front the print cannot read,
+ * so the page never names one that will not print.
  */
 function postcardView(draft: LetterDraft & { postcard_size?: string | null; postcard_front?: unknown }): PostcardView | null {
   if (mailTypeOf(draft) !== 'postcard') return null;
   const size = draft.postcard_size ?? '6x9';
-  if (draft.postcard_front == null) return { size, layout: 'full_bleed' };
+  // As the print reads it: a front only with the version that draws one (#602 review round 1).
+  if (draft.renderer_version !== POSTCARD_FRONT_RENDERER_VERSION || draft.postcard_front == null) {
+    return { size, layout: 'full_bleed' };
+  }
   const front = postcardFrontOf(draft.postcard_front);
   if (!front) return null;
   if (front.layout === 'greetings') return { size, layout: 'greetings', place: front.place };

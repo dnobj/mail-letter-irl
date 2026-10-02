@@ -289,8 +289,17 @@ describe('the confirmation page API (#470)', () => {
       // A size no writer leaves out reads as the 6x9 every postcard was before.
       vi.mocked(getDraft).mockResolvedValue(postcard({ postcard_size: null }) as any);
       expect((await call('GET')).json().postcard).toEqual({ size: '6x9', layout: 'full_bleed' });
+      // A row without the column reads as no front.
+      const { postcard_front: _omitted, ...withoutFront } = postcard({}) as Record<string, unknown>;
+      vi.mocked(getDraft).mockResolvedValue(withoutFront as any);
+      expect((await call('GET')).json().postcard).toEqual({ size: '6x9', layout: 'full_bleed' });
+      // As the print reads it: a front only with pdf-3, whatever the row holds (#602 review round 1).
+      for (const renderer_version of ['pdf-1', null]) {
+        vi.mocked(getDraft).mockResolvedValue(postcard({ renderer_version, postcard_front: { layout: 'border', caption: 'Cape Cod' } }) as any);
+        expect((await call('GET')).json().postcard, String(renderer_version)).toEqual({ size: '6x9', layout: 'full_bleed' });
+      }
       // A front the print cannot read is not named, nor anything of a letter.
-      for (const overrides of [{ postcard_front: { layout: 'collage' } }, { mail_type: 'letter' }]) {
+      for (const overrides of [{ renderer_version: 'pdf-3', postcard_front: { layout: 'collage' } }, { mail_type: 'letter' }]) {
         vi.mocked(getDraft).mockResolvedValue(postcard(overrides) as any);
         expect((await call('GET')).json(), JSON.stringify(overrides)).not.toHaveProperty('postcard');
       }
