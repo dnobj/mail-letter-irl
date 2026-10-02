@@ -8,6 +8,12 @@
  * is, and the card shows it in place of the preview's. A theme chosen here is
  * remembered for the account's next preview, as one the model chose is.
  *
+ * While room to write is offered (#586), the studio's Words tab can change
+ * the letter's words the same way, through set_letter_words. The two share
+ * one draft, one wait and one page: a single change to the draft at a time,
+ * none while the card sends or pays, and the page and price the last change
+ * gave are the card's.
+ *
  * The server inlines this file into the letter card, in place of its
  * letter-irl:style marker comment (src/mcp/widgetHost.ts). It defines
  * window.letterIrlStyle: THEMES and createStyle.
@@ -37,7 +43,8 @@
    *   change the draft now: not while it sends or starts a payment, which it
    *   also says with hold()), onSet()
    *   (a style is being set on the draft), onChange({ draftId, stationery }),
-   *   onBusy()
+   *   onBusy(), and wordsElement(id), which finds the Words tab's editor
+   *   (#586) once the studio has drawn it
    */
   // What a restyle or a status answer says the letter costs now (#586): a
   // restyle can run it on to another page, or back on to one, and with that
@@ -61,8 +68,9 @@
     // initials and headline this card last saw with each theme on this
     // draft, which come back with the theme when the person returns to it.
     // held: the card is sending the letter or starting a payment, so the
-    // row waits too. restyled: the row set a style on this draft itself, so
-    // the server's earlier word on it (adopt) is out of date. terms: what the
+    // row waits too. restyled: the card changed this draft itself, its style
+    // or its words, so the server's earlier word on it (adopt) is out of
+    // date. terms: what the
     // letter costs now and how full its pages are, as the last restyle or
     // status answer said (#586), or null for the preview's own.
     var state = {
@@ -78,6 +86,25 @@
       error: false,
       slots: {}
     };
+
+    // The Words tab's editor (#586). editing: it is open. updating: its words
+    // are being set. set: the words this card last set on the draft, or null
+    // for the preview's. current: the words shown now. fit: how full the page
+    // is for them. editable: the card may change them now. gift: a gift
+    // letter, which stays on one page.
+    var words = {
+      editing: false,
+      updating: false,
+      set: null,
+      current: null,
+      fit: null,
+      editable: false,
+      gift: false,
+      message: "",
+      error: false
+    };
+    var element = typeof options.wordsElement === "function" ? options.wordsElement : function () { return null; };
+    var wordsBound = false;
 
     function shownTheme() {
       if (state.busy && state.pending) return state.pending;
@@ -176,6 +203,165 @@
         });
     }
 
+    // The page the room is counted on, by how many the letter takes.
+    var ROOM_ON = ["", "this page", "the back of the page", "the third page"];
+
+    // How much room the words being written leave (#586): the room the last
+    // count gave, less what was typed since. "About": a line ends at a word,
+    // and a new paragraph takes a line of its own.
+    function roomText() {
+      var fit = words.fit;
+      var body = element("studio-words-body");
+      var signOff = element("studio-words-signoff");
+      if (!fit || typeof fit !== "object" || !words.current || !body || !signOff) return "";
+      var room = Number(fit.roomCharacters);
+      if (!isFinite(room)) return "";
+      var pages = fit.pages === 2 || fit.pages === 3 ? fit.pages : 1;
+      var typed = body.value.length + signOff.value.length;
+      var before = words.current.bodyText.length + words.current.signOff.length;
+      var left = Math.round(room - (typed - before));
+      var count = Math.abs(left).toLocaleString("en-US");
+      if (left >= 0) return "About " + count + " characters left on " + ROOM_ON[pages] + ".";
+      if (words.gift) return "About " + count + " characters past this page, and a gift letter is one page.";
+      if (pages === 3) return "About " + count + " characters past the third page, more than we print.";
+      return "About " + count + " characters past " + ROOM_ON[pages] + ": Update the page to see how it runs on.";
+    }
+
+    // The editor's elements live in the studio, which draws them after the
+    // card starts: found, and listened to, once they are there.
+    function bindWords() {
+      if (wordsBound) return true;
+      var open = element("studio-words-open");
+      var update = element("studio-words-update");
+      var cancel = element("studio-words-cancel");
+      var body = element("studio-words-body");
+      var signOff = element("studio-words-signoff");
+      if (!open || !update || !cancel || !body || !signOff) return false;
+      open.addEventListener("click", openWords);
+      update.addEventListener("click", setWords);
+      cancel.addEventListener("click", closeWords);
+      body.addEventListener("input", drawWords);
+      signOff.addEventListener("input", drawWords);
+      wordsBound = true;
+      return true;
+    }
+
+    function drawWords() {
+      if (!bindWords()) return;
+      var editing = words.editable && words.editing;
+      var view = element("studio-words");
+      var chat = element("studio-words-chat");
+      var count = element("studio-words-count");
+      var note = element("studio-words-note");
+      var update = element("studio-words-update");
+      element("studio-words-edit").hidden = !editing;
+      if (view) view.hidden = editing;
+      element("studio-words-open").hidden = !words.editable || editing;
+      if (chat) chat.hidden = words.editable;
+      // aria-disabled, as the Style row's: a press meanwhile is ignored.
+      update.setAttribute("aria-disabled", state.busy || state.held ? "true" : "false");
+      element("studio-words-cancel").setAttribute("aria-disabled", words.updating ? "true" : "false");
+      update.textContent = words.updating ? "Updating the page\u2026" : "Update the page";
+      var room = editing ? roomText() : "";
+      if (count) {
+        count.textContent = room;
+        count.hidden = !room;
+      }
+      if (note) {
+        note.textContent = words.message;
+        note.hidden = !words.message;
+        note.classList.toggle("alert", words.error);
+      }
+    }
+
+    function openWords() {
+      if (!words.editable || !words.current || state.busy || state.held) return;
+      var body = element("studio-words-body");
+      var signOff = element("studio-words-signoff");
+      body.value = words.current.bodyText;
+      signOff.value = words.current.signOff;
+      words.editing = true;
+      words.message = "";
+      words.error = false;
+      drawWords();
+      // The card holds its Send buttons while words are being written.
+      options.onBusy();
+      if (typeof body.focus === "function") body.focus();
+    }
+
+    function closeWords() {
+      if (words.updating) return;
+      words.editing = false;
+      words.message = "";
+      words.error = false;
+      drawWords();
+      options.onBusy();
+    }
+
+    // The words as written in the editor, set on the draft (#586). The page
+    // comes back drawn again with them, and what the letter costs now.
+    function setWords() {
+      if (!words.editable || !words.editing || state.busy || state.held || !state.draftId || typeof host.callTool !== "function") return;
+      if (typeof options.idle === "function" && !options.idle()) return;
+      var draftId = state.draftId;
+      var bodyText = element("studio-words-body").value;
+      var signOff = element("studio-words-signoff").value;
+      state.busy = true;
+      words.updating = true;
+      words.message = "";
+      words.error = false;
+      draw();
+      drawWords();
+      // Changing the words is acting on the draft (the card keeps it).
+      if (typeof options.onSet === "function") options.onSet();
+      options.onBusy();
+      Promise.resolve()
+        .then(function () {
+          return host.callTool("set_letter_words", { draftId: draftId, bodyText: bodyText, signOff: signOff });
+        })
+        .then(function (result) {
+          // A refusal comes back as an error result, not a rejection.
+          if (result && result.isError) {
+            throw new Error(options.resultText(result) || "The words were not changed.");
+          }
+          if (state.draftId !== draftId) return;
+          var data = toolData(result);
+          // An answer about another draft is no answer to this one.
+          if (typeof data.draftId === "string" && data.draftId !== draftId) {
+            throw new Error("The words may have changed. Make the preview again to see them.");
+          }
+          state.restyled = true;
+          words.set = { bodyText: bodyText, signOff: signOff };
+          words.editing = false;
+          // What it costs now, and how full its pages are.
+          var said = termsOf(data, result && result._meta && result._meta.pageFit);
+          if (said) state.terms = said;
+          var page = result && result._meta && result._meta.previewHtml;
+          // The draft has the words either way; without its page the card
+          // keeps showing the last one and says so.
+          if (typeof page === "string" && page) {
+            state.previewHtml = page;
+            words.message = typeof data.message === "string" && data.message ? data.message : "The words are changed. Nothing has been sent.";
+          } else {
+            words.message = "The words are changed, but the page did not come back here. Make the preview again to see it.";
+          }
+          options.onChange({ draftId: draftId, stationery: state.stationery });
+        })
+        .catch(function (error) {
+          if (state.draftId !== draftId) return;
+          words.error = true;
+          words.message = options.readableError(error);
+        })
+        .then(function () {
+          if (state.draftId !== draftId) return;
+          state.busy = false;
+          words.updating = false;
+          draw();
+          drawWords();
+          options.onBusy();
+        });
+    }
+
     for (var i = 0; i < options.buttons.length; i++) {
       (function (button) {
         button.addEventListener("click", function () {
@@ -217,6 +403,11 @@
           state.message = "";
           state.error = false;
           state.slots = {};
+          words.editing = false;
+          words.updating = false;
+          words.set = null;
+          words.message = "";
+          words.error = false;
           keepSlots(offered);
         }
         options.row.style.display = "";
@@ -229,6 +420,29 @@
         state.held = Boolean(held);
         // Drawn only while shown: a hidden row keeps its note hidden.
         if (state.draftId !== null && options.row.style.display !== "none") draw();
+        drawWords();
+      },
+      // The Words tab's editor (#586): the words shown now, as the card set
+      // them or the preview gave them ({ bodyText, signOff }); how full the
+      // page is for them (fit, or null); whether the card may change them now
+      // (editable: room to write is offered and the draft can still change);
+      // and whether it is a gift letter. Only while the row is the draft's.
+      showWords: function (draftId, current, fit, editable, gift) {
+        words.current = current && typeof current.bodyText === "string" && typeof current.signOff === "string" ? current : null;
+        words.fit = fit && typeof fit === "object" ? fit : null;
+        words.gift = gift === true;
+        words.editable =
+          Boolean(editable) &&
+          words.current !== null &&
+          state.draftId === draftId &&
+          options.row.style.display !== "none" &&
+          typeof host.callTool === "function";
+        if (!words.editable && !words.updating) words.editing = false;
+        drawWords();
+      },
+      // The words this card set on the draft (#586), or null for the preview's.
+      words: function (draftId) {
+        return state.draftId === draftId ? words.set : null;
       },
       // The draft's style and page as the server says they are now
       // (get_draft_status), for a card shown its preview's first answer
@@ -264,6 +478,11 @@
       },
       busy: function () {
         return state.busy;
+      },
+      // Words are being written in the editor (#586): until they are set or
+      // put back, sending would mail the words the draft has, not these.
+      editing: function () {
+        return words.editable && words.editing;
       }
     };
   }
