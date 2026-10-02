@@ -22,7 +22,13 @@ import {
   POSTCARD_CAPTION_DESCRIPTION,
   POSTCARD_PLACE_DESCRIPTION,
   SET_POSTCARD_STYLE_SIZE_OUTPUT_DESCRIPTION,
-  SET_POSTCARD_STYLE_CAN_SEND_DESCRIPTION
+  SET_POSTCARD_STYLE_CAN_SEND_DESCRIPTION,
+  ADDRESS_REQUEST_RECIPIENT_NAME_DESCRIPTION,
+  ADDRESS_REQUEST_SENDER_FIRST_NAME_DESCRIPTION,
+  ADDRESS_REQUEST_ID_DESCRIPTION,
+  ADDRESS_REQUEST_STATES,
+  ADDRESS_REQUEST_STATUS_DESCRIPTION,
+  ADDRESS_REQUEST_RECIPIENT_DESCRIPTION
 } from "./zodSchemas.js";
 import { STATIONERY_THEMES } from "./render/stationery.js";
 
@@ -1005,6 +1011,69 @@ export const cancelScheduledMailOutputSchema: JsonSchema = {
         kind: { type: "string", enum: ["letters", "gift_letter"] },
         count: { type: "integer" }
       }
+    },
+    message: { type: "string" }
+  }
+};
+
+/** A link asking someone for their address (#604). */
+export const requestAddressInputSchema: JsonSchema = {
+  type: "object",
+  required: ["recipientName"],
+  properties: {
+    recipientName: { type: "string", description: ADDRESS_REQUEST_RECIPIENT_NAME_DESCRIPTION },
+    senderFirstName: { type: "string", description: ADDRESS_REQUEST_SENDER_FIRST_NAME_DESCRIPTION }
+  }
+};
+
+export const requestAddressOutputSchema: JsonSchema = {
+  type: "object",
+  required: ["requestId", "status", "url", "recipientName", "senderFirstName", "expiresAt", "message"],
+  properties: {
+    requestId: { type: "string", description: "Pass it to get_address_request and cancel_address_request" },
+    status: { type: "string", enum: ["waiting"] },
+    url: { type: "string", description: "The private link for the person to share with the recipient themselves. It is given only here" },
+    recipientName: { type: "string" },
+    senderFirstName: { type: "string", description: "All the page shows of the sender" },
+    expiresAt: { type: "string", description: "When the link stops working, ISO 8601" },
+    message: { type: "string" }
+  }
+};
+
+const addressRequestIdInputSchema: JsonSchema = {
+  type: "object",
+  required: ["requestId"],
+  properties: {
+    requestId: { type: "string", description: ADDRESS_REQUEST_ID_DESCRIPTION }
+  }
+};
+
+export const getAddressRequestInputSchema: JsonSchema = addressRequestIdInputSchema;
+
+export const getAddressRequestOutputSchema: JsonSchema = {
+  type: "object",
+  required: ["requestId", "status", "recipientName", "expiresAt", "message"],
+  properties: {
+    requestId: { type: "string" },
+    status: { type: "string", enum: [...ADDRESS_REQUEST_STATES], description: ADDRESS_REQUEST_STATUS_DESCRIPTION },
+    recipientName: { type: "string" },
+    expiresAt: { type: "string", description: "When the link stops, or stopped, working, ISO 8601" },
+    recipient: { ...addressSchema, description: ADDRESS_REQUEST_RECIPIENT_DESCRIPTION },
+    message: { type: "string" }
+  }
+};
+
+export const cancelAddressRequestInputSchema: JsonSchema = addressRequestIdInputSchema;
+
+export const cancelAddressRequestOutputSchema: JsonSchema = {
+  type: "object",
+  required: ["requestId", "status", "alreadyClosed", "message"],
+  properties: {
+    requestId: { type: "string" },
+    status: { type: "string", enum: [...ADDRESS_REQUEST_STATES], description: ADDRESS_REQUEST_STATUS_DESCRIPTION },
+    alreadyClosed: {
+      type: "boolean",
+      description: "True when it had already been answered, declined, cancelled or had expired: nothing changed"
     },
     message: { type: "string" }
   }

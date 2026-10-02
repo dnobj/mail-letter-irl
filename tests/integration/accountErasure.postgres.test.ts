@@ -689,6 +689,14 @@ describePostgres('account erasure', () => {
        VALUES ($1, 'Jane wants', 'Please add', 'other', 'asked', $2, true)`,
       [userId, email]
     );
+    // An address request a recipient answered (#604): a third party's address.
+    await owner.query(
+      `INSERT INTO address_requests (user_id, token_hash, recipient_name, sender_first_name, status, address, expires_at, closed_at)
+       VALUES ($1, sha256('erasure-test-token'::bytea), 'Ruth', 'Jane', 'answered',
+               '{"name": "Ruth Example", "addressLine1": "1 Main St", "city": "Tucson", "state": "AZ", "postalCode": "85701", "country": "US"}'::jsonb,
+               NOW() + INTERVAL '7 days', NOW())`,
+      [userId]
+    );
 
     // A seed-code claim with its address, and two gift codes: one nobody
     // redeemed, and one another account did.
@@ -843,7 +851,7 @@ describePostgres('account erasure', () => {
     expect(
       (await owner.query(`SELECT 1 FROM redacted_content_quarantine WHERE source_id IN ($1, $2)`, [delivered, boundDraft])).rowCount
     ).toBe(0);
-    for (const table of ['personal_access_tokens', 'recent_uploads', 'feature_requests']) {
+    for (const table of ['personal_access_tokens', 'recent_uploads', 'feature_requests', 'address_requests']) {
       expect((await owner.query(`SELECT 1 FROM ${table} WHERE user_id = $1`, [userId])).rowCount, table).toBe(0);
     }
     const redemption = await owner.query(`SELECT email_normalized FROM promo_redemptions WHERE user_id = $1`, [userId]);
@@ -912,6 +920,7 @@ describePostgres('account erasure', () => {
         accessTokensDeleted: 1,
         uploadsDeleted: 1,
         featureRequestsDeleted: 1,
+        addressRequestsDeleted: 1,
         seedCodeEmailsCleared: 1,
         giftCodesDeleted: 1,
         descriptionsCleared: 2

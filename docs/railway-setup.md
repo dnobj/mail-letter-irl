@@ -117,6 +117,12 @@ LETTER_IRL_STATIONERY_ENABLED=<true to offer themes on letter previews; unset is
 # Postcard layouts (#594, docs/letter-send-flow.md): a border with a caption, or "Greetings from" a place,
 # offered only while LETTER_IRL_PRINT_RENDERER is pdf. API service only: the print draws a stored front whatever the flag.
 LETTER_IRL_POSTCARD_LAYOUTS_ENABLED=<true to offer postcard layouts on postcard previews; unset is off>
+# Address requests (#604, docs/tool-apis.md): a private link asking someone for their address. API service only.
+# The link lives on LETTER_IRL_WEBSITE_BASE_URL. Its days and the caps per account have defaults (7; 10 waiting, 20 a day).
+LETTER_IRL_ADDRESS_REQUESTS_ENABLED=<true to list request_address, get_address_request and cancel_address_request; unset is off>
+LETTER_IRL_ADDRESS_REQUEST_LINK_DAYS=<days a link works, 1 to 30; default 7>
+LETTER_IRL_ADDRESS_REQUEST_WAITING_CAP=<requests an account may have waiting, 1 to 100; default 10>
+LETTER_IRL_ADDRESS_REQUEST_DAILY_CAP=<requests an account may make in 24 hours, 1 to 500; default 20>
 # The letter card's envelope reveal (#576, docs/ui-widgets.md): cards only, nothing prints differently.
 LETTER_IRL_ENVELOPE_REVEAL_ENABLED=<true to open previews from an envelope; unset is off>
 # The studio card (#580, docs/ui-widgets.md): the letter card laid out with Style, Words and Delivery tabs. Cards only.

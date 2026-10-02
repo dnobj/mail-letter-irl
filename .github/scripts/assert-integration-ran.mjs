@@ -48,6 +48,7 @@ const REQUIRED = [
   'sendConfirmation.postgres.test.ts',
   'rendererVersion.postgres.test.ts',
   'arriveBy.postgres.test.ts',
+  'addressRequests.postgres.test.ts',
 ];
 
 /**

@@ -28,6 +28,9 @@ export { setStationeryTool } from "./setStationery.js";
 export { setLetterWordsTool } from "./setLetterWords.js";
 export { setPostcardStyleTool } from "./setPostcardStyle.js";
 export { cancelScheduledMailTool } from "./cancelScheduledMail.js";
+export { requestAddressTool } from "./requestAddress.js";
+export { getAddressRequestTool } from "./getAddressRequest.js";
+export { cancelAddressRequestTool } from "./cancelAddressRequest.js";
 export { uploadPhotoChunkTool } from "./uploadPhotoChunk.js";
 
 // Feedback tools (US-FEEDBACK-01)
