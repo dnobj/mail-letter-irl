@@ -130,6 +130,11 @@ const hashOf = (layout: Layout) => createHash('sha256').update(JSON.stringify(la
 const runs = (layout: Layout, page: number) => layout.pages[page].items.filter((item): item is TextRun => item.kind === 'text');
 const images = (layout: Layout, page: number) => layout.pages[page].items.filter(item => item.kind === 'image');
 const paths = (layout: Layout, page: number) => layout.pages[page].items.filter(item => item.kind === 'path');
+/** `count` short lines, one wrapped line each, with no blank line between. */
+const numberedLines = (count: number) => Array.from({ length: count }, (_, index) => `Line ${index + 1}`).join('\n');
+/** Where Handwritten's rules sit on a page, top to bottom: each rule is "Mx yLx y". */
+const ruleYs = (layout: Layout, page: number) =>
+  paths(layout, page).flatMap(item => [...(item as { d: string }).d.matchAll(/M[\d.]+ ([\d.]+)L/g)].map(match => Number(match[1])));
 
 describe('a letter that fits one page, whatever the limit (#586)', () => {
   it('records every case', () => {
@@ -152,6 +157,9 @@ describe('a letter over several pages (#586)', () => {
 
   it('holds 33 lines on each later page', () => {
     expect(CAPACITY_LATER).toBe(33);
+    const layout = layoutLetter({ text: numberedLines(26 + 33 + 5), layoutType: 'text_only' }, { maxPages: 3 });
+    expect(layout.pages.map(page => [page.linesUsed, page.linesAvailable])).toEqual([[26, 26], [33, 33], [5, 33]]);
+    expect(layout.overflowLines).toBe(0);
   });
 
   it('flows a letter too long for one page on to the next, starting it at the continuation top with words', () => {
@@ -213,13 +221,25 @@ describe('a letter over several pages (#586)', () => {
     expect(runs(layout, 1).some(run => run.source === 'October 2, 2026')).toBe(false);
   });
 
-  it('rules every page for the handwritten theme', () => {
-    const layout = layoutLetter(
-      { text: letterText(10), layoutType: 'text_only', stationery: { theme: 'handwritten', dateLine: 'October 2, 2026' } },
-      { maxPages: 3 }
-    );
+  it('rules every page for the handwritten theme, a later page from its top, and never across the image', () => {
+    const handwritten = { theme: 'handwritten' as const, dateLine: 'October 2, 2026' };
+    const layout = layoutLetter({ text: letterText(10), layoutType: 'text_only', stationery: handwritten }, { maxPages: 3 });
     expect(layout.pages.length).toBeGreaterThan(1);
     for (let page = 0; page < layout.pages.length; page += 1) expect(paths(layout, page).length).toBeGreaterThan(0);
+    // Page 2's first rule sits under its first line, a line's pitch below the continuation top at most.
+    const later = ruleYs(layout, 1);
+    expect(later[0]).toBeGreaterThan(CONTINUATION_TOP);
+    expect(later[0]).toBeLessThan(CONTINUATION_TOP + LINE_PITCH);
+    expect(later.length).toBe(33);
+
+    // With the enclosed image after the text on page 2, no rule crosses it.
+    const withImage = layoutLetter({ text: numberedLines(26 + 5), layoutType: 'inline_image', image, stationery: handwritten }, { maxPages: 3 });
+    expect(withImage.pages).toHaveLength(2);
+    const [box] = images(withImage, 1) as Array<{ top: number; height: number }>;
+    const ys = ruleYs(withImage, 1);
+    expect(ys.length).toBeGreaterThan(5);
+    expect(ys.filter(y => y > box.top && y < box.top + box.height)).toEqual([]);
+    expect(ys.some(y => y > box.top + box.height)).toBe(true);
   });
 
   it('keeps a header image on the first page only', () => {
@@ -262,12 +282,26 @@ describe('a letter over several pages (#586)', () => {
     expect(checked).toBe(true);
   });
 
-  it('counts an enclosed image with no page left for it as lines past the letter', () => {
-    // Text that fills the last page allowed exactly, then an image.
-    const layout = layoutLetter({ text: letterText(40), layoutType: 'inline_image', image }, { maxPages: 2 });
-    const textOnly = layoutLetter({ text: letterText(40), layoutType: 'text_only' }, { maxPages: 2 });
-    const imageLines = Math.ceil((IMAGE_GAP + (images(layout, 1)[0] as { height: number }).height) / LINE_PITCH);
-    expect(layout.overflowLines).toBe(textOnly.overflowLines + imageLines);
+  it('counts a letter with an enclosed image and no page left for it as over by the lines past the room its last page keeps', () => {
+    // The image's room on a later page: the lines that still fit above it.
+    const height = (images(layoutLetter({ text: 'Hello', layoutType: 'inline_image', image }), 0)[0] as { height: number }).height;
+    const room = Math.floor((BODY_BOTTOM - CONTINUATION_TOP - IMAGE_GAP - height + 1e-6) / LINE_PITCH);
+    expect(room).toBeGreaterThan(0);
+    for (const maxPages of [2, 3]) {
+      const before = 26 + 33 * (maxPages - 2);
+      // As one page counts it: the last page's lines past its room, then cutting that many fits.
+      for (const extra of [1, 2, 7, room + 3, 33 - room, 40]) {
+        const lines = before + room + extra;
+        const layout = layoutLetter({ text: numberedLines(lines), layoutType: 'inline_image', image }, { maxPages });
+        const last = layout.pages[maxPages - 1];
+        expect(layout.pages, `${lines} lines`).toHaveLength(maxPages);
+        expect(layout.overflowLines, `${lines} lines`).toBe(extra);
+        expect(last.linesUsed - last.linesAvailable, `${lines} lines`).toBe(layout.overflowLines);
+        const cut = layoutLetter({ text: numberedLines(lines - extra), layoutType: 'inline_image', image }, { maxPages });
+        expect(cut.overflowLines, `${lines - extra} lines`).toBe(0);
+        expect(cut.pages, `${lines - extra} lines`).toHaveLength(maxPages);
+      }
+    }
   });
 
   it('never starts a page past the limit for the enclosed image: text that fills the last page leaves it as overflow', () => {
@@ -277,7 +311,7 @@ describe('a letter over several pages (#586)', () => {
     expect(layout.pages).toHaveLength(2);
     expect(layout.pages[1].linesUsed).toBe(33);
     const height = (images(layout, 1)[0] as { height: number }).height;
-    expect(layout.overflowLines).toBe(Math.ceil((IMAGE_GAP + height) / LINE_PITCH));
+    expect(layout.overflowLines).toBe(33 - Math.floor((BODY_BOTTOM - CONTINUATION_TOP - IMAGE_GAP - height + 1e-6) / LINE_PITCH));
   });
 
   it.each([0, 4, 1.5, Number.NaN, -1])('refuses a limit of %s pages', maxPages => {

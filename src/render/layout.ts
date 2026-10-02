@@ -543,7 +543,7 @@ function layoutOnePage(letter: PreparedLetter): Layout {
   const { textTop, inlineBox, lines } = letter;
   const reserved = inlineBox ? IMAGE_GAP + inlineBox.height : 0;
   const inlineTop = inlineBox ? textTop + lines.length * LINE_PITCH + IMAGE_GAP : undefined;
-  const linesAvailable = linesBetween(textTop, BODY_BOTTOM - reserved);
+  const linesAvailable = Math.max(0, Math.floor((BODY_BOTTOM - textTop - reserved + 1e-6) / LINE_PITCH));
   return {
     width: PAGE_WIDTH,
     height: PAGE_HEIGHT,
@@ -589,9 +589,11 @@ function flowPages(letter: PreparedLetter, maxPages: number): Layout {
       placed.push({ top: CONTINUATION_TOP, lines: [] });
       [imagePage, imageTop] = [placed.length - 1, CONTINUATION_TOP];
     } else {
-      // No page left for it: laid out after the last line, past the page.
+      // No page left for it: laid out after the last line, past the page. The
+      // letter is over by the lines past the room that page keeps for the
+      // image, as one page counts it (#587 review round 1).
       [imagePage, imageTop] = [placed.length - 1, after];
-      overflowLines += Math.ceil((IMAGE_GAP + inlineBox.height) / LINE_PITCH);
+      overflowLines = Math.max(0, end.lines.length - linesBetween(end.top, BODY_BOTTOM - (IMAGE_GAP + inlineBox.height)));
     }
   }
 
@@ -620,7 +622,11 @@ export interface PageFit {
   doubleSided: boolean;
   /** Each page's lines: used, and how many it holds. */
   lines: Array<{ used: number; available: number }>;
-  /** Lines still free on the last page; none for a letter that runs past its pages. */
+  /**
+   * Lines still free on the last page; none for a letter that runs past its
+   * pages. Only the last page's: when the enclosed image sits alone there, the
+   * page before may hold more lines too, so the letter has more room than this.
+   */
   roomLines: number;
   /** About how many characters those lines hold, at the face's average width. */
   roomCharacters: number;
