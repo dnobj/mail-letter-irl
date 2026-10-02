@@ -1510,7 +1510,15 @@ describe('commerceService', () => {
     });
 
     it('refuses a checkout for an option this deployment does not sell, before any order', async () => {
-      mocks.getJitProduct.mockReturnValue(null);
+      // The 6x9 is sold and the 4x6 is not: a checkout priced by the mail
+      // type alone would sell this 4x6 as a 6x9.
+      mocks.getJitProduct.mockImplementation((({ postcardSize }: { postcardSize?: string }) =>
+        postcardSize === '6x4'
+          ? null
+          : {
+              productCode: 'jit-postcard', priceId: 'price-6x9', amountCents: 499,
+              currency: 'usd', name: 'Pay & Send One Physical Postcard', description: 'x', mailType: 'postcard'
+            }) as never);
       mocks.query
         // In the order the checkout reads them: the send block, then the peek.
         .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
@@ -1524,8 +1532,9 @@ describe('commerceService', () => {
       // The peek ensures the option's own code, sold or not, so the catalog
       // clears what it held for it; the cap reads no price for it.
       expect(mocks.ensurePriceCatalog).toHaveBeenCalledWith('jit-postcard-4x6');
-      // Priced by the draft's own option, and nothing inserted or opened.
-      expect(mocks.getJitProduct).toHaveBeenCalledWith({ mailType: 'postcard', postcardSize: '6x4' });
+      // Priced by the draft's own option, the locked row's last of all, and
+      // nothing inserted or opened.
+      expect(mocks.getJitProduct).toHaveBeenLastCalledWith({ mailType: 'postcard', postcardSize: '6x4' });
       const sql = mocks.query.mock.calls.map(call => String(call[0]));
       expect(sql.some(statement => statement.includes('INSERT INTO orders'))).toBe(false);
       expect(mocks.createJitSession).not.toHaveBeenCalled();
