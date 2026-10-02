@@ -1741,6 +1741,52 @@ or an admin grant: the owner's step).
 - [ ] `npm run maintenance` processes the due row and exits cleanly
 - [ ] A stale processing lock is recovered after the configured lock timeout
 
+### ADDRESS-01 — An address request link: given, declined, cancelled (#604)
+
+**Status:** Not run.
+
+**Preconditions:** Development, `LETTER_IRL_ADDRESS_REQUESTS_ENABLED` on in the API (the website's
+`/address` page has no flag of its own). A client with the (DEV) connector, or the dev CLI's tools; a
+private window, signed out, for the recipient. An answer that passes the API's field checks runs a
+PostGrid test-mode verification; a refused field costs none.
+
+**Steps:**
+
+1. [ ] Ask the assistant to write to someone whose address you do not know. Verify it calls
+   `request_address` with their name and your first name (which it may leave out when your saved
+   return address gives it), rather than guessing an address, and gives you a link to
+   `<website>/address#<token>` with the time it stops working.
+2. [ ] Open the link signed out. Verify the page shows your first name and nothing else of the request
+   (not the recipient's name, not the expiry), says who sees the address and how long Letter IRL keeps
+   it, and opens the privacy policy in a new tab.
+3. [ ] Type a test address (Test Addresses (US), below) without its ZIP code, leaving the name blank,
+   and press **Send my address**. Verify the ZIP field is marked and focused, and the note under the
+   fields reads "Check the fields marked above." without naming the printer. Add an emoji to the city
+   and send again: the note now names the printer.
+4. [ ] Take the emoji out, add the ZIP code, and press **Send my address**. Verify **Thank you**.
+5. [ ] Ask the assistant what became of the request. Verify `get_address_request` says `answered`,
+   with the address as given (or as USPS corrected it). As the recipient left the name blank, its
+   name is the one from step 1, and a preview to it puts that name on the envelope.
+6. [ ] Open the link again. Verify "This link has already been used to give an address".
+7. [ ] A second request: press **No thanks**, then **Go back**, then **No thanks** and **Yes, no
+   thanks**. Verify **Done**, and that `get_address_request` says `declined`, with no address.
+8. [ ] A third request: ask the assistant to cancel it. Verify `cancel_address_request` closes it, the
+   page says "Pat cancelled this request, so the link no longer works." (with your first name), and a
+   second cancel answers `alreadyClosed: true`.
+9. [ ] Change one character of a link: the page says "This link isn't valid".
+10. [ ] Seven days after a request closes, the maintenance run's `address-requests-sweep` deletes it.
+    To see it sooner, set `LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS=1` on the maintenance service
+    (`letter-irl-maintenance-dev`): its floor is 1 day, and 0 or a non-integer falls back to 7. Then
+    `get_address_request` says "That address request wasn't found on this account. request_address
+    makes a new one." Put the variable back afterwards.
+11. [ ] Last, make a fourth request and leave it waiting. Then turn the flag off: set it to `false` and
+    deploy the API (a variable deleted through Railway's API does not redeploy by itself), and refresh
+    the client's tool list, which clients cache. Verify the three tools are not listed, and that the
+    fourth request's link says "This link isn't valid". Turn the flag back on.
+
+**Pass criteria:** The page shows only the sender's first name and takes one address or one no thanks;
+the sender's assistant learns which, and nothing about the request appears in a URL a server logs.
+
 ---
 
 ## Image Generation Routing

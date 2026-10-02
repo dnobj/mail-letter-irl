@@ -131,7 +131,7 @@ none of them.
 
 ## Address Requests
 
-Listed only while `LETTER_IRL_ADDRESS_REQUESTS_ENABLED` is on (#604, concept 10 in [letter-creator-vision.md](letter-creator-vision.md)), and each refuses while it is off (`ADDRESS_REQUESTS_OFF`). The table is `address_requests` ([database-schema.md](database-schema.md#address_requests)). The recipient's page on the website comes in a later PR of #604; its public routes are below.
+Listed only while `LETTER_IRL_ADDRESS_REQUESTS_ENABLED` is on (#604, concept 10 in [letter-creator-vision.md](letter-creator-vision.md)), and each refuses while it is off (`ADDRESS_REQUESTS_OFF`). The table is `address_requests` ([database-schema.md](database-schema.md#address_requests)). The recipient's page is the website's `/address#<token>` (website #55); its public routes are below.
 
 - `request_address`: Makes a private link asking someone for their U.S. mailing address, when the person wants to send them mail and does not know it. Letter IRL never contacts the recipient: the person shares the link themselves.
   - **Takes** `recipientName` (what the person calls them, up to 100 characters; the envelope's name unless the recipient gives another; never shown on the page) and `senderFirstName`.
@@ -157,7 +157,7 @@ The server instructions add, while these are listed, that `request_address` is t
   - **The link is checked first,** so a used or expired one costs no verification.
   - **The fields** are trimmed and bounded (name, lines 100 characters, city 60), with no hidden characters and nothing Open Sans cannot print. `state` is a USPS state, territory or freely associated state code (FM, MH, PW), or a military post office's. `postalCode` is a ZIP or ZIP+4; nine digits without the hyphen are taken as ZIP+4. A wrong field answers 400 `{ reason: "invalid", fields }`.
   - **PostGrid's verification** then runs under the preview's policy: a corrected address is kept corrected; one USPS cannot reach answers 422 `{ reason: "undeliverable", message }`; one the service cannot check goes ahead as given.
-  - **A link may spend 10 verifications a day** (in memory, per process). An unreachable address leaves the link waiting, so without the budget one link could drive paid checks at the routes' global rate. Past it, 429 `{ reason: "too_many_tries" }`, before PostGrid is asked.
+  - **A link may spend 10 verifications a day** (in memory, per process). An unreachable address leaves the link waiting, so without the budget one link could drive paid checks at the routes' global rate. Past it, 429 `{ reason: "too_many_tries" }` with `Retry-After` (the seconds until the link may spend one again), before PostGrid is asked.
   - An absent name or line 2 is left out. The envelope then carries the name the sender gave.
 - `POST /api/public/address-requests/decline` with `{ token }`.
 - **Outcomes:** 200 `{ ok: true }` when done. 409 `{ reason }` for a link already answered, declined, cancelled or expired. 404 `{ reason: "not_found" }` for an unknown link, and for everything while the feature is off.
