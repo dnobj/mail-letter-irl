@@ -14,6 +14,7 @@ PostGrid prints every HTML letter in Open Sans, whatever font the HTML names (#5
 | P2 | A pdfkit PDF (Tinos subset, a JPEG) by multipart, `addressPlacement: top_first_page`, `color: false` | Accepted, `pageCount` 1. **The page is flattened** into one 2550x3300 grayscale image (300 px per inch). No font of ours survives. The addresses are stamped on top as vector Open Sans, 9 pt |
 | P4, P5 | PDFs from `src/render` | P4 printed Hebrew with each word's letters reversed. P5, with glyphs drawn as outlines, printed it correctly |
 | P8 | A two-page PDF from `src/render`: a letter, then a funded gift card with its QR as vector rectangles (October 1, 2026) | Accepted, `pageCount` 2. Both pages flattened at 300 px per inch; the addresses stamped on page 1 only. The QR cropped from the flattened page 2 decodes with jsQR, and its border, type and modules are crisp |
+| P13 | Two letters from `src/render` with `doubleSided: true` (October 2, 2026): two pages in Classic (`letter_ry68S6tZ8UwjUyP2a8T1yB`) and three in Handwritten (`letter_35HRt3npF2z9sszGzq18Z9`) | Accepted, `pageCount` 2 and 3: it counts sides, not sheets. See "Letters of more than one page" below |
 
 Multipart needs no contact objects: `to[firstName]`, `to[addressLine1]` and the other fields work as form fields beside the `pdf` file. They are read as UTF-8. Probe P6 (`letter_pypQkUM56Cc5s7vDRU6qe6`) sent "José Muñoz Ñandú" and "Zoë Brontë":
 - PostGrid stored the names intact;
@@ -86,6 +87,21 @@ What it means for themes (`src/render/stationery.ts`):
 - **The corner beside the envelope window is free.** Themes draw their date line, monogram, sprigs and confetti in it (`STATIONERY_CORNER`).
 - **Draw lines at 0.5 pt or more,** and in greys from #222 to #aaa. A 0.25 pt rule prints lighter than drawn.
 - **Greys print as drawn in the PDF.** Whether a 5% tint shows on paper is a question for the live print, which test mode doesn't show.
+
+## Letters of more than one page (#586)
+
+Probe P13 (October 2, 2026) sent two letters from `src/render` by multipart with `doubleSided: true` (`probe-586.mjs` beside `probe-534.mjs`). One was two pages in Classic, the other three in Handwritten.
+- **Accepted.** `pageCount` was 2 and 3: it counts sides, so nothing should read it as sheets.
+- **The proofs keep our pages.** Two stay two and three stay three, with no blank back added for sheet 2.
+- **Addresses on page 1 only,** as for one page. Pages 2 and 3 carry nothing of PostGrid's.
+- **The bottom inch is clear on every page** of the proof. Our body ends 1 in from the bottom on every page.
+- **Later pages print as drawn,** from 1 in (`CONTINUATION_TOP`), with Handwritten's rules on each.
+- **Handwritten's PDFs are large.** Its glyph outlines come to about 217, 864 and 1,622 KB for one, two and three pages. The other themes are about 12, 35 and 60 KB.
+
+Open, for a live double-sided print (the owner's call, since it costs a letter):
+- which way the back flips;
+- any marks PostGrid prints on the backs;
+- whether page 2, printed on the back of the address area, shows through the envelope window. If it does, later pages start at 3 in (26 + 26 + 33 lines) before anything reaches production.
 
 ## What it means
 

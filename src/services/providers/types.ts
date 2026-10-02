@@ -55,8 +55,19 @@ export interface LetterParams {
   /** Color printing (true) or black & white (false) */
   color?: boolean;
 
-  /** Double-sided printing */
+  /**
+   * Double-sided printing. PostGrid's letters print double-sided exactly when
+   * they run to more than one page (`pages`), whatever this says.
+   */
   doubleSided?: boolean;
+
+  /**
+   * The pages the letter was laid out on (letters.content.pages, #586): one
+   * when absent. Only our renderer prints more than one, on both sides of the
+   * paper, and never with a gift card. The print lays the letter out on
+   * exactly this many pages, and holds one that disagrees.
+   */
+  pages?: number;
 
   /** Extra services (certified mail, etc.) */
   extraServices?: string[];

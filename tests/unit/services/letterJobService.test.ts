@@ -228,6 +228,27 @@ describe('mail outbox retries', () => {
     expect(sendLetter).toHaveBeenCalledWith(expect.objectContaining({ rendererVersion: 'pdf-2', stationery }));
   });
 
+  it.each([
+    [3, true],
+    [2, true],
+    [undefined, false]
+  ] as const)('hands the provider the pages a letter was laid out on (%s), double-sided past one (#586)', async (pages, doubleSided) => {
+    const long = { ...letter, content: { ...letter.content, rendererVersion: 'pdf-1', ...(pages ? { pages } : {}) } };
+    query.mockImplementation(async (sql: string) => {
+      if (sql.includes('WITH candidate')) return { rows: [{ ...job }] };
+      if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...long }] };
+      return { rows: [] };
+    });
+    const base = clientQuery.getMockImplementation()!;
+    clientQuery.mockImplementation(async (sql: string, params?: unknown[]) =>
+      sql.startsWith('SELECT * FROM letters') ? { rows: [{ ...long }] } : base(sql, params)
+    );
+
+    await processLetterJob('job-1', {});
+
+    expect(sendLetter).toHaveBeenCalledWith(expect.objectContaining({ pages, doubleSided }));
+  });
+
   it('hands the provider the renderer a postcard was previewed with (#534 Phase 4)', async () => {
     const postcard = {
       ...letter,

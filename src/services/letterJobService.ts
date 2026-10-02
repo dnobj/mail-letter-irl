@@ -360,7 +360,10 @@ function letterParams(letter: Letter, job: LetterJob): LetterParams {
     // The same text validation counted lines on (#77).
     message: letterPrintText(content.bodyText, content.signOff),
     color: content.layoutType !== 'text_only' && Boolean(content.headerImageData || content.inlineImageData),
-    doubleSided: false,
+    // Two or three pages print on both sides of the paper (#586); the print
+    // checks the count against the layout and holds a letter that disagrees.
+    pages: content.pages,
+    doubleSided: Number(content.pages ?? 1) > 1,
     layoutType: content.layoutType || 'text_only',
     headerImageData: content.headerImageData,
     inlineImageData: content.inlineImageData,
