@@ -268,6 +268,14 @@ A `pdf-1` gift send prints its card as the PDF's second page, drawn by the rende
 - `preview_html` holds the page as SVG in a minimal HTML document, which the website's confirm page and the letter card show. The page carries the addresses where PostGrid stamps them, at 9pt in upper case, as sent. It asks for Open Sans, which no card or confirm page loads, so a viewer sees a sans-serif fallback, slightly narrower than the print. The PDF leaves the addresses to PostGrid;
 - the draft records `renderer_version = 'pdf-1'`, so the letter prints as it was previewed.
 
+**Pages after the first (#586, room to write).** `layoutLetter` can lay a letter out over up to three pages (`maxPages`).
+- A letter that fits one page is laid out exactly as before, whatever the limit; a golden test pins every layout and theme.
+- A longer one flows on. Pages 2 and 3 start 1 in from the top and hold 33 lines of Classic.
+- The theme's corner, date and headline, and a header image, stay on the first page. Handwritten rules every page.
+- An enclosed image follows the last line where it fits, or starts a page of its own; it is never split.
+- `pageFit` says how full the letter is, for the card's fit meter.
+- Nothing passes more than one page yet: the previews, the print and the price take pages up in later PRs of #586.
+
 **Stationery on a preview (#563).** While `LETTER_IRL_STATIONERY_ENABLED` is on and the previews are
 drawn by `src/render`, the three letter previews take `stationery`, `monogram` and `headline`
 (`src/tools/stationeryInput.ts`):
