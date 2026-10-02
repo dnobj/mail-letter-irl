@@ -514,5 +514,11 @@ describe('set_stationery lays a letter out again on its pages, and prices it aga
     const error = await restyle('botanical').catch(e => e);
     expect(error.message).toMatch(/too long for one page/);
     expect(setDraftStationery).not.toHaveBeenCalled();
+
+    // A one-page letter restyles as before, with no fit for the card (#586).
+    vi.mocked(getDraftForStationery).mockResolvedValue(draft({ bodyText: lines(10) }) as never);
+    const output = await restyle('botanical');
+    expect(setDraftStationery).toHaveBeenCalledTimes(1);
+    expect(output).not.toHaveProperty('pageFit');
   });
 });
