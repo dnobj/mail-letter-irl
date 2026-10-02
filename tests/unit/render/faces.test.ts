@@ -105,9 +105,27 @@ describe('the faces (#563 PR 8)', () => {
     }
   });
 
+  it("sit each face's baseline by its own ascent and descent, as CSS does", () => {
+    for (const [font, size] of [['Cousine-Regular', 11], ['Caveat-Regular', 15]] as const) {
+      const face = loadFont(font);
+      const scale = size / face.unitsPerEm;
+      const expected = (LINE_PITCH - (face.ascent - face.descent) * scale) / 2 + face.ascent * scale;
+      expect(baselineOffset(size, LINE_PITCH, font), font).toBeCloseTo(expected, 6);
+      expect(baselineOffset(size, LINE_PITCH, font)).not.toBeCloseTo(baselineOffset(size, LINE_PITCH), 2);
+    }
+  });
+
   it('wrap Typewriter as a typewriter would: 70 characters to a line', () => {
     const lines = wrapText('x'.repeat(150), 11, CONTENT_WIDTH, 'Cousine-Regular');
     expect(lines.map(line => line.source.length)).toEqual([70, 70, 10]);
+  });
+
+  it("wrap Handwritten as wide as Caveat's letters allow, measured in Caveat", () => {
+    const caveat = loadFont('Caveat-Regular');
+    const advance = (caveat.glyphForCodePoint('x'.codePointAt(0)!).advanceWidth * 15) / caveat.unitsPerEm;
+    const perLine = Math.floor(CONTENT_WIDTH / advance);
+    const lines = wrapText('x'.repeat(perLine * 2 + 5), 15, CONTENT_WIDTH, 'Caveat-Regular');
+    expect(lines.map(line => line.source.length)).toEqual([perLine, perLine, 5]);
   });
 
   it('say by how much a letter runs past the page in its face', () => {
@@ -137,6 +155,24 @@ describe('the faces (#563 PR 8)', () => {
     expect(date.size).toBeGreaterThanOrEqual(12);
     expect(date.x).toBeGreaterThanOrEqual(STATIONERY_CORNER.left - 1e-6);
     expect(() => letter({ theme: 'handwritten', dateLine: `${long} ${long}` })).toThrow(/dateLine/);
+
+    // One that would fit at 10 pt is still refused: Handwritten's floor is 12.
+    const caveat = loadFont('Caveat-Regular');
+    const room = PAGE_WIDTH - SIDE_MARGIN - STATIONERY_CORNER.left;
+    const at = (text: string, size: number) => (shape(caveat, text).advanceWidth * size) / caveat.unitsPerEm;
+    let text = 'x';
+    while (at(text, 12) <= room) text += 'x';
+    expect(at(text, 10)).toBeLessThanOrEqual(room);
+    expect(() => letter({ theme: 'handwritten', dateLine: text })).toThrow(/dateLine/);
+    // And Typewriter's is 9, as the Tinos themes'.
+    const cousine = loadFont('Cousine-Regular');
+    const typed = 'x'.repeat(Math.floor(room / ((cousine.glyphForCodePoint(120).advanceWidth * 9.5) / cousine.unitsPerEm)));
+    const [small] = runs(letter({ theme: 'typewriter', dateLine: typed })).filter(run => run.baseline < BODY_TOP);
+    expect(small).toMatchObject({ font: 'Cousine-Regular', size: 9.5 });
+  });
+
+  it('refuse a theme this build does not know in the corner too', () => {
+    expect(() => layoutStationery({ theme: 'floral' } as unknown as DrawnStationery, BODY_TOP)).toThrow('Unknown stationery theme: floral');
   });
 });
 
