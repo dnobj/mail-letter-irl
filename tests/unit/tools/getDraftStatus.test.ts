@@ -91,6 +91,16 @@ describe("get_draft_status (#474)", () => {
       expect(one).toMatchObject({ canSendNow: true });
       expect(one).not.toHaveProperty("pages");
 
+      // A gift letter, which its gift pays for whatever the balance (#579).
+      vi.mocked(getDraftState).mockResolvedValue({ ...ready, pages: 1, is_gift_send: true } as any);
+      const gift = await ask({ draftId: DRAFT_ID }, { ...context(), user: { userId: "auth0|owner", creditsRemaining: 0, orders: [] } as any });
+      expect(gift).toMatchObject({ canSendNow: true });
+
+      // The draft's own credits, not a guess: more than the balance holds.
+      vi.mocked(getDraftState).mockResolvedValue({ ...ready, pages: 1, required_credits: 12 } as any);
+      const short = await ask({ draftId: DRAFT_ID }, { ...context(), user: { userId: "auth0|owner", creditsRemaining: 10, orders: [] } as any });
+      expect(short).toMatchObject({ canSendNow: false });
+
       // A postcard, or a letter the legacy HTML drew, says nothing of it.
       for (const overrides of [{ mail_type: "postcard" }, { renderer_version: null }]) {
         vi.mocked(getDraftState).mockResolvedValue({ ...ready, ...overrides } as any);

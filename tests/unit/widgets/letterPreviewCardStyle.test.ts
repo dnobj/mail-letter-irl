@@ -439,6 +439,7 @@ describe('a restyle that changes the pages, and so the price (#586)', () => {
     await card.show(output({ theme: 'classic', source: 'default' }));
     expect(card.text('cost')).toBe('1 Letter');
     expect(card.text('layout-type')).toBe('Text Only');
+    expect(card.text('status-pill')).toBe('Ready to send');
 
     await card.choose('typewriter');
     await card.answer({
@@ -459,6 +460,7 @@ describe('a restyle that changes the pages, and so the price (#586)', () => {
 
     expect(card.text('cost')).toBe('Pay & Send USD 5.99');
     expect(card.text('layout-type')).toBe('Text Only · 2 pages, both sides');
+    expect(card.text('status-pill')).toBe('Letter packs and gift letters pay for one-page letters and 6x9 postcards; this one is paid with Pay & Send.');
   });
 
   it('takes it back to one page, which the balance pays for', async () => {
@@ -485,6 +487,38 @@ describe('a restyle that changes the pages, and so the price (#586)', () => {
     await card.choose('botanical');
     await card.answer(restyled({ theme: 'botanical', dateLine: 'October 1, 2026', source: 'asked' }, BOTANICAL_PAGE));
     expect(card.text('cost')).toBe('1 Letter');
+    expect(card.text('status-pill')).toBe('Ready to send');
+  });
+
+  it('draws a new draft from its own price, shown once or again', async () => {
+    const card = mount();
+    await card.show(output({ theme: 'classic', source: 'default' }));
+    await card.choose('typewriter');
+    await card.answer({
+      result: {
+        content: [],
+        structuredContent: {
+          draftId: 'draft_0001',
+          stationery: { theme: 'typewriter', dateLine: 'October 1, 2026', source: 'asked' },
+          pages: 2,
+          canSendNow: false,
+          reasonCannotSend: 'Letter packs and gift letters pay for one-page letters and 6x9 postcards; this one is paid with Pay & Send.',
+          sendEligibility: PAY_AND_SEND,
+          message: 'The letter is now on the typewriter stationery.'
+        },
+        _meta: { previewHtml: BOTANICAL_PAGE }
+      }
+    });
+    expect(card.text('cost')).toBe('Pay & Send USD 5.99');
+
+    // A new preview in the same card, as the host may deliver it twice.
+    const next = { ...output({ theme: 'classic', source: 'default' }), draftId: 'draft_0002' };
+    for (const time of ['once', 'again']) {
+      await card.show(next);
+      expect(card.text('cost'), time).toBe('1 Letter');
+      expect(card.text('layout-type'), time).toBe('Text Only');
+      expect(card.text('status-pill'), time).toBe('Ready to send');
+    }
   });
 
   it('takes a reopened card\'s price and pages from get_draft_status', async () => {

@@ -45,6 +45,7 @@ import {
   setDraftSchedule,
   setDraftStationery,
   getDraftForStationery,
+  getDraftState,
   LIVE_PAY_AND_SEND_STATUSES,
 } from '../../../src/services/draftService.js';
 
@@ -825,6 +826,18 @@ describe('draftService stationery (#563)', () => {
     vi.mocked(db.transaction).mockImplementation(async callback => callback(client as any));
     return client;
   }
+
+  describe('getDraftState', () => {
+    it('reads what get_draft_status prices a ready letter by (#586)', async () => {
+      vi.mocked(db.query).mockResolvedValueOnce({ rows: [{ draft_id: 'draft-1' }] } as any);
+      await expect(getDraftState('draft-1')).resolves.toEqual({ draft_id: 'draft-1' });
+      const [sql, params] = vi.mocked(db.query).mock.calls[0] as [string, unknown[]];
+      for (const column of ['d.pages', 'd.is_gift_send', 'd.required_credits']) {
+        expect(sql, column).toContain(column);
+      }
+      expect(params).toEqual(['draft-1']);
+    });
+  });
 
   describe('getDraftForStationery', () => {
     it("reads the caller's draft with what its page is drawn from", async () => {

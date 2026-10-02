@@ -393,6 +393,34 @@ describe('the letter card as a studio (#580)', () => {
     expect(plain.byId('studio-fit').hidden).toBe(true);
   });
 
+  it('says how full the page is after a restyle, from what the restyle gave (#586)', async () => {
+    const card = mount();
+    const fit = (roomCharacters: number) => ({ pages: 1, sheets: 1, doubleSided: false, roomLines: Math.ceil(roomCharacters / 64), roomCharacters, charactersPerLine: 64 });
+    await card.show(output({ stationery: { theme: 'classic', source: 'default' } }), { ...ON, pageFit: fit(1940) });
+    expect(text(card, 'studio-fit')).toBe('Fits on one page, with room for about 1,940 more characters.');
+
+    const restyle = async (theme: string, roomCharacters: number) => {
+      await card.click(card.byId('style-row').querySelector(`[data-theme="${theme}"]`)!);
+      await card.answer(
+        {
+          result: {
+            content: [],
+            structuredContent: { draftId: 'draft_0001', stationery: { theme, dateLine: 'October 1, 2026', source: 'asked' }, ...canSend, message: 'Restyled.' },
+            _meta: { previewHtml: PAGE, pageFit: fit(roomCharacters) }
+          }
+        },
+        'set_stationery'
+      );
+    };
+    await restyle('typewriter', 512);
+    expect(text(card, 'studio-fit')).toBe('Fits on one page, with room for about 512 more characters.');
+
+    // A page with no room left says nothing of room.
+    await restyle('botanical', 0);
+    expect(text(card, 'studio-fit')).toBe('');
+    expect(card.byId('studio-fit').hidden).toBe(true);
+  });
+
   it('says a letter with its picture prints in colour (#584 review round 1)', async () => {
     const card = mount();
     await card.show(output({ layoutType: 'header_image', stationery: { theme: 'classic', source: 'default' } }), ON);
