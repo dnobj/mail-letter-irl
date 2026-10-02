@@ -142,7 +142,7 @@
       .studio-section{display:flex;flex-direction:column;gap:6px}
       .studio-label,.studio #arrives-row .info-label{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--mut)}
       .studio-section .info-row{padding:6px 0}
-      .studio-section .note{margin-top:0}
+      .studio-section .note,.studio-side > .note{margin-top:0}
       .studio #arrives-row{flex-direction:column;align-items:stretch;gap:8px;border-bottom:0;padding:0}
       .studio #arrives-row .arrives-controls{justify-content:flex-start;text-align:left;gap:6px}
       .studio #arrives-row .link-button{border:1px solid var(--bd);border-radius:999px;padding:5px 11px;font-size:12px;font-weight:600;color:var(--tx);text-decoration:none;background:var(--sf)}
@@ -481,6 +481,9 @@
       // The preview render() last drew, for a refresh after a send.
       let studioState = null;
       let flipWired = false;
+      // What get_purchase_status last said of the order this card's Pay &
+      // Send opened (#579), for the maker's header and footer.
+      let purchaseState = null;
 
       // The flip says which side shows, and turns the postcard over.
       function showSide() {
@@ -515,16 +518,20 @@
         studioState = state;
         const settled = settledDraft();
         const sentOrder = sentOrderOf(settled);
-        const sent = settled?.status === "sent" || (saved?.draftId === state.draftId && saved?.sent === true);
+        const sentByCard = saved?.draftId === state.draftId && saved?.sent === true;
+        // The order this card's Pay & Send opened (#579), as its status last said.
+        const purchase = trackedOrderId !== null ? purchaseState : null;
+        const paid = purchase === "processing" || purchase === "submitted";
+        const sent = settled?.status === "sent" || sentByCard || purchase === "submitted";
         const cancelled = sentOrder === "cancelled" || (saved?.draftId === state.draftId && saved?.cancelled === true);
+        const expired = settled?.status === "expired";
         const name = typeof state.recipientName === "string" ? state.recipientName.trim() : "";
         document.getElementById("studio-title").textContent = name ? `Postcard to ${name}` : "Your postcard";
         const place = [state.recipientCity, [state.recipientState, state.recipientPostalCode].filter(Boolean).join(" ")]
           .filter(Boolean)
           .join(", ");
-        document.getElementById("studio-sub").textContent = [cancelled ? "Cancelled" : sent ? "Sent" : "Draft", place]
-          .filter(Boolean)
-          .join(" · ");
+        const stage = cancelled ? "Cancelled" : expired ? "Expired" : sent ? "Sent" : paid ? "Paid" : "Draft";
+        document.getElementById("studio-sub").textContent = [stage, place].filter(Boolean).join(" · ");
 
         // The message, read-only, against what the back holds: 16 lines, about
         // 500 characters, fewer beside a gift card.
@@ -542,25 +549,43 @@
         const letters = state.lettersRequired ?? 1;
         document.getElementById("studio-cost").textContent = state.giftCard
           ? "Free: a gift letter"
-          : sendEligibility?.packPays === false
+          : paid
             ? payAndSend?.amountCents
-              ? `Pay & Send ${formatPayAmount(payAndSend)}`
-              : "Paid when you send it"
-            : `${letters} letter${letters === 1 ? "" : "s"}`;
+              ? `Paid ${formatPayAmount(payAndSend)}`
+              : "Paid with Pay & Send"
+            : sendEligibility?.packPays === false
+              ? payAndSend?.amountCents
+                ? `Pay & Send ${formatPayAmount(payAndSend)}`
+                : "Paid when you send it"
+              : `${letters} letter${letters === 1 ? "" : "s"}`;
 
+        // Once sent, the dates are the server's or the send's own, never the
+        // picker's: the chat may have changed them since this preview.
         const held =
-          picker.schedule() ?? (sentOrder === "scheduled" ? arrives.scheduleOf(settled.schedule) : null);
+          settled?.status === "sent"
+            ? sentOrder === "scheduled"
+              ? arrives.scheduleOf(settled.schedule)
+              : null
+            : sentByCard
+              ? arrives.scheduleOf(saved.schedule)
+              : picker.schedule();
         const estimate =
           arrivalChange?.draftId === state.draftId && arrivalChange.deliveryEstimate
             ? arrivalChange.deliveryEstimate
             : state.deliveryEstimate;
         const timing = cancelled
           ? "cancelled, nothing will be mailed"
-          : held
-            ? `held until ${arrives.describeDate(held.mailOn)}`
-            : typeof estimate === "string" && estimate
-              ? estimate.charAt(0).toLowerCase() + estimate.slice(1)
-              : "First Class";
+          : expired
+            ? "the preview has expired"
+            : held
+              ? `held until ${arrives.describeDate(held.mailOn)}`
+              : sent
+                ? "with the printer"
+                : paid
+                  ? "paid, going to the printer"
+                  : typeof estimate === "string" && estimate
+                    ? estimate.charAt(0).toLowerCase() + estimate.slice(1)
+                    : "First Class";
         document.getElementById("studio-summary").textContent = ["6 x 9 in", timing].join(" · ");
         showSide();
       }
@@ -2047,6 +2072,7 @@
       function applyPurchaseStatus(status) {
         const statusPill = document.getElementById("status-pill");
         const state = status.purchaseStatus;
+        purchaseState = typeof state === "string" ? state : null;
         statusPill.classList.remove("ok", "alert");
         if (state === "submitted") {
           statusPill.classList.add("ok");
@@ -2083,6 +2109,8 @@
         // dispatches inline too, the only cost of this line is a card that
         // updates when the user returns rather than on a timer - which is why
         // this is a comment rather than a pinned test.
+        // The maker's header and footer follow the order (#580).
+        refreshStudio();
         return state === "processing" || TERMINAL_PURCHASE_STATUSES.includes(state);
       }
 

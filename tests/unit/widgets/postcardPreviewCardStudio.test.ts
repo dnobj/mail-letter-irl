@@ -317,6 +317,69 @@ describe('the postcard card as a postcard maker (#580)', () => {
     expect(text(gone, 'studio-sub')).toBe('Cancelled · New York, NY 10118');
   });
 
+  it('says a postcard the server or its own send put with the printer is there, whatever date its preview had', async () => {
+    const dated = { arrivalWindow: WINDOW, schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' }, deliveryEstimate: 'Goes to the printer Fri, Oct 9.' };
+    const card = mount();
+    await card.show(output(dated), ON);
+    await card.answer(
+      { result: { content: [], structuredContent: { draftId: 'draft_0001', status: 'sent', orderId: 'order-1', orderStatus: 'sent', schedule: null } } },
+      'get_draft_status'
+    );
+    expect(text(card, 'studio-sub')).toBe('Sent · New York, NY 10118');
+    expect(text(card, 'studio-summary')).toBe('6 x 9 in · with the printer');
+
+    const own = mount();
+    await own.show(output(dated), ON);
+    await own.click(own.byId('send-button'));
+    await own.answer({ result: { content: [{ type: 'text', text: 'Sent.' }], structuredContent: { orderId: 'order-1', currentStatus: 'sent' } } }, 'send_postcard');
+    expect(text(own, 'studio-summary')).toBe('6 x 9 in · with the printer');
+  });
+
+  it('says an expired preview has expired', async () => {
+    const card = mount();
+    await card.show(output(), ON);
+    await card.answer({ result: { content: [], structuredContent: { draftId: 'draft_0001', status: 'expired' } } }, 'get_draft_status');
+    expect(text(card, 'studio-sub')).toBe('Expired · New York, NY 10118');
+    expect(text(card, 'studio-summary')).toBe('6 x 9 in · the preview has expired');
+  });
+
+  it('follows a Pay & Send order: paid, then with the printer', async () => {
+    const card = mount();
+    await card.show(
+      output({ canSendNow: false, sendEligibility: { packPays: false, payAndSend: { available: true, amountCents: 399, currency: 'usd' }, letterPack: { available: false } } }),
+      ON
+    );
+    await card.click(card.byId('pay-send-button'));
+    await card.answer(
+      { result: { content: [], structuredContent: { orderId: 'order-1', checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_1' } } },
+      'create_mail_checkout'
+    );
+    expect(text(card, 'studio-sub')).toBe('Draft · New York, NY 10118');
+    await card.click(card.byId('check-status-button'));
+    await card.answer({ result: { content: [], structuredContent: { orderId: 'order-1', purchaseStatus: 'processing' } } }, 'get_purchase_status');
+    expect(text(card, 'studio-sub')).toBe('Paid · New York, NY 10118');
+    expect(text(card, 'studio-cost')).toBe('Paid USD 3.99');
+    expect(text(card, 'studio-summary')).toBe('6 x 9 in · paid, going to the printer');
+    await card.click(card.byId('check-status-button'));
+    await card.answer({ result: { content: [], structuredContent: { orderId: 'order-1', purchaseStatus: 'submitted' } } }, 'get_purchase_status');
+    expect(text(card, 'studio-sub')).toBe('Sent · New York, NY 10118');
+    expect(text(card, 'studio-summary')).toBe('6 x 9 in · with the printer');
+
+    const unpriced = mount();
+    await unpriced.show(
+      output({ canSendNow: false, sendEligibility: { packPays: false, payAndSend: { available: true }, letterPack: { available: false } } }),
+      ON
+    );
+    await unpriced.click(unpriced.byId('pay-send-button'));
+    await unpriced.answer(
+      { result: { content: [], structuredContent: { orderId: 'order-2', checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_2' } } },
+      'create_mail_checkout'
+    );
+    await unpriced.click(unpriced.byId('check-status-button'));
+    await unpriced.answer({ result: { content: [], structuredContent: { orderId: 'order-2', purchaseStatus: 'processing' } } }, 'get_purchase_status');
+    expect(text(unpriced, 'studio-cost')).toBe('Paid with Pay & Send');
+  });
+
   it("takes the estimate a cleared date brings, not the dated preview's", async () => {
     const card = mount();
     await card.show(
