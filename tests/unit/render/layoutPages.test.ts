@@ -270,6 +270,16 @@ describe('a letter over several pages (#586)', () => {
     expect(layout.overflowLines).toBe(textOnly.overflowLines + imageLines);
   });
 
+  it('never starts a page past the limit for the enclosed image: text that fills the last page leaves it as overflow', () => {
+    // 26 lines fill page 1 and 33 fill page 2, the last page allowed.
+    const text = Array.from({ length: 59 }, (_, index) => `Line ${index + 1}`).join('\n');
+    const layout = layoutLetter({ text, layoutType: 'inline_image', image }, { maxPages: 2 });
+    expect(layout.pages).toHaveLength(2);
+    expect(layout.pages[1].linesUsed).toBe(33);
+    const height = (images(layout, 1)[0] as { height: number }).height;
+    expect(layout.overflowLines).toBe(Math.ceil((IMAGE_GAP + height) / LINE_PITCH));
+  });
+
   it.each([0, 4, 1.5, Number.NaN, -1])('refuses a limit of %s pages', maxPages => {
     expect(() => layoutLetter({ text: 'Hello', layoutType: 'text_only' }, { maxPages })).toThrow(RangeError);
   });
