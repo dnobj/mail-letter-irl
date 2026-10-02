@@ -27,6 +27,8 @@ import {
   JIT_OPTION_PRICE_ENV_VARS,
   JIT_PRICE_ENV_VARS,
   PACK_PRICE_ENV_VARS,
+  POSTCARD_SIZES_FLAG,
+  ROOM_TO_WRITE_FLAG,
   normalizedCurrency,
   packCurrency
 } from './products.js';
@@ -585,6 +587,20 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     secret: false,
     services: ['api']
   },
+  /**
+   * The mail options' flags (#578, src/config/products.ts): each sells its
+   * options through Pay & Send and demands their prices above. Off unless
+   * set, so absence is the intended production state until the owner approves
+   * the prices; listed so the preflight shows which environments and services
+   * have them. Both services, as the prices they demand are.
+   */
+  ...[ROOM_TO_WRITE_FLAG, POSTCARD_SIZES_FLAG].map((name): EnvVarRequirement => ({
+    name,
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api', 'maintenance']
+  })),
   /**
    * Arrive-by (#535, src/config/arriveBy.ts): the preview tools offer and
    * accept an arrival date only while the flag is on. Off unless set, so

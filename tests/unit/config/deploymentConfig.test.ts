@@ -336,6 +336,20 @@ describe('validateDeploymentConfig in production', () => {
       expect(jitFindings(dev).map(f => f.severity)).toEqual(['warning', 'warning']);
     });
 
+    it('lists the two flags for the preflight to show, on both services, never demanded', () => {
+      for (const name of ['LETTER_IRL_ROOM_TO_WRITE_ENABLED', 'LETTER_IRL_POSTCARD_SIZES_ENABLED']) {
+        expect(ENV_VAR_MANIFEST.find(entry => entry.name === name)).toEqual({
+          name,
+          requiredIn: 'production',
+          advisory: true,
+          secret: false,
+          services: ['api', 'maintenance']
+        });
+      }
+      // Absent in production, as it is until the owner approves: no finding.
+      expect(ruleIds(env({}))).toEqual(ruleIds(VALID_PROD));
+    });
+
     it('lists each price in the manifest behind Pay & Send and its flag', () => {
       expect(
         ENV_VAR_MANIFEST.filter(entry => entry.flag).map(entry => [entry.name, entry.condition, entry.flag, entry.checkedBy])

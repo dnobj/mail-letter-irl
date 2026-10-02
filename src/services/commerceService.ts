@@ -16,7 +16,6 @@ import {
   CREDITS_PER_LETTER,
   PACK_PRODUCTS,
   formatAmountForCurrency,
-  jitProductFor,
   jitProductMatching,
   normalizedCurrency,
   packCurrency,
@@ -1165,7 +1164,9 @@ export async function createJitCheckout(
     [params.draftId, params.userId]
   );
   const peekedOption = draftMailOption(draftPeek.rows[0] ?? {});
-  const peekedProduct = jitProductFor(peekedOption);
+  // The option's own code, sold or not, as the quote kicks: for an option
+  // whose flag is off it clears what the catalog recorded while it was sold.
+  const peekedProduct = jitProductMatching(peekedOption);
   if (peekedProduct) await ensurePriceCatalog(peekedProduct.productCode);
 
   // Pay & Send is the one path that both charges AND mails, so both ceilings

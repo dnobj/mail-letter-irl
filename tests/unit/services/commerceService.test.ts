@@ -1512,14 +1512,18 @@ describe('commerceService', () => {
     it('refuses a checkout for an option this deployment does not sell, before any order', async () => {
       mocks.getJitProduct.mockReturnValue(null);
       mocks.query
-        .mockResolvedValueOnce({ rows: [{ mail_type: 'postcard' }] })
+        // In the order the checkout reads them: the send block, then the peek.
         .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
+        .mockResolvedValueOnce({ rows: [{ mail_type: 'postcard', postcard_size: '6x4' }] })
         .mockResolvedValueOnce({ rows: [DRAFT] })
         .mockResolvedValue({ rows: [] });
 
       await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' }))
         .rejects.toMatchObject({ code: 'JIT_OPTION_NOT_SOLD' });
 
+      // The peek ensures the option's own code, sold or not, so the catalog
+      // clears what it held for it; the cap reads no price for it.
+      expect(mocks.ensurePriceCatalog).toHaveBeenCalledWith('jit-postcard-4x6');
       // Priced by the draft's own option, and nothing inserted or opened.
       expect(mocks.getJitProduct).toHaveBeenCalledWith({ mailType: 'postcard', postcardSize: '6x4' });
       const sql = mocks.query.mock.calls.map(call => String(call[0]));
@@ -1544,8 +1548,9 @@ describe('commerceService', () => {
         checkout_expires_at: new Date(Date.now() + 90 * 60_000)
       };
       mocks.query
-        .mockResolvedValueOnce({ rows: [{ mail_type: 'postcard' }] })
+        // In the order the checkout reads them: the send block, then the peek.
         .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
+        .mockResolvedValueOnce({ rows: [{ mail_type: 'postcard', postcard_size: '6x4' }] })
         .mockResolvedValueOnce({ rows: [DRAFT] })
         .mockResolvedValueOnce({ rows: [reusable] })
         .mockResolvedValue({ rows: [reusable] });
@@ -1576,8 +1581,9 @@ describe('commerceService', () => {
         checkout_expires_at: new Date(Date.now() + 90 * 60_000)
       };
       mocks.query
-        .mockResolvedValueOnce({ rows: [{ mail_type: 'postcard' }] })
+        // In the order the checkout reads them: the send block, then the peek.
         .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
+        .mockResolvedValueOnce({ rows: [{ mail_type: 'postcard', postcard_size: '6x4' }] })
         .mockResolvedValueOnce({ rows: [DRAFT] })
         .mockResolvedValueOnce({ rows: [reusable] })
         .mockResolvedValue({ rows: [{ order_id: 'order-1' }] });
