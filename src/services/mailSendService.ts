@@ -28,6 +28,8 @@ interface MailDraftRow extends LetterDraft {
   front_image_data?: string;
   front_image_url?: string;
   postcard_size?: string;
+  /** A postcard's front other than full bleed (#594, migration 048); null for full bleed. */
+  postcard_front?: unknown;
 }
 
 export interface CreateMailOrderParams {
@@ -93,7 +95,9 @@ function buildPostcardContent(draft: MailDraftRow): Record<string, unknown> {
     frontImageUrl: draft.front_image_url,
     postcardSize: draft.postcard_size || '6x9',
     // As for letters: absent for the legacy HTML path (#534).
-    ...(draft.renderer_version ? { rendererVersion: draft.renderer_version } : {})
+    ...(draft.renderer_version ? { rendererVersion: draft.renderer_version } : {}),
+    // And the front it was drawn with (#594); absent for full bleed.
+    ...(draft.postcard_front ? { postcardFront: draft.postcard_front } : {})
   };
 }
 

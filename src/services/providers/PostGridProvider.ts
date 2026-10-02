@@ -41,12 +41,17 @@ import {
   layoutLetter,
   layoutPostcard,
   MAX_LETTER_PAGES,
+  POSTCARD_FRONT_RENDERER_VERSION,
+  postcardFrontOf,
+  PostcardFrontOverflow,
   PRINTABLE_RENDERER_VERSIONS,
   readImageDataUri,
   renderPdf,
+  RENDERER_VERSION,
   rendererVersionFor,
   STATIONERY_RENDERER_VERSION,
   stationeryOf,
+  type PostcardFront,
   type Stationery
 } from '../../render/index.js';
 
@@ -412,6 +417,12 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       const renderer = params.rendererVersion;
       if (renderer != null && !PRINTABLE_RENDERER_VERSIONS.has(renderer)) {
         throw new RenderRefusal('unknown_version', `This build cannot print renderer version "${renderer}".`);
+      }
+      // A front is a postcard's (#594): a letter recording pdf-3 would print
+      // without what it was drawn with, so it is refused, as a postcard
+      // recording stationery's pdf-2 is.
+      if (renderer === POSTCARD_FRONT_RENDERER_VERSION) {
+        throw new RenderRefusal('unknown_version', `A letter is never drawn with a postcard's front: renderer version "${renderer}".`);
       }
       // A gift send prints its card as the PDF's second page (renderForPrint).
       const usePdf = renderer != null;
@@ -1536,6 +1547,16 @@ export class PostGridProvider implements LetterFulfillmentProvider {
     if (params.giftCard && size !== '6x9') {
       throw new RenderRefusal('size', `A gift postcard is 6x9, not ${size}.`);
     }
+    // A front other than full bleed (#594) prints as it was drawn. One whose
+    // stored front this build cannot read is refused, never printed full bleed.
+    let front: PostcardFront | undefined;
+    if (params.rendererVersion === POSTCARD_FRONT_RENDERER_VERSION) {
+      const stored = postcardFrontOf(params.front);
+      if (!stored) {
+        throw new RenderRefusal('render', 'The postcard was drawn with a front this build cannot read.');
+      }
+      front = stored;
+    }
     let image;
     try {
       image = readImageDataUri(params.frontImageBase64);
@@ -1547,15 +1568,19 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       // A gift send's card, with the code the send minted. A strip its words
       // overflow (GiftStripOverflow) is held here.
       const strip = params.giftCard ? giftPostcardStripCopy(params.giftCard, params.senderName || '') : undefined;
-      layout = layoutPostcard({ message: params.backMessage, image, strip, size });
+      layout = layoutPostcard({ message: params.backMessage, image, strip, size, ...front });
     } catch (error) {
+      // A caption or place that no longer fits was measured to fit when it
+      // was previewed, under the same version: the layout changed, as an
+      // overflow of the message means.
+      if (error instanceof PostcardFrontOverflow) throw new RenderRefusal('overflow', error.message);
       throw new RenderRefusal('render', `The postcard could not be laid out: ${reason(error)}`);
     }
     if (layout.overflowLines > 0) {
       throw new RenderRefusal('overflow', `The postcard's message runs ${layout.overflowLines} line(s) past its room on the back.`);
     }
     try {
-      return await renderPdf(layout);
+      return await renderPdf(layout, front ? POSTCARD_FRONT_RENDERER_VERSION : RENDERER_VERSION);
     } catch (error) {
       throw new RenderRefusal('render', `The postcard could not be drawn: ${reason(error)}`);
     }

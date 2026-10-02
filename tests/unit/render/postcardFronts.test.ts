@@ -8,7 +8,10 @@
 
 import { deflateSync, inflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
-import { layoutPostcard, PostcardFrontOverflow, renderPdf, renderPreviewSvg } from '../../../src/render/index.js';
+import {
+  layoutPostcard, POSTCARD_FRONT_RENDERER_VERSION, POSTCARD_FRONT_TEXT_MAX_LENGTH, postcardFrontOf, PostcardFrontOverflow,
+  PRINTABLE_RENDERER_VERSIONS, renderPdf, renderPreviewSvg
+} from '../../../src/render/index.js';
 import { loadFont } from '../../../src/render/fonts.js';
 import { shape } from '../../../src/render/glyphs.js';
 import { POSTCARD_BLEED, POSTCARD_FRONT, POSTCARD_GEOMETRY } from '../../../src/render/geometry.js';
@@ -311,5 +314,44 @@ describe('the fronts as they print and preview (#594)', () => {
         placeBaseline: 0.5, placeWidth: 0.88, placeColor: '#F6E3A1', shadowColor: '#A8461F', shadowOffset: 0.0104
       }
     });
+  });
+});
+
+describe('a stored front, as the print reads it (#594, migration 048)', () => {
+  it('reads a border, with or without its caption, and a greeting with its place', () => {
+    expect(postcardFrontOf({ layout: 'border', caption: 'Cape Cod' })).toEqual({ layout: 'border', caption: 'Cape Cod' });
+    expect(postcardFrontOf({ layout: 'border' })).toEqual({ layout: 'border' });
+    // An absent field may be stored as null.
+    expect(postcardFrontOf({ layout: 'border', caption: null, place: null })).toEqual({ layout: 'border' });
+    expect(postcardFrontOf({ layout: 'greetings', place: 'Asheville' })).toEqual({ layout: 'greetings', place: 'Asheville' });
+    // Anything else it holds is left behind.
+    expect(postcardFrontOf({ layout: 'greetings', place: 'Rye', drawnAt: '2026-10-02' })).toEqual({ layout: 'greetings', place: 'Rye' });
+    // The longest text it stores, and no longer.
+    const longest = 'x'.repeat(POSTCARD_FRONT_TEXT_MAX_LENGTH);
+    expect(postcardFrontOf({ layout: 'border', caption: longest })).toEqual({ layout: 'border', caption: longest });
+    expect(postcardFrontOf({ layout: 'border', caption: `${longest}x` })).toBeNull();
+  });
+
+  it.each([
+    ['nothing', undefined],
+    ['null', null],
+    ['a string', 'border'],
+    ['an array', [{ layout: 'border' }]],
+    ['no layout', { caption: 'Cape Cod' }],
+    ['full bleed, which is no front', { layout: 'full_bleed' }],
+    ['a layout no build draws', { layout: 'collage' }],
+    ['a greeting without its place', { layout: 'greetings' }],
+    ['a greeting whose place is blank', { layout: 'greetings', place: ' \t ' }],
+    ['a caption on a greeting', { layout: 'greetings', place: 'Rye', caption: 'Hello' }],
+    ['a place on a border', { layout: 'border', place: 'Rye' }],
+    ['a caption that is not text', { layout: 'border', caption: 5 }],
+    ['a place that is not text', { layout: 'greetings', place: ['Rye'] }]
+  ])('reads no front from %s', (_name, value) => {
+    expect(postcardFrontOf(value)).toBeNull();
+  });
+
+  it('is drawn as pdf-3, a version this build prints', () => {
+    expect(POSTCARD_FRONT_RENDERER_VERSION).toBe('pdf-3');
+    expect(PRINTABLE_RENDERER_VERSIONS.has(POSTCARD_FRONT_RENDERER_VERSION)).toBe(true);
   });
 });

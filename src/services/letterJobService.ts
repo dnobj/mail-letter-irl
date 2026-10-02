@@ -408,6 +408,8 @@ function postcardParams(letter: Letter, job: LetterJob): PostcardParams {
     size: (content.postcardSize || '6x9') as PostcardSize,
     giftCard: content.giftCard,
     rendererVersion: content.rendererVersion,
+    // A front other than full bleed (#594): read by the print for 'pdf-3' only.
+    front: content.postcardFront,
     metadata: {
       letterId: letter.letter_id,
       userId: letter.user_id,

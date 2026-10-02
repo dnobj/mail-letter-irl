@@ -402,3 +402,95 @@ describe('postcards printed from our own PDF (#534 Phase 4)', () => {
     expect(body.backHTML).toContain('K7M2-QX9A');
   });
 });
+
+describe('postcards drawn with a front (#594)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  const BORDER = { layout: 'border' as const, caption: 'Cape Cod, August 2026' };
+  const GREETINGS = { layout: 'greetings' as const, place: 'Asheville' };
+
+  it.each([
+    ['a bordered 6x9', '6x9' as const, BORDER],
+    ['a greetings 4x6', '6x4' as const, GREETINGS],
+    ['a bordered 11x6, its caption left out', '6x11' as const, { layout: 'border' as const }]
+  ])('prints %s exactly as drawn, its PDF made by pdf-3', async (_name, size, front) => {
+    const fetchMock = accepted();
+    vi.stubGlobal('fetch', fetchMock);
+    // pdfkit writes the creation time, and an id made from it, into the file.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-01T12:00:00Z'));
+
+    await expect(provider().sendPostcard({ ...base, size, rendererVersion: 'pdf-3', front })).resolves.toMatchObject({ success: true });
+
+    const form = (fetchMock.mock.calls[0] as [string, RequestInit])[1].body as FormData;
+    const printed = Buffer.from(await (form.get('pdf') as File).arrayBuffer());
+    const image = readImageDataUri(base.frontImageBase64);
+    expect(printed.equals(await renderPdf(layoutPostcard({ message: base.backMessage, image, size, ...front }), 'pdf-3'))).toBe(true);
+    // Not the same postcard full bleed.
+    expect(printed.equals(await renderPdf(layoutPostcard({ message: base.backMessage, image, size }), 'pdf-3'))).toBe(false);
+    expect(printed.toString('latin1')).toContain('Letter IRL renderer pdf-3');
+  });
+
+  it.each([
+    ['no front at all', undefined],
+    ['a layout no build draws', { layout: 'collage' }],
+    ['a greeting without its place', { layout: 'greetings' }],
+    ['a greeting whose place is blank', { layout: 'greetings', place: '   ' }],
+    ['a caption on a greeting', { layout: 'greetings', place: 'Rye', caption: 'Hello' }],
+    ['a place on a border', { layout: 'border', place: 'Rye' }],
+    ['a caption that is not text', { layout: 'border', caption: 5 }],
+    ['a caption longer than any stored', { layout: 'border', caption: 'x'.repeat(121) }],
+    ['a front that is not an object', 'border']
+  ])('holds a pdf-3 postcard with %s, sending nothing', async (_name, front) => {
+    const fetchMock = accepted();
+    vi.stubGlobal('fetch', fetchMock);
+    diagnostics.written = [];
+
+    const result = await provider().sendPostcard({ ...base, rendererVersion: 'pdf-3', front, metadata: { letterId: 'postcard-7' } });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.error).toBe('The postcard was drawn with a front this build cannot read.');
+    expect(result.metadata).toMatchObject({ submissionOutcome: 'ambiguous', retryable: false, errorClass: 'render_refused' });
+    expect(diagnostics.written).toContainEqual(expect.objectContaining({
+      event: 'provider.postgrid.render_refused',
+      fields: expect.objectContaining({ reason: 'render', letterId: 'postcard-7' })
+    }));
+  });
+
+  it('holds a front whose caption no longer fits as an overflow, saying by how much', async () => {
+    const fetchMock = accepted();
+    vi.stubGlobal('fetch', fetchMock);
+    diagnostics.written = [];
+
+    // Stored, as it is short enough to store, but far wider than the photo.
+    const result = await provider().sendPostcard({
+      ...base,
+      size: '6x4',
+      rendererVersion: 'pdf-3',
+      front: { layout: 'border', caption: 'x'.repeat(100) },
+      metadata: { letterId: 'postcard-8' }
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.error).toMatch(/^The caption runs \d+\.\d\din past its room on the front\.$/);
+    expect(diagnostics.written).toContainEqual(expect.objectContaining({
+      fields: expect.objectContaining({ reason: 'overflow', letterId: 'postcard-8' })
+    }));
+  });
+
+  it('prints a pdf-1 postcard full bleed, whatever front its row holds', async () => {
+    const fetchMock = accepted();
+    vi.stubGlobal('fetch', fetchMock);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-01T12:00:00Z'));
+
+    await expect(provider().sendPostcard({ ...base, front: BORDER })).resolves.toMatchObject({ success: true });
+
+    const form = (fetchMock.mock.calls[0] as [string, RequestInit])[1].body as FormData;
+    const printed = Buffer.from(await (form.get('pdf') as File).arrayBuffer());
+    expect(printed.equals(await renderPdf(layoutPostcard({ message: base.backMessage, image: readImageDataUri(base.frontImageBase64) })))).toBe(true);
+  });
+});

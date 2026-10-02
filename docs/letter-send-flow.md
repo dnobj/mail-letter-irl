@@ -266,6 +266,11 @@ A `pdf-1` gift send prints its card as the PDF's second page, drawn by the rende
 **How a postcard goes to PostGrid (#534 Phase 4).** A postcard carries the same `rendererVersion` from its draft.
 - With `pdf-1`, it prints as our own two-page PDF, front then back, at its size with a 0.125 in bleed (#594): 9.25 x 6.25 in for a 6x9, 6.25 x 4.25 in for a 4x6 and 11.25 x 6.25 in for an 11x6. It is uploaded to `/postcards` as a multipart form with a 30-second budget.
   - The front image covers the whole page.
+  - With `pdf-3` (#594, migration 048), the front is drawn as the preview drew it, from `letters.content.postcardFront`, which the send copies from the draft's `postcard_front`:
+    - a border: the photo cut to a box inside a white border, its caption below in Caveat;
+    - a greeting: the photo covering the page, "Greetings from" over it, and the place in capitals.
+
+    A front the print cannot read (`postcardFrontOf`) is refused (`render`), never printed full bleed. A caption or place that no longer fits is refused as an `overflow`.
   - The message fills the left part of the back:
     - a 6x9: its left half, 16 lines of 14 pt Tinos;
     - a 4x6: its left 3.25 in, above USPS's barcode clear zone, 11 lines of 12 pt;
@@ -278,7 +283,8 @@ A `pdf-1` gift send prints its card as the PDF's second page, drawn by the rende
   - a message past its room on the back;
   - a gift card whose words run past its strip;
   - a gift card on any size but 6x9;
-  - a size no writer stores, on either path.
+  - a size no writer stores, on either path;
+  - a `pdf-3` front the print cannot read, or one whose caption or place no longer fits (#594).
 - With the flag, a postcard preview records `pdf-1` (below). The print's overflow refusal is then a backstop: the preview measured the same back. A 4x6 or 11x6 with no renderer version prints on the legacy HTML, as before.
 - **The 4x6 and 11x6 are offered only while `LETTER_IRL_POSTCARD_SIZES_ENABLED`, `LETTER_IRL_PRINT_RENDERER=pdf` and Pay & Send are all on (#594).** The legacy back is a 9 x 6 in page whatever the card, so the tool never previews either on it, and none it makes reaches the legacy print.
   - The preview crops the front to the size, measures the back at its size, and stamps the addresses where PostGrid prints them on it. The draft keeps the size.

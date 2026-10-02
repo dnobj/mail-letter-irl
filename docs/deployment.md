@@ -648,16 +648,21 @@ ambiguous outcome raises a durable `mail_provider_outcome_ambiguous` alert.
 
 **A hold whose class is `render_refused` never reached PostGrid (#534).** Our own renderer refused to
 draw the letter or postcard before any request was made. The reason is one of:
-- `unknown_version`: a renderer version this build cannot print;
+- `unknown_version`: a renderer version this build cannot print, or one that is the other kind of mail's:
+  a postcard recording stationery's `pdf-2`, or a letter recording a postcard front's `pdf-3` (#594);
 - `image`: an image it could not read;
 - `overflow`: a letter that no longer lays out as it was previewed (it now lays out on more or fewer pages
-  than it was previewed on, or past three, #586), or a postcard message past its room on the back;
+  than it was previewed on, or past three, #586), a postcard message past its room on the back, or a
+  postcard front's caption or place past its room on the front ("The caption runs ...in past its room on
+  the front.", #594);
 - `pages`: a letter's page count no writer stores (#586): a count outside 1 to 3, or more than one page
   on the legacy HTML or beside a gift card;
 - `size`: a postcard size no writer stores, on either print path, or a gift postcard at any size but 6x9
   (#579). The sizes are `6x4`, `6x9` and `6x11`, which PostGrid calls 6x4, 9x6 and 11x6, and our renderer
   draws all three (#594);
 - `render`: anything else that failed to lay out or draw: a letter's gift card, or its stationery (#563), included.
+  "The postcard was drawn with a front this build cannot read." means a `pdf-3` postcard's
+  `content.postcardFront` is not one this build reads (`postcardFrontOf`, #594).
   Two of its messages are stationery's: "The letter was drawn in stationery this build cannot read." means
   the stored theme is not one this build reads (`stationeryOf`): look at the letter's `content.stationery`.
   "The letter could not be laid out: The stationery's headline does not fit." (or `dateLine`, or
@@ -668,7 +673,7 @@ The log line `provider.postgrid.render_refused` names the reason and the letter 
 hold the postcard's stored size (`postcardSize`). Neither the hold, which stores only its class, nor the
 log keeps the refusal's message; the messages quoted below are what each case says. Decide by the reason,
 and where a reason has more than one case, by the letter's stored content (`content.pages`,
-`content.postcardSize`, `content.rendererVersion`, `content.giftCard`, the image, the stationery):
+`content.postcardSize`, `content.postcardFront`, `content.rendererVersion`, `content.giftCard`, the image, the stationery):
 - **Retry** when a build can print it: deploy that build, then resolve the letter with a retry
   (`provider_confirmed_rejected_retry`). That covers:
   - a version this build does not know;
@@ -686,7 +691,8 @@ and where a reason has more than one case, by the letter's stored content (`cont
     ("runs N line(s) past 3 pages") cannot print at all: reject it;
   - stationery this build cannot read, once a build that reads the stored theme is deployed. Stored
     stationery is refused when the draft is made unless the print reads it back, so this means the
-    build changed, not the letter.
+    build changed, not the letter. A front this build cannot read is the same case (#594), and so is a
+    front's caption or place that no longer fits: it was measured to fit when it was previewed.
 - **Reject** when the content itself cannot print, resolving it as rejected
   (`provider_confirmed_rejected_refund`):
   - a postcard message that is too long in any build;
@@ -735,6 +741,11 @@ layout than the person previewed.
   Reject guidance above would then refund mail that can print. Do not roll back below it while such a
   postcard is queued or held, or such a draft is unexpired; if one is held after all, retry it once the newer
   build is back.
+- Postcard fronts set another (#594): migration 048's build is the first to print `pdf-3`, a postcard with a
+  border or a greeting, and the first whose retention sweeps and erasure clear the `postcard_front` column's
+  caption or place. An older build holds a `pdf-3` postcard as `render_refused` (`unknown_version`) rather
+  than printing it full bleed, and would redact a draft but keep its caption or place. Roll back only with no
+  `pdf-3` postcard queued or held and no `pdf-3` draft whose content is still live (`redacted_at IS NULL`).
 
 `stripe_money_event_unmatched` covers two different situations, and they have
 different recovery paths.
