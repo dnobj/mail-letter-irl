@@ -128,7 +128,8 @@ export const toolInputSchemas = {
     sender: addressSchema.optional(),  // Optional - will use saved return address if not provided
     recipient: addressSchema,
     message: z.string(),
-    size: z.enum(["6x9"]).optional(),
+    // The 4x6 and 11x6 while offered (#594); zodSchemas.ts serves each state.
+    size: z.enum(["6x9", "6x4", "6x11"]).optional(),
     // Image from file attachment - OpenAI Apps SDK requires explicit schema definition
     image: imageFileParamSchema.optional(),
     // Alternative: direct image URL

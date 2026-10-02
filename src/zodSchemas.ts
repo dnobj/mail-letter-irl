@@ -274,15 +274,23 @@ export const clearReturnAddressInputZ = z.object({
 // ============================================================================
 
 /**
- * The postcard preview's `size` as it is served while the 4x6 and 11x6 are
- * not offered (#594): the 6x9 alone, exactly as before them.
+ * The postcard preview's `message` and `size` as they are served while the
+ * 4x6 and 11x6 are not offered (#594): the 6x9 alone, and its message's
+ * room, exactly as before them.
  */
-export const postcardSixByNineZ = z.enum(["6x9"]).optional();
+export const postcardSixByNineZ = {
+  message: z.string().describe("Must fit the back of the postcard: 16 lines, about 500 characters of prose"),
+  size: z.enum(["6x9"]).optional()
+};
 
 export const quoteAndPreviewPostcardInputZ = z.object({
   sender: addressZ.optional(),  // Optional - will use saved return address if not provided
   recipient: addressZ,
-  message: z.string().describe("Must fit the back of the postcard: 16 lines, about 500 characters of prose"),
+  // Served as postcardSixByNineZ while the 4x6 and 11x6 are not offered (#594).
+  message: z.string().describe(
+    "Must fit the back of the postcard, which is measured in lines: 16 on a 6x9, about 500 characters of prose. " +
+    "size gives the other sizes' room."
+  ),
   // Served as postcardSixByNineZ while the 4x6 and 11x6 are not offered (#594).
   size: z.enum(["6x9", "6x4", "6x11"]).optional().describe(
     "The postcard's size: 6x9 (the default), 6x4 for a 4 x 6 in postcard, or 6x11 for an 11 x 6 in one. " +

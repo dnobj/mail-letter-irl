@@ -280,7 +280,7 @@ A `pdf-1` gift send prints its card as the PDF's second page, drawn by the rende
   - a gift card on any size but 6x9;
   - a size no writer stores, on either path.
 - With the flag, a postcard preview records `pdf-1` (below). The print's overflow refusal is then a backstop: the preview measured the same back. A 4x6 or 11x6 with no renderer version prints on the legacy HTML, as before.
-- **The 4x6 and 11x6 are offered only while `LETTER_IRL_POSTCARD_SIZES_ENABLED`, `LETTER_IRL_PRINT_RENDERER=pdf` and Pay & Send are all on (#594).** The legacy back is a 9 x 6 in page whatever the card, so neither is ever previewed or printed on it.
+- **The 4x6 and 11x6 are offered only while `LETTER_IRL_POSTCARD_SIZES_ENABLED`, `LETTER_IRL_PRINT_RENDERER=pdf` and Pay & Send are all on (#594).** The legacy back is a 9 x 6 in page whatever the card, so the tool never previews either on it, and none it makes reaches the legacy print.
   - The preview crops the front to the size, measures the back at its size, and stamps the addresses where PostGrid prints them on it. The draft keeps the size.
   - A 4x6 or 11x6 is paid with Pay & Send at its own price (`jit-postcard-4x6`, `jit-postcard-11x6`), never from a pack or as a gift letter (#579).
   - Off, the tool's `size` is served as before, the 6x9 alone. A size from a schema cached while it was on is refused by validation, and the preview itself refuses any other size.

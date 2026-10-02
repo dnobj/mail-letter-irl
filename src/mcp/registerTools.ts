@@ -894,14 +894,14 @@ export function getZodInputShape(name: string) {
  * before, set_arrival_date included: its own arriveBy is offered with it,
  * only while the flag is on.
  *
- * The postcard preview's `size` is served narrowed rather than withheld
- * (servesPostcardSixByNineOnly): the 6x9 alone, as before the 4x6 and 11x6
- * (#594). A client holding the wider schema has a 4x6 refused by validation,
- * never printed as a 6x9.
+ * The postcard preview's `size` and `message` are served narrowed rather
+ * than withheld (servesPostcardSixByNineOnly): the 6x9 alone and its
+ * message's room, as before the 4x6 and 11x6 (#594). A client holding the
+ * wider schema has a 4x6 refused by validation, never printed as a 6x9.
  */
 export function getServedInputSchema(name: string): z.ZodRawShape | z.AnyZodObject | undefined {
   const declared = getZodInputShape(name);
-  const shape = declared && servesPostcardSixByNineOnly(name) ? { ...declared, size: postcardSixByNineZ } : declared;
+  const shape = declared && servesPostcardSixByNineOnly(name) ? { ...declared, ...postcardSixByNineZ } : declared;
   const withheld = withheldInputKeys(name);
   if (!shape || withheld.length === 0) return shape;
   const served = Object.fromEntries(Object.entries(shape).filter(([key]) => !withheld.includes(key))) as z.ZodRawShape;
@@ -910,8 +910,9 @@ export function getServedInputSchema(name: string): z.ZodRawShape | z.AnyZodObje
 
 /**
  * Whether this deployment serves the postcard preview as it was before the
- * 4x6 and 11x6 (#594): its `size` the 6x9 alone, and in /manifest.json its
- * message's limit too, while those sizes are not offered.
+ * 4x6 and 11x6 (#594): its `size` the 6x9 alone and its `message` described
+ * by the 6x9's room (in /manifest.json its limit too), while those sizes are
+ * not offered.
  */
 export function servesPostcardSixByNineOnly(name: string): boolean {
   return name === "quote_and_preview_postcard" && !isPostcardSizesOffered();

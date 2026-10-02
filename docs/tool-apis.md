@@ -98,7 +98,7 @@ none of them.
 
 ## Postcards
 
-- `quote_and_preview_postcard`: Create a free draft preview for a 6x9 physical postcard with a front image and back message. Accepts an attached image or `imageUrl`; sender is optional when a saved return address exists. Creates a draft and uses `ui://widgets/PostcardPreviewCard.html@v<N>`.
+- `quote_and_preview_postcard`: Create a free draft preview for a physical postcard (a 6x9; a 4x6 or 11x6 too while those are offered) with a front image and back message. Accepts an attached image or `imageUrl`; sender is optional when a saved return address exists. Creates a draft and uses `ui://widgets/PostcardPreviewCard.html@v<N>`.
   - **`size` (#594).** While the 4x6 and 11x6 are offered (`LETTER_IRL_POSTCARD_SIZES_ENABLED`, with `LETTER_IRL_PRINT_RENDERER=pdf` and Pay & Send on), `size` takes `6x9` (the default), `6x4` (a 4 x 6 in postcard) or `6x11` (an 11 x 6 in one).
     - Each is drawn by our renderer at its size, and its back is measured at its size: 16 lines on a 6x9 or an 11x6, 11 on a 4x6.
     - A 4x6 or 11x6 is paid with Pay & Send at its own price, never from a pack or as a gift letter (#579).

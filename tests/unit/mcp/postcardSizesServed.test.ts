@@ -86,18 +86,33 @@ describe('the postcard size in tools/list', () => {
     expect(required ?? []).not.toContain('size');
   });
 
-  it('is the 6x9 alone while not offered, exactly as before, and nothing else changes', async () => {
+  it("describes the message by each size's room while offered", async () => {
+    offer('true', 'pdf', 'true');
+    const { properties } = (await listedTools()).get('quote_and_preview_postcard')!;
+    expect(properties.message.description).toBe(
+      "Must fit the back of the postcard, which is measured in lines: 16 on a 6x9, about 500 characters of prose. size gives the other sizes' room."
+    );
+  });
+
+  // With arrival dates off the postcard is served as an object open to
+  // unknown keys (arriveBy withheld); with them on, as its raw shape.
+  it.each(['', 'true'])('is the 6x9 alone while not offered, exactly as before, and nothing else changes (arrival dates %s)', async arriveBy => {
+    vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', arriveBy);
     offer('true', 'pdf', 'true');
     const on = await listedTools();
     for (const [flag, renderer, payAndSend] of NOT_OFFERED) {
       offer(flag, renderer, payAndSend);
       const off = await listedTools();
       const label = `${flag} ${renderer} ${payAndSend}`;
-      // As it was served before #594: an enum of one, undescribed.
-      expect(off.get('quote_and_preview_postcard')!.properties.size, label).toEqual({ type: 'string', enum: ['6x9'] });
-      const { size: _offered, ...onRest } = on.get('quote_and_preview_postcard')!.properties;
-      const { size: _narrowed, ...offRest } = off.get('quote_and_preview_postcard')!.properties;
+      const served = off.get('quote_and_preview_postcard')!;
+      // As it was served before #594: an enum of one, undescribed, and the 6x9's room.
+      expect(served.properties.size, label).toEqual({ type: 'string', enum: ['6x9'] });
+      expect(served.properties.message, label).toEqual({ type: 'string', description: 'Must fit the back of the postcard: 16 lines, about 500 characters of prose' });
+      expect(served.additionalProperties, label).toBe(arriveBy !== 'true');
+      const { size: _offered, message: _room, ...onRest } = on.get('quote_and_preview_postcard')!.properties;
+      const { size: _narrowed, message: _sixByNine, ...offRest } = served.properties;
       expect(offRest, label).toEqual(onRest);
+      expect(Object.keys(served.properties), label).toEqual(Object.keys(on.get('quote_and_preview_postcard')!.properties));
       for (const [name, schema] of off) {
         if (name === 'quote_and_preview_postcard') continue;
         // The renderer and Pay & Send change other tools; the sizes do not.
@@ -106,7 +121,8 @@ describe('the postcard size in tools/list', () => {
     }
   });
 
-  it('refuses a 4x6 from a cached schema by validation while not offered, before the preview', async () => {
+  it.each(['', 'true'])('refuses a 4x6 from a cached schema by validation while not offered, before the preview (arrival dates %s)', async arriveBy => {
+    vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', arriveBy);
     offer('', 'pdf', 'true');
     const client = await connected();
     const result = await client
