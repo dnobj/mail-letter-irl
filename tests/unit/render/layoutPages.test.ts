@@ -239,6 +239,10 @@ describe('a letter over several pages (#586)', () => {
     const lastRun = runs(layout, last).at(-1)!;
     expect(box.top).toBeGreaterThan(lastRun.baseline);
     expect(box.top + box.height).toBeLessThanOrEqual(BODY_BOTTOM + 1e-6);
+    // The page's lines leave room for the image, as one page's always have.
+    expect(layout.pages[last].linesAvailable).toBe(
+      Math.floor((BODY_BOTTOM - CONTINUATION_TOP - IMAGE_GAP - box.height + 1e-6) / LINE_PITCH)
+    );
     for (let page = 0; page < last; page += 1) expect(images(layout, page)).toHaveLength(0);
   });
 
