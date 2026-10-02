@@ -63,6 +63,8 @@ describe("request_send", () => {
     expect(requestSendTool.readOnly).toBe(true);
     expect(requestSendTool.meta.readOnlyHint).toBe(true);
     expect(requestSendTool.description).toMatch(/Nothing is sent by this tool/);
+    // The page takes a payment for mail no pack pays for (#579).
+    expect(requestSendTool.description).toContain('or pays there with Pay & Send for mail no letter pack pays for.');
   });
 
   it("returns the page where the person sends their own draft", async () => {
@@ -127,6 +129,15 @@ describe("request_send", () => {
     vi.mocked(getDraft).mockResolvedValue(draft({ mail_type: "postcard" }) as any);
     const result = await requestSendTool.handler({ draftId: DRAFT_ID }, context());
     expect(result.mailType).toBe("postcard");
+    // A 6x9 is pack-payable, as every postcard was (#579).
+    expect(result).not.toHaveProperty("paidPerSend");
+  });
+
+  it("says the page takes a Pay & Send payment for mail no pack pays for (#579)", async () => {
+    vi.mocked(getDraft).mockResolvedValue(draft({ mail_type: "postcard", postcard_size: "6x4" }) as any);
+    const result = await requestSendTool.handler({ draftId: DRAFT_ID }, context());
+    expect(result.paidPerSend).toBe(true);
+    expect(result.confirmationUrl).toBe(`https://site.example/confirm/${DRAFT_ID}`);
   });
 
   it("refuses someone else's draft in the words it uses for a missing one", async () => {

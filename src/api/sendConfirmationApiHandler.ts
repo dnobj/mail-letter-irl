@@ -192,6 +192,9 @@ export function refusalFor(error: unknown): Refusal {
       return refuse(409, 'gift_unavailable', 'The gift letter for this preview is no longer available. Make a new preview.');
     case 'SCHEDULE_PASSED':
       return refuse(409, 'schedule_passed', 'The day this was to go to the printer has passed, so it can no longer arrive by its date. Make a new preview with a new date.');
+    // #579: a pack pays only for a one-page letter or a 6x9 postcard.
+    case 'PACK_CANNOT_PAY':
+      return refuse(402, 'pay_per_send', 'Letter packs and gift letters pay for one-page letters and 6x9 postcards. This one is paid with Pay & Send.');
     case 'DRAFT_INVALID_STATE':
     case 'DRAFT_INCOMPLETE':
     case 'DRAFT_WRONG_MAIL_TYPE':

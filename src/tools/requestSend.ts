@@ -5,6 +5,7 @@ import { draftScheduleOf } from '../services/draftSchedule.js';
 import { earliestMailOn } from '../services/deliverySchedule.js';
 import type { LetterDraft } from '../services/types.js';
 import { sendConfirmationUrl } from '../config/sendConfirmation.js';
+import { draftMailOption, isPackPayable } from '../config/products.js';
 
 /**
  * A link where the person checks a draft and sends it themselves (#470).
@@ -33,6 +34,11 @@ export interface RequestSendOutput {
   recipientSummary: { name: string; city: string; state: string };
   /** The preview's arrival dates (#535): once sent, it waits for its mail date. */
   schedule?: { arriveBy: string; mailOn: string };
+  /**
+   * Present when the page takes a Pay & Send payment for this mail: packs and
+   * gift letters pay only for one-page letters and 6x9 postcards (#579).
+   */
+  paidPerSend?: true;
 }
 
 /** The draft's dates, or none: a link is never refused over dates it cannot read. */
@@ -137,7 +143,8 @@ async function handler(
       city: text(recipient.city),
       state: text(recipient.state)
     },
-    ...(schedule ? { schedule } : {})
+    ...(schedule ? { schedule } : {}),
+    ...(isPackPayable(draftMailOption(draft)) ? {} : { paidPerSend: true as const })
   };
 }
 
@@ -146,7 +153,8 @@ export const requestSendTool: McpToolDefinition<RequestSendInput, RequestSendOut
   title: 'Get a link to send a preview',
   description:
     'Get a link where the person checks a previewed letter or postcard and sends it themselves on letterirl.com. ' +
-    'Nothing is sent by this tool, and nothing is sent until the person presses Send on that page. ' +
+    'Nothing is sent by this tool, and nothing is sent until the person presses Send on that page, ' +
+    'or pays there with Pay & Send for mail no letter pack pays for. ' +
     'Use it when the person wants to send a preview and no preview card with a Send button is showing.',
   readOnly: true,
   inputSchema: requestSendInputSchema,

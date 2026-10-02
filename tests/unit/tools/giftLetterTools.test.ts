@@ -31,7 +31,14 @@ vi.mock('../../../src/services/userService.js', async importOriginal => ({
   findUser: mocks.findUser
 }));
 
-import { createLetterDraftAndBuildOutput, letterGiftChoice, previewSendEligibility } from '../../../src/tools/letterHelpers.js';
+import {
+  appSendEligibility,
+  createLetterDraftAndBuildOutput,
+  letterGiftChoice,
+  PAID_PER_SEND_REASON,
+  previewSendEligibility,
+  reasonCannotSend
+} from '../../../src/tools/letterHelpers.js';
 import { clientProfileNamed, type ClientProfileName } from '../../../src/auth/clientProfiles.js';
 import { redeemPromoCodeTool } from '../../../src/tools/redeemPromoCode.js';
 import { friendlyCheckoutError } from '../../../src/tools/createMailCheckout.js';
@@ -144,10 +151,75 @@ describe('letter preview: purchases per app', () => {
       new URL('../../../src/tools/quoteAndPreviewPostcard.ts', import.meta.url),
       'utf8'
     );
+    // Its option is the postcard and its size (#578), and the draft names the
+    // page an app with no checkout pays on (#579).
+    expect(source).toContain('const option: MailOption = { mailType: "postcard", postcardSize: size };');
     expect(source).toMatch(
-      /previewSendEligibility\(\s*available,\s*requiredCredits,\s*\{\s*mailType:\s*"postcard",\s*postcardSize:\s*size\s*\},\s*gift\.isGift,\s*callingApp\(context\)\s*\)/
+      /previewSendEligibility\(\s*available,\s*requiredCredits,\s*option,\s*gift\.isGift,\s*callingApp\(context\),\s*draftResult\.draftId\s*\)/
     );
     expect(source).not.toContain('getSendEligibility(');
+  });
+});
+
+describe('mail no pack pays for, per app (#579)', () => {
+  const OPTION = {
+    payAndSend: { available: true, amountCents: 399 },
+    letterPack: { available: false, purchaseUrl: 'https://letterirl.com/pricing' },
+    packPays: false as const
+  };
+
+  beforeEach(() => {
+    vi.stubEnv('LETTER_IRL_WEBSITE_BASE_URL', 'https://website.example');
+    vi.stubEnv('LETTER_IRL_SEND_CONFIRMATION_ENABLED', 'true');
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('names the page that takes the payment in an app with no checkout', () => {
+    expect(appSendEligibility(OPTION, clientProfileNamed('claude'), 'draft-1')).toEqual({
+      payAndSend: {
+        available: false,
+        unavailableReason: "Pay & Send isn't available in this app.",
+        pageUrl: 'https://website.example/confirm/draft-1'
+      },
+      letterPack: { available: false, purchaseUrl: 'https://website.example/dashboard/letter-packs' },
+      packPays: false
+    });
+  });
+
+  it('leaves it to the card where the app opens Pay & Send itself', () => {
+    expect(appSendEligibility(OPTION, clientProfileNamed('chatgpt'), 'draft-1')).toEqual(OPTION);
+  });
+
+  it('names no page without the send rule, without the draft, or for mail a pack pays for', () => {
+    expect(appSendEligibility(OPTION, clientProfileNamed('claude')).payAndSend).not.toHaveProperty('pageUrl');
+    const packPayable = { ...OPTION, letterPack: { ...OPTION.letterPack, available: true } };
+    delete (packPayable as { packPays?: false }).packPays;
+    expect(appSendEligibility(packPayable, clientProfileNamed('claude'), 'draft-1')).not.toHaveProperty('packPays');
+    expect(appSendEligibility(packPayable, clientProfileNamed('claude'), 'draft-1').payAndSend).not.toHaveProperty('pageUrl');
+    vi.stubEnv('LETTER_IRL_SEND_CONFIRMATION_ENABLED', 'false');
+    expect(appSendEligibility(OPTION, clientProfileNamed('claude'), 'draft-1').payAndSend).not.toHaveProperty('pageUrl');
+  });
+
+  it("names the page with the letter preview's own draft, as a longer letter will need", async () => {
+    // A quote for mail no pack pays for, as a two-page letter's will be once
+    // room to write gives letters their pages.
+    mocks.createDraft.mockResolvedValue({ draftId: 'draft-7', expiresAt: new Date('2026-09-18T12:00:00Z') });
+    mocks.getGiftBalance.mockResolvedValue({ available: 0, next: undefined });
+    mocks.getSendEligibility.mockReturnValue(OPTION);
+
+    const output = await preview(0, undefined, 'claude');
+
+    expect(output.sendEligibility.payAndSend.pageUrl).toBe('https://website.example/confirm/draft-7');
+    expect(output.sendEligibility.packPays).toBe(false);
+  });
+
+  it('says why such mail cannot be sent from the balance', () => {
+    expect(reasonCannotSend({ mailType: 'postcard', postcardSize: '6x4' })).toBe(PAID_PER_SEND_REASON);
+    expect(PAID_PER_SEND_REASON).toBe(
+      'Letter packs and gift letters pay for one-page letters and 6x9 postcards; this one is paid with Pay & Send.'
+    );
+    expect(reasonCannotSend({ mailType: 'postcard', postcardSize: '6x9' })).toBe('Not enough letters in your balance.');
+    expect(reasonCannotSend({ mailType: 'letter' })).toBe('Not enough letters in your balance.');
   });
 });
 

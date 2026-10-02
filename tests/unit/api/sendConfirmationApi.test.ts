@@ -484,6 +484,7 @@ describe('refusalFor (#470)', () => {
     ['GIFT_LETTERS_DISABLED', 409, 'gift_unavailable'],
     ['GIFT_LETTER_UNAVAILABLE', 409, 'gift_unavailable'],
     ['SCHEDULE_PASSED', 409, 'schedule_passed'],
+    ['PACK_CANNOT_PAY', 402, 'pay_per_send'],
     ['DRAFT_INVALID_STATE', 409, 'unsendable'],
     ['DRAFT_INCOMPLETE', 409, 'unsendable'],
     ['DRAFT_WRONG_MAIL_TYPE', 409, 'unsendable'],
@@ -499,6 +500,12 @@ describe('refusalFor (#470)', () => {
   it('tells the person a missed mail date needs a new preview (#535)', () => {
     expect(refusalFor(coded('SCHEDULE_PASSED')).body.message).toBe(
       'The day this was to go to the printer has passed, so it can no longer arrive by its date. Make a new preview with a new date.'
+    );
+  });
+
+  it('says which mail a pack pays for, and how this one is paid (#579)', () => {
+    expect(refusalFor(coded('PACK_CANNOT_PAY')).body.message).toBe(
+      'Letter packs and gift letters pay for one-page letters and 6x9 postcards. This one is paid with Pay & Send.'
     );
   });
 

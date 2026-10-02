@@ -10,6 +10,7 @@ import { createLetterJobWithClient } from './letterJobService.js';
 import { assertNoRecentDuplicateMail } from './duplicateMailService.js';
 import { consumeGiftLetterForSendWithClient } from './giftLetterService.js';
 import { isGiftLettersEnabled } from '../config/giftLetters.js';
+import { draftMailOption, isPackPayable } from '../config/products.js';
 import type { GiftCardContent } from './giftCardRenderer.js';
 import { dispatchAt, earliestMailOn } from './deliverySchedule.js';
 import { draftScheduleOf } from './draftSchedule.js';
@@ -268,6 +269,13 @@ export async function createMailOrderFromDraftWithClient(
   const useGift = funding.type !== 'jit_order' && draft.is_gift_send === true;
   if (useGift && !isGiftLettersEnabled()) {
     throw draftError('GIFT_LETTERS_DISABLED', `Draft ${params.draftId} is a gift send and gift letters are off`);
+  }
+  // Packs and gift letters pay only for a one-page letter or a 6x9 postcard
+  // (#579). Any other option is paid per send through Pay & Send, which funds
+  // it as a jit_order. Refused here, before any value moves, so every surface
+  // that sends (the tools, the card, the confirmation page) keeps the rule.
+  if (funding.type === 'prepaid_balance' && !isPackPayable(draftMailOption(draft))) {
+    throw draftError('PACK_CANNOT_PAY', `Draft ${params.draftId} is paid with Pay & Send, not a pack or gift letter`);
   }
 
   let jitOrder: Order | undefined;

@@ -43,10 +43,25 @@ export async function resolveGiftSendChoice(params: {
   userId: string;
   requested: boolean | undefined;
   balanceCanPay: boolean;
+  /**
+   * Whether a gift letter could pay for this mail: like a pack, only a
+   * one-page letter or a 6x9 postcard (#579). Otherwise the mail is paid with
+   * Pay & Send, so no gift is chosen for it, and asking for one is refused.
+   */
+  giftCanPay?: boolean;
 }): Promise<GiftSendChoice> {
   if (!isGiftLettersEnabled()) {
     if (params.requested === true) {
       throw new Error('Gift letters are not available right now. Leave sendAsGift out to send from the balance.');
+    }
+    return { isGift: false, giftLettersAvailable: 0 };
+  }
+  if (params.giftCanPay === false) {
+    if (params.requested === true) {
+      throw new Error(
+        'A gift letter pays for a one-page letter or a 6x9 postcard, not for this one. ' +
+          'Leave sendAsGift out and pay for it with Pay & Send, or send a 6x9 postcard or a one-page letter as the gift.'
+      );
     }
     return { isGift: false, giftLettersAvailable: 0 };
   }

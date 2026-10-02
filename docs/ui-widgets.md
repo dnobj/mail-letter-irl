@@ -132,6 +132,15 @@ server-provided alternatives:
   the letters as after a pack checkout: the pill says **Waiting for your Letter
   Pack**, **Check status** appears, and `get_account_balance` is read again.
   When the host does not open the page, the card shows its address instead.
+- **Pay & Send on letterirl.com** (#579) is offered for mail no pack pays for:
+  a letter longer than one page, or a postcard other than 6x9.
+  - The server marks such mail `sendEligibility.packPays: false`. Where the app
+    takes no purchases, it also names the confirmation page in
+    `payAndSend.pageUrl`, and that page takes the Pay & Send payment.
+  - The card opens the page with `openLink`, shows the page's address if the
+    host does not open it, and never offers a pack for such mail.
+  - A balance the card has seen refreshed never turns Send on for it.
+  - Where the app takes purchases (ChatGPT), the card's own Pay & Send is the way.
 
 The note under the buttons describes the checkout only where the card can open
 one. On the website path it says to sign in there with the same email, and

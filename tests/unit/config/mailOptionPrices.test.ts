@@ -15,6 +15,7 @@ import {
   getConfiguredProducts,
   isConfiguredProductCode,
   isJitProductSold,
+  isPackPayable,
   jitProductFor,
   jitProductMatching
 } from '../../../src/config/products.js';
@@ -166,5 +167,23 @@ describe('the catalog sells an option only with Pay & Send and its flag on', () 
     expect(codes()).toEqual([]);
     expect(isConfiguredProductCode('jit-letter-2-pages')).toBe(false);
     expect(getConfiguredProduct('jit-letter-2-pages')).toBeNull();
+  });
+});
+
+describe('what a pack or a gift letter pays for (#579)', () => {
+  it.each([
+    [{ mailType: 'letter' as const }, true],
+    [{ mailType: 'letter' as const, pages: 1 }, true],
+    [{ mailType: 'letter' as const, pages: 2 }, false],
+    [{ mailType: 'letter' as const, pages: 3 }, false],
+    [{ mailType: 'postcard' as const }, true],
+    [{ mailType: 'postcard' as const, postcardSize: '6x9' as const }, true],
+    [{ mailType: 'postcard' as const, postcardSize: '6x4' as const }, false],
+    [{ mailType: 'postcard' as const, postcardSize: '6x11' as const }, false],
+    // A letter's size and a postcard's pages mean nothing.
+    [{ mailType: 'letter' as const, postcardSize: '6x4' as const }, true],
+    [{ mailType: 'postcard' as const, pages: 3 }, true]
+  ])('%o: %s', (option, pays) => {
+    expect(isPackPayable(option)).toBe(pays);
   });
 });

@@ -258,6 +258,15 @@
           >
             Buy letters on the website
           </button>
+          <!-- Mail no pack pays for (#579), in an app with no checkout: paid
+               with Pay & Send on the confirmation page, which sends it. -->
+          <button
+            class="send-button"
+            id="pay-page-button"
+            style="display: none"
+          >
+            Pay &amp; Send on letterirl.com
+          </button>
           <div id="pack-options" style="display: none"></div>
           <a
             class="send-button checkout-link"
@@ -282,7 +291,7 @@
           style="display: none"
         ></div>
       </div>
-      <p class="rev">letter t34</p>
+      <p class="rev">letter t35</p>
     </div>
 
     <!-- letter-irl:host -->
@@ -1683,9 +1692,11 @@
         // reddens, this line is what it is warning about.
         //
         // A gift send spends a gift letter, not the balance, so a refreshed
-        // balance says nothing about it.
+        // balance says nothing about it. Nor about mail no pack pays for
+        // (#579): that is paid per send, whatever the balance.
+        const packPays = sendEligibility?.packPays !== false;
         const effectiveCanSendNow =
-          isGiftSend
+          isGiftSend || !packPays
             ? canSendNow
             : refreshedLetters !== null
               ? refreshedLetters >= (lettersRequired ?? 1)
@@ -1824,18 +1835,31 @@
           // An app that takes no purchases (#475) offers neither button
           // above; the server says so with letterPack.available false and
           // the website's letter packs page as purchaseUrl (#474).
+          // Never for mail no pack pays for (#579): a pack would not send it.
           const packsOnWebsite =
             !effectiveCanSendNow &&
+            packPays &&
             letterPack?.available === false &&
             isHttpsUrl(letterPack?.purchaseUrl) &&
             typeof host.openLink === "function";
           document.getElementById("website-packs-button").style.display =
             packsOnWebsite ? "flex" : "none";
+          // That mail, in an app with no checkout, is paid on the
+          // confirmation page (#579), which the server names.
+          const payOnPage =
+            !effectiveCanSendNow &&
+            isHttpsUrl(payAndSend?.pageUrl) &&
+            typeof host.openLink === "function";
+          document.getElementById("pay-page-button").style.display =
+            payOnPage ? "flex" : "none";
           // The note describes a checkout this card opens, so it shows only
           // where there is one to open.
           const checkoutNote = document.getElementById("checkout-note");
           if (payAndSendAvailable || packsBuyable) {
             checkoutNote.textContent = CHECKOUT_NOTE;
+            checkoutNote.style.display = "block";
+          } else if (payOnPage) {
+            checkoutNote.textContent = PAY_PAGE_NOTE;
             checkoutNote.style.display = "block";
           } else if (packsOnWebsite) {
             checkoutNote.textContent = WEBSITE_PACKS_NOTE;
@@ -2450,6 +2474,28 @@
         "Checkout opens in your browser. Paying sends it automatically - this card updates when you return to this tab, or use Check status.";
       const WEBSITE_PACKS_NOTE =
         "Letter packs are sold on the website. Sign in there with the same email you use here - this card updates when you return to this tab, or use Check status.";
+      const PAY_PAGE_NOTE =
+        "Letter packs pay for one-page letters and 6x9 postcards. This one is paid with Pay & Send on Letter IRL's page, which sends it once you pay.";
+
+      // Mail no pack pays for, in an app with no checkout (#579): the page
+      // that takes the Pay & Send payment, as the server named it.
+      async function handlePayPage() {
+        const url = currentEligibility?.payAndSend?.pageUrl;
+        if (!isHttpsUrl(url) || typeof host.openLink !== "function") return;
+        const errorMessage = document.getElementById("error-message");
+        errorMessage.style.display = "none";
+        let opened = false;
+        try {
+          // A host that declines answers with isError rather than failing.
+          opened = !(await host.openLink(url))?.isError;
+        } catch {
+          opened = false;
+        }
+        if (!opened) {
+          errorMessage.textContent = `The page did not open. It is at ${url}`;
+          errorMessage.style.display = "block";
+        }
+      }
 
       // Where the app takes no purchases (#475), letters are bought on the
       // website (#474). As with a pack bought here, the balance is the only
@@ -2497,6 +2543,11 @@
         .getElementById("website-packs-button")
         .addEventListener("click", () => {
           void handleWebsitePacks();
+        });
+      document
+        .getElementById("pay-page-button")
+        .addEventListener("click", () => {
+          void handlePayPage();
         });
       document
         .getElementById("retry-button")

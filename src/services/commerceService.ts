@@ -15,7 +15,9 @@ import {
 import {
   CREDITS_PER_LETTER,
   PACK_PRODUCTS,
+  draftMailOption,
   formatAmountForCurrency,
+  isPackPayable,
   jitProductMatching,
   normalizedCurrency,
   packCurrency,
@@ -50,7 +52,7 @@ import {
   type CommerceProductConfig,
   type PackProductId
 } from './stripeService.js';
-import type { LetterDraft, MailType, Order, OrderStatus, PostcardSize } from './types.js';
+import type { LetterDraft, MailType, Order, OrderStatus } from './types.js';
 import {
   carriedDiagnosticClass,
   classifyDiagnosticError,
@@ -185,11 +187,22 @@ export interface SendEligibility {
     displayAmount?: string;
     productDescription?: string;
     unavailableReason?: string;
+    /**
+     * In an app that cannot open Pay & Send itself, the page where the person
+     * pays for mail no pack pays for, and so sends it (#579).
+     */
+    pageUrl?: string;
   };
   letterPack: {
     available: boolean;
     purchaseUrl: string;
   };
+  /**
+   * False when letter packs and gift letters cannot pay for this mail (#579):
+   * it is paid per send with Pay & Send, whatever the balance. Absent when
+   * they can, as for every mail before the options.
+   */
+  packPays?: false;
 }
 
 function integerSetting(name: string, fallback: number): number {
@@ -204,20 +217,6 @@ function refundRetryDelaySeconds(): number {
     MINIMUM_REFUND_RETRY_DELAY_SECONDS,
     integerSetting('JIT_REFUND_RETRY_DELAY_SECONDS', 300)
   );
-}
-
-/**
- * The mail option a draft is priced as. Letters are one page until room to
- * write records a draft's pages (#578).
- */
-export function draftMailOption(draft: {
-  mail_type?: string | null;
-  postcard_size?: string | null;
-}): MailOption {
-  const mailType = (draft.mail_type || 'letter') as MailType;
-  return mailType === 'postcard'
-    ? { mailType, postcardSize: (draft.postcard_size || '6x9') as PostcardSize }
-    : { mailType };
 }
 
 /** Why a quote offers no Pay & Send for an option this deployment does not sell (#578). */
@@ -238,7 +237,11 @@ export function getSendEligibility(
   requiredCredits: number,
   option: MailOption
 ): SendEligibility {
-  const prepaidEligible = availableCredits >= requiredCredits;
+  // Packs and gift letters pay only for a one-page letter or a 6x9 postcard
+  // (#579). For any other option the balance cannot pay, so Pay & Send is the
+  // way whatever the balance, and no pack is offered.
+  const packPays = isPackPayable(option);
+  const prepaidEligible = packPays && availableCredits >= requiredCredits;
   // One enabled read per call (three separate env reads before, against this
   // codebase's own hoisting standard), and the disabled default short-circuits
   // before building a product config whose only fate was to be discarded
@@ -262,12 +265,13 @@ export function getSendEligibility(
       ? enabledPayAndSend(option, prepaidEligible)
       : disabledPayAndSend(option),
     letterPack: {
-      available: true,
+      available: packPays,
       purchaseUrl:
         process.env.LETTER_IRL_PACKS_URL ||
         process.env.LETTER_IRL_PUBLIC_BASE_URL ||
         'https://letterirl.com'
-    }
+    },
+    ...(packPays ? {} : { packPays: false as const })
   };
 }
 
@@ -1059,7 +1063,9 @@ async function prepareJitOrder(
         diagnosticClass: failure.diagnosticClass
       });
     }
-    if (process.env.JIT_ALLOW_WITH_PREPAID_BALANCE !== 'true') {
+    // Only mail a pack can pay for (#579): an option is paid per send, so a
+    // balance never stands in the way of its checkout.
+    if (process.env.JIT_ALLOW_WITH_PREPAID_BALANCE !== 'true' && isPackPayable(draftMailOption(draft))) {
       const balance = await client.query<{ credits: number }>(
         'SELECT credits FROM users WHERE user_id = $1',
         [params.userId]
@@ -1230,8 +1236,11 @@ export async function createJitCheckout(
   // option (#578).
   const product = getJitProductConfigForCode(prepared.order.product_code);
   if (!product) {
-    // Its option stopped being sold between the order and its session: a
-    // configuration fault, which cancels the order, as an unpriced one does.
+    // The order names a product this deployment no longer sells: a code gone
+    // from the table, or an option whose flag went off across a redeploy
+    // since the order was made (within one request, prepareJitOrder has
+    // already refused it). A configuration fault, which cancels the order, as
+    // an unpriced one does.
     throw await failCheckoutCreation(
       prepared.order.order_id,
       {

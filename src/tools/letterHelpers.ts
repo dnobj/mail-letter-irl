@@ -39,9 +39,9 @@ import {
   type Stationery
 } from "../render/index.js";
 import { getSendEligibility, type SendEligibility } from "../services/commerceService.js";
-import type { MailOption } from "../config/products.js";
+import { isPackPayable, type MailOption } from "../config/products.js";
 import { callingApp, type ClientProfile } from "../auth/clientProfiles.js";
-import { letterPacksPageUrl } from "../config/sendConfirmation.js";
+import { isSendConfirmationEnabled, letterPacksPageUrl, sendConfirmationUrl } from "../config/sendConfirmation.js";
 import { giftCardSummary, resolveGiftSendChoice, type GiftSendChoice } from "./giftSendChoice.js";
 import { giftLetterPageCopy } from "../services/giftCardRenderer.js";
 import { rememberedPrefix, type PreviewStationery } from "./stationeryInput.js";
@@ -840,21 +840,43 @@ export function giftSendEligibility(eligibility: SendEligibility): SendEligibili
  * there shows no Pay & Send and no Buy a Letter Pack, and the pack link is the
  * website's letter packs page, where the person buys one. Apply it before
  * giftSendEligibility, whose reason for a gift draft is the truer one.
+ *
+ * Mail no pack pays for (#579) is paid on the confirmation page there, with
+ * Pay & Send: the page's address goes with it, for the card's button, while
+ * the send rule gives the page.
  */
-export function appSendEligibility(eligibility: SendEligibility, client: ClientProfile): SendEligibility {
+export function appSendEligibility(
+  eligibility: SendEligibility,
+  client: ClientProfile,
+  draftId?: string
+): SendEligibility {
   if (client.inAppPurchases) {
     return eligibility;
   }
+  const paidPerSend = eligibility.packPays === false;
   return {
     payAndSend: {
       available: false,
-      unavailableReason: "Pay & Send isn't available in this app."
+      unavailableReason: "Pay & Send isn't available in this app.",
+      ...(paidPerSend && draftId && isSendConfirmationEnabled() ? { pageUrl: sendConfirmationUrl(draftId) } : {})
     },
     letterPack: {
       available: false,
       purchaseUrl: letterPacksPageUrl()
-    }
+    },
+    ...(paidPerSend ? { packPays: false as const } : {})
   };
+}
+
+/**
+ * Why a preview cannot be sent from the balance as it stands: too few
+ * letters, or mail a pack does not pay for (#579), which is paid per send.
+ */
+export const PAID_PER_SEND_REASON =
+  "Letter packs and gift letters pay for one-page letters and 6x9 postcards; this one is paid with Pay & Send.";
+
+export function reasonCannotSend(option: MailOption): string {
+  return isPackPayable(option) ? "Not enough letters in your balance." : PAID_PER_SEND_REASON;
 }
 
 /**
@@ -867,9 +889,10 @@ export function previewSendEligibility(
   requiredCredits: number,
   option: MailOption,
   isGift: boolean,
-  client: ClientProfile
+  client: ClientProfile,
+  draftId?: string
 ): SendEligibility {
-  const eligibility = appSendEligibility(getSendEligibility(available, requiredCredits, option), client);
+  const eligibility = appSendEligibility(getSendEligibility(available, requiredCredits, option), client, draftId);
   return isGift ? giftSendEligibility(eligibility) : eligibility;
 }
 
@@ -918,10 +941,12 @@ export async function createLetterDraftAndBuildOutput(
     context
   } = params;
 
-  // Calculate credits
+  // Calculate credits, only where a pack pays (#579). A letter is one page
+  // until room to write gives its option the pages it prints.
+  const option: MailOption = { mailType: "letter" };
   const requiredCredits = estimateRequiredCredits(bodyText, signOff);
   const available = context.user.creditsRemaining;
-  const canSendNow = gift.isGift || available >= requiredCredits;
+  const canSendNow = gift.isGift || (isPackPayable(option) && available >= requiredCredits);
   const lettersRequired = Math.max(1, Math.ceil(requiredCredits / 2));
 
   context.logger.info(
@@ -1023,8 +1048,8 @@ export async function createLetterDraftAndBuildOutput(
     previewHtml,
     lettersRequired,
     canSendNow,
-    reasonCannotSend: canSendNow ? undefined : "Not enough letters in your balance.",
-    sendEligibility: previewSendEligibility(available, requiredCredits, { mailType: "letter" }, gift.isGift, callingApp(context)),
+    reasonCannotSend: canSendNow ? undefined : reasonCannotSend(option),
+    sendEligibility: previewSendEligibility(available, requiredCredits, option, gift.isGift, callingApp(context), draftResult.draftId),
     deliveryClass: DELIVERY_CLASS,
     // A held letter's card says when it goes to the printer, not "in 1-2 days".
     deliveryEstimate: schedule ? scheduleSentence(schedule.output, context.now()) : DELIVERY_ESTIMATE,

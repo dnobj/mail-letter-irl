@@ -62,8 +62,21 @@ export const HANDLED_DRAFT_ERROR_CODES = [
   'JIT_ORDER_NOT_FOUND',
   'JIT_ORDER_NOT_OWNED',
   'JIT_ORDER_NOT_PAID',
+  'PACK_CANNOT_PAY',
   'SCHEDULE_PASSED'
 ] as const;
+
+/**
+ * The refusal for mail a pack or a gift letter does not pay for (#579). Its
+ * own constant: registerTools recognises the code to answer an app with no
+ * checkout with the page that takes the payment instead.
+ */
+export function packCannotPayText(mailType: DraftMailType): string {
+  return (
+    `This ${mailType} is paid with Pay & Send, not from the balance: letter packs and gift letters ` +
+    'pay for one-page letters and 6x9 postcards.'
+  );
+}
 
 export function friendlyDraftError(
   error: unknown,
@@ -132,6 +145,11 @@ export function friendlyDraftError(
     return new Error(
       `The day this ${noun} was to go to the printer has passed, so it can no longer arrive by its date. Please preview it again with a new arrival date, or with none to send it as soon as possible.`
     );
+  }
+  // #579. Upstream interpolates the draft id; this keeps the code, so the
+  // tool layer can still tell this refusal from the others.
+  if (code === 'PACK_CANNOT_PAY') {
+    return Object.assign(new Error(packCannotPayText(mailType)), { code });
   }
   if (code === 'DRAFT_CHECKOUT_PENDING') {
     return new Error(

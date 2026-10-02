@@ -172,6 +172,18 @@ describe("published output-schema parity (#278)", () => {
 
     expect(Object.keys(payAndSend).sort()).toEqual(zodKeys);
   });
+  it("declares the same sendEligibility fields on both served layers, packPays alike (#579)", () => {
+    for (const name of ["quote_and_preview_letter", "quote_and_preview_postcard"]) {
+      const eligibility = (
+        getManifestTool(name)?.outputSchema as {
+          properties: { sendEligibility: { properties: Record<string, { const?: unknown; description?: string }> } };
+        }
+      ).properties.sendEligibility.properties;
+      expect(Object.keys(eligibility).sort(), name).toEqual(Object.keys(sendEligibilityZ.shape).sort());
+      expect(eligibility.packPays.const, name).toBe(false);
+      expect(eligibility.packPays.description, name).toBe(sendEligibilityZ.shape.packPays.description);
+    }
+  });
   it.each([
     ["quote_and_preview_letter", quoteAndPreviewOutputZ],
     ["quote_and_preview_postcard", quoteAndPreviewPostcardOutputZ]
@@ -247,7 +259,15 @@ describe("request_send schema (#535)", () => {
     const zodKeys = Object.keys(requestSendOutputZ.shape);
     expect(zodKeys).toContain("schedule");
     expect(Object.keys(requestSendOutputSchema.properties ?? {})).toEqual(zodKeys);
-    expect(requestSendOutputSchema.required).toEqual(zodKeys.filter((key) => key !== "schedule"));
+    expect(requestSendOutputSchema.required).toEqual(
+      zodKeys.filter((key) => key !== "schedule" && key !== "paidPerSend")
+    );
+    // Mail paid on the page (#579): optional, true only, worded alike on both layers.
+    const paid = requestSendOutputZ.shape.paidPerSend;
+    expect(paid.isOptional()).toBe(true);
+    const paidJson = (requestSendOutputSchema.properties as Record<string, { const?: unknown; description?: string }>).paidPerSend;
+    expect(paidJson.const).toBe(true);
+    expect(paid.description).toBe(paidJson.description);
     const served = requestSendOutputZ.shape.schedule;
     expect(served.isOptional()).toBe(true);
     expect(Object.keys(served.unwrap().shape)).toEqual(["arriveBy", "mailOn"]);
