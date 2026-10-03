@@ -14,7 +14,7 @@ export interface PreviewSignature {
   asked?: boolean;
   /** Whether signatures are offered: only then does the preview say what it printed. */
   offered?: boolean;
-  /** Whether the account has a saved signature; not read when the call asked for none. */
+  /** Whether the account has a saved signature: read even when the call asked for none, so the output can say so. */
   saved?: boolean;
 }
 
@@ -35,7 +35,9 @@ export interface PreviewSignatureOutput {
  *
  * While signatures are not offered the argument is withheld from the served
  * schemas, so a call that names it anyway is refused rather than printed
- * unsigned. Left out, nothing is read.
+ * unsigned. While they are offered the saved signature is read even for
+ * `false`, so the output says whether one is saved: the card offers its switch
+ * only then (#615 review round 1).
  */
 export async function chooseSignature(asked: boolean | undefined, context: ToolContext): Promise<PreviewSignature> {
   if (!isSignaturesOffered()) {
@@ -44,8 +46,8 @@ export async function chooseSignature(asked: boolean | undefined, context: ToolC
     }
     return {};
   }
-  if (asked === false) return { asked, offered: true };
   const saved = await getSignature(context.user.userId);
+  if (asked === false) return { asked, offered: true, saved: saved !== null };
   if (!saved) {
     if (asked === true) {
       throw new SignatureRefusedError(
@@ -68,8 +70,9 @@ export async function chooseSignature(asked: boolean | undefined, context: ToolC
  */
 export function previewSignatureOutput(signature: PreviewSignature | undefined, printed: boolean): PreviewSignatureOutput | undefined {
   if (!signature?.offered) return undefined;
-  if (signature.asked !== undefined) return { printed, source: 'asked' };
-  return signature.saved ? { printed, source: 'remembered' } : { printed: false, source: 'none_saved' };
+  // None saved, whatever the call asked: nothing to sign with (#615 review round 1).
+  if (!signature.saved) return { printed: false, source: 'none_saved' };
+  return { printed, source: signature.asked !== undefined ? 'asked' : 'remembered' };
 }
 
 /**

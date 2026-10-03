@@ -235,6 +235,8 @@
     // page drawn again, as a restyle is. The account remembers the choice.
     function setSignature() {
       if (state.busy || state.held || !state.draftId || typeof host.callTool !== "function" || !signature.offered) return;
+      // A press a host still delivers to a hidden switch (after a send) does nothing.
+      if (signatureRow && signatureRow.style.display === "none") return;
       if (typeof options.idle === "function" && !options.idle()) return;
       var draftId = state.draftId;
       var wanted = !signature.on;
@@ -280,7 +282,19 @@
         .catch(function (error) {
           if (state.draftId !== draftId) return;
           state.error = true;
-          state.message = options.readableError(error);
+          var text = options.readableError(error);
+          // The signature was removed since the preview (SIGNATURE_NOT_SAVED): the
+          // refusal is written for the model, so the card says it in the
+          // person's words, and puts the switch away (#615 review round 1).
+          // Found anywhere in the text, as a host may wrap it (#434).
+          if (text.indexOf("No signature is saved") !== -1) {
+            state.message = "There's no saved signature to add now. Save one in the chat, or on your Letter IRL settings page.";
+            signature.offered = false;
+            signature.on = false;
+            if (signatureRow) signatureRow.style.display = "none";
+          } else {
+            state.message = text;
+          }
         })
         .then(function () {
           if (state.draftId !== draftId) return;
@@ -604,11 +618,6 @@
       // The stationery as this card last set or saw it, or null.
       stationery: function () {
         return state.stationery;
-      },
-      // Whether the draft prints the saved signature, as this card last set
-      // or saw it (#608); null where the switch is not offered.
-      signed: function () {
-        return signature.offered ? signature.on : null;
       },
       busy: function () {
         return state.busy;

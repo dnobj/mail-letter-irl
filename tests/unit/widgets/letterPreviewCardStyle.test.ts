@@ -731,3 +731,113 @@ describe('the Signature switch (#608 part 4b)', () => {
     expect(card.drawn()).toContain(SIGNATURE_IMAGE);
   });
 });
+
+describe('the Signature switch against its answers (#615 review round 1)', () => {
+  const SIGNED_PAGE = page('Dear Sam,\nPat', '<image data-role="signature" href="data:image/png;base64,AA==" x="72" y="300" width="180" height="45"/>');
+  const SIGNATURE_IMAGE = 'data:image/png;base64,AA==';
+  const signed = (printed: boolean, source = 'remembered', draftId = 'draft_0001') => ({
+    ...output({ theme: 'classic', source: 'default' }),
+    draftId,
+    signature: { printed, source }
+  });
+  const toggle = (card: ReturnType<typeof mount>) => card.document.getElementById('signature-switch') as HTMLButtonElement;
+  const send = (card: ReturnType<typeof mount>) => card.document.getElementById('send-button') as HTMLButtonElement;
+  const status = (structured: Json, previewHtml = SIGNED_PAGE) => ({
+    result: {
+      content: [],
+      structuredContent: { draftId: 'draft_0001', status: 'ready', deliveryEstimate: 'Mailed in 1-2 business days', stationery: { theme: 'classic' }, ...structured },
+      _meta: { previewHtml }
+    }
+  });
+
+  it('is offered for a preview asked to leave it off, which says a signature is saved', async () => {
+    const card = mount();
+    await card.show(signed(false, 'asked'));
+    expect(card.visible('signature-row')).toBe(true);
+    expect(toggle(card).getAttribute('aria-checked')).toBe('false');
+  });
+
+  it.each([
+    ['refused', { result: { isError: true, content: [{ type: 'text', text: 'The signature takes 3 lines, and this letter has no room for them on one page.' }] } }],
+    ['rejected by the host', { error: { code: -32000, message: 'The signature takes 3 lines, and this letter has no room for them on one page.' } }]
+  ])('says a call %s, and lets the person go on: the switch, Send and the page as they were', async (_label, reply) => {
+    const card = mount();
+    await card.show(signed(false));
+    await card.click('signature-switch');
+    await card.answer(reply as Json, 'set_letter_signature');
+    expect(card.text('style-note')).toContain('no room for them');
+    expect(toggle(card).getAttribute('aria-checked')).toBe('false');
+    expect(toggle(card).getAttribute('aria-disabled')).toBe('false');
+    expect(send(card).disabled).toBe(false);
+    expect(card.drawn()).not.toContain(SIGNATURE_IMAGE);
+  });
+
+  it("says a signature removed since the preview in the person's words, and puts the switch away", async () => {
+    const card = mount();
+    await card.show(signed(false));
+    await card.click('signature-switch');
+    await card.answer(
+      {
+        result: {
+          isError: true,
+          content: [{ type: 'text', text: 'No signature is saved. Ask the person for a photo of their signature and save it with set_signature, then try again.' }]
+        }
+      },
+      'set_letter_signature'
+    );
+    expect(card.text('style-note')).toBe("There's no saved signature to add now. Save one in the chat, or on your Letter IRL settings page.");
+    expect(card.visible('signature-row')).toBe(false);
+    expect(send(card).disabled).toBe(false);
+  });
+
+  it('says the signature may have changed for an answer without what it set, or for another letter', async () => {
+    for (const result of [
+      { content: [{ type: 'text', text: 'Done.' }] },
+      { content: [], structuredContent: { draftId: 'draft_9999', signature: { printed: true, source: 'asked' } }, _meta: { previewHtml: SIGNED_PAGE } }
+    ]) {
+      const card = mount();
+      await card.show(signed(false));
+      await card.click('signature-switch');
+      await card.answer({ result }, 'set_letter_signature');
+      expect(card.text('style-note')).toBe('The signature may have changed. Make the preview again to see it.');
+      expect(toggle(card).getAttribute('aria-checked')).toBe('false');
+      expect(card.drawn()).not.toContain(SIGNATURE_IMAGE);
+    }
+  });
+
+  it('takes the new state from an answer without its page, and says the page did not come back', async () => {
+    const card = mount();
+    await card.show(signed(false));
+    await card.click('signature-switch');
+    await card.answer(
+      { result: { content: [], structuredContent: { draftId: 'draft_0001', signature: { printed: true, source: 'asked' }, ...canSend } } },
+      'set_letter_signature'
+    );
+    expect(toggle(card).getAttribute('aria-checked')).toBe('true');
+    expect(card.text('style-note')).toBe('The signature is changed, but its page did not come back here. Make the preview again to see it.');
+  });
+
+  it("does not let a status answer older than a switch undo it, during the call or after", async () => {
+    const card = mount();
+    await card.show(signed(false));
+    await card.click('signature-switch');
+    // During: the card is waiting on the switch.
+    await card.answer(status({ signature: false }, CLASSIC_PAGE), 'get_draft_status');
+    expect(toggle(card).getAttribute('aria-checked')).toBe('true');
+    await card.answer({ result: { content: [], structuredContent: { draftId: 'draft_0001', signature: { printed: true, source: 'asked' }, ...canSend }, _meta: { previewHtml: SIGNED_PAGE } } }, 'set_letter_signature');
+    expect(toggle(card).getAttribute('aria-checked')).toBe('true');
+    expect(card.drawn()).toContain(SIGNATURE_IMAGE);
+  });
+
+  it("draws a new draft from its own preview, and an answer about the old one changes nothing", async () => {
+    const card = mount();
+    await card.show(signed(false));
+    await card.click('signature-switch');
+    // Another preview arrives while the call is out.
+    await card.show(signed(true, 'remembered', 'draft_0002'), { previewHtml: SIGNED_PAGE });
+    expect(toggle(card).getAttribute('aria-checked')).toBe('true');
+    await card.answer({ result: { content: [], structuredContent: { draftId: 'draft_0001', signature: { printed: true, source: 'asked' }, ...canSend }, _meta: { previewHtml: CLASSIC_PAGE } } }, 'set_letter_signature');
+    expect(toggle(card).getAttribute('aria-checked')).toBe('true');
+    expect(card.drawn()).toContain(SIGNATURE_IMAGE);
+  });
+});

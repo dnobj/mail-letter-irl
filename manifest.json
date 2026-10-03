@@ -239,7 +239,7 @@
                   "remembered",
                   "none_saved"
                 ],
-                "description": "Why: asked for in the call (signature), the account's remembered choice, or none_saved when the account has no signature"
+                "description": "Why: asked for in the call (signature), the account's remembered choice, or none_saved when the account has no signature, whatever the call asked"
               }
             },
             "required": [
@@ -684,7 +684,7 @@
                   "remembered",
                   "none_saved"
                 ],
-                "description": "Why: asked for in the call (signature), the account's remembered choice, or none_saved when the account has no signature"
+                "description": "Why: asked for in the call (signature), the account's remembered choice, or none_saved when the account has no signature, whatever the call asked"
               }
             },
             "required": [
@@ -1129,7 +1129,7 @@
                   "remembered",
                   "none_saved"
                 ],
-                "description": "Why: asked for in the call (signature), the account's remembered choice, or none_saved when the account has no signature"
+                "description": "Why: asked for in the call (signature), the account's remembered choice, or none_saved when the account has no signature, whatever the call asked"
               }
             },
             "required": [
