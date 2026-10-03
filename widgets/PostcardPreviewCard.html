@@ -1144,14 +1144,16 @@
         return fileObjectUsable(input.image);
       }
 
-      // A collage's list of photos the card can pass back (#616): none, or each
-      // photo a file object with an address (images) or an https link (imageUrls),
-      // a blank slot being nothing. The server refuses a sandbox path in either,
-      // by its place, on every press, and a card cannot pick several photos again.
+      // A collage's list of photos the card can pass back (#616): none (absent, a
+      // blank string, or slots that are all blank), or every photo a file object
+      // with an address (images) or an https link (imageUrls). The server refuses
+      // a sandbox path in either, and a blank slot beside real photos, by its
+      // place, on every press, and a card cannot pick several photos again.
       function photoListRepeatable(photos, usable) {
-        if (photos === undefined || photos === null || photos === "") return true;
+        const blank = (photo) => typeof photo === "string" && photo.trim() === "";
+        if (photos === undefined || blank(photos)) return true;
         if (!Array.isArray(photos)) return false;
-        return photos.every((photo) => (typeof photo === "string" && photo.trim() === "") || usable(photo));
+        return photos.every(blank) || photos.every(usable);
       }
 
       // The call this card can repeat faithfully, or null.
@@ -1182,6 +1184,8 @@
       function imageRequest() {
         const asked = hostRequest();
         if (!asked) return null;
+        // One picked image cannot repair a collage (it takes images or imageUrls, never image beside them).
+        if (namesCollage(asked.input)) return null;
         if (imageArgumentRepeatable(asked.input.image) && imageUrlRepeatable(asked.input)) return null;
         const { image, imageUrl, ...args } = asked.input;
         return { tool: asked.tool, args };

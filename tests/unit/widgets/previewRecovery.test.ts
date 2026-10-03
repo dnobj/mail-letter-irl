@@ -3059,8 +3059,7 @@ describe('PostcardPreviewCard waiting for a collage (#616)', () => {
   it.each([
     ['links', { imageUrls: photos.slice(0, 2) }],
     ['three links', { imageUrls: photos }],
-    ['attachments', { images: files }],
-    ['links among blank slots', { imageUrls: ['', photos[0], ' ', photos[1]] }]
+    ['attachments', { images: files }]
   ])('waits 30 s more than for a photo, once, when asked for %s, before it offers to create the preview', async (_name, extra) => {
     const harness = mount(POSTCARD, { toolInput: without(extra) });
     await flush();
@@ -3077,6 +3076,17 @@ describe('PostcardPreviewCard waiting for a collage (#616)', () => {
     expect(harness.pendingTimers()).toEqual([]);
     // The card never repeats a call by itself.
     expect(harness.calls).toEqual([]);
+  });
+
+  it('counts the photos among blank slots for the extra wait, as the server does', async () => {
+    const harness = mount(POSTCARD, { toolInput: without({ imageUrls: ['', photos[0], ' ', photos[1]] }) });
+    await flush();
+    await harness.runTimer(45000);
+    expect(harness.visible('empty-state')).toBe(false);
+    expect(harness.pendingTimers().map(timer => timer.delay)).toEqual([30000]);
+    await harness.runTimer(30000);
+    expect(harness.visible('empty-state')).toBe(true);
+    expect(harness.pendingTimers()).toEqual([]);
   });
 
   it('draws a result that lands in the extra wait, and arms nothing more', async () => {
@@ -3113,7 +3123,8 @@ describe('PostcardPreviewCard waiting for a collage (#616)', () => {
   it.each([
     ['links', { imageUrls: photos.slice(0, 2) }],
     ['attachments with an address', { images: files }],
-    ['links with a blank slot beside them', { imageUrls: ['', photos[0], photos[1]] }]
+    ['lists of blank slots only beside a photo', { imageUrl: photos[0], images: ['', ''], imageUrls: [' '] }],
+    ['a whitespace string for a list beside a photo', { imageUrl: photos[0], images: '  ' }]
   ])('offers to create the preview again for %s, repeating exactly what the host passed', async (_name, extra) => {
     const harness = mount(POSTCARD, { toolInput: without(extra) });
     await flush();
@@ -3129,7 +3140,10 @@ describe('PostcardPreviewCard waiting for a collage (#616)', () => {
     ['a file object with no address', { images: [files[0], { file_id: 'file-3', download_url: '' }] }],
     ['an http link', { imageUrls: [photos[0], 'http://example.com/2.jpg'] }],
     ['a sandbox path among links', { imageUrls: [photos[0], '/mnt/data/b.png'] }],
-    ['a list that is a string', { imageUrls: 'https://example.com/a.jpg' }]
+    ['a list that is a string', { imageUrls: 'https://example.com/a.jpg' }],
+    ['a blank slot beside links', { imageUrls: ['', photos[0], photos[1]] }],
+    ['a blank slot beside attachments', { images: ['', files[0], files[1]] }],
+    ['null for a list', { imageUrl: photos[0], images: null }]
   ])('does not offer it for %s, which the server refuses on every press', async (_name, extra) => {
     const harness = mount(POSTCARD, { toolInput: without(extra) });
     await flush();
@@ -3138,5 +3152,22 @@ describe('PostcardPreviewCard waiting for a collage (#616)', () => {
     expect(harness.visible('retry-button')).toBe(false);
     expect(harness.text('empty-message')).toContain('Otherwise, ask for the preview again in the chat.');
     expect(harness.calls).toEqual([]);
+  });
+
+  it('offers no pick-again beside a collage, which one picked image cannot repair', async () => {
+    const harness = mount(POSTCARD, {
+      toolInput: without({ image: '/mnt/data/a.png', images: files }),
+      fileApis: {
+        selectFiles: () => [{ fileId: 'file_pick', fileName: 'beach.png', mimeType: 'image/png' }],
+        uploadFile: () => ({ fileId: 'file_pick' }),
+        getFileDownloadUrl: () => ({ downloadUrl: photos[0] })
+      }
+    });
+    await flush();
+    await waitsRunOut(harness);
+    expect(harness.visible('empty-state')).toBe(true);
+    expect(harness.visible('retry-button')).toBe(false);
+    expect(harness.visible('choose-image-button')).toBe(false);
+    expect(harness.visible('upload-image-button')).toBe(false);
   });
 });

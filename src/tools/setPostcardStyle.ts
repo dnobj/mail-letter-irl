@@ -214,7 +214,7 @@ async function handler(input: SetPostcardStyleInput, context: ToolContext): Prom
     throw refused(
       'COLLAGE_SIZE',
       'A collage keeps the size it was made at: its photos were read once and are not kept, so they cannot be arranged again. ' +
-        'To change the size, make a new preview with quote_and_preview_postcard: the same photos in images or imageUrls, the same message and front, and the size you want. The postcard stays as it is.',
+        'To change the size, make a new preview with quote_and_preview_postcard: the same photos in images or imageUrls, the same message, layout, caption and place, and the size you want. The postcard stays as it is.',
       context
     );
   }
