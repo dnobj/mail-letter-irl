@@ -84,7 +84,8 @@ describe('the signature tools in tools/list (#608)', () => {
       expect(Object.keys((byName[name].outputSchema as Schema).properties), name).not.toContain('signatureImage');
     }
 
-    expect(byName.set_signature.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: true, idempotentHint: false });
+    // It fetches its picture from a link, as the image previews do.
+    expect(byName.set_signature.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true });
     expect(byName.get_signature.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false });
     expect(byName.clear_signature.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: true, idempotentHint: true });
   });

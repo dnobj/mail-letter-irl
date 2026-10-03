@@ -10,7 +10,12 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'http';
-import { readRequestBody, RequestBodyTooLargeError, RequestBodyTimeoutError } from '../utils/requestBody.js';
+import {
+  readRequestBody,
+  RequestBodyTooLargeError,
+  RequestBodyTimeoutError,
+  SIGNATURE_BODY_LIMIT_BYTES
+} from '../utils/requestBody.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 import { authenticateRestRequest, sendRestAuthFailure } from './middleware/restAuth.js';
 import { rateLimitAccount } from './middleware/rateLimit.js';
@@ -23,12 +28,8 @@ import { signatureImageUri } from '../tools/signatureShared.js';
 
 export const SIGNATURE_API_PATH = '/api/signature';
 
-/**
- * A picture arrives as a data URI in JSON. The page shrinks a photo to 2000
- * px before sending it, so 4 MB of body (about 3 MB of picture) is generous;
- * the JSON routes' own limit is for small objects.
- */
-export const SIGNATURE_BODY_LIMIT_BYTES = 4 * 1024 * 1024;
+/** The picture arrives as a data URI in JSON, under its own limit (SIGNATURE_BODY_LIMIT_BYTES). */
+export { SIGNATURE_BODY_LIMIT_BYTES };
 
 const DATA_URI = /^data:image\/(?:png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/;
 
@@ -127,7 +128,7 @@ export async function handleSignatureApiRequest(
     return true;
   } catch (error) {
     if (error instanceof RequestBodyTooLargeError) {
-      sendJson(res, 413, { reason: 'too_large', message: 'That picture is too large. Please use one under 3MB.' });
+      sendJson(res, 413, { reason: 'too_large', message: 'That picture is too large. Please send a smaller one.' });
       return true;
     }
     if (error instanceof RequestBodyTimeoutError) {

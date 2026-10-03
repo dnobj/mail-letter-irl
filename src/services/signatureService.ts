@@ -73,8 +73,8 @@ export async function saveSignature(userId: string, image: CleanedSignature): Pr
       [userId]
     );
     if (!account.rows[0] || account.rows[0].erased_at) return { ok: false, refusal: 'account_closed' } as const;
-    const before = await client.query('SELECT 1 FROM user_signatures WHERE user_id = $1', [userId]);
-    const saved = await client.query<Omit<SignatureRow, 'image_png'>>(
+    // inserted: the row is new. An upsert that updated leaves its own transaction in xmax.
+    const saved = await client.query<Omit<SignatureRow, 'image_png'> & { inserted: boolean }>(
       `INSERT INTO user_signatures (user_id, image_png, width, height)
        VALUES ($1, $2, $3, $4)
        ON CONFLICT (user_id) DO UPDATE
@@ -83,10 +83,10 @@ export async function saveSignature(userId: string, image: CleanedSignature): Pr
              height = EXCLUDED.height,
              use_by_default = TRUE,
              updated_at = NOW()
-       RETURNING width, height, use_by_default, created_at, updated_at`,
+       RETURNING width, height, use_by_default, created_at, updated_at, (xmax = 0) AS inserted`,
       [userId, image.png, image.width, image.height]
     );
-    return { ok: true, signature: signatureOf(saved.rows[0]), replaced: before.rows.length > 0 } as const;
+    return { ok: true, signature: signatureOf(saved.rows[0]), replaced: !saved.rows[0].inserted } as const;
   });
 }
 

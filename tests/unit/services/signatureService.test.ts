@@ -59,10 +59,10 @@ describe('getSignature', () => {
 });
 
 describe('saveSignature', () => {
-  const saved = { width: 300, height: 90, use_by_default: true, created_at: CREATED, updated_at: UPDATED };
+  const saved = { width: 300, height: 90, use_by_default: true, created_at: CREATED, updated_at: UPDATED, inserted: true };
 
   it('locks the account, saves the picture, and turns it on for the next previews', async () => {
-    const client = inTransaction([{ erased_at: null }], [], [saved]);
+    const client = inTransaction([{ erased_at: null }], [saved]);
     expect(await saveSignature(USER, { png: PNG, width: 300, height: 90 })).toEqual({
       ok: true,
       replaced: false,
@@ -74,22 +74,21 @@ describe('saveSignature', () => {
         updatedAt: UPDATED.toISOString()
       }
     });
-    const [lock, before, upsert] = client.query.mock.calls;
+    expect(client.query).toHaveBeenCalledTimes(2);
+    const [lock, upsert] = client.query.mock.calls;
     expect(flat(lock[0])).toBe('SELECT erased_at FROM users WHERE user_id = $1 FOR UPDATE');
     expect(lock[1]).toEqual([USER]);
-    expect(flat(before[0])).toBe('SELECT 1 FROM user_signatures WHERE user_id = $1');
-    expect(before[1]).toEqual([USER]);
     expect(flat(upsert[0])).toBe(
       'INSERT INTO user_signatures (user_id, image_png, width, height) VALUES ($1, $2, $3, $4) ' +
         'ON CONFLICT (user_id) DO UPDATE SET image_png = EXCLUDED.image_png, width = EXCLUDED.width, ' +
         'height = EXCLUDED.height, use_by_default = TRUE, updated_at = NOW() ' +
-        'RETURNING width, height, use_by_default, created_at, updated_at'
+        'RETURNING width, height, use_by_default, created_at, updated_at, (xmax = 0) AS inserted'
     );
     expect(upsert[1]).toEqual([USER, PNG, 300, 90]);
   });
 
-  it('says when it replaced a signature saved before', async () => {
-    inTransaction([{ erased_at: null }], [{ '?column?': 1 }], [saved]);
+  it('says when it replaced a signature saved before: the upsert updated rather than inserted', async () => {
+    inTransaction([{ erased_at: null }], [{ ...saved, inserted: false }]);
     expect(await saveSignature(USER, { png: PNG, width: 300, height: 90 })).toMatchObject({ ok: true, replaced: true });
   });
 

@@ -2,26 +2,33 @@
  * A signature's picture, cleaned for print (#608, concept 3).
  *
  * A person photographs their signature: ink on paper, often grey, with a
- * shadow across it, sometimes turned by the phone. What prints must be dark
- * ink on white, cropped to the ink, so the letter shows a signature and not a
+ * shadow across it or a desk at the edges, sometimes turned by the phone, and
+ * sometimes a stray mark beside it. What prints must be dark ink on white,
+ * cropped to the signature, so the letter shows a signature and not a
  * photograph of paper. The steps:
  *
  * 1. Turn the picture upright by its EXIF orientation, put any transparency
- *    on white, and make it grey, no larger than 2000 px on its longest edge.
- * 2. Estimate the paper's light at every point: dilate the picture (each
- *    pixel takes the lightest near it), which lifts the thin strokes of ink
- *    into the paper around them, then blur what is left.
+ *    on white, and make it grey, no larger than 1600 px on its longest edge.
+ * 2. Estimate the paper's light at every point with a grey-level closing: a
+ *    maximum filter, then a minimum filter, over a window wider than any pen
+ *    stroke. Thin dark strokes vanish into the paper around them, while a
+ *    shadow, a desk or a grey sheet, being larger than the window, stays as
+ *    it is, edges included (van Herk and Gil-Werman's filters, linear time).
  * 3. Divide each pixel by its paper. Paper comes out near 1 wherever the light
  *    fell; ink well under it. Map 0.40 and below to black and 0.75 and above
- *    to white, so a shadow or a grey sheet goes white and the ink stays dark.
- * 4. Crop to the ink, with a small margin, and fit it inside 1200 x 400 px as
- *    a grayscale PNG.
+ *    to white.
+ * 4. Find the ink's connected pieces. Keep the largest and every piece near
+ *    it, and whiten the rest: a speck in a corner neither prints nor stretches
+ *    the crop, while an i's dot stays with its word.
+ * 5. Crop to what was kept, with a small margin, and fit it inside 1200 x 400
+ *    px as a grayscale PNG.
  *
- * A picture with almost no ink after this is refused (blank paper, or light
- * ink on dark), and so is one whose ink fills more than a third of its box (a
- * photograph, not a signature). Pixels made here are opened with plain sharp:
- * they are ours and already bounded; the picture itself is opened by
- * openImage, with the pixel ceiling, under the decode gate.
+ * Refused: a picture with too little ink (blank paper, or light ink on dark),
+ * one whose ink fills more than a third of its own box (a photograph, not a
+ * signature), and a picture or a signature too small to print well. Pixels
+ * made here are opened with plain sharp: they are ours and already bounded;
+ * the picture itself is opened by openImage, with the pixel ceiling, under
+ * the decode gate.
  */
 
 import sharp, { type OutputInfo } from 'sharp';
@@ -30,22 +37,29 @@ import { ImageProcessingError, openImage, readImageHeader, runImageDecode } from
 /** The largest signature kept: wide and short, as signatures are. */
 export const SIGNATURE_MAX_SIZE = { width: 1200, height: 400 } as const;
 
-const SIGNATURE_CLEANING = {
+export const SIGNATURE_CLEANING = {
   /** The longest edge looked at: enough for a signature, and bounded work. */
-  analysisEdge: 2000,
+  analysisEdge: 1600,
+  /** The closing's window: this share of the longest edge, and at least minWindow px, always odd. */
+  windowShare: 1 / 30,
+  minWindow: 15,
   /** A pixel at this share of its paper's light, or less, is black... */
   blackAt: 0.4,
   /** ...and at this share or more, white. */
   whiteAt: 0.75,
   /** Darker than this, after cleaning, is ink. */
   inkBelow: 160,
-  /** Less ink than this share of the picture is no signature. */
-  minInkShare: 0.002,
+  /** A piece of ink smaller than this, in pixels, is noise. */
+  noiseArea: 8,
+  /** How far, as a share of the longest edge, a piece may sit from the signature and still be part of it. */
+  reachShare: 0.08,
+  /** Less ink than this, in pixels, is no signature. */
+  minInk: 300,
   /** More ink than this share of its own box is a photograph. */
   maxInkShare: 0.35,
   /** A picture smaller than this cannot hold a signature that prints well. */
   minSource: { longEdge: 150, shortEdge: 50 },
-  /** Ink narrower than this prints as a smudge. */
+  /** A signature narrower than this prints as a smudge. */
   minInkWidth: 60,
 } as const;
 
@@ -67,7 +81,7 @@ const SIGNATURE_TOO_SMALL_MESSAGE =
   'That signature is too small to print well. Photograph it closer, so it fills most of the picture.';
 
 export interface CleanedSignature {
-  /** A grayscale PNG: dark ink on white, cropped to the ink. */
+  /** A grayscale PNG: dark ink on white, cropped to the signature. */
   png: Buffer;
   width: number;
   height: number;
@@ -80,6 +94,128 @@ export interface CleanedSignature {
  */
 export function cleanSignatureImage(input: Buffer, actorId?: string): Promise<CleanedSignature> {
   return runImageDecode(() => cleanSignature(input), actorId);
+}
+
+/**
+ * A maximum (or minimum) over `size` pixels along each row, or each column,
+ * of a `width` x `height` grey image: van Herk and Gil-Werman's filter, three
+ * comparisons a pixel whatever the window. Past the edges counts as neutral:
+ * nothing for a maximum, full white for a minimum.
+ */
+export function rankFilter(
+  source: Uint8Array,
+  width: number,
+  height: number,
+  size: number,
+  along: 'rows' | 'columns',
+  take: 'max' | 'min'
+): Uint8Array {
+  const out = new Uint8Array(source.length);
+  const rows = along === 'rows';
+  const length = rows ? width : height;
+  const lines = rows ? height : width;
+  const step = rows ? 1 : width;
+  const half = size >> 1;
+  const padded = length + 2 * half;
+  const neutral = take === 'max' ? 0 : 255;
+  const pick = take === 'max' ? Math.max : Math.min;
+  const value = new Uint8Array(padded);
+  const forward = new Uint8Array(padded);
+  const backward = new Uint8Array(padded);
+  for (let line = 0; line < lines; line += 1) {
+    const base = rows ? line * width : line;
+    value.fill(neutral);
+    for (let i = 0; i < length; i += 1) value[i + half] = source[base + i * step];
+    for (let start = 0; start < padded; start += size) {
+      const end = Math.min(start + size, padded);
+      forward[start] = value[start];
+      for (let i = start + 1; i < end; i += 1) forward[i] = pick(forward[i - 1], value[i]);
+      backward[end - 1] = value[end - 1];
+      for (let i = end - 2; i >= start; i -= 1) backward[i] = pick(backward[i + 1], value[i]);
+    }
+    // Pixel i's window is padded [i, i + size - 1]: the backward run from its
+    // start meets the forward run to its end, at most one block apart.
+    for (let i = 0; i < length; i += 1) {
+      const last = i + size - 1;
+      out[base + i * step] = last < padded ? pick(backward[i], forward[last]) : backward[i];
+    }
+  }
+  return out;
+}
+
+/** A grey-level closing: the maximum over a square window, then the minimum. */
+export function closing(source: Uint8Array, width: number, height: number, size: number): Uint8Array {
+  const lightest = rankFilter(rankFilter(source, width, height, size, 'rows', 'max'), width, height, size, 'columns', 'max');
+  return rankFilter(rankFilter(lightest, width, height, size, 'rows', 'min'), width, height, size, 'columns', 'min');
+}
+
+interface Piece {
+  id: number;
+  area: number;
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
+/** The ink's 8-connected pieces, each pixel labelled with its piece's id (from 1). */
+function pieces(ink: Uint8Array, width: number, height: number): { labels: Int32Array; found: Piece[] } {
+  const labels = new Int32Array(ink.length);
+  const stack = new Int32Array(ink.length);
+  const found: Piece[] = [];
+  for (let start = 0; start < ink.length; start += 1) {
+    if (!ink[start] || labels[start]) continue;
+    const piece: Piece = { id: found.length + 1, area: 0, minX: width, minY: height, maxX: -1, maxY: -1 };
+    found.push(piece);
+    let top = 0;
+    stack[top++] = start;
+    labels[start] = piece.id;
+    while (top > 0) {
+      const at = stack[--top];
+      const x = at % width;
+      const y = (at - x) / width;
+      piece.area += 1;
+      if (x < piece.minX) piece.minX = x;
+      if (x > piece.maxX) piece.maxX = x;
+      if (y < piece.minY) piece.minY = y;
+      if (y > piece.maxY) piece.maxY = y;
+      for (let ny = Math.max(0, y - 1); ny <= Math.min(height - 1, y + 1); ny += 1) {
+        for (let nx = Math.max(0, x - 1); nx <= Math.min(width - 1, x + 1); nx += 1) {
+          const next = ny * width + nx;
+          if (ink[next] && !labels[next]) {
+            labels[next] = piece.id;
+            stack[top++] = next;
+          }
+        }
+      }
+    }
+  }
+  return { labels, found };
+}
+
+/** The largest piece and every piece within `reach` of what is kept, growing until none is near. */
+function signaturePieces(found: Piece[], reach: number): { kept: Set<number>; box: Omit<Piece, 'id' | 'area'>; area: number } {
+  const largest = found.reduce((best, piece) => (piece.area > best.area ? piece : best));
+  const kept = new Set([largest.id]);
+  const box = { minX: largest.minX, minY: largest.minY, maxX: largest.maxX, maxY: largest.maxY };
+  let area = largest.area;
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const piece of found) {
+      if (kept.has(piece.id)) continue;
+      const gapX = Math.max(0, piece.minX - box.maxX, box.minX - piece.maxX);
+      const gapY = Math.max(0, piece.minY - box.maxY, box.minY - piece.maxY);
+      if (gapX > reach || gapY > reach) continue;
+      kept.add(piece.id);
+      area += piece.area;
+      box.minX = Math.min(box.minX, piece.minX);
+      box.minY = Math.min(box.minY, piece.minY);
+      box.maxX = Math.max(box.maxX, piece.maxX);
+      box.maxY = Math.max(box.maxY, piece.maxY);
+      grew = true;
+    }
+  }
+  return { kept, box, area };
 }
 
 async function cleanSignature(input: Buffer): Promise<CleanedSignature> {
@@ -111,47 +247,39 @@ async function cleanSignature(input: Buffer): Promise<CleanedSignature> {
     throw new ImageProcessingError('PROCESSING_FAILED', 'Image could not be processed. Please try a different image.');
   }
 
-  const paper = await sharp(grey.data, { raw: { width, height, channels: 1 } })
-    .dilate(Math.max(5, Math.round(Math.min(width, height) / 40)))
-    .blur(Math.max(8, Math.round(Math.min(width, height) / 25)))
-    .raw()
-    .toBuffer();
+  const longest = Math.max(width, height);
+  const window = Math.max(SIGNATURE_CLEANING.minWindow, Math.round(longest * SIGNATURE_CLEANING.windowShare)) | 1;
+  const paper = closing(grey.data, width, height, window);
 
   const { blackAt, whiteAt, inkBelow } = SIGNATURE_CLEANING;
   const cleaned = Buffer.alloc(width * height);
-  let ink = 0;
-  let minX = width;
-  let minY = height;
-  let maxX = -1;
-  let maxY = -1;
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const i = y * width + x;
-      const ratio = grey.data[i] / Math.max(1, paper[i]);
-      const level = Math.round(Math.min(1, Math.max(0, (ratio - blackAt) / (whiteAt - blackAt))) * 255);
-      cleaned[i] = level;
-      if (level < inkBelow) {
-        ink += 1;
-        if (x < minX) minX = x;
-        if (x > maxX) maxX = x;
-        if (y < minY) minY = y;
-        if (y > maxY) maxY = y;
-      }
-    }
+  const ink = new Uint8Array(width * height);
+  for (let i = 0; i < cleaned.length; i += 1) {
+    const ratio = grey.data[i] / Math.max(1, paper[i]);
+    const level = Math.round(Math.min(1, Math.max(0, (ratio - blackAt) / (whiteAt - blackAt))) * 255);
+    cleaned[i] = level;
+    if (level < inkBelow) ink[i] = 1;
   }
 
-  if (ink < width * height * SIGNATURE_CLEANING.minInkShare) {
-    throw new SignatureImageError('NO_SIGNATURE_FOUND', NO_SIGNATURE_FOUND_MESSAGE);
+  const { labels, found } = pieces(ink, width, height);
+  const real = found.filter(piece => piece.area >= SIGNATURE_CLEANING.noiseArea);
+  if (real.length === 0) throw new SignatureImageError('NO_SIGNATURE_FOUND', NO_SIGNATURE_FOUND_MESSAGE);
+  const { kept, box, area } = signaturePieces(real, Math.round(longest * SIGNATURE_CLEANING.reachShare));
+  if (area < SIGNATURE_CLEANING.minInk) throw new SignatureImageError('NO_SIGNATURE_FOUND', NO_SIGNATURE_FOUND_MESSAGE);
+  // Specks and stray marks print as paper.
+  for (let i = 0; i < labels.length; i += 1) {
+    if (labels[i] && !kept.has(labels[i])) cleaned[i] = 255;
   }
+
   const margin = Math.round(Math.min(width, height) * 0.02) + 2;
-  const left = Math.max(0, minX - margin);
-  const top = Math.max(0, minY - margin);
-  const boxWidth = Math.min(width, maxX + margin + 1) - left;
-  const boxHeight = Math.min(height, maxY + margin + 1) - top;
-  if (ink / (boxWidth * boxHeight) > SIGNATURE_CLEANING.maxInkShare) {
+  const left = Math.max(0, box.minX - margin);
+  const top = Math.max(0, box.minY - margin);
+  const boxWidth = Math.min(width, box.maxX + margin + 1) - left;
+  const boxHeight = Math.min(height, box.maxY + margin + 1) - top;
+  if (area / (boxWidth * boxHeight) > SIGNATURE_CLEANING.maxInkShare) {
     throw new SignatureImageError('NOT_A_SIGNATURE', NOT_A_SIGNATURE_MESSAGE);
   }
-  if (maxX - minX + 1 < SIGNATURE_CLEANING.minInkWidth) {
+  if (box.maxX - box.minX + 1 < SIGNATURE_CLEANING.minInkWidth) {
     throw new SignatureImageError('SIGNATURE_TOO_SMALL', SIGNATURE_TOO_SMALL_MESSAGE);
   }
 

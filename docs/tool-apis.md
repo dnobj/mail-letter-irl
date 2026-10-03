@@ -171,13 +171,12 @@ Listed only while signatures are offered (#608, concept 3 in [letter-creator-vis
 - `set_signature`: Saves a picture of the person's handwritten signature for their account, in place of any saved before.
   - **Takes** `image` (a file attached in ChatGPT, through `openai/fileParams`) or `imageUrl` (a link, or `letterirl-upload:latest` for the account's own upload through the card), the file first. Neither is refused (`SIGNATURE_PICTURE_REQUIRED`), and a file the server cannot open is refused as such (`SIGNATURE_PICTURE_UNREADABLE`).
   - **The picture** is fetched as a letter image is (at most 5 MB), then cleaned (`src/services/signatureImage.ts`):
-    - turned upright by its EXIF orientation;
-    - transparency flattened onto white;
-    - each pixel divided by the paper's light around it, so a grey sheet or a shadow goes white and the ink stays dark;
-    - cropped to the ink;
-    - fitted inside 1200 x 400 px, as a grayscale PNG.
+    - turned upright by its EXIF orientation, transparency flattened onto white, and looked at no larger than 1600 px;
+    - each pixel divided by the paper's light at that point, estimated by a grey-level closing (a maximum then a minimum filter over a window wider than a pen stroke). A grey sheet, a gradient, a hard shadow or a desk at the edges goes white, edges included, and the ink stays dark;
+    - the ink's connected pieces found: the largest and those near it are kept, and a stray mark is whitened and left out of the crop;
+    - cropped to what was kept, and fitted inside 1200 x 400 px, as a grayscale PNG. A 16-megapixel photograph takes well under a second.
   - **Refusals**, in words the person can act on:
-    - `NO_SIGNATURE_FOUND`: blank paper, or light ink on dark;
+    - `NO_SIGNATURE_FOUND`: under 300 px of ink as looked at, as blank paper or light ink on dark gives;
     - `NOT_A_SIGNATURE`: ink filling more than a third of its own box, as a photograph's detail does;
     - `SIGNATURE_TOO_SMALL`: a picture under 150 x 50 px, or ink under 60 px wide.
   - **Returns** `saved: true`, `replaced`, and the cleaned `width` and `height`, and a `message`. The cleaned picture goes to a card in `_meta.signatureImage`, never to the model.
@@ -187,7 +186,7 @@ Listed only while signatures are offered (#608, concept 3 in [letter-creator-vis
 
 **The website's routes** (`src/api/signatureApiHandler.ts`), the same service and scopes as the tools, and 404 while signatures are not offered:
 - `GET /api/signature` (`mail:read`): `{ saved: false }`, or `{ saved: true, width, height, savedAt, image }` with the picture as a PNG data URI. `no-store`.
-- `POST /api/signature` (`mail:draft`) with `{ image: <PNG, JPEG or WebP data URI> }`, a body of at most 4 MB: cleans and saves it, and answers as GET does with `replaced`. 400 for a body that is not a picture; 422 `{ reason, message }` for a cleaning refusal or a picture that cannot be opened; 413 too large; 408 too slow; 503 when the image service is busy.
+- `POST /api/signature` (`mail:draft`) with `{ image: <PNG, JPEG or WebP data URI> }`, a body of at most `LETTER_IRL_SIGNATURE_BODY_LIMIT_BYTES` (4 MB): cleans and saves it, and answers as GET does with `replaced`. 400 for a body that is not a picture; 422 `{ reason, message }` for a cleaning refusal or a picture that cannot be opened; 413 too large; 408 too slow; 503 when the image service is busy.
 - `DELETE /api/signature` (`mail:draft`): `{ removed }`.
 
 ## Account, Orders, and Return Address
