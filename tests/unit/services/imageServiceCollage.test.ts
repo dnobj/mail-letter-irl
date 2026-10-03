@@ -43,6 +43,28 @@ async function halves(orientation?: 6): Promise<Buffer> {
   return (orientation === undefined ? base : base.withMetadata({ orientation })).toBuffer();
 }
 
+/**
+ * Red, green and blue in three equal bands, across (left to right) or down (top to bottom). Cropped to the
+ * middle, a cell shows mostly the middle band; stretched, or cropped from an edge, it shows another.
+ */
+async function bands(direction: 'across' | 'down', width: number, height: number): Promise<Buffer> {
+  const colours = ['#ff0000', '#00a000', '#0000ff'];
+  const across = direction === 'across';
+  const length = (across ? width : height) / 3;
+  const tiles = await Promise.all(
+    colours.map(async (background, i) => ({
+      input: await sharp({
+        create: { width: across ? length : width, height: across ? height : length, channels: 3, background },
+      })
+        .png()
+        .toBuffer(),
+      left: across ? i * length : 0,
+      top: across ? 0 : i * length,
+    }))
+  );
+  return sharp({ create: { width, height, channels: 3, background: '#000000' } }).composite(tiles).jpeg({ quality: 95 }).toBuffer();
+}
+
 /** A transparent picture with an opaque red square in the middle. */
 async function squareOnClear(): Promise<Buffer> {
   const square = await sharp({ create: { width: 100, height: 100, channels: 3, background: '#ff0000' } }).png().toBuffer();
@@ -228,6 +250,31 @@ describe('postcard collages (#616)', () => {
       const picture = await pixelsOf((await downloadAndProcessCollageWithPreview(inputs(2), '6x9')).base64DataUri);
       await expectCell(picture, 352, 900, RED, 'the left quarter of the first cell');
       await expectCell(picture, 1009, 900, BLUE, 'the right quarter of the first cell');
+    });
+
+    it('crops to the middle, not by stretching the whole photo into the cell', async () => {
+      // Thirds across, in a 1314 x 1752 cell: the middle half of the photo shows, so the cell's quarter points
+      // fall in the green middle band. Stretched, the same points would be red and blue.
+      serve({ [URLS[0]]: await bands('across', 600, 400), [URLS[1]]: await solid(GREEN) });
+      const picture = await pixelsOf((await downloadAndProcessCollageWithPreview(inputs(2), '6x9')).base64DataUri);
+      await expectCell(picture, 352, 900, GREEN, 'the left quarter of the cell');
+      await expectCell(picture, 1009, 900, GREEN, 'the right quarter of the cell');
+      await expectCell(picture, 40, 900, RED, 'the left edge of the cell');
+      await expectCell(picture, 1310, 900, BLUE, 'the right edge of the cell');
+    });
+
+    it('crops to the middle down a tall photo too, not from its top', async () => {
+      // Thirds down, in a 1314 x 864 cell (the top left of four): the middle 44% of the photo shows, so the cell's
+      // quarter points fall in the green middle band. Cropped from the top they would be red.
+      serve({
+        [URLS[0]]: await bands('down', 400, 600),
+        [URLS[1]]: await solid(GREEN),
+        [URLS[2]]: await solid(BLUE),
+        [URLS[3]]: await solid(YELLOW),
+      });
+      const picture = await pixelsOf((await downloadAndProcessCollageWithPreview(inputs(4), '6x9')).base64DataUri);
+      await expectCell(picture, 681, 240, GREEN, 'the upper quarter of the cell');
+      await expectCell(picture, 681, 672, GREEN, 'the lower quarter of the cell');
     });
 
     it('turns a photo upright by its EXIF orientation before it is cropped', async () => {
