@@ -31,6 +31,7 @@ import {
 import { previewSchedule } from "./arriveByInput.js";
 import { chooseStationery } from "./stationeryInput.js";
 import { chooseSignature } from "./signatureInput.js";
+import { certifiedMailSentence, chooseMailService } from "./mailServiceInput.js";
 import { previewSendStep } from "./previewSendStep.js";
 import { downloadAndProcessLetterImageWithPreview, ImageProcessingError } from "../services/imageService.js";
 import type { ImageFileParam } from "../services/types.js";
@@ -61,6 +62,8 @@ interface QuoteAndPreviewLetterWithImageInput {
   headline?: string;
   /** The person's saved signature on the letter, or not (#608); left out, their last choice. */
   signature?: boolean;
+  /** USPS Certified Mail, with or without an electronic return receipt (#625); served only while it is offered. */
+  mailService?: string;
 }
 
 // ============================================================================
@@ -92,6 +95,10 @@ async function handler(
   // Arrive-by (#535): checked first, so a date that cannot be met is refused
   // before any picture is fetched or address validated.
   const schedule = previewSchedule(input.arriveBy, context);
+
+  // Certified mail (#625): asked for, and offered, checked here for the same reason, and
+  // known before the gift is decided: no gift letter pays for it.
+  const mailService = chooseMailService(input.mailService, context);
 
   // Get image source - REQUIRED. A file ChatGPT resolved, then imageUrl, then
   // a recent upload through the upload card (see previewImageSource.ts).
@@ -162,7 +169,7 @@ async function handler(
   // must print and fit (#534). Not while room to write is offered (#586): the
   // gift then waits for the pages (giftForLayout). The renderer is read once,
   // so every check agrees.
-  const early = await earlyGiftChoice(input, context);
+  const early = await earlyGiftChoice(input, context, mailService);
   const renderer = printRenderer();
 
   // Stationery (#563): the theme, asked for or remembered, and what it
@@ -278,6 +285,7 @@ async function handler(
     schedule,
     stationery,
     signature,
+    mailService,
     context
   });
 }
@@ -296,6 +304,7 @@ export const quoteAndPreviewLetterWithImageTool: McpToolDefinition<
   description: (client) =>
     "Preview a physical letter draft with an enclosed image after the signature. This does not send mail. Requires a real U.S. recipient mailing address. If the user refers to an image already generated, shown, or attached earlier in this conversation, call this tool first to reuse that image. Otherwise prefer a direct file attachment or explicit imageUrl. Use upload_image only after an actual failed handoff or upload problem. " +
     roomToWriteSentence() +
+    certifiedMailSentence() +
     previewSendStep("send_letter", client),
   // readOnly: false because this tool creates draft records in the database
   // See docs/learnings/tool-annotation-decision.md for rationale

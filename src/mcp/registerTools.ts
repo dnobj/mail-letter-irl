@@ -119,6 +119,7 @@ import { isSendConfirmationEnabled } from "../config/sendConfirmation.js";
 import { isArriveByEnabled } from "../config/arriveBy.js";
 import { isStationeryOffered } from "../config/stationery.js";
 import { isSignaturesOffered } from "../config/signatures.js";
+import { isCertifiedMailOffered } from "../config/certifiedMail.js";
 import { isPostcardSizesOffered } from "../config/postcardSizes.js";
 import { isPostcardLayoutsOffered } from "../config/postcardLayouts.js";
 import { isPostcardCollagesOffered } from "../config/postcardCollages.js";
@@ -986,7 +987,8 @@ export const POSTCARD_COLLAGE_INPUT_KEYS: readonly string[] = ["images", "imageU
  * four previews' `arriveBy` while LETTER_IRL_ARRIVE_BY_ENABLED is off (#535),
  * the three letter previews' stationery while it is not offered (#563), and
  * the postcard preview's and set_postcard_style's front while the layouts
- * are not, and set_postcard_style's size while the sizes are not (#594).
+ * are not, and set_postcard_style's size while the sizes are not (#594), and
+ * the three letter previews' mailService while certified mail is not (#625).
  * tools/list (getServedInputSchema) and /manifest.json both ask this, so
  * they agree.
  */
@@ -996,6 +998,8 @@ export function withheldInputKeys(name: string): string[] {
   if (LETTER_PREVIEW_TOOLS.has(name) && !isStationeryOffered()) withheld.push(...STATIONERY_INPUT_KEYS);
   // The letter previews' signature (#608), while signatures are not offered.
   if (LETTER_PREVIEW_TOOLS.has(name) && !isSignaturesOffered()) withheld.push("signature");
+  // The letter previews' mail service (#625), while certified mail is not offered.
+  if (LETTER_PREVIEW_TOOLS.has(name) && !isCertifiedMailOffered()) withheld.push("mailService");
   if (name === "quote_and_preview_postcard" && !isPostcardLayoutsOffered()) withheld.push(...POSTCARD_FRONT_INPUT_KEYS);
   // The postcard preview's collage photos, while collages are not offered (#616).
   if (name === "quote_and_preview_postcard" && !isPostcardCollagesOffered()) withheld.push(...POSTCARD_COLLAGE_INPUT_KEYS);
@@ -1595,6 +1599,21 @@ function signatureSentence(result: Record<string, unknown>): string {
 }
 
 /**
+ * Certified mail (#625), for the narration: which service the preview is, so
+ * the model says what the person is paying for. Empty for an ordinary letter.
+ */
+function mailServiceSentence(result: Record<string, unknown>): string {
+  switch (result.mailService) {
+    case "certified":
+      return " Sent as USPS Certified Mail, which gives a tracking number.";
+    case "certified_return_receipt":
+      return " Sent as USPS Certified Mail with an electronic return receipt, which gives a tracking number.";
+    default:
+      return "";
+  }
+}
+
+/**
  * What a preview costs, for the narration's lead: the letters it takes from
  * the balance, or Pay & Send for mail no pack pays for (#579), such as a
  * letter of more than one page (#586). Never "requires 1 letter" for mail no
@@ -1705,6 +1724,7 @@ export function summarizeToolResult(
       summary += stationerySentence(result);
       summary += signatureSentence(result);
       summary += pagesSentence(result);
+      summary += mailServiceSentence(result);
       return summary;
     }
     case "request_send":

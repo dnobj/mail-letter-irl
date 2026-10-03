@@ -2,6 +2,7 @@ import { z } from "zod";
 import { preprocessImageFileElement, preprocessImageFileParam, preprocessPhotoList } from "./utils/imageFileParam.js";
 import { STATIONERY_THEMES } from "./render/stationery.js";
 import { MAX_LETTER_PAGES } from "./render/geometry.js";
+import { MAIL_SERVICES } from "./config/certifiedMail.js";
 
 export const addressZ = z.object({
   name: z.string(),
@@ -125,6 +126,19 @@ const previewSignatureOutputZ = z.object({
   source: z.enum(["asked", "remembered", "none_saved"]).describe(SIGNATURE_SOURCE_DESCRIPTION)
 });
 
+// The letter previews' mail service (#625): withheld while certified mail is not
+// offered (withheldInputKeys), as the signature is.
+export const PREVIEW_MAIL_SERVICE_DESCRIPTION =
+  "Optional. How the letter travels: standard (the default), certified (USPS Certified Mail, which gives a tracking number), " +
+  "or certified_return_receipt (Certified Mail with an electronic return receipt). Certified mail costs more and is paid with Pay & Send: " +
+  "no letter pack and no gift letter pays for it. Leave it out for an ordinary letter.";
+const previewMailServiceZ = z.enum(MAIL_SERVICES).optional().describe(PREVIEW_MAIL_SERVICE_DESCRIPTION);
+
+/** What a letter preview's output says when it is certified mail (#625): which service. Absent for an ordinary letter. */
+export const PREVIEW_MAIL_SERVICE_OUTPUT_DESCRIPTION =
+  "Present only when the letter is sent as certified mail: certified, or certified_return_receipt (with an electronic return receipt). Paid with Pay & Send.";
+const CERTIFIED_MAIL_SERVICES = ["certified", "certified_return_receipt"] as const;
+
 // Text-only letter schema
 export const quoteAndPreviewInputZ = z.object({
   sender: addressZ.optional(),  // Optional - will use saved return address if not provided
@@ -136,7 +150,8 @@ export const quoteAndPreviewInputZ = z.object({
   stationery: stationeryZ,
   monogram: monogramZ,
   headline: headlineZ,
-  signature: previewSignatureZ
+  signature: previewSignatureZ,
+  mailService: previewMailServiceZ
 });
 
 // ============================================================================
@@ -203,7 +218,8 @@ export const quoteAndPreviewLetterWithHeaderImageInputZ = z.object({
   stationery: stationeryZ,
   monogram: monogramZ,
   headline: headlineZ,
-  signature: previewSignatureZ
+  signature: previewSignatureZ,
+  mailService: previewMailServiceZ
 });
 
 // Letter with inline image (image after signature, like enclosing a photo)
@@ -221,7 +237,8 @@ export const quoteAndPreviewLetterWithImageInputZ = z.object({
   stationery: stationeryZ,
   monogram: monogramZ,
   headline: headlineZ,
-  signature: previewSignatureZ
+  signature: previewSignatureZ,
+  mailService: previewMailServiceZ
 });
 
 export const sendLetterInputZ = z.object({
@@ -650,6 +667,7 @@ export const quoteAndPreviewOutputZ = z.object({
   arrivalWindow: arrivalWindowZ.optional().describe(ARRIVAL_WINDOW_DESCRIPTION),
   stationery: previewStationeryZ.optional().describe(PREVIEW_STATIONERY_DESCRIPTION),
   signature: previewSignatureOutputZ.optional().describe(PREVIEW_SIGNATURE_OUTPUT_DESCRIPTION),
+  mailService: z.enum(CERTIFIED_MAIL_SERVICES).optional().describe(PREVIEW_MAIL_SERVICE_OUTPUT_DESCRIPTION),
   pages: z.number().int().min(2).max(MAX_LETTER_PAGES).optional().describe(PREVIEW_PAGES_DESCRIPTION),
   wordsVersion: z.string().optional().describe(WORDS_VERSION_DESCRIPTION)
 });

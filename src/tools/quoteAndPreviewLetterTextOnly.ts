@@ -31,6 +31,7 @@ import {
 import { previewSchedule } from "./arriveByInput.js";
 import { chooseStationery } from "./stationeryInput.js";
 import { chooseSignature } from "./signatureInput.js";
+import { certifiedMailSentence, chooseMailService } from "./mailServiceInput.js";
 import { previewSendStep } from "./previewSendStep.js";
 
 // ============================================================================
@@ -52,6 +53,8 @@ interface QuoteAndPreviewLetterTextOnlyInput {
   headline?: string;
   /** The person's saved signature on the letter, or not (#608); left out, their last choice. */
   signature?: boolean;
+  /** USPS Certified Mail, with or without an electronic return receipt (#625); served only while it is offered. */
+  mailService?: string;
 }
 
 // ============================================================================
@@ -82,6 +85,10 @@ async function handler(
   // before any picture is fetched or address validated.
   const schedule = previewSchedule(input.arriveBy, context);
 
+  // Certified mail (#625): asked for, and offered, checked here for the same reason, and
+  // known before the gift is decided: no gift letter pays for it.
+  const mailService = chooseMailService(input.mailService, context);
+
   // Prepare sender (use saved return address if not provided)
   const { sender, usedSavedReturnAddress, savedReturnAddressNote } = await prepareSender(input, context);
 
@@ -92,7 +99,7 @@ async function handler(
   // must print and fit (#534). Not while room to write is offered (#586): the
   // gift then waits for the pages (giftForLayout). The renderer is read once,
   // so every check agrees.
-  const early = await earlyGiftChoice(input, context);
+  const early = await earlyGiftChoice(input, context, mailService);
   const renderer = printRenderer();
 
   // Stationery (#563): the theme, asked for or remembered, and what it
@@ -158,6 +165,7 @@ async function handler(
     schedule,
     stationery,
     signature,
+    mailService,
     context
   });
 }
@@ -176,6 +184,7 @@ export const quoteAndPreviewLetterTextOnlyTool: McpToolDefinition<
   description: (client) =>
     "Preview a text-only physical letter draft. This does not send mail. Requires a real U.S. recipient mailing address and text that fits the text-only letter limit. " +
     roomToWriteSentence() +
+    certifiedMailSentence() +
     previewSendStep("send_letter", client),
   // readOnly: false because this tool creates draft records in the database
   // See docs/learnings/tool-annotation-decision.md for rationale
