@@ -12,6 +12,18 @@ export interface PreviewSignature {
   image?: string;
   /** What the call asked: true or false, or undefined when it named none. */
   asked?: boolean;
+  /** Whether signatures are offered: only then does the preview say what it printed. */
+  offered?: boolean;
+  /** Whether the account has a saved signature; not read when the call asked for none. */
+  saved?: boolean;
+}
+
+/** What a letter preview's output says of its signature (#608 review round 1). */
+export interface PreviewSignatureOutput {
+  /** Whether the letter prints the person's saved signature. */
+  printed: boolean;
+  /** Why: the call asked, the account's remembered choice, or no signature is saved. */
+  source: 'asked' | 'remembered' | 'none_saved';
 }
 
 /**
@@ -32,7 +44,7 @@ export async function chooseSignature(asked: boolean | undefined, context: ToolC
     }
     return {};
   }
-  if (asked === false) return { asked };
+  if (asked === false) return { asked, offered: true };
   const saved = await getSignature(context.user.userId);
   if (!saved) {
     if (asked === true) {
@@ -41,9 +53,23 @@ export async function chooseSignature(asked: boolean | undefined, context: ToolC
         'No signature is saved. Ask the person for a photo of their signature and save it with set_signature, or preview the letter without signature.'
       );
     }
-    return {};
+    return { offered: true, saved: false };
   }
-  return asked === true || saved.useByDefault ? { image: signatureImageUri(saved.png), asked } : { asked };
+  return asked === true || saved.useByDefault
+    ? { image: signatureImageUri(saved.png), asked, offered: true, saved: true }
+    : { asked, offered: true, saved: true };
+}
+
+/**
+ * What the preview's output says of the signature, so a model without the
+ * card knows the letter is signed, and why (#608 review round 1): `printed`
+ * follows the layout, which is what prints. Nothing while signatures are not
+ * offered, so the output is then as before them.
+ */
+export function previewSignatureOutput(signature: PreviewSignature | undefined, printed: boolean): PreviewSignatureOutput | undefined {
+  if (!signature?.offered) return undefined;
+  if (signature.asked !== undefined) return { printed, source: 'asked' };
+  return signature.saved ? { printed, source: 'remembered' } : { printed: false, source: 'none_saved' };
 }
 
 /**

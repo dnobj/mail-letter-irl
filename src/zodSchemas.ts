@@ -111,6 +111,16 @@ export const PREVIEW_SIGNATURE_DESCRIPTION =
   "Left out, the person's last choice: on once a signature is saved. True with none saved is refused. Pass false to leave it off.";
 const previewSignatureZ = z.boolean().optional().describe(PREVIEW_SIGNATURE_DESCRIPTION);
 
+/** What a letter preview's output says of its signature (#608 review round 1). */
+export const PREVIEW_SIGNATURE_OUTPUT_DESCRIPTION =
+  "While signatures are offered: whether the letter prints the person's saved signature, and why";
+export const SIGNATURE_SOURCE_DESCRIPTION =
+  "Why: asked for in the call (signature), the account's remembered choice, or none_saved when the account has no signature";
+const previewSignatureOutputZ = z.object({
+  printed: z.boolean(),
+  source: z.enum(["asked", "remembered", "none_saved"]).describe(SIGNATURE_SOURCE_DESCRIPTION)
+});
+
 // Text-only letter schema
 export const quoteAndPreviewInputZ = z.object({
   sender: addressZ.optional(),  // Optional - will use saved return address if not provided
@@ -598,6 +608,7 @@ export const quoteAndPreviewOutputZ = z.object({
   schedule: previewScheduleZ.optional(),
   arrivalWindow: arrivalWindowZ.optional().describe(ARRIVAL_WINDOW_DESCRIPTION),
   stationery: previewStationeryZ.optional().describe(PREVIEW_STATIONERY_DESCRIPTION),
+  signature: previewSignatureOutputZ.optional().describe(PREVIEW_SIGNATURE_OUTPUT_DESCRIPTION),
   pages: z.number().int().min(2).max(MAX_LETTER_PAGES).optional().describe(PREVIEW_PAGES_DESCRIPTION),
   wordsVersion: z.string().optional().describe(WORDS_VERSION_DESCRIPTION)
 });

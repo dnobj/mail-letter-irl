@@ -774,6 +774,28 @@ describe('arrive-by in the served schemas (#535)', () => {
   });
 });
 
+describe("a letter preview's narration says whether it is signed (#612 review round 1)", () => {
+  const PREVIEW = { lettersRequired: 1, layoutType: 'text_only' };
+  const said = (signature?: unknown) => summarizeToolResult('quote_and_preview_letter', { ...PREVIEW, ...(signature ? { signature } : {}) });
+
+  it("says the account's choice decided it, and how to change it", () => {
+    expect(said({ printed: true, source: 'remembered' })).toMatch(
+      / Signed with the person's saved signature, the account's choice; signature: false in the call leaves it off\.$/
+    );
+    expect(said({ printed: false, source: 'remembered' })).toMatch(
+      / Not signed: the account's choice is no signature; signature: true in the call prints the saved one\.$/
+    );
+  });
+
+  it('says a signature asked for is printed, and nothing for one asked against, none saved, or none offered', () => {
+    expect(said({ printed: true, source: 'asked' })).toMatch(/ Signed with the person's saved signature\.$/);
+    const plain = said();
+    expect(said({ printed: false, source: 'asked' })).toBe(plain);
+    expect(said({ printed: false, source: 'none_saved' })).toBe(plain);
+    expect(plain).not.toContain('signature');
+  });
+});
+
 describe("a letter preview's narration names its stationery (#563)", () => {
   const PREVIEW = { lettersRequired: 1, layoutType: 'text_only' };
 

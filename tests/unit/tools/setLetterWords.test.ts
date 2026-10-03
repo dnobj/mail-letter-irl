@@ -33,7 +33,12 @@ import { layoutGiftPage, layoutLetter, readImageDataUri, renderPreviewSvg, type 
 import { letterPrintText, renderLetterPreviewDocument, signatureParagraph, stampedAddressLines } from '../../../src/services/previewService.js';
 import { sampleFundedCard } from '../../../src/services/giftLetterService.js';
 import { giftLetterPageCopy } from '../../../src/services/giftCardRenderer.js';
-import { layoutLetterForPreview, PAID_PER_SEND_REASON, withDisplayImage, wordsVersionOf } from '../../../src/tools/letterHelpers.js';
+import { layoutLetterForPreview, PAID_PER_SEND_REASON, SIGNATURE_GIFT_WORDS, withDisplayImage, wordsVersionOf } from '../../../src/tools/letterHelpers.js';
+
+/** A gift letter's one-page refusal, as the tool words it. */
+const GIFT_ONE_PAGE_WORDS =
+  'This letter is sent as a gift letter, which is one page, and these words run past it. ' +
+  'Shorten them to fit one page, or make a new preview to send it another way.';
 import { getGiftBalance } from '../../../src/services/giftLetterService.js';
 import type { Address, ToolContext } from '../../../src/contracts/types.js';
 
@@ -191,6 +196,22 @@ describe('set_letter_words on a signed letter (#608)', () => {
       expect(svgs(words.previewHtml)[0]).toBe(page);
     }
   );
+});
+
+describe('set_letter_words on a signed gift letter (#612 review round 1)', () => {
+  it('refuses words the band pushes past one page with the way out, and words too long unsigned in the gift\'s own', async () => {
+    vi.mocked(getDraftForStationery).mockResolvedValue(draft({ bodyText: lines(4), gift: true, signed: true }) as never);
+
+    // 25 lines and the one-line sign-off fill one page; the band's three run past it.
+    const error = await change(lines(25), context(0)).catch(e => e);
+    expect(error).toMatchObject({ code: 'GIFT_LETTER_ONE_PAGE' });
+    expect(error.message).toBe(`${GIFT_ONE_PAGE_WORDS} ${SIGNATURE_GIFT_WORDS}`);
+
+    const longer = await change(lines(40), context(0)).catch(e => e);
+    expect(longer).toMatchObject({ code: 'GIFT_LETTER_ONE_PAGE' });
+    expect(longer.message).toBe(GIFT_ONE_PAGE_WORDS);
+    expect(setDraftWords).not.toHaveBeenCalled();
+  });
 });
 
 describe('set_letter_words', () => {

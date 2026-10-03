@@ -154,7 +154,11 @@ describePostgres('a letter\'s signature (migration 051, #608)', () => {
     await pool.query('UPDATE letter_drafts SET stationery = $2::jsonb WHERE draft_id = $1', [signed, JSON.stringify(BOTANICAL)]);
     expect(await read(signed)).toMatchObject({ renderer_version: 'pdf-4', stationery: BOTANICAL });
 
-    // pdf-2 still needs a theme, and a theme still needs pdf-2 or pdf-4.
+    // pdf-2 still needs a theme, and a theme still needs pdf-2 or pdf-4: never no version (#612 review round 1).
+    const themed = await previewed(userId, { stationery: BOTANICAL });
+    expect(await read(themed)).toMatchObject({ renderer_version: 'pdf-2', stationery: BOTANICAL });
+    await expect(pool.query('UPDATE letter_drafts SET renderer_version = NULL WHERE draft_id = $1', [themed]))
+      .rejects.toMatchObject({ code: '23514', constraint: 'letter_drafts_stationery_drawn_by_pdf_2' });
     const plain = await previewed(userId);
     await expect(pool.query("UPDATE letter_drafts SET renderer_version = 'pdf-2' WHERE draft_id = $1", [plain]))
       .rejects.toMatchObject({ code: '23514', constraint: 'letter_drafts_stationery_drawn_by_pdf_2' });

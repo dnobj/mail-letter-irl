@@ -13,7 +13,10 @@
 -- (044) and pdf-3 for postcard fronts (048).
 --
 -- So 044's pairing of stationery with pdf-2 widens: a theme may be drawn by
--- pdf-2 or pdf-4, and pdf-2 always has one. The signature pairs with pdf-4
+-- pdf-2 or pdf-4, and pdf-2 always has one. A theme with no version, which
+-- 044 refused, is still refused: the COALESCE keeps the IN from reading a
+-- NULL version as unknown, which a CHECK would pass (#612 review round 1).
+-- The signature pairs with pdf-4
 -- exactly. Retention empties the copy to '' rather than NULL, as it does the
 -- draft's other images, which keeps the pair.
 --
@@ -36,7 +39,7 @@ ALTER TABLE letter_drafts
   DROP CONSTRAINT letter_drafts_stationery_drawn_by_pdf_2,
   ADD CONSTRAINT letter_drafts_stationery_drawn_by_pdf_2
     CHECK (
-      (stationery IS NULL OR renderer_version IN ('pdf-2', 'pdf-4'))
+      (stationery IS NULL OR COALESCE(renderer_version, '') IN ('pdf-2', 'pdf-4'))
       AND (renderer_version IS DISTINCT FROM 'pdf-2' OR stationery IS NOT NULL)
     ),
   ADD CONSTRAINT letter_drafts_signature_drawn_by_pdf_4

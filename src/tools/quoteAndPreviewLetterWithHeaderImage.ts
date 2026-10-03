@@ -23,6 +23,7 @@ import {
   earlyGiftChoice,
   giftForLayout,
   layoutLetterForPreview,
+  letterRunsPast,
   roomToWriteSentence,
   createLetterDraftAndBuildOutput,
   type LetterQuoteOutput
@@ -245,7 +246,9 @@ async function handler(
     { sender, recipient: input.recipient, bodyText: input.bodyText, signOff: input.signOff, senderIsSaved: usedSavedReturnAddress, sendAsGift: input.sendAsGift },
     printLayout,
     context,
-    renderer
+    renderer,
+    // A signed letter its band pushes past one page fits without it (#608).
+    () => signature.image !== undefined && !letterRunsPast({ bodyText: input.bodyText, signOff: input.signOff, layoutType, imageData: headerImageData, stationery }, 1)
   );
 
   // Validate with PostGrid provider

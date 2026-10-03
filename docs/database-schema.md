@@ -198,7 +198,7 @@ Temporary drafts for idempotent send operations. Prevents duplicate sends.
 - `valid_postcard_size`: postcard_size must be '6x4', '6x9', or '6x11'
 - `letter_drafts_renderer_version_known`: renderer_version must be NULL, 'pdf-1', 'pdf-2', 'pdf-3' or 'pdf-4' (039, then 044, 048 and 051; a new version extends it in its own migration)
 - `letter_drafts_stationery_theme_known`: stationery's theme is 'monogram', 'botanical', 'celebration', 'typewriter' or 'handwritten' (044, 046)
-- `letter_drafts_stationery_drawn_by_pdf_2`: stationery only with renderer_version 'pdf-2' or 'pdf-4', and 'pdf-2' always with stationery (044, then 051)
+- `letter_drafts_stationery_drawn_by_pdf_2`: stationery only with renderer_version 'pdf-2' or 'pdf-4', never with none, and 'pdf-2' always with stationery (044, then 051)
 - `letter_drafts_signature_letters_only`: signature_image only on a letter (051)
 - `letter_drafts_signature_drawn_by_pdf_4`: signature_image is set exactly when renderer_version is 'pdf-4' (051)
 - `letter_drafts_postcard_front_layout_known`: a postcard_front is a postcard's, and its layout is 'border' or 'greetings' (048)

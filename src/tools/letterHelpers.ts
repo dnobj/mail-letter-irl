@@ -50,11 +50,11 @@ import { getSendEligibility, type SendEligibility } from "../services/commerceSe
 import { isPackPayable, type MailOption } from "../config/products.js";
 import { callingApp, type ClientProfile } from "../auth/clientProfiles.js";
 import { isSendConfirmationEnabled, letterPacksPageUrl, sendConfirmationUrl } from "../config/sendConfirmation.js";
-import { giftCardSummary, resolveGiftSendChoice, type GiftSendChoice } from "./giftSendChoice.js";
+import { GIFT_PAYS_ONE_PAGE, giftCardSummary, resolveGiftSendChoice, type GiftSendChoice } from "./giftSendChoice.js";
 import { giftLetterPageCopy } from "../services/giftCardRenderer.js";
 import { rememberedPrefix, type PreviewStationery } from "./stationeryInput.js";
 import { rememberStationery } from "../services/stationeryDefaultService.js";
-import { rememberPreviewSignature, type PreviewSignature } from "./signatureInput.js";
+import { previewSignatureOutput, rememberPreviewSignature, type PreviewSignature, type PreviewSignatureOutput } from "./signatureInput.js";
 import {
   previewArrivalWindow,
   scheduleSentence,
@@ -147,6 +147,8 @@ export interface LetterQuoteOutput {
   arrivalWindow?: ArrivalWindow;
   /** The stationery the page was drawn in (#563), while stationery is offered, and why: asked for, remembered, or Classic by default. */
   stationery?: PreviewStationery;
+  /** Whether the letter prints the person's saved signature (#608), while signatures are offered, and why. */
+  signature?: PreviewSignatureOutput;
   /** A letter of more than one page (#586): the pages it prints on, both sides of the paper, paid with Pay & Send. */
   pages?: number;
   /** While room to write is offered (#586): how full its pages are, for the card's fit line. Card-only (_meta). */
@@ -723,6 +725,10 @@ export function layoutLetterForPreview(
   );
 }
 
+/** A signed gift letter that fits one page without its signature (#608): the way out. */
+export const SIGNATURE_GIFT_WORDS =
+  `The signature takes ${SIGNATURE_LINES} lines, and without it the letter fits one page: preview it with signature: false to send it as a gift letter.`;
+
 /**
  * What a signature has to do with a letter too long (#608): its band takes
  * SIGNATURE_LINES lines, and when the letter fits without it, says so.
@@ -1098,10 +1104,22 @@ export async function giftForLayout(
   letter: PrintedAddresses & { bodyText: string; signOff: string; sendAsGift?: boolean },
   layout: Layout | undefined,
   context: ToolContext,
-  renderer: 'html' | 'pdf' = printRenderer()
+  renderer: 'html' | 'pdf' = printRenderer(),
+  /** Whether a signed letter fits one page without its signature (#608): asked only when the gift is refused. */
+  fitsOnePageUnsigned: () => boolean = () => false
 ): Promise<GiftSendChoice> {
   if (early) return early;
-  const gift = await letterGiftChoice(letter, context, letterOption(layout));
+  let gift: GiftSendChoice;
+  try {
+    gift = await letterGiftChoice(letter, context, letterOption(layout));
+  } catch (error) {
+    // A signed letter its band pushed past one page: the way out is no
+    // signature, which the gift's refusal says (#612 review round 1).
+    if (error instanceof Error && error.message === GIFT_PAYS_ONE_PAGE && fitsOnePageUnsigned()) {
+      throw new Error(`${GIFT_PAYS_ONE_PAGE} ${SIGNATURE_GIFT_WORDS}`);
+    }
+    throw error;
+  }
   if (gift.card) validateGiftCardPrints(gift.card, letter, context, renderer);
   return gift;
 }
@@ -1283,6 +1301,7 @@ export async function createLetterDraftAndBuildOutput(
   if (signature) await rememberPreviewSignature(signature, context);
 
   // Build output
+  const signatureSaid = previewSignatureOutput(signature, signed);
   // Only pass small preview images for ChatGPT widget display (~3KB each)
   // Full-quality images are stored in the draft and retrieved when sending to PostGrid
   const output: LetterQuoteOutput = {
@@ -1311,6 +1330,9 @@ export async function createLetterDraftAndBuildOutput(
     arrivalWindow: previewArrivalWindow(context),
     // Only while stationery is offered (#563): otherwise the output is as before it.
     ...(stationery ? { stationery } : {}),
+    // Whether it is signed, and why, while signatures are offered (#608 review
+    // round 1): a model without the card hears it from here.
+    ...(signatureSaid ? { signature: signatureSaid } : {}),
     // A letter of more than one page (#586), printed on both sides: only then.
     ...(option.pages ? { pages: option.pages } : {}),
     // And how full its pages are, for the card's fit line, while room to write

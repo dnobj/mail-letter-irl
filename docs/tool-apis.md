@@ -84,14 +84,21 @@ signature ([Signatures](#signatures)) under the sign-off's first line.
   preview. A preview that names it, `true` or `false`, is remembered once its draft exists.
 - `true` with none saved is refused (`SIGNATURE_NOT_SAVED`), saying `set_signature` saves one.
 - The letter is laid out with it. Its band takes three lines, so a letter that fits only without it is
-  refused as too long, and the refusal says it fits with `signature: false`.
+  refused as too long, and the refusal says it fits with `signature: false`. So does a gift letter's
+  refusal, while room to write is offered, when the band is what runs it past one page, and
+  `set_letter_words`' refusal of a gift letter's new words.
+- Each preview then returns `signature`: `printed`, whether the letter prints it, and `source`: `asked`
+  (the call named it), `remembered` (the account's choice) or `none_saved`. The narration says when the
+  account's choice signed the letter, or left it unsigned, and how to change it, so a model without the
+  card can tell the person.
 - The draft keeps its own copy, as the letter was previewed with it, and records renderer `pdf-4`
   whatever its theme. The send copies it into the letter, so replacing or removing the saved signature
   never changes a letter already previewed. `set_stationery` and `set_letter_words` draw the letter
   again with the draft's copy.
 
-While signatures are not offered, `signature` is not served, nor in `/manifest.json`. An app that
-cached it and passes `true` anyway is refused (`SIGNATURES_OFF`) rather than printed unsigned.
+While signatures are not offered, `signature` is not served, nor in `/manifest.json`, and the output
+has no `signature`. An app that cached it and passes `true` anyway is refused (`SIGNATURES_OFF`) rather
+than printed unsigned.
 Postcards take no signature.
 
 - `quote_and_preview_letter`: Create a free draft preview for a text-only physical letter. Requires a real U.S. recipient address, `bodyText`, and `signOff`; sender is optional when a saved return address exists. Creates a draft, so it is not read-only. Uses `ui://widgets/LetterPreviewCard.html@v<N>`.

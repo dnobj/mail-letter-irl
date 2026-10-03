@@ -1561,6 +1561,23 @@ function stationerySentence(result: Record<string, unknown>): string {
 }
 
 /**
+ * A letter preview's signature (#608 review round 1), for the narration:
+ * whether the saved signature prints, and when the account's choice decided
+ * it, so the person hears why and how to change it. Nothing while signatures
+ * are not offered, with none saved, or for a call that said no signature.
+ */
+function signatureSentence(result: Record<string, unknown>): string {
+  const signature = result.signature as { printed?: unknown; source?: unknown } | undefined;
+  if (typeof signature?.printed !== "boolean") return "";
+  if (signature.source === "remembered") {
+    return signature.printed
+      ? " Signed with the person's saved signature, the account's choice; signature: false in the call leaves it off."
+      : " Not signed: the account's choice is no signature; signature: true in the call prints the saved one.";
+  }
+  return signature.source === "asked" && signature.printed ? " Signed with the person's saved signature." : "";
+}
+
+/**
  * What a preview costs, for the narration's lead: the letters it takes from
  * the balance, or Pay & Send for mail no pack pays for (#579), such as a
  * letter of more than one page (#586). Never "requires 1 letter" for mail no
@@ -1669,6 +1686,7 @@ export function summarizeToolResult(
       }
       summary += heldMailSentence(result);
       summary += stationerySentence(result);
+      summary += signatureSentence(result);
       summary += pagesSentence(result);
       return summary;
     }

@@ -11,6 +11,7 @@ import {
   letterOption,
   letterPayment,
   letterRunsPast,
+  SIGNATURE_GIFT_WORDS,
   redrawLetterPreview,
   RENDERED_LETTER_CHARACTER_CAP,
   validateCharacterLimitForLayout,
@@ -234,7 +235,11 @@ async function handler(input: SetLetterWordsInput, context: ToolContext): Promis
   try {
     layout = layoutLetterForPreview(letter, context, 'pdf', gift ? 1 : limit)!;
   } catch (error) {
-    if (gift && letterRunsPast(letter, 1)) throw refused('GIFT_LETTER_ONE_PAGE', GIFT_ONE_PAGE, context);
+    if (gift && letterRunsPast(letter, 1)) {
+      // Signed, and fitting one page without the signature: the way out (#608).
+      const signedOnly = letter.signatureImage !== undefined && !letterRunsPast({ ...letter, signatureImage: undefined }, 1);
+      throw refused('GIFT_LETTER_ONE_PAGE', signedOnly ? `${GIFT_ONE_PAGE} ${SIGNATURE_GIFT_WORDS}` : GIFT_ONE_PAGE, context);
+    }
     throw error;
   }
   const pages = layout.pages.length;
