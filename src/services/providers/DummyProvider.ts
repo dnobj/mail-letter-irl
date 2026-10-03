@@ -129,7 +129,9 @@ export class DummyProvider implements LetterFulfillmentProvider {
       metadata: {
         provider: 'dummy',
         simulatedDelay: this.options.delayMs,
-        messageLength: params.message.length
+        messageLength: params.message.length,
+        // The extra service it was asked for (#625), so a test can see it arrive.
+        ...(params.extraService ? { extraService: params.extraService } : {})
       }
     };
   }

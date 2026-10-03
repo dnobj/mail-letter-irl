@@ -40,6 +40,19 @@ export class DIYProvider implements LetterFulfillmentProvider {
    * The letter-irl-diy dashboard will pick it up from the shared database.
    */
   async sendLetter(params: LetterParams): Promise<LetterResult> {
+    // Manual fulfilment mails standard first-class mail. An extra service
+    // (certified mail, #625) would be queued as an ordinary letter with nothing
+    // marking it, after being paid for: refused before anything is queued, an
+    // authoritative rejection, so what paid for it comes back.
+    if (params.extraService !== undefined) {
+      return {
+        success: false,
+        trackingId: '',
+        error: 'Manual fulfilment cannot send an extra service such as certified mail.',
+        metadata: { retryable: false, submissionOutcome: 'definite_rejection' }
+      };
+    }
+
     const letterId = params.metadata?.letterId;
 
     if (this.verbose) {

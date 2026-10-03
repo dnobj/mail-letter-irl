@@ -184,9 +184,31 @@ describe('diffManifest', () => {
       'STRIPE_JIT_POSTCARD_11X6_PRICE_ID'
     ]);
 
+    // Certified mail (#625): its two prices, once its flag's name is present.
+    const certifiedOn = diffManifest([...jitNames, 'LETTER_IRL_CERTIFIED_MAIL_ENABLED'], {
+      environment: 'production',
+      service: 'api'
+    });
+    expect(certifiedOn.missing.map(gap => gap.note)).toEqual([
+      'STRIPE_JIT_LETTER_CERTIFIED_PRICE_ID [required because JIT_PURCHASE_ENABLED and LETTER_IRL_CERTIFIED_MAIL_ENABLED are set]',
+      'STRIPE_JIT_LETTER_CERTIFIED_RECEIPT_PRICE_ID [required because JIT_PURCHASE_ENABLED and LETTER_IRL_CERTIFIED_MAIL_ENABLED are set]'
+    ]);
+    expect(
+      diffManifest([...FULL_PRODUCTION_NAMES, 'LETTER_IRL_CERTIFIED_MAIL_ENABLED'], { environment: 'production', service: 'api' })
+        .missing.map(gap => gap.entry.name)
+    ).toEqual([]);
+
     // Set, they are satisfied.
     const allSet = diffManifest(
-      [...jitNames, 'LETTER_IRL_ROOM_TO_WRITE_ENABLED', 'LETTER_IRL_POSTCARD_SIZES_ENABLED', ...OPTION_PRICES],
+      [
+        ...jitNames,
+        'LETTER_IRL_ROOM_TO_WRITE_ENABLED',
+        'LETTER_IRL_POSTCARD_SIZES_ENABLED',
+        'LETTER_IRL_CERTIFIED_MAIL_ENABLED',
+        ...OPTION_PRICES,
+        'STRIPE_JIT_LETTER_CERTIFIED_PRICE_ID',
+        'STRIPE_JIT_LETTER_CERTIFIED_RECEIPT_PRICE_ID'
+      ],
       { environment: 'production', service: 'api' }
     );
     expect(allSet.missing).toEqual([]);

@@ -8,6 +8,8 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { DIYProvider } from '../../../src/services/providers/DIYProvider.js';
+import { DummyProvider } from '../../../src/services/providers/DummyProvider.js';
 import { PostGridProvider } from '../../../src/services/providers/PostGridProvider.js';
 import { RENDERER_VERSION } from '../../../src/render/index.js';
 
@@ -70,6 +72,42 @@ describe('the extra service in the request', () => {
     expect(Object.keys(body)).toEqual(['to', 'from', 'html', 'description', 'color', 'doubleSided', 'addressPlacement', 'extraService']);
   });
 
+  const STANDARD_FIELDS = [
+    'to[firstName]', 'to[lastName]', 'to[addressLine1]', 'to[addressLine2]', 'to[city]', 'to[provinceOrState]',
+    'to[postalOrZip]', 'to[country]', 'from[firstName]', 'from[lastName]', 'from[addressLine1]', 'from[city]',
+    'from[provinceOrState]', 'from[postalOrZip]', 'from[country]', 'description', 'color', 'doubleSided',
+    'addressPlacement'
+  ];
+
+  it('adds the one field to the form, before the PDF, and changes no other', async () => {
+    const standard = answering(accepted);
+    await provider().sendLetter({ ...base, rendererVersion: RENDERER_VERSION });
+    expect([...((standard.mock.calls[0] as [string, RequestInit])[1].body as FormData).keys()]).toEqual([...STANDARD_FIELDS, 'pdf']);
+
+    const certified = answering(accepted);
+    await provider().sendLetter({ ...base, rendererVersion: RENDERER_VERSION, extraService: 'certified' });
+    expect([...((certified.mock.calls[0] as [string, RequestInit])[1].body as FormData).keys()]).toEqual([
+      ...STANDARD_FIELDS,
+      'extraService',
+      'pdf'
+    ]);
+  });
+
+  it.each(['registered', 'express', 'Certified', 'constructor', 'toString', '__proto__', ''])(
+    'refuses an extra service it does not sell (%s) before any request, so what paid for it comes back',
+    async extraService => {
+      const fetchMock = answering(accepted);
+      const result = await provider().sendLetter({ ...base, rendererVersion: RENDERER_VERSION, extraService: extraService as never });
+      expect(result).toMatchObject({
+        success: false,
+        trackingId: '',
+        error: 'PostGrid does not sell that extra service.',
+        metadata: { retryable: false, submissionOutcome: 'definite_rejection' }
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    }
+  );
+
   it('sends nothing for a standard letter, by either route', async () => {
     const pdf = answering(accepted);
     await provider().sendLetter({ ...base, rendererVersion: RENDERER_VERSION });
@@ -102,6 +140,28 @@ describe("the carrier's tracking number on a status read", () => {
     });
   });
 
+  it.each(['9407100000000000000000', '9407-1000-0000-0000-0000-00', 'EJ123456789US', '12345678', 'A'.repeat(40)])(
+    'carries a number shaped like one: %s',
+    async trackingNumber => {
+      answering({ ...status, trackingNumber });
+      await expect(provider().getStatus('letter_cert')).resolves.toMatchObject({ carrierTrackingNumber: trackingNumber });
+    }
+  );
+
+  it.each([
+    ['one too short', '1234567'],
+    ['one too long', 'A'.repeat(41)],
+    ['a character that cannot be in one', '9407100000000000/000000'],
+    ['a NUL', '94071000\u0000000000000000'],
+    ['markup', '<script>alert(1)</script>'],
+    ['a leading hyphen', '-9407100000000000000000'],
+    ['a line break inside', '9407100000\n000000000000']
+  ])('does not carry %s', async (_name, trackingNumber) => {
+    answering({ ...status, trackingNumber });
+    const result = await provider().getStatus('letter_cert');
+    expect('carrierTrackingNumber' in result).toBe(false);
+  });
+
   it.each([
     ['no field', {}],
     ['null', { trackingNumber: null }],
@@ -120,5 +180,64 @@ describe("the carrier's tracking number on a status read", () => {
     const result = await provider().getStatus('letter_cert');
     expect(result.trackingId).toBe('letter_cert');
     expect(result.carrierTrackingNumber).not.toBe(result.trackingId);
+  });
+});
+
+describe("the provider's cost estimate with an extra service", () => {
+  it('adds the public price of the service to the letter, at most about a dollar high', async () => {
+    const standard = await provider().estimateCost(base);
+    const certified = await provider().estimateCost({ ...base, extraService: 'certified' });
+    const receipt = await provider().estimateCost({ ...base, extraService: 'certified_return_receipt' });
+
+    expect(certified.totalCents - standard.totalCents).toBe(694);
+    expect(receipt.totalCents - standard.totalCents).toBe(985);
+    expect(certified.servicesCents - standard.servicesCents).toBe(694);
+    expect(certified.breakdown).toContainEqual({ item: 'Certified Mail', costCents: 694 });
+    expect(receipt.breakdown).toContainEqual({ item: 'Certified Mail with Return Receipt', costCents: 985 });
+    expect(standard.breakdown?.some(line => line.item.startsWith('Certified'))).toBe(false);
+  });
+
+  it('is the cost a send reports, and unchanged for standard mail and for a service it does not know', async () => {
+    answering(accepted);
+    const sent = await provider().sendLetter({ ...base, extraService: 'certified' });
+    expect(sent.costCents).toBe(85 + 694);
+    answering(accepted);
+    const plain = await provider().sendLetter(base);
+    expect(plain.costCents).toBe(85);
+
+    const unknown = await provider().estimateCost({ ...base, extraService: 'constructor' as never });
+    expect(unknown.totalCents).toBe(85);
+  });
+});
+
+describe('providers that cannot sell an extra service', () => {
+  const diy = () => new DIYProvider({ name: 'diy', displayName: 'DIY', enabled: true, config: { verbose: false } });
+  const dummy = () =>
+    new DummyProvider({ name: 'dummy', displayName: 'Dummy', enabled: true }, { verbose: false, delayMs: 0, failureRate: 0 });
+
+  it.each(['certified', 'certified_return_receipt'] as const)(
+    'manual fulfilment refuses %s outright, as an authoritative rejection, queueing nothing',
+    async extraService => {
+      await expect(diy().sendLetter({ ...base, extraService })).resolves.toEqual({
+        success: false,
+        trackingId: '',
+        error: 'Manual fulfilment cannot send an extra service such as certified mail.',
+        metadata: { retryable: false, submissionOutcome: 'definite_rejection' }
+      });
+    }
+  );
+
+  it('manual fulfilment still queues standard mail', async () => {
+    await expect(diy().sendLetter({ ...base, metadata: { letterId: 'L1' } })).resolves.toMatchObject({
+      success: true,
+      trackingId: 'DIY-L1'
+    });
+  });
+
+  it('the dummy records the service it was asked for, so a test can see it arrive, and nothing for standard mail', async () => {
+    const certified = await dummy().sendLetter({ ...base, extraService: 'certified_return_receipt' });
+    expect(certified.metadata).toMatchObject({ provider: 'dummy', extraService: 'certified_return_receipt' });
+    const standard = await dummy().sendLetter(base);
+    expect(standard.metadata).not.toHaveProperty('extraService');
   });
 });

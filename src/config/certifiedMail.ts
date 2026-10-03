@@ -16,9 +16,15 @@ import type { MailService } from '../services/types.js';
 /** The values a letter preview takes for `mailService`, in the order they are offered. */
 export const MAIL_SERVICES = ['standard', 'certified', 'certified_return_receipt'] as const;
 
-/** Compile-time check that the list above is exactly the MailService union. */
-const _servicesAreTheUnion: readonly MailService[] = MAIL_SERVICES;
-void _servicesAreTheUnion;
+/**
+ * Compile-time checks that the list above is exactly the MailService union:
+ * every listed value is a service, and every service is listed.
+ */
+type UnlistedService = Exclude<MailService, (typeof MAIL_SERVICES)[number]>;
+const _everyServiceIsListed: [UnlistedService] extends [never] ? true : never = true;
+const _everyListedValueIsAService: readonly MailService[] = MAIL_SERVICES;
+void _everyServiceIsListed;
+void _everyListedValueIsAService;
 
 /**
  * Whether the letter previews offer certified mail: the flag is on (it also

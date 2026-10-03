@@ -81,7 +81,7 @@ export function draftMailOption(draft: {
   // The column holds only these three values (a CHECK, #625); a reader that
   // loads only part of the row must load `mail_service` too, or a certified
   // letter is priced as a standard one.
-  const mailService = certifiedServiceOf(draft.mail_service);
+  const mailService = mailServiceOf(draft.mail_service);
   return {
     mailType,
     ...(pages > 1 ? { pages } : {}),
@@ -89,9 +89,17 @@ export function draftMailOption(draft: {
   };
 }
 
-/** The extra service a stored value names; undefined for standard, null and anything else. */
-function certifiedServiceOf(value: string | null | undefined): CertifiedMailService | undefined {
-  return value === 'certified' || value === 'certified_return_receipt' ? value : undefined;
+/**
+ * The service a stored value (a draft's mail_service) names, as a MailOption
+ * carries it: absent for standard, null and the empty string; the certified
+ * services as they are; and any OTHER text as itself, so that it fails closed
+ * everywhere downstream (no product matches it, no pack or gift pays for it)
+ * rather than being priced and mailed as standard. The column's CHECK keeps
+ * one from existing; this holds if the code is ever older than the data.
+ */
+export function mailServiceOf(value: string | null | undefined): MailService | undefined {
+  if (value === null || value === undefined || value === '' || value === 'standard') return undefined;
+  return value as MailService;
 }
 
 /**
@@ -297,8 +305,10 @@ export const JIT_PRODUCTS: readonly JitProductDefinition[] = [
   },
   // Certified mail (#625): PostGrid's `extraService`, on a letter of one to
   // three pages. The prices are the proposal on the issue (the owner's call):
-  // PostGrid's public prices are $6.94 and $9.85, so these leave about $4.40
-  // after Stripe's fee. In development until the owner approves them.
+  // PostGrid's public prices are $6.94 and $9.85. If those include the letter
+  // these leave about $4.40 after Stripe's fee; if they are added to its cost
+  // (PostGrid's older notes list certified as an add-on) about $3.30. To be
+  // confirmed with PostGrid. In development until the owner approves them.
   {
     productCode: 'jit-letter-certified',
     mailType: 'letter',
@@ -430,13 +440,14 @@ function configuredRow(
 
 /**
  * Whether a letter pack or a gift letter pays for this mail (#579): a one-page
- * letter, in any layout and stationery, or a 6x9 postcard, the mail sold before
- * the options. Everything else is paid per send through Pay & Send, at its own
- * price. An unknown mail type is a letter, as it is priced.
+ * standard letter, in any layout and stationery, or a 6x9 postcard, the mail
+ * sold before the options. Everything else is paid per send through Pay & Send,
+ * at its own price. An unknown mail type is a letter, as it is priced.
  */
 export function isPackPayable(option: MailOption): boolean {
-  // Certified mail costs the carrier far more than a letter: never a pack's (#625).
-  if (option.mailService !== undefined && option.mailService !== 'standard') return false;
+  // Certified mail costs the carrier far more than a letter: never a pack's
+  // (#625). Nor is a service this code does not know.
+  if ((option.mailService ?? 'standard') !== 'standard') return false;
   return option.mailType === 'postcard'
     ? (option.postcardSize ?? '6x9') === '6x9'
     : (option.pages ?? 1) === 1;

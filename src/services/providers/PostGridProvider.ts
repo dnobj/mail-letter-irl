@@ -109,6 +109,31 @@ function letterPages(params: LetterParams, usePdf: boolean): number {
 const PDF_UPLOAD_TIMEOUT_MS = 30_000;
 
 /**
+ * The extra services PostGrid sells a letter (#625), and what its public price
+ * list charges for each (read 2026-10-03: $6.94 and $9.85). Whether those
+ * prices include the letter itself is unconfirmed, so the cost estimate adds
+ * them to the letter's own cost: at most about a dollar too high, never too low.
+ */
+const EXTRA_SERVICE_COST_CENTS: Readonly<Record<CertifiedMailService, number>> = {
+  certified: 694,
+  certified_return_receipt: 985
+};
+
+/** The service PostGrid sells under this name, or undefined: an own key, never one the prototype supplies. */
+function knownExtraService(value: unknown): CertifiedMailService | undefined {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(EXTRA_SERVICE_COST_CENTS, value)
+    ? (value as CertifiedMailService)
+    : undefined;
+}
+
+/**
+ * A USPS tracking number as PostGrid returns it, once trimmed (#625): letters
+ * and digits, with spaces or hyphens between groups, 8 to 40 characters. Anything
+ * else is not carried: it is shown to a customer and stored in a bounded column.
+ */
+const CARRIER_TRACKING_NUMBER = /^[A-Za-z0-9][A-Za-z0-9 -]{7,39}$/;
+
+/**
  * A letter as PostGrid's multipart form: the contacts as bracketed fields
  * beside our PDF, which PostGrid prints with the addresses stamped on the
  * first page (#534 Phase 0, docs/learnings/postgrid-pdf-rendering.md).
@@ -412,6 +437,18 @@ export class PostGridProvider implements LetterFulfillmentProvider {
    * Send a letter via PostGrid API
    */
   async sendLetter(params: LetterParams): Promise<LetterResult> {
+    // A service this provider does not sell is refused before any request, so
+    // it is an authoritative rejection and what paid for the letter comes back
+    // (#625): never mailed as standard mail.
+    if (params.extraService !== undefined && knownExtraService(params.extraService) === undefined) {
+      return {
+        success: false,
+        trackingId: '',
+        error: 'PostGrid does not sell that extra service.',
+        metadata: { retryable: false, submissionOutcome: 'definite_rejection' }
+      };
+    }
+
     if (this.options.verbose) {
       this.writeOperationDiagnostic('provider.postgrid.operation_started', 'create_letter');
     }
@@ -588,9 +625,9 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       };
 
       // PostGrid sets the USPS number some time after it accepts a certified
-      // letter (#625). Read as text, never trusted as anything else.
+      // letter (#625). Read as text and carried only if it is shaped like one.
       const carrierNumber = typeof response.trackingNumber === 'string' ? response.trackingNumber.trim() : '';
-      if (carrierNumber) letterStatus.carrierTrackingNumber = carrierNumber;
+      if (CARRIER_TRACKING_NUMBER.test(carrierNumber)) letterStatus.carrierTrackingNumber = carrierNumber;
 
       // Add tracking URL if available
       if (response.trackingUrl) {
@@ -636,18 +673,23 @@ export class PostGridProvider implements LetterFulfillmentProvider {
     const doubleSided = this.extraPagesCents(params) > 0;
     const doubleSidedExtra = doubleSided ? 10 : 0; // ~$0.10 extra for double-sided
     const extraPagesCost = this.extraPagesCents(params);
+    const service = knownExtraService(params.extraService);
+    const extraServiceCost = service ? EXTRA_SERVICE_COST_CENTS[service] : 0;
 
     return {
       baseCostCents: baseCost,
       postageCents: postageCost,
-      servicesCents: colorExtra + doubleSidedExtra + extraPagesCost,
+      servicesCents: colorExtra + doubleSidedExtra + extraPagesCost + extraServiceCost,
       totalCents,
       breakdown: [
         { item: 'Printing & Handling', costCents: baseCost },
         { item: 'First-Class Postage', costCents: postageCost },
         ...(params.color ? [{ item: 'Color Printing', costCents: colorExtra }] : []),
         ...(doubleSided ? [{ item: 'Double-Sided', costCents: doubleSidedExtra }] : []),
-        ...(extraPagesCost > 0 ? [{ item: 'Extra Pages', costCents: extraPagesCost }] : [])
+        ...(extraPagesCost > 0 ? [{ item: 'Extra Pages', costCents: extraPagesCost }] : []),
+        ...(extraServiceCost > 0
+          ? [{ item: service === 'certified_return_receipt' ? 'Certified Mail with Return Receipt' : 'Certified Mail', costCents: extraServiceCost }]
+          : [])
       ]
     };
   }
@@ -1200,7 +1242,11 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       baseCost += 10; // Double-sided: +$0.10
     }
 
-    return baseCost + this.extraPagesCents(params);
+    // Certified mail (#625): PostGrid's public price for the service, on top.
+    const service = knownExtraService(params.extraService);
+    const extraServiceCost = service ? EXTRA_SERVICE_COST_CENTS[service] : 0;
+
+    return baseCost + this.extraPagesCents(params) + extraServiceCost;
   }
 
   /**

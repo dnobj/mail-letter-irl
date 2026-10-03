@@ -273,6 +273,25 @@ describe('certified mail (#625)', () => {
     expect(isPackPayable({ mailType: 'letter', mailService: 'standard', pages: 2 })).toBe(false);
   });
 
+  it.each(['registered', 'express', 'Certified', ' certified', 'certified ', 'constructor', 'toString', '__proto__'])(
+    'gives a service it does not know no product and no pack: %s',
+    service => {
+      const option = { mailType: 'letter' as const, mailService: service as never };
+      expect(jitProductMatching(option)).toBeNull();
+      expect(jitProductMatching({ ...option, pages: 2 })).toBeNull();
+      expect(jitProductFor(option, { [CERTIFIED_MAIL_FLAG]: 'true' })).toBeNull();
+      expect(isPackPayable(option)).toBe(false);
+      expect(isPackPayable({ ...option, mailType: 'postcard' })).toBe(false);
+    }
+  );
+
+  it('reads a null service as standard everywhere, as the column does', () => {
+    const option = { mailType: 'letter' as const, mailService: null as never };
+    expect(isPackPayable(option)).toBe(true);
+    expect(jitProductMatching(option)?.productCode).toBe('jit-letter');
+    expect(jitProductMatching({ ...option, pages: 3 })?.productCode).toBe('jit-letter-3-pages');
+  });
+
   it('is configured as a product only while Pay & Send and its flag are on', () => {
     const base = { JIT_PURCHASE_ENABLED: 'true' };
     expect(isConfiguredProductCode('jit-letter-certified', base)).toBe(false);
@@ -304,9 +323,12 @@ describe('draftMailOption reads the service (#625)', () => {
     [{ mail_type: 'letter', mail_service: null }, { mailType: 'letter' }],
     [{ mail_type: 'letter' }, { mailType: 'letter' }],
     [{}, { mailType: 'letter' }],
-    // Anything else is read as standard; the column's CHECK keeps it from existing.
-    [{ mail_type: 'letter', mail_service: 'express' }, { mailType: 'letter' }],
+    // Empty is standard. Text this code does not know is kept as it is, so it fails closed
+    // downstream (no product, no pack): the column's CHECK keeps one from existing.
     [{ mail_type: 'letter', mail_service: '' }, { mailType: 'letter' }],
+    [{ mail_type: 'letter', mail_service: 'express' }, { mailType: 'letter', mailService: 'express' }],
+    [{ mail_type: 'letter', mail_service: 'Certified' }, { mailType: 'letter', mailService: 'Certified' }],
+    [{ mail_type: 'letter', mail_service: ' certified' }, { mailType: 'letter', mailService: ' certified' }],
     // A postcard is never certified, whatever a row says.
     [
       { mail_type: 'postcard', postcard_size: '6x4', mail_service: 'certified' },

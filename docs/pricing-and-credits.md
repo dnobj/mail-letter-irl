@@ -222,14 +222,17 @@ used in development until the owner approves them:
 
 Certified mail (#625) is USPS Certified Mail, sent through PostGrid's `extraService`, for a letter only: never a
 postcard, never a gift send. The price is flat for one to three pages. PostGrid's public prices are $6.94 for certified
-mail and $9.85 with the electronic return receipt, so these leave about $4.40 after Stripe's fee. They are the proposal on
-issue #625, the owner's call, used in development until approved. Production waits for that approval.
+mail and $9.85 with the electronic return receipt. If those include the letter itself, these prices leave about $4.40
+after Stripe's fee; if they are added to the letter's own cost of roughly $1.06 (PostGrid's older notes, in
+[layout-options-research.md](learnings/layout-options-research.md), list certified as an add-on), about $3.30. That is
+to be confirmed with PostGrid. They are the proposal on issue #625, the owner's call, used in development until
+approved. Production waits for that approval.
 
 - **Flags:** an option is sold only while its flag is on, as well as Pay & Send. Each flag also switches its option on, so an option is never offered without a price. The longer letters and the 4x6 and 11x6 postcards are offered only on our renderer as well (`LETTER_IRL_PRINT_RENDERER=pdf`, #586, #594).
 - **Off:** with its flag off, an option has no price at all. A quote offers no Pay & Send for it, and a checkout is refused rather than charging a smaller option's price.
 - **Ordering:** a checkout is priced by the product its order recorded.
 - **Fulfilment:** a paid order mails only the mail it paid for. A draft whose option no longer matches the order's product, such as a letter that changed length after its checkout opened, is refused (`JIT_PRODUCT_MISMATCH`) and the order goes to `refund_pending`, rather than mailing at another option's price (#586). A letter's pages are stored on its draft (`letter_drafts.pages`, migration 047), and every price, refusal and checkout reads them there.
-- **Packs and gift letters** pay for one-page letters and 6x9 postcards only (#579), in any layout and stationery. Every other option is paid per send with Pay & Send, whatever the balance:
+- **Packs and gift letters** pay for one-page standard letters and 6x9 postcards only (#579), in any layout and stationery. Every other option, certified mail included (#625), is paid per send with Pay & Send, whatever the balance:
   - the quote offers no pack and no send from the balance for it;
   - the send refuses a pack or gift letter for it (`PACK_CANNOT_PAY`);
   - a Pay & Send checkout for it is never refused because the balance could pay.
