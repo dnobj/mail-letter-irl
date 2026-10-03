@@ -26,7 +26,7 @@ export type MailFunding =
 interface MailDraftRow extends LetterDraft {
   mail_type: SendMailType;
   front_image_data?: string;
-  front_image_url?: string | null;
+  front_image_url?: string;
   postcard_size?: string;
   /** A postcard's front other than full bleed (#594, migration 048); null for full bleed. */
   postcard_front?: unknown;
