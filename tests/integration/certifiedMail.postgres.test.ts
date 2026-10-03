@@ -146,7 +146,7 @@ describePostgres('certified mail at the letter, the dispatch and the status sync
     await pool.query(
       `INSERT INTO letters (letter_id, user_id, content, recipient, credits_cost, status, mail_type,
          funding_type, mail_service, carrier_tracking_number, tracking_id, provider, sent_at)
-       VALUES ($1, $2, '{}'::jsonb, '{}'::jsonb, 0, $3, 'letter', 'prepaid_balance', $4::text, $5::text, $6,
+       VALUES ($1, $2, '{}'::jsonb, '{}'::jsonb, 2, $3, 'letter', 'prepaid_balance', $4::text, $5::text, $6,
          $7, NOW())`,
       [letterId, userId, options.status, options.service, options.number ?? null, `pg_${letterId}`, STUB_PROVIDER_NAME]
     );
@@ -170,7 +170,7 @@ describePostgres('certified mail at the letter, the dispatch and the status sync
       const letterId = randomUUID();
       await pool.query(
         `INSERT INTO letters (letter_id, user_id, content, recipient, credits_cost, status)
-         VALUES ($1, $2, '{}'::jsonb, '{}'::jsonb, 0, 'draft')`,
+         VALUES ($1, $2, '{}'::jsonb, '{}'::jsonb, 2, 'draft')`,
         [letterId, userId]
       );
       const now = await letterNow(letterId);
