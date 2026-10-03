@@ -1791,14 +1791,23 @@ export function summarizeToolResult(
     }
     case "get_order_status": {
       const status = result.currentStatus ?? "unknown";
-      return status === "scheduled"
-        ? `Latest order status: scheduled.${scheduledOrderSentence(result)}`
-        : `Latest order status: ${status}.`;
+      const summary =
+        status === "scheduled"
+          ? `Latest order status: scheduled.${scheduledOrderSentence(result)}`
+          : `Latest order status: ${status}.`;
+      // Certified mail (#625): its tracking number, or that there is none yet, in the words the output carries.
+      return typeof result.certifiedNote === "string" ? `${summary} ${result.certifiedNote}` : summary;
     }
     case "list_orders": {
       const orders = result.orders as any[];
       const total = result.total ?? 0;
-      return `Found ${orders?.length ?? 0} recent orders (${total} total).`;
+      const certified = (orders ?? []).filter(order => order?.mailService !== undefined).length;
+      return (
+        `Found ${orders?.length ?? 0} recent orders (${total} total).` +
+        (certified > 0
+          ? ` ${certified} went as USPS Certified Mail: their entries carry the USPS tracking number and link once there is one.`
+          : "")
+      );
     }
     case "set_return_address": {
       const message = result.message as string;

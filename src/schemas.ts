@@ -43,6 +43,10 @@ import {
   PREVIEW_SIGNATURE_OUTPUT_DESCRIPTION,
   PREVIEW_MAIL_SERVICE_DESCRIPTION,
   PREVIEW_MAIL_SERVICE_OUTPUT_DESCRIPTION,
+  ORDER_MAIL_SERVICE_DESCRIPTION,
+  ORDER_CARRIER_TRACKING_NUMBER_DESCRIPTION,
+  ORDER_CARRIER_TRACKING_URL_DESCRIPTION,
+  ORDER_CERTIFIED_NOTE_DESCRIPTION,
   SIGNATURE_SOURCE_DESCRIPTION,
   SET_LETTER_SIGNATURE_DESCRIPTION,
   SET_LETTER_SIGNATURE_CAN_SEND_DESCRIPTION,
@@ -636,8 +640,12 @@ export const getOrderStatusOutputSchema: JsonSchema = {
     trackingSupport: {
       type: "string",
       enum: ["none", "estimated_only", "carrier_tracking"],
-      description: "Tracking capability level. 'estimated_only' = periodic status updates available but delivery is estimated based on mail timing, not confirmed by carrier."
-    }
+      description: "Tracking capability level. 'estimated_only' = periodic status updates available but delivery is estimated based on mail timing, not confirmed by carrier. 'carrier_tracking' = a USPS tracking number is stored (certified mail): see carrierTrackingNumber."
+    },
+    mailService: { type: "string", enum: ["certified", "certified_return_receipt"], description: ORDER_MAIL_SERVICE_DESCRIPTION },
+    carrierTrackingNumber: { type: "string", description: ORDER_CARRIER_TRACKING_NUMBER_DESCRIPTION },
+    carrierTrackingUrl: { type: "string", description: ORDER_CARRIER_TRACKING_URL_DESCRIPTION },
+    certifiedNote: { type: "string", description: ORDER_CERTIFIED_NOTE_DESCRIPTION }
   }
 };
 
@@ -702,7 +710,10 @@ export const listOrdersOutputSchema: JsonSchema = {
           sentAt: { type: "string" },
           arriveBy: { type: "string", description: "Sent with an arrival date: the date it aims to arrive by, YYYY-MM-DD" },
           mailOn: { type: "string", description: "Sent with an arrival date: the day it goes to the printer, YYYY-MM-DD" },
-          cancellable: { type: "boolean", description: "With an arrival date: whether it can still be cancelled free, before it goes to the printer" }
+          cancellable: { type: "boolean", description: "With an arrival date: whether it can still be cancelled free, before it goes to the printer" },
+          mailService: { type: "string", enum: ["certified", "certified_return_receipt"], description: ORDER_MAIL_SERVICE_DESCRIPTION },
+          carrierTrackingNumber: { type: "string", description: ORDER_CARRIER_TRACKING_NUMBER_DESCRIPTION },
+          carrierTrackingUrl: { type: "string", description: ORDER_CARRIER_TRACKING_URL_DESCRIPTION }
         }
       }
     },

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAIL_SERVICES, isCertifiedMailOffered } from '../../../src/config/certifiedMail.js';
+import { MAIL_SERVICES, certifiedFactsOf, isCertifiedMailOffered, uspsTrackingUrl } from '../../../src/config/certifiedMail.js';
 import { CERTIFIED_MAIL_FLAG } from '../../../src/config/products.js';
 
 /**
@@ -33,5 +33,52 @@ describe('certified mail is offered (#625)', () => {
 
   it('lists the services in the order they are offered, standard first', () => {
     expect(MAIL_SERVICES).toEqual(['standard', 'certified', 'certified_return_receipt']);
+  });
+});
+
+describe('the USPS page for a tracking number (#625)', () => {
+  it('links the characters of the number alone, without the groups\' spaces and hyphens', () => {
+    expect(uspsTrackingUrl('9407100000000000000000')).toBe(
+      'https://tools.usps.com/go/TrackConfirmAction?tLabels=9407100000000000000000'
+    );
+    expect(uspsTrackingUrl('9407 1000 0000 0000 0000 00')).toBe(
+      'https://tools.usps.com/go/TrackConfirmAction?tLabels=9407100000000000000000'
+    );
+    expect(uspsTrackingUrl('9407-1000-0000-0000-0000-00')).toBe(
+      'https://tools.usps.com/go/TrackConfirmAction?tLabels=9407100000000000000000'
+    );
+  });
+
+  it('cannot be made to carry anything but the label', () => {
+    expect(uspsTrackingUrl('9407&x=1#frag')).toBe('https://tools.usps.com/go/TrackConfirmAction?tLabels=9407%26x%3D1%23frag');
+  });
+});
+
+describe('what a letter row says about certified mail (#625)', () => {
+  it('says nothing for an ordinary letter, however the column is left', () => {
+    for (const mail_service of ['standard', '', null, undefined]) {
+      expect(certifiedFactsOf({ mail_service, carrier_tracking_number: null })).toBeUndefined();
+    }
+    expect(certifiedFactsOf({})).toBeUndefined();
+  });
+
+  it('says nothing for text that is not one of the two services, and prices nothing by it', () => {
+    for (const mail_service of ['Certified', 'express', 7, {}]) {
+      expect(certifiedFactsOf({ mail_service, carrier_tracking_number: '9407100000000000000000' })).toBeUndefined();
+    }
+  });
+
+  it('gives the service alone until there is a number', () => {
+    for (const carrier_tracking_number of [null, undefined, '', '   ', 42]) {
+      expect(certifiedFactsOf({ mail_service: 'certified', carrier_tracking_number })).toEqual({ mailService: 'certified' });
+    }
+  });
+
+  it('gives the number, trimmed, with its link', () => {
+    expect(certifiedFactsOf({ mail_service: 'certified_return_receipt', carrier_tracking_number: ' 9407 1000 0000 0000 0000 00 ' })).toEqual({
+      mailService: 'certified_return_receipt',
+      carrierTrackingNumber: '9407 1000 0000 0000 0000 00',
+      carrierTrackingUrl: 'https://tools.usps.com/go/TrackConfirmAction?tLabels=9407100000000000000000'
+    });
   });
 });

@@ -18,6 +18,7 @@ import { cancelScheduledMail, type ScheduledMailRefusal } from '../services/sche
 import type { LetterStatus } from '../services/types.js';
 import { cancelledMessage } from '../tools/cancelScheduledMail.js';
 import { heldSendFields, waitsInOutbox } from '../tools/heldSend.js';
+import { certifiedFactsOf } from '../config/certifiedMail.js';
 
 /**
  * Send JSON response
@@ -165,6 +166,9 @@ interface LetterRow {
   arrive_by: string | null;
   mail_on: string | null;
   funding_type: string | null;
+  /** How it travelled (migration 053, #625), and the USPS number once the status sync has it. */
+  mail_service: string | null;
+  carrier_tracking_number: string | null;
 }
 
 /**
@@ -226,7 +230,8 @@ async function handleListLetters(
   let sql = `
     SELECT
       letter_id, user_id, content, recipient, credits_cost, status,
-      tracking_id, created_at, sent_at, provider, arrive_by, mail_on, funding_type
+      tracking_id, created_at, sent_at, provider, arrive_by, mail_on, funding_type,
+      mail_service, carrier_tracking_number
     FROM letters
     WHERE user_id = $1
   `;
@@ -271,7 +276,8 @@ async function handleGetLetter(
   const result = await query<LetterRow>(`
     SELECT
       letter_id, user_id, content, recipient, credits_cost, status,
-      preview_html, tracking_id, created_at, sent_at, provider, arrive_by, mail_on, funding_type
+      preview_html, tracking_id, created_at, sent_at, provider, arrive_by, mail_on, funding_type,
+      mail_service, carrier_tracking_number
     FROM letters
     WHERE letter_id = $1 AND user_id = $2
   `, [letterId, authInfo.userId]);
@@ -325,6 +331,7 @@ function formatLetterResponse(row: LetterRow): any {
   // and can be cancelled free until then unless Pay & Send paid for it.
   const waiting = waitsInOutbox(row.status as LetterStatus);
   const held = heldSendFields(row, waiting);
+  const certified = certifiedFactsOf(row);
 
   return {
     letterId: row.letter_id,
@@ -332,7 +339,13 @@ function formatLetterResponse(row: LetterRow): any {
     creditsCost: row.credits_cost,
     createdAt: row.created_at?.toISOString(),
     sentAt: row.sent_at?.toISOString(),
+    // The printer's id for the letter, not a carrier number: the USPS number of certified mail is carrierTrackingNumber below.
     trackingNumber: row.tracking_id,
+
+    // How it travelled (#625): standard, or USPS Certified Mail with or without an electronic return receipt, with the USPS number and its link once the status sync has it
+    mailService: certified?.mailService ?? 'standard',
+    carrierTrackingNumber: certified?.carrierTrackingNumber ?? null,
+    carrierTrackingUrl: certified?.carrierTrackingUrl ?? null,
 
     // Arrival dates, when it was sent with them (#535)
     arriveBy: held?.schedule.arriveBy ?? null,

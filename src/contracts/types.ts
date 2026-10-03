@@ -1,4 +1,5 @@
 import type { ClientProfile } from "../auth/clientProfiles.js";
+import type { CertifiedFacts } from "../config/certifiedMail.js";
 
 export type LetterStatus =
   | "pending"      // draft, queued
@@ -55,6 +56,8 @@ export interface OrderRecord {
   schedule?: { arriveBy: string; mailOn: string };
   /** With a schedule: whether it can still be cancelled free (cancel_scheduled_mail decides). */
   cancellable?: boolean;
+  /** Sent as USPS Certified Mail (#625): which service, the carrier's number once the status sync has it, and where USPS shows it. Absent for an ordinary letter. */
+  certified?: CertifiedFacts;
 }
 
 export interface UserAccount {

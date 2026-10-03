@@ -7,6 +7,8 @@ import {
   getOrderStatusInputSchema,
   getOrderStatusOutputSchema
 } from "../schemas.js";
+import type { CertifiedMailService } from "../services/types.js";
+import { certifiedOrderNote } from "./certifiedOrder.js";
 
 interface GetOrderStatusInput {
   orderId?: string;
@@ -26,6 +28,11 @@ interface GetOrderStatusOutput {
   arriveBy?: string;
   mailOn?: string;
   cancellable?: boolean;
+  /** Sent as USPS Certified Mail (#625): the service, the carrier's number and its link once there is one, and what to say about them. */
+  mailService?: CertifiedMailService;
+  carrierTrackingNumber?: string;
+  carrierTrackingUrl?: string;
+  certifiedNote?: string;
 }
 
 
@@ -89,9 +96,19 @@ async function handler(
     recipientSummary: order.recipientSummary,
     canSendFollowUp: true,
     followUpSuggestedPrompt: `Write a follow-up letter to ${order.recipientSummary.name}.`,
-    trackingSupport: "estimated_only",
+    // Carrier tracking only once USPS's number is stored (#625); until then, like any mail, estimated.
+    trackingSupport: order.certified?.carrierTrackingNumber ? "carrier_tracking" : "estimated_only",
     ...(order.schedule
       ? { arriveBy: order.schedule.arriveBy, mailOn: order.schedule.mailOn, cancellable: order.cancellable === true }
+      : {}),
+    ...(order.certified
+      ? {
+          mailService: order.certified.mailService,
+          ...(order.certified.carrierTrackingNumber
+            ? { carrierTrackingNumber: order.certified.carrierTrackingNumber, carrierTrackingUrl: order.certified.carrierTrackingUrl }
+            : {}),
+          certifiedNote: certifiedOrderNote(order.certified)
+        }
       : {})
   };
 }

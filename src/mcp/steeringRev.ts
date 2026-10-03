@@ -162,5 +162,12 @@
  *     deployment returns it for an ordinary letter. request_send's link words
  *     and the how-to-send words give a certified letter its own sentence, not
  *     the pack rule's.
+ * r39: certified orders (#625). For an order sent as USPS Certified Mail,
+ *     get_order_status and list_orders give the service and, once the status
+ *     sync has stored it, USPS's tracking number and link, and get_order_status
+ *     adds a note: that the number is not here yet, or that the electronic
+ *     return receipt is USPS's record, which Letter IRL does not receive. They
+ *     say it whatever the flag says (a sent letter is a fact), and the output
+ *     schemas declare the fields either way.
  */
-export const STEERING_COPY_REV = 38;
+export const STEERING_COPY_REV = 39;
