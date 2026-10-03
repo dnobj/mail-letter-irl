@@ -11,6 +11,7 @@ import { heldSendFields, waitsInOutbox } from './heldSend.js';
 import { isDraftIdShape } from './requestSend.js';
 import { letterPayment, wordsVersionOf } from './letterHelpers.js';
 import { letterPageLimit } from '../config/roomToWrite.js';
+import { draftMailOption, mailServiceOf } from '../config/products.js';
 import { isPostcardSizesOffered } from '../config/postcardSizes.js';
 import { isPostcardLayoutsOffered } from '../config/postcardLayouts.js';
 import { postcardFrontOf } from '../render/index.js';
@@ -191,10 +192,12 @@ function termsNow(
   draftId: string,
   context: ToolContext
 ): Pick<GetDraftStatusOutput, 'canSendNow' | 'reasonCannotSend' | 'sendEligibility'> {
-  if (draft.mail_type !== 'letter' || !draft.renderer_version || letterPageLimit() === 1) return {};
-  const pages = Number(draft.pages ?? 1);
-  const option = pages > 1 ? { mailType: 'letter' as const, pages } : { mailType: 'letter' as const };
-  return letterPayment(option, Number(draft.required_credits ?? 2), draft.is_gift_send === true, context, draftId);
+  // A certified letter (#625) keeps its terms whether or not room to write is
+  // offered: it was previewed while certified mail was, and the card must not
+  // offer a pack for it. Its option is the draft's own, service included.
+  const certified = mailServiceOf(draft.mail_service) !== undefined;
+  if (draft.mail_type !== 'letter' || !draft.renderer_version || (letterPageLimit() === 1 && !certified)) return {};
+  return letterPayment(draftMailOption(draft), Number(draft.required_credits ?? 2), draft.is_gift_send === true, context, draftId);
 }
 
 /**

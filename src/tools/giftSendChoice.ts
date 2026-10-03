@@ -44,6 +44,11 @@ export const GIFT_PAYS_ONE_PAGE =
   'A gift letter pays for a one-page letter or a 6x9 postcard, not for this one. ' +
   'Leave sendAsGift out and pay for it with Pay & Send, or send a 6x9 postcard or a one-page letter as the gift.';
 
+/** The refusal of a gift for certified mail (#625): no gift letter pays for it, however many pages it has. */
+export const GIFT_NOT_FOR_CERTIFIED =
+  'A gift letter does not pay for certified mail. ' +
+  'Leave sendAsGift out and pay for it with Pay & Send, or send the gift as an ordinary one-page letter or a 6x9 postcard.';
+
 export async function resolveGiftSendChoice(params: {
   userId: string;
   requested: boolean | undefined;
@@ -54,6 +59,8 @@ export async function resolveGiftSendChoice(params: {
    * Pay & Send, so no gift is chosen for it, and asking for one is refused.
    */
   giftCanPay?: boolean;
+  /** Whether the mail asks for certified mail (#625): the refusal then says so, not that the letter is long. */
+  certified?: boolean;
 }): Promise<GiftSendChoice> {
   if (!isGiftLettersEnabled()) {
     if (params.requested === true) {
@@ -63,7 +70,7 @@ export async function resolveGiftSendChoice(params: {
   }
   if (params.giftCanPay === false) {
     if (params.requested === true) {
-      throw new Error(GIFT_PAYS_ONE_PAGE);
+      throw new Error(params.certified === true ? GIFT_NOT_FOR_CERTIFIED : GIFT_PAYS_ONE_PAGE);
     }
     return { isGift: false, giftLettersAvailable: 0 };
   }

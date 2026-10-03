@@ -259,6 +259,31 @@ describe('set_letter_words', () => {
     expect(getSendEligibility).toHaveBeenCalledWith(10, 2, { mailType: 'letter', pages: 2 });
   });
 
+  it('prices a certified letter by its service and says its price is the same on a second page (#625)', async () => {
+    vi.mocked(getDraftForStationery).mockResolvedValue({ ...draft({ bodyText: lines(10) }), mail_service: 'certified' } as never);
+
+    const output = await change(lines(40));
+
+    expect(written().pages).toBe(2);
+    expect(output).toMatchObject({ pages: 2, canSendNow: false, reasonCannotSend: 'Certified mail is paid with Pay & Send.' });
+    expect(output.sendEligibility).toMatchObject({ packPays: false });
+    expect(output.message).toContain('It now runs to two pages, printed on both sides. The price is the same.');
+    expect(output.message).not.toContain('Pay & Send.');
+    expect(getSendEligibility).toHaveBeenCalledWith(10, 2, { mailType: 'letter', pages: 2, mailService: 'certified' });
+  });
+
+  it('says nothing of a pack when a certified letter fits back on one page (#625)', async () => {
+    vi.mocked(getDraftForStationery).mockResolvedValue({ ...draft({ bodyText: lines(40) }), mail_service: 'certified_return_receipt' } as never);
+
+    const output = await change(lines(10));
+
+    expect(written().pages).toBe(1);
+    expect(output).toMatchObject({ canSendNow: false, reasonCannotSend: 'Certified mail is paid with Pay & Send.' });
+    expect(output.message).toContain('It now fits on one page.');
+    expect(output.message).not.toContain('letter pack');
+    expect(getSendEligibility).toHaveBeenCalledWith(10, 2, { mailType: 'letter', mailService: 'certified_return_receipt' });
+  });
+
   it('fits a longer letter back on one page, which a pack pays for', async () => {
     vi.mocked(getDraftForStationery).mockResolvedValue(draft({ bodyText: lines(40) }) as never);
 

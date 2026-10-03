@@ -47,10 +47,11 @@ import {
   type Stationery
 } from "../render/index.js";
 import { getSendEligibility, type SendEligibility } from "../services/commerceService.js";
-import { isPackPayable, type MailOption } from "../config/products.js";
+import { isPackPayable, mailServiceOf, type MailOption } from "../config/products.js";
 import { callingApp, type ClientProfile } from "../auth/clientProfiles.js";
 import { isSendConfirmationEnabled, letterPacksPageUrl, sendConfirmationUrl } from "../config/sendConfirmation.js";
 import { GIFT_PAYS_ONE_PAGE, giftCardSummary, resolveGiftSendChoice, type GiftSendChoice } from "./giftSendChoice.js";
+import type { MailService } from "../services/types.js";
 import { giftLetterPageCopy } from "../services/giftCardRenderer.js";
 import { rememberedPrefix, type PreviewStationery } from "./stationeryInput.js";
 import { rememberStationery } from "../services/stationeryDefaultService.js";
@@ -1038,8 +1039,30 @@ export function appSendEligibility(
 export const PAID_PER_SEND_REASON =
   "Letter packs and gift letters pay for one-page letters and 6x9 postcards; this one is paid with Pay & Send.";
 
+export const PAGE_WORDS = ['', 'one page', 'two pages', 'three pages'];
+
+/**
+ * What a restyle says of a change in the letter's pages, and so of who pays (#586):
+ * a pack pays for one page, and two or three are paid with Pay & Send. Certified mail
+ * (#625) is paid with Pay & Send at one price whatever the pages, so for it a change
+ * of pages moves nothing about who pays, and the sentence does not say it does.
+ */
+export function pageChangeSentence(pages: number, pagesBefore: number, mailService?: string | null): string {
+  if (pages === pagesBefore) return '';
+  if (mailServiceOf(mailService)) {
+    return pages === 1 ? ' It now fits on one page.' : ` It now runs to ${PAGE_WORDS[pages]}, printed on both sides. The price is the same.`;
+  }
+  return pages === 1
+    ? ' It now fits on one page, which a letter pack pays for.'
+    : ` It now runs to ${PAGE_WORDS[pages]}, printed on both sides, and is paid with Pay & Send.`;
+}
+
+/** Why a certified letter cannot be sent from the balance (#625): no pack and no gift letter pays for it. */
+export const CERTIFIED_PAID_PER_SEND_REASON = "Certified mail is paid with Pay & Send.";
+
 export function reasonCannotSend(option: MailOption): string {
-  return isPackPayable(option) ? "Not enough letters in your balance." : PAID_PER_SEND_REASON;
+  if (isPackPayable(option)) return "Not enough letters in your balance.";
+  return option.mailService ? CERTIFIED_PAID_PER_SEND_REASON : PAID_PER_SEND_REASON;
 }
 
 /**
@@ -1068,7 +1091,7 @@ export function previewSendEligibility(
 export async function letterGiftChoice(
   letter: { bodyText: string; signOff: string; sendAsGift?: boolean },
   context: ToolContext,
-  /** The letter's option, once its pages are known (#586): a gift letter pays for one page only. */
+  /** The letter's option, once its pages are known (#586): a gift letter pays for one page only, and for standard mail (#625). */
   option?: MailOption
 ): Promise<GiftSendChoice> {
   const packPays = option === undefined || isPackPayable(option);
@@ -1076,7 +1099,8 @@ export async function letterGiftChoice(
     userId: context.user.userId,
     requested: letter.sendAsGift,
     balanceCanPay: context.user.creditsRemaining >= estimateRequiredCredits(letter.bodyText, letter.signOff),
-    ...(option === undefined ? {} : { giftCanPay: packPays })
+    ...(option === undefined ? {} : { giftCanPay: packPays }),
+    ...(option?.mailService ? { certified: true } : {})
   });
 }
 
@@ -1088,8 +1112,12 @@ export async function letterGiftChoice(
  */
 export async function earlyGiftChoice(
   letter: { bodyText: string; signOff: string; sendAsGift?: boolean },
-  context: ToolContext
+  context: ToolContext,
+  /** The mail service the letter asks for (#625): certified mail is paid per send whatever its pages, so no gift pays for it and that is known at once. */
+  mailService?: string | null
 ): Promise<GiftSendChoice | undefined> {
+  const service = mailServiceOf(mailService);
+  if (service) return letterGiftChoice(letter, context, { mailType: "letter", mailService: service });
   return letterPageLimit() > 1 ? undefined : letterGiftChoice(letter, context);
 }
 
@@ -1154,10 +1182,20 @@ export function letterPayment(
   };
 }
 
-/** A letter's option for its price (#579, #586): its pages, when its layout runs past one. */
-export function letterOption(layout: Layout | undefined): MailOption {
+/**
+ * A letter's option for its price (#579, #586, #625): its pages, when its
+ * layout runs past one, and the mail service the draft holds, when it is not
+ * standard (read as the rest of the code reads a row's: mailServiceOf, so an
+ * unknown value is carried and prices as nothing, never as standard mail).
+ */
+export function letterOption(layout: Layout | undefined, mailService?: MailService | string | null): MailOption {
   const pages = layout?.pages.length ?? 1;
-  return pages > 1 ? { mailType: "letter", pages } : { mailType: "letter" };
+  const service = mailServiceOf(mailService);
+  return {
+    mailType: "letter",
+    ...(pages > 1 ? { pages } : {}),
+    ...(service ? { mailService: service } : {})
+  };
 }
 
 export async function createLetterDraftAndBuildOutput(
