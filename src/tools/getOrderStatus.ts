@@ -96,8 +96,11 @@ async function handler(
     recipientSummary: order.recipientSummary,
     canSendFollowUp: true,
     followUpSuggestedPrompt: `Write a follow-up letter to ${order.recipientSummary.name}.`,
-    // Carrier tracking only once USPS's number is stored (#625); until then, like any mail, estimated.
-    trackingSupport: order.certified?.carrierTrackingNumber ? "carrier_tracking" : "estimated_only",
+    // Carrier tracking only once USPS's number is stored, and not for a letter that did not go out (#625); until then, like any mail, estimated.
+    trackingSupport:
+      order.certified?.carrierTrackingNumber && order.currentStatus !== "failed" && order.currentStatus !== "cancelled"
+        ? "carrier_tracking"
+        : "estimated_only",
     ...(order.schedule
       ? { arriveBy: order.schedule.arriveBy, mailOn: order.schedule.mailOn, cancellable: order.cancellable === true }
       : {}),
