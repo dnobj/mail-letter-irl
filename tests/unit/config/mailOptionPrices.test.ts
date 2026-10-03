@@ -332,7 +332,7 @@ describe('mailServiceOf reads a stored service (#625)', () => {
   });
 });
 
-describe('isExtraService narrows to what a provider is handed (#625)', () => {
+describe('isExtraService names the two extra services (#625)', () => {
   it.each(['certified', 'certified_return_receipt'])('%j is an extra service', value => {
     expect(isExtraService(value)).toBe(true);
   });

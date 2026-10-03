@@ -123,9 +123,9 @@ void _everyListedValueIsAnExtraService;
  *
  * Do NOT use it to turn other text into "no service" (isExtraService(v) ? v :
  * undefined): that mails what a row asks for in a service this code does not
- * know as standard mail. The send hands the provider mailServiceOf's value and
- * refuses what is neither none nor one of these (extraServiceRefusal), and the
- * providers refuse it too.
+ * know as standard mail. A caller hands the provider mailServiceOf's value and
+ * refuses what is neither none nor one of these before it asks (the dispatch
+ * does, from part 3), and the providers refuse it too.
  */
 export function isExtraService(value: unknown): value is CertifiedMailService {
   return (EXTRA_SERVICES as readonly unknown[]).includes(value);
