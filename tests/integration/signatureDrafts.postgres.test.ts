@@ -163,14 +163,18 @@ describePostgres('a letter\'s signature (migration 051, #608)', () => {
 
     await expect(pool.query("UPDATE letter_drafts SET mail_type = 'postcard' WHERE draft_id = $1", [signed]))
       .rejects.toMatchObject({ code: '23514' });
-    const postcard = randomUUID();
-    await expect(pool.query(
+    // A postcard every other check admits (rendererVersion.postgres.test.ts), then the same with a signature.
+    const postcard = (signature: string | null, rendererVersion: string) => pool.query(
       `INSERT INTO letter_drafts (
-         draft_id, user_id, sender, recipient, body_text, required_credits, expires_at, status, mail_type,
-         front_image_data, renderer_version, signature_image
-       ) VALUES ($1, $2, $3, $4, 'Hello', 2, NOW() + INTERVAL '1 day', 'pending', 'postcard', 'data:image/png;base64,AA==', 'pdf-4', $5)`,
-      [postcard, userId, JSON.stringify(SENDER), JSON.stringify(RECIPIENT), SIGNATURE]
-    )).rejects.toMatchObject({ code: '23514', constraint: 'letter_drafts_signature_letters_only' });
+         draft_id, user_id, sender, recipient, body_text, required_credits, expires_at, status,
+         mail_type, front_image_data, postcard_size, renderer_version, signature_image
+       ) VALUES ($1, $2, $3, $4, $5, 2, NOW() + INTERVAL '1 day', 'pending',
+                 'postcard', 'data:image/png;base64,AAAA', '6x9', $6, $7)`,
+      [randomUUID(), userId, JSON.stringify(SENDER), JSON.stringify(RECIPIENT), `Wish you were here ${randomUUID()}`, rendererVersion, signature]
+    );
+    await expect(postcard(null, 'pdf-1')).resolves.toMatchObject({ rowCount: 1 });
+    await expect(postcard(SIGNATURE, 'pdf-4'))
+      .rejects.toMatchObject({ code: '23514', constraint: 'letter_drafts_signature_letters_only' });
   }, 60_000);
 
   it('copies the signature into the letter the send creates, and none for an unsigned one', async () => {
