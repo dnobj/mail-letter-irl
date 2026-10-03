@@ -73,6 +73,15 @@ export const INLINE_IMAGE_MAX_HEIGHT = inch(3);
 export const IMAGE_GAP = inch(0.5);
 
 /**
+ * A signature (#608) takes three lines under the sign-off's first line: 0.8in,
+ * about the room a hand-signed letter leaves. The picture sits inside, a
+ * little air above and below it, at most 2.5in wide and left with the text.
+ */
+export const SIGNATURE_LINES = 3;
+export const SIGNATURE_MAX_WIDTH = inch(2.5);
+export const SIGNATURE_PADDING = 3;
+
+/**
  * A 9x6 postcard as PostGrid takes it from a PDF, from #534's probe P9
  * (test mode, 2026-10-01): two pages, front then back, each 9.25 x 6.25in,
  * a 0.125in bleed on every side. A 9 x 6in page is refused, and both pages

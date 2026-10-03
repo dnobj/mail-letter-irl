@@ -325,6 +325,13 @@ A `pdf-1` gift send prints its card as the PDF's second page, drawn by the rende
 - `pageFit` says how full the letter is, for the card's fit meter.
 - The previews lay letters out on more than one page only while room to write is offered (below).
 
+**A signature on a letter (#608).** `layoutLetter` takes the person's saved signature (`LetterContent.signature`: the picture, and the paragraph of the text that holds the sign-off's first line).
+- It draws the picture in a band three lines tall (`SIGNATURE_LINES`, 0.8 in) right after that line, left with the text, at most 2.5 in wide and never past CSS pixel size, with 3 pt of air above and below. "Sincerely,\nPat Example" prints the closing, the signature, then the name; a one-line sign-off gets it below.
+- The band counts as three lines, so the page fit, room to write and a letter's overflow all see it.
+- A page break never parts the band from the closing above it: when it would, the closing and the band start the next page. A continuation page never drops the band as blank lines.
+- Handwritten's rules skip the band, as they skip an enclosed image.
+- Without a signature the page is exactly the page without one. The previews and the print pass a signature from #608's next part, which records it on the draft.
+
 **Room to write on a preview (#586).** While `LETTER_IRL_ROOM_TO_WRITE_ENABLED` is on, the previews are drawn by `src/render` and Pay & Send is on (`isRoomToWriteOffered`), the three letter previews lay the letter out on up to three pages (`letterPageLimit`):
 - **Recorded and priced.** The draft records the pages (`letter_drafts.pages`, migration 047), counted before any gift page. A letter of two or three pages is Pay & Send at its own price: no pack pays for it, so `canSendNow` is false and the eligibility is priced as `jit-letter-2-pages` or `jit-letter-3-pages`. The output gives `pages`, and the narration opens "Preview ready: paid with Pay & Send." and adds "A two-page letter, printed on both sides of one sheet." A letter that fits one page is as before.
 - **Refused only past three pages:** "Letter is 6 lines too long for three pages: three pages is the longest letter we print. Please shorten your message to fit on three pages." The theme ways out are offered as on one page, at three pages. The character cap names three pages.
