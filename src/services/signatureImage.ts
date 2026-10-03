@@ -170,16 +170,19 @@ interface Piece {
 }
 
 /**
- * The ink's 8-connected pieces. `ink` holds 1 for ink, and each pixel found is
- * marked 2, so the ink is its own record of where the search has been.
+ * The ink's 8-connected pieces of at least `noiseArea` pixels. `ink` holds 1
+ * for ink, and each pixel found is marked 2, so the ink is its own record of
+ * where the search has been. A smaller piece is noise: its pixels are
+ * whitened in `cleaned`, so it prints as paper even inside the crop.
  */
-function pieces(ink: Uint8Array, width: number, height: number): Piece[] {
+function pieces(ink: Uint8Array, cleaned: Uint8Array, width: number, height: number, noiseArea: number): Piece[] {
   const stack = new Int32Array(ink.length);
+  // A piece's first pixels: all of a piece too small to keep.
+  const first = new Int32Array(noiseArea);
   const found: Piece[] = [];
   for (let start = 0; start < ink.length; start += 1) {
     if (ink[start] !== 1) continue;
     const piece: Piece = { id: found.length + 1, area: 0, minX: width, minY: height, maxX: -1, maxY: -1 };
-    found.push(piece);
     let top = 0;
     stack[top++] = start;
     ink[start] = 2;
@@ -187,6 +190,7 @@ function pieces(ink: Uint8Array, width: number, height: number): Piece[] {
       const at = stack[--top];
       const x = at % width;
       const y = (at - x) / width;
+      if (piece.area < noiseArea) first[piece.area] = at;
       piece.area += 1;
       if (x < piece.minX) piece.minX = x;
       if (x > piece.maxX) piece.maxX = x;
@@ -202,6 +206,8 @@ function pieces(ink: Uint8Array, width: number, height: number): Piece[] {
         }
       }
     }
+    if (piece.area >= noiseArea) found.push(piece);
+    else for (let k = 0; k < piece.area; k += 1) cleaned[first[k]] = 255;
   }
   return found;
 }
@@ -267,9 +273,7 @@ async function cleanSignature(input: Buffer): Promise<CleanedSignature> {
   const { blackAt, whiteAt, inkBelow, paperFloor } = SIGNATURE_CLEANING;
   const cleaned = Buffer.alloc(width * height);
   const ink = new Uint8Array(width * height);
-  let darkPaper = 0;
   for (let i = 0; i < cleaned.length; i += 1) {
-    if (paper[i] < paperFloor) darkPaper += 1;
     // One more on each side, so crushed blacks divide as near-blacks do.
     const ratio = paper[i] < paperFloor ? 1 : (grey.data[i] + 1) / (paper[i] + 1);
     const level = Math.round(Math.min(1, Math.max(0, (ratio - blackAt) / (whiteAt - blackAt))) * 255);
@@ -277,13 +281,22 @@ async function cleanSignature(input: Buffer): Promise<CleanedSignature> {
     if (level < inkBelow) ink[i] = 1;
   }
 
-  // Mostly dark paper: light ink on a dark sheet, or no sheet at all.
-  if (darkPaper * 2 > cleaned.length) throw new SignatureImageError('NO_SIGNATURE_FOUND', NO_SIGNATURE_FOUND_MESSAGE);
-  const found = pieces(ink, width, height);
-  const real = found.filter(piece => piece.area >= SIGNATURE_CLEANING.noiseArea);
+  const real = pieces(ink, cleaned, width, height, SIGNATURE_CLEANING.noiseArea);
   if (real.length === 0) throw new SignatureImageError('NO_SIGNATURE_FOUND', NO_SIGNATURE_FOUND_MESSAGE);
   const { box, area } = signaturePieces(real, Math.round(longest * SIGNATURE_CLEANING.reachShare));
   if (area < SIGNATURE_CLEANING.minInk) throw new SignatureImageError('NO_SIGNATURE_FOUND', NO_SIGNATURE_FOUND_MESSAGE);
+  // The signature on dark paper: light ink on a dark sheet leaves only the
+  // inner edges of its strokes as ink, with the sheet around them. Counted
+  // around what was kept, a window beyond it on each side, not over the whole
+  // picture, so a sheet on a dark desk is not refused (#609 round 3).
+  const around = { minX: Math.max(0, box.minX - window), minY: Math.max(0, box.minY - window), maxX: Math.min(width - 1, box.maxX + window), maxY: Math.min(height - 1, box.maxY + window) };
+  let darkPaper = 0;
+  for (let y = around.minY; y <= around.maxY; y += 1) {
+    for (let x = around.minX; x <= around.maxX; x += 1) if (paper[y * width + x] < paperFloor) darkPaper += 1;
+  }
+  if (darkPaper * 2 > (around.maxX - around.minX + 1) * (around.maxY - around.minY + 1)) {
+    throw new SignatureImageError('NO_SIGNATURE_FOUND', NO_SIGNATURE_FOUND_MESSAGE);
+  }
   // A piece left out is further than `reach` from what is kept, and the crop's
   // margin is narrower than that, so a stray mark never reaches the crop.
 

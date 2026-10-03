@@ -148,6 +148,16 @@ describe('cleanSignatureImage', () => {
     }
   });
 
+  it('refuses a mark with too little ink to be a signature, though it is wide enough', async () => {
+    // One line 120 px long and 2 px thick: under 300 px of ink, on white paper.
+    const slight = await sharp(
+      Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="600" height="300"><rect width="100%" height="100%" fill="#ffffff"/><rect x="240" y="150" width="120" height="2" fill="#000000"/></svg>')
+    )
+      .png()
+      .toBuffer();
+    expect(await refusal(slight)).toMatchObject({ code: 'NO_SIGNATURE_FOUND' });
+  });
+
   it('refuses a photograph, whose detail fills its own box, as not a signature', async () => {
     // Noise from a fixed seed: detail everywhere, as a photograph has.
     let seed = 7;
@@ -270,6 +280,31 @@ describe('cleanSignatureImage', () => {
     const cleaned = await cleanSignatureImage(phone);
     expect(cleaned.width).toBeLessThan(840);
     expect(cleaned.height).toBeLessThan(240);
+  });
+
+  it('finds a signature on a card lying on a dark desk that fills most of the photograph', async () => {
+    // The desk at grey 40 fills three quarters of the frame (#609 review round 3).
+    const desk = await photograph(
+      1600,
+      1200,
+      '<rect width="100%" height="100%" fill="#282828"/><rect x="500" y="400" width="600" height="400" fill="#f2f0ea"/>' +
+        scribble('translate(530,470) scale(0.6)')
+    );
+    const cleaned = await cleanSignatureImage(desk);
+    expect(cleaned.width).toBeGreaterThan(400);
+    expect(cleaned.width).toBeLessThan(560);
+  });
+
+  it('prints a speck of noise inside the crop as paper', async () => {
+    // Lossless, so the two pictures differ only by a dot of about 3 px between the strokes.
+    const sheetWith = (dot: string) =>
+      sharp(Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="800"><rect width="100%" height="100%" fill="#f4f2ee"/>${scribble('translate(300,250)')}${dot}</svg>`))
+        .png()
+        .toBuffer();
+    const plain = await cleanSignatureImage(await sheetWith(''));
+    const specked = await cleanSignatureImage(await sheetWith('<circle cx="950" cy="550" r="1" fill="#111111"/>'));
+    expect([specked.width, specked.height]).toEqual([plain.width, plain.height]);
+    expect(Buffer.compare(specked.png, plain.png)).toBe(0);
   });
 
   it("leaves lined paper's faint rules out of the signature", async () => {
