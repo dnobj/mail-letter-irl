@@ -195,6 +195,20 @@ export function openImage(input: Buffer): Sharp {
   return sharp(input, { limitInputPixels: MAX_INPUT_PIXELS });
 }
 
+/**
+ * Opens a photo to be printed, under the same ceiling and turned upright by
+ * its EXIF orientation (#617). A phone stores a portrait photo's pixels as
+ * the sensor read them and records the turn in an Orientation tag. Every
+ * print path re-encodes without EXIF, so left alone the tag is lost and the
+ * picture prints turned by 90 degrees; the renderer relies on the images it
+ * is given being upright (src/render/pdf.ts). sharp turns the picture after
+ * it has been resized, which measured no higher a peak at 49 megapixels
+ * (docs/image-support.md). A picture without the tag is unchanged.
+ */
+function openUprightImage(input: Buffer): Sharp {
+  return openImage(input).rotate();
+}
+
 /** Per-call options shared by every processing entry point. */
 export interface ImageProcessingOptions {
   /**
@@ -493,7 +507,7 @@ export async function downloadAndProcessImage(
     validateDimensions(metadata.width, metadata.height);
 
     // 3. Resize and convert to JPEG
-    const processed = await openImage(buffer)
+    const processed = await openUprightImage(buffer)
       .resize(targetDimensions.width, targetDimensions.height, {
         fit: 'cover',
         position: 'center',
@@ -614,7 +628,7 @@ async function processPostcardBuffer(
     validateDimensions(metadata.width, metadata.height);
 
     // 3. Create full-quality image for PostGrid printing
-    const processed = await openImage(buffer)
+    const processed = await openUprightImage(buffer)
       .resize(targetDimensions.width, targetDimensions.height, {
         fit: 'cover',
         position: 'center',
@@ -680,7 +694,7 @@ export async function downloadAndProcessLetterImage(
 
     // 3. Resize to fit within dimensions while maintaining aspect ratio
     // Use 'inside' fit to ensure image doesn't exceed max dimensions
-    const processed = await openImage(buffer)
+    const processed = await openUprightImage(buffer)
       .resize(targetDimensions.width, targetDimensions.height, {
         fit: 'inside',       // Fit within bounds, don't crop
         withoutEnlargement: false, // Allow upscaling if needed
@@ -744,7 +758,7 @@ export async function downloadAndProcessLetterImageWithPreview(
     validateDimensions(metadata.width, metadata.height);
 
     // 3. Create full-quality image for PostGrid
-    const processed = await openImage(buffer)
+    const processed = await openUprightImage(buffer)
       .resize(targetDimensions.width, targetDimensions.height, {
         fit: 'inside',
         withoutEnlargement: false,

@@ -88,7 +88,7 @@ All images are validated, resized to print specifications (300 DPI), and optimiz
 2. Validate file size (≤10 MB)
 3. Validate format (PNG, JPEG, or WebP) from the bytes; the Content-Type header is only an early hint
 4. Validate dimensions (≥100×100 pixels and ≤50 megapixels; the ceiling is enforced on the header read, before any pixel is decoded)
-5. Resize to 2700×1800 using Sharp with `cover` fit (crops and fills)
+5. Turn the picture upright by its EXIF orientation, then resize to 2700×1800 using Sharp with `cover` fit (crops and fills). A phone stores a portrait photo's pixels as the sensor read them and records the turn in a tag that re-encoding drops, so the turn is applied first (#617)
 6. Convert to JPEG at quality 85
 7. Encode as base64 data URI
 8. Embed in PostGrid HTML template
@@ -128,7 +128,7 @@ All images are validated, resized to print specifications (300 DPI), and optimiz
 2. Validate file size (≤5 MB)
 3. Validate format (PNG, JPEG, or WebP) from the bytes; the Content-Type header is only an early hint
 4. Validate dimensions (≥100×100 pixels and ≤50 megapixels; the ceiling is enforced on the header read, before any pixel is decoded)
-5. Resize to fit within 1950×600 using Sharp with `inside` fit (maintains aspect ratio)
+5. Turn the picture upright by its EXIF orientation (#617), then resize to fit within 1950×600 using Sharp with `inside` fit (maintains aspect ratio)
 6. Convert to JPEG at quality 85
 7. Encode as base64 data URI
 8. Embed at top of letter HTML template
@@ -200,6 +200,10 @@ Every image byte is customer-controlled, and decoding is where bytes become memo
 - **One download deadline.** A remote download has one 20 s deadline that covers every redirect hop, the headers and the whole body read; a server that dribbles bytes is cut off at the deadline and the byte cap is enforced whether or not Content-Length was sent. The only time outside the deadline is the DNS lookup that validates each hop's host, which Node's resolver does not let a signal abort.
 
 `tests/unit/services/imageServiceHardening.test.ts` proves each of these with real image bytes and no sharp mock.
+
+Turning a photo upright by its EXIF orientation (`openUprightImage`, #617) adds nothing to these bounds. sharp resizes first and turns the smaller picture, and for a 90-degree tag it swaps the resize target before choosing how far to shrink on load. Measured in a standalone process (`sharp.concurrency(1)`, a 2700 × 1800 `cover` crop, one file at a time), peak resident memory without the turn and then with it, in megabytes: a 49-megapixel baseline JPEG tagged 1, 112 and 113; the same tagged 6, 113 and 103; a plain 8-bit 49-megapixel PNG tagged 6, 113 and 104; a WebP tagged 6, 132 and 123; and a progressive JPEG tagged 6 at the edge of the full-decode budget (32.5 megapixels), 199 and 197. A 49-megapixel colour progressive JPEG is refused by that budget before any of this. The turn defeats none of the bounds above.
+
+`tests/unit/services/imageServiceOrientation.test.ts` proves with real bytes that a photo tagged 3, 6 or 8 prints upright on every path and that all eight tags (the mirrored 2, 4, 5 and 7 too) print as a viewer sees them in a JPEG, a WebP and a PNG, and that one with no tag, or tagged 1, is unchanged.
 
 ### Image Service
 

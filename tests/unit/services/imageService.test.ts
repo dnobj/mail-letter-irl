@@ -35,6 +35,7 @@ vi.mock('sharp', () => {
   const sharpMock = Object.assign(
     vi.fn(() => ({
       metadata: vi.fn(),
+      rotate: vi.fn().mockReturnThis(),
       resize: vi.fn().mockReturnThis(),
       jpeg: vi.fn().mockReturnThis(),
       toBuffer: vi.fn(),
