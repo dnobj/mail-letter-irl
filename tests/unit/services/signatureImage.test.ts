@@ -43,6 +43,17 @@ async function pixels(png: Buffer) {
 /** The darkest grey level. */
 const darkest = (data: Buffer) => data.reduce((least, level) => Math.min(least, level), 255);
 
+/** Of the ink (darker than 160), the share that is solid black (under 16): a stroke is black, its edges grey. */
+function solidInk(data: Buffer): number {
+  let ink = 0;
+  let black = 0;
+  for (const level of data) {
+    if (level < 160) ink += 1;
+    if (level < 16) black += 1;
+  }
+  return black / ink;
+}
+
 /** The mean grey level of a box of the cleaned picture. */
 function mean(data: Buffer, width: number, box: { left: number; top: number; width: number; height: number }) {
   let sum = 0;
@@ -72,6 +83,7 @@ describe('cleanSignatureImage', () => {
     expect(info.channels).toBe(1);
     expect([info.width, info.height]).toEqual([cleaned.width, cleaned.height]);
     expect(darkest(data)).toBeLessThan(40);
+    expect(solidInk(data)).toBeGreaterThan(0.5);
     // Every corner is white paper.
     for (const left of [0, info.width - 10]) {
       for (const top of [0, info.height - 10]) {
@@ -96,6 +108,7 @@ describe('cleanSignatureImage', () => {
     const { data, info } = await pixels(cleaned.png);
     expect(mean(data, info.width, { left: 0, top: 0, width: 10, height: 10 })).toBeGreaterThan(250);
     expect(darkest(data)).toBeLessThan(40);
+    expect(solidInk(data)).toBeGreaterThan(0.5);
   });
 
   it('turns a photograph upright by its EXIF orientation', async () => {
@@ -144,7 +157,8 @@ describe('cleanSignatureImage', () => {
   it('refuses a picture too small to hold a signature, and ink too narrow to print well', async () => {
     const tiny = await jpeg(sheet(140, 60, { paper: '#ffffff', path: 'M 10 30 L 130 30' }));
     expect(await refusal(tiny)).toMatchObject({ code: 'SIGNATURE_TOO_SMALL' });
-    const short = await jpeg(sheet(140, 49, { paper: '#ffffff', path: 'M 10 25 L 130 25' }));
+    // Long enough, but under 50 px on its short side.
+    const short = await jpeg(sheet(400, 40, { paper: '#ffffff', path: 'M 10 20 L 390 20' }));
     expect(await refusal(short)).toMatchObject({ code: 'SIGNATURE_TOO_SMALL' });
     // A mark 40 px wide on a sheet big enough.
     const narrow = await jpeg(sheet(300, 150, { ink: '#000000', paper: '#ffffff', strokeWidth: 3, path: 'M 130 55 L 170 95 M 170 55 L 130 95' }));
