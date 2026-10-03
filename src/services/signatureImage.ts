@@ -23,8 +23,8 @@
  * 5. Crop to what was kept, with a small margin, and fit it inside 1200 x 400
  *    px as a grayscale PNG.
  *
- * Refused: a picture with too little ink (blank paper, or light ink on dark),
- * one whose ink fills more than a third of its own box (a photograph, not a
+ * Refused: a picture with too little ink (blank paper), one whose ink fills
+ * more than a third of its own box (a photograph, not a
  * signature), and a picture or a signature too small to print well. Pixels
  * made here are opened with plain sharp: they are ours and already bounded;
  * the picture itself is opened by openImage, with the pixel ceiling, under
@@ -285,38 +285,12 @@ async function cleanSignature(input: Buffer): Promise<CleanedSignature> {
   if (real.length === 0) throw new SignatureImageError('NO_SIGNATURE_FOUND', NO_SIGNATURE_FOUND_MESSAGE);
   const { box, area } = signaturePieces(real, Math.round(longest * SIGNATURE_CLEANING.reachShare));
   if (area < SIGNATURE_CLEANING.minInk) throw new SignatureImageError('NO_SIGNATURE_FOUND', NO_SIGNATURE_FOUND_MESSAGE);
-  // Ink is darker than the paper around it, by the contrast each ink pixel
-  // met against its own paper. Light ink on a dark sheet fails: the closing
-  // takes its light strokes for paper, and what reads as ink is their edges,
-  // lighter than the sheet. Around what was kept, a window beyond it on each
-  // side, where nothing left out lies (the window is narrower than the reach),
-  // so a desk in the rest of the picture does not count (#609 rounds 3 and 4).
-  const around = {
-    minX: Math.max(0, box.minX - window),
-    minY: Math.max(0, box.minY - window),
-    maxX: Math.min(width - 1, box.maxX + window),
-    maxY: Math.min(height - 1, box.maxY + window),
-  };
-  let inkGrey = 0;
-  let inkCount = 0;
-  let paperGrey = 0;
-  let paperCount = 0;
-  for (let y = around.minY; y <= around.maxY; y += 1) {
-    for (let x = around.minX; x <= around.maxX; x += 1) {
-      const i = y * width + x;
-      if (ink[i]) {
-        inkGrey += grey.data[i];
-        inkCount += 1;
-      } else {
-        paperGrey += grey.data[i];
-        paperCount += 1;
-      }
-    }
-  }
-  const inkContrast = blackAt + (whiteAt - blackAt) * (inkBelow / 255);
-  if (paperCount === 0 || inkGrey / inkCount > inkContrast * (paperGrey / paperCount)) {
-    throw new SignatureImageError('NO_SIGNATURE_FOUND', NO_SIGNATURE_FOUND_MESSAGE);
-  }
+  // Light ink on a dark sheet is not refused as such: the closing takes its
+  // light strokes for paper, so the dark sheet between their bends reads as
+  // ink. Most such pictures fail the checks below; one that passes is saved as
+  // those shapes, and the person sees it in the letter's preview before it
+  // prints. A rule to tell them apart broke in three review rounds running
+  // (#609 rounds 3 to 5), so it waits for #611.
   // A piece left out is further than `reach` from what is kept, and the crop's
   // margin is narrower than that, so a stray mark never reaches the crop.
 

@@ -137,15 +137,12 @@ describe('cleanSignatureImage', () => {
     expect(Math.max(cleaned.width / SIGNATURE_MAX_SIZE.width, cleaned.height / SIGNATURE_MAX_SIZE.height)).toBeGreaterThan(0.99);
   });
 
-  it('refuses blank paper, and light ink on dark, as no signature found', async () => {
+  it('refuses blank paper as no signature found', async () => {
     const blank = await sharp({ create: { width: 800, height: 300, channels: 3, background: '#e0dcd4' } }).jpeg().toBuffer();
-    const lightOnDark = await jpeg(sheet(800, 300, { ink: '#f0f0f0', paper: '#304050' }));
-    for (const input of [blank, lightOnDark]) {
-      const error = await refusal(input);
-      expect(error).toBeInstanceOf(SignatureImageError);
-      expect(error).toMatchObject({ code: 'NO_SIGNATURE_FOUND' });
-      expect((error as Error).message).toContain('Sign in dark ink');
-    }
+    const error = await refusal(blank);
+    expect(error).toBeInstanceOf(SignatureImageError);
+    expect(error).toMatchObject({ code: 'NO_SIGNATURE_FOUND' });
+    expect((error as Error).message).toContain('Sign in dark ink');
   });
 
   it('refuses a mark with too little ink to be a signature, though it is wide enough', async () => {
@@ -293,14 +290,6 @@ describe('cleanSignatureImage', () => {
     const cleaned = await cleanSignatureImage(desk);
     expect(cleaned.width).toBeGreaterThan(400);
     expect(cleaned.width).toBeLessThan(560);
-  });
-
-  it('refuses light ink on a grey sheet at a phone\'s size: ink is darker than its paper', async () => {
-    // Paper at grey 90 and 110, above the floor; strokes at grey 240, 24 px, the picture 3000 px across (#609 round 4).
-    for (const paperGrey of ['#5a5a5a', '#6e6e6e']) {
-      const grey = await photograph(3000, 1200, `<rect width="100%" height="100%" fill="${paperGrey}"/>` + scribble('translate(300,200) scale(3)', 8, '#f0f0f0'));
-      expect(await refusal(grey), paperGrey).toMatchObject({ code: 'NO_SIGNATURE_FOUND' });
-    }
   });
 
   it('finds a signature on a business card on a dark desk', async () => {
