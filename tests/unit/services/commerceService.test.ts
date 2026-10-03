@@ -4247,6 +4247,25 @@ describe('commerceService', () => {
       }
     );
 
+    it.each(['standard', '', null])(
+      'opens a checkout for a draft whose mail service is %j, which is what an ordinary letter is (#625)',
+      async mail_service => {
+        credits = 0;
+        draftRow = pendingDraft({ mail_service });
+        mocks.getJitProduct.mockReturnValue({
+          productCode: 'jit-letter', priceId: 'price-1p', amountCents: 499, currency: 'usd',
+          name: 'Pay & Send One Physical Letter', description: 'x', mailType: 'letter'
+        });
+
+        await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).resolves.toMatchObject({
+          success: true,
+          reused: false
+        });
+
+        expect(inserted()).toBe(true);
+      }
+    );
+
     it('opens a checkout for a 4x6 postcard whatever the balance: no pack pays for it (#579)', async () => {
       credits = 200;
       draftRow = pendingDraft({ mail_type: 'postcard', postcard_size: '6x4' });
