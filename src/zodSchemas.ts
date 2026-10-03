@@ -428,6 +428,27 @@ export const cancelAddressRequestInputZ = z.object({
   requestId: z.string().describe(ADDRESS_REQUEST_ID_DESCRIPTION)
 });
 
+// A saved signature (#608). Listed only while LETTER_IRL_SIGNATURES_ENABLED is
+// on and our renderer draws letters (src/server.ts).
+export const SIGNATURE_IMAGE_DESCRIPTION = "A photo of the person's signature, attached in the conversation";
+export const SIGNATURE_IMAGE_URL_DESCRIPTION = "A link to a photo of the person's signature, when no file was attached";
+export const SIGNATURE_CONFIRM_DESCRIPTION =
+  "Set true once the person has agreed: a removed signature cannot be brought back";
+export const SIGNATURE_SAVED_AT_DESCRIPTION = "When it was saved, ISO 8601";
+export const SIGNATURE_REPLACED_DESCRIPTION = "Whether it replaced a signature saved before";
+export const SIGNATURE_REMOVED_DESCRIPTION = "Whether a saved signature was removed: false when none was saved";
+
+export const setSignatureInputZ = z.object({
+  image: imageFileParamZ.optional().describe(SIGNATURE_IMAGE_DESCRIPTION),
+  imageUrl: z.string().optional().describe(SIGNATURE_IMAGE_URL_DESCRIPTION)
+});
+
+export const getSignatureInputZ = z.object({});
+
+export const clearSignatureInputZ = z.object({
+  confirm: z.boolean().describe(SIGNATURE_CONFIRM_DESCRIPTION)
+});
+
 // ============================================================================
 // Feature Request Schema (US-FEEDBACK-01)
 // ============================================================================
@@ -915,6 +936,28 @@ export const cancelAddressRequestOutputZ = z.object({
   requestId: z.string(),
   status: z.enum(ADDRESS_REQUEST_STATES).describe(ADDRESS_REQUEST_STATUS_DESCRIPTION),
   alreadyClosed: z.boolean().describe("True when it had already been answered, declined, cancelled or had expired: nothing changed"),
+  message: z.string()
+});
+
+// The cleaned picture itself travels in _meta, for a card (partitionToolResult).
+export const setSignatureOutputZ = z.object({
+  saved: z.literal(true),
+  replaced: z.boolean().describe(SIGNATURE_REPLACED_DESCRIPTION),
+  width: z.number().describe("The cleaned signature's width, in pixels"),
+  height: z.number().describe("The cleaned signature's height, in pixels"),
+  message: z.string()
+});
+
+export const getSignatureOutputZ = z.object({
+  saved: z.boolean(),
+  width: z.number().optional(),
+  height: z.number().optional(),
+  savedAt: z.string().optional().describe(SIGNATURE_SAVED_AT_DESCRIPTION),
+  message: z.string()
+});
+
+export const clearSignatureOutputZ = z.object({
+  removed: z.boolean().describe(SIGNATURE_REMOVED_DESCRIPTION),
   message: z.string()
 });
 

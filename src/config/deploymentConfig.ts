@@ -624,6 +624,20 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     services: ['api']
   },
   /**
+   * Signatures (#608, src/config/signatures.ts): the three tools and the
+   * website's /api/signature routes, while the flag is on and our renderer
+   * draws letters. Off unless set, so absence is the intended production
+   * state until the owner's word and the privacy policy's wording; listed so
+   * the preflight shows which environments have it. API only.
+   */
+  {
+    name: 'LETTER_IRL_SIGNATURES_ENABLED',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  /**
    * How many days a closed address request, and any address given with it,
    * is kept (#604): read by the maintenance sweep, whatever the feature's flag.
    * The value is the owner's, with the privacy policy's wording; 7 by default.

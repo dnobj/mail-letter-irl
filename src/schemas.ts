@@ -30,7 +30,13 @@ import {
   ADDRESS_REQUEST_ID_DESCRIPTION,
   ADDRESS_REQUEST_STATES,
   ADDRESS_REQUEST_STATUS_DESCRIPTION,
-  ADDRESS_REQUEST_RECIPIENT_DESCRIPTION
+  ADDRESS_REQUEST_RECIPIENT_DESCRIPTION,
+  SIGNATURE_IMAGE_DESCRIPTION,
+  SIGNATURE_IMAGE_URL_DESCRIPTION,
+  SIGNATURE_CONFIRM_DESCRIPTION,
+  SIGNATURE_SAVED_AT_DESCRIPTION,
+  SIGNATURE_REPLACED_DESCRIPTION,
+  SIGNATURE_REMOVED_DESCRIPTION
 } from "./zodSchemas.js";
 import { STATIONERY_THEMES } from "./render/stationery.js";
 
@@ -1081,6 +1087,72 @@ export const cancelAddressRequestOutputSchema: JsonSchema = {
       type: "boolean",
       description: "True when it had already been answered, declined, cancelled or had expired: nothing changed"
     },
+    message: { type: "string" }
+  }
+};
+
+/** A saved signature (#608). The cleaned picture travels in _meta, for a card. */
+export const setSignatureInputSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    // A file attachment: ChatGPT fills it through fileParams, as the image previews' image.
+    image: {
+      type: "object",
+      description: SIGNATURE_IMAGE_DESCRIPTION,
+      properties: {
+        download_url: { type: "string" },
+        file_id: { type: "string" },
+        mime_type: { type: "string" },
+        file_name: { type: "string" }
+      },
+      required: ["download_url", "file_id"]
+    },
+    imageUrl: { type: "string", description: SIGNATURE_IMAGE_URL_DESCRIPTION }
+  }
+};
+
+export const setSignatureOutputSchema: JsonSchema = {
+  type: "object",
+  required: ["saved", "replaced", "width", "height", "message"],
+  properties: {
+    saved: { type: "boolean", enum: [true] },
+    replaced: { type: "boolean", description: SIGNATURE_REPLACED_DESCRIPTION },
+    width: { type: "number", description: "The cleaned signature's width, in pixels" },
+    height: { type: "number", description: "The cleaned signature's height, in pixels" },
+    message: { type: "string" }
+  }
+};
+
+export const getSignatureInputSchema: JsonSchema = {
+  type: "object",
+  properties: {}
+};
+
+export const getSignatureOutputSchema: JsonSchema = {
+  type: "object",
+  required: ["saved", "message"],
+  properties: {
+    saved: { type: "boolean" },
+    width: { type: "number" },
+    height: { type: "number" },
+    savedAt: { type: "string", description: SIGNATURE_SAVED_AT_DESCRIPTION },
+    message: { type: "string" }
+  }
+};
+
+export const clearSignatureInputSchema: JsonSchema = {
+  type: "object",
+  required: ["confirm"],
+  properties: {
+    confirm: { type: "boolean", description: SIGNATURE_CONFIRM_DESCRIPTION }
+  }
+};
+
+export const clearSignatureOutputSchema: JsonSchema = {
+  type: "object",
+  required: ["removed", "message"],
+  properties: {
+    removed: { type: "boolean", description: SIGNATURE_REMOVED_DESCRIPTION },
     message: { type: "string" }
   }
 };

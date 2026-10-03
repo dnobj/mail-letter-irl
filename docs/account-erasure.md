@@ -19,6 +19,7 @@ the owner's decision on #289 (2026-09-23).
 | Retention copies of letters and drafts | Disputes and refunds |
 | Personal access tokens, the upload link and feature requests | Gift letters, and gift codes another account redeemed |
 | Address requests (#604), with any address a recipient gave. The preview does not count them: neither admin role reads the table | |
+| The saved signature (#608), a picture of the person's handwriting. The preview does not count it either: neither admin role reads the table | |
 | The photo uploaded through the card, from the image store (#474) | |
 | Gift codes nobody has redeemed, so a card already in the post stops working | The admin audit trail, kept two years as the privacy policy says |
 | The address a seed code was claimed with | |

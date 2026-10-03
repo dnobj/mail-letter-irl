@@ -69,7 +69,10 @@ import type {
   cancelScheduledMailOutputZ,
   requestAddressOutputZ,
   getAddressRequestOutputZ,
-  cancelAddressRequestOutputZ
+  cancelAddressRequestOutputZ,
+  setSignatureOutputZ,
+  getSignatureOutputZ,
+  clearSignatureOutputZ
 } from "../zodSchemas.js";
 import type {
   quoteAndPreviewLetterTextOnlyTool,
@@ -101,7 +104,10 @@ import type {
   cancelScheduledMailTool,
   requestAddressTool,
   getAddressRequestTool,
-  cancelAddressRequestTool
+  cancelAddressRequestTool,
+  setSignatureTool,
+  getSignatureTool,
+  clearSignatureTool
 } from "../tools/index.js";
 
 // ============================================================================
@@ -146,7 +152,9 @@ type MetaPartitioned =
   | "purchaseStep"
   | "examplePrompts"
   // the letter card's fit line (#586)
-  | "pageFit";
+  | "pageFit"
+  // a saved signature's picture (#608)
+  | "signatureImage";
 
 type UndeclaredKeys<Output, Schema> = Exclude<keyof Output, keyof Schema | MetaPartitioned>;
 
@@ -279,4 +287,13 @@ export type GetAddressRequestConforms = Conforms<
 >;
 export type CancelAddressRequestConforms = Conforms<
   BothDirections<z.infer<typeof cancelAddressRequestOutputZ>, typeof cancelAddressRequestTool>
+>;
+export type SetSignatureConforms = Conforms<
+  BothDirections<z.infer<typeof setSignatureOutputZ>, typeof setSignatureTool>
+>;
+export type GetSignatureConforms = Conforms<
+  BothDirections<z.infer<typeof getSignatureOutputZ>, typeof getSignatureTool>
+>;
+export type ClearSignatureConforms = Conforms<
+  BothDirections<z.infer<typeof clearSignatureOutputZ>, typeof clearSignatureTool>
 >;

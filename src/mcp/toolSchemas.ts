@@ -197,6 +197,15 @@ export const toolInputSchemas = {
   cancel_address_request: z.object({
     requestId: z.string()
   }),
+  // A saved signature, read, and removed (#608)
+  set_signature: z.object({
+    image: imageFileParamSchema.optional(),
+    imageUrl: z.string().optional()
+  }),
+  get_signature: z.object({}).strict(),
+  clear_signature: z.object({
+    confirm: z.boolean()
+  }),
   // One chunk of a photo from the upload card (#474, phase 3)
   upload_photo_chunk: z.object({
     uploadId: z.string(),

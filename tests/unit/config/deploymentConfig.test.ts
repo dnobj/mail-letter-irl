@@ -667,6 +667,16 @@ describe('ENV_VAR_MANIFEST', () => {
     });
   });
 
+  it('lists the signatures flag, advisory and API only, so the preflight shows where it is set (#608)', () => {
+    expect(ENV_VAR_MANIFEST.find(entry => entry.name === 'LETTER_IRL_SIGNATURES_ENABLED')).toEqual({
+      name: 'LETTER_IRL_SIGNATURES_ENABLED',
+      requiredIn: 'production',
+      advisory: true,
+      secret: false,
+      services: ['api']
+    });
+  });
+
   it('lists the print renderer flag, so the preflight shows where it is set (#534)', () => {
     // Advisory: absent is the intended production state until the owner
     // switches it on. API only: maintenance prints with the recorded version.

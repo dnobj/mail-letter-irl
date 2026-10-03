@@ -164,6 +164,32 @@ The server instructions add, while these are listed, that `request_address` is t
 - **Limits:** a 4 KB body (413), read within 30 seconds (408), and the `address_public` rate limits (20 a minute per IP, 200 in all). Answers are `no-store` and `no-referrer`.
 - **Logs** carry an outcome and an error class only: never the token, a name or an address.
 
+## Signatures
+
+Listed only while signatures are offered (#608, concept 3 in [letter-creator-vision.md](letter-creator-vision.md)): `LETTER_IRL_SIGNATURES_ENABLED` is on and `LETTER_IRL_PRINT_RENDERER=pdf`, since only our renderer can draw one. Each refuses otherwise (`SIGNATURES_OFF`). The table is `user_signatures` ([database-schema.md](database-schema.md#user_signatures)). Letters print the saved signature under the closing in #608's later parts; until they do, the flag stays off everywhere.
+
+- `set_signature`: Saves a picture of the person's handwritten signature for their account, in place of any saved before.
+  - **Takes** `image` (a file attached in ChatGPT, through `openai/fileParams`) or `imageUrl` (a link, or `letterirl-upload:latest` for the account's own upload through the card), the file first. Neither is refused (`SIGNATURE_PICTURE_REQUIRED`), and a file the server cannot open is refused as such (`SIGNATURE_PICTURE_UNREADABLE`).
+  - **The picture** is fetched as a letter image is (at most 5 MB), then cleaned (`src/services/signatureImage.ts`):
+    - turned upright by its EXIF orientation;
+    - transparency flattened onto white;
+    - each pixel divided by the paper's light around it, so a grey sheet or a shadow goes white and the ink stays dark;
+    - cropped to the ink;
+    - fitted inside 1200 x 400 px, as a grayscale PNG.
+  - **Refusals**, in words the person can act on:
+    - `NO_SIGNATURE_FOUND`: blank paper, or light ink on dark;
+    - `NOT_A_SIGNATURE`: ink filling more than a third of its own box, as a photograph's detail does;
+    - `SIGNATURE_TOO_SMALL`: a picture under 150 x 50 px, or ink under 60 px wide.
+  - **Returns** `saved: true`, `replaced`, and the cleaned `width` and `height`, and a `message`. The cleaned picture goes to a card in `_meta.signatureImage`, never to the model.
+  - Saving one turns it on for the account's next previews (`use_by_default`). Destructive (the signature before cannot be brought back), not idempotent.
+- `get_signature`: Whether a signature is saved: `saved`, and when one is, its `width`, `height` and `savedAt`; the picture in `_meta.signatureImage`. Read-only, on `mail:read`.
+- `clear_signature`: Removes the saved signature, with `confirm: true` (`CONFIRM_REQUIRED` without it). Returns `removed`, false when none was saved. Letters already previewed keep their own copy. Destructive and idempotent.
+
+**The website's routes** (`src/api/signatureApiHandler.ts`), the same service and scopes as the tools, and 404 while signatures are not offered:
+- `GET /api/signature` (`mail:read`): `{ saved: false }`, or `{ saved: true, width, height, savedAt, image }` with the picture as a PNG data URI. `no-store`.
+- `POST /api/signature` (`mail:draft`) with `{ image: <PNG, JPEG or WebP data URI> }`, a body of at most 4 MB: cleans and saves it, and answers as GET does with `replaced`. 400 for a body that is not a picture; 422 `{ reason, message }` for a cleaning refusal or a picture that cannot be opened; 413 too large; 408 too slow; 503 when the image service is busy.
+- `DELETE /api/signature` (`mail:draft`): `{ removed }`.
+
 ## Account, Orders, and Return Address
 
 - `get_profile`: The profile ChatGPT records for a connected account - a stable account id and the confirmed email address. Marked `_meta["openai/profile"]`, which is how ChatGPT finds it; called by ChatGPT with the connection's credentials when it links an account; the model can call it too; the narration carries only the address, while the id travels in `structuredContent` (#424). Read-only.

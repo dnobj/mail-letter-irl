@@ -30,17 +30,25 @@ import { sendToolDescription } from '../../../src/tools/previewSendStep.js';
 
 // ChatGPT's list is the full one: an app that takes no purchases is not
 // offered the checkouts (#475). The other apps' text has its own suite below.
-// Listed with address requests on (#604), so the copy of the tools that flag
-// lists meets these rules too (#605 review round 1).
+// Listed with address requests (#604) and signatures (#608) offered, so the
+// copy of the tools those flags list meets these rules too (#605 review round 1).
 const ADDRESS_REQUEST_TOOLS = ['request_address', 'get_address_request', 'cancel_address_request'];
+const SIGNATURE_TOOLS = ['set_signature', 'get_signature', 'clear_signature'];
 const tools = (() => {
-  const before = process.env.LETTER_IRL_ADDRESS_REQUESTS_ENABLED;
-  process.env.LETTER_IRL_ADDRESS_REQUESTS_ENABLED = 'true';
+  const switches: Record<string, string> = {
+    LETTER_IRL_ADDRESS_REQUESTS_ENABLED: 'true',
+    LETTER_IRL_SIGNATURES_ENABLED: 'true',
+    LETTER_IRL_PRINT_RENDERER: 'pdf'
+  };
+  const before = Object.fromEntries(Object.keys(switches).map(name => [name, process.env[name]]));
+  Object.assign(process.env, switches);
   try {
     return new LetterIrlServer().listTools(clientProfileNamed('chatgpt'));
   } finally {
-    if (before === undefined) delete process.env.LETTER_IRL_ADDRESS_REQUESTS_ENABLED;
-    else process.env.LETTER_IRL_ADDRESS_REQUESTS_ENABLED = before;
+    for (const [name, value] of Object.entries(before)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
   }
 })();
 
@@ -50,6 +58,7 @@ describe('tool descriptions and invocation messages', () => {
     // ever returns nothing.
     expect(tools.length).toBeGreaterThan(15);
     expect(tools.map(tool => tool.name)).toEqual(expect.arrayContaining(ADDRESS_REQUEST_TOOLS));
+    expect(tools.map(tool => tool.name)).toEqual(expect.arrayContaining(SIGNATURE_TOOLS));
   });
 
   it.each(tools.map(tool => tool.name))('%s never says "credit"', name => {

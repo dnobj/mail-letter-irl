@@ -697,6 +697,13 @@ describePostgres('account erasure', () => {
                NOW() + INTERVAL '7 days', NOW())`,
       [userId]
     );
+    // A saved signature (#608): a picture of the person's handwriting. Only
+    // its PNG signature matters to the table's CHECK.
+    await owner.query(
+      `INSERT INTO user_signatures (user_id, image_png, width, height)
+       VALUES ($1, decode('89504e470d0a1a0a0000000d49484452', 'hex'), 300, 90)`,
+      [userId]
+    );
 
     // A seed-code claim with its address, and two gift codes: one nobody
     // redeemed, and one another account did.
@@ -851,7 +858,7 @@ describePostgres('account erasure', () => {
     expect(
       (await owner.query(`SELECT 1 FROM redacted_content_quarantine WHERE source_id IN ($1, $2)`, [delivered, boundDraft])).rowCount
     ).toBe(0);
-    for (const table of ['personal_access_tokens', 'recent_uploads', 'feature_requests', 'address_requests']) {
+    for (const table of ['personal_access_tokens', 'recent_uploads', 'feature_requests', 'address_requests', 'user_signatures']) {
       expect((await owner.query(`SELECT 1 FROM ${table} WHERE user_id = $1`, [userId])).rowCount, table).toBe(0);
     }
     const redemption = await owner.query(`SELECT email_normalized FROM promo_redemptions WHERE user_id = $1`, [userId]);
@@ -921,6 +928,7 @@ describePostgres('account erasure', () => {
         uploadsDeleted: 1,
         featureRequestsDeleted: 1,
         addressRequestsDeleted: 1,
+        signaturesDeleted: 1,
         seedCodeEmailsCleared: 1,
         giftCodesDeleted: 1,
         descriptionsCleared: 2

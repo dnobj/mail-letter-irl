@@ -23,6 +23,8 @@ process.env.LETTER_IRL_POSTCARD_SIZES_ENABLED = "false";
 process.env.LETTER_IRL_POSTCARD_LAYOUTS_ENABLED = "false";
 // And address requests (#604).
 process.env.LETTER_IRL_ADDRESS_REQUESTS_ENABLED = "false";
+// And signatures (#608).
+process.env.LETTER_IRL_SIGNATURES_ENABLED = "false";
 
 const { stringifyManifest } = await import("../src/mcp/manifest.js");
 

@@ -75,9 +75,13 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  * third party's address, and the panel does not show it. Erasure, which
  * deletes an account's requests, runs as the database owner. So nothing to
  * re-run.
+ *
+ * 050 adds user_signatures (#608), which neither role is granted either: a
+ * picture of a person's handwriting, which the panel does not show. Erasure
+ * deletes it as the database owner. So nothing to re-run.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
-  "049_address_requests.sql";
+  "050_user_signatures.sql";
 
 export interface AdminProvisioningArguments {
   environment: "development" | "production";
