@@ -3078,7 +3078,7 @@ describe('PostcardPreviewCard waiting for a collage (#616)', () => {
     expect(harness.calls).toEqual([]);
   });
 
-  it('counts the photos among blank slots for the extra wait, as the server does', async () => {
+  it('waits the extra 30 s when photos sit among blank slots, though the server refuses that at once and the wait buys nothing', async () => {
     const harness = mount(POSTCARD, { toolInput: without({ imageUrls: ['', photos[0], ' ', photos[1]] }) });
     await flush();
     await harness.runTimer(45000);
