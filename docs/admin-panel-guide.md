@@ -44,7 +44,9 @@ direction of failure.
 The three provider-error columns operators read (`letter_jobs.last_error`, `orders.last_error` and the
 `provider.terminal_failure` order event) hold an error class and HTTP status only, `provider_rejected
 http_400`, never the provider's message: PostGrid's validation messages name the field and value that
-failed, which can be a fragment of a recipient's address (migration 031). Since migration 032 the same
+failed, which can be a fragment of a recipient's address (migration 031). One class of ours reads differently:
+`extra_service_refused` (#625) means the letter asked for a service (certified mail) its provider cannot sell, so
+nothing was sent and what paid for it came back; the log line `outbox.extra_service_refused` says which reason. Since migration 032 the same
 rule covers every stored error: `orders.last_error` under the fulfilment, recovery and refund codes,
 the order events, the outbox pair, pack-refund failure text, `maintenance_tasks.last_error` and the
 status-sync command's per-letter error all hold a class, never a message, and the operator's typed
