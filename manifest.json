@@ -2746,7 +2746,7 @@
           },
           "canSendNow": {
             "type": "boolean",
-            "description": "A ready letter while room to write is offered, or a postcard while its sizes or layouts are: whether the balance or a gift letter pays for it now"
+            "description": "A ready letter while room to write or certified mail is offered, or a postcard while its sizes or layouts are: whether the balance or a gift letter pays for it now"
           },
           "size": {
             "type": "string",
@@ -2784,6 +2784,14 @@
           "wordsVersion": {
             "type": "string",
             "description": "While room to write is offered: the version of the letter's words, which set_letter_words takes to say which words it replaces"
+          },
+          "mailService": {
+            "type": "string",
+            "enum": [
+              "certified",
+              "certified_return_receipt"
+            ],
+            "description": "A ready letter that is certified mail now: which service. Absent: an ordinary letter, which a card reads from the terms beside it"
           },
           "reasonCannotSend": {
             "type": "string"
