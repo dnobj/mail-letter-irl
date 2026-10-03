@@ -339,7 +339,9 @@ describe('a letter over several pages (#586)', () => {
       }
     }
     expect(compared).toBeGreaterThan(100);
-  });
+    // Some 180 layouts: 3.6 s alone, but past the global 10 s when the whole unit
+    // suite runs in parallel on a busy machine (twice in a row, 2026-10-03).
+  }, 30_000);
 
   it.each([0, 4, 1.5, Number.NaN, -1])('refuses a limit of %s pages', maxPages => {
     expect(() => layoutLetter({ text: 'Hello', layoutType: 'text_only' }, { maxPages })).toThrow(RangeError);
