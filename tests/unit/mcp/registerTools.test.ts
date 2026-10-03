@@ -701,6 +701,8 @@ describe('arrive-by in the served schemas (#535)', () => {
     // And the postcard layouts (#594), so nothing is withheld from the postcard,
     // and signatures (#608), so nothing is withheld from a letter.
     vi.stubEnv('LETTER_IRL_POSTCARD_LAYOUTS_ENABLED', 'true');
+    // And the postcard's collage photos (#616).
+    vi.stubEnv('LETTER_IRL_POSTCARD_COLLAGES_ENABLED', 'true');
     vi.stubEnv('LETTER_IRL_SIGNATURES_ENABLED', 'true');
     for (const name of PREVIEWS) {
       const served = getServedInputSchema(name) as Record<string, { description?: string }>;

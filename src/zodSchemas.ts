@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { preprocessImageFileParam } from "./utils/imageFileParam.js";
+import { preprocessImageFileElement, preprocessImageFileParam, preprocessPhotoList } from "./utils/imageFileParam.js";
 import { STATIONERY_THEMES } from "./render/stationery.js";
 import { MAX_LETTER_PAGES } from "./render/geometry.js";
 
@@ -173,6 +173,21 @@ const imageFileParamZ = z.preprocess(
     .optional()
 );
 
+/**
+ * One photo of a collage's `images` (#616): the same file object, and required.
+ * A string in its place is a photo the host did not resolve, blank or not
+ * (preprocessImageFileElement).
+ */
+const imageFileElementZ = z.preprocess(
+  preprocessImageFileElement,
+  z.object({
+    download_url: z.string(),
+    file_id: z.string(),
+    mime_type: z.string().optional(),
+    file_name: z.string().optional()
+  })
+);
+
 // Letter with header image (image at top, like letterhead)
 export const quoteAndPreviewLetterWithHeaderImageInputZ = z.object({
   sender: addressZ.optional(),
@@ -313,6 +328,16 @@ export const POSTCARD_CAPTION_DESCRIPTION =
 export const POSTCARD_PLACE_DESCRIPTION =
   "For the greetings layout only, and needed there: the place it greets from, such as \"Asheville\", printed in capitals.";
 
+/** A collage's photos (#616): the postcard preview's `images` and `imageUrls`, served while collages are offered. */
+export const POSTCARD_COLLAGE_IMAGES_DESCRIPTION =
+  "For a collage front: two to four photos attached in the conversation, in the order they should appear. " +
+  "The arrangement follows the count: two side by side; three, one large with two beside it; four, two by two. " +
+  "Give images or imageUrls, never together with image or imageUrl. Leave it out for a single photo.";
+export const POSTCARD_COLLAGE_IMAGE_URLS_DESCRIPTION =
+  "For a collage front: two to four links to photos, in the order they should appear, each a public image link or an imageUrl from confirm_uploaded_image. " +
+  "The arrangement follows the count: two side by side; three, one large with two beside it; four, two by two. " +
+  "Give imageUrls or images, never together with image or imageUrl. Leave it out for a single photo.";
+
 export const quoteAndPreviewPostcardInputZ = z.object({
   sender: addressZ.optional(),  // Optional - will use saved return address if not provided
   recipient: addressZ,
@@ -339,6 +364,10 @@ export const quoteAndPreviewPostcardInputZ = z.object({
   image: imageFileParamZ.optional(),
   // Alternative: direct image URL (for when fileParams isn't available)
   imageUrl: z.string().optional(),
+  // Two to four photos for a collage (#616): withheld while collages are not offered (withheldInputKeys).
+  // A blank string where a list belongs is no list (preprocessPhotoList); the JSON Schema is the array's.
+  images: z.preprocess(preprocessPhotoList, z.array(imageFileElementZ).optional()).describe(POSTCARD_COLLAGE_IMAGES_DESCRIPTION),
+  imageUrls: z.preprocess(preprocessPhotoList, z.array(z.string()).optional()).describe(POSTCARD_COLLAGE_IMAGE_URLS_DESCRIPTION),
   sendAsGift: sendAsGiftZ,
   arriveBy: arriveByZ
 });
@@ -857,7 +886,8 @@ export const quoteAndPreviewPostcardOutputZ = z.object({
   size: z.enum(["6x9", "6x4", "6x11"]).optional().describe(PREVIEW_POSTCARD_SIZE_DESCRIPTION),
   layout: z.enum(["full_bleed", "border", "greetings"]).optional().describe(PREVIEW_POSTCARD_LAYOUT_DESCRIPTION),
   caption: z.string().optional().describe("The border's caption, when it has one"),
-  place: z.string().optional().describe("The place the greeting names")
+  place: z.string().optional().describe("The place the greeting names"),
+  collagePhotos: z.number().int().optional().describe("How many photos the front draws, when it is a collage")
 });
 
 export const sendPostcardOutputZ = z.object({

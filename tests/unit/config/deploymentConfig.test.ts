@@ -657,6 +657,16 @@ describe('ENV_VAR_MANIFEST', () => {
     });
   });
 
+  it('lists the postcard collages flag, advisory and API only, so the preflight shows where it is set (#616)', () => {
+    expect(ENV_VAR_MANIFEST.find(entry => entry.name === 'LETTER_IRL_POSTCARD_COLLAGES_ENABLED')).toEqual({
+      name: 'LETTER_IRL_POSTCARD_COLLAGES_ENABLED',
+      requiredIn: 'production',
+      advisory: true,
+      secret: false,
+      services: ['api']
+    });
+  });
+
   it('lists the address requests flag, advisory and API only, so the preflight shows where it is set (#604)', () => {
     expect(ENV_VAR_MANIFEST.find(entry => entry.name === 'LETTER_IRL_ADDRESS_REQUESTS_ENABLED')).toEqual({
       name: 'LETTER_IRL_ADDRESS_REQUESTS_ENABLED',

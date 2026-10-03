@@ -64,11 +64,17 @@ import {
 import type { AddressValidationInput, AddressValidationResult } from "../services/providers/types.js";
 import { createPostcardDraft } from "../services/draftService.js";
 import { getReturnAddress } from "../services/returnAddressService.js";
-import { downloadAndProcessPostcardImageWithPreview, ImageProcessingError, type ImageInput } from "../services/imageService.js";
+import {
+  downloadAndProcessCollageWithPreview,
+  downloadAndProcessPostcardImageWithPreview,
+  ImageProcessingError,
+  type ImageInput
+} from "../services/imageService.js";
+import { collageSources } from "./collageSources.js";
 import type { PostcardSize, ImageFileParam } from "../services/types.js";
 import type { SendEligibility } from "../services/commerceService.js";
 import { MOBILE_IMAGE_ERRORS } from "../utils/mobileDetection.js";
-import { resolvePreviewImageSource } from "../services/previewImageSource.js";
+import { resolvePreviewImageSource, type PreviewImageSource } from "../services/previewImageSource.js";
 import { isUnresolvedImageReference, usableImageFile } from "../utils/imageFileParam.js";
 import {
   DELIVERY_CLASS,
@@ -94,6 +100,9 @@ interface QuoteAndPreviewPostcardInput {
   image?: ImageFileParam | string;
   // Alternative: direct image URL (for when fileParams isn't available)
   imageUrl?: string;
+  /** Two to four photos for a collage front, while collages are offered (#616); checked by collageSources. */
+  images?: unknown;
+  imageUrls?: unknown;
   /** Send as the account's gift letter (docs/gift-letters.md). */
   sendAsGift?: boolean;
   /** The date it should arrive by, YYYY-MM-DD (#535); served only while the flag is on. */
@@ -168,6 +177,8 @@ export interface QuoteAndPreviewPostcardOutput {
   layout?: PostcardLayoutChoice;
   caption?: string;
   place?: string;
+  /** How many photos the front draws, when it is a collage (#616). */
+  collagePhotos?: number;
 }
 
 // ============================================================================
@@ -265,9 +276,15 @@ async function handler(
     );
   }
 
+  // A collage's photos (#616): two to four, refused here, before any is fetched,
+  // when they cannot be made as asked. A collage has no one source to resolve.
+  const collage = collageSources(input, context);
+
   // A file ChatGPT resolved, then imageUrl, then a recent upload through the
   // upload card (see previewImageSource.ts).
-  const resolved = await resolvePreviewImageSource(input, context.user.userId, "postcard");
+  const resolved: PreviewImageSource = collage
+    ? { kind: "none", unresolvedReference: false }
+    : await resolvePreviewImageSource(input, context.user.userId, "postcard");
   if (resolved.kind === "file") {
     // OpenAI fileParams (preferred)
     imageInput = resolved.file;
@@ -305,7 +322,7 @@ async function handler(
     );
   }
 
-  if (!imageInput) {
+  if (!imageInput && !collage) {
     context.logger.warn(
       {
         correlationId: context.correlationId,
@@ -515,7 +532,8 @@ async function handler(
       correlationId: context.correlationId,
       event: "quote.postcard.start",
       size,
-      messageLength: input.message.length
+      messageLength: input.message.length,
+      ...(collage ? { collagePhotos: collage.inputs.length, collageVia: collage.via } : {})
     },
     "Processing quote_and_preview_postcard"
   );
@@ -531,9 +549,11 @@ async function handler(
       "Downloading and processing postcard image"
     );
 
-    processedImage = await downloadAndProcessPostcardImageWithPreview(imageInput!, size, {
-      actorId: context.user.userId
-    });
+    processedImage = collage
+      ? await downloadAndProcessCollageWithPreview(collage.inputs, size, { actorId: context.user.userId })
+      : await downloadAndProcessPostcardImageWithPreview(imageInput!, size, {
+          actorId: context.user.userId
+        });
 
     context.logger.info(
       {
@@ -613,7 +633,7 @@ async function handler(
     recipient: input.recipient as unknown as Record<string, unknown>,
     message: input.message,
     frontImageData: processedImage.base64DataUri,
-    frontImageUrl: imageSourceUrl!,
+    frontImageUrl: imageSourceUrl ?? null,
     postcardSize: size,
     requiredCredits,
     previewHtml: renderedHtml ?? previewFrontHtml,
@@ -684,6 +704,8 @@ async function handler(
     // The postcard maker's choices now, each named while it is offered (#594).
     ...(isPostcardSizesOffered() ? { size } : {}),
     ...(renderer === 'pdf' && isPostcardLayoutsOffered() ? frontChoice(front) : {}),
+    // A collage names how many photos it draws (#616).
+    ...(collage ? { collagePhotos: collage.inputs.length } : {}),
   };
 
   // Add address validation results if available

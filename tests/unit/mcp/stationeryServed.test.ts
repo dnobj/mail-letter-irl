@@ -162,6 +162,8 @@ describe('stationery in tools/list', () => {
     vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', 'true');
     // The postcard's own front (#594) is offered too, wherever our renderer draws it.
     vi.stubEnv('LETTER_IRL_POSTCARD_LAYOUTS_ENABLED', 'true');
+    // And its collage photos (#616).
+    vi.stubEnv('LETTER_IRL_POSTCARD_COLLAGES_ENABLED', 'true');
     for (const renderer of ['pdf', 'html']) {
       offer('', renderer);
       const without = (await listedTools()).get('quote_and_preview_postcard');

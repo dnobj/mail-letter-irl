@@ -117,6 +117,9 @@ LETTER_IRL_STATIONERY_ENABLED=<true to offer themes on letter previews; unset is
 # Postcard layouts (#594, docs/letter-send-flow.md): a border with a caption, or "Greetings from" a place,
 # offered only while LETTER_IRL_PRINT_RENDERER is pdf. API service only: the print draws a stored front whatever the flag.
 LETTER_IRL_POSTCARD_LAYOUTS_ENABLED=<true to offer postcard layouts on postcard previews; unset is off>
+# Postcard collages (#616, docs/image-support.md): two to four photos drawn as one front. API service only. It needs neither
+# our renderer nor Pay & Send: the print draws the stored picture whatever the flag.
+LETTER_IRL_POSTCARD_COLLAGES_ENABLED=<true to offer collages of two to four photos on postcard previews; unset is off>
 # Address requests (#604, docs/tool-apis.md): a private link asking someone for their address. API service only.
 # The link lives on LETTER_IRL_WEBSITE_BASE_URL. Its days and the caps per account have defaults (7; 10 waiting, 20 a day).
 LETTER_IRL_ADDRESS_REQUESTS_ENABLED=<true to list request_address, get_address_request and cancel_address_request; unset is off>

@@ -101,7 +101,7 @@ All images are validated, resized to print specifications (300 DPI), and optimiz
 - Too large to decode whole: "Image is too large to process. Please use an image under N megapixels, or save it without interlacing or progressive encoding." (N depends on the image's channels and depth: 33 for 8-bit RGB, 25 for 8-bit RGBA, 16 for 16-bit RGB, 12 for 16-bit RGBA.)
 - Busy: "The image service is busy right now. Please try again in a moment." or, when it is the caller's own share of the gates that is full, "You have other images still processing. Please wait for them to finish and try again."
 
-**Collages (#616, built; no tool takes it yet):** `downloadAndProcessCollageWithPreview` (`src/services/imageService.ts`) draws two to four photos on one front, so a collage is stored as a single photo's crop is and nothing downstream learns it was one.
+**Collages (#616; `quote_and_preview_postcard` takes them as `images` or `imageUrls` while `LETTER_IRL_POSTCARD_COLLAGES_ENABLED` is on):** `downloadAndProcessCollageWithPreview` (`src/services/imageService.ts`) draws two to four photos on one front, so a collage is stored as a single photo's crop is and nothing downstream learns it was one.
 
 | Photos | Arrangement (`src/services/collageArrangement.ts`) |
 |--------|-----------------------------------------------------|

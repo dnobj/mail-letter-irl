@@ -146,5 +146,11 @@
  *     signature; the letter previews take signature, and say whether the
  *     letter is signed, and why; set_letter_signature signs or unsigns a
  *     preview without previewing again.
+ * r37: postcard collages (#616). While LETTER_IRL_POSTCARD_COLLAGES_ENABLED
+ *     is on, the postcard preview takes images (attachments) or imageUrls
+ *     (links), two to four photos drawn as one front, and names collagePhotos
+ *     in its answer. The output field is declared whatever the flag says (the
+ *     output schema is closed), so production's postcard preview lists it
+ *     too, and no deployment ever returns it without a collage.
  */
-export const STEERING_COPY_REV = 36;
+export const STEERING_COPY_REV = 37;
