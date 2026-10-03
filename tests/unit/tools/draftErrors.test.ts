@@ -156,6 +156,16 @@ describe('mail-type wording', () => {
     expect(friendlyDraftError(upstream, 'd-1', 'postcard').message).toContain('than this postcard is now');
   });
 
+  it('says a draft that asks for certified mail was not sent, since the send does not carry the service yet (#625)', () => {
+    const upstream = Object.assign(new Error('Draft d-1 asks for certified, which the send does not carry yet'), {
+      code: 'MAIL_SERVICE_NOT_SENDABLE'
+    });
+    expect(friendlyDraftError(upstream, 'd-1', 'letter').message).toBe(
+      'This letter asks for a mail service that cannot be sent yet, so it was not sent.'
+    );
+    expect(friendlyDraftError(upstream, 'd-1', 'letter').message).not.toContain('certified');
+  });
+
   it('points a wrong-type draft at the other tool', () => {
     expect(friendlyDraftError(withCode('DRAFT_WRONG_MAIL_TYPE'), 'd', 'letter').message).toBe(
       'This is a postcard draft. Please use send_postcard instead.'

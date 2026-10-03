@@ -43,6 +43,7 @@ import {
   markExpiredDrafts,
   cleanupOldDrafts,
   cancelDraft,
+  setDraftMailService,
   setDraftSchedule,
   setDraftSignature,
   setDraftStationery,
@@ -112,7 +113,7 @@ describe('draftService', () => {
       await createDraft({ ...params, rendererVersion: 'pdf-1' });
 
       const [signed, plain] = vi.mocked(db.query).mock.calls as unknown as Array<[string, unknown[]]>;
-      expect(signed[0]).toMatch(/stationery, pages, signature_image\s*\) VALUES \([\s\S]*\$21::smallint, \$22\)/);
+      expect(signed[0]).toMatch(/stationery, pages, signature_image,\s*mail_service\s*\) VALUES \([\s\S]*\$21::smallint, \$22, \$23::text\)/);
       expect(signed[1][21]).toBe(signature);
       expect(signed[1][15]).toBe('pdf-4');
       expect(plain[1][21]).toBeNull();
@@ -411,6 +412,49 @@ describe('draftService', () => {
         await expect(createDraft({ ...base, rendererVersion: 'pdf-1', pages: 3 })).resolves.toMatchObject({ draftId: 'draft-1' });
         await expect(createDraft({ ...base, rendererVersion: 'pdf-1', pages: 1, isGiftSend: true })).resolves.toMatchObject({ draftId: 'draft-1' });
         expect(columnValues(vi.mocked(db.query).mock.calls[1]).pages).toEqual({ value: 1, cast: '::smallint' });
+      });
+    });
+
+    describe('how a letter travels (#625)', () => {
+      const base = {
+        userId: testUsers.sarah.user_id,
+        sender: testAddresses.validSender as unknown as Record<string, unknown>,
+        recipient: testAddresses.validRecipient as unknown as Record<string, unknown>,
+        bodyText: 'Hello',
+        signOff: 'Love',
+        requiredCredits: 2,
+      };
+
+      it('records the service as text, standard by default', async () => {
+        vi.mocked(db.query).mockResolvedValueOnce(inserted).mockResolvedValueOnce(inserted).mockResolvedValueOnce(inserted);
+        await createDraft({ ...base, mailService: 'certified' });
+        await createDraft({ ...base, mailService: 'certified_return_receipt' });
+        await createDraft(base);
+        const calls = vi.mocked(db.query).mock.calls;
+        expect(columnValues(calls[0]).mail_service).toEqual({ value: 'certified', cast: '::text' });
+        expect(columnValues(calls[1]).mail_service).toEqual({ value: 'certified_return_receipt', cast: '::text' });
+        expect(columnValues(calls[2]).mail_service).toEqual({ value: 'standard', cast: '::text' });
+      });
+
+      it.each([
+        ['a service nobody sells', { mailService: 'registered' as never }],
+        ['an empty service', { mailService: '' as never }],
+        ['certified mail for a gift send', { mailService: 'certified' as const, isGiftSend: true, rendererVersion: 'pdf-1' }],
+        ['certified mail with a return receipt for a gift send', { mailService: 'certified_return_receipt' as const, isGiftSend: true }]
+      ])('refuses %s before writing anything', async (_label, extra) => {
+        await expect(createDraft({ ...base, ...extra })).rejects.toMatchObject({
+          message: 'The letter cannot be stored with that mail service.',
+          code: 'DRAFT_MAIL_SERVICE_INVALID',
+          diagnosticClass: 'validation_error'
+        });
+        expect(db.query).not.toHaveBeenCalled();
+      });
+
+      it('takes standard on a gift send, which is what a gift send is', async () => {
+        vi.mocked(db.query).mockResolvedValueOnce(inserted).mockResolvedValueOnce(inserted);
+        await expect(createDraft({ ...base, rendererVersion: 'pdf-1', isGiftSend: true })).resolves.toMatchObject({ draftId: 'draft-1' });
+        await expect(createDraft({ ...base, mailService: 'standard', isGiftSend: true })).resolves.toMatchObject({ draftId: 'draft-1' });
+        expect(columnValues(vi.mocked(db.query).mock.calls[1]).mail_service).toEqual({ value: 'standard', cast: '::text' });
       });
     });
   });
@@ -887,6 +931,99 @@ describe('draftService', () => {
       await expect(setDraftSchedule('draft-1', 'auth0|owner', DATES, new Date('2026-10-02T09:00:00Z'))).resolves.toBe('expired');
     });
   });
+
+  // ==========================================================================
+  // setDraftMailService Tests (#625, set_mail_service)
+  // ==========================================================================
+  describe('setDraftMailService', () => {
+    const NOW = new Date('2026-10-01T14:00:00Z');
+    const pending = { status: 'pending', expires_at: new Date('2026-10-02T09:00:00Z') };
+    const aLetter = { mail_type: 'letter', is_gift_send: false };
+
+    /** A transaction whose statements answer in turn; the client is returned to read its calls. */
+    function inTransaction(...answers: Array<{ rows: unknown[] }>) {
+      const client = { query: vi.fn() };
+      for (const answer of answers) client.query.mockResolvedValueOnce(answer);
+      client.query.mockResolvedValue({ rows: [], rowCount: 1 });
+      vi.mocked(db.transaction).mockImplementation(async callback => callback(client as any));
+      return client;
+    }
+
+    it('locks the draft as a schedule change does, reads what it is, and writes the service as text', async () => {
+      const client = inTransaction({ rows: [pending] }, { rows: [] }, { rows: [aLetter] });
+
+      await expect(setDraftMailService('draft-1', 'auth0|owner', 'certified', NOW)).resolves.toBeNull();
+
+      const [lock, live, read, update] = client.query.mock.calls as Array<[string, unknown[]]>;
+      expect(lock[0]).toMatch(/FROM letter_drafts WHERE draft_id = \$1 AND user_id = \$2 FOR UPDATE/);
+      expect(live[0]).toMatch(/FROM orders/);
+      expect(read[0]).toMatch(/SELECT mail_type, is_gift_send FROM letter_drafts WHERE draft_id = \$1/);
+      expect(read[1]).toEqual(['draft-1']);
+      expect(update[0]).toMatch(/UPDATE letter_drafts SET mail_service = \$2::text, updated_at = NOW\(\) WHERE draft_id = \$1/);
+      expect(update[1]).toEqual(['draft-1', 'certified']);
+      expect(client.query).toHaveBeenCalledTimes(4);
+    });
+
+    it.each(['certified', 'certified_return_receipt', 'standard'] as const)('writes %s', async service => {
+      const client = inTransaction({ rows: [pending] }, { rows: [] }, { rows: [aLetter] });
+      await expect(setDraftMailService('draft-1', 'auth0|owner', service, NOW)).resolves.toBeNull();
+      expect(client.query.mock.calls[3][1]).toEqual(['draft-1', service]);
+    });
+
+    it('refuses a service nobody sells before opening a transaction', async () => {
+      await expect(setDraftMailService('draft-1', 'auth0|owner', 'registered' as never, NOW)).rejects.toMatchObject({
+        code: 'DRAFT_MAIL_SERVICE_INVALID'
+      });
+      expect(db.transaction).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['a missing draft, or one that is not the caller\'s', [], 'not_found'],
+      ['a sent draft', [{ ...pending, status: 'consumed' }], 'sent'],
+      ['an expired draft', [{ ...pending, status: 'expired' }], 'expired'],
+      ['a draft an erasure emptied', [{ ...pending, redacted_at: new Date('2026-10-01T13:59:00Z') }], 'expired']
+    ])('leaves %s alone, reading nothing more', async (_label, rows, refusal) => {
+      const client = inTransaction({ rows });
+      await expect(setDraftMailService('draft-1', 'auth0|owner', 'certified', NOW)).resolves.toBe(refusal);
+      expect(client.query).toHaveBeenCalledTimes(1);
+    });
+
+    it('leaves a draft with a live Pay & Send order alone: its price is held', async () => {
+      const client = inTransaction({ rows: [pending] }, { rows: [{ '?column?': 1 }] });
+      await expect(setDraftMailService('draft-1', 'auth0|owner', 'certified', NOW)).resolves.toBe('checkout_pending');
+      expect(client.query).toHaveBeenCalledTimes(2);
+    });
+
+    it('refuses certified mail for a postcard and for a gift send, naming which, and writes nothing', async () => {
+      const postcard = inTransaction({ rows: [pending] }, { rows: [] }, { rows: [{ mail_type: 'postcard', is_gift_send: false }] });
+      await expect(setDraftMailService('draft-1', 'auth0|owner', 'certified', NOW)).resolves.toBe('not_a_letter');
+      expect(postcard.query).toHaveBeenCalledTimes(3);
+
+      const gift = inTransaction({ rows: [pending] }, { rows: [] }, { rows: [{ mail_type: 'letter', is_gift_send: true }] });
+      await expect(setDraftMailService('draft-1', 'auth0|owner', 'certified_return_receipt', NOW)).resolves.toBe('gift_send');
+      expect(gift.query).toHaveBeenCalledTimes(3);
+    });
+
+    it.each([
+      ['a gift send', { mail_type: 'letter', is_gift_send: true }],
+      ['a postcard', { mail_type: 'postcard', is_gift_send: false }],
+      ['a postcard that is also a gift send', { mail_type: 'postcard', is_gift_send: true }]
+    ])('lets %s be set to standard, which is what it is', async (_name, row) => {
+      const txn = inTransaction({ rows: [pending] }, { rows: [] }, { rows: [row] });
+      await expect(setDraftMailService('draft-1', 'auth0|owner', 'standard', NOW)).resolves.toBeNull();
+      expect(txn.query.mock.calls[3][1]).toEqual(['draft-1', 'standard']);
+    });
+
+    it('names the postcard first when a draft is both a postcard and a gift send', async () => {
+      inTransaction({ rows: [pending] }, { rows: [] }, { rows: [{ mail_type: 'postcard', is_gift_send: true }] });
+      await expect(setDraftMailService('draft-1', 'auth0|owner', 'certified', NOW)).resolves.toBe('not_a_letter');
+    });
+
+    it('is not_found when the draft vanishes between the lock and the read', async () => {
+      inTransaction({ rows: [pending] }, { rows: [] }, { rows: [] });
+      await expect(setDraftMailService('draft-1', 'auth0|owner', 'certified', NOW)).resolves.toBe('not_found');
+    });
+  });
 });
 
 describe('draftService stationery (#563)', () => {
@@ -916,7 +1053,7 @@ describe('draftService stationery (#563)', () => {
       vi.mocked(db.query).mockResolvedValueOnce({ rows: [{ draft_id: 'draft-1' }] } as any);
       await expect(getDraftState('draft-1')).resolves.toEqual({ draft_id: 'draft-1' });
       const [sql, params] = vi.mocked(db.query).mock.calls[0] as [string, unknown[]];
-      for (const column of ['d.pages', 'd.is_gift_send', 'd.required_credits']) {
+      for (const column of ['d.pages', 'd.mail_service', 'd.is_gift_send', 'd.required_credits']) {
         expect(sql, column).toContain(column);
       }
       expect(params).toEqual(['draft-1']);
@@ -929,7 +1066,7 @@ describe('draftService stationery (#563)', () => {
       await expect(getDraftForStationery('draft-1', 'auth0|owner')).resolves.toEqual({ mail_type: 'letter' });
       const [sql, params] = vi.mocked(db.query).mock.calls[0] as [string, unknown[]];
       for (const column of ['mail_type', 'status', 'expires_at', 'redacted_at', 'renderer_version', 'body_text', 'sign_off', 'layout_type',
-        'header_image_data', 'inline_image_data', 'sender', 'recipient', 'preview_html', 'pages', 'is_gift_send', 'required_credits',
+        'header_image_data', 'inline_image_data', 'sender', 'recipient', 'preview_html', 'pages', 'mail_service', 'is_gift_send', 'required_credits',
         // And the draft's own signature (#608), which set_stationery and set_letter_words draw again.
         'stationery', 'signature_image']) {
         expect(sql, column).toContain(column);

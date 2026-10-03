@@ -2,6 +2,7 @@ import type { Address, LetterLayoutType, McpToolDefinition, ToolContext } from '
 import { setLetterWordsInputSchema, setLetterWordsOutputSchema } from '../schemas.js';
 import { letterPageLimit } from '../config/roomToWrite.js';
 import { isGiftLettersEnabled } from '../config/giftLetters.js';
+import { mailServiceOf } from '../config/products.js';
 import type { SendEligibility } from '../services/commerceService.js';
 import { getGiftBalance } from '../services/giftLetterService.js';
 import { pageFit, stationeryOf, type Layout, type PageFit } from '../render/index.js';
@@ -11,6 +12,7 @@ import {
   letterOption,
   letterPayment,
   letterRunsPast,
+  pageChangeSentence,
   SIGNATURE_GIFT_WORDS,
   redrawLetterPreview,
   RENDERED_LETTER_CHARACTER_CAP,
@@ -133,18 +135,11 @@ function wordsChanged(given: boolean, bodyText: string, signOff: string, version
   );
 }
 
-const PAGE_WORDS = ['', 'one page', 'two pages', 'three pages'];
-
 /** What the tool says it did, and what changed in the letter's pages, and so its price. */
-function messageFor(pages: number, pagesBefore: number, note: string, already: boolean): string {
+function messageFor(pages: number, pagesBefore: number, note: string, already: boolean, mailService?: string | null): string {
   // A call retried after its answer was lost changes nothing: said so (#593 review round 3).
   if (already) return 'The letter already has these words, so nothing changed. Nothing has been sent.';
-  const length =
-    pages === pagesBefore
-      ? ''
-      : pages === 1
-        ? ' It now fits on one page, which a letter pack pays for.'
-        : ` It now runs to ${PAGE_WORDS[pages]}, printed on both sides, and is paid with Pay & Send.`;
+  const length = pageChangeSentence(pages, pagesBefore, mailService);
   return `The letter's words are changed and its page is drawn again.${length}${note} Nothing has been sent.`;
 }
 
@@ -272,8 +267,12 @@ async function handler(input: SetLetterWordsInput, context: ToolContext): Promis
   );
   // Priced as it stands now: the pages are the draft's, as the send and the
   // checkout read them.
-  const payment = letterPayment(letterOption(layout), Number(draft.required_credits ?? 2), gift, context, draftId);
-  const note = pages === 1 && pagesBefore > 1 && !payment.canSendNow && !gift ? await giftLetterNote(context) : '';
+  const payment = letterPayment(letterOption(layout, draft.mail_service), Number(draft.required_credits ?? 2), gift, context, draftId);
+  // Never for certified mail (#625): no gift letter pays for it, and a new preview that used one would drop the service.
+  const note =
+    pages === 1 && pagesBefore > 1 && !payment.canSendNow && !gift && mailServiceOf(draft.mail_service) === undefined
+      ? await giftLetterNote(context)
+      : '';
   return {
     draftId,
     previewHtml,
@@ -281,7 +280,7 @@ async function handler(input: SetLetterWordsInput, context: ToolContext): Promis
     ...payment,
     pageFit: pageFit(layout, stationery),
     wordsVersion: wordsVersionOf(bodyText, signOff),
-    message: messageFor(pages, pagesBefore, note, already)
+    message: messageFor(pages, pagesBefore, note, already, draft.mail_service)
   };
 }
 

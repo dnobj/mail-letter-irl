@@ -67,7 +67,7 @@ import { sampleFundedCard } from '../../../src/services/giftLetterService.js';
 import { giftLetterPageCopy } from '../../../src/services/giftCardRenderer.js';
 import { withDisplayImage } from '../../../src/tools/letterHelpers.js';
 import { partitionToolResult } from '../../../src/mcp/registerTools.js';
-import { PAID_PER_SEND_REASON, RENDERED_LETTER_CHARACTER_CAP, wordsVersionOf } from '../../../src/tools/letterHelpers.js';
+import { CERTIFIED_PAID_PER_SEND_REASON, PAID_PER_SEND_REASON, RENDERED_LETTER_CHARACTER_CAP, wordsVersionOf } from '../../../src/tools/letterHelpers.js';
 import type { Address, ToolContext } from '../../../src/contracts/types.js';
 
 /** A PNG's signature and header: enough for the renderer to read its size. */
@@ -434,6 +434,39 @@ describe('set_stationery lays a letter out again on its pages, and prices it aga
     expect(output).toMatchObject({ pages: 2, canSendNow: false, reasonCannotSend: PAID_PER_SEND_REASON });
     expect(output.message).toBe('The letter is now on the botanical stationery, and the account remembers it for its next letter preview. Nothing has been sent.');
     expect(getSendEligibility).toHaveBeenCalledWith(10, 2, { mailType: 'letter', pages: 2 });
+  });
+
+  it.each(['certified', 'certified_return_receipt'])(
+    'keeps a %s letter priced as certified mail: no pack pays for it, whatever the balance (#625)',
+    async service => {
+      vi.mocked(getDraftForStationery).mockResolvedValue({ ...draft({ bodyText: lines(10) }), mail_service: service } as never);
+      const output = await restyle('botanical', context(10));
+      expect(written().pages).toBe(1);
+      expect(output).toMatchObject({ canSendNow: false, reasonCannotSend: CERTIFIED_PAID_PER_SEND_REASON });
+      expect(getSendEligibility).toHaveBeenCalledWith(10, 2, { mailType: 'letter', mailService: service });
+    }
+  );
+
+  it('prices a certified letter by its pages and its service together, as the checkout reads the draft (#625)', async () => {
+    const stored = { ...draft({ bodyText: lines(40) }), mail_service: 'certified' };
+    vi.mocked(getDraftForStationery).mockResolvedValue(stored as never);
+    await restyle('botanical', context(10));
+    const quoted = vi.mocked(getSendEligibility).mock.calls.at(-1)![2];
+    expect(quoted).toEqual({ mailType: 'letter', pages: 2, mailService: 'certified' });
+    expect(quoted).toEqual(draftMailOption({ mail_type: 'letter', pages: stored.pages, mail_service: 'certified' }));
+    // One product whatever the pages: the service sets the price.
+    expect(jitProductMatching(quoted)?.productCode).toBe('jit-letter-certified');
+  });
+
+  it('says a certified letter that runs on to a second page costs the same, and not that Pay & Send pays for the page (#625)', async () => {
+    vi.mocked(getDraftForStationery).mockResolvedValue({ ...draft({ bodyText: wide(13) }), mail_service: 'certified' } as never);
+    const output = await restyle('typewriter', context(10));
+    expect(written().pages).toBe(2);
+    expect(output.message).toBe(
+      'The letter is now on the typewriter stationery, and the account remembers it for its next letter preview. ' +
+        'It now runs to two pages, printed on both sides. The price is the same. Nothing has been sent.'
+    );
+    expect(getSendEligibility).toHaveBeenCalledWith(10, 2, { mailType: 'letter', pages: 2, mailService: 'certified' });
   });
 
   it('runs a one-page letter on to a second page in a wider face, and prices it as Pay & Send', async () => {

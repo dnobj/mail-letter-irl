@@ -205,6 +205,9 @@ async function showDraft(res: ServerResponse, draft: LetterDraft, userId: string
     ...(isPackPayable(option) ? {} : { packPays: false }),
     // A letter of more than one page (#586), printed on both sides: only then.
     ...(option.pages ? { pages: option.pages } : {}),
+    // Certified mail (#625), with or without a return receipt: only then, so a
+    // standard letter's answer is unchanged.
+    ...(option.mailService ? { mailService: option.mailService } : {}),
     ...(payment ? { payment } : {})
   });
 }
@@ -261,6 +264,7 @@ export function refusalFor(error: unknown): Refusal {
     case 'DRAFT_INCOMPLETE':
     case 'DRAFT_WRONG_MAIL_TYPE':
     case 'DRAFT_FUNDING_CONFLICT':
+    case 'MAIL_SERVICE_NOT_SENDABLE': // Certified mail (#625), until the send carries the service.
       return refuse(409, 'unsendable', "This preview can't be sent. Make a new preview, then try again.");
   }
   // The ledger's own sentence, with no code; matched on its fixed opening.

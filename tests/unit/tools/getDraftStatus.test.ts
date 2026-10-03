@@ -116,6 +116,42 @@ describe("get_draft_status (#474)", () => {
     }
   });
 
+  it("keeps a ready certified letter's terms whether or not room to write is offered, and no pack pays for it (#625)", async () => {
+    const certified = state({
+      mail_type: "letter", renderer_version: "pdf-1", pages: 1, mail_service: "certified",
+      required_credits: 2, is_gift_send: false, body_text: "Dear Sam,", sign_off: "Pat"
+    });
+    const rich = { ...context(), user: { userId: "auth0|owner", creditsRemaining: 10, orders: [] } as any };
+    vi.stubEnv("JIT_PURCHASE_ENABLED", "true");
+    try {
+      // Room to write is not offered, and a standard letter then says nothing of its terms.
+      vi.mocked(getDraftState).mockResolvedValue({ ...certified, mail_service: "standard" } as any);
+      expect(await ask({ draftId: DRAFT_ID }, rich)).not.toHaveProperty("canSendNow");
+
+      // A certified one is paid per send, whatever the balance.
+      for (const service of ["certified", "certified_return_receipt"]) {
+        vi.mocked(getDraftState).mockResolvedValue({ ...certified, mail_service: service } as any);
+        const answer = await ask({ draftId: DRAFT_ID }, rich);
+        expect(answer, service).toMatchObject({ ...READY, canSendNow: false, reasonCannotSend: "Certified mail is paid with Pay & Send." });
+        expect(answer.sendEligibility, service).toMatchObject({ packPays: false });
+        // Its words are not offered with it: they are room to write's.
+        expect(answer, service).not.toHaveProperty("wordsVersion");
+      }
+
+      // And a service this code does not know prices as no standard letter: nothing a pack pays for.
+      vi.mocked(getDraftState).mockResolvedValue({ ...certified, mail_service: "express" } as any);
+      expect(await ask({ draftId: DRAFT_ID }, rich)).toMatchObject({ canSendNow: false });
+
+      // A gift letter, a postcard and a letter the legacy HTML drew are as they were.
+      for (const overrides of [{ mail_type: "postcard" }, { renderer_version: null }]) {
+        vi.mocked(getDraftState).mockResolvedValue({ ...certified, ...overrides } as any);
+        expect(await ask({ draftId: DRAFT_ID }, rich), JSON.stringify(overrides)).not.toHaveProperty("canSendNow");
+      }
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("says a sent draft was sent, with the order it became", async () => {
     vi.mocked(getDraftState).mockResolvedValue(state({ status: "consumed", consumed_letter_id: ORDER_ID }) as any);
     await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual({ draftId: DRAFT_ID, status: "sent", orderId: ORDER_ID });

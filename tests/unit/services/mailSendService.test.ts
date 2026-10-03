@@ -259,6 +259,40 @@ describe('createMailOrderFromDraft', () => {
     expect(savedLetter?.content).not.toHaveProperty('pages');
   });
 
+  describe('certified mail, until the send carries it (#625)', () => {
+    it.each(['certified', 'certified_return_receipt'] as const)(
+      'does not send a %s draft, paid for or not, and moves nothing',
+      async mail_service => {
+        draft = { ...draft, mail_service, renderer_version: 'pdf-1' };
+        const funding = { type: 'jit_order' as const, orderId: 'order-jit' };
+        commerceOrder = {
+          order_id: 'order-jit', order_type: 'jit_mail', product_code: 'jit-letter-certified',
+          user_id: 'user-1', draft_id: 'draft-1', status: 'paid'
+        };
+        for (const attempt of [
+          { draftId: 'draft-1', userId: 'user-1', mailType: 'letter' as const },
+          { draftId: 'draft-1', userId: 'user-1', mailType: 'letter' as const, funding }
+        ]) {
+          await expect(createMailOrderFromDraft(attempt)).rejects.toMatchObject({ code: 'MAIL_SERVICE_NOT_SENDABLE' });
+        }
+        expect(savedLetter).toBeNull();
+        expect(mocks.deductCredits).not.toHaveBeenCalled();
+        expect(mocks.createOutboxJob).not.toHaveBeenCalled();
+      }
+    );
+
+    it('sends standard mail as before, when the draft says so', async () => {
+      draft = { ...draft, mail_service: 'standard', renderer_version: 'pdf-1' };
+      await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter' });
+      expect(savedLetter).not.toBeNull();
+    });
+
+    it('sends standard mail as before, when the draft says nothing', async () => {
+      await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter' });
+      expect(savedLetter).not.toBeNull();
+    });
+  });
+
   it('copies the renderer into a postcard too (#534 Phase 4)', async () => {
     draft.mail_type = 'postcard';
     draft.renderer_version = 'pdf-1';

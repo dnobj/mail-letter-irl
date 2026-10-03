@@ -5,7 +5,7 @@ import type { SendEligibility } from '../services/commerceService.js';
 import { pageFit, SIGNATURE_LINES, stationeryOf, type PageFit } from '../render/index.js';
 import { getDraftForStationery, setDraftSignature, type DraftRedrawRefusal } from '../services/draftService.js';
 import { getSignature } from '../services/signatureService.js';
-import { layoutLetterForPreview, letterOption, letterPayment, letterRunsPast, redrawLetterPreview } from './letterHelpers.js';
+import { PAGE_WORDS, layoutLetterForPreview, letterOption, letterPayment, letterRunsPast, pageChangeSentence, redrawLetterPreview } from './letterHelpers.js';
 import { isDraftIdShape } from './requestSend.js';
 import { requireSignatures, SignatureRefusedError, signatureImageUri, type SignatureRefusalCode } from './signatureShared.js';
 import type { PreviewSignatureOutput } from './signatureInput.js';
@@ -66,8 +66,6 @@ function refused(code: SignatureRefusalCode, message: string, context: ToolConte
   return new SignatureRefusedError(code, message);
 }
 
-const PAGE_WORDS = ['', 'one page', 'two pages', 'three pages'];
-
 /** A signature with no room: the band's lines, and the page the letter may not run past. */
 function noRoom(maxPages: number, gift: boolean): string {
   const limit = gift ? "a gift letter's one page" : PAGE_WORDS[maxPages] ?? `${maxPages} pages`;
@@ -78,17 +76,12 @@ function noRoom(maxPages: number, gift: boolean): string {
  * What the tool says it did, for the model and the person, and what changed
  * in the letter's pages, and so its price (#586).
  */
-function messageFor(signed: boolean, pages: number, pagesBefore: number): string {
+function messageFor(signed: boolean, pages: number, pagesBefore: number, mailService?: string | null): string {
   // Off is true with none saved too: the next previews print none unless asked.
   const what = signed
     ? "The letter now prints the person's saved signature under the closing, and the account's next letter previews print it too"
     : "The letter now prints no signature, and the account's next letter previews leave it off unless they ask for it";
-  const length =
-    pages === pagesBefore
-      ? ''
-      : pages === 1
-        ? ' It now fits on one page, which a letter pack pays for.'
-        : ` It now runs to ${PAGE_WORDS[pages]}, printed on both sides, and is paid with Pay & Send.`;
+  const length = pageChangeSentence(pages, pagesBefore, mailService);
   return `${what}.${length} Nothing has been sent.`;
 }
 
@@ -190,7 +183,7 @@ async function handler(input: SetLetterSignatureInput, context: ToolContext): Pr
   );
   // Priced as it stands now: the pages are the draft's, as the send and the
   // checkout read them (#586).
-  const payment = letterPayment(letterOption(layout), Number(draft.required_credits ?? 2), gift, context, draftId);
+  const payment = letterPayment(letterOption(layout, draft.mail_service), Number(draft.required_credits ?? 2), gift, context, draftId);
   return {
     draftId,
     signature: { printed: signatureImage !== null, source: 'asked' },
@@ -198,7 +191,7 @@ async function handler(input: SetLetterSignatureInput, context: ToolContext): Pr
     ...(pages > 1 ? { pages } : {}),
     ...payment,
     ...(letterPageLimit() > 1 ? { pageFit: pageFit(layout, stationery) } : {}),
-    message: messageFor(signatureImage !== null, pages, pagesBefore)
+    message: messageFor(signatureImage !== null, pages, pagesBefore, draft.mail_service)
   };
 }
 

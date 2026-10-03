@@ -25,8 +25,10 @@ import type {
   PostcardDraft,
   CreatePostcardDraftParams,
   CreatePostcardDraftResult,
+  MailService,
   PostcardSize,
 } from './types.js';
+import { MAIL_SERVICES } from '../config/certifiedMail.js';
 
 // Default draft expiration: 24 hours
 const DEFAULT_EXPIRATION_HOURS = 24;
@@ -93,6 +95,26 @@ function storedPages(params: CreateDraftParams): number {
 }
 
 /**
+ * How a letter draft travels (#625): standard unless its preview asked for
+ * certified mail. A service other than standard only for a letter and never a
+ * gift send, whose free letter pays for standard mail only (#579): migration
+ * 052's checks hold any writer to that. Refused here, before anything is
+ * written.
+ */
+function storedMailService(params: { mailService?: MailService; isGiftSend?: boolean }): MailService {
+  const service = params.mailService ?? 'standard';
+  const known = (MAIL_SERVICES as readonly string[]).includes(service);
+  if (!known || (service !== 'standard' && params.isGiftSend === true)) {
+    // The previews check this before it gets here, so this is a defect, classed as a refusal.
+    throw Object.assign(new Error('The letter cannot be stored with that mail service.'), {
+      code: 'DRAFT_MAIL_SERVICE_INVALID',
+      diagnosticClass: 'validation_error'
+    });
+  }
+  return service;
+}
+
+/**
  * Create a new draft for a letter that has been previewed and validated.
  * Called by quote_and_preview_letter after successful address validation.
  */
@@ -102,15 +124,17 @@ export async function createDraft(params: CreateDraftParams): Promise<CreateDraf
   const layoutType = params.layoutType ?? 'text_only';
   const stationery = storedStationery(params.stationery);
   const pages = storedPages(params);
+  const mailService = storedMailService(params);
 
   const result = await query<LetterDraft>(
     `INSERT INTO letter_drafts (
       user_id, sender, recipient, body_text, sign_off,
       required_credits, preview_html, sender_validation, recipient_validation,
       layout_type, header_image_data, header_image_url, inline_image_data, inline_image_url,
-      is_gift_send, renderer_version, status, expires_at, arrive_by, mail_on, stationery, pages, signature_image
+      is_gift_send, renderer_version, status, expires_at, arrive_by, mail_on, stationery, pages, signature_image,
+      mail_service
     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'pending', $17,
-              $18::date, $19::date, $20::jsonb, $21::smallint, $22)
+              $18::date, $19::date, $20::jsonb, $21::smallint, $22, $23::text)
     RETURNING draft_id, expires_at`,
     [
       params.userId,
@@ -135,6 +159,7 @@ export async function createDraft(params: CreateDraftParams): Promise<CreateDraf
       stationery ? JSON.stringify(stationery) : null,
       pages,
       params.signatureImage ?? null,
+      mailService,
     ]
   );
 
@@ -146,6 +171,7 @@ export async function createDraft(params: CreateDraftParams): Promise<CreateDraf
     renderer: params.rendererVersion ?? 'html',
     scheduled: params.schedule !== undefined,
     pages,
+    mailService,
     signed: params.signatureImage !== undefined
   });
 
@@ -357,7 +383,7 @@ export interface DraftState
   extends Pick<
     LetterDraft,
     | 'draft_id' | 'user_id' | 'status' | 'expires_at' | 'consumed_letter_id' | 'arrive_by' | 'mail_on'
-    | 'mail_type' | 'renderer_version' | 'stationery' | 'preview_html' | 'pages' | 'is_gift_send' | 'required_credits'
+    | 'mail_type' | 'renderer_version' | 'stationery' | 'preview_html' | 'pages' | 'mail_service' | 'is_gift_send' | 'required_credits'
     | 'body_text' | 'sign_off' | 'postcard_size' | 'postcard_front'
   > {
   /** The letter the draft became; null for a draft not sent, or a letter that is not the draft owner's. */
@@ -372,7 +398,7 @@ export interface DraftState
 export async function getDraftState(draftId: string): Promise<DraftState | null> {
   const result = await query<DraftState>(
     `SELECT d.draft_id, d.user_id, d.status, d.expires_at, d.consumed_letter_id, d.arrive_by, d.mail_on,
-            d.mail_type, d.renderer_version, d.stationery, d.pages, d.is_gift_send, d.required_credits,
+            d.mail_type, d.renderer_version, d.stationery, d.pages, d.mail_service, d.is_gift_send, d.required_credits,
             d.body_text, d.sign_off, d.postcard_size, d.postcard_front,
             -- Whether it is signed (#608), not the picture.
             (d.signature_image IS NOT NULL AND d.signature_image <> '') AS signed,
@@ -551,6 +577,53 @@ export async function setDraftSchedule(
   });
 }
 
+/** Why a draft's mail service cannot be changed (#625): a draft that may change, or one that cannot be certified. */
+export type MailServiceRefusal = DraftScheduleRefusal | 'not_a_letter' | 'gift_send';
+
+/**
+ * Sets how a letter draft travels (#625, set_mail_service). It changes only a
+ * draft setDraftSchedule would change, under the same lock, so a send or a Pay
+ * & Send checkout runs before or after it, never between: one that goes first
+ * leaves this refused ('sent', 'checkout_pending'), and one that goes second
+ * sees and prices the new service. The preview's page does not change with
+ * the service (the certified label is on the envelope), so nothing is drawn
+ * again.
+ *
+ * A service other than standard only for a letter that is not a gift send:
+ * read under the lock and refused by name, as migration 052's checks would
+ * refuse it. Returns the refusal, or null once the service is set.
+ */
+export async function setDraftMailService(
+  draftId: string,
+  userId: string,
+  mailService: MailService,
+  now: Date = new Date()
+): Promise<MailServiceRefusal | null> {
+  const service = storedMailService({ mailService });
+  return transaction(async client => {
+    const refusal = await lockChangeableDraft(client, draftId, userId, now);
+    if (refusal) return refusal;
+
+    const locked = await client.query<Pick<LetterDraft, 'mail_type' | 'is_gift_send'>>(
+      'SELECT mail_type, is_gift_send FROM letter_drafts WHERE draft_id = $1',
+      [draftId]
+    );
+    const draft = locked.rows[0];
+    if (!draft) return 'not_found';
+    if (service !== 'standard') {
+      if (draft.mail_type !== 'letter') return 'not_a_letter';
+      if (draft.is_gift_send) return 'gift_send';
+    }
+
+    await client.query('UPDATE letter_drafts SET mail_service = $2::text, updated_at = NOW() WHERE draft_id = $1', [
+      draftId,
+      service
+    ]);
+    writeDiagnostic('info', 'draft.mail_service_set', { mailService: service });
+    return null;
+  });
+}
+
 /**
  * Locks a draft a tool may still change (its dates, its stationery, its words), or says
  * why it may not: it is the caller's, pending, unexpired and not emptied by an
@@ -612,6 +685,8 @@ export interface DraftForStationery {
   preview_html: string | null;
   /** The pages it was laid out on (migration 047, #586). */
   pages: number;
+  /** How it travels (migration 052, #625): a restyle prices it again by this as well as its pages. */
+  mail_service: MailService;
   /** A gift letter pays for one page only (#579): its restyle stays on one. */
   is_gift_send: boolean;
   /** The letters its preview priced it at, for what a restyle says it costs. */
@@ -626,8 +701,8 @@ export interface DraftForStationery {
 export async function getDraftForStationery(draftId: string, userId: string): Promise<DraftForStationery | null> {
   const result = await query<DraftForStationery>(
     `SELECT mail_type, status, expires_at, redacted_at, renderer_version, body_text, sign_off, layout_type,
-            header_image_data, inline_image_data, sender, recipient, preview_html, pages, is_gift_send, required_credits,
-            stationery, signature_image
+            header_image_data, inline_image_data, sender, recipient, preview_html, pages, mail_service, is_gift_send,
+            required_credits, stationery, signature_image
      FROM letter_drafts
      WHERE draft_id = $1 AND user_id = $2`,
     [draftId, userId]

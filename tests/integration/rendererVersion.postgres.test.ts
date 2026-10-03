@@ -48,7 +48,7 @@ const SENDER = {
   country: 'US'
 };
 
-describePostgres('renderer version, stationery and pages (migrations 039 and 044 to 047, #534, #563, #586)', () => {
+describePostgres('renderer version, stationery, pages and mail service (migrations 039, 044 to 047 and 052, #534, #563, #586, #625)', () => {
   let adminPool: pg.Pool;
   let pool: pg.Pool;
   let schema: string;
@@ -377,6 +377,145 @@ describePostgres('renderer version, stationery and pages (migrations 039 and 044
       const byId = new Map(stored.rows.map(row => [row.letter_id, row.content]));
       expect(byId.get(paid.letter.letter_id)).toMatchObject({ rendererVersion: 'pdf-1', pages: 2 });
       expect(byId.get(prepaid.letter.letter_id)).not.toHaveProperty('pages');
+    }, 60_000);
+  });
+
+  describe('certified mail (#625, migration 052)', () => {
+    const serviceOf = async (draftId: string) =>
+      (await pool.query<{ mail_service: string }>('SELECT mail_service FROM letter_drafts WHERE draft_id = $1', [draftId]))
+        .rows[0].mail_service;
+
+    async function seedLiveOrder(userId: string, draftId: string): Promise<void> {
+      const orderId = `order-${randomUUID()}`;
+      await pool.query(
+        `INSERT INTO orders (order_id, user_id, credits, amount_cents, currency, status, order_type, product_code,
+           idempotency_key, draft_id, checkout_expires_at)
+         VALUES ($1, $2, NULL, 499, 'USD', 'checkout_pending', 'jit_mail', 'jit-letter', $3, $4, NOW() + INTERVAL '30 minutes')`,
+        [orderId, userId, `idem_${orderId}`, draftId]
+      );
+    }
+
+    it('records standard by default, admits the two certified services on a letter, and no other value', async () => {
+      const userId = await seedUser();
+      const draftId = await seedDraft(userId, 'pdf-1');
+      expect(await serviceOf(draftId)).toBe('standard');
+      for (const service of ['certified', 'certified_return_receipt', 'standard']) {
+        await pool.query('UPDATE letter_drafts SET mail_service = $2::text WHERE draft_id = $1', [draftId, service]);
+        expect(await serviceOf(draftId)).toBe(service);
+      }
+      for (const service of ['registered', 'express', '', 'Certified']) {
+        await expect(pool.query('UPDATE letter_drafts SET mail_service = $2::text WHERE draft_id = $1', [draftId, service]), service)
+          .rejects.toMatchObject({ code: '23514', constraint: 'letter_drafts_mail_service_known' });
+      }
+      expect(await serviceOf(draftId)).toBe('standard');
+    }, 60_000);
+
+    it('admits a service other than standard only on a letter that is no gift send', async () => {
+      const userId = await seedUser();
+      const refused = { code: '23514', constraint: 'letter_drafts_mail_service_paid_per_send' };
+
+      const gift = await seedDraft(userId, 'pdf-1');
+      await pool.query('UPDATE letter_drafts SET is_gift_send = TRUE WHERE draft_id = $1', [gift]);
+      await expect(pool.query("UPDATE letter_drafts SET mail_service = 'certified' WHERE draft_id = $1", [gift])).rejects.toMatchObject(refused);
+
+      // Nor does a certified letter become a gift send or a postcard.
+      const certified = await seedDraft(userId, 'pdf-1');
+      await pool.query("UPDATE letter_drafts SET mail_service = 'certified_return_receipt' WHERE draft_id = $1", [certified]);
+      for (const change of [
+        'is_gift_send = TRUE',
+        // A postcard as the other postcard checks want one, so only this check refuses it.
+        "mail_type = 'postcard', postcard_size = '6x9', front_image_data = 'data:image/jpeg;base64,AA==', renderer_version = NULL"
+      ]) {
+        await expect(pool.query(`UPDATE letter_drafts SET ${change} WHERE draft_id = $1`, [certified]), change).rejects.toMatchObject(refused);
+      }
+      // A postcard is standard, whatever else it is.
+      const postcard = await seedDraft(userId, null);
+      await pool.query(
+        "UPDATE letter_drafts SET mail_type = 'postcard', postcard_size = '6x9', front_image_data = 'data:image/jpeg;base64,AA==' WHERE draft_id = $1",
+        [postcard]
+      );
+      await expect(pool.query("UPDATE letter_drafts SET mail_service = 'certified' WHERE draft_id = $1", [postcard])).rejects.toMatchObject(refused);
+      expect(await serviceOf(certified)).toBe('certified_return_receipt');
+    }, 60_000);
+
+    it('stores the service createDraft is given, standard by default, and refuses a certified gift before writing', async () => {
+      const userId = await seedUser();
+      const draft = {
+        userId,
+        sender: SENDER,
+        recipient: RECIPIENT,
+        signOff: 'Warmly, Test',
+        requiredCredits: 2,
+        previewHtml: '<svg></svg>',
+        layoutType: 'text_only' as const,
+        rendererVersion: 'pdf-1' as const
+      };
+      const certified = await drafts.createDraft({ ...draft, bodyText: `Hello ${randomUUID()}`, mailService: 'certified' });
+      const receipt = await drafts.createDraft({ ...draft, bodyText: `Hello ${randomUUID()}`, mailService: 'certified_return_receipt' });
+      const plain = await drafts.createDraft({ ...draft, bodyText: `Hello ${randomUUID()}` });
+      expect(await serviceOf(certified.draftId)).toBe('certified');
+      expect(await serviceOf(receipt.draftId)).toBe('certified_return_receipt');
+      expect(await serviceOf(plain.draftId)).toBe('standard');
+      await expect(drafts.getDraftState(certified.draftId)).resolves.toMatchObject({ mail_service: 'certified' });
+
+      const count = async () =>
+        (await pool.query('SELECT COUNT(*)::int AS n FROM letter_drafts WHERE user_id = $1', [userId])).rows[0].n;
+      const before = await count();
+      await expect(
+        drafts.createDraft({ ...draft, bodyText: `Hello ${randomUUID()}`, mailService: 'certified', isGiftSend: true })
+      ).rejects.toMatchObject({ code: 'DRAFT_MAIL_SERVICE_INVALID' });
+      await expect(
+        drafts.createDraft({ ...draft, bodyText: `Hello ${randomUUID()}`, mailService: 'registered' as never })
+      ).rejects.toMatchObject({ code: 'DRAFT_MAIL_SERVICE_INVALID' });
+      expect(await count()).toBe(before);
+    }, 60_000);
+
+    it("sets and clears the service on a pending letter, and refuses a postcard, a gift, a live checkout and someone else's draft", async () => {
+      const userId = await seedUser();
+      const other = await seedUser();
+      const draftId = await seedDraft(userId, 'pdf-1');
+      await expect(drafts.setDraftMailService(draftId, userId, 'certified')).resolves.toBeNull();
+      expect(await serviceOf(draftId)).toBe('certified');
+      await expect(drafts.setDraftMailService(draftId, userId, 'certified_return_receipt')).resolves.toBeNull();
+      expect(await serviceOf(draftId)).toBe('certified_return_receipt');
+      await expect(drafts.setDraftMailService(draftId, userId, 'standard')).resolves.toBeNull();
+      expect(await serviceOf(draftId)).toBe('standard');
+
+      // Someone else's draft is a missing one, and is left alone.
+      await expect(drafts.setDraftMailService(draftId, other, 'certified')).resolves.toBe('not_found');
+      expect(await serviceOf(draftId)).toBe('standard');
+
+      const gift = await seedDraft(userId, 'pdf-1');
+      await pool.query('UPDATE letter_drafts SET is_gift_send = TRUE WHERE draft_id = $1', [gift]);
+      await expect(drafts.setDraftMailService(gift, userId, 'certified')).resolves.toBe('gift_send');
+      // Standard is always allowed, even on a gift send.
+      await expect(drafts.setDraftMailService(gift, userId, 'standard')).resolves.toBeNull();
+
+      const postcard = await seedDraft(userId, null);
+      await pool.query(
+        "UPDATE letter_drafts SET mail_type = 'postcard', postcard_size = '6x9', front_image_data = 'data:image/jpeg;base64,AA==' WHERE draft_id = $1",
+        [postcard]
+      );
+      await expect(drafts.setDraftMailService(postcard, userId, 'certified')).resolves.toBe('not_a_letter');
+      // Standard is what a postcard is: allowed.
+      await expect(drafts.setDraftMailService(postcard, userId, 'standard')).resolves.toBeNull();
+
+      // A live Pay & Send order holds the draft's price: the service waits for it.
+      const priced = await seedDraft(userId, 'pdf-1');
+      await seedLiveOrder(userId, priced);
+      await expect(drafts.setDraftMailService(priced, userId, 'certified')).resolves.toBe('checkout_pending');
+      expect(await serviceOf(priced)).toBe('standard');
+    }, 60_000);
+
+    it('does not send a certified draft until the send carries the service', async () => {
+      const userId = await seedUser();
+      const draftId = await seedDraft(userId, 'pdf-1');
+      await pool.query("UPDATE letter_drafts SET mail_service = 'certified' WHERE draft_id = $1", [draftId]);
+      await expect(mailSend.createMailOrderFromDraft({ draftId, userId, mailType: 'letter' }))
+        .rejects.toMatchObject({ code: 'MAIL_SERVICE_NOT_SENDABLE' });
+      const state = (await pool.query('SELECT status FROM letter_drafts WHERE draft_id = $1', [draftId])).rows[0];
+      expect(state.status).toBe('pending');
+      expect((await pool.query('SELECT 1 FROM letters WHERE user_id = $1', [userId])).rows).toHaveLength(0);
     }, 60_000);
   });
 

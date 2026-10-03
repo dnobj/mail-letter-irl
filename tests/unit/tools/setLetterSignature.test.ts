@@ -232,6 +232,18 @@ describe('set_letter_signature', () => {
     expect(output.message).toContain('It now runs to two pages, printed on both sides, and is paid with Pay & Send.');
   });
 
+  it('prices a certified letter by its service and says its price is the same on a second page (#625)', async () => {
+    vi.stubEnv('LETTER_IRL_ROOM_TO_WRITE_ENABLED', 'true');
+    vi.stubEnv('JIT_PURCHASE_ENABLED', 'true');
+    vi.mocked(getDraftForStationery).mockResolvedValue({ ...draft({ bodyText: lines(24) }), mail_service: 'certified' });
+    const output = await run({ signature: true });
+    expect(written().pages).toBe(2);
+    expect(output).toMatchObject({ pages: 2, canSendNow: false, reasonCannotSend: 'Certified mail is paid with Pay & Send.' });
+    expect(output.sendEligibility).toMatchObject({ packPays: false });
+    expect(output.message).toContain('It now runs to two pages, printed on both sides. The price is the same.');
+    expect(output.message).not.toContain('letter pack');
+  });
+
   it('refuses a draft whose page lost its picture, rather than embed the full image', async () => {
     const withImage = draft({ layoutType: 'header_image' });
     vi.mocked(getDraftForStationery).mockResolvedValue({ ...withImage, preview_html: withImage.preview_html!.replace(SMALL, 'x') });

@@ -331,6 +331,20 @@ describe('the confirmation page API (#470)', () => {
         expect((await call('GET')).json(), JSON.stringify(overrides)).not.toHaveProperty('pages');
       }
     });
+
+    it('names certified mail, which no pack pays for, and nothing for standard mail (#625)', async () => {
+      signedIn();
+      for (const mail_service of ['certified', 'certified_return_receipt']) {
+        vi.mocked(getDraft).mockResolvedValue(draft({ mail_service }) as any);
+        const body = (await call('GET')).json();
+        expect(body.mailService, mail_service).toBe(mail_service);
+        expect(body.packPays, mail_service).toBe(false);
+      }
+      for (const overrides of [{ mail_service: 'standard' }, {}, { mail_service: null }, { mail_type: 'postcard', mail_service: 'certified' }]) {
+        vi.mocked(getDraft).mockResolvedValue(draft(overrides) as any);
+        expect((await call('GET')).json(), JSON.stringify(overrides)).not.toHaveProperty('mailService');
+      }
+    });
   });
 
   describe('POST', () => {
@@ -538,6 +552,7 @@ describe('refusalFor (#470)', () => {
     ['DRAFT_INCOMPLETE', 409, 'unsendable'],
     ['DRAFT_WRONG_MAIL_TYPE', 409, 'unsendable'],
     ['DRAFT_FUNDING_CONFLICT', 409, 'unsendable'],
+    ['MAIL_SERVICE_NOT_SENDABLE', 409, 'unsendable'],
     ['SOMETHING_NEW', 500, 'send_failed']
   ])('maps %s to %i %s, without the service message', (code, status, reason) => {
     const refusal = refusalFor(coded(code));

@@ -85,9 +85,13 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  * letter_drafts whole, and letters.content, so it can read a letter's copy of
  * the signature, as it can the letter's words and addresses. Nothing to
  * re-run.
+ *
+ * 052 adds letter_drafts.mail_service (#625), with two CHECKs. As for 039, the
+ * reader role's column list leaves it out and the operator role reads
+ * letter_drafts whole, so nothing to re-run.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
-  "051_signature_drafts.sql";
+  "052_mail_service.sql";
 
 export interface AdminProvisioningArguments {
   environment: "development" | "production";

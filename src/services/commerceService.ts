@@ -19,6 +19,7 @@ import {
   formatAmountForCurrency,
   isPackPayable,
   jitProductMatching,
+  mailServiceOf,
   normalizedCurrency,
   packCurrency,
   type MailOption
@@ -910,6 +911,16 @@ async function prepareJitOrder(
       throw Object.assign(new Error('Draft has missed its mail date'), { code: 'SCHEDULE_PASSED' });
     }
 
+    // Certified mail (#625) is previewed and priced before the send carries it
+    // to the printer. Until it does, the send refuses such a draft
+    // (MAIL_SERVICE_NOT_SENDABLE), so it is not sold either: refused here, before
+    // any order or charge, since fulfilment runs after one and could only refund it.
+    if (mailServiceOf(draft.mail_service) !== undefined) {
+      throw Object.assign(new Error('Pay & Send does not sell this mail option'), {
+        code: 'JIT_OPTION_NOT_SOLD'
+      });
+    }
+
     // ONE derivation for the whole transaction: the reprice branch and the
     // insert below must price against the SAME row or they silently diverge
     // (#278 round 8).
@@ -1209,9 +1220,16 @@ export async function createJitCheckout(
   // price and meet the charge cap at the one-page amount. A restyle can change
   // them between this peek and the lock (#591, and new words, #586):
   // prepareJitOrder refuses an order whose locked price is not the one the
-  // caps were checked at, so neither the warm-up nor the caps go stale.
-  const draftPeek = await query<{ mail_type: string | null; postcard_size: string | null; pages: number | null }>(
-    'SELECT mail_type, postcard_size, pages FROM letter_drafts WHERE draft_id = $1 AND user_id = $2',
+  // caps were checked at, so neither the warm-up nor the caps go stale. And
+  // with its mail service (#625): without it a certified letter would warm
+  // the standard price and meet the charge cap at the standard amount.
+  const draftPeek = await query<{
+    mail_type: string | null;
+    postcard_size: string | null;
+    pages: number | null;
+    mail_service: string | null;
+  }>(
+    'SELECT mail_type, postcard_size, pages, mail_service FROM letter_drafts WHERE draft_id = $1 AND user_id = $2',
     [params.draftId, params.userId]
   );
   const peekedOption = draftMailOption(draftPeek.rows[0] ?? {});

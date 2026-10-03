@@ -197,7 +197,8 @@ with Pay & Send:
 - `LETTER_IRL_POSTCARD_SIZES_ENABLED`: `STRIPE_JIT_POSTCARD_4X6_PRICE_ID` and
   `STRIPE_JIT_POSTCARD_11X6_PRICE_ID`;
 - `LETTER_IRL_CERTIFIED_MAIL_ENABLED` (#625): `STRIPE_JIT_LETTER_CERTIFIED_PRICE_ID` and
-  `STRIPE_JIT_LETTER_CERTIFIED_RECEIPT_PRICE_ID`.
+  `STRIPE_JIT_LETTER_CERTIFIED_RECEIPT_PRICE_ID`. Leave it off until the send carries the service (the api and
+  the maintenance service both run it, [deployment.md](deployment.md)).
 
 In Stripe test mode, `npx tsx scripts/create-option-prices.ts` makes all of these Prices at the amounts the product
 table pins and writes the variable lines (#624; see [deployment.md](deployment.md), the Pay & Send rollout).

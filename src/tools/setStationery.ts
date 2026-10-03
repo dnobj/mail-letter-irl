@@ -10,7 +10,7 @@ import {
   setDraftStationery,
   type DraftRedrawRefusal
 } from '../services/draftService.js';
-import { layoutLetterForPreview, letterOption, letterPayment, redrawLetterPreview, validatePrintableLetter } from './letterHelpers.js';
+import { layoutLetterForPreview, letterOption, letterPayment, pageChangeSentence, redrawLetterPreview, validatePrintableLetter } from './letterHelpers.js';
 import { isDraftIdShape } from './requestSend.js';
 import { previewStationery, THEME_LIST } from './stationeryInput.js';
 
@@ -103,20 +103,13 @@ function refused(code: StationeryRefusedError['code'], message: string, context:
   return new StationeryRefusedError(code, message);
 }
 
-const PAGE_WORDS = ['', 'one page', 'two pages', 'three pages'];
-
 /**
  * What the tool says it did, for the model and the person, and what changed
  * in the letter's pages, and so its price (#586).
  */
-function messageFor(stationery: Stationery, pages: number, pagesBefore: number): string {
+function messageFor(stationery: Stationery, pages: number, pagesBefore: number, mailService?: string | null): string {
   const drawn = stationery.theme === 'classic' ? 'on a plain page, the classic stationery' : `on the ${stationery.theme} stationery`;
-  const length =
-    pages === pagesBefore
-      ? ''
-      : pages === 1
-        ? ' It now fits on one page, which a letter pack pays for.'
-        : ` It now runs to ${PAGE_WORDS[pages]}, printed on both sides, and is paid with Pay & Send.`;
+  const length = pageChangeSentence(pages, pagesBefore, mailService);
   return `The letter is now ${drawn}, and the account remembers it for its next letter preview.${length} Nothing has been sent.`;
 }
 
@@ -201,7 +194,7 @@ async function handler(input: SetStationeryInput, context: ToolContext): Promise
   );
   // Priced as it stands now: the pages are the draft's, as the send and the
   // checkout read them (#586).
-  const payment = letterPayment(letterOption(layout), Number(draft.required_credits ?? 2), draft.is_gift_send === true, context, draftId);
+  const payment = letterPayment(letterOption(layout, draft.mail_service), Number(draft.required_credits ?? 2), draft.is_gift_send === true, context, draftId);
   return {
     draftId,
     stationery,
@@ -209,7 +202,7 @@ async function handler(input: SetStationeryInput, context: ToolContext): Promise
     ...(pages > 1 ? { pages } : {}),
     ...payment,
     ...(letterPageLimit() > 1 ? { pageFit: pageFit(layout, stationery) } : {}),
-    message: messageFor(stationery, pages, pagesBefore)
+    message: messageFor(stationery, pages, pagesBefore, draft.mail_service)
   };
 }
 
