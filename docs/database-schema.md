@@ -680,7 +680,8 @@ the website's routes `/api/signature` ([tool-apis.md](tool-apis.md#signatures)).
 
 A letter draws a signature from its own copy, taken into the draft when it is previewed
 (`letter_drafts.signature_image`, migration 051), so replacing or removing this row never changes a letter
-already previewed. A preview's explicit `signature`, true or false, sets `use_by_default`. It is kept until the
+already previewed. A preview's explicit `signature`, true or false, sets `use_by_default`, as does
+`set_letter_signature` (#608 part 4). It is kept until the
 person removes it (`clear_signature`, or the website) or the account is erased: erasure keeps the
 `users` row, so it deletes this one explicitly ([account-erasure.md](account-erasure.md)). Neither admin
 role is granted the table.

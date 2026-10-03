@@ -72,7 +72,8 @@ import type {
   cancelAddressRequestOutputZ,
   setSignatureOutputZ,
   getSignatureOutputZ,
-  clearSignatureOutputZ
+  clearSignatureOutputZ,
+  setLetterSignatureOutputZ
 } from "../zodSchemas.js";
 import type {
   quoteAndPreviewLetterTextOnlyTool,
@@ -107,7 +108,8 @@ import type {
   cancelAddressRequestTool,
   setSignatureTool,
   getSignatureTool,
-  clearSignatureTool
+  clearSignatureTool,
+  setLetterSignatureTool
 } from "../tools/index.js";
 
 // ============================================================================
@@ -296,4 +298,7 @@ export type GetSignatureConforms = Conforms<
 >;
 export type ClearSignatureConforms = Conforms<
   BothDirections<z.infer<typeof clearSignatureOutputZ>, typeof clearSignatureTool>
+>;
+export type SetLetterSignatureConforms = Conforms<
+  BothDirections<z.infer<typeof setLetterSignatureOutputZ>, typeof setLetterSignatureTool>
 >;

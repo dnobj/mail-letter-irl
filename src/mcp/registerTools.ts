@@ -45,6 +45,7 @@ import {
   setSignatureInputZ,
   getSignatureInputZ,
   clearSignatureInputZ,
+  setLetterSignatureInputZ,
   uploadPhotoChunkInputZ,
   submitFeatureRequestInputZ,
   getStartedInputZ,
@@ -80,6 +81,7 @@ import {
   setSignatureOutputZ,
   getSignatureOutputZ,
   clearSignatureOutputZ,
+  setLetterSignatureOutputZ,
   uploadPhotoChunkOutputZ,
   submitFeatureRequestOutputZ,
   getStartedOutputZ,
@@ -209,7 +211,8 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     'set_postcard_style',     // The same size and front twice change nothing more (#594)
     'cancel_scheduled_mail',  // A repeat answers as already cancelled (#535)
     'cancel_address_request', // A repeat answers as already closed (#604)
-    'clear_signature'         // A repeat answers that none was saved (#608)
+    'clear_signature',        // A repeat answers that none was saved (#608)
+    'set_letter_signature'    // The same choice twice changes nothing more (#608)
   ];
 
   // Destructive tools. OpenAI's app-review guidance asks for destructiveHint on
@@ -856,6 +859,7 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   set_signature: setSignatureInputZ,
   get_signature: getSignatureInputZ,
   clear_signature: clearSignatureInputZ,
+  set_letter_signature: setLetterSignatureInputZ,
   upload_photo_chunk: uploadPhotoChunkInputZ,
   // Feedback tools
   submit_feature_request: submitFeatureRequestInputZ,
@@ -902,6 +906,7 @@ const zodOutputSchemas: Record<ToolName, z.ZodObject<any>> = {
   set_signature: setSignatureOutputZ,
   get_signature: getSignatureOutputZ,
   clear_signature: clearSignatureOutputZ,
+  set_letter_signature: setLetterSignatureOutputZ,
   upload_photo_chunk: uploadPhotoChunkOutputZ,
   // Feedback tools
   submit_feature_request: submitFeatureRequestOutputZ,
@@ -1861,6 +1866,9 @@ export function summarizeToolResult(
     }
     case "cancel_address_request":
       return typeof result.message === "string" ? result.message : "The address request was cancelled.";
+    case "set_letter_signature":
+      // As for set_stationery: the tool's own sentence, with any change in pages (#608).
+      return typeof result.message === "string" ? result.message : "The letter's signature was changed.";
     case "set_signature":
     case "get_signature":
     case "clear_signature":

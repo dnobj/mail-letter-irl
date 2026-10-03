@@ -44,6 +44,7 @@ import {
   cleanupOldDrafts,
   cancelDraft,
   setDraftSchedule,
+  setDraftSignature,
   setDraftStationery,
   setDraftWords,
   getDraftForStationery,
@@ -956,7 +957,7 @@ describe('draftService stationery (#563)', () => {
       expect(live[0]).toMatch(/FROM orders/);
       expect(live[1]).toEqual(['draft-1', [...LIVE_PAY_AND_SEND_STATUSES]]);
       // What the page was drawn from, read again under the lock (#586).
-      expect(read).toEqual(['SELECT body_text, sign_off, stationery FROM letter_drafts WHERE draft_id = $1', ['draft-1']]);
+      expect(read).toEqual(['SELECT body_text, sign_off, stationery, signature_image FROM letter_drafts WHERE draft_id = $1', ['draft-1']]);
       expect(update[0]).toMatch(
         /UPDATE letter_drafts\s+SET stationery = \$2::jsonb,\s+renderer_version = CASE WHEN signature_image IS NOT NULL THEN 'pdf-4' ELSE \$3::text END,\s+preview_html = \$4,\s+pages = COALESCE\(\$5::smallint, pages\), updated_at = NOW\(\)\s+WHERE draft_id = \$1/
       );
@@ -1038,6 +1039,69 @@ describe('draftService stationery (#563)', () => {
     });
   });
 
+  describe('setDraftSignature (#608 part 4)', () => {
+    const SIGNED = 'data:image/png;base64,iVBORw0KGgo=';
+    const drawnFrom = (signature: string | null) => ({ words: WORDS, stationery: null, signature });
+
+    it.each([
+      ['signs', SIGNED, null, true],
+      ['unsigns', null, SIGNED, false]
+    ] as const)('%s the draft under the lock a restyle takes, with the version its row needs, and remembers the choice', async (_label, image, before, remembered) => {
+      const client = inTransaction({ rows: [pending] }, { rows: [] }, { rows: [{ ...DRAWN, signature_image: before }] });
+
+      await expect(
+        setDraftSignature('draft-1', 'auth0|owner', { signatureImage: image, previewHtml: PAGE, pages: 1, drawnFrom: drawnFrom(before) }, NOW)
+      ).resolves.toBeNull();
+
+      const [lock, live, read, update, remember] = client.query.mock.calls as Array<[string, unknown[]]>;
+      expect(lock[0]).toMatch(/FROM letter_drafts WHERE draft_id = \$1 AND user_id = \$2 FOR UPDATE/);
+      expect(live[0]).toMatch(/FROM orders/);
+      expect(read).toEqual(['SELECT body_text, sign_off, stationery, signature_image FROM letter_drafts WHERE draft_id = $1', ['draft-1']]);
+      // The version from the row's own stationery, under the lock, so 044's and 051's pairs hold.
+      expect(update[0]).toMatch(
+        /UPDATE letter_drafts\s+SET signature_image = \$2::text,\s+renderer_version = CASE WHEN \$2::text IS NOT NULL THEN 'pdf-4'\s+WHEN stationery IS NOT NULL THEN 'pdf-2'\s+ELSE 'pdf-1' END,\s+preview_html = \$3,\s+pages = \$4::smallint, updated_at = NOW\(\)\s+WHERE draft_id = \$1/
+      );
+      expect(update[1]).toEqual(['draft-1', image, PAGE, 1]);
+      expect(remember).toEqual(['UPDATE user_signatures SET use_by_default = $2 WHERE user_id = $1', ['auth0|owner', remembered]]);
+      expect(client.query).toHaveBeenCalledTimes(5);
+    });
+
+    it.each([
+      ['its signature', { signature_image: SIGNED }],
+      ['its words', { body_text: 'Dear Ruth,' }],
+      ['its stationery', { stationery: BOTANICAL }]
+    ])('refuses as changed when %s changed since the page was drawn, writing nothing', async (_label, changed) => {
+      const client = inTransaction({ rows: [pending] }, { rows: [] }, { rows: [{ ...DRAWN, signature_image: null, ...changed }] });
+      await expect(
+        setDraftSignature('draft-1', 'auth0|owner', { signatureImage: SIGNED, previewHtml: PAGE, pages: 1, drawnFrom: drawnFrom(null) }, NOW)
+      ).resolves.toBe('changed');
+      expect(client.query).toHaveBeenCalledTimes(3);
+    });
+
+    it('refuses a restyle or new words drawn with a signature the draft no longer has (#608)', async () => {
+      let client = inTransaction({ rows: [pending] }, { rows: [] }, { rows: [{ ...DRAWN, signature_image: SIGNED }] });
+      await expect(
+        setDraftStationery('draft-1', 'auth0|owner', { stationery: { ...BOTANICAL, source: 'asked' } as any, previewHtml: PAGE, drawnFrom: { ...WORDS, signature: null } }, NOW)
+      ).resolves.toBe('changed');
+      expect(client.query).toHaveBeenCalledTimes(3);
+
+      client = inTransaction({ rows: [pending] }, { rows: [] }, { rows: [{ ...DRAWN, signature_image: null }] });
+      await expect(
+        setDraftWords('draft-1', 'auth0|owner', {
+          bodyText: 'Dear Sam,\n\nNew words.', signOff: 'Pat', previewHtml: PAGE, pages: 1, drawnIn: null,
+          replacing: WORDS, drawnWith: SIGNED
+        }, NOW)
+      ).resolves.toBe('changed');
+      expect(client.query).toHaveBeenCalledTimes(3);
+
+      // A restyle that names no signature does not compare it, as before.
+      client = inTransaction({ rows: [pending] }, { rows: [] }, { rows: [{ ...DRAWN, signature_image: SIGNED }] });
+      await expect(
+        setDraftStationery('draft-1', 'auth0|owner', { stationery: { ...BOTANICAL, source: 'asked' } as any, previewHtml: PAGE, drawnFrom: WORDS }, NOW)
+      ).resolves.toBeNull();
+    });
+  });
+
   describe('setDraftWords (#586)', () => {
     it.each([
       ['its body', { body_text: 'Dear Sam, changed on the card,' }],
@@ -1061,7 +1125,7 @@ describe('draftService stationery (#563)', () => {
       const [lock, live, read, update] = client.query.mock.calls as Array<[string, unknown[]]>;
       expect(lock[0]).toMatch(/FROM letter_drafts WHERE draft_id = \$1 AND user_id = \$2 FOR UPDATE/);
       expect(live[0]).toMatch(/FROM orders/);
-      expect(read).toEqual(['SELECT body_text, sign_off, stationery FROM letter_drafts WHERE draft_id = $1', ['draft-1']]);
+      expect(read).toEqual(['SELECT body_text, sign_off, stationery, signature_image FROM letter_drafts WHERE draft_id = $1', ['draft-1']]);
       expect(update[0]).toMatch(
         /UPDATE letter_drafts\s+SET body_text = \$2, sign_off = \$3, preview_html = \$4, pages = \$5::smallint, updated_at = NOW\(\)\s+WHERE draft_id = \$1/
       );
@@ -1151,6 +1215,9 @@ describe('draftService postcard style (#594)', () => {
       const [sql] = vi.mocked(db.query).mock.calls[0] as [string, unknown[]];
       expect(sql).toContain('d.postcard_size, d.postcard_front');
       expect(sql).toMatch(/CASE WHEN d\.status = 'pending' AND d\.renderer_version IS NOT NULL\s+THEN d\.preview_html END AS preview_html/);
+      // Whether it is signed (#608), never the picture: an emptied copy reads as unsigned.
+      expect(sql).toContain("(d.signature_image IS NOT NULL AND d.signature_image <> '') AS signed");
+      expect(sql).not.toMatch(/d\.signature_image(,|\s+FROM)/);
     });
   });
 

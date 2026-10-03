@@ -71,6 +71,7 @@ export const TOOL_SCOPES: Record<string, ProductScope> = {
   set_signature: "mail:draft",
   get_signature: "mail:read",
   clear_signature: "mail:draft",
+  set_letter_signature: "mail:draft",
   // Keeps a photo for the account's next preview (#474, phase 3): the upload
   // card's part of drafting, so it sits with the drafting tools.
   upload_photo_chunk: "mail:draft"

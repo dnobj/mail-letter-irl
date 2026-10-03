@@ -4,6 +4,7 @@ import { getDraftStatusInputSchema, getDraftStatusOutputSchema } from '../schema
 import { scheduleSentence } from '../services/deliverySchedule.js';
 import { getDraftState, type DraftState } from '../services/draftService.js';
 import { isStationeryOffered } from '../config/stationery.js';
+import { isSignaturesOffered } from '../config/signatures.js';
 import { stationeryOf, type Stationery } from '../render/stationery.js';
 import { draftScheduleOf } from '../services/draftSchedule.js';
 import { heldSendFields, waitsInOutbox } from './heldSend.js';
@@ -60,6 +61,8 @@ export interface GetDraftStatusOutput {
    * Classic for a page our renderer drew without a theme.
    */
   stationery?: Stationery;
+  /** Ready, a letter our renderer drew, while signatures are offered (#608): whether it prints the saved signature now. */
+  signature?: boolean;
   /** With it, the page as it is now: for the card, in _meta (partitionToolResult). */
   previewHtml?: string;
   /** Sent and scheduled: whether it can still be cancelled free (not Pay & Send). */
@@ -144,6 +147,7 @@ async function handler(
   return {
     ...ready,
     ...styleNow(draft),
+    ...signatureNow(draft),
     ...pagesNow(draft),
     ...termsNow(draft, draftId, context),
     ...wordsNow(draft),
@@ -223,6 +227,20 @@ function styleNow(draft: DraftState): Pick<GetDraftStatusOutput, 'stationery' | 
   if (!isStationeryOffered() || draft.mail_type !== 'letter' || !draft.renderer_version) return {};
   return {
     stationery: stationeryOf(draft.stationery) ?? { theme: 'classic' },
+    ...(draft.preview_html ? { previewHtml: draft.preview_html } : {})
+  };
+}
+
+/**
+ * A ready letter's signature and page as they are now (#608 part 4), for a
+ * card shown its preview's first answer again: set_letter_signature may have
+ * changed both since. Only while signatures are offered, and only for a page
+ * our renderer drew; whether it is signed, never the picture.
+ */
+function signatureNow(draft: DraftState): Pick<GetDraftStatusOutput, 'signature' | 'previewHtml'> {
+  if (!isSignaturesOffered() || draft.mail_type !== 'letter' || !draft.renderer_version) return {};
+  return {
+    signature: draft.signed === true,
     ...(draft.preview_html ? { previewHtml: draft.preview_html } : {})
   };
 }

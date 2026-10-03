@@ -34,6 +34,7 @@ export { cancelAddressRequestTool } from "./cancelAddressRequest.js";
 export { setSignatureTool } from "./setSignature.js";
 export { getSignatureTool } from "./getSignature.js";
 export { clearSignatureTool } from "./clearSignature.js";
+export { setLetterSignatureTool } from "./setLetterSignature.js";
 export { uploadPhotoChunkTool } from "./uploadPhotoChunk.js";
 
 // Feedback tools (US-FEEDBACK-01)

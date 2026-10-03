@@ -54,7 +54,8 @@ import {
   // A saved signature, read, and removed (#608)
   setSignatureTool,
   getSignatureTool,
-  clearSignatureTool
+  clearSignatureTool,
+  setLetterSignatureTool
 } from "./tools/index.js";
 import { REQUEST_SEND_TOOL } from "./tools/requestSend.js";
 import { UPLOAD_PHOTO_CHUNK_TOOL } from "./tools/uploadPhotoChunk.js";
@@ -69,6 +70,7 @@ import { CANCEL_ADDRESS_REQUEST_TOOL } from "./tools/cancelAddressRequest.js";
 import { SET_SIGNATURE_TOOL } from "./tools/setSignature.js";
 import { GET_SIGNATURE_TOOL } from "./tools/getSignature.js";
 import { CLEAR_SIGNATURE_TOOL } from "./tools/clearSignature.js";
+import { SET_LETTER_SIGNATURE_TOOL } from "./tools/setLetterSignature.js";
 import { isAddressRequestsEnabled } from "./config/addressRequests.js";
 import { isSignaturesOffered } from "./config/signatures.js";
 import { isCardUploadEnabled } from "./config/cardUpload.js";
@@ -140,6 +142,9 @@ const tools: McpToolDefinition<any, any>[] = [
   setSignatureTool,
   getSignatureTool,
   clearSignatureTool,
+  // A preview signed or unsigned in place (#608 part 4), by the model or the
+  // letter card's Signature switch.
+  setLetterSignatureTool,
   // The model's way to send, once the send rule is on (#470): a link where
   // the person sends the preview themselves. Listed only while the rule is on.
   requestSendTool,
@@ -219,7 +224,12 @@ export const ADDRESS_REQUEST_TOOLS: ReadonlySet<string> = new Set([
  * Signatures (#608): listed only while LETTER_IRL_SIGNATURES_ENABLED is on and
  * our renderer draws letters, and each refuses otherwise.
  */
-export const SIGNATURE_TOOLS: ReadonlySet<string> = new Set([SET_SIGNATURE_TOOL, GET_SIGNATURE_TOOL, CLEAR_SIGNATURE_TOOL]);
+export const SIGNATURE_TOOLS: ReadonlySet<string> = new Set([
+  SET_SIGNATURE_TOOL,
+  GET_SIGNATURE_TOOL,
+  CLEAR_SIGNATURE_TOOL,
+  SET_LETTER_SIGNATURE_TOOL
+]);
 
 /**
  * A tool's description as the calling app reads it (#484). Most tools say the

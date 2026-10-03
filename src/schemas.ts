@@ -39,7 +39,10 @@ import {
   SIGNATURE_REMOVED_DESCRIPTION,
   PREVIEW_SIGNATURE_DESCRIPTION,
   PREVIEW_SIGNATURE_OUTPUT_DESCRIPTION,
-  SIGNATURE_SOURCE_DESCRIPTION
+  SIGNATURE_SOURCE_DESCRIPTION,
+  SET_LETTER_SIGNATURE_DESCRIPTION,
+  SET_LETTER_SIGNATURE_CAN_SEND_DESCRIPTION,
+  GET_DRAFT_STATUS_SIGNATURE_DESCRIPTION
 } from "./zodSchemas.js";
 import { STATIONERY_THEMES } from "./render/stationery.js";
 
@@ -971,7 +974,8 @@ export const getDraftStatusOutputSchema: JsonSchema = {
         headline: { type: "string" }
       },
       required: ["theme"]
-    }
+    },
+    signature: { type: "boolean", description: GET_DRAFT_STATUS_SIGNATURE_DESCRIPTION }
   }
 };
 
@@ -1175,6 +1179,30 @@ export const clearSignatureOutputSchema: JsonSchema = {
   required: ["removed", "message"],
   properties: {
     removed: { type: "boolean", description: SIGNATURE_REMOVED_DESCRIPTION },
+    message: { type: "string" }
+  }
+};
+
+/** A letter preview signed or unsigned without previewing again (#608 part 4). */
+export const setLetterSignatureInputSchema: JsonSchema = {
+  type: "object",
+  required: ["draftId", "signature"],
+  properties: {
+    draftId: { type: "string", description: "The draftId from a letter preview" },
+    signature: { type: "boolean", description: SET_LETTER_SIGNATURE_DESCRIPTION }
+  }
+};
+
+export const setLetterSignatureOutputSchema: JsonSchema = {
+  type: "object",
+  required: ["draftId", "signature", "canSendNow", "sendEligibility", "message"],
+  properties: {
+    draftId: { type: "string" },
+    signature: { ...previewSignatureOutputSchema, description: "Whether the letter now prints the person's saved signature: asked for in the call" },
+    pages: { type: "integer", minimum: 2, maximum: MAX_LETTER_PAGES, description: PREVIEW_PAGES_DESCRIPTION },
+    canSendNow: { type: "boolean", description: SET_LETTER_SIGNATURE_CAN_SEND_DESCRIPTION },
+    reasonCannotSend: { type: "string" },
+    sendEligibility: sendEligibilitySchema,
     message: { type: "string" }
   }
 };

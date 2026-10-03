@@ -841,6 +841,12 @@ describe("a letter preview's narration names its stationery (#563)", () => {
     expect(summarizeToolResult('quote_and_preview_letter', { layoutType: 'text_only' })).toMatch(/^Preview ready: requires 1 letter\. /);
   });
 
+  it("answers set_letter_signature with the tool's own sentence (#608 part 4)", () => {
+    const message = "The letter now prints no signature, and the account remembers that for its next letter preview. Nothing has been sent.";
+    expect(summarizeToolResult('set_letter_signature', { message, signature: { printed: false, source: 'asked' } })).toBe(message);
+    expect(summarizeToolResult('set_letter_signature', {})).toBe("The letter's signature was changed.");
+  });
+
   it("answers set_stationery with the tool's own sentence", () => {
     expect(summarizeToolResult('set_stationery', { message: 'The letter is now on the botanical stationery.' })).toBe(
       'The letter is now on the botanical stationery.'

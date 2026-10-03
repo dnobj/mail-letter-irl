@@ -347,6 +347,55 @@ describe("get_draft_status names a ready letter's style now (#563, #572)", () =>
   });
 });
 
+describe("get_draft_status says whether a ready letter is signed now (#608 part 4)", () => {
+  const PAGE = '<!DOCTYPE html><html><body data-renderer="pdf-4"><svg></svg></body></html>';
+  const drawn = (overrides: Record<string, unknown> = {}) =>
+    state({ mail_type: "letter", renderer_version: "pdf-4", stationery: null, preview_html: PAGE, signed: true, ...overrides });
+
+  beforeEach(() => {
+    vi.mocked(getDraftState).mockReset();
+    vi.stubEnv("LETTER_IRL_SIGNATURES_ENABLED", "true");
+    vi.stubEnv("LETTER_IRL_PRINT_RENDERER", "pdf");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("says a signed letter is signed and an unsigned one is not, with its page, never the picture", async () => {
+    vi.mocked(getDraftState).mockResolvedValue(drawn() as any);
+    await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual({ ...READY, signature: true, previewHtml: PAGE });
+    vi.mocked(getDraftState).mockResolvedValue(drawn({ renderer_version: "pdf-1", signed: false }) as any);
+    await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual({ ...READY, signature: false, previewHtml: PAGE });
+  });
+
+  it("says it beside the stationery while both are offered", async () => {
+    vi.stubEnv("LETTER_IRL_STATIONERY_ENABLED", "true");
+    vi.mocked(getDraftState).mockResolvedValue(drawn({ stationery: { theme: "botanical", dateLine: "October 3, 2026" } }) as any);
+    await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual({
+      ...READY,
+      stationery: { theme: "botanical", dateLine: "October 3, 2026" },
+      signature: true,
+      previewHtml: PAGE
+    });
+  });
+
+  it("says nothing of it for a legacy page, a postcard, a sent draft, or while signatures are not offered", async () => {
+    for (const draft of [drawn({ renderer_version: null, signed: false }), drawn({ mail_type: "postcard", renderer_version: "pdf-1", signed: false })]) {
+      vi.mocked(getDraftState).mockResolvedValue(draft as any);
+      await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual(READY);
+    }
+    vi.mocked(getDraftState).mockResolvedValue(drawn({ status: "consumed", consumed_letter_id: ORDER_ID }) as any);
+    await expect(ask({ draftId: DRAFT_ID })).resolves.not.toHaveProperty("signature");
+    for (const [enabled, renderer] of [["", "pdf"], ["true", "html"]]) {
+      vi.stubEnv("LETTER_IRL_SIGNATURES_ENABLED", enabled);
+      vi.stubEnv("LETTER_IRL_PRINT_RENDERER", renderer);
+      vi.mocked(getDraftState).mockResolvedValue(drawn() as any);
+      await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual(READY);
+    }
+  });
+});
+
 describe("a ready postcard's size and front (#594)", () => {
   const PAGE = '<!DOCTYPE html><html><body data-renderer="pdf-1"><svg></svg><svg></svg></body></html>';
   const postcard = (overrides: Record<string, unknown> = {}) =>

@@ -209,6 +209,11 @@ export const toolInputSchemas = {
   clear_signature: z.object({
     confirm: z.boolean()
   }),
+  // A letter preview signed or unsigned without previewing again (#608 part 4)
+  set_letter_signature: z.object({
+    draftId: z.string(),
+    signature: z.boolean()
+  }),
   // One chunk of a photo from the upload card (#474, phase 3)
   upload_photo_chunk: z.object({
     uploadId: z.string(),
