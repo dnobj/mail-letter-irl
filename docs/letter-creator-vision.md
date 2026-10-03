@@ -154,7 +154,7 @@ Each concept lists what PostGrid supports and how it reaches clients without car
 - **Why:** postcards are the fastest thing to send. It borrows from Touchnote, Postagram and Alpic's "Send Postcard" ChatGPT app.
 - **PostGrid:** all three sizes. 120lb gloss, UV and satin stock need PostGrid to enable premium paper, which the Starter tier doesn't include.
 - **Card-less clients:** `size`, `layout` and `caption` arguments, and an image-link array for collages.
-- **Stage:** Next for sizes and single-photo layouts. Collages are built as #616 behind `LETTER_IRL_POSTCARD_COLLAGES_ENABLED`: the compositor draws two to four photos as one front, and the postcard preview takes them as `images` or `imageUrls`. Whether ChatGPT hands over several attachments at once is still to be probed on development.
+- **Stage:** Next for sizes and single-photo layouts. Collages are built as #616 behind `LETTER_IRL_POSTCARD_COLLAGES_ENABLED`: the compositor draws two to four photos as one front, and the postcard preview takes them as `images` or `imageUrls`. A collage keeps the size it was made at (`set_postcard_style` refuses another), and the card names it and offers no other size. Whether ChatGPT hands over several attachments at once is still to be probed on development.
 
 #### 5. Keepsake formats
 - **What:**

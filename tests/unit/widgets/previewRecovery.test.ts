@@ -3043,3 +3043,62 @@ describe.each([LETTER, POSTCARD])('$file keeps a send with an arrival date (#535
     expect(harness.visible('scheduled')).toBe(false);
   });
 });
+
+describe('PostcardPreviewCard waiting for a collage (#616)', () => {
+  const photos = ['https://example.com/1.jpg', 'https://example.com/2.jpg', 'https://example.com/3.jpg'];
+  const files = [
+    { download_url: 'https://files.example/1.jpg', file_id: 'file-1' },
+    { download_url: 'https://files.example/2.jpg', file_id: 'file-2' }
+  ];
+  /** The postcard's arguments with its one photo replaced by what the test gives. */
+  const without = (extra: Json): Json => {
+    const { imageUrl: _single, ...rest } = POSTCARD.args();
+    return { ...rest, ...extra };
+  };
+
+  it.each([
+    ['links', { imageUrls: photos.slice(0, 2) }],
+    ['three links', { imageUrls: photos }],
+    ['attachments', { images: files }]
+  ])('waits 30 s more than for a photo, once, when asked for %s, before it offers to create the preview', async (_name, extra) => {
+    const harness = mount(POSTCARD, { toolInput: without(extra) });
+    await flush();
+    expect(harness.pendingTimers().map(timer => timer.delay)).toEqual([45000]);
+
+    await harness.runTimer(45000);
+    expect(harness.visible('empty-state')).toBe(false);
+    expect(harness.pendingTimers().map(timer => timer.delay)).toEqual([30000]);
+
+    await harness.runTimer(30000);
+    expect(harness.visible('empty-state')).toBe(true);
+    expect(harness.visible('retry-button')).toBe(true);
+    expect(harness.text('status-pill')).toBe('No preview');
+    expect(harness.pendingTimers()).toEqual([]);
+    // The card never repeats a call by itself.
+    expect(harness.calls).toEqual([]);
+  });
+
+  it('draws a result that lands in the extra wait, and arms nothing more', async () => {
+    const harness = mount(POSTCARD, { toolInput: without({ imageUrls: photos.slice(0, 2) }) });
+    await flush();
+    await harness.runTimer(45000);
+    await harness.deliverHostResult(POSTCARD.output('draft_collage_0001'));
+    expect(harness.visible('empty-state')).toBe(false);
+    expect(harness.text('id-value')).toBe('draft_collage_0001');
+    expect(harness.pendingTimers()).toEqual([]);
+  });
+
+  it.each([
+    ['a single photo', POSTCARD.args()],
+    ['a list of one link', without({ imageUrls: [photos[0]] })],
+    ['a list of one attachment', without({ images: [files[0]] })],
+    ['empty lists', without({ imageUrl: photos[0], imageUrls: [], images: [] })],
+    ['lists that are not lists', without({ imageUrl: photos[0], imageUrls: 'https://example.com/a.jpg', images: { download_url: 'y' } })]
+  ])('waits the usual time for %s', async (_name, input) => {
+    const harness = mount(POSTCARD, { toolInput: input });
+    await flush();
+    await harness.runTimer(45000);
+    expect(harness.visible('empty-state')).toBe(true);
+    expect(harness.pendingTimers()).toEqual([]);
+  });
+});

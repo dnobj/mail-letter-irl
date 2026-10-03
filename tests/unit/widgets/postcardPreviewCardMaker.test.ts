@@ -644,3 +644,55 @@ describe('the maker after #603 review round 2', () => {
     expect(sendDisabled(card)).toBe(false);
   });
 });
+
+describe('a collage on the maker (#616)', () => {
+  it('tells its size and its photos, and offers no other size, since a collage keeps the one it was made at', async () => {
+    const card = mount();
+    await card.show(output({ size: '6x9', collagePhotos: 3 }), ON());
+    expect(card.byId('studio-sizes').hidden).toBe(true);
+    expect(card.byId('studio-size').hidden).toBe(false);
+    expect(card.byId('studio-size').textContent).toBe('6 x 9 in · a collage of 3 photos');
+    // The footer keeps naming the size alone.
+    expect(card.byId('studio-summary').textContent).toMatch(/^6 x 9 in · (?!a collage)/);
+
+    // At the other sizes too: the card draws the size the page is.
+    const wide = mount();
+    await wide.show(output({ size: '6x11', collagePhotos: 2 }), ON(drawn('6x11')));
+    expect(wide.byId('studio-size').textContent).toBe('6 x 11 in · a collage of 2 photos');
+    expect(wide.byId('studio-sizes').hidden).toBe(true);
+  });
+
+  it('still offers the front, which frames a collage as it frames a photo', async () => {
+    const card = mount();
+    await card.show(output({ size: '6x9', layout: 'full_bleed', collagePhotos: 4 }), ON());
+    expect(card.byId('studio-front').hidden).toBe(false);
+    expect(pressed(card, '#studio-front [data-layout]')).toEqual(['Full']);
+    await card.click(card.document.querySelector('[data-layout="border"]')!);
+    expect(card.requests('set_postcard_style').map(request => request.params.arguments)).toEqual([{ draftId: 'draft_0001', layout: 'border' }]);
+    await card.answer(
+      restyled({ draftId: 'draft_0001', size: '6x9', layout: 'border', canSendNow: true, sendEligibility: PACK, message: 'Bordered.' }, drawn('6x9', { layout: 'border' })),
+      'set_postcard_style'
+    );
+    expect(pressed(card, '#studio-front [data-layout]')).toEqual(['Border']);
+    // It is still a collage after the restyle: no sizes come back.
+    expect(card.byId('studio-sizes').hidden).toBe(true);
+    expect(card.byId('studio-size').textContent).toBe('6 x 9 in · a collage of 4 photos');
+  });
+
+  it('takes two to four photos for a collage, and nothing else for one', async () => {
+    for (const count of [2, 3, 4]) {
+      const card = mount();
+      await card.show(output({ size: '6x9', collagePhotos: count }), ON());
+      expect(card.byId('studio-size').textContent, String(count)).toBe(`6 x 9 in · a collage of ${count} photos`);
+      expect(card.byId('studio-sizes').hidden, String(count)).toBe(true);
+    }
+    // A count a collage cannot have is a single photo's card: its sizes are offered.
+    for (const count of [1, 0, 5, 2.5, '3', null, undefined]) {
+      const card = mount();
+      await card.show(output({ size: '6x9', collagePhotos: count }), ON());
+      expect(card.byId('studio-sizes').hidden, String(count)).toBe(false);
+      expect(card.byId('studio-size').hidden, String(count)).toBe(true);
+      expect(card.byId('studio-size').textContent, String(count)).toBe('6 x 9 in');
+    }
+  });
+});

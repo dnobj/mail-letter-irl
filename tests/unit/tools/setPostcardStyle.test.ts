@@ -101,7 +101,7 @@ function drawn(options: { size?: PostcardSize; front?: PostcardFront; gift?: boo
 }
 
 /** A pending postcard draft, as the preview stored it. */
-function draft(options: { size?: PostcardSize; front?: PostcardFront; gift?: boolean; message?: string } = {}): DraftForPostcardStyle {
+function draft(options: { size?: PostcardSize; front?: PostcardFront; gift?: boolean; message?: string; collage?: boolean } = {}): DraftForPostcardStyle {
   const size = options.size ?? '6x9';
   return {
     mail_type: 'postcard',
@@ -113,7 +113,8 @@ function draft(options: { size?: PostcardSize; front?: PostcardFront; gift?: boo
     sender: SENDER,
     recipient: RECIPIENT,
     front_image_data: PRINT[size],
-    front_image_url: SOURCE,
+    // A collage has no one source: the preview stores its link null (#616).
+    front_image_url: options.collage ? null : SOURCE,
     postcard_size: size,
     postcard_front: options.front ?? null,
     preview_html: renderPostcardPreviewDocument(drawn(options)),
@@ -189,6 +190,19 @@ describe('set_postcard_style at the same size', () => {
     expect(output).not.toHaveProperty('reasonCannotSend');
     expect(output.message).toBe('The postcard is now a 6x9, with the photo in a white border over "Cape Cod". Nothing has been sent.');
     expect(getSendEligibility).toHaveBeenCalledWith(10, 2, { mailType: 'postcard', postcardSize: '6x9' });
+  });
+
+  it("draws a collage's front again at its own size, naming the size it already has", async () => {
+    // A collage's draft records no link (#616); its size is not changing, so nothing is cropped again.
+    const before = draft({ collage: true });
+    vi.mocked(getDraftForPostcardStyle).mockResolvedValue(before);
+    const output = await run({ size: '6x9', layout: 'border', caption: 'Our trip' });
+
+    const change = stored();
+    expect(change).toMatchObject({ size: '6x9', front: { layout: 'border', caption: 'Our trip' }, drawnFrom: { previewHtml: before.preview_html } });
+    expect(change.frontImageData).toBeUndefined();
+    expect(reprocessPostcardImage).not.toHaveBeenCalled();
+    expect(output).toMatchObject({ size: '6x9', layout: 'border', caption: 'Our trip' });
   });
 
   it('gives a greeting its place, and takes a front off back to full bleed', async () => {
@@ -342,6 +356,28 @@ describe('set_postcard_style at a new size', () => {
     }
     expect(reprocessPostcardImage).not.toHaveBeenCalled();
     expect(setDraftPostcardStyle).not.toHaveBeenCalled();
+  });
+
+  it('refuses a collage any other size, in every direction, before anything is cropped (#616)', async () => {
+    // Its photos were read once and are not kept: cropping the composite again would cut them at its edges.
+    const message =
+      'A collage keeps the size it was made at: its photos were read once and are not kept, so they cannot be arranged again. ' +
+      'To change the size, make a new preview with the same photos at the size you want. The postcard stays as it is.';
+    for (const [from, to] of [['6x9', '6x4'], ['6x9', '6x11'], ['6x4', '6x9'], ['6x11', '6x4']] as const) {
+      vi.mocked(getDraftForPostcardStyle).mockResolvedValue(draft({ size: from, collage: true }));
+      await expect(refusal({ size: to }), `${from} to ${to}`).resolves.toEqual(expect.objectContaining({ code: 'COLLAGE_SIZE', message }));
+    }
+    // A front asked for in the same call does not slip the size through.
+    vi.mocked(getDraftForPostcardStyle).mockResolvedValue(draft({ collage: true }));
+    await expect(refusal({ size: '6x4', layout: 'border', caption: 'Our trip' })).resolves.toMatchObject({ code: 'COLLAGE_SIZE' });
+    expect(reprocessPostcardImage).not.toHaveBeenCalled();
+    expect(setDraftPostcardStyle).not.toHaveBeenCalled();
+  });
+
+  it('crops a photo again at a new size: only a collage keeps its size', async () => {
+    // The same call on a draft that records its link goes through.
+    await run({ size: '6x4' });
+    expect(reprocessPostcardImage).toHaveBeenCalledWith({ url: SOURCE, stored: PRINT['6x9'] }, '6x4', { actorId: 'user-1' });
   });
 
   it('refuses when the picture cannot be cropped again, leaving the postcard as it is', async () => {
