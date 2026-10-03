@@ -223,7 +223,7 @@ used in development until the owner approves them:
 Certified mail (#625) is USPS Certified Mail, sent through PostGrid's `extraService`, for a letter only: never a
 postcard, never a gift send. The price is flat for one to three pages. PostGrid's public prices are $6.94 for certified
 mail and $9.85 with the electronic return receipt. If those include the letter itself, these prices leave about $4.40
-after Stripe's fee; if they are added to the letter's own cost of roughly $1.06 (PostGrid's older notes, in
+after Stripe's fee; if they are added to the letter's own cost of roughly $1.06 (our 2025 notes of PostGrid's price list, in
 [layout-options-research.md](learnings/layout-options-research.md), list certified as an add-on), about $3.30. That is
 to be confirmed with PostGrid. They are the proposal on issue #625, the owner's call, used in development until
 approved. Production waits for that approval.

@@ -57,7 +57,12 @@ export interface MailOption {
   readonly mailType: MailType;
   readonly pages?: number;
   readonly postcardSize?: PostcardSize;
-  /** Absent is standard. Only a letter is ever certified (#625). */
+  /**
+   * Absent is standard. Only a letter is ever certified (#625). The type names
+   * the services this code knows, but a value read from a row is carried as it
+   * is (mailServiceOf), so a reader that switches on it must treat any other
+   * text as a service it cannot sell; isExtraService narrows it.
+   */
   readonly mailService?: MailService;
 }
 
@@ -100,6 +105,16 @@ export function draftMailOption(draft: {
 export function mailServiceOf(value: string | null | undefined): MailService | undefined {
   if (value === null || value === undefined || value === '' || value === 'standard') return undefined;
   return value as MailService;
+}
+
+/**
+ * Whether a value is one of the two extra services PostGrid sells a letter
+ * (#625): the narrowing from what mailServiceOf carries to what a provider is
+ * handed. Standard is not an extra service, and neither is text this code does
+ * not know.
+ */
+export function isExtraService(value: unknown): value is CertifiedMailService {
+  return value === 'certified' || value === 'certified_return_receipt';
 }
 
 /**
@@ -307,7 +322,7 @@ export const JIT_PRODUCTS: readonly JitProductDefinition[] = [
   // three pages. The prices are the proposal on the issue (the owner's call):
   // PostGrid's public prices are $6.94 and $9.85. If those include the letter
   // these leave about $4.40 after Stripe's fee; if they are added to its cost
-  // (PostGrid's older notes list certified as an add-on) about $3.30. To be
+  // (our 2025 notes of PostGrid's price list have it as an add-on) about $3.30. To be
   // confirmed with PostGrid. In development until the owner approves them.
   {
     productCode: 'jit-letter-certified',

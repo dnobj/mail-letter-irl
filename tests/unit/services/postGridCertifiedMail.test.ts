@@ -46,7 +46,10 @@ const accepted = {
   url: 'https://example.test/letter_cert'
 };
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 describe('the extra service in the request', () => {
   it.each(['certified', 'certified_return_receipt'] as const)('sends %s with our PDF, as a form field', async extraService => {
@@ -93,9 +96,10 @@ describe('the extra service in the request', () => {
     ]);
   });
 
-  it.each(['registered', 'express', 'Certified', 'constructor', 'toString', '__proto__', ''])(
-    'refuses an extra service it does not sell (%s) before any request, so what paid for it comes back',
+  it.each(['registered', 'express', 'Certified', ' certified', 'constructor', 'toString', '__proto__', 5, ['certified'], {}])(
+    'refuses an extra service it does not sell (%j) before any request, so what paid for it comes back',
     async extraService => {
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
       const fetchMock = answering(accepted);
       const result = await provider().sendLetter({ ...base, rendererVersion: RENDERER_VERSION, extraService: extraService as never });
       expect(result).toMatchObject({
@@ -105,8 +109,31 @@ describe('the extra service in the request', () => {
         metadata: { retryable: false, submissionOutcome: 'definite_rejection' }
       });
       expect(fetchMock).not.toHaveBeenCalled();
+      // The operator is told, in a fixed word and not the value.
+      const logged = errorLog.mock.calls.map(call => String(call[0])).filter(line => line.includes('extra_service_refused'));
+      expect(logged).toHaveLength(1);
+      expect(JSON.parse(logged[0])).toMatchObject({ event: 'provider.postgrid.extra_service_refused', operation: 'create_letter' });
+      expect(logged[0]).not.toContain('constructor');
     }
   );
+
+  // A letter built from stored JSON may write "no service" as null, an empty
+  // string or 'standard' (the vocabulary mailServiceOf reads a row by). It is
+  // standard mail, not a refusal: refusing it would refund every standard letter.
+  it.each([null, '', 'standard'])('sends %j as standard mail, by either route', async extraService => {
+    const pdf = answering(accepted);
+    await expect(
+      provider().sendLetter({ ...base, rendererVersion: RENDERER_VERSION, extraService: extraService as never })
+    ).resolves.toMatchObject({ success: true, trackingId: 'letter_cert' });
+    expect(((pdf.mock.calls[0] as [string, RequestInit])[1].body as FormData).has('extraService')).toBe(false);
+
+    const html = answering(accepted);
+    await expect(provider().sendLetter({ ...base, extraService: extraService as never })).resolves.toMatchObject({
+      success: true
+    });
+    const body = JSON.parse((html.mock.calls[0] as [string, RequestInit])[1].body as string);
+    expect('extraService' in body).toBe(false);
+  });
 
   it('sends nothing for a standard letter, by either route', async () => {
     const pdf = answering(accepted);
@@ -175,6 +202,30 @@ describe("the carrier's tracking number on a status read", () => {
     expect('carrierTrackingNumber' in result).toBe(false);
   });
 
+  it('says so, with the length and never the value, when PostGrid sets a number this code refuses', async () => {
+    const warnLog = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    answering({ ...status, trackingNumber: '<b>9407</b>1000000000' });
+    await provider().getStatus('letter_cert');
+    const logged = warnLog.mock.calls.map(call => String(call[0])).filter(line => line.includes('carrier_number'));
+    expect(logged).toHaveLength(1);
+    expect(JSON.parse(logged[0])).toMatchObject({
+      event: 'provider.postgrid.carrier_number_unrecognised',
+      operation: 'get_letter_status',
+      length: 21
+    });
+    expect(logged[0]).not.toContain('9407');
+  });
+
+  it.each([[{}], [{ trackingNumber: null }], [{ trackingNumber: '' }], [{ trackingNumber: '   ' }], [{ trackingNumber: '9407100000000000000000' }]])(
+    'says nothing when there is no number to refuse (%j)',
+    async extra => {
+      const warnLog = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      answering({ ...status, ...extra });
+      await provider().getStatus('letter_cert');
+      expect(warnLog.mock.calls.filter(call => String(call[0]).includes('carrier_number'))).toEqual([]);
+    }
+  );
+
   it('is never the provider id, which stays the tracking id', async () => {
     answering({ ...status, trackingNumber: '9407100000000000000000' });
     const result = await provider().getStatus('letter_cert');
@@ -227,6 +278,13 @@ describe('providers that cannot sell an extra service', () => {
     }
   );
 
+  it.each(['express', 'Certified', 5])('manual fulfilment refuses any other service (%j) too', async extraService => {
+    await expect(diy().sendLetter({ ...base, extraService: extraService as never })).resolves.toMatchObject({
+      success: false,
+      metadata: { retryable: false, submissionOutcome: 'definite_rejection' }
+    });
+  });
+
   it('manual fulfilment still queues standard mail', async () => {
     await expect(diy().sendLetter({ ...base, metadata: { letterId: 'L1' } })).resolves.toMatchObject({
       success: true,
@@ -234,10 +292,20 @@ describe('providers that cannot sell an extra service', () => {
     });
   });
 
+  it.each([null, '', 'standard'])('manual fulfilment queues %j as standard mail, not a refusal', async extraService => {
+    await expect(
+      diy().sendLetter({ ...base, extraService: extraService as never, metadata: { letterId: 'L2' } })
+    ).resolves.toMatchObject({ success: true, trackingId: 'DIY-L2' });
+  });
+
   it('the dummy records the service it was asked for, so a test can see it arrive, and nothing for standard mail', async () => {
     const certified = await dummy().sendLetter({ ...base, extraService: 'certified_return_receipt' });
     expect(certified.metadata).toMatchObject({ provider: 'dummy', extraService: 'certified_return_receipt' });
     const standard = await dummy().sendLetter(base);
     expect(standard.metadata).not.toHaveProperty('extraService');
+    for (const none of [null, '', 'standard']) {
+      const written = await dummy().sendLetter({ ...base, extraService: none as never });
+      expect(written.metadata).not.toHaveProperty('extraService');
+    }
   });
 });

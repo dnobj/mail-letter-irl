@@ -19,6 +19,7 @@ import type {
   CostEstimate,
   ProviderConfig,
 } from './types.js';
+import { mailServiceOf } from '../../config/products.js';
 
 export class DIYProvider implements LetterFulfillmentProvider {
   public readonly config: ProviderConfig;
@@ -44,7 +45,7 @@ export class DIYProvider implements LetterFulfillmentProvider {
     // (certified mail, #625) would be queued as an ordinary letter with nothing
     // marking it, after being paid for: refused before anything is queued, an
     // authoritative rejection, so what paid for it comes back.
-    if (params.extraService !== undefined) {
+    if (mailServiceOf(params.extraService) !== undefined) {
       return {
         success: false,
         trackingId: '',

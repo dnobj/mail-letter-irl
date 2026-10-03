@@ -29,6 +29,7 @@ import type {
 } from './types.js';
 import type { CertifiedMailService } from '../types.js';
 import { writeDiagnostic } from '../../utils/diagnosticLog.js';
+import { mailServiceOf } from '../../config/products.js';
 import {
   buildGiftLetterPage,
   buildGiftPostcardBlock,
@@ -112,7 +113,9 @@ const PDF_UPLOAD_TIMEOUT_MS = 30_000;
  * The extra services PostGrid sells a letter (#625), and what its public price
  * list charges for each (read 2026-10-03: $6.94 and $9.85). Whether those
  * prices include the letter itself is unconfirmed, so the cost estimate adds
- * them to the letter's own cost: at most about a dollar too high, never too low.
+ * them to the letter's own cost. That is about 85 cents high if they are
+ * all-in, and about 20 cents low if they are add-ons (the estimate's letter is
+ * 85 cents, PostGrid's list price $1.059): within about a dollar either way.
  */
 const EXTRA_SERVICE_COST_CENTS: Readonly<Record<CertifiedMailService, number>> = {
   certified: 694,
@@ -437,10 +440,17 @@ export class PostGridProvider implements LetterFulfillmentProvider {
    * Send a letter via PostGrid API
    */
   async sendLetter(params: LetterParams): Promise<LetterResult> {
-    // A service this provider does not sell is refused before any request, so
-    // it is an authoritative rejection and what paid for the letter comes back
-    // (#625): never mailed as standard mail.
-    if (params.extraService !== undefined && knownExtraService(params.extraService) === undefined) {
+    // The service the letter asks for (#625). None is none: undefined, null,
+    // the empty string and 'standard' are how a standard letter is written
+    // (mailServiceOf, the vocabulary the rest of the code reads a row by), and
+    // a letter built from stored JSON may carry any of them. One of the two
+    // PostGrid sells is passed on. Any other text is refused before any
+    // request, so it is an authoritative rejection and what paid for the
+    // letter comes back: never mailed as standard mail.
+    const requested = mailServiceOf(params.extraService);
+    const extraService = knownExtraService(requested);
+    if (requested !== undefined && extraService === undefined) {
+      this.writeOperationDiagnostic('provider.postgrid.extra_service_refused', 'create_letter', {}, 'error');
       return {
         success: false,
         trackingId: '',
@@ -492,7 +502,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
           'POST',
           '/letters',
           'create_letter',
-          letterForm({ to, from, description, color, doubleSided, pdf, extraService: params.extraService }),
+          letterForm({ to, from, description, color, doubleSided, pdf, extraService }),
           params.idempotencyKey,
           isUsableSubmissionResponse,
           PDF_UPLOAD_TIMEOUT_MS
@@ -517,7 +527,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
           color,
           doubleSided,
           addressPlacement: 'top_first_page',
-          ...(params.extraService ? { extraService: params.extraService } : {})
+          ...(extraService ? { extraService } : {})
         };
 
         response = await this.apiRequest<PostGridLetterResponse>(
@@ -627,7 +637,18 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       // PostGrid sets the USPS number some time after it accepts a certified
       // letter (#625). Read as text and carried only if it is shaped like one.
       const carrierNumber = typeof response.trackingNumber === 'string' ? response.trackingNumber.trim() : '';
-      if (CARRIER_TRACKING_NUMBER.test(carrierNumber)) letterStatus.carrierTrackingNumber = carrierNumber;
+      if (CARRIER_TRACKING_NUMBER.test(carrierNumber)) {
+        letterStatus.carrierTrackingNumber = carrierNumber;
+      } else if (carrierNumber !== '') {
+        // Never the value, only its length: an operator can tell "PostGrid
+        // has not set one yet" from "it set one this code refuses".
+        this.writeOperationDiagnostic(
+          'provider.postgrid.carrier_number_unrecognised',
+          operation,
+          { length: carrierNumber.length },
+          'warn'
+        );
+      }
 
       // Add tracking URL if available
       if (response.trackingUrl) {

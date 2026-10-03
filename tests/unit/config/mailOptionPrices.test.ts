@@ -19,6 +19,7 @@ import {
   isJitProductSold,
   isPackPayable,
   jitProductFor,
+  isExtraService,
   jitProductMatching,
   mailServiceOf
 } from '../../../src/config/products.js';
@@ -329,6 +330,19 @@ describe('mailServiceOf reads a stored service (#625)', () => {
   ])('%o is %o', (value, service) => {
     expect(mailServiceOf(value)).toBe(service);
   });
+});
+
+describe('isExtraService narrows to what a provider is handed (#625)', () => {
+  it.each(['certified', 'certified_return_receipt'])('%j is an extra service', value => {
+    expect(isExtraService(value)).toBe(true);
+  });
+
+  it.each(['standard', '', 'express', 'Certified', ' certified', 'constructor', null, undefined, 5, ['certified'], {}])(
+    '%j is not',
+    value => {
+      expect(isExtraService(value)).toBe(false);
+    }
+  );
 });
 
 describe('draftMailOption reads the service (#625)', () => {

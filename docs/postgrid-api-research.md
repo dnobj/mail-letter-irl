@@ -177,7 +177,8 @@ tracking guide); the test-mode behaviour is not stated there and is settled by t
   `letter.updated`, and `GET /letters/{id}` carries it. The return receipt is not returned by the API: the sender gets it
   from USPS with the tracking number once the letter is delivered.
 - Public prices: certified $6.94, with the electronic return receipt $9.85, against a first-class black-and-white letter at
-  $1.059. Probably all-in (the USPS fee, postage and printing); to be confirmed with PostGrid.
+  $1.059. Either all-in (the USPS fee, postage and printing) or an add-on to the letter's own price, as our 2025 notes
+  of PostGrid's price list have it: to be confirmed with PostGrid.
 - In Letter IRL, `LetterParams.extraService` carries the value to the form field (our PDF) or the JSON body (the legacy
   HTML), and `LetterStatus.carrierTrackingNumber` carries the number from a status read (8 to 40 letters, digits, spaces
   or hyphens; anything else is not carried). `letters.tracking_id` is PostGrid's own letter id, never the carrier's
