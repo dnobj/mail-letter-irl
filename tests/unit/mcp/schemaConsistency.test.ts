@@ -280,8 +280,15 @@ describe("request_send schema (#535)", () => {
     expect(zodKeys).toContain("schedule");
     expect(Object.keys(requestSendOutputSchema.properties ?? {})).toEqual(zodKeys);
     expect(requestSendOutputSchema.required).toEqual(
-      zodKeys.filter((key) => key !== "schedule" && key !== "paidPerSend")
+      zodKeys.filter((key) => key !== "schedule" && key !== "paidPerSend" && key !== "mailService")
     );
+    // Certified mail (#625): optional, the two services, worded alike on both layers.
+    expect(requestSendOutputZ.shape.mailService.isOptional()).toBe(true);
+    expect(requestSendOutputSchema.properties?.mailService).toMatchObject({
+      type: "string",
+      enum: ["certified", "certified_return_receipt"],
+      description: requestSendOutputZ.shape.mailService.description
+    });
     // Mail paid on the page (#579): optional, true only, worded alike on both layers.
     const paid = requestSendOutputZ.shape.paidPerSend;
     expect(paid.isOptional()).toBe(true);
