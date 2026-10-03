@@ -28,6 +28,28 @@ export function preprocessImageFileParam(value: unknown): unknown {
   return value;
 }
 
+/**
+ * The preprocess for one photo of a collage's `images` (#616). A string where
+ * the host did not swap in a file, blank or not, is a photo the server cannot
+ * open: it becomes the marker, so the refusal names its place. (The single
+ * `image` reads "" as no picture; in a list an empty slot is still a slot.)
+ */
+export function preprocessImageFileElement(value: unknown): unknown {
+  if (typeof value === "string") return { download_url: "", file_id: UNRESOLVED_IMAGE_FILE_ID };
+  return value;
+}
+
+/**
+ * The preprocess for a collage's whole list, `images` or `imageUrls` (#616).
+ * The blank string a host sends for an argument left unset is no list, as the
+ * empty string is no `image`: without this the call fails the served schema,
+ * and a single-photo postcard with it (ChatGPT mobile sends "" for a file
+ * parameter with nothing attached). Any other string still fails the schema.
+ */
+export function preprocessPhotoList(value: unknown): unknown {
+  return typeof value === "string" && value.trim() === "" ? undefined : value;
+}
+
 /** A file object the server can download, or null. */
 export function usableImageFile(image: unknown): ImageFileParam | null {
   if (!image || typeof image !== "object") return null;

@@ -265,8 +265,23 @@ describe('a postcard collage (#616)', () => {
 
     it('does not fall back to the account\'s recent upload for a collage that cannot be made', async () => {
       vi.mocked(getRecentUploadedImage).mockResolvedValue({ imageUrl: 'https://uploads.example/latest.jpg', ageMs: 1000 } as never);
-      await expect(run({ imageUrls: [link(1)] })).rejects.toThrow('A collage takes 2 to 4 photos');
+      vi.mocked(downloadAndProcessCollageWithPreview).mockRejectedValue(
+        new ImageProcessingError('DOWNLOAD_FAILED', "The second photo: Couldn't download the image. Please try again.")
+      );
+      await expect(run({ imageUrls: [link(1), link(2)] })).rejects.toThrow('The second photo');
+      expect(downloadAndProcessCollageWithPreview).toHaveBeenCalledTimes(1);
+      expect(getRecentUploadedImage).not.toHaveBeenCalled();
       expect(downloadAndProcessPostcardImageWithPreview).not.toHaveBeenCalled();
+      expect(createPostcardDraft).not.toHaveBeenCalled();
+    });
+
+    it('reads an empty list as no collage, so a recent upload can still be the photo (hosts send [] for one left unset)', async () => {
+      vi.mocked(getRecentUploadedImage).mockResolvedValue({ imageUrl: 'https://uploads.example/latest.jpg', ageMs: 1000 } as never);
+      const result = await run({ images: [], imageUrls: [] });
+      expect(downloadAndProcessCollageWithPreview).not.toHaveBeenCalled();
+      expect(downloadAndProcessPostcardImageWithPreview).toHaveBeenCalledTimes(1);
+      expect(drafted().frontImageUrl).toBe('https://uploads.example/latest.jpg');
+      expect(result).not.toHaveProperty('collagePhotos');
     });
   });
 });

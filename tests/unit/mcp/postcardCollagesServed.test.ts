@@ -63,6 +63,16 @@ async function listed() {
   return new Map((tools as unknown as Listed[]).map(tool => [tool.name, tool]));
 }
 
+/**
+ * Every other field the postcard preview withholds, offered: with them on, only the collage photos
+ * being withheld can open the schema to unknown keys (arrive-by alone does while it is off).
+ */
+function allOtherFieldsOffered() {
+  vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', 'true');
+  vi.stubEnv('LETTER_IRL_POSTCARD_LAYOUTS_ENABLED', 'true');
+  vi.stubEnv('LETTER_IRL_PRINT_RENDERER', 'pdf');
+}
+
 function offer(enabled: string) {
   vi.stubEnv('LETTER_IRL_POSTCARD_COLLAGES_ENABLED', enabled);
 }
@@ -123,6 +133,9 @@ describe('the collage photos in tools/list', () => {
   });
 
   it('passes a stray collage through to the preview while off, so its refusal runs, not the SDK\'s strip', async () => {
+    allOtherFieldsOffered();
+    offer('true');
+    expect((await listed()).get('quote_and_preview_postcard')!.inputSchema.additionalProperties).toBe(false);
     offer('');
     expect((await listed()).get('quote_and_preview_postcard')!.inputSchema.additionalProperties).toBe(true);
     const client = await connected();
@@ -145,13 +158,33 @@ describe('the collage photos in tools/list', () => {
   it('turns a path the host did not swap for a file into an unreadable photo, not an error of the schema\'s', async () => {
     offer('true');
     const client = await connected();
-    await client.callTool({ name: 'quote_and_preview_postcard', arguments: { ...POSTCARD, images: [file(1), '/mnt/data/second.png'] } });
+    await client.callTool({ name: 'quote_and_preview_postcard', arguments: { ...POSTCARD, images: [file(1), '/mnt/data/second.png', ''] } });
     expect(received).toHaveLength(1);
     const images = received[0].images as Array<{ download_url: string; file_id: string }>;
     expect(images[0]).toEqual(file(1));
     // The marker the single image's preprocess makes: an object with no address to download.
-    expect(images[1].download_url).toBe('');
-    expect(images[1].file_id).toBe('letter-irl:unresolved-image-reference');
+    // A blank slot in a list is a photo too, unlike the blank string for the whole list.
+    for (const photo of images.slice(1)) {
+      expect(photo.download_url).toBe('');
+      expect(photo.file_id).toBe('letter-irl:unresolved-image-reference');
+    }
+  });
+
+  it('reads a blank list, which a host sends for one left unset, as none, so a single photo still previews', async () => {
+    offer('true');
+    const client = await connected();
+    for (const blank of ['', '   ']) {
+      await client.callTool({
+        name: 'quote_and_preview_postcard',
+        arguments: { ...POSTCARD, imageUrl: 'https://photos.example/1.jpg', images: blank, imageUrls: blank }
+      });
+    }
+    expect(received).toHaveLength(2);
+    for (const input of received) {
+      expect(input.images).toBeUndefined();
+      expect(input.imageUrls).toBeUndefined();
+      expect(input.imageUrl).toBe('https://photos.example/1.jpg');
+    }
   });
 
   it('does not take a list of photos that is not a list', async () => {

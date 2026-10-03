@@ -931,7 +931,8 @@ export function getZodInputShape(name: string) {
 /**
  * A tool's input as this deployment serves it. The preview tools' `arriveBy`
  * (#535) is offered only while LETTER_IRL_ARRIVE_BY_ENABLED is on, and the
- * letter previews' stationery (#563) only while it is offered, so no model is
+ * letter previews' stationery (#563) only while it is offered, and the postcard
+ * preview's collage photos (#616) only while collages are, so no model is
  * shown a field the preview would refuse; read at each registration, so
  * switching a flag needs a reconnect, not a deploy.
  *

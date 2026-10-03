@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { preprocessImageFileParam } from "./utils/imageFileParam.js";
+import { preprocessImageFileElement, preprocessImageFileParam, preprocessPhotoList } from "./utils/imageFileParam.js";
 import { STATIONERY_THEMES } from "./render/stationery.js";
 import { MAX_LETTER_PAGES } from "./render/geometry.js";
 
@@ -173,9 +173,13 @@ const imageFileParamZ = z.preprocess(
     .optional()
 );
 
-/** One photo of a collage's `images` (#616): the same file object, and required. */
+/**
+ * One photo of a collage's `images` (#616): the same file object, and required.
+ * A string in its place is a photo the host did not resolve, blank or not
+ * (preprocessImageFileElement).
+ */
 const imageFileElementZ = z.preprocess(
-  preprocessImageFileParam,
+  preprocessImageFileElement,
   z.object({
     download_url: z.string(),
     file_id: z.string(),
@@ -361,8 +365,9 @@ export const quoteAndPreviewPostcardInputZ = z.object({
   // Alternative: direct image URL (for when fileParams isn't available)
   imageUrl: z.string().optional(),
   // Two to four photos for a collage (#616): withheld while collages are not offered (withheldInputKeys).
-  images: z.array(imageFileElementZ).optional().describe(POSTCARD_COLLAGE_IMAGES_DESCRIPTION),
-  imageUrls: z.array(z.string()).optional().describe(POSTCARD_COLLAGE_IMAGE_URLS_DESCRIPTION),
+  // A blank string where a list belongs is no list (preprocessPhotoList); the JSON Schema is the array's.
+  images: z.preprocess(preprocessPhotoList, z.array(imageFileElementZ).optional()).describe(POSTCARD_COLLAGE_IMAGES_DESCRIPTION),
+  imageUrls: z.preprocess(preprocessPhotoList, z.array(z.string()).optional()).describe(POSTCARD_COLLAGE_IMAGE_URLS_DESCRIPTION),
   sendAsGift: sendAsGiftZ,
   arriveBy: arriveByZ
 });

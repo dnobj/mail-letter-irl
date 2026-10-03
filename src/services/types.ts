@@ -816,7 +816,7 @@ export interface PostcardDraft {
   body_text: string;              // Message for postcards
   sign_off: string | null;        // Optional for postcards
   front_image_data: string;       // Base64 data URI
-  front_image_url: string;        // Original URL for debugging
+  front_image_url: string | null; // Original URL for debugging; null for a collage (#616)
   postcard_size: PostcardSize;
   /**
    * The front when not full bleed (migration 048, #594): read with
