@@ -3059,7 +3059,8 @@ describe('PostcardPreviewCard waiting for a collage (#616)', () => {
   it.each([
     ['links', { imageUrls: photos.slice(0, 2) }],
     ['three links', { imageUrls: photos }],
-    ['attachments', { images: files }]
+    ['attachments', { images: files }],
+    ['links among blank slots', { imageUrls: ['', photos[0], ' ', photos[1]] }]
   ])('waits 30 s more than for a photo, once, when asked for %s, before it offers to create the preview', async (_name, extra) => {
     const harness = mount(POSTCARD, { toolInput: without(extra) });
     await flush();
@@ -3093,6 +3094,8 @@ describe('PostcardPreviewCard waiting for a collage (#616)', () => {
     ['a list of one link', without({ imageUrls: [photos[0]] })],
     ['a list of one attachment', without({ images: [files[0]] })],
     ['empty lists', without({ imageUrl: photos[0], imageUrls: [], images: [] })],
+    ['lists of blank slots beside a photo', without({ imageUrl: photos[0], images: ['', ''], imageUrls: [' ', ''] })],
+    ['one link among blank slots', without({ imageUrls: ['', photos[0]] })],
     ['lists that are not lists', without({ imageUrl: photos[0], imageUrls: 'https://example.com/a.jpg', images: { download_url: 'y' } })]
   ])('waits the usual time for %s', async (_name, input) => {
     const harness = mount(POSTCARD, { toolInput: input });
@@ -3100,5 +3103,40 @@ describe('PostcardPreviewCard waiting for a collage (#616)', () => {
     await harness.runTimer(45000);
     expect(harness.visible('empty-state')).toBe(true);
     expect(harness.pendingTimers()).toEqual([]);
+  });
+
+  /** Lets the waits run out, the usual one and a collage's extra. */
+  async function waitsRunOut(harness: ReturnType<typeof mount>): Promise<void> {
+    for (let i = 0; i < 3 && harness.pendingTimers().length > 0; i += 1) await harness.runWait();
+  }
+
+  it.each([
+    ['links', { imageUrls: photos.slice(0, 2) }],
+    ['attachments with an address', { images: files }],
+    ['links with a blank slot beside them', { imageUrls: ['', photos[0], photos[1]] }]
+  ])('offers to create the preview again for %s, repeating exactly what the host passed', async (_name, extra) => {
+    const harness = mount(POSTCARD, { toolInput: without(extra) });
+    await flush();
+    await waitsRunOut(harness);
+    expect(harness.visible('retry-button')).toBe(true);
+    await harness.click('retry-button');
+    expect(harness.calls).toEqual([{ name: POSTCARD.tool, args: without(extra) }]);
+  });
+
+  it.each([
+    ['sandbox paths in images', { images: ['/mnt/data/a.png', '/mnt/data/b.png'] }],
+    ['a sandbox path among attachments', { images: [files[0], '/mnt/data/b.png'] }],
+    ['a file object with no address', { images: [files[0], { file_id: 'file-3', download_url: '' }] }],
+    ['an http link', { imageUrls: [photos[0], 'http://example.com/2.jpg'] }],
+    ['a sandbox path among links', { imageUrls: [photos[0], '/mnt/data/b.png'] }],
+    ['a list that is a string', { imageUrls: 'https://example.com/a.jpg' }]
+  ])('does not offer it for %s, which the server refuses on every press', async (_name, extra) => {
+    const harness = mount(POSTCARD, { toolInput: without(extra) });
+    await flush();
+    await waitsRunOut(harness);
+    expect(harness.visible('empty-state')).toBe(true);
+    expect(harness.visible('retry-button')).toBe(false);
+    expect(harness.text('empty-message')).toContain('Otherwise, ask for the preview again in the chat.');
+    expect(harness.calls).toEqual([]);
   });
 });

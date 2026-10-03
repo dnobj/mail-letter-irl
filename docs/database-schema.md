@@ -176,7 +176,7 @@ Temporary drafts for idempotent send operations. Prevents duplicate sends.
 | consumed_at | TIMESTAMPTZ | YES | - | When draft was sent |
 | consumed_letter_id | VARCHAR(255) | YES | - | FK to letters (after send) |
 | front_image_data | TEXT | YES | - | Base64 JPEG for postcard front (NULL for letters) |
-| front_image_url | TEXT | YES | - | Original image URL for debugging |
+| front_image_url | TEXT | YES | - | The photo's address: where `set_postcard_style` crops it again from at a new size, and how a collage is told from a photo. Every single photo records it; NULL for a collage (#616), for a letter, and once the draft is redacted |
 | postcard_size | VARCHAR(10) | YES | - | Postcard size: '6x9' (NULL for letters) |
 | is_gift_send | BOOLEAN | NO | false | Previewed as a gift send: funded by a gift letter and printed with its card (033) |
 | renderer_version | VARCHAR(16) | YES | - | The renderer that drew the preview: NULL for the legacy HTML, `pdf-1` for our own PDF (039, #534), `pdf-2` for our own PDF in stationery (044, #563), `pdf-3` for a postcard with a front other than full bleed (048, #594), `pdf-4` for our own PDF with the person's signature, in any theme (051, #608). The send copies it into `letters.content.rendererVersion`, and dispatch prints with it |

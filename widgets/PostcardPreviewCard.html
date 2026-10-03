@@ -1063,7 +1063,10 @@
       const COLLAGE_EXTRA_WAIT_MS = 30000;
       let collageWaited = false;
       function namesCollage(input) {
-        return [input?.images, input?.imageUrls].some((photos) => Array.isArray(photos) && photos.length >= 2);
+        const blank = (photo) => typeof photo === "string" && photo.trim() === "";
+        return [input?.images, input?.imageUrls].some(
+          (photos) => Array.isArray(photos) && photos.filter((photo) => !blank(photo)).length >= 2,
+        );
       }
       // How long the button waits on the card's own call before it can be
       // pressed again. A result that arrives later is still drawn, as long as
@@ -1141,11 +1144,24 @@
         return fileObjectUsable(input.image);
       }
 
+      // A collage's list of photos the card can pass back (#616): none, or each
+      // photo a file object with an address (images) or an https link (imageUrls),
+      // a blank slot being nothing. The server refuses a sandbox path in either,
+      // by its place, on every press, and a card cannot pick several photos again.
+      function photoListRepeatable(photos, usable) {
+        if (photos === undefined || photos === null || photos === "") return true;
+        if (!Array.isArray(photos)) return false;
+        return photos.every((photo) => (typeof photo === "string" && photo.trim() === "") || usable(photo));
+      }
+
       // The call this card can repeat faithfully, or null.
       function retryRequest() {
         const asked = hostRequest();
         if (!asked) return null;
         if (!imageArgumentRepeatable(asked.input.image) || !imageUrlRepeatable(asked.input)) return null;
+        if (!photoListRepeatable(asked.input.images, fileObjectUsable) || !photoListRepeatable(asked.input.imageUrls, isHttpsUrl)) {
+          return null;
+        }
         return { tool: asked.tool, args: asked.input };
       }
 

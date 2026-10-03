@@ -362,7 +362,7 @@ describe('set_postcard_style at a new size', () => {
     // Its photos were read once and are not kept: cropping the composite again would cut them at its edges.
     const message =
       'A collage keeps the size it was made at: its photos were read once and are not kept, so they cannot be arranged again. ' +
-      'To change the size, make a new preview with the same photos at the size you want. The postcard stays as it is.';
+      'To change the size, make a new preview with quote_and_preview_postcard: the same photos in images or imageUrls, the same message and front, and the size you want. The postcard stays as it is.';
     for (const [from, to] of [['6x9', '6x4'], ['6x9', '6x11'], ['6x4', '6x9'], ['6x11', '6x4']] as const) {
       vi.mocked(getDraftForPostcardStyle).mockResolvedValue(draft({ size: from, collage: true }));
       await expect(refusal({ size: to }), `${from} to ${to}`).resolves.toEqual(expect.objectContaining({ code: 'COLLAGE_SIZE', message }));

@@ -14,6 +14,7 @@ Two more template names serve an existing card rather than a new widget (`WIDGET
   - the page has no stamp;
   - the host passed no usable arguments;
   - the host passed an image in a form other than the file object the server reads, and the card cannot offer to pick the image again (below);
+  - a postcard asked for a collage whose `images` or `imageUrls` hold anything but file objects with an address or `https` links (#616): the server would refuse it, by its place, on every press, and a card cannot pick several photos again;
   - the host cannot call tools;
   - a text-only stamp arrives with image arguments.
 
