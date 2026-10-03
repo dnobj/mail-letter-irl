@@ -1,6 +1,6 @@
 # Letter Creator Vision
 
-**Last Updated:** September 30, 2026
+**Last Updated:** October 3, 2026
 **Status:** Draft
 **Purpose:** Where letter and postcard creation goes next: the goal, the principles, every concept, the interactive demos, and the order we build in
 
@@ -145,7 +145,7 @@ Each concept lists what PostGrid supports and how it reaches clients without car
 - **Why:** it makes the letter feel personal. It borrows from Hallmark Sign & Send, Ink Cards and Thankster.
 - **PostGrid:** an image in the layout.
 - **Card-less clients:** a `signature` argument that uses the saved one. Capture needs an upload, which is weak outside ChatGPT (the MCP Apps standard has no upload).
-- **Stage:** Later, being built as #608 behind `LETTER_IRL_SIGNATURES_ENABLED`. The website gets a page to draw or upload one, for apps without an upload. The handwriting face is #563's Handwritten stationery.
+- **Stage:** Later, built as #608 behind `LETTER_IRL_SIGNATURES_ENABLED`, on in development: saving (`set_signature`), the renderer's band, previews and prints (`pdf-4`), `set_letter_signature` and the card's Signature switch, and the website's Settings page to draw or upload one, for apps without an upload. The handwriting face is #563's Handwritten stationery. Still open: refusing light ink on a dark sheet (#611), a smaller copy for the card's page (#614), and the privacy wording, which is the owner's before production.
 
 #### 4. Postcard layouts and sizes
 - **What:**
@@ -288,7 +288,7 @@ The `mail:send` scope already exists. OAuth clients (ChatGPT, Claude, the websit
 |-------|-------|
 | **Pre-launch** | #534 renderer (probe prints first); #535 arrive-by; website #47; studio card Delivery tab (part of #535) |
 | **Next** (after launch) | Stationery collection (1) and studio card Style tab (6); room to write (2) and the Words tab; postcard sizes and single-photo layouts (4); envelope reveal (8); address request (10); server-remembered choices (Principle 4) |
-| **Later** | Signature capture (3); collages (4); keepsake formats (5); side panel (7); delivery moments via MCP Events (11); home (12); group letters and batch (13); standing agent permissions; a second vendor for folded cards or robot-pen ink |
+| **Later** | Signature capture (3; built as #608, on in development); collages (4); keepsake formats (5); side panel (7); delivery moments via MCP Events (11); home (12); group letters and batch (13); standing agent permissions; a second vendor for folded cards or robot-pen ink |
 
 ---
 
@@ -363,3 +363,4 @@ The `mail:send` scope already exists. OAuth clients (ChatGPT, Claude, the websit
 |------|--------|
 | 2026-09-30 | Initial version from the concept and demo session; #534, #535 and website #47 filed |
 | 2026-10-01 | Stationery: probe P12 settles the top-right corner; #563 filed |
+| 2026-10-03 | Signature: #608 saved, printed, switched on the card and set on the website; #611 and #614 filed |

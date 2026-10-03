@@ -1,6 +1,6 @@
 # Core User Flows
 
-**Last Updated:** September 16, 2026
+**Last Updated:** October 3, 2026
 
 This document describes the primary user interaction flows for Letter IRL.
 
@@ -200,6 +200,41 @@ Login methods sharing one confirmed email address are one account, joined at
 sign-in by an Auth0 post-login Action, so step 4 lands back on the same account
 unless the other method carries a different address
 ([account-switching-guide.md](account-switching-guide.md)).
+
+---
+
+## Flow G - Your Signature
+
+A saved signature (#608, behind `LETTER_IRL_SIGNATURES_ENABLED`) is a picture of the person's handwriting
+that their letters print under the closing.
+
+### Saving it
+
+1. In ChatGPT the person attaches a photo (or gives a link) and the assistant calls `set_signature`.
+   On the website the person opens Dashboard → Settings → Your signature, and chooses **Upload a photo**
+   (made smaller in the browser first) or **Draw it**.
+2. The server cleans the picture: upright, the paper made white, cropped to the ink, at most 1200 x 400
+   px. It refuses a picture with no signature in it, one that is a photograph rather than a signature, one
+   too small, and one that is not an image or cannot be read. A signature under 600 px wide prints softly,
+   and the answer says so.
+3. One signature is saved per account; saving again replaces it.
+
+### Using it
+
+1. A letter preview prints it under the closing's first line while the account's last choice is on (on
+   once one is saved). `signature: false` turns it off for later previews too; `true` with none saved is
+   refused.
+2. The card, the confirmation page and the print show it in the same place. A letter with no room for its
+   three lines is refused, naming the signature.
+3. The card's **Signature** switch, and `set_letter_signature`, sign or unsign a previewed letter without
+   previewing it again.
+4. A draft keeps its own copy: changing or removing the saved signature leaves letters already previewed as
+   they were.
+
+### Removing it
+
+`clear_signature` (confirmed), or **Remove** on the Settings page and then **Remove it** after its question. Account erasure
+deletes it too; the drafts' copies go with the draft's other content.
 
 ---
 
