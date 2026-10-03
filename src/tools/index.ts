@@ -25,6 +25,7 @@ export { requestSendTool } from "./requestSend.js";
 export { getDraftStatusTool } from "./getDraftStatus.js";
 export { setArrivalDateTool } from "./setArrivalDate.js";
 export { setStationeryTool } from "./setStationery.js";
+export { setMailServiceTool } from "./setMailService.js";
 export { setLetterWordsTool } from "./setLetterWords.js";
 export { setPostcardStyleTool } from "./setPostcardStyle.js";
 export { cancelScheduledMailTool } from "./cancelScheduledMail.js";

@@ -54,6 +54,8 @@ export const TOOL_SCOPES: Record<string, ProductScope> = {
   // nothing, so it sits with the drafting tools.
   set_arrival_date: "mail:draft",
   set_stationery: "mail:draft",
+  // Changes how a letter preview travels (#625): drafting, and it sends nothing.
+  set_mail_service: "mail:draft",
   // Changes a preview's words (#586): drafting, and it sends nothing.
   set_letter_words: "mail:draft",
   // Changes a postcard preview's size and front (#594): drafting, and it sends nothing.

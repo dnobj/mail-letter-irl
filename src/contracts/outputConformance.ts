@@ -64,6 +64,7 @@ import type {
   confirmUploadedImageOutputZ,
   setArrivalDateOutputZ,
   setStationeryOutputZ,
+  setMailServiceOutputZ,
   setLetterWordsOutputZ,
   setPostcardStyleOutputZ,
   cancelScheduledMailOutputZ,
@@ -100,6 +101,7 @@ import type {
   confirmUploadedImageTool,
   setArrivalDateTool,
   setStationeryTool,
+  setMailServiceTool,
   setLetterWordsTool,
   setPostcardStyleTool,
   cancelScheduledMailTool,
@@ -271,6 +273,9 @@ export type SetArrivalDateConforms = Conforms<
 >;
 export type SetStationeryConforms = Conforms<
   BothDirections<z.infer<typeof setStationeryOutputZ>, typeof setStationeryTool>
+>;
+export type SetMailServiceConforms = Conforms<
+  BothDirections<z.infer<typeof setMailServiceOutputZ>, typeof setMailServiceTool>
 >;
 export type SetLetterWordsConforms = Conforms<
   BothDirections<z.infer<typeof setLetterWordsOutputZ>, typeof setLetterWordsTool>
