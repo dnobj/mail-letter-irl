@@ -196,6 +196,9 @@ with Pay & Send:
 - `LETTER_IRL_POSTCARD_SIZES_ENABLED`: `STRIPE_JIT_POSTCARD_4X6_PRICE_ID` and
   `STRIPE_JIT_POSTCARD_11X6_PRICE_ID`.
 
+In Stripe test mode, `npx tsx scripts/create-option-prices.ts` makes all of these Prices at the amounts the product
+table pins and writes the variable lines (#624; see [deployment.md](deployment.md), the Pay & Send rollout).
+
 Without them, production refuses to boot and development warns. The flags stay
 unset in production until the owner approves the prices. Leave a flag unset
 rather than `false`: the cutover preflight reads variable names, not values, so a

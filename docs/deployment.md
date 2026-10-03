@@ -555,6 +555,13 @@ Configure development and production independently:
   `STRIPE_JIT_LETTER_TWO_PAGES_PRICE_ID` and `STRIPE_JIT_LETTER_THREE_PAGES_PRICE_ID` with
   `LETTER_IRL_ROOM_TO_WRITE_ENABLED` (which also lets the letter previews run to three pages, #586), and `STRIPE_JIT_POSTCARD_4X6_PRICE_ID` and
   `STRIPE_JIT_POSTCARD_11X6_PRICE_ID` with `LETTER_IRL_POSTCARD_SIZES_ENABLED`
+  - In Stripe test mode, make every option's Price in one command (#624). With a Stripe **test** key in your own shell
+    (never in a chat): `npx tsx scripts/create-option-prices.ts --out dev-option-prices.txt`; add `--dry-run` to look first.
+    It finds or creates a Product and a one-time Price for each option under the lookup key `letter-irl-<productCode>`, at
+    the amount and currency the product table pins, and writes `NAME=price_...` lines to the file. A live key is refused, a
+    Price at another amount is refused and left alone, and a second run changes nothing. Set the lines on the development
+    api and maintenance services, then turn the option's flag on. Production Prices are made in the dashboard once the price
+    proposal (#578) is approved.
 - `JIT_CURRENCY` (amounts come from the Stripe Prices above, not from variables).
   Pay & Send may use a different currency from the packs; each product's Price
   is validated against its own expected currency.
