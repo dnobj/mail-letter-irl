@@ -1813,7 +1813,8 @@ development: a sent letter is drawn, not mailed, and its PDF opens in PostGrid's
    signature stays under the new closing each time.
 6. [ ] Ask the assistant to take the signature off that preview, then to put it back. Verify
    `set_letter_signature` draws the card's page without it and then with it, and that the next preview
-   follows the last choice.
+   follows the last choice. Then do the same with the card's Signature switch, in the Style tab: it reads
+   **On** or **Off**, and the page follows it.
 7. [ ] Save the second photo as your signature. Send the preview from step 5 (test mode). Verify the
    PDF in PostGrid's test dashboard prints the first signature, as the preview showed it, in Botanical.
 8. [ ] Remove the signature (`clear_signature`, confirmed). Verify a preview asking for the signature

@@ -233,6 +233,8 @@ describe('the letter card as a studio (#580)', () => {
     await card.show(output({ stationery: { theme: 'classic', source: 'default' }, arrivalWindow: WINDOW }), ON);
     const panel = (id: string) => card.byId(id).closest('.studio-panel')?.getAttribute('data-tab');
     expect(panel('style-row')).toBe('style');
+    // The Signature switch beside the styles (#608 part 4b).
+    expect(panel('signature-row')).toBe('style');
     expect(panel('style-note')).toBe('style');
     expect(panel('layout-row')).toBe('style');
     expect(panel('arrives-row')).toBe('delivery');

@@ -589,3 +589,145 @@ describe('a card shown its preview again (#572 review round 1)', () => {
     expect(card.drawn()).toContain('<title>Dear Sam,\nPat</title>');
   });
 });
+
+describe('the Signature switch (#608 part 4b)', () => {
+  const SIGNED_PAGE = page('Dear Sam,\nPat', '<image data-role="signature" href="data:image/png;base64,AA==" x="72" y="300" width="180" height="45"/>');
+  const signed = (printed: boolean, source = 'remembered') => ({ ...output({ theme: 'classic', source: 'default' }), signature: { printed, source } });
+  const switched = (printed: boolean, previewHtml?: string, extra: Json = {}) => ({
+    result: {
+      content: [{ type: 'text', text: 'The letter now prints no signature.' }],
+      structuredContent: { draftId: 'draft_0001', signature: { printed, source: 'asked' }, ...canSend, message: 'Changed.', ...extra },
+      ...(previewHtml ? { _meta: { previewHtml } } : {})
+    }
+  });
+  // The card's cleaner drops the mark and keeps the picture: what it draws is the image.
+  const SIGNATURE_IMAGE = 'data:image/png;base64,AA==';
+  const PAY_AND_SEND = { packPays: false, payAndSend: { available: true, amountCents: 599, currency: 'usd' }, letterPack: { available: false } };
+  const toggle = (card: ReturnType<typeof mount>) => card.document.getElementById('signature-switch') as HTMLButtonElement;
+  const flip = async (card: ReturnType<typeof mount>) => card.click('signature-switch');
+
+  it('is offered beside the styles while a signature is saved, on or off as the letter prints it', async () => {
+    const card = mount();
+    await card.show(signed(true));
+    expect(card.visible('signature-row')).toBe(true);
+    expect(toggle(card).getAttribute('role')).toBe('switch');
+    expect(toggle(card).getAttribute('aria-checked')).toBe('true');
+    expect(toggle(card).textContent).toBe('On');
+    // Outside the style buttons: never taken for a theme.
+    expect(card.pressed()).toEqual(['classic']);
+    expect(card.document.querySelector('#style-row #signature-switch')).toBeNull();
+
+    const off = mount();
+    await off.show(signed(false));
+    expect(toggle(off).getAttribute('aria-checked')).toBe('false');
+    expect(toggle(off).textContent).toBe('Off');
+  });
+
+  it('is hidden with none saved, while signatures are not offered, or while the styles are', async () => {
+    for (const shown of [signed(false, 'none_saved'), output({ theme: 'classic', source: 'default' }), { ...output(), signature: { printed: true, source: 'remembered' } }]) {
+      const card = mount();
+      await card.show(shown);
+      expect(card.visible('signature-row')).toBe(false);
+    }
+  });
+
+  it('signs or unsigns with set_letter_signature, holding Send meanwhile, and draws the page it answers with', async () => {
+    const card = mount();
+    await card.show(signed(false));
+
+    await flip(card);
+    expect(card.lastRequest('tools/call', 'set_letter_signature')!.params).toEqual({
+      name: 'set_letter_signature',
+      arguments: { draftId: 'draft_0001', signature: true }
+    });
+    // While the server answers: the choice shows, and nothing can be sent, switched or styled.
+    expect(toggle(card).getAttribute('aria-checked')).toBe('true');
+    expect(toggle(card).getAttribute('aria-disabled')).toBe('true');
+    expect((card.document.getElementById('send-button') as HTMLButtonElement).disabled).toBe(true);
+    await card.choose('botanical');
+    expect(card.lastRequest('tools/call', 'set_stationery')).toBeUndefined();
+
+    await card.answer(switched(true, SIGNED_PAGE), 'set_letter_signature');
+    expect(toggle(card).getAttribute('aria-checked')).toBe('true');
+    expect(toggle(card).getAttribute('aria-disabled')).toBe('false');
+    expect(card.drawn()).toContain(SIGNATURE_IMAGE);
+    expect((card.document.getElementById('send-button') as HTMLButtonElement).disabled).toBe(false);
+
+    // And off again.
+    await flip(card);
+    expect(card.lastRequest('tools/call', 'set_letter_signature')!.params.arguments).toEqual({ draftId: 'draft_0001', signature: false });
+    await card.answer(switched(false, CLASSIC_PAGE), 'set_letter_signature');
+    expect(toggle(card).getAttribute('aria-checked')).toBe('false');
+    expect(card.drawn()).not.toContain(SIGNATURE_IMAGE);
+  });
+
+  it('takes the price the answer gives when the signature runs the letter on to a page', async () => {
+    const card = mount();
+    await card.show(signed(false));
+    await flip(card);
+    await card.answer(switched(true, SIGNED_PAGE, { pages: 2, canSendNow: false, sendEligibility: PAY_AND_SEND }), 'set_letter_signature');
+    expect(card.text('cost')).toBe('Pay & Send USD 5.99');
+    expect(card.text('layout-type')).toBe('Text Only · 2 pages, both sides');
+  });
+
+  it('shows a refusal under the row and keeps the switch and page as they were', async () => {
+    const card = mount();
+    await card.show(signed(false));
+    await flip(card);
+    await card.answer(
+      { result: { isError: true, content: [{ type: 'text', text: 'The signature takes 3 lines, and this letter has no room for them on one page.' }] } },
+      'set_letter_signature'
+    );
+    expect(card.visible('style-note')).toBe(true);
+    expect(card.text('style-note')).toContain('no room for them');
+    expect(card.document.getElementById('style-note')!.classList.contains('alert')).toBe(true);
+    expect(toggle(card).getAttribute('aria-checked')).toBe('false');
+    expect(card.drawn()).toContain('<title>Dear Sam,\nPat</title>');
+  });
+
+  it('waits for a style being set, and a style waits for it', async () => {
+    const card = mount();
+    await card.show(signed(false));
+    await card.choose('botanical');
+    await flip(card);
+    expect(card.lastRequest('tools/call', 'set_letter_signature')).toBeUndefined();
+    await card.answer(restyled({ theme: 'botanical', dateLine: 'October 1, 2026', source: 'asked' }, BOTANICAL_PAGE));
+    await flip(card);
+    expect(card.lastRequest('tools/call', 'set_letter_signature')).toBeDefined();
+  });
+
+  it('goes once the letter is sent, and signs nothing after', async () => {
+    const card = mount();
+    await card.show(signed(false));
+    expect(card.visible('signature-row')).toBe(true);
+    await card.click('send-button');
+    await card.answer({ result: { content: [], structuredContent: { orderId: 'ord_0001' } } }, 'send_letter');
+    expect(card.visible('signature-row')).toBe(false);
+    // A press that still reaches the hidden switch (a host delivering it) does nothing.
+    await flip(card);
+    expect(card.lastRequest('tools/call', 'set_letter_signature')).toBeUndefined();
+  });
+
+  it('takes whether a reopened card is signed now from get_draft_status', async () => {
+    const card = mount();
+    await card.show(signed(false));
+    await card.answer(
+      {
+        result: {
+          content: [],
+          structuredContent: {
+            draftId: 'draft_0001',
+            status: 'ready',
+            deliveryEstimate: 'Mailed in 1-2 business days',
+            stationery: { theme: 'classic' },
+            signature: true
+          },
+          _meta: { previewHtml: SIGNED_PAGE }
+        }
+      },
+      'get_draft_status'
+    );
+    expect(toggle(card).getAttribute('aria-checked')).toBe('true');
+    expect(card.drawn()).toContain(SIGNATURE_IMAGE);
+  });
+});

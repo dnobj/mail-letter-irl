@@ -14,6 +14,11 @@
  * none while the card sends or pays, and the page and price the last change
  * gave are the card's.
  *
+ * While signatures are offered (#608), a letter preview also says whether it
+ * prints the person's saved signature (signature). With one saved, the row
+ * has a Signature switch, which signs or unsigns the draft through
+ * set_letter_signature in the same way: one draft, one wait, one page.
+ *
  * The server inlines this file into the letter card, in place of its
  * letter-irl:style marker comment (src/mcp/widgetHost.ts). It defines
  * window.letterIrlStyle: THEMES and createStyle.
@@ -44,7 +49,8 @@
    *   also says with hold()), onSet()
    *   (a style is being set on the draft), onChange({ draftId, stationery }),
    *   onBusy(), and wordsElement(id), which finds the Words tab's editor
-   *   (#586) once the studio has drawn it
+   *   (#586) once the studio has drawn it; and signatureRow and
+   *   signatureSwitch, the Signature switch (#608), which may be absent
    */
   // What a restyle or a status answer says the letter costs now (#586): a
   // restyle can run it on to another page, or back on to one, and with that
@@ -108,6 +114,20 @@
     var element = typeof options.wordsElement === "function" ? options.wordsElement : function () { return null; };
     var wordsBound = false;
 
+    // The Signature switch (#608). offered: the preview says a signature is
+    // saved, so the switch can turn it on. on: the draft prints it. pending:
+    // the choice being set while the server answers.
+    var signature = { offered: false, on: false, pending: null };
+    var signatureSwitch = options.signatureSwitch || null;
+    var signatureRow = options.signatureRow || null;
+
+    // What a preview or a status answer says of the signature: whether a
+    // saved one can be switched, and whether it prints. None saved, or
+    // signatures not offered: no switch.
+    function signatureOffered(said) {
+      return Boolean(said) && typeof said.printed === "boolean" && said.source !== "none_saved";
+    }
+
     function shownTheme() {
       if (state.busy && state.pending) return state.pending;
       return state.stationery ? state.stationery.theme : null;
@@ -126,6 +146,12 @@
       options.note.textContent = state.message;
       options.note.style.display = state.message ? "block" : "none";
       options.note.classList.toggle("alert", state.error);
+      if (signatureSwitch) {
+        var on = state.busy && signature.pending !== null ? signature.pending : signature.on;
+        signatureSwitch.setAttribute("aria-checked", on ? "true" : "false");
+        signatureSwitch.setAttribute("aria-disabled", waiting);
+        signatureSwitch.textContent = on ? "On" : "Off";
+      }
     }
 
     function keepSlots(stationery) {
@@ -200,6 +226,66 @@
           if (state.draftId !== draftId) return;
           state.busy = false;
           state.pending = null;
+          draw();
+          options.onBusy();
+        });
+    }
+
+    // The Signature switch pressed (#608): the draft signed or unsigned, its
+    // page drawn again, as a restyle is. The account remembers the choice.
+    function setSignature() {
+      if (state.busy || state.held || !state.draftId || typeof host.callTool !== "function" || !signature.offered) return;
+      if (typeof options.idle === "function" && !options.idle()) return;
+      var draftId = state.draftId;
+      var wanted = !signature.on;
+      state.busy = true;
+      signature.pending = wanted;
+      state.message = "";
+      state.error = false;
+      draw();
+      // Signing is acting on the draft (the card keeps it).
+      if (typeof options.onSet === "function") options.onSet();
+      options.onBusy();
+      Promise.resolve()
+        .then(function () {
+          return host.callTool("set_letter_signature", { draftId: draftId, signature: wanted });
+        })
+        .then(function (result) {
+          // A refusal comes back as an error result, not a rejection.
+          if (result && result.isError) {
+            throw new Error(options.resultText(result) || "The signature was not changed.");
+          }
+          if (state.draftId !== draftId) return;
+          var data = toolData(result);
+          // An answer about another draft is no answer to this one.
+          if (typeof data.draftId === "string" && data.draftId !== draftId) {
+            throw new Error("The signature may have changed. Make the preview again to see it.");
+          }
+          if (!data.signature || typeof data.signature.printed !== "boolean") {
+            throw new Error("The signature may have changed. Make the preview again to see it.");
+          }
+          signature.on = data.signature.printed;
+          state.restyled = true;
+          // What it costs now: the band can run the letter on to a page.
+          var said = termsOf(data, result && result._meta && result._meta.pageFit);
+          if (said) state.terms = said;
+          var page = result && result._meta && result._meta.previewHtml;
+          if (typeof page === "string" && page) {
+            state.previewHtml = page;
+          } else {
+            state.message = "The signature is changed, but its page did not come back here. Make the preview again to see it.";
+          }
+          options.onChange({ draftId: draftId, stationery: state.stationery });
+        })
+        .catch(function (error) {
+          if (state.draftId !== draftId) return;
+          state.error = true;
+          state.message = options.readableError(error);
+        })
+        .then(function () {
+          if (state.draftId !== draftId) return;
+          state.busy = false;
+          signature.pending = null;
           draw();
           options.onBusy();
         });
@@ -396,9 +482,12 @@
       })(options.buttons[i]);
     }
 
+    if (signatureSwitch) signatureSwitch.addEventListener("click", setSignature);
+
     function hide() {
       options.row.style.display = "none";
       options.note.style.display = "none";
+      if (signatureRow) signatureRow.style.display = "none";
     }
 
     return {
@@ -435,8 +524,13 @@
           words.message = "";
           words.error = false;
           keepSlots(offered);
+          signature.offered = signatureOffered(output.signature);
+          signature.on = signature.offered && output.signature.printed === true;
+          signature.pending = null;
         }
         options.row.style.display = "";
+        // The switch beside the styles, while a signature is saved (#608).
+        if (signatureRow) signatureRow.style.display = signature.offered && signatureSwitch ? "" : "none";
         draw();
       },
       hide: hide,
@@ -492,6 +586,9 @@
         if (answer && typeof answer.bodyText === "string" && typeof answer.signOff === "string" && typeof answer.wordsVersion === "string") {
           words.set = { bodyText: answer.bodyText, signOff: answer.signOff, version: answer.wordsVersion };
         }
+        // And whether it is signed now (#608): the chat may have signed or
+        // unsigned it since. Only where the switch is offered at all.
+        if (answer && typeof answer.signature === "boolean" && signature.offered) signature.on = answer.signature;
         draw();
         return true;
       },
@@ -507,6 +604,11 @@
       // The stationery as this card last set or saw it, or null.
       stationery: function () {
         return state.stationery;
+      },
+      // Whether the draft prints the saved signature, as this card last set
+      // or saw it (#608); null where the switch is not offered.
+      signed: function () {
+        return signature.offered ? signature.on : null;
       },
       busy: function () {
         return state.busy;
