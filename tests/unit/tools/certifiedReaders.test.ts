@@ -86,6 +86,10 @@ describe('no gift letter pays for certified mail (#625)', () => {
       GIFT_NOT_FOR_CERTIFIED
     );
     expect(GIFT_NOT_FOR_CERTIFIED).not.toBe(GIFT_PAYS_ONE_PAGE);
+    expect(GIFT_NOT_FOR_CERTIFIED).toBe(
+      'A gift letter does not pay for certified mail. ' +
+        'Leave sendAsGift out and pay for it with Pay & Send, or send the gift as an ordinary one-page letter or a 6x9 postcard.'
+    );
   });
 
   it('decides at once whatever room to write offers, and chooses no gift when none was asked for, though one is waiting', async () => {
