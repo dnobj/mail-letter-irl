@@ -142,6 +142,13 @@ describe('set_mail_service (#625)', () => {
     expect(vi.mocked(getSendEligibility).mock.calls.at(-1)![2]).toEqual({ mailType: 'letter' });
   });
 
+  it('prices a standard letter by the credits it needs: a balance short of them cannot send it', async () => {
+    vi.mocked(getDraftForMailService).mockResolvedValue(draft({ required_credits: 2 }));
+    const result = await set({ draftId: DRAFT_ID, mailService: 'standard' }, context(1));
+    expect(result.canSendNow).toBe(false);
+    expect(vi.mocked(getSendEligibility).mock.calls.at(-1)!.slice(0, 2)).toEqual([1, 2]);
+  });
+
   it('prices a certified letter of three pages by its service, as the send does', async () => {
     vi.mocked(getDraftForMailService).mockResolvedValue(draft({ mail_service: 'certified', pages: 3 }));
     await set({ draftId: DRAFT_ID, mailService: 'certified' });
