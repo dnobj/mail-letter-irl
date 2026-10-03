@@ -1576,9 +1576,39 @@ describe('commerceService', () => {
       await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' }))
         .rejects.toMatchObject({ code: 'CHARGE_ABOVE_DAILY_CAP' });
 
-      expect(String(mocks.query.mock.calls[1][0])).toContain('SELECT mail_type, postcard_size, pages FROM letter_drafts');
+      expect(String(mocks.query.mock.calls[1][0])).toContain(
+        'SELECT mail_type, postcard_size, pages, mail_service FROM letter_drafts'
+      );
       expect(mocks.ensurePriceCatalog).toHaveBeenCalledWith('jit-letter-2-pages');
       expect(mocks.getJitProduct).toHaveBeenCalledWith({ mailType: 'letter', pages: 2 });
+      const sql = mocks.query.mock.calls.map(call => String(call[0]));
+      expect(sql.some(statement => statement.includes('INSERT INTO orders'))).toBe(false);
+    });
+
+    it("prices a certified letter's checkout by its service from the peek on: its price warmed, its amount capped (#625)", async () => {
+      // A day's limit between the standard price and the certified price.
+      vi.stubEnv('LETTER_IRL_BETA_ACCOUNT_DAILY_CHARGE_CENTS', '700');
+      mocks.getJitProduct.mockImplementation((({ mailType, mailService }: { mailType: string; mailService?: string }) =>
+        mailType === 'letter' && mailService === 'certified'
+          ? {
+              productCode: 'jit-letter-certified', priceId: 'price-cert', amountCents: 1199,
+              currency: 'usd', name: 'Pay & Send One Certified Mail Letter', description: 'x', mailType: 'letter'
+            }
+          : {
+              productCode: 'jit-letter', priceId: 'price-1p', amountCents: 499,
+              currency: 'usd', name: 'Pay & Send One Physical Letter', description: 'x', mailType: 'letter'
+            }) as never);
+      mocks.query
+        // In the order the checkout reads them: the send block, then the peek.
+        .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
+        .mockResolvedValueOnce({ rows: [{ mail_type: 'letter', postcard_size: null, pages: 1, mail_service: 'certified' }] })
+        .mockResolvedValue({ rows: [] });
+
+      await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' }))
+        .rejects.toMatchObject({ code: 'CHARGE_ABOVE_DAILY_CAP' });
+
+      expect(mocks.ensurePriceCatalog).toHaveBeenCalledWith('jit-letter-certified');
+      expect(mocks.getJitProduct).toHaveBeenCalledWith({ mailType: 'letter', mailService: 'certified' });
       const sql = mocks.query.mock.calls.map(call => String(call[0]));
       expect(sql.some(statement => statement.includes('INSERT INTO orders'))).toBe(false);
     });

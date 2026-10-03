@@ -551,6 +551,12 @@ export interface LetterDraft {
    * gift send, runs past one page; it is paid per send (#579).
    */
   pages?: number;
+  /**
+   * How a letter travels (migration 052, #625): standard first-class mail, or
+   * USPS Certified Mail with or without an electronic return receipt. Only a
+   * letter that is not a gift send is ever certified; it is paid per send (#579).
+   */
+  mail_service?: MailService;
   /** A postcard's size (migration 012): '6x9', or '6x4' or '6x11' (#594); null for a letter. */
   postcard_size?: string | null;
   /**
@@ -606,6 +612,12 @@ export interface CreateDraftParams {
    * database's check does: createDraft refuses anything else first.
    */
   pages?: number;
+  /**
+   * How the letter travels (migration 052, #625); standard when unset. A
+   * service other than standard needs a letter that is not a gift send, as the
+   * database's check does: createDraft refuses anything else first.
+   */
+  mailService?: MailService;
   /**
    * The person's signature, a PNG data URI, when the letter prints one
    * (migration 051, #608). With it, rendererVersion must be 'pdf-4'

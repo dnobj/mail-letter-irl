@@ -186,6 +186,7 @@ Temporary drafts for idempotent send operations. Prevents duplicate sends.
 | arrive_by | DATE | YES | - | The date the mail should arrive by, in America/New_York; NULL to mail as soon as possible (040, #535) |
 | mail_on | DATE | YES | - | The date it goes to the printer, worked back from `arrive_by` by the lead time (040, #535). The send copies both to the letter and holds its job until then |
 | pages | SMALLINT | NO | 1 | The pages the letter prints on, 1 to 3, printed on both sides when more than 1 (047, #586). The send, the checkout and the confirmation page price and refuse the draft by it (`draftMailOption`): a letter of more than one page is paid per send. `createDraft` refuses a count it would not store, before writing (`DRAFT_PAGES_INVALID`). The send copies it into `letters.content.pages` when above one, for the print |
+| mail_service | TEXT | NO | 'standard' | How a letter travels (052, #625): `standard` (first-class mail), `certified` (USPS Certified Mail) or `certified_return_receipt` (with an electronic return receipt). Only a letter that is not a gift send is ever certified; it is paid per send (#579). The send, the checkout and the confirmation page price and refuse the draft by it (`draftMailOption`), and the send carries it to the provider (as `extraService`) |
 | created_at | TIMESTAMPTZ | NO | NOW() | Draft creation |
 | updated_at | TIMESTAMPTZ | NO | NOW() | Last update |
 
@@ -207,6 +208,8 @@ Temporary drafts for idempotent send operations. Prevents duplicate sends.
 - `letter_drafts_schedule_order`: mail_on is never after arrive_by (040)
 - `letter_drafts_pages_known`: pages is 1 to 3 (047)
 - `letter_drafts_pages_paid_per_send`: more than one page only for a letter our renderer drew (renderer_version set), never a gift send (047, #586)
+- `letter_drafts_mail_service_known`: mail_service is 'standard', 'certified' or 'certified_return_receipt' (052)
+- `letter_drafts_mail_service_paid_per_send`: a service other than standard only for a letter, never a gift send (052, #625)
 
 **Indexes:**
 - `idx_letter_drafts_user_pending` on (user_id, status) WHERE status='pending'
@@ -860,6 +863,7 @@ Production provisioning and the first production connection remain separate owne
 | 49 | 049_address_requests.sql | `address_requests` (#604): address request links, the token stored as its SHA-256, an address exactly when answered, `closed_at` exactly when not waiting. No provisioning re-run: neither admin role is granted it |
 | 50 | 050_user_signatures.sql | `user_signatures` (#608): one saved signature per account, a grayscale PNG within 1200 x 400 px, with the remembered choice. No provisioning re-run: neither admin role is granted it |
 | 51 | 051_signature_drafts.sql | `letter_drafts.signature_image` (#608): a letter's own copy of the signature it was previewed with. `renderer_version` admits `pdf-4`, set exactly when a draft has one, with `letter_drafts_signature_letters_only` and `letter_drafts_signature_drawn_by_pdf_4`; `letter_drafts_stationery_drawn_by_pdf_2` admits a theme with `pdf-4`. No provisioning re-run: the reader role's column list leaves it out, as for 039 |
+| 52 | 052_mail_service.sql | `letter_drafts.mail_service` (#625): how a letter travels, 'standard' by default, with `letter_drafts_mail_service_known` and `letter_drafts_mail_service_paid_per_send` (certified or certified with a return receipt only for a letter, never a gift send). No provisioning re-run, as for 039 |
 
 ---
 

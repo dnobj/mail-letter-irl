@@ -273,6 +273,16 @@ export async function createMailOrderFromDraftWithClient(
   const schedule = sendSchedule(draft, funding, params.draftId);
   const releaseAt = schedule ? dispatchAt(schedule.mailOn) : undefined;
 
+  // Certified mail (#625) is previewed, priced and paid for before the send
+  // carries it to the printer: until it does, a draft that asks for it is not
+  // sent, so it can never go as standard mail after being paid for as certified.
+  if (draft.mail_service !== undefined && draft.mail_service !== 'standard') {
+    throw draftError(
+      'MAIL_SERVICE_NOT_SENDABLE',
+      `Draft ${params.draftId} asks for ${draft.mail_service}, which the send does not carry yet`
+    );
+  }
+
   // A gift draft is funded by a gift letter instead of the balance. Pay & Send
   // ignores the flag: that path runs after Stripe has charged, and
   // createJitCheckout refuses a gift draft before any charge exists.
