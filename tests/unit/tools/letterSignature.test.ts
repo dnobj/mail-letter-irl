@@ -189,9 +189,10 @@ describe('chooseSignature', () => {
     expect(getSignature).not.toHaveBeenCalled();
   });
 
-  it('prints none for false, reading nothing, and remembers the choice', async () => {
-    await expect(chooseSignature(false, context())).resolves.toEqual({ asked: false, offered: true });
-    expect(getSignature).not.toHaveBeenCalled();
+  it('prints none for false, and says whether one is saved', async () => {
+    await expect(chooseSignature(false, context())).resolves.toEqual({ asked: false, offered: true, saved: true });
+    vi.mocked(getSignature).mockResolvedValue(null);
+    await expect(chooseSignature(false, context())).resolves.toEqual({ asked: false, offered: true, saved: false });
   });
 
   it('prints the saved one when left out while the choice is on, or when asked, as a PNG data URI', async () => {
@@ -292,7 +293,6 @@ describe('a letter preview with the saved signature', () => {
     expect(draft.rendererVersion).toBe('pdf-1');
     expect(draft.signatureImage).toBeUndefined();
     expect(draft.previewHtml).not.toContain('data-role="signature"');
-    expect(getSignature).not.toHaveBeenCalled();
     expect(rememberSignatureChoice).toHaveBeenCalledWith('user-1', false);
   });
 
@@ -357,6 +357,8 @@ describe('what a preview says of the signature (#612 review round 1)', () => {
     ['left out, the choice off', false, {}, { printed: false, source: 'remembered' }],
     ['asked for', false, { signature: true }, { printed: true, source: 'asked' }],
     ['asked against', true, { signature: false }, { printed: false, source: 'asked' }],
+    // Nothing to switch on: none saved, whatever the call asked (#615 review round 1).
+    ['asked against, none saved', null, { signature: false }, { printed: false, source: 'none_saved' }],
     ['left out, none saved', null, {}, { printed: false, source: 'none_saved' }]
   ] as const)('%s', async (_label, useByDefault, input, said) => {
     vi.mocked(getSignature).mockResolvedValue(useByDefault === null ? null : saved(useByDefault));

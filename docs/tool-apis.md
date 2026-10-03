@@ -88,7 +88,7 @@ signature ([Signatures](#signatures)) under the sign-off's first line.
   refusal, while room to write is offered, when the band is what runs it past one page, and
   `set_letter_words`' refusal of a gift letter's new words.
 - Each preview then returns `signature`: `printed`, whether the letter prints it, and `source`: `asked`
-  (the call named it), `remembered` (the account's choice) or `none_saved`. The narration says when the
+  (the call named it), `remembered` (the account's choice) or `none_saved` (the account has none, whatever the call asked). The narration says when the
   account's choice signed the letter, or left it unsigned, and that `set_letter_signature` changes it in
   place, so a model without the card can tell the person.
 - The draft keeps its own copy, as the letter was previewed with it, and records renderer `pdf-4`

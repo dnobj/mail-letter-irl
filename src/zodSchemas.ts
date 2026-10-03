@@ -119,7 +119,7 @@ export const GET_DRAFT_STATUS_SIGNATURE_DESCRIPTION =
 export const PREVIEW_SIGNATURE_OUTPUT_DESCRIPTION =
   "While signatures are offered: whether the letter prints the person's saved signature, and why";
 export const SIGNATURE_SOURCE_DESCRIPTION =
-  "Why: asked for in the call (signature), the account's remembered choice, or none_saved when the account has no signature";
+  "Why: asked for in the call (signature), the account's remembered choice, or none_saved when the account has no signature, whatever the call asked";
 const previewSignatureOutputZ = z.object({
   printed: z.boolean(),
   source: z.enum(["asked", "remembered", "none_saved"]).describe(SIGNATURE_SOURCE_DESCRIPTION)
