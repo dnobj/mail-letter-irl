@@ -101,6 +101,20 @@ All images are validated, resized to print specifications (300 DPI), and optimiz
 - Too large to decode whole: "Image is too large to process. Please use an image under N megapixels, or save it without interlacing or progressive encoding." (N depends on the image's channels and depth: 33 for 8-bit RGB, 25 for 8-bit RGBA, 16 for 16-bit RGB, 12 for 16-bit RGBA.)
 - Busy: "The image service is busy right now. Please try again in a moment." or, when it is the caller's own share of the gates that is full, "You have other images still processing. Please wait for them to finish and try again."
 
+**Collages (#616, built; no tool takes it yet):** `downloadAndProcessCollageWithPreview` (`src/services/imageService.ts`) draws two to four photos on one front, so a collage is stored as a single photo's crop is and nothing downstream learns it was one.
+
+| Photos | Arrangement (`src/services/collageArrangement.ts`) |
+|--------|-----------------------------------------------------|
+| 2 | side by side, equal |
+| 3 | one large on the left, two thirds of the width, and two stacked on the right |
+| 4 | two by two, in reading order |
+
+- The cells are the front's own proportions at every size (4×6, 6×9 and 11×6), with a white margin round the front and a white gutter between photos, each 24 px (0.08 in at 300 DPI). The odd pixel of a split goes to the second cell, never to a gutter. For a 6×9, two photos are 1314 × 1752 px each; three are 1752 × 1752 and two of 876 × 864; four are 1314 × 864.
+- The photos are downloaded at once, under the download gate (an account holds two slots, so the third and fourth wait their turn). Downloads are checked before pictures: the lowest place that would not download is said first, and when all do, the lowest whose picture cannot be used.
+- Each photo gets the checks a single photo gets (format from the bytes, the pixel ceiling, the progressive budget, the 100 × 100 minimum) before any is drawn. Then, under one decode slot and one at a time, each is turned upright by its EXIF orientation, cropped to fill its cell (`cover`, centred) and encoded as a PNG tile; the tiles are laid on a white canvas of the postcard's size, which a transparent picture shows through to, and encoded as a JPEG at quality 85, with the small preview derived from it as for a single photo.
+- A photo that cannot be used is named by its place, with the single photo's sentence: "The second photo: Unsupported image format. Please use PNG, JPEG, or WebP." A busy service is not any photo's fault and is said as it is. Fewer than two or more than four photos is refused.
+- `tests/unit/services/collageArrangement.test.ts` proves the geometry (exact cells for the three sizes, and that the cells and gutters tile any front), and `tests/unit/services/imageServiceCollage.test.ts` proves the picture with real bytes: the cells' colours, the white margins and gutters, the order, the crop, the EXIF turn, transparency, and every refusal.
+
 ### 2. Letter Header Images
 
 **Tool**: `quote_and_preview_letter_with_header_image`
