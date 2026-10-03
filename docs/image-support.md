@@ -201,7 +201,9 @@ Every image byte is customer-controlled, and decoding is where bytes become memo
 
 `tests/unit/services/imageServiceHardening.test.ts` proves each of these with real image bytes and no sharp mock.
 
-Turning a photo upright by its EXIF orientation (`openUprightImage`, #617) adds nothing to these bounds. sharp turns the picture after the resize, and the peak resident memory of the whole print path at 49 megapixels (the pixel ceiling) was within 10 MB of what it was without the turn: a baseline JPEG 135 MB against 126 MB, a progressive JPEG 275 against 266, a PNG 259 against 253 and a WebP 156 against 146. `tests/unit/services/imageServiceOrientation.test.ts` proves with real bytes that a photo tagged 3, 6 or 8 prints upright on every path, and that one with no tag, or tagged 1, is unchanged.
+Turning a photo upright by its EXIF orientation (`openUprightImage`, #617) adds nothing to these bounds. sharp resizes first and turns the smaller picture, and for a 90-degree tag it swaps the resize target before choosing how far to shrink on load. Measured in a standalone process (`sharp.concurrency(1)`, a 2700 × 1800 `cover` crop, one file at a time), peak resident memory without the turn and then with it, in megabytes: a 49-megapixel baseline JPEG tagged 1, 112 and 113; the same tagged 6, 113 and 103; a plain 8-bit 49-megapixel PNG tagged 6, 113 and 104; a WebP tagged 6, 132 and 123; and a progressive JPEG tagged 6 at the edge of the full-decode budget (32.5 megapixels), 199 and 197. A 49-megapixel colour progressive JPEG is refused by that budget before any of this. The turn defeats none of the bounds above.
+
+`tests/unit/services/imageServiceOrientation.test.ts` proves with real bytes that a photo tagged 3, 6 or 8 prints upright on every path and that all eight tags (the mirrored 2, 4, 5 and 7 too) print as a viewer sees them in a JPEG, a WebP and a PNG, and that one with no tag, or tagged 1, is unchanged.
 
 ### Image Service
 

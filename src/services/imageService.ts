@@ -200,10 +200,10 @@ export function openImage(input: Buffer): Sharp {
  * its EXIF orientation (#617). A phone stores a portrait photo's pixels as
  * the sensor read them and records the turn in an Orientation tag. Every
  * print path re-encodes without EXIF, so left alone the tag is lost and the
- * picture prints turned by 90 degrees; the renderer relies on images arriving
- * here already upright (src/render/pdf.ts). sharp turns the picture after it
- * has been resized, which measured no higher a peak at 49 megapixels (JPEG,
- * progressive JPEG, PNG and WebP). A picture without the tag is unchanged.
+ * picture prints turned by 90 degrees; the renderer relies on the images it
+ * is given being upright (src/render/pdf.ts). sharp turns the picture after
+ * it has been resized, which measured no higher a peak at 49 megapixels
+ * (docs/image-support.md). A picture without the tag is unchanged.
  */
 function openUprightImage(input: Buffer): Sharp {
   return openImage(input).rotate();

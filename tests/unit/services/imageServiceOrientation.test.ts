@@ -28,6 +28,7 @@ const REMOTE = 'https://93.184.216.34/photo.jpg';
 
 type Orientation = 1 | 3 | 6 | 8;
 type Colour = 'R' | 'B' | '?';
+type Corner = 'R' | 'G' | 'B' | 'Y';
 
 async function halves(format: 'jpeg' | 'webp', orientation?: Orientation): Promise<Buffer> {
   const red = await sharp({ create: { width: 150, height: 200, channels: 3, background: '#ff0000' } }).png().toBuffer();
@@ -78,6 +79,54 @@ function respond(bytes: Buffer, type: string): Response {
     body: bodyOf(bytes),
   } as unknown as Response;
 }
+
+/** 300 x 200: red top left, green top right, blue bottom left, yellow bottom right, optionally tagged. */
+async function quadrants(format: 'jpeg' | 'webp' | 'png', orientation?: number): Promise<Buffer> {
+  const tile = (background: string) => sharp({ create: { width: 150, height: 100, channels: 3, background } }).png().toBuffer();
+  const base = sharp({ create: { width: 300, height: 200, channels: 3, background: '#000000' } }).composite([
+    { input: await tile('#ff0000'), left: 0, top: 0 },
+    { input: await tile('#00ff00'), left: 150, top: 0 },
+    { input: await tile('#0000ff'), left: 0, top: 100 },
+    { input: await tile('#ffff00'), left: 150, top: 100 },
+  ]);
+  const encoded = format === 'jpeg' ? base.jpeg({ quality: 95 }) : format === 'webp' ? base.webp({ quality: 95 }) : base.png();
+  return (orientation === undefined ? encoded : encoded.withMetadata({ orientation })).toBuffer();
+}
+
+/** The nearest of red, green, blue and yellow at the middle of each quarter: top left, top right, bottom left, bottom right. */
+async function corners(dataUri: string): Promise<string> {
+  const { data, info } = await sharp(Buffer.from(dataUri.split(',')[1], 'base64')).raw().toBuffer({ resolveWithObject: true });
+  const palette: Array<[Corner, [number, number, number]]> = [
+    ['R', [255, 0, 0]],
+    ['G', [0, 255, 0]],
+    ['B', [0, 0, 255]],
+    ['Y', [255, 255, 0]],
+  ];
+  const nearest = (x: number, y: number): Corner => {
+    const i = (Math.floor(y * info.height) * info.width + Math.floor(x * info.width)) * info.channels;
+    const distance = ([r, g, b]: [number, number, number]) => (data[i] - r) ** 2 + (data[i + 1] - g) ** 2 + (data[i + 2] - b) ** 2;
+    return palette.reduce((best, entry) => (distance(entry[1]) < distance(best[1]) ? entry : best))[0];
+  };
+  return [nearest(0.25, 0.25), nearest(0.75, 0.25), nearest(0.25, 0.75), nearest(0.75, 0.75)].join('');
+}
+
+/**
+ * What a viewer sees for each EXIF Orientation of the quadrants fixture, as its corners read: top left, top
+ * right, bottom left, bottom right (EXIF 2.3, tag Orientation): 2 mirrors left to right, 3 turns it 180 degrees,
+ * 4 mirrors top to bottom, 5 is a transpose, 6 turns it 90 degrees clockwise, 7 is a transverse, 8 turns it 90
+ * degrees anticlockwise.
+ */
+const UPRIGHT: Record<string, string> = {
+  none: 'RGBY',
+  '1': 'RGBY',
+  '2': 'GRYB',
+  '3': 'YBGR',
+  '4': 'BYRG',
+  '5': 'RBGY',
+  '6': 'BRYG',
+  '7': 'YGBR',
+  '8': 'GYRB',
+};
 
 describe('photos are printed upright (#617)', () => {
   const fetchMock = vi.fn();
@@ -132,6 +181,18 @@ describe('photos are printed upright (#617)', () => {
         await expect(quarters(result.base64DataUri)).resolves.toEqual(seen);
         await expect(quarters(result.previewDataUri)).resolves.toEqual(seen);
       });
+    });
+  });
+
+  describe.each([
+    ['jpeg', 'image/jpeg'],
+    ['webp', 'image/webp'],
+    ['png', 'image/png'],
+  ] as const)('every orientation a %s can carry', (format, type) => {
+    it.each(Object.entries(UPRIGHT))('tagged %s prints as a viewer sees it', async (tag, expected) => {
+      fetchMock.mockResolvedValueOnce(respond(await quadrants(format, tag === 'none' ? undefined : Number(tag)), type));
+      const result = await downloadAndProcessPostcardImageWithPreview({ url: REMOTE }, '6x9');
+      await expect(corners(result.base64DataUri)).resolves.toBe(expected);
     });
   });
 
