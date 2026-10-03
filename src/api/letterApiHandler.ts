@@ -19,6 +19,7 @@ import type { LetterStatus } from '../services/types.js';
 import { cancelledMessage } from '../tools/cancelScheduledMail.js';
 import { heldSendFields, waitsInOutbox } from '../tools/heldSend.js';
 import { certifiedFactsOf } from '../config/certifiedMail.js';
+import { mailServiceOf } from '../config/products.js';
 
 /**
  * Send JSON response
@@ -343,7 +344,8 @@ function formatLetterResponse(row: LetterRow): any {
     trackingNumber: row.tracking_id,
 
     // How it travelled (#625): standard, or USPS Certified Mail with or without an electronic return receipt, with the USPS number and its link once the status sync has it
-    mailService: certified?.mailService ?? 'standard',
+    // An ordinary letter is standard; text this code does not know is unknown (null), never called standard.
+    mailService: certified?.mailService ?? (mailServiceOf(row.mail_service) === undefined ? 'standard' : null),
     carrierTrackingNumber: certified?.carrierTrackingNumber ?? null,
     carrierTrackingUrl: certified?.carrierTrackingUrl ?? null,
 

@@ -91,6 +91,27 @@ describe("the order tools' certified output (#625)", () => {
     }
   });
 
+  it('describes tracking support on both layers, so a model knows what carrier_tracking means', async () => {
+    const [status] = await listed(['get_order_status']);
+    const served = (status.outputSchema as Schema).properties.trackingSupport.description ?? '';
+    const manifest = manifestTools(['get_order_status'])[0].outputSchema!.properties.trackingSupport.description ?? '';
+    for (const description of [served, manifest]) {
+      expect(description).toContain('estimated_only');
+      expect(description).toContain('carrier_tracking');
+      expect(description).toContain("USPS's own tracking number is stored");
+      expect(description).toContain('this status is still the printer');
+    }
+    expect(served).toBe(manifest);
+  });
+
+  it('says the service is present for USPS Certified Mail, not only when it was sent', async () => {
+    const [status] = await listed(['get_order_status']);
+    const description = (status.outputSchema as Schema).properties.mailService.description ?? '';
+    expect(description).toContain('Present only for USPS Certified Mail');
+    expect(description).not.toContain('was sent');
+    expect((status.outputSchema as Schema).properties.carrierTrackingNumber.description).toContain('status sync has stored it');
+  });
+
   it('adds nothing to either tool\'s description or input', async () => {
     const [status, list] = [...(await listed(['get_order_status'])), ...(await listed(['list_orders']))];
     for (const tool of [status, list]) {
@@ -120,8 +141,13 @@ describe("the order tools' certified output (#625)", () => {
     const say = (orders: unknown[]) => summarizeToolResult('list_orders', { orders, total: orders.length });
     expect(say([{ orderId: 'a' }, { orderId: 'b' }])).toBe('Found 2 recent orders (2 total).');
     expect(say([{ orderId: 'a', mailService: 'certified' }, { orderId: 'b' }, { orderId: 'c', mailService: 'certified_return_receipt' }])).toBe(
-      'Found 3 recent orders (3 total). 2 went as USPS Certified Mail: their entries carry the USPS tracking number and link once there is one.'
+      'Found 3 recent orders (3 total). 2 are USPS Certified Mail: their entries carry the USPS tracking number and link once there is one.'
     );
+    // Neutral about whether each went out: some may be scheduled, failed or cancelled.
+    expect(say([{ orderId: 'a', mailService: 'certified' }])).toBe(
+      'Found 1 recent orders (1 total). 1 is USPS Certified Mail: its entry carries the USPS tracking number and link once there is one.'
+    );
+    expect(say([{ orderId: 'a', mailService: 'certified', status: 'failed' }])).not.toMatch(/went|sent/i);
   });
 
   it('bumps the steering copy revision', () => {

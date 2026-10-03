@@ -1,5 +1,7 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { MAIL_SERVICES, certifiedFactsOf, isCertifiedMailOffered, uspsTrackingUrl } from '../../../src/config/certifiedMail.js';
+import { CARRIER_TRACKING_NUMBER_SHAPE, MAIL_SERVICES, certifiedFactsOf, isCertifiedMailOffered, uspsTrackingUrl } from '../../../src/config/certifiedMail.js';
 import { CERTIFIED_MAIL_FLAG } from '../../../src/config/products.js';
 
 /**
@@ -87,5 +89,28 @@ describe('what a letter row says about certified mail (#625)', () => {
       carrierTrackingNumber: '9407 1000 0000 0000 0000 00',
       carrierTrackingUrl: 'https://tools.usps.com/go/TrackConfirmAction?tLabels=9407100000000000000000'
     });
+  });
+});
+
+describe('the carrier number this code will show (#625)', () => {
+  it.each(['9407 1000 0000 0000 0000 00', '9407-1000-0000-0000-0000-00', '94071000000000000000000', 'ABC12345', 'A'.padEnd(40, '1')])(
+    'shows %j',
+    number => {
+      expect(certifiedFactsOf({ mail_service: 'certified', carrier_tracking_number: number })).toMatchObject({ carrierTrackingNumber: number });
+    }
+  );
+
+  it.each(['short', 'A'.padEnd(41, '1'), '9407/1000/0000', '<b>9407100000000000000000</b>', 'javascript:alert(1)', ' - 9407 1000 0000', '9407\n1000 0000 0000'])(
+    'shows no number for %j, though the column holds it',
+    number => {
+      expect(certifiedFactsOf({ mail_service: 'certified', carrier_tracking_number: number })).toEqual({ mailService: 'certified' });
+    }
+  );
+
+  it("is the shape the status sync stores, held equal to the printer provider's", () => {
+    const source = fs.readFileSync(path.resolve(__dirname, '../../../src/services/providers/PostGridProvider.ts'), 'utf8');
+    const stored = /const CARRIER_TRACKING_NUMBER = (\/\^.*\$\/);/.exec(source);
+    expect(stored, 'the provider names its shape').not.toBeNull();
+    expect(CARRIER_TRACKING_NUMBER_SHAPE.toString()).toBe(stored![1]);
   });
 });

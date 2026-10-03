@@ -120,6 +120,24 @@ describe('certified mail on the letters routes (#625)', () => {
     });
   });
 
+  it('calls text it does not know unknown (null), never standard, and shows no number for it', async () => {
+    expect(await listed({ mail_service: 'express', carrier_tracking_number: '9407100000000000000000' })).toEqual({
+      mailService: null,
+      carrierTrackingNumber: null,
+      carrierTrackingUrl: null,
+      trackingNumber: 'letter_postgrid_123'
+    });
+  });
+
+  it.each([null, undefined, '', 'standard'])('calls a letter whose service column holds %j standard', async mail_service => {
+    expect((await listed({ mail_service })).mailService).toBe('standard');
+  });
+
+  it('shows no number that is not shaped like a carrier number', async () => {
+    const letter = await listed({ mail_service: 'certified', carrier_tracking_number: 'https://example.com/<script>' });
+    expect(letter).toMatchObject({ mailService: 'certified', carrierTrackingNumber: null, carrierTrackingUrl: null });
+  });
+
   it('shows no number beside an ordinary letter, whatever the column holds', async () => {
     const letter = await listed({ mail_service: 'standard', carrier_tracking_number: '9407100000000000000000' });
     expect(letter).toMatchObject({ mailService: 'standard', carrierTrackingNumber: null, carrierTrackingUrl: null });

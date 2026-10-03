@@ -38,6 +38,14 @@ export function isCertifiedMailOffered(env: NodeJS.ProcessEnv = process.env): bo
 }
 
 /**
+ * The shape of a carrier tracking number this code will show: letters and digits, with spaces or
+ * hyphens between groups, 8 to 40 characters. The status sync stores only numbers of this shape
+ * (CARRIER_TRACKING_NUMBER in PostGridProvider.ts, held equal by a test); the reader checks again, since
+ * the column itself bounds only the length and an operator role can write it.
+ */
+export const CARRIER_TRACKING_NUMBER_SHAPE = /^[A-Za-z0-9][A-Za-z0-9 -]{7,39}$/;
+
+/**
  * Where USPS shows a piece's progress, from its tracking number. The number is
  * stored as the printer sent it, in groups that may be separated by spaces or
  * hyphens; USPS wants the characters alone.
@@ -65,12 +73,13 @@ export interface CertifiedFacts {
  * prices nothing, so text that is not one of the two services (which the
  * column's CHECK keeps out of the table) says nothing rather than something
  * invented. The row's number is shown only beside a certified service and only
- * as non-empty text, whatever the column holds.
+ * if it has the shape of a carrier number, whatever the column holds.
  */
 export function certifiedFactsOf(row: { mail_service?: unknown; carrier_tracking_number?: unknown }): CertifiedFacts | undefined {
   const service = mailServiceOf(typeof row.mail_service === 'string' ? row.mail_service : null);
   if (!isExtraService(service)) return undefined;
-  const number = typeof row.carrier_tracking_number === 'string' ? row.carrier_tracking_number.trim() : '';
+  const stored = typeof row.carrier_tracking_number === 'string' ? row.carrier_tracking_number.trim() : '';
+  const number = CARRIER_TRACKING_NUMBER_SHAPE.test(stored) ? stored : '';
   return {
     mailService: service,
     ...(number === '' ? {} : { carrierTrackingNumber: number, carrierTrackingUrl: uspsTrackingUrl(number) })

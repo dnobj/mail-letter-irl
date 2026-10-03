@@ -28,10 +28,10 @@ const CERTIFIED: CertifiedFacts = { mailService: 'certified' };
 const WITH_NUMBER: CertifiedFacts = { mailService: 'certified', carrierTrackingNumber: NUMBER, carrierTrackingUrl: URL };
 const RECEIPT_WITH_NUMBER: CertifiedFacts = { ...WITH_NUMBER, mailService: 'certified_return_receipt' };
 
-function order(orderId: string, certified?: CertifiedFacts): OrderRecord {
+function order(orderId: string, certified?: CertifiedFacts, status = 'in_transit'): OrderRecord {
   return {
     orderId,
-    currentStatus: 'in_transit',
+    currentStatus: status,
     statusTimeline: [{ timestampISO: '2026-10-01T10:00:00Z', statusText: 'Order placed' }],
     recipientSummary: { name: 'Sam Rivera', city: 'Leeds', state: 'NY' },
     ...(certified ? { certified } : {})
@@ -49,37 +49,84 @@ function contextWith(orders: OrderRecord[]) {
 }
 
 describe('the words about a certified order (#625)', () => {
-  it('says the service and that the number is not here yet, until it is stored', () => {
-    expect(certifiedOrderNote(CERTIFIED)).toBe(
-      'Sent as USPS Certified Mail. The USPS tracking number is not here yet: the printer adds it some time after it accepts the letter, so check again later.'
-    );
+  const NOT_HERE =
+    'The USPS tracking number is not here yet: the printer adds it some time after it accepts the letter, so check again later.';
+  const RECEIPT =
+    'The electronic return receipt is the record USPS keeps of who signed for the letter. Letter IRL does not send it to you: once the letter is delivered, ask USPS for it with the tracking number.';
+
+  it('says the service and that the number is not here yet, while the printer has the letter', () => {
+    for (const status of ['accepted', 'printing', 'in_transit', 'delivered']) {
+      expect(certifiedOrderNote(CERTIFIED, status), status).toBe(`Sent as USPS Certified Mail. ${NOT_HERE}`);
+    }
   });
 
   it('gives the number and its link once it is stored', () => {
-    expect(certifiedOrderNote(WITH_NUMBER)).toBe(`Sent as USPS Certified Mail. USPS tracking number ${NUMBER}: ${URL}.`);
+    expect(certifiedOrderNote(WITH_NUMBER, 'in_transit')).toBe(`Sent as USPS Certified Mail. USPS tracking number ${NUMBER}: ${URL}.`);
   });
 
-  it('says where the return receipt comes from, and that Letter IRL does not receive it', () => {
-    const note = certifiedOrderNote(RECEIPT_WITH_NUMBER);
+  it('says where the return receipt comes from, and that Letter IRL does not send it, without settling more', () => {
+    const note = certifiedOrderNote(RECEIPT_WITH_NUMBER, 'delivered');
     expect(note).toContain('Sent as USPS Certified Mail with an electronic return receipt.');
     expect(note).toContain(`USPS tracking number ${NUMBER}: ${URL}.`);
-    expect(note).toContain('Letter IRL does not receive it: ask USPS for it with the tracking number once the letter is delivered.');
+    expect(note).toContain(RECEIPT);
+    // Not "does not receive it": where the receipt goes is for the development check to settle.
+    expect(note).not.toMatch(/does not receive/i);
   });
 
   it('says nothing of a return receipt for plain certified mail', () => {
-    expect(certifiedOrderNote(WITH_NUMBER)).not.toMatch(/receipt/i);
-    expect(certifiedOrderNote(CERTIFIED)).not.toMatch(/receipt/i);
+    for (const status of ['in_transit', 'scheduled', 'delivered']) {
+      expect(certifiedOrderNote(WITH_NUMBER, status)).not.toMatch(/receipt/i);
+      expect(certifiedOrderNote(CERTIFIED, status)).not.toMatch(/receipt/i);
+    }
   });
 
   it('names a number only with its link, and a link only with its number', () => {
-    const notHere = certifiedOrderNote(CERTIFIED);
-    expect(certifiedOrderNote({ mailService: 'certified', carrierTrackingNumber: NUMBER })).toBe(notHere);
-    expect(certifiedOrderNote({ mailService: 'certified', carrierTrackingUrl: URL })).toBe(notHere);
+    const notHere = certifiedOrderNote(CERTIFIED, 'in_transit');
+    expect(certifiedOrderNote({ mailService: 'certified', carrierTrackingNumber: NUMBER }, 'in_transit')).toBe(notHere);
+    expect(certifiedOrderNote({ mailService: 'certified', carrierTrackingUrl: URL }, 'in_transit')).toBe(notHere);
+  });
+
+  it('does not tell a letter that did not go out to check again later, or to ask USPS for a receipt', () => {
+    expect(certifiedOrderNote(CERTIFIED, 'failed')).toBe('Failed: it did not go out as USPS Certified Mail. It has no USPS tracking number.');
+    expect(certifiedOrderNote(CERTIFIED, 'cancelled')).toBe('Cancelled: it was not mailed as USPS Certified Mail. It has no USPS tracking number.');
+    for (const status of ['failed', 'cancelled']) {
+      const note = certifiedOrderNote({ mailService: 'certified_return_receipt' }, status);
+      expect(note, status).not.toMatch(/check again|receipt is|ask USPS/i);
+      expect(note, status).toContain('with an electronic return receipt');
+    }
+  });
+
+  it('says mail that has not reached the printer goes as certified mail, and that the number comes after', () => {
+    for (const status of ['scheduled', 'pending']) {
+      const note = certifiedOrderNote({ mailService: 'certified_return_receipt' }, status);
+      expect(note, status).toBe(
+        `Goes as USPS Certified Mail with an electronic return receipt once it is sent to the printer. USPS's tracking number comes some time after the printer accepts it. ${RECEIPT}`
+      );
+      expect(note, status).not.toMatch(/Sent as|check again/);
+    }
+  });
+
+  it('says a returned letter was returned, keeps a number it has, and looks for none', () => {
+    expect(certifiedOrderNote(CERTIFIED, 'returned')).toBe(
+      'Sent as USPS Certified Mail, and returned to the sender. No USPS tracking number was stored for it.'
+    );
+    expect(certifiedOrderNote(WITH_NUMBER, 'returned')).toBe(
+      `Sent as USPS Certified Mail, and returned to the sender. USPS tracking number ${NUMBER}: ${URL}.`
+    );
+    expect(certifiedOrderNote(RECEIPT_WITH_NUMBER, 'returned')).not.toMatch(/receipt is|ask USPS/);
+  });
+
+  it('keeps a stored number for any status', () => {
+    for (const status of ['failed', 'cancelled', 'scheduled', 'returned', 'in_transit']) {
+      expect(certifiedOrderNote(WITH_NUMBER, status), status).toContain(`USPS tracking number ${NUMBER}: ${URL}.`);
+    }
   });
 
   it('promises no delivery and no legal effect', () => {
     for (const facts of [CERTIFIED, WITH_NUMBER, RECEIPT_WITH_NUMBER]) {
-      expect(certifiedOrderNote(facts)).not.toMatch(/guarantee|legal|proof|will be delivered|binding/i);
+      for (const status of ['pending', 'scheduled', 'accepted', 'in_transit', 'delivered', 'returned', 'failed', 'cancelled']) {
+        expect(certifiedOrderNote(facts, status)).not.toMatch(/guarantee|legal|proof|will be delivered|binding/i);
+      }
     }
   });
 });
@@ -96,7 +143,7 @@ describe('get_order_status for certified mail (#625)', () => {
   it('names the service and says the number is not here yet, still estimated', async () => {
     const result = await getOrderStatusTool.handler({ orderId: 'c' }, contextWith([order('c', CERTIFIED)]));
     expect(result).toMatchObject({ mailService: 'certified', trackingSupport: 'estimated_only' });
-    expect(result.certifiedNote).toBe(certifiedOrderNote(CERTIFIED));
+    expect(result.certifiedNote).toBe(certifiedOrderNote(CERTIFIED, 'in_transit'));
     expect(result).not.toHaveProperty('carrierTrackingNumber');
     expect(result).not.toHaveProperty('carrierTrackingUrl');
   });
@@ -108,14 +155,23 @@ describe('get_order_status for certified mail (#625)', () => {
       carrierTrackingNumber: NUMBER,
       carrierTrackingUrl: URL,
       trackingSupport: 'carrier_tracking',
-      certifiedNote: certifiedOrderNote(RECEIPT_WITH_NUMBER)
+      certifiedNote: certifiedOrderNote(RECEIPT_WITH_NUMBER, 'in_transit')
     });
   });
 
-  it('answers within its declared output', async () => {
+  it('words the note by where the order stands, not as though every certified order went out', async () => {
+    for (const status of ['failed', 'cancelled', 'scheduled', 'pending', 'returned', 'delivered']) {
+      const result = await getOrderStatusTool.handler({ orderId: 'c' }, contextWith([order('c', CERTIFIED, status)]));
+      expect(result.certifiedNote, status).toBe(certifiedOrderNote(CERTIFIED, status));
+    }
+    const failed = await getOrderStatusTool.handler({ orderId: 'c' }, contextWith([order('c', CERTIFIED, 'failed')]));
+    expect(failed.certifiedNote).not.toMatch(/Sent as|check again/);
+  });
+
+  it('answers within its declared output, with no key it does not declare', async () => {
     for (const facts of [undefined, CERTIFIED, WITH_NUMBER, RECEIPT_WITH_NUMBER]) {
       const result = await getOrderStatusTool.handler({ orderId: 'x' }, contextWith([order('x', facts)]));
-      expect(getOrderStatusOutputZ.safeParse(result).success).toBe(true);
+      expect(getOrderStatusOutputZ.strict().safeParse(result).success).toBe(true);
     }
   });
 });

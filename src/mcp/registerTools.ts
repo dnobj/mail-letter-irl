@@ -1805,7 +1805,7 @@ export function summarizeToolResult(
       return (
         `Found ${orders?.length ?? 0} recent orders (${total} total).` +
         (certified > 0
-          ? ` ${certified} went as USPS Certified Mail: their entries carry the USPS tracking number and link once there is one.`
+          ? ` ${certified} ${certified === 1 ? "is" : "are"} USPS Certified Mail: ${certified === 1 ? "its entry carries" : "their entries carry"} the USPS tracking number and link once there is one.`
           : "")
       );
     }

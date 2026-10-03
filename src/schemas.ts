@@ -45,6 +45,7 @@ import {
   PREVIEW_MAIL_SERVICE_OUTPUT_DESCRIPTION,
   ORDER_MAIL_SERVICE_DESCRIPTION,
   ORDER_CARRIER_TRACKING_NUMBER_DESCRIPTION,
+  ORDER_TRACKING_SUPPORT_DESCRIPTION,
   ORDER_CARRIER_TRACKING_URL_DESCRIPTION,
   ORDER_CERTIFIED_NOTE_DESCRIPTION,
   SIGNATURE_SOURCE_DESCRIPTION,
@@ -640,7 +641,7 @@ export const getOrderStatusOutputSchema: JsonSchema = {
     trackingSupport: {
       type: "string",
       enum: ["none", "estimated_only", "carrier_tracking"],
-      description: "Tracking capability level. 'estimated_only' = periodic status updates available but delivery is estimated based on mail timing, not confirmed by carrier. 'carrier_tracking' = a USPS tracking number is stored (certified mail): see carrierTrackingNumber."
+      description: ORDER_TRACKING_SUPPORT_DESCRIPTION
     },
     mailService: { type: "string", enum: [...EXTRA_SERVICES], description: ORDER_MAIL_SERVICE_DESCRIPTION },
     carrierTrackingNumber: { type: "string", description: ORDER_CARRIER_TRACKING_NUMBER_DESCRIPTION },
