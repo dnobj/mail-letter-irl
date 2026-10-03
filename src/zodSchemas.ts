@@ -151,7 +151,7 @@ export const ORDER_MAIL_SERVICE_DESCRIPTION =
 export const ORDER_CARRIER_TRACKING_NUMBER_DESCRIPTION =
   "Certified mail only: USPS's tracking number, once the printer has set it and Letter IRL's status sync has stored it. It is not the order id.";
 export const ORDER_TRACKING_SUPPORT_DESCRIPTION =
-  "How the order can be tracked. estimated_only: the status comes from the printer, and delivery is estimated, not confirmed by a carrier. carrier_tracking: USPS's own tracking number is stored (certified mail), so USPS's page shows the scans; this status is still the printer's.";
+  "How the order can be tracked. estimated_only: the status comes from the printer, and delivery is estimated, not confirmed by a carrier. carrier_tracking: USPS's own tracking number is stored for a letter that went out (certified mail), so USPS's page shows the scans; this status is still the printer's.";
 export const ORDER_CARRIER_TRACKING_URL_DESCRIPTION =
   "Certified mail only, with the tracking number: the USPS page that shows where the piece is.";
 export const ORDER_CERTIFIED_NOTE_DESCRIPTION =

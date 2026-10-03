@@ -1899,7 +1899,7 @@
               "estimated_only",
               "carrier_tracking"
             ],
-            "description": "How the order can be tracked. estimated_only: the status comes from the printer, and delivery is estimated, not confirmed by a carrier. carrier_tracking: USPS's own tracking number is stored (certified mail), so USPS's page shows the scans; this status is still the printer's."
+            "description": "How the order can be tracked. estimated_only: the status comes from the printer, and delivery is estimated, not confirmed by a carrier. carrier_tracking: USPS's own tracking number is stored for a letter that went out (certified mail), so USPS's page shows the scans; this status is still the printer's."
           },
           "mailService": {
             "type": "string",

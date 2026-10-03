@@ -44,9 +44,9 @@ export function certifiedOrderNote(facts: CertifiedFacts, status: LetterStatus):
     `Sent as ${name}. ${tracking ?? 'The USPS tracking number is not here yet: the printer adds it some time after it accepts the letter, so check again later.'}${receipt}`;
   switch (status) {
     case 'failed':
-      return `This ${name} letter did not go out. ${tracking ?? 'It has no USPS tracking number.'}`;
+      return `This letter (${name}) did not go out. ${tracking ?? 'It has no USPS tracking number.'}`;
     case 'cancelled':
-      return `This ${name} letter was cancelled and not mailed. ${tracking ?? 'It has no USPS tracking number.'}`;
+      return `This letter (${name}) was cancelled and not mailed. ${tracking ?? 'It has no USPS tracking number.'}`;
     case 'scheduled':
     case 'pending':
       return `Goes as ${name}. ${tracking ?? 'USPS\'s tracking number comes some time after the printer accepts it.'}${receipt}`;

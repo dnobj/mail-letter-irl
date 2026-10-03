@@ -90,8 +90,8 @@ describe('the words about a certified order (#625)', () => {
   });
 
   it('does not tell a letter that did not go out to check again later, or to ask USPS for a receipt', () => {
-    expect(certifiedOrderNote(CERTIFIED, 'failed')).toBe('This USPS Certified Mail letter did not go out. It has no USPS tracking number.');
-    expect(certifiedOrderNote(CERTIFIED, 'cancelled')).toBe('This USPS Certified Mail letter was cancelled and not mailed. It has no USPS tracking number.');
+    expect(certifiedOrderNote(CERTIFIED, 'failed')).toBe('This letter (USPS Certified Mail) did not go out. It has no USPS tracking number.');
+    expect(certifiedOrderNote(CERTIFIED, 'cancelled')).toBe('This letter (USPS Certified Mail) was cancelled and not mailed. It has no USPS tracking number.');
     for (const status of ['failed', 'cancelled'] as LetterStatus[]) {
       const note = certifiedOrderNote({ mailService: 'certified_return_receipt' }, status);
       expect(note, status).not.toMatch(/check again|receipt is|ask USPS/i);
