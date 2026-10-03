@@ -89,9 +89,14 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  * 052 adds letter_drafts.mail_service (#625), with two CHECKs. As for 039, the
  * reader role's column list leaves it out and the operator role reads
  * letter_drafts whole, so nothing to re-run.
+ *
+ * 053 adds letters.mail_service and letters.carrier_tracking_number (#625), with
+ * four CHECKs. As for 040, the reader role's letters column list leaves them
+ * out and the operator role reads letters whole. The admin panel's letter view
+ * gains them later, with a re-run.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
-  "052_mail_service.sql";
+  "053_letter_mail_service.sql";
 
 export interface AdminProvisioningArguments {
   environment: "development" | "production";

@@ -161,6 +161,18 @@ export interface Letter {
   /** Arrive-by (migration 040, #535): 'YYYY-MM-DD' in New York, both or neither. */
   arrive_by?: string | null;
   mail_on?: string | null;
+  /**
+   * How the letter travelled (migration 053, #625): standard first-class mail,
+   * or USPS Certified Mail with or without an electronic return receipt.
+   * Copied from the draft by the send; the print reads this column.
+   */
+  mail_service?: MailService;
+  /**
+   * The USPS number of a certified letter (migration 053, #625): set by the
+   * status sync once the provider has it, NULL before and for standard mail.
+   * Not `tracking_id`, which is the provider's own id for the letter.
+   */
+  carrier_tracking_number?: string | null;
   created_at: Date;
   sent_at?: Date;
 }

@@ -273,16 +273,6 @@ export async function createMailOrderFromDraftWithClient(
   const schedule = sendSchedule(draft, funding, params.draftId);
   const releaseAt = schedule ? dispatchAt(schedule.mailOn) : undefined;
 
-  // Certified mail (#625) is previewed, priced and paid for before the send
-  // carries it to the printer: until it does, a draft that asks for it is not
-  // sent, so it can never go as standard mail after being paid for as certified.
-  if (draft.mail_service !== undefined && draft.mail_service !== 'standard') {
-    throw draftError(
-      'MAIL_SERVICE_NOT_SENDABLE',
-      `Draft ${params.draftId} asks for ${draft.mail_service}, which the send does not carry yet`
-    );
-  }
-
   // A gift draft is funded by a gift letter instead of the balance. Pay & Send
   // ignores the flag: that path runs after Stripe has charged, and
   // createJitCheckout refuses a gift draft before any charge exists.
@@ -357,8 +347,8 @@ export async function createMailOrderFromDraftWithClient(
   const letterResult = await client.query<Letter>(
     `INSERT INTO letters (
        letter_id, user_id, content, recipient, credits_cost, status,
-       preview_html, mail_type, funding_type, funding_order_id, arrive_by, mail_on
-     ) VALUES ($1, $2, $3, $4, $5, 'draft', $6, $7, $8, $9, $10::date, $11::date)
+       preview_html, mail_type, funding_type, funding_order_id, arrive_by, mail_on, mail_service
+     ) VALUES ($1, $2, $3, $4, $5, 'draft', $6, $7, $8, $9, $10::date, $11::date, $12::text)
      RETURNING *`,
     [
       letterId,
@@ -371,7 +361,10 @@ export async function createMailOrderFromDraftWithClient(
       fundingType,
       funding.type === 'jit_order' ? funding.orderId : null,
       schedule?.arriveBy ?? null,
-      schedule?.mailOn ?? null
+      schedule?.mailOn ?? null,
+      // How it travels (#625): the draft's, for a letter. The checks of 052 and
+      // 053 hold a postcard and a gift letter to standard.
+      params.mailType === 'letter' ? (draft.mail_service ?? 'standard') : 'standard'
     ]
   );
   let letter = letterResult.rows[0];
