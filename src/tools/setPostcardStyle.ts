@@ -88,6 +88,7 @@ export class PostcardStyleRefusedError extends Error {
       | 'DRAFT_NOT_DRAWN'
       | 'DRAFT_CHANGED'
       | 'GIFT_POSTCARD_SIZE'
+      | 'COLLAGE_SIZE'
       | 'MESSAGE_TOO_LONG'
       | 'PICTURE_UNAVAILABLE',
     message: string
@@ -200,6 +201,20 @@ async function handler(input: SetPostcardStyleInput, context: ToolContext): Prom
     throw refused(
       'GIFT_POSTCARD_SIZE',
       'A gift postcard is a 6x9: the gift letter pays for that size only. To send another size, make a new preview with sendAsGift set to false.',
+      context
+    );
+  }
+
+  // A collage keeps the size it was made at (#616). Its photos were read once
+  // and are not kept, so only the picture it prints from remains, and cropping
+  // that again would cut the photos at its edges, and more at every change.
+  // Every single photo's draft records the link it came from; a collage's has
+  // none (quoteAndPreviewPostcard stores it null).
+  if (size !== sizeBefore && draft.front_image_url == null) {
+    throw refused(
+      'COLLAGE_SIZE',
+      'A collage keeps the size it was made at: its photos were read once and are not kept, so they cannot be arranged again. ' +
+        'To change the size, make a new preview with quote_and_preview_postcard: the same photos in images or imageUrls, the same message, layout, caption and place, and the size you want. The postcard stays as it is.',
       context
     );
   }

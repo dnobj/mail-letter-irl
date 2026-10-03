@@ -816,7 +816,7 @@ export interface PostcardDraft {
   body_text: string;              // Message for postcards
   sign_off: string | null;        // Optional for postcards
   front_image_data: string;       // Base64 data URI
-  front_image_url: string | null; // Original URL for debugging; null for a collage (#616)
+  front_image_url: string | null; // The photo's address (where a new size crops from); null is a collage (#616)
   postcard_size: PostcardSize;
   /**
    * The front when not full bleed (migration 048, #594): read with
@@ -843,7 +843,11 @@ export interface CreatePostcardDraftParams {
   recipient: Record<string, unknown>;
   message: string;
   frontImageData: string;
-  /** The photo's address, for debugging; null for a collage, which has no one source (#616). */
+  /**
+   * The photo's address: where set_postcard_style crops it again from at a new
+   * size, and how a collage is told from a photo. Every single photo records
+   * its link; null means a collage, which has no one source (#616).
+   */
   frontImageUrl: string | null;
   postcardSize?: PostcardSize;    // Default: '6x9'
   requiredCredits?: number;       // Default: 2

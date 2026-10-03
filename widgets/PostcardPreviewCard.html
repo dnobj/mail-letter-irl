@@ -324,7 +324,7 @@
           style="display: none"
         ></div>
       </div>
-      <p class="rev">postcard t32</p>
+      <p class="rev">postcard t34</p>
     </div>
 
     <!-- The postcard maker (#580): widgets/shared/studio.js lays the card out
@@ -542,6 +542,14 @@
       function sizeText() {
         return `${postcardInches[0]} x ${postcardInches[1]} in`;
       }
+      // How many photos a collage front draws (#616), which the preview says
+      // of a collage and of nothing else; 0 for a single photo. A collage keeps
+      // the size it was made at (set_postcard_style refuses another: its photos
+      // are not kept), so the size is told here and not offered.
+      function collagePhotosOf(state) {
+        const count = state?.collagePhotos;
+        return Number.isInteger(count) && count >= 2 && count <= 4 ? count : 0;
+      }
       // What each size's back holds: its lines, and about how much prose.
       const BACK_HOLDS = new Map([["4x6", "11 lines, about 350"], ["6x9", "16 lines, about 500"], ["6x11", "16 lines, about 900"]]);
       function backHolds() {
@@ -673,7 +681,8 @@
                     : typeof estimate === "string" && estimate
                       ? estimate.charAt(0).toLowerCase() + estimate.slice(1)
                       : "First Class";
-        document.getElementById("studio-size").textContent = sizeText();
+        const collage = collagePhotosOf(state);
+        document.getElementById("studio-size").textContent = collage ? `${sizeText()} · a collage of ${collage} photos` : sizeText();
         document.getElementById("studio-summary").textContent = [sizeText(), timing].join(" · ");
         showMakerStyle(state, !cancelled && !halted && !expired && !sent && !paid);
         showSide();
@@ -960,7 +969,8 @@
 
       /**
        * Draws the maker's choices: the sizes while the preview names its
-       * size (never for a gift postcard, which is a 6x9), the layouts and the
+       * size (never for a gift postcard, which is a 6x9, nor a collage, which
+       * keeps the size it was made at), the layouts and the
        * line one takes while it names its front. `open`: whether the draft
        * can still change, as the maker's header says (not sent, paid,
        * cancelled or expired).
@@ -974,7 +984,7 @@
           wireMakerStyle();
         }
         makerFollows(state.draftId);
-        const offersSizes = POSTCARD_SIZES.includes(state.size) && !state.giftCard;
+        const offersSizes = POSTCARD_SIZES.includes(state.size) && !state.giftCard && collagePhotosOf(state) === 0;
         const offersLayouts = POSTCARD_LAYOUTS.includes(state.layout);
         maker.changeable =
           open && cardIsShowingDraft() && !settledDraft() && !sendPageShown() && !sendInProgress && !checkoutInProgress && trackedOrderId === null;
@@ -1046,6 +1056,18 @@
       // that arrives after the wait still renders, and it replaces a preview
       // this card made until the card acts on its own draft (see render()).
       const PREVIEW_WAIT_MS = 45000;
+      // A collage's photos download one at a time, within 30 seconds between
+      // them (#616), so its preview can take that much longer than a photo's:
+      // asked for two or more photos, the card waits that long again, once,
+      // before it says no result is coming.
+      const COLLAGE_EXTRA_WAIT_MS = 30000;
+      let collageWaited = false;
+      function namesCollage(input) {
+        const blank = (photo) => typeof photo === "string" && photo.trim() === "";
+        return [input?.images, input?.imageUrls].some(
+          (photos) => Array.isArray(photos) && photos.filter((photo) => !blank(photo)).length >= 2,
+        );
+      }
       // How long the button waits on the card's own call before it can be
       // pressed again. A result that arrives later is still drawn, as long as
       // the card has no preview by then.
@@ -1122,11 +1144,26 @@
         return fileObjectUsable(input.image);
       }
 
+      // A collage's list of photos the card can pass back (#616): none (absent, a
+      // blank string, or slots that are all blank), or every photo a file object
+      // with an address (images) or an https link (imageUrls). The server refuses
+      // a sandbox path in either, and a blank slot beside real photos, by its
+      // place, on every press, and a card cannot pick several photos again.
+      function photoListRepeatable(photos, usable) {
+        const blank = (photo) => typeof photo === "string" && photo.trim() === "";
+        if (photos === undefined || blank(photos)) return true;
+        if (!Array.isArray(photos)) return false;
+        return photos.every(blank) || photos.every(usable);
+      }
+
       // The call this card can repeat faithfully, or null.
       function retryRequest() {
         const asked = hostRequest();
         if (!asked) return null;
         if (!imageArgumentRepeatable(asked.input.image) || !imageUrlRepeatable(asked.input)) return null;
+        if (!photoListRepeatable(asked.input.images, fileObjectUsable) || !photoListRepeatable(asked.input.imageUrls, isHttpsUrl)) {
+          return null;
+        }
         return { tool: asked.tool, args: asked.input };
       }
 
@@ -1147,6 +1184,8 @@
       function imageRequest() {
         const asked = hostRequest();
         if (!asked) return null;
+        // One picked image cannot repair a collage (it takes images or imageUrls, never image beside them).
+        if (namesCollage(asked.input)) return null;
         if (imageArgumentRepeatable(asked.input.image) && imageUrlRepeatable(asked.input)) return null;
         const { image, imageUrl, ...args } = asked.input;
         return { tool: asked.tool, args };
@@ -1233,12 +1272,19 @@
 
       function armEmptyTimer() {
         if (emptyTimer !== null || emptyShown) return;
-        emptyTimer = setTimeout(() => {
-          emptyTimer = null;
-          if (dataLoaded) return;
-          emptyShown = true;
-          render();
-        }, PREVIEW_WAIT_MS);
+        emptyTimer = setTimeout(emptyTimerFired, PREVIEW_WAIT_MS);
+      }
+
+      function emptyTimerFired() {
+        emptyTimer = null;
+        if (dataLoaded) return;
+        if (!collageWaited && namesCollage(host.toolInput())) {
+          collageWaited = true;
+          emptyTimer = setTimeout(emptyTimerFired, COLLAGE_EXTRA_WAIT_MS);
+          return;
+        }
+        emptyShown = true;
+        render();
       }
 
       function cancelEmptyTimer() {

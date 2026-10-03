@@ -3043,3 +3043,131 @@ describe.each([LETTER, POSTCARD])('$file keeps a send with an arrival date (#535
     expect(harness.visible('scheduled')).toBe(false);
   });
 });
+
+describe('PostcardPreviewCard waiting for a collage (#616)', () => {
+  const photos = ['https://example.com/1.jpg', 'https://example.com/2.jpg', 'https://example.com/3.jpg'];
+  const files = [
+    { download_url: 'https://files.example/1.jpg', file_id: 'file-1' },
+    { download_url: 'https://files.example/2.jpg', file_id: 'file-2' }
+  ];
+  /** The postcard's arguments with its one photo replaced by what the test gives. */
+  const without = (extra: Json): Json => {
+    const { imageUrl: _single, ...rest } = POSTCARD.args();
+    return { ...rest, ...extra };
+  };
+
+  it.each([
+    ['links', { imageUrls: photos.slice(0, 2) }],
+    ['three links', { imageUrls: photos }],
+    ['attachments', { images: files }]
+  ])('waits 30 s more than for a photo, once, when asked for %s, before it offers to create the preview', async (_name, extra) => {
+    const harness = mount(POSTCARD, { toolInput: without(extra) });
+    await flush();
+    expect(harness.pendingTimers().map(timer => timer.delay)).toEqual([45000]);
+
+    await harness.runTimer(45000);
+    expect(harness.visible('empty-state')).toBe(false);
+    expect(harness.pendingTimers().map(timer => timer.delay)).toEqual([30000]);
+
+    await harness.runTimer(30000);
+    expect(harness.visible('empty-state')).toBe(true);
+    expect(harness.visible('retry-button')).toBe(true);
+    expect(harness.text('status-pill')).toBe('No preview');
+    expect(harness.pendingTimers()).toEqual([]);
+    // The card never repeats a call by itself.
+    expect(harness.calls).toEqual([]);
+  });
+
+  it('waits the extra 30 s when photos sit among blank slots, though the server refuses that at once and the wait buys nothing', async () => {
+    const harness = mount(POSTCARD, { toolInput: without({ imageUrls: ['', photos[0], ' ', photos[1]] }) });
+    await flush();
+    await harness.runTimer(45000);
+    expect(harness.visible('empty-state')).toBe(false);
+    expect(harness.pendingTimers().map(timer => timer.delay)).toEqual([30000]);
+    await harness.runTimer(30000);
+    expect(harness.visible('empty-state')).toBe(true);
+    expect(harness.pendingTimers()).toEqual([]);
+  });
+
+  it('draws a result that lands in the extra wait, and arms nothing more', async () => {
+    const harness = mount(POSTCARD, { toolInput: without({ imageUrls: photos.slice(0, 2) }) });
+    await flush();
+    await harness.runTimer(45000);
+    await harness.deliverHostResult(POSTCARD.output('draft_collage_0001'));
+    expect(harness.visible('empty-state')).toBe(false);
+    expect(harness.text('id-value')).toBe('draft_collage_0001');
+    expect(harness.pendingTimers()).toEqual([]);
+  });
+
+  it.each([
+    ['a single photo', POSTCARD.args()],
+    ['a list of one link', without({ imageUrls: [photos[0]] })],
+    ['a list of one attachment', without({ images: [files[0]] })],
+    ['empty lists', without({ imageUrl: photos[0], imageUrls: [], images: [] })],
+    ['lists of blank slots beside a photo', without({ imageUrl: photos[0], images: ['', ''], imageUrls: [' ', ''] })],
+    ['one link among blank slots', without({ imageUrls: ['', photos[0]] })],
+    ['lists that are not lists', without({ imageUrl: photos[0], imageUrls: 'https://example.com/a.jpg', images: { download_url: 'y' } })]
+  ])('waits the usual time for %s', async (_name, input) => {
+    const harness = mount(POSTCARD, { toolInput: input });
+    await flush();
+    await harness.runTimer(45000);
+    expect(harness.visible('empty-state')).toBe(true);
+    expect(harness.pendingTimers()).toEqual([]);
+  });
+
+  /** Lets the waits run out, the usual one and a collage's extra. */
+  async function waitsRunOut(harness: ReturnType<typeof mount>): Promise<void> {
+    for (let i = 0; i < 3 && harness.pendingTimers().length > 0; i += 1) await harness.runWait();
+  }
+
+  it.each([
+    ['links', { imageUrls: photos.slice(0, 2) }],
+    ['attachments with an address', { images: files }],
+    ['lists of blank slots only beside a photo', { imageUrl: photos[0], images: ['', ''], imageUrls: [' '] }],
+    ['a whitespace string for a list beside a photo', { imageUrl: photos[0], images: '  ' }]
+  ])('offers to create the preview again for %s, repeating exactly what the host passed', async (_name, extra) => {
+    const harness = mount(POSTCARD, { toolInput: without(extra) });
+    await flush();
+    await waitsRunOut(harness);
+    expect(harness.visible('retry-button')).toBe(true);
+    await harness.click('retry-button');
+    expect(harness.calls).toEqual([{ name: POSTCARD.tool, args: without(extra) }]);
+  });
+
+  it.each([
+    ['sandbox paths in images', { images: ['/mnt/data/a.png', '/mnt/data/b.png'] }],
+    ['a sandbox path among attachments', { images: [files[0], '/mnt/data/b.png'] }],
+    ['a file object with no address', { images: [files[0], { file_id: 'file-3', download_url: '' }] }],
+    ['an http link', { imageUrls: [photos[0], 'http://example.com/2.jpg'] }],
+    ['a sandbox path among links', { imageUrls: [photos[0], '/mnt/data/b.png'] }],
+    ['a list that is a string', { imageUrls: 'https://example.com/a.jpg' }],
+    ['a blank slot beside links', { imageUrls: ['', photos[0], photos[1]] }],
+    ['a blank slot beside attachments', { images: ['', files[0], files[1]] }],
+    ['null for a list', { imageUrl: photos[0], images: null }]
+  ])('does not offer it for %s, which the server refuses on every press', async (_name, extra) => {
+    const harness = mount(POSTCARD, { toolInput: without(extra) });
+    await flush();
+    await waitsRunOut(harness);
+    expect(harness.visible('empty-state')).toBe(true);
+    expect(harness.visible('retry-button')).toBe(false);
+    expect(harness.text('empty-message')).toContain('Otherwise, ask for the preview again in the chat.');
+    expect(harness.calls).toEqual([]);
+  });
+
+  it('offers no pick-again beside a collage, which one picked image cannot repair', async () => {
+    const harness = mount(POSTCARD, {
+      toolInput: without({ image: '/mnt/data/a.png', images: files }),
+      fileApis: {
+        selectFiles: () => [{ fileId: 'file_pick', fileName: 'beach.png', mimeType: 'image/png' }],
+        uploadFile: () => ({ fileId: 'file_pick' }),
+        getFileDownloadUrl: () => ({ downloadUrl: photos[0] })
+      }
+    });
+    await flush();
+    await waitsRunOut(harness);
+    expect(harness.visible('empty-state')).toBe(true);
+    expect(harness.visible('retry-button')).toBe(false);
+    expect(harness.visible('choose-image-button')).toBe(false);
+    expect(harness.visible('upload-image-button')).toBe(false);
+  });
+});

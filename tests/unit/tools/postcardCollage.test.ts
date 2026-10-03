@@ -225,6 +225,14 @@ describe('a postcard collage (#616)', () => {
     expect(result).not.toHaveProperty('collagePhotos');
   });
 
+  it('records the link of a single attached photo, which is how a collage is told from it (#616)', async () => {
+    // A collage's draft has a picture and no link (set_postcard_style refuses it another size); a photo's has its link.
+    const result = await run({ image: file(1) });
+    expect(drafted().frontImageUrl).toBe(file(1).download_url);
+    expect(downloadAndProcessCollageWithPreview).not.toHaveBeenCalled();
+    expect(result).not.toHaveProperty('collagePhotos');
+  });
+
   it('logs its size and how the photos came, never an address', async () => {
     const ctx = context();
     await run({ imageUrls: [link(1), link(2), link(3)] }, ctx);

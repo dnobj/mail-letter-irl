@@ -319,7 +319,7 @@ interface ProviderStatus {
 **Technical Details:**
 - Uses Sharp library for image processing
 - Image stored in `front_image_data` column (base64)
-- Original URL stored in `front_image_url` for debugging
+- The photo's address is stored in `front_image_url`: where a new size crops the photo again from, and how a collage (which has none) is told from it
 - PostGrid receives image via `frontHTML` containing base64 img tag
 
 **Error Handling:**
