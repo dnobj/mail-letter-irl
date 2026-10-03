@@ -7,10 +7,13 @@ import {
 } from '../../../src/config/products.js';
 import {
   LOOKUP_KEY_PREFIX,
+  OUTPUT_HEADER,
+  USAGE,
   decide,
   execute,
   keyMode,
   lookupKeyFor,
+  mayReplace,
   parseArgs,
   redact,
   run,
@@ -246,7 +249,7 @@ describe('stripePort', () => {
     const spec: NewPrice = {
       lookupKey: 'letter-irl-jit-letter-2-pages',
       unitAmount: 599,
-      currency: 'usd',
+      currency: 'eur',
       productName: 'Pay & Send One Two-Page Letter',
       productCode: 'jit-letter-2-pages'
     };
@@ -254,7 +257,7 @@ describe('stripePort', () => {
     expect(stripe.prices.create).toHaveBeenCalledTimes(1);
     const [body, options] = stripe.prices.create.mock.calls[0] as unknown as [Record<string, unknown>, Record<string, unknown>];
     expect(body).toEqual({
-      currency: 'usd',
+      currency: 'eur',
       unit_amount: 599,
       lookup_key: 'letter-irl-jit-letter-2-pages',
       product_data: {
@@ -263,7 +266,7 @@ describe('stripePort', () => {
       },
       metadata: { productCode: 'jit-letter-2-pages' }
     });
-    expect(options).toEqual({ idempotencyKey: 'letter-irl-option-price:letter-irl-jit-letter-2-pages:usd:599' });
+    expect(options).toEqual({ idempotencyKey: 'letter-irl-option-price:letter-irl-jit-letter-2-pages:eur:599' });
   });
 
   it('keys a retry by the amount and currency, so a changed pin is never answered with an old Price', async () => {
@@ -296,6 +299,20 @@ describe('redact', () => {
   it('leaves other text alone', () => {
     expect(redact('No such price: price_123', TEST_KEY)).toBe('No such price: price_123');
     expect(redact('nothing to hide', '')).toBe('nothing to hide');
+  });
+});
+
+describe('mayReplace', () => {
+  it('replaces a file that is not there, or that an earlier run wrote', () => {
+    expect(mayReplace(null)).toBe(true);
+    expect(mayReplace(`${OUTPUT_HEADER}\nX=1\n`)).toBe(true);
+    expect(mayReplace(OUTPUT_HEADER)).toBe(true);
+  });
+
+  it('leaves any other file alone, empty or not', () => {
+    for (const other of ['', 'X=1\n', ` ${OUTPUT_HEADER}`, `x\n${OUTPUT_HEADER}\n`, OUTPUT_HEADER.slice(0, 10)]) {
+      expect(mayReplace(other), other).toBe(false);
+    }
   });
 });
 
@@ -350,13 +367,15 @@ describe('execute', () => {
   const DOT_ENV = String.fromCharCode(46) + 'env';
   const env = { STRIPE_SECRET_KEY: TEST_KEY } as NodeJS.ProcessEnv;
 
-  function harness(account = fakeAccount()) {
+  function harness(account = fakeAccount(), existingFile: string | null = null) {
     const logs: string[] = [];
     const errors: string[] = [];
     const files: Array<{ path: string; text: string }> = [];
     const createPort = vi.fn(() => account.port);
+    const readFile = vi.fn((_path: string): string | null => existingFile);
     const deps: Deps = {
       createPort,
+      readFile,
       writeFile: (path, text) => {
         files.push({ path, text });
       },
@@ -368,7 +387,7 @@ describe('execute', () => {
       }
     };
     const everything = () => [...logs, ...errors, ...files.map(file => file.text)].join('\n');
-    return { deps, logs, errors, files, createPort, account, everything };
+    return { deps, logs, errors, files, createPort, readFile, account, everything };
   }
 
   it('refuses a live key before anything is built, and never prints it', async () => {
@@ -406,7 +425,7 @@ describe('execute', () => {
     const lines = h.files[0].text.split('\n').filter(line => line && !line.startsWith('#'));
     expect(lines).toHaveLength(OPTIONS.length);
     for (const line of lines) expect(line).toMatch(/^STRIPE_JIT_[A-Z0-9_]+_PRICE_ID=price_test_[0-9]+$/);
-    expect(h.files[0].text.startsWith('# Letter IRL option prices (Stripe test mode)')).toBe(true);
+    expect(h.files[0].text.startsWith(OUTPUT_HEADER)).toBe(true);
     expect(h.logs).toContain(`Wrote ${OPTIONS.length} line(s) to dev-option-prices.txt`);
     expect(h.everything()).not.toContain(TEST_KEY);
   });
@@ -457,20 +476,59 @@ describe('execute', () => {
     expect(h.everything()).not.toContain(TEST_KEY);
   });
 
-  it('reports a failed write the same way, not as a crash', async () => {
+  it('shows the lines when the file cannot be written, since the Prices exist by then', async () => {
     const h = harness();
     h.deps.writeFile = () => {
-      throw new Error('EACCES: permission denied');
+      throw new Error(`EACCES: permission denied, key ${TEST_KEY}`);
     };
     expect(await execute(['--out', 'prices.txt'], env, h.deps)).toBe(1);
-    expect(h.errors[0]).toBe('Stopped: EACCES: permission denied');
+    expect(h.errors[0]).toBe('Could not write prices.txt: EACCES: permission denied, key [key]');
+    for (const [i, product] of OPTIONS.entries()) expect(h.logs).toContain(`${product.priceEnv}=price_test_${i + 1}`);
+    expect(h.everything()).not.toContain(TEST_KEY);
+  });
+
+  describe('the --out file', () => {
+    it('is replaced when an earlier run wrote it', async () => {
+      const h = harness(fakeAccount(), `${OUTPUT_HEADER}\nSTRIPE_JIT_OLD_PRICE_ID=price_old\n`);
+      expect(await execute(['--out', 'prices.txt'], env, h.deps)).toBe(0);
+      expect(h.files).toHaveLength(1);
+    });
+
+    it('is left alone when another program wrote it, before any request', async () => {
+      for (const foreign of ['DATABASE_URL=postgres://example\n', '', `SOMETHING=1\n${OUTPUT_HEADER}\n`]) {
+        const h = harness(fakeAccount(), foreign);
+        expect(await execute(['--out', 'prices.txt'], env, h.deps), foreign).toBe(2);
+        expect(h.createPort).not.toHaveBeenCalled();
+        expect(h.files).toEqual([]);
+        expect(h.errors[0]).toBe('prices.txt exists and was not written by this script, so it is left alone. Pick another name.');
+      }
+    });
+
+    it('is reported when it cannot be read, before any request', async () => {
+      const h = harness();
+      h.deps.readFile = () => {
+        throw new Error('EISDIR: illegal operation on a directory');
+      };
+      expect(await execute(['--out', 'somewhere'], env, h.deps)).toBe(2);
+      expect(h.createPort).not.toHaveBeenCalled();
+      expect(h.errors[0]).toBe('Cannot use somewhere: EISDIR: illegal operation on a directory');
+    });
+
+    it('is not looked at in a dry run, or when there is no --out', async () => {
+      const dry = harness();
+      await execute(['--dry-run', '--out', 'prices.txt'], env, dry.deps);
+      const plain = harness();
+      await execute([], env, plain.deps);
+      expect(dry.readFile).not.toHaveBeenCalled();
+      expect(plain.readFile).not.toHaveBeenCalled();
+    });
   });
 
   it('exits 2 on a usage error before it looks at the key', async () => {
     const h = harness();
     expect(await execute(['--nope'], {}, h.deps)).toBe(2);
     expect(h.createPort).not.toHaveBeenCalled();
-    expect(h.errors[0]).toBe('Unknown argument: --nope');
+    expect(h.errors).toEqual(['Unknown argument: --nope', USAGE]);
   });
 
   it('prints its usage for --help and needs no key', async () => {

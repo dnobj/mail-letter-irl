@@ -29,11 +29,12 @@
  *   is reused when it is active, one-time, in the right currency and at the
  *   pinned amount, and REFUSED otherwise; nothing is ever edited or archived.
  * - Amount and currency come from JIT_PRODUCTS and jitCurrency, never from here.
- * - The key is never printed, and the output holds price ids only. An --out path
- *   named like an env file is refused, since writing it would overwrite secrets.
+ * - The key is never printed, and the output holds price ids only. --out replaces
+ *   only a file an earlier run of this script wrote (it starts with OUTPUT_HEADER),
+ *   checked before any request; a name like an env file is refused outright.
  */
 
-import { writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { win32 } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type Stripe from 'stripe';
@@ -253,9 +254,19 @@ export function redact(text: string, key: string | undefined): string {
   return out.replace(/\b[sr]k_(?:test|live)_[A-Za-z0-9*]+/g, '[key]');
 }
 
+/** The first line of what this script writes: --out replaces only a file that starts with it. */
+export const OUTPUT_HEADER = '# Letter IRL option prices (Stripe test mode): price ids only, no secrets';
+
+/** Whether --out may replace a file: it is not there, or an earlier run of this script wrote it. */
+export function mayReplace(existing: string | null): boolean {
+  return existing === null || existing.startsWith(OUTPUT_HEADER);
+}
+
 export interface Deps {
   /** Built only after the key checks pass, so a refused key never reaches Stripe. */
   createPort(): PricePort;
+  /** What the file holds, or null when there is no such file. */
+  readFile(path: string): string | null;
   writeFile(path: string, text: string): void;
   log(line: string): void;
   error(line: string): void;
@@ -282,6 +293,18 @@ export async function execute(argv: readonly string[], env: NodeJS.ProcessEnv, d
     );
     return 2;
   }
+  if (parsed.out && !parsed.dryRun) {
+    // Before any request, so a refused path costs nothing.
+    try {
+      if (!mayReplace(deps.readFile(parsed.out))) {
+        deps.error(`${parsed.out} exists and was not written by this script, so it is left alone. Pick another name.`);
+        return 2;
+      }
+    } catch (error) {
+      deps.error(`Cannot use ${parsed.out}: ${error instanceof Error ? error.message : String(error)}`);
+      return 2;
+    }
+  }
   const currency = parsed.currency ?? jitCurrency(env);
   try {
     const result = await run({ port: deps.createPort(), currency, dryRun: parsed.dryRun, all: parsed.all });
@@ -289,13 +312,18 @@ export async function execute(argv: readonly string[], env: NodeJS.ProcessEnv, d
     if (parsed.dryRun) {
       deps.log('Dry run: nothing was created or written.');
     } else if (result.lines.length > 0) {
-      const text = [
-        '# Letter IRL option prices (Stripe test mode): price ids only, no secrets',
-        ...result.lines,
-        ''
-      ].join('\n');
+      const text = [OUTPUT_HEADER, ...result.lines, ''].join('\n');
       if (parsed.out) {
-        deps.writeFile(parsed.out, text);
+        try {
+          deps.writeFile(parsed.out, text);
+        } catch (error) {
+          // The Prices exist now, so show the lines: nothing is lost.
+          const why = error instanceof Error ? error.message : String(error);
+          deps.error(`Could not write ${parsed.out}: ${redact(why, env.STRIPE_SECRET_KEY)}`);
+          deps.log('');
+          for (const line of result.lines) deps.log(line);
+          return 1;
+        }
         deps.log(`Wrote ${result.lines.length} line(s) to ${parsed.out}`);
       } else {
         deps.log('');
@@ -314,6 +342,7 @@ export async function execute(argv: readonly string[], env: NodeJS.ProcessEnv, d
 async function main(): Promise<void> {
   process.exitCode = await execute(process.argv.slice(2), process.env, {
     createPort: () => stripePort(getStripeClient()),
+    readFile: path => (existsSync(path) ? readFileSync(path, 'utf8') : null),
     writeFile: (path, text) => writeFileSync(path, text, 'utf8'),
     log: line => console.log(line),
     error: line => console.error(line)
