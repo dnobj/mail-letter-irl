@@ -1004,10 +1004,19 @@ describe('draftService', () => {
       expect(gift.query).toHaveBeenCalledTimes(3);
     });
 
-    it('lets a gift send or a postcard be set to standard, which is what it is', async () => {
-      const gift = inTransaction({ rows: [pending] }, { rows: [] }, { rows: [{ mail_type: 'letter', is_gift_send: true }] });
+    it.each([
+      ['a gift send', { mail_type: 'letter', is_gift_send: true }],
+      ['a postcard', { mail_type: 'postcard', is_gift_send: false }],
+      ['a postcard that is also a gift send', { mail_type: 'postcard', is_gift_send: true }]
+    ])('lets %s be set to standard, which is what it is', async (_name, row) => {
+      const txn = inTransaction({ rows: [pending] }, { rows: [] }, { rows: [row] });
       await expect(setDraftMailService('draft-1', 'auth0|owner', 'standard', NOW)).resolves.toBeNull();
-      expect(gift.query.mock.calls[3][1]).toEqual(['draft-1', 'standard']);
+      expect(txn.query.mock.calls[3][1]).toEqual(['draft-1', 'standard']);
+    });
+
+    it('names the postcard first when a draft is both a postcard and a gift send', async () => {
+      inTransaction({ rows: [pending] }, { rows: [] }, { rows: [{ mail_type: 'postcard', is_gift_send: true }] });
+      await expect(setDraftMailService('draft-1', 'auth0|owner', 'certified', NOW)).resolves.toBe('not_a_letter');
     });
 
     it('is not_found when the draft vanishes between the lock and the read', async () => {

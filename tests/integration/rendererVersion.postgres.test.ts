@@ -48,7 +48,7 @@ const SENDER = {
   country: 'US'
 };
 
-describePostgres('renderer version, stationery and pages (migrations 039 and 044 to 047, #534, #563, #586)', () => {
+describePostgres('renderer version, stationery, pages and mail service (migrations 039, 044 to 047 and 052, #534, #563, #586, #625)', () => {
   let adminPool: pg.Pool;
   let pool: pg.Pool;
   let schema: string;
@@ -497,6 +497,8 @@ describePostgres('renderer version, stationery and pages (migrations 039 and 044
         [postcard]
       );
       await expect(drafts.setDraftMailService(postcard, userId, 'certified')).resolves.toBe('not_a_letter');
+      // Standard is what a postcard is: allowed.
+      await expect(drafts.setDraftMailService(postcard, userId, 'standard')).resolves.toBeNull();
 
       // A live Pay & Send order holds the draft's price: the service waits for it.
       const priced = await seedDraft(userId, 'pdf-1');

@@ -3811,8 +3811,8 @@ describe('commerceService', () => {
       active = [];
       mocks.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
         if (sql.includes('sends_blocked_reason')) return { rows: [{ sends_blocked_reason: null }] };
-        if (sql.includes('SELECT mail_type, postcard_size, pages FROM letter_drafts')) {
-          return { rows: [{ mail_type: 'letter', postcard_size: null, pages: 1 }] };
+        if (sql.includes('SELECT mail_type, postcard_size, pages, mail_service FROM letter_drafts')) {
+          return { rows: [{ mail_type: 'letter', postcard_size: null, pages: 1, mail_service: 'standard' }] };
         }
         if (sql.includes('SELECT * FROM letter_drafts')) {
           return {
@@ -4053,8 +4053,8 @@ describe('commerceService', () => {
       mocks.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
         if (sql.includes('sends_blocked_reason')) return { rows: [{ sends_blocked_reason: null }] };
         // The peek before the transaction reads the draft's option (#578), with its pages (#586).
-        if (sql.includes('SELECT mail_type, postcard_size, pages FROM letter_drafts')) {
-          return { rows: [{ mail_type: draftRow.mail_type, postcard_size: draftRow.postcard_size ?? null, pages: draftRow.pages ?? 1 }] };
+        if (sql.includes('SELECT mail_type, postcard_size, pages, mail_service FROM letter_drafts')) {
+          return { rows: [{ mail_type: draftRow.mail_type, postcard_size: draftRow.postcard_size ?? null, pages: draftRow.pages ?? 1, mail_service: draftRow.mail_service ?? 'standard' }] };
         }
         if (sql.includes('SELECT * FROM letter_drafts')) return { rows: [draftRow] };
         if (sql.includes('status = ANY($2::varchar[])')) return { rows: activeRows };
@@ -4227,6 +4227,25 @@ describe('commerceService', () => {
 
       expect(dupState.calls).toEqual([]);
     });
+
+    it.each(['certified', 'certified_return_receipt'])(
+      'does not open a checkout for a %s draft until the send carries the service: refused before any order or charge (#625)',
+      async mail_service => {
+        credits = 200;
+        draftRow = pendingDraft({ mail_service });
+        mocks.getJitProduct.mockReturnValue({
+          productCode: 'jit-letter-certified', priceId: 'price-cert', amountCents: 1199, currency: 'usd',
+          name: 'Pay & Send One Certified Mail Letter', description: 'x', mailType: 'letter'
+        });
+
+        await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).rejects.toMatchObject({
+          code: 'JIT_OPTION_NOT_SOLD'
+        });
+
+        expect(inserted()).toBe(false);
+        expect(mocks.createJitSession).not.toHaveBeenCalled();
+      }
+    );
 
     it('opens a checkout for a 4x6 postcard whatever the balance: no pack pays for it (#579)', async () => {
       credits = 200;

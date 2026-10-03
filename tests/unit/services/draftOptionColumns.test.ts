@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 /**
@@ -9,7 +10,16 @@ import { describe, expect, it } from 'vitest';
  * defect that `pages` already had. This reads the SOURCE: any query that names
  * its columns, selects from letter_drafts and picks up `pages` must pick up
  * `mail_service` too.
+ *
+ * What it cannot see: a query that names letter_drafts in a join or a comma
+ * join, a column list built in code (a ${COLUMNS} template), a CTE, a
+ * schema-qualified table, RETURNING, or a SELECT nested in the select list.
+ * It would also flag a comment that reads like a query. None of those is in
+ * the source today; a new reader of a draft is reviewed for this by hand.
  */
+
+/** The repository's src folder, whatever the directory the tests run from. */
+const SRC = fileURLToPath(new URL('../../../src', import.meta.url));
 
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap(name => {
@@ -21,11 +31,12 @@ function sourceFiles(dir: string): string[] {
 /** Every `SELECT <columns> FROM letter_drafts` in the source, with where it is. */
 function draftSelects(): Array<{ file: string; columns: string }> {
   const found: Array<{ file: string; columns: string }> = [];
-  for (const file of sourceFiles('src')) {
+  for (const file of sourceFiles(SRC)) {
     const text = readFileSync(file, 'utf8');
     // The nearest SELECT before the table: a capture that crosses another SELECT would swallow a whole file.
     for (const match of text.matchAll(/SELECT\s+((?:(?!\bSELECT\b)[\s\S])*?)\s+FROM\s+letter_drafts\b/gi)) {
-      found.push({ file: file.split(String.fromCharCode(92)).join('/'), columns: match[1] });
+      const relative = file.slice(SRC.length).split(String.fromCharCode(92)).join('/');
+      found.push({ file: `src${relative}`, columns: match[1] });
     }
   }
   return found;

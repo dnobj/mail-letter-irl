@@ -585,7 +585,7 @@ export type MailServiceRefusal = DraftScheduleRefusal | 'not_a_letter' | 'gift_s
  * draft setDraftSchedule would change, under the same lock, so a send or a Pay
  * & Send checkout runs before or after it, never between: one that goes first
  * leaves this refused ('sent', 'checkout_pending'), and one that goes second
- * sends and prices the new service. The preview's page does not change with
+ * sees and prices the new service. The preview's page does not change with
  * the service (the certified label is on the envelope), so nothing is drawn
  * again.
  *

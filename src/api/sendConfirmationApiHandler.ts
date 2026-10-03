@@ -264,6 +264,7 @@ export function refusalFor(error: unknown): Refusal {
     case 'DRAFT_INCOMPLETE':
     case 'DRAFT_WRONG_MAIL_TYPE':
     case 'DRAFT_FUNDING_CONFLICT':
+    case 'MAIL_SERVICE_NOT_SENDABLE': // Certified mail (#625), until the send carries the service.
       return refuse(409, 'unsendable', "This preview can't be sent. Make a new preview, then try again.");
   }
   // The ledger's own sentence, with no code; matched on its fixed opening.
