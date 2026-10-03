@@ -127,7 +127,7 @@ LETTER_IRL_ADDRESS_REQUEST_DAILY_CAP=<requests an account may make in 24 hours, 
 LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS=<days after it closes, or after its link expires unanswered, 1 to 365; default 7>
 # Signatures (#608, docs/tool-apis.md#signatures): a saved picture of the person's signature, and /api/signature for the
 # website. Offered only while LETTER_IRL_PRINT_RENDERER is pdf. API service only; production waits for the owner.
-LETTER_IRL_SIGNATURES_ENABLED=<true to list set_signature, get_signature and clear_signature; unset is off>
+LETTER_IRL_SIGNATURES_ENABLED=<true to list set_signature, get_signature, clear_signature and set_letter_signature; unset is off>
 # The letter card's envelope reveal (#576, docs/ui-widgets.md): cards only, nothing prints differently.
 LETTER_IRL_ENVELOPE_REVEAL_ENABLED=<true to open previews from an envelope; unset is off>
 # The studio card (#580, docs/ui-widgets.md): the letter card laid out with Style, Words and Delivery tabs. Cards only.

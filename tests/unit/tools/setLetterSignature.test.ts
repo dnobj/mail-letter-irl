@@ -151,7 +151,7 @@ describe('set_letter_signature', () => {
       previewHtml: change.previewHtml,
       canSendNow: true,
       message:
-        "The letter now prints the person's saved signature under the closing, and the account remembers that for its next letter preview. Nothing has been sent."
+        "The letter now prints the person's saved signature under the closing, and the account's next letter previews print it too. Nothing has been sent."
     });
     expect(output).not.toHaveProperty('pages');
     expect(getDraftForStationery).toHaveBeenCalledWith(DRAFT_ID, 'user-1');
@@ -188,7 +188,7 @@ describe('set_letter_signature', () => {
     expect(getSignature).toHaveBeenCalledTimes(1);
     expect(output).toMatchObject({
       signature: { printed: false, source: 'asked' },
-      message: 'The letter now prints no signature, and the account remembers that for its next letter preview. Nothing has been sent.'
+      message: "The letter now prints no signature, and the account's next letter previews leave it off unless they ask for it. Nothing has been sent."
     });
   });
 

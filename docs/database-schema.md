@@ -660,7 +660,8 @@ it closed, or for one never answered, when its link expired. It runs whatever th
 
 A saved signature (#608, concept 3): one cleaned picture of the person's handwritten signature per
 account (migration 050), which their letters print under the closing. Behind
-`LETTER_IRL_SIGNATURES_ENABLED`; the tools are `set_signature`, `get_signature` and `clear_signature`, and
+`LETTER_IRL_SIGNATURES_ENABLED`; the tools are `set_signature`, `get_signature`, `clear_signature` and
+`set_letter_signature`, and
 the website's routes `/api/signature` ([tool-apis.md](tool-apis.md#signatures)).
 
 | Column | Type | Nullable | Default | Description |

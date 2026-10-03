@@ -5,7 +5,7 @@ import type { SendEligibility } from '../services/commerceService.js';
 import { pageFit, SIGNATURE_LINES, stationeryOf, type PageFit } from '../render/index.js';
 import { getDraftForStationery, setDraftSignature, type DraftRedrawRefusal } from '../services/draftService.js';
 import { getSignature } from '../services/signatureService.js';
-import { layoutLetterForPreview, letterOption, letterPayment, redrawLetterPreview } from './letterHelpers.js';
+import { layoutLetterForPreview, letterOption, letterPayment, letterRunsPast, redrawLetterPreview } from './letterHelpers.js';
 import { isDraftIdShape } from './requestSend.js';
 import { requireSignatures, SignatureRefusedError, signatureImageUri, type SignatureRefusalCode } from './signatureShared.js';
 import type { PreviewSignatureOutput } from './signatureInput.js';
@@ -79,16 +79,17 @@ function noRoom(maxPages: number, gift: boolean): string {
  * in the letter's pages, and so its price (#586).
  */
 function messageFor(signed: boolean, pages: number, pagesBefore: number): string {
+  // Off is true with none saved too: the next previews print none unless asked.
   const what = signed
-    ? "The letter now prints the person's saved signature under the closing"
-    : 'The letter now prints no signature';
+    ? "The letter now prints the person's saved signature under the closing, and the account's next letter previews print it too"
+    : "The letter now prints no signature, and the account's next letter previews leave it off unless they ask for it";
   const length =
     pages === pagesBefore
       ? ''
       : pages === 1
         ? ' It now fits on one page, which a letter pack pays for.'
         : ` It now runs to ${PAGE_WORDS[pages]}, printed on both sides, and is paid with Pay & Send.`;
-  return `${what}, and the account remembers that for its next letter preview.${length} Nothing has been sent.`;
+  return `${what}.${length} Nothing has been sent.`;
 }
 
 async function handler(input: SetLetterSignatureInput, context: ToolContext): Promise<SetLetterSignatureOutput> {
@@ -143,18 +144,14 @@ async function handler(input: SetLetterSignatureInput, context: ToolContext): Pr
   // it pays for one page only (#579).
   const gift = draft.is_gift_send === true;
   const maxPages = gift ? 1 : letterPageLimit();
+  const letter = { bodyText, signOff, layoutType, imageData: imageData ?? undefined, signatureImage: signatureImage ?? undefined, stationery };
   let layout;
   try {
-    layout = layoutLetterForPreview(
-      { bodyText, signOff, layoutType, imageData: imageData ?? undefined, signatureImage: signatureImage ?? undefined, stationery },
-      context,
-      'pdf',
-      maxPages
-    )!;
+    layout = layoutLetterForPreview(letter, context, 'pdf', maxPages)!;
   } catch (error) {
-    // The letter fitted without the band, as its preview did: the band is
-    // what has no room. Without it, nothing can run past.
-    if (signatureImage !== null) throw refused('SIGNATURE_NO_ROOM', noRoom(maxPages, gift), context);
+    // The letter fitted without the band, as its preview did: when it now
+    // runs past, the band is what has no room. Any other refusal is its own.
+    if (signatureImage !== null && letterRunsPast(letter, maxPages)) throw refused('SIGNATURE_NO_ROOM', noRoom(maxPages, gift), context);
     throw error;
   }
 
@@ -211,7 +208,7 @@ export const setLetterSignatureTool: McpToolDefinition<SetLetterSignatureInput, 
   description:
     "Print the person's saved signature on a previewed letter, under the closing, or take it off, without previewing it again. " +
     'Give the draftId from the preview and signature: true or false. set_signature saves a signature first; true with none saved is refused. ' +
-    "The signature takes three lines, so a letter with no room for them is refused. The page is drawn again with the signature as it is saved now, " +
+    `The signature takes ${SIGNATURE_LINES} lines, so a letter with no room for them is refused. The page is drawn again with the signature as it is saved now, ` +
     'and the choice is remembered for the next letter preview. Nothing is sent by this tool.',
   readOnly: false,
   inputSchema: setLetterSignatureInputSchema,
