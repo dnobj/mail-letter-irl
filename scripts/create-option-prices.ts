@@ -283,7 +283,13 @@ export function redact(text: string, key: string | undefined): string {
   // would garble every message ("a Stripe [key]-mode key"). The shape pattern
   // below masks anything key-like either way.
   if (secret.length >= MIN_SECRET_LENGTH) out = out.split(secret).join('[key]');
-  return out.replace(/\b[sr]k_(?:test|live)_[A-Za-z0-9*]+/g, '[key]');
+  return (
+    out
+      .replace(/\b[sr]k_(?:test|live)_[A-Za-z0-9*]+/g, '[key]')
+      // A name replaced inside a longer key (a truncated value in the environment,
+      // the whole key typed as an argument) leaves the tail beside the mask: take it.
+      .replace(/\[key\][A-Za-z0-9*]+/g, '[key]')
+  );
 }
 
 /** The first line of what this script writes: --out replaces only a file that starts with it. */

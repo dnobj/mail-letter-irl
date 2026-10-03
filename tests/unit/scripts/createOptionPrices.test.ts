@@ -324,6 +324,13 @@ describe('redact', () => {
     expect(redact('typed sk_test_abc123 here', 'abc')).toBe('typed [key] here');
   });
 
+  it('takes the tail of a longer key too, when only a prefix of it is the key by name', () => {
+    const truncated = TEST_KEY.slice(0, 16);
+    const out = redact(`x ${TEST_KEY} y`, truncated);
+    expect(out).toBe('x [key] y');
+    expect(out).not.toContain(TEST_KEY.slice(16));
+  });
+
   it('leaves other text alone', () => {
     expect(redact('No such price: price_123', TEST_KEY)).toBe('No such price: price_123');
     expect(redact('nothing to hide', '')).toBe('nothing to hide');
@@ -464,6 +471,17 @@ describe('execute', () => {
     const noKey = harness();
     await execute([`STRIPE_SECRET_KEY=${TEST_KEY}`], {}, noKey.deps);
     expect(noKey.everything()).not.toContain(TEST_KEY);
+  });
+
+  it('masks anything key-shaped in what it reports, whatever its source', async () => {
+    const [first] = OPTIONS;
+    const account = fakeAccount({
+      [lookupKeyFor(first.productCode)]: priceFor({ unitAmount: first.expectedAmountCents, currency: 'usd' }, TEST_KEY)
+    });
+    const h = harness(account);
+    expect(await execute([], env, h.deps)).toBe(0);
+    expect(h.everything()).not.toContain(TEST_KEY);
+    expect(h.logs).toContain(`kept ${first.productCode}: [key]`);
   });
 
   it('refuses a key typed where the --out file name belongs, so it is never written as a name', async () => {
