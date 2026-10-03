@@ -106,6 +106,14 @@ function tooLargeToDecodeMessage(bytesPerPixel: number): string {
   return `Image is too large to process. Please use an image under ${megapixels} megapixels, or save it without interlacing or progressive encoding.`;
 }
 
+/**
+ * The time a collage's photos have to download between them (#616 review),
+ * from the moment it holds its slot: each transfer starts with what is left
+ * of it, if that is less than its own deadline, and one that finds it spent
+ * fails as a download that did not finish.
+ */
+const COLLAGE_DOWNLOAD_BUDGET_MS = 30_000;
+
 const REMOTE_IMAGE_FETCH_CONFIG = {
   /** One deadline for the whole transfer: redirects, headers and body. */
   deadlineMs: 20_000,
@@ -129,7 +137,11 @@ const REMOTE_IMAGE_FETCH_CONFIG = {
  * downloads included: two at a time and one per account, and one that waits
  * has fetched nothing. The two add at most six held input buffers and two
  * sets of tiles (about 24 MB each at worst) to the figure above: about
- * 835 MB.
+ * 835 MB, or about 1.13 GB while a progressive JPEG without chroma
+ * subsampling decodes at the 265 MB measured and not the 165 MB counted
+ * (#622). Its photos share one budget for their downloads
+ * (COLLAGE_DOWNLOAD_BUDGET_MS), the queue waits and the transfers together,
+ * so a collage cannot hold its slot four times as long as one photo.
  */
 const GATE_CONFIG = {
   decode: { limit: 3, maxQueue: 12, queueTimeoutMs: 15_000, perKeyLimit: 2 },
@@ -201,11 +213,12 @@ sharp.concurrency(1);
  * 20 files and 100 items by default), and a cached source keeps its decoder
  * alive, whose memory the cache does not count: a progressive JPEG held its
  * whole coefficient buffer after its tile was made, so four photos decoded one
- * after another in one slot measured up to four times one photo's peak, and a
+ * after another in one slot measured up to three times one photo's peak, and a
  * request's decoders were still held after it had returned (#616 review). Every
  * image here is opened from bytes seen once, so the cache never hits.
  */
 sharp.cache(false);
+
 /**
  * The one way this module (and generateImageForMail) opens image bytes: the
  * pixel ceiling travels with every call, including metadata reads, so no site
@@ -236,6 +249,11 @@ export interface ImageProcessingOptions {
    * each gate (perKeyLimit), so one account cannot fill a gate for everyone.
    */
   actorId?: string;
+  /**
+   * A moment (Date.now()) by which a remote download must be over, if sooner
+   * than its own deadline: the photos of a collage share one (#616 review).
+   */
+  deadlineAt?: number;
 }
 
 async function runGated<T>(gate: ConcurrencyGate, work: () => Promise<T>, key?: string): Promise<T> {
@@ -449,8 +467,16 @@ async function downloadRemoteImage(
   options: ImageProcessingOptions
 ): Promise<Buffer> {
   return runGated(downloadGate, async () => {
+    // What a collage's budget has left, when that is less than a download's own deadline.
+    const allowedMs =
+      options.deadlineAt === undefined
+        ? REMOTE_IMAGE_FETCH_CONFIG.deadlineMs
+        : Math.min(REMOTE_IMAGE_FETCH_CONFIG.deadlineMs, options.deadlineAt - Date.now());
+    if (allowedMs <= 0) {
+      throw new ImageProcessingError('DOWNLOAD_FAILED', DOWNLOAD_FAILED_MESSAGE);
+    }
     const controller = new AbortController();
-    const deadline = setTimeout(() => controller.abort(), REMOTE_IMAGE_FETCH_CONFIG.deadlineMs);
+    const deadline = setTimeout(() => controller.abort(), allowedMs);
 
     try {
       const response = await fetchRemoteImage(url, controller.signal);
@@ -715,8 +741,9 @@ function namedPhoto(error: unknown, index: number): unknown {
  * The whole of it runs under the collage gate (two at a time, one per
  * account), so a set waiting its turn has fetched nothing. The photos are
  * downloaded one at a time, in order, each under the download gate, so the
- * account holds one share of it, not four: the first that will not download
- * is named and the rest are not fetched. Then every photo is checked from its
+ * account holds one share of it, not four, and within one budget between them
+ * (COLLAGE_DOWNLOAD_BUDGET_MS): the first that will not download is named and
+ * the rest are not fetched. Then every photo is checked from its
  * header before any is drawn, the first to fail being named; one whose pixels
  * will not decode is named when its turn to be drawn comes.
  *
@@ -736,10 +763,11 @@ export async function downloadAndProcessCollageWithPreview(
   }
 
   return runGated(collageGate, async () => {
+    const downloadOptions: ImageProcessingOptions = { ...options, deadlineAt: Date.now() + COLLAGE_DOWNLOAD_BUDGET_MS };
     const buffers: Buffer[] = [];
     for (const [index, input] of inputs.entries()) {
       try {
-        buffers.push(await downloadImage('download_url' in input ? input.download_url : input.url, options));
+        buffers.push(await downloadImage('download_url' in input ? input.download_url : input.url, downloadOptions));
       } catch (error) {
         throw namedPhoto(error, index);
       }
@@ -1174,6 +1202,7 @@ export const _testing = {
   decodeGate,
   downloadGate,
   collageGate,
+  COLLAGE_DOWNLOAD_BUDGET_MS,
   openImage,
   sniffFormat,
   downloadImage,

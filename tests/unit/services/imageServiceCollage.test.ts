@@ -8,6 +8,14 @@ import {
 } from '../../../src/services/imageService.js';
 import { ConcurrencyGateError } from '../../../src/utils/concurrencyGate.js';
 
+vi.mock('../../../src/services/tempImageStore.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/services/tempImageStore.js')>()),
+  getUploadedPhoto: vi.fn(),
+  getImage: vi.fn(),
+}));
+
+import { getImage, getUploadedPhoto, UPLOADED_PHOTO_REFERENCE } from '../../../src/services/tempImageStore.js';
+
 /**
  * Postcard collages (#616): two to four photos downloaded and drawn on one
  * front, in the arrangement their number calls for. Real bytes and no sharp
@@ -128,6 +136,9 @@ function serve(files: Files): void {
   fetchMock.mockImplementation(async (url: string) => responseFor(files, url));
 }
 
+/** The latest hold(), released after a test that did not finish it. */
+let lastHold: { release: () => void } | undefined;
+
 /** Every photo answers only when released, so a test can stand a collage at any download. */
 function hold(files: Files) {
   const pending: Array<() => void> = [];
@@ -143,11 +154,13 @@ function hold(files: Files) {
         });
       })
   );
-  return {
+  const held = {
     /** Answers every download asked for so far. */
     release: () => pending.splice(0).forEach((answer) => answer()),
     asked: () => pending.length,
   };
+  lastHold = held;
+  return held;
 }
 
 async function flush(times = 20): Promise<void> {
@@ -224,6 +237,8 @@ async function expectCell(
 describe('postcard collages (#616)', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', fetchMock);
+    vi.mocked(getUploadedPhoto).mockReset();
+    vi.mocked(getImage).mockReset();
   });
 
   afterEach(() => {
@@ -377,6 +392,42 @@ describe('postcard collages (#616)', () => {
     });
   });
 
+  describe('photos that are not links', () => {
+    it('takes the account\'s uploaded photo and a picture in the temp store as it takes a link, fetching neither', async () => {
+      vi.mocked(getUploadedPhoto).mockResolvedValue(await solid(RED));
+      vi.mocked(getImage).mockResolvedValue((await solid(BLUE)).toString('base64'));
+      const stored = 'https://letterirl.example/api/temp-image/0123456789abcdef0123456789abcdef';
+      const result = await downloadAndProcessCollageWithPreview(
+        [{ url: UPLOADED_PHOTO_REFERENCE }, { url: stored }],
+        '6x9',
+        { actorId: 'account-a' }
+      );
+      const picture = await pixelsOf(result.base64DataUri);
+      await expectCell(picture, 681, 900, RED, 'the uploaded photo');
+      await expectCell(picture, 2019, 900, BLUE, 'the temp store photo');
+      expect(getUploadedPhoto).toHaveBeenCalledWith('account-a');
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('names an uploaded photo that has expired, or that has no account to belong to, by its place', async () => {
+      vi.mocked(getUploadedPhoto).mockResolvedValue(null);
+      serve({ [URLS[0]]: await solid(RED) });
+      const expired = await rejection(
+        downloadAndProcessCollageWithPreview([{ url: URLS[0] }, { url: UPLOADED_PHOTO_REFERENCE }], '6x9', { actorId: 'account-a' })
+      );
+      expect(expired.code).toBe('DOWNLOAD_FAILED');
+      expect(expired.userMessage).toBe(
+        'The second photo: That uploaded photo has expired: uploads are kept for 15 minutes. Please upload it again.'
+      );
+
+      vi.mocked(getUploadedPhoto).mockResolvedValue(await solid(RED));
+      const nobody = await rejection(
+        downloadAndProcessCollageWithPreview([{ url: UPLOADED_PHOTO_REFERENCE }, { url: URLS[0] }], '6x9')
+      );
+      expect(nobody.userMessage).toMatch(/^The first photo: That uploaded photo has expired/);
+    });
+  });
+
   describe('what it returns', () => {
     it('gives the preview a derived small copy, and the first photo\'s own size', async () => {
       serve({ [URLS[0]]: await solid(RED, 640, 480), [URLS[1]]: await solid(BLUE, 800, 600) });
@@ -504,8 +555,25 @@ describe('postcard collages (#616)', () => {
       expect(_testing.decodeGate.snapshot()).toMatchObject(idle);
     };
 
+    const gatesIdle = (): boolean =>
+      [_testing.collageGate, _testing.downloadGate, _testing.decodeGate].every((gate) => {
+        const { active, queued } = gate.snapshot();
+        return active === 0 && queued === 0;
+      });
+
+    afterEach(async () => {
+      // A test that fails with downloads held would leave the module's gates held for the rest of the file.
+      const until = Date.now() + 5_000;
+      while (Date.now() < until && !gatesIdle()) {
+        lastHold?.release();
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      lastHold = undefined;
+    });
+
     it('bounds collages to two at a time and one per account, with four to wait', () => {
       expect(_testing.GATE_CONFIG.collage).toEqual({ limit: 2, maxQueue: 4, queueTimeoutMs: 15_000, perKeyLimit: 1 });
+      expect(_testing.COLLAGE_DOWNLOAD_BUDGET_MS).toBe(30_000);
       expect(_testing.collageGate.snapshot()).toMatchObject({ limit: 2, maxQueue: 4, perKeyLimit: 1 });
     });
 
@@ -556,6 +624,90 @@ describe('postcard collages (#616)', () => {
       expect(error.userMessage).toBe("The second photo: Couldn't download the image. Please try again.");
       expect(fetchMock).toHaveBeenCalledTimes(2);
       expectIdle();
+    });
+
+    it('gives the photos one budget for their downloads, not a deadline each', async () => {
+      vi.useFakeTimers();
+      try {
+        const files = await palette(3);
+        // The first photo answers after 19 s, inside its own 20 s; the second never does, and has the 11 s of the
+        // 30 s that are left, not its own 20 s.
+        fetchMock.mockImplementation(
+          (url: string, init: RequestInit) =>
+            new Promise<Response>((resolve, reject) => {
+              (init.signal as AbortSignal).addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+              if (url === URLS[0]) setTimeout(() => resolve(responseFor(files, url)), 19_000);
+            })
+        );
+        let outcome: unknown = 'pending';
+        const call = downloadAndProcessCollageWithPreview(inputs(3), '6x9', { actorId: 'account-a' }).then(
+          () => { outcome = 'resolved'; },
+          (error: unknown) => { outcome = error; }
+        );
+        await vi.advanceTimersByTimeAsync(19_000);
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(outcome).toBe('pending');
+        await vi.advanceTimersByTimeAsync(11_000);
+        expect(outcome).toBeInstanceOf(ImageProcessingError);
+        expect((outcome as ImageProcessingError).userMessage).toBe("The second photo: Couldn't download the image. Please try again.");
+        // Nothing is fetched after it.
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        await vi.runAllTimersAsync();
+        await call;
+      } finally {
+        vi.useRealTimers();
+      }
+      expectIdle();
+    });
+
+    it('keeps a photo\'s own 20 s deadline when the budget has more left', async () => {
+      vi.useFakeTimers();
+      try {
+        fetchMock.mockImplementation(
+          (_url: string, init: RequestInit) =>
+            new Promise<Response>((_resolve, reject) => {
+              (init.signal as AbortSignal).addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+            })
+        );
+        let outcome: unknown = 'pending';
+        const call = downloadAndProcessCollageWithPreview(inputs(2), '6x9', { actorId: 'account-a' }).then(
+          () => { outcome = 'resolved'; },
+          (error: unknown) => { outcome = error; }
+        );
+        await vi.advanceTimersByTimeAsync(19_999);
+        expect(outcome).toBe('pending');
+        await vi.advanceTimersByTimeAsync(1);
+        expect(outcome).toBeInstanceOf(ImageProcessingError);
+        expect((outcome as ImageProcessingError).userMessage).toBe("The first photo: Couldn't download the image. Please try again.");
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        await vi.runAllTimersAsync();
+        await call;
+      } finally {
+        vi.useRealTimers();
+      }
+      expectIdle();
+    });
+
+    it('does not start a transfer once the budget is spent, and starts one with what is left', async () => {
+      // A transfer can find the budget spent after it waited for a download slot. The clock is held still, so
+      // "0 s left" is exactly 0.
+      vi.useFakeTimers({ toFake: ['Date'] });
+      try {
+        serve({ [URLS[0]]: await solid(RED) });
+        for (const left of [0, -1, -60_000]) {
+          fetchMock.mockClear();
+          const error = await rejection(_testing.downloadImage(URLS[0], { deadlineAt: Date.now() + left }));
+          expect([error.code, error.userMessage], String(left)).toEqual(['DOWNLOAD_FAILED', "Couldn't download the image. Please try again."]);
+          expect(fetchMock, String(left)).not.toHaveBeenCalled();
+        }
+        expectIdle();
+        fetchMock.mockClear();
+        await expect(_testing.downloadImage(URLS[0], { deadlineAt: Date.now() + 10_000 })).resolves.toBeInstanceOf(Buffer);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expectIdle();
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('refuses a second collage from an account that has one under way, fetching nothing for it', async () => {
