@@ -843,7 +843,8 @@ export interface CreatePostcardDraftParams {
   recipient: Record<string, unknown>;
   message: string;
   frontImageData: string;
-  frontImageUrl: string;
+  /** The photo's address, for debugging; null for a collage, which has no one source (#616). */
+  frontImageUrl: string | null;
   postcardSize?: PostcardSize;    // Default: '6x9'
   requiredCredits?: number;       // Default: 2
   previewHtml?: string;

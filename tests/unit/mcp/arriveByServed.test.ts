@@ -117,6 +117,8 @@ describe('arriveBy in tools/list', () => {
     // front while its layouts are not (#594).
     vi.stubEnv('LETTER_IRL_STATIONERY_ENABLED', 'true');
     vi.stubEnv('LETTER_IRL_POSTCARD_LAYOUTS_ENABLED', 'true');
+    // And its collage photos while collages are not (#616).
+    vi.stubEnv('LETTER_IRL_POSTCARD_COLLAGES_ENABLED', 'true');
     vi.stubEnv('LETTER_IRL_PRINT_RENDERER', 'pdf');
     // And the letter previews' signature while signatures are not (#608).
     vi.stubEnv('LETTER_IRL_SIGNATURES_ENABLED', 'true');

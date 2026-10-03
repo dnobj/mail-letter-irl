@@ -590,6 +590,21 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     services: ['api']
   },
   /**
+   * Postcard collages (#616, src/config/postcardCollages.ts): the postcard
+   * preview takes `images` and `imageUrls`, two to four photos drawn as one
+   * front, only while the flag is on. Off unless set, so absence is the
+   * intended production state until the owner switches it on; listed so the
+   * preflight shows which environments have it. API only: a postcard prints
+   * with the picture its draft stored, never by this flag.
+   */
+  {
+    name: 'LETTER_IRL_POSTCARD_COLLAGES_ENABLED',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  /**
    * Address requests (#604, src/config/addressRequests.ts): the three tools
    * are listed only while the flag is on. Off unless set, so absence is the
    * intended production state until the owner's retention wording is in;

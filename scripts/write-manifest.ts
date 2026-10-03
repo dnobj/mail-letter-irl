@@ -21,6 +21,8 @@ process.env.LETTER_IRL_ROOM_TO_WRITE_ENABLED = "false";
 // And the 4x6 and 11x6 postcards, and the postcard layouts (#594).
 process.env.LETTER_IRL_POSTCARD_SIZES_ENABLED = "false";
 process.env.LETTER_IRL_POSTCARD_LAYOUTS_ENABLED = "false";
+// And postcard collages (#616).
+process.env.LETTER_IRL_POSTCARD_COLLAGES_ENABLED = "false";
 // And address requests (#604).
 process.env.LETTER_IRL_ADDRESS_REQUESTS_ENABLED = "false";
 // And signatures (#608).

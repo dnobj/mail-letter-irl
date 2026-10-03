@@ -82,6 +82,7 @@ describe("Compatibility manifest", () => {
     vi.stubEnv("LETTER_IRL_ROOM_TO_WRITE_ENABLED", "");
     vi.stubEnv("LETTER_IRL_POSTCARD_SIZES_ENABLED", "");
     vi.stubEnv("LETTER_IRL_POSTCARD_LAYOUTS_ENABLED", "");
+    vi.stubEnv("LETTER_IRL_POSTCARD_COLLAGES_ENABLED", "");
     vi.stubEnv("LETTER_IRL_ADDRESS_REQUESTS_ENABLED", "");
     vi.stubEnv("LETTER_IRL_SIGNATURES_ENABLED", "");
     const snapshot = fs.readFileSync(manifestPath, "utf-8");

@@ -121,6 +121,7 @@ import { isStationeryOffered } from "../config/stationery.js";
 import { isSignaturesOffered } from "../config/signatures.js";
 import { isPostcardSizesOffered } from "../config/postcardSizes.js";
 import { isPostcardLayoutsOffered } from "../config/postcardLayouts.js";
+import { isPostcardCollagesOffered } from "../config/postcardCollages.js";
 import { ENVELOPE_REVEAL_META, isEnvelopeRevealEnabled } from "../config/envelope.js";
 import { STUDIO_CARD_META, isStudioCardEnabled } from "../config/studioCard.js";
 import { scheduleSentence } from "../tools/arriveByInput.js";
@@ -553,6 +554,10 @@ export function buildToolMeta(
   return {
     securitySchemes: buildToolSecuritySchemes(toolName, requireAuth),
     ...meta,
+    // The postcard preview's collage photos are file parameters too, while collages are offered (#616).
+    ...(toolName === "quote_and_preview_postcard" && isPostcardCollagesOffered()
+      ? { "openai/fileParams": [...((meta["openai/fileParams"] as string[] | undefined) ?? []), "images"] }
+      : {}),
     ...(hidden ? { "openai/visibility": "private" } : {}),
     ...(cardOnly ? { "anthropic/requiresUserInteraction": true } : {}),
     ui: {
@@ -972,6 +977,9 @@ export const STATIONERY_INPUT_KEYS: readonly string[] = ["stationery", "monogram
 /** The postcard preview's front arguments (#594). */
 export const POSTCARD_FRONT_INPUT_KEYS: readonly string[] = ["layout", "caption", "place"];
 
+/** The postcard preview's collage photos (#616). */
+export const POSTCARD_COLLAGE_INPUT_KEYS: readonly string[] = ["images", "imageUrls"];
+
 /**
  * The input fields a tool is served without, as this deployment stands: the
  * four previews' `arriveBy` while LETTER_IRL_ARRIVE_BY_ENABLED is off (#535),
@@ -988,6 +996,8 @@ export function withheldInputKeys(name: string): string[] {
   // The letter previews' signature (#608), while signatures are not offered.
   if (LETTER_PREVIEW_TOOLS.has(name) && !isSignaturesOffered()) withheld.push("signature");
   if (name === "quote_and_preview_postcard" && !isPostcardLayoutsOffered()) withheld.push(...POSTCARD_FRONT_INPUT_KEYS);
+  // The postcard preview's collage photos, while collages are not offered (#616).
+  if (name === "quote_and_preview_postcard" && !isPostcardCollagesOffered()) withheld.push(...POSTCARD_COLLAGE_INPUT_KEYS);
   // set_postcard_style takes each only while it is offered (#594).
   if (name === "set_postcard_style" && !isPostcardSizesOffered()) withheld.push("size");
   if (name === "set_postcard_style" && !isPostcardLayoutsOffered()) withheld.push(...POSTCARD_FRONT_INPUT_KEYS);

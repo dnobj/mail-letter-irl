@@ -2315,6 +2315,10 @@
             "type": "string",
             "description": "The place the greeting names"
           },
+          "collagePhotos": {
+            "type": "integer",
+            "description": "How many photos the front draws, when it is a collage"
+          },
           "previewFrontHtml": {
             "type": "string",
             "description": "HTML preview of postcard front (image)"

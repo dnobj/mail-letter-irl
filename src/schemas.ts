@@ -20,6 +20,8 @@ import {
   SET_POSTCARD_SIZE_DESCRIPTION,
   SET_POSTCARD_LAYOUT_DESCRIPTION,
   POSTCARD_CAPTION_DESCRIPTION,
+  POSTCARD_COLLAGE_IMAGES_DESCRIPTION,
+  POSTCARD_COLLAGE_IMAGE_URLS_DESCRIPTION,
   POSTCARD_PLACE_DESCRIPTION,
   SET_POSTCARD_STYLE_SIZE_OUTPUT_DESCRIPTION,
   SET_POSTCARD_STYLE_CAN_SEND_DESCRIPTION,
@@ -823,6 +825,26 @@ export const quoteAndPreviewPostcardInputSchema: JsonSchema = {
       type: "string",
       description: "REQUIRED when using a hosted image: set this to the imageUrl returned by confirm_uploaded_image (the upload widget flow) or another publicly accessible image URL. This is the URL of the image for the postcard front."
     },
+    // Two to four photos for a collage (#616): withheld while collages are not offered (withheldInputKeys).
+    images: {
+      type: "array",
+      description: POSTCARD_COLLAGE_IMAGES_DESCRIPTION,
+      items: {
+        type: "object",
+        properties: {
+          download_url: { type: "string" },
+          file_id: { type: "string" },
+          mime_type: { type: "string" },
+          file_name: { type: "string" }
+        },
+        required: ["download_url", "file_id"]
+      }
+    },
+    imageUrls: {
+      type: "array",
+      description: POSTCARD_COLLAGE_IMAGE_URLS_DESCRIPTION,
+      items: { type: "string" }
+    },
     sendAsGift: {
       type: "boolean",
       description: "Set true only when the user asks to send this as their gift letter: it is free and adds a printed page with a card for the recipient. Leave it out otherwise; a gift letter is then used only if the balance cannot pay."
@@ -850,6 +872,7 @@ export const quoteAndPreviewPostcardOutputSchema: JsonSchema = {
     layout: { type: "string", enum: ["full_bleed", "border", "greetings"], description: PREVIEW_POSTCARD_LAYOUT_DESCRIPTION },
     caption: { type: "string", description: "The border's caption, when it has one" },
     place: { type: "string", description: "The place the greeting names" },
+    collagePhotos: { type: "integer", description: "How many photos the front draws, when it is a collage" },
     previewFrontHtml: { type: "string", description: "HTML preview of postcard front (image)" },
     previewBackHtml: { type: "string", description: "HTML preview of postcard back (message)" },
     previewHtml: { type: "string", description: "The postcard as it prints, front and back as SVG, when our renderer drew it (#534)" },

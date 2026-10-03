@@ -1844,6 +1844,26 @@ Steps 9 to 11, and the Settings page check in step 12, need a signed-in session 
 a preview's choice is remembered; the Settings page shows and changes the signature a letter would
 print; and nothing prints a signature the person did not see.
 
+### COLLAGE-01 — A postcard of two to four photos (#616)
+
+**Status:** Not run.
+
+**Preconditions:** Development, with `LETTER_IRL_POSTCARD_COLLAGES_ENABLED` on in the API (and `LETTER_IRL_POSTCARD_LAYOUTS_ENABLED` and `LETTER_IRL_POSTCARD_SIZES_ENABLED` for steps 3 and 4). A client with the (DEV) connector, or the dev CLI's tools, with its tool list refreshed. Four photos, as links and as attachments, some portrait and some landscape, one of them taken on a phone held upright (it carries an EXIF orientation). PostGrid is in test mode on development.
+
+**Steps:**
+
+1. [ ] With the dev CLI's tools, preview a postcard with `imageUrls` of two photos. Verify the answer says `collagePhotos: 2`, and the front shows the two side by side, cropped to fill, with white margins and a white gutter.
+2. [ ] Preview with three, then four. Verify three show one large photo on the left and two stacked on the right, four show two by two, and each keeps the order given.
+3. [ ] Preview a collage as a 4x6 and as an 11x6. Verify the arrangement and the white margins hold at each size.
+4. [ ] Preview a collage with `layout: border` and a `caption`, then change it with `set_postcard_style` to greetings with a `place`. Verify the collage sits inside the border, and under the greeting.
+5. [ ] Include the phone photo in a collage. Verify it is upright in its cell.
+6. [ ] Try one photo and five in `imageUrls`, `images` and `imageUrls` together, and a collage with `imageUrl` beside it. Verify each is refused before anything is fetched, saying what to send instead. Put a broken link, then a GIF, in the second place. Verify the refusal names "The second photo".
+7. [ ] In ChatGPT (DEV), after a connector Refresh, attach three photos and ask for a collage postcard. Verify the call carries `images` (**record whether ChatGPT hands over an array of attachments: this is the open probe of #616**), and that a postcard with one attached photo still works, so the array parameter has not broken the single `image` handoff.
+8. [ ] Send one collage (test mode). Verify the PDF in PostGrid's test dashboard shows the collage as previewed.
+9. [ ] Turn the flag off and deploy the API, then refresh the tool list. Verify `images` and `imageUrls` are gone, and a collage sent anyway is refused. Turn the flag back on.
+
+**Pass criteria:** The front is the arrangement the preview showed, in the order given, and prints as previewed; a postcard of one photo is unchanged.
+
 ---
 
 ## Image Generation Routing
