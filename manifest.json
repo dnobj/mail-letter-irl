@@ -247,6 +247,14 @@
               "source"
             ]
           },
+          "mailService": {
+            "type": "string",
+            "enum": [
+              "certified",
+              "certified_return_receipt"
+            ],
+            "description": "Present only when the letter goes as certified mail: certified, or certified_return_receipt (with an electronic return receipt). Paid with Pay & Send."
+          },
           "pages": {
             "type": "integer",
             "minimum": 2,
@@ -692,6 +700,14 @@
               "source"
             ]
           },
+          "mailService": {
+            "type": "string",
+            "enum": [
+              "certified",
+              "certified_return_receipt"
+            ],
+            "description": "Present only when the letter goes as certified mail: certified, or certified_return_receipt (with an electronic return receipt). Paid with Pay & Send."
+          },
           "pages": {
             "type": "integer",
             "minimum": 2,
@@ -1136,6 +1152,14 @@
               "printed",
               "source"
             ]
+          },
+          "mailService": {
+            "type": "string",
+            "enum": [
+              "certified",
+              "certified_return_receipt"
+            ],
+            "description": "Present only when the letter goes as certified mail: certified, or certified_return_receipt (with an electronic return receipt). Paid with Pay & Send."
           },
           "pages": {
             "type": "integer",

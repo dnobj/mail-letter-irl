@@ -51,7 +51,7 @@ import { isPackPayable, mailServiceOf, type MailOption } from "../config/product
 import { callingApp, type ClientProfile } from "../auth/clientProfiles.js";
 import { isSendConfirmationEnabled, letterPacksPageUrl, sendConfirmationUrl } from "../config/sendConfirmation.js";
 import { GIFT_PAYS_ONE_PAGE, giftCardSummary, resolveGiftSendChoice, type GiftSendChoice } from "./giftSendChoice.js";
-import type { MailService } from "../services/types.js";
+import type { CertifiedMailService, MailService } from "../services/types.js";
 import { giftLetterPageCopy } from "../services/giftCardRenderer.js";
 import { rememberedPrefix, type PreviewStationery } from "./stationeryInput.js";
 import { rememberStationery } from "../services/stationeryDefaultService.js";
@@ -150,6 +150,8 @@ export interface LetterQuoteOutput {
   stationery?: PreviewStationery;
   /** Whether the letter prints the person's saved signature (#608), while signatures are offered, and why. */
   signature?: PreviewSignatureOutput;
+  /** Present only when the letter is sent as certified mail (#625): which service. Paid with Pay & Send. */
+  mailService?: CertifiedMailService;
   /** A letter of more than one page (#586): the pages it prints on, both sides of the paper, paid with Pay & Send. */
   pages?: number;
   /** While room to write is offered (#586): how full its pages are, for the card's fit line. Card-only (_meta). */
@@ -981,6 +983,8 @@ export interface CreateLetterDraftParams {
   stationery?: PreviewStationery;
   /** The signature asked for or remembered (chooseSignature, #608): its image when the letter prints one. */
   signature?: PreviewSignature;
+  /** The certified service the letter asks for (chooseMailService, #625); undefined for an ordinary letter. */
+  mailService?: CertifiedMailService;
   context: ToolContext;
 }
 
@@ -1224,6 +1228,7 @@ export async function createLetterDraftAndBuildOutput(
     schedule,
     stationery,
     signature,
+    mailService,
     context
   } = params;
   // Whether the letter as laid out carries the signature (#608): the draft's
@@ -1232,7 +1237,7 @@ export async function createLetterDraftAndBuildOutput(
 
   // Calculate credits, only where a pack pays (#579). The letter's option has
   // the pages it was laid out on (#586), counted before any gift page.
-  const option = letterOption(printLayout);
+  const option = letterOption(printLayout, mailService);
   const requiredCredits = estimateRequiredCredits(bodyText, signOff);
   const available = context.user.creditsRemaining;
   const canSendNow = canSendNowFor(option, requiredCredits, gift.isGift, available);
@@ -1308,6 +1313,8 @@ export async function createLetterDraftAndBuildOutput(
     schedule: schedule?.draft,
     // The pages it was laid out on (#586): it prints and is priced on them.
     pages: option.pages ?? 1,
+    // How it travels (#625): the send, the checkout and the confirmation page read it from the draft.
+    ...(mailService ? { mailService } : {}),
   });
 
   context.logger.info(
@@ -1371,6 +1378,8 @@ export async function createLetterDraftAndBuildOutput(
     // Whether it is signed, and why, while signatures are offered (#608 review
     // round 1): a model without the card hears it from here.
     ...(signatureSaid ? { signature: signatureSaid } : {}),
+    // Certified mail (#625): only then, so an ordinary letter's answer is unchanged.
+    ...(mailService ? { mailService } : {}),
     // A letter of more than one page (#586), printed on both sides: only then.
     ...(option.pages ? { pages: option.pages } : {}),
     // And how full its pages are, for the card's fit line, while room to write

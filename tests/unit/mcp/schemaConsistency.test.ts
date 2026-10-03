@@ -280,14 +280,23 @@ describe("request_send schema (#535)", () => {
     expect(zodKeys).toContain("schedule");
     expect(Object.keys(requestSendOutputSchema.properties ?? {})).toEqual(zodKeys);
     expect(requestSendOutputSchema.required).toEqual(
-      zodKeys.filter((key) => key !== "schedule" && key !== "paidPerSend")
+      zodKeys.filter((key) => key !== "schedule" && key !== "paidPerSend" && key !== "mailService")
     );
+    // Certified mail (#625): optional, the two services, worded alike on both layers.
+    expect(requestSendOutputZ.shape.mailService.isOptional()).toBe(true);
+    expect(requestSendOutputSchema.properties?.mailService).toMatchObject({
+      type: "string",
+      enum: ["certified", "certified_return_receipt"],
+      description: requestSendOutputZ.shape.mailService.description
+    });
     // Mail paid on the page (#579): optional, true only, worded alike on both layers.
     const paid = requestSendOutputZ.shape.paidPerSend;
     expect(paid.isOptional()).toBe(true);
     const paidJson = (requestSendOutputSchema.properties as Record<string, { const?: unknown; description?: string }>).paidPerSend;
     expect(paidJson.const).toBe(true);
     expect(paid.description).toBe(paidJson.description);
+    // It says what packs and gift letters do not pay for, certified mail among it (#625).
+    expect(paid.description).toContain('never for certified mail');
     const served = requestSendOutputZ.shape.schedule;
     expect(served.isOptional()).toBe(true);
     expect(Object.keys(served.unwrap().shape)).toEqual(["arriveBy", "mailOn"]);

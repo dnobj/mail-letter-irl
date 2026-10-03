@@ -119,6 +119,8 @@ import { isSendConfirmationEnabled } from "../config/sendConfirmation.js";
 import { isArriveByEnabled } from "../config/arriveBy.js";
 import { isStationeryOffered } from "../config/stationery.js";
 import { isSignaturesOffered } from "../config/signatures.js";
+import { isCertifiedMailOffered } from "../config/certifiedMail.js";
+import { isExtraService } from "../config/products.js";
 import { isPostcardSizesOffered } from "../config/postcardSizes.js";
 import { isPostcardLayoutsOffered } from "../config/postcardLayouts.js";
 import { isPostcardCollagesOffered } from "../config/postcardCollages.js";
@@ -986,7 +988,8 @@ export const POSTCARD_COLLAGE_INPUT_KEYS: readonly string[] = ["images", "imageU
  * four previews' `arriveBy` while LETTER_IRL_ARRIVE_BY_ENABLED is off (#535),
  * the three letter previews' stationery while it is not offered (#563), and
  * the postcard preview's and set_postcard_style's front while the layouts
- * are not, and set_postcard_style's size while the sizes are not (#594).
+ * are not, and set_postcard_style's size while the sizes are not (#594), and
+ * the three letter previews' mailService while certified mail is not (#625).
  * tools/list (getServedInputSchema) and /manifest.json both ask this, so
  * they agree.
  */
@@ -996,6 +999,8 @@ export function withheldInputKeys(name: string): string[] {
   if (LETTER_PREVIEW_TOOLS.has(name) && !isStationeryOffered()) withheld.push(...STATIONERY_INPUT_KEYS);
   // The letter previews' signature (#608), while signatures are not offered.
   if (LETTER_PREVIEW_TOOLS.has(name) && !isSignaturesOffered()) withheld.push("signature");
+  // The letter previews' mail service (#625), while certified mail is not offered.
+  if (LETTER_PREVIEW_TOOLS.has(name) && !isCertifiedMailOffered()) withheld.push("mailService");
   if (name === "quote_and_preview_postcard" && !isPostcardLayoutsOffered()) withheld.push(...POSTCARD_FRONT_INPUT_KEYS);
   // The postcard preview's collage photos, while collages are not offered (#616).
   if (name === "quote_and_preview_postcard" && !isPostcardCollagesOffered()) withheld.push(...POSTCARD_COLLAGE_INPUT_KEYS);
@@ -1408,6 +1413,17 @@ export function buildTokenScopeToolResult(toolName: string) {
 }
 
 /**
+ * The sentence that says why mail is paid per send, for the narration (#579):
+ * the pack rule, or for certified mail (#625) what is true of it, since the
+ * rule's "one-page letters" would contradict a one-page certified letter.
+ */
+function packRuleText(certified: boolean): string {
+  return certified
+    ? "Certified mail is paid with Pay & Send, never with a letter pack or a gift letter. "
+    : "Letter packs and gift letters pay only for one-page letters and 6x9 postcards. ";
+}
+
+/**
  * The link, in words the model can pass on (#470). Nothing is sent until the
  * person presses Send on the page, and the text says so, so a model cannot
  * report the mail as sent.
@@ -1420,7 +1436,7 @@ export function sendLinkText(result: RequestSendOutput): string {
     return (
       `Ask the person to open ${result.confirmationUrl} to check the ${what}${to}, then pay for it with Pay & Send there, which sends it. ` +
       whenSentText(result) +
-      `Letter packs and gift letters pay only for one-page letters and 6x9 postcards. ` +
+      packRuleText(isExtraService(result.mailService)) +
       `Nothing is sent until they pay there. The link works until ${result.expiresAtISO}.`
     );
   }
@@ -1481,7 +1497,7 @@ export function howToSendText(
   draftId: string,
   client: Pick<ClientProfile, "rendersCards" | "inAppPurchases">,
   cardOffersPayAndSend = false,
-  pay: { packPays: boolean; payOnPage: boolean } = { packPays: true, payOnPage: false }
+  pay: { packPays: boolean; payOnPage: boolean; certified?: boolean } = { packPays: true, payOnPage: false }
 ): string {
   if (!client.rendersCards) {
     // Mail no pack pays for (#579) is paid on that page, which sends it.
@@ -1490,7 +1506,7 @@ export function howToSendText(
           `where they check it and send it themselves.`
       : `Nothing has been sent. To send it, call request_send with draftId ${draftId} and give the person its link, ` +
           `where they check it and pay for it with Pay & Send, which sends it. ` +
-          `Letter packs and gift letters pay only for one-page letters and 6x9 postcards.`;
+          packRuleText(pay.certified === true).trimEnd();
   }
   const how =
     client.inAppPurchases && cardOffersPayAndSend
@@ -1501,9 +1517,7 @@ export function howToSendText(
           ? "The person sends it with Send on the preview card; point them to it when they ask you to send. "
           : "It is paid with Pay & Send, which is not available for it right now. ";
   // Mail no pack pays for (#579): said, so the model does not offer a pack.
-  const packRule = pay.packPays
-    ? ""
-    : "Letter packs and gift letters pay only for one-page letters and 6x9 postcards. ";
+  const packRule = pay.packPays ? "" : packRuleText(pay.certified === true);
   return `Nothing has been sent. ${how}${packRule}Only if the card is not showing, call request_send with draftId ${draftId} and give them its link.`;
 }
 
@@ -1512,13 +1526,15 @@ export function howToSendText(
  * pack pays for it, and whether the card's button opens the page that takes
  * a Pay & Send payment.
  */
-export function previewPayment(result: Record<string, unknown>): { packPays: boolean; payOnPage: boolean } {
+export function previewPayment(result: Record<string, unknown>): { packPays: boolean; payOnPage: boolean; certified: boolean } {
   const eligibility = result.sendEligibility as
     | { packPays?: unknown; payAndSend?: { pageUrl?: unknown } }
     | undefined;
   return {
     packPays: eligibility?.packPays !== false,
-    payOnPage: typeof eligibility?.payAndSend?.pageUrl === "string"
+    payOnPage: typeof eligibility?.payAndSend?.pageUrl === "string",
+    // Certified mail (#625): its sentence is not the pack rule's, which would contradict a one-page letter.
+    certified: isExtraService(result.mailService)
   };
 }
 
@@ -1592,6 +1608,21 @@ function signatureSentence(result: Record<string, unknown>): string {
       : " Not signed: the account's choice is no signature; set_letter_signature with signature: true signs this letter.";
   }
   return signature.source === "asked" && signature.printed ? " Signed with the person's saved signature." : "";
+}
+
+/**
+ * Certified mail (#625), for the narration: which service the preview is, so
+ * the model says what the person is paying for. Empty for an ordinary letter.
+ */
+function mailServiceSentence(result: Record<string, unknown>): string {
+  switch (result.mailService) {
+    case "certified":
+      return " Once sent, it goes by USPS Certified Mail, which gives a tracking number.";
+    case "certified_return_receipt":
+      return " Once sent, it goes by USPS Certified Mail with an electronic return receipt, which gives a tracking number.";
+    default:
+      return "";
+  }
 }
 
 /**
@@ -1705,6 +1736,7 @@ export function summarizeToolResult(
       summary += stationerySentence(result);
       summary += signatureSentence(result);
       summary += pagesSentence(result);
+      summary += mailServiceSentence(result);
       return summary;
     }
     case "request_send":

@@ -5,7 +5,8 @@ import { draftScheduleOf } from '../services/draftSchedule.js';
 import { earliestMailOn } from '../services/deliverySchedule.js';
 import type { LetterDraft } from '../services/types.js';
 import { sendConfirmationUrl } from '../config/sendConfirmation.js';
-import { draftMailOption, isPackPayable } from '../config/products.js';
+import { draftMailOption, isExtraService, isPackPayable, mailServiceOf } from '../config/products.js';
+import type { CertifiedMailService } from '../services/types.js';
 
 /**
  * A link where the person checks a draft and sends it themselves (#470).
@@ -36,9 +37,12 @@ export interface RequestSendOutput {
   schedule?: { arriveBy: string; mailOn: string };
   /**
    * Present when the page takes a Pay & Send payment for this mail: packs and
-   * gift letters pay only for one-page letters and 6x9 postcards (#579).
+   * gift letters pay only for one-page letters and 6x9 postcards (#579), and
+   * never for certified mail (#625).
    */
   paidPerSend?: true;
+  /** Present only for certified mail (#625): which service, so the words around the link do not give it the pack rule. */
+  mailService?: CertifiedMailService;
 }
 
 /** The draft's dates, or none: a link is never refused over dates it cannot read. */
@@ -144,7 +148,8 @@ async function handler(
       state: text(recipient.state)
     },
     ...(schedule ? { schedule } : {}),
-    ...(isPackPayable(draftMailOption(draft)) ? {} : { paidPerSend: true as const })
+    ...(isPackPayable(draftMailOption(draft)) ? {} : { paidPerSend: true as const }),
+    ...(isExtraService(mailServiceOf(draft.mail_service)) ? { mailService: mailServiceOf(draft.mail_service) as CertifiedMailService } : {})
   };
 }
 

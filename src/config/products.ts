@@ -108,7 +108,7 @@ export function mailServiceOf(value: string | null | undefined): MailService | u
 }
 
 /** The extra services PostGrid sells a letter (#625), exactly the CertifiedMailService union. */
-const EXTRA_SERVICES = ['certified', 'certified_return_receipt'] as const;
+export const EXTRA_SERVICES = ['certified', 'certified_return_receipt'] as const;
 
 // Compile-time: every listed value is an extra service, and every extra service is listed.
 type UnlistedExtraService = Exclude<CertifiedMailService, (typeof EXTRA_SERVICES)[number]>;

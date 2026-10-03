@@ -704,6 +704,9 @@ describe('arrive-by in the served schemas (#535)', () => {
     // And the postcard's collage photos (#616).
     vi.stubEnv('LETTER_IRL_POSTCARD_COLLAGES_ENABLED', 'true');
     vi.stubEnv('LETTER_IRL_SIGNATURES_ENABLED', 'true');
+    // And certified mail (#625), so no mail service is withheld from a letter.
+    vi.stubEnv('LETTER_IRL_CERTIFIED_MAIL_ENABLED', 'true');
+    vi.stubEnv('JIT_PURCHASE_ENABLED', 'true');
     for (const name of PREVIEWS) {
       const served = getServedInputSchema(name) as Record<string, { description?: string }>;
       // On: the raw shape, as declared.

@@ -76,7 +76,7 @@ describe("Compatibility manifest", () => {
   it("should keep the checked-in manifest.json snapshot in sync", () => {
     // Generated as production is: arrive-by (#535), stationery (#563), room to
     // write (#586), the postcard sizes (#594), address requests (#604) and
-    // signatures (#608) off.
+    // signatures (#608) and certified mail (#625) off.
     vi.stubEnv("LETTER_IRL_ARRIVE_BY_ENABLED", "");
     vi.stubEnv("LETTER_IRL_STATIONERY_ENABLED", "");
     vi.stubEnv("LETTER_IRL_ROOM_TO_WRITE_ENABLED", "");
@@ -85,6 +85,7 @@ describe("Compatibility manifest", () => {
     vi.stubEnv("LETTER_IRL_POSTCARD_COLLAGES_ENABLED", "");
     vi.stubEnv("LETTER_IRL_ADDRESS_REQUESTS_ENABLED", "");
     vi.stubEnv("LETTER_IRL_SIGNATURES_ENABLED", "");
+    vi.stubEnv("LETTER_IRL_CERTIFIED_MAIL_ENABLED", "");
     const snapshot = fs.readFileSync(manifestPath, "utf-8");
     const previousPublicBaseUrl = process.env.LETTER_IRL_PUBLIC_BASE_URL;
     process.env.LETTER_IRL_PUBLIC_BASE_URL = "https://api.letterirl.com";

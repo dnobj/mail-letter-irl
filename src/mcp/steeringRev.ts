@@ -152,5 +152,15 @@
  *     in its answer. The output field is declared whatever the flag says (the
  *     output schema is closed), so production's postcard preview lists it
  *     too, and no deployment ever returns it without a collage.
+ * r38: certified mail (#625). While LETTER_IRL_CERTIFIED_MAIL_ENABLED is on
+ *     with Pay & Send, the three letter previews take mailService (certified,
+ *     or certified_return_receipt with an electronic return receipt), and say
+ *     in their descriptions, output and narration that certified mail is paid
+ *     with Pay & Send, never a pack or a gift letter. The output field is
+ *     declared whatever the flag says (the output schema is closed), so
+ *     production's letter previews and request_send list it too, and no
+ *     deployment returns it for an ordinary letter. request_send's link words
+ *     and the how-to-send words give a certified letter its own sentence, not
+ *     the pack rule's.
  */
-export const STEERING_COPY_REV = 37;
+export const STEERING_COPY_REV = 38;

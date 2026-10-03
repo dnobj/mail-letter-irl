@@ -2,6 +2,8 @@ import { z } from "zod";
 import { preprocessImageFileElement, preprocessImageFileParam, preprocessPhotoList } from "./utils/imageFileParam.js";
 import { STATIONERY_THEMES } from "./render/stationery.js";
 import { MAX_LETTER_PAGES } from "./render/geometry.js";
+import { MAIL_SERVICES } from "./config/certifiedMail.js";
+import { EXTRA_SERVICES } from "./config/products.js";
 
 export const addressZ = z.object({
   name: z.string(),
@@ -125,6 +127,23 @@ const previewSignatureOutputZ = z.object({
   source: z.enum(["asked", "remembered", "none_saved"]).describe(SIGNATURE_SOURCE_DESCRIPTION)
 });
 
+// The letter previews' mail service (#625): withheld while certified mail is not
+// offered (withheldInputKeys), as the signature is.
+export const PREVIEW_MAIL_SERVICE_DESCRIPTION =
+  "Optional. How the letter travels: standard (the default), certified (USPS Certified Mail, which gives a tracking number), " +
+  "or certified_return_receipt (Certified Mail with an electronic return receipt). Certified mail costs more and is paid with Pay & Send: " +
+  "no letter pack and no gift letter pays for it. Leave it out for an ordinary letter.";
+// A client that fills an unset field with null or an empty string means no service, as it does for the
+// stationery: an ordinary letter, never a certified one.
+const noneForNullOrEmpty = (value: unknown): unknown => (value === null || value === '' ? undefined : value);
+const previewMailServiceZ = z.preprocess(noneForNullOrEmpty, z.enum(MAIL_SERVICES).optional()).describe(PREVIEW_MAIL_SERVICE_DESCRIPTION);
+
+/** What a letter preview's output says when it is certified mail (#625): which service. Absent for an ordinary letter. */
+export const PREVIEW_MAIL_SERVICE_OUTPUT_DESCRIPTION =
+  "Present only when the letter goes as certified mail: certified, or certified_return_receipt (with an electronic return receipt). Paid with Pay & Send.";
+// The two services of a certified letter: the one list the code ties to the MailService type (products.ts).
+const CERTIFIED_MAIL_SERVICES = EXTRA_SERVICES;
+
 // Text-only letter schema
 export const quoteAndPreviewInputZ = z.object({
   sender: addressZ.optional(),  // Optional - will use saved return address if not provided
@@ -136,7 +155,8 @@ export const quoteAndPreviewInputZ = z.object({
   stationery: stationeryZ,
   monogram: monogramZ,
   headline: headlineZ,
-  signature: previewSignatureZ
+  signature: previewSignatureZ,
+  mailService: previewMailServiceZ
 });
 
 // ============================================================================
@@ -203,7 +223,8 @@ export const quoteAndPreviewLetterWithHeaderImageInputZ = z.object({
   stationery: stationeryZ,
   monogram: monogramZ,
   headline: headlineZ,
-  signature: previewSignatureZ
+  signature: previewSignatureZ,
+  mailService: previewMailServiceZ
 });
 
 // Letter with inline image (image after signature, like enclosing a photo)
@@ -221,7 +242,8 @@ export const quoteAndPreviewLetterWithImageInputZ = z.object({
   stationery: stationeryZ,
   monogram: monogramZ,
   headline: headlineZ,
-  signature: previewSignatureZ
+  signature: previewSignatureZ,
+  mailService: previewMailServiceZ
 });
 
 export const sendLetterInputZ = z.object({
@@ -650,6 +672,7 @@ export const quoteAndPreviewOutputZ = z.object({
   arrivalWindow: arrivalWindowZ.optional().describe(ARRIVAL_WINDOW_DESCRIPTION),
   stationery: previewStationeryZ.optional().describe(PREVIEW_STATIONERY_DESCRIPTION),
   signature: previewSignatureOutputZ.optional().describe(PREVIEW_SIGNATURE_OUTPUT_DESCRIPTION),
+  mailService: z.enum(CERTIFIED_MAIL_SERVICES).optional().describe(PREVIEW_MAIL_SERVICE_OUTPUT_DESCRIPTION),
   pages: z.number().int().min(2).max(MAX_LETTER_PAGES).optional().describe(PREVIEW_PAGES_DESCRIPTION),
   wordsVersion: z.string().optional().describe(WORDS_VERSION_DESCRIPTION)
 });
@@ -963,7 +986,8 @@ export const requestSendOutputZ = z.object({
   paidPerSend: z
     .literal(true)
     .optional()
-    .describe("Present when the person pays for it with Pay & Send on that page: letter packs and gift letters pay only for one-page letters and 6x9 postcards")
+    .describe("Present when the person pays for it with Pay & Send on that page: letter packs and gift letters pay only for one-page letters and 6x9 postcards, and never for certified mail"),
+  mailService: z.enum(CERTIFIED_MAIL_SERVICES).optional().describe(PREVIEW_MAIL_SERVICE_OUTPUT_DESCRIPTION)
 });
 
 export const cancelScheduledMailOutputZ = z.object({

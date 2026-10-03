@@ -41,12 +41,16 @@ import {
   SIGNATURE_REMOVED_DESCRIPTION,
   PREVIEW_SIGNATURE_DESCRIPTION,
   PREVIEW_SIGNATURE_OUTPUT_DESCRIPTION,
+  PREVIEW_MAIL_SERVICE_DESCRIPTION,
+  PREVIEW_MAIL_SERVICE_OUTPUT_DESCRIPTION,
   SIGNATURE_SOURCE_DESCRIPTION,
   SET_LETTER_SIGNATURE_DESCRIPTION,
   SET_LETTER_SIGNATURE_CAN_SEND_DESCRIPTION,
   GET_DRAFT_STATUS_SIGNATURE_DESCRIPTION
 } from "./zodSchemas.js";
 import { STATIONERY_THEMES } from "./render/stationery.js";
+import { MAIL_SERVICES } from "./config/certifiedMail.js";
+import { EXTRA_SERVICES } from "./config/products.js";
 
 /** Arrive-by (#535): the preview's input, and what its output says. */
 const arriveBySchema = { type: "string", description: ARRIVE_BY_DESCRIPTION } as const;
@@ -139,7 +143,8 @@ export const quoteAndPreviewLetterTextOnlyInputSchema: JsonSchema = {
     },
     arriveBy: arriveBySchema,
     ...stationeryInputSchemas,
-    signature: { type: "boolean", description: PREVIEW_SIGNATURE_DESCRIPTION }
+    signature: { type: "boolean", description: PREVIEW_SIGNATURE_DESCRIPTION },
+    mailService: { type: "string", enum: [...MAIL_SERVICES], description: PREVIEW_MAIL_SERVICE_DESCRIPTION }
   }
 };
 
@@ -183,7 +188,8 @@ export const quoteAndPreviewLetterWithHeaderImageInputSchema: JsonSchema = {
     },
     arriveBy: arriveBySchema,
     ...stationeryInputSchemas,
-    signature: { type: "boolean", description: PREVIEW_SIGNATURE_DESCRIPTION }
+    signature: { type: "boolean", description: PREVIEW_SIGNATURE_DESCRIPTION },
+    mailService: { type: "string", enum: [...MAIL_SERVICES], description: PREVIEW_MAIL_SERVICE_DESCRIPTION }
   }
 };
 
@@ -223,7 +229,8 @@ export const quoteAndPreviewLetterWithImageInputSchema: JsonSchema = {
     },
     arriveBy: arriveBySchema,
     ...stationeryInputSchemas,
-    signature: { type: "boolean", description: PREVIEW_SIGNATURE_DESCRIPTION }
+    signature: { type: "boolean", description: PREVIEW_SIGNATURE_DESCRIPTION },
+    mailService: { type: "string", enum: [...MAIL_SERVICES], description: PREVIEW_MAIL_SERVICE_DESCRIPTION }
   }
 };
 
@@ -310,6 +317,7 @@ export const quoteAndPreviewOutputSchema: JsonSchema = {
     arrivalWindow: arrivalWindowSchema,
     stationery: previewStationerySchema,
     signature: previewSignatureOutputSchema,
+    mailService: { type: "string", enum: [...EXTRA_SERVICES], description: PREVIEW_MAIL_SERVICE_OUTPUT_DESCRIPTION },
     pages: { type: "integer", minimum: 2, maximum: MAX_LETTER_PAGES, description: PREVIEW_PAGES_DESCRIPTION },
     wordsVersion: { type: "string", description: WORDS_VERSION_DESCRIPTION },
     previewHtml: { type: "string" },
@@ -1042,8 +1050,9 @@ export const requestSendOutputSchema: JsonSchema = {
     paidPerSend: {
       type: "boolean",
       const: true,
-      description: "Present when the person pays for it with Pay & Send on that page: letter packs and gift letters pay only for one-page letters and 6x9 postcards"
-    }
+      description: "Present when the person pays for it with Pay & Send on that page: letter packs and gift letters pay only for one-page letters and 6x9 postcards, and never for certified mail"
+    },
+    mailService: { type: "string", enum: [...EXTRA_SERVICES], description: PREVIEW_MAIL_SERVICE_OUTPUT_DESCRIPTION }
   }
 };
 

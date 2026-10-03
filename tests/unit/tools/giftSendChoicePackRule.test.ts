@@ -55,4 +55,14 @@ describe('a gift for mail no gift letter pays for (#579)', () => {
       resolveGiftSendChoice({ userId: 'user-1', requested: true, balanceCanPay: false, giftCanPay: false })
     ).rejects.toThrow('Gift letters are not available right now.');
   });
+
+  it('does not send certified mail to the balance when gift letters are off: the balance never pays for it', async () => {
+    vi.stubEnv('LETTER_IRL_GIFT_LETTERS_ENABLED', 'false');
+    await expect(
+      resolveGiftSendChoice({ userId: 'user-1', requested: true, balanceCanPay: false, giftCanPay: false, certified: true })
+    ).rejects.toThrow('Gift letters are not available right now. Leave sendAsGift out and pay for it with Pay & Send.');
+    await expect(
+      resolveGiftSendChoice({ userId: 'user-1', requested: true, balanceCanPay: false, giftCanPay: false })
+    ).rejects.toThrow('Gift letters are not available right now. Leave sendAsGift out to send from the balance.');
+  });
 });

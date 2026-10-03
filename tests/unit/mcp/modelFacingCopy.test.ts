@@ -30,7 +30,7 @@ import { sendToolDescription } from '../../../src/tools/previewSendStep.js';
 
 // ChatGPT's list is the full one: an app that takes no purchases is not
 // offered the checkouts (#475). The other apps' text has its own suite below.
-// Listed with address requests (#604) and signatures (#608) offered, so the
+// Listed with address requests (#604), signatures (#608) and certified mail (#625) offered, so the
 // copy of the tools those flags list meets these rules too (#605 review round 1).
 const ADDRESS_REQUEST_TOOLS = ['request_address', 'get_address_request', 'cancel_address_request'];
 const SIGNATURE_TOOLS = ['set_signature', 'get_signature', 'clear_signature'];
@@ -38,6 +38,8 @@ const tools = (() => {
   const switches: Record<string, string> = {
     LETTER_IRL_ADDRESS_REQUESTS_ENABLED: 'true',
     LETTER_IRL_SIGNATURES_ENABLED: 'true',
+    LETTER_IRL_CERTIFIED_MAIL_ENABLED: 'true',
+    JIT_PURCHASE_ENABLED: 'true',
     LETTER_IRL_PRINT_RENDERER: 'pdf'
   };
   const before = Object.fromEntries(Object.keys(switches).map(name => [name, process.env[name]]));

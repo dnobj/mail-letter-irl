@@ -122,6 +122,9 @@ describe('arriveBy in tools/list', () => {
     vi.stubEnv('LETTER_IRL_PRINT_RENDERER', 'pdf');
     // And the letter previews' signature while signatures are not (#608).
     vi.stubEnv('LETTER_IRL_SIGNATURES_ENABLED', 'true');
+    // And certified mail (#625), so no mail service is withheld from a letter.
+    vi.stubEnv('LETTER_IRL_CERTIFIED_MAIL_ENABLED', 'true');
+    vi.stubEnv('JIT_PURCHASE_ENABLED', 'true');
     const on = await listedTools();
     for (const name of PREVIEWS) {
       expect((off.get(name)?.inputSchema as { additionalProperties?: unknown }).additionalProperties, name).toBe(true);

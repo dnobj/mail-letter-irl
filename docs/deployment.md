@@ -575,6 +575,9 @@ Configure development and production independently:
     `LETTER_IRL_OUTBOX_DISPATCH_ENABLED=false` on both. After migration 053, re-run
     `npm run admin:provision-access` in each environment: the admin panel's provider status sync (the operator
     role) now writes `letters.carrier_tracking_number`.
+    And turn it on only when the whole path is in: the previews' words promise a tracking number, so the orders
+    must show it first (`get_order_status`, `list_orders` and `GET /api/letters`, part 5), and the letter card's
+    pay note must not give a certified letter the one-page pack rule (part 6).
 - `JIT_CURRENCY` (amounts come from the Stripe Prices above, not from variables).
   Pay & Send may use a different currency from the packs; each product's Price
   is validated against its own expected currency.
