@@ -27,6 +27,7 @@ import type {
   PostcardSize,
   LetterLayoutType
 } from './types.js';
+import type { CertifiedMailService } from '../types.js';
 import { writeDiagnostic } from '../../utils/diagnosticLog.js';
 import {
   buildGiftLetterPage,
@@ -119,12 +120,17 @@ function letterForm(fields: {
   color: boolean;
   doubleSided: boolean;
   pdf: Buffer;
+  extraService?: CertifiedMailService;
 }): FormData {
   const form = contactForm(fields.to, fields.from);
   form.append('description', fields.description);
   form.append('color', String(fields.color));
   form.append('doubleSided', String(fields.doubleSided));
   form.append('addressPlacement', 'top_first_page');
+  // Certified mail (#625): `certified`, or `certified_return_receipt`, exactly
+  // as PostGrid names them. Absent for standard mail, so a standard letter's
+  // request is byte for byte what it was.
+  if (fields.extraService) form.append('extraService', fields.extraService);
   form.append('pdf', new Blob([new Uint8Array(fields.pdf)], { type: 'application/pdf' }), 'letter.pdf');
   return form;
 }
@@ -289,6 +295,7 @@ interface PostGridLetterRequest {
   color?: boolean;
   doubleSided?: boolean;
   addressPlacement?: 'top_first_page' | 'insert_blank_page';
+  extraService?: CertifiedMailService;
 }
 
 interface PostGridLetterResponse {
@@ -448,7 +455,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
           'POST',
           '/letters',
           'create_letter',
-          letterForm({ to, from, description, color, doubleSided, pdf }),
+          letterForm({ to, from, description, color, doubleSided, pdf, extraService: params.extraService }),
           params.idempotencyKey,
           isUsableSubmissionResponse,
           PDF_UPLOAD_TIMEOUT_MS
@@ -472,7 +479,8 @@ export class PostGridProvider implements LetterFulfillmentProvider {
           description,
           color,
           doubleSided,
-          addressPlacement: 'top_first_page'
+          addressPlacement: 'top_first_page',
+          ...(params.extraService ? { extraService: params.extraService } : {})
         };
 
         response = await this.apiRequest<PostGridLetterResponse>(
@@ -578,6 +586,11 @@ export class PostGridProvider implements LetterFulfillmentProvider {
           : undefined,
         events: [] // PostGrid doesn't provide detailed events in basic API
       };
+
+      // PostGrid sets the USPS number some time after it accepts a certified
+      // letter (#625). Read as text, never trusted as anything else.
+      const carrierNumber = typeof response.trackingNumber === 'string' ? response.trackingNumber.trim() : '';
+      if (carrierNumber) letterStatus.carrierTrackingNumber = carrierNumber;
 
       // Add tracking URL if available
       if (response.trackingUrl) {

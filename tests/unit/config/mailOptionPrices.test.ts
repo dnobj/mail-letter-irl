@@ -6,11 +6,13 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  CERTIFIED_MAIL_FLAG,
   JIT_OPTION_PRICE_ENV_VARS,
   JIT_PRICE_ENV_VARS,
   JIT_PRODUCTS,
   POSTCARD_SIZES_FLAG,
   ROOM_TO_WRITE_FLAG,
+  draftMailOption,
   getConfiguredProduct,
   getConfiguredProducts,
   isConfiguredProductCode,
@@ -22,7 +24,14 @@ import {
 
 afterEach(() => vi.unstubAllEnvs());
 
-const OPTION_CODES = ['jit-letter-2-pages', 'jit-letter-3-pages', 'jit-postcard-4x6', 'jit-postcard-11x6'];
+const OPTION_CODES = [
+  'jit-letter-2-pages',
+  'jit-letter-3-pages',
+  'jit-postcard-4x6',
+  'jit-postcard-11x6',
+  'jit-letter-certified',
+  'jit-letter-certified-receipt'
+];
 
 function product(code: string) {
   const found = JIT_PRODUCTS.find(candidate => candidate.productCode === code);
@@ -40,7 +49,10 @@ describe('the price table (#578)', () => {
       ['jit-letter-2-pages', 599],
       ['jit-letter-3-pages', 699],
       ['jit-postcard-4x6', 399],
-      ['jit-postcard-11x6', 599]
+      ['jit-postcard-11x6', 599],
+      // Certified mail (#625): the proposal on the issue, the owner's call.
+      ['jit-letter-certified', 1199],
+      ['jit-letter-certified-receipt', 1499]
     ]);
   });
 
@@ -54,10 +66,17 @@ describe('the price table (#578)', () => {
       ['Pay & Send One Two-Page Letter', ROOM_TO_WRITE_FLAG, 'STRIPE_JIT_LETTER_TWO_PAGES_PRICE_ID'],
       ['Pay & Send One Three-Page Letter', ROOM_TO_WRITE_FLAG, 'STRIPE_JIT_LETTER_THREE_PAGES_PRICE_ID'],
       ['Pay & Send One 4x6 Postcard', POSTCARD_SIZES_FLAG, 'STRIPE_JIT_POSTCARD_4X6_PRICE_ID'],
-      ['Pay & Send One 11x6 Postcard', POSTCARD_SIZES_FLAG, 'STRIPE_JIT_POSTCARD_11X6_PRICE_ID']
+      ['Pay & Send One 11x6 Postcard', POSTCARD_SIZES_FLAG, 'STRIPE_JIT_POSTCARD_11X6_PRICE_ID'],
+      ['Pay & Send One Certified Mail Letter', CERTIFIED_MAIL_FLAG, 'STRIPE_JIT_LETTER_CERTIFIED_PRICE_ID'],
+      [
+        'Pay & Send One Certified Mail Letter with Return Receipt',
+        CERTIFIED_MAIL_FLAG,
+        'STRIPE_JIT_LETTER_CERTIFIED_RECEIPT_PRICE_ID'
+      ]
     ]);
     expect(ROOM_TO_WRITE_FLAG).toBe('LETTER_IRL_ROOM_TO_WRITE_ENABLED');
     expect(POSTCARD_SIZES_FLAG).toBe('LETTER_IRL_POSTCARD_SIZES_ENABLED');
+    expect(CERTIFIED_MAIL_FLAG).toBe('LETTER_IRL_CERTIFIED_MAIL_ENABLED');
     // The products sold before have no flag.
     expect(product('jit-letter').enabledBy).toBeUndefined();
     expect(product('jit-postcard').enabledBy).toBeUndefined();
@@ -69,7 +88,9 @@ describe('the price table (#578)', () => {
       { priceEnv: 'STRIPE_JIT_LETTER_TWO_PAGES_PRICE_ID', flag: ROOM_TO_WRITE_FLAG },
       { priceEnv: 'STRIPE_JIT_LETTER_THREE_PAGES_PRICE_ID', flag: ROOM_TO_WRITE_FLAG },
       { priceEnv: 'STRIPE_JIT_POSTCARD_4X6_PRICE_ID', flag: POSTCARD_SIZES_FLAG },
-      { priceEnv: 'STRIPE_JIT_POSTCARD_11X6_PRICE_ID', flag: POSTCARD_SIZES_FLAG }
+      { priceEnv: 'STRIPE_JIT_POSTCARD_11X6_PRICE_ID', flag: POSTCARD_SIZES_FLAG },
+      { priceEnv: 'STRIPE_JIT_LETTER_CERTIFIED_PRICE_ID', flag: CERTIFIED_MAIL_FLAG },
+      { priceEnv: 'STRIPE_JIT_LETTER_CERTIFIED_RECEIPT_PRICE_ID', flag: CERTIFIED_MAIL_FLAG }
     ]);
   });
 });
@@ -185,5 +206,113 @@ describe('what a pack or a gift letter pays for (#579)', () => {
     [{ mailType: 'postcard' as const, pages: 3 }, true]
   ])('%o: %s', (option, pays) => {
     expect(isPackPayable(option)).toBe(pays);
+  });
+});
+
+describe('certified mail (#625)', () => {
+  const CERTIFIED = { mailType: 'letter' as const, mailService: 'certified' as const };
+  const RECEIPT = { mailType: 'letter' as const, mailService: 'certified_return_receipt' as const };
+
+  it('prices a certified letter by its service, whatever its pages', () => {
+    for (const pages of [undefined, 1, 2, 3]) {
+      const extra = pages === undefined ? {} : { pages };
+      expect(jitProductMatching({ ...CERTIFIED, ...extra })?.productCode, `certified, ${pages} pages`).toBe('jit-letter-certified');
+      expect(jitProductMatching({ ...RECEIPT, ...extra })?.productCode, `receipt, ${pages} pages`).toBe(
+        'jit-letter-certified-receipt'
+      );
+    }
+  });
+
+  it('prices a letter that says standard by its pages, as before', () => {
+    expect(jitProductMatching({ mailType: 'letter', mailService: 'standard' })?.productCode).toBe('jit-letter');
+    expect(jitProductMatching({ mailType: 'letter', mailService: 'standard', pages: 2 })?.productCode).toBe('jit-letter-2-pages');
+  });
+
+  it('never prices a standard letter as a certified one', () => {
+    for (const pages of [1, 2, 3]) {
+      expect(jitProductMatching({ mailType: 'letter', pages })?.mailService, `${pages} pages`).toBeUndefined();
+    }
+  });
+
+  it("has no price for a certified postcard, rather than a plain postcard's", () => {
+    for (const mailService of ['certified', 'certified_return_receipt'] as const) {
+      for (const postcardSize of [undefined, '6x4', '6x9', '6x11'] as const) {
+        const size = postcardSize === undefined ? {} : { postcardSize };
+        expect(jitProductMatching({ mailType: 'postcard', mailService, ...size }), `${mailService} ${postcardSize}`).toBeNull();
+      }
+    }
+  });
+
+  it('sells certified mail only while its own flag is on, and no other flag sells it', () => {
+    expect(jitProductFor(CERTIFIED)).toBeNull();
+    expect(jitProductFor(RECEIPT)).toBeNull();
+
+    vi.stubEnv(ROOM_TO_WRITE_FLAG, 'true');
+    vi.stubEnv(POSTCARD_SIZES_FLAG, 'true');
+    expect(jitProductFor(CERTIFIED)).toBeNull();
+    expect(jitProductFor(RECEIPT)).toBeNull();
+
+    vi.stubEnv(CERTIFIED_MAIL_FLAG, 'true');
+    expect(jitProductFor(CERTIFIED)?.productCode).toBe('jit-letter-certified');
+    expect(jitProductFor(RECEIPT)?.productCode).toBe('jit-letter-certified-receipt');
+  });
+
+  it('is the only thing the certified flag sells', () => {
+    vi.stubEnv(CERTIFIED_MAIL_FLAG, 'true');
+    expect(jitProductFor({ mailType: 'letter', pages: 2 })).toBeNull();
+    expect(jitProductFor({ mailType: 'postcard', postcardSize: '6x4' })).toBeNull();
+    expect(jitProductFor({ mailType: 'letter' })?.productCode).toBe('jit-letter');
+  });
+
+  it('is never paid for by a pack or a gift letter, whatever the pages', () => {
+    for (const option of [CERTIFIED, RECEIPT, { ...CERTIFIED, pages: 3 }, { ...RECEIPT, pages: 2 }]) {
+      expect(isPackPayable(option), JSON.stringify(option)).toBe(false);
+    }
+    // Standard, spelled out, is the pack's as before.
+    expect(isPackPayable({ mailType: 'letter', mailService: 'standard' })).toBe(true);
+    expect(isPackPayable({ mailType: 'letter', mailService: 'standard', pages: 2 })).toBe(false);
+  });
+
+  it('is configured as a product only while Pay & Send and its flag are on', () => {
+    const base = { JIT_PURCHASE_ENABLED: 'true' };
+    expect(isConfiguredProductCode('jit-letter-certified', base)).toBe(false);
+    expect(isConfiguredProductCode('jit-letter-certified', { [CERTIFIED_MAIL_FLAG]: 'true' })).toBe(false);
+    const on = { ...base, [CERTIFIED_MAIL_FLAG]: 'true' };
+    expect(isConfiguredProductCode('jit-letter-certified', on)).toBe(true);
+    expect(isConfiguredProductCode('jit-letter-certified-receipt', on)).toBe(true);
+    expect(getConfiguredProduct('jit-letter-certified', { ...on, STRIPE_JIT_LETTER_CERTIFIED_PRICE_ID: ' price_c ' })).toMatchObject({
+      priceId: 'price_c',
+      expectedAmountCents: 1199,
+      group: 'jit'
+    });
+    const receiptEnv = { ...on, STRIPE_JIT_LETTER_CERTIFIED_RECEIPT_PRICE_ID: 'price_r' };
+    expect(getConfiguredProduct('jit-letter-certified-receipt', receiptEnv)).toMatchObject({
+      priceId: 'price_r',
+      expectedAmountCents: 1499
+    });
+  });
+});
+
+describe('draftMailOption reads the service (#625)', () => {
+  it.each([
+    [{ mail_type: 'letter', mail_service: 'certified' }, { mailType: 'letter', mailService: 'certified' }],
+    [
+      { mail_type: 'letter', mail_service: 'certified_return_receipt', pages: 3 },
+      { mailType: 'letter', pages: 3, mailService: 'certified_return_receipt' }
+    ],
+    [{ mail_type: 'letter', mail_service: 'standard' }, { mailType: 'letter' }],
+    [{ mail_type: 'letter', mail_service: null }, { mailType: 'letter' }],
+    [{ mail_type: 'letter' }, { mailType: 'letter' }],
+    [{}, { mailType: 'letter' }],
+    // Anything else is read as standard; the column's CHECK keeps it from existing.
+    [{ mail_type: 'letter', mail_service: 'express' }, { mailType: 'letter' }],
+    [{ mail_type: 'letter', mail_service: '' }, { mailType: 'letter' }],
+    // A postcard is never certified, whatever a row says.
+    [
+      { mail_type: 'postcard', postcard_size: '6x4', mail_service: 'certified' },
+      { mailType: 'postcard', postcardSize: '6x4' }
+    ]
+  ])('%o is %o', (row, option) => {
+    expect(draftMailOption(row)).toEqual(option);
   });
 });

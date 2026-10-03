@@ -554,7 +554,9 @@ Configure development and production independently:
 - the mail options' prices, only while their flags are on (#578):
   `STRIPE_JIT_LETTER_TWO_PAGES_PRICE_ID` and `STRIPE_JIT_LETTER_THREE_PAGES_PRICE_ID` with
   `LETTER_IRL_ROOM_TO_WRITE_ENABLED` (which also lets the letter previews run to three pages, #586), and `STRIPE_JIT_POSTCARD_4X6_PRICE_ID` and
-  `STRIPE_JIT_POSTCARD_11X6_PRICE_ID` with `LETTER_IRL_POSTCARD_SIZES_ENABLED`
+  `STRIPE_JIT_POSTCARD_11X6_PRICE_ID` with `LETTER_IRL_POSTCARD_SIZES_ENABLED`, and
+  `STRIPE_JIT_LETTER_CERTIFIED_PRICE_ID` and `STRIPE_JIT_LETTER_CERTIFIED_RECEIPT_PRICE_ID` with
+  `LETTER_IRL_CERTIFIED_MAIL_ENABLED` (certified mail, #625)
   - In Stripe test mode, make every option's Price in one command (#624). Set `STRIPE_SECRET_KEY` in your own shell to a
     Stripe **test** key (never in a chat; use the Stripe account the development services use) and run
     `npx tsx scripts/create-option-prices.ts --out dev-option-prices.txt`; add `--dry-run` to look first. It finds or

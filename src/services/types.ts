@@ -772,6 +772,18 @@ export type MailType = 'letter' | 'postcard';
 
 export type PostcardSize = '6x4' | '6x9' | '6x11';
 
+/**
+ * How a letter travels (#625). Standard is first-class mail. Certified adds USPS
+ * Certified Mail, with a tracking number and a signature at the door; the return
+ * receipt adds an electronic copy of that signature. PostGrid names the last two
+ * `certified` and `certified_return_receipt`, and so do we: the value goes to the
+ * provider as it is. Letters only: never a postcard, never a gift send.
+ */
+export type MailService = 'standard' | 'certified' | 'certified_return_receipt';
+
+/** The services that cost extra: everything but standard. */
+export type CertifiedMailService = Exclude<MailService, 'standard'>;
+
 // ============================================================================
 // Letter Layout Types (US-LAYOUT-01 through US-LAYOUT-06)
 // ============================================================================

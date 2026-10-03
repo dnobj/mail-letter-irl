@@ -322,6 +322,12 @@ describe('validateDeploymentConfig in production', () => {
         'STRIPE_JIT_POSTCARD_4X6_PRICE_ID must be a Stripe price id (price_...)',
         'STRIPE_JIT_POSTCARD_11X6_PRICE_ID is required when JIT_PURCHASE_ENABLED=true and LETTER_IRL_POSTCARD_SIZES_ENABLED is on'
       ]);
+      // Certified mail (#625) is one more option with two prices.
+      const certifiedOn = env({ ...JIT_ON, LETTER_IRL_CERTIFIED_MAIL_ENABLED: 'true' });
+      expect(jitFindings(certifiedOn).map(f => [f.severity, f.message])).toEqual([
+        ['error', 'STRIPE_JIT_LETTER_CERTIFIED_PRICE_ID is required when JIT_PURCHASE_ENABLED=true and LETTER_IRL_CERTIFIED_MAIL_ENABLED is on'],
+        ['error', 'STRIPE_JIT_LETTER_CERTIFIED_RECEIPT_PRICE_ID is required when JIT_PURCHASE_ENABLED=true and LETTER_IRL_CERTIFIED_MAIL_ENABLED is on']
+      ]);
     });
 
     it('is satisfied once the prices are set, and only warns outside production', () => {
@@ -332,12 +338,23 @@ describe('validateDeploymentConfig in production', () => {
         STRIPE_JIT_LETTER_THREE_PAGES_PRICE_ID: 'price_three_unit_fixture'
       });
       expect(jitFindings(priced)).toEqual([]);
+      const certifiedPriced = env({
+        ...JIT_ON,
+        LETTER_IRL_CERTIFIED_MAIL_ENABLED: 'true',
+        STRIPE_JIT_LETTER_CERTIFIED_PRICE_ID: 'price_certified_unit_fixture',
+        STRIPE_JIT_LETTER_CERTIFIED_RECEIPT_PRICE_ID: 'price_receipt_unit_fixture'
+      });
+      expect(jitFindings(certifiedPriced)).toEqual([]);
       const dev = env({ ...JIT_ON, LETTER_IRL_POSTCARD_SIZES_ENABLED: 'true' }, VALID_DEV);
       expect(jitFindings(dev).map(f => f.severity)).toEqual(['warning', 'warning']);
     });
 
-    it('lists the two flags for the preflight to show, on both services, never demanded', () => {
-      for (const name of ['LETTER_IRL_ROOM_TO_WRITE_ENABLED', 'LETTER_IRL_POSTCARD_SIZES_ENABLED']) {
+    it('lists the three flags for the preflight to show, on both services, never demanded', () => {
+      for (const name of [
+        'LETTER_IRL_ROOM_TO_WRITE_ENABLED',
+        'LETTER_IRL_POSTCARD_SIZES_ENABLED',
+        'LETTER_IRL_CERTIFIED_MAIL_ENABLED'
+      ]) {
         expect(ENV_VAR_MANIFEST.find(entry => entry.name === name)).toEqual({
           name,
           requiredIn: 'production',
@@ -350,12 +367,13 @@ describe('validateDeploymentConfig in production', () => {
       // no finding names either flag, on either service.
       const flagsOff = env({
         LETTER_IRL_ROOM_TO_WRITE_ENABLED: 'false',
-        LETTER_IRL_POSTCARD_SIZES_ENABLED: 'false'
+        LETTER_IRL_POSTCARD_SIZES_ENABLED: 'false',
+        LETTER_IRL_CERTIFIED_MAIL_ENABLED: 'false'
       });
       for (const surface of ['server', 'maintenance'] as const) {
         for (const input of [VALID_PROD, flagsOff]) {
           const messages = validateDeploymentConfig(input, surface).findings.map(f => f.message).join('\n');
-          expect(messages).not.toMatch(/ROOM_TO_WRITE|POSTCARD_SIZES/);
+          expect(messages).not.toMatch(/ROOM_TO_WRITE|POSTCARD_SIZES|CERTIFIED_MAIL/);
         }
       }
     });
@@ -367,7 +385,9 @@ describe('validateDeploymentConfig in production', () => {
         ['STRIPE_JIT_LETTER_TWO_PAGES_PRICE_ID', 'when-jit-enabled', 'LETTER_IRL_ROOM_TO_WRITE_ENABLED', 'stripe.jit_config_incomplete'],
         ['STRIPE_JIT_LETTER_THREE_PAGES_PRICE_ID', 'when-jit-enabled', 'LETTER_IRL_ROOM_TO_WRITE_ENABLED', 'stripe.jit_config_incomplete'],
         ['STRIPE_JIT_POSTCARD_4X6_PRICE_ID', 'when-jit-enabled', 'LETTER_IRL_POSTCARD_SIZES_ENABLED', 'stripe.jit_config_incomplete'],
-        ['STRIPE_JIT_POSTCARD_11X6_PRICE_ID', 'when-jit-enabled', 'LETTER_IRL_POSTCARD_SIZES_ENABLED', 'stripe.jit_config_incomplete']
+        ['STRIPE_JIT_POSTCARD_11X6_PRICE_ID', 'when-jit-enabled', 'LETTER_IRL_POSTCARD_SIZES_ENABLED', 'stripe.jit_config_incomplete'],
+        ['STRIPE_JIT_LETTER_CERTIFIED_PRICE_ID', 'when-jit-enabled', 'LETTER_IRL_CERTIFIED_MAIL_ENABLED', 'stripe.jit_config_incomplete'],
+        ['STRIPE_JIT_LETTER_CERTIFIED_RECEIPT_PRICE_ID', 'when-jit-enabled', 'LETTER_IRL_CERTIFIED_MAIL_ENABLED', 'stripe.jit_config_incomplete']
       ]);
     });
   });

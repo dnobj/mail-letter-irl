@@ -34,27 +34,31 @@ import { createHash } from 'node:crypto';
  * operational step - it adds a review.
  */
 
-import type { MailType, PostcardSize } from '../services/types.js';
+import type { CertifiedMailService, MailService, MailType, PostcardSize } from '../services/types.js';
 import { offUnlessExplicitlyEnabled } from '../utils/envSettings.js';
 
 /**
  * The flags that sell the mail options added after the one-page letter and the
  * 6x9 postcard (#578). Each also switches its option on (room to write, the
- * postcard sizes), so an option is never sold without its price, nor priced
- * without being sold. Off unless set: production waits for the owner's word.
+ * postcard sizes, certified mail), so an option is never sold without its
+ * price, nor priced without being sold. Off unless set: production waits for
+ * the owner's word.
  */
 export const ROOM_TO_WRITE_FLAG = 'LETTER_IRL_ROOM_TO_WRITE_ENABLED';
 export const POSTCARD_SIZES_FLAG = 'LETTER_IRL_POSTCARD_SIZES_ENABLED';
+export const CERTIFIED_MAIL_FLAG = 'LETTER_IRL_CERTIFIED_MAIL_ENABLED';
 
 /**
- * What a Pay & Send price depends on: the mail type, a letter's printed pages
- * and a postcard's size. Pages default to one and the size to 6x9, the only
- * mail sold before #578.
+ * What a Pay & Send price depends on: the mail type, a letter's printed pages,
+ * a postcard's size and how a letter travels. Pages default to one, the size to
+ * 6x9 and the service to standard, the only mail sold before #578.
  */
 export interface MailOption {
   readonly mailType: MailType;
   readonly pages?: number;
   readonly postcardSize?: PostcardSize;
+  /** Absent is standard. Only a letter is ever certified (#625). */
+  readonly mailService?: MailService;
 }
 
 /**
@@ -68,12 +72,26 @@ export function draftMailOption(draft: {
   mail_type?: string | null;
   postcard_size?: string | null;
   pages?: number | string | null;
+  mail_service?: string | null;
 }): MailOption {
   const mailType = (draft.mail_type || 'letter') as MailType;
   if (mailType === 'postcard') return { mailType, postcardSize: (draft.postcard_size || '6x9') as PostcardSize };
   // A SMALLINT comes back from pg as a number; anything else is read as its number.
   const pages = Number(draft.pages ?? 1);
-  return pages > 1 ? { mailType, pages } : { mailType };
+  // The column holds only these three values (a CHECK, #625); a reader that
+  // loads only part of the row must load `mail_service` too, or a certified
+  // letter is priced as a standard one.
+  const mailService = certifiedServiceOf(draft.mail_service);
+  return {
+    mailType,
+    ...(pages > 1 ? { pages } : {}),
+    ...(mailService ? { mailService } : {})
+  };
+}
+
+/** The extra service a stored value names; undefined for standard, null and anything else. */
+function certifiedServiceOf(value: string | null | undefined): CertifiedMailService | undefined {
+  return value === 'certified' || value === 'certified_return_receipt' ? value : undefined;
 }
 
 /**
@@ -148,7 +166,9 @@ export type JitProductCode =
   | 'jit-letter-2-pages'
   | 'jit-letter-3-pages'
   | 'jit-postcard-4x6'
-  | 'jit-postcard-11x6';
+  | 'jit-postcard-11x6'
+  | 'jit-letter-certified'
+  | 'jit-letter-certified-receipt';
 
 export interface JitProductDefinition {
   readonly productCode: JitProductCode;
@@ -157,6 +177,11 @@ export interface JitProductDefinition {
   readonly pages?: number;
   /** Postcards: the size, in PostGrid's terms ('6x4' is the 4x6, '6x11' the 11x6). */
   readonly postcardSize?: PostcardSize;
+  /**
+   * Letters: the extra service it sells (#625). Its price is flat, whatever the
+   * pages (one to three, held by the preview), so it has no `pages`.
+   */
+  readonly mailService?: CertifiedMailService;
   /**
    * The flag that sells it (#578). The two products sold before have none and
    * are sold whenever Pay & Send is.
@@ -269,6 +294,31 @@ export const JIT_PRODUCTS: readonly JitProductDefinition[] = [
     expectedAmountCents: 599,
     name: 'Pay & Send One 11x6 Postcard',
     description: 'Payment authorizes Letter IRL to print and mail this exact 11x6 postcard.'
+  },
+  // Certified mail (#625): PostGrid's `extraService`, on a letter of one to
+  // three pages. The prices are the proposal on the issue (the owner's call):
+  // PostGrid's public prices are $6.94 and $9.85, so these leave about $4.40
+  // after Stripe's fee. In development until the owner approves them.
+  {
+    productCode: 'jit-letter-certified',
+    mailType: 'letter',
+    mailService: 'certified',
+    enabledBy: CERTIFIED_MAIL_FLAG,
+    priceEnv: 'STRIPE_JIT_LETTER_CERTIFIED_PRICE_ID',
+    expectedAmountCents: 1199,
+    name: 'Pay & Send One Certified Mail Letter',
+    description: 'Payment authorizes Letter IRL to print and mail this exact letter as USPS Certified Mail.'
+  },
+  {
+    productCode: 'jit-letter-certified-receipt',
+    mailType: 'letter',
+    mailService: 'certified_return_receipt',
+    enabledBy: CERTIFIED_MAIL_FLAG,
+    priceEnv: 'STRIPE_JIT_LETTER_CERTIFIED_RECEIPT_PRICE_ID',
+    expectedAmountCents: 1499,
+    name: 'Pay & Send One Certified Mail Letter with Return Receipt',
+    description:
+      'Payment authorizes Letter IRL to print and mail this exact letter as USPS Certified Mail with an electronic return receipt.'
   }
 ] as const;
 
@@ -385,6 +435,8 @@ function configuredRow(
  * price. An unknown mail type is a letter, as it is priced.
  */
 export function isPackPayable(option: MailOption): boolean {
+  // Certified mail costs the carrier far more than a letter: never a pack's (#625).
+  if (option.mailService !== undefined && option.mailService !== 'standard') return false;
   return option.mailType === 'postcard'
     ? (option.postcardSize ?? '6x9') === '6x9'
     : (option.pages ?? 1) === 1;
@@ -399,12 +451,18 @@ export function jitProductMatching(option: MailOption): JitProductDefinition | n
   const mailType = JIT_PRODUCTS.some(product => product.mailType === option.mailType)
     ? option.mailType
     : JIT_PRODUCTS[0].mailType;
-  return JIT_PRODUCTS.find(candidate =>
-    candidate.mailType === mailType &&
-    (mailType === 'postcard'
-      ? candidate.postcardSize === (option.postcardSize ?? '6x9')
-      : candidate.pages === (option.pages ?? 1))
-  ) ?? null;
+  const service = option.mailService ?? 'standard';
+  return JIT_PRODUCTS.find(candidate => {
+    if (candidate.mailType !== mailType) return false;
+    if (mailType === 'postcard') {
+      // A postcard is never certified: a certified postcard has no price, rather than a plain one's.
+      return service === 'standard' && candidate.postcardSize === (option.postcardSize ?? '6x9');
+    }
+    // A certified letter is priced by its service, whatever its pages; every other letter by its pages.
+    return service === 'standard'
+      ? candidate.mailService === undefined && candidate.pages === (option.pages ?? 1)
+      : candidate.mailService === service;
+  }) ?? null;
 }
 
 /**

@@ -1,4 +1,5 @@
 import type { GiftCardContent } from '../giftCardRenderer.js';
+import type { CertifiedMailService } from '../types.js';
 
 /**
  * Letter Fulfillment Service Provider Types
@@ -69,8 +70,13 @@ export interface LetterParams {
    */
   pages?: number;
 
-  /** Extra services (certified mail, etc.) */
-  extraServices?: string[];
+  /**
+   * An extra service the carrier sells with the letter (#625): USPS Certified
+   * Mail, or Certified Mail with an electronic return receipt. Absent is
+   * standard first-class mail. Sent to PostGrid as `extraService`, which takes
+   * these two values exactly; US first-class letters only.
+   */
+  extraService?: CertifiedMailService;
 
   // Layout fields (US-LAYOUT-01 through US-LAYOUT-06)
   /** Letter layout type */
@@ -151,6 +157,14 @@ export interface LetterStatus {
 
   /** Delivery confirmation date (if delivered) */
   deliveredAt?: Date;
+
+  /**
+   * The carrier's tracking number (#625): the USPS number of a certified
+   * letter, which the provider sets some time after the letter is accepted. Not
+   * the provider's own id (`trackingId`, which is what `letters.tracking_id`
+   * holds).
+   */
+  carrierTrackingNumber?: string;
 
   /** Provider-specific tracking events */
   events?: Array<{

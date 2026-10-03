@@ -139,6 +139,7 @@ LETTER_IRL_STUDIO_CARD_ENABLED=<true to lay letter cards out as a studio; unset 
 # at their own prices, and needs their Stripe Prices below. API and maintenance services.
 LETTER_IRL_ROOM_TO_WRITE_ENABLED=<true to preview and sell two- and three-page letters; unset is off>
 LETTER_IRL_POSTCARD_SIZES_ENABLED=<true to preview and sell 4x6 and 11x6 postcards, with LETTER_IRL_PRINT_RENDERER=pdf; unset is off>
+LETTER_IRL_CERTIFIED_MAIL_ENABLED=<true to preview and sell certified mail letters (#625), with Pay & Send; unset is off>
 LETTER_IRL_SCHEDULE_LEAD_DAYS=<business days from the mail date to the arrival date; default 7, production refuses less than 3>
 LETTER_IRL_SCHEDULE_HORIZON_DAYS=<calendar days ahead an arrival date may be; default 60>
 # Photo upload through the card in apps with no file store (#474, docs/deployment.md): off unless
@@ -194,7 +195,9 @@ with Pay & Send:
 - `LETTER_IRL_ROOM_TO_WRITE_ENABLED`: `STRIPE_JIT_LETTER_TWO_PAGES_PRICE_ID` and
   `STRIPE_JIT_LETTER_THREE_PAGES_PRICE_ID`;
 - `LETTER_IRL_POSTCARD_SIZES_ENABLED`: `STRIPE_JIT_POSTCARD_4X6_PRICE_ID` and
-  `STRIPE_JIT_POSTCARD_11X6_PRICE_ID`.
+  `STRIPE_JIT_POSTCARD_11X6_PRICE_ID`;
+- `LETTER_IRL_CERTIFIED_MAIL_ENABLED` (#625): `STRIPE_JIT_LETTER_CERTIFIED_PRICE_ID` and
+  `STRIPE_JIT_LETTER_CERTIFIED_RECEIPT_PRICE_ID`.
 
 In Stripe test mode, `npx tsx scripts/create-option-prices.ts` makes all of these Prices at the amounts the product
 table pins and writes the variable lines (#624; see [deployment.md](deployment.md), the Pay & Send rollout).
