@@ -295,6 +295,27 @@ describe('cleanSignatureImage', () => {
     expect(cleaned.width).toBeLessThan(560);
   });
 
+  it('refuses light ink on a grey sheet at a phone\'s size: ink is darker than its paper', async () => {
+    // Paper at grey 90 and 110, above the floor; strokes at grey 240, 24 px, the picture 3000 px across (#609 round 4).
+    for (const paperGrey of ['#5a5a5a', '#6e6e6e']) {
+      const grey = await photograph(3000, 1200, `<rect width="100%" height="100%" fill="${paperGrey}"/>` + scribble('translate(300,200) scale(3)', 8, '#f0f0f0'));
+      expect(await refusal(grey), paperGrey).toMatchObject({ code: 'NO_SIGNATURE_FOUND' });
+    }
+  });
+
+  it('finds a signature on a business card on a dark desk', async () => {
+    // A 250 x 150 card holding a 200 x 60 signature, the desk at grey 40 (#609 round 4).
+    const card = await photograph(
+      1200,
+      900,
+      '<rect width="100%" height="100%" fill="#282828"/><rect x="475" y="375" width="250" height="150" fill="#f2f0ea"/>' +
+        scribble('translate(470,390) scale(0.26)', 12, '#111111')
+    );
+    const cleaned = await cleanSignatureImage(card);
+    expect(cleaned.width).toBeGreaterThan(150);
+    expect(cleaned.width).toBeLessThan(260);
+  });
+
   it('prints a speck of noise inside the crop as paper', async () => {
     // Lossless, so the two pictures differ only by a dot of about 3 px between the strokes.
     const sheetWith = (dot: string) =>
