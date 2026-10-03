@@ -160,8 +160,9 @@ describe.each(Object.keys(TOOLS) as (keyof typeof TOOLS)[])('the %s letter previ
     }
   );
 
-  it.each([[undefined], ['standard']])('leaves an ordinary letter alone when the service is %j', async service => {
+  it.each([[undefined], ['standard'], [null]])('leaves an ordinary letter alone when the service is %j', async service => {
     const output = await run(layout, service === undefined ? {} : { mailService: service }, context(10));
+    // (null is how a client that sends every field says none)
     expect(drafted()).not.toHaveProperty('mailService');
     expect(output).not.toHaveProperty('mailService');
     expect(output).toMatchObject({ canSendNow: true });
