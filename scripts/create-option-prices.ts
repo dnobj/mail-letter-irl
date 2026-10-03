@@ -21,17 +21,21 @@
  *   --out <file>       write the NAME=price_... lines there (default: print them)
  *   --dry-run          read-only: say what would be created
  *   --all              also the base letter and postcard products
- *   --currency <code>  the Prices' currency (default: JIT_CURRENCY, else STRIPE_CURRENCY, else usd)
+ *   --currency <code>  the Prices' currency (default: JIT_CURRENCY, else STRIPE_CURRENCY, else usd,
+ *                      read from your shell: match the development services)
  *
  * Contract, each line pinned by tests/unit/scripts/createOptionPrices.test.ts:
  * - Test keys only. A live or unrecognised key is refused before any request.
  * - Idempotent. A Price found under the lookup key `letter-irl-<productCode>`
  *   is reused when it is active, one-time, in the right currency and at the
  *   pinned amount, and REFUSED otherwise; nothing is ever edited or archived.
- * - Amount and currency come from JIT_PRODUCTS and jitCurrency, never from here.
- * - The key is never printed, and the output holds price ids only. --out replaces
- *   only a file an earlier run of this script wrote (it starts with OUTPUT_HEADER),
- *   checked before any request; a name like an env file is refused outright.
+ * - The amount comes from JIT_PRODUCTS and the currency from --currency or jitCurrency,
+ *   never from a literal here.
+ * - The key is never printed: everything the script prints passes through redact,
+ *   and the output file holds price ids only. --out replaces only a file an
+ *   earlier run of this script wrote (it starts with OUTPUT_HEADER), checked before
+ *   any request, dry runs included; a name like an env file is refused outright.
+ * - A failure partway shows each Price decided so far, and a second run is safe.
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -48,9 +52,14 @@ import { getStripeClient } from '../src/services/stripeClient.js';
 
 export type KeyMode = 'test' | 'live' | 'unknown';
 
-/** What a key is, by its prefix: the only thing this script learns about it. */
+/**
+ * What a key is, by its prefix: the only thing this script learns about it. The
+ * string is read exactly as given, never trimmed, so the key checked is the key
+ * getStripeClient uses; a key with any whitespace in it is unknown, and refused.
+ */
 export function keyMode(key: string | undefined): KeyMode {
-  const value = (key ?? '').trim();
+  const value = key ?? '';
+  if (/\s/.test(value)) return 'unknown';
   if (value.startsWith('sk_test_') || value.startsWith('rk_test_')) return 'test';
   if (value.startsWith('sk_live_') || value.startsWith('rk_live_')) return 'live';
   return 'unknown';
@@ -125,6 +134,8 @@ export interface RunOptions {
   currency: string;
   dryRun: boolean;
   all: boolean;
+  /** Called with each report line as it is decided, so a failure partway still shows what happened. */
+  onReport?: (line: string) => void;
 }
 
 export interface RunResult {
@@ -138,20 +149,24 @@ export interface RunResult {
 export async function run(options: RunOptions): Promise<RunResult> {
   const lines: string[] = [];
   const report: string[] = [];
+  const say = (line: string): void => {
+    report.push(line);
+    options.onReport?.(line);
+  };
   let refused = 0;
   for (const product of selectOptions(options.all)) {
     const lookupKey = lookupKeyFor(product.productCode);
     const outcome = decide(product, options.currency, await options.port.findPrice(lookupKey));
     if (outcome.kind === 'refuse') {
       refused += 1;
-      report.push(`REFUSED ${product.productCode}: ${outcome.why}. Nothing was changed.`);
+      say(`REFUSED ${product.productCode}: ${outcome.why}. Nothing was changed.`);
     } else if (outcome.kind === 'reuse') {
       lines.push(`${product.priceEnv}=${outcome.priceId}`);
-      report.push(`kept ${product.productCode}: ${outcome.priceId}`);
+      say(`kept ${product.productCode}: ${outcome.priceId}`);
     } else {
       const amount = `${formatAmountForCurrency(product.expectedAmountCents, options.currency)} ${options.currency.toUpperCase()}`;
       if (options.dryRun) {
-        report.push(`would create ${product.productCode} at ${amount}`);
+        say(`would create ${product.productCode} at ${amount}`);
       } else {
         const created = await options.port.createPrice({
           lookupKey,
@@ -161,7 +176,7 @@ export async function run(options: RunOptions): Promise<RunResult> {
           productCode: product.productCode
         });
         lines.push(`${product.priceEnv}=${created.id}`);
-        report.push(`created ${product.productCode} at ${amount}: ${created.id}`);
+        say(`created ${product.productCode} at ${amount}: ${created.id}`);
       }
     }
   }
@@ -186,21 +201,23 @@ export function stripePort(stripe: Stripe): PricePort {
     },
     async createPrice(spec) {
       // The Product comes with the Price, in one request, so a failure cannot
-      // leave a Product with no Price behind. The idempotency key makes a
-      // retried request return the first result.
-      const price = await stripe.prices.create(
-        {
-          currency: spec.currency,
-          unit_amount: spec.unitAmount,
-          lookup_key: spec.lookupKey,
-          product_data: {
-            name: spec.productName,
-            metadata: { productCode: spec.productCode, createdBy: 'scripts/create-option-prices.ts' }
-          },
-          metadata: { productCode: spec.productCode }
+      // leave a Product with no Price behind. stripe-node sends one idempotency
+      // key per request and reuses it across its retry, so a retried request
+      // never makes a second Price; a later run finds the first by its lookup
+      // key. No key of our own: one that outlived the run could replay an old
+      // answer after a lookup key was freed.
+      const price = await stripe.prices.create({
+        currency: spec.currency,
+        unit_amount: spec.unitAmount,
+        lookup_key: spec.lookupKey,
+        product_data: {
+          name: spec.productName,
+          metadata: { productCode: spec.productCode, createdBy: 'scripts/create-option-prices.ts' }
         },
-        { idempotencyKey: `letter-irl-option-price:${spec.lookupKey}:${spec.currency}:${spec.unitAmount}` }
-      );
+        metadata: { productCode: spec.productCode }
+      });
+      // A test key makes test-mode objects only; this is the last line of defence.
+      if (price.livemode) throw new Error(`Stripe made a live-mode Price (${price.id}); stopping`);
       return { id: price.id };
     }
   };
@@ -215,7 +232,8 @@ export interface CliArgs {
 }
 
 export const USAGE = [
-  'Usage: STRIPE_SECRET_KEY=<test key> npx tsx scripts/create-option-prices.ts [--out <file>] [--dry-run] [--all] [--currency <code>]',
+  'Usage: npx tsx scripts/create-option-prices.ts [--out <file>] [--dry-run] [--all] [--currency <code>]',
+  '  STRIPE_SECRET_KEY must be set in your shell to a Stripe TEST key (sk_test_ or rk_test_), with no spaces around it.',
   "  Creates the Pay & Send options' Stripe test-mode Prices at the amounts pinned in src/config/products.ts."
 ].join('\n');
 
@@ -234,11 +252,11 @@ export function parseArgs(argv: readonly string[]): CliArgs | { error: string } 
       else args.currency = value.trim().toLowerCase();
     } else return { error: `Unknown argument: ${flag}` };
   }
-  // win32.basename reads both separators, whichever system this runs on.
-  if (args.out !== undefined && /^\.env/i.test(win32.basename(args.out))) {
-    return {
-      error: `Refusing to write ${win32.basename(args.out)}: a file named like an env file may hold secrets. Pick another name.`
-    };
+  // win32 reads both separators, whichever system this runs on. The path is
+  // resolved first, so a trailing "." or ".." segment cannot hide the name.
+  const outName = args.out === undefined ? '' : win32.basename(win32.resolve(args.out));
+  if (/^\.env/i.test(outName)) {
+    return { error: `Refusing to write ${outName}: a file named like an env file may hold secrets. Pick another name.` };
   }
   if (args.currency !== undefined && !/^[a-z]{3}$/.test(args.currency)) {
     return { error: '--currency takes a three-letter code such as usd' };
@@ -259,7 +277,10 @@ export const OUTPUT_HEADER = '# Letter IRL option prices (Stripe test mode): pri
 
 /** Whether --out may replace a file: it is not there, or an earlier run of this script wrote it. */
 export function mayReplace(existing: string | null): boolean {
-  return existing === null || existing.startsWith(OUTPUT_HEADER);
+  if (existing === null) return true;
+  // An editor may have saved the file with a byte order mark in front.
+  const text = existing.charCodeAt(0) === 0xfeff ? existing.slice(1) : existing;
+  return text.startsWith(OUTPUT_HEADER);
 }
 
 export interface Deps {
@@ -274,43 +295,53 @@ export interface Deps {
 
 /** The whole command, returning the exit code: 0 done, 1 failed or refused a Price, 2 not run. */
 export async function execute(argv: readonly string[], env: NodeJS.ProcessEnv, deps: Deps): Promise<number> {
+  // Everything printed passes through redact: a key typed where an argument
+  // belongs, or one inside an error, never reaches the screen or a log.
+  const say = (line: string): void => deps.log(redact(line, env.STRIPE_SECRET_KEY));
+  const warn = (line: string): void => deps.error(redact(line, env.STRIPE_SECRET_KEY));
   const parsed = parseArgs(argv);
   if ('error' in parsed) {
-    deps.error(parsed.error);
-    deps.error(USAGE);
+    warn(parsed.error);
+    warn(USAGE);
     return 2;
   }
   if (parsed.help) {
-    deps.log(USAGE);
+    say(USAGE);
     return 0;
   }
   const mode = keyMode(env.STRIPE_SECRET_KEY);
   if (mode !== 'test') {
-    deps.error(
+    warn(
       mode === 'live'
         ? 'STRIPE_SECRET_KEY is a live-mode key. This script only uses a test-mode key (sk_test_ or rk_test_); production prices are made by the owner once the price proposal is approved.'
-        : 'STRIPE_SECRET_KEY must be set to a Stripe test-mode key (sk_test_ or rk_test_).'
+        : 'STRIPE_SECRET_KEY must be set to a Stripe test-mode key (sk_test_ or rk_test_), with no spaces around it.'
     );
     return 2;
   }
-  if (parsed.out && !parsed.dryRun) {
-    // Before any request, so a refused path costs nothing.
+  if (parsed.out) {
+    // Before any request, so a refused path costs nothing. A dry run looks too,
+    // so "look first" shows a path the real run would refuse.
     try {
       if (!mayReplace(deps.readFile(parsed.out))) {
-        deps.error(`${parsed.out} exists and was not written by this script, so it is left alone. Pick another name.`);
+        warn(`${parsed.out} exists and was not written by this script, so it is left alone. Pick another name.`);
         return 2;
       }
     } catch (error) {
-      deps.error(`Cannot use ${parsed.out}: ${error instanceof Error ? error.message : String(error)}`);
+      warn(`Cannot use ${parsed.out}: ${error instanceof Error ? error.message : String(error)}`);
       return 2;
     }
   }
   const currency = parsed.currency ?? jitCurrency(env);
   try {
-    const result = await run({ port: deps.createPort(), currency, dryRun: parsed.dryRun, all: parsed.all });
-    for (const line of result.report) deps.log(line);
+    const result = await run({
+      port: deps.createPort(),
+      currency,
+      dryRun: parsed.dryRun,
+      all: parsed.all,
+      onReport: say
+    });
     if (parsed.dryRun) {
-      deps.log('Dry run: nothing was created or written.');
+      say('Dry run: nothing was created or written.');
     } else if (result.lines.length > 0) {
       const text = [OUTPUT_HEADER, ...result.lines, ''].join('\n');
       if (parsed.out) {
@@ -318,23 +349,23 @@ export async function execute(argv: readonly string[], env: NodeJS.ProcessEnv, d
           deps.writeFile(parsed.out, text);
         } catch (error) {
           // The Prices exist now, so show the lines: nothing is lost.
-          const why = error instanceof Error ? error.message : String(error);
-          deps.error(`Could not write ${parsed.out}: ${redact(why, env.STRIPE_SECRET_KEY)}`);
-          deps.log('');
-          for (const line of result.lines) deps.log(line);
+          warn(`Could not write ${parsed.out}: ${error instanceof Error ? error.message : String(error)}`);
+          say('');
+          for (const line of result.lines) say(line);
           return 1;
         }
-        deps.log(`Wrote ${result.lines.length} line(s) to ${parsed.out}`);
+        say(`Wrote ${result.lines.length} line(s) to ${parsed.out}`);
       } else {
-        deps.log('');
-        for (const line of result.lines) deps.log(line);
+        say('');
+        for (const line of result.lines) say(line);
       }
+    } else if (parsed.out) {
+      say(`${parsed.out} was left as it was: there are no prices to write.`);
     }
     return result.refused > 0 ? 1 : 0;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    deps.error(`Stopped: ${redact(message, env.STRIPE_SECRET_KEY)}`);
-    deps.error('Running it again is safe: the prices already made are found and kept.');
+    warn(`Stopped: ${error instanceof Error ? error.message : String(error)}`);
+    warn('Running it again is safe: the prices already made are found and kept.');
     return 1;
   }
 }

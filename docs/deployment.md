@@ -555,13 +555,16 @@ Configure development and production independently:
   `STRIPE_JIT_LETTER_TWO_PAGES_PRICE_ID` and `STRIPE_JIT_LETTER_THREE_PAGES_PRICE_ID` with
   `LETTER_IRL_ROOM_TO_WRITE_ENABLED` (which also lets the letter previews run to three pages, #586), and `STRIPE_JIT_POSTCARD_4X6_PRICE_ID` and
   `STRIPE_JIT_POSTCARD_11X6_PRICE_ID` with `LETTER_IRL_POSTCARD_SIZES_ENABLED`
-  - In Stripe test mode, make every option's Price in one command (#624). With a Stripe **test** key in your own shell
-    (never in a chat): `npx tsx scripts/create-option-prices.ts --out dev-option-prices.txt`; add `--dry-run` to look first.
-    It finds or creates a Product and a one-time Price for each option under the lookup key `letter-irl-<productCode>`, at
-    the amount and currency the product table pins, and writes `NAME=price_...` lines to the file. A live key is refused, a
-    Price at another amount is refused and left alone, and a second run changes nothing. Set the lines on the development
-    api and maintenance services, then turn the option's flag on. Production Prices are made in the dashboard once the price
-    proposal (#578) is approved.
+  - In Stripe test mode, make every option's Price in one command (#624). Set `STRIPE_SECRET_KEY` in your own shell to a
+    Stripe **test** key (never in a chat; use the Stripe account the development services use) and run
+    `npx tsx scripts/create-option-prices.ts --out dev-option-prices.txt`; add `--dry-run` to look first. It finds or
+    creates a Product and a one-time Price for each option under the lookup key `letter-irl-<productCode>`, at the amount
+    the product table pins, in `--currency` (default: `JIT_CURRENCY`, else `STRIPE_CURRENCY`, else `usd`, read from your
+    shell, so match the development services), and writes `NAME=price_...` lines to the file. A live key is refused; a
+    Price under the lookup key that is archived, recurring, in another currency or at another amount is refused and left
+    alone; a second run changes nothing; `--out` replaces only a file an earlier run wrote. The Products carry the table's
+    name, not its description. Set the lines on the development api and maintenance services, then turn the option's
+    flag on. Production Prices are made in the dashboard once the price proposal (#578) is approved.
 - `JIT_CURRENCY` (amounts come from the Stripe Prices above, not from variables).
   Pay & Send may use a different currency from the packs; each product's Price
   is validated against its own expected currency.

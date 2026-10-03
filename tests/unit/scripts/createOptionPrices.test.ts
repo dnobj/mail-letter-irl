@@ -60,7 +60,6 @@ describe('keyMode', () => {
   it('reads a test key by its prefix, secret or restricted', () => {
     expect(keyMode('sk_test_abc')).toBe('test');
     expect(keyMode('rk_test_abc')).toBe('test');
-    expect(keyMode('  sk_test_abc  ')).toBe('test');
   });
 
   it('reads a live key by its prefix, secret or restricted', () => {
@@ -69,7 +68,8 @@ describe('keyMode', () => {
   });
 
   it('knows nothing else', () => {
-    for (const other of [undefined, '', '   ', 'pk_test_abc', 'sk_prod_abc', 'whsec_abc', 'test_sk_abc']) {
+    // A stray space is not trimmed away: the key checked must be the key used.
+    for (const other of [undefined, '', '   ', 'pk_test_abc', 'sk_prod_abc', 'whsec_abc', 'test_sk_abc', ' sk_test_abc', 'sk_test_abc ']) {
       expect(keyMode(other)).toBe('unknown');
     }
   });
@@ -166,6 +166,7 @@ describe('run', () => {
 
     expect((account.port.createPrice as ReturnType<typeof vi.fn>).mock.calls.length).toBe(madeAfterFirst);
     expect(second.lines).toEqual(first.lines);
+    expect(second.report).toHaveLength(OPTIONS.length);
     expect(second.report.every(line => line.startsWith('kept '))).toBe(true);
   });
 
@@ -182,6 +183,25 @@ describe('run', () => {
     expect(result.report[0].startsWith(`REFUSED ${wrong.productCode}: `)).toBe(true);
     expect(result.report[0].endsWith('Nothing was changed.')).toBe(true);
     expect(account.prices.get(lookupKeyFor(wrong.productCode))?.id).toBe('price_wrong');
+  });
+
+  it('reports each line as it is decided, so a failure partway still shows what was made', async () => {
+    const account = fakeAccount();
+    const heard: string[] = [];
+    const result = await run({ port: account.port, currency: 'usd', dryRun: false, all: false, onReport: line => heard.push(line) });
+    expect(heard).toEqual(result.report);
+
+    const failing = fakeAccount();
+    (failing.port.createPrice as ReturnType<typeof vi.fn>).mockImplementationOnce(async (spec: NewPrice) => {
+      failing.created.push(spec);
+      return { id: 'price_first' };
+    }).mockRejectedValueOnce(new Error('network down'));
+    const seen: string[] = [];
+    await expect(
+      run({ port: failing.port, currency: 'usd', dryRun: false, all: false, onReport: line => seen.push(line) })
+    ).rejects.toThrow('network down');
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toContain('price_first');
   });
 
   it('creates nothing in a dry run, and says what it would create', async () => {
@@ -255,7 +275,9 @@ describe('stripePort', () => {
     };
     await expect(port.createPrice(spec)).resolves.toEqual({ id: 'price_new' });
     expect(stripe.prices.create).toHaveBeenCalledTimes(1);
-    const [body, options] = stripe.prices.create.mock.calls[0] as unknown as [Record<string, unknown>, Record<string, unknown>];
+    // One argument: no idempotency key of our own, which could outlive the run and replay an old answer.
+    expect(stripe.prices.create.mock.calls[0]).toHaveLength(1);
+    const [body] = stripe.prices.create.mock.calls[0] as unknown as [Record<string, unknown>];
     expect(body).toEqual({
       currency: 'eur',
       unit_amount: 599,
@@ -266,17 +288,13 @@ describe('stripePort', () => {
       },
       metadata: { productCode: 'jit-letter-2-pages' }
     });
-    expect(options).toEqual({ idempotencyKey: 'letter-irl-option-price:letter-irl-jit-letter-2-pages:eur:599' });
   });
 
-  it('keys a retry by the amount and currency, so a changed pin is never answered with an old Price', async () => {
+  it('stops if Stripe says the Price it made is live-mode, whatever the key was', async () => {
     const { stripe, port } = fakeStripe();
-    const base: NewPrice = { lookupKey: 'letter-irl-x', unitAmount: 599, currency: 'usd', productName: 'X', productCode: 'x' };
-    await port.createPrice(base);
-    await port.createPrice({ ...base, unitAmount: 699 });
-    await port.createPrice({ ...base, currency: 'eur' });
-    const keys = stripe.prices.create.mock.calls.map(call => (call as unknown as [unknown, { idempotencyKey: string }])[1].idempotencyKey);
-    expect(new Set(keys).size).toBe(3);
+    stripe.prices.create.mockResolvedValueOnce({ id: 'price_live', livemode: true } as never);
+    const spec: NewPrice = { lookupKey: 'letter-irl-x', unitAmount: 599, currency: 'usd', productName: 'X', productCode: 'x' };
+    await expect(port.createPrice(spec)).rejects.toThrow('Stripe made a live-mode Price (price_live); stopping');
   });
 });
 
@@ -307,6 +325,12 @@ describe('mayReplace', () => {
     expect(mayReplace(null)).toBe(true);
     expect(mayReplace(`${OUTPUT_HEADER}\nX=1\n`)).toBe(true);
     expect(mayReplace(OUTPUT_HEADER)).toBe(true);
+  });
+
+  it('still recognises its own file when an editor put a byte order mark in front', () => {
+    const bom = String.fromCharCode(0xfeff);
+    expect(mayReplace(`${bom}${OUTPUT_HEADER}\nX=1\n`)).toBe(true);
+    expect(mayReplace(`${bom}something else\n`)).toBe(false);
   });
 
   it('leaves any other file alone, empty or not', () => {
@@ -351,6 +375,16 @@ describe('parseArgs', () => {
   it('refuses to write a file named like an env file, whichever separator the path uses', () => {
     const windowsPath = ['C:', 'letter-irl-scripts', `${DOT_ENV}.dev`].join(BACKSLASH);
     for (const out of [DOT_ENV, `${DOT_ENV}.dev`, `${DOT_ENV.toUpperCase()}.local`, `/tmp/${DOT_ENV}`, windowsPath]) {
+      expect(parseArgs(['--out', out]), out).toHaveProperty('error');
+    }
+  });
+
+  it('reads the name the path resolves to, so a trailing dot segment cannot hide it', () => {
+    const hidden = [DOT_ENV, '.'].join(BACKSLASH);
+    expect(parseArgs(['--out', hidden])).toEqual({
+      error: `Refusing to write ${DOT_ENV}: a file named like an env file may hold secrets. Pick another name.`
+    });
+    for (const out of [`${DOT_ENV}/.`, `dir/../${DOT_ENV}.local`, [DOT_ENV, '..', `${DOT_ENV}.dev`].join(BACKSLASH)]) {
       expect(parseArgs(['--out', out]), out).toHaveProperty('error');
     }
   });
@@ -401,12 +435,32 @@ describe('execute', () => {
   });
 
   it('refuses a missing or unrecognised key before anything is built', async () => {
-    for (const key of [undefined, '', 'pk_test_abc', 'whsec_abc']) {
+    for (const key of [undefined, '', 'pk_test_abc', 'whsec_abc', ' sk_test_abc', 'sk_test_abc ']) {
       const h = harness();
       expect(await execute([], { STRIPE_SECRET_KEY: key }, h.deps), String(key)).toBe(2);
       expect(h.createPort).not.toHaveBeenCalled();
-      expect(h.errors.join(' ')).toMatch(/test-mode key/);
+      expect(h.errors.join(' ')).toMatch(/test-mode key.*no spaces around it/);
     }
+  });
+
+  it('never echoes a key typed where an argument belongs, test or live', async () => {
+    for (const typed of [`STRIPE_SECRET_KEY=${TEST_KEY}`, TEST_KEY, 'sk_live_51AbCdEfGhIjKl']) {
+      const h = harness();
+      expect(await execute([typed], env, h.deps), typed).toBe(2);
+      expect(h.createPort).not.toHaveBeenCalled();
+      expect(h.errors[0]).toContain('Unknown argument: ');
+      expect(h.everything()).not.toContain(typed.replace('STRIPE_SECRET_KEY=', ''));
+    }
+    const noKey = harness();
+    await execute([`STRIPE_SECRET_KEY=${TEST_KEY}`], {}, noKey.deps);
+    expect(noKey.everything()).not.toContain(TEST_KEY);
+  });
+
+  it('never echoes a key typed into the --out path either', async () => {
+    const h = harness();
+    expect(await execute(['--out', `${TEST_KEY}.txt`], env, h.deps)).toBe(0);
+    expect(h.everything()).not.toContain(TEST_KEY);
+    expect(h.logs).toContain(`Wrote ${OPTIONS.length} line(s) to [key].txt`);
   });
 
   it('accepts a restricted test key', async () => {
@@ -463,6 +517,23 @@ describe('execute', () => {
     const h = harness(fakeAccount(seeded));
     expect(await execute(['--out', 'prices.txt'], env, h.deps)).toBe(1);
     expect(h.files).toEqual([]);
+    expect(h.logs).toContain('prices.txt was left as it was: there are no prices to write.');
+  });
+
+  it('shows what was decided before a failure partway through', async () => {
+    const h = harness();
+    const find = h.account.port.findPrice as ReturnType<typeof vi.fn>;
+    const original = find.getMockImplementation() as (lookupKey: string) => Promise<unknown>;
+    let calls = 0;
+    find.mockImplementation(async (lookupKey: string) => {
+      calls += 1;
+      if (calls === 3) throw new Error('network down');
+      return original(lookupKey);
+    });
+    expect(await execute([], env, h.deps)).toBe(1);
+    expect(h.logs).toHaveLength(2);
+    expect(h.logs.every(line => line.startsWith('created '))).toBe(true);
+    expect(h.errors[0]).toBe('Stopped: network down');
   });
 
   it('reports a Stripe failure with the key removed, and says to run it again', async () => {
@@ -514,13 +585,28 @@ describe('execute', () => {
       expect(h.errors[0]).toBe('Cannot use somewhere: EISDIR: illegal operation on a directory');
     });
 
-    it('is not looked at in a dry run, or when there is no --out', async () => {
+    it('is looked at in a dry run too, so looking first shows a path the real run would refuse', async () => {
       const dry = harness();
-      await execute(['--dry-run', '--out', 'prices.txt'], env, dry.deps);
+      expect(await execute(['--dry-run', '--out', 'prices.txt'], env, dry.deps)).toBe(0);
+      expect(dry.readFile).toHaveBeenCalledWith('prices.txt');
+      expect(dry.files).toEqual([]);
+
+      const foreign = harness(fakeAccount(), 'SOMETHING=1\n');
+      expect(await execute(['--dry-run', '--out', 'prices.txt'], env, foreign.deps)).toBe(2);
+      expect(foreign.createPort).not.toHaveBeenCalled();
+    });
+
+    it('is not looked at when there is no --out', async () => {
       const plain = harness();
       await execute([], env, plain.deps);
-      expect(dry.readFile).not.toHaveBeenCalled();
       expect(plain.readFile).not.toHaveBeenCalled();
+    });
+
+    it('is replaced when an editor saved it with a byte order mark', async () => {
+      const bom = String.fromCharCode(0xfeff);
+      const h = harness(fakeAccount(), `${bom}${OUTPUT_HEADER}\nSTRIPE_JIT_OLD_PRICE_ID=price_old\n`);
+      expect(await execute(['--out', 'prices.txt'], env, h.deps)).toBe(0);
+      expect(h.files).toHaveLength(1);
     });
   });
 
