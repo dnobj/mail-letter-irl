@@ -21,7 +21,7 @@ export const CERTIFIED_NOT_OFFERED =
   'Certified mail is not available right now. Leave mailService out to preview an ordinary letter.';
 
 export function chooseMailService(requested: unknown, context: ToolContext): CertifiedMailService | undefined {
-  if (requested === undefined || requested === null || requested === 'standard') return undefined;
+  if (requested === undefined || requested === null || requested === '' || requested === 'standard') return undefined;
   const known = requested === 'certified' || requested === 'certified_return_receipt';
   if (!isCertifiedMailOffered()) {
     // The value only when it is one of the two: a call's own text never reaches a log.
@@ -49,6 +49,6 @@ export function chooseMailService(requested: unknown, context: ToolContext): Cer
  */
 export function certifiedMailSentence(): string {
   return isCertifiedMailOffered()
-    ? 'Only when the person asks for USPS Certified Mail (it costs more), pass mailService "certified"; "certified_return_receipt" adds an electronic return receipt. Certified mail is paid with Pay & Send, never a letter pack or a gift letter, and a new preview starts as an ordinary letter, so pass mailService again. '
+    ? 'Only when the person asks for USPS Certified Mail (it costs more), pass mailService "certified"; "certified_return_receipt" adds an electronic return receipt. Certified mail is paid with Pay & Send, never a letter pack or a gift letter, and a new preview of a certified letter must pass mailService again. '
     : '';
 }

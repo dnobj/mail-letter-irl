@@ -160,9 +160,9 @@ describe.each(Object.keys(TOOLS) as (keyof typeof TOOLS)[])('the %s letter previ
     }
   );
 
-  it.each([[undefined], ['standard'], [null]])('leaves an ordinary letter alone when the service is %j', async service => {
+  it.each([[undefined], ['standard'], [null], ['']])('leaves an ordinary letter alone when the service is %j', async service => {
     const output = await run(layout, service === undefined ? {} : { mailService: service }, context(10));
-    // (null is how a client that sends every field says none)
+    // (null, and the empty string, are how a client that sends every field says none)
     expect(drafted()).not.toHaveProperty('mailService');
     expect(output).not.toHaveProperty('mailService');
     expect(output).toMatchObject({ canSendNow: true });
@@ -194,7 +194,9 @@ describe('while certified mail is not offered', () => {
   it.each(Object.keys(TOOLS) as (keyof typeof TOOLS)[])(
     'refuses certified mail on the %s preview before anything is fetched or checked, and makes no draft',
     async layout => {
-      // A provider that validates addresses, so a check that ran before the refusal would show.
+      // Gift letters on, so a gift decided before the refusal would show; and a provider that
+      // validates addresses, so a check that ran before it would too.
+      vi.stubEnv('LETTER_IRL_GIFT_LETTERS_ENABLED', 'true');
       const validateAddress = vi.fn();
       vi.mocked(getLetterProvider).mockReturnValue({ validateAddress } as never);
       for (const service of ['certified', 'certified_return_receipt']) {
@@ -216,7 +218,18 @@ describe('while certified mail is not offered', () => {
     }
   );
 
-  it.each(['registered', 'Certified', ' certified', '', 0, false, ['certified']])(
+  it.each(['header_image', 'inline_image'] as const)(
+    'refuses certified mail on the %s preview before it looks for a picture, though none was given',
+    async layout => {
+      await expect(run(layout, { mailService: 'certified', imageUrl: undefined })).rejects.toMatchObject({
+        code: 'MAIL_SERVICE_NOT_OFFERED'
+      });
+      expect(getRecentUploadedImage).not.toHaveBeenCalled();
+      expect(downloadAndProcessLetterImageWithPreview).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(['registered', 'Certified', ' certified', 0, false, ['certified']])(
     'refuses %j as not offered too, so no one is told to use a value that is then refused',
     async service => {
       await expect(run('text_only', { mailService: service })).rejects.toMatchObject({

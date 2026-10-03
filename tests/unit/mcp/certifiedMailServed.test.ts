@@ -162,9 +162,9 @@ describe("the letter previews' mailService (#625)", () => {
       expect(description).toContain('USPS Certified Mail');
       expect(description).toContain('mailService "certified"');
       expect(description).toContain('never a letter pack or a gift letter');
-      // Only on request, said to cost more, and said to be asked for again by the next preview.
+      // Only on request, said to cost more, and said to be asked for again by a new preview of a certified letter.
       expect(description).toContain('Only when the person asks for USPS Certified Mail (it costs more)');
-      expect(description).toContain('a new preview starts as an ordinary letter, so pass mailService again');
+      expect(description).toContain('a new preview of a certified letter must pass mailService again');
     }
   });
 
@@ -202,16 +202,16 @@ describe("the letter previews' mailService as a client sends it (#625)", () => {
     expect(received[0].mailService).toBe(service);
   });
 
-  it('takes null as no service, as a client that fills every field says it', async () => {
+  it.each([[null], ['']])('takes %j as no service, as a client that fills every field says it', async none => {
     vi.stubEnv('LETTER_IRL_CERTIFIED_MAIL_ENABLED', 'true');
     vi.stubEnv('JIT_PURCHASE_ENABLED', 'true');
-    const outcome = await send({ mailService: null });
-    expect(String(outcome?.message ?? '')).not.toContain('Input validation error');
+    const outcome = await send({ mailService: none });
+    expect(outcome instanceof Error ? outcome.message : JSON.stringify(outcome)).not.toContain('Input validation error');
     expect(received).toHaveLength(1);
     expect(received[0].mailService).toBeUndefined();
   });
 
-  it.each([['Certified'], ['registered'], ['']])('refuses %j at the schema while certified mail is offered, listing what is valid', async service => {
+  it.each([['Certified'], ['registered'], [' certified']])('refuses %j at the schema while certified mail is offered, listing what is valid', async service => {
     vi.stubEnv('LETTER_IRL_CERTIFIED_MAIL_ENABLED', 'true');
     vi.stubEnv('JIT_PURCHASE_ENABLED', 'true');
     const outcome = await send({ mailService: service });

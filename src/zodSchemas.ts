@@ -133,12 +133,14 @@ export const PREVIEW_MAIL_SERVICE_DESCRIPTION =
   "Optional. How the letter travels: standard (the default), certified (USPS Certified Mail, which gives a tracking number), " +
   "or certified_return_receipt (Certified Mail with an electronic return receipt). Certified mail costs more and is paid with Pay & Send: " +
   "no letter pack and no gift letter pays for it. Leave it out for an ordinary letter.";
-// A client that fills an unset field with null means no service, as it does for the monogram.
-const previewMailServiceZ = z.preprocess(noneForNull, z.enum(MAIL_SERVICES).optional()).describe(PREVIEW_MAIL_SERVICE_DESCRIPTION);
+// A client that fills an unset field with null or an empty string means no service, as it does for the
+// monogram and the stationery: an ordinary letter, never a certified one.
+const noneForNullOrEmpty = (value: unknown): unknown => (value === null || value === '' ? undefined : value);
+const previewMailServiceZ = z.preprocess(noneForNullOrEmpty, z.enum(MAIL_SERVICES).optional()).describe(PREVIEW_MAIL_SERVICE_DESCRIPTION);
 
 /** What a letter preview's output says when it is certified mail (#625): which service. Absent for an ordinary letter. */
 export const PREVIEW_MAIL_SERVICE_OUTPUT_DESCRIPTION =
-  "Present only when the letter is sent as certified mail: certified, or certified_return_receipt (with an electronic return receipt). Paid with Pay & Send.";
+  "Present only when the letter goes as certified mail: certified, or certified_return_receipt (with an electronic return receipt). Paid with Pay & Send.";
 // The two services of a certified letter: the one list the code ties to the MailService type (products.ts).
 const CERTIFIED_MAIL_SERVICES = EXTRA_SERVICES;
 

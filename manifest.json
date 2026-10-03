@@ -253,7 +253,7 @@
               "certified",
               "certified_return_receipt"
             ],
-            "description": "Present only when the letter is sent as certified mail: certified, or certified_return_receipt (with an electronic return receipt). Paid with Pay & Send."
+            "description": "Present only when the letter goes as certified mail: certified, or certified_return_receipt (with an electronic return receipt). Paid with Pay & Send."
           },
           "pages": {
             "type": "integer",
@@ -706,7 +706,7 @@
               "certified",
               "certified_return_receipt"
             ],
-            "description": "Present only when the letter is sent as certified mail: certified, or certified_return_receipt (with an electronic return receipt). Paid with Pay & Send."
+            "description": "Present only when the letter goes as certified mail: certified, or certified_return_receipt (with an electronic return receipt). Paid with Pay & Send."
           },
           "pages": {
             "type": "integer",
@@ -1159,7 +1159,7 @@
               "certified",
               "certified_return_receipt"
             ],
-            "description": "Present only when the letter is sent as certified mail: certified, or certified_return_receipt (with an electronic return receipt). Paid with Pay & Send."
+            "description": "Present only when the letter goes as certified mail: certified, or certified_return_receipt (with an electronic return receipt). Paid with Pay & Send."
           },
           "pages": {
             "type": "integer",
