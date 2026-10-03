@@ -111,6 +111,10 @@ export const PREVIEW_SIGNATURE_DESCRIPTION =
   "Left out, the person's last choice: on once a signature is saved. True with none saved is refused. Pass false to leave it off.";
 const previewSignatureZ = z.boolean().optional().describe(PREVIEW_SIGNATURE_DESCRIPTION);
 
+/** A ready letter's signature now (#608 part 4), for a card shown its preview's first answer again. */
+export const GET_DRAFT_STATUS_SIGNATURE_DESCRIPTION =
+  "A ready letter our renderer drew, while signatures are offered: whether it prints the person's saved signature now; its page goes to the card";
+
 /** What a letter preview's output says of its signature (#608 review round 1). */
 export const PREVIEW_SIGNATURE_OUTPUT_DESCRIPTION =
   "While signatures are offered: whether the letter prints the person's saved signature, and why";
@@ -467,6 +471,14 @@ export const getSignatureInputZ = z.object({});
 
 export const clearSignatureInputZ = z.object({
   confirm: z.boolean().describe(SIGNATURE_CONFIRM_DESCRIPTION)
+});
+
+// A letter preview signed or unsigned without previewing again (#608 part 4).
+export const SET_LETTER_SIGNATURE_DESCRIPTION =
+  "true prints the person's saved signature under the closing; false takes it off";
+export const setLetterSignatureInputZ = z.object({
+  draftId: z.string().describe("The draftId from a letter preview"),
+  signature: z.boolean().describe(SET_LETTER_SIGNATURE_DESCRIPTION)
 });
 
 // ============================================================================
@@ -904,7 +916,8 @@ export const getDraftStatusOutputZ = z.object({
       headline: z.string().optional()
     })
     .optional()
-    .describe("A ready letter's stationery now, while stationery is offered; its page goes to the card")
+    .describe("A ready letter's stationery now, while stationery is offered; its page goes to the card"),
+  signature: z.boolean().optional().describe(GET_DRAFT_STATUS_SIGNATURE_DESCRIPTION)
 });
 
 export const requestSendOutputZ = z.object({
@@ -979,6 +992,19 @@ export const getSignatureOutputZ = z.object({
 
 export const clearSignatureOutputZ = z.object({
   removed: z.boolean().describe(SIGNATURE_REMOVED_DESCRIPTION),
+  message: z.string()
+});
+
+/** set_letter_signature's answer (#608 part 4); the page drawn again and how full it is go to the card in _meta. */
+export const SET_LETTER_SIGNATURE_CAN_SEND_DESCRIPTION =
+  "Whether the balance or a gift letter pays for the letter as it is now: the signature's lines can change its pages, and so its price";
+export const setLetterSignatureOutputZ = z.object({
+  draftId: z.string(),
+  signature: previewSignatureOutputZ.describe("Whether the letter now prints the person's saved signature: asked for in the call"),
+  pages: z.number().int().min(2).max(MAX_LETTER_PAGES).optional().describe(PREVIEW_PAGES_DESCRIPTION),
+  canSendNow: z.boolean().describe(SET_LETTER_SIGNATURE_CAN_SEND_DESCRIPTION),
+  reasonCannotSend: z.string().optional(),
+  sendEligibility: sendEligibilityZ,
   message: z.string()
 });
 

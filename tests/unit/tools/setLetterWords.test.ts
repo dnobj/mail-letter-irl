@@ -177,6 +177,8 @@ describe('set_letter_words on a signed letter (#608)', () => {
       await change('Dear Sam,\n\nThe garden is in.', context(), 'Love,\nPat');
 
       const words = written();
+      // Drawn with the draft's own copy, which the service checks under the lock (#613 review round 1).
+      expect(words.drawnWith).toBe(SIGNATURE);
       expect(words.previewHtml).toContain('<body data-renderer="pdf-4">');
       expect(words.previewHtml).toContain(`<image data-role="signature" href="${SIGNATURE}"`);
       // The letter's own picture from its small copy, never the signature in its place.
@@ -221,7 +223,8 @@ describe('set_letter_words', () => {
     const output = await change('Dear Sam,\n\nThe garden is in.');
 
     const words = written();
-    expect(words).toMatchObject({ bodyText: 'Dear Sam,\n\nThe garden is in.', signOff: 'Love, Pat', pages: 1, drawnIn: null });
+    // With the signature it was drawn with (#608): none, so a signature added meanwhile refuses it.
+    expect(words).toMatchObject({ bodyText: 'Dear Sam,\n\nThe garden is in.', signOff: 'Love, Pat', pages: 1, drawnIn: null, drawnWith: null });
     // The words it replaces, as read, so a change under it is refused (#593 review round 1).
     expect(words.replacing).toEqual({ bodyText: lines(10), signOff: 'Pat' });
     expect(svgs(words.previewHtml)).toHaveLength(1);

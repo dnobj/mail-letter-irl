@@ -133,7 +133,7 @@ describe('set_stationery', () => {
     // And the pages it is laid out on now (#586): one, as before.
     expect(Object.keys(change).sort()).toEqual(['drawnFrom', 'pages', 'previewHtml', 'stationery']);
     // With the words it was drawn from, as read, so a change under it is refused (#586).
-    expect(change.drawnFrom).toEqual({ bodyText: draft().body_text, signOff: 'Love, Pat' });
+    expect(change.drawnFrom).toEqual({ bodyText: draft().body_text, signOff: 'Love, Pat', signature: null });
     expect(change.pages).toBe(1);
     expect(inked(change.previewHtml).length).toBeGreaterThan(0);
     expect(change.previewHtml).toContain('<body data-renderer="pdf-2">');

@@ -140,5 +140,11 @@
  *     preview's recipient, and cancel_address_request closes a waiting link.
  *     The server instructions name request_address beside asking for an
  *     address.
+ * r36: signatures (#608). While LETTER_IRL_SIGNATURES_ENABLED is on and our
+ *     renderer draws letters, set_signature, get_signature and
+ *     clear_signature save, read and remove a picture of the person's
+ *     signature; the letter previews take signature, and say whether the
+ *     letter is signed, and why; set_letter_signature signs or unsigns a
+ *     preview without previewing again.
  */
-export const STEERING_COPY_REV = 35;
+export const STEERING_COPY_REV = 36;

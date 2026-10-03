@@ -45,6 +45,7 @@ import {
   setSignatureInputZ,
   getSignatureInputZ,
   clearSignatureInputZ,
+  setLetterSignatureInputZ,
   uploadPhotoChunkInputZ,
   submitFeatureRequestInputZ,
   getStartedInputZ,
@@ -80,6 +81,7 @@ import {
   setSignatureOutputZ,
   getSignatureOutputZ,
   clearSignatureOutputZ,
+  setLetterSignatureOutputZ,
   uploadPhotoChunkOutputZ,
   submitFeatureRequestOutputZ,
   getStartedOutputZ,
@@ -209,7 +211,8 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     'set_postcard_style',     // The same size and front twice change nothing more (#594)
     'cancel_scheduled_mail',  // A repeat answers as already cancelled (#535)
     'cancel_address_request', // A repeat answers as already closed (#604)
-    'clear_signature'         // A repeat answers that none was saved (#608)
+    'clear_signature',        // A repeat answers that none was saved (#608)
+    'set_letter_signature'    // The same choice twice changes nothing more (#608)
   ];
 
   // Destructive tools. OpenAI's app-review guidance asks for destructiveHint on
@@ -856,6 +859,7 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   set_signature: setSignatureInputZ,
   get_signature: getSignatureInputZ,
   clear_signature: clearSignatureInputZ,
+  set_letter_signature: setLetterSignatureInputZ,
   upload_photo_chunk: uploadPhotoChunkInputZ,
   // Feedback tools
   submit_feature_request: submitFeatureRequestInputZ,
@@ -902,6 +906,7 @@ const zodOutputSchemas: Record<ToolName, z.ZodObject<any>> = {
   set_signature: setSignatureOutputZ,
   get_signature: getSignatureOutputZ,
   clear_signature: clearSignatureOutputZ,
+  set_letter_signature: setLetterSignatureOutputZ,
   upload_photo_chunk: uploadPhotoChunkOutputZ,
   // Feedback tools
   submit_feature_request: submitFeatureRequestOutputZ,
@@ -1563,16 +1568,17 @@ function stationerySentence(result: Record<string, unknown>): string {
 /**
  * A letter preview's signature (#608 review round 1), for the narration:
  * whether the saved signature prints, and when the account's choice decided
- * it, so the person hears why and how to change it. Nothing while signatures
- * are not offered, with none saved, or for a call that said no signature.
+ * it, so the person hears why, and that set_letter_signature changes it in
+ * place (#608 part 4). Nothing while signatures are not offered, with none
+ * saved, or for a call that said no signature.
  */
 function signatureSentence(result: Record<string, unknown>): string {
   const signature = result.signature as { printed?: unknown; source?: unknown } | undefined;
   if (typeof signature?.printed !== "boolean") return "";
   if (signature.source === "remembered") {
     return signature.printed
-      ? " Signed with the person's saved signature, the account's choice; signature: false in the call leaves it off."
-      : " Not signed: the account's choice is no signature; signature: true in the call prints the saved one.";
+      ? " Signed with the person's saved signature, the account's choice; set_letter_signature with signature: false takes it off this letter."
+      : " Not signed: the account's choice is no signature; set_letter_signature with signature: true signs this letter.";
   }
   return signature.source === "asked" && signature.printed ? " Signed with the person's saved signature." : "";
 }
@@ -1861,6 +1867,9 @@ export function summarizeToolResult(
     }
     case "cancel_address_request":
       return typeof result.message === "string" ? result.message : "The address request was cancelled.";
+    case "set_letter_signature":
+      // As for set_stationery: the tool's own sentence, with any change in pages (#608).
+      return typeof result.message === "string" ? result.message : "The letter's signature was changed.";
     case "set_signature":
     case "get_signature":
     case "clear_signature":

@@ -259,7 +259,8 @@ async function handler(input: SetLetterWordsInput, context: ToolContext): Promis
   const refusal = await setDraftWords(
     draftId,
     userId,
-    { bodyText, signOff, previewHtml, pages, drawnIn: draft.stationery, replacing },
+    // Drawn with the draft's signature (#608), which set_letter_signature changes in place.
+    { bodyText, signOff, previewHtml, pages, drawnIn: draft.stationery, replacing, drawnWith: draft.signature_image },
     context.now()
   );
   if (refusal) throw refused(...REFUSALS[refusal], context);

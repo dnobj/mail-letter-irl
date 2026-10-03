@@ -1811,12 +1811,15 @@ development: a sent letter is drawn, not mailed, and its PDF opens in PostGrid's
    signature previews.
 5. [ ] On a signed preview, change the stationery to Botanical, then change the words. Verify the
    signature stays under the new closing each time.
-6. [ ] Save the second photo as your signature. Send the preview from step 5 (test mode). Verify the
+6. [ ] Ask the assistant to take the signature off that preview, then to put it back. Verify
+   `set_letter_signature` draws the card's page without it and then with it, and that the next preview
+   follows the last choice.
+7. [ ] Save the second photo as your signature. Send the preview from step 5 (test mode). Verify the
    PDF in PostGrid's test dashboard prints the first signature, as the preview showed it, in Botanical.
-7. [ ] Remove the signature (`clear_signature`, confirmed). Verify a preview asking for the signature
+8. [ ] Remove the signature (`clear_signature`, confirmed). Verify a preview asking for the signature
    is refused, saying `set_signature` saves one, and that a preview not asking has none.
-8. [ ] Turn the flag off and deploy the API, then refresh the tool list. Verify the previews no
-   longer list `signature` and the three signature tools are gone. Turn the flag back on.
+9. [ ] Turn the flag off and deploy the API, then refresh the tool list. Verify the previews no
+   longer list `signature` and the four signature tools are gone. Turn the flag back on.
 
 **Pass criteria:** A letter prints the signature its preview showed, under the sign-off's first line;
 a preview's choice is remembered; and nothing prints a signature the person did not see.

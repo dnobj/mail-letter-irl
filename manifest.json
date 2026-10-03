@@ -2811,6 +2811,10 @@
             "required": [
               "theme"
             ]
+          },
+          "signature": {
+            "type": "boolean",
+            "description": "A ready letter our renderer drew, while signatures are offered: whether it prints the person's saved signature now; its page goes to the card"
           }
         }
       }

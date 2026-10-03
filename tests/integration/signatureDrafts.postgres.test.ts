@@ -261,6 +261,56 @@ describePostgres('a letter\'s signature (migration 051, #608)', () => {
     expect(await read(plain)).toMatchObject({ signature_image: null, renderer_version: 'pdf-1' });
   }, 60_000);
 
+  it('signs and unsigns a draft in place, with the version each pair needs, and remembers the choice (#608 part 4)', async () => {
+    const userId = await seedUser();
+    await signatures.saveSignature(userId, { png: Buffer.from('89504e470d0a1a0a00000000', 'hex'), width: 600, height: 150 });
+    const choice = async () =>
+      (await pool.query<{ use_by_default: boolean }>('SELECT use_by_default FROM user_signatures WHERE user_id = $1', [userId])).rows[0]
+        .use_by_default;
+    /** What a page is drawn from, as the tool reads it before the lock. */
+    const drawnFrom = async (draftId: string) => {
+      const row = (await pool.query<{ body_text: string; sign_off: string | null; stationery: unknown; signature_image: string | null }>(
+        'SELECT body_text, sign_off, stationery, signature_image FROM letter_drafts WHERE draft_id = $1',
+        [draftId]
+      )).rows[0];
+      return { words: { bodyText: row.body_text, signOff: row.sign_off }, stationery: row.stationery, signature: row.signature_image };
+    };
+    const set = async (draftId: string, signatureImage: string | null) =>
+      drafts.setDraftSignature(draftId, userId, { signatureImage, previewHtml: PAGE, pages: 1, drawnFrom: await drawnFrom(draftId) });
+
+    // A Classic letter: pdf-4 signed, pdf-1 again unsigned.
+    const plain = await previewed(userId);
+    await expect(set(plain, SIGNATURE)).resolves.toBeNull();
+    expect(await read(plain)).toEqual({ signature_image: SIGNATURE, renderer_version: 'pdf-4', stationery: null });
+    expect(await choice()).toBe(true);
+    // What get_draft_status reads of it: signed, never the picture.
+    expect((await drafts.getDraftState(plain))?.signed).toBe(true);
+    await expect(set(plain, null)).resolves.toBeNull();
+    expect(await read(plain)).toEqual({ signature_image: null, renderer_version: 'pdf-1', stationery: null });
+    expect(await choice()).toBe(false);
+    expect((await drafts.getDraftState(plain))?.signed).toBe(false);
+
+    // A themed letter keeps its theme: pdf-4 signed, pdf-2 again unsigned.
+    const themed = await previewed(userId, { stationery: BOTANICAL });
+    await expect(set(themed, SIGNATURE)).resolves.toBeNull();
+    expect(await read(themed)).toEqual({ signature_image: SIGNATURE, renderer_version: 'pdf-4', stationery: BOTANICAL });
+    await expect(set(themed, null)).resolves.toBeNull();
+    expect(await read(themed)).toEqual({ signature_image: null, renderer_version: 'pdf-2', stationery: BOTANICAL });
+
+    // Drawn from a signature it no longer has: refused, unchanged.
+    const stale = { ...(await drawnFrom(themed)), signature: SIGNATURE };
+    await expect(
+      drafts.setDraftSignature(themed, userId, { signatureImage: null, previewHtml: PAGE, pages: 1, drawnFrom: stale })
+    ).resolves.toBe('changed');
+    expect(await read(themed)).toEqual({ signature_image: null, renderer_version: 'pdf-2', stationery: BOTANICAL });
+
+    // Another account's draft is not found.
+    const stranger = await seedUser();
+    await expect(
+      drafts.setDraftSignature(plain, stranger, { signatureImage: null, previewHtml: PAGE, pages: 1, drawnFrom: await drawnFrom(plain) })
+    ).resolves.toBe('not_found');
+  }, 60_000);
+
   it("remembers a preview's explicit choice on the saved signature, and does nothing without one", async () => {
     const userId = await seedUser();
     await signatures.saveSignature(userId, { png: Buffer.from('89504e470d0a1a0a00000000', 'hex'), width: 600, height: 150 });

@@ -189,7 +189,8 @@ async function handler(input: SetStationeryInput, context: ToolContext): Promise
   const refusal = await setDraftStationery(
     draftId,
     userId,
-    { stationery, previewHtml, pages, drawnFrom: { bodyText: draft.body_text, signOff: draft.sign_off } },
+    // And with the signature it was drawn with (#608), which set_letter_signature changes in place.
+    { stationery, previewHtml, pages, drawnFrom: { bodyText: draft.body_text, signOff: draft.sign_off, signature: draft.signature_image } },
     context.now()
   );
   if (refusal) throw refused(...REFUSALS[refusal], context);

@@ -365,6 +365,8 @@ export interface DraftState
   letter_funding_type: Letter['funding_type'] | null;
   letter_arrive_by: string | null;
   letter_mail_on: string | null;
+  /** Whether the draft holds a signature (#608): its copy is never read here. */
+  signed: boolean;
 }
 
 export async function getDraftState(draftId: string): Promise<DraftState | null> {
@@ -372,6 +374,8 @@ export async function getDraftState(draftId: string): Promise<DraftState | null>
     `SELECT d.draft_id, d.user_id, d.status, d.expires_at, d.consumed_letter_id, d.arrive_by, d.mail_on,
             d.mail_type, d.renderer_version, d.stationery, d.pages, d.is_gift_send, d.required_credits,
             d.body_text, d.sign_off, d.postcard_size, d.postcard_front,
+            -- Whether it is signed (#608), not the picture.
+            (d.signature_image IS NOT NULL AND d.signature_image <> '') AS signed,
             -- The page only where get_draft_status can give it: a letter or
             -- postcard (#594) our renderer drew, still pending.
             CASE WHEN d.status = 'pending' AND d.renderer_version IS NOT NULL
@@ -636,13 +640,15 @@ export async function getDraftForStationery(draftId: string, userId: string): Pr
  * lock (#586): a restyle draws the letter's words, and new words are drawn in
  * its stationery. Each writes what the other draws from, so whichever
  * committed second would store a page drawn from what the first replaced.
- * Read again under the lock; any change refuses the edit, to be tried again.
+ * A page is drawn with the draft's signature too, which set_letter_signature
+ * changes in place (#608). Read again under the lock; any change refuses the
+ * edit, to be tried again.
  */
-type DrawnFrom = { words?: { bodyText: string; signOff: string | null }; stationery?: unknown };
+type DrawnFrom = { words?: { bodyText: string; signOff: string | null }; stationery?: unknown; signature?: string | null };
 
 async function drawnFromChanged(client: pg.PoolClient, draftId: string, drawnFrom: DrawnFrom): Promise<boolean> {
-  const locked = await client.query<{ body_text: string; sign_off: string | null; stationery: unknown }>(
-    'SELECT body_text, sign_off, stationery FROM letter_drafts WHERE draft_id = $1',
+  const locked = await client.query<{ body_text: string; sign_off: string | null; stationery: unknown; signature_image: string | null }>(
+    'SELECT body_text, sign_off, stationery, signature_image FROM letter_drafts WHERE draft_id = $1',
     [draftId]
   );
   const row = locked.rows[0];
@@ -650,7 +656,8 @@ async function drawnFromChanged(client: pg.PoolClient, draftId: string, drawnFro
   const words = drawnFrom.words;
   if (words && (row.body_text !== words.bodyText || (row.sign_off ?? null) !== (words.signOff ?? null))) return true;
   // Both read from the same jsonb column, so an unchanged value serialises the same.
-  return 'stationery' in drawnFrom && JSON.stringify(row.stationery ?? null) !== JSON.stringify(drawnFrom.stationery ?? null);
+  if ('stationery' in drawnFrom && JSON.stringify(row.stationery ?? null) !== JSON.stringify(drawnFrom.stationery ?? null)) return true;
+  return 'signature' in drawnFrom && (row.signature_image ?? null) !== (drawnFrom.signature ?? null);
 }
 
 /**
@@ -675,7 +682,13 @@ export async function setDraftStationery(
    * `pages`: the pages the letter is laid out on now (#586); left as it was
    * when absent. `drawnFrom`: the words the page was drawn from, as read.
    */
-  change: { stationery: Stationery; previewHtml: string; pages?: number; drawnFrom: { bodyText: string; signOff: string | null } },
+  change: {
+    stationery: Stationery;
+    previewHtml: string;
+    pages?: number;
+    /** The words, and the signature (#608) when the caller drew one, as read. */
+    drawnFrom: { bodyText: string; signOff: string | null; signature?: string | null };
+  },
   now: Date = new Date()
 ): Promise<DraftRedrawRefusal | null> {
   const stationery = storedStationery(change.stationery);
@@ -687,7 +700,8 @@ export async function setDraftStationery(
   return transaction(async client => {
     const refusal = await lockChangeableDraft(client, draftId, userId, now);
     if (refusal) return refusal;
-    if (await drawnFromChanged(client, draftId, { words: change.drawnFrom })) return 'changed';
+    const { signature, ...words } = change.drawnFrom;
+    if (await drawnFromChanged(client, draftId, { words, ...(signature !== undefined ? { signature } : {}) })) return 'changed';
 
     await client.query(
       `UPDATE letter_drafts
@@ -733,13 +747,17 @@ export async function setDraftWords(
     pages: number;
     drawnIn: unknown;
     replacing: { bodyText: string; signOff: string | null };
+    /** The signature the page was drawn with (#608), as read; a change of it refuses. */
+    drawnWith?: string | null;
   },
   now: Date = new Date()
 ): Promise<DraftRedrawRefusal | null> {
   return transaction(async client => {
     const refusal = await lockChangeableDraft(client, draftId, userId, now);
     if (refusal) return refusal;
-    if (await drawnFromChanged(client, draftId, { words: change.replacing, stationery: change.drawnIn })) return 'changed';
+    const drawnFrom: DrawnFrom = { words: change.replacing, stationery: change.drawnIn };
+    if (change.drawnWith !== undefined) drawnFrom.signature = change.drawnWith;
+    if (await drawnFromChanged(client, draftId, drawnFrom)) return 'changed';
 
     await client.query(
       `UPDATE letter_drafts
@@ -749,6 +767,55 @@ export async function setDraftWords(
     );
     // Counts only: the words never reach the log.
     writeDiagnostic('info', 'draft.words_set', { pages: change.pages, characters: change.bodyText.length + change.signOff.length });
+    return null;
+  });
+}
+
+/**
+ * A letter draft signed or unsigned in place (#608, set_letter_signature):
+ * its own copy of the signature (the saved one's PNG as a data URI, or null
+ * for none), the renderer version that goes with it (pdf-4 with one; pdf-2
+ * or pdf-1 by its stationery without), its preview drawn again, which the
+ * caller made from the draft's own content, and the pages it now takes.
+ * Under the lock a restyle takes, so a send or a Pay & Send checkout runs
+ * before or after it, never between; refused as 'changed' when its words,
+ * stationery or signature changed since the caller read them.
+ *
+ * In the same transaction the account remembers the choice (migration 050's
+ * use_by_default), as a restyle remembers its theme: on or off, explicitly.
+ */
+export async function setDraftSignature(
+  draftId: string,
+  userId: string,
+  change: {
+    signatureImage: string | null;
+    previewHtml: string;
+    pages: number;
+    /** What the page was drawn from, as read: its words, stationery and signature. */
+    drawnFrom: { words: { bodyText: string; signOff: string | null }; stationery: unknown; signature: string | null };
+  },
+  now: Date = new Date()
+): Promise<DraftRedrawRefusal | null> {
+  return transaction(async client => {
+    const refusal = await lockChangeableDraft(client, draftId, userId, now);
+    if (refusal) return refusal;
+    if (await drawnFromChanged(client, draftId, change.drawnFrom)) return 'changed';
+
+    // The version from the row's own stationery, read under the lock, so
+    // 044's and 051's pairs hold whatever the caller drew.
+    await client.query(
+      `UPDATE letter_drafts
+       SET signature_image = $2::text,
+           renderer_version = CASE WHEN $2::text IS NOT NULL THEN 'pdf-4'
+                                   WHEN stationery IS NOT NULL THEN 'pdf-2'
+                                   ELSE 'pdf-1' END,
+           preview_html = $3,
+           pages = $4::smallint, updated_at = NOW()
+       WHERE draft_id = $1`,
+      [draftId, change.signatureImage, change.previewHtml, change.pages]
+    );
+    await client.query('UPDATE user_signatures SET use_by_default = $2 WHERE user_id = $1', [userId, change.signatureImage !== null]);
+    writeDiagnostic('info', 'draft.signature_set', { signed: change.signatureImage !== null, pages: change.pages });
     return null;
   });
 }

@@ -780,10 +780,10 @@ describe("a letter preview's narration says whether it is signed (#612 review ro
 
   it("says the account's choice decided it, and how to change it", () => {
     expect(said({ printed: true, source: 'remembered' })).toMatch(
-      / Signed with the person's saved signature, the account's choice; signature: false in the call leaves it off\.$/
+      / Signed with the person's saved signature, the account's choice; set_letter_signature with signature: false takes it off this letter\.$/
     );
     expect(said({ printed: false, source: 'remembered' })).toMatch(
-      / Not signed: the account's choice is no signature; signature: true in the call prints the saved one\.$/
+      / Not signed: the account's choice is no signature; set_letter_signature with signature: true signs this letter\.$/
     );
   });
 
@@ -839,6 +839,12 @@ describe("a letter preview's narration names its stationery (#563)", () => {
     expect(summarizeToolResult('quote_and_preview_postcard', { lettersRequired: 1 })).toMatch(/^Postcard preview ready: requires 1 letter\. /);
     // A result without its count reads as one letter, in the singular.
     expect(summarizeToolResult('quote_and_preview_letter', { layoutType: 'text_only' })).toMatch(/^Preview ready: requires 1 letter\. /);
+  });
+
+  it("answers set_letter_signature with the tool's own sentence (#608 part 4)", () => {
+    const message = "The letter now prints no signature, and the account's next letter previews leave it off unless they ask for it. Nothing has been sent.";
+    expect(summarizeToolResult('set_letter_signature', { message, signature: { printed: false, source: 'asked' } })).toBe(message);
+    expect(summarizeToolResult('set_letter_signature', {})).toBe("The letter's signature was changed.");
   });
 
   it("answers set_stationery with the tool's own sentence", () => {

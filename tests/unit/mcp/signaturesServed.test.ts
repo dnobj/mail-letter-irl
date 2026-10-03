@@ -21,7 +21,7 @@ import type { ClientProfile } from '../../../src/auth/clientProfiles.js';
 import { getRequiredToolScopes } from '../../../src/auth/toolScopes.js';
 import { LetterIrlServer } from '../../../src/server.js';
 
-const TOOLS = ['set_signature', 'get_signature', 'clear_signature'];
+const TOOLS = ['set_signature', 'get_signature', 'clear_signature', 'set_letter_signature'];
 
 async function listed(names: readonly string[] = TOOLS) {
   vi.stubEnv('LETTER_IRL_REQUIRE_AUTH', 'true');
@@ -78,6 +78,13 @@ describe('the signature tools in tools/list (#608)', () => {
     expect(byName.set_signature._meta).toMatchObject({ 'openai/fileParams': ['image'] });
     expect(Object.keys((byName.get_signature.inputSchema as Schema).properties ?? {})).toEqual([]);
     expect((byName.clear_signature.inputSchema as Schema).required).toEqual(['confirm']);
+    // A preview signed or unsigned in place (#608 part 4), which the letter card calls too.
+    const sign = byName.set_letter_signature.inputSchema as Schema;
+    expect(Object.keys(sign.properties).sort()).toEqual(['draftId', 'signature']);
+    expect([...(sign.required ?? [])].sort()).toEqual(['draftId', 'signature']);
+    expect(sign.properties.signature.type).toBe('boolean');
+    expect(byName.set_letter_signature._meta).toMatchObject({ 'openai/widgetAccessible': true });
+    expect(Object.keys((byName.set_letter_signature.outputSchema as Schema).properties)).not.toContain('previewHtml');
 
     // The picture is not in any output schema: it travels in _meta.
     for (const name of ['set_signature', 'get_signature']) {
@@ -88,12 +95,15 @@ describe('the signature tools in tools/list (#608)', () => {
     expect(byName.set_signature.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true });
     expect(byName.get_signature.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false });
     expect(byName.clear_signature.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: true, idempotentHint: true });
+    // A draft's signature only: it expires on its own and sends nothing.
+    expect(byName.set_letter_signature.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false });
   });
 
   it('save and remove on mail:draft, and read on mail:read, as the return address does', () => {
     expect(getRequiredToolScopes('set_signature')).toEqual(['mail:draft']);
     expect(getRequiredToolScopes('clear_signature')).toEqual(['mail:draft']);
     expect(getRequiredToolScopes('get_signature')).toEqual(['mail:read']);
+    expect(getRequiredToolScopes('set_letter_signature')).toEqual(['mail:draft']);
   });
 });
 
