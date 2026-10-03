@@ -37,7 +37,9 @@ import {
   SIGNATURE_SAVED_AT_DESCRIPTION,
   SIGNATURE_REPLACED_DESCRIPTION,
   SIGNATURE_REMOVED_DESCRIPTION,
-  PREVIEW_SIGNATURE_DESCRIPTION
+  PREVIEW_SIGNATURE_DESCRIPTION,
+  PREVIEW_SIGNATURE_OUTPUT_DESCRIPTION,
+  SIGNATURE_SOURCE_DESCRIPTION
 } from "./zodSchemas.js";
 import { STATIONERY_THEMES } from "./render/stationery.js";
 
@@ -73,6 +75,17 @@ const previewStationerySchema = {
     source: { type: "string", enum: ["asked", "remembered", "default"], description: STATIONERY_SOURCE_DESCRIPTION }
   },
   required: ["theme", "source"]
+} as const;
+
+/** What a letter preview's output says of its signature (#608), as quoteAndPreviewOutputZ serves it. */
+const previewSignatureOutputSchema = {
+  type: "object",
+  description: PREVIEW_SIGNATURE_OUTPUT_DESCRIPTION,
+  properties: {
+    printed: { type: "boolean" },
+    source: { type: "string", enum: ["asked", "remembered", "none_saved"], description: SIGNATURE_SOURCE_DESCRIPTION }
+  },
+  required: ["printed", "source"]
 } as const;
 
 const arrivalWindowSchema = {
@@ -291,6 +304,7 @@ export const quoteAndPreviewOutputSchema: JsonSchema = {
     schedule: previewScheduleSchema,
     arrivalWindow: arrivalWindowSchema,
     stationery: previewStationerySchema,
+    signature: previewSignatureOutputSchema,
     pages: { type: "integer", minimum: 2, maximum: MAX_LETTER_PAGES, description: PREVIEW_PAGES_DESCRIPTION },
     wordsVersion: { type: "string", description: WORDS_VERSION_DESCRIPTION },
     previewHtml: { type: "string" },
@@ -302,6 +316,10 @@ export const quoteAndPreviewOutputSchema: JsonSchema = {
     estimatedDeliveryDays: { type: "integer" },
     deliveryEstimate: { type: "string" },
     deliveryDisclaimer: { type: "string" },
+    // As tools/list serves them (#612 review round 2): the manifest had left them out.
+    usedSavedReturnAddress: { type: "boolean" },
+    savedReturnAddressNote: { type: "string" },
+    addressWarnings: { type: "array", items: { type: "string" } },
     draftId: { type: "string", description: "Unique draft ID required for send_letter" },
     draftExpiresAt: { type: "string", description: "ISO timestamp when draft expires (24h)" },
     layoutType: {
