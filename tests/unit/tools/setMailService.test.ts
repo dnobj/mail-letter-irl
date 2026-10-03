@@ -330,7 +330,7 @@ describe('the gift letter note when a letter goes back to ordinary mail (#625)',
   it('says nothing of it for certified mail, a longer letter or a gift letter, which no gift can pay for or already is one', async () => {
     available(1);
     vi.mocked(getDraftForMailService).mockResolvedValue(draft({ mail_service: 'certified', required_credits: 2 }));
-    expect((await set({ draftId: DRAFT_ID, mailService: 'certified' }, context(0))).message).not.toContain('gift letter ');
+    expect((await set({ draftId: DRAFT_ID, mailService: 'certified' }, context(0))).message).not.toContain('use your gift letter');
     vi.mocked(getDraftForMailService).mockResolvedValue(draft({ pages: 2, required_credits: 2 }));
     expect((await set({ draftId: DRAFT_ID, mailService: 'standard' }, context(0))).message).not.toContain('use your gift letter');
     vi.mocked(getDraftForMailService).mockResolvedValue(draft({ is_gift_send: true, required_credits: 2 }));

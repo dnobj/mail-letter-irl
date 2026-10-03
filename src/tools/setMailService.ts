@@ -142,10 +142,9 @@ async function handler(input: SetMailServiceInput, context: ToolContext): Promis
   );
   const payment = letterPayment(draftMailOption(draft), Number(draft.required_credits ?? 2), draft.is_gift_send === true, context, draftId);
   // Back to ordinary mail, the balance short, and a one-page letter: only a new preview decides a gift (#593).
+  // (A gift letter can always send, so it never gets here.)
   const note =
-    certified === undefined && !payment.canSendNow && draft.is_gift_send !== true && Number(draft.pages ?? 1) === 1
-      ? await giftLetterNote(context)
-      : '';
+    certified === undefined && !payment.canSendNow && Number(draft.pages ?? 1) === 1 ? await giftLetterNote(context) : '';
   return {
     draftId,
     ...(certified ? { mailService: certified } : {}),
