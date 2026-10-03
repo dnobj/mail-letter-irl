@@ -225,6 +225,28 @@
               "source"
             ]
           },
+          "signature": {
+            "type": "object",
+            "description": "While signatures are offered: whether the letter prints the person's saved signature, and why",
+            "properties": {
+              "printed": {
+                "type": "boolean"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "asked",
+                  "remembered",
+                  "none_saved"
+                ],
+                "description": "Why: asked for in the call (signature), the account's remembered choice, or none_saved when the account has no signature"
+              }
+            },
+            "required": [
+              "printed",
+              "source"
+            ]
+          },
           "pages": {
             "type": "integer",
             "minimum": 2,
@@ -318,6 +340,18 @@
           },
           "deliveryDisclaimer": {
             "type": "string"
+          },
+          "usedSavedReturnAddress": {
+            "type": "boolean"
+          },
+          "savedReturnAddressNote": {
+            "type": "string"
+          },
+          "addressWarnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "draftId": {
             "type": "string",
@@ -636,6 +670,28 @@
               "source"
             ]
           },
+          "signature": {
+            "type": "object",
+            "description": "While signatures are offered: whether the letter prints the person's saved signature, and why",
+            "properties": {
+              "printed": {
+                "type": "boolean"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "asked",
+                  "remembered",
+                  "none_saved"
+                ],
+                "description": "Why: asked for in the call (signature), the account's remembered choice, or none_saved when the account has no signature"
+              }
+            },
+            "required": [
+              "printed",
+              "source"
+            ]
+          },
           "pages": {
             "type": "integer",
             "minimum": 2,
@@ -729,6 +785,18 @@
           },
           "deliveryDisclaimer": {
             "type": "string"
+          },
+          "usedSavedReturnAddress": {
+            "type": "boolean"
+          },
+          "savedReturnAddressNote": {
+            "type": "string"
+          },
+          "addressWarnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "draftId": {
             "type": "string",
@@ -1047,6 +1115,28 @@
               "source"
             ]
           },
+          "signature": {
+            "type": "object",
+            "description": "While signatures are offered: whether the letter prints the person's saved signature, and why",
+            "properties": {
+              "printed": {
+                "type": "boolean"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "asked",
+                  "remembered",
+                  "none_saved"
+                ],
+                "description": "Why: asked for in the call (signature), the account's remembered choice, or none_saved when the account has no signature"
+              }
+            },
+            "required": [
+              "printed",
+              "source"
+            ]
+          },
           "pages": {
             "type": "integer",
             "minimum": 2,
@@ -1140,6 +1230,18 @@
           },
           "deliveryDisclaimer": {
             "type": "string"
+          },
+          "usedSavedReturnAddress": {
+            "type": "boolean"
+          },
+          "savedReturnAddressNote": {
+            "type": "string"
+          },
+          "addressWarnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "draftId": {
             "type": "string",

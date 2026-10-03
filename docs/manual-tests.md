@@ -1787,6 +1787,40 @@ PostGrid test-mode verification; a refused field costs none.
 **Pass criteria:** The page shows only the sender's first name and takes one address or one no thanks;
 the sender's assistant learns which, and nothing about the request appears in a URL a server logs.
 
+### SIGNATURE-01 — A saved signature on a letter (#608)
+
+**Status:** Not run.
+
+**Preconditions:** Development, with `LETTER_IRL_SIGNATURES_ENABLED` on and `LETTER_IRL_PRINT_RENDERER=pdf`
+in the API. A client with the (DEV) connector, or the dev CLI's tools, with its tool list refreshed. A
+photo of your signature in dark ink on white paper, and a second one. PostGrid is in test mode on
+development: a sent letter is drawn, not mailed, and its PDF opens in PostGrid's test dashboard.
+
+**Steps:**
+
+1. [ ] Ask the assistant to save your signature, attaching the first photo (or giving a link to it).
+   Verify `set_signature` answers that it is saved, with its size. One under 600 px wide is said to
+   print softly.
+2. [ ] Ask for a short letter preview signed "Love," then your name on the next line. Verify the card
+   shows the signature under "Love,", left with the text, and your name under the signature.
+3. [ ] Ask for the same letter without the signature. Verify the card shows none. Ask for another
+   letter without mentioning it: it has none (the choice is remembered). Ask for one with the
+   signature: it is back, and the next letter keeps it.
+4. [ ] Ask for a letter a few lines short of a full page. Verify it is refused as too long, with "The
+   signature takes 3 lines, and without it the letter fits", and that the same letter without the
+   signature previews.
+5. [ ] On a signed preview, change the stationery to Botanical, then change the words. Verify the
+   signature stays under the new closing each time.
+6. [ ] Save the second photo as your signature. Send the preview from step 5 (test mode). Verify the
+   PDF in PostGrid's test dashboard prints the first signature, as the preview showed it, in Botanical.
+7. [ ] Remove the signature (`clear_signature`, confirmed). Verify a preview asking for the signature
+   is refused, saying `set_signature` saves one, and that a preview not asking has none.
+8. [ ] Turn the flag off and deploy the API, then refresh the tool list. Verify the previews no
+   longer list `signature` and the three signature tools are gone. Turn the flag back on.
+
+**Pass criteria:** A letter prints the signature its preview showed, under the sign-off's first line;
+a preview's choice is remembered; and nothing prints a signature the person did not see.
+
 ---
 
 ## Image Generation Routing

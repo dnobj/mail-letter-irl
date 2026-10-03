@@ -11,6 +11,7 @@ import {
   letterOption,
   letterPayment,
   letterRunsPast,
+  SIGNATURE_GIFT_WORDS,
   redrawLetterPreview,
   RENDERED_LETTER_CHARACTER_CAP,
   validateCharacterLimitForLayout,
@@ -217,7 +218,8 @@ async function handler(input: SetLetterWordsInput, context: ToolContext): Promis
   const imageData = layoutType === 'header_image'
     ? draft.header_image_data
     : layoutType === 'inline_image' ? draft.inline_image_data : null;
-  const letter = { bodyText, signOff, layoutType, imageData: imageData ?? undefined, stationery };
+  // With the draft's own signature (#608), under the new sign-off's first line.
+  const letter = { bodyText, signOff, layoutType, imageData: imageData ?? undefined, signatureImage: draft.signature_image || undefined, stationery };
   // A gift letter pays for one page only (#579): its words are held to one
   // page and refused in a gift's words when they run past it, never priced
   // again (#593 review round 1).
@@ -233,7 +235,11 @@ async function handler(input: SetLetterWordsInput, context: ToolContext): Promis
   try {
     layout = layoutLetterForPreview(letter, context, 'pdf', gift ? 1 : limit)!;
   } catch (error) {
-    if (gift && letterRunsPast(letter, 1)) throw refused('GIFT_LETTER_ONE_PAGE', GIFT_ONE_PAGE, context);
+    if (gift && letterRunsPast(letter, 1)) {
+      // Signed, and fitting one page without the signature: the way out (#608).
+      const signedOnly = letter.signatureImage !== undefined && !letterRunsPast({ ...letter, signatureImage: undefined }, 1);
+      throw refused('GIFT_LETTER_ONE_PAGE', signedOnly ? `${GIFT_ONE_PAGE} ${SIGNATURE_GIFT_WORDS}` : GIFT_ONE_PAGE, context);
+    }
     throw error;
   }
   const pages = layout.pages.length;

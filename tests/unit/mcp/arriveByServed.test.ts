@@ -118,6 +118,8 @@ describe('arriveBy in tools/list', () => {
     vi.stubEnv('LETTER_IRL_STATIONERY_ENABLED', 'true');
     vi.stubEnv('LETTER_IRL_POSTCARD_LAYOUTS_ENABLED', 'true');
     vi.stubEnv('LETTER_IRL_PRINT_RENDERER', 'pdf');
+    // And the letter previews' signature while signatures are not (#608).
+    vi.stubEnv('LETTER_IRL_SIGNATURES_ENABLED', 'true');
     const on = await listedTools();
     for (const name of PREVIEWS) {
       expect((off.get(name)?.inputSchema as { additionalProperties?: unknown }).additionalProperties, name).toBe(true);

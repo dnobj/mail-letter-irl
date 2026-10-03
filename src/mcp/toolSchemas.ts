@@ -50,7 +50,8 @@ export const toolInputSchemas = {
     arriveBy: z.string().optional(),
     stationery: z.string().optional(),
     monogram: z.string().optional(),
-    headline: z.string().optional()
+    headline: z.string().optional(),
+    signature: z.boolean().optional()
   }),
   quote_and_preview_letter_with_header_image: z.object({
     sender: addressSchema.optional(),
@@ -65,7 +66,8 @@ export const toolInputSchemas = {
     arriveBy: z.string().optional(),
     stationery: z.string().optional(),
     monogram: z.string().optional(),
-    headline: z.string().optional()
+    headline: z.string().optional(),
+    signature: z.boolean().optional()
   }),
   quote_and_preview_letter_with_image: z.object({
     sender: addressSchema.optional(),
@@ -80,7 +82,8 @@ export const toolInputSchemas = {
     arriveBy: z.string().optional(),
     stationery: z.string().optional(),
     monogram: z.string().optional(),
-    headline: z.string().optional()
+    headline: z.string().optional(),
+    signature: z.boolean().optional()
   }),
   send_letter: z.object({
     draftId: z.string(),

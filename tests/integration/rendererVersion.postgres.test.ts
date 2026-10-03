@@ -660,8 +660,9 @@ describePostgres('renderer version, stationery and pages (migrations 039 and 044
         "UPDATE letter_drafts SET renderer_version = 'pdf-3', postcard_front = $2::jsonb WHERE draft_id = $1",
         [letterDraft, JSON.stringify(BORDER)]
       )).rejects.toMatchObject({ code: '23514', constraint: 'letter_drafts_postcard_front_layout_known' });
-      // pdf-3 is a version the check admits, and pdf-2 still is.
-      await expect(seedDraft(userId, 'pdf-4')).rejects.toMatchObject({ code: '23514', constraint: 'letter_drafts_renderer_version_known' });
+      // pdf-3 is a version the check admits, and pdf-2 still is; a version no build draws is not. (pdf-4,
+      // a signed letter's, is admitted with its signature since migration 051: signatureDrafts.postgres.test.ts.)
+      await expect(seedDraft(userId, 'pdf-5')).rejects.toMatchObject({ code: '23514', constraint: 'letter_drafts_renderer_version_known' });
     }, 60_000);
 
     it('copies the front into the letter the send creates, and none for full bleed', async () => {

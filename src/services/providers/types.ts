@@ -94,9 +94,17 @@ export interface LetterParams {
 
   /**
    * The stationery the letter was drawn in (letters.content.stationery, #563),
-   * as stored: the print reads it with stationeryOf, for a 'pdf-2' letter only.
+   * as stored: the print reads it with stationeryOf, for a 'pdf-2' or 'pdf-4'
+   * letter.
    */
   stationery?: unknown;
+
+  /**
+   * The person's signature (letters.content.signatureImage, #608): a PNG data
+   * URI, and the paragraph of `message` holding the sign-off's first line,
+   * which it prints under. The print draws it for a 'pdf-4' letter only.
+   */
+  signature?: { image: string; closingParagraph: number };
 }
 
 /**

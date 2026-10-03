@@ -210,6 +210,51 @@ describe('mail outbox retries', () => {
     expect(sendLetter).toHaveBeenCalledWith(expect.objectContaining({ rendererVersion: 'pdf-1' }));
   });
 
+  it.each([
+    // The message is "Hello\nRegards": the sign-off's first line is paragraph 1.
+    ['under the sign-off\'s first line', { bodyText: 'Hello', signOff: 'Regards' }, 1],
+    // A body ending in blank lines: they are trimmed, so the closing follows the last word.
+    ['after a body ending in blank lines', { bodyText: 'Line one\nLine two\n\n\n', signOff: 'Love,\nPat' }, 2]
+  ])('hands the provider the signature, %s (#608)', async (_label, words, closingParagraph) => {
+    const image = 'data:image/png;base64,iVBORw0KGgo=';
+    const signed = { ...letter, content: { ...letter.content, ...words, rendererVersion: 'pdf-4', signatureImage: image } };
+    query.mockImplementation(async (sql: string) => {
+      if (sql.includes('WITH candidate')) return { rows: [{ ...job }] };
+      if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...signed }] };
+      return { rows: [] };
+    });
+    const base = clientQuery.getMockImplementation()!;
+    clientQuery.mockImplementation(async (sql: string, params?: unknown[]) =>
+      sql.startsWith('SELECT * FROM letters') ? { rows: [{ ...signed }] } : base(sql, params)
+    );
+
+    await processLetterJob('job-1', {});
+
+    expect(sendLetter).toHaveBeenCalledWith(expect.objectContaining({ rendererVersion: 'pdf-4', signature: { image, closingParagraph } }));
+  });
+
+  it.each([['none', undefined], ['an emptied one', ''], ['one that is not text', 42]])(
+    'hands the provider no signature for a letter with %s (#608)',
+    async (_label, signatureImage) => {
+      const content = { ...letter.content, rendererVersion: 'pdf-4', ...(signatureImage === undefined ? {} : { signatureImage }) };
+      const unsigned = { ...letter, content };
+      query.mockImplementation(async (sql: string) => {
+        if (sql.includes('WITH candidate')) return { rows: [{ ...job }] };
+        if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...unsigned }] };
+        return { rows: [] };
+      });
+      const base = clientQuery.getMockImplementation()!;
+      clientQuery.mockImplementation(async (sql: string, params?: unknown[]) =>
+        sql.startsWith('SELECT * FROM letters') ? { rows: [{ ...unsigned }] } : base(sql, params)
+      );
+
+      await processLetterJob('job-1', {});
+
+      // The print holds a pdf-4 letter without one (postGridPdfLetters.test.ts).
+      expect(sendLetter).toHaveBeenCalledWith(expect.objectContaining({ rendererVersion: 'pdf-4', signature: undefined }));
+    }
+  );
+
   it('hands the provider the stationery the letter was drawn in (#563)', async () => {
     const stationery = { theme: 'botanical', dateLine: 'October 1, 2026' };
     const themed = { ...letter, content: { ...letter.content, rendererVersion: 'pdf-2', stationery } };

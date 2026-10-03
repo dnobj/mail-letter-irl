@@ -165,7 +165,8 @@ async function handler(input: SetStationeryInput, context: ToolContext): Promise
     ? draft.header_image_data
     : layoutType === 'inline_image' ? draft.inline_image_data : null;
   const layout = layoutLetterForPreview(
-    { bodyText, signOff, layoutType, imageData: imageData ?? undefined, stationery },
+    // With the draft's own signature (#608), which a restyle keeps.
+    { bodyText, signOff, layoutType, imageData: imageData ?? undefined, signatureImage: draft.signature_image || undefined, stationery },
     context,
     'pdf',
     // On as many pages as a preview may take (#586), and a gift letter on one:

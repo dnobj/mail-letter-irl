@@ -13,7 +13,8 @@ export type SignatureRefusalCode =
   | 'NO_SIGNATURE_FOUND'
   | 'NOT_A_SIGNATURE'
   | 'SIGNATURE_TOO_SMALL'
-  | 'CONFIRM_REQUIRED';
+  | 'CONFIRM_REQUIRED'
+  | 'SIGNATURE_NOT_SAVED';
 
 /**
  * Refusals the model can act on. The code doubles as the log's class, and no

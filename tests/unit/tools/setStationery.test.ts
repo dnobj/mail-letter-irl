@@ -54,27 +54,31 @@ function png(width: number, height: number): string {
 }
 const FULL = png(1950, 600);
 const SMALL = png(390, 120);
+// A saved signature's copy, as a signed draft keeps it (#608).
+const SIGNATURE = png(1200, 300);
 
 /** A pending letter draft and the Classic preview the preview tools drew for it. */
-function draft(options: { layoutType?: LetterLayoutType; gift?: boolean; bodyText?: string } = {}): DraftForStationery {
+function draft(options: { layoutType?: LetterLayoutType; gift?: boolean; bodyText?: string; signed?: boolean } = {}): DraftForStationery {
   const layoutType = options.layoutType ?? 'text_only';
   const bodyText = options.bodyText ?? 'Dear Sam,\n\nThank you for the jam.';
   const signOff = 'Love, Pat';
   const image = layoutType === 'text_only' ? undefined : FULL;
-  const layout = layoutLetterForPreview({ bodyText, signOff, layoutType, imageData: image }, context(), 'pdf')!;
+  const signatureImage = options.signed ? SIGNATURE : undefined;
+  const layout = layoutLetterForPreview({ bodyText, signOff, layoutType, imageData: image, signatureImage }, context(), 'pdf')!;
   const pages = options.gift ? [...layout.pages, layoutGiftPage(giftLetterPageCopy(sampleFundedCard(), SENDER.name))] : layout.pages;
   const previewHtml = renderLetterPreviewDocument(
     renderPreviewSvg(withDisplayImage({ ...layout, pages }, image ? SMALL : undefined), {
       addresses: { from: stampedAddressLines(SENDER), to: stampedAddressLines(RECIPIENT) }
     }),
-    { bodyText, signOff }
+    { bodyText, signOff },
+    options.signed ? 'pdf-4' : 'pdf-1'
   );
   return {
     mail_type: 'letter',
     status: 'pending',
     expires_at: new Date('2026-10-01T12:00:00Z'),
     redacted_at: null,
-    renderer_version: 'pdf-1',
+    renderer_version: options.signed ? 'pdf-4' : 'pdf-1',
     body_text: bodyText,
     sign_off: signOff,
     layout_type: layoutType,
@@ -86,7 +90,8 @@ function draft(options: { layoutType?: LetterLayoutType; gift?: boolean; bodyTex
     pages: 1,
     is_gift_send: options.gift === true,
     required_credits: 2,
-    stationery: null
+    stationery: null,
+    signature_image: signatureImage ?? null
   };
 }
 
@@ -314,6 +319,32 @@ describe('set_stationery', () => {
       expect.any(String)
     );
   });
+
+  it.each(['text_only', 'header_image', 'inline_image'] as const)(
+    'draws a signed %s letter again with its own signature, records pdf-4 in the page, and keeps its picture (#608)',
+    async layoutType => {
+      const original = draft({ layoutType, signed: true });
+      expect(original.preview_html).toContain(`<image data-role="signature" href="${SIGNATURE}"`);
+      vi.mocked(getDraftForStationery).mockResolvedValue(original);
+
+      await run({ stationery: 'botanical' });
+
+      const change = written();
+      expect(change.previewHtml).toContain('<body data-renderer="pdf-4">');
+      expect(change.previewHtml).toContain(`<image data-role="signature" href="${SIGNATURE}"`);
+      // The letter's own picture from its small copy, never the signature in its place.
+      if (layoutType !== 'text_only') {
+        expect(change.previewHtml.match(/<image href="([^"]+)"/)?.[1]).toBe(SMALL);
+        expect(change.previewHtml).not.toContain(FULL);
+      }
+
+      // And back to Classic: the preview first made, byte for byte.
+      vi.mocked(setDraftStationery).mockClear();
+      vi.mocked(getDraftForStationery).mockResolvedValue({ ...original, stationery: { theme: 'botanical' }, preview_html: change.previewHtml });
+      await run({ stationery: 'classic' });
+      expect(written().previewHtml).toBe(original.preview_html);
+    }
+  );
 
   it('is card-callable, idempotent and not destructive', () => {
     expect(setStationeryTool.meta).toMatchObject({ 'openai/widgetAccessible': true, readOnlyHint: false, idempotentHint: true });

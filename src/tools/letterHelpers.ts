@@ -20,6 +20,7 @@ import {
   rendererDocumentPages,
   renderLayoutPreviewHtml,
   renderLetterPreviewDocument,
+  signatureParagraph,
   stampedAddressLines,
   validateCharacterLimit,
 } from "../services/previewService.js";
@@ -40,6 +41,7 @@ import {
   StationeryOverflow,
   renderPreviewSvg,
   rendererVersionFor,
+  SIGNATURE_LINES,
   type Layout,
   type PageFit,
   type Stationery
@@ -48,10 +50,11 @@ import { getSendEligibility, type SendEligibility } from "../services/commerceSe
 import { isPackPayable, type MailOption } from "../config/products.js";
 import { callingApp, type ClientProfile } from "../auth/clientProfiles.js";
 import { isSendConfirmationEnabled, letterPacksPageUrl, sendConfirmationUrl } from "../config/sendConfirmation.js";
-import { giftCardSummary, resolveGiftSendChoice, type GiftSendChoice } from "./giftSendChoice.js";
+import { GIFT_PAYS_ONE_PAGE, giftCardSummary, resolveGiftSendChoice, type GiftSendChoice } from "./giftSendChoice.js";
 import { giftLetterPageCopy } from "../services/giftCardRenderer.js";
 import { rememberedPrefix, type PreviewStationery } from "./stationeryInput.js";
 import { rememberStationery } from "../services/stationeryDefaultService.js";
+import { previewSignatureOutput, rememberPreviewSignature, type PreviewSignature, type PreviewSignatureOutput } from "./signatureInput.js";
 import {
   previewArrivalWindow,
   scheduleSentence,
@@ -144,6 +147,8 @@ export interface LetterQuoteOutput {
   arrivalWindow?: ArrivalWindow;
   /** The stationery the page was drawn in (#563), while stationery is offered, and why: asked for, remembered, or Classic by default. */
   stationery?: PreviewStationery;
+  /** Whether the letter prints the person's saved signature (#608), while signatures are offered, and why. */
+  signature?: PreviewSignatureOutput;
   /** A letter of more than one page (#586): the pages it prints on, both sides of the paper, paid with Pay & Send. */
   pages?: number;
   /** While room to write is offered (#586): how full its pages are, for the card's fit line. Card-only (_meta). */
@@ -604,12 +609,15 @@ const LAYOUT_LABELS: Record<LetterLayoutType, string> = {
   inline_image: " with an enclosed image"
 };
 
-/** What a letter preview lays out: its printed text, its layout and its image. */
-function previewContent(letter: { bodyText: string; signOff: string; layoutType: LetterLayoutType; imageData?: string }) {
+/** What a letter preview lays out: its printed text, its layout, its image, and its signature (#608). */
+function previewContent(letter: { bodyText: string; signOff: string; layoutType: LetterLayoutType; imageData?: string; signatureImage?: string }) {
   return {
     text: letterPrintText(letter.bodyText, letter.signOff),
     layoutType: letter.layoutType,
-    image: letter.layoutType !== "text_only" && letter.imageData ? readImageDataUri(letter.imageData) : undefined
+    image: letter.layoutType !== "text_only" && letter.imageData ? readImageDataUri(letter.imageData) : undefined,
+    signature: letter.signatureImage
+      ? { image: readImageDataUri(letter.signatureImage), closingParagraph: signatureParagraph(letter.bodyText, letter.signOff) }
+      : undefined
   };
 }
 
@@ -619,7 +627,7 @@ function previewContent(letter: { bodyText: string; signOff: string; layoutType:
  * is left to the layout to say.
  */
 export function letterRunsPast(
-  letter: { bodyText: string; signOff: string; layoutType: LetterLayoutType; imageData?: string; stationery?: Stationery | PreviewStationery },
+  letter: { bodyText: string; signOff: string; layoutType: LetterLayoutType; imageData?: string; signatureImage?: string; stationery?: Stationery | PreviewStationery },
   maxPages: number
 ): boolean {
   try {
@@ -644,7 +652,7 @@ export function letterRunsPast(
  * longest letter we print. The draft records the pages it took.
  */
 export function layoutLetterForPreview(
-  letter: { bodyText: string; signOff: string; layoutType: LetterLayoutType; imageData?: string; stationery?: Stationery | PreviewStationery },
+  letter: { bodyText: string; signOff: string; layoutType: LetterLayoutType; imageData?: string; signatureImage?: string; stationery?: Stationery | PreviewStationery },
   context: ToolContext,
   renderer: 'html' | 'pdf' = printRenderer(),
   /** The most pages it may take: the previews' limit (#586), or a draft's own pages when it is drawn again. */
@@ -710,10 +718,31 @@ export function layoutLetterForPreview(
           ? fitsPlain
             ? `The ${own} stationery sets the text in its own typeface: shorten the message, or choose the classic stationery.`
             : `The ${own} stationery sets the text in its own typeface, and the letter runs past ${past} on the classic stationery too: shorten the message.`
-          : `Please shorten your message to fit on ${pageWords(maxPages)}.`)
+          : `Please shorten your message to fit on ${pageWords(maxPages)}.`) +
+      signatureWords(content, stationery, maxPages)
     ),
     { diagnosticClass: "validation_error" }
   );
+}
+
+/** A signed gift letter that fits one page without its signature (#608): the way out. */
+export const SIGNATURE_GIFT_WORDS =
+  `The signature takes ${SIGNATURE_LINES} lines, and without it the letter fits one page: preview it with signature: false to send it as a gift letter.`;
+
+/**
+ * What a signature has to do with a letter too long (#608): its band takes
+ * SIGNATURE_LINES lines, and when the letter fits without it, says so.
+ */
+function signatureWords(
+  content: ReturnType<typeof previewContent>,
+  stationery: Stationery | PreviewStationery | undefined,
+  maxPages: number
+): string {
+  if (!content.signature) return "";
+  const fitsUnsigned = layoutLetter({ ...content, signature: undefined, stationery }, { maxPages }).overflowLines === 0;
+  return fitsUnsigned
+    ? ` The signature takes ${SIGNATURE_LINES} lines, and without it the letter fits: preview it with signature: false to leave it off.`
+    : ` The signature takes ${SIGNATURE_LINES} lines.`;
 }
 
 /**
@@ -728,7 +757,8 @@ export function withDisplayImage(layout: Layout, previewDataUri: string | undefi
     ...layout,
     pages: layout.pages.map(page => ({
       ...page,
-      items: page.items.map(item => (item.kind === "image" ? { ...item, image } : item))
+      // The signature is not the letter's picture (#608).
+      items: page.items.map(item => (item.kind === "image" && item.role !== "signature" ? { ...item, image } : item))
     }))
   };
 }
@@ -752,7 +782,8 @@ export function redrawLetterPreview(
   const letterPages = storedPages.slice(0, stored.pages);
   const after = storedPages.slice(stored.pages);
   const image = letterPages.map(renderedPageImage).find(found => found !== undefined);
-  const drawsImage = layout.pages.some(page => page.items.some(item => item.kind === "image"));
+  const drawsImage = layout.pages.some(page => page.items.some(item => item.kind === "image" && item.role !== "signature"));
+  const signed = layout.pages.some(page => page.items.some(item => item.kind === "image" && item.role === "signature"));
   if (letterPages.length < stored.pages || letterPages.length === 0 || (drawsImage && !image)) return null;
   const drawn = renderPreviewSvg(withDisplayImage(layout, image), {
     addresses: { from: stampedAddressLines(letter.sender), to: stampedAddressLines(letter.recipient) }
@@ -760,7 +791,7 @@ export function redrawLetterPreview(
   return renderLetterPreviewDocument(
     [...drawn, ...after],
     { bodyText: letter.bodyText, signOff: letter.signOff },
-    rendererVersionFor(stationery)
+    rendererVersionFor(stationery, signed)
   );
 }
 
@@ -947,6 +978,8 @@ export interface CreateLetterDraftParams {
   schedule?: PreviewSchedule;
   /** The stationery asked for or remembered, checked (chooseStationery, #563); undefined while it is not offered. */
   stationery?: PreviewStationery;
+  /** The signature asked for or remembered (chooseSignature, #608): its image when the letter prints one. */
+  signature?: PreviewSignature;
   context: ToolContext;
 }
 
@@ -1071,10 +1104,22 @@ export async function giftForLayout(
   letter: PrintedAddresses & { bodyText: string; signOff: string; sendAsGift?: boolean },
   layout: Layout | undefined,
   context: ToolContext,
-  renderer: 'html' | 'pdf' = printRenderer()
+  renderer: 'html' | 'pdf' = printRenderer(),
+  /** Whether a signed letter fits one page without its signature (#608): asked only when the gift is refused. */
+  fitsOnePageUnsigned: () => boolean = () => false
 ): Promise<GiftSendChoice> {
   if (early) return early;
-  const gift = await letterGiftChoice(letter, context, letterOption(layout));
+  let gift: GiftSendChoice;
+  try {
+    gift = await letterGiftChoice(letter, context, letterOption(layout));
+  } catch (error) {
+    // A signed letter its band pushed past one page: the way out is no
+    // signature, which the gift's refusal says (#612 review round 1).
+    if (error instanceof Error && error.message === GIFT_PAYS_ONE_PAGE && fitsOnePageUnsigned()) {
+      throw new Error(`${GIFT_PAYS_ONE_PAGE} ${SIGNATURE_GIFT_WORDS}`);
+    }
+    throw error;
+  }
   if (gift.card) validateGiftCardPrints(gift.card, letter, context, renderer);
   return gift;
 }
@@ -1140,8 +1185,12 @@ export async function createLetterDraftAndBuildOutput(
     printLayout,
     schedule,
     stationery,
+    signature,
     context
   } = params;
+  // Whether the letter as laid out carries the signature (#608): the draft's
+  // version and its copy follow what was drawn.
+  const signed = Boolean(printLayout?.pages.some(page => page.items.some(item => item.kind === "image" && item.role === "signature")));
 
   // Calculate credits, only where a pack pays (#579). The letter's option has
   // the pages it was laid out on (#586), counted before any gift page.
@@ -1181,7 +1230,7 @@ export async function createLetterDraftAndBuildOutput(
           { addresses: { from: stampedAddressLines(sender), to: stampedAddressLines(recipient) } }
         ),
         { bodyText, signOff },
-        rendererVersionFor(stationery)
+        rendererVersionFor(stationery, signed)
       )
     : renderLayoutPreviewHtml({
         sender,
@@ -1212,9 +1261,11 @@ export async function createLetterDraftAndBuildOutput(
     inlineImageUrl,
     isGiftSend: gift.isGift,
     // The letter prints with the renderer its preview was drawn with: pdf-2
-    // for a theme (#563), which the draft records with it.
-    rendererVersion: layout ? rendererVersionFor(stationery) : undefined,
+    // for a theme (#563), which the draft records with it; pdf-4 with a
+    // signature (#608), whose copy the draft keeps.
+    rendererVersion: layout ? rendererVersionFor(stationery, signed) : undefined,
     stationery: layout ? stationery : undefined,
+    signatureImage: signed ? signature?.image : undefined,
     // Held until its mail date (#535).
     schedule: schedule?.draft,
     // The pages it was laid out on (#586): it prints and is priced on them.
@@ -1245,7 +1296,12 @@ export async function createLetterDraftAndBuildOutput(
     }
   }
 
+  // A signature the call chose, on or off, is the account's choice for its
+  // next preview (#608), once the draft exists, as stationery is.
+  if (signature) await rememberPreviewSignature(signature, context);
+
   // Build output
+  const signatureSaid = previewSignatureOutput(signature, signed);
   // Only pass small preview images for ChatGPT widget display (~3KB each)
   // Full-quality images are stored in the draft and retrieved when sending to PostGrid
   const output: LetterQuoteOutput = {
@@ -1274,6 +1330,9 @@ export async function createLetterDraftAndBuildOutput(
     arrivalWindow: previewArrivalWindow(context),
     // Only while stationery is offered (#563): otherwise the output is as before it.
     ...(stationery ? { stationery } : {}),
+    // Whether it is signed, and why, while signatures are offered (#608 review
+    // round 1): a model without the card hears it from here.
+    ...(signatureSaid ? { signature: signatureSaid } : {}),
     // A letter of more than one page (#586), printed on both sides: only then.
     ...(option.pages ? { pages: option.pages } : {}),
     // And how full its pages are, for the card's fit line, while room to write

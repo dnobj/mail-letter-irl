@@ -39,6 +39,11 @@ function fundedPreviewCard(seed: GiftBalanceSeed | undefined): GiftCardContent {
   return seed ? seedCard(seed.code, seed.endsAt, seed.newAccountsOnly) : sampleFundedCard();
 }
 
+/** The refusal of a gift for mail no gift letter pays for (#579): a signed letter adds its way out (#608). */
+export const GIFT_PAYS_ONE_PAGE =
+  'A gift letter pays for a one-page letter or a 6x9 postcard, not for this one. ' +
+  'Leave sendAsGift out and pay for it with Pay & Send, or send a 6x9 postcard or a one-page letter as the gift.';
+
 export async function resolveGiftSendChoice(params: {
   userId: string;
   requested: boolean | undefined;
@@ -58,10 +63,7 @@ export async function resolveGiftSendChoice(params: {
   }
   if (params.giftCanPay === false) {
     if (params.requested === true) {
-      throw new Error(
-        'A gift letter pays for a one-page letter or a 6x9 postcard, not for this one. ' +
-          'Leave sendAsGift out and pay for it with Pay & Send, or send a 6x9 postcard or a one-page letter as the gift.'
-      );
+      throw new Error(GIFT_PAYS_ONE_PAGE);
     }
     return { isGift: false, giftLettersAvailable: 0 };
   }

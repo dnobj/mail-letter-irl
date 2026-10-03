@@ -48,7 +48,8 @@
   unanswered (`address-requests-sweep`); the policy's wording for it is the owner's, and production
   waits for it. A saved signature (#608) is account data: kept until the person removes it or the
   account is erased, which the policy does not yet say; its wording is the owner's too, and production
-  waits for it. The maintenance retention sweep (`src/services/retentionService.ts`,
+  waits for it. A letter's own copy of it, taken when the letter is previewed, is that letter's content,
+  and goes with it on the content's clock. The maintenance retention sweep (`src/services/retentionService.ts`,
   migration 026) clears the content columns and quarantines what it clears in
   `redacted_content_quarantine` for a bounded restore window. Rows, status, timestamps and
   identifiers remain. A copy leaves the quarantine when the published period ends, counted on the

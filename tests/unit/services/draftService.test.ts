@@ -94,6 +94,29 @@ describe('draftService', () => {
       );
     });
 
+    it('stores the signature a preview was drawn with in its own column, and NULL without one (#608)', async () => {
+      const signature = 'data:image/png;base64,iVBORw0KGgo=';
+      const inserted = { rows: [{ draft_id: 'draft-s', expires_at: new Date() }], rowCount: 1, command: 'INSERT', oid: 0, fields: [] };
+      vi.mocked(db.query).mockResolvedValueOnce(inserted).mockResolvedValueOnce(inserted);
+      const params = {
+        userId: testUsers.sarah.user_id,
+        sender: testAddresses.validSender,
+        recipient: testAddresses.validRecipient,
+        bodyText: testLetterContent.shortLetter.bodyText,
+        signOff: testLetterContent.shortLetter.signOff,
+        requiredCredits: 2
+      };
+
+      await createDraft({ ...params, rendererVersion: 'pdf-4', signatureImage: signature });
+      await createDraft({ ...params, rendererVersion: 'pdf-1' });
+
+      const [signed, plain] = vi.mocked(db.query).mock.calls as unknown as Array<[string, unknown[]]>;
+      expect(signed[0]).toMatch(/stationery, pages, signature_image\s*\) VALUES \([\s\S]*\$21::smallint, \$22\)/);
+      expect(signed[1][21]).toBe(signature);
+      expect(signed[1][15]).toBe('pdf-4');
+      expect(plain[1][21]).toBeNull();
+    });
+
     it('does not log draft, user, recipient, or address identifiers', async () => {
       const mockDraft = testDrafts.pending();
       vi.mocked(db.query).mockResolvedValueOnce({
@@ -906,7 +929,8 @@ describe('draftService stationery (#563)', () => {
       const [sql, params] = vi.mocked(db.query).mock.calls[0] as [string, unknown[]];
       for (const column of ['mail_type', 'status', 'expires_at', 'redacted_at', 'renderer_version', 'body_text', 'sign_off', 'layout_type',
         'header_image_data', 'inline_image_data', 'sender', 'recipient', 'preview_html', 'pages', 'is_gift_send', 'required_credits',
-        'stationery']) {
+        // And the draft's own signature (#608), which set_stationery and set_letter_words draw again.
+        'stationery', 'signature_image']) {
         expect(sql, column).toContain(column);
       }
       expect(sql).toMatch(/WHERE draft_id = \$1 AND user_id = \$2/);
@@ -934,8 +958,10 @@ describe('draftService stationery (#563)', () => {
       // What the page was drawn from, read again under the lock (#586).
       expect(read).toEqual(['SELECT body_text, sign_off, stationery FROM letter_drafts WHERE draft_id = $1', ['draft-1']]);
       expect(update[0]).toMatch(
-        /UPDATE letter_drafts\s+SET stationery = \$2::jsonb, renderer_version = \$3, preview_html = \$4,\s+pages = COALESCE\(\$5::smallint, pages\), updated_at = NOW\(\)\s+WHERE draft_id = \$1/
+        /UPDATE letter_drafts\s+SET stationery = \$2::jsonb,\s+renderer_version = CASE WHEN signature_image IS NOT NULL THEN 'pdf-4' ELSE \$3::text END,\s+preview_html = \$4,\s+pages = COALESCE\(\$5::smallint, pages\), updated_at = NOW\(\)\s+WHERE draft_id = \$1/
       );
+      // A signed draft keeps pdf-4 whatever the theme (#608, 051's pair): the
+      // row's own signature decides, read under the lock.
       // Stored as the print reads it back: the theme and its slots, not why it was chosen.
       // No pages given: the draft keeps its own (#586).
       expect(update[1]).toEqual(['draft-1', JSON.stringify(BOTANICAL), 'pdf-2', PAGE, null]);

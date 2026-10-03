@@ -220,7 +220,9 @@ const DRAFT_CONTENT_COLUMNS = [
   // A theme and the slot text it prints (#563, migration 044).
   'stationery',
   // A postcard's front and the caption or place it prints (#594, migration 048).
-  'postcard_front'
+  'postcard_front',
+  // The person's signature as the letter was previewed with it (#608, migration 051).
+  'signature_image'
 ] as const;
 
 const DRAFT_QUARANTINE_OBJECT = DRAFT_CONTENT_COLUMNS.map(
@@ -242,7 +244,9 @@ const DRAFT_QUARANTINE_OBJECT = DRAFT_CONTENT_COLUMNS.map(
  * initials, the headline), which is the content: migration 044 holds a themed
  * draft to renderer 'pdf-2' and back, so a NULL would roll the batch back too.
  * A postcard's front keeps its layout and loses its caption or place, for the
- * same reason (#594, migration 048 and 'pdf-3').
+ * same reason (#594, migration 048 and 'pdf-3'). The signature is emptied, as
+ * the images are: migration 051 holds a signed draft to 'pdf-4' by IS NOT NULL
+ * (#608).
  */
 export const DRAFT_REDACTION_SET = `
         SET sender = '{}'::jsonb,
@@ -260,6 +264,7 @@ export const DRAFT_REDACTION_SET = `
             inline_image_url = NULL,
             stationery = CASE WHEN stationery IS NULL THEN NULL ELSE jsonb_build_object('theme', stationery->'theme') END,
             postcard_front = CASE WHEN postcard_front IS NULL THEN NULL ELSE jsonb_build_object('layout', postcard_front->'layout') END,
+            signature_image = CASE WHEN signature_image IS NULL THEN NULL ELSE '' END,
             redacted_at = NOW()`;
 
 /**

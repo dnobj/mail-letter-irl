@@ -217,6 +217,22 @@ describe('createMailOrderFromDraft', () => {
     expect(savedLetter?.content).toMatchObject({ rendererVersion: 'pdf-2', stationery: botanical });
   });
 
+  it('copies the signature the preview was drawn with into the letter (#608)', async () => {
+    const signature = 'data:image/png;base64,iVBORw0KGgo=';
+    (draft as Record<string, unknown>).renderer_version = 'pdf-4';
+    (draft as Record<string, unknown>).signature_image = signature;
+    await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter' });
+    expect(savedLetter?.content).toMatchObject({ rendererVersion: 'pdf-4', signatureImage: signature });
+  });
+
+  // Never drawn, or emptied by retention: nothing to print.
+  it.each([null, ''])('leaves the content without a signature for a draft holding %j (#608)', async none => {
+    (draft as Record<string, unknown>).renderer_version = 'pdf-1';
+    (draft as Record<string, unknown>).signature_image = none;
+    await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter' });
+    expect(savedLetter?.content).not.toHaveProperty('signatureImage');
+  });
+
   it("leaves a Classic letter's content without stationery (#563)", async () => {
     (draft as Record<string, unknown>).renderer_version = 'pdf-1';
     (draft as Record<string, unknown>).stationery = null;

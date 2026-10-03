@@ -79,9 +79,15 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  * 050 adds user_signatures (#608), which neither role is granted either: a
  * picture of a person's handwriting, which the panel does not show. Erasure
  * deletes it as the database owner. So nothing to re-run.
+ *
+ * 051 adds letter_drafts.signature_image (#608) and admits pdf-4. As for 039,
+ * the reader role's column list leaves it out; the operator role reads
+ * letter_drafts whole, and letters.content, so it can read a letter's copy of
+ * the signature, as it can the letter's words and addresses. Nothing to
+ * re-run.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
-  "050_user_signatures.sql";
+  "051_signature_drafts.sql";
 
 export interface AdminProvisioningArguments {
   environment: "development" | "production";

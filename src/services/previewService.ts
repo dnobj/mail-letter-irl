@@ -177,6 +177,21 @@ export function letterPrintText(bodyText: string | null | undefined, signOff?: s
   return (signOff ? `${body}\n${unix(signOff)}` : body).trim();
 }
 
+/**
+ * The paragraph of letterPrintText's text that holds the sign-off's first
+ * line, which a signature prints under (#608): after the body's paragraphs,
+ * past any blank line the sign-off begins with. Past the text when there is
+ * no sign-off, which puts the signature after the letter. The preview and the
+ * print both ask this, so they draw the signature in the same place.
+ */
+export function signatureParagraph(bodyText: string | null | undefined, signOff?: string | null): number {
+  const body = letterPrintText(bodyText);
+  const paragraphs = letterPrintText(bodyText, signOff).split('\n');
+  let index = body === '' ? 0 : body.split('\n').length;
+  while (index < paragraphs.length && paragraphs[index].trim() === '') index += 1;
+  return index;
+}
+
 // ============================================================================
 // Content Validation
 // ============================================================================

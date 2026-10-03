@@ -23,12 +23,14 @@ import {
   earlyGiftChoice,
   giftForLayout,
   layoutLetterForPreview,
+  letterRunsPast,
   roomToWriteSentence,
   createLetterDraftAndBuildOutput,
   type LetterQuoteOutput
 } from "./letterHelpers.js";
 import { previewSchedule } from "./arriveByInput.js";
 import { chooseStationery } from "./stationeryInput.js";
+import { chooseSignature } from "./signatureInput.js";
 import { previewSendStep } from "./previewSendStep.js";
 
 // ============================================================================
@@ -48,6 +50,8 @@ interface QuoteAndPreviewLetterTextOnlyInput {
   stationery?: string;
   monogram?: string;
   headline?: string;
+  /** The person's saved signature on the letter, or not (#608); left out, their last choice. */
+  signature?: boolean;
 }
 
 // ============================================================================
@@ -96,6 +100,10 @@ async function handler(
   // headline and the layout draws it.
   const stationery = await chooseStationery(input, sender.name, context, renderer);
 
+  // The person's signature (#608): asked for or remembered, read once, and
+  // laid out with the letter, so the fit counts its three lines.
+  const signature = await chooseSignature(input.signature, context);
+
   // Validate character limit
   validateCharacterLimitForLayout(input.bodyText, input.signOff, layoutType, context, renderer);
 
@@ -110,7 +118,7 @@ async function handler(
 
   // Our renderer measures the page itself (#534)
   const printLayout = layoutLetterForPreview(
-    { bodyText: input.bodyText, signOff: input.signOff, layoutType, stationery },
+    { bodyText: input.bodyText, signOff: input.signOff, layoutType, stationery, signatureImage: signature.image },
     context,
     renderer
   );
@@ -121,7 +129,9 @@ async function handler(
     { sender, recipient: input.recipient, bodyText: input.bodyText, signOff: input.signOff, senderIsSaved: usedSavedReturnAddress, sendAsGift: input.sendAsGift },
     printLayout,
     context,
-    renderer
+    renderer,
+    // A signed letter its band pushes past one page fits without it (#608).
+    () => signature.image !== undefined && !letterRunsPast({ bodyText: input.bodyText, signOff: input.signOff, layoutType, stationery }, 1)
   );
 
   // Validate with PostGrid provider
@@ -147,6 +157,7 @@ async function handler(
     printLayout,
     schedule,
     stationery,
+    signature,
     context
   });
 }

@@ -156,6 +156,26 @@ describe("published output-schema parity (#278)", () => {
 
     expect(manifestKeys).toEqual(Object.keys(getPurchaseStatusOutputZ.shape).sort());
   });
+  it("declares the letter previews' top-level output fields on both served layers, those for a card aside (#612 review round 2)", () => {
+    // The manifest also lists what partitionToolResult moves to _meta for the
+    // card; tools/list leaves those out. Anything else is on both, so a new
+    // output field cannot land on one layer only.
+    const CARD_ONLY = ['headerImageData', 'inlineImageData', 'previewHtml'];
+    const manifestKeys = Object.keys(
+      (getManifestTool('quote_and_preview_letter')?.outputSchema as { properties: Record<string, unknown> }).properties
+    ).filter(key => !CARD_ONLY.includes(key)).sort();
+    expect(manifestKeys).toEqual(Object.keys(quoteAndPreviewOutputZ.shape).sort());
+    // The signature (#608) inside: the same fields, and the same reasons.
+    const signature = (
+      getManifestTool('quote_and_preview_letter')?.outputSchema as {
+        properties: { signature: { properties: Record<string, { enum?: string[] }>; required: string[] } };
+      }
+    ).properties.signature;
+    const served = quoteAndPreviewOutputZ.shape.signature.unwrap();
+    expect(Object.keys(signature.properties).sort()).toEqual(Object.keys(served.shape).sort());
+    expect([...signature.required].sort()).toEqual(Object.keys(served.shape).sort());
+    expect(signature.properties.source.enum).toEqual(served.shape.source.options);
+  });
   it("declares the same sendEligibility.payAndSend fields on both served layers", () => {
     const manifestTool = getManifestTool("quote_and_preview_letter");
     const payAndSend = (

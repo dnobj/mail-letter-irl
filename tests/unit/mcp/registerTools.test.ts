@@ -698,8 +698,10 @@ describe('arrive-by in the served schemas (#535)', () => {
     vi.stubEnv('LETTER_IRL_PRINT_RENDERER', 'pdf');
     vi.stubEnv('LETTER_IRL_POSTCARD_SIZES_ENABLED', 'true');
     vi.stubEnv('JIT_PURCHASE_ENABLED', 'true');
-    // And the postcard layouts (#594), so nothing is withheld from the postcard.
+    // And the postcard layouts (#594), so nothing is withheld from the postcard,
+    // and signatures (#608), so nothing is withheld from a letter.
     vi.stubEnv('LETTER_IRL_POSTCARD_LAYOUTS_ENABLED', 'true');
+    vi.stubEnv('LETTER_IRL_SIGNATURES_ENABLED', 'true');
     for (const name of PREVIEWS) {
       const served = getServedInputSchema(name) as Record<string, { description?: string }>;
       // On: the raw shape, as declared.
@@ -769,6 +771,28 @@ describe('arrive-by in the served schemas (#535)', () => {
       );
       expect(summarizeToolResult(name, { lettersRequired: 1, deliveryEstimate: 'Mailed in 1-2 business days' }), name).not.toContain('Scheduled');
     }
+  });
+});
+
+describe("a letter preview's narration says whether it is signed (#612 review round 1)", () => {
+  const PREVIEW = { lettersRequired: 1, layoutType: 'text_only' };
+  const said = (signature?: unknown) => summarizeToolResult('quote_and_preview_letter', { ...PREVIEW, ...(signature ? { signature } : {}) });
+
+  it("says the account's choice decided it, and how to change it", () => {
+    expect(said({ printed: true, source: 'remembered' })).toMatch(
+      / Signed with the person's saved signature, the account's choice; signature: false in the call leaves it off\.$/
+    );
+    expect(said({ printed: false, source: 'remembered' })).toMatch(
+      / Not signed: the account's choice is no signature; signature: true in the call prints the saved one\.$/
+    );
+  });
+
+  it('says a signature asked for is printed, and nothing for one asked against, none saved, or none offered', () => {
+    expect(said({ printed: true, source: 'asked' })).toMatch(/ Signed with the person's saved signature\.$/);
+    const plain = said();
+    expect(said({ printed: false, source: 'asked' })).toBe(plain);
+    expect(said({ printed: false, source: 'none_saved' })).toBe(plain);
+    expect(plain).not.toContain('signature');
   });
 });
 

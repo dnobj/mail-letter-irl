@@ -116,6 +116,7 @@ import { inlineHostBridge } from "./widgetHost.js";
 import { isSendConfirmationEnabled } from "../config/sendConfirmation.js";
 import { isArriveByEnabled } from "../config/arriveBy.js";
 import { isStationeryOffered } from "../config/stationery.js";
+import { isSignaturesOffered } from "../config/signatures.js";
 import { isPostcardSizesOffered } from "../config/postcardSizes.js";
 import { isPostcardLayoutsOffered } from "../config/postcardLayouts.js";
 import { ENVELOPE_REVEAL_META, isEnvelopeRevealEnabled } from "../config/envelope.js";
@@ -979,6 +980,8 @@ export function withheldInputKeys(name: string): string[] {
   const withheld: string[] = [];
   if (PREVIEW_TOOLS.has(name) && !isArriveByEnabled()) withheld.push("arriveBy");
   if (LETTER_PREVIEW_TOOLS.has(name) && !isStationeryOffered()) withheld.push(...STATIONERY_INPUT_KEYS);
+  // The letter previews' signature (#608), while signatures are not offered.
+  if (LETTER_PREVIEW_TOOLS.has(name) && !isSignaturesOffered()) withheld.push("signature");
   if (name === "quote_and_preview_postcard" && !isPostcardLayoutsOffered()) withheld.push(...POSTCARD_FRONT_INPUT_KEYS);
   // set_postcard_style takes each only while it is offered (#594).
   if (name === "set_postcard_style" && !isPostcardSizesOffered()) withheld.push("size");
@@ -1558,6 +1561,23 @@ function stationerySentence(result: Record<string, unknown>): string {
 }
 
 /**
+ * A letter preview's signature (#608 review round 1), for the narration:
+ * whether the saved signature prints, and when the account's choice decided
+ * it, so the person hears why and how to change it. Nothing while signatures
+ * are not offered, with none saved, or for a call that said no signature.
+ */
+function signatureSentence(result: Record<string, unknown>): string {
+  const signature = result.signature as { printed?: unknown; source?: unknown } | undefined;
+  if (typeof signature?.printed !== "boolean") return "";
+  if (signature.source === "remembered") {
+    return signature.printed
+      ? " Signed with the person's saved signature, the account's choice; signature: false in the call leaves it off."
+      : " Not signed: the account's choice is no signature; signature: true in the call prints the saved one.";
+  }
+  return signature.source === "asked" && signature.printed ? " Signed with the person's saved signature." : "";
+}
+
+/**
  * What a preview costs, for the narration's lead: the letters it takes from
  * the balance, or Pay & Send for mail no pack pays for (#579), such as a
  * letter of more than one page (#586). Never "requires 1 letter" for mail no
@@ -1666,6 +1686,7 @@ export function summarizeToolResult(
       }
       summary += heldMailSentence(result);
       summary += stationerySentence(result);
+      summary += signatureSentence(result);
       summary += pagesSentence(result);
       return summary;
     }
