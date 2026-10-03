@@ -1282,6 +1282,15 @@ describe('the service the server last reported (#625)', () => {
     expect(text(card, 'studio-summary')).toContain('certified mail');
   });
 
+  it('keeps the service of a preview that came after, whatever the status said of the one before', async () => {
+    const card = mount();
+    await card.show(certifiedPreview(), ON);
+    await card.answerTo(card.requests('tools/call', ASK)[0], status({ ...canSend }));
+    expect(text(card, 'studio-summary')).not.toContain('certified');
+    await card.show({ ...certifiedPreview(), draftId: 'draft_0002' }, ON);
+    expect(text(card, 'studio-summary')).toContain('certified mail');
+  });
+
   it('ignores a service it does not know', async () => {
     const card = mount();
     await card.show(certifiedPreview(), ON);
