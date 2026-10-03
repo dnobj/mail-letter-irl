@@ -450,7 +450,13 @@ export class PostGridProvider implements LetterFulfillmentProvider {
     const requested = mailServiceOf(params.extraService);
     const extraService = knownExtraService(requested);
     if (requested !== undefined && extraService === undefined) {
-      this.writeOperationDiagnostic('provider.postgrid.extra_service_refused', 'create_letter', {}, 'error');
+      const letterId = typeof params.metadata?.letterId === 'string' ? params.metadata.letterId : undefined;
+      this.writeOperationDiagnostic(
+        'provider.postgrid.extra_service_refused',
+        'create_letter',
+        letterId ? { letterId } : {},
+        'error'
+      );
       return {
         success: false,
         trackingId: '',

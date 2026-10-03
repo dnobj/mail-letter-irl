@@ -101,7 +101,12 @@ describe('the extra service in the request', () => {
     async extraService => {
       const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
       const fetchMock = answering(accepted);
-      const result = await provider().sendLetter({ ...base, rendererVersion: RENDERER_VERSION, extraService: extraService as never });
+      const result = await provider().sendLetter({
+        ...base,
+        rendererVersion: RENDERER_VERSION,
+        extraService: extraService as never,
+        metadata: { letterId: 'letter-9' }
+      });
       expect(result).toMatchObject({
         success: false,
         trackingId: '',
@@ -109,13 +114,28 @@ describe('the extra service in the request', () => {
         metadata: { retryable: false, submissionOutcome: 'definite_rejection' }
       });
       expect(fetchMock).not.toHaveBeenCalled();
-      // The operator is told, in a fixed word and not the value.
+      // The operator is told which letter, in a fixed word and not the value.
       const logged = errorLog.mock.calls.map(call => String(call[0])).filter(line => line.includes('extra_service_refused'));
       expect(logged).toHaveLength(1);
-      expect(JSON.parse(logged[0])).toMatchObject({ event: 'provider.postgrid.extra_service_refused', operation: 'create_letter' });
+      expect(JSON.parse(logged[0])).toMatchObject({
+        event: 'provider.postgrid.extra_service_refused',
+        operation: 'create_letter',
+        letterId: 'letter-9'
+      });
       expect(logged[0]).not.toContain('constructor');
     }
   );
+
+  it('logs the refusal without a letter id when it has none to name, and never a non-text one', async () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+    answering(accepted);
+    for (const metadata of [undefined, { letterId: 5 }, { letterId: '' }]) {
+      await provider().sendLetter({ ...base, extraService: 'registered' as never, metadata });
+    }
+    const logged = errorLog.mock.calls.map(call => JSON.parse(String(call[0]))).filter(line => line.event.endsWith('extra_service_refused'));
+    expect(logged).toHaveLength(3);
+    for (const line of logged) expect(line).not.toHaveProperty('letterId');
+  });
 
   // A letter built from stored JSON may write "no service" as null, an empty
   // string or 'standard' (the vocabulary mailServiceOf reads a row by). It is

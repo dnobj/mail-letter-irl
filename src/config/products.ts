@@ -107,14 +107,28 @@ export function mailServiceOf(value: string | null | undefined): MailService | u
   return value as MailService;
 }
 
+/** The extra services PostGrid sells a letter (#625), exactly the CertifiedMailService union. */
+const EXTRA_SERVICES = ['certified', 'certified_return_receipt'] as const;
+
+// Compile-time: every listed value is an extra service, and every extra service is listed.
+type UnlistedExtraService = Exclude<CertifiedMailService, (typeof EXTRA_SERVICES)[number]>;
+const _everyExtraServiceIsListed: [UnlistedExtraService] extends [never] ? true : never = true;
+const _everyListedValueIsAnExtraService: readonly CertifiedMailService[] = EXTRA_SERVICES;
+void _everyExtraServiceIsListed;
+void _everyListedValueIsAnExtraService;
+
 /**
  * Whether a value is one of the two extra services PostGrid sells a letter
- * (#625): the narrowing from what mailServiceOf carries to what a provider is
- * handed. Standard is not an extra service, and neither is text this code does
- * not know.
+ * (#625). Standard is not one, and neither is text this code does not know.
+ *
+ * Do NOT use it to turn other text into "no service" (isExtraService(v) ? v :
+ * undefined): that mails what a row asks for in a service this code does not
+ * know as standard mail. The send hands the provider mailServiceOf's value and
+ * refuses what is neither none nor one of these (extraServiceRefusal), and the
+ * providers refuse it too.
  */
 export function isExtraService(value: unknown): value is CertifiedMailService {
-  return value === 'certified' || value === 'certified_return_receipt';
+  return (EXTRA_SERVICES as readonly unknown[]).includes(value);
 }
 
 /**
