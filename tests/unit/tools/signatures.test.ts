@@ -34,7 +34,7 @@ import type { ToolContext } from '../../../src/contracts/types.js';
 const USER = 'auth0|signer';
 const PICTURE = Buffer.from('a photo of a signature');
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
-const CLEANED = { png: PNG, width: 300, height: 90 };
+const CLEANED = { png: PNG, width: 800, height: 220 };
 const SAVED = {
   width: 300,
   height: 90,
@@ -109,8 +109,8 @@ describe('set_signature', () => {
     expect(output).toEqual({
       saved: true,
       replaced: false,
-      width: 300,
-      height: 90,
+      width: 800,
+      height: 220,
       signatureImage: `data:image/png;base64,${PNG.toString('base64')}`,
       message:
         'Saved the signature. Letters previewed from now on print it under the closing. ' +
@@ -118,9 +118,18 @@ describe('set_signature', () => {
     });
     // The log names the size, never the picture or where it came from.
     expect(logger.info).toHaveBeenCalledWith(
-      { correlationId: 'corr-1', event: 'signature.saved', replaced: false, width: 300, height: 90 },
+      { correlationId: 'corr-1', event: 'signature.saved', replaced: false, width: 800, height: 220 },
       'Signature saved'
     );
+  });
+
+  it('says when the signature came out too narrow to print sharply', async () => {
+    vi.mocked(cleanSignatureImage).mockResolvedValue({ png: PNG, width: 599, height: 160 });
+    const narrow = await setSignatureTool.handler({ imageUrl: 'https://example.invalid/sig.png' }, context());
+    expect(narrow.message.endsWith(' It came out 599 pixels wide, which prints softly: a closer photo prints sharper.')).toBe(true);
+    vi.mocked(cleanSignatureImage).mockResolvedValue({ png: PNG, width: 600, height: 160 });
+    const wide = await setSignatureTool.handler({ imageUrl: 'https://example.invalid/sig.png' }, context());
+    expect(wide.message).not.toContain('prints softly');
   });
 
   it('prefers a file the person attached to a link, and says when it replaced one', async () => {

@@ -252,10 +252,33 @@ describe('cleanSignatureImage', () => {
     expect(withDot.height).toBeGreaterThan(withSpeck.height + 40);
   });
 
-  it("keeps a marker's thick strokes solid", async () => {
+  it("keeps a marker's thick strokes solid and filled", async () => {
     const marker = await photograph(1200, 500, '<rect width="100%" height="100%" fill="#eeeeee"/>' + scribble('', 28, '#000000'));
     const { data } = await pixels((await cleanSignatureImage(marker)).png);
     expect(solidInk(data)).toBeGreaterThan(0.7);
+    // Filled, not hollowed to its edges: ink is about a fifth of the crop, as the stroke is.
+    expect(data.filter(level => level < 160).length / data.length).toBeGreaterThan(0.15);
+  });
+
+  it('leaves a black object beside the sheet out: ink shows only against light paper', async () => {
+    // A phone, crushed to black by the camera, 100 px from the signature (#609 review round 2).
+    const phone = await photograph(
+      1600,
+      800,
+      '<rect width="100%" height="100%" fill="#f4f2ee"/>' + scribble('translate(300,250)') + '<rect x="1300" y="300" width="200" height="200" fill="#000000"/>'
+    );
+    const cleaned = await cleanSignatureImage(phone);
+    expect(cleaned.width).toBeLessThan(840);
+    expect(cleaned.height).toBeLessThan(240);
+  });
+
+  it("leaves lined paper's faint rules out of the signature", async () => {
+    // Rules at 70% of the paper's light, every 40 px, across the whole sheet.
+    const rules = Array.from({ length: 19 }, (_, index) => `<rect x="0" y="${20 + index * 40}" width="1600" height="2" fill="#aaaaaa"/>`).join('');
+    const lined = await photograph(1600, 800, '<rect width="100%" height="100%" fill="#f4f2ee"/>' + rules + scribble('translate(300,250)'));
+    const cleaned = await cleanSignatureImage(lined);
+    expect(cleaned.width).toBeLessThan(840);
+    expect(cleaned.height).toBeLessThan(240);
   });
 
   it('cleans a large photograph in well under the decode gate\'s wait', async () => {

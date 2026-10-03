@@ -18,8 +18,8 @@
  *    fell; ink well under it. Map 0.40 and below to black and 0.75 and above
  *    to white.
  * 4. Find the ink's connected pieces. Keep the largest and every piece near
- *    it, and whiten the rest: a speck in a corner neither prints nor stretches
- *    the crop, while an i's dot stays with its word.
+ *    it: a speck in a corner neither stretches the crop nor falls inside it,
+ *    while an i's dot stays with its word.
  * 5. Crop to what was kept, with a small margin, and fit it inside 1200 x 400
  *    px as a grayscale PNG.
  *
@@ -40,8 +40,14 @@ export const SIGNATURE_MAX_SIZE = { width: 1200, height: 400 } as const;
 export const SIGNATURE_CLEANING = {
   /** The longest edge looked at: enough for a signature, and bounded work. */
   analysisEdge: 1600,
-  /** The closing's window: this share of the longest edge, and at least minWindow px, always odd. */
-  windowShare: 1 / 30,
+  /**
+   * The closing's window: this share of the longest edge, and at least
+   * minWindow px, always odd. A straight stroke as wide as the window is taken
+   * for paper, and a dark band narrower than it near the signature (a pen's
+   * shadow, a printed rule) for ink: a twentieth keeps a 5 mm marker stroke
+   * at 14 px a millimetre.
+   */
+  windowShare: 1 / 20,
   minWindow: 15,
   /** A pixel at this share of its paper's light, or less, is black... */
   blackAt: 0.4,
@@ -49,6 +55,11 @@ export const SIGNATURE_CLEANING = {
   whiteAt: 0.75,
   /** Darker than this, after cleaning, is ink. */
   inkBelow: 160,
+  /**
+   * Paper darker than this holds no ink: ink shows only against light paper,
+   * and a black object beside the sheet (a phone) is its own paper.
+   */
+  paperFloor: 64,
   /** A piece of ink smaller than this, in pixels, is noise. */
   noiseArea: 8,
   /** How far, as a share of the longest edge, a piece may sit from the signature and still be part of it. */
@@ -158,18 +169,20 @@ interface Piece {
   maxY: number;
 }
 
-/** The ink's 8-connected pieces, each pixel labelled with its piece's id (from 1). */
-function pieces(ink: Uint8Array, width: number, height: number): { labels: Int32Array; found: Piece[] } {
-  const labels = new Int32Array(ink.length);
+/**
+ * The ink's 8-connected pieces. `ink` holds 1 for ink, and each pixel found is
+ * marked 2, so the ink is its own record of where the search has been.
+ */
+function pieces(ink: Uint8Array, width: number, height: number): Piece[] {
   const stack = new Int32Array(ink.length);
   const found: Piece[] = [];
   for (let start = 0; start < ink.length; start += 1) {
-    if (!ink[start] || labels[start]) continue;
+    if (ink[start] !== 1) continue;
     const piece: Piece = { id: found.length + 1, area: 0, minX: width, minY: height, maxX: -1, maxY: -1 };
     found.push(piece);
     let top = 0;
     stack[top++] = start;
-    labels[start] = piece.id;
+    ink[start] = 2;
     while (top > 0) {
       const at = stack[--top];
       const x = at % width;
@@ -182,19 +195,19 @@ function pieces(ink: Uint8Array, width: number, height: number): { labels: Int32
       for (let ny = Math.max(0, y - 1); ny <= Math.min(height - 1, y + 1); ny += 1) {
         for (let nx = Math.max(0, x - 1); nx <= Math.min(width - 1, x + 1); nx += 1) {
           const next = ny * width + nx;
-          if (ink[next] && !labels[next]) {
-            labels[next] = piece.id;
+          if (ink[next] === 1) {
+            ink[next] = 2;
             stack[top++] = next;
           }
         }
       }
     }
   }
-  return { labels, found };
+  return found;
 }
 
 /** The largest piece and every piece within `reach` of what is kept, growing until none is near. */
-function signaturePieces(found: Piece[], reach: number): { kept: Set<number>; box: Omit<Piece, 'id' | 'area'>; area: number } {
+function signaturePieces(found: Piece[], reach: number): { box: Omit<Piece, 'id' | 'area'>; area: number } {
   const largest = found.reduce((best, piece) => (piece.area > best.area ? piece : best));
   const kept = new Set([largest.id]);
   const box = { minX: largest.minX, minY: largest.minY, maxX: largest.maxX, maxY: largest.maxY };
@@ -215,7 +228,7 @@ function signaturePieces(found: Piece[], reach: number): { kept: Set<number>; bo
       grew = true;
     }
   }
-  return { kept, box, area };
+  return { box, area };
 }
 
 async function cleanSignature(input: Buffer): Promise<CleanedSignature> {
@@ -251,25 +264,28 @@ async function cleanSignature(input: Buffer): Promise<CleanedSignature> {
   const window = Math.max(SIGNATURE_CLEANING.minWindow, Math.round(longest * SIGNATURE_CLEANING.windowShare)) | 1;
   const paper = closing(grey.data, width, height, window);
 
-  const { blackAt, whiteAt, inkBelow } = SIGNATURE_CLEANING;
+  const { blackAt, whiteAt, inkBelow, paperFloor } = SIGNATURE_CLEANING;
   const cleaned = Buffer.alloc(width * height);
   const ink = new Uint8Array(width * height);
+  let darkPaper = 0;
   for (let i = 0; i < cleaned.length; i += 1) {
-    const ratio = grey.data[i] / Math.max(1, paper[i]);
+    if (paper[i] < paperFloor) darkPaper += 1;
+    // One more on each side, so crushed blacks divide as near-blacks do.
+    const ratio = paper[i] < paperFloor ? 1 : (grey.data[i] + 1) / (paper[i] + 1);
     const level = Math.round(Math.min(1, Math.max(0, (ratio - blackAt) / (whiteAt - blackAt))) * 255);
     cleaned[i] = level;
     if (level < inkBelow) ink[i] = 1;
   }
 
-  const { labels, found } = pieces(ink, width, height);
+  // Mostly dark paper: light ink on a dark sheet, or no sheet at all.
+  if (darkPaper * 2 > cleaned.length) throw new SignatureImageError('NO_SIGNATURE_FOUND', NO_SIGNATURE_FOUND_MESSAGE);
+  const found = pieces(ink, width, height);
   const real = found.filter(piece => piece.area >= SIGNATURE_CLEANING.noiseArea);
   if (real.length === 0) throw new SignatureImageError('NO_SIGNATURE_FOUND', NO_SIGNATURE_FOUND_MESSAGE);
-  const { kept, box, area } = signaturePieces(real, Math.round(longest * SIGNATURE_CLEANING.reachShare));
+  const { box, area } = signaturePieces(real, Math.round(longest * SIGNATURE_CLEANING.reachShare));
   if (area < SIGNATURE_CLEANING.minInk) throw new SignatureImageError('NO_SIGNATURE_FOUND', NO_SIGNATURE_FOUND_MESSAGE);
-  // Specks and stray marks print as paper.
-  for (let i = 0; i < labels.length; i += 1) {
-    if (labels[i] && !kept.has(labels[i])) cleaned[i] = 255;
-  }
+  // A piece left out is further than `reach` from what is kept, and the crop's
+  // margin is narrower than that, so a stray mark never reaches the crop.
 
   const margin = Math.round(Math.min(width, height) * 0.02) + 2;
   const left = Math.max(0, box.minX - margin);

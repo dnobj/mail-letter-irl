@@ -21,6 +21,9 @@ import {
  */
 export const SET_SIGNATURE_TOOL = 'set_signature';
 
+/** Narrower than this, a signature prints softly in its 2.5 in band: say so (#609 review round 2). */
+const SHARP_WIDTH = 600;
+
 interface SetSignatureInput {
   image?: ImageFileParam;
   imageUrl?: string;
@@ -82,7 +85,10 @@ async function handler(input: SetSignatureInput, context: ToolContext): Promise<
     message:
       (saved.replaced ? 'Saved the new signature, in place of the one before.' : 'Saved the signature.') +
       ' Letters previewed from now on print it under the closing.' +
-      ' Letters already previewed keep what they had. clear_signature removes it.'
+      ' Letters already previewed keep what they had. clear_signature removes it.' +
+      (cleaned.width < SHARP_WIDTH
+        ? ` It came out ${cleaned.width} pixels wide, which prints softly: a closer photo prints sharper.`
+        : '')
   };
 }
 
