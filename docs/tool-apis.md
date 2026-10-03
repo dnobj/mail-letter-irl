@@ -1,6 +1,6 @@
 # MCP Tool API Specifications
 
-**Last Updated:** October 2, 2026  
+**Last Updated:** October 3, 2026  
 **Purpose:** Practical reference for the MCP tools exposed by Letter IRL
 
 The runtime MCP registry is the source of truth. The checked-in `manifest.json` is generated from that registry with `npm run manifest:generate`, and submission-facing tests verify that the manifest, widget list, and runtime tool registry stay aligned.
@@ -190,7 +190,7 @@ The server instructions add, while these are listed, that `request_address` is t
 
 ## Signatures
 
-Listed only while signatures are offered (#608, concept 3 in [letter-creator-vision.md](letter-creator-vision.md)): `LETTER_IRL_SIGNATURES_ENABLED` is on and `LETTER_IRL_PRINT_RENDERER=pdf`, since only our renderer can draw one. Each refuses otherwise (`SIGNATURES_OFF`). The table is `user_signatures` ([database-schema.md](database-schema.md#user_signatures)). Letters print the saved signature under the closing in #608's later parts; until they do, the flag stays off everywhere.
+Listed only while signatures are offered (#608, concept 3 in [letter-creator-vision.md](letter-creator-vision.md)): `LETTER_IRL_SIGNATURES_ENABLED` is on and `LETTER_IRL_PRINT_RENDERER=pdf`, since only our renderer can draw one. Each refuses otherwise (`SIGNATURES_OFF`). The table is `user_signatures` ([database-schema.md](database-schema.md#user_signatures)). Letters print the saved signature under the closing (#608, parts 2 to 4), and the flag is on in development only until the owner's word.
 
 - `set_signature`: Saves a picture of the person's handwritten signature for their account, in place of any saved before.
   - **Takes** `image` (a file attached in ChatGPT, through `openai/fileParams`) or `imageUrl` (a link, or `letterirl-upload:latest` for the account's own upload through the card), the file first. Neither is refused (`SIGNATURE_PICTURE_REQUIRED`), and a file the server cannot open is refused as such (`SIGNATURE_PICTURE_UNREADABLE`).

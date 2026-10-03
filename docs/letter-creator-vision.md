@@ -1,6 +1,6 @@
 # Letter Creator Vision
 
-**Last Updated:** September 30, 2026
+**Last Updated:** October 3, 2026
 **Status:** Draft
 **Purpose:** Where letter and postcard creation goes next: the goal, the principles, every concept, the interactive demos, and the order we build in
 
@@ -288,7 +288,7 @@ The `mail:send` scope already exists. OAuth clients (ChatGPT, Claude, the websit
 |-------|-------|
 | **Pre-launch** | #534 renderer (probe prints first); #535 arrive-by; website #47; studio card Delivery tab (part of #535) |
 | **Next** (after launch) | Stationery collection (1) and studio card Style tab (6); room to write (2) and the Words tab; postcard sizes and single-photo layouts (4); envelope reveal (8); address request (10); server-remembered choices (Principle 4) |
-| **Later** | Signature capture (3); collages (4); keepsake formats (5); side panel (7); delivery moments via MCP Events (11); home (12); group letters and batch (13); standing agent permissions; a second vendor for folded cards or robot-pen ink |
+| **Later** | Signature capture (3; built as #608, on in development); collages (4); keepsake formats (5); side panel (7); delivery moments via MCP Events (11); home (12); group letters and batch (13); standing agent permissions; a second vendor for folded cards or robot-pen ink |
 
 ---
 
