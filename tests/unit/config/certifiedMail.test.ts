@@ -78,7 +78,7 @@ describe('what a letter row says about certified mail (#625)', () => {
   });
 
   it('gives the service alone until there is a number', () => {
-    for (const carrier_tracking_number of [null, undefined, '', '   ', 42]) {
+    for (const carrier_tracking_number of [null, undefined, '', '   ', 42, 94071000, ['9407100000']]) {
       expect(certifiedFactsOf({ mail_service: 'certified', carrier_tracking_number })).toEqual({ mailService: 'certified' });
     }
   });
