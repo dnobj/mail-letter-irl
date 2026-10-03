@@ -29,6 +29,11 @@ const SAFE_ERROR_CODES = new Set([
   // gets for the guard actually firing is the generic database_error, which is
   // the mislabel #213 was about.
   "23514",
+  // insufficient_privilege. The admin panel's operator role has a column list
+  // for what it may update; a column a service starts to set that the list
+  // lacks fails with this and nowhere else (#625 review: the carrier number),
+  // and without the code it read as the mail provider's failure.
+  "42501",
   "28P01",
   "3D000",
   "42P01",

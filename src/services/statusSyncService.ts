@@ -28,7 +28,9 @@ export interface StatusSyncDetail {
 
 // Terminal statuses are not synced: the query below skips the same list as
 // letterJobService's ENDED_LETTER_STATUSES, which failProviderCancelledLetter
-// leaves as they are.
+// leaves as they are. The one exception is a certified letter delivered before
+// its carrier number was stored (#625): it is read for the number alone, and its
+// status is left as it is.
 
 /**
  * Sync letter statuses from the fulfillment provider
@@ -114,15 +116,32 @@ export async function syncLetterStatuses(
         letter.mail_service !== 'standard' &&
         letter.carrier_tracking_number !== carrierNumber
       ) {
-        await query(
-          `UPDATE letters
-           SET carrier_tracking_number = $2::text, updated_at = NOW()
-           WHERE letter_id = $1
-             AND mail_service <> 'standard'
-             AND carrier_tracking_number IS DISTINCT FROM $2::text`,
-          [letter.letter_id, carrierNumber]
-        );
+        // In a block of its own: a number that cannot be stored never holds back
+        // the letter's status (a cancel, a delivery), and the next run tries again.
+        try {
+          await query(
+            `UPDATE letters
+             SET carrier_tracking_number = $2::text, updated_at = NOW()
+             WHERE letter_id = $1
+               AND mail_service <> 'standard'
+               AND carrier_tracking_number IS DISTINCT FROM $2::text`,
+            [letter.letter_id, carrierNumber]
+          );
+        } catch (error) {
+          // A class, never the database's text (#394).
+          result.errors++;
+          result.details.push({
+            ...detail,
+            newStatus: letter.status,
+            providerRawStatus: '',
+            error: `carrier_number_not_stored:${carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'database_error')}`
+          });
+        }
       }
+
+      // A delivered letter is read for its number alone (above): its status is
+      // final, whatever the provider now answers.
+      if (letter.status === 'delivered') continue;
 
       // Check if status changed
       if (providerStatus.status !== letter.status) {

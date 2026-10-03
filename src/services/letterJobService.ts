@@ -20,6 +20,7 @@ import type {
 } from './providers/types.js';
 import type { CertifiedMailService, Letter, LetterJob } from './types.js';
 import { isExtraService, mailServiceOf } from '../config/products.js';
+import { providerSellsExtraServices } from './providers/extraServices.js';
 import {
   isLetterAlreadyCompensated,
   returnConsumedCreditsForLetter
@@ -489,7 +490,8 @@ async function submitToProvider(
       success: false,
       trackingId: '',
       error: `${provider.config.displayName} cannot send this letter's mail service (${refusal})`,
-      metadata: { retryable: false, submissionOutcome: 'definite_rejection' },
+      // Its own class, kept in the columns an operator reads: nothing was sent, and the provider said nothing.
+      metadata: { retryable: false, submissionOutcome: 'definite_rejection', errorClass: 'extra_service_refused' },
     };
     return { result: rejected, providerName: provider.config.name };
   }
@@ -1429,6 +1431,20 @@ export async function resolveAmbiguousLetterJobAsAdmin(
       throw new AdminMailResolutionError(currentLetter?.user_id === params.expectedUserId
         ? 'invalid_state'
         : 'not_found');
+    }
+
+    // Certified mail (#625) is accepted only by a provider that sells it: manual
+    // fulfilment would print the letter as ordinary mail and record it accepted,
+    // after it was paid for as certified. A retry is safe (the dispatch asks the
+    // provider it routes to), and so is a rejection.
+    if (params.decision === 'accepted') {
+      const service = await client.query<{ mail_service: string | null }>(
+        'SELECT mail_service FROM letters WHERE letter_id = $1',
+        [ids.letter_id]
+      );
+      if (mailServiceOf(service.rows[0]?.mail_service) !== undefined && !providerSellsExtraServices(params.providerName)) {
+        throw new AdminMailResolutionError('invalid_state');
+      }
     }
 
     // Issue #151. Once the pack is back, only 'rejected' is still safe - and it

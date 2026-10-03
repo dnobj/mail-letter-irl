@@ -365,7 +365,7 @@ Commands available:
 | Resolve ambiguous image reservation | `image_generation_reservations` in `ambiguous` | `resolveAmbiguousGenerationReservation` (issue #69's operator recovery, now reachable) |
 | Set / clear tier override | an account | `setTierOverride` (the daily calculation skips overridden accounts; the API's tier cache lasts five minutes) |
 | Change provider routing | `provider_routing` by mail type | validated against the runtime provider registry, versioned on `updated_at`; production never accepts `dummy` |
-| Provider status sync | letters of the last N days | `syncLetterStatuses` (dry run by default; apply updates statuses and history) |
+| Provider status sync | letters of the last N days | `syncLetterStatuses` (dry run by default; apply updates statuses and history, and stores a certified letter's carrier tracking number, which needs the operator role's grant from `npm run admin:provision-access` after migration 053, #625) |
 | Set a daily limit | a daily limit, for everyone or (the two per-account limits) one account | writes a `daily_limit_overrides` row and clears the one it replaces; for the rest of the UTC day or until cleared; letters, or whole dollars for spending. The API reads it on the next send or checkout, with no redeploy (see **Limits**, below) |
 | Clear a daily limit's value | a `daily_limit_overrides` row not yet cleared | stamps it cleared (kept as history); the limit returns to the value for everyone, or the configured one |
 

@@ -390,11 +390,11 @@ describe('mail outbox retries', () => {
         // with the data-free class and not a word of the refusal's text.
         expect(clientQuery).toHaveBeenCalledWith(
           expect.stringContaining('WHERE order_id = $1'),
-          ['order-1', 'provider_rejected']
+          ['order-1', 'extra_service_refused']
         );
         expect(clientQuery).toHaveBeenCalledWith(
           expect.stringContaining("'provider.terminal_failure'"),
-          ['order-1', JSON.stringify({ errorClass: 'provider_rejected' })]
+          ['order-1', JSON.stringify({ errorClass: 'extra_service_refused' })]
         );
         // The operator is told why, in a fixed word and nothing of the letter.
         const logged = errorLog.mock.calls
@@ -408,15 +408,33 @@ describe('mail outbox retries', () => {
         });
       });
 
-      it('stops a letter no order funds the same way', async () => {
+      it('stops a letter no order funds the same way: a definite failure, never a hold', async () => {
         // The refusal does not depend on how the letter was paid for.
         asRow({ mail_service: 'certified' });
+        const base = clientQuery.getMockImplementation()!;
+        clientQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
+          // The funding graph of a letter no order funds, as the terminal transition reads it.
+          if (sql.includes('SELECT jobs.letter_id')) return { rows: [{ letter_id: 'letter-1', funding_order_id: null }] };
+          if (sql.includes('SELECT funding_order_id FROM letters')) return { rows: [{ funding_order_id: null }] };
+          if (sql.includes('SELECT letter_id FROM letter_jobs')) return { rows: [{ letter_id: 'letter-1' }] };
+          if (sql.includes('SET status = $1::varchar')) return { rows: [], rowCount: 1 };
+          return base(sql, params);
+        });
         vi.mocked(getProviderForMailType).mockResolvedValueOnce(providerWith());
 
         const result = await processLetterJob('job-1', {});
 
         expect(sendLetter).not.toHaveBeenCalled();
         expect(result).toMatchObject({ completed: false, retryScheduled: false });
+        // The job ends as a definite failure, with our own class in the columns an operator reads...
+        expect(clientQuery).toHaveBeenCalledWith(
+          expect.stringContaining('SET status = $1::varchar'),
+          ['failed', expect.any(Date), 'extra_service_refused', 'job-1']
+        );
+        // ...and nothing was held for an operator as an ambiguous outcome.
+        const statements = clientQuery.mock.calls.map(call => String(call[0]));
+        expect(statements.some(sql => sql.includes("SET status = 'held'"))).toBe(false);
+        expect(statements.some(sql => sql.includes("provider_outcome = 'ambiguous'"))).toBe(false);
       });
     });
   });
@@ -974,6 +992,68 @@ describe('mail outbox retries', () => {
       expect.stringContaining("'mail_fulfillment_resolve'"),
       expect.anything()
     );
+  });
+
+  describe('certified mail (#625)', () => {
+    const jobId = '00000000-0000-4000-8000-000000000311';
+    const held = (mail_service: string | undefined) => {
+      clientQuery.mockImplementation(async (sql: string) => {
+        if (sql.includes('FROM commerce_operator_audit_events')) return { rows: [] };
+        if (sql.includes('SELECT jobs.letter_id')) return { rows: [{ letter_id: 'letter-1', funding_order_id: null }] };
+        if (sql.startsWith('SELECT user_id, status, funding_order_id FROM letters')) {
+          return { rows: [{ user_id: 'user-1', status: 'held', funding_order_id: null }] };
+        }
+        if (sql.startsWith('SELECT mail_service FROM letters')) return { rows: [{ mail_service }] };
+        if (sql.startsWith('SELECT * FROM letter_jobs')) {
+          return { rows: [{ ...job, job_id: jobId, status: 'held', provider_outcome: 'ambiguous' }] };
+        }
+        return { rows: [] };
+      });
+    };
+    const resolve = (decision: 'accepted' | 'retry' | 'rejected', providerName: string) =>
+      resolveAmbiguousLetterJobAsAdmin({
+        jobId,
+        expectedUserId: 'user-1',
+        actorId: 'admin-1',
+        idempotencyKey: `resolve-certified-${decision}-${providerName}`,
+        decision,
+        resolution:
+          decision === 'accepted'
+            ? 'provider_confirmed_accepted'
+            : decision === 'retry'
+              ? 'provider_confirmed_rejected_retry'
+              : 'provider_confirmed_rejected_refund',
+        providerName: providerName as never,
+        ...(decision === 'accepted' ? { providerTrackingId: 'provider-confirmed-311' } : {})
+      });
+    const writes = () => clientQuery.mock.calls.filter(call => /^\s*(UPDATE|INSERT)/.test(String(call[0])));
+
+    it.each(['certified', 'certified_return_receipt'])(
+      'refuses to resolve a %s letter as accepted by manual fulfilment, which would print it as ordinary mail, and writes nothing',
+      async service => {
+        held(service);
+        await expect(resolve('accepted', 'diy')).rejects.toMatchObject({ code: 'invalid_state' });
+        expect(writes()).toEqual([]);
+      }
+    );
+
+    it.each(['postgrid', 'dummy'])('lets a certified letter be resolved as accepted by %s', async providerName => {
+      held('certified');
+      await expect(resolve('accepted', providerName)).resolves.toMatchObject({ jobStatus: 'completed', letterStatus: 'accepted' });
+    });
+
+    it.each([
+      ['a standard letter', 'standard'],
+      ['a letter with no service', undefined]
+    ])('lets %s be resolved as accepted by manual fulfilment', async (_name, service) => {
+      held(service);
+      await expect(resolve('accepted', 'diy')).resolves.toMatchObject({ letterStatus: 'accepted' });
+    });
+
+    it.each(['retry', 'rejected'] as const)('lets a certified letter be resolved as %s whatever the provider named', async decision => {
+      held('certified');
+      await expect(resolve(decision, 'diy')).resolves.toBeDefined();
+    });
   });
 
   it('rejects an ambiguous mail resolution bound to another account', async () => {

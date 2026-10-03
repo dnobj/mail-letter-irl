@@ -552,7 +552,6 @@ describe('refusalFor (#470)', () => {
     ['DRAFT_INCOMPLETE', 409, 'unsendable'],
     ['DRAFT_WRONG_MAIL_TYPE', 409, 'unsendable'],
     ['DRAFT_FUNDING_CONFLICT', 409, 'unsendable'],
-    ['MAIL_SERVICE_NOT_SENDABLE', 409, 'unsendable'],
     ['SOMETHING_NEW', 500, 'send_failed']
   ])('maps %s to %i %s, without the service message', (code, status, reason) => {
     const refusal = refusalFor(coded(code));

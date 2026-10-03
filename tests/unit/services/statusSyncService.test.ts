@@ -481,6 +481,49 @@ describe('statusSyncService', () => {
       expect(result.updated).toBe(1);
     });
 
+    it("does not hold back the letter's status when the number cannot be stored: one error, a class, and the status written", async () => {
+      vi.mocked(db.query)
+        .mockResolvedValueOnce({ rows: [certified()] } as any)
+        .mockRejectedValueOnce(Object.assign(new Error('permission denied for table letters at 10.0.0.1'), { code: '42501' }))
+        .mockResolvedValue({ rows: [], rowCount: 1 } as any);
+      mockProvider.getStatus.mockResolvedValueOnce({
+        status: 'in_transit',
+        statusMessage: 'In transit',
+        carrierTrackingNumber: NUMBER,
+      });
+
+      const result = await syncLetterStatuses(false, 30);
+
+      expect(result.errors).toBe(1);
+      expect(result.updated).toBe(1);
+      // The number's write failed, and the status and its history were still written.
+      const writes = vi.mocked(db.query).mock.calls.filter(call => /UPDATE|INSERT/.test(String(call[0])));
+      expect(writes.map(call => flat(call).slice(0, 30))).toEqual([
+        'UPDATE letters SET carrier_tra',
+        'UPDATE letters SET status = $1',
+        'INSERT INTO letter_status_hist',
+      ]);
+      const failed = result.details.find(detail => detail.error);
+      expect(failed?.error).toBe('carrier_number_not_stored:42501');
+      expect(JSON.stringify(result.details)).not.toContain('10.0.0.1');
+    });
+
+    it.each(['accepted', 'processing', 'in_transit', 'failed'] as const)(
+      'reads a delivered certified letter for its number alone, whatever the provider now answers (%s)',
+      async status => {
+        reading(certified({ status: 'delivered' }));
+        mockProvider.getStatus.mockResolvedValueOnce({ status, statusMessage: 'Stub', carrierTrackingNumber: NUMBER });
+
+        const result = await syncLetterStatuses(false, 30);
+
+        expect(numberWrites()).toHaveLength(1);
+        // Nothing but the number: its status stays delivered, no history, no cancel.
+        expect(allWrites()).toHaveLength(1);
+        expect(failProviderCancelledLetter).not.toHaveBeenCalled();
+        expect(result).toMatchObject({ checked: 1, updated: 0, errors: 0 });
+      }
+    );
+
     it('counts a failed write as that letter\'s error, naming a class and not the database\'s text', async () => {
       vi.mocked(db.query)
         .mockResolvedValueOnce({ rows: [certified()] } as any)

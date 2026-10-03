@@ -92,11 +92,10 @@ describePostgres('certified mail at the letter, the dispatch and the status sync
   }
 
   /**
-   * A letter the outbox can dispatch, paid for by a Pay & Send order that awaits
-   * fulfilment. The order names a draft (021's valid_order_draft).
+   * A Pay & Send order that awaits fulfilment, for a certified letter. It names
+   * a draft (021's valid_order_draft).
    */
-  async function seedPaidLetter(service: string): Promise<{ userId: string; letterId: string; orderId: string }> {
-    const userId = await seedUser();
+  async function seedOrderFor(userId: string): Promise<string> {
     const draft = await pool.query<{ draft_id: string }>(
       `INSERT INTO letter_drafts (user_id, sender, recipient, body_text, sign_off, required_credits, expires_at)
        VALUES ($1, '{}', '{}', 'Dear Sam', 'Regards', 2, NOW() + INTERVAL '1 day') RETURNING draft_id`,
@@ -109,6 +108,16 @@ describePostgres('certified mail at the letter, the dispatch and the status sync
        VALUES ($1, $2, NULL, 1199, 'usd', 'fulfillment_pending', 'jit_mail', 'jit-letter-certified', $3, $4, NOW())`,
       [orderId, userId, `idem_${orderId}`, draft.rows[0].draft_id]
     );
+    return orderId;
+  }
+
+  /**
+   * A letter the outbox can dispatch, paid for by a Pay & Send order that awaits
+   * fulfilment.
+   */
+  async function seedPaidLetter(service: string): Promise<{ userId: string; letterId: string; orderId: string }> {
+    const userId = await seedUser();
+    const orderId = await seedOrderFor(userId);
     const letterId = randomUUID();
     await pool.query(
       `INSERT INTO letters (letter_id, user_id, content, recipient, credits_cost, status, mail_type,
@@ -139,16 +148,36 @@ describePostgres('certified mail at the letter, the dispatch and the status sync
     return jobId;
   }
 
-  /** A letter with a provider id, as the status sync reads one. */
-  async function seedSentLetter(options: { service: string; status: string; number?: string | null }): Promise<string> {
+  /**
+   * A letter with a provider id, as the status sync reads one. A letter that
+   * travels as anything but standard mail is a Pay & Send letter (053's
+   * letters_mail_service_letters_paid_per_send): funded by an order. `payAndSend`
+   * makes a standard one so, for a test that changes its service.
+   */
+  async function seedSentLetter(options: {
+    service: string;
+    status: string;
+    number?: string | null;
+    payAndSend?: boolean;
+  }): Promise<string> {
     const userId = await seedUser();
     const letterId = randomUUID();
+    const orderId = options.service !== 'standard' || options.payAndSend ? await seedOrderFor(userId) : null;
     await pool.query(
       `INSERT INTO letters (letter_id, user_id, content, recipient, credits_cost, status, mail_type,
-         funding_type, mail_service, carrier_tracking_number, tracking_id, provider, sent_at)
-       VALUES ($1, $2, '{}'::jsonb, '{}'::jsonb, 2, $3, 'letter', 'prepaid_balance', $4::text, $5::text, $6,
-         $7, NOW())`,
-      [letterId, userId, options.status, options.service, options.number ?? null, `pg_${letterId}`, STUB_PROVIDER_NAME]
+         funding_type, funding_order_id, mail_service, carrier_tracking_number, tracking_id, provider, sent_at)
+       VALUES ($1, $2, '{}'::jsonb, '{}'::jsonb, 2, $3, 'letter', $4, $5, $6::text, $7::text, $8, $9, NOW())`,
+      [
+        letterId,
+        userId,
+        options.status,
+        orderId ? 'jit_order' : 'prepaid_balance',
+        orderId,
+        options.service,
+        options.number ?? null,
+        `pg_${letterId}`,
+        STUB_PROVIDER_NAME
+      ]
     );
     return letterId;
   }
@@ -177,22 +206,30 @@ describePostgres('certified mail at the letter, the dispatch and the status sync
       expect(now.mail_service).toBe('standard');
       expect(now.carrier_tracking_number).toBeNull();
 
+      // A Pay & Send letter, which is what may travel as anything but standard mail.
+      const paid = await seedSentLetter({ service: 'standard', status: 'processing', payAndSend: true });
       for (const service of ['certified', 'certified_return_receipt', 'standard']) {
-        await pool.query('UPDATE letters SET mail_service = $2::text WHERE letter_id = $1', [letterId, service]);
-        expect((await letterNow(letterId)).mail_service).toBe(service);
+        await pool.query('UPDATE letters SET mail_service = $2::text WHERE letter_id = $1', [paid, service]);
+        expect((await letterNow(paid)).mail_service).toBe(service);
       }
       for (const service of ['registered', 'express', '', 'Certified']) {
         await expect(
-          pool.query('UPDATE letters SET mail_service = $2::text WHERE letter_id = $1', [letterId, service]),
+          pool.query('UPDATE letters SET mail_service = $2::text WHERE letter_id = $1', [paid, service]),
           service
         ).rejects.toMatchObject({ code: '23514', constraint: 'letters_mail_service_known' });
       }
-      expect((await letterNow(letterId)).mail_service).toBe('standard');
+      expect((await letterNow(paid)).mail_service).toBe('standard');
     }, 60_000);
 
-    it('admits a service other than standard only on a letter that is neither a postcard nor a gift letter', async () => {
+    it('admits a service other than standard only on a Pay & Send letter: never a postcard, a pack or a gift letter', async () => {
       const refused = { code: '23514', constraint: 'letters_mail_service_letters_paid_per_send' };
-      const postcard = await seedSentLetter({ service: 'standard', status: 'processing' });
+      // A letter a pack paid for.
+      const pack = await seedSentLetter({ service: 'standard', status: 'processing' });
+      await expect(
+        pool.query("UPDATE letters SET mail_service = 'certified' WHERE letter_id = $1", [pack])
+      ).rejects.toMatchObject(refused);
+
+      const postcard = await seedSentLetter({ service: 'standard', status: 'processing', payAndSend: true });
       await pool.query("UPDATE letters SET mail_type = 'postcard' WHERE letter_id = $1", [postcard]);
       await expect(
         pool.query("UPDATE letters SET mail_service = 'certified' WHERE letter_id = $1", [postcard])
@@ -204,9 +241,13 @@ describePostgres('certified mail at the letter, the dispatch and the status sync
         pool.query("UPDATE letters SET mail_service = 'certified_return_receipt' WHERE letter_id = $1", [gift])
       ).rejects.toMatchObject(refused);
 
-      // Nor does a certified letter become a postcard or a gift letter.
+      // Nor does a certified letter become a postcard, a pack's or a gift letter.
       const certified = await seedSentLetter({ service: 'certified', status: 'processing' });
-      for (const change of ["mail_type = 'postcard'", "funding_type = 'gift_letter'"]) {
+      for (const change of [
+        "mail_type = 'postcard'",
+        "funding_type = 'prepaid_balance', funding_order_id = NULL",
+        "funding_type = 'gift_letter', funding_order_id = NULL"
+      ]) {
         await expect(pool.query(`UPDATE letters SET ${change} WHERE letter_id = $1`, [certified]), change)
           .rejects.toMatchObject(refused);
       }
@@ -266,8 +307,8 @@ describePostgres('certified mail at the letter, the dispatch and the status sync
       60_000
     );
 
-    it('hands the provider no service for a standard letter', async () => {
-      stubProvider.supportsExtraServices = true;
+    it('hands the provider no service for a standard letter, which needs no capability to send', async () => {
+      // supportsExtraServices is left unset: the provider says nothing of services.
       stubProvider.nextResult = providerSuccess('stub-standard');
       const { letterId } = await seedPaidLetter('standard');
 
@@ -297,7 +338,7 @@ describePostgres('certified mail at the letter, the dispatch and the status sync
       expect(order.rows[0]).toEqual({
         status: 'refund_pending',
         last_error_code: 'PROVIDER_SUBMISSION_FAILED',
-        last_error: 'provider_rejected'
+        last_error: 'extra_service_refused'
       });
       const events = await pool.query(
         "SELECT 1 FROM commerce_order_events WHERE order_id = $1 AND event_type = 'provider.terminal_failure'",

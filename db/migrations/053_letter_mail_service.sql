@@ -13,8 +13,10 @@
 -- Only a letter that travelled with an extra service has one, and the status
 -- sync writes it.
 --
--- PostGrid sells the service for letters only, and a gift letter is funded
--- for standard mail only (#579): the checks hold any writer to that.
+-- PostGrid sells the service for letters only, and certified mail is paid per
+-- send with Pay & Send (#579): never a pack and never a gift letter. A letter
+-- that travels as anything but standard mail is a letter, funded by an order
+-- (funding_type jit_order); the checks hold any writer to that.
 --
 -- letters predates 022 and 023, so the legacy-scenario replay needs no guard
 -- here.
@@ -25,7 +27,7 @@ ALTER TABLE letters
   ADD CONSTRAINT letters_mail_service_known
     CHECK (mail_service IN ('standard', 'certified', 'certified_return_receipt')),
   ADD CONSTRAINT letters_mail_service_letters_paid_per_send
-    CHECK (mail_service = 'standard' OR (mail_type = 'letter' AND funding_type IS DISTINCT FROM 'gift_letter')),
+    CHECK (mail_service = 'standard' OR (mail_type = 'letter' AND funding_type = 'jit_order')),
   ADD CONSTRAINT letters_carrier_tracking_certified_only
     CHECK (carrier_tracking_number IS NULL OR mail_service <> 'standard'),
   ADD CONSTRAINT letters_carrier_tracking_length

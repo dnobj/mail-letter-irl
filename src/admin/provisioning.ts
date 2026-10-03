@@ -92,8 +92,11 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  *
  * 053 adds letters.mail_service and letters.carrier_tracking_number (#625), with
  * four CHECKs. As for 040, the reader role's letters column list leaves them
- * out and the operator role reads letters whole. The admin panel's letter view
- * gains them later, with a re-run.
+ * out and the operator role reads letters whole. But the operator role's
+ * letters UPDATE list gains carrier_tracking_number, because the admin panel's
+ * provider status sync writes it (as the operator role, in full mode): re-run
+ * `npm run admin:provision-access` in each environment after 053 is applied.
+ * The admin panel's letter view gains the two columns later, with another re-run.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
   "053_letter_mail_service.sql";
@@ -356,6 +359,9 @@ export const ADMIN_OPERATOR_WRITE_GRANTS: Readonly<
     // Never content, recipient, preview_html or redacted_at: the retention
     // sweep owns those and no command touches them.
     update: [
+      // The USPS number of a certified letter (053, #625), written by the
+      // provider status sync.
+      "carrier_tracking_number",
       "provider",
       "provider_raw_status",
       "sent_at",

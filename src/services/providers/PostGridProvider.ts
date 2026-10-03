@@ -463,7 +463,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
         success: false,
         trackingId: '',
         error: 'PostGrid does not sell that extra service.',
-        metadata: { retryable: false, submissionOutcome: 'definite_rejection' }
+        metadata: { retryable: false, submissionOutcome: 'definite_rejection', errorClass: 'extra_service_refused' }
       };
     }
 

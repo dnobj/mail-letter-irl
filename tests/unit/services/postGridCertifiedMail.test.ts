@@ -12,6 +12,8 @@ import { DIYProvider } from '../../../src/services/providers/DIYProvider.js';
 import { DummyProvider } from '../../../src/services/providers/DummyProvider.js';
 import { PostGridProvider } from '../../../src/services/providers/PostGridProvider.js';
 import { RENDERER_VERSION } from '../../../src/render/index.js';
+import { providerSellsExtraServices } from '../../../src/services/providers/extraServices.js';
+import type { LetterFulfillmentProvider } from '../../../src/services/providers/types.js';
 
 function provider() {
   return new PostGridProvider(
@@ -111,7 +113,7 @@ describe('the extra service in the request', () => {
         success: false,
         trackingId: '',
         error: 'PostGrid does not sell that extra service.',
-        metadata: { retryable: false, submissionOutcome: 'definite_rejection' }
+        metadata: { retryable: false, submissionOutcome: 'definite_rejection', errorClass: 'extra_service_refused' }
       });
       expect(fetchMock).not.toHaveBeenCalled();
       // The operator is told which letter, in a fixed word and not the value.
@@ -291,8 +293,27 @@ describe('which providers say they sell an extra service (#625)', () => {
         .supportsExtraServices
     ).toBe(true);
     expect(
-      new DIYProvider({ name: 'diy', displayName: 'DIY', enabled: true, config: { verbose: false } }).supportsExtraServices
+      (new DIYProvider({ name: 'diy', displayName: 'DIY', enabled: true, config: { verbose: false } }) as LetterFulfillmentProvider)
+        .supportsExtraServices
     ).not.toBe(true);
+  });
+});
+
+describe('the provider names that sell an extra service (#625)', () => {
+  // An operator's decision names a provider without constructing it, so the names
+  // that sell extra services are a list of their own; each provider says so itself.
+  it('agree with what each provider says of itself', () => {
+    const providers = [
+      provider(),
+      new DummyProvider({ name: 'dummy', displayName: 'Dummy', enabled: true }, { verbose: false, delayMs: 0, failureRate: 0 }),
+      new DIYProvider({ name: 'diy', displayName: 'DIY', enabled: true, config: { verbose: false } })
+    ] as LetterFulfillmentProvider[];
+    for (const instance of providers) {
+      expect(providerSellsExtraServices(instance.config.name), instance.config.name).toBe(instance.supportsExtraServices === true);
+    }
+    expect(providerSellsExtraServices('POSTGRID')).toBe(true);
+    expect(providerSellsExtraServices('lob')).toBe(false);
+    expect(providerSellsExtraServices('')).toBe(false);
   });
 });
 
@@ -308,7 +329,7 @@ describe('providers that cannot sell an extra service', () => {
         success: false,
         trackingId: '',
         error: 'Manual fulfilment cannot send an extra service such as certified mail.',
-        metadata: { retryable: false, submissionOutcome: 'definite_rejection' }
+        metadata: { retryable: false, submissionOutcome: 'definite_rejection', errorClass: 'extra_service_refused' }
       });
     }
   );
