@@ -400,6 +400,22 @@ describe('set_letter_words', () => {
     expect((await change(lines(10), context(10))).message).not.toContain('gift letter');
   });
 
+  it.each(['certified', 'certified_return_receipt'])(
+    'says nothing of a gift letter when a %s letter shrinks back to one page: no gift letter pays for it (#625)',
+    async mail_service => {
+      vi.stubEnv('LETTER_IRL_GIFT_LETTERS_ENABLED', 'true');
+      vi.mocked(getGiftBalance).mockResolvedValue({ available: 1 } as never);
+      vi.mocked(getDraftForStationery).mockResolvedValue({ ...draft({ bodyText: lines(40) }), mail_service } as never);
+
+      const output = await change(lines(10), context(0));
+
+      expect(output.message).toContain('It now fits on one page.');
+      expect(output.message).not.toContain('gift letter');
+      // The gift balance is not even read for it.
+      expect(getGiftBalance).not.toHaveBeenCalled();
+    }
+  );
+
   it('draws the enclosed picture again from the small copy its preview showed', async () => {
     vi.mocked(getDraftForStationery).mockResolvedValue(draft({ bodyText: lines(4), inline: true }) as never);
 

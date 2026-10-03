@@ -2,6 +2,7 @@ import type { Address, LetterLayoutType, McpToolDefinition, ToolContext } from '
 import { setLetterWordsInputSchema, setLetterWordsOutputSchema } from '../schemas.js';
 import { letterPageLimit } from '../config/roomToWrite.js';
 import { isGiftLettersEnabled } from '../config/giftLetters.js';
+import { mailServiceOf } from '../config/products.js';
 import type { SendEligibility } from '../services/commerceService.js';
 import { getGiftBalance } from '../services/giftLetterService.js';
 import { pageFit, stationeryOf, type Layout, type PageFit } from '../render/index.js';
@@ -267,7 +268,11 @@ async function handler(input: SetLetterWordsInput, context: ToolContext): Promis
   // Priced as it stands now: the pages are the draft's, as the send and the
   // checkout read them.
   const payment = letterPayment(letterOption(layout, draft.mail_service), Number(draft.required_credits ?? 2), gift, context, draftId);
-  const note = pages === 1 && pagesBefore > 1 && !payment.canSendNow && !gift ? await giftLetterNote(context) : '';
+  // Never for certified mail (#625): no gift letter pays for it, and a new preview that used one would drop the service.
+  const note =
+    pages === 1 && pagesBefore > 1 && !payment.canSendNow && !gift && mailServiceOf(draft.mail_service) === undefined
+      ? await giftLetterNote(context)
+      : '';
   return {
     draftId,
     previewHtml,
