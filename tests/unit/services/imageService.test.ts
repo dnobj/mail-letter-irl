@@ -40,8 +40,8 @@ vi.mock('sharp', () => {
       jpeg: vi.fn().mockReturnThis(),
       toBuffer: vi.fn(),
     })),
-    // imageService pins libvips to one thread when it loads.
-    { concurrency: vi.fn() }
+    // imageService pins libvips to one thread and turns its cache off when it loads.
+    { concurrency: vi.fn(), cache: vi.fn() }
   );
   return { default: sharpMock };
 });

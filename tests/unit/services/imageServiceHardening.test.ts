@@ -250,6 +250,18 @@ describe('image pipeline hardening', () => {
       expect(sharp.concurrency()).toBe(1);
     });
 
+    it('turns sharp\'s operation cache off, so a finished photo\'s decoder is not kept alive (#616 review)', async () => {
+      // The cache keeps a source's decoder alive with its entry, and a progressive JPEG's coefficient
+      // buffer is not counted in it: four photos decoded one after another in one slot peaked at up to
+      // four times one photo, and a request's decoders stayed held after it returned. Turn it on, load a
+      // fresh copy of the service, and expect it to have been turned off.
+      sharp.cache({ memory: 50, files: 20, items: 100 });
+      expect(sharp.cache()).toMatchObject({ memory: { max: 50 }, files: { max: 20 }, items: { max: 100 } });
+      vi.resetModules();
+      await import('../../../src/services/imageService.js');
+      expect(sharp.cache()).toMatchObject({ memory: { max: 0 }, files: { max: 0 }, items: { max: 0 } });
+    });
+
     it('processes a real interlaced PNG and a real progressive JPEG', async () => {
       const create = () => sharp({ create: { width: 640, height: 480, channels: 3, background: { r: 30, g: 60, b: 90 } } });
       fetchMock.mockResolvedValueOnce(responseWith(bodyOf(await create().png({ progressive: true }).toBuffer()), {}));

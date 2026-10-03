@@ -26,7 +26,7 @@
 
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
-import sharp, { type Metadata, type Sharp } from 'sharp';
+import sharp, { type Metadata, type OverlayOptions, type Sharp } from 'sharp';
 import type { ImageFileParam, ProcessedImage, PostcardSize, LetterImageType } from './types.js';
 import {
   getImage as getTempImage,
@@ -34,6 +34,7 @@ import {
   UPLOADED_PHOTO_REFERENCE,
 } from './tempImageStore.js';
 import { ConcurrencyGateError, createConcurrencyGate, type ConcurrencyGate } from '../utils/concurrencyGate.js';
+import { COLLAGE_MAX_PHOTOS, COLLAGE_MIN_PHOTOS, collageCells } from './collageArrangement.js';
 
 // ============================================================================
 // Configuration
@@ -105,6 +106,14 @@ function tooLargeToDecodeMessage(bytesPerPixel: number): string {
   return `Image is too large to process. Please use an image under ${megapixels} megapixels, or save it without interlacing or progressive encoding.`;
 }
 
+/**
+ * The time a collage's photos have to download between them (#616 review),
+ * from the moment it holds its slot: each transfer starts with what is left
+ * of it, if that is less than its own deadline, and one that finds it spent
+ * fails as a download that did not finish.
+ */
+const COLLAGE_DOWNLOAD_BUDGET_MS = 30_000;
+
 const REMOTE_IMAGE_FETCH_CONFIG = {
   /** One deadline for the whole transfer: redirects, headers and body. */
   deadlineMs: 20_000,
@@ -122,14 +131,27 @@ const REMOTE_IMAGE_FETCH_CONFIG = {
  * queue is full or the wait is up, and one account may hold at most two
  * callers in each gate, so a single account cannot fill a gate for everyone
  * else.
+ *
+ * A collage (#616) holds up to four input buffers at once, and then their
+ * tiles, so it is bounded by a gate of its own around the whole of it, its
+ * downloads included: two at a time and one per account, and one that waits
+ * has fetched nothing. The two add at most six held input buffers and two
+ * sets of tiles (about 24 MB each at worst) to the figure above: about
+ * 835 MB, or about 1.13 GB while a progressive JPEG without chroma
+ * subsampling decodes at the 265 MB measured and not the 165 MB counted
+ * (#622). Its photos share one budget for their downloads
+ * (COLLAGE_DOWNLOAD_BUDGET_MS), the queue waits and the transfers together,
+ * so a collage cannot hold its slot four times as long as one photo.
  */
 const GATE_CONFIG = {
   decode: { limit: 3, maxQueue: 12, queueTimeoutMs: 15_000, perKeyLimit: 2 },
   download: { limit: 8, maxQueue: 24, queueTimeoutMs: 15_000, perKeyLimit: 2 },
+  collage: { limit: 2, maxQueue: 4, queueTimeoutMs: 15_000, perKeyLimit: 1 },
 } as const;
 
 const decodeGate = createConcurrencyGate({ name: 'image-decode', ...GATE_CONFIG.decode });
 const downloadGate = createConcurrencyGate({ name: 'image-download', ...GATE_CONFIG.download });
+const collageGate = createConcurrencyGate({ name: 'image-collage', ...GATE_CONFIG.collage });
 
 const SERVICE_BUSY_MESSAGE = 'The image service is busy right now. Please try again in a moment.';
 const ACCOUNT_BUSY_MESSAGE = 'You have other images still processing. Please wait for them to finish and try again.';
@@ -187,6 +209,17 @@ export class ImageProcessingError extends Error {
 sharp.concurrency(1);
 
 /**
+ * No operation cache. sharp keeps recent sources and results for reuse (50 MB,
+ * 20 files and 100 items by default), and a cached source keeps its decoder
+ * alive, whose memory the cache does not count: a progressive JPEG held its
+ * whole coefficient buffer after its tile was made, so four photos decoded one
+ * after another in one slot measured up to three times one photo's peak, and a
+ * request's decoders were still held after it had returned (#616 review). Every
+ * image here is opened from bytes seen once, so the cache never hits.
+ */
+sharp.cache(false);
+
+/**
  * The one way this module (and generateImageForMail) opens image bytes: the
  * pixel ceiling travels with every call, including metadata reads, so no site
  * can forget it.
@@ -216,6 +249,11 @@ export interface ImageProcessingOptions {
    * each gate (perKeyLimit), so one account cannot fill a gate for everyone.
    */
   actorId?: string;
+  /**
+   * A moment (Date.now()) by which a remote download must be over, if sooner
+   * than its own deadline: the photos of a collage share one (#616 review).
+   */
+  deadlineAt?: number;
 }
 
 async function runGated<T>(gate: ConcurrencyGate, work: () => Promise<T>, key?: string): Promise<T> {
@@ -429,8 +467,16 @@ async function downloadRemoteImage(
   options: ImageProcessingOptions
 ): Promise<Buffer> {
   return runGated(downloadGate, async () => {
+    // What a collage's budget has left, when that is less than a download's own deadline.
+    const allowedMs =
+      options.deadlineAt === undefined
+        ? REMOTE_IMAGE_FETCH_CONFIG.deadlineMs
+        : Math.min(REMOTE_IMAGE_FETCH_CONFIG.deadlineMs, options.deadlineAt - Date.now());
+    if (allowedMs <= 0) {
+      throw new ImageProcessingError('DOWNLOAD_FAILED', DOWNLOAD_FAILED_MESSAGE);
+    }
     const controller = new AbortController();
-    const deadline = setTimeout(() => controller.abort(), REMOTE_IMAGE_FETCH_CONFIG.deadlineMs);
+    const deadline = setTimeout(() => controller.abort(), allowedMs);
 
     try {
       const response = await fetchRemoteImage(url, controller.signal);
@@ -636,31 +682,157 @@ async function processPostcardBuffer(
       .jpeg({ quality: CONFIG.jpegQuality })
       .toBuffer();
 
-    // 4. Create small preview for ChatGPT widget from the processed image.
-    // Maintain aspect ratio of postcard (landscape)
-    const previewWidth = PREVIEW_CONFIG.maxWidth;
-    const previewHeight = Math.round(previewWidth * (targetDimensions.height / targetDimensions.width));
+    // 4. The small preview and both data URIs
+    return postcardPicture(processed, targetDimensions, metadata);
+  }, options.actorId);
+}
 
-    const preview = await openImage(processed)
-      .resize(previewWidth, previewHeight, {
-        fit: 'cover',
-        position: 'center',
-      })
-      .jpeg({ quality: PREVIEW_CONFIG.jpegQuality })
+/**
+ * A postcard front's JPEG as the tools take it: the print copy, and the small
+ * copy the card shows, derived from it, never from the original (the original
+ * is decoded once). `original` is the photo's own size, for the logs.
+ */
+async function postcardPicture(
+  processed: Buffer,
+  target: { width: number; height: number },
+  original: { width: number; height: number }
+): Promise<ProcessedPostcardImage> {
+  // Create small preview for ChatGPT widget from the processed image.
+  // Maintain aspect ratio of postcard (landscape)
+  const previewWidth = PREVIEW_CONFIG.maxWidth;
+  const previewHeight = Math.round(previewWidth * (target.height / target.width));
+
+  const preview = await openImage(processed)
+    .resize(previewWidth, previewHeight, {
+      fit: 'cover',
+      position: 'center',
+    })
+    .jpeg({ quality: PREVIEW_CONFIG.jpegQuality })
+    .toBuffer();
+
+  return {
+    base64DataUri: `data:image/jpeg;base64,${processed.toString('base64')}`,
+    previewDataUri: `data:image/jpeg;base64,${preview.toString('base64')}`,
+    originalWidth: original.width,
+    originalHeight: original.height,
+    processedWidth: target.width,
+    processedHeight: target.height,
+  };
+}
+
+// ============================================================================
+// Postcard Collages (#616)
+// ============================================================================
+
+const PHOTO_ORDINALS = ['first', 'second', 'third', 'fourth'] as const;
+
+/** A photo's refusal said by its place, so the person knows which to replace. A busy service is not any photo's. */
+function namedPhoto(error: unknown, index: number): unknown {
+  if (!(error instanceof ImageProcessingError) || error.code === 'SERVICE_BUSY') return error;
+  const place = PHOTO_ORDINALS[index] ?? `number ${index + 1}`;
+  return new ImageProcessingError(error.code, `The ${place} photo: ${error.userMessage}`, error);
+}
+
+/**
+ * Downloads two to four photos and draws them on one postcard front (#616),
+ * in the arrangement their number calls for (collageArrangement.ts), in the
+ * order given. The result is one JPEG at the postcard's print size, kept as a
+ * single photo's crop is: nothing downstream learns the front was a collage.
+ * The whole of it runs under the collage gate (two at a time, one per
+ * account), so a set waiting its turn has fetched nothing. The photos are
+ * downloaded one at a time, in order, each under the download gate, so the
+ * account holds one share of it, not four, and within one budget between them
+ * (COLLAGE_DOWNLOAD_BUDGET_MS): the first that will not download is named and
+ * the rest are not fetched. Then every photo is checked from its
+ * header before any is drawn, the first to fail being named; one whose pixels
+ * will not decode is named when its turn to be drawn comes.
+ *
+ * @param inputs - two to four OpenAI file parameters or plain links
+ * @throws ImageProcessingError naming the photo that could not be used ("The second photo: ...")
+ */
+export async function downloadAndProcessCollageWithPreview(
+  inputs: ImageInput[],
+  size: PostcardSize = '6x9',
+  options: ImageProcessingOptions = {}
+): Promise<ProcessedPostcardImage> {
+  if (inputs.length < COLLAGE_MIN_PHOTOS || inputs.length > COLLAGE_MAX_PHOTOS) {
+    throw new ImageProcessingError(
+      'PROCESSING_FAILED',
+      `A collage takes ${COLLAGE_MIN_PHOTOS} to ${COLLAGE_MAX_PHOTOS} photos.`
+    );
+  }
+
+  return runGated(collageGate, async () => {
+    const downloadOptions: ImageProcessingOptions = { ...options, deadlineAt: Date.now() + COLLAGE_DOWNLOAD_BUDGET_MS };
+    const buffers: Buffer[] = [];
+    for (const [index, input] of inputs.entries()) {
+      try {
+        buffers.push(await downloadImage('download_url' in input ? input.download_url : input.url, downloadOptions));
+      } catch (error) {
+        throw namedPhoto(error, index);
+      }
+    }
+    return composeCollageBuffers(buffers, size, options);
+  }, options.actorId);
+}
+
+/**
+ * The collage from its photos' bytes, under one decode slot. Every photo is
+ * checked first, with the checks a single photo gets (format from the bytes,
+ * the pixel ceiling, the progressive budget, the print minimum), before any is
+ * drawn; then each is turned upright and cropped to fill its cell, one at a
+ * time (the cache is off, so a finished photo's decoder is not kept), and the tiles are laid on a white
+ * canvas of the postcard's size, which a transparent picture shows through to.
+ */
+async function composeCollageBuffers(
+  buffers: Buffer[],
+  size: PostcardSize,
+  options: ImageProcessingOptions
+): Promise<ProcessedPostcardImage> {
+  const target = CONFIG.sizes[size];
+  const cells = collageCells(buffers.length, target);
+  return runGated(decodeGate, async () => {
+    const originals: Array<{ width: number; height: number }> = [];
+    for (const [index, buffer] of buffers.entries()) {
+      try {
+        const metadata = await getImageMetadata(buffer);
+        validateDimensions(metadata.width, metadata.height);
+        originals.push(metadata);
+      } catch (error) {
+        throw namedPhoto(error, index);
+      }
+    }
+
+    const tiles: OverlayOptions[] = [];
+    for (const [index, buffer] of buffers.entries()) {
+      const cell = cells[index];
+      try {
+        const tile = await openUprightImage(buffer)
+          .resize(cell.width, cell.height, { fit: 'cover', position: 'center' })
+          .toColourspace('srgb')
+          .png({ compressionLevel: 1 })
+          .toBuffer();
+        tiles.push({ input: tile, left: cell.left, top: cell.top });
+      } catch (error) {
+        throw namedPhoto(
+          new ImageProcessingError(
+            'PROCESSING_FAILED',
+            'Image could not be processed. Please try a different image.',
+            error instanceof Error ? error : undefined
+          ),
+          index
+        );
+      }
+    }
+
+    const processed = await sharp({
+      create: { width: target.width, height: target.height, channels: 3, background: '#ffffff' },
+    })
+      .composite(tiles)
+      .jpeg({ quality: CONFIG.jpegQuality })
       .toBuffer();
 
-    // 5. Convert both to base64 data URIs
-    const base64Full = processed.toString('base64');
-    const base64Preview = preview.toString('base64');
-
-    return {
-      base64DataUri: `data:image/jpeg;base64,${base64Full}`,
-      previewDataUri: `data:image/jpeg;base64,${base64Preview}`,
-      originalWidth: metadata.width,
-      originalHeight: metadata.height,
-      processedWidth: targetDimensions.width,
-      processedHeight: targetDimensions.height,
-    };
+    return postcardPicture(processed, target, originals[0]);
   }, options.actorId);
 }
 
@@ -1029,6 +1201,8 @@ export const _testing = {
   REMOTE_IMAGE_FETCH_CONFIG,
   decodeGate,
   downloadGate,
+  collageGate,
+  COLLAGE_DOWNLOAD_BUDGET_MS,
   openImage,
   sniffFormat,
   downloadImage,
@@ -1040,4 +1214,5 @@ export const _testing = {
   validateRemoteImageUrl,
   isUnsafeIpAddress,
   readResponseBufferWithLimit,
+  namedPhoto,
 };
