@@ -287,10 +287,10 @@ async function cleanSignature(input: Buffer): Promise<CleanedSignature> {
   if (area < SIGNATURE_CLEANING.minInk) throw new SignatureImageError('NO_SIGNATURE_FOUND', NO_SIGNATURE_FOUND_MESSAGE);
   // Light ink on a dark sheet is not refused as such: the closing takes its
   // light strokes for paper, so the dark sheet between their bends reads as
-  // ink. Most such pictures fail the checks below; one that passes is saved as
-  // those shapes, and the person sees it in the letter's preview before it
-  // prints. A rule to tell them apart broke in three review rounds running
-  // (#609 rounds 3 to 5), so it waits for #611.
+  // ink. Such a picture may fail the checks below or be saved as those shapes,
+  // which the person sees in the letter's preview before it prints. A rule to
+  // tell them apart broke in three review rounds running (#609 rounds 3 to 5),
+  // so it waits for #611.
   // A piece left out is further than `reach` from what is kept, and the crop's
   // margin is narrower than that, so a stray mark never reaches the crop.
 
