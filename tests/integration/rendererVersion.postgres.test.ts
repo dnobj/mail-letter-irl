@@ -507,15 +507,43 @@ describePostgres('renderer version, stationery, pages and mail service (migratio
       expect(await serviceOf(priced)).toBe('standard');
     }, 60_000);
 
-    it('does not send a certified draft until the send carries the service', async () => {
+    it('copies the service a certified draft asks for into the letter Pay & Send creates, and standard into every other', async () => {
+      const userId = await seedUser();
+      const certified = await seedDraft(userId, 'pdf-1');
+      await pool.query("UPDATE letter_drafts SET mail_service = 'certified_return_receipt' WHERE draft_id = $1", [certified]);
+      const orderId = `order-${randomUUID()}`;
+      await pool.query(
+        `INSERT INTO orders (order_id, user_id, credits, amount_cents, currency, status, order_type, product_code,
+           idempotency_key, draft_id)
+         VALUES ($1, $2, NULL, 1499, 'usd', 'paid', 'jit_mail', 'jit-letter-certified-receipt', $3, $4)`,
+        [orderId, userId, `idem_${orderId}`, certified]
+      );
+      const plain = await seedDraft(userId, 'pdf-1');
+
+      const paid = await mailSend.createMailOrderFromDraft({
+        draftId: certified, userId, mailType: 'letter', funding: { type: 'jit_order', orderId }
+      });
+      const prepaid = await mailSend.createMailOrderFromDraft({ draftId: plain, userId, mailType: 'letter' });
+
+      const stored = await pool.query<{ letter_id: string; mail_service: string; carrier_tracking_number: string | null }>(
+        'SELECT letter_id, mail_service, carrier_tracking_number FROM letters WHERE letter_id = ANY($1)',
+        [[paid.letter.letter_id, prepaid.letter.letter_id]]
+      );
+      const byId = new Map(stored.rows.map(row => [row.letter_id, row]));
+      expect(byId.get(paid.letter.letter_id)).toMatchObject({ mail_service: 'certified_return_receipt', carrier_tracking_number: null });
+      expect(byId.get(prepaid.letter.letter_id)).toMatchObject({ mail_service: 'standard', carrier_tracking_number: null });
+    }, 60_000);
+
+    it('does not let a pack pay for certified mail, and moves nothing', async () => {
       const userId = await seedUser();
       const draftId = await seedDraft(userId, 'pdf-1');
       await pool.query("UPDATE letter_drafts SET mail_service = 'certified' WHERE draft_id = $1", [draftId]);
       await expect(mailSend.createMailOrderFromDraft({ draftId, userId, mailType: 'letter' }))
-        .rejects.toMatchObject({ code: 'MAIL_SERVICE_NOT_SENDABLE' });
+        .rejects.toMatchObject({ code: 'PACK_CANNOT_PAY' });
       const state = (await pool.query('SELECT status FROM letter_drafts WHERE draft_id = $1', [draftId])).rows[0];
       expect(state.status).toBe('pending');
       expect((await pool.query('SELECT 1 FROM letters WHERE user_id = $1', [userId])).rows).toHaveLength(0);
+      expect((await pool.query('SELECT credits FROM users WHERE user_id = $1', [userId])).rows[0].credits).toBe(10);
     }, 60_000);
   });
 

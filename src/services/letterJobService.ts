@@ -376,26 +376,17 @@ function letterParams(letter: Letter, job: LetterJob): LetterParams {
       typeof content.signatureImage === 'string' && content.signatureImage !== ''
         ? { image: content.signatureImage, closingParagraph: signatureParagraph(content.bodyText, content.signOff) }
         : undefined,
-    // Certified mail (#625): only a service PostGrid sells is passed on;
-    // extraServiceRefusal has already turned away any other text.
-    extraService: extraServiceOf(letter),
+    // Certified mail (#625): the service as the letter holds it, none being
+    // none. Text this code does not know is handed over as it is and never
+    // read as standard mail: extraServiceRefusal turns it away before this is
+    // built, and a provider refuses it too.
+    extraService: mailServiceOf(letter.mail_service) as CertifiedMailService | undefined,
     metadata: {
       letterId: letter.letter_id,
       userId: letter.user_id,
       creditsCost: letter.credits_cost,
     },
   };
-}
-
-/**
- * The extra service a letter asks for, as the print passes it on: one of the
- * two PostGrid sells, or undefined for standard mail. Text this code does not
- * know is never passed on as if it were standard; extraServiceRefusal answers
- * for it before anything is built.
- */
-function extraServiceOf(letter: Letter): CertifiedMailService | undefined {
-  const service = mailServiceOf(letter.mail_service);
-  return isExtraService(service) ? service : undefined;
 }
 
 /**

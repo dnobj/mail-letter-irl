@@ -52,6 +52,12 @@ export interface StubProvider {
   calls: { mailType: 'letter' | 'postcard'; params: LetterParams | PostcardParams }[];
   /** Invoked before each send. Use to interleave a concurrent action mid-dispatch. */
   onSend?: () => Promise<void> | void;
+  /** Whether the provider says it sells extra services such as certified mail (#625). Absent is no. */
+  supportsExtraServices?: boolean;
+  /** What a status read answers for a tracking id. Unset, a status read throws, as it always did. */
+  statusFor?: (trackingId: string) => LetterStatus;
+  /** Every tracking id a status read was made for, in order. */
+  statusCalls: string[];
 }
 
 /** A provider result that proves the piece was refused and no mail exists. */
@@ -85,7 +91,8 @@ export function providerSuccess(trackingId = 'stub-tracking'): LetterResult {
 
 export const stubProvider: StubProvider = {
   defaultResult: definiteRejection(),
-  calls: []
+  calls: [],
+  statusCalls: []
 };
 
 /** Clear recorded calls and queued behaviour between tests. */
@@ -95,6 +102,9 @@ export function resetStubProvider(): void {
   stubProvider.onSend = undefined;
   stubProvider.defaultResult = definiteRejection();
   stubProvider.calls = [];
+  stubProvider.supportsExtraServices = undefined;
+  stubProvider.statusFor = undefined;
+  stubProvider.statusCalls = [];
 }
 
 function take(): AnyResult {
@@ -131,6 +141,10 @@ export async function installStubProvider(): Promise<void> {
 
   const instance: LetterFulfillmentProvider = {
     config,
+    // Read at each dispatch, so a test changes it by mutating `stubProvider`.
+    get supportsExtraServices() {
+      return stubProvider.supportsExtraServices === true;
+    },
     async sendLetter(params: LetterParams): Promise<LetterResult> {
       stubProvider.calls.push({ mailType: 'letter', params });
       await stubProvider.onSend?.();
@@ -145,7 +159,11 @@ export async function installStubProvider(): Promise<void> {
     },
     // The outbox never calls these, but the interface requires them and a stub
     // that silently no-ops would hide a caller that started to depend on one.
+    // The status sync does call getStatus (#625), so a test that runs it sets
+    // `statusFor`; without it a status read still throws.
     async getStatus(trackingId: string): Promise<LetterStatus> {
+      stubProvider.statusCalls.push(trackingId);
+      if (stubProvider.statusFor) return stubProvider.statusFor(trackingId);
       throw new Error(`stub provider does not track mail: ${trackingId}`);
     },
     async estimateCost(): Promise<CostEstimate> {

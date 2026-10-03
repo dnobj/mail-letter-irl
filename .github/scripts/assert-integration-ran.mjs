@@ -51,6 +51,7 @@ const REQUIRED = [
   'addressRequests.postgres.test.ts',
   'signatures.postgres.test.ts',
   'signatureDrafts.postgres.test.ts',
+  'certifiedMail.postgres.test.ts',
 ];
 
 /**

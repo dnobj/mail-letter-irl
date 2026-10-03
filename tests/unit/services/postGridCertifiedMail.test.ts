@@ -281,6 +281,21 @@ describe("the provider's cost estimate with an extra service", () => {
   });
 });
 
+describe('which providers say they sell an extra service (#625)', () => {
+  // The outbox asks a provider for a service only if the provider says it can
+  // (letterJobService.extraServiceRefusal): absent is no.
+  it('PostGrid and the dummy say so, and manual fulfilment does not', () => {
+    expect(provider().supportsExtraServices).toBe(true);
+    expect(
+      new DummyProvider({ name: 'dummy', displayName: 'Dummy', enabled: true }, { verbose: false, delayMs: 0, failureRate: 0 })
+        .supportsExtraServices
+    ).toBe(true);
+    expect(
+      new DIYProvider({ name: 'diy', displayName: 'DIY', enabled: true, config: { verbose: false } }).supportsExtraServices
+    ).not.toBe(true);
+  });
+});
+
 describe('providers that cannot sell an extra service', () => {
   const diy = () => new DIYProvider({ name: 'diy', displayName: 'DIY', enabled: true, config: { verbose: false } });
   const dummy = () =>
