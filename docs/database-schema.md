@@ -186,7 +186,7 @@ Temporary drafts for idempotent send operations. Prevents duplicate sends.
 | arrive_by | DATE | YES | - | The date the mail should arrive by, in America/New_York; NULL to mail as soon as possible (040, #535) |
 | mail_on | DATE | YES | - | The date it goes to the printer, worked back from `arrive_by` by the lead time (040, #535). The send copies both to the letter and holds its job until then |
 | pages | SMALLINT | NO | 1 | The pages the letter prints on, 1 to 3, printed on both sides when more than 1 (047, #586). The send, the checkout and the confirmation page price and refuse the draft by it (`draftMailOption`): a letter of more than one page is paid per send. `createDraft` refuses a count it would not store, before writing (`DRAFT_PAGES_INVALID`). The send copies it into `letters.content.pages` when above one, for the print |
-| mail_service | TEXT | NO | 'standard' | How a letter travels (052, #625): `standard` (first-class mail), `certified` (USPS Certified Mail) or `certified_return_receipt` (with an electronic return receipt). Only a letter that is not a gift send is ever certified; it is paid per send (#579). The checkout, the confirmation page, the tools that read or restyle a ready letter and the send price and refuse the draft by it (`draftMailOption`, `letterOption`). Until the send carries it to the provider (as `extraService`, part 3), the send refuses a draft that asks for it, and Pay & Send does not sell it |
+| mail_service | TEXT | NO | 'standard' | How a letter travels (052, #625): `standard` (first-class mail), `certified` (USPS Certified Mail) or `certified_return_receipt` (with an electronic return receipt). Only a letter that is not a gift send is ever certified; it is paid per send (#579). The checkout, the confirmation page, the tools that read or restyle a ready letter and the send price and refuse the draft by it (`draftMailOption`, `letterOption`). The send copies it to the letter (`letters.mail_service`, 053) and the dispatch hands it to the provider as `extraService` |
 | created_at | TIMESTAMPTZ | NO | NOW() | Draft creation |
 | updated_at | TIMESTAMPTZ | NO | NOW() | Last update |
 
@@ -243,6 +243,8 @@ Sent letters with content and tracking.
 | updated_at | TIMESTAMPTZ | YES | - | Last update |
 | arrive_by | DATE | YES | - | The date the mail should arrive by (America/New_York), copied from the draft at send; NULL when sent as soon as possible (040, #535) |
 | mail_on | DATE | YES | - | The date it goes to the printer; its job is held until 09:00 New York time that day (040, #535) |
+| mail_service | TEXT | NO | 'standard' | How the letter travelled (053, #625): `standard`, `certified` or `certified_return_receipt`, copied from the draft by the send. The print reads it (`LetterParams.extraService`); a provider that cannot honor it rejects the letter before sending, and what paid for it comes back |
+| carrier_tracking_number | TEXT | YES | - | The USPS number of a certified letter (053, #625), 1 to 64 characters, set by the status sync once PostGrid has it; NULL before that and for standard mail. Not `tracking_id`, which is PostGrid's own id for the letter |
 
 **Enums:**
 - `mail_type`: letter, postcard
@@ -250,6 +252,10 @@ Sent letters with content and tracking.
 **Constraints:**
 - `letters_schedule_pair`: arrive_by and mail_on are both set or both NULL (040)
 - `letters_schedule_order`: mail_on is never after arrive_by (040)
+- `letters_mail_service_known`: mail_service is 'standard', 'certified' or 'certified_return_receipt' (053)
+- `letters_mail_service_letters_paid_per_send`: a service other than standard only for a letter paid with Pay & Send (funding_type jit_order): never a postcard, a pack or a gift letter (053, #625)
+- `letters_carrier_tracking_certified_only`: a carrier tracking number only on a letter with an extra service (053)
+- `letters_carrier_tracking_length`: a carrier tracking number is 1 to 64 characters (053)
 
 **Indexes:**
 - `idx_letters_held_mail_on` on mail_on WHERE status = 'queued' AND mail_on IS NOT NULL: mail waiting for its date (040)
@@ -864,6 +870,7 @@ Production provisioning and the first production connection remain separate owne
 | 50 | 050_user_signatures.sql | `user_signatures` (#608): one saved signature per account, a grayscale PNG within 1200 x 400 px, with the remembered choice. No provisioning re-run: neither admin role is granted it |
 | 51 | 051_signature_drafts.sql | `letter_drafts.signature_image` (#608): a letter's own copy of the signature it was previewed with. `renderer_version` admits `pdf-4`, set exactly when a draft has one, with `letter_drafts_signature_letters_only` and `letter_drafts_signature_drawn_by_pdf_4`; `letter_drafts_stationery_drawn_by_pdf_2` admits a theme with `pdf-4`. No provisioning re-run: the reader role's column list leaves it out, as for 039 |
 | 52 | 052_mail_service.sql | `letter_drafts.mail_service` (#625): how a letter travels, 'standard' by default, with `letter_drafts_mail_service_known` and `letter_drafts_mail_service_paid_per_send` (certified or certified with a return receipt only for a letter, never a gift send). No provisioning re-run, as for 039 |
+| 53 | 053_letter_mail_service.sql | `letters.mail_service` (#625): how the letter travelled, copied from the draft by the send, standard by default; `letters.carrier_tracking_number`: the USPS number of a certified letter, set by the status sync, NULL before and for standard mail. Four CHECKs: `letters_mail_service_known`, `letters_mail_service_letters_paid_per_send` (only a letter funded by a Pay & Send order), `letters_carrier_tracking_certified_only`, `letters_carrier_tracking_length` (1 to 64). The admin operator role's letters UPDATE list gains `carrier_tracking_number` (the panel's status sync writes it): re-run `npm run admin:provision-access` in each environment after it |
 
 ---
 

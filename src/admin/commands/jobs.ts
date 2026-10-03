@@ -9,6 +9,7 @@ import {
 } from "../../services/letterJobService.js";
 import { AdminFoundationError } from "../errors.js";
 import { isHeldMailJob, readJob } from "../queries/jobs.js";
+import { providerSellsExtraServices } from "../../services/providers/extraServices.js";
 import { mapDomainError, type CommandDefinition } from "./runner.js";
 
 const PROVIDERS = ["postgrid", "dummy", "diy"] as const;
@@ -100,7 +101,13 @@ export const jobResolveCommand: CommandDefinition<JobResolveInput> = {
       ],
       warnings:
         input.decision === "accepted"
-          ? ["Accepted marks the letter as mailed with this reference. Only use evidence from the provider dashboard."]
+          ? [
+              "Accepted marks the letter as mailed with this reference. Only use evidence from the provider dashboard.",
+              // Certified mail (#625): the service is checked under the lock, when the letter is read there.
+              ...(providerSellsExtraServices(input.providerName)
+                ? []
+                : ["Manual fulfilment cannot send certified mail: accepting a certified letter with this provider is refused."]),
+            ]
           : input.decision === "retry"
             ? ["Retry resends the letter through the outbox; the customer is not charged again."]
             : ["Rejected fails the letter; a prepaid letter's credits return through the failed-send path, and a Pay & Send order moves to refund."],

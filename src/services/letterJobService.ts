@@ -18,7 +18,9 @@ import type {
   PostcardResult,
   PostcardSize,
 } from './providers/types.js';
-import type { Letter, LetterJob } from './types.js';
+import type { CertifiedMailService, Letter, LetterJob } from './types.js';
+import { isExtraService, mailServiceOf } from '../config/products.js';
+import { providerSellsExtraServices } from './providers/extraServices.js';
 import {
   isLetterAlreadyCompensated,
   returnConsumedCreditsForLetter
@@ -375,12 +377,38 @@ function letterParams(letter: Letter, job: LetterJob): LetterParams {
       typeof content.signatureImage === 'string' && content.signatureImage !== ''
         ? { image: content.signatureImage, closingParagraph: signatureParagraph(content.bodyText, content.signOff) }
         : undefined,
+    // Certified mail (#625): the service as the letter holds it, none being
+    // none. Text this code does not know is handed over as it is and never
+    // read as standard mail: extraServiceRefusal turns it away before this is
+    // built, and a provider refuses it too.
+    extraService: mailServiceOf(letter.mail_service) as CertifiedMailService | undefined,
     metadata: {
       letterId: letter.letter_id,
       userId: letter.user_id,
       creditsCost: letter.credits_cost,
     },
   };
+}
+
+/**
+ * Why this letter cannot go to this provider with the service it asks for, or
+ * undefined when nothing stands in the way. The answer comes before anything
+ * is submitted, so it is a definite rejection: the letter fails and what paid
+ * for it comes back. A letter that asks for a service is never mailed as a
+ * standard one - not when the text is unknown to this code (a newer deploy's
+ * service, a row edited by hand), not by a provider that does not say it can
+ * sell the service, and not as a postcard.
+ */
+function extraServiceRefusal(
+  provider: { supportsExtraServices?: boolean },
+  letter: Letter
+): 'unknown_service' | 'postcard' | 'provider_cannot_sell' | undefined {
+  const service = mailServiceOf(letter.mail_service);
+  if (service === undefined) return undefined;
+  if (!isExtraService(service)) return 'unknown_service';
+  if ((letter.mail_type || 'letter') === 'postcard') return 'postcard';
+  if (!provider.supportsExtraServices) return 'provider_cannot_sell';
+  return undefined;
 }
 
 function postcardParams(letter: Letter, job: LetterJob): PostcardParams {
@@ -447,6 +475,26 @@ async function submitToProvider(
   options: ProcessLetterJobOptions
 ): Promise<{ result: ProviderResult; providerName: string }> {
   const mailType = letter.mail_type || 'letter';
+
+  const refusal = extraServiceRefusal(provider, letter);
+  if (refusal) {
+    // Nothing was submitted, so this is an authoritative rejection. The
+    // reason is a fixed word, never the letter's text, for the operator who
+    // reads why a paid certified letter came back.
+    writeDiagnostic('error', 'outbox.extra_service_refused', {
+      jobId: job.job_id,
+      reason: refusal,
+      provider: provider.config.name
+    });
+    const rejected: ProviderResult = {
+      success: false,
+      trackingId: '',
+      error: `${provider.config.displayName} cannot send this letter's mail service (${refusal})`,
+      // Its own class, kept in the columns an operator reads: nothing was sent, and the provider said nothing.
+      metadata: { retryable: false, submissionOutcome: 'definite_rejection', errorClass: 'extra_service_refused' },
+    };
+    return { result: rejected, providerName: provider.config.name };
+  }
 
   const result = await submitToProviderOnce(async () => {
     if (mailType === 'postcard') {
@@ -1383,6 +1431,20 @@ export async function resolveAmbiguousLetterJobAsAdmin(
       throw new AdminMailResolutionError(currentLetter?.user_id === params.expectedUserId
         ? 'invalid_state'
         : 'not_found');
+    }
+
+    // Certified mail (#625) is accepted only by a provider that sells it: manual
+    // fulfilment would print the letter as ordinary mail and record it accepted,
+    // after it was paid for as certified. A retry is safe (the dispatch asks the
+    // provider it routes to), and so is a rejection.
+    if (params.decision === 'accepted') {
+      const service = await client.query<{ mail_service: string | null }>(
+        'SELECT mail_service FROM letters WHERE letter_id = $1',
+        [ids.letter_id]
+      );
+      if (mailServiceOf(service.rows[0]?.mail_service) !== undefined && !providerSellsExtraServices(params.providerName)) {
+        throw new AdminMailResolutionError('invalid_state');
+      }
     }
 
     // Issue #151. Once the pack is back, only 'rejected' is still safe - and it

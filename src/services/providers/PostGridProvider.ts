@@ -417,6 +417,8 @@ interface PostGridAddressVerificationResponse {
 
 export class PostGridProvider implements LetterFulfillmentProvider {
   public readonly config: ProviderConfig;
+  /** Certified mail and its return receipt, as PostGrid's `extraService` (#625). */
+  public readonly supportsExtraServices = true;
   private options: Required<PostGridProviderOptions>;
 
   constructor(config: ProviderConfig, options: PostGridProviderOptions) {
@@ -461,7 +463,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
         success: false,
         trackingId: '',
         error: 'PostGrid does not sell that extra service.',
-        metadata: { retryable: false, submissionOutcome: 'definite_rejection' }
+        metadata: { retryable: false, submissionOutcome: 'definite_rejection', errorClass: 'extra_service_refused' }
       };
     }
 

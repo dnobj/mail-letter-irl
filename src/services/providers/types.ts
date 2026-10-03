@@ -244,6 +244,14 @@ export interface LetterFulfillmentProvider {
   readonly config: ProviderConfig;
 
   /**
+   * Whether this provider sells the extra services a letter can ask for
+   * (certified mail, #625). Absent means no: the dispatch does not ask a
+   * provider for what it has not said it can do, and rejects the letter
+   * instead (nothing is sent; what paid for it comes back).
+   */
+  readonly supportsExtraServices?: boolean;
+
+  /**
    * Send a letter
    * @param params Letter parameters
    * @returns Result with tracking ID

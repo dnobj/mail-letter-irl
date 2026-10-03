@@ -35,4 +35,20 @@ describe('summarizeProviderRejection', () => {
     expect(summarizeProviderRejection({})).toBe('provider_rejected');
     expect(summarizeProviderRejection({ metadata: { statusCode: 'HTTP 500' } })).toBe('provider_rejected');
   });
+
+  // A refusal of ours before any request (#625) keeps its own class: it is not what the provider said.
+  it("keeps our own refusal class as it is, whatever the message and status say", () => {
+    expect(
+      summarizeProviderRejection({ error: "PostGrid cannot send this letter's mail service (provider_cannot_sell)", metadata: { errorClass: "extra_service_refused" } }),
+    ).toBe("extra_service_refused");
+    expect(
+      summarizeProviderRejection({ error: "HTTP 400: to.postalCode x", metadata: { statusCode: 400, errorClass: "extra_service_refused" } }),
+    ).toBe("extra_service_refused");
+  });
+
+  it("keeps no other class a result names: only the one we know", () => {
+    for (const errorClass of ["render_refused", "PRIVATE LANE", "", 5, undefined, null]) {
+      expect(summarizeProviderRejection({ error: "HTTP 400 x", metadata: { errorClass } as never })).toBe("provider_rejected http_400");
+    }
+  });
 });

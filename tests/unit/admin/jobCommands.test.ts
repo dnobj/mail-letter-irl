@@ -15,7 +15,7 @@ vi.mock("../../../src/services/letterJobService.js", async (importOriginal) => (
 }));
 
 import { findAdminCommand } from "../../../src/admin/commands/index.js";
-import { jobDispatchNowCommand } from "../../../src/admin/commands/jobs.js";
+import { jobDispatchNowCommand, jobResolveCommand } from "../../../src/admin/commands/jobs.js";
 import type { AdminSqlClient } from "../../../src/admin/database.js";
 import { renderLetter } from "../../../src/admin/pages/accounts.js";
 import { jobActionPanel } from "../../../src/admin/pages/commands.js";
@@ -88,6 +88,35 @@ const NOT_HELD: Array<[string, Record<string, unknown>]> = [
 beforeEach(() => {
   mocks.release.mockReset();
   mocks.release.mockResolvedValue({ jobId: "job-held", replayed: false });
+});
+
+describe("job.resolve (#625)", () => {
+  const AMBIGUOUS = { ...HELD_ROW, status: "held", provider_outcome: "ambiguous", letter_status: "held" };
+  const WARNING = "Manual fulfilment cannot send certified mail: accepting a certified letter with this provider is refused.";
+  const preview = (decision: string, providerName: string) =>
+    jobResolveCommand.preview(
+      client(AMBIGUOUS),
+      "job-held",
+      jobResolveCommand.parseInput(
+        new Map([
+          ["decision", decision],
+          ["providerName", providerName],
+          ...(decision === "accepted" ? [["providerTrackingId", "provider-ref-001"] as [string, string]] : [])
+        ]) as never
+      )
+    );
+
+  it("warns when manual fulfilment is named to accept a letter: it cannot send certified mail", async () => {
+    expect((await preview("accepted", "diy")).warnings).toContain(WARNING);
+  });
+
+  it.each(["postgrid", "dummy"])("does not warn for %s, which sells it", async providerName => {
+    expect((await preview("accepted", providerName)).warnings).not.toContain(WARNING);
+  });
+
+  it.each(["retry", "rejected"])("does not warn for %s, which manual fulfilment may be named for", async decision => {
+    expect((await preview(decision, "diy")).warnings).not.toContain(WARNING);
+  });
 });
 
 describe("job.dispatch_now (#535)", () => {

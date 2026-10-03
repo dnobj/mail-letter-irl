@@ -19,7 +19,6 @@ import {
   formatAmountForCurrency,
   isPackPayable,
   jitProductMatching,
-  mailServiceOf,
   normalizedCurrency,
   packCurrency,
   type MailOption
@@ -909,16 +908,6 @@ async function prepareJitOrder(
     const schedule = draftScheduleOf(draft);
     if (schedule && schedule.mailOn < earliestMailOn(new Date())) {
       throw Object.assign(new Error('Draft has missed its mail date'), { code: 'SCHEDULE_PASSED' });
-    }
-
-    // Certified mail (#625) is previewed and priced before the send carries it
-    // to the printer. Until it does, the send refuses such a draft
-    // (MAIL_SERVICE_NOT_SENDABLE), so it is not sold either: refused here, before
-    // any order or charge, since fulfilment runs after one and could only refund it.
-    if (mailServiceOf(draft.mail_service) !== undefined) {
-      throw Object.assign(new Error('Pay & Send does not sell this mail option'), {
-        code: 'JIT_OPTION_NOT_SOLD'
-      });
     }
 
     // ONE derivation for the whole transaction: the reprice branch and the

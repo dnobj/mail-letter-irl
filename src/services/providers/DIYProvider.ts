@@ -50,7 +50,7 @@ export class DIYProvider implements LetterFulfillmentProvider {
         success: false,
         trackingId: '',
         error: 'Manual fulfilment cannot send an extra service such as certified mail.',
-        metadata: { retryable: false, submissionOutcome: 'definite_rejection' }
+        metadata: { retryable: false, submissionOutcome: 'definite_rejection', errorClass: 'extra_service_refused' }
       };
     }
 

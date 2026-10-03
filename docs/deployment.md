@@ -566,9 +566,15 @@ Configure development and production independently:
     Price under the lookup key that is archived, recurring, in another currency or at another amount is refused and left
     alone; a second run changes nothing; `--out` replaces only a file an earlier run wrote. The Products carry the table's
     name, not its description. Set the lines on the development api and maintenance services, then turn the option's
-    flag on, except `LETTER_IRL_CERTIFIED_MAIL_ENABLED`, which stays off until the send carries the service (#625,
-    [letter-send-flow.md](letter-send-flow.md)). Production Prices are made in the dashboard once the price proposal
-    (#578) is approved.
+    flag on, except `LETTER_IRL_CERTIFIED_MAIL_ENABLED`, which waits for the rollout below (#625). Production
+    Prices are made in the dashboard once the price proposal (#578) is approved.
+  - **Certified mail (#625) rollout.** Only a build from the send (migration 053) on reads `letters.mail_service`;
+    an older build prints a certified letter as ordinary first-class mail, after it was paid for as certified.
+    So turn `LETTER_IRL_CERTIFIED_MAIL_ENABLED` on only once **both** the api and the maintenance service run that
+    build, and before rolling either of them back below it while certified letters wait, set
+    `LETTER_IRL_OUTBOX_DISPATCH_ENABLED=false` on both. After migration 053, re-run
+    `npm run admin:provision-access` in each environment: the admin panel's provider status sync (the operator
+    role) now writes `letters.carrier_tracking_number`.
 - `JIT_CURRENCY` (amounts come from the Stripe Prices above, not from variables).
   Pay & Send may use a different currency from the packs; each product's Price
   is validated against its own expected currency.

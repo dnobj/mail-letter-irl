@@ -365,6 +365,207 @@ describe('statusSyncService', () => {
     });
   });
 
+  describe("a certified letter's USPS number (#625)", () => {
+    const NUMBER = '9407 1000 0000 0000 0000 00';
+    const certified = (over: Record<string, unknown> = {}) => ({
+      ...createLetterRowForSync({ letterId: 'letter-cert', trackingId: 'track-cert', status: 'processing' }),
+      mail_service: 'certified',
+      carrier_tracking_number: null,
+      ...over,
+    });
+    const moving = { status: 'processing', statusMessage: 'Printing' };
+    const flat = (call: unknown[]) => String(call[0]).replace(/\s+/g, ' ');
+    const numberWrites = () =>
+      vi.mocked(db.query).mock.calls.filter(call => /SET carrier_tracking_number = /.test(String(call[0])));
+    const allWrites = () => vi.mocked(db.query).mock.calls.filter(call => /UPDATE|INSERT/.test(String(call[0])));
+    const reading = (row: unknown) =>
+      vi
+        .mocked(db.query)
+        .mockResolvedValueOnce({ rows: [row] } as any)
+        .mockResolvedValue({ rows: [], rowCount: 1 } as any);
+
+    it('stores the number once the carrier has it, though the status has not moved', async () => {
+      reading(certified());
+      mockProvider.getStatus.mockResolvedValueOnce({ ...moving, carrierTrackingNumber: NUMBER });
+
+      const result = await syncLetterStatuses(false, 30);
+
+      expect(numberWrites()).toHaveLength(1);
+      expect(numberWrites()[0][1]).toEqual(['letter-cert', NUMBER]);
+      // Nothing else was written: the status, and so its history, did not move.
+      expect(allWrites()).toHaveLength(1);
+      expect(result.updated).toBe(0);
+      expect(result.errors).toBe(0);
+    });
+
+    it('stores it beside a change of status', async () => {
+      reading(certified());
+      mockProvider.getStatus.mockResolvedValueOnce({
+        status: 'in_transit',
+        statusMessage: 'In transit',
+        carrierTrackingNumber: NUMBER,
+      });
+
+      const result = await syncLetterStatuses(false, 30);
+
+      expect(numberWrites()).toHaveLength(1);
+      expect(numberWrites()[0][1]).toEqual(['letter-cert', NUMBER]);
+      // The status and its history are written as before.
+      expect(allWrites()).toHaveLength(3);
+      expect(result.updated).toBe(1);
+    });
+
+    it('asks the database to write it only to a certified letter, and only if it differs', async () => {
+      reading(certified());
+      mockProvider.getStatus.mockResolvedValueOnce({ ...moving, carrierTrackingNumber: NUMBER });
+
+      await syncLetterStatuses(false, 30);
+
+      const sql = flat(numberWrites()[0]);
+      expect(sql).toContain("SET carrier_tracking_number = $2::text");
+      expect(sql).toContain("AND mail_service <> 'standard'");
+      expect(sql).toContain('AND carrier_tracking_number IS DISTINCT FROM $2::text');
+    });
+
+    it('does not write a number the letter already has', async () => {
+      reading(certified({ carrier_tracking_number: NUMBER }));
+      mockProvider.getStatus.mockResolvedValueOnce({ ...moving, carrierTrackingNumber: NUMBER });
+
+      await syncLetterStatuses(false, 30);
+
+      expect(allWrites()).toEqual([]);
+    });
+
+    it('replaces a number that differs: the provider has the last word', async () => {
+      reading(certified({ carrier_tracking_number: '9407 1000 0000 0000 0000 11' }));
+      mockProvider.getStatus.mockResolvedValueOnce({ ...moving, carrierTrackingNumber: NUMBER });
+
+      await syncLetterStatuses(false, 30);
+
+      expect(numberWrites()).toHaveLength(1);
+      expect(numberWrites()[0][1]).toEqual(['letter-cert', NUMBER]);
+    });
+
+    it('writes nothing while the provider has no number', async () => {
+      reading(certified());
+      mockProvider.getStatus.mockResolvedValueOnce(moving);
+
+      await syncLetterStatuses(false, 30);
+
+      expect(allWrites()).toEqual([]);
+    });
+
+    it.each([undefined, null, '', 'standard'])(
+      'gives a standard letter (%j) no number, whatever the provider reports',
+      async service => {
+        reading(certified({ mail_service: service }));
+        mockProvider.getStatus.mockResolvedValueOnce({ ...moving, carrierTrackingNumber: NUMBER });
+
+        await syncLetterStatuses(false, 30);
+
+        expect(allWrites()).toEqual([]);
+      }
+    );
+
+    it('writes nothing in a dry run, and still counts the change', async () => {
+      reading(certified());
+      mockProvider.getStatus.mockResolvedValueOnce({
+        status: 'in_transit',
+        statusMessage: 'In transit',
+        carrierTrackingNumber: NUMBER,
+      });
+
+      const result = await syncLetterStatuses(true, 30);
+
+      expect(allWrites()).toEqual([]);
+      expect(result.updated).toBe(1);
+    });
+
+    it("does not hold back the letter's status when the number cannot be stored: one error, a class, and the status written", async () => {
+      vi.mocked(db.query)
+        .mockResolvedValueOnce({ rows: [certified()] } as any)
+        .mockRejectedValueOnce(Object.assign(new Error('permission denied for table letters at 10.0.0.1'), { code: '42501' }))
+        .mockResolvedValue({ rows: [], rowCount: 1 } as any);
+      mockProvider.getStatus.mockResolvedValueOnce({
+        status: 'in_transit',
+        statusMessage: 'In transit',
+        carrierTrackingNumber: NUMBER,
+      });
+
+      const result = await syncLetterStatuses(false, 30);
+
+      expect(result.errors).toBe(1);
+      expect(result.updated).toBe(1);
+      // The number's write failed, and the status and its history were still written.
+      const writes = vi.mocked(db.query).mock.calls.filter(call => /UPDATE|INSERT/.test(String(call[0])));
+      expect(writes.map(call => flat(call).slice(0, 30))).toEqual([
+        'UPDATE letters SET carrier_tra',
+        'UPDATE letters SET status = $1',
+        'INSERT INTO letter_status_hist',
+      ]);
+      const failed = result.details.find(detail => detail.error);
+      expect(failed?.error).toBe('carrier_number_not_stored:42501');
+      expect(JSON.stringify(result.details)).not.toContain('10.0.0.1');
+    });
+
+    it.each(['accepted', 'processing', 'in_transit', 'failed'] as const)(
+      'reads a delivered certified letter for its number alone, whatever the provider now answers (%s)',
+      async status => {
+        reading(certified({ status: 'delivered' }));
+        mockProvider.getStatus.mockResolvedValueOnce({ status, statusMessage: 'Stub', carrierTrackingNumber: NUMBER });
+
+        const result = await syncLetterStatuses(false, 30);
+
+        expect(numberWrites()).toHaveLength(1);
+        // Nothing but the number: its status stays delivered, no history, no cancel.
+        expect(allWrites()).toHaveLength(1);
+        expect(failProviderCancelledLetter).not.toHaveBeenCalled();
+        expect(result).toMatchObject({ checked: 1, updated: 0, errors: 0 });
+      }
+    );
+
+    it('counts a failed write as that letter\'s error, naming a class and not the database\'s text', async () => {
+      vi.mocked(db.query)
+        .mockResolvedValueOnce({ rows: [certified()] } as any)
+        .mockRejectedValueOnce(new Error('connection to 10.0.0.1 lost'));
+      mockProvider.getStatus.mockResolvedValueOnce({ ...moving, carrierTrackingNumber: NUMBER });
+
+      const result = await syncLetterStatuses(false, 30);
+
+      expect(result.errors).toBe(1);
+      expect(JSON.stringify(result.details)).not.toContain('10.0.0.1');
+    });
+
+    it('keeps asking for the number of a certified letter that was delivered without one', async () => {
+      vi.mocked(db.query).mockResolvedValueOnce({ rows: [] } as any);
+
+      await syncLetterStatuses(false, 30);
+
+      const sql = flat(vi.mocked(db.query).mock.calls[0]);
+      expect(sql).toContain('mail_service, carrier_tracking_number');
+      expect(sql).toContain(
+        "WHERE ( status NOT IN ('delivered', 'returned', 'failed', 'cancelled') " +
+          "OR (status = 'delivered' AND mail_service <> 'standard' AND carrier_tracking_number IS NULL) )"
+      );
+      expect(sql).toContain('AND tracking_id IS NOT NULL');
+    });
+
+    it('stores the number of a letter that was delivered before it had one, and counts no change', async () => {
+      reading(certified({ status: 'delivered' }));
+      mockProvider.getStatus.mockResolvedValueOnce({
+        status: 'delivered',
+        statusMessage: 'Delivered',
+        carrierTrackingNumber: NUMBER,
+      });
+
+      const result = await syncLetterStatuses(false, 30);
+
+      expect(numberWrites()).toHaveLength(1);
+      expect(allWrites()).toHaveLength(1);
+      expect(result.updated).toBe(0);
+    });
+  });
+
   describe('getStuckLetters', () => {
     it('should return letters stuck in non-terminal status', async () => {
       const stuckLetters = [

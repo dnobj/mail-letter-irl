@@ -161,8 +161,8 @@ export function createOpsCommands(overrides: Partial<OpsCommandSeams> = {}) {
         targetId: "letters",
         summary: { dryRun: input.dryRun, days: input.days },
         display: [
-          ["Scope", `letters created in the last ${input.days} days that are not yet terminal`],
-          ["Mode", input.dryRun ? "dry run (report only)" : "apply (letter statuses and history are updated)"],
+          ["Scope", `letters created in the last ${input.days} days that are not yet terminal, and certified letters delivered without a carrier number (#625)`],
+          ["Mode", input.dryRun ? "dry run (report only)" : "apply (letter statuses and history are updated, and a certified letter's carrier tracking number is stored)"],
         ],
         warnings: [
           "Calls the environment's mail provider once per letter; large windows take time and count against the provider's rate limits.",

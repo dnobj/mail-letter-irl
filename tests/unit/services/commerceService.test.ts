@@ -4228,22 +4228,27 @@ describe('commerceService', () => {
       expect(dupState.calls).toEqual([]);
     });
 
-    it.each(['certified', 'certified_return_receipt'])(
-      'does not open a checkout for a %s draft until the send carries the service: refused before any order or charge (#625)',
-      async mail_service => {
+    it.each([
+      ['certified', 'jit-letter-certified', 1199],
+      ['certified_return_receipt', 'jit-letter-certified-receipt', 1499]
+    ] as const)(
+      'opens a checkout for a %s draft at its own price, whatever the balance: no pack pays for it (#625)',
+      async (mail_service, productCode, amountCents) => {
         credits = 200;
         draftRow = pendingDraft({ mail_service });
         mocks.getJitProduct.mockReturnValue({
-          productCode: 'jit-letter-certified', priceId: 'price-cert', amountCents: 1199, currency: 'usd',
+          productCode, priceId: `price-${productCode}`, amountCents, currency: 'usd',
           name: 'Pay & Send One Certified Mail Letter', description: 'x', mailType: 'letter'
         });
 
-        await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).rejects.toMatchObject({
-          code: 'JIT_OPTION_NOT_SOLD'
+        await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).resolves.toMatchObject({
+          success: true,
+          reused: false
         });
 
-        expect(inserted()).toBe(false);
-        expect(mocks.createJitSession).not.toHaveBeenCalled();
+        expect(inserted()).toBe(true);
+        // Priced by the draft's own option, service included.
+        expect(mocks.getJitProduct).toHaveBeenCalledWith({ mailType: 'letter', mailService: mail_service });
       }
     );
 
