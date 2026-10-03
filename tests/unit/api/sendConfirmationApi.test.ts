@@ -566,6 +566,18 @@ describe('refusalFor (#470)', () => {
     );
   });
 
+  it('says certified mail is paid with Pay & Send, not that packs pay for one-page letters (#625)', () => {
+    const certified = Object.assign(coded('PACK_CANNOT_PAY'), { certified: true });
+    expect(refusalFor(certified)).toMatchObject({ status: 402, body: { error: 'pay_per_send' } });
+    expect(refusalFor(certified).body.message).toBe('Certified mail is paid with Pay & Send. Letter packs and gift letters do not pay for it.');
+    // A flag that is not true is not the claim.
+    for (const certifiedFlag of [false, 'true', 1, undefined]) {
+      expect(refusalFor(Object.assign(coded('PACK_CANNOT_PAY'), { certified: certifiedFlag })).body.message, String(certifiedFlag)).toBe(
+        'Letter packs and gift letters pay for one-page letters and 6x9 postcards. This one is paid with Pay & Send.'
+      );
+    }
+  });
+
   it('says which mail a pack pays for, and how this one is paid (#579)', () => {
     expect(refusalFor(coded('PACK_CANNOT_PAY')).body.message).toBe(
       'Letter packs and gift letters pay for one-page letters and 6x9 postcards. This one is paid with Pay & Send.'

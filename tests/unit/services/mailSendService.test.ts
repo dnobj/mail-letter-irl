@@ -308,11 +308,19 @@ describe('createMailOrderFromDraft', () => {
 
       await expect(
         createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter' })
-      ).rejects.toMatchObject({ code: 'PACK_CANNOT_PAY' });
+      ).rejects.toMatchObject({ code: 'PACK_CANNOT_PAY', certified: true });
 
       expect(savedLetter).toBeNull();
       expect(mocks.deductCredits).not.toHaveBeenCalled();
       expect(mocks.createOutboxJob).not.toHaveBeenCalled();
+    });
+
+    it('says a pack refusal is certified only for certified mail, not for a longer standard letter', async () => {
+      draft = { ...draft, pages: 2, mail_service: 'standard', renderer_version: 'pdf-1' };
+
+      const refusal = await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter' }).catch(e => e);
+
+      expect(refusal).toMatchObject({ code: 'PACK_CANNOT_PAY', certified: false });
     });
 
     it('is not paid for by an order for another product', async () => {

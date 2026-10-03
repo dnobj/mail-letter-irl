@@ -72,11 +72,20 @@ export const HANDLED_DRAFT_ERROR_CODES = [
  * own constant: registerTools recognises the code to answer an app with no
  * checkout with the page that takes the payment instead.
  */
-export function packCannotPayText(mailType: DraftMailType): string {
+export function packCannotPayText(mailType: DraftMailType, certified = false): string {
+  // Certified mail (#625) is a one-page letter too, so the rule's own words would contradict it.
+  if (certified) {
+    return `This ${mailType} is certified mail, which is paid with Pay & Send, not from the balance or a gift letter.`;
+  }
   return (
     `This ${mailType} is paid with Pay & Send, not from the balance: letter packs and gift letters ` +
     'pay for one-page letters and 6x9 postcards.'
   );
+}
+
+/** Whether a send's refusal says the mail is certified (mailSendService): a flag it sets, never text. */
+export function isCertifiedRefusal(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { certified?: unknown }).certified === true;
 }
 
 export function friendlyDraftError(
@@ -150,7 +159,7 @@ export function friendlyDraftError(
   // #579. Upstream interpolates the draft id; this keeps the code, so the
   // tool layer can still tell this refusal from the others.
   if (code === 'PACK_CANNOT_PAY') {
-    return Object.assign(new Error(packCannotPayText(mailType)), { code });
+    return Object.assign(new Error(packCannotPayText(mailType, isCertifiedRefusal(error))), { code });
   }
   if (code === 'DRAFT_CHECKOUT_PENDING') {
     return new Error(

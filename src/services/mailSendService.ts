@@ -285,7 +285,11 @@ export async function createMailOrderFromDraftWithClient(
   // it as a jit_order. Refused here, before any value moves, so every surface
   // that sends (the tools, the card, the confirmation page) keeps the rule.
   if (funding.type === 'prepaid_balance' && !isPackPayable(draftMailOption(draft))) {
-    throw draftError('PACK_CANNOT_PAY', `Draft ${params.draftId} is paid with Pay & Send, not a pack or gift letter`);
+    // Certified mail (#625) says so, so a refusal does not tell a one-page letter that packs pay for one-page letters.
+    throw Object.assign(
+      draftError('PACK_CANNOT_PAY', `Draft ${params.draftId} is paid with Pay & Send, not a pack or gift letter`),
+      { certified: draftMailOption(draft).mailService !== undefined }
+    );
   }
 
   let jitOrder: Order | undefined;

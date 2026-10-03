@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   friendlyDraftError,
   HANDLED_DRAFT_ERROR_CODES,
+  packCannotPayText,
   type DraftMailType
 } from '../../../src/tools/draftErrors.js';
 import { SpendLimitError } from '../../../src/services/betaSpendLimits.js';
@@ -154,6 +155,23 @@ describe('mail-type wording', () => {
       'That Pay & Send order paid for different mail than this letter is now, so it was not sent.'
     );
     expect(friendlyDraftError(upstream, 'd-1', 'postcard').message).toContain('than this postcard is now');
+  });
+
+  it('says certified mail is paid with Pay & Send, not that packs pay for one-page letters (#625)', () => {
+    const upstream = Object.assign(new Error('Draft d-1 is paid with Pay & Send, not a pack or gift letter'), {
+      code: 'PACK_CANNOT_PAY',
+      certified: true
+    });
+    const letter = friendlyDraftError(upstream, 'd-1', 'letter');
+    expect(letter.message).toBe('This letter is certified mail, which is paid with Pay & Send, not from the balance or a gift letter.');
+    // The code is kept, so the tool layer can still tell it from the others.
+    expect(letter).toMatchObject({ code: 'PACK_CANNOT_PAY' });
+    expect(letter.message).not.toContain('d-1');
+    // Only a flag that is exactly true says it.
+    for (const certified of [false, 'true', 1, undefined]) {
+      const plain = Object.assign(new Error('x'), { code: 'PACK_CANNOT_PAY', certified });
+      expect(friendlyDraftError(plain, 'd-1', 'letter').message, String(certified)).toBe(packCannotPayText('letter'));
+    }
   });
 
   it('points a wrong-type draft at the other tool', () => {
