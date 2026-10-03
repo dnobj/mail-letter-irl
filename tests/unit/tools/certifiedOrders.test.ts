@@ -71,6 +71,12 @@ describe('the words about a certified order (#625)', () => {
     expect(certifiedOrderNote(CERTIFIED)).not.toMatch(/receipt/i);
   });
 
+  it('names a number only with its link, and a link only with its number', () => {
+    const notHere = certifiedOrderNote(CERTIFIED);
+    expect(certifiedOrderNote({ mailService: 'certified', carrierTrackingNumber: NUMBER })).toBe(notHere);
+    expect(certifiedOrderNote({ mailService: 'certified', carrierTrackingUrl: URL })).toBe(notHere);
+  });
+
   it('promises no delivery and no legal effect', () => {
     for (const facts of [CERTIFIED, WITH_NUMBER, RECEIPT_WITH_NUMBER]) {
       expect(certifiedOrderNote(facts)).not.toMatch(/guarantee|legal|proof|will be delivered|binding/i);
