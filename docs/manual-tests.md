@@ -1789,12 +1789,13 @@ the sender's assistant learns which, and nothing about the request appears in a 
 
 ### SIGNATURE-01 — A saved signature on a letter (#608)
 
-**Status:** Not run.
+**Status:** Partly run on development, 2026-10-03 (API 997f568), with the dev CLI's tools. Passed: steps 1, 3 and 4, and the tools' half of step 6; the served card (v64) carries the Signature switch. Not run: the card drawn in ChatGPT (steps 2 and 5, and the switch in step 6); step 7, a test-mode send, which the owner presses; step 8; steps 9 to 11, the website's page (merged as website #57), which need a sign-in (the owner's, or BTA's); and step 12, which turns the flag off on development.
 
 **Preconditions:** Development, with `LETTER_IRL_SIGNATURES_ENABLED` on and `LETTER_IRL_PRINT_RENDERER=pdf`
 in the API. A client with the (DEV) connector, or the dev CLI's tools, with its tool list refreshed. A
 photo of your signature in dark ink on white paper, and a second one. PostGrid is in test mode on
 development: a sent letter is drawn, not mailed, and its PDF opens in PostGrid's test dashboard.
+Steps 9 to 11 need a signed-in session on the development website.
 
 **Steps:**
 
@@ -1819,11 +1820,27 @@ development: a sent letter is drawn, not mailed, and its PDF opens in PostGrid's
    PDF in PostGrid's test dashboard prints the first signature, as the preview showed it, in Botanical.
 8. [ ] Remove the signature (`clear_signature`, confirmed). Verify a preview asking for the signature
    is refused, saying `set_signature` saves one, and that a preview not asking has none.
-9. [ ] Turn the flag off and deploy the API, then refresh the tool list. Verify the previews no
-   longer list `signature` and the four signature tools are gone. Turn the flag back on.
+9. [ ] On the development website, signed in, open Settings. Verify **Your signature** shows below the
+   return address: the signature saved in step 7 as letters print it, with the day it was saved, and
+   **Upload a new photo**, **Draw it** and **Remove** (or "No signature is saved." after step 8).
+10. [ ] Press **Upload a photo** and choose a phone photo of your signature, at full size. Verify the
+    button reads "Preparing…", then "Saving…", and the cleaned signature replaces the old one, with "Saved.
+    Letters you preview from now on can print it. Letters already previewed keep what they had." Then choose
+    a photo of a blank sheet. Verify "No signature was found in that picture." in red, the saved signature
+    unchanged, and **Upload a new photo** focused.
+11. [ ] Press **Draw it** and sign with a finger or the mouse. Verify Save stays off until a stroke is drawn,
+    a second finger resting on the pad does not cut the stroke, and the right mouse button does not draw. Press
+    **Save this signature**: the pad goes and the saved signature is the drawing, cleaned. Press **Draw it**,
+    draw, then **Cancel**: nothing changes. Press **Remove**, then **Keep it**: it stays. Press **Remove**, then
+    **Remove it**: "Removed. New letters print no signature; letters already previewed keep theirs." and "No
+    signature is saved."
+12. [ ] Turn the flag off and deploy the API, then refresh the tool list. Verify the previews no
+    longer list `signature`, the four signature tools are gone, and the Settings page no longer shows
+    **Your signature**. Turn the flag back on.
 
 **Pass criteria:** A letter prints the signature its preview showed, under the sign-off's first line;
-a preview's choice is remembered; and nothing prints a signature the person did not see.
+a preview's choice is remembered; the Settings page shows and changes the signature a letter would
+print; and nothing prints a signature the person did not see.
 
 ---
 
