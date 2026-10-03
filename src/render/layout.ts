@@ -4,7 +4,8 @@ import { loadFont, type FontName } from './fonts.js';
 import { shape } from './glyphs.js';
 import {
   BODY_BOTTOM, BODY_TOP, CONTENT_WIDTH, CONTINUATION_TOP, HEADER_IMAGE_MAX_HEIGHT, IMAGE_GAP,
-  INLINE_IMAGE_MAX_HEIGHT, LINE_PITCH, MAX_LETTER_PAGES, PAGE_HEIGHT, PAGE_WIDTH, SIDE_MARGIN
+  INLINE_IMAGE_MAX_HEIGHT, LINE_PITCH, MAX_LETTER_PAGES, PAGE_HEIGHT, PAGE_WIDTH, SIDE_MARGIN,
+  SIGNATURE_LINES, SIGNATURE_MAX_WIDTH, SIGNATURE_PADDING
 } from './geometry.js';
 import type { RenderImage } from './images.js';
 import { clampMarks, MARK, MAX_MARKS_PER_LETTER } from './marks.js';
@@ -19,6 +20,13 @@ export interface LetterContent {
   image?: RenderImage;
   /** The letter's theme and what it prints (#563); without one, Classic: today's page. */
   stationery?: Stationery;
+  /**
+   * The person's signature (#608), drawn in a band of SIGNATURE_LINES lines
+   * after the sign-off's first line. `closingParagraph` is that line's
+   * paragraph in `text`: the body's paragraphs come first, so it is how many
+   * the body has. Without one, the page is exactly the page without it.
+   */
+  signature?: { image: RenderImage; closingParagraph: number };
 }
 
 /** One line of text, drawn from `x` along `baseline`, in visual order. */
@@ -283,6 +291,13 @@ function fitImage(image: RenderImage, maxHeight: number): { width: number; heigh
   return { width: image.width * scale, height: image.height * scale };
 }
 
+/** A signature's box inside its band (#608): as large as fits, never past CSS pixel size, as fitImage. */
+function fitSignature(image: RenderImage): { width: number; height: number } {
+  const maxHeight = SIGNATURE_LINES * LINE_PITCH - 2 * SIGNATURE_PADDING;
+  const scale = Math.min(SIGNATURE_MAX_WIDTH / image.width, maxHeight / image.height, POINTS_PER_CSS_PIXEL);
+  return { width: image.width * scale, height: image.height * scale };
+}
+
 /**
  * Breaks one paragraph (no newlines) into lines no wider than `width`, at
  * Unicode line-break opportunities, greedily, as CSS `white-space: pre-wrap`
@@ -415,11 +430,18 @@ export interface WrappedLine {
  * measured exactly as it will be drawn.
  */
 export function wrapText(text: string, size: number, width: number, fontName: FontName = BODY_FONT): WrappedLine[] {
+  return wrapParagraphs(text, size, width, fontName).flat();
+}
+
+/** wrapText's lines, paragraph by paragraph: where a paragraph ends, for a signature's band (#608). */
+function wrapParagraphs(text: string, size: number, width: number, fontName: FontName): WrappedLine[][] {
   const font = loadFont(fontName);
   const scale = size / font.unitsPerEm;
-  const lines: WrappedLine[] = [];
+  const wrapped: WrappedLine[][] = [];
   const paragraphs = clampMarks(text).replace(/\r\n?/g, '\n').replace(/\t/g, TAB).split('\n');
   for (const paragraph of paragraphs) {
+    const lines: WrappedLine[] = [];
+    wrapped.push(lines);
     const bidi = paragraphBidi(paragraph);
     // A line is drawn with the face's look-alikes, but breaks and orders as
     // written: a non-breaking hyphen drawn as a hyphen still never breaks.
@@ -430,7 +452,7 @@ export function wrapText(text: string, size: number, width: number, fontName: Fo
       lines.push({ source: paragraph.slice(start, end), drawn: visual(start, end) });
     }
   }
-  return lines;
+  return wrapped;
 }
 
 /**
@@ -465,8 +487,13 @@ interface PreparedLetter {
   image?: RenderImage;
   /** The enclosed image's box, for an inline_image letter with its image. */
   inlineBox?: { width: number; height: number };
-  lines: WrappedLine[];
+  lines: LetterLine[];
+  /** The signature and its box, when the letter has one (#608). */
+  signature?: { image: RenderImage; width: number; height: number };
 }
+
+/** A wrapped line, or one of the lines a signature's band takes, which hold no text (#608). */
+type LetterLine = WrappedLine & { signature?: true };
 
 function prepareLetter(content: LetterContent): PreparedLetter {
   const stationery = content.stationery ?? { theme: 'classic' };
@@ -485,8 +512,33 @@ function prepareLetter(content: LetterContent): PreparedLetter {
     textTop = bodyTop + box.height + IMAGE_GAP;
   }
   const inlineBox = image && content.layoutType === 'inline_image' ? fitImage(image, INLINE_IMAGE_MAX_HEIGHT) : undefined;
-  const lines = wrapText(content.text, size, CONTENT_WIDTH, fontName);
-  return { stationery, fontName, size, baseline, firstPageItems, textTop, image, inlineBox, lines };
+  const paragraphs = wrapParagraphs(content.text, size, CONTENT_WIDTH, fontName);
+  const lines: LetterLine[] = paragraphs.flat();
+  let signature: PreparedLetter['signature'];
+  if (content.signature) {
+    // After the closing's last line: every line through its paragraph, all of them for one past the text.
+    const after = paragraphs
+      .slice(0, Math.max(0, content.signature.closingParagraph) + 1)
+      .reduce((count, paragraph) => count + paragraph.length, 0);
+    const band: LetterLine[] = Array.from({ length: SIGNATURE_LINES }, () => ({ source: '', drawn: '', signature: true }));
+    lines.splice(after, 0, ...band);
+    signature = { image: content.signature.image, ...fitSignature(content.signature.image) };
+  }
+  return { stationery, fontName, size, baseline, firstPageItems, textTop, image, inlineBox, lines, signature };
+}
+
+/**
+ * A page break never parts a signature from the closing it is under (#608):
+ * when the page would end after the closing line but before the band's last
+ * line, the closing and the band start the next page. `count` lines from
+ * `start` are the page as it would be; the page as it is is returned.
+ */
+function keepSignatureWithClosing(lines: LetterLine[], start: number, count: number): number {
+  const band = lines.findIndex(line => line.signature);
+  if (band < 1) return count;
+  const closing = band - 1;
+  const end = start + count;
+  return closing > start && end > closing && end < band + SIGNATURE_LINES ? closing - start : count;
 }
 
 /** How many whole lines fit between two heights on a page. */
@@ -495,20 +547,27 @@ function linesBetween(top: number, bottom: number): number {
 }
 
 /**
- * One page's items: Handwritten's rules (none where the image sits), the
- * text from `top`, then the enclosed image if it is on this page.
+ * One page's items: Handwritten's rules (none where an image or the
+ * signature sits), the text from `top`, the signature in its band, then the
+ * enclosed image if it is on this page.
  */
 function pageItems(
   letter: PreparedLetter,
   start: LayoutItem[],
   top: number,
-  lines: WrappedLine[],
+  lines: LetterLine[],
   inlineTop?: number
 ): LayoutItem[] {
   const items = [...start];
-  const { fontName, size, baseline, inlineBox, image } = letter;
+  const { fontName, size, baseline, inlineBox, image, signature } = letter;
+  // The signature's band, when it is on this page: all of it is, after keepSignatureWithClosing.
+  const band = signature ? lines.findIndex(line => line.signature) : -1;
+  const bandTop = top + band * LINE_PITCH;
   if (letter.stationery.theme === 'handwritten') {
     const covered: Band[] = inlineBox && inlineTop !== undefined ? [{ top: inlineTop, bottom: inlineTop + inlineBox.height }] : [];
+    // A hair inside its lines: the band's edges fall exactly on two lines' edges, and
+    // floating point would otherwise cover the lines above and below it too.
+    if (band >= 0) covered.push({ top: bandTop + 1e-6, bottom: bandTop + SIGNATURE_LINES * LINE_PITCH - 1e-6 });
     const rules = ruledLines(top, BODY_BOTTOM, baseline, covered);
     if (rules) items.push(rules);
   }
@@ -516,6 +575,16 @@ function pageItems(
     if (drawn.trim() === '') return;
     items.push({ kind: 'text', font: fontName, size, x: SIDE_MARGIN, baseline: top + index * LINE_PITCH + baseline, text: drawn, source });
   });
+  if (signature && band >= 0) {
+    items.push({
+      kind: 'image',
+      x: SIDE_MARGIN,
+      top: bandTop + SIGNATURE_PADDING,
+      width: signature.width,
+      height: signature.height,
+      image: signature.image
+    });
+  }
   if (inlineBox && image && inlineTop !== undefined) {
     items.push({ kind: 'image', x: SIDE_MARGIN + (CONTENT_WIDTH - inlineBox.width) / 2, top: inlineTop, ...inlineBox, image });
   }
@@ -573,16 +642,16 @@ function layoutOnePage(letter: PreparedLetter): Layout {
  */
 function flowPages(letter: PreparedLetter, maxPages: number): Layout {
   const { lines, inlineBox } = letter;
-  const placed: Array<{ top: number; lines: WrappedLine[] }> = [];
+  const placed: Array<{ top: number; lines: LetterLine[] }> = [];
   let overflowLines = 0;
   let next = 0;
   for (let index = 0; index < maxPages && next < lines.length; index += 1) {
-    if (index > 0) while (next < lines.length && lines[next].drawn.trim() === '') next += 1;
+    if (index > 0) while (next < lines.length && lines[next].drawn.trim() === '' && !lines[next].signature) next += 1;
     if (next >= lines.length) break;
     const top = index === 0 ? letter.textTop : CONTINUATION_TOP;
     const capacity = linesBetween(top, BODY_BOTTOM);
     const last = index === maxPages - 1;
-    const count = last ? lines.length - next : Math.min(capacity, lines.length - next);
+    const count = last ? lines.length - next : keepSignatureWithClosing(lines, next, Math.min(capacity, lines.length - next));
     placed.push({ top, lines: lines.slice(next, next + count) });
     next += count;
     if (last) overflowLines = Math.max(0, count - capacity);
