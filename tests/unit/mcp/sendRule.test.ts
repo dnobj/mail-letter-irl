@@ -494,6 +494,42 @@ describe("the send rule in the MCP server (#470)", () => {
         );
       });
 
+      it("gives certified mail its own sentence in the link, not the pack rule (#625)", () => {
+        const text = sendLinkText({ ...LINK, paidPerSend: true, mailService: "certified" } as any);
+        expect(text).toBe(
+          `Ask the person to open ${LINK.confirmationUrl} to check the letter to Sam Rivera, then pay for it with Pay & Send there, which sends it. ` +
+            "Certified mail is paid with Pay & Send, never with a letter pack or a gift letter. " +
+            `Nothing is sent until they pay there. The link works until ${LINK.expiresAtISO}.`
+        );
+        expect(text).not.toContain("one-page");
+        // A letter longer than a page keeps the pack rule.
+        expect(sendLinkText({ ...LINK, paidPerSend: true } as any)).toContain("pay only for one-page letters and 6x9 postcards.");
+      });
+
+      it("gives certified mail its own sentence in the how-to-send words too (#625)", () => {
+        const certified = { packPays: false, payOnPage: false, certified: true };
+        const noCard = howToSendText(DRAFT_ID, clientProfileNamed("vscode"), false, certified);
+        expect(noCard).toBe(
+          `Nothing has been sent. To send it, call request_send with draftId ${DRAFT_ID} and give the person its link, ` +
+            "where they check it and pay for it with Pay & Send, which sends it. " +
+            "Certified mail is paid with Pay & Send, never with a letter pack or a gift letter."
+        );
+        const onCard = howToSendText(DRAFT_ID, clientProfileNamed("chatgpt"), true, certified);
+        expect(onCard).toContain("with Pay & Send on the preview card");
+        expect(onCard).toContain("Certified mail is paid with Pay & Send, never with a letter pack or a gift letter.");
+        expect(onCard).not.toContain("one-page");
+      });
+
+      it("reads a preview as certified only from the two services it names (#625)", () => {
+        const eligibility = { packPays: false, payAndSend: { available: true } };
+        for (const mailService of ["certified", "certified_return_receipt"]) {
+          expect(previewPayment({ sendEligibility: eligibility, mailService }).certified, mailService).toBe(true);
+        }
+        for (const mailService of [undefined, null, "", "standard", "express", true]) {
+          expect(previewPayment({ sendEligibility: eligibility, mailService }).certified, String(mailService)).toBe(false);
+        }
+      });
+
       it("tells an app with no card that the page takes the payment", () => {
         const text = howToSendText(DRAFT_ID, clientProfileNamed("vscode"), false, { packPays: false, payOnPage: false });
         expect(text).toBe(
@@ -521,13 +557,14 @@ describe("the send rule in the MCP server (#470)", () => {
       });
 
       it("reads how a preview is paid from its eligibility", () => {
-        expect(previewPayment({})).toEqual({ packPays: true, payOnPage: false });
+        expect(previewPayment({})).toEqual({ packPays: true, payOnPage: false, certified: false });
         expect(
           previewPayment({ sendEligibility: { packPays: false, payAndSend: { pageUrl: "https://site.example/confirm/x" } } })
-        ).toEqual({ packPays: false, payOnPage: true });
+        ).toEqual({ packPays: false, payOnPage: true, certified: false });
         expect(previewPayment({ sendEligibility: { packPays: false, payAndSend: {} } })).toEqual({
           packPays: false,
-          payOnPage: false
+          payOnPage: false,
+          certified: false
         });
       });
     });

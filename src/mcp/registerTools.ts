@@ -1412,6 +1412,17 @@ export function buildTokenScopeToolResult(toolName: string) {
 }
 
 /**
+ * The sentence that says why mail is paid per send, for the narration (#579):
+ * the pack rule, or for certified mail (#625) what is true of it, since the
+ * rule's "one-page letters" would contradict a one-page certified letter.
+ */
+function packRuleText(certified: boolean): string {
+  return certified
+    ? "Certified mail is paid with Pay & Send, never with a letter pack or a gift letter. "
+    : "Letter packs and gift letters pay only for one-page letters and 6x9 postcards. ";
+}
+
+/**
  * The link, in words the model can pass on (#470). Nothing is sent until the
  * person presses Send on the page, and the text says so, so a model cannot
  * report the mail as sent.
@@ -1424,7 +1435,7 @@ export function sendLinkText(result: RequestSendOutput): string {
     return (
       `Ask the person to open ${result.confirmationUrl} to check the ${what}${to}, then pay for it with Pay & Send there, which sends it. ` +
       whenSentText(result) +
-      `Letter packs and gift letters pay only for one-page letters and 6x9 postcards. ` +
+      packRuleText(result.mailService !== undefined) +
       `Nothing is sent until they pay there. The link works until ${result.expiresAtISO}.`
     );
   }
@@ -1485,7 +1496,7 @@ export function howToSendText(
   draftId: string,
   client: Pick<ClientProfile, "rendersCards" | "inAppPurchases">,
   cardOffersPayAndSend = false,
-  pay: { packPays: boolean; payOnPage: boolean } = { packPays: true, payOnPage: false }
+  pay: { packPays: boolean; payOnPage: boolean; certified?: boolean } = { packPays: true, payOnPage: false }
 ): string {
   if (!client.rendersCards) {
     // Mail no pack pays for (#579) is paid on that page, which sends it.
@@ -1494,7 +1505,7 @@ export function howToSendText(
           `where they check it and send it themselves.`
       : `Nothing has been sent. To send it, call request_send with draftId ${draftId} and give the person its link, ` +
           `where they check it and pay for it with Pay & Send, which sends it. ` +
-          `Letter packs and gift letters pay only for one-page letters and 6x9 postcards.`;
+          packRuleText(pay.certified === true).trimEnd();
   }
   const how =
     client.inAppPurchases && cardOffersPayAndSend
@@ -1505,9 +1516,7 @@ export function howToSendText(
           ? "The person sends it with Send on the preview card; point them to it when they ask you to send. "
           : "It is paid with Pay & Send, which is not available for it right now. ";
   // Mail no pack pays for (#579): said, so the model does not offer a pack.
-  const packRule = pay.packPays
-    ? ""
-    : "Letter packs and gift letters pay only for one-page letters and 6x9 postcards. ";
+  const packRule = pay.packPays ? "" : packRuleText(pay.certified === true);
   return `Nothing has been sent. ${how}${packRule}Only if the card is not showing, call request_send with draftId ${draftId} and give them its link.`;
 }
 
@@ -1516,13 +1525,15 @@ export function howToSendText(
  * pack pays for it, and whether the card's button opens the page that takes
  * a Pay & Send payment.
  */
-export function previewPayment(result: Record<string, unknown>): { packPays: boolean; payOnPage: boolean } {
+export function previewPayment(result: Record<string, unknown>): { packPays: boolean; payOnPage: boolean; certified: boolean } {
   const eligibility = result.sendEligibility as
     | { packPays?: unknown; payAndSend?: { pageUrl?: unknown } }
     | undefined;
   return {
     packPays: eligibility?.packPays !== false,
-    payOnPage: typeof eligibility?.payAndSend?.pageUrl === "string"
+    payOnPage: typeof eligibility?.payAndSend?.pageUrl === "string",
+    // Certified mail (#625): its sentence is not the pack rule's, which would contradict a one-page letter.
+    certified: result.mailService === "certified" || result.mailService === "certified_return_receipt"
   };
 }
 

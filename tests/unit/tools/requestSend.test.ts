@@ -147,6 +147,23 @@ describe("request_send", () => {
     expect(await requestSendTool.handler({ draftId: DRAFT_ID }, context())).not.toHaveProperty("paidPerSend");
   });
 
+  it.each(["certified", "certified_return_receipt"])(
+    "names %s, which is paid per send whatever the pages, so the words around the link do not give it the pack rule (#625)",
+    async mail_service => {
+      vi.mocked(getDraft).mockResolvedValue(draft({ pages: 1, mail_service, renderer_version: "pdf-1" }) as any);
+      const result = await requestSendTool.handler({ draftId: DRAFT_ID }, context());
+      expect(result).toMatchObject({ paidPerSend: true, mailService: mail_service });
+    }
+  );
+
+  it.each([undefined, null, "", "standard", "express"])(
+    "names no service for a letter whose mail service is %j (#625)",
+    async mail_service => {
+      vi.mocked(getDraft).mockResolvedValue(draft({ mail_service }) as any);
+      expect(await requestSendTool.handler({ draftId: DRAFT_ID }, context())).not.toHaveProperty("mailService");
+    }
+  );
+
   it("refuses someone else's draft in the words it uses for a missing one", async () => {
     vi.mocked(getDraft).mockResolvedValue(draft({ user_id: "auth0|someone-else" }) as any);
     const theirs = await refusal({ draftId: DRAFT_ID });

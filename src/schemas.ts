@@ -1050,7 +1050,8 @@ export const requestSendOutputSchema: JsonSchema = {
       type: "boolean",
       const: true,
       description: "Present when the person pays for it with Pay & Send on that page: letter packs and gift letters pay only for one-page letters and 6x9 postcards"
-    }
+    },
+    mailService: { type: "string", enum: ["certified", "certified_return_receipt"], description: PREVIEW_MAIL_SERVICE_OUTPUT_DESCRIPTION }
   }
 };
 

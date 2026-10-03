@@ -981,7 +981,8 @@ export const requestSendOutputZ = z.object({
   paidPerSend: z
     .literal(true)
     .optional()
-    .describe("Present when the person pays for it with Pay & Send on that page: letter packs and gift letters pay only for one-page letters and 6x9 postcards")
+    .describe("Present when the person pays for it with Pay & Send on that page: letter packs and gift letters pay only for one-page letters and 6x9 postcards"),
+  mailService: z.enum(CERTIFIED_MAIL_SERVICES).optional().describe(PREVIEW_MAIL_SERVICE_OUTPUT_DESCRIPTION)
 });
 
 export const cancelScheduledMailOutputZ = z.object({
