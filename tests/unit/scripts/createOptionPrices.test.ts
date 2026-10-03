@@ -331,6 +331,13 @@ describe('redact', () => {
     expect(out).not.toContain(TEST_KEY.slice(16));
   });
 
+  it('masks a second key glued after the first: the shape pattern runs before the tail rule', () => {
+    const second = `rk_live_${'Z'.repeat(14)}`;
+    const out = redact(`${TEST_KEY}${second}`, TEST_KEY);
+    expect(out).toBe('[key][key]');
+    expect(out).not.toContain('ZZZ');
+  });
+
   it('leaves other text alone', () => {
     expect(redact('No such price: price_123', TEST_KEY)).toBe('No such price: price_123');
     expect(redact('nothing to hide', '')).toBe('nothing to hide');
