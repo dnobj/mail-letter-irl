@@ -68,6 +68,13 @@ describe('what a letter row says about certified mail (#625)', () => {
     }
   });
 
+  it('reads the service from its own column and nowhere else', () => {
+    // A number that happens to spell a service is still only a number.
+    for (const mail_service of [undefined, null, 7]) {
+      expect(certifiedFactsOf({ mail_service, carrier_tracking_number: 'certified' })).toBeUndefined();
+    }
+  });
+
   it('gives the service alone until there is a number', () => {
     for (const carrier_tracking_number of [null, undefined, '', '   ', 42]) {
       expect(certifiedFactsOf({ mail_service: 'certified', carrier_tracking_number })).toEqual({ mailService: 'certified' });
