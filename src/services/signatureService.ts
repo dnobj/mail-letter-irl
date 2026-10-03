@@ -90,6 +90,15 @@ export async function saveSignature(userId: string, image: CleanedSignature): Pr
   });
 }
 
+/**
+ * Remembers whether the account's next previews print its signature when they
+ * do not say (#608): a preview's explicit `signature`. Nothing to remember
+ * without a saved signature, whose choice this is.
+ */
+export async function rememberSignatureChoice(userId: string, use: boolean): Promise<void> {
+  await query('UPDATE user_signatures SET use_by_default = $2 WHERE user_id = $1', [userId, use]);
+}
+
 /** Removes the account's saved signature. True when there was one. */
 export async function clearSignature(userId: string): Promise<boolean> {
   const result = await query('DELETE FROM user_signatures WHERE user_id = $1', [userId]);

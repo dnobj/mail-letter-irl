@@ -179,9 +179,10 @@ Temporary drafts for idempotent send operations. Prevents duplicate sends.
 | front_image_url | TEXT | YES | - | Original image URL for debugging |
 | postcard_size | VARCHAR(10) | YES | - | Postcard size: '6x9' (NULL for letters) |
 | is_gift_send | BOOLEAN | NO | false | Previewed as a gift send: funded by a gift letter and printed with its card (033) |
-| renderer_version | VARCHAR(16) | YES | - | The renderer that drew the preview: NULL for the legacy HTML, `pdf-1` for our own PDF (039, #534), `pdf-2` for our own PDF in stationery (044, #563), `pdf-3` for a postcard with a front other than full bleed (048, #594). The send copies it into `letters.content.rendererVersion`, and dispatch prints with it |
-| stationery | JSONB | YES | - | The stationery the preview was drawn in (044, #563): `{"theme": "monogram" \| "botanical" \| "celebration" \| "typewriter" \| "handwritten", "dateLine"?, "monogram"?, "headline"?}`. NULL is Classic. Set exactly when `renderer_version` is `pdf-2`. The send copies it into `letters.content.stationery`; redaction keeps the theme and drops the slot text |
+| renderer_version | VARCHAR(16) | YES | - | The renderer that drew the preview: NULL for the legacy HTML, `pdf-1` for our own PDF (039, #534), `pdf-2` for our own PDF in stationery (044, #563), `pdf-3` for a postcard with a front other than full bleed (048, #594), `pdf-4` for our own PDF with the person's signature, in any theme (051, #608). The send copies it into `letters.content.rendererVersion`, and dispatch prints with it |
+| stationery | JSONB | YES | - | The stationery the preview was drawn in (044, #563): `{"theme": "monogram" \| "botanical" \| "celebration" \| "typewriter" \| "handwritten", "dateLine"?, "monogram"?, "headline"?}`. NULL is Classic. Set always with `renderer_version` `pdf-2`, and with `pdf-4` when the signed letter has a theme (051). The send copies it into `letters.content.stationery`; redaction keeps the theme and drops the slot text |
 | postcard_front | JSONB | YES | - | A postcard's front, when not full bleed (048, #594): `{"layout": "border", "caption"?}` (the photo in a white border over its caption) or `{"layout": "greetings", "place"}`. NULL is full bleed. Set exactly when `renderer_version` is `pdf-3`, and only on a postcard. The send copies it into `letters.content.postcardFront`, and the print reads it (`postcardFrontOf`); redaction keeps the layout and drops the caption or place |
+| signature_image | TEXT | YES | - | The person's signature as the letter was previewed with it (051, #608): a PNG data URI, the draft's own copy, so replacing or removing the saved one (`user_signatures`) never changes a letter already previewed. Set exactly when `renderer_version` is `pdf-4`, and only on a letter. The send copies it into `letters.content.signatureImage`, and the print draws it under the sign-off's first line. Redaction empties it to `''`, never NULL, which would break the pair |
 | arrive_by | DATE | YES | - | The date the mail should arrive by, in America/New_York; NULL to mail as soon as possible (040, #535) |
 | mail_on | DATE | YES | - | The date it goes to the printer, worked back from `arrive_by` by the lead time (040, #535). The send copies both to the letter and holds its job until then |
 | pages | SMALLINT | NO | 1 | The pages the letter prints on, 1 to 3, printed on both sides when more than 1 (047, #586). The send, the checkout and the confirmation page price and refuse the draft by it (`draftMailOption`): a letter of more than one page is paid per send. `createDraft` refuses a count it would not store, before writing (`DRAFT_PAGES_INVALID`). The send copies it into `letters.content.pages` when above one, for the print |
@@ -195,9 +196,11 @@ Temporary drafts for idempotent send operations. Prevents duplicate sends.
 - `postcard_requires_image`: Postcards must have front_image_data
 - `postcard_requires_size`: Postcards must have postcard_size
 - `valid_postcard_size`: postcard_size must be '6x4', '6x9', or '6x11'
-- `letter_drafts_renderer_version_known`: renderer_version must be NULL, 'pdf-1', 'pdf-2' or 'pdf-3' (039, then 044 and 048; a new version extends it in its own migration)
+- `letter_drafts_renderer_version_known`: renderer_version must be NULL, 'pdf-1', 'pdf-2', 'pdf-3' or 'pdf-4' (039, then 044, 048 and 051; a new version extends it in its own migration)
 - `letter_drafts_stationery_theme_known`: stationery's theme is 'monogram', 'botanical', 'celebration', 'typewriter' or 'handwritten' (044, 046)
-- `letter_drafts_stationery_drawn_by_pdf_2`: stationery is set exactly when renderer_version is 'pdf-2' (044)
+- `letter_drafts_stationery_drawn_by_pdf_2`: stationery only with renderer_version 'pdf-2' or 'pdf-4', and 'pdf-2' always with stationery (044, then 051)
+- `letter_drafts_signature_letters_only`: signature_image only on a letter (051)
+- `letter_drafts_signature_drawn_by_pdf_4`: signature_image is set exactly when renderer_version is 'pdf-4' (051)
 - `letter_drafts_postcard_front_layout_known`: a postcard_front is a postcard's, and its layout is 'border' or 'greetings' (048)
 - `letter_drafts_postcard_front_drawn_by_pdf_3`: postcard_front is set exactly when renderer_version is 'pdf-3' (048)
 - `letter_drafts_schedule_pair`: arrive_by and mail_on are both set or both NULL (040)
@@ -675,8 +678,9 @@ the website's routes `/api/signature` ([tool-apis.md](tool-apis.md#signatures)).
 - `valid_user_signature_size`: the size limits above
 - `valid_user_signature_times`: `updated_at` not before `created_at`
 
-A letter draws a signature from its own copy, taken into the draft when it is previewed (#608's later
-parts), so replacing or removing this row never changes a letter already previewed. It is kept until the
+A letter draws a signature from its own copy, taken into the draft when it is previewed
+(`letter_drafts.signature_image`, migration 051), so replacing or removing this row never changes a letter
+already previewed. A preview's explicit `signature`, true or false, sets `use_by_default`. It is kept until the
 person removes it (`clear_signature`, or the website) or the account is erased: erasure keeps the
 `users` row, so it deletes this one explicitly ([account-erasure.md](account-erasure.md)). Neither admin
 role is granted the table.
@@ -853,6 +857,7 @@ Production provisioning and the first production connection remain separate owne
 | 48 | 048_postcard_fronts.sql | `letter_drafts.postcard_front` (#594): a postcard's front when not full bleed, a border with its caption or a greeting with its place, NULL for full bleed. `renderer_version` admits `pdf-3`, set exactly when a draft has a front, with `letter_drafts_postcard_front_layout_known` and `letter_drafts_postcard_front_drawn_by_pdf_3`. No provisioning re-run, as for 039 |
 | 49 | 049_address_requests.sql | `address_requests` (#604): address request links, the token stored as its SHA-256, an address exactly when answered, `closed_at` exactly when not waiting. No provisioning re-run: neither admin role is granted it |
 | 50 | 050_user_signatures.sql | `user_signatures` (#608): one saved signature per account, a grayscale PNG within 1200 x 400 px, with the remembered choice. No provisioning re-run: neither admin role is granted it |
+| 51 | 051_signature_drafts.sql | `letter_drafts.signature_image` (#608): a letter's own copy of the signature it was previewed with. `renderer_version` admits `pdf-4`, set exactly when a draft has one, with `letter_drafts_signature_letters_only` and `letter_drafts_signature_drawn_by_pdf_4`; `letter_drafts_stationery_drawn_by_pdf_2` admits a theme with `pdf-4`. No provisioning re-run: the reader role's column list leaves it out, as for 039 |
 
 ---
 

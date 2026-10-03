@@ -36,7 +36,8 @@ import {
   SIGNATURE_CONFIRM_DESCRIPTION,
   SIGNATURE_SAVED_AT_DESCRIPTION,
   SIGNATURE_REPLACED_DESCRIPTION,
-  SIGNATURE_REMOVED_DESCRIPTION
+  SIGNATURE_REMOVED_DESCRIPTION,
+  PREVIEW_SIGNATURE_DESCRIPTION
 } from "./zodSchemas.js";
 import { STATIONERY_THEMES } from "./render/stationery.js";
 
@@ -119,7 +120,8 @@ export const quoteAndPreviewLetterTextOnlyInputSchema: JsonSchema = {
       description: "Set true only when the user asks to send this as their gift letter: it is free and adds a printed page with a card for the recipient. Leave it out otherwise; a gift letter is then used only if the balance cannot pay."
     },
     arriveBy: arriveBySchema,
-    ...stationeryInputSchemas
+    ...stationeryInputSchemas,
+    signature: { type: "boolean", description: PREVIEW_SIGNATURE_DESCRIPTION }
   }
 };
 
@@ -162,7 +164,8 @@ export const quoteAndPreviewLetterWithHeaderImageInputSchema: JsonSchema = {
       description: "Set true only when the user asks to send this as their gift letter: it is free and adds a printed page with a card for the recipient. Leave it out otherwise; a gift letter is then used only if the balance cannot pay."
     },
     arriveBy: arriveBySchema,
-    ...stationeryInputSchemas
+    ...stationeryInputSchemas,
+    signature: { type: "boolean", description: PREVIEW_SIGNATURE_DESCRIPTION }
   }
 };
 
@@ -201,7 +204,8 @@ export const quoteAndPreviewLetterWithImageInputSchema: JsonSchema = {
       description: "Set true only when the user asks to send this as their gift letter: it is free and adds a printed page with a card for the recipient. Leave it out otherwise; a gift letter is then used only if the balance cannot pay."
     },
     arriveBy: arriveBySchema,
-    ...stationeryInputSchemas
+    ...stationeryInputSchemas,
+    signature: { type: "boolean", description: PREVIEW_SIGNATURE_DESCRIPTION }
   }
 };
 

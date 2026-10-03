@@ -108,9 +108,9 @@ export async function createDraft(params: CreateDraftParams): Promise<CreateDraf
       user_id, sender, recipient, body_text, sign_off,
       required_credits, preview_html, sender_validation, recipient_validation,
       layout_type, header_image_data, header_image_url, inline_image_data, inline_image_url,
-      is_gift_send, renderer_version, status, expires_at, arrive_by, mail_on, stationery, pages
+      is_gift_send, renderer_version, status, expires_at, arrive_by, mail_on, stationery, pages, signature_image
     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'pending', $17,
-              $18::date, $19::date, $20::jsonb, $21::smallint)
+              $18::date, $19::date, $20::jsonb, $21::smallint, $22)
     RETURNING draft_id, expires_at`,
     [
       params.userId,
@@ -134,6 +134,7 @@ export async function createDraft(params: CreateDraftParams): Promise<CreateDraf
       params.schedule?.mailOn ?? null,
       stationery ? JSON.stringify(stationery) : null,
       pages,
+      params.signatureImage ?? null,
     ]
   );
 
@@ -144,7 +145,8 @@ export async function createDraft(params: CreateDraftParams): Promise<CreateDraf
     expiresInHours,
     renderer: params.rendererVersion ?? 'html',
     scheduled: params.schedule !== undefined,
-    pages
+    pages,
+    signed: params.signatureImage !== undefined
   });
 
   return {
@@ -612,6 +614,8 @@ export interface DraftForStationery {
   required_credits: number;
   /** The stationery as stored (null for Classic): new words are laid out in it (#586). */
   stationery: unknown;
+  /** The signature as the letter was previewed with it (#608): laid out again with the letter. */
+  signature_image: string | null;
 }
 
 /** The caller's draft, as set_stationery draws it again, or null when it is not theirs or not there. */
@@ -619,7 +623,7 @@ export async function getDraftForStationery(draftId: string, userId: string): Pr
   const result = await query<DraftForStationery>(
     `SELECT mail_type, status, expires_at, redacted_at, renderer_version, body_text, sign_off, layout_type,
             header_image_data, inline_image_data, sender, recipient, preview_html, pages, is_gift_send, required_credits,
-            stationery
+            stationery, signature_image
      FROM letter_drafts
      WHERE draft_id = $1 AND user_id = $2`,
     [draftId, userId]
@@ -676,7 +680,9 @@ export async function setDraftStationery(
 ): Promise<DraftRedrawRefusal | null> {
   const stationery = storedStationery(change.stationery);
   // The version goes with the stationery stored (rendererVersionFor), so
-  // 044's pair check holds whatever the caller drew.
+  // 044's pair check holds whatever the caller drew. A signed draft keeps
+  // pdf-4 (#608, 051's pair): its signature is the draft's own, read in the
+  // UPDATE under the lock, which the restyle never changes.
   const rendererVersion = rendererVersionFor(stationery);
   return transaction(async client => {
     const refusal = await lockChangeableDraft(client, draftId, userId, now);
@@ -685,7 +691,9 @@ export async function setDraftStationery(
 
     await client.query(
       `UPDATE letter_drafts
-       SET stationery = $2::jsonb, renderer_version = $3, preview_html = $4,
+       SET stationery = $2::jsonb,
+           renderer_version = CASE WHEN signature_image IS NOT NULL THEN 'pdf-4' ELSE $3::text END,
+           preview_html = $4,
            pages = COALESCE($5::smallint, pages), updated_at = NOW()
        WHERE draft_id = $1`,
       [draftId, stationery ? JSON.stringify(stationery) : null, rendererVersion, change.previewHtml, change.pages ?? null]

@@ -30,10 +30,10 @@ import { getSendEligibility } from '../../../src/services/commerceService.js';
 import { setLetterWordsTool } from '../../../src/tools/setLetterWords.js';
 import { partitionToolResult } from '../../../src/mcp/registerTools.js';
 import { layoutGiftPage, layoutLetter, readImageDataUri, renderPreviewSvg, type Stationery } from '../../../src/render/index.js';
-import { letterPrintText, renderLetterPreviewDocument, stampedAddressLines } from '../../../src/services/previewService.js';
+import { letterPrintText, renderLetterPreviewDocument, signatureParagraph, stampedAddressLines } from '../../../src/services/previewService.js';
 import { sampleFundedCard } from '../../../src/services/giftLetterService.js';
 import { giftLetterPageCopy } from '../../../src/services/giftCardRenderer.js';
-import { PAID_PER_SEND_REASON, withDisplayImage, wordsVersionOf } from '../../../src/tools/letterHelpers.js';
+import { layoutLetterForPreview, PAID_PER_SEND_REASON, withDisplayImage, wordsVersionOf } from '../../../src/tools/letterHelpers.js';
 import { getGiftBalance } from '../../../src/services/giftLetterService.js';
 import type { Address, ToolContext } from '../../../src/contracts/types.js';
 
@@ -53,6 +53,8 @@ function png(width: number, height: number): string {
 }
 const FULL_INLINE = png(1950, 900);
 const SMALL_INLINE = png(390, 180);
+// A saved signature's copy, as a signed draft keeps it (#608).
+const SIGNATURE = png(1200, 300);
 
 function context(credits = 10): ToolContext {
   return {
@@ -75,14 +77,15 @@ const wide = (count: number) =>
   Array.from({ length: count }, () => 'the quick brown fox jumps over the lazy dog while the letters wait patiently to be written').join('\n');
 
 /** A pending letter draft, and the preview a preview tool drew for it on its own pages. */
-function draft(options: { bodyText: string; stationery?: Stationery; gift?: boolean; inline?: boolean }) {
+function draft(options: { bodyText: string; stationery?: Stationery; gift?: boolean; inline?: boolean; signed?: boolean }) {
   const layoutType = options.inline ? 'inline_image' : 'text_only';
   const layout = layoutLetter(
     {
       text: letterPrintText(options.bodyText, 'Pat'),
       layoutType,
       ...(options.inline ? { image: readImageDataUri(FULL_INLINE) } : {}),
-      ...(options.stationery ? { stationery: options.stationery } : {})
+      ...(options.stationery ? { stationery: options.stationery } : {}),
+      ...(options.signed ? { signature: { image: readImageDataUri(SIGNATURE), closingParagraph: signatureParagraph(options.bodyText, 'Pat') } } : {})
     },
     { maxPages: 3 }
   );
@@ -92,14 +95,15 @@ function draft(options: { bodyText: string; stationery?: Stationery; gift?: bool
     renderPreviewSvg(withDisplayImage({ ...layout, pages }, options.inline ? SMALL_INLINE : undefined), {
       addresses: { from: stampedAddressLines(SENDER), to: stampedAddressLines(RECIPIENT) }
     }),
-    { bodyText: options.bodyText, signOff: 'Pat' }
+    { bodyText: options.bodyText, signOff: 'Pat' },
+    options.signed ? 'pdf-4' : undefined
   );
   return {
     mail_type: 'letter',
     status: 'pending',
     expires_at: new Date('2026-10-03T12:00:00Z'),
     redacted_at: null,
-    renderer_version: options.stationery ? 'pdf-2' : 'pdf-1',
+    renderer_version: options.signed ? 'pdf-4' : options.stationery ? 'pdf-2' : 'pdf-1',
     body_text: options.bodyText,
     sign_off: 'Pat',
     layout_type: layoutType,
@@ -112,7 +116,8 @@ function draft(options: { bodyText: string; stationery?: Stationery; gift?: bool
     is_gift_send: options.gift === true,
     required_credits: 2,
     // As the draft stores it: none for Classic.
-    stationery: options.stationery ?? null
+    stationery: options.stationery ?? null,
+    signature_image: options.signed ? SIGNATURE : null
   };
 }
 
@@ -156,6 +161,36 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+});
+
+describe('set_letter_words on a signed letter (#608)', () => {
+  it.each([['a text-only letter', false], ['an enclosed image', true]])(
+    'draws %s with its own signature under the new sign-off, recording pdf-4 in the page',
+    async (_label, inline) => {
+      vi.mocked(getDraftForStationery).mockResolvedValue(draft({ bodyText: lines(4), inline, signed: true }) as never);
+
+      await change('Dear Sam,\n\nThe garden is in.', context(), 'Love,\nPat');
+
+      const words = written();
+      expect(words.previewHtml).toContain('<body data-renderer="pdf-4">');
+      expect(words.previewHtml).toContain(`<image data-role="signature" href="${SIGNATURE}"`);
+      // The letter's own picture from its small copy, never the signature in its place.
+      if (inline) {
+        expect(words.previewHtml.match(/<image href="([^"]+)"/)?.[1]).toBe(SMALL_INLINE);
+        expect(words.previewHtml).not.toContain(FULL_INLINE);
+      }
+      // Under the new sign-off's first line, as a preview of the new words draws it.
+      const layout = layoutLetterForPreview(
+        { bodyText: 'Dear Sam,\n\nThe garden is in.', signOff: 'Love,\nPat', layoutType: inline ? 'inline_image' : 'text_only', imageData: inline ? FULL_INLINE : undefined, signatureImage: SIGNATURE },
+        context(),
+        'pdf'
+      )!;
+      const [page] = renderPreviewSvg(withDisplayImage(layout, inline ? SMALL_INLINE : undefined), {
+        addresses: { from: stampedAddressLines(SENDER), to: stampedAddressLines(RECIPIENT) }
+      });
+      expect(svgs(words.previewHtml)[0]).toBe(page);
+    }
+  );
 });
 
 describe('set_letter_words', () => {

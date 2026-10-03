@@ -9,7 +9,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../../../src/db/index.js', () => ({ query: vi.fn(), transaction: vi.fn() }));
 
 import { query, transaction } from '../../../src/db/index.js';
-import { clearSignature, getSignature, saveSignature } from '../../../src/services/signatureService.js';
+import { clearSignature, getSignature, rememberSignatureChoice, saveSignature } from '../../../src/services/signatureService.js';
 
 const USER = 'auth0|signer';
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
@@ -100,6 +100,14 @@ describe('saveSignature', () => {
     const gone = inTransaction([]);
     expect(await saveSignature(USER, { png: PNG, width: 300, height: 90 })).toEqual({ ok: false, refusal: 'account_closed' });
     expect(gone.query).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('rememberSignatureChoice (#608)', () => {
+  it("sets the saved signature's choice, and nothing else", async () => {
+    vi.mocked(query).mockResolvedValueOnce(result([]));
+    await rememberSignatureChoice('auth0|signer', false);
+    expect(vi.mocked(query).mock.calls).toEqual([['UPDATE user_signatures SET use_by_default = $2 WHERE user_id = $1', ['auth0|signer', false]]]);
   });
 });
 

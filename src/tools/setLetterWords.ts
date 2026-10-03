@@ -217,7 +217,8 @@ async function handler(input: SetLetterWordsInput, context: ToolContext): Promis
   const imageData = layoutType === 'header_image'
     ? draft.header_image_data
     : layoutType === 'inline_image' ? draft.inline_image_data : null;
-  const letter = { bodyText, signOff, layoutType, imageData: imageData ?? undefined, stationery };
+  // With the draft's own signature (#608), under the new sign-off's first line.
+  const letter = { bodyText, signOff, layoutType, imageData: imageData ?? undefined, signatureImage: draft.signature_image || undefined, stationery };
   // A gift letter pays for one page only (#579): its words are held to one
   // page and refused in a gift's words when they run past it, never priced
   // again (#593 review round 1).

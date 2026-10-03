@@ -83,7 +83,10 @@ function buildLetterContent(draft: MailDraftRow): Record<string, unknown> {
     ...(draft.stationery ? { stationery: draft.stationery } : {}),
     // And on the pages it was laid out on, when more than one (#586); absent
     // for a one-page letter, so its content is unchanged.
-    ...(Number(draft.pages ?? 1) > 1 ? { pages: Number(draft.pages) } : {})
+    ...(Number(draft.pages ?? 1) > 1 ? { pages: Number(draft.pages) } : {}),
+    // And with the signature it was previewed with (#608), the draft's own
+    // copy; absent for a letter without one.
+    ...(draft.signature_image ? { signatureImage: draft.signature_image } : {})
   };
 }
 

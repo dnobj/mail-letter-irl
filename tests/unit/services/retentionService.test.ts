@@ -306,6 +306,14 @@ describe('retention sweep guards (#153)', () => {
       );
     });
 
+    it("saves a draft's signature and empties it, never NULL, so migration 051's pair still holds (#608)", async () => {
+      await purgePaidDraftContent();
+
+      const sql = sqlFrom(mocks.query.mock.calls[0]);
+      expect(sql).toContain("'signature_image', to_jsonb(d.signature_image)");
+      expect(sql).toContain("signature_image = CASE WHEN signature_image IS NULL THEN NULL ELSE '' END");
+    });
+
     it('requires an order in a PAID state, not merely an order row', async () => {
       await purgePaidDraftContent();
 

@@ -60,6 +60,12 @@ export interface ImageBox {
    * postcard front's photo (#594). The page's edge cuts it otherwise.
    */
   clip?: { x: number; top: number; width: number; height: number };
+  /**
+   * The person's signature (#608), not a picture of the letter's: the preview
+   * marks it, so the code that swaps a letter's picture for its small copy
+   * leaves it alone.
+   */
+  role?: 'signature';
 }
 
 /** A rounded rectangle's outline, as the gift card's border. */
@@ -582,7 +588,8 @@ function pageItems(
       top: bandTop + SIGNATURE_PADDING,
       width: signature.width,
       height: signature.height,
-      image: signature.image
+      image: signature.image,
+      role: 'signature'
     });
   }
   if (inlineBox && image && inlineTop !== undefined) {

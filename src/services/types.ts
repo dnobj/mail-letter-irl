@@ -533,6 +533,12 @@ export interface LetterDraft {
    */
   stationery?: Stationery | null;
   /**
+   * The person's signature as the letter was previewed with it (migration
+   * 051, #608): a PNG data URI, recorded with renderer version 'pdf-4', or ''
+   * once retention has emptied it. The send copies it into letters.content.
+   */
+  signature_image?: string | null;
+  /**
    * Arrive-by (migration 040, #535): the date the mail should arrive by and
    * the date it goes to the printer, 'YYYY-MM-DD' in New York; both or
    * neither. The send holds the job until the mail date.
@@ -600,6 +606,12 @@ export interface CreateDraftParams {
    * database's check does: createDraft refuses anything else first.
    */
   pages?: number;
+  /**
+   * The person's signature, a PNG data URI, when the letter prints one
+   * (migration 051, #608). With it, rendererVersion must be 'pdf-4'
+   * (rendererVersionFor).
+   */
+  signatureImage?: string;
 }
 
 export interface CreateDraftResult {

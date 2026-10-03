@@ -251,6 +251,8 @@ describe('postcards printed from our own PDF (#534 Phase 4)', () => {
     ['a renderer this build does not know', { rendererVersion: 'pdf-9' }, 'unknown_version', 'pdf-9'],
     // Stationery is a letter's (#563): never printed on a postcard as if it were not there.
     ['a postcard recording stationery\'s renderer', { rendererVersion: 'pdf-2' }, 'unknown_version', 'A postcard is never drawn in stationery'],
+    // And so is a signature (#608).
+    ['a postcard recording a signature\'s renderer', { rendererVersion: 'pdf-4' }, 'unknown_version', 'or with a signature: renderer version "pdf-4"'],
     ['a message past its half of the back', { backMessage: lines(17) }, 'overflow', 'runs 1 line(s) past its room on the back'],
     // Each size holds its own lines (#594): 11 on a 4x6, 16 on an 11x6.
     ['a 4x6 message past its room', { size: '6x4' as const, backMessage: lines(12) }, 'overflow', 'runs 1 line(s) past its room on the back'],

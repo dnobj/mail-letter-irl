@@ -50,6 +50,7 @@ const REQUIRED = [
   'arriveBy.postgres.test.ts',
   'addressRequests.postgres.test.ts',
   'signatures.postgres.test.ts',
+  'signatureDrafts.postgres.test.ts',
 ];
 
 /**

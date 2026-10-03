@@ -9,10 +9,11 @@
 import { describe, expect, it } from 'vitest';
 import sharp from 'sharp';
 import { layoutLetter, pageFit, type Layout, type LayoutItem, type LetterContent, type TextRun } from '../../../src/render/layout.js';
-import { renderPdf } from '../../../src/render/pdf.js';
+import { PRINTABLE_RENDERER_VERSIONS, renderPdf, rendererVersionFor, SIGNATURE_RENDERER_VERSION, STATIONERY_RENDERER_VERSION } from '../../../src/render/pdf.js';
+import { signatureParagraph } from '../../../src/services/previewService.js';
 import { renderPreviewSvg } from '../../../src/render/preview.js';
 import {
-  BODY_BOTTOM, BODY_TOP, CONTINUATION_TOP, LINE_PITCH, SIDE_MARGIN, SIGNATURE_LINES, SIGNATURE_MAX_WIDTH, SIGNATURE_PADDING
+  BODY_TOP, CONTINUATION_TOP, LINE_PITCH, SIDE_MARGIN, SIGNATURE_LINES, SIGNATURE_MAX_WIDTH, SIGNATURE_PADDING
 } from '../../../src/render/geometry.js';
 import { readImage, type RenderImage } from '../../../src/render/images.js';
 
@@ -39,6 +40,31 @@ function letter(text: string, closingParagraph: number, extra: Partial<LetterCon
   return { text, layoutType: 'text_only', signature: { image: SIGNATURE, closingParagraph }, ...extra };
 }
 
+describe('the version a signed letter records (#608)', () => {
+  it('is pdf-4 whatever its theme, which this build prints', () => {
+    expect(SIGNATURE_RENDERER_VERSION).toBe('pdf-4');
+    expect(rendererVersionFor(null, true)).toBe(SIGNATURE_RENDERER_VERSION);
+    expect(rendererVersionFor({ theme: 'botanical' }, true)).toBe(SIGNATURE_RENDERER_VERSION);
+    expect(rendererVersionFor({ theme: 'botanical' }, false)).toBe(STATIONERY_RENDERER_VERSION);
+    expect(PRINTABLE_RENDERER_VERSIONS.has(SIGNATURE_RENDERER_VERSION)).toBe(true);
+  });
+});
+
+describe('signatureParagraph (#608)', () => {
+  it.each([
+    ['after the body, at the closing', 'Dear Ruth,\n\nThank you.', 'Sincerely,\nPat', 3],
+    ['past a body\'s trailing blank lines, which do not print', 'Line one\nLine two\n\n\n', 'Love,\nPat', 2],
+    ['past blank lines the sign-off begins with', 'Hello', '\n\nLove,\nPat', 3],
+    ['past a body\'s leading blank lines, which do not print either', '\n\nHello', 'Love,', 1],
+    ['at the start, with no body', '', 'Love,\nPat', 0],
+    ['past the text, with no sign-off', 'Hello\nWorld', undefined, 2],
+    ['past the text, with a sign-off of blank lines only', 'Hello', '\n\n', 1],
+    ['on Windows line breaks as on Unix ones', 'Dear Ruth,\r\n\r\nThank you.\r\n', 'Sincerely,\r\nPat', 3]
+  ])('is %s', (_label, bodyText, signOff, paragraph) => {
+    expect(signatureParagraph(bodyText, signOff)).toBe(paragraph);
+  });
+});
+
 describe('a signature on a letter (#608)', () => {
   it('sits in three lines under the closing, left with the text, and the name follows it', () => {
     // Paragraphs: "Dear Ruth,", "", "Thank you.", "Sincerely,", "Pat Example". The body has three.
@@ -49,7 +75,8 @@ describe('a signature on a letter (#608)', () => {
     expect(lineOf(layout, 0, 'Sincerely,').baseline).toBeCloseTo(BODY_TOP + 3 * LINE_PITCH + baseline, 6);
     expect(lineOf(layout, 0, 'Pat Example').baseline).toBeCloseTo(BODY_TOP + (4 + SIGNATURE_LINES) * LINE_PITCH + baseline, 6);
     expect(images(page.items)).toEqual([
-      { kind: 'image', x: SIDE_MARGIN, top: BODY_TOP + 4 * LINE_PITCH + SIGNATURE_PADDING, width: SIGNATURE_MAX_WIDTH, height: 45, image: SIGNATURE }
+      // Marked as the signature, so a preview's picture never takes it for the letter's own (#608).
+      { kind: 'image', x: SIDE_MARGIN, top: BODY_TOP + 4 * LINE_PITCH + SIGNATURE_PADDING, width: SIGNATURE_MAX_WIDTH, height: 45, image: SIGNATURE, role: 'signature' }
     ]);
     expect(page.linesUsed).toBe(5 + SIGNATURE_LINES);
   });
@@ -156,7 +183,6 @@ describe('a signature on a letter (#608)', () => {
     expect(pdf.match(/\/Subtype \/Image/g)?.length).toBe(1);
     expect(pdf).toContain('/DeviceGray');
     const [svg] = renderPreviewSvg(layout);
-    expect(svg).toContain(`data:image/png;base64,${png.toString('base64')}`);
-    expect(BODY_BOTTOM).toBeGreaterThan(BODY_TOP);
+    expect(svg).toContain(`data-role="signature" href="data:image/png;base64,${png.toString('base64')}"`);
   });
 });

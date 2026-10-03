@@ -12,14 +12,15 @@ export {
 } from './stationery.js';
 export type { Face, Stationery, StationeryTheme } from './stationery.js';
 export {
-  POSTCARD_FRONT_RENDERER_VERSION, PRINTABLE_RENDERER_VERSIONS, renderPdf, RENDERER_VERSION, rendererVersionFor, STATIONERY_RENDERER_VERSION
+  POSTCARD_FRONT_RENDERER_VERSION, PRINTABLE_RENDERER_VERSIONS, renderPdf, RENDERER_VERSION, rendererVersionFor, SIGNATURE_RENDERER_VERSION,
+  STATIONERY_RENDERER_VERSION
 } from './pdf.js';
 export { GiftPageOverflow, layoutGiftPage } from './giftPage.js';
 export type { GiftPageCopy } from './giftPage.js';
 export {
   GiftStripOverflow, layoutPostcard, layoutPostcardBack, POSTCARD_FRONT_TEXT_MAX_LENGTH, postcardFrontOf, PostcardFrontOverflow
 } from './postcard.js';
-export { CONTINUATION_TOP, MAX_LETTER_PAGES, POSTCARD_GEOMETRY, POSTCARD_STAMP } from './geometry.js';
+export { CONTINUATION_TOP, MAX_LETTER_PAGES, POSTCARD_GEOMETRY, POSTCARD_STAMP, SIGNATURE_LINES } from './geometry.js';
 export type { PostcardGeometry, PostcardLayoutName, PostcardSizeName, StampGeometry } from './geometry.js';
 export type { GiftStripCopy, PostcardContent, PostcardFront } from './postcard.js';
 export { renderPreviewSvg } from './preview.js';

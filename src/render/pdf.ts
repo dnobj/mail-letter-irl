@@ -25,6 +25,14 @@ export const STATIONERY_RENDERER_VERSION = 'pdf-2';
 export const POSTCARD_FRONT_RENDERER_VERSION = 'pdf-3';
 
 /**
+ * Recorded on a letter drawn with the person's signature (#608, migration
+ * 051): pdf-1 or pdf-2 with a signature, in any theme. A build that cannot draw
+ * signatures refuses it, so a rollback holds a signed letter instead of
+ * printing it unsigned.
+ */
+export const SIGNATURE_RENDERER_VERSION = 'pdf-4';
+
+/**
  * Every renderer version this build can print. A letter keeps the version its
  * preview was drawn with however long it waits (arrive-by, #535), so a new
  * version is added here, beside the old version's renderer, never in its
@@ -34,11 +42,17 @@ export const POSTCARD_FRONT_RENDERER_VERSION = 'pdf-3';
 export const PRINTABLE_RENDERER_VERSIONS: ReadonlySet<string> = new Set([
   RENDERER_VERSION,
   STATIONERY_RENDERER_VERSION,
-  POSTCARD_FRONT_RENDERER_VERSION
+  POSTCARD_FRONT_RENDERER_VERSION,
+  SIGNATURE_RENDERER_VERSION
 ]);
 
-/** The version a preview records: pdf-2 when drawn in a theme other than Classic, else pdf-1. */
-export function rendererVersionFor(stationery?: Stationery | null): string {
+/**
+ * The version a letter's preview records: pdf-4 when drawn with a signature
+ * (#608), whatever its theme; pdf-2 when drawn in a theme other than Classic;
+ * else pdf-1.
+ */
+export function rendererVersionFor(stationery?: Stationery | null, signed = false): string {
+  if (signed) return SIGNATURE_RENDERER_VERSION;
   return stationery && stationery.theme !== 'classic' ? STATIONERY_RENDERER_VERSION : RENDERER_VERSION;
 }
 

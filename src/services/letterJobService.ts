@@ -27,7 +27,7 @@ import { returnGiftLetterForFailedSendWithClient } from './giftLetterService.js'
 import { carriedDiagnosticClass, classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 import { summarizeProviderRejection } from './providerFailureSummary.js';
 import { enabledUnlessDisabled } from '../utils/envSettings.js';
-import { letterPrintText } from './previewService.js';
+import { letterPrintText, signatureParagraph } from './previewService.js';
 
 const DEFAULT_MAX_ATTEMPTS = 5;
 const STALE_LOCK_MINUTES = 15;
@@ -370,6 +370,11 @@ function letterParams(letter: Letter, job: LetterJob): LetterParams {
     giftCard: content.giftCard,
     rendererVersion: content.rendererVersion,
     stationery: content.stationery,
+    // Under the sign-off's first line, where the preview drew it (#608).
+    signature:
+      typeof content.signatureImage === 'string' && content.signatureImage !== ''
+        ? { image: content.signatureImage, closingParagraph: signatureParagraph(content.bodyText, content.signOff) }
+        : undefined,
     metadata: {
       letterId: letter.letter_id,
       userId: letter.user_id,

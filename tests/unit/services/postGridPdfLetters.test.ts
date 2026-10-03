@@ -8,7 +8,9 @@
 import { deflateSync } from 'node:zlib';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PostGridProvider } from '../../../src/services/providers/PostGridProvider.js';
-import { layoutGiftPage, layoutLetter, RENDERER_VERSION, renderPdf, STATIONERY_RENDERER_VERSION } from '../../../src/render/index.js';
+import {
+  layoutGiftPage, layoutLetter, readImageDataUri, RENDERER_VERSION, renderPdf, SIGNATURE_RENDERER_VERSION, STATIONERY_RENDERER_VERSION
+} from '../../../src/render/index.js';
 import { giftLetterPageCopy } from '../../../src/services/giftCardRenderer.js';
 
 const diagnostics = vi.hoisted(() => ({ written: [] as Array<{ level: string; event: string; fields: Record<string, unknown> }> }));
@@ -625,6 +627,78 @@ describe('letters printed from our own PDF (#534)', () => {
       expect(fetchMock).not.toHaveBeenCalled();
       expect(result.error).toContain('could not be laid out');
       expect(result.metadata).toMatchObject({ errorClass: 'render_refused' });
+    });
+  });
+
+  describe('a signature (#608)', () => {
+    const BOTANICAL = { theme: 'botanical' as const, dateLine: 'October 1, 2026' };
+    // The message's paragraphs: "Dear Sam,", "", "Happy birthday.", "", "Warmly,", "Test".
+    const SIGNATURE = { image: pngDataUri(120, 30), closingParagraph: 4 };
+
+    /** The PDF uploaded for `params`, rendered at a fixed time so it can be compared byte for byte. */
+    async function printed(params: Record<string, unknown>) {
+      const fetchMock = accepted();
+      vi.stubGlobal('fetch', fetchMock);
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-10-01T12:00:00Z'));
+      try {
+        const result = await provider().sendLetter({ ...base, ...params } as Parameters<PostGridProvider['sendLetter']>[0]);
+        const call = fetchMock.mock.calls[0] as [string, RequestInit] | undefined;
+        const pdf = call ? Buffer.from(await ((call[1].body as FormData).get('pdf') as File).arrayBuffer()) : null;
+        return { result, pdf, fetchMock };
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+
+    async function drawn(version: string, content: { stationery?: typeof BOTANICAL; signed?: boolean } = {}) {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-10-01T12:00:00Z'));
+      try {
+        const signature = content.signed ? { image: readImageDataUri(SIGNATURE.image), closingParagraph: SIGNATURE.closingParagraph } : undefined;
+        return await renderPdf(layoutLetter({ text: base.message, layoutType: 'text_only', stationery: content.stationery, signature }), version);
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+
+    it('prints a pdf-4 letter with its signature under the closing', async () => {
+      const { result, pdf } = await printed({ rendererVersion: SIGNATURE_RENDERER_VERSION, signature: SIGNATURE });
+
+      expect(result.success).toBe(true);
+      expect(pdf!.equals(await drawn(SIGNATURE_RENDERER_VERSION, { signed: true }))).toBe(true);
+      expect(pdf!.toString('latin1')).toContain(`Letter IRL renderer ${SIGNATURE_RENDERER_VERSION}`);
+      expect(pdf!.toString('latin1')).toMatch(/\/Subtype\s*\/Image/);
+    });
+
+    it('prints a pdf-4 letter in the stationery it was drawn in, with its signature', async () => {
+      const { pdf } = await printed({ rendererVersion: SIGNATURE_RENDERER_VERSION, stationery: BOTANICAL, signature: SIGNATURE });
+
+      expect(pdf!.equals(await drawn(SIGNATURE_RENDERER_VERSION, { stationery: BOTANICAL, signed: true }))).toBe(true);
+    });
+
+    it('prints a pdf-1 or pdf-2 letter without a signature its content carries', async () => {
+      const plain = await printed({ rendererVersion: RENDERER_VERSION, signature: SIGNATURE });
+      expect(plain.pdf!.equals(await drawn(RENDERER_VERSION))).toBe(true);
+      const themed = await printed({ rendererVersion: STATIONERY_RENDERER_VERSION, stationery: BOTANICAL, signature: SIGNATURE });
+      expect(themed.pdf!.equals(await drawn(STATIONERY_RENDERER_VERSION, { stationery: BOTANICAL }))).toBe(true);
+    });
+
+    it.each([
+      ['no longer has its signature', undefined, 'render', 'drawn with a signature it no longer has'],
+      ['has a signature that cannot be read', { image: 'data:image/gif;base64,R0lGODlhAQABAAAAACw=', closingParagraph: 4 }, 'image', "The letter's signature could not be read"]
+    ])('holds a pdf-4 letter that %s, and sends nothing', async (_label, signature, reason, error) => {
+      diagnostics.written = [];
+      const { result, fetchMock } = await printed({ rendererVersion: SIGNATURE_RENDERER_VERSION, signature, metadata: { letterId: 'letter-g' } });
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(result.success).toBe(false);
+      expect(result.error).toContain(error);
+      expect(result.metadata).toMatchObject({ submissionOutcome: 'ambiguous', retryable: false, errorClass: 'render_refused' });
+      expect(diagnostics.written).toContainEqual(expect.objectContaining({
+        event: 'provider.postgrid.render_refused',
+        fields: expect.objectContaining({ reason, letterId: 'letter-g' })
+      }));
     });
   });
 

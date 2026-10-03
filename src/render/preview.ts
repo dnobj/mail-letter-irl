@@ -68,7 +68,11 @@ function renderPage(layout: Layout, page: LayoutPage, stamp?: Stamp): string {
           '</svg>'
         );
       } else {
-        drawn.push(`<image href="${href}" x="${round(item.x)}" y="${round(item.top)}" width="${round(item.width)}" height="${round(item.height)}" preserveAspectRatio="none"/>`);
+        // A signature is marked before its href, so renderedPageImage, which
+        // looks for a letter's picture by `<image href=`, never takes it (#608).
+        // The card's cleaner drops the mark and keeps the image.
+        const role = item.role === 'signature' ? 'data-role="signature" ' : '';
+        drawn.push(`<image ${role}href="${href}" x="${round(item.x)}" y="${round(item.top)}" width="${round(item.width)}" height="${round(item.height)}" preserveAspectRatio="none"/>`);
       }
       continue;
     }

@@ -23,7 +23,7 @@ import { LetterIrlServer } from '../../../src/server.js';
 
 const TOOLS = ['set_signature', 'get_signature', 'clear_signature'];
 
-async function listed() {
+async function listed(names: readonly string[] = TOOLS) {
   vi.stubEnv('LETTER_IRL_REQUIRE_AUTH', 'true');
   vi.stubEnv('LETTER_IRL_OAUTH_SCOPES', 'openid email offline_access mail:read mail:draft mail:send');
   const real = new LetterIrlServer();
@@ -42,7 +42,7 @@ async function listed() {
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
   const { tools } = await client.listTools();
-  return tools.filter(tool => TOOLS.includes(tool.name));
+  return tools.filter(tool => names.includes(tool.name));
 }
 
 type Schema = {
@@ -94,6 +94,33 @@ describe('the signature tools in tools/list (#608)', () => {
     expect(getRequiredToolScopes('set_signature')).toEqual(['mail:draft']);
     expect(getRequiredToolScopes('clear_signature')).toEqual(['mail:draft']);
     expect(getRequiredToolScopes('get_signature')).toEqual(['mail:read']);
+  });
+});
+
+describe("the letter previews' signature (#608)", () => {
+  const PREVIEWS = ['quote_and_preview_letter', 'quote_and_preview_letter_with_header_image', 'quote_and_preview_letter_with_image'];
+  const properties = (tool: { inputSchema?: unknown } | undefined) => Object.keys((tool?.inputSchema as Schema | undefined)?.properties ?? {});
+
+  it('is served only while signatures are offered, in tools/list and /manifest.json, and never on a postcard', async () => {
+    vi.stubEnv('LETTER_IRL_PRINT_RENDERER', 'pdf');
+    const names = [...PREVIEWS, 'quote_and_preview_postcard'];
+    const manifest = () => (buildManifest().tools as Array<{ name: string; inputSchema?: unknown }>).filter(tool => names.includes(tool.name));
+
+    vi.stubEnv('LETTER_IRL_SIGNATURES_ENABLED', '');
+    const off = [...(await listed(names)), ...manifest()];
+    vi.stubEnv('LETTER_IRL_SIGNATURES_ENABLED', 'true');
+    const on = [...(await listed(names)), ...manifest()];
+
+    for (const name of PREVIEWS) {
+      for (const tool of off.filter(found => found.name === name)) expect(properties(tool), name).not.toContain('signature');
+      const offered = on.filter(found => found.name === name);
+      expect(offered, name).toHaveLength(2);
+      for (const tool of offered) {
+        expect(properties(tool), name).toContain('signature');
+        expect((tool.inputSchema as Schema).properties.signature.type, name).toBe('boolean');
+      }
+    }
+    for (const tool of on.filter(found => found.name === 'quote_and_preview_postcard')) expect(properties(tool)).not.toContain('signature');
   });
 });
 
