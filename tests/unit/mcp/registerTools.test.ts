@@ -780,10 +780,10 @@ describe("a letter preview's narration says whether it is signed (#612 review ro
 
   it("says the account's choice decided it, and how to change it", () => {
     expect(said({ printed: true, source: 'remembered' })).toMatch(
-      / Signed with the person's saved signature, the account's choice; signature: false in the call leaves it off\.$/
+      / Signed with the person's saved signature, the account's choice; set_letter_signature with signature: false takes it off this letter\.$/
     );
     expect(said({ printed: false, source: 'remembered' })).toMatch(
-      / Not signed: the account's choice is no signature; signature: true in the call prints the saved one\.$/
+      / Not signed: the account's choice is no signature; set_letter_signature with signature: true signs this letter\.$/
     );
   });
 

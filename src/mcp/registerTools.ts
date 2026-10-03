@@ -1568,16 +1568,17 @@ function stationerySentence(result: Record<string, unknown>): string {
 /**
  * A letter preview's signature (#608 review round 1), for the narration:
  * whether the saved signature prints, and when the account's choice decided
- * it, so the person hears why and how to change it. Nothing while signatures
- * are not offered, with none saved, or for a call that said no signature.
+ * it, so the person hears why, and that set_letter_signature changes it in
+ * place (#608 part 4). Nothing while signatures are not offered, with none
+ * saved, or for a call that said no signature.
  */
 function signatureSentence(result: Record<string, unknown>): string {
   const signature = result.signature as { printed?: unknown; source?: unknown } | undefined;
   if (typeof signature?.printed !== "boolean") return "";
   if (signature.source === "remembered") {
     return signature.printed
-      ? " Signed with the person's saved signature, the account's choice; signature: false in the call leaves it off."
-      : " Not signed: the account's choice is no signature; signature: true in the call prints the saved one.";
+      ? " Signed with the person's saved signature, the account's choice; set_letter_signature with signature: false takes it off this letter."
+      : " Not signed: the account's choice is no signature; set_letter_signature with signature: true signs this letter.";
   }
   return signature.source === "asked" && signature.printed ? " Signed with the person's saved signature." : "";
 }

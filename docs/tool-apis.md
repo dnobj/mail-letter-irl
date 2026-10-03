@@ -89,8 +89,8 @@ signature ([Signatures](#signatures)) under the sign-off's first line.
   `set_letter_words`' refusal of a gift letter's new words.
 - Each preview then returns `signature`: `printed`, whether the letter prints it, and `source`: `asked`
   (the call named it), `remembered` (the account's choice) or `none_saved`. The narration says when the
-  account's choice signed the letter, or left it unsigned, and how to change it, so a model without the
-  card can tell the person.
+  account's choice signed the letter, or left it unsigned, and that `set_letter_signature` changes it in
+  place, so a model without the card can tell the person.
 - The draft keeps its own copy, as the letter was previewed with it, and records renderer `pdf-4`
   whatever its theme. The send copies it into the letter, so replacing or removing the saved signature
   never changes a letter already previewed. `set_stationery` and `set_letter_words` draw the letter
