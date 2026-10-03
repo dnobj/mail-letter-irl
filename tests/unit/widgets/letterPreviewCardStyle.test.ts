@@ -775,6 +775,7 @@ describe('the Signature switch against its answers (#615 review round 1)', () =>
   it("says a signature removed since the preview in the person's words, and puts the switch away", async () => {
     const card = mount();
     await card.show(signed(false));
+    toggle(card).focus();
     await card.click('signature-switch');
     await card.answer(
       {
@@ -788,6 +789,8 @@ describe('the Signature switch against its answers (#615 review round 1)', () =>
     expect(card.text('style-note')).toBe("There's no saved signature to add now. Save one in the chat, or on your Letter IRL settings page.");
     expect(card.visible('signature-row')).toBe(false);
     expect(send(card).disabled).toBe(false);
+    // Focus leaves with the switch, to the first style (#615 review round 2).
+    expect(card.document.activeElement).toBe(card.button('classic'));
   });
 
   it('says the signature may have changed for an answer without what it set, or for another letter', async () => {
@@ -827,6 +830,10 @@ describe('the Signature switch against its answers (#615 review round 1)', () =>
     await card.answer({ result: { content: [], structuredContent: { draftId: 'draft_0001', signature: { printed: true, source: 'asked' }, ...canSend }, _meta: { previewHtml: SIGNED_PAGE } } }, 'set_letter_signature');
     expect(toggle(card).getAttribute('aria-checked')).toBe('true');
     expect(card.drawn()).toContain(SIGNATURE_IMAGE);
+    // After: the card changed the draft itself, so an older answer is older than that.
+    await card.answer(status({ signature: false }, CLASSIC_PAGE), 'get_draft_status');
+    expect(toggle(card).getAttribute('aria-checked')).toBe('true');
+    expect(card.drawn()).toContain(SIGNATURE_IMAGE);
   });
 
   it("draws a new draft from its own preview, and an answer about the old one changes nothing", async () => {
@@ -834,10 +841,37 @@ describe('the Signature switch against its answers (#615 review round 1)', () =>
     await card.show(signed(false));
     await card.click('signature-switch');
     // Another preview arrives while the call is out.
-    await card.show(signed(true, 'remembered', 'draft_0002'), { previewHtml: SIGNED_PAGE });
-    expect(toggle(card).getAttribute('aria-checked')).toBe('true');
-    await card.answer({ result: { content: [], structuredContent: { draftId: 'draft_0001', signature: { printed: true, source: 'asked' }, ...canSend }, _meta: { previewHtml: CLASSIC_PAGE } } }, 'set_letter_signature');
-    expect(toggle(card).getAttribute('aria-checked')).toBe('true');
-    expect(card.drawn()).toContain(SIGNATURE_IMAGE);
+    await card.show(signed(false, 'remembered', 'draft_0002'), { previewHtml: CLASSIC_PAGE });
+    expect(toggle(card).getAttribute('aria-checked')).toBe('false');
+    await card.answer({ result: { content: [], structuredContent: { draftId: 'draft_0001', signature: { printed: true, source: 'asked' }, ...canSend }, _meta: { previewHtml: SIGNED_PAGE } } }, 'set_letter_signature');
+    expect(toggle(card).getAttribute('aria-checked')).toBe('false');
+    expect(card.drawn()).not.toContain(SIGNATURE_IMAGE);
+  });
+
+  it('goes when the send is offered as a link, and a press still delivered to it does nothing', async () => {
+    const card = mount();
+    await card.show(signed(false));
+    await card.click('send-button');
+    await card.answer(
+      {
+        result: {
+          isError: true,
+          content: [
+            {
+              type: 'text',
+              text:
+                'Not sent: Letter IRL sends mail only when the person sends it. ' +
+                'Ask the person to open https://letterirl.com/confirm/draft_0001 to check the mail and send it themselves. Nothing is sent until they press Send there.'
+            }
+          ]
+        }
+      },
+      'send_letter'
+    );
+    expect(card.visible('send-page-button')).toBe(true);
+    expect(card.visible('signature-row')).toBe(false);
+    // The page has the draft now: the card no longer changes it.
+    await card.click('signature-switch');
+    expect(card.lastRequest('tools/call', 'set_letter_signature')).toBeUndefined();
   });
 });

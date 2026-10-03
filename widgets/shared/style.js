@@ -291,7 +291,11 @@
             state.message = "There's no saved signature to add now. Save one in the chat, or on your Letter IRL settings page.";
             signature.offered = false;
             signature.on = false;
+            // Focus leaves with the switch: to the first style, as closeWords
+            // returns it (#615 review round 2).
+            var focused = typeof document !== "undefined" && document.activeElement === signatureSwitch;
             if (signatureRow) signatureRow.style.display = "none";
+            if (focused && options.buttons[0] && typeof options.buttons[0].focus === "function") options.buttons[0].focus();
           } else {
             state.message = text;
           }
