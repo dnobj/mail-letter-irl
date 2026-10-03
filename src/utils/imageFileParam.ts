@@ -44,10 +44,16 @@ export function preprocessImageFileElement(value: unknown): unknown {
  * The blank string a host sends for an argument left unset is no list, as the
  * empty string is no `image`: without this the call fails the served schema,
  * and a single-photo postcard with it (ChatGPT mobile sends "" for a file
- * parameter with nothing attached). Any other string still fails the schema.
+ * parameter with nothing attached). A list of blank slots only, which a host
+ * may send for the same, is none as well; a blank slot beside a real one is
+ * still a slot. Any other string still fails the schema.
  */
 export function preprocessPhotoList(value: unknown): unknown {
-  return typeof value === "string" && value.trim() === "" ? undefined : value;
+  if (typeof value === "string") return value.trim() === "" ? undefined : value;
+  if (Array.isArray(value) && value.length > 0 && value.every((entry) => typeof entry === "string" && entry.trim() === "")) {
+    return undefined;
+  }
+  return value;
 }
 
 /** A file object the server can download, or null. */

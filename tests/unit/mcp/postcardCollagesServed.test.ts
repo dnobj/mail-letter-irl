@@ -173,13 +173,13 @@ describe('the collage photos in tools/list', () => {
   it('reads a blank list, which a host sends for one left unset, as none, so a single photo still previews', async () => {
     offer('true');
     const client = await connected();
-    for (const blank of ['', '   ']) {
+    for (const blank of ['', '   ', [''], ['', ' ']]) {
       await client.callTool({
         name: 'quote_and_preview_postcard',
         arguments: { ...POSTCARD, imageUrl: 'https://photos.example/1.jpg', images: blank, imageUrls: blank }
       });
     }
-    expect(received).toHaveLength(2);
+    expect(received).toHaveLength(4);
     for (const input of received) {
       expect(input.images).toBeUndefined();
       expect(input.imageUrls).toBeUndefined();

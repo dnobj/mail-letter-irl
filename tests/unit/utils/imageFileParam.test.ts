@@ -31,8 +31,21 @@ describe('preprocessPhotoList (a collage\'s whole list)', () => {
     expect(preprocessPhotoList(value)).toBeUndefined();
   });
 
+  it.each([[['']], [['', ' ']], [['\n', '  ', '']]])('reads the list of blanks only %j as no list, whatever its length', value => {
+    expect(preprocessPhotoList(value)).toBeUndefined();
+  });
+
+  it('leaves an empty list, and a blank slot beside a real one, for the schema and the refusals to judge', () => {
+    const empty: unknown[] = [];
+    expect(preprocessPhotoList(empty)).toBe(empty);
+    const mixed = ['', 'https://photos.example/1.jpg'];
+    expect(preprocessPhotoList(mixed)).toBe(mixed);
+    const withNull = ['', null];
+    expect(preprocessPhotoList(withNull)).toBe(withNull);
+  });
+
   it('leaves everything else for the schema to judge, a path string included', () => {
-    for (const value of ['x', '/mnt/data/a.png', [], ['a', 'b'], undefined, null, 0, {}]) {
+    for (const value of ['x', '/mnt/data/a.png', [], ['a', 'b'], [null], [0], undefined, null, 0, {}]) {
       expect(preprocessPhotoList(value)).toBe(value);
     }
   });

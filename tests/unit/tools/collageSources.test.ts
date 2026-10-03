@@ -35,6 +35,8 @@ describe('collageSources', () => {
       ['undefined', { images: undefined, imageUrls: undefined }],
       ['null', { images: null, imageUrls: null }],
       ['a blank string', { imageUrls: '  ' }],
+      ['a list of one blank', { images: [''] }],
+      ['a list of blanks', { imageUrls: ['', '  '] }],
     ])('returns undefined for %s, whether or not collages are offered', (_name, input) => {
       expect(collageSources(input, context())).toBeUndefined();
       offered();

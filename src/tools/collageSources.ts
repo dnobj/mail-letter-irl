@@ -37,12 +37,13 @@ function refusal(message: string, reason: string, context: ToolContext): Error {
 
 /**
  * Whether a photo argument was given: present, and not empty or blank, which
- * models send for one left unset (an empty list, an empty string).
+ * models send for one left unset (an empty list, an empty string, a list of
+ * blank slots).
  */
 function given(value: unknown): boolean {
   if (value === undefined || value === null) return false;
   if (typeof value === 'string') return value.trim() !== '';
-  if (Array.isArray(value)) return value.length > 0;
+  if (Array.isArray(value)) return value.some((entry) => !(typeof entry === 'string' && entry.trim() === ''));
   return true;
 }
 
