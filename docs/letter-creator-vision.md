@@ -340,7 +340,7 @@ The `mail:send` scope already exists. OAuth clients (ChatGPT, Claude, the websit
 | Colour, double-sided | Yes | Colour for image letters only; never double-sided |
 | `sendDate` scheduling, cancel while `ready` | Yes | No (#535 holds in our outbox instead) |
 | Perforated page 1, return envelope | Yes | No |
-| Certified, registered, express | Yes | No |
+| Certified (letters, with or without a return receipt) | Yes | In development (#625); registered and express: no |
 | Postcards 4x6, 6x9, 11x6 | Yes | 6x9 only |
 | Premium paper, self-mailers | On request | No |
 | Folded greeting cards, photo prints, robot pen | No | Would need another vendor |

@@ -161,8 +161,34 @@ https://api.postgrid.com/print-mail/v1
 | `color` | boolean | No | false | Print in color (vs black & white) |
 | `doubleSided` | boolean | No | false | Print double-sided |
 | `addressPlacement` | string | No | "top_first_page" | "top_first_page" or "insert_blank_page" |
+| `extraService` | string | No | - | `certified` or `certified_return_receipt` (US first-class letters and cheques only; #625) |
 
 **Note:** Either `html` or `template` is required, not both.
+
+### Certified mail (`extraService`, #625)
+
+Read from PostGrid's documentation on 2026-10-03 (its pricing page, the Send Letter guide, the mailing-class guide and the
+tracking guide); the test-mode behaviour is not stated there and is settled by the development check.
+
+- `extraService: "certified"` sends USPS Certified Mail; `"certified_return_receipt"` adds an **electronic** return receipt.
+  There is also `"registered"`, which Letter IRL does not use. Letters and cheques only, so never postcards; US first-class
+  mail only; not combinable with express delivery.
+- Tracking is included. The USPS `trackingNumber` is **not** on the create response: PostGrid sets it later, fires
+  `letter.updated`, and `GET /letters/{id}` carries it. The return receipt is not returned by the API: the sender gets it
+  from USPS with the tracking number once the letter is delivered.
+- Public prices: certified $6.94, with the electronic return receipt $9.85, against a first-class black-and-white letter at
+  $1.059. Either all-in (the USPS fee, postage and printing) or an add-on to the letter's own price, as our 2025 notes
+  of PostGrid's price list have it: to be confirmed with PostGrid.
+- In Letter IRL, `LetterParams.extraService` carries the value to the form field (our PDF) or the JSON body (the legacy
+  HTML), and `LetterStatus.carrierTrackingNumber` carries the number from a status read (8 to 40 letters, digits, spaces
+  or hyphens; anything else is not carried). `letters.tracking_id` is PostGrid's own letter id, never the carrier's
+  number. Beware `GET /api/letters`, which already returns that provider id under the name `trackingNumber`
+  (`letterApiHandler.ts`): the carrier's number gets its own name, `carrierTrackingNumber`, on every surface.
+- **To confirm with PostGrid, or in the development check, before the receipt product is priced:** where the electronic
+  return receipt is delivered (PostGrid is the mailer of record, so USPS may send it to PostGrid rather than to us), and
+  whether certified printing adds markings that collide with the `top_first_page` address zone our renderer fills.
+- The provider's cost estimate adds PostGrid's public price for the service to the letter's own cost (at most about a
+  dollar too high if those prices already include the letter).
 
 ---
 

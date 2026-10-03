@@ -18,6 +18,7 @@ import type {
   CostEstimate,
   ProviderConfig
 } from './types.js';
+import { mailServiceOf } from '../../config/products.js';
 
 export interface DummyProviderOptions {
   /** Simulated delay in milliseconds (default: 1000ms) */
@@ -129,7 +130,10 @@ export class DummyProvider implements LetterFulfillmentProvider {
       metadata: {
         provider: 'dummy',
         simulatedDelay: this.options.delayMs,
-        messageLength: params.message.length
+        messageLength: params.message.length,
+        // The extra service it was asked for (#625), so a test can see it
+        // arrive; standard mail, however it is written, records nothing.
+        ...(mailServiceOf(params.extraService) ? { extraService: params.extraService } : {})
       }
     };
   }

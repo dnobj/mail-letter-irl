@@ -24,6 +24,7 @@ import { maintenanceHeartbeatUrlInvalid } from '../services/maintenanceHeartbeat
 import { operatorAlertUrlInvalid } from './operatorAlerts.js';
 import { enabledUnlessDisabled, offUnlessExplicitlyEnabled } from '../utils/envSettings.js';
 import {
+  CERTIFIED_MAIL_FLAG,
   JIT_OPTION_PRICE_ENV_VARS,
   JIT_PRICE_ENV_VARS,
   PACK_PRICE_ENV_VARS,
@@ -692,14 +693,15 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
   },
   /**
    * The mail options' flags (#578, src/config/products.ts): each sells its
-   * options through Pay & Send and demands their prices above, and offers
-   * them with our renderer: room to write's longer letters (#586), the 4x6
-   * and 11x6 postcards (#594). Off unless set, so absence is the intended
-   * production state until the owner approves the prices; listed so the
-   * preflight shows which environments and services have them. Both
-   * services, as the prices they demand are.
+   * options through Pay & Send and demands their prices above. Room to write's
+   * longer letters (#586) and the 4x6 and 11x6 postcards (#594) are also
+   * offered only with our renderer; certified mail (#625) is not tied to it.
+   * Off unless set, so absence is the intended production state until the
+   * owner approves the prices; listed so the preflight shows which
+   * environments and services have them. Both services, as the prices they
+   * demand are.
    */
-  ...[ROOM_TO_WRITE_FLAG, POSTCARD_SIZES_FLAG].map((name): EnvVarRequirement => ({
+  ...[ROOM_TO_WRITE_FLAG, POSTCARD_SIZES_FLAG, CERTIFIED_MAIL_FLAG].map((name): EnvVarRequirement => ({
     name,
     requiredIn: 'production',
     advisory: true,
