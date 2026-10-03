@@ -628,6 +628,7 @@ describe('postcard collages (#616)', () => {
 
     it('gives the photos one budget for their downloads, not a deadline each', async () => {
       vi.useFakeTimers();
+      let call: Promise<void> | undefined;
       try {
         const files = await palette(3);
         // The first photo answers after 19 s, inside its own 20 s; the second never does, and has the 11 s of the
@@ -640,7 +641,7 @@ describe('postcard collages (#616)', () => {
             })
         );
         let outcome: unknown = 'pending';
-        const call = downloadAndProcessCollageWithPreview(inputs(3), '6x9', { actorId: 'account-a' }).then(
+        call = downloadAndProcessCollageWithPreview(inputs(3), '6x9', { actorId: 'account-a' }).then(
           () => { outcome = 'resolved'; },
           (error: unknown) => { outcome = error; }
         );
@@ -652,9 +653,11 @@ describe('postcard collages (#616)', () => {
         expect((outcome as ImageProcessingError).userMessage).toBe("The second photo: Couldn't download the image. Please try again.");
         // Nothing is fetched after it.
         expect(fetchMock).toHaveBeenCalledTimes(2);
+      } finally {
+        // Whatever the assertions found, run the pending aborts and let the collage settle, so that no share or
+        // slot stays held for the next test.
         await vi.runAllTimersAsync();
         await call;
-      } finally {
         vi.useRealTimers();
       }
       expectIdle();
@@ -662,6 +665,7 @@ describe('postcard collages (#616)', () => {
 
     it('keeps a photo\'s own 20 s deadline when the budget has more left', async () => {
       vi.useFakeTimers();
+      let call: Promise<void> | undefined;
       try {
         fetchMock.mockImplementation(
           (_url: string, init: RequestInit) =>
@@ -670,7 +674,7 @@ describe('postcard collages (#616)', () => {
             })
         );
         let outcome: unknown = 'pending';
-        const call = downloadAndProcessCollageWithPreview(inputs(2), '6x9', { actorId: 'account-a' }).then(
+        call = downloadAndProcessCollageWithPreview(inputs(2), '6x9', { actorId: 'account-a' }).then(
           () => { outcome = 'resolved'; },
           (error: unknown) => { outcome = error; }
         );
@@ -680,9 +684,11 @@ describe('postcard collages (#616)', () => {
         expect(outcome).toBeInstanceOf(ImageProcessingError);
         expect((outcome as ImageProcessingError).userMessage).toBe("The first photo: Couldn't download the image. Please try again.");
         expect(fetchMock).toHaveBeenCalledTimes(1);
+      } finally {
+        // Whatever the assertions found, run the pending aborts and let the collage settle, so that no share or
+        // slot stays held for the next test.
         await vi.runAllTimersAsync();
         await call;
-      } finally {
         vi.useRealTimers();
       }
       expectIdle();
