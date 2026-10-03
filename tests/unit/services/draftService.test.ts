@@ -929,7 +929,8 @@ describe('draftService stationery (#563)', () => {
       const [sql, params] = vi.mocked(db.query).mock.calls[0] as [string, unknown[]];
       for (const column of ['mail_type', 'status', 'expires_at', 'redacted_at', 'renderer_version', 'body_text', 'sign_off', 'layout_type',
         'header_image_data', 'inline_image_data', 'sender', 'recipient', 'preview_html', 'pages', 'is_gift_send', 'required_credits',
-        'stationery']) {
+        // And the draft's own signature (#608), which set_stationery and set_letter_words draw again.
+        'stationery', 'signature_image']) {
         expect(sql, column).toContain(column);
       }
       expect(sql).toMatch(/WHERE draft_id = \$1 AND user_id = \$2/);
