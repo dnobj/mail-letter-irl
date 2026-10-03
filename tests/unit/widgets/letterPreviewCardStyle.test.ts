@@ -820,17 +820,26 @@ describe('the Signature switch against its answers (#615 review round 1)', () =>
     expect(card.text('style-note')).toBe('The signature is changed, but its page did not come back here. Make the preview again to see it.');
   });
 
-  it("does not let a status answer older than a switch undo it, during the call or after", async () => {
+  it('does not let a status answer arriving during a switch undo it', async () => {
     const card = mount();
     await card.show(signed(false));
     await card.click('signature-switch');
-    // During: the card is waiting on the switch.
+    // The card is waiting on the switch.
     await card.answer(status({ signature: false }, CLASSIC_PAGE), 'get_draft_status');
     expect(toggle(card).getAttribute('aria-checked')).toBe('true');
     await card.answer({ result: { content: [], structuredContent: { draftId: 'draft_0001', signature: { printed: true, source: 'asked' }, ...canSend }, _meta: { previewHtml: SIGNED_PAGE } } }, 'set_letter_signature');
     expect(toggle(card).getAttribute('aria-checked')).toBe('true');
     expect(card.drawn()).toContain(SIGNATURE_IMAGE);
-    // After: the card changed the draft itself, so an older answer is older than that.
+  });
+
+  it('does not let a status answer arriving after a switch undo it', async () => {
+    const card = mount();
+    await card.show(signed(false));
+    await card.click('signature-switch');
+    await card.answer({ result: { content: [], structuredContent: { draftId: 'draft_0001', signature: { printed: true, source: 'asked' }, ...canSend }, _meta: { previewHtml: SIGNED_PAGE } } }, 'set_letter_signature');
+    expect(toggle(card).getAttribute('aria-checked')).toBe('true');
+    // The card's one status request is answered only now: the card changed the draft
+    // itself since asking, so the answer is older than that.
     await card.answer(status({ signature: false }, CLASSIC_PAGE), 'get_draft_status');
     expect(toggle(card).getAttribute('aria-checked')).toBe('true');
     expect(card.drawn()).toContain(SIGNATURE_IMAGE);
