@@ -183,6 +183,14 @@ export async function run(options: RunOptions): Promise<RunResult> {
   return { lines, report, refused };
 }
 
+/** Stripe reported a live-mode Price: not possible with a test key, and never to be run again with it. */
+export class LiveModePriceError extends Error {
+  constructor(readonly priceId: string) {
+    super(`Stripe made a live-mode Price (${priceId}); stopping`);
+    this.name = 'LiveModePriceError';
+  }
+}
+
 /** The real Stripe client behind the port. */
 export function stripePort(stripe: Stripe): PricePort {
   return {
@@ -217,7 +225,7 @@ export function stripePort(stripe: Stripe): PricePort {
         metadata: { productCode: spec.productCode }
       });
       // A test key makes test-mode objects only; this is the last line of defence.
-      if (price.livemode) throw new Error(`Stripe made a live-mode Price (${price.id}); stopping`);
+      if (price.livemode) throw new LiveModePriceError(price.id);
       return { id: price.id };
     }
   };
@@ -264,11 +272,17 @@ export function parseArgs(argv: readonly string[]): CliArgs | { error: string } 
   return args;
 }
 
+/** Shorter than this, a value is not a Stripe key and is not replaced by name. */
+const MIN_SECRET_LENGTH = 12;
+
 /** Text safe to print: the key, and anything shaped like one, removed. */
 export function redact(text: string, key: string | undefined): string {
   let out = text;
   const secret = (key ?? '').trim();
-  if (secret) out = out.split(secret).join('[key]');
+  // Only a value long enough to be a Stripe key: replacing a short junk value
+  // would garble every message ("a Stripe [key]-mode key"). The shape pattern
+  // below masks anything key-like either way.
+  if (secret.length >= MIN_SECRET_LENGTH) out = out.split(secret).join('[key]');
   return out.replace(/\b[sr]k_(?:test|live)_[A-Za-z0-9*]+/g, '[key]');
 }
 
@@ -308,6 +322,12 @@ export async function execute(argv: readonly string[], env: NodeJS.ProcessEnv, d
   if (parsed.help) {
     say(USAGE);
     return 0;
+  }
+  // A key typed where a file name belongs would be written to disk as the name
+  // of the file (and so listed, and shown in git status). Refused before anything.
+  if (parsed.out !== undefined && redact(parsed.out, env.STRIPE_SECRET_KEY) !== parsed.out) {
+    warn('--out must be a file name, and this one contains a key. Nothing was done.');
+    return 2;
   }
   const mode = keyMode(env.STRIPE_SECRET_KEY);
   if (mode !== 'test') {
@@ -365,7 +385,11 @@ export async function execute(argv: readonly string[], env: NodeJS.ProcessEnv, d
     return result.refused > 0 ? 1 : 0;
   } catch (error) {
     warn(`Stopped: ${error instanceof Error ? error.message : String(error)}`);
-    warn('Running it again is safe: the prices already made are found and kept.');
+    warn(
+      error instanceof LiveModePriceError
+        ? `Do not run this again with this key. Archive ${error.priceId} in the Stripe dashboard and check which account the key belongs to.`
+        : 'Running it again is safe: the prices already made are found and kept.'
+    );
     return 1;
   }
 }

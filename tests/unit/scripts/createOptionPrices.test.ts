@@ -7,6 +7,7 @@ import {
 } from '../../../src/config/products.js';
 import {
   LOOKUP_KEY_PREFIX,
+  LiveModePriceError,
   OUTPUT_HEADER,
   USAGE,
   decide,
@@ -294,7 +295,9 @@ describe('stripePort', () => {
     const { stripe, port } = fakeStripe();
     stripe.prices.create.mockResolvedValueOnce({ id: 'price_live', livemode: true } as never);
     const spec: NewPrice = { lookupKey: 'letter-irl-x', unitAmount: 599, currency: 'usd', productName: 'X', productCode: 'x' };
-    await expect(port.createPrice(spec)).rejects.toThrow('Stripe made a live-mode Price (price_live); stopping');
+    const refused = port.createPrice(spec);
+    await expect(refused).rejects.toBeInstanceOf(LiveModePriceError);
+    await expect(refused).rejects.toThrow('Stripe made a live-mode Price (price_live); stopping');
   });
 });
 
@@ -312,6 +315,13 @@ describe('redact', () => {
     const odd = 'sk_test_ab-cd_ef';
     expect(redact(`bad ${odd} here`, odd)).toBe('bad [key] here');
     expect(redact(`bad ${odd} here`, `  ${odd} `)).toBe('bad [key] here');
+  });
+
+  it('replaces a key by name only when it is long enough to be one, and the shape pattern masks the rest', () => {
+    expect(redact('x abcdefghijkl y', 'abcdefghijkl')).toBe('x [key] y');
+    expect(redact('x abcdefghijk y', 'abcdefghijk')).toBe('x abcdefghijk y');
+    expect(redact('a Stripe test-mode key (sk_test_ or rk_test_)', 'test')).toBe('a Stripe test-mode key (sk_test_ or rk_test_)');
+    expect(redact('typed sk_test_abc123 here', 'abc')).toBe('typed [key] here');
   });
 
   it('leaves other text alone', () => {
@@ -456,11 +466,45 @@ describe('execute', () => {
     expect(noKey.everything()).not.toContain(TEST_KEY);
   });
 
-  it('never echoes a key typed into the --out path either', async () => {
+  it('refuses a key typed where the --out file name belongs, so it is never written as a name', async () => {
+    // The last case is caught by the exact key alone: it has no Stripe key's shape.
+    const cases: Array<[string, string]> = [
+      [`${TEST_KEY}.txt`, TEST_KEY],
+      ['sk_live_51AbCdEfGhIjKl', TEST_KEY],
+      [`C:/prices/${TEST_KEY}`, TEST_KEY],
+      ['pk_not_a_stripe_key_12345.txt', 'pk_not_a_stripe_key_12345']
+    ];
+    for (const [typed, key] of cases) {
+      const h = harness();
+      expect(await execute(['--out', typed], { STRIPE_SECRET_KEY: key }, h.deps), typed).toBe(2);
+      expect(h.createPort).not.toHaveBeenCalled();
+      expect(h.files).toEqual([]);
+      expect(h.errors).toEqual(['--out must be a file name, and this one contains a key. Nothing was done.']);
+      expect(h.everything()).not.toContain(typed);
+    }
+  });
+
+  it('does not garble its messages when the key value is short junk', async () => {
     const h = harness();
-    expect(await execute(['--out', `${TEST_KEY}.txt`], env, h.deps)).toBe(0);
-    expect(h.everything()).not.toContain(TEST_KEY);
-    expect(h.logs).toContain(`Wrote ${OPTIONS.length} line(s) to [key].txt`);
+    expect(await execute([], { STRIPE_SECRET_KEY: 'test' }, h.deps)).toBe(2);
+    expect(h.errors).toEqual([
+      'STRIPE_SECRET_KEY must be set to a Stripe test-mode key (sk_test_ or rk_test_), with no spaces around it.'
+    ]);
+  });
+
+  it('tells the person not to run again after a live-mode Price, and otherwise that running again is safe', async () => {
+    const live = harness();
+    (live.account.port.createPrice as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new LiveModePriceError('price_live'));
+    expect(await execute([], env, live.deps)).toBe(1);
+    expect(live.errors[0]).toBe('Stopped: Stripe made a live-mode Price (price_live); stopping');
+    expect(live.errors[1]).toBe(
+      'Do not run this again with this key. Archive price_live in the Stripe dashboard and check which account the key belongs to.'
+    );
+
+    const plain = harness();
+    (plain.account.port.createPrice as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('network down'));
+    expect(await execute([], env, plain.deps)).toBe(1);
+    expect(plain.errors[1]).toBe('Running it again is safe: the prices already made are found and kept.');
   });
 
   it('accepts a restricted test key', async () => {
