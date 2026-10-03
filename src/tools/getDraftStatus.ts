@@ -11,12 +11,13 @@ import { heldSendFields, waitsInOutbox } from './heldSend.js';
 import { isDraftIdShape } from './requestSend.js';
 import { letterPayment, wordsVersionOf } from './letterHelpers.js';
 import { letterPageLimit } from '../config/roomToWrite.js';
-import { draftMailOption, mailServiceOf } from '../config/products.js';
+import { draftMailOption, isExtraService, mailServiceOf } from '../config/products.js';
+import { isCertifiedMailOffered } from '../config/certifiedMail.js';
 import { isPostcardSizesOffered } from '../config/postcardSizes.js';
 import { isPostcardLayoutsOffered } from '../config/postcardLayouts.js';
 import { postcardFrontOf } from '../render/index.js';
 import type { SendEligibility } from '../services/commerceService.js';
-import type { PostcardSize } from '../services/types.js';
+import type { CertifiedMailService, PostcardSize } from '../services/types.js';
 
 /**
  * What became of a preview's draft (#474), for a preview card whose host keeps
@@ -70,7 +71,9 @@ export interface GetDraftStatusOutput {
   cancellable?: boolean;
   /** Ready: a letter of more than one page (#586), the pages it is laid out on now. */
   pages?: number;
-  /** Ready, while room to write is offered (#586): what it costs now, as a restyle may have changed it. */
+  /** Ready, a letter that is certified mail now (#625): which service. Absent: an ordinary letter. Card-only, like the rest. */
+  mailService?: CertifiedMailService;
+  /** Ready, while room to write or certified mail is offered (#586, #625): what it costs now, as a restyle or a change of service may have changed it. */
   canSendNow?: boolean;
   reasonCannotSend?: string;
   sendEligibility?: SendEligibility;
@@ -151,6 +154,7 @@ async function handler(
     ...signatureNow(draft),
     ...pagesNow(draft),
     ...termsNow(draft, draftId, context),
+    ...serviceNow(draft),
     ...wordsNow(draft),
     ...postcardStyleNow(draft, draftId, context)
   };
@@ -193,11 +197,24 @@ function termsNow(
   context: ToolContext
 ): Pick<GetDraftStatusOutput, 'canSendNow' | 'reasonCannotSend' | 'sendEligibility'> {
   // A certified letter (#625) keeps its terms whether or not room to write is
-  // offered: it was previewed while certified mail was, and the card must not
-  // offer a pack for it. Its option is the draft's own, service included.
+  // offered, and so does any letter while certified mail is: set_mail_service
+  // may have turned it certified or back since its preview, and the card must
+  // not offer a pack for one or Pay & Send for the other. Its option is the
+  // draft's own, service included.
   const certified = mailServiceOf(draft.mail_service) !== undefined;
-  if (draft.mail_type !== 'letter' || !draft.renderer_version || (letterPageLimit() === 1 && !certified)) return {};
+  if (draft.mail_type !== 'letter' || !draft.renderer_version || (letterPageLimit() === 1 && !certified && !isCertifiedMailOffered())) return {};
   return letterPayment(draftMailOption(draft), Number(draft.required_credits ?? 2), draft.is_gift_send === true, context, draftId);
+}
+
+/**
+ * A ready letter's certified service now (#625), for a card shown its preview's
+ * first answer again: set_mail_service may have changed it since. Only for a
+ * letter that is certified mail; an ordinary letter has none to name, and with
+ * the terms above a card reads the absence as ordinary mail.
+ */
+function serviceNow(draft: DraftState): Pick<GetDraftStatusOutput, 'mailService'> {
+  const service = mailServiceOf(draft.mail_service);
+  return draft.mail_type === 'letter' && isExtraService(service) ? { mailService: service } : {};
 }
 
 /**

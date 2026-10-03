@@ -1224,6 +1224,72 @@ describe('certified mail on the card (#625)', () => {
   });
 });
 
+describe('the service the server last reported (#625)', () => {
+  // The style row takes the terms of a status answer only for a letter whose preview named a stationery.
+  const CLASSIC = { stationery: { theme: 'classic', source: 'default' } };
+  const ON_PAGE = {
+    packPays: false,
+    payAndSend: { available: false, amountCents: 1199, currency: 'usd', pageUrl: 'https://letterirl.example/send/draft_0001' },
+    letterPack: { available: false, purchaseUrl: 'https://letterirl.example/packs' }
+  };
+  const certifiedPreview = () =>
+    output({ ...CLASSIC, mailService: 'certified', canSendNow: false, sendEligibility: ON_PAGE, deliveryClass: 'USPS Certified Mail' });
+  const status = (extra: Json) => ({
+    result: {
+      content: [],
+      structuredContent: { draftId: 'draft_0001', status: 'ready', deliveryEstimate: 'Mailed in 1-2 business days', stationery: { theme: 'classic' }, ...extra },
+      _meta: { previewHtml: PAGE }
+    }
+  });
+  const ASK = 'get_draft_status';
+
+  it('drops the certified words when the status says the letter is ordinary mail now, terms and all', async () => {
+    const card = mount();
+    await card.show(certifiedPreview(), ON);
+    expect(text(card, 'checkout-note')).toContain('Certified mail is paid');
+    expect(text(card, 'studio-summary')).toContain('certified mail');
+    await card.answerTo(card.requests('tools/call', ASK)[0], status({ ...canSend }));
+    expect(text(card, 'studio-summary')).not.toContain('certified');
+    expect(card.byId('send-button').style.display).toBe('flex');
+  });
+
+  it('keeps the certified words when the status still names the service', async () => {
+    const card = mount();
+    await card.show(certifiedPreview(), ON);
+    await card.answerTo(
+      card.requests('tools/call', ASK)[0],
+      status({ mailService: 'certified_return_receipt', canSendNow: false, sendEligibility: ON_PAGE })
+    );
+    expect(text(card, 'studio-summary')).toContain('certified mail with a return receipt');
+    expect(text(card, 'checkout-note')).toContain('Certified mail is paid');
+  });
+
+  it('turns an ordinary preview certified when the status says so', async () => {
+    const card = mount();
+    await card.show(output({ ...CLASSIC, canSendNow: false, sendEligibility: ON_PAGE }), ON);
+    expect(text(card, 'studio-summary')).not.toContain('certified');
+    await card.answerTo(
+      card.requests('tools/call', ASK)[0],
+      status({ mailService: 'certified', canSendNow: false, sendEligibility: ON_PAGE })
+    );
+    expect(text(card, 'studio-summary')).toContain('certified mail');
+  });
+
+  it('says nothing new when the status gives no terms (an older server, or a letter it does not price)', async () => {
+    const card = mount();
+    await card.show(certifiedPreview(), ON);
+    await card.answerTo(card.requests('tools/call', ASK)[0], status({}));
+    expect(text(card, 'studio-summary')).toContain('certified mail');
+  });
+
+  it('ignores a service it does not know', async () => {
+    const card = mount();
+    await card.show(certifiedPreview(), ON);
+    await card.answerTo(card.requests('tools/call', ASK)[0], status({ mailService: 'express', canSendNow: false, sendEligibility: ON_PAGE }));
+    expect(text(card, 'studio-summary')).not.toContain('certified');
+  });
+});
+
 describe('the widget version after the certified card (#625)', () => {
   it('is bumped, so a host that cached the card fetches the new one', async () => {
     const { WIDGET_TEMPLATE_VERSION } = await import('../../../src/mcp/widgetUris.js');

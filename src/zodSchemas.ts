@@ -154,6 +154,8 @@ export const ORDER_TRACKING_SUPPORT_DESCRIPTION =
   "How the order can be tracked. estimated_only: the status comes from the printer, and delivery is estimated, not confirmed by a carrier. carrier_tracking: USPS's own tracking number is stored for a letter that went out (certified mail), so USPS's page shows the scans; this status is still the printer's.";
 export const ORDER_CARRIER_TRACKING_URL_DESCRIPTION =
   "Certified mail only, with the tracking number: the USPS page that shows where the piece is.";
+export const GET_DRAFT_STATUS_MAIL_SERVICE_DESCRIPTION =
+  "A ready letter that is certified mail now: which service. Absent: an ordinary letter, which a card reads from the terms beside it";
 export const ORDER_CERTIFIED_NOTE_DESCRIPTION =
   "Certified mail only: what to tell the person about the tracking number and the return receipt. It promises nothing about delivery or legal effect.";
 
@@ -980,7 +982,8 @@ export const getDraftStatusOutputZ = z.object({
     .describe("Where a sent draft's order stands: scheduled while it waits for its mail date"),
   cancellable: z.boolean().optional().describe("A sent draft's order: whether it can still be cancelled free"),
   pages: z.number().int().min(2).max(MAX_LETTER_PAGES).optional().describe("A ready letter of more than one page: the pages it is laid out on now"),
-  canSendNow: z.boolean().optional().describe("A ready letter while room to write is offered, or a postcard while its sizes or layouts are: whether the balance or a gift letter pays for it now"),
+  canSendNow: z.boolean().optional().describe("A ready letter while room to write or certified mail is offered, or a postcard while its sizes or layouts are: whether the balance or a gift letter pays for it now"),
+  mailService: z.enum(CERTIFIED_MAIL_SERVICES).optional().describe(GET_DRAFT_STATUS_MAIL_SERVICE_DESCRIPTION),
   reasonCannotSend: z.string().optional(),
   sendEligibility: sendEligibilityZ.optional(),
   size: z.enum(["6x9", "6x4", "6x11"]).optional().describe("A ready postcard our renderer drew, while its sizes or layouts are offered: its size now. Its page goes to the card"),

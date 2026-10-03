@@ -648,7 +648,8 @@
 
       // The certified service a preview names (#625), or "": only the two values the server writes.
       function certifiedOf(state) {
-        return state?.mailService === "certified" || state?.mailService === "certified_return_receipt" ? state.mailService : "";
+        const said = serviceNow && serviceNow.draftId === state?.draftId ? serviceNow.mailService : state?.mailService;
+        return said === "certified" || said === "certified_return_receipt" ? said : "";
       }
 
       // The pages a letter prints on (#586): one unless it says more.
@@ -1245,6 +1246,9 @@
       // sent or expired.
       let draftState = null;
       const draftStateAsked = new Set();
+      // How the draft travels now (#625), as the server last said: set_mail_service may have changed it since the
+      // preview. Null until an answer that carries the terms says.
+      let serviceNow = null;
 
       function askDraftState(draftId) {
         if (typeof host.setWidgetState === "function") return;
@@ -1271,6 +1275,11 @@
               const statusFit =
                 typeof statusPage === "string" && statusPage === currentMeta().previewHtml ? currentMeta().pageFit ?? null : null;
               styleRow.adopt(draftId, answer.stationery, statusPage, answer, statusFit);
+              // And how it travels now (#625). An answer that carries the terms names a certified service or, naming none, means
+              // ordinary mail; one without them (an older server, or terms it did not give) says nothing.
+              if (answer.sendEligibility && typeof answer.canSendNow === "boolean") {
+                serviceNow = { draftId, mailService: typeof answer.mailService === "string" ? answer.mailService : "" };
+              }
               // And what they mean for delivery, for the Delivery line.
               if (
                 picker.adopt(draftId, answer.schedule) &&

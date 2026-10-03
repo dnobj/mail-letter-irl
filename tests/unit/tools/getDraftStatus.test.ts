@@ -152,6 +152,44 @@ describe("get_draft_status (#474)", () => {
     }
   });
 
+  it("names a ready certified letter's service, and gives every letter its terms while certified mail is offered (#625)", async () => {
+    const letter = state({
+      mail_type: "letter", renderer_version: "pdf-1", pages: 1, mail_service: "standard",
+      required_credits: 2, is_gift_send: false, body_text: "Dear Sam,", sign_off: "Pat"
+    });
+    const rich = { ...context(), user: { userId: "auth0|owner", creditsRemaining: 10, orders: [] } as any };
+    vi.stubEnv("JIT_PURCHASE_ENABLED", "true");
+    try {
+      // Not offered: an ordinary letter says nothing of its terms or its service.
+      vi.mocked(getDraftState).mockResolvedValue(letter as any);
+      const plain = await ask({ draftId: DRAFT_ID }, rich);
+      expect(plain).not.toHaveProperty("canSendNow");
+      expect(plain).not.toHaveProperty("mailService");
+
+      // Offered: set_mail_service may have changed it since the preview, so the terms come with it, and a service when there is one.
+      vi.stubEnv("LETTER_IRL_CERTIFIED_MAIL_ENABLED", "true");
+      const ordinary = await ask({ draftId: DRAFT_ID }, rich);
+      expect(ordinary).toMatchObject({ ...READY, canSendNow: true });
+      expect(ordinary).not.toHaveProperty("mailService");
+      for (const service of ["certified", "certified_return_receipt"]) {
+        vi.mocked(getDraftState).mockResolvedValue({ ...letter, mail_service: service } as any);
+        expect(await ask({ draftId: DRAFT_ID }, rich), service).toMatchObject({ mailService: service, canSendNow: false });
+      }
+
+      // Text that is not a service is never named, and a postcard never has one.
+      vi.mocked(getDraftState).mockResolvedValue({ ...letter, mail_service: "express" } as any);
+      expect(await ask({ draftId: DRAFT_ID }, rich)).not.toHaveProperty("mailService");
+      vi.mocked(getDraftState).mockResolvedValue({ ...letter, mail_type: "postcard", mail_service: "certified" } as any);
+      expect(await ask({ draftId: DRAFT_ID }, rich)).not.toHaveProperty("mailService");
+
+      // A sent or expired draft says nothing of it.
+      vi.mocked(getDraftState).mockResolvedValue({ ...letter, mail_service: "certified", status: "consumed", consumed_letter_id: ORDER_ID } as any);
+      expect(await ask({ draftId: DRAFT_ID }, rich)).not.toHaveProperty("mailService");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("says a sent draft was sent, with the order it became", async () => {
     vi.mocked(getDraftState).mockResolvedValue(state({ status: "consumed", consumed_letter_id: ORDER_ID }) as any);
     await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual({ draftId: DRAFT_ID, status: "sent", orderId: ORDER_ID });
