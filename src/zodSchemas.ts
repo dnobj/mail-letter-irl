@@ -144,6 +144,19 @@ export const PREVIEW_MAIL_SERVICE_OUTPUT_DESCRIPTION =
 // The two services of a certified letter: the one list the code ties to the MailService type (products.ts).
 const CERTIFIED_MAIL_SERVICES = EXTRA_SERVICES;
 
+// What an order says when it was sent as USPS Certified Mail (#625). Declared whatever the
+// flag says: the output schemas are closed, and an order outlives the flag.
+export const ORDER_MAIL_SERVICE_DESCRIPTION =
+  "Present only for USPS Certified Mail: certified, or certified_return_receipt (with an electronic return receipt).";
+export const ORDER_CARRIER_TRACKING_NUMBER_DESCRIPTION =
+  "Certified mail only: USPS's tracking number, once the printer has set it and Letter IRL's status sync has stored it. It is not the order id.";
+export const ORDER_TRACKING_SUPPORT_DESCRIPTION =
+  "How the order can be tracked. estimated_only: the status comes from the printer, and delivery is estimated, not confirmed by a carrier. carrier_tracking: USPS's own tracking number is stored for a letter that went out (certified mail), so USPS's page shows the scans; this status is still the printer's.";
+export const ORDER_CARRIER_TRACKING_URL_DESCRIPTION =
+  "Certified mail only, with the tracking number: the USPS page that shows where the piece is.";
+export const ORDER_CERTIFIED_NOTE_DESCRIPTION =
+  "Certified mail only: what to tell the person about the tracking number and the return receipt. It promises nothing about delivery or legal effect.";
+
 // Text-only letter schema
 export const quoteAndPreviewInputZ = z.object({
   sender: addressZ.optional(),  // Optional - will use saved return address if not provided
@@ -791,10 +804,14 @@ export const getOrderStatusOutputZ = z.object({
   recipientSummary: recipientSummaryZ,
   canSendFollowUp: z.boolean().optional(),
   followUpSuggestedPrompt: z.string().optional(),
-  trackingSupport: trackingSupportZ.optional(),
+  trackingSupport: trackingSupportZ.optional().describe(ORDER_TRACKING_SUPPORT_DESCRIPTION),
   arriveBy: z.string().optional().describe("Sent with an arrival date: the date it aims to arrive by, YYYY-MM-DD"),
   mailOn: z.string().optional().describe("Sent with an arrival date: the day it goes to the printer, YYYY-MM-DD"),
-  cancellable: z.boolean().optional().describe(CANCELLABLE_DESCRIPTION)
+  cancellable: z.boolean().optional().describe(CANCELLABLE_DESCRIPTION),
+  mailService: z.enum(CERTIFIED_MAIL_SERVICES).optional().describe(ORDER_MAIL_SERVICE_DESCRIPTION),
+  carrierTrackingNumber: z.string().optional().describe(ORDER_CARRIER_TRACKING_NUMBER_DESCRIPTION),
+  carrierTrackingUrl: z.string().optional().describe(ORDER_CARRIER_TRACKING_URL_DESCRIPTION),
+  certifiedNote: z.string().optional().describe(ORDER_CERTIFIED_NOTE_DESCRIPTION)
 });
 
 export const getAccountBalanceOutputZ = z.object({
@@ -821,7 +838,10 @@ export const listOrdersOutputZ = z.object({
     sentAt: z.string().optional(),
     arriveBy: z.string().optional().describe("Sent with an arrival date: the date it aims to arrive by, YYYY-MM-DD"),
     mailOn: z.string().optional().describe("Sent with an arrival date: the day it goes to the printer, YYYY-MM-DD"),
-    cancellable: z.boolean().optional().describe(CANCELLABLE_DESCRIPTION)
+    cancellable: z.boolean().optional().describe(CANCELLABLE_DESCRIPTION),
+    mailService: z.enum(CERTIFIED_MAIL_SERVICES).optional().describe(ORDER_MAIL_SERVICE_DESCRIPTION),
+    carrierTrackingNumber: z.string().optional().describe(ORDER_CARRIER_TRACKING_NUMBER_DESCRIPTION),
+    carrierTrackingUrl: z.string().optional().describe(ORDER_CARRIER_TRACKING_URL_DESCRIPTION)
   })),
   total: z.number(),
   // Letter-pack purchases, newest first, in get_purchase_status's status

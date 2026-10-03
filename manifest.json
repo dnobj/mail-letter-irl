@@ -1899,7 +1899,27 @@
               "estimated_only",
               "carrier_tracking"
             ],
-            "description": "Tracking capability level. 'estimated_only' = periodic status updates available but delivery is estimated based on mail timing, not confirmed by carrier."
+            "description": "How the order can be tracked. estimated_only: the status comes from the printer, and delivery is estimated, not confirmed by a carrier. carrier_tracking: USPS's own tracking number is stored for a letter that went out (certified mail), so USPS's page shows the scans; this status is still the printer's."
+          },
+          "mailService": {
+            "type": "string",
+            "enum": [
+              "certified",
+              "certified_return_receipt"
+            ],
+            "description": "Present only for USPS Certified Mail: certified, or certified_return_receipt (with an electronic return receipt)."
+          },
+          "carrierTrackingNumber": {
+            "type": "string",
+            "description": "Certified mail only: USPS's tracking number, once the printer has set it and Letter IRL's status sync has stored it. It is not the order id."
+          },
+          "carrierTrackingUrl": {
+            "type": "string",
+            "description": "Certified mail only, with the tracking number: the USPS page that shows where the piece is."
+          },
+          "certifiedNote": {
+            "type": "string",
+            "description": "Certified mail only: what to tell the person about the tracking number and the return receipt. It promises nothing about delivery or legal effect."
           }
         }
       }
@@ -2035,6 +2055,22 @@
                 "cancellable": {
                   "type": "boolean",
                   "description": "With an arrival date: whether it can still be cancelled free, before it goes to the printer"
+                },
+                "mailService": {
+                  "type": "string",
+                  "enum": [
+                    "certified",
+                    "certified_return_receipt"
+                  ],
+                  "description": "Present only for USPS Certified Mail: certified, or certified_return_receipt (with an electronic return receipt)."
+                },
+                "carrierTrackingNumber": {
+                  "type": "string",
+                  "description": "Certified mail only: USPS's tracking number, once the printer has set it and Letter IRL's status sync has stored it. It is not the order id."
+                },
+                "carrierTrackingUrl": {
+                  "type": "string",
+                  "description": "Certified mail only, with the tracking number: the USPS page that shows where the piece is."
                 }
               }
             }

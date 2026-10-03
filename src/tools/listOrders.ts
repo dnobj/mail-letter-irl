@@ -8,6 +8,7 @@ import {
   listOrdersOutputSchema
 } from "../schemas.js";
 import { listPackPurchases, type PackPurchaseSummary } from "../services/commerceService.js";
+import type { CertifiedMailService } from "../services/types.js";
 
 interface ListOrdersInput {
   limit?: number;
@@ -22,6 +23,10 @@ interface OrderSummary {
   arriveBy?: string;
   mailOn?: string;
   cancellable?: boolean;
+  /** Sent as USPS Certified Mail (#625): the service, and the carrier's number and link once there is one. */
+  mailService?: CertifiedMailService;
+  carrierTrackingNumber?: string;
+  carrierTrackingUrl?: string;
 }
 
 interface ListOrdersOutput {
@@ -63,6 +68,14 @@ async function handler(
     sentAt: order.statusTimeline[0]?.timestampISO ?? "",
     ...(order.schedule
       ? { arriveBy: order.schedule.arriveBy, mailOn: order.schedule.mailOn, cancellable: order.cancellable === true }
+      : {}),
+    ...(order.certified
+      ? {
+          mailService: order.certified.mailService,
+          ...(order.certified.carrierTrackingNumber
+            ? { carrierTrackingNumber: order.certified.carrierTrackingNumber, carrierTrackingUrl: order.certified.carrierTrackingUrl }
+            : {})
+        }
       : {})
   }));
 

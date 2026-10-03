@@ -1410,12 +1410,12 @@ ChatGPT offered "Track it until delivery" to a user after sending a postcard, bu
 |-------|---------|
 | `none` | No tracking available |
 | `estimated_only` | Status updates via periodic PostGrid sync, delivery is ESTIMATED |
-| `carrier_tracking` | Real-time carrier tracking with confirmed delivery (future) |
+| `carrier_tracking` | USPS's own tracking number is stored for a letter that went out (certified mail, #625): USPS's page shows the scans. The status itself is still the printer's, synced every six hours, and delivery is not confirmed by it |
 
-**Current Value:** `"estimated_only"`
+**Current Value:** `"estimated_only"`, and `"carrier_tracking"` for certified mail that went out, once its USPS number is stored (#625)
 - PostGrid syncs status every 6 hours via `statusSyncService.ts`
 - "Delivered" status is ESTIMATED based on USPS mail timing
-- No USPS tracking numbers or confirmed delivery scans
+- No USPS tracking numbers or confirmed delivery scans, except certified mail's number once the sync has stored it
 
 **Related:**
 - GitHub Issue: #98

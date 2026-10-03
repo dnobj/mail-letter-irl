@@ -1,6 +1,6 @@
-import { CERTIFIED_MAIL_FLAG, isJitPurchaseEnabled } from './products.js';
+import { CERTIFIED_MAIL_FLAG, isExtraService, isJitPurchaseEnabled, mailServiceOf } from './products.js';
 import { offUnlessExplicitlyEnabled } from '../utils/envSettings.js';
-import type { MailService } from '../services/types.js';
+import type { CertifiedMailService, MailService } from '../services/types.js';
 
 /**
  * Certified mail (#625): a letter sent as USPS Certified Mail, with or without
@@ -35,4 +35,53 @@ void _everyListedValueIsAService;
  */
 export function isCertifiedMailOffered(env: NodeJS.ProcessEnv = process.env): boolean {
   return offUnlessExplicitlyEnabled(CERTIFIED_MAIL_FLAG, env) && isJitPurchaseEnabled(env);
+}
+
+/**
+ * The shape of a carrier tracking number this code will show: letters and digits, with spaces or
+ * hyphens between groups, 8 to 40 characters. The status sync stores only numbers of this shape
+ * (CARRIER_TRACKING_NUMBER in PostGridProvider.ts, held equal by a test); the reader checks again, since
+ * the column itself bounds only the length and an operator role can write it.
+ */
+export const CARRIER_TRACKING_NUMBER_SHAPE = /^[A-Za-z0-9][A-Za-z0-9 -]{7,39}$/;
+
+/**
+ * Where USPS shows a piece's progress, from its tracking number. The number is
+ * stored as the printer sent it, in groups that may be separated by spaces or
+ * hyphens; USPS wants the characters alone.
+ */
+export function uspsTrackingUrl(carrierNumber: string): string {
+  return `https://tools.usps.com/go/TrackConfirmAction?tLabels=${encodeURIComponent(carrierNumber.replace(/[ -]/g, ''))}`;
+}
+
+/**
+ * What a sent letter's row says about certified mail (#625), for the readers
+ * that show an order: the service, and the carrier's number and its link once
+ * there is one (the status sync stores it some time after the printer accepts
+ * the letter).
+ */
+export interface CertifiedFacts {
+  mailService: CertifiedMailService;
+  carrierTrackingNumber?: string;
+  carrierTrackingUrl?: string;
+}
+
+/**
+ * The certified facts of a letter row, or none for an ordinary letter.
+ *
+ * This only decides whether an order says anything about certified mail; it
+ * prices nothing, so text that is not one of the two services (which the
+ * column's CHECK keeps out of the table) says nothing rather than something
+ * invented. The row's number is shown only beside a certified service and only
+ * if it has the shape of a carrier number, whatever the column holds.
+ */
+export function certifiedFactsOf(row: { mail_service?: unknown; carrier_tracking_number?: unknown }): CertifiedFacts | undefined {
+  const service = mailServiceOf(typeof row.mail_service === 'string' ? row.mail_service : null);
+  if (!isExtraService(service)) return undefined;
+  const stored = typeof row.carrier_tracking_number === 'string' ? row.carrier_tracking_number.trim() : '';
+  const number = CARRIER_TRACKING_NUMBER_SHAPE.test(stored) ? stored : '';
+  return {
+    mailService: service,
+    ...(number === '' ? {} : { carrierTrackingNumber: number, carrierTrackingUrl: uspsTrackingUrl(number) })
+  };
 }

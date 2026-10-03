@@ -3,6 +3,7 @@ import { query } from "../db/index.js";
 import { getBalance } from "../services/creditService.js";
 import { getGenerationQuota } from "../services/imageGenerationLimitService.js";
 import { isImageGenerationOff } from "../config/imageGeneration.js";
+import { certifiedFactsOf } from "../config/certifiedMail.js";
 import { heldDatesOf, scheduleSentence } from "../services/deliverySchedule.js";
 import {
   classifyDiagnosticError,
@@ -90,7 +91,9 @@ export class FileAccountStore {
           sent_at,
           arrive_by,
           mail_on,
-          funding_type
+          funding_type,
+          mail_service,
+          carrier_tracking_number
         FROM letters
         WHERE user_id = $1
         ORDER BY created_at DESC
@@ -117,6 +120,7 @@ export class FileAccountStore {
         // the end; this only says what to expect.
         const schedule = heldDatesOf(row.arrive_by, row.mail_on);
         const waiting = schedule !== null && row.status === 'queued';
+        const certified = certifiedFactsOf(row);
         if (schedule && row.created_at) {
           timeline.push({
             timestampISO: row.created_at.toISOString(),
@@ -164,7 +168,9 @@ export class FileAccountStore {
             state: recipient.state || ''
           },
           previewFirstPageHtml: row.preview_html || undefined,
-          ...(schedule ? { schedule, cancellable: waiting && row.funding_type !== 'jit_order' } : {})
+          ...(schedule ? { schedule, cancellable: waiting && row.funding_type !== 'jit_order' } : {}),
+          // Certified mail (#625): the service, and the carrier's number once the status sync has it.
+          ...(certified ? { certified } : {})
         } as OrderRecord;
       });
     } catch (error) {
