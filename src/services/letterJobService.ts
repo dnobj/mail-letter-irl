@@ -18,7 +18,8 @@ import type {
   PostcardResult,
   PostcardSize,
 } from './providers/types.js';
-import type { Letter, LetterJob } from './types.js';
+import type { CertifiedMailService, Letter, LetterJob } from './types.js';
+import { isExtraService, mailServiceOf } from '../config/products.js';
 import {
   isLetterAlreadyCompensated,
   returnConsumedCreditsForLetter
@@ -375,12 +376,47 @@ function letterParams(letter: Letter, job: LetterJob): LetterParams {
       typeof content.signatureImage === 'string' && content.signatureImage !== ''
         ? { image: content.signatureImage, closingParagraph: signatureParagraph(content.bodyText, content.signOff) }
         : undefined,
+    // Certified mail (#625): only a service PostGrid sells is passed on;
+    // extraServiceRefusal has already turned away any other text.
+    extraService: extraServiceOf(letter),
     metadata: {
       letterId: letter.letter_id,
       userId: letter.user_id,
       creditsCost: letter.credits_cost,
     },
   };
+}
+
+/**
+ * The extra service a letter asks for, as the print passes it on: one of the
+ * two PostGrid sells, or undefined for standard mail. Text this code does not
+ * know is never passed on as if it were standard; extraServiceRefusal answers
+ * for it before anything is built.
+ */
+function extraServiceOf(letter: Letter): CertifiedMailService | undefined {
+  const service = mailServiceOf(letter.mail_service);
+  return isExtraService(service) ? service : undefined;
+}
+
+/**
+ * Why this letter cannot go to this provider with the service it asks for, or
+ * undefined when nothing stands in the way. The answer comes before anything
+ * is submitted, so it is a definite rejection: the letter fails and what paid
+ * for it comes back. A letter that asks for a service is never mailed as a
+ * standard one - not when the text is unknown to this code (a newer deploy's
+ * service, a row edited by hand), not by a provider that does not say it can
+ * sell the service, and not as a postcard.
+ */
+function extraServiceRefusal(
+  provider: { supportsExtraServices?: boolean },
+  letter: Letter
+): 'unknown_service' | 'postcard' | 'provider_cannot_sell' | undefined {
+  const service = mailServiceOf(letter.mail_service);
+  if (service === undefined) return undefined;
+  if (!isExtraService(service)) return 'unknown_service';
+  if ((letter.mail_type || 'letter') === 'postcard') return 'postcard';
+  if (!provider.supportsExtraServices) return 'provider_cannot_sell';
+  return undefined;
 }
 
 function postcardParams(letter: Letter, job: LetterJob): PostcardParams {
@@ -447,6 +483,25 @@ async function submitToProvider(
   options: ProcessLetterJobOptions
 ): Promise<{ result: ProviderResult; providerName: string }> {
   const mailType = letter.mail_type || 'letter';
+
+  const refusal = extraServiceRefusal(provider, letter);
+  if (refusal) {
+    // Nothing was submitted, so this is an authoritative rejection. The
+    // reason is a fixed word, never the letter's text, for the operator who
+    // reads why a paid certified letter came back.
+    writeDiagnostic('error', 'outbox.extra_service_refused', {
+      jobId: job.job_id,
+      reason: refusal,
+      provider: provider.config.name
+    });
+    const rejected: ProviderResult = {
+      success: false,
+      trackingId: '',
+      error: `${provider.config.displayName} cannot send this letter's mail service (${refusal})`,
+      metadata: { retryable: false, submissionOutcome: 'definite_rejection' },
+    };
+    return { result: rejected, providerName: provider.config.name };
+  }
 
   const result = await submitToProviderOnce(async () => {
     if (mailType === 'postcard') {

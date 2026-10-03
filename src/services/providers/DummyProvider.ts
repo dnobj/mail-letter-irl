@@ -49,6 +49,8 @@ const letterStore = new Map<string, {
 
 export class DummyProvider implements LetterFulfillmentProvider {
   public readonly config: ProviderConfig;
+  /** Simulated: it records the service it was asked for (#625). */
+  public readonly supportsExtraServices = true;
   private options: Required<DummyProviderOptions>;
 
   constructor(config: ProviderConfig, options: DummyProviderOptions = {}) {

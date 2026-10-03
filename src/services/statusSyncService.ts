@@ -60,16 +60,25 @@ export async function syncLetterStatuses(
   // - Mailed within maxAgeInDays: counted from sent_at, when the provider took
   //   it, so a letter held for weeks to arrive by a date (#535) is still
   //   followed after it mails; created_at for one not yet marked sent
+  // - Or a certified letter (#625) that was delivered before its USPS number
+  //   was stored: the number is the point of the service, so it is still asked
+  //   for until it is had (inside the same window)
   const lettersResult = await query<{
     letter_id: string;
     tracking_id: string;
     status: string;
     provider: string;
     created_at: Date;
+    mail_service: string | null;
+    carrier_tracking_number: string | null;
   }>(`
-    SELECT letter_id, tracking_id, status, provider, created_at
+    SELECT letter_id, tracking_id, status, provider, created_at,
+           mail_service, carrier_tracking_number
     FROM letters
-    WHERE status NOT IN ('delivered', 'returned', 'failed', 'cancelled')
+    WHERE (
+        status NOT IN ('delivered', 'returned', 'failed', 'cancelled')
+        OR (status = 'delivered' AND mail_service <> 'standard' AND carrier_tracking_number IS NULL)
+      )
       AND tracking_id IS NOT NULL
       AND COALESCE(sent_at, created_at) > NOW() - INTERVAL '${maxAgeInDays} days'
     ORDER BY created_at DESC
@@ -92,6 +101,28 @@ export async function syncLetterStatuses(
         newStatus: providerStatus.status,
         providerRawStatus: providerStatus.statusMessage
       };
+
+      // The USPS number of a certified letter (#625). The carrier sets it some
+      // time after it takes the letter, usually without a change of status, so
+      // it is stored on its own and not only when the status moves. Standard
+      // mail has none (the column's CHECK holds that too).
+      const carrierNumber = providerStatus.carrierTrackingNumber;
+      if (
+        !dryRun &&
+        carrierNumber &&
+        letter.mail_service &&
+        letter.mail_service !== 'standard' &&
+        letter.carrier_tracking_number !== carrierNumber
+      ) {
+        await query(
+          `UPDATE letters
+           SET carrier_tracking_number = $2::text, updated_at = NOW()
+           WHERE letter_id = $1
+             AND mail_service <> 'standard'
+             AND carrier_tracking_number IS DISTINCT FROM $2::text`,
+          [letter.letter_id, carrierNumber]
+        );
+      }
 
       // Check if status changed
       if (providerStatus.status !== letter.status) {
