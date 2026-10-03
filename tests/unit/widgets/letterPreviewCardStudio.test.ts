@@ -1223,3 +1223,10 @@ describe('certified mail on the card (#625)', () => {
     expect(text(unknown, 'checkout-note')).toContain(PACK_RULE);
   });
 });
+
+describe('the widget version after the certified card (#625)', () => {
+  it('is bumped, so a host that cached the card fetches the new one', async () => {
+    const { WIDGET_TEMPLATE_VERSION } = await import('../../../src/mcp/widgetUris.js');
+    expect(WIDGET_TEMPLATE_VERSION).toBeGreaterThanOrEqual(66);
+  });
+});
