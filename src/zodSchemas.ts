@@ -134,7 +134,7 @@ export const PREVIEW_MAIL_SERVICE_DESCRIPTION =
   "or certified_return_receipt (Certified Mail with an electronic return receipt). Certified mail costs more and is paid with Pay & Send: " +
   "no letter pack and no gift letter pays for it. Leave it out for an ordinary letter.";
 // A client that fills an unset field with null or an empty string means no service, as it does for the
-// monogram and the stationery: an ordinary letter, never a certified one.
+// stationery: an ordinary letter, never a certified one.
 const noneForNullOrEmpty = (value: unknown): unknown => (value === null || value === '' ? undefined : value);
 const previewMailServiceZ = z.preprocess(noneForNullOrEmpty, z.enum(MAIL_SERVICES).optional()).describe(PREVIEW_MAIL_SERVICE_DESCRIPTION);
 

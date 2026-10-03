@@ -258,7 +258,8 @@ describe('while certified mail is not offered', () => {
   });
 
   it('still previews an ordinary letter, with or without standard said', async () => {
-    for (const input of [{}, { mailService: 'standard' }]) {
+    // Null and the empty string are how a client that sends every field says none: an ordinary letter here too.
+    for (const input of [{}, { mailService: 'standard' }, { mailService: null }, { mailService: '' }]) {
       vi.mocked(createDraft).mockClear();
       const output = await run('text_only', input);
       expect(output).not.toHaveProperty('mailService');
