@@ -42,6 +42,9 @@ import {
   requestAddressInputZ,
   getAddressRequestInputZ,
   cancelAddressRequestInputZ,
+  setSignatureInputZ,
+  getSignatureInputZ,
+  clearSignatureInputZ,
   uploadPhotoChunkInputZ,
   submitFeatureRequestInputZ,
   getStartedInputZ,
@@ -74,6 +77,9 @@ import {
   requestAddressOutputZ,
   getAddressRequestOutputZ,
   cancelAddressRequestOutputZ,
+  setSignatureOutputZ,
+  getSignatureOutputZ,
+  clearSignatureOutputZ,
   uploadPhotoChunkOutputZ,
   submitFeatureRequestOutputZ,
   getStartedOutputZ,
@@ -164,7 +170,9 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     // The preview card's question about its draft (#474).
     'get_draft_status',
     // What became of an address request (#604).
-    'get_address_request'
+    'get_address_request',
+    // Whether a signature is saved (#608).
+    'get_signature'
   ];
 
   // Tools that call external APIs (PostGrid for validation or mail fulfillment)
@@ -178,7 +186,8 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     'create_mail_checkout',
     'create_pack_checkout',
     'set_return_address',  // Validates address via PostGrid
-    'generate_image_for_mail' // Calls the OpenAI Images API when credits allow
+    'generate_image_for_mail', // Calls the OpenAI Images API when credits allow
+    'set_signature'        // Fetches the picture from its link (#608)
   ];
 
   // Tools where repeated calls with same args have no additional effect
@@ -198,7 +207,8 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     'set_letter_words',       // The same words twice change nothing more (#586)
     'set_postcard_style',     // The same size and front twice change nothing more (#594)
     'cancel_scheduled_mail',  // A repeat answers as already cancelled (#535)
-    'cancel_address_request'  // A repeat answers as already closed (#604)
+    'cancel_address_request', // A repeat answers as already closed (#604)
+    'clear_signature'         // A repeat answers that none was saved (#608)
   ];
 
   // Destructive tools. OpenAI's app-review guidance asks for destructiveHint on
@@ -224,7 +234,10 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     // A cancelled order cannot be restored: it must be sent again (#535).
     'cancel_scheduled_mail',
     // A cancelled address request's link cannot be restored (#604).
-    'cancel_address_request'
+    'cancel_address_request',
+    // A saved signature, replaced or removed, cannot be brought back (#608).
+    'set_signature',
+    'clear_signature'
   ];
 
   return {
@@ -839,6 +852,9 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   request_address: requestAddressInputZ,
   get_address_request: getAddressRequestInputZ,
   cancel_address_request: cancelAddressRequestInputZ,
+  set_signature: setSignatureInputZ,
+  get_signature: getSignatureInputZ,
+  clear_signature: clearSignatureInputZ,
   upload_photo_chunk: uploadPhotoChunkInputZ,
   // Feedback tools
   submit_feature_request: submitFeatureRequestInputZ,
@@ -882,6 +898,9 @@ const zodOutputSchemas: Record<ToolName, z.ZodObject<any>> = {
   request_address: requestAddressOutputZ,
   get_address_request: getAddressRequestOutputZ,
   cancel_address_request: cancelAddressRequestOutputZ,
+  set_signature: setSignatureOutputZ,
+  get_signature: getSignatureOutputZ,
+  clear_signature: clearSignatureOutputZ,
   upload_photo_chunk: uploadPhotoChunkOutputZ,
   // Feedback tools
   submit_feature_request: submitFeatureRequestOutputZ,
@@ -1006,6 +1025,8 @@ export function partitionToolResult(
     examplePrompts,
     // How full a letter's pages are (#586), for the card's fit line.
     pageFit,
+    // A saved signature's picture (#608), for a card: the model reads its sentence.
+    signatureImage,
     ...modelFacingData
   } = result;
 
@@ -1045,6 +1066,7 @@ export function partitionToolResult(
       ...(inlineImagePreview !== undefined ? { inlineImagePreview } : {}),
       ...(generatedImagePreview !== undefined ? { generatedImagePreview } : {}),
       ...(pageFit !== undefined ? { pageFit } : {}),
+      ...(signatureImage !== undefined ? { signatureImage } : {}),
       ...(modelFacingData.generatedImageUrl !== undefined
         ? { generatedImageUrl: modelFacingData.generatedImageUrl }
         : {})
@@ -1818,6 +1840,11 @@ export function summarizeToolResult(
     }
     case "cancel_address_request":
       return typeof result.message === "string" ? result.message : "The address request was cancelled.";
+    case "set_signature":
+    case "get_signature":
+    case "clear_signature":
+      // The sentence only: the picture is the card's, in _meta (#608).
+      return typeof result.message === "string" ? result.message : "The signature was checked.";
     default:
       return JSON.stringify(result);
   }

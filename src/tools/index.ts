@@ -31,6 +31,9 @@ export { cancelScheduledMailTool } from "./cancelScheduledMail.js";
 export { requestAddressTool } from "./requestAddress.js";
 export { getAddressRequestTool } from "./getAddressRequest.js";
 export { cancelAddressRequestTool } from "./cancelAddressRequest.js";
+export { setSignatureTool } from "./setSignature.js";
+export { getSignatureTool } from "./getSignature.js";
+export { clearSignatureTool } from "./clearSignature.js";
 export { uploadPhotoChunkTool } from "./uploadPhotoChunk.js";
 
 // Feedback tools (US-FEEDBACK-01)

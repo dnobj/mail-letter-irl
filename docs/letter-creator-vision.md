@@ -145,7 +145,7 @@ Each concept lists what PostGrid supports and how it reaches clients without car
 - **Why:** it makes the letter feel personal. It borrows from Hallmark Sign & Send, Ink Cards and Thankster.
 - **PostGrid:** an image in the layout.
 - **Card-less clients:** a `signature` argument that uses the saved one. Capture needs an upload, which is weak outside ChatGPT (the MCP Apps standard has no upload).
-- **Stage:** Later.
+- **Stage:** Later, being built as #608 behind `LETTER_IRL_SIGNATURES_ENABLED`. The website gets a page to draw or upload one, for apps without an upload. The handwriting face is #563's Handwritten stationery.
 
 #### 4. Postcard layouts and sizes
 - **What:**

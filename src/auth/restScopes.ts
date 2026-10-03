@@ -47,6 +47,10 @@ export const REST_ROUTE_SCOPES: readonly RestRouteScope[] = [
   { id: 'return_address.get', method: 'GET', path: '/api/return-address', scope: 'mail:read', twin: 'get_return_address' },
   { id: 'return_address.set', method: 'POST', path: '/api/return-address', scope: 'mail:draft', twin: 'set_return_address' },
   { id: 'return_address.clear', method: 'DELETE', path: '/api/return-address', scope: 'mail:draft', twin: 'clear_return_address' },
+  // The website's signature page (#608), as its tools.
+  { id: 'signature.get', method: 'GET', path: '/api/signature', scope: 'mail:read', twin: 'get_signature' },
+  { id: 'signature.set', method: 'POST', path: '/api/signature', scope: 'mail:draft', twin: 'set_signature' },
+  { id: 'signature.clear', method: 'DELETE', path: '/api/signature', scope: 'mail:draft', twin: 'clear_signature' },
   // No twin. A token that can mint a personal access token holds a standing
   // credential, so both need mail:send (audit A-02). A personal access token
   // carries read and draft (037, #470) and never gets here, and

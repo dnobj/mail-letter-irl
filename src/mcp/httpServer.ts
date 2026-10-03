@@ -25,6 +25,7 @@ import { handleCreditApiRequest } from "../api/creditApiHandler.js";
 import { handlePATApiRequest } from "../api/patApiHandler.js";
 import { handleLetterApiRequest } from "../api/letterApiHandler.js";
 import { handleReturnAddressApiRequest } from "../api/returnAddressApiHandler.js";
+import { handleSignatureApiRequest, SIGNATURE_API_PATH } from "../api/signatureApiHandler.js";
 import { handleSendConfirmationApiRequest } from "../api/sendConfirmationApiHandler.js";
 import { ADDRESS_REQUEST_API_PREFIX, handleAddressRequestApiRequest } from "../api/addressRequestApi.js";
 import { handleTempImageRequest } from "../api/tempImageHandler.js";
@@ -935,6 +936,16 @@ export async function startHttpServer() {
     }
     const returnAddressApiHandled = await handleReturnAddressApiRequest(req, res, url.pathname);
     if (returnAddressApiHandled) {
+      return;
+    }
+
+    // The saved signature (#608), for the website's signature page.
+    if (url.pathname === SIGNATURE_API_PATH) {
+      if (await rateLimitMiddlewareWithTier(req, res, 'api')) {
+        return; // Rate limited
+      }
+    }
+    if (await handleSignatureApiRequest(req, res, url.pathname)) {
       return;
     }
 

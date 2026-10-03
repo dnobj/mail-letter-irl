@@ -66,6 +66,11 @@ export const TOOL_SCOPES: Record<string, ProductScope> = {
   request_address: "mail:draft",
   get_address_request: "mail:draft",
   cancel_address_request: "mail:draft",
+  // A saved signature (#608): saving and removing one are drafting, as the
+  // return address's are; reading it is a read of the account's own data.
+  set_signature: "mail:draft",
+  get_signature: "mail:read",
+  clear_signature: "mail:draft",
   // Keeps a photo for the account's next preview (#474, phase 3): the upload
   // card's part of drafting, so it sits with the drafting tools.
   upload_photo_chunk: "mail:draft"

@@ -50,7 +50,11 @@ import {
   // A link asking someone for their address, and what became of it (#604)
   requestAddressTool,
   getAddressRequestTool,
-  cancelAddressRequestTool
+  cancelAddressRequestTool,
+  // A saved signature, read, and removed (#608)
+  setSignatureTool,
+  getSignatureTool,
+  clearSignatureTool
 } from "./tools/index.js";
 import { REQUEST_SEND_TOOL } from "./tools/requestSend.js";
 import { UPLOAD_PHOTO_CHUNK_TOOL } from "./tools/uploadPhotoChunk.js";
@@ -62,7 +66,11 @@ import { CANCEL_SCHEDULED_MAIL_TOOL } from "./tools/cancelScheduledMail.js";
 import { REQUEST_ADDRESS_TOOL } from "./tools/requestAddress.js";
 import { GET_ADDRESS_REQUEST_TOOL } from "./tools/getAddressRequest.js";
 import { CANCEL_ADDRESS_REQUEST_TOOL } from "./tools/cancelAddressRequest.js";
+import { SET_SIGNATURE_TOOL } from "./tools/setSignature.js";
+import { GET_SIGNATURE_TOOL } from "./tools/getSignature.js";
+import { CLEAR_SIGNATURE_TOOL } from "./tools/clearSignature.js";
 import { isAddressRequestsEnabled } from "./config/addressRequests.js";
+import { isSignaturesOffered } from "./config/signatures.js";
 import { isCardUploadEnabled } from "./config/cardUpload.js";
 import { isArriveByEnabled } from "./config/arriveBy.js";
 import { isStationeryOffered } from "./config/stationery.js";
@@ -127,6 +135,11 @@ const tools: McpToolDefinition<any, any>[] = [
   requestAddressTool,
   getAddressRequestTool,
   cancelAddressRequestTool,
+  // The person's signature, saved once for their letters, read, and removed
+  // (#608). Listed only while signatures are offered.
+  setSignatureTool,
+  getSignatureTool,
+  clearSignatureTool,
   // The model's way to send, once the send rule is on (#470): a link where
   // the person sends the preview themselves. Listed only while the rule is on.
   requestSendTool,
@@ -201,6 +214,12 @@ export const ADDRESS_REQUEST_TOOLS: ReadonlySet<string> = new Set([
   GET_ADDRESS_REQUEST_TOOL,
   CANCEL_ADDRESS_REQUEST_TOOL
 ]);
+
+/**
+ * Signatures (#608): listed only while LETTER_IRL_SIGNATURES_ENABLED is on and
+ * our renderer draws letters, and each refuses otherwise.
+ */
+export const SIGNATURE_TOOLS: ReadonlySet<string> = new Set([SET_SIGNATURE_TOOL, GET_SIGNATURE_TOOL, CLEAR_SIGNATURE_TOOL]);
 
 /**
  * A tool's description as the calling app reads it (#484). Most tools say the
@@ -362,6 +381,7 @@ export class LetterIrlServer {
     const roomToWrite = letterPageLimit() > 1;
     const postcardStyles = isPostcardSizesOffered() || isPostcardLayoutsOffered();
     const addressRequests = isAddressRequestsEnabled();
+    const signatures = isSignaturesOffered();
     return tools
       .filter((tool) => sendRule || tool.name !== REQUEST_SEND_TOOL)
       .filter((tool) => cardUpload || tool.name !== UPLOAD_PHOTO_CHUNK_TOOL)
@@ -370,6 +390,7 @@ export class LetterIrlServer {
       .filter((tool) => roomToWrite || tool.name !== SET_LETTER_WORDS_TOOL)
       .filter((tool) => postcardStyles || tool.name !== SET_POSTCARD_STYLE_TOOL)
       .filter((tool) => addressRequests || !ADDRESS_REQUEST_TOOLS.has(tool.name))
+      .filter((tool) => signatures || !SIGNATURE_TOOLS.has(tool.name))
       .filter((tool) => client.inAppPurchases || !IN_APP_PURCHASE_TOOLS.has(tool.name))
       .filter((tool) => offersImageGeneration(client) || !IMAGE_GENERATION_TOOLS.has(tool.name))
       .map((tool) => ({

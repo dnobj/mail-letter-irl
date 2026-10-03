@@ -841,6 +841,34 @@ async function tryGetUploadedPhoto(url: string, options: ImageProcessingOptions)
 }
 
 /**
+ * The bytes of a picture a signature is saved from (#608), fetched as a
+ * letter image is: the account's own upload through the card, a picture in
+ * our temp store, or a remote image of at most 5 MB. The picture is checked
+ * and cleaned by src/services/signatureImage.ts.
+ */
+export async function downloadSignatureSource(url: string, options: ImageProcessingOptions = {}): Promise<Buffer> {
+  const ownPhoto = await tryGetUploadedPhoto(url, options);
+  if (ownPhoto) return ownPhoto;
+  const localBuffer = await tryGetFromTempStore(url);
+  if (localBuffer) return localBuffer;
+  return downloadRemoteImage(url, {
+    maxFileSize: LETTER_IMAGE_CONFIG.maxFileSize,
+    allowedTypes: LETTER_IMAGE_CONFIG.allowedTypes,
+    tooLargeMessage: 'That picture is too large. Please use one under 5MB.',
+  }, options);
+}
+
+/**
+ * A picture's size and format from its header, behind the checks every image
+ * here passes (a PNG, JPEG or WebP by its own bytes, the pixel ceiling, the
+ * full-decode budget), with no print minimum: a signature has its own
+ * (signatureImage.ts). Decodes no pixel; call it under the decode gate.
+ */
+export function readImageHeader(buffer: Buffer): Promise<{ width: number; height: number; format: string }> {
+  return getImageMetadata(buffer);
+}
+
+/**
  * Check a photo sent through our upload card before it is kept: a PNG, JPEG
  * or WebP by its own bytes, within the pixel ceiling and the decode budget,
  * and big enough to print. Reads the header only, under the decode gate.

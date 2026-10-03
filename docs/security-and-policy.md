@@ -46,6 +46,8 @@
   address request (#604), with any address a recipient gave through it, goes
   `LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS` (7) days after it closes, or after its link expires
   unanswered (`address-requests-sweep`); the policy's wording for it is the owner's, and production
+  waits for it. A saved signature (#608) is account data: kept until the person removes it or the
+  account is erased, which the policy does not yet say; its wording is the owner's too, and production
   waits for it. The maintenance retention sweep (`src/services/retentionService.ts`,
   migration 026) clears the content columns and quarantines what it clears in
   `redacted_content_quarantine` for a bounded restore window. Rows, status, timestamps and
@@ -55,8 +57,8 @@
   sweep reports until `CONTENT_RETENTION_MODE=enforce` is set, development first. Until then the
   letter and draft periods are the design target the sweep reports against, not yet a measurement.
 - A customer's request to delete their account is an erasure (#289, [account-erasure.md](account-erasure.md)):
-  - **Removed:** letter content and addresses, drafts, uploads, the saved return address, access
-    tokens, feature requests and unredeemed gift codes. The email is replaced by a placeholder.
+  - **Removed:** letter content and addresses, drafts, uploads, the saved return address and
+    signature, access tokens, feature requests and unredeemed gift codes. The email is replaced by a placeholder.
   - **Kept, without personal details:** orders, the ledger, disputes and refunds, under a tombstone
     account row that refuses every sign-in.
   - **How:** the admin panel only queues it; the maintenance run, as the database owner, carries it out.

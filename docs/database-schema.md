@@ -27,6 +27,7 @@ migration 021 as its immediate predecessor.
 | Images | `image_entitlements`, `image_generation_reservations`, `recent_uploads` |
 | Gift letters | `gift_letters`, `gift_codes` |
 | Address requests | `address_requests` |
+| Signatures | `user_signatures` |
 | Retention | `redacted_content_quarantine` |
 | Admin foundation | `admin_environment_marker`, `admin_audit_events`, `admin_command_runs`, `admin_operations` |
 
@@ -652,6 +653,34 @@ the `users` row, so the cascade does not reach them. Neither admin role is grant
 `LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS` (default 7) days after `COALESCE(closed_at, expires_at)`: when
 it closed, or for one never answered, when its link expired. It runs whatever the feature's flag says.
 
+### user_signatures
+
+A saved signature (#608, concept 3): one cleaned picture of the person's handwritten signature per
+account (migration 050), which their letters print under the closing. Behind
+`LETTER_IRL_SIGNATURES_ENABLED`; the tools are `set_signature`, `get_signature` and `clear_signature`, and
+the website's routes `/api/signature` ([tool-apis.md](tool-apis.md#signatures)).
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| user_id | VARCHAR(255) | NO | - | Primary key: the account (FK users, ON DELETE CASCADE) |
+| image_png | BYTEA | NO | - | The cleaned signature: a grayscale PNG of dark ink on white, cropped to the ink (`src/services/signatureImage.ts`) |
+| width | INTEGER | NO | - | Its width in pixels, 1 to 1200 |
+| height | INTEGER | NO | - | Its height in pixels, 1 to 400 |
+| use_by_default | BOOLEAN | NO | TRUE | The remembered choice (Principle 4): true when saved, then whatever the last preview chose |
+| created_at | TIMESTAMPTZ | NO | NOW() | When the first signature was saved |
+| updated_at | TIMESTAMPTZ | NO | NOW() | When this one was saved: a new signature replaces the row in place |
+
+**Constraints:**
+- `valid_user_signature_png`: 8 bytes to 1 MB, starting with the PNG signature
+- `valid_user_signature_size`: the size limits above
+- `valid_user_signature_times`: `updated_at` not before `created_at`
+
+A letter draws a signature from its own copy, taken into the draft when it is previewed (#608's later
+parts), so replacing or removing this row never changes a letter already previewed. It is kept until the
+person removes it (`clear_signature`, or the website) or the account is erased: erasure keeps the
+`users` row, so it deletes this one explicitly ([account-erasure.md](account-erasure.md)). Neither admin
+role is granted the table.
+
 ### maintenance_tasks
 
 One row per scheduled maintenance task (`task_name` is the key) with its last start, completion,
@@ -823,6 +852,7 @@ Production provisioning and the first production connection remain separate owne
 | 47 | 047_room_to_write.sql | `letter_drafts.pages` (#586): the pages a letter prints on, 1 to 3, default 1, with `letter_drafts_pages_known` and `letter_drafts_pages_paid_per_send` (more than one page only for a letter our renderer drew, never a gift send). No provisioning re-run, as for 039 |
 | 48 | 048_postcard_fronts.sql | `letter_drafts.postcard_front` (#594): a postcard's front when not full bleed, a border with its caption or a greeting with its place, NULL for full bleed. `renderer_version` admits `pdf-3`, set exactly when a draft has a front, with `letter_drafts_postcard_front_layout_known` and `letter_drafts_postcard_front_drawn_by_pdf_3`. No provisioning re-run, as for 039 |
 | 49 | 049_address_requests.sql | `address_requests` (#604): address request links, the token stored as its SHA-256, an address exactly when answered, `closed_at` exactly when not waiting. No provisioning re-run: neither admin role is granted it |
+| 50 | 050_user_signatures.sql | `user_signatures` (#608): one saved signature per account, a grayscale PNG within 1200 x 400 px, with the remembered choice. No provisioning re-run: neither admin role is granted it |
 
 ---
 
