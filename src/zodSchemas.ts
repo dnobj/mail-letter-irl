@@ -3,6 +3,7 @@ import { preprocessImageFileElement, preprocessImageFileParam, preprocessPhotoLi
 import { STATIONERY_THEMES } from "./render/stationery.js";
 import { MAX_LETTER_PAGES } from "./render/geometry.js";
 import { MAIL_SERVICES } from "./config/certifiedMail.js";
+import { EXTRA_SERVICES } from "./config/products.js";
 
 export const addressZ = z.object({
   name: z.string(),
@@ -132,12 +133,14 @@ export const PREVIEW_MAIL_SERVICE_DESCRIPTION =
   "Optional. How the letter travels: standard (the default), certified (USPS Certified Mail, which gives a tracking number), " +
   "or certified_return_receipt (Certified Mail with an electronic return receipt). Certified mail costs more and is paid with Pay & Send: " +
   "no letter pack and no gift letter pays for it. Leave it out for an ordinary letter.";
-const previewMailServiceZ = z.enum(MAIL_SERVICES).optional().describe(PREVIEW_MAIL_SERVICE_DESCRIPTION);
+// A client that fills an unset field with null means no service, as it does for the monogram.
+const previewMailServiceZ = z.preprocess(noneForNull, z.enum(MAIL_SERVICES).optional()).describe(PREVIEW_MAIL_SERVICE_DESCRIPTION);
 
 /** What a letter preview's output says when it is certified mail (#625): which service. Absent for an ordinary letter. */
 export const PREVIEW_MAIL_SERVICE_OUTPUT_DESCRIPTION =
   "Present only when the letter is sent as certified mail: certified, or certified_return_receipt (with an electronic return receipt). Paid with Pay & Send.";
-const CERTIFIED_MAIL_SERVICES = ["certified", "certified_return_receipt"] as const;
+// The two services of a certified letter: the one list the code ties to the MailService type (products.ts).
+const CERTIFIED_MAIL_SERVICES = EXTRA_SERVICES;
 
 // Text-only letter schema
 export const quoteAndPreviewInputZ = z.object({
@@ -981,7 +984,7 @@ export const requestSendOutputZ = z.object({
   paidPerSend: z
     .literal(true)
     .optional()
-    .describe("Present when the person pays for it with Pay & Send on that page: letter packs and gift letters pay only for one-page letters and 6x9 postcards"),
+    .describe("Present when the person pays for it with Pay & Send on that page: letter packs and gift letters pay only for one-page letters and 6x9 postcards, and never for certified mail"),
   mailService: z.enum(CERTIFIED_MAIL_SERVICES).optional().describe(PREVIEW_MAIL_SERVICE_OUTPUT_DESCRIPTION)
 });
 

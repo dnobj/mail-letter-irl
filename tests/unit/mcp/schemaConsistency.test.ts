@@ -295,6 +295,8 @@ describe("request_send schema (#535)", () => {
     const paidJson = (requestSendOutputSchema.properties as Record<string, { const?: unknown; description?: string }>).paidPerSend;
     expect(paidJson.const).toBe(true);
     expect(paid.description).toBe(paidJson.description);
+    // It says what packs and gift letters do not pay for, certified mail among it (#625).
+    expect(paid.description).toContain('never for certified mail');
     const served = requestSendOutputZ.shape.schedule;
     expect(served.isOptional()).toBe(true);
     expect(Object.keys(served.unwrap().shape)).toEqual(["arriveBy", "mailOn"]);

@@ -53,8 +53,43 @@ async function listed(names: readonly string[]) {
 
 const properties = (tool: { inputSchema?: unknown } | undefined) => Object.keys((tool?.inputSchema as Schema | undefined)?.properties ?? {});
 
+/** The input each call reaches the app server with, through the SDK's validation. */
+const received: Array<Record<string, unknown>> = [];
+
+/** A connection whose app server records each call's input, then stops. */
+async function connectedRecording() {
+  vi.stubEnv('LETTER_IRL_REQUIRE_AUTH', 'true');
+  vi.stubEnv('LETTER_IRL_OAUTH_SCOPES', 'openid email offline_access mail:read mail:draft mail:send');
+  const real = new LetterIrlServer();
+  const appServer = {
+    listTools: (client: ClientProfile) => real.listTools(client),
+    execute: vi.fn(async (request: { input: Record<string, unknown> }) => {
+      received.push(request.input);
+      throw new Error('stopped after recording the input');
+    })
+  } as unknown as LetterIrlServer;
+  const server = await createMcpServer(appServer, {
+    userId: 'auth0|test',
+    claims: { azp: 'https://chatgpt.com/oauth/abc/client.json' },
+    token: 'token',
+    authType: 'jwt',
+    scopes: ['mail:read', 'mail:draft', 'mail:send']
+  });
+  const client = new Client({ name: 'certified-recording-client', version: '0.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  return client;
+}
+
+const LETTER = {
+  recipient: { name: 'Sam Rivera', addressLine1: '350 5th Ave', city: 'New York', state: 'NY', postalCode: '10118', country: 'US' },
+  bodyText: 'Dear Sam,',
+  signOff: 'Pat'
+};
+
 afterEach(() => {
   vi.unstubAllEnvs();
+  received.length = 0;
 });
 
 describe("the letter previews' mailService (#625)", () => {
@@ -127,17 +162,22 @@ describe("the letter previews' mailService (#625)", () => {
       expect(description).toContain('USPS Certified Mail');
       expect(description).toContain('mailService "certified"');
       expect(description).toContain('never a letter pack or a gift letter');
+      // Only on request, said to cost more, and said to be asked for again by the next preview.
+      expect(description).toContain('Only when the person asks for USPS Certified Mail (it costs more)');
+      expect(description).toContain('a new preview starts as an ordinary letter, so pass mailService again');
     }
   });
 
   it('is named in the narration, once, and not for an ordinary letter', () => {
     const preview = { lettersRequired: 1, sendEligibility: { packPays: false }, canSendNow: false };
     const say = (extra: Record<string, unknown>) => summarizeToolResult('quote_and_preview_letter', { ...preview, ...extra });
-    expect(say({ mailService: 'certified' })).toContain(' Sent as USPS Certified Mail, which gives a tracking number.');
+    expect(say({ mailService: 'certified' })).toContain(' Once sent, it goes by USPS Certified Mail, which gives a tracking number.');
     expect(say({ mailService: 'certified_return_receipt' })).toContain(
-      ' Sent as USPS Certified Mail with an electronic return receipt, which gives a tracking number.'
+      ' Once sent, it goes by USPS Certified Mail with an electronic return receipt, which gives a tracking number.'
     );
     expect(say({ mailService: 'certified' }).match(/Certified Mail/g)).toHaveLength(1);
+    // A preview has sent nothing: no sentence of it begins as though it had.
+    expect(say({ mailService: 'certified' })).not.toContain('Sent as');
     expect(say({})).not.toContain('Certified');
     expect(say({ mailService: 'standard' })).not.toContain('Certified');
     expect(say({ mailService: 'express' })).not.toContain('Certified');
@@ -145,5 +185,44 @@ describe("the letter previews' mailService (#625)", () => {
 
   it('bumps the steering copy revision', () => {
     expect(STEERING_COPY_REV).toBeGreaterThanOrEqual(38);
+  });
+});
+
+describe("the letter previews' mailService as a client sends it (#625)", () => {
+  const send = async (arguments_: Record<string, unknown>) => {
+    const client = await connectedRecording();
+    return client.callTool({ name: 'quote_and_preview_letter', arguments: { ...LETTER, ...arguments_ } }).catch(error => error);
+  };
+
+  it.each([['certified'], ['certified_return_receipt'], ['standard']])('delivers %s to the preview while certified mail is offered', async service => {
+    vi.stubEnv('LETTER_IRL_CERTIFIED_MAIL_ENABLED', 'true');
+    vi.stubEnv('JIT_PURCHASE_ENABLED', 'true');
+    await send({ mailService: service });
+    expect(received).toHaveLength(1);
+    expect(received[0].mailService).toBe(service);
+  });
+
+  it('takes null as no service, as a client that fills every field says it', async () => {
+    vi.stubEnv('LETTER_IRL_CERTIFIED_MAIL_ENABLED', 'true');
+    vi.stubEnv('JIT_PURCHASE_ENABLED', 'true');
+    const outcome = await send({ mailService: null });
+    expect(String(outcome?.message ?? '')).not.toContain('Input validation error');
+    expect(received).toHaveLength(1);
+    expect(received[0].mailService).toBeUndefined();
+  });
+
+  it.each([['Certified'], ['registered'], ['']])('refuses %j at the schema while certified mail is offered, listing what is valid', async service => {
+    vi.stubEnv('LETTER_IRL_CERTIFIED_MAIL_ENABLED', 'true');
+    vi.stubEnv('JIT_PURCHASE_ENABLED', 'true');
+    const outcome = await send({ mailService: service });
+    expect(received).toHaveLength(0);
+    expect(JSON.stringify(outcome)).toContain('certified_return_receipt');
+  });
+
+  it('delivers a stray certified request to the preview while it is not offered, which refuses it', async () => {
+    // An app that cached the schema from while it was offered.
+    await send({ mailService: 'certified' });
+    expect(received).toHaveLength(1);
+    expect(received[0].mailService).toBe('certified');
   });
 });

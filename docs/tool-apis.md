@@ -43,9 +43,9 @@ while the flag is off, and when no date can be scheduled.
 
 While certified mail is offered (`LETTER_IRL_CERTIFIED_MAIL_ENABLED` and Pay & Send both on, #625), the three letter previews
 also accept `mailService`: `certified` (USPS Certified Mail, which gives a tracking number) or `certified_return_receipt`
-(with an electronic return receipt). `standard`, `null` and leaving it out are an ordinary letter; any other text is refused
-(`MAIL_SERVICE_INVALID`) rather than read as one, and a service asked for while certified mail is not offered is refused
-(`MAIL_SERVICE_NOT_OFFERED`), both before anything is created. Certified mail is Pay & Send only: no letter pack, balance or gift letter
+(with an electronic return receipt). `standard`, `null` and leaving it out are an ordinary letter. While certified mail is offered, any other text is refused (by
+the schema's enum, and again as `MAIL_SERVICE_INVALID`) rather than read as one; while it is not offered, anything but those is
+refused as `MAIL_SERVICE_NOT_OFFERED`, whatever it says. Both come before anything is created. Certified mail is Pay & Send only: no letter pack, balance or gift letter
 pays for it, so the preview's terms are Pay & Send's. The preview returns `mailService` for certified mail only. While certified mail is
 not offered the argument is not served, nor in `/manifest.json`; the output field is declared either way, since output schemas are closed.
 

@@ -64,7 +64,11 @@ export async function resolveGiftSendChoice(params: {
 }): Promise<GiftSendChoice> {
   if (!isGiftLettersEnabled()) {
     if (params.requested === true) {
-      throw new Error('Gift letters are not available right now. Leave sendAsGift out to send from the balance.');
+      throw new Error(
+        params.certified === true
+          ? 'Gift letters are not available right now. Leave sendAsGift out and pay for it with Pay & Send.'
+          : 'Gift letters are not available right now. Leave sendAsGift out to send from the balance.'
+      );
     }
     return { isGift: false, giftLettersAvailable: 0 };
   }

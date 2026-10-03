@@ -158,7 +158,9 @@
  *     in their descriptions, output and narration that certified mail is paid
  *     with Pay & Send, never a pack or a gift letter. The output field is
  *     declared whatever the flag says (the output schema is closed), so
- *     production's letter previews list it too, and no deployment returns it
- *     for an ordinary letter.
+ *     production's letter previews and request_send list it too, and no
+ *     deployment returns it for an ordinary letter. request_send's link words
+ *     and the how-to-send words give a certified letter its own sentence, not
+ *     the pack rule's.
  */
 export const STEERING_COPY_REV = 38;

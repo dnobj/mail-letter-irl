@@ -120,6 +120,7 @@ import { isArriveByEnabled } from "../config/arriveBy.js";
 import { isStationeryOffered } from "../config/stationery.js";
 import { isSignaturesOffered } from "../config/signatures.js";
 import { isCertifiedMailOffered } from "../config/certifiedMail.js";
+import { isExtraService } from "../config/products.js";
 import { isPostcardSizesOffered } from "../config/postcardSizes.js";
 import { isPostcardLayoutsOffered } from "../config/postcardLayouts.js";
 import { isPostcardCollagesOffered } from "../config/postcardCollages.js";
@@ -1435,7 +1436,7 @@ export function sendLinkText(result: RequestSendOutput): string {
     return (
       `Ask the person to open ${result.confirmationUrl} to check the ${what}${to}, then pay for it with Pay & Send there, which sends it. ` +
       whenSentText(result) +
-      packRuleText(result.mailService !== undefined) +
+      packRuleText(isExtraService(result.mailService)) +
       `Nothing is sent until they pay there. The link works until ${result.expiresAtISO}.`
     );
   }
@@ -1533,7 +1534,7 @@ export function previewPayment(result: Record<string, unknown>): { packPays: boo
     packPays: eligibility?.packPays !== false,
     payOnPage: typeof eligibility?.payAndSend?.pageUrl === "string",
     // Certified mail (#625): its sentence is not the pack rule's, which would contradict a one-page letter.
-    certified: result.mailService === "certified" || result.mailService === "certified_return_receipt"
+    certified: isExtraService(result.mailService)
   };
 }
 
@@ -1616,9 +1617,9 @@ function signatureSentence(result: Record<string, unknown>): string {
 function mailServiceSentence(result: Record<string, unknown>): string {
   switch (result.mailService) {
     case "certified":
-      return " Sent as USPS Certified Mail, which gives a tracking number.";
+      return " Once sent, it goes by USPS Certified Mail, which gives a tracking number.";
     case "certified_return_receipt":
-      return " Sent as USPS Certified Mail with an electronic return receipt, which gives a tracking number.";
+      return " Once sent, it goes by USPS Certified Mail with an electronic return receipt, which gives a tracking number.";
     default:
       return "";
   }

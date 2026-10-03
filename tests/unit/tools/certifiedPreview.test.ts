@@ -194,17 +194,46 @@ describe('while certified mail is not offered', () => {
   it.each(Object.keys(TOOLS) as (keyof typeof TOOLS)[])(
     'refuses certified mail on the %s preview before anything is fetched or checked, and makes no draft',
     async layout => {
+      // A provider that validates addresses, so a check that ran before the refusal would show.
+      const validateAddress = vi.fn();
+      vi.mocked(getLetterProvider).mockReturnValue({ validateAddress } as never);
       for (const service of ['certified', 'certified_return_receipt']) {
         await expect(run(layout, { mailService: service })).rejects.toMatchObject({
           message: CERTIFIED_NOT_OFFERED,
           code: 'MAIL_SERVICE_NOT_OFFERED'
         });
+        // And with no sender given, which would look for the saved return address first.
+        await expect(run(layout, { mailService: service, sender: undefined })).rejects.toMatchObject({
+          code: 'MAIL_SERVICE_NOT_OFFERED'
+        });
       }
       expect(createDraft).not.toHaveBeenCalled();
       expect(downloadAndProcessLetterImageWithPreview).not.toHaveBeenCalled();
+      expect(getRecentUploadedImage).not.toHaveBeenCalled();
       expect(getReturnAddress).not.toHaveBeenCalled();
+      expect(validateAddress).not.toHaveBeenCalled();
+      expect(getGiftBalance).not.toHaveBeenCalled();
     }
   );
+
+  it.each(['registered', 'Certified', ' certified', '', 0, false, ['certified']])(
+    'refuses %j as not offered too, so no one is told to use a value that is then refused',
+    async service => {
+      await expect(run('text_only', { mailService: service })).rejects.toMatchObject({
+        message: CERTIFIED_NOT_OFFERED,
+        code: 'MAIL_SERVICE_NOT_OFFERED'
+      });
+      expect(createDraft).not.toHaveBeenCalled();
+    }
+  );
+
+  it('logs which service was asked for only when it is one of the two, never the text it was given', async () => {
+    const ctx = context();
+    await expect(run('text_only', { mailService: 'certified' }, ctx)).rejects.toThrow();
+    await expect(run('text_only', { mailService: 'drop table letters' }, ctx)).rejects.toThrow();
+    const logged = vi.mocked(ctx.logger.info).mock.calls.filter(([fields]) => (fields as { event?: string }).event === 'quote.letter.certified_not_offered');
+    expect(logged.map(([fields]) => (fields as { mailService: string }).mailService)).toEqual(['certified', 'unrecognized']);
+  });
 
   it.each([
     ['the flag is off', { LETTER_IRL_CERTIFIED_MAIL_ENABLED: 'false', JIT_PURCHASE_ENABLED: 'true' }],

@@ -37,7 +37,8 @@ export interface RequestSendOutput {
   schedule?: { arriveBy: string; mailOn: string };
   /**
    * Present when the page takes a Pay & Send payment for this mail: packs and
-   * gift letters pay only for one-page letters and 6x9 postcards (#579).
+   * gift letters pay only for one-page letters and 6x9 postcards (#579), and
+   * never for certified mail (#625).
    */
   paidPerSend?: true;
   /** Present only for certified mail (#625): which service, so the words around the link do not give it the pack rule. */

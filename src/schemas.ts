@@ -50,6 +50,7 @@ import {
 } from "./zodSchemas.js";
 import { STATIONERY_THEMES } from "./render/stationery.js";
 import { MAIL_SERVICES } from "./config/certifiedMail.js";
+import { EXTRA_SERVICES } from "./config/products.js";
 
 /** Arrive-by (#535): the preview's input, and what its output says. */
 const arriveBySchema = { type: "string", description: ARRIVE_BY_DESCRIPTION } as const;
@@ -316,7 +317,7 @@ export const quoteAndPreviewOutputSchema: JsonSchema = {
     arrivalWindow: arrivalWindowSchema,
     stationery: previewStationerySchema,
     signature: previewSignatureOutputSchema,
-    mailService: { type: "string", enum: ["certified", "certified_return_receipt"], description: PREVIEW_MAIL_SERVICE_OUTPUT_DESCRIPTION },
+    mailService: { type: "string", enum: [...EXTRA_SERVICES], description: PREVIEW_MAIL_SERVICE_OUTPUT_DESCRIPTION },
     pages: { type: "integer", minimum: 2, maximum: MAX_LETTER_PAGES, description: PREVIEW_PAGES_DESCRIPTION },
     wordsVersion: { type: "string", description: WORDS_VERSION_DESCRIPTION },
     previewHtml: { type: "string" },
@@ -1049,9 +1050,9 @@ export const requestSendOutputSchema: JsonSchema = {
     paidPerSend: {
       type: "boolean",
       const: true,
-      description: "Present when the person pays for it with Pay & Send on that page: letter packs and gift letters pay only for one-page letters and 6x9 postcards"
+      description: "Present when the person pays for it with Pay & Send on that page: letter packs and gift letters pay only for one-page letters and 6x9 postcards, and never for certified mail"
     },
-    mailService: { type: "string", enum: ["certified", "certified_return_receipt"], description: PREVIEW_MAIL_SERVICE_OUTPUT_DESCRIPTION }
+    mailService: { type: "string", enum: [...EXTRA_SERVICES], description: PREVIEW_MAIL_SERVICE_OUTPUT_DESCRIPTION }
   }
 };
 
