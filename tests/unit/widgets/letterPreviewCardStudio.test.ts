@@ -1160,3 +1160,66 @@ describe("the Words tab's editor (#586)", () => {
     expect(card.byId('studio-words-chat').hidden).toBe(false);
   });
 });
+
+describe('certified mail on the card (#625)', () => {
+  const ON_PAGE = {
+    packPays: false,
+    payAndSend: { available: false, amountCents: 1199, currency: 'usd', pageUrl: 'https://letterirl.example/send/draft_0001' },
+    letterPack: { available: false, purchaseUrl: 'https://letterirl.example/packs' }
+  };
+  const PACK_RULE = 'Letter packs pay for one-page letters and 6x9 postcards.';
+  const certified = (service = 'certified') =>
+    output({
+      mailService: service,
+      canSendNow: false,
+      reasonCannotSend: 'Certified mail is paid with Pay & Send.',
+      sendEligibility: ON_PAGE,
+      deliveryClass: service === 'certified' ? 'USPS Certified Mail' : 'USPS Certified Mail with an electronic return receipt'
+    });
+
+  it('tells a certified letter that Pay & Send on the page pays for it, not the pack rule', async () => {
+    const card = mount();
+    await card.show(certified(), ON);
+    expect(card.byId('pay-page-button').style.display).toBe('flex');
+    const note = text(card, 'checkout-note');
+    expect(note).toBe("Certified mail is paid with Pay & Send on Letter IRL's page, which sends it once you pay.");
+    expect(note).not.toContain(PACK_RULE);
+    expect(card.byId('checkout-note').style.display).toBe('block');
+  });
+
+  it('keeps the pack rule for mail no pack pays for that is not certified (a two-page letter)', async () => {
+    const card = mount();
+    await card.show(output({ pages: 2, canSendNow: false, sendEligibility: ON_PAGE }), ON);
+    expect(text(card, 'checkout-note')).toContain(PACK_RULE);
+    expect(text(card, 'checkout-note')).not.toContain('Certified');
+  });
+
+  it('names the service in the summary and the price in the footer', async () => {
+    const plain = mount();
+    await plain.show(certified(), ON);
+    expect(text(plain, 'studio-summary')).toContain('certified mail');
+    expect(text(plain, 'studio-summary')).not.toContain('return receipt');
+    expect(text(plain, 'studio-cost')).toBe('Pay & Send USD 11.99');
+
+    const receipt = mount();
+    await receipt.show(certified('certified_return_receipt'), ON);
+    expect(text(receipt, 'studio-summary')).toContain('certified mail with a return receipt');
+  });
+
+  it('shows the server\'s delivery class, which says what the letter travels by', async () => {
+    const card = mount();
+    await card.show(certified('certified_return_receipt'), ON);
+    expect(text(card, 'delivery')).toContain('USPS Certified Mail with an electronic return receipt');
+  });
+
+  it('says nothing of certified mail for an ordinary letter, or for a service it does not know', async () => {
+    for (const mailService of [undefined, 'standard', 'express', 7]) {
+      const card = mount();
+      await card.show(output({ ...(mailService === undefined ? {} : { mailService }) }), ON);
+      expect(text(card, 'studio-summary'), String(mailService)).not.toContain('certified');
+    }
+    const unknown = mount();
+    await unknown.show(output({ mailService: 'express', pages: 2, canSendNow: false, sendEligibility: ON_PAGE }), ON);
+    expect(text(unknown, 'checkout-note')).toContain(PACK_RULE);
+  });
+});

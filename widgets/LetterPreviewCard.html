@@ -646,6 +646,11 @@
         return latestTerms;
       }
 
+      // The certified service a preview names (#625), or "": only the two values the server writes.
+      function certifiedOf(state) {
+        return state?.mailService === "certified" || state?.mailService === "certified_return_receipt" ? state.mailService : "";
+      }
+
       // The pages a letter prints on (#586): one unless it says more.
       function pagesOf(state) {
         return state?.pages === 2 || state?.pages === 3 ? state.pages : 1;
@@ -790,7 +795,9 @@
                       ? estimate.charAt(0).toLowerCase() + estimate.slice(1)
                       : "First Class";
         const pages = pagesOf(state);
-        document.getElementById("studio-summary").textContent = [theme, ink, pages > 1 ? `${pages} pages, both sides` : null, timing]
+        const certified = certifiedOf(state);
+        const service = certified ? (certified === "certified" ? "certified mail" : "certified mail with a return receipt") : null;
+        document.getElementById("studio-summary").textContent = [theme, ink, pages > 1 ? `${pages} pages, both sides` : null, service, timing]
           .filter(Boolean)
           .join(" · ");
 
@@ -2290,7 +2297,7 @@
             checkoutNote.textContent = CHECKOUT_NOTE;
             checkoutNote.style.display = "block";
           } else if (payOnPage) {
-            checkoutNote.textContent = PAY_PAGE_NOTE;
+            checkoutNote.textContent = certifiedOf(state) ? CERTIFIED_PAY_PAGE_NOTE : PAY_PAGE_NOTE;
             checkoutNote.style.display = "block";
           } else if (packsOnWebsite) {
             checkoutNote.textContent = WEBSITE_PACKS_NOTE;
@@ -2918,6 +2925,9 @@
         "Checkout opens in your browser. Paying sends it automatically - this card updates when you return to this tab, or use Check status.";
       const WEBSITE_PACKS_NOTE =
         "Letter packs are sold on the website. Sign in there with the same email you use here - this card updates when you return to this tab, or use Check status.";
+      // Certified mail (#625) is paid per send whatever its pages, so the rule about what a pack pays for does not apply to it.
+      const CERTIFIED_PAY_PAGE_NOTE =
+        "Certified mail is paid with Pay & Send on Letter IRL's page, which sends it once you pay.";
       const PAY_PAGE_NOTE =
         "Letter packs pay for one-page letters and 6x9 postcards. This one is paid with Pay & Send on Letter IRL's page, which sends it once you pay.";
 
