@@ -14,6 +14,11 @@ vi.mock('../../../src/services/draftService.js', async importOriginal => ({
   getDraftForMailService: vi.fn()
 }));
 
+vi.mock('../../../src/services/giftLetterService.js', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../../src/services/giftLetterService.js')>()),
+  getGiftBalance: vi.fn()
+}));
+
 vi.mock('../../../src/services/commerceService.js', async importOriginal => ({
   ...(await importOriginal<typeof import('../../../src/services/commerceService.js')>()),
   getSendEligibility: vi.fn()
@@ -21,6 +26,7 @@ vi.mock('../../../src/services/commerceService.js', async importOriginal => ({
 
 import { getDraftForMailService, setDraftMailService } from '../../../src/services/draftService.js';
 import { getSendEligibility } from '../../../src/services/commerceService.js';
+import { getGiftBalance } from '../../../src/services/giftLetterService.js';
 import { MailServiceRefusedError, SET_MAIL_SERVICE_TOOL, setMailServiceTool } from '../../../src/tools/setMailService.js';
 import { CERTIFIED_PAID_PER_SEND_REASON } from '../../../src/tools/letterHelpers.js';
 import { setMailServiceInputSchema, setMailServiceOutputSchema } from '../../../src/schemas.js';
@@ -44,13 +50,14 @@ const set = (input: Record<string, unknown>, ctx = context()) => setMailServiceT
 
 /** The draft as the answer reads it after the change. */
 const draft = (overrides: Record<string, unknown> = {}) =>
-  ({ mail_type: 'letter', pages: 1, mail_service: 'standard', is_gift_send: false, required_credits: 1, ...overrides }) as never;
+  ({ mail_type: 'letter', postcard_size: null, pages: 1, mail_service: 'standard', is_gift_send: false, required_credits: 1, status: 'pending', ...overrides }) as never;
 
 beforeEach(() => {
   vi.stubEnv('LETTER_IRL_CERTIFIED_MAIL_ENABLED', 'true');
   vi.stubEnv('JIT_PURCHASE_ENABLED', 'true');
   vi.mocked(setDraftMailService).mockReset().mockResolvedValue(null);
   vi.mocked(getDraftForMailService).mockReset().mockResolvedValue(draft({ mail_service: 'certified' }));
+  vi.mocked(getGiftBalance).mockReset().mockResolvedValue({ available: 0, next: undefined } as never);
   vi.mocked(getSendEligibility).mockReset().mockReturnValue({
     payAndSend: { available: true, amountCents: 1199 },
     letterPack: { available: false, purchaseUrl: 'https://packs.example/pricing' },
@@ -86,7 +93,7 @@ describe('the cards and the tool list (#625)', () => {
 
   it('says in its description that it is for when the person asks, costs more and is not a pack or a gift', () => {
     const description = String(setMailServiceTool.description);
-    expect(description).toContain('Only when the person asks for certified mail');
+    expect(description).toContain('Only when the person asks to add or remove certified mail');
     expect(description).toContain('costs more');
     expect(description).toContain('never a letter pack or a gift letter');
     expect(description).toContain('Nothing is sent by this tool');
@@ -200,23 +207,41 @@ describe('the draft service refusing a change (#625)', () => {
     ['not_found', 'DRAFT_NOT_FOUND', "That preview wasn't found. Make a new preview, then try again."],
     ['sent', 'DRAFT_ALREADY_SENT', "This letter has already been sent, so how it travels can't change. list_orders shows it."],
     ['expired', 'DRAFT_EXPIRED', 'This preview has expired. Make a new preview: the letter previews take mailService themselves.'],
-    ['checkout_pending', 'DRAFT_CHECKOUT_PENDING', "This preview is tied to a Pay & Send payment, so how it travels can't change now."],
-    ['not_a_letter', 'DRAFT_NOT_A_LETTER', 'Certified mail is for letters. A postcard cannot be certified.'],
-    ['gift_send', 'DRAFT_IS_GIFT', 'A gift letter does not pay for certified mail. Make a new preview without sendAsGift to send it certified.']
+    [
+      'checkout_pending',
+      'DRAFT_CHECKOUT_PENDING',
+      "This preview is tied to a Pay & Send payment, so how it travels can't change now. Finish or let that payment lapse, or make a new preview."
+    ],
+    [
+      'not_a_letter',
+      'DRAFT_NOT_A_LETTER',
+      'Certified mail is for letters, and a postcard always goes as ordinary mail. Make a letter preview to send certified mail.'
+    ],
+    [
+      'gift_send',
+      'DRAFT_IS_GIFT',
+      'A gift letter does not pay for certified mail. Make a new preview with mailService certified: it is paid with Pay & Send, not by a gift letter.'
+    ]
   ] as const)('turns "%s" into a sentence the model can act on', async (reason, code, message) => {
     vi.mocked(setDraftMailService).mockResolvedValue(reason);
     const ctx = context();
     const error = await set({ draftId: DRAFT_ID, mailService: 'certified' }, ctx).catch(caught => caught);
     expect(error).toBeInstanceOf(MailServiceRefusedError);
     expect(error).toMatchObject({ code, message, diagnosticClass: code });
-    // The draft's price is read only once the change is made, and its id is not repeated.
-    expect(getDraftForMailService).not.toHaveBeenCalled();
+    // The draft is read once, before the change; its price is read again only once the change is made. Its id is not repeated.
+    expect(getDraftForMailService).toHaveBeenCalledTimes(1);
     expect(message).not.toContain(DRAFT_ID);
     expect(vi.mocked(ctx.logger.warn).mock.calls[0][0]).toMatchObject({ event: 'draft.mail_service_refused', reason: code });
   });
 
-  it('says a draft that vanished after the change is missing', async () => {
+  it('says a draft that is not there, or belongs to someone else, is missing, and changes nothing', async () => {
     vi.mocked(getDraftForMailService).mockResolvedValue(null);
+    await expect(set({ draftId: DRAFT_ID, mailService: 'certified' })).rejects.toMatchObject({ code: 'DRAFT_NOT_FOUND' });
+    expect(setDraftMailService).not.toHaveBeenCalled();
+  });
+
+  it('says a draft that vanished after the change is missing', async () => {
+    vi.mocked(getDraftForMailService).mockResolvedValueOnce(draft()).mockResolvedValueOnce(null);
     await expect(set({ draftId: DRAFT_ID, mailService: 'certified' })).rejects.toMatchObject({ code: 'DRAFT_NOT_FOUND' });
   });
 
@@ -234,5 +259,87 @@ describe('the draft service refusing a change (#625)', () => {
       expect(setMailServiceOutputZ.safeParse(result).success, service).toBe(true);
       expect(Object.keys(setMailServiceOutputSchema.properties as object)).toEqual(expect.arrayContaining(Object.keys(result)));
     }
+  });
+});
+
+describe('a postcard, a draft sent meanwhile and text that is not a service (#625)', () => {
+  it.each(['standard', 'certified', 'certified_return_receipt'])(
+    'refuses a postcard whatever the service is (%s), and changes nothing: it is always ordinary mail and this tool is for letters',
+    async service => {
+      vi.mocked(getDraftForMailService).mockResolvedValue(draft({ mail_type: 'postcard', postcard_size: '6x11' }));
+      await expect(set({ draftId: DRAFT_ID, mailService: service })).rejects.toMatchObject({ code: 'DRAFT_NOT_A_LETTER' });
+      expect(setDraftMailService).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    ['consumed', 'DRAFT_ALREADY_SENT'],
+    ['cancelled', 'DRAFT_EXPIRED'],
+    ['expired', 'DRAFT_EXPIRED']
+  ])('refuses a draft that is %s by the time the change has been made, rather than saying nothing was sent', async (status, code) => {
+    vi.mocked(getDraftForMailService).mockResolvedValueOnce(draft()).mockResolvedValueOnce(draft({ status }));
+    await expect(set({ draftId: DRAFT_ID, mailService: 'certified' })).rejects.toMatchObject({ code });
+  });
+
+  it('says nothing of a stored service it does not know, rather than calling it ordinary mail', async () => {
+    vi.mocked(getDraftForMailService).mockResolvedValueOnce(draft()).mockResolvedValueOnce(draft({ mail_service: 'express' }));
+    await expect(set({ draftId: DRAFT_ID, mailService: 'standard' })).rejects.toMatchObject({ code: 'DRAFT_NOT_FOUND' });
+  });
+
+  it('keeps a call\'s own text out of every log', async () => {
+    const ctx = context();
+    await expect(set({ draftId: DRAFT_ID, mailService: 'drop table letters' }, ctx)).rejects.toMatchObject({ code: 'MAIL_SERVICE_INVALID' });
+    const logged = JSON.stringify([...vi.mocked(ctx.logger.info).mock.calls, ...vi.mocked(ctx.logger.warn).mock.calls]);
+    expect(logged).not.toContain('drop table');
+  });
+
+  it('prices a gift letter set to standard as a gift: nothing to pay', async () => {
+    vi.mocked(getDraftForMailService).mockResolvedValue(draft({ is_gift_send: true }));
+    const result = await set({ draftId: DRAFT_ID, mailService: 'standard' }, context(0));
+    expect(result.canSendNow).toBe(true);
+    expect(result.sendEligibility.payAndSend).toEqual({ available: false, unavailableReason: 'This uses a gift letter, so there is nothing to pay.' });
+  });
+});
+
+describe('the gift letter note when a letter goes back to ordinary mail (#625)', () => {
+  const NOTE = ' A new preview of it can use your gift letter.';
+  const available = (count: number) => vi.mocked(getGiftBalance).mockResolvedValue({ available: count, next: undefined } as never);
+
+  beforeEach(() => {
+    vi.stubEnv('LETTER_IRL_GIFT_LETTERS_ENABLED', 'true');
+    vi.mocked(getDraftForMailService).mockResolvedValue(draft({ required_credits: 2 }));
+  });
+
+  it('says a new preview can use the gift letter, for a one-page letter the balance cannot pay', async () => {
+    available(1);
+    const result = await set({ draftId: DRAFT_ID, mailService: 'standard' }, context(0));
+    expect(result.canSendNow).toBe(false);
+    expect(result.message).toBe(`This letter now goes as ordinary first-class mail once sent. Nothing has been sent.${NOTE}`);
+  });
+
+  it('says nothing of it without a gift letter, with gift letters off, or when the balance pays', async () => {
+    available(0);
+    expect((await set({ draftId: DRAFT_ID, mailService: 'standard' }, context(0))).message).not.toContain('gift letter');
+    available(1);
+    vi.stubEnv('LETTER_IRL_GIFT_LETTERS_ENABLED', 'false');
+    expect((await set({ draftId: DRAFT_ID, mailService: 'standard' }, context(0))).message).not.toContain('gift letter');
+    vi.stubEnv('LETTER_IRL_GIFT_LETTERS_ENABLED', 'true');
+    expect((await set({ draftId: DRAFT_ID, mailService: 'standard' }, context(10))).message).not.toContain('gift letter');
+  });
+
+  it('says nothing of it for certified mail, a longer letter or a gift letter, which no gift can pay for or already is one', async () => {
+    available(1);
+    vi.mocked(getDraftForMailService).mockResolvedValue(draft({ mail_service: 'certified', required_credits: 2 }));
+    expect((await set({ draftId: DRAFT_ID, mailService: 'certified' }, context(0))).message).not.toContain('gift letter ');
+    vi.mocked(getDraftForMailService).mockResolvedValue(draft({ pages: 2, required_credits: 2 }));
+    expect((await set({ draftId: DRAFT_ID, mailService: 'standard' }, context(0))).message).not.toContain('use your gift letter');
+    vi.mocked(getDraftForMailService).mockResolvedValue(draft({ is_gift_send: true, required_credits: 2 }));
+    expect((await set({ draftId: DRAFT_ID, mailService: 'standard' }, context(0))).message).not.toContain('use your gift letter');
+  });
+
+  it('answers without it when the gift balance cannot be read', async () => {
+    vi.mocked(getGiftBalance).mockRejectedValue(new Error('down'));
+    const result = await set({ draftId: DRAFT_ID, mailService: 'standard' }, context(0));
+    expect(result.message).toBe('This letter now goes as ordinary first-class mail once sent. Nothing has been sent.');
   });
 });

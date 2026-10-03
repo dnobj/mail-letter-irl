@@ -139,7 +139,7 @@ LETTER_IRL_STUDIO_CARD_ENABLED=<true to lay letter cards out as a studio; unset 
 # at their own prices, and needs their Stripe Prices below. API and maintenance services.
 LETTER_IRL_ROOM_TO_WRITE_ENABLED=<true to preview and sell two- and three-page letters; unset is off>
 LETTER_IRL_POSTCARD_SIZES_ENABLED=<true to preview and sell 4x6 and 11x6 postcards, with LETTER_IRL_PRINT_RENDERER=pdf; unset is off>
-LETTER_IRL_CERTIFIED_MAIL_ENABLED=<true to sell certified mail letters through Pay & Send (#625), which needs their two prices below; unset is off>
+LETTER_IRL_CERTIFIED_MAIL_ENABLED=<true to sell certified mail letters through Pay & Send (#625), which needs their two prices below, to accept mailService on the letter previews and to list set_mail_service; unset is off>
 LETTER_IRL_SCHEDULE_LEAD_DAYS=<business days from the mail date to the arrival date; default 7, production refuses less than 3>
 LETTER_IRL_SCHEDULE_HORIZON_DAYS=<calendar days ahead an arrival date may be; default 60>
 # Photo upload through the card in apps with no file store (#474, docs/deployment.md): off unless

@@ -185,7 +185,8 @@ drafts that expire on their own, and `set_arrival_date` (#535, listed only while
 on) changes only such a draft's dates; it sends nothing, and the same date twice changes nothing
 more, so it is also idempotent.
 
-`set_stationery` (#563) and `set_letter_words` (#586) are non-destructive and idempotent on the same
+`set_stationery` (#563), `set_letter_words` (#586) and `set_mail_service` (#625, how a letter travels:
+ordinary or certified) are non-destructive and idempotent on the same
 grounds: each changes only a draft, which sends nothing and expires on its own. `set_letter_words`
 replaces the person's words in place, which reads like `set_return_address`, but only words its
 caller has seen: a change names the version of the words it replaces (`wordsVersion`) and is refused,

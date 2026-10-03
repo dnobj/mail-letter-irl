@@ -115,3 +115,73 @@ describe('the steering copy (#625)', () => {
     expect(STEERING_COPY_REV).toBeGreaterThanOrEqual(40);
   });
 });
+
+describe('set_mail_service called through a real MCP client (#625)', () => {
+  const received: Array<Record<string, unknown>> = [];
+
+  async function connectedRecording() {
+    vi.stubEnv('LETTER_IRL_REQUIRE_AUTH', 'true');
+    vi.stubEnv('LETTER_IRL_OAUTH_SCOPES', 'openid email offline_access mail:read mail:draft mail:send');
+    const real = new LetterIrlServer();
+    const appServer = {
+      listTools: (client: ClientProfile) => real.listTools(client),
+      execute: vi.fn(async (request: { input: Record<string, unknown> }) => {
+        received.push(request.input);
+        throw new Error('stopped after recording the input');
+      })
+    } as unknown as LetterIrlServer;
+    const server = await createMcpServer(appServer, {
+      userId: 'auth0|test',
+      claims: { azp: 'https://chatgpt.com/oauth/abc/client.json' },
+      token: 'token',
+      authType: 'jwt',
+      scopes: ['mail:read', 'mail:draft', 'mail:send']
+    });
+    const client = new Client({ name: 'set-mail-service-recording', version: '0.0.0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    return client;
+  }
+
+  const DRAFT = '0f1e2d3c-4b5a-4978-8796-a5b4c3d2e1f0';
+  const call = async (arguments_: Record<string, unknown>) =>
+    (await connectedRecording()).callTool({ name: 'set_mail_service', arguments: arguments_ }).catch(error => error);
+
+  afterEach(() => {
+    received.length = 0;
+  });
+
+  it.each(['standard', 'certified', 'certified_return_receipt'])('delivers %s to the tool as declared', async service => {
+    offer();
+    await call({ draftId: DRAFT, mailService: service });
+    expect(received).toEqual([{ draftId: DRAFT, mailService: service }]);
+  });
+
+  it.each([[undefined], [null], [''], ['Certified'], [' certified'], ['express'], [0], [['certified']]])(
+    'refuses %j before the tool, listing the valid services',
+    async mailService => {
+      offer();
+      const outcome = await call({ draftId: DRAFT, ...(mailService === undefined ? {} : { mailService }) });
+      expect(received).toHaveLength(0);
+      expect(JSON.stringify(outcome)).toContain('certified_return_receipt');
+    }
+  );
+
+  it('is not a tool of the connection while certified mail is not offered: the tool is not reached', async () => {
+    const outcome = await call({ draftId: DRAFT, mailService: 'certified' });
+    expect(received).toHaveLength(0);
+    expect(outcome instanceof Error ? outcome.message : JSON.stringify(outcome)).toMatch(/not found|unknown tool/i);
+  });
+
+  it('declares the same output on the served and the manifest layers', async () => {
+    offer();
+    const served = (await listed()).find(tool => tool.name === 'set_mail_service')!.outputSchema as Schema;
+    const manifest = (buildManifest().tools as unknown as Array<{ name: string; outputSchema: Schema }>).find(tool => tool.name === 'set_mail_service')!
+      .outputSchema;
+    expect(manifest.required?.slice().sort()).toEqual(served.required?.slice().sort());
+    expect(Object.keys(manifest.properties).sort()).toEqual(Object.keys(served.properties).sort());
+    expect(manifest.properties.mailService.enum).toEqual(served.properties.mailService.enum);
+    expect(manifest.properties.mailService.description).toBe(served.properties.mailService.description);
+    expect(manifest.properties.canSendNow.description).toBe(served.properties.canSendNow.description);
+  });
+});

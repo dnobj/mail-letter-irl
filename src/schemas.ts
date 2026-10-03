@@ -45,6 +45,7 @@ import {
   PREVIEW_MAIL_SERVICE_OUTPUT_DESCRIPTION,
   SET_MAIL_SERVICE_DESCRIPTION,
   SET_MAIL_SERVICE_CAN_SEND_DESCRIPTION,
+  SET_MAIL_SERVICE_OUTPUT_DESCRIPTION,
   ORDER_MAIL_SERVICE_DESCRIPTION,
   ORDER_CARRIER_TRACKING_NUMBER_DESCRIPTION,
   ORDER_TRACKING_SUPPORT_DESCRIPTION,
@@ -1268,7 +1269,7 @@ export const setMailServiceOutputSchema: JsonSchema = {
   required: ["draftId", "canSendNow", "sendEligibility", "message"],
   properties: {
     draftId: { type: "string" },
-    mailService: { type: "string", enum: [...EXTRA_SERVICES], description: "Present only when the letter now goes as certified mail: which service. Absent: an ordinary letter" },
+    mailService: { type: "string", enum: [...EXTRA_SERVICES], description: SET_MAIL_SERVICE_OUTPUT_DESCRIPTION },
     canSendNow: { type: "boolean", description: SET_MAIL_SERVICE_CAN_SEND_DESCRIPTION },
     reasonCannotSend: { type: "string" },
     sendEligibility: sendEligibilitySchema,

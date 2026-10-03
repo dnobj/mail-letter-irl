@@ -1087,7 +1087,7 @@ describe('draftService stationery (#563)', () => {
       vi.mocked(db.query).mockResolvedValueOnce({ rows: [{ mail_type: 'letter', pages: 1 }] } as any);
       await expect(getDraftForMailService('draft-1', 'auth0|owner')).resolves.toEqual({ mail_type: 'letter', pages: 1 });
       const [sql, params] = vi.mocked(db.query).mock.calls[0] as [string, unknown[]];
-      for (const column of ['mail_type', 'pages', 'mail_service', 'is_gift_send', 'required_credits']) {
+      for (const column of ['mail_type', 'postcard_size', 'pages', 'mail_service', 'is_gift_send', 'required_credits', 'status']) {
         expect(sql, column).toContain(column);
       }
       // No picture and no page: only what the price is read from (#625).

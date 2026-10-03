@@ -540,6 +540,11 @@ export const clearSignatureInputZ = z.object({
 // A letter preview signed or unsigned without previewing again (#608 part 4).
 export const SET_LETTER_SIGNATURE_DESCRIPTION =
   "true prints the person's saved signature under the closing; false takes it off";
+export const setLetterSignatureInputZ = z.object({
+  draftId: z.string().describe("The draftId from a letter preview"),
+  signature: z.boolean().describe(SET_LETTER_SIGNATURE_DESCRIPTION)
+});
+
 /** set_mail_service's input (#625): which service the previewed letter travels by. */
 export const SET_MAIL_SERVICE_DESCRIPTION =
   "How the letter travels: standard (ordinary first-class mail), certified (USPS Certified Mail) or certified_return_receipt (Certified Mail with an electronic return receipt). " +
@@ -547,11 +552,6 @@ export const SET_MAIL_SERVICE_DESCRIPTION =
 export const setMailServiceInputZ = z.object({
   draftId: z.string().describe("The draftId from a letter preview"),
   mailService: z.enum(MAIL_SERVICES).describe(SET_MAIL_SERVICE_DESCRIPTION)
-});
-
-export const setLetterSignatureInputZ = z.object({
-  draftId: z.string().describe("The draftId from a letter preview"),
-  signature: z.boolean().describe(SET_LETTER_SIGNATURE_DESCRIPTION)
 });
 
 // ============================================================================
@@ -1079,11 +1079,13 @@ export const clearSignatureOutputZ = z.object({
 });
 
 /** set_mail_service's answer (#625). */
+export const SET_MAIL_SERVICE_OUTPUT_DESCRIPTION =
+  "Present only when the letter now goes as certified mail: which service. Absent: an ordinary letter";
 export const SET_MAIL_SERVICE_CAN_SEND_DESCRIPTION =
   "Whether the balance or a gift letter pays for the letter as it is now: certified mail is paid with Pay & Send, so it is false for it";
 export const setMailServiceOutputZ = z.object({
   draftId: z.string(),
-  mailService: z.enum(CERTIFIED_MAIL_SERVICES).optional().describe("Present only when the letter now goes as certified mail: which service. Absent: an ordinary letter"),
+  mailService: z.enum(CERTIFIED_MAIL_SERVICES).optional().describe(SET_MAIL_SERVICE_OUTPUT_DESCRIPTION),
   canSendNow: z.boolean().describe(SET_MAIL_SERVICE_CAN_SEND_DESCRIPTION),
   reasonCannotSend: z.string().optional(),
   sendEligibility: sendEligibilityZ,

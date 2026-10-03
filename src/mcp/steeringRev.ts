@@ -176,5 +176,7 @@
  *     change how a previewed letter travels (ordinary, certified, or certified
  *     with an electronic return receipt) without previewing it again. The answer
  *     prices the letter as it stands: Pay & Send for certified mail, never a pack
- *     or a gift letter. The letter card calls it too. */
+ *     or a gift letter. A postcard is refused for every service. The letter card
+ *     will call it too (a later part).
+ */
 export const STEERING_COPY_REV = 40;
