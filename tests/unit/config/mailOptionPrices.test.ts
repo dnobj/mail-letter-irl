@@ -19,7 +19,8 @@ import {
   isJitProductSold,
   isPackPayable,
   jitProductFor,
-  jitProductMatching
+  jitProductMatching,
+  mailServiceOf
 } from '../../../src/config/products.js';
 
 afterEach(() => vi.unstubAllEnvs());
@@ -309,6 +310,24 @@ describe('certified mail (#625)', () => {
       priceId: 'price_r',
       expectedAmountCents: 1499
     });
+  });
+});
+
+describe('mailServiceOf reads a stored service (#625)', () => {
+  // draftMailOption drops a falsy answer, so it cannot tell null or the empty
+  // string from undefined; this is the contract the other readers rely on.
+  it.each([
+    [null, undefined],
+    [undefined, undefined],
+    ['', undefined],
+    ['standard', undefined],
+    ['certified', 'certified'],
+    ['certified_return_receipt', 'certified_return_receipt'],
+    // Text this code does not know comes back as itself, so it fails closed downstream.
+    ['express', 'express'],
+    ['Standard', 'Standard']
+  ])('%o is %o', (value, service) => {
+    expect(mailServiceOf(value)).toBe(service);
   });
 });
 
