@@ -41,7 +41,7 @@
       var refresh = document.getElementById('refresh');
       var busy = false;
       var lastOutput;
-      var labels = {pending:'Waiting for the printer',scheduled:'Scheduled',accepted:'Accepted by the printer',printing:'Being submitted or printed',in_transit:'In the mail',delivered:'Delivery estimated',returned:'Returned to sender',failed:'Did not go out',cancelled:'Cancelled; not mailed'};
+      var labels = {pending:'Awaiting an update',scheduled:'Scheduled',accepted:'Accepted by the printer',printing:'Being submitted or printed',in_transit:'In the mail',delivered:'Delivery estimated',returned:'Returned to sender',failed:'Did not go out',cancelled:'Cancelled; not mailed'};
       function el(tag, text, className) {
         var node = document.createElement(tag);
         node.textContent = text;
@@ -50,6 +50,12 @@
       }
       function line(container, text, className) { container.appendChild(el('p', text, className)); }
       function place(person) { return [person.city, person.state].filter(Boolean).join(', '); }
+      function displayDate(value) {
+        var calendar = /^\d{4}-\d{2}-\d{2}$/.test(value);
+        var date = new Date(calendar ? value + 'T12:00:00Z' : value);
+        if (!Number.isFinite(date.getTime())) return value;
+        return calendar ? date.toLocaleDateString(undefined, { dateStyle: 'medium', timeZone: 'UTC' }) : date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+      }
       function safeLink(container, href, title, tracking) {
         try {
           var url = new URL(href);
@@ -75,8 +81,8 @@
         items('drafts', data.drafts, 'No active drafts. Ask in the conversation to start a letter or postcard.', function (card, draft) {
           line(card, draft.mailType === 'postcard' ? 'Postcard draft' : 'Letter draft', 'tag');
           line(card, draft.recipient.name || 'Recipient', 'name'); line(card, place(draft.recipient), 'detail');
-          line(card, 'Expires: ' + draft.expiresAt, 'detail');
-          if (draft.arriveBy) line(card, 'Aims to arrive by ' + draft.arriveBy + '; planned mail date ' + draft.mailOn + '.', 'detail');
+          line(card, 'Expires: ' + displayDate(draft.expiresAt), 'detail');
+          if (draft.arriveBy) line(card, 'Aims to arrive by ' + displayDate(draft.arriveBy) + '; planned mail date ' + displayDate(draft.mailOn) + '.', 'detail');
           if (draft.isGiftSend) line(card, 'Gift letter', 'detail');
           safeLink(card, draft.confirmationUrl, 'Review draft on the website', false);
         });
@@ -85,7 +91,7 @@
           line(card, order.recipient.name || 'Recipient', 'name'); line(card, place(order.recipient), 'detail');
           line(card, labels[order.status] || 'Status unavailable');
           if (order.arriveBy) {
-            line(card, (order.status === 'scheduled' ? 'Aims to arrive by ' : 'Original arrival aim: ') + order.arriveBy + '; planned mail date ' + order.mailOn + '.', 'detail');
+            line(card, (order.status === 'scheduled' ? 'Aims to arrive by ' : 'Original arrival aim: ') + displayDate(order.arriveBy) + '; planned mail date ' + displayDate(order.mailOn) + '.', 'detail');
           }
           if (order.isGiftSend) line(card, 'Gift letter', 'detail');
           if (order.certifiedNote) line(card, order.certifiedNote, 'detail');
