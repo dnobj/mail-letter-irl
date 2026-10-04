@@ -39,7 +39,7 @@ describe('LetterHomeCard', () => {
       orders: [order('scheduled', { arriveBy: '2026-10-20', mailOn: '2026-10-09', carrierTrackingUrl: 'https://tools.usps.com/go/TrackConfirmAction?tLabels=9400111899223856928499', certifiedNote: 'Goes as USPS Certified Mail.' })],
       recipients: [], limit: 20
     });
-    expect(doc.body.textContent).toContain('Aims to arrive by 2026-10-20');
+    expect(doc.body.textContent).toContain('Aims to arrive by Oct 20, 2026');
     expect(doc.body.textContent).toContain('Gift letter');
     expect(doc.querySelectorAll('a')).toHaveLength(2);
     expect(doc.body.textContent).toContain('Goes as USPS Certified Mail.');

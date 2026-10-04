@@ -1232,7 +1232,6 @@ export async function registerLetterTools(
         // the description, which Claude then showed where the name belongs
         // (#484); every tool has a title now.
         title: tool.title,
-        ...(tool.icons ? { icons: tool.icons } : {}),
         description: tool.description,
         // A raw shape, or for the previews while arrive-by is off a passthrough
         // object (getServedInputSchema); the SDK normalizes either. Typed as

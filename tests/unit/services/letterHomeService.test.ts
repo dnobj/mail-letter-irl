@@ -33,13 +33,14 @@ describe('readLetterHome', () => {
   it('summarizes drafts, scheduled mail, gifts and deduplicates recent recipients', async () => {
     vi.stubEnv('LETTER_IRL_WEBSITE_BASE_URL', 'https://dev.example.test');
     vi.mocked(query).mockResolvedValueOnce({ rows: [
-      row({ kind: 'draft', id: 'draft-1', mail_type: 'postcard', expires_at: new Date('2026-10-05T00:00:00Z'), is_gift_send: true }),
+      row({ kind: 'draft', id: 'draft-1', mail_type: 'postcard', expires_at: new Date('2026-10-05T00:00:00Z'), is_gift_send: true, arrive_by: '2026-10-20', mail_on: '2026-10-09' }),
       row({ status: 'queued', arrive_by: '2026-10-20', mail_on: '2026-10-09', is_gift_send: true }),
       row({ id: 'order-2', status: 'delivered' })
     ] } as any);
     const home = await readLetterHome('owner');
     expect(home.drafts[0]).toMatchObject({ draftId: 'draft-1', mailType: 'postcard', expiresAt: '2026-10-05T00:00:00.000Z', confirmationUrl: 'https://dev.example.test/confirm/draft-1', isGiftSend: true });
     expect(home.orders[0]).toMatchObject({ status: 'scheduled', arriveBy: '2026-10-20', mailOn: '2026-10-09', isGiftSend: true });
+    expect(home.drafts[0]).toMatchObject({ arriveBy: '2026-10-20', mailOn: '2026-10-09' });
     expect(home.orders[1].status).toBe('delivered');
     expect(home.recipients).toEqual([{ name: 'Ruth', city: 'Chicago', state: 'IL' }]);
   });
@@ -58,6 +59,7 @@ describe('readLetterHome', () => {
     const order = (await readLetterHome('owner')).orders[0];
     expect(order).toMatchObject({ mailService: 'certified_return_receipt', carrierTrackingNumber: '9400111899223856928499' });
     expect(order.carrierTrackingUrl).toMatch(/^https:\/\/tools\.usps\.com\//);
+    expect(order.certifiedNote).toContain('USPS Certified Mail');
     if (status === 'failed' || status === 'cancelled' || status === 'returned') {
       expect(order.certifiedNote).not.toMatch(/check again later|ask USPS for it/);
     }

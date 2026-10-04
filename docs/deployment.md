@@ -1,6 +1,6 @@
 # Deployment Guide
 
-**Last Updated:** October 1, 2026
+**Last Updated:** October 4, 2026
 **Purpose:** Release process, environment checks, boot validation rules, and migration safety
 
 Letter IRL deploys development first. Production is promoted only after automated and manual verification succeeds in development.
@@ -935,5 +935,5 @@ that never sends it cannot hold a large upload until it times out.
 
 ## Letter IRL home flag
 
-LETTER_IRL_HOME_ENABLED adds the read-only open_letter_home tool and its global Plugin Extensions entrypoint. Default off. Reconnect/refresh the development connector after enabling it, and complete HOME-01 before live enablement. No migration is needed; this read expects the existing schema through migration 053. Turning it off refuses cached tool calls and widget reads. See [Letter IRL home](letter-home.md).
+`LETTER_IRL_HOME_ENABLED` adds the read-only `open_letter_home` tool and its global Plugin Extensions entrypoint. Default off. Reconnect/refresh the development connector after enabling it, and complete HOME-01 before live enablement. No migration is needed; this read expects the existing schema through migration 053. Turning it off refuses cached tool calls and widget reads. See [Letter IRL home](letter-home.md).
 

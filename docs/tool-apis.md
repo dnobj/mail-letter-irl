@@ -1,6 +1,6 @@
 # MCP Tool API Specifications
 
-**Last Updated:** October 3, 2026  
+**Last Updated:** October 4, 2026  
 **Purpose:** Practical reference for the MCP tools exposed by Letter IRL
 
 The runtime MCP registry is the source of truth. The checked-in `manifest.json` is generated from that registry with `npm run manifest:generate`, and submission-facing tests verify that the manifest, widget list, and runtime tool registry stay aligned.
@@ -343,5 +343,5 @@ npm run test:submission
 
 ## Letter IRL home (conditional)
 
-open_letter_home accepts {} on mail:read while LETTER_IRL_HOME_ENABLED is on. It returns drafts, orders, recipients and limit (20 per draft/mail list). A read-only global entrypoint titled Letter IRL, using LetterHomeCard.html@v<N>. Drafts include expiry and website review links; orders include scheduled dates and status-specific certified tracking/receipt notes. No full addresses, content or prices. This adds one conditional tool and widget. See [Letter IRL home](letter-home.md).
+`open_letter_home` accepts {} on `mail:read` while `LETTER_IRL_HOME_ENABLED` is on. It returns drafts, orders, recipients and limit (20 per draft/mail list). A read-only global entrypoint titled Letter IRL, using LetterHomeCard.html@v<N>. Drafts include expiry and website review links; orders include scheduled dates and status-specific certified tracking/receipt notes. No full addresses, content or prices. This adds one conditional tool and widget. See [Letter IRL home](letter-home.md).
 

@@ -57,7 +57,7 @@ temporarily lowered to 300s (restored afterwards to 86400 / 7200 for web).
 - [x] Confirm the consent screen requests offline access, and that Auth0 records
       a refresh token issued on the code exchange.
       Consent screen listed **Allow offline access**; the authorize event
-      recorded `scope: "mail:read mail:draft mail:send offline_access"`.
+      recorded `scope: "`mail:read` mail:draft mail:send offline_access"`.
 - [x] Leave the connection idle past the access-token lifetime, then invoke any
       read tool (for example `get_account_balance`).
       Token issued 21:53:30Z (300s life, expiring 21:58:30Z); tool invoked
@@ -764,7 +764,7 @@ our tools arrive through Claude's own connection and log as `client=claude` (che
 
 - [x] `codex mcp add letter-irl-dev --url <development /mcp>`.
 - [x] In `~/.codex/config.toml`, add
-      `scopes = ["mail:read", "mail:draft", "mail:send", "offline_access"]` to that server's entry.
+      `scopes = ["`mail:read`", "mail:draft", "mail:send", "offline_access"]` to that server's entry.
       Without it, Codex requests Auth0's OpenID scopes instead of ours
       ([auth0-tenant-configuration.md](auth0-tenant-configuration.md), Applications, section 6).
 - [x] `codex mcp login letter-irl-dev`. The consent screen should list Read, Draft, Send and
@@ -842,7 +842,7 @@ in the website's `LETTER_IRL_CONNECT_APPS`.
       got `403 Callback URL mismatch.`)
 - [ ] Install OpenClaw 2026.9.6 or later, then add the server:
       `openclaw mcp add letter-irl-dev --url <development /mcp> --transport streamable-http --auth
-      oauth --oauth-client-metadata-url <the document's address> --oauth-scope 'mail:read
+      oauth --oauth-client-metadata-url <the document's address> --oauth-scope '`mail:read`
       mail:draft mail:send offline_access'`. Without `--oauth-scope`, OpenClaw asks for the
       server's advertised scopes, OpenID's included, which went wrong for Codex (CLIENT-04).
 - [ ] `openclaw mcp login letter-irl-dev`, with the browser on the same computer. The consent screen
@@ -3247,8 +3247,8 @@ linked PR before enabling Pay & Send.
 
 Status: Not run on the host. Automated MCP wire, query and DOM coverage accompany #639.
 
-1. Deploy the feature to development and explicitly enable LETTER_IRL_HOME_ENABLED there. Keep production off. Refresh/reconnect the existing ChatGPT development connection.
-2. Owner: look for Letter IRL in ChatGPT's sidebar and open it. Record the app version, platform and whether the entry appears. If absent, record the limitation and try invoking open_letter_home in a development conversation. Do not claim sidebar acceptance.
+1. Deploy the feature to development and explicitly enable `LETTER_IRL_HOME_ENABLED` there. Keep production off. Refresh/reconnect the existing ChatGPT development connection.
+2. Owner: look for Letter IRL in ChatGPT's sidebar and open it. Record the app version, platform and whether the entry appears. If absent, record the limitation and try invoking `open_letter_home` in a development conversation. Do not claim sidebar acceptance.
 3. Verify the initial result renders without another call. Check empty state on an account with no mail and the maximum of 20 per list.
 4. With two development test accounts, confirm each sees only its own active drafts and retained mail. Expired, consumed and redacted drafts are absent, as is redacted mail. No full addresses, content, images, signatures, purchases or prices appear.
 5. Check scheduled dates, gift markers, failed/cancelled/returned status and **Delivery estimated**. Certified mail carries its status-specific note and a USPS link only for a valid number.
