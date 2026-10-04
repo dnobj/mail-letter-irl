@@ -289,3 +289,11 @@ it.each(['unsupported', 'refused'])('reports %s context sharing for initial and 
     dom.window.close();
   }
 });
+
+it.each(['https://evil.example/plugins/dev/app/open_letter_home', 'https://user:pass@chatgpt.com/plugins/dev/app/open_letter_home', 'https://chatgpt.com/plugins/dev/app/other', 'javascript:alert(1)'])('does not offer an unsafe share base %s', async appUrl => {
+  const { dom, doc } = open({ drafts: [], orders: [order('accepted')], recipients: [], limit: 20, appUrl });
+  (doc.querySelector('#orders button') as HTMLButtonElement).click(); await new Promise(resolve => setTimeout(resolve, 0));
+  const link = doc.getElementById('selection-link') as HTMLAnchorElement;
+  expect(link.hidden).toBe(true); expect(link.getAttribute('href')).toBeNull();
+  dom.window.close();
+});
