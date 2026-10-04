@@ -273,3 +273,19 @@ it('handles a changed host route and root navigation without changing mail', asy
   expect(host.callTool).not.toHaveBeenCalled();
   dom.window.close();
 });
+
+it.each(['unsupported', 'refused'])('reports %s context sharing for initial and newly resolved deep links', async failure => {
+  const extra = failure === 'refused' ? { updateModelContext: vi.fn().mockResolvedValue({ isError: true }) } : {};
+  for (const initiallyAvailable of [true, false]) {
+    const filled = { drafts: [], orders: [order('accepted')], recipients: [], limit: 20 };
+    const { dom, host, doc } = open(initiallyAvailable ? filled : { ...filled, orders: [] }, { ...extra, hostContext: () => ({ 'openai/deepLink': { url: '/order/order-1' } }) });
+    if (!initiallyAvailable) {
+      host.callTool.mockResolvedValue({ structuredContent: filled });
+      (doc.getElementById('refresh') as HTMLButtonElement).click();
+    }
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(doc.getElementById('selection')?.hidden).toBe(false);
+    expect(doc.getElementById('notice')?.textContent).toMatch(/cannot share|could not be shared/);
+    dom.window.close();
+  }
+});

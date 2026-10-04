@@ -109,11 +109,11 @@
         if ((route === lastRoute && !(retryUnresolved && unresolvedRoute === route)) || !currentData || typeof route !== 'string') return;
         lastRoute = route;
         unresolvedRoute = undefined;
-        if (route === '/') { select(undefined, undefined, quiet); return; }
+        if (route === '/') { select(); return; }
         var match = /^\/(draft|order)\/([a-zA-Z0-9-]{1,100})$/.exec(route);
         var found = match && (match[1] === 'draft' ? currentData.drafts : currentData.orders).find(function (item) { return selectionKey(item, match[1]) === route.slice(1); });
         if (!found) { unresolvedRoute = route; select(undefined, undefined, true); notice.textContent = 'That selection is unavailable in your current mail list. Refresh to check again.'; return; }
-        select(found, match[1], quiet);
+        select(found, match[1], quiet && selected === selectionKey(found, match[1]));
       }
       async function cancelOrder(order, card) {
         if (busy || typeof host.callTool !== 'function') return;
