@@ -545,6 +545,15 @@ export const setLetterSignatureInputZ = z.object({
   signature: z.boolean().describe(SET_LETTER_SIGNATURE_DESCRIPTION)
 });
 
+/** set_mail_service's input (#625): which service the previewed letter travels by. */
+export const SET_MAIL_SERVICE_DESCRIPTION =
+  "How the letter travels: standard (ordinary first-class mail), certified (USPS Certified Mail) or certified_return_receipt (Certified Mail with an electronic return receipt). " +
+  "Certified mail costs more and is paid with Pay & Send: no letter pack and no gift letter pays for it.";
+export const setMailServiceInputZ = z.object({
+  draftId: z.string().describe("The draftId from a letter preview"),
+  mailService: z.enum(MAIL_SERVICES).describe(SET_MAIL_SERVICE_DESCRIPTION)
+});
+
 // ============================================================================
 // Feature Request Schema (US-FEEDBACK-01)
 // ============================================================================
@@ -1066,6 +1075,20 @@ export const getSignatureOutputZ = z.object({
 
 export const clearSignatureOutputZ = z.object({
   removed: z.boolean().describe(SIGNATURE_REMOVED_DESCRIPTION),
+  message: z.string()
+});
+
+/** set_mail_service's answer (#625). */
+export const SET_MAIL_SERVICE_OUTPUT_DESCRIPTION =
+  "Present only when the letter now goes as certified mail: which service. Absent: an ordinary letter";
+export const SET_MAIL_SERVICE_CAN_SEND_DESCRIPTION =
+  "Whether the balance or a gift letter pays for the letter as it is now: certified mail is paid with Pay & Send, so it is false for it";
+export const setMailServiceOutputZ = z.object({
+  draftId: z.string(),
+  mailService: z.enum(CERTIFIED_MAIL_SERVICES).optional().describe(SET_MAIL_SERVICE_OUTPUT_DESCRIPTION),
+  canSendNow: z.boolean().describe(SET_MAIL_SERVICE_CAN_SEND_DESCRIPTION),
+  reasonCannotSend: z.string().optional(),
+  sendEligibility: sendEligibilityZ,
   message: z.string()
 });
 

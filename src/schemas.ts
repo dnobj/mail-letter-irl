@@ -43,6 +43,9 @@ import {
   PREVIEW_SIGNATURE_OUTPUT_DESCRIPTION,
   PREVIEW_MAIL_SERVICE_DESCRIPTION,
   PREVIEW_MAIL_SERVICE_OUTPUT_DESCRIPTION,
+  SET_MAIL_SERVICE_DESCRIPTION,
+  SET_MAIL_SERVICE_CAN_SEND_DESCRIPTION,
+  SET_MAIL_SERVICE_OUTPUT_DESCRIPTION,
   ORDER_MAIL_SERVICE_DESCRIPTION,
   ORDER_CARRIER_TRACKING_NUMBER_DESCRIPTION,
   ORDER_TRACKING_SUPPORT_DESCRIPTION,
@@ -1245,6 +1248,29 @@ export const setLetterSignatureOutputSchema: JsonSchema = {
     signature: { ...previewSignatureOutputSchema, description: "Whether the letter now prints the person's saved signature: asked for in the call" },
     pages: { type: "integer", minimum: 2, maximum: MAX_LETTER_PAGES, description: PREVIEW_PAGES_DESCRIPTION },
     canSendNow: { type: "boolean", description: SET_LETTER_SIGNATURE_CAN_SEND_DESCRIPTION },
+    reasonCannotSend: { type: "string" },
+    sendEligibility: sendEligibilitySchema,
+    message: { type: "string" }
+  }
+};
+
+/** How a previewed letter travels, changed without previewing again (#625). */
+export const setMailServiceInputSchema: JsonSchema = {
+  type: "object",
+  required: ["draftId", "mailService"],
+  properties: {
+    draftId: { type: "string", description: "The draftId from a letter preview" },
+    mailService: { type: "string", enum: [...MAIL_SERVICES], description: SET_MAIL_SERVICE_DESCRIPTION }
+  }
+};
+
+export const setMailServiceOutputSchema: JsonSchema = {
+  type: "object",
+  required: ["draftId", "canSendNow", "sendEligibility", "message"],
+  properties: {
+    draftId: { type: "string" },
+    mailService: { type: "string", enum: [...EXTRA_SERVICES], description: SET_MAIL_SERVICE_OUTPUT_DESCRIPTION },
+    canSendNow: { type: "boolean", description: SET_MAIL_SERVICE_CAN_SEND_DESCRIPTION },
     reasonCannotSend: { type: "string" },
     sendEligibility: sendEligibilitySchema,
     message: { type: "string" }

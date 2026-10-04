@@ -41,6 +41,8 @@ import {
   setArrivalDateTool,
   // A letter preview's stationery, changed without previewing again (#563)
   setStationeryTool,
+  // How a letter preview travels, changed without previewing again (#625)
+  setMailServiceTool,
   // A letter preview's words, changed without previewing again (#586)
   setLetterWordsTool,
   // A postcard preview's size and front, changed without previewing again (#594)
@@ -61,6 +63,7 @@ import { REQUEST_SEND_TOOL } from "./tools/requestSend.js";
 import { UPLOAD_PHOTO_CHUNK_TOOL } from "./tools/uploadPhotoChunk.js";
 import { SET_ARRIVAL_DATE_TOOL } from "./tools/setArrivalDate.js";
 import { SET_STATIONERY_TOOL } from "./tools/setStationery.js";
+import { SET_MAIL_SERVICE_TOOL } from "./tools/setMailService.js";
 import { SET_LETTER_WORDS_TOOL } from "./tools/setLetterWords.js";
 import { SET_POSTCARD_STYLE_TOOL } from "./tools/setPostcardStyle.js";
 import { CANCEL_SCHEDULED_MAIL_TOOL } from "./tools/cancelScheduledMail.js";
@@ -76,6 +79,7 @@ import { isSignaturesOffered } from "./config/signatures.js";
 import { isCardUploadEnabled } from "./config/cardUpload.js";
 import { isArriveByEnabled } from "./config/arriveBy.js";
 import { isStationeryOffered } from "./config/stationery.js";
+import { isCertifiedMailOffered } from "./config/certifiedMail.js";
 import { letterPageLimit } from "./config/roomToWrite.js";
 import { isPostcardSizesOffered } from "./config/postcardSizes.js";
 import { isPostcardLayoutsOffered } from "./config/postcardLayouts.js";
@@ -126,6 +130,10 @@ const tools: McpToolDefinition<any, any>[] = [
   // A letter preview's stationery, changed without previewing again, and
   // remembered for the next (#563). Listed only while stationery is offered.
   setStationeryTool,
+  // How a letter preview travels, ordinary or certified, changed without
+  // previewing again and priced again (#625). Listed only while certified mail
+  // is offered.
+  setMailServiceTool,
   // A letter preview's words, changed without previewing again, on up to the
   // pages a preview may take (#586). Listed only while room to write is offered.
   setLetterWordsTool,
@@ -373,6 +381,7 @@ export class LetterIrlServer {
    * generation only where it is allowed (#467), set_arrival_date and
    * cancel_scheduled_mail only while arrival dates are on (#535), and
    * set_stationery only while stationery is offered (#563),
+   * set_mail_service only while certified mail is (#625),
    * set_letter_words only while room to write is (#586),
    * set_postcard_style only while the postcard sizes or layouts are (#594),
    * and the three address request tools only while those are on (#604).
@@ -388,6 +397,7 @@ export class LetterIrlServer {
     const cardUpload = isCardUploadEnabled();
     const arriveBy = isArriveByEnabled();
     const stationery = isStationeryOffered();
+    const certifiedMail = isCertifiedMailOffered();
     const roomToWrite = letterPageLimit() > 1;
     const postcardStyles = isPostcardSizesOffered() || isPostcardLayoutsOffered();
     const addressRequests = isAddressRequestsEnabled();
@@ -397,6 +407,7 @@ export class LetterIrlServer {
       .filter((tool) => cardUpload || tool.name !== UPLOAD_PHOTO_CHUNK_TOOL)
       .filter((tool) => arriveBy || (tool.name !== SET_ARRIVAL_DATE_TOOL && tool.name !== CANCEL_SCHEDULED_MAIL_TOOL))
       .filter((tool) => stationery || tool.name !== SET_STATIONERY_TOOL)
+      .filter((tool) => certifiedMail || tool.name !== SET_MAIL_SERVICE_TOOL)
       .filter((tool) => roomToWrite || tool.name !== SET_LETTER_WORDS_TOOL)
       .filter((tool) => postcardStyles || tool.name !== SET_POSTCARD_STYLE_TOOL)
       .filter((tool) => addressRequests || !ADDRESS_REQUEST_TOOLS.has(tool.name))

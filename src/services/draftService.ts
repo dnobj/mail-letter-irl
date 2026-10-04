@@ -711,6 +711,27 @@ export async function getDraftForStationery(draftId: string, userId: string): Pr
 }
 
 /**
+ * What a mail service change answers from (#625): the draft's option, whole (draftMailOption reads the
+ * postcard's size as well as the letter's pages and service), who pays for it, and whether it is still
+ * pending, since the answer is read after the change's lock is released.
+ */
+export type DraftForMailService = Pick<
+  LetterDraft,
+  'mail_type' | 'postcard_size' | 'pages' | 'mail_service' | 'is_gift_send' | 'required_credits' | 'status'
+>;
+
+/** The caller's draft as set_mail_service prices it now, or null when it is not theirs or not there. */
+export async function getDraftForMailService(draftId: string, userId: string): Promise<DraftForMailService | null> {
+  const result = await query<DraftForMailService>(
+    `SELECT mail_type, postcard_size, pages, mail_service, is_gift_send, required_credits, status
+     FROM letter_drafts
+     WHERE draft_id = $1 AND user_id = $2`,
+    [draftId, userId]
+  );
+  return result.rows[0] ?? null;
+}
+
+/**
  * What an in-place edit drew its page from, as it read the draft before the
  * lock (#586): a restyle draws the letter's words, and new words are drawn in
  * its stationery. Each writes what the other draws from, so whichever

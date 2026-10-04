@@ -49,6 +49,7 @@ import {
   setDraftStationery,
   setDraftWords,
   getDraftForStationery,
+  getDraftForMailService,
   getDraftForPostcardStyle,
   setDraftPostcardStyle,
   getDraftState,
@@ -1078,6 +1079,28 @@ describe('draftService stationery (#563)', () => {
     it("is null for a draft that is not the caller's, or not there", async () => {
       vi.mocked(db.query).mockResolvedValueOnce({ rows: [] } as any);
       await expect(getDraftForStationery('draft-1', 'auth0|owner')).resolves.toBeNull();
+    });
+  });
+
+  describe('getDraftForMailService', () => {
+    it("reads the caller's draft with what prices it, and nothing of its page", async () => {
+      vi.mocked(db.query).mockResolvedValueOnce({ rows: [{ mail_type: 'letter', pages: 1 }] } as any);
+      await expect(getDraftForMailService('draft-1', 'auth0|owner')).resolves.toEqual({ mail_type: 'letter', pages: 1 });
+      const [sql, params] = vi.mocked(db.query).mock.calls[0] as [string, unknown[]];
+      for (const column of ['mail_type', 'postcard_size', 'pages', 'mail_service', 'is_gift_send', 'required_credits', 'status']) {
+        expect(sql, column).toContain(column);
+      }
+      // No picture and no page: only what the price is read from (#625).
+      for (const column of ['preview_html', 'header_image_data', 'inline_image_data', 'signature_image']) {
+        expect(sql, column).not.toContain(column);
+      }
+      expect(sql).toContain("WHERE draft_id = $1 AND user_id = $2");
+      expect(params).toEqual(['draft-1', 'auth0|owner']);
+    });
+
+    it("is null for a draft that is not the caller's, or not there", async () => {
+      vi.mocked(db.query).mockResolvedValueOnce({ rows: [] } as any);
+      await expect(getDraftForMailService('draft-1', 'auth0|owner')).resolves.toBeNull();
     });
   });
 

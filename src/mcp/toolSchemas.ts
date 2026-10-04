@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { preprocessImageFileParam } from "../utils/imageFileParam.js";
+import { MAIL_SERVICES } from "../config/certifiedMail.js";
 
 const addressSchema = z.object({
   name: z.string(),
@@ -161,6 +162,11 @@ export const toolInputSchemas = {
   set_arrival_date: z.object({
     draftId: z.string(),
     arriveBy: z.string().optional()
+  }),
+  // How a letter preview travels, changed without previewing again (#625)
+  set_mail_service: z.object({
+    draftId: z.string(),
+    mailService: z.enum(MAIL_SERVICES)
   }),
   // A letter preview's stationery, changed without previewing again (#563)
   set_stationery: z.object({

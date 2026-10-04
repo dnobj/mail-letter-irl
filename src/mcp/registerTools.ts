@@ -36,6 +36,7 @@ import {
   getDraftStatusInputZ,
   setArrivalDateInputZ,
   setStationeryInputZ,
+  setMailServiceInputZ,
   setLetterWordsInputZ,
   setPostcardStyleInputZ,
   cancelScheduledMailInputZ,
@@ -72,6 +73,7 @@ import {
   getDraftStatusOutputZ,
   setArrivalDateOutputZ,
   setStationeryOutputZ,
+  setMailServiceOutputZ,
   setLetterWordsOutputZ,
   setPostcardStyleOutputZ,
   cancelScheduledMailOutputZ,
@@ -210,6 +212,7 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     'confirm_uploaded_image', // Repeating the same relay overwrites with the same value
     'set_arrival_date',       // The same date twice changes nothing more (#535)
     'set_stationery',         // The same style twice changes nothing more (#563)
+    'set_mail_service',       // The same service twice changes nothing more (#625)
     'set_letter_words',       // The same words twice change nothing more (#586)
     'set_postcard_style',     // The same size and front twice change nothing more (#594)
     'cancel_scheduled_mail',  // A repeat answers as already cancelled (#535)
@@ -857,6 +860,7 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   get_draft_status: getDraftStatusInputZ,
   set_arrival_date: setArrivalDateInputZ,
   set_stationery: setStationeryInputZ,
+  set_mail_service: setMailServiceInputZ,
   set_letter_words: setLetterWordsInputZ,
   set_postcard_style: setPostcardStyleInputZ,
   cancel_scheduled_mail: cancelScheduledMailInputZ,
@@ -904,6 +908,7 @@ const zodOutputSchemas: Record<ToolName, z.ZodObject<any>> = {
   get_draft_status: getDraftStatusOutputZ,
   set_arrival_date: setArrivalDateOutputZ,
   set_stationery: setStationeryOutputZ,
+  set_mail_service: setMailServiceOutputZ,
   set_letter_words: setLetterWordsOutputZ,
   set_postcard_style: setPostcardStyleOutputZ,
   cancel_scheduled_mail: cancelScheduledMailOutputZ,
@@ -1748,6 +1753,9 @@ export function summarizeToolResult(
     case "set_stationery":
       // As for set_arrival_date: the tool's own sentence (#563).
       return typeof result.message === "string" ? result.message : "The stationery was changed.";
+    case "set_mail_service":
+      // As for set_stationery: the tool's own sentence (#625).
+      return typeof result.message === "string" ? result.message : "How the letter travels was changed.";
     case "set_letter_words":
       // As for set_stationery: the tool's own sentence, with any change in pages (#586).
       return typeof result.message === "string" ? result.message : "The letter's words were changed.";

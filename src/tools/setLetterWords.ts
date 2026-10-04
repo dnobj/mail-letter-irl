@@ -148,7 +148,7 @@ function messageFor(pages: number, pagesBefore: number, note: string, already: b
  * gift letter can (#579). Only a preview decides a gift, so say a new preview
  * would offer it, when the account has one (#593 review round 1).
  */
-async function giftLetterNote(context: ToolContext): Promise<string> {
+export async function giftLetterNote(context: ToolContext): Promise<string> {
   if (!isGiftLettersEnabled()) return '';
   try {
     const balance = await getGiftBalance(context.user.userId);
