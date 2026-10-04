@@ -45,6 +45,7 @@
       var currentData;
       var selected;
       var lastRoute;
+      var unresolvedRoute;
       var selectionRevision = 0;
       var contextQueue = Promise.resolve();
       var labels = {pending:'Awaiting an update',scheduled:'Scheduled',accepted:'Accepted by the printer',printing:'Being submitted or printed',in_transit:'In the mail',delivered:'Delivery estimated',returned:'Returned to sender',failed:'Did not go out',cancelled:'Cancelled; not mailed'};
@@ -94,15 +95,16 @@
         }
         shareContext(item, kind, quiet);
       }
-      function applyRoute(quiet) {
+      function applyRoute(quiet, retryUnresolved) {
         var context = typeof host.hostContext === 'function' ? host.hostContext() : {};
         var route = context['openai/deepLink']; route = route && route.url;
-        if (route === lastRoute || !currentData || typeof route !== 'string') return;
+        if ((route === lastRoute && !(retryUnresolved && unresolvedRoute === route)) || !currentData || typeof route !== 'string') return;
         lastRoute = route;
+        unresolvedRoute = undefined;
         if (route === '/') { select(undefined, undefined, quiet); return; }
         var match = /^\/(draft|order)\/([a-zA-Z0-9-]{1,100})$/.exec(route);
         var found = match && (match[1] === 'draft' ? currentData.drafts : currentData.orders).find(function (item) { return selectionKey(item, match[1]) === route.slice(1); });
-        if (!found) { select(undefined, undefined, true); notice.textContent = 'That selection is unavailable in your current mail list. Refresh to check again.'; return; }
+        if (!found) { unresolvedRoute = route; select(undefined, undefined, true); notice.textContent = 'That selection is unavailable in your current mail list. Refresh to check again.'; return; }
         select(found, match[1], quiet);
       }
       async function cancelOrder(order, card) {
@@ -191,8 +193,7 @@
           var item = (kind === 'draft' ? data.drafts : data.orders).find(function (value) { return selectionKey(value, kind) === selected; });
           select(item, kind, true);
         }
-        lastRoute = undefined;
-        applyRoute(true);
+        applyRoute(true, true);
         return true;
       }
       function sync() {
@@ -213,7 +214,7 @@
           notice.textContent = document.getElementById('home').hidden ? 'Unable to load your mail. Please try Refresh again.' : 'Refresh failed. The mail shown may be out of date; please try again.';
         } finally { busy = false; sync(); }
       });
-      document.getElementById('clear-selection').addEventListener('click', function () { select(); });
+      document.getElementById('clear-selection').addEventListener('click', function () { unresolvedRoute = undefined; select(); });
       if (host) { host.onChange(sync); sync(); }
       else { notice.textContent = 'Open Letter IRL home from your connected app.'; }
     })();

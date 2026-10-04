@@ -199,3 +199,19 @@ describe('home extension recovery regressions', () => {
     dom.window.close();
   });
 });
+
+it('does not undo an explicit clear or newer selection when the original successful deep link is unchanged', async () => {
+  const updateModelContext = vi.fn().mockResolvedValue({});
+  const output = { drafts: [], orders: [order('scheduled'), order('accepted', { orderId: 'order-2' })], recipients: [], limit: 20 };
+  const { dom, host, doc } = open(output, { updateModelContext, hostContext: () => ({ 'openai/deepLink': { url: '/order/order-1' } }) });
+  (doc.getElementById('clear-selection') as HTMLButtonElement).click();
+  host.callTool.mockResolvedValue({ structuredContent: structuredClone(output) });
+  (doc.getElementById('refresh') as HTMLButtonElement).click(); await new Promise(resolve => setTimeout(resolve, 0));
+  expect(doc.getElementById('selection')?.hidden).toBe(true);
+  expect(updateModelContext.mock.calls.at(-1)![0]).toEqual({ content: [] });
+  (Array.from(doc.querySelectorAll('#orders button')).filter(button => button.textContent === 'Select order')[1] as HTMLButtonElement).click();
+  (doc.getElementById('refresh') as HTMLButtonElement).click(); await new Promise(resolve => setTimeout(resolve, 0));
+  expect(doc.getElementById('selected-detail')?.textContent).toContain('order-2');
+  expect(JSON.parse(updateModelContext.mock.calls.at(-1)![0].content[0].text)).toMatchObject({ id: 'order-2' });
+  dom.window.close();
+});
