@@ -103,6 +103,26 @@ describe('home extension interactions', () => {
     }
   });
 
+  it('honors owner-visible deep links and produces a properly encoded share URL', async () => {
+    const { dom, doc } = open(data({ appUrl: 'https://chatgpt.com/plugins/letter-irl-dev/app/open_letter_home' }), { hostContext: () => ({ 'openai/deepLink': { url: '/draft/draft-1' } }) });
+    await tick();
+    expect(doc.getElementById('selected-detail')?.textContent).toContain('draft-1');
+    const link = doc.getElementById('selection-link') as HTMLAnchorElement;
+    expect(link.hidden).toBe(false);
+    expect(new URL(link.href).searchParams.get('path')).toBe('/draft/draft-1');
+    expect(link.href).toContain('path=%2Fdraft%2Fdraft-1');
+    dom.window.close();
+  });
+
+  it.each(['/draft/another-account', '//evil.example', '/draft/draft-1#fragment', '/draft/draft-1?query=1', '/draft/%2e%2e'])('refuses unavailable or malformed route %s without fetching it', async route => {
+    const { dom, host, doc } = open(data(), { hostContext: () => ({ 'openai/deepLink': { url: route } }) });
+    await tick();
+    expect(doc.getElementById('selection')?.hidden).toBe(true);
+    expect(doc.getElementById('notice')?.textContent).toContain('unavailable');
+    expect(host.callTool).not.toHaveBeenCalled();
+    dom.window.close();
+  });
+
   it('asks before cancelling, blocks double presses, and displays the actual returned balance message', async () => {
     const { dom, doc, host } = open(data());
     let resolve!: (value: unknown) => void;
@@ -148,6 +168,15 @@ describe('home extension recovery regressions', () => {
     click(doc, 'Cancel scheduled mail'); click(doc, 'Confirm cancellation'); await tick(); await tick();
     expect(doc.getElementById('notice')?.textContent).toBe('Cancelled. Funding expired; nothing returned.');
     expect(JSON.parse(updateModelContext.mock.calls.at(-1)![0].content[0].text)).toMatchObject({ status: 'cancelled', id: 'order-1' });
+    dom.window.close();
+  });
+  it('retries an unavailable deep link when Refresh brings its owner-visible order into the list', async () => {
+    const { dom, host, doc } = open({ drafts: [], orders: [], recipients: [], limit: 20 }, { hostContext: () => ({ 'openai/deepLink': { url: '/order/order-1' } }) });
+    expect(doc.getElementById('selection')?.hidden).toBe(true);
+    host.callTool.mockResolvedValue({ structuredContent: data });
+    click(doc, 'Refresh'); await tick();
+    expect(doc.getElementById('selection')?.hidden).toBe(false);
+    expect(doc.getElementById('selected-detail')?.textContent).toContain('order-1');
     dom.window.close();
   });
   it('rejects an error result even when it contains cancellation-shaped structured content', async () => {
@@ -198,5 +227,49 @@ it('recovers from a lost cancellation reply, ignores late success and requires R
   click('Refresh'); await new Promise(resolve => setTimeout(resolve, 0));
   expect(doc.getElementById('orders')?.textContent).toContain('Cancelled; not mailed');
   expect(doc.getElementById('orders')?.textContent).not.toContain('Cancel scheduled mail');
+  dom.window.close();
+});
+
+it('does not undo an explicit clear or newer selection when the original successful deep link is unchanged', async () => {
+  const updateModelContext = vi.fn().mockResolvedValue({});
+  const output = { drafts: [], orders: [order('scheduled'), order('accepted', { orderId: 'order-2' })], recipients: [], limit: 20 };
+  const { dom, host, doc } = open(output, { updateModelContext, hostContext: () => ({ 'openai/deepLink': { url: '/order/order-1' } }) });
+  (doc.getElementById('clear-selection') as HTMLButtonElement).click();
+  host.callTool.mockResolvedValue({ structuredContent: structuredClone(output) });
+  (doc.getElementById('refresh') as HTMLButtonElement).click(); await new Promise(resolve => setTimeout(resolve, 0));
+  expect(doc.getElementById('selection')?.hidden).toBe(true);
+  expect(updateModelContext.mock.calls.at(-1)![0]).toEqual({ content: [] });
+  (Array.from(doc.querySelectorAll('#orders button')).filter(button => button.textContent === 'Select order')[1] as HTMLButtonElement).click();
+  (doc.getElementById('refresh') as HTMLButtonElement).click(); await new Promise(resolve => setTimeout(resolve, 0));
+  expect(doc.getElementById('selected-detail')?.textContent).toContain('order-2');
+  expect(JSON.parse(updateModelContext.mock.calls.at(-1)![0].content[0].text)).toMatchObject({ id: 'order-2' });
+  dom.window.close();
+});
+
+it('lets explicit selection supersede an initially unresolved route even when Refresh later resolves it', async () => {
+  const updateModelContext = vi.fn().mockResolvedValue({});
+  const first = { drafts: [], orders: [order('accepted', { orderId: 'order-2' })], recipients: [], limit: 20 };
+  const { dom, host, doc } = open(first, { updateModelContext, hostContext: () => ({ 'openai/deepLink': { url: '/order/order-1' } }) });
+  expect(doc.getElementById('selection')?.hidden).toBe(true);
+  (doc.querySelector('#orders button') as HTMLButtonElement).click();
+  host.callTool.mockResolvedValue({ structuredContent: { ...first, orders: [order('scheduled'), ...first.orders] } });
+  (doc.getElementById('refresh') as HTMLButtonElement).click(); await new Promise(resolve => setTimeout(resolve, 0));
+  expect(doc.getElementById('selected-detail')?.textContent).toContain('order-2');
+  expect(JSON.parse(updateModelContext.mock.calls.at(-1)![0].content[0].text)).toMatchObject({ id: 'order-2' });
+  dom.window.close();
+});
+
+it('handles a changed host route and root navigation without changing mail', async () => {
+  let route = '/order/order-1';
+  const updateModelContext = vi.fn().mockResolvedValue({});
+  const { dom, host, doc } = open({ drafts: [], orders: [order('accepted'), order('failed', { orderId: 'order-2' })], recipients: [], limit: 20 }, { updateModelContext, hostContext: () => ({ 'openai/deepLink': { url: route } }) });
+  route = '/order/order-2'; host.onChange.mock.calls[0][0]();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(doc.getElementById('selected-detail')?.textContent).toContain('order-2');
+  route = '/'; host.onChange.mock.calls[0][0]();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(doc.getElementById('selection')?.hidden).toBe(true);
+  expect(updateModelContext.mock.calls.at(-1)![0]).toEqual({ content: [] });
+  expect(host.callTool).not.toHaveBeenCalled();
   dom.window.close();
 });

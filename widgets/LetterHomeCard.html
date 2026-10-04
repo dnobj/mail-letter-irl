@@ -23,7 +23,7 @@
     <header><h1>Letter IRL</h1><button id="refresh" type="button" disabled>Refresh</button></header>
     <p class="muted">Your drafts, the mail you've sent, and the people you've written to.</p>
     <p id="notice" role="status" aria-live="polite">Loading your mail...</p>
-    <section id="selection" hidden aria-label="Selected mail"><h2 id="selected-title"></h2><p id="selected-detail"></p><button id="clear-selection" type="button">Clear selection</button></section>
+    <section id="selection" hidden aria-label="Selected mail"><h2 id="selected-title"></h2><p id="selected-detail"></p><button id="clear-selection" type="button">Clear selection</button><a id="selection-link" hidden target="_blank" rel="noopener noreferrer">Open this selection</a></section>
     <div id="home" hidden>
       <p id="scope" class="detail"></p>
       <div class="columns">
@@ -45,6 +45,8 @@
       var lastOutput;
       var currentData;
       var selected;
+      var lastRoute;
+      var unresolvedRoute;
       var selectionRevision = 0;
       var contextQueue = Promise.resolve();
       var labels = {pending:'Awaiting an update',scheduled:'Scheduled',accepted:'Accepted by the printer',printing:'Being submitted or printed',in_transit:'In the mail',delivered:'Delivery estimated',returned:'Returned to sender',failed:'Did not go out',cancelled:'Cancelled; not mailed'};
@@ -84,14 +86,34 @@
         });
       }
       function select(item, kind, quiet) {
+        if (!quiet) unresolvedRoute = undefined;
         selected = item ? selectionKey(item, kind) : undefined;
         var panel = document.getElementById('selection'); panel.hidden = !item;
+        var link = document.getElementById('selection-link'); link.hidden = true; link.removeAttribute('href');
         if (item) {
           document.getElementById('selected-title').textContent = item.recipient.name || 'Recipient';
           document.getElementById('selected-detail').textContent = (kind === 'draft' ? 'Draft ' + item.draftId : (labels[item.status] || 'Status unavailable') + ': order ' + item.orderId) + (item.arriveBy ? '; arrival aim ' + displayDate(item.arriveBy) : '');
-
+          try {
+            var base = new URL(currentData.appUrl);
+            if (base.origin === 'https://chatgpt.com' && /^\/plugins\/[a-zA-Z0-9_-]+\/app\/open_letter_home$/.test(base.pathname) && !base.username && !base.password) {
+              base.search = ''; base.hash = ''; base.searchParams.set('path', '/' + selected);
+              link.href = base.href; link.hidden = false;
+            }
+          } catch (_) {}
         }
         shareContext(item, kind, quiet);
+      }
+      function applyRoute(quiet, retryUnresolved) {
+        var context = typeof host.hostContext === 'function' ? host.hostContext() : {};
+        var route = context['openai/deepLink']; route = route && route.url;
+        if ((route === lastRoute && !(retryUnresolved && unresolvedRoute === route)) || !currentData || typeof route !== 'string') return;
+        lastRoute = route;
+        unresolvedRoute = undefined;
+        if (route === '/') { select(undefined, undefined, quiet); return; }
+        var match = /^\/(draft|order)\/([a-zA-Z0-9-]{1,100})$/.exec(route);
+        var found = match && (match[1] === 'draft' ? currentData.drafts : currentData.orders).find(function (item) { return selectionKey(item, match[1]) === route.slice(1); });
+        if (!found) { unresolvedRoute = route; select(undefined, undefined, true); notice.textContent = 'That selection is unavailable in your current mail list. Refresh to check again.'; return; }
+        select(found, match[1], quiet);
       }
       async function cancelOrder(order, card) {
         if (busy || typeof host.callTool !== 'function') return;
@@ -182,6 +204,7 @@
           var item = (kind === 'draft' ? data.drafts : data.orders).find(function (value) { return selectionKey(value, kind) === selected; });
           select(item, kind, true);
         }
+        applyRoute(true, true);
         return true;
       }
       function sync() {
@@ -189,6 +212,7 @@
         refresh.disabled = busy || typeof host.callTool !== 'function';
         var output = host.toolOutput();
         if (output && output !== lastOutput) { lastOutput = output; render(output); }
+        applyRoute();
       }
       refresh.addEventListener('click', async function () {
         if (busy || typeof host.callTool !== 'function') return;
@@ -202,7 +226,7 @@
           notice.textContent = document.getElementById('home').hidden ? 'Unable to load your mail. Please try Refresh again.' : 'Refresh failed. The mail shown may be out of date; please try again.';
         } finally { busy = false; sync(); }
       });
-      document.getElementById('clear-selection').addEventListener('click', function () { select(); });
+      document.getElementById('clear-selection').addEventListener('click', function () { unresolvedRoute = undefined; select(); });
       if (host) { host.onChange(sync); sync(); }
       else { notice.textContent = 'Open Letter IRL home from your connected app.'; }
     })();

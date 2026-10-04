@@ -3272,3 +3272,15 @@ Needs HOME-01, a host advertising text model context, and development arrive-by 
 7. Disable host context support or refuse the update: selection stays visible locally and the notice says it was not shared. Check desktop and mobile layouts and dark mode.
 
 Automated coverage: real MCP wire registration/schema checks, owner-isolated PostgreSQL home reads, DOM cancellation/selection/deep-link checks, host capability negotiation and serialized replacement context. Existing scheduled-mail PostgreSQL suites cover idempotency, cancellation versus dispatch, expired/refunded funding and process recovery; no transaction workflow changes in this slice.
+
+### HOME-03: owner-scoped deep links
+
+Requires HOME-01/HOME-02 and the actual installed development plugin ID configured as `LETTER_IRL_CHATGPT_PLUGIN_ID`; owner-only ChatGPT surface acceptance is pending.
+
+1. Select a draft/order and follow Open this selection. Verify the ChatGPT URL encodes the full `/draft/<id>` or `/order/<id>` path; the current owner-visible item is selected on initialize.
+2. Open a different deep link while the home is running; the selection and model context must change to that item. `/` clears selection. No ID is supplied to the server entrypoint: it still receives `{}`.
+3. Missing, older-than-the-list, expired, redacted, other-account and malformed routes report unavailable, with no arbitrary lookup or content disclosure. A Refresh may resolve a previously missing item once it is in the current owner-scoped list.
+4. After a successful deep link, Clear selection then Refresh: the original link must not silently select the item again. Selecting a different item then Refresh preserves the newer choice.
+5. After an unresolved deep link, select a visible item (or clear) before Refresh. Even if the original target now appears, the explicit newer choice must take precedence. A genuinely new host route may navigate again.
+6. Unset the plugin ID: no share link is offered. Unsafe IDs or URLs cannot produce links. Select draft/order must remain usable locally and unsupported model context must be reported.
+7. Test dark mode and narrow layout. No send, edit, payment or cancellation occurs from navigating a deep link.
