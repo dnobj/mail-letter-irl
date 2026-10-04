@@ -133,16 +133,5 @@ export async function readLetterHome(userId: string) {
       orders.map((order) => [JSON.stringify(order.recipient), order.recipient]),
     ).values(),
   ];
-  const pluginId = process.env.LETTER_IRL_CHATGPT_PLUGIN_ID?.trim();
-  const appUrl =
-    pluginId && /^[a-zA-Z0-9_-]{1,100}$/.test(pluginId)
-      ? `https://chatgpt.com/plugins/${encodeURIComponent(pluginId)}/app/open_letter_home`
-      : undefined;
-  return {
-    drafts,
-    orders,
-    recipients,
-    limit: HOME_LIMIT,
-    ...(appUrl ? { appUrl } : {}),
-  };
+  return { drafts, orders, recipients, limit: HOME_LIMIT };
 }

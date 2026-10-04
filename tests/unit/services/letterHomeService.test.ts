@@ -102,13 +102,4 @@ describe('home scheduling and share configuration', () => {
     vi.mocked(query).mockResolvedValue({ rows: [row({ status: 'queued', funding_type, arrive_by: '2026-10-20', mail_on: '2026-10-09' })] } as any);
     expect((await readLetterHome('owner')).orders[0].cancellable).toBe(false);
   });
-  it('uses a configured plugin ID only when safe, and never invents one', async () => {
-    vi.mocked(query).mockResolvedValue({ rows: [] } as any);
-    for (const id of ['', '../evil', 'user@market', 'https://evil.test']) {
-      vi.stubEnv('LETTER_IRL_CHATGPT_PLUGIN_ID', id);
-      expect(await readLetterHome('owner')).not.toHaveProperty('appUrl');
-    }
-    vi.stubEnv('LETTER_IRL_CHATGPT_PLUGIN_ID', 'letter-irl-dev');
-    expect(await readLetterHome('owner')).toHaveProperty('appUrl', 'https://chatgpt.com/plugins/letter-irl-dev/app/open_letter_home');
-  });
 });

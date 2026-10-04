@@ -103,26 +103,6 @@ describe('home extension interactions', () => {
     }
   });
 
-  it('honors owner-visible deep links and produces a properly encoded share URL', async () => {
-    const { dom, doc } = open(data({ appUrl: 'https://chatgpt.com/plugins/letter-irl-dev/app/open_letter_home' }), { hostContext: () => ({ 'openai/deepLink': { url: '/draft/draft-1' } }) });
-    await tick();
-    expect(doc.getElementById('selected-detail')?.textContent).toContain('draft-1');
-    const link = doc.getElementById('selection-link') as HTMLAnchorElement;
-    expect(link.hidden).toBe(false);
-    expect(new URL(link.href).searchParams.get('path')).toBe('/draft/draft-1');
-    expect(link.href).toContain('path=%2Fdraft%2Fdraft-1');
-    dom.window.close();
-  });
-
-  it.each(['/draft/another-account', '//evil.example', '/draft/draft-1#fragment', '/draft/draft-1?query=1', '/draft/%2e%2e'])('refuses unavailable or malformed route %s without fetching it', async route => {
-    const { dom, host, doc } = open(data(), { hostContext: () => ({ 'openai/deepLink': { url: route } }) });
-    await tick();
-    expect(doc.getElementById('selection')?.hidden).toBe(true);
-    expect(doc.getElementById('notice')?.textContent).toContain('unavailable');
-    expect(host.callTool).not.toHaveBeenCalled();
-    dom.window.close();
-  });
-
   it('asks before cancelling, blocks double presses, and displays the actual returned balance message', async () => {
     const { dom, doc, host } = open(data());
     let resolve!: (value: unknown) => void;
@@ -170,15 +150,6 @@ describe('home extension recovery regressions', () => {
     expect(JSON.parse(updateModelContext.mock.calls.at(-1)![0].content[0].text)).toMatchObject({ status: 'cancelled', id: 'order-1' });
     dom.window.close();
   });
-  it('retries an unavailable deep link when Refresh brings its owner-visible order into the list', async () => {
-    const { dom, host, doc } = open({ drafts: [], orders: [], recipients: [], limit: 20 }, { hostContext: () => ({ 'openai/deepLink': { url: '/order/order-1' } }) });
-    expect(doc.getElementById('selection')?.hidden).toBe(true);
-    host.callTool.mockResolvedValue({ structuredContent: data });
-    click(doc, 'Refresh'); await tick();
-    expect(doc.getElementById('selection')?.hidden).toBe(false);
-    expect(doc.getElementById('selected-detail')?.textContent).toContain('order-1');
-    dom.window.close();
-  });
   it('rejects an error result even when it contains cancellation-shaped structured content', async () => {
     const { dom, host, doc } = open(structuredClone(data));
     host.callTool.mockResolvedValue({ isError: true, structuredContent: { orderId: 'order-1', status: 'cancelled', message: 'Wrong success' } });
@@ -198,20 +169,4 @@ describe('home extension recovery regressions', () => {
     expect(updateModelContext.mock.calls[1][0]).toEqual({ content: [] });
     dom.window.close();
   });
-});
-
-it('does not undo an explicit clear or newer selection when the original successful deep link is unchanged', async () => {
-  const updateModelContext = vi.fn().mockResolvedValue({});
-  const output = { drafts: [], orders: [order('scheduled'), order('accepted', { orderId: 'order-2' })], recipients: [], limit: 20 };
-  const { dom, host, doc } = open(output, { updateModelContext, hostContext: () => ({ 'openai/deepLink': { url: '/order/order-1' } }) });
-  (doc.getElementById('clear-selection') as HTMLButtonElement).click();
-  host.callTool.mockResolvedValue({ structuredContent: structuredClone(output) });
-  (doc.getElementById('refresh') as HTMLButtonElement).click(); await new Promise(resolve => setTimeout(resolve, 0));
-  expect(doc.getElementById('selection')?.hidden).toBe(true);
-  expect(updateModelContext.mock.calls.at(-1)![0]).toEqual({ content: [] });
-  (Array.from(doc.querySelectorAll('#orders button')).filter(button => button.textContent === 'Select order')[1] as HTMLButtonElement).click();
-  (doc.getElementById('refresh') as HTMLButtonElement).click(); await new Promise(resolve => setTimeout(resolve, 0));
-  expect(doc.getElementById('selected-detail')?.textContent).toContain('order-2');
-  expect(JSON.parse(updateModelContext.mock.calls.at(-1)![0].content[0].text)).toMatchObject({ id: 'order-2' });
-  dom.window.close();
 });

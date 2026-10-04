@@ -338,8 +338,7 @@ export const openLetterHomeOutputZ = z.object({
     certifiedNote: z.string().optional()
   })),
   recipients: z.array(homeRecipientZ),
-  limit: z.number().int().positive(),
-  appUrl: z.string().optional()
+  limit: z.number().int().positive()
 });
 export const getProfileOutputZ = z.object({
   // Served in tools/list, so this is the copy ChatGPT reads. "Be a non-empty,
