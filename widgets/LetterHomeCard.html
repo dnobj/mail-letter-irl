@@ -102,7 +102,7 @@
         line(confirm, 'Cancel it? Nothing will be mailed. Cancellation cannot be undone. The answer will say what returned to your account.');
         action(confirm, 'Keep scheduled', function () { confirm.remove(); });
         var yes = action(confirm, 'Confirm cancellation', async function () {
-          if (busy) return;
+          if (busy || cancellationUnconfirmed) return;
           busy = true; yes.disabled = true; refresh.disabled = true;
           cancellationUnconfirmed = true;
           try {

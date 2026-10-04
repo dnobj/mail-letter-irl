@@ -172,7 +172,7 @@ describe('home extension recovery regressions', () => {
 });
 
 it('recovers from a lost cancellation reply, ignores late success and requires Refresh before another cancellation', async () => {
-  const output = { drafts: [], orders: [order('scheduled', { cancellable: true })], recipients: [], limit: 20 };
+  const output = { drafts: [], orders: [order('scheduled', { cancellable: true }), order('scheduled', { cancellable: true, orderId: 'order-2' })], recipients: [], limit: 20 };
   const { dom, host, doc } = open(output);
   const expire: (() => void)[] = [];
   dom.window.setTimeout = ((callback: () => void, ms: number) => { expect(ms).toBe(15000); expire.push(callback); return expire.length; }) as any;
@@ -180,13 +180,15 @@ it('recovers from a lost cancellation reply, ignores late success and requires R
   const click = (label: string) => (Array.from(doc.querySelectorAll('button')).find(button => button.textContent === label) as HTMLButtonElement).click();
   let lateReply!: (value: unknown) => void;
   host.callTool.mockReturnValueOnce(new Promise(resolve => { lateReply = resolve; }));
-  click('Cancel scheduled mail'); click('Confirm cancellation');
+  Array.from(doc.querySelectorAll('#orders button')).filter(button => button.textContent === 'Cancel scheduled mail').forEach(button => (button as HTMLButtonElement).click());
+  click('Confirm cancellation');
   expect((doc.getElementById('refresh') as HTMLButtonElement).disabled).toBe(true);
   expect(expire).toHaveLength(1);
   expire[0](); await new Promise(resolve => setTimeout(resolve, 0));
   expect(doc.getElementById('notice')?.textContent).toContain('not confirmed');
   expect((doc.getElementById('refresh') as HTMLButtonElement).disabled).toBe(false);
   click('Confirm cancellation');
+  (Array.from(doc.querySelectorAll('#orders button')).filter(button => button.textContent === 'Confirm cancellation')[1] as HTMLButtonElement).click();
   expect(host.callTool).toHaveBeenCalledTimes(1);
   lateReply({ structuredContent: { orderId: 'order-1', status: 'cancelled', message: 'Late refund success' } });
   await new Promise(resolve => setTimeout(resolve, 0));
