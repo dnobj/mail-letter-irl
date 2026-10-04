@@ -2793,6 +2793,14 @@
             ],
             "description": "A ready letter that is certified mail now: which service. Absent: an ordinary letter, which a card reads from the terms beside it"
           },
+          "deliveryClass": {
+            "type": "string",
+            "description": "A ready letter with its terms, when it is certified mail or certified mail is offered: how it is delivered now, as a new preview would say it. A card draws it on its Delivery line"
+          },
+          "deliveryDisclaimer": {
+            "type": "string",
+            "description": "With it, the words that qualify the delivery"
+          },
           "reasonCannotSend": {
             "type": "string"
           },

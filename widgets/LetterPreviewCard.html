@@ -631,6 +631,11 @@
         return [bodyText.trim(), signOff.trim()].filter(Boolean).join("\n\n");
       }
 
+      // How the draft travels now (#625), as the last status answer that the style row took the terms of said:
+      // { draftId, mailService, deliveryClass, deliveryDisclaimer }, with "" for what the answer did not name.
+      // set_mail_service may have changed it since the preview. Null until such an answer.
+      let serviceNow = null;
+
       // A letter's terms as this card last heard them (#586): a restyle, or a
       // status answer, may have changed its pages since the preview, and with
       // them who pays. Laid over the preview's answer, so the card draws one
@@ -643,12 +648,20 @@
         else delete latestTerms.reasonCannotSend;
         if (terms.pages > 1) latestTerms.pages = terms.pages;
         else delete latestTerms.pages;
+        // And how it travels (#625), from the answer that gave those terms: the service, and the words that say how it is
+        // delivered, so the summary, the note, the Delivery line, the price and the buttons all agree.
+        if (serviceNow && serviceNow.draftId === output.draftId) {
+          latestTerms.mailService = serviceNow.mailService;
+          if (serviceNow.deliveryClass) latestTerms.deliveryClass = serviceNow.deliveryClass;
+          if (serviceNow.deliveryDisclaimer) latestTerms.deliveryDisclaimer = serviceNow.deliveryDisclaimer;
+        }
         return latestTerms;
       }
 
-      // The certified service a preview names (#625), or "": only the two values the server writes.
+      // The certified service a state names (#625), or "": only the two values the server writes. The state is the
+      // preview's with the last status answer's service laid over it (withTerms).
       function certifiedOf(state) {
-        const said = serviceNow && serviceNow.draftId === state?.draftId ? serviceNow.mailService : state?.mailService;
+        const said = state?.mailService;
         return said === "certified" || said === "certified_return_receipt" ? said : "";
       }
 
@@ -1246,9 +1259,6 @@
       // sent or expired.
       let draftState = null;
       const draftStateAsked = new Set();
-      // How the draft travels now (#625), as the server last said: set_mail_service may have changed it since the
-      // preview. Null until an answer that carries the terms says.
-      let serviceNow = null;
 
       function askDraftState(draftId) {
         if (typeof host.setWidgetState === "function") return;
@@ -1274,11 +1284,19 @@
               const statusPage = result?._meta?.previewHtml;
               const statusFit =
                 typeof statusPage === "string" && statusPage === currentMeta().previewHtml ? currentMeta().pageFit ?? null : null;
-              styleRow.adopt(draftId, answer.stationery, statusPage, answer, statusFit);
-              // And how it travels now (#625). An answer that carries the terms names a certified service or, naming none, means
-              // ordinary mail; one without them (an older server, or terms it did not give) says nothing.
-              if (answer.sendEligibility && typeof answer.canSendNow === "boolean") {
-                serviceNow = { draftId, mailService: typeof answer.mailService === "string" ? answer.mailService : "" };
+              const adopted = styleRow.adopt(draftId, answer.stationery, statusPage, answer, statusFit);
+              // And how it travels now (#625), but only with the terms that adoption took, so the service, the delivery words, the
+              // price and the buttons come from one answer and never from two: the style row refuses an answer for another draft,
+              // while the card sets a style, or for a preview that named no stationery. An answer that carries the terms names a
+              // certified service or, naming none, means ordinary mail; one without them (an older server, or terms it did not
+              // give) says nothing.
+              if (adopted && answer.sendEligibility && typeof answer.sendEligibility === "object" && typeof answer.canSendNow === "boolean") {
+                serviceNow = {
+                  draftId,
+                  mailService: typeof answer.mailService === "string" ? answer.mailService : "",
+                  deliveryClass: typeof answer.deliveryClass === "string" ? answer.deliveryClass : "",
+                  deliveryDisclaimer: typeof answer.deliveryDisclaimer === "string" ? answer.deliveryDisclaimer : ""
+                };
               }
               // And what they mean for delivery, for the Delivery line.
               if (

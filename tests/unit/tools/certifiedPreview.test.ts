@@ -167,7 +167,7 @@ describe.each(Object.keys(TOOLS) as (keyof typeof TOOLS)[])('the %s letter previ
     const output = await run(layout, { mailService: service });
     expect(output).toMatchObject({ deliveryClass });
     expect(output.deliveryDisclaimer).toBe(
-      'USPS timing varies and can take longer. Certified mail is signed for at delivery; if no one signs for it, USPS returns it to the sender.'
+      'USPS timing varies and can take longer. Certified mail is signed for at delivery; if no one signs for it or collects it from the Post Office, USPS returns it to the sender.'
     );
   });
 

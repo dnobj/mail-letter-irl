@@ -48,6 +48,8 @@ import {
   SET_MAIL_SERVICE_OUTPUT_DESCRIPTION,
   ORDER_MAIL_SERVICE_DESCRIPTION,
   GET_DRAFT_STATUS_MAIL_SERVICE_DESCRIPTION,
+  GET_DRAFT_STATUS_DELIVERY_CLASS_DESCRIPTION,
+  GET_DRAFT_STATUS_DELIVERY_DISCLAIMER_DESCRIPTION,
   ORDER_CARRIER_TRACKING_NUMBER_DESCRIPTION,
   ORDER_TRACKING_SUPPORT_DESCRIPTION,
   ORDER_CARRIER_TRACKING_URL_DESCRIPTION,
@@ -1010,6 +1012,8 @@ export const getDraftStatusOutputSchema: JsonSchema = {
     signOff: { type: "string" },
     wordsVersion: { type: "string", description: WORDS_VERSION_DESCRIPTION },
     mailService: { type: "string", enum: [...EXTRA_SERVICES], description: GET_DRAFT_STATUS_MAIL_SERVICE_DESCRIPTION },
+    deliveryClass: { type: "string", description: GET_DRAFT_STATUS_DELIVERY_CLASS_DESCRIPTION },
+    deliveryDisclaimer: { type: "string", description: GET_DRAFT_STATUS_DELIVERY_DISCLAIMER_DESCRIPTION },
     reasonCannotSend: { type: "string" },
     sendEligibility: sendEligibilitySchema,
     stationery: {

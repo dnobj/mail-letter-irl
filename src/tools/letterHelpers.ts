@@ -64,14 +64,7 @@ import {
   type PreviewScheduleOutput
 } from "./arriveByInput.js";
 import type { GiftCardContent, GiftCardState } from "../services/giftCardRenderer.js";
-import {
-  DELIVERY_CLASS,
-  DELIVERY_DISCLAIMER,
-  CERTIFIED_DELIVERY_CLASS,
-  CERTIFIED_RECEIPT_DELIVERY_CLASS,
-  CERTIFIED_DELIVERY_DISCLAIMER,
-  DELIVERY_ESTIMATE
-} from "../content/delivery.js";
+import { DELIVERY_ESTIMATE, deliveryWordsOf } from "../content/delivery.js";
 
 // ============================================================================
 // Types
@@ -1359,11 +1352,11 @@ export async function createLetterDraftAndBuildOutput(
     reasonCannotSend: canSendNow ? undefined : reasonCannotSend(option),
     sendEligibility: previewSendEligibility(available, requiredCredits, option, gift.isGift, callingApp(context), draftResult.draftId),
     // Certified mail (#625) says what it is, and that it is signed for: First-Class alone would be less than the truth.
-    deliveryClass:
-      mailService === "certified_return_receipt" ? CERTIFIED_RECEIPT_DELIVERY_CLASS : mailService ? CERTIFIED_DELIVERY_CLASS : DELIVERY_CLASS,
+    // The class and the disclaimer are get_draft_status's too, so a card told of a change of service draws the same words.
+    deliveryClass: deliveryWordsOf(mailService).deliveryClass,
     // A held letter's card says when it goes to the printer, not "in 1-2 days".
     deliveryEstimate: schedule ? scheduleSentence(schedule.output, context.now()) : DELIVERY_ESTIMATE,
-    deliveryDisclaimer: mailService ? CERTIFIED_DELIVERY_DISCLAIMER : DELIVERY_DISCLAIMER,
+    deliveryDisclaimer: deliveryWordsOf(mailService).deliveryDisclaimer,
     draftId: draftResult.draftId,
     draftExpiresAt: draftResult.expiresAt.toISOString(),
     layoutType,
