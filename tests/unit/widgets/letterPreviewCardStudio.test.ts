@@ -1248,6 +1248,26 @@ describe('the service the server last reported (#625)', () => {
     }
   });
   const ASK = 'get_draft_status';
+  const restyled = async (card: ReturnType<typeof mount>, draftId = 'draft_0001') => {
+    await card.click(card.byId('style-row').querySelector('[data-theme="botanical"]')!);
+    await card.answer(
+      {
+        result: {
+          content: [],
+          structuredContent: {
+            draftId,
+            stationery: { theme: 'botanical', dateLine: 'October 1, 2026', source: 'asked' },
+            canSendNow: false,
+            reasonCannotSend: 'Certified mail is paid with Pay & Send.',
+            sendEligibility: ON_PAGE,
+            message: 'Restyled.'
+          },
+          _meta: { previewHtml: PAGE }
+        }
+      },
+      'set_stationery'
+    );
+  };
 
   it('drops the certified words when the status says the letter is ordinary mail now, terms and all', async () => {
     const card = mount();
@@ -1366,6 +1386,36 @@ describe('the service the server last reported (#625)', () => {
     const card = mount();
     await card.show(certifiedPreview(), ON);
     await card.click(card.byId('style-row').querySelector('[data-theme="botanical"]')!);
+    await card.answerTo(card.requests('tools/call', ASK)[0], status({ ...canSend, ...FIRST_CLASS }));
+    expect(text(card, 'studio-summary')).toContain('certified mail');
+    expect(text(card, 'delivery')).toContain('USPS Certified Mail');
+    expect(card.byId('send-button').style.display).not.toBe('flex');
+  });
+
+  it('keeps a draft its own service when the draft before it was adopted and the new one is restyled', async () => {
+    const card = mount();
+    await card.show(certifiedPreview(), ON);
+    await card.answerTo(card.requests('tools/call', ASK)[0], status({ ...canSend, ...FIRST_CLASS }));
+    expect(text(card, 'studio-summary')).not.toContain('certified');
+    await card.show({ ...certifiedPreview(), draftId: 'draft_0002' }, ON);
+    await restyled(card, 'draft_0002');
+    expect(text(card, 'studio-summary')).toContain('certified mail');
+    expect(text(card, 'delivery')).toContain('USPS Certified Mail');
+  });
+
+  it('leaves the service of the preview alone when an older server answers without terms, even after a restyle', async () => {
+    const card = mount();
+    await card.show(certifiedPreview(), ON);
+    await card.answerTo(card.requests('tools/call', ASK)[0], status({}));
+    await restyled(card);
+    expect(text(card, 'studio-summary')).toContain('certified mail');
+    expect(text(card, 'delivery')).toContain('USPS Certified Mail');
+  });
+
+  it('ignores a status that lands after the card restyled the draft: it is older than the restyle', async () => {
+    const card = mount();
+    await card.show(certifiedPreview(), ON);
+    await restyled(card);
     await card.answerTo(card.requests('tools/call', ASK)[0], status({ ...canSend, ...FIRST_CLASS }));
     expect(text(card, 'studio-summary')).toContain('certified mail');
     expect(text(card, 'delivery')).toContain('USPS Certified Mail');
