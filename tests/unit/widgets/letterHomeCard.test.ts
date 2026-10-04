@@ -3,8 +3,8 @@ import { JSDOM } from 'jsdom';
 import { describe, expect, it, vi } from 'vitest';
 
 const html = readFileSync(new URL('../../../widgets/LetterHomeCard.html', import.meta.url), 'utf8');
-function open(output: unknown = { drafts: [], orders: [], recipients: [], limit: 20 }) {
-  const host = { theme: () => 'light', toolOutput: () => output, onChange: vi.fn(), callTool: vi.fn() };
+function open(output: unknown = { drafts: [], orders: [], recipients: [], limit: 20 }, extras = {}) {
+  const host = { theme: () => 'light', toolOutput: () => output, onChange: vi.fn(), callTool: vi.fn(), ...extras };
   const dom = new JSDOM(html, { runScripts: 'dangerously', beforeParse(window) { (window as any).letterIrlHost = host; } });
   return { dom, host, doc: dom.window.document };
 }
@@ -28,7 +28,7 @@ describe('LetterHomeCard', () => {
     });
     expect(doc.getElementById('drafts')?.textContent).toContain('<img');
     expect(doc.querySelector('img')).toBeNull();
-    expect(doc.querySelector('a')).toBeNull();
+    expect(doc.querySelector('a[href]')).toBeNull();
     expect(doc.getElementById('orders')?.textContent).toContain('Delivery estimated');
     dom.window.close();
   });
@@ -41,7 +41,7 @@ describe('LetterHomeCard', () => {
     });
     expect(doc.body.textContent).toContain('Aims to arrive by Oct 20, 2026');
     expect(doc.body.textContent).toContain('Gift letter');
-    expect(doc.querySelectorAll('a')).toHaveLength(2);
+    expect(doc.querySelectorAll('a[href]')).toHaveLength(2);
     expect(doc.body.textContent).toContain('Goes as USPS Certified Mail.');
     expect(doc.querySelector('a')?.rel).toBe('noopener noreferrer');
     dom.window.close();
@@ -72,5 +72,86 @@ describe('LetterHomeCard', () => {
     button.click(); await new Promise(resolve => setTimeout(resolve, 0));
     expect(doc.getElementById('orders')?.textContent).toContain('Cancelled; not mailed');
     dom.window.close();
+  });
+});
+
+describe('home extension interactions', () => {
+  const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+  const click = (doc: Document, label: string) => (Array.from(doc.querySelectorAll('button')).find(node => node.textContent === label) as HTMLButtonElement).click();
+  const data = (extra = {}) => ({ drafts: [{ draftId: 'draft-1', recipient: { name: 'Ruth', city: 'Chicago', state: 'IL' }, expiresAt: '2026-10-20' }], orders: [order('scheduled', { cancellable: true, isGiftSend: true, arriveBy: '2026-10-20' })], recipients: [], limit: 20, ...extra });
+
+  it('shares only selected summaries, serializes changes, and replaces context on clear', async () => {
+    const update = vi.fn().mockResolvedValue({});
+    const { dom, doc } = open(data(), { updateModelContext: update });
+    click(doc, 'Select draft'); click(doc, 'Select order'); click(doc, 'Clear selection');
+    await tick();
+    expect(update).toHaveBeenCalledTimes(3);
+    expect(JSON.parse(update.mock.calls[0][0].content[0].text)).toMatchObject({ kind: 'draft', id: 'draft-1', editable: true });
+    expect(JSON.parse(update.mock.calls[1][0].content[0].text)).toMatchObject({ kind: 'order', id: 'order-1', status: 'scheduled', editable: false });
+    expect(update.mock.calls[2][0]).toEqual({ content: [] });
+    expect(JSON.stringify(update.mock.calls)).not.toMatch(/addressLine|bodyText|confirmationUrl/);
+    dom.window.close();
+  });
+
+  it('reports unsupported and refused context without claiming success', async () => {
+    for (const extra of [{}, { updateModelContext: vi.fn().mockResolvedValue({ isError: true }) }]) {
+      const { dom, doc } = open(data(), extra);
+      click(doc, 'Select draft'); await tick();
+      expect(doc.getElementById('notice')?.textContent).toMatch(/cannot share|could not be shared/);
+      expect(doc.getElementById('selection')?.hidden).toBe(false);
+      dom.window.close();
+    }
+  });
+
+  it('honors owner-visible deep links and produces a properly encoded share URL', async () => {
+    const { dom, doc } = open(data({ appUrl: 'https://chatgpt.com/plugins/letter-irl-dev/app/open_letter_home' }), { hostContext: () => ({ 'openai/deepLink': { url: '/draft/draft-1' } }) });
+    await tick();
+    expect(doc.getElementById('selected-detail')?.textContent).toContain('draft-1');
+    const link = doc.getElementById('selection-link') as HTMLAnchorElement;
+    expect(link.hidden).toBe(false);
+    expect(new URL(link.href).searchParams.get('path')).toBe('/draft/draft-1');
+    expect(link.href).toContain('path=%2Fdraft%2Fdraft-1');
+    dom.window.close();
+  });
+
+  it.each(['/draft/another-account', '//evil.example', '/draft/draft-1#fragment', '/draft/draft-1?query=1', '/draft/%2e%2e'])('refuses unavailable or malformed route %s without fetching it', async route => {
+    const { dom, host, doc } = open(data(), { hostContext: () => ({ 'openai/deepLink': { url: route } }) });
+    await tick();
+    expect(doc.getElementById('selection')?.hidden).toBe(true);
+    expect(doc.getElementById('notice')?.textContent).toContain('unavailable');
+    expect(host.callTool).not.toHaveBeenCalled();
+    dom.window.close();
+  });
+
+  it('asks before cancelling, blocks double presses, and displays the actual returned balance message', async () => {
+    const { dom, doc, host } = open(data());
+    let resolve!: (value: unknown) => void;
+    host.callTool.mockReturnValue(new Promise(done => { resolve = done; }));
+    click(doc, 'Cancel scheduled mail');
+    expect(host.callTool).not.toHaveBeenCalled();
+    click(doc, 'Keep scheduled');
+    expect(doc.querySelector('.cancel-confirm')).toBeNull();
+    click(doc, 'Cancel scheduled mail'); click(doc, 'Confirm cancellation'); click(doc, 'Confirm cancellation');
+    expect(host.callTool).toHaveBeenCalledExactlyOnceWith('cancel_scheduled_mail', { orderId: 'order-1', confirm: true });
+    resolve({ structuredContent: { orderId: 'order-1', status: 'cancelled', message: 'Cancelled. Nothing returned because it expired.' } });
+    await tick();
+    expect(doc.getElementById('orders')?.textContent).toContain('Cancelled; not mailed');
+    expect(doc.getElementById('notice')?.textContent).toContain('Nothing returned because it expired');
+    expect(doc.querySelector('.cancel-confirm')).toBeNull();
+    dom.window.close();
+  });
+
+  it('preserves scheduled state on an ambiguous/refused cancellation, and offers no cancel for ineligible mail', async () => {
+    const { dom, doc, host } = open(data());
+    host.callTool.mockResolvedValue({ isError: true });
+    click(doc, 'Cancel scheduled mail'); click(doc, 'Confirm cancellation'); await tick();
+    expect(doc.getElementById('orders')?.textContent).toContain('Scheduled');
+    expect(doc.getElementById('notice')?.textContent).toContain('not confirmed');
+    dom.window.close();
+    for (const item of [order('printing', { cancellable: true }), order('scheduled', { cancellable: false })]) {
+      const mounted = open(data({ orders: [item] }));
+      expect(mounted.doc.getElementById('orders')?.textContent).not.toContain('Cancel scheduled mail');
+      mounted.dom.window.close();
+    }
   });
 });

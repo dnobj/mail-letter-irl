@@ -53,6 +53,7 @@
       toolOutput: function () { return openai().toolOutput; },
       toolMeta: function () { return openai().toolResponseMetadata; },
       widgetState: function () { return openai().widgetState; },
+      hostContext: function () { return openai().hostContext || {}; },
       onChange: onChange
     };
     // Each capability exists only while window.openai has it, so a card's
@@ -71,6 +72,7 @@
     capability("openLink", "openExternal", function (api, url) { return api.openExternal({ href: url }); });
     capability("sendMessage", "sendFollowUpMessage", function (api, text) { return api.sendFollowUpMessage({ prompt: text }); });
     capability("setWidgetState", "setWidgetState", function (api, value) { return api.setWidgetState(value); });
+    capability("updateModelContext", "updateModelContext", function (api, value) { return api.updateModelContext(value); });
     // ChatGPT's file store: no MCP Apps equivalent (#474).
     capability("uploadFile", "uploadFile", function (api, file) { return api.uploadFile(file); });
     capability("selectFiles", "selectFiles", function (api) { return api.selectFiles(); });
@@ -85,7 +87,7 @@
   var parent = window.parent;
   var framed = Boolean(parent) && parent !== window;
   // Null until the host sends them, as window.openai's are before a result.
-  var state = { theme: "light", toolInput: null, toolOutput: null, toolMeta: null };
+  var state = { theme: "light", toolInput: null, toolOutput: null, toolMeta: null, hostContext: {}, capabilities: {} };
   var pending = {};
   var nextId = 1;
   var initialized = false;
@@ -107,6 +109,7 @@
   }
 
   function applyHostContext(context) {
+    if (context && typeof context === "object") Object.assign(state.hostContext, context);
     if (context && (context.theme === "dark" || context.theme === "light")) {
       state.theme = context.theme;
     }
@@ -178,6 +181,7 @@
     toolOutput: function () { return state.toolOutput; },
     toolMeta: function () { return state.toolMeta; },
     widgetState: function () { return null; },
+    hostContext: function () { return state.hostContext; },
     callTool: function (name, args) {
       return request("tools/call", { name: name, arguments: args || {} });
     },
@@ -188,6 +192,13 @@
     onChange: onChange
   };
 
+  Object.defineProperty(window.letterIrlHost, "updateModelContext", {
+    get: function () {
+      if (!state.capabilities.updateModelContext || !state.capabilities.updateModelContext.text) return undefined;
+      return function (value) { return request("ui/update-model-context", value); };
+    }
+  });
+
   if (!framed) return;
 
   request("ui/initialize", {
@@ -196,6 +207,7 @@
     protocolVersion: "2026-01-26"
   }).then(
     function (result) {
+      state.capabilities = (result && result.hostCapabilities) || {};
       applyHostContext(result && result.hostContext);
       initialized = true;
       post({ method: "ui/notifications/initialized", params: {} });

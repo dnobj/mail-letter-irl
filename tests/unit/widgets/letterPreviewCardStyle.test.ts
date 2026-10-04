@@ -69,6 +69,7 @@ function mount(file = 'LetterPreviewCard', tool = 'quote_and_preview_letter') {
   const button = (theme: string) => document.querySelector(`#style-row [data-theme="${theme}"]`) as HTMLButtonElement;
   return {
     document,
+    deliver,
     sent,
     lastRequest,
     button,
@@ -76,11 +77,11 @@ function mount(file = 'LetterPreviewCard', tool = 'quote_and_preview_letter') {
       Array.from(document.querySelectorAll('#style-row [data-theme]'))
         .filter(element => element.getAttribute('aria-pressed') === 'true')
         .map(element => element.getAttribute('data-theme')),
-    async show(output: Json, meta: Json = { previewHtml: CLASSIC_PAGE }) {
+    async show(output: Json, meta: Json = { previewHtml: CLASSIC_PAGE }, hostCapabilities: Json = {}) {
       await flush();
       await deliver({
         id: lastRequest('ui/initialize')!.id,
-        result: { protocolVersion: '2026-01-26', hostInfo: { name: 'fake' }, hostCapabilities: {}, hostContext: {} }
+        result: { protocolVersion: '2026-01-26', hostInfo: { name: 'fake' }, hostCapabilities, hostContext: {} }
       });
       await deliver({ method: 'ui/notifications/tool-input', params: { arguments: ARGS } });
       await deliver({
@@ -127,6 +128,21 @@ const restyled = (stationery: Json, previewHtml?: string) => ({
 });
 
 describe('the Style row (#563)', () => {
+  it('shares the explicit card draft selection only with the flag and a supported host', async () => {
+    const card = mount();
+    await card.show(output(), { previewHtml: CLASSIC_PAGE, modelContextEnabled: true }, { updateModelContext: { text: {} } });
+    const selected = () => Array.from(card.document.querySelectorAll('button')).find(button => button.textContent === 'Select this draft in the conversation')!;
+    expect(selected().hidden).toBe(false);
+    expect(card.lastRequest('ui/update-model-context')).toBeUndefined();
+    selected().click(); await flush();
+    const request = card.lastRequest('ui/update-model-context')!;
+    expect(JSON.parse(request.params.content[0].text)).toMatchObject({ draftId: 'draft_0001' });
+    expect(request.params.content[0].text).not.toContain('Main St');
+    await card.deliver({ id: request.id, result: {} });
+    expect(card.document.body.textContent).toContain('Draft selection shared');
+    await card.deliver({ method: 'ui/notifications/tool-result', params: { structuredContent: output(), _meta: { previewHtml: CLASSIC_PAGE } } });
+    expect(selected().hidden).toBe(true);
+  });
   it('offers the six styles while the preview names its stationery, the one it is in pressed', async () => {
     const card = mount();
     await card.show(output({ theme: 'classic', source: 'default' }));

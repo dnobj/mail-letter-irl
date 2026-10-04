@@ -1753,6 +1753,9 @@ export const openLetterHomeOutputSchema: JsonSchema = {
           },
           "certifiedNote": {
             "type": "string"
+          },
+          "cancellable": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -1792,6 +1795,9 @@ export const openLetterHomeOutputSchema: JsonSchema = {
     "limit": {
       "type": "integer",
       "minimum": 1
+    },
+    "appUrl": {
+      "type": "string"
     }
   },
   "required": [

@@ -2,7 +2,7 @@
 
 **Last Updated:** October 4, 2026
 **Status:** In Progress; host acceptance pending
-**Purpose:** The first read-only Plugin Extensions home and its rollout checks
+**Purpose:** Plugin Extensions home, selection, cancellation and rollout checks
 
 ## Scope
 
@@ -10,13 +10,19 @@
 
 A single SQL statement reads both lists. Pending drafts must be unexpired and not redacted; mail must not be redacted. Neither list contains street addresses, body text, images, signatures, payments or prices. Errors refuse the read rather than implying an empty history. Existing authenticated account preparation and erased-account checks remain in effect. Summaries reach the connected app and its model, like `list_orders`.
 
-The home uses the initial result and refreshes only when the person presses Refresh. It does not send, cancel, edit, purchase, or poll. Draft links open the existing website confirmation page, where the person signs in, reviews, and sends. Scheduled mail shows its original arrival aim and planned mail date. Delivered mail reads **Delivery estimated**. Certified mail reuses `certifiedOrderNote`, including status-specific tracking and electronic receipt wording. Refresh failures retain a visible stale-data warning.
+The home uses the initial result and refreshes only when the person presses Refresh. Draft links open the existing website confirmation page, where the person signs in, reviews, and sends. Scheduled mail shows its original arrival aim and planned mail date. Delivered mail reads **Delivery estimated**. Certified mail reuses `certifiedOrderNote`, including status-specific tracking and electronic receipt wording. Refresh failures retain a visible stale-data warning.
+
+Scheduled prepaid and gift mail offer Cancel while arrive-by is enabled. A second press confirms cancellation through `cancel_scheduled_mail`; the existing transaction rechecks eligibility, account ownership and dispatch races, and restores funding at most once. Pay & Send never offers Cancel here. The UI displays the tool's actual balance-return message, including expired or refunded funding. A timeout or refusal leaves the status unchanged and asks for Refresh before retrying. The home read remains `mail:read`; cancellation separately requires the cancellation tool's scope.
+
+Selecting a draft or order sends only its ID, recipient summary, status and dates through `ui/update-model-context`, replacing prior selection context. Clear selection replaces it with empty content. Calls are serialized so an older selection cannot arrive after a newer one. Unsupported or refused context is reported visibly. The letter card offers explicit draft selection while the home flag and host capability are enabled; it tells the model to recheck draft status before editing.
+
+Deep links accept only `/draft/<id>`, `/order/<id>` or `/`. Selection must exist in the current owner-scoped, bounded result; arbitrary routes never trigger a fetch. A missing or old selection asks for Refresh. Optional `LETTER_IRL_CHATGPT_PLUGIN_ID` enables share URLs for that installed plugin; leave it unset until the actual development plugin ID is known. No ID is invented. Links have the documented ChatGPT HTTPS format and an encoded `path` query.
 
 ## Configuration and compatibility
 
 `LETTER_IRL_HOME_ENABLED` is off unless explicitly enabled. While off, the tool is absent from `tools/list` and /manifest.json, its resource is unlisted and unreadable, and cached calls refuse without reading home data. Manifest generation disables it for the checked-in production snapshot. No migration or dependency is added.
 
-While enabled, LetterHomeCard.html@v67 is an MCP App resource. The tool declares _meta.ui.resourceUri and _meta["openai/ui"].entrypoints: [{type: "global"}]. Other clients can call it as a read-only tool. The host uses its default navigation icon: SDK 1.29's high-level `registerTool` does not emit top-level `icons`. This change does not modify SDK internals.
+While enabled, LetterHomeCard.html@v68 is an MCP App resource. The tool declares _meta.ui.resourceUri and _meta["openai/ui"].entrypoints: [{type: "global"}]. Other clients can call it as a read-only tool. The host uses its default navigation icon: SDK 1.29's high-level `registerTool` does not emit top-level `icons`. This change does not modify SDK internals.
 
 Source: [official Plugin Extensions documentation](https://developers.openai.com/plugins/build/extensions). Declaring an entrypoint does not establish that it appears in the owner's development connection. HOME-01 requires the owner's eyes before that is reported as working.
 
@@ -24,8 +30,6 @@ The published privacy policy covers recipient names, addresses and connected AI 
 
 ## Remaining slices
 
-- Scheduled cancellation through the existing confirmed cancellation tool.
-- Model-App Context for selecting a draft, then home deep links.
 - Rich-form pickers with capability detection and fallback. OpenAI-registered servers require multi-round-trip requests (`MRTR`); preserve existing tools until supported.
 - Conversation panel after home/context host acceptance, as the plan requires.
 - Custom entrypoint icon when the SDK exposes it.

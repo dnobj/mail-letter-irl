@@ -3258,3 +3258,17 @@ Status: Not run on the host. Automated MCP wire, query and DOM coverage accompan
 
 External boundaries: this slice reads stored data only. No webhook, vendor dispatch, payment, refund or entitlement mutation. Draft links reuse the existing website.
 
+
+### HOME-02: selection, deep links and scheduled cancellation
+
+Needs HOME-01, a host advertising text model context, and development arrive-by for cancellation. Owner-only ChatGPT surface acceptance remains pending.
+
+1. Select a draft in the home: the selected recipient and draft ID appear. Ask to revise it; verify the model uses this ID and rechecks draft status. Select an order; the model must not edit it as a draft. Clear selection and verify prior selection is removed.
+2. Repeat on the letter card's explicit selection button while home is enabled. With home off or unsupported context, no selection button should appear there.
+3. With the actual development plugin ID configured as `LETTER_IRL_CHATGPT_PLUGIN_ID`, open the selection's share link. Verify the correct draft/order is selected after initialization and after another deep link. A missing, expired, redacted, other-account or malformed route must report unavailable without fetching arbitrary content.
+4. Select scheduled prepaid or gift mail. Cancel must ask first; Keep scheduled changes nothing. Confirm cancellation once and verify the returned-funding sentence agrees with the tool response and balance. Refresh: the order is cancelled and Cancel is absent. A duplicate request must return no second refund.
+5. Pay & Send, already printing, cancelled, and undated mail offer no Cancel. With arrive-by off, Cancel is absent. A `mail:read` token's cancellation must be refused by the existing scope guard.
+6. Simulate refusal/disconnection during cancellation: the home must report cancellation unconfirmed, retain the previous state, and request Refresh. It must not claim restored funding. Refresh and check the authoritative state before retrying.
+7. Disable host context support or refuse the update: selection stays visible locally and the notice says it was not shared. Check desktop and mobile layouts and dark mode.
+
+Automated coverage: real MCP wire registration/schema checks, owner-isolated PostgreSQL home reads, DOM cancellation/selection/deep-link checks, host capability negotiation and serialized replacement context. Existing scheduled-mail PostgreSQL suites cover idempotency, cancellation versus dispatch, expired/refunded funding and process recovery; no transaction workflow changes in this slice.

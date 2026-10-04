@@ -1344,6 +1344,7 @@ export async function registerLetterTools(
           !client.passesResultMetaToCards
         );
         Object.assign(_meta, cardSwitches(tool.name));
+        if (isLetterHomeEnabled()) _meta.modelContextEnabled = true;
 
         const response = {
           structuredContent,

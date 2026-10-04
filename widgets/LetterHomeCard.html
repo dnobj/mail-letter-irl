@@ -23,6 +23,7 @@
     <header><h1>Letter IRL</h1><button id="refresh" type="button" disabled>Refresh</button></header>
     <p class="muted">Your drafts, the mail you've sent, and the people you've written to.</p>
     <p id="notice" role="status" aria-live="polite">Loading your mail...</p>
+    <section id="selection" hidden aria-label="Selected mail"><h2 id="selected-title"></h2><p id="selected-detail"></p><button id="clear-selection" type="button">Clear selection</button><a id="selection-link" hidden target="_blank" rel="noopener noreferrer">Open this selection</a></section>
     <div id="home" hidden>
       <p id="scope" class="detail"></p>
       <div class="columns">
@@ -41,6 +42,11 @@
       var refresh = document.getElementById('refresh');
       var busy = false;
       var lastOutput;
+      var currentData;
+      var selected;
+      var lastRoute;
+      var selectionRevision = 0;
+      var contextQueue = Promise.resolve();
       var labels = {pending:'Awaiting an update',scheduled:'Scheduled',accepted:'Accepted by the printer',printing:'Being submitted or printed',in_transit:'In the mail',delivered:'Delivery estimated',returned:'Returned to sender',failed:'Did not go out',cancelled:'Cancelled; not mailed'};
       function el(tag, text, className) {
         var node = document.createElement(tag);
@@ -49,6 +55,79 @@
         return node;
       }
       function line(container, text, className) { container.appendChild(el('p', text, className)); }
+      function action(container, title, run) {
+        var button = el('button', title); button.type = 'button';
+        button.addEventListener('click', run); container.appendChild(button); return button;
+      }
+      function selectionKey(item, kind) { return kind + '/' + (kind === 'draft' ? item.draftId : item.orderId); }
+      function shareContext(item, kind) {
+        var revision = ++selectionRevision;
+        var text = item ? JSON.stringify({ source: 'Letter IRL selection', kind: kind, id: kind === 'draft' ? item.draftId : item.orderId, recipient: item.recipient, status: kind === 'draft' ? 'draft' : item.status, arriveBy: item.arriveBy, mailOn: item.mailOn, editable: kind === 'draft' }) : '';
+        contextQueue = contextQueue.catch(function () {}).then(async function () {
+          if (typeof host.updateModelContext !== 'function') {
+            if (revision === selectionRevision && item) notice.textContent = 'Selected here. This host cannot share the selection with the conversation; include the draft or order ID in your request.';
+            return;
+          }
+          try {
+            var answer = await host.updateModelContext({ content: text ? [{ type: 'text', text: text }] : [] });
+            if (answer && answer.isError) throw new Error('refused');
+            if (revision === selectionRevision) notice.textContent = item ? 'Selection shared with the conversation.' : '';
+          } catch (_) {
+            if (revision === selectionRevision) notice.textContent = 'Selection could not be shared. Include the draft or order ID in your request.';
+          }
+        });
+      }
+      function select(item, kind) {
+        selected = item ? selectionKey(item, kind) : undefined;
+        var panel = document.getElementById('selection'); panel.hidden = !item;
+        var link = document.getElementById('selection-link'); link.hidden = true; link.removeAttribute('href');
+        if (item) {
+          document.getElementById('selected-title').textContent = item.recipient.name || 'Recipient';
+          document.getElementById('selected-detail').textContent = (kind === 'draft' ? 'Draft ' + item.draftId : (labels[item.status] || 'Status unavailable') + ': order ' + item.orderId) + (item.arriveBy ? '; arrival aim ' + displayDate(item.arriveBy) : '');
+          try {
+            var base = new URL(currentData.appUrl);
+            if (base.origin === 'https://chatgpt.com' && /^\/plugins\/[a-zA-Z0-9_-]+\/app\/open_letter_home$/.test(base.pathname) && !base.username && !base.password) {
+              base.search = ''; base.hash = ''; base.searchParams.set('path', '/' + selected);
+              link.href = base.href; link.hidden = false;
+            }
+          } catch (_) {}
+        }
+        shareContext(item, kind);
+      }
+      function applyRoute() {
+        var context = typeof host.hostContext === 'function' ? host.hostContext() : {};
+        var route = context['openai/deepLink']; route = route && route.url;
+        if (route === lastRoute || !currentData || typeof route !== 'string') return;
+        lastRoute = route;
+        if (route === '/') { select(); return; }
+        var match = /^\/(draft|order)\/([a-zA-Z0-9-]{1,100})$/.exec(route);
+        var found = match && (match[1] === 'draft' ? currentData.drafts : currentData.orders).find(function (item) { return selectionKey(item, match[1]) === route.slice(1); });
+        if (!found) { select(); notice.textContent = 'That selection is unavailable in your current mail list. Refresh to check again.'; return; }
+        select(found, match[1]);
+      }
+      async function cancelOrder(order, card) {
+        if (busy || typeof host.callTool !== 'function') return;
+        var existing = card.querySelector('.cancel-confirm');
+        if (existing) return;
+        var confirm = el('div', '', 'cancel-confirm');
+        line(confirm, 'Cancel it? Nothing will be mailed. Cancellation cannot be undone. The answer will say what returned to your account.');
+        action(confirm, 'Keep scheduled', function () { confirm.remove(); });
+        var yes = action(confirm, 'Confirm cancellation', async function () {
+          if (busy) return;
+          busy = true; yes.disabled = true; refresh.disabled = true;
+          try {
+            var answer = await host.callTool('cancel_scheduled_mail', { orderId: order.orderId, confirm: true });
+            if (!answer || answer.isError) throw new Error('refused');
+            var result = answer.structuredContent || answer;
+            if (result.status !== 'cancelled' || result.orderId !== order.orderId) throw new Error('missing result');
+            order.status = 'cancelled'; order.cancellable = false;
+            render(currentData);
+            notice.textContent = result.message || 'Cancelled; not mailed. Refresh for the current account balance.';
+          } catch (_) { notice.textContent = 'Cancellation was not confirmed. Refresh to check the order before trying again.'; }
+          finally { busy = false; sync(); if (yes.isConnected) yes.disabled = false; }
+        });
+        card.appendChild(confirm);
+      }
       function place(person) { return [person.city, person.state].filter(Boolean).join(', '); }
       function displayDate(value) {
         var calendar = /^\d{4}-\d{2}-\d{2}$/.test(value);
@@ -77,6 +156,7 @@
       }
       function render(data) {
         if (!data || !Array.isArray(data.drafts) || !Array.isArray(data.orders) || !Array.isArray(data.recipients)) return false;
+        currentData = data;
         document.getElementById('scope').textContent = 'Up to ' + data.limit + ' active drafts and ' + data.limit + ' recent mail items. Recipients come from that recent mail.';
         items('drafts', data.drafts, 'No active drafts. Ask in the conversation to start a letter or postcard.', function (card, draft) {
           line(card, draft.mailType === 'postcard' ? 'Postcard draft' : 'Letter draft', 'tag');
@@ -85,6 +165,7 @@
           if (draft.arriveBy) line(card, 'Aims to arrive by ' + displayDate(draft.arriveBy) + '; planned mail date ' + displayDate(draft.mailOn) + '.', 'detail');
           if (draft.isGiftSend) line(card, 'Gift letter', 'detail');
           safeLink(card, draft.confirmationUrl, 'Review draft on the website', false);
+          action(card, 'Select draft', function () { select(draft, 'draft'); });
         });
         items('orders', data.orders, 'No recent mail to show.', function (card, order) {
           line(card, order.mailType === 'postcard' ? 'Postcard' : 'Letter', 'tag');
@@ -97,12 +178,20 @@
           if (order.certifiedNote) line(card, order.certifiedNote, 'detail');
           if (order.carrierTrackingUrl) safeLink(card, order.carrierTrackingUrl, 'Track with USPS', true);
           line(card, 'Order ' + order.orderId, 'detail');
+          action(card, 'Select order', function () { select(order, 'order'); });
+          if (order.status === 'scheduled' && order.cancellable === true && typeof host.callTool === 'function') action(card, 'Cancel scheduled mail', function () { void cancelOrder(order, card); });
         });
         items('recipients', data.recipients, 'No recent recipients to show.', function (card, person) {
           line(card, person.name || 'Recipient', 'name'); line(card, place(person), 'detail');
         });
         document.getElementById('home').hidden = false;
         notice.textContent = '';
+        if (selected) {
+          var kind = selected.split('/')[0];
+          var item = (kind === 'draft' ? data.drafts : data.orders).find(function (value) { return selectionKey(value, kind) === selected; });
+          select(item, kind);
+        }
+        applyRoute();
         return true;
       }
       function sync() {
@@ -110,6 +199,7 @@
         refresh.disabled = busy || typeof host.callTool !== 'function';
         var output = host.toolOutput();
         if (output && output !== lastOutput) { lastOutput = output; render(output); }
+        applyRoute();
       }
       refresh.addEventListener('click', async function () {
         if (busy || typeof host.callTool !== 'function') return;
@@ -122,6 +212,7 @@
           notice.textContent = document.getElementById('home').hidden ? 'Unable to load your mail. Please try Refresh again.' : 'Refresh failed. The mail shown may be out of date; please try again.';
         } finally { busy = false; sync(); }
       });
+      document.getElementById('clear-selection').addEventListener('click', function () { select(); });
       if (host) { host.onChange(sync); sync(); }
       else { notice.textContent = 'Open Letter IRL home from your connected app.'; }
     })();

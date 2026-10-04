@@ -88,3 +88,27 @@ describe('open_letter_home handler', () => {
     expect(JSON.stringify(logger.error.mock.calls)).not.toContain('secret');
   });
 });
+
+describe('home scheduling and share configuration', () => {
+  it.each(['prepaid_balance', 'gift_letter'])('offers confirmed cancellation for scheduled %s only while arrive-by is enabled', async funding_type => {
+    vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', 'true');
+    vi.mocked(query).mockResolvedValue({ rows: [row({ status: 'queued', funding_type, arrive_by: '2026-10-20', mail_on: '2026-10-09' })] } as any);
+    expect((await readLetterHome('owner')).orders[0].cancellable).toBe(true);
+    vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', 'false');
+    expect((await readLetterHome('owner')).orders[0].cancellable).toBe(false);
+  });
+  it.each(['jit_order', 'unknown', null])('never offers cancellation for funding %s', async funding_type => {
+    vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', 'true');
+    vi.mocked(query).mockResolvedValue({ rows: [row({ status: 'queued', funding_type, arrive_by: '2026-10-20', mail_on: '2026-10-09' })] } as any);
+    expect((await readLetterHome('owner')).orders[0].cancellable).toBe(false);
+  });
+  it('uses a configured plugin ID only when safe, and never invents one', async () => {
+    vi.mocked(query).mockResolvedValue({ rows: [] } as any);
+    for (const id of ['', '../evil', 'user@market', 'https://evil.test']) {
+      vi.stubEnv('LETTER_IRL_CHATGPT_PLUGIN_ID', id);
+      expect(await readLetterHome('owner')).not.toHaveProperty('appUrl');
+    }
+    vi.stubEnv('LETTER_IRL_CHATGPT_PLUGIN_ID', 'letter-irl-dev');
+    expect(await readLetterHome('owner')).toHaveProperty('appUrl', 'https://chatgpt.com/plugins/letter-irl-dev/app/open_letter_home');
+  });
+});

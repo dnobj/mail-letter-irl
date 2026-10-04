@@ -3052,11 +3052,33 @@
       });
 
       // Initial render (will show loading state)
+      const selectionButton = document.createElement("button");
+      selectionButton.type = "button";
+      selectionButton.textContent = "Select this draft in the conversation";
+      selectionButton.hidden = true;
+      const selectionNotice = document.createElement("p");
+      selectionNotice.setAttribute("role", "status");
+      document.body.append(selectionButton, selectionNotice);
+      selectionButton.addEventListener("click", async () => {
+        if (!currentDraftId || typeof host.updateModelContext !== "function") return;
+        selectionButton.disabled = true;
+        try {
+          const result = await host.updateModelContext({ content: [{ type: "text", text: JSON.stringify({ source: "Letter IRL letter card", draftId: currentDraftId, instruction: "Check get_draft_status before editing; this card may have been sent or expired." }) }] });
+          if (result?.isError) throw new Error("refused");
+          selectionNotice.textContent = "Draft selection shared with the conversation.";
+        } catch (_) { selectionNotice.textContent = "Selection could not be shared. Include the draft ID in your request."; }
+        finally { selectionButton.disabled = false; }
+      });
+      function syncSelectionButton() {
+        selectionButton.hidden = !currentDraftId || host.toolMeta()?.modelContextEnabled !== true || typeof host.updateModelContext !== "function";
+      }
       render();
+      syncSelectionButton();
 
       // Listen for data updates (per OpenAI docs)
       host.onChange(() => {
         render();
+        syncSelectionButton();
       });
     </script>
   </body>
