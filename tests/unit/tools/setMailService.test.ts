@@ -284,8 +284,12 @@ describe('a postcard, a draft sent meanwhile and text that is not a service (#62
 
   it('says a draft sent just after the change went with the service it holds, not that the change was refused', async () => {
     vi.mocked(getDraftForMailService).mockResolvedValueOnce(draft()).mockResolvedValueOnce(draft({ status: 'consumed', mail_service: 'standard' }));
-    const error = await set({ draftId: DRAFT_ID, mailService: 'standard' }).catch(caught => caught);
+    const ctx = context();
+    const error = await set({ draftId: DRAFT_ID, mailService: 'standard' }, ctx).catch(caught => caught);
     expect(error).toMatchObject({ code: 'DRAFT_ALREADY_SENT' });
+    // It was not refused: the change was made, and the log says what happened.
+    expect(vi.mocked(ctx.logger.warn)).not.toHaveBeenCalled();
+    expect(vi.mocked(ctx.logger.info).mock.calls.map(call => (call[0] as { event?: string }).event)).toContain('draft.mail_service_sent_meanwhile');
     expect(error.message).toBe('This letter was sent just after the change was made, so it went with the service it holds now. list_orders shows it.');
     expect(error.message).not.toMatch(/can.t change/);
   });

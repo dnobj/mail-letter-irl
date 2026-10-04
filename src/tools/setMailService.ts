@@ -136,7 +136,13 @@ async function handler(input: SetMailServiceInput, context: ToolContext): Promis
   const draft = await getDraftForMailService(draftId, userId);
   if (!draft) throw refused(...REFUSALS.not_found, context);
   // The change was made: a send that took the draft after it carried the new service, so this is not a refusal of the change.
-  if (draft.status === 'consumed') throw refused('DRAFT_ALREADY_SENT', SENT_MEANWHILE, context);
+  if (draft.status === 'consumed') {
+    context.logger.info(
+      { correlationId: context.correlationId, event: 'draft.mail_service_sent_meanwhile' },
+      'A preview was sent just after its mail service was changed'
+    );
+    throw new MailServiceRefusedError('DRAFT_ALREADY_SENT', SENT_MEANWHILE);
+  }
   if (draft.status !== 'pending') throw refused(...REFUSALS.expired, context);
   const service = mailServiceOf(draft.mail_service);
   const certified = isExtraService(service) ? service : undefined;
