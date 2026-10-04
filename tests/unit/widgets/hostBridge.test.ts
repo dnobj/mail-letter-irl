@@ -375,3 +375,26 @@ describe('the getting-started card on the bridge', () => {
     expect(mounted.window.document.documentElement.classList.contains('dark')).toBe(true);
   });
 });
+
+describe('model context bridge', () => {
+  it('gates updates on host advertisement, sends the standard request, and merges deep-link context changes', async () => {
+    const mounted = mountInMcpHost(bridgePage());
+    expect(mounted.host().updateModelContext).toBeUndefined();
+    mounted.deliver({ id: mounted.lastRequest('ui/initialize')!.id, result: { hostCapabilities: { updateModelContext: { text: {} } }, hostContext: { theme: 'dark', 'openai/deepLink': { url: '/draft/d1' } } } });
+    await flush();
+    const update = mounted.host().updateModelContext({ content: [{ type: 'text', text: 'draft d1' }] });
+    const request = mounted.lastRequest('ui/update-model-context')!;
+    expect(request.params).toEqual({ content: [{ type: 'text', text: 'draft d1' }] });
+    mounted.deliver({ id: request.id, result: {} });
+    await expect(update).resolves.toEqual({});
+    mounted.deliver({ method: 'ui/notifications/host-context-changed', params: { 'openai/deepLink': { url: '/order/o1' } } });
+    expect(mounted.host().hostContext()).toMatchObject({ theme: 'dark', 'openai/deepLink': { url: '/order/o1' } });
+    mounted.deliver({ method: 'ui/notifications/host-context-changed', params: { 'openai/deepLink': null } });
+    expect(mounted.host().hostContext()['openai/deepLink']).toBeNull();
+    mounted.window.close();
+  });
+  it('leaves context unsupported when no text capability is advertised', async () => {
+    const mounted = mountInMcpHost(bridgePage()); initialize(mounted); await flush();
+    expect(mounted.host().updateModelContext).toBeUndefined(); mounted.window.close();
+  });
+});

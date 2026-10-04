@@ -332,6 +332,7 @@ export const openLetterHomeOutputZ = z.object({
   })),
   orders: z.array(z.object({
     ...homeItemZ, orderId: z.string(), status: z.string(),
+    cancellable: z.boolean().optional(),
     mailService: z.enum(['certified', 'certified_return_receipt']).optional(),
     carrierTrackingNumber: z.string().optional(), carrierTrackingUrl: z.string().optional(),
     certifiedNote: z.string().optional()

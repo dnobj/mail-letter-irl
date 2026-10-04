@@ -3,8 +3,8 @@ import { JSDOM } from 'jsdom';
 import { describe, expect, it, vi } from 'vitest';
 
 const html = readFileSync(new URL('../../../widgets/LetterHomeCard.html', import.meta.url), 'utf8');
-function open(output: unknown = { drafts: [], orders: [], recipients: [], limit: 20 }) {
-  const host = { theme: () => 'light', toolOutput: () => output, onChange: vi.fn(), callTool: vi.fn() };
+function open(output: unknown = { drafts: [], orders: [], recipients: [], limit: 20 }, extras = {}) {
+  const host = { theme: () => 'light', toolOutput: () => output, onChange: vi.fn(), callTool: vi.fn(), ...extras };
   const dom = new JSDOM(html, { runScripts: 'dangerously', beforeParse(window) { (window as any).letterIrlHost = host; } });
   return { dom, host, doc: dom.window.document };
 }
@@ -28,7 +28,7 @@ describe('LetterHomeCard', () => {
     });
     expect(doc.getElementById('drafts')?.textContent).toContain('<img');
     expect(doc.querySelector('img')).toBeNull();
-    expect(doc.querySelector('a')).toBeNull();
+    expect(doc.querySelector('a[href]')).toBeNull();
     expect(doc.getElementById('orders')?.textContent).toContain('Delivery estimated');
     dom.window.close();
   });
@@ -41,7 +41,7 @@ describe('LetterHomeCard', () => {
     });
     expect(doc.body.textContent).toContain('Aims to arrive by Oct 20, 2026');
     expect(doc.body.textContent).toContain('Gift letter');
-    expect(doc.querySelectorAll('a')).toHaveLength(2);
+    expect(doc.querySelectorAll('a[href]')).toHaveLength(2);
     expect(doc.body.textContent).toContain('Goes as USPS Certified Mail.');
     expect(doc.querySelector('a')?.rel).toBe('noopener noreferrer');
     dom.window.close();
@@ -73,4 +73,130 @@ describe('LetterHomeCard', () => {
     expect(doc.getElementById('orders')?.textContent).toContain('Cancelled; not mailed');
     dom.window.close();
   });
+});
+
+describe('home extension interactions', () => {
+  const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+  const click = (doc: Document, label: string) => (Array.from(doc.querySelectorAll('button')).find(node => node.textContent === label) as HTMLButtonElement).click();
+  const data = (extra = {}) => ({ drafts: [{ draftId: 'draft-1', recipient: { name: 'Ruth', city: 'Chicago', state: 'IL' }, expiresAt: '2026-10-20' }], orders: [order('scheduled', { cancellable: true, isGiftSend: true, arriveBy: '2026-10-20' })], recipients: [], limit: 20, ...extra });
+
+  it('shares only selected summaries, serializes changes, and replaces context on clear', async () => {
+    const update = vi.fn().mockResolvedValue({});
+    const { dom, doc } = open(data(), { updateModelContext: update });
+    click(doc, 'Select draft'); click(doc, 'Select order'); click(doc, 'Clear selection');
+    await tick();
+    expect(update).toHaveBeenCalledTimes(3);
+    expect(JSON.parse(update.mock.calls[0][0].content[0].text)).toMatchObject({ kind: 'draft', id: 'draft-1', editable: true });
+    expect(JSON.parse(update.mock.calls[1][0].content[0].text)).toMatchObject({ kind: 'order', id: 'order-1', status: 'scheduled', editable: false });
+    expect(update.mock.calls[2][0]).toEqual({ content: [] });
+    expect(JSON.stringify(update.mock.calls)).not.toMatch(/addressLine|bodyText|confirmationUrl/);
+    dom.window.close();
+  });
+
+  it('reports unsupported and refused context without claiming success', async () => {
+    for (const extra of [{}, { updateModelContext: vi.fn().mockResolvedValue({ isError: true }) }]) {
+      const { dom, doc } = open(data(), extra);
+      click(doc, 'Select draft'); await tick();
+      expect(doc.getElementById('notice')?.textContent).toMatch(/cannot share|could not be shared/);
+      expect(doc.getElementById('selection')?.hidden).toBe(false);
+      dom.window.close();
+    }
+  });
+
+  it('asks before cancelling, blocks double presses, and displays the actual returned balance message', async () => {
+    const { dom, doc, host } = open(data());
+    let resolve!: (value: unknown) => void;
+    host.callTool.mockReturnValue(new Promise(done => { resolve = done; }));
+    click(doc, 'Cancel scheduled mail');
+    expect(host.callTool).not.toHaveBeenCalled();
+    click(doc, 'Keep scheduled');
+    expect(doc.querySelector('.cancel-confirm')).toBeNull();
+    click(doc, 'Cancel scheduled mail'); click(doc, 'Confirm cancellation'); click(doc, 'Confirm cancellation');
+    expect(host.callTool).toHaveBeenCalledExactlyOnceWith('cancel_scheduled_mail', { orderId: 'order-1', confirm: true });
+    resolve({ structuredContent: { orderId: 'order-1', status: 'cancelled', message: 'Cancelled. Nothing returned because it expired.' } });
+    await tick();
+    expect(doc.getElementById('orders')?.textContent).toContain('Cancelled; not mailed');
+    expect(doc.getElementById('notice')?.textContent).toContain('Nothing returned because it expired');
+    expect(doc.querySelector('.cancel-confirm')).toBeNull();
+    dom.window.close();
+  });
+
+  it('preserves scheduled state on an ambiguous/refused cancellation, and offers no cancel for ineligible mail', async () => {
+    const { dom, doc, host } = open(data());
+    host.callTool.mockResolvedValue({ isError: true });
+    click(doc, 'Cancel scheduled mail'); click(doc, 'Confirm cancellation'); await tick();
+    expect(doc.getElementById('orders')?.textContent).toContain('Scheduled');
+    expect(doc.getElementById('notice')?.textContent).toContain('not confirmed');
+    dom.window.close();
+    for (const item of [order('printing', { cancellable: true }), order('scheduled', { cancellable: false })]) {
+      const mounted = open(data({ orders: [item] }));
+      expect(mounted.doc.getElementById('orders')?.textContent).not.toContain('Cancel scheduled mail');
+      mounted.dom.window.close();
+    }
+  });
+});
+
+describe('home extension recovery regressions', () => {
+  const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+  const click = (doc: Document, label: string) => (Array.from(doc.querySelectorAll('button')).find(node => node.textContent === label) as HTMLButtonElement).click();
+  const data = { drafts: [], orders: [order('scheduled', { cancellable: true })], recipients: [], limit: 20 };
+  it('keeps the actual cancellation balance outcome when the selected order is republished', async () => {
+    const updateModelContext = vi.fn().mockResolvedValue({});
+    const { dom, host, doc } = open(structuredClone(data), { updateModelContext });
+    click(doc, 'Select order'); await tick();
+    host.callTool.mockResolvedValue({ structuredContent: { orderId: 'order-1', status: 'cancelled', message: 'Cancelled. Funding expired; nothing returned.' } });
+    click(doc, 'Cancel scheduled mail'); click(doc, 'Confirm cancellation'); await tick(); await tick();
+    expect(doc.getElementById('notice')?.textContent).toBe('Cancelled. Funding expired; nothing returned.');
+    expect(JSON.parse(updateModelContext.mock.calls.at(-1)![0].content[0].text)).toMatchObject({ status: 'cancelled', id: 'order-1' });
+    dom.window.close();
+  });
+  it('rejects an error result even when it contains cancellation-shaped structured content', async () => {
+    const { dom, host, doc } = open(structuredClone(data));
+    host.callTool.mockResolvedValue({ isError: true, structuredContent: { orderId: 'order-1', status: 'cancelled', message: 'Wrong success' } });
+    click(doc, 'Cancel scheduled mail'); click(doc, 'Confirm cancellation'); await tick();
+    expect(doc.getElementById('orders')?.textContent).not.toContain('Cancelled; not mailed');
+    expect(doc.getElementById('notice')?.textContent).toContain('not confirmed');
+    dom.window.close();
+  });
+  it('waits for an earlier context acknowledgment before sending the newer selection', async () => {
+    let resolve!: (value: unknown) => void;
+    const updateModelContext = vi.fn().mockReturnValueOnce(new Promise(done => { resolve = done; })).mockResolvedValue({});
+    const { dom, doc } = open(structuredClone(data), { updateModelContext });
+    click(doc, 'Select order'); click(doc, 'Clear selection'); await tick();
+    expect(updateModelContext).toHaveBeenCalledTimes(1);
+    resolve({}); await tick();
+    expect(updateModelContext).toHaveBeenCalledTimes(2);
+    expect(updateModelContext.mock.calls[1][0]).toEqual({ content: [] });
+    dom.window.close();
+  });
+});
+
+it('recovers from a lost cancellation reply, ignores late success and requires Refresh before another cancellation', async () => {
+  const output = { drafts: [], orders: [order('scheduled', { cancellable: true }), order('scheduled', { cancellable: true, orderId: 'order-2' })], recipients: [], limit: 20 };
+  const { dom, host, doc } = open(output);
+  const expire: (() => void)[] = [];
+  dom.window.setTimeout = ((callback: () => void, ms: number) => { expect(ms).toBe(15000); expire.push(callback); return expire.length; }) as any;
+  dom.window.clearTimeout = vi.fn();
+  const click = (label: string) => (Array.from(doc.querySelectorAll('button')).find(button => button.textContent === label) as HTMLButtonElement).click();
+  let lateReply!: (value: unknown) => void;
+  host.callTool.mockReturnValueOnce(new Promise(resolve => { lateReply = resolve; }));
+  Array.from(doc.querySelectorAll('#orders button')).filter(button => button.textContent === 'Cancel scheduled mail').forEach(button => (button as HTMLButtonElement).click());
+  click('Confirm cancellation');
+  expect((doc.getElementById('refresh') as HTMLButtonElement).disabled).toBe(true);
+  expect(expire).toHaveLength(1);
+  expire[0](); await new Promise(resolve => setTimeout(resolve, 0));
+  expect(doc.getElementById('notice')?.textContent).toContain('not confirmed');
+  expect((doc.getElementById('refresh') as HTMLButtonElement).disabled).toBe(false);
+  click('Confirm cancellation');
+  (Array.from(doc.querySelectorAll('#orders button')).filter(button => button.textContent === 'Confirm cancellation')[1] as HTMLButtonElement).click();
+  expect(host.callTool).toHaveBeenCalledTimes(1);
+  lateReply({ structuredContent: { orderId: 'order-1', status: 'cancelled', message: 'Late refund success' } });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(doc.getElementById('notice')?.textContent).not.toContain('Late refund');
+  expect(doc.getElementById('orders')?.textContent).not.toContain('Cancelled; not mailed');
+  host.callTool.mockResolvedValueOnce({ structuredContent: { drafts: [], orders: [order('cancelled')], recipients: [], limit: 20 } });
+  click('Refresh'); await new Promise(resolve => setTimeout(resolve, 0));
+  expect(doc.getElementById('orders')?.textContent).toContain('Cancelled; not mailed');
+  expect(doc.getElementById('orders')?.textContent).not.toContain('Cancel scheduled mail');
+  dom.window.close();
 });

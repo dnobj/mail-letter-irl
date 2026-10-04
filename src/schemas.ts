@@ -1753,6 +1753,9 @@ export const openLetterHomeOutputSchema: JsonSchema = {
           },
           "certifiedNote": {
             "type": "string"
+          },
+          "cancellable": {
+            "type": "boolean"
           }
         },
         "required": [
