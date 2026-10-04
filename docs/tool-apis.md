@@ -1,6 +1,6 @@
 # MCP Tool API Specifications
 
-**Last Updated:** October 4, 2026  
+**Last Updated:** October 4, 2026
 **Purpose:** Practical reference for the MCP tools exposed by Letter IRL
 
 The runtime MCP registry is the source of truth. The checked-in `manifest.json` is generated from that registry with `npm run manifest:generate`, and submission-facing tests verify that the manifest, widget list, and runtime tool registry stay aligned.

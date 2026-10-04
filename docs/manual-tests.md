@@ -57,7 +57,7 @@ temporarily lowered to 300s (restored afterwards to 86400 / 7200 for web).
 - [x] Confirm the consent screen requests offline access, and that Auth0 records
       a refresh token issued on the code exchange.
       Consent screen listed **Allow offline access**; the authorize event
-      recorded `scope: "`mail:read` mail:draft mail:send offline_access"`.
+      recorded `scope: "mail:read mail:draft mail:send offline_access"`.
 - [x] Leave the connection idle past the access-token lifetime, then invoke any
       read tool (for example `get_account_balance`).
       Token issued 21:53:30Z (300s life, expiring 21:58:30Z); tool invoked
@@ -764,7 +764,7 @@ our tools arrive through Claude's own connection and log as `client=claude` (che
 
 - [x] `codex mcp add letter-irl-dev --url <development /mcp>`.
 - [x] In `~/.codex/config.toml`, add
-      `scopes = ["`mail:read`", "mail:draft", "mail:send", "offline_access"]` to that server's entry.
+      `scopes = ["mail:read", "mail:draft", "mail:send", "offline_access"]` to that server's entry.
       Without it, Codex requests Auth0's OpenID scopes instead of ours
       ([auth0-tenant-configuration.md](auth0-tenant-configuration.md), Applications, section 6).
 - [x] `codex mcp login letter-irl-dev`. The consent screen should list Read, Draft, Send and
@@ -842,7 +842,7 @@ in the website's `LETTER_IRL_CONNECT_APPS`.
       got `403 Callback URL mismatch.`)
 - [ ] Install OpenClaw 2026.9.6 or later, then add the server:
       `openclaw mcp add letter-irl-dev --url <development /mcp> --transport streamable-http --auth
-      oauth --oauth-client-metadata-url <the document's address> --oauth-scope '`mail:read`
+      oauth --oauth-client-metadata-url <the document's address> --oauth-scope 'mail:read
       mail:draft mail:send offline_access'`. Without `--oauth-scope`, OpenClaw asks for the
       server's advertised scopes, OpenID's included, which went wrong for Codex (CLIENT-04).
 - [ ] `openclaw mcp login letter-irl-dev`, with the browser on the same computer. The consent screen
