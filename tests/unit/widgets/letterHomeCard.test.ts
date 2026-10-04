@@ -155,3 +155,47 @@ describe('home extension interactions', () => {
     }
   });
 });
+
+describe('home extension recovery regressions', () => {
+  const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+  const click = (doc: Document, label: string) => (Array.from(doc.querySelectorAll('button')).find(node => node.textContent === label) as HTMLButtonElement).click();
+  const data = { drafts: [], orders: [order('scheduled', { cancellable: true })], recipients: [], limit: 20 };
+  it('keeps the actual cancellation balance outcome when the selected order is republished', async () => {
+    const updateModelContext = vi.fn().mockResolvedValue({});
+    const { dom, host, doc } = open(structuredClone(data), { updateModelContext });
+    click(doc, 'Select order'); await tick();
+    host.callTool.mockResolvedValue({ structuredContent: { orderId: 'order-1', status: 'cancelled', message: 'Cancelled. Funding expired; nothing returned.' } });
+    click(doc, 'Cancel scheduled mail'); click(doc, 'Confirm cancellation'); await tick(); await tick();
+    expect(doc.getElementById('notice')?.textContent).toBe('Cancelled. Funding expired; nothing returned.');
+    expect(JSON.parse(updateModelContext.mock.calls.at(-1)![0].content[0].text)).toMatchObject({ status: 'cancelled', id: 'order-1' });
+    dom.window.close();
+  });
+  it('retries an unavailable deep link when Refresh brings its owner-visible order into the list', async () => {
+    const { dom, host, doc } = open({ drafts: [], orders: [], recipients: [], limit: 20 }, { hostContext: () => ({ 'openai/deepLink': { url: '/order/order-1' } }) });
+    expect(doc.getElementById('selection')?.hidden).toBe(true);
+    host.callTool.mockResolvedValue({ structuredContent: data });
+    click(doc, 'Refresh'); await tick();
+    expect(doc.getElementById('selection')?.hidden).toBe(false);
+    expect(doc.getElementById('selected-detail')?.textContent).toContain('order-1');
+    dom.window.close();
+  });
+  it('rejects an error result even when it contains cancellation-shaped structured content', async () => {
+    const { dom, host, doc } = open(structuredClone(data));
+    host.callTool.mockResolvedValue({ isError: true, structuredContent: { orderId: 'order-1', status: 'cancelled', message: 'Wrong success' } });
+    click(doc, 'Cancel scheduled mail'); click(doc, 'Confirm cancellation'); await tick();
+    expect(doc.getElementById('orders')?.textContent).not.toContain('Cancelled; not mailed');
+    expect(doc.getElementById('notice')?.textContent).toContain('not confirmed');
+    dom.window.close();
+  });
+  it('waits for an earlier context acknowledgment before sending the newer selection', async () => {
+    let resolve!: (value: unknown) => void;
+    const updateModelContext = vi.fn().mockReturnValueOnce(new Promise(done => { resolve = done; })).mockResolvedValue({});
+    const { dom, doc } = open(structuredClone(data), { updateModelContext });
+    click(doc, 'Select order'); click(doc, 'Clear selection'); await tick();
+    expect(updateModelContext).toHaveBeenCalledTimes(1);
+    resolve({}); await tick();
+    expect(updateModelContext).toHaveBeenCalledTimes(2);
+    expect(updateModelContext.mock.calls[1][0]).toEqual({ content: [] });
+    dom.window.close();
+  });
+});

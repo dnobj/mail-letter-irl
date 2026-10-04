@@ -60,24 +60,24 @@
         button.addEventListener('click', run); container.appendChild(button); return button;
       }
       function selectionKey(item, kind) { return kind + '/' + (kind === 'draft' ? item.draftId : item.orderId); }
-      function shareContext(item, kind) {
+      function shareContext(item, kind, quiet) {
         var revision = ++selectionRevision;
         var text = item ? JSON.stringify({ source: 'Letter IRL selection', kind: kind, id: kind === 'draft' ? item.draftId : item.orderId, recipient: item.recipient, status: kind === 'draft' ? 'draft' : item.status, arriveBy: item.arriveBy, mailOn: item.mailOn, editable: kind === 'draft' }) : '';
         contextQueue = contextQueue.catch(function () {}).then(async function () {
           if (typeof host.updateModelContext !== 'function') {
-            if (revision === selectionRevision && item) notice.textContent = 'Selected here. This host cannot share the selection with the conversation; include the draft or order ID in your request.';
+            if (!quiet && revision === selectionRevision && item) notice.textContent = 'Selected here. This host cannot share the selection with the conversation; include the draft or order ID in your request.';
             return;
           }
           try {
             var answer = await host.updateModelContext({ content: text ? [{ type: 'text', text: text }] : [] });
             if (answer && answer.isError) throw new Error('refused');
-            if (revision === selectionRevision) notice.textContent = item ? 'Selection shared with the conversation.' : '';
+            if (!quiet && revision === selectionRevision) notice.textContent = item ? 'Selection shared with the conversation.' : '';
           } catch (_) {
-            if (revision === selectionRevision) notice.textContent = 'Selection could not be shared. Include the draft or order ID in your request.';
+            if (!quiet && revision === selectionRevision) notice.textContent = 'Selection could not be shared. Include the draft or order ID in your request.';
           }
         });
       }
-      function select(item, kind) {
+      function select(item, kind, quiet) {
         selected = item ? selectionKey(item, kind) : undefined;
         var panel = document.getElementById('selection'); panel.hidden = !item;
         var link = document.getElementById('selection-link'); link.hidden = true; link.removeAttribute('href');
@@ -92,18 +92,18 @@
             }
           } catch (_) {}
         }
-        shareContext(item, kind);
+        shareContext(item, kind, quiet);
       }
-      function applyRoute() {
+      function applyRoute(quiet) {
         var context = typeof host.hostContext === 'function' ? host.hostContext() : {};
         var route = context['openai/deepLink']; route = route && route.url;
         if (route === lastRoute || !currentData || typeof route !== 'string') return;
         lastRoute = route;
-        if (route === '/') { select(); return; }
+        if (route === '/') { select(undefined, undefined, quiet); return; }
         var match = /^\/(draft|order)\/([a-zA-Z0-9-]{1,100})$/.exec(route);
         var found = match && (match[1] === 'draft' ? currentData.drafts : currentData.orders).find(function (item) { return selectionKey(item, match[1]) === route.slice(1); });
-        if (!found) { select(); notice.textContent = 'That selection is unavailable in your current mail list. Refresh to check again.'; return; }
-        select(found, match[1]);
+        if (!found) { select(undefined, undefined, true); notice.textContent = 'That selection is unavailable in your current mail list. Refresh to check again.'; return; }
+        select(found, match[1], quiet);
       }
       async function cancelOrder(order, card) {
         if (busy || typeof host.callTool !== 'function') return;
@@ -189,9 +189,10 @@
         if (selected) {
           var kind = selected.split('/')[0];
           var item = (kind === 'draft' ? data.drafts : data.orders).find(function (value) { return selectionKey(value, kind) === selected; });
-          select(item, kind);
+          select(item, kind, true);
         }
-        applyRoute();
+        lastRoute = undefined;
+        applyRoute(true);
         return true;
       }
       function sync() {
