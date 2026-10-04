@@ -154,11 +154,13 @@ export const ORDER_TRACKING_SUPPORT_DESCRIPTION =
   "How the order can be tracked. estimated_only: the status comes from the printer, and delivery is estimated, not confirmed by a carrier. carrier_tracking: USPS's own tracking number is stored for a letter that went out (certified mail), so USPS's page shows the scans; this status is still the printer's.";
 export const ORDER_CARRIER_TRACKING_URL_DESCRIPTION =
   "Certified mail only, with the tracking number: the USPS page that shows where the piece is.";
-export const GET_DRAFT_STATUS_MAIL_SERVICE_DESCRIPTION =
-  "A ready letter that is certified mail now: which service. Absent: an ordinary letter, which a card reads from the terms beside it";
-export const GET_DRAFT_STATUS_DELIVERY_CLASS_DESCRIPTION =
-  "A ready letter with its terms, when it is certified mail or certified mail is offered: how it is delivered now, as a new preview would say it. A card draws it on its Delivery line";
-export const GET_DRAFT_STATUS_DELIVERY_DISCLAIMER_DESCRIPTION = "With it, the words that qualify the delivery";
+// How a letter travels (#625), declared once on every answer that carries a letter's terms: get_draft_status,
+// set_stationery, set_letter_words, set_letter_signature and set_mail_service.
+export const LETTER_TRAVEL_MAIL_SERVICE_DESCRIPTION =
+  "With the terms, for a letter that is certified mail now: which service. Absent beside the delivery words: ordinary mail";
+export const LETTER_TRAVEL_DELIVERY_CLASS_DESCRIPTION =
+  "With the terms, for a letter that is certified mail or while certified mail is offered: how it is delivered now, as a new preview would say it. A card draws it on its Delivery line";
+export const LETTER_TRAVEL_DELIVERY_DISCLAIMER_DESCRIPTION = "With it, the words that qualify the delivery";
 export const ORDER_CERTIFIED_NOTE_DESCRIPTION =
   "Certified mail only: what to tell the person about the tracking number and the return receipt. It promises nothing about delivery or legal effect.";
 
@@ -970,6 +972,12 @@ export const uploadPhotoChunkOutputZ = z.object({
   height: z.number().int().optional()
 });
 
+const letterTravelZ = {
+  mailService: z.enum(CERTIFIED_MAIL_SERVICES).optional().describe(LETTER_TRAVEL_MAIL_SERVICE_DESCRIPTION),
+  deliveryClass: z.string().optional().describe(LETTER_TRAVEL_DELIVERY_CLASS_DESCRIPTION),
+  deliveryDisclaimer: z.string().optional().describe(LETTER_TRAVEL_DELIVERY_DISCLAIMER_DESCRIPTION)
+};
+
 export const getDraftStatusOutputZ = z.object({
   draftId: z.string(),
   status: z.enum(["ready", "sent", "expired", "not_found"]),
@@ -986,9 +994,7 @@ export const getDraftStatusOutputZ = z.object({
   cancellable: z.boolean().optional().describe("A sent draft's order: whether it can still be cancelled free"),
   pages: z.number().int().min(2).max(MAX_LETTER_PAGES).optional().describe("A ready letter of more than one page: the pages it is laid out on now"),
   canSendNow: z.boolean().optional().describe("A ready letter while room to write or certified mail is offered, or a postcard while its sizes or layouts are: whether the balance or a gift letter pays for it now"),
-  mailService: z.enum(CERTIFIED_MAIL_SERVICES).optional().describe(GET_DRAFT_STATUS_MAIL_SERVICE_DESCRIPTION),
-  deliveryClass: z.string().optional().describe(GET_DRAFT_STATUS_DELIVERY_CLASS_DESCRIPTION),
-  deliveryDisclaimer: z.string().optional().describe(GET_DRAFT_STATUS_DELIVERY_DISCLAIMER_DESCRIPTION),
+  ...letterTravelZ,
   reasonCannotSend: z.string().optional(),
   sendEligibility: sendEligibilityZ.optional(),
   size: z.enum(["6x9", "6x4", "6x11"]).optional().describe("A ready postcard our renderer drew, while its sizes or layouts are offered: its size now. Its page goes to the card"),
@@ -1094,6 +1100,8 @@ export const SET_MAIL_SERVICE_CAN_SEND_DESCRIPTION =
 export const setMailServiceOutputZ = z.object({
   draftId: z.string(),
   mailService: z.enum(CERTIFIED_MAIL_SERVICES).optional().describe(SET_MAIL_SERVICE_OUTPUT_DESCRIPTION),
+  deliveryClass: letterTravelZ.deliveryClass,
+  deliveryDisclaimer: letterTravelZ.deliveryDisclaimer,
   canSendNow: z.boolean().describe(SET_MAIL_SERVICE_CAN_SEND_DESCRIPTION),
   reasonCannotSend: z.string().optional(),
   sendEligibility: sendEligibilityZ,
@@ -1110,6 +1118,7 @@ export const setLetterSignatureOutputZ = z.object({
   canSendNow: z.boolean().describe(SET_LETTER_SIGNATURE_CAN_SEND_DESCRIPTION),
   reasonCannotSend: z.string().optional(),
   sendEligibility: sendEligibilityZ,
+  ...letterTravelZ,
   message: z.string()
 });
 
@@ -1129,6 +1138,7 @@ export const setStationeryOutputZ = z.object({
   canSendNow: z.boolean().describe("Whether the balance or a gift letter pays for the letter as it is now: a restyle can change its pages, and so its price"),
   reasonCannotSend: z.string().optional(),
   sendEligibility: sendEligibilityZ,
+  ...letterTravelZ,
   message: z.string()
 });
 
@@ -1141,6 +1151,7 @@ export const setLetterWordsOutputZ = z.object({
   canSendNow: z.boolean().describe(SET_LETTER_WORDS_CAN_SEND_DESCRIPTION),
   reasonCannotSend: z.string().optional(),
   sendEligibility: sendEligibilityZ,
+  ...letterTravelZ,
   wordsVersion: z.string().describe("The version of the words now, for the next change of them"),
   message: z.string()
 });

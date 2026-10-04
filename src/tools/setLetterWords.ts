@@ -18,7 +18,8 @@ import {
   RENDERED_LETTER_CHARACTER_CAP,
   validateCharacterLimitForLayout,
   validatePrintableLetter,
-  wordsVersionOf
+  wordsVersionOf,
+  type LetterTravel
 } from './letterHelpers.js';
 import { isDraftIdShape } from './requestSend.js';
 
@@ -50,7 +51,7 @@ interface SetLetterWordsInput {
   wordsVersion?: string;
 }
 
-export interface SetLetterWordsOutput {
+export interface SetLetterWordsOutput extends LetterTravel {
   draftId: string;
   /** The preview drawn again: for the card, in _meta, never the model's (partitionToolResult). */
   previewHtml: string;

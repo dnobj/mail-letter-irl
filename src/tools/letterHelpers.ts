@@ -47,7 +47,8 @@ import {
   type Stationery
 } from "../render/index.js";
 import { getSendEligibility, type SendEligibility } from "../services/commerceService.js";
-import { isPackPayable, mailServiceOf, type MailOption } from "../config/products.js";
+import { isExtraService, isPackPayable, mailServiceOf, type MailOption } from "../config/products.js";
+import { isCertifiedMailOffered } from "../config/certifiedMail.js";
 import { callingApp, type ClientProfile } from "../auth/clientProfiles.js";
 import { isSendConfirmationEnabled, letterPacksPageUrl, sendConfirmationUrl } from "../config/sendConfirmation.js";
 import { GIFT_PAYS_ONE_PAGE, giftCardSummary, resolveGiftSendChoice, type GiftSendChoice } from "./giftSendChoice.js";
@@ -1162,9 +1163,35 @@ function canSendNowFor(option: MailOption, requiredCredits: number, isGift: bool
 }
 
 /**
+ * How a letter travels (#625), beside its terms: the certified service when it
+ * is one, and the words that say how it is delivered. A card that takes a
+ * letter's terms takes these with them, so its summary, note, Delivery line,
+ * price and buttons all come from one answer, never from two. They are added
+ * only where they say something: the letter is certified mail, or certified
+ * mail is offered (an ordinary letter then says First-Class, so a change back
+ * is heard). With certified mail off an ordinary letter's terms get nothing
+ * added, and text that is not a service gets no words, as how that mail would
+ * go is not known.
+ */
+export interface LetterTravel {
+  /** Certified mail only: which service. Absent beside the delivery words: ordinary mail. */
+  mailService?: CertifiedMailService;
+  deliveryClass?: string;
+  deliveryDisclaimer?: string;
+}
+
+export function travelFields(mailService: string | null | undefined): LetterTravel {
+  const service = mailServiceOf(mailService);
+  const certified = isExtraService(service) ? service : undefined;
+  if (!certified && !(service === undefined && isCertifiedMailOffered())) return {};
+  return { ...(certified ? { mailService: certified } : {}), ...deliveryWordsOf(certified) };
+}
+
+/**
  * What a letter preview's draft costs as it stands, and whether the balance
  * pays: the terms a preview gives (createLetterDraftAndBuildOutput), for a
- * draft whose pages a restyle changed (#586). A gift letter is paid for.
+ * draft whose pages a restyle changed (#586). A gift letter is paid for. A
+ * letter's terms say how it travels too (#625): see travelFields.
  */
 export function letterPayment(
   option: MailOption,
@@ -1172,13 +1199,14 @@ export function letterPayment(
   isGift: boolean,
   context: ToolContext,
   draftId: string
-): { canSendNow: boolean; reasonCannotSend?: string; sendEligibility: SendEligibility } {
+): { canSendNow: boolean; reasonCannotSend?: string; sendEligibility: SendEligibility } & LetterTravel {
   const available = context.user.creditsRemaining;
   const canSendNow = canSendNowFor(option, requiredCredits, isGift, available);
   return {
     canSendNow,
     ...(canSendNow ? {} : { reasonCannotSend: reasonCannotSend(option) }),
-    sendEligibility: previewSendEligibility(available, requiredCredits, option, isGift, callingApp(context), draftId)
+    sendEligibility: previewSendEligibility(available, requiredCredits, option, isGift, callingApp(context), draftId),
+    ...(option.mailType === "letter" ? travelFields(option.mailService) : {})
   };
 }
 

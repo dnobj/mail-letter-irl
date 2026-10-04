@@ -1,11 +1,11 @@
 /**
- * get_draft_status as tools/list and /manifest.json serve it, and as its output
- * schema parses what the tool answers (#625): the card-only tool says how a
- * ready letter travels now (the certified service) and in what words (the
- * delivery class and its disclaimer), so a card shown its preview again can
- * draw the change. The schemas are closed: a field the handler answers with and
- * the served schema does not declare is lost, and one the manifest does not
- * declare drifts from what is served.
+ * Every answer that carries a letter's terms (get_draft_status, set_stationery, set_letter_words,
+ * set_letter_signature and set_mail_service) says how the letter travels with
+ * them (#625): the certified service and the words that say how it is delivered,
+ * so a card that takes the terms of an answer takes these with it. The schemas
+ * are closed: a field a handler answers with and the served schema does not
+ * declare is lost to ChatGPT, and one the manifest does not declare drifts from
+ * what is served.
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -52,50 +52,53 @@ afterEach(() => {
 });
 
 const FIELDS = ['mailService', 'deliveryClass', 'deliveryDisclaimer'] as const;
+// Every answer that carries a letter's terms says how the letter travels with them (#625).
+const TOOLS = ['get_draft_status', 'set_stationery', 'set_letter_words', 'set_letter_signature', 'set_mail_service'] as const;
 
-describe('get_draft_status declares how a ready letter travels (#625)', () => {
-  it('serves the service and the delivery words, and the manifest declares them the same way', async () => {
-    const served = (await listed()).find(tool => tool.name === 'get_draft_status')!.outputSchema as Schema;
-    const manifest = (buildManifest().tools as unknown as Array<{ name: string; outputSchema: Schema }>).find(
-      tool => tool.name === 'get_draft_status'
-    )!.outputSchema;
+// All five are listed only while their feature is offered.
+const offerEverything = () => {
+  for (const [name, value] of Object.entries({
+    LETTER_IRL_PRINT_RENDERER: 'pdf',
+    LETTER_IRL_STATIONERY_ENABLED: 'true',
+    LETTER_IRL_ROOM_TO_WRITE_ENABLED: 'true',
+    LETTER_IRL_SIGNATURES_ENABLED: 'true',
+    LETTER_IRL_CERTIFIED_MAIL_ENABLED: 'true',
+    JIT_PURCHASE_ENABLED: 'true'
+  })) {
+    vi.stubEnv(name, value);
+  }
+};
+
+describe('the answers that carry the terms of a letter declare how it travels (#625)', () => {
+  it.each(TOOLS)('%s serves the service and the delivery words, and the manifest declares them the same way', async tool => {
+    offerEverything();
+    const served = (await listed()).find(found => found.name === tool)!.outputSchema as Schema;
+    const manifest = (buildManifest().tools as unknown as Array<{ name: string; outputSchema: Schema }>).find(found => found.name === tool)!.outputSchema;
     for (const field of FIELDS) {
       expect(served.properties[field], `${field} served`).toBeDefined();
       expect(manifest.properties[field], `${field} in the manifest`).toBeDefined();
       expect(manifest.properties[field].type, field).toBe(served.properties[field].type);
       expect(manifest.properties[field].description, field).toBe(served.properties[field].description);
-    }
-    expect(served.properties.mailService.enum).toEqual(['certified', 'certified_return_receipt']);
-    expect(manifest.properties.mailService.enum).toEqual(['certified', 'certified_return_receipt']);
-    // None is required: an ordinary letter, a postcard and an older answer have none of them.
-    for (const field of FIELDS) {
+      // None is required: an ordinary letter, a postcard and an older answer have none of them.
       expect(served.required ?? [], field).not.toContain(field);
       expect(manifest.required ?? [], field).not.toContain(field);
     }
+    expect(served.properties.mailService.enum).toEqual(['certified', 'certified_return_receipt']);
+    expect(manifest.properties.mailService.enum).toEqual(['certified', 'certified_return_receipt']);
   });
 
-  it('keeps what the tool answers for a ready certified letter when the served schema parses it', () => {
-    const answer = {
-      draftId: '0f1e2d3c-4b5a-4978-8796-a5b4c3d2e1f0',
-      status: 'ready',
-      mailService: 'certified',
-      deliveryClass: CERTIFIED_DELIVERY_CLASS,
-      deliveryDisclaimer: CERTIFIED_DELIVERY_DISCLAIMER
-    };
-    const parsed = z.object(getZodOutputShape('get_draft_status')!).safeParse(answer);
+  it.each(TOOLS)('%s keeps what it answers for a certified letter when the served schema parses it', tool => {
+    const answer = { mailService: 'certified', deliveryClass: CERTIFIED_DELIVERY_CLASS, deliveryDisclaimer: CERTIFIED_DELIVERY_DISCLAIMER };
+    // Partial: the other fields of each answer are theirs; what matters here is that these three are declared, not stripped.
+    const parsed = z.object(getZodOutputShape(tool)!).partial().safeParse(answer);
     expect(parsed.success).toBe(true);
-    // A field the schema did not declare would be stripped here, and refused by a closed schema in a host.
-    expect(parsed.success ? parsed.data : {}).toMatchObject({
-      mailService: 'certified',
-      deliveryClass: CERTIFIED_DELIVERY_CLASS,
-      deliveryDisclaimer: CERTIFIED_DELIVERY_DISCLAIMER
-    });
+    expect(parsed.success ? parsed.data : {}).toMatchObject(answer);
   });
 
-  it('refuses a service that is not one of the two certified ones', () => {
-    const shape = z.object(getZodOutputShape('get_draft_status')!);
-    expect(shape.safeParse({ draftId: 'd', status: 'ready', mailService: 'standard' }).success).toBe(false);
-    expect(shape.safeParse({ draftId: 'd', status: 'ready', mailService: 'express' }).success).toBe(false);
-    expect(shape.safeParse({ draftId: 'd', status: 'ready', mailService: 'certified_return_receipt' }).success).toBe(true);
+  it.each(TOOLS)('%s refuses a service that is not one of the two certified ones', tool => {
+    const shape = z.object(getZodOutputShape(tool)!).partial();
+    expect(shape.safeParse({ mailService: 'standard' }).success).toBe(false);
+    expect(shape.safeParse({ mailService: 'express' }).success).toBe(false);
+    expect(shape.safeParse({ mailService: 'certified_return_receipt' }).success).toBe(true);
   });
 });

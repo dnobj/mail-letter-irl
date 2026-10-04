@@ -1,5 +1,5 @@
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
-import { DELIVERY_ESTIMATE, deliveryWordsOf } from '../content/delivery.js';
+import { DELIVERY_ESTIMATE } from '../content/delivery.js';
 import { getDraftStatusInputSchema, getDraftStatusOutputSchema } from '../schemas.js';
 import { scheduleSentence } from '../services/deliverySchedule.js';
 import { getDraftState, type DraftState } from '../services/draftService.js';
@@ -9,7 +9,7 @@ import { stationeryOf, type Stationery } from '../render/stationery.js';
 import { draftScheduleOf } from '../services/draftSchedule.js';
 import { heldSendFields, waitsInOutbox } from './heldSend.js';
 import { isDraftIdShape } from './requestSend.js';
-import { letterPayment, wordsVersionOf } from './letterHelpers.js';
+import { letterPayment, wordsVersionOf, type LetterTravel } from './letterHelpers.js';
 import { letterPageLimit } from '../config/roomToWrite.js';
 import { draftMailOption, isExtraService, mailServiceOf } from '../config/products.js';
 import { isCertifiedMailOffered } from '../config/certifiedMail.js';
@@ -47,7 +47,7 @@ interface GetDraftStatusInput {
   draftId: string;
 }
 
-export interface GetDraftStatusOutput {
+export interface GetDraftStatusOutput extends LetterTravel {
   draftId: string;
   status: 'ready' | 'sent' | 'expired' | 'not_found';
   /** The order the draft became, once sent. */
@@ -71,14 +71,6 @@ export interface GetDraftStatusOutput {
   cancellable?: boolean;
   /** Ready: a letter of more than one page (#586), the pages it is laid out on now. */
   pages?: number;
-  /** Ready, a letter that is certified mail now (#625): which service. Absent: an ordinary letter. Card-only, like the rest. */
-  mailService?: CertifiedMailService;
-  /**
-   * Ready, with the terms, for a letter that is certified mail or while certified mail is offered (#625): how it is delivered now, in the
-   * words a new preview would use, as a change of service may have changed it. A card draws them on its Delivery line.
-   */
-  deliveryClass?: string;
-  deliveryDisclaimer?: string;
   /** Ready, while room to write or certified mail is offered (#586, #625): what it costs now, as a restyle or a change of service may have changed it. */
   canSendNow?: boolean;
   reasonCannotSend?: string;
@@ -202,7 +194,7 @@ function termsNow(
   draft: DraftState,
   draftId: string,
   context: ToolContext
-): Pick<GetDraftStatusOutput, 'canSendNow' | 'reasonCannotSend' | 'sendEligibility'> {
+): Pick<GetDraftStatusOutput, 'canSendNow' | 'reasonCannotSend' | 'sendEligibility' | keyof LetterTravel> {
   // A certified letter (#625) keeps its terms whether or not room to write is
   // offered, and so does any letter while certified mail is: set_mail_service
   // may have turned it certified or back since its preview, and the card must
@@ -215,21 +207,15 @@ function termsNow(
 
 /**
  * A ready letter's certified service now (#625), for a card shown its preview's
- * first answer again: set_mail_service may have changed it since. The service
- * is named only for a letter that is certified mail; an ordinary letter has none
- * to name. The words that say how it is delivered come with the terms, whenever
- * the card is told the service (the letter is certified, or certified mail is
- * offered), so a letter turned back to ordinary mail says First-Class again and
- * the card's Delivery line agrees with its price and its buttons. With certified
- * mail off and an ordinary letter nothing is added, and text that is not a
- * service gets no words: how that mail would go is not known.
+ * first answer again: set_mail_service may have changed it since. With the terms
+ * the service and the words that say how it is delivered come in them (see
+ * travelFields), so a card takes them together. Without the terms (a letter our
+ * renderer did not draw) a certified letter is still named; an ordinary letter
+ * has none to name.
  */
-function serviceNow(draft: DraftState, termsGiven: boolean): Pick<GetDraftStatusOutput, 'mailService' | 'deliveryClass' | 'deliveryDisclaimer'> {
+function serviceNow(draft: DraftState, termsGiven: boolean): Pick<GetDraftStatusOutput, 'mailService'> {
   const service = mailServiceOf(draft.mail_service);
-  const certified = draft.mail_type === 'letter' && isExtraService(service) ? service : undefined;
-  const ordinary = service === undefined;
-  const words = termsGiven && (certified || (ordinary && isCertifiedMailOffered())) ? deliveryWordsOf(certified) : {};
-  return { ...(certified ? { mailService: certified } : {}), ...words };
+  return !termsGiven && draft.mail_type === 'letter' && isExtraService(service) ? { mailService: service } : {};
 }
 
 /**

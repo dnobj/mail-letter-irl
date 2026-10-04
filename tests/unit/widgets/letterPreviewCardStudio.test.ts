@@ -1224,22 +1224,30 @@ describe('certified mail on the card (#625)', () => {
   });
 });
 
-describe('the service the server last reported (#625)', () => {
-  // The style row takes the terms of a status answer only for a letter whose preview named a stationery.
+describe('how the letter travels, as the latest answer with its terms says (#625)', () => {
+  // The style row takes the terms of an answer only for a letter whose preview named a stationery.
   const CLASSIC = { stationery: { theme: 'classic', source: 'default' } };
   const ON_PAGE = {
     packPays: false,
     payAndSend: { available: false, amountCents: 1199, currency: 'usd', pageUrl: 'https://letterirl.example/send/draft_0001' },
     letterPack: { available: false, purchaseUrl: 'https://letterirl.example/packs' }
   };
-  const CERTIFIED_WORDS = {
-    deliveryClass: 'USPS Certified Mail',
-    deliveryDisclaimer:
-      'USPS timing varies and can take longer. Certified mail is signed for at delivery; if no one signs for it or collects it from the Post Office, USPS returns it to the sender.'
-  };
+  const DISCLAIMER =
+    'USPS timing varies and can take longer. Certified mail is signed for at delivery; if no one signs for it or collects it from the Post Office, USPS returns it to the sender.';
+  const CERTIFIED_WORDS = { deliveryClass: 'USPS Certified Mail', deliveryDisclaimer: DISCLAIMER };
+  const RECEIPT_WORDS = { deliveryClass: 'USPS Certified Mail with an electronic return receipt', deliveryDisclaimer: DISCLAIMER };
   const FIRST_CLASS = { deliveryClass: 'USPS First-Class Mail', deliveryDisclaimer: 'USPS timing varies and can take longer.' };
-  const certifiedPreview = () =>
-    output({ ...CLASSIC, mailService: 'certified', canSendNow: false, sendEligibility: ON_PAGE, ...CERTIFIED_WORDS });
+  // The terms of a certified letter and of an ordinary one, each with how it travels, as the server answers them.
+  const CERTIFIED_TERMS = {
+    canSendNow: false,
+    reasonCannotSend: 'Certified mail is paid with Pay & Send.',
+    sendEligibility: ON_PAGE,
+    mailService: 'certified',
+    ...CERTIFIED_WORDS
+  };
+  const ORDINARY_TERMS = { ...canSend, ...FIRST_CLASS };
+  const certifiedPreview = () => output({ ...CLASSIC, ...CERTIFIED_TERMS });
+  const ordinaryPreview = () => output({ ...CLASSIC, ...ORDINARY_TERMS });
   const status = (extra: Json) => ({
     result: {
       content: [],
@@ -1248,122 +1256,106 @@ describe('the service the server last reported (#625)', () => {
     }
   });
   const ASK = 'get_draft_status';
-  const restyled = async (card: ReturnType<typeof mount>, draftId = 'draft_0001') => {
+  // The card sets a style, and the server answers with the draft's terms as they are now.
+  const restyled = async (card: ReturnType<typeof mount>, terms: Json, draftId = 'draft_0001') => {
     await card.click(card.byId('style-row').querySelector('[data-theme="botanical"]')!);
     await card.answer(
       {
         result: {
           content: [],
-          structuredContent: {
-            draftId,
-            stationery: { theme: 'botanical', dateLine: 'October 1, 2026', source: 'asked' },
-            canSendNow: false,
-            reasonCannotSend: 'Certified mail is paid with Pay & Send.',
-            sendEligibility: ON_PAGE,
-            message: 'Restyled.'
-          },
+          structuredContent: { draftId, stationery: { theme: 'botanical', dateLine: 'October 1, 2026', source: 'asked' }, ...terms, message: 'Restyled.' },
           _meta: { previewHtml: PAGE }
         }
       },
       'set_stationery'
     );
   };
+  // The five things a person reads and presses, which must come from one answer and so agree.
+  const agree = (card: ReturnType<typeof mount>, kind: 'certified' | 'ordinary', label = '') => {
+    const summary = text(card, 'studio-summary');
+    const delivery = text(card, 'delivery');
+    if (kind === 'certified') {
+      expect(summary, label).toContain('certified mail');
+      expect(delivery, label).toContain('USPS Certified Mail');
+      expect(delivery, label).toContain('signed for at delivery');
+      expect(card.byId('checkout-note').style.display, label).toBe('block');
+      expect(text(card, 'checkout-note'), label).toContain('Certified mail is paid');
+      expect(text(card, 'studio-cost'), label).toBe('Pay & Send USD 11.99');
+      expect(card.byId('pay-page-button').style.display, label).toBe('flex');
+      expect(card.byId('send-button').style.display, label).not.toBe('flex');
+    } else {
+      expect(summary, label).not.toContain('certified');
+      expect(delivery, label).toContain('USPS First-Class Mail');
+      expect(delivery, label).not.toContain('Certified');
+      expect(delivery, label).not.toContain('signed for');
+      // A note that is hidden may still hold its last words: what counts is what is shown.
+      const note = card.byId('checkout-note');
+      expect(note.style.display === 'block' && text(card, 'checkout-note').includes('Certified mail is paid'), label).toBe(false);
+      expect(text(card, 'studio-cost'), label).toBe('1 letter');
+      expect(card.byId('send-button').style.display, label).toBe('flex');
+      expect(card.byId('pay-page-button').style.display, label).not.toBe('flex');
+    }
+  };
 
-  it('drops the certified words when the status says the letter is ordinary mail now, terms and all', async () => {
+  it('follows a status that says the letter is ordinary mail now, in all five things', async () => {
     const card = mount();
     await card.show(certifiedPreview(), ON);
-    expect(text(card, 'checkout-note')).toContain('Certified mail is paid');
-    expect(text(card, 'studio-summary')).toContain('certified mail');
-    await card.answerTo(card.requests('tools/call', ASK)[0], status({ ...canSend }));
-    expect(text(card, 'studio-summary')).not.toContain('certified');
-    expect(card.byId('send-button').style.display).toBe('flex');
+    agree(card, 'certified', 'preview');
+    await card.answerTo(card.requests('tools/call', ASK)[0], status(ORDINARY_TERMS));
+    agree(card, 'ordinary', 'status');
   });
 
-  it('keeps the certified words when the status still names the service', async () => {
+  it('follows a status that says the letter is certified now, in all five things', async () => {
+    const card = mount();
+    await card.show(ordinaryPreview(), ON);
+    agree(card, 'ordinary', 'preview');
+    await card.answerTo(card.requests('tools/call', ASK)[0], status(CERTIFIED_TERMS));
+    agree(card, 'certified', 'status');
+  });
+
+  it('names the return receipt as the status gives it', async () => {
     const card = mount();
     await card.show(certifiedPreview(), ON);
     await card.answerTo(
       card.requests('tools/call', ASK)[0],
-      status({ mailService: 'certified_return_receipt', canSendNow: false, sendEligibility: ON_PAGE })
+      status({ ...CERTIFIED_TERMS, mailService: 'certified_return_receipt', ...RECEIPT_WORDS })
     );
     expect(text(card, 'studio-summary')).toContain('certified mail with a return receipt');
-    expect(text(card, 'checkout-note')).toContain('Certified mail is paid');
+    expect(text(card, 'delivery')).toContain('USPS Certified Mail with an electronic return receipt');
+    agree(card, 'certified', 'receipt');
   });
 
-  it('turns an ordinary preview certified when the status says so', async () => {
-    const card = mount();
-    await card.show(output({ ...CLASSIC, canSendNow: false, sendEligibility: ON_PAGE }), ON);
-    expect(text(card, 'studio-summary')).not.toContain('certified');
-    // The pack rule, which is what ordinary mail no pack pays for says.
-    expect(text(card, 'checkout-note')).toContain('Letter packs pay for one-page letters');
-    await card.answerTo(
-      card.requests('tools/call', ASK)[0],
-      status({ mailService: 'certified', canSendNow: false, sendEligibility: ON_PAGE })
-    );
-    expect(text(card, 'studio-summary')).toContain('certified mail');
-    // The note comes from the status service too, not from the preview alone.
-    expect(text(card, 'checkout-note')).toBe("Certified mail is paid with Pay & Send on Letter IRL's page, which sends it once you pay.");
-  });
-
-  it('says nothing new when the status gives no terms (an older server, or a letter it does not price)', async () => {
+  it('keeps the preview when the status gives no terms (a letter it does not price)', async () => {
     const card = mount();
     await card.show(certifiedPreview(), ON);
     await card.answerTo(card.requests('tools/call', ASK)[0], status({}));
-    expect(text(card, 'studio-summary')).toContain('certified mail');
+    agree(card, 'certified', 'no terms');
+  });
+
+  it('keeps the words of the preview when an older server gives terms without how the letter travels', async () => {
+    const card = mount();
+    await card.show(certifiedPreview(), ON);
+    await card.answerTo(
+      card.requests('tools/call', ASK)[0],
+      status({ canSendNow: false, reasonCannotSend: 'Certified mail is paid with Pay & Send.', sendEligibility: ON_PAGE })
+    );
+    agree(card, 'certified', 'older server');
+  });
+
+  it('reads a service it does not know as ordinary mail, and drops the certified words of the preview', async () => {
+    const card = mount();
+    await card.show(certifiedPreview(), ON);
+    await card.answerTo(card.requests('tools/call', ASK)[0], status({ ...ORDINARY_TERMS, mailService: 'express' }));
+    expect(text(card, 'studio-summary')).not.toContain('certified');
   });
 
   it('keeps the service of a preview that came after, whatever the status said of the one before', async () => {
     const card = mount();
     await card.show(certifiedPreview(), ON);
-    await card.answerTo(card.requests('tools/call', ASK)[0], status({ ...canSend }));
-    expect(text(card, 'studio-summary')).not.toContain('certified');
+    await card.answerTo(card.requests('tools/call', ASK)[0], status(ORDINARY_TERMS));
+    agree(card, 'ordinary', 'first');
     await card.show({ ...certifiedPreview(), draftId: 'draft_0002' }, ON);
-    expect(text(card, 'studio-summary')).toContain('certified mail');
-  });
-
-  it('draws the delivery words the status gives, so the Delivery line agrees with the service', async () => {
-    const back = mount();
-    await back.show(certifiedPreview(), ON);
-    expect(text(back, 'delivery')).toContain('signed for at delivery');
-    await back.answerTo(back.requests('tools/call', ASK)[0], status({ ...canSend, ...FIRST_CLASS }));
-    expect(text(back, 'delivery')).toContain('USPS First-Class Mail');
-    expect(text(back, 'delivery')).not.toContain('Certified');
-    expect(text(back, 'delivery')).not.toContain('signed for');
-    expect(text(back, 'studio-summary')).not.toContain('certified');
-
-    const forth = mount();
-    await forth.show(output({ ...CLASSIC, canSendNow: false, sendEligibility: ON_PAGE, ...FIRST_CLASS }), ON);
-    expect(text(forth, 'delivery')).toContain('USPS First-Class Mail');
-    await forth.answerTo(
-      forth.requests('tools/call', ASK)[0],
-      status({ mailService: 'certified', canSendNow: false, sendEligibility: ON_PAGE, ...CERTIFIED_WORDS })
-    );
-    expect(text(forth, 'delivery')).toContain('USPS Certified Mail');
-    expect(text(forth, 'delivery')).toContain('signed for at delivery');
-  });
-
-  it('keeps the delivery words of the preview when the status gives none (an older server)', async () => {
-    const card = mount();
-    await card.show(certifiedPreview(), ON);
-    await card.answerTo(
-      card.requests('tools/call', ASK)[0],
-      status({ mailService: 'certified', canSendNow: false, sendEligibility: ON_PAGE })
-    );
-    expect(text(card, 'delivery')).toContain('USPS Certified Mail');
-    expect(text(card, 'delivery')).toContain('signed for at delivery');
-  });
-
-  it('takes nothing from a status answer for a preview that named no stationery: its card has no row to take the terms', async () => {
-    const card = mount();
-    await card.show(output({ mailService: 'certified', canSendNow: false, sendEligibility: ON_PAGE, ...CERTIFIED_WORDS }), ON);
-    await card.answerTo(card.requests('tools/call', ASK)[0], status({ ...canSend, ...FIRST_CLASS }));
-    // The words, the price and the buttons all stay those of the preview, so they agree.
-    expect(text(card, 'studio-summary')).toContain('certified mail');
-    expect(text(card, 'delivery')).toContain('USPS Certified Mail');
-    expect(text(card, 'checkout-note')).toContain('Certified mail is paid');
-    expect(text(card, 'studio-cost')).toBe('Pay & Send USD 11.99');
-    expect(card.byId('pay-page-button').style.display).toBe('flex');
-    expect(card.byId('send-button').style.display).not.toBe('flex');
+    agree(card, 'certified', 'second');
   });
 
   it('keeps each draft its own service when the answers arrive out of order', async () => {
@@ -1372,61 +1364,73 @@ describe('the service the server last reported (#625)', () => {
     const first = card.requests('tools/call', ASK)[0];
     await card.show({ ...certifiedPreview(), draftId: 'draft_0002' }, ON);
     // The answer for the first draft, late: the card is on the second now, which it says nothing of.
-    await card.answerTo(first, status({ ...canSend, ...FIRST_CLASS }));
-    expect(text(card, 'studio-summary')).toContain('certified mail');
-    expect(text(card, 'delivery')).toContain('USPS Certified Mail');
-    expect(card.byId('send-button').style.display).not.toBe('flex');
+    await card.answerTo(first, status(ORDINARY_TERMS));
+    agree(card, 'certified', 'late answer');
     // The second draft has its own answer, which is taken.
-    await card.answerTo(card.requests('tools/call', ASK)[1], status({ draftId: 'draft_0002', ...canSend, ...FIRST_CLASS }));
-    expect(text(card, 'studio-summary')).not.toContain('certified');
-    expect(text(card, 'delivery')).toContain('USPS First-Class Mail');
+    await card.answerTo(card.requests('tools/call', ASK)[1], status({ draftId: 'draft_0002', ...ORDINARY_TERMS }));
+    agree(card, 'ordinary', 'own answer');
   });
 
-  it('takes nothing from a status answer that lands while the card is setting a style', async () => {
+  it('takes nothing from a status for a preview that named no stationery: its card has no row to take the terms', async () => {
+    const card = mount();
+    await card.show(output({ ...CERTIFIED_TERMS }), ON);
+    await card.answerTo(card.requests('tools/call', ASK)[0], status(ORDINARY_TERMS));
+    agree(card, 'certified', 'no stationery');
+  });
+
+  it('takes nothing from a status that lands while the card is setting a style, and the restyle answer governs', async () => {
     const card = mount();
     await card.show(certifiedPreview(), ON);
     await card.click(card.byId('style-row').querySelector('[data-theme="botanical"]')!);
-    await card.answerTo(card.requests('tools/call', ASK)[0], status({ ...canSend, ...FIRST_CLASS }));
-    expect(text(card, 'studio-summary')).toContain('certified mail');
-    expect(text(card, 'delivery')).toContain('USPS Certified Mail');
-    expect(card.byId('send-button').style.display).not.toBe('flex');
+    await card.answerTo(card.requests('tools/call', ASK)[0], status(CERTIFIED_TERMS));
+    agree(card, 'certified', 'while setting');
+    // The chat made the letter ordinary before the style was pressed: the server prices and words it so.
+    await card.answer(
+      {
+        result: {
+          content: [],
+          structuredContent: { draftId: 'draft_0001', stationery: { theme: 'botanical', dateLine: 'October 1, 2026', source: 'asked' }, ...ORDINARY_TERMS, message: 'Restyled.' },
+          _meta: { previewHtml: PAGE }
+        }
+      },
+      'set_stationery'
+    );
+    agree(card, 'ordinary', 'restyle answer');
   });
 
-  it('keeps a draft its own service when the draft before it was adopted and the new one is restyled', async () => {
+  it('brings the words of a change made from the card with its price, so a letter the chat turned ordinary is ordinary in all five things', async () => {
     const card = mount();
     await card.show(certifiedPreview(), ON);
-    await card.answerTo(card.requests('tools/call', ASK)[0], status({ ...canSend, ...FIRST_CLASS }));
-    expect(text(card, 'studio-summary')).not.toContain('certified');
+    await card.answerTo(card.requests('tools/call', ASK)[0], status(CERTIFIED_TERMS));
+    agree(card, 'certified', 'status');
+    // The chat turns it ordinary and the card cannot hear that. The person presses a style, and the server answers as the draft is now.
+    await restyled(card, ORDINARY_TERMS);
+    agree(card, 'ordinary', 'restyle');
+  });
+
+  it('ignores a status that lands after the card restyled the draft: the restyle is the later word', async () => {
+    const card = mount();
+    await card.show(certifiedPreview(), ON);
+    await restyled(card, ORDINARY_TERMS);
+    agree(card, 'ordinary', 'restyle');
+    await card.answerTo(card.requests('tools/call', ASK)[0], status(CERTIFIED_TERMS));
+    agree(card, 'ordinary', 'late status');
+  });
+
+  it('keeps the service of the draft a restyle is for, whatever an earlier draft was told', async () => {
+    const card = mount();
+    await card.show(certifiedPreview(), ON);
+    await card.answerTo(card.requests('tools/call', ASK)[0], status(ORDINARY_TERMS));
     await card.show({ ...certifiedPreview(), draftId: 'draft_0002' }, ON);
-    await restyled(card, 'draft_0002');
-    expect(text(card, 'studio-summary')).toContain('certified mail');
-    expect(text(card, 'delivery')).toContain('USPS Certified Mail');
+    await restyled(card, CERTIFIED_TERMS, 'draft_0002');
+    agree(card, 'certified', 'second draft restyled');
   });
 
-  it('leaves the service of the preview alone when an older server answers without terms, even after a restyle', async () => {
+  it('keeps the words of the preview when an older server restyles without saying how the letter travels', async () => {
     const card = mount();
     await card.show(certifiedPreview(), ON);
-    await card.answerTo(card.requests('tools/call', ASK)[0], status({}));
-    await restyled(card);
-    expect(text(card, 'studio-summary')).toContain('certified mail');
-    expect(text(card, 'delivery')).toContain('USPS Certified Mail');
-  });
-
-  it('ignores a status that lands after the card restyled the draft: it is older than the restyle', async () => {
-    const card = mount();
-    await card.show(certifiedPreview(), ON);
-    await restyled(card);
-    await card.answerTo(card.requests('tools/call', ASK)[0], status({ ...canSend, ...FIRST_CLASS }));
-    expect(text(card, 'studio-summary')).toContain('certified mail');
-    expect(text(card, 'delivery')).toContain('USPS Certified Mail');
-    expect(card.byId('send-button').style.display).not.toBe('flex');
-  });
-
-  it('reads a service it does not know as ordinary mail, and drops the certified words of the preview', async () => {
-    const card = mount();
-    await card.show(certifiedPreview(), ON);
-    await card.answerTo(card.requests('tools/call', ASK)[0], status({ mailService: 'express', canSendNow: false, sendEligibility: ON_PAGE }));
-    expect(text(card, 'studio-summary')).not.toContain('certified');
+    await restyled(card, { canSendNow: false, reasonCannotSend: 'Certified mail is paid with Pay & Send.', sendEligibility: ON_PAGE });
+    agree(card, 'certified', 'older server restyle');
   });
 });
 

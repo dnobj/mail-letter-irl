@@ -5,7 +5,7 @@ import { draftMailOption, isExtraService, mailServiceOf } from '../config/produc
 import type { SendEligibility } from '../services/commerceService.js';
 import { getDraftForMailService, setDraftMailService, type MailServiceRefusal } from '../services/draftService.js';
 import type { CertifiedMailService } from '../services/types.js';
-import { letterPayment } from './letterHelpers.js';
+import { letterPayment, type LetterTravel } from './letterHelpers.js';
 import { isDraftIdShape } from './requestSend.js';
 import { giftLetterNote } from './setLetterWords.js';
 
@@ -30,10 +30,9 @@ interface SetMailServiceInput {
   mailService: string;
 }
 
-export interface SetMailServiceOutput {
+/** The terms carry how the letter travels now: the service when it is certified mail, and the words that say how it is delivered. */
+export interface SetMailServiceOutput extends LetterTravel {
   draftId: string;
-  /** Present only when the letter now goes as certified mail: which service. Absent: an ordinary letter. */
-  mailService?: CertifiedMailService;
   /** What the letter costs and how it is paid as it stands now. */
   canSendNow: boolean;
   reasonCannotSend?: string;
@@ -159,7 +158,6 @@ async function handler(input: SetMailServiceInput, context: ToolContext): Promis
     certified === undefined && !payment.canSendNow && Number(draft.pages ?? 1) === 1 ? await giftLetterNote(context) : '';
   return {
     draftId,
-    ...(certified ? { mailService: certified } : {}),
     ...payment,
     message: messageFor(certified) + note
   };

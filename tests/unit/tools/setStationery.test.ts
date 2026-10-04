@@ -351,3 +351,45 @@ describe('set_stationery', () => {
     expect(setStationeryTool.readOnly).toBe(false);
   });
 });
+
+describe('set_stationery says how the letter travels, with its price (#625)', () => {
+  const offer = () => {
+    vi.stubEnv('LETTER_IRL_CERTIFIED_MAIL_ENABLED', 'true');
+    vi.stubEnv('JIT_PURCHASE_ENABLED', 'true');
+  };
+
+  it('adds nothing for an ordinary letter while certified mail is off', async () => {
+    vi.mocked(getDraftForStationery).mockResolvedValue(draft());
+    const output = await run({ stationery: 'Botanical' });
+    for (const key of ['mailService', 'deliveryClass', 'deliveryDisclaimer']) expect(output, key).not.toHaveProperty(key);
+  });
+
+  it('says First-Class for an ordinary letter while certified mail is offered, so a change back is heard', async () => {
+    offer();
+    vi.mocked(getDraftForStationery).mockResolvedValue(draft());
+    const output = await run({ stationery: 'Botanical' });
+    expect(output).toMatchObject({ deliveryClass: 'USPS First-Class Mail', deliveryDisclaimer: 'USPS timing varies and can take longer.' });
+    expect(output).not.toHaveProperty('mailService');
+  });
+
+  it.each([
+    ['certified', 'USPS Certified Mail'],
+    ['certified_return_receipt', 'USPS Certified Mail with an electronic return receipt']
+  ])('names a %s letter and says it is signed for, whether or not certified mail is offered', async (service, deliveryClass) => {
+    for (const offered of [false, true]) {
+      if (offered) offer();
+      vi.mocked(getDraftForStationery).mockResolvedValue({ ...draft(), mail_service: service } as never);
+      vi.mocked(setDraftStationery).mockClear();
+      const output = await run({ stationery: 'Botanical' });
+      expect(output, String(offered)).toMatchObject({ mailService: service, deliveryClass, canSendNow: false });
+      expect(output.deliveryDisclaimer, String(offered)).toContain('signed for at delivery');
+    }
+  });
+
+  it('says nothing of how text that is not a service would travel', async () => {
+    offer();
+    vi.mocked(getDraftForStationery).mockResolvedValue({ ...draft(), mail_service: 'express' } as never);
+    const output = await run({ stationery: 'Botanical' });
+    for (const key of ['mailService', 'deliveryClass', 'deliveryDisclaimer']) expect(output, key).not.toHaveProperty(key);
+  });
+});

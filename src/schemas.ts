@@ -47,9 +47,9 @@ import {
   SET_MAIL_SERVICE_CAN_SEND_DESCRIPTION,
   SET_MAIL_SERVICE_OUTPUT_DESCRIPTION,
   ORDER_MAIL_SERVICE_DESCRIPTION,
-  GET_DRAFT_STATUS_MAIL_SERVICE_DESCRIPTION,
-  GET_DRAFT_STATUS_DELIVERY_CLASS_DESCRIPTION,
-  GET_DRAFT_STATUS_DELIVERY_DISCLAIMER_DESCRIPTION,
+  LETTER_TRAVEL_MAIL_SERVICE_DESCRIPTION,
+  LETTER_TRAVEL_DELIVERY_CLASS_DESCRIPTION,
+  LETTER_TRAVEL_DELIVERY_DISCLAIMER_DESCRIPTION,
   ORDER_CARRIER_TRACKING_NUMBER_DESCRIPTION,
   ORDER_TRACKING_SUPPORT_DESCRIPTION,
   ORDER_CARRIER_TRACKING_URL_DESCRIPTION,
@@ -979,6 +979,13 @@ export const getDraftStatusInputSchema: JsonSchema = {
   }
 };
 
+/** How a letter travels (#625), declared once on every answer that carries a letter's terms. */
+const letterTravelProperties: Record<string, JsonSchema> = {
+  mailService: { type: "string", enum: [...EXTRA_SERVICES], description: LETTER_TRAVEL_MAIL_SERVICE_DESCRIPTION },
+  deliveryClass: { type: "string", description: LETTER_TRAVEL_DELIVERY_CLASS_DESCRIPTION },
+  deliveryDisclaimer: { type: "string", description: LETTER_TRAVEL_DELIVERY_DISCLAIMER_DESCRIPTION }
+};
+
 export const getDraftStatusOutputSchema: JsonSchema = {
   type: "object",
   required: ["draftId", "status"],
@@ -1011,9 +1018,7 @@ export const getDraftStatusOutputSchema: JsonSchema = {
     bodyText: { type: "string", description: "A ready letter, while room to write is offered: its words now, for the card" },
     signOff: { type: "string" },
     wordsVersion: { type: "string", description: WORDS_VERSION_DESCRIPTION },
-    mailService: { type: "string", enum: [...EXTRA_SERVICES], description: GET_DRAFT_STATUS_MAIL_SERVICE_DESCRIPTION },
-    deliveryClass: { type: "string", description: GET_DRAFT_STATUS_DELIVERY_CLASS_DESCRIPTION },
-    deliveryDisclaimer: { type: "string", description: GET_DRAFT_STATUS_DELIVERY_DISCLAIMER_DESCRIPTION },
+    ...letterTravelProperties,
     reasonCannotSend: { type: "string" },
     sendEligibility: sendEligibilitySchema,
     stationery: {
@@ -1256,6 +1261,7 @@ export const setLetterSignatureOutputSchema: JsonSchema = {
     canSendNow: { type: "boolean", description: SET_LETTER_SIGNATURE_CAN_SEND_DESCRIPTION },
     reasonCannotSend: { type: "string" },
     sendEligibility: sendEligibilitySchema,
+    ...letterTravelProperties,
     message: { type: "string" }
   }
 };
@@ -1276,6 +1282,8 @@ export const setMailServiceOutputSchema: JsonSchema = {
   properties: {
     draftId: { type: "string" },
     mailService: { type: "string", enum: [...EXTRA_SERVICES], description: SET_MAIL_SERVICE_OUTPUT_DESCRIPTION },
+    deliveryClass: letterTravelProperties.deliveryClass,
+    deliveryDisclaimer: letterTravelProperties.deliveryDisclaimer,
     canSendNow: { type: "boolean", description: SET_MAIL_SERVICE_CAN_SEND_DESCRIPTION },
     reasonCannotSend: { type: "string" },
     sendEligibility: sendEligibilitySchema,
@@ -1331,6 +1339,7 @@ export const setStationeryOutputSchema: JsonSchema = {
     },
     reasonCannotSend: { type: "string" },
     sendEligibility: sendEligibilitySchema,
+    ...letterTravelProperties,
     message: { type: "string" }
   }
 };
@@ -1355,6 +1364,7 @@ export const setLetterWordsOutputSchema: JsonSchema = {
     canSendNow: { type: "boolean", description: SET_LETTER_WORDS_CAN_SEND_DESCRIPTION },
     reasonCannotSend: { type: "string" },
     sendEligibility: sendEligibilitySchema,
+    ...letterTravelProperties,
     wordsVersion: { type: "string", description: "The version of the words now, for the next change of them" },
     message: { type: "string" }
   }
