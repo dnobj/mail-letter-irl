@@ -117,9 +117,9 @@ describe('set_mail_service while certified mail is not offered (#625)', () => {
 
 describe('set_mail_service (#625)', () => {
   it.each([
-    ['certified', 'This letter now goes by USPS Certified Mail once sent.'],
-    ['certified_return_receipt', 'This letter now goes by USPS Certified Mail with an electronic return receipt once sent.']
-  ])('sets %s, prices the draft as Pay & Send whatever the balance, and says so', async (service, sentence) => {
+    ['certified', 'This letter now goes by USPS Certified Mail once sent.', 'USPS Certified Mail'],
+    ['certified_return_receipt', 'This letter now goes by USPS Certified Mail with an electronic return receipt once sent.', 'USPS Certified Mail with an electronic return receipt']
+  ])('sets %s, prices the draft as Pay & Send whatever the balance, and says so', async (service, sentence, deliveryClass) => {
     vi.mocked(getDraftForMailService).mockResolvedValue(draft({ mail_service: service }));
     const result = await set({ draftId: DRAFT_ID, mailService: service }, context(10));
 
@@ -129,8 +129,11 @@ describe('set_mail_service (#625)', () => {
       draftId: DRAFT_ID,
       mailService: service,
       canSendNow: false,
-      reasonCannotSend: CERTIFIED_PAID_PER_SEND_REASON
+      reasonCannotSend: CERTIFIED_PAID_PER_SEND_REASON,
+      // And how it is delivered, in the words a new preview would use, so a card takes them with the price.
+      deliveryClass
     });
+    expect(result.deliveryDisclaimer).toContain('signed for at delivery');
     expect(result.message).toContain(sentence);
     expect(result.message).toContain('paid with Pay & Send, never a letter pack or a gift letter');
     expect(result.message).toContain('Nothing has been sent.');
@@ -144,6 +147,8 @@ describe('set_mail_service (#625)', () => {
 
     expect(setDraftMailService).toHaveBeenCalledWith(DRAFT_ID, 'auth0|owner', 'standard', NOW);
     expect(result).not.toHaveProperty('mailService');
+    // Ordinary mail says so in words too, so a card told of the change back draws First-Class again.
+    expect(result).toMatchObject({ deliveryClass: 'USPS First-Class Mail', deliveryDisclaimer: 'USPS timing varies and can take longer.' });
     expect(result.canSendNow).toBe(true);
     expect(result.message).toBe('This letter now goes as ordinary first-class mail once sent. Nothing has been sent.');
     expect(vi.mocked(getSendEligibility).mock.calls.at(-1)![2]).toEqual({ mailType: 'letter' });

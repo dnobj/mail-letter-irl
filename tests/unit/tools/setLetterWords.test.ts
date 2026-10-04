@@ -266,6 +266,9 @@ describe('set_letter_words', () => {
 
     expect(written().pages).toBe(2);
     expect(output).toMatchObject({ pages: 2, canSendNow: false, reasonCannotSend: 'Certified mail is paid with Pay & Send.' });
+    // The terms say how it travels (#625), so a card that takes them draws a certified letter as one.
+    expect(output).toMatchObject({ mailService: 'certified', deliveryClass: 'USPS Certified Mail' });
+    expect(output.deliveryDisclaimer).toContain('signed for at delivery');
     expect(output.sendEligibility).toMatchObject({ packPays: false });
     expect(output.message).toContain('It now runs to two pages, printed on both sides. The price is the same.');
     expect(output.message).not.toContain('Pay & Send.');
@@ -279,6 +282,7 @@ describe('set_letter_words', () => {
 
     expect(written().pages).toBe(1);
     expect(output).toMatchObject({ canSendNow: false, reasonCannotSend: 'Certified mail is paid with Pay & Send.' });
+    expect(output).toMatchObject({ mailService: 'certified_return_receipt', deliveryClass: 'USPS Certified Mail with an electronic return receipt' });
     expect(output.message).toContain('It now fits on one page.');
     expect(output.message).not.toContain('letter pack');
     expect(getSendEligibility).toHaveBeenCalledWith(10, 2, { mailType: 'letter', mailService: 'certified_return_receipt' });

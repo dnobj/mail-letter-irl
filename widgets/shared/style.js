@@ -64,7 +64,19 @@
       sendEligibility: data.sendEligibility,
       reasonCannotSend: typeof data.reasonCannotSend === "string" ? data.reasonCannotSend : null,
       pages: data.pages === 2 || data.pages === 3 ? data.pages : 1,
-      pageFit: fit && typeof fit === "object" ? fit : null
+      pageFit: fit && typeof fit === "object" ? fit : null,
+      // How the letter travels, when the answer speaks of it (#625): the certified service ("" for ordinary mail) and the
+      // words that say how it is delivered, taken with the terms so that the summary, the note, the Delivery line, the price
+      // and the buttons all come from one answer. An answer that carries a delivery class speaks of it; one without (an
+      // older server, or an ordinary letter while certified mail is off) says nothing, and the preview's words stand.
+      travel:
+        typeof data.deliveryClass === "string" && data.deliveryClass
+          ? {
+              mailService: typeof data.mailService === "string" ? data.mailService : "",
+              deliveryClass: data.deliveryClass,
+              deliveryDisclaimer: typeof data.deliveryDisclaimer === "string" ? data.deliveryDisclaimer : ""
+            }
+          : null
     };
   }
 

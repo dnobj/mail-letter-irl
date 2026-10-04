@@ -5,7 +5,7 @@ import type { SendEligibility } from '../services/commerceService.js';
 import { pageFit, SIGNATURE_LINES, stationeryOf, type PageFit } from '../render/index.js';
 import { getDraftForStationery, setDraftSignature, type DraftRedrawRefusal } from '../services/draftService.js';
 import { getSignature } from '../services/signatureService.js';
-import { PAGE_WORDS, layoutLetterForPreview, letterOption, letterPayment, letterRunsPast, pageChangeSentence, redrawLetterPreview } from './letterHelpers.js';
+import { PAGE_WORDS, layoutLetterForPreview, letterOption, letterPayment, letterRunsPast, pageChangeSentence, redrawLetterPreview, type LetterTravel } from './letterHelpers.js';
 import { isDraftIdShape } from './requestSend.js';
 import { requireSignatures, SignatureRefusedError, signatureImageUri, type SignatureRefusalCode } from './signatureShared.js';
 import type { PreviewSignatureOutput } from './signatureInput.js';
@@ -30,7 +30,7 @@ interface SetLetterSignatureInput {
   signature: boolean;
 }
 
-export interface SetLetterSignatureOutput {
+export interface SetLetterSignatureOutput extends LetterTravel {
   draftId: string;
   /** Whether the letter now prints the saved signature: asked for, always. */
   signature: PreviewSignatureOutput;

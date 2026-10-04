@@ -9,9 +9,10 @@ import { stationeryOf, type Stationery } from '../render/stationery.js';
 import { draftScheduleOf } from '../services/draftSchedule.js';
 import { heldSendFields, waitsInOutbox } from './heldSend.js';
 import { isDraftIdShape } from './requestSend.js';
-import { letterPayment, wordsVersionOf } from './letterHelpers.js';
+import { letterPayment, wordsVersionOf, type LetterTravel } from './letterHelpers.js';
 import { letterPageLimit } from '../config/roomToWrite.js';
-import { draftMailOption, mailServiceOf } from '../config/products.js';
+import { draftMailOption, isExtraService, mailServiceOf } from '../config/products.js';
+import { isCertifiedMailOffered } from '../config/certifiedMail.js';
 import { isPostcardSizesOffered } from '../config/postcardSizes.js';
 import { isPostcardLayoutsOffered } from '../config/postcardLayouts.js';
 import { postcardFrontOf } from '../render/index.js';
@@ -46,7 +47,7 @@ interface GetDraftStatusInput {
   draftId: string;
 }
 
-export interface GetDraftStatusOutput {
+export interface GetDraftStatusOutput extends LetterTravel {
   draftId: string;
   status: 'ready' | 'sent' | 'expired' | 'not_found';
   /** The order the draft became, once sent. */
@@ -70,7 +71,7 @@ export interface GetDraftStatusOutput {
   cancellable?: boolean;
   /** Ready: a letter of more than one page (#586), the pages it is laid out on now. */
   pages?: number;
-  /** Ready, while room to write is offered (#586): what it costs now, as a restyle may have changed it. */
+  /** Ready, while room to write or certified mail is offered (#586, #625): what it costs now, as a restyle or a change of service may have changed it. */
   canSendNow?: boolean;
   reasonCannotSend?: string;
   sendEligibility?: SendEligibility;
@@ -151,6 +152,7 @@ async function handler(
     ...signatureNow(draft),
     ...pagesNow(draft),
     ...termsNow(draft, draftId, context),
+    ...serviceNow(draft),
     ...wordsNow(draft),
     ...postcardStyleNow(draft, draftId, context)
   };
@@ -191,13 +193,27 @@ function termsNow(
   draft: DraftState,
   draftId: string,
   context: ToolContext
-): Pick<GetDraftStatusOutput, 'canSendNow' | 'reasonCannotSend' | 'sendEligibility'> {
+): Pick<GetDraftStatusOutput, 'canSendNow' | 'reasonCannotSend' | 'sendEligibility' | keyof LetterTravel> {
   // A certified letter (#625) keeps its terms whether or not room to write is
-  // offered: it was previewed while certified mail was, and the card must not
-  // offer a pack for it. Its option is the draft's own, service included.
+  // offered, and so does any letter while certified mail is: set_mail_service
+  // may have turned it certified or back since its preview, and the card must
+  // not offer a pack for one or Pay & Send for the other. Its option is the
+  // draft's own, service included.
   const certified = mailServiceOf(draft.mail_service) !== undefined;
-  if (draft.mail_type !== 'letter' || !draft.renderer_version || (letterPageLimit() === 1 && !certified)) return {};
+  if (draft.mail_type !== 'letter' || !draft.renderer_version || (letterPageLimit() === 1 && !certified && !isCertifiedMailOffered())) return {};
   return letterPayment(draftMailOption(draft), Number(draft.required_credits ?? 2), draft.is_gift_send === true, context, draftId);
+}
+
+/**
+ * A ready letter's certified service now (#625), for a card shown its preview's
+ * first answer again: set_mail_service may have changed it since. A certified
+ * letter is named, with or without terms: the terms say how it travels as well
+ * (see travelFields), and a letter our renderer did not draw has none but is
+ * still named. An ordinary letter has no service to name.
+ */
+function serviceNow(draft: DraftState): Pick<GetDraftStatusOutput, 'mailService'> {
+  const service = mailServiceOf(draft.mail_service);
+  return draft.mail_type === 'letter' && isExtraService(service) ? { mailService: service } : {};
 }
 
 /**

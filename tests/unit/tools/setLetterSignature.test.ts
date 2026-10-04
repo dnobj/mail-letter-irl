@@ -239,6 +239,9 @@ describe('set_letter_signature', () => {
     const output = await run({ signature: true });
     expect(written().pages).toBe(2);
     expect(output).toMatchObject({ pages: 2, canSendNow: false, reasonCannotSend: 'Certified mail is paid with Pay & Send.' });
+    // The terms say how it travels (#625), so a card that takes them draws a certified letter as one.
+    expect(output).toMatchObject({ mailService: 'certified', deliveryClass: 'USPS Certified Mail' });
+    expect(output.deliveryDisclaimer).toContain('signed for at delivery');
     expect(output.sendEligibility).toMatchObject({ packPays: false });
     expect(output.message).toContain('It now runs to two pages, printed on both sides. The price is the same.');
     expect(output.message).not.toContain('letter pack');

@@ -10,7 +10,7 @@ import {
   setDraftStationery,
   type DraftRedrawRefusal
 } from '../services/draftService.js';
-import { layoutLetterForPreview, letterOption, letterPayment, pageChangeSentence, redrawLetterPreview, validatePrintableLetter } from './letterHelpers.js';
+import { layoutLetterForPreview, letterOption, letterPayment, pageChangeSentence, redrawLetterPreview, validatePrintableLetter, type LetterTravel } from './letterHelpers.js';
 import { isDraftIdShape } from './requestSend.js';
 import { previewStationery, THEME_LIST } from './stationeryInput.js';
 
@@ -37,7 +37,7 @@ interface SetStationeryInput {
   headline?: string;
 }
 
-export interface SetStationeryOutput {
+export interface SetStationeryOutput extends LetterTravel {
   draftId: string;
   /** The stationery the page is now drawn in: asked for, always. */
   stationery: PreviewStationery;

@@ -160,6 +160,22 @@ describe.each(Object.keys(TOOLS) as (keyof typeof TOOLS)[])('the %s letter previ
     }
   );
 
+  it.each([
+    ['certified', 'USPS Certified Mail'],
+    ['certified_return_receipt', 'USPS Certified Mail with an electronic return receipt']
+  ])('says what %s is, and that it is signed for, not just First-Class', async (service, deliveryClass) => {
+    const output = await run(layout, { mailService: service });
+    expect(output).toMatchObject({ deliveryClass });
+    expect(output.deliveryDisclaimer).toBe(
+      'USPS timing varies and can take longer. Certified mail is signed for at delivery; if no one signs for it or collects it from the Post Office, USPS returns it to the sender.'
+    );
+  });
+
+  it('keeps First-Class and its disclaimer for an ordinary letter', async () => {
+    const output = await run(layout, {});
+    expect(output).toMatchObject({ deliveryClass: 'USPS First-Class Mail', deliveryDisclaimer: 'USPS timing varies and can take longer.' });
+  });
+
   it.each([[undefined], ['standard'], [null], ['']])('leaves an ordinary letter alone when the service is %j', async service => {
     const output = await run(layout, service === undefined ? {} : { mailService: service }, context(10));
     // (null, and the empty string, are how a client that sends every field says none)
