@@ -102,3 +102,10 @@ describe('the answers that carry the terms of a letter declare how it travels (#
     expect(shape.safeParse({ mailService: 'certified_return_receipt' }).success).toBe(true);
   });
 });
+
+describe('the steering revision after how a letter travels (#625)', () => {
+  it('is bumped, so a client holding the earlier tool list can be told apart in the log', async () => {
+    const { STEERING_COPY_REV } = await import('../../../src/mcp/steeringRev.js');
+    expect(STEERING_COPY_REV).toBeGreaterThanOrEqual(41);
+  });
+});

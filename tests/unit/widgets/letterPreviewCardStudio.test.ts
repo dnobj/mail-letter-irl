@@ -1382,7 +1382,8 @@ describe('how the letter travels, as the latest answer with its terms says (#625
     const card = mount();
     await card.show(certifiedPreview(), ON);
     await card.click(card.byId('style-row').querySelector('[data-theme="botanical"]')!);
-    await card.answerTo(card.requests('tools/call', ASK)[0], status(CERTIFIED_TERMS));
+    // A status that says the opposite of the preview, landing while the style is being set: refused, not taken.
+    await card.answerTo(card.requests('tools/call', ASK)[0], status(ORDINARY_TERMS));
     agree(card, 'certified', 'while setting');
     // The chat made the letter ordinary before the style was pressed: the server prices and words it so.
     await card.answer(

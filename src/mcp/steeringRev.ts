@@ -178,5 +178,12 @@
  *     prices the letter as it stands: Pay & Send for certified mail, never a pack
  *     or a gift letter. A postcard is refused for every service. The letter card
  *     will call it too (a later part).
+ * r41: how a letter travels (#625). The answers of set_stationery,
+ *     set_letter_words, set_letter_signature and set_mail_service (and the
+ *     card-only get_draft_status) say, with the letter's price, how it travels:
+ *     mailService for certified mail, and the words that say how it is
+ *     delivered (deliveryClass, deliveryDisclaimer), while the letter is
+ *     certified or certified mail is offered. The output schemas declare the
+ *     fields whatever the flag says.
  */
-export const STEERING_COPY_REV = 40;
+export const STEERING_COPY_REV = 41;
