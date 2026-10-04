@@ -48,15 +48,17 @@ describe('Letter IRL home on the MCP wire', () => {
 
   it('accepts {}, dispatches the real registry, exposes the entrypoint and serves its HTML', async () => {
     vi.stubEnv('LETTER_IRL_HOME_ENABLED', 'true');
+    vi.stubEnv('LETTER_IRL_CHATGPT_PLUGIN_ID', 'letter-irl-dev');
     const client = await connect();
     const tool = (await client.listTools()).tools.find(tool => tool.name === 'open_letter_home')!;
     expect(tool.title).toBe('Letter IRL');
     expect(tool.inputSchema.properties).toEqual({});
+    expect(tool.outputSchema?.properties?.appUrl).toMatchObject({ type: 'string' });
     expect(tool._meta).toMatchObject({ 'openai/ui': { entrypoints: [{ type: 'global' }] } });
     expect(tool.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false, openWorldHint: false });
     const result = await client.callTool({ name: 'open_letter_home', arguments: {} });
     expect(result.isError).toBeFalsy();
-    expect(result.structuredContent).toEqual({ drafts: [], orders: [], recipients: [], limit: 20 });
+    expect(result.structuredContent).toEqual({ drafts: [], orders: [], recipients: [], limit: 20, appUrl: 'https://chatgpt.com/plugins/letter-irl-dev/app/open_letter_home' });
     expect(vi.mocked(query).mock.calls.at(-1)?.[1]).toEqual(['auth0|owner', 20]);
     const uri = (tool._meta?.ui as { resourceUri: string }).resourceUri;
     const resource = await client.readResource({ uri });

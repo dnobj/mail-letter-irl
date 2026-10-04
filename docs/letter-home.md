@@ -16,19 +16,19 @@ Scheduled prepaid and gift mail offer Cancel while arrive-by is enabled. A secon
 
 Selecting a draft or order sends only its ID, recipient summary, status and dates through `ui/update-model-context`, replacing prior selection context. Clear selection replaces it with empty content. Calls are serialized so an older selection cannot arrive after a newer one. Unsupported or refused context is reported visibly. The letter card offers explicit draft selection while the home flag and host capability are enabled; it tells the model to recheck draft status before editing.
 
+Deep links accept only `/draft/<id>`, `/order/<id>` or `/`. Selection must exist in the current owner-scoped, bounded result; arbitrary routes never trigger a fetch. A missing or old selection asks for Refresh. Optional `LETTER_IRL_CHATGPT_PLUGIN_ID` enables share URLs for that installed plugin; leave it unset until the actual development plugin ID is known. No ID is invented. Links have the documented ChatGPT HTTPS format and an encoded `path` query.
+
 ## Configuration and compatibility
 
 `LETTER_IRL_HOME_ENABLED` is off unless explicitly enabled. While off, the tool is absent from `tools/list` and /manifest.json, its resource is unlisted and unreadable, and cached calls refuse without reading home data. Manifest generation disables it for the checked-in production snapshot. No migration or dependency is added.
 
-While enabled, LetterHomeCard.html@v68 is an MCP App resource. The tool declares _meta.ui.resourceUri and _meta["openai/ui"].entrypoints: [{type: "global"}]. Other clients can call it as a read-only tool. The host uses its default navigation icon: SDK 1.29's high-level `registerTool` does not emit top-level `icons`. This change does not modify SDK internals.
+While enabled, LetterHomeCard.html@v69 is an MCP App resource. The tool declares _meta.ui.resourceUri and _meta["openai/ui"].entrypoints: [{type: "global"}]. Other clients can call it as a read-only tool. The host uses its default navigation icon: SDK 1.29's high-level `registerTool` does not emit top-level `icons`. This change does not modify SDK internals.
 
 Source: [official Plugin Extensions documentation](https://developers.openai.com/plugins/build/extensions). Declaring an entrypoint does not establish that it appears in the owner's development connection. HOME-01 requires the owner's eyes before that is reported as working.
 
 The published privacy policy covers recipient names, addresses and connected AI interfaces. This slice adds no collection, street-address disclosure or retention schedule. Review this scope against the website's published policy before enabling it live. This PR neither changes policy wording nor enables the flag anywhere.
 
 ## Remaining slices
-
-- Deep links, isolated into a separate PR after three navigation review findings.
 
 - Rich-form pickers with capability detection and fallback. OpenAI-registered servers require multi-round-trip requests (`MRTR`); preserve existing tools until supported.
 - Conversation panel after home/context host acceptance, as the plan requires.

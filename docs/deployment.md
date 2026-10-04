@@ -936,3 +936,7 @@ that never sends it cannot hold a large upload until it times out.
 
 `LETTER_IRL_HOME_ENABLED` adds the read-only `open_letter_home` tool and its global Plugin Extensions entrypoint. Default off. Reconnect/refresh the development connector after enabling it, and complete HOME-01 before live enablement. No migration is needed; this read expects the existing schema through migration 053. Turning it off refuses cached tool calls and widget reads. See [Letter IRL home](letter-home.md).
 
+
+### Optional home share links
+
+`LETTER_IRL_CHATGPT_PLUGIN_ID` is the actual installed plugin's non-secret ID, not a connector name. While the home flag is on, a configured safe ID adds ChatGPT share links for the selected draft/order. Leave it unset for developer connections without a plugin ID; the home and selection remain usable. No fabricated default or production change. HOME-03 checks navigation in the owner's ChatGPT host.
