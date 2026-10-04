@@ -17,7 +17,7 @@ import { isPostcardSizesOffered } from '../config/postcardSizes.js';
 import { isPostcardLayoutsOffered } from '../config/postcardLayouts.js';
 import { postcardFrontOf } from '../render/index.js';
 import type { SendEligibility } from '../services/commerceService.js';
-import type { CertifiedMailService, PostcardSize } from '../services/types.js';
+import type { PostcardSize } from '../services/types.js';
 
 /**
  * What became of a preview's draft (#474), for a preview card whose host keeps
