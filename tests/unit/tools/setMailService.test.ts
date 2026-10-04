@@ -189,6 +189,7 @@ describe('set_mail_service (#625)', () => {
         code: 'MAIL_SERVICE_INVALID',
         message: 'Name the service: standard, certified, certified_return_receipt.'
       });
+      expect(getDraftForMailService).not.toHaveBeenCalled();
       expect(setDraftMailService).not.toHaveBeenCalled();
     }
   );
@@ -279,6 +280,14 @@ describe('a postcard, a draft sent meanwhile and text that is not a service (#62
   ])('refuses a draft that is %s by the time the change has been made, rather than saying nothing was sent', async (status, code) => {
     vi.mocked(getDraftForMailService).mockResolvedValueOnce(draft()).mockResolvedValueOnce(draft({ status }));
     await expect(set({ draftId: DRAFT_ID, mailService: 'certified' })).rejects.toMatchObject({ code });
+  });
+
+  it('says a draft sent just after the change went with the service it holds, not that the change was refused', async () => {
+    vi.mocked(getDraftForMailService).mockResolvedValueOnce(draft()).mockResolvedValueOnce(draft({ status: 'consumed', mail_service: 'standard' }));
+    const error = await set({ draftId: DRAFT_ID, mailService: 'standard' }).catch(caught => caught);
+    expect(error).toMatchObject({ code: 'DRAFT_ALREADY_SENT' });
+    expect(error.message).toBe('This letter was sent just after the change was made, so it went with the service it holds now. list_orders shows it.');
+    expect(error.message).not.toMatch(/can.t change/);
   });
 
   it('says nothing of a stored service it does not know, rather than calling it ordinary mail', async () => {
