@@ -197,3 +197,8 @@ owned by the hourly maintenance job, so there is nothing a short poll could
 observe. A **Check status** button covers the rest, and webhook delay shows as
 processing rather than failure. Stripe Checkout is reached as a redirect
 target; the full widget policy is under [Content Security Policy](#content-security-policy).
+
+## LetterHomeCard (conditional)
+
+A seventh widget while LETTER_IRL_HOME_ENABLED is on: active drafts, recent mail and recent recipients, with explicit Refresh and website draft-review links. No send or cancel controls. The open_letter_home tool declares a ChatGPT global entrypoint; other clients can use the same read-only data. See [Letter IRL home](letter-home.md) and HOME-01 for host acceptance and privacy scope.
+

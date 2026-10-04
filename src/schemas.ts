@@ -1617,3 +1617,188 @@ export const getProfileOutputSchema: JsonSchema = {
     email: { type: "string", description: "The confirmed email address the account is opened on" }
   }
 };
+
+export const openLetterHomeInputSchema: JsonSchema = { type: "object", properties: {}, additionalProperties: false };
+export const openLetterHomeOutputSchema: JsonSchema = {
+  "type": "object",
+  "properties": {
+    "drafts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "recipient": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "city": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "city",
+              "state"
+            ],
+            "additionalProperties": false
+          },
+          "mailType": {
+            "type": "string",
+            "enum": [
+              "letter",
+              "postcard"
+            ]
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "isGiftSend": {
+            "type": "boolean"
+          },
+          "arriveBy": {
+            "type": "string"
+          },
+          "mailOn": {
+            "type": "string"
+          },
+          "draftId": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string"
+          },
+          "confirmationUrl": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "recipient",
+          "mailType",
+          "createdAt",
+          "isGiftSend",
+          "draftId",
+          "expiresAt",
+          "confirmationUrl"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "orders": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "recipient": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "city": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "city",
+              "state"
+            ],
+            "additionalProperties": false
+          },
+          "mailType": {
+            "type": "string",
+            "enum": [
+              "letter",
+              "postcard"
+            ]
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "isGiftSend": {
+            "type": "boolean"
+          },
+          "arriveBy": {
+            "type": "string"
+          },
+          "mailOn": {
+            "type": "string"
+          },
+          "orderId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "mailService": {
+            "type": "string",
+            "enum": [
+              "certified",
+              "certified_return_receipt"
+            ]
+          },
+          "carrierTrackingNumber": {
+            "type": "string"
+          },
+          "carrierTrackingUrl": {
+            "type": "string"
+          },
+          "certifiedNote": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "recipient",
+          "mailType",
+          "createdAt",
+          "isGiftSend",
+          "orderId",
+          "status"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "recipients": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "city",
+          "state"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1
+    }
+  },
+  "required": [
+    "drafts",
+    "orders",
+    "recipients",
+    "limit"
+  ],
+  "additionalProperties": false
+};

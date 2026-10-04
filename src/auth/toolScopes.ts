@@ -20,6 +20,7 @@ export const TOOL_SCOPES: Record<string, ProductScope> = {
   get_purchase_status: "mail:read",
   get_order_status: "mail:read",
   list_orders: "mail:read",
+  open_letter_home: "mail:read",
   get_return_address: "mail:read",
   quote_and_preview_letter: "mail:draft",
   quote_and_preview_letter_with_header_image: "mail:draft",
