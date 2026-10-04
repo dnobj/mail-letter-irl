@@ -146,14 +146,13 @@ async function handler(
   const ready: GetDraftStatusOutput = schedule
     ? { draftId, status: 'ready', schedule, deliveryEstimate: scheduleSentence(schedule, context.now()) }
     : { draftId, status: 'ready', deliveryEstimate: DELIVERY_ESTIMATE };
-  const terms = termsNow(draft, draftId, context);
   return {
     ...ready,
     ...styleNow(draft),
     ...signatureNow(draft),
     ...pagesNow(draft),
-    ...terms,
-    ...serviceNow(draft, 'canSendNow' in terms),
+    ...termsNow(draft, draftId, context),
+    ...serviceNow(draft),
     ...wordsNow(draft),
     ...postcardStyleNow(draft, draftId, context)
   };
@@ -207,15 +206,14 @@ function termsNow(
 
 /**
  * A ready letter's certified service now (#625), for a card shown its preview's
- * first answer again: set_mail_service may have changed it since. With the terms
- * the service and the words that say how it is delivered come in them (see
- * travelFields), so a card takes them together. Without the terms (a letter our
- * renderer did not draw) a certified letter is still named; an ordinary letter
- * has none to name.
+ * first answer again: set_mail_service may have changed it since. A certified
+ * letter is named, with or without terms: the terms say how it travels as well
+ * (see travelFields), and a letter our renderer did not draw has none but is
+ * still named. An ordinary letter has no service to name.
  */
-function serviceNow(draft: DraftState, termsGiven: boolean): Pick<GetDraftStatusOutput, 'mailService'> {
+function serviceNow(draft: DraftState): Pick<GetDraftStatusOutput, 'mailService'> {
   const service = mailServiceOf(draft.mail_service);
-  return !termsGiven && draft.mail_type === 'letter' && isExtraService(service) ? { mailService: service } : {};
+  return draft.mail_type === 'letter' && isExtraService(service) ? { mailService: service } : {};
 }
 
 /**

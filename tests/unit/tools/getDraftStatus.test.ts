@@ -203,6 +203,10 @@ describe("get_draft_status (#474)", () => {
       expect(legacy).toMatchObject({ mailService: "certified" });
       expect(legacy).not.toHaveProperty("deliveryClass");
 
+      // Text that is not a service is not named, with terms or without.
+      vi.mocked(getDraftState).mockResolvedValue({ ...letter, mail_service: "express", renderer_version: null } as any);
+      expect(await ask({ draftId: DRAFT_ID }, rich)).not.toHaveProperty("mailService");
+
       // Text that is not a service is never named, and a postcard never has one.
       vi.mocked(getDraftState).mockResolvedValue({ ...letter, mail_service: "express" } as any);
       const unknown = await ask({ draftId: DRAFT_ID }, rich);
