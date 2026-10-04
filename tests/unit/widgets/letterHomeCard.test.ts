@@ -170,3 +170,31 @@ describe('home extension recovery regressions', () => {
     dom.window.close();
   });
 });
+
+it('recovers from a lost cancellation reply, ignores late success and requires Refresh before another cancellation', async () => {
+  const output = { drafts: [], orders: [order('scheduled', { cancellable: true })], recipients: [], limit: 20 };
+  const { dom, host, doc } = open(output);
+  const expire: (() => void)[] = [];
+  dom.window.setTimeout = ((callback: () => void, ms: number) => { expect(ms).toBe(15000); expire.push(callback); return expire.length; }) as any;
+  dom.window.clearTimeout = vi.fn();
+  const click = (label: string) => (Array.from(doc.querySelectorAll('button')).find(button => button.textContent === label) as HTMLButtonElement).click();
+  let lateReply!: (value: unknown) => void;
+  host.callTool.mockReturnValueOnce(new Promise(resolve => { lateReply = resolve; }));
+  click('Cancel scheduled mail'); click('Confirm cancellation');
+  expect((doc.getElementById('refresh') as HTMLButtonElement).disabled).toBe(true);
+  expect(expire).toHaveLength(1);
+  expire[0](); await new Promise(resolve => setTimeout(resolve, 0));
+  expect(doc.getElementById('notice')?.textContent).toContain('not confirmed');
+  expect((doc.getElementById('refresh') as HTMLButtonElement).disabled).toBe(false);
+  click('Confirm cancellation');
+  expect(host.callTool).toHaveBeenCalledTimes(1);
+  lateReply({ structuredContent: { orderId: 'order-1', status: 'cancelled', message: 'Late refund success' } });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(doc.getElementById('notice')?.textContent).not.toContain('Late refund');
+  expect(doc.getElementById('orders')?.textContent).not.toContain('Cancelled; not mailed');
+  host.callTool.mockResolvedValueOnce({ structuredContent: { drafts: [], orders: [order('cancelled')], recipients: [], limit: 20 } });
+  click('Refresh'); await new Promise(resolve => setTimeout(resolve, 0));
+  expect(doc.getElementById('orders')?.textContent).toContain('Cancelled; not mailed');
+  expect(doc.getElementById('orders')?.textContent).not.toContain('Cancel scheduled mail');
+  dom.window.close();
+});

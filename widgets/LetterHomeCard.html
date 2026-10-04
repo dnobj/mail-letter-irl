@@ -41,6 +41,7 @@
       var notice = document.getElementById('notice');
       var refresh = document.getElementById('refresh');
       var busy = false;
+      var cancellationUnconfirmed = false;
       var lastOutput;
       var currentData;
       var selected;
@@ -54,6 +55,12 @@
         return node;
       }
       function line(container, text, className) { container.appendChild(el('p', text, className)); }
+      function withDeadline(promise) {
+        return new Promise(function (resolve, reject) {
+          var timer = setTimeout(function () { reject(new Error('No reply')); }, 15000);
+          Promise.resolve(promise).then(function (value) { clearTimeout(timer); resolve(value); }, function (error) { clearTimeout(timer); reject(error); });
+        });
+      }
       function action(container, title, run) {
         var button = el('button', title); button.type = 'button';
         button.addEventListener('click', run); container.appendChild(button); return button;
@@ -88,6 +95,7 @@
       }
       async function cancelOrder(order, card) {
         if (busy || typeof host.callTool !== 'function') return;
+        if (cancellationUnconfirmed) { notice.textContent = 'Cancellation was not confirmed. Refresh to check the order before trying again.'; return; }
         var existing = card.querySelector('.cancel-confirm');
         if (existing) return;
         var confirm = el('div', '', 'cancel-confirm');
@@ -96,16 +104,18 @@
         var yes = action(confirm, 'Confirm cancellation', async function () {
           if (busy) return;
           busy = true; yes.disabled = true; refresh.disabled = true;
+          cancellationUnconfirmed = true;
           try {
-            var answer = await host.callTool('cancel_scheduled_mail', { orderId: order.orderId, confirm: true });
+            var answer = await withDeadline(host.callTool('cancel_scheduled_mail', { orderId: order.orderId, confirm: true }));
             if (!answer || answer.isError) throw new Error('refused');
             var result = answer.structuredContent || answer;
             if (result.status !== 'cancelled' || result.orderId !== order.orderId) throw new Error('missing result');
+            cancellationUnconfirmed = false;
             order.status = 'cancelled'; order.cancellable = false;
             render(currentData);
             notice.textContent = result.message || 'Cancelled; not mailed. Refresh for the current account balance.';
           } catch (_) { notice.textContent = 'Cancellation was not confirmed. Refresh to check the order before trying again.'; }
-          finally { busy = false; sync(); if (yes.isConnected) yes.disabled = false; }
+          finally { busy = false; sync(); if (yes.isConnected) yes.disabled = cancellationUnconfirmed; }
         });
         card.appendChild(confirm);
       }
@@ -184,9 +194,10 @@
         if (busy || typeof host.callTool !== 'function') return;
         busy = true; refresh.disabled = true; notice.textContent = 'Refreshing your mail...';
         try {
-          var result = await host.callTool('open_letter_home', {});
+          var result = await withDeadline(host.callTool('open_letter_home', {}));
           if (result && result.isError) throw new Error('refused');
           if (!render(result && (result.structuredContent || result))) throw new Error('missing result');
+          cancellationUnconfirmed = false;
         } catch (_) {
           notice.textContent = document.getElementById('home').hidden ? 'Unable to load your mail. Please try Refresh again.' : 'Refresh failed. The mail shown may be out of date; please try again.';
         } finally { busy = false; sync(); }
