@@ -14,6 +14,7 @@ export { getOrderStatusTool } from "./getOrderStatus.js";
 export { getAccountBalanceTool } from "./getAccountBalance.js";
 export { getProfileTool } from "./getProfile.js";
 export { listOrdersTool } from "./listOrders.js";
+export { openLetterHomeTool } from "./openLetterHome.js";
 export { setReturnAddressTool } from "./setReturnAddress.js";
 export { getReturnAddressTool } from "./getReturnAddress.js";
 export { clearReturnAddressTool } from "./clearReturnAddress.js";

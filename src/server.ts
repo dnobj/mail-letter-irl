@@ -1,4 +1,6 @@
 import "dotenv/config";
+import { openLetterHomeTool } from './tools/openLetterHome.js';
+import { isLetterHomeEnabled } from './config/letterHome.js';
 import { randomUUID } from "node:crypto";
 import { assertBetaAccess } from "./auth/betaAccess.js";
 import { FileAccountStore } from "./store/fileAccountStore.js";
@@ -97,6 +99,7 @@ import { createLogger } from "./logging/index.js";
 import { carriedDiagnosticClass, classifyDiagnosticError } from "./utils/diagnosticLog.js";
 
 const tools: McpToolDefinition<any, any>[] = [
+  openLetterHomeTool,
   // An early observation was that ChatGPT exposed only the first 12
   // registered actions. It ingests the whole list now - the #160 learning
   // shows the 18th tool on the connector page with its security schemes, and
@@ -403,6 +406,7 @@ export class LetterIrlServer {
     const addressRequests = isAddressRequestsEnabled();
     const signatures = isSignaturesOffered();
     return tools
+      .filter((tool) => isLetterHomeEnabled() || tool.name !== 'open_letter_home')
       .filter((tool) => sendRule || tool.name !== REQUEST_SEND_TOOL)
       .filter((tool) => cardUpload || tool.name !== UPLOAD_PHOTO_CHUNK_TOOL)
       .filter((tool) => arriveBy || (tool.name !== SET_ARRIVAL_DATE_TOOL && tool.name !== CANCEL_SCHEDULED_MAIL_TOOL))

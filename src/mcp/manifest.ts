@@ -1,5 +1,5 @@
 import { LetterIrlServer } from "../server.js";
-import { servesPostcardSixByNineOnly, WIDGET_DEFINITIONS, withheldInputKeys } from "./registerTools.js";
+import { servesPostcardSixByNineOnly, listedWidgets, withheldInputKeys } from "./registerTools.js";
 import { postcardSixByNineProperties } from "../schemas.js";
 import { DEFAULT_OAUTH_SCOPES } from "../auth/oauthConfig.js";
 import { buildServerInstructions } from "./serverInstructions.js";
@@ -72,7 +72,7 @@ export function buildManifest(publicBaseUrl?: string) {
     legalInfoUrl: "https://letterirl.com/terms",
     tools,
     ui: {
-      widgets: WIDGET_DEFINITIONS.map((widget) => widget.name)
+      widgets: listedWidgets().map((widget) => widget.name)
     },
     servers: [
       {

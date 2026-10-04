@@ -186,4 +186,5 @@
  *     certified or certified mail is offered. The output schemas declare the
  *     fields whatever the flag says.
  */
-export const STEERING_COPY_REV = 41;
+// r42: flag-gated, read-only Letter IRL home entrypoint.
+export const STEERING_COPY_REV = 42;

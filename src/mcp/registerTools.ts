@@ -1,5 +1,7 @@
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ToolAnnotations, McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
+import { isLetterHomeEnabled } from "../config/letterHome.js";
+import { openLetterHomeInputZ, openLetterHomeOutputZ } from "../zodSchemas.js";
 import { z } from "zod";
 import * as fs from "fs/promises";
 import * as path from "path";
@@ -169,6 +171,7 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     'get_account_balance',
     'get_profile',
     'list_orders',
+    'open_letter_home',
     'get_order_status',
     'get_purchase_status',
     'get_return_address',
@@ -604,8 +607,14 @@ export function buildWidgetResourceMeta(
  * they publish, for resolving a client-supplied template variable. Covers the
  * cards and their preview-tool variants (#411).
  */
+export const LETTER_HOME_WIDGET = { name: "LetterHomeCard", description: "Your active drafts, recent mail, and recent recipients" };
+
+export function listedWidgets() {
+  return isLetterHomeEnabled() ? [...WIDGET_DEFINITIONS, LETTER_HOME_WIDGET] : WIDGET_DEFINITIONS;
+}
+
 const WIDGET_BY_NAME = new Map<string, { file: string; description: string }>([
-  ...WIDGET_DEFINITIONS.map(
+  ...[...WIDGET_DEFINITIONS, LETTER_HOME_WIDGET].map(
     (widget) => [widget.name, { file: widget.name, description: widget.description }] as const
   ),
   ...WIDGET_VARIANTS.map(
@@ -649,7 +658,7 @@ async function readWidgetResource(
 ) {
   const widget = WIDGET_BY_NAME.get(name);
 
-  if (!widget) {
+  if (!widget || (name === LETTER_HOME_WIDGET.name && !isLetterHomeEnabled())) {
     console.warn(`🎨 Widget resource requested but not served: ${uri}`);
     return null;
   }
@@ -688,7 +697,7 @@ export async function registerWidgetResources(
   mcpServer: McpServer,
   client: ClientProfile = clientProfileNamed("chatgpt")
 ) {
-  for (const widget of WIDGET_DEFINITIONS) {
+  for (const widget of listedWidgets()) {
     const filePath = path.join(DEFAULT_WIDGET_DIR, `${widget.name}.html`);
 
     // Check if widget file exists before registering
@@ -850,6 +859,7 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   get_account_balance: getAccountBalanceInputZ,
   get_profile: getProfileInputZ,
   list_orders: listOrdersInputZ,
+  open_letter_home: openLetterHomeInputZ,
   set_return_address: setReturnAddressInputZ,
   get_return_address: getReturnAddressInputZ,
   clear_return_address: clearReturnAddressInputZ,
@@ -898,6 +908,7 @@ const zodOutputSchemas: Record<ToolName, z.ZodObject<any>> = {
   get_account_balance: getAccountBalanceOutputZ,
   get_profile: getProfileOutputZ,
   list_orders: listOrdersOutputZ,
+  open_letter_home: openLetterHomeOutputZ,
   set_return_address: setReturnAddressOutputZ,
   get_return_address: getReturnAddressOutputZ,
   clear_return_address: clearReturnAddressOutputZ,
@@ -1806,6 +1817,8 @@ export function summarizeToolResult(
       // Certified mail (#625): its tracking number, or that there is none yet, in the words the output carries.
       return typeof result.certifiedNote === "string" ? `${summary} ${result.certifiedNote}` : summary;
     }
+    case "open_letter_home":
+      return `Letter IRL home: ${(result.drafts as unknown[]).length} active drafts and ${(result.orders as unknown[]).length} recent mail items (up to ${result.limit} each).`;
     case "list_orders": {
       const orders = result.orders as any[];
       const total = result.total ?? 0;

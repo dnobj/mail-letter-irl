@@ -3242,3 +3242,19 @@ linked PR before enabling Pay & Send.
 - [ ] Restore `JIT_PURCHASE_ENABLED=false` in Railway development.
 - [ ] Confirm production configuration, Stripe live mode, production Neon, and production mail-provider state were never changed.
 - [ ] Attach the collected browser, Stripe, provider, and database evidence to the draft PR and record any deviations as linked issues.
+
+## HOME-01: read-only Letter IRL home
+
+Status: Not run on the host. Automated MCP wire, query and DOM coverage accompany #639.
+
+1. Deploy the feature to development and explicitly enable `LETTER_IRL_HOME_ENABLED` there. Keep production off. Refresh/reconnect the existing ChatGPT development connection.
+2. Owner: look for Letter IRL in ChatGPT's sidebar and open it. Record the app version, platform and whether the entry appears. If absent, record the limitation and try invoking `open_letter_home` in a development conversation. Do not claim sidebar acceptance.
+3. Verify the initial result renders without another call. Check empty state on an account with no mail and the maximum of 20 per list.
+4. With two development test accounts, confirm each sees only its own active drafts and retained mail. Expired, consumed and redacted drafts are absent, as is redacted mail. No full addresses, content, images, signatures, purchases or prices appear.
+5. Check scheduled dates, gift markers, failed/cancelled/returned status and **Delivery estimated**. Certified mail carries its status-specific note and a USPS link only for a valid number.
+6. Open a draft review link. It must use the development website, require that account's sign-in and show the existing confirmation page. Do not press Send for this check.
+7. Refresh once. Check success, a failure's stale-data warning and recovery. Check narrow width, dark mode, keyboard focus and screen-reader feedback.
+8. Disable the flag and reconnect. The tool/resource disappear; cached calls refuse. Record results and the privacy scope review before live enablement.
+
+External boundaries: this slice reads stored data only. No webhook, vendor dispatch, payment, refund or entitlement mutation. Draft links reuse the existing website.
+

@@ -41,6 +41,7 @@ const imageFileParamSchema = z.preprocess(
 );
 
 export const toolInputSchemas = {
+  open_letter_home: z.object({}).strict(),
   // Letter tools - three separate tools for different layouts
   quote_and_preview_letter: z.object({
     sender: addressSchema.optional(),  // Optional - will use saved return address if not provided

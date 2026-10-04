@@ -316,6 +316,29 @@ export const getAccountBalanceInputZ = z.object({});
 // The profile ChatGPT records for a connected account (#424): an id that is
 // stable across refresh, reconnect and scope upgrades, and the address.
 export const getProfileInputZ = z.object({});
+export const openLetterHomeInputZ = z.object({}).strict();
+const homeRecipientZ = z.object({ name: z.string(), city: z.string(), state: z.string() });
+const homeItemZ = {
+  recipient: homeRecipientZ,
+  mailType: z.enum(['letter', 'postcard']),
+  createdAt: z.string(),
+  isGiftSend: z.boolean(),
+  arriveBy: z.string().optional(),
+  mailOn: z.string().optional()
+};
+export const openLetterHomeOutputZ = z.object({
+  drafts: z.array(z.object({
+    ...homeItemZ, draftId: z.string(), expiresAt: z.string(), confirmationUrl: z.string()
+  })),
+  orders: z.array(z.object({
+    ...homeItemZ, orderId: z.string(), status: z.string(),
+    mailService: z.enum(['certified', 'certified_return_receipt']).optional(),
+    carrierTrackingNumber: z.string().optional(), carrierTrackingUrl: z.string().optional(),
+    certifiedNote: z.string().optional()
+  })),
+  recipients: z.array(homeRecipientZ),
+  limit: z.number().int().positive()
+});
 export const getProfileOutputZ = z.object({
   // Served in tools/list, so this is the copy ChatGPT reads. "Be a non-empty,
   // non-whitespace string" - the regex mirrors the pattern in OpenAI's own

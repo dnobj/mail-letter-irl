@@ -27,6 +27,7 @@ process.env.LETTER_IRL_POSTCARD_COLLAGES_ENABLED = "false";
 process.env.LETTER_IRL_ADDRESS_REQUESTS_ENABLED = "false";
 // And signatures (#608).
 process.env.LETTER_IRL_SIGNATURES_ENABLED = "false";
+process.env.LETTER_IRL_HOME_ENABLED = "false";
 // And certified mail (#625).
 process.env.LETTER_IRL_CERTIFIED_MAIL_ENABLED = "false";
 

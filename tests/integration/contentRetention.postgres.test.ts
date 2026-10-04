@@ -147,6 +147,43 @@ describePostgres('content retention sweep', () => {
     return orderId;
   }
 
+  it('home reads only the owner active drafts and retained mail, without content or street addresses', async () => {
+    const { readLetterHome } = await import('../../src/services/letterHomeService.js');
+    const owner = await seedUser();
+    const other = await seedUser();
+    const draft = await seedDraft(owner);
+    await pool.query(`UPDATE letter_drafts SET status = 'pending', expires_at = NOW() + INTERVAL '1 day',
+      recipient = $2::jsonb WHERE draft_id = $1`, [draft, JSON.stringify({ name: 'Ruth', city: 'Chicago', state: 'IL', addressLine1: SECRET_STREET })]);
+    await seedDraft(owner); // expired and consumed
+    const redactedDraft = await seedDraft(owner);
+    await pool.query(`UPDATE letter_drafts SET status = 'pending', expires_at = NOW() + INTERVAL '1 day', redacted_at = NOW() WHERE draft_id = $1`, [redactedDraft]);
+    const { letterId } = await seedSentLetter({ userId: owner, daysAgo: 0 });
+    const hidden = await seedSentLetter({ userId: owner, daysAgo: 0 });
+    await pool.query('UPDATE letters SET redacted_at = NOW() WHERE letter_id = $1', [hidden.letterId]);
+    await seedSentLetter({ userId: other, daysAgo: 0 });
+    const home = await readLetterHome(owner);
+    expect(home.drafts.map(item => item.draftId)).toEqual([draft]);
+    expect(home.orders.map(item => item.orderId)).toEqual([letterId]);
+    expect(home.drafts[0].recipient).toEqual({ name: 'Ruth', city: 'Chicago', state: 'IL' });
+    expect(JSON.stringify(home)).not.toContain(SECRET_BODY);
+    expect(JSON.stringify(home)).not.toContain(SECRET_STREET);
+    expect(await readLetterHome('absent-account')).toEqual({ drafts: [], orders: [], recipients: [], limit: 20 });
+  });
+
+  it('home limits recent mail and active drafts independently to twenty', async () => {
+    const { readLetterHome } = await import('../../src/services/letterHomeService.js');
+    const owner = await seedUser();
+    for (let index = 0; index < 21; index++) {
+      await seedSentLetter({ userId: owner, daysAgo: 0 });
+      const draft = await seedDraft(owner);
+      await pool.query(`UPDATE letter_drafts SET status = 'pending', expires_at = NOW() + INTERVAL '1 day' WHERE draft_id = $1`, [draft]);
+    }
+    const home = await readLetterHome(owner);
+    expect(home.orders).toHaveLength(20);
+    expect(home.drafts).toHaveLength(20);
+    expect(home.recipients).toHaveLength(1);
+  });
+
   /**
    * A PREPAID letter and the pack order that funded it, linked only through
    * the ledger - which is the only link that exists for prepaid mail, because

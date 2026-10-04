@@ -34,6 +34,7 @@ import {
   previewToolFor,
   stampPreviewTool,
   WIDGET_DEFINITIONS,
+  LETTER_HOME_WIDGET,
   WIDGET_MIME_TYPE,
   WIDGET_VARIANTS,
   registerWidgetResources
@@ -131,7 +132,7 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       // stale widgets to native mobile caches - always bump both.
       const widgetDir = path.resolve(__dirname, '../../../widgets');
       const parts: string[] = [];
-      for (const { name } of [...WIDGET_DEFINITIONS].sort((a, b) => a.name.localeCompare(b.name))) {
+      for (const { name } of [...WIDGET_DEFINITIONS, LETTER_HOME_WIDGET].sort((a, b) => a.name.localeCompare(b.name))) {
         // Normalize line endings: with core.autocrlf a Windows checkout
         // materializes CRLF and the pin must not depend on that.
         const content = (await fs.readFile(path.join(widgetDir, `${name}.html`), 'utf-8')).replace(/\r\n/g, '\n');
@@ -158,8 +159,8 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       parts.push(`shared/studio.js:${createHash('sha256').update(studio).digest('hex')}`);
       const digest = createHash('sha256').update(parts.join('\n')).digest('hex').slice(0, 12);
       expect({ version: WIDGET_TEMPLATE_VERSION, digest }).toEqual({
-        version: 66,
-        digest: 'c9a1c5a86a0a'
+        version: 67,
+        digest: '8297d2eb81cb'
       });
     });
   });
