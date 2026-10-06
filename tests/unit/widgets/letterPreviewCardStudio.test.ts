@@ -1747,6 +1747,17 @@ describe('the Mail choice on the Delivery tab (#648)', () => {
     expect(text(card, 'studio-summary')).toContain('3 pages, both sides');
     // The one-page room is for words the chat has changed since: it is not said of a three-page letter.
     expect(text(card, 'studio-fit')).not.toContain('room for about 1,940');
+
+    // Nor counted in the Words editor, which is where the fit is read.
+    const open = mount();
+    await open.show(ordinary(), { ...OFFERED, pageFit: { pages: 1, sheets: 1, roomLines: 20, roomCharacters: 1940, charactersPerLine: 97 } });
+    await open.click(open.tab('words'));
+    await open.click(open.byId('studio-words-open'));
+    expect(text(open, 'studio-words-count')).toBe('About 1,940 characters left on this page.');
+    await open.click(choice(open, 'certified'));
+    await open.answer(changed({ ...CERTIFIED_TERMS, pages: 2 }), SET);
+    expect(text(open, 'studio-summary')).toContain('2 pages, both sides');
+    expect(text(open, 'studio-words-count')).not.toContain('1,940');
   });
 
   it('takes no status after a change made here: the change is the later word', async () => {
