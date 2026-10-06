@@ -23,10 +23,14 @@ export async function rememberedStationery(userId: string): Promise<StationeryTh
 }
 
 /**
- * Remembers a theme the account chose, Classic included. Never on an erased
- * account: erasure clears the theme, and a remember that waited on the
- * erasure's row lock re-reads the row after it and finds it erased.
+ * Remembers a theme the account chose, Classic included, and forgets any
+ * design it remembered (#649): the last choice is the one remembered. Never on
+ * an erased account: erasure clears the theme, and a remember that waited on
+ * the erasure's row lock re-reads the row after it and finds it erased.
  */
 export async function rememberStationery(userId: string, theme: StationeryTheme): Promise<void> {
-  await query('UPDATE users SET stationery_theme = $2 WHERE user_id = $1 AND erased_at IS NULL', [userId, theme]);
+  await query(
+    'UPDATE users SET stationery_theme = $2, stationery_design_id = NULL WHERE user_id = $1 AND erased_at IS NULL',
+    [userId, theme]
+  );
 }
