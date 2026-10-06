@@ -38,7 +38,7 @@ const row = (name = 'Garden', design: Record<string, unknown> = DESIGN) => ({
 const SAVED = { designId: ID, name: 'Garden', design: DESIGN, createdAt: AT.toISOString(), updatedAt: AT.toISOString() };
 
 /** A transaction whose client answers each statement in turn, recording them. */
-function inTransaction(...answers: Array<{ rows: unknown[] }>) {
+function inTransaction(...answers: Array<{ rows: unknown[]; rowCount?: number }>) {
   const statements: Array<[string, unknown[]]> = [];
   const client = {
     query: vi.fn(async (sql: string, params: unknown[]) => {
@@ -122,29 +122,43 @@ describe('reading designs (#649)', () => {
 });
 
 describe('deleting and remembering (#649)', () => {
-  it("deletes only the account's own design, and says whether there was one", async () => {
-    vi.mocked(query).mockResolvedValueOnce({ rows: [], rowCount: 1 } as never).mockResolvedValueOnce({ rows: [], rowCount: 0 } as never);
-    expect(await deleteDesign('user-1', ID)).toBe(true);
-    expect(await deleteDesign('user-1', ID)).toBe(false);
-    expect(vi.mocked(query).mock.calls[0]).toEqual(['DELETE FROM stationery_designs WHERE user_id = $1 AND design_id = $2', ['user-1', ID]]);
+  const LOCK = 'SELECT erased_at FROM users WHERE user_id = $1 FOR UPDATE';
+
+  it("deletes only the account's own design, under the account's lock first, and says whether there was one", async () => {
+    for (const [deleted, said] of [[1, true], [0, false]] as const) {
+      const statements = inTransaction({ rows: [{ erased_at: null }] }, { rows: [], rowCount: deleted } as never);
+      expect(await deleteDesign('user-1', ID)).toBe(said);
+      expect(statements).toEqual([
+        [LOCK, ['user-1']],
+        ['DELETE FROM stationery_designs WHERE user_id = $1 AND design_id = $2', ['user-1', ID]]
+      ]);
+    }
   });
 
-  it("remembers one of the account's own designs on an account not erased, and says whether it did", async () => {
-    vi.mocked(query).mockResolvedValueOnce({ rows: [], rowCount: 1 } as never).mockResolvedValueOnce({ rows: [], rowCount: 0 } as never);
-    expect(await rememberDesign('user-1', ID)).toBe(true);
-    expect(await rememberDesign('user-1', ID)).toBe(false);
-    const [sql, params] = vi.mocked(query).mock.calls[0];
-    expect(sql).toContain('u.erased_at IS NULL AND d.user_id = u.user_id AND d.design_id = $2');
-    expect(params).toEqual(['user-1', ID]);
+  it("remembers one of the account's own designs under the account's lock, and says whether it did", async () => {
+    for (const [remembered, said] of [[1, true], [0, false]] as const) {
+      const statements = inTransaction({ rows: [{ erased_at: null }] }, { rows: [], rowCount: remembered } as never);
+      expect(await rememberDesign('user-1', ID)).toBe(said);
+      expect(statements[0]).toEqual([LOCK, ['user-1']]);
+      expect(statements[1][0]).toContain('WHERE u.user_id = $1 AND d.user_id = u.user_id AND d.design_id = $2');
+      expect(statements[1][1]).toEqual(['user-1', ID]);
+    }
   });
 
-  it('forgets the remembered design on asking for none, on an account not erased', async () => {
-    vi.mocked(query).mockResolvedValue({ rows: [], rowCount: 1 } as never);
+  it('remembers nothing, and says so, on an account that is erased or gone, a design or none', async () => {
+    for (const designId of [ID, null]) {
+      for (const account of [[{ erased_at: AT }], []]) {
+        const statements = inTransaction({ rows: account });
+        expect(await rememberDesign('user-1', designId), String(designId)).toBe(false);
+        expect(statements).toHaveLength(1);
+      }
+    }
+  });
+
+  it('forgets the remembered design on asking for none', async () => {
+    const statements = inTransaction({ rows: [{ erased_at: null }] }, { rows: [], rowCount: 1 } as never);
     expect(await rememberDesign('user-1', null)).toBe(true);
-    expect(vi.mocked(query).mock.calls[0]).toEqual([
-      'UPDATE users SET stationery_design_id = NULL WHERE user_id = $1 AND erased_at IS NULL',
-      ['user-1']
-    ]);
+    expect(statements[1]).toEqual(['UPDATE users SET stationery_design_id = NULL WHERE user_id = $1', ['user-1']]);
   });
 });
 
@@ -160,5 +174,6 @@ describe('an id that names no design (#649)', () => {
     expect(await deleteDesign('user-1', 'garden')).toBe(false);
     expect(await rememberDesign('user-1', 'garden')).toBe(false);
     expect(query).not.toHaveBeenCalled();
+    expect(transaction).not.toHaveBeenCalled();
   });
 });

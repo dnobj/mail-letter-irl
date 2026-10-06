@@ -13,6 +13,7 @@
  * the account is erased (accountErasureService deletes them).
  */
 
+import type { PoolClient } from 'pg';
 import { query, transaction } from '../db/index.js';
 import { designOf, type StationeryDesign } from '../render/stationery.js';
 
@@ -98,11 +99,8 @@ export type SaveDesignResult =
  */
 export async function saveDesign(userId: string, name: string, design: StationeryDesign): Promise<SaveDesignResult> {
   return transaction(async client => {
-    const account = await client.query<{ erased_at: Date | null }>(
-      'SELECT erased_at FROM users WHERE user_id = $1 FOR UPDATE',
-      [userId]
-    );
-    if (!account.rows[0] || account.rows[0].erased_at) return { ok: false, refusal: 'account_closed' } as const;
+    const account = await lockAccount(client, userId);
+    if (!account || account.erased_at) return { ok: false, refusal: 'account_closed' } as const;
     const replaced = await client.query<DesignRow>(
       `UPDATE stationery_designs
           SET name = $2, face = $3, ornament = $4, ruled = $5, tone = $6, updated_at = NOW()
@@ -126,11 +124,26 @@ export async function saveDesign(userId: string, name: string, design: Stationer
   });
 }
 
+/**
+ * Locks the account's row, as a save and an erasure do first: deleting a
+ * remembered design writes the account's row too (ON DELETE SET NULL), so
+ * every writer takes the account before a design, and none waits on another
+ * the other way round (#649 part 2 review round 1). The row as locked, or
+ * undefined when there is no account.
+ */
+async function lockAccount(client: PoolClient, userId: string): Promise<{ erased_at: Date | null } | undefined> {
+  const account = await client.query<{ erased_at: Date | null }>('SELECT erased_at FROM users WHERE user_id = $1 FOR UPDATE', [userId]);
+  return account.rows[0];
+}
+
 /** Deletes one of the account's designs; the account forgets it if it remembered it. True when there was one. */
 export async function deleteDesign(userId: string, designId: string): Promise<boolean> {
   if (!isDesignId(designId)) return false;
-  const result = await query('DELETE FROM stationery_designs WHERE user_id = $1 AND design_id = $2', [userId, designId]);
-  return (result.rowCount ?? 0) > 0;
+  return transaction(async client => {
+    await lockAccount(client, userId);
+    const result = await client.query('DELETE FROM stationery_designs WHERE user_id = $1 AND design_id = $2', [userId, designId]);
+    return (result.rowCount ?? 0) > 0;
+  });
 }
 
 /** The account's remembered design, or null for none (or one this build does not draw). */
@@ -148,21 +161,28 @@ export async function rememberedDesign(userId: string): Promise<SavedDesign | nu
 
 /**
  * Remembers one of the account's designs for its next previews, or none
- * (null), as when it chooses a theme. Never on an erased account, and never
- * another account's design: the update finds no such design and changes
- * nothing. True when the account now remembers what was asked.
+ * (null). A remembered design comes before the remembered theme, and
+ * remembering a theme forgets it (rememberStationery), so the last choice is
+ * the one remembered. Under the account's lock, so a design deleted meanwhile
+ * is simply not found. Never on an erased account or one that is gone, and
+ * never another account's design: nothing changes. True when the account now
+ * remembers what was asked.
  */
 export async function rememberDesign(userId: string, designId: string | null): Promise<boolean> {
-  if (designId === null) {
-    await query('UPDATE users SET stationery_design_id = NULL WHERE user_id = $1 AND erased_at IS NULL', [userId]);
-    return true;
-  }
-  if (!isDesignId(designId)) return false;
-  const result = await query(
-    `UPDATE users u SET stationery_design_id = d.design_id
-       FROM stationery_designs d
-      WHERE u.user_id = $1 AND u.erased_at IS NULL AND d.user_id = u.user_id AND d.design_id = $2`,
-    [userId, designId]
-  );
-  return (result.rowCount ?? 0) > 0;
+  if (designId !== null && !isDesignId(designId)) return false;
+  return transaction(async client => {
+    const account = await lockAccount(client, userId);
+    if (!account || account.erased_at) return false;
+    if (designId === null) {
+      await client.query('UPDATE users SET stationery_design_id = NULL WHERE user_id = $1', [userId]);
+      return true;
+    }
+    const result = await client.query(
+      `UPDATE users u SET stationery_design_id = d.design_id
+         FROM stationery_designs d
+        WHERE u.user_id = $1 AND d.user_id = u.user_id AND d.design_id = $2`,
+      [userId, designId]
+    );
+    return (result.rowCount ?? 0) > 0;
+  });
 }
