@@ -48,13 +48,14 @@ function mount(file = 'LetterPreviewCard', tool = 'quote_and_preview_letter') {
   const served = stampPreviewTool(inlineHostBridge(fs.readFileSync(path.join(WIDGET_DIR, `${file}.html`), 'utf-8'), WIDGET_DIR), tool);
   const runnable = served.replace('<script type="module">', '<script>');
   const sent: Json[] = [];
+  const timers: Array<{ fn: () => void; ms: number }> = [];
   const parent = { postMessage: (message: Json) => sent.push(JSON.parse(JSON.stringify(message))) };
   const dom = new JSDOM(runnable, {
     runScripts: 'dangerously',
     beforeParse(window) {
       Object.defineProperty(window, 'parent', { value: parent, configurable: true });
       Object.defineProperty(window.document, 'hidden', { get: () => false });
-      (window as any).setTimeout = () => 0;
+      (window as any).setTimeout = (fn: () => void, ms: number) => { timers.push({ fn, ms }); return timers.length; };
       (window as any).clearTimeout = () => undefined;
     }
   });
@@ -70,6 +71,7 @@ function mount(file = 'LetterPreviewCard', tool = 'quote_and_preview_letter') {
   return {
     document,
     deliver,
+    timers,
     sent,
     lastRequest,
     button,
@@ -128,21 +130,246 @@ const restyled = (stationery: Json, previewHtml?: string) => ({
 });
 
 describe('the Style row (#563)', () => {
-  it('shares the explicit card draft selection only with the flag and a supported host', async () => {
+  // The card tells the conversation which draft it shows by itself, with no button (#650).
+  const shares = (card: ReturnType<typeof mount>) => card.sent.filter(message => message.method === 'ui/update-model-context');
+  const flagged = { previewHtml: CLASSIC_PAGE, modelContextEnabled: true };
+  const supports = { updateModelContext: { text: {} } };
+  const statusOf = (card: ReturnType<typeof mount>, status: string, draftId = 'draft_0001') =>
+    card.deliver({
+      id: card.sent.filter(message => message.method === 'tools/call' && message.params?.name === 'get_draft_status').at(-1)!.id,
+      result: { content: [], structuredContent: { draftId, status } }
+    });
+  const ready = async (extra: Json = {}) => {
     const card = mount();
-    await card.show(output(), { previewHtml: CLASSIC_PAGE, modelContextEnabled: true }, { updateModelContext: { text: {} } });
-    const selected = () => Array.from(card.document.querySelectorAll('button')).find(button => button.textContent === 'Select this draft in the conversation')!;
-    expect(selected().hidden).toBe(false);
-    expect(card.lastRequest('ui/update-model-context')).toBeUndefined();
-    selected().click(); await flush();
-    const request = card.lastRequest('ui/update-model-context')!;
-    expect(JSON.parse(request.params.content[0].text)).toMatchObject({ draftId: 'draft_0001' });
-    expect(request.params.content[0].text).not.toContain('Main St');
-    await card.deliver({ id: request.id, result: {} });
-    expect(card.document.body.textContent).toContain('Draft selection shared');
-    await card.deliver({ method: 'ui/notifications/tool-result', params: { structuredContent: output(), _meta: { previewHtml: CLASSIC_PAGE } } });
-    expect(selected().hidden).toBe(true);
+    await card.show({ ...output(), ...extra }, flagged, supports);
+    await statusOf(card, 'ready', extra.draftId ?? 'draft_0001');
+    return card;
+  };
+
+  it('shares the draft once the server says it is ready, with nothing personal in it, and draws no button (#650)', async () => {
+    const card = mount();
+    await card.show(output(), flagged, supports);
+    // A reopened card may show a preview long since sent: nothing until the server answers.
+    expect(shares(card)).toHaveLength(0);
+    await statusOf(card, 'ready');
+    expect(shares(card)).toHaveLength(1);
+    const text = shares(card)[0].params.content[0].text;
+    const shared = JSON.parse(text);
+    expect(Object.keys(shared).sort()).toEqual(['draftId', 'instruction', 'sharedAt', 'source']);
+    expect(shared).toMatchObject({ source: 'Letter IRL letter card', draftId: 'draft_0001' });
+    expect(shared.instruction).toContain('the latest sharedAt is most likely the one the person means, but ask if unsure');
+    expect(shared.instruction).toContain('Check get_draft_status before editing');
+    expect(Number.isNaN(Date.parse(shared.sharedAt))).toBe(false);
+    expect(text).not.toContain('Main St');
+    expect(text).not.toContain('Sam');
+    await card.deliver({ id: shares(card)[0].id, result: {} });
+    // The same draft drawn again is not shared again, and the card shows no control for it.
+    await card.deliver({ method: 'ui/notifications/tool-result', params: { structuredContent: output(), _meta: flagged } });
+    expect(shares(card)).toHaveLength(1);
+    expect(Array.from(card.document.querySelectorAll('button')).some(button => /conversation/i.test(button.textContent ?? ''))).toBe(false);
   });
+
+  it('never shares a draft the server says was sent or has expired, nor one it never answers for (#650)', async () => {
+    for (const status of ['sent', 'expired']) {
+      const card = mount();
+      await card.show(output(), flagged, supports);
+      await statusOf(card, status);
+      expect(shares(card), status).toHaveLength(0);
+    }
+    const silent = mount();
+    await silent.show(output(), flagged, supports);
+    expect(shares(silent)).toHaveLength(0);
+  });
+
+  it('shares nothing where the host takes no model context, or the preview is not flagged for it (#650)', async () => {
+    const unsupported = mount();
+    await unsupported.show(output(), flagged, {});
+    await statusOf(unsupported, 'ready');
+    expect(shares(unsupported)).toHaveLength(0);
+    const unflagged = mount();
+    await unflagged.show(output(), { previewHtml: CLASSIC_PAGE }, supports);
+    await statusOf(unflagged, 'ready');
+    expect(shares(unflagged)).toHaveLength(0);
+  });
+
+  it('shares again at once on a click, and a key within the wait when it is over, with the time of the key (#650)', async () => {
+    const card = await ready();
+    await card.deliver({ id: shares(card)[0].id, result: {} });
+    const cardDate = (card.document.defaultView as any).Date;
+    const realNow = cardDate.now;
+    const base = realNow();
+    const at = (ms: number) => { const frozen = base + ms; cardDate.now = () => frozen; return frozen; };
+    const timeOf = (index: number) => Date.parse(JSON.parse(shares(card)[index].params.content[0].text).sharedAt);
+    try {
+      // A click soon after the first share: shared at once, with its own time.
+      const clickedAt = at(3_000);
+      card.document.dispatchEvent(new card.document.defaultView!.Event('click'));
+      await flush();
+      expect(shares(card)).toHaveLength(2);
+      expect(timeOf(1)).toBe(clickedAt);
+      await card.deliver({ id: shares(card)[1].id, result: {} });
+      // A key soon after: not at once, but when the wait is over, saying when the key was.
+      const keyedAt = at(5_000);
+      card.document.dispatchEvent(new card.document.defaultView!.KeyboardEvent('keydown', { key: 'Tab' }));
+      await flush();
+      expect(shares(card)).toHaveLength(2);
+      const wait = card.timers.at(-1)!;
+      expect(wait.ms).toBeGreaterThan(0);
+      expect(wait.ms).toBeLessThan(10_000);
+      at(20_000);
+      wait.fn();
+      await flush();
+      expect(shares(card)).toHaveLength(3);
+      expect(timeOf(2)).toBe(keyedAt);
+      await card.deliver({ id: shares(card)[2].id, result: {} });
+      // A key long after: at once.
+      at(60_000);
+      card.document.dispatchEvent(new card.document.defaultView!.KeyboardEvent('keydown', { key: 'Tab' }));
+      await flush();
+      expect(shares(card)).toHaveLength(4);
+    } finally {
+      cardDate.now = realNow;
+    }
+  });
+
+  it('drops a delayed share once a newer share already carries its use (#650)', async () => {
+    const card = await ready();
+    await card.deliver({ id: shares(card)[0].id, result: {} });
+    const cardDate = (card.document.defaultView as any).Date;
+    const realNow = cardDate.now;
+    const base = realNow();
+    const at = (ms: number) => { const frozen = base + ms; cardDate.now = () => frozen; };
+    try {
+      at(2_000);
+      card.document.dispatchEvent(new card.document.defaultView!.KeyboardEvent('keydown', { key: 'a' }));
+      await flush();
+      const wait = card.timers.at(-1)!;
+      // A click shares at once, carrying a later time than the key.
+      at(4_000);
+      card.document.dispatchEvent(new card.document.defaultView!.Event('click'));
+      await flush();
+      expect(shares(card)).toHaveLength(2);
+      await card.deliver({ id: shares(card)[1].id, result: {} });
+      at(20_000);
+      wait.fn();
+      await flush();
+      expect(shares(card)).toHaveLength(2);
+    } finally {
+      cardDate.now = realNow;
+    }
+  });
+
+  it('shares nothing on a use before the server says the draft is ready (#650)', async () => {
+    const card = mount();
+    await card.show(output(), flagged, supports);
+    card.document.dispatchEvent(new card.document.defaultView!.Event('click'));
+    await flush();
+    expect(shares(card)).toHaveLength(0);
+  });
+
+  it('takes the selection back when Send sends the person to the confirmation page (#650)', async () => {
+    const card = await ready();
+    await card.deliver({ id: shares(card)[0].id, result: {} });
+    card.document.getElementById('send-button')!.click();
+    await flush();
+    const sendCall = card.lastRequest('tools/call', 'send_letter')!;
+    const page = 'https://site.example/confirm/draft_0001';
+    await card.deliver({
+      id: sendCall.id,
+      result: {
+        isError: true,
+        content: [{ type: 'text', text: 'Not sent: Letter IRL sends mail only when the person sends it. Ask the person to open ' + page + ' to check the mail and send it themselves.' }]
+      }
+    });
+    expect(card.document.getElementById('send-page-button')!.style.display).not.toBe('none');
+    // Every share answered, so none waits in the queue: the last is the take-back, and nothing follows it.
+    for (let answered = 1; answered < shares(card).length; answered += 1) {
+      await card.deliver({ id: shares(card)[answered].id, result: {} });
+    }
+    card.document.dispatchEvent(new card.document.defaultView!.Event('click'));
+    await flush();
+    expect(shares(card)).toHaveLength(2);
+    expect(shares(card).at(-1)!.params.content).toEqual([]);
+  });
+
+  it('takes the selection back when a later result drops the flag (#650)', async () => {
+    const card = await ready();
+    await card.deliver({ id: shares(card)[0].id, result: {} });
+    await card.deliver({ method: 'ui/notifications/tool-result', params: { structuredContent: output(), _meta: { previewHtml: CLASSIC_PAGE } } });
+    expect(shares(card)).toHaveLength(2);
+    expect(shares(card)[1].params.content).toEqual([]);
+  });
+
+  it('shares a new draft when the card moves to one, after the earlier share is answered (#650)', async () => {
+    const card = await ready();
+    await card.deliver({ method: 'ui/notifications/tool-result', params: { structuredContent: { ...output(), draftId: 'draft_0002' }, _meta: flagged } });
+    await statusOf(card, 'ready', 'draft_0002');
+    // Each waits for the one before: an older selection never lands after a newer one.
+    expect(shares(card)).toHaveLength(1);
+    for (let answered = 0; answered < shares(card).length; answered += 1) {
+      await card.deliver({ id: shares(card)[answered].id, result: {} });
+    }
+    // The first draft was taken back while the second was not yet known to be ready, then the second was shared.
+    expect(shares(card).map(share => share.params.content.length ? JSON.parse(share.params.content[0].text).draftId : null)).toEqual(['draft_0001', null, 'draft_0002']);
+  });
+
+  it('gives up on an update the host never answers, so the next one still goes (#650)', async () => {
+    const card = await ready();
+    const limit = card.timers.filter(timer => timer.ms === 10000).at(-1)!;
+    expect(limit).toBeDefined();
+    card.document.getElementById('send-button')!.click();
+    await flush();
+    const sendCall = card.lastRequest('tools/call', 'send_letter')!;
+    await card.deliver({ id: sendCall.id, result: { content: [{ type: 'text', text: 'Sent.' }], structuredContent: { orderId: 'order-1' } } });
+    // The host never answered the first share; the take-back waits behind it until its 10 seconds run out.
+    expect(shares(card)).toHaveLength(1);
+    limit.fn();
+    await flush();
+    expect(shares(card)).toHaveLength(2);
+    expect(shares(card)[1].params.content).toEqual([]);
+  });
+
+  it('takes the selection back once the card sends the draft, and says nothing on the card if a share fails (#650)', async () => {
+    const card = await ready();
+    await card.deliver({ id: shares(card)[0].id, error: { code: -32000, message: 'refused' } });
+    expect(card.document.getElementById('error-message')!.style.display).not.toBe('block');
+    card.document.getElementById('send-button')!.click();
+    await flush();
+    const sendCall = card.lastRequest('tools/call', 'send_letter')!;
+    await card.deliver({ id: sendCall.id, result: { content: [{ type: 'text', text: 'Sent.' }], structuredContent: { orderId: 'order-1' } } });
+    expect(shares(card)).toHaveLength(2);
+    expect(shares(card)[1].params.content).toEqual([]);
+  });
+
+  it('takes the selection back when Pay & Send starts a checkout for the draft (#650)', async () => {
+    const card = await ready({
+      canSendNow: false,
+      sendEligibility: {
+        payAndSend: { available: true, amountCents: 499, currency: 'usd', displayAmount: '$4.99' },
+        letterPack: { available: true, purchaseUrl: 'https://example.test/packs' }
+      }
+    });
+    await card.deliver({ id: shares(card)[0].id, result: {} });
+    await card.click('pay-send-button');
+    const checkout = card.lastRequest('tools/call', 'create_mail_checkout')!;
+    await card.deliver({ id: checkout.id, result: { content: [], structuredContent: { orderId: 'order-9', checkoutUrl: 'https://checkout.stripe.com/c/pay/x' } } });
+    expect(shares(card).at(-1)!.params.content).toEqual([]);
+  });
+
+  it('shares the draft again when a send fails, after a redraw during the send took it back (#650)', async () => {
+    const card = await ready();
+    await card.deliver({ id: shares(card)[0].id, result: {} });
+    card.document.getElementById('send-button')!.click();
+    await flush();
+    // The host redraws while the send is out: the draft is not shared meanwhile.
+    await card.deliver({ method: 'ui/notifications/host-context-changed', params: { theme: 'dark' } });
+    expect(shares(card).at(-1)!.params.content).toEqual([]);
+    await card.deliver({ id: shares(card).at(-1)!.id, result: {} });
+    const sendCall = card.lastRequest('tools/call', 'send_letter')!;
+    await card.deliver({ id: sendCall.id, result: { isError: true, content: [{ type: 'text', text: 'The printer is busy.' }] } });
+    expect(JSON.parse(shares(card).at(-1)!.params.content[0].text).draftId).toBe('draft_0001');
+  });
+
   it('offers the six styles while the preview names its stationery, the one it is in pressed', async () => {
     const card = mount();
     await card.show(output({ theme: 'classic', source: 'default' }));

@@ -454,6 +454,18 @@
       // Claude and VS Code. Data may not be available immediately, so the
       // card re-renders on host.onChange.
       const host = window.letterIrlHost;
+      // The draft last told to the conversation, and the queue of those updates (#650: shareSelection).
+      let sharedDraftId = "";
+      let shareChain = Promise.resolve();
+      let sharedAt = 0;
+      // A share asked for by a use of the card too soon after the last, made when the wait is over.
+      let shareLater = false;
+      let lastUseAt = 0;
+      // The time the last share carried, so a delayed share never goes back in time.
+      let carriedAt = 0;
+      // The draft get_draft_status last answered "ready" for, in a host where the card asks (#650 review round 1).
+      let statusReadyFor = null;
+
       //
       // US-LAYOUT-05: Visual letter mockup with layout-aware rendering
       // US-MCP-08: Send button calls send_letter via callTool
@@ -1025,6 +1037,8 @@
 
       function keep(patch) {
         saved = { ...(saved || readSaved() || {}), ...patch, v: SAVED_STATE_VERSION };
+        // A send or a payment this card made takes the draft back from the conversation (#650).
+        shareSelection();
         if (typeof host.setWidgetState !== "function") return;
         const snapshot = saved;
         Promise.resolve()
@@ -1273,6 +1287,7 @@
             // A draft still ready keeps its preview, with the dates it has
             // now: this card may have changed them since that preview (#535).
             if (answer.status === "ready") {
+              statusReadyFor = draftId;
               // And the style it is in now, with its page (#563): this card,
               // or the chat, may have restyled it since that preview.
               // How full its pages are (#592 review round 1): the preview's own
@@ -1404,6 +1419,7 @@
           sendButton.disabled = false;
           document.getElementById("send-button-text").textContent = ANOTHER_COPY_SEND_LABEL;
           sendInProgress = false;
+          shareSelection();
         } else {
           const payButton = document.getElementById("pay-send-button");
           payButton.classList.remove("loading");
@@ -2004,7 +2020,13 @@
         sendButton.disabled = true;
       }
 
+      // Draws the card, then tells the conversation which draft it shows (#650).
       function render() {
+        renderCard();
+        shareSelection();
+      }
+
+      function renderCard() {
         applyTheme();
         adoptKeptState();
         if (keptOrderShown()) {
@@ -2475,6 +2497,8 @@
         } finally {
           // A failed send leaves the row usable again; a sent letter has none.
           styleRow.hold(false);
+          // A send that did not go out shares its draft again; one that did has taken it back (#650).
+          shareSelection();
           // The studio's header and footer say what the send did (#580).
           refreshStudio();
         }
@@ -3051,34 +3075,82 @@
         });
       });
 
-      // Initial render (will show loading state)
-      const selectionButton = document.createElement("button");
-      selectionButton.type = "button";
-      selectionButton.textContent = "Select this draft in the conversation";
-      selectionButton.hidden = true;
-      const selectionNotice = document.createElement("p");
-      selectionNotice.setAttribute("role", "status");
-      document.body.append(selectionButton, selectionNotice);
-      selectionButton.addEventListener("click", async () => {
-        if (!currentDraftId || typeof host.updateModelContext !== "function") return;
-        selectionButton.disabled = true;
-        try {
-          const result = await host.updateModelContext({ content: [{ type: "text", text: JSON.stringify({ source: "Letter IRL letter card", draftId: currentDraftId, instruction: "Check get_draft_status before editing; this card may have been sent or expired." }) }] });
-          if (result?.isError) throw new Error("refused");
-          selectionNotice.textContent = "Draft selection shared with the conversation.";
-        } catch (_) { selectionNotice.textContent = "Selection could not be shared. Include the draft ID in your request."; }
-        finally { selectionButton.disabled = false; }
-      });
-      function syncSelectionButton() {
-        selectionButton.hidden = !currentDraftId || host.toolMeta()?.modelContextEnabled !== true || typeof host.updateModelContext !== "function";
+      // The draft this card shows, told to the conversation by itself (#650), so "make it warmer" acts on it: only
+      // where the host takes model context and the preview is flagged for it (the home's selection context), and only
+      // a draft known to be ready. In a host where the card asks get_draft_status (Claude, VS Code), that is after the
+      // server says "ready": a reopened card may show a preview long since sent. A draft this card made itself (a retry
+      // preview) is ready by its making. The share is taken back (an empty update) once the draft stops being ready, and
+      // it is made again, with a later time, when the person uses the card: each card is its own instance, so several
+      // cards may share at once, and the time tells the model which one the person showed or touched last.
+      // Each update replaces this card's last (ui/update-model-context is idempotent); they go one after another, each
+      // given up after 10 seconds so a host that never answers cannot hold the rest back. Failures say nothing on the
+      // card: there is nothing the person could do about them.
+      const SHARE_TIMEOUT_MS = 10000;
+      const RESHARE_AFTER_MS = 10000;
+      function shareSelection(touched = false, usedAt = 0, immediate = false) {
+        if (typeof host.updateModelContext !== "function") return;
+        const flagged = currentMeta().modelContextEnabled === true;
+        const asks = typeof host.setWidgetState !== "function" && typeof host.callTool === "function";
+        const confirmed = !asks || statusReadyFor === currentDraftId || retryResult?.output?.draftId === currentDraftId;
+        // Not while a send is out or after it (sendInProgress stays set once sent), nor once a checkout is tracked, nor
+        // for a reopened card's kept order, nor once the person was sent to the confirmation page. A draft the server
+        // says was sent or expired is never confirmed ready: get_draft_status answers once, and finally.
+        const ready =
+          flagged && typeof currentDraftId === "string" && currentDraftId && confirmed &&
+          cardIsShowingDraft() && !keptOrderShown() && !sendPageShown();
+        const draftId = ready ? currentDraftId : "";
+        const now = Date.now();
+        // The time a share carries is the time of the use that asked for it, so a share that waited still says when.
+        if (touched && !usedAt) lastUseAt = now;
+        const at = touched ? usedAt || now : now;
+        const again = touched && draftId && draftId === sharedDraftId && (immediate || now - sharedAt >= RESHARE_AFTER_MS);
+        // A use too soon after the last share is not lost: one share follows when the wait is over, so the card the
+        // latest use always carries the latest time.
+        if (touched && draftId && draftId === sharedDraftId && !again) {
+          if (!shareLater) {
+            shareLater = true;
+            setTimeout(() => {
+              shareLater = false;
+              // A share made meanwhile already carries this use, or a later one.
+              if (lastUseAt > carriedAt) shareSelection(true, lastUseAt);
+            }, Math.max(0, RESHARE_AFTER_MS - (now - sharedAt)));
+          }
+          return;
+        }
+        if (draftId === sharedDraftId && !again) return;
+        sharedDraftId = draftId;
+        sharedAt = now;
+        carriedAt = at;
+        const content = draftId
+          ? [{ type: "text", text: JSON.stringify({
+              source: "Letter IRL letter card",
+              draftId,
+              sharedAt: new Date(at).toISOString(),
+              instruction:
+                "Several Letter IRL cards may each share a draft; the one with the latest sharedAt is most likely the one the person means, but ask if unsure. Check get_draft_status before editing; this card may have been sent or expired."
+            }) }]
+          : [];
+        shareChain = shareChain
+          .then(() => Promise.race([
+            host.updateModelContext({ content }),
+            new Promise((resolve) => setTimeout(resolve, SHARE_TIMEOUT_MS)),
+          ]))
+          .catch(() => {});
       }
+      // Using the card shows which draft the person means.
+      // A click, not a pointer going down: scrolling past a card on a phone is not a use of it. A click shares at once,
+      // since clicks are few; keys, which come many at a time while someone types, wait their turn. Both are heard as
+      // they bubble, after the card's own handler: a press of Send has already started the send, so it takes the
+      // draft back rather than sharing it again.
+      document.addEventListener("click", () => shareSelection(true, 0, true));
+      document.addEventListener("keydown", () => shareSelection(true));
+
+      // Initial render (will show loading state)
       render();
-      syncSelectionButton();
 
       // Listen for data updates (per OpenAI docs)
       host.onChange(() => {
         render();
-        syncSelectionButton();
       });
     </script>
   </body>

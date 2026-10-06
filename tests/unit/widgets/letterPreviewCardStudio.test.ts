@@ -139,7 +139,7 @@ const ON = { previewHtml: PAGE, [STUDIO]: true };
 const text = (card: ReturnType<typeof mount>, id: string) => card.byId(id).textContent;
 
 /** The card as served, in ChatGPT: window.openai carries the result and its _meta. */
-function mountInChatGpt(meta: Json) {
+function mountInChatGpt(meta: Json, extra: Json = {}) {
   const served = stampPreviewTool(
     inlineHostBridge(fs.readFileSync(path.join(WIDGET_DIR, 'LetterPreviewCard.html'), 'utf-8'), WIDGET_DIR),
     'quote_and_preview_letter'
@@ -156,13 +156,32 @@ function mountInChatGpt(meta: Json) {
         toolResponseMetadata: meta,
         widgetState: null,
         setWidgetState: async () => undefined,
-        callTool: async () => ({})
+        callTool: async () => ({}),
+        ...extra
       };
     }
   });
   dom.window.dispatchEvent(new dom.window.Event('openai:set_globals'));
   return dom.window.document;
 }
+
+describe('the selected draft in ChatGPT (#650)', () => {
+  it('is shared at once through window.openai, where the card keeps its own state and asks no status', async () => {
+    const updates: Json[] = [];
+    const document = mountInChatGpt({ ...ON, modelContextEnabled: true }, { updateModelContext: async (value: Json) => { updates.push(value); return {}; } });
+    await flush();
+    expect(updates).toHaveLength(1);
+    expect(JSON.parse(updates[0].content[0].text)).toMatchObject({ source: 'Letter IRL letter card', draftId: 'draft_0001' });
+    expect(Array.from(document.querySelectorAll('button')).some(button => /conversation/i.test(button.textContent ?? ''))).toBe(false);
+  });
+
+  it('is not shared through window.openai without the flag', async () => {
+    const updates: Json[] = [];
+    mountInChatGpt(ON, { updateModelContext: async (value: Json) => { updates.push(value); return {}; } });
+    await flush();
+    expect(updates).toHaveLength(0);
+  });
+});
 
 describe('the letter studio in ChatGPT (#580 maker review round 1)', () => {
   it('lays itself out from the switch in toolResponseMetadata, and not without it', async () => {
