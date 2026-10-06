@@ -16,7 +16,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createMcpServer } from '../../../src/mcp/httpServer.js';
 import { buildManifest } from '../../../src/mcp/manifest.js';
-import { summarizeToolResult } from '../../../src/mcp/registerTools.js';
+import { partitionToolResult, summarizeToolResult } from '../../../src/mcp/registerTools.js';
 import type { ClientProfile } from '../../../src/auth/clientProfiles.js';
 import { getRequiredToolScopes } from '../../../src/auth/toolScopes.js';
 import { LetterIrlServer } from '../../../src/server.js';
@@ -143,6 +143,13 @@ describe('the design tools in tools/list and /manifest.json (#649)', () => {
       ` Stationery: the saved design "Garden", the account's last choice; stationery in the call or set_stationery changes it.`
     );
     expect(preview('asked')).not.toContain('3f2b8c1e');
+  });
+
+  it("give a letter card the account's designs in _meta, never the model (#649 part 4)", () => {
+    const designs = [{ designId: '3f2b8c1e-9a4d-4c7e-8b1f-2d6a5e9c0b7a', name: 'Garden', design: { face: 'serif', ornament: 'none', ruled: false, tone: 'black' } }];
+    const { structuredContent, _meta } = partitionToolResult({ draftId: 'draft_0001', canSendNow: true, stationeryDesigns: designs });
+    expect(structuredContent).toEqual({ draftId: 'draft_0001', canSendNow: true });
+    expect(_meta).toMatchObject({ stationeryDesigns: designs });
   });
 
   it('bump the steering copy revision', () => {

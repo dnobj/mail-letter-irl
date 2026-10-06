@@ -48,7 +48,8 @@ import {
   SIGNATURE_LINES,
   type Layout,
   type PageFit,
-  type Stationery
+  type Stationery,
+  type StationeryDesign
 } from "../render/index.js";
 import { getSendEligibility, type SendEligibility } from "../services/commerceService.js";
 import { isExtraService, isPackPayable, mailServiceOf, type MailOption } from "../config/products.js";
@@ -60,7 +61,8 @@ import type { CertifiedMailService, MailService } from "../services/types.js";
 import { giftLetterPageCopy } from "../services/giftCardRenderer.js";
 import { rememberedPrefix, type PreviewStationery } from "./stationeryInput.js";
 import { rememberStationery } from "../services/stationeryDefaultService.js";
-import { rememberDesign } from "../services/stationeryDesignService.js";
+import { listDesigns, rememberDesign } from "../services/stationeryDesignService.js";
+import { isCustomStationeryOffered } from "../config/customStationery.js";
 import { previewSignatureOutput, rememberPreviewSignature, type PreviewSignature, type PreviewSignatureOutput } from "./signatureInput.js";
 import {
   previewArrivalWindow,
@@ -165,6 +167,11 @@ export interface LetterQuoteOutput {
    * offers, in order (#648). Card-only (_meta): the model changes the service with set_mail_service.
    */
   mailServices?: Array<'standard' | 'certified' | 'certified_return_receipt'>;
+  /**
+   * While saved designs are offered (#649): the account's designs, oldest first, for the card's Style row, each by
+   * its id, its name and its choices. Card-only (_meta): the model lists them with list_stationery_designs.
+   */
+  stationeryDesigns?: Array<{ designId: string; name: string; design: StationeryDesign }>;
 }
 
 // ============================================================================
@@ -1394,6 +1401,11 @@ export async function createLetterDraftAndBuildOutput(
   // next preview (#608), once the draft exists, as stationery is.
   if (signature) await rememberPreviewSignature(signature, context);
 
+  // The account's designs for the card's Style row (#649), while designs are offered and the page is drawn in stationery.
+  const stationeryDesigns = stationery && isCustomStationeryOffered()
+    ? (await listDesigns(context.user.userId)).map(({ designId, name, design }) => ({ designId, name, design }))
+    : undefined;
+
   // Build output
   const signatureSaid = previewSignatureOutput(signature, signed);
   // Only pass small preview images for ChatGPT widget display (~3KB each)
@@ -1413,6 +1425,7 @@ export async function createLetterDraftAndBuildOutput(
     // The choice of service on the card's Delivery tab (#648): only while certified mail is offered, and never for a gift
     // letter, which no certified service can be.
     ...(isCertifiedMailOffered() && !gift.isGift ? { mailServices: ["standard", "certified", "certified_return_receipt"] as Array<'standard' | 'certified' | 'certified_return_receipt'> } : {}),
+    ...(stationeryDesigns ? { stationeryDesigns } : {}),
     draftId: draftResult.draftId,
     draftExpiresAt: draftResult.expiresAt.toISOString(),
     layoutType,

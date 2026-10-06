@@ -46,7 +46,8 @@ vi.mock('../../../src/services/stationeryDesignService.js', async importOriginal
   ...(await importOriginal<typeof import('../../../src/services/stationeryDesignService.js')>()),
   getDesign: vi.fn().mockResolvedValue(null),
   rememberedDesign: vi.fn().mockResolvedValue(null),
-  rememberDesign: vi.fn().mockResolvedValue(true)
+  rememberDesign: vi.fn().mockResolvedValue(true),
+  listDesigns: vi.fn().mockResolvedValue([])
 }));
 
 vi.mock('../../../src/services/commerceService.js', async importOriginal => ({
@@ -62,7 +63,7 @@ import { downloadAndProcessLetterImageWithPreview } from '../../../src/services/
 import { getGiftBalance, sampleFundedCard } from '../../../src/services/giftLetterService.js';
 import { getSendEligibility } from '../../../src/services/commerceService.js';
 import { rememberedStationery, rememberStationery } from '../../../src/services/stationeryDefaultService.js';
-import { getDesign, rememberDesign } from '../../../src/services/stationeryDesignService.js';
+import { getDesign, listDesigns, rememberDesign } from '../../../src/services/stationeryDesignService.js';
 import { quoteAndPreviewLetterTextOnlyTool } from '../../../src/tools/quoteAndPreviewLetterTextOnly.js';
 import { quoteAndPreviewLetterWithHeaderImageTool } from '../../../src/tools/quoteAndPreviewLetterWithHeaderImage.js';
 import { quoteAndPreviewLetterWithImageTool } from '../../../src/tools/quoteAndPreviewLetterWithImage.js';
@@ -538,6 +539,22 @@ describe('stationery (#563)', () => {
     expect(rememberStationery).not.toHaveBeenCalled();
     // Drawn in the design's grey.
     expect(draft.previewHtml).toContain('stroke="#555555"');
+  });
+
+  it("gives the card the account's designs, only while designs are offered and the page is drawn in stationery (#649)", async () => {
+    const id = '3f2b8c1e-9a4d-4c7e-8b1f-2d6a5e9c0b7a';
+    const design = { face: 'serif', ornament: 'confetti', ruled: false, tone: 'black' } as const;
+    vi.mocked(listDesigns).mockResolvedValue([{ designId: id, name: 'Party', design, createdAt: 'x', updatedAt: 'y' }]);
+    vi.stubEnv('LETTER_IRL_CUSTOM_STATIONERY_ENABLED', 'true');
+    const offered = await run('text_only', { stationery: 'classic' });
+    expect(offered.stationeryDesigns).toEqual([{ designId: id, name: 'Party', design }]);
+    expect(listDesigns).toHaveBeenCalledWith('user-1');
+
+    vi.mocked(listDesigns).mockClear();
+    vi.stubEnv('LETTER_IRL_CUSTOM_STATIONERY_ENABLED', '');
+    const off = await run('text_only', { stationery: 'classic' });
+    expect(off).not.toHaveProperty('stationeryDesigns');
+    expect(listDesigns).not.toHaveBeenCalled();
   });
 
   it.each(LAYOUTS)('%s: Classic is the page as before, recording pdf-1, and says Classic', async layout => {

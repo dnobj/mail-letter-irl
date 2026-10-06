@@ -166,7 +166,9 @@ type MetaPartitioned =
   // a saved signature's picture (#608)
   | "signatureImage"
   // the letter card's choice of service (#648)
-  | "mailServices";
+  | "mailServices"
+  // the letter card's saved designs (#649)
+  | "stationeryDesigns";
 
 type UndeclaredKeys<Output, Schema> = Exclude<keyof Output, keyof Schema | MetaPartitioned>;
 

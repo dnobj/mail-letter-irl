@@ -1106,6 +1106,8 @@ export function partitionToolResult(
     signatureImage,
     // The services a letter card's Delivery tab offers (#648): the model changes one with set_mail_service.
     mailServices,
+    // The account's saved designs for a letter card's Style row (#649): the model lists them itself.
+    stationeryDesigns,
     ...modelFacingData
   } = result;
 
@@ -1147,6 +1149,7 @@ export function partitionToolResult(
       ...(pageFit !== undefined ? { pageFit } : {}),
       ...(signatureImage !== undefined ? { signatureImage } : {}),
       ...(mailServices !== undefined ? { mailServices } : {}),
+      ...(stationeryDesigns !== undefined ? { stationeryDesigns } : {}),
       ...(modelFacingData.generatedImageUrl !== undefined
         ? { generatedImageUrl: modelFacingData.generatedImageUrl }
         : {})

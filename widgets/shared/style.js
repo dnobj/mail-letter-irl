@@ -32,6 +32,21 @@
     return THEMES.indexOf(value) !== -1;
   }
 
+  /** The theme a saved design (#649) is drawn as: a page the card can show and change, though no theme button names it. */
+  var CUSTOM = "custom";
+
+  /** Whether the card can show a page drawn in this: a theme, or a saved design. */
+  function isDrawn(value) {
+    return isTheme(value) || value === CUSTOM;
+  }
+
+  /** A saved design as the preview's _meta offers it (#649): an id and a name, each text; anything else is none. */
+  function designOf(value) {
+    return value && typeof value === "object" && typeof value.designId === "string" && value.designId && typeof value.name === "string" && value.name
+      ? value
+      : null;
+  }
+
   function toolData(result) {
     return (result && result.structuredContent) || result || {};
   }
@@ -158,9 +173,54 @@
       return Boolean(said) && typeof said.printed === "boolean" && said.source !== "none_saved";
     }
 
+    // The account's saved designs (#649), as this draft's preview offered them, and their buttons in the Style row.
+    var designs = { list: [], buttons: [] };
+    var designsElement = options.designsElement || null;
+
+    /**
+     * What the row presses for a stationery: its theme, or "design:" and the
+     * design's id (#649). A status names a design without its id: it is
+     * pressed by its name, when the preview offered one of that name.
+     */
+    function keyOf(stationery) {
+      if (!stationery) return null;
+      if (stationery.theme !== CUSTOM) return stationery.theme;
+      var id = typeof stationery.designId === "string" ? stationery.designId : null;
+      if (!id) {
+        for (var i = 0; i < designs.list.length; i++) {
+          if (designs.list[i].name === stationery.name) id = designs.list[i].designId;
+        }
+      }
+      return id ? "design:" + id : "design:";
+    }
+
     function shownTheme() {
       if (state.busy && state.pending) return state.pending;
-      return state.stationery ? state.stationery.theme : null;
+      return keyOf(state.stationery);
+    }
+
+    /** The design buttons for this draft's designs, drawn afresh: each named as the person saved it. */
+    function drawDesigns(list) {
+      designs.list = list;
+      designs.buttons = [];
+      if (!designsElement) return;
+      while (designsElement.firstChild) designsElement.removeChild(designsElement.firstChild);
+      for (var i = 0; i < list.length; i++) {
+        var button = designsElement.ownerDocument.createElement("button");
+        button.type = "button";
+        button.className = "link-button";
+        button.setAttribute("data-design-id", list[i].designId);
+        button.setAttribute("aria-pressed", "false");
+        button.textContent = list[i].name;
+        (function (id) {
+          button.addEventListener("click", function () {
+            set("design:" + id);
+          });
+        })(list[i].designId);
+        designsElement.appendChild(button);
+        designs.buttons.push(button);
+      }
+      designsElement.hidden = list.length === 0;
     }
 
     function draw() {
@@ -172,6 +232,11 @@
         var button = options.buttons[i];
         button.setAttribute("aria-pressed", button.getAttribute("data-theme") === shown ? "true" : "false");
         button.setAttribute("aria-disabled", waiting);
+      }
+      for (var d = 0; d < designs.buttons.length; d++) {
+        var mine = designs.buttons[d];
+        mine.setAttribute("aria-pressed", "design:" + mine.getAttribute("data-design-id") === shown ? "true" : "false");
+        mine.setAttribute("aria-disabled", waiting);
       }
       options.note.textContent = state.message;
       options.note.style.display = state.message ? "block" : "none";
@@ -202,12 +267,24 @@
       var slots = {};
       if (typeof stationery.monogram === "string") slots.monogram = stationery.monogram;
       if (typeof stationery.headline === "string") slots.headline = stationery.headline;
-      state.slots[stationery.theme] = slots;
+      state.slots[keyOf(stationery)] = slots;
     }
 
+    /** The design a key names, among this draft's (#649), or null. */
+    function designFor(key) {
+      if (typeof key !== "string" || key.indexOf("design:") !== 0) return null;
+      var id = key.slice("design:".length);
+      for (var i = 0; i < designs.list.length; i++) {
+        if (designs.list[i].designId === id) return designs.list[i];
+      }
+      return null;
+    }
+
+    // theme: a theme's name, or "design:" and one of this draft's designs' ids (#649).
     function set(theme) {
-      if (state.busy || state.held || !state.draftId || typeof host.callTool !== "function" || !isTheme(theme)) return;
-      if (state.stationery && state.stationery.theme === theme) return;
+      var design = designFor(theme);
+      if (state.busy || state.held || !state.draftId || typeof host.callTool !== "function" || !(isTheme(theme) || design)) return;
+      if (state.stationery && keyOf(state.stationery) === theme) return;
       if (typeof options.idle === "function" && !options.idle()) return;
       var draftId = state.draftId;
       state.busy = true;
@@ -219,11 +296,12 @@
       if (typeof options.onSet === "function") options.onSet();
       options.onBusy();
       // Only Monogram prints initials and only Celebration a headline: the
-      // ones this card last saw with the theme come back with it.
-      var args = { draftId: draftId, stationery: theme };
+      // ones this card last saw with the theme come back with it. A design
+      // (#649) takes back what it printed when this card last saw it.
+      var args = design ? { draftId: draftId, stationeryDesignId: design.designId } : { draftId: draftId, stationery: theme };
       var slots = state.slots[theme] || {};
-      if (theme === "monogram" && slots.monogram) args.monogram = slots.monogram;
-      if (theme === "celebration" && slots.headline) args.headline = slots.headline;
+      if ((theme === "monogram" || design) && slots.monogram) args.monogram = slots.monogram;
+      if ((theme === "celebration" || design) && slots.headline) args.headline = slots.headline;
       Promise.resolve()
         .then(function () {
           return host.callTool("set_stationery", args);
@@ -240,7 +318,9 @@
             throw new Error("The style may have changed. Make the preview again to see it.");
           }
           var stationery = data.stationery;
-          if (!stationery || !isTheme(stationery.theme)) {
+          // A theme asked is answered with a theme; a design (#649) with that design.
+          var answered = stationery && (design ? stationery.theme === CUSTOM && stationery.designId === design.designId : isTheme(stationery.theme));
+          if (!answered) {
             throw new Error("The style may have changed. Make the preview again to see it.");
           }
           state.stationery = stationery;
@@ -655,13 +735,16 @@
           !draftId ||
           typeof host.callTool !== "function" ||
           !offered ||
-          !isTheme(offered.theme)
+          !isDrawn(offered.theme)
         ) {
           hide();
           return;
         }
         if (state.draftId !== draftId) {
           state.draftId = draftId;
+          // The account's designs as this preview offered them (#649), before anything is keyed by them.
+          var offeredDesigns = typeof options.designs === "function" ? options.designs() : null;
+          drawDesigns(Array.isArray(offeredDesigns) ? offeredDesigns.map(designOf).filter(Boolean) : []);
           state.stationery = offered;
           state.previewHtml = null;
           state.terms = null;
@@ -736,7 +819,7 @@
       // how full its pages are as the card knows it (fit, or null when it
       // does not: the status lays nothing out).
       adopt: function (draftId, stationery, previewHtml, answer, fit) {
-        if (state.draftId !== draftId || state.busy || state.restyled || !stationery || !isTheme(stationery.theme)) return false;
+        if (state.draftId !== draftId || state.busy || state.restyled || !stationery || !isDrawn(stationery.theme)) return false;
         state.stationery = stationery;
         keepSlots(stationery);
         if (typeof previewHtml === "string" && previewHtml) state.previewHtml = previewHtml;
@@ -779,6 +862,7 @@
 
   window.letterIrlStyle = {
     THEMES: THEMES,
+    CUSTOM: CUSTOM,
     createStyle: createStyle
   };
 })();
