@@ -58,6 +58,10 @@ beforeEach(() => {
 });
 
 describe('saving a design (#649)', () => {
+  it('keeps at most ten designs an account, as the tools and the docs say', () => {
+    expect(MAX_STATIONERY_DESIGNS).toBe(10);
+  });
+
   it('locks the account first, and saves nothing onto one that is erased or gone', async () => {
     for (const account of [[{ erased_at: AT }], []]) {
       const statements = inTransaction({ rows: account });
