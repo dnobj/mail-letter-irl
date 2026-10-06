@@ -191,9 +191,9 @@
         choice.setAttribute("aria-disabled", waiting);
       }
       if (serviceNote) {
-        var noted = Boolean(service.message) && Boolean(serviceRow) && serviceRow.style.display !== "none";
+        // Hidden with the row by hide(), which the card calls whenever the row goes.
         serviceNote.textContent = service.message;
-        serviceNote.style.display = noted ? "block" : "none";
+        serviceNote.style.display = service.message ? "block" : "none";
         serviceNote.classList.toggle("alert", service.error);
       }
     }
@@ -413,6 +413,8 @@
           var previewFit = typeof options.previewFit === "function" ? options.previewFit() : null;
           var said = termsOf(data, known ? known.pageFit : previewFit);
           if (!said) throw new Error("How the letter travels may have changed. Make the preview again to see it.");
+          // A fit for another number of pages than the answer gives is for words the chat has changed since: say none.
+          if (said.pageFit && said.pageFit.pages !== said.pages) said.pageFit = null;
           // The terms say how the letter travels now, and with them the service the draft holds, whichever was pressed.
           adoptTerms(said);
           state.restyled = true;

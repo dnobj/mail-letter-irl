@@ -1738,12 +1738,15 @@ describe('the Mail choice on the Delivery tab (#648)', () => {
     expect(text(card, 'studio-fit')).toBe('Fits on one page, with room for about 512 more characters.');
   });
 
-  it('takes the pages the answer gives, which the chat may have changed unheard', async () => {
+  it('takes the pages the answer gives, which the chat may have changed unheard, and drops a fit for other pages', async () => {
     const card = mount();
-    await card.show(ordinary(), OFFERED);
+    await card.show(ordinary(), { ...OFFERED, pageFit: { pages: 1, sheets: 1, roomLines: 20, roomCharacters: 1940, charactersPerLine: 97 } });
+    expect(text(card, 'studio-fit')).toBe('Fits on one page, with room for about 1,940 more characters.');
     await card.click(choice(card, 'certified'));
     await card.answer(changed({ ...CERTIFIED_TERMS, pages: 3 }), SET);
     expect(text(card, 'studio-summary')).toContain('3 pages, both sides');
+    // The one-page room is for words the chat has changed since: it is not said of a three-page letter.
+    expect(text(card, 'studio-fit')).not.toContain('room for about 1,940');
   });
 
   it('takes no status after a change made here: the change is the later word', async () => {

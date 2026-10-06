@@ -189,4 +189,5 @@
 // r42: flag-gated, read-only Letter IRL home entrypoint.
 // r45: the words editor (#647): set_letter_words is listed with LETTER_IRL_WORDS_EDITOR_ENABLED alone, and its
 // description then says the letter is laid out on one page and words that do not fit are refused.
-export const STEERING_COPY_REV = 45;
+// r46: the letter card's Mail choice (#648) calls set_mail_service, whose answer now gives the letter's pages above one.
+export const STEERING_COPY_REV = 46;
