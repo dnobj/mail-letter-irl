@@ -121,8 +121,8 @@ export function designNameOf(value: unknown): string | null {
   )
     .replace(/\s+/gu, ' ')
     .trim();
-  const length = [...name].length;
-  return length >= 1 && length <= STATIONERY_DESIGN_NAME_MAX_LENGTH && NAME_VISIBLE.test(name) ? name : null;
+  // An empty name has nothing visible either.
+  return [...name].length <= STATIONERY_DESIGN_NAME_MAX_LENGTH && NAME_VISIBLE.test(name) ? name : null;
 }
 
 /** A letter's theme and what it prints. */
