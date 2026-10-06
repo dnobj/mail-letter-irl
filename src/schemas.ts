@@ -112,8 +112,8 @@ const previewStationerySchema = {
   description: PREVIEW_STATIONERY_DESCRIPTION,
   properties: {
     theme: { type: "string", enum: [...DRAWN_THEMES], description: STATIONERY_THEME_OUTPUT_DESCRIPTION },
-    designId: { type: "string", description: "With the custom theme: the saved design's designId, which stationeryDesignId takes" },
-    name: { type: "string", description: "With the custom theme: the name the design was saved under" },
+    designId: { type: "string", description: "With the custom theme: its design's id" },
+    name: { type: "string", description: "With the custom theme: its design's name" },
     design: stationeryDesignSchema,
     dateLine: { type: "string", description: "The date it prints at the top right, as written" },
     monogram: { type: "string", description: "The initials it prints" },
@@ -1052,7 +1052,7 @@ export const getDraftStatusOutputSchema: JsonSchema = {
       description: "A ready letter's stationery now, while stationery is offered; its page goes to the card",
       properties: {
         theme: { type: "string", enum: [...DRAWN_THEMES], description: STATIONERY_THEME_OUTPUT_DESCRIPTION },
-        name: { type: "string", description: "With the custom theme: the name the design was saved under when the letter was drawn" },
+        name: { type: "string", description: "With the custom theme: its design's name when the letter was drawn" },
         design: stationeryDesignSchema,
         dateLine: { type: "string" },
         monogram: { type: "string" },

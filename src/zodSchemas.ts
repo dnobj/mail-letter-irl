@@ -85,7 +85,8 @@ const headlineZ = z.preprocess(noneForNull, z.string().optional()).describe(HEAD
 /** A saved design (#649): withheld while designs are not offered (withheldInputKeys). */
 export const STATIONERY_DESIGN_ID_DESCRIPTION =
   "Optional, only when the user asks for one of their saved stationery designs: its designId, from list_stationery_designs or save_stationery_design. " +
-  "The letter is drawn in that design instead of a stationery: leave stationery out with it. Monogram prints only on a design whose ornament is the monogram; headline prints on any design.";
+  "The letter is drawn in that design instead of a stationery: leave stationery out with it. With a design, monogram is taken only when its ornament is the monogram, " +
+  "and headline prints on any design, whatever monogram's and headline's own descriptions say of the themes.";
 const stationeryDesignIdZ = z.preprocess(noneForNull, z.string().optional()).describe(STATIONERY_DESIGN_ID_DESCRIPTION);
 
 /** A letter of more than one page (#586), on the letter previews' output. */
@@ -104,19 +105,18 @@ export const PREVIEW_STATIONERY_DESCRIPTION =
 export const STATIONERY_SOURCE_DESCRIPTION =
   "Why this stationery: asked for in the call, the account's remembered choice, or classic by default";
 /** A saved design's four choices (#649), as an output says them. */
-export const STATIONERY_DESIGN_OUTPUT_DESCRIPTION = "With the custom theme: the saved design's choices, as save_stationery_design took them";
+export const STATIONERY_DESIGN_OUTPUT_DESCRIPTION = "With the custom theme: its design's choices";
 export const stationeryDesignZ = z.object({
   face: z.enum(STATIONERY_FACES),
   ornament: z.enum(STATIONERY_ORNAMENTS),
   ruled: z.boolean(),
   tone: z.enum(STATIONERY_TONES)
 });
-export const STATIONERY_THEME_OUTPUT_DESCRIPTION =
-  "The stationery drawn: a built-in theme, or custom for a saved stationery design, named in name";
+export const STATIONERY_THEME_OUTPUT_DESCRIPTION = "The stationery the page is drawn in";
 const previewStationeryZ = z.object({
   theme: z.enum(DRAWN_THEMES).describe(STATIONERY_THEME_OUTPUT_DESCRIPTION),
-  designId: z.string().optional().describe("With the custom theme: the saved design's designId, which stationeryDesignId takes"),
-  name: z.string().optional().describe("With the custom theme: the name the design was saved under"),
+  designId: z.string().optional().describe("With the custom theme: its design's id"),
+  name: z.string().optional().describe("With the custom theme: its design's name"),
   design: stationeryDesignZ.optional().describe(STATIONERY_DESIGN_OUTPUT_DESCRIPTION),
   dateLine: z.string().optional(),
   monogram: z.string().optional(),
@@ -1057,7 +1057,7 @@ export const getDraftStatusOutputZ = z.object({
   stationery: z
     .object({
       theme: z.enum(DRAWN_THEMES).describe(STATIONERY_THEME_OUTPUT_DESCRIPTION),
-      name: z.string().optional().describe("With the custom theme: the name the design was saved under when the letter was drawn"),
+      name: z.string().optional().describe("With the custom theme: its design's name when the letter was drawn"),
       design: stationeryDesignZ.optional().describe(STATIONERY_DESIGN_OUTPUT_DESCRIPTION),
       dateLine: z.string().optional(),
       monogram: z.string().optional(),
@@ -1146,7 +1146,8 @@ export const DESIGN_FACE_DESCRIPTION =
 export const DESIGN_ORNAMENT_DESCRIPTION =
   "What is drawn in the top-right corner beside the address window: none, monogram (initials in a double ring), sprig (a line-drawn sprig with berries) or confetti";
 export const DESIGN_RULED_DESCRIPTION = "Whether faint rules are drawn under each line";
-export const DESIGN_TONE_DESCRIPTION = "The ornament's grey, darkest first: black, dark, medium or light. Letters print in black and greys only";
+export const DESIGN_TONE_DESCRIPTION =
+  "The grey of the sprig or the monogram, darkest first: black, dark, medium or light. Confetti keeps its own mix of greys, and none has nothing to colour. Letters print in black and greys only";
 export const DESIGN_ID_DESCRIPTION = "The design's id, which stationeryDesignId takes on a letter preview or set_stationery";
 export const DESIGN_CONFIRM_DESCRIPTION = "true, once the person has agreed: a deleted design cannot be brought back";
 export const saveStationeryDesignInputZ = z.object({

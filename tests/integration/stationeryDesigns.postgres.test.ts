@@ -334,6 +334,41 @@ describePostgres('saved stationery designs (#649)', () => {
     expect(await remembered()).toEqual({ stationery_theme: 'botanical', stationery_design_id: null });
   });
 
+  it('restyles a draft into a design deleted meanwhile without breaking a key: the design is simply not remembered (#649 part 3)', async () => {
+    const drafts = await import('../../src/services/draftService.js');
+    const address = { name: 'Pat Example', addressLine1: '350 Fifth Ave', city: 'New York', state: 'NY', postalCode: '10118', country: 'US' };
+    const userId = await seedUser();
+    const mine = await saved(userId, 'Garden', SPRIG);
+    const bodyText = 'Dear Sam,';
+    const signOff = 'Pat';
+    const { draftId } = await drafts.createDraft({
+      userId, sender: address, recipient: { ...address, name: 'Sam Rivera' }, bodyText, signOff,
+      requiredCredits: 2, previewHtml: '<svg></svg>', layoutType: 'text_only', rendererVersion: 'pdf-1'
+    });
+    const custom = { theme: 'custom', design: SPRIG, name: 'Garden', designId: mine.designId, dateLine: 'October 1, 2026', source: 'asked' };
+    // A delete in progress: it holds the account's row, as every design writer takes it first, and has deleted the design.
+    const deleter = await pool.connect();
+    let restyling: Promise<unknown> = Promise.resolve();
+    try {
+      await deleter.query('BEGIN');
+      await deleter.query('SELECT 1 FROM users WHERE user_id = $1 FOR UPDATE', [userId]);
+      await deleter.query('DELETE FROM stationery_designs WHERE design_id = $1', [mine.designId]);
+      restyling = drafts.setDraftStationery(draftId, userId, { stationery: custom as never, previewHtml: '<svg></svg>', drawnFrom: { bodyText, signOff } });
+      await lockWaiters(deleter, 1);
+      await deleter.query('COMMIT');
+      // The restyle finds the design gone and remembers nothing: no 23503 from a key to a deleted row.
+      expect(await restyling).toBeNull();
+    } finally {
+      await giveBack(deleter);
+      await Promise.allSettled([restyling]);
+    }
+    const row = await pool.query('SELECT stationery_design_id FROM users WHERE user_id = $1', [userId]);
+    expect(row.rows[0].stationery_design_id).toBeNull();
+    // The draft keeps its own copy of the design all the same.
+    const stored = await pool.query('SELECT stationery FROM letter_drafts WHERE draft_id = $1', [draftId]);
+    expect(stored.rows[0].stationery).toEqual({ theme: 'custom', design: SPRIG, name: 'Garden', dateLine: 'October 1, 2026' });
+  });
+
   it('remembers nothing on an erased account', async () => {
     const userId = await seedUser();
     const mine = await saved(userId, 'Garden');

@@ -198,19 +198,19 @@
                   "handwritten",
                   "custom"
                 ],
-                "description": "The stationery drawn: a built-in theme, or custom for a saved stationery design, named in name"
+                "description": "The stationery the page is drawn in"
               },
               "designId": {
                 "type": "string",
-                "description": "With the custom theme: the saved design's designId, which stationeryDesignId takes"
+                "description": "With the custom theme: its design's id"
               },
               "name": {
                 "type": "string",
-                "description": "With the custom theme: the name the design was saved under"
+                "description": "With the custom theme: its design's name"
               },
               "design": {
                 "type": "object",
-                "description": "With the custom theme: the saved design's choices, as save_stationery_design took them",
+                "description": "With the custom theme: its design's choices",
                 "properties": {
                   "face": {
                     "type": "string",
@@ -702,19 +702,19 @@
                   "handwritten",
                   "custom"
                 ],
-                "description": "The stationery drawn: a built-in theme, or custom for a saved stationery design, named in name"
+                "description": "The stationery the page is drawn in"
               },
               "designId": {
                 "type": "string",
-                "description": "With the custom theme: the saved design's designId, which stationeryDesignId takes"
+                "description": "With the custom theme: its design's id"
               },
               "name": {
                 "type": "string",
-                "description": "With the custom theme: the name the design was saved under"
+                "description": "With the custom theme: its design's name"
               },
               "design": {
                 "type": "object",
-                "description": "With the custom theme: the saved design's choices, as save_stationery_design took them",
+                "description": "With the custom theme: its design's choices",
                 "properties": {
                   "face": {
                     "type": "string",
@@ -1206,19 +1206,19 @@
                   "handwritten",
                   "custom"
                 ],
-                "description": "The stationery drawn: a built-in theme, or custom for a saved stationery design, named in name"
+                "description": "The stationery the page is drawn in"
               },
               "designId": {
                 "type": "string",
-                "description": "With the custom theme: the saved design's designId, which stationeryDesignId takes"
+                "description": "With the custom theme: its design's id"
               },
               "name": {
                 "type": "string",
-                "description": "With the custom theme: the name the design was saved under"
+                "description": "With the custom theme: its design's name"
               },
               "design": {
                 "type": "object",
-                "description": "With the custom theme: the saved design's choices, as save_stationery_design took them",
+                "description": "With the custom theme: its design's choices",
                 "properties": {
                   "face": {
                     "type": "string",
@@ -3031,15 +3031,15 @@
                   "handwritten",
                   "custom"
                 ],
-                "description": "The stationery drawn: a built-in theme, or custom for a saved stationery design, named in name"
+                "description": "The stationery the page is drawn in"
               },
               "name": {
                 "type": "string",
-                "description": "With the custom theme: the name the design was saved under when the letter was drawn"
+                "description": "With the custom theme: its design's name when the letter was drawn"
               },
               "design": {
                 "type": "object",
-                "description": "With the custom theme: the saved design's choices, as save_stationery_design took them",
+                "description": "With the custom theme: its design's choices",
                 "properties": {
                   "face": {
                     "type": "string",
