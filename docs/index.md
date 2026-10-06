@@ -1,6 +1,6 @@
 # Letter IRL Documentation Index
 
-**Last Updated:** September 23, 2026
+**Last Updated:** October 6, 2026
 **Purpose:** Central navigation hub for all Letter IRL documentation
 
 Letter IRL prints and mails real US letters and postcards composed in ChatGPT. This repository is the
@@ -35,6 +35,8 @@ maintenance job.
 - [Just-in-Time Purchase Plan](just-in-time-purchase-plan.md) - Pay & Send design record (shipped)
 - [Future Roadmap](future-roadmap.md) - out-of-scope features and plans
 - [Letter Creator Vision](letter-creator-vision.md) - the mail-studio goal: principles, 13 concepts, interactive demos, and the build order (#534, #535)
+- [Plugin Extensions Plan](plugin-extensions-plan.md) - the ChatGPT home, selection, deep links, rich forms and the side panel: order, state and what each waits for (#652)
+- [Letter IRL Home](letter-home.md) - the sidebar home in ChatGPT: what it shows, its flags and its rollout (#639)
 
 ---
 
