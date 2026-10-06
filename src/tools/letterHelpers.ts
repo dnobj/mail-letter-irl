@@ -1402,9 +1402,18 @@ export async function createLetterDraftAndBuildOutput(
   if (signature) await rememberPreviewSignature(signature, context);
 
   // The account's designs for the card's Style row (#649), while designs are offered and the page is drawn in stationery.
-  const stationeryDesigns = stationery && isCustomStationeryOffered()
-    ? (await listDesigns(context.user.userId)).map(({ designId, name, design }) => ({ designId, name, design }))
-    : undefined;
+  // Only for the card's buttons, once the draft exists: not reading them never fails the preview.
+  let stationeryDesigns: LetterQuoteOutput['stationeryDesigns'];
+  if (stationery && isCustomStationeryOffered()) {
+    try {
+      stationeryDesigns = (await listDesigns(context.user.userId)).map(({ designId, name, design }) => ({ designId, name, design }));
+    } catch (error) {
+      context.logger.warn(
+        { correlationId: context.correlationId, event: "quote.stationery_designs_not_read", error: (error as Error).message },
+        "The account's stationery designs were not read for the card"
+      );
+    }
+  }
 
   // Build output
   const signatureSaid = previewSignatureOutput(signature, signed);

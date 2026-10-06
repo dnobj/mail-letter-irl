@@ -1976,6 +1976,71 @@ describe('saved designs on the Style tab (#649)', () => {
     expect(card.requests('tools/call', 'set_stationery')[1].params.arguments).toEqual({ draftId: 'draft_0001', stationeryDesignId: ID, headline: 'For Sam' });
   });
 
+  it("labels each design's button as the person's design, so a screen reader tells it from a theme of the same name", async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, stationeryDesigns: [{ designId: ID, name: 'Classic', design: DESIGN }] });
+    expect(designButtons(card)[0].getAttribute('aria-label')).toBe('Classic, your design');
+    expect(designButtons(card)[0].textContent).toBe('Classic');
+  });
+
+  it("says a design deleted since the preview in the person's words, and puts its button away", async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, stationeryDesigns: DESIGNS });
+    await card.click(designButtons(card)[0]);
+    await card.answer(
+      {
+        result: {
+          isError: true,
+          content: [{ type: 'text', text: "That stationery design was not found. list_stationery_designs lists the account's designs, with their designId." }]
+        }
+      },
+      'set_stationery'
+    );
+    expect(text(card, 'style-note')).toBe('That design was deleted. Make the preview again to see your designs.');
+    expect(designButtons(card).map(button => button.textContent)).toEqual(['Grandma <b>Ruth</b>']);
+    expect(pressedStyle(card)).toEqual(['classic']);
+    // Another refusal is said as it came, and keeps the buttons.
+    const other = mount();
+    await other.show(output(CLASSIC), { ...ON, stationeryDesigns: DESIGNS });
+    await other.click(designButtons(other)[0]);
+    await other.answer({ result: { isError: true, content: [{ type: 'text', text: 'Stationery is not available yet.' }] } }, 'set_stationery');
+    expect(text(other, 'style-note')).toBe('Stationery is not available yet.');
+    expect(designButtons(other)).toHaveLength(2);
+  });
+
+  it('carries initials back only into a design whose ornament is the monogram', async () => {
+    const card = mount();
+    await card.show(output({ stationery: { ...GARDEN.stationery, monogram: 'PR' } }), { ...ON, stationeryDesigns: DESIGNS });
+    await card.click(card.byId('style-row').querySelector('[data-theme="classic"]')!);
+    await card.answer(restyled({ theme: 'classic', source: 'asked' }), 'set_stationery');
+    await card.click(designButtons(card)[0]);
+    // Garden draws a sprig: no initials go with it.
+    expect(card.requests('tools/call', 'set_stationery')[1].params.arguments).toEqual({ draftId: 'draft_0001', stationeryDesignId: ID });
+
+    const monogram = mount();
+    const initials = { theme: 'custom', design: { ...DESIGN, ornament: 'monogram' }, name: 'Grandma <b>Ruth</b>', designId: OTHER, monogram: 'PR', source: 'asked' };
+    await monogram.show(output({ stationery: initials }), { ...ON, stationeryDesigns: DESIGNS });
+    await monogram.click(monogram.byId('style-row').querySelector('[data-theme="classic"]')!);
+    await monogram.answer(restyled({ theme: 'classic', source: 'asked' }), 'set_stationery');
+    await monogram.click(designButtons(monogram)[1]);
+    expect(monogram.requests('tools/call', 'set_stationery')[1].params.arguments).toEqual({ draftId: 'draft_0001', stationeryDesignId: OTHER, monogram: 'PR' });
+  });
+
+  it('presses no design for a status naming one replaced since under the same name, so the current one can be pressed', async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, stationeryDesigns: DESIGNS });
+    await card.answerTo(card.requests('tools/call', 'get_draft_status')[0], {
+      result: {
+        content: [],
+        structuredContent: { draftId: 'draft_0001', status: 'ready', stationery: { theme: 'custom', design: { ...DESIGN, tone: 'dark' }, name: 'Garden' } },
+        _meta: { previewHtml: PAGE }
+      }
+    });
+    expect(pressedStyle(card)).toEqual([]);
+    await card.click(designButtons(card)[0]);
+    expect(card.requests('tools/call', 'set_stationery')[0].params.arguments).toEqual({ draftId: 'draft_0001', stationeryDesignId: ID });
+  });
+
   it('presses a design a status names by its name, though the status gives no id', async () => {
     const card = mount();
     await card.show(output(CLASSIC), { ...ON, stationeryDesigns: DESIGNS });

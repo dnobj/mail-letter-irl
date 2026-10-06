@@ -187,11 +187,17 @@
       if (stationery.theme !== CUSTOM) return stationery.theme;
       var id = typeof stationery.designId === "string" ? stationery.designId : null;
       if (!id) {
+        // By its name, and only while the design of that name still has the draft's choices: one replaced
+        // since under the same name is another design, which the person may press to redraw the letter in.
         for (var i = 0; i < designs.list.length; i++) {
-          if (designs.list[i].name === stationery.name) id = designs.list[i].designId;
+          if (designs.list[i].name === stationery.name && sameChoices(designs.list[i].design, stationery.design)) id = designs.list[i].designId;
         }
       }
       return id ? "design:" + id : "design:";
+    }
+
+    function sameChoices(a, b) {
+      return Boolean(a && b) && a.face === b.face && a.ornament === b.ornament && a.ruled === b.ruled && a.tone === b.tone;
     }
 
     function shownTheme() {
@@ -212,6 +218,8 @@
         button.setAttribute("data-design-id", list[i].designId);
         button.setAttribute("aria-pressed", "false");
         button.textContent = list[i].name;
+        // Told apart from a theme of the same name by a screen reader.
+        button.setAttribute("aria-label", list[i].name + ", your design");
         (function (id) {
           button.addEventListener("click", function () {
             set("design:" + id);
@@ -300,7 +308,8 @@
       // (#649) takes back what it printed when this card last saw it.
       var args = design ? { draftId: draftId, stationeryDesignId: design.designId } : { draftId: draftId, stationery: theme };
       var slots = state.slots[theme] || {};
-      if ((theme === "monogram" || design) && slots.monogram) args.monogram = slots.monogram;
+      var monogrammed = design && design.design && design.design.ornament === "monogram";
+      if ((theme === "monogram" || monogrammed) && slots.monogram) args.monogram = slots.monogram;
       if ((theme === "celebration" || design) && slots.headline) args.headline = slots.headline;
       Promise.resolve()
         .then(function () {
@@ -344,7 +353,17 @@
         .catch(function (error) {
           if (state.draftId !== draftId) return;
           state.error = true;
-          state.message = options.readableError(error);
+          var said = options.readableError(error);
+          // A design deleted since the preview (#649): the refusal is written for the model, so the card says it in
+          // the person's words and puts the design's button away. Found anywhere in the text, as a host may wrap it.
+          if (design && said.indexOf("That stationery design was not found") !== -1) {
+            state.message = "That design was deleted. Make the preview again to see your designs.";
+            drawDesigns(designs.list.filter(function (kept) {
+              return kept.designId !== design.designId;
+            }));
+          } else {
+            state.message = said;
+          }
         })
         .then(function () {
           if (state.draftId !== draftId) return;

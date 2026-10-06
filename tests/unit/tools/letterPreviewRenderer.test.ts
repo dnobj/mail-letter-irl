@@ -550,6 +550,12 @@ describe('stationery (#563)', () => {
     expect(offered.stationeryDesigns).toEqual([{ designId: id, name: 'Party', design }]);
     expect(listDesigns).toHaveBeenCalledWith('user-1');
 
+    // Not reading them never fails the preview: the card simply has no design buttons.
+    vi.mocked(listDesigns).mockRejectedValueOnce(new Error('connection reset'));
+    const unread = await run('text_only', { stationery: 'classic' });
+    expect(unread.draftId).toBeDefined();
+    expect(unread).not.toHaveProperty('stationeryDesigns');
+
     vi.mocked(listDesigns).mockClear();
     vi.stubEnv('LETTER_IRL_CUSTOM_STATIONERY_ENABLED', '');
     const off = await run('text_only', { stationery: 'classic' });

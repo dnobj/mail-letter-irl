@@ -1864,9 +1864,10 @@ dashboard.
    the card's summary names "Garden".
 3. [ ] On the card's Style tab, verify a **Garden** button after the six themes, pressed. Press **Botanical**: verify the
    page is drawn again in Botanical and Botanical is pressed. Press **Garden**: verify it comes back.
-4. [ ] Ask for a design with the monogram ornament and a headline ("Party", confetti, a headline "Happy Birthday!").
-   Verify a preview in it prints the initials only with a monogram ornament (ask once with confetti and initials:
-   refused, saying why), and the headline above the letter.
+4. [ ] Ask for two designs: "Party" with confetti, and "Initials" with the monogram ornament. Preview a letter in
+   "Initials": verify the initials print in the ring. Preview one in "Party" with initials: verify it is refused,
+   saying initials print only with the monogram ornament. Preview one in "Party" with a headline ("Happy Birthday!"):
+   verify the headline prints above the letter.
 5. [ ] Save a design under a name you have, in other capitals ("GARDEN"): verify it says it replaced the design, and
    the list (`list_stationery_designs`) still has one Garden. Save designs until you have ten, then an eleventh: verify
    the refusal names deleting one or saving under an existing name.
