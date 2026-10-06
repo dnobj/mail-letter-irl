@@ -702,6 +702,8 @@ function flowPages(letter: PreparedLetter, maxPages: number): Layout {
 
 /** What a letter's pages hold, and the room left on its last: for the card's fit meter (#586). */
 export interface PageFit {
+  /** The most pages the letter may run to now, where the card's words editor shows it (#647): 1 without room to write. */
+  maxPages?: number;
   /** The letter's pages, a gift page not among them. */
   pages: number;
   /** Sheets of paper: a letter of more than one page prints on both sides. */

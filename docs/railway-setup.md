@@ -131,6 +131,9 @@ LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS=<days after it closes, or after its li
 # Signatures (#608, docs/tool-apis.md#signatures): a saved picture of the person's signature, and /api/signature for the
 # website. Offered only while LETTER_IRL_PRINT_RENDERER is pdf. API service only; production waits for the owner.
 LETTER_IRL_SIGNATURES_ENABLED=<true to list set_signature, get_signature, clear_signature and set_letter_signature; unset is off>
+# The words editor (#647, docs/deployment.md): a letter's words changed in place on one page, without room to write.
+# Offered only while LETTER_IRL_PRINT_RENDERER is pdf; room to write turns it on by itself. API service only.
+LETTER_IRL_WORDS_EDITOR_ENABLED=<true to change a letter's words in place on one page; unset is off>
 # The letter card's envelope reveal (#576, docs/ui-widgets.md): cards only, nothing prints differently.
 LETTER_IRL_ENVELOPE_REVEAL_ENABLED=<true to open previews from an envelope; unset is off>
 # The studio card (#580, docs/ui-widgets.md): the letter card laid out with Style, Words and Delivery tabs. Cards only.

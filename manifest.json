@@ -263,7 +263,7 @@
           },
           "wordsVersion": {
             "type": "string",
-            "description": "While room to write is offered: the version of the letter's words, which set_letter_words takes to say which words it replaces"
+            "description": "While a letter's words can be changed in place: the version of the letter's words, which set_letter_words takes to say which words it replaces"
           },
           "previewHtml": {
             "type": "string"
@@ -716,7 +716,7 @@
           },
           "wordsVersion": {
             "type": "string",
-            "description": "While room to write is offered: the version of the letter's words, which set_letter_words takes to say which words it replaces"
+            "description": "While a letter's words can be changed in place: the version of the letter's words, which set_letter_words takes to say which words it replaces"
           },
           "previewHtml": {
             "type": "string"
@@ -1169,7 +1169,7 @@
           },
           "wordsVersion": {
             "type": "string",
-            "description": "While room to write is offered: the version of the letter's words, which set_letter_words takes to say which words it replaces"
+            "description": "While a letter's words can be changed in place: the version of the letter's words, which set_letter_words takes to say which words it replaces"
           },
           "previewHtml": {
             "type": "string"
@@ -2776,14 +2776,14 @@
           },
           "bodyText": {
             "type": "string",
-            "description": "A ready letter, while room to write is offered: its words now, for the card"
+            "description": "A ready letter, while a letter's words can be changed in place (room to write, or the words editor): its words now, for the card"
           },
           "signOff": {
             "type": "string"
           },
           "wordsVersion": {
             "type": "string",
-            "description": "While room to write is offered: the version of the letter's words, which set_letter_words takes to say which words it replaces"
+            "description": "While a letter's words can be changed in place: the version of the letter's words, which set_letter_words takes to say which words it replaces"
           },
           "mailService": {
             "type": "string",

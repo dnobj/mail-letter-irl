@@ -154,6 +154,16 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
+describe('the words editor without room to write (#647)', () => {
+  it('gives the card the fit and the words version on one page, and says the letter may run to one page', async () => {
+    vi.stubEnv('LETTER_IRL_ROOM_TO_WRITE_ENABLED', '');
+    vi.stubEnv('LETTER_IRL_WORDS_EDITOR_ENABLED', 'true');
+    const output = await run('text_only', { bodyText: lines(10) });
+    expect(output.pageFit).toMatchObject({ pages: 1, maxPages: 1 });
+    expect(output.wordsVersion).toBe(wordsVersionOf(lines(10), 'Pat'));
+  });
+});
+
 describe('when room to write is offered', () => {
   it('gives no fit while room to write is not offered', async () => {
     const output = await run('text_only', { bodyText: lines(10) });

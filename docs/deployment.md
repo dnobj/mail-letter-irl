@@ -932,6 +932,10 @@ account unable to start another, until a restart. Bodies are sent at once,
 without waiting for "100 Continue" (`expectContinueHeader: false`), so a store
 that never sends it cannot hold a large upload until it times out.
 
+## Words editor flag
+
+`LETTER_IRL_WORDS_EDITOR_ENABLED` lets a letter's words be changed in place, on the card's Words tab and with `set_letter_words`, without room to write (#647). The letter then stays on one page: words that do not fit are refused, and the card's editor says how much room is left on the page. Room to write (`LETTER_IRL_ROOM_TO_WRITE_ENABLED`) turns the editor on by itself, on up to three pages. Needs our renderer (`LETTER_IRL_PRINT_RENDERER=pdf`). Default off; refresh the connector after turning it on, since `set_letter_words` is then listed.
+
 ## Letter IRL home flag
 
 `LETTER_IRL_HOME_ENABLED` adds the read-only `open_letter_home` tool and its global Plugin Extensions entrypoint. Default off. Reconnect/refresh the development connector after enabling it, and complete HOME-01 before live enablement. No migration is needed; this read expects the existing schema through migration 053. Turning it off refuses cached tool calls and widget reads. See [Letter IRL home](letter-home.md).

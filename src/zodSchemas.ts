@@ -86,7 +86,7 @@ const headlineZ = z.preprocess(noneForNull, z.string().optional()).describe(HEAD
 /** A letter of more than one page (#586), on the letter previews' output. */
 /** The version of a letter's words (#586), which a change of them names. */
 export const WORDS_VERSION_DESCRIPTION =
-  "While room to write is offered: the version of the letter's words, which set_letter_words takes to say which words it replaces";
+  "While a letter's words can be changed in place: the version of the letter's words, which set_letter_words takes to say which words it replaces";
 export const SET_LETTER_WORDS_VERSION_DESCRIPTION =
   "The wordsVersion of the words this change replaces, from the preview or the last change of words. The letter card can change the words too: if they changed since, nothing is changed, and the answer gives the words as they are now";
 export const PREVIEW_PAGES_DESCRIPTION =
@@ -488,7 +488,7 @@ export const setStationeryInputZ = z.object({
 });
 
 // A letter preview's words, changed without previewing again (#586). Listed
-// only while room to write is offered (src/server.ts).
+// only while the words can be changed in place: room to write, or the words editor (#647, src/server.ts).
 export const SET_LETTER_WORDS_BODY_DESCRIPTION = "The letter's body in full: it replaces the words the preview has";
 export const SET_LETTER_WORDS_SIGN_OFF_DESCRIPTION = "The closing and signature in full (e.g., 'Love, Pat')";
 export const setLetterWordsInputZ = z.object({
@@ -1027,7 +1027,7 @@ export const getDraftStatusOutputZ = z.object({
   layout: z.enum(["full_bleed", "border", "greetings"]).optional().describe("With it, the postcard's front now"),
   caption: z.string().optional().describe("The border's caption, when it has one"),
   place: z.string().optional().describe("The place the greeting names"),
-  bodyText: z.string().optional().describe("A ready letter, while room to write is offered: its words now, for the card"),
+  bodyText: z.string().optional().describe("A ready letter, while a letter's words can be changed in place (room to write, or the words editor): its words now, for the card"),
   signOff: z.string().optional(),
   wordsVersion: z.string().optional().describe(WORDS_VERSION_DESCRIPTION),
   stationery: z

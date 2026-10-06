@@ -1,11 +1,12 @@
 import type { Address, LetterLayoutType, McpToolDefinition, ToolContext } from '../contracts/types.js';
 import { setLetterSignatureInputSchema, setLetterSignatureOutputSchema } from '../schemas.js';
 import { letterPageLimit } from '../config/roomToWrite.js';
+import { isWordsEditorOffered } from '../config/wordsEditor.js';
 import type { SendEligibility } from '../services/commerceService.js';
-import { pageFit, SIGNATURE_LINES, stationeryOf, type PageFit } from '../render/index.js';
+import { SIGNATURE_LINES, stationeryOf, type PageFit } from '../render/index.js';
 import { getDraftForStationery, setDraftSignature, type DraftRedrawRefusal } from '../services/draftService.js';
 import { getSignature } from '../services/signatureService.js';
-import { PAGE_WORDS, layoutLetterForPreview, letterOption, letterPayment, letterRunsPast, pageChangeSentence, redrawLetterPreview, type LetterTravel } from './letterHelpers.js';
+import { PAGE_WORDS, editorPageFit, layoutLetterForPreview, letterOption, letterPayment, letterRunsPast, pageChangeSentence, redrawLetterPreview, type LetterTravel } from './letterHelpers.js';
 import { isDraftIdShape } from './requestSend.js';
 import { requireSignatures, SignatureRefusedError, signatureImageUri, type SignatureRefusalCode } from './signatureShared.js';
 import type { PreviewSignatureOutput } from './signatureInput.js';
@@ -190,7 +191,7 @@ async function handler(input: SetLetterSignatureInput, context: ToolContext): Pr
     previewHtml,
     ...(pages > 1 ? { pages } : {}),
     ...payment,
-    ...(letterPageLimit() > 1 ? { pageFit: pageFit(layout, stationery) } : {}),
+    ...(isWordsEditorOffered() ? { pageFit: editorPageFit(layout, stationery) } : {}),
     message: messageFor(signatureImage !== null, pages, pagesBefore, draft.mail_service)
   };
 }

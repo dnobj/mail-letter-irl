@@ -307,3 +307,17 @@ describe('set_letter_signature', () => {
     expect(setLetterSignatureTool.readOnly).toBe(false);
   });
 });
+
+describe('set_letter_signature and the words editor (#647)', () => {
+  it('gives the card how full the page is with the words editor alone, on one page', async () => {
+    vi.stubEnv('LETTER_IRL_WORDS_EDITOR_ENABLED', 'true');
+    vi.mocked(getDraftForStationery).mockResolvedValue(draft());
+    const output = await run({ signature: true });
+    expect(output.pageFit).toMatchObject({ pages: 1, maxPages: 1 });
+  });
+
+  it('gives no fit without the words editor or room to write', async () => {
+    vi.mocked(getDraftForStationery).mockResolvedValue(draft());
+    expect(await run({ signature: true })).not.toHaveProperty('pageFit');
+  });
+});

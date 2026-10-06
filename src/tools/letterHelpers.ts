@@ -28,6 +28,7 @@ import { createDraft } from "../services/draftService.js";
 import { findUnprintable, unprintableRefusal, type PrintedText, type ThemedFace } from "../services/printableText.js";
 import { printRenderer } from "../config/printRenderer.js";
 import { isRoomToWriteOffered, letterPageLimit } from "../config/roomToWrite.js";
+import { isWordsEditorOffered } from "../config/wordsEditor.js";
 import {
   bodyFace,
   drawsGrapheme,
@@ -151,9 +152,9 @@ export interface LetterQuoteOutput {
   mailService?: CertifiedMailService;
   /** A letter of more than one page (#586): the pages it prints on, both sides of the paper, paid with Pay & Send. */
   pages?: number;
-  /** While room to write is offered (#586): how full its pages are, for the card's fit line. Card-only (_meta). */
+  /** While the words can be changed in place (#586, #647): how full its pages are, for the card's fit line. Card-only (_meta). */
   pageFit?: PageFit;
-  /** While room to write is offered (#586): the version of these words, which set_letter_words takes to say which words it replaces. */
+  /** While the words can be changed in place (#586, #647): the version of these words, which set_letter_words takes to say which words it replaces. */
   wordsVersion?: string;
 }
 
@@ -1188,6 +1189,14 @@ export function travelFields(mailService: string | null | undefined): LetterTrav
 }
 
 /**
+ * How full a letter's pages are, for the card's fit line and words editor (#586), with the most pages it may run to
+ * now (#647): one without room to write, so the editor can say the words must fit one page.
+ */
+export function editorPageFit(layout: Layout, stationery?: Stationery) {
+  return { ...pageFit(layout, stationery), maxPages: letterPageLimit() };
+}
+
+/**
  * What a letter preview's draft costs as it stands, and whether the balance
  * pays: the terms a preview gives (createLetterDraftAndBuildOutput), for a
  * draft whose pages a restyle changed (#586). A gift letter is paid for. A
@@ -1411,8 +1420,8 @@ export async function createLetterDraftAndBuildOutput(
     // And how full its pages are, for the card's fit line, while room to write
     // is offered: counted before any gift page, in the theme's face.
     // With the version of its words, which a change of them names (#586).
-    ...(printLayout && letterPageLimit() > 1
-      ? { pageFit: pageFit(printLayout, stationery), wordsVersion: wordsVersionOf(bodyText, signOff) }
+    ...(printLayout && isWordsEditorOffered()
+      ? { pageFit: editorPageFit(printLayout, stationery), wordsVersion: wordsVersionOf(bodyText, signOff) }
       : {}),
   };
 

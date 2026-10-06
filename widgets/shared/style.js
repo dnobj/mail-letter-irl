@@ -341,6 +341,8 @@
       var count = Math.abs(left).toLocaleString("en-US");
       if (left >= 0) return "About " + count + " characters left on " + ROOM_ON[pages] + ".";
       if (words.gift) return "About " + count + " characters past this page, and a gift letter is one page.";
+      // Without room to write the letter stays on one page (#647).
+      if (fit.maxPages === 1) return "About " + count + " characters past this page, and this letter must fit on one page.";
       if (pages === 3) return "About " + count + " characters past the third page, more than we print.";
       return "About " + count + " characters past " + ROOM_ON[pages] + ": Update the page to see how it runs on.";
     }
