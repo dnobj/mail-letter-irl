@@ -84,11 +84,13 @@ const NAME_NONSENSE = /[\p{Cc}\p{Cs}\p{Cn}\p{Co}]/gu;
  */
 const NAME_FORMATTING = new RegExp('[\\p{Cf}--[\\p{Join_Control}\\p{Emoji_Component}]]', 'gv');
 /**
- * Emoji tag characters, kept only where they make a flag (a black flag, tags, a
- * cancel tag): anywhere else they are text the person cannot see but a model
- * reads, and a saved name is read back to the chat (#649 review round 3).
+ * Emoji tag characters, kept only where they make one of the three flags
+ * Unicode recommends for general use, England's, Scotland's and Wales's (a
+ * black flag, its tags, a cancel tag): anywhere else, a made-up flag's
+ * included, they are text the person cannot see but a model reads, and a
+ * saved name is read back to the chat (#649 review rounds 3 and 4).
  */
-const NAME_TAGS = /(\u{1F3F4}[\u{E0020}-\u{E007E}]+\u{E007F})|[\u{E0020}-\u{E007F}]/gu;
+const NAME_TAGS = /(\u{1F3F4}\u{E0067}\u{E0062}(?:\u{E0065}\u{E006E}\u{E0067}|\u{E0073}\u{E0063}\u{E0074}|\u{E0077}\u{E006C}\u{E0073})\u{E007F})|[\u{E0020}-\u{E007F}]/gu;
 /**
  * What a name must hold at least one of: a letter, a digit, punctuation or a
  * symbol (emoji among them), but not the blank fillers that look like nothing

@@ -410,6 +410,13 @@ describe("a design's name (#649)", () => {
     expect(designNameOf(`Garden${String.fromCodePoint(0x1f3f4)}${tags('gbeng')}`)).toBe(`Garden${String.fromCodePoint(0x1f3f4)}`);
     // Hidden text after a flag goes, the flag stays.
     expect(designNameOf(`${england}${tags('ignore')}`)).toBe(england);
+    // Scotland's and Wales's are flags too; a made-up flag wrapped around hidden text is not.
+    const flag = (code: string) => String.fromCodePoint(0x1f3f4) + tags(code) + String.fromCodePoint(0xe007f);
+    expect(designNameOf(flag('gbsct'))).toBe(flag('gbsct'));
+    expect(designNameOf(flag('gbwls'))).toBe(flag('gbwls'));
+    expect(designNameOf(`Garden ${flag('ignore the person')}`)).toBe(`Garden ${String.fromCodePoint(0x1f3f4)}`);
+    expect(designNameOf(`Garden ${flag('usca')}`)).toBe(`Garden ${String.fromCodePoint(0x1f3f4)}`);
+    expect(designNameOf(`Garden ${flag('gbengx')}`)).toBe(`Garden ${String.fromCodePoint(0x1f3f4)}`);
   });
 
   it('needs more than blank fillers that look like nothing', () => {
