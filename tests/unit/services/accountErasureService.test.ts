@@ -102,7 +102,10 @@ describe("processing queued erasures", () => {
     expect(done.text).toMatch(/status = 'succeeded'/);
     expect(done.values?.[0]).toBe("op-1");
     const counts = JSON.parse(String(done.values?.[1]));
-    expect(counts).toMatchObject({ lettersScrubbed: 2, accessTokensDeleted: 2, descriptionsCleared: 4 });
+    expect(counts).toMatchObject({ lettersScrubbed: 2, accessTokensDeleted: 2, descriptionsCleared: 4, stationeryDesignsDeleted: 2 });
+    // The account's saved designs go, and it forgets the one it remembered (#649).
+    expect(client.statements.some((s) => s.text === "DELETE FROM stationery_designs WHERE user_id = $1")).toBe(true);
+    expect(client.statements.find((s) => s.text.includes("erased_at = NOW()"))?.text).toContain("stationery_design_id = NULL");
     // Every write ran under the savepoint, and nothing was rolled back.
     expect(client.statements.some((s) => s.text === "SAVEPOINT admin_operation")).toBe(true);
     expect(client.statements.some((s) => s.text.startsWith("ROLLBACK TO SAVEPOINT"))).toBe(false);
