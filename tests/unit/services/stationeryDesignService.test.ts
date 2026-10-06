@@ -1,6 +1,7 @@
 /**
- * Saved stationery designs (#649): the name a design is kept under, and ids
- * that name no design. What the statements hold is the PostgreSQL suite's
+ * Saved stationery designs (#649): ids that name no design. The name rule is
+ * the renderer's (tests/unit/render/stationeryDesigns.test.ts); what the
+ * statements hold is the PostgreSQL suite's
  * (tests/integration/stationeryDesigns.postgres.test.ts).
  */
 
@@ -14,7 +15,6 @@ vi.mock('../../../src/db/index.js', () => ({
 import { query } from '../../../src/db/index.js';
 import {
   deleteDesign,
-  designNameOf,
   getDesign,
   isDesignId,
   rememberDesign
@@ -22,35 +22,6 @@ import {
 
 beforeEach(() => {
   vi.mocked(query).mockReset();
-});
-
-describe("a design's name (#649)", () => {
-  it('is kept trimmed, with each run of white space one space', () => {
-    expect(designNameOf('  Grandma   Ruth \t')).toBe('Grandma Ruth');
-    expect(designNameOf('Line\nbreak')).toBe('Line break');
-  });
-
-  it('loses what prints nothing: controls, bidi marks and zero-width characters', () => {
-    const hidden = String.fromCodePoint(0x202e, 0x200b, 0x2066, 0x0007, 0xfeff);
-    expect(designNameOf(`Gar${hidden}den`)).toBe('Garden');
-    expect(designNameOf(`${hidden}`)).toBeNull();
-  });
-
-  it('holds one to forty characters, counted as PostgreSQL counts them', () => {
-    expect(designNameOf('x')).toBe('x');
-    expect(designNameOf('x'.repeat(40))).toBe('x'.repeat(40));
-    expect(designNameOf('x'.repeat(41))).toBeNull();
-    // Forty code points, eighty UTF-16 units: kept.
-    const smile = String.fromCodePoint(0x1f600);
-    expect(designNameOf(smile.repeat(40))).toBe(smile.repeat(40));
-    expect(designNameOf(smile.repeat(41))).toBeNull();
-    expect(designNameOf('')).toBeNull();
-    expect(designNameOf('   ')).toBeNull();
-  });
-
-  it('is text', () => {
-    for (const value of [undefined, null, 7, ['Garden'], { name: 'Garden' }]) expect(designNameOf(value)).toBeNull();
-  });
 });
 
 describe('an id that names no design (#649)', () => {

@@ -14,8 +14,10 @@
  */
 
 import { query, transaction } from '../db/index.js';
-import { withoutInvisible } from '../render/bidi.js';
-import { designOf, STATIONERY_DESIGN_NAME_MAX_LENGTH, type StationeryDesign } from '../render/stationery.js';
+import { designOf, type StationeryDesign } from '../render/stationery.js';
+
+// A design's name is kept as the renderer reads one back (src/render/stationery.ts), so no saved name is ever dropped.
+export { designNameOf } from '../render/stationery.js';
 
 /** The most designs an account may hold. */
 export const MAX_STATIONERY_DESIGNS = 10;
@@ -60,24 +62,6 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Whether text is a design id at all: anything else names no design, and is never handed to PostgreSQL's uuid parser. */
 export function isDesignId(value: unknown): value is string {
   return typeof value === 'string' && UUID.test(value);
-}
-
-/**
- * A design's name as it is kept: what prints nothing (controls, bidi marks,
- * zero-width characters) taken out, every run of white space one space, the
- * ends trimmed; null when that leaves nothing, or more than
- * STATIONERY_DESIGN_NAME_MAX_LENGTH characters (counted as PostgreSQL counts
- * them: code points). The name is shown to the person, never printed.
- */
-export function designNameOf(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
-  const name = withoutInvisible(value)
-    .replace(/[\t\n\v\f\r\p{Zl}\p{Zp}]/gu, ' ')
-    .replace(/[\p{Cc}\p{Cf}]/gu, '')
-    .replace(/\s+/gu, ' ')
-    .trim();
-  const length = [...name].length;
-  return length >= 1 && length <= STATIONERY_DESIGN_NAME_MAX_LENGTH ? name : null;
 }
 
 /** The account's designs, oldest first. */
