@@ -107,6 +107,7 @@ What it means for themes (`src/render/stationery.ts`):
 - **The corner beside the envelope window is free.** Themes draw their date line, monogram, sprigs and confetti in it (`STATIONERY_CORNER`).
 - **Draw lines at 0.5 pt or more,** and in greys from #222 to #aaa. A 0.25 pt rule prints lighter than drawn.
 - **Greys print as drawn in the PDF.** Whether a 5% tint shows on paper is a question for the live print, which test mode doesn't show.
+- **Saved designs (#649) are made of these pieces only.** A design chooses a face (Tinos, Cousine or Caveat), a corner ornament (the monogram's ring, the sprig, the confetti, or none), the faint rules under any face, and the ornament's grey: #222, #555, #888 or #aaa, the greys P12 printed on the sprigs (0.75 pt) and in the tints. A grey monogram's inner ring is 0.5 pt in that grey, as the rules were, and its initials are filled in it. The confetti keeps its own mix. Nothing a design draws is new geometry, so P12's corner and line widths hold for every design; the body's ink stays #222.
 
 ## Letters of more than one page (#586)
 

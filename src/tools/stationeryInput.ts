@@ -14,8 +14,8 @@ import {
   STATIONERY_SLOT_MAX_LENGTH,
   STATIONERY_THEMES,
   visualOrder,
-  type Stationery,
-  type StationeryTheme
+  type StationeryTheme,
+  type ThemeStationery
 } from '../render/index.js';
 import { withoutInvisible } from '../render/bidi.js';
 import { clampMarks } from '../render/marks.js';
@@ -29,7 +29,7 @@ import { rememberedStationery } from '../services/stationeryDefaultService.js';
 export type StationerySource = 'asked' | 'remembered' | 'default';
 
 /** A preview's stationery, and why it is that one. The draft stores the stationery alone (stationeryOf drops the rest). */
-export type PreviewStationery = Stationery & { source: StationerySource };
+export type PreviewStationery = ThemeStationery & { source: StationerySource };
 
 /** The previews' three stationery arguments, as they arrive: unchecked. */
 export interface StationeryInput {

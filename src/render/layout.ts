@@ -9,7 +9,7 @@ import {
 } from './geometry.js';
 import type { RenderImage } from './images.js';
 import { clampMarks, MARK, MAX_MARKS_PER_LETTER } from './marks.js';
-import { bodyFace, layoutStationery, ruledLines, type Band, type Stationery } from './stationery.js';
+import { isRuled, layoutStationery, ruledLines, stationeryFace, type Band, type Stationery } from './stationery.js';
 import type { LetterLayoutType } from '../contracts/types.js';
 
 export interface LetterContent {
@@ -502,8 +502,8 @@ interface PreparedLetter {
 type LetterLine = WrappedLine & { signature?: true };
 
 function prepareLetter(content: LetterContent): PreparedLetter {
-  const stationery = content.stationery ?? { theme: 'classic' };
-  const { font: fontName, size } = bodyFace(stationery.theme);
+  const stationery: Stationery = content.stationery ?? { theme: 'classic' };
+  const { font: fontName, size } = stationeryFace(stationery);
   const baseline = baselineOffset(size, LINE_PITCH, fontName);
 
   const theme = layoutStationery(stationery, BODY_TOP);
@@ -569,7 +569,7 @@ function pageItems(
   // The signature's band, when it is on this page: all of it is, after keepSignatureWithClosing.
   const band = signature ? lines.findIndex(line => line.signature) : -1;
   const bandTop = top + band * LINE_PITCH;
-  if (letter.stationery.theme === 'handwritten') {
+  if (isRuled(letter.stationery)) {
     const covered: Band[] = inlineBox && inlineTop !== undefined ? [{ top: inlineTop, bottom: inlineTop + inlineBox.height }] : [];
     // A hair inside its lines: the band's edges fall exactly on two lines' edges, and
     // floating point would otherwise cover the lines above and below it too.
@@ -731,7 +731,7 @@ const AVERAGE_SAMPLE = 'the quick brown fox jumps over the lazy dog while letter
  * it, before any gift page is added; `stationery` the letter's, for its face.
  */
 export function pageFit(layout: Layout, stationery?: Stationery): PageFit {
-  const { font: fontName, size } = bodyFace((stationery ?? { theme: 'classic' }).theme);
+  const { font: fontName, size } = stationeryFace(stationery ?? { theme: 'classic' });
   const font = loadFont(fontName);
   const average = (shape(font, AVERAGE_SAMPLE).advanceWidth * size) / font.unitsPerEm / AVERAGE_SAMPLE.length;
   const charactersPerLine = Math.floor(CONTENT_WIDTH / average);

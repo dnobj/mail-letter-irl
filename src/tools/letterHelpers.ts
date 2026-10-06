@@ -31,6 +31,8 @@ import { isRoomToWriteOffered, letterPageLimit } from "../config/roomToWrite.js"
 import { isWordsEditorOffered } from "../config/wordsEditor.js";
 import {
   bodyFace,
+  printsHeadline,
+  stationeryFace,
   drawsGrapheme,
   drawsGraphemeIn,
   GiftPageOverflow,
@@ -684,7 +686,7 @@ export function layoutLetterForPreview(
   if (layout.overflowLines === 0) return layout;
 
   const { linesUsed, linesAvailable } = layout.pages[layout.pages.length - 1];
-  const headline = stationery?.theme === "celebration" && stationery.headline !== undefined;
+  const headline = stationery !== undefined && printsHeadline(stationery) && stationery.headline !== undefined;
   context.logger.warn(
     {
       correlationId: context.correlationId,
@@ -863,7 +865,7 @@ export function validatePrintableCharacters(
  */
 export function ownFaceTheme(stationery: Stationery | undefined): Stationery["theme"] | undefined {
   if (!stationery) return undefined;
-  return bodyFace(stationery.theme).font === bodyFace("classic").font ? undefined : stationery.theme;
+  return stationeryFace(stationery).font === bodyFace("classic").font ? undefined : stationery.theme;
 }
 
 /**
@@ -886,7 +888,7 @@ export function validatePrintableLetter(
   const slots = prints ? stationery : undefined;
   // The text prints in its theme's typeface: one with its own is checked against it.
   const own = prints ? ownFaceTheme(stationery) : undefined;
-  const textPrints = own ? drawsGraphemeIn(bodyFace(own).font) : prints;
+  const textPrints = own && stationery ? drawsGraphemeIn(stationeryFace(stationery).font) : prints;
   const inFace = own ? `, which the ${own} stationery prints in its own typeface` : "";
   validatePrintableCharacters(
     "letter",
