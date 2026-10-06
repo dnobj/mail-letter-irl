@@ -195,7 +195,58 @@
                   "botanical",
                   "celebration",
                   "typewriter",
-                  "handwritten"
+                  "handwritten",
+                  "custom"
+                ],
+                "description": "The stationery drawn: a built-in theme, or custom for a saved stationery design, named in name"
+              },
+              "designId": {
+                "type": "string",
+                "description": "With the custom theme: the saved design's designId, which stationeryDesignId takes"
+              },
+              "name": {
+                "type": "string",
+                "description": "With the custom theme: the name the design was saved under"
+              },
+              "design": {
+                "type": "object",
+                "description": "With the custom theme: the saved design's choices, as save_stationery_design took them",
+                "properties": {
+                  "face": {
+                    "type": "string",
+                    "enum": [
+                      "serif",
+                      "typewriter",
+                      "handwritten"
+                    ]
+                  },
+                  "ornament": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "monogram",
+                      "sprig",
+                      "confetti"
+                    ]
+                  },
+                  "ruled": {
+                    "type": "boolean"
+                  },
+                  "tone": {
+                    "type": "string",
+                    "enum": [
+                      "black",
+                      "dark",
+                      "medium",
+                      "light"
+                    ]
+                  }
+                },
+                "required": [
+                  "face",
+                  "ornament",
+                  "ruled",
+                  "tone"
                 ]
               },
               "dateLine": {
@@ -648,7 +699,58 @@
                   "botanical",
                   "celebration",
                   "typewriter",
-                  "handwritten"
+                  "handwritten",
+                  "custom"
+                ],
+                "description": "The stationery drawn: a built-in theme, or custom for a saved stationery design, named in name"
+              },
+              "designId": {
+                "type": "string",
+                "description": "With the custom theme: the saved design's designId, which stationeryDesignId takes"
+              },
+              "name": {
+                "type": "string",
+                "description": "With the custom theme: the name the design was saved under"
+              },
+              "design": {
+                "type": "object",
+                "description": "With the custom theme: the saved design's choices, as save_stationery_design took them",
+                "properties": {
+                  "face": {
+                    "type": "string",
+                    "enum": [
+                      "serif",
+                      "typewriter",
+                      "handwritten"
+                    ]
+                  },
+                  "ornament": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "monogram",
+                      "sprig",
+                      "confetti"
+                    ]
+                  },
+                  "ruled": {
+                    "type": "boolean"
+                  },
+                  "tone": {
+                    "type": "string",
+                    "enum": [
+                      "black",
+                      "dark",
+                      "medium",
+                      "light"
+                    ]
+                  }
+                },
+                "required": [
+                  "face",
+                  "ornament",
+                  "ruled",
+                  "tone"
                 ]
               },
               "dateLine": {
@@ -1101,7 +1203,58 @@
                   "botanical",
                   "celebration",
                   "typewriter",
-                  "handwritten"
+                  "handwritten",
+                  "custom"
+                ],
+                "description": "The stationery drawn: a built-in theme, or custom for a saved stationery design, named in name"
+              },
+              "designId": {
+                "type": "string",
+                "description": "With the custom theme: the saved design's designId, which stationeryDesignId takes"
+              },
+              "name": {
+                "type": "string",
+                "description": "With the custom theme: the name the design was saved under"
+              },
+              "design": {
+                "type": "object",
+                "description": "With the custom theme: the saved design's choices, as save_stationery_design took them",
+                "properties": {
+                  "face": {
+                    "type": "string",
+                    "enum": [
+                      "serif",
+                      "typewriter",
+                      "handwritten"
+                    ]
+                  },
+                  "ornament": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "monogram",
+                      "sprig",
+                      "confetti"
+                    ]
+                  },
+                  "ruled": {
+                    "type": "boolean"
+                  },
+                  "tone": {
+                    "type": "string",
+                    "enum": [
+                      "black",
+                      "dark",
+                      "medium",
+                      "light"
+                    ]
+                  }
+                },
+                "required": [
+                  "face",
+                  "ornament",
+                  "ruled",
+                  "tone"
                 ]
               },
               "dateLine": {
@@ -2875,7 +3028,54 @@
                   "botanical",
                   "celebration",
                   "typewriter",
-                  "handwritten"
+                  "handwritten",
+                  "custom"
+                ],
+                "description": "The stationery drawn: a built-in theme, or custom for a saved stationery design, named in name"
+              },
+              "name": {
+                "type": "string",
+                "description": "With the custom theme: the name the design was saved under when the letter was drawn"
+              },
+              "design": {
+                "type": "object",
+                "description": "With the custom theme: the saved design's choices, as save_stationery_design took them",
+                "properties": {
+                  "face": {
+                    "type": "string",
+                    "enum": [
+                      "serif",
+                      "typewriter",
+                      "handwritten"
+                    ]
+                  },
+                  "ornament": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "monogram",
+                      "sprig",
+                      "confetti"
+                    ]
+                  },
+                  "ruled": {
+                    "type": "boolean"
+                  },
+                  "tone": {
+                    "type": "string",
+                    "enum": [
+                      "black",
+                      "dark",
+                      "medium",
+                      "light"
+                    ]
+                  }
+                },
+                "required": [
+                  "face",
+                  "ornament",
+                  "ruled",
+                  "tone"
                 ]
               },
               "dateLine": {

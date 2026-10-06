@@ -42,6 +42,13 @@ vi.mock('../../../src/services/stationeryDefaultService.js', () => ({
   rememberStationery: vi.fn()
 }));
 
+vi.mock('../../../src/services/stationeryDesignService.js', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../../src/services/stationeryDesignService.js')>()),
+  getDesign: vi.fn().mockResolvedValue(null),
+  rememberedDesign: vi.fn().mockResolvedValue(null),
+  rememberDesign: vi.fn().mockResolvedValue(true)
+}));
+
 vi.mock('../../../src/services/commerceService.js', async importOriginal => ({
   ...(await importOriginal<typeof import('../../../src/services/commerceService.js')>()),
   getSendEligibility: vi.fn()
@@ -55,6 +62,7 @@ import { downloadAndProcessLetterImageWithPreview } from '../../../src/services/
 import { getGiftBalance, sampleFundedCard } from '../../../src/services/giftLetterService.js';
 import { getSendEligibility } from '../../../src/services/commerceService.js';
 import { rememberedStationery, rememberStationery } from '../../../src/services/stationeryDefaultService.js';
+import { getDesign, rememberDesign } from '../../../src/services/stationeryDesignService.js';
 import { quoteAndPreviewLetterTextOnlyTool } from '../../../src/tools/quoteAndPreviewLetterTextOnly.js';
 import { quoteAndPreviewLetterWithHeaderImageTool } from '../../../src/tools/quoteAndPreviewLetterWithHeaderImage.js';
 import { quoteAndPreviewLetterWithImageTool } from '../../../src/tools/quoteAndPreviewLetterWithImage.js';
@@ -511,6 +519,25 @@ describe('stationery (#563)', () => {
     expect(inked(html).length).toBeGreaterThan(0);
     expect(html).toContain('<title>September 30, 2026\nDear Sam,\nPat</title>');
     expect(html).toContain('<body data-renderer="pdf-2">');
+  });
+
+  it.each(LAYOUTS)("%s: a saved design draws the page in it, keeps the draft's own copy, and is remembered as a design (#649)", async layout => {
+    vi.stubEnv('LETTER_IRL_CUSTOM_STATIONERY_ENABLED', 'true');
+    const id = '3f2b8c1e-9a4d-4c7e-8b1f-2d6a5e9c0b7a';
+    const design = { face: 'typewriter', ornament: 'sprig', ruled: false, tone: 'dark' } as const;
+    vi.mocked(getDesign).mockResolvedValueOnce({ designId: id, name: 'Garden', design, createdAt: '', updatedAt: '' });
+    processedLayout = layout === 'text_only' ? 'header_image' : layout;
+    const output = await run(layout, { stationeryDesignId: id });
+    const draft = drafted();
+    expect(draft.rendererVersion).toBe('pdf-2');
+    expect(draft.stationery).toEqual({ theme: 'custom', design, name: 'Garden', designId: id, dateLine: 'September 30, 2026', source: 'asked' });
+    expect(output.stationery).toEqual(draft.stationery);
+    // Remembered as a design, once the draft exists; the remembered theme is left as it was.
+    expect(rememberDesign).toHaveBeenCalledWith('user-1', id);
+    expect(vi.mocked(rememberDesign).mock.invocationCallOrder[0]).toBeGreaterThan(vi.mocked(createDraft).mock.invocationCallOrder[0]);
+    expect(rememberStationery).not.toHaveBeenCalled();
+    // Drawn in the design's grey.
+    expect(draft.previewHtml).toContain('stroke="#555555"');
   });
 
   it.each(LAYOUTS)('%s: Classic is the page as before, recording pdf-1, and says Classic', async layout => {

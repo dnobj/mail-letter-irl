@@ -346,10 +346,11 @@ describe("stationery schema (#563)", () => {
       description?: string; properties: Record<string, { enum?: string[] }>; required: string[];
     }>).stationery;
     const zodKeys = Object.keys(served.unwrap().shape);
-    expect(zodKeys).toEqual(["theme", "dateLine", "monogram", "headline", "source"]);
+    // A saved design (#649) is named by the custom theme, its id, its name and its choices.
+    expect(zodKeys).toEqual(["theme", "designId", "name", "design", "dateLine", "monogram", "headline", "source"]);
     expect(Object.keys(manifestLayer.properties)).toEqual(zodKeys);
     expect(manifestLayer.required).toEqual(["theme", "source"]);
-    expect(manifestLayer.properties.theme.enum).toEqual([...STATIONERY_THEMES]);
+    expect(manifestLayer.properties.theme.enum).toEqual([...STATIONERY_THEMES, "custom"]);
     expect(served.description).toBe(manifestLayer.description);
     expect(quoteAndPreviewPostcardOutputZ.shape).not.toHaveProperty("stationery");
   });

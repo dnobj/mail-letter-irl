@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { preprocessImageFileElement, preprocessImageFileParam, preprocessPhotoList } from "./utils/imageFileParam.js";
-import { STATIONERY_THEMES } from "./render/stationery.js";
+import { DRAWN_THEMES, STATIONERY_FACES, STATIONERY_ORNAMENTS, STATIONERY_THEMES, STATIONERY_TONES } from "./render/stationery.js";
 import { MAX_LETTER_PAGES } from "./render/geometry.js";
 import { MAIL_SERVICES } from "./config/certifiedMail.js";
 import { EXTRA_SERVICES } from "./config/products.js";
@@ -82,6 +82,11 @@ const stationeryZ = z.preprocess(themeName, z.enum(STATIONERY_THEMES).optional()
 const noneForNull = (value: unknown): unknown => (value === null ? undefined : value);
 const monogramZ = z.preprocess(noneForNull, z.string().optional()).describe(MONOGRAM_DESCRIPTION);
 const headlineZ = z.preprocess(noneForNull, z.string().optional()).describe(HEADLINE_DESCRIPTION);
+/** A saved design (#649): withheld while designs are not offered (withheldInputKeys). */
+export const STATIONERY_DESIGN_ID_DESCRIPTION =
+  "Optional, only when the user asks for one of their saved stationery designs: its designId, from list_stationery_designs or save_stationery_design. " +
+  "The letter is drawn in that design instead of a stationery: leave stationery out with it. Monogram prints only on a design whose ornament is the monogram; headline prints on any design.";
+const stationeryDesignIdZ = z.preprocess(noneForNull, z.string().optional()).describe(STATIONERY_DESIGN_ID_DESCRIPTION);
 
 /** A letter of more than one page (#586), on the letter previews' output. */
 /** The version of a letter's words (#586), which a change of them names. */
@@ -98,8 +103,21 @@ export const PREVIEW_STATIONERY_DESCRIPTION =
   "it prints, and why: asked for, the account's last choice, or classic by default";
 export const STATIONERY_SOURCE_DESCRIPTION =
   "Why this stationery: asked for in the call, the account's remembered choice, or classic by default";
+/** A saved design's four choices (#649), as an output says them. */
+export const STATIONERY_DESIGN_OUTPUT_DESCRIPTION = "With the custom theme: the saved design's choices, as save_stationery_design took them";
+export const stationeryDesignZ = z.object({
+  face: z.enum(STATIONERY_FACES),
+  ornament: z.enum(STATIONERY_ORNAMENTS),
+  ruled: z.boolean(),
+  tone: z.enum(STATIONERY_TONES)
+});
+export const STATIONERY_THEME_OUTPUT_DESCRIPTION =
+  "The stationery drawn: a built-in theme, or custom for a saved stationery design, named in name";
 const previewStationeryZ = z.object({
-  theme: z.enum(STATIONERY_THEMES),
+  theme: z.enum(DRAWN_THEMES).describe(STATIONERY_THEME_OUTPUT_DESCRIPTION),
+  designId: z.string().optional().describe("With the custom theme: the saved design's designId, which stationeryDesignId takes"),
+  name: z.string().optional().describe("With the custom theme: the name the design was saved under"),
+  design: stationeryDesignZ.optional().describe(STATIONERY_DESIGN_OUTPUT_DESCRIPTION),
   dateLine: z.string().optional(),
   monogram: z.string().optional(),
   headline: z.string().optional(),
@@ -173,6 +191,7 @@ export const quoteAndPreviewInputZ = z.object({
   sendAsGift: sendAsGiftZ,
   arriveBy: arriveByZ,
   stationery: stationeryZ,
+  stationeryDesignId: stationeryDesignIdZ,
   monogram: monogramZ,
   headline: headlineZ,
   signature: previewSignatureZ,
@@ -241,6 +260,7 @@ export const quoteAndPreviewLetterWithHeaderImageInputZ = z.object({
   sendAsGift: sendAsGiftZ,
   arriveBy: arriveByZ,
   stationery: stationeryZ,
+  stationeryDesignId: stationeryDesignIdZ,
   monogram: monogramZ,
   headline: headlineZ,
   signature: previewSignatureZ,
@@ -260,6 +280,7 @@ export const quoteAndPreviewLetterWithImageInputZ = z.object({
   sendAsGift: sendAsGiftZ,
   arriveBy: arriveByZ,
   stationery: stationeryZ,
+  stationeryDesignId: stationeryDesignIdZ,
   monogram: monogramZ,
   headline: headlineZ,
   signature: previewSignatureZ,
@@ -480,9 +501,12 @@ export const SET_STATIONERY_DESCRIPTION =
   "typewriter, the letter typed in a monospace face, which fits fewer words on the page; " +
   "or handwritten, the letter in a handwriting face on faint ruled lines, which has no Greek, Hebrew or Vietnamese. " +
   "Each but classic prints the date at the top right.";
+/** set_stationery's theme as it is served while saved designs are not offered (#649): required, as before them. */
+export const setStationeryThemeRequiredZ = z.preprocess(themeName, z.enum(STATIONERY_THEMES)).describe(SET_STATIONERY_DESCRIPTION);
 export const setStationeryInputZ = z.object({
   draftId: z.string().describe("The draftId from a letter preview"),
-  stationery: z.preprocess(themeName, z.enum(STATIONERY_THEMES)).describe(SET_STATIONERY_DESCRIPTION),
+  stationery: z.preprocess(themeName, z.enum(STATIONERY_THEMES).optional()).describe(SET_STATIONERY_DESCRIPTION),
+  stationeryDesignId: stationeryDesignIdZ,
   monogram: monogramZ,
   headline: headlineZ
 });
@@ -1032,7 +1056,9 @@ export const getDraftStatusOutputZ = z.object({
   wordsVersion: z.string().optional().describe(WORDS_VERSION_DESCRIPTION),
   stationery: z
     .object({
-      theme: z.enum(STATIONERY_THEMES),
+      theme: z.enum(DRAWN_THEMES).describe(STATIONERY_THEME_OUTPUT_DESCRIPTION),
+      name: z.string().optional().describe("With the custom theme: the name the design was saved under when the letter was drawn"),
+      design: stationeryDesignZ.optional().describe(STATIONERY_DESIGN_OUTPUT_DESCRIPTION),
       dateLine: z.string().optional(),
       monogram: z.string().optional(),
       headline: z.string().optional()
@@ -1110,6 +1136,51 @@ export const getSignatureOutputZ = z.object({
   width: z.number().optional(),
   height: z.number().optional(),
   savedAt: z.string().optional().describe(SIGNATURE_SAVED_AT_DESCRIPTION),
+  message: z.string()
+});
+
+// Saved stationery designs (#649): saved, listed and deleted. Listed only while designs are offered (src/server.ts).
+export const DESIGN_NAME_DESCRIPTION = "The person's name for the design, 1 to 40 characters, such as \"Garden letters\"; saving under a name the account has replaces that design";
+export const DESIGN_FACE_DESCRIPTION =
+  "The letter's face: serif (a classic book face), typewriter (a monospace face, fewer words to the page) or handwritten (a handwriting face, no Greek, Hebrew or Vietnamese)";
+export const DESIGN_ORNAMENT_DESCRIPTION =
+  "What is drawn in the top-right corner beside the address window: none, monogram (initials in a double ring), sprig (a line-drawn sprig with berries) or confetti";
+export const DESIGN_RULED_DESCRIPTION = "Whether faint rules are drawn under each line";
+export const DESIGN_TONE_DESCRIPTION = "The ornament's grey, darkest first: black, dark, medium or light. Letters print in black and greys only";
+export const DESIGN_ID_DESCRIPTION = "The design's id, which stationeryDesignId takes on a letter preview or set_stationery";
+export const DESIGN_CONFIRM_DESCRIPTION = "true, once the person has agreed: a deleted design cannot be brought back";
+export const saveStationeryDesignInputZ = z.object({
+  name: z.string().describe(DESIGN_NAME_DESCRIPTION),
+  face: z.enum(STATIONERY_FACES).describe(DESIGN_FACE_DESCRIPTION),
+  ornament: z.enum(STATIONERY_ORNAMENTS).describe(DESIGN_ORNAMENT_DESCRIPTION),
+  ruled: z.boolean().describe(DESIGN_RULED_DESCRIPTION),
+  tone: z.enum(STATIONERY_TONES).describe(DESIGN_TONE_DESCRIPTION)
+});
+export const listStationeryDesignsInputZ = z.object({});
+export const deleteStationeryDesignInputZ = z.object({
+  designId: z.string().describe(DESIGN_ID_DESCRIPTION),
+  confirm: z.boolean().describe(DESIGN_CONFIRM_DESCRIPTION)
+});
+const designOutputZ = z.object({
+  designId: z.string().describe(DESIGN_ID_DESCRIPTION),
+  name: z.string(),
+  face: z.enum(STATIONERY_FACES),
+  ornament: z.enum(STATIONERY_ORNAMENTS),
+  ruled: z.boolean(),
+  tone: z.enum(STATIONERY_TONES)
+});
+export const saveStationeryDesignOutputZ = designOutputZ.extend({
+  replaced: z.boolean().describe("Whether a design of the same name was replaced"),
+  message: z.string()
+});
+export const listStationeryDesignsOutputZ = z.object({
+  designs: z.array(designOutputZ).describe("The account's saved designs, oldest first"),
+  rememberedDesignId: z.string().optional().describe("The design a letter preview that names no stationery is drawn in, when the account remembers one"),
+  limit: z.number().int().describe("The most designs an account may keep"),
+  message: z.string()
+});
+export const deleteStationeryDesignOutputZ = z.object({
+  deleted: z.boolean().describe("Whether a design was deleted: false when the account has none with that id"),
   message: z.string()
 });
 

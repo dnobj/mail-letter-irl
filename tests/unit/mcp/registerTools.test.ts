@@ -706,6 +706,8 @@ describe('arrive-by in the served schemas (#535)', () => {
     vi.stubEnv('LETTER_IRL_SIGNATURES_ENABLED', 'true');
     // And certified mail (#625), so no mail service is withheld from a letter.
     vi.stubEnv('LETTER_IRL_CERTIFIED_MAIL_ENABLED', 'true');
+    // And saved stationery designs (#649), so no stationeryDesignId is withheld from a letter.
+    vi.stubEnv('LETTER_IRL_CUSTOM_STATIONERY_ENABLED', 'true');
     vi.stubEnv('JIT_PURCHASE_ENABLED', 'true');
     for (const name of PREVIEWS) {
       const served = getServedInputSchema(name) as Record<string, { description?: string }>;

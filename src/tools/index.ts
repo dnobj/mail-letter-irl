@@ -37,6 +37,9 @@ export { setSignatureTool } from "./setSignature.js";
 export { getSignatureTool } from "./getSignature.js";
 export { clearSignatureTool } from "./clearSignature.js";
 export { setLetterSignatureTool } from "./setLetterSignature.js";
+export { saveStationeryDesignTool } from "./saveStationeryDesign.js";
+export { listStationeryDesignsTool } from "./listStationeryDesigns.js";
+export { deleteStationeryDesignTool } from "./deleteStationeryDesign.js";
 export { uploadPhotoChunkTool } from "./uploadPhotoChunk.js";
 
 // Feedback tools (US-FEEDBACK-01)

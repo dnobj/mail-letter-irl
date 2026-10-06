@@ -297,6 +297,43 @@ describePostgres('saved stationery designs (#649)', () => {
     expect(await service.getDesign(userId, mine.designId)).toEqual(mine);
   });
 
+  it("remembers a design a draft is restyled into, never another account's, and a theme after it forgets it (#649 part 3)", async () => {
+    const drafts = await import('../../src/services/draftService.js');
+    const address = { name: 'Pat Example', addressLine1: '350 Fifth Ave', city: 'New York', state: 'NY', postalCode: '10118', country: 'US' };
+    const userId = await seedUser();
+    const mine = await saved(userId, 'Garden', SPRIG);
+    const other = await seedUser();
+    const theirs = await saved(other, 'Theirs');
+    const bodyText = 'Dear Sam,';
+    const signOff = 'Pat';
+    const { draftId } = await drafts.createDraft({
+      userId, sender: address, recipient: { ...address, name: 'Sam Rivera' }, bodyText, signOff,
+      requiredCredits: 2, previewHtml: '<svg></svg>', layoutType: 'text_only', rendererVersion: 'pdf-1'
+    });
+    const restyle = (stationery: Record<string, unknown>) =>
+      drafts.setDraftStationery(draftId, userId, { stationery: stationery as never, previewHtml: '<svg></svg>', drawnFrom: { bodyText, signOff } });
+    const remembered = async () =>
+      (await pool.query('SELECT stationery_theme, stationery_design_id FROM users WHERE user_id = $1', [userId])).rows[0];
+    const custom = (designId: string) => ({ theme: 'custom', design: SPRIG, name: 'Garden', designId, dateLine: 'October 1, 2026', source: 'asked' });
+
+    await pool.query(`UPDATE users SET stationery_theme = 'typewriter' WHERE user_id = $1`, [userId]);
+    expect(await restyle(custom(mine.designId))).toBeNull();
+    expect(await remembered()).toEqual({ stationery_theme: 'typewriter', stationery_design_id: mine.designId });
+    const stored = await pool.query('SELECT stationery, renderer_version FROM letter_drafts WHERE draft_id = $1', [draftId]);
+    expect(stored.rows[0]).toEqual({
+      stationery: { theme: 'custom', design: SPRIG, name: 'Garden', dateLine: 'October 1, 2026' },
+      renderer_version: 'pdf-2'
+    });
+
+    // Another account's design id changes nothing the account remembers, and breaks no key.
+    expect(await restyle(custom(theirs.designId))).toBeNull();
+    expect((await remembered()).stationery_design_id).toBe(mine.designId);
+
+    // A theme chosen after it is the account's choice now.
+    expect(await restyle({ theme: 'botanical', dateLine: 'October 1, 2026', source: 'asked' })).toBeNull();
+    expect(await remembered()).toEqual({ stationery_theme: 'botanical', stationery_design_id: null });
+  });
+
   it('remembers nothing on an erased account', async () => {
     const userId = await seedUser();
     const mine = await saved(userId, 'Garden');
