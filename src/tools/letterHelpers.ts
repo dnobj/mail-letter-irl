@@ -860,15 +860,16 @@ export function validatePrintableCharacters(
   throw Object.assign(new Error(unprintableRefusal(mail, found, themed)), { diagnosticClass: "validation_error" });
 }
 
-/**
- * A theme that sets the letter's text in a typeface of its own (#563:
- * typewriter, handwritten), or undefined for one in Classic's.
- */
 /** A stationery as a sentence names it (#649): "celebration stationery", or "saved stationery design". */
 export function stationeryNamed(stationery: Stationery): string {
   return stationery.theme === CUSTOM_THEME ? "saved stationery design" : `${stationery.theme} stationery`;
 }
 
+/**
+ * A theme that sets the letter's text in a typeface of its own (#563:
+ * typewriter, handwritten, or a design in either, #649), or undefined for one
+ * in Classic's.
+ */
 export function ownFaceTheme(stationery: Stationery | undefined): Stationery["theme"] | undefined {
   if (!stationery) return undefined;
   return stationeryFace(stationery).font === bodyFace("classic").font ? undefined : stationery.theme;

@@ -355,6 +355,47 @@ describe("a design's name (#649)", () => {
   it('is text', () => {
     for (const value of [undefined, null, 7, ['Garden'], { name: 'Garden' }]) expect(designNameOf(value)).toBeNull();
   });
+
+  it('keeps the joiners and emoji tags real names need', () => {
+    const cp = (...points: number[]) => String.fromCodePoint(...points);
+    const kept = [
+      // A family emoji: man, joiner, woman, joiner, girl.
+      cp(0x1f468, 0x200d, 0x1f469, 0x200d, 0x1f467),
+      // A red heart in its emoji style (variation selector 16).
+      cp(0x2764, 0xfe0f),
+      // A Persian word with its zero-width non-joiner.
+      cp(0x645, 0x6cc, 0x200c, 0x62e, 0x648, 0x627, 0x647, 0x645),
+      // England's flag: a black flag and its tag characters.
+      cp(0x1f3f4, 0xe0067, 0xe0062, 0xe0065, 0xe006e, 0xe0067, 0xe007f),
+      // A letter with two accents.
+      cp(0x65, 0x301, 0x302)
+    ];
+    for (const name of kept) expect(designNameOf(name), JSON.stringify(name)).toBe(name);
+  });
+
+  it('takes out broken surrogate halves, private-use and unassigned characters, which PostgreSQL or a reader cannot use', () => {
+    const lone = String.fromCharCode(0xd800);
+    expect(designNameOf(`Mine${lone}`)).toBe('Mine');
+    expect(designNameOf(`Mi${String.fromCodePoint(0xe000)}ne`)).toBe('Mine');
+    expect(designNameOf(`Mi${String.fromCodePoint(0x50000)}ne`)).toBe('Mine');
+    // Kept again, the result is the same: what saving keeps, reading back keeps.
+    expect(JSON.stringify(designNameOf(`Mine${lone}`))).toBe('"Mine"');
+  });
+
+  it('keeps at most four marks on a letter, as the body does', () => {
+    const name = 'e' + String.fromCodePoint(0x301).repeat(39);
+    const kept = designNameOf(name)!;
+    expect([...kept]).toHaveLength(5);
+    expect(designNameOf(kept)).toBe(kept);
+  });
+
+  it('needs something visible: joiners, marks and selectors alone are no name', () => {
+    for (const name of [String.fromCodePoint(0x200d, 0x200c), String.fromCodePoint(0x301, 0x302), String.fromCodePoint(0xfe0f), String.fromCodePoint(0xe0067)]) {
+      expect(designNameOf(name), JSON.stringify(name)).toBeNull();
+    }
+    expect(designNameOf('.')).toBe('.');
+    expect(designNameOf('7')).toBe('7');
+  });
 });
 
 describe('a stored design (#649)', () => {

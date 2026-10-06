@@ -439,10 +439,10 @@ describe("get_draft_status names a ready letter's style now (#563, #572)", () =>
     });
   });
 
-  it("names only the built-in themes its output schema knows: a saved design is not one yet (#649)", async () => {
+  it("names only the built-in themes its output schema knows: a saved design is left out, and the card keeps its preview's (#649)", async () => {
     const design = { face: "handwritten", ornament: "sprig", ruled: true, tone: "medium" };
     vi.mocked(getDraftState).mockResolvedValue(drawn({ stationery: { theme: "custom", design, name: "Garden", dateLine: "October 1, 2026" } }) as any);
-    await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual({ ...READY, stationery: { theme: "classic" }, previewHtml: PAGE });
+    await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual({ ...READY, previewHtml: PAGE });
   });
 
   it("calls a page our renderer drew without a theme Classic", async () => {

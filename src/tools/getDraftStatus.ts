@@ -242,21 +242,15 @@ function pagesNow(draft: DraftState): Pick<GetDraftStatusOutput, 'pages'> {
  * its preview's first answer again: set_stationery may have changed both
  * since. Only while stationery is offered, and only for a page our renderer
  * drew (renderer_version), whose stored theme reads as the print reads it.
+ * A saved design (#649) is not named: the status's output schema knows only
+ * the built-in themes until the part that offers designs says one here, so the
+ * card keeps the stationery its preview gave.
  */
-/**
- * A draft's built-in theme for the status, Classic for none. The status's output
- * schema names only the built-in themes: a saved design (#649) is not offered
- * by any tool yet, and the part that offers one says it here.
- */
-function themeOf(stored: unknown): ThemeStationery {
-  const stationery = stationeryOf(stored);
-  return stationery && stationery.theme !== CUSTOM_THEME ? (stationery as ThemeStationery) : { theme: 'classic' };
-}
-
 function styleNow(draft: DraftState): Pick<GetDraftStatusOutput, 'stationery' | 'previewHtml'> {
   if (!isStationeryOffered() || draft.mail_type !== 'letter' || !draft.renderer_version) return {};
+  const stationery = stationeryOf(draft.stationery);
   return {
-    stationery: themeOf(draft.stationery),
+    ...(stationery?.theme === CUSTOM_THEME ? {} : { stationery: (stationery as ThemeStationery | null) ?? { theme: 'classic' } }),
     ...(draft.preview_html ? { previewHtml: draft.preview_html } : {})
   };
 }

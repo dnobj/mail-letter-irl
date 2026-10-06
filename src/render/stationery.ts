@@ -1,4 +1,4 @@
-import { visualOrder, withoutInvisible } from './bidi.js';
+import { visualOrder } from './bidi.js';
 import { loadFont, type FontName } from './fonts.js';
 import { shape } from './glyphs.js';
 import { BODY_FONT_SIZE, CONTENT_WIDTH, LINE_PITCH, PAGE_WIDTH, POINTS_PER_INCH, SIDE_MARGIN } from './geometry.js';
@@ -72,24 +72,39 @@ export interface StationeryDesign {
 /** The longest name a design may have (#649): the account's own label for it, never printed. */
 export const STATIONERY_DESIGN_NAME_MAX_LENGTH = 40;
 
+/** Line breaks and tabs, which a name keeps as a space. */
+const NAME_BREAKS = /[\t\n\v\f\r\p{Zl}\p{Zp}]/gu;
+/** Controls, broken halves of a pair, and characters with no meaning (unassigned, private use): taken out. */
+const NAME_NONSENSE = /[\p{Cc}\p{Cs}\p{Cn}\p{Co}]/gu;
 /**
- * A design's name as it is kept (#649): what prints nothing (controls, bidi
- * marks, zero-width characters) taken out, line breaks and tabs and each run
- * of white space one space, the ends trimmed; null when that leaves nothing,
- * or more than STATIONERY_DESIGN_NAME_MAX_LENGTH characters, counted as
- * PostgreSQL counts them (code points). Saving keeps a name by this rule and
- * reading one back holds it to the same, so no name saved is ever refused on
- * the way back. The name is shown to the person, never printed.
+ * The other characters that only format text (bidi controls and marks, zero-width
+ * spaces, byte order marks): taken out. The joiners and the emoji tags stay, as
+ * names need them: a family emoji, a Persian word's non-joiner, a flag's tags.
+ * Set subtraction needs the v flag, which ES2022's regular expression literals lack.
+ */
+const NAME_FORMATTING = new RegExp('[\\p{Cf}--[\\p{Join_Control}\\p{Emoji_Component}]]', 'gv');
+/** What a name must hold at least one of: a letter, a digit, punctuation or a symbol (emoji among them). */
+const NAME_VISIBLE = /[\p{L}\p{N}\p{P}\p{S}]/u;
+
+/**
+ * A design's name as it is kept (#649): line breaks and tabs a space; controls,
+ * broken surrogate halves, unassigned and private-use characters, and the
+ * characters that only format text taken out, but the joiners and emoji tags
+ * that real names need; at most four marks on a letter, as in the body (and so
+ * stable when kept again); each run of white space one space; the ends trimmed.
+ * Null when that leaves nothing visible, or more than
+ * STATIONERY_DESIGN_NAME_MAX_LENGTH characters, counted as PostgreSQL counts
+ * them (code points). Saving keeps a name by this rule and reading one back
+ * holds it to the same, so no name saved is ever dropped on the way back. The
+ * name is shown to the person, never printed.
  */
 export function designNameOf(value: unknown): string | null {
   if (typeof value !== 'string') return null;
-  const name = withoutInvisible(value)
-    .replace(/[\t\n\v\f\r\p{Zl}\p{Zp}]/gu, ' ')
-    .replace(/[\p{Cc}\p{Cf}]/gu, '')
+  const name = clampMarks(value.replace(NAME_BREAKS, ' ').replace(NAME_NONSENSE, '').replace(NAME_FORMATTING, ''))
     .replace(/\s+/gu, ' ')
     .trim();
   const length = [...name].length;
-  return length >= 1 && length <= STATIONERY_DESIGN_NAME_MAX_LENGTH ? name : null;
+  return length >= 1 && length <= STATIONERY_DESIGN_NAME_MAX_LENGTH && NAME_VISIBLE.test(name) ? name : null;
 }
 
 /** A letter's theme and what it prints. */
