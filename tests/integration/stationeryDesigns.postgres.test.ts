@@ -75,6 +75,23 @@ describePostgres('saved stationery designs (#649)', () => {
     return userId;
   }
 
+  /**
+   * Waits until `count` statements on these tables wait on a lock, so a test
+   * starts the next step only once the race it sets up is really running.
+   */
+  async function lockWaiters(count: number): Promise<void> {
+    for (let tries = 0; tries < 200; tries += 1) {
+      const waiting = await pool.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM pg_stat_activity
+          WHERE datname = current_database() AND state = 'active' AND wait_event_type = 'Lock'
+            AND (query LIKE '%stationery_designs%' OR query LIKE '%FROM users WHERE user_id%')`
+      );
+      if (waiting.rows[0].n >= count) return;
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+    throw new Error(`fewer than ${count} statements waited on a lock`);
+  }
+
   async function saved(userId: string, name: string, design: StationeryDesign = PLAIN) {
     const result = await service.saveDesign(userId, name, design);
     if (!result.ok) throw new Error(`not saved: ${result.refusal}`);
@@ -131,7 +148,8 @@ describePostgres('saved stationery designs (#649)', () => {
       await holder.query('BEGIN');
       await holder.query('SELECT 1 FROM users WHERE user_id = $1 FOR UPDATE', [userId]);
       const both = Promise.all([service.saveDesign(userId, 'Tenth', PLAIN), service.saveDesign(userId, 'Also tenth', PLAIN)]);
-      await new Promise(resolve => setTimeout(resolve, 300));
+      // Both wait: on the account's row with the lock, or, without it, after both counted nine.
+      await lockWaiters(2);
       await holder.query('COMMIT');
       results = await both;
     } finally {
@@ -220,17 +238,44 @@ describePostgres('saved stationery designs (#649)', () => {
     expect(await service.rememberedDesign(userId)).toBeNull();
   });
 
-  it("deletes a remembered design while a save of its name waits, and neither deadlocks: both take the account's row first", async () => {
+  it("takes the account's row before the design's when it deletes one, as a save and an erasure do, so none waits on another the other way round", async () => {
     const userId = await seedUser();
     const mine = await saved(userId, 'Garden');
     await service.rememberDesign(userId, mine.designId);
-    for (let round = 0; round < 5; round += 1) {
-      const current = (await service.listDesigns(userId))[0];
-      await service.rememberDesign(userId, current.designId);
-      const outcomes = await Promise.allSettled([service.deleteDesign(userId, current.designId), service.saveDesign(userId, 'Garden', SPRIG)]);
-      expect(outcomes.map(outcome => outcome.status), `round ${round}`).toEqual(['fulfilled', 'fulfilled']);
-      expect(await service.listDesigns(userId)).toHaveLength(1);
+    // Another transaction holds the design's row, so the delete stops at it.
+    const designHolder = await pool.connect();
+    try {
+      await designHolder.query('BEGIN');
+      await designHolder.query('SELECT 1 FROM stationery_designs WHERE design_id = $1 FOR UPDATE', [mine.designId]);
+      const deleting = service.deleteDesign(userId, mine.designId);
+      await lockWaiters(1);
+      // Stopped there, it already holds the account's row: nothing else can take it now.
+      const probe = await pool.connect();
+      try {
+        await probe.query('BEGIN');
+        await expect(probe.query('SELECT 1 FROM users WHERE user_id = $1 FOR UPDATE NOWAIT', [userId])).rejects.toMatchObject({ code: '55P03' });
+      } finally {
+        await probe.query('ROLLBACK');
+        probe.release();
+      }
+      await designHolder.query('COMMIT');
+      expect(await deleting).toBe(true);
+    } finally {
+      designHolder.release();
     }
+    expect(await service.rememberedDesign(userId)).toBeNull();
+  });
+
+  it('forgets a remembered design when the account remembers a theme: the last choice is the one remembered', async () => {
+    const userId = await seedUser();
+    const mine = await saved(userId, 'Garden');
+    await service.rememberDesign(userId, mine.designId);
+    const { rememberStationery } = await import('../../src/services/stationeryDefaultService.js');
+    await rememberStationery(userId, 'botanical');
+    const row = await pool.query('SELECT stationery_theme, stationery_design_id FROM users WHERE user_id = $1', [userId]);
+    expect(row.rows).toEqual([{ stationery_theme: 'botanical', stationery_design_id: null }]);
+    // The design itself stays.
+    expect(await service.getDesign(userId, mine.designId)).toEqual(mine);
   });
 
   it('remembers nothing on an erased account', async () => {

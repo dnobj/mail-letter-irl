@@ -54,7 +54,7 @@ User accounts with credit balances and tier information.
 | updated_at | TIMESTAMPTZ | NO | NOW() | Last update (auto-trigger) |
 | erased_at | TIMESTAMPTZ | YES | NULL | Set by the account erasure (#289); sign-in refuses an erased account |
 | stationery_theme | TEXT | YES | NULL | The theme the account last chose (#563, migrations 045 and 046): `classic`, `monogram`, `botanical`, `celebration`, `typewriter` or `handwritten`. A letter preview that asks for none is drawn in it. Erasure clears it |
-| stationery_design_id | UUID | YES | NULL | The account's remembered stationery design (#649, migration 054): one of its own `stationery_designs` (composite FK with `user_id`); deleting the design clears it (ON DELETE SET NULL on this column only). Erasure clears it |
+| stationery_design_id | UUID | YES | NULL | The account's remembered stationery design (#649, migration 054): one of its own `stationery_designs` (composite FK with `user_id`); deleting the design clears it (ON DELETE SET NULL on this column only), and so does remembering a theme: a remembered design comes before the remembered theme, so the last choice is the one remembered. Erasure clears it |
 
 **Erased accounts (migration 035).** An erasure keeps the row as a tombstone, because orders, ledger
 lots, disputes and refunds keep foreign keys to it ([account-erasure.md](account-erasure.md)). The
