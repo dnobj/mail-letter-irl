@@ -123,7 +123,20 @@ describePostgres('saved stationery designs (#649)', () => {
   it('counts two saves at once one after the other: never an eleventh', async () => {
     const userId = await seedUser();
     for (let index = 1; index < service.MAX_STATIONERY_DESIGNS; index += 1) await saved(userId, `Design ${index}`);
-    const results = await Promise.all([service.saveDesign(userId, 'Tenth', PLAIN), service.saveDesign(userId, 'Also tenth', PLAIN)]);
+    // Both saves start while another transaction holds the account's row, so both reach their count at
+    // the same moment unless each takes the row first: without the lock, both would count nine.
+    const holder = await pool.connect();
+    let results: Awaited<ReturnType<typeof service.saveDesign>>[];
+    try {
+      await holder.query('BEGIN');
+      await holder.query('SELECT 1 FROM users WHERE user_id = $1 FOR UPDATE', [userId]);
+      const both = Promise.all([service.saveDesign(userId, 'Tenth', PLAIN), service.saveDesign(userId, 'Also tenth', PLAIN)]);
+      await new Promise(resolve => setTimeout(resolve, 300));
+      await holder.query('COMMIT');
+      results = await both;
+    } finally {
+      holder.release();
+    }
     expect(results.filter(result => result.ok)).toHaveLength(1);
     expect(results.filter(result => !result.ok)).toEqual([{ ok: false, refusal: 'limit' }]);
     expect(await service.listDesigns(userId)).toHaveLength(service.MAX_STATIONERY_DESIGNS);
@@ -205,6 +218,19 @@ describePostgres('saved stationery designs (#649)', () => {
     await service.rememberDesign(userId, again.designId);
     expect(await service.rememberDesign(userId, null)).toBe(true);
     expect(await service.rememberedDesign(userId)).toBeNull();
+  });
+
+  it("deletes a remembered design while a save of its name waits, and neither deadlocks: both take the account's row first", async () => {
+    const userId = await seedUser();
+    const mine = await saved(userId, 'Garden');
+    await service.rememberDesign(userId, mine.designId);
+    for (let round = 0; round < 5; round += 1) {
+      const current = (await service.listDesigns(userId))[0];
+      await service.rememberDesign(userId, current.designId);
+      const outcomes = await Promise.allSettled([service.deleteDesign(userId, current.designId), service.saveDesign(userId, 'Garden', SPRIG)]);
+      expect(outcomes.map(outcome => outcome.status), `round ${round}`).toEqual(['fulfilled', 'fulfilled']);
+      expect(await service.listDesigns(userId)).toHaveLength(1);
+    }
   });
 
   it('remembers nothing on an erased account', async () => {

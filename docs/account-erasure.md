@@ -13,13 +13,14 @@ the owner's decision on #289 (2026-09-23).
 
 | Removed | Kept, without personal details |
 |---------|--------------------------------|
-| The email (replaced by a placeholder), the saved return address and the remembered stationery (#563) | The account row, as a tombstone, so the kept records keep their links |
+| The email (replaced by a placeholder), the saved return address and the remembered stationery (#563), theme or design (#649) | The account row, as a tombstone, so the kept records keep their links |
 | The content, addresses and rendered preview of every letter, with its copy of the signature (#608) | Each letter's status, tracking id, cost and dates, and for a certified letter (#625) the way it travelled and its USPS tracking number, kept beside the tracking id |
 | Drafts (emptied instead when an order refers to one) | Orders, ledger lots and transactions, with their descriptions cleared |
 | Retention copies of letters and drafts | Disputes and refunds |
 | Personal access tokens, the upload link and feature requests | Gift letters, and gift codes another account redeemed |
 | Address requests (#604), with any address a recipient gave. The preview does not count them: neither admin role reads the table | |
 | The saved signature (#608), a picture of the person's handwriting. The preview does not count it either: neither admin role reads the table | |
+| Saved stationery designs (#649), with the names the person gave them, and the remembered design. The preview does not count them: neither admin role reads the table. A draft's or a letter's copy of a design goes with the draft or the letter | |
 | The photo uploaded through the card, from the image store (#474) | |
 | Gift codes nobody has redeemed, so a card already in the post stops working | The admin audit trail, kept two years as the privacy policy says |
 | The address a seed code was claimed with | |
