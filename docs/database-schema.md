@@ -1,6 +1,6 @@
 # Database Schema
 
-**Last Updated:** October 2, 2026
+**Last Updated:** October 6, 2026
 **Purpose:** Complete database schema reference for all tables, indexes, constraints, and migrations
 
 This document describes the Letter IRL database schema as defined by `db/migrations` at the head of `dev` (Neon
@@ -28,6 +28,7 @@ migration 021 as its immediate predecessor.
 | Gift letters | `gift_letters`, `gift_codes` |
 | Address requests | `address_requests` |
 | Signatures | `user_signatures` |
+| Stationery designs | `stationery_designs` |
 | Retention | `redacted_content_quarantine` |
 | Admin foundation | `admin_environment_marker`, `admin_audit_events`, `admin_command_runs`, `admin_operations` |
 
@@ -53,6 +54,7 @@ User accounts with credit balances and tier information.
 | updated_at | TIMESTAMPTZ | NO | NOW() | Last update (auto-trigger) |
 | erased_at | TIMESTAMPTZ | YES | NULL | Set by the account erasure (#289); sign-in refuses an erased account |
 | stationery_theme | TEXT | YES | NULL | The theme the account last chose (#563, migrations 045 and 046): `classic`, `monogram`, `botanical`, `celebration`, `typewriter` or `handwritten`. A letter preview that asks for none is drawn in it. Erasure clears it |
+| stationery_design_id | UUID | YES | NULL | The account's remembered stationery design (#649, migration 054): one of its own `stationery_designs` (composite FK with `user_id`); deleting the design clears it (ON DELETE SET NULL on this column only), and so does remembering a theme: a remembered design comes before the remembered theme, so the last choice is the one remembered. Erasure clears it |
 
 **Erased accounts (migration 035).** An erasure keeps the row as a tombstone, because orders, ledger
 lots, disputes and refunds keep foreign keys to it ([account-erasure.md](account-erasure.md)). The
@@ -198,7 +200,7 @@ Temporary drafts for idempotent send operations. Prevents duplicate sends.
 - `postcard_requires_size`: Postcards must have postcard_size
 - `valid_postcard_size`: postcard_size must be '6x4', '6x9', or '6x11'
 - `letter_drafts_renderer_version_known`: renderer_version must be NULL, 'pdf-1', 'pdf-2', 'pdf-3' or 'pdf-4' (039, then 044, 048 and 051; a new version extends it in its own migration)
-- `letter_drafts_stationery_theme_known`: stationery's theme is 'monogram', 'botanical', 'celebration', 'typewriter' or 'handwritten' (044, 046)
+- `letter_drafts_stationery_theme_known`: stationery's theme is 'monogram', 'botanical', 'celebration', 'typewriter', 'handwritten' or 'custom', a saved design's copy with its design and name (044, 046, 054)
 - `letter_drafts_stationery_drawn_by_pdf_2`: stationery only with renderer_version 'pdf-2' or 'pdf-4', never with none, and 'pdf-2' always with stationery (044, then 051)
 - `letter_drafts_signature_letters_only`: signature_image only on a letter (051)
 - `letter_drafts_signature_drawn_by_pdf_4`: signature_image is set exactly when renderer_version is 'pdf-4' (051)
@@ -696,6 +698,36 @@ person removes it (`clear_signature`, or the website) or the account is erased: 
 `users` row, so it deletes this one explicitly ([account-erasure.md](account-erasure.md)). Neither admin
 role is granted the table.
 
+### stationery_designs
+
+An account's saved stationery designs (#649): a name the person gives each and four choices, each made of
+what the built-in themes already draw (`src/render/stationery.ts`). No picture: the first version is
+parameters only (#657 is the later step). Read and written by `src/services/stationeryDesignService.ts`.
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| design_id | UUID | NO | gen_random_uuid() | Primary key |
+| user_id | VARCHAR(255) | NO | - | The account (FK users, ON DELETE CASCADE) |
+| name | TEXT | NO | - | The person's name for it, 1 to 40 characters, trimmed; never printed. One per account whatever its case (`stationery_designs_user_name`, a unique index on `user_id, lower(name)`) |
+| face | TEXT | NO | - | The body's face: `serif` (Tinos), `typewriter` (Cousine) or `handwritten` (Caveat) |
+| ornament | TEXT | NO | - | The corner's ornament: `none`, `monogram`, `sprig` or `confetti` |
+| ruled | BOOLEAN | NO | - | Faint rules under each line |
+| tone | TEXT | NO | - | The ornament's grey: `black` (#222), `dark` (#555), `medium` (#888) or `light` (#aaa) |
+| created_at | TIMESTAMPTZ | NO | NOW() | When it was first saved |
+| updated_at | TIMESTAMPTZ | NO | NOW() | When it was last saved: saving under its name replaces it in place |
+
+**Constraints:**
+- `stationery_designs_name_length`, `stationery_designs_name_trimmed`: the name rules above
+- `stationery_designs_face_known`, `stationery_designs_ornament_known`, `stationery_designs_tone_known`: the choices above
+- `stationery_designs_times`: `updated_at` not before `created_at`
+- `stationery_designs_owned`: unique `(design_id, user_id)`, the target of `users_stationery_design_owned`
+
+An account holds at most ten: the service counts them under the account's row lock. A letter draws a
+design from its own copy, taken into the draft when it is previewed (`letter_drafts.stationery` with theme
+`custom`), so changing or deleting a design never changes a letter already previewed. Designs are kept
+until the person deletes them or the account is erased: erasure keeps the `users` row, so it deletes them
+explicitly ([account-erasure.md](account-erasure.md)). Neither admin role is granted the table.
+
 ### maintenance_tasks
 
 One row per scheduled maintenance task (`task_name` is the key) with its last start, completion,
@@ -871,6 +903,7 @@ Production provisioning and the first production connection remain separate owne
 | 51 | 051_signature_drafts.sql | `letter_drafts.signature_image` (#608): a letter's own copy of the signature it was previewed with. `renderer_version` admits `pdf-4`, set exactly when a draft has one, with `letter_drafts_signature_letters_only` and `letter_drafts_signature_drawn_by_pdf_4`; `letter_drafts_stationery_drawn_by_pdf_2` admits a theme with `pdf-4`. No provisioning re-run: the reader role's column list leaves it out, as for 039 |
 | 52 | 052_mail_service.sql | `letter_drafts.mail_service` (#625): how a letter travels, 'standard' by default, with `letter_drafts_mail_service_known` and `letter_drafts_mail_service_paid_per_send` (certified or certified with a return receipt only for a letter, never a gift send). No provisioning re-run, as for 039 |
 | 53 | 053_letter_mail_service.sql | `letters.mail_service` (#625): how the letter travelled, copied from the draft by the send, standard by default; `letters.carrier_tracking_number`: the USPS number of a certified letter, set by the status sync, NULL before and for standard mail. Four CHECKs: `letters_mail_service_known`, `letters_mail_service_letters_paid_per_send` (only a letter funded by a Pay & Send order), `letters_carrier_tracking_certified_only`, `letters_carrier_tracking_length` (1 to 64). The admin operator role's letters UPDATE list gains `carrier_tracking_number` (the panel's status sync writes it): re-run `npm run admin:provision-access` in each environment after it |
+| 54 | 054_stationery_designs.sql | `stationery_designs` (#649): an account's saved designs, a name and four choices, at most ten per account (counted by the service). `users.stationery_design_id`, the remembered design, with the composite `users_stationery_design_owned` (only the account's own; deleting it clears the column). `letter_drafts_stationery_theme_known` admits `custom`. No provisioning re-run: neither admin role is granted the table, and the reader's users column list leaves the column out |
 
 ---
 
