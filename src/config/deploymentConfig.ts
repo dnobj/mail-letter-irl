@@ -640,6 +640,19 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     services: ['api']
   },
   /**
+   * The words editor (#647, src/config/wordsEditor.ts): a letter's words
+   * changed in place on one page, without room to write, while the flag is on
+   * and our renderer draws letters. Off unless set; listed so the preflight
+   * shows which environments have it. API only.
+   */
+  {
+    name: 'LETTER_IRL_WORDS_EDITOR_ENABLED',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  /**
    * Signatures (#608, src/config/signatures.ts): the three tools and the
    * website's /api/signature routes, while the flag is on and our renderer
    * draws letters. Off unless set, so absence is the intended production

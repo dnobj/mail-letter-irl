@@ -1156,6 +1156,15 @@ describe("the Words tab's editor (#586)", () => {
     expect((card.byId('studio-words-body') as HTMLTextAreaElement).value).toBe(ARGS.bodyText);
   });
 
+  it('says the words must fit one page when the letter may run to one page (#647)', async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, pageFit: { ...FIT, maxPages: 1 } });
+    await card.click(card.tab('words'));
+    await card.click(card.byId('studio-words-open'));
+    await type(card, 'studio-words-body', `${ARGS.bodyText}${'x'.repeat(2000)}`);
+    expect(text(card, 'studio-words-count')).toBe('About 60 characters past this page, and this letter must fit on one page.');
+  });
+
   it('says a gift letter is one page when the words run past it', async () => {
     const card = mount();
     await card.show(output({ ...CLASSIC, giftCard: { state: 'funded' } }), { ...ON, pageFit: FIT });

@@ -2,15 +2,16 @@ import type { Address, LetterLayoutType, McpToolDefinition, ToolContext } from '
 import { setStationeryInputSchema, setStationeryOutputSchema } from '../schemas.js';
 import { isStationeryOffered } from '../config/stationery.js';
 import { letterPageLimit } from '../config/roomToWrite.js';
+import { isWordsEditorOffered } from '../config/wordsEditor.js';
 import type { SendEligibility } from '../services/commerceService.js';
-import { pageFit, type PageFit, type Stationery } from '../render/index.js';
+import { type PageFit, type Stationery } from '../render/index.js';
 import type { PreviewStationery } from './stationeryInput.js';
 import {
   getDraftForStationery,
   setDraftStationery,
   type DraftRedrawRefusal
 } from '../services/draftService.js';
-import { layoutLetterForPreview, letterOption, letterPayment, pageChangeSentence, redrawLetterPreview, validatePrintableLetter, type LetterTravel } from './letterHelpers.js';
+import { editorPageFit, layoutLetterForPreview, letterOption, letterPayment, pageChangeSentence, redrawLetterPreview, validatePrintableLetter, type LetterTravel } from './letterHelpers.js';
 import { isDraftIdShape } from './requestSend.js';
 import { previewStationery, THEME_LIST } from './stationeryInput.js';
 
@@ -201,7 +202,7 @@ async function handler(input: SetStationeryInput, context: ToolContext): Promise
     previewHtml,
     ...(pages > 1 ? { pages } : {}),
     ...payment,
-    ...(letterPageLimit() > 1 ? { pageFit: pageFit(layout, stationery) } : {}),
+    ...(isWordsEditorOffered() ? { pageFit: editorPageFit(layout, stationery) } : {}),
     message: messageFor(stationery, pages, pagesBefore, draft.mail_service)
   };
 }

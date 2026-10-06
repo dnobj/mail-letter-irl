@@ -18,6 +18,8 @@ process.env.LETTER_IRL_ARRIVE_BY_ENABLED = "false";
 process.env.LETTER_IRL_STATIONERY_ENABLED = "false";
 // And room to write (#586).
 process.env.LETTER_IRL_ROOM_TO_WRITE_ENABLED = "false";
+// And the words editor on its own (#647).
+process.env.LETTER_IRL_WORDS_EDITOR_ENABLED = "false";
 // And the 4x6 and 11x6 postcards, and the postcard layouts (#594).
 process.env.LETTER_IRL_POSTCARD_SIZES_ENABLED = "false";
 process.env.LETTER_IRL_POSTCARD_LAYOUTS_ENABLED = "false";

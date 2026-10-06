@@ -1,11 +1,12 @@
 import type { Address, LetterLayoutType, McpToolDefinition, ToolContext } from '../contracts/types.js';
 import { setLetterWordsInputSchema, setLetterWordsOutputSchema } from '../schemas.js';
 import { letterPageLimit } from '../config/roomToWrite.js';
+import { isWordsEditorOffered } from '../config/wordsEditor.js';
 import { isGiftLettersEnabled } from '../config/giftLetters.js';
 import { mailServiceOf } from '../config/products.js';
 import type { SendEligibility } from '../services/commerceService.js';
 import { getGiftBalance } from '../services/giftLetterService.js';
-import { pageFit, stationeryOf, type Layout, type PageFit } from '../render/index.js';
+import { stationeryOf, type Layout, type PageFit } from '../render/index.js';
 import { getDraftForStationery, setDraftWords, type DraftRedrawRefusal } from '../services/draftService.js';
 import {
   layoutLetterForPreview,
@@ -19,7 +20,8 @@ import {
   validateCharacterLimitForLayout,
   validatePrintableLetter,
   wordsVersionOf,
-  type LetterTravel
+  type LetterTravel,
+  editorPageFit
 } from './letterHelpers.js';
 import { isDraftIdShape } from './requestSend.js';
 
@@ -162,7 +164,7 @@ export async function giftLetterNote(context: ToolContext): Promise<string> {
 
 async function handler(input: SetLetterWordsInput, context: ToolContext): Promise<SetLetterWordsOutput> {
   const limit = letterPageLimit();
-  if (limit === 1) {
+  if (!isWordsEditorOffered()) {
     throw refused(
       'WORDS_DISABLED',
       "A letter's words can't be changed in place yet. Make a new preview with the words you want.",
@@ -279,7 +281,7 @@ async function handler(input: SetLetterWordsInput, context: ToolContext): Promis
     previewHtml,
     ...(pages > 1 ? { pages } : {}),
     ...payment,
-    pageFit: pageFit(layout, stationery),
+    pageFit: editorPageFit(layout, stationery),
     wordsVersion: wordsVersionOf(bodyText, signOff),
     message: messageFor(pages, pagesBefore, note, already, draft.mail_service)
   };
@@ -288,13 +290,17 @@ async function handler(input: SetLetterWordsInput, context: ToolContext): Promis
 export const setLetterWordsTool: McpToolDefinition<SetLetterWordsInput, SetLetterWordsOutput> = {
   name: SET_LETTER_WORDS_TOOL,
   title: "Change the letter's words",
-  description:
+  // The pages it lays out on follow room to write (#586); without it, the words editor alone keeps a letter on one page (#647).
+  description: () =>
     'Change the words of a previewed letter without previewing it again. Give the draftId from the preview, ' +
     'bodyText and signOff in full, as the letter previews take them, and the wordsVersion of the words being replaced, ' +
     'from the preview or the last change of words. The letter card can change the words too: if they changed since you ' +
     'saw them, nothing is changed, and the answer gives the words as they are now. The letter is laid out again in its ' +
-    'stationery on up to three pages: a longer letter prints on both sides and is paid with Pay & Send, and a gift letter ' +
-    'stays on one page. Nothing is sent by this tool.',
+    (letterPageLimit() > 1
+      ? 'stationery on up to three pages: a longer letter prints on both sides and is paid with Pay & Send, and a gift letter ' +
+        'stays on one page. '
+      : 'stationery on one page: words that do not fit are refused. ') +
+    'Nothing is sent by this tool.',
   readOnly: false,
   inputSchema: setLetterWordsInputSchema,
   outputSchema: setLetterWordsOutputSchema,

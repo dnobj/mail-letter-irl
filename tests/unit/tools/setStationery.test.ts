@@ -393,3 +393,17 @@ describe('set_stationery says how the letter travels, with its price (#625)', ()
     for (const key of ['mailService', 'deliveryClass', 'deliveryDisclaimer']) expect(output, key).not.toHaveProperty(key);
   });
 });
+
+describe('set_stationery and the words editor (#647)', () => {
+  it('gives the card how full the page is with the words editor alone, on one page', async () => {
+    vi.stubEnv('LETTER_IRL_WORDS_EDITOR_ENABLED', 'true');
+    vi.mocked(getDraftForStationery).mockResolvedValue(draft());
+    const output = await run({ stationery: 'Botanical' });
+    expect(output.pageFit).toMatchObject({ pages: 1, maxPages: 1 });
+  });
+
+  it('gives no fit without the words editor or room to write', async () => {
+    vi.mocked(getDraftForStationery).mockResolvedValue(draft());
+    expect(await run({ stationery: 'Botanical' })).not.toHaveProperty('pageFit');
+  });
+});

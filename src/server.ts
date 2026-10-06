@@ -82,7 +82,7 @@ import { isCardUploadEnabled } from "./config/cardUpload.js";
 import { isArriveByEnabled } from "./config/arriveBy.js";
 import { isStationeryOffered } from "./config/stationery.js";
 import { isCertifiedMailOffered } from "./config/certifiedMail.js";
-import { letterPageLimit } from "./config/roomToWrite.js";
+import { isWordsEditorOffered } from "./config/wordsEditor.js";
 import { isPostcardSizesOffered } from "./config/postcardSizes.js";
 import { isPostcardLayoutsOffered } from "./config/postcardLayouts.js";
 import { isSendConfirmationEnabled } from "./config/sendConfirmation.js";
@@ -385,7 +385,7 @@ export class LetterIrlServer {
    * cancel_scheduled_mail only while arrival dates are on (#535), and
    * set_stationery only while stationery is offered (#563),
    * set_mail_service only while certified mail is (#625),
-   * set_letter_words only while room to write is (#586),
+   * set_letter_words only while the words can be changed in place (room to write, #586, or the words editor, #647),
    * set_postcard_style only while the postcard sizes or layouts are (#594),
    * and the three address request tools only while those are on (#604).
    * Without an app,
@@ -401,7 +401,7 @@ export class LetterIrlServer {
     const arriveBy = isArriveByEnabled();
     const stationery = isStationeryOffered();
     const certifiedMail = isCertifiedMailOffered();
-    const roomToWrite = letterPageLimit() > 1;
+    const wordsEditor = isWordsEditorOffered();
     const postcardStyles = isPostcardSizesOffered() || isPostcardLayoutsOffered();
     const addressRequests = isAddressRequestsEnabled();
     const signatures = isSignaturesOffered();
@@ -412,7 +412,7 @@ export class LetterIrlServer {
       .filter((tool) => arriveBy || (tool.name !== SET_ARRIVAL_DATE_TOOL && tool.name !== CANCEL_SCHEDULED_MAIL_TOOL))
       .filter((tool) => stationery || tool.name !== SET_STATIONERY_TOOL)
       .filter((tool) => certifiedMail || tool.name !== SET_MAIL_SERVICE_TOOL)
-      .filter((tool) => roomToWrite || tool.name !== SET_LETTER_WORDS_TOOL)
+      .filter((tool) => wordsEditor || tool.name !== SET_LETTER_WORDS_TOOL)
       .filter((tool) => postcardStyles || tool.name !== SET_POSTCARD_STYLE_TOOL)
       .filter((tool) => addressRequests || !ADDRESS_REQUEST_TOOLS.has(tool.name))
       .filter((tool) => signatures || !SIGNATURE_TOOLS.has(tool.name))

@@ -85,6 +85,16 @@ describe('set_letter_words in tools/list (#586)', () => {
     }
   });
 
+  it('is listed with the words editor alone, on our renderer, without room to write (#647)', async () => {
+    offer('', 'pdf', '');
+    vi.stubEnv('LETTER_IRL_WORDS_EDITOR_ENABLED', 'true');
+    const tool = (await listedTools()).get('set_letter_words');
+    expect(tool).toBeDefined();
+    expect(tool!.description).toContain('on one page: words that do not fit are refused.');
+    vi.stubEnv('LETTER_IRL_PRINT_RENDERER', 'html');
+    expect((await listedTools()).has('set_letter_words')).toBe(false);
+  });
+
   it('hands the tool its input as declared, and refuses missing words before it', async () => {
     offer('true', 'pdf', 'true');
     const client = await connected();

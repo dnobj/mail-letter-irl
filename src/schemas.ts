@@ -1015,7 +1015,7 @@ export const getDraftStatusOutputSchema: JsonSchema = {
     layout: { type: "string", enum: ["full_bleed", "border", "greetings"], description: "With it, the postcard's front now" },
     caption: { type: "string", description: "The border's caption, when it has one" },
     place: { type: "string", description: "The place the greeting names" },
-    bodyText: { type: "string", description: "A ready letter, while room to write is offered: its words now, for the card" },
+    bodyText: { type: "string", description: "A ready letter, while a letter's words can be changed in place (room to write, or the words editor): its words now, for the card" },
     signOff: { type: "string" },
     wordsVersion: { type: "string", description: WORDS_VERSION_DESCRIPTION },
     ...letterTravelProperties,

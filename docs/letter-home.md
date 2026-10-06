@@ -22,7 +22,7 @@ Deep links accept only `/draft/<id>`, `/order/<id>` or `/`. Selection must exist
 
 `LETTER_IRL_HOME_ENABLED` is off unless explicitly enabled. While off, the tool is absent from `tools/list` and /manifest.json, its resource is unlisted and unreadable, and cached calls refuse without reading home data. Manifest generation disables it for the checked-in production snapshot. No migration or dependency is added.
 
-While enabled, LetterHomeCard.html@v71 is an MCP App resource. The tool declares _meta.ui.resourceUri and _meta["openai/ui"].entrypoints: [{type: "global"}]. Other clients can call it as a read-only tool. The host uses its default navigation icon: SDK 1.29's high-level `registerTool` does not emit top-level `icons`. This change does not modify SDK internals.
+While enabled, LetterHomeCard.html@v72 is an MCP App resource. The tool declares _meta.ui.resourceUri and _meta["openai/ui"].entrypoints: [{type: "global"}]. Other clients can call it as a read-only tool. The host uses its default navigation icon: SDK 1.29's high-level `registerTool` does not emit top-level `icons`. This change does not modify SDK internals.
 
 Source: [official Plugin Extensions documentation](https://developers.openai.com/plugins/build/extensions). Declaring an entrypoint does not establish that it appears in the owner's development connection. HOME-01 requires the owner's eyes before that is reported as working.
 

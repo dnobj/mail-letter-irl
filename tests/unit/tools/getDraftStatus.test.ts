@@ -89,6 +89,15 @@ describe("get_draft_status (#474)", () => {
       expect(answer).toMatchObject({ ...READY, pages: 2, canSendNow: false });
       // And its words now, with their version, for the card's Words tab (#593 review round 1).
       expect(answer).toMatchObject({ bodyText: ready.body_text, signOff: ready.sign_off, wordsVersion: wordsVersionOf(ready.body_text, ready.sign_off) });
+      // The words editor alone gives them too (#647).
+      vi.stubEnv("LETTER_IRL_ROOM_TO_WRITE_ENABLED", "");
+      vi.stubEnv("LETTER_IRL_WORDS_EDITOR_ENABLED", "true");
+      const editorOnly = await ask({ draftId: DRAFT_ID }, { ...context(), user: { userId: "auth0|owner", creditsRemaining: 10, orders: [] } as any });
+      expect(editorOnly).toMatchObject({ wordsVersion: wordsVersionOf(ready.body_text, ready.sign_off) });
+      vi.stubEnv("LETTER_IRL_WORDS_EDITOR_ENABLED", "");
+      const neither = await ask({ draftId: DRAFT_ID }, { ...context(), user: { userId: "auth0|owner", creditsRemaining: 10, orders: [] } as any });
+      expect(neither).not.toHaveProperty("wordsVersion");
+      vi.stubEnv("LETTER_IRL_ROOM_TO_WRITE_ENABLED", "true");
       expect(answer.reasonCannotSend).toMatch(/paid with Pay & Send/);
       expect(answer.sendEligibility).toMatchObject({ packPays: false });
       // Certified mail is off: nothing about how it travels is added to an ordinary letter's terms (#625).

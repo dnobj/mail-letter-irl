@@ -453,6 +453,72 @@ describe('set_letter_words', () => {
     expect(setDraftWords).not.toHaveBeenCalled();
   });
 
+  describe('the words editor without room to write (#647)', () => {
+    const editorOnly = () => {
+      vi.stubEnv('LETTER_IRL_ROOM_TO_WRITE_ENABLED', '');
+      vi.stubEnv('LETTER_IRL_WORDS_EDITOR_ENABLED', 'true');
+    };
+
+    it('changes the words on one page, and the card is told the letter may run to one page', async () => {
+      editorOnly();
+      vi.mocked(getDraftForStationery).mockResolvedValue(draft({ bodyText: lines(4) }) as never);
+      const output = await change(lines(6));
+      expect(written().pages).toBe(1);
+      expect(output).not.toHaveProperty('pages');
+      expect(output.pageFit).toMatchObject({ pages: 1, maxPages: 1 });
+    });
+
+    it('refuses words that run past one page, writing nothing', async () => {
+      editorOnly();
+      vi.mocked(getDraftForStationery).mockResolvedValue(draft({ bodyText: lines(4) }) as never);
+      await expect(change(lines(40))).rejects.toThrow(/too long for one page/);
+      expect(setDraftWords).not.toHaveBeenCalled();
+    });
+
+    it('brings a draft previewed on two pages back to one, priced for one page', async () => {
+      editorOnly();
+      vi.mocked(getDraftForStationery).mockResolvedValue({ ...draft({ bodyText: lines(40) }), pages: 2 } as never);
+      const output = await change(lines(6));
+      expect(written().pages).toBe(1);
+      expect(output).not.toHaveProperty('pages');
+      expect(output).toMatchObject({ canSendNow: true });
+      expect(getSendEligibility).toHaveBeenCalledWith(10, 2, { mailType: 'letter' });
+    });
+
+    it('keeps the description as it was while room to write is offered', () => {
+      const describe = setLetterWordsTool.description as (client?: unknown) => string;
+      expect(describe()).toBe(
+        'Change the words of a previewed letter without previewing it again. Give the draftId from the preview, ' +
+          'bodyText and signOff in full, as the letter previews take them, and the wordsVersion of the words being replaced, ' +
+          'from the preview or the last change of words. The letter card can change the words too: if they changed since you ' +
+          'saw them, nothing is changed, and the answer gives the words as they are now. The letter is laid out again in its ' +
+          'stationery on up to three pages: a longer letter prints on both sides and is paid with Pay & Send, and a gift letter ' +
+          'stays on one page. Nothing is sent by this tool.'
+      );
+    });
+
+    it('says the page it lays out on in its description, one or up to three', () => {
+      editorOnly();
+      const describe = setLetterWordsTool.description as (client?: unknown) => string;
+      expect(describe()).toContain('on one page: words that do not fit are refused.');
+      expect(describe()).not.toContain('three pages');
+      offer();
+      expect(describe()).toContain('on up to three pages');
+    });
+
+    it('tells the card the letter may run to three pages while room to write is offered', async () => {
+      vi.mocked(getDraftForStationery).mockResolvedValue(draft({ bodyText: lines(4) }) as never);
+      const output = await change(lines(6));
+      expect(output.pageFit).toMatchObject({ maxPages: 3 });
+    });
+
+    it('is refused when the editor is on but our renderer does not draw the page', async () => {
+      editorOnly();
+      vi.stubEnv('LETTER_IRL_PRINT_RENDERER', 'html');
+      await expect(change(lines(4))).rejects.toMatchObject({ code: 'WORDS_DISABLED' });
+    });
+  });
+
   it('is refused while room to write is not offered, before reading the draft', async () => {
     vi.stubEnv('LETTER_IRL_ROOM_TO_WRITE_ENABLED', '');
     await expect(change(lines(4))).rejects.toMatchObject({

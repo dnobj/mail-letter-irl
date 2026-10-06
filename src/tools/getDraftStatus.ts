@@ -11,6 +11,7 @@ import { heldSendFields, waitsInOutbox } from './heldSend.js';
 import { isDraftIdShape } from './requestSend.js';
 import { letterPayment, wordsVersionOf, type LetterTravel } from './letterHelpers.js';
 import { letterPageLimit } from '../config/roomToWrite.js';
+import { isWordsEditorOffered } from '../config/wordsEditor.js';
 import { draftMailOption, isExtraService, mailServiceOf } from '../config/products.js';
 import { isCertifiedMailOffered } from '../config/certifiedMail.js';
 import { isPostcardSizesOffered } from '../config/postcardSizes.js';
@@ -222,7 +223,7 @@ function serviceNow(draft: DraftState): Pick<GetDraftStatusOutput, 'mailService'
  * the card's Words tab starts from them (#593 review round 1).
  */
 function wordsNow(draft: DraftState): Pick<GetDraftStatusOutput, 'bodyText' | 'signOff' | 'wordsVersion'> {
-  if (draft.mail_type !== 'letter' || !draft.renderer_version || letterPageLimit() === 1) return {};
+  if (draft.mail_type !== 'letter' || !draft.renderer_version || !isWordsEditorOffered()) return {};
   const signOff = draft.sign_off ?? '';
   return { bodyText: draft.body_text, signOff, wordsVersion: wordsVersionOf(draft.body_text, signOff) };
 }

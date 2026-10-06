@@ -187,4 +187,6 @@
  *     fields whatever the flag says.
  */
 // r42: flag-gated, read-only Letter IRL home entrypoint.
-export const STEERING_COPY_REV = 44;
+// r45: the words editor (#647): set_letter_words is listed with LETTER_IRL_WORDS_EDITOR_ENABLED alone, and its
+// description then says the letter is laid out on one page and words that do not fit are refused.
+export const STEERING_COPY_REV = 45;
