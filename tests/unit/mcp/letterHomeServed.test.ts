@@ -58,7 +58,7 @@ describe('Letter IRL home on the MCP wire', () => {
     expect(tool.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false, openWorldHint: false });
     const result = await client.callTool({ name: 'open_letter_home', arguments: {} });
     expect(result.isError).toBeFalsy();
-    expect(result.structuredContent).toEqual({ drafts: [], orders: [], recipients: [], limit: 20, appUrl: 'https://chatgpt.com/plugins/letter-irl-dev/app/open_letter_home' });
+    expect(result.structuredContent).toEqual({ drafts: [], orders: [], recipients: [], limit: 20, websiteOrigin: expect.any(String), appUrl: 'https://chatgpt.com/plugins/letter-irl-dev/app/open_letter_home' });
     expect(vi.mocked(query).mock.calls.at(-1)?.[1]).toEqual(['auth0|owner', 20]);
     const uri = (tool._meta?.ui as { resourceUri: string }).resourceUri;
     const resource = await client.readResource({ uri });

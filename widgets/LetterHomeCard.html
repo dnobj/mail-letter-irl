@@ -152,8 +152,10 @@
         try {
           var url = new URL(href);
           if (url.protocol !== 'https:' || url.username || url.password) return;
-          if (tracking && (url.hostname !== 'tools.usps.com' || url.pathname !== '/go/TrackConfirmAction')) return;
-          if (!tracking && !/^\/confirm\/[^/]+$/.test(url.pathname)) return;
+          // USPS's tracking page with only the label the API builds: 8 to 40 letters and digits, nothing after (#651).
+          if (tracking && (url.origin !== 'https://tools.usps.com' || url.pathname !== '/go/TrackConfirmAction' || !/^\?tLabels=[A-Za-z0-9]{8,40}$/.test(url.search) || url.hash)) return;
+          // A draft's confirmation page, on the website the server names and nowhere else (#651).
+          if (!tracking && (!currentData || url.origin !== currentData.websiteOrigin || !/^\/confirm\/[^/]+$/.test(url.pathname) || url.search || url.hash)) return;
           var link = el('a', title);
           link.href = url.href; link.target = '_blank'; link.rel = 'noopener noreferrer';
           container.appendChild(link);

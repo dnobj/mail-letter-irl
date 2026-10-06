@@ -18,8 +18,9 @@ afterEach(() => vi.unstubAllEnvs());
 
 describe('readLetterHome', () => {
   it('reads one bounded snapshot for the account and no street addresses or content', async () => {
+    vi.stubEnv('LETTER_IRL_WEBSITE_BASE_URL', 'https://site.example');
     vi.mocked(query).mockResolvedValueOnce({ rows: [] } as any);
-    expect(await readLetterHome('owner')).toEqual({ drafts: [], orders: [], recipients: [], limit: 20 });
+    expect(await readLetterHome('owner')).toEqual({ drafts: [], orders: [], recipients: [], limit: 20, websiteOrigin: 'https://site.example' });
     const [sql, values] = vi.mocked(query).mock.calls[0];
     expect(values).toEqual(['owner', 20]);
     expect(sql.match(/WHERE user_id = \$1/g)).toHaveLength(2);
@@ -102,6 +103,14 @@ describe('home scheduling and share configuration', () => {
     vi.mocked(query).mockResolvedValue({ rows: [row({ status: 'queued', funding_type, arrive_by: '2026-10-20', mail_on: '2026-10-09' })] } as any);
     expect((await readLetterHome('owner')).orders[0].cancellable).toBe(false);
   });
+  it('names the website origin its confirmation links are on, so the card opens them only there (#651)', async () => {
+    vi.mocked(query).mockResolvedValue({ rows: [row({ kind: 'draft', id: 'draft-1', status: 'pending', expires_at: new Date('2026-10-06T00:00:00Z') })] } as any);
+    vi.stubEnv('LETTER_IRL_WEBSITE_BASE_URL', 'https://dev-site.example/');
+    const home = await readLetterHome('owner');
+    expect(home.websiteOrigin).toBe('https://dev-site.example');
+    expect(new URL(home.drafts[0].confirmationUrl).origin).toBe(home.websiteOrigin);
+  });
+
   it('uses a configured plugin ID only when safe, and never invents one', async () => {
     vi.mocked(query).mockResolvedValue({ rows: [] } as any);
     for (const id of ['', '../evil', 'user@market', 'https://evil.test']) {
