@@ -167,7 +167,7 @@ describePostgres('content retention sweep', () => {
     expect(home.drafts[0].recipient).toEqual({ name: 'Ruth', city: 'Chicago', state: 'IL' });
     expect(JSON.stringify(home)).not.toContain(SECRET_BODY);
     expect(JSON.stringify(home)).not.toContain(SECRET_STREET);
-    expect(await readLetterHome('absent-account')).toEqual({ drafts: [], orders: [], recipients: [], limit: 20 });
+    expect(await readLetterHome('absent-account')).toEqual({ drafts: [], orders: [], recipients: [], limit: 20, websiteOrigin: expect.any(String) });
   });
 
   it('home limits recent mail and active drafts independently to twenty', async () => {
