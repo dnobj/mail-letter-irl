@@ -97,9 +97,16 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  * provider status sync writes it (as the operator role, in full mode): re-run
  * `npm run admin:provision-access` in each environment after 053 is applied.
  * The admin panel's letter view gains the two columns later, with another re-run.
+ *
+ * 054 adds stationery_designs and users.stationery_design_id (#649). Neither
+ * role is granted the table: a design's name is the person's own words, which
+ * the panel does not show. The reader's users column list leaves the new
+ * column out; the operator reads users whole and writes only the columns
+ * listed, none of them this. Erasure, which deletes the designs, runs as the
+ * database owner. So nothing to re-run.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
-  "053_letter_mail_service.sql";
+  "054_stationery_designs.sql";
 
 export interface AdminProvisioningArguments {
   environment: "development" | "production";

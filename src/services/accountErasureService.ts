@@ -405,6 +405,7 @@ export interface ErasureCounts {
    * in the preview: neither admin role is granted the table (migration 050).
    */
   signaturesDeleted: number;
+  stationeryDesignsDeleted: number;
   seedCodeEmailsCleared: number;
   giftCodesDeleted: number;
   descriptionsCleared: number;
@@ -562,6 +563,9 @@ export async function eraseAccountWithClient(client: SqlClient, userId: string):
   // Erasure keeps the users row, so ON DELETE CASCADE never reaches them.
   const addressRequests = await client.query(`DELETE FROM address_requests WHERE user_id = $1`, [userId]);
   const signatures = await client.query(`DELETE FROM user_signatures WHERE user_id = $1`, [userId]);
+  // Saved stationery designs (#649): their names are the person's own words. Deleting them
+  // also clears the remembered design (ON DELETE SET NULL), which the users update repeats.
+  const designs = await client.query(`DELETE FROM stationery_designs WHERE user_id = $1`, [userId]);
   // The address a seed code was claimed with. Clearing it frees that address
   // to claim the same campaign once more from a new account, which is the
   // price of not keeping it.
@@ -600,6 +604,7 @@ export async function eraseAccountWithClient(client: SqlClient, userId: string):
             return_address = NULL,
             return_address_validated_at = NULL,
             stationery_theme = NULL,
+            stationery_design_id = NULL,
             sends_blocked_at = COALESCE(sends_blocked_at, NOW()),
             sends_blocked_reason = COALESCE(sends_blocked_reason, 'account_erased'),
             erased_at = NOW(),
@@ -631,6 +636,7 @@ export async function eraseAccountWithClient(client: SqlClient, userId: string):
       featureRequestsDeleted: requests.rowCount ?? 0,
       addressRequestsDeleted: addressRequests.rowCount ?? 0,
       signaturesDeleted: signatures.rowCount ?? 0,
+      stationeryDesignsDeleted: designs.rowCount ?? 0,
       seedCodeEmailsCleared: seedEmails.rowCount ?? 0,
       giftCodesDeleted: giftCodes.rowCount ?? 0,
       descriptionsCleared: (transactionDescriptions.rowCount ?? 0) + (lotDescriptions.rowCount ?? 0)
