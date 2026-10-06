@@ -138,7 +138,8 @@
     var SERVICES = ["standard", "certified", "certified_return_receipt"];
     // message and error: what the last change of service said, in the Mail row's own note on the Delivery tab, since the
     // Style note sits on another tab.
-    var service = { offered: [], current: "standard", pending: null, message: "", error: false };
+    // pages: the pages the preview prints on, which a change of service leaves as they are.
+    var service = { offered: [], current: "standard", pending: null, message: "", error: false, pages: 1 };
     var serviceRow = options.serviceRow || null;
     var serviceButtons = options.serviceButtons || [];
     var serviceNote = options.serviceNote || null;
@@ -353,14 +354,34 @@
         });
     }
 
+    // A refusal of set_mail_service is written for the model (it names tools and arguments): the Mail note says it in the
+    // person's words, found anywhere in the text, as a host may wrap it (#434). Anything else is said as it came.
+    var SERVICE_REFUSALS = [
+      ["has already been sent", "This letter has already been sent, so how it travels can't change now."],
+      ["was sent just after", "This letter was sent just as it was changed. Its order says how it travels."],
+      ["has expired", "This preview has expired. Ask in the chat for a new one."],
+      ["tied to a Pay & Send payment", "A Pay & Send payment is open for this letter, so how it travels can't change now."],
+      ["gift letter does not pay for certified mail", "A gift letter can't go by certified mail. Ask in the chat for a new preview to send it certified."],
+      ["postcard always goes as ordinary mail", "A postcard always goes as ordinary mail."],
+      ["wasn't found", "That preview wasn't found. Ask in the chat for a new one."]
+    ];
+    function serviceRefusal(text) {
+      for (var i = 0; i < SERVICE_REFUSALS.length; i++) {
+        if (text.indexOf(SERVICE_REFUSALS[i][0]) !== -1) return SERVICE_REFUSALS[i][1];
+      }
+      return text;
+    }
+
     // The Mail choice on the Delivery tab (#648): the services the preview's _meta offers (certified mail, while it is
     // offered and the letter is not a gift letter), the one the draft travels by, and the one being set. A change of
     // service calls set_mail_service, whose answer carries the terms and how the letter travels (#638), so the price,
-    // the buttons, the summary and the Delivery line follow it as they follow a restyle.
+    // the buttons, the summary and the Delivery line follow it as they follow a restyle. The pressed service is asked
+    // for again too: a card that did not hear the chat change it (ChatGPT's) hears the draft as it is from the answer.
     function setService(wanted) {
-      if (state.busy || state.held || !state.draftId || typeof host.callTool !== "function") return;
-      if (service.offered.indexOf(wanted) === -1 || wanted === service.current) return;
+      if (state.busy || !state.draftId || typeof host.callTool !== "function") return;
+      if (service.offered.indexOf(wanted) === -1) return;
       if (serviceRow && serviceRow.style.display === "none") return;
+      // Not while the card sends the letter or starts paying for it.
       if (typeof options.idle === "function" && !options.idle()) return;
       var draftId = state.draftId;
       state.busy = true;
@@ -383,17 +404,21 @@
           if (typeof data.draftId === "string" && data.draftId !== draftId) {
             throw new Error("How the letter travels may have changed. Make the preview again to see it.");
           }
-          var said = termsOf(data, state.terms ? state.terms.pageFit : null);
+          // A change of service leaves the page as it is (#648 review round 1): its pages and how full they are stay
+          // the ones the card knew, from the last terms or the preview, which the answer does not repeat.
+          var known = state.terms;
+          var previewFit = typeof options.previewFit === "function" ? options.previewFit() : null;
+          var said = termsOf(data, known ? known.pageFit : previewFit);
           if (!said) throw new Error("How the letter travels may have changed. Make the preview again to see it.");
+          said.pages = known ? known.pages : service.pages;
           // The terms say how the letter travels now, and with them the service the draft holds, whichever was pressed.
           adoptTerms(said);
           state.restyled = true;
-          options.onChange({ draftId: draftId, stationery: state.stationery });
         })
         .catch(function (error) {
           if (state.draftId !== draftId) return;
           service.error = true;
-          service.message = options.readableError(error);
+          service.message = serviceRefusal(options.readableError(error));
         })
         .then(function () {
           if (state.draftId !== draftId) return;
@@ -654,6 +679,7 @@
           var offer = typeof options.mailServices === "function" ? options.mailServices() : null;
           service.offered = Array.isArray(offer) ? offer.filter(isService) : [];
           service.current = isService(output.mailService) ? output.mailService : "standard";
+          service.pages = output.pages === 2 || output.pages === 3 ? output.pages : 1;
           service.pending = null;
           service.message = "";
           service.error = false;

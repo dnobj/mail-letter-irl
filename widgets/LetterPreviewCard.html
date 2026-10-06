@@ -267,7 +267,7 @@
             <span class="info-value style-controls" role="group" aria-labelledby="service-label">
               <button type="button" class="link-button" data-service="standard" aria-pressed="false">First-Class</button>
               <button type="button" class="link-button" data-service="certified" aria-pressed="false">Certified</button>
-              <button type="button" class="link-button" data-service="certified_return_receipt" aria-pressed="false">Certified with receipt</button>
+              <button type="button" class="link-button" data-service="certified_return_receipt" aria-pressed="false">Certified + e-receipt</button>
             </span>
           </div>
           <div class="info-row" id="status-row">
@@ -588,6 +588,10 @@
         serviceNote: document.getElementById("service-note"),
         mailServices() {
           return currentMeta().mailServices;
+        },
+        // How full the preview's pages are, which a change of service keeps.
+        previewFit() {
+          return currentMeta().pageFit ?? null;
         },
         readableError,
         resultText,
