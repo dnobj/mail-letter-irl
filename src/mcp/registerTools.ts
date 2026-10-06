@@ -1067,6 +1067,8 @@ export function partitionToolResult(
     pageFit,
     // A saved signature's picture (#608), for a card: the model reads its sentence.
     signatureImage,
+    // The services a letter card's Delivery tab offers (#648): the model changes one with set_mail_service.
+    mailServices,
     ...modelFacingData
   } = result;
 
@@ -1107,6 +1109,7 @@ export function partitionToolResult(
       ...(generatedImagePreview !== undefined ? { generatedImagePreview } : {}),
       ...(pageFit !== undefined ? { pageFit } : {}),
       ...(signatureImage !== undefined ? { signatureImage } : {}),
+      ...(mailServices !== undefined ? { mailServices } : {}),
       ...(modelFacingData.generatedImageUrl !== undefined
         ? { generatedImageUrl: modelFacingData.generatedImageUrl }
         : {})

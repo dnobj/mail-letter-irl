@@ -158,7 +158,9 @@ type MetaPartitioned =
   // the letter card's fit line (#586)
   | "pageFit"
   // a saved signature's picture (#608)
-  | "signatureImage";
+  | "signatureImage"
+  // the letter card's choice of service (#648)
+  | "mailServices";
 
 type UndeclaredKeys<Output, Schema> = Exclude<keyof Output, keyof Schema | MetaPartitioned>;
 

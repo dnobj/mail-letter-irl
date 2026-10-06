@@ -26,7 +26,7 @@ letter: `sendAsGift: true` on it is refused. Only a letter longer than three pag
 three pages: three pages is the longest letter we print", without line counts. Otherwise every preview is one
 page, as before. While the words can be changed in place (room to write, or the words editor alone, `LETTER_IRL_WORDS_EDITOR_ENABLED`, #647, on one page), they also return `wordsVersion`, the version of the letter's words, which `set_letter_words` names. The card also gets `_meta.pageFit`, which never reaches the model: how full the letter's pages are
 (pages, sheets, double-sided, each page's lines, and the room left on the last page in lines and about how many
-characters), counted before any gift page, for its fit line.
+characters), counted before any gift page, for its fit line. While certified mail is offered, a letter that is not a gift letter also gives the card `_meta.mailServices` (`standard`, `certified`, `certified_return_receipt`, in that order), never the model: the services its Delivery tab offers, each changed with `set_mail_service` (#648).
 
 While `LETTER_IRL_ARRIVE_BY_ENABLED` is on, all four preview tools also accept an optional
 `arriveBy` (YYYY-MM-DD, #535): the date the mail should arrive by. The preview works back to the

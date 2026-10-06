@@ -16,7 +16,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createMcpServer } from '../../../src/mcp/httpServer.js';
 import { buildManifest } from '../../../src/mcp/manifest.js';
-import { summarizeToolResult, withheldInputKeys } from '../../../src/mcp/registerTools.js';
+import { partitionToolResult, summarizeToolResult, withheldInputKeys } from '../../../src/mcp/registerTools.js';
 import type { ClientProfile } from '../../../src/auth/clientProfiles.js';
 import { LetterIrlServer } from '../../../src/server.js';
 import { MAIL_SERVICES } from '../../../src/config/certifiedMail.js';
@@ -185,6 +185,32 @@ describe("the letter previews' mailService (#625)", () => {
 
   it('bumps the steering copy revision', () => {
     expect(STEERING_COPY_REV).toBeGreaterThanOrEqual(38);
+  });
+});
+
+describe("the letter card's choice of service (#648)", () => {
+  const SERVICES = ['standard', 'certified', 'certified_return_receipt'];
+
+  it('goes to the card in _meta, and never to the model', () => {
+    const { structuredContent, _meta } = partitionToolResult({ draftId: 'draft-1', canSendNow: true, mailServices: SERVICES });
+    expect(structuredContent).toEqual({ draftId: 'draft-1', canSendNow: true });
+    expect(_meta).toMatchObject({ mailServices: SERVICES });
+  });
+
+  it('is not in the narration', () => {
+    for (const name of PREVIEWS) {
+      expect(summarizeToolResult(name, { message: 'Preview ready.', mailServices: SERVICES }), name).not.toContain('certified_return_receipt');
+    }
+  });
+
+  it("is not declared in the previews' output schema, so no host takes it for the model's", async () => {
+    vi.stubEnv('LETTER_IRL_CERTIFIED_MAIL_ENABLED', 'true');
+    vi.stubEnv('JIT_PURCHASE_ENABLED', 'true');
+    const tools = await listed(PREVIEWS);
+    expect(tools).toHaveLength(3);
+    for (const tool of tools) {
+      expect(Object.keys((tool.outputSchema as Schema | undefined)?.properties ?? {}), tool.name).not.toContain('mailServices');
+    }
   });
 });
 

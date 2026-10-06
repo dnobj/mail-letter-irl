@@ -133,6 +133,24 @@
     var signatureSwitch = options.signatureSwitch || null;
     var signatureRow = options.signatureRow || null;
 
+    // The Mail choice (#648): offered, the services the preview offers; current, the one the draft travels by; pending,
+    // the one being set while the server answers.
+    var SERVICES = ["standard", "certified", "certified_return_receipt"];
+    // message and error: what the last change of service said, in the Mail row's own note on the Delivery tab, since the
+    // Style note sits on another tab.
+    var service = { offered: [], current: "standard", pending: null, message: "", error: false };
+    var serviceRow = options.serviceRow || null;
+    var serviceButtons = options.serviceButtons || [];
+    var serviceNote = options.serviceNote || null;
+    function isService(value) {
+      return SERVICES.indexOf(value) !== -1;
+    }
+    // Terms taken from any answer: when they say how the letter travels, the Mail choice follows them.
+    function adoptTerms(said) {
+      state.terms = said;
+      if (said && said.travel) service.current = isService(said.travel.mailService) ? said.travel.mailService : "standard";
+    }
+
     // What a preview or a status answer says of the signature: whether a
     // saved one can be switched, and whether it prints. None saved, or
     // signatures not offered: no switch.
@@ -163,6 +181,20 @@
         signatureSwitch.setAttribute("aria-checked", on ? "true" : "false");
         signatureSwitch.setAttribute("aria-disabled", waiting);
         signatureSwitch.textContent = on ? "On" : "Off";
+      }
+      var shownService = state.busy && service.pending !== null ? service.pending : service.current;
+      for (var j = 0; j < serviceButtons.length; j++) {
+        var choice = serviceButtons[j];
+        var value = choice.getAttribute("data-service");
+        choice.hidden = service.offered.indexOf(value) === -1;
+        choice.setAttribute("aria-pressed", value === shownService ? "true" : "false");
+        choice.setAttribute("aria-disabled", waiting);
+      }
+      if (serviceNote) {
+        var noted = Boolean(service.message) && Boolean(serviceRow) && serviceRow.style.display !== "none";
+        serviceNote.textContent = service.message;
+        serviceNote.style.display = noted ? "block" : "none";
+        serviceNote.classList.toggle("alert", service.error);
       }
     }
 
@@ -218,7 +250,7 @@
           // that says nothing of it, as an older server's would not, keeps
           // the last word on it (#592 review round 1).
           var said = termsOf(data, result && result._meta && result._meta.pageFit);
-          if (said) state.terms = said;
+          if (said) adoptTerms(said);
           var page = result && result._meta && result._meta.previewHtml;
           // The draft has the new style either way; without its page the card
           // keeps showing the last one and says so.
@@ -282,7 +314,7 @@
           state.restyled = true;
           // What it costs now: the band can run the letter on to a page.
           var said = termsOf(data, result && result._meta && result._meta.pageFit);
-          if (said) state.terms = said;
+          if (said) adoptTerms(said);
           var page = result && result._meta && result._meta.previewHtml;
           if (typeof page === "string" && page) {
             state.previewHtml = page;
@@ -316,6 +348,57 @@
           if (state.draftId !== draftId) return;
           state.busy = false;
           signature.pending = null;
+          draw();
+          options.onBusy();
+        });
+    }
+
+    // The Mail choice on the Delivery tab (#648): the services the preview's _meta offers (certified mail, while it is
+    // offered and the letter is not a gift letter), the one the draft travels by, and the one being set. A change of
+    // service calls set_mail_service, whose answer carries the terms and how the letter travels (#638), so the price,
+    // the buttons, the summary and the Delivery line follow it as they follow a restyle.
+    function setService(wanted) {
+      if (state.busy || state.held || !state.draftId || typeof host.callTool !== "function") return;
+      if (service.offered.indexOf(wanted) === -1 || wanted === service.current) return;
+      if (serviceRow && serviceRow.style.display === "none") return;
+      if (typeof options.idle === "function" && !options.idle()) return;
+      var draftId = state.draftId;
+      state.busy = true;
+      service.pending = wanted;
+      service.message = "";
+      service.error = false;
+      draw();
+      if (typeof options.onSet === "function") options.onSet();
+      options.onBusy();
+      Promise.resolve()
+        .then(function () {
+          return host.callTool("set_mail_service", { draftId: draftId, mailService: wanted });
+        })
+        .then(function (result) {
+          if (result && result.isError) {
+            throw new Error(options.resultText(result) || "How the letter travels was not changed.");
+          }
+          if (state.draftId !== draftId) return;
+          var data = toolData(result);
+          if (typeof data.draftId === "string" && data.draftId !== draftId) {
+            throw new Error("How the letter travels may have changed. Make the preview again to see it.");
+          }
+          var said = termsOf(data, state.terms ? state.terms.pageFit : null);
+          if (!said) throw new Error("How the letter travels may have changed. Make the preview again to see it.");
+          // The terms say how the letter travels now, and with them the service the draft holds, whichever was pressed.
+          adoptTerms(said);
+          state.restyled = true;
+          options.onChange({ draftId: draftId, stationery: state.stationery });
+        })
+        .catch(function (error) {
+          if (state.draftId !== draftId) return;
+          service.error = true;
+          service.message = options.readableError(error);
+        })
+        .then(function () {
+          if (state.draftId !== draftId) return;
+          state.busy = false;
+          service.pending = null;
           draw();
           options.onBusy();
         });
@@ -471,7 +554,7 @@
           words.editing = false;
           // What it costs now, and how full its pages are.
           var said = termsOf(data, result && result._meta && result._meta.pageFit);
-          if (said) state.terms = said;
+          if (said) adoptTerms(said);
           var page = result && result._meta && result._meta.previewHtml;
           // The draft has the words either way; without its page the card
           // keeps showing the last one and says so.
@@ -515,11 +598,20 @@
     }
 
     if (signatureSwitch) signatureSwitch.addEventListener("click", setSignature);
+    for (var k = 0; k < serviceButtons.length; k++) {
+      (function (choice) {
+        choice.addEventListener("click", function () {
+          setService(choice.getAttribute("data-service"));
+        });
+      })(serviceButtons[k]);
+    }
 
     function hide() {
       options.row.style.display = "none";
       options.note.style.display = "none";
       if (signatureRow) signatureRow.style.display = "none";
+      if (serviceRow) serviceRow.style.display = "none";
+      if (serviceNote) serviceNote.style.display = "none";
     }
 
     return {
@@ -559,8 +651,16 @@
           signature.offered = signatureOffered(output.signature);
           signature.on = signature.offered && output.signature.printed === true;
           signature.pending = null;
+          var offer = typeof options.mailServices === "function" ? options.mailServices() : null;
+          service.offered = Array.isArray(offer) ? offer.filter(isService) : [];
+          service.current = isService(output.mailService) ? output.mailService : "standard";
+          service.pending = null;
+          service.message = "";
+          service.error = false;
         }
         options.row.style.display = "";
+        // The Mail choice, while the preview offers more than one service (#648).
+        if (serviceRow) serviceRow.style.display = service.offered.length > 1 && serviceButtons.length ? "" : "none";
         // The switch beside the styles, while a signature is saved (#608).
         if (signatureRow) signatureRow.style.display = signature.offered && signatureSwitch ? "" : "none";
         draw();
@@ -612,7 +712,7 @@
         keepSlots(stationery);
         if (typeof previewHtml === "string" && previewHtml) state.previewHtml = previewHtml;
         var terms = termsOf(answer, fit);
-        if (terms) state.terms = terms;
+        if (terms) adoptTerms(terms);
         // And its words now (#593 review round 1): the chat may have changed
         // them since the preview, and the Words tab shows and edits these.
         if (answer && typeof answer.bodyText === "string" && typeof answer.signOff === "string" && typeof answer.wordsVersion === "string") {
