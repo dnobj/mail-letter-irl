@@ -1844,6 +1844,48 @@ Steps 9 to 11, and the Settings page check in step 12, need a signed-in session 
 a preview's choice is remembered; the Settings page shows and changes the signature a letter would
 print; and nothing prints a signature the person did not see.
 
+### STATIONERY-02 — Saved stationery designs (#649)
+
+**Status:** Not run.
+
+**Preconditions:** Development, with `LETTER_IRL_STATIONERY_ENABLED` and `LETTER_IRL_CUSTOM_STATIONERY_ENABLED` on and
+`LETTER_IRL_PRINT_RENDERER=pdf` in the API. The ChatGPT (DEV) and Claude connectors with their tool lists refreshed
+(three new tools; the previews' and `set_stationery`'s schemas gained `stationeryDesignId`; steering rev 47; widget v74).
+PostGrid is in test mode on development: a sent letter is drawn, not mailed, and its PDF opens in PostGrid's test
+dashboard.
+
+**Steps:**
+1. [ ] Ask the assistant for stationery in your words, such as "a handwritten letter with a little sprig in the corner,
+   light grey, with lines, and call it Garden". Verify it calls `save_stationery_design` with a face, ornament, rules and
+   tone that match what you asked, and answers that the design is saved and how to use it. Verify it does not promise
+   colour: letters print in black and greys.
+2. [ ] Ask for a letter to someone in that design. Verify the preview passes `stationeryDesignId`, the page shows the
+   sprig in light grey in the top-right corner, the date line and the body in the handwriting face on faint rules, and
+   the card's summary names "Garden".
+3. [ ] On the card's Style tab, verify a **Garden** button after the six themes, pressed. Press **Botanical**: verify the
+   page is drawn again in Botanical and Botanical is pressed. Press **Garden**: verify it comes back.
+4. [ ] Ask for a design with the monogram ornament and a headline ("Party", confetti, a headline "Happy Birthday!").
+   Verify a preview in it prints the initials only with a monogram ornament (ask once with confetti and initials:
+   refused, saying why), and the headline above the letter.
+5. [ ] Save a design under a name you have, in other capitals ("GARDEN"): verify it says it replaced the design, and
+   the list (`list_stationery_designs`) still has one Garden. Save designs until you have ten, then an eleventh: verify
+   the refusal names deleting one or saving under an existing name.
+6. [ ] Make a new preview without naming any stationery: verify it is drawn in the design you used last and says so.
+   Ask for a theme instead, then a new preview without one: verify the theme is remembered now, not the design.
+7. [ ] Delete a design (`delete_stationery_design`): verify the assistant asks you first, and the design is gone from the
+   list. Verify a letter previewed in it before still shows it, and sends in it.
+8. [ ] Send a letter in a design (test mode). In PostGrid's test dashboard, verify the PDF prints as the preview showed:
+   the ornament in its grey, inside the corner beside the address window, clear of PostGrid's address area, and the body
+   in the design's face. **Record how a light-grey ornament looks on the test print; a live print is the owner's call.**
+9. [ ] Erase a test account that has designs (ERASE-01): verify its designs are gone and the erasure counts them.
+10. [ ] Turn `LETTER_IRL_CUSTOM_STATIONERY_ENABLED` off and refresh the tool lists. Verify the three tools are gone, the
+    previews and `set_stationery` take no `stationeryDesignId`, a preview naming no stationery is drawn in the remembered
+    theme (never a design), and a letter already previewed in a design still prints in it. Turn the flag back on.
+
+**Pass criteria:** A design made in conversation is saved, drawn in previews and on the card exactly as it prints, kept
+to the account, remembered as the last choice, and deleted on request; nothing about designs is offered while the flag
+is off, and a letter drawn in a design prints in it whatever happens to the design afterwards.
+
 ### COLLAGE-01 — A postcard of two to four photos (#616)
 
 **Status:** Partly run on development, 2026-10-03, through ChatGPT (DEV) after a connector Refresh, on build 69b00b3 (parts 1 and 2; the card was still v64). Passed:
