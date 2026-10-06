@@ -1945,8 +1945,11 @@ describe('saved designs on the Style tab (#649)', () => {
     expect(asked[0].params.arguments).toEqual({ draftId: 'draft_0001', stationeryDesignId: ID });
     // While the server answers, the design shows pressed.
     expect(pressedStyle(card)).toEqual([`design:${ID}`]);
+    // And every design waits with the themes.
+    expect(designButtons(card).map(button => button.getAttribute('aria-disabled'))).toEqual(['true', 'true']);
     await card.answer(restyled(GARDEN.stationery), 'set_stationery');
     expect(pressedStyle(card)).toEqual([`design:${ID}`]);
+    expect(designButtons(card).map(button => button.getAttribute('aria-disabled'))).toEqual(['false', 'false']);
     expect(text(card, 'studio-summary')).toContain('Garden');
     // Pressing it again asks nothing.
     await card.click(designButtons(card)[0]);
