@@ -243,8 +243,10 @@ function pagesNow(draft: DraftState): Pick<GetDraftStatusOutput, 'pages'> {
  * since. Only while stationery is offered, and only for a page our renderer
  * drew (renderer_version), whose stored theme reads as the print reads it.
  * A saved design (#649) is not named: the status's output schema knows only
- * the built-in themes until the part that offers designs says one here, so the
- * card keeps the stationery its preview gave.
+ * the built-in themes until the part that offers designs says one here. A card
+ * takes nothing from a status without stationery (widgets/shared/style.js,
+ * adopt): not the page, the price, the words or the signature either. The part
+ * that lets the chat restyle a draft into a design must name it here first.
  */
 function styleNow(draft: DraftState): Pick<GetDraftStatusOutput, 'stationery' | 'previewHtml'> {
   if (!isStationeryOffered() || draft.mail_type !== 'letter' || !draft.renderer_version) return {};

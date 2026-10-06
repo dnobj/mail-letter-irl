@@ -83,14 +83,24 @@ const NAME_NONSENSE = /[\p{Cc}\p{Cs}\p{Cn}\p{Co}]/gu;
  * Set subtraction needs the v flag, which ES2022's regular expression literals lack.
  */
 const NAME_FORMATTING = new RegExp('[\\p{Cf}--[\\p{Join_Control}\\p{Emoji_Component}]]', 'gv');
-/** What a name must hold at least one of: a letter, a digit, punctuation or a symbol (emoji among them). */
-const NAME_VISIBLE = /[\p{L}\p{N}\p{P}\p{S}]/u;
+/**
+ * Emoji tag characters, kept only where they make a flag (a black flag, tags, a
+ * cancel tag): anywhere else they are text the person cannot see but a model
+ * reads, and a saved name is read back to the chat (#649 review round 3).
+ */
+const NAME_TAGS = /(\u{1F3F4}[\u{E0020}-\u{E007E}]+\u{E007F})|[\u{E0020}-\u{E007F}]/gu;
+/**
+ * What a name must hold at least one of: a letter, a digit, punctuation or a
+ * symbol (emoji among them), but not the blank fillers that look like nothing
+ * (the Hangul fillers, the blank Braille pattern).
+ */
+const NAME_VISIBLE = new RegExp('[[\\p{L}\\p{N}\\p{P}\\p{S}]--[\\u{115F}\\u{1160}\\u{3164}\\u{FFA0}\\u{2800}]]', 'v');
 
 /**
  * A design's name as it is kept (#649): line breaks and tabs a space; controls,
  * broken surrogate halves, unassigned and private-use characters, and the
- * characters that only format text taken out, but the joiners and emoji tags
- * that real names need; at most four marks on a letter, as in the body (and so
+ * characters that only format text taken out, but the joiners real names need
+ * and the tags of a flag; at most four marks on a letter, as in the body (and so
  * stable when kept again); each run of white space one space; the ends trimmed.
  * Null when that leaves nothing visible, or more than
  * STATIONERY_DESIGN_NAME_MAX_LENGTH characters, counted as PostgreSQL counts
@@ -100,7 +110,13 @@ const NAME_VISIBLE = /[\p{L}\p{N}\p{P}\p{S}]/u;
  */
 export function designNameOf(value: unknown): string | null {
   if (typeof value !== 'string') return null;
-  const name = clampMarks(value.replace(NAME_BREAKS, ' ').replace(NAME_NONSENSE, '').replace(NAME_FORMATTING, ''))
+  const name = clampMarks(
+    value
+      .replace(NAME_BREAKS, ' ')
+      .replace(NAME_NONSENSE, '')
+      .replace(NAME_FORMATTING, '')
+      .replace(NAME_TAGS, (_tag, flag: string | undefined) => flag ?? '')
+  )
     .replace(/\s+/gu, ' ')
     .trim();
   const length = [...name].length;
