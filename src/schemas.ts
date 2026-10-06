@@ -1796,6 +1796,10 @@ export const openLetterHomeOutputSchema: JsonSchema = {
       "type": "integer",
       "minimum": 1
     },
+    "websiteOrigin": {
+      "type": "string",
+      "description": "The website's origin: a draft's confirmation link opens only there"
+    },
     "appUrl": {
       "type": "string"
     }
@@ -1804,6 +1808,7 @@ export const openLetterHomeOutputSchema: JsonSchema = {
     "drafts",
     "orders",
     "recipients",
+    "websiteOrigin",
     "limit"
   ],
   "additionalProperties": false

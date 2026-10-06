@@ -1,6 +1,6 @@
 import { query } from "../db/index.js";
 import { certifiedFactsOf } from "../config/certifiedMail.js";
-import { sendConfirmationUrl } from "../config/sendConfirmation.js";
+import { sendConfirmationUrl, websiteBaseUrl } from "../config/sendConfirmation.js";
 import { certifiedOrderNote } from "../tools/certifiedOrder.js";
 import type { LetterStatus } from "../contracts/types.js";
 import { isArriveByEnabled } from "../config/arriveBy.js";
@@ -30,6 +30,10 @@ const homeStatus = (status: string, scheduled: boolean): LetterStatus => {
     case "queued":
       return scheduled ? "scheduled" : "pending";
     case "draft":
+      return "pending";
+    // Held for an operator (a recovery hold, or a payment reversed or disputed while the letter was going out):
+    // "awaiting an update", as get_order_status says it.
+    case "held":
       return "pending";
     case "processing":
       return "printing";
@@ -138,11 +142,20 @@ export async function readLetterHome(userId: string) {
     pluginId && /^[a-zA-Z0-9_-]{1,100}$/.test(pluginId)
       ? `https://chatgpt.com/plugins/${encodeURIComponent(pluginId)}/app/open_letter_home`
       : undefined;
+  // The website's origin, so the card opens a draft's confirmation link only there (#651).
+  // A setting that is not a URL gives no origin, so no draft link opens, rather than failing the whole home.
+  let websiteOrigin = "";
+  try {
+    websiteOrigin = new URL(websiteBaseUrl()).origin;
+  } catch {
+    websiteOrigin = "";
+  }
   return {
     drafts,
     orders,
     recipients,
     limit: HOME_LIMIT,
+    websiteOrigin,
     ...(appUrl ? { appUrl } : {}),
   };
 }

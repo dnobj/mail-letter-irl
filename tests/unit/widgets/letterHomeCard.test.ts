@@ -37,13 +37,65 @@ describe('LetterHomeCard', () => {
     const { dom, doc } = open({
       drafts: [{ recipient: { name: 'Ruth', city: '', state: '' }, confirmationUrl: 'https://dev.example.test/confirm/draft-1', expiresAt: '2026-10-05', isGiftSend: true }],
       orders: [order('scheduled', { arriveBy: '2026-10-20', mailOn: '2026-10-09', carrierTrackingUrl: 'https://tools.usps.com/go/TrackConfirmAction?tLabels=9400111899223856928499', certifiedNote: 'Goes as USPS Certified Mail.' })],
-      recipients: [], limit: 20
+      recipients: [], limit: 20, websiteOrigin: 'https://dev.example.test'
     });
     expect(doc.body.textContent).toContain('Aims to arrive by Oct 20, 2026');
     expect(doc.body.textContent).toContain('Gift letter');
     expect(doc.querySelectorAll('a[href]')).toHaveLength(2);
     expect(doc.body.textContent).toContain('Goes as USPS Certified Mail.');
     expect(doc.querySelector('a')?.rel).toBe('noopener noreferrer');
+    dom.window.close();
+  });
+
+  it('opens a confirmation link only on the website the server names, and a USPS link only with the label the API builds (#651)', () => {
+    const draft = (confirmationUrl: string) => ({ recipient: { name: 'Ruth', city: '', state: '' }, confirmationUrl, expiresAt: '2026-10-05', draftId: 'draft-1' });
+    const usps = (carrierTrackingUrl: string) => order('in_transit', { carrierTrackingUrl, orderId: carrierTrackingUrl });
+    const { dom, doc } = open({
+      drafts: [
+        draft('https://dev.example.test/confirm/draft-1'),
+        draft('https://Dev.Example.TEST:443/confirm/draft-2'),
+        draft('https://evil.example/confirm/draft-1'),
+        draft('https://dev.example.test' + String.fromCharCode(92) + '@evil.example/confirm/draft-1'),
+        draft('https://dev.example.test@evil.example/confirm/draft-1'),
+        draft('https://dev.example.test:8443/confirm/draft-1'),
+        draft('http://dev.example.test/confirm/draft-1'),
+        draft('https://dev.example.test/confirm/draft-1?next=https://evil.example'),
+        draft('https://dev.example.test/confirm/draft-1#x'),
+        draft('https://dev.example.test/other/draft-1')
+      ],
+      orders: [
+        usps('https://tools.usps.com/go/TrackConfirmAction?tLabels=9400111899223856928499'),
+        usps('https://tools.usps.com/go/TrackConfirmAction?tLabels=EJ123456789US'),
+        usps('https://Tools.USPS.com:443/go/TrackConfirmAction?tLabels=9400111899223856928400'),
+        usps('https://tools.usps.com/go/TrackConfirmAction?tLabels=9400111899223856928499&redirect=https://evil.example'),
+        usps('https://tools.usps.com/go/TrackConfirmAction?tLabels=9400%2611189922'),
+        usps('https://tools.usps.com/go/TrackConfirmAction?tLabels=1234567'),
+        usps('https://tools.usps.com/go/TrackConfirmAction?tLabels=' + '9'.repeat(41)),
+        usps('https://tools.usps.com/go/TrackConfirmAction?tLabels=9400-1118'),
+        usps('https://tools.usps.com/go/TrackConfirmAction?tLabels=9400111899223856928499#x'),
+        usps('https://tools.usps.com/go/TrackConfirmAction'),
+        usps('https://tools.usps.com/go/Other?tLabels=9400111899223856928499'),
+        usps('https://tools.usps.com:8443/go/TrackConfirmAction?tLabels=9400111899223856928499')
+      ],
+      recipients: [], limit: 20, websiteOrigin: 'https://dev.example.test'
+    });
+    const hrefs = [...doc.querySelectorAll('a[href]')].map(a => a.getAttribute('href'));
+    expect(hrefs).toEqual([
+      'https://dev.example.test/confirm/draft-1',
+      'https://dev.example.test/confirm/draft-2',
+      'https://tools.usps.com/go/TrackConfirmAction?tLabels=9400111899223856928499',
+      'https://tools.usps.com/go/TrackConfirmAction?tLabels=EJ123456789US',
+      'https://tools.usps.com/go/TrackConfirmAction?tLabels=9400111899223856928400'
+    ]);
+    dom.window.close();
+  });
+
+  it('opens no confirmation link when the server names no website (an older server)', () => {
+    const { dom, doc } = open({
+      drafts: [{ recipient: { name: 'Ruth', city: '', state: '' }, confirmationUrl: 'https://dev.example.test/confirm/draft-1', expiresAt: '2026-10-05', draftId: 'draft-1' }],
+      orders: [], recipients: [], limit: 20
+    });
+    expect(doc.querySelector('a[href]')).toBeNull();
     dom.window.close();
   });
 

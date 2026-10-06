@@ -339,6 +339,7 @@ export const openLetterHomeOutputZ = z.object({
   })),
   recipients: z.array(homeRecipientZ),
   limit: z.number().int().positive(),
+  websiteOrigin: z.string().describe("The website's origin: a draft's confirmation link opens only there"),
   appUrl: z.string().optional()
 });
 export const getProfileOutputZ = z.object({
