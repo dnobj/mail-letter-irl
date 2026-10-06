@@ -278,6 +278,20 @@
       state.slots[keyOf(stationery)] = slots;
     }
 
+    /** Focus on the button of the style the letter has, a theme's or a design's, or the first theme's. */
+    function focusShown() {
+      var key = keyOf(state.stationery);
+      var target = null;
+      for (var i = 0; i < options.buttons.length; i++) {
+        if (options.buttons[i].getAttribute("data-theme") === key) target = options.buttons[i];
+      }
+      for (var j = 0; j < designs.buttons.length; j++) {
+        if ("design:" + designs.buttons[j].getAttribute("data-design-id") === key) target = designs.buttons[j];
+      }
+      target = target || options.buttons[0];
+      if (target && typeof target.focus === "function") target.focus();
+    }
+
     /** The design a key names, among this draft's (#649), or null. */
     function designFor(key) {
       if (typeof key !== "string" || key.indexOf("design:") !== 0) return null;
@@ -358,9 +372,15 @@
           // the person's words and puts the design's button away. Found anywhere in the text, as a host may wrap it.
           if (design && said.indexOf("That stationery design was not found") !== -1) {
             state.message = "That design was deleted. Make the preview again to see your designs.";
+            var focused = typeof document !== "undefined" && designs.buttons.indexOf(document.activeElement) !== -1;
             drawDesigns(designs.list.filter(function (kept) {
               return kept.designId !== design.designId;
             }));
+            // Focus leaves with the button: to the style the letter keeps, as the signature switch's does.
+            if (focused) focusShown();
+          } else if (design && said.indexOf("Name the stationery") !== -1) {
+            // Designs turned off since the preview: the tool no longer takes one, and says so for the model.
+            state.message = "Saved designs aren't available now. Make the preview again to see the styles.";
           } else {
             state.message = said;
           }

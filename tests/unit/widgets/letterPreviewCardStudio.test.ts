@@ -1999,6 +1999,17 @@ describe('saved designs on the Style tab (#649)', () => {
     expect(text(card, 'style-note')).toBe('That design was deleted. Make the preview again to see your designs.');
     expect(designButtons(card).map(button => button.textContent)).toEqual(['Grandma <b>Ruth</b>']);
     expect(pressedStyle(card)).toEqual(['classic']);
+
+    // A keyboard press: focus goes to the style the letter keeps, not to the page.
+    const keyed = mount();
+    await keyed.show(output(CLASSIC), { ...ON, stationeryDesigns: DESIGNS });
+    designButtons(keyed)[0].focus();
+    await keyed.click(designButtons(keyed)[0]);
+    await keyed.answer(
+      { result: { isError: true, content: [{ type: 'text', text: 'That stationery design was not found.' }] } },
+      'set_stationery'
+    );
+    expect(keyed.document.activeElement).toBe(keyed.byId('style-row').querySelector('[data-theme="classic"]'));
     // Another refusal is said as it came, and keeps the buttons.
     const other = mount();
     await other.show(output(CLASSIC), { ...ON, stationeryDesigns: DESIGNS });
@@ -2006,6 +2017,16 @@ describe('saved designs on the Style tab (#649)', () => {
     await other.answer({ result: { isError: true, content: [{ type: 'text', text: 'Stationery is not available yet.' }] } }, 'set_stationery');
     expect(text(other, 'style-note')).toBe('Stationery is not available yet.');
     expect(designButtons(other)).toHaveLength(2);
+
+    // Designs turned off since the preview: the tool asks the model for a theme; the card says it plainly.
+    const off = mount();
+    await off.show(output(CLASSIC), { ...ON, stationeryDesigns: DESIGNS });
+    await off.click(designButtons(off)[0]);
+    await off.answer(
+      { result: { isError: true, content: [{ type: 'text', text: 'Name the stationery: classic, monogram, botanical, celebration, typewriter or handwritten.' }] } },
+      'set_stationery'
+    );
+    expect(text(off, 'style-note')).toBe("Saved designs aren't available now. Make the preview again to see the styles.");
   });
 
   it('carries initials back only into a design whose ornament is the monogram', async () => {
