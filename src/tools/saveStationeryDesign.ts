@@ -70,10 +70,12 @@ export const saveStationeryDesignTool: McpToolDefinition<SaveStationeryDesignInp
   title: 'Save a stationery design',
   description:
     'Save a stationery design the person describes, for their letters: a name and four choices. ' +
+    'Only when the person wants a design of their own kept; for a style for one letter, the built-in stationery may do. ' +
+    'Check list_stationery_designs first: saving under a name the account has replaces that design, so ask before reusing a name. ' +
     'face: serif (a classic book face), typewriter (a monospace face, fewer words to the page) or handwritten (a handwriting face, no Greek, Hebrew or Vietnamese). ' +
     'ornament, in the top-right corner beside the address window: none, monogram (initials in a double ring), sprig (a line-drawn sprig with berries) or confetti. ' +
     'ruled: faint rules under each line. tone: the grey of the sprig or the monogram, black, dark, medium or light (confetti keeps its own mix of greys); letters print in black and greys only. ' +
-    `Saving under a name the account has replaces that design; an account keeps at most ${MAX_STATIONERY_DESIGNS}. ` +
+    `An account keeps at most ${MAX_STATIONERY_DESIGNS}. ` +
     'Then draw a letter in it with stationeryDesignId on a letter preview or set_stationery. Nothing is previewed or sent by this tool.',
   readOnly: false,
   inputSchema: saveStationeryDesignInputSchema,

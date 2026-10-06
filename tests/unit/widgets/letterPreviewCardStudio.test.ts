@@ -1911,7 +1911,7 @@ describe('saved designs on the Style tab (#649)', () => {
   });
 
   it('draws none without designs, or from anything that is not one', async () => {
-    for (const meta of [ON, { ...ON, stationeryDesigns: [] }, { ...ON, stationeryDesigns: 'Garden' }, { ...ON, stationeryDesigns: [null, { name: 'x' }, { designId: ID }, { designId: '', name: 'x' }] }]) {
+    for (const meta of [ON, { ...ON, stationeryDesigns: [] }, { ...ON, stationeryDesigns: 'Garden' }, { ...ON, stationeryDesigns: [null, { name: 'x' }, { designId: ID }, { designId: '', name: 'x' }, { designId: ID, name: '' }] }]) {
       const card = mount();
       await card.show(output(CLASSIC), meta);
       expect(designButtons(card), JSON.stringify(meta).slice(0, 60)).toHaveLength(0);
