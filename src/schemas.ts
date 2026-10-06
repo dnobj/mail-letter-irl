@@ -1287,6 +1287,7 @@ export const setMailServiceOutputSchema: JsonSchema = {
     canSendNow: { type: "boolean", description: SET_MAIL_SERVICE_CAN_SEND_DESCRIPTION },
     reasonCannotSend: { type: "string" },
     sendEligibility: sendEligibilitySchema,
+    pages: { type: "integer", minimum: 2, maximum: MAX_LETTER_PAGES, description: PREVIEW_PAGES_DESCRIPTION },
     message: { type: "string" }
   }
 };

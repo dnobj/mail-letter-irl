@@ -177,11 +177,11 @@
       .studio-panel[hidden]{display:none}
       .studio-panel .info-row{padding:6px 0}
       .studio-panel .note,.studio-side > .note{margin-top:0}
-      .studio #style-row,.studio #signature-row,.studio #arrives-row{flex-direction:column;align-items:stretch;gap:8px;border-bottom:0;padding:0}
-      .studio #style-label,.studio #signature-label,.studio #arrives-row .info-label{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase}
-      .studio #style-row .style-controls,.studio #signature-row .style-controls,.studio #arrives-row .arrives-controls{justify-content:flex-start;text-align:left;gap:6px}
-      .studio #style-row .link-button,.studio #arrives-row .link-button{border:1px solid var(--bd);border-radius:999px;padding:5px 11px;font-size:12px;font-weight:600;color:var(--tx);text-decoration:none;background:var(--sf)}
-      .studio #style-row .link-button[aria-pressed=true],.studio #arrives-row .link-button[aria-pressed=true]{background:var(--pri);border-color:var(--pri);color:var(--prit)}
+      .studio #style-row,.studio #signature-row,.studio #service-row,.studio #arrives-row{flex-direction:column;align-items:stretch;gap:8px;border-bottom:0;padding:0}
+      .studio #style-label,.studio #signature-label,.studio #service-label,.studio #arrives-row .info-label{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase}
+      .studio #style-row .style-controls,.studio #signature-row .style-controls,.studio #service-row .style-controls,.studio #arrives-row .arrives-controls{justify-content:flex-start;text-align:left;gap:6px}
+      .studio #style-row .link-button,.studio #service-row .link-button,.studio #arrives-row .link-button{border:1px solid var(--bd);border-radius:999px;padding:5px 11px;font-size:12px;font-weight:600;color:var(--tx);text-decoration:none;background:var(--sf)}
+      .studio #style-row .link-button[aria-pressed=true],.studio #service-row .link-button[aria-pressed=true],.studio #arrives-row .link-button[aria-pressed=true]{background:var(--pri);border-color:var(--pri);color:var(--prit)}
       .studio #arrives-row input[type=date]{font-size:12.5px;padding:4px 8px;border-radius:999px}
       .studio-quiet{margin:0;font-size:12px;color:var(--mut);line-height:1.45}
       .studio-words{max-height:300px;overflow:auto;white-space:pre-wrap;word-wrap:break-word;font-family:Georgia,"Times New Roman",serif;font-size:13px;line-height:1.55;color:var(--tx);background:var(--sf2);border:1px solid var(--bd2);border-radius:10px;padding:10px 12px}
@@ -260,6 +260,16 @@
               <button type="button" class="signature-switch" id="signature-switch" role="switch" aria-checked="false" aria-labelledby="signature-label">Off</button>
             </span>
           </div>
+          <!-- How the letter travels (#648): ordinary mail or certified mail, while the preview offers certified mail.
+               widgets/shared/style.js draws it with the Style row; the studio puts it on the Delivery tab. -->
+          <div class="info-row" id="service-row" style="display: none">
+            <span class="info-label" id="service-label">Mail</span>
+            <span class="info-value style-controls" role="group" aria-labelledby="service-label">
+              <button type="button" class="link-button" data-service="standard" aria-pressed="false">First-Class</button>
+              <button type="button" class="link-button" data-service="certified" aria-pressed="false">Certified</button>
+              <button type="button" class="link-button" data-service="certified_return_receipt" aria-pressed="false">Certified + e-receipt</button>
+            </span>
+          </div>
           <div class="info-row" id="status-row">
             <span class="info-label">Status</span>
             <span class="status-pill" id="status-pill">Loading...</span>
@@ -271,6 +281,7 @@
         </div>
         <div class="note" id="arrives-note" style="display: none" aria-live="polite"></div>
         <div class="note" id="style-note" style="display: none" aria-live="polite"></div>
+        <div class="note" id="service-note" style="display: none" aria-live="polite"></div>
         <div class="note" id="note" style="display: none"></div>
         <!-- Shown when no result arrived (#411), or for a reopened card that
              already sent its letter or started a checkout. -->
@@ -423,6 +434,8 @@
             <span data-slot="arrives-row"></span>
             <span data-slot="arrives-note"></span>
             <span data-slot="scheduled"></span>
+            <span data-slot="service-row"></span>
+            <span data-slot="service-note"></span>
             <span data-slot="delivery-row"></span>
             <span data-slot="id-row"></span>
           </div>
@@ -569,6 +582,17 @@
         // The Signature switch (#608), beside the styles.
         signatureRow: document.getElementById("signature-row"),
         signatureSwitch: document.getElementById("signature-switch"),
+        // The Mail choice (#648), on the Delivery tab: the services the preview's _meta offers.
+        serviceRow: document.getElementById("service-row"),
+        serviceButtons: Array.from(document.querySelectorAll("#service-row [data-service]")),
+        serviceNote: document.getElementById("service-note"),
+        mailServices() {
+          return currentMeta().mailServices;
+        },
+        // How full the preview's pages are, which a change of service keeps.
+        previewFit() {
+          return currentMeta().pageFit ?? null;
+        },
         readableError,
         resultText,
         // Not while this card sends the letter or starts paying for it.

@@ -1463,6 +1463,421 @@ describe('how the letter travels, as the latest answer with its terms says (#625
   });
 });
 
+describe('the Mail choice on the Delivery tab (#648)', () => {
+  const CLASSIC = { stationery: { theme: 'classic', source: 'default' } };
+  const ALL = ['standard', 'certified', 'certified_return_receipt'];
+  const OFFERED = { ...ON, mailServices: ALL };
+  const ON_PAGE = {
+    packPays: false,
+    payAndSend: { available: false, amountCents: 1199, currency: 'usd', pageUrl: 'https://letterirl.example/send/draft_0001' },
+    letterPack: { available: false, purchaseUrl: 'https://letterirl.example/packs' }
+  };
+  const DISCLAIMER =
+    'USPS timing varies and can take longer. Certified mail is signed for at delivery; if no one signs for it or collects it from the Post Office, USPS returns it to the sender.';
+  const CERTIFIED_TERMS = {
+    canSendNow: false,
+    reasonCannotSend: 'Certified mail is paid with Pay & Send.',
+    sendEligibility: ON_PAGE,
+    mailService: 'certified',
+    deliveryClass: 'USPS Certified Mail',
+    deliveryDisclaimer: DISCLAIMER
+  };
+  const RECEIPT_TERMS = { ...CERTIFIED_TERMS, mailService: 'certified_return_receipt', deliveryClass: 'USPS Certified Mail with an electronic return receipt' };
+  const ORDINARY_TERMS = { ...canSend, deliveryClass: 'USPS First-Class Mail', deliveryDisclaimer: 'USPS timing varies and can take longer.' };
+  const ordinary = () => output({ ...CLASSIC, ...ORDINARY_TERMS });
+  const certified = () => output({ ...CLASSIC, ...CERTIFIED_TERMS });
+  const SET = 'set_mail_service';
+  const ASK = 'get_draft_status';
+  type Card = ReturnType<typeof mount>;
+  const choice = (card: Card, service: string) => card.byId('service-row').querySelector(`[data-service="${service}"]`) as HTMLElement;
+  const choices = (card: Card) => Array.from(card.byId('service-row').querySelectorAll('[data-service]')) as HTMLElement[];
+  const pressed = (card: Card) => choices(card).filter(button => button.getAttribute('aria-pressed') === 'true').map(button => button.dataset.service);
+  const shown = (card: Card) => choices(card).filter(button => !button.hidden).map(button => button.dataset.service);
+  const waiting = (card: Card) => choices(card).map(button => button.getAttribute('aria-disabled'));
+  const changed = (terms: Json, draftId = 'draft_0001') => ({
+    result: { content: [{ type: 'text', text: 'Changed.' }], structuredContent: { draftId, ...terms, message: 'Changed.' } }
+  });
+  const restyle = (terms: Json) => ({
+    result: {
+      content: [],
+      structuredContent: { draftId: 'draft_0001', stationery: { theme: 'botanical', dateLine: 'October 1, 2026', source: 'asked' }, ...terms, message: 'Restyled.' },
+      _meta: { previewHtml: PAGE }
+    }
+  });
+  const status = (extra: Json) => ({
+    result: {
+      content: [],
+      structuredContent: { draftId: 'draft_0001', status: 'ready', deliveryEstimate: 'Mailed in 1-2 business days', stationery: { theme: 'classic' }, ...extra },
+      _meta: { previewHtml: PAGE }
+    }
+  });
+  const isCertified = (card: Card) => (text(card, 'studio-summary') ?? '').includes('certified mail');
+
+  it("offers the three services on the Delivery tab, with the preview's own pressed", async () => {
+    const card = mount();
+    await card.show(ordinary(), OFFERED);
+    expect(card.byId('service-row').style.display).toBe('');
+    expect(card.byId('service-row').closest('.studio-panel')?.id).toBe('studio-panel-delivery');
+    expect(shown(card)).toEqual(ALL);
+    expect(pressed(card)).toEqual(['standard']);
+    expect(choices(card).map(button => button.textContent)).toEqual(['First-Class', 'Certified', 'Certified + e-receipt']);
+
+    const plain = mount();
+    await plain.show(certified(), OFFERED);
+    expect(pressed(plain)).toEqual(['certified']);
+
+    const receipt = mount();
+    await receipt.show(output({ ...CLASSIC, ...RECEIPT_TERMS }), OFFERED);
+    expect(pressed(receipt)).toEqual(['certified_return_receipt']);
+  });
+
+  it('offers nothing when the preview offers no choice: no services, one, only ones it does not know, or no stationery', async () => {
+    const cases: Array<[string, Json, Json]> = [
+      ['none', ON, ordinary()],
+      ['one', { ...ON, mailServices: ['standard'] }, ordinary()],
+      ['unknown', { ...ON, mailServices: ['standard', 'express', 7] }, ordinary()],
+      ['not a list', { ...ON, mailServices: 'standard,certified' }, ordinary()],
+      ['no stationery', OFFERED, output({ ...ORDINARY_TERMS })]
+    ];
+    for (const [label, meta, result] of cases) {
+      const card = mount();
+      await card.show(result, meta);
+      expect(card.byId('service-row').style.display, label).toBe('none');
+    }
+  });
+
+  it('shows only the services offered', async () => {
+    const card = mount();
+    await card.show(ordinary(), { ...ON, mailServices: ['standard', 'certified', 'registered'] });
+    expect(card.byId('service-row').style.display).toBe('');
+    expect(shown(card)).toEqual(['standard', 'certified']);
+  });
+
+  it('changes the service with set_mail_service, and the price, the summary and the Delivery line follow its answer', async () => {
+    const card = mount();
+    await card.show(ordinary(), OFFERED);
+    await card.click(choice(card, 'certified'));
+    const asked = card.requests('tools/call', SET);
+    expect(asked).toHaveLength(1);
+    expect(asked[0].params.arguments).toEqual({ draftId: 'draft_0001', mailService: 'certified' });
+    // While the server answers: the choice is pressed, every choice waits, and the letter is as it was.
+    expect(pressed(card)).toEqual(['certified']);
+    expect(waiting(card)).toEqual(['true', 'true', 'true']);
+    expect(isCertified(card)).toBe(false);
+    expect(card.byId('send-button').disabled).toBe(true);
+    // A second press meanwhile sends nothing.
+    await card.click(choice(card, 'certified_return_receipt'));
+    expect(card.requests('tools/call', SET)).toHaveLength(1);
+
+    await card.answer(changed(CERTIFIED_TERMS), SET);
+    expect(pressed(card)).toEqual(['certified']);
+    expect(waiting(card)).toEqual(['false', 'false', 'false']);
+    expect(isCertified(card)).toBe(true);
+    expect(text(card, 'delivery')).toContain('USPS Certified Mail');
+    expect(text(card, 'studio-cost')).toBe('Pay & Send USD 11.99');
+    expect(card.byId('pay-page-button').style.display).toBe('flex');
+    expect(card.byId('send-button').style.display).not.toBe('flex');
+  });
+
+  it('goes back to First-Class, and the letter is ordinary mail again', async () => {
+    const card = mount();
+    await card.show(certified(), OFFERED);
+    await card.click(choice(card, 'standard'));
+    expect(card.requests('tools/call', SET)[0].params.arguments).toEqual({ draftId: 'draft_0001', mailService: 'standard' });
+    await card.answer(changed(ORDINARY_TERMS), SET);
+    expect(pressed(card)).toEqual(['standard']);
+    expect(isCertified(card)).toBe(false);
+    expect(text(card, 'delivery')).toContain('USPS First-Class Mail');
+    expect(text(card, 'studio-cost')).toBe('1 letter');
+    expect(card.byId('send-button').style.display).toBe('flex');
+  });
+
+  it('takes the service from the answer, not from the press', async () => {
+    const card = mount();
+    await card.show(ordinary(), OFFERED);
+    await card.click(choice(card, 'certified'));
+    // The chat chose the receipt meanwhile, and the server answers with what the draft holds.
+    await card.answer(changed(RECEIPT_TERMS), SET);
+    expect(pressed(card)).toEqual(['certified_return_receipt']);
+  });
+
+  it('asks for the pressed service again, so a card that missed a change in the chat hears the draft as it is', async () => {
+    const card = mount();
+    await card.show(certified(), OFFERED);
+    await card.click(choice(card, 'certified'));
+    expect(card.requests('tools/call', SET)[0].params.arguments).toEqual({ draftId: 'draft_0001', mailService: 'certified' });
+    // The chat had made it ordinary, and the server keeps the service pressed: the answer says certified again.
+    await card.answer(changed(CERTIFIED_TERMS), SET);
+    expect(pressed(card)).toEqual(['certified']);
+    expect(isCertified(card)).toBe(true);
+  });
+
+  it('sends nothing for a service the preview did not offer', async () => {
+    const card = mount();
+    await card.show(ordinary(), { ...ON, mailServices: ['standard', 'certified'] });
+    await card.click(choice(card, 'certified_return_receipt'));
+    expect(card.requests('tools/call', SET)).toHaveLength(0);
+  });
+
+  it('drops a refusal for one draft when the card is shown another, and hides it once the letter is sent', async () => {
+    const card = mount();
+    await card.show(ordinary(), OFFERED);
+    await card.click(choice(card, 'certified'));
+    await card.answer({ result: { isError: true, content: [{ type: 'text', text: 'Refused.' }] } }, SET);
+    expect(card.byId('service-note').style.display).toBe('block');
+    await card.show({ ...ordinary(), draftId: 'draft_0002' }, OFFERED);
+    expect(card.byId('service-note').style.display).toBe('none');
+    expect(card.byId('service-note').classList.contains('alert')).toBe(false);
+
+    const sent = mount();
+    await sent.show(ordinary(), OFFERED);
+    await sent.click(choice(sent, 'certified'));
+    await sent.answer({ result: { isError: true, content: [{ type: 'text', text: 'Refused.' }] } }, SET);
+    await sent.click(sent.byId('send-button'));
+    await sent.answer({ result: { content: [{ type: 'text', text: 'Sent.' }], structuredContent: { orderId: 'order-1' } } }, 'send_letter');
+    expect(sent.byId('service-note').style.display).toBe('none');
+  });
+
+  it('says a refusal in its own note on the Delivery tab, and keeps the service the letter has', async () => {
+    const card = mount();
+    await card.show(ordinary(), OFFERED);
+    await card.click(choice(card, 'certified'));
+    await card.answer(
+      {
+        result: {
+          isError: true,
+          content: [{ type: 'text', text: 'A gift letter does not pay for certified mail. Make a new preview with mailService certified: it is paid with Pay & Send, not by a gift letter.' }]
+        }
+      },
+      SET
+    );
+    expect(pressed(card)).toEqual(['standard']);
+    expect(waiting(card)).toEqual(['false', 'false', 'false']);
+    expect(isCertified(card)).toBe(false);
+    const note = card.byId('service-note');
+    expect(note.style.display).toBe('block');
+    // In the person's words: the refusal is written for the model.
+    expect(note.textContent).toBe("A gift letter can't go by certified mail. Ask in the chat for a new preview to send it certified.");
+    expect(note.classList.contains('alert')).toBe(true);
+    expect(note.closest('.studio-panel')?.id).toBe('studio-panel-delivery');
+    expect(card.byId('style-note').style.display).toBe('none');
+    // The next change starts afresh.
+    await card.click(choice(card, 'certified'));
+    expect(note.style.display).toBe('none');
+    await card.answer(changed(CERTIFIED_TERMS), SET);
+    expect(note.style.display).toBe('none');
+    expect(note.classList.contains('alert')).toBe(false);
+    expect(pressed(card)).toEqual(['certified']);
+  });
+
+  it("says each of set_mail_service's refusals in the person's words, and anything else as it came", async () => {
+    const cases: Array<[string, string]> = [
+      ["This letter has already been sent, so how it travels can't change. list_orders shows it.", "This letter has already been sent, so how it travels can't change now."],
+      ['This letter was sent just after the change was made, so it went with the service it holds now. list_orders shows it.', 'This letter was sent just as it was changed. Its order says how it travels.'],
+      ['This preview has expired. Make a new preview: the letter previews take mailService themselves.', 'This preview has expired. Ask in the chat for a new one.'],
+      [
+        "This preview is tied to a Pay & Send payment, so how it travels can't change now. Finish or let that payment lapse, or make a new preview.",
+        "A Pay & Send payment is open for this letter, so how it travels can't change now."
+      ],
+      ['Certified mail is for letters, and a postcard always goes as ordinary mail. Make a letter preview to send certified mail.', 'A postcard always goes as ordinary mail.'],
+      ["That preview wasn't found. Make a new preview, then try again.", "That preview wasn't found. Ask in the chat for a new one."],
+      ['Certified mail is not available right now. The preview stays as it is.', 'Certified mail is not available right now. The preview stays as it is.'],
+      // Certified mail turned off since the preview: the tool is no longer listed, and the connection says so.
+      ['MCP error -32602: Tool set_mail_service not found', 'Certified mail is not available right now. The preview stays as it is.'],
+      // Another error that only looks like one of ours is said as it came.
+      ['Token has expired', 'Token has expired'],
+      ['Tool set_stationery not found', 'Tool set_stationery not found']
+    ];
+    for (const [refusal, said] of cases) {
+      const card = mount();
+      await card.show(ordinary(), OFFERED);
+      await card.click(choice(card, 'certified'));
+      await card.answer({ result: { isError: true, content: [{ type: 'text', text: refusal }] } }, SET);
+      expect(text(card, 'service-note'), refusal).toBe(said);
+    }
+  });
+
+  it("takes a longer letter's pages from the answer, and keeps how full they are: a change of service leaves the page as it is", async () => {
+    const PAY_AND_SEND = { packPays: false, payAndSend: { available: true, amountCents: 599, currency: 'usd' }, letterPack: { available: false } };
+    const card = mount();
+    await card.show(output({ ...CLASSIC, ...ORDINARY_TERMS, pages: 2, canSendNow: false, sendEligibility: PAY_AND_SEND }), {
+      ...OFFERED,
+      pageFit: { pages: 2, sheets: 1 }
+    });
+    expect(text(card, 'studio-summary')).toContain('2 pages, both sides');
+    const fit = text(card, 'studio-fit');
+    expect(fit).toBe('Runs on to the back of the page: printed on both sides of one sheet.');
+    await card.click(choice(card, 'certified'));
+    await card.answer(changed({ ...CERTIFIED_TERMS, pages: 2 }), SET);
+    expect(isCertified(card)).toBe(true);
+    expect(text(card, 'studio-summary')).toContain('2 pages, both sides');
+    expect(text(card, 'studio-fit')).toBe(fit);
+    // And back again, from the terms the card now holds.
+    await card.click(choice(card, 'standard'));
+    await card.answer(changed({ ...ORDINARY_TERMS, canSendNow: false, sendEligibility: PAY_AND_SEND, pages: 2 }), SET);
+    expect(text(card, 'studio-summary')).toContain('2 pages, both sides');
+    expect(text(card, 'studio-fit')).toBe(fit);
+
+    const one = mount();
+    await one.show(ordinary(), { ...OFFERED, pageFit: { pages: 1, sheets: 1, roomLines: 20, roomCharacters: 1940, charactersPerLine: 97 } });
+    await one.click(choice(one, 'certified'));
+    await one.answer(changed(CERTIFIED_TERMS), SET);
+    expect(text(one, 'studio-fit')).toBe('Fits on one page, with room for about 1,940 more characters.');
+    expect(text(one, 'studio-summary')).not.toContain('pages');
+  });
+
+  it('keeps how full the page is as the last restyle gave it, not as the preview did', async () => {
+    const fit = (roomCharacters: number) => ({ pages: 1, sheets: 1, doubleSided: false, roomLines: Math.ceil(roomCharacters / 64), roomCharacters, charactersPerLine: 64 });
+    const card = mount();
+    await card.show(ordinary(), { ...OFFERED, pageFit: fit(1940) });
+    await card.click(card.byId('style-row').querySelector('[data-theme="typewriter"]')!);
+    await card.answer({ ...restyle(ORDINARY_TERMS), result: { ...restyle(ORDINARY_TERMS).result, _meta: { previewHtml: PAGE, pageFit: fit(512) } } }, 'set_stationery');
+    expect(text(card, 'studio-fit')).toBe('Fits on one page, with room for about 512 more characters.');
+    await card.click(choice(card, 'certified'));
+    await card.answer(changed(CERTIFIED_TERMS), SET);
+    expect(text(card, 'studio-fit')).toBe('Fits on one page, with room for about 512 more characters.');
+  });
+
+  it('takes the pages the answer gives, which the chat may have changed unheard, and drops a fit for other pages', async () => {
+    const card = mount();
+    await card.show(ordinary(), { ...OFFERED, pageFit: { pages: 1, sheets: 1, roomLines: 20, roomCharacters: 1940, charactersPerLine: 97 } });
+    expect(text(card, 'studio-fit')).toBe('Fits on one page, with room for about 1,940 more characters.');
+    await card.click(choice(card, 'certified'));
+    await card.answer(changed({ ...CERTIFIED_TERMS, pages: 3 }), SET);
+    expect(text(card, 'studio-summary')).toContain('3 pages, both sides');
+    // The one-page room is for words the chat has changed since: it is not said of a three-page letter.
+    expect(text(card, 'studio-fit')).not.toContain('room for about 1,940');
+
+    // Nor counted in the Words editor, which is where the fit is read.
+    const open = mount();
+    await open.show(ordinary(), { ...OFFERED, pageFit: { pages: 1, sheets: 1, roomLines: 20, roomCharacters: 1940, charactersPerLine: 97 } });
+    await open.click(open.tab('words'));
+    await open.click(open.byId('studio-words-open'));
+    expect(text(open, 'studio-words-count')).toBe('About 1,940 characters left on this page.');
+    await open.click(choice(open, 'certified'));
+    await open.answer(changed({ ...CERTIFIED_TERMS, pages: 2 }), SET);
+    expect(text(open, 'studio-summary')).toContain('2 pages, both sides');
+    expect(text(open, 'studio-words-count')).not.toContain('1,940');
+  });
+
+  it('takes no status after a change made here: the change is the later word', async () => {
+    const card = mount();
+    await card.show(ordinary(), OFFERED);
+    await card.click(choice(card, 'certified'));
+    await card.answer(changed(CERTIFIED_TERMS), SET);
+    await card.answerTo(card.requests('tools/call', ASK)[0], status(ORDINARY_TERMS));
+    expect(pressed(card)).toEqual(['certified']);
+    expect(isCertified(card)).toBe(true);
+  });
+
+  it('reads a service it does not know, in a status, as First-Class', async () => {
+    const card = mount();
+    await card.show(certified(), OFFERED);
+    await card.answerTo(card.requests('tools/call', ASK)[0], status({ ...ORDINARY_TERMS, mailService: 'express' }));
+    expect(pressed(card)).toEqual(['standard']);
+  });
+
+  it('takes no press, and shows no note, once a preview without stationery has put the row away', async () => {
+    const card = mount();
+    await card.show(ordinary(), OFFERED);
+    await card.click(choice(card, 'certified'));
+    const pending = card.requests('tools/call', SET)[0];
+    // A preview that named no stationery: the row goes, though its answer for the first draft is still to come.
+    await card.show(output({ ...ORDINARY_TERMS, draftId: 'draft_0002' }), OFFERED);
+    expect(card.byId('service-row').style.display).toBe('none');
+    await card.answerTo(pending, { result: { isError: true, content: [{ type: 'text', text: 'Refused.' }] } });
+    expect(card.byId('service-note').style.display).toBe('none');
+    await card.click(choice(card, 'certified_return_receipt'));
+    expect(card.requests('tools/call', SET)).toHaveLength(1);
+  });
+
+  it('takes no press while the letter is being sent', async () => {
+    const card = mount();
+    await card.show(ordinary(), OFFERED);
+    await card.click(card.byId('send-button'));
+    await card.click(choice(card, 'certified'));
+    expect(card.requests('tools/call', SET)).toHaveLength(0);
+  });
+
+  it('is shown without the studio too, among the rows', async () => {
+    const card = mount();
+    await card.show(ordinary(), { previewHtml: PAGE, mailServices: ALL });
+    expect(card.byId('service-row').style.display).toBe('');
+    expect(card.byId('service-row').closest('.studio-panel')).toBeNull();
+    await card.click(choice(card, 'certified'));
+    expect(card.requests('tools/call', SET)).toHaveLength(1);
+  });
+
+  it('says so, and changes nothing, when the answer is for another draft or gives no terms', async () => {
+    const cases: Array<[string, Json]> = [
+      ['another draft', changed(CERTIFIED_TERMS, 'draft_0009')],
+      ['no terms', { result: { content: [], structuredContent: { draftId: 'draft_0001', message: 'Changed.' } } }]
+    ];
+    for (const [label, reply] of cases) {
+      const card = mount();
+      await card.show(ordinary(), OFFERED);
+      await card.click(choice(card, 'certified'));
+      await card.answer(reply, SET);
+      expect(pressed(card), label).toEqual(['standard']);
+      expect(isCertified(card), label).toBe(false);
+      expect(text(card, 'service-note'), label).toContain('Make the preview again');
+    }
+  });
+
+  it('ignores an answer for a draft the card has moved on from', async () => {
+    const card = mount();
+    await card.show(ordinary(), OFFERED);
+    await card.click(choice(card, 'certified'));
+    const late = card.requests('tools/call', SET)[0];
+    await card.show({ ...ordinary(), draftId: 'draft_0002' }, OFFERED);
+    await card.answerTo(late, changed(CERTIFIED_TERMS));
+    expect(pressed(card)).toEqual(['standard']);
+    expect(isCertified(card)).toBe(false);
+    expect(waiting(card)).toEqual(['false', 'false', 'false']);
+    // Nor once the card draws the new draft again: nothing of the late answer was kept for it.
+    await card.show({ ...ordinary(), draftId: 'draft_0002' }, OFFERED);
+    expect(pressed(card)).toEqual(['standard']);
+    expect(isCertified(card)).toBe(false);
+    // And the new draft changes as its own.
+    await card.click(choice(card, 'certified_return_receipt'));
+    expect(card.requests('tools/call', SET)[1].params.arguments).toEqual({ draftId: 'draft_0002', mailService: 'certified_return_receipt' });
+  });
+
+  it('follows a status that says the chat changed the service, and keeps it when a status says nothing of it', async () => {
+    const card = mount();
+    await card.show(ordinary(), OFFERED);
+    await card.answerTo(card.requests('tools/call', ASK)[0], status(RECEIPT_TERMS));
+    expect(pressed(card)).toEqual(['certified_return_receipt']);
+
+    const quiet = mount();
+    await quiet.show(certified(), OFFERED);
+    await quiet.answerTo(quiet.requests('tools/call', ASK)[0], status({ canSendNow: false, sendEligibility: ON_PAGE }));
+    expect(pressed(quiet)).toEqual(['certified']);
+  });
+
+  it('follows a restyle that says the letter travels another way now', async () => {
+    const card = mount();
+    await card.show(certified(), OFFERED);
+    await card.click(card.byId('style-row').querySelector('[data-theme="botanical"]')!);
+    await card.answer(restyle(ORDINARY_TERMS), 'set_stationery');
+    expect(pressed(card)).toEqual(['standard']);
+  });
+
+  it('waits while a style is being set, and is gone once the letter is sent', async () => {
+    const card = mount();
+    await card.show(ordinary(), OFFERED);
+    await card.click(card.byId('style-row').querySelector('[data-theme="botanical"]')!);
+    await card.click(choice(card, 'certified'));
+    expect(card.requests('tools/call', SET)).toHaveLength(0);
+    await card.answer(restyle(ORDINARY_TERMS), 'set_stationery');
+    await card.click(card.byId('send-button'));
+    await card.answer({ result: { content: [{ type: 'text', text: 'Sent.' }], structuredContent: { orderId: 'order-1' } } }, 'send_letter');
+    expect(card.byId('service-row').style.display).toBe('none');
+    await card.click(choice(card, 'certified'));
+    expect(card.requests('tools/call', SET)).toHaveLength(0);
+  });
+});
+
 describe('the widget version after the certified card (#625)', () => {
   it('is bumped, so a host that cached the card fetches the new one', async () => {
     const { WIDGET_TEMPLATE_VERSION } = await import('../../../src/mcp/widgetUris.js');

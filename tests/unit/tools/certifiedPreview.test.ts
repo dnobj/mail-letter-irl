@@ -204,6 +204,22 @@ describe.each(Object.keys(TOOLS) as (keyof typeof TOOLS)[])('the %s letter previ
     await expect(run(layout, { mailService: 'registered' })).rejects.toMatchObject({ code: 'MAIL_SERVICE_INVALID' });
     expect(createDraft).not.toHaveBeenCalled();
   });
+
+  it.each([[undefined], ['certified'], ['certified_return_receipt']])(
+    "offers the card's Delivery tab the three services, in order, whichever the letter travels by (%s) (#648)",
+    async service => {
+      const output = await run(layout, service === undefined ? {} : { mailService: service });
+      expect(output.mailServices).toEqual(['standard', 'certified', 'certified_return_receipt']);
+    }
+  );
+
+  it('offers no choice of service for a gift letter, which no certified service can be (#648)', async () => {
+    vi.mocked(getGiftBalance).mockResolvedValue({ available: 2, next: undefined } as never);
+    vi.stubEnv('LETTER_IRL_GIFT_LETTERS_ENABLED', 'true');
+    const output = await run(layout, { sendAsGift: true }, context(0));
+    expect(drafted().isGiftSend).toBe(true);
+    expect(output).not.toHaveProperty('mailServices');
+  });
 });
 
 describe('while certified mail is not offered', () => {
@@ -280,6 +296,18 @@ describe('while certified mail is not offered', () => {
       const output = await run('text_only', input);
       expect(output).not.toHaveProperty('mailService');
       expect(drafted()).not.toHaveProperty('mailService');
+    }
+  });
+
+  it.each([
+    ['nothing is on', {}],
+    ['the flag is on without Pay & Send', { LETTER_IRL_CERTIFIED_MAIL_ENABLED: 'true' }],
+    ['Pay & Send is on without the flag', { JIT_PURCHASE_ENABLED: 'true' }]
+  ])("offers the card's Delivery tab no choice of service when %s (#648)", async (_name, env) => {
+    for (const [name, value] of Object.entries(env)) vi.stubEnv(name, value);
+    for (const layout of Object.keys(TOOLS) as (keyof typeof TOOLS)[]) {
+      vi.mocked(createDraft).mockClear();
+      expect(await run(layout, {}), layout).not.toHaveProperty('mailServices');
     }
   });
 });

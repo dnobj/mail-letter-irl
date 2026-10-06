@@ -156,6 +156,11 @@ export interface LetterQuoteOutput {
   pageFit?: PageFit;
   /** While the words can be changed in place (#586, #647): the version of these words, which set_letter_words takes to say which words it replaces. */
   wordsVersion?: string;
+  /**
+   * While certified mail is offered (#625), for a letter that is not a gift letter: the services the card's Delivery tab
+   * offers, in order (#648). Card-only (_meta): the model changes the service with set_mail_service.
+   */
+  mailServices?: Array<'standard' | 'certified' | 'certified_return_receipt'>;
 }
 
 // ============================================================================
@@ -1394,6 +1399,9 @@ export async function createLetterDraftAndBuildOutput(
     // A held letter's card says when it goes to the printer, not "in 1-2 days".
     deliveryEstimate: schedule ? scheduleSentence(schedule.output, context.now()) : DELIVERY_ESTIMATE,
     deliveryDisclaimer: deliveryWordsOf(mailService).deliveryDisclaimer,
+    // The choice of service on the card's Delivery tab (#648): only while certified mail is offered, and never for a gift
+    // letter, which no certified service can be.
+    ...(isCertifiedMailOffered() && !gift.isGift ? { mailServices: ["standard", "certified", "certified_return_receipt"] as Array<'standard' | 'certified' | 'certified_return_receipt'> } : {}),
     draftId: draftResult.draftId,
     draftExpiresAt: draftResult.expiresAt.toISOString(),
     layoutType,

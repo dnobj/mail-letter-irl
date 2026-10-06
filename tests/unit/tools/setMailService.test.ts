@@ -167,6 +167,18 @@ describe('set_mail_service (#625)', () => {
     expect(vi.mocked(getSendEligibility).mock.calls.at(-1)![2]).toEqual({ mailType: 'letter', pages: 3, mailService: 'certified' });
   });
 
+  it.each([
+    [1, undefined],
+    [2, 2],
+    [3, 3]
+  ])('gives the pages of a %i-page letter above one, as a restyle does, so the card keeps its length (#648)', async (pages, said) => {
+    vi.mocked(getDraftForMailService).mockResolvedValue(draft({ mail_service: 'certified', pages }));
+    const result = await set({ draftId: DRAFT_ID, mailService: 'certified' });
+    if (said === undefined) expect(result).not.toHaveProperty('pages');
+    else expect(result.pages).toBe(said);
+    expect(setMailServiceOutputZ.safeParse(result).success).toBe(true);
+  });
+
   it('answers by what the draft holds once the change is made, not by what was asked for', async () => {
     // Another change got in between: the draft now says standard, and so does the answer.
     vi.mocked(getDraftForMailService).mockResolvedValue(draft({ mail_service: 'standard' }));
