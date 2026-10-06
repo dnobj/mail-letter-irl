@@ -3264,7 +3264,7 @@ External boundaries: this slice reads stored data only. No webhook, vendor dispa
 Needs HOME-01, a host advertising text model context, and development arrive-by for cancellation. Owner-only ChatGPT surface acceptance remains pending.
 
 1. Select a draft in the home: the selected recipient and draft ID appear. Ask to revise it; verify the model uses this ID and rechecks draft status. Select an order; the model must not edit it as a draft. Clear selection and verify prior selection is removed.
-2. Repeat on the letter card's explicit selection button while home is enabled. With home off or unsupported context, no selection button should appear there.
+2. On the letter card, while home is enabled, the card tells the conversation which draft it shows by itself, with no button (#650): ask "make it warmer" without naming the draft and check the model acts on that draft. After the card sends the draft, the selection is taken back. With home off or unsupported context, nothing is shared and no button appears.
 3. Deep-link acceptance belongs to the subsequent #643 slice; this selection/cancellation PR does not expose share links or navigate from deep-link routes.
 4. Select scheduled prepaid or gift mail. Cancel must ask first; Keep scheduled changes nothing. Confirm cancellation once and verify the returned-funding sentence agrees with the tool response and balance. Refresh: the order is cancelled and Cancel is absent. A duplicate request must return no second refund.
 5. Pay & Send, already printing, cancelled, and undated mail offer no Cancel. With arrive-by off, Cancel is absent. A `mail:read` token's cancellation must be refused by the existing scope guard.
