@@ -7,10 +7,11 @@
 export { drawsGrapheme, drawsGraphemeIn, inFace, layoutLetter, pageFit, wrapParagraph } from './layout.js';
 export type { ImageBox, Layout, LayoutOptions, LayoutPage, LetterContent, PageFit, PathItem, TextRun } from './layout.js';
 export {
-  bodyFace, HEADLINE_LINES, headlineSize, slotText, STATIONERY_CORNER, STATIONERY_SLOT_MAX_LENGTH, STATIONERY_THEMES,
-  stationeryOf, StationeryOverflow
+  bodyFace, CUSTOM_THEME, designNameOf, designOf, HEADLINE_LINES, headlineSize, isRuled, printsHeadline, printsInitials, slotText, STATIONERY_CORNER,
+  STATIONERY_DESIGN_NAME_MAX_LENGTH, STATIONERY_FACES, STATIONERY_ORNAMENTS, STATIONERY_SLOT_MAX_LENGTH, STATIONERY_THEMES, STATIONERY_TONES,
+  stationeryFace, stationeryOf, StationeryOverflow
 } from './stationery.js';
-export type { Face, Stationery, StationeryTheme } from './stationery.js';
+export type { Face, Stationery, StationeryDesign, StationeryTheme, ThemeStationery } from './stationery.js';
 export {
   POSTCARD_FRONT_RENDERER_VERSION, PRINTABLE_RENDERER_VERSIONS, renderPdf, RENDERER_VERSION, rendererVersionFor, SIGNATURE_RENDERER_VERSION,
   STATIONERY_RENDERER_VERSION

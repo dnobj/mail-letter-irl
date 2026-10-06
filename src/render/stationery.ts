@@ -26,6 +26,15 @@ import { clampMarks } from './marks.js';
  * slotText. Each has a rule for text that will not fit: the date line and the
  * initials shrink to a floor, the headline shrinks to its own, and past that
  * the layout throws StationeryOverflow, which a preview turns into a refusal.
+ *
+ * A saved design (#649) is not a theme of its own but four choices, each made
+ * only of what the themes already draw and P12 printed: the body's face (one of
+ * the three), the corner's ornament (Monogram's ring, Botanical's sprig,
+ * Celebration's confetti, or none), Handwritten's rules under any face, and the
+ * ornament's grey, one of the four P12 printed exactly. It prints the date line
+ * and may print a headline, as Celebration does. A draft stores it as the
+ * `custom` theme with its design, so the page never depends on a design that
+ * was changed or deleted since.
  */
 
 /**
@@ -36,9 +45,92 @@ import { clampMarks } from './marks.js';
 export const STATIONERY_THEMES = ['classic', 'monogram', 'botanical', 'celebration', 'typewriter', 'handwritten'] as const;
 export type StationeryTheme = (typeof STATIONERY_THEMES)[number];
 
+/** The theme a saved design (#649) is drawn as: not one of STATIONERY_THEMES, which the previews offer by name. */
+export const CUSTOM_THEME = 'custom';
+
+/** A design's faces (#649): Classic's Tinos, Typewriter's Cousine and Handwritten's Caveat. */
+export const STATIONERY_FACES = ['serif', 'typewriter', 'handwritten'] as const;
+export type StationeryFace = (typeof STATIONERY_FACES)[number];
+
+/** A design's corner ornaments (#649): none, or what Monogram, Botanical or Celebration draws there. */
+export const STATIONERY_ORNAMENTS = ['none', 'monogram', 'sprig', 'confetti'] as const;
+export type StationeryOrnament = (typeof STATIONERY_ORNAMENTS)[number];
+
+/** A design's ornament greys (#649): the four P12 printed exactly, darkest first. */
+export const STATIONERY_TONES = ['black', 'dark', 'medium', 'light'] as const;
+export type StationeryTone = (typeof STATIONERY_TONES)[number];
+
+/** A saved design's four choices (#649). */
+export interface StationeryDesign {
+  face: StationeryFace;
+  ornament: StationeryOrnament;
+  /** Faint rules under each line, as Handwritten's. */
+  ruled: boolean;
+  tone: StationeryTone;
+}
+
+/** The longest name a design may have (#649): the account's own label for it, never printed. */
+export const STATIONERY_DESIGN_NAME_MAX_LENGTH = 40;
+
+/** Line breaks and tabs, which a name keeps as a space. */
+const NAME_BREAKS = /[\t\n\v\f\r\p{Zl}\p{Zp}]/gu;
+/** Controls, broken halves of a pair, and characters with no meaning (unassigned, private use): taken out. */
+const NAME_NONSENSE = /[\p{Cc}\p{Cs}\p{Cn}\p{Co}]/gu;
+/**
+ * The other characters that only format text (bidi controls and marks, zero-width
+ * spaces, byte order marks): taken out. The joiners and the emoji tags stay, as
+ * names need them: a family emoji, a Persian word's non-joiner, a flag's tags.
+ * Set subtraction needs the v flag, which ES2022's regular expression literals lack.
+ */
+const NAME_FORMATTING = new RegExp('[\\p{Cf}--[\\p{Join_Control}\\p{Emoji_Component}]]', 'gv');
+/**
+ * Emoji tag characters, kept only where they make one of the three flags
+ * Unicode recommends for general use, England's, Scotland's and Wales's (a
+ * black flag, its tags, a cancel tag): anywhere else, a made-up flag's
+ * included, they are text the person cannot see but a model reads, and a
+ * saved name is read back to the chat (#649 review rounds 3 and 4).
+ */
+const NAME_TAGS = /(\u{1F3F4}\u{E0067}\u{E0062}(?:\u{E0065}\u{E006E}\u{E0067}|\u{E0073}\u{E0063}\u{E0074}|\u{E0077}\u{E006C}\u{E0073})\u{E007F})|[\u{E0020}-\u{E007F}]/gu;
+/**
+ * What a name must hold at least one of: a letter, a digit, punctuation or a
+ * symbol (emoji among them), but not the blank fillers that look like nothing
+ * (the Hangul fillers, the blank Braille pattern).
+ */
+const NAME_VISIBLE = new RegExp('[[\\p{L}\\p{N}\\p{P}\\p{S}]--[\\u{115F}\\u{1160}\\u{3164}\\u{FFA0}\\u{2800}]]', 'v');
+
+/**
+ * A design's name as it is kept (#649): line breaks and tabs a space; controls,
+ * broken surrogate halves, unassigned and private-use characters, and the
+ * characters that only format text taken out, but the joiners real names need
+ * and the tags of a flag; at most four marks on a letter, as in the body (and so
+ * stable when kept again); each run of white space one space; the ends trimmed.
+ * Null when that leaves nothing visible, or more than
+ * STATIONERY_DESIGN_NAME_MAX_LENGTH characters, counted as PostgreSQL counts
+ * them (code points). Saving keeps a name by this rule and reading one back
+ * holds it to the same, so no name saved is ever dropped on the way back. The
+ * name is shown to the person, never printed.
+ */
+export function designNameOf(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const name = clampMarks(
+    value
+      .replace(NAME_BREAKS, ' ')
+      .replace(NAME_NONSENSE, '')
+      .replace(NAME_FORMATTING, '')
+      .replace(NAME_TAGS, (_tag, flag: string | undefined) => flag ?? '')
+  )
+    .replace(/\s+/gu, ' ')
+    .trim();
+  // An empty name has nothing visible either.
+  return [...name].length <= STATIONERY_DESIGN_NAME_MAX_LENGTH && NAME_VISIBLE.test(name) ? name : null;
+}
+
 /** A letter's theme and what it prints. */
 export interface Stationery {
-  theme: StationeryTheme;
+  theme: StationeryTheme | typeof CUSTOM_THEME;
+  /** The custom theme's design (#649), and the name it was saved under. */
+  design?: StationeryDesign;
+  name?: string;
   /** The date line as it prints, such as "October 1, 2026". Every theme but Classic prints it. */
   dateLine?: string;
   /** Monogram's initials, one to three letters. */
@@ -46,6 +138,9 @@ export interface Stationery {
   /** Celebration's headline, on one line above the body. */
   headline?: string;
 }
+
+/** A built-in theme's stationery (#563): what the previews take by name and their outputs say. */
+export type ThemeStationery = Omit<Stationery, 'theme' | 'design' | 'name'> & { theme: StationeryTheme };
 
 /** A typeface at a size. */
 export interface Face {
@@ -88,6 +183,63 @@ export function bodyFace(theme: StationeryTheme): Face {
   return BODY_FACES[theme];
 }
 
+/** The theme whose face each design face is (#649). */
+const FACE_THEMES: Record<StationeryFace, StationeryTheme> = { serif: 'classic', typewriter: 'typewriter', handwritten: 'handwritten' };
+
+/**
+ * A design's four choices, checked (#649): the object if each is one this build
+ * draws and nothing else is in it, else null. A stored design is read back
+ * through this, so a page is never drawn from choices it does not know.
+ */
+export function designOf(value: unknown): StationeryDesign | null {
+  // An array has keys of its own ('0', 'length' is not one), so the key check below refuses it too.
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  if (Object.keys(record).some(key => !['face', 'ornament', 'ruled', 'tone'].includes(key))) return null;
+  const { face, ornament, ruled, tone } = record;
+  if (typeof face !== 'string' || !(STATIONERY_FACES as readonly string[]).includes(face)) return null;
+  if (typeof ornament !== 'string' || !(STATIONERY_ORNAMENTS as readonly string[]).includes(ornament)) return null;
+  if (typeof ruled !== 'boolean') return null;
+  if (typeof tone !== 'string' || !(STATIONERY_TONES as readonly string[]).includes(tone)) return null;
+  return { face: face as StationeryFace, ornament: ornament as StationeryOrnament, ruled, tone: tone as StationeryTone };
+}
+
+/** A custom theme's design, checked: one without a design this build draws is an error, never a page drawn some other way. */
+function customDesign(stationery: Stationery): StationeryDesign {
+  const design = designOf(stationery.design);
+  if (!design) throw new Error('A custom stationery needs a design this build draws.');
+  return design;
+}
+
+/** The built-in theme whose face a stationery sets its body in: its own, or a design's face's (#649). */
+export function faceTheme(stationery: Stationery): StationeryTheme {
+  if (stationery.theme === CUSTOM_THEME) return FACE_THEMES[customDesign(stationery).face];
+  knownTheme(stationery.theme);
+  return stationery.theme;
+}
+
+/** The face a stationery sets its body in: its theme's, or its design's (#649). */
+export function stationeryFace(stationery: Stationery): Face {
+  return BODY_FACES[faceTheme(stationery)];
+}
+
+/** Whether a stationery rules its lines: Handwritten, or a design that asks for rules (#649). */
+export function isRuled(stationery: Stationery): boolean {
+  if (stationery.theme === CUSTOM_THEME) return customDesign(stationery).ruled;
+  return stationery.theme === 'handwritten';
+}
+
+/** Whether a stationery prints a headline: Celebration, or any design (#649). */
+export function printsHeadline(stationery: Stationery): boolean {
+  return stationery.theme === 'celebration' || stationery.theme === CUSTOM_THEME;
+}
+
+/** Whether a stationery prints initials: Monogram, or a design whose ornament is the monogram (#649). */
+export function printsInitials(stationery: Stationery): boolean {
+  if (stationery.theme === CUSTOM_THEME) return customDesign(stationery).ornament === 'monogram';
+  return stationery.theme === 'monogram';
+}
+
 /**
  * The longest slot text a stored theme may carry: far past anything that
  * prints. A draft stores its slots as slotText makes them, and only as
@@ -99,16 +251,27 @@ export const STATIONERY_SLOT_MAX_LENGTH = 200;
  * A theme read back from storage (a draft's stationery column, a letter's
  * content): the object if its theme is one this build draws and each slot is
  * absent or a string of sensible length, else null. Classic is stored as no
- * theme at all, so a stored 'classic' is not a stored theme either.
+ * theme at all, so a stored 'classic' is not a stored theme either. A custom
+ * theme (#649) reads back only with a design this build draws. Its name, never
+ * printed, reads back only as a design name is kept (designNameOf); any other
+ * is dropped, never a reason to refuse the letter.
  */
 export function stationeryOf(value: unknown): Stationery | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
   const theme = record.theme;
-  if (typeof theme !== 'string' || theme === 'classic' || !(STATIONERY_THEMES as readonly string[]).includes(theme)) {
+  let stationery: Stationery;
+  if (theme === CUSTOM_THEME) {
+    const design = designOf(record.design);
+    if (!design) return null;
+    stationery = { theme: CUSTOM_THEME, design };
+    const name = record.name;
+    if (typeof name === 'string' && designNameOf(name) === name) stationery.name = name;
+  } else if (typeof theme !== 'string' || theme === 'classic' || !(STATIONERY_THEMES as readonly string[]).includes(theme)) {
     return null;
+  } else {
+    stationery = { theme: theme as StationeryTheme };
   }
-  const stationery: Stationery = { theme: theme as StationeryTheme };
   for (const slot of ['dateLine', 'monogram', 'headline'] as const) {
     const text = record[slot];
     if (text === undefined || text === null) continue;
@@ -139,6 +302,8 @@ const FONT: FontName = 'Tinos-Regular';
 /** Where the corner's drawing lines up: the body's right edge, 7.5 in. */
 const RIGHT = PAGE_WIDTH - SIDE_MARGIN;
 const INK = '#222222';
+/** A hex colour, as the renderer's items take one. */
+type Ink = `#${string}`;
 const LINE_WIDTH = 0.75;
 
 const DATE_SIZE = 12;
@@ -151,13 +316,21 @@ const DATE_BASELINE = inch(0.9);
  * Handwritten's in Caveat a little larger than its body, down to 12, about
  * Tinos's 9 pt in height.
  */
-const DATE_FACES: Record<Exclude<StationeryTheme, 'classic'>, { face: Face; floor: number }> = {
+const DATE_FACES: Record<StationeryTheme, { face: Face; floor: number }> = {
+  // Classic prints no date line; a design in its face (#649) prints the corner themes' Tinos date line.
+  classic: { face: { font: FONT, size: DATE_SIZE }, floor: DATE_MIN_SIZE },
   monogram: { face: { font: FONT, size: DATE_SIZE }, floor: DATE_MIN_SIZE },
   botanical: { face: { font: FONT, size: DATE_SIZE }, floor: DATE_MIN_SIZE },
   celebration: { face: { font: FONT, size: DATE_SIZE }, floor: DATE_MIN_SIZE },
   typewriter: { face: BODY_FACES.typewriter, floor: 9 },
   handwritten: { face: { font: 'Caveat-Regular', size: 16 }, floor: 12 }
 };
+
+/**
+ * A design's ornament greys (#649): the text's #222, and the three greys P12
+ * printed its 0.75 pt sprigs in, each distinct and crisp.
+ */
+const TONE_INKS: Record<StationeryTone, Ink> = { black: '#222222', dark: '#555555', medium: '#888888', light: '#aaaaaa' };
 
 /**
  * Handwritten's rules: one under each line, faint so the writing stands out.
@@ -237,8 +410,8 @@ function fitted(drawn: string, size: number, room: number, floor: number, font: 
   return smaller >= floor ? smaller : null;
 }
 
-/** The date line in its theme's face, its right edge on the body's, shrunk to fit the corner if it must. */
-function dateLine(text: string, theme: Exclude<StationeryTheme, 'classic'>): TextRun {
+/** The date line in its face's theme's face, its right edge on the body's, shrunk to fit the corner if it must. */
+function dateLine(text: string, theme: StationeryTheme): TextRun {
   const { face, floor } = DATE_FACES[theme];
   const drawn = visualOrder(text);
   const size = fitted(drawn, face.size, RIGHT - STATIONERY_CORNER.left, floor, face.font);
@@ -278,15 +451,15 @@ function circle([cx, cy]: Point, r: number): string {
     `C${at([cx + k, cy - r])} ${at([cx + r, cy - k])} ${at([cx + r, cy])}Z`;
 }
 
-function line(d: string): PathItem {
-  return { kind: 'path', d, fill: 'none', stroke: INK, strokeWidth: LINE_WIDTH };
+function line(d: string, ink: Ink = INK): PathItem {
+  return { kind: 'path', d, fill: 'none', stroke: ink, strokeWidth: LINE_WIDTH };
 }
 
 /**
  * The initials in a double ring, centred on their capitals, as large as fits
  * up to MONOGRAM_SIZE. The inner ring is 0.5 pt, which P12 printed exactly.
  */
-function monogram(letters: string): LayoutItem[] {
+function monogram(letters: string, ink: Ink = INK): LayoutItem[] {
   if ([...graphemes.segment(letters)].length > MONOGRAM_MAX_LETTERS) throw new StationeryOverflow('monogram');
   const font = loadFont(FONT);
   const drawn = visualOrder(letters);
@@ -294,10 +467,12 @@ function monogram(letters: string): LayoutItem[] {
   const size = fitted(drawn, MONOGRAM_SIZE, MONOGRAM_FILL * 2 * MONOGRAM_RADIUS, 0)!;
   const [cx, cy] = MONOGRAM_CENTER;
   const baseline = cy + (font.capHeight * size) / font.unitsPerEm / 2;
+  const initials = run(letters, size, cx - width(drawn, size) / 2, baseline);
   return [
-    line(circle(MONOGRAM_CENTER, MONOGRAM_RADIUS)),
-    { ...line(circle(MONOGRAM_CENTER, MONOGRAM_RADIUS - 3.5)), strokeWidth: 0.5 },
-    run(letters, size, cx - width(drawn, size) / 2, baseline)
+    line(circle(MONOGRAM_CENTER, MONOGRAM_RADIUS), ink),
+    { ...line(circle(MONOGRAM_CENTER, MONOGRAM_RADIUS - 3.5), ink), strokeWidth: 0.5 },
+    // The initials in the ring's grey (#649); the themes' own are the text's ink, as before.
+    ink === INK ? initials : { ...initials, fill: ink }
   ];
 }
 
@@ -335,7 +510,7 @@ function leaf(base: Point, tip: Point, breadth: number): string {
 }
 
 /** Botanical: one sprig rising to the right below the date, leaves on alternate sides, three berries at its tip. */
-function sprig(): LayoutItem[] {
+function sprig(ink: Ink = INK): LayoutItem[] {
   const stem: Point[] = [
     [RIGHT - inch(1.3), inch(2.75)],
     [RIGHT - inch(1.1), inch(2.15)],
@@ -357,11 +532,11 @@ function sprig(): LayoutItem[] {
   const berries = ([[4, -3], [-3, -6], [6, 4]] as Point[]).map(([dx, dy]): PathItem => ({
     kind: 'path',
     d: circle([tip[0] + dx, tip[1] + dy], 2.4),
-    fill: INK
+    fill: ink
   }));
   return [
-    line(`M${at(stem[0])}C${at(stem[1])} ${at(stem[2])} ${at(stem[3])}`),
-    ...leaves.map(line),
+    line(`M${at(stem[0])}C${at(stem[1])} ${at(stem[2])} ${at(stem[3])}`, ink),
+    ...leaves.map(leafPath => line(leafPath, ink)),
     ...berries
   ];
 }
@@ -422,22 +597,30 @@ function headline(text: string, top: number): TextRun {
  *
  * Typewriter and Handwritten draw only their date line here; their body's
  * face (bodyFace) and Handwritten's rules (ruledLines) are the layout's.
+ *
+ * A design (#649) draws its ornament in its grey, the date line in its face,
+ * initials when its ornament is the monogram, and a headline.
  */
 export function layoutStationery(stationery: Stationery, bodyTop: number): StationeryLayout {
-  knownTheme(stationery.theme);
+  const custom = stationery.theme === CUSTOM_THEME ? customDesign(stationery) : null;
+  if (!custom) knownTheme(stationery.theme);
   if (stationery.theme === 'classic') return { items: [], bodyOffset: 0 };
   const slot = (text: string | undefined) => {
     const printed = slotText(text ?? '');
     return shows(printed) ? printed : null;
   };
+  const ornament: StationeryOrnament = custom
+    ? custom.ornament
+    : stationery.theme === 'monogram' ? 'monogram' : stationery.theme === 'botanical' ? 'sprig' : stationery.theme === 'celebration' ? 'confetti' : 'none';
+  const ink = custom ? TONE_INKS[custom.tone] : INK;
   const items: LayoutItem[] = [];
-  if (stationery.theme === 'botanical') items.push(...sprig());
-  if (stationery.theme === 'celebration') items.push(...CONFETTI.map(confettiPiece));
+  if (ornament === 'sprig') items.push(...sprig(ink));
+  if (ornament === 'confetti') items.push(...CONFETTI.map(confettiPiece));
   const date = slot(stationery.dateLine);
-  if (date) items.push(dateLine(date, stationery.theme));
-  const initials = stationery.theme === 'monogram' ? slot(stationery.monogram) : null;
-  if (initials) items.push(...monogram(initials));
-  const occasion = stationery.theme === 'celebration' ? slot(stationery.headline) : null;
+  if (date) items.push(dateLine(date, faceTheme(stationery)));
+  const initials = ornament === 'monogram' ? slot(stationery.monogram) : null;
+  if (initials) items.push(...monogram(initials, ink));
+  const occasion = printsHeadline(stationery) ? slot(stationery.headline) : null;
   if (occasion) {
     items.push(headline(occasion, bodyTop));
     return { items, bodyOffset: HEADLINE_LINES * LINE_PITCH };

@@ -5,7 +5,7 @@ import { scheduleSentence } from '../services/deliverySchedule.js';
 import { getDraftState, type DraftState } from '../services/draftService.js';
 import { isStationeryOffered } from '../config/stationery.js';
 import { isSignaturesOffered } from '../config/signatures.js';
-import { stationeryOf, type Stationery } from '../render/stationery.js';
+import { CUSTOM_THEME, stationeryOf, type ThemeStationery } from '../render/stationery.js';
 import { draftScheduleOf } from '../services/draftSchedule.js';
 import { heldSendFields, waitsInOutbox } from './heldSend.js';
 import { isDraftIdShape } from './requestSend.js';
@@ -63,7 +63,7 @@ export interface GetDraftStatusOutput extends LetterTravel {
    * A ready letter's stationery now, while stationery is offered (#563):
    * Classic for a page our renderer drew without a theme.
    */
-  stationery?: Stationery;
+  stationery?: ThemeStationery;
   /** Ready, a letter our renderer drew, while signatures are offered (#608): whether it prints the saved signature now. */
   signature?: boolean;
   /** With it, the page as it is now: for the card, in _meta (partitionToolResult). */
@@ -242,11 +242,17 @@ function pagesNow(draft: DraftState): Pick<GetDraftStatusOutput, 'pages'> {
  * its preview's first answer again: set_stationery may have changed both
  * since. Only while stationery is offered, and only for a page our renderer
  * drew (renderer_version), whose stored theme reads as the print reads it.
+ * A saved design (#649) is not named: the status's output schema knows only
+ * the built-in themes until the part that offers designs says one here. A card
+ * takes nothing from a status without stationery (widgets/shared/style.js,
+ * adopt): not the page, the price, the words or the signature either. The part
+ * that lets the chat restyle a draft into a design must name it here first.
  */
 function styleNow(draft: DraftState): Pick<GetDraftStatusOutput, 'stationery' | 'previewHtml'> {
   if (!isStationeryOffered() || draft.mail_type !== 'letter' || !draft.renderer_version) return {};
+  const stationery = stationeryOf(draft.stationery);
   return {
-    stationery: stationeryOf(draft.stationery) ?? { theme: 'classic' },
+    ...(stationery?.theme === CUSTOM_THEME ? {} : { stationery: (stationery as ThemeStationery | null) ?? { theme: 'classic' } }),
     ...(draft.preview_html ? { previewHtml: draft.preview_html } : {})
   };
 }

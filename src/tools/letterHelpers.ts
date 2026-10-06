@@ -31,6 +31,9 @@ import { isRoomToWriteOffered, letterPageLimit } from "../config/roomToWrite.js"
 import { isWordsEditorOffered } from "../config/wordsEditor.js";
 import {
   bodyFace,
+  CUSTOM_THEME,
+  printsHeadline,
+  stationeryFace,
   drawsGrapheme,
   drawsGraphemeIn,
   GiftPageOverflow,
@@ -684,7 +687,7 @@ export function layoutLetterForPreview(
   if (layout.overflowLines === 0) return layout;
 
   const { linesUsed, linesAvailable } = layout.pages[layout.pages.length - 1];
-  const headline = stationery?.theme === "celebration" && stationery.headline !== undefined;
+  const headline = stationery !== undefined && printsHeadline(stationery) && stationery.headline !== undefined;
   context.logger.warn(
     {
       correlationId: context.correlationId,
@@ -712,7 +715,7 @@ export function layoutLetterForPreview(
       // A theme the call did not name says where it came from.
       (themed ? rememberedPrefix(stationery) : "") +
       `Letter is ${over} line${over === 1 ? "" : "s"} too long for ${pageWords(maxPages)}${LAYOUT_LABELS[layoutType]}` +
-      `${headline ? " on the celebration stationery with a headline" : own ? ` on the ${own} stationery` : ""}: ` +
+      `${headline ? ` on the ${stationeryNamed(stationery!)} with a headline` : own ? ` on the ${stationeryNamed(stationery!)}` : ""}: ` +
       (longest
         ? `${pageWords(maxPages)} is the longest letter we print. `
         : `it takes ${linesUsed} lines and the page holds ${linesAvailable}. `) +
@@ -722,8 +725,8 @@ export function layoutLetterForPreview(
           : `The headline takes ${HEADLINE_LINES} lines, and the letter runs past ${past} without it too: shorten the message.`
         : own
           ? fitsPlain
-            ? `The ${own} stationery sets the text in its own typeface: shorten the message, or choose the classic stationery.`
-            : `The ${own} stationery sets the text in its own typeface, and the letter runs past ${past} on the classic stationery too: shorten the message.`
+            ? `The ${stationeryNamed(stationery!)} sets the text in its own typeface: shorten the message, or choose the classic stationery.`
+            : `The ${stationeryNamed(stationery!)} sets the text in its own typeface, and the letter runs past ${past} on the classic stationery too: shorten the message.`
           : `Please shorten your message to fit on ${pageWords(maxPages)}.`) +
       signatureWords(content, stationery, maxPages)
     ),
@@ -857,13 +860,19 @@ export function validatePrintableCharacters(
   throw Object.assign(new Error(unprintableRefusal(mail, found, themed)), { diagnosticClass: "validation_error" });
 }
 
+/** A stationery as a sentence names it (#649): "celebration stationery", or "saved stationery design". */
+export function stationeryNamed(stationery: Stationery): string {
+  return stationery.theme === CUSTOM_THEME ? "saved stationery design" : `${stationery.theme} stationery`;
+}
+
 /**
  * A theme that sets the letter's text in a typeface of its own (#563:
- * typewriter, handwritten), or undefined for one in Classic's.
+ * typewriter, handwritten, or a design in either, #649), or undefined for one
+ * in Classic's.
  */
 export function ownFaceTheme(stationery: Stationery | undefined): Stationery["theme"] | undefined {
   if (!stationery) return undefined;
-  return bodyFace(stationery.theme).font === bodyFace("classic").font ? undefined : stationery.theme;
+  return stationeryFace(stationery).font === bodyFace("classic").font ? undefined : stationery.theme;
 }
 
 /**
@@ -886,8 +895,8 @@ export function validatePrintableLetter(
   const slots = prints ? stationery : undefined;
   // The text prints in its theme's typeface: one with its own is checked against it.
   const own = prints ? ownFaceTheme(stationery) : undefined;
-  const textPrints = own ? drawsGraphemeIn(bodyFace(own).font) : prints;
-  const inFace = own ? `, which the ${own} stationery prints in its own typeface` : "";
+  const textPrints = own && stationery ? drawsGraphemeIn(stationeryFace(stationery).font) : prints;
+  const inFace = own && stationery ? `, which the ${stationeryNamed(stationery)} prints in its own typeface` : "";
   validatePrintableCharacters(
     "letter",
     [
@@ -906,7 +915,7 @@ export function validatePrintableLetter(
     letter,
     context,
     own
-      ? { theme: own, fields: ["bodyText", "signOff"], drawnInClassic: drawsGrapheme, remembered: rememberedPrefix(stationery) }
+      ? { named: stationeryNamed(stationery!), fields: ["bodyText", "signOff"], drawnInClassic: drawsGrapheme, remembered: rememberedPrefix(stationery) }
       : undefined
   );
   if (card) validateGiftPageFits(card, letter.sender.name, context);

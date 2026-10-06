@@ -71,6 +71,11 @@ function storedStationery(stationery: Stationery | null | undefined): Stationery
       diagnosticClass: 'validation_error'
     });
   }
+  // A design's name the print does not read back is dropped, never a reason to refuse the letter (stationeryOf);
+  // the previews keep names as it reads them, so a drop here is a defect worth seeing (#649).
+  if (stored && stationery?.name !== undefined && stored.name !== stationery.name) {
+    writeDiagnostic('warn', 'draft.stationery_name_dropped', { theme: stored.theme });
+  }
   return stored;
 }
 
