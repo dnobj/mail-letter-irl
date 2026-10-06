@@ -76,15 +76,21 @@ describePostgres('saved stationery designs (#649)', () => {
   }
 
   /**
-   * Waits until `count` sessions wait on a lock `holder` holds, so a test
-   * starts the next step only once the race it sets up is really running.
+   * Waits until `count` sessions wait behind `holder`, directly or behind
+   * another waiter (a second FOR UPDATE waits on the first's tuple lock), so a
+   * test starts the next step only once the race it sets up is really running.
    * Counted by who blocks whom, so no other suite's waiting counts.
    */
   async function lockWaiters(holder: pg.PoolClient, count: number): Promise<void> {
     const pid = (await holder.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0].pid;
     for (let tries = 0; tries < 200; tries += 1) {
       const waiting = await pool.query<{ n: number }>(
-        'SELECT count(*)::int AS n FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))',
+        `WITH RECURSIVE waiting(pid) AS (
+           SELECT pid FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))
+           UNION
+           SELECT a.pid FROM pg_stat_activity a JOIN waiting w ON w.pid = ANY(pg_blocking_pids(a.pid))
+         )
+         SELECT count(*)::int AS n FROM waiting`,
         [pid]
       );
       if (waiting.rows[0].n >= count) return;
@@ -151,16 +157,20 @@ describePostgres('saved stationery designs (#649)', () => {
     // the same moment unless each takes the row first: without the lock, both would count nine.
     const holder = await pool.connect();
     let results: Awaited<ReturnType<typeof service.saveDesign>>[];
+    let both: Promise<unknown> = Promise.resolve();
     try {
       await holder.query('BEGIN');
       await holder.query('SELECT 1 FROM users WHERE user_id = $1 FOR UPDATE', [userId]);
-      const both = Promise.all([service.saveDesign(userId, 'Tenth', PLAIN), service.saveDesign(userId, 'Also tenth', PLAIN)]);
+      const saving = Promise.all([service.saveDesign(userId, 'Tenth', PLAIN), service.saveDesign(userId, 'Also tenth', PLAIN)]);
+      both = saving;
       // Both wait: on the account's row with the lock, or, without it, after both counted nine.
       await lockWaiters(holder, 2);
       await holder.query('COMMIT');
-      results = await both;
+      results = await saving;
     } finally {
       await giveBack(holder);
+      // A failed step leaves no save running into the next test.
+      await Promise.allSettled([both]);
     }
     expect(results.filter(result => result.ok)).toHaveLength(1);
     expect(results.filter(result => !result.ok)).toEqual([{ ok: false, refusal: 'limit' }]);
@@ -251,10 +261,11 @@ describePostgres('saved stationery designs (#649)', () => {
     await service.rememberDesign(userId, mine.designId);
     // Another transaction holds the design's row, so the delete stops at it.
     const designHolder = await pool.connect();
+    let deleting: Promise<boolean> = Promise.resolve(false);
     try {
       await designHolder.query('BEGIN');
       await designHolder.query('SELECT 1 FROM stationery_designs WHERE design_id = $1 FOR UPDATE', [mine.designId]);
-      const deleting = service.deleteDesign(userId, mine.designId);
+      deleting = service.deleteDesign(userId, mine.designId);
       await lockWaiters(designHolder, 1);
       // Stopped there, it already holds the account's row: nothing else can take it now.
       const probe = await pool.connect();
@@ -268,6 +279,8 @@ describePostgres('saved stationery designs (#649)', () => {
       expect(await deleting).toBe(true);
     } finally {
       await giveBack(designHolder);
+      // A failed step leaves no delete running into the next test.
+      await Promise.allSettled([deleting]);
     }
     expect(await service.rememberedDesign(userId)).toBeNull();
   });
