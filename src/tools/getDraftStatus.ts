@@ -5,7 +5,7 @@ import { scheduleSentence } from '../services/deliverySchedule.js';
 import { getDraftState, type DraftState } from '../services/draftService.js';
 import { isStationeryOffered } from '../config/stationery.js';
 import { isSignaturesOffered } from '../config/signatures.js';
-import { stationeryOf, type Stationery } from '../render/stationery.js';
+import { CUSTOM_THEME, stationeryOf, type ThemeStationery } from '../render/stationery.js';
 import { draftScheduleOf } from '../services/draftSchedule.js';
 import { heldSendFields, waitsInOutbox } from './heldSend.js';
 import { isDraftIdShape } from './requestSend.js';
@@ -63,7 +63,7 @@ export interface GetDraftStatusOutput extends LetterTravel {
    * A ready letter's stationery now, while stationery is offered (#563):
    * Classic for a page our renderer drew without a theme.
    */
-  stationery?: Stationery;
+  stationery?: ThemeStationery;
   /** Ready, a letter our renderer drew, while signatures are offered (#608): whether it prints the saved signature now. */
   signature?: boolean;
   /** With it, the page as it is now: for the card, in _meta (partitionToolResult). */
@@ -243,10 +243,20 @@ function pagesNow(draft: DraftState): Pick<GetDraftStatusOutput, 'pages'> {
  * since. Only while stationery is offered, and only for a page our renderer
  * drew (renderer_version), whose stored theme reads as the print reads it.
  */
+/**
+ * A draft's built-in theme for the status, Classic for none. The status's output
+ * schema names only the built-in themes: a saved design (#649) is not offered
+ * by any tool yet, and the part that offers one says it here.
+ */
+function themeOf(stored: unknown): ThemeStationery {
+  const stationery = stationeryOf(stored);
+  return stationery && stationery.theme !== CUSTOM_THEME ? (stationery as ThemeStationery) : { theme: 'classic' };
+}
+
 function styleNow(draft: DraftState): Pick<GetDraftStatusOutput, 'stationery' | 'previewHtml'> {
   if (!isStationeryOffered() || draft.mail_type !== 'letter' || !draft.renderer_version) return {};
   return {
-    stationery: stationeryOf(draft.stationery) ?? { theme: 'classic' },
+    stationery: themeOf(draft.stationery),
     ...(draft.preview_html ? { previewHtml: draft.preview_html } : {})
   };
 }

@@ -7,14 +7,17 @@
  * it.
  */
 
-import { describe, expect, it } from 'vitest';
+import { inflateSync } from 'node:zlib';
+import { describe, expect, it, vi } from 'vitest';
+import type { ToolContext } from '../../../src/contracts/types.js';
 import { ADDRESS_ZONE, BODY_TOP, LINE_PITCH } from '../../../src/render/geometry.js';
 import { placeGlyphs } from '../../../src/render/glyphs.js';
-import { layoutLetter, type Layout, type LayoutItem, type PathItem, type TextRun } from '../../../src/render/layout.js';
+import { layoutLetter, pageFit, type Layout, type LayoutItem, type PathItem, type TextRun } from '../../../src/render/layout.js';
 import { rendererVersionFor, renderPdf, STATIONERY_RENDERER_VERSION } from '../../../src/render/pdf.js';
 import { renderPreviewSvg } from '../../../src/render/preview.js';
 import {
   CUSTOM_THEME,
+  designNameOf,
   designOf,
   HEADLINE_LINES,
   isRuled,
@@ -33,10 +36,18 @@ import {
   type Stationery,
   type StationeryDesign
 } from '../../../src/render/stationery.js';
-import { ownFaceTheme } from '../../../src/tools/letterHelpers.js';
+import { layoutLetterForPreview, ownFaceTheme, validatePrintableLetter } from '../../../src/tools/letterHelpers.js';
 
 const TEXT = 'Dear Sam,\n\nHappy birthday! I hope this year brings you everything you have been hoping for.\n\nWith love,\nAda';
 const DATE = 'October 1, 2026';
+const SENDER = { name: 'Pat Example', addressLine1: '350 Fifth Ave', city: 'New York', state: 'NY', postalCode: '10118', country: 'US' };
+const context = (): ToolContext =>
+  ({
+    user: { userId: 'user-1' },
+    correlationId: 'corr-1',
+    logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+    now: () => new Date('2026-10-01T12:00:00Z')
+  }) as unknown as ToolContext;
 const PLAIN: StationeryDesign = { face: 'serif', ornament: 'none', ruled: false, tone: 'black' };
 const custom = (design: Partial<StationeryDesign> = {}, slots: Partial<Stationery> = {}): Stationery => ({
   theme: CUSTOM_THEME,
@@ -234,14 +245,115 @@ describe('a design (#649)', () => {
     expect(ownFaceTheme(custom({ face: 'handwritten' }))).toBe(CUSTOM_THEME);
   });
 
-  it('records the themes\' renderer version, and draws in the preview and the PDF', async () => {
-    const stationery = custom({ face: 'handwritten', ornament: 'sprig', ruled: true, tone: 'medium' }, { headline: 'For Sam' });
+  it('counts how full a page is in its face, as the theme of that face does', () => {
+    const faces = { serif: undefined, typewriter: 'typewriter', handwritten: 'handwritten' } as const;
+    for (const face of STATIONERY_FACES) {
+      const theme = faces[face];
+      const themed: Stationery | undefined = theme ? { theme, dateLine: DATE } : undefined;
+      expect(pageFit(letter(custom({ face })), custom({ face })), face).toEqual(pageFit(letter(themed), themed));
+    }
+    // Caveat's count is not Tinos's: the face is read.
+    expect(pageFit(letter(custom({ face: 'handwritten' })), custom({ face: 'handwritten' })).charactersPerLine)
+      .not.toBe(pageFit(letter(), undefined).charactersPerLine);
+  });
+
+  it('keeps the date line clear of its ornament in every face, the longest date included', () => {
+    const LONGEST = 'Wednesday, September 30, 2026';
+    for (const face of STATIONERY_FACES) {
+      for (const ornament of ['monogram', 'sprig', 'confetti'] as const) {
+        const drawn = layoutStationery(custom({ face, ornament }, { dateLine: LONGEST, monogram: 'WWW' }), BODY_TOP).items;
+        const date = drawn.find(item => item.kind === 'text' && item.source === LONGEST)!;
+        const dateBox = reach(date);
+        for (const item of drawn.filter(other => other !== date)) {
+          const box = reach(item);
+          const apart = box.top > dateBox.bottom || box.bottom < dateBox.top || box.left > dateBox.right || box.right < dateBox.left;
+          expect(apart, `${face} ${ornament}`).toBe(true);
+        }
+      }
+    }
+  });
+
+  it('records the themes\' renderer version, and fills grey initials in the preview and the PDF', async () => {
+    const stationery = custom({ ornament: 'monogram', tone: 'medium' }, { monogram: 'AL' });
     expect(rendererVersionFor(stationery)).toBe(STATIONERY_RENDERER_VERSION);
     const layout = letter(stationery);
+    // The initials are the only text in the design's grey: the ring is a stroke.
     const [svg] = renderPreviewSvg(layout);
-    expect(svg).toContain('#888888');
-    const pdf = await renderPdf(layout);
-    expect(pdf.subarray(0, 5).toString('latin1')).toBe('%PDF-');
+    expect(svg).toMatch(/<g fill="#888888">/);
+    const pdf = (await renderPdf(layout)).toString('latin1');
+    const content = [...pdf.matchAll(/stream\r?\n([\s\S]*?)\r?\nendstream/g)]
+      .map(match => {
+        try {
+          return inflateSync(Buffer.from(match[1], 'latin1')).toString('latin1');
+        } catch {
+          return '';
+        }
+      })
+      .join('\n');
+    // #888888 is 136/255 of each channel: the initials' glyphs fill with it.
+    expect(content).toMatch(/0\.533\d* 0\.533\d* 0\.533\d* scn/);
+    // And with black, as Monogram's are, the initials take no grey.
+    const [black] = renderPreviewSvg(letter(custom({ ornament: 'monogram', tone: 'black' }, { monogram: 'AL' })));
+    expect(black).not.toMatch(/<g fill="#/);
+  });
+
+  it("says a design's own face and headline as a design, in the preview's refusals", () => {
+    const long = Array.from({ length: 40 }, (_, line) => `Line ${line + 1} of a letter that runs on.`).join('\n');
+    const refusal = (stationery: Stationery) => {
+      try {
+        layoutLetterForPreview({ bodyText: long, signOff: 'Pat', layoutType: 'text_only', stationery }, context(), 'pdf', 1);
+      } catch (error) {
+        return (error as Error).message;
+      }
+      throw new Error('not refused');
+    };
+    const headlined = refusal(custom({}, { headline: 'For Sam' }));
+    expect(headlined).toContain('on the saved stationery design with a headline');
+    expect(headlined).toContain('The headline takes 3 lines');
+    const faced = refusal(custom({ face: 'typewriter' }));
+    expect(faced).toContain('on the saved stationery design:');
+    expect(faced).toContain('The saved stationery design sets the text in its own typeface');
+    // The themes' words are as they were.
+    expect(refusal({ theme: 'celebration', dateLine: DATE, headline: 'For Sam' })).toContain('on the celebration stationery with a headline');
+    expect(refusal({ theme: 'typewriter', dateLine: DATE })).toContain('The typewriter stationery sets the text in its own typeface');
+  });
+
+  it("checks a design's text against its own face, and says so as a design", () => {
+    const greek = String.fromCodePoint(0x3c0, 0x3b1, 0x3c1, 0x3ac);
+    const letterIn = (stationery: Stationery) => () =>
+      validatePrintableLetter({ sender: SENDER, recipient: SENDER, bodyText: `Dear ${greek},`, signOff: 'Pat' }, context(), 'pdf', undefined, stationery);
+    expect(letterIn(custom({ face: 'handwritten' }))).toThrow(/The saved stationery design sets the text in its own typeface/);
+    expect(letterIn(custom({ face: 'handwritten' }))).toThrow(/, which the saved stationery design prints in its own typeface/);
+    expect(letterIn(custom({ face: 'typewriter' }))).not.toThrow();
+    expect(letterIn(custom({ face: 'serif' }))).not.toThrow();
+  });
+});
+
+describe("a design's name (#649)", () => {
+  it('is kept trimmed, each run of white space one space, line breaks and tabs too', () => {
+    expect(designNameOf('  Grandma   Ruth \t')).toBe('Grandma Ruth');
+    expect(designNameOf('Line\nbreak')).toBe('Line break');
+  });
+
+  it('loses what prints nothing: controls, bidi marks and zero-width characters', () => {
+    const hidden = String.fromCodePoint(0x202e, 0x200b, 0x2066, 0x0007, 0xfeff);
+    expect(designNameOf(`Gar${hidden}den`)).toBe('Garden');
+    expect(designNameOf(hidden)).toBeNull();
+  });
+
+  it('holds one to forty characters, counted as PostgreSQL counts them', () => {
+    expect(designNameOf('x'.repeat(STATIONERY_DESIGN_NAME_MAX_LENGTH))).toBe('x'.repeat(STATIONERY_DESIGN_NAME_MAX_LENGTH));
+    expect(designNameOf('x'.repeat(STATIONERY_DESIGN_NAME_MAX_LENGTH + 1))).toBeNull();
+    // Forty code points, eighty UTF-16 units: kept.
+    const smile = String.fromCodePoint(0x1f600);
+    expect(designNameOf(smile.repeat(40))).toBe(smile.repeat(40));
+    expect(designNameOf(smile.repeat(41))).toBeNull();
+    expect(designNameOf('')).toBeNull();
+    expect(designNameOf('   ')).toBeNull();
+  });
+
+  it('is text', () => {
+    for (const value of [undefined, null, 7, ['Garden'], { name: 'Garden' }]) expect(designNameOf(value)).toBeNull();
   });
 });
 
@@ -249,23 +361,33 @@ describe('a stored design (#649)', () => {
   it('reads back with its design, its name and its slots', () => {
     const stored = { theme: 'custom', design: { face: 'typewriter', ornament: 'monogram', ruled: true, tone: 'dark' }, name: 'Grandma', dateLine: DATE, monogram: 'AL', headline: 'Hello' };
     expect(stationeryOf(stored)).toEqual(stored);
-    expect(stationeryOf({ ...stored, name: undefined })).toEqual({ ...stored, name: undefined });
+    expect(stationeryOf({ ...stored, name: undefined })).not.toHaveProperty('name');
     expect(stationeryOf({ ...stored, name: null })).not.toHaveProperty('name');
   });
 
-  it('reads back as nothing without a design this build draws, or with a name past its length', () => {
+  it('reads back as nothing without a design this build draws', () => {
     const stored = { theme: 'custom', design: PLAIN, name: 'Grandma', dateLine: DATE };
     const refused: unknown[] = [
       { ...stored, design: undefined },
       { ...stored, design: { ...PLAIN, tone: 'blue' } },
       { ...stored, design: [PLAIN] },
-      { ...stored, name: 7 },
-      { ...stored, name: 'x'.repeat(STATIONERY_DESIGN_NAME_MAX_LENGTH + 1) },
+      { ...stored, design: [] },
       { ...stored, headline: 'x'.repeat(201) },
-      { ...stored, theme: 'Custom' }
+      { ...stored, theme: 'Custom' },
+      JSON.parse('{"theme": "custom", "design": {"__proto__": {"face": "serif"}, "face": "serif", "ornament": "none", "ruled": false, "tone": "black"}}'),
+      JSON.parse('{"theme": "custom", "design": {"constructor": 1, "face": "serif", "ornament": "none", "ruled": false, "tone": "black"}}')
     ];
     for (const value of refused) expect(stationeryOf(value), JSON.stringify(value).slice(0, 80)).toBeNull();
-    expect(stationeryOf({ ...stored, name: 'x'.repeat(STATIONERY_DESIGN_NAME_MAX_LENGTH) })).not.toBeNull();
+  });
+
+  it('drops a name that is not kept as a design name is, rather than refuse the letter it prints', () => {
+    const stored = { theme: 'custom', design: PLAIN, dateLine: DATE };
+    for (const name of [7, '', '   ', ' Grandma', 'x'.repeat(STATIONERY_DESIGN_NAME_MAX_LENGTH + 1), `Gr${String.fromCodePoint(0x202e)}andma`]) {
+      const read = stationeryOf({ ...stored, name });
+      expect(read, JSON.stringify(name)).toEqual(stored);
+    }
+    const smile = String.fromCodePoint(0x1f600).repeat(40);
+    expect(stationeryOf({ ...stored, name: smile })?.name).toBe(smile);
   });
 
   it("keeps a theme's own read-back as it was: no design, no name", () => {

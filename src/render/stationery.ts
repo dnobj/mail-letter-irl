@@ -1,4 +1,4 @@
-import { visualOrder } from './bidi.js';
+import { visualOrder, withoutInvisible } from './bidi.js';
 import { loadFont, type FontName } from './fonts.js';
 import { shape } from './glyphs.js';
 import { BODY_FONT_SIZE, CONTENT_WIDTH, LINE_PITCH, PAGE_WIDTH, POINTS_PER_INCH, SIDE_MARGIN } from './geometry.js';
@@ -72,6 +72,26 @@ export interface StationeryDesign {
 /** The longest name a design may have (#649): the account's own label for it, never printed. */
 export const STATIONERY_DESIGN_NAME_MAX_LENGTH = 40;
 
+/**
+ * A design's name as it is kept (#649): what prints nothing (controls, bidi
+ * marks, zero-width characters) taken out, line breaks and tabs and each run
+ * of white space one space, the ends trimmed; null when that leaves nothing,
+ * or more than STATIONERY_DESIGN_NAME_MAX_LENGTH characters, counted as
+ * PostgreSQL counts them (code points). Saving keeps a name by this rule and
+ * reading one back holds it to the same, so no name saved is ever refused on
+ * the way back. The name is shown to the person, never printed.
+ */
+export function designNameOf(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const name = withoutInvisible(value)
+    .replace(/[\t\n\v\f\r\p{Zl}\p{Zp}]/gu, ' ')
+    .replace(/[\p{Cc}\p{Cf}]/gu, '')
+    .replace(/\s+/gu, ' ')
+    .trim();
+  const length = [...name].length;
+  return length >= 1 && length <= STATIONERY_DESIGN_NAME_MAX_LENGTH ? name : null;
+}
+
 /** A letter's theme and what it prints. */
 export interface Stationery {
   theme: StationeryTheme | typeof CUSTOM_THEME;
@@ -139,7 +159,8 @@ const FACE_THEMES: Record<StationeryFace, StationeryTheme> = { serif: 'classic',
  * through this, so a page is never drawn from choices it does not know.
  */
 export function designOf(value: unknown): StationeryDesign | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  // An array has keys of its own ('0', 'length' is not one), so the key check below refuses it too.
+  if (!value || typeof value !== 'object') return null;
   const record = value as Record<string, unknown>;
   if (Object.keys(record).some(key => !['face', 'ornament', 'ruled', 'tone'].includes(key))) return null;
   const { face, ornament, ruled, tone } = record;
@@ -198,8 +219,9 @@ export const STATIONERY_SLOT_MAX_LENGTH = 200;
  * content): the object if its theme is one this build draws and each slot is
  * absent or a string of sensible length, else null. Classic is stored as no
  * theme at all, so a stored 'classic' is not a stored theme either. A custom
- * theme (#649) reads back only with a design this build draws, and its name,
- * when it has one, of a design name's length.
+ * theme (#649) reads back only with a design this build draws. Its name, never
+ * printed, reads back only as a design name is kept (designNameOf); any other
+ * is dropped, never a reason to refuse the letter.
  */
 export function stationeryOf(value: unknown): Stationery | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -211,10 +233,7 @@ export function stationeryOf(value: unknown): Stationery | null {
     if (!design) return null;
     stationery = { theme: CUSTOM_THEME, design };
     const name = record.name;
-    if (name !== undefined && name !== null) {
-      if (typeof name !== 'string' || name.length > STATIONERY_DESIGN_NAME_MAX_LENGTH) return null;
-      stationery.name = name;
-    }
+    if (typeof name === 'string' && designNameOf(name) === name) stationery.name = name;
   } else if (typeof theme !== 'string' || theme === 'classic' || !(STATIONERY_THEMES as readonly string[]).includes(theme)) {
     return null;
   } else {
@@ -274,7 +293,10 @@ const DATE_FACES: Record<StationeryTheme, { face: Face; floor: number }> = {
   handwritten: { face: { font: 'Caveat-Regular', size: 16 }, floor: 12 }
 };
 
-/** A design's ornament greys (#649): the four confetti prints in, which P12 printed exactly. */
+/**
+ * A design's ornament greys (#649): the text's #222, and the three greys P12
+ * printed its 0.75 pt sprigs in, each distinct and crisp.
+ */
 const TONE_INKS: Record<StationeryTone, Ink> = { black: '#222222', dark: '#555555', medium: '#888888', light: '#aaaaaa' };
 
 /**

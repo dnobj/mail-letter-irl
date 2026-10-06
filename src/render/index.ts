@@ -7,7 +7,7 @@
 export { drawsGrapheme, drawsGraphemeIn, inFace, layoutLetter, pageFit, wrapParagraph } from './layout.js';
 export type { ImageBox, Layout, LayoutOptions, LayoutPage, LetterContent, PageFit, PathItem, TextRun } from './layout.js';
 export {
-  bodyFace, CUSTOM_THEME, designOf, HEADLINE_LINES, headlineSize, isRuled, printsHeadline, printsInitials, slotText, STATIONERY_CORNER,
+  bodyFace, CUSTOM_THEME, designNameOf, designOf, HEADLINE_LINES, headlineSize, isRuled, printsHeadline, printsInitials, slotText, STATIONERY_CORNER,
   STATIONERY_DESIGN_NAME_MAX_LENGTH, STATIONERY_FACES, STATIONERY_ORNAMENTS, STATIONERY_SLOT_MAX_LENGTH, STATIONERY_THEMES, STATIONERY_TONES,
   stationeryFace, stationeryOf, StationeryOverflow
 } from './stationery.js';

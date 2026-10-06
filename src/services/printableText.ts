@@ -270,7 +270,8 @@ function listed(characters: string[], prints: PrintsGrapheme = printsInOpenSans)
  * may print what this one cannot.
  */
 export interface ThemedFace {
-  theme: string;
+  /** The stationery as a sentence names it: "typewriter stationery", or "saved stationery design" (#649). */
+  named: string;
   fields: readonly string[];
   /**
    * Whether Classic's face draws a character: another stationery is
@@ -301,7 +302,7 @@ export function unprintableRefusal(mail: 'letter' | 'postcard', found: Unprintab
     `Printed mail shows Latin letters with common accents, modern Greek, Cyrillic, Hebrew ` +
     `and common punctuation, and no emoji. ` +
     (face && elsewhere
-      ? `The ${face.theme} stationery sets the text in its own typeface, which has fewer: ` +
+      ? `The ${face.named} sets the text in its own typeface, which has fewer: ` +
         (others
           ? `choose another stationery for the text, and take the other characters out or write them in plain letters, `
           : `choose another stationery, or take those characters out or write them in plain letters, `) +
