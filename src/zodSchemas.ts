@@ -1131,6 +1131,7 @@ export const setMailServiceOutputZ = z.object({
   canSendNow: z.boolean().describe(SET_MAIL_SERVICE_CAN_SEND_DESCRIPTION),
   reasonCannotSend: z.string().optional(),
   sendEligibility: sendEligibilityZ,
+  pages: z.number().int().min(2).max(MAX_LETTER_PAGES).optional().describe(PREVIEW_PAGES_DESCRIPTION),
   message: z.string()
 });
 

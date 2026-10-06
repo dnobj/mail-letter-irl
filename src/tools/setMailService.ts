@@ -37,6 +37,8 @@ export interface SetMailServiceOutput extends LetterTravel {
   canSendNow: boolean;
   reasonCannotSend?: string;
   sendEligibility: SendEligibility;
+  /** The pages the letter prints on, above one (#648): the card keeps a letter's length from the answer that prices it. */
+  pages?: number;
   message: string;
 }
 
@@ -156,9 +158,11 @@ async function handler(input: SetMailServiceInput, context: ToolContext): Promis
   // (A gift letter can always send, so it never gets here.)
   const note =
     certified === undefined && !payment.canSendNow && Number(draft.pages ?? 1) === 1 ? await giftLetterNote(context) : '';
+  const pages = Number(draft.pages ?? 1);
   return {
     draftId,
     ...payment,
+    ...(pages > 1 ? { pages } : {}),
     message: messageFor(certified) + note
   };
 }

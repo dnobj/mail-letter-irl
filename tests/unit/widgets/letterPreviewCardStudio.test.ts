@@ -1681,7 +1681,12 @@ describe('the Mail choice on the Delivery tab (#648)', () => {
       ],
       ['Certified mail is for letters, and a postcard always goes as ordinary mail. Make a letter preview to send certified mail.', 'A postcard always goes as ordinary mail.'],
       ["That preview wasn't found. Make a new preview, then try again.", "That preview wasn't found. Ask in the chat for a new one."],
-      ['Certified mail is not available right now. The preview stays as it is.', 'Certified mail is not available right now. The preview stays as it is.']
+      ['Certified mail is not available right now. The preview stays as it is.', 'Certified mail is not available right now. The preview stays as it is.'],
+      // Certified mail turned off since the preview: the tool is no longer listed, and the connection says so.
+      ['MCP error -32602: Tool set_mail_service not found', 'Certified mail is not available right now. The preview stays as it is.'],
+      // Another error that only looks like one of ours is said as it came.
+      ['Token has expired', 'Token has expired'],
+      ['Tool set_stationery not found', 'Tool set_stationery not found']
     ];
     for (const [refusal, said] of cases) {
       const card = mount();
@@ -1692,7 +1697,7 @@ describe('the Mail choice on the Delivery tab (#648)', () => {
     }
   });
 
-  it("keeps a longer letter's pages and how full they are: a change of service leaves the page as it is", async () => {
+  it("takes a longer letter's pages from the answer, and keeps how full they are: a change of service leaves the page as it is", async () => {
     const PAY_AND_SEND = { packPays: false, payAndSend: { available: true, amountCents: 599, currency: 'usd' }, letterPack: { available: false } };
     const card = mount();
     await card.show(output({ ...CLASSIC, ...ORDINARY_TERMS, pages: 2, canSendNow: false, sendEligibility: PAY_AND_SEND }), {
@@ -1703,13 +1708,13 @@ describe('the Mail choice on the Delivery tab (#648)', () => {
     const fit = text(card, 'studio-fit');
     expect(fit).toBe('Runs on to the back of the page: printed on both sides of one sheet.');
     await card.click(choice(card, 'certified'));
-    await card.answer(changed(CERTIFIED_TERMS), SET);
+    await card.answer(changed({ ...CERTIFIED_TERMS, pages: 2 }), SET);
     expect(isCertified(card)).toBe(true);
     expect(text(card, 'studio-summary')).toContain('2 pages, both sides');
     expect(text(card, 'studio-fit')).toBe(fit);
     // And back again, from the terms the card now holds.
     await card.click(choice(card, 'standard'));
-    await card.answer(changed({ ...ORDINARY_TERMS, canSendNow: false, sendEligibility: PAY_AND_SEND }), SET);
+    await card.answer(changed({ ...ORDINARY_TERMS, canSendNow: false, sendEligibility: PAY_AND_SEND, pages: 2 }), SET);
     expect(text(card, 'studio-summary')).toContain('2 pages, both sides');
     expect(text(card, 'studio-fit')).toBe(fit);
 
@@ -1719,6 +1724,26 @@ describe('the Mail choice on the Delivery tab (#648)', () => {
     await one.answer(changed(CERTIFIED_TERMS), SET);
     expect(text(one, 'studio-fit')).toBe('Fits on one page, with room for about 1,940 more characters.');
     expect(text(one, 'studio-summary')).not.toContain('pages');
+  });
+
+  it('keeps how full the page is as the last restyle gave it, not as the preview did', async () => {
+    const fit = (roomCharacters: number) => ({ pages: 1, sheets: 1, doubleSided: false, roomLines: Math.ceil(roomCharacters / 64), roomCharacters, charactersPerLine: 64 });
+    const card = mount();
+    await card.show(ordinary(), { ...OFFERED, pageFit: fit(1940) });
+    await card.click(card.byId('style-row').querySelector('[data-theme="typewriter"]')!);
+    await card.answer({ ...restyle(ORDINARY_TERMS), result: { ...restyle(ORDINARY_TERMS).result, _meta: { previewHtml: PAGE, pageFit: fit(512) } } }, 'set_stationery');
+    expect(text(card, 'studio-fit')).toBe('Fits on one page, with room for about 512 more characters.');
+    await card.click(choice(card, 'certified'));
+    await card.answer(changed(CERTIFIED_TERMS), SET);
+    expect(text(card, 'studio-fit')).toBe('Fits on one page, with room for about 512 more characters.');
+  });
+
+  it('takes the pages the answer gives, which the chat may have changed unheard', async () => {
+    const card = mount();
+    await card.show(ordinary(), OFFERED);
+    await card.click(choice(card, 'certified'));
+    await card.answer(changed({ ...CERTIFIED_TERMS, pages: 3 }), SET);
+    expect(text(card, 'studio-summary')).toContain('3 pages, both sides');
   });
 
   it('takes no status after a change made here: the change is the later word', async () => {
@@ -1795,6 +1820,10 @@ describe('the Mail choice on the Delivery tab (#648)', () => {
     expect(pressed(card)).toEqual(['standard']);
     expect(isCertified(card)).toBe(false);
     expect(waiting(card)).toEqual(['false', 'false', 'false']);
+    // Nor once the card draws the new draft again: nothing of the late answer was kept for it.
+    await card.show({ ...ordinary(), draftId: 'draft_0002' }, OFFERED);
+    expect(pressed(card)).toEqual(['standard']);
+    expect(isCertified(card)).toBe(false);
     // And the new draft changes as its own.
     await card.click(choice(card, 'certified_return_receipt'));
     expect(card.requests('tools/call', SET)[1].params.arguments).toEqual({ draftId: 'draft_0002', mailService: 'certified_return_receipt' });
