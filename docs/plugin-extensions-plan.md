@@ -1,7 +1,7 @@
 # Plugin Extensions Plan
 
 **Last Updated:** October 5, 2026
-**Status:** In progress: the home is built (behind its flag); host acceptance, the panel and rich forms wait
+**Status:** In progress: the home is built (behind its flag); host acceptance, the panel and rich forms wait; the card work alongside is built but for custom stationery
 **Purpose:** What Letter IRL builds with ChatGPT Plugin Extensions, in what order, and what each slice waits for (#652, epic #537, concepts 7 and 12 of [the vision](letter-creator-vision.md))
 
 ---
@@ -20,6 +20,16 @@
 | Plugin settings (return address, signature, default stationery) | Optional; duplicates the website's Settings page | none |
 
 The design and the rollout of the home are in [letter-home.md](letter-home.md).
+
+### Card work alongside
+
+Not extensions, but the same epic (#537) and the same owner list of 2026-10-05:
+
+| Change | State | Issue |
+|---|---|---|
+| Change a letter's words on the Words tab without room to write | Built, behind `LETTER_IRL_WORDS_EDITOR_ENABLED` (one page; words past it are refused) | #647, #655 |
+| Choose how a letter travels on the Delivery tab | Built, shown while certified mail is offered, never for a gift letter | #648, #656 |
+| Custom stationery designed with ChatGPT | Waiting for the owner's design decisions (what the model makes, print safety, storage, abuse) | #649 |
 
 ## What the specification says
 
