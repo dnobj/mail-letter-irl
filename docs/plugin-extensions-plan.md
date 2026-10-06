@@ -8,11 +8,11 @@
 
 ## Overview
 
-The home and the context it shares are built behind their flags and wait for the owner's acceptance in ChatGPT. Rich forms wait for the SDK, and the conversation panel waits for the home to be accepted. The card work from the owner's list of 2026-10-05 sits beside it: built, except custom stationery, which is being built (#649).
+The home and the context it shares are built behind their flags and wait for the owner's acceptance in ChatGPT. Rich forms wait for the SDK, and the conversation panel waits for the home and its context to be accepted (HOME-01, HOME-02). The card work from the owner's list of 2026-10-05 sits beside it: built, except custom stationery, which is being built (#649).
 
 ## Where it stands
 
-Every slice below is off unless `LETTER_IRL_HOME_ENABLED` is on: the home is where they show.
+Every built slice below is off unless `LETTER_IRL_HOME_ENABLED` is on; the slices still waiting will each have a flag of their own.
 
 | Slice | State | Issue |
 |---|---|---|
@@ -22,7 +22,7 @@ Every slice below is off unless `LETTER_IRL_HOME_ENABLED` is on: the home is whe
 | Deep links to a draft or an order | Built; share links need `LETTER_IRL_CHATGPT_PLUGIN_ID`, unset until the plugin is installed, and the owner's acceptance (HOME-03) waits | #643, #646 |
 | Link checks and held mail's words | Built; the privacy check before the home goes live is the owner's (item 4 of #651) | #651 |
 | Entrypoint icon (20x20 monochrome SVG) | Waiting: the SDK does not expose it yet, so the home uses the default | none |
-| Rich-form pickers (stationery, recipient, layout, date) | Waiting for MCP multi-round-trip requests (MRTR) in the SDK (1.32.0 still advertises 2025-11-25) | #644 |
+| Rich-form pickers (stationery, recipient, layout, date) | Waiting for MCP multi-round-trip requests (MRTR) in the SDK (as of 2026-10-04, SDK 1.32.0 still advertises 2025-11-25) | #644 |
 | Conversation panel (side-panel editor, `{ type: "thread" }`) | Waiting for the home and its context to be accepted on desktop | #645 |
 | Plugin settings (return address, signature, default stationery) | Optional; duplicates the website's Settings page | none |
 
@@ -69,7 +69,7 @@ Skipped: file viewers and composer mentions (no flow of ours fits them yet).
 - Every sentence about a letter switches on the letter's status; a delivery is an estimate, never "confirmed".
 - Every answer that carries a letter's terms carries how it travels (#638), so a card never mixes two answers.
 - What reaches the model is the least it needs: ids, a recipient's name, city and state, dates, a letter's status and whether it can still be changed. The privacy policy is checked before a slice is enabled live.
-- Every pull request has independent review rounds and a mutation run with every mutant killed. Money, sign-in, erasure, sending, fulfilment and migrations need two clean rounds.
+- Every pull request has independent review rounds, and one that changes source has a mutation run with every mutant killed. Money, sign-in, erasure, sending, fulfilment and migrations need two clean rounds.
 - Anything only ChatGPT's sidebar can show is accepted by the owner, with a manual test written for them.
 
 ## See Also
