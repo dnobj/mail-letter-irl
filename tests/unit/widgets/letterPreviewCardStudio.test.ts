@@ -1878,6 +1878,207 @@ describe('the Mail choice on the Delivery tab (#648)', () => {
   });
 });
 
+describe('saved designs on the Style tab (#649)', () => {
+  const ID = '3f2b8c1e-9a4d-4c7e-8b1f-2d6a5e9c0b7a';
+  const OTHER = '4f2b8c1e-9a4d-4c7e-8b1f-2d6a5e9c0b7a';
+  const DESIGN = { face: 'handwritten', ornament: 'sprig', ruled: true, tone: 'medium' };
+  const DESIGNS = [
+    { designId: ID, name: 'Garden', design: DESIGN },
+    { designId: OTHER, name: 'Grandma <b>Ruth</b>', design: { ...DESIGN, ornament: 'monogram' } }
+  ];
+  const CLASSIC = { stationery: { theme: 'classic', source: 'default' } };
+  const GARDEN = { stationery: { theme: 'custom', design: DESIGN, name: 'Garden', designId: ID, dateLine: 'October 1, 2026', source: 'asked' } };
+  type Card = ReturnType<typeof mount>;
+  const designButtons = (card: Card) => Array.from(card.byId('style-designs').querySelectorAll('[data-design-id]')) as HTMLElement[];
+  const pressedStyle = (card: Card) =>
+    Array.from(card.byId('style-row').querySelectorAll('[aria-pressed="true"]')).map(button => button.getAttribute('data-theme') ?? `design:${button.getAttribute('data-design-id')}`);
+  const restyled = (stationery: Json) => ({
+    result: {
+      content: [],
+      structuredContent: { draftId: 'draft_0001', stationery, ...canSend, message: 'Restyled.' },
+      _meta: { previewHtml: PAGE }
+    }
+  });
+
+  it("draws a button for each of the person's designs, named as they saved it, as text", async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, stationeryDesigns: DESIGNS });
+    expect(card.byId('style-designs').hidden).toBe(false);
+    expect(designButtons(card).map(button => button.textContent)).toEqual(['Garden', 'Grandma <b>Ruth</b>']);
+    expect(card.byId('style-designs').querySelector('b')).toBeNull();
+    expect(designButtons(card).map(button => button.getAttribute('aria-pressed'))).toEqual(['false', 'false']);
+    expect(pressedStyle(card)).toEqual(['classic']);
+  });
+
+  it('draws none without designs, or from anything that is not one', async () => {
+    for (const meta of [ON, { ...ON, stationeryDesigns: [] }, { ...ON, stationeryDesigns: 'Garden' }, { ...ON, stationeryDesigns: [null, { name: 'x' }, { designId: ID }, { designId: '', name: 'x' }, { designId: ID, name: '' }] }]) {
+      const card = mount();
+      await card.show(output(CLASSIC), meta);
+      expect(designButtons(card), JSON.stringify(meta).slice(0, 60)).toHaveLength(0);
+      expect(card.byId('style-designs').hidden).toBe(true);
+    }
+  });
+
+  it('shows the Style row for a letter drawn in a design, with the design pressed, and names it in the summary', async () => {
+    const card = mount();
+    await card.show(output(GARDEN), { ...ON, stationeryDesigns: DESIGNS });
+    expect(card.byId('style-row').style.display).toBe('');
+    expect(pressedStyle(card)).toEqual([`design:${ID}`]);
+    expect(text(card, 'studio-summary')).toContain('Garden');
+    expect(text(card, 'studio-summary')).not.toContain('Custom');
+  });
+
+  it('names a design not among the buttons by its name, and presses nothing', async () => {
+    const card = mount();
+    await card.show(output(GARDEN), ON);
+    expect(card.byId('style-row').style.display).toBe('');
+    expect(pressedStyle(card)).toEqual([]);
+    expect(text(card, 'studio-summary')).toContain('Garden');
+  });
+
+  it("draws the letter in a design with set_stationery, and takes the answer's design", async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, stationeryDesigns: DESIGNS });
+    await card.click(designButtons(card)[0]);
+    const asked = card.requests('tools/call', 'set_stationery');
+    expect(asked).toHaveLength(1);
+    expect(asked[0].params.arguments).toEqual({ draftId: 'draft_0001', stationeryDesignId: ID });
+    // While the server answers, the design shows pressed.
+    expect(pressedStyle(card)).toEqual([`design:${ID}`]);
+    // And every design waits with the themes.
+    expect(designButtons(card).map(button => button.getAttribute('aria-disabled'))).toEqual(['true', 'true']);
+    await card.answer(restyled(GARDEN.stationery), 'set_stationery');
+    expect(pressedStyle(card)).toEqual([`design:${ID}`]);
+    expect(designButtons(card).map(button => button.getAttribute('aria-disabled'))).toEqual(['false', 'false']);
+    expect(text(card, 'studio-summary')).toContain('Garden');
+    // Pressing it again asks nothing.
+    await card.click(designButtons(card)[0]);
+    expect(card.requests('tools/call', 'set_stationery')).toHaveLength(1);
+    // And back to a theme.
+    await card.click(card.byId('style-row').querySelector('[data-theme="botanical"]')!);
+    expect(card.requests('tools/call', 'set_stationery')[1].params.arguments).toEqual({ draftId: 'draft_0001', stationery: 'botanical' });
+  });
+
+  it('says so, and keeps the style, when the answer is not the design asked for', async () => {
+    for (const answer of [{ theme: 'botanical', source: 'asked' }, { ...GARDEN.stationery, designId: OTHER }]) {
+      const card = mount();
+      await card.show(output(CLASSIC), { ...ON, stationeryDesigns: DESIGNS });
+      await card.click(designButtons(card)[0]);
+      await card.answer(restyled(answer), 'set_stationery');
+      expect(pressedStyle(card), JSON.stringify(answer)).toEqual(['classic']);
+      expect(text(card, 'style-note')).toContain('The style may have changed');
+    }
+  });
+
+  it("takes back what a design printed when it is pressed again: its headline and initials", async () => {
+    const card = mount();
+    await card.show(output({ stationery: { ...GARDEN.stationery, headline: 'For Sam' } }), { ...ON, stationeryDesigns: DESIGNS });
+    await card.click(card.byId('style-row').querySelector('[data-theme="classic"]')!);
+    await card.answer(restyled({ theme: 'classic', source: 'asked' }), 'set_stationery');
+    await card.click(designButtons(card)[0]);
+    expect(card.requests('tools/call', 'set_stationery')[1].params.arguments).toEqual({ draftId: 'draft_0001', stationeryDesignId: ID, headline: 'For Sam' });
+  });
+
+  it("labels each design's button as the person's design, so a screen reader tells it from a theme of the same name", async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, stationeryDesigns: [{ designId: ID, name: 'Classic', design: DESIGN }] });
+    expect(designButtons(card)[0].getAttribute('aria-label')).toBe('Classic, your design');
+    expect(designButtons(card)[0].textContent).toBe('Classic');
+  });
+
+  it("says a design deleted since the preview in the person's words, and puts its button away", async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, stationeryDesigns: DESIGNS });
+    await card.click(designButtons(card)[0]);
+    await card.answer(
+      {
+        result: {
+          isError: true,
+          content: [{ type: 'text', text: "That stationery design was not found. list_stationery_designs lists the account's designs, with their designId." }]
+        }
+      },
+      'set_stationery'
+    );
+    expect(text(card, 'style-note')).toBe('That design was deleted. Make the preview again to see your designs.');
+    expect(designButtons(card).map(button => button.textContent)).toEqual(['Grandma <b>Ruth</b>']);
+    expect(pressedStyle(card)).toEqual(['classic']);
+
+    // A keyboard press: focus goes to the style the letter keeps, not to the page.
+    const keyed = mount();
+    await keyed.show(output(CLASSIC), { ...ON, stationeryDesigns: DESIGNS });
+    designButtons(keyed)[0].focus();
+    await keyed.click(designButtons(keyed)[0]);
+    await keyed.answer(
+      { result: { isError: true, content: [{ type: 'text', text: 'That stationery design was not found.' }] } },
+      'set_stationery'
+    );
+    expect(keyed.document.activeElement).toBe(keyed.byId('style-row').querySelector('[data-theme="classic"]'));
+    // Another refusal is said as it came, and keeps the buttons.
+    const other = mount();
+    await other.show(output(CLASSIC), { ...ON, stationeryDesigns: DESIGNS });
+    await other.click(designButtons(other)[0]);
+    await other.answer({ result: { isError: true, content: [{ type: 'text', text: 'Stationery is not available yet.' }] } }, 'set_stationery');
+    expect(text(other, 'style-note')).toBe('Stationery is not available yet.');
+    expect(designButtons(other)).toHaveLength(2);
+
+    // Designs turned off since the preview: the tool asks the model for a theme; the card says it plainly.
+    const off = mount();
+    await off.show(output(CLASSIC), { ...ON, stationeryDesigns: DESIGNS });
+    await off.click(designButtons(off)[0]);
+    await off.answer(
+      { result: { isError: true, content: [{ type: 'text', text: 'Name the stationery: classic, monogram, botanical, celebration, typewriter or handwritten.' }] } },
+      'set_stationery'
+    );
+    expect(text(off, 'style-note')).toBe("Saved designs aren't available now. Make the preview again to see the styles.");
+  });
+
+  it('carries initials back only into a design whose ornament is the monogram', async () => {
+    const card = mount();
+    await card.show(output({ stationery: { ...GARDEN.stationery, monogram: 'PR' } }), { ...ON, stationeryDesigns: DESIGNS });
+    await card.click(card.byId('style-row').querySelector('[data-theme="classic"]')!);
+    await card.answer(restyled({ theme: 'classic', source: 'asked' }), 'set_stationery');
+    await card.click(designButtons(card)[0]);
+    // Garden draws a sprig: no initials go with it.
+    expect(card.requests('tools/call', 'set_stationery')[1].params.arguments).toEqual({ draftId: 'draft_0001', stationeryDesignId: ID });
+
+    const monogram = mount();
+    const initials = { theme: 'custom', design: { ...DESIGN, ornament: 'monogram' }, name: 'Grandma <b>Ruth</b>', designId: OTHER, monogram: 'PR', source: 'asked' };
+    await monogram.show(output({ stationery: initials }), { ...ON, stationeryDesigns: DESIGNS });
+    await monogram.click(monogram.byId('style-row').querySelector('[data-theme="classic"]')!);
+    await monogram.answer(restyled({ theme: 'classic', source: 'asked' }), 'set_stationery');
+    await monogram.click(designButtons(monogram)[1]);
+    expect(monogram.requests('tools/call', 'set_stationery')[1].params.arguments).toEqual({ draftId: 'draft_0001', stationeryDesignId: OTHER, monogram: 'PR' });
+  });
+
+  it('presses no design for a status naming one replaced since under the same name, so the current one can be pressed', async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, stationeryDesigns: DESIGNS });
+    await card.answerTo(card.requests('tools/call', 'get_draft_status')[0], {
+      result: {
+        content: [],
+        structuredContent: { draftId: 'draft_0001', status: 'ready', stationery: { theme: 'custom', design: { ...DESIGN, tone: 'dark' }, name: 'Garden' } },
+        _meta: { previewHtml: PAGE }
+      }
+    });
+    expect(pressedStyle(card)).toEqual([]);
+    await card.click(designButtons(card)[0]);
+    expect(card.requests('tools/call', 'set_stationery')[0].params.arguments).toEqual({ draftId: 'draft_0001', stationeryDesignId: ID });
+  });
+
+  it('presses a design a status names by its name, though the status gives no id', async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, stationeryDesigns: DESIGNS });
+    await card.answerTo(card.requests('tools/call', 'get_draft_status')[0], {
+      result: {
+        content: [],
+        structuredContent: { draftId: 'draft_0001', status: 'ready', stationery: { theme: 'custom', design: DESIGN, name: 'Garden' } },
+        _meta: { previewHtml: PAGE }
+      }
+    });
+    expect(pressedStyle(card)).toEqual([`design:${ID}`]);
+  });
+});
+
 describe('the widget version after the certified card (#625)', () => {
   it('is bumped, so a host that cached the card fetches the new one', async () => {
     const { WIDGET_TEMPLATE_VERSION } = await import('../../../src/mcp/widgetUris.js');

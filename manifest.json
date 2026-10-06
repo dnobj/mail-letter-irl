@@ -195,7 +195,58 @@
                   "botanical",
                   "celebration",
                   "typewriter",
-                  "handwritten"
+                  "handwritten",
+                  "custom"
+                ],
+                "description": "The stationery the page is drawn in"
+              },
+              "designId": {
+                "type": "string",
+                "description": "With the custom theme: its design's id"
+              },
+              "name": {
+                "type": "string",
+                "description": "With the custom theme: its design's name"
+              },
+              "design": {
+                "type": "object",
+                "description": "With the custom theme: its design's choices",
+                "properties": {
+                  "face": {
+                    "type": "string",
+                    "enum": [
+                      "serif",
+                      "typewriter",
+                      "handwritten"
+                    ]
+                  },
+                  "ornament": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "monogram",
+                      "sprig",
+                      "confetti"
+                    ]
+                  },
+                  "ruled": {
+                    "type": "boolean"
+                  },
+                  "tone": {
+                    "type": "string",
+                    "enum": [
+                      "black",
+                      "dark",
+                      "medium",
+                      "light"
+                    ]
+                  }
+                },
+                "required": [
+                  "face",
+                  "ornament",
+                  "ruled",
+                  "tone"
                 ]
               },
               "dateLine": {
@@ -648,7 +699,58 @@
                   "botanical",
                   "celebration",
                   "typewriter",
-                  "handwritten"
+                  "handwritten",
+                  "custom"
+                ],
+                "description": "The stationery the page is drawn in"
+              },
+              "designId": {
+                "type": "string",
+                "description": "With the custom theme: its design's id"
+              },
+              "name": {
+                "type": "string",
+                "description": "With the custom theme: its design's name"
+              },
+              "design": {
+                "type": "object",
+                "description": "With the custom theme: its design's choices",
+                "properties": {
+                  "face": {
+                    "type": "string",
+                    "enum": [
+                      "serif",
+                      "typewriter",
+                      "handwritten"
+                    ]
+                  },
+                  "ornament": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "monogram",
+                      "sprig",
+                      "confetti"
+                    ]
+                  },
+                  "ruled": {
+                    "type": "boolean"
+                  },
+                  "tone": {
+                    "type": "string",
+                    "enum": [
+                      "black",
+                      "dark",
+                      "medium",
+                      "light"
+                    ]
+                  }
+                },
+                "required": [
+                  "face",
+                  "ornament",
+                  "ruled",
+                  "tone"
                 ]
               },
               "dateLine": {
@@ -1101,7 +1203,58 @@
                   "botanical",
                   "celebration",
                   "typewriter",
-                  "handwritten"
+                  "handwritten",
+                  "custom"
+                ],
+                "description": "The stationery the page is drawn in"
+              },
+              "designId": {
+                "type": "string",
+                "description": "With the custom theme: its design's id"
+              },
+              "name": {
+                "type": "string",
+                "description": "With the custom theme: its design's name"
+              },
+              "design": {
+                "type": "object",
+                "description": "With the custom theme: its design's choices",
+                "properties": {
+                  "face": {
+                    "type": "string",
+                    "enum": [
+                      "serif",
+                      "typewriter",
+                      "handwritten"
+                    ]
+                  },
+                  "ornament": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "monogram",
+                      "sprig",
+                      "confetti"
+                    ]
+                  },
+                  "ruled": {
+                    "type": "boolean"
+                  },
+                  "tone": {
+                    "type": "string",
+                    "enum": [
+                      "black",
+                      "dark",
+                      "medium",
+                      "light"
+                    ]
+                  }
+                },
+                "required": [
+                  "face",
+                  "ornament",
+                  "ruled",
+                  "tone"
                 ]
               },
               "dateLine": {
@@ -2875,7 +3028,54 @@
                   "botanical",
                   "celebration",
                   "typewriter",
-                  "handwritten"
+                  "handwritten",
+                  "custom"
+                ],
+                "description": "The stationery the page is drawn in"
+              },
+              "name": {
+                "type": "string",
+                "description": "With the custom theme: its design's name when the letter was drawn"
+              },
+              "design": {
+                "type": "object",
+                "description": "With the custom theme: its design's choices",
+                "properties": {
+                  "face": {
+                    "type": "string",
+                    "enum": [
+                      "serif",
+                      "typewriter",
+                      "handwritten"
+                    ]
+                  },
+                  "ornament": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "monogram",
+                      "sprig",
+                      "confetti"
+                    ]
+                  },
+                  "ruled": {
+                    "type": "boolean"
+                  },
+                  "tone": {
+                    "type": "string",
+                    "enum": [
+                      "black",
+                      "dark",
+                      "medium",
+                      "light"
+                    ]
+                  }
+                },
+                "required": [
+                  "face",
+                  "ornament",
+                  "ruled",
+                  "tone"
                 ]
               },
               "dateLine": {

@@ -6,14 +6,17 @@
  */
 
 import type { ToolContext } from '../contracts/types.js';
+import { isCustomStationeryOffered } from '../config/customStationery.js';
 import { isStationeryEnabled } from '../config/stationery.js';
 import {
+  CUSTOM_THEME,
   drawsGrapheme,
   headlineSize,
   slotText,
   STATIONERY_SLOT_MAX_LENGTH,
   STATIONERY_THEMES,
   visualOrder,
+  type StationeryDesign,
   type StationeryTheme,
   type ThemeStationery
 } from '../render/index.js';
@@ -21,6 +24,7 @@ import { withoutInvisible } from '../render/bidi.js';
 import { clampMarks } from '../render/marks.js';
 import { SCHEDULE_TIME_ZONE } from '../services/deliverySchedule.js';
 import { rememberedStationery } from '../services/stationeryDefaultService.js';
+import { getDesign, rememberedDesign, type SavedDesign } from '../services/stationeryDesignService.js';
 
 /**
  * Why a preview is drawn in its theme (#563): asked for in the call, the
@@ -28,15 +32,32 @@ import { rememberedStationery } from '../services/stationeryDefaultService.js';
  */
 export type StationerySource = 'asked' | 'remembered' | 'default';
 
-/** A preview's stationery, and why it is that one. The draft stores the stationery alone (stationeryOf drops the rest). */
-export type PreviewStationery = ThemeStationery & { source: StationerySource };
+/**
+ * A saved design as a preview draws it (#649): the custom theme with its
+ * design, the name it was saved under, and its id, which the draft does not
+ * keep (stationeryOf drops it): the draft keeps its own copy of the design.
+ */
+export type DesignStationery = Omit<ThemeStationery, 'theme'> & {
+  theme: typeof CUSTOM_THEME;
+  design: StationeryDesign;
+  name: string;
+  designId: string;
+};
 
-/** The previews' three stationery arguments, as they arrive: unchecked. */
+/** A preview's stationery, and why it is that one. The draft stores the stationery alone (stationeryOf drops the rest). */
+export type PreviewStationery = (ThemeStationery | DesignStationery) & { source: StationerySource };
+
+/** The previews' stationery arguments, as they arrive: unchecked. */
 export interface StationeryInput {
   stationery?: unknown;
   monogram?: unknown;
   headline?: unknown;
+  /** A saved design's id (#649), in place of a theme. */
+  stationeryDesignId?: unknown;
 }
+
+/** The account's remembered choice: a theme, or one of its saved designs (#649). */
+export type RememberedChoice = StationeryTheme | SavedDesign;
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 const clusters = (text: string): string[] => [...graphemes.segment(text)].map(({ segment }) => segment);
@@ -49,8 +70,11 @@ const MONOGRAM_MAX_LETTERS = 3;
  * What a refusal about a theme the call did not name starts with: where the
  * theme came from, the account's remembered choice. Empty otherwise.
  */
-export function rememberedPrefix(stationery: { theme: string; source?: StationerySource } | undefined): string {
-  return stationery?.source === 'remembered' ? `The account's remembered stationery is ${stationery.theme}. ` : '';
+export function rememberedPrefix(stationery: { theme: string; source?: StationerySource; name?: string } | undefined): string {
+  if (stationery?.source !== 'remembered') return '';
+  return stationery.theme === CUSTOM_THEME
+    ? `The account's remembered stationery is its saved design "${stationery.name ?? ''}". `
+    : `The account's remembered stationery is ${stationery.theme}. `;
 }
 
 /** The themes, as a sentence names them: "classic, monogram, ... or handwritten". */
@@ -124,7 +148,15 @@ function nameWords(words: string[]): string[] {
  * gives its first, in capitals, but a title or a suffix; past three, the
  * first two and the last, as a first, middle and last name would.
  */
-function initialsFor(asked: string | undefined, senderName: string, context: ToolContext, remembered: boolean): string {
+function initialsFor(
+  asked: string | undefined,
+  senderName: string,
+  context: ToolContext,
+  /** What a refusal starts with when the stationery was the account's remembered choice (rememberedPrefix); else empty. */
+  remembering: string,
+  /** The stationery as a sentence names it: "monogram stationery", or "saved stationery design" (#649). */
+  named: string
+): string {
   if (asked !== undefined) {
     // As a slot prints it, without what prints nothing, spaces and full
     // stops; its marks clamped again after, so no letter keeps the marks of two.
@@ -151,8 +183,8 @@ function initialsFor(asked: string | undefined, senderName: string, context: Too
     });
   if (initials.length === 0) {
     throw refusal(
-      (remembered ? "The account's remembered stationery is monogram. " : '') +
-        'The monogram stationery prints initials, and the return address\'s name has none to use. ' +
+      remembering +
+        `The ${named} prints initials, and the return address's name has none to use. ` +
         'Pass monogram with one to three letters, such as "JMS", or choose another stationery.',
       'monogram_no_initials',
       context
@@ -217,18 +249,26 @@ function headlineFor(asked: string, context: ToolContext): string | undefined {
  * does not print it. Whether the slots' characters print is the printable
  * check's (validatePrintableLetter), and whether the letter still fits its
  * page, below a headline, the layout's (layoutLetterForPreview).
+ *
+ * A saved design (#649), while designs are offered: `stationeryDesignId` names
+ * one of the account's, which the caller has read (`askedDesign`, null when it
+ * is none of the account's), in place of a theme; without either, the
+ * account's remembered design comes before its remembered theme (the caller
+ * passes whichever it remembers last). A design prints the date line, initials
+ * only with the monogram ornament, and a headline.
  */
 export function previewStationery(
   input: StationeryInput,
   senderName: string,
   context: ToolContext,
   renderer: 'html' | 'pdf',
-  remembered: StationeryTheme | null = null
+  remembered: RememberedChoice | null = null,
+  askedDesign: SavedDesign | null = null
 ): PreviewStationery | undefined {
   if (!isStationeryEnabled() || renderer !== 'pdf') {
     const asked = (value: unknown) => value !== undefined && value !== null && !(typeof value === 'string' && value.trim() === '');
     const classic = typeof input.stationery === 'string' && input.stationery.trim().toLowerCase() === 'classic';
-    if ((asked(input.stationery) && !classic) || asked(input.monogram) || asked(input.headline)) {
+    if ((asked(input.stationery) && !classic) || asked(input.monogram) || asked(input.headline) || asked(input.stationeryDesignId)) {
       throw refusal(
         'Stationery is not available yet. Leave stationery, monogram and headline out, and the letter prints on a plain page.',
         'not_offered',
@@ -244,8 +284,27 @@ export function previewStationery(
   if (theme !== undefined && !(STATIONERY_THEMES as readonly string[]).includes(theme)) {
     throw refusal(`stationery must be one of ${THEME_LIST}.`, 'unknown_theme', context);
   }
-  const source: StationerySource = theme !== undefined ? 'asked' : remembered ? 'remembered' : 'default';
-  const chosen = (theme ?? remembered ?? 'classic') as StationeryTheme;
+  const designId = optionalText(input.stationeryDesignId, 'stationeryDesignId', "a saved design's designId", context);
+  if (designId !== undefined) {
+    if (!isCustomStationeryOffered()) {
+      throw refusal('Saved stationery designs are not available yet. Leave stationeryDesignId out, or name a stationery.', 'design_not_offered', context);
+    }
+    if (theme !== undefined) {
+      throw refusal('Give stationery or stationeryDesignId, not both: a saved design is a stationery of its own.', 'design_with_theme', context);
+    }
+    if (!askedDesign || askedDesign.designId.toLowerCase() !== designId.toLowerCase()) {
+      throw refusal(
+        "That stationery design was not found. list_stationery_designs lists the account's designs, with their designId.",
+        'design_not_found',
+        context
+      );
+    }
+  }
+  const source: StationerySource = theme !== undefined || designId !== undefined ? 'asked' : remembered ? 'remembered' : 'default';
+  // A design asked for, or, with nothing asked, the one the account remembers.
+  const design = designId !== undefined ? askedDesign : theme === undefined && remembered && typeof remembered === 'object' ? remembered : null;
+  if (design) return designStationery(design, { monogram, headline }, senderName, context, source);
+  const chosen = (theme ?? (typeof remembered === 'string' ? remembered : null) ?? 'classic') as StationeryTheme;
   // A refusal about a theme the call did not name says where it came from.
   const remembering = rememberedPrefix({ theme: chosen, source });
   if (monogram !== undefined && chosen !== 'monogram') {
@@ -265,7 +324,7 @@ export function previewStationery(
   if (chosen === 'classic') return { theme: 'classic', source };
 
   const stationery: PreviewStationery = { theme: chosen, dateLine: dateLineFor(context.now()), source };
-  if (chosen === 'monogram') stationery.monogram = initialsFor(monogram, senderName, context, source === 'remembered');
+  if (chosen === 'monogram') stationery.monogram = initialsFor(monogram, senderName, context, remembering, 'monogram stationery');
   if (chosen === 'celebration' && headline !== undefined) {
     const printed = headlineFor(headline, context);
     if (printed !== undefined) stationery.headline = printed;
@@ -274,8 +333,49 @@ export function previewStationery(
 }
 
 /**
- * previewStationery with the account's remembered theme, read only when it
- * could apply: stationery is offered, and the call asks for no theme.
+ * A saved design as a preview draws it (#649): its choices, its name and id,
+ * the date line, initials only with the monogram ornament, and a headline.
+ */
+function designStationery(
+  saved: SavedDesign,
+  slots: { monogram: string | undefined; headline: string | undefined },
+  senderName: string,
+  context: ToolContext,
+  source: StationerySource
+): PreviewStationery {
+  const stationery: PreviewStationery = {
+    theme: CUSTOM_THEME,
+    design: saved.design,
+    name: saved.name,
+    designId: saved.designId,
+    dateLine: dateLineFor(context.now()),
+    source
+  };
+  const remembering = rememberedPrefix(stationery);
+  if (slots.monogram !== undefined && saved.design.ornament !== 'monogram') {
+    throw refusal(
+      remembering +
+        'Initials print only on a design whose ornament is the monogram, and this design has another. Leave monogram out, or choose a design or stationery that prints initials.',
+      'monogram_without_theme',
+      context
+    );
+  }
+  if (saved.design.ornament === 'monogram') {
+    stationery.monogram = initialsFor(slots.monogram, senderName, context, remembering, 'saved stationery design');
+  }
+  if (slots.headline !== undefined) {
+    const printed = headlineFor(slots.headline, context);
+    if (printed !== undefined) stationery.headline = printed;
+  }
+  return stationery;
+}
+
+/**
+ * previewStationery with what it needs read first: a design the call names
+ * (#649), and the account's remembered choice, read only when it could apply:
+ * stationery is offered, and the call asks for no theme and no design. The
+ * remembered design comes first (remembering a theme forgets it), while
+ * designs are offered.
  */
 export async function chooseStationery(
   input: StationeryInput,
@@ -283,9 +383,15 @@ export async function chooseStationery(
   context: ToolContext,
   renderer: 'html' | 'pdf'
 ): Promise<PreviewStationery | undefined> {
-  const asks = typeof input.stationery === 'string' ? input.stationery.trim() !== '' : input.stationery != null;
-  const remembered = isStationeryEnabled() && renderer === 'pdf' && !asks
-    ? await rememberedStationery(context.user.userId)
-    : null;
-  return previewStationery(input, senderName, context, renderer, remembered);
+  const offered = isStationeryEnabled() && renderer === 'pdf';
+  const designs = offered && isCustomStationeryOffered();
+  const asksTheme = typeof input.stationery === 'string' ? input.stationery.trim() !== '' : input.stationery != null;
+  const askedId = typeof input.stationeryDesignId === 'string' ? input.stationeryDesignId.trim() : '';
+  const asksDesign = askedId !== '' || (input.stationeryDesignId != null && typeof input.stationeryDesignId !== 'string');
+  const askedDesign = designs && askedId !== '' && !asksTheme ? await getDesign(context.user.userId, askedId) : null;
+  let remembered: RememberedChoice | null = null;
+  if (offered && !asksTheme && !asksDesign) {
+    remembered = (designs ? await rememberedDesign(context.user.userId) : null) ?? (await rememberedStationery(context.user.userId));
+  }
+  return previewStationery(input, senderName, context, renderer, remembered, askedDesign);
 }

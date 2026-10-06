@@ -8,7 +8,7 @@
 
 ## Overview
 
-The home and the context it shares are built behind their flags and wait for the owner's acceptance in ChatGPT. Rich forms wait for the SDK, and the conversation panel waits for the home and its context to be accepted (HOME-01, HOME-02). The card work from the owner's list of 2026-10-05 sits beside it: built, except custom stationery, which is being built (#649).
+The home and the context it shares are built behind their flags and wait for the owner's acceptance in ChatGPT. Rich forms wait for the SDK, and the conversation panel waits for the home and its context to be accepted (HOME-01, HOME-02). The card work from the owner's list of 2026-10-05 sits beside it, all built behind its flags.
 
 ## Where it stands
 
@@ -36,7 +36,7 @@ Not extensions, but the same epic (#537) and the same owner list of 2026-10-05:
 |---|---|---|
 | Change a letter's words on the Words tab without room to write | Built, behind `LETTER_IRL_WORDS_EDITOR_ENABLED` with our renderer (`LETTER_IRL_PRINT_RENDERER=pdf`), or with room to write; one page, and words past it are refused | #647, #655 |
 | Choose how a letter travels on the Delivery tab | Built: shown while certified mail is offered (off on development until the owner's Stripe test prices exist), more than one service is offered and the preview named a stationery; never for a gift letter | #648, #656 |
-| Custom stationery designed with ChatGPT | Being built: parameters on the existing pieces (face, corner ornament, rules, grey), saved per account | #649 |
+| Custom stationery designed with ChatGPT | Built, behind `LETTER_IRL_CUSTOM_STATIONERY_ENABLED` with stationery offered: designs made of the existing pieces (face, corner ornament, rules, grey), saved per account (at most ten), drawn in previews and on the card's Style tab; manual test STATIONERY-02 | #649 |
 | Custom stationery with maximum flexibility (the model's own artwork, fonts, layouts) | Later | #657 |
 
 ## What the specification says

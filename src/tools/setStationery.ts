@@ -1,10 +1,12 @@
 import type { Address, LetterLayoutType, McpToolDefinition, ToolContext } from '../contracts/types.js';
 import { setStationeryInputSchema, setStationeryOutputSchema } from '../schemas.js';
+import { isCustomStationeryOffered } from '../config/customStationery.js';
 import { isStationeryOffered } from '../config/stationery.js';
 import { letterPageLimit } from '../config/roomToWrite.js';
 import { isWordsEditorOffered } from '../config/wordsEditor.js';
 import type { SendEligibility } from '../services/commerceService.js';
-import { type PageFit, type Stationery } from '../render/index.js';
+import { CUSTOM_THEME, type PageFit, type Stationery } from '../render/index.js';
+import { getDesign } from '../services/stationeryDesignService.js';
 import type { PreviewStationery } from './stationeryInput.js';
 import {
   getDraftForStationery,
@@ -32,8 +34,9 @@ export const SET_STATIONERY_TOOL = 'set_stationery';
 
 interface SetStationeryInput {
   draftId: string;
-  /** Required by the served schema; a direct call without one is refused. */
-  stationery: string;
+  /** A theme, or, while designs are offered, stationeryDesignId (#649): one of the two; none is refused. */
+  stationery?: string;
+  stationeryDesignId?: string;
   monogram?: string;
   headline?: string;
 }
@@ -108,8 +111,13 @@ function refused(code: StationeryRefusedError['code'], message: string, context:
  * What the tool says it did, for the model and the person, and what changed
  * in the letter's pages, and so its price (#586).
  */
-function messageFor(stationery: Stationery, pages: number, pagesBefore: number, mailService?: string | null): string {
-  const drawn = stationery.theme === 'classic' ? 'on a plain page, the classic stationery' : `on the ${stationery.theme} stationery`;
+function messageFor(stationery: PreviewStationery, pages: number, pagesBefore: number, mailService?: string | null): string {
+  const drawn =
+    stationery.theme === CUSTOM_THEME
+      ? `on the saved stationery design "${stationery.name}"`
+      : stationery.theme === 'classic'
+        ? 'on a plain page, the classic stationery'
+        : `on the ${stationery.theme} stationery`;
   const length = pageChangeSentence(pages, pagesBefore, mailService);
   return `The letter is now ${drawn}, and the account remembers it for its next letter preview.${length} Nothing has been sent.`;
 }
@@ -118,9 +126,17 @@ async function handler(input: SetStationeryInput, context: ToolContext): Promise
   if (!isStationeryOffered()) {
     throw refused('STATIONERY_DISABLED', 'Stationery is not available yet. The preview stays as it is.', context);
   }
-  // A restyle names its theme: none would fall back to the remembered one.
-  if (typeof input.stationery !== 'string' || input.stationery.trim() === '') {
-    throw refused('STATIONERY_MISSING', `Name the stationery: ${THEME_LIST}.`, context);
+  // A restyle names its theme or a saved design (#649): none would fall back to the remembered one.
+  const named = (value: unknown) => typeof value === 'string' && value.trim() !== '';
+  const designs = isCustomStationeryOffered();
+  if (!named(input.stationery) && !(designs && named(input.stationeryDesignId))) {
+    throw refused(
+      'STATIONERY_MISSING',
+      designs
+        ? `Name the stationery: ${THEME_LIST}, or a saved design's stationeryDesignId.`
+        : `Name the stationery: ${THEME_LIST}.`,
+      context
+    );
   }
   const draftId = typeof input.draftId === 'string' ? input.draftId.trim() : '';
   const userId = context.user.userId;
@@ -147,12 +163,17 @@ async function handler(input: SetStationeryInput, context: ToolContext): Promise
   const signOff = draft.sign_off ?? '';
   const layoutType = (draft.layout_type ?? 'text_only') as LetterLayoutType;
 
-  // The theme first, then what it prints, then the page, as a preview checks them.
+  // The theme first, then what it prints, then the page, as a preview checks them. A design is
+  // read as a preview reads it: only the account's own (#649).
+  const designId = typeof input.stationeryDesignId === 'string' ? input.stationeryDesignId.trim() : '';
+  const askedDesign = designs && designId !== '' && !named(input.stationery) ? await getDesign(userId, designId) : null;
   const stationery = previewStationery(
-    { stationery: input.stationery, monogram: input.monogram, headline: input.headline },
+    { stationery: input.stationery, monogram: input.monogram, headline: input.headline, stationeryDesignId: input.stationeryDesignId },
     sender.name,
     context,
-    'pdf'
+    'pdf',
+    null,
+    askedDesign
   )!;
   validatePrintableLetter({ sender, recipient, bodyText, signOff, senderIsSaved: false }, context, 'pdf', undefined, stationery);
   const imageData = layoutType === 'header_image'

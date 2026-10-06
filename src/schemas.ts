@@ -12,6 +12,16 @@ import {
   SET_LETTER_WORDS_SIGN_OFF_DESCRIPTION,
   SET_LETTER_WORDS_CAN_SEND_DESCRIPTION,
   PREVIEW_STATIONERY_DESCRIPTION,
+  STATIONERY_DESIGN_ID_DESCRIPTION,
+  DESIGN_CONFIRM_DESCRIPTION,
+  DESIGN_FACE_DESCRIPTION,
+  DESIGN_ID_DESCRIPTION,
+  DESIGN_NAME_DESCRIPTION,
+  DESIGN_ORNAMENT_DESCRIPTION,
+  DESIGN_RULED_DESCRIPTION,
+  DESIGN_TONE_DESCRIPTION,
+  STATIONERY_DESIGN_OUTPUT_DESCRIPTION,
+  STATIONERY_THEME_OUTPUT_DESCRIPTION,
   STATIONERY_SOURCE_DESCRIPTION,
   SET_ARRIVE_BY_DESCRIPTION,
   SET_STATIONERY_DESCRIPTION,
@@ -59,7 +69,7 @@ import {
   SET_LETTER_SIGNATURE_CAN_SEND_DESCRIPTION,
   GET_DRAFT_STATUS_SIGNATURE_DESCRIPTION
 } from "./zodSchemas.js";
-import { STATIONERY_THEMES } from "./render/stationery.js";
+import { DRAWN_THEMES, STATIONERY_FACES, STATIONERY_ORNAMENTS, STATIONERY_THEMES, STATIONERY_TONES } from "./render/stationery.js";
 import { MAIL_SERVICES } from "./config/certifiedMail.js";
 import { EXTRA_SERVICES } from "./config/products.js";
 
@@ -82,13 +92,29 @@ const previewScheduleSchema = {
 const stationeryInputSchemas = {
   stationery: { type: "string", enum: [...STATIONERY_THEMES], description: STATIONERY_DESCRIPTION },
   monogram: { type: "string", description: MONOGRAM_DESCRIPTION },
-  headline: { type: "string", description: HEADLINE_DESCRIPTION }
+  headline: { type: "string", description: HEADLINE_DESCRIPTION },
+  stationeryDesignId: { type: "string", description: STATIONERY_DESIGN_ID_DESCRIPTION }
+} as const;
+/** A saved design's four choices (#649), as an output says them. */
+const stationeryDesignSchema = {
+  type: "object",
+  description: STATIONERY_DESIGN_OUTPUT_DESCRIPTION,
+  properties: {
+    face: { type: "string", enum: [...STATIONERY_FACES] },
+    ornament: { type: "string", enum: [...STATIONERY_ORNAMENTS] },
+    ruled: { type: "boolean" },
+    tone: { type: "string", enum: [...STATIONERY_TONES] }
+  },
+  required: ["face", "ornament", "ruled", "tone"]
 } as const;
 const previewStationerySchema = {
   type: "object",
   description: PREVIEW_STATIONERY_DESCRIPTION,
   properties: {
-    theme: { type: "string", enum: [...STATIONERY_THEMES] },
+    theme: { type: "string", enum: [...DRAWN_THEMES], description: STATIONERY_THEME_OUTPUT_DESCRIPTION },
+    designId: { type: "string", description: "With the custom theme: its design's id" },
+    name: { type: "string", description: "With the custom theme: its design's name" },
+    design: stationeryDesignSchema,
     dateLine: { type: "string", description: "The date it prints at the top right, as written" },
     monogram: { type: "string", description: "The initials it prints" },
     headline: { type: "string", description: "The headline it prints above the letter" },
@@ -1025,7 +1051,9 @@ export const getDraftStatusOutputSchema: JsonSchema = {
       type: "object",
       description: "A ready letter's stationery now, while stationery is offered; its page goes to the card",
       properties: {
-        theme: { type: "string", enum: [...STATIONERY_THEMES] },
+        theme: { type: "string", enum: [...DRAWN_THEMES], description: STATIONERY_THEME_OUTPUT_DESCRIPTION },
+        name: { type: "string", description: "With the custom theme: its design's name when the letter was drawn" },
+        design: stationeryDesignSchema,
         dateLine: { type: "string" },
         monogram: { type: "string" },
         headline: { type: "string" }
@@ -1241,6 +1269,80 @@ export const clearSignatureOutputSchema: JsonSchema = {
   }
 };
 
+/** Saved stationery designs (#649). */
+const designOutputProperties = {
+  designId: { type: "string", description: DESIGN_ID_DESCRIPTION },
+  name: { type: "string" },
+  face: { type: "string", enum: [...STATIONERY_FACES] },
+  ornament: { type: "string", enum: [...STATIONERY_ORNAMENTS] },
+  ruled: { type: "boolean" },
+  tone: { type: "string", enum: [...STATIONERY_TONES] }
+} as const;
+const DESIGN_OUTPUT_REQUIRED = ["designId", "name", "face", "ornament", "ruled", "tone"];
+
+export const saveStationeryDesignInputSchema: JsonSchema = {
+  type: "object",
+  required: ["name", "face", "ornament", "ruled", "tone"],
+  properties: {
+    name: { type: "string", description: DESIGN_NAME_DESCRIPTION },
+    face: { type: "string", enum: [...STATIONERY_FACES], description: DESIGN_FACE_DESCRIPTION },
+    ornament: { type: "string", enum: [...STATIONERY_ORNAMENTS], description: DESIGN_ORNAMENT_DESCRIPTION },
+    ruled: { type: "boolean", description: DESIGN_RULED_DESCRIPTION },
+    tone: { type: "string", enum: [...STATIONERY_TONES], description: DESIGN_TONE_DESCRIPTION }
+  }
+};
+
+export const saveStationeryDesignOutputSchema: JsonSchema = {
+  type: "object",
+  required: [...DESIGN_OUTPUT_REQUIRED, "replaced", "message"],
+  properties: {
+    ...designOutputProperties,
+    replaced: { type: "boolean", description: "Whether a design of the same name was replaced" },
+    message: { type: "string" }
+  }
+};
+
+export const listStationeryDesignsInputSchema: JsonSchema = {
+  type: "object",
+  properties: {}
+};
+
+export const listStationeryDesignsOutputSchema: JsonSchema = {
+  type: "object",
+  required: ["designs", "limit", "message"],
+  properties: {
+    designs: {
+      type: "array",
+      description: "The account's saved designs, oldest first",
+      items: { type: "object", required: DESIGN_OUTPUT_REQUIRED, properties: designOutputProperties }
+    },
+    rememberedDesignId: {
+      type: "string",
+      description: "The design a letter preview that names no stationery is drawn in, when the account remembers one"
+    },
+    limit: { type: "integer", description: "The most designs an account may keep" },
+    message: { type: "string" }
+  }
+};
+
+export const deleteStationeryDesignInputSchema: JsonSchema = {
+  type: "object",
+  required: ["designId", "confirm"],
+  properties: {
+    designId: { type: "string", description: DESIGN_ID_DESCRIPTION },
+    confirm: { type: "boolean", description: DESIGN_CONFIRM_DESCRIPTION }
+  }
+};
+
+export const deleteStationeryDesignOutputSchema: JsonSchema = {
+  type: "object",
+  required: ["deleted", "message"],
+  properties: {
+    deleted: { type: "boolean", description: "Whether a design was deleted: false when the account has none with that id" },
+    message: { type: "string" }
+  }
+};
+
 /** A letter preview signed or unsigned without previewing again (#608 part 4). */
 export const setLetterSignatureInputSchema: JsonSchema = {
   type: "object",
@@ -1318,10 +1420,11 @@ export const setArrivalDateOutputSchema: JsonSchema = {
 
 export const setStationeryInputSchema: JsonSchema = {
   type: "object",
-  required: ["draftId", "stationery"],
+  required: ["draftId"],
   properties: {
     draftId: { type: "string", description: "The draftId from a letter preview" },
     stationery: { type: "string", enum: [...STATIONERY_THEMES], description: SET_STATIONERY_DESCRIPTION },
+    stationeryDesignId: stationeryInputSchemas.stationeryDesignId,
     monogram: stationeryInputSchemas.monogram,
     headline: stationeryInputSchemas.headline
   }

@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { query, transaction } from '../db/index.js';
 import type pg from 'pg';
 import { writeDiagnostic } from '../utils/diagnosticLog.js';
-import { stationeryOf, type Stationery } from '../render/stationery.js';
+import { CUSTOM_THEME, stationeryOf, type Stationery } from '../render/stationery.js';
 import { postcardFrontOf, type PostcardFront } from '../render/postcard.js';
 import { POSTCARD_FRONT_RENDERER_VERSION, RENDERER_VERSION, rendererVersionFor } from '../render/pdf.js';
 import { MAX_LETTER_PAGES } from '../render/geometry.js';
@@ -784,7 +784,8 @@ export async function setDraftStationery(
    * when absent. `drawnFrom`: the words the page was drawn from, as read.
    */
   change: {
-    stationery: Stationery;
+    /** With a saved design's id (#649), which the draft does not keep but the account remembers. */
+    stationery: Stationery & { designId?: string };
     previewHtml: string;
     pages?: number;
     /** The words, and the signature (#608) when the caller drew one, as read. */
@@ -813,12 +814,28 @@ export async function setDraftStationery(
        WHERE draft_id = $1`,
       [draftId, stationery ? JSON.stringify(stationery) : null, rendererVersion, change.previewHtml, change.pages ?? null]
     );
-    // Never on an erased account (rememberStationery).
-    await client.query('UPDATE users SET stationery_theme = $2 WHERE user_id = $1 AND erased_at IS NULL', [
-      userId,
-      change.stationery.theme
-    ]);
-    writeDiagnostic('info', 'draft.stationery_set', { theme: change.stationery.theme });
+    // The account's choice for its next preview: a theme, which forgets any
+    // remembered design, or a saved design (#649), which comes before the
+    // theme; never on an erased account (rememberStationery, rememberDesign).
+    const chosen = change.stationery;
+    if (chosen.theme !== CUSTOM_THEME) {
+      await client.query(
+        'UPDATE users SET stationery_theme = $2, stationery_design_id = NULL WHERE user_id = $1 AND erased_at IS NULL',
+        [userId, chosen.theme]
+      );
+    } else if (chosen.designId) {
+      // The account's row first, in a statement of its own: a design deleted
+      // meanwhile (its delete takes the account's row first) is then simply
+      // not found by the next statement, never a broken key.
+      await client.query('SELECT 1 FROM users WHERE user_id = $1 FOR UPDATE', [userId]);
+      await client.query(
+        `UPDATE users u SET stationery_design_id = d.design_id
+           FROM stationery_designs d
+          WHERE u.user_id = $1 AND u.erased_at IS NULL AND d.user_id = u.user_id AND d.design_id = $2`,
+        [userId, chosen.designId]
+      );
+    }
+    writeDiagnostic('info', 'draft.stationery_set', { theme: chosen.theme });
     return null;
   });
 }

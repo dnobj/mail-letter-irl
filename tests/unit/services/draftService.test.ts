@@ -1126,10 +1126,32 @@ describe('draftService stationery (#563)', () => {
       // Stored as the print reads it back: the theme and its slots, not why it was chosen.
       // No pages given: the draft keeps its own (#586).
       expect(update[1]).toEqual(['draft-1', JSON.stringify(BOTANICAL), 'pdf-2', PAGE, null]);
-      // Never on an erased account (#571 review round 3).
-      expect(remember[0]).toBe('UPDATE users SET stationery_theme = $2 WHERE user_id = $1 AND erased_at IS NULL');
+      // Never on an erased account (#571 review round 3); a theme forgets a remembered design (#649).
+      expect(remember[0]).toBe('UPDATE users SET stationery_theme = $2, stationery_design_id = NULL WHERE user_id = $1 AND erased_at IS NULL');
       expect(remember[1]).toEqual(['auth0|owner', 'botanical']);
       expect(client.query).toHaveBeenCalledTimes(5);
+    });
+
+    it("stores a saved design's copy without its id, and remembers the design, with the account's row locked first (#649)", async () => {
+      const client = inTransaction({ rows: [pending] }, { rows: [] }, { rows: [DRAWN] });
+      const design = { face: 'handwritten', ornament: 'sprig', ruled: true, tone: 'medium' };
+      const id = '3f2b8c1e-9a4d-4c7e-8b1f-2d6a5e9c0b7a';
+      const custom = { theme: 'custom', design, name: 'Garden', designId: id, dateLine: 'October 1, 2026', source: 'asked' };
+      await expect(
+        setDraftStationery('draft-1', 'auth0|owner', { stationery: custom as any, previewHtml: PAGE, drawnFrom: WORDS }, NOW)
+      ).resolves.toBeNull();
+      const [, , , update, lockAccount, remember] = client.query.mock.calls as Array<[string, unknown[]]>;
+      // The draft keeps its own copy, as the print reads it: no id, no source.
+      expect(update[1][1]).toBe(JSON.stringify({ theme: 'custom', design, name: 'Garden', dateLine: 'October 1, 2026' }));
+      expect(update[1][2]).toBe('pdf-2');
+      // The account's row in a statement of its own, then the design found afresh, as the account's own.
+      expect(lockAccount).toEqual(['SELECT 1 FROM users WHERE user_id = $1 FOR UPDATE', ['auth0|owner']]);
+      expect(remember[0]).toContain('UPDATE users u SET stationery_design_id = d.design_id');
+      expect(remember[0]).toContain('WHERE u.user_id = $1 AND u.erased_at IS NULL AND d.user_id = u.user_id AND d.design_id = $2');
+      expect(remember[1]).toEqual(['auth0|owner', id]);
+      // The theme the account remembered stays: the design comes before it.
+      expect(client.query.mock.calls.some(([sql]) => String(sql).includes('stationery_theme'))).toBe(false);
+      expect(client.query).toHaveBeenCalledTimes(6);
     });
 
     it('stores Classic as none, with pdf-1, and remembers Classic like any theme', async () => {

@@ -1,5 +1,5 @@
 import { LetterIrlServer } from "../server.js";
-import { servesPostcardSixByNineOnly, listedWidgets, withheldInputKeys } from "./registerTools.js";
+import { servesPostcardSixByNineOnly, servesStationeryThemeOnly, listedWidgets, withheldInputKeys } from "./registerTools.js";
 import { postcardSixByNineProperties } from "../schemas.js";
 import { DEFAULT_OAUTH_SCOPES } from "../auth/oauthConfig.js";
 import { buildServerInstructions } from "./serverInstructions.js";
@@ -18,11 +18,18 @@ import { clientProfileNamed } from "../auth/clientProfiles.js";
 function servedInputSchema(name: string, schema: unknown): unknown {
   const declared = (schema as { properties?: Record<string, unknown> } | undefined)?.properties;
   if (!declared) return schema;
-  const properties = servesPostcardSixByNineOnly(name) ? { ...declared, ...postcardSixByNineProperties } : declared;
+  let properties = servesPostcardSixByNineOnly(name) ? { ...declared, ...postcardSixByNineProperties } : declared;
+  // set_stationery as before saved designs (#649): a theme required, no stationeryDesignId.
+  const themeOnly = servesStationeryThemeOnly(name);
+  if (themeOnly) {
+    const { stationeryDesignId: _design, ...rest } = properties;
+    properties = rest;
+  }
   const withheld = withheldInputKeys(name);
   if (properties === declared && withheld.length === 0) return schema;
   const served = Object.fromEntries(Object.entries(properties).filter(([key]) => !withheld.includes(key)));
-  return { ...(schema as object), properties: served };
+  const required = (schema as { required?: string[] }).required ?? [];
+  return { ...(schema as object), properties: served, ...(themeOnly ? { required: [...required, "stationery"] } : {}) };
 }
 
 function getManifestUrls(publicBaseUrlOverride?: string) {

@@ -15,7 +15,13 @@ vi.mock('../../../src/services/draftService.js', async importOriginal => ({
   setDraftStationery: vi.fn()
 }));
 
+vi.mock('../../../src/services/stationeryDesignService.js', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../../src/services/stationeryDesignService.js')>()),
+  getDesign: vi.fn()
+}));
+
 import { getDraftForStationery, setDraftStationery, type DraftForStationery } from '../../../src/services/draftService.js';
+import { getDesign } from '../../../src/services/stationeryDesignService.js';
 import { setStationeryTool } from '../../../src/tools/setStationery.js';
 import { layoutLetterForPreview, withDisplayImage } from '../../../src/tools/letterHelpers.js';
 import { layoutGiftPage, renderPreviewSvg } from '../../../src/render/index.js';
@@ -405,5 +411,55 @@ describe('set_stationery and the words editor (#647)', () => {
   it('gives no fit without the words editor or room to write', async () => {
     vi.mocked(getDraftForStationery).mockResolvedValue(draft());
     expect(await run({ stationery: 'Botanical' })).not.toHaveProperty('pageFit');
+  });
+});
+
+describe('set_stationery with a saved design (#649)', () => {
+  const ID = '3f2b8c1e-9a4d-4c7e-8b1f-2d6a5e9c0b7a';
+  const DESIGN = { face: 'handwritten', ornament: 'sprig', ruled: true, tone: 'medium' } as const;
+  const SAVED = { designId: ID, name: 'Garden', design: DESIGN, createdAt: NOW.toISOString(), updatedAt: NOW.toISOString() };
+
+  beforeEach(() => {
+    vi.stubEnv('LETTER_IRL_CUSTOM_STATIONERY_ENABLED', 'true');
+    vi.mocked(getDesign).mockReset().mockResolvedValue(SAVED);
+    vi.mocked(getDraftForStationery).mockResolvedValue(draft());
+  });
+
+  it("draws the letter in the account's design, records it with its id for remembering, and says its name", async () => {
+    const output = await run({ stationeryDesignId: ` ${ID} ` });
+    expect(getDesign).toHaveBeenCalledWith('user-1', ID);
+    const change = written();
+    expect(change.stationery).toEqual({ theme: 'custom', design: DESIGN, name: 'Garden', designId: ID, dateLine: 'September 30, 2026', source: 'asked' });
+    expect(change.previewHtml).toContain('<body data-renderer="pdf-2">');
+    // The sprig in the design's grey.
+    expect(change.previewHtml).toContain('stroke="#888888"');
+    expect(output.stationery).toEqual(change.stationery);
+    expect(output.message).toBe(
+      'The letter is now on the saved stationery design "Garden", and the account remembers it for its next letter preview. Nothing has been sent.'
+    );
+  });
+
+  it("refuses a design that is not the account's, or one with a theme too, and writes nothing", async () => {
+    vi.mocked(getDesign).mockResolvedValue(null);
+    await expect(run({ stationeryDesignId: ID })).rejects.toThrow('That stationery design was not found.');
+    vi.mocked(getDesign).mockResolvedValue(SAVED);
+    await expect(run({ stationeryDesignId: ID, stationery: 'botanical' })).rejects.toThrow('Give stationery or stationeryDesignId, not both');
+    expect(setDraftStationery).not.toHaveBeenCalled();
+  });
+
+  it('names both ways when neither is given, while designs are offered, and the themes alone while not', async () => {
+    await expect(run({})).rejects.toMatchObject({
+      code: 'STATIONERY_MISSING',
+      message: "Name the stationery: classic, monogram, botanical, celebration, typewriter or handwritten, or a saved design's stationeryDesignId."
+    });
+    vi.stubEnv('LETTER_IRL_CUSTOM_STATIONERY_ENABLED', '');
+    await expect(run({})).rejects.toMatchObject({
+      code: 'STATIONERY_MISSING',
+      message: 'Name the stationery: classic, monogram, botanical, celebration, typewriter or handwritten.'
+    });
+    // And a stray design id, with no theme, is no stationery named.
+    await expect(run({ stationeryDesignId: ID })).rejects.toMatchObject({ code: 'STATIONERY_MISSING' });
+    expect(getDesign).not.toHaveBeenCalled();
+    expect(setDraftStationery).not.toHaveBeenCalled();
   });
 });

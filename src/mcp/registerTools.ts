@@ -38,6 +38,7 @@ import {
   getDraftStatusInputZ,
   setArrivalDateInputZ,
   setStationeryInputZ,
+  setStationeryThemeRequiredZ,
   setMailServiceInputZ,
   setLetterWordsInputZ,
   setPostcardStyleInputZ,
@@ -48,6 +49,9 @@ import {
   setSignatureInputZ,
   getSignatureInputZ,
   clearSignatureInputZ,
+  saveStationeryDesignInputZ,
+  listStationeryDesignsInputZ,
+  deleteStationeryDesignInputZ,
   setLetterSignatureInputZ,
   uploadPhotoChunkInputZ,
   submitFeatureRequestInputZ,
@@ -85,6 +89,9 @@ import {
   setSignatureOutputZ,
   getSignatureOutputZ,
   clearSignatureOutputZ,
+  saveStationeryDesignOutputZ,
+  listStationeryDesignsOutputZ,
+  deleteStationeryDesignOutputZ,
   setLetterSignatureOutputZ,
   uploadPhotoChunkOutputZ,
   submitFeatureRequestOutputZ,
@@ -121,6 +128,7 @@ import {
 import { inlineHostBridge } from "./widgetHost.js";
 import { isSendConfirmationEnabled } from "../config/sendConfirmation.js";
 import { isArriveByEnabled } from "../config/arriveBy.js";
+import { isCustomStationeryOffered } from "../config/customStationery.js";
 import { isStationeryOffered } from "../config/stationery.js";
 import { isSignaturesOffered } from "../config/signatures.js";
 import { isCertifiedMailOffered } from "../config/certifiedMail.js";
@@ -183,7 +191,9 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     // What became of an address request (#604).
     'get_address_request',
     // Whether a signature is saved (#608).
-    'get_signature'
+    'get_signature',
+    // The account's saved stationery designs (#649).
+    'list_stationery_designs'
   ];
 
   // Tools that call external APIs (PostGrid for validation or mail fulfillment)
@@ -221,7 +231,9 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     'cancel_scheduled_mail',  // A repeat answers as already cancelled (#535)
     'cancel_address_request', // A repeat answers as already closed (#604)
     'clear_signature',        // A repeat answers that none was saved (#608)
-    'set_letter_signature'    // The same choice twice changes nothing more (#608)
+    'set_letter_signature',   // The same choice twice changes nothing more (#608)
+    'save_stationery_design', // The same design twice changes nothing more (#649)
+    'delete_stationery_design' // A repeat answers that none was found (#649)
   ];
 
   // Destructive tools. OpenAI's app-review guidance asks for destructiveHint on
@@ -250,7 +262,10 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     'cancel_address_request',
     // A saved signature, replaced or removed, cannot be brought back (#608).
     'set_signature',
-    'clear_signature'
+    'clear_signature',
+    // A saved design, replaced or deleted, cannot be brought back (#649).
+    'save_stationery_design',
+    'delete_stationery_design'
   ];
 
   return {
@@ -880,6 +895,9 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   set_signature: setSignatureInputZ,
   get_signature: getSignatureInputZ,
   clear_signature: clearSignatureInputZ,
+  save_stationery_design: saveStationeryDesignInputZ,
+  list_stationery_designs: listStationeryDesignsInputZ,
+  delete_stationery_design: deleteStationeryDesignInputZ,
   set_letter_signature: setLetterSignatureInputZ,
   upload_photo_chunk: uploadPhotoChunkInputZ,
   // Feedback tools
@@ -929,6 +947,9 @@ const zodOutputSchemas: Record<ToolName, z.ZodObject<any>> = {
   set_signature: setSignatureOutputZ,
   get_signature: getSignatureOutputZ,
   clear_signature: clearSignatureOutputZ,
+  save_stationery_design: saveStationeryDesignOutputZ,
+  list_stationery_designs: listStationeryDesignsOutputZ,
+  delete_stationery_design: deleteStationeryDesignOutputZ,
   set_letter_signature: setLetterSignatureOutputZ,
   upload_photo_chunk: uploadPhotoChunkOutputZ,
   // Feedback tools
@@ -973,7 +994,11 @@ export function getZodInputShape(name: string) {
  */
 export function getServedInputSchema(name: string): z.ZodRawShape | z.AnyZodObject | undefined {
   const declared = getZodInputShape(name);
-  const shape = declared && servesPostcardSixByNineOnly(name) ? { ...declared, ...postcardSixByNineZ } : declared;
+  let shape = declared && servesPostcardSixByNineOnly(name) ? { ...declared, ...postcardSixByNineZ } : declared;
+  if (shape && servesStationeryThemeOnly(name)) {
+    const { stationeryDesignId: _design, ...rest } = shape;
+    shape = { ...rest, stationery: setStationeryThemeRequiredZ };
+  }
   const withheld = withheldInputKeys(name);
   if (!shape || withheld.length === 0) return shape;
   const served = Object.fromEntries(Object.entries(shape).filter(([key]) => !withheld.includes(key))) as z.ZodRawShape;
@@ -988,6 +1013,15 @@ export function getServedInputSchema(name: string): z.ZodRawShape | z.AnyZodObje
  */
 export function servesPostcardSixByNineOnly(name: string): boolean {
   return name === "quote_and_preview_postcard" && !isPostcardSizesOffered();
+}
+
+/**
+ * Whether this deployment serves set_stationery as it was before saved designs
+ * (#649): a theme required and no stationeryDesignId, while designs are not
+ * offered, so its served schema is exactly as it was until they are.
+ */
+export function servesStationeryThemeOnly(name: string): boolean {
+  return name === "set_stationery" && !isCustomStationeryOffered();
 }
 
 /** The letter previews' stationery arguments (#563). */
@@ -1013,6 +1047,9 @@ export function withheldInputKeys(name: string): string[] {
   const withheld: string[] = [];
   if (PREVIEW_TOOLS.has(name) && !isArriveByEnabled()) withheld.push("arriveBy");
   if (LETTER_PREVIEW_TOOLS.has(name) && !isStationeryOffered()) withheld.push(...STATIONERY_INPUT_KEYS);
+  // A saved design (#649), on the letter previews, while designs are not offered. set_stationery is
+  // served as before them instead (servesStationeryThemeOnly).
+  if (LETTER_PREVIEW_TOOLS.has(name) && !isCustomStationeryOffered()) withheld.push("stationeryDesignId");
   // The letter previews' signature (#608), while signatures are not offered.
   if (LETTER_PREVIEW_TOOLS.has(name) && !isSignaturesOffered()) withheld.push("signature");
   // The letter previews' mail service (#625), while certified mail is not offered.
@@ -1069,6 +1106,8 @@ export function partitionToolResult(
     signatureImage,
     // The services a letter card's Delivery tab offers (#648): the model changes one with set_mail_service.
     mailServices,
+    // The account's saved designs for a letter card's Style row (#649): the model lists them itself.
+    stationeryDesigns,
     ...modelFacingData
   } = result;
 
@@ -1110,6 +1149,7 @@ export function partitionToolResult(
       ...(pageFit !== undefined ? { pageFit } : {}),
       ...(signatureImage !== undefined ? { signatureImage } : {}),
       ...(mailServices !== undefined ? { mailServices } : {}),
+      ...(stationeryDesigns !== undefined ? { stationeryDesigns } : {}),
       ...(modelFacingData.generatedImageUrl !== undefined
         ? { generatedImageUrl: modelFacingData.generatedImageUrl }
         : {})
@@ -1604,12 +1644,16 @@ export function cardSwitches(toolName: string): Record<string, unknown> {
  * for Classic by default, or while stationery is not offered.
  */
 function stationerySentence(result: Record<string, unknown>): string {
-  const stationery = result.stationery as { theme?: unknown; source?: unknown } | undefined;
+  const stationery = result.stationery as { theme?: unknown; source?: unknown; name?: unknown } | undefined;
   if (typeof stationery?.theme !== "string") return "";
+  // A saved design (#649) is named by the name it was saved under.
+  const named = stationery.theme === "custom" && typeof stationery.name === "string"
+    ? `the saved design "${stationery.name}"`
+    : stationery.theme;
   if (stationery.source === "remembered") {
-    return ` Stationery: ${stationery.theme}, the account's last choice; stationery in the call or set_stationery changes it.`;
+    return ` Stationery: ${named}, the account's last choice; stationery in the call or set_stationery changes it.`;
   }
-  return stationery.source === "asked" ? ` Stationery: ${stationery.theme}.` : "";
+  return stationery.source === "asked" ? ` Stationery: ${named}.` : "";
 }
 
 /**
@@ -1947,6 +1991,11 @@ export function summarizeToolResult(
     case "set_letter_signature":
       // As for set_stationery: the tool's own sentence, with any change in pages (#608).
       return typeof result.message === "string" ? result.message : "The letter's signature was changed.";
+    case "save_stationery_design":
+    case "list_stationery_designs":
+    case "delete_stationery_design":
+      // The tool's own sentence (#649): the designs themselves are in its output.
+      return typeof result.message === "string" ? result.message : "The stationery designs were checked.";
     case "set_signature":
     case "get_signature":
     case "clear_signature":

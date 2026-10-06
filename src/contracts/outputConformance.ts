@@ -74,6 +74,9 @@ import type {
   setSignatureOutputZ,
   getSignatureOutputZ,
   clearSignatureOutputZ,
+  saveStationeryDesignOutputZ,
+  listStationeryDesignsOutputZ,
+  deleteStationeryDesignOutputZ,
   setLetterSignatureOutputZ
 } from "../zodSchemas.js";
 import type {
@@ -111,7 +114,10 @@ import type {
   setSignatureTool,
   getSignatureTool,
   clearSignatureTool,
-  setLetterSignatureTool
+  setLetterSignatureTool,
+  saveStationeryDesignTool,
+  listStationeryDesignsTool,
+  deleteStationeryDesignTool
 } from "../tools/index.js";
 
 // ============================================================================
@@ -160,7 +166,9 @@ type MetaPartitioned =
   // a saved signature's picture (#608)
   | "signatureImage"
   // the letter card's choice of service (#648)
-  | "mailServices";
+  | "mailServices"
+  // the letter card's saved designs (#649)
+  | "stationeryDesigns";
 
 type UndeclaredKeys<Output, Schema> = Exclude<keyof Output, keyof Schema | MetaPartitioned>;
 
@@ -308,4 +316,13 @@ export type ClearSignatureConforms = Conforms<
 >;
 export type SetLetterSignatureConforms = Conforms<
   BothDirections<z.infer<typeof setLetterSignatureOutputZ>, typeof setLetterSignatureTool>
+>;
+export type SaveStationeryDesignConforms = Conforms<
+  BothDirections<z.infer<typeof saveStationeryDesignOutputZ>, typeof saveStationeryDesignTool>
+>;
+export type ListStationeryDesignsConforms = Conforms<
+  BothDirections<z.infer<typeof listStationeryDesignsOutputZ>, typeof listStationeryDesignsTool>
+>;
+export type DeleteStationeryDesignConforms = Conforms<
+  BothDirections<z.infer<typeof deleteStationeryDesignOutputZ>, typeof deleteStationeryDesignTool>
 >;

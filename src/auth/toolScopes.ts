@@ -75,6 +75,11 @@ export const TOOL_SCOPES: Record<string, ProductScope> = {
   get_signature: "mail:read",
   clear_signature: "mail:draft",
   set_letter_signature: "mail:draft",
+  // Saved stationery designs (#649): saving and deleting one are drafting, as a
+  // signature's are; listing them is a read of the account's own data.
+  save_stationery_design: "mail:draft",
+  list_stationery_designs: "mail:read",
+  delete_stationery_design: "mail:draft",
   // Keeps a photo for the account's next preview (#474, phase 3): the upload
   // card's part of drafting, so it sits with the drafting tools.
   upload_photo_chunk: "mail:draft"

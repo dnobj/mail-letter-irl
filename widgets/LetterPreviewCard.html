@@ -123,7 +123,7 @@
       .signature-switch[aria-disabled=true]{cursor:default;opacity:.6}
       .signature-switch:focus-visible{outline:2px solid var(--tx);outline-offset:1px}
       .studio .signature-switch{padding:5px 11px}
-      .link-button{font:inherit;font-size:11.5px;background:none;border:none;padding:0;color:var(--mut);text-decoration:underline;cursor:pointer}
+      .link-button{font:inherit;font-size:11.5px;background:none;border:none;padding:0;color:var(--mut);text-decoration:underline;cursor:pointer;overflow-wrap:anywhere}
       .link-button[aria-pressed=true],.link-button:disabled{color:var(--tx);text-decoration:none;cursor:default}
       .note.alert{color:var(--er);background:var(--erbg);border-color:transparent}
       .checkout-link{text-decoration:none}
@@ -175,6 +175,8 @@
       .studio-tab:focus-visible,.studio-words:focus-visible{outline:2px solid var(--tx);outline-offset:1px}
       .studio-panel{display:flex;flex-direction:column;gap:10px}
       .studio-panel[hidden]{display:none}
+      .style-designs{display:contents}
+      .style-designs[hidden]{display:none}
       .studio-panel .info-row{padding:6px 0}
       .studio-panel .note,.studio-side > .note{margin-top:0}
       .studio #style-row,.studio #signature-row,.studio #service-row,.studio #arrives-row{flex-direction:column;align-items:stretch;gap:8px;border-bottom:0;padding:0}
@@ -249,6 +251,9 @@
               <button type="button" class="link-button" data-theme="celebration" aria-pressed="false">Celebration</button>
               <button type="button" class="link-button" data-theme="typewriter" aria-pressed="false">Typewriter</button>
               <button type="button" class="link-button" data-theme="handwritten" aria-pressed="false">Handwritten</button>
+              <!-- The person's saved designs (#649), one button each, named as they saved it; drawn by style.js
+                   from the preview's _meta.stationeryDesigns while designs are offered. -->
+              <span class="style-designs" id="style-designs" hidden></span>
             </span>
           </div>
           <!-- The person's saved signature on the letter (#608), while the
@@ -578,6 +583,11 @@
         host,
         row: document.getElementById("style-row"),
         buttons: Array.from(document.querySelectorAll("#style-row [data-theme]")),
+        // The person's saved designs (#649): their buttons go here, from the preview's _meta.
+        designsElement: document.getElementById("style-designs"),
+        designs() {
+          return currentMeta().stationeryDesigns;
+        },
         note: document.getElementById("style-note"),
         // The Signature switch (#608), beside the styles.
         signatureRow: document.getElementById("signature-row"),
@@ -726,8 +736,10 @@
       // The stationery the page is drawn in: the Style row's pressed theme,
       // or the preview's; null where stationery is not offered.
       function stationeryName(state) {
-        const pressed = document.querySelector('#style-row [data-theme][aria-pressed="true"]');
+        const pressed = document.querySelector('#style-row [data-theme][aria-pressed="true"], #style-row [data-design-id][aria-pressed="true"]');
         if (pressed) return pressed.textContent.trim();
+        // A saved design (#649) by the name it was saved under.
+        if (state.stationery?.theme === "custom") return typeof state.stationery.name === "string" && state.stationery.name ? state.stationery.name : null;
         const theme = state.stationery?.theme;
         return typeof theme === "string" && theme ? theme.charAt(0).toUpperCase() + theme.slice(1) : null;
       }

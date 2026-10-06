@@ -48,7 +48,8 @@ import {
   SIGNATURE_LINES,
   type Layout,
   type PageFit,
-  type Stationery
+  type Stationery,
+  type StationeryDesign
 } from "../render/index.js";
 import { getSendEligibility, type SendEligibility } from "../services/commerceService.js";
 import { isExtraService, isPackPayable, mailServiceOf, type MailOption } from "../config/products.js";
@@ -60,6 +61,8 @@ import type { CertifiedMailService, MailService } from "../services/types.js";
 import { giftLetterPageCopy } from "../services/giftCardRenderer.js";
 import { rememberedPrefix, type PreviewStationery } from "./stationeryInput.js";
 import { rememberStationery } from "../services/stationeryDefaultService.js";
+import { listDesigns, rememberDesign } from "../services/stationeryDesignService.js";
+import { isCustomStationeryOffered } from "../config/customStationery.js";
 import { previewSignatureOutput, rememberPreviewSignature, type PreviewSignature, type PreviewSignatureOutput } from "./signatureInput.js";
 import {
   previewArrivalWindow,
@@ -164,6 +167,11 @@ export interface LetterQuoteOutput {
    * offers, in order (#648). Card-only (_meta): the model changes the service with set_mail_service.
    */
   mailServices?: Array<'standard' | 'certified' | 'certified_return_receipt'>;
+  /**
+   * While saved designs are offered (#649): the account's designs, oldest first, for the card's Style row, each by
+   * its id, its name and its choices. Card-only (_meta): the model lists them with list_stationery_designs.
+   */
+  stationeryDesigns?: Array<{ designId: string; name: string; design: StationeryDesign }>;
 }
 
 // ============================================================================
@@ -1374,12 +1382,13 @@ export async function createLetterDraftAndBuildOutput(
     "Draft created for idempotent send"
   );
 
-  // A theme the call asked for, Classic included, is the account's choice
-  // for its next preview (#563). Only once the draft exists: a refused
-  // preview chose nothing. Not remembering never fails the preview.
+  // A theme the call asked for, Classic included, or a saved design (#649), is
+  // the account's choice for its next preview (#563). Only once the draft
+  // exists: a refused preview chose nothing. Not remembering never fails the preview.
   if (stationery?.source === "asked") {
     try {
-      await rememberStationery(context.user.userId, stationery.theme);
+      if (stationery.theme === CUSTOM_THEME) await rememberDesign(context.user.userId, stationery.designId);
+      else await rememberStationery(context.user.userId, stationery.theme);
     } catch (error) {
       context.logger.warn(
         { correlationId: context.correlationId, event: "quote.stationery_not_remembered", error: (error as Error).message },
@@ -1391,6 +1400,20 @@ export async function createLetterDraftAndBuildOutput(
   // A signature the call chose, on or off, is the account's choice for its
   // next preview (#608), once the draft exists, as stationery is.
   if (signature) await rememberPreviewSignature(signature, context);
+
+  // The account's designs for the card's Style row (#649), while designs are offered and the page is drawn in stationery.
+  // Only for the card's buttons, once the draft exists: not reading them never fails the preview.
+  let stationeryDesigns: LetterQuoteOutput['stationeryDesigns'];
+  if (stationery && isCustomStationeryOffered()) {
+    try {
+      stationeryDesigns = (await listDesigns(context.user.userId)).map(({ designId, name, design }) => ({ designId, name, design }));
+    } catch (error) {
+      context.logger.warn(
+        { correlationId: context.correlationId, event: "quote.stationery_designs_not_read", error: (error as Error).message },
+        "The account's stationery designs were not read for the card"
+      );
+    }
+  }
 
   // Build output
   const signatureSaid = previewSignatureOutput(signature, signed);
@@ -1411,6 +1434,7 @@ export async function createLetterDraftAndBuildOutput(
     // The choice of service on the card's Delivery tab (#648): only while certified mail is offered, and never for a gift
     // letter, which no certified service can be.
     ...(isCertifiedMailOffered() && !gift.isGift ? { mailServices: ["standard", "certified", "certified_return_receipt"] as Array<'standard' | 'certified' | 'certified_return_receipt'> } : {}),
+    ...(stationeryDesigns ? { stationeryDesigns } : {}),
     draftId: draftResult.draftId,
     draftExpiresAt: draftResult.expiresAt.toISOString(),
     layoutType,
