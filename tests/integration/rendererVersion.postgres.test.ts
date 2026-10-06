@@ -230,6 +230,21 @@ describePostgres('renderer version, stationery, pages and mail service (migratio
         expect((await pool.query('SELECT stationery FROM letter_drafts WHERE draft_id = $1', [drawn])).rows[0].stationery)
           .toEqual({ theme, dateLine: 'October 1, 2026' });
       }
+      // A saved design (#649, migration 054) is stored as the custom theme, with its own copy of the design and its name.
+      const CUSTOM = {
+        theme: 'custom',
+        design: { face: 'handwritten', ornament: 'sprig', ruled: true, tone: 'medium' },
+        name: 'Garden',
+        dateLine: 'October 1, 2026'
+      };
+      const designed = await drafts.createDraft({
+        ...base(userId),
+        bodyText: `Hello ${randomUUID()}`,
+        rendererVersion: 'pdf-2',
+        stationery: CUSTOM as never
+      });
+      expect((await pool.query('SELECT stationery, renderer_version FROM letter_drafts WHERE draft_id = $1', [designed.draftId])).rows[0])
+        .toEqual({ stationery: CUSTOM, renderer_version: 'pdf-2' });
       // Classic is no theme: never stored. Nor is JSON that names no theme.
       for (const stored of ['{"theme": "classic"}', '{}', '{"theme": null}', '"botanical"', '[]']) {
         await expect(pool.query(

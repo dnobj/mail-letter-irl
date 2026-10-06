@@ -704,6 +704,13 @@ describePostgres('account erasure', () => {
        VALUES ($1, decode('89504e470d0a1a0a0000000d49484452', 'hex'), 300, 90)`,
       [userId]
     );
+    // A saved stationery design (#649), which the account remembers: its name is the person's own words.
+    const design = await owner.query<{ design_id: string }>(
+      `INSERT INTO stationery_designs (user_id, name, face, ornament, ruled, tone)
+       VALUES ($1, 'Grandma Ruth', 'handwritten', 'sprig', true, 'medium') RETURNING design_id`,
+      [userId]
+    );
+    await owner.query(`UPDATE users SET stationery_design_id = $2 WHERE user_id = $1`, [userId, design.rows[0].design_id]);
 
     // A seed-code claim with its address, and two gift codes: one nobody
     // redeemed, and one another account did.
@@ -806,7 +813,7 @@ describePostgres('account erasure', () => {
 
     const account = await owner.query(
       `SELECT email, return_address, return_address_validated_at, erased_at, sends_blocked_at, sends_blocked_reason,
-              credits, credits_purchased, stationery_theme
+              credits, credits_purchased, stationery_theme, stationery_design_id
          FROM users WHERE user_id = $1`,
       [userId]
     );
@@ -814,6 +821,7 @@ describePostgres('account erasure', () => {
       return_address: null,
       return_address_validated_at: null,
       stationery_theme: null,
+      stationery_design_id: null,
       sends_blocked_reason: 'account_erased',
       credits: 4,
       credits_purchased: 10
@@ -858,7 +866,7 @@ describePostgres('account erasure', () => {
     expect(
       (await owner.query(`SELECT 1 FROM redacted_content_quarantine WHERE source_id IN ($1, $2)`, [delivered, boundDraft])).rowCount
     ).toBe(0);
-    for (const table of ['personal_access_tokens', 'recent_uploads', 'feature_requests', 'address_requests', 'user_signatures']) {
+    for (const table of ['personal_access_tokens', 'recent_uploads', 'feature_requests', 'address_requests', 'user_signatures', 'stationery_designs']) {
       expect((await owner.query(`SELECT 1 FROM ${table} WHERE user_id = $1`, [userId])).rowCount, table).toBe(0);
     }
     const redemption = await owner.query(`SELECT email_normalized FROM promo_redemptions WHERE user_id = $1`, [userId]);
@@ -929,6 +937,7 @@ describePostgres('account erasure', () => {
         featureRequestsDeleted: 1,
         addressRequestsDeleted: 1,
         signaturesDeleted: 1,
+        stationeryDesignsDeleted: 1,
         seedCodeEmailsCleared: 1,
         giftCodesDeleted: 1,
         descriptionsCleared: 2
