@@ -131,6 +131,7 @@ LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS=<days after it closes, or after its li
 # Signatures (#608, docs/tool-apis.md#signatures): a saved picture of the person's signature, and /api/signature for the
 # website. Offered only while LETTER_IRL_PRINT_RENDERER is pdf. API service only; production waits for the owner.
 LETTER_IRL_SIGNATURES_ENABLED=<true to list set_signature, get_signature, clear_signature and set_letter_signature; unset is off>
+LETTER_IRL_CUSTOM_STATIONERY_ENABLED=<true, with stationery offered, to list save_stationery_design, list_stationery_designs and delete_stationery_design and let the letter previews and set_stationery take stationeryDesignId (#649); unset is off>
 # The words editor (#647, docs/deployment.md): a letter's words changed in place on one page, without room to write.
 # Offered only while LETTER_IRL_PRINT_RENDERER is pdf; room to write turns it on by itself. API service only.
 LETTER_IRL_WORDS_EDITOR_ENABLED=<true to change a letter's words in place on one page; unset is off>

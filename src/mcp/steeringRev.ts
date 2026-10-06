@@ -190,4 +190,7 @@
 // r45: the words editor (#647): set_letter_words is listed with LETTER_IRL_WORDS_EDITOR_ENABLED alone, and its
 // description then says the letter is laid out on one page and words that do not fit are refused.
 // r46: the letter card's Mail choice (#648) calls set_mail_service, whose answer now gives the letter's pages above one.
-export const STEERING_COPY_REV = 46;
+// r47: saved stationery designs (#649): save_stationery_design, list_stationery_designs and delete_stationery_design, listed
+// with LETTER_IRL_CUSTOM_STATIONERY_ENABLED; the letter previews and set_stationery take stationeryDesignId, and their
+// outputs, and get_draft_status, can name the custom theme with its name and choices.
+export const STEERING_COPY_REV = 47;

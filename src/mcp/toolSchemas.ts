@@ -213,6 +213,19 @@ export const toolInputSchemas = {
     imageUrl: z.string().optional()
   }),
   get_signature: z.object({}).strict(),
+  // Saved stationery designs (#649)
+  save_stationery_design: z.object({
+    name: z.string(),
+    face: z.string(),
+    ornament: z.string(),
+    ruled: z.boolean(),
+    tone: z.string()
+  }),
+  list_stationery_designs: z.object({}).strict(),
+  delete_stationery_design: z.object({
+    designId: z.string(),
+    confirm: z.boolean()
+  }),
   clear_signature: z.object({
     confirm: z.boolean()
   }),

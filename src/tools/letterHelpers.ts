@@ -60,6 +60,7 @@ import type { CertifiedMailService, MailService } from "../services/types.js";
 import { giftLetterPageCopy } from "../services/giftCardRenderer.js";
 import { rememberedPrefix, type PreviewStationery } from "./stationeryInput.js";
 import { rememberStationery } from "../services/stationeryDefaultService.js";
+import { rememberDesign } from "../services/stationeryDesignService.js";
 import { previewSignatureOutput, rememberPreviewSignature, type PreviewSignature, type PreviewSignatureOutput } from "./signatureInput.js";
 import {
   previewArrivalWindow,
@@ -1374,12 +1375,13 @@ export async function createLetterDraftAndBuildOutput(
     "Draft created for idempotent send"
   );
 
-  // A theme the call asked for, Classic included, is the account's choice
-  // for its next preview (#563). Only once the draft exists: a refused
-  // preview chose nothing. Not remembering never fails the preview.
+  // A theme the call asked for, Classic included, or a saved design (#649), is
+  // the account's choice for its next preview (#563). Only once the draft
+  // exists: a refused preview chose nothing. Not remembering never fails the preview.
   if (stationery?.source === "asked") {
     try {
-      await rememberStationery(context.user.userId, stationery.theme);
+      if (stationery.theme === CUSTOM_THEME) await rememberDesign(context.user.userId, stationery.designId);
+      else await rememberStationery(context.user.userId, stationery.theme);
     } catch (error) {
       context.logger.warn(
         { correlationId: context.correlationId, event: "quote.stationery_not_remembered", error: (error as Error).message },

@@ -48,6 +48,9 @@ export type StationeryTheme = (typeof STATIONERY_THEMES)[number];
 /** The theme a saved design (#649) is drawn as: not one of STATIONERY_THEMES, which the previews offer by name. */
 export const CUSTOM_THEME = 'custom';
 
+/** What an output may say a letter is drawn in (#649): a built-in theme, or a saved design. */
+export const DRAWN_THEMES = [...STATIONERY_THEMES, CUSTOM_THEME] as const;
+
 /** A design's faces (#649): Classic's Tinos, Typewriter's Cousine and Handwritten's Caveat. */
 export const STATIONERY_FACES = ['serif', 'typewriter', 'handwritten'] as const;
 export type StationeryFace = (typeof STATIONERY_FACES)[number];
