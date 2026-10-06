@@ -109,6 +109,15 @@ describe('home scheduling and share configuration', () => {
     const home = await readLetterHome('owner');
     expect(home.websiteOrigin).toBe('https://dev-site.example');
     expect(new URL(home.drafts[0].confirmationUrl).origin).toBe(home.websiteOrigin);
+    // An origin, never the setting with its path.
+    vi.stubEnv('LETTER_IRL_WEBSITE_BASE_URL', 'https://dev-site.example/app');
+    expect((await readLetterHome('owner')).websiteOrigin).toBe('https://dev-site.example');
+  });
+
+  it('gives no website origin, and still reads the home, when the website setting is not a URL (#651)', async () => {
+    vi.mocked(query).mockResolvedValue({ rows: [] } as any);
+    vi.stubEnv('LETTER_IRL_WEBSITE_BASE_URL', 'site.example');
+    expect(await readLetterHome('owner')).toMatchObject({ drafts: [], orders: [], websiteOrigin: '' });
   });
 
   it('uses a configured plugin ID only when safe, and never invents one', async () => {

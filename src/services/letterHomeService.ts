@@ -31,7 +31,8 @@ const homeStatus = (status: string, scheduled: boolean): LetterStatus => {
       return scheduled ? "scheduled" : "pending";
     case "draft":
       return "pending";
-    // Held for a person to look at (a recovery hold, #389): "awaiting an update", as get_order_status says it.
+    // Held for an operator (a recovery hold, or a payment reversed or disputed while the letter was going out):
+    // "awaiting an update", as get_order_status says it.
     case "held":
       return "pending";
     case "processing":
@@ -142,7 +143,13 @@ export async function readLetterHome(userId: string) {
       ? `https://chatgpt.com/plugins/${encodeURIComponent(pluginId)}/app/open_letter_home`
       : undefined;
   // The website's origin, so the card opens a draft's confirmation link only there (#651).
-  const websiteOrigin = new URL(websiteBaseUrl()).origin;
+  // A setting that is not a URL gives no origin, so no draft link opens, rather than failing the whole home.
+  let websiteOrigin = "";
+  try {
+    websiteOrigin = new URL(websiteBaseUrl()).origin;
+  } catch {
+    websiteOrigin = "";
+  }
   return {
     drafts,
     orders,

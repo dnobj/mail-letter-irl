@@ -53,7 +53,10 @@ describe('LetterHomeCard', () => {
     const { dom, doc } = open({
       drafts: [
         draft('https://dev.example.test/confirm/draft-1'),
+        draft('https://Dev.Example.TEST:443/confirm/draft-2'),
         draft('https://evil.example/confirm/draft-1'),
+        draft('https://dev.example.test' + String.fromCharCode(92) + '@evil.example/confirm/draft-1'),
+        draft('https://dev.example.test@evil.example/confirm/draft-1'),
         draft('https://dev.example.test:8443/confirm/draft-1'),
         draft('http://dev.example.test/confirm/draft-1'),
         draft('https://dev.example.test/confirm/draft-1?next=https://evil.example'),
@@ -62,12 +65,16 @@ describe('LetterHomeCard', () => {
       ],
       orders: [
         usps('https://tools.usps.com/go/TrackConfirmAction?tLabels=9400111899223856928499'),
+        usps('https://tools.usps.com/go/TrackConfirmAction?tLabels=EJ123456789US'),
+        usps('https://Tools.USPS.com:443/go/TrackConfirmAction?tLabels=9400111899223856928400'),
         usps('https://tools.usps.com/go/TrackConfirmAction?tLabels=9400111899223856928499&redirect=https://evil.example'),
+        usps('https://tools.usps.com/go/TrackConfirmAction?tLabels=9400%2611189922'),
         usps('https://tools.usps.com/go/TrackConfirmAction?tLabels=1234567'),
         usps('https://tools.usps.com/go/TrackConfirmAction?tLabels=' + '9'.repeat(41)),
         usps('https://tools.usps.com/go/TrackConfirmAction?tLabels=9400-1118'),
         usps('https://tools.usps.com/go/TrackConfirmAction?tLabels=9400111899223856928499#x'),
         usps('https://tools.usps.com/go/TrackConfirmAction'),
+        usps('https://tools.usps.com/go/Other?tLabels=9400111899223856928499'),
         usps('https://tools.usps.com:8443/go/TrackConfirmAction?tLabels=9400111899223856928499')
       ],
       recipients: [], limit: 20, websiteOrigin: 'https://dev.example.test'
@@ -75,7 +82,10 @@ describe('LetterHomeCard', () => {
     const hrefs = [...doc.querySelectorAll('a[href]')].map(a => a.getAttribute('href'));
     expect(hrefs).toEqual([
       'https://dev.example.test/confirm/draft-1',
-      'https://tools.usps.com/go/TrackConfirmAction?tLabels=9400111899223856928499'
+      'https://dev.example.test/confirm/draft-2',
+      'https://tools.usps.com/go/TrackConfirmAction?tLabels=9400111899223856928499',
+      'https://tools.usps.com/go/TrackConfirmAction?tLabels=EJ123456789US',
+      'https://tools.usps.com/go/TrackConfirmAction?tLabels=9400111899223856928400'
     ]);
     dom.window.close();
   });

@@ -13,6 +13,7 @@ import { buildManifest } from '../../../src/mcp/manifest.js';
 import { getRequiredToolScopes } from '../../../src/auth/toolScopes.js';
 import { query } from '../../../src/db/index.js';
 import { openLetterHomeInputZ, openLetterHomeOutputZ } from '../../../src/zodSchemas.js';
+import { websiteBaseUrl } from '../../../src/config/sendConfirmation.js';
 import { openLetterHomeInputSchema, openLetterHomeOutputSchema } from '../../../src/schemas.js';
 import { toolInputSchemas } from '../../../src/mcp/toolSchemas.js';
 
@@ -58,7 +59,7 @@ describe('Letter IRL home on the MCP wire', () => {
     expect(tool.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false, openWorldHint: false });
     const result = await client.callTool({ name: 'open_letter_home', arguments: {} });
     expect(result.isError).toBeFalsy();
-    expect(result.structuredContent).toEqual({ drafts: [], orders: [], recipients: [], limit: 20, websiteOrigin: expect.any(String), appUrl: 'https://chatgpt.com/plugins/letter-irl-dev/app/open_letter_home' });
+    expect(result.structuredContent).toEqual({ drafts: [], orders: [], recipients: [], limit: 20, websiteOrigin: new URL(websiteBaseUrl()).origin, appUrl: 'https://chatgpt.com/plugins/letter-irl-dev/app/open_letter_home' });
     expect(vi.mocked(query).mock.calls.at(-1)?.[1]).toEqual(['auth0|owner', 20]);
     const uri = (tool._meta?.ui as { resourceUri: string }).resourceUri;
     const resource = await client.readResource({ uri });
@@ -92,5 +93,13 @@ describe('Letter IRL home on the MCP wire', () => {
     expect(openLetterHomeInputSchema.properties).toEqual({});
     expect(Object.keys(openLetterHomeOutputZ.shape).sort()).toEqual(Object.keys(openLetterHomeOutputSchema.properties as object).sort());
     expect(openLetterHomeInputZ.safeParse({ userId: 'other' }).success).toBe(false);
+  });
+});
+
+describe('the website origin on both schema layers (#651)', () => {
+  it('is a required string on the served schema and the manifest schema alike', () => {
+    expect(openLetterHomeOutputZ.shape.websiteOrigin.isOptional()).toBe(false);
+    expect((openLetterHomeOutputSchema as any).required).toContain('websiteOrigin');
+    expect((openLetterHomeOutputSchema as any).properties.websiteOrigin).toMatchObject({ type: 'string' });
   });
 });
