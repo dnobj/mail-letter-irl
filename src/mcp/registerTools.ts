@@ -1748,12 +1748,14 @@ function scheduledOrderSentence(result: Record<string, unknown>): string {
 }
 
 /**
- * Mail whose status is "delivered" only passed the printer's delivery estimate;
- * no carrier confirmed it. Said to the model wherever such a status reaches it,
- * or it says the mail was delivered (HOME-01).
+ * Mail whose status is "delivered" only passed the printer's estimated delivery
+ * date; no carrier confirmed it. Said in the text of every tool that gives a
+ * model an order's status (the output schemas' status descriptions say it for
+ * the models that read only the structured result), or the model says the mail
+ * was delivered (HOME-01).
  */
 export const DELIVERED_IS_ESTIMATED =
-  "A delivered status is the printer's estimate, not a carrier's confirmation: say delivery is estimated, never that the mail was delivered.";
+  "A delivered status means the printer's estimated delivery date has passed; no carrier confirmed it. Say its delivery is estimated, not that it was delivered.";
 
 function deliveredSentence(orders: unknown): string {
   return Array.isArray(orders) && orders.some(order => (order as { status?: unknown } | null)?.status === "delivered")
@@ -1864,7 +1866,7 @@ export function summarizeToolResult(
       let summary =
         status === "scheduled"
           ? `Letter ${order} is scheduled.${scheduledOrderSentence(result)}`
-          : `Letter ${order} queued with status ${status}.`;
+          : `Letter ${order} queued with status ${status}.${status === "delivered" ? ` ${DELIVERED_IS_ESTIMATED}` : ""}`;
       if (note) {
         summary += ` ${note}`;
       }
@@ -1927,7 +1929,7 @@ export function summarizeToolResult(
       let summary =
         status === "scheduled"
           ? `Postcard ${order} is scheduled.${scheduledOrderSentence(result)}`
-          : `Postcard ${order} queued with status ${status}.`;
+          : `Postcard ${order} queued with status ${status}.${status === "delivered" ? ` ${DELIVERED_IS_ESTIMATED}` : ""}`;
       if (note) {
         summary += ` ${note}`;
       }

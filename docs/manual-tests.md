@@ -3289,7 +3289,7 @@ linked PR before enabling Pay & Send.
 
 ## HOME-01: read-only Letter IRL home
 
-Status: Partly run on ChatGPT web, 2026-10-07 (results below). Steps 4 and parts of 5 and 7 remain for the owner. Automated MCP wire, query and DOM coverage accompany #639.
+Status: Partly run on ChatGPT web, 2026-10-07 (results below). Step 4, and parts of steps 2, 3, 5, 6 and 7, remain for the owner. Automated MCP wire, query and DOM coverage accompany #639.
 
 1. Deploy the feature to development and explicitly enable `LETTER_IRL_HOME_ENABLED` there. Keep production off. Refresh/reconnect the existing ChatGPT development connection.
 2. Owner: look for Letter IRL in ChatGPT's sidebar and open it. Record the app version, platform and whether the entry appears. If absent, record the limitation and try invoking `open_letter_home` in a development conversation. Do not claim sidebar acceptance.
@@ -3306,11 +3306,11 @@ External boundaries: this slice reads stored data only. No webhook, vendor dispa
 
 1. Pass. The home flag was on, and the connector's Refresh tools was pressed.
 2. **No sidebar entry on ChatGPT web**, before and after Refresh tools. Sidebar acceptance is not claimed. Opened instead with `@Letter IRL (DEV) v8 no-OIDC` and "Open my Letter IRL home."
-3. Pass: drew on the first call. Account state: 0 drafts, 17 mail items. The 20-item maximum and the empty mail list were not exercised.
-4. Not run: needs a second account. The result carries names, cities, statuses and ids only: no street address, words, image, signature, purchase or price.
-5. Partly: delivered mail read **Delivery estimated**, and gift mail was marked. **Found:** ChatGPT's reply under the card said the mail was "marked delivered", because the tool gave the model a bare `delivered`. Fixed in the PR that records this run. Scheduled, failed, cancelled, returned and certified mail were not on this account.
+3. Partly. It drew on the first call. Account state: 0 drafts, 17 mail items. The 20-item maximum and the empty mail list were not exercised.
+4. Not run: needs a second account. Per item, the result carried a recipient's name, city and state, mail type, status, date, gift marker and id, and a draft's review link. It carried no street address, words, image, signature, purchase or price.
+5. Partly: delivered mail read **Delivery estimated**, and gift mail was marked. **Found:** ChatGPT's reply under the card said the mail was "marked delivered", because the tool gave the model a bare `delivered`. Fixed with this record: every order status a model reads now says a delivered status is the printer's estimate. Scheduled, failed, cancelled, returned and certified mail were not on this account.
 6. Pass, with one gap: after Refresh, a new draft showed with a review link to `<development website>/confirm/<draftId>`. That page was the existing "Check your letter, then send it" page, signed in as the draft's own account. Send was not pressed. The browser already had that account's session, so the sign-in prompt itself was not seen.
-7. Partly. Refresh reached the server and drew a new draft. **Found:** a Refresh that works was silent; it now says "Your mail is up to date." Narrow width (375 px) fits, and dark theme follows ChatGPT. Not run: light theme (the account's ChatGPT is set to dark), a failed Refresh while the flag is on, keyboard focus, and a screen reader.
+7. Partly. Refresh reached the server and drew a new draft. **Found:** a Refresh that works was silent; it now says "Mail list refreshed." Narrow width (375 px) fits, and dark theme follows ChatGPT. Not run: light theme (the account's ChatGPT is set to dark), a failed Refresh while the flag is on, keyboard focus, and a screen reader.
 8. Pass. `LETTER_IRL_HOME_ENABLED=false` on development, redeployed:
    - a connection holding the cached tool got "Tool open_letter_home not found";
    - the open card's Refresh got a 400 from ChatGPT's `call_mcp` and showed "Refresh failed. The mail shown may be out of date; please try again.", with nothing new disclosed.

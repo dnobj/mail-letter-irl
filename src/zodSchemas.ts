@@ -337,9 +337,14 @@ export const getAccountBalanceInputZ = z.object({});
 // The profile ChatGPT records for a connected account (#424): an id that is
 // stable across refresh, reconnect and scope upgrades, and the address.
 export const getProfileInputZ = z.object({});
-/** "delivered" is the printer's estimate, never a carrier's scan: the home's status says so to the model (HOME-01). */
-export const HOME_ORDER_STATUS_DESCRIPTION =
-  "Where the mail stands: pending, scheduled, accepted, printing, in_transit, delivered, returned, failed or cancelled. delivered means the printer's delivery estimate has passed, not that a carrier confirmed it: say its delivery is estimated, never that it was delivered";
+/**
+ * "delivered" is the printer's estimate, never a carrier's scan: every order status a model reads says so (HOME-01),
+ * since some apps' models read only the structured result.
+ */
+const DELIVERED_STATUS_NOTE =
+  "delivered means the printer's estimated delivery date has passed; no carrier confirmed it, so say its delivery is estimated, not that it was delivered";
+export const HOME_ORDER_STATUS_DESCRIPTION = `Where the mail stands: pending, scheduled, accepted, printing, in_transit, delivered, returned, failed or cancelled. ${DELIVERED_STATUS_NOTE}`;
+export const ORDER_STATUS_DESCRIPTION = `The order's status. ${DELIVERED_STATUS_NOTE}`;
 export const openLetterHomeInputZ = z.object({}).strict();
 const homeRecipientZ = z.object({ name: z.string(), city: z.string(), state: z.string() });
 const homeItemZ = {
@@ -868,7 +873,7 @@ export const getPurchaseStatusOutputZ = z.object({
 
 export const getOrderStatusOutputZ = z.object({
   orderId: z.string(),
-  currentStatus: z.string(),
+  currentStatus: z.string().describe(ORDER_STATUS_DESCRIPTION),
   statusTimeline: z.array(statusTimelineEntryZ),
   recipientSummary: recipientSummaryZ,
   canSendFollowUp: z.boolean().optional(),
@@ -903,7 +908,7 @@ export const listOrdersOutputZ = z.object({
   orders: z.array(z.object({
     orderId: z.string(),
     recipient: recipientSummaryZ.optional(),
-    status: z.string().optional(),
+    status: z.string().optional().describe(ORDER_STATUS_DESCRIPTION),
     sentAt: z.string().optional(),
     arriveBy: z.string().optional().describe("Sent with an arrival date: the date it aims to arrive by, YYYY-MM-DD"),
     mailOn: z.string().optional().describe("Sent with an arrival date: the day it goes to the printer, YYYY-MM-DD"),

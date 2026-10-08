@@ -70,7 +70,7 @@
       function selectionKey(item, kind) { return kind + '/' + (kind === 'draft' ? item.draftId : item.orderId); }
       function shareContext(item, kind, quiet) {
         var revision = ++selectionRevision;
-        var text = item ? JSON.stringify({ source: 'Letter IRL selection', kind: kind, id: kind === 'draft' ? item.draftId : item.orderId, recipient: item.recipient, status: kind === 'draft' ? 'draft' : item.status, arriveBy: item.arriveBy, mailOn: item.mailOn, editable: kind === 'draft' }) : '';
+        var text = item ? JSON.stringify({ source: 'Letter IRL selection', kind: kind, id: kind === 'draft' ? item.draftId : item.orderId, recipient: item.recipient, status: kind === 'draft' ? 'draft' : item.status, statusLabel: kind === 'draft' ? undefined : labels[item.status], arriveBy: item.arriveBy, mailOn: item.mailOn, editable: kind === 'draft' }) : '';
         contextQueue = contextQueue.catch(function () {}).then(async function () {
           if (typeof host.updateModelContext !== 'function') {
             if (!quiet && revision === selectionRevision && item) notice.textContent = 'Selected here. This host cannot share the selection with the conversation; include the draft or order ID in your request.';
@@ -219,16 +219,20 @@
       refresh.addEventListener('click', async function () {
         if (busy || typeof host.callTool !== 'function') return;
         busy = true; refresh.disabled = true; notice.textContent = 'Refreshing your mail...';
+        var refreshed = false;
         try {
           var result = await withDeadline(host.callTool('open_letter_home', {}));
           if (result && result.isError) throw new Error('refused');
           if (!render(result && (result.structuredContent || result))) throw new Error('missing result');
           cancellationUnconfirmed = false;
-          // Said, so a refresh that worked is not silent (HOME-01); a route's own notice is kept.
-          if (!notice.textContent) notice.textContent = 'Your mail is up to date.';
+          refreshed = true;
         } catch (_) {
           notice.textContent = document.getElementById('home').hidden ? 'Unable to load your mail. Please try Refresh again.' : 'Refresh failed. The mail shown may be out of date; please try again.';
-        } finally { busy = false; sync(); }
+        } finally {
+          busy = false; sync();
+          // Said last, after any redraw, so a refresh that worked is not silent (HOME-01); a route's own notice is kept.
+          if (refreshed && !notice.textContent) notice.textContent = 'Mail list refreshed.';
+        }
       });
       document.getElementById('clear-selection').addEventListener('click', function () { unresolvedRoute = undefined; select(); });
       if (host) { host.onChange(sync); sync(); }

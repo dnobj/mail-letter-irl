@@ -124,11 +124,23 @@ describe('LetterHomeCard', () => {
     button.click(); await new Promise(resolve => setTimeout(resolve, 0));
     expect(doc.getElementById('orders')?.textContent).toContain('Cancelled; not mailed');
     // A refresh that worked says so, in the live status line (HOME-01).
-    expect(doc.getElementById('notice')?.textContent).toBe('Your mail is up to date.');
+    expect(doc.getElementById('notice')?.textContent).toBe('Mail list refreshed.');
     dom.window.close();
   });
 
-  it('says nothing of being up to date when the card first draws', () => {
+  it('says the refresh last, when the host also redraws the card with the new result', async () => {
+    const fresh = { drafts: [], orders: [order('in_transit')], recipients: [], limit: 20 };
+    let current: unknown = { drafts: [], orders: [], recipients: [], limit: 20 };
+    const callTool = vi.fn(async () => { current = fresh; return { structuredContent: fresh }; });
+    const { dom, doc } = open(undefined, { toolOutput: () => current, callTool });
+    (doc.getElementById('refresh') as HTMLButtonElement).click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(doc.getElementById('orders')?.textContent).toContain('In the mail');
+    expect(doc.getElementById('notice')?.textContent).toBe('Mail list refreshed.');
+    dom.window.close();
+  });
+
+  it('says nothing of a refresh when the card first draws', () => {
     const { dom, doc } = open();
     expect(doc.getElementById('notice')?.textContent).toBe('');
     dom.window.close();
@@ -147,7 +159,8 @@ describe('home extension interactions', () => {
     await tick();
     expect(update).toHaveBeenCalledTimes(3);
     expect(JSON.parse(update.mock.calls[0][0].content[0].text)).toMatchObject({ kind: 'draft', id: 'draft-1', editable: true });
-    expect(JSON.parse(update.mock.calls[1][0].content[0].text)).toMatchObject({ kind: 'order', id: 'order-1', status: 'scheduled', editable: false });
+    expect(JSON.parse(update.mock.calls[1][0].content[0].text)).toMatchObject({ kind: 'order', id: 'order-1', status: 'scheduled', statusLabel: 'Scheduled', editable: false });
+    expect(JSON.parse(update.mock.calls[0][0].content[0].text)).not.toHaveProperty('statusLabel');
     expect(update.mock.calls[2][0]).toEqual({ content: [] });
     expect(JSON.stringify(update.mock.calls)).not.toMatch(/addressLine|bodyText|confirmationUrl/);
     dom.window.close();
@@ -239,7 +252,14 @@ describe('home extension recovery regressions', () => {
     expect(doc.getElementById('selected-detail')?.textContent).toContain('order-1');
     dom.window.close();
   });
-  it('keeps a deep link still unavailable after a Refresh that works, rather than saying all is up to date (HOME-01)', async () => {
+  it("shares a delivered order's status in the card's words, as estimated (HOME-01 review)", async () => {
+    const update = vi.fn().mockResolvedValue({});
+    const { dom, doc } = open({ drafts: [], orders: [order('delivered')], recipients: [], limit: 20 }, { updateModelContext: update });
+    click(doc, 'Select order'); await tick();
+    expect(JSON.parse(update.mock.calls[0][0].content[0].text)).toMatchObject({ status: 'delivered', statusLabel: 'Delivery estimated' });
+    dom.window.close();
+  });
+  it('keeps a deep link still unavailable after a Refresh that works, rather than saying it refreshed (HOME-01)', async () => {
     const { dom, host, doc } = open({ drafts: [], orders: [], recipients: [], limit: 20 }, { hostContext: () => ({ 'openai/deepLink': { url: '/order/order-9' } }) });
     expect(doc.getElementById('notice')?.textContent).toBe('That selection is unavailable in your current mail list. Refresh to check again.');
     host.callTool.mockResolvedValue({ structuredContent: data });

@@ -43,6 +43,7 @@ import {
   ADDRESS_REQUEST_STATES,
   ADDRESS_REQUEST_STATUS_DESCRIPTION,
   HOME_ORDER_STATUS_DESCRIPTION,
+  ORDER_STATUS_DESCRIPTION,
   ADDRESS_REQUEST_RECIPIENT_DESCRIPTION,
   SIGNATURE_IMAGE_DESCRIPTION,
   SIGNATURE_IMAGE_URL_DESCRIPTION,
@@ -645,7 +646,7 @@ export const getOrderStatusOutputSchema: JsonSchema = {
   required: ["orderId", "currentStatus", "statusTimeline", "recipientSummary", "trackingSupport"],
   properties: {
     orderId: { type: "string" },
-    currentStatus: { type: "string" },
+    currentStatus: { type: "string", description: ORDER_STATUS_DESCRIPTION },
     statusTimeline: {
       type: "array",
       items: {
@@ -740,7 +741,7 @@ export const listOrdersOutputSchema: JsonSchema = {
               state: { type: "string" }
             }
           },
-          status: { type: "string" },
+          status: { type: "string", description: ORDER_STATUS_DESCRIPTION },
           sentAt: { type: "string" },
           arriveBy: { type: "string", description: "Sent with an arrival date: the date it aims to arrive by, YYYY-MM-DD" },
           mailOn: { type: "string", description: "Sent with an arrival date: the day it goes to the printer, YYYY-MM-DD" },
