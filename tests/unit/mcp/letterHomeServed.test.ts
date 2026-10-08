@@ -16,7 +16,8 @@ import { openLetterHomeInputZ, openLetterHomeOutputZ } from '../../../src/zodSch
 import { websiteBaseUrl } from '../../../src/config/sendConfirmation.js';
 import { openLetterHomeInputSchema, openLetterHomeOutputSchema } from '../../../src/schemas.js';
 import { toolInputSchemas } from '../../../src/mcp/toolSchemas.js';
-import { DELIVERED_IS_ESTIMATED, HOME_CARD_SHOWS_THE_LIST } from '../../../src/mcp/registerTools.js';
+import { DELIVERED_IS_ESTIMATED, HOME_CARD_SHOWS_THE_LIST, summarizeToolResult } from '../../../src/mcp/registerTools.js';
+import { CLIENT_PROFILE_NAMES, clientProfileNamed } from '../../../src/auth/clientProfiles.js';
 import { HOME_ORDER_STATUS_DESCRIPTION, ORDER_STATUS_DESCRIPTION } from '../../../src/zodSchemas.js';
 import { getOrderStatusOutputSchema, listOrdersOutputSchema } from '../../../src/schemas.js';
 import { STEERING_COPY_REV } from '../../../src/mcp/steeringRev.js';
@@ -143,7 +144,15 @@ describe('a delivered status said as an estimate (HOME-01)', () => {
     const moving = await client.callTool({ name: 'open_letter_home', arguments: {} });
     expect((moving.content as any)[0].text).toBe(`Letter IRL home: 0 active drafts and 1 recent mail items (up to 20 each). ${HOME_CARD_SHOWS_THE_LIST}`);
     // The card shows the lists; the model says only what needs the person (#662).
-    expect(HOME_CARD_SHOWS_THE_LIST).toMatch(/^The card shows these lists, so do not repeat them/);
+    expect(HOME_CARD_SHOWS_THE_LIST).toMatch(/^The card shows these lists, so do not repeat them unless the person asks/);
+    // Only where the app draws our cards; elsewhere the model needs the lists (#662 review).
+    const home = { drafts: [], orders: [], recipients: [], limit: 20 };
+    for (const name of CLIENT_PROFILE_NAMES) {
+      const profile = clientProfileNamed(name);
+      const text = summarizeToolResult('open_letter_home', home, profile);
+      expect(text.includes(HOME_CARD_SHOWS_THE_LIST), name).toBe(profile.rendersCards);
+    }
+    expect(summarizeToolResult('open_letter_home', home, clientProfileNamed('claude_code'))).toBe('Letter IRL home: 0 active drafts and 0 recent mail items (up to 20 each).');
     expect(STEERING_COPY_REV).toBeGreaterThanOrEqual(49);
   });
 });

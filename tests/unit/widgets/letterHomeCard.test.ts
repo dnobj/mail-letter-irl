@@ -424,11 +424,13 @@ describe('the compact home (#662)', () => {
     const { dom, doc } = open(big());
     expect(shown(doc, '#drafts > article')).toHaveLength(3);
     expect(button(doc, 'Show 2 more')).toBeDefined();
-    expect(shown(doc, '#orders > article').map(node => node.getAttribute('data-key'))).toEqual(['order/sched-1', 'order/fail-1', 'order/move-1', 'order/move-2']);
+    // Problems first, then scheduled, then the rest, newest first within each.
+    expect(shown(doc, '#orders > article').map(node => node.getAttribute('data-key'))).toEqual(['order/fail-1', 'order/sched-1', 'order/move-1', 'order/move-2']);
     expect(button(doc, 'Show 1 more')).toBeDefined();
     expect(group(doc).textContent).toBe('Delivery estimated (16) · Cancelled (1)');
     expect(group(doc).getAttribute('aria-expanded')).toBe('false');
     expect(group(doc).getAttribute('aria-controls')).toBe('settled-orders');
+    expect(group(doc).getAttribute('aria-label')).toBe('Settled mail: Delivery estimated (16), Cancelled (1)');
     expect((doc.getElementById('settled-orders') as HTMLElement).hidden).toBe(true);
     expect(doc.querySelectorAll('#settled-orders > article')).toHaveLength(17);
     expect((doc.getElementById('people') as HTMLElement).hidden).toBe(true);
@@ -524,6 +526,100 @@ describe('the compact home (#662)', () => {
     }
   });
 
+  it('puts what needs the person first: the draft expiring soonest, and older problems before newer mail on the way', () => {
+    const data = big();
+    data.drafts = [
+      { ...draft(1), expiresAt: '2026-10-20T00:00:00Z' }, { ...draft(2), expiresAt: '2026-10-19T00:00:00Z' },
+      { ...draft(3), expiresAt: '2026-10-21T00:00:00Z' }, { ...draft(4), expiresAt: '2026-10-09T00:00:00Z' }
+    ];
+    data.orders = [
+      order('in_transit', { orderId: 'new-1' }), order('accepted', { orderId: 'new-2' }), order('printing', { orderId: 'new-3' }),
+      order('pending', { orderId: 'held-1' }), order('in_transit', { orderId: 'new-4' }), order('scheduled', { orderId: 'sched-9' }),
+      order('returned', { orderId: 'back-1' }), order('delivered', { orderId: 'done-9' })
+    ];
+    const { dom, doc } = open(data);
+    expect(shown(doc, '#drafts > article').map(node => node.getAttribute('data-key'))).toEqual(['draft/draft-4', 'draft/draft-2', 'draft/draft-1']);
+    expect(shown(doc, '#orders > article').map(node => node.getAttribute('data-key'))).toEqual(['order/back-1', 'order/sched-9', 'order/held-1', 'order/new-1']);
+    dom.window.close();
+  });
+
+  it('says nothing is on the way when all mail is settled, and nothing when there is no mail', () => {
+    const settledOnly = { drafts: [], orders: [order('delivered', { orderId: 'done-1' })], recipients: [], limit: 20 };
+    const first = open(settledOnly);
+    expect(first.doc.getElementById('orders')?.firstElementChild?.textContent).toBe('Nothing on the way.');
+    first.dom.window.close();
+    const none = open({ drafts: [], orders: [], recipients: [], limit: 20 });
+    expect(none.doc.getElementById('orders')?.textContent).toBe('No recent mail to show.');
+    none.dom.window.close();
+  });
+
+  it('keeps an order cancelled here in view, open and focused, rather than folding it away', async () => {
+    const callTool = vi.fn(async () => ({ structuredContent: { orderId: 'sched-1', status: 'cancelled', message: 'Cancelled. The gift letter is back.' } }));
+    const { dom, doc } = open(big(), { callTool });
+    (doc.querySelector('[data-key="order/sched-1"] .row-main') as HTMLButtonElement).click();
+    button(doc, 'Cancel scheduled mail')!.click();
+    button(doc, 'Confirm cancellation')!.click();
+    await tick(); await tick();
+    expect(callTool).toHaveBeenCalledExactlyOnceWith('cancel_scheduled_mail', { orderId: 'sched-1', confirm: true });
+    const article = doc.querySelector('[data-key="order/sched-1"]') as HTMLElement;
+    expect(shown(doc, '[data-key="order/sched-1"]')).toHaveLength(1);
+    expect(article.closest('#settled-orders')).toBeNull();
+    expect(article.querySelector('.row-main .state')?.textContent).toBe('Cancelled; not mailed');
+    expect((article.querySelector('.row-details') as HTMLElement).hidden).toBe(false);
+    expect(doc.activeElement).toBe(article.querySelector('.row-main'));
+    expect(doc.getElementById('notice')?.textContent).toBe('Cancelled. The gift letter is back.');
+    dom.window.close();
+  });
+
+  it('keeps keyboard focus on the card: Show N more moves it to the first row it showed, Show less to See all', async () => {
+    const { dom, doc } = open(big());
+    const more = button(doc, 'Show 2 more')!;
+    more.focus();
+    more.click();
+    expect(doc.activeElement).toBe(doc.querySelector('[data-key="draft/draft-4"] .row-main'));
+    const seeAll = doc.getElementById('see-all') as HTMLButtonElement;
+    seeAll.focus();
+    seeAll.click(); await tick();
+    expect(doc.activeElement).toBe(seeAll);
+    seeAll.click(); await tick();
+    expect(doc.activeElement).toBe(seeAll);
+    dom.window.close();
+  });
+
+  it('moves focus to Refresh when the host goes fullscreen and hides the focused See all', async () => {
+    let mode = 'inline';
+    const { dom, doc, host } = open(big(), { displayMode: () => mode });
+    const seeAll = doc.getElementById('see-all') as HTMLButtonElement;
+    seeAll.focus();
+    mode = 'fullscreen';
+    host.onChange.mock.calls[0][0]();
+    expect(seeAll.hidden).toBe(true);
+    expect(doc.activeElement).toBe(doc.getElementById('refresh'));
+    dom.window.close();
+  });
+
+  it('waits for the host at most 5 seconds, disabled meanwhile, then opens everything in place', async () => {
+    vi.useFakeTimers();
+    try {
+      const requestDisplayMode = vi.fn(() => new Promise(() => {}));
+      const { dom, doc } = open(big(), { requestDisplayMode });
+      const seeAll = doc.getElementById('see-all') as HTMLButtonElement;
+      seeAll.click();
+      expect(seeAll.disabled).toBe(true);
+      seeAll.click();
+      expect(requestDisplayMode).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(4999);
+      expect(shown(doc, '#drafts > article')).toHaveLength(3);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(seeAll.disabled).toBe(false);
+      expect(shown(doc, '#drafts > article')).toHaveLength(5);
+      expect(seeAll.textContent).toBe('Show less');
+      dom.window.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('draws everything, with no See all, in a host that shows it in fullscreen', () => {
     const { dom, doc } = open(big(), { displayMode: () => 'fullscreen' });
     expect((doc.getElementById('see-all') as HTMLButtonElement).hidden).toBe(true);
@@ -536,8 +632,10 @@ describe('the compact home (#662)', () => {
   it('shows the row of a deep link into folded mail or past the first rows, then keeps the rest folded', () => {
     let route = '/order/done-5';
     const { dom, doc, host } = open(big(), { hostContext: () => ({ 'openai/deepLink': { url: route } }) });
-    expect((doc.getElementById('settled-orders') as HTMLElement).hidden).toBe(false);
+    // The selected delivered order joins the list in view; the rest of settled mail stays folded.
+    expect((doc.getElementById('settled-orders') as HTMLElement).hidden).toBe(true);
     expect(shown(doc, '[data-key="order/done-5"]')).toHaveLength(1);
+    expect(doc.querySelector('#settled-orders [data-key="order/done-5"]')).toBeNull();
     expect(doc.getElementById('selected-detail')?.textContent).toContain('done-5');
     route = '/draft/draft-5';
     host.onChange.mock.calls[0][0]();

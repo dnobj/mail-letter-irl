@@ -3327,7 +3327,7 @@ Needs HOME-01, a host advertising text model context, and development arrive-by 
 1. Select a draft in the home: the selected recipient and draft ID appear. Ask to revise it; verify the model uses this ID and rechecks draft status. Select an order; the model must not edit it as a draft. Clear selection and verify prior selection is removed.
 2. On the letter card, while home is enabled, the card tells the conversation which draft it shows by itself, with no button (#650): ask "make it warmer" without naming the draft and check the model acts on that draft. After the card sends the draft, the selection is taken back. With home off or unsupported context, nothing is shared and no button appears.
 3. Deep-link acceptance belongs to the subsequent #643 slice; this selection/cancellation PR does not expose share links or navigate from deep-link routes.
-4. Select scheduled prepaid or gift mail. Cancel must ask first; Keep scheduled changes nothing. Confirm cancellation once and verify the returned-funding sentence agrees with the tool response and balance. Refresh: the order is cancelled and Cancel is absent. A duplicate request must return no second refund.
+4. Select scheduled prepaid or gift mail. Cancel must ask first; Keep scheduled changes nothing. Confirm cancellation once and verify the returned-funding sentence agrees with the tool response and balance; the order stays in view, open, reading Cancelled; not mailed. Refresh: the order is cancelled and Cancel is absent. A duplicate request must return no second refund.
 5. Pay & Send, already printing, cancelled, and undated mail offer no Cancel. With arrive-by off, Cancel is absent. A `mail:read` token's cancellation must be refused by the existing scope guard.
 6. Simulate refusal/disconnection during cancellation: the home must report cancellation unconfirmed, retain the previous state, and request Refresh. It must not claim restored funding. Refresh and check the authoritative state before retrying.
 7. Disable host context support or refuse the update: selection stays visible locally and the notice says it was not shared. Check desktop and mobile layouts and dark mode.
@@ -3351,7 +3351,8 @@ Requires HOME-01/HOME-02 and the actual installed development plugin ID configur
 Needs the home on in development, an account with more than 4 mail items (testlirl02 has a scheduled letter and 16 delivered), and the connector refreshed after the deploy.
 
 1. ChatGPT web, inline: the home fits about one screen. Drafts and unsettled mail show as one line each, with at most 3 drafts and 4 mail items before "Show N more". Delivered and cancelled mail is folded behind one button such as "Delivery estimated (16)". No recipients section.
-2. ChatGPT's reply under the card does not repeat the list as a table; it mentions only what needs the person.
+2. ChatGPT's reply under the card does not repeat the list as a table; it mentions only what needs the person. Asked for the list, it gives it. In Claude Code (no card) the model lists the mail as before.
+   Failed or returned mail and the draft expiring soonest come first, even when older than the rest.
 3. Press a line: its details and actions open under it; press again to close. Open the folded group; press Refresh; the group and the open line stay open.
 4. Press See all: ChatGPT opens the full viewer with every item in two columns, recipients and no See all. Close it: the card is compact again. ChatGPT's own expand (side panel, then full viewer) draws the same.
 5. Claude web: the same compact card. See all opens Claude's fullscreen; closing it returns to compact.

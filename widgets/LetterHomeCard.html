@@ -62,6 +62,10 @@
       var lastMode;
       var openRows = {};
       var openLists = {};
+      var justCancelled;
+      var SEE_ALL_WAIT_MS = 5000;
+      // What needs the person first: problems, then mail waiting to go out, then the rest (the server sends newest first).
+      var NEED = { returned: 0, failed: 0, scheduled: 1, pending: 2 };
       var labels = {pending:'Awaiting an update',scheduled:'Scheduled',accepted:'Accepted by the printer',printing:'Being submitted or printed',in_transit:'In the mail',delivered:'Delivery estimated',returned:'Returned to sender',failed:'Did not go out',cancelled:'Cancelled; not mailed'};
       function el(tag, text, className) {
         var node = document.createElement(tag);
@@ -148,7 +152,10 @@
             if (result.status !== 'cancelled' || result.orderId !== order.orderId) throw new Error('missing result');
             cancellationUnconfirmed = false;
             order.status = 'cancelled'; order.cancellable = false;
+            // It stays in view, open, where the person was, rather than folding away with settled mail.
+            justCancelled = selectionKey(order, 'order'); openRows[justCancelled] = true;
             render(currentData);
+            focusRow(justCancelled);
             notice.textContent = result.message || 'Cancelled; not mailed. Refresh for the current account balance.';
           } catch (_) { notice.textContent = 'Cancellation was not confirmed. Refresh to check the order before trying again.'; }
           finally { busy = false; sync(); if (yes.isConnected) yes.disabled = cancellationUnconfirmed; }
@@ -191,6 +198,38 @@
         });
       }
       function displayMode() { return typeof host.displayMode === 'function' ? host.displayMode() : undefined; }
+      // A row that is never folded: the selection, and an order just cancelled here.
+      function kept(key) { return key === selected || key === justCancelled; }
+      function byNeed(orders) {
+        return orders.map(function (order, index) { return { order: order, index: index }; }).sort(function (a, b) {
+          var need = (NEED[a.order.status] === undefined ? 3 : NEED[a.order.status]) - (NEED[b.order.status] === undefined ? 3 : NEED[b.order.status]);
+          return need || a.index - b.index;
+        }).map(function (entry) { return entry.order; });
+      }
+      // Drafts that expire soonest first.
+      function bySoonest(drafts) {
+        return drafts.map(function (draft, index) { return { draft: draft, index: index, at: new Date(draft.expiresAt).getTime() }; }).sort(function (a, b) {
+          var at = (Number.isFinite(a.at) ? a.at : Infinity) - (Number.isFinite(b.at) ? b.at : Infinity);
+          return (Number.isFinite(at) && at) || a.index - b.index;
+        }).map(function (entry) { return entry.draft; });
+      }
+      function focusRow(key) {
+        Array.prototype.forEach.call(document.querySelectorAll('[data-key]'), function (article) {
+          if (article.getAttribute('data-key') === key) article.querySelector('.row-main').focus();
+        });
+      }
+      // Redraws, and keeps keyboard focus on the card when the control that had it went away or was hidden.
+      function redraw() {
+        var had = document.activeElement && document.activeElement !== document.body;
+        draw();
+        var now = document.activeElement;
+        if (had && (!now || now === document.body || now.closest('[hidden]'))) (seeAll.hidden ? refresh : seeAll).focus();
+      }
+      // A new mode from the host: back from fullscreen, the home is compact again.
+      function noteMode(mode) {
+        if (lastMode === 'fullscreen' && mode !== 'fullscreen') full = false;
+        lastMode = mode;
+      }
       function showsAll() { return full || displayMode() === 'fullscreen'; }
       function settled(order) { return order.status === 'delivered' || order.status === 'cancelled'; }
       function setOpen(article, open) {
@@ -217,13 +256,14 @@
         var hidden = [];
         entries.forEach(function (entry, index) {
           var article = entry.build(target);
-          if (index >= shown && !openLists[id] && entry.key !== selected) { article.hidden = true; hidden.push(article); }
+          if (index >= shown && !openLists[id] && !kept(entry.key)) { article.hidden = true; hidden.push(article); }
         });
         if (hidden.length) {
           var more = action(target, 'Show ' + hidden.length + ' more', function () {
             openLists[id] = true;
             hidden.forEach(function (article) { article.hidden = false; });
             more.remove();
+            hidden[0].querySelector('.row-main').focus();
           });
           more.className = 'more';
         }
@@ -233,7 +273,7 @@
         var folded = Array.prototype.some.call(document.querySelectorAll('[data-key]'), function (article) {
           return article.getAttribute('data-key') === key && (article.hidden || Boolean(article.closest('[hidden]')));
         });
-        if (folded) draw();
+        if (folded) redraw();
       }
       function draftEntry(draft) {
         var key = selectionKey(draft, 'draft');
@@ -282,25 +322,26 @@
         var data = currentData;
         if (!data) return;
         var all = showsAll();
-        document.getElementById('home').classList.toggle('full', all);
         seeAll.hidden = displayMode() === 'fullscreen';
         seeAll.textContent = full ? 'Show less' : 'See all';
         seeAll.setAttribute('aria-expanded', String(all));
         var drafts = document.getElementById('drafts');
         drafts.replaceChildren();
         if (!data.drafts.length) line(drafts, 'No active drafts. Ask in the conversation to start a letter or postcard.', 'muted');
-        rows(drafts, 'drafts', data.drafts.map(draftEntry), all ? Infinity : DRAFTS_SHOWN);
+        rows(drafts, 'drafts', bySoonest(data.drafts).map(draftEntry), all ? Infinity : DRAFTS_SHOWN);
         var orders = document.getElementById('orders');
         orders.replaceChildren();
         if (!data.orders.length) line(orders, 'No recent mail to show.', 'muted');
-        rows(orders, 'orders', data.orders.filter(function (order) { return !settled(order); }).map(orderEntry), all ? Infinity : ORDERS_SHOWN);
-        var done = data.orders.filter(settled);
+        var moving = byNeed(data.orders.filter(function (order) { return !settled(order) || kept(selectionKey(order, 'order')); }));
+        var done = data.orders.filter(function (order) { return settled(order) && !kept(selectionKey(order, 'order')); });
+        if (!moving.length && done.length) line(orders, 'Nothing on the way.', 'muted');
+        rows(orders, 'orders', moving.map(orderEntry), all ? Infinity : ORDERS_SHOWN);
         if (done.length) {
           var estimated = done.filter(function (order) { return order.status === 'delivered'; }).length;
           var counts = [];
           if (estimated) counts.push('Delivery estimated (' + estimated + ')');
           if (done.length - estimated) counts.push('Cancelled (' + (done.length - estimated) + ')');
-          var open = all || Boolean(openLists.settled) || done.some(function (order) { return selectionKey(order, 'order') === selected; });
+          var open = all || Boolean(openLists.settled);
           var group = el('div', '', 'settled'); group.id = 'settled-orders'; group.hidden = !open;
           var toggle = action(orders, counts.join(' · '), function () {
             var opening = group.hidden;
@@ -309,6 +350,7 @@
             if (opening) openLists.settled = true; else delete openLists.settled;
           });
           toggle.className = 'group'; toggle.setAttribute('aria-expanded', String(open)); toggle.setAttribute('aria-controls', group.id);
+          toggle.setAttribute('aria-label', 'Settled mail: ' + counts.join(', '));
           orders.appendChild(group);
           done.map(orderEntry).forEach(function (entry) { entry.build(group); });
         }
@@ -321,7 +363,7 @@
         if (!data || !Array.isArray(data.drafts) || !Array.isArray(data.orders) || !Array.isArray(data.recipients)) return false;
         currentData = data;
         document.getElementById('scope').textContent = 'Up to ' + data.limit + ' active drafts and ' + data.limit + ' recent mail items. Recipients come from that recent mail.';
-        lastMode = displayMode();
+        noteMode(displayMode());
         draw();
         document.getElementById('home').hidden = false;
         notice.textContent = '';
@@ -340,21 +382,27 @@
         if (output && output !== lastOutput) { lastOutput = output; render(output); }
         var mode = displayMode();
         if (mode !== lastMode) {
-          // Back from fullscreen: compact again.
-          if (lastMode === 'fullscreen') full = false;
-          lastMode = mode;
-          draw();
+          noteMode(mode);
+          redraw();
         }
         applyRoute();
       }
       seeAll.addEventListener('click', async function () {
-        if (full) { full = false; draw(); return; }
+        if (seeAll.disabled) return;
+        if (full) { full = false; redraw(); return; }
         if (typeof host.requestDisplayMode === 'function') {
-          try { await host.requestDisplayMode('fullscreen'); } catch (_) { /* Refused: opened in place below. */ }
+          seeAll.disabled = true;
+          try {
+            await new Promise(function (resolve, reject) {
+              var timer = setTimeout(function () { reject(new Error('No reply')); }, SEE_ALL_WAIT_MS);
+              Promise.resolve(host.requestDisplayMode('fullscreen')).then(function (value) { clearTimeout(timer); resolve(value); }, function (error) { clearTimeout(timer); reject(error); });
+            });
+          } catch (_) { /* Refused or no reply: opened in place below. */ }
+          finally { seeAll.disabled = false; }
         }
         // Whole now: in place where the host gave no fullscreen, and before a host that did says its new mode.
         full = displayMode() !== 'fullscreen';
-        draw();
+        redraw();
       });
       refresh.addEventListener('click', async function () {
         if (busy || typeof host.callTool !== 'function') return;
