@@ -140,6 +140,19 @@ describe('LetterHomeCard', () => {
     dom.window.close();
   });
 
+  it('never says it refreshed when the refresh failed, even when the host redraws the card (HOME-01 review round 2)', async () => {
+    const fresh = { drafts: [], orders: [order('in_transit')], recipients: [], limit: 20 };
+    let current: unknown = { drafts: [], orders: [], recipients: [], limit: 20 };
+    const callTool = vi.fn(async () => { current = fresh; return { isError: true }; });
+    const { dom, doc } = open(undefined, { toolOutput: () => current, callTool });
+    (doc.getElementById('refresh') as HTMLButtonElement).click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(callTool).toHaveBeenCalledTimes(1);
+    expect(doc.getElementById('orders')?.textContent).toContain('In the mail');
+    expect(doc.getElementById('notice')?.textContent).not.toBe('Mail list refreshed.');
+    dom.window.close();
+  });
+
   it('says nothing of a refresh when the card first draws', () => {
     const { dom, doc } = open();
     expect(doc.getElementById('notice')?.textContent).toBe('');
@@ -154,7 +167,8 @@ describe('home extension interactions', () => {
 
   it('shares only selected summaries, serializes changes, and replaces context on clear', async () => {
     const update = vi.fn().mockResolvedValue({});
-    const { dom, doc } = open(data(), { updateModelContext: update });
+    // A draft carrying a status a label exists for, so only the draft rule keeps statusLabel out of its selection.
+    const { dom, doc } = open(data({ drafts: [{ ...data().drafts[0], status: 'delivered' }] }), { updateModelContext: update });
     click(doc, 'Select draft'); click(doc, 'Select order'); click(doc, 'Clear selection');
     await tick();
     expect(update).toHaveBeenCalledTimes(3);
