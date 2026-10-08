@@ -42,6 +42,7 @@ import {
   ADDRESS_REQUEST_ID_DESCRIPTION,
   ADDRESS_REQUEST_STATES,
   ADDRESS_REQUEST_STATUS_DESCRIPTION,
+  HOME_ORDER_STATUS_DESCRIPTION,
   ADDRESS_REQUEST_RECIPIENT_DESCRIPTION,
   SIGNATURE_IMAGE_DESCRIPTION,
   SIGNATURE_IMAGE_URL_DESCRIPTION,
@@ -1840,7 +1841,8 @@ export const openLetterHomeOutputSchema: JsonSchema = {
             "type": "string"
           },
           "status": {
-            "type": "string"
+            "type": "string",
+            "description": HOME_ORDER_STATUS_DESCRIPTION
           },
           "mailService": {
             "type": "string",

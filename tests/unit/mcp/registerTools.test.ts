@@ -616,7 +616,9 @@ describe('cancel_scheduled_mail (#535)', () => {
     expect(summarizeToolResult('send_letter', { orderId: 'ltr-2', currentStatus: 'accepted', schedule, cancellable: false })).toBe(
       'Letter ltr-2 queued with status accepted.'
     );
-    expect(summarizeToolResult('get_order_status', { currentStatus: 'delivered' })).toBe('Latest order status: delivered.');
+    expect(summarizeToolResult('get_order_status', { currentStatus: 'delivered' })).toBe(
+      "Latest order status: delivered. A delivered status is the printer's estimate, not a carrier's confirmation: say delivery is estimated, never that the mail was delivered."
+    );
   }
 
   it("narrates the tool's own sentence", () => {

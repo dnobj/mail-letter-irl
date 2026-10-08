@@ -16,6 +16,8 @@ import { openLetterHomeInputZ, openLetterHomeOutputZ } from '../../../src/zodSch
 import { websiteBaseUrl } from '../../../src/config/sendConfirmation.js';
 import { openLetterHomeInputSchema, openLetterHomeOutputSchema } from '../../../src/schemas.js';
 import { toolInputSchemas } from '../../../src/mcp/toolSchemas.js';
+import { DELIVERED_IS_ESTIMATED } from '../../../src/mcp/registerTools.js';
+import { HOME_ORDER_STATUS_DESCRIPTION } from '../../../src/zodSchemas.js';
 
 const connections: Array<{ server: McpServer; client: Client }> = [];
 async function connect(scopes = ['mail:read'], userId = 'auth0|owner') {
@@ -93,6 +95,38 @@ describe('Letter IRL home on the MCP wire', () => {
     expect(openLetterHomeInputSchema.properties).toEqual({});
     expect(Object.keys(openLetterHomeOutputZ.shape).sort()).toEqual(Object.keys(openLetterHomeOutputSchema.properties as object).sort());
     expect(openLetterHomeInputZ.safeParse({ userId: 'other' }).success).toBe(false);
+  });
+});
+
+describe('a delivered status said as an estimate (HOME-01)', () => {
+  const row = (status: string, id: string) => ({
+    kind: 'order', id, name: 'Sam', city: 'New York', state: 'NY', status, created_at: new Date('2026-10-01T00:00:00Z'),
+    expires_at: null, arrive_by: null, mail_on: null, mail_type: 'letter', mail_service: 'standard',
+    carrier_tracking_number: null, is_gift_send: false, funding_type: null
+  });
+
+  it('describes the status on both schema layers, served in tools/list', async () => {
+    vi.stubEnv('LETTER_IRL_HOME_ENABLED', 'true');
+    const client = await connect();
+    const tool = (await client.listTools()).tools.find(tool => tool.name === 'open_letter_home')!;
+    const served = (tool.outputSchema?.properties?.orders as any).items.properties.status;
+    expect(served.description).toBe(HOME_ORDER_STATUS_DESCRIPTION);
+    expect(HOME_ORDER_STATUS_DESCRIPTION).toMatch(/not that a carrier confirmed it/);
+    expect((openLetterHomeOutputSchema as any).properties.orders.items.properties.status.description).toBe(HOME_ORDER_STATUS_DESCRIPTION);
+  });
+
+  it("tells the model a delivered status is the printer's estimate, and only when one is delivered", async () => {
+    vi.stubEnv('LETTER_IRL_HOME_ENABLED', 'true');
+    const client = await connect();
+    vi.mocked(query).mockResolvedValueOnce({ rows: [row('in_transit', 'o-1'), row('delivered', 'o-2')] } as any);
+    const delivered = await client.callTool({ name: 'open_letter_home', arguments: {} });
+    expect((delivered.structuredContent as any).orders.map((order: any) => order.status)).toEqual(['in_transit', 'delivered']);
+    expect((delivered.content as any)[0].text).toBe(
+      `Letter IRL home: 0 active drafts and 2 recent mail items (up to 20 each). ${DELIVERED_IS_ESTIMATED}`
+    );
+    vi.mocked(query).mockResolvedValueOnce({ rows: [row('in_transit', 'o-1')] } as any);
+    const moving = await client.callTool({ name: 'open_letter_home', arguments: {} });
+    expect((moving.content as any)[0].text).toBe('Letter IRL home: 0 active drafts and 1 recent mail items (up to 20 each).');
   });
 });
 

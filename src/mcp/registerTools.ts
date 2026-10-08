@@ -1747,6 +1747,20 @@ function scheduledOrderSentence(result: Record<string, unknown>): string {
   return ` ${scheduleSentence({ arriveBy, mailOn }, new Date())}${cancel}`;
 }
 
+/**
+ * Mail whose status is "delivered" only passed the printer's delivery estimate;
+ * no carrier confirmed it. Said to the model wherever such a status reaches it,
+ * or it says the mail was delivered (HOME-01).
+ */
+export const DELIVERED_IS_ESTIMATED =
+  "A delivered status is the printer's estimate, not a carrier's confirmation: say delivery is estimated, never that the mail was delivered.";
+
+function deliveredSentence(orders: unknown): string {
+  return Array.isArray(orders) && orders.some(order => (order as { status?: unknown } | null)?.status === "delivered")
+    ? ` ${DELIVERED_IS_ESTIMATED}`
+    : "";
+}
+
 /** An address on one line, as get_address_request's text gives it (#604). */
 function addressLine(address: Record<string, unknown>): string {
   const part = (key: string) => (typeof address[key] === "string" ? (address[key] as string).trim() : "");
@@ -1861,18 +1875,19 @@ export function summarizeToolResult(
       const summary =
         status === "scheduled"
           ? `Latest order status: scheduled.${scheduledOrderSentence(result)}`
-          : `Latest order status: ${status}.`;
+          : `Latest order status: ${status}.${status === "delivered" ? ` ${DELIVERED_IS_ESTIMATED}` : ""}`;
       // Certified mail (#625): its tracking number, or that there is none yet, in the words the output carries.
       return typeof result.certifiedNote === "string" ? `${summary} ${result.certifiedNote}` : summary;
     }
     case "open_letter_home":
-      return `Letter IRL home: ${(result.drafts as unknown[]).length} active drafts and ${(result.orders as unknown[]).length} recent mail items (up to ${result.limit} each).`;
+      return `Letter IRL home: ${(result.drafts as unknown[]).length} active drafts and ${(result.orders as unknown[]).length} recent mail items (up to ${result.limit} each).${deliveredSentence(result.orders)}`;
     case "list_orders": {
       const orders = result.orders as any[];
       const total = result.total ?? 0;
       const certified = (orders ?? []).filter(order => order?.mailService !== undefined).length;
       return (
         `Found ${orders?.length ?? 0} recent orders (${total} total).` +
+        deliveredSentence(orders) +
         (certified > 0
           ? ` ${certified} ${certified === 1 ? "is" : "are"} USPS Certified Mail: ${certified === 1 ? "its entry carries" : "their entries carry"} the USPS tracking number and link once there is one.`
           : "")

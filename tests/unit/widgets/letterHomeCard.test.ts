@@ -123,6 +123,14 @@ describe('LetterHomeCard', () => {
     expect(doc.getElementById('notice')?.textContent).toContain('Unable to load');
     button.click(); await new Promise(resolve => setTimeout(resolve, 0));
     expect(doc.getElementById('orders')?.textContent).toContain('Cancelled; not mailed');
+    // A refresh that worked says so, in the live status line (HOME-01).
+    expect(doc.getElementById('notice')?.textContent).toBe('Your mail is up to date.');
+    dom.window.close();
+  });
+
+  it('says nothing of being up to date when the card first draws', () => {
+    const { dom, doc } = open();
+    expect(doc.getElementById('notice')?.textContent).toBe('');
     dom.window.close();
   });
 });

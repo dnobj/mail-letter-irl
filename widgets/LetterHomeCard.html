@@ -14,7 +14,7 @@
     button:disabled{opacity:.6;cursor:wait}button:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
     .columns{display:grid;grid-template-columns:1fr 1fr;gap:32px;margin-top:32px}section{min-width:0}.item{border-top:1px solid var(--line);padding:16px 0}
     .name{font-weight:600}.detail{font-size:13px;color:var(--muted)}.tag{font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--accent)}
-    .people{margin-top:30px}.people .item{display:inline-block;margin-right:24px}#notice{color:var(--muted)}
+    .people{margin-top:30px}.people .item{display:inline-block;margin-right:24px}.item>a{display:inline-block;margin:0 16px 8px 0}#notice{color:var(--muted)}
     @media(max-width:640px){main{padding:20px}.columns{grid-template-columns:1fr;gap:24px}h1{font-size:30px}}
   </style>
 </head>
@@ -224,6 +224,8 @@
           if (result && result.isError) throw new Error('refused');
           if (!render(result && (result.structuredContent || result))) throw new Error('missing result');
           cancellationUnconfirmed = false;
+          // Said, so a refresh that worked is not silent (HOME-01); a route's own notice is kept.
+          if (!notice.textContent) notice.textContent = 'Your mail is up to date.';
         } catch (_) {
           notice.textContent = document.getElementById('home').hidden ? 'Unable to load your mail. Please try Refresh again.' : 'Refresh failed. The mail shown may be out of date; please try again.';
         } finally { busy = false; sync(); }

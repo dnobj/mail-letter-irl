@@ -337,6 +337,9 @@ export const getAccountBalanceInputZ = z.object({});
 // The profile ChatGPT records for a connected account (#424): an id that is
 // stable across refresh, reconnect and scope upgrades, and the address.
 export const getProfileInputZ = z.object({});
+/** "delivered" is the printer's estimate, never a carrier's scan: the home's status says so to the model (HOME-01). */
+export const HOME_ORDER_STATUS_DESCRIPTION =
+  "Where the mail stands: pending, scheduled, accepted, printing, in_transit, delivered, returned, failed or cancelled. delivered means the printer's delivery estimate has passed, not that a carrier confirmed it: say its delivery is estimated, never that it was delivered";
 export const openLetterHomeInputZ = z.object({}).strict();
 const homeRecipientZ = z.object({ name: z.string(), city: z.string(), state: z.string() });
 const homeItemZ = {
@@ -352,7 +355,7 @@ export const openLetterHomeOutputZ = z.object({
     ...homeItemZ, draftId: z.string(), expiresAt: z.string(), confirmationUrl: z.string()
   })),
   orders: z.array(z.object({
-    ...homeItemZ, orderId: z.string(), status: z.string(),
+    ...homeItemZ, orderId: z.string(), status: z.string().describe(HOME_ORDER_STATUS_DESCRIPTION),
     cancellable: z.boolean().optional(),
     mailService: z.enum(['certified', 'certified_return_receipt']).optional(),
     carrierTrackingNumber: z.string().optional(), carrierTrackingUrl: z.string().optional(),
