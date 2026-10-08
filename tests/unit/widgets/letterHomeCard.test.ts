@@ -239,6 +239,16 @@ describe('home extension recovery regressions', () => {
     expect(doc.getElementById('selected-detail')?.textContent).toContain('order-1');
     dom.window.close();
   });
+  it('keeps a deep link still unavailable after a Refresh that works, rather than saying all is up to date (HOME-01)', async () => {
+    const { dom, host, doc } = open({ drafts: [], orders: [], recipients: [], limit: 20 }, { hostContext: () => ({ 'openai/deepLink': { url: '/order/order-9' } }) });
+    expect(doc.getElementById('notice')?.textContent).toBe('That selection is unavailable in your current mail list. Refresh to check again.');
+    host.callTool.mockResolvedValue({ structuredContent: data });
+    click(doc, 'Refresh'); await tick();
+    expect(host.callTool).toHaveBeenCalledExactlyOnceWith('open_letter_home', {});
+    expect(doc.getElementById('orders')?.textContent).toContain('order-1');
+    expect(doc.getElementById('notice')?.textContent).toBe('That selection is unavailable in your current mail list. Refresh to check again.');
+    dom.window.close();
+  });
   it('rejects an error result even when it contains cancellation-shaped structured content', async () => {
     const { dom, host, doc } = open(structuredClone(data));
     host.callTool.mockResolvedValue({ isError: true, structuredContent: { orderId: 'order-1', status: 'cancelled', message: 'Wrong success' } });
