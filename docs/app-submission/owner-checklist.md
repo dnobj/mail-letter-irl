@@ -89,6 +89,7 @@ Remaining:
 - [ ] **Support URL.** The listing needs an HTTPS support page, not only an email:
       `https://letterirl.com/support` (website #45, live on letterirl.com once the website is
       promoted).
+- [ ] **Website URL.** Set the app's website to `https://letterirl.com`. In development ChatGPT's "Website" reads Unavailable, and the "Open in Letter IRL" button on an expanded card opened the connector's server URL instead (#662 probe, 2026-10-08). Check where that button goes once the listing has its website.
 - [ ] **Developer Identity.** The portal checks the verified developer, Objective Works, against the
       name, website, support, privacy and terms pages. Website #45 names Objective Works as the
       operator on the privacy, terms and support pages and in the footer, for the owner's sign-off.

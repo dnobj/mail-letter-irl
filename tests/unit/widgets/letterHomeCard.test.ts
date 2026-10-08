@@ -355,7 +355,7 @@ it('lets explicit selection supersede an initially unresolved route even when Re
   const first = { drafts: [], orders: [order('accepted', { orderId: 'order-2' })], recipients: [], limit: 20 };
   const { dom, host, doc } = open(first, { updateModelContext, hostContext: () => ({ 'openai/deepLink': { url: '/order/order-1' } }) });
   expect(doc.getElementById('selection')?.hidden).toBe(true);
-  (doc.querySelector('#orders button') as HTMLButtonElement).click();
+  (Array.from(doc.querySelectorAll('#orders button')).find(node => node.textContent === 'Select order') as HTMLButtonElement).click();
   host.callTool.mockResolvedValue({ structuredContent: { ...first, orders: [order('scheduled'), ...first.orders] } });
   (doc.getElementById('refresh') as HTMLButtonElement).click(); await new Promise(resolve => setTimeout(resolve, 0));
   expect(doc.getElementById('selected-detail')?.textContent).toContain('order-2');
@@ -400,4 +400,150 @@ it.each(['https://evil.example/plugins/dev/app/open_letter_home', 'https://user:
   const link = doc.getElementById('selection-link') as HTMLAnchorElement;
   expect(link.hidden).toBe(true); expect(link.getAttribute('href')).toBeNull();
   dom.window.close();
+});
+
+describe('the compact home (#662)', () => {
+  const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+  const draft = (n: number) => ({ draftId: `draft-${n}`, recipient: { name: `Draft person ${n}`, city: 'Chicago', state: 'IL' }, mailType: 'letter', expiresAt: '2026-10-20T00:00:00Z' });
+  const delivered = Array.from({ length: 16 }, (_, n) => order('delivered', { orderId: `done-${n}` }));
+  const big = () => ({
+    drafts: [1, 2, 3, 4, 5].map(draft),
+    orders: [
+      order('scheduled', { orderId: 'sched-1', cancellable: true, arriveBy: '2026-10-30', mailOn: '2026-10-21' }),
+      order('failed', { orderId: 'fail-1' }), order('in_transit', { orderId: 'move-1' }),
+      order('accepted', { orderId: 'move-2' }), order('printing', { orderId: 'move-3' }),
+      ...delivered, order('cancelled', { orderId: 'gone-1' })
+    ],
+    recipients: [{ name: 'Ruth', city: 'Chicago', state: 'IL' }], limit: 20
+  });
+  const shown = (doc: Document, selector: string) => Array.from(doc.querySelectorAll(selector)).filter(node => !(node as HTMLElement).hidden && !(node as HTMLElement).closest('[hidden]'));
+  const button = (doc: Document, label: string) => Array.from(doc.querySelectorAll('button')).find(node => node.textContent === label) as HTMLButtonElement | undefined;
+  const group = (doc: Document) => doc.querySelector('#orders > button.group') as HTMLButtonElement;
+
+  it('inline, shows a few rows of what needs the person, folds settled mail away, and keeps recipients for the whole view', () => {
+    const { dom, doc } = open(big());
+    expect(shown(doc, '#drafts > article')).toHaveLength(3);
+    expect(button(doc, 'Show 2 more')).toBeDefined();
+    expect(shown(doc, '#orders > article').map(node => node.getAttribute('data-key'))).toEqual(['order/sched-1', 'order/fail-1', 'order/move-1', 'order/move-2']);
+    expect(button(doc, 'Show 1 more')).toBeDefined();
+    expect(group(doc).textContent).toBe('Delivery estimated (16) · Cancelled (1)');
+    expect(group(doc).getAttribute('aria-expanded')).toBe('false');
+    expect(group(doc).getAttribute('aria-controls')).toBe('settled-orders');
+    expect((doc.getElementById('settled-orders') as HTMLElement).hidden).toBe(true);
+    expect(doc.querySelectorAll('#settled-orders > article')).toHaveLength(17);
+    expect((doc.getElementById('people') as HTMLElement).hidden).toBe(true);
+    const seeAll = doc.getElementById('see-all') as HTMLButtonElement;
+    expect(seeAll.hidden).toBe(false);
+    expect(seeAll.textContent).toBe('See all');
+    expect(seeAll.getAttribute('aria-expanded')).toBe('false');
+    dom.window.close();
+  });
+
+  it('draws each item as one line whose details and actions open under it', () => {
+    const { dom, doc } = open(big());
+    const article = doc.querySelector('[data-key="order/sched-1"]') as HTMLElement;
+    const main = article.querySelector('.row-main') as HTMLButtonElement;
+    const details = article.querySelector('.row-details') as HTMLElement;
+    expect(Array.from(main.children).map(node => node.textContent)).toEqual(['Letter', 'Ruth', 'Chicago, IL', 'Scheduled, arrives by Oct 30']);
+    expect(main.getAttribute('aria-controls')).toBe(details.id);
+    expect(details.hidden).toBe(true);
+    expect(main.getAttribute('aria-expanded')).toBe('false');
+    main.click();
+    expect(details.hidden).toBe(false);
+    expect(main.getAttribute('aria-expanded')).toBe('true');
+    expect(Array.from(details.querySelectorAll('button')).map(node => node.textContent)).toEqual(['Select order', 'Cancel scheduled mail']);
+    main.click();
+    expect(details.hidden).toBe(true);
+    const draftRow = doc.querySelector('[data-key="draft/draft-1"] .row-main') as HTMLElement;
+    expect(Array.from(draftRow.children).map(node => node.textContent)).toEqual(['Letter draft', 'Draft person 1', 'Chicago, IL', expect.stringMatching(/^Expires /)]);
+    dom.window.close();
+  });
+
+  it('opens more rows and the settled mail in place, and keeps them and an open row open across a refresh', async () => {
+    const { dom, doc, host } = open(big());
+    button(doc, 'Show 2 more')!.click();
+    expect(shown(doc, '#drafts > article')).toHaveLength(5);
+    expect(button(doc, 'Show 2 more')).toBeUndefined();
+    group(doc).click();
+    expect((doc.getElementById('settled-orders') as HTMLElement).hidden).toBe(false);
+    expect(group(doc).getAttribute('aria-expanded')).toBe('true');
+    (doc.querySelector('[data-key="order/done-3"] .row-main') as HTMLButtonElement).click();
+    host.callTool.mockResolvedValue({ structuredContent: big() });
+    (doc.getElementById('refresh') as HTMLButtonElement).click();
+    await tick();
+    expect(shown(doc, '#drafts > article')).toHaveLength(5);
+    expect((doc.getElementById('settled-orders') as HTMLElement).hidden).toBe(false);
+    expect((doc.querySelector('[data-key="order/done-3"] .row-details') as HTMLElement).hidden).toBe(false);
+    group(doc).click();
+    expect((doc.getElementById('settled-orders') as HTMLElement).hidden).toBe(true);
+    expect(group(doc).getAttribute('aria-expanded')).toBe('false');
+    dom.window.close();
+  });
+
+  it('See all asks the host for fullscreen and draws everything, and the home is compact again when the host returns inline', async () => {
+    let mode = 'inline';
+    const requestDisplayMode = vi.fn(async () => ({ mode: 'fullscreen' }));
+    const { dom, doc, host } = open(big(), { requestDisplayMode, displayMode: () => mode });
+    (doc.getElementById('see-all') as HTMLButtonElement).click();
+    await tick();
+    expect(requestDisplayMode).toHaveBeenCalledExactlyOnceWith('fullscreen');
+    expect(shown(doc, '#drafts > article')).toHaveLength(5);
+    expect(shown(doc, '#orders article')).toHaveLength(22);
+    expect((doc.getElementById('people') as HTMLElement).hidden).toBe(false);
+    expect(button(doc, 'Show 2 more')).toBeUndefined();
+    mode = 'fullscreen';
+    host.onChange.mock.calls[0][0]();
+    expect((doc.getElementById('see-all') as HTMLButtonElement).hidden).toBe(true);
+    expect(shown(doc, '#orders article')).toHaveLength(22);
+    mode = 'inline';
+    host.onChange.mock.calls[0][0]();
+    expect((doc.getElementById('see-all') as HTMLButtonElement).hidden).toBe(false);
+    expect((doc.getElementById('see-all') as HTMLButtonElement).textContent).toBe('See all');
+    expect(shown(doc, '#drafts > article')).toHaveLength(3);
+    expect((doc.getElementById('people') as HTMLElement).hidden).toBe(true);
+    dom.window.close();
+  });
+
+  it('See all opens everything in place where the host has no fullscreen, refuses it or gives another mode, and Show less folds it back', async () => {
+    const hosts = [{}, { requestDisplayMode: vi.fn(async () => { throw new Error('no'); }) }, { requestDisplayMode: vi.fn(async () => ({ mode: 'inline' })) }];
+    for (const extras of hosts) {
+      const { dom, doc } = open(big(), extras);
+      const seeAll = doc.getElementById('see-all') as HTMLButtonElement;
+      seeAll.click();
+      await tick();
+      expect(shown(doc, '#orders article')).toHaveLength(22);
+      expect((doc.getElementById('people') as HTMLElement).hidden).toBe(false);
+      expect(seeAll.textContent).toBe('Show less');
+      expect(seeAll.getAttribute('aria-expanded')).toBe('true');
+      seeAll.click();
+      await tick();
+      expect(shown(doc, '#drafts > article')).toHaveLength(3);
+      expect(seeAll.textContent).toBe('See all');
+      expect(seeAll.getAttribute('aria-expanded')).toBe('false');
+      dom.window.close();
+    }
+  });
+
+  it('draws everything, with no See all, in a host that shows it in fullscreen', () => {
+    const { dom, doc } = open(big(), { displayMode: () => 'fullscreen' });
+    expect((doc.getElementById('see-all') as HTMLButtonElement).hidden).toBe(true);
+    expect(shown(doc, '#drafts > article')).toHaveLength(5);
+    expect(shown(doc, '#orders article')).toHaveLength(22);
+    expect((doc.getElementById('people') as HTMLElement).hidden).toBe(false);
+    dom.window.close();
+  });
+
+  it('shows the row of a deep link into folded mail or past the first rows, then keeps the rest folded', () => {
+    let route = '/order/done-5';
+    const { dom, doc, host } = open(big(), { hostContext: () => ({ 'openai/deepLink': { url: route } }) });
+    expect((doc.getElementById('settled-orders') as HTMLElement).hidden).toBe(false);
+    expect(shown(doc, '[data-key="order/done-5"]')).toHaveLength(1);
+    expect(doc.getElementById('selected-detail')?.textContent).toContain('done-5');
+    route = '/draft/draft-5';
+    host.onChange.mock.calls[0][0]();
+    expect(shown(doc, '[data-key="draft/draft-5"]')).toHaveLength(1);
+    expect(shown(doc, '#drafts > article').map(node => node.getAttribute('data-key'))).toEqual(['draft/draft-1', 'draft/draft-2', 'draft/draft-3', 'draft/draft-5']);
+    expect((doc.getElementById('settled-orders') as HTMLElement).hidden).toBe(true);
+    dom.window.close();
+  });
 });

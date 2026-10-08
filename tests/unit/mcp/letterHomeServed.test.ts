@@ -16,7 +16,7 @@ import { openLetterHomeInputZ, openLetterHomeOutputZ } from '../../../src/zodSch
 import { websiteBaseUrl } from '../../../src/config/sendConfirmation.js';
 import { openLetterHomeInputSchema, openLetterHomeOutputSchema } from '../../../src/schemas.js';
 import { toolInputSchemas } from '../../../src/mcp/toolSchemas.js';
-import { DELIVERED_IS_ESTIMATED } from '../../../src/mcp/registerTools.js';
+import { DELIVERED_IS_ESTIMATED, HOME_CARD_SHOWS_THE_LIST } from '../../../src/mcp/registerTools.js';
 import { HOME_ORDER_STATUS_DESCRIPTION, ORDER_STATUS_DESCRIPTION } from '../../../src/zodSchemas.js';
 import { getOrderStatusOutputSchema, listOrdersOutputSchema } from '../../../src/schemas.js';
 import { STEERING_COPY_REV } from '../../../src/mcp/steeringRev.js';
@@ -137,11 +137,14 @@ describe('a delivered status said as an estimate (HOME-01)', () => {
     const delivered = await client.callTool({ name: 'open_letter_home', arguments: {} });
     expect((delivered.structuredContent as any).orders.map((order: any) => order.status)).toEqual(['in_transit', 'delivered']);
     expect((delivered.content as any)[0].text).toBe(
-      `Letter IRL home: 0 active drafts and 2 recent mail items (up to 20 each). ${DELIVERED_IS_ESTIMATED}`
+      `Letter IRL home: 0 active drafts and 2 recent mail items (up to 20 each). ${HOME_CARD_SHOWS_THE_LIST} ${DELIVERED_IS_ESTIMATED}`
     );
     vi.mocked(query).mockResolvedValueOnce({ rows: [row('in_transit', 'o-1')] } as any);
     const moving = await client.callTool({ name: 'open_letter_home', arguments: {} });
-    expect((moving.content as any)[0].text).toBe('Letter IRL home: 0 active drafts and 1 recent mail items (up to 20 each).');
+    expect((moving.content as any)[0].text).toBe(`Letter IRL home: 0 active drafts and 1 recent mail items (up to 20 each). ${HOME_CARD_SHOWS_THE_LIST}`);
+    // The card shows the lists; the model says only what needs the person (#662).
+    expect(HOME_CARD_SHOWS_THE_LIST).toMatch(/^The card shows these lists, so do not repeat them/);
+    expect(STEERING_COPY_REV).toBeGreaterThanOrEqual(49);
   });
 });
 

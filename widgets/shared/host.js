@@ -20,6 +20,12 @@
  *
  * What MCP Apps has no equivalent for: widgetState (a card keeps its state on
  * the server instead), ChatGPT's file store, and openExternal's redirectUrl.
+ *
+ * Display modes (#662): a card that can be shown larger lists its modes on
+ * its <html data-display-modes="inline fullscreen">. It then reads
+ * displayMode() and, where the host offers one of those modes, asks for it
+ * with requestDisplayMode(mode), which answers { mode } with the mode given.
+ * A card without the attribute declares none and is offered none.
  */
 (function () {
   "use strict";
@@ -38,6 +44,11 @@
     listeners.push(listener);
   }
 
+  var DISPLAY_MODES = ["inline", "fullscreen", "pip"];
+  var cardModes = (document.documentElement.getAttribute("data-display-modes") || "")
+    .split(/\s+/)
+    .filter(function (mode) { return DISPLAY_MODES.indexOf(mode) !== -1; });
+
   // ChatGPT: window.openai is there before the page runs.
   if (window.openai) {
     // Read at the moment of use, as the cards always read it: ChatGPT sets
@@ -54,6 +65,7 @@
       toolMeta: function () { return openai().toolResponseMetadata; },
       widgetState: function () { return openai().widgetState; },
       hostContext: function () { return openai().hostContext || {}; },
+      displayMode: function () { return openai().displayMode; },
       onChange: onChange
     };
     // Each capability exists only while window.openai has it, so a card's
@@ -73,6 +85,18 @@
     capability("sendMessage", "sendFollowUpMessage", function (api, text) { return api.sendFollowUpMessage({ prompt: text }); });
     capability("setWidgetState", "setWidgetState", function (api, value) { return api.setWidgetState(value); });
     capability("updateModelContext", "updateModelContext", function (api, value) { return api.updateModelContext(value); });
+    // Only for a card that lists the mode it asks for (#662).
+    Object.defineProperty(chatgpt, "requestDisplayMode", {
+      enumerable: true,
+      get: function () {
+        var api = openai();
+        if (typeof api.requestDisplayMode !== "function" || cardModes.length < 2) return undefined;
+        return function (mode) {
+          if (cardModes.indexOf(mode) === -1) return Promise.reject(new Error("This card does not offer " + mode));
+          return api.requestDisplayMode({ mode: mode });
+        };
+      }
+    });
     // ChatGPT's file store: no MCP Apps equivalent (#474).
     capability("uploadFile", "uploadFile", function (api, file) { return api.uploadFile(file); });
     capability("selectFiles", "selectFiles", function (api) { return api.selectFiles(); });
@@ -182,6 +206,7 @@
     toolMeta: function () { return state.toolMeta; },
     widgetState: function () { return null; },
     hostContext: function () { return state.hostContext; },
+    displayMode: function () { return state.hostContext.displayMode; },
     callTool: function (name, args) {
       return request("tools/call", { name: name, arguments: args || {} });
     },
@@ -191,6 +216,22 @@
     },
     onChange: onChange
   };
+
+  // A mode the card lists and the host offers, besides inline (#662).
+  function offeredModes() {
+    var host = state.hostContext.availableDisplayModes;
+    if (!Array.isArray(host)) return [];
+    return cardModes.filter(function (mode) { return mode !== "inline" && host.indexOf(mode) !== -1; });
+  }
+  Object.defineProperty(window.letterIrlHost, "requestDisplayMode", {
+    get: function () {
+      if (offeredModes().length === 0) return undefined;
+      return function (mode) {
+        if (mode !== "inline" && offeredModes().indexOf(mode) === -1) return Promise.reject(new Error("The host does not offer " + mode));
+        return request("ui/request-display-mode", { mode: mode });
+      };
+    }
+  });
 
   Object.defineProperty(window.letterIrlHost, "updateModelContext", {
     get: function () {
@@ -203,7 +244,7 @@
 
   request("ui/initialize", {
     appInfo: { name: "letter-irl-card", version: "1.0.0" },
-    appCapabilities: {},
+    appCapabilities: cardModes.length > 0 ? { availableDisplayModes: cardModes } : {},
     protocolVersion: "2026-01-26"
   }).then(
     function (result) {

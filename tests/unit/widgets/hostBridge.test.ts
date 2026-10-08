@@ -398,3 +398,68 @@ describe('model context bridge', () => {
     expect(mounted.host().updateModelContext).toBeUndefined(); mounted.window.close();
   });
 });
+
+describe('display modes (#662)', () => {
+  const modesPage = `<!doctype html><html data-display-modes="inline fullscreen bogus"><body><script>${BRIDGE}</script></body></html>`;
+  function inChatGpt(page: string, openai: Record<string, unknown>) {
+    const dom = new JSDOM(page, { runScripts: 'dangerously', beforeParse(window) { (window as any).openai = openai; } });
+    return dom.window as any;
+  }
+
+  it('in ChatGPT, reads displayMode afresh and asks with { mode } only for a mode the card lists', async () => {
+    const asked: unknown[] = [];
+    const openai: Record<string, unknown> = { displayMode: 'inline', requestDisplayMode: async (arg: unknown) => { asked.push(arg); return { mode: 'fullscreen' }; } };
+    const window = inChatGpt(modesPage, openai);
+    const host = window.letterIrlHost;
+    expect(host.displayMode()).toBe('inline');
+    openai.displayMode = 'fullscreen';
+    expect(host.displayMode()).toBe('fullscreen');
+    await expect(host.requestDisplayMode('fullscreen')).resolves.toEqual({ mode: 'fullscreen' });
+    expect(asked).toEqual([{ mode: 'fullscreen' }]);
+    await expect(host.requestDisplayMode('pip')).rejects.toThrow();
+    expect(asked).toHaveLength(1);
+    window.close();
+  });
+
+  it('in ChatGPT, offers no mode change to a card that lists none, or where ChatGPT has none', () => {
+    const plain = inChatGpt(bridgePage(), { requestDisplayMode: async () => ({ mode: 'fullscreen' }) });
+    expect(plain.letterIrlHost.requestDisplayMode).toBeUndefined();
+    plain.close();
+    const none = inChatGpt(modesPage, {});
+    expect(none.letterIrlHost.requestDisplayMode).toBeUndefined();
+    none.close();
+  });
+
+  it('in an MCP Apps host, declares the listed modes and asks with ui/request-display-mode only for one the host offers', async () => {
+    const mounted = mountInMcpHost(modesPage);
+    expect(mounted.lastRequest('ui/initialize')!.params.appCapabilities).toEqual({ availableDisplayModes: ['inline', 'fullscreen'] });
+    expect(mounted.host().requestDisplayMode).toBeUndefined();
+    initialize(mounted, { displayMode: 'inline', availableDisplayModes: ['inline', 'fullscreen'] });
+    await flush();
+    expect(mounted.host().displayMode()).toBe('inline');
+    const asked = mounted.host().requestDisplayMode('fullscreen');
+    const request = mounted.lastRequest('ui/request-display-mode')!;
+    expect(request.params).toEqual({ mode: 'fullscreen' });
+    mounted.deliver({ id: request.id, result: { mode: 'fullscreen' } });
+    await expect(asked).resolves.toEqual({ mode: 'fullscreen' });
+    mounted.deliver({ method: 'ui/notifications/host-context-changed', params: { displayMode: 'fullscreen' } });
+    expect(mounted.host().displayMode()).toBe('fullscreen');
+    await expect(mounted.host().requestDisplayMode('pip')).rejects.toThrow();
+    expect(mounted.sent.filter(message => message.method === 'ui/request-display-mode')).toHaveLength(1);
+    mounted.window.close();
+  });
+
+  it('in an MCP Apps host, offers nothing where the host has only inline, and declares nothing for a card that lists none', async () => {
+    const inlineOnly = mountInMcpHost(modesPage);
+    initialize(inlineOnly, { availableDisplayModes: ['inline'] });
+    await flush();
+    expect(inlineOnly.host().requestDisplayMode).toBeUndefined();
+    inlineOnly.window.close();
+    const plain = mountInMcpHost(bridgePage());
+    expect(plain.lastRequest('ui/initialize')!.params.appCapabilities).toEqual({});
+    initialize(plain, { availableDisplayModes: ['inline', 'fullscreen'] });
+    await flush();
+    expect(plain.host().requestDisplayMode).toBeUndefined();
+    plain.window.close();
+  });
+});

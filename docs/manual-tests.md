@@ -3345,3 +3345,16 @@ Requires HOME-01/HOME-02 and the actual installed development plugin ID configur
 5. After an unresolved deep link, select a visible item (or clear) before Refresh. Even if the original target now appears, the explicit newer choice must take precedence. A genuinely new host route may navigate again.
 6. Unset the plugin ID: no share link is offered. Unsafe IDs or URLs cannot produce links. Select draft/order must remain usable locally and unsupported model context must be reported.
 7. Test dark mode and narrow layout. No send, edit, payment or cancellation occurs from navigating a deep link.
+
+### HOME-04: the compact home and See all (#662)
+
+Needs the home on in development, an account with more than 4 mail items (testlirl02 has a scheduled letter and 16 delivered), and the connector refreshed after the deploy.
+
+1. ChatGPT web, inline: the home fits about one screen. Drafts and unsettled mail show as one line each, with at most 3 drafts and 4 mail items before "Show N more". Delivered and cancelled mail is folded behind one button such as "Delivery estimated (16)". No recipients section.
+2. ChatGPT's reply under the card does not repeat the list as a table; it mentions only what needs the person.
+3. Press a line: its details and actions open under it; press again to close. Open the folded group; press Refresh; the group and the open line stay open.
+4. Press See all: ChatGPT opens the full viewer with every item in two columns, recipients and no See all. Close it: the card is compact again. ChatGPT's own expand (side panel, then full viewer) draws the same.
+5. Claude web: the same compact card. See all opens Claude's fullscreen; closing it returns to compact.
+6. VS Code (or any host without fullscreen): See all opens everything in place and reads "Show less"; pressing it folds it back.
+7. A deep link (HOME-03) to delivered mail opens the folded group to show its line.
+8. Phone width (ChatGPT Android): no sideways scroll; the state wraps under the name. Dark and light themes.
