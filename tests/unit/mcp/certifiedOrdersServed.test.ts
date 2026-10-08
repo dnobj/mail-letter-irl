@@ -16,7 +16,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createMcpServer } from '../../../src/mcp/httpServer.js';
 import { buildManifest } from '../../../src/mcp/manifest.js';
-import { summarizeToolResult } from '../../../src/mcp/registerTools.js';
+import { DELIVERED_IS_ESTIMATED, summarizeToolResult } from '../../../src/mcp/registerTools.js';
 import type { ClientProfile } from '../../../src/auth/clientProfiles.js';
 import { LetterIrlServer } from '../../../src/server.js';
 import { STEERING_COPY_REV } from '../../../src/mcp/steeringRev.js';
@@ -135,6 +135,10 @@ describe("the order tools' certified output (#625)", () => {
         certifiedNote: 'Sent as USPS Certified Mail. X.'
       })
     ).toMatch(/^Latest order status: scheduled\. .* Sent as USPS Certified Mail\. X\.$/);
+    // Delivered is the printer's estimate, said before the certified note (HOME-01).
+    expect(summarizeToolResult('get_order_status', { currentStatus: 'delivered', certifiedNote: 'Sent as USPS Certified Mail. X.' })).toBe(
+      `Latest order status: delivered. ${DELIVERED_IS_ESTIMATED} Sent as USPS Certified Mail. X.`
+    );
   });
 
   it('counts the certified orders in a list, and says where their numbers are', () => {
@@ -148,6 +152,11 @@ describe("the order tools' certified output (#625)", () => {
       'Found 1 recent orders (1 total). 1 is USPS Certified Mail: its entry carries the USPS tracking number and link once there is one.'
     );
     expect(say([{ orderId: 'a', mailService: 'certified', status: 'failed' }])).not.toMatch(/went|sent/i);
+    // A delivered order in the list: its delivery is said as estimated, once (HOME-01).
+    expect(say([{ orderId: 'a', status: 'in_transit' }, { orderId: 'b', status: 'delivered' }, { orderId: 'c', status: 'delivered' }])).toBe(
+      `Found 3 recent orders (3 total). ${DELIVERED_IS_ESTIMATED}`
+    );
+    expect(say([{ orderId: 'a', status: 'in_transit' }, null])).toBe('Found 2 recent orders (2 total).');
   });
 
   it('bumps the steering copy revision', () => {

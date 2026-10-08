@@ -25,7 +25,8 @@ import {
   getZodInputShape,
   getServedInputSchema,
   getZodOutputShape,
-  summarizeToolResult
+  summarizeToolResult,
+  DELIVERED_IS_ESTIMATED
 } from '../../../src/mcp/registerTools.js';
 import { cancelScheduledMailTool, getStartedTool, setArrivalDateTool } from '../../../src/tools/index.js';
 import {
@@ -616,7 +617,16 @@ describe('cancel_scheduled_mail (#535)', () => {
     expect(summarizeToolResult('send_letter', { orderId: 'ltr-2', currentStatus: 'accepted', schedule, cancellable: false })).toBe(
       'Letter ltr-2 queued with status accepted.'
     );
-    expect(summarizeToolResult('get_order_status', { currentStatus: 'delivered' })).toBe('Latest order status: delivered.');
+    expect(DELIVERED_IS_ESTIMATED).toMatch(/^A delivered status means the printer's estimated delivery date has passed; no carrier confirmed it\./);
+    expect(summarizeToolResult('get_order_status', { currentStatus: 'delivered' })).toBe(`Latest order status: delivered. ${DELIVERED_IS_ESTIMATED}`);
+    // A retried send of a letter that has since gone out answers with its status now (HOME-01 review).
+    expect(summarizeToolResult('send_letter', { orderId: 'ltr-3', currentStatus: 'delivered', isRetry: true })).toBe(
+      `Letter ltr-3 queued with status delivered. ${DELIVERED_IS_ESTIMATED}`
+    );
+    expect(summarizeToolResult('send_postcard', { orderId: 'pc-3', currentStatus: 'delivered', isRetry: true })).toBe(
+      `Postcard pc-3 queued with status delivered. ${DELIVERED_IS_ESTIMATED}`
+    );
+    expect(summarizeToolResult('send_postcard', { orderId: 'pc-4', currentStatus: 'accepted' })).toBe('Postcard pc-4 queued with status accepted.');
   }
 
   it("narrates the tool's own sentence", () => {

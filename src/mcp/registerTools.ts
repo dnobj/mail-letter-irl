@@ -1747,6 +1747,22 @@ function scheduledOrderSentence(result: Record<string, unknown>): string {
   return ` ${scheduleSentence({ arriveBy, mailOn }, new Date())}${cancel}`;
 }
 
+/**
+ * Mail whose status is "delivered" only passed the printer's estimated delivery
+ * date; no carrier confirmed it. Said in the text of every tool that gives a
+ * model an order's status (the output schemas' status descriptions say it for
+ * the models that read only the structured result), or the model says the mail
+ * was delivered (HOME-01).
+ */
+export const DELIVERED_IS_ESTIMATED =
+  "A delivered status means the printer's estimated delivery date has passed; no carrier confirmed it. Say its delivery is estimated, not that it was delivered.";
+
+function deliveredSentence(orders: unknown): string {
+  return Array.isArray(orders) && orders.some(order => (order as { status?: unknown } | null)?.status === "delivered")
+    ? ` ${DELIVERED_IS_ESTIMATED}`
+    : "";
+}
+
 /** An address on one line, as get_address_request's text gives it (#604). */
 function addressLine(address: Record<string, unknown>): string {
   const part = (key: string) => (typeof address[key] === "string" ? (address[key] as string).trim() : "");
@@ -1850,7 +1866,7 @@ export function summarizeToolResult(
       let summary =
         status === "scheduled"
           ? `Letter ${order} is scheduled.${scheduledOrderSentence(result)}`
-          : `Letter ${order} queued with status ${status}.`;
+          : `Letter ${order} queued with status ${status}.${status === "delivered" ? ` ${DELIVERED_IS_ESTIMATED}` : ""}`;
       if (note) {
         summary += ` ${note}`;
       }
@@ -1861,18 +1877,19 @@ export function summarizeToolResult(
       const summary =
         status === "scheduled"
           ? `Latest order status: scheduled.${scheduledOrderSentence(result)}`
-          : `Latest order status: ${status}.`;
+          : `Latest order status: ${status}.${status === "delivered" ? ` ${DELIVERED_IS_ESTIMATED}` : ""}`;
       // Certified mail (#625): its tracking number, or that there is none yet, in the words the output carries.
       return typeof result.certifiedNote === "string" ? `${summary} ${result.certifiedNote}` : summary;
     }
     case "open_letter_home":
-      return `Letter IRL home: ${(result.drafts as unknown[]).length} active drafts and ${(result.orders as unknown[]).length} recent mail items (up to ${result.limit} each).`;
+      return `Letter IRL home: ${(result.drafts as unknown[]).length} active drafts and ${(result.orders as unknown[]).length} recent mail items (up to ${result.limit} each).${deliveredSentence(result.orders)}`;
     case "list_orders": {
       const orders = result.orders as any[];
       const total = result.total ?? 0;
       const certified = (orders ?? []).filter(order => order?.mailService !== undefined).length;
       return (
         `Found ${orders?.length ?? 0} recent orders (${total} total).` +
+        deliveredSentence(orders) +
         (certified > 0
           ? ` ${certified} ${certified === 1 ? "is" : "are"} USPS Certified Mail: ${certified === 1 ? "its entry carries" : "their entries carry"} the USPS tracking number and link once there is one.`
           : "")
@@ -1912,7 +1929,7 @@ export function summarizeToolResult(
       let summary =
         status === "scheduled"
           ? `Postcard ${order} is scheduled.${scheduledOrderSentence(result)}`
-          : `Postcard ${order} queued with status ${status}.`;
+          : `Postcard ${order} queued with status ${status}.${status === "delivered" ? ` ${DELIVERED_IS_ESTIMATED}` : ""}`;
       if (note) {
         summary += ` ${note}`;
       }

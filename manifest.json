@@ -1988,7 +1988,8 @@
             "type": "string"
           },
           "currentStatus": {
-            "type": "string"
+            "type": "string",
+            "description": "The order's status. delivered means the printer's estimated delivery date has passed; no carrier confirmed it, so say its delivery is estimated, not that it was delivered"
           },
           "statusTimeline": {
             "type": "array",
@@ -2192,7 +2193,8 @@
                   }
                 },
                 "status": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "The order's status. delivered means the printer's estimated delivery date has passed; no carrier confirmed it, so say its delivery is estimated, not that it was delivered"
                 },
                 "sentAt": {
                   "type": "string"

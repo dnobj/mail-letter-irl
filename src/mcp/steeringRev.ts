@@ -193,4 +193,6 @@
 // r47: saved stationery designs (#649): save_stationery_design, list_stationery_designs and delete_stationery_design, listed
 // with LETTER_IRL_CUSTOM_STATIONERY_ENABLED; the letter previews and set_stationery take stationeryDesignId, and their
 // outputs, and get_draft_status, can name the custom theme with its name and choices.
-export const STEERING_COPY_REV = 47;
+// r48: a delivered status is said as the printer's estimate (HOME-01): the status descriptions of open_letter_home,
+// get_order_status and list_orders, and the text of those and of send_letter and send_postcard when one is delivered.
+export const STEERING_COPY_REV = 48;
