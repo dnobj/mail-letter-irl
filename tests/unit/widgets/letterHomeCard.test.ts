@@ -430,7 +430,7 @@ describe('the compact home (#662)', () => {
     expect(group(doc).textContent).toBe('Delivery estimated (16) · Cancelled (1)');
     expect(group(doc).getAttribute('aria-expanded')).toBe('false');
     expect(group(doc).getAttribute('aria-controls')).toBe('settled-orders');
-    expect(group(doc).getAttribute('aria-label')).toBe('Settled mail: Delivery estimated (16), Cancelled (1)');
+    expect(group(doc).getAttribute('aria-label')).toBe('Delivery estimated (16) · Cancelled (1), settled mail');
     expect((doc.getElementById('settled-orders') as HTMLElement).hidden).toBe(true);
     expect(doc.querySelectorAll('#settled-orders > article')).toHaveLength(17);
     expect((doc.getElementById('people') as HTMLElement).hidden).toBe(true);
@@ -558,7 +558,9 @@ describe('the compact home (#662)', () => {
     const { dom, doc } = open(big(), { callTool });
     (doc.querySelector('[data-key="order/sched-1"] .row-main') as HTMLButtonElement).click();
     button(doc, 'Cancel scheduled mail')!.click();
-    button(doc, 'Confirm cancellation')!.click();
+    const confirm = button(doc, 'Confirm cancellation')!;
+    confirm.focus();
+    confirm.click();
     await tick(); await tick();
     expect(callTool).toHaveBeenCalledExactlyOnceWith('cancel_scheduled_mail', { orderId: 'sched-1', confirm: true });
     const article = doc.querySelector('[data-key="order/sched-1"]') as HTMLElement;
@@ -568,7 +570,96 @@ describe('the compact home (#662)', () => {
     expect((article.querySelector('.row-details') as HTMLElement).hidden).toBe(false);
     expect(doc.activeElement).toBe(article.querySelector('.row-main'));
     expect(doc.getElementById('notice')?.textContent).toBe('Cancelled. The gift letter is back.');
+
+    // A Refresh brings the server's word: from then on it folds with settled mail.
+    const after = big(); after.orders[0] = { ...after.orders[0], status: 'cancelled', cancellable: false };
+    callTool.mockResolvedValue({ structuredContent: after } as any);
+    (doc.getElementById('refresh') as HTMLButtonElement).click();
+    await tick();
+    expect(callTool).toHaveBeenLastCalledWith('open_letter_home', {});
+    expect(doc.getElementById('notice')?.textContent).toBe('Mail list refreshed.');
+    expect(Boolean(doc.querySelector('#settled-orders [data-key="order/sched-1"]'))).toBe(true);
+    expect(shown(doc, '[data-key="order/sched-1"]').length).toBe(0);
     dom.window.close();
+  });
+
+  it('takes no focus after a cancellation when the card does not have it', async () => {
+    const callTool = vi.fn(async () => ({ structuredContent: { orderId: 'sched-1', status: 'cancelled', message: 'Cancelled.' } }));
+    const { dom, doc } = open(big(), { callTool });
+    (doc.querySelector('[data-key="order/sched-1"] .row-main') as HTMLButtonElement).click();
+    button(doc, 'Cancel scheduled mail')!.click();
+    button(doc, 'Confirm cancellation')!.click();
+    await tick(); await tick();
+    expect(callTool).toHaveBeenCalledTimes(1);
+    expect(doc.activeElement).toBe(doc.body);
+    dom.window.close();
+  });
+
+  it('keeps focus on the same row through a redraw, and takes none when the host changes things while the card is not focused', () => {
+    let mode = 'fullscreen';
+    const { dom, doc, host } = open(big(), { displayMode: () => mode });
+    const moving = () => doc.querySelector('[data-key="order/move-1"] .row-main') as HTMLButtonElement;
+    const first = moving();
+    first.focus();
+    mode = 'inline';
+    host.onChange.mock.calls[0][0]();
+    expect(moving()).not.toBe(first);
+    expect(doc.activeElement).toBe(moving());
+    // A settled row folds away: focus goes to See all.
+    mode = 'fullscreen'; host.onChange.mock.calls[0][0]();
+    (doc.querySelector('[data-key="order/done-2"] .row-main') as HTMLButtonElement).focus();
+    mode = 'inline'; host.onChange.mock.calls[0][0]();
+    expect(doc.activeElement).toBe(doc.getElementById('see-all'));
+    // The host's page has focus: a change it makes leaves focus where it is.
+    mode = 'fullscreen'; host.onChange.mock.calls[0][0]();
+    (doc.querySelector('[data-key="order/done-2"] .row-main') as HTMLButtonElement).focus();
+    doc.hasFocus = () => false;
+    mode = 'inline'; host.onChange.mock.calls[0][0]();
+    expect(doc.activeElement).not.toBe(doc.getElementById('see-all'));
+    expect(doc.activeElement).not.toBe(doc.getElementById('refresh'));
+    dom.window.close();
+  });
+
+  it('gives See all its focus back after the wait, and leaves the home compact when the host went fullscreen and back meanwhile', async () => {
+    const held: { seeAll?: HTMLButtonElement } = {};
+    // As a browser does when the focused button is disabled.
+    const blurring = vi.fn(async () => { held.seeAll!.blur(); return { mode: 'inline' }; });
+    const first = open(big(), { requestDisplayMode: blurring });
+    const seeAll = first.doc.getElementById('see-all') as HTMLButtonElement;
+    held.seeAll = seeAll;
+    seeAll.focus();
+    seeAll.click(); await tick();
+    expect(first.doc.activeElement).toBe(seeAll);
+    expect(seeAll.textContent).toBe('Show less');
+    first.dom.window.close();
+
+    let mode = 'inline';
+    let answer!: (value: unknown) => void;
+    const waiting = vi.fn(() => new Promise(resolve => { answer = resolve; }));
+    const second = open(big(), { requestDisplayMode: waiting, displayMode: () => mode });
+    (second.doc.getElementById('see-all') as HTMLButtonElement).click();
+    mode = 'fullscreen'; second.host.onChange.mock.calls[0][0]();
+    mode = 'inline'; second.host.onChange.mock.calls[0][0]();
+    answer({ mode: 'fullscreen' }); await tick();
+    expect(shown(second.doc, '#drafts > article')).toHaveLength(3);
+    expect((second.doc.getElementById('see-all') as HTMLButtonElement).textContent).toBe('See all');
+    second.dom.window.close();
+  });
+
+  it('puts drafts with an unreadable date last, ranks an unknown status with the rest, and says nothing is on the way beside a kept settled order', () => {
+    const data = big();
+    data.drafts = [{ ...draft(1), expiresAt: '2026-10-20T00:00:00Z' }, { ...draft(2), expiresAt: 'soon' }, { ...draft(3), expiresAt: '2026-10-10T00:00:00Z' }];
+    data.orders = [order('constructor', { orderId: 'odd-1' }), order('failed', { orderId: 'fail-9' })];
+    const first = open(data);
+    expect(shown(first.doc, '#drafts > article').map(node => node.getAttribute('data-key'))).toEqual(['draft/draft-3', 'draft/draft-1', 'draft/draft-2']);
+    expect(shown(first.doc, '#orders > article').map(node => node.getAttribute('data-key'))).toEqual(['order/fail-9', 'order/odd-1']);
+    first.dom.window.close();
+
+    const settledOnly = { drafts: [], orders: [order('delivered', { orderId: 'done-1' }), order('delivered', { orderId: 'done-2' })], recipients: [], limit: 20 };
+    const second = open(settledOnly, { hostContext: () => ({ 'openai/deepLink': { url: '/order/done-1' } }) });
+    expect(second.doc.getElementById('orders')?.firstElementChild?.textContent).toBe('Nothing on the way.');
+    expect(shown(second.doc, '#orders > article').map(node => node.getAttribute('data-key'))).toEqual(['order/done-1']);
+    second.dom.window.close();
   });
 
   it('keeps keyboard focus on the card: Show N more moves it to the first row it showed, Show less to See all', async () => {

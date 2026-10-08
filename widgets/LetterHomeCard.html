@@ -63,6 +63,7 @@
       var openRows = {};
       var openLists = {};
       var justCancelled;
+      var modeChanges = 0;
       var SEE_ALL_WAIT_MS = 5000;
       // What needs the person first: problems, then mail waiting to go out, then the rest (the server sends newest first).
       var NEED = { returned: 0, failed: 0, scheduled: 1, pending: 2 };
@@ -153,9 +154,11 @@
             cancellationUnconfirmed = false;
             order.status = 'cancelled'; order.cancellable = false;
             // It stays in view, open, where the person was, rather than folding away with settled mail.
-            justCancelled = selectionKey(order, 'order'); openRows[justCancelled] = true;
+            justCancelled = selectionKey(order, 'order');
+            // Asked before the redraw removes the focused Confirm button.
+            var focused = document.hasFocus();
             render(currentData);
-            focusRow(justCancelled);
+            if (focused) focusRow(justCancelled);
             notice.textContent = result.message || 'Cancelled; not mailed. Refresh for the current account balance.';
           } catch (_) { notice.textContent = 'Cancellation was not confirmed. Refresh to check the order before trying again.'; }
           finally { busy = false; sync(); if (yes.isConnected) yes.disabled = cancellationUnconfirmed; }
@@ -201,33 +204,53 @@
       // A row that is never folded: the selection, and an order just cancelled here.
       function kept(key) { return key === selected || key === justCancelled; }
       function byNeed(orders) {
+        function rank(order) { return Object.prototype.hasOwnProperty.call(NEED, order.status) ? NEED[order.status] : 3; }
         return orders.map(function (order, index) { return { order: order, index: index }; }).sort(function (a, b) {
-          var need = (NEED[a.order.status] === undefined ? 3 : NEED[a.order.status]) - (NEED[b.order.status] === undefined ? 3 : NEED[b.order.status]);
-          return need || a.index - b.index;
+          return rank(a.order) - rank(b.order) || a.index - b.index;
         }).map(function (entry) { return entry.order; });
       }
       // Drafts that expire soonest first.
       function bySoonest(drafts) {
-        return drafts.map(function (draft, index) { return { draft: draft, index: index, at: new Date(draft.expiresAt).getTime() }; }).sort(function (a, b) {
-          var at = (Number.isFinite(a.at) ? a.at : Infinity) - (Number.isFinite(b.at) ? b.at : Infinity);
-          return (Number.isFinite(at) && at) || a.index - b.index;
+        return drafts.map(function (draft, index) {
+          var at = new Date(draft.expiresAt).getTime();
+          // A date that does not read goes last.
+          return { draft: draft, index: index, at: Number.isFinite(at) ? at : Infinity };
+        }).sort(function (a, b) {
+          return a.at < b.at ? -1 : a.at > b.at ? 1 : a.index - b.index;
         }).map(function (entry) { return entry.draft; });
       }
+      // Focuses a row that is in view; says whether it could.
       function focusRow(key) {
+        var done = false;
         Array.prototype.forEach.call(document.querySelectorAll('[data-key]'), function (article) {
-          if (article.getAttribute('data-key') === key) article.querySelector('.row-main').focus();
+          if (done || article.getAttribute('data-key') !== key || article.hidden || article.closest('[hidden]')) return;
+          article.querySelector('.row-main').focus();
+          done = true;
         });
+        return done;
       }
-      // Redraws, and keeps keyboard focus on the card when the control that had it went away or was hidden.
+      function lost(element) { return !element || element === document.body || element === document.documentElement || Boolean(element.closest('[hidden]')); }
+      // Focus to a control that is there: See all, else Refresh.
+      function focusControl() {
+        if (!seeAll.hidden && !seeAll.disabled) seeAll.focus();
+        else if (!refresh.disabled) refresh.focus();
+      }
+      // Redraws, and keeps keyboard focus on the card when the control that had it went away or was hidden: on the
+      // same row when it is still in view, else See all or Refresh. Only while the card has focus, so a change the
+      // host makes (closing fullscreen, a deep link) never pulls focus from the host's own page.
       function redraw() {
-        var had = document.activeElement && document.activeElement !== document.body;
+        var active = document.activeElement;
+        var had = document.hasFocus() && !lost(active);
+        var row = had && active.closest('[data-key]');
+        var key = row ? row.getAttribute('data-key') : undefined;
         draw();
-        var now = document.activeElement;
-        if (had && (!now || now === document.body || now.closest('[hidden]'))) (seeAll.hidden ? refresh : seeAll).focus();
+        if (!had || !lost(document.activeElement)) return;
+        if (!(key && focusRow(key))) focusControl();
       }
       // A new mode from the host: back from fullscreen, the home is compact again.
       function noteMode(mode) {
         if (lastMode === 'fullscreen' && mode !== 'fullscreen') full = false;
+        if (mode !== lastMode) modeChanges += 1;
         lastMode = mode;
       }
       function showsAll() { return full || displayMode() === 'fullscreen'; }
@@ -334,7 +357,7 @@
         if (!data.orders.length) line(orders, 'No recent mail to show.', 'muted');
         var moving = byNeed(data.orders.filter(function (order) { return !settled(order) || kept(selectionKey(order, 'order')); }));
         var done = data.orders.filter(function (order) { return settled(order) && !kept(selectionKey(order, 'order')); });
-        if (!moving.length && done.length) line(orders, 'Nothing on the way.', 'muted');
+        if (data.orders.length && data.orders.every(settled)) line(orders, 'Nothing on the way.', 'muted');
         rows(orders, 'orders', moving.map(orderEntry), all ? Infinity : ORDERS_SHOWN);
         if (done.length) {
           var estimated = done.filter(function (order) { return order.status === 'delivered'; }).length;
@@ -350,7 +373,7 @@
             if (opening) openLists.settled = true; else delete openLists.settled;
           });
           toggle.className = 'group'; toggle.setAttribute('aria-expanded', String(open)); toggle.setAttribute('aria-controls', group.id);
-          toggle.setAttribute('aria-label', 'Settled mail: ' + counts.join(', '));
+          toggle.setAttribute('aria-label', counts.join(' · ') + ', settled mail');
           orders.appendChild(group);
           done.map(orderEntry).forEach(function (entry) { entry.build(group); });
         }
@@ -388,9 +411,11 @@
         applyRoute();
       }
       seeAll.addEventListener('click', async function () {
-        if (seeAll.disabled) return;
         if (full) { full = false; redraw(); return; }
+        var changes = modeChanges;
         if (typeof host.requestDisplayMode === 'function') {
+          // Disabling the focused button drops its focus; it is put back after the wait.
+          var focused = document.hasFocus() && document.activeElement === seeAll;
           seeAll.disabled = true;
           try {
             await new Promise(function (resolve, reject) {
@@ -400,9 +425,11 @@
           } catch (_) { /* Refused or no reply: opened in place below. */ }
           finally { seeAll.disabled = false; }
         }
-        // Whole now: in place where the host gave no fullscreen, and before a host that did says its new mode.
-        full = displayMode() !== 'fullscreen';
+        // Whole now: in place where the host gave no fullscreen, and before a host that did says its new mode. A host
+        // that went fullscreen meanwhile has drawn it whole already, and one that came back has asked for compact.
+        if (modeChanges === changes) full = displayMode() !== 'fullscreen';
         redraw();
+        if (focused && lost(document.activeElement)) focusControl();
       });
       refresh.addEventListener('click', async function () {
         if (busy || typeof host.callTool !== 'function') return;
@@ -411,7 +438,9 @@
         try {
           var result = await withDeadline(host.callTool('open_letter_home', {}));
           if (result && result.isError) throw new Error('refused');
-          if (!render(result && (result.structuredContent || result))) throw new Error('missing result');
+          // The server's word replaces the card's: an order cancelled here folds with settled mail from now on.
+          var wasCancelled = justCancelled; justCancelled = undefined;
+          if (!render(result && (result.structuredContent || result))) { justCancelled = wasCancelled; throw new Error('missing result'); }
           cancellationUnconfirmed = false;
           refreshed = true;
         } catch (_) {
