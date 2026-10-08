@@ -350,13 +350,11 @@
       seeAll.addEventListener('click', async function () {
         if (full) { full = false; draw(); return; }
         if (typeof host.requestDisplayMode === 'function') {
-          try {
-            var answer = await host.requestDisplayMode('fullscreen');
-            // Granted: drawn whole now, whether or not the host has said its new mode yet.
-            if (answer && answer.mode === 'fullscreen') { full = displayMode() !== 'fullscreen'; draw(); return; }
-          } catch (_) { /* Refused: open it in place. */ }
+          try { await host.requestDisplayMode('fullscreen'); } catch (_) { /* Refused: opened in place below. */ }
         }
-        full = true; draw();
+        // Whole now: in place where the host gave no fullscreen, and before a host that did says its new mode.
+        full = displayMode() !== 'fullscreen';
+        draw();
       });
       refresh.addEventListener('click', async function () {
         if (busy || typeof host.callTool !== 'function') return;
