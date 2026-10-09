@@ -3332,6 +3332,10 @@ Needs HOME-01, a host advertising text model context, and development arrive-by 
 6. Simulate refusal/disconnection during cancellation: the home must report cancellation unconfirmed, retain the previous state, and request Refresh. It must not claim restored funding. Refresh and check the authoritative state before retrying.
 7. Disable host context support or refuse the update: selection stays visible locally and the notice says it was not shared. Check desktop and mobile layouts and dark mode.
 
+**Run 2026-10-08 on DEV 796c05c (ChatGPT web, Claude web; testlirl02 with a scheduled gift letter):**
+- Step 1 on ChatGPT web: **failed**. Selecting showed "This host cannot share the selection with the conversation" (#665: `window.openai` has no model context; fixed by the handshake). On Claude web the card said "Selection shared with the conversation.", but Claude's model did not see it on the next turn.
+- Step 4 on ChatGPT web: passed. Cancel asked first; Keep scheduled changed nothing; Confirm cancellation said "Cancelled. The gift letter is back in the account, to use again."; the balance showed the gift letter back; the order stayed in view reading "Cancelled; not mailed" and Cancel was gone.
+
 Automated coverage: real MCP wire registration/schema checks, owner-isolated PostgreSQL home reads, DOM cancellation/selection/deep-link checks, host capability negotiation and serialized replacement context. Existing scheduled-mail PostgreSQL suites cover idempotency, cancellation versus dispatch, expired/refunded funding and process recovery; no transaction workflow changes in this slice.
 
 ### HOME-03: owner-scoped deep links
@@ -3346,6 +3350,8 @@ Requires HOME-01/HOME-02 and the actual installed development plugin ID configur
 6. Unset the plugin ID: no share link is offered. Unsafe IDs or URLs cannot produce links. Select draft/order must remain usable locally and unsupported model context must be reported.
 7. Test dark mode and narrow layout. No send, edit, payment or cancellation occurs from navigating a deep link.
 
+**Run 2026-10-08 on DEV 796c05c, ChatGPT web, `LETTER_IRL_CHATGPT_PLUGIN_ID` set:** "Open this selection" was offered. Its link went to the full-page app view (`chatgpt.com/mcp-app/<app id>/open_letter_home#/order/<id>`), where the home drew fullscreen, but nothing was selected: the route never reached the card (#665, fixed by the handshake; re-run after it deploys).
+
 ### HOME-04: the compact home and See all (#662)
 
 Needs the home on in development, an account with more than 4 mail items (testlirl02 has a scheduled letter and 16 delivered), and the connector refreshed after the deploy.
@@ -3359,3 +3365,10 @@ Needs the home on in development, an account with more than 4 mail items (testli
 6. VS Code (or any host without fullscreen): See all opens everything in place and reads "Show less"; pressing it folds it back.
 7. A deep link (HOME-03) to delivered mail opens the folded group to show its line.
 8. Phone width (ChatGPT Android): no sideways scroll; the state wraps under the name. Dark and light themes.
+
+**Run 2026-10-08 on DEV 796c05c:**
+- Step 1 passed on ChatGPT web (the inline card about 310 px) and Claude web (about 260 px).
+- Step 2 passed on Claude ("open above, with no drafts waiting and 18 recent items"). On ChatGPT it was partial: the reply led with the scheduled letter but still added a four-row table.
+- Steps 3 and 4 passed on ChatGPT web: See all opened ChatGPT's side panel whole, and Close viewer returned it compact.
+- Step 5 passed on Claude web: See all opened Claude's fullscreen, and closing returned it compact.
+- Steps 6 to 8 were not run.
