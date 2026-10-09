@@ -484,10 +484,15 @@ describe('Plugin Extensions in ChatGPT (#665)', () => {
   }
 
   it('opens the MCP Apps handshake beside window.openai for a card that asks, and shares model context once the host offers it', async () => {
-    const mounted = mountInChatGptFrame(extensionsPage);
+    const mounted = mountInChatGptFrame(extensionsPage, { hostContext: { locale: 'en', 'openai/deepLink': { url: '/stale' } } });
     const host = mounted.host();
     expect(host.kind).toBe('chatgpt');
     const init = mounted.lastRequest('ui/initialize')!;
+    // Ids of its own: a reply meant for window.openai's runtime (a plain number) is not taken.
+    expect(String(init.id)).toMatch(/^lirl-ext-/);
+    mounted.deliver({ id: 1, result: { hostCapabilities: { experimental: { 'openai/modelContext': {} } } } });
+    await flush();
+    expect(host.updateModelContext).toBeUndefined();
     expect(init.params.appCapabilities).toEqual({ availableDisplayModes: ['inline', 'fullscreen'] });
     expect(host.updateModelContext).toBeUndefined();
     let told = 0;
@@ -508,6 +513,19 @@ describe('Plugin Extensions in ChatGPT (#665)', () => {
     mounted.deliver({ method: 'ui/notifications/host-context-changed', params: { 'openai/deepLink': { url: '/draft/d-2' } } });
     expect(host.hostContext()['openai/deepLink']).toEqual({ url: '/draft/d-2' });
     expect(told).toBe(2);
+    // A refused share rejects, so the card can say it was not shared.
+    const refused = host.updateModelContext({ content: [] });
+    mounted.deliver({ id: mounted.lastRequest('ui/update-model-context')!.id, error: { code: -32000, message: 'no' } });
+    await expect(refused).rejects.toThrow('no');
+    mounted.window.close();
+  });
+
+  it('keeps a context change that arrives before the handshake reply over the reply', async () => {
+    const mounted = mountInChatGptFrame(extensionsPage);
+    mounted.deliver({ method: 'ui/notifications/host-context-changed', params: { 'openai/deepLink': { url: '/order/new' } } });
+    mounted.deliver({ id: mounted.lastRequest('ui/initialize')!.id, result: { hostCapabilities: {}, hostContext: { 'openai/deepLink': { url: '/order/old' }, theme: 'dark' } } });
+    await flush();
+    expect(mounted.host().hostContext()).toMatchObject({ 'openai/deepLink': { url: '/order/new' }, theme: 'dark' });
     mounted.window.close();
   });
 
@@ -554,18 +572,32 @@ describe('Plugin Extensions in ChatGPT (#665)', () => {
     mounted.deliver({ id: init.id, result: { hostCapabilities: { experimental: { 'openai/modelContext': {} } } } }, {});
     await flush();
     expect(mounted.host().updateModelContext).toBeUndefined();
+    let told = 0;
+    mounted.host().onChange(() => { told += 1; });
+    mounted.deliver({ method: 'ui/notifications/tool-input', params: { arguments: { from: 'mcp' } } });
     mounted.deliver({ method: 'ui/notifications/tool-result', params: { structuredContent: { from: 'mcp' } } });
-    expect(mounted.host().toolOutput()).toEqual({ from: 'openai' });
+    expect(told).toBe(0);
+    // Before the host has taken us as an MCP App, ping and teardown are window.openai's runtime's to answer.
+    mounted.deliver({ id: 75, method: 'ping' });
+    expect(mounted.sent.some(message => message.id === 75)).toBe(false);
+    mounted.deliver({ id: mounted.lastRequest('ui/initialize')!.id, result: { hostCapabilities: {} } });
+    await flush();
+    // A request it does not serve goes unanswered.
+    mounted.deliver({ id: 76, method: 'ui/unknown' });
+    expect(mounted.sent.some(message => message.id === 76)).toBe(false);
     mounted.deliver({ method: 'ui/notifications/host-context-changed', params: { 'openai/deepLink': { url: '/x' } } }, {});
     expect(mounted.host().hostContext()).toEqual({ locale: 'en' });
     mounted.deliver({ id: 77, method: 'ping' });
     mounted.deliver({ id: 78, method: 'ui/resource-teardown' });
     expect(mounted.sent.filter(message => message.id === 77 || message.id === 78).map(message => message.result)).toEqual([{}, {}]);
-    // A refused handshake leaves window.openai alone, as before.
-    mounted.deliver({ id: init.id, error: { code: -32601, message: 'no' } });
-    await flush();
-    expect(mounted.host().updateModelContext).toBeUndefined();
     mounted.window.close();
+    // A refused handshake leaves window.openai alone, as before.
+    const refused = mountInChatGptFrame(extensionsPage);
+    refused.deliver({ id: refused.lastRequest('ui/initialize')!.id, error: { code: -32601, message: 'no' } });
+    await flush();
+    expect(refused.host().updateModelContext).toBeUndefined();
+    expect(refused.sent.some(message => message.method === 'ui/notifications/initialized')).toBe(false);
+    refused.window.close();
   });
 });
 

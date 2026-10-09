@@ -139,8 +139,9 @@
       message.jsonrpc = "2.0";
       host.postMessage(message, "*");
     }
+    // Ids of our own, so a reply meant for window.openai's runtime on the same channel is never taken, nor ours given to it.
     link.request = function (method, params) {
-      var id = nextId;
+      var id = "lirl-ext-" + nextId;
       nextId += 1;
       return new Promise(function (resolve, reject) {
         pending[id] = { resolve: resolve, reject: reject };
@@ -162,10 +163,11 @@
       if (message.method === "ui/notifications/host-context-changed") {
         if (message.params && typeof message.params === "object") Object.assign(link.hostContext, message.params);
         changed();
-      } else if ((message.method === "ping" || message.method === "ui/resource-teardown") && message.id !== undefined) {
+      } else if (link.capabilities && (message.method === "ping" || message.method === "ui/resource-teardown") && message.id !== undefined) {
+        // Only once the host has taken us as an MCP App; before that, window.openai's runtime answers for the frame.
         post({ id: message.id, result: {} });
       }
-      // Tool input and results stay window.openai's: nothing else is taken from here.
+      // Tool input and results stay window.openai's, and requests we do not serve go unanswered: nothing else is taken.
     });
     link.request("ui/initialize", {
       appInfo: { name: "letter-irl-card", version: "1.0.0" },
@@ -174,11 +176,16 @@
     }).then(
       function (result) {
         link.capabilities = (result && result.hostCapabilities) || {};
-        if (result && result.hostContext && typeof result.hostContext === "object") Object.assign(link.hostContext, result.hostContext);
+        // A change that arrived before this reply is newer than the reply's context.
+        if (result && result.hostContext && typeof result.hostContext === "object") link.hostContext = Object.assign({}, result.hostContext, link.hostContext);
         post({ method: "ui/notifications/initialized", params: {} });
+        console.info("letterIrlHost: Plugin Extensions handshake answered", Object.keys(link.capabilities));
         changed();
       },
-      function () { /* Not answered as an MCP Apps host: window.openai alone, as before. */ }
+      function (error) {
+        // Refused: window.openai alone, as before.
+        console.info("letterIrlHost: Plugin Extensions handshake refused", error && error.message);
+      }
     );
     return link;
   }
