@@ -589,6 +589,17 @@ describe('the compact home (#662)', () => {
     dom.window.close();
   });
 
+  it('keeps focus on the same row when a Refresh redraws the home', async () => {
+    const { dom, doc, host } = open(big());
+    (doc.querySelector('[data-key="order/move-1"] .row-main') as HTMLButtonElement).focus();
+    host.callTool.mockResolvedValue({ structuredContent: big() });
+    (doc.getElementById('refresh') as HTMLButtonElement).click();
+    await tick();
+    expect(doc.getElementById('notice')?.textContent).toBe('Mail list refreshed.');
+    expect(doc.activeElement === doc.querySelector('[data-key="order/move-1"] .row-main')).toBe(true);
+    dom.window.close();
+  });
+
   it('takes no focus after a cancellation when the card does not have it', async () => {
     const callTool = vi.fn(async () => ({ structuredContent: { orderId: 'sched-1', status: 'cancelled', message: 'Cancelled.' } }));
     const { dom, doc } = open(big(), { callTool });
