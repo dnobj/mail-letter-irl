@@ -291,6 +291,25 @@ describe('home extension recovery regressions', () => {
     expect(doc.getElementById('notice')?.textContent).toContain('not confirmed');
     dom.window.close();
   });
+  it('gives up on a share the host never answers after the usual wait, so later selections still go (#665)', async () => {
+    vi.useFakeTimers();
+    try {
+      const updateModelContext = vi.fn().mockReturnValueOnce(new Promise(() => {})).mockResolvedValue({});
+      const { dom, doc } = open(structuredClone(data), { updateModelContext });
+      click(doc, 'Select order');
+      await vi.advanceTimersByTimeAsync(14999);
+      click(doc, 'Clear selection');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(updateModelContext).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      // The unanswered share gave up; the clear went on to the host.
+      expect(updateModelContext).toHaveBeenCalledTimes(2);
+      expect(updateModelContext.mock.calls[1][0]).toEqual({ content: [] });
+      dom.window.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it('waits for an earlier context acknowledgment before sending the newer selection', async () => {
     let resolve!: (value: unknown) => void;
     const updateModelContext = vi.fn().mockReturnValueOnce(new Promise(done => { resolve = done; })).mockResolvedValue({});

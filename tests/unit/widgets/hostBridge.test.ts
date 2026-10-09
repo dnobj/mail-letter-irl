@@ -463,3 +463,184 @@ describe('display modes (#662)', () => {
     plain.window.close();
   });
 });
+
+describe('Plugin Extensions in ChatGPT (#665)', () => {
+  const extensionsPage = `<!doctype html><html data-display-modes="inline fullscreen" data-plugin-extensions><body><script>${BRIDGE}</script></body></html>`;
+  function mountInChatGptFrame(page: string, openai: Record<string, unknown> = {}) {
+    const sent: Message[] = [];
+    const parent = { postMessage: (message: Message) => sent.push(JSON.parse(JSON.stringify(message))) };
+    const dom = new JSDOM(page, {
+      runScripts: 'dangerously',
+      beforeParse(window) {
+        (window as any).openai = { toolOutput: { from: 'openai' }, hostContext: { locale: 'en' }, ...openai };
+        Object.defineProperty(window, 'parent', { value: parent, configurable: true });
+      }
+    });
+    const window = dom.window as any;
+    const deliver = (message: Message, source: unknown = parent) =>
+      window.dispatchEvent(new window.MessageEvent('message', { data: { jsonrpc: '2.0', ...message }, source }));
+    const lastRequest = (method: string) => [...sent].reverse().find(message => message.method === method);
+    return { window, sent, deliver, lastRequest, host: () => window.letterIrlHost };
+  }
+
+  it('opens the MCP Apps handshake beside window.openai for a card that asks, and shares model context once the host offers it', async () => {
+    const mounted = mountInChatGptFrame(extensionsPage, { hostContext: { locale: 'en', 'openai/deepLink': { url: '/stale' } } });
+    const host = mounted.host();
+    expect(host.kind).toBe('chatgpt');
+    const init = mounted.lastRequest('ui/initialize')!;
+    // Ids of its own: a reply meant for window.openai's runtime (a plain number) is not taken.
+    expect(String(init.id)).toMatch(/^lirl-ext-/);
+    mounted.deliver({ id: 1, result: { hostCapabilities: { experimental: { 'openai/modelContext': {} } } } });
+    await flush();
+    expect(host.updateModelContext).toBeUndefined();
+    expect(init.params.appCapabilities).toEqual({ availableDisplayModes: ['inline', 'fullscreen'] });
+    expect(host.updateModelContext).toBeUndefined();
+    let told = 0;
+    host.onChange(() => { told += 1; });
+    mounted.deliver({ id: init.id, result: { hostCapabilities: { experimental: { 'openai/modelContext': {} } }, hostContext: { 'openai/deepLink': { url: '/order/o-1' } } } });
+    await flush();
+    expect(told).toBe(1);
+    expect(mounted.sent.some(message => message.method === 'ui/notifications/initialized')).toBe(true);
+    // The deep link over window.openai's own host context; the result stays window.openai's.
+    expect(host.hostContext()).toEqual({ locale: 'en', 'openai/deepLink': { url: '/order/o-1' } });
+    expect(host.toolOutput()).toEqual({ from: 'openai' });
+    const shared = host.updateModelContext({ content: [{ type: 'text', text: 'order o-1' }] });
+    const request = mounted.lastRequest('ui/update-model-context')!;
+    expect(request.params).toEqual({ content: [{ type: 'text', text: 'order o-1' }] });
+    mounted.deliver({ id: request.id, result: { _meta: { 'openai/modelContext': { updateId: 'u-1' } } } });
+    await expect(shared).resolves.toEqual({ _meta: { 'openai/modelContext': { updateId: 'u-1' } } });
+    // A new route arrives as a host context change.
+    mounted.deliver({ method: 'ui/notifications/host-context-changed', params: { 'openai/deepLink': { url: '/draft/d-2' } } });
+    expect(host.hostContext()['openai/deepLink']).toEqual({ url: '/draft/d-2' });
+    expect(told).toBe(2);
+    // A refused share rejects, so the card can say it was not shared.
+    const refused = host.updateModelContext({ content: [] });
+    mounted.deliver({ id: mounted.lastRequest('ui/update-model-context')!.id, error: { code: -32000, message: 'no' } });
+    await expect(refused).rejects.toThrow('no');
+    mounted.window.close();
+  });
+
+  it('keeps a context change that arrives before the handshake reply over the reply', async () => {
+    const mounted = mountInChatGptFrame(extensionsPage);
+    mounted.deliver({ method: 'ui/notifications/host-context-changed', params: { 'openai/deepLink': { url: '/order/new' } } });
+    mounted.deliver({ id: mounted.lastRequest('ui/initialize')!.id, result: { hostCapabilities: {}, hostContext: { 'openai/deepLink': { url: '/order/old' }, theme: 'dark' } } });
+    await flush();
+    expect(mounted.host().hostContext()).toMatchObject({ 'openai/deepLink': { url: '/order/new' }, theme: 'dark' });
+    mounted.window.close();
+  });
+
+  it('takes the updateModelContext capability as the MCP Apps spec states it, and offers nothing when the host offers neither', async () => {
+    const text = mountInChatGptFrame(extensionsPage);
+    text.deliver({ id: text.lastRequest('ui/initialize')!.id, result: { hostCapabilities: { updateModelContext: { text: {} } } } });
+    await flush();
+    expect(typeof text.host().updateModelContext).toBe('function');
+    text.window.close();
+    const neither = mountInChatGptFrame(extensionsPage);
+    neither.deliver({ id: neither.lastRequest('ui/initialize')!.id, result: { hostCapabilities: { updateModelContext: {} } } });
+    await flush();
+    expect(neither.host().updateModelContext).toBeUndefined();
+    neither.window.close();
+  });
+
+  it("uses ChatGPT's own updateModelContext when window.openai has one, sending nothing over postMessage", async () => {
+    const calls: unknown[] = [];
+    const mounted = mountInChatGptFrame(extensionsPage, { updateModelContext: async (value: unknown) => { calls.push(value); return { ok: true }; } });
+    await expect(mounted.host().updateModelContext({ content: [] })).resolves.toEqual({ ok: true });
+    expect(calls).toEqual([{ content: [] }]);
+    expect(mounted.sent.filter(message => message.method === 'ui/update-model-context')).toHaveLength(0);
+    mounted.window.close();
+  });
+
+  it('changes nothing when the host never answers, or the card does not ask', async () => {
+    const silent = mountInChatGptFrame(extensionsPage);
+    await flush();
+    expect(silent.host().updateModelContext).toBeUndefined();
+    expect(silent.host().hostContext()).toEqual({ locale: 'en' });
+    silent.window.close();
+    const plain = mountInChatGptFrame(bridgePage());
+    await flush();
+    expect(plain.sent).toHaveLength(0);
+    expect(plain.host().updateModelContext).toBeUndefined();
+    expect(plain.host().hostContext()).toEqual({ locale: 'en' });
+    plain.window.close();
+  });
+
+  it("answers ping and teardown, takes nothing else from the host, and ignores messages from anyone else", async () => {
+    const mounted = mountInChatGptFrame(extensionsPage);
+    const init = mounted.lastRequest('ui/initialize')!;
+    // A reply from a stranger is not the host's.
+    mounted.deliver({ id: init.id, result: { hostCapabilities: { experimental: { 'openai/modelContext': {} } } } }, {});
+    await flush();
+    expect(mounted.host().updateModelContext).toBeUndefined();
+    let told = 0;
+    mounted.host().onChange(() => { told += 1; });
+    mounted.deliver({ method: 'ui/notifications/tool-input', params: { arguments: { from: 'mcp' } } });
+    mounted.deliver({ method: 'ui/notifications/tool-result', params: { structuredContent: { from: 'mcp' } } });
+    expect(told).toBe(0);
+    // Before the host has taken us as an MCP App, ping and teardown are window.openai's runtime's to answer.
+    mounted.deliver({ id: 75, method: 'ping' });
+    expect(mounted.sent.some(message => message.id === 75)).toBe(false);
+    mounted.deliver({ id: mounted.lastRequest('ui/initialize')!.id, result: { hostCapabilities: {} } });
+    await flush();
+    // A request it does not serve goes unanswered.
+    mounted.deliver({ id: 76, method: 'ui/unknown' });
+    expect(mounted.sent.some(message => message.id === 76)).toBe(false);
+    mounted.deliver({ method: 'ui/notifications/host-context-changed', params: { 'openai/deepLink': { url: '/x' } } }, {});
+    expect(mounted.host().hostContext()).toEqual({ locale: 'en' });
+    mounted.deliver({ id: 77, method: 'ping' });
+    mounted.deliver({ id: 78, method: 'ui/resource-teardown' });
+    expect(mounted.sent.filter(message => message.id === 77 || message.id === 78).map(message => message.result)).toEqual([{}, {}]);
+    mounted.window.close();
+    // A refused handshake leaves window.openai alone, as before.
+    const refused = mountInChatGptFrame(extensionsPage);
+    refused.deliver({ id: refused.lastRequest('ui/initialize')!.id, error: { code: -32601, message: 'no' } });
+    await flush();
+    expect(refused.host().updateModelContext).toBeUndefined();
+    expect(refused.sent.some(message => message.method === 'ui/notifications/initialized')).toBe(false);
+    refused.window.close();
+  });
+});
+
+describe('the home card in ChatGPT on the bridge (#665)', () => {
+  const HOME = inlineHostBridge(fs.readFileSync(path.join(WIDGET_DIR, 'LetterHomeCard.html'), 'utf-8'), WIDGET_DIR);
+  const output = {
+    drafts: [], recipients: [], limit: 20, websiteOrigin: 'https://dev.example.test',
+    orders: [{ orderId: 'o-1', recipient: { name: 'Ruth', city: 'Chicago', state: 'IL' }, mailType: 'letter', status: 'delivered', createdAt: '2026-10-01T00:00:00Z', isGiftSend: false }]
+  };
+
+  it('selects the order a deep link names and shares the selection, both through the handshake', async () => {
+    const sent: Message[] = [];
+    const parent = { postMessage: (message: Message) => sent.push(JSON.parse(JSON.stringify(message))) };
+    const dom = new JSDOM(HOME, {
+      runScripts: 'dangerously',
+      beforeParse(window) {
+        (window as any).openai = { toolOutput: output, theme: 'dark', callTool: async () => ({}) };
+        Object.defineProperty(window, 'parent', { value: parent, configurable: true });
+      }
+    });
+    const window = dom.window as any;
+    const doc = window.document as Document;
+    const deliver = (message: Message) => window.dispatchEvent(new window.MessageEvent('message', { data: { jsonrpc: '2.0', ...message }, source: parent }));
+    expect(doc.getElementById('selection')?.hidden).toBe(true);
+    const init = sent.find(message => message.method === 'ui/initialize')!;
+    deliver({ id: init.id, result: { hostCapabilities: { experimental: { 'openai/modelContext': {} } }, hostContext: { 'openai/deepLink': { url: '/order/o-1' } } } });
+    await flush();
+    expect(doc.getElementById('selection')?.hidden).toBe(false);
+    expect(doc.getElementById('selected-detail')?.textContent).toContain('o-1');
+    // Selecting by hand shares it with the model through ui/update-model-context.
+    (Array.from(doc.querySelectorAll('button')).find(node => node.textContent === 'Select order') as HTMLButtonElement).click();
+    await flush();
+    // Shares go one at a time: the deep link's first, then the press's.
+    const shares = () => sent.filter(message => message.method === 'ui/update-model-context');
+    expect(shares()).toHaveLength(1);
+    deliver({ id: shares()[0].id, result: {} });
+    await flush();
+    expect(shares()).toHaveLength(2);
+    const share = shares()[1];
+    expect(JSON.parse(share.params.content[0].text)).toMatchObject({ kind: 'order', id: 'o-1', statusLabel: 'Delivery estimated' });
+    deliver({ id: share.id, result: {} });
+    await flush();
+    expect(doc.getElementById('notice')?.textContent).toBe('Selection shared with the conversation.');
+    window.close();
+  });
+});

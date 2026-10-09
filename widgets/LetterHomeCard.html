@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-display-modes="inline fullscreen">
+<html lang="en" data-display-modes="inline fullscreen" data-plugin-extensions>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -97,7 +97,8 @@
             return;
           }
           try {
-            var answer = await host.updateModelContext({ content: text ? [{ type: 'text', text: text }] : [] });
+            // At most the card's usual wait, so a host that never answers cannot hold later selections back.
+            var answer = await withDeadline(host.updateModelContext({ content: text ? [{ type: 'text', text: text }] : [] }));
             if (answer && answer.isError) throw new Error('refused');
             if (!quiet && revision === selectionRevision) notice.textContent = item ? 'Selection shared with the conversation.' : '';
           } catch (_) {

@@ -26,6 +26,13 @@
  * displayMode() and, where the host offers one of those modes, asks for it
  * with requestDisplayMode(mode), which answers { mode } with the mode given.
  * A card without the attribute declares none and is offered none.
+ *
+ * Plugin Extensions in ChatGPT (#665): model context (ui/update-model-context)
+ * and deep links (hostContext["openai/deepLink"]) are MCP Apps features that
+ * window.openai does not carry. A card that needs them says so on its
+ * <html data-plugin-extensions>, and in ChatGPT the bridge then also opens the
+ * MCP Apps handshake with the host. Only those two come from it; everything
+ * else stays on window.openai. A host that never answers changes nothing.
  */
 (function () {
   "use strict";
@@ -84,7 +91,19 @@
     capability("openLink", "openExternal", function (api, url) { return api.openExternal({ href: url }); });
     capability("sendMessage", "sendFollowUpMessage", function (api, text) { return api.sendFollowUpMessage({ prompt: text }); });
     capability("setWidgetState", "setWidgetState", function (api, value) { return api.setWidgetState(value); });
-    capability("updateModelContext", "updateModelContext", function (api, value) { return api.updateModelContext(value); });
+    // ChatGPT's own call if it has one; else the MCP Apps request, once the handshake says the host takes it (#665).
+    var extensions = null;
+    Object.defineProperty(chatgpt, "updateModelContext", {
+      enumerable: true,
+      get: function () {
+        var api = openai();
+        if (typeof api.updateModelContext === "function") return function (value) { return api.updateModelContext(value); };
+        var caps = extensions && extensions.capabilities;
+        var offered = caps && ((caps.updateModelContext && caps.updateModelContext.text) || (caps.experimental && caps.experimental["openai/modelContext"]));
+        if (!offered) return undefined;
+        return function (value) { return extensions.request("ui/update-model-context", value); };
+      }
+    });
     // Only for a card that lists the mode it asks for (#662).
     Object.defineProperty(chatgpt, "requestDisplayMode", {
       enumerable: true,
@@ -103,7 +122,72 @@
     capability("getFileDownloadUrl", "getFileDownloadUrl", function (api, request) { return api.getFileDownloadUrl(request); });
     window.letterIrlHost = chatgpt;
     window.addEventListener("openai:set_globals", changed);
+    if (document.documentElement.hasAttribute("data-plugin-extensions") && window.parent && window.parent !== window) {
+      extensions = openExtensions(window.parent);
+      // The deep link (and anything else the handshake says) over window.openai's own host context.
+      chatgpt.hostContext = function () { return Object.assign({}, openai().hostContext || {}, extensions.hostContext); };
+    }
     return;
+  }
+
+  // The MCP Apps handshake beside window.openai, for model context and deep links only (#665).
+  function openExtensions(host) {
+    var pending = {};
+    var nextId = 1;
+    var link = { capabilities: null, hostContext: {} };
+    function post(message) {
+      message.jsonrpc = "2.0";
+      host.postMessage(message, "*");
+    }
+    // Ids of our own, so a reply meant for window.openai's runtime on the same channel is never taken, nor ours given to it.
+    link.request = function (method, params) {
+      var id = "lirl-ext-" + nextId;
+      nextId += 1;
+      return new Promise(function (resolve, reject) {
+        pending[id] = { resolve: resolve, reject: reject };
+        post({ id: id, method: method, params: params });
+      });
+    };
+    window.addEventListener("message", function (event) {
+      if (event.source !== host) return;
+      var message = event.data;
+      if (!message || message.jsonrpc !== "2.0") return;
+      if (message.method === undefined && message.id !== undefined) {
+        var waiting = pending[message.id];
+        if (!waiting) return;
+        delete pending[message.id];
+        if (message.error) waiting.reject(new Error((message.error && message.error.message) || "The host refused the request"));
+        else waiting.resolve(message.result);
+        return;
+      }
+      if (message.method === "ui/notifications/host-context-changed") {
+        if (message.params && typeof message.params === "object") Object.assign(link.hostContext, message.params);
+        changed();
+      } else if (link.capabilities && (message.method === "ping" || message.method === "ui/resource-teardown") && message.id !== undefined) {
+        // Only once the host has taken us as an MCP App; before that, window.openai's runtime answers for the frame.
+        post({ id: message.id, result: {} });
+      }
+      // Tool input and results stay window.openai's, and requests we do not serve go unanswered: nothing else is taken.
+    });
+    link.request("ui/initialize", {
+      appInfo: { name: "letter-irl-card", version: "1.0.0" },
+      appCapabilities: cardModes.length > 0 ? { availableDisplayModes: cardModes } : {},
+      protocolVersion: "2026-01-26"
+    }).then(
+      function (result) {
+        link.capabilities = (result && result.hostCapabilities) || {};
+        // A change that arrived before this reply is newer than the reply's context.
+        if (result && result.hostContext && typeof result.hostContext === "object") link.hostContext = Object.assign({}, result.hostContext, link.hostContext);
+        post({ method: "ui/notifications/initialized", params: {} });
+        console.info("letterIrlHost: Plugin Extensions handshake answered", Object.keys(link.capabilities));
+        changed();
+      },
+      function (error) {
+        // Refused: window.openai alone, as before.
+        console.info("letterIrlHost: Plugin Extensions handshake refused", error && error.message);
+      }
+    );
+    return link;
   }
 
   // MCP Apps: the host is the frame's parent. A page that is not framed has no
