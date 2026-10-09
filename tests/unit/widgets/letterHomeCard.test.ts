@@ -559,8 +559,11 @@ describe('the compact home (#662)', () => {
     (doc.querySelector('[data-key="order/sched-1"] .row-main') as HTMLButtonElement).click();
     button(doc, 'Cancel scheduled mail')!.click();
     const confirm = button(doc, 'Confirm cancellation')!;
+    doc.hasFocus = () => true;
     confirm.focus();
     confirm.click();
+    // As a browser does when the focused Confirm button is disabled: focus drops to the page.
+    confirm.disabled = false; confirm.blur(); confirm.disabled = true;
     await tick(); await tick();
     expect(callTool).toHaveBeenCalledExactlyOnceWith('cancel_scheduled_mail', { orderId: 'sched-1', confirm: true });
     const article = doc.querySelector('[data-key="order/sched-1"]') as HTMLElement;
@@ -568,7 +571,7 @@ describe('the compact home (#662)', () => {
     expect(article.closest('#settled-orders')).toBeNull();
     expect(article.querySelector('.row-main .state')?.textContent).toBe('Cancelled; not mailed');
     expect((article.querySelector('.row-details') as HTMLElement).hidden).toBe(false);
-    expect(doc.activeElement).toBe(article.querySelector('.row-main'));
+    expect(doc.activeElement === article.querySelector('.row-main')).toBe(true);
     expect(doc.getElementById('notice')?.textContent).toBe('Cancelled. The gift letter is back.');
 
     // A Refresh that fails keeps it in view.
@@ -576,6 +579,10 @@ describe('the compact home (#662)', () => {
     (doc.getElementById('refresh') as HTMLButtonElement).click();
     await tick();
     expect(doc.getElementById('notice')?.textContent).toContain('may be out of date');
+    // Drawn again (See all, then Show less): the card still keeps it.
+    const seeAll = doc.getElementById('see-all') as HTMLButtonElement;
+    seeAll.click(); await tick(); seeAll.click(); await tick();
+    expect(seeAll.textContent).toBe('See all');
     expect(shown(doc, '[data-key="order/sched-1"]').length).toBe(1);
     // A Refresh brings the server's word: from then on it folds with settled mail.
     const after = big(); after.orders[0] = { ...after.orders[0], status: 'cancelled', cancellable: false };
@@ -586,6 +593,23 @@ describe('the compact home (#662)', () => {
     expect(doc.getElementById('notice')?.textContent).toBe('Mail list refreshed.');
     expect(Boolean(doc.querySelector('#settled-orders [data-key="order/sched-1"]'))).toBe(true);
     expect(shown(doc, '[data-key="order/sched-1"]').length).toBe(0);
+    dom.window.close();
+  });
+
+  it('gives Refresh its focus back after it runs, as a keyboard press leaves it', async () => {
+    const { dom, doc, host } = open(big());
+    doc.hasFocus = () => true;
+    const refreshButton = doc.getElementById('refresh') as HTMLButtonElement;
+    refreshButton.focus();
+    host.callTool.mockImplementation(async () => {
+      // As a browser does when the focused Refresh is disabled: focus drops to the page.
+      refreshButton.disabled = false; refreshButton.blur(); refreshButton.disabled = true;
+      return { structuredContent: big() };
+    });
+    refreshButton.click();
+    await tick();
+    expect(doc.getElementById('notice')?.textContent).toBe('Mail list refreshed.');
+    expect(doc.activeElement === refreshButton).toBe(true);
     dom.window.close();
   });
 

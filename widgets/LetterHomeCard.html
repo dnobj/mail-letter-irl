@@ -436,6 +436,8 @@
       });
       refresh.addEventListener('click', async function () {
         if (busy || typeof host.callTool !== 'function') return;
+        // Disabling the focused button drops its focus; it is put back after the refresh, as See all's is.
+        var refreshFocused = document.hasFocus() && document.activeElement === refresh;
         busy = true; refresh.disabled = true; notice.textContent = 'Refreshing your mail...';
         var refreshed = false;
         try {
@@ -452,6 +454,7 @@
           busy = false; sync();
           // Said last, after any redraw, so a refresh that worked is not silent (HOME-01); a route's own notice is kept.
           if (refreshed && !notice.textContent) notice.textContent = 'Mail list refreshed.';
+          if (refreshFocused && document.hasFocus() && lost(document.activeElement)) refresh.focus();
         }
       });
       document.getElementById('clear-selection').addEventListener('click', function () { unresolvedRoute = undefined; select(); });
