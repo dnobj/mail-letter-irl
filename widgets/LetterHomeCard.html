@@ -68,6 +68,8 @@
       // What needs the person first: problems, then mail waiting to go out, then the rest (the server sends newest first).
       var NEED = { returned: 0, failed: 0, scheduled: 1, pending: 2 };
       var labels = {pending:'Awaiting an update',scheduled:'Scheduled',accepted:'Accepted by the printer',printing:'Being submitted or printed',in_transit:'In the mail',delivered:'Delivery estimated',returned:'Returned to sender',failed:'Did not go out',cancelled:'Cancelled; not mailed'};
+      // A status's words; a key the server never sends (one an object inherits) has none.
+      function statusLabel(status) { return Object.prototype.hasOwnProperty.call(labels, status) ? labels[status] : undefined; }
       function el(tag, text, className) {
         var node = document.createElement(tag);
         node.textContent = text;
@@ -88,7 +90,7 @@
       function selectionKey(item, kind) { return kind + '/' + (kind === 'draft' ? item.draftId : item.orderId); }
       function shareContext(item, kind, quiet) {
         var revision = ++selectionRevision;
-        var text = item ? JSON.stringify({ source: 'Letter IRL selection', kind: kind, id: kind === 'draft' ? item.draftId : item.orderId, recipient: item.recipient, status: kind === 'draft' ? 'draft' : item.status, statusLabel: kind === 'draft' ? undefined : labels[item.status], arriveBy: item.arriveBy, mailOn: item.mailOn, editable: kind === 'draft' }) : '';
+        var text = item ? JSON.stringify({ source: 'Letter IRL selection', kind: kind, id: kind === 'draft' ? item.draftId : item.orderId, recipient: item.recipient, status: kind === 'draft' ? 'draft' : item.status, statusLabel: kind === 'draft' ? undefined : statusLabel(item.status), arriveBy: item.arriveBy, mailOn: item.mailOn, editable: kind === 'draft' }) : '';
         contextQueue = contextQueue.catch(function () {}).then(async function () {
           if (typeof host.updateModelContext !== 'function') {
             if (!quiet && revision === selectionRevision && item) notice.textContent = 'Selected here. This host cannot share the selection with the conversation; include the draft or order ID in your request.';
@@ -111,7 +113,7 @@
         var link = document.getElementById('selection-link'); link.hidden = true; link.removeAttribute('href');
         if (item) {
           document.getElementById('selected-title').textContent = item.recipient.name || 'Recipient';
-          document.getElementById('selected-detail').textContent = (kind === 'draft' ? 'Draft ' + item.draftId : (labels[item.status] || 'Status unavailable') + ': order ' + item.orderId) + (item.arriveBy ? '; arrival aim ' + displayDate(item.arriveBy) : '');
+          document.getElementById('selected-detail').textContent = (kind === 'draft' ? 'Draft ' + item.draftId : (statusLabel(item.status) || 'Status unavailable') + ': order ' + item.orderId) + (item.arriveBy ? '; arrival aim ' + displayDate(item.arriveBy) : '');
           try {
             var base = new URL(currentData.appUrl);
             if (base.origin === 'https://chatgpt.com' && /^\/plugins\/[a-zA-Z0-9_-]+\/app\/open_letter_home$/.test(base.pathname) && !base.username && !base.password) {
@@ -155,10 +157,10 @@
             order.status = 'cancelled'; order.cancellable = false;
             // It stays in view, open, where the person was, rather than folding away with settled mail.
             justCancelled = selectionKey(order, 'order');
-            // Asked before the redraw removes the focused Confirm button.
+            // Asked before the redraw removes the focused Confirm button; and only if the redraw lost focus.
             var focused = document.hasFocus();
             render(currentData);
-            if (focused) focusRow(justCancelled);
+            if (focused && lost(document.activeElement)) focusRow(justCancelled);
             notice.textContent = result.message || 'Cancelled; not mailed. Refresh for the current account balance.';
           } catch (_) { notice.textContent = 'Cancellation was not confirmed. Refresh to check the order before trying again.'; }
           finally { busy = false; sync(); if (yes.isConnected) yes.disabled = cancellationUnconfirmed; }
@@ -316,7 +318,7 @@
       }
       // What a row says of an order: its status, and when it aims to arrive or was sent, so rows tell apart.
       function orderState(order) {
-        var label = labels[order.status] || 'Status unavailable';
+        var label = statusLabel(order.status) || 'Status unavailable';
         if (order.status === 'scheduled' && shortDate(order.arriveBy)) return label + ', arrives by ' + shortDate(order.arriveBy);
         return shortDate(order.createdAt) ? label + ' · ' + shortDate(order.createdAt) : label;
       }
@@ -387,7 +389,7 @@
         currentData = data;
         document.getElementById('scope').textContent = 'Up to ' + data.limit + ' active drafts and ' + data.limit + ' recent mail items. Recipients come from that recent mail.';
         noteMode(displayMode());
-        draw();
+        redraw();
         document.getElementById('home').hidden = false;
         notice.textContent = '';
         if (selected) {
@@ -429,7 +431,8 @@
         // that went fullscreen meanwhile has drawn it whole already, and one that came back has asked for compact.
         if (modeChanges === changes) full = displayMode() !== 'fullscreen';
         redraw();
-        if (focused && lost(document.activeElement)) focusControl();
+        // Only while the card still has focus: the person may have gone to the host's page during the wait.
+        if (focused && document.hasFocus() && lost(document.activeElement)) focusControl();
       });
       refresh.addEventListener('click', async function () {
         if (busy || typeof host.callTool !== 'function') return;

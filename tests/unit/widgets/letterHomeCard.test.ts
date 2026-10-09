@@ -571,6 +571,12 @@ describe('the compact home (#662)', () => {
     expect(doc.activeElement).toBe(article.querySelector('.row-main'));
     expect(doc.getElementById('notice')?.textContent).toBe('Cancelled. The gift letter is back.');
 
+    // A Refresh that fails keeps it in view.
+    callTool.mockResolvedValue({ structuredContent: { wrong: true } } as any);
+    (doc.getElementById('refresh') as HTMLButtonElement).click();
+    await tick();
+    expect(doc.getElementById('notice')?.textContent).toContain('may be out of date');
+    expect(shown(doc, '[data-key="order/sched-1"]').length).toBe(1);
     // A Refresh brings the server's word: from then on it folds with settled mail.
     const after = big(); after.orders[0] = { ...after.orders[0], status: 'cancelled', cancellable: false };
     callTool.mockResolvedValue({ structuredContent: after } as any);
@@ -586,6 +592,8 @@ describe('the compact home (#662)', () => {
   it('takes no focus after a cancellation when the card does not have it', async () => {
     const callTool = vi.fn(async () => ({ structuredContent: { orderId: 'sched-1', status: 'cancelled', message: 'Cancelled.' } }));
     const { dom, doc } = open(big(), { callTool });
+    // The host's page has focus, as a browser reports it.
+    doc.hasFocus = () => false;
     (doc.querySelector('[data-key="order/sched-1"] .row-main') as HTMLButtonElement).click();
     button(doc, 'Cancel scheduled mail')!.click();
     button(doc, 'Confirm cancellation')!.click();
@@ -621,16 +629,26 @@ describe('the compact home (#662)', () => {
   });
 
   it('gives See all its focus back after the wait, and leaves the home compact when the host went fullscreen and back meanwhile', async () => {
-    const held: { seeAll?: HTMLButtonElement } = {};
-    // As a browser does when the focused button is disabled.
-    const blurring = vi.fn(async () => { held.seeAll!.blur(); return { mode: 'inline' }; });
+    const held: { seeAll?: HTMLButtonElement; away?: boolean } = {};
+    // As a browser does when the focused button is disabled: focus drops to the page, the card's document keeps it.
+    // (JSDOM will not blur a disabled button, so the drop is done by hand.)
+    const drop = () => { const button = held.seeAll!; button.disabled = false; button.blur(); button.disabled = true; };
+    const blurring = vi.fn(async () => { drop(); return { mode: 'inline' }; });
     const first = open(big(), { requestDisplayMode: blurring });
+    first.doc.hasFocus = () => !held.away;
     const seeAll = first.doc.getElementById('see-all') as HTMLButtonElement;
     held.seeAll = seeAll;
     seeAll.focus();
     seeAll.click(); await tick();
-    expect(first.doc.activeElement).toBe(seeAll);
+    expect(first.doc.activeElement === seeAll).toBe(true);
     expect(seeAll.textContent).toBe('Show less');
+    // The person goes to the host's page during the wait: focus stays there.
+    seeAll.click(); await tick();
+    seeAll.focus();
+    blurring.mockImplementation(async () => { drop(); held.away = true; return { mode: 'inline' }; });
+    seeAll.click(); await tick();
+    expect(seeAll.textContent).toBe('Show less');
+    expect(first.doc.activeElement === seeAll).toBe(false);
     first.dom.window.close();
 
     let mode = 'inline';
@@ -651,6 +669,7 @@ describe('the compact home (#662)', () => {
     data.drafts = [{ ...draft(1), expiresAt: '2026-10-20T00:00:00Z' }, { ...draft(2), expiresAt: 'soon' }, { ...draft(3), expiresAt: '2026-10-10T00:00:00Z' }];
     data.orders = [order('constructor', { orderId: 'odd-1' }), order('failed', { orderId: 'fail-9' })];
     const first = open(data);
+    expect(first.doc.querySelector('[data-key="order/odd-1"] .state')?.textContent).toBe('Status unavailable');
     expect(shown(first.doc, '#drafts > article').map(node => node.getAttribute('data-key'))).toEqual(['draft/draft-3', 'draft/draft-1', 'draft/draft-2']);
     expect(shown(first.doc, '#orders > article').map(node => node.getAttribute('data-key'))).toEqual(['order/fail-9', 'order/odd-1']);
     first.dom.window.close();
