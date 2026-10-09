@@ -3333,7 +3333,7 @@ Needs HOME-01, a host advertising text model context, and development arrive-by 
 7. Disable host context support or refuse the update: selection stays visible locally and the notice says it was not shared. Check desktop and mobile layouts and dark mode.
 
 **Run 2026-10-08 on DEV 796c05c (ChatGPT web, Claude web; testlirl02 with a scheduled gift letter):**
-- Step 1 on ChatGPT web: **failed**. Selecting showed "This host cannot share the selection with the conversation" (#665: `window.openai` has no model context; the handshake is expected to fix it, pending a re-run). On Claude web the card said "Selection shared with the conversation.", but Claude's model did not see it on the next turn.
+- Step 1 on ChatGPT web: **failed**. Selecting showed "This host cannot share the selection with the conversation" (#665: `window.openai` has no model context). On Claude web the card said "Selection shared with the conversation.", but Claude's model did not see it on the next turn.
 - Step 4 on ChatGPT web: passed. Cancel asked first; Keep scheduled changed nothing; Confirm cancellation said "Cancelled. The gift letter is back in the account, to use again."; the balance showed the gift letter back; the order stayed in view reading "Cancelled; not mailed" and Cancel was gone.
 
 Automated coverage: real MCP wire registration/schema checks, owner-isolated PostgreSQL home reads, DOM cancellation/selection/deep-link checks, host capability negotiation and serialized replacement context. Existing scheduled-mail PostgreSQL suites cover idempotency, cancellation versus dispatch, expired/refunded funding and process recovery; no transaction workflow changes in this slice.
@@ -3350,7 +3350,13 @@ Requires HOME-01/HOME-02 and the actual installed development plugin ID configur
 6. Unset the plugin ID: no share link is offered. Unsafe IDs or URLs cannot produce links. Select draft/order must remain usable locally and unsupported model context must be reported.
 7. Test dark mode and narrow layout. No send, edit, payment or cancellation occurs from navigating a deep link.
 
-**Run 2026-10-08 on DEV 796c05c, ChatGPT web, `LETTER_IRL_CHATGPT_PLUGIN_ID` set:** "Open this selection" was offered. Its link went to the full-page app view (`chatgpt.com/mcp-app/<app id>/open_letter_home#/order/<id>`), where the home drew fullscreen, but nothing was selected: the route never reached the card (#665; the handshake is expected to fix it; re-run after it deploys).
+**Run 2026-10-08 on DEV 796c05c, ChatGPT web, `LETTER_IRL_CHATGPT_PLUGIN_ID` set:** "Open this selection" was offered. Its link went to the full-page app view (`chatgpt.com/mcp-app/<app id>/open_letter_home#/order/<id>`), where the home drew fullscreen, but nothing was selected: the route never reached the card (#665).
+
+**Re-run 2026-10-09 on DEV 1cd57cf (#666, the handshake), ChatGPT web:**
+- **Step 1 passed.** The same link opened the full-page app view with the order selected.
+- **HOME-02 step 1 passed.** The card said "Selection shared with the conversation." and ChatGPT's composer showed a Context chip.
+- **The model saw it.** Asked with no tools, ChatGPT said "The selected item is order 21dc0954-… for Sam Rivera in New York, NY".
+- **Not yet run:** steps 2 to 7, and ChatGPT Android.
 
 ### HOME-04: the compact home and See all (#662)
 
