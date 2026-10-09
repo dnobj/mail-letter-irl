@@ -355,7 +355,7 @@ it('lets explicit selection supersede an initially unresolved route even when Re
   const first = { drafts: [], orders: [order('accepted', { orderId: 'order-2' })], recipients: [], limit: 20 };
   const { dom, host, doc } = open(first, { updateModelContext, hostContext: () => ({ 'openai/deepLink': { url: '/order/order-1' } }) });
   expect(doc.getElementById('selection')?.hidden).toBe(true);
-  (doc.querySelector('#orders button') as HTMLButtonElement).click();
+  (Array.from(doc.querySelectorAll('#orders button')).find(node => node.textContent === 'Select order') as HTMLButtonElement).click();
   host.callTool.mockResolvedValue({ structuredContent: { ...first, orders: [order('scheduled'), ...first.orders] } });
   (doc.getElementById('refresh') as HTMLButtonElement).click(); await new Promise(resolve => setTimeout(resolve, 0));
   expect(doc.getElementById('selected-detail')?.textContent).toContain('order-2');
@@ -400,4 +400,442 @@ it.each(['https://evil.example/plugins/dev/app/open_letter_home', 'https://user:
   const link = doc.getElementById('selection-link') as HTMLAnchorElement;
   expect(link.hidden).toBe(true); expect(link.getAttribute('href')).toBeNull();
   dom.window.close();
+});
+
+describe('the compact home (#662)', () => {
+  const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+  const draft = (n: number) => ({ draftId: `draft-${n}`, recipient: { name: `Draft person ${n}`, city: 'Chicago', state: 'IL' }, mailType: 'letter', expiresAt: '2026-10-20T00:00:00Z' });
+  const delivered = Array.from({ length: 16 }, (_, n) => order('delivered', { orderId: `done-${n}` }));
+  const big = () => ({
+    drafts: [1, 2, 3, 4, 5].map(draft),
+    orders: [
+      order('scheduled', { orderId: 'sched-1', cancellable: true, arriveBy: '2026-10-30', mailOn: '2026-10-21' }),
+      order('failed', { orderId: 'fail-1' }), order('in_transit', { orderId: 'move-1' }),
+      order('accepted', { orderId: 'move-2' }), order('printing', { orderId: 'move-3' }),
+      ...delivered, order('cancelled', { orderId: 'gone-1' })
+    ],
+    recipients: [{ name: 'Ruth', city: 'Chicago', state: 'IL' }], limit: 20
+  });
+  const shown = (doc: Document, selector: string) => Array.from(doc.querySelectorAll(selector)).filter(node => !(node as HTMLElement).hidden && !(node as HTMLElement).closest('[hidden]'));
+  const button = (doc: Document, label: string) => Array.from(doc.querySelectorAll('button')).find(node => node.textContent === label) as HTMLButtonElement | undefined;
+  const group = (doc: Document) => doc.querySelector('#orders > button.group') as HTMLButtonElement;
+
+  it('inline, shows a few rows of what needs the person, folds settled mail away, and keeps recipients for the whole view', () => {
+    const { dom, doc } = open(big());
+    expect(shown(doc, '#drafts > article')).toHaveLength(3);
+    expect(button(doc, 'Show 2 more')).toBeDefined();
+    // Problems first, then scheduled, then the rest, newest first within each.
+    expect(shown(doc, '#orders > article').map(node => node.getAttribute('data-key'))).toEqual(['order/fail-1', 'order/sched-1', 'order/move-1', 'order/move-2']);
+    expect(button(doc, 'Show 1 more')).toBeDefined();
+    expect(group(doc).textContent).toBe('Delivery estimated (16) · Cancelled (1)');
+    expect(group(doc).getAttribute('aria-expanded')).toBe('false');
+    expect(group(doc).getAttribute('aria-controls')).toBe('settled-orders');
+    expect(group(doc).getAttribute('aria-label')).toBe('Delivery estimated (16) · Cancelled (1), settled mail');
+    expect((doc.getElementById('settled-orders') as HTMLElement).hidden).toBe(true);
+    expect(doc.querySelectorAll('#settled-orders > article')).toHaveLength(17);
+    expect((doc.getElementById('people') as HTMLElement).hidden).toBe(true);
+    const seeAll = doc.getElementById('see-all') as HTMLButtonElement;
+    expect(seeAll.hidden).toBe(false);
+    expect(seeAll.textContent).toBe('See all');
+    expect(seeAll.getAttribute('aria-expanded')).toBe('false');
+    dom.window.close();
+  });
+
+  it('draws each item as one line whose details and actions open under it', () => {
+    const { dom, doc } = open(big());
+    const article = doc.querySelector('[data-key="order/sched-1"]') as HTMLElement;
+    const main = article.querySelector('.row-main') as HTMLButtonElement;
+    const details = article.querySelector('.row-details') as HTMLElement;
+    expect(Array.from(main.children).map(node => node.textContent)).toEqual(['Letter', 'Ruth', 'Chicago, IL', 'Scheduled, arrives by Oct 30']);
+    expect(main.getAttribute('aria-controls')).toBe(details.id);
+    expect(details.hidden).toBe(true);
+    expect(main.getAttribute('aria-expanded')).toBe('false');
+    main.click();
+    expect(details.hidden).toBe(false);
+    expect(main.getAttribute('aria-expanded')).toBe('true');
+    expect(Array.from(details.querySelectorAll('button')).map(node => node.textContent)).toEqual(['Select order', 'Cancel scheduled mail']);
+    main.click();
+    expect(details.hidden).toBe(true);
+    const draftRow = doc.querySelector('[data-key="draft/draft-1"] .row-main') as HTMLElement;
+    expect(Array.from(draftRow.children).map(node => node.textContent)).toEqual(['Letter draft', 'Draft person 1', 'Chicago, IL', expect.stringMatching(/^Expires /)]);
+    dom.window.close();
+  });
+
+  it('opens more rows and the settled mail in place, and keeps them and an open row open across a refresh', async () => {
+    const { dom, doc, host } = open(big());
+    button(doc, 'Show 2 more')!.click();
+    expect(shown(doc, '#drafts > article')).toHaveLength(5);
+    expect(button(doc, 'Show 2 more')).toBeUndefined();
+    group(doc).click();
+    expect((doc.getElementById('settled-orders') as HTMLElement).hidden).toBe(false);
+    expect(group(doc).getAttribute('aria-expanded')).toBe('true');
+    (doc.querySelector('[data-key="order/done-3"] .row-main') as HTMLButtonElement).click();
+    host.callTool.mockResolvedValue({ structuredContent: big() });
+    (doc.getElementById('refresh') as HTMLButtonElement).click();
+    await tick();
+    expect(shown(doc, '#drafts > article')).toHaveLength(5);
+    expect((doc.getElementById('settled-orders') as HTMLElement).hidden).toBe(false);
+    expect((doc.querySelector('[data-key="order/done-3"] .row-details') as HTMLElement).hidden).toBe(false);
+    group(doc).click();
+    expect((doc.getElementById('settled-orders') as HTMLElement).hidden).toBe(true);
+    expect(group(doc).getAttribute('aria-expanded')).toBe('false');
+    dom.window.close();
+  });
+
+  it('See all asks the host for fullscreen and draws everything, and the home is compact again when the host returns inline', async () => {
+    let mode = 'inline';
+    const requestDisplayMode = vi.fn(async () => ({ mode: 'fullscreen' }));
+    const { dom, doc, host } = open(big(), { requestDisplayMode, displayMode: () => mode });
+    (doc.getElementById('see-all') as HTMLButtonElement).click();
+    await tick();
+    expect(requestDisplayMode).toHaveBeenCalledExactlyOnceWith('fullscreen');
+    expect(shown(doc, '#drafts > article')).toHaveLength(5);
+    expect(shown(doc, '#orders article')).toHaveLength(22);
+    expect((doc.getElementById('people') as HTMLElement).hidden).toBe(false);
+    expect(button(doc, 'Show 2 more')).toBeUndefined();
+    mode = 'fullscreen';
+    host.onChange.mock.calls[0][0]();
+    expect((doc.getElementById('see-all') as HTMLButtonElement).hidden).toBe(true);
+    expect(shown(doc, '#orders article')).toHaveLength(22);
+    mode = 'inline';
+    host.onChange.mock.calls[0][0]();
+    expect((doc.getElementById('see-all') as HTMLButtonElement).hidden).toBe(false);
+    expect((doc.getElementById('see-all') as HTMLButtonElement).textContent).toBe('See all');
+    expect(shown(doc, '#drafts > article')).toHaveLength(3);
+    expect((doc.getElementById('people') as HTMLElement).hidden).toBe(true);
+    dom.window.close();
+  });
+
+  it('See all opens everything in place where the host has no fullscreen, refuses it or gives another mode, and Show less folds it back', async () => {
+    const hosts = [{}, { requestDisplayMode: vi.fn(async () => { throw new Error('no'); }) }, { requestDisplayMode: vi.fn(async () => ({ mode: 'inline' })) }];
+    for (const extras of hosts) {
+      const { dom, doc } = open(big(), extras);
+      const seeAll = doc.getElementById('see-all') as HTMLButtonElement;
+      seeAll.click();
+      await tick();
+      expect(shown(doc, '#orders article')).toHaveLength(22);
+      expect((doc.getElementById('people') as HTMLElement).hidden).toBe(false);
+      expect(seeAll.textContent).toBe('Show less');
+      expect(seeAll.getAttribute('aria-expanded')).toBe('true');
+      seeAll.click();
+      await tick();
+      expect(shown(doc, '#drafts > article')).toHaveLength(3);
+      expect(seeAll.textContent).toBe('See all');
+      expect(seeAll.getAttribute('aria-expanded')).toBe('false');
+      dom.window.close();
+    }
+  });
+
+  it('puts what needs the person first: the draft expiring soonest, and older problems before newer mail on the way', () => {
+    const data = big();
+    data.drafts = [
+      { ...draft(1), expiresAt: '2026-10-20T00:00:00Z' }, { ...draft(2), expiresAt: '2026-10-19T00:00:00Z' },
+      { ...draft(3), expiresAt: '2026-10-21T00:00:00Z' }, { ...draft(4), expiresAt: '2026-10-09T00:00:00Z' }
+    ];
+    data.orders = [
+      order('in_transit', { orderId: 'new-1' }), order('accepted', { orderId: 'new-2' }), order('printing', { orderId: 'new-3' }),
+      order('pending', { orderId: 'held-1' }), order('in_transit', { orderId: 'new-4' }), order('scheduled', { orderId: 'sched-9' }),
+      order('returned', { orderId: 'back-1' }), order('delivered', { orderId: 'done-9' })
+    ];
+    const { dom, doc } = open(data);
+    expect(shown(doc, '#drafts > article').map(node => node.getAttribute('data-key'))).toEqual(['draft/draft-4', 'draft/draft-2', 'draft/draft-1']);
+    expect(shown(doc, '#orders > article').map(node => node.getAttribute('data-key'))).toEqual(['order/back-1', 'order/sched-9', 'order/held-1', 'order/new-1']);
+    dom.window.close();
+  });
+
+  it('says nothing is on the way when all mail is settled, and nothing when there is no mail', () => {
+    const settledOnly = { drafts: [], orders: [order('delivered', { orderId: 'done-1' })], recipients: [], limit: 20 };
+    const first = open(settledOnly);
+    expect(first.doc.getElementById('orders')?.firstElementChild?.textContent).toBe('Nothing on the way.');
+    first.dom.window.close();
+    const none = open({ drafts: [], orders: [], recipients: [], limit: 20 });
+    expect(none.doc.getElementById('orders')?.textContent).toBe('No recent mail to show.');
+    none.dom.window.close();
+  });
+
+  it('keeps an order cancelled here in view, open and focused, rather than folding it away', async () => {
+    const callTool = vi.fn(async () => ({ structuredContent: { orderId: 'sched-1', status: 'cancelled', message: 'Cancelled. The gift letter is back.' } }));
+    const { dom, doc } = open(big(), { callTool });
+    (doc.querySelector('[data-key="order/sched-1"] .row-main') as HTMLButtonElement).click();
+    button(doc, 'Cancel scheduled mail')!.click();
+    const confirm = button(doc, 'Confirm cancellation')!;
+    doc.hasFocus = () => true;
+    confirm.focus();
+    confirm.click();
+    // As a browser does when the focused Confirm button is disabled: focus drops to the page.
+    confirm.disabled = false; confirm.blur(); confirm.disabled = true;
+    await tick(); await tick();
+    expect(callTool).toHaveBeenCalledExactlyOnceWith('cancel_scheduled_mail', { orderId: 'sched-1', confirm: true });
+    const article = doc.querySelector('[data-key="order/sched-1"]') as HTMLElement;
+    expect(shown(doc, '[data-key="order/sched-1"]')).toHaveLength(1);
+    expect(article.closest('#settled-orders')).toBeNull();
+    expect(article.querySelector('.row-main .state')?.textContent).toBe('Cancelled; not mailed');
+    expect((article.querySelector('.row-details') as HTMLElement).hidden).toBe(false);
+    expect(doc.activeElement === article.querySelector('.row-main')).toBe(true);
+    expect(doc.getElementById('notice')?.textContent).toBe('Cancelled. The gift letter is back.');
+
+    // A Refresh that fails keeps it in view.
+    callTool.mockResolvedValue({ structuredContent: { wrong: true } } as any);
+    (doc.getElementById('refresh') as HTMLButtonElement).click();
+    await tick();
+    expect(doc.getElementById('notice')?.textContent).toContain('may be out of date');
+    // Drawn again (See all, then Show less): the card still keeps it.
+    const seeAll = doc.getElementById('see-all') as HTMLButtonElement;
+    seeAll.click(); await tick(); seeAll.click(); await tick();
+    expect(seeAll.textContent).toBe('See all');
+    expect(shown(doc, '[data-key="order/sched-1"]').length).toBe(1);
+    // A Refresh brings the server's word: from then on it folds with settled mail.
+    const after = big(); after.orders[0] = { ...after.orders[0], status: 'cancelled', cancellable: false };
+    callTool.mockResolvedValue({ structuredContent: after } as any);
+    (doc.getElementById('refresh') as HTMLButtonElement).click();
+    await tick();
+    expect(callTool).toHaveBeenLastCalledWith('open_letter_home', {});
+    expect(doc.getElementById('notice')?.textContent).toBe('Mail list refreshed.');
+    expect(Boolean(doc.querySelector('#settled-orders [data-key="order/sched-1"]'))).toBe(true);
+    expect(shown(doc, '[data-key="order/sched-1"]').length).toBe(0);
+    dom.window.close();
+  });
+
+  it('gives Refresh its focus back after it runs, as a keyboard press leaves it', async () => {
+    const { dom, doc, host } = open(big());
+    doc.hasFocus = () => true;
+    const refreshButton = doc.getElementById('refresh') as HTMLButtonElement;
+    refreshButton.focus();
+    host.callTool.mockImplementation(async () => {
+      // As a browser does when the focused Refresh is disabled: focus drops to the page.
+      refreshButton.disabled = false; refreshButton.blur(); refreshButton.disabled = true;
+      return { structuredContent: big() };
+    });
+    refreshButton.click();
+    await tick();
+    expect(doc.getElementById('notice')?.textContent).toBe('Mail list refreshed.');
+    expect(doc.activeElement === refreshButton).toBe(true);
+    dom.window.close();
+  });
+
+  it('leaves focus where the person put it during a Refresh: on the host page, or on a row in the card', async () => {
+    // The person goes to the host's page while Refresh runs.
+    const away = open(big());
+    let focused = true;
+    away.doc.hasFocus = () => focused;
+    const awayRefresh = away.doc.getElementById('refresh') as HTMLButtonElement;
+    awayRefresh.focus();
+    away.host.callTool.mockImplementation(async () => {
+      awayRefresh.disabled = false; awayRefresh.blur(); awayRefresh.disabled = true;
+      focused = false;
+      return { structuredContent: big() };
+    });
+    awayRefresh.click();
+    await tick();
+    expect(away.doc.getElementById('notice')?.textContent).toBe('Mail list refreshed.');
+    expect(away.doc.activeElement === awayRefresh).toBe(false);
+    away.dom.window.close();
+
+    // The card's page never had focus when Refresh was pressed: nothing is taken.
+    const unfocused = open(big());
+    unfocused.doc.hasFocus = () => false;
+    const unfocusedRefresh = unfocused.doc.getElementById('refresh') as HTMLButtonElement;
+    unfocusedRefresh.focus();
+    unfocused.host.callTool.mockImplementation(async () => {
+      unfocusedRefresh.disabled = false; unfocusedRefresh.blur(); unfocusedRefresh.disabled = true;
+      unfocused.doc.hasFocus = () => true;
+      return { structuredContent: big() };
+    });
+    unfocusedRefresh.click();
+    await tick();
+    expect(unfocused.doc.activeElement === unfocusedRefresh).toBe(false);
+    unfocused.dom.window.close();
+
+    // The person tabs to a row while Refresh runs: focus stays on that row.
+    const tabbed = open(big());
+    tabbed.doc.hasFocus = () => true;
+    const tabbedRefresh = tabbed.doc.getElementById('refresh') as HTMLButtonElement;
+    tabbedRefresh.focus();
+    tabbed.host.callTool.mockImplementation(async () => {
+      tabbedRefresh.disabled = false; tabbedRefresh.blur(); tabbedRefresh.disabled = true;
+      (tabbed.doc.querySelector('[data-key="order/move-1"] .row-main') as HTMLButtonElement).focus();
+      return { structuredContent: big() };
+    });
+    tabbedRefresh.click();
+    await tick();
+    expect(tabbed.doc.activeElement === tabbed.doc.querySelector('[data-key="order/move-1"] .row-main')).toBe(true);
+    tabbed.dom.window.close();
+  });
+
+  it('keeps focus on the same row when a Refresh redraws the home', async () => {
+    const { dom, doc, host } = open(big());
+    (doc.querySelector('[data-key="order/move-1"] .row-main') as HTMLButtonElement).focus();
+    host.callTool.mockResolvedValue({ structuredContent: big() });
+    (doc.getElementById('refresh') as HTMLButtonElement).click();
+    await tick();
+    expect(doc.getElementById('notice')?.textContent).toBe('Mail list refreshed.');
+    expect(doc.activeElement === doc.querySelector('[data-key="order/move-1"] .row-main')).toBe(true);
+    dom.window.close();
+  });
+
+  it('takes no focus after a cancellation when the card does not have it', async () => {
+    const callTool = vi.fn(async () => ({ structuredContent: { orderId: 'sched-1', status: 'cancelled', message: 'Cancelled.' } }));
+    const { dom, doc } = open(big(), { callTool });
+    // The host's page has focus, as a browser reports it.
+    doc.hasFocus = () => false;
+    (doc.querySelector('[data-key="order/sched-1"] .row-main') as HTMLButtonElement).click();
+    button(doc, 'Cancel scheduled mail')!.click();
+    button(doc, 'Confirm cancellation')!.click();
+    await tick(); await tick();
+    expect(callTool).toHaveBeenCalledTimes(1);
+    expect(doc.activeElement).toBe(doc.body);
+    dom.window.close();
+  });
+
+  it('keeps focus on the same row through a redraw, and takes none when the host changes things while the card is not focused', () => {
+    let mode = 'fullscreen';
+    const { dom, doc, host } = open(big(), { displayMode: () => mode });
+    const moving = () => doc.querySelector('[data-key="order/move-1"] .row-main') as HTMLButtonElement;
+    const first = moving();
+    first.focus();
+    mode = 'inline';
+    host.onChange.mock.calls[0][0]();
+    expect(moving()).not.toBe(first);
+    expect(doc.activeElement).toBe(moving());
+    // A settled row folds away: focus goes to See all.
+    mode = 'fullscreen'; host.onChange.mock.calls[0][0]();
+    (doc.querySelector('[data-key="order/done-2"] .row-main') as HTMLButtonElement).focus();
+    mode = 'inline'; host.onChange.mock.calls[0][0]();
+    expect(doc.activeElement).toBe(doc.getElementById('see-all'));
+    // The host's page has focus: a change it makes leaves focus where it is.
+    mode = 'fullscreen'; host.onChange.mock.calls[0][0]();
+    (doc.querySelector('[data-key="order/done-2"] .row-main') as HTMLButtonElement).focus();
+    doc.hasFocus = () => false;
+    mode = 'inline'; host.onChange.mock.calls[0][0]();
+    expect(doc.activeElement).not.toBe(doc.getElementById('see-all'));
+    expect(doc.activeElement).not.toBe(doc.getElementById('refresh'));
+    dom.window.close();
+  });
+
+  it('gives See all its focus back after the wait, and leaves the home compact when the host went fullscreen and back meanwhile', async () => {
+    const held: { seeAll?: HTMLButtonElement; away?: boolean } = {};
+    // As a browser does when the focused button is disabled: focus drops to the page, the card's document keeps it.
+    // (JSDOM will not blur a disabled button, so the drop is done by hand.)
+    const drop = () => { const button = held.seeAll!; button.disabled = false; button.blur(); button.disabled = true; };
+    const blurring = vi.fn(async () => { drop(); return { mode: 'inline' }; });
+    const first = open(big(), { requestDisplayMode: blurring });
+    first.doc.hasFocus = () => !held.away;
+    const seeAll = first.doc.getElementById('see-all') as HTMLButtonElement;
+    held.seeAll = seeAll;
+    seeAll.focus();
+    seeAll.click(); await tick();
+    expect(first.doc.activeElement === seeAll).toBe(true);
+    expect(seeAll.textContent).toBe('Show less');
+    // The person goes to the host's page during the wait: focus stays there.
+    seeAll.click(); await tick();
+    seeAll.focus();
+    blurring.mockImplementation(async () => { drop(); held.away = true; return { mode: 'inline' }; });
+    seeAll.click(); await tick();
+    expect(seeAll.textContent).toBe('Show less');
+    expect(first.doc.activeElement === seeAll).toBe(false);
+    first.dom.window.close();
+
+    let mode = 'inline';
+    let answer!: (value: unknown) => void;
+    const waiting = vi.fn(() => new Promise(resolve => { answer = resolve; }));
+    const second = open(big(), { requestDisplayMode: waiting, displayMode: () => mode });
+    (second.doc.getElementById('see-all') as HTMLButtonElement).click();
+    mode = 'fullscreen'; second.host.onChange.mock.calls[0][0]();
+    mode = 'inline'; second.host.onChange.mock.calls[0][0]();
+    answer({ mode: 'fullscreen' }); await tick();
+    expect(shown(second.doc, '#drafts > article')).toHaveLength(3);
+    expect((second.doc.getElementById('see-all') as HTMLButtonElement).textContent).toBe('See all');
+    second.dom.window.close();
+  });
+
+  it('puts drafts with an unreadable date last, ranks an unknown status with the rest, and says nothing is on the way beside a kept settled order', () => {
+    const data = big();
+    data.drafts = [{ ...draft(1), expiresAt: '2026-10-20T00:00:00Z' }, { ...draft(2), expiresAt: 'soon' }, { ...draft(3), expiresAt: '2026-10-10T00:00:00Z' }];
+    data.orders = [order('constructor', { orderId: 'odd-1' }), order('failed', { orderId: 'fail-9' })];
+    const first = open(data);
+    expect(first.doc.querySelector('[data-key="order/odd-1"] .state')?.textContent).toBe('Status unavailable');
+    expect(shown(first.doc, '#drafts > article').map(node => node.getAttribute('data-key'))).toEqual(['draft/draft-3', 'draft/draft-1', 'draft/draft-2']);
+    expect(shown(first.doc, '#orders > article').map(node => node.getAttribute('data-key'))).toEqual(['order/fail-9', 'order/odd-1']);
+    first.dom.window.close();
+
+    const settledOnly = { drafts: [], orders: [order('delivered', { orderId: 'done-1' }), order('delivered', { orderId: 'done-2' })], recipients: [], limit: 20 };
+    const second = open(settledOnly, { hostContext: () => ({ 'openai/deepLink': { url: '/order/done-1' } }) });
+    expect(second.doc.getElementById('orders')?.firstElementChild?.textContent).toBe('Nothing on the way.');
+    expect(shown(second.doc, '#orders > article').map(node => node.getAttribute('data-key'))).toEqual(['order/done-1']);
+    second.dom.window.close();
+  });
+
+  it('keeps keyboard focus on the card: Show N more moves it to the first row it showed, Show less to See all', async () => {
+    const { dom, doc } = open(big());
+    const more = button(doc, 'Show 2 more')!;
+    more.focus();
+    more.click();
+    expect(doc.activeElement).toBe(doc.querySelector('[data-key="draft/draft-4"] .row-main'));
+    const seeAll = doc.getElementById('see-all') as HTMLButtonElement;
+    seeAll.focus();
+    seeAll.click(); await tick();
+    expect(doc.activeElement).toBe(seeAll);
+    seeAll.click(); await tick();
+    expect(doc.activeElement).toBe(seeAll);
+    dom.window.close();
+  });
+
+  it('moves focus to Refresh when the host goes fullscreen and hides the focused See all', async () => {
+    let mode = 'inline';
+    const { dom, doc, host } = open(big(), { displayMode: () => mode });
+    const seeAll = doc.getElementById('see-all') as HTMLButtonElement;
+    seeAll.focus();
+    mode = 'fullscreen';
+    host.onChange.mock.calls[0][0]();
+    expect(seeAll.hidden).toBe(true);
+    expect(doc.activeElement).toBe(doc.getElementById('refresh'));
+    dom.window.close();
+  });
+
+  it('waits for the host at most 5 seconds, disabled meanwhile, then opens everything in place', async () => {
+    vi.useFakeTimers();
+    try {
+      const requestDisplayMode = vi.fn(() => new Promise(() => {}));
+      const { dom, doc } = open(big(), { requestDisplayMode });
+      const seeAll = doc.getElementById('see-all') as HTMLButtonElement;
+      seeAll.click();
+      expect(seeAll.disabled).toBe(true);
+      seeAll.click();
+      expect(requestDisplayMode).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(4999);
+      expect(shown(doc, '#drafts > article')).toHaveLength(3);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(seeAll.disabled).toBe(false);
+      expect(shown(doc, '#drafts > article')).toHaveLength(5);
+      expect(seeAll.textContent).toBe('Show less');
+      dom.window.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('draws everything, with no See all, in a host that shows it in fullscreen', () => {
+    const { dom, doc } = open(big(), { displayMode: () => 'fullscreen' });
+    expect((doc.getElementById('see-all') as HTMLButtonElement).hidden).toBe(true);
+    expect(shown(doc, '#drafts > article')).toHaveLength(5);
+    expect(shown(doc, '#orders article')).toHaveLength(22);
+    expect((doc.getElementById('people') as HTMLElement).hidden).toBe(false);
+    dom.window.close();
+  });
+
+  it('shows the row of a deep link into folded mail or past the first rows, then keeps the rest folded', () => {
+    let route = '/order/done-5';
+    const { dom, doc, host } = open(big(), { hostContext: () => ({ 'openai/deepLink': { url: route } }) });
+    // The selected delivered order joins the list in view; the rest of settled mail stays folded.
+    expect((doc.getElementById('settled-orders') as HTMLElement).hidden).toBe(true);
+    expect(shown(doc, '[data-key="order/done-5"]')).toHaveLength(1);
+    expect(doc.querySelector('#settled-orders [data-key="order/done-5"]')).toBeNull();
+    expect(doc.getElementById('selected-detail')?.textContent).toContain('done-5');
+    route = '/draft/draft-5';
+    host.onChange.mock.calls[0][0]();
+    expect(shown(doc, '[data-key="draft/draft-5"]')).toHaveLength(1);
+    expect(shown(doc, '#drafts > article').map(node => node.getAttribute('data-key'))).toEqual(['draft/draft-1', 'draft/draft-2', 'draft/draft-3', 'draft/draft-5']);
+    expect((doc.getElementById('settled-orders') as HTMLElement).hidden).toBe(true);
+    dom.window.close();
+  });
 });

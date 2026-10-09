@@ -1,6 +1,6 @@
 # UI Widgets
 
-**Last Updated:** October 4, 2026
+**Last Updated:** October 8, 2026
 
 Letter IRL registers six OpenAI Apps SDK widgets as MCP resources with `ui://` URIs and `text/html;profile=mcp-app`. Widget template URIs are versioned (`ui://widgets/<name>.html@v<N>` via `src/mcp/widgetUris.ts`) because the native mobile apps cache widget metadata aggressively (issue #235); bump `WIDGET_TEMPLATE_VERSION` on any widget change — a digest-pinning test enforces this — and the legacy unversioned URI stays registered as a transition alias for stale clients. Tool results keep model-facing data in `structuredContent` and send large render payloads, such as preview HTML and compressed letter-image previews, through widget-only `_meta`.
 
@@ -117,6 +117,7 @@ Every card's header shows the website's mark, the logo in its navbar. `scripts/b
     - `tools/call`, `ui/open-link` and `ui/message` (content as an array);
     - `size-changed`, plus answers to `ping` and `ui/resource-teardown`.
   - **Where MCP Apps has no equivalent:** `widgetState` is always empty and there is no `setWidgetState`, so a card keeps nothing across a remount there. ChatGPT's file store and `openExternal`'s `redirectUrl` are absent. So the preview cards offer no image picker, and the upload card sends the photo itself.
+  - **Display modes (#662).** A card that can be shown larger lists its modes on `<html data-display-modes="inline fullscreen">`. The bridge then offers `displayMode()` and, where the host has one of those modes besides inline, `requestDisplayMode(mode)`, which answers `{ mode }` with the mode given. In ChatGPT that is `window.openai.requestDisplayMode({ mode })`. In MCP Apps the card's modes go in `ui/initialize`'s `appCapabilities.availableDisplayModes`, the request is `ui/request-display-mode`, offered only when the host context's `availableDisplayModes` has the mode, and a change arrives as `host-context-changed`. A card without the attribute declares and is offered none. Only `LetterHomeCard` lists modes so far.
   - **Cards on the bridge:** `GetStartedCard` (phase 1), then `LetterPreviewCard` and `PostcardPreviewCard` (phase 2a), then `ImageUploadCard` (phase 3). The pack checkout and image routing cards still call `window.openai` directly, because Claude is not offered their tools (#475, #490).
 - **Card address and copy per app (#474).**
   - **Card address:** ChatGPT's card resources carry `ui.domain` and `openai/widgetDomain` as the API origin. Every other app gets neither, because Claude refuses to draw a card whose domain is not its own hashed `claudemcpcontent.com` form. With no domain, Claude gives the card an origin per conversation.
@@ -202,5 +203,5 @@ target; the full widget policy is under [Content Security Policy](#content-secur
 
 ## LetterHomeCard (conditional)
 
-A seventh widget while `LETTER_IRL_HOME_ENABLED` is on: active drafts, recent mail and recent recipients, with explicit Refresh and website draft-review links. No send or cancel controls. The `open_letter_home` tool declares a ChatGPT global entrypoint; other clients can use the same read-only data. See [Letter IRL home](letter-home.md) and HOME-01 for host acceptance and privacy scope.
+A seventh widget while `LETTER_IRL_HOME_ENABLED` is on: active drafts, recent mail and recent recipients, with explicit Refresh and website draft-review links. It sends nothing; scheduled mail can be cancelled where arrive-by is on. Inline it is compact, one line per item with settled mail folded, and "See all" asks for fullscreen or opens it whole in place (#662). The `open_letter_home` tool declares a ChatGPT global entrypoint; other clients can use the same read-only data. See [Letter IRL home](letter-home.md) and HOME-01 for host acceptance and privacy scope.
 

@@ -195,4 +195,6 @@
 // outputs, and get_draft_status, can name the custom theme with its name and choices.
 // r48: a delivered status is said as the printer's estimate (HOME-01): the status descriptions of open_letter_home,
 // get_order_status and list_orders, and the text of those and of send_letter and send_postcard when one is delivered.
-export const STEERING_COPY_REV = 48;
+// r49: the compact home (#662): where the app draws our cards (rendersCards), open_letter_home's text asks the model not
+// to repeat the lists the card shows unless the person asks.
+export const STEERING_COPY_REV = 49;

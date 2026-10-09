@@ -1757,6 +1757,15 @@ function scheduledOrderSentence(result: Record<string, unknown>): string {
 export const DELIVERED_IS_ESTIMATED =
   "A delivered status means the printer's estimated delivery date has passed; no carrier confirmed it. Say its delivery is estimated, not that it was delivered.";
 
+/**
+ * The home's card shows its lists, so where an app draws our cards the model is
+ * asked not to list them again (#662): a turn that repeats twenty items as a
+ * table pushes the conversation away, as HOME-01 found. Where no card shows,
+ * the model needs the lists, so nothing is said.
+ */
+export const HOME_CARD_SHOWS_THE_LIST =
+  "The card shows these lists, so do not repeat them unless the person asks: mention only what needs the person, if anything (a draft to finish, scheduled mail, or mail that was returned or did not go out).";
+
 function deliveredSentence(orders: unknown): string {
   return Array.isArray(orders) && orders.some(order => (order as { status?: unknown } | null)?.status === "delivered")
     ? ` ${DELIVERED_IS_ESTIMATED}`
@@ -1882,7 +1891,7 @@ export function summarizeToolResult(
       return typeof result.certifiedNote === "string" ? `${summary} ${result.certifiedNote}` : summary;
     }
     case "open_letter_home":
-      return `Letter IRL home: ${(result.drafts as unknown[]).length} active drafts and ${(result.orders as unknown[]).length} recent mail items (up to ${result.limit} each).${deliveredSentence(result.orders)}`;
+      return `Letter IRL home: ${(result.drafts as unknown[]).length} active drafts and ${(result.orders as unknown[]).length} recent mail items (up to ${result.limit} each).${client.rendersCards ? ` ${HOME_CARD_SHOWS_THE_LIST}` : ""}${deliveredSentence(result.orders)}`;
     case "list_orders": {
       const orders = result.orders as any[];
       const total = result.total ?? 0;

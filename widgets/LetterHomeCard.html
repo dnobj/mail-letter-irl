@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-display-modes="inline fullscreen">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -12,7 +12,11 @@
     h1{font:36px Georgia,serif;margin:0}h2{font:24px Georgia,serif;margin:0 0 14px}p{margin:8px 0}.muted{color:var(--muted)}
     button,a{color:var(--accent)}button{border:1px solid var(--line);background:transparent;padding:9px 16px;border-radius:8px;font:inherit;cursor:pointer}
     button:disabled{opacity:.6;cursor:wait}button:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
-    .columns{display:grid;grid-template-columns:1fr 1fr;gap:32px;margin-top:32px}section{min-width:0}.item{border-top:1px solid var(--line);padding:16px 0}
+    .columns{display:grid;grid-template-columns:1fr 1fr;gap:32px;margin-top:24px}section{min-width:0}.item{border-top:1px solid var(--line);padding:16px 0}
+    .tools{display:flex;gap:8px}.row{border-top:1px solid var(--line)}
+    .row-main{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 10px;width:100%;text-align:left;border:0;border-radius:0;padding:10px 0;color:var(--ink)}
+    .row-main .tag{flex:0 0 auto}.row-main .state{margin-left:auto;font-size:13px;color:var(--muted)}.row-main .where{font-size:13px;color:var(--muted)}
+    .row-details{padding:0 0 12px}.row-details>button{margin:4px 8px 4px 0}.more,.group{margin-top:8px}
     .name{font-weight:600}.detail{font-size:13px;color:var(--muted)}.tag{font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--accent)}
     .people{margin-top:30px}.people .item{display:inline-block;margin-right:24px}.item>a{display:inline-block;margin:0 16px 8px 0}#notice{color:var(--muted)}
     @media(max-width:640px){main{padding:20px}.columns{grid-template-columns:1fr;gap:24px}h1{font-size:30px}}
@@ -20,7 +24,7 @@
 </head>
 <body>
   <main>
-    <header><h1>Letter IRL</h1><button id="refresh" type="button" disabled>Refresh</button></header>
+    <header><h1>Letter IRL</h1><div class="tools"><button id="see-all" type="button" hidden aria-expanded="false">See all</button><button id="refresh" type="button" disabled>Refresh</button></div></header>
     <p class="muted">Your drafts, the mail you've sent, and the people you've written to.</p>
     <p id="notice" role="status" aria-live="polite">Loading your mail...</p>
     <section id="selection" hidden aria-label="Selected mail"><h2 id="selected-title"></h2><p id="selected-detail"></p><button id="clear-selection" type="button">Clear selection</button><a id="selection-link" hidden target="_blank" rel="noopener noreferrer">Open this selection</a></section>
@@ -30,7 +34,7 @@
         <section aria-labelledby="draft-title"><h2 id="draft-title">Ready to finish</h2><div id="drafts"></div></section>
         <section aria-labelledby="order-title"><h2 id="order-title">Recent mail</h2><div id="orders"></div></section>
       </div>
-      <section class="people" aria-labelledby="people-title"><h2 id="people-title">Recent recipients</h2><div id="recipients"></div></section>
+      <section id="people" class="people" aria-labelledby="people-title"><h2 id="people-title">Recent recipients</h2><div id="recipients"></div></section>
     </div>
   </main>
   <!-- letter-irl:host -->
@@ -49,7 +53,23 @@
       var unresolvedRoute;
       var selectionRevision = 0;
       var contextQueue = Promise.resolve();
+      // The compact home (#662): inline it shows what needs the person, a few rows each, and folds settled mail away;
+      // "See all" asks the host for fullscreen, or opens everything in place where the host has none.
+      var seeAll = document.getElementById('see-all');
+      var DRAFTS_SHOWN = 3;
+      var ORDERS_SHOWN = 4;
+      var full = false;
+      var lastMode;
+      var openRows = {};
+      var openLists = {};
+      var justCancelled;
+      var modeChanges = 0;
+      var SEE_ALL_WAIT_MS = 5000;
+      // What needs the person first: problems, then mail waiting to go out, then the rest (the server sends newest first).
+      var NEED = { returned: 0, failed: 0, scheduled: 1, pending: 2 };
       var labels = {pending:'Awaiting an update',scheduled:'Scheduled',accepted:'Accepted by the printer',printing:'Being submitted or printed',in_transit:'In the mail',delivered:'Delivery estimated',returned:'Returned to sender',failed:'Did not go out',cancelled:'Cancelled; not mailed'};
+      // A status's words; a key the server never sends (one an object inherits) has none.
+      function statusLabel(status) { return Object.prototype.hasOwnProperty.call(labels, status) ? labels[status] : undefined; }
       function el(tag, text, className) {
         var node = document.createElement(tag);
         node.textContent = text;
@@ -70,7 +90,7 @@
       function selectionKey(item, kind) { return kind + '/' + (kind === 'draft' ? item.draftId : item.orderId); }
       function shareContext(item, kind, quiet) {
         var revision = ++selectionRevision;
-        var text = item ? JSON.stringify({ source: 'Letter IRL selection', kind: kind, id: kind === 'draft' ? item.draftId : item.orderId, recipient: item.recipient, status: kind === 'draft' ? 'draft' : item.status, statusLabel: kind === 'draft' ? undefined : labels[item.status], arriveBy: item.arriveBy, mailOn: item.mailOn, editable: kind === 'draft' }) : '';
+        var text = item ? JSON.stringify({ source: 'Letter IRL selection', kind: kind, id: kind === 'draft' ? item.draftId : item.orderId, recipient: item.recipient, status: kind === 'draft' ? 'draft' : item.status, statusLabel: kind === 'draft' ? undefined : statusLabel(item.status), arriveBy: item.arriveBy, mailOn: item.mailOn, editable: kind === 'draft' }) : '';
         contextQueue = contextQueue.catch(function () {}).then(async function () {
           if (typeof host.updateModelContext !== 'function') {
             if (!quiet && revision === selectionRevision && item) notice.textContent = 'Selected here. This host cannot share the selection with the conversation; include the draft or order ID in your request.';
@@ -89,10 +109,11 @@
         if (!quiet) unresolvedRoute = undefined;
         selected = item ? selectionKey(item, kind) : undefined;
         var panel = document.getElementById('selection'); panel.hidden = !item;
+        if (item) reveal(selected);
         var link = document.getElementById('selection-link'); link.hidden = true; link.removeAttribute('href');
         if (item) {
           document.getElementById('selected-title').textContent = item.recipient.name || 'Recipient';
-          document.getElementById('selected-detail').textContent = (kind === 'draft' ? 'Draft ' + item.draftId : (labels[item.status] || 'Status unavailable') + ': order ' + item.orderId) + (item.arriveBy ? '; arrival aim ' + displayDate(item.arriveBy) : '');
+          document.getElementById('selected-detail').textContent = (kind === 'draft' ? 'Draft ' + item.draftId : (statusLabel(item.status) || 'Status unavailable') + ': order ' + item.orderId) + (item.arriveBy ? '; arrival aim ' + displayDate(item.arriveBy) : '');
           try {
             var base = new URL(currentData.appUrl);
             if (base.origin === 'https://chatgpt.com' && /^\/plugins\/[a-zA-Z0-9_-]+\/app\/open_letter_home$/.test(base.pathname) && !base.username && !base.password) {
@@ -134,7 +155,12 @@
             if (result.status !== 'cancelled' || result.orderId !== order.orderId) throw new Error('missing result');
             cancellationUnconfirmed = false;
             order.status = 'cancelled'; order.cancellable = false;
+            // It stays in view, open, where the person was, rather than folding away with settled mail.
+            justCancelled = selectionKey(order, 'order');
+            // Asked before the redraw removes the focused Confirm button; and only if the redraw lost focus.
+            var focused = document.hasFocus();
             render(currentData);
+            if (focused && lost(document.activeElement)) focusRow(justCancelled);
             notice.textContent = result.message || 'Cancelled; not mailed. Refresh for the current account balance.';
           } catch (_) { notice.textContent = 'Cancellation was not confirmed. Refresh to check the order before trying again.'; }
           finally { busy = false; sync(); if (yes.isConnected) yes.disabled = cancellationUnconfirmed; }
@@ -147,6 +173,13 @@
         var date = new Date(calendar ? value + 'T12:00:00Z' : value);
         if (!Number.isFinite(date.getTime())) return value;
         return calendar ? date.toLocaleDateString(undefined, { dateStyle: 'medium', timeZone: 'UTC' }) : date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+      }
+      // A row's date, short: "Oct 30" for a calendar date, the day of a moment in the reader's zone.
+      function shortDate(value) {
+        var calendar = /^\d{4}-\d{2}-\d{2}$/.test(value || '');
+        var date = new Date(calendar ? value + 'T12:00:00Z' : value);
+        if (!Number.isFinite(date.getTime())) return '';
+        return date.toLocaleDateString(undefined, calendar ? { month: 'short', day: 'numeric', timeZone: 'UTC' } : { month: 'short', day: 'numeric' });
       }
       function safeLink(container, href, title, tracking) {
         try {
@@ -169,36 +202,194 @@
           var card = el('article', '', 'item'); render(card, item); target.appendChild(card);
         });
       }
+      function displayMode() { return typeof host.displayMode === 'function' ? host.displayMode() : undefined; }
+      // A row that is never folded: the selection, and an order just cancelled here.
+      function kept(key) { return key === selected || key === justCancelled; }
+      function byNeed(orders) {
+        function rank(order) { return Object.prototype.hasOwnProperty.call(NEED, order.status) ? NEED[order.status] : 3; }
+        return orders.map(function (order, index) { return { order: order, index: index }; }).sort(function (a, b) {
+          return rank(a.order) - rank(b.order) || a.index - b.index;
+        }).map(function (entry) { return entry.order; });
+      }
+      // Drafts that expire soonest first.
+      function bySoonest(drafts) {
+        return drafts.map(function (draft, index) {
+          var at = new Date(draft.expiresAt).getTime();
+          // A date that does not read goes last.
+          return { draft: draft, index: index, at: Number.isFinite(at) ? at : Infinity };
+        }).sort(function (a, b) {
+          return a.at < b.at ? -1 : a.at > b.at ? 1 : a.index - b.index;
+        }).map(function (entry) { return entry.draft; });
+      }
+      // Focuses a row that is in view; says whether it could.
+      function focusRow(key) {
+        var done = false;
+        Array.prototype.forEach.call(document.querySelectorAll('[data-key]'), function (article) {
+          if (done || article.getAttribute('data-key') !== key || article.hidden || article.closest('[hidden]')) return;
+          article.querySelector('.row-main').focus();
+          done = true;
+        });
+        return done;
+      }
+      function lost(element) { return !element || element === document.body || element === document.documentElement || Boolean(element.closest('[hidden]')); }
+      // Focus to a control that is there: See all, else Refresh.
+      function focusControl() {
+        if (!seeAll.hidden && !seeAll.disabled) seeAll.focus();
+        else if (!refresh.disabled) refresh.focus();
+      }
+      // Redraws, and keeps keyboard focus on the card when the control that had it went away or was hidden: on the
+      // same row when it is still in view, else See all or Refresh. Only while the card has focus, so a change the
+      // host makes (closing fullscreen, a deep link) never pulls focus from the host's own page.
+      function redraw() {
+        var active = document.activeElement;
+        var had = document.hasFocus() && !lost(active);
+        var row = had && active.closest('[data-key]');
+        var key = row ? row.getAttribute('data-key') : undefined;
+        draw();
+        if (!had || !lost(document.activeElement)) return;
+        if (!(key && focusRow(key))) focusControl();
+      }
+      // A new mode from the host: back from fullscreen, the home is compact again.
+      function noteMode(mode) {
+        if (lastMode === 'fullscreen' && mode !== 'fullscreen') full = false;
+        if (mode !== lastMode) modeChanges += 1;
+        lastMode = mode;
+      }
+      function showsAll() { return full || displayMode() === 'fullscreen'; }
+      function settled(order) { return order.status === 'delivered' || order.status === 'cancelled'; }
+      function setOpen(article, open) {
+        var key = article.getAttribute('data-key');
+        article.querySelector('.row-details').hidden = !open;
+        article.querySelector('.row-main').setAttribute('aria-expanded', String(open));
+        if (open) openRows[key] = true; else delete openRows[key];
+      }
+      // One line per item; its details and actions open under it.
+      function row(target, key, parts, fill) {
+        var article = el('article', '', 'row'); article.setAttribute('data-key', key);
+        var main = el('button', '', 'row-main'); main.type = 'button';
+        parts.forEach(function (part) { if (part[0]) main.appendChild(el('span', part[0], part[1])); });
+        var details = el('div', '', 'row-details'); details.id = 'details-' + key.replace('/', '-');
+        main.setAttribute('aria-controls', details.id);
+        fill(details);
+        main.addEventListener('click', function () { setOpen(article, details.hidden); });
+        article.appendChild(main); article.appendChild(details); target.appendChild(article);
+        setOpen(article, Boolean(openRows[key]));
+        return article;
+      }
+      // The first rows, and the rest behind "Show N more"; a selected row is never hidden.
+      function rows(target, id, entries, shown) {
+        var hidden = [];
+        entries.forEach(function (entry, index) {
+          var article = entry.build(target);
+          if (index >= shown && !openLists[id] && !kept(entry.key)) { article.hidden = true; hidden.push(article); }
+        });
+        if (hidden.length) {
+          var more = action(target, 'Show ' + hidden.length + ' more', function () {
+            openLists[id] = true;
+            hidden.forEach(function (article) { article.hidden = false; });
+            more.remove();
+            hidden[0].querySelector('.row-main').focus();
+          });
+          more.className = 'more';
+        }
+      }
+      // A selection (a deep link, or the model's) shows its row, folded away or not.
+      function reveal(key) {
+        var folded = Array.prototype.some.call(document.querySelectorAll('[data-key]'), function (article) {
+          return article.getAttribute('data-key') === key && (article.hidden || Boolean(article.closest('[hidden]')));
+        });
+        if (folded) redraw();
+      }
+      function draftEntry(draft) {
+        var key = selectionKey(draft, 'draft');
+        return { key: key, build: function (target) {
+          return row(target, key, [
+            [draft.mailType === 'postcard' ? 'Postcard draft' : 'Letter draft', 'tag'],
+            [draft.recipient.name || 'Recipient', 'name'], [place(draft.recipient), 'where'],
+            [shortDate(draft.expiresAt) ? 'Expires ' + shortDate(draft.expiresAt) : '', 'state']
+          ], function (card) {
+            line(card, 'Expires: ' + displayDate(draft.expiresAt), 'detail');
+            if (draft.arriveBy) line(card, 'Aims to arrive by ' + displayDate(draft.arriveBy) + '; planned mail date ' + displayDate(draft.mailOn) + '.', 'detail');
+            if (draft.isGiftSend) line(card, 'Gift letter', 'detail');
+            safeLink(card, draft.confirmationUrl, 'Review draft on the website', false);
+            action(card, 'Select draft', function () { select(draft, 'draft'); });
+          });
+        } };
+      }
+      // What a row says of an order: its status, and when it aims to arrive or was sent, so rows tell apart.
+      function orderState(order) {
+        var label = statusLabel(order.status) || 'Status unavailable';
+        if (order.status === 'scheduled' && shortDate(order.arriveBy)) return label + ', arrives by ' + shortDate(order.arriveBy);
+        return shortDate(order.createdAt) ? label + ' · ' + shortDate(order.createdAt) : label;
+      }
+      function orderEntry(order) {
+        var key = selectionKey(order, 'order');
+        return { key: key, build: function (target) {
+          return row(target, key, [
+            [order.mailType === 'postcard' ? 'Postcard' : 'Letter', 'tag'],
+            [order.recipient.name || 'Recipient', 'name'], [place(order.recipient), 'where'],
+            [orderState(order), 'state']
+          ], function (card) {
+            if (order.arriveBy) {
+              line(card, (order.status === 'scheduled' ? 'Aims to arrive by ' : 'Original arrival aim: ') + displayDate(order.arriveBy) + '; planned mail date ' + displayDate(order.mailOn) + '.', 'detail');
+            }
+            if (order.isGiftSend) line(card, 'Gift letter', 'detail');
+            if (order.certifiedNote) line(card, order.certifiedNote, 'detail');
+            if (order.carrierTrackingUrl) safeLink(card, order.carrierTrackingUrl, 'Track with USPS', true);
+            line(card, 'Order ' + order.orderId, 'detail');
+            action(card, 'Select order', function () { select(order, 'order'); });
+            if (order.status === 'scheduled' && order.cancellable === true && typeof host.callTool === 'function') action(card, 'Cancel scheduled mail', function () { void cancelOrder(order, card); });
+          });
+        } };
+      }
+      // Draws the lists from the last result, compact or whole; it never touches the notice or the selection.
+      function draw() {
+        var data = currentData;
+        if (!data) return;
+        var all = showsAll();
+        seeAll.hidden = displayMode() === 'fullscreen';
+        seeAll.textContent = full ? 'Show less' : 'See all';
+        seeAll.setAttribute('aria-expanded', String(all));
+        var drafts = document.getElementById('drafts');
+        drafts.replaceChildren();
+        if (!data.drafts.length) line(drafts, 'No active drafts. Ask in the conversation to start a letter or postcard.', 'muted');
+        rows(drafts, 'drafts', bySoonest(data.drafts).map(draftEntry), all ? Infinity : DRAFTS_SHOWN);
+        var orders = document.getElementById('orders');
+        orders.replaceChildren();
+        if (!data.orders.length) line(orders, 'No recent mail to show.', 'muted');
+        var moving = byNeed(data.orders.filter(function (order) { return !settled(order) || kept(selectionKey(order, 'order')); }));
+        var done = data.orders.filter(function (order) { return settled(order) && !kept(selectionKey(order, 'order')); });
+        if (data.orders.length && data.orders.every(settled)) line(orders, 'Nothing on the way.', 'muted');
+        rows(orders, 'orders', moving.map(orderEntry), all ? Infinity : ORDERS_SHOWN);
+        if (done.length) {
+          var estimated = done.filter(function (order) { return order.status === 'delivered'; }).length;
+          var counts = [];
+          if (estimated) counts.push('Delivery estimated (' + estimated + ')');
+          if (done.length - estimated) counts.push('Cancelled (' + (done.length - estimated) + ')');
+          var open = all || Boolean(openLists.settled);
+          var group = el('div', '', 'settled'); group.id = 'settled-orders'; group.hidden = !open;
+          var toggle = action(orders, counts.join(' · '), function () {
+            var opening = group.hidden;
+            group.hidden = !opening;
+            toggle.setAttribute('aria-expanded', String(opening));
+            if (opening) openLists.settled = true; else delete openLists.settled;
+          });
+          toggle.className = 'group'; toggle.setAttribute('aria-expanded', String(open)); toggle.setAttribute('aria-controls', group.id);
+          toggle.setAttribute('aria-label', counts.join(' · ') + ', settled mail');
+          orders.appendChild(group);
+          done.map(orderEntry).forEach(function (entry) { entry.build(group); });
+        }
+        document.getElementById('people').hidden = !all;
+        items('recipients', data.recipients, 'No recent recipients to show.', function (card, person) {
+          line(card, person.name || 'Recipient', 'name'); line(card, place(person), 'detail');
+        });
+      }
       function render(data) {
         if (!data || !Array.isArray(data.drafts) || !Array.isArray(data.orders) || !Array.isArray(data.recipients)) return false;
         currentData = data;
         document.getElementById('scope').textContent = 'Up to ' + data.limit + ' active drafts and ' + data.limit + ' recent mail items. Recipients come from that recent mail.';
-        items('drafts', data.drafts, 'No active drafts. Ask in the conversation to start a letter or postcard.', function (card, draft) {
-          line(card, draft.mailType === 'postcard' ? 'Postcard draft' : 'Letter draft', 'tag');
-          line(card, draft.recipient.name || 'Recipient', 'name'); line(card, place(draft.recipient), 'detail');
-          line(card, 'Expires: ' + displayDate(draft.expiresAt), 'detail');
-          if (draft.arriveBy) line(card, 'Aims to arrive by ' + displayDate(draft.arriveBy) + '; planned mail date ' + displayDate(draft.mailOn) + '.', 'detail');
-          if (draft.isGiftSend) line(card, 'Gift letter', 'detail');
-          safeLink(card, draft.confirmationUrl, 'Review draft on the website', false);
-          action(card, 'Select draft', function () { select(draft, 'draft'); });
-        });
-        items('orders', data.orders, 'No recent mail to show.', function (card, order) {
-          line(card, order.mailType === 'postcard' ? 'Postcard' : 'Letter', 'tag');
-          line(card, order.recipient.name || 'Recipient', 'name'); line(card, place(order.recipient), 'detail');
-          line(card, labels[order.status] || 'Status unavailable');
-          if (order.arriveBy) {
-            line(card, (order.status === 'scheduled' ? 'Aims to arrive by ' : 'Original arrival aim: ') + displayDate(order.arriveBy) + '; planned mail date ' + displayDate(order.mailOn) + '.', 'detail');
-          }
-          if (order.isGiftSend) line(card, 'Gift letter', 'detail');
-          if (order.certifiedNote) line(card, order.certifiedNote, 'detail');
-          if (order.carrierTrackingUrl) safeLink(card, order.carrierTrackingUrl, 'Track with USPS', true);
-          line(card, 'Order ' + order.orderId, 'detail');
-          action(card, 'Select order', function () { select(order, 'order'); });
-          if (order.status === 'scheduled' && order.cancellable === true && typeof host.callTool === 'function') action(card, 'Cancel scheduled mail', function () { void cancelOrder(order, card); });
-        });
-        items('recipients', data.recipients, 'No recent recipients to show.', function (card, person) {
-          line(card, person.name || 'Recipient', 'name'); line(card, place(person), 'detail');
-        });
+        noteMode(displayMode());
+        redraw();
         document.getElementById('home').hidden = false;
         notice.textContent = '';
         if (selected) {
@@ -214,16 +405,47 @@
         refresh.disabled = busy || typeof host.callTool !== 'function';
         var output = host.toolOutput();
         if (output && output !== lastOutput) { lastOutput = output; render(output); }
+        var mode = displayMode();
+        if (mode !== lastMode) {
+          noteMode(mode);
+          redraw();
+        }
         applyRoute();
       }
+      seeAll.addEventListener('click', async function () {
+        if (full) { full = false; redraw(); return; }
+        var changes = modeChanges;
+        if (typeof host.requestDisplayMode === 'function') {
+          // Disabling the focused button drops its focus; it is put back after the wait.
+          var focused = document.hasFocus() && document.activeElement === seeAll;
+          seeAll.disabled = true;
+          try {
+            await new Promise(function (resolve, reject) {
+              var timer = setTimeout(function () { reject(new Error('No reply')); }, SEE_ALL_WAIT_MS);
+              Promise.resolve(host.requestDisplayMode('fullscreen')).then(function (value) { clearTimeout(timer); resolve(value); }, function (error) { clearTimeout(timer); reject(error); });
+            });
+          } catch (_) { /* Refused or no reply: opened in place below. */ }
+          finally { seeAll.disabled = false; }
+        }
+        // Whole now: in place where the host gave no fullscreen, and before a host that did says its new mode. A host
+        // that went fullscreen meanwhile has drawn it whole already, and one that came back has asked for compact.
+        if (modeChanges === changes) full = displayMode() !== 'fullscreen';
+        redraw();
+        // Only while the card still has focus: the person may have gone to the host's page during the wait.
+        if (focused && document.hasFocus() && lost(document.activeElement)) focusControl();
+      });
       refresh.addEventListener('click', async function () {
         if (busy || typeof host.callTool !== 'function') return;
+        // Disabling the focused button drops its focus; it is put back after the refresh, as See all's is.
+        var refreshFocused = document.hasFocus() && document.activeElement === refresh;
         busy = true; refresh.disabled = true; notice.textContent = 'Refreshing your mail...';
         var refreshed = false;
         try {
           var result = await withDeadline(host.callTool('open_letter_home', {}));
           if (result && result.isError) throw new Error('refused');
-          if (!render(result && (result.structuredContent || result))) throw new Error('missing result');
+          // The server's word replaces the card's: an order cancelled here folds with settled mail from now on.
+          var wasCancelled = justCancelled; justCancelled = undefined;
+          if (!render(result && (result.structuredContent || result))) { justCancelled = wasCancelled; throw new Error('missing result'); }
           cancellationUnconfirmed = false;
           refreshed = true;
         } catch (_) {
@@ -232,6 +454,7 @@
           busy = false; sync();
           // Said last, after any redraw, so a refresh that worked is not silent (HOME-01); a route's own notice is kept.
           if (refreshed && !notice.textContent) notice.textContent = 'Mail list refreshed.';
+          if (refreshFocused && document.hasFocus() && lost(document.activeElement)) refresh.focus();
         }
       });
       document.getElementById('clear-selection').addEventListener('click', function () { unresolvedRoute = undefined; select(); });
