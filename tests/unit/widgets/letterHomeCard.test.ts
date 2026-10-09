@@ -613,6 +613,55 @@ describe('the compact home (#662)', () => {
     dom.window.close();
   });
 
+  it('leaves focus where the person put it during a Refresh: on the host page, or on a row in the card', async () => {
+    // The person goes to the host's page while Refresh runs.
+    const away = open(big());
+    let focused = true;
+    away.doc.hasFocus = () => focused;
+    const awayRefresh = away.doc.getElementById('refresh') as HTMLButtonElement;
+    awayRefresh.focus();
+    away.host.callTool.mockImplementation(async () => {
+      awayRefresh.disabled = false; awayRefresh.blur(); awayRefresh.disabled = true;
+      focused = false;
+      return { structuredContent: big() };
+    });
+    awayRefresh.click();
+    await tick();
+    expect(away.doc.getElementById('notice')?.textContent).toBe('Mail list refreshed.');
+    expect(away.doc.activeElement === awayRefresh).toBe(false);
+    away.dom.window.close();
+
+    // The card's page never had focus when Refresh was pressed: nothing is taken.
+    const unfocused = open(big());
+    unfocused.doc.hasFocus = () => false;
+    const unfocusedRefresh = unfocused.doc.getElementById('refresh') as HTMLButtonElement;
+    unfocusedRefresh.focus();
+    unfocused.host.callTool.mockImplementation(async () => {
+      unfocusedRefresh.disabled = false; unfocusedRefresh.blur(); unfocusedRefresh.disabled = true;
+      unfocused.doc.hasFocus = () => true;
+      return { structuredContent: big() };
+    });
+    unfocusedRefresh.click();
+    await tick();
+    expect(unfocused.doc.activeElement === unfocusedRefresh).toBe(false);
+    unfocused.dom.window.close();
+
+    // The person tabs to a row while Refresh runs: focus stays on that row.
+    const tabbed = open(big());
+    tabbed.doc.hasFocus = () => true;
+    const tabbedRefresh = tabbed.doc.getElementById('refresh') as HTMLButtonElement;
+    tabbedRefresh.focus();
+    tabbed.host.callTool.mockImplementation(async () => {
+      tabbedRefresh.disabled = false; tabbedRefresh.blur(); tabbedRefresh.disabled = true;
+      (tabbed.doc.querySelector('[data-key="order/move-1"] .row-main') as HTMLButtonElement).focus();
+      return { structuredContent: big() };
+    });
+    tabbedRefresh.click();
+    await tick();
+    expect(tabbed.doc.activeElement === tabbed.doc.querySelector('[data-key="order/move-1"] .row-main')).toBe(true);
+    tabbed.dom.window.close();
+  });
+
   it('keeps focus on the same row when a Refresh redraws the home', async () => {
     const { dom, doc, host } = open(big());
     (doc.querySelector('[data-key="order/move-1"] .row-main') as HTMLButtonElement).focus();
