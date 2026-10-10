@@ -176,6 +176,13 @@ describe('home extension interactions', () => {
     expect(update.mock.calls[0][0].content[0].text).toBe('Selected in the Letter IRL home: draft draft-1, a letter to "Ruth" (Chicago, IL). It is a draft and can still be changed before it is sent.');
     expect(update.mock.calls[1][0].content[0].text).toBe('Selected in the Letter IRL home: order order-1, a letter to "Ruth" (Chicago, IL), status: Scheduled; it aims to arrive by 2026-10-20. It is mail already ordered, not a draft to edit.');
     expect(update.mock.calls[0][0].content[0].text).not.toContain('status:');
+    // A draft with an arrival date still aims for it; mail with no name is not given a quoted one.
+    const later = vi.fn().mockResolvedValue({});
+    const dated = open(data({ drafts: [{ draftId: 'draft-2', recipient: { name: '', city: 'Chicago', state: 'IL' }, expiresAt: '2026-10-20', arriveBy: '2026-10-30', mailOn: '2026-10-21' }] }), { updateModelContext: later });
+    click(dated.doc, 'Select draft');
+    await tick();
+    expect(later.mock.calls[0][0].content[0].text).toBe('Selected in the Letter IRL home: draft draft-2, a letter to a recipient (Chicago, IL); it aims to arrive by 2026-10-30, planned mail date 2026-10-21. It is a draft and can still be changed before it is sent.');
+    dated.dom.window.close();
     expect(update.mock.calls[2][0]).toEqual({ content: [] });
     expect(JSON.stringify(update.mock.calls)).not.toMatch(/addressLine|bodyText|confirmationUrl/);
     dom.window.close();

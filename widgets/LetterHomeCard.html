@@ -98,7 +98,7 @@
         var recipient = item.recipient || {};
         var where = place(recipient);
         // The name in quotes: it may come from someone else (an address request), and must not read as one of our claims.
-        var what = (item.mailType === 'postcard' ? 'a postcard' : 'a letter') + ' to ' + JSON.stringify(recipient.name || 'a recipient') + (where ? ' (' + where + ')' : '');
+        var what = (item.mailType === 'postcard' ? 'a postcard' : 'a letter') + ' to ' + (recipient.name ? JSON.stringify(recipient.name) : 'a recipient') + (where ? ' (' + where + ')' : '');
         // Only a draft or scheduled mail still aims to arrive by its date; for the rest it was the original aim, as the rows say.
         var aiming = kind === 'draft' || item.status === 'scheduled';
         var dates = item.arriveBy ? (aiming ? '; it aims to arrive by ' : '; original arrival aim ') + item.arriveBy + (item.mailOn ? ', planned mail date ' + item.mailOn : '') : '';
