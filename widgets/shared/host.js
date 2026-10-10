@@ -73,6 +73,13 @@
       widgetState: function () { return openai().widgetState; },
       hostContext: function () { return openai().hostContext || {}; },
       displayMode: function () { return openai().displayMode; },
+      // The host's safe-area insets (#668): window.openai's, else the MCP Apps host context's.
+      safeArea: function () {
+        var safe = openai().safeArea;
+        if (safe && safe.insets) return safe.insets;
+        var context = chatgpt.hostContext();
+        return (context && context.safeAreaInsets) || null;
+      },
       onChange: onChange
     };
     // Each capability exists only while window.openai has it, so a card's
@@ -291,6 +298,7 @@
     widgetState: function () { return null; },
     hostContext: function () { return state.hostContext; },
     displayMode: function () { return state.hostContext.displayMode; },
+    safeArea: function () { return state.hostContext.safeAreaInsets || null; },
     callTool: function (name, args) {
       return request("tools/call", { name: name, arguments: args || {} });
     },

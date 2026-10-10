@@ -172,9 +172,17 @@ describe('home extension interactions', () => {
     click(doc, 'Select draft'); click(doc, 'Select order'); click(doc, 'Clear selection');
     await tick();
     expect(update).toHaveBeenCalledTimes(3);
-    expect(JSON.parse(update.mock.calls[0][0].content[0].text)).toMatchObject({ kind: 'draft', id: 'draft-1', editable: true });
-    expect(JSON.parse(update.mock.calls[1][0].content[0].text)).toMatchObject({ kind: 'order', id: 'order-1', status: 'scheduled', statusLabel: 'Scheduled', editable: false });
-    expect(JSON.parse(update.mock.calls[0][0].content[0].text)).not.toHaveProperty('statusLabel');
+    // A sentence a person can read, since ChatGPT shows the shared context to them (#668).
+    expect(update.mock.calls[0][0].content[0].text).toBe('Selected in the Letter IRL home: draft draft-1, a letter to "Ruth" (Chicago, IL). It is a draft and can still be changed before it is sent.');
+    expect(update.mock.calls[1][0].content[0].text).toBe('Selected in the Letter IRL home: order order-1, a letter to "Ruth" (Chicago, IL), status: Scheduled; it aims to arrive by 2026-10-20. It is mail already ordered, not a draft to edit.');
+    expect(update.mock.calls[0][0].content[0].text).not.toContain('status:');
+    // A draft with an arrival date still aims for it; mail with no name is not given a quoted one.
+    const later = vi.fn().mockResolvedValue({});
+    const dated = open(data({ drafts: [{ draftId: 'draft-2', recipient: { name: '', city: 'Chicago', state: 'IL' }, expiresAt: '2026-10-20', arriveBy: '2026-10-30', mailOn: '2026-10-21' }] }), { updateModelContext: later });
+    click(dated.doc, 'Select draft');
+    await tick();
+    expect(later.mock.calls[0][0].content[0].text).toBe('Selected in the Letter IRL home: draft draft-2, a letter to a recipient (Chicago, IL); it aims to arrive by 2026-10-30, planned mail date 2026-10-21. It is a draft and can still be changed before it is sent.');
+    dated.dom.window.close();
     expect(update.mock.calls[2][0]).toEqual({ content: [] });
     expect(JSON.stringify(update.mock.calls)).not.toMatch(/addressLine|bodyText|confirmationUrl/);
     dom.window.close();
@@ -254,7 +262,7 @@ describe('home extension recovery regressions', () => {
     host.callTool.mockResolvedValue({ structuredContent: { orderId: 'order-1', status: 'cancelled', message: 'Cancelled. Funding expired; nothing returned.' } });
     click(doc, 'Cancel scheduled mail'); click(doc, 'Confirm cancellation'); await tick(); await tick();
     expect(doc.getElementById('notice')?.textContent).toBe('Cancelled. Funding expired; nothing returned.');
-    expect(JSON.parse(updateModelContext.mock.calls.at(-1)![0].content[0].text)).toMatchObject({ status: 'cancelled', id: 'order-1' });
+    expect(updateModelContext.mock.calls.at(-1)![0].content[0].text).toContain('order order-1, a letter to "Ruth" (Chicago, IL), status: Cancelled; not mailed');
     dom.window.close();
   });
   it('retries an unavailable deep link when Refresh brings its owner-visible order into the list', async () => {
@@ -268,9 +276,10 @@ describe('home extension recovery regressions', () => {
   });
   it("shares a delivered order's status in the card's words, as estimated (HOME-01 review)", async () => {
     const update = vi.fn().mockResolvedValue({});
-    const { dom, doc } = open({ drafts: [], orders: [order('delivered')], recipients: [], limit: 20 }, { updateModelContext: update });
+    const { dom, doc } = open({ drafts: [], orders: [order('delivered', { arriveBy: '2026-10-20', mailOn: '2026-10-09' })], recipients: [], limit: 20 }, { updateModelContext: update });
     click(doc, 'Select order'); await tick();
-    expect(JSON.parse(update.mock.calls[0][0].content[0].text)).toMatchObject({ status: 'delivered', statusLabel: 'Delivery estimated' });
+    // Delivered mail's date is its original aim, as the row says, never one it still aims for.
+    expect(update.mock.calls[0][0].content[0].text).toContain('status: Delivery estimated; original arrival aim 2026-10-20, planned mail date 2026-10-09.');
     dom.window.close();
   });
   it('keeps a deep link still unavailable after a Refresh that works, rather than saying it refreshed (HOME-01)', async () => {
@@ -365,7 +374,7 @@ it('does not undo an explicit clear or newer selection when the original success
   (Array.from(doc.querySelectorAll('#orders button')).filter(button => button.textContent === 'Select order')[1] as HTMLButtonElement).click();
   (doc.getElementById('refresh') as HTMLButtonElement).click(); await new Promise(resolve => setTimeout(resolve, 0));
   expect(doc.getElementById('selected-detail')?.textContent).toContain('order-2');
-  expect(JSON.parse(updateModelContext.mock.calls.at(-1)![0].content[0].text)).toMatchObject({ id: 'order-2' });
+  expect(updateModelContext.mock.calls.at(-1)![0].content[0].text).toContain('order order-2,');
   dom.window.close();
 });
 
@@ -378,7 +387,7 @@ it('lets explicit selection supersede an initially unresolved route even when Re
   host.callTool.mockResolvedValue({ structuredContent: { ...first, orders: [order('scheduled'), ...first.orders] } });
   (doc.getElementById('refresh') as HTMLButtonElement).click(); await new Promise(resolve => setTimeout(resolve, 0));
   expect(doc.getElementById('selected-detail')?.textContent).toContain('order-2');
-  expect(JSON.parse(updateModelContext.mock.calls.at(-1)![0].content[0].text)).toMatchObject({ id: 'order-2' });
+  expect(updateModelContext.mock.calls.at(-1)![0].content[0].text).toContain('order order-2,');
   dom.window.close();
 });
 
@@ -831,6 +840,32 @@ describe('the compact home (#662)', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("keeps clear of the host's chrome in fullscreen and honours its safe-area insets (#668)", () => {
+    let mode = 'inline';
+    let insets: unknown = { top: 24, right: Infinity, bottom: 34, left: -8 };
+    const { dom, doc, host } = open(big(), { displayMode: () => mode, safeArea: () => insets });
+    const root = doc.documentElement;
+    expect(root.classList.contains('fullscreen')).toBe(false);
+    expect(root.style.getPropertyValue('--inset-top')).toBe('24px');
+    expect(root.style.getPropertyValue('--inset-bottom')).toBe('34px');
+    // A value that is not a finite, positive number is no inset.
+    expect(root.style.getPropertyValue('--inset-left')).toBe('0px');
+    expect(root.style.getPropertyValue('--inset-right')).toBe('0px');
+    // Insets that change alone, with no new mode or result, are taken at once.
+    insets = { top: 30, right: 0, bottom: 0, left: 0 };
+    host.onChange.mock.calls[0][0]();
+    expect(root.style.getPropertyValue('--inset-top')).toBe('30px');
+    mode = 'fullscreen';
+    insets = null;
+    host.onChange.mock.calls[0][0]();
+    expect(root.classList.contains('fullscreen')).toBe(true);
+    expect(root.style.getPropertyValue('--inset-top')).toBe('0px');
+    mode = 'inline';
+    host.onChange.mock.calls[0][0]();
+    expect(root.classList.contains('fullscreen')).toBe(false);
+    dom.window.close();
   });
 
   it('draws everything, with no See all, in a host that shows it in fullscreen', () => {
