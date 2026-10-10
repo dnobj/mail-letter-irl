@@ -8,7 +8,10 @@
     :root{color-scheme:light dark;--paper:#fffdf8;--ink:#282b27;--muted:#666d63;--line:#e4e5dd;--accent:#385e48}
     *{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.5 system-ui,sans-serif}
     .dark{--paper:#20241f;--ink:#f4f2e9;--muted:#b7bdb2;--line:#42493f;--accent:#b5d1be}
-    main{max-width:1100px;margin:auto;padding:32px}header{display:flex;align-items:center;justify-content:space-between;gap:16px}
+    main{max-width:1100px;margin:auto;padding:calc(32px + var(--inset-top,0px)) calc(32px + var(--inset-right,0px)) calc(32px + var(--inset-bottom,0px)) calc(32px + var(--inset-left,0px))}header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+    .tools button{white-space:nowrap}
+    /* Fullscreen (#668): the host's close button and bar sit over the card's top right; keep the header clear of them. */
+    .fullscreen main{padding-top:max(56px,calc(20px + var(--inset-top,0px)))}.fullscreen header{padding-right:48px}
     h1{font:36px Georgia,serif;margin:0}h2{font:24px Georgia,serif;margin:0 0 14px}p{margin:8px 0}.muted{color:var(--muted)}
     button,a{color:var(--accent)}button{border:1px solid var(--line);background:transparent;padding:9px 16px;border-radius:8px;font:inherit;cursor:pointer}
     button:disabled{opacity:.6;cursor:wait}button:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
@@ -19,7 +22,8 @@
     .row-details{padding:0 0 12px}.row-details>button{margin:4px 8px 4px 0}.more,.group{margin-top:8px}
     .name{font-weight:600}.detail{font-size:13px;color:var(--muted)}.tag{font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--accent)}
     .people{margin-top:30px}.people .item{display:inline-block;margin-right:24px}.item>a{display:inline-block;margin:0 16px 8px 0}#notice{color:var(--muted)}
-    @media(max-width:640px){main{padding:20px}.columns{grid-template-columns:1fr;gap:24px}h1{font-size:30px}}
+    @media(max-width:640px){main{padding:calc(20px + var(--inset-top,0px)) calc(20px + var(--inset-right,0px)) calc(20px + var(--inset-bottom,0px)) calc(20px + var(--inset-left,0px))}.columns{grid-template-columns:1fr;gap:24px}h1{font-size:30px}}
+    @media(max-width:480px){h1{font-size:26px}.tools{gap:6px}.tools button{padding:8px 12px}}
   </style>
 </head>
 <body>
@@ -88,9 +92,19 @@
         button.addEventListener('click', run); container.appendChild(button); return button;
       }
       function selectionKey(item, kind) { return kind + '/' + (kind === 'draft' ? item.draftId : item.orderId); }
+      // What the conversation is told of a selection: a sentence, since ChatGPT shows it to the person too (#668). It
+      // carries the id, the recipient, the status in the card's words, the dates, and whether it can be revised.
+      function selectionSentence(item, kind) {
+        var recipient = item.recipient || {};
+        var where = place(recipient);
+        var what = (item.mailType === 'postcard' ? 'a postcard' : 'a letter') + ' to ' + (recipient.name || 'a recipient') + (where ? ' (' + where + ')' : '');
+        var dates = item.arriveBy ? '; it aims to arrive by ' + item.arriveBy + (item.mailOn ? ', planned mail date ' + item.mailOn : '') : '';
+        if (kind === 'draft') return 'Selected in the Letter IRL home: draft ' + item.draftId + ', ' + what + dates + '. It can be revised; check get_draft_status first.';
+        return 'Selected in the Letter IRL home: order ' + item.orderId + ', ' + what + ', status: ' + (statusLabel(item.status) || 'unavailable') + dates + '. It is mail already ordered, not a draft to edit.';
+      }
       function shareContext(item, kind, quiet) {
         var revision = ++selectionRevision;
-        var text = item ? JSON.stringify({ source: 'Letter IRL selection', kind: kind, id: kind === 'draft' ? item.draftId : item.orderId, recipient: item.recipient, status: kind === 'draft' ? 'draft' : item.status, statusLabel: kind === 'draft' ? undefined : statusLabel(item.status), arriveBy: item.arriveBy, mailOn: item.mailOn, editable: kind === 'draft' }) : '';
+        var text = item ? selectionSentence(item, kind) : '';
         contextQueue = contextQueue.catch(function () {}).then(async function () {
           if (typeof host.updateModelContext !== 'function') {
             if (!quiet && revision === selectionRevision && item) notice.textContent = 'Selected here. This host cannot share the selection with the conversation; include the draft or order ID in your request.';
@@ -201,6 +215,13 @@
         if (!data.length) { line(target, empty, 'muted'); return; }
         data.forEach(function (item) {
           var card = el('article', '', 'item'); render(card, item); target.appendChild(card);
+        });
+      }
+      function applyInsets() {
+        var insets = typeof host.safeArea === 'function' ? host.safeArea() : null;
+        ['top', 'right', 'bottom', 'left'].forEach(function (side) {
+          var value = insets ? Number(insets[side]) : 0;
+          document.documentElement.style.setProperty('--inset-' + side, (Number.isFinite(value) && value > 0 ? value : 0) + 'px');
         });
       }
       function displayMode() { return typeof host.displayMode === 'function' ? host.displayMode() : undefined; }
@@ -348,6 +369,9 @@
         var data = currentData;
         if (!data) return;
         var all = showsAll();
+        // Fullscreen keeps clear of the host's chrome, and every view of its safe-area insets (#668).
+        document.documentElement.classList.toggle('fullscreen', displayMode() === 'fullscreen');
+        applyInsets();
         seeAll.hidden = displayMode() === 'fullscreen';
         seeAll.textContent = full ? 'Show less' : 'See all';
         seeAll.setAttribute('aria-expanded', String(all));

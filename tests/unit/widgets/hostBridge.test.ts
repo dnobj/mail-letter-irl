@@ -637,10 +637,51 @@ describe('the home card in ChatGPT on the bridge (#665)', () => {
     await flush();
     expect(shares()).toHaveLength(2);
     const share = shares()[1];
-    expect(JSON.parse(share.params.content[0].text)).toMatchObject({ kind: 'order', id: 'o-1', statusLabel: 'Delivery estimated' });
+    expect(share.params.content[0].text).toContain('order o-1, a letter to Ruth (Chicago, IL), status: Delivery estimated');
     deliver({ id: share.id, result: {} });
     await flush();
     expect(doc.getElementById('notice')?.textContent).toBe('Selection shared with the conversation.');
     window.close();
+  });
+});
+
+describe('safe-area insets (#668)', () => {
+  it("in ChatGPT, reads window.openai's safe area afresh, else the handshake's host context", async () => {
+    const openai: Record<string, unknown> = { safeArea: { insets: { top: 40, right: 0, bottom: 20, left: 0 } } };
+    const plain = new JSDOM(bridgePage(), { runScripts: 'dangerously', beforeParse(window) { (window as any).openai = openai; } });
+    const host = (plain.window as any).letterIrlHost;
+    expect(host.safeArea()).toEqual({ top: 40, right: 0, bottom: 20, left: 0 });
+    openai.safeArea = undefined;
+    expect(host.safeArea()).toBeNull();
+    plain.window.close();
+  });
+
+  it("in ChatGPT, falls back to the safe area in the handshake's host context for a card that opened one", async () => {
+    const sent: Message[] = [];
+    const parent = { postMessage: (message: Message) => sent.push(JSON.parse(JSON.stringify(message))) };
+    const page = `<!doctype html><html data-plugin-extensions><body><script>${BRIDGE}</script></body></html>`;
+    const dom = new JSDOM(page, {
+      runScripts: 'dangerously',
+      beforeParse(window) {
+        (window as any).openai = {};
+        Object.defineProperty(window, 'parent', { value: parent, configurable: true });
+      }
+    });
+    const window = dom.window as any;
+    expect(window.letterIrlHost.safeArea()).toBeNull();
+    const init = sent.find(message => message.method === 'ui/initialize')!;
+    window.dispatchEvent(new window.MessageEvent('message', { data: { jsonrpc: '2.0', id: init.id, result: { hostCapabilities: {}, hostContext: { safeAreaInsets: { top: 48, right: 0, bottom: 0, left: 0 } } } }, source: parent }));
+    await flush();
+    expect(window.letterIrlHost.safeArea()).toEqual({ top: 48, right: 0, bottom: 0, left: 0 });
+    window.close();
+  });
+
+  it("in an MCP Apps host, reads the host context's safeAreaInsets", async () => {
+    const mounted = mountInMcpHost(bridgePage());
+    expect(mounted.host().safeArea()).toBeNull();
+    initialize(mounted, { safeAreaInsets: { top: 12, right: 0, bottom: 0, left: 0 } });
+    await flush();
+    expect(mounted.host().safeArea()).toEqual({ top: 12, right: 0, bottom: 0, left: 0 });
+    mounted.window.close();
   });
 });

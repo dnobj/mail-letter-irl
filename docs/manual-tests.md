@@ -3377,3 +3377,13 @@ Needs the home on in development, an account with more than 4 mail items (testli
 - Steps 3 and 4 passed on ChatGPT web: See all opened ChatGPT's side panel whole, and Close viewer returned it compact.
 - Step 5 passed on Claude web: See all opened Claude's fullscreen, and closing returned it compact.
 - Steps 6 to 8 were not run.
+
+**Run 2026-10-10 on DEV 1cd57cf, ChatGPT Android (S25 Ultra, 4dm1n with 20 mail items):**
+- **Step 1 passed.** The card was compact, about one screen: the 3 failed letters first, the 17 delivered folded into one button.
+- **See all opened fullscreen** (Android offers no expand of its own), and closing returned it compact.
+- **Selection passed (HOME-02 step 1).** It said "Selection shared with the conversation", and the model named the order with no tools.
+- **A deep link passed (HOME-03 step 1).** It opened the app view with the order selected.
+- **Found and fixed in #668:**
+  - ChatGPT's close button and bar covered Refresh in fullscreen and in the app view;
+  - the shared context showed as raw JSON in a chip in the message box;
+  - the title and See all wrapped at phone width.
