@@ -637,7 +637,7 @@ describe('the home card in ChatGPT on the bridge (#665)', () => {
     await flush();
     expect(shares()).toHaveLength(2);
     const share = shares()[1];
-    expect(share.params.content[0].text).toContain('order o-1, a letter to Ruth (Chicago, IL), status: Delivery estimated');
+    expect(share.params.content[0].text).toContain('order o-1, a letter to "Ruth" (Chicago, IL), status: Delivery estimated');
     deliver({ id: share.id, result: {} });
     await flush();
     expect(doc.getElementById('notice')?.textContent).toBe('Selection shared with the conversation.');
@@ -646,7 +646,7 @@ describe('the home card in ChatGPT on the bridge (#665)', () => {
 });
 
 describe('safe-area insets (#668)', () => {
-  it("in ChatGPT, reads window.openai's safe area afresh, else the handshake's host context", async () => {
+  it("in ChatGPT, reads window.openai's safe area afresh", async () => {
     const openai: Record<string, unknown> = { safeArea: { insets: { top: 40, right: 0, bottom: 20, left: 0 } } };
     const plain = new JSDOM(bridgePage(), { runScripts: 'dangerously', beforeParse(window) { (window as any).openai = openai; } });
     const host = (plain.window as any).letterIrlHost;
@@ -673,6 +673,9 @@ describe('safe-area insets (#668)', () => {
     window.dispatchEvent(new window.MessageEvent('message', { data: { jsonrpc: '2.0', id: init.id, result: { hostCapabilities: {}, hostContext: { safeAreaInsets: { top: 48, right: 0, bottom: 0, left: 0 } } } }, source: parent }));
     await flush();
     expect(window.letterIrlHost.safeArea()).toEqual({ top: 48, right: 0, bottom: 0, left: 0 });
+    // window.openai's own safe area comes first when it has one.
+    window.openai.safeArea = { insets: { top: 20, right: 0, bottom: 0, left: 0 } };
+    expect(window.letterIrlHost.safeArea()).toEqual({ top: 20, right: 0, bottom: 0, left: 0 });
     window.close();
   });
 

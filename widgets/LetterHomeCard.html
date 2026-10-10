@@ -8,7 +8,7 @@
     :root{color-scheme:light dark;--paper:#fffdf8;--ink:#282b27;--muted:#666d63;--line:#e4e5dd;--accent:#385e48}
     *{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.5 system-ui,sans-serif}
     .dark{--paper:#20241f;--ink:#f4f2e9;--muted:#b7bdb2;--line:#42493f;--accent:#b5d1be}
-    main{max-width:1100px;margin:auto;padding:calc(32px + var(--inset-top,0px)) calc(32px + var(--inset-right,0px)) calc(32px + var(--inset-bottom,0px)) calc(32px + var(--inset-left,0px))}header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+    main{max-width:1100px;margin:auto;padding:calc(32px + var(--inset-top,0px)) calc(32px + var(--inset-right,0px)) calc(32px + var(--inset-bottom,0px)) calc(32px + var(--inset-left,0px))}header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}
     .tools button{white-space:nowrap}
     /* Fullscreen (#668): the host's close button and bar sit over the card's top right; keep the header clear of them. */
     .fullscreen main{padding-top:max(56px,calc(20px + var(--inset-top,0px)))}.fullscreen header{padding-right:48px}
@@ -97,9 +97,12 @@
       function selectionSentence(item, kind) {
         var recipient = item.recipient || {};
         var where = place(recipient);
-        var what = (item.mailType === 'postcard' ? 'a postcard' : 'a letter') + ' to ' + (recipient.name || 'a recipient') + (where ? ' (' + where + ')' : '');
-        var dates = item.arriveBy ? '; it aims to arrive by ' + item.arriveBy + (item.mailOn ? ', planned mail date ' + item.mailOn : '') : '';
-        if (kind === 'draft') return 'Selected in the Letter IRL home: draft ' + item.draftId + ', ' + what + dates + '. It can be revised; check get_draft_status first.';
+        // The name in quotes: it may come from someone else (an address request), and must not read as one of our claims.
+        var what = (item.mailType === 'postcard' ? 'a postcard' : 'a letter') + ' to ' + JSON.stringify(recipient.name || 'a recipient') + (where ? ' (' + where + ')' : '');
+        // Only a draft or scheduled mail still aims to arrive by its date; for the rest it was the original aim, as the rows say.
+        var aiming = kind === 'draft' || item.status === 'scheduled';
+        var dates = item.arriveBy ? (aiming ? '; it aims to arrive by ' : '; original arrival aim ') + item.arriveBy + (item.mailOn ? ', planned mail date ' + item.mailOn : '') : '';
+        if (kind === 'draft') return 'Selected in the Letter IRL home: draft ' + item.draftId + ', ' + what + dates + '. It is a draft and can still be changed before it is sent.';
         return 'Selected in the Letter IRL home: order ' + item.orderId + ', ' + what + ', status: ' + (statusLabel(item.status) || 'unavailable') + dates + '. It is mail already ordered, not a draft to edit.';
       }
       function shareContext(item, kind, quiet) {
@@ -216,6 +219,12 @@
         data.forEach(function (item) {
           var card = el('article', '', 'item'); render(card, item); target.appendChild(card);
         });
+      }
+      // Fullscreen keeps clear of the host's chrome, and every view honours its safe-area insets (#668): on each change
+      // the host makes, not only a new mode or result, since insets can arrive or change alone.
+      function applyLayout() {
+        document.documentElement.classList.toggle('fullscreen', displayMode() === 'fullscreen');
+        applyInsets();
       }
       function applyInsets() {
         var insets = typeof host.safeArea === 'function' ? host.safeArea() : null;
@@ -369,9 +378,7 @@
         var data = currentData;
         if (!data) return;
         var all = showsAll();
-        // Fullscreen keeps clear of the host's chrome, and every view of its safe-area insets (#668).
-        document.documentElement.classList.toggle('fullscreen', displayMode() === 'fullscreen');
-        applyInsets();
+        applyLayout();
         seeAll.hidden = displayMode() === 'fullscreen';
         seeAll.textContent = full ? 'Show less' : 'See all';
         seeAll.setAttribute('aria-expanded', String(all));
@@ -427,6 +434,7 @@
       }
       function sync() {
         document.documentElement.classList.toggle('dark', host.theme() === 'dark');
+        applyLayout();
         refresh.disabled = busy || typeof host.callTool !== 'function';
         var output = host.toolOutput();
         if (output && output !== lastOutput) { lastOutput = output; render(output); }

@@ -3383,7 +3383,7 @@ Needs the home on in development, an account with more than 4 mail items (testli
 - **See all opened fullscreen** (Android offers no expand of its own), and closing returned it compact.
 - **Selection passed (HOME-02 step 1).** It said "Selection shared with the conversation", and the model named the order with no tools.
 - **A deep link passed (HOME-03 step 1).** It opened the app view with the order selected.
-- **Found and fixed in #668:**
+- **Found; fix in #668, to recheck on Android (fullscreen and the app view, recording the `displayMode` the app view reports):**
   - ChatGPT's close button and bar covered Refresh in fullscreen and in the app view;
   - the shared context showed as raw JSON in a chip in the message box;
   - the title and See all wrapped at phone width.
