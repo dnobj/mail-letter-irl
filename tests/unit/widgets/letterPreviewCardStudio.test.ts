@@ -171,7 +171,7 @@ describe('the selected draft in ChatGPT (#650)', () => {
     const document = mountInChatGpt({ ...ON, modelContextEnabled: true }, { updateModelContext: async (value: Json) => { updates.push(value); return {}; } });
     await flush();
     expect(updates).toHaveLength(1);
-    expect(updates[0].content[0].text).toMatch(/^Shared by a Letter IRL letter card at \S+: the card shows the letter draft draft_0001, ready to send\. /);
+    expect(updates[0].content[0].text).toMatch(/^Shared by a Letter IRL letter card on \d{4}-\d{2}-\d{2} at \d{2}:\d{2}:\d{2} UTC: the card shows the letter draft draft_0001\. /);
     expect(Array.from(document.querySelectorAll('button')).some(button => /conversation/i.test(button.textContent ?? ''))).toBe(false);
   });
 
@@ -222,7 +222,7 @@ describe('the selected draft in ChatGPT (#650)', () => {
     await flush();
     const shared = card.requests('ui/update-model-context');
     expect(shared).toHaveLength(1);
-    expect(shared[0].params.content[0].text).toContain('the card shows the letter draft draft_0001, ready to send.');
+    expect(shared[0].params.content[0].text).toContain('the card shows the letter draft draft_0001.');
     // Drawn again, it is not opened again.
     expect(card.requests('ui/initialize')).toHaveLength(1);
   });

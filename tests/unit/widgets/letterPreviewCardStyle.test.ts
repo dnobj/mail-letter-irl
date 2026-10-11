@@ -130,12 +130,14 @@ const restyled = (stationery: Json, previewHtml?: string) => ({
 });
 
 /** What a letter card shares (#650): a sentence ChatGPT can show the person, with the draft and the time in it. */
-const SHARED = /^Shared by a Letter IRL letter card at (\S+): the card shows the letter draft (\S+), ready to send\. /;
+const SHARED = /^Shared by a Letter IRL letter card on (\d{4}-\d{2}-\d{2}) at (\d{2}:\d{2}:\d{2}) UTC: the card shows the letter draft (\S+)\. /;
 const sharedOf = (text: string) => {
   const found = SHARED.exec(text);
   if (!found) throw new Error(`not a letter card's share: ${text}`);
-  return { sharedAt: found[1], draftId: found[2] };
+  return { sharedAt: `${found[1]}T${found[2]}Z`, draftId: found[3] };
 };
+/** A time as a share says it: to the second. */
+const toSecond = (ms: number) => Math.floor(ms / 1000) * 1000;
 
 describe('the Style row (#563)', () => {
   // The card tells the conversation which draft it shows by itself, with no button (#650).
@@ -166,7 +168,9 @@ describe('the Style row (#563)', () => {
     expect(shared.draftId).toBe('draft_0001');
     expect(Number.isNaN(Date.parse(shared.sharedAt))).toBe(false);
     // A sentence the person can read where ChatGPT shows it, naming no tool the model may not have (#668).
-    expect(text).toContain('the one shared latest is most likely the one the person means; ask if unsure.');
+    expect(text).toContain('Several Letter IRL cards may each share a draft; the one shared latest is most likely the one the person means, so ask if unsure.');
+    // In ChatGPT the card asks no status, so a share never claims the draft is ready.
+    expect(text).not.toMatch(/ready/i);
     expect(text).toContain('It may have been sent or have expired since: a Letter IRL tool given this draftId says so.');
     expect(text).not.toMatch(/[{}]|get_draft_status/);
     expect(text).not.toContain('Main St');
@@ -215,7 +219,7 @@ describe('the Style row (#563)', () => {
       card.document.dispatchEvent(new card.document.defaultView!.Event('click'));
       await flush();
       expect(shares(card)).toHaveLength(2);
-      expect(timeOf(1)).toBe(clickedAt);
+      expect(timeOf(1)).toBe(toSecond(clickedAt));
       await card.deliver({ id: shares(card)[1].id, result: {} });
       // A key soon after: not at once, but when the wait is over, saying when the key was.
       const keyedAt = at(5_000);
@@ -229,7 +233,7 @@ describe('the Style row (#563)', () => {
       wait.fn();
       await flush();
       expect(shares(card)).toHaveLength(3);
-      expect(timeOf(2)).toBe(keyedAt);
+      expect(timeOf(2)).toBe(toSecond(keyedAt));
       await card.deliver({ id: shares(card)[2].id, result: {} });
       // A key long after: at once.
       at(60_000);
