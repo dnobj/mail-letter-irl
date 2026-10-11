@@ -182,16 +182,18 @@ describe('the selected draft in ChatGPT (#650)', () => {
     expect(updates).toHaveLength(0);
   });
 
-  // ChatGPT carries model context on the MCP Apps handshake, not window.openai (#665). The letter card opens it only
-  // when the server flags it to share, so a card that never shares, as everywhere the home is off, never opens it.
-  function framed(meta: Json, extra: Json = {}) {
+  // ChatGPT carries model context on the MCP Apps handshake, not window.openai (#665). The letter card's own opening
+  // of it is withdrawn (#676): with it open, ChatGPT did not give a reopened card its kept state. The card keeps the
+  // logic, tested here with the attribute put back (`optIn`), for when the handshake keeps that state.
+  function framed(meta: Json, extra: Json = {}, optIn = true) {
     const sent: Json[] = [];
     const parent = { postMessage: (message: Json) => sent.push(JSON.parse(JSON.stringify(message))) };
     const served = stampPreviewTool(
       inlineHostBridge(fs.readFileSync(path.join(WIDGET_DIR, 'LetterPreviewCard.html'), 'utf-8'), WIDGET_DIR),
       'quote_and_preview_letter'
     );
-    const dom = new JSDOM(served.replace('<script type="module">', '<script>'), {
+    const page = optIn ? served.replace('<html lang="en">', '<html lang="en" data-plugin-extensions="on-request">') : served;
+    const dom = new JSDOM(page.replace('<script type="module">', '<script>'), {
       runScripts: 'dangerously',
       beforeParse(window) {
         (window as any).setTimeout = () => 0;
@@ -225,6 +227,14 @@ describe('the selected draft in ChatGPT (#650)', () => {
     expect(shared[0].params.content[0].text).toContain('the card shows the letter draft draft_0001.');
     // Drawn again, it is not opened again.
     expect(card.requests('ui/initialize')).toHaveLength(1);
+  });
+
+  it('as served, never opens the handshake, flagged or not, so a reopened card keeps its state (#676)', async () => {
+    const served = fs.readFileSync(path.join(WIDGET_DIR, 'LetterPreviewCard.html'), 'utf-8');
+    expect(served).not.toMatch(/<html[^>]*data-plugin-extensions/);
+    const card = framed({ ...ON, modelContextEnabled: true }, {}, false);
+    await flush();
+    expect(card.sent).toHaveLength(0);
   });
 
   it('never opens the handshake for a card the server does not flag', async () => {

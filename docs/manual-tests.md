@@ -3354,6 +3354,16 @@ Needs HOME-01, a host advertising text model context, and development arrive-by 
 6. Simulate refusal/disconnection during cancellation: the home must report cancellation unconfirmed, retain the previous state, and request Refresh. It must not claim restored funding. Refresh and check the authoritative state before retrying.
 7. Disable host context support or refuse the update: selection stays visible locally and the notice says it was not shared. Check desktop and mobile layouts and dark mode.
 
+**Run 2026-10-11 on DEV (ChatGPT web, the built-in browser pane, testlirl02):**
+- **Step 2 failed its production gate**, on f3b338e (#675, widget v80), with the letter card opening the handshake.
+  - What worked: the composer's Context chip read as the sentence ("Shared by a Letter IRL letter card on 2026-10-11 at 21:47:27 UTC: the card shows the letter draft …"). Asked with no tools, the model named the newest card's draft id and time. "Make it a bit warmer" acted on that letter (a new preview, same recipient and stationery). Pay & Send opened checkout, and the chip was taken back. The card's layout was unchanged.
+  - What failed: **reopening the chat lost the card's kept state.** The card that had started a checkout offered Pay & Send again and shared again. This happened twice; a control run with the home off (no handshake) kept it ("A checkout for this letter was started from this card"). Send could not be tried: the account had no letters.
+  - The letter card's opt-in is withdrawn (#676, widget v81). Step 2 waits for #676.
+- **Step 3:** covered by HOME-03 (the deep links passed on 2026-10-09).
+- **Step 5 passed in part:** the home offered no Cancel on mail already printing (21c2e770, accepted by the printer), on cancelled mail (21dc0954), or on delivered mail with no arrival date. The account had no Pay & Send order or scheduled mail. Pay & Send and arrive-by off are pinned by `letterHomeService.test.ts` (`cancellable` only for scheduled prepaid or gift mail while arrive-by is on), and `cancel_scheduled_mail` needs `mail:draft` (`toolScopes.test.ts`).
+- **Step 6:** covered by `letterHomeCard.test.ts` (a refused or failed cancellation keeps the prior state and asks for Refresh). A dropped connection mid-cancel cannot be caused by hand.
+- **Step 7 passed in part:** the home read well in light and dark at desktop width, and at 375 px wide (no sideways scroll, the state under the name), in both themes. A refused share cannot be caused in ChatGPT; `letterHomeCard.test.ts` covers the notice.
+
 **Run 2026-10-08 on DEV 796c05c (ChatGPT web, Claude web; testlirl02 with a scheduled gift letter):**
 - Step 1 on ChatGPT web: **failed**. Selecting showed "This host cannot share the selection with the conversation" (#665: `window.openai` has no model context; passed on the 2026-10-09 re-run below). On Claude web the card said "Selection shared with the conversation.", but Claude's model did not see it on the next turn.
 - Step 4 on ChatGPT web: **passed**. Cancel asked first; Keep scheduled changed nothing; Confirm cancellation said "Cancelled. The gift letter is back in the account, to use again."; the balance showed the gift letter back; the order stayed in view reading "Cancelled; not mailed" and Cancel was gone.
