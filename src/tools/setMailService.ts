@@ -173,7 +173,7 @@ export const setMailServiceTool: McpToolDefinition<SetMailServiceInput, SetMailS
   description:
     'Change how a previewed letter travels without previewing it again: standard (ordinary first-class mail), ' +
     'certified (USPS Certified Mail) or certified_return_receipt (Certified Mail with an electronic return receipt). ' +
-    'Use it when the person asks to add or remove certified mail: it costs more and is paid with Pay & Send, never a letter pack or ' +
+    'Only when the person asks to add or remove certified mail: it costs more and is paid with Pay & Send, never a letter pack or ' +
     'a gift letter, and a postcard or a gift letter cannot be certified. ' +
     'Give the draftId from the preview and mailService; the page does not change, its price does.',
   readOnly: false,

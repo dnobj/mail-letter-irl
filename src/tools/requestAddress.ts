@@ -98,7 +98,7 @@ function describe(): string {
   const daily = addressRequestDailyCap();
   return (
     "Use this when the person wants to send mail to someone whose U.S. mailing address they don't know. " +
-    'It makes a private link for the person to share with that recipient themselves: Letter IRL never contacts them. ' +
+    'It makes a private link that the person shares with that recipient themselves. ' +
     'The page the link opens shows only the sender\'s first name, and the recipient types their address there or declines. ' +
     `The link works once and for ${days} days. It is free. ` +
     `Each call makes a new link, and an account may make ${daily} a day, so make one per recipient. ` +

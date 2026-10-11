@@ -93,7 +93,7 @@ describe('the cards and the tool list (#625)', () => {
 
   it('says in its description that it is for when the person asks, costs more and is not a pack or a gift', () => {
     const description = String(setMailServiceTool.description);
-    expect(description).toContain('Use it when the person asks to add or remove certified mail');
+    expect(description).toContain('Only when the person asks to add or remove certified mail');
     expect(description).toContain('costs more');
     expect(description).toContain('never a letter pack or a gift letter');
   });

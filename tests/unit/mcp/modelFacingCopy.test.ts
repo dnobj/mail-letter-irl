@@ -28,6 +28,7 @@ import { buildServerInstructions } from '../../../src/mcp/serverInstructions.js'
 import { CLIENT_PROFILE_NAMES, clientProfileNamed } from '../../../src/auth/clientProfiles.js';
 import { sendToolDescription } from '../../../src/tools/previewSendStep.js';
 import { STEERING_COPY_REV } from '../../../src/mcp/steeringRev.js';
+import { RATES_ITS_RISK, everyFlag, modelFacingStrings } from '../../fixtures/riskWords.js';
 
 // ChatGPT's list is the full one: an app that takes no purchases is not
 // offered the checkouts (#475). The other apps' text has its own suite below.
@@ -204,25 +205,6 @@ describe('the manifest prose ChatGPT reads first', () => {
  * because a description said letters could be bought without leaving the
  * conversation - where Claude allows no purchases through connectors (#475).
  */
-const FLAGS_THAT_CHANGE_TOOLS = [
-  'LETTER_IRL_ADDRESS_REQUESTS_ENABLED',
-  'LETTER_IRL_ARRIVE_BY_ENABLED',
-  'LETTER_IRL_CARD_UPLOAD_ENABLED',
-  'LETTER_IRL_CERTIFIED_MAIL_ENABLED',
-  'LETTER_IRL_CUSTOM_STATIONERY_ENABLED',
-  'LETTER_IRL_ENVELOPE_REVEAL_ENABLED',
-  'LETTER_IRL_GIFT_LETTERS_ENABLED',
-  'LETTER_IRL_HOME_ENABLED',
-  'LETTER_IRL_POSTCARD_COLLAGES_ENABLED',
-  'LETTER_IRL_POSTCARD_LAYOUTS_ENABLED',
-  'LETTER_IRL_POSTCARD_SIZES_ENABLED',
-  'LETTER_IRL_ROOM_TO_WRITE_ENABLED',
-  'LETTER_IRL_SIGNATURES_ENABLED',
-  'LETTER_IRL_STATIONERY_ENABLED',
-  'LETTER_IRL_STUDIO_CARD_ENABLED',
-  'LETTER_IRL_WORDS_EDITOR_ENABLED'
-];
-
 describe('tool text in every app', () => {
   afterEach(() => vi.unstubAllEnvs());
 
@@ -263,32 +245,44 @@ describe('tool text in every app', () => {
   // ChatGPT's approval dialog flagged previews and save_stationery_design as a "Suspicious Instruction" for
   // descriptions that said what a tool does not do ("This does not send mail", "Nothing is sent by this tool"): it
   // reads them as steering its risk rating (#543, #670). A description says what the tool does; readOnlyHint and the
-  // other annotations carry the risk. Every flag on and off, since flags change the words.
+  // other annotations carry the risk. Every flag on and off, since flags change the words; riskWordsServed.test.ts
+  // reads the same words from a real tools/list.
   it.each(CLIENT_PROFILE_NAMES.map(name => [name]))('%s: no description rates its own risk', name => {
-    const RATES_ITS_RISK =
-      /nothing is (sent|previewed)|sends nothing|changes nothing|does not send|not send (mail|the)|read-only|is not sent|harmless|safe to (call|use)/i;
-    const descriptions = (node: unknown): string[] =>
-      node && typeof node === 'object'
-        ? Object.entries(node).flatMap(([key, value]) =>
-            key === 'description' && typeof value === 'string' ? [value] : descriptions(value)
-          )
-        : [];
     // A client that cached the old words is told apart in the logs.
     expect(STEERING_COPY_REV).toBeGreaterThanOrEqual(50);
-    for (const on of ['true', 'false']) {
-      for (const flag of FLAGS_THAT_CHANGE_TOOLS) vi.stubEnv(flag, on);
-      // Stationery and designs are offered only with the PDF renderer.
-      vi.stubEnv('LETTER_IRL_PRINT_RENDERER', on === 'true' ? 'pdf' : '');
+    for (const on of [true, false]) {
+      everyFlag(on);
       for (const sendRule of ['true', 'false']) {
         vi.stubEnv('LETTER_IRL_SEND_CONFIRMATION_ENABLED', sendRule);
-        const tools = new LetterIrlServer().listTools(clientProfileNamed(name));
-        if (on === 'true') expect(tools.map(tool => tool.name)).toEqual(expect.arrayContaining(['save_stationery_design', 'open_letter_home']));
-        for (const tool of tools) {
-          for (const text of [tool.description, ...descriptions(tool.inputSchema)]) {
+        for (const tool of new LetterIrlServer().listTools(clientProfileNamed(name))) {
+          for (const text of [tool.title, tool.description, ...modelFacingStrings(tool.inputSchema)]) {
             expect(text, `${tool.name} (flags ${on}, send rule ${sendRule})`).not.toMatch(RATES_ITS_RISK);
           }
         }
+        expect(buildServerInstructions(sendRule === 'true', clientProfileNamed(name)), 'instructions').not.toMatch(RATES_ITS_RISK);
       }
+    }
+  });
+
+  it('lists every tool somewhere with every flag on, so the risk check reads them all', () => {
+    everyFlag(true);
+    vi.stubEnv('LETTER_IRL_SEND_CONFIRMATION_ENABLED', 'true');
+    const listed = new Set(CLIENT_PROFILE_NAMES.flatMap(name => new LetterIrlServer().listTools(clientProfileNamed(name)).map(tool => tool.name)));
+    expect(new LetterIrlServer().toolNames().filter(tool => !listed.has(tool))).toEqual([]);
+  });
+
+  it("refuses each form of rating a tool's own risk", () => {
+    for (const said of [
+      'This does not send mail.', 'Nothing is sent by this tool.', 'Nothing is previewed or sent.', 'It sends nothing.',
+      'It changes nothing.', "It doesn't send the letter.", 'Read-only.', 'It is safe.', 'Safe retries return it.',
+      'It is harmless.', "It won't charge you.", 'It never sends mail.', 'It only reads.', 'Returns sanitized state.',
+      'It never exposes card details.', 'Letter IRL never contacts them.'
+    ]) {
+      expect(said).toMatch(RATES_ITS_RISK);
+    }
+    // What a tool does, said plainly, is not a rating.
+    for (const said of ['The person sends it with Send on the preview card.', 'Free until it goes to the printer: nothing is mailed.', 'A retry returns the existing order.']) {
+      expect(said).not.toMatch(RATES_ITS_RISK);
     }
   });
 

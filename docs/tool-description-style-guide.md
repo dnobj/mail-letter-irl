@@ -14,7 +14,7 @@ Use tool descriptions to explain capability, critical constraints, and important
 - Put platform workarounds in a brief sentence, not a long numbered playbook.
 - Avoid all-caps urgency, repeated warnings, use-case lists, and internal planner instructions.
 - Do not restate field-by-field schema details that are already in the input schema.
-- Say what the tool does, never what it does not do or how risky it is: no "This does not send mail", "Nothing is sent by this tool", "Read-only" or "It is safe". ChatGPT's approval dialog flags such sentences as a "Suspicious Instruction" that steers its risk rating (#543, #670). The annotations (`readOnlyHint`, `destructiveHint`, `openWorldHint`) carry the risk, and `tests/unit/mcp/modelFacingCopy.test.ts` refuses these sentences in every app.
+- Say what the tool does, never what it does not do or how risky it is: no "This does not send mail", "Nothing is sent by this tool", "Read-only", "Safe retries" or "never exposes card details". ChatGPT's approval dialog flagged such sentences as a "Suspicious Instruction" that steers its risk rating (#543, #670). The annotations (`readOnlyHint`, `destructiveHint`, `openWorldHint`) carry the risk. `RATES_ITS_RISK` in `tests/fixtures/riskWords.ts` lists the forms refused; `modelFacingCopy.test.ts` checks every app's tool list and instructions, and `riskWordsServed.test.ts` checks what ChatGPT is served, schemas included, every switch on and off.
 - Where it matters who sends, say where the person sends: "The person sends it with Send on the preview card".
 
 ## Good Patterns

@@ -94,7 +94,7 @@ const ADDRESSES_OR_REQUEST =
 function instructionLines(sendRule: boolean, client: ClientProfile): string[] {
   return [
     "Letter IRL drafts, previews, and sends real physical letters and postcards in the U.S.",
-    "Always create a preview draft before sending. Preview tools are free drafts; they do not send mail.",
+    "Always create a preview draft before sending. Preview tools make free drafts.",
     sendRule ? SEND_BY_PERSON : SEND_BY_MODEL,
     "Do not say mail has been sent unless the send tool succeeds.",
     anotherCopyLine(sendRule, client),

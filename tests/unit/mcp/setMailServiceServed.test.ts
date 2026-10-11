@@ -84,6 +84,7 @@ describe('set_mail_service in tools/list and /manifest.json (#625)', () => {
     const tool = (await listed()).find(found => found.name === 'set_mail_service')!;
     expect(tool.annotations).toMatchObject({ readOnlyHint: false, idempotentHint: true, destructiveHint: false });
     expect(tool.description).toContain('the page does not change, its price does.');
+    expect(tool.description).not.toMatch(/Nothing is sent/);
   });
 
   it('answers with the terms the card shows, declared on its output', async () => {

@@ -70,7 +70,7 @@ export const saveStationeryDesignTool: McpToolDefinition<SaveStationeryDesignInp
   title: 'Save a stationery design',
   description:
     'Save a stationery design the person describes for their letters: a name, a face, a corner ornament, ruled lines or not, and a grey tone. ' +
-    'Use it when the person wants a design of their own kept; for one letter, the built-in stationery may do. ' +
+    'Only when the person wants a design of their own kept; for one letter, the built-in stationery may do. ' +
     'Saving under a name the account has replaces that design; list_stationery_designs gives the names. ' +
     `An account keeps at most ${MAX_STATIONERY_DESIGNS}. ` +
     'A letter is drawn in a saved design with its designId as stationeryDesignId on a letter preview or set_stationery.',
