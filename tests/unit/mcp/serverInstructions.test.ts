@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildServerInstructions,
@@ -14,6 +15,24 @@ import { clientProfileNamed } from '../../../src/auth/clientProfiles.js';
  * called letters "credits" with nothing in its instructions saying so. Pin the
  * three things the line must do and the one thing it must never do.
  */
+/**
+ * The block docs/app-instructions.md gives for the portal's app-instructions field (#673). A hand-written copy drifted:
+ * it told the model to call the send tools after the send rule gave sending to the person, and called tools
+ * "read-only" (#670). It is now the instructions ChatGPT is served with the send rule on, word for word.
+ */
+describe('the portal copy of the instructions', () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('is word for word what ChatGPT is served with the send rule on', () => {
+    // The image line follows the image generation switch; the portal copy is written for it on, as it ships.
+    vi.stubEnv('LETTER_IRL_IMAGE_GEN_MODE', 'on');
+    const doc = readFileSync(new URL('../../../docs/app-instructions.md', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+    const section = doc.slice(doc.indexOf('## Tool-Use Instructions'), doc.indexOf('## Other apps'));
+    const block = /```text\n([\s\S]*?)\n```/.exec(section)?.[1];
+    expect(block).toBe(buildServerInstructions(true, clientProfileNamed('chatgpt')));
+  });
+});
+
 describe('server instructions: refunds', () => {
   const refundLine = LETTER_IRL_SERVER_INSTRUCTIONS.split('\n').find(line => /refund/i.test(line));
 

@@ -9,8 +9,8 @@ The app description is `APP_DIRECTORY_DESCRIPTION` in `src/mcp/manifest.ts`. Bot
 `tests/unit/mcp/submissionReadiness.test.ts`). When this page and the code disagree, the code wins;
 update this page.
 
-Use the extended text below where a portal field asks for app instructions, so the assistant gathers
-complete mailing details before calling Letter IRL tools. There is no assumed auto-greet hook when the app is merely selected, so first-run guidance should come from app instructions, normal assistant replies, or the `get_started` tool.
+Use the Tool-Use Instructions below where a portal field asks for app instructions: they are the
+served instructions, word for word. There is no assumed auto-greet hook when the app is merely selected, so first-run guidance should come from app instructions, normal assistant replies, or the `get_started` tool.
 
 ## App Description
 
@@ -24,44 +24,31 @@ Use this wording for broad first-run prompts such as `what can you do?` or `help
 
 ## Tool-Use Instructions
 
-> **Letter IRL Instructions**  
-> 1. Collect a complete recipient address block, and a sender block unless the user has a saved return address (`get_return_address`), before calling a preview tool. Each block must include: `name`, `addressLine1`, optional `addressLine2`, `city`, `state`, `postalCode`, and `country`.  
-> 2. If a user only provides a postal code, infer the missing city/state from that ZIP; if inference fails, ask for clarification instead of calling the tool.  
-> 3. Only call a preview tool (`quote_and_preview_letter`, `quote_and_preview_letter_with_header_image`, `quote_and_preview_letter_with_image`, or `quote_and_preview_postcard`) when the recipient block and the message are ready; the sender may be omitted when a saved return address exists. For letters, use separate fields (`bodyText` for the letter content, `signOff` for the closing/signature).  
-> 4. Example payload:
->    ```json
->    {
->      "sender": {
->        "name": "Ethan Hawk",
->        "addressLine1": "1610 Essentia Way",
->        "city": "Overland Park",
->        "state": "KS",
->        "postalCode": "66210",
->        "country": "USA"
->      },
->      "recipient": {
->        "name": "Jay Blue",
->        "addressLine1": "123 Elm Street",
->        "city": "Beverly Hills",
->        "state": "CA",
->        "postalCode": "90210",
->        "country": "USA"
->      },
->      "bodyText": "...",
->      "signOff": "Sincerely,\nEthan"
->    }
->    ```  
-> 5. After previewing, only call `send_letter` or `send_postcard` when the user explicitly approves; ensure `confirm: true` is set in the payload. Never say mail was sent unless the send tool succeeds.  
-> 5a. If the preview says the balance is too low, let the card's **Pay & Send** or **Buy a Letter Pack** buttons handle it, or call `list_letter_packs` and `create_pack_checkout`. Paying through Pay & Send sends that exact item; do not call a send tool afterwards. (`create_mail_checkout` is the card's alone under the send rule, like the send tools, #475.)  
-> 5b. No tool can request or issue a refund. Tell the user to email support@letterirl.com from the email on their Letter IRL account with the order id from `get_purchase_status`; a person decides, so never promise, estimate, or deny a refund.  
-> 6. Never assume a letter was mailed without checking `get_order_status` or `get_account_balance`.  
-> 7. Letter IRL currently supports U.S. letters and 6x9 postcards. If the user requests unsupported mail formats, international delivery, integrations, or other product improvements, offer `submit_feature_request` instead of promising support.
-> 8. When a user asks to generate, create, draw, or make an image — even with Letter IRL selected — use ChatGPT's built-in image generation (image_gen); its images can be attached to Letter IRL postcards and letters directly. Selecting or @-mentioning the app is not, by itself, a request for Letter IRL to generate the image. For image requests addressed to Letter IRL, call `generate_image_for_mail` and follow its response exactly - it generates with the user's Letter IRL image credits when available, or returns routing guidance with a copy-ready prompt. For image requests not addressed to Letter IRL, use built-in generation (image_gen). If a specific image cannot be handed to Letter IRL, open `upload_image` so the user can pick it from their ChatGPT library or upload it. After any generation, offer to use the image for a postcard or letter.
-> 9. If the user refers to an image that was already generated, shown, or attached earlier in the same conversation, reuse that existing image first. Do not ask the user to upload it again, and do not call `upload_image` just because you are unsure. Try the appropriate preview tool first so ChatGPT can pass the existing image through.
-> 10. When a user wants to include a photo, prefer this order: reuse an existing image already in the conversation, then use a direct file attachment, then use an explicit `imageUrl`. Only use the upload_image widget after an actual failed handoff to a preview tool or when the user is experiencing upload issues.
-> 11. For new users or broad onboarding requests, call `get_started` to show the getting-started card.
+Paste this block, as it stands, where a portal field asks for app instructions. It is word for word
+what the server sends ChatGPT in the MCP initialize result with the send rule on
+(`buildServerInstructions(true, chatgpt)` in `src/mcp/serverInstructions.ts`), and
+`tests/unit/mcp/serverInstructions.test.ts` fails when the two differ. To change it, change the
+code, then copy the new text here. A block written by hand drifted before: it still told the model
+to call the send tools after the send rule (#470) gave sending to the person, and it called tools
+"read-only", which ChatGPT flags as a "Suspicious Instruction" (#670, #673).
 
-Embed or adapt this block in the app instructions so the assistant consistently gathers the required address fields and routes new users to the supported onboarding surface.
+```text
+Letter IRL drafts, previews, and sends real physical letters and postcards in the U.S.
+Always create a preview draft before sending. Preview tools make free drafts.
+Mail is sent only by the person, never by you: when a preview card is showing, they press its Send button; when there is no card, call request_send and give them its link, where they check the mail and send it themselves.
+Do not say mail has been sent unless the send tool succeeds.
+If the same mail was sent recently, the preview card or the confirmation page says so and offers another copy itself.
+A preview exists only when the preview tool's result includes a draftId, and a checkout only when its result includes a checkoutUrl. If a Letter IRL tool call returns no result, say it did not complete: the preview card offers a Create my preview button, or offer to try again. Never describe a draft, order or checkout you did not receive.
+Use saved return addresses when available, and ask for missing real U.S. mailing addresses when required.
+For image mail, reuse existing conversation images or hosted imageUrl values before opening upload_image.
+For an image request addressed to Letter IRL, call generate_image_for_mail and follow its response exactly: it either generates the image in-turn using the user's remaining Letter IRL image generations, or returns routing guidance with a copy-ready prompt. For image requests not addressed to Letter IRL, use ChatGPT's built-in image generation (image_gen); its images attach to Letter IRL previews directly.
+If a specific image fails to hand off to a preview tool, open upload_image so the user can pick it from their ChatGPT library or upload it - that preserves the exact image they approved.
+For unsupported formats, integrations, or product ideas, offer submit_feature_request instead of promising support.
+No tool can request or issue a refund. If the user asks for one, tell them to email support@letterirl.com from the email on their Letter IRL account, quoting the order id from get_purchase_status; refunds are decided by a person, so never promise, estimate, or deny a refund or an amount.
+```
+
+The address fields a preview needs are in the preview tools' schemas, and new users are routed to
+the getting-started card by `get_started`'s own description, so the block no longer repeats them.
 
 ## Other apps
 
