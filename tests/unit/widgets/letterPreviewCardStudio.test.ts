@@ -193,6 +193,8 @@ describe('the selected draft in ChatGPT (#650)', () => {
       'quote_and_preview_letter'
     );
     const page = optIn ? served.replace('<html lang="en">', '<html lang="en" data-plugin-extensions="on-request">') : served;
+    // Put back for real, or the opt-in tests below pass for nothing.
+    if (optIn && !page.includes('data-plugin-extensions="on-request"')) throw new Error('the opt-in was not put back');
     const dom = new JSDOM(page.replace('<script type="module">', '<script>'), {
       runScripts: 'dangerously',
       beforeParse(window) {
