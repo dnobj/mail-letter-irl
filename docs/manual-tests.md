@@ -1846,7 +1846,8 @@ print; and nothing prints a signature the person did not see.
 
 ### STATIONERY-02 — Saved stationery designs (#649)
 
-**Status:** Passed on development, 2026-10-10, on 979909a with `LETTER_IRL_CUSTOM_STATIONERY_ENABLED` turned on for the
+**Status:** Partly run on development, 2026-10-10: steps 1 to 7 passed, step 8 passed in part, step 9 skipped and
+step 10 passed in part. It ran on 979909a with `LETTER_IRL_CUSTOM_STATIONERY_ENABLED` turned on for the
 run (step 9 skipped). Steps 1 to 3 ran on ChatGPT web (DEV) and steps 4 to 7 with the dev CLI, both as testlirl02; step 8
 was checked in PostGrid's test dashboard. The flag was turned off at step 10 and left off on development.
 
@@ -3412,4 +3413,5 @@ Needs the home on in development, an account with more than 4 mail items (testli
 - In fullscreen and in the deep link's app view, Refresh sat clear of ChatGPT's close button and bar.
 - The shared selection read as a sentence, not JSON: "Selected in the Letter IRL home: order 02726a1a…, a letter to "<name>" (<city>, <state>), status: Did not go out. It is mail already ordered, not a draft to edit."
 - The header fitted on one line.
-- Found: the three failed letters, from December 2025, read "Dec 30" with no year. Short dates from another year now say their year (widget v79).
+- The `displayMode` the app view reports was not recorded.
+- Found: the three failed letters, from December 2025, read "Dec 30" with no year. Fixed in widget v79 (#671), so short dates from another year say their year; not yet rechecked on Android.
