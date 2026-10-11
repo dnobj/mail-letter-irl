@@ -15,7 +15,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createMcpServer } from '../../../src/mcp/httpServer.js';
 import { LetterIrlServer } from '../../../src/server.js';
-import { RATES_ITS_RISK, everyFlag, modelFacingStrings } from '../../fixtures/riskWords.js';
+import { RATES_ITS_RISK, SWITCH_STATES, everyFlag, modelFacingStrings } from '../../fixtures/riskWords.js';
 
 async function chatgpt() {
   vi.stubEnv('LETTER_IRL_REQUIRE_AUTH', 'true');
@@ -36,17 +36,20 @@ async function chatgpt() {
 afterEach(() => vi.unstubAllEnvs());
 
 describe('what ChatGPT is served rates no tool by its risk (#543, #670)', () => {
-  it.each([
-    [true, 'true'],
-    [true, 'false'],
-    [false, 'true'],
-    [false, 'false']
-  ])('switches on: %s, send rule: %s', async (on, sendRule) => {
-    everyFlag(on);
+  it.each(
+    SWITCH_STATES.flatMap(([on, paidPerSend]) =>
+      ['true', 'false'].map(sendRule => [on, paidPerSend, sendRule] as const)
+    )
+  )('switches on: %s, paid per send: %s, send rule: %s', async (on, paidPerSend, sendRule) => {
+    everyFlag(on, paidPerSend);
     vi.stubEnv('LETTER_IRL_SEND_CONFIRMATION_ENABLED', sendRule);
     const client = await chatgpt();
     const { tools } = await client.listTools();
-    if (on) expect(tools.map(tool => tool.name)).toEqual(expect.arrayContaining(['save_stationery_design', 'set_mail_service', 'open_letter_home']));
+    if (on)
+      expect(tools.map(tool => tool.name)).toEqual(
+        expect.arrayContaining(['save_stationery_design', 'set_postcard_style', 'open_letter_home'])
+      );
+    if (paidPerSend) expect(tools.map(tool => tool.name)).toContain('set_mail_service');
     for (const tool of tools) {
       // The whole tool as served: its title, description, annotations, and input and output schemas.
       const said = modelFacingStrings(tool);
@@ -63,7 +66,9 @@ describe('what ChatGPT is served rates no tool by its risk (#543, #670)', () => 
     const client = await chatgpt();
     const { tools } = await client.listTools();
     const save = tools.find(tool => tool.name === 'save_stationery_design');
-    expect(modelFacingStrings(save?.inputSchema)).toEqual(expect.arrayContaining([expect.stringContaining('ask the person before reusing one')]));
+    expect(modelFacingStrings(save?.inputSchema)).toEqual(
+      expect.arrayContaining([expect.stringContaining('ask the person before reusing one')])
+    );
     await client.close();
   });
 });

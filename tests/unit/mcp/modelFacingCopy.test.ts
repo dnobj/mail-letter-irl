@@ -28,7 +28,7 @@ import { buildServerInstructions } from '../../../src/mcp/serverInstructions.js'
 import { CLIENT_PROFILE_NAMES, clientProfileNamed } from '../../../src/auth/clientProfiles.js';
 import { sendToolDescription } from '../../../src/tools/previewSendStep.js';
 import { STEERING_COPY_REV } from '../../../src/mcp/steeringRev.js';
-import { RATES_ITS_RISK, everyFlag, modelFacingStrings } from '../../fixtures/riskWords.js';
+import { RATES_ITS_RISK, SWITCH_STATES, everyFlag, modelFacingStrings } from '../../fixtures/riskWords.js';
 
 // ChatGPT's list is the full one: an app that takes no purchases is not
 // offered the checkouts (#475). The other apps' text has its own suite below.
@@ -250,13 +250,13 @@ describe('tool text in every app', () => {
   it.each(CLIENT_PROFILE_NAMES.map(name => [name]))('%s: no description rates its own risk', name => {
     // A client that cached the old words is told apart in the logs.
     expect(STEERING_COPY_REV).toBeGreaterThanOrEqual(50);
-    for (const on of [true, false]) {
-      everyFlag(on);
+    for (const [on, paidPerSend] of SWITCH_STATES) {
+      everyFlag(on, paidPerSend);
       for (const sendRule of ['true', 'false']) {
         vi.stubEnv('LETTER_IRL_SEND_CONFIRMATION_ENABLED', sendRule);
         for (const tool of new LetterIrlServer().listTools(clientProfileNamed(name))) {
           for (const text of [tool.title, tool.description, ...modelFacingStrings(tool.inputSchema)]) {
-            expect(text, `${tool.name} (flags ${on}, send rule ${sendRule})`).not.toMatch(RATES_ITS_RISK);
+            expect(text, `${tool.name} (flags ${on}, paid per send ${paidPerSend}, send rule ${sendRule})`).not.toMatch(RATES_ITS_RISK);
           }
         }
         expect(buildServerInstructions(sendRule === 'true', clientProfileNamed(name)), 'instructions').not.toMatch(RATES_ITS_RISK);

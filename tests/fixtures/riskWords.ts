@@ -37,9 +37,20 @@ export const FLAGS_THAT_CHANGE_TOOLS = [
   'LETTER_IRL_WORDS_EDITOR_ENABLED'
 ];
 
-/** Every switch on or off. Stationery is offered only with the PDF renderer, and the options paid per send only with JIT. */
-export function everyFlag(on: boolean): void {
+/**
+ * Every switch on or off. Stationery is offered only with the PDF renderer, and the options paid per send (certified
+ * mail, room to write, the postcard sizes) only with JIT purchases, which `paidPerSend` sets apart: with every switch on
+ * but JIT off, descriptions take the words they have without those options (a postcard's layouts without its sizes).
+ */
+export function everyFlag(on: boolean, paidPerSend = on): void {
   for (const flag of FLAGS_THAT_CHANGE_TOOLS) vi.stubEnv(flag, String(on));
   vi.stubEnv('LETTER_IRL_PRINT_RENDERER', on ? 'pdf' : '');
-  vi.stubEnv('JIT_PURCHASE_ENABLED', String(on));
+  vi.stubEnv('JIT_PURCHASE_ENABLED', String(paidPerSend));
 }
+
+/** The switch states the risk checks read: every switch on, every switch on but nothing paid per send, every switch off. */
+export const SWITCH_STATES: Array<[on: boolean, paidPerSend: boolean]> = [
+  [true, true],
+  [true, false],
+  [false, false]
+];
