@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-plugin-extensions="on-request">
   <head>
     <meta charset="utf-8" />
     <title>LetterPreviewCard</title>
@@ -3124,8 +3124,11 @@
       const SHARE_TIMEOUT_MS = 10000;
       const RESHARE_AFTER_MS = 10000;
       function shareSelection(touched = false, usedAt = 0, immediate = false) {
-        if (typeof host.updateModelContext !== "function") return;
         const flagged = currentMeta().modelContextEnabled === true;
+        // In ChatGPT what carries model context opens only for a card flagged to share; its answer redraws the card,
+        // which shares then.
+        if (flagged && typeof host.openPluginExtensions === "function") host.openPluginExtensions();
+        if (typeof host.updateModelContext !== "function") return;
         const asks = typeof host.setWidgetState !== "function" && typeof host.callTool === "function";
         const confirmed = !asks || statusReadyFor === currentDraftId || retryResult?.output?.draftId === currentDraftId;
         // Not while a send is out or after it (sendInProgress stays set once sent), nor once a checkout is tracked, nor
@@ -3157,14 +3160,13 @@
         sharedDraftId = draftId;
         sharedAt = now;
         carriedAt = at;
+        // A sentence, not JSON: ChatGPT shows what a card shares to the person, in a chip in the message box (#668).
         const content = draftId
-          ? [{ type: "text", text: JSON.stringify({
-              source: "Letter IRL letter card",
-              draftId,
-              sharedAt: new Date(at).toISOString(),
-              instruction:
-                "Several Letter IRL cards may each share a draft; the one with the latest sharedAt is most likely the one the person means, but ask if unsure. Check get_draft_status before editing; this card may have been sent or expired."
-            }) }]
+          ? [{ type: "text", text:
+              "Shared by a Letter IRL letter card at " + new Date(at).toISOString() + ": the card shows the letter draft " +
+              draftId + ", ready to send. If several Letter IRL cards share a draft, the one shared latest is most likely " +
+              "the one the person means; ask if unsure. It may have been sent or have expired since: a Letter IRL tool " +
+              "given this draftId says so." }]
           : [];
         shareChain = shareChain
           .then(() => Promise.race([

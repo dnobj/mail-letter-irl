@@ -129,6 +129,14 @@ const restyled = (stationery: Json, previewHtml?: string) => ({
   }
 });
 
+/** What a letter card shares (#650): a sentence ChatGPT can show the person, with the draft and the time in it. */
+const SHARED = /^Shared by a Letter IRL letter card at (\S+): the card shows the letter draft (\S+), ready to send\. /;
+const sharedOf = (text: string) => {
+  const found = SHARED.exec(text);
+  if (!found) throw new Error(`not a letter card's share: ${text}`);
+  return { sharedAt: found[1], draftId: found[2] };
+};
+
 describe('the Style row (#563)', () => {
   // The card tells the conversation which draft it shows by itself, with no button (#650).
   const shares = (card: ReturnType<typeof mount>) => card.sent.filter(message => message.method === 'ui/update-model-context');
@@ -154,12 +162,13 @@ describe('the Style row (#563)', () => {
     await statusOf(card, 'ready');
     expect(shares(card)).toHaveLength(1);
     const text = shares(card)[0].params.content[0].text;
-    const shared = JSON.parse(text);
-    expect(Object.keys(shared).sort()).toEqual(['draftId', 'instruction', 'sharedAt', 'source']);
-    expect(shared).toMatchObject({ source: 'Letter IRL letter card', draftId: 'draft_0001' });
-    expect(shared.instruction).toContain('the latest sharedAt is most likely the one the person means, but ask if unsure');
-    expect(shared.instruction).toContain('Check get_draft_status before editing');
+    const shared = sharedOf(text);
+    expect(shared.draftId).toBe('draft_0001');
     expect(Number.isNaN(Date.parse(shared.sharedAt))).toBe(false);
+    // A sentence the person can read where ChatGPT shows it, naming no tool the model may not have (#668).
+    expect(text).toContain('the one shared latest is most likely the one the person means; ask if unsure.');
+    expect(text).toContain('It may have been sent or have expired since: a Letter IRL tool given this draftId says so.');
+    expect(text).not.toMatch(/[{}]|get_draft_status/);
     expect(text).not.toContain('Main St');
     expect(text).not.toContain('Sam');
     await card.deliver({ id: shares(card)[0].id, result: {} });
@@ -199,7 +208,7 @@ describe('the Style row (#563)', () => {
     const realNow = cardDate.now;
     const base = realNow();
     const at = (ms: number) => { const frozen = base + ms; cardDate.now = () => frozen; return frozen; };
-    const timeOf = (index: number) => Date.parse(JSON.parse(shares(card)[index].params.content[0].text).sharedAt);
+    const timeOf = (index: number) => Date.parse(sharedOf(shares(card)[index].params.content[0].text).sharedAt);
     try {
       // A click soon after the first share: shared at once, with its own time.
       const clickedAt = at(3_000);
@@ -310,7 +319,7 @@ describe('the Style row (#563)', () => {
       await card.deliver({ id: shares(card)[answered].id, result: {} });
     }
     // The first draft was taken back while the second was not yet known to be ready, then the second was shared.
-    expect(shares(card).map(share => share.params.content.length ? JSON.parse(share.params.content[0].text).draftId : null)).toEqual(['draft_0001', null, 'draft_0002']);
+    expect(shares(card).map(share => share.params.content.length ? sharedOf(share.params.content[0].text).draftId : null)).toEqual(['draft_0001', null, 'draft_0002']);
   });
 
   it('gives up on an update the host never answers, so the next one still goes (#650)', async () => {
@@ -367,7 +376,7 @@ describe('the Style row (#563)', () => {
     await card.deliver({ id: shares(card).at(-1)!.id, result: {} });
     const sendCall = card.lastRequest('tools/call', 'send_letter')!;
     await card.deliver({ id: sendCall.id, result: { isError: true, content: [{ type: 'text', text: 'The printer is busy.' }] } });
-    expect(JSON.parse(shares(card).at(-1)!.params.content[0].text).draftId).toBe('draft_0001');
+    expect(sharedOf(shares(card).at(-1)!.params.content[0].text).draftId).toBe('draft_0001');
   });
 
   it('offers the six styles while the preview names its stationery, the one it is in pressed', async () => {

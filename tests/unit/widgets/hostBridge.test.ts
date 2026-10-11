@@ -520,6 +520,28 @@ describe('Plugin Extensions in ChatGPT (#665)', () => {
     mounted.window.close();
   });
 
+  it('opens the handshake for an on-request card only when it asks, and once', async () => {
+    const page = `<!doctype html><html data-plugin-extensions="on-request"><body><script>${BRIDGE}</script></body></html>`;
+    const mounted = mountInChatGptFrame(page);
+    const host = mounted.host();
+    expect(mounted.sent).toHaveLength(0);
+    expect(host.updateModelContext).toBeUndefined();
+    host.openPluginExtensions();
+    host.openPluginExtensions();
+    const opened = mounted.sent.filter(message => message.method === 'ui/initialize');
+    expect(opened).toHaveLength(1);
+    mounted.deliver({ id: opened[0].id, result: { hostCapabilities: { updateModelContext: { text: {} } }, hostContext: { 'openai/deepLink': { url: '/draft/d-1' } } } });
+    await flush();
+    expect(typeof host.updateModelContext).toBe('function');
+    expect(host.hostContext()['openai/deepLink']).toEqual({ url: '/draft/d-1' });
+    mounted.window.close();
+    // A card that asks at load has nothing to open later.
+    const atLoad = mountInChatGptFrame(extensionsPage);
+    expect(atLoad.sent.filter(message => message.method === 'ui/initialize')).toHaveLength(1);
+    expect(atLoad.host().openPluginExtensions).toBeUndefined();
+    atLoad.window.close();
+  });
+
   it('keeps a context change that arrives before the handshake reply over the reply', async () => {
     const mounted = mountInChatGptFrame(extensionsPage);
     mounted.deliver({ method: 'ui/notifications/host-context-changed', params: { 'openai/deepLink': { url: '/order/new' } } });

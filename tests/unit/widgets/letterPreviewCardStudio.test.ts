@@ -171,7 +171,7 @@ describe('the selected draft in ChatGPT (#650)', () => {
     const document = mountInChatGpt({ ...ON, modelContextEnabled: true }, { updateModelContext: async (value: Json) => { updates.push(value); return {}; } });
     await flush();
     expect(updates).toHaveLength(1);
-    expect(JSON.parse(updates[0].content[0].text)).toMatchObject({ source: 'Letter IRL letter card', draftId: 'draft_0001' });
+    expect(updates[0].content[0].text).toMatch(/^Shared by a Letter IRL letter card at \S+: the card shows the letter draft draft_0001, ready to send\. /);
     expect(Array.from(document.querySelectorAll('button')).some(button => /conversation/i.test(button.textContent ?? ''))).toBe(false);
   });
 
@@ -180,6 +180,57 @@ describe('the selected draft in ChatGPT (#650)', () => {
     mountInChatGpt(ON, { updateModelContext: async (value: Json) => { updates.push(value); return {}; } });
     await flush();
     expect(updates).toHaveLength(0);
+  });
+
+  // ChatGPT carries model context on the MCP Apps handshake, not window.openai (#665). The letter card opens it only
+  // when the server flags it to share, so a card that never shares, as everywhere the home is off, never opens it.
+  function framed(meta: Json) {
+    const sent: Json[] = [];
+    const parent = { postMessage: (message: Json) => sent.push(JSON.parse(JSON.stringify(message))) };
+    const served = stampPreviewTool(
+      inlineHostBridge(fs.readFileSync(path.join(WIDGET_DIR, 'LetterPreviewCard.html'), 'utf-8'), WIDGET_DIR),
+      'quote_and_preview_letter'
+    );
+    const dom = new JSDOM(served.replace('<script type="module">', '<script>'), {
+      runScripts: 'dangerously',
+      beforeParse(window) {
+        (window as any).setTimeout = () => 0;
+        (window as any).clearTimeout = () => undefined;
+        Object.defineProperty(window, 'parent', { value: parent, configurable: true });
+        (window as any).openai = {
+          theme: 'light', toolInput: ARGS, toolOutput: output(), toolResponseMetadata: meta, widgetState: null,
+          setWidgetState: async () => undefined, callTool: async () => ({})
+        };
+      }
+    });
+    const window = dom.window as any;
+    window.dispatchEvent(new window.Event('openai:set_globals'));
+    const deliver = (message: Json) =>
+      window.dispatchEvent(new window.MessageEvent('message', { data: { jsonrpc: '2.0', ...message }, source: parent }));
+    const requests = (method: string) => sent.filter(message => message.method === method);
+    return { sent, deliver, requests };
+  }
+
+  it('opens the handshake only when flagged, and shares once ChatGPT takes model context there', async () => {
+    const card = framed({ ...ON, modelContextEnabled: true });
+    await flush();
+    const opened = card.requests('ui/initialize');
+    expect(opened).toHaveLength(1);
+    expect(String(opened[0].id)).toMatch(/^lirl-ext-/);
+    expect(card.requests('ui/update-model-context')).toHaveLength(0);
+    card.deliver({ id: opened[0].id, result: { hostCapabilities: { experimental: { 'openai/modelContext': {} } } } });
+    await flush();
+    const shared = card.requests('ui/update-model-context');
+    expect(shared).toHaveLength(1);
+    expect(shared[0].params.content[0].text).toContain('the card shows the letter draft draft_0001, ready to send.');
+    // Drawn again, it is not opened again.
+    expect(card.requests('ui/initialize')).toHaveLength(1);
+  });
+
+  it('never opens the handshake for a card the server does not flag', async () => {
+    const card = framed(ON);
+    await flush();
+    expect(card.sent).toHaveLength(0);
   });
 });
 
