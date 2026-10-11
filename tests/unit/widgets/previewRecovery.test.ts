@@ -137,7 +137,7 @@ interface MountOptions {
   /** get_purchase_status's answer from the start: a card may ask at mount. */
   purchaseStatus?: Json;
   /** What get_draft_status answers (#676); without it, an answer the card ignores. */
-  draftStatus?: (args: Json) => Json;
+  draftStatus?: (args: Json) => Json | Promise<Json>;
   /** How many send calls reject before one succeeds. */
   failSends?: number;
   /** How many create_mail_checkout calls reject before one succeeds. */
@@ -229,7 +229,7 @@ function mount(spec: CardSpec, options: MountOptions = {}) {
           }
         };
       }
-      if (name === 'get_draft_status' && options.draftStatus) return { structuredContent: options.draftStatus(args) };
+      if (name === 'get_draft_status' && options.draftStatus) return { structuredContent: await options.draftStatus(args) };
       if (name === 'get_purchase_status') return { structuredContent: purchaseStatus };
       if (name === 'get_account_balance') return { structuredContent: { lettersRemaining } };
       return { structuredContent: {} };
@@ -2837,15 +2837,50 @@ describe('LetterPreviewCard in ChatGPT asks the server what became of its draft 
     expect(other.visible('send-button')).toBe(true);
   });
 
-  it('takes no started checkout over state it found on opening', async () => {
+  it('takes a checkout started elsewhere over a kept draft id alone, the server being the truth', async () => {
     const harness = mount(LETTER, {
       toolOutput: LETTER.output('draft_host_0001'),
-      widgetState: { v: 1, draftId: 'draft_host_0001', sent: true, orderId: 'ord_sent_0001' },
+      widgetState: { v: 1, draftId: 'draft_host_0001' },
       draftStatus: args => ({ draftId: args.draftId, status: 'ready', checkout: { orderId: 'ord_checkout_0009' } })
     });
     await flush();
     await flush();
-    expect(harness.text('id-value')).toBe('ord_sent_0001');
+    expect(harness.text('empty-message')).toBe('A checkout for this letter was started from this card.');
+    expect(harness.text('id-value')).toBe('ord_checkout_0009');
+  });
+
+  it('takes no checkout without an order id', async () => {
+    const harness = mount(LETTER, {
+      toolOutput: LETTER.output('draft_host_0001'),
+      draftStatus: args => ({ draftId: args.draftId, status: 'ready', checkout: { checkoutUrl: 'https://checkout.stripe.com/c/pay/x' } })
+    });
+    await flush();
+    await flush();
+    expect(harness.visible('send-button')).toBe(true);
+    expect(harness.savedStates.some(state => (state as { checkout?: boolean }).checkout)).toBe(false);
+  });
+
+  it('takes no checkout for a draft the card no longer shows when the answer comes', async () => {
+    let answerFirst: (() => void) | null = null;
+    const firstAnswered = new Promise<void>(resolve => (answerFirst = resolve));
+    const harness = mount(LETTER, {
+      toolOutput: LETTER.output('draft_host_0001'),
+      // The first draft's answer waits until the card shows the second.
+      draftStatus: async args => {
+        if (args.draftId !== 'draft_host_0001') return { draftId: args.draftId, status: 'ready' };
+        await firstAnswered;
+        return { draftId: args.draftId, status: 'ready', checkout: { orderId: 'ord_checkout_0009' } };
+      }
+    });
+    await flush();
+    await harness.deliverHostResult(LETTER.output('draft_host_0002'));
+    expect(harness.text('id-value')).toBe('draft_host_0002');
+    answerFirst!();
+    await flush();
+    await flush();
+    expect(harness.text('id-value')).toBe('draft_host_0002');
+    expect(harness.visible('send-button')).toBe(true);
+    expect(harness.savedStates.some(state => (state as { checkout?: boolean }).checkout)).toBe(false);
   });
 });
 

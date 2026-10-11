@@ -1325,12 +1325,13 @@
             if (answer.status === "ready") {
               statusReadyFor = draftId;
               // A Pay & Send checkout already started on it (#676): what this card would have kept had its state not
-              // been lost. Shown as the kept checkout, so the card offers its link rather than Pay & Send again; not
-              // for a checkout this card is following, nor over state it found on opening.
+              // been lost, or one started elsewhere, such as the confirmation page. Shown as the kept checkout, so the
+              // card offers its link rather than Pay & Send again; not for a checkout this card is following, nor once
+              // the card has moved to another draft or is sending.
               const started = answer.checkout;
               if (
                 started && typeof started.orderId === "string" && started.orderId &&
-                draftId === currentDraftId && !resumed && trackedOrderId === null && !sendInProgress
+                draftId === currentDraftId && trackedOrderId === null && !sendInProgress
               ) {
                 keep({
                   draftId,
