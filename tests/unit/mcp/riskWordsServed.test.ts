@@ -15,7 +15,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createMcpServer } from '../../../src/mcp/httpServer.js';
 import { LetterIrlServer } from '../../../src/server.js';
-import { RATES_ITS_RISK, SWITCH_STATES, everyFlag, modelFacingStrings } from '../../fixtures/riskWords.js';
+import { A_REMOVED_RISK_SENTENCE, SWITCH_STATES, everyFlag, modelFacingStrings } from '../../fixtures/riskWords.js';
 
 async function chatgpt() {
   vi.stubEnv('LETTER_IRL_REQUIRE_AUTH', 'true');
@@ -54,9 +54,9 @@ describe('what ChatGPT is served rates no tool by its risk (#543, #670)', () => 
       // The whole tool as served: its title, description, annotations, and input and output schemas.
       const said = modelFacingStrings(tool);
       expect(said.length, tool.name).toBeGreaterThan(0);
-      for (const text of said) expect(text, tool.name).not.toMatch(RATES_ITS_RISK);
+      for (const text of said) expect(text, tool.name).not.toMatch(A_REMOVED_RISK_SENTENCE);
     }
-    expect(client.getInstructions() ?? '').not.toMatch(RATES_ITS_RISK);
+    expect(client.getInstructions() ?? '').not.toMatch(A_REMOVED_RISK_SENTENCE);
     await client.close();
   });
 

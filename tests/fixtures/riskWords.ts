@@ -1,40 +1,38 @@
 import { vi } from 'vitest';
 import type { ImageGenMode } from '../../src/config/imageGeneration.js';
 
-/** A straight or a curly apostrophe. */
-const APOSTROPHE = "['\u2019]";
-/** What says a tool or a preview is not to do something. */
-const NOT = `(does not|doesn${APOSTROPHE}t|do not|don${APOSTROPHE}t|will not|won${APOSTROPHE}t|cannot|can not|can${APOSTROPHE}t|never)`;
-/** What a sentence rating a tool's own risk is about: the tool, its previews or drafts, not Letter IRL or the model. */
-const SUBJECT = '(it|this|this tool|the tool|they|tools?|previews?|preview tools|drafts?)';
-
 /**
- * Sentences that rate a tool's own risk rather than say what it does (#543, #670). ChatGPT's approval dialog flagged
- * "This does not send mail" and "Nothing is sent by this tool" as a "Suspicious Instruction" steering its risk rating.
- * The annotations (readOnlyHint, destructiveHint, openWorldHint) carry the risk; the words say what the tool does.
+ * The sentences #543 and #670 took out of the tools' descriptions and the instructions, kept out of them. ChatGPT's
+ * approval dialog flagged "This does not send mail" and "Nothing is sent by this tool" as a "Suspicious Instruction"
+ * steering its risk rating; the annotations (readOnlyHint, destructiveHint, openWorldHint) carry the risk, and the
+ * words say what the tool does.
  *
- * These are the forms ChatGPT flagged and the forms close to them (#672's review rounds): a tool or a preview said not
- * to send, mail or charge; nothing sent, previewed or charged; read-only, safe, harmless, sanitized. It is not a
- * grammar of every way to say so, and it lets through what a description may rightly say: an instruction to the model
- * ("Do not send mail to a guessed address"), what Letter IRL does not do ("Letter IRL does not send the receipt"), and
- * what an action does ("Free until it goes to the printer: nothing is mailed"). The style guide states the rule
- * (docs/tool-description-style-guide.md).
+ * This is the list of what was removed, not a pattern for every way of saying a tool is harmless: four review rounds
+ * of #672 found such a pattern always missed one phrasing or refused a sentence a description may rightly say. The
+ * rule for new words is the style guide's (docs/tool-description-style-guide.md), kept by review.
  */
-export const RATES_ITS_RISK = new RegExp(
-  [
-    '\\bnothing (is|will be|gets|has been) (sent|previewed|charged)\\b',
-    '\\bno mail is sent\\b',
-    '\\b(sends|changes|charges) nothing\\b',
-    `\\b${SUBJECT} ${NOT} (send|sends|mail|mails|charge|charges)\\b`,
-    '\\bnever exposes\\b',
-    '\\bread[- ]?only\\b',
-    '\\bonly reads\\b',
-    '\\bno side effects?\\b',
-    '\\bharmless\\b',
-    `\\b(is|are|it${APOSTROPHE}s) safe\\b`,
-    '\\bsafe(ly)? (to|retr)',
-    '\\bsanitized\\b'
-  ].join('|'),
+export const REMOVED_RISK_SENTENCES = [
+  'This does not send mail',
+  'Nothing is sent from here',
+  'Nothing is sent by this tool',
+  'Nothing is previewed or sent',
+  'Read-only',
+  'sends nothing',
+  'changes nothing',
+  'does not send or cancel mail',
+  'Does not send the letter',
+  'Does not send the postcard',
+  'it does not send anything',
+  'Safe retries',
+  'sanitized commerce state',
+  'never exposes payment-card details',
+  'never contacts them',
+  'they do not send mail'
+];
+
+/** Any of the removed sentences, in any case. */
+export const A_REMOVED_RISK_SENTENCE = new RegExp(
+  REMOVED_RISK_SENTENCES.map(sentence => sentence.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'),
   'i'
 );
 

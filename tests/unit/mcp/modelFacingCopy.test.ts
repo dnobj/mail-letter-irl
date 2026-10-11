@@ -28,7 +28,7 @@ import { buildServerInstructions } from '../../../src/mcp/serverInstructions.js'
 import { CLIENT_PROFILE_NAMES, clientProfileNamed } from '../../../src/auth/clientProfiles.js';
 import { sendToolDescription } from '../../../src/tools/previewSendStep.js';
 import { STEERING_COPY_REV } from '../../../src/mcp/steeringRev.js';
-import { RATES_ITS_RISK, SWITCH_STATES, everyFlag, modelFacingStrings } from '../../fixtures/riskWords.js';
+import { A_REMOVED_RISK_SENTENCE, SWITCH_STATES, everyFlag, modelFacingStrings } from '../../fixtures/riskWords.js';
 
 // ChatGPT's list is the full one: an app that takes no purchases is not
 // offered the checkouts (#475). The other apps' text has its own suite below.
@@ -254,10 +254,10 @@ describe('tool text in every app', () => {
         vi.stubEnv('LETTER_IRL_SEND_CONFIRMATION_ENABLED', sendRule);
         for (const tool of new LetterIrlServer().listTools(clientProfileNamed(name))) {
           for (const text of [tool.title, tool.description, ...modelFacingStrings(tool.inputSchema)]) {
-            expect(text, `${tool.name} (flags ${on}, paid per send ${paidPerSend}, images ${imageGen}, send rule ${sendRule})`).not.toMatch(RATES_ITS_RISK);
+            expect(text, `${tool.name} (flags ${on}, paid per send ${paidPerSend}, images ${imageGen}, send rule ${sendRule})`).not.toMatch(A_REMOVED_RISK_SENTENCE);
           }
         }
-        expect(buildServerInstructions(sendRule === 'true', clientProfileNamed(name)), 'instructions').not.toMatch(RATES_ITS_RISK);
+        expect(buildServerInstructions(sendRule === 'true', clientProfileNamed(name)), 'instructions').not.toMatch(A_REMOVED_RISK_SENTENCE);
       }
     }
   });
@@ -273,29 +273,23 @@ describe('tool text in every app', () => {
     expect(STEERING_COPY_REV).toBeGreaterThanOrEqual(50);
   });
 
-  it("refuses each form of rating a tool's own risk", () => {
+  it('keeps out each sentence #543 and #670 removed, and nothing a description may rightly say', () => {
     for (const said of [
-      'This does not send mail.', 'Nothing is sent by this tool.', 'Nothing is previewed or sent.', 'It sends nothing.',
-      'It changes nothing.', "It doesn't send the letter.", 'Read-only.', 'It is safe.', 'Safe retries return it.',
-      'It is harmless.', "It won't charge you.", 'It never sends mail.', 'It only reads.', 'Returns sanitized state.',
-      'It never exposes card details.', 'It doesn\u2019t send the letter.', 'It can\u2019t send mail.',
-      "It can't send mail.", 'This tool can\u2019t send mail.', 'Preview tools do not send anything.', "Drafts don't send.",
-      'Previews never send mail.', 'Nothing will be sent.', 'Nothing gets sent.', 'Nothing has been sent.',
-      'No mail is sent.', 'It does not mail anything.',
-      'It won\u2019t charge you.', 'Read only.', 'It is readonly.', 'Nothing is charged.', 'It charges nothing.',
-      'It cannot send mail.', 'Preview tools are free drafts; they do not send mail.', 'This will not charge you.', 'It has no side effects.', 'It\u2019s safe.'
+      'Preview a text-only physical letter draft. This does not send mail.',
+      'Nothing is sent by this tool.',
+      'Read-only: it changes and sends nothing.',
+      'Does not send the letter in this app: Letter IRL sends mail only when the person sends it.',
+      'Safe retries return the existing order instead of charging twice.',
+      'Preview tools are free drafts; they do not send mail.'
     ]) {
-      expect(said).toMatch(RATES_ITS_RISK);
+      expect(said).toMatch(A_REMOVED_RISK_SENTENCE);
     }
-    // What a tool does, said plainly, is not a rating.
     for (const said of [
       'The person sends it with Send on the preview card.', 'Free until it goes to the printer: nothing is mailed.',
-      'A retry returns the existing order.', 'Do not send the person to the website.', 'A link that won\u2019t open after 7 days.',
-      'Keep the link safe.', 'The mail goes to the printer as soon as it is sent.', 'Letter IRL does not make images in this app.',
-      'Do not send mail to a guessed address.', 'A draft that is not sent within 30 days expires.',
-      'Letter IRL does not send the receipt; ask USPS.', 'Never send mail without the person.'
+      'A retry returns the existing order instead of charging twice.', 'Do not send mail to a guessed address.',
+      'Letter IRL does not send the receipt; ask USPS.', 'Read only the first page.', 'The link is safe to share.'
     ]) {
-      expect(said).not.toMatch(RATES_ITS_RISK);
+      expect(said).not.toMatch(A_REMOVED_RISK_SENTENCE);
     }
   });
 
