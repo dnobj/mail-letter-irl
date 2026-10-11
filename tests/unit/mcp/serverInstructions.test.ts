@@ -1,9 +1,30 @@
+import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildServerInstructions,
   LETTER_IRL_SERVER_INSTRUCTIONS
 } from '../../../src/mcp/serverInstructions.js';
 import { clientProfileNamed } from '../../../src/auth/clientProfiles.js';
+
+/**
+ * The block docs/app-instructions.md gives for the portal's app-instructions field (#673). A hand-written copy drifted:
+ * it told the model to call the send tools after the send rule gave sending to the person, and called tools
+ * "read-only" (#670). It is now the instructions ChatGPT is served with production's launch switches, word for word.
+ */
+describe('the portal copy of the instructions', () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("is word for word what ChatGPT is served with production's launch switches", () => {
+    // Production's launch switches (docs/app-instructions.md): image generation off (set 2026-09-26), address requests
+    // off. When production changes one, change it here and copy the new text into the doc.
+    vi.stubEnv('LETTER_IRL_IMAGE_GEN_MODE', 'off');
+    vi.stubEnv('LETTER_IRL_ADDRESS_REQUESTS_ENABLED', 'false');
+    const doc = readFileSync(new URL('../../../docs/app-instructions.md', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+    const section = doc.slice(doc.indexOf('## Tool-Use Instructions'), doc.indexOf('## Other apps'));
+    const block = /```text\n([\s\S]*?)\n```/.exec(section)?.[1];
+    expect(block).toBe(buildServerInstructions(true, clientProfileNamed('chatgpt')));
+  });
+});
 
 /**
  * The refund line of the server instructions (#323).

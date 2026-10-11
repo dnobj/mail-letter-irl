@@ -96,11 +96,13 @@ Remaining:
 - [ ] **Developer Identity.** The portal checks the verified developer, Objective Works, against the
       name, website, support, privacy and terms pages. Website #45 names Objective Works as the
       operator on the privacy, terms and support pages and in the footer, for the owner's sign-off.
-- [ ] **App instructions.** The "Tool-Use Instructions" block in
-      [app-instructions.md](../app-instructions.md) predates the send rule and still tells the model to
-      call the send tools, so bring it in line first (#673), then paste it into the portal's
-      app-instructions field. A copy pasted earlier still calls tools "read-only", the kind of sentence
-      ChatGPT flagged as a "Suspicious Instruction" (#670).
+- [ ] **App instructions.** Once the launch build is on production (the send rule on, image
+      generation off), paste the "Tool-Use Instructions" block from
+      [app-instructions.md](../app-instructions.md) into the portal's app-instructions field, replacing
+      any copy pasted before. Paste it again whenever one of those switches, or address requests,
+      changes in production. Since #673 it is the served instructions word for word (a test keeps it
+      so). An older copy told the model to call the send tools itself and called tools "read-only",
+      which ChatGPT flags as a "Suspicious Instruction" (#670).
 - [ ] Confirm app description and short metadata match `docs/chatgpt-app-submission.md`.
 - [ ] Confirm localization fields, if required by the submission portal.
 
