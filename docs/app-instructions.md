@@ -3,14 +3,15 @@
 **Last Updated:** October 11, 2026
 **Purpose:** App description, onboarding copy, and extended assistant instructions for the ChatGPT app
 
-The instructions ChatGPT actually receives are `LETTER_IRL_SERVER_INSTRUCTIONS` in
-`src/mcp/serverInstructions.ts`, sent in the MCP initialize result and copied into `manifest.json`.
+The instructions an app actually receives are `buildServerInstructions(sendRule, app)` in
+`src/mcp/serverInstructions.ts`, sent in the MCP initialize result and copied into `manifest.json`
+for ChatGPT. They follow the switches: the send rule, image generation and address requests.
 The app description is `APP_DIRECTORY_DESCRIPTION` in `src/mcp/manifest.ts`. Both are pinned by unit tests (`tests/unit/mcp/serverInstructions.test.ts`,
 `tests/unit/mcp/submissionReadiness.test.ts`). When this page and the code disagree, the code wins;
 update this page.
 
 Use the Tool-Use Instructions below where a portal field asks for app instructions: they are the
-served instructions, word for word. There is no assumed auto-greet hook when the app is merely selected, so first-run guidance should come from app instructions, normal assistant replies, or the `get_started` tool.
+served instructions, word for word. There is no assumed auto-greet hook when the app is merely selected, so first-run guidance comes from normal assistant replies and the `get_started` tool, whose description offers it to new users.
 
 ## App Description
 
@@ -25,9 +26,11 @@ Use this wording for broad first-run prompts such as `what can you do?` or `help
 ## Tool-Use Instructions
 
 Paste this block, as it stands, where a portal field asks for app instructions. It is word for word
-what the server sends ChatGPT in the MCP initialize result with the send rule on
+what the server sends ChatGPT in the MCP initialize result with production's launch switches: the
+send rule on, image generation off (`LETTER_IRL_IMAGE_GEN_MODE=off`) and address requests off
 (`buildServerInstructions(true, chatgpt)` in `src/mcp/serverInstructions.ts`), and
-`tests/unit/mcp/serverInstructions.test.ts` fails when the two differ. To change it, change the
+`tests/unit/mcp/serverInstructions.test.ts` fails when the two differ. **When production changes
+any of those switches, change the test's switches, copy the new text here, and paste it again.** To change it, change the
 code, then copy the new text here. A block written by hand drifted before: it still told the model
 to call the send tools after the send rule (#470) gave sending to the person, and it called tools
 "read-only", which ChatGPT flags as a "Suspicious Instruction" (#670, #673).
@@ -41,7 +44,7 @@ If the same mail was sent recently, the preview card or the confirmation page sa
 A preview exists only when the preview tool's result includes a draftId, and a checkout only when its result includes a checkoutUrl. If a Letter IRL tool call returns no result, say it did not complete: the preview card offers a Create my preview button, or offer to try again. Never describe a draft, order or checkout you did not receive.
 Use saved return addresses when available, and ask for missing real U.S. mailing addresses when required.
 For image mail, reuse existing conversation images or hosted imageUrl values before opening upload_image.
-For an image request addressed to Letter IRL, call generate_image_for_mail and follow its response exactly: it either generates the image in-turn using the user's remaining Letter IRL image generations, or returns routing guidance with a copy-ready prompt. For image requests not addressed to Letter IRL, use ChatGPT's built-in image generation (image_gen); its images attach to Letter IRL previews directly.
+Letter IRL does not make images. For an image, use ChatGPT's built-in image generation (image_gen); its images attach to Letter IRL previews directly. If it is not available in a message that mentions Letter IRL, ask the user to request the image in a message that does not mention Letter IRL.
 If a specific image fails to hand off to a preview tool, open upload_image so the user can pick it from their ChatGPT library or upload it - that preserves the exact image they approved.
 For unsupported formats, integrations, or product ideas, offer submit_feature_request instead of promising support.
 No tool can request or issue a refund. If the user asks for one, tell them to email support@letterirl.com from the email on their Letter IRL account, quoting the order id from get_purchase_status; refunds are decided by a person, so never promise, estimate, or deny a refund or an amount.
