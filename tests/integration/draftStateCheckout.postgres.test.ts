@@ -8,7 +8,7 @@ import { repositoryMigrations, validateDisposableDatabaseUrl } from './support/d
  * The Pay & Send order active on a draft, as getDraftState reads it for get_draft_status (#676): the letter card asks
  * the server what became of its draft, since ChatGPT did not give a reopened card its kept state.
  *
- *   an unexpired checkout, or one paid and being sent or refunded, is active, with its link (the database holds at
+ *   an unexpired checkout, or one paid, being sent, refunded, disputed or held, is active, with its link (the database holds at
  *   most one active Pay & Send order per draft, idx_orders_active_jit_draft_unique)
  *   an expired checkout, a cancelled one, another person's, and a pack's are not
  *
@@ -149,12 +149,14 @@ describePostgres('the Pay & Send order active on a draft (#676)', () => {
     });
   });
 
-  it('reads one with no expiry, and one paid, being sent or refunded, as active', async () => {
+  it('reads one with no expiry, and one paid, being sent, refunded, disputed or held, as active', async () => {
     for (const [status, expiresInMinutes] of [
       ['checkout_pending', null],
       ['paid', -60],
       ['fulfillment_pending', -60],
-      ['refund_pending', -60]
+      ['refund_pending', -60],
+      ['disputed', -60],
+      ['held', -60]
     ] as const) {
       const userId = await seedUser();
       const draftId = await previewed(userId);

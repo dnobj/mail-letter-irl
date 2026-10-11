@@ -2901,12 +2901,15 @@
               },
               "checkoutUrl": {
                 "type": "string"
+              },
+              "paid": {
+                "type": "boolean"
               }
             },
             "required": [
               "orderId"
             ],
-            "description": "A ready draft's Pay & Send order now active: its order id, and its checkout link"
+            "description": "A ready draft's Pay & Send order now live: its order id, its checkout link, and whether it is paid"
           },
           "pages": {
             "type": "integer",

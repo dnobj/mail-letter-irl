@@ -1051,9 +1051,9 @@ export const getDraftStatusOutputZ = z.object({
     .describe("Where a sent draft's order stands: scheduled while it waits for its mail date"),
   cancellable: z.boolean().optional().describe("A sent draft's order: whether it can still be cancelled free"),
   checkout: z
-    .object({ orderId: z.string(), checkoutUrl: z.string().optional() })
+    .object({ orderId: z.string(), checkoutUrl: z.string().optional(), paid: z.boolean().optional() })
     .optional()
-    .describe("A ready draft's Pay & Send order now active: its order id, and its checkout link"),
+    .describe("A ready draft's Pay & Send order now live: its order id, its checkout link, and whether it is paid"),
   pages: z.number().int().min(2).max(MAX_LETTER_PAGES).optional().describe("A ready letter of more than one page: the pages it is laid out on now"),
   canSendNow: z.boolean().optional().describe("A ready letter while room to write or certified mail is offered, or a postcard while its sizes or layouts are: whether the balance or a gift letter pays for it now"),
   ...letterTravelZ,

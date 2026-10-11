@@ -1151,8 +1151,19 @@
         const orderId = keptOrderId(kept);
         document.getElementById("card").classList.remove("loading");
         document.getElementById("mockup-container").innerHTML = kept.fromServer
-          ? '<div class="preview-loading">This letter is waiting for its payment.</div>'
+          ? kept.paid
+            ? '<div class="preview-loading">This letter has been paid for.</div>'
+            : '<div class="preview-loading">This letter is waiting for its payment.</div>'
           : '<div class="preview-loading">A reopened conversation does not show the preview again.</div>';
+        // What changes or pays for the draft goes: the draft is the order's now. A card that drew the draft before the
+        // server named its checkout (#676) still shows them otherwise, and the server refuses each.
+        picker.hide();
+        styleRow.hide();
+        document.getElementById("service-row").style.display = "none";
+        document.getElementById("send-page-button").style.display = "none";
+        document.getElementById("pay-page-button").style.display = "none";
+        document.getElementById("website-packs-button").style.display = "none";
+        refreshStudio();
         document.getElementById("id-label").textContent = kept.sent ? "Order" : "Purchase";
         document.getElementById("id-value").textContent = orderId || "—";
         document.getElementById("send-button").style.display = "none";
@@ -1163,7 +1174,9 @@
         document.getElementById("empty-message").textContent = kept.sent
           ? "This letter was sent to the printer from this card. Ask for its status in the chat."
           : kept.fromServer
-            ? "A checkout for this letter has been started."
+            ? kept.paid
+              ? "A Pay & Send payment for this letter has been made."
+              : "A checkout for this letter has been started."
             : "A checkout for this letter was started from this card.";
         document.getElementById("empty-state").style.display = "block";
         const statusPill = document.getElementById("status-pill");
@@ -1342,6 +1355,7 @@
                   draftId,
                   checkout: true,
                   fromServer: true,
+                  paid: started.paid === true,
                   orderId: started.orderId,
                   ...(isHttpsUrl(started.checkoutUrl) ? { checkoutUrl: started.checkoutUrl } : {}),
                 };

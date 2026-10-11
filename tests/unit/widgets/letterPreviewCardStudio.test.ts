@@ -467,6 +467,35 @@ describe('the letter card as a studio (#580)', () => {
     expect(text(card, 'studio-summary')).toBe('black and white · mailed in 1-2 business days');
   });
 
+  it('keeps a date the person set when a status answer asked before it comes after (#676 review round 2)', async () => {
+    const card = mount();
+    await card.show(
+      output({ arrivalWindow: WINDOW, schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' }, deliveryEstimate: 'Goes to the printer Fri, Oct 9.' }),
+      ON
+    );
+    await card.click(card.byId('arrives-asap'));
+    await card.answer(
+      { result: { content: [], structuredContent: { draftId: 'draft_0001', schedule: null, deliveryEstimate: 'Mailed in 1-2 business days', message: 'Cleared.' } } },
+      'set_arrival_date'
+    );
+    // The status the card asked on opening comes now, with the dates the draft had then.
+    await card.answer(
+      {
+        result: {
+          content: [],
+          structuredContent: {
+            draftId: 'draft_0001',
+            status: 'ready',
+            schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' },
+            deliveryEstimate: 'Goes to the printer Fri, Oct 9.'
+          }
+        }
+      },
+      'get_draft_status'
+    );
+    expect(text(card, 'studio-summary')).toBe('black and white · mailed in 1-2 business days');
+  });
+
   it('keeps the tab the person picked when the preview changes under it', async () => {
     const card = mount();
     await card.show(output({ arrivalWindow: WINDOW }), ON);

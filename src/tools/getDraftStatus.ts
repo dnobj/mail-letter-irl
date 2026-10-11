@@ -75,7 +75,7 @@ export interface GetDraftStatusOutput extends LetterTravel {
    * started rather than offering Pay & Send again. The link only when it is an https one; an unpaid checkout only
    * with one.
    */
-  checkout?: { orderId: string; checkoutUrl?: string };
+  checkout?: { orderId: string; checkoutUrl?: string; paid?: boolean };
   /** Ready: a letter of more than one page (#586), the pages it is laid out on now. */
   pages?: number;
   /** Ready, while room to write or certified mail is offered (#586, #625): what it costs now, as a restyle or a change of service may have changed it. */
@@ -110,7 +110,9 @@ function checkoutNow(draft: DraftState): Pick<GetDraftStatusOutput, 'checkout'> 
   // An unpaid checkout with no link to pay at (its Stripe session was never made, or its link was lost) is not
   // offered: the card's Pay & Send then reaches createJitCheckout, which repairs or reuses it.
   if (active.status === 'checkout_pending' && !link) return {};
-  return { checkout: { orderId: active.order_id, ...(link ? { checkoutUrl: link } : {}) } };
+  // Paid, and being sent, refunded, disputed or held: the card says a payment was made, not that one is awaited.
+  const paid = active.status !== 'checkout_pending';
+  return { checkout: { orderId: active.order_id, ...(link ? { checkoutUrl: link } : {}), ...(paid ? { paid: true } : {}) } };
 }
 
 /** The draft's dates, or none: a status answer is never refused over dates it cannot read. */

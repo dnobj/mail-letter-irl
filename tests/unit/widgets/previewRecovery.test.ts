@@ -2871,6 +2871,41 @@ describe('LetterPreviewCard in ChatGPT asks the server what became of its draft 
     expect(harness.text('id-value')).toBe('ord_checkout_0001');
   });
 
+  it('takes away what changes or pays for the draft when the server names its checkout after the first draw', async () => {
+    let answer: (() => void) | null = null;
+    const answered = new Promise<void>(resolve => (answer = resolve));
+    const window = { earliestArrival: '2026-10-13', latestArrival: '2026-11-30' };
+    const harness = mount(LETTER, {
+      toolOutput: LETTER.output('draft_host_0001', { arrivalWindow: window, ...eligibility(false) }),
+      toolResponseMetadata: LETTER.meta(),
+      draftStatus: async args => {
+        await answered;
+        return { draftId: args.draftId, status: 'ready', checkout: { orderId: 'ord_checkout_0009', checkoutUrl: 'https://checkout.stripe.com/c/pay/x' } };
+      }
+    });
+    await flush();
+    expect(harness.visible('arrives-row')).toBe(true);
+    expect(harness.visible('pay-send-button')).toBe(true);
+    answer!();
+    await flush();
+    await flush();
+    expect(harness.text('empty-message')).toBe('A checkout for this letter has been started.');
+    for (const id of ['arrives-row', 'style-row', 'service-row', 'pay-send-button', 'buy-pack-button', 'send-page-button', 'pay-page-button', 'website-packs-button']) {
+      expect(harness.visible(id), id).toBe(false);
+    }
+  });
+
+  it('says a payment was made for a paid order the server names, not that one is awaited', async () => {
+    const harness = mount(LETTER, {
+      toolOutput: LETTER.output('draft_host_0001'),
+      draftStatus: args => ({ draftId: args.draftId, status: 'ready', checkout: { orderId: 'ord_checkout_0009', paid: true } })
+    });
+    await flush();
+    await flush();
+    expect(harness.text('empty-message')).toBe('A Pay & Send payment for this letter has been made.');
+    expect(harness.document.getElementById('mockup-container')!.textContent).toBe('This letter has been paid for.');
+  });
+
   it('takes no checkout without an order id', async () => {
     const harness = mount(LETTER, {
       toolOutput: LETTER.output('draft_host_0001'),

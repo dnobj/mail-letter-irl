@@ -113,7 +113,7 @@
     var host = options.host;
     // pending: the date being set while the server answers ("" for as soon
     // as possible), so the field keeps what the person chose meanwhile.
-    var state = { draftId: null, schedule: null, min: "", max: "", busy: false, pending: null, message: "", error: false };
+    var state = { draftId: null, schedule: null, min: "", max: "", busy: false, pending: null, message: "", error: false, set: false };
 
     function draw() {
       options.input.min = state.min;
@@ -155,6 +155,8 @@
           var data = toolData(result);
           var schedule = data.schedule || null;
           state.schedule = scheduleOf(schedule);
+          // Set here: a status answer asked before it does not take it back (#676).
+          state.set = true;
           // A successful set names the dates on offer now.
           if (schedule && isCalendarDate(schedule.earliestArrival) && isCalendarDate(schedule.latestArrival)) {
             state.min = schedule.earliestArrival;
@@ -234,6 +236,7 @@
           state.pending = null;
           state.message = "";
           state.error = false;
+          state.set = false;
         }
         options.row.style.display = "";
         draw();
@@ -242,7 +245,7 @@
       // card shown again with its preview's first answer. False when the
       // picker is on another draft, or setting a date, and took nothing.
       adopt: function (draftId, schedule) {
-        if (state.draftId !== draftId || state.busy) return false;
+        if (state.draftId !== draftId || state.busy || state.set) return false;
         state.schedule = scheduleOf(schedule);
         draw();
         return true;

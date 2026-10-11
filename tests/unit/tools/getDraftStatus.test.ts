@@ -2,7 +2,8 @@
  * get_draft_status (#474).
  *
  * The preview card asks it in a host that keeps no state for the card (MCP
- * Apps): what became of the draft the preview made. It changes nothing, and a
+ * Apps), and the letter card in ChatGPT too (#676): what became of the draft the
+ * preview made. It changes nothing, and a
  * draft that is not the caller's reads as not found, so the answer says
  * nothing about whether someone else's draft exists.
  */
@@ -74,7 +75,7 @@ describe("get_draft_status (#474)", () => {
     for (const checkout_url of [null, "http://checkout.stripe.com/c/pay/cs_test_1", "javascript:alert(1)", "not a url"]) {
       // Paid, or being sent or refunded: named, with no link.
       vi.mocked(getDraftState).mockResolvedValue(state({ active_checkout: { order_id: ORDER, status: "paid", checkout_url } }) as any);
-      await expect(ask({ draftId: DRAFT_ID }), String(checkout_url)).resolves.toEqual({ ...READY, checkout: { orderId: ORDER } });
+      await expect(ask({ draftId: DRAFT_ID }), String(checkout_url)).resolves.toEqual({ ...READY, checkout: { orderId: ORDER, paid: true } });
       // Unpaid with no link to pay at: not named, so the card's Pay & Send repairs or reuses it (review round 1).
       vi.mocked(getDraftState).mockResolvedValue(state({ active_checkout: { order_id: ORDER, status: "checkout_pending", checkout_url } }) as any);
       await expect(ask({ draftId: DRAFT_ID }), String(checkout_url)).resolves.toEqual(READY);

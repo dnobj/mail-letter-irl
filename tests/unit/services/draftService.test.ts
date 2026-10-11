@@ -1057,7 +1057,9 @@ describe('draftService stationery (#563)', () => {
       for (const column of ['d.pages', 'd.mail_service', 'd.is_gift_send', 'd.required_credits']) {
         expect(sql, column).toContain(column);
       }
-      expect(params).toEqual(['draft-1']);
+      // And the Pay & Send order live on it (#676), counted as the edit and checkout locks count one.
+      expect(sql).toContain('o.status = ANY($2::varchar[])');
+      expect(params).toEqual(['draft-1', ['checkout_pending', 'paid', 'fulfillment_pending', 'refund_pending', 'disputed', 'held']]);
     });
   });
 
