@@ -17,7 +17,7 @@ async function handler(_input: Record<string, never>, context: ToolContext) {
 export const openLetterHomeTool: McpToolDefinition<Record<string, never>, Awaited<ReturnType<typeof readLetterHome>>> = {
   name: 'open_letter_home',
   title: 'Letter IRL',
-  description: 'Open your Letter IRL home: up to 20 active preview drafts and 20 recent letters or postcards, with scheduled dates, delivery status, certified tracking details, and recent recipients. Read-only; does not send or cancel mail. Draft review links open the website where you can review and send.',
+  description: 'Open your Letter IRL home: up to 20 active preview drafts and 20 recent letters or postcards, with scheduled dates, delivery status, certified tracking details, and recent recipients. Draft review links open the website where you can review and send.',
   readOnly: true,
   inputSchema: openLetterHomeInputSchema,
   outputSchema: openLetterHomeOutputSchema,

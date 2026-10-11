@@ -174,7 +174,7 @@ export const createPackCheckoutTool: McpToolDefinition<
   // Under the send rule Pay & Send is card-only (#475), so the model is sent
   // to the card rather than to a tool it cannot call.
   description: () =>
-    'Create a Stripe-hosted checkout to buy a pack of prepaid letters. The result carries a checkoutUrl that the customer must be shown as a link to click; nothing opens automatically and no card is guaranteed to render, so present the link. The price and pack sizes come only from server configuration. Payment adds letters to the account balance; it does not send anything, so the customer still chooses and sends afterward. ' +
+    'Create a Stripe-hosted checkout to buy a pack of prepaid letters. The result carries a checkoutUrl that the customer must be shown as a link to click; nothing opens automatically and no card is guaranteed to render, so present the link. The price and pack sizes come only from server configuration. Payment adds letters to the account balance, for the customer to send mail with afterward. ' +
     (isSendConfirmationEnabled()
       ? 'To pay for one specific draft instead, the person presses Pay & Send on its preview card.'
       : 'Use create_mail_checkout instead to pay for one specific draft.'),

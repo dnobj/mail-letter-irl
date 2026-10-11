@@ -124,7 +124,7 @@ Postcards take no signature.
 ## Buying Letters and Pay & Send
 
 - `list_letter_packs`: List the packs available to buy, with how many letters each adds and what it costs. Read-only. Packs whose Stripe Price has not resolved are omitted rather than offered, because buying one would fail.
-- `create_pack_checkout`: Create a Stripe-hosted checkout for one pack size (`starter`, `regular`, `power`). Payment adds letters to the balance; it does not send anything, so the customer still chooses and sends afterward. Uses `ui://widgets/PackCheckoutCard.html@v<N>`.
+- `create_pack_checkout`: Create a Stripe-hosted checkout for one pack size (`starter`, `regular`, `power`). Payment adds letters to the balance, for the customer to send mail with afterward. Uses `ui://widgets/PackCheckoutCard.html@v<N>`.
 - `create_mail_checkout`: Create a Stripe-hosted Pay & Send checkout for one previewed letter or postcard draft. Paying sends that exact item; see [Pay & Send Details](#pay--send-details).
 - `get_purchase_status`: Read the status of a pack or Pay & Send purchase by `orderId`. Read-only. Has no widget of its own; `PackCheckoutCard` and the preview cards poll it through `callTool`.
 - `redeem_promo_code`: Redeem a promo code, or a gift code printed on a letter, to add letters. A gift code or seed campaign reports `giftLetters`. Returns `redeemed: false` with the reason for an invalid, expired or spent code - an ordinary answer rather than an error.

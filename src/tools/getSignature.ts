@@ -46,8 +46,7 @@ export const getSignatureTool: McpToolDefinition<GetSignatureInput, GetSignature
   name: GET_SIGNATURE_TOOL,
   title: 'Get the saved signature',
   description:
-    'Check whether the person has a saved signature for their letters, and when it was saved. ' +
-    'Read-only: it changes and sends nothing.',
+    'Check whether the person has a saved signature for their letters, and when it was saved.',
   readOnly: true,
   inputSchema: getSignatureInputSchema,
   outputSchema: getSignatureOutputSchema,

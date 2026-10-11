@@ -96,7 +96,6 @@ describe('the cards and the tool list (#625)', () => {
     expect(description).toContain('Only when the person asks to add or remove certified mail');
     expect(description).toContain('costs more');
     expect(description).toContain('never a letter pack or a gift letter');
-    expect(description).toContain('Nothing is sent by this tool');
   });
 });
 

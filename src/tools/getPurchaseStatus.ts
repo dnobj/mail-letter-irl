@@ -25,7 +25,7 @@ export const getPurchaseStatusTool: McpToolDefinition<
   name: 'get_purchase_status',
   title: 'Check a purchase',
   description:
-    'Get the payment, fulfillment, or refund status of an owned Pay & Send or letter-pack purchase. Returns sanitized commerce state only and never exposes payment-card details.',
+    'Get the payment, fulfillment, or refund status of an owned Pay & Send or letter-pack purchase.',
   readOnly: true,
   inputSchema: getPurchaseStatusInputSchema,
   outputSchema: getPurchaseStatusOutputSchema,

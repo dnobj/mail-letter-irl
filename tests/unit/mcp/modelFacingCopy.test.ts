@@ -27,6 +27,8 @@ import { buildManifest } from '../../../src/mcp/manifest.js';
 import { buildServerInstructions } from '../../../src/mcp/serverInstructions.js';
 import { CLIENT_PROFILE_NAMES, clientProfileNamed } from '../../../src/auth/clientProfiles.js';
 import { sendToolDescription } from '../../../src/tools/previewSendStep.js';
+import { STEERING_COPY_REV } from '../../../src/mcp/steeringRev.js';
+import { A_REMOVED_RISK_SENTENCE, SWITCH_STATES, everyFlag, modelFacingStrings } from '../../fixtures/riskWords.js';
 
 // ChatGPT's list is the full one: an app that takes no purchases is not
 // offered the checkouts (#475). The other apps' text has its own suite below.
@@ -240,6 +242,60 @@ describe('tool text in every app', () => {
     }
   });
 
+  // ChatGPT's approval dialog flagged previews and save_stationery_design as a "Suspicious Instruction" for
+  // descriptions that said what a tool does not do ("This does not send mail", "Nothing is sent by this tool"): it
+  // reads them as steering its risk rating (#543, #670). A description says what the tool does; readOnlyHint and the
+  // other annotations carry the risk. Every flag on and off, since flags change the words; riskWordsServed.test.ts
+  // reads the same words from a real tools/list.
+  it.each(CLIENT_PROFILE_NAMES.map(name => [name]))('%s: no description rates its own risk', name => {
+    for (const [on, paidPerSend, imageGen] of SWITCH_STATES) {
+      everyFlag(on, paidPerSend, imageGen);
+      for (const sendRule of ['true', 'false']) {
+        vi.stubEnv('LETTER_IRL_SEND_CONFIRMATION_ENABLED', sendRule);
+        for (const tool of new LetterIrlServer().listTools(clientProfileNamed(name))) {
+          for (const text of [tool.title, tool.description, ...modelFacingStrings(tool.inputSchema)]) {
+            expect(text, `${tool.name} (flags ${on}, paid per send ${paidPerSend}, images ${imageGen}, send rule ${sendRule})`).not.toMatch(A_REMOVED_RISK_SENTENCE);
+          }
+        }
+        expect(buildServerInstructions(sendRule === 'true', clientProfileNamed(name)), 'instructions').not.toMatch(A_REMOVED_RISK_SENTENCE);
+      }
+    }
+  });
+
+  it('lists every tool somewhere with every flag on, so the risk check reads them all', () => {
+    everyFlag(true);
+    vi.stubEnv('LETTER_IRL_SEND_CONFIRMATION_ENABLED', 'true');
+    const listed = new Set(CLIENT_PROFILE_NAMES.flatMap(name => new LetterIrlServer().listTools(clientProfileNamed(name)).map(tool => tool.name)));
+    expect(new LetterIrlServer().toolNames().filter(tool => !listed.has(tool))).toEqual([]);
+  });
+
+  it('bumps the steering revision, so a client that cached the old words is told apart in the logs', () => {
+    expect(STEERING_COPY_REV).toBeGreaterThanOrEqual(50);
+  });
+
+  it('keeps out each sentence #543 and #670 removed, and nothing a description may rightly say', () => {
+    for (const said of [
+      'Preview a text-only physical letter draft. This does not send mail.',
+      'Nothing is sent by this tool.',
+      'Read-only: it changes and sends nothing.',
+      'Does not send the letter in this app: Letter IRL sends mail only when the person sends it.',
+      'Safe retries return the existing order instead of charging twice.',
+      'Nothing is sent by this tool, and nothing is sent until the person presses Send on that page.',
+      'A retry returns the existing order instead of charging twice.',
+      'Preview tools are free drafts; they do not send mail.'
+    ]) {
+      expect(said).toMatch(A_REMOVED_RISK_SENTENCE);
+    }
+    for (const said of [
+      'The person sends it with Send on the preview card.', 'Free until it goes to the printer: nothing is mailed.',
+      'A retry returns the existing order.', 'The same choice twice changes nothing.',
+      'Letter IRL does not send the letter to the printer before its mail date.', 'Do not send mail to a guessed address.',
+      'Letter IRL does not send the receipt; ask USPS.', 'Read only the first page.', 'The link is safe to share.'
+    ]) {
+      expect(said).not.toMatch(A_REMOVED_RISK_SENTENCE);
+    }
+  });
+
   it.each(CLIENT_PROFILE_NAMES.filter(name => name !== 'chatgpt').map(name => [name]))(
     '%s: no description or instruction names ChatGPT',
     name => {
@@ -448,15 +504,14 @@ describe('what the send tools say, in every app', () => {
     }
   });
 
-  it('says a call sends nothing, and names request_send, where the model sees the tool', () => {
+  it('says a call answers with the link, and names request_send, where the model sees the tool', () => {
     vi.stubEnv('LETTER_IRL_SEND_CONFIRMATION_ENABLED', 'true');
     for (const name of shown) {
       for (const tool of sendsFor(name)) {
         const mail = mailOf(tool.name);
         expect(tool.description, `${name} ${tool.name}`).toBe(
-          `Does not send the ${mail} in this app: Letter IRL sends mail only when the person sends it. ` +
-            `A call answers with the link to the page where they check the ${mail} and send it. ` +
-            'Call request_send instead and give the person its link.'
+          `In this app a call answers with the link to the page where the person checks the ${mail} and sends it themselves. ` +
+            'Call request_send and give the person its link.'
         );
       }
     }
@@ -479,7 +534,7 @@ describe('what the send tools say, in every app', () => {
     const own = 'Send a physical letter using a draft from a preview tool.';
     const cardsButShown = { ...clientProfileNamed('generic'), rendersCards: true };
     const hiddenButNoCards = { ...clientProfileNamed('chatgpt'), rendersCards: false };
-    expect(sendToolDescription(own, 'letter', cardsButShown)).toMatch(/^Does not send the letter in this app: /);
+    expect(sendToolDescription(own, 'letter', cardsButShown)).toMatch(/^In this app a call answers with the link /);
     expect(sendToolDescription(own, 'letter', hiddenButNoCards)).toBe(own);
   });
 });
@@ -522,7 +577,7 @@ describe('how a preview is sent, in every app', () => {
     for (const name of CLIENT_PROFILE_NAMES) {
       for (const tool of previewsFor(name)) {
         expect(tool.description, `${name} ${tool.name}`).not.toMatch(/send_letter|send_postcard|Send later/);
-        expect(tool.description, `${name} ${tool.name}`).toMatch(/Nothing is sent from here: .*request_send/);
+        expect(tool.description, `${name} ${tool.name}`).toMatch(/The person sends it .*request_send/);
       }
     }
   });
@@ -532,7 +587,7 @@ describe('how a preview is sent, in every app', () => {
     for (const name of withCards) {
       for (const tool of previewsFor(name)) {
         expect(tool.description, `${name} ${tool.name}`).toMatch(
-          /the person sends it with Send on the preview card, or, if no card shows, on the page request_send links to\.$/
+          /The person sends it with Send on the preview card, or, if no card shows, on the page request_send links to\.$/
         );
       }
     }
@@ -540,7 +595,7 @@ describe('how a preview is sent, in every app', () => {
       for (const tool of previewsFor(name)) {
         expect(tool.description, `${name} ${tool.name}`).not.toContain('preview card');
         expect(tool.description, `${name} ${tool.name}`).toMatch(
-          /to send it, call request_send and give the person its link\.$/
+          /The person sends it on the page request_send links to: call request_send and give the person its link\.$/
         );
       }
     }

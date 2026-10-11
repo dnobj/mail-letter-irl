@@ -87,9 +87,13 @@ server enforces its own side by the calling app's profile
   preview's text (#516);
 - where a send tool call answers with the link (every app without
   `honorsCardOnlyTools`), `send_letter`'s and `send_postcard`'s own
-  descriptions say a call sends nothing and name `request_send`. ChatGPT and
-  Claude keep these tools from the model, and their text is unchanged (#516,
-  steering r20);
+  descriptions say a call answers with the link to the page where the person
+  sends it, and name `request_send`. ChatGPT and Claude keep these tools from
+  the model, and they keep their own words there (#516, steering r20). The sentences
+  that said what a tool does not do to mail or money ("This does not send
+  mail", "Nothing is sent by this tool") were removed, since ChatGPT flagged
+  them as steering its risk rating, and a test keeps them out; new words follow
+  the style guide, by review (#543, #670, steering r50);
 - the server instructions say the model cannot send, and that the card or the
   page offers another copy of mail sent recently. They name no checkout to
   repeat, since the model cannot start Pay & Send;

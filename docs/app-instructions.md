@@ -1,6 +1,6 @@
 # App Instructions (Manifest Guidance)
 
-**Last Updated:** September 26, 2026
+**Last Updated:** October 11, 2026
 **Purpose:** App description, onboarding copy, and extended assistant instructions for the ChatGPT app
 
 The instructions ChatGPT actually receives are `LETTER_IRL_SERVER_INSTRUCTIONS` in
@@ -54,7 +54,7 @@ Use this wording for broad first-run prompts such as `what can you do?` or `help
 > 5. After previewing, only call `send_letter` or `send_postcard` when the user explicitly approves; ensure `confirm: true` is set in the payload. Never say mail was sent unless the send tool succeeds.  
 > 5a. If the preview says the balance is too low, let the card's **Pay & Send** or **Buy a Letter Pack** buttons handle it, or call `list_letter_packs` and `create_pack_checkout`. Paying through Pay & Send sends that exact item; do not call a send tool afterwards. (`create_mail_checkout` is the card's alone under the send rule, like the send tools, #475.)  
 > 5b. No tool can request or issue a refund. Tell the user to email support@letterirl.com from the email on their Letter IRL account with the order id from `get_purchase_status`; a person decides, so never promise, estimate, or deny a refund.  
-> 6. `get_order_status` and `get_account_balance` are read-only; never assume a letter was mailed without checking their responses.  
+> 6. Never assume a letter was mailed without checking `get_order_status` or `get_account_balance`.  
 > 7. Letter IRL currently supports U.S. letters and 6x9 postcards. If the user requests unsupported mail formats, international delivery, integrations, or other product improvements, offer `submit_feature_request` instead of promising support.
 > 8. When a user asks to generate, create, draw, or make an image — even with Letter IRL selected — use ChatGPT's built-in image generation (image_gen); its images can be attached to Letter IRL postcards and letters directly. Selecting or @-mentioning the app is not, by itself, a request for Letter IRL to generate the image. For image requests addressed to Letter IRL, call `generate_image_for_mail` and follow its response exactly - it generates with the user's Letter IRL image credits when available, or returns routing guidance with a copy-ready prompt. For image requests not addressed to Letter IRL, use built-in generation (image_gen). If a specific image cannot be handed to Letter IRL, open `upload_image` so the user can pick it from their ChatGPT library or upload it. After any generation, offer to use the image for a postcard or letter.
 > 9. If the user refers to an image that was already generated, shown, or attached earlier in the same conversation, reuse that existing image first. Do not ask the user to upload it again, and do not call `upload_image` just because you are unsure. Try the appropriate preview tool first so ChatGPT can pass the existing image through.
@@ -95,8 +95,8 @@ ChatGPT's would be false there. The app's profile (`src/auth/clientProfiles.ts`)
   rule, the four preview tools end with how the person sends: the card's Send in an app with
   `rendersCards`, `request_send`'s link elsewhere (#516). `send_letter` and `send_postcard` keep
   their words where the app keeps card-only tools from its model (ChatGPT, Claude). In any other
-  app, where a call answers with the link, they say a call sends nothing and name `request_send`
-  (#516).
+  app, where a call answers with the link, they say a call answers with the link to the page where
+  the person sends it, and name `request_send` (#516, #670).
 - **Tool results.**
   - Where the app takes no purchases, `get_started`, `get_account_balance` and `list_letter_packs`
     give the letter packs page and ask the model to pass the link on.

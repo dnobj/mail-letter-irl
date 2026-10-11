@@ -59,12 +59,12 @@ describe("request_send", () => {
   });
   afterEach(() => vi.unstubAllEnvs());
 
-  it("is read-only and says nothing is sent", () => {
+  it("is read-only and says the person sends on the page", () => {
     expect(requestSendTool.readOnly).toBe(true);
     expect(requestSendTool.meta.readOnlyHint).toBe(true);
-    expect(requestSendTool.description).toMatch(/Nothing is sent by this tool/);
+    expect(requestSendTool.description).toContain('sends it themselves on letterirl.com: they press Send on that page');
     // The page takes a payment for mail no pack pays for (#579).
-    expect(requestSendTool.description).toContain('or pays there with Pay & Send for mail no letter pack pays for.');
+    expect(requestSendTool.description).toContain('or pay there with Pay & Send for mail no letter pack pays for.');
   });
 
   it("returns the page where the person sends their own draft", async () => {

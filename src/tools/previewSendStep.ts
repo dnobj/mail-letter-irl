@@ -18,8 +18,8 @@ export function previewSendStep(
 ): string {
   if (!isSendConfirmationEnabled()) return `Send later with ${sendTool}.`;
   return client.rendersCards
-    ? "Nothing is sent from here: the person sends it with Send on the preview card, or, if no card shows, on the page request_send links to."
-    : "Nothing is sent from here: to send it, call request_send and give the person its link.";
+    ? "The person sends it with Send on the preview card, or, if no card shows, on the page request_send links to."
+    : "The person sends it on the page request_send links to: call request_send and give the person its link.";
 }
 
 /**
@@ -31,7 +31,9 @@ export function previewSendStep(
  * stays listed, so a card shown there still reaches the link, and a call
  * answers with that link instead of sending (sendsByLinkOnly,
  * src/mcp/registerTools.ts). Those apps show the tool to their model, so this
- * says the call sends nothing and names request_send (#516). "Send a physical
+ * says a call answers with the link where the person sends, and names
+ * request_send (#516); it does not say what the call does not do, which ChatGPT
+ * flagged as steering its risk rating (#670). "Send a physical
  * letter" had the model promise a send that the call then refused.
  */
 export function sendToolDescription(
@@ -41,8 +43,7 @@ export function sendToolDescription(
 ): string {
   if (!isSendConfirmationEnabled() || client.honorsCardOnlyTools) return description;
   return (
-    `Does not send the ${mail} in this app: Letter IRL sends mail only when the person sends it. ` +
-    `A call answers with the link to the page where they check the ${mail} and send it. ` +
-    `Call request_send instead and give the person its link.`
+    `In this app a call answers with the link to the page where the person checks the ${mail} and sends it themselves. ` +
+    `Call request_send and give the person its link.`
   );
 }

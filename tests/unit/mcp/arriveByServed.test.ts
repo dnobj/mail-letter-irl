@@ -162,7 +162,7 @@ describe('set_arrival_date in tools/list', () => {
     vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', 'true');
     const tool = (await listedTools()).get('set_arrival_date');
     expect(tool?.title).toBe('Set the arrival date');
-    expect(tool?.description).toContain('Nothing is sent by this tool.');
+    expect(tool?.description).toContain('With a date set, once it is sent, Letter IRL holds the mail and sends it to the printer in time');
     const schema = tool?.inputSchema as { properties: Record<string, { type?: string; description?: string }>; required?: string[] };
     expect(Object.keys(schema.properties)).toEqual(['draftId', 'arriveBy']);
     expect(schema.required).toEqual(['draftId']);

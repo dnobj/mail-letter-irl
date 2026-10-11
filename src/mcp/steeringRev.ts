@@ -197,4 +197,9 @@
 // get_order_status and list_orders, and the text of those and of send_letter and send_postcard when one is delivered.
 // r49: the compact home (#662): where the app draws our cards (rendersCards), open_letter_home's text asks the model not
 // to repeat the lists the card shows unless the person asks.
-export const STEERING_COPY_REV = 49;
+// r50: descriptions say what a tool does, never what it does not (#543, #670): "This does not send mail", "Nothing is sent by
+// this tool" and "Read-only" are gone, since ChatGPT flagged them as steering its risk rating. The previews and the send
+// tools say where the person sends instead; save_stationery_design leaves its choices to the input schema. "Safe retries",
+// get_purchase_status's "never exposes payment-card details", request_address's "never contacts them" and the
+// instructions' "they do not send mail" are reworded too.
+export const STEERING_COPY_REV = 50;

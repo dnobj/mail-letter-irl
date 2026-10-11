@@ -354,9 +354,8 @@ export const setPostcardStyleTool: McpToolDefinition<SetPostcardStyleInput, SetP
       (sizes && layouts ? 'A size or layout left out stays as it is. ' : '') +
       (layouts ? 'A layout given replaces the front, so give its caption again to keep it. ' : '') +
       (sizes
-        ? 'The postcard is drawn again and priced again: the 4x6 and 11x6 are paid per send with Pay & Send. '
-        : 'The postcard is drawn again. ') +
-      'Nothing is sent by this tool.'
+        ? 'The postcard is drawn again and priced again: the 4x6 and 11x6 are paid per send with Pay & Send.'
+        : 'The postcard is drawn again.')
     );
   },
   readOnly: false,

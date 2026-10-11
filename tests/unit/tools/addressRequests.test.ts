@@ -182,7 +182,7 @@ describe('request_address (#604)', () => {
     vi.stubEnv('LETTER_IRL_ADDRESS_REQUEST_LINK_DAYS', '5');
     const description = (requestAddressTool.description as (client: never) => string)(undefined as never);
     expect(description).toContain("whose U.S. mailing address they don't know");
-    expect(description).toContain('Letter IRL never contacts them');
+    expect(description).toContain('It makes a private link that the person shares with that recipient themselves.');
     expect(description).toContain('for 5 days');
     expect(description).toContain('Do not use it for an address the person already has');
     expect(description).toContain('Each call makes a new link, and an account may make 20 a day, so make one per recipient.');

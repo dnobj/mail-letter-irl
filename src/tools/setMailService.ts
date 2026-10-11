@@ -175,7 +175,7 @@ export const setMailServiceTool: McpToolDefinition<SetMailServiceInput, SetMailS
     'certified (USPS Certified Mail) or certified_return_receipt (Certified Mail with an electronic return receipt). ' +
     'Only when the person asks to add or remove certified mail: it costs more and is paid with Pay & Send, never a letter pack or ' +
     'a gift letter, and a postcard or a gift letter cannot be certified. ' +
-    'Give the draftId from the preview and mailService; the page does not change, its price does. Nothing is sent by this tool.',
+    'Give the draftId from the preview and mailService; the page does not change, its price does.',
   readOnly: false,
   inputSchema: setMailServiceInputSchema,
   outputSchema: setMailServiceOutputSchema,

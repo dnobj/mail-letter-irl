@@ -157,9 +157,8 @@ export const requestSendTool: McpToolDefinition<RequestSendInput, RequestSendOut
   name: REQUEST_SEND_TOOL,
   title: 'Get a link to send a preview',
   description:
-    'Get a link where the person checks a previewed letter or postcard and sends it themselves on letterirl.com. ' +
-    'Nothing is sent by this tool, and nothing is sent until the person presses Send on that page, ' +
-    'or pays there with Pay & Send for mail no letter pack pays for. ' +
+    'Get a link where the person checks a previewed letter or postcard and sends it themselves on letterirl.com: ' +
+    'they press Send on that page, or pay there with Pay & Send for mail no letter pack pays for. ' +
     'Use it when the person wants to send a preview and no preview card with a Send button is showing.',
   readOnly: true,
   inputSchema: requestSendInputSchema,
