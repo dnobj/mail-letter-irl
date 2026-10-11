@@ -35,7 +35,8 @@
  * else stays on window.openai. A host that never answers changes nothing.
  * A card that says data-plugin-extensions="on-request" opens it itself, with
  * openPluginExtensions(), when it first needs it (#650): the letter card, only
- * once the server flags it to share, so a card that never shares never opens it.
+ * when it has a draft to share and the server flags it to, so a card the server
+ * does not flag, or one already sent, never opens it.
  */
 (function () {
   "use strict";

@@ -184,7 +184,7 @@ describe('the selected draft in ChatGPT (#650)', () => {
 
   // ChatGPT carries model context on the MCP Apps handshake, not window.openai (#665). The letter card opens it only
   // when the server flags it to share, so a card that never shares, as everywhere the home is off, never opens it.
-  function framed(meta: Json) {
+  function framed(meta: Json, extra: Json = {}) {
     const sent: Json[] = [];
     const parent = { postMessage: (message: Json) => sent.push(JSON.parse(JSON.stringify(message))) };
     const served = stampPreviewTool(
@@ -199,7 +199,7 @@ describe('the selected draft in ChatGPT (#650)', () => {
         Object.defineProperty(window, 'parent', { value: parent, configurable: true });
         (window as any).openai = {
           theme: 'light', toolInput: ARGS, toolOutput: output(), toolResponseMetadata: meta, widgetState: null,
-          setWidgetState: async () => undefined, callTool: async () => ({})
+          setWidgetState: async () => undefined, callTool: async () => ({}), ...extra
         };
       }
     });
@@ -231,6 +231,18 @@ describe('the selected draft in ChatGPT (#650)', () => {
     const card = framed(ON);
     await flush();
     expect(card.sent).toHaveLength(0);
+  });
+
+  it('never opens the handshake for a flagged card with no draft to share, nor where ChatGPT takes model context itself', async () => {
+    // A reopened card whose letter was already sent: flagged, but nothing to share.
+    const sent = framed({ ...ON, modelContextEnabled: true }, { widgetState: { v: 1, draftId: 'draft_0001', sent: true, orderId: 'order-9' } });
+    await flush();
+    expect(sent.requests('ui/initialize')).toHaveLength(0);
+    const native: Json[] = [];
+    const own = framed({ ...ON, modelContextEnabled: true }, { updateModelContext: async (value: Json) => { native.push(value); return {}; } });
+    await flush();
+    expect(own.requests('ui/initialize')).toHaveLength(0);
+    expect(native).toHaveLength(1);
   });
 });
 

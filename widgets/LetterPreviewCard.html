@@ -3125,10 +3125,6 @@
       const RESHARE_AFTER_MS = 10000;
       function shareSelection(touched = false, usedAt = 0, immediate = false) {
         const flagged = currentMeta().modelContextEnabled === true;
-        // In ChatGPT what carries model context opens only for a card flagged to share; its answer redraws the card,
-        // which shares then.
-        if (flagged && typeof host.openPluginExtensions === "function") host.openPluginExtensions();
-        if (typeof host.updateModelContext !== "function") return;
         const asks = typeof host.setWidgetState !== "function" && typeof host.callTool === "function";
         const confirmed = !asks || statusReadyFor === currentDraftId || retryResult?.output?.draftId === currentDraftId;
         // Not while a send is out or after it (sendInProgress stays set once sent), nor once a checkout is tracked, nor
@@ -3137,6 +3133,12 @@
         const ready =
           flagged && typeof currentDraftId === "string" && currentDraftId && confirmed &&
           cardIsShowingDraft() && !keptOrderShown() && !sendPageShown();
+        // In ChatGPT what carries model context opens only when there is a draft to share and no other way to share it,
+        // so a sent or reopened card never opens it; its answer redraws the card, which shares then.
+        if (ready && typeof host.updateModelContext !== "function" && typeof host.openPluginExtensions === "function") {
+          host.openPluginExtensions();
+        }
+        if (typeof host.updateModelContext !== "function") return;
         const draftId = ready ? currentDraftId : "";
         const now = Date.now();
         // The time a share carries is the time of the use that asked for it, so a share that waited still says when.
