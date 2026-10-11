@@ -1846,8 +1846,9 @@ print; and nothing prints a signature the person did not see.
 
 ### STATIONERY-02 — Saved stationery designs (#649)
 
-**Status:** Passed on development, 2026-10-10, on 979909a with `LETTER_IRL_CUSTOM_STATIONERY_ENABLED` on (step 9
-skipped). Steps 1 to 3 ran on ChatGPT web (DEV) and steps 4 to 7 with the dev CLI, both as testlirl02:
+**Status:** Passed on development, 2026-10-10, on 979909a with `LETTER_IRL_CUSTOM_STATIONERY_ENABLED` turned on for the
+run (step 9 skipped). Steps 1 to 3 ran on ChatGPT web (DEV) and steps 4 to 7 with the dev CLI, both as testlirl02; step 8
+was checked in PostGrid's test dashboard. The flag was turned off at step 10 and left off on development.
 
 - **Step 1 passed:** Garden saved from plain words. ChatGPT showed its "Suspicious Instruction" warning on
   `save_stationery_design`, reading its description as an attempt to steer ChatGPT's reviewer (#670).
@@ -1859,9 +1860,11 @@ skipped). Steps 1 to 3 ran on ChatGPT web (DEV) and steps 4 to 7 with the dev CL
 - **Step 7 passed:** a delete without confirmation was refused, then the design was deleted; the letter previewed in
   Party kept it.
 - **Step 8 passed:** PostGrid test letter `letter_sSB1H4dsHWLueaxAWLMoFy` (order 21c2e770): the confetti clear of
-  both address blocks, the headline, the date, the serif body, and the gift card on page 2.
+  both address blocks, the headline, the date, the serif body, and the gift card on page 2. The letter sent was in
+  Party, so how a light-grey ornament looks on the test print is still to record.
 - **Step 9 skipped** by the owner; ERASE-01 covers erasure.
-- **Step 10 passed:** the three tools were gone, and the Initials draft still showed TS. The flag was left off.
+- **Step 10 passed** as far as recorded: the three tools were gone, and the Initials draft still showed TS. The
+  previews' schemas and a new preview's remembered theme were not recorded.
 - **Also found:** the website's confirmation page does not name a saved design the way it names a theme
   (mail-letter-irl-website #60).
 
@@ -3407,8 +3410,6 @@ Needs the home on in development, an account with more than 4 mail items (testli
 
 **Recheck 2026-10-10 on DEV 979909a, ChatGPT Android (the same phone and account), passed:**
 - In fullscreen and in the deep link's app view, Refresh sat clear of ChatGPT's close button and bar.
-- The shared selection read as a sentence, not JSON: "Selected in the Letter IRL home: order 02726a1a…, a letter to
-  "<name>" (<city>, <state>), status: Did not go out. It is mail already ordered, not a draft to edit."
+- The shared selection read as a sentence, not JSON: "Selected in the Letter IRL home: order 02726a1a…, a letter to "<name>" (<city>, <state>), status: Did not go out. It is mail already ordered, not a draft to edit."
 - The header fitted on one line.
-- Found: the three failed letters, from December 2025, read "Dec 30" with no year. Short dates from another year now
-  say their year (widget v79).
+- Found: the three failed letters, from December 2025, read "Dec 30" with no year. Short dates from another year now say their year (widget v79).

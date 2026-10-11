@@ -478,11 +478,13 @@ describe('the compact home (#662)', () => {
   });
 
   it('gives a short date its year only when it is not this year', () => {
+    // Timestamps at noon UTC fall on the same day from UTC-11 to UTC+11. A draft's expiry comes as a timestamp, as the
+    // server sends it; a scheduled arrival as a calendar date.
     const output = {
-      drafts: [{ recipient: { name: 'Ruth', city: '', state: '' }, expiresAt: '2027-01-02', draftId: 'draft-1' }],
+      drafts: [{ recipient: { name: 'Ruth', city: '', state: '' }, expiresAt: '2027-01-02T12:00:00.000Z', draftId: 'draft-1' }],
       orders: [
-        order('failed', { orderId: 'old', createdAt: '2025-12-30T15:00:00Z' }),
-        order('delivered', { orderId: 'new', createdAt: '2026-10-05T15:00:00Z' }),
+        order('failed', { orderId: 'old', createdAt: '2025-12-30T12:00:00Z' }),
+        order('delivered', { orderId: 'new', createdAt: '2026-10-05T12:00:00Z' }),
         order('scheduled', { orderId: 'next', arriveBy: '2027-01-08' })
       ],
       recipients: [], limit: 20
