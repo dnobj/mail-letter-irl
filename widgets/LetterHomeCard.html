@@ -197,7 +197,10 @@
         var calendar = /^\d{4}-\d{2}-\d{2}$/.test(value || '');
         var date = new Date(calendar ? value + 'T12:00:00Z' : value);
         if (!Number.isFinite(date.getTime())) return '';
-        return date.toLocaleDateString(undefined, calendar ? { month: 'short', day: 'numeric', timeZone: 'UTC' } : { month: 'short', day: 'numeric' });
+        var options = calendar ? { month: 'short', day: 'numeric', timeZone: 'UTC' } : { month: 'short', day: 'numeric' };
+        // A date from another year says its year, so last December's mail is not read as this December's.
+        if ((calendar ? date.getUTCFullYear() : date.getFullYear()) !== new Date().getFullYear()) options.year = 'numeric';
+        return date.toLocaleDateString(undefined, options);
       }
       function safeLink(container, href, title, tracking) {
         try {
