@@ -250,13 +250,13 @@ describe('tool text in every app', () => {
   it.each(CLIENT_PROFILE_NAMES.map(name => [name]))('%s: no description rates its own risk', name => {
     // A client that cached the old words is told apart in the logs.
     expect(STEERING_COPY_REV).toBeGreaterThanOrEqual(50);
-    for (const [on, paidPerSend] of SWITCH_STATES) {
-      everyFlag(on, paidPerSend);
+    for (const [on, paidPerSend, imageGen] of SWITCH_STATES) {
+      everyFlag(on, paidPerSend, imageGen);
       for (const sendRule of ['true', 'false']) {
         vi.stubEnv('LETTER_IRL_SEND_CONFIRMATION_ENABLED', sendRule);
         for (const tool of new LetterIrlServer().listTools(clientProfileNamed(name))) {
           for (const text of [tool.title, tool.description, ...modelFacingStrings(tool.inputSchema)]) {
-            expect(text, `${tool.name} (flags ${on}, paid per send ${paidPerSend}, send rule ${sendRule})`).not.toMatch(RATES_ITS_RISK);
+            expect(text, `${tool.name} (flags ${on}, paid per send ${paidPerSend}, images ${imageGen}, send rule ${sendRule})`).not.toMatch(RATES_ITS_RISK);
           }
         }
         expect(buildServerInstructions(sendRule === 'true', clientProfileNamed(name)), 'instructions').not.toMatch(RATES_ITS_RISK);
@@ -276,12 +276,18 @@ describe('tool text in every app', () => {
       'This does not send mail.', 'Nothing is sent by this tool.', 'Nothing is previewed or sent.', 'It sends nothing.',
       'It changes nothing.', "It doesn't send the letter.", 'Read-only.', 'It is safe.', 'Safe retries return it.',
       'It is harmless.', "It won't charge you.", 'It never sends mail.', 'It only reads.', 'Returns sanitized state.',
-      'It never exposes card details.', 'Letter IRL never contacts them.'
+      'It never exposes card details.', 'Letter IRL never contacts them.', 'It doesn\u2019t send the letter.',
+      'It won\u2019t charge you.', 'Read only.', 'It is readonly.', 'Nothing is charged.', 'It charges nothing.',
+      'It cannot send mail.', 'Drafts are not sent.', 'It isn\u2019t sent.', 'It has no side effects.', 'It\u2019s safe.'
     ]) {
       expect(said).toMatch(RATES_ITS_RISK);
     }
     // What a tool does, said plainly, is not a rating.
-    for (const said of ['The person sends it with Send on the preview card.', 'Free until it goes to the printer: nothing is mailed.', 'A retry returns the existing order.']) {
+    for (const said of [
+      'The person sends it with Send on the preview card.', 'Free until it goes to the printer: nothing is mailed.',
+      'A retry returns the existing order.', 'Do not send the person to the website.', 'A link that won\u2019t open after 7 days.',
+      'Keep the link safe.', 'The mail goes to the printer as soon as it is sent.', 'Letter IRL does not make images in this app.'
+    ]) {
       expect(said).not.toMatch(RATES_ITS_RISK);
     }
   });

@@ -37,11 +37,11 @@ afterEach(() => vi.unstubAllEnvs());
 
 describe('what ChatGPT is served rates no tool by its risk (#543, #670)', () => {
   it.each(
-    SWITCH_STATES.flatMap(([on, paidPerSend]) =>
-      ['true', 'false'].map(sendRule => [on, paidPerSend, sendRule] as const)
+    SWITCH_STATES.flatMap(([on, paidPerSend, imageGen]) =>
+      ['true', 'false'].map(sendRule => [on, paidPerSend, imageGen, sendRule] as const)
     )
-  )('switches on: %s, paid per send: %s, send rule: %s', async (on, paidPerSend, sendRule) => {
-    everyFlag(on, paidPerSend);
+  )('switches on: %s, paid per send: %s, images: %s, send rule: %s', async (on, paidPerSend, imageGen, sendRule) => {
+    everyFlag(on, paidPerSend, imageGen);
     vi.stubEnv('LETTER_IRL_SEND_CONFIRMATION_ENABLED', sendRule);
     const client = await chatgpt();
     const { tools } = await client.listTools();
