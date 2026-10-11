@@ -281,6 +281,7 @@ describe('tool text in every app', () => {
       'Does not send the letter in this app: Letter IRL sends mail only when the person sends it.',
       'Safe retries return the existing order instead of charging twice.',
       'Nothing is sent by this tool, and nothing is sent until the person presses Send on that page.',
+      'A retry returns the existing order instead of charging twice.',
       'Preview tools are free drafts; they do not send mail.'
     ]) {
       expect(said).toMatch(A_REMOVED_RISK_SENTENCE);

@@ -12,7 +12,9 @@ import type { ImageGenMode } from '../../src/config/imageGeneration.js';
  * entry is a removed sentence or the part of one that rated the tool, never a shorter prefix that a description may
  * rightly say ("The same choice twice changes nothing", "Letter IRL does not send the letter to the printer before its
  * mail date"). "Letter IRL sends mail only when the person sends it", removed from the send tools, says what happens,
- * so it is not listed. The rule for new words is the style guide's (docs/tool-description-style-guide.md), by review.
+ * so it is not listed. A whole removed phrase can still stand in a sentence a description might say ("if the recipient
+ * sends nothing back"); the test that fails then names the tool, and the sentence is worded another way. The rule for
+ * new words is the style guide's (docs/tool-description-style-guide.md), by review.
  */
 export const REMOVED_RISK_SENTENCES = [
   'This does not send mail',
@@ -27,6 +29,7 @@ export const REMOVED_RISK_SENTENCES = [
   'Does not send the postcard in this app',
   'it does not send anything',
   'Safe retries',
+  'instead of charging twice',
   'sanitized commerce state',
   'never exposes payment-card details',
   'never contacts them',

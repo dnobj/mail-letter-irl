@@ -110,7 +110,9 @@ function instructionLines(sendRule: boolean, client: ClientProfile): string[] {
 
 /**
  * The instructions one app reads (#484). Only the lines that would be false in
- * some app differ, and ChatGPT's are the text it has always had.
+ * some app differ, and ChatGPT's are the text it has always had, but for the
+ * second line, which #670 reworded in every app ("Preview tools make free
+ * drafts.", tests/unit/mcp/sendRule.test.ts).
  */
 export function buildServerInstructions(sendRule: boolean, client: ClientProfile): string {
   return instructionLines(sendRule, client).join("\n");
