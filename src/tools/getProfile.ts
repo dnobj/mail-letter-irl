@@ -87,7 +87,7 @@ export const getProfileTool: McpToolDefinition<Record<string, never>, GetProfile
   title: "Profile",
   // Read by the model every turn, so it says what the tool is for and no more.
   description:
-    "Identifies the connected Letter IRL account: a stable account id and the account's email address. Read-only.",
+    "Identifies the connected Letter IRL account: a stable account id and the account's email address.",
   readOnly: true,
   inputSchema: getProfileInputSchema,
   outputSchema: getProfileOutputSchema,

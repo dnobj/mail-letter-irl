@@ -18,8 +18,8 @@ export function previewSendStep(
 ): string {
   if (!isSendConfirmationEnabled()) return `Send later with ${sendTool}.`;
   return client.rendersCards
-    ? "Nothing is sent from here: the person sends it with Send on the preview card, or, if no card shows, on the page request_send links to."
-    : "Nothing is sent from here: to send it, call request_send and give the person its link.";
+    ? "The person sends it with Send on the preview card, or, if no card shows, on the page request_send links to."
+    : "The person sends it on the page request_send links to: call request_send and give the person its link.";
 }
 
 /**
@@ -41,8 +41,7 @@ export function sendToolDescription(
 ): string {
   if (!isSendConfirmationEnabled() || client.honorsCardOnlyTools) return description;
   return (
-    `Does not send the ${mail} in this app: Letter IRL sends mail only when the person sends it. ` +
-    `A call answers with the link to the page where they check the ${mail} and send it. ` +
+    `In this app a call answers with the link to the page where the person checks the ${mail} and sends it themselves. ` +
     `Call request_send instead and give the person its link.`
   );
 }

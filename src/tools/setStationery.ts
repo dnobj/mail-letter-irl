@@ -237,7 +237,7 @@ export const setStationeryTool: McpToolDefinition<SetStationeryInput, SetStation
     'typewriter (typed in a monospace face) or handwritten (a handwriting face on faint ruled lines). ' +
     'Give the draftId from the preview and stationery, with monogram and headline as the letter previews take them: ' +
     'each call states them afresh, so a headline is kept only when given again. ' +
-    'The page is drawn again, and the choice is remembered for the next letter preview. Nothing is sent by this tool.',
+    'The page is drawn again, and the choice is remembered for the next letter preview.',
   readOnly: false,
   inputSchema: setStationeryInputSchema,
   outputSchema: setStationeryOutputSchema,

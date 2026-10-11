@@ -114,7 +114,7 @@ export const setArrivalDateTool: McpToolDefinition<SetArrivalDateInput, SetArriv
   description:
     'Set, change or clear the date a previewed letter or postcard should arrive by, without previewing it again. ' +
     'Give the draftId from the preview and arriveBy as YYYY-MM-DD; leave arriveBy out to clear the date, so the mail ' +
-    'goes to the printer as soon as it is sent. Nothing is sent by this tool. Letter IRL holds the mail and sends it ' +
+    'goes to the printer as soon as it is sent. Once it is sent, Letter IRL holds the mail and sends it ' +
     'to the printer in time; USPS does not guarantee First-Class dates.',
   readOnly: false,
   inputSchema: setArrivalDateInputSchema,

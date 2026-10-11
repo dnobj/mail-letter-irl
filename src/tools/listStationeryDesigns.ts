@@ -40,7 +40,7 @@ export const listStationeryDesignsTool: McpToolDefinition<ListStationeryDesignsI
   title: 'List saved stationery designs',
   description:
     "List the person's saved stationery designs, with each one's designId, name and choices, and the one their next letter preview " +
-    'is drawn in when it names no stationery. Read-only: it changes and sends nothing.',
+    'is drawn in when it names no stationery.',
   readOnly: true,
   inputSchema: listStationeryDesignsInputSchema,
   outputSchema: listStationeryDesignsOutputSchema,

@@ -182,7 +182,7 @@ export const quoteAndPreviewLetterTextOnlyTool: McpToolDefinition<
   title: "Preview a letter",
   // The last sentence follows the send rule and the app (#516).
   description: (client) =>
-    "Preview a text-only physical letter draft. This does not send mail. Requires a real U.S. recipient mailing address and text that fits the text-only letter limit. " +
+    "Preview a text-only physical letter draft. Requires a real U.S. recipient mailing address and text that fits the text-only letter limit. " +
     roomToWriteSentence() +
     certifiedMailSentence() +
     previewSendStep("send_letter", client),

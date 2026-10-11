@@ -99,7 +99,7 @@ function describe(): string {
     'Take the picture as a file the person attached (image) or a link to it (imageUrl). ' +
     'It works best as dark ink on white paper, photographed flat and close. ' +
     'The server crops it to the ink and turns the paper white, and refuses a picture with no signature in it. ' +
-    "Use only the person's own signature. It is free and sends nothing."
+    "Use only the person's own signature. It is free."
   );
 }
 

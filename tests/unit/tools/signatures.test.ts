@@ -188,7 +188,7 @@ describe('set_signature', () => {
     expect(setSignatureTool.meta).toMatchObject({ 'openai/fileParams': ['image'], destructiveHint: true });
     const description = typeof setSignatureTool.description === 'function' ? setSignatureTool.description({} as never) : setSignatureTool.description;
     expect(description).toContain("Use only the person's own signature.");
-    expect(description).toContain('It is free and sends nothing.');
+    expect(description).toContain("Use only the person's own signature. It is free.");
   });
 });
 

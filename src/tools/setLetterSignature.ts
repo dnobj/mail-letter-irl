@@ -203,7 +203,7 @@ export const setLetterSignatureTool: McpToolDefinition<SetLetterSignatureInput, 
     "Print the person's saved signature on a previewed letter, under the closing, or take it off, without previewing it again. " +
     'Give the draftId from the preview and signature: true or false. set_signature saves a signature first; true with none saved is refused. ' +
     `The signature takes ${SIGNATURE_LINES} lines, so a letter with no room for them is refused. The page is drawn again with the signature as it is saved now, ` +
-    'and the choice is remembered for the next letter preview. Nothing is sent by this tool.',
+    'and the choice is remembered for the next letter preview.',
   readOnly: false,
   inputSchema: setLetterSignatureInputSchema,
   outputSchema: setLetterSignatureOutputSchema,

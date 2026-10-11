@@ -273,7 +273,7 @@ export const getDraftStatusTool: McpToolDefinition<GetDraftStatusInput, GetDraft
   title: 'Check a preview',
   description:
     "Used by Letter IRL's preview card: says whether a previewed letter or postcard is still ready to send, " +
-    'has been sent (with its order id and where that order stands), or has expired. It sends nothing and changes nothing.',
+    'has been sent (with its order id and where that order stands), or has expired.',
   readOnly: true,
   inputSchema: getDraftStatusInputSchema,
   outputSchema: getDraftStatusOutputSchema,

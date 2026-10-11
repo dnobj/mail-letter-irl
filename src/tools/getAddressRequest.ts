@@ -58,7 +58,7 @@ export const getAddressRequestTool: McpToolDefinition<GetAddressRequestInput, Ge
     'Check an address request made with request_address: whether the recipient has answered. ' +
     'Once answered, it returns their address as recipient, in the shape a letter or postcard preview tool takes, so the preview can be made. ' +
     'It may also say the recipient declined, the request was cancelled, or the link expired before an answer. ' +
-    'Call it when the person says the recipient has answered, or asks; it sends nothing.',
+    'Call it when the person says the recipient has answered, or asks.',
   readOnly: true,
   inputSchema: getAddressRequestInputSchema,
   outputSchema: getAddressRequestOutputSchema,

@@ -1148,7 +1148,7 @@ export const getSignatureOutputZ = z.object({
 });
 
 // Saved stationery designs (#649): saved, listed and deleted. Listed only while designs are offered (src/server.ts).
-export const DESIGN_NAME_DESCRIPTION = "The person's name for the design, 1 to 40 characters, such as \"Garden letters\"; saving under a name the account has replaces that design";
+export const DESIGN_NAME_DESCRIPTION = "The person's name for the design, 1 to 40 characters, such as \"Garden letters\"; saving under a name the account has replaces that design, so ask the person before reusing one";
 export const DESIGN_FACE_DESCRIPTION =
   "The letter's face: serif (a classic book face), typewriter (a monospace face, fewer words to the page) or handwritten (a handwriting face, no Greek, Hebrew or Vietnamese)";
 export const DESIGN_ORNAMENT_DESCRIPTION =

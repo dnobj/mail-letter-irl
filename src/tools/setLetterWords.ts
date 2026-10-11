@@ -298,9 +298,8 @@ export const setLetterWordsTool: McpToolDefinition<SetLetterWordsInput, SetLette
     'saw them, nothing is changed, and the answer gives the words as they are now. The letter is laid out again in its ' +
     (letterPageLimit() > 1
       ? 'stationery on up to three pages: a longer letter prints on both sides and is paid with Pay & Send, and a gift letter ' +
-        'stays on one page. '
-      : 'stationery on one page: words that do not fit are refused. ') +
-    'Nothing is sent by this tool.',
+        'stays on one page.'
+      : 'stationery on one page: words that do not fit are refused.'),
   readOnly: false,
   inputSchema: setLetterWordsInputSchema,
   outputSchema: setLetterWordsOutputSchema,

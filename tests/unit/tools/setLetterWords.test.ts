@@ -493,7 +493,7 @@ describe('set_letter_words', () => {
           'from the preview or the last change of words. The letter card can change the words too: if they changed since you ' +
           'saw them, nothing is changed, and the answer gives the words as they are now. The letter is laid out again in its ' +
           'stationery on up to three pages: a longer letter prints on both sides and is paid with Pay & Send, and a gift letter ' +
-          'stays on one page. Nothing is sent by this tool.'
+          'stays on one page.'
       );
     });
 
