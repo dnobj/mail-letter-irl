@@ -1037,12 +1037,6 @@ export const getDraftStatusOutputSchema: JsonSchema = {
       description: "Where a sent draft's order stands: scheduled while it waits for its mail date"
     },
     cancellable: { type: "boolean", description: "A sent draft's order: whether it can still be cancelled free" },
-    checkout: {
-      type: "object",
-      properties: { orderId: { type: "string" }, checkoutUrl: { type: "string" }, paid: { type: "boolean" } },
-      required: ["orderId"],
-      description: "A ready draft's Pay & Send order now live: its order id, its checkout link, and whether it is paid"
-    },
     pages: { type: "integer", minimum: 2, maximum: MAX_LETTER_PAGES, description: "A ready letter of more than one page: the pages it is laid out on now" },
     canSendNow: { type: "boolean", description: "A ready letter while room to write or certified mail is offered, or a postcard while its sizes or layouts are: whether the balance or a gift letter pays for it now" },
     size: { type: "string", enum: ["6x9", "6x4", "6x11"], description: "A ready postcard our renderer drew, while its sizes or layouts are offered: its size now. Its page goes to the card" },

@@ -1150,20 +1150,8 @@
       function showKeptOrder(kept) {
         const orderId = keptOrderId(kept);
         document.getElementById("card").classList.remove("loading");
-        document.getElementById("mockup-container").innerHTML = kept.fromServer
-          ? kept.paid
-            ? '<div class="preview-loading">This letter has been paid for.</div>'
-            : '<div class="preview-loading">This letter is waiting for its payment.</div>'
-          : '<div class="preview-loading">A reopened conversation does not show the preview again.</div>';
-        // What changes or pays for the draft goes: the draft is the order's now. A card that drew the draft before the
-        // server named its checkout (#676) still shows them otherwise, and the server refuses each.
-        picker.hide();
-        styleRow.hide();
-        document.getElementById("service-row").style.display = "none";
-        document.getElementById("send-page-button").style.display = "none";
-        document.getElementById("pay-page-button").style.display = "none";
-        document.getElementById("website-packs-button").style.display = "none";
-        refreshStudio();
+        document.getElementById("mockup-container").innerHTML =
+          '<div class="preview-loading">A reopened conversation does not show the preview again.</div>';
         document.getElementById("id-label").textContent = kept.sent ? "Order" : "Purchase";
         document.getElementById("id-value").textContent = orderId || "—";
         document.getElementById("send-button").style.display = "none";
@@ -1173,11 +1161,7 @@
         document.getElementById("empty-hint").style.display = "none";
         document.getElementById("empty-message").textContent = kept.sent
           ? "This letter was sent to the printer from this card. Ask for its status in the chat."
-          : kept.fromServer
-            ? kept.paid
-              ? "A Pay & Send payment for this letter has been made."
-              : "A checkout for this letter has been started."
-            : "A checkout for this letter was started from this card.";
+          : "A checkout for this letter was started from this card.";
         document.getElementById("empty-state").style.display = "block";
         const statusPill = document.getElementById("status-pill");
         const keptSchedule = arrives.scheduleOf(kept.schedule);
@@ -1318,9 +1302,11 @@
       // again, which would offer Send for mail that has gone. ChatGPT keeps
       // the card's own state, but not always: with the Plugin Extensions
       // handshake open, a reopened card was given none (#676). So the card
-      // asks in every host, and the server's answer is the truth. {draftId,
-      // status, orderId, schedule, orderStatus, cancellable} once the draft
-      // turns out to be sent or expired.
+      // asks in every host, and the server's answer is the truth. A Pay & Send
+      // checkout started before is not named: Pay & Send on the draft again
+      // reuses it, with its link (createJitCheckout). {draftId, status,
+      // orderId, schedule, orderStatus, cancellable} once the draft turns out
+      // to be sent or expired.
       let draftState = null;
       const draftStateAsked = new Set();
 
@@ -1340,28 +1326,6 @@
             // now: this card may have changed them since that preview (#535).
             if (answer.status === "ready") {
               statusReadyFor = draftId;
-              // A Pay & Send checkout already started on it (#676): what this card would have kept had its state not
-              // been lost, or one started elsewhere, such as the confirmation page. Shown as a kept checkout, so the
-              // card offers its link rather than Pay & Send again; not for a checkout this card is starting or
-              // following, nor once the card has moved to another draft or is sending. Shown, not kept: the server
-              // says it afresh each time the card opens, so a checkout that lapses unpaid is not offered for good.
-              const started = answer.checkout;
-              if (
-                started && typeof started.orderId === "string" && started.orderId &&
-                draftId === currentDraftId && trackedOrderId === null && !checkoutInProgress && !sendInProgress
-              ) {
-                resumed = {
-                  v: SAVED_STATE_VERSION,
-                  draftId,
-                  checkout: true,
-                  fromServer: true,
-                  paid: started.paid === true,
-                  orderId: started.orderId,
-                  ...(isHttpsUrl(started.checkoutUrl) ? { checkoutUrl: started.checkoutUrl } : {}),
-                };
-                render();
-                return;
-              }
               // And the style it is in now, with its page (#563): this card,
               // or the chat, may have restyled it since that preview.
               // How full its pages are (#592 review round 1): the preview's own

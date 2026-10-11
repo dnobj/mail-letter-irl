@@ -194,20 +194,16 @@ describe('the selected draft in ChatGPT (#650)', () => {
     expect(updates).toHaveLength(0);
   });
 
-  // ChatGPT carries model context on the MCP Apps handshake, not window.openai (#665). The letter card's own opening
-  // of it is withdrawn (#676): with it open, ChatGPT did not give a reopened card its kept state. The card keeps the
-  // logic, tested here with the attribute put back (`optIn`), for when the handshake keeps that state.
-  function framed(meta: Json, extra: Json = {}, optIn = true) {
+  // ChatGPT carries model context on the MCP Apps handshake, not window.openai (#665). The letter card, as served,
+  // opens it on request (#675, #676), once flagged and ready.
+  function framed(meta: Json, extra: Json = {}) {
     const sent: Json[] = [];
     const parent = { postMessage: (message: Json) => sent.push(JSON.parse(JSON.stringify(message))) };
     const served = stampPreviewTool(
       inlineHostBridge(fs.readFileSync(path.join(WIDGET_DIR, 'LetterPreviewCard.html'), 'utf-8'), WIDGET_DIR),
       'quote_and_preview_letter'
     );
-    const page = optIn ? served.replace('<html lang="en">', '<html lang="en" data-plugin-extensions="on-request">') : served;
-    // Put back for real, or the opt-in tests below pass for nothing.
-    if (optIn && !/<html[^>]*data-plugin-extensions="on-request"/.test(page)) throw new Error('the opt-in was not put back');
-    const dom = new JSDOM(page.replace('<script type="module">', '<script>'), {
+    const dom = new JSDOM(served.replace('<script type="module">', '<script>'), {
       runScripts: 'dangerously',
       beforeParse(window) {
         (window as any).setTimeout = () => 0;
@@ -248,7 +244,7 @@ describe('the selected draft in ChatGPT (#650)', () => {
   it('as served, opens the handshake on request, as the server now answers for a reopened card (#676)', async () => {
     const served = fs.readFileSync(path.join(WIDGET_DIR, 'LetterPreviewCard.html'), 'utf-8');
     expect(served).toMatch(/<html[^>]*data-plugin-extensions="on-request"/);
-    const card = framed({ ...ON, modelContextEnabled: true }, {}, false);
+    const card = framed({ ...ON, modelContextEnabled: true });
     await flush();
     expect(card.requests('ui/initialize')).toHaveLength(1);
   });

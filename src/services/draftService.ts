@@ -381,9 +381,8 @@ export async function getDraft(draftId: string): Promise<LetterDraft | null> {
  * What became of a draft, without its content (#474): who owns it, its status,
  * when it expires, its arrival dates, and the mail it became once sent, with
  * that letter's own status, funding and dates (#535), so an answer about a
- * sent draft says where the order stands now, and the Pay & Send order live on
- * a draft still pending (#676). For get_draft_status, which the preview cards
- * ask where the host keeps no state for them, and the letter card in every host.
+ * sent draft says where the order stands now. For get_draft_status, which the
+ * preview card asks where its host keeps no state for it.
  */
 export interface DraftState
   extends Pick<
@@ -399,12 +398,6 @@ export interface DraftState
   letter_mail_on: string | null;
   /** Whether the draft holds a signature (#608): its copy is never read here. */
   signed: boolean;
-  /**
-   * The Pay & Send order now live on the draft (#676), as the edit and checkout locks count one
-   * (LIVE_PAY_AND_SEND_STATUSES, idx_orders_active_jit_draft_unique): an unexpired checkout, or one paid, being sent,
-   * refunded, disputed or held. With its status and checkout link; null for none.
-   */
-  active_checkout: { order_id: string; status: string; checkout_url: string | null } | null;
 }
 
 export async function getDraftState(draftId: string): Promise<DraftState | null> {
@@ -419,21 +412,11 @@ export async function getDraftState(draftId: string): Promise<DraftState | null>
             CASE WHEN d.status = 'pending' AND d.renderer_version IS NOT NULL
                  THEN d.preview_html END AS preview_html,
             l.status AS letter_status, l.funding_type AS letter_funding_type,
-            l.arrive_by AS letter_arrive_by, l.mail_on AS letter_mail_on,
-            -- The Pay & Send order live on it (#676), the owner's only.
-            (SELECT json_build_object('order_id', o.order_id, 'status', o.status, 'checkout_url', o.checkout_url)
-               FROM orders o
-              WHERE o.draft_id = d.draft_id
-                AND o.user_id = d.user_id
-                AND o.order_type = 'jit_mail'
-                AND o.status = ANY($2::varchar[])
-                AND (o.status <> 'checkout_pending' OR o.checkout_expires_at IS NULL OR o.checkout_expires_at > NOW())
-              ORDER BY o.created_at DESC
-              LIMIT 1) AS active_checkout
+            l.arrive_by AS letter_arrive_by, l.mail_on AS letter_mail_on
        FROM letter_drafts d
        LEFT JOIN letters l ON l.letter_id = d.consumed_letter_id AND l.user_id = d.user_id
       WHERE d.draft_id = $1`,
-    [draftId, [...LIVE_PAY_AND_SEND_STATUSES]]
+    [draftId]
   );
   return result.rows[0] || null;
 }
