@@ -8,20 +8,23 @@ import type { ImageGenMode } from '../../src/config/imageGeneration.js';
  * words say what the tool does.
  *
  * This is the list of what was removed, not a pattern for every way of saying a tool is harmless: four review rounds
- * of #672 found such a pattern always missed one phrasing or refused a sentence a description may rightly say. The
- * rule for new words is the style guide's (docs/tool-description-style-guide.md), kept by review.
+ * of #672 found such a pattern always missed one phrasing or refused a sentence a description may rightly say. Each
+ * entry is a removed sentence or the part of one that rated the tool, never a shorter prefix that a description may
+ * rightly say ("The same choice twice changes nothing", "Letter IRL does not send the letter to the printer before its
+ * mail date"). "Letter IRL sends mail only when the person sends it", removed from the send tools, says what happens,
+ * so it is not listed. The rule for new words is the style guide's (docs/tool-description-style-guide.md), by review.
  */
 export const REMOVED_RISK_SENTENCES = [
   'This does not send mail',
   'Nothing is sent from here',
   'Nothing is sent by this tool',
+  'nothing is sent until the person presses Send',
   'Nothing is previewed or sent',
   'Read-only',
   'sends nothing',
-  'changes nothing',
   'does not send or cancel mail',
-  'Does not send the letter',
-  'Does not send the postcard',
+  'Does not send the letter in this app',
+  'Does not send the postcard in this app',
   'it does not send anything',
   'Safe retries',
   'sanitized commerce state',

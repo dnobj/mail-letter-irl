@@ -44,6 +44,6 @@ export function sendToolDescription(
   if (!isSendConfirmationEnabled() || client.honorsCardOnlyTools) return description;
   return (
     `In this app a call answers with the link to the page where the person checks the ${mail} and sends it themselves. ` +
-    `Call request_send instead and give the person its link.`
+    `Call request_send and give the person its link.`
   );
 }

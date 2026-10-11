@@ -221,7 +221,7 @@ export const sendLetterTool: McpToolDefinition<SendLetterInput, SendLetterOutput
   title: 'Send a letter',
   description: (client) =>
     sendToolDescription(
-      'Send a physical letter using a draft from a preview tool. Requires a draftId and confirm: true. A retry returns the existing order instead of charging twice, and the response may suggest saving the sender as your return address. If the same mail was sent or paid for from this account in the last 24 hours, the call is refused and says so; repeat it with sendAnotherCopy: true only after the user asks for another copy.',
+      'Send a physical letter using a draft from a preview tool. Requires a draftId and confirm: true. A retry returns the existing order, and the response may suggest saving the sender as your return address. If the same mail was sent or paid for from this account in the last 24 hours, the call is refused and says so; repeat it with sendAnotherCopy: true only after the user asks for another copy.',
       'letter',
       client
     ),

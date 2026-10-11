@@ -280,13 +280,15 @@ describe('tool text in every app', () => {
       'Read-only: it changes and sends nothing.',
       'Does not send the letter in this app: Letter IRL sends mail only when the person sends it.',
       'Safe retries return the existing order instead of charging twice.',
+      'Nothing is sent by this tool, and nothing is sent until the person presses Send on that page.',
       'Preview tools are free drafts; they do not send mail.'
     ]) {
       expect(said).toMatch(A_REMOVED_RISK_SENTENCE);
     }
     for (const said of [
       'The person sends it with Send on the preview card.', 'Free until it goes to the printer: nothing is mailed.',
-      'A retry returns the existing order instead of charging twice.', 'Do not send mail to a guessed address.',
+      'A retry returns the existing order.', 'The same choice twice changes nothing.',
+      'Letter IRL does not send the letter to the printer before its mail date.', 'Do not send mail to a guessed address.',
       'Letter IRL does not send the receipt; ask USPS.', 'Read only the first page.', 'The link is safe to share.'
     ]) {
       expect(said).not.toMatch(A_REMOVED_RISK_SENTENCE);
@@ -508,7 +510,7 @@ describe('what the send tools say, in every app', () => {
         const mail = mailOf(tool.name);
         expect(tool.description, `${name} ${tool.name}`).toBe(
           `In this app a call answers with the link to the page where the person checks the ${mail} and sends it themselves. ` +
-            'Call request_send instead and give the person its link.'
+            'Call request_send and give the person its link.'
         );
       }
     }

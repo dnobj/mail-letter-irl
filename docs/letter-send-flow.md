@@ -90,7 +90,8 @@ server enforces its own side by the calling app's profile
   descriptions say a call answers with the link to the page where the person
   sends it, and name `request_send`. ChatGPT and Claude keep these tools from
   the model, and their text is unchanged (#516, steering r20). No description
-  says what a tool does not do: ChatGPT flagged that as steering its risk
+  says what a tool does not do to the person's mail, money or data, or how
+  risky it is: ChatGPT flagged that as steering its risk
   rating (#543, #670, steering r50);
 - the server instructions say the model cannot send, and that the card or the
   page offers another copy of mail sent recently. They name no checkout to
