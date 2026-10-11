@@ -278,7 +278,7 @@ describe('tool text in every app', () => {
       'It is harmless.', "It won't charge you.", 'It never sends mail.', 'It only reads.', 'Returns sanitized state.',
       'It never exposes card details.', 'Letter IRL never contacts them.', 'It doesn\u2019t send the letter.',
       'It won\u2019t charge you.', 'Read only.', 'It is readonly.', 'Nothing is charged.', 'It charges nothing.',
-      'It cannot send mail.', 'Drafts are not sent.', 'It isn\u2019t sent.', 'It has no side effects.', 'It\u2019s safe.'
+      'It cannot send mail.', 'Preview tools are free drafts; they do not send mail.', 'This will not charge you.', 'Drafts are not sent.', 'It isn\u2019t sent.', 'It has no side effects.', 'It\u2019s safe.'
     ]) {
       expect(said).toMatch(RATES_ITS_RISK);
     }

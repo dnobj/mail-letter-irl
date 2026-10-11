@@ -12,6 +12,8 @@ export const RATES_ITS_RISK = new RegExp(
     '(sends|changes|charges) nothing',
     "(does|will)(n['\u2019]t| not) (send|charge)",
     'cannot (send|charge)',
+    "(it|they|this|that|which) (do|does|will|can)(n['\u2019]t| not) (send|charge)",
+    'not send mail',
     "won['\u2019]t (send|charge|change)",
     'never (sends|charges|exposes|contacts)',
     '(is|are) not sent',
