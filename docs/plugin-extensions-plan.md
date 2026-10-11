@@ -17,7 +17,7 @@ Every built slice below is off unless `LETTER_IRL_HOME_ENABLED` is on; the slice
 | Slice | State | Issue |
 |---|---|---|
 | Letter IRL home (sidebar app, `{ type: "global" }` entrypoint) | Built, behind `LETTER_IRL_HOME_ENABLED` (on for development only); the owner's acceptance (HOME-01) waits | #639, #640 |
-| Selection shared with the conversation (Model-App Context) | Built: the home on a click, the letter card by itself (#650), both only while the home is on, and in ChatGPT through the MCP Apps handshake (#665; the letter card opens it only when flagged); the owner's acceptance (HOME-02) waits | #641, #642, #650 |
+| Selection shared with the conversation (Model-App Context) | Built: the home on a click, the letter card by itself (#650), both only while the home is on, and in ChatGPT through the MCP Apps handshake (#665) for the home; the letter card's use of it is withdrawn until a reopened card keeps its state with it open (#676); the owner's acceptance (HOME-02) waits | #641, #642, #650 |
 | Cancel scheduled mail from the home, with confirmation | Built; also needs `LETTER_IRL_ARRIVE_BY_ENABLED` | #642 |
 | Deep links to a draft or an order | Built; share links need `LETTER_IRL_CHATGPT_PLUGIN_ID`, unset until the plugin is installed, and the owner's acceptance (HOME-03) waits | #643, #646 |
 | Link checks and held mail's words | Built; the privacy check before the home goes live is the owner's (item 4 of #651) | #651 |

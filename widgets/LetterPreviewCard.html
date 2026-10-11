@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-plugin-extensions="on-request">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <title>LetterPreviewCard</title>
@@ -3133,8 +3133,10 @@
         const ready =
           flagged && typeof currentDraftId === "string" && currentDraftId && confirmed &&
           cardIsShowingDraft() && !keptOrderShown() && !sendPageShown();
-        // In ChatGPT what carries model context opens only when there is a draft to share and no other way to share it,
-        // so a sent or reopened card never opens it; its answer redraws the card, which shares then.
+        // In ChatGPT what carries model context opens only when there is a draft to share and no other way to share it;
+        // its answer redraws the card, which shares then. Withdrawn for now (#676): the card does not say
+        // data-plugin-extensions="on-request", so the bridge offers no openPluginExtensions. With the handshake open,
+        // ChatGPT did not give a reopened card its kept state (a started checkout), so it offered Pay & Send again.
         if (ready && typeof host.updateModelContext !== "function" && typeof host.openPluginExtensions === "function") {
           host.openPluginExtensions();
         }
