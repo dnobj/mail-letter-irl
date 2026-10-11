@@ -2860,6 +2860,27 @@ describe('LetterPreviewCard in ChatGPT asks the server what became of its draft 
     expect(harness.savedStates.some(state => (state as { checkout?: boolean }).checkout)).toBe(false);
   });
 
+  it('takes no checkout over one the card has started itself', async () => {
+    let answer: (() => void) | null = null;
+    const answered = new Promise<void>(resolve => (answer = resolve));
+    const harness = mount(LETTER, {
+      toolOutput: LETTER.output('draft_host_0001', eligibility(false)),
+      // The answer waits until the card has started its own checkout, and names another order.
+      draftStatus: async args => {
+        await answered;
+        return { draftId: args.draftId, status: 'ready', checkout: { orderId: 'ord_checkout_elsewhere' } };
+      }
+    });
+    await flush();
+    await harness.click('pay-send-button');
+    expect(harness.callsTo('create_mail_checkout')).toHaveLength(1);
+    answer!();
+    await flush();
+    await flush();
+    expect(harness.text('id-value')).toBe('ord_checkout_0001');
+    expect(harness.savedStates.some(state => (state as { orderId?: string }).orderId === 'ord_checkout_elsewhere')).toBe(false);
+  });
+
   it('takes no checkout for a draft the card no longer shows when the answer comes', async () => {
     let answerFirst: (() => void) | null = null;
     const firstAnswered = new Promise<void>(resolve => (answerFirst = resolve));
