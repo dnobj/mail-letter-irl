@@ -1848,7 +1848,7 @@ print; and nothing prints a signature the person did not see.
 
 **Status:** Partly run on development, 2026-10-10: steps 1 to 7 passed, step 8 passed in part, step 9 skipped and
 step 10 passed in part. It ran on 979909a with `LETTER_IRL_CUSTOM_STATIONERY_ENABLED` turned on for the
-run (step 9 skipped). Steps 1 to 3 ran on ChatGPT web (DEV) and steps 4 to 7 with the dev CLI, both as testlirl02; step 8
+run. Steps 1 to 3 ran on ChatGPT web (DEV) and steps 4 to 7 with the dev CLI, both as testlirl02; step 8
 was checked in PostGrid's test dashboard. The flag was turned off at step 10 and left off on development.
 
 - **Step 1 passed:** Garden saved from plain words. ChatGPT showed its "Suspicious Instruction" warning on
