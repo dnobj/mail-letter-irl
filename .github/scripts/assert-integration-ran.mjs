@@ -19,6 +19,7 @@ import path from 'node:path';
 /** Suites that must execute. A skip here means CI is lying about its coverage. */
 const REQUIRED = [
   'commerceAcid.postgres.test.ts',
+  'draftStateCheckout.postgres.test.ts',
   'migrateConcurrency.postgres.test.ts',
   'adminFoundationDatabase.test.ts',
   'adminMigrationOrder.test.ts',

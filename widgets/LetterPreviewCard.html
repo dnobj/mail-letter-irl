@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-plugin-extensions="on-request">
   <head>
     <meta charset="utf-8" />
     <title>LetterPreviewCard</title>
@@ -1297,18 +1297,18 @@
         return sendPage !== null && sendPage.draftId === currentDraftId;
       }
 
-      // What the server says became of the host's draft (#474), in a host
-      // that keeps no state for this card: MCP Apps has no widgetState, and
-      // Claude hands a reopened card the preview's result again, which would
-      // offer Send for mail that has gone. ChatGPT keeps the card's own state
-      // instead, so the card never asks there. {draftId, status, orderId,
-      // schedule, orderStatus, cancellable} once the draft turns out to be
-      // sent or expired.
+      // What the server says became of the host's draft (#474): MCP Apps has
+      // no widgetState, and Claude hands a reopened card the preview's result
+      // again, which would offer Send for mail that has gone. ChatGPT keeps
+      // the card's own state, but not always: with the Plugin Extensions
+      // handshake open, a reopened card was given none (#676). So the card
+      // asks in every host, and the server's answer is the truth. {draftId,
+      // status, orderId, schedule, orderStatus, cancellable} once the draft
+      // turns out to be sent or expired.
       let draftState = null;
       const draftStateAsked = new Set();
 
       function askDraftState(draftId) {
-        if (typeof host.setWidgetState === "function") return;
         if (typeof host.callTool !== "function") return;
         if (typeof draftId !== "string" || !draftId || draftStateAsked.has(draftId)) return;
         draftStateAsked.add(draftId);
@@ -1324,6 +1324,24 @@
             // now: this card may have changed them since that preview (#535).
             if (answer.status === "ready") {
               statusReadyFor = draftId;
+              // A Pay & Send checkout already started on it (#676): what this card would have kept had its state not
+              // been lost. Shown as the kept checkout, so the card offers its link rather than Pay & Send again; not
+              // for a checkout this card is following, nor over state it found on opening.
+              const started = answer.checkout;
+              if (
+                started && typeof started.orderId === "string" && started.orderId &&
+                draftId === currentDraftId && !resumed && trackedOrderId === null && !sendInProgress
+              ) {
+                keep({
+                  draftId,
+                  checkout: true,
+                  orderId: started.orderId,
+                  ...(isHttpsUrl(started.checkoutUrl) ? { checkoutUrl: started.checkoutUrl } : {}),
+                });
+                resumed = saved;
+                render();
+                return;
+              }
               // And the style it is in now, with its page (#563): this card,
               // or the chat, may have restyled it since that preview.
               // How full its pages are (#592 review round 1): the preview's own
@@ -3134,9 +3152,8 @@
           flagged && typeof currentDraftId === "string" && currentDraftId && confirmed &&
           cardIsShowingDraft() && !keptOrderShown() && !sendPageShown();
         // In ChatGPT what carries model context opens only when there is a draft to share and no other way to share it;
-        // its answer redraws the card, which shares then. Withdrawn for now (#676): the card does not say
-        // data-plugin-extensions="on-request", so the bridge offers no openPluginExtensions. With the handshake open,
-        // ChatGPT did not give a reopened card its kept state (a started checkout), so it offered Pay & Send again.
+        // its answer redraws the card, which shares then. With the handshake open, ChatGPT did not give a reopened card
+        // its kept state (#676), so the card asks the server what became of its draft in every host (askDraftState).
         if (ready && typeof host.updateModelContext !== "function" && typeof host.openPluginExtensions === "function") {
           host.openPluginExtensions();
         }

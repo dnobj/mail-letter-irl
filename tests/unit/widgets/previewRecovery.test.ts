@@ -136,6 +136,8 @@ interface MountOptions {
   previewResponse?: (name: string, args: Json) => unknown;
   /** get_purchase_status's answer from the start: a card may ask at mount. */
   purchaseStatus?: Json;
+  /** What get_draft_status answers (#676); without it, an answer the card ignores. */
+  draftStatus?: (args: Json) => Json;
   /** How many send calls reject before one succeeds. */
   failSends?: number;
   /** How many create_mail_checkout calls reject before one succeeds. */
@@ -227,6 +229,7 @@ function mount(spec: CardSpec, options: MountOptions = {}) {
           }
         };
       }
+      if (name === 'get_draft_status' && options.draftStatus) return { structuredContent: options.draftStatus(args) };
       if (name === 'get_purchase_status') return { structuredContent: purchaseStatus };
       if (name === 'get_account_balance') return { structuredContent: { lettersRemaining } };
       return { structuredContent: {} };
@@ -264,6 +267,8 @@ function mount(spec: CardSpec, options: MountOptions = {}) {
     calls,
     savedStates,
     callsTo: (name: string) => calls.filter(call => call.name === name),
+    /** The calls that act: every call but the card's question about its draft (#676). */
+    actions: () => calls.filter(call => call.name !== 'get_draft_status'),
     pendingTimers: () => timers.filter(timer => !timer.cancelled),
     /** Fire the recovery wait (the only timer a card arms before a result). */
     /** Fire the one pending timer armed with this delay. */
@@ -452,7 +457,7 @@ describe.each([LETTER, POSTCARD])('$file recovery from a lost preview call (#411
     expect(harness.pendingTimers()).toEqual([]);
     expect(harness.visible('empty-state')).toBe(false);
     expect(harness.text('id-value')).toBe('draft_host_0001');
-    expect(harness.calls).toEqual([]);
+    expect(harness.actions()).toEqual([]);
   });
 
   it('draws a host result that arrives after the wait', async () => {
@@ -1245,7 +1250,7 @@ describe.each([LETTER, POSTCARD])('$file previews a chat image picked again (#41
     answer({ downloadUrl: LINK });
     await flush();
 
-    expect(harness.calls).toEqual([]);
+    expect(harness.actions()).toEqual([]);
     expect(harness.text('id-value')).toBe('draft_host_0001');
   });
 
@@ -1475,7 +1480,7 @@ describe.each([LETTER, POSTCARD])('$file previews a chat image picked again (#41
     await flush();
 
     expect(harness.text('id-value')).toBe('draft_host_0001');
-    expect(harness.calls).toEqual([]);
+    expect(harness.actions()).toEqual([]);
     expect(harness.fileCalls.map(call => call.name)).toEqual(['selectFiles']);
   });
 
@@ -1491,7 +1496,7 @@ describe.each([LETTER, POSTCARD])('$file previews a chat image picked again (#41
     await flush();
 
     expect(harness.text('id-value')).toBe('draft_host_0001');
-    expect(harness.calls).toEqual([]);
+    expect(harness.actions()).toEqual([]);
     expect(harness.fileCalls.map(call => call.name)).toEqual(['uploadFile']);
   });
 
@@ -2503,7 +2508,7 @@ describe.each([LETTER, POSTCARD])('$file where the app takes no purchases (#474)
     expect(harness.visible('check-status-button')).toBe(false);
     expect(harness.visible('checkout-note')).toBe(true);
     expect(harness.text('checkout-note')).toBe(WEBSITE_NOTE);
-    expect(harness.calls).toEqual([]);
+    expect(harness.actions()).toEqual([]);
   });
 
   it('opens the letter packs page, then waits for the letters and offers Send', async () => {
@@ -2750,14 +2755,97 @@ describe.each([LETTER, POSTCARD])('$file when the app sends from the confirmatio
   });
 });
 
-describe.each([LETTER, POSTCARD])('$file in ChatGPT, which keeps its own state (#474)', spec => {
+describe('PostcardPreviewCard in ChatGPT, which keeps its own state (#474)', () => {
   it('never asks the server what became of its draft', async () => {
-    const harness = mount(spec, { toolOutput: spec.output('draft_host_0001') });
+    const harness = mount(POSTCARD, { toolOutput: POSTCARD.output('draft_host_0001') });
     await flush();
-    await harness.deliverHostResult(spec.output('draft_host_0002'));
+    await harness.deliverHostResult(POSTCARD.output('draft_host_0002'));
 
     expect(harness.callsTo('get_draft_status')).toEqual([]);
     expect(harness.visible('send-button')).toBe(true);
+  });
+});
+
+// ChatGPT did not give a reopened letter card its kept state with the Plugin Extensions handshake open (#676), so the
+// letter card asks the server what became of its draft there too, and the answer is the truth.
+describe('LetterPreviewCard in ChatGPT asks the server what became of its draft (#676)', () => {
+  it('asks once for each draft it shows', async () => {
+    const harness = mount(LETTER, { toolOutput: LETTER.output('draft_host_0001') });
+    await flush();
+    await harness.deliverHostResult(LETTER.output('draft_host_0002'));
+    await flush();
+
+    expect(harness.callsTo('get_draft_status').map(call => call.args.draftId)).toEqual(['draft_host_0001', 'draft_host_0002']);
+    expect(harness.visible('send-button')).toBe(true);
+  });
+
+  it('shows a letter the server says was sent as sent, not offering Send again, when its own state was lost', async () => {
+    const harness = mount(LETTER, {
+      toolOutput: LETTER.output('draft_host_0001'),
+      draftStatus: args => ({ draftId: args.draftId, status: 'sent', orderId: 'ord_sent_0009', orderStatus: 'sent' })
+    });
+    await flush();
+    await flush();
+
+    expect(harness.visible('send-button')).toBe(false);
+    expect(harness.actions()).toEqual([]);
+  });
+
+  it('shows a Pay & Send checkout the server says was started, with its link, and keeps it, when its own state was lost', async () => {
+    const harness = mount(LETTER, {
+      toolOutput: LETTER.output('draft_host_0001'),
+      draftStatus: args => ({
+        draftId: args.draftId,
+        status: 'ready',
+        checkout: { orderId: 'ord_checkout_0009', checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_kept' }
+      })
+    });
+    await flush();
+    await flush();
+
+    expect(harness.text('empty-message')).toBe('A checkout for this letter was started from this card.');
+    expect(harness.visible('send-button')).toBe(false);
+    expect(harness.visible('pay-send-button')).toBe(false);
+    expect(harness.text('id-value')).toBe('ord_checkout_0009');
+    // Kept, as the card keeps a checkout it starts itself, so a later reopening finds it either way.
+    expect(harness.savedStates.at(-1)).toMatchObject({
+      draftId: 'draft_host_0001',
+      checkout: true,
+      orderId: 'ord_checkout_0009',
+      checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_kept'
+    });
+    // No new checkout is started over it.
+    expect(harness.callsTo('create_mail_checkout')).toEqual([]);
+  });
+
+  it('keeps no link that is not https, and takes no checkout for another draft', async () => {
+    const plain = mount(LETTER, {
+      toolOutput: LETTER.output('draft_host_0001'),
+      draftStatus: args => ({ draftId: args.draftId, status: 'ready', checkout: { orderId: 'ord_checkout_0009', checkoutUrl: 'http://checkout.stripe.com/x' } })
+    });
+    await flush();
+    await flush();
+    expect(plain.savedStates.at(-1)).not.toHaveProperty('checkoutUrl');
+    expect(plain.text('empty-message')).toBe('A checkout for this letter was started from this card.');
+
+    const other = mount(LETTER, {
+      toolOutput: LETTER.output('draft_host_0001'),
+      draftStatus: () => ({ draftId: 'draft_someone_else', status: 'ready', checkout: { orderId: 'ord_checkout_0009' } })
+    });
+    await flush();
+    await flush();
+    expect(other.visible('send-button')).toBe(true);
+  });
+
+  it('takes no started checkout over state it found on opening', async () => {
+    const harness = mount(LETTER, {
+      toolOutput: LETTER.output('draft_host_0001'),
+      widgetState: { v: 1, draftId: 'draft_host_0001', sent: true, orderId: 'ord_sent_0001' },
+      draftStatus: args => ({ draftId: args.draftId, status: 'ready', checkout: { orderId: 'ord_checkout_0009' } })
+    });
+    await flush();
+    await flush();
+    expect(harness.text('id-value')).toBe('ord_sent_0001');
   });
 });
 

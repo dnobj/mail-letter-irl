@@ -231,12 +231,12 @@ describe('the selected draft in ChatGPT (#650)', () => {
     expect(card.requests('ui/initialize')).toHaveLength(1);
   });
 
-  it('as served, never opens the handshake, flagged or not, so a reopened card keeps its state (#676)', async () => {
+  it('as served, opens the handshake on request, as the server now answers for a reopened card (#676)', async () => {
     const served = fs.readFileSync(path.join(WIDGET_DIR, 'LetterPreviewCard.html'), 'utf-8');
-    expect(served).not.toMatch(/<html[^>]*data-plugin-extensions/);
+    expect(served).toMatch(/<html[^>]*data-plugin-extensions="on-request"/);
     const card = framed({ ...ON, modelContextEnabled: true }, {}, false);
     await flush();
-    expect(card.sent).toHaveLength(0);
+    expect(card.requests('ui/initialize')).toHaveLength(1);
   });
 
   it('never opens the handshake for a card the server does not flag', async () => {

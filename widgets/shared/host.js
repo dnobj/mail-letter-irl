@@ -34,9 +34,10 @@
  * MCP Apps handshake with the host. Only those two come from it; everything
  * else stays on window.openai. A host that never answers changes nothing.
  * A card that says data-plugin-extensions="on-request" opens it itself, with
- * openPluginExtensions(), when it first needs it. The letter card used this
- * (#650) and has withdrawn it (#676): with the handshake open, ChatGPT did not
- * give a reopened card its kept widget state. No served card uses it now.
+ * openPluginExtensions(), when it first needs it: the letter card (#650), only
+ * when it has a draft to share and the server flags it to. With the handshake
+ * open, ChatGPT did not give a reopened card its kept widget state, so the card
+ * asks the server what became of its draft (#676).
  */
 (function () {
   "use strict";
