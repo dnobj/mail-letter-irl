@@ -33,6 +33,10 @@
  * <html data-plugin-extensions>, and in ChatGPT the bridge then also opens the
  * MCP Apps handshake with the host. Only those two come from it; everything
  * else stays on window.openai. A host that never answers changes nothing.
+ * A card that says data-plugin-extensions="on-request" opens it itself, with
+ * openPluginExtensions(), when it first needs it (#650): the letter card, only
+ * when it has a draft to share and the server flags it to, so a card the server
+ * does not flag, or one already sent, never opens it.
  */
 (function () {
   "use strict";
@@ -129,10 +133,16 @@
     capability("getFileDownloadUrl", "getFileDownloadUrl", function (api, request) { return api.getFileDownloadUrl(request); });
     window.letterIrlHost = chatgpt;
     window.addEventListener("openai:set_globals", changed);
-    if (document.documentElement.hasAttribute("data-plugin-extensions") && window.parent && window.parent !== window) {
-      extensions = openExtensions(window.parent);
-      // The deep link (and anything else the handshake says) over window.openai's own host context.
-      chatgpt.hostContext = function () { return Object.assign({}, openai().hostContext || {}, extensions.hostContext); };
+    var asked = document.documentElement.getAttribute("data-plugin-extensions");
+    if (asked !== null && window.parent && window.parent !== window) {
+      var openOnce = function () {
+        if (extensions) return;
+        extensions = openExtensions(window.parent);
+        // The deep link (and anything else the handshake says) over window.openai's own host context.
+        chatgpt.hostContext = function () { return Object.assign({}, openai().hostContext || {}, extensions.hostContext); };
+      };
+      if (asked === "on-request") chatgpt.openPluginExtensions = openOnce;
+      else openOnce();
     }
     return;
   }

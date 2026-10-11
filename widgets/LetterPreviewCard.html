@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-plugin-extensions="on-request">
   <head>
     <meta charset="utf-8" />
     <title>LetterPreviewCard</title>
@@ -3124,7 +3124,6 @@
       const SHARE_TIMEOUT_MS = 10000;
       const RESHARE_AFTER_MS = 10000;
       function shareSelection(touched = false, usedAt = 0, immediate = false) {
-        if (typeof host.updateModelContext !== "function") return;
         const flagged = currentMeta().modelContextEnabled === true;
         const asks = typeof host.setWidgetState !== "function" && typeof host.callTool === "function";
         const confirmed = !asks || statusReadyFor === currentDraftId || retryResult?.output?.draftId === currentDraftId;
@@ -3134,6 +3133,12 @@
         const ready =
           flagged && typeof currentDraftId === "string" && currentDraftId && confirmed &&
           cardIsShowingDraft() && !keptOrderShown() && !sendPageShown();
+        // In ChatGPT what carries model context opens only when there is a draft to share and no other way to share it,
+        // so a sent or reopened card never opens it; its answer redraws the card, which shares then.
+        if (ready && typeof host.updateModelContext !== "function" && typeof host.openPluginExtensions === "function") {
+          host.openPluginExtensions();
+        }
+        if (typeof host.updateModelContext !== "function") return;
         const draftId = ready ? currentDraftId : "";
         const now = Date.now();
         // The time a share carries is the time of the use that asked for it, so a share that waited still says when.
@@ -3157,14 +3162,16 @@
         sharedDraftId = draftId;
         sharedAt = now;
         carriedAt = at;
+        // A sentence, not JSON: ChatGPT shows what a card shares to the person, in a chip in the message box (#668). The
+        // time is UTC to the second, written out, so the model can still tell which card shared last. It does not say the
+        // draft is ready: in ChatGPT the card asks no status, and the draft may have been sent from another card.
+        const stamp = new Date(at).toISOString();
         const content = draftId
-          ? [{ type: "text", text: JSON.stringify({
-              source: "Letter IRL letter card",
-              draftId,
-              sharedAt: new Date(at).toISOString(),
-              instruction:
-                "Several Letter IRL cards may each share a draft; the one with the latest sharedAt is most likely the one the person means, but ask if unsure. Check get_draft_status before editing; this card may have been sent or expired."
-            }) }]
+          ? [{ type: "text", text:
+              "Shared by a Letter IRL letter card on " + stamp.slice(0, 10) + " at " + stamp.slice(11, 19) + " UTC: the card " +
+              "shows the letter draft " + draftId + ". Several Letter IRL cards may each share a draft; the one shared " +
+              "latest is most likely the one the person means, so ask if unsure. It may have been sent or have expired " +
+              "since: a Letter IRL tool given this draftId says so." }]
           : [];
         shareChain = shareChain
           .then(() => Promise.race([
