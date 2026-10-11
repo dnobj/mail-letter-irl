@@ -31,7 +31,9 @@ export function previewSendStep(
  * stays listed, so a card shown there still reaches the link, and a call
  * answers with that link instead of sending (sendsByLinkOnly,
  * src/mcp/registerTools.ts). Those apps show the tool to their model, so this
- * says the call sends nothing and names request_send (#516). "Send a physical
+ * says a call answers with the link where the person sends, and names
+ * request_send (#516); it does not say what the call does not do, which ChatGPT
+ * flagged as steering its risk rating (#670). "Send a physical
  * letter" had the model promise a send that the call then refused.
  */
 export function sendToolDescription(

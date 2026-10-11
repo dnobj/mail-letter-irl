@@ -248,8 +248,6 @@ describe('tool text in every app', () => {
   // other annotations carry the risk. Every flag on and off, since flags change the words; riskWordsServed.test.ts
   // reads the same words from a real tools/list.
   it.each(CLIENT_PROFILE_NAMES.map(name => [name]))('%s: no description rates its own risk', name => {
-    // A client that cached the old words is told apart in the logs.
-    expect(STEERING_COPY_REV).toBeGreaterThanOrEqual(50);
     for (const [on, paidPerSend, imageGen] of SWITCH_STATES) {
       everyFlag(on, paidPerSend, imageGen);
       for (const sendRule of ['true', 'false']) {
@@ -271,14 +269,21 @@ describe('tool text in every app', () => {
     expect(new LetterIrlServer().toolNames().filter(tool => !listed.has(tool))).toEqual([]);
   });
 
+  it('bumps the steering revision, so a client that cached the old words is told apart in the logs', () => {
+    expect(STEERING_COPY_REV).toBeGreaterThanOrEqual(50);
+  });
+
   it("refuses each form of rating a tool's own risk", () => {
     for (const said of [
       'This does not send mail.', 'Nothing is sent by this tool.', 'Nothing is previewed or sent.', 'It sends nothing.',
       'It changes nothing.', "It doesn't send the letter.", 'Read-only.', 'It is safe.', 'Safe retries return it.',
       'It is harmless.', "It won't charge you.", 'It never sends mail.', 'It only reads.', 'Returns sanitized state.',
-      'It never exposes card details.', 'Letter IRL never contacts them.', 'It doesn\u2019t send the letter.',
+      'It never exposes card details.', 'It doesn\u2019t send the letter.', 'It can\u2019t send mail.',
+      "It can't send mail.", 'This tool can\u2019t send mail.', 'Preview tools do not send anything.', "Drafts don't send.",
+      'Previews never send mail.', 'Nothing will be sent.', 'Nothing gets sent.', 'Nothing has been sent.',
+      'No mail is sent.', 'It does not mail anything.',
       'It won\u2019t charge you.', 'Read only.', 'It is readonly.', 'Nothing is charged.', 'It charges nothing.',
-      'It cannot send mail.', 'Preview tools are free drafts; they do not send mail.', 'This will not charge you.', 'Drafts are not sent.', 'It isn\u2019t sent.', 'It has no side effects.', 'It\u2019s safe.'
+      'It cannot send mail.', 'Preview tools are free drafts; they do not send mail.', 'This will not charge you.', 'It has no side effects.', 'It\u2019s safe.'
     ]) {
       expect(said).toMatch(RATES_ITS_RISK);
     }
@@ -286,7 +291,9 @@ describe('tool text in every app', () => {
     for (const said of [
       'The person sends it with Send on the preview card.', 'Free until it goes to the printer: nothing is mailed.',
       'A retry returns the existing order.', 'Do not send the person to the website.', 'A link that won\u2019t open after 7 days.',
-      'Keep the link safe.', 'The mail goes to the printer as soon as it is sent.', 'Letter IRL does not make images in this app.'
+      'Keep the link safe.', 'The mail goes to the printer as soon as it is sent.', 'Letter IRL does not make images in this app.',
+      'Do not send mail to a guessed address.', 'A draft that is not sent within 30 days expires.',
+      'Letter IRL does not send the receipt; ask USPS.', 'Never send mail without the person.'
     ]) {
       expect(said).not.toMatch(RATES_ITS_RISK);
     }

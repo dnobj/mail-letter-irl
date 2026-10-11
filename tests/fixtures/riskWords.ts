@@ -1,30 +1,39 @@
 import { vi } from 'vitest';
 import type { ImageGenMode } from '../../src/config/imageGeneration.js';
 
+/** A straight or a curly apostrophe. */
+const APOSTROPHE = "['\u2019]";
+/** What says a tool or a preview is not to do something. */
+const NOT = `(does not|doesn${APOSTROPHE}t|do not|don${APOSTROPHE}t|will not|won${APOSTROPHE}t|cannot|can not|can${APOSTROPHE}t|never)`;
+/** What a sentence rating a tool's own risk is about: the tool, its previews or drafts, not Letter IRL or the model. */
+const SUBJECT = '(it|this|this tool|the tool|they|tools?|previews?|preview tools|drafts?)';
+
 /**
  * Sentences that rate a tool's own risk rather than say what it does (#543, #670). ChatGPT's approval dialog flagged
  * "This does not send mail" and "Nothing is sent by this tool" as a "Suspicious Instruction" steering its risk rating.
  * The annotations (readOnlyHint, destructiveHint, openWorldHint) carry the risk; the words say what the tool does.
+ *
+ * These are the forms ChatGPT flagged and the forms close to them (#672's review rounds): a tool or a preview said not
+ * to send, mail or charge; nothing sent, previewed or charged; read-only, safe, harmless, sanitized. It is not a
+ * grammar of every way to say so, and it lets through what a description may rightly say: an instruction to the model
+ * ("Do not send mail to a guessed address"), what Letter IRL does not do ("Letter IRL does not send the receipt"), and
+ * what an action does ("Free until it goes to the printer: nothing is mailed"). The style guide states the rule
+ * (docs/tool-description-style-guide.md).
  */
 export const RATES_ITS_RISK = new RegExp(
   [
-    'nothing is (sent|previewed|charged)',
-    '(sends|changes|charges) nothing',
-    "(does|will)(n['\u2019]t| not) (send|charge)",
-    'cannot (send|charge)',
-    "(it|they|this|that|which) (do|does|will|can)(n['\u2019]t| not) (send|charge)",
-    'not send mail',
-    "won['\u2019]t (send|charge|change)",
-    'never (sends|charges|exposes|contacts)',
-    '(is|are) not sent',
-    "(isn|aren)['\u2019]t sent",
-    'only reads',
-    'read[- ]?only',
-    'no side effects?',
-    'harmless',
-    "\\b(is|are|it['\u2019]s) safe\\b",
+    '\\bnothing (is|will be|gets|has been) (sent|previewed|charged)\\b',
+    '\\bno mail is sent\\b',
+    '\\b(sends|changes|charges) nothing\\b',
+    `\\b${SUBJECT} ${NOT} (send|sends|mail|mails|charge|charges)\\b`,
+    '\\bnever exposes\\b',
+    '\\bread[- ]?only\\b',
+    '\\bonly reads\\b',
+    '\\bno side effects?\\b',
+    '\\bharmless\\b',
+    `\\b(is|are|it${APOSTROPHE}s) safe\\b`,
     '\\bsafe(ly)? (to|retr)',
-    'sanitized'
+    '\\bsanitized\\b'
   ].join('|'),
   'i'
 );

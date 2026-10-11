@@ -655,8 +655,10 @@ describe("the pack checkout's pointer to Pay & Send (#475)", () => {
 });
 
 // The instructions as they were before the send rule (8465b1f), verbatim, less
-// the "Never refuse an image request." that #476 removed from every app. With
-// the rule off they must not change by a character.
+// the "Never refuse an image request." that #476 removed from every app, and
+// with "Preview tools make free drafts." for "Preview tools are free drafts;
+// they do not send mail.", which #670 reworded in every app. With the rule off
+// they must not change by a character.
 const PRE_470_INSTRUCTIONS = [
   "Letter IRL drafts, previews, and sends real physical letters and postcards in the U.S.",
   "Always create a preview draft before sending. Preview tools make free drafts.",

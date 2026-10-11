@@ -95,8 +95,8 @@ ChatGPT's would be false there. The app's profile (`src/auth/clientProfiles.ts`)
   rule, the four preview tools end with how the person sends: the card's Send in an app with
   `rendersCards`, `request_send`'s link elsewhere (#516). `send_letter` and `send_postcard` keep
   their words where the app keeps card-only tools from its model (ChatGPT, Claude). In any other
-  app, where a call answers with the link, they say a call sends nothing and name `request_send`
-  (#516).
+  app, where a call answers with the link, they say a call answers with the link to the page where
+  the person sends it, and name `request_send` (#516, #670).
 - **Tool results.**
   - Where the app takes no purchases, `get_started`, `get_account_balance` and `list_letter_packs`
     give the letter packs page and ask the model to pass the link on.
