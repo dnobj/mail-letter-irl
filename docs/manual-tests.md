@@ -1846,7 +1846,24 @@ print; and nothing prints a signature the person did not see.
 
 ### STATIONERY-02 — Saved stationery designs (#649)
 
-**Status:** Not run.
+**Status:** Passed on development, 2026-10-10, on 979909a with `LETTER_IRL_CUSTOM_STATIONERY_ENABLED` on (step 9
+skipped). Steps 1 to 3 ran on ChatGPT web (DEV) and steps 4 to 7 with the dev CLI, both as testlirl02:
+
+- **Step 1 passed:** Garden saved from plain words. ChatGPT showed its "Suspicious Instruction" warning on
+  `save_stationery_design`, reading its description as an attempt to steer ChatGPT's reviewer (#670).
+- **Step 2 passed:** the sprig in light grey, the handwriting face on faint rules, the date line.
+- **Step 3 passed:** Garden pressed after the six themes; Botanical, then Garden again.
+- **Step 4 passed:** TS printed in the monogram's ring; Party with initials was refused; Party's headline was drawn.
+- **Step 5 passed:** GARDEN replaced the same design; the eleventh was refused.
+- **Step 6 passed:** Party remembered, then Botanical once a theme was asked for.
+- **Step 7 passed:** a delete without confirmation was refused, then the design was deleted; the letter previewed in
+  Party kept it.
+- **Step 8 passed:** PostGrid test letter `letter_sSB1H4dsHWLueaxAWLMoFy` (order 21c2e770): the confetti clear of
+  both address blocks, the headline, the date, the serif body, and the gift card on page 2.
+- **Step 9 skipped** by the owner; ERASE-01 covers erasure.
+- **Step 10 passed:** the three tools were gone, and the Initials draft still showed TS. The flag was left off.
+- **Also found:** the website's confirmation page does not name a saved design the way it names a theme
+  (mail-letter-irl-website #60).
 
 **Preconditions:** Development, with `LETTER_IRL_STATIONERY_ENABLED` and `LETTER_IRL_CUSTOM_STATIONERY_ENABLED` on and
 `LETTER_IRL_PRINT_RENDERER=pdf` in the API. The ChatGPT (DEV) and Claude connectors with their tool lists refreshed
@@ -3387,3 +3404,11 @@ Needs the home on in development, an account with more than 4 mail items (testli
   - ChatGPT's close button and bar covered Refresh in fullscreen and in the app view;
   - the shared context showed as raw JSON in a chip in the message box;
   - the title and See all wrapped at phone width.
+
+**Recheck 2026-10-10 on DEV 979909a, ChatGPT Android (the same phone and account), passed:**
+- In fullscreen and in the deep link's app view, Refresh sat clear of ChatGPT's close button and bar.
+- The shared selection read as a sentence, not JSON: "Selected in the Letter IRL home: order 02726a1a…, a letter to
+  "<name>" (<city>, <state>), status: Did not go out. It is mail already ordered, not a draft to edit."
+- The header fitted on one line.
+- Found: the three failed letters, from December 2025, read "Dec 30" with no year. Short dates from another year now
+  say their year (widget v79).

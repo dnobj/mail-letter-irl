@@ -3,9 +3,17 @@ import { JSDOM } from 'jsdom';
 import { describe, expect, it, vi } from 'vitest';
 
 const html = readFileSync(new URL('../../../widgets/LetterHomeCard.html', import.meta.url), 'utf8');
-function open(output: unknown = { drafts: [], orders: [], recipients: [], limit: 20 }, extras = {}) {
+// `now` fixes the card's clock, so which dates say their year does not change with the year the tests run in.
+function open(output: unknown = { drafts: [], orders: [], recipients: [], limit: 20 }, extras = {}, now = '2026-10-11T12:00:00Z') {
   const host = { theme: () => 'light', toolOutput: () => output, onChange: vi.fn(), callTool: vi.fn(), ...extras };
-  const dom = new JSDOM(html, { runScripts: 'dangerously', beforeParse(window) { (window as any).letterIrlHost = host; } });
+  const dom = new JSDOM(html, { runScripts: 'dangerously', beforeParse(window) {
+    (window as any).letterIrlHost = host;
+    const RealDate = (window as any).Date;
+    (window as any).Date = class extends RealDate {
+      constructor(...args: unknown[]) { super(...(args.length ? args : [now])); }
+      static now() { return RealDate.parse(now); }
+    };
+  } });
   return { dom, host, doc: dom.window.document };
 }
 const order = (status: string, extra = {}) => ({ recipient: { name: 'Ruth', city: 'Chicago', state: 'IL' }, mailType: 'letter', status, orderId: 'order-1', ...extra });
@@ -467,6 +475,26 @@ describe('the compact home (#662)', () => {
     expect(seeAll.textContent).toBe('See all');
     expect(seeAll.getAttribute('aria-expanded')).toBe('false');
     dom.window.close();
+  });
+
+  it('gives a short date its year only when it is not this year', () => {
+    const output = {
+      drafts: [{ recipient: { name: 'Ruth', city: '', state: '' }, expiresAt: '2027-01-02', draftId: 'draft-1' }],
+      orders: [
+        order('failed', { orderId: 'old', createdAt: '2025-12-30T15:00:00Z' }),
+        order('delivered', { orderId: 'new', createdAt: '2026-10-05T15:00:00Z' }),
+        order('scheduled', { orderId: 'next', arriveBy: '2027-01-08' })
+      ],
+      recipients: [], limit: 20
+    };
+    const states = (doc: Document) => Array.from(doc.querySelectorAll('.row-main > :last-child')).map(node => node.textContent);
+    const { dom, doc } = open(output);
+    expect(states(doc)).toEqual(expect.arrayContaining(['Expires Jan 2, 2027', 'Did not go out · Dec 30, 2025', 'Delivery estimated · Oct 5', 'Scheduled, arrives by Jan 8, 2027']));
+    dom.window.close();
+    // A year on, the same dates turn: this year's say no year, and last year's say theirs.
+    const later = open(output, {}, '2027-01-02T12:00:00Z');
+    expect(states(later.doc)).toEqual(expect.arrayContaining(['Expires Jan 2', 'Delivery estimated · Oct 5, 2026', 'Scheduled, arrives by Jan 8']));
+    later.dom.window.close();
   });
 
   it('draws each item as one line whose details and actions open under it', () => {
