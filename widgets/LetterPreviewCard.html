@@ -1150,8 +1150,9 @@
       function showKeptOrder(kept) {
         const orderId = keptOrderId(kept);
         document.getElementById("card").classList.remove("loading");
-        document.getElementById("mockup-container").innerHTML =
-          '<div class="preview-loading">A reopened conversation does not show the preview again.</div>';
+        document.getElementById("mockup-container").innerHTML = kept.fromServer
+          ? '<div class="preview-loading">This letter is waiting for its payment.</div>'
+          : '<div class="preview-loading">A reopened conversation does not show the preview again.</div>';
         document.getElementById("id-label").textContent = kept.sent ? "Order" : "Purchase";
         document.getElementById("id-value").textContent = orderId || "—";
         document.getElementById("send-button").style.display = "none";
@@ -1161,7 +1162,9 @@
         document.getElementById("empty-hint").style.display = "none";
         document.getElementById("empty-message").textContent = kept.sent
           ? "This letter was sent to the printer from this card. Ask for its status in the chat."
-          : "A checkout for this letter was started from this card.";
+          : kept.fromServer
+            ? "A checkout for this letter has been started."
+            : "A checkout for this letter was started from this card.";
         document.getElementById("empty-state").style.display = "block";
         const statusPill = document.getElementById("status-pill");
         const keptSchedule = arrives.scheduleOf(kept.schedule);
@@ -1325,21 +1328,23 @@
             if (answer.status === "ready") {
               statusReadyFor = draftId;
               // A Pay & Send checkout already started on it (#676): what this card would have kept had its state not
-              // been lost, or one started elsewhere, such as the confirmation page. Shown as the kept checkout, so the
-              // card offers its link rather than Pay & Send again; not for a checkout this card is following, nor once
-              // the card has moved to another draft or is sending.
+              // been lost, or one started elsewhere, such as the confirmation page. Shown as a kept checkout, so the
+              // card offers its link rather than Pay & Send again; not for a checkout this card is starting or
+              // following, nor once the card has moved to another draft or is sending. Shown, not kept: the server
+              // says it afresh each time the card opens, so a checkout that lapses unpaid is not offered for good.
               const started = answer.checkout;
               if (
                 started && typeof started.orderId === "string" && started.orderId &&
-                draftId === currentDraftId && trackedOrderId === null && !sendInProgress
+                draftId === currentDraftId && trackedOrderId === null && !checkoutInProgress && !sendInProgress
               ) {
-                keep({
+                resumed = {
+                  v: SAVED_STATE_VERSION,
                   draftId,
                   checkout: true,
+                  fromServer: true,
                   orderId: started.orderId,
                   ...(isHttpsUrl(started.checkoutUrl) ? { checkoutUrl: started.checkoutUrl } : {}),
-                });
-                resumed = saved;
+                };
                 render();
                 return;
               }
@@ -3132,8 +3137,8 @@
 
       // The draft this card shows, told to the conversation by itself (#650), so "make it warmer" acts on it: only
       // where the host takes model context and the preview is flagged for it (the home's selection context), and only
-      // a draft known to be ready. In a host where the card asks get_draft_status (Claude, VS Code), that is after the
-      // server says "ready": a reopened card may show a preview long since sent. A draft this card made itself (a retry
+      // a draft known to be ready, which is after get_draft_status says "ready" (in every host since #676): a reopened
+      // card may show a preview long since sent. A draft this card made itself (a retry
       // preview) is ready by its making. The share is taken back (an empty update) once the draft stops being ready, and
       // it is made again, with a later time, when the person uses the card: each card is its own instance, so several
       // cards may share at once, and the time tells the model which one the person showed or touched last.
@@ -3144,7 +3149,7 @@
       const RESHARE_AFTER_MS = 10000;
       function shareSelection(touched = false, usedAt = 0, immediate = false) {
         const flagged = currentMeta().modelContextEnabled === true;
-        const asks = typeof host.setWidgetState !== "function" && typeof host.callTool === "function";
+        const asks = typeof host.callTool === "function";
         const confirmed = !asks || statusReadyFor === currentDraftId || retryResult?.output?.draftId === currentDraftId;
         // Not while a send is out or after it (sendInProgress stays set once sent), nor once a checkout is tracked, nor
         // for a reopened card's kept order, nor once the person was sent to the confirmation page. A draft the server
@@ -3184,7 +3189,7 @@
         carriedAt = at;
         // A sentence, not JSON: ChatGPT shows what a card shares to the person, in a chip in the message box (#668). The
         // time is UTC to the second, written out, so the model can still tell which card shared last. It does not say the
-        // draft is ready: in ChatGPT the card asks no status, and the draft may have been sent from another card.
+        // draft is ready: it may have been sent from another card, or on the confirmation page, since.
         const stamp = new Date(at).toISOString();
         const content = draftId
           ? [{ type: "text", text:

@@ -156,7 +156,8 @@ function mountInChatGpt(meta: Json, extra: Json = {}) {
         toolResponseMetadata: meta,
         widgetState: null,
         setWidgetState: async () => undefined,
-        callTool: async () => ({}),
+        // The card asks what became of its draft in ChatGPT too (#676): ready.
+        callTool: async (name: string, args: Json) => (name === 'get_draft_status' ? { structuredContent: { draftId: args.draftId, status: 'ready' } } : {}),
         ...extra
       };
     }
@@ -166,13 +167,24 @@ function mountInChatGpt(meta: Json, extra: Json = {}) {
 }
 
 describe('the selected draft in ChatGPT (#650)', () => {
-  it('is shared at once through window.openai, where the card keeps its own state and asks no status', async () => {
+  it('is shared through window.openai once the server says the draft is ready (#676)', async () => {
     const updates: Json[] = [];
     const document = mountInChatGpt({ ...ON, modelContextEnabled: true }, { updateModelContext: async (value: Json) => { updates.push(value); return {}; } });
     await flush();
     expect(updates).toHaveLength(1);
     expect(updates[0].content[0].text).toMatch(/^Shared by a Letter IRL letter card on \d{4}-\d{2}-\d{2} at \d{2}:\d{2}:\d{2} UTC: the card shows the letter draft draft_0001\. /);
     expect(Array.from(document.querySelectorAll('button')).some(button => /conversation/i.test(button.textContent ?? ''))).toBe(false);
+  });
+
+  it('is never shared through window.openai for a draft the server says was sent (#676)', async () => {
+    const updates: Json[] = [];
+    mountInChatGpt({ ...ON, modelContextEnabled: true }, {
+      updateModelContext: async (value: Json) => { updates.push(value); return {}; },
+      callTool: async (name: string, args: Json) =>
+        name === 'get_draft_status' ? { structuredContent: { draftId: args.draftId, status: 'sent', orderId: 'order-9' } } : {}
+    });
+    await flush();
+    expect(updates.filter(update => update.content.length > 0)).toHaveLength(0);
   });
 
   it('is not shared through window.openai without the flag', async () => {
@@ -203,7 +215,9 @@ describe('the selected draft in ChatGPT (#650)', () => {
         Object.defineProperty(window, 'parent', { value: parent, configurable: true });
         (window as any).openai = {
           theme: 'light', toolInput: ARGS, toolOutput: output(), toolResponseMetadata: meta, widgetState: null,
-          setWidgetState: async () => undefined, callTool: async () => ({}), ...extra
+          setWidgetState: async () => undefined,
+          callTool: async (name: string, args: Json) => (name === 'get_draft_status' ? { structuredContent: { draftId: args.draftId, status: 'ready' } } : {}),
+          ...extra
         };
       }
     });

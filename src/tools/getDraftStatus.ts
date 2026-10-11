@@ -72,7 +72,8 @@ export interface GetDraftStatusOutput extends LetterTravel {
   cancellable?: boolean;
   /**
    * Ready (#676): the Pay & Send order active on the draft, so a card that lost its own state shows the checkout it
-   * started rather than offering Pay & Send again. The link only when it is an https one.
+   * started rather than offering Pay & Send again. The link only when it is an https one; an unpaid checkout only
+   * with one.
    */
   checkout?: { orderId: string; checkoutUrl?: string };
   /** Ready: a letter of more than one page (#586), the pages it is laid out on now. */
@@ -106,6 +107,9 @@ function checkoutNow(draft: DraftState): Pick<GetDraftStatusOutput, 'checkout'> 
   } catch {
     link = undefined;
   }
+  // An unpaid checkout with no link to pay at (its Stripe session was never made, or its link was lost) is not
+  // offered: the card's Pay & Send then reaches createJitCheckout, which repairs or reuses it.
+  if (active.status === 'checkout_pending' && !link) return {};
   return { checkout: { orderId: active.order_id, ...(link ? { checkoutUrl: link } : {}) } };
 }
 
@@ -299,6 +303,8 @@ export const getDraftStatusTool: McpToolDefinition<GetDraftStatusInput, GetDraft
   meta: {
     'openai/toolInvocation/invoking': 'Checking the preview...',
     'openai/toolInvocation/invoked': 'Checked',
+    // The letter card asks it in ChatGPT too (#676), through window.openai.callTool, which needs this.
+    'openai/widgetAccessible': true,
     readOnlyHint: true
   },
   handler

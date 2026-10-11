@@ -2791,7 +2791,7 @@ describe('LetterPreviewCard in ChatGPT asks the server what became of its draft 
     expect(harness.actions()).toEqual([]);
   });
 
-  it('shows a Pay & Send checkout the server says was started, with its link, and keeps it, when its own state was lost', async () => {
+  it('shows a Pay & Send checkout the server says was started, with its link, without keeping it, when its own state was lost', async () => {
     const harness = mount(LETTER, {
       toolOutput: LETTER.output('draft_host_0001'),
       draftStatus: args => ({
@@ -2803,17 +2803,16 @@ describe('LetterPreviewCard in ChatGPT asks the server what became of its draft 
     await flush();
     await flush();
 
-    expect(harness.text('empty-message')).toBe('A checkout for this letter was started from this card.');
+    expect(harness.text('empty-message')).toBe('A checkout for this letter has been started.');
     expect(harness.visible('send-button')).toBe(false);
     expect(harness.visible('pay-send-button')).toBe(false);
     expect(harness.text('id-value')).toBe('ord_checkout_0009');
-    // Kept, as the card keeps a checkout it starts itself, so a later reopening finds it either way.
-    expect(harness.savedStates.at(-1)).toMatchObject({
-      draftId: 'draft_host_0001',
-      checkout: true,
-      orderId: 'ord_checkout_0009',
-      checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_kept'
-    });
+    // Its link, to pay at.
+    const link = harness.document.getElementById('checkout-link') as HTMLAnchorElement;
+    expect(link.href).toBe('https://checkout.stripe.com/c/pay/cs_test_kept');
+    expect(harness.visible('checkout-link')).toBe(true);
+    // Not kept: the server says it afresh each time the card opens, so one that lapses is not offered for good.
+    expect(harness.savedStates.some(state => (state as { checkout?: boolean }).checkout)).toBe(false);
     // No new checkout is started over it.
     expect(harness.callsTo('create_mail_checkout')).toEqual([]);
   });
@@ -2825,8 +2824,8 @@ describe('LetterPreviewCard in ChatGPT asks the server what became of its draft 
     });
     await flush();
     await flush();
-    expect(plain.savedStates.at(-1)).not.toHaveProperty('checkoutUrl');
-    expect(plain.text('empty-message')).toBe('A checkout for this letter was started from this card.');
+    expect(plain.visible('checkout-link')).toBe(false);
+    expect(plain.text('empty-message')).toBe('A checkout for this letter has been started.');
 
     const other = mount(LETTER, {
       toolOutput: LETTER.output('draft_host_0001'),
@@ -2845,8 +2844,31 @@ describe('LetterPreviewCard in ChatGPT asks the server what became of its draft 
     });
     await flush();
     await flush();
-    expect(harness.text('empty-message')).toBe('A checkout for this letter was started from this card.');
+    expect(harness.text('empty-message')).toBe('A checkout for this letter has been started.');
     expect(harness.text('id-value')).toBe('ord_checkout_0009');
+  });
+
+  it('takes no checkout while the card is starting its own (#676 review round 1)', async () => {
+    let answer: (() => void) | null = null;
+    const answered = new Promise<void>(resolve => (answer = resolve));
+    const harness = mount(LETTER, {
+      toolOutput: LETTER.output('draft_host_0001', eligibility(false)),
+      draftStatus: async args => {
+        await answered;
+        return { draftId: args.draftId, status: 'ready', checkout: { orderId: 'ord_checkout_0001', checkoutUrl: 'https://checkout.stripe.com/c/pay/x' } };
+      }
+    });
+    await flush();
+    // Pay & Send is pressed, and its order is made, while the first answer is still out; the answer names that order.
+    harness.holdCalls();
+    await harness.click('pay-send-button');
+    answer!();
+    await flush();
+    expect(harness.text('empty-message')).not.toBe('A checkout for this letter has been started.');
+    await harness.releaseCalls();
+    await flush();
+    expect(harness.callsTo('create_mail_checkout')).toHaveLength(1);
+    expect(harness.text('id-value')).toBe('ord_checkout_0001');
   });
 
   it('takes no checkout without an order id', async () => {

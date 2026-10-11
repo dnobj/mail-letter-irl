@@ -72,8 +72,12 @@ describe("get_draft_status (#474)", () => {
     vi.mocked(getDraftState).mockResolvedValue(state({ active_checkout: { order_id: ORDER, status: "checkout_pending", checkout_url: "https://checkout.stripe.com/c/pay/cs_test_1" } }) as any);
     await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual({ ...READY, checkout: { orderId: ORDER, checkoutUrl: "https://checkout.stripe.com/c/pay/cs_test_1" } });
     for (const checkout_url of [null, "http://checkout.stripe.com/c/pay/cs_test_1", "javascript:alert(1)", "not a url"]) {
+      // Paid, or being sent or refunded: named, with no link.
       vi.mocked(getDraftState).mockResolvedValue(state({ active_checkout: { order_id: ORDER, status: "paid", checkout_url } }) as any);
       await expect(ask({ draftId: DRAFT_ID }), String(checkout_url)).resolves.toEqual({ ...READY, checkout: { orderId: ORDER } });
+      // Unpaid with no link to pay at: not named, so the card's Pay & Send repairs or reuses it (review round 1).
+      vi.mocked(getDraftState).mockResolvedValue(state({ active_checkout: { order_id: ORDER, status: "checkout_pending", checkout_url } }) as any);
+      await expect(ask({ draftId: DRAFT_ID }), String(checkout_url)).resolves.toEqual(READY);
     }
     // None active, or one with no order id: nothing said.
     for (const active_checkout of [null, { order_id: "", status: "paid", checkout_url: null }]) {
