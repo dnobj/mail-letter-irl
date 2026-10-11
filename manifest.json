@@ -2893,6 +2893,21 @@
             "type": "boolean",
             "description": "A sent draft's order: whether it can still be cancelled free"
           },
+          "checkout": {
+            "type": "object",
+            "properties": {
+              "orderId": {
+                "type": "string"
+              },
+              "checkoutUrl": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "orderId"
+            ],
+            "description": "A ready draft's Pay & Send order now active: its order id, and its checkout link"
+          },
           "pages": {
             "type": "integer",
             "minimum": 2,

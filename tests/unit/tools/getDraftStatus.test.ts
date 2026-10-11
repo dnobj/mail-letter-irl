@@ -67,6 +67,24 @@ describe("get_draft_status (#474)", () => {
     expect(getDraftState).toHaveBeenCalledWith(DRAFT_ID);
   });
 
+  it("names the Pay & Send order active on a ready draft, with its link only when it is https (#676)", async () => {
+    const ORDER = "5b0f3a52-8b1f-4d7e-9f4a-0c9a6f2e7d11";
+    vi.mocked(getDraftState).mockResolvedValue(state({ active_checkout: { order_id: ORDER, status: "checkout_pending", checkout_url: "https://checkout.stripe.com/c/pay/cs_test_1" } }) as any);
+    await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual({ ...READY, checkout: { orderId: ORDER, checkoutUrl: "https://checkout.stripe.com/c/pay/cs_test_1" } });
+    for (const checkout_url of [null, "http://checkout.stripe.com/c/pay/cs_test_1", "javascript:alert(1)", "not a url"]) {
+      vi.mocked(getDraftState).mockResolvedValue(state({ active_checkout: { order_id: ORDER, status: "paid", checkout_url } }) as any);
+      await expect(ask({ draftId: DRAFT_ID }), String(checkout_url)).resolves.toEqual({ ...READY, checkout: { orderId: ORDER } });
+    }
+    // None active, or one with no order id: nothing said.
+    for (const active_checkout of [null, { order_id: "", status: "paid", checkout_url: null }]) {
+      vi.mocked(getDraftState).mockResolvedValue(state({ active_checkout }) as any);
+      await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual(READY);
+    }
+    // A sent draft says where its letter stands, not a checkout.
+    vi.mocked(getDraftState).mockResolvedValue(state({ status: "consumed", consumed_letter_id: ORDER, active_checkout: { order_id: ORDER, status: "fulfillment_pending", checkout_url: null } }) as any);
+    expect(await ask({ draftId: DRAFT_ID })).not.toHaveProperty("checkout");
+  });
+
   it("names a ready letter's pages when it has more than one, as set_stationery may have changed them (#586)", async () => {
     vi.mocked(getDraftState).mockResolvedValue(state({ mail_type: "letter", pages: 2 }) as any);
     await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual({ ...READY, pages: 2 });

@@ -398,6 +398,11 @@ export interface DraftState
   letter_mail_on: string | null;
   /** Whether the draft holds a signature (#608): its copy is never read here. */
   signed: boolean;
+  /**
+   * The Pay & Send order now active on the draft (#676), as the send's own check reads one (mailSendService): an
+   * unexpired checkout, or one paid and being sent or refunded. The newest, with its checkout link; null for none.
+   */
+  active_checkout: { order_id: string; status: string; checkout_url: string | null } | null;
 }
 
 export async function getDraftState(draftId: string): Promise<DraftState | null> {
@@ -412,7 +417,17 @@ export async function getDraftState(draftId: string): Promise<DraftState | null>
             CASE WHEN d.status = 'pending' AND d.renderer_version IS NOT NULL
                  THEN d.preview_html END AS preview_html,
             l.status AS letter_status, l.funding_type AS letter_funding_type,
-            l.arrive_by AS letter_arrive_by, l.mail_on AS letter_mail_on
+            l.arrive_by AS letter_arrive_by, l.mail_on AS letter_mail_on,
+            -- The Pay & Send order active on it (#676), the owner's only.
+            (SELECT json_build_object('order_id', o.order_id, 'status', o.status, 'checkout_url', o.checkout_url)
+               FROM orders o
+              WHERE o.draft_id = d.draft_id
+                AND o.user_id = d.user_id
+                AND o.order_type = 'jit_mail'
+                AND o.status IN ('checkout_pending', 'paid', 'fulfillment_pending', 'refund_pending')
+                AND (o.status <> 'checkout_pending' OR o.checkout_expires_at IS NULL OR o.checkout_expires_at > NOW())
+              ORDER BY o.created_at DESC
+              LIMIT 1) AS active_checkout
        FROM letter_drafts d
        LEFT JOIN letters l ON l.letter_id = d.consumed_letter_id AND l.user_id = d.user_id
       WHERE d.draft_id = $1`,

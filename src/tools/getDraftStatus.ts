@@ -70,6 +70,11 @@ export interface GetDraftStatusOutput extends LetterTravel {
   previewHtml?: string;
   /** Sent and scheduled: whether it can still be cancelled free (not Pay & Send). */
   cancellable?: boolean;
+  /**
+   * Ready (#676): the Pay & Send order active on the draft, so a card that lost its own state shows the checkout it
+   * started rather than offering Pay & Send again. The link only when it is an https one.
+   */
+  checkout?: { orderId: string; checkoutUrl?: string };
   /** Ready: a letter of more than one page (#586), the pages it is laid out on now. */
   pages?: number;
   /** Ready, while room to write or certified mail is offered (#586, #625): what it costs now, as a restyle or a change of service may have changed it. */
@@ -89,6 +94,19 @@ export interface GetDraftStatusOutput extends LetterTravel {
   bodyText?: string;
   signOff?: string;
   wordsVersion?: string;
+}
+
+/** The Pay & Send order active on a ready draft (#676), with its link when that is an https one. */
+function checkoutNow(draft: DraftState): Pick<GetDraftStatusOutput, 'checkout'> {
+  const active = draft.active_checkout;
+  if (!active || typeof active.order_id !== 'string' || !active.order_id) return {};
+  let link: string | undefined;
+  try {
+    link = active.checkout_url && new URL(active.checkout_url).protocol === 'https:' ? active.checkout_url : undefined;
+  } catch {
+    link = undefined;
+  }
+  return { checkout: { orderId: active.order_id, ...(link ? { checkoutUrl: link } : {}) } };
 }
 
 /** The draft's dates, or none: a status answer is never refused over dates it cannot read. */
@@ -155,7 +173,8 @@ async function handler(
     ...termsNow(draft, draftId, context),
     ...serviceNow(draft),
     ...wordsNow(draft),
-    ...postcardStyleNow(draft, draftId, context)
+    ...postcardStyleNow(draft, draftId, context),
+    ...checkoutNow(draft)
   };
 }
 
