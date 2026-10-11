@@ -2895,6 +2895,25 @@ describe('LetterPreviewCard in ChatGPT asks the server what became of its draft 
     }
   });
 
+  it('takes away the website pay buttons too, where the app takes no purchases', async () => {
+    let answer: (() => void) | null = null;
+    const answered = new Promise<void>(resolve => (answer = resolve));
+    const harness = mount(LETTER, {
+      toolOutput: LETTER.output('draft_host_0001', noPurchaseEligibility()),
+      draftStatus: async args => {
+        await answered;
+        return { draftId: args.draftId, status: 'ready', checkout: { orderId: 'ord_checkout_0009', checkoutUrl: 'https://checkout.stripe.com/c/pay/x' } };
+      }
+    });
+    await flush();
+    expect(harness.visible('website-packs-button')).toBe(true);
+    answer!();
+    await flush();
+    await flush();
+    expect(harness.visible('website-packs-button')).toBe(false);
+    expect(harness.visible('pay-page-button')).toBe(false);
+  });
+
   it('says a payment was made for a paid order the server names, not that one is awaited', async () => {
     const harness = mount(LETTER, {
       toolOutput: LETTER.output('draft_host_0001'),
