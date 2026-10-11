@@ -96,6 +96,10 @@ Remaining:
 - [ ] **Developer Identity.** The portal checks the verified developer, Objective Works, against the
       name, website, support, privacy and terms pages. Website #45 names Objective Works as the
       operator on the privacy, terms and support pages and in the footer, for the owner's sign-off.
+- [ ] **App instructions.** Paste the current "Tool-Use Instructions" block from
+      [app-instructions.md](../app-instructions.md) into the portal's app-instructions field. Since
+      #670 (2026-10-11) it no longer calls tools "read-only": ChatGPT flagged that kind of sentence as a
+      "Suspicious Instruction", and a copy pasted before keeps the old words until it is replaced.
 - [ ] Confirm app description and short metadata match `docs/chatgpt-app-submission.md`.
 - [ ] Confirm localization fields, if required by the submission portal.
 

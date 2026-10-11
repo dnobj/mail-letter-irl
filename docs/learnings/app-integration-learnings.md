@@ -104,7 +104,10 @@ ChatGPT generates the permission prompt text (the dialog asking the user to appr
 
 **Solution:**
 - Start descriptions with action-accurate verbs: "PREVIEW a letter..." instead of "Create a letter..."
-- Explicitly state side effects (or lack thereof): "This does NOT send anything."
+- ~~Explicitly state side effects (or lack thereof): "This does NOT send anything."~~ **Superseded (#543, #670,
+  2026-10-11):** ChatGPT's approval dialog flags a description that says what the tool does not do as a "Suspicious
+  Instruction" steering its risk rating. Say what the tool does and where the person sends; the annotations carry the
+  risk. See [the style guide](../tool-description-style-guide.md).
 - Clarify what the tool actually does: "Creates a DRAFT for the user to review."
 
 **Example (before):**
@@ -117,7 +120,7 @@ Permission prompt showed: "Send Letter?" ❌
 ```
 "PREVIEW a letter with an IMAGE enclosed after the signature. This does NOT send anything."
 ```
-Permission prompt should show: "Create Preview?" ✓
+Permission prompt should show: "Create Preview?" ✓ (Its second sentence is the kind #670 removed; see above.)
 
 **Key Insight:**
 The `readOnlyHint: true` metadata tells ChatGPT the tool doesn't mutate state, but it doesn't affect the permission prompt text. The prompt text is derived from the description's natural language, so word choice matters.

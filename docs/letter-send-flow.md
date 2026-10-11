@@ -89,7 +89,7 @@ server enforces its own side by the calling app's profile
   `honorsCardOnlyTools`), `send_letter`'s and `send_postcard`'s own
   descriptions say a call answers with the link to the page where the person
   sends it, and name `request_send`. ChatGPT and Claude keep these tools from
-  the model, and their text is unchanged (#516, steering r20). No description
+  the model, and they keep their own words there (#516, steering r20). No description
   says what a tool does not do to the person's mail, money or data, or how
   risky it is: ChatGPT flagged that as steering its risk
   rating (#543, #670, steering r50);
