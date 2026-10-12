@@ -942,22 +942,10 @@ async function prepareJitOrder(
       });
     }
     if (shown === 'missing') writeDiagnostic('info', 'checkout.content_version_missing', {});
-    // Arrive-by (#535): a mail date already past is refused before the charge.
-    // After it, fulfilment mails as soon as it can (mailSendService). The send's
-    // own reader, so dates it could not read fail here, before the charge.
+    // Arrive-by (#535): the dates, read by the send's own reader, so dates it
+    // could not read fail here, before the charge. Checked below, once the
+    // draft's order is known.
     const schedule = draftScheduleOf(draft);
-    if (schedule && schedule.mailOn < earliestMailOn(new Date())) {
-      throw Object.assign(new Error('Draft has missed its mail date'), { code: 'SCHEDULE_PASSED' });
-    }
-    // And a full one (#700), read without the send's lock: after the charge
-    // the fulfilment mails it whatever the count, so this is the refusal that
-    // keeps a paid letter off a full date.
-    if (schedule) {
-      const full = await fullMailDate(client, schedule, new Date());
-      if (full) {
-        throw Object.assign(new Error('Draft mail date is full'), { code: 'SCHEDULE_FULL', openArrivals: full.openArrivals });
-      }
-    }
 
     // ONE derivation for the whole transaction: the reprice branch and the
     // insert below must price against the SAME row or they silently diverge
@@ -990,6 +978,28 @@ async function prepareJitOrder(
       [params.draftId, ACTIVE_JIT_STATUSES]
     );
     const existing = active.rows[0];
+    // A mail date already past (#535), or full (#700), is refused before the
+    // charge: after it, fulfilment mails as soon as it can, and over the cap.
+    // Not for an order already paid or further on, which is returned below as
+    // it always was: refusing it would tell someone charged that nothing was.
+    // The count is read without the send's lock; this is the refusal that
+    // keeps a paid letter off a full date.
+    if (schedule && (!existing || existing.status === 'checkout_pending')) {
+      if (schedule.mailOn < earliestMailOn(new Date())) {
+        throw Object.assign(new Error('Draft has missed its mail date'), {
+          code: 'SCHEDULE_PASSED',
+          diagnosticClass: 'SCHEDULE_PASSED'
+        });
+      }
+      const full = await fullMailDate(client, schedule, new Date());
+      if (full) {
+        throw Object.assign(new Error('Draft mail date is full'), {
+          code: 'SCHEDULE_FULL',
+          diagnosticClass: 'SCHEDULE_FULL',
+          openArrivals: full.openArrivals
+        });
+      }
+    }
     if (existing) {
       if (
         existing.status === 'checkout_pending' &&
@@ -3688,10 +3698,10 @@ export function missedScheduleSentence(
 ): string | undefined {
   const by = describeDate(missed.arriveBy, now);
   if (status === 'processing') {
-    return `It was paid for after the day it was to go to the printer to arrive by ${by}, so it goes to the printer as soon as it can instead, and may arrive after that date.`;
+    return `Its payment was confirmed too late for it to go to the printer in time to arrive by ${by}, so it goes to the printer as soon as it can instead, and may arrive after that date.`;
   }
   if (status === 'submitted') {
-    return `It was paid for after the day it was to go to the printer to arrive by ${by}, so it went to the printer as soon as it could instead, and may arrive after that date.`;
+    return `Its payment was confirmed too late for it to go to the printer in time to arrive by ${by}, so it went to the printer as soon as it could instead, and may arrive after that date.`;
   }
   return undefined;
 }

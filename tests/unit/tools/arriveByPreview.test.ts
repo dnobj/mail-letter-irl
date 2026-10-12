@@ -284,7 +284,7 @@ describe('a full mail date (#700)', () => {
     expect(error.message).toBe(
       'Mail to arrive by Fri, Oct 16 (2026-10-16) is fully booked. ' +
         'The nearest arrival dates with room are Thu, Oct 15 (2026-10-15) and Mon, Oct 19 (2026-10-19). ' +
-        'Choose one of those, or leave arriveBy out to mail as soon as possible.'
+        'Choose one of those, or no date to mail as soon as possible.'
     );
     expect(error).toMatchObject({ diagnosticClass: 'validation_error' });
     // Its own schedule, as the date check chose it, at the context's clock.
@@ -301,11 +301,11 @@ describe('a full mail date (#700)', () => {
     expect(createPostcardDraft).not.toHaveBeenCalled();
   });
 
-  it('says to leave the date out when no other date has room', async () => {
+  it('says to choose no date when no other date has room', async () => {
     vi.mocked(fullMailDate).mockResolvedValueOnce({ mailOn: '2026-10-06', openArrivals: [] });
     await expect(letter('text_only', { arriveBy: '2026-10-16' })).rejects.toThrow(
       'Mail to arrive by Fri, Oct 16 (2026-10-16) is fully booked. No other arrival date on offer has room right now. ' +
-        'Leave arriveBy out to mail as soon as possible.'
+        'Choose no date to mail as soon as possible.'
     );
   });
 

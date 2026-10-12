@@ -1030,6 +1030,33 @@ describePostgres('arrive-by (migration 040, #535)', () => {
       expect(queued.rows[0].n).toBe(1);
     }, 60_000);
 
+    it("waits for its date's lock: a send holds still while another transaction holds it, and goes once that commits", async () => {
+      const base = ownDate();
+      // Two weeks later again, so neither case above counts here.
+      const arriveBy = schedule.addCalendarDays(base.arriveBy, 14);
+      const dates = { arriveBy, mailOn: schedule.mailOnFor(arriveBy, 7) };
+      process.env.LETTER_IRL_SCHEDULE_DAILY_CAP = '5';
+      const userId = await seedUser();
+      const draftId = await seedDraft(userId, dates);
+
+      const holder = await pool.connect();
+      try {
+        await holder.query('BEGIN');
+        await holder.query("SELECT pg_advisory_xact_lock(hashtext('letter_irl.mail_on'), hashtext($1))", [dates.mailOn]);
+        let settled = false;
+        const sending = mailSend.createMailOrderFromDraft({ draftId, userId, mailType: 'letter' }).finally(() => {
+          settled = true;
+        });
+        await new Promise(resolve => setTimeout(resolve, 750));
+        expect(settled).toBe(false);
+        await holder.query('COMMIT');
+        await expect(sending).resolves.toMatchObject({ alreadyConsumed: false });
+      } finally {
+        await holder.query('ROLLBACK').catch(() => undefined);
+        holder.release();
+      }
+    }, 60_000);
+
     it('records a Pay & Send letter whose mail date passed before it was paid, and get_purchase_status says so', async () => {
       process.env.JIT_PURCHASE_ENABLED = 'true';
       // The fulfilment reads no balance: the order paid for it.
@@ -1049,7 +1076,7 @@ describePostgres('arrive-by (migration 040, #535)', () => {
       const letter = (await pool.query('SELECT l.arrive_by, l.mail_on FROM letters l JOIN letter_drafts d ON d.consumed_letter_id = l.letter_id WHERE d.draft_id = $1', [draftId])).rows[0];
       expect([letter.arrive_by, letter.mail_on]).toEqual([null, null]);
       const status = await commerce.getPurchaseStatus(userId, orderId);
-      expect(status.message).toContain('It was paid for after the day it was to go to the printer to arrive by Mon, Jan 13, 2020');
+      expect(status.message).toContain('Its payment was confirmed too late for it to go to the printer in time to arrive by Mon, Jan 13, 2020');
     }, 60_000);
   });
 });

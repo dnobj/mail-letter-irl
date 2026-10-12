@@ -56,8 +56,8 @@ export function scheduleHorizonDays(env: NodeJS.ProcessEnv = process.env): numbe
 }
 
 /**
- * How many letters may be held to go to the printer on one day (#700), across
- * every account. The outbox sends a mail date's letters in the hourly runs
+ * How many letters may wait at once to go to the printer on one day (#700),
+ * across every account. The outbox sends a mail date's letters in the hourly runs
  * from 09:00 New York time, and a date with more than it can send that day
  * would miss its arrival dates; a full date is refused at the preview,
  * set_arrival_date and the send, naming the nearest dates with room.

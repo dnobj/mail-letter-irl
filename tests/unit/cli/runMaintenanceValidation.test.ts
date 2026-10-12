@@ -736,15 +736,15 @@ describe('the outbox in batches, within a time budget (#700)', () => {
   it('claims batches while each comes back full, and stops at the first that comes back short', async () => {
     services.processDueLetterJobs
       .mockResolvedValueOnce(batch(3))
-      .mockResolvedValueOnce(batch(3, { completed: 1, retryScheduled: 1, failed: 1 }))
+      .mockResolvedValueOnce(batch(3))
       .mockResolvedValueOnce(batch(2));
 
     await expect(dispatchDueMail(3, 60_000, () => 1_000)).resolves.toEqual({
       batches: 3,
       processed: 8,
-      completed: 6,
-      retryScheduled: 1,
-      failed: 1
+      completed: 8,
+      retryScheduled: 0,
+      failed: 0
     });
     // Each batch of the limit, told when the budget ends.
     expect(services.processDueLetterJobs.mock.calls).toEqual([
@@ -765,6 +765,27 @@ describe('the outbox in batches, within a time budget (#700)', () => {
 
     expect(summary).toMatchObject({ batches: 3, processed: 9 });
     expect(services.processDueLetterJobs).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([
+    ['a failure', { completed: 2, failed: 1, retryScheduled: 0 }],
+    ['a retry', { completed: 2, failed: 0, retryScheduled: 1 }]
+  ])('starts no batch after one with %s, as a single batch a run always stopped', async (_label, trouble) => {
+    services.processDueLetterJobs
+      .mockResolvedValueOnce(batch(3))
+      .mockResolvedValueOnce(batch(3, trouble))
+      .mockResolvedValueOnce(batch(3));
+
+    const summary = await dispatchDueMail(3, 60_000, () => 0);
+
+    expect(summary).toMatchObject({ batches: 2, processed: 6, completed: 5, failed: trouble.failed, retryScheduled: trouble.retryScheduled });
+    expect(services.processDueLetterJobs).toHaveBeenCalledTimes(2);
+  });
+
+  it('carries on after a batch whose only others were left for the operator', async () => {
+    // Put back for a person (#696): neither completed nor failed nor retried.
+    services.processDueLetterJobs.mockResolvedValueOnce(batch(3, { completed: 2 })).mockResolvedValueOnce(batch(0));
+    await expect(dispatchDueMail(3, 60_000, () => 0)).resolves.toMatchObject({ batches: 2 });
   });
 
   it('stops at a paused outbox, saying how much is waiting', async () => {

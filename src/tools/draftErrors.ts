@@ -165,7 +165,7 @@ export function friendlyDraftError(
     return new Error(
       `Mail to arrive by this ${noun}'s date is now fully booked, so nothing was sent. ` +
         `${openArrivalsSentence(openArrivalsOf(error), new Date(), true)} ` +
-        'Set another date with set_arrival_date, or clear it to send as soon as possible, then send it again.'
+        'Choose another arrival date for it, or none to send it as soon as possible, then send it again.'
     );
   }
   // #579. Upstream interpolates the draft id; this keeps the code, so the

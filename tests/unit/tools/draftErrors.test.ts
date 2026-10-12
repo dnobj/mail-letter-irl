@@ -141,7 +141,7 @@ describe('mail-type wording', () => {
     });
     const friendly = friendlyDraftError(upstream, 'd-1', 'postcard').message;
     expect(friendly).toMatch(
-      /^Mail to arrive by this postcard's date is now fully booked, so nothing was sent\. The nearest arrival dates with room are \w{3}, Oct 15(, 2026)? \(2026-10-15\) and \w{3}, Oct 19(, 2026)? \(2026-10-19\)\. Set another date with set_arrival_date, or clear it to send as soon as possible, then send it again\.$/
+      /^Mail to arrive by this postcard's date is now fully booked, so nothing was sent\. The nearest arrival dates with room are \w{3}, Oct 15(, 2026)? \(2026-10-15\) and \w{3}, Oct 19(, 2026)? \(2026-10-19\)\. Choose another arrival date for it, or none to send it as soon as possible, then send it again\.$/
     );
     expect(friendly).not.toContain('d-1');
     expect(friendlyDraftError(Object.assign(new Error('x'), { code: 'SCHEDULE_FULL' }), 'd-1', 'letter').message).toContain(

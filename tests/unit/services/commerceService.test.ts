@@ -4289,6 +4289,38 @@ describe('commerceService', () => {
         held = 1;
         await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).resolves.toMatchObject({ status: 'checkout_pending' });
       });
+
+      it.each(['paid', 'fulfillment_pending'])(
+        'returns an order already %s as it always did, though its date has since filled or passed (review round 1)',
+        async status => {
+          activeRows = [currentOrder({ status, stripe_checkout_session_id: 'cs-paid', checkout_url: 'https://checkout.stripe.test/cs-paid' })];
+          for (const dates of [{}, { arrive_by: '2026-10-12', mail_on: '2026-09-30' }]) {
+            draftRow = { ...draftRow, ...dates };
+            await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).resolves.toMatchObject({ reused: true });
+          }
+          expect(trail.some(sql => sql.includes('AS held FROM letters'))).toBe(false);
+          expect(inserted()).toBe(false);
+        }
+      );
+
+      it('refuses a full date for a draft whose checkout is still open, which nothing has paid', async () => {
+        activeRows = [currentOrder({ stripe_checkout_session_id: 'cs-open', checkout_url: 'https://checkout.stripe.test/cs-open' })];
+        await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).rejects.toMatchObject({
+          code: 'SCHEDULE_FULL',
+          diagnosticClass: 'SCHEDULE_FULL'
+        });
+        // After the look for the draft's order.
+        expect(position('AS held FROM letters')).toBeGreaterThan(position('status = ANY($2::varchar[])'));
+      });
+
+      it('refuses a passed date, classed, for a draft whose checkout is still open', async () => {
+        activeRows = [currentOrder({ stripe_checkout_session_id: 'cs-open', checkout_url: 'https://checkout.stripe.test/cs-open' })];
+        draftRow = { ...draftRow, arrive_by: '2026-10-12', mail_on: '2026-09-30' };
+        await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).rejects.toMatchObject({
+          code: 'SCHEDULE_PASSED',
+          diagnosticClass: 'SCHEDULE_PASSED'
+        });
+      });
     });
 
     describe('the content version the person was shown (#695)', () => {

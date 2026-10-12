@@ -13,8 +13,14 @@ import type { ToolContext } from "../../../src/contracts/types.js";
 vi.mock("../../../src/services/draftService.js", () => ({
   getDraft: vi.fn()
 }));
+// Room on the mail date (#700): every date has room unless a test says not.
+vi.mock("../../../src/services/mailDateCapacity.js", async importOriginal => ({
+  ...(await importOriginal<typeof import("../../../src/services/mailDateCapacity.js")>()),
+  fullMailDate: vi.fn(async () => null)
+}));
 
 import { getDraft } from "../../../src/services/draftService.js";
+import { fullMailDate } from "../../../src/services/mailDateCapacity.js";
 import {
   requestSendTool,
   SendConfirmationRefusedError
@@ -55,6 +61,7 @@ async function refusal(input: Record<string, unknown>, ctx = context()) {
 describe("request_send", () => {
   beforeEach(() => {
     vi.mocked(getDraft).mockReset();
+    vi.mocked(fullMailDate).mockClear();
     vi.stubEnv("LETTER_IRL_WEBSITE_BASE_URL", "https://site.example");
   });
   afterEach(() => vi.unstubAllEnvs());
@@ -99,6 +106,28 @@ describe("request_send", () => {
       const result = await requestSendTool.handler({ draftId: DRAFT_ID }, context());
       expect(result, JSON.stringify(dates)).not.toHaveProperty("schedule");
     }
+  });
+
+  it("refuses a preview whose mail date is full, naming the nearest dates with room, rather than a link the page would refuse (#700)", async () => {
+    vi.mocked(getDraft).mockResolvedValue(draft({ arrive_by: "2026-10-16", mail_on: "2026-10-06", mail_type: "postcard" }) as any);
+    vi.mocked(fullMailDate).mockResolvedValueOnce({ mailOn: "2026-10-06", openArrivals: ["2026-10-15"] });
+
+    const full = await refusal({ draftId: DRAFT_ID });
+
+    expect(full).toBeInstanceOf(SendConfirmationRefusedError);
+    expect(full.code).toBe("SCHEDULE_FULL");
+    expect(full.diagnosticClass).toBe("SCHEDULE_FULL");
+    expect(full.message).toBe(
+      "Mail to arrive by this postcard's date is now fully booked. The nearest arrival date with room is Thu, Oct 15 (2026-10-15). " +
+        "Choose another arrival date for it, or none to send it as soon as possible, then ask again."
+    );
+    expect(fullMailDate).toHaveBeenCalledWith(expect.anything(), { arriveBy: "2026-10-16", mailOn: "2026-10-06" }, NOW);
+  });
+
+  it("asks about room only for a preview with dates (#700)", async () => {
+    vi.mocked(getDraft).mockResolvedValue(draft() as any);
+    await requestSendTool.handler({ draftId: DRAFT_ID }, context());
+    expect(fullMailDate).not.toHaveBeenCalled();
   });
 
   it("refuses a preview whose mail date has passed, rather than a link the page would refuse (#535)", async () => {

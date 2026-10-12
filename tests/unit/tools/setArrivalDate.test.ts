@@ -172,7 +172,7 @@ describe('set_arrival_date (#535)', () => {
 
     await expect(set({ draftId: DRAFT_ID, arriveBy: '2026-10-16' })).rejects.toThrow(
       'Mail to arrive by Fri, Oct 16 (2026-10-16) is fully booked. The nearest arrival date with room is Thu, Oct 15 (2026-10-15). ' +
-        'Choose one of those, or leave arriveBy out to mail as soon as possible.'
+        'Choose one of those, or no date to mail as soon as possible.'
     );
     expect(fullMailDate).toHaveBeenCalledWith(expect.anything(), { arriveBy: '2026-10-16', mailOn: '2026-10-06' }, THURSDAY_MORNING);
     expect(setDraftSchedule).not.toHaveBeenCalled();

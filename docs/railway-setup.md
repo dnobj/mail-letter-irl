@@ -147,7 +147,7 @@ LETTER_IRL_POSTCARD_SIZES_ENABLED=<true to preview and sell 4x6 and 11x6 postcar
 LETTER_IRL_CERTIFIED_MAIL_ENABLED=<true to sell certified mail letters through Pay & Send (#625), which needs their two prices below, to accept mailService on the letter previews and to list set_mail_service; unset is off>
 LETTER_IRL_SCHEDULE_LEAD_DAYS=<business days from the mail date to the arrival date; default 7, production refuses less than 3>
 LETTER_IRL_SCHEDULE_HORIZON_DAYS=<calendar days ahead an arrival date may be; default 60>
-LETTER_IRL_SCHEDULE_DAILY_CAP=<letters held for one mail date, across every account; default 200>
+LETTER_IRL_SCHEDULE_DAILY_CAP=<letters waiting at once for one mail date, across every account; default 200; outside 1-100000 or unparseable falls back to 200>
 # Photo upload through the card in apps with no file store (#474, docs/deployment.md): off unless
 # explicitly true. API service only.
 LETTER_IRL_CARD_UPLOAD_ENABLED=<true to let the upload card send photos in Claude; unset keeps it off>

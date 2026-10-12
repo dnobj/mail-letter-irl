@@ -181,7 +181,7 @@ describe('a Pay & Send order whose mail date passed before it was paid (#700)', 
 
     expect(output.message).toBe(
       'Payment is confirmed and the mail item is being prepared. ' +
-        'It was paid for after the day it was to go to the printer to arrive by Fri, Oct 16, so it goes to the printer as soon as it can instead, and may arrive after that date.'
+        'Its payment was confirmed too late for it to go to the printer in time to arrive by Fri, Oct 16, so it goes to the printer as soon as it can instead, and may arrive after that date.'
     );
     expect(issues(getPurchaseStatusOutputZ.safeParse(output))).toBe('ok');
     const [sql, params] = mocks.query.mock.calls[1];
@@ -194,13 +194,13 @@ describe('a Pay & Send order whose mail date passed before it was paid (#700)', 
     const output = await payAndSend('fulfilled', { arrive_by: '2026-10-16', mail_on: '2026-10-06' });
     expect(output.message).toBe(
       'The physical mail item was accepted by the print provider. ' +
-        'It was paid for after the day it was to go to the printer to arrive by Fri, Oct 16, so it went to the printer as soon as it could instead, and may arrive after that date.'
+        'Its payment was confirmed too late for it to go to the printer in time to arrive by Fri, Oct 16, so it went to the printer as soon as it could instead, and may arrive after that date.'
     );
   });
 
   it.each(['refund_pending', 'refunded', 'held', 'disputed'])('says nothing of it once the order is %s', async status => {
     const output = await payAndSend(status, { arrive_by: '2026-10-16', mail_on: '2026-10-06' });
-    expect(output.message).not.toContain('paid for after');
+    expect(output.message).not.toContain('confirmed too late');
   });
 
   it('says nothing of it without the event, or with dates it cannot read', async () => {

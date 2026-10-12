@@ -92,7 +92,7 @@ export function friendlyCheckoutError(error: unknown): Error {
       return friendly(
         'Mail to arrive by its date is now fully booked, so nothing was charged. ' +
           `${openArrivalsSentence(openArrivalsOf(error), new Date(), true)} ` +
-          'Set another date with set_arrival_date, or clear it to send as soon as possible, then try again.'
+          'Choose another arrival date for it, or none to send it as soon as possible, then try again.'
       );
     case 'PREPAID_BALANCE_AVAILABLE':
       return friendly(

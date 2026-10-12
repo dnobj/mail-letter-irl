@@ -78,7 +78,7 @@ describe('friendlyCheckoutError terminality (#278)', () => {
       Object.assign(new Error('Draft mail date is full'), { code: 'SCHEDULE_FULL', openArrivals: ['2026-10-15'] })
     );
     expect(friendly.message).toMatch(
-      /^Mail to arrive by its date is now fully booked, so nothing was charged\. The nearest arrival date with room is \w{3}, Oct 15(, 2026)? \(2026-10-15\)\. Set another date with set_arrival_date, or clear it to send as soon as possible, then try again\.$/
+      /^Mail to arrive by its date is now fully booked, so nothing was charged\. The nearest arrival date with room is \w{3}, Oct 15(, 2026)? \(2026-10-15\)\. Choose another arrival date for it, or none to send it as soon as possible, then try again\.$/
     );
     expect((friendly as { code?: string }).code).toBe('SCHEDULE_FULL');
   });

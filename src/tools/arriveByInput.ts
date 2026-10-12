@@ -143,6 +143,6 @@ export async function previewScheduleWithRoom(arriveBy: unknown, context: ToolCo
   throw refusal(
     `Mail to arrive by ${describeDate(schedule.draft.arriveBy, now)} (${schedule.draft.arriveBy}) is fully booked. ` +
       `${openArrivalsSentence(full.openArrivals, now, true)} ` +
-      (full.openArrivals.length > 0 ? 'Choose one of those, or leave arriveBy out to mail as soon as possible.' : 'Leave arriveBy out to mail as soon as possible.')
+      (full.openArrivals.length > 0 ? 'Choose one of those, or no date to mail as soon as possible.' : 'Choose no date to mail as soon as possible.')
   );
 }
