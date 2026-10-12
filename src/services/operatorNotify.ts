@@ -3,9 +3,9 @@ import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog
 
 /**
  * Telling the operator (#699). Each notice is plain text posted to
- * LETTER_IRL_OPERATOR_ALERT_URL: a healthchecks.io check's `/fail` URL emails
- * it, and push services such as ntfy show it on a phone. The admin panel's
- * Alerts page has the detail, so a notice names no customer, letter or order.
+ * LETTER_IRL_OPERATOR_ALERT_URL, such as an ntfy topic, which shows it on a
+ * phone (src/config/operatorAlerts.ts). The admin panel's Alerts page has the
+ * detail, so a notice names no customer, letter or order.
  *
  * Unset, nothing is posted; production requires it (src/config/deploymentConfig.ts).
  */
@@ -128,7 +128,8 @@ const inFlightNotices = new Set<Promise<unknown>>();
 /**
  * notifyOperator without waiting, for a path that must not: a send's inline
  * dispatch, or a Stripe webhook inside its transaction. The maintenance run
- * waits for these before it exits (settleOperatorNotices).
+ * waits for these before it exits, and the API, for a few seconds, before it
+ * shuts down (settleOperatorNotices).
  */
 export function reportToOperator(kind: OperatorNoticeKind, text: string, options: NotifyOperatorOptions = {}): void {
   const pending = notifyOperator(kind, text, options).catch(() => undefined);

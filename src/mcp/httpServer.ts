@@ -1081,9 +1081,10 @@ export async function startHttpServer() {
 
   const close = async () => {
     console.log('\n🛑 Shutting down gracefully...');
-    // Notices to the operator started without waiting (#699), each bounded by
-    // its timeout, are posted before the process ends.
-    await settleOperatorNotices();
+    // Notices to the operator started without waiting (#699) are posted
+    // before the process ends, for at most three seconds: Railway's teardown
+    // is short, and the alert row in the database is what lasts.
+    await Promise.race([settleOperatorNotices(), new Promise(resolve => setTimeout(resolve, 3000).unref())]);
     try {
       await closePool();
     } catch (error) {

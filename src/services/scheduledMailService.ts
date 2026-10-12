@@ -30,6 +30,8 @@ export const MISSED_MAIL_DAY_ALERT = 'schedule_missed_mail_day';
  * ran out, or the provider refused it). Raises one operator alert per letter,
  * ever, and logs schedule.missed_mail_day with how many were new. A letter
  * held after an ambiguous dispatch is left out: it has its own critical alert.
+ * So is one the provider accepted (sent_at), whatever status the sync has
+ * written since: \`processing\` is how a letter being printed reads (#699).
  *
  * Once per letter: NOT EXISTS, with a partial unique index behind it (041)
  * and ON CONFLICT DO NOTHING, so two runs at once still raise one.
@@ -47,6 +49,7 @@ export async function raiseMissedMailDayAlerts(): Promise<number> {
          FROM letters held
         WHERE held.mail_on IS NOT NULL
           AND held.status IN ('queued', 'processing', 'failed')
+          AND held.sent_at IS NULL
           AND (held.mail_on + TIME '18:00') AT TIME ZONE 'America/New_York' < NOW()
           AND NOT EXISTS (
             SELECT 1 FROM commerce_operational_alerts seen
@@ -72,7 +75,9 @@ export async function raiseMissedMailDayAlerts(): Promise<number> {
 
 /**
  * Letters with a mail date still waiting to go to the printer after 18:00 New
- * York time on it (#699): queued or taken, not yet accepted. The maintenance
+ * York time on it (#699): queued or taken, and never accepted by the provider
+ * (no sent_at: the status sync writes `processing` for a letter the provider
+ * is printing, which is at the printer). The maintenance
  * run withholds its heartbeat while there are any, so the monitor alerts until
  * they go or a person settles them. 'unknown' when the count fails, which
  * withholds too. Left out, each having its own alert and its own end, and each
@@ -88,6 +93,7 @@ export async function lettersPastMailDay(): Promise<number | 'unknown'> {
          FROM letters held
         WHERE held.mail_on IS NOT NULL
           AND held.status IN ('queued', 'processing')
+          AND held.sent_at IS NULL
           AND (held.mail_on + TIME '18:00') AT TIME ZONE 'America/New_York' < NOW()
           AND NOT EXISTS (
             SELECT 1 FROM letter_jobs left_job

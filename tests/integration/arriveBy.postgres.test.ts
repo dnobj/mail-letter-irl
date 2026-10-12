@@ -750,6 +750,12 @@ describePostgres('arrive-by (migration 040, #535)', () => {
     await expect(held.lettersPastMailDay()).resolves.toBe(before);
     await pool.query('UPDATE users SET sends_blocked_reason = NULL WHERE user_id = $1', [userId]);
 
+    // Accepted by the provider, and being printed: the status sync writes 'processing' (review round 2).
+    await pool.query("UPDATE letters SET status = 'processing', sent_at = NOW() WHERE letter_id = $1", [letterId]);
+    await expect(held.lettersPastMailDay()).resolves.toBe(before);
+    await pool.query("UPDATE letters SET sent_at = NULL WHERE letter_id = $1", [letterId]);
+    await expect(held.lettersPastMailDay()).resolves.toBe((before as number) + 1);
+
     // Once it fails, it has its own alert and its own end.
     await pool.query("UPDATE letters SET status = 'failed' WHERE letter_id = $1", [letterId]);
     await expect(held.lettersPastMailDay()).resolves.toBe(before);
@@ -760,12 +766,19 @@ describePostgres('arrive-by (migration 040, #535)', () => {
     const late = randomUUID();
     const failed = randomUUID();
     const mailed = randomUUID();
-    for (const [letterId, status] of [[late, 'queued'], [failed, 'failed'], [mailed, 'accepted']] as const) {
+    // Being printed reads 'processing' after the status sync, with sent_at from its acceptance (#699).
+    const printing = randomUUID();
+    for (const [letterId, status, sentAt] of [
+      [late, 'queued', null],
+      [failed, 'failed', null],
+      [mailed, 'accepted', '2020-01-02T14:00:00Z'],
+      [printing, 'processing', '2020-01-02T14:00:00Z']
+    ] as const) {
       await pool.query(
         `INSERT INTO letters (letter_id, user_id, content, recipient, credits_cost, status, mail_type,
-           funding_type, arrive_by, mail_on)
-         VALUES ($1, $2, '{}', $3, 2, $4, 'letter', 'prepaid_balance', '2020-01-13', '2020-01-02')`,
-        [letterId, userId, JSON.stringify(RECIPIENT), status]
+           funding_type, arrive_by, mail_on, sent_at)
+         VALUES ($1, $2, '{}', $3, 2, $4, 'letter', 'prepaid_balance', '2020-01-13', '2020-01-02', $5::timestamptz)`,
+        [letterId, userId, JSON.stringify(RECIPIENT), status, sentAt]
       );
     }
 
