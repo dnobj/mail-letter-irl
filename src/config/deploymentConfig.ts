@@ -808,36 +808,43 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
   /**
    * The maintenance cron's dead man's switch (#408). A capability: anyone
    * holding it can report the job alive, so the preflight treats it as secret.
+   * Required in production (#699): without it nobody is told the run stopped,
+   * the outbox is paused, or a letter missed its mail day. Development may
+   * leave it unset; a value it cannot call is an error in production and a
+   * warning elsewhere (maintenance.heartbeat_url_invalid).
    */
   {
     name: 'MAINTENANCE_HEARTBEAT_URL',
     requiredIn: 'production',
-    advisory: true,
     secret: true,
-    services: ['maintenance'],
-    checkedBy: 'maintenance.heartbeat_url_invalid'
+    services: ['maintenance']
   },
   /**
-   * Where the operator is told a daily limit refused someone (migration 038).
-   * A capability, like the heartbeat, so the preflight treats it as secret.
+   * Where the operator is told what needs a person (src/services/operatorNotify.ts):
+   * a daily limit that refused someone (migration 038) from the API, and from
+   * both the API and maintenance, held mail that missed its mail day, letters
+   * the provider cancelled, a dispatch whose outcome is unknown, and mail held
+   * for its funding (#699). A capability, like the heartbeat, so the preflight
+   * treats it as secret. Required in production on both services (#699); a
+   * value it cannot post to is an error in production and a warning elsewhere
+   * (limits.operator_alert_url_invalid).
    */
   {
     name: 'LETTER_IRL_OPERATOR_ALERT_URL',
     requiredIn: 'production',
-    advisory: true,
     secret: true,
-    services: ['api'],
-    checkedBy: 'limits.operator_alert_url_invalid'
+    services: ['api', 'maintenance']
   },
   /**
    * The retention sweep (#153): reports what is past the published window
    * unless this is `enforce`, which production switches to at the launch
-   * promotion. Listed so the preflight shows each environment's state.
+   * promotion. Required in production (#699), so the mode is chosen rather
+   * than left to the default; a value that is neither `enforce` nor
+   * `report` is warned of (retention.mode_unknown).
    */
   {
     name: 'CONTENT_RETENTION_MODE',
     requiredIn: 'production',
-    advisory: true,
     secret: false,
     services: ['maintenance']
   },
@@ -1457,24 +1464,36 @@ export function validateDeploymentConfig(
 
   // #408: the maintenance service's heartbeat (src/services/maintenanceHeartbeat.ts).
   // A URL maintenance cannot call leaves its monitor alerting every hour for a
-  // job that is running fine. A warning, never a boot error: the heartbeat is an
-  // alarm, not part of the work.
+  // job that is running fine. An error in production, where the heartbeat is
+  // required (#699); a warning elsewhere.
   if (maintenanceHeartbeatUrlInvalid(env)) {
     findings.push({
-      severity: 'warning',
+      severity: production ? 'error' : 'warning',
       rule: 'maintenance.heartbeat_url_invalid',
       message: 'MAINTENANCE_HEARTBEAT_URL must be an https URL, such as a healthchecks.io ping URL'
     });
   }
 
-  // The operator's notice (src/config/operatorAlerts.ts): a URL the API
-  // cannot post to means a limit that refuses customers tells nobody. A
-  // warning: the alert in the admin panel still opens.
+  // The operator's notices (src/services/operatorNotify.ts): a URL they
+  // cannot be posted to means what needs a person tells nobody but the admin
+  // panel. An error in production, where it is required (#699); a warning
+  // elsewhere.
   if (operatorAlertUrlInvalid(env)) {
     findings.push({
-      severity: 'warning',
+      severity: production ? 'error' : 'warning',
       rule: 'limits.operator_alert_url_invalid',
       message: 'LETTER_IRL_OPERATOR_ALERT_URL must be an https URL, such as a healthchecks.io /fail URL'
+    });
+  }
+
+  // The retention sweep's mode: only `enforce` acts, and anything else runs
+  // the report, so a misspelt `enforce` reports quietly. Said, never refused.
+  const retentionMode = (env.CONTENT_RETENTION_MODE ?? '').trim().toLowerCase();
+  if (retentionMode !== '' && retentionMode !== 'enforce' && retentionMode !== 'report') {
+    findings.push({
+      severity: 'warning',
+      rule: 'retention.mode_unknown',
+      message: 'CONTENT_RETENTION_MODE is neither enforce nor report, so the retention sweep only reports'
     });
   }
 

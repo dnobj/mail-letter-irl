@@ -31,6 +31,7 @@ import { summarizeProviderRejection } from './providerFailureSummary.js';
 import { enabledUnlessDisabled } from '../utils/envSettings.js';
 import { letterPrintText, signatureParagraph } from './previewService.js';
 import { fundingHeldJobSql, heldMailJobSql, isFundingHoldReason } from './heldMail.js';
+import { OPERATOR_NOTICES, reportToOperator } from './operatorNotify.js';
 
 const DEFAULT_MAX_ATTEMPTS = 5;
 const STALE_LOCK_MINUTES = 15;
@@ -368,6 +369,9 @@ async function holdAmbiguousDispatch(job: LetterJob, error: unknown): Promise<vo
       [orderId, JSON.stringify({ jobId: job.job_id, errorClass })]
     );
   });
+  // Once the hold has committed (#699). Not waited for: this runs in a send's
+  // inline dispatch too; the maintenance run settles it before it exits.
+  reportToOperator('ambiguous_outcome', OPERATOR_NOTICES.ambiguousOutcome());
 }
 
 async function loadLetter(letterId: string): Promise<Letter> {

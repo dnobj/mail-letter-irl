@@ -85,7 +85,9 @@ const READY_PROD: NodeJS.ProcessEnv = {
   // every request to the public hostname. The boot rule is what stops a
   // deployment passing its own promotion check while serving nothing.
   LETTER_IRL_ALLOWED_HOSTS: 'api.fixture.example',
-  LETTER_IRL_ALLOWED_ORIGINS: 'https://chatgpt.com'
+  LETTER_IRL_ALLOWED_ORIGINS: 'https://chatgpt.com',
+  // Required in production since #699; the API posts the operator's notices.
+  LETTER_IRL_OPERATOR_ALERT_URL: 'https://hc-ping.example/readyz/fail'
 };
 
 function routableDb(rows: Array<{ mail_type: string; provider: string }> = []): void {

@@ -102,9 +102,12 @@ LETTER_IRL_BETA_ACCOUNT_DAILY_MAIL_CAP=<letters per account per day>
 LETTER_IRL_BETA_ACCOUNT_DAILY_CHARGE_CENTS=<spend per account per day, in cents; default 6000>
 # The four daily limits can also be set, for everyone or one account, in the admin panel's Limits page
 # (migration 038), with no redeploy; these variables are the values in force when none is set there.
-# Where the operator is told a daily limit refused someone: an https URL that takes a plain-text POST,
-# such as a healthchecks.io check's /fail URL. A capability: treat it as a secret. API service only.
-LETTER_IRL_OPERATOR_ALERT_URL=<https URL, or unset for the admin panel's alert alone>
+# Where the operator is told what needs a person (src/services/operatorNotify.ts): a daily limit that
+# refused someone, held mail that missed its mail day, letters the provider cancelled, a dispatch whose
+# outcome is unknown, mail held for its funding. An https URL that takes a plain-text POST, such as a
+# healthchecks.io check's /fail URL or an ntfy topic. A capability: treat it as a secret. Set it on the
+# API service AND the maintenance service. Required in production (#699): boot refuses without it.
+LETTER_IRL_OPERATOR_ALERT_URL=<https URL; outside production, unset for the admin panel's alerts alone>
 # Gift letters (docs/gift-letters.md): off unless explicitly true. API service only.
 LETTER_IRL_GIFT_LETTERS_ENABLED=<true to turn the programme on; unset keeps it off>
 LETTER_IRL_GIFT_DAILY_SEND_CAP=<gift sends per UTC day, all accounts; default 20; 0 stops them>
@@ -282,7 +285,7 @@ Public domain: none
 
 Reference the same backend variables used by the API, including the environment-specific database and bucket references. The command closes all clients and exits. Investigate any run that is still active near the next hour.
 
-`MAINTENANCE_HEARTBEAT_URL` is the maintenance service's own: an external monitor's ping URL (for example a healthchecks.io check), called after every run that finishes. The monitor alerts when the calls stop, which covers a run that never happens and one that keeps failing ([operational-acceptance.md](operational-acceptance.md), #408). Unset, nothing is called. It must be https; anything else only warns (`maintenance.heartbeat_url_invalid`). It is a capability, so keep it in Railway only.
+`MAINTENANCE_HEARTBEAT_URL` is the maintenance service's own: an external monitor's ping URL (for example a healthchecks.io check), called after every run that finishes. The monitor alerts when the calls stop, which covers a run that never happens and one that keeps failing ([operational-acceptance.md](operational-acceptance.md), #408). Production requires it (#699): maintenance refuses to run without it, or with a value that is not https (`maintenance.heartbeat_url_invalid`). Elsewhere, unset, nothing is called, and a value that is not https only warns. It is a capability, so keep it in Railway only. The run also withholds the call while the outbox is paused with letters waiting, or while a letter with an arrival date is still waiting after 18:00 New York time on its mail day.
 
 ## Website Settings
 

@@ -170,6 +170,12 @@ vi.mock('../../../src/db/index.js', () => ({
   },
   transaction: mocks.transaction
 }));
+// The operator's notices (#699): spied, never posted.
+vi.mock('../../../src/services/operatorNotify.js', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../../src/services/operatorNotify.js')>()),
+  reportToOperator: vi.fn(async () => 'sent')
+}));
+
 vi.mock('../../../src/services/creditLedgerService.js', () => ({
   addCreditsToLedgerWithClient: mocks.addCredits
 }));
@@ -209,6 +215,7 @@ import {
   revokePackLots,
   runCommerceMaintenance
 } from '../../../src/services/commerceService.js';
+import { OPERATOR_NOTICES, reportToOperator } from '../../../src/services/operatorNotify.js';
 import { draftMailOption } from '../../../src/services/mailOptions.js';
 import { optionRow } from '../../fixtures/mailOptions.js';
 import { LIVE_PAY_AND_SEND_STATUSES } from '../../../src/services/draftService.js';
@@ -4719,10 +4726,11 @@ describe("mail a pack paid for, when the pack's money goes back (#696)", () => {
     draft_id: undefined, credits: 4, amount_cents: 500, currency: 'usd',
     status: 'fulfilled', stripe_payment_intent_id: 'pi-hold', refund_attempts: 0
   };
-  function script(order: Record<string, unknown> = packOrder) {
+  function script(order: Record<string, unknown> = packOrder, alertRaised = 1) {
     const calls: Array<{ sql: string; params: unknown[] }> = [];
     mocks.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
       calls.push({ sql, params });
+      if (sql.includes("'held_mail_funding_reversed'")) return { rows: [], rowCount: alertRaised };
       if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-hold' }] };
       if (sql.includes('UPDATE orders') && sql.includes('RETURNING order_id')) return { rows: [{ order_id: 'order-1' }] };
       if (sql.includes('FROM gift_letters g')) return { rows: [{ letter_id: 'letter-1' }, { letter_id: 'letter-2' }] };
@@ -4781,6 +4789,18 @@ describe("mail a pack paid for, when the pack's money goes back (#696)", () => {
     // Before the account lock, so before the lots are revoked.
     const holdAt = calls.findIndex(call => call.sql.includes('SET hold_reason = $2'));
     expect(holdAt).toBeLessThan(calls.findIndex(call => call.sql === ACCOUNT_LOCK_SQL));
+  });
+
+  it('tells the operator when the order\'s alert is first raised, and not when it was raised already (#699)', async () => {
+    script();
+    await processStripeWebhookEvent(refund('succeeded'));
+    expect(reportToOperator).toHaveBeenCalledTimes(1);
+    expect(reportToOperator).toHaveBeenCalledWith('held_mail_funding', OPERATOR_NOTICES.heldMailFunding());
+
+    vi.mocked(reportToOperator).mockClear();
+    script(packOrder, 0);
+    await processStripeWebhookEvent(refund('succeeded'));
+    expect(reportToOperator).not.toHaveBeenCalled();
   });
 
   it('holds nothing while the refund is pending: it may still fail', async () => {

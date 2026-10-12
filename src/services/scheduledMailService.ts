@@ -69,6 +69,32 @@ export async function raiseMissedMailDayAlerts(): Promise<number> {
   }
 }
 
+/**
+ * Letters with a mail date still waiting to go to the printer after 18:00 New
+ * York time on it (#699): queued or taken, not yet accepted. The maintenance
+ * run withholds its heartbeat while there are any, so the monitor alerts until
+ * they go or a person settles them. 'unknown' when the count fails, which
+ * withholds too. Letters that failed or are held are left out: each has its
+ * own alert and its own end, and would otherwise withhold it for good.
+ */
+export async function lettersPastMailDay(): Promise<number | 'unknown'> {
+  try {
+    const late = await query<{ late: number | string }>(
+      `SELECT COUNT(*)::int AS late
+         FROM letters held
+        WHERE held.mail_on IS NOT NULL
+          AND held.status IN ('queued', 'processing')
+          AND (held.mail_on + TIME '18:00') AT TIME ZONE 'America/New_York' < NOW()`
+    );
+    return Number(late.rows[0]?.late ?? 0);
+  } catch (error) {
+    writeDiagnostic('error', 'schedule.past_mail_day_count_failed', {
+      errorClass: classifyDiagnosticError(error, 'database_error')
+    });
+    return 'unknown';
+  }
+}
+
 /** Why held mail was not cancelled. */
 export type ScheduledMailRefusal =
   /** No such letter, or it is someone else's: the two read the same. */

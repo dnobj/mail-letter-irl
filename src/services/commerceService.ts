@@ -37,6 +37,7 @@ import { draftScheduleOf } from './draftSchedule.js';
 import { STUCK_ORDER_CONDITION } from './stuckOrders.js';
 import { describeDate, earliestMailOn } from './deliverySchedule.js';
 import { fullMailDate } from './mailDateCapacity.js';
+import { OPERATOR_NOTICES, reportToOperator } from './operatorNotify.js';
 import { assertNoRecentDuplicateMail } from './duplicateMailService.js';
 import {
   createJitCheckoutSession,
@@ -2458,7 +2459,7 @@ async function holdMailFundedByOrder(
     held += job.rowCount ?? 0;
   }
   if (held > 0) {
-    await client.query(
+    const alert = await client.query(
       `INSERT INTO commerce_operational_alerts
          (source_event_id, order_id, alert_type, severity, details)
        VALUES ($1, $2, 'held_mail_funding_reversed', 'warning', $3)
@@ -2466,6 +2467,11 @@ async function holdMailFundedByOrder(
       [sourceEventId, order.order_id, JSON.stringify({ reason, letters: held })]
     );
     writeDiagnostic('warn', 'commerce.held_mail_funding_reversed', { reason, letters: held });
+    // The operator is told when the order's alert is first raised (#699),
+    // without waiting: this is inside the webhook's transaction. Should that
+    // roll back, Stripe sends the event again and the alert is raised then; a
+    // notice already posted only asks the operator to look.
+    if ((alert.rowCount ?? 0) > 0) reportToOperator('held_mail_funding', OPERATOR_NOTICES.heldMailFunding());
   }
   return held;
 }

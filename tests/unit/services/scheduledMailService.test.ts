@@ -17,7 +17,8 @@ import {
   CANCELLED_BY_CUSTOMER,
   MISSED_MAIL_DAY_ALERT,
   cancelScheduledMail,
-  raiseMissedMailDayAlerts
+  raiseMissedMailDayAlerts,
+  lettersPastMailDay
 } from '../../../src/services/scheduledMailService.js';
 
 const LETTER = 'ltr-1';
@@ -274,5 +275,28 @@ describe('raiseMissedMailDayAlerts (#535)', () => {
   it('never throws: a failed check is logged and the hourly run goes on', async () => {
     vi.mocked(query).mockRejectedValue(Object.assign(new Error('relation does not exist'), { code: '42P01' }));
     await expect(raiseMissedMailDayAlerts()).resolves.toBe(0);
+  });
+});
+
+describe('lettersPastMailDay (#699)', () => {
+  beforeEach(() => {
+    vi.mocked(query).mockReset();
+  });
+
+  it('counts letters with a date still queued or taken after 18:00 New York time on their mail day', async () => {
+    vi.mocked(query).mockResolvedValue({ rows: [{ late: '3' }], rowCount: 1 } as never);
+
+    await expect(lettersPastMailDay()).resolves.toBe(3);
+
+    const flat = String(vi.mocked(query).mock.calls[0][0]).replace(/\s+/g, ' ');
+    expect(flat).toContain('held.mail_on IS NOT NULL');
+    // Not failed or held: each has its own alert and its own end.
+    expect(flat).toContain("held.status IN ('queued', 'processing')");
+    expect(flat).toContain("(held.mail_on + TIME '18:00') AT TIME ZONE 'America/New_York' < NOW()");
+  });
+
+  it("answers 'unknown' when the count fails, which withholds the heartbeat too", async () => {
+    vi.mocked(query).mockRejectedValue(new Error('connection terminated'));
+    await expect(lettersPastMailDay()).resolves.toBe('unknown');
   });
 });

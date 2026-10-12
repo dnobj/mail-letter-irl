@@ -53,7 +53,9 @@ const FULL_PRODUCTION_NAMES = [
   'LETTER_IRL_OAUTH_AUDIENCE',
   'LETTER_IRL_MCP_RESOURCE',
   'LETTER_IRL_OAUTH_PROD_ISSUER',
-  'LETTER_IRL_OAUTH_CIMD_ENFORCEMENT'
+  'LETTER_IRL_OAUTH_CIMD_ENFORCEMENT',
+  // Required in production since #699.
+  'LETTER_IRL_OPERATOR_ALERT_URL'
 ];
 
 describe('diffManifest', () => {
@@ -175,7 +177,8 @@ describe('diffManifest', () => {
       'STRIPE_JIT_LETTER_THREE_PAGES_PRICE_ID [required because JIT_PURCHASE_ENABLED and LETTER_IRL_ROOM_TO_WRITE_ENABLED are set]'
     ]);
 
-    const sizesOn = diffManifest([...jitNames, 'LETTER_IRL_POSTCARD_SIZES_ENABLED'], {
+    // The maintenance service's own production requirements (#699) are present here too.
+    const sizesOn = diffManifest([...jitNames, 'LETTER_IRL_POSTCARD_SIZES_ENABLED', 'MAINTENANCE_HEARTBEAT_URL', 'CONTENT_RETENTION_MODE'], {
       environment: 'production',
       service: 'maintenance'
     });

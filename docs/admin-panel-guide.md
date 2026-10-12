@@ -400,7 +400,9 @@ When a daily limit refuses someone, the first refusal of the UTC day for that li
 `daily_limit_reached` alert (warning), naming the first account for the per-account limits; later refusals
 that day only add to the count on the Limits page. The API also posts a one-line notice to
 `LETTER_IRL_OPERATOR_ALERT_URL` when that variable is set on the API service: a healthchecks.io check's
-`/fail` URL emails it, and ntfy or a similar service pushes it to a phone. Review the alert, then raise the
+`/fail` URL emails it, and ntfy or a similar service pushes it to a phone. The same URL carries the other
+notices (#699): held mail that missed its mail day, letters the provider cancelled, a dispatch whose outcome
+is unknown, and mail held for its funding. Each names no customer; the Alerts page has the detail. Review the alert, then raise the
 limit here if everything looks right, or leave it. Resolve the alert with a code such as
 `limit_reviewed` or `limit_raised`.
 

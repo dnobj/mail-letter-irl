@@ -18,6 +18,12 @@ import {
   createStatusSyncTestLetters,
 } from '../../fixtures/letters.js';
 
+// The operator's notices (#699): spied, never posted.
+vi.mock('../../../src/services/operatorNotify.js', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../../src/services/operatorNotify.js')>()),
+  notifyOperator: vi.fn(async () => 'sent')
+}));
+
 // Mock the database module before importing the service
 vi.mock('../../../src/db/index.js', () => {
   return {
@@ -43,6 +49,7 @@ vi.mock('../../../src/services/letterJobService.js', () => {
 import * as db from '../../../src/db/index.js';
 import { getLetterProvider } from '../../../src/services/providers/index.js';
 import { failProviderCancelledLetter } from '../../../src/services/letterJobService.js';
+import { notifyOperator, OPERATOR_NOTICES } from '../../../src/services/operatorNotify.js';
 import {
   syncLetterStatuses,
   getStuckLetters,
@@ -372,6 +379,9 @@ describe('statusSyncService', () => {
       expect(writes()).toEqual([]);
       expect(result.updated).toBe(1);
       expect(result.details).toEqual([expect.objectContaining({ letterId: 'letter-cancelled', newStatus: 'failed' })]);
+      // The operator is told once, by count (#699).
+      expect(notifyOperator).toHaveBeenCalledTimes(1);
+      expect(notifyOperator).toHaveBeenCalledWith('provider_cancelled', OPERATOR_NOTICES.providerCancelled(1));
     });
 
     it('counts nothing when the letter had already ended', async () => {
@@ -386,6 +396,7 @@ describe('statusSyncService', () => {
       expect(result.updated).toBe(0);
       expect(result.details).toEqual([]);
       expect(writes()).toEqual([]);
+      expect(notifyOperator).not.toHaveBeenCalled();
     });
 
     it('only reports it in a dry run', async () => {

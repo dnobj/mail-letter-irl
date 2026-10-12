@@ -92,7 +92,8 @@ While `LETTER_IRL_OUTBOX_DISPATCH_ENABLED=false` pauses the outbox (#444,
 interrupted mid-dispatch, the redeploy that sets the switch included, is still settled: held for an
 operator if the provider may have it, or failed and refunded if it never reached the provider on its last
 attempt. While letters are waiting, the run withholds its heartbeat, so the external monitor alerts until
-the outbox is switched back on.
+the outbox is switched back on. It withholds it too while a letter with an arrival date is still waiting
+after 18:00 New York time on its mail day (#699).
 
 Generated images are stored in a private Railway bucket for 15 minutes, and so is a photo uploaded through the card in an app with no file store (#474, one per account under `uploaded-photos/`, never served at an address). Production must not fall back to process memory. Development may use memory only for local execution; deployed development uses the bucket so restart behavior matches production.
 

@@ -5,7 +5,12 @@ import type pg from 'pg';
 import * as db from '../db/index.js';
 import { accountDailyChargeCents, accountDailyMailCap, globalDailyMailCeiling } from '../auth/betaAccess.js';
 import { giftDailySendCap } from '../config/giftLetters.js';
-import { operatorAlertUrl, operatorAlertUrlInvalid } from '../config/operatorAlerts.js';
+import {
+  OPERATOR_ALERT_TIMEOUT_MS,
+  environmentName,
+  postOperatorNotice,
+  type OperatorNoticeOutcome
+} from './operatorNotify.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 
 /**
@@ -130,12 +135,7 @@ export async function effectiveDailyLimits(
 // ---------------------------------------------------------------------------
 // When a limit refuses someone
 
-const OPERATOR_ALERT_TIMEOUT_MS = 10_000;
 const INTEGER_MAX = 2_147_483_647;
-
-function environmentName(env: NodeJS.ProcessEnv): string {
-  return (env.RAILWAY_ENVIRONMENT_NAME || env.RAILWAY_ENVIRONMENT || '').trim().slice(0, 40);
-}
 
 function describeValue(key: DailyLimitKey, value: number): string {
   return key === 'account_daily_charge_cents' ? `$${(value / 100).toFixed(2)}` : String(value);
@@ -151,11 +151,13 @@ export function dailyLimitNotice(key: DailyLimitKey, value: number, env: NodeJS.
   );
 }
 
-export type OperatorNoticeOutcome = 'sent' | 'skipped' | 'invalid' | 'failed';
+export type { OperatorNoticeOutcome };
 
 /**
- * Posts the notice as plain text: a healthchecks.io check's `/fail` URL
- * emails it, and push services such as ntfy show it on a phone. Never throws.
+ * Posts the notice as plain text, through the operator's one sender
+ * (src/services/operatorNotify.ts), under this module's own diagnostics. Once
+ * a day per limit, as the refusal record decides, not once an hour as the
+ * other notices. Never throws.
  */
 export async function notifyOperatorOfLimit(
   key: DailyLimitKey,
@@ -164,34 +166,13 @@ export async function notifyOperatorOfLimit(
   fetchImpl: typeof fetch = fetch,
   timeoutMs: number = OPERATOR_ALERT_TIMEOUT_MS
 ): Promise<OperatorNoticeOutcome> {
-  if (operatorAlertUrlInvalid(env)) {
-    writeDiagnostic('warn', 'limits.operator_alert_url_invalid');
-    return 'invalid';
-  }
-  const url = operatorAlertUrl(env);
-  if (!url) return 'skipped';
-  try {
-    const response = await fetchImpl(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
-      body: dailyLimitNotice(key, value, env),
-      signal: AbortSignal.timeout(timeoutMs)
-    });
-    await response.body?.cancel().catch(() => undefined);
-    if (!response.ok) {
-      writeDiagnostic('warn', 'limits.operator_alert_failed', { status: response.status });
-      return 'failed';
-    }
-    return 'sent';
-  } catch (error) {
-    const name = (error as { name?: unknown } | null)?.name;
-    const errorClass =
-      name === 'TimeoutError' || name === 'AbortError'
-        ? 'ETIMEDOUT'
-        : classifyDiagnosticError((error as { cause?: unknown } | null)?.cause ?? error, 'provider_error');
-    writeDiagnostic('warn', 'limits.operator_alert_failed', { errorClass });
-    return 'failed';
-  }
+  return postOperatorNotice(
+    dailyLimitNotice(key, value, env),
+    { invalid: 'limits.operator_alert_url_invalid', failed: 'limits.operator_alert_failed' },
+    env,
+    fetchImpl,
+    timeoutMs
+  );
 }
 
 export interface RefusalRecorderDeps {

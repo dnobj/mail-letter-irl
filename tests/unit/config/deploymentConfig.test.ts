@@ -41,7 +41,12 @@ const VALID_PROD: NodeJS.ProcessEnv = {
   // unset LETTER_IRL_ALLOWED_HOSTS makes DNS-rebinding protection reject every
   // request to the public hostname while /readyz still answers 200.
   LETTER_IRL_ALLOWED_HOSTS: 'api.fixture.example',
-  LETTER_IRL_ALLOWED_ORIGINS: 'https://chatgpt.com'
+  LETTER_IRL_ALLOWED_ORIGINS: 'https://chatgpt.com',
+  // Required in production since #699: the operator's notices, the
+  // maintenance heartbeat and the retention mode.
+  LETTER_IRL_OPERATOR_ALERT_URL: 'https://hc-ping.example/fixture/fail',
+  MAINTENANCE_HEARTBEAT_URL: 'https://hc-ping.example/fixture',
+  CONTENT_RETENTION_MODE: 'enforce',
 };
 
 const VALID_DEV: NodeJS.ProcessEnv = {
@@ -242,13 +247,59 @@ describe('validateDeploymentConfig in production', () => {
     expect(validateDeploymentConfig(aliased, 'server').errors).toEqual([]);
   });
 
-  it('warns, never fails, on a maintenance heartbeat URL that is not https (#408)', () => {
-    const bad = env({ MAINTENANCE_HEARTBEAT_URL: 'http://hc-ping.com/abc' });
+  it('warns, never fails, on a maintenance heartbeat URL that is not https outside production (#408)', () => {
+    const bad = env({ MAINTENANCE_HEARTBEAT_URL: 'http://hc-ping.com/abc' }, VALID_DEV);
     expect(ruleIds(bad, 'error')).not.toContain('maintenance.heartbeat_url_invalid');
     expect(ruleIds(bad, 'warning')).toContain('maintenance.heartbeat_url_invalid');
     expect(ruleIds(env({ MAINTENANCE_HEARTBEAT_URL: 'https://hc-ping.com/abc' }))).not.toContain(
       'maintenance.heartbeat_url_invalid'
     );
+  });
+
+  describe('the monitoring production requires (#699)', () => {
+    const maintenanceErrors = (input: NodeJS.ProcessEnv) =>
+      validateDeploymentConfig(input, 'maintenance').findings.filter(f => f.severity === 'error').map(f => f.rule);
+
+    it('refuses production maintenance without the heartbeat, the operator URL or the retention mode', () => {
+      expect(maintenanceErrors(VALID_PROD)).toEqual([]);
+      for (const [name, rule] of [
+        ['MAINTENANCE_HEARTBEAT_URL', 'presence.maintenance_heartbeat_url'],
+        ['LETTER_IRL_OPERATOR_ALERT_URL', 'presence.letter_irl_operator_alert_url'],
+        ['CONTENT_RETENTION_MODE', 'presence.content_retention_mode']
+      ] as const) {
+        expect(maintenanceErrors(env({ [name]: undefined })), name).toContain(rule);
+      }
+    });
+
+    it('refuses the production API without the operator URL, and asks it for neither of the others', () => {
+      expect(ruleIds(env({ LETTER_IRL_OPERATOR_ALERT_URL: undefined }), 'error')).toContain('presence.letter_irl_operator_alert_url');
+      const apiOnly = env({ MAINTENANCE_HEARTBEAT_URL: undefined, CONTENT_RETENTION_MODE: undefined });
+      expect(ruleIds(apiOnly, 'error')).toEqual([]);
+    });
+
+    it('refuses a URL production cannot use, and only warns of it elsewhere', () => {
+      for (const [name, rule] of [
+        ['MAINTENANCE_HEARTBEAT_URL', 'maintenance.heartbeat_url_invalid'],
+        ['LETTER_IRL_OPERATOR_ALERT_URL', 'limits.operator_alert_url_invalid']
+      ] as const) {
+        expect(maintenanceErrors(env({ [name]: 'http://hc-ping.example/x' })), name).toContain(rule);
+        const dev = validateDeploymentConfig(env({ [name]: 'http://hc-ping.example/x' }, VALID_DEV), 'maintenance');
+        expect(dev.findings.filter(f => f.severity === 'error').map(f => f.rule), name).not.toContain(rule);
+        expect(dev.findings.filter(f => f.severity === 'warning').map(f => f.rule), name).toContain(rule);
+      }
+    });
+
+    it('asks development for none of them', () => {
+      expect(validateDeploymentConfig(VALID_DEV, 'maintenance').findings.filter(f => f.severity === 'error')).toEqual([]);
+    });
+
+    it('warns of a retention mode that is neither enforce nor report, which only reports', () => {
+      expect(ruleIds(env({ CONTENT_RETENTION_MODE: 'enforced' }), 'warning')).toContain('retention.mode_unknown');
+      expect(ruleIds(env({ CONTENT_RETENTION_MODE: 'enforced' }), 'error')).not.toContain('retention.mode_unknown');
+      for (const mode of ['enforce', 'report', ' ENFORCE ']) {
+        expect(ruleIds(env({ CONTENT_RETENTION_MODE: mode })), mode).not.toContain('retention.mode_unknown');
+      }
+    });
   });
 
   it('warns, never fails, while the outbox switch pauses dispatch (#451 review)', () => {

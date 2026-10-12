@@ -26,11 +26,21 @@ const services = vi.hoisted(() => ({
   sendMaintenanceHeartbeat: vi.fn().mockResolvedValue('sent'),
   lettersWaitingBehindPause: vi.fn().mockResolvedValue(0),
   raiseMissedMailDayAlerts: vi.fn().mockResolvedValue(0),
+  lettersPastMailDay: vi.fn().mockResolvedValue(0),
+  notifyOperator: vi.fn().mockResolvedValue('sent'),
+  settleOperatorNotices: vi.fn().mockResolvedValue(undefined),
   closePool: vi.fn().mockResolvedValue(undefined)
 }));
 
 vi.mock('../../../src/services/scheduledMailService.js', () => ({
-  raiseMissedMailDayAlerts: services.raiseMissedMailDayAlerts
+  raiseMissedMailDayAlerts: services.raiseMissedMailDayAlerts,
+  lettersPastMailDay: services.lettersPastMailDay
+}));
+
+vi.mock('../../../src/services/operatorNotify.js', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../../src/services/operatorNotify.js')>()),
+  notifyOperator: services.notifyOperator,
+  settleOperatorNotices: services.settleOperatorNotices
 }));
 
 vi.mock('../../../src/services/letterJobService.js', () => ({
@@ -84,6 +94,7 @@ vi.mock('../../../src/services/maintenanceHeartbeat.js', async importOriginal =>
 }));
 
 import { dispatchDueMail, maintenanceEntry, writeMaintenanceFailure } from '../../../src/cli/runMaintenance.js';
+import { OPERATOR_NOTICES } from '../../../src/services/operatorNotify.js';
 
 type TaskRunner = (
   name: string,
@@ -239,7 +250,71 @@ describe('maintenance deployment validation', () => {
     await expect(maintenanceEntry()).resolves.toBeUndefined();
 
     expect(services.lettersWaitingBehindPause).toHaveBeenCalledTimes(1);
+    expect(services.lettersPastMailDay).toHaveBeenCalledTimes(1);
     expect(services.sendMaintenanceHeartbeat).toHaveBeenCalledTimes(1);
+  });
+
+  it('withholds the heartbeat while a letter is still waiting after its mail day (#699)', async () => {
+    const output = captureOutput();
+    stubValidDevelopment();
+    services.lettersPastMailDay.mockResolvedValueOnce(2);
+
+    await expect(maintenanceEntry()).resolves.toBeUndefined();
+
+    expect(services.sendMaintenanceHeartbeat).not.toHaveBeenCalled();
+    expect(output()).toContain('Heartbeat withheld: 2 letters are still waiting after their mail day');
+    expect(output()).toContain('"pastMailDay":2');
+    // Asked after the run, which went ahead in full.
+    expect(services.lettersPastMailDay.mock.invocationCallOrder[0]).toBeGreaterThan(
+      services.runCommerceMaintenance.mock.invocationCallOrder[0]
+    );
+  });
+
+  it('withholds it when the late letters could not be counted, and gives both reasons with a pause (#699)', async () => {
+    const output = captureOutput();
+    stubValidDevelopment();
+    services.lettersPastMailDay.mockResolvedValueOnce('unknown');
+    await expect(maintenanceEntry()).resolves.toBeUndefined();
+    expect(services.sendMaintenanceHeartbeat).not.toHaveBeenCalled();
+    expect(output()).toContain('Heartbeat withheld: the letters past their mail day could not be counted');
+
+    vi.restoreAllMocks();
+    const both = captureOutput();
+    services.lettersWaitingBehindPause.mockResolvedValueOnce(3);
+    services.lettersPastMailDay.mockResolvedValueOnce(1);
+    await expect(maintenanceEntry()).resolves.toBeUndefined();
+    expect(both()).toContain('Heartbeat withheld: the outbox is paused with 3 waiting; 1 letter is still waiting after their mail day');
+  });
+
+  it('tells the operator of held mail that missed its mail day, once a run, after raising the alerts (#699)', async () => {
+    stubValidDevelopment();
+    services.raiseMissedMailDayAlerts.mockResolvedValueOnce(2);
+
+    await expect(maintenanceEntry()).resolves.toBeUndefined();
+
+    expect(services.notifyOperator).toHaveBeenCalledTimes(1);
+    expect(services.notifyOperator).toHaveBeenCalledWith('missed_mail_day', OPERATOR_NOTICES.missedMailDay(2));
+    expect(services.notifyOperator.mock.invocationCallOrder[0]).toBeGreaterThan(
+      services.raiseMissedMailDayAlerts.mock.invocationCallOrder[0]
+    );
+  });
+
+  it('tells nothing when no alert was newly raised (#699)', async () => {
+    stubValidDevelopment();
+    await expect(maintenanceEntry()).resolves.toBeUndefined();
+    expect(services.notifyOperator).not.toHaveBeenCalled();
+  });
+
+  it('waits for the notices started without waiting before it closes, even when the run fails (#699)', async () => {
+    stubValidDevelopment();
+    await expect(maintenanceEntry()).resolves.toBeUndefined();
+    expect(services.settleOperatorNotices).toHaveBeenCalledTimes(1);
+    expect(services.settleOperatorNotices.mock.invocationCallOrder[0]).toBeLessThan(services.closePool.mock.invocationCallOrder[0]);
+
+    vi.clearAllMocks();
+    services.runCommerceMaintenance.mockRejectedValueOnce(new Error('stripe down'));
+    await expect(maintenanceEntry()).rejects.toThrow('stripe down');
+    expect(services.settleOperatorNotices).toHaveBeenCalledTimes(1);
   });
 
   it('says in the maintenance log, every run, that the outbox is paused (#451 review)', async () => {

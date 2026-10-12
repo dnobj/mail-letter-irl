@@ -21,11 +21,19 @@ The daily ceilings (`LETTER_IRL_BETA_GLOBAL_DAILY_MAIL_CEILING`, `LETTER_IRL_BET
 ## Watching it
 
 - **Failures inside a run** raise durable alerts (`commerce_operational_alerts`), shown on the admin panel's `/alerts` page, and a `maintenance.run_failed` line in the maintenance log. The panel's `/maintenance` page shows when each scheduled task last ran.
-- **A run that does not happen**, or keeps failing, is caught by the maintenance heartbeat. After a run finishes, maintenance calls `MAINTENANCE_HEARTBEAT_URL`; an external monitor alerts when the calls stop. A run that finishes with the outbox paused and letters waiting does not call it either, so a pause left on is caught the same way (below). Setup:
+- **A run that does not happen**, or keeps failing, is caught by the maintenance heartbeat. After a run finishes, maintenance calls `MAINTENANCE_HEARTBEAT_URL`; an external monitor alerts when the calls stop. A run that finishes with the outbox paused and letters waiting does not call it either, so a pause left on is caught the same way (below); nor one that finishes with a letter still waiting after 18:00 New York time on its mail day (#699). Production requires the URL: maintenance refuses to run without it (#699). Setup:
   1. At [healthchecks.io](https://healthchecks.io), create one check per environment: period 1 hour, grace 1 hour, email alerts to the owner.
   2. Set each check's ping URL as `MAINTENANCE_HEARTBEAT_URL` on the maintenance service in each environment: `letter-irl-maintenance` in production, `letter-irl-maintenance-dev` in development (the names in Railway's service list on 2026-09-23). The URL is a capability, so it lives only in Railway.
   3. After the next hourly run, each check shows a ping. The maintenance log says `Heartbeat sent`. An unusable value logs `[config]` and `Heartbeat invalid` on every run instead.
-- **On a heartbeat alarm**, read the maintenance log first. `Heartbeat withheld` means the outbox is paused with letters waiting, or that they could not be counted. While that alarm stands, a run that stops happening raises nothing new, so check the last run times on the panel's `/maintenance` page as well.
+- **On a heartbeat alarm**, read the maintenance log first. `Heartbeat withheld` says why: the outbox is paused with letters waiting, letters are still waiting after their mail day, or one of the two could not be counted. For late letters, the admin panel's `/alerts` page has a `schedule_missed_mail_day` alert for each. While that alarm stands, a run that stops happening raises nothing new, so check the last run times on the panel's `/maintenance` page as well.
+- **Notices to the operator (#699).** `LETTER_IRL_OPERATOR_ALERT_URL`, required in production on the API and maintenance services, takes a plain-text POST for each of these, at most one of each kind an hour per process (`src/services/operatorNotify.ts`):
+  - a daily limit that refused someone (once a UTC day per limit);
+  - held mail that missed its mail day;
+  - letters the provider cancelled;
+  - a dispatch whose outcome is unknown;
+  - mail held because its funding was refunded or disputed.
+
+  A notice names no customer, letter or order: the Alerts page has them. Setup: a healthchecks.io check of its own, separate from the heartbeat's, with its `/fail` URL set on both services, so each notice emails the owner; or an ntfy topic, for a phone.
 - **Who watches:** the owner, for held mail, refunds and disputes, through the admin panel: `/alerts`, and an order or account found through Lookup.
 
 ## Stopping and recovering
