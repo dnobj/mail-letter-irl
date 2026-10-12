@@ -216,13 +216,13 @@ describe('one letter-preview pipeline (#689)', () => {
         expect(helpers.createLetterDraftAndBuildOutput).not.toHaveBeenCalled();
       });
 
-      it('refuses a letter with no picture before any check on the addresses, in words for the device', async () => {
+      it('refuses a letter with no picture before any check on the addresses, in the exact words for the device (the desktop words are a prefix of the mobile ones)', async () => {
         vi.mocked(resolvePreviewImageSource).mockResolvedValueOnce({ kind: 'none' } as never);
-        await expect(tool.handler(input, context(true))).rejects.toThrow(MOBILE_IMAGE_ERRORS.letterWithImage);
+        await expect(tool.handler(input, context(true))).rejects.toMatchObject({ message: MOBILE_IMAGE_ERRORS.letterWithImage });
         expect(order).toEqual([...SHARED_BEFORE]);
 
         vi.mocked(resolvePreviewImageSource).mockResolvedValueOnce({ kind: 'none' } as never);
-        await expect(tool.handler(input, context(false))).rejects.toThrow(MOBILE_IMAGE_ERRORS.desktop);
+        await expect(tool.handler(input, context(false))).rejects.toMatchObject({ message: MOBILE_IMAGE_ERRORS.desktop });
         expect(downloadAndProcessLetterImageWithPreview).not.toHaveBeenCalled();
       });
 
