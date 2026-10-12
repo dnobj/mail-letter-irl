@@ -979,6 +979,7 @@ describePostgres('content retention sweep', () => {
       expect(summary.errors).toEqual([]);
       expect(Object.keys(summary).sort()).toEqual([
         'abandonedDraftsRedacted',
+        'cancelledHeldLettersRedacted',
         'draftsRedacted',
         'errors',
         'lettersRedacted',

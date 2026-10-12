@@ -997,6 +997,9 @@ describePostgres('arrive-by (migration 040, #535)', () => {
 
   it("keeps a cancelled held letter's sent draft 7 days after the cancel, not until after its mail date (#701)", async () => {
     const userId = await seedUser();
+    // Promotional credits: this file's own lots are adjustments with no order, which the
+    // retention sweeps' money hold keeps back (#729), and that is not what this case is about.
+    await pool.query("UPDATE credit_ledger SET source_type = 'promo' WHERE user_id = $1", [userId]);
     const letterId = await sendHeld(userId);
     const draftId = (await pool.query('SELECT draft_id FROM letter_drafts WHERE consumed_letter_id = $1', [letterId])).rows[0].draft_id;
     const retention = await import('../../src/services/retentionService.js');
