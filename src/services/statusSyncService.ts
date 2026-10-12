@@ -143,6 +143,10 @@ export async function syncLetterStatuses(
       // final, whatever the provider now answers.
       if (letter.status === 'delivered') continue;
 
+      // A status the provider has that this code does not know (#682): the
+      // letter keeps its own, and the provider said so in its diagnostic.
+      if (providerStatus.status === 'unrecognised') continue;
+
       // Check if status changed
       if (providerStatus.status !== letter.status) {
         console.log(`   📝 Letter status updated: ${letter.status} → ${providerStatus.status}`);

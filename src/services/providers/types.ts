@@ -146,8 +146,11 @@ export interface LetterStatus {
   /** Provider-specific tracking ID */
   trackingId: string;
 
-  /** Current status */
-  status: 'queued' | 'accepted' | 'processing' | 'in_transit' | 'delivered' | 'failed' | 'returned';
+  /**
+   * Current status. `unrecognised`: the provider answered a status this code does not know, so the letter's own
+   * status is left as it is (#682); reading it as any one of the others could move a letter backwards.
+   */
+  status: 'queued' | 'accepted' | 'processing' | 'in_transit' | 'delivered' | 'failed' | 'returned' | 'unrecognised';
 
   /** Human-readable status message */
   statusMessage: string;
