@@ -1627,7 +1627,12 @@ describe('mail left for the operator (#696)', () => {
   });
 
   it('is put back, not failed, when it fails before dispatch: a claim a crash left behind on its last attempt', async () => {
-    mockClaims();
+    // Its last attempt: a failure would be final.
+    query.mockImplementation(async (sql: string) => {
+      if (sql.includes('WITH candidate')) return { rows: [{ ...job, attempts: 5, max_attempts: 5 }] };
+      if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...letter }] };
+      return { rows: [] };
+    });
     vi.mocked(getProviderForMailType).mockRejectedValueOnce(new Error('provider unavailable'));
     const calls: Array<{ sql: string; params: unknown[] }> = [];
     clientQuery.mockImplementation(async (sql: string, values: unknown[] = []) => {
@@ -1722,7 +1727,9 @@ describe('cancelLeftLetterJobAsAdmin: the operator cancels mail left for them (#
     expect(order('pg_advisory_xact_lock')).toBeLessThan(order('FROM letters WHERE letter_id = $1 FOR UPDATE'));
     expect(order('FROM letters WHERE letter_id = $1 FOR UPDATE')).toBeLessThan(order('FROM letter_jobs WHERE job_id = $1 FOR UPDATE'));
     // The account for update: the return changes its balance (#696 review round 2).
-    expect(order('FROM letter_jobs WHERE job_id = $1 FOR UPDATE')).toBeLessThan(order('FROM users WHERE user_id = $1 FOR UPDATE'));
+    const account = calls.find(call => call.sql.startsWith('SELECT sends_blocked_reason FROM users'))!;
+    expect(account.sql).toContain('FOR UPDATE');
+    expect(order('FROM letter_jobs WHERE job_id = $1 FOR UPDATE')).toBeLessThan(calls.indexOf(account));
     // And its history, as the customer's cancel writes it.
     const history = calls.find(call => call.sql.includes('INSERT INTO letter_status_history'))!;
     expect(history.sql).toContain("'queued', 'cancelled', 'operator'");
