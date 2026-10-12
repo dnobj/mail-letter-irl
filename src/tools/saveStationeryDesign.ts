@@ -78,10 +78,13 @@ async function handler(input: SaveStationeryDesignInput, context: ToolContext): 
 export const saveStationeryDesignTool: McpToolDefinition<SaveStationeryDesignInput, SaveStationeryDesignOutput> = {
   name: SAVE_STATIONERY_DESIGN_TOOL,
   title: 'Save a stationery design',
-  description:
+  description: (client) =>
     'Save a stationery design the person describes for their letters: a name, a face, a corner ornament, ruled lines or not, and a grey tone. ' +
     'Only when the person wants a design of their own kept; for one letter, the built-in stationery may do. ' +
-    'Saving under a name the account has replaces that design, so check list_stationery_designs first. ' +
+    // A personal access token adds designs and replaces none (#685).
+    (client.name === 'token'
+      ? 'A design is saved only under a name the account does not have yet, so check list_stationery_designs first. '
+      : 'Saving under a name the account has replaces that design, so check list_stationery_designs first. ') +
     `An account keeps at most ${MAX_STATIONERY_DESIGNS}. ` +
     'A letter is drawn in a saved design with its designId as stationeryDesignId on a letter preview or set_stationery.',
   readOnly: false,

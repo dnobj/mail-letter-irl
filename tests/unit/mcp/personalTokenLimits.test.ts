@@ -125,6 +125,15 @@ describe("personal access tokens and the tools that cannot be undone (#685)", ()
     expect(PERSONAL_TOKEN_REFUSAL).not.toMatch(/return address/);
   });
 
+  it("tells a token's model that a design saves only under a new name, and every other app that a name replaces", async () => {
+    const { saveStationeryDesignTool } = await import("../../../src/tools/saveStationeryDesign.js");
+    const { clientProfileNamed } = await import("../../../src/auth/clientProfiles.js");
+    const describe = saveStationeryDesignTool.description as (client: unknown) => string;
+    expect(describe(clientProfileNamed("token"))).toContain("only under a name the account does not have yet");
+    expect(describe(clientProfileNamed("token"))).not.toContain("replaces that design");
+    expect(describe(clientProfileNamed("claude"))).toContain("replaces that design");
+  });
+
   it("names the website and a signed-in app as where to do it", () => {
     expect(PERSONAL_TOKEN_REFUSAL).toMatch(/Letter IRL website/);
     expect(PERSONAL_TOKEN_REFUSAL).toMatch(/signed in/);
