@@ -505,6 +505,11 @@ export function paragraphMeasure(paragraph: string, size: number, width: number,
  * counts: a blank line costs no shaping, and the page tops a letter flows on
  * to drop blank lines (flowPages), so counting them could stop a letter that
  * fits. A paragraph the wrapping did not finish, for any reason, is truncation.
+ * Within one paragraph wrapParagraph counts every line it makes, a rare line
+ * that draws nothing (only invisible characters) included: the budget's
+ * margin, twice what a page holds, is what covers those. Blank paragraphs past
+ * the budget are still laid out (they cost no shaping), so a letter whose
+ * text ends at the budget is whole, its count of lines exact.
  */
 function wrapParagraphs(text: string, size: number, width: number, fontName: FontName, maxLines: number = Infinity): WrappedParagraphs {
   const key = `${fontName}|${size}|${width}|${maxLines}|${text}`;
@@ -515,9 +520,9 @@ function wrapParagraphs(text: string, size: number, width: number, fontName: Fon
   let written = 0;
   let truncated = false;
   for (const [position, paragraph] of paragraphs.entries()) {
-    if (written >= maxLines) {
-      // Out of lines: only text past here, if there is any, makes the letter longer.
-      truncated = paragraphs.slice(position).some(rest => rest.trim() !== '');
+    if (written >= maxLines && paragraphs.slice(position).some(rest => rest.trim() !== '')) {
+      // Out of lines with text left: the letter is longer than this.
+      truncated = true;
       break;
     }
     const lines: WrappedLine[] = [];

@@ -136,8 +136,8 @@ describe('wrapping paragraphs (#534)', () => {
     // At most a few shapings for each line it lays out (a binary search over its breaks), and no
     // more lines than the budget: a count, not a time, so the test is the same on any machine.
     const shapings = vi.mocked(shape).mock.calls.length;
-    expect(shapings).toBeLessThan(lines * 20);
-    expect(shapings).toBeLessThan(5000);
+    // About 10 a line today (a search over the line's breaks, then the line drawn): 12 is the gate.
+    expect(shapings).toBeLessThan(lines * 12);
   });
 
   it('stops at the budget exactly when the text is many short paragraphs (#694)', () => {
@@ -504,6 +504,27 @@ describe('the line search finds the breaks the scan found (#694)', () => {
     },
     180_000
   );
+});
+
+describe('the budget is part of what a wrapping is remembered by (#694 review round 2)', () => {
+  it('lays a letter out on three pages whole after the same text was laid out on one', () => {
+    // A gift letter's one-page check (letterRunsPast) may run first: its stopped wrapping must
+    // not be the three-page layout's.
+    const text = Array.from({ length: 80 }, (_, index) => `Line ${index + 1} of a letter that runs to two pages.`).join('\n');
+    expect(layoutLetter({ text, layoutType: 'text_only' }).truncated).toBe(true);
+    const three = layoutLetter({ text, layoutType: 'text_only' }, { maxPages: 3 });
+    expect(three.truncated).toBeUndefined();
+    expect(three.overflowLines).toBe(0);
+  });
+});
+
+describe('blank paragraphs past the budget (#694 review round 2)', () => {
+  it('are laid out, so a letter whose text ends at the budget is counted exactly', () => {
+    const text = Array.from({ length: LINE_BUDGET_PER_PAGE }, (_, index) => `Line ${index + 1}`).join('\n') + '\n \n';
+    const layout = layoutLetter({ text, layoutType: 'text_only' });
+    expect(layout.truncated).toBeUndefined();
+    expect(layout.pages[0].linesUsed).toBe(LINE_BUDGET_PER_PAGE + 2);
+  });
 });
 
 describe('blank lines do not spend the line budget (#694 review round 1)', () => {
