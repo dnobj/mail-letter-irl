@@ -69,7 +69,9 @@ describe('set_arrival_date (#535)', () => {
       DRAFT_ID,
       'auth0|owner',
       { arriveBy: '2026-10-16', mailOn: '2026-10-06' },
-      THURSDAY_MORNING
+      THURSDAY_MORNING,
+      // Told the content version once written (#695).
+      expect.any(Function)
     );
     expect(result).toEqual({
       draftId: DRAFT_ID,
@@ -100,7 +102,7 @@ describe('set_arrival_date (#535)', () => {
   ])('clears the dates when arriveBy is %s', async (_label, extra) => {
     const result = await set({ draftId: DRAFT_ID, ...extra });
 
-    expect(setDraftSchedule).toHaveBeenCalledWith(DRAFT_ID, 'auth0|owner', null, THURSDAY_MORNING);
+    expect(setDraftSchedule).toHaveBeenCalledWith(DRAFT_ID, 'auth0|owner', null, THURSDAY_MORNING, expect.any(Function));
     expect(result).toEqual({
       draftId: DRAFT_ID,
       deliveryEstimate: DELIVERY_ESTIMATE,

@@ -32,6 +32,8 @@ interface SetLetterSignatureInput {
 }
 
 export interface SetLetterSignatureOutput extends LetterTravel {
+  /** The draft's content version once changed (#695): the send takes it back. */
+  contentVersion?: string;
   draftId: string;
   /** Whether the letter now prints the saved signature: asked for, always. */
   signature: PreviewSignatureOutput;
@@ -149,6 +151,7 @@ async function handler(input: SetLetterSignatureInput, context: ToolContext): Pr
   const pages = layout.pages.length;
 
   // With what it was drawn from, refused if any of it changed meanwhile.
+  let contentVersion: string | undefined;
   const refusal = await setDraftSignature(
     draftId,
     userId,
@@ -162,7 +165,7 @@ async function handler(input: SetLetterSignatureInput, context: ToolContext): Pr
         signature: draft.signature_image
       }
     },
-    context.now()
+    context.now(), version => { contentVersion = version; }
   );
   if (refusal) throw refused(...SIGNATURE_REFUSALS[refusal], context);
 
@@ -174,6 +177,7 @@ async function handler(input: SetLetterSignatureInput, context: ToolContext): Pr
   // checkout read them (#586).
   const payment = letterPayment(letterOption(layout, draft.mail_service), Number(draft.required_credits ?? 2), gift, context, draftId);
   return {
+    ...(contentVersion ? { contentVersion } : {}),
     draftId,
     signature: { printed: signatureImage !== null, source: 'asked' },
     previewHtml,

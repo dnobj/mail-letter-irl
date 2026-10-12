@@ -23,6 +23,8 @@ interface SetArrivalDateInput {
 }
 
 export interface SetArrivalDateOutput {
+  /** The draft's content version once changed (#695): the send takes it back. */
+  contentVersion?: string;
   draftId: string;
   /** The draft's dates now; absent when it mails as soon as it is sent. */
   schedule?: PreviewScheduleOutput;
@@ -55,8 +57,9 @@ async function handler(
   // refused naming the dates on offer, before the draft is read. None, an
   // empty string included, clears it.
   const schedule = previewSchedule(input.arriveBy, context);
+  let contentVersion: string | undefined;
   const refusal = isDraftIdShape(draftId)
-    ? await setDraftSchedule(draftId, context.user.userId, schedule?.draft ?? null, context.now())
+    ? await setDraftSchedule(draftId, context.user.userId, schedule?.draft ?? null, context.now(), version => { contentVersion = version; })
     : 'not_found';
   if (refusal) {
     // Logged by the draft's state, as it always was here, where the other editors log the code.
@@ -69,6 +72,7 @@ async function handler(
 
   if (!schedule) {
     return {
+      ...(contentVersion ? { contentVersion } : {}),
       draftId,
       deliveryEstimate: DELIVERY_ESTIMATE,
       message: 'No arrival date: once this mail is sent, it goes to the printer as soon as it can. Nothing has been sent.'
@@ -76,6 +80,7 @@ async function handler(
   }
   const sentence = scheduleSentence(schedule.output, context.now());
   return {
+    ...(contentVersion ? { contentVersion } : {}),
     draftId,
     schedule: schedule.output,
     deliveryEstimate: sentence,
