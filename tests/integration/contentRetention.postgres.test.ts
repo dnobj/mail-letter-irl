@@ -594,8 +594,11 @@ describePostgres('content retention sweep', () => {
       const undated = await seedCancelledHeldLetter({ cancelledDaysAgo: 30 });
       await pool.query('UPDATE letters SET arrive_by = NULL, mail_on = NULL WHERE letter_id = $1', [undated]);
       await pool.query('UPDATE letter_jobs SET mail_hold_until = NULL WHERE letter_id = $1', [undated]);
+      // The control, seeded the same way: the seed itself selects (review round 3).
+      const control = await seedCancelledHeldLetter({ cancelledDaysAgo: 30 });
 
-      expect(await retention.purgeCancelledHeldLetterContent()).toBe(0);
+      expect(await retention.purgeCancelledHeldLetterContent()).toBe(1);
+      expect((await readLetter(control)).redacted_at).not.toBeNull();
       for (const letterId of [byOperator, printed, undated]) {
         expect((await readLetter(letterId)).redacted_at, letterId).toBeNull();
       }
@@ -632,7 +635,10 @@ describePostgres('content retention sweep', () => {
     it('holds one whose job is not settled', async () => {
       const letterId = await seedCancelledHeldLetter({ cancelledDaysAgo: 30 });
       await pool.query("UPDATE letter_jobs SET status = 'pending' WHERE letter_id = $1", [letterId]);
-      expect(await retention.purgeCancelledHeldLetterContent()).toBe(0);
+      const control = await seedCancelledHeldLetter({ cancelledDaysAgo: 30 });
+      expect(await retention.purgeCancelledHeldLetterContent()).toBe(1);
+      expect((await readLetter(control)).redacted_at).not.toBeNull();
+      expect((await readLetter(letterId)).redacted_at).toBeNull();
     });
 
     it('runs in the retention sweep on its own window, whatever the caller asks for letters', async () => {

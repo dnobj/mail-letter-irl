@@ -133,7 +133,7 @@ describe("the Retention page", () => {
       }
     });
     expect(page).toContain("cancelled held letters due");
-    expect(page).toContain("2 (held back: 1; 7 days from the customer's cancel, #701)");
+    expect(page).toContain("2 (held back: 1; emptied 4 days after the customer's cancel, its copy kept to day 7, #701)");
   });
 
   it("says when nothing has been restored yet", () => {

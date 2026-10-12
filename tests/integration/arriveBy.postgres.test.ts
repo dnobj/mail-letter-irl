@@ -999,7 +999,16 @@ describePostgres('arrive-by (migration 040, #535)', () => {
     const userId = await seedUser();
     const letterId = await sendHeld(userId);
     const draftId = (await pool.query('SELECT draft_id FROM letter_drafts WHERE consumed_letter_id = $1', [letterId])).rows[0].draft_id;
+    const retention = await import('../../src/services/retentionService.js');
+    const dueBefore = (await retention.previewCancelledHeldLetterContent()).due;
     await expect(held.cancelScheduledMail({ letterId, userId })).resolves.toMatchObject({ ok: true });
+    // The real cancel leaves what the retention sweep reads: the job's hold and a customer's history row
+    // (review round 3). Five days on, its content is due on the unpaid schedule.
+    await pool.query(
+      "UPDATE letter_status_history SET changed_at = NOW() - INTERVAL '5 days' WHERE letter_id = $1 AND source = 'customer'",
+      [letterId]
+    );
+    await expect(retention.previewCancelledHeldLetterContent()).resolves.toMatchObject({ due: dueBefore + 1 });
     // Sent eight days ago, as the sweep sees it; the trigger is off for this, inside a transaction.
     const client = await pool.connect();
     try {
