@@ -1551,7 +1551,8 @@
           (result) => {
             const answer = toolData(result);
             if (answer.draftId !== draftId) {
-              if (force === true) changedRedrawn(draftId, false);
+              // An error result (a host that resolves a failed call) is an ask that failed, to try again.
+              if (force === true) changedRedrawn(draftId, result?.isError || typeof answer.draftId !== "string" ? "failed" : false);
               return;
             }
             // Both answers are final: a sent or expired draft never becomes
@@ -1724,11 +1725,11 @@
 
       // Says so, puts the pressed button back, and asks for the mail as it is now, to draw it whatever this card had set.
       // A version refused twice is not asked about again: the card says to make a new preview.
-      function showChanged(action, draftId) {
+      // refused: the version the send or checkout named, which may be older than the one shown by the time it is refused.
+      function showChanged(action, draftId, refused) {
         const errorMessage = document.getElementById("error-message");
-        const refused = versionFor(draftId);
-        const again = refused !== null && refused === lastRefused;
-        lastRefused = refused;
+        const again = Boolean(refused) && refused === lastRefused;
+        lastRefused = refused || null;
         changed = again ? null : { draftId, action };
         changedNotice = true;
         errorMessage.textContent = changedSaid(action, again ? false : "asking");
@@ -2556,12 +2557,13 @@
         sendButtonText.innerHTML = '<span class="spinner"></span> Sending...';
 
         const sentDraftId = currentDraftId;
+        // The version it shows as it sends (#695): a refusal names this one.
+        const sentVersion = versionFor(sentDraftId);
         try {
           // Call send_postcard via OpenAI callTool
           const sendArgs = { draftId: sentDraftId, confirm: true };
           if (anotherCopy) sendArgs.sendAnotherCopy = true;
           // What it showed (#695): mail changed since is refused, and drawn again.
-          const sentVersion = versionFor(sentDraftId);
           if (sentVersion) sendArgs.contentVersion = sentVersion;
           const result = await host.callTool("send_postcard", sendArgs);
           // A refused send comes back as an error result, not a rejection.
@@ -2639,7 +2641,7 @@
           }
           // Refused for a change since (#695), as an error result or, in ChatGPT, a rejection wrapping its text.
           if (String(error?.message ?? "").includes(CHANGED_SINCE_SHOWN)) {
-            showChanged("send", sentDraftId);
+            showChanged("send", sentDraftId, sentVersion);
             showPickerAgain();
             return;
           }
@@ -2932,11 +2934,12 @@
         button.classList.add("loading");
         buttonText.innerHTML =
           '<span class="spinner"></span> Preparing checkout...';
+        // The version it shows as it pays (#695): a refusal names this one.
+        const paidVersion = versionFor(currentDraftId);
         try {
           const checkoutArgs = { draftId: currentDraftId };
           if (anotherCopy) checkoutArgs.sendAnotherCopy = true;
           // What it showed (#695): mail changed since is refused before any charge, and drawn again.
-          const paidVersion = versionFor(currentDraftId);
           if (paidVersion) checkoutArgs.contentVersion = paidVersion;
           const raw = await host.callTool("create_mail_checkout", checkoutArgs);
           if (raw?.isError) {
@@ -3011,7 +3014,7 @@
           }
           // Refused for a change since (#695), as an error result or, in ChatGPT, a rejection wrapping its text.
           if (String(error?.message ?? "").includes(CHANGED_SINCE_SHOWN)) {
-            showChanged("pay", currentDraftId);
+            showChanged("pay", currentDraftId, paidVersion);
             showPickerAgain();
             return;
           }

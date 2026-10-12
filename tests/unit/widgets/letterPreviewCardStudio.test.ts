@@ -2449,6 +2449,33 @@ describe('the content version the letter card sends (#695)', () => {
     expect(card.byId('error-message').textContent).toBe(`${SAID_SENT} Getting it as it is now…`);
   });
 
+  it('says to try again when the ask comes back as an error result (#695 review round 3)', async () => {
+    const card = mount();
+    await card.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
+    await card.click(card.byId('send-button'));
+    await card.answer(CHANGED, 'send_letter');
+    await card.answer({ result: { isError: true, content: [{ type: 'text', text: 'Something went wrong.' }] } }, 'get_draft_status');
+    expect(card.byId('error-message').textContent).toBe(`${SAID_SENT} This card couldn't check it just now: try again in a moment.`);
+  });
+
+  it('counts as refused the version it sent, not one it drew while the send was out (#695 review round 3)', async () => {
+    const card = mount();
+    await card.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
+    const opening = card.lastRequest('tools/call', 'get_draft_status')!;
+    await card.click(card.byId('send-button'));
+    // While the send is out, the status asked on opening draws the chat's change: the card now shows v_chat.
+    await card.answerTo(opening, ready('v_chat', document1('Dear Sam, and more,\nPat')));
+    await card.answer(CHANGED, 'send_letter');
+    // Its ask answers with nothing to draw.
+    await card.answer(ready('v_now', null), 'get_draft_status');
+    await card.click(card.byId('send-button'));
+    expect(sentWith(card).contentVersion).toBe('v_chat');
+    // v_chat was never refused before: refused now, the card asks again.
+    const asks = card.requests('tools/call', 'get_draft_status').length;
+    await card.answer(CHANGED, 'send_letter');
+    expect(card.requests('tools/call', 'get_draft_status').length).toBe(asks + 1);
+  });
+
   it('knows the refusal however ChatGPT wraps it, on the letter too', async () => {
     const card = mount();
     await card.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
