@@ -872,6 +872,8 @@ describe('commerceService', () => {
       await fulfil();
       expect(mocks.createMail).toHaveBeenCalled();
       expect(missedEvents()).toEqual([]);
+      // Nor tries to: no savepoint for an event it has no dates for.
+      expect(mocks.query.mock.calls.some(([sql]) => String(sql).includes('schedule_missed_event'))).toBe(false);
     });
 
     it('grants a pack its image generations while the switch is on', async () => {

@@ -1816,6 +1816,10 @@ async function transitionPaidCheckout(
       quantity: integerSetting('IMAGE_ENTITLEMENTS_PER_JIT_ORDER', 2)
     });
     await client.query('RELEASE SAVEPOINT jit_fulfillment');
+    // After the release, a throw is meant to abort the whole transaction: the
+    // catch's ROLLBACK TO a released savepoint fails, so nothing commits and
+    // Stripe retries, rather than refunding mail already queued. The miss's
+    // event cannot throw for itself (its own savepoint, #700 review round 3).
     await recordOrderEvent(
       client,
       order.order_id,
@@ -3860,6 +3864,8 @@ export async function fulfillPaidOrder(orderId: string): Promise<boolean> {
         quantity: integerSetting('IMAGE_ENTITLEMENTS_PER_JIT_ORDER', 2)
       });
       await client.query('RELEASE SAVEPOINT recovery_fulfillment');
+      // As in the webhook's fulfilment: a throw after the release aborts the
+      // whole transaction, and the next run tries again.
       await recordOrderEvent(
         client,
         orderId,
