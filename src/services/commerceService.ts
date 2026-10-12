@@ -1216,7 +1216,7 @@ export async function createJitCheckout(
     [params.draftId, params.userId]
   );
   // No row (not the caller's, or gone): a one-page letter, as an empty row always read; prepareJitOrder
-  // refuses it, unless a daily cap refuses first.
+  // refuses it, unless the price warm-up or a daily cap refuses first.
   const peeked = draftPeek.rows.at(0);
   const peekedOption: MailOption = peeked ? draftMailOption(peeked) : { mailType: 'letter' };
   // The option's own code, sold or not, as the quote kicks: for an option

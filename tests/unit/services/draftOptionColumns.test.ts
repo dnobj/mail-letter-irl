@@ -22,7 +22,7 @@ import { describe, expect, it } from 'vitest';
  * Kept beside the row type (#691, review round 1): DraftOptionRow makes a reader
  * that DECLARES part of the option fail to compile, but every query declares its
  * row type by hand and nothing checks the SQL against it. A list built from
- * DRAFT_OPTION_COLUMNS is whole; this guards the rest, and the two locking reads.
+ * DRAFT_OPTION_COLUMNS is whole; this guards the rest, and the three whole-row reads.
  */
 
 /** The repository's src folder, whatever the directory the tests run from. */
@@ -74,9 +74,17 @@ describe('the draft columns a price is read from (#625)', () => {
   it('locks the draft it charges for and sends by reading all of it (#691)', () => {
     // prepareJitOrder checks the paid product against the option it reads here, and the send refuses a
     // pack for mail no pack pays for by it: a narrower read would type-check, since the row type is taken on trust.
-    for (const file of ['services/commerceService.ts', 'services/mailSendService.ts']) {
+    for (const [file, fn] of [
+      ['services/commerceService.ts', 'async function prepareJitOrder('],
+      ['services/mailSendService.ts', 'export async function createMailOrderFromDraftWithClient(']
+    ]) {
       const text = readFileSync(join(SRC, file), 'utf8');
-      expect(text, file).toContain("'SELECT * FROM letter_drafts WHERE draft_id = $1 FOR UPDATE'");
+      const start = text.indexOf(fn);
+      expect(start, `${file}: ${fn}`).toBeGreaterThan(-1);
+      // The function's own read: up to the next top-level function.
+      const end = text.slice(start + fn.length).search(/\n(export )?(async )?function /);
+      const body = end < 0 ? text.slice(start) : text.slice(start, start + fn.length + end);
+      expect(body, file).toContain("'SELECT * FROM letter_drafts WHERE draft_id = $1 FOR UPDATE'");
     }
   });
 

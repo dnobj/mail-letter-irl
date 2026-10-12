@@ -4,7 +4,7 @@
  * letter as one page, or a certified letter as a standard one; the row draftMailOption takes
  * names every column, so a reader that declares part of them does not compile. The SQL is
  * never checked against the declared type: draftOptionColumns.test.ts still searches the
- * source for a column list that leaves the service out, and pins the two locking reads.
+ * source for a column list that leaves the service out, and pins the three whole-row reads.
  *
  * What the option is for each row: mailOptionPrices.test.ts and commerceService.test.ts;
  * letterOption: certifiedReaders.test.ts; the readers' own queries: draftService.test.ts
@@ -34,7 +34,8 @@ describe('the columns a draft is priced from (#691)', () => {
     const fromWhole: DraftOptionRow = whole;
     expect(draftMailOption(fromWhole)).toEqual({ mailType: 'letter', pages: 2, mailService: 'certified' });
 
-    // The pages without the service: the partial-row defect (#625). The test types fail if this compiles.
+    // The pages without the service: the partial-row defect (#625). The build checks the same in src
+    // (_everyOptionColumnIsRequired in mailOptions.ts); here, the test types count it.
     // @ts-expect-error mail_service and postcard_size are missing
     const partial: DraftOptionRow = { mail_type: 'letter', pages: 2 };
     // Read without them, a certified two-page letter would be priced as a standard one.

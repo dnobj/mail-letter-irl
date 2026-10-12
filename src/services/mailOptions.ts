@@ -1,16 +1,18 @@
 /**
- * Who pays for a piece of mail (#691): the one place the send, the checkout, the
- * confirmation page, the previews and the draft editors read a draft's mail option
- * from, and the one rule for whether a letter pack or a gift letter pays for it.
+ * Who pays for a piece of mail (#691): where the send, the checkout, the confirmation
+ * page, the previews and the draft editors read a draft's mail option from its row,
+ * and the one rule for whether a letter pack or a gift letter pays for it. (The
+ * postcard previews and restyles name a postcard's option from the size asked for:
+ * { mailType: 'postcard', postcardSize }.)
  *
  * A draft's price depends on four of its columns: its mail type, a postcard's size,
  * a letter's printed pages (migration 047, #586) and how a letter travels (052,
  * #625). A reader that loads some of them but not all prices a long letter as one
  * page, or a certified letter as a standard one. So the row draftMailOption takes
  * names all four (DraftOptionRow): a reader that declares part of them does not
- * compile. The compiler takes a query's declared row type on trust, so a query that
- * reads the option by name selects DRAFT_OPTION_COLUMNS, and getDraft, the checkout and
- * the send read the whole row (SELECT *). tests/unit/services/draftOptionColumns.test.ts
+ * compile. The compiler takes a query's declared row type on trust, so the checkout's
+ * peek and getDraftForMailService select DRAFT_OPTION_COLUMNS, getDraftState lists the
+ * four by hand, and getDraft, the checkout and the send read the whole row (SELECT *). tests/unit/services/draftOptionColumns.test.ts
  * pins those three reads and fails on a column list that selects pages without
  * mail_service; any other partial reader is caught only in review. The database holds any writer to the same rules
  * (migrations 047, 052 and 053's checks); storedPages and storedMailService refuse
@@ -23,8 +25,6 @@ import { MAX_LETTER_PAGES } from '../render/geometry.js';
 import type { Layout } from '../render/index.js';
 import type { MailService, MailType, PostcardSize } from './types.js';
 
-/** The columns of letter_drafts a draft's mail option is read from, for a query's select list. */
-export const DRAFT_OPTION_COLUMNS = 'mail_type, postcard_size, pages, mail_service';
 
 /**
  * The columns a draft's option is read from, every one of them: a row typed
@@ -42,6 +42,14 @@ type OptionalOptionColumn = { [K in keyof DraftOptionRow]-?: object extends Pick
 // Checked by the build, whatever the tests' type ratchet allows: no column of the option may be left out.
 const _everyOptionColumnIsRequired: [OptionalOptionColumn] extends [never] ? true : never = true;
 void _everyOptionColumnIsRequired;
+
+const OPTION_COLUMNS = ['mail_type', 'postcard_size', 'pages', 'mail_service'] as const satisfies readonly (keyof DraftOptionRow)[];
+// Checked by the build: the select list names every column of the row.
+const _everyOptionColumnIsSelected: [Exclude<keyof DraftOptionRow, (typeof OPTION_COLUMNS)[number]>] extends [never] ? true : never = true;
+void _everyOptionColumnIsSelected;
+
+/** The columns of letter_drafts a draft's mail option is read from, for a query's select list. */
+export const DRAFT_OPTION_COLUMNS = OPTION_COLUMNS.join(', ');
 
 /**
  * The mail option a draft is, from its row: its mail type, a letter's printed
