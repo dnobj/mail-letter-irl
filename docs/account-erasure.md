@@ -33,7 +33,15 @@ erasure cancels it only once nothing else holds the account back, so a refused e
 Held mail is not cancelled when:
 - its mail date has come: it is due, and holds the account back until it mails;
 - it is Pay & Send: it is a paid order not yet mailed, and holds the account back like any other, because
-  its refund is a person's decision.
+  its refund is a person's decision. Two remedies end that hold (#701), and the operator chooses:
+  - **refund the order in full** in the Stripe dashboard: the refund's webhook cancels the letter before
+    it prints, and the order, once refunded, no longer holds the erasure back. A partial refund only raises
+    an alert, and the letter still mails. A letter the outbox has already taken is held for a person
+    instead, with a critical alert (`refunded_mail_already_dispatched`);
+  - **send it now**: the admin panel's **Send held mail now** (`job.dispatch_now`) makes it due at once,
+    the next hourly run mails it, and the erasure can be queued again once it has.
+
+  Waiting for its mail date also ends it, which can be up to 60 days away.
 
 Prepaid mail held for its funding (#696), a pack refunded in full or disputed, is cancelled the
 same way, due or not: it waits for a person, and an erasure is one. Other mail of an account whose

@@ -67,6 +67,7 @@ ${
   report
     ? html`${definitionList([
         ["letters due", html`${report.letters.due} (past window: ${report.letters.pastWindow}; held back: ${report.letters.heldBack}; oldest due ${report.letters.oldestDueDays ?? "—"} days)`],
+        ["cancelled held letters due", html`${report.cancelledHeldLetters.due} (held back: ${report.cancelledHeldLetters.heldBack}; emptied 4 days after the customer's cancel, its copy kept to day 7, #701)`],
         ["paid drafts due", html`${report.paidDrafts.due} (held back: ${report.paidDrafts.heldBack})`],
         ["abandoned drafts due", html`${report.abandonedDrafts.due} (held back: ${report.abandonedDrafts.heldBack})`],
       ])}

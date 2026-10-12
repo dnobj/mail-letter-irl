@@ -13,6 +13,7 @@ const services = vi.hoisted(() => ({
   processDueLetterJobs: vi.fn().mockResolvedValue({ processed: 0 }),
   processAccountErasures: vi.fn().mockResolvedValue({ erased: 0, refused: 0, retrying: 0, failed: 0 }),
   processRetentionRestores: vi.fn().mockResolvedValue({ done: 0, refused: 0, retrying: 0, failed: 0 }),
+  runRetentionPreview: vi.fn(),
   runCommerceMaintenance: vi.fn().mockResolvedValue({}),
   reconcileGenerationReservations: vi.fn().mockResolvedValue({}),
   cleanupExpiredImages: vi.fn().mockResolvedValue(0),
@@ -52,7 +53,8 @@ vi.mock('../../../src/services/accountErasureService.js', () => ({
 }));
 vi.mock('../../../src/services/retentionService.js', async importOriginal => ({
   ...(await importOriginal<typeof import('../../../src/services/retentionService.js')>()),
-  processRetentionRestores: services.processRetentionRestores
+  processRetentionRestores: services.processRetentionRestores,
+  runRetentionPreview: services.runRetentionPreview
 }));
 vi.mock('../../../src/services/packRefundService.js', () => ({
   reconcilePackRefunds: async () => ({ retried: 0, adopted: 0, settled: 0, compensated: 0 })
@@ -786,6 +788,36 @@ describe('maintenance deployment validation', () => {
       expect(logged).not.toContain('secret-subject');
       expect(logged).not.toContain('example.invalid');
     });
+  });
+});
+
+describe('the retention report (#153, #701)', () => {
+  afterEach(() => {
+    services.runMaintenanceTaskIfDue.mockReset().mockResolvedValue({ ran: false });
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it('logs the counts of each population, cancelled held letters included', async () => {
+    const output = captureOutput();
+    stubValidDevelopment();
+    const preview = (due: number) => ({ pastWindow: due + 1, due, heldBack: 1, oldestDueDays: null, newestDueDays: null });
+    services.runRetentionPreview.mockResolvedValue({
+      letters: preview(3),
+      cancelledHeldLetters: preview(2),
+      paidDrafts: preview(0),
+      abandonedDrafts: preview(1),
+      errors: []
+    });
+    services.runMaintenanceTaskIfDue.mockImplementation((async (name, _interval, task) =>
+      name === 'content-retention-report' ? { ran: true, result: await task() } : { ran: false }) as TaskRunner);
+
+    await expect(maintenanceEntry()).resolves.toBeUndefined();
+
+    expect(output()).toContain('"event":"retention.preview"');
+    expect(output()).toContain('"cancelledHeldLettersDue":2');
+    expect(output()).toContain('"cancelledHeldLettersHeldBack":1');
+    expect(output()).toContain('"lettersDue":3');
   });
 });
 

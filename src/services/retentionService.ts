@@ -19,7 +19,10 @@ import type { JobStatus, LetterStatus, OrderStatus } from './types.js';
  *     ones it can; purgeAbandonedDraftContent handles the ones the schema
  *     forbids deleting. cleanupOldDrafts() also deletes a sent draft with no
  *     order 7 days after the send (its letter keeps the content), except a
- *     held letter's, which it keeps until 7 days after the mail date (#564).
+ *     held letter's, which it keeps until 7 days after the mail date (#564),
+ *     or, once that letter is cancelled, 7 days after the cancel (#701).
+ *   - Held mail its customer cancelled, never printed: the unpaid 7 days,
+ *     from the cancel (purgeCancelledHeldLetterContent, #701).
  *
  * REDACTION MOVES CONTENT TO QUARANTINE; IT DOES NOT DESTROY IT
  * Two max-effort reviews of the direct-overwrite design each found ways it
@@ -159,6 +162,8 @@ const MAX_BATCH_LIMIT = 5000;
 
 export interface RetentionSweepResult {
   lettersRedacted: number;
+  /** Held mail its customer cancelled, on the unpaid schedule (#701). */
+  cancelledHeldLettersRedacted: number;
   draftsRedacted: number;
   abandonedDraftsRedacted: number;
   /** Quarantine rows whose recovery window expired and were purged. */
@@ -341,6 +346,68 @@ const ABANDONED_DRAFT_DUE_PREDICATE = `        WHERE d.redacted_at IS NULL
                  WHERE d.consumed_letter_id IS NOT NULL
                    AND j.letter_id = d.consumed_letter_id
                    AND NOT (j.status = ANY($3::varchar[]))
+              )`;
+
+/**
+ * Held mail its customer cancelled before it went to the printer (#701):
+ * never printed, so on the unpaid schedule (UNPAID_DRAFT_RETENTION_DAYS),
+ * counted from the cancel, not 90 days from its creation.
+ *
+ * Held mail is known by its job's hold (letter_jobs.mail_hold_until, 055),
+ * which the cancel leaves and the admin panel's reader role may read, as it
+ * may not letters.mail_on; the panel's /retention page runs the preview
+ * (#701 review round 1). A job written while 055 was deploying carries its
+ * hold only in metadata.heldUntil until 055's backfill is run again (its
+ * header says how): such a letter is missed here and stays on the letter
+ * schedule, which keeps it longer, never shorter (#701 review round 2).
+ *
+ * The cancel is the
+ * customer's (letter_status_history, source 'customer', which
+ * cancelScheduledMail writes and nothing rewrites): an operator's cancel of
+ * mail held for its funding (#696) may be evidence in a dispute, and keeps the
+ * letter schedule. Never accepted by the provider (sent_at). The job settled,
+ * and the same holds as the letter schedule's on its order and on the money
+ * that paid for it.
+ *
+ * $1 live days, $2 settled job statuses, $3 settled order statuses, $4 money-backed source types.
+ */
+const CANCELLED_HELD_LETTER_CANCELLED_AT = `(SELECT MAX(h.changed_at) FROM letter_status_history h
+                 WHERE h.letter_id = l.letter_id AND h.new_status = 'cancelled' AND h.source = 'customer')`;
+
+const CANCELLED_HELD_LETTER_HELD = `EXISTS (
+                SELECT 1 FROM letter_jobs hj
+                 WHERE hj.letter_id = l.letter_id AND hj.mail_hold_until IS NOT NULL
+              )`;
+
+const CANCELLED_HELD_LETTER_DUE_PREDICATE = `        WHERE l.redacted_at IS NULL
+          AND l.status = 'cancelled'
+          AND ${CANCELLED_HELD_LETTER_HELD}
+          AND l.sent_at IS NULL
+          AND ${CANCELLED_HELD_LETTER_CANCELLED_AT} < NOW() - make_interval(days => $1::int)
+          AND NOT EXISTS (
+                SELECT 1 FROM letter_jobs j
+                 WHERE j.letter_id = l.letter_id
+                   AND NOT (j.status = ANY($2::varchar[]))
+              )
+          AND NOT EXISTS (
+                SELECT 1 FROM orders o
+                 WHERE o.letter_id = l.letter_id
+                   AND NOT (o.status = ANY($3::varchar[]))
+              )
+          AND NOT EXISTS (
+                SELECT 1
+                  FROM credit_transactions txn
+                  JOIN credit_consumption cc ON cc.transaction_id = txn.transaction_id
+                  JOIN credit_ledger lot ON lot.ledger_id = cc.ledger_id
+                  LEFT JOIN orders o ON o.order_id = lot.source_order_id
+                 WHERE txn.reference_type = 'letter'
+                   AND txn.type = 'deduction'
+                   AND txn.reference_id = l.letter_id
+                   AND (
+                         lot.status = 'revoked'
+                      OR (o.order_id IS NULL AND lot.source_type::text = ANY($4::varchar[]))
+                      OR (o.order_id IS NOT NULL AND NOT (o.status = ANY($3::varchar[])))
+                       )
               )`;
 
 export interface RetentionPreview {
@@ -641,6 +708,89 @@ ${ABANDONED_DRAFT_DUE_PREDICATE}
 }
 
 /**
+ * REPORT MODE for held mail its customer cancelled (#701). Writes nothing.
+ * `db` is the pool unless given: a test runs it as the admin panel's reader role.
+ */
+export async function previewCancelledHeldLetterContent(
+  retentionDays = UNPAID_DRAFT_RETENTION_DAYS,
+  db: SqlClient = { query }
+): Promise<RetentionPreview> {
+  assertRetentionArgs(retentionDays, 1);
+  const { liveDays } = splitRetentionWindow(retentionDays);
+  const params = [liveDays, SETTLED_JOB_STATUSES, SETTLED_ORDER_STATUSES, MONEY_BACKED_SOURCE_TYPES];
+  const result = await db.query(
+    `SELECT
+       (SELECT COUNT(*) FROM letters l
+         WHERE l.redacted_at IS NULL
+           AND l.status = 'cancelled'
+           AND ${CANCELLED_HELD_LETTER_HELD}
+           AND l.sent_at IS NULL
+           AND ${CANCELLED_HELD_LETTER_CANCELLED_AT} < NOW() - make_interval(days => $1::int)
+       ) AS past_window,
+       (SELECT COUNT(*) FROM letters l
+${CANCELLED_HELD_LETTER_DUE_PREDICATE}
+       ) AS due,
+       (SELECT MAX(EXTRACT(EPOCH FROM (NOW() - ${CANCELLED_HELD_LETTER_CANCELLED_AT})) / 86400)
+          FROM letters l
+${CANCELLED_HELD_LETTER_DUE_PREDICATE}
+       ) AS oldest_due_days,
+       (SELECT MIN(EXTRACT(EPOCH FROM (NOW() - ${CANCELLED_HELD_LETTER_CANCELLED_AT})) / 86400)
+          FROM letters l
+${CANCELLED_HELD_LETTER_DUE_PREDICATE}
+       ) AS newest_due_days`,
+    params
+  );
+  return toPreview(result.rows[0] as Record<string, unknown> | undefined);
+}
+
+/**
+ * Removes the content of held mail its customer cancelled, on the unpaid
+ * schedule from the cancel (#701), as purgeExpiredLetterContent removes a
+ * letter's: the same three columns, into the same quarantine as 'letters', so
+ * the restore puts it back as it would any letter's. Its recovery window runs
+ * from the cancel too. ENFORCING.
+ */
+export async function purgeCancelledHeldLetterContent(
+  retentionDays = UNPAID_DRAFT_RETENTION_DAYS,
+  batchLimit = DEFAULT_BATCH_LIMIT
+): Promise<number> {
+  assertRetentionArgs(retentionDays, batchLimit);
+  const { liveDays } = splitRetentionWindow(retentionDays);
+  const result = await query(
+    `WITH due AS (
+       SELECT l.letter_id
+         FROM letters l
+${CANCELLED_HELD_LETTER_DUE_PREDICATE}
+        ORDER BY l.created_at
+        LIMIT $5::int
+        FOR UPDATE OF l SKIP LOCKED
+     ),
+     quarantined AS (
+       INSERT INTO redacted_content_quarantine (source_table, source_id, content, purge_after)
+       SELECT 'letters',
+              l.letter_id,
+              jsonb_build_object(
+                'content', l.content,
+                'recipient', l.recipient,
+                'preview_html', to_jsonb(l.preview_html)
+              ),
+              GREATEST(${CANCELLED_HELD_LETTER_CANCELLED_AT} + make_interval(days => $6::int), ${RECOVERY_FLOOR})
+         FROM letters l
+        WHERE l.letter_id IN (SELECT letter_id FROM due)
+       ON CONFLICT (source_table, source_id) DO NOTHING
+     )
+     UPDATE letters
+        SET content = '{}'::jsonb,
+            recipient = '{}'::jsonb,
+            preview_html = NULL,
+            redacted_at = NOW()
+      WHERE letter_id IN (SELECT letter_id FROM due)`,
+    [liveDays, SETTLED_JOB_STATUSES, SETTLED_ORDER_STATUSES, MONEY_BACKED_SOURCE_TYPES, batchLimit, retentionDays]
+  );
+  return result.rowCount ?? 0;
+}
+
+/**
  * Expire the recovery window.
  *
  * This is the statement that finally destroys content, and it is deliberately
@@ -838,6 +988,7 @@ export async function handleRetentionRestore(client: SqlClient, payload: unknown
 
 export interface RetentionPreviewResult {
   letters: RetentionPreview;
+  cancelledHeldLetters: RetentionPreview;
   paidDrafts: RetentionPreview;
   abandonedDrafts: RetentionPreview;
   errors: string[];
@@ -866,6 +1017,10 @@ export async function runRetentionPreview(
 
   return {
     letters: await run('letters', () => previewExpiredLetterContent(retentionDays)),
+    // Its own published number, not the caller's (#701).
+    cancelledHeldLetters: await run('cancelled_held_letters', () =>
+      previewCancelledHeldLetterContent(UNPAID_DRAFT_RETENTION_DAYS)
+    ),
     paidDrafts: await run('paid_drafts', () => previewPaidDraftContent(retentionDays)),
     abandonedDrafts: await run('abandoned_drafts', () =>
       previewAbandonedDraftContent(UNPAID_DRAFT_RETENTION_DAYS)
@@ -895,7 +1050,7 @@ export async function runRetentionSweep(
   batchLimit = DEFAULT_BATCH_LIMIT
 ): Promise<RetentionSweepResult> {
   const errors: string[] = [];
-  const counts = { letters: 0, drafts: 0, abandoned: 0, quarantine: 0 };
+  const counts = { letters: 0, cancelledHeld: 0, drafts: 0, abandoned: 0, quarantine: 0 };
 
   const run = async (label: string, task: () => Promise<number>): Promise<number> => {
     try {
@@ -909,6 +1064,10 @@ export async function runRetentionSweep(
   counts.letters = await run('letters', () =>
     purgeExpiredLetterContent(retentionDays, batchLimit)
   );
+  // The unpaid window, as the abandoned drafts' (#701).
+  counts.cancelledHeld = await run('cancelled_held_letters', () =>
+    purgeCancelledHeldLetterContent(UNPAID_DRAFT_RETENTION_DAYS, batchLimit)
+  );
   counts.drafts = await run('paid_drafts', () =>
     purgePaidDraftContent(retentionDays, batchLimit)
   );
@@ -920,11 +1079,13 @@ export async function runRetentionSweep(
 
   return {
     lettersRedacted: counts.letters,
+    cancelledHeldLettersRedacted: counts.cancelledHeld,
     draftsRedacted: counts.drafts,
     abandonedDraftsRedacted: counts.abandoned,
     quarantinePurged: counts.quarantine,
     moreWaiting:
       counts.letters >= batchLimit ||
+      counts.cancelledHeld >= batchLimit ||
       counts.drafts >= batchLimit ||
       counts.abandoned >= batchLimit ||
       counts.quarantine >= batchLimit ||

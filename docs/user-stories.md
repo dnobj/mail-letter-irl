@@ -847,7 +847,7 @@ See [gift-letters.md](gift-letters.md). Built behind `LETTER_IRL_GIFT_LETTERS_EN
 - [ ] Expired drafts cannot be sent
 - [ ] User gets clear error with instructions to re-preview
 - [ ] Daily job marks pending drafts as expired
-- [ ] Old drafts cleaned up after 7 days, except a held letter's, kept until 7 days after its mail date (#564)
+- [ ] Old drafts cleaned up after 7 days, except a held letter's, kept until 7 days after its mail date (#564), or 7 days after the cancel once it is cancelled (#701)
 
 ---
 

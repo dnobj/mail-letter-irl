@@ -845,11 +845,16 @@ describe('draftService', () => {
       const [sql, params] = vi.mocked(db.query).mock.calls[0] as unknown as [string, [Date, number]];
       expect(sql).toMatch(/NOT EXISTS \(\s*SELECT 1 FROM orders WHERE orders\.draft_id = letter_drafts\.draft_id\s*\)/);
       expect(sql).toMatch(
-        /NOT EXISTS \(\s*SELECT 1 FROM letters\s+WHERE letters\.letter_id = letter_drafts\.consumed_letter_id\s+AND letters\.mail_on >= CURRENT_DATE - \$2::int\s*\)/
+        /NOT EXISTS \(\s*SELECT 1 FROM letters\s+WHERE letters\.letter_id = letter_drafts\.consumed_letter_id\s+AND letters\.mail_on >= CURRENT_DATE - \$2::int\s+AND \(letters\.status <> 'cancelled' OR letters\.status_updated_at >= \$1\)\s*\)/
       );
       // The timestamp cutoff and the day count are separate parameters: one
-      // parameter cast two ways silently takes the first type.
-      expect(sql.match(/\$1/g)).toHaveLength(1);
+      // parameter cast two ways silently takes the first type. The cutoff is
+      // compared twice, each time with a timestamptz column and never cast;
+      // the second keeps a cancelled held letter's draft as long after the
+      // cancel as a sent draft after its send (#701).
+      expect(sql.match(/\$1/g)).toHaveLength(2);
+      expect(sql).toContain('updated_at < $1');
+      expect(sql).not.toMatch(/\$1::/);
       expect(sql.match(/\$2/g)).toHaveLength(1);
       expect(params[0]).toBeInstanceOf(Date);
       expect(Math.abs(before - 7 * 24 * 60 * 60 * 1000 - params[0].getTime())).toBeLessThan(5_000);
