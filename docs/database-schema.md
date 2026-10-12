@@ -285,7 +285,8 @@ Background job tracking for letter processing.
 | started_at | TIMESTAMP | YES | - | When processing started (without a zone, as `scheduled_at`) |
 | completed_at | TIMESTAMP | YES | - | When finished (without a zone, as `scheduled_at`) |
 | error_message | TEXT | YES | - | Legacy twin of `last_error`; an error class and provider status only, never provider or driver message text (migrations 031, 032) |
-| metadata | JSONB | YES | - | Job-specific data: `source`, and `heldUntil` for held mail (#535) |
+| metadata | JSONB | YES | - | Job-specific data: `source`. Jobs created before migration 055 also carry `heldUntil` for held mail (#535), which nothing reads now |
+| mail_hold_until | TIMESTAMPTZ | YES | - | The end of an arrive-by hold (#535; migration 055, #693): set when held mail's job is created, null for mail due now. Kept when an operator releases the mail early (only `next_attempt_at` moves), and cleared by a trigger when the job leaves `pending`; a check holds it to pending jobs. Held mail is `src/services/heldMail.ts`'s predicate: pending, not dispatched, never attempted, with a hold, and not yet due. Not the operator's `held` status, `held_at` and `hold_reason` (023) |
 | created_at | TIMESTAMP | NO | NOW() | Job creation (without a zone, as `scheduled_at`) |
 
 **Indexes:**

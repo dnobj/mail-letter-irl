@@ -1,4 +1,5 @@
 import type { AdminSqlClient } from "../database.js";
+import { isHeldMailJobState } from "../../services/heldMail.js";
 import { JOB_COLUMNS, toJobDetail, type JobDetailForLetter, type JobRow } from "./accounts.js";
 
 export interface JobView extends JobDetailForLetter {
@@ -34,14 +35,9 @@ const JOB_JOINED_SQL = `
  */
 export function isHeldMailJob(job: JobView, now: number = Date.now()): boolean {
   return (
-    job.status === "pending" &&
-    job.providerOutcome === "not_dispatched" &&
-    job.attempts === 0 &&
+    isHeldMailJobState({ ...job, mailHoldUntil: job.heldUntil }, now) &&
     job.letterStatus === "queued" &&
-    !job.operatorResolution &&
-    job.heldUntil !== null &&
-    job.nextAttemptAt !== null &&
-    job.nextAttemptAt.getTime() > now
+    !job.operatorResolution
   );
 }
 

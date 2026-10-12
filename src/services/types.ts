@@ -217,6 +217,8 @@ export interface LetterJob {
   provider_outcome: 'not_dispatched' | 'dispatching' | 'accepted' | 'definite_failure' | 'ambiguous';
   provider_dispatch_started_at?: Date;
   held_at?: Date;
+  /** The end of an arrive-by hold (#535, migration 055): set for held mail only, cleared when the job leaves pending. */
+  mail_hold_until?: Date | null;
   hold_reason?: string;
   operator_resolution?: string;
   resolved_at?: Date;

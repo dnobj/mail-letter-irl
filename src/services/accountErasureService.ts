@@ -12,6 +12,7 @@ import {
   SETTLED_ORDER_STATUSES
 } from './retentionService.js';
 import { deleteUploadedPhoto } from './tempImageStore.js';
+import { heldMailJobSql } from './heldMail.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 
 /**
@@ -77,12 +78,10 @@ export const ERASED_EMAIL_PATTERN = 'erased-%@erased.invalid';
 
 /**
  * Held mail an erasure cancels (#535, the owner's default): a prepaid or gift
- * letter waiting in the outbox for its mail date. Its job is pending, never
- * attempted and not yet due, as the pause count reads held mail
- * (letterJobService), and carries the hold it was created with
- * (metadata.heldUntil, which createLetterJobWithClient writes only for held
- * mail): a job scheduled ahead for any other reason holds the account back
- * rather than being cancelled. Read through the job, not letters.mail_on,
+ * letter waiting in the outbox for its mail date: its job held
+ * (heldMailJobSql, as the pause count and the admin release read held mail,
+ * #693), which takes the hold it was created with: a job scheduled ahead for
+ * any other reason holds the account back rather than being cancelled. Read through the job, not letters.mail_on,
  * because the admin reader role runs the preview and holds letter_jobs whole
  * but not that column.
  *
@@ -95,11 +94,7 @@ export const ERASED_EMAIL_PATTERN = 'erased-%@erased.invalid';
  */
 const HELD_MAIL_CONDITION = `l.status = 'queued'
       AND l.funding_type IN ('prepaid_balance', 'gift_letter')
-      AND j.status = 'pending'
-      AND j.provider_outcome = 'not_dispatched'
-      AND j.attempts = 0
-      AND j.next_attempt_at > NOW()
-      AND j.metadata->>'heldUntil' IS NOT NULL`;
+      AND ${heldMailJobSql('j')}`;
 
 /** Refunds that are over; any other status is still moving money. */
 const SETTLED_PACK_REFUND_STATUSES = ['succeeded', 'failed', 'compensated'];

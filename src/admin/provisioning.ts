@@ -104,9 +104,17 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  * column out; the operator reads users whole and writes only the columns
  * listed, none of them this. Erasure, which deletes the designs, runs as the
  * database owner. So nothing to re-run.
+ *
+ * 055 adds letter_jobs.mail_hold_until (#693), the end of an arrive-by hold,
+ * which the panel now reads in place of metadata.heldUntil: required, so the
+ * panel never reads a column that is not there. Both roles read letter_jobs
+ * whole. The release (job.dispatch_now) leaves the column as it is, and the
+ * trigger that clears it when a job leaves pending changes only the row the
+ * operator's own status update writes, so the operator needs no new column.
+ * Nothing to re-run.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
-  "054_stationery_designs.sql";
+  "055_letter_jobs_mail_hold_until.sql";
 
 export interface AdminProvisioningArguments {
   environment: "development" | "production";

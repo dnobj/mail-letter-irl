@@ -224,7 +224,9 @@ describePostgres('arrive-by (migration 040, #535)', () => {
         [job.job_id]
       );
       expect(same.rows[0].same).toBe(true);
-      expect(job.metadata).toMatchObject({ source: 'transactional-outbox', heldUntil: release.toISOString() });
+      // The hold is the job's own column (055, #693), and no longer in its metadata.
+      expect(new Date(job.mail_hold_until).toISOString()).toBe(release.toISOString());
+      expect(job.metadata).toEqual({ source: 'transactional-outbox' });
       // The value moved at the send, as for any letter.
       const credits = (await pool.query('SELECT credits FROM users WHERE user_id = $1', [userId])).rows[0].credits;
       expect(credits).toBe(8);
@@ -233,6 +235,25 @@ describePostgres('arrive-by (migration 040, #535)', () => {
       await expect(jobs.processLetterJob(job.job_id)).resolves.toMatchObject({ claimed: false });
       const after = (await pool.query('SELECT status, attempts FROM letter_jobs WHERE job_id = $1', [job.job_id])).rows[0];
       expect(after).toEqual({ status: 'pending', attempts: 0 });
+
+      // A hold is a pending job's only (#693): whichever writer moves the job on, the
+      // trigger ends its hold, and a hold set on a job that is not pending does not stay.
+      const claimed = await pool.query<{ mail_hold_until: Date | null }>(
+        "UPDATE letter_jobs SET status = 'processing', attempts = attempts + 1 WHERE job_id = $1 RETURNING mail_hold_until",
+        [job.job_id]
+      );
+      expect(claimed.rows[0].mail_hold_until).toBeNull();
+      const set = await pool.query<{ mail_hold_until: Date | null }>(
+        "UPDATE letter_jobs SET mail_hold_until = NOW() + INTERVAL '1 day' WHERE job_id = $1 RETURNING mail_hold_until",
+        [job.job_id]
+      );
+      expect(set.rows[0].mail_hold_until).toBeNull();
+      // And the check stands behind the trigger.
+      const check = await pool.query<{ ok: boolean }>(
+        `SELECT pg_get_constraintdef(oid) LIKE '%mail_hold_until IS NULL%' AS ok
+           FROM pg_constraint WHERE conname = 'letter_jobs_mail_hold_pending'`
+      );
+      expect(check.rows[0]?.ok).toBe(true);
     } finally {
       if (savedSwitch === undefined) delete process.env.LETTER_IRL_OUTBOX_DISPATCH_ENABLED;
       else process.env.LETTER_IRL_OUTBOX_DISPATCH_ENABLED = savedSwitch;
@@ -801,7 +822,7 @@ describePostgres('arrive-by (migration 040, #535)', () => {
 
     // Its hold ended 3 hours ago and it has not gone: stuck.
     await pool.query(
-      "UPDATE letter_jobs SET attempts = 0, metadata = jsonb_set(metadata, '{heldUntil}', to_jsonb((NOW() - INTERVAL '3 hours')::text)) WHERE letter_id = $1",
+      "UPDATE letter_jobs SET attempts = 0, mail_hold_until = NOW() - INTERVAL '3 hours' WHERE letter_id = $1",
       [letterId]
     );
     expect(await stuck(orderId)).toBe(1);

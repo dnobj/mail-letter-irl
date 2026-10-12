@@ -578,7 +578,7 @@ export const JOB_COLUMNS = `
   j.next_attempt_at, j.locked_at, (j.provider_order_id IS NOT NULL) AS has_provider_order_id,
   j.provider_dispatch_started_at, j.held_at, j.hold_reason, j.operator_resolution, j.resolved_at,
   left(j.last_error, 200) AS last_error, j.created_at, j.updated_at,
-  j.metadata->>'heldUntil' AS held_until
+  j.mail_hold_until AS held_until
 `;
 
 export interface JobRow {
@@ -599,11 +599,12 @@ export interface JobRow {
   last_error: string | null;
   created_at: Date;
   updated_at: Date;
-  held_until: string | null;
+  /** mail_hold_until (055, #693): a timestamptz, which pg reads as a Date. */
+  held_until: Date | string | null;
 }
 
-/** A time the job's metadata holds, or null when there is none or it is not a time. */
-function heldUntilOf(value: string | null): Date | null {
+/** The end of the job's hold, or null when it has none or it is not a time. */
+function heldUntilOf(value: Date | string | null): Date | null {
   if (!value) return null;
   const at = new Date(value);
   return Number.isNaN(at.getTime()) ? null : at;

@@ -30,6 +30,7 @@ import { carriedDiagnosticClass, classifyDiagnosticError, writeDiagnostic } from
 import { summarizeProviderRejection } from './providerFailureSummary.js';
 import { enabledUnlessDisabled } from '../utils/envSettings.js';
 import { letterPrintText, signatureParagraph } from './previewService.js';
+import { heldMailJobSql } from './heldMail.js';
 
 const DEFAULT_MAX_ATTEMPTS = 5;
 const STALE_LOCK_MINUTES = 15;
@@ -132,12 +133,13 @@ export async function createLetterJobWithClient(
   options: { notBefore?: Date } = {}
 ): Promise<LetterJob> {
   const notBefore = options.notBefore ?? null;
+  // The hold is its own column (055, #693): mail_hold_until, null for mail due now.
   const result = await client.query<LetterJob>(
     `INSERT INTO letter_jobs (
        job_id, letter_id, status, attempts, max_attempts, scheduled_at,
-       idempotency_key, next_attempt_at, metadata
+       idempotency_key, next_attempt_at, metadata, mail_hold_until
      ) VALUES ($1, $2, 'pending', 0, $3, COALESCE($5::timestamptz, NOW()), $2,
-               COALESCE($5::timestamptz, NOW()), $4)
+               COALESCE($5::timestamptz, NOW()), $4, $5::timestamptz)
      ON CONFLICT (letter_id) DO UPDATE
      SET updated_at = NOW()
      RETURNING *`,
@@ -145,7 +147,7 @@ export async function createLetterJobWithClient(
       randomUUID(),
       letter.letter_id,
       maxAttempts(),
-      JSON.stringify({ source: 'transactional-outbox', ...(notBefore ? { heldUntil: notBefore.toISOString() } : {}) }),
+      JSON.stringify({ source: 'transactional-outbox' }),
       notBefore,
     ]
   );
@@ -1070,9 +1072,9 @@ export async function processLetterJob(
  * redeploy that sets the switch is one such crash (#451 review).
  */
 async function countWaitingLetterJobs(): Promise<number> {
-  // Held mail (#535) is not waiting behind a pause until its date: a job
-  // pending, never attempted and not yet due is exactly a held one (every
-  // other job is created due, and a retry has an attempt), so it is left out.
+  // Held mail (#535) is not waiting behind a pause until its date, so it is
+  // left out (heldMailJobSql): every other job is created due, and a retry has
+  // an attempt.
   const waiting = await query<{ count: string }>(
     `SELECT COUNT(*)::text AS count FROM letter_jobs
       WHERE attempts < max_attempts
@@ -1084,7 +1086,7 @@ async function countWaitingLetterJobs(): Promise<number> {
             AND locked_at < NOW() - INTERVAL '${STALE_LOCK_MINUTES} minutes'
           )
         )
-        AND NOT (status = 'pending' AND attempts = 0 AND next_attempt_at > NOW())`
+        AND NOT (${heldMailJobSql('letter_jobs')})`
   );
   return Number(waiting.rows[0]?.count ?? 0);
 }
@@ -1705,14 +1707,14 @@ export async function retryLetterJobAsAdmin(params: {
 /**
  * Release held mail early (#535, the admin panel's job.dispatch_now): its job
  * becomes due now, so the next maintenance run sends it as an ordinary letter
- * instead of waiting for its mail date. Only mail still held: the job pending,
- * never attempted or dispatched, carrying its hold (metadata.heldUntil, which
- * createLetterJobWithClient writes only for held mail) and not yet due, its
- * letter queued, and a Pay & Send letter's order still awaiting fulfilment.
+ * instead of waiting for its mail date. Only mail still held (heldMailJobSql:
+ * the job pending, never attempted or dispatched, carrying its hold and not yet
+ * due), its letter queued, and a Pay & Send letter's order still awaiting
+ * fulfilment.
  *
- * Only next_attempt_at and scheduled_at move. heldUntil keeps the original
- * time, since the operator role cannot write metadata; the stuck-order
- * condition, which reads it, then counts from the later of the two. The
+ * Only next_attempt_at and scheduled_at move. mail_hold_until keeps the
+ * original time (#693): the stuck-order condition, which reads it, then counts
+ * its grace from the later of the two. The
  * operator audit row records the hold that ended. Locks in the outbox's order:
  * the order, the letter, the job. The customer can still cancel the letter
  * until the run takes it.
@@ -1786,13 +1788,13 @@ export async function releaseHeldLetterJobAsAdmin(params: {
       provider_outcome: string;
       attempts: number;
       operator_resolution: string | null;
-      held_until: string | null;
+      mail_hold_until: Date | null;
       next_attempt_at: Date;
       still_held: boolean;
     }>(
       `SELECT letter_id, status, provider_outcome, attempts, operator_resolution,
-              metadata->>'heldUntil' AS held_until, next_attempt_at,
-              next_attempt_at > NOW() AS still_held
+              mail_hold_until, next_attempt_at,
+              (${heldMailJobSql('letter_jobs')}) AS still_held
        FROM letter_jobs WHERE job_id = $1 FOR UPDATE`, [params.jobId]
     );
     const current = job.rows[0];
@@ -1803,7 +1805,7 @@ export async function releaseHeldLetterJobAsAdmin(params: {
         held?.status !== 'queued' ||
         current.status !== 'pending' || current.provider_outcome !== 'not_dispatched' ||
         current.attempts !== 0 || current.operator_resolution ||
-        !current.held_until || current.still_held !== true) {
+        !current.mail_hold_until || current.still_held !== true) {
       throw new AdminJobReleaseError('invalid_state');
     }
     const released = await client.query<{ next_attempt_at: Date }>(
@@ -1819,7 +1821,7 @@ export async function releaseHeldLetterJobAsAdmin(params: {
       [idempotencyKeyHash,
         actorHash,
         jobHash,
-        JSON.stringify({ jobStatus: 'pending', heldUntil: current.held_until, nextAttemptAt: current.next_attempt_at }),
+        JSON.stringify({ jobStatus: 'pending', heldUntil: current.mail_hold_until, nextAttemptAt: current.next_attempt_at }),
         JSON.stringify({ jobStatus: 'pending', nextAttemptAt: released.rows[0]?.next_attempt_at ?? null }),
         JSON.stringify({ operatorReasonHash: reasonHash, expectedUserHash })]
     );
