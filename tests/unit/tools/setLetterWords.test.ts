@@ -72,6 +72,17 @@ function context(credits = 10): ToolContext {
   } as unknown as ToolContext;
 }
 
+/** What set_letter_words says for each refusal of the draft, word for word. */
+const WORDS_SAYS: Record<string, string> = {
+  DRAFT_NOT_FOUND: "That preview wasn't found. Make a new preview with the words, then try again.",
+  DRAFT_NOT_A_LETTER: "A postcard's words are its message: make a new postcard preview with them.",
+  DRAFT_ALREADY_SENT: "This letter has already been sent, so its words can't change. list_orders shows it.",
+  DRAFT_EXPIRED: 'This preview has expired. Make a new preview with the words.',
+  DRAFT_CHECKOUT_PENDING: "This preview is tied to a Pay & Send payment, so its words can't change now.",
+  DRAFT_NOT_DRAWN: 'This preview was not drawn in a way that can take new words. Make a new preview with them.',
+  DRAFT_CHANGED: 'The letter changed while its page was being drawn again. Try the words again.'
+};
+
 const SENDER: Address = { name: 'Pat Example', addressLine1: '1 Main St', city: 'Springfield', state: 'IL', postalCode: '62701', country: 'US' };
 const RECIPIENT: Address = { name: 'Sam Rivera', addressLine1: '350 Fifth Ave', city: 'New York', state: 'NY', postalCode: '10118', country: 'US' };
 
@@ -540,7 +551,10 @@ describe('set_letter_words', () => {
   ])('refuses %s, writing nothing', async (_label, overrides, input, code) => {
     vi.mocked(getDraftForStationery).mockResolvedValue(overrides ? ({ ...draft({ bodyText: lines(10) }), ...overrides } as never) : null);
     const ctx = context();
-    await expect(handler({ draftId: DRAFT_ID, bodyText: lines(4), signOff: 'Pat', wordsVersion: await versionNow(), ...input }, ctx)).rejects.toMatchObject({ code });
+    await expect(handler({ draftId: DRAFT_ID, bodyText: lines(4), signOff: 'Pat', wordsVersion: await versionNow(), ...input }, ctx)).rejects.toMatchObject({
+      code,
+      message: WORDS_SAYS[code]
+    });
     expect(setDraftWords).not.toHaveBeenCalled();
     expect(ctx.logger.warn).toHaveBeenCalledWith(expect.objectContaining({ event: 'draft.words_refused', reason: code }), expect.any(String));
   });
@@ -554,7 +568,7 @@ describe('set_letter_words', () => {
   ] as const)('says why when the draft changed under the lock: %s', async (refusal, code) => {
     vi.mocked(getDraftForStationery).mockResolvedValue(draft({ bodyText: lines(10) }) as never);
     vi.mocked(setDraftWords).mockResolvedValue(refusal);
-    await expect(change(lines(4))).rejects.toMatchObject({ code });
+    await expect(change(lines(4))).rejects.toMatchObject({ code, message: WORDS_SAYS[code] });
   });
 
   it('logs how long the words are, never the words', async () => {

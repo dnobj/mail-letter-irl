@@ -1,13 +1,13 @@
-import type { Address, LetterLayoutType, McpToolDefinition, ToolContext } from '../contracts/types.js';
+import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
 import { letterPageLimit } from '../config/roomToWrite.js';
 import { isWordsEditorOffered } from '../config/wordsEditor.js';
 import type { SendEligibility } from '../services/commerceService.js';
 import { SIGNATURE_LINES, stationeryOf, type PageFit } from '../render/index.js';
-import { getDraftForStationery, setDraftSignature, type DraftRedrawRefusal } from '../services/draftService.js';
+import { getDraftForStationery, setDraftSignature } from '../services/draftService.js';
 import { getSignature } from '../services/signatureService.js';
 import { PAGE_WORDS, editorPageFit, layoutLetterForPreview, letterOption, letterPayment, letterRunsPast, pageChangeSentence, redrawLetterPreview, type LetterTravel } from './letterHelpers.js';
-import { isDraftIdShape } from './requestSend.js';
-import { requireSignatures, SignatureRefusedError, signatureImageUri, type SignatureRefusalCode } from './signatureShared.js';
+import { draftLetter, draftRefusals, draftRefuser, editableDraft, type DraftRefusal } from './draftEdit.js';
+import { requireSignatures, signatureImageUri } from './signatureShared.js';
 import type { PreviewSignatureOutput } from './signatureInput.js';
 
 /**
@@ -47,24 +47,20 @@ export interface SetLetterSignatureOutput extends LetterTravel {
   message: string;
 }
 
-const REFUSALS: Record<DraftRedrawRefusal, [SignatureRefusalCode, string]> = {
-  not_found: ['DRAFT_NOT_FOUND', "That preview wasn't found. Make a new preview, then try again."],
-  sent: ['DRAFT_ALREADY_SENT', "This letter has already been sent, so its signature can't change. list_orders shows it."],
-  expired: ['DRAFT_EXPIRED', 'This preview has expired. Make a new preview: the letter previews take signature themselves.'],
-  checkout_pending: ['DRAFT_CHECKOUT_PENDING', "This preview is tied to a Pay & Send payment, so its signature can't change now."],
-  // Its words, stationery or signature changed while the page was drawn again.
-  changed: ['DRAFT_CHANGED', 'The letter changed while its page was being drawn again. Try the signature again.']
-};
+/** The draft's state, refused in a signature change's words (#690). 'changed': its words, stationery or signature changed while the page was drawn again. */
+export const SIGNATURE_REFUSALS = draftRefusals({
+  mail: 'letter',
+  what: 'its signature',
+  previewTakes: 'the letter previews take signature themselves',
+  retry: 'signature'
+});
 
-const NOT_DRAWN = 'This preview was not drawn in a way that can take a signature. Make a new preview, with signature if you like.';
+const NOT_DRAWN: DraftRefusal = [
+  'DRAFT_NOT_DRAWN',
+  'This preview was not drawn in a way that can take a signature. Make a new preview, with signature if you like.'
+];
 
-function refused(code: SignatureRefusalCode, message: string, context: ToolContext): SignatureRefusedError {
-  context.logger.warn(
-    { correlationId: context.correlationId, event: 'draft.signature_refused', reason: code },
-    'A signature change was refused'
-  );
-  return new SignatureRefusedError(code, message);
-}
+const refused = draftRefuser('draft.signature_refused', 'A signature change was refused');
 
 /** A signature with no room: the band's lines, and the page the letter may not run past. */
 function noRoom(maxPages: number, gift: boolean): string {
@@ -90,21 +86,22 @@ async function handler(input: SetLetterSignatureInput, context: ToolContext): Pr
   if (typeof input.signature !== 'boolean') {
     throw refused('SIGNATURE_CHOICE_MISSING', 'Say signature: true to print the saved signature, or false to leave it off.', context);
   }
-  const draftId = typeof input.draftId === 'string' ? input.draftId.trim() : '';
   const userId = context.user.userId;
-  const draft = isDraftIdShape(draftId) ? await getDraftForStationery(draftId, userId) : null;
-  if (!draft) throw refused(...REFUSALS.not_found, context);
-  if (draft.mail_type !== 'letter') {
-    throw refused('DRAFT_NOT_A_LETTER', 'A signature is for letters. A postcard prints none.', context);
-  }
-  // Read before the lock, to say why at once; setDraftSignature checks again
-  // under it. A draft an erasure emptied is refused as the lock refuses it.
-  if (draft.status === 'consumed') throw refused(...REFUSALS.sent, context);
-  if (draft.status !== 'pending' || draft.redacted_at || !(new Date(draft.expires_at).getTime() > context.now().getTime())) {
-    throw refused(...REFUSALS.expired, context);
-  }
-  // Only a letter our renderer drew can be drawn again with a signature.
-  if (!draft.renderer_version) throw refused('DRAFT_NOT_DRAWN', NOT_DRAWN, context);
+  // Read before the lock, to say why at once; setDraftSignature checks again under it.
+  const { draftId, draft } = await editableDraft(
+    {
+      draftId: input.draftId,
+      read: getDraftForStationery,
+      mailType: 'letter',
+      wrongKind: ['DRAFT_NOT_A_LETTER', 'A signature is for letters. A postcard prints none.'],
+      // Only a letter our renderer drew can be drawn again with a signature.
+      drawn: found => Boolean(found.renderer_version),
+      notDrawn: NOT_DRAWN,
+      refusals: SIGNATURE_REFUSALS,
+      refuse: refused
+    },
+    context
+  );
 
   // The saved signature, read once: the draft keeps this copy, so replacing
   // the saved one later never changes this letter.
@@ -121,23 +118,14 @@ async function handler(input: SetLetterSignatureInput, context: ToolContext): Pr
     signatureImage = signatureImageUri(saved.png);
   }
 
-  const pagesBefore = Number(draft.pages ?? 1);
-  const sender = draft.sender as unknown as Address;
-  const recipient = draft.recipient as unknown as Address;
-  const bodyText = draft.body_text;
-  const signOff = draft.sign_off ?? '';
-  const layoutType = (draft.layout_type ?? 'text_only') as LetterLayoutType;
+  const { sender, recipient, bodyText, signOff, layoutType, imageData, pagesBefore, gift } = draftLetter(draft);
   // In the stationery it was drawn in: a theme no build draws is drawn Classic,
   // as the redraws read it.
   const stationery = stationeryOf(draft.stationery) ?? undefined;
-  const imageData = layoutType === 'header_image'
-    ? draft.header_image_data
-    : layoutType === 'inline_image' ? draft.inline_image_data : null;
   // On as many pages as a preview may take (#586), and a gift letter on one:
   // it pays for one page only (#579).
-  const gift = draft.is_gift_send === true;
   const maxPages = gift ? 1 : letterPageLimit();
-  const letter = { bodyText, signOff, layoutType, imageData: imageData ?? undefined, signatureImage: signatureImage ?? undefined, stationery };
+  const letter = { bodyText, signOff, layoutType, imageData, signatureImage: signatureImage ?? undefined, stationery };
   let layout;
   try {
     layout = layoutLetterForPreview(letter, context, 'pdf', maxPages)!;
@@ -156,7 +144,7 @@ async function handler(input: SetLetterSignatureInput, context: ToolContext): Pr
     { sender, recipient, bodyText, signOff },
     stationery
   );
-  if (previewHtml === null) throw refused('DRAFT_NOT_DRAWN', NOT_DRAWN, context);
+  if (previewHtml === null) throw refused(...NOT_DRAWN, context);
   const pages = layout.pages.length;
 
   // With what it was drawn from, refused if any of it changed meanwhile.
@@ -175,7 +163,7 @@ async function handler(input: SetLetterSignatureInput, context: ToolContext): Pr
     },
     context.now()
   );
-  if (refusal) throw refused(...REFUSALS[refusal], context);
+  if (refusal) throw refused(...SIGNATURE_REFUSALS[refusal], context);
 
   context.logger.info(
     { correlationId: context.correlationId, event: 'draft.signature_changed', signed: signatureImage !== null, pages, pagesBefore },

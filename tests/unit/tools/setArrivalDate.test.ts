@@ -14,10 +14,10 @@ vi.mock('../../../src/services/draftService.js', () => ({
 
 import { setDraftSchedule } from '../../../src/services/draftService.js';
 import {
-  ArrivalDateRefusedError,
   SET_ARRIVAL_DATE_TOOL,
   setArrivalDateTool
 } from '../../../src/tools/setArrivalDate.js';
+import { DraftRefusedError } from '../../../src/tools/draftEdit.js';
 import { DELIVERY_ESTIMATE } from '../../../src/content/delivery.js';
 import type { ToolContext } from '../../../src/contracts/types.js';
 import { servedToolJsonSchemas } from '../../../src/mcp/manifest.js';
@@ -139,7 +139,7 @@ describe('set_arrival_date (#535)', () => {
 
     const refused = set({ draftId: DRAFT_ID, arriveBy: '2026-10-16' }, ctx);
 
-    await expect(refused).rejects.toBeInstanceOf(ArrivalDateRefusedError);
+    await expect(refused).rejects.toBeInstanceOf(DraftRefusedError);
     await expect(refused).rejects.toMatchObject({ code, diagnosticClass: code, message });
     expect(ctx.logger.warn).toHaveBeenCalledWith(
       expect.objectContaining({ event: 'draft.arrival_date_refused', reason }),

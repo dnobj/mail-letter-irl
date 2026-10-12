@@ -542,9 +542,7 @@ export async function setDraftSchedule(
   schedule: DraftSchedule | null,
   now: Date = new Date()
 ): Promise<DraftScheduleRefusal | null> {
-  return transaction(async client => {
-    const refusal = await lockChangeableDraft(client, draftId, userId, now);
-    if (refusal) return refusal;
+  return withChangeableDraft(draftId, userId, now, async client => {
 
     await client.query(
       `UPDATE letter_drafts
@@ -580,9 +578,7 @@ export async function setDraftMailService(
   now: Date = new Date()
 ): Promise<MailServiceRefusal | null> {
   const service = storedMailService({ mailService });
-  return transaction(async client => {
-    const refusal = await lockChangeableDraft(client, draftId, userId, now);
-    if (refusal) return refusal;
+  return withChangeableDraft(draftId, userId, now, async client => {
 
     const locked = await client.query<Pick<LetterDraft, 'mail_type' | 'is_gift_send'>>(
       'SELECT mail_type, is_gift_send FROM letter_drafts WHERE draft_id = $1',
@@ -601,6 +597,26 @@ export async function setDraftMailService(
     ]);
     writeDiagnostic('info', 'draft.mail_service_set', { mailService: service });
     return null;
+  });
+}
+
+/**
+ * The one way a draft is changed in place (#690): in a transaction, the draft locked
+ * first (lockChangeableDraft), so a send or a Pay & Send checkout runs before or after
+ * the change, never between, and the change written only while the draft may still
+ * change. Returns the lock's refusal, or what the change returns: its own refusal, or
+ * null once it is written.
+ */
+async function withChangeableDraft<R extends string | null>(
+  draftId: string,
+  userId: string,
+  now: Date,
+  change: (client: pg.PoolClient) => Promise<R>
+): Promise<DraftScheduleRefusal | R> {
+  return transaction(async client => {
+    const refusal = await lockChangeableDraft(client, draftId, userId, now);
+    if (refusal) return refusal;
+    return change(client);
   });
 }
 
@@ -774,9 +790,7 @@ export async function setDraftStationery(
   // pdf-4 (#608, 051's pair): its signature is the draft's own, read in the
   // UPDATE under the lock, which the restyle never changes.
   const rendererVersion = rendererVersionFor(stationery);
-  return transaction(async client => {
-    const refusal = await lockChangeableDraft(client, draftId, userId, now);
-    if (refusal) return refusal;
+  return withChangeableDraft(draftId, userId, now, async client => {
     const { signature, ...words } = change.drawnFrom;
     if (await drawnFromChanged(client, draftId, { words, ...(signature !== undefined ? { signature } : {}) })) return 'changed';
 
@@ -845,9 +859,7 @@ export async function setDraftWords(
   },
   now: Date = new Date()
 ): Promise<DraftRedrawRefusal | null> {
-  return transaction(async client => {
-    const refusal = await lockChangeableDraft(client, draftId, userId, now);
-    if (refusal) return refusal;
+  return withChangeableDraft(draftId, userId, now, async client => {
     const drawnFrom: DrawnFrom = { words: change.replacing, stationery: change.drawnIn };
     if (change.drawnWith !== undefined) drawnFrom.signature = change.drawnWith;
     if (await drawnFromChanged(client, draftId, drawnFrom)) return 'changed';
@@ -889,9 +901,7 @@ export async function setDraftSignature(
   },
   now: Date = new Date()
 ): Promise<DraftRedrawRefusal | null> {
-  return transaction(async client => {
-    const refusal = await lockChangeableDraft(client, draftId, userId, now);
-    if (refusal) return refusal;
+  return withChangeableDraft(draftId, userId, now, async client => {
     if (await drawnFromChanged(client, draftId, change.drawnFrom)) return 'changed';
 
     // The version from the row's own stationery, read under the lock, so
@@ -977,9 +987,7 @@ export async function setDraftPostcardStyle(
 ): Promise<DraftRedrawRefusal | null> {
   const front = storedPostcardFront(change.front);
   const rendererVersion = front ? POSTCARD_FRONT_RENDERER_VERSION : RENDERER_VERSION;
-  return transaction(async client => {
-    const refusal = await lockChangeableDraft(client, draftId, userId, now);
-    if (refusal) return refusal;
+  return withChangeableDraft(draftId, userId, now, async client => {
     const locked = await client.query<{ preview_md5: string | null; is_gift_send: boolean }>(
       'SELECT md5(preview_html) AS preview_md5, is_gift_send FROM letter_drafts WHERE draft_id = $1',
       [draftId]

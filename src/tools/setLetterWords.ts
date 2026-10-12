@@ -1,4 +1,4 @@
-import type { Address, LetterLayoutType, McpToolDefinition, ToolContext } from '../contracts/types.js';
+import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
 import { letterPageLimit } from '../config/roomToWrite.js';
 import { isWordsEditorOffered } from '../config/wordsEditor.js';
 import { isGiftLettersEnabled } from '../config/giftLetters.js';
@@ -6,7 +6,7 @@ import { mailServiceOf } from '../config/products.js';
 import type { SendEligibility } from '../services/commerceService.js';
 import { getGiftBalance } from '../services/giftLetterService.js';
 import { stationeryOf, type Layout, type PageFit } from '../render/index.js';
-import { getDraftForStationery, setDraftWords, type DraftRedrawRefusal } from '../services/draftService.js';
+import { getDraftForStationery, setDraftWords } from '../services/draftService.js';
 import {
   layoutLetterForPreview,
   letterOption,
@@ -22,7 +22,7 @@ import {
   type LetterTravel,
   editorPageFit
 } from './letterHelpers.js';
-import { isDraftIdShape } from './requestSend.js';
+import { draftLetter, draftRefusals, draftRefuser, editableDraft, type DraftRefusal } from './draftEdit.js';
 
 /**
  * A letter preview's words, changed without previewing it again (#586). The
@@ -70,56 +70,24 @@ export interface SetLetterWordsOutput extends LetterTravel {
 }
 
 /**
- * Refusals the model can act on. Like set_stationery's, none repeats the
- * draft id, and the code doubles as the log's class. Only WORDS_CHANGED gives
- * the words, as they are now: the caller's own read of them.
+ * The draft's state, refused in a change of words' words (#690). 'changed': its
+ * stationery, or its words, changed while the page was drawn again. Only
+ * WORDS_CHANGED gives the words, as they are now: the caller's own read of them.
  */
-export class WordsRefusedError extends Error {
-  readonly diagnosticClass: string;
+export const WORDS_REFUSALS = draftRefusals({
+  mail: 'letter',
+  what: 'its words',
+  remake: 'Make a new preview with the words',
+  retry: 'words'
+});
 
-  constructor(
-    readonly code:
-      | 'WORDS_DISABLED'
-      | 'WORDS_MISSING'
-      | 'WORDS_CHANGED'
-      | 'DRAFT_NOT_FOUND'
-      | 'DRAFT_ALREADY_SENT'
-      | 'DRAFT_EXPIRED'
-      | 'DRAFT_CHECKOUT_PENDING'
-      | 'DRAFT_NOT_A_LETTER'
-      | 'DRAFT_NOT_DRAWN'
-      | 'DRAFT_CHANGED'
-      | 'GIFT_LETTER_ONE_PAGE',
-    message: string
-  ) {
-    super(message);
-    this.name = 'WordsRefusedError';
-    this.diagnosticClass = code;
-  }
-}
-
-const REFUSALS: Record<DraftRedrawRefusal, [WordsRefusedError['code'], string]> = {
-  not_found: ['DRAFT_NOT_FOUND', "That preview wasn't found. Make a new preview with the words, then try again."],
-  sent: ['DRAFT_ALREADY_SENT', "This letter has already been sent, so its words can't change. list_orders shows it."],
-  expired: ['DRAFT_EXPIRED', 'This preview has expired. Make a new preview with the words.'],
-  checkout_pending: ['DRAFT_CHECKOUT_PENDING', "This preview is tied to a Pay & Send payment, so its words can't change now."],
-  // Its stationery, or its words, changed while the page was drawn again.
-  changed: ['DRAFT_CHANGED', 'The letter changed while its page was being drawn again. Try the words again.']
-};
-
-const NOT_DRAWN = 'This preview was not drawn in a way that can take new words. Make a new preview with them.';
+const NOT_DRAWN: DraftRefusal = ['DRAFT_NOT_DRAWN', 'This preview was not drawn in a way that can take new words. Make a new preview with them.'];
 
 const GIFT_ONE_PAGE =
   'This letter is sent as a gift letter, which is one page, and these words run past it. ' +
   'Shorten them to fit one page, or make a new preview to send it another way.';
 
-function refused(code: WordsRefusedError['code'], message: string, context: ToolContext): WordsRefusedError {
-  context.logger.warn(
-    { correlationId: context.correlationId, event: 'draft.words_refused', reason: code },
-    'A change of words was refused'
-  );
-  return new WordsRefusedError(code, message);
-}
+const refused = draftRefuser('draft.words_refused', 'A change of words was refused');
 
 /**
  * Why a change of words its caller has not seen was refused, with the words as
@@ -176,21 +144,22 @@ async function handler(input: SetLetterWordsInput, context: ToolContext): Promis
   if (bodyText.trim() === '') {
     throw refused('WORDS_MISSING', "Give the letter's words in full: bodyText, and signOff.", context);
   }
-  const draftId = typeof input.draftId === 'string' ? input.draftId.trim() : '';
   const userId = context.user.userId;
-  const draft = isDraftIdShape(draftId) ? await getDraftForStationery(draftId, userId) : null;
-  if (!draft) throw refused(...REFUSALS.not_found, context);
-  if (draft.mail_type !== 'letter') {
-    throw refused('DRAFT_NOT_A_LETTER', "A postcard's words are its message: make a new postcard preview with them.", context);
-  }
-  // Read before the lock, to say why at once; setDraftWords checks again under
-  // it. A draft an erasure emptied is refused as the lock refuses it.
-  if (draft.status === 'consumed') throw refused(...REFUSALS.sent, context);
-  if (draft.status !== 'pending' || draft.redacted_at || !(new Date(draft.expires_at).getTime() > context.now().getTime())) {
-    throw refused(...REFUSALS.expired, context);
-  }
-  // Only a letter our renderer drew can be drawn again with new words.
-  if (!draft.renderer_version) throw refused('DRAFT_NOT_DRAWN', NOT_DRAWN, context);
+  // Read before the lock, to say why at once; setDraftWords checks again under it.
+  const { draftId, draft } = await editableDraft(
+    {
+      draftId: input.draftId,
+      read: getDraftForStationery,
+      mailType: 'letter',
+      wrongKind: ['DRAFT_NOT_A_LETTER', "A postcard's words are its message: make a new postcard preview with them."],
+      // Only a letter our renderer drew can be drawn again with new words.
+      drawn: found => Boolean(found.renderer_version),
+      notDrawn: NOT_DRAWN,
+      refusals: WORDS_REFUSALS,
+      refuse: refused
+    },
+    context
+  );
 
   // The words it replaces, by their version: refused, with the words as they
   // are now, unless they are the ones its caller last saw.
@@ -204,23 +173,14 @@ async function handler(input: SetLetterWordsInput, context: ToolContext): Promis
   if (named !== current && !already) {
     throw refused('WORDS_CHANGED', wordsChanged(named !== '', replacing.bodyText, replacing.signOff ?? '', current), context);
   }
-  // The pages its preview drew: its own, then any gift card's.
-  const pagesBefore = Number(draft.pages ?? 1);
-
-  const sender = draft.sender as unknown as Address;
-  const recipient = draft.recipient as unknown as Address;
-  const layoutType = (draft.layout_type ?? 'text_only') as LetterLayoutType;
+  // The draft's addresses, layout and picture; its pages before, its own then any gift card's.
+  // A gift letter pays for one page only (#579): its words are held to one page and refused
+  // in a gift's words when they run past it, never priced again (#593 review round 1).
+  const { sender, recipient, layoutType, imageData, pagesBefore, gift } = draftLetter(draft);
   // In the stationery it is drawn in now, as the print reads it back.
   const stationery = stationeryOf(draft.stationery) ?? undefined;
-  const imageData = layoutType === 'header_image'
-    ? draft.header_image_data
-    : layoutType === 'inline_image' ? draft.inline_image_data : null;
   // With the draft's own signature (#608), under the new sign-off's first line.
-  const letter = { bodyText, signOff, layoutType, imageData: imageData ?? undefined, signatureImage: draft.signature_image || undefined, stationery };
-  // A gift letter pays for one page only (#579): its words are held to one
-  // page and refused in a gift's words when they run past it, never priced
-  // again (#593 review round 1).
-  const gift = draft.is_gift_send === true;
+  const letter = { bodyText, signOff, layoutType, imageData, signatureImage: draft.signature_image || undefined, stationery };
   if (gift && bodyText.length + signOff.length > RENDERED_LETTER_CHARACTER_CAP) {
     throw refused('GIFT_LETTER_ONE_PAGE', GIFT_ONE_PAGE, context);
   }
@@ -249,7 +209,7 @@ async function handler(input: SetLetterWordsInput, context: ToolContext): Promis
     { sender, recipient, bodyText, signOff },
     stationery
   );
-  if (previewHtml === null) throw refused('DRAFT_NOT_DRAWN', NOT_DRAWN, context);
+  if (previewHtml === null) throw refused(...NOT_DRAWN, context);
 
   // With the stationery it was drawn in and the words it replaces, refused if
   // either changed meanwhile.
@@ -260,7 +220,7 @@ async function handler(input: SetLetterWordsInput, context: ToolContext): Promis
     { bodyText, signOff, previewHtml, pages, drawnIn: draft.stationery, replacing, drawnWith: draft.signature_image },
     context.now()
   );
-  if (refusal) throw refused(...REFUSALS[refusal], context);
+  if (refusal) throw refused(...WORDS_REFUSALS[refusal], context);
 
   // Counts only: the words never reach the log.
   context.logger.info(

@@ -42,6 +42,17 @@ function context(): ToolContext {
   } as unknown as ToolContext;
 }
 
+/** What set_letter_signature says for each refusal of the draft, word for word. */
+const SIGNATURE_SAYS: Record<string, string> = {
+  DRAFT_NOT_FOUND: "That preview wasn't found. Make a new preview, then try again.",
+  DRAFT_NOT_A_LETTER: 'A signature is for letters. A postcard prints none.',
+  DRAFT_ALREADY_SENT: "This letter has already been sent, so its signature can't change. list_orders shows it.",
+  DRAFT_EXPIRED: 'This preview has expired. Make a new preview: the letter previews take signature themselves.',
+  DRAFT_CHECKOUT_PENDING: "This preview is tied to a Pay & Send payment, so its signature can't change now.",
+  DRAFT_NOT_DRAWN: 'This preview was not drawn in a way that can take a signature. Make a new preview, with signature if you like.',
+  DRAFT_CHANGED: 'The letter changed while its page was being drawn again. Try the signature again.'
+};
+
 const SENDER: Address = { name: 'Pat Example', addressLine1: '350 Fifth Ave', city: 'New York', state: 'NY', postalCode: '10118', country: 'US' };
 const RECIPIENT: Address = { ...SENDER, name: 'Sam Rivera' };
 
@@ -272,7 +283,7 @@ describe('set_letter_signature', () => {
     ['drawn by the legacy HTML', { ...draft(), renderer_version: null }, 'DRAFT_NOT_DRAWN']
   ] as const)('refuses a draft %s, writing nothing', async (_label, found, code) => {
     vi.mocked(getDraftForStationery).mockResolvedValue(found as never);
-    await expect(run({ signature: true })).rejects.toMatchObject({ code });
+    await expect(run({ signature: true })).rejects.toMatchObject({ code, message: SIGNATURE_SAYS[code] });
     expect(setDraftSignature).not.toHaveBeenCalled();
   });
 
@@ -283,7 +294,7 @@ describe('set_letter_signature', () => {
   ] as const)("passes on the service's refusal under the lock: %s", async (refusal, code) => {
     vi.mocked(getDraftForStationery).mockResolvedValue(draft());
     vi.mocked(setDraftSignature).mockResolvedValue(refusal);
-    await expect(run({ signature: false })).rejects.toMatchObject({ code });
+    await expect(run({ signature: false })).rejects.toMatchObject({ code, message: SIGNATURE_SAYS[code] });
   });
 
   it('refuses a call that names no choice, or a malformed id, reading no draft', async () => {
