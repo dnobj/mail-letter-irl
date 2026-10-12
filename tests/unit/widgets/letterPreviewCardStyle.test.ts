@@ -892,7 +892,7 @@ describe('the Signature switch (#608 part 4b)', () => {
       const card = mount();
       await card.show({ ...signed(false), contentVersion: 'v_preview' });
       await flip(card);
-      await card.answer(switched(true, page, { contentVersion: 'v_signed' }), 'set_letter_signature');
+      await card.answer(switched(true, page, { contentVersion: 'v_signed', contentVersionBefore: 'v_preview' }), 'set_letter_signature');
       await card.click('send-button');
       expect(card.lastRequest('tools/call', 'send_letter')!.params.arguments.contentVersion, String(page !== undefined)).toBe(expected);
     }

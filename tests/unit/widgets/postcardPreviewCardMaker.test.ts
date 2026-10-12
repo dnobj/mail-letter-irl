@@ -698,14 +698,17 @@ describe('a collage on the maker (#616)', () => {
 });
 
 describe('the content version the postcard card sends (#695)', () => {
-  const ready = (version: string, size: string, page: string, extra: Json = {}) => ({
+  const ready = (version: string, size: string, page: string | null, extra: Json = {}) => ({
     result: {
       content: [{ type: 'text', text: 'Ready.' }],
       structuredContent: { draftId: 'draft_0001', status: 'ready', size, layout: 'full_bleed', canSendNow: true, sendEligibility: PACK, contentVersion: version, ...extra },
-      _meta: { previewHtml: page }
+      ...(page ? { _meta: { previewHtml: page } } : {})
     }
   });
+  const sized = (version: string, before = 'v_preview') =>
+    ({ draftId: 'draft_0001', size: '6x4', layout: 'full_bleed', contentVersion: version, contentVersionBefore: before, canSendNow: true, sendEligibility: PACK });
   const sentWith = (card: ReturnType<typeof mount>) => card.requests('send_postcard').at(-1)!.params.arguments;
+  const SAID_SENT = 'This postcard changed after it was shown here, so nothing was sent.';
 
   it("sends the preview's version, then the version of a change it drew, and keeps the last for one whose page did not come back", async () => {
     const card = mount();
@@ -716,16 +719,27 @@ describe('the content version the postcard card sends (#695)', () => {
     const drawnChange = mount();
     await drawnChange.show(output({ size: '6x9', layout: 'full_bleed', contentVersion: 'v_preview' }), ON());
     await drawnChange.click(drawnChange.document.querySelector('[data-size="6x4"]')!);
-    await drawnChange.answer(restyled({ draftId: 'draft_0001', size: '6x4', layout: 'full_bleed', contentVersion: 'v_4x6', canSendNow: true, sendEligibility: PACK }, drawn('6x4')), 'set_postcard_style');
+    await drawnChange.answer(restyled(sized('v_4x6'), drawn('6x4')), 'set_postcard_style');
     await drawnChange.click(drawnChange.byId('send-button'));
     expect(sentWith(drawnChange).contentVersion).toBe('v_4x6');
 
     const pageless = mount();
     await pageless.show(output({ size: '6x9', layout: 'full_bleed', contentVersion: 'v_preview' }), ON());
     await pageless.click(pageless.document.querySelector('[data-size="6x4"]')!);
-    await pageless.answer(restyled({ draftId: 'draft_0001', size: '6x4', layout: 'full_bleed', contentVersion: 'v_4x6', canSendNow: true, sendEligibility: PACK }), 'set_postcard_style');
+    await pageless.answer(restyled(sized('v_4x6')), 'set_postcard_style');
     await pageless.click(pageless.byId('send-button'));
     expect(sentWith(pageless).contentVersion).toBe('v_preview');
+  });
+
+  it('takes no version from a change made to another, and draws the postcard as it is now instead (#695 review round 1)', async () => {
+    const card = mount();
+    await card.show(output({ size: '6x9', layout: 'full_bleed', contentVersion: 'v_preview' }), ON());
+    const asks = card.requests('get_draft_status').length;
+    await card.click(card.document.querySelector('[data-size="6x4"]')!);
+    await card.answer(restyled(sized('v_both', 'v_chat'), drawn('6x4')), 'set_postcard_style');
+    expect(card.requests('get_draft_status').length).toBe(asks + 1);
+    await card.click(card.byId('send-button'));
+    expect(sentWith(card).contentVersion).toBe('v_preview');
   });
 
   it('sends the version of a status answer it took, and not of one older than its own change', async () => {
@@ -738,7 +752,7 @@ describe('the content version the postcard card sends (#695)', () => {
     const changedFirst = mount();
     await changedFirst.show(output({ size: '6x9', layout: 'full_bleed', contentVersion: 'v_preview' }), ON());
     await changedFirst.click(changedFirst.document.querySelector('[data-size="6x4"]')!);
-    await changedFirst.answer(restyled({ draftId: 'draft_0001', size: '6x4', layout: 'full_bleed', contentVersion: 'v_4x6', canSendNow: true, sendEligibility: PACK }, drawn('6x4')), 'set_postcard_style');
+    await changedFirst.answer(restyled(sized('v_4x6'), drawn('6x4')), 'set_postcard_style');
     await changedFirst.answer(ready('v_old', '6x9', drawn()), 'get_draft_status');
     await changedFirst.click(changedFirst.byId('send-button'));
     expect(sentWith(changedFirst).contentVersion).toBe('v_4x6');
@@ -748,7 +762,7 @@ describe('the content version the postcard card sends (#695)', () => {
     const card = mount();
     await card.show(output({ size: '6x9', layout: 'full_bleed', contentVersion: 'v_preview' }), ON());
     await card.click(card.document.querySelector('[data-size="6x4"]')!);
-    await card.answer(restyled({ draftId: 'draft_0001', size: '6x4', layout: 'full_bleed', contentVersion: 'v_4x6', canSendNow: true, sendEligibility: PACK }, drawn('6x4')), 'set_postcard_style');
+    await card.answer(restyled(sized('v_4x6'), drawn('6x4')), 'set_postcard_style');
     const asks = card.requests('get_draft_status').length;
 
     await card.click(card.byId('send-button'));
@@ -761,15 +775,14 @@ describe('the content version the postcard card sends (#695)', () => {
       },
       'send_postcard'
     );
-    expect(card.byId('error-message').textContent).toBe(
-      'This postcard changed after it was shown here, so nothing was sent. It is shown again as it is now: check it, then press Send again.'
-    );
+    expect(card.byId('error-message').textContent).toBe(`${SAID_SENT} Getting it as it is now…`);
     expect((card.byId('send-button') as HTMLButtonElement).disabled).toBe(false);
     expect(card.byId('send-button-text').textContent).toBe('Send Postcard');
     expect(card.requests('get_draft_status').length).toBe(asks + 1);
     // The chat made it 6 x 11 meanwhile: the card takes it over its own change.
     await card.answer(ready('v_now', '6x11', drawn('6x11')), 'get_draft_status');
     expect(pressed(card, '#studio-sizes [data-size]')).toEqual(['6 x 11 in']);
+    expect(card.byId('error-message').textContent).toBe(`${SAID_SENT} It is shown again as it is now: check it, then press Send again.`);
 
     await card.click(card.byId('send-button'));
     expect(sentWith(card).contentVersion).toBe('v_now');
@@ -790,10 +803,11 @@ describe('the content version the postcard card sends (#695)', () => {
       },
       'create_mail_checkout'
     );
+    expect(card.byId('pay-send-button-text').textContent).toBe('Pay & Send');
+    expect(card.requests('get_draft_status').length).toBe(asks + 1);
+    await card.answer(ready('v_now', '6x9', drawn(), { canSendNow: false, sendEligibility: PER_SEND }), 'get_draft_status');
     expect(card.byId('error-message').textContent).toBe(
       'This postcard changed after it was shown here, so nothing was charged. It is shown again as it is now: check it, then press Pay & Send again.'
     );
-    expect(card.byId('pay-send-button-text').textContent).toBe('Pay & Send');
-    expect(card.requests('get_draft_status').length).toBe(asks + 1);
   });
 });

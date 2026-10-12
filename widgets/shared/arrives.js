@@ -159,7 +159,7 @@
           state.set = true;
           // The content version (#695) of the draft with the dates the card now shows, for its Send to name.
           if (typeof options.onVersion === "function" && typeof data.contentVersion === "string" && data.contentVersion) {
-            options.onVersion(draftId, data.contentVersion);
+            options.onVersion(draftId, data.contentVersion, data.contentVersionBefore);
           }
           // A successful set names the dates on offer now.
           if (schedule && isCalendarDate(schedule.earliestArrival) && isCalendarDate(schedule.latestArrival)) {

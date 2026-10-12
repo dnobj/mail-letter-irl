@@ -1037,7 +1037,7 @@ describe("the Words tab's editor (#586)", () => {
         {
           result: {
             content: [{ type: 'text', text: 'Changed.' }],
-            structuredContent: { draftId: 'draft_0001', ...canSend, wordsVersion: 'fedcba654321', contentVersion: 'v_words', message: 'Changed.' },
+            structuredContent: { draftId: 'draft_0001', ...canSend, wordsVersion: 'fedcba654321', contentVersion: 'v_words', contentVersionBefore: 'v_preview', message: 'Changed.' },
             ...(page ? { _meta: { previewHtml: PAGE } } : {})
           }
         },
@@ -1046,6 +1046,28 @@ describe("the Words tab's editor (#586)", () => {
       await card.click(card.byId('send-button'));
       expect(card.lastRequest('tools/call', 'send_letter')!.params.arguments.contentVersion, String(page)).toBe(expected);
     }
+  });
+
+  it('replaces the words it was opened on, though a status answer brings others while they are written (#695 review round 1)', async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
+    await card.click(card.tab('words'));
+    await card.click(card.byId('studio-words-open'));
+    // The chat changed the words: the status asked on opening brings them while the editor is open.
+    await card.answer(
+      {
+        result: {
+          content: [],
+          structuredContent: { draftId: 'draft_0001', status: 'ready', stationery: { theme: 'classic' }, bodyText: 'Dear Sam, from the chat.', signOff: 'Pat', wordsVersion: 'chat12345678', ...canSend },
+          _meta: { previewHtml: PAGE }
+        }
+      },
+      'get_draft_status'
+    );
+    await type(card, 'studio-words-body', 'Dear Sam,\n\nThe roses are out.');
+    await card.click(card.byId('studio-words-update'));
+    // Written from the preview's words: the server refuses them over the chat's, rather than overwrite them unseen.
+    expect(card.lastRequest('tools/call', 'set_letter_words')!.params.arguments.wordsVersion).toBe(VERSION);
   });
 
   it('offers to change the words while room to write is offered, counting the room as they are written', async () => {
@@ -1654,7 +1676,7 @@ describe('the Mail choice on the Delivery tab (#648)', () => {
     const card = mount();
     await card.show(output({ ...CLASSIC, ...CERTIFIED_TERMS, contentVersion: 'v_preview' }), OFFERED);
     await card.click(choice(card, 'standard'));
-    await card.answer(changed({ ...ORDINARY_TERMS, contentVersion: 'v_standard' }), SET);
+    await card.answer(changed({ ...ORDINARY_TERMS, contentVersion: 'v_standard', contentVersionBefore: 'v_preview' }), SET);
     await card.click(card.byId('send-button'));
     expect(card.lastRequest('tools/call', 'send_letter')!.params.arguments.contentVersion).toBe('v_standard');
   });
@@ -2231,27 +2253,34 @@ describe('the content version the letter card sends (#695)', () => {
     canSendNow: false,
     sendEligibility: { packPays: false, payAndSend: { available: true, amountCents: 599, currency: 'usd' }, letterPack: { available: false } }
   };
-  const restyled = (theme: string, version: string, page?: string) => ({
+  /** A restyle's answer: the version it wrote, and the version it was made to. */
+  const restyled = (theme: string, version: string, page?: string, before = 'v_preview') => ({
     result: {
       content: [],
-      structuredContent: { draftId: 'draft_0001', stationery: { theme, dateLine: 'October 1, 2026', source: 'asked' }, contentVersion: version, ...canSend, message: 'Restyled.' },
+      structuredContent: {
+        draftId: 'draft_0001',
+        stationery: { theme, dateLine: 'October 1, 2026', source: 'asked' },
+        contentVersion: version,
+        contentVersionBefore: before,
+        ...canSend,
+        message: 'Restyled.'
+      },
       ...(page ? { _meta: { previewHtml: page } } : {})
     }
   });
-  const ready = (version: string, page: string, extra: Json = {}) => ({
+  const ready = (version: string, page: string | null, extra: Json = {}) => ({
     result: {
       content: [],
       structuredContent: { draftId: 'draft_0001', status: 'ready', stationery: { theme: 'classic' }, contentVersion: version, ...canSend, ...extra },
-      _meta: { previewHtml: page }
+      ...(page ? { _meta: { previewHtml: page } } : {})
     }
   });
-  const CHANGED = {
-    result: {
-      isError: true,
-      content: [{ type: 'text', text: 'This letter changed after it was shown, so nothing was sent. Show the person the letter as it is now (its preview card, or a new preview), and send it once they have seen it.' }]
-    }
-  };
+  const CHANGED_TEXT =
+    'This letter changed after it was shown, so nothing was sent. Show the person the letter as it is now (its preview card, or a new preview), and send it once they have seen it.';
+  const CHANGED = { result: { isError: true, content: [{ type: 'text', text: CHANGED_TEXT }] } };
   const sentWith = (card: ReturnType<typeof mount>) => card.lastRequest('tools/call', 'send_letter')!.params.arguments;
+  const restyle = (card: ReturnType<typeof mount>, theme: string) => card.click(card.byId('style-row').querySelector(`[data-theme="${theme}"]`)!);
+  const SAID_SENT = 'This letter changed after it was shown here, so nothing was sent.';
 
   it("sends the preview's version, and none for a preview that names none", async () => {
     const card = mount();
@@ -2265,36 +2294,68 @@ describe('the content version the letter card sends (#695)', () => {
     expect(sentWith(older)).toEqual({ draftId: 'draft_0001', confirm: true });
   });
 
-  it('sends the version of a restyle it drew, and keeps the last for one whose page did not come back', async () => {
+  it('sends the version of a restyle it drew, made to the version it shows, and keeps the last for one whose page did not come back', async () => {
     const card = mount();
     await card.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
-    await card.click(card.byId('style-row').querySelector('[data-theme="botanical"]')!);
+    await restyle(card, 'botanical');
     await card.answer(restyled('botanical', 'v_botanical', PAGE), 'set_stationery');
     await card.click(card.byId('send-button'));
     expect(sentWith(card).contentVersion).toBe('v_botanical');
 
     const pageless = mount();
     await pageless.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
-    await pageless.click(pageless.byId('style-row').querySelector('[data-theme="botanical"]')!);
+    await restyle(pageless, 'botanical');
     await pageless.answer(restyled('botanical', 'v_botanical'), 'set_stationery');
     await pageless.click(pageless.byId('send-button'));
     // The card still shows the classic page: what it sends is that, which the server refuses and the card draws again.
     expect(sentWith(pageless).contentVersion).toBe('v_preview');
   });
 
-  it('sends the version of the dates it set', async () => {
+  it('takes no version from an edit made to another, and draws the draft as it is now instead (#695 review round 1)', async () => {
     const card = mount();
-    await card.show(
-      output({ ...STYLED, contentVersion: 'v_preview', arrivalWindow: WINDOW, schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' }, deliveryEstimate: 'Goes to the printer Fri, Oct 9.' }),
-      ON
-    );
+    await card.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
+    const asks = card.requests('tools/call', 'get_draft_status').length;
+    // The chat changed the words meanwhile: the restyle was made to their version, not the one the card shows.
+    await restyle(card, 'botanical');
+    await card.answer(restyled('botanical', 'v_both', PAGE, 'v_chat'), 'set_stationery');
+    expect(card.requests('tools/call', 'get_draft_status').length).toBe(asks + 1);
+
+    // Once the draft as it is now is drawn, its version is the one sent.
+    const NOW = document1('Dear Sam, and more,\nPat');
+    await card.answer(ready('v_now', NOW, { stationery: { theme: 'botanical', dateLine: 'October 1, 2026' } }), 'get_draft_status');
+    expect(card.byId('mockup-container').innerHTML).toContain('<title>Dear Sam, and more,\nPat</title>');
+    await card.click(card.byId('send-button'));
+    expect(sentWith(card).contentVersion).toBe('v_now');
+
+    // Asked, and answered with nothing to draw: the edit's version is still not taken.
+    const unanswered = mount();
+    await unanswered.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
+    await restyle(unanswered, 'botanical');
+    await unanswered.answer(restyled('botanical', 'v_both', PAGE, 'v_chat'), 'set_stationery');
+    await unanswered.answer(ready('v_now', null), 'get_draft_status');
+    await unanswered.click(unanswered.byId('send-button'));
+    expect(sentWith(unanswered).contentVersion).toBe('v_preview');
+  });
+
+  it('sends the version of the dates it set, and not of dates set on a draft changed meanwhile', async () => {
+    const DATED = { arrivalWindow: WINDOW, schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' }, deliveryEstimate: 'Goes to the printer Fri, Oct 9.' };
+    const cleared = (version: string, before: string) => ({
+      result: { content: [], structuredContent: { draftId: 'draft_0001', schedule: null, contentVersion: version, contentVersionBefore: before, deliveryEstimate: 'Mailed in 1-2 business days', message: 'Cleared.' } }
+    });
+    const card = mount();
+    await card.show(output({ ...STYLED, contentVersion: 'v_preview', ...DATED }), ON);
     await card.click(card.byId('arrives-asap'));
-    await card.answer(
-      { result: { content: [], structuredContent: { draftId: 'draft_0001', schedule: null, contentVersion: 'v_asap', deliveryEstimate: 'Mailed in 1-2 business days', message: 'Cleared.' } } },
-      'set_arrival_date'
-    );
+    await card.answer(cleared('v_asap', 'v_preview'), 'set_arrival_date');
     await card.click(card.byId('send-button'));
     expect(sentWith(card).contentVersion).toBe('v_asap');
+
+    const chat = mount();
+    await chat.show(output({ ...STYLED, contentVersion: 'v_preview', ...DATED }), ON);
+    await chat.click(chat.byId('arrives-asap'));
+    // The chat changed the words before the date was cleared: the version covers words this card never drew.
+    await chat.answer(cleared('v_words_and_date', 'v_chat_words'), 'set_arrival_date');
+    await chat.click(chat.byId('send-button'));
+    expect(sentWith(chat).contentVersion).toBe('v_preview');
   });
 
   it('sends the version of a status answer it took, and not of one it did not', async () => {
@@ -2309,28 +2370,32 @@ describe('the content version the letter card sends (#695)', () => {
     const restyledFirst = mount();
     await restyledFirst.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
     const asked = restyledFirst.lastRequest('tools/call', 'get_draft_status')!;
-    await restyledFirst.click(restyledFirst.byId('style-row').querySelector('[data-theme="botanical"]')!);
+    await restyle(restyledFirst, 'botanical');
     await restyledFirst.answer(restyled('botanical', 'v_botanical', PAGE), 'set_stationery');
     await restyledFirst.answerTo(asked, ready('v_old', document1('Dear Sam,\nPat')));
     await restyledFirst.click(restyledFirst.byId('send-button'));
     expect(sentWith(restyledFirst).contentVersion).toBe('v_botanical');
+
+    // A status answer with no page draws nothing: its version is not taken.
+    const pageless = mount();
+    await pageless.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
+    await pageless.answer(ready('v_chat', null), 'get_draft_status');
+    await pageless.click(pageless.byId('send-button'));
+    expect(sentWith(pageless).contentVersion).toBe('v_preview');
   });
 
   it('draws the letter again when the send is refused for a change since, and sends it as it is now', async () => {
     const card = mount();
     await card.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
     // Restyled by this card, so an ordinary status answer would not be taken.
-    await card.click(card.byId('style-row').querySelector('[data-theme="botanical"]')!);
+    await restyle(card, 'botanical');
     await card.answer(restyled('botanical', 'v_botanical', PAGE), 'set_stationery');
     const asks = card.requests('tools/call', 'get_draft_status').length;
 
     await card.click(card.byId('send-button'));
     await card.answer(CHANGED, 'send_letter');
 
-    expect(card.byId('error-message').textContent).toBe(
-      'This letter changed after it was shown here, so nothing was sent. It is shown again as it is now: check it, then press Send again.'
-    );
-    expect(card.byId('error-message').textContent).not.toContain('Failed to send');
+    expect(card.byId('error-message').textContent).toBe(`${SAID_SENT} Getting it as it is now…`);
     expect((card.byId('send-button') as HTMLButtonElement).disabled).toBe(false);
     expect(card.byId('send-button-text').textContent).toBe('Send Letter');
     // Asked again, though it asked on opening.
@@ -2338,9 +2403,41 @@ describe('the content version the letter card sends (#695)', () => {
     const NOW = document1('Dear Sam, and more,\nPat');
     await card.answer(ready('v_now', NOW, { stationery: { theme: 'typewriter', dateLine: 'October 1, 2026' } }), 'get_draft_status');
     expect(card.byId('mockup-container').innerHTML).toContain('<title>Dear Sam, and more,\nPat</title>');
+    expect(card.byId('error-message').textContent).toBe(`${SAID_SENT} It is shown again as it is now: check it, then press Send again.`);
 
     await card.click(card.byId('send-button'));
     expect(sentWith(card).contentVersion).toBe('v_now');
+  });
+
+  it('says it cannot show the letter as it is now when the answer draws nothing, and keeps the version it shows (#695 review round 1)', async () => {
+    // A preview without stationery: the card draws no page from a status answer.
+    const card = mount();
+    await card.show(output({ contentVersion: 'v_preview' }), ON);
+    await card.click(card.byId('send-button'));
+    await card.answer(CHANGED, 'send_letter');
+    await card.answer(ready('v_now', document1('Dear Sam, and more,\nPat')), 'get_draft_status');
+    expect(card.byId('error-message').textContent).toBe(
+      `${SAID_SENT} This card can't show it as it is now: ask in the chat for a new preview, and send from that.`
+    );
+    await card.click(card.byId('send-button'));
+    expect(sentWith(card).contentVersion).toBe('v_preview');
+
+    // Refused again for the same version: it says so at once, and does not ask again.
+    const asks = card.requests('tools/call', 'get_draft_status').length;
+    await card.answer(CHANGED, 'send_letter');
+    expect(card.requests('tools/call', 'get_draft_status').length).toBe(asks);
+    expect(card.byId('error-message').textContent).toBe(
+      `${SAID_SENT} This card can't show it as it is now: ask in the chat for a new preview, and send from that.`
+    );
+  });
+
+  it('says nothing more of it once the draft turns out sent meanwhile', async () => {
+    const card = mount();
+    await card.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
+    await card.click(card.byId('send-button'));
+    await card.answer(CHANGED, 'send_letter');
+    await card.answer({ result: { content: [], structuredContent: { draftId: 'draft_0001', status: 'sent', orderId: 'order-9' } } }, 'get_draft_status');
+    expect(card.byId('error-message').style.display).toBe('none');
   });
 
   it('opens Pay & Send with the version it shows, and draws the letter again when the checkout is refused for a change since', async () => {
@@ -2359,13 +2456,13 @@ describe('the content version the letter card sends (#695)', () => {
       },
       'create_mail_checkout'
     );
-    expect(card.byId('error-message').textContent).toBe(
-      'This letter changed after it was shown here, so nothing was charged. It is shown again as it is now: check it, then press Pay & Send again.'
-    );
     expect((card.byId('pay-send-button') as HTMLButtonElement).disabled).toBe(false);
     expect(card.byId('pay-send-button-text').textContent).toBe('Pay & Send');
     expect(card.requests('tools/call', 'get_draft_status').length).toBe(asks + 1);
     await card.answer(ready('v_now', document1('Dear Sam, and more,\nPat'), PAY), 'get_draft_status');
+    expect(card.byId('error-message').textContent).toBe(
+      'This letter changed after it was shown here, so nothing was charged. It is shown again as it is now: check it, then press Pay & Send again.'
+    );
 
     await card.click(card.byId('pay-send-button'));
     expect(card.lastRequest('tools/call', 'create_mail_checkout')!.params.arguments).toEqual({ draftId: 'draft_0001', contentVersion: 'v_now' });
@@ -2377,7 +2474,7 @@ describe('the content version the letter card sends (#695)', () => {
     await card.show(output({ ...STYLED, contentVersion: 'v_preview', arrivalWindow: WINDOW, ...DATED }), ON);
     await card.click(card.byId('arrives-asap'));
     await card.answer(
-      { result: { content: [], structuredContent: { draftId: 'draft_0001', schedule: null, contentVersion: 'v_asap', deliveryEstimate: 'Mailed in 1-2 business days', message: 'Cleared.' } } },
+      { result: { content: [], structuredContent: { draftId: 'draft_0001', schedule: null, contentVersion: 'v_asap', contentVersionBefore: 'v_preview', deliveryEstimate: 'Mailed in 1-2 business days', message: 'Cleared.' } } },
       'set_arrival_date'
     );
     expect(text(card, 'studio-summary')).toBe('Classic · black and white · mailed in 1-2 business days');

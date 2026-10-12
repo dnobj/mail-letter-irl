@@ -962,17 +962,22 @@ describe('draftService', () => {
       expect(client.query).toHaveBeenCalledTimes(2);
     });
 
-    it('tells its caller the content version it wrote, read in the same transaction (#695)', async () => {
-      const written = { mail_type: 'letter', body_text: 'Hello', arrive_by: '2026-10-16', mail_on: '2026-10-06', signature_image_hash: null };
-      const client = inTransaction({ rows: [pending] }, { rows: [] }, { rows: [] }, { rows: [written] });
+    it('tells its caller the content version it wrote, and the one it was written to, both read under its lock (#695)', async () => {
+      const before = { mail_type: 'letter', body_text: 'Hello', arrive_by: null, mail_on: null, signature_image_hash: null };
+      const written = { ...before, arrive_by: '2026-10-16', mail_on: '2026-10-06' };
+      const client = inTransaction({ rows: [pending] }, { rows: [] }, { rows: [before] }, { rows: [] }, { rows: [written] });
       const onWritten = vi.fn();
 
       await expect(setDraftSchedule('draft-1', 'auth0|owner', DATES, NOW, onWritten)).resolves.toBeNull();
 
-      expect(onWritten).toHaveBeenCalledWith(contentVersionOf(written));
-      const read = client.query.mock.calls[3] as [string, unknown[]];
-      expect(read).toEqual([`SELECT ${CONTENT_VERSION_COLUMNS} FROM letter_drafts WHERE draft_id = $1`, ['draft-1']]);
-      expect(client.query).toHaveBeenCalledTimes(4);
+      expect(onWritten).toHaveBeenCalledWith(contentVersionOf(written), contentVersionOf(before));
+      const calls = client.query.mock.calls as Array<[string, unknown[]]>;
+      const READ = [`SELECT ${CONTENT_VERSION_COLUMNS} FROM letter_drafts WHERE draft_id = $1`, ['draft-1']];
+      // After the lock and the order check, before the write; and again after it.
+      expect(calls[2]).toEqual(READ);
+      expect(calls[3][0]).toMatch(/UPDATE letter_drafts/);
+      expect(calls[4]).toEqual(READ);
+      expect(client.query).toHaveBeenCalledTimes(5);
     });
 
     it('tells nothing, and reads nothing more, when it changed nothing (#695)', async () => {
@@ -982,6 +987,7 @@ describe('draftService', () => {
       await expect(setDraftSchedule('draft-1', 'auth0|owner', DATES, NOW, onWritten)).resolves.toBe('checkout_pending');
 
       expect(onWritten).not.toHaveBeenCalled();
+      // Refused at the lock: nothing read for the version.
       expect(client.query).toHaveBeenCalledTimes(2);
     });
 
@@ -1238,13 +1244,14 @@ describe('draftService stationery (#563)', () => {
       ['its sign-off', { sign_off: 'Love, Pat' }],
       ['its sign-off, gone', { sign_off: null }]
     ])('refuses a restyle drawn from words that changed under it: %s (#586)', async (_label, changed) => {
-      const client = inTransaction({ rows: [pending] }, { rows: [] }, { rows: [{ ...DRAWN, ...changed }] });
+      // The version before the change is read first (#695), then the words it was drawn from.
+      const client = inTransaction({ rows: [pending] }, { rows: [] }, { rows: [DRAWN] }, { rows: [{ ...DRAWN, ...changed }] });
       const onWritten = vi.fn();
       await expect(
         setDraftStationery('draft-1', 'auth0|owner', { stationery: BOTANICAL, previewHtml: PAGE, pages: 2, drawnFrom: WORDS }, NOW, onWritten)
       ).resolves.toBe('changed');
       // Nothing written, nothing remembered, and no version told (#695).
-      expect(client.query).toHaveBeenCalledTimes(3);
+      expect(client.query).toHaveBeenCalledTimes(4);
       expect(onWritten).not.toHaveBeenCalled();
     });
 

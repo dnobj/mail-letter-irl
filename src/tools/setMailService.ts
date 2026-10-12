@@ -35,6 +35,8 @@ interface SetMailServiceInput {
 export interface SetMailServiceOutput extends LetterTravel {
   /** The draft's content version once changed (#695): the send takes it back. */
   contentVersion?: string;
+  /** The version the change was made to (#695): a card takes contentVersion only when this is the one it shows. */
+  contentVersionBefore?: string;
   draftId: string;
   /** What the letter costs and how it is paid as it stands now. */
   canSendNow: boolean;
@@ -103,7 +105,8 @@ async function handler(input: SetMailServiceInput, context: ToolContext): Promis
   if (before.mail_type !== 'letter') throw refused(...MAIL_SERVICE_REFUSALS.not_a_letter, context);
 
   let contentVersion: string | undefined;
-  const refusal = await setDraftMailService(draftId, userId, requested, context.now(), version => { contentVersion = version; });
+  let contentVersionBefore: string | undefined;
+  const refusal = await setDraftMailService(draftId, userId, requested, context.now(), (version, before) => { contentVersion = version; contentVersionBefore = before; });
   if (refusal) throw refused(...MAIL_SERVICE_REFUSALS[refusal], context);
 
   // Priced as the draft stands now, as the send and the checkout read it. The lock is released, so a send
@@ -134,7 +137,7 @@ async function handler(input: SetMailServiceInput, context: ToolContext): Promis
     certified === undefined && !payment.canSendNow && Number(draft.pages ?? 1) === 1 ? await giftLetterNote(context) : '';
   const pages = Number(draft.pages ?? 1);
   return {
-    ...(contentVersion ? { contentVersion } : {}),
+    ...(contentVersion ? { contentVersion, contentVersionBefore } : {}),
     draftId,
     ...payment,
     ...(pages > 1 ? { pages } : {}),

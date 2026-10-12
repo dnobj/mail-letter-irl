@@ -516,7 +516,7 @@ export async function setDraftSchedule(
   schedule: DraftSchedule | null,
   now: Date = new Date(),
   /** Told the content version once written (#695). */
-  onWritten?: (contentVersion: string) => void
+  onWritten?: (contentVersion: string, before: string) => void
 ): Promise<DraftScheduleRefusal | null> {
   return withChangeableDraft(draftId, userId, now, async client => {
 
@@ -553,7 +553,7 @@ export async function setDraftMailService(
   mailService: MailService,
   now: Date = new Date(),
   /** Told the content version once written (#695). */
-  onWritten?: (contentVersion: string) => void
+  onWritten?: (contentVersion: string, before: string) => void
 ): Promise<MailServiceRefusal | null> {
   const service = storedMailService({ mailService });
   return withChangeableDraft(draftId, userId, now, async client => {
@@ -591,21 +591,29 @@ async function withChangeableDraft<R extends string | null>(
   now: Date,
   change: (client: pg.PoolClient) => Promise<R>,
   /**
-   * Told the draft's content version once the change is written (#695), read in
-   * the same transaction, so it is the version of exactly what was written.
+   * Told the draft's content version once the change is written (#695), and the
+   * version it had before, both read in the same transaction under its lock: the
+   * version of exactly what was written, and of what the change was made to. A
+   * card takes the new one only when the one before is the one it shows, so a
+   * change it did not see (the chat's) is never sent on the strength of its own.
    */
-  onWritten?: (contentVersion: string) => void
+  onWritten?: (contentVersion: string, before: string) => void
 ): Promise<DraftScheduleRefusal | R> {
   return transaction(async client => {
     const refusal = await lockChangeableDraft(client, draftId, userId, now);
     if (refusal) return refusal;
-    const result = await change(client);
-    if (result === null && onWritten) {
-      const written = await client.query<ContentVersionRow>(
+    const readVersion = async () => {
+      const read = await client.query<ContentVersionRow>(
         `SELECT ${CONTENT_VERSION_COLUMNS} FROM letter_drafts WHERE draft_id = $1`,
         [draftId]
       );
-      if (written.rows[0]) onWritten(contentVersionOf(written.rows[0]));
+      return read.rows[0] ? contentVersionOf(read.rows[0]) : null;
+    };
+    const before = onWritten ? await readVersion() : null;
+    const result = await change(client);
+    if (result === null && onWritten && before !== null) {
+      const written = await readVersion();
+      if (written !== null) onWritten(written, before);
     }
     return result;
   });
@@ -780,7 +788,7 @@ export async function setDraftStationery(
   },
   now: Date = new Date(),
   /** Told the content version once written (#695). */
-  onWritten?: (contentVersion: string) => void
+  onWritten?: (contentVersion: string, before: string) => void
 ): Promise<DraftRedrawRefusal | null> {
   const stationery = storedStationery(change.stationery);
   // The version goes with the stationery stored (rendererVersionFor), so
@@ -857,7 +865,7 @@ export async function setDraftWords(
   },
   now: Date = new Date(),
   /** Told the content version once written (#695). */
-  onWritten?: (contentVersion: string) => void
+  onWritten?: (contentVersion: string, before: string) => void
 ): Promise<DraftRedrawRefusal | null> {
   return withChangeableDraft(draftId, userId, now, async client => {
     const drawnFrom: DrawnFrom = { words: change.replacing, stationery: change.drawnIn };
@@ -901,7 +909,7 @@ export async function setDraftSignature(
   },
   now: Date = new Date(),
   /** Told the content version once written (#695). */
-  onWritten?: (contentVersion: string) => void
+  onWritten?: (contentVersion: string, before: string) => void
 ): Promise<DraftRedrawRefusal | null> {
   return withChangeableDraft(draftId, userId, now, async client => {
     if (await drawnFromChanged(client, draftId, change.drawnFrom)) return 'changed';
@@ -987,7 +995,7 @@ export async function setDraftPostcardStyle(
   },
   now: Date = new Date(),
   /** Told the content version once written (#695). */
-  onWritten?: (contentVersion: string) => void
+  onWritten?: (contentVersion: string, before: string) => void
 ): Promise<DraftRedrawRefusal | null> {
   const front = storedPostcardFront(change.front);
   const rendererVersion = front ? POSTCARD_FRONT_RENDERER_VERSION : RENDERER_VERSION;

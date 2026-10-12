@@ -40,6 +40,8 @@ interface SetStationeryInput {
 export interface SetStationeryOutput extends LetterTravel {
   /** The draft's content version once changed (#695): the send takes it back. */
   contentVersion?: string;
+  /** The version the change was made to (#695): a card takes contentVersion only when this is the one it shows. */
+  contentVersionBefore?: string;
   draftId: string;
   /** The stationery the page is now drawn in: asked for, always. */
   stationery: PreviewStationery;
@@ -156,12 +158,13 @@ async function handler(input: SetStationeryInput, context: ToolContext): Promise
 
   // With the words it was drawn from, refused if they changed meanwhile (#586).
   let contentVersion: string | undefined;
+  let contentVersionBefore: string | undefined;
   const refusal = await setDraftStationery(
     draftId,
     userId,
     // And with the signature it was drawn with (#608), which set_letter_signature changes in place.
     { stationery, previewHtml, pages, drawnFrom: { bodyText: draft.body_text, signOff: draft.sign_off, signature: draft.signature_image } },
-    context.now(), version => { contentVersion = version; }
+    context.now(), (version, before) => { contentVersion = version; contentVersionBefore = before; }
   );
   if (refusal) throw refused(...STATIONERY_REFUSALS[refusal], context);
 
@@ -173,7 +176,7 @@ async function handler(input: SetStationeryInput, context: ToolContext): Promise
   // checkout read them (#586).
   const payment = letterPayment(letterOption(layout, draft.mail_service), Number(draft.required_credits ?? 2), gift, context, draftId);
   return {
-    ...(contentVersion ? { contentVersion } : {}),
+    ...(contentVersion ? { contentVersion, contentVersionBefore } : {}),
     draftId,
     stationery,
     previewHtml,

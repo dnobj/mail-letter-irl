@@ -91,10 +91,10 @@ describe('set_arrival_date (#535)', () => {
 
   it('answers with the content version the change wrote, and none when the writer told none (#695)', async () => {
     vi.mocked(setDraftSchedule).mockImplementation(async (...args: unknown[]) => {
-      (args.at(-1) as (version: string) => void)('0123456789abcdef');
+      (args.at(-1) as (version: string, before: string) => void)('0123456789abcdef', 'fedcba9876543210');
       return null;
     });
-    expect(await set({ draftId: DRAFT_ID, arriveBy: '2026-10-16' })).toMatchObject({ contentVersion: '0123456789abcdef' });
+    expect(await set({ draftId: DRAFT_ID, arriveBy: '2026-10-16' })).toMatchObject({ contentVersion: '0123456789abcdef', contentVersionBefore: 'fedcba9876543210' });
     vi.mocked(setDraftSchedule).mockResolvedValue(null);
     expect(await set({ draftId: DRAFT_ID, arriveBy: '2026-10-16' })).not.toHaveProperty('contentVersion');
   });

@@ -160,11 +160,12 @@
     function isService(value) {
       return SERVICES.indexOf(value) !== -1;
     }
-    // The content version (#695) of what the card now shows, for its Send to name: told only when the answer is
-    // drawn, so a change whose page did not come back keeps the last, and its send is refused and drawn again.
+    // The content version (#695) of what the card now shows, for its Send to name, with the version the change was
+    // made to: told only when the answer is drawn, so a change whose page did not come back keeps the last, and its
+    // send is refused and drawn again. The card takes it only when made to the version it shows.
     function tellVersion(draftId, data) {
       if (typeof options.onVersion === "function" && data && typeof data.contentVersion === "string" && data.contentVersion) {
-        options.onVersion(draftId, data.contentVersion);
+        options.onVersion(draftId, data.contentVersion, data.contentVersionBefore);
       }
     }
     // Terms taken from any answer: when they say how the letter travels, the Mail choice follows them.
@@ -641,6 +642,9 @@
       var signOff = element("studio-words-signoff");
       body.value = words.current.bodyText;
       signOff.value = words.current.signOff;
+      // What these words were written from (#695 review round 1): a status answer taken while they are written does not
+      // change which words they replace.
+      words.openedFrom = words.current;
       words.editing = true;
       words.message = "";
       words.error = false;
@@ -659,6 +663,7 @@
     function closeWords() {
       if (words.updating) return;
       words.editing = false;
+      words.openedFrom = null;
       words.message = "";
       words.error = false;
       drawWords();
@@ -676,7 +681,7 @@
       var signOff = element("studio-words-signoff").value;
       // The words it replaces: their version, so a change made elsewhere since
       // is not overwritten unseen (#593 review round 1).
-      var startedFrom = words.current;
+      var startedFrom = words.openedFrom || words.current;
       var args = { draftId: draftId, bodyText: bodyText, signOff: signOff };
       if (startedFrom && typeof startedFrom.version === "string") args.wordsVersion = startedFrom.version;
       state.busy = true;

@@ -25,6 +25,8 @@ interface SetArrivalDateInput {
 export interface SetArrivalDateOutput {
   /** The draft's content version once changed (#695): the send takes it back. */
   contentVersion?: string;
+  /** The version the change was made to (#695): a card takes contentVersion only when this is the one it shows. */
+  contentVersionBefore?: string;
   draftId: string;
   /** The draft's dates now; absent when it mails as soon as it is sent. */
   schedule?: PreviewScheduleOutput;
@@ -58,8 +60,9 @@ async function handler(
   // empty string included, clears it.
   const schedule = previewSchedule(input.arriveBy, context);
   let contentVersion: string | undefined;
+  let contentVersionBefore: string | undefined;
   const refusal = isDraftIdShape(draftId)
-    ? await setDraftSchedule(draftId, context.user.userId, schedule?.draft ?? null, context.now(), version => { contentVersion = version; })
+    ? await setDraftSchedule(draftId, context.user.userId, schedule?.draft ?? null, context.now(), (version, before) => { contentVersion = version; contentVersionBefore = before; })
     : 'not_found';
   if (refusal) {
     // Logged by the draft's state, as it always was here, where the other editors log the code.
@@ -72,7 +75,7 @@ async function handler(
 
   if (!schedule) {
     return {
-      ...(contentVersion ? { contentVersion } : {}),
+      ...(contentVersion ? { contentVersion, contentVersionBefore } : {}),
       draftId,
       deliveryEstimate: DELIVERY_ESTIMATE,
       message: 'No arrival date: once this mail is sent, it goes to the printer as soon as it can. Nothing has been sent.'
@@ -80,7 +83,7 @@ async function handler(
   }
   const sentence = scheduleSentence(schedule.output, context.now());
   return {
-    ...(contentVersion ? { contentVersion } : {}),
+    ...(contentVersion ? { contentVersion, contentVersionBefore } : {}),
     draftId,
     schedule: schedule.output,
     deliveryEstimate: sentence,

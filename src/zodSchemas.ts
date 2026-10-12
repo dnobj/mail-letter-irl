@@ -299,6 +299,10 @@ export const quoteAndPreviewLetterWithImageInputZ = z.object({
 const CONTENT_VERSION_INPUT_DESCRIPTION =
   "The contentVersion of the mail the person saw, from its preview or the last change to it. If the mail changed since, nothing is sent and the answer says to show it again";
 const contentVersionInputZ = z.string().optional().describe(CONTENT_VERSION_INPUT_DESCRIPTION);
+const contentVersionBeforeOutputZ = z
+  .string()
+  .optional()
+  .describe("The version of this mail the change was made to: for the preview card, which takes contentVersion only when this is the version it shows");
 const contentVersionOutputZ = z
   .string()
   .optional()
@@ -1228,6 +1232,7 @@ export const SET_MAIL_SERVICE_CAN_SEND_DESCRIPTION =
   "Whether the balance or a gift letter pays for the letter as it is now: certified mail is paid with Pay & Send, so it is false for it";
 export const setMailServiceOutputZ = z.object({
   contentVersion: contentVersionOutputZ,
+  contentVersionBefore: contentVersionBeforeOutputZ,
   draftId: z.string(),
   mailService: z.enum(CERTIFIED_MAIL_SERVICES).optional().describe(SET_MAIL_SERVICE_OUTPUT_DESCRIPTION),
   deliveryClass: letterTravelZ.deliveryClass,
@@ -1244,6 +1249,7 @@ export const SET_LETTER_SIGNATURE_CAN_SEND_DESCRIPTION =
   "Whether the balance or a gift letter pays for the letter as it is now: the signature's lines can change its pages, and so its price";
 export const setLetterSignatureOutputZ = z.object({
   contentVersion: contentVersionOutputZ,
+  contentVersionBefore: contentVersionBeforeOutputZ,
   draftId: z.string(),
   signature: previewSignatureOutputZ.describe("Whether the letter now prints the person's saved signature: asked for in the call"),
   pages: z.number().int().min(2).max(MAX_LETTER_PAGES).optional().describe(PREVIEW_PAGES_DESCRIPTION),
@@ -1256,6 +1262,7 @@ export const setLetterSignatureOutputZ = z.object({
 
 export const setArrivalDateOutputZ = z.object({
   contentVersion: contentVersionOutputZ,
+  contentVersionBefore: contentVersionBeforeOutputZ,
   draftId: z.string(),
   schedule: previewScheduleZ.optional().describe("The draft's dates now; absent when it mails as soon as it is sent"),
   deliveryEstimate: z.string(),
@@ -1266,6 +1273,7 @@ export const setArrivalDateOutputZ = z.object({
 export const SET_STATIONERY_OUTPUT_DESCRIPTION = "The stationery the letter is now drawn in, with the date line, initials and headline it prints";
 export const setStationeryOutputZ = z.object({
   contentVersion: contentVersionOutputZ,
+  contentVersionBefore: contentVersionBeforeOutputZ,
   draftId: z.string(),
   stationery: previewStationeryZ.describe(SET_STATIONERY_OUTPUT_DESCRIPTION),
   pages: z.number().int().min(2).max(MAX_LETTER_PAGES).optional().describe(PREVIEW_PAGES_DESCRIPTION),
@@ -1281,6 +1289,7 @@ export const SET_LETTER_WORDS_CAN_SEND_DESCRIPTION =
   "Whether the balance or a gift letter pays for the letter as it is now: new words can change its pages, and so its price";
 export const setLetterWordsOutputZ = z.object({
   contentVersion: contentVersionOutputZ,
+  contentVersionBefore: contentVersionBeforeOutputZ,
   draftId: z.string(),
   pages: z.number().int().min(2).max(MAX_LETTER_PAGES).optional().describe(PREVIEW_PAGES_DESCRIPTION),
   canSendNow: z.boolean().describe(SET_LETTER_WORDS_CAN_SEND_DESCRIPTION),
@@ -1297,6 +1306,7 @@ export const SET_POSTCARD_STYLE_CAN_SEND_DESCRIPTION =
   "Whether the balance or a gift letter pays for the postcard as it is now: a new size can change how it is paid";
 export const setPostcardStyleOutputZ = z.object({
   contentVersion: contentVersionOutputZ,
+  contentVersionBefore: contentVersionBeforeOutputZ,
   draftId: z.string(),
   size: z.enum(["6x9", "6x4", "6x11"]).describe(SET_POSTCARD_STYLE_SIZE_OUTPUT_DESCRIPTION),
   layout: z.enum(["full_bleed", "border", "greetings"]).describe("The postcard's front now"),
