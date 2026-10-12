@@ -9,6 +9,8 @@ export interface JobView extends JobDetailForLetter {
   mailType: string;
   fundingType: string;
   fundingOrderId: string | null;
+  /** The account's sending is blocked (#696): the outbox leaves its mail. */
+  accountBlocked: boolean;
 }
 
 interface JobJoinedRow extends JobRow {
@@ -18,13 +20,16 @@ interface JobJoinedRow extends JobRow {
   mail_type: string;
   funding_type: string;
   funding_order_id: string | null;
+  account_blocked: boolean;
 }
 
 const JOB_JOINED_SQL = `
   SELECT ${JOB_COLUMNS},
          l.letter_id, l.user_id, l.status AS letter_status, l.mail_type::text AS mail_type,
-         l.funding_type, l.funding_order_id
+         l.funding_type, l.funding_order_id,
+         (u.sends_blocked_reason IS NOT NULL) AS account_blocked
   FROM letter_jobs j JOIN letters l ON l.letter_id = j.letter_id
+  LEFT JOIN users u ON u.user_id = l.user_id
 `;
 
 /**
@@ -42,20 +47,30 @@ export function isHeldMailJob(job: JobView, now: number = Date.now()): boolean {
 }
 
 /**
- * Mail held for its funding (#696): a pack refunded in full or lost to a dispute paid for
- * it. The job pending and never attempted or dispatched, its letter queued, due or not: a
- * dispute can outlast its mail date. The page offers job.dispatch_now for it too; the
- * service checks the same again under its locks.
+ * Mail the outbox leaves for the operator (#696): never dispatched, pending with an
+ * attempt left, its letter queued, due or not, and held for its funding (a pack refunded in
+ * full or lost to a dispute) or of an account whose sending is blocked. The service checks
+ * the same again under its locks.
  */
-export function isFundingHeldMailJob(job: JobView): boolean {
+export function isLeftForOperatorJob(job: JobView): boolean {
   return (
     job.status === "pending" &&
     job.providerOutcome === "not_dispatched" &&
-    job.attempts === 0 &&
+    job.attempts < job.maxAttempts &&
     job.letterStatus === "queued" &&
     !job.operatorResolution &&
-    isFundingHoldReason(job.holdReason)
+    (isFundingHoldReason(job.holdReason) || job.accountBlocked)
   );
+}
+
+/** Mail held for its funding (#696), which job.dispatch_now releases, due or not: a dispute can outlast its mail date. */
+export function isFundingHeldMailJob(job: JobView): boolean {
+  return isLeftForOperatorJob(job) && isFundingHoldReason(job.holdReason);
+}
+
+/** What job.cancel_held cancels: prepaid or gift mail left for the operator. A Pay & Send letter goes with its order's refund. */
+export function isCancellableLeftJob(job: JobView): boolean {
+  return isLeftForOperatorJob(job) && !job.fundingOrderId && ["prepaid_balance", "gift_letter"].includes(job.fundingType);
 }
 
 /** What job.dispatch_now may release: held mail before its date, or mail held for its funding. */
@@ -72,13 +87,14 @@ function toJobView(row: JobJoinedRow): JobView {
     mailType: row.mail_type,
     fundingType: row.funding_type,
     fundingOrderId: row.funding_order_id,
+    accountBlocked: row.account_blocked === true,
   };
 }
 
 /**
  * Jobs that need an operator: held (ambiguous provider outcome or accepted
- * after a refund), held for their funding (#696), failed, or processing for
- * longer than a dispatch takes.
+ * after a refund), left for the operator (#696: held for their funding, or of
+ * a blocked account), failed, or processing for longer than a dispatch takes.
  */
 export async function listAttentionJobs(
   client: AdminSqlClient,
@@ -88,6 +104,7 @@ export async function listAttentionJobs(
     `${JOB_JOINED_SQL}
      WHERE j.status IN ('held', 'failed')
         OR (j.status = 'pending' AND ${fundingHeldJobSql("j")})
+        OR (j.status = 'pending' AND j.provider_outcome = 'not_dispatched' AND u.sends_blocked_reason IS NOT NULL)
         OR (j.status = 'processing' AND j.locked_at < NOW() - INTERVAL '10 minutes')
      ORDER BY CASE j.status WHEN 'held' THEN 0 WHEN 'processing' THEN 1 ELSE 2 END, j.updated_at DESC
      LIMIT $1`,

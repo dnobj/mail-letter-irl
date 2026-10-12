@@ -56,6 +56,8 @@ export interface ProcessLetterJobResult {
   retryScheduled: boolean;
   job?: LetterJob;
   error?: string;
+  /** Put back for the operator by the dispatch marker (#696): neither sent nor failed. */
+  leftForOperator?: boolean;
 }
 
 function maxAttempts(): number {
@@ -291,7 +293,7 @@ async function markProviderDispatch(job: LetterJob): Promise<Letter | typeof LEF
     // pending, its attempt given back, so it neither fails nor counts against it, and
     // waits for the operator as it would have had the claim seen it.
     const blocked = await client.query<{ sends_blocked_reason: string | null }>(
-      'SELECT sends_blocked_reason FROM users WHERE user_id = $1',
+      'SELECT sends_blocked_reason FROM users WHERE user_id = $1 FOR SHARE',
       [letter.user_id]
     );
     if (isFundingHoldReason(current.hold_reason) || blocked.rows[0]?.sends_blocked_reason) {
@@ -1080,7 +1082,7 @@ async function processClaimedJob(
     const provider = await resolveProviderForLetter(preview);
     const marked = await markProviderDispatch(job);
     if (marked === LEFT_FOR_OPERATOR) {
-      return { claimed: true, completed: false, retryScheduled: false, job, error: 'Left for the operator' };
+      return { claimed: true, completed: false, retryScheduled: false, job, error: 'Left for the operator', leftForOperator: true };
     }
     const letter = marked;
     dispatched = true;
@@ -1234,11 +1236,22 @@ export async function processDueLetterJobs(
   // reclaimable by claimJob and will simply be retried, which is the better
   // outcome; stealing it here would convert a recoverable job into a terminal
   // failure and a refund the customer did not need.
+  // Mail left for the operator (#696) is put back, not failed: it was never to be sent
+  // without a person, and failing it would cancel it and give back what paid for it.
+  await query(
+    `UPDATE letter_jobs SET status = 'pending', attempts = GREATEST(attempts - 1, 0), locked_at = NULL,
+       updated_at = NOW()
+     WHERE status = 'processing' AND provider_outcome = 'not_dispatched'
+       AND attempts >= max_attempts
+       AND locked_at < NOW() - INTERVAL '${STALE_LOCK_MINUTES} minutes'
+       AND ${leftForOperatorSql('letter_jobs')}`
+  );
   const staleUndispatched = await query<LetterJob>(
     `SELECT * FROM letter_jobs
      WHERE status = 'processing' AND provider_outcome = 'not_dispatched'
        AND attempts >= max_attempts
        AND locked_at < NOW() - INTERVAL '${STALE_LOCK_MINUTES} minutes'
+       AND NOT ${leftForOperatorSql('letter_jobs')}
      ORDER BY locked_at LIMIT $1`,
     [limit]
   );
@@ -1271,7 +1284,7 @@ export async function processDueLetterJobs(
     summary.processed += 1;
     if (result.completed) summary.completed += 1;
     else if (result.retryScheduled) summary.retryScheduled += 1;
-    else summary.failed += 1;
+    else if (!result.leftForOperator) summary.failed += 1;
   }
 
   return summary;
@@ -1294,6 +1307,122 @@ export class AdminJobRetryError extends Error {
   constructor(readonly code: 'not_found' | 'invalid_state' | 'idempotency_conflict') {
     super(code);
   }
+}
+
+/**
+ * Cancel mail left for the operator (#696, decision D2: the operator releases or cancels): a
+ * prepaid or gift letter whose job is held for its funding (a pack refunded in full or lost
+ * to a dispute), or whose account's sending is blocked, never dispatched. The job and the
+ * letter are cancelled, and what paid for it goes back as a failed send's would
+ * (returnPrepaidCreditsForFailedLetter): nothing from a revoked lot, no gift from a refunded
+ * or disputed purchase. A Pay & Send letter is not cancelled here: its order's refund cancels
+ * it (stopFundedMailBeforeFinancialReversal).
+ *
+ * Locks the letter, then the job, as the outbox does. Idempotent through the operator audit,
+ * as the release is, under its own operation, mail_job_cancel (migration 056).
+ */
+export async function cancelLeftLetterJobAsAdmin(params: {
+  jobId: string;
+  expectedUserId: string;
+  actorId: string;
+  reason: string;
+  idempotencyKey: string;
+}): Promise<{ jobId: string; replayed: boolean }> {
+  return transaction(async client => {
+    const idempotencyKeyHash = createHash('sha256').update(params.idempotencyKey).digest('hex');
+    const actorHash = createHash('sha256').update(params.actorId).digest('hex');
+    const jobHash = createHash('sha256').update(params.jobId).digest('hex');
+    const reasonHash = createHash('sha256').update(params.reason).digest('hex');
+    const expectedUserHash = createHash('sha256').update(params.expectedUserId).digest('hex');
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [params.idempotencyKey]);
+    const replay = await client.query<{
+      operation: string;
+      target_type: string;
+      target_reference_hash: string;
+      actor_subject_hash: string;
+      operator_reason_hash: string | null;
+      expected_user_hash: string | null;
+    }>(
+      `SELECT operation, target_type, target_reference_hash, actor_subject_hash,
+              provider_evidence->>'operatorReasonHash' AS operator_reason_hash,
+              provider_evidence->>'expectedUserHash' AS expected_user_hash
+       FROM commerce_operator_audit_events
+       WHERE idempotency_key_hash = $1`,
+      [idempotencyKeyHash]
+    );
+    if (replay.rows[0]) {
+      const existing = replay.rows[0];
+      if (
+        existing.operation !== 'mail_job_cancel' ||
+        existing.target_type !== 'letter_job' ||
+        existing.target_reference_hash !== jobHash ||
+        existing.actor_subject_hash !== actorHash ||
+        existing.operator_reason_hash !== reasonHash ||
+        existing.expected_user_hash !== expectedUserHash
+      ) {
+        throw new AdminJobReleaseError('idempotency_conflict');
+      }
+      return { jobId: params.jobId, replayed: true };
+    }
+    const relation = await client.query<{ letter_id: string }>(
+      'SELECT letter_id FROM letter_jobs WHERE job_id = $1', [params.jobId]
+    );
+    const letterId = relation.rows[0]?.letter_id;
+    if (!letterId) throw new AdminJobReleaseError('not_found');
+    const letter = await client.query<{ status: string; user_id: string; funding_type: string; funding_order_id: string | null }>(
+      'SELECT status, user_id, funding_type, funding_order_id FROM letters WHERE letter_id = $1 FOR UPDATE', [letterId]
+    );
+    const job = await client.query<{
+      letter_id: string;
+      status: string;
+      provider_outcome: string;
+      attempts: number;
+      max_attempts: number;
+      hold_reason: string | null;
+      operator_resolution: string | null;
+    }>(
+      `SELECT letter_id, status, provider_outcome, attempts, max_attempts, hold_reason, operator_resolution
+       FROM letter_jobs WHERE job_id = $1 FOR UPDATE`, [params.jobId]
+    );
+    const held = letter.rows[0];
+    const current = job.rows[0];
+    if (!held || held.user_id !== params.expectedUserId) throw new AdminJobReleaseError('not_found');
+    const blocked = await client.query<{ sends_blocked_reason: string | null }>(
+      'SELECT sends_blocked_reason FROM users WHERE user_id = $1 FOR SHARE', [held.user_id]
+    );
+    const left = isFundingHoldReason(current?.hold_reason) || Boolean(blocked.rows[0]?.sends_blocked_reason);
+    if (!current || current.letter_id !== letterId || !left ||
+        held.status !== 'queued' || held.funding_order_id ||
+        !['prepaid_balance', 'gift_letter'].includes(held.funding_type) ||
+        current.status !== 'pending' || current.provider_outcome !== 'not_dispatched' ||
+        current.attempts >= current.max_attempts || current.operator_resolution) {
+      throw new AdminJobReleaseError('invalid_state');
+    }
+    await client.query(
+      `UPDATE letter_jobs SET status = 'cancelled', completed_at = NOW(), locked_at = NULL,
+         operator_resolution = 'operator_cancelled', resolved_at = NOW(), updated_at = NOW()
+       WHERE job_id = $1`,
+      [params.jobId]
+    );
+    await client.query(
+      `UPDATE letters SET status = 'cancelled', status_updated_at = NOW(), updated_at = NOW() WHERE letter_id = $1`,
+      [letterId]
+    );
+    await returnPrepaidCreditsForFailedLetter(client, letterId, 'operator_cancelled');
+    await client.query(
+      `INSERT INTO commerce_operator_audit_events
+         (idempotency_key_hash, actor_subject_hash, operation, target_type,
+          target_reference_hash, reason_code, before_state, after_state, provider_evidence)
+       VALUES ($1, $2, 'mail_job_cancel', 'letter_job', $3, 'operator_cancelled_held_mail', $4, $5, $6)`,
+      [idempotencyKeyHash,
+        actorHash,
+        jobHash,
+        JSON.stringify({ jobStatus: 'pending', ...(isFundingHoldReason(current.hold_reason) ? { fundingHold: current.hold_reason } : { accountBlocked: true }) }),
+        JSON.stringify({ jobStatus: 'cancelled' }),
+        JSON.stringify({ operatorReasonHash: reasonHash, expectedUserHash })]
+    );
+    return { jobId: params.jobId, replayed: false };
+  });
 }
 
 export class AdminJobReleaseError extends Error {
@@ -1879,31 +2008,40 @@ export async function releaseHeldLetterJobAsAdmin(params: {
       mail_hold_until: Date | null;
       next_attempt_at: Date;
       hold_reason: string | null;
+      max_attempts: number;
       still_held: boolean;
     }>(
       `SELECT letter_id, status, provider_outcome, attempts, operator_resolution,
-              mail_hold_until, next_attempt_at, hold_reason,
+              mail_hold_until, next_attempt_at, hold_reason, max_attempts,
               (${heldMailJobSql('letter_jobs')}) AS still_held
        FROM letter_jobs WHERE job_id = $1 FOR UPDATE`, [params.jobId]
     );
     const current = job.rows[0];
     const held = letter.rows[0];
+    // A funding hold (#696) may have spent attempts before it was held: a retry, or a claim
+    // the marker put back. Any left will do.
+    const fundingHeld = isFundingHoldReason(current?.hold_reason);
     if (!current || current.letter_id !== ids.letter_id ||
         held?.funding_order_id !== ids.funding_order_id ||
         held?.user_id !== params.expectedUserId ||
         held?.status !== 'queued' ||
         current.status !== 'pending' || current.provider_outcome !== 'not_dispatched' ||
-        current.attempts !== 0 || current.operator_resolution ||
+        (fundingHeld ? current.attempts >= current.max_attempts : current.attempts !== 0) ||
+        current.operator_resolution ||
         // Held mail not yet due, or mail held for its funding (#696), due or not: a dispute
         // can outlast its mail date.
-        !((current.mail_hold_until && current.still_held === true) || isFundingHoldReason(current.hold_reason))) {
+        !((current.mail_hold_until && current.still_held === true) || fundingHeld)) {
       throw new AdminJobReleaseError('invalid_state');
     }
-    // The funding hold ends with the release (#696); held mail never has one otherwise.
+    // The funding hold ends with the release (#696), and its mail keeps its own date: due now if
+    // that has passed, else on it. Held mail released early is due now, as before.
     const released = await client.query<{ next_attempt_at: Date }>(
-      `UPDATE letter_jobs SET next_attempt_at = NOW(), scheduled_at = NOW(), hold_reason = NULL, updated_at = NOW()
-       WHERE job_id = $1 RETURNING next_attempt_at`,
-      [params.jobId]
+      `UPDATE letter_jobs
+          SET next_attempt_at = CASE WHEN $2::boolean THEN GREATEST(next_attempt_at, NOW()) ELSE NOW() END,
+              scheduled_at = CASE WHEN $2::boolean THEN GREATEST(scheduled_at, NOW()) ELSE NOW() END,
+              hold_reason = NULL, updated_at = NOW()
+        WHERE job_id = $1 RETURNING next_attempt_at`,
+      [params.jobId, fundingHeld]
     );
     await client.query(
       `INSERT INTO commerce_operator_audit_events
@@ -1917,7 +2055,7 @@ export async function releaseHeldLetterJobAsAdmin(params: {
           jobStatus: 'pending',
           heldUntil: current.mail_hold_until,
           nextAttemptAt: current.next_attempt_at,
-          ...(isFundingHoldReason(current.hold_reason) ? { fundingHold: current.hold_reason } : {})
+          ...(fundingHeld ? { fundingHold: current.hold_reason } : {})
         }),
         JSON.stringify({ jobStatus: 'pending', nextAttemptAt: released.rows[0]?.next_attempt_at ?? null }),
         JSON.stringify({ operatorReasonHash: reasonHash, expectedUserHash })]

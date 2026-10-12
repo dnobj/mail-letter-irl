@@ -785,7 +785,7 @@ describePostgres('failed send returns the pack', () => {
         await held(jobId);
 
         await commerce.processStripeWebhookEvent(disputeEvent(paymentIntentId, 'needs_response'));
-        // A second event for the same order (the dispute's update) raises no second alert.
+        // A second dispute event for the same order raises no second alert.
         await commerce.processStripeWebhookEvent(disputeEvent(paymentIntentId, 'needs_response'));
 
         expect((await jobRow(jobId)).hold_reason).toBe('funding_disputed');
@@ -823,6 +823,79 @@ describePostgres('failed send returns the pack', () => {
         expect(stubProvider.calls).toHaveLength(1);
       }, 60_000);
 
+      it('holds a letter paid from a lot returned from the pack, which names the order only as its reference', async () => {
+        resetStubProvider();
+        const { userId, letterId, orderId, paymentIntentId } = await seedPackOrderLetter({ credits: 6, spend: 2 });
+        const firstJob = await queueJob(letterId);
+        // A credit returned from the pack (a cancelled send), then spent on another letter.
+        const purchase = await pool.query<{ ledger_id: string }>(
+          "SELECT ledger_id FROM credit_ledger WHERE user_id = $1 AND source_type = 'purchase'", [userId]
+        );
+        const returned = await pool.query<{ ledger_id: string }>(
+          `INSERT INTO credit_ledger (
+             user_id, initial_amount, remaining_amount, source_type, source_reference_id, related_ledger_id,
+             activated_at, expires_at, expiration_policy, status
+           ) VALUES ($1, 1, 0, 'adjustment', $2, $3, NOW(), NOW() + INTERVAL '730 days', 'days_from_activation', 'active')
+           RETURNING ledger_id`,
+          [userId, orderId, purchase.rows[0].ledger_id]
+        );
+        const second = randomUUID();
+        await pool.query(
+          `INSERT INTO letters (letter_id, user_id, content, recipient, credits_cost, status, funding_type)
+           VALUES ($1, $2, '{"body":"again"}'::jsonb, '{"name":"R"}'::jsonb, 1, 'queued', 'prepaid_balance')`,
+          [second, userId]
+        );
+        const txn = await pool.query<{ transaction_id: number }>(
+          `INSERT INTO credit_transactions (user_id, amount, balance_after, type, reference_type, reference_id, description)
+           VALUES ($1, -1, 3, 'deduction', 'letter', $2, 'send') RETURNING transaction_id`,
+          [userId, second]
+        );
+        await pool.query(
+          'INSERT INTO credit_consumption (transaction_id, ledger_id, amount, ledger_remaining_after) VALUES ($1, $2, 1, 0)',
+          [txn.rows[0].transaction_id, returned.rows[0].ledger_id]
+        );
+        const secondJob = await queueJob(second);
+
+        await commerce.processStripeWebhookEvent(refundedChargeEvent(paymentIntentId));
+
+        expect((await jobRow(firstJob)).hold_reason).toBe('funding_reversed');
+        expect((await jobRow(secondJob)).hold_reason).toBe('funding_reversed');
+        expect(await alertsFor(orderId)).toBe(1);
+      }, 60_000);
+
+      it('still claims and sends ordinary mail, with no hold and an account not blocked', async () => {
+        resetStubProvider();
+        const { letterId } = await seedSpentLetter({ lotA: 5, lotB: 1, spend: 2 });
+        const jobId = await queueJob(letterId);
+        stubProvider.nextResult = providerSuccess('ordinary');
+        await jobs.processLetterJob(jobId);
+        expect(stubProvider.calls).toHaveLength(1);
+      }, 60_000);
+
+      it("lets the operator cancel a blocked account's mail, giving back what paid for it", async () => {
+        resetStubProvider();
+        const { userId, letterId } = await seedSpentLetter({ lotA: 5, lotB: 1, spend: 2 });
+        const jobId = await queueJob(letterId);
+        await pool.query(
+          "UPDATE users SET sends_blocked_reason = 'payment_disputed', sends_blocked_at = NOW() WHERE user_id = $1", [userId]
+        );
+        expect(await credits(userId)).toBe(4);
+
+        await expect(jobs.cancelLeftLetterJobAsAdmin({
+          jobId, expectedUserId: userId, actorId: 'operator_test', reason: 'the account is closing', idempotencyKey: `cancel-${jobId}`
+        })).resolves.toMatchObject({ replayed: false });
+
+        expect((await jobRow(jobId)).status).toBe('cancelled');
+        expect((await pool.query<{ status: string }>('SELECT status FROM letters WHERE letter_id = $1', [letterId])).rows[0].status)
+          .toBe('cancelled');
+        expect(await credits(userId)).toBe(6);
+        const audit = await pool.query(
+          "SELECT 1 FROM commerce_operator_audit_events WHERE operation = 'mail_job_cancel' AND reason_code = 'operator_cancelled_held_mail'"
+        );
+        expect(audit.rowCount).toBeGreaterThan(0);
+        expect(stubProvider.calls).toHaveLength(0);
+      }, 60_000);
+
       it('puts back a claim a crash left behind for mail left for the operator, its attempt given back', async () => {
         resetStubProvider();
         const { letterId } = await seedSpentLetter({ lotA: 5, lotB: 1, spend: 2 });
@@ -835,7 +908,7 @@ describePostgres('failed send returns the pack', () => {
 
         await expect(jobs.processLetterJob(jobId)).resolves.toMatchObject({ claimed: true, completed: false, error: 'Left for the operator' });
         expect(stubProvider.calls).toHaveLength(0);
-        expect(await jobRow(jobId)).toMatchObject({ status: 'pending', attempts: 0, hold_reason: 'funding_reversed', provider_outcome: 'not_dispatched' });
+        expect(await jobRow(jobId)).toMatchObject({ status: 'pending', attempts: 1, hold_reason: 'funding_reversed', provider_outcome: 'not_dispatched' });
         // Nothing failed or returned: the letter still waits.
         expect((await pool.query<{ status: string }>('SELECT status FROM letters WHERE letter_id = $1', [letterId])).rows[0].status)
           .toBe('queued');

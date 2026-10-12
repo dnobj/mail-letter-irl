@@ -244,7 +244,7 @@ describe("held mail (#535)", () => {
     "l.status = 'queued' AND l.funding_type IN ('prepaid_balance', 'gift_letter') AND ((j.status = 'pending' " +
     "AND j.provider_outcome = 'not_dispatched' AND j.attempts = 0 AND j.mail_hold_until IS NOT NULL " +
     "AND j.next_attempt_at > NOW()) OR (j.status = 'pending' AND (j.provider_outcome = 'not_dispatched' " +
-    "AND j.hold_reason IN ('funding_reversed', 'funding_disputed'))))";
+    "AND j.hold_reason IS NOT NULL AND j.hold_reason IN ('funding_reversed', 'funding_disputed'))))";
 
   it("does not hold the account: the gate leaves held prepaid and gift mail out of both mail counts", async () => {
     const client = scriptedClient({ queue: [OPERATION()] });

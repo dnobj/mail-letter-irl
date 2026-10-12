@@ -2,7 +2,7 @@ import type { CommandOutcome, CommandPreview } from "../commands/runner.js";
 import { html, join, type SafeHtml } from "../ui/html.js";
 import { formatDate } from "../ui/format.js";
 import { csrfField } from "../ui/layout.js";
-import { isFundingHeldMailJob, isHeldMailJob, type JobView } from "../queries/jobs.js";
+import { isCancellableLeftJob, isFundingHeldMailJob, isHeldMailJob, isLeftForOperatorJob, type JobView } from "../queries/jobs.js";
 import { commandLink, definitionList } from "./common.js";
 
 /** The preview page: what will happen, and the confirmation form. */
@@ -181,13 +181,25 @@ ${input.mode !== "full" ? html`<p class="muted">Read-only mode: previews work, e
 </form>
 ${input.mode !== "full" ? html`<p class="muted">Read-only mode: previews work, execution is refused.</p>` : ""}`;
   }
-  if (isFundingHeldMailJob(job)) {
-    return html`<h2>Held for its funding</h2>
-<p>The letter pack that paid for this letter was ${job.holdReason === "funding_disputed" ? "lost to a dispute" : "refunded in full"}, so it waits here instead of printing. Sending it prints a letter whose money went back; the customer can also cancel it.</p>
-<form method="get" action="/commands/job.dispatch_now/preview" class="inline">
+  if (isLeftForOperatorJob(job)) {
+    const funding = isFundingHeldMailJob(job);
+    const why = funding
+      ? `The letter pack that paid for this letter was ${job.holdReason === "funding_disputed" ? "lost to a dispute" : "refunded in full"}, so it waits here instead of printing.`
+      : "The account's sending is blocked, so this letter waits here instead of printing.";
+    return html`<h2>Left for the operator</h2>
+<p>${why}</p>
+${funding
+  ? html`<form method="get" action="/commands/job.dispatch_now/preview" class="inline">
   <input type="hidden" name="target" value="${job.jobId}">
   <button type="submit">Preview sending anyway…</button>
-</form>
+</form>`
+  : ""}
+${isCancellableLeftJob(job)
+  ? html`<form method="get" action="/commands/job.cancel_held/preview" class="inline">
+  <input type="hidden" name="target" value="${job.jobId}">
+  <button type="submit">Preview cancelling…</button>
+</form>`
+  : html`<p class="muted">A Pay &amp; Send letter is cancelled by refunding its order.</p>`}
 ${input.mode !== "full" ? html`<p class="muted">Read-only mode: previews work, execution is refused.</p>` : ""}`;
   }
   if (isHeldMailJob(job, input.now)) {

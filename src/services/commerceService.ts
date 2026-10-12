@@ -2331,8 +2331,11 @@ async function stopFundedMailBeforeFinancialReversal(
  * won. A proportional refund (unused letters only) does not come here: what it leaves was
  * paid for.
  *
- * The letters are those whose deduction drew on the order's lots, or on lots re-issued
- * from them (returned credits, related_ledger_id), as retentionService reads them. A job
+ * The letters are those whose deduction drew on the pack's lots as revokeWholePack finds
+ * them (the purchase lot and every lot returned from it carry the order id, or its
+ * checkout session), and the gift letters the pack granted. Read before the account lock,
+ * as every path that holds a letter and the account locks the letter first; a send that
+ * commits between this read and the revocation is not held (milliseconds). A job
  * claimed but not yet marked dispatching is held too: the marker reads the hold under its
  * lock and puts the job back. Mail already dispatching or accepted is past this, and its
  * own alerts say so.
@@ -2348,20 +2351,27 @@ async function holdMailFundedByOrder(
 ): Promise<number> {
   if (order.order_type !== 'letter_pack') return 0;
   const funded = await client.query<{ letter_id: string }>(
-    `SELECT DISTINCT l.letter_id
-       FROM credit_transactions txn
-       JOIN credit_consumption cc ON cc.transaction_id = txn.transaction_id
-       JOIN credit_ledger lot ON lot.ledger_id = cc.ledger_id
-       JOIN letters l ON l.letter_id = txn.reference_id
-      WHERE txn.reference_type = 'letter'
-        AND txn.type = 'deduction'
-        AND l.user_id = $2
-        AND (
-              lot.source_order_id = $1
-           OR lot.related_ledger_id IN (SELECT ledger_id FROM credit_ledger WHERE source_order_id = $1)
-            )
-      ORDER BY l.letter_id`,
-    [order.order_id, order.user_id]
+    `SELECT letter_id FROM (
+       SELECT l.letter_id
+         FROM credit_transactions txn
+         JOIN credit_consumption cc ON cc.transaction_id = txn.transaction_id
+         JOIN credit_ledger lot ON lot.ledger_id = cc.ledger_id
+         JOIN letters l ON l.letter_id = txn.reference_id
+        WHERE txn.reference_type = 'letter'
+          AND txn.type = 'deduction'
+          AND l.user_id = $2
+          AND lot.user_id = $2
+          AND (lot.source_order_id = $1 OR lot.source_reference_id = $1
+               OR lot.source_metadata->>'stripe_session_id' = $3)
+       UNION
+       SELECT l.letter_id
+         FROM gift_letters g
+         JOIN letters l ON l.letter_id = g.consumed_by_letter_id
+        WHERE g.source_order_id = $1
+          AND l.user_id = $2
+     ) funded
+     ORDER BY letter_id`,
+    [order.order_id, order.user_id, order.stripe_checkout_session_id || null]
   );
   let held = 0;
   for (const { letter_id: letterId } of funded.rows) {

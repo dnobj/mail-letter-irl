@@ -29,6 +29,7 @@ import {
   lettersWaitingBehindPause,
   processDueLetterJobs,
   processLetterJob,
+  cancelLeftLetterJobAsAdmin,
   releaseHeldLetterJobAsAdmin,
   resolveAmbiguousLetterJobAsAdmin,
   retryLetterJobAsAdmin,
@@ -1224,6 +1225,7 @@ describe("the outbox's stop (#444)", () => {
     query
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [{ count: '3' }] });
 
     expect(await processDueLetterJobs(25)).toEqual({
@@ -1236,9 +1238,13 @@ describe("the outbox's stop (#444)", () => {
     });
 
     const statements = query.mock.calls.map(([sql]) => String(sql).replace(/\s+/g, ' '));
-    expect(statements).toHaveLength(3);
+    expect(statements).toHaveLength(4);
     expect(statements[0]).toContain("provider_outcome = 'dispatching'");
-    expect(statements[1]).toContain("provider_outcome = 'not_dispatched'");
+    // The last attempt's crash: mail left for the operator put back (#696), the rest settled.
+    expect(statements[1]).toContain("UPDATE letter_jobs SET status = 'pending', attempts = GREATEST(attempts - 1, 0)");
+    expect(statements[2]).toContain("provider_outcome = 'not_dispatched'");
+    expect(statements[2]).toContain('AND NOT ((letter_jobs.provider_outcome');
+    statements.splice(1, 1);
     expect(statements[2]).toContain('SELECT COUNT(*)::text AS count FROM letter_jobs');
     // What claimJob would take once resumed, a claim a crash left behind
     // included (#451 review).
@@ -1416,9 +1422,10 @@ describe('releaseHeldLetterJobAsAdmin: sending held mail now (#535)', () => {
     );
     const update = calls.find(call => call.sql.startsWith('UPDATE letter_jobs'))!;
     expect(update.sql.replace(/\s+/g, ' ')).toBe(
-      'UPDATE letter_jobs SET next_attempt_at = NOW(), scheduled_at = NOW(), hold_reason = NULL, updated_at = NOW() WHERE job_id = $1 RETURNING next_attempt_at'
+      'UPDATE letter_jobs SET next_attempt_at = CASE WHEN $2::boolean THEN GREATEST(next_attempt_at, NOW()) ELSE NOW() END, scheduled_at = CASE WHEN $2::boolean THEN GREATEST(scheduled_at, NOW()) ELSE NOW() END, hold_reason = NULL, updated_at = NOW() WHERE job_id = $1 RETURNING next_attempt_at'
     );
-    expect(update.params).toEqual(['job-held']);
+    // Held mail, not a funding hold (#696): due now.
+    expect(update.params).toEqual(['job-held', false]);
     // Nothing else: not the letter, not the order, not the job's metadata.
     expect(writes(calls)).toEqual(['UPDATE letter_jobs SET', 'INSERT INTO commerce_operator_audit_events']);
 
@@ -1485,13 +1492,15 @@ describe('releaseHeldLetterJobAsAdmin: sending held mail now (#535)', () => {
     expect(writes(calls)).toEqual([]);
   });
 
-  it('releases mail held for its funding, due or not, and ends the hold (#696)', async () => {
-    for (const hold of ['funding_reversed', 'funding_disputed']) {
-      // A pack's letter sent for now, or one whose mail date passed while it was held.
-      const calls = heldClient({ job: { hold_reason: hold, mail_hold_until: null, still_held: false } });
+  it('releases mail held for its funding, due or not, attempts spent or not, keeping its date, and ends the hold (#696)', async () => {
+    for (const [hold, attempts] of [['funding_reversed', 0], ['funding_disputed', 2]] as const) {
+      // A pack's letter sent for now, or one whose mail date passed while it was held; one retried before it was held.
+      const calls = heldClient({ job: { hold_reason: hold, mail_hold_until: null, still_held: false, attempts, max_attempts: 5 } });
       await expect(releaseHeldLetterJobAsAdmin(params), hold).resolves.toEqual({ jobId: 'job-held', replayed: false });
       const release = calls.find(call => call.sql.startsWith('UPDATE letter_jobs'))!;
       expect(release.sql).toContain('hold_reason = NULL');
+      // Its own date kept: due now only if that has passed.
+      expect(release.params).toEqual(['job-held', true]);
       const audit = calls.find(call => call.sql.includes('INSERT INTO commerce_operator_audit_events'))!;
       expect(JSON.parse(String(audit.params[3]))).toMatchObject({ fundingHold: hold });
     }
@@ -1499,10 +1508,10 @@ describe('releaseHeldLetterJobAsAdmin: sending held mail now (#535)', () => {
 
   it.each([
     ['another hold', { hold_reason: 'provider_outcome_ambiguous' }],
-    ['attempted', { attempts: 1 }],
+    ['out of attempts', { attempts: 5 }],
     ['dispatched', { provider_outcome: 'dispatching' }],
   ])('refuses mail held for its funding that is %s, writing nothing (#696)', async (_label, job) => {
-    const calls = heldClient({ job: { hold_reason: 'funding_reversed', mail_hold_until: null, still_held: false, ...job } });
+    const calls = heldClient({ job: { hold_reason: 'funding_reversed', mail_hold_until: null, still_held: false, max_attempts: 5, ...job } });
     await expect(releaseHeldLetterJobAsAdmin(params)).rejects.toMatchObject({ code: 'invalid_state' });
     expect(writes(calls)).toEqual([]);
   });
@@ -1543,13 +1552,19 @@ describe('releaseHeldLetterJobAsAdmin: sending held mail now (#535)', () => {
 
 describe('mail left for the operator (#696)', () => {
   const flat = (text: string) => text.replace(/\s+/g, ' ');
-  const LEFT = "(j_alias.provider_outcome = 'not_dispatched' AND j_alias.hold_reason IN ('funding_reversed', 'funding_disputed'))";
+  const LEFT =
+    "(j_alias.provider_outcome = 'not_dispatched' AND j_alias.hold_reason IS NOT NULL " +
+    "AND j_alias.hold_reason IN ('funding_reversed', 'funding_disputed'))";
 
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.transaction.mockImplementation(
       async (callback: (client: { query: typeof clientQuery }) => Promise<unknown>) => callback({ query: clientQuery })
     );
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it('is not claimed when due: held for its funding, or of an account whose sending is blocked', async () => {
@@ -1605,8 +1620,16 @@ describe('mail left for the operator (#696)', () => {
     expect(back?.params).toEqual(['job-1']);
     expect(calls.some(call => call.sql.includes("SET provider_outcome = 'dispatching'"))).toBe(false);
     expect(calls.some(call => call.sql.includes('last_error'))).toBe(false);
-    // Read for its user, as the letter names it.
-    expect(calls.find(call => call.sql.startsWith('SELECT sends_blocked_reason FROM users'))?.params).toEqual(['user-1']);
+    // Read for its user, as the letter names it, under a share lock after the letter and the job.
+    const block = calls.find(call => call.sql.startsWith('SELECT sends_blocked_reason FROM users'))!;
+    expect(block.params).toEqual(['user-1']);
+    expect(block.sql).toContain('FOR SHARE');
+  });
+
+  it('counts a put-back as neither sent nor failed in a run', async () => {
+    mockClaims();
+    markerClient({ holdReason: 'funding_reversed' });
+    expect(await processDueLetterJobs(25)).toMatchObject({ processed: 1, completed: 0, retryScheduled: 0, failed: 0 });
   });
 
   it('is dispatched as before when neither', async () => {
@@ -1616,5 +1639,105 @@ describe('mail left for the operator (#696)', () => {
     await processLetterJob('job-1');
     expect(calls.some(call => call.sql.includes("SET provider_outcome = 'dispatching'"))).toBe(true);
     expect(calls.some(call => call.sql.includes('GREATEST(attempts - 1, 0)'))).toBe(false);
+  });
+});
+
+describe('cancelLeftLetterJobAsAdmin: the operator cancels mail left for them (#696)', () => {
+  const sha = (value: string) => createHash('sha256').update(value).digest('hex');
+  const params = {
+    jobId: 'job-left',
+    expectedUserId: 'user-1',
+    actorId: 'admin-1',
+    reason: 'the dispute was lost for good',
+    idempotencyKey: 'cancel-left-001'
+  };
+  const LEFT_JOB = {
+    letter_id: 'letter-1', status: 'pending', provider_outcome: 'not_dispatched', attempts: 1, max_attempts: 5,
+    hold_reason: 'funding_disputed', operator_resolution: null
+  };
+  interface Script { letter?: Record<string, unknown>; job?: Record<string, unknown>; blocked?: string | null; replay?: Record<string, unknown> }
+  function leftClient(script: Script = {}) {
+    const calls: Array<{ sql: string; params: unknown[] }> = [];
+    clientQuery.mockImplementation(async (sql: string, values: unknown[] = []) => {
+      calls.push({ sql, params: values });
+      if (sql.includes('FROM commerce_operator_audit_events')) return { rows: script.replay ? [script.replay] : [] };
+      if (sql.startsWith('SELECT letter_id FROM letter_jobs WHERE job_id')) return { rows: [{ letter_id: 'letter-1' }] };
+      if (sql.startsWith('SELECT status, user_id, funding_type, funding_order_id FROM letters')) {
+        return { rows: [{ status: 'queued', user_id: 'user-1', funding_type: 'prepaid_balance', funding_order_id: null, ...script.letter }] };
+      }
+      if (sql.includes('FROM letter_jobs WHERE job_id = $1 FOR UPDATE')) return { rows: [{ ...LEFT_JOB, ...script.job }] };
+      if (sql.startsWith('SELECT sends_blocked_reason FROM users')) return { rows: [{ sends_blocked_reason: script.blocked ?? null }] };
+      if (sql.startsWith('SELECT user_id, funding_type FROM letters')) return { rows: [{ user_id: 'user-1', funding_type: 'prepaid_balance', ...script.letter }] };
+      return { rows: [] };
+    });
+    return calls;
+  }
+  const writes = (calls: Array<{ sql: string }>) =>
+    calls.filter(call => /^\s*(UPDATE|INSERT|DELETE)/.test(call.sql)).map(call => call.sql.trim().split(/\s+/).slice(0, 3).join(' '));
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.transaction.mockImplementation(
+      async (callback: (client: { query: typeof clientQuery }) => Promise<unknown>) => callback({ query: clientQuery })
+    );
+  });
+
+  it('cancels the job and the letter, gives back what it can, and records the cancel', async () => {
+    const calls = leftClient();
+    await expect(cancelLeftLetterJobAsAdmin(params)).resolves.toEqual({ jobId: 'job-left', replayed: false });
+    const job = calls.find(call => call.sql.includes("UPDATE letter_jobs SET status = 'cancelled'"))!;
+    expect(job.sql).toContain("operator_resolution = 'operator_cancelled'");
+    expect(job.params).toEqual(['job-left']);
+    expect(calls.find(call => call.sql.includes("UPDATE letters SET status = 'cancelled'"))!.params).toEqual(['letter-1']);
+    // What paid for it, as a failed send's: read for the return.
+    expect(calls.some(call => call.sql.startsWith('SELECT user_id, funding_type FROM letters'))).toBe(true);
+    const audit = calls.find(call => call.sql.includes('INSERT INTO commerce_operator_audit_events'))!;
+    expect(audit.sql).toContain("'mail_job_cancel', 'letter_job'");
+    expect(audit.params.slice(0, 3)).toEqual([sha('cancel-left-001'), sha('admin-1'), sha('job-left')]);
+    expect(JSON.parse(String(audit.params[3]))).toEqual({ jobStatus: 'pending', fundingHold: 'funding_disputed' });
+    // Locks: the key, the letter, then the job, then the account's block.
+    const order = (fragment: string) => calls.findIndex(call => call.sql.includes(fragment));
+    expect(order('pg_advisory_xact_lock')).toBeLessThan(order('FROM letters WHERE letter_id = $1 FOR UPDATE'));
+    expect(order('FROM letters WHERE letter_id = $1 FOR UPDATE')).toBeLessThan(order('FROM letter_jobs WHERE job_id = $1 FOR UPDATE'));
+    expect(order('FROM letter_jobs WHERE job_id = $1 FOR UPDATE')).toBeLessThan(order('FROM users WHERE user_id = $1 FOR SHARE'));
+  });
+
+  it("cancels a blocked account's mail, held for nothing else", async () => {
+    const calls = leftClient({ job: { hold_reason: null }, blocked: 'payment_disputed' });
+    await expect(cancelLeftLetterJobAsAdmin(params)).resolves.toMatchObject({ replayed: false });
+    const audit = calls.find(call => call.sql.includes('INSERT INTO commerce_operator_audit_events'))!;
+    expect(JSON.parse(String(audit.params[3]))).toEqual({ jobStatus: 'pending', accountBlocked: true });
+  });
+
+  it.each([
+    ['not left for the operator', { job: { hold_reason: null } }],
+    ['Pay & Send, which its refund cancels', { letter: { funding_order_id: 'order-9', funding_type: 'jit_order' } }],
+    ['no longer queued', { letter: { status: 'cancelled' } }],
+    ['taken by the outbox', { job: { status: 'processing' } }],
+    ['dispatched', { job: { provider_outcome: 'dispatching' } }],
+    ['out of attempts', { job: { attempts: 5 } }],
+    ['resolved by an operator', { job: { operator_resolution: 'account_erased' } }],
+  ])('refuses mail that is %s, writing nothing', async (_label, script) => {
+    const calls = leftClient(script as Script);
+    await expect(cancelLeftLetterJobAsAdmin(params)).rejects.toMatchObject({ code: 'invalid_state' });
+    expect(writes(calls)).toEqual([]);
+  });
+
+  it("refuses another account's mail as not found", async () => {
+    const calls = leftClient({ letter: { user_id: 'someone-else' } });
+    await expect(cancelLeftLetterJobAsAdmin(params)).rejects.toMatchObject({ code: 'not_found' });
+    expect(writes(calls)).toEqual([]);
+  });
+
+  it('replays an exact cancel without writing, and refuses the key reused for anything else', async () => {
+    const replay = {
+      operation: 'mail_job_cancel', target_type: 'letter_job', target_reference_hash: sha('job-left'),
+      actor_subject_hash: sha('admin-1'), operator_reason_hash: sha('the dispute was lost for good'), expected_user_hash: sha('user-1')
+    };
+    const calls = leftClient({ replay });
+    await expect(cancelLeftLetterJobAsAdmin(params)).resolves.toEqual({ jobId: 'job-left', replayed: true });
+    expect(writes(calls)).toEqual([]);
+    leftClient({ replay: { ...replay, operation: 'mail_job_release' } });
+    await expect(cancelLeftLetterJobAsAdmin(params)).rejects.toMatchObject({ code: 'idempotency_conflict' });
   });
 });

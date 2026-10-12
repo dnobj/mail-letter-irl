@@ -752,7 +752,7 @@ describe('commerceService', () => {
     // The read of the letters a pack paid for (#696) comes first, a plain read: it locks
     // each letter before the account, as every path that holds both does.
     const ordered = mocks.query.mock.calls
-      .filter(call => !String(call[0]).includes('SELECT DISTINCT l.letter_id'))
+      .filter(call => !String(call[0]).includes('FROM gift_letters g'))
       .filter(call =>
         String(call[0]) === ACCOUNT_LOCK_SQL ||
         String(call[0]).includes('credit_ledger') ||
@@ -4565,7 +4565,7 @@ describe("mail a pack paid for, when the pack's money goes back (#696)", () => {
       calls.push({ sql, params });
       if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-hold' }] };
       if (sql.includes('UPDATE orders') && sql.includes('RETURNING order_id')) return { rows: [{ order_id: 'order-1' }] };
-      if (sql.includes('SELECT DISTINCT l.letter_id')) return { rows: [{ letter_id: 'letter-1' }, { letter_id: 'letter-2' }] };
+      if (sql.includes('FROM gift_letters g')) return { rows: [{ letter_id: 'letter-1' }, { letter_id: 'letter-2' }] };
       if (sql.startsWith('SELECT status FROM letters WHERE letter_id')) {
         // The second has gone to the printer: nothing to hold.
         return { rows: [{ status: params[0] === 'letter-1' ? 'queued' : 'sent' }] };
@@ -4600,13 +4600,16 @@ describe("mail a pack paid for, when the pack's money goes back (#696)", () => {
     const calls = script();
     await processStripeWebhookEvent(refund('succeeded'));
 
-    const funded = calls.find(call => call.sql.includes('SELECT DISTINCT l.letter_id'))!;
-    expect(funded.params).toEqual(['order-1', 'user-1']);
-    // Through the lots the order bought, or lots returned from them.
-    expect(funded.sql).toContain('lot.source_order_id = $1');
-    // Only the order's own account's letters.
-    expect(funded.sql).toContain('AND l.user_id = $2');
-    expect(funded.sql).toContain('lot.related_ledger_id IN (SELECT ledger_id FROM credit_ledger WHERE source_order_id = $1)');
+    const funded = calls.find(call => call.sql.includes('FROM gift_letters g'))!;
+    expect(funded.params).toEqual(['order-1', 'user-1', null]);
+    const flat = funded.sql.replace(/\s+/g, ' ');
+    // Through the pack's lots as their revocation finds them: every lot returned from the
+    // purchase carries the order id, or its checkout session.
+    expect(flat).toContain("AND (lot.source_order_id = $1 OR lot.source_reference_id = $1 OR lot.source_metadata->>'stripe_session_id' = $3)");
+    // Only the order's own account's letters and lots.
+    expect(flat).toContain('AND l.user_id = $2 AND lot.user_id = $2');
+    // And the gift letters the pack granted.
+    expect(flat).toContain('UNION SELECT l.letter_id FROM gift_letters g JOIN letters l ON l.letter_id = g.consumed_by_letter_id WHERE g.source_order_id = $1 AND l.user_id = $2');
     // Each letter locked before its job; only a queued one held, never dispatched mail.
     expect(calls.filter(call => call.sql.startsWith('SELECT status FROM letters WHERE letter_id')).map(call => call.params))
       .toEqual([['letter-1'], ['letter-2']]);
@@ -4624,7 +4627,7 @@ describe("mail a pack paid for, when the pack's money goes back (#696)", () => {
     mocks.findRefund.mockResolvedValue({ id: 're-hold', status: 'pending' });
     const calls = script();
     await processStripeWebhookEvent(refund('pending'));
-    expect(calls.some(call => call.sql.includes('SELECT DISTINCT l.letter_id'))).toBe(false);
+    expect(calls.some(call => call.sql.includes('FROM gift_letters g'))).toBe(false);
     expect(alerts(calls)).toEqual([]);
   });
 
@@ -4638,7 +4641,7 @@ describe("mail a pack paid for, when the pack's money goes back (#696)", () => {
   it("holds nothing for a card network's inquiry, which takes no money", async () => {
     const calls = script();
     await processStripeWebhookEvent(dispute('warning_needs_response'));
-    expect(calls.some(call => call.sql.includes('SELECT DISTINCT l.letter_id'))).toBe(false);
+    expect(calls.some(call => call.sql.includes('FROM gift_letters g'))).toBe(false);
   });
 
   it('raises no alert when nothing was waiting', async () => {
@@ -4647,7 +4650,7 @@ describe("mail a pack paid for, when the pack's money goes back (#696)", () => {
       calls.push({ sql, params });
       if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-hold' }] };
       if (sql.includes('UPDATE orders') && sql.includes('RETURNING order_id')) return { rows: [{ order_id: 'order-1' }] };
-      if (sql.includes('SELECT DISTINCT l.letter_id')) return { rows: [{ letter_id: 'letter-1' }] };
+      if (sql.includes('FROM gift_letters g')) return { rows: [{ letter_id: 'letter-1' }] };
       if (sql.startsWith('SELECT status FROM letters WHERE letter_id')) return { rows: [{ status: 'queued' }] };
       // Its job already taken past dispatch.
       if (sql.includes('SET hold_reason = $2')) return { rows: [], rowCount: 0 };
@@ -4661,6 +4664,6 @@ describe("mail a pack paid for, when the pack's money goes back (#696)", () => {
   it("leaves a Pay & Send order's own letter to its own stop", async () => {
     const calls = script({ ...packOrder, order_type: 'jit_mail', letter_id: null });
     await processStripeWebhookEvent(refund('succeeded'));
-    expect(calls.some(call => call.sql.includes('SELECT DISTINCT l.letter_id'))).toBe(false);
+    expect(calls.some(call => call.sql.includes('FROM gift_letters g'))).toBe(false);
   });
 });
