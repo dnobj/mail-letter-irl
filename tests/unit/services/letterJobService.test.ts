@@ -1506,6 +1506,11 @@ describe('releaseHeldLetterJobAsAdmin: sending held mail now (#535)', () => {
     }
   });
 
+  it('releases mail held for its funding after an operator resolved it for retry (#696 review round 3)', async () => {
+    heldClient({ job: { hold_reason: 'funding_reversed', mail_hold_until: null, still_held: false, max_attempts: 5, operator_resolution: 'provider_confirmed_rejected_retry' } });
+    await expect(releaseHeldLetterJobAsAdmin(params)).resolves.toMatchObject({ replayed: false });
+  });
+
   it.each([
     ['another hold', { hold_reason: 'provider_outcome_ambiguous' }],
     ['out of attempts', { attempts: 5 }],
@@ -1626,7 +1631,7 @@ describe('mail left for the operator (#696)', () => {
     expect(block.sql).toContain('FOR SHARE');
   });
 
-  it('is put back, not failed, when it fails before dispatch: a claim a crash left behind on its last attempt', async () => {
+  it.each([false, true])('is put back, not failed, when it fails before dispatch on its last attempt (superseded meanwhile: %s)', async superseded => {
     // Its last attempt: a failure would be final.
     query.mockImplementation(async (sql: string) => {
       if (sql.includes('WITH candidate')) return { rows: [{ ...job, attempts: 5, max_attempts: 5 }] };
@@ -1638,16 +1643,19 @@ describe('mail left for the operator (#696)', () => {
     clientQuery.mockImplementation(async (sql: string, values: unknown[] = []) => {
       calls.push({ sql, params: values });
       if (sql.includes('SELECT j.hold_reason, u.sends_blocked_reason')) return { rows: [{ hold_reason: 'funding_disputed', sends_blocked_reason: null }] };
+      if (sql.includes("UPDATE letter_jobs SET status = 'pending', attempts = GREATEST(attempts - 1, 0)")) return { rows: [], rowCount: superseded ? 0 : 1 };
       if (sql.startsWith('SELECT funding_order_id FROM letters')) return { rows: [{ funding_order_id: null }] };
       if (sql.startsWith('SELECT letter_id FROM letter_jobs WHERE job_id = $1 FOR UPDATE')) return { rows: [{ letter_id: 'letter-1' }] };
       return { rows: [] };
     });
-    // Waiting again, as a scheduled retry is: no failure in the run.
-    expect(await processLetterJob('job-1')).toMatchObject({ completed: false, retryScheduled: true });
+    // Waiting again, as a scheduled retry is: no failure in the run. A job another worker put back
+    // or settled meanwhile is not this claimant's to report.
+    expect(await processLetterJob('job-1')).toMatchObject({ completed: false, retryScheduled: !superseded });
     const left = calls.find(call => call.sql.includes('SELECT j.hold_reason, u.sends_blocked_reason'))!;
     expect(left.sql).toContain('FOR SHARE OF u');
     expect(left.params).toEqual(['job-1']);
-    expect(calls.some(call => call.sql.includes("UPDATE letter_jobs SET status = 'pending', attempts = GREATEST(attempts - 1, 0)"))).toBe(true);
+    const back = calls.find(call => call.sql.includes("UPDATE letter_jobs SET status = 'pending', attempts = GREATEST(attempts - 1, 0)"))!;
+    expect(back.sql).toContain("status = 'processing'");
     // Not failed, and nothing given back.
     expect(calls.some(call => call.sql.includes('SET status = $2::varchar'))).toBe(false);
     expect(calls.some(call => call.sql.includes('UPDATE letters SET status'))).toBe(false);
@@ -1736,6 +1744,11 @@ describe('cancelLeftLetterJobAsAdmin: the operator cancels mail left for them (#
     expect(history.params).toEqual(['letter-1']);
   });
 
+  it('cancels mail held for its funding after an operator resolved it for retry (#696 review round 3)', async () => {
+    leftClient({ job: { operator_resolution: 'provider_confirmed_rejected_retry' } });
+    await expect(cancelLeftLetterJobAsAdmin(params)).resolves.toMatchObject({ replayed: false });
+  });
+
   it("cancels a blocked account's mail, held for nothing else", async () => {
     const calls = leftClient({ job: { hold_reason: null }, blocked: 'payment_disputed' });
     await expect(cancelLeftLetterJobAsAdmin(params)).resolves.toMatchObject({ replayed: false });
@@ -1753,7 +1766,7 @@ describe('cancelLeftLetterJobAsAdmin: the operator cancels mail left for them (#
     ['taken by the outbox', { job: { status: 'processing' } }],
     ['dispatched', { job: { provider_outcome: 'dispatching' } }],
     ['out of attempts', { job: { attempts: 5 } }],
-    ['resolved by an operator', { job: { operator_resolution: 'account_erased' } }],
+    ["a blocked account's, resolved by an operator", { job: { hold_reason: null, operator_resolution: 'account_erased' }, blocked: 'payment_disputed' }],
   ])('refuses mail that is %s, writing nothing', async (_label, script) => {
     const calls = leftClient(script as Script);
     await expect(cancelLeftLetterJobAsAdmin(params)).rejects.toMatchObject({ code: 'invalid_state' });

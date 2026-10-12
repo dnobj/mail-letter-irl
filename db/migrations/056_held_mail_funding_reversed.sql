@@ -1,6 +1,6 @@
 -- Migration: 056_held_mail_funding_reversed.sql
 -- Purpose: an alert for mail held because the pack that paid for it was
--- refunded in full or lost to a dispute (#696, decision D2), and the operator
+-- refunded in full or disputed (#696, decision D2), and the operator
 -- audit operation for cancelling mail left for the operator (job.cancel_held).
 --
 -- Such mail waits for the operator instead of printing: its job keeps a funding

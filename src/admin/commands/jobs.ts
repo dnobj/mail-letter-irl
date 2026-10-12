@@ -306,7 +306,7 @@ export const jobDispatchNowCommand: CommandDefinition<Record<string, never>> = {
 
 /**
  * Cancel mail left for the operator (#696, decision D2): a prepaid or gift letter held
- * because the pack that paid for it was refunded in full or lost to a dispute, or of an
+ * because the pack that paid for it was refunded in full or disputed, or of an
  * account whose sending is blocked. What paid for it goes back as a failed send's would:
  * nothing from a revoked pack, no gift from a refunded or disputed purchase. A Pay & Send
  * letter is cancelled by its order's refund instead. The service checks it all again under

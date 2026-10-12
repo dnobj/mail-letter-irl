@@ -90,7 +90,7 @@ export const ERASED_EMAIL_PATTERN = 'erased-%@erased.invalid';
  * ended it is due and holds the account until it mails. Pay & Send held mail is
  * not here: its order is in flight, and its refund is a person's decision.
  *
- * Mail held for its funding (#696), a pack refunded in full or lost to a dispute,
+ * Mail held for its funding (#696), a pack refunded in full or disputed,
  * is cancelled with it, due or not: it waits for a person, and an erasure is one.
  *
  * A SQL condition on `letters l` joined to its `letter_jobs j`.

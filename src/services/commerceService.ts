@@ -2320,7 +2320,7 @@ async function stopFundedMailBeforeFinancialReversal(
 
 /**
  * Mail a letter pack paid for that has not gone to the printer, held for the operator
- * when the pack is refunded in full or lost to a dispute (#696, decision D2).
+ * when the pack is refunded in full or disputed (#696, decision D2).
  *
  * A refund absorbs the letters already spent (#150), and a dispute zeroes the rest; but a
  * letter sent with an arrival date (#535) can wait weeks for its mail date, paid for by

@@ -190,7 +190,7 @@ export function outboxDispatchEnabled(env: NodeJS.ProcessEnv = process.env): boo
 
 /**
  * Mail the outbox leaves where it is, for a person (#696): held for its funding (a pack
- * refunded in full or lost to a dispute), or of an account whose sending is blocked. A SQL
+ * refunded in full or disputed), or of an account whose sending is blocked. A SQL
  * condition on the letter_jobs row named `alias`. A plain read of users, no lock: the
  * dispatch marker reads the same again under its locks and puts back a job that turned
  * so between the claim and the mark.
@@ -1014,13 +1014,15 @@ async function failBeforeDispatch(job: LetterJob, error: unknown, random: () => 
       [job.job_id]
     );
     if (isFundingHoldReason(left.rows[0]?.hold_reason) || left.rows[0]?.sends_blocked_reason) {
-      await client.query(
+      const back = await client.query(
         `UPDATE letter_jobs SET status = 'pending', attempts = GREATEST(attempts - 1, 0), locked_at = NULL,
            last_error = $2, error_message = $2, updated_at = NOW()
-         WHERE job_id = $1 AND provider_outcome = 'not_dispatched' AND status <> 'cancelled'`,
+         WHERE job_id = $1 AND provider_outcome = 'not_dispatched' AND status = 'processing'`,
         [job.job_id, errorClass]
       );
-      putBack = true;
+      // Only a job this claimant still holds: another worker may have put it back, or settled it.
+      putBack = Boolean(back.rowCount);
+      if (!putBack) writeDiagnostic('warn', 'outbox.pre_dispatch_transition_superseded', { jobId: job.job_id, errorClass });
       return;
     }
     const owned = await client.query(
@@ -1418,7 +1420,8 @@ export async function cancelLeftLetterJobAsAdmin(params: {
         held.status !== 'queued' || held.funding_order_id ||
         !['prepaid_balance', 'gift_letter'].includes(held.funding_type) ||
         current.status !== 'pending' || current.provider_outcome !== 'not_dispatched' ||
-        current.attempts >= current.max_attempts || current.operator_resolution) {
+        current.attempts >= current.max_attempts ||
+        (current.operator_resolution && !isFundingHoldReason(current.hold_reason))) {
       throw new AdminJobReleaseError('invalid_state');
     }
     await client.query(
@@ -2054,7 +2057,8 @@ export async function releaseHeldLetterJobAsAdmin(params: {
         held?.status !== 'queued' ||
         current.status !== 'pending' || current.provider_outcome !== 'not_dispatched' ||
         (fundingHeld ? current.attempts >= current.max_attempts : current.attempts !== 0) ||
-        current.operator_resolution ||
+        // A funding hold may come after an operator resolved the job for retry: still theirs to release.
+        (current.operator_resolution && !fundingHeld) ||
         // Held mail not yet due, or mail held for its funding (#696), due or not: a dispute
         // can outlast its mail date.
         !((current.mail_hold_until && current.still_held === true) || fundingHeld)) {

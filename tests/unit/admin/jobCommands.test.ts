@@ -349,12 +349,20 @@ describe("job.dispatch_now for mail held for its funding (#696)", () => {
     ["dispatched", { provider_outcome: "dispatching" }],
     ["out of attempts", { attempts: 5 }],
     ["no longer queued", { letter_status: "cancelled" }],
-    ["resolved by an operator", { operator_resolution: "account_erased" }],
     ["held for another reason", { hold_reason: "provider_outcome_ambiguous" }],
   ])("refuses mail held for its funding that is %s", async (_label, overrides) => {
     await expect(jobDispatchNowCommand.preview(client({ ...FUNDING_HELD, ...overrides }), "job-held", {})).rejects.toMatchObject({
       code: "ADMIN_INVALID_STATE",
     });
+  });
+
+  it("previews mail held for its funding after an operator resolved it for retry (#696 review round 3)", async () => {
+    const preview = await jobDispatchNowCommand.preview(
+      client({ ...FUNDING_HELD, operator_resolution: "provider_confirmed_rejected_retry" }),
+      "job-held",
+      {},
+    );
+    expect(preview.summary).toMatchObject({ fundingHold: "funding_reversed" });
   });
 
   it("is told apart from held mail", async () => {

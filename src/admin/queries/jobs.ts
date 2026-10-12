@@ -49,7 +49,7 @@ export function isHeldMailJob(job: JobView, now: number = Date.now()): boolean {
 /**
  * Mail the outbox leaves for the operator (#696): never dispatched, pending with an
  * attempt left, its letter queued, due or not, and held for its funding (a pack refunded in
- * full or lost to a dispute) or of an account whose sending is blocked. The service checks
+ * full or disputed) or of an account whose sending is blocked. The service checks
  * the same again under its locks.
  */
 export function isLeftForOperatorJob(job: JobView): boolean {
@@ -58,7 +58,8 @@ export function isLeftForOperatorJob(job: JobView): boolean {
     job.providerOutcome === "not_dispatched" &&
     job.attempts < job.maxAttempts &&
     job.letterStatus === "queued" &&
-    !job.operatorResolution &&
+    // A funding hold may come after an operator resolved the job for retry.
+    (!job.operatorResolution || isFundingHoldReason(job.holdReason)) &&
     (isFundingHoldReason(job.holdReason) || job.accountBlocked)
   );
 }
