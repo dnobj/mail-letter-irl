@@ -191,7 +191,8 @@ function mount(
           }
           return { structuredContent: {} };
         },
-        openExternal: async () => {
+        openExternal: async (args: Record<string, unknown>) => {
+          calls.push({ name: 'openExternal', args });
           if (options.openExternalRejects) throw new Error('host refused');
         }
       };
@@ -466,6 +467,12 @@ describe.each(CARDS)('%s purchase status', card => {
       const link = refusing.document.getElementById('checkout-link');
       expect(link?.getAttribute('href') ?? '').not.toBe(hostile);
       expect(refusing.document.querySelector(`[href="${hostile}"]`)).toBeNull();
+      // Nor is it opened.
+      expect(refusing.calls.filter(call => call.name === 'openExternal' && call.args.href === hostile)).toEqual([]);
+      // While a good address is.
+      const opening = mount(card);
+      await checkout(opening);
+      expect(opening.calls.some(call => call.name === 'openExternal')).toBe(true);
     }
   );
 
