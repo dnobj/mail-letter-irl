@@ -458,6 +458,8 @@
       // { draftId, action }. lastRefused: the version last refused, so a version refused twice is not asked about again.
       let changed = null;
       let lastRefused = null;
+      // A changed-notice that says the card could not show the mail: cleared once a later answer draws it whole.
+      let changedNotice = false;
       let currentEligibility = null;
       let sendInProgress = false;
       let checkoutInProgress = false;
@@ -1574,6 +1576,10 @@
               const drawnWhole =
                 frontTaken && typeof statusPage === "string" && statusPage !== "" && (datesTaken || !picker.follows(draftId));
               if (drawnWhole) showVersion(draftId, answer.contentVersion);
+              if (drawnWhole && changed === null && changedNotice) {
+                changedNotice = false;
+                document.getElementById("error-message").style.display = "none";
+              }
               if (force === true) changedRedrawn(draftId, drawnWhole);
               render();
               return;
@@ -1596,7 +1602,7 @@
           },
           // Unanswered, the card shows the preview as the host gave it.
           () => {
-            if (force === true) changedRedrawn(draftId, false);
+            if (force === true) changedRedrawn(draftId, "failed");
           },
         );
       }
@@ -1685,8 +1691,6 @@
       // A send or a checkout refused because the mail changed after this card drew it (#695): nothing was sent or
       // charged. The words are the server's (draftErrors, createMailCheckout).
       const CHANGED_SINCE_SHOWN = "changed after it was shown";
-      const SEND_LABEL = "Send Postcard";
-      const PAY_LABEL = "Pay & Send";
 
       // What the card says once it has asked (#695 review round 1): drawn whole, to check it and press again; not drawn
       // (no page, or a part this card cannot show), to ask for a new preview; sent or expired meanwhile, nothing, as the
@@ -1694,6 +1698,7 @@
       function changedSaid(action, drawn) {
         const nothing = `This ${MAIL_NOUN} changed after it was shown here, so nothing was ${action === "send" ? "sent" : "charged"}.`;
         if (drawn === "asking") return `${nothing} Getting it as it is now…`;
+        if (drawn === "failed") return `${nothing} This card couldn't check it just now: try again in a moment.`;
         return drawn
           ? `${nothing} It is shown again as it is now: check it, then press ${action === "send" ? "Send" : "Pay & Send"} again.`
           : `${nothing} This card can't show it as it is now: ask in the chat for a new preview, and ${action === "send" ? "send" : "pay"} from that.`;
@@ -1703,13 +1708,18 @@
         if (!changed || changed.draftId !== draftId) return;
         const action = changed.action;
         changed = null;
+        // Not an answer: the next refusal asks again.
+        if (drawn === "failed") lastRefused = null;
+        changedNotice = drawn !== true && drawn !== null;
         const errorMessage = document.getElementById("error-message");
         if (drawn === null) {
           errorMessage.style.display = "none";
-          return;
+        } else {
+          errorMessage.textContent = changedSaid(action, drawn);
+          errorMessage.style.display = "block";
         }
-        errorMessage.textContent = changedSaid(action, drawn);
-        errorMessage.style.display = "block";
+        // The buttons it held come back, with their own labels.
+        render();
       }
 
       // Says so, puts the pressed button back, and asks for the mail as it is now, to draw it whatever this card had set.
@@ -1720,22 +1730,21 @@
         const again = refused !== null && refused === lastRefused;
         lastRefused = refused;
         changed = again ? null : { draftId, action };
+        changedNotice = true;
         errorMessage.textContent = changedSaid(action, again ? false : "asking");
         errorMessage.style.display = "block";
         if (action === "send") {
           const sendButton = document.getElementById("send-button");
           sendButton.classList.remove("loading");
-          sendButton.disabled = false;
-          document.getElementById("send-button-text").textContent = anotherCopy ? ANOTHER_COPY_SEND_LABEL : SEND_LABEL;
           sendInProgress = false;
         } else {
           const payButton = document.getElementById("pay-send-button");
           payButton.classList.remove("loading");
-          payButton.disabled = false;
-          document.getElementById("pay-send-button-text").textContent = anotherCopy ? ANOTHER_COPY_PAY_LABEL : PAY_LABEL;
           checkoutInProgress = false;
         }
         if (!again) askDraftState(draftId, true);
+        // Held while it asks, then drawn with their own labels (a dated or gift letter's, a price).
+        render();
       }
 
       function showDuplicate(details, action) {
@@ -2432,7 +2441,8 @@
         }
         // Setting a date or a style (#594): Send waits for the draft it sends.
         maker.heldShown = makerHolds();
-        const settingDate = picker.busy() || maker.heldShown;
+        // And the card asking for the draft as it is now, after a refusal for a change since (#695).
+        const settingDate = picker.busy() || maker.heldShown || changed !== null;
         const datedSend = Boolean(picker.schedule());
 
         if (!sendInProgress && !checkoutInProgress) {
@@ -2521,7 +2531,7 @@
 
       // Handle send button click
       async function handleSend() {
-        if (sendInProgress || !currentDraftId || picker.busy() || makerHolds()) return;
+        if (sendInProgress || changed !== null || !currentDraftId || picker.busy() || makerHolds()) return;
         draftActedOn = true;
 
         const sendButton = document.getElementById("send-button");
@@ -2908,7 +2918,7 @@
 
       async function handlePayAndSend() {
         // Not while the maker sets a style (#594): the checkout prices the draft as it stands.
-        if (checkoutInProgress || !currentDraftId || makerHolds()) return;
+        if (checkoutInProgress || changed !== null || !currentDraftId || makerHolds()) return;
         draftActedOn = true;
         const button = document.getElementById("pay-send-button");
         const buttonText = document.getElementById("pay-send-button-text");

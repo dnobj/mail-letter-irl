@@ -2396,14 +2396,16 @@ describe('the content version the letter card sends (#695)', () => {
     await card.answer(CHANGED, 'send_letter');
 
     expect(card.byId('error-message').textContent).toBe(`${SAID_SENT} Getting it as it is now…`);
-    expect((card.byId('send-button') as HTMLButtonElement).disabled).toBe(false);
-    expect(card.byId('send-button-text').textContent).toBe('Send Letter');
+    // Held while it asks (#695 review round 2).
+    expect((card.byId('send-button') as HTMLButtonElement).disabled).toBe(true);
     // Asked again, though it asked on opening.
     expect(card.requests('tools/call', 'get_draft_status').length).toBe(asks + 1);
     const NOW = document1('Dear Sam, and more,\nPat');
     await card.answer(ready('v_now', NOW, { stationery: { theme: 'typewriter', dateLine: 'October 1, 2026' } }), 'get_draft_status');
     expect(card.byId('mockup-container').innerHTML).toContain('<title>Dear Sam, and more,\nPat</title>');
     expect(card.byId('error-message').textContent).toBe(`${SAID_SENT} It is shown again as it is now: check it, then press Send again.`);
+    expect((card.byId('send-button') as HTMLButtonElement).disabled).toBe(false);
+    expect(card.byId('send-button-text').textContent).toBe('Send Letter');
 
     await card.click(card.byId('send-button'));
     expect(sentWith(card).contentVersion).toBe('v_now');
@@ -2431,6 +2433,48 @@ describe('the content version the letter card sends (#695)', () => {
     );
   });
 
+  it('says to try again when it could not ask, and asks again on the next refusal (#695 review round 2)', async () => {
+    const card = mount();
+    await card.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
+    await card.click(card.byId('send-button'));
+    await card.answer(CHANGED, 'send_letter');
+    await card.answer({ error: { code: -32000, message: 'The host could not reach the app.' } }, 'get_draft_status');
+    expect(card.byId('error-message').textContent).toBe(`${SAID_SENT} This card couldn't check it just now: try again in a moment.`);
+    expect((card.byId('send-button') as HTMLButtonElement).disabled).toBe(false);
+
+    const asks = card.requests('tools/call', 'get_draft_status').length;
+    await card.click(card.byId('send-button'));
+    await card.answer(CHANGED, 'send_letter');
+    expect(card.requests('tools/call', 'get_draft_status').length).toBe(asks + 1);
+    expect(card.byId('error-message').textContent).toBe(`${SAID_SENT} Getting it as it is now…`);
+  });
+
+  it('knows the refusal however ChatGPT wraps it, on the letter too', async () => {
+    const card = mount();
+    await card.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
+    const asks = card.requests('tools/call', 'get_draft_status').length;
+    await card.click(card.byId('send-button'));
+    await card.answer({ error: { code: -32000, message: `Error code: INVALID_ARGUMENT; Error: RuntimeException: Error calling MCP tool: [TextContent(type='text', text='${CHANGED_TEXT}', annotations=None, meta=None)]` } }, 'send_letter');
+    expect(card.requests('tools/call', 'get_draft_status').length).toBe(asks + 1);
+    expect(card.byId('error-message').textContent).toBe(`${SAID_SENT} Getting it as it is now…`);
+  });
+
+  it('clears a notice that it could not show the letter once a later answer draws it whole', async () => {
+    const card = mount();
+    await card.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
+    await card.click(card.byId('send-button'));
+    await card.answer(CHANGED, 'send_letter');
+    await card.answer(ready('v_now', null), 'get_draft_status');
+    expect(card.byId('error-message').style.display).toBe('block');
+    // A restyle made to another version asks again; this answer draws the letter whole.
+    await restyle(card, 'botanical');
+    await card.answer(restyled('botanical', 'v_later', PAGE, 'v_now'), 'set_stationery');
+    await card.answer(ready('v_later', PAGE, { stationery: { theme: 'botanical', dateLine: 'October 1, 2026' } }), 'get_draft_status');
+    expect(card.byId('error-message').style.display).toBe('none');
+    await card.click(card.byId('send-button'));
+    expect(sentWith(card).contentVersion).toBe('v_later');
+  });
+
   it('says nothing more of it once the draft turns out sent meanwhile', async () => {
     const card = mount();
     await card.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
@@ -2456,13 +2500,15 @@ describe('the content version the letter card sends (#695)', () => {
       },
       'create_mail_checkout'
     );
-    expect((card.byId('pay-send-button') as HTMLButtonElement).disabled).toBe(false);
-    expect(card.byId('pay-send-button-text').textContent).toBe('Pay & Send');
+    expect((card.byId('pay-send-button') as HTMLButtonElement).disabled).toBe(true);
     expect(card.requests('tools/call', 'get_draft_status').length).toBe(asks + 1);
     await card.answer(ready('v_now', document1('Dear Sam, and more,\nPat'), PAY), 'get_draft_status');
     expect(card.byId('error-message').textContent).toBe(
       'This letter changed after it was shown here, so nothing was charged. It is shown again as it is now: check it, then press Pay & Send again.'
     );
+    // Back, with its own label: the price, as render() draws it.
+    expect((card.byId('pay-send-button') as HTMLButtonElement).disabled).toBe(false);
+    expect(card.byId('pay-send-button-text').textContent).toMatch(/^Pay & Send \(/);
 
     await card.click(card.byId('pay-send-button'));
     expect(card.lastRequest('tools/call', 'create_mail_checkout')!.params.arguments).toEqual({ draftId: 'draft_0001', contentVersion: 'v_now' });

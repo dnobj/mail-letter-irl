@@ -776,13 +776,14 @@ describe('the content version the postcard card sends (#695)', () => {
       'send_postcard'
     );
     expect(card.byId('error-message').textContent).toBe(`${SAID_SENT} Getting it as it is now…`);
-    expect((card.byId('send-button') as HTMLButtonElement).disabled).toBe(false);
-    expect(card.byId('send-button-text').textContent).toBe('Send Postcard');
+    expect((card.byId('send-button') as HTMLButtonElement).disabled).toBe(true);
     expect(card.requests('get_draft_status').length).toBe(asks + 1);
     // The chat made it 6 x 11 meanwhile: the card takes it over its own change.
     await card.answer(ready('v_now', '6x11', drawn('6x11')), 'get_draft_status');
     expect(pressed(card, '#studio-sizes [data-size]')).toEqual(['6 x 11 in']);
     expect(card.byId('error-message').textContent).toBe(`${SAID_SENT} It is shown again as it is now: check it, then press Send again.`);
+    expect((card.byId('send-button') as HTMLButtonElement).disabled).toBe(false);
+    expect(card.byId('send-button-text').textContent).toBe('Send Postcard');
 
     await card.click(card.byId('send-button'));
     expect(sentWith(card).contentVersion).toBe('v_now');
@@ -803,11 +804,13 @@ describe('the content version the postcard card sends (#695)', () => {
       },
       'create_mail_checkout'
     );
-    expect(card.byId('pay-send-button-text').textContent).toBe('Pay & Send');
+    expect((card.byId('pay-send-button') as HTMLButtonElement).disabled).toBe(true);
     expect(card.requests('get_draft_status').length).toBe(asks + 1);
     await card.answer(ready('v_now', '6x9', drawn(), { canSendNow: false, sendEligibility: PER_SEND }), 'get_draft_status');
     expect(card.byId('error-message').textContent).toBe(
       'This postcard changed after it was shown here, so nothing was charged. It is shown again as it is now: check it, then press Pay & Send again.'
     );
+    expect((card.byId('pay-send-button') as HTMLButtonElement).disabled).toBe(false);
+    expect(card.byId('pay-send-button-text').textContent).toMatch(/^Pay & Send/);
   });
 });
