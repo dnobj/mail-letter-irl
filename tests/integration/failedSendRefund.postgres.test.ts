@@ -1324,6 +1324,12 @@ describePostgres('failed send returns the pack', () => {
       await commerce.processStripeWebhookEvent(refundedChargeEvent(paymentIntentId));
       expect(await credits(userId)).toBe(0);
       expect(await liveLots(userId)).toBe(0);
+      // The refund holds the letter for the operator (#696); one sends it anyway.
+      expect(await jobs.processLetterJob(jobId)).toMatchObject({ claimed: false });
+      await jobs.releaseHeldLetterJobAsAdmin({
+        jobId, expectedUserId: userId, actorId: 'operator_test',
+        reason: 'send it although refunded', idempotencyKey: `refunded-release-${jobId}`
+      });
 
       stubProvider.nextResult = definiteRejection('stub refused');
       await jobs.processLetterJob(jobId);
