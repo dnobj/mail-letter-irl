@@ -140,6 +140,18 @@ describe('wrapping paragraphs (#534)', () => {
     expect(shapings).toBeLessThan(5000);
   });
 
+  it('stops at the budget exactly when the text is many short paragraphs (#694)', () => {
+    const layout = layoutLetter({ text: Array.from({ length: 500 }, (_, index) => `Line ${index + 1}`).join('\n'), layoutType: 'text_only' });
+    expect(layout.truncated).toBe(true);
+    // Not one line more, not even an empty one for the paragraph that did not fit.
+    expect(layout.pages[0].linesUsed).toBe(LINE_BUDGET_PER_PAGE);
+    expect(runs(layout).map(run => run.source).at(-1)).toBe(`Line ${LINE_BUDGET_PER_PAGE}`);
+    // A letter that ends exactly at the budget is whole, not truncated.
+    // Trailing blank space past the budget is not more letter.
+    const whole = layoutLetter({ text: Array.from({ length: LINE_BUDGET_PER_PAGE }, (_, index) => `Line ${index + 1}`).join('\n') + '\n  ', layoutType: 'text_only' });
+    expect(whole.truncated).toBeUndefined();
+  });
+
   it('lays out the same text again from the lines it already wrapped (#694)', () => {
     vi.mocked(shape).mockClear();
     const content = { text: 'b '.repeat(4000), layoutType: 'text_only' as const, stationery: { theme: 'typewriter' as const } };
