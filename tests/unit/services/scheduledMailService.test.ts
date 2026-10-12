@@ -125,6 +125,39 @@ describe('cancelScheduledMail (#535)', () => {
     });
   });
 
+  it('does not count a gift that came back already expired: it ran out while the mail was held (#683)', async () => {
+    const client = inTransaction(
+      { rows: [{ ...HELD, funding_type: 'gift_letter' }] },
+      { rows: [JOB] },
+      { rows: [] },
+      { rows: [] },
+      { rows: [] },
+      { rows: [{ expired: true }] }
+    );
+    await expect(cancel()).resolves.toMatchObject({
+      ok: true,
+      cancelled: { returned: { kind: 'gift_letter', count: 0 }, shortfall: 'expired' }
+    });
+    const [expiredSql, expiredParams] = client.query.mock.calls[5] as [string, unknown[]];
+    expect(expiredSql).toMatch(/expires_at <= NOW\(\)[\s\S]*FROM gift_letters[\s\S]*source = 'send_failed' AND source_reference_id = \$1/);
+    expect(expiredParams).toEqual([LETTER]);
+  });
+
+  it('counts a gift that came back with life left as returned in full', async () => {
+    inTransaction(
+      { rows: [{ ...HELD, funding_type: 'gift_letter' }] },
+      { rows: [JOB] },
+      { rows: [] },
+      { rows: [] },
+      { rows: [] },
+      { rows: [{ expired: false }] }
+    );
+    await expect(cancel()).resolves.toMatchObject({
+      ok: true,
+      cancelled: { returned: { kind: 'gift_letter', count: 1 }, shortfall: 'none' }
+    });
+  });
+
   it('counts a gift that could not come back as refunded', async () => {
     vi.mocked(returnGiftLetterForFailedSendWithClient).mockResolvedValue(0);
     inTransaction({ rows: [{ ...HELD, funding_type: 'gift_letter' }] }, { rows: [JOB] });
