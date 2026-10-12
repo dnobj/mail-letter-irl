@@ -746,9 +746,9 @@ describePostgres('arrive-by (migration 040, #535)', () => {
     await expect(held.lettersPastMailDay()).resolves.toBe((before as number) + 1);
 
     // Of a blocked account: the same.
-    await pool.query("UPDATE users SET sends_blocked_reason = 'payment_disputed' WHERE user_id = $1", [userId]);
+    await pool.query("UPDATE users SET sends_blocked_at = NOW(), sends_blocked_reason = 'payment_disputed' WHERE user_id = $1", [userId]);
     await expect(held.lettersPastMailDay()).resolves.toBe(before);
-    await pool.query('UPDATE users SET sends_blocked_reason = NULL WHERE user_id = $1', [userId]);
+    await pool.query('UPDATE users SET sends_blocked_at = NULL, sends_blocked_reason = NULL WHERE user_id = $1', [userId]);
 
     // Accepted by the provider, and being printed: the status sync writes 'processing' (review round 2).
     await pool.query("UPDATE letters SET status = 'processing', sent_at = NOW() WHERE letter_id = $1", [letterId]);
@@ -759,6 +759,10 @@ describePostgres('arrive-by (migration 040, #535)', () => {
     // Once it fails, it has its own alert and its own end.
     await pool.query("UPDATE letters SET status = 'failed' WHERE letter_id = $1", [letterId]);
     await expect(held.lettersPastMailDay()).resolves.toBe(before);
+
+    // Out of the next case's way: a failed letter past its mail day is one the missed-day alert counts.
+    await pool.query("UPDATE letters SET status = 'cancelled' WHERE letter_id = $1", [letterId]);
+    await pool.query("UPDATE letter_jobs SET status = 'cancelled' WHERE letter_id = $1", [letterId]);
   }, 60_000);
 
   it("raises one alert for held mail not at the printer by 18:00 on its mail date, and none for mail that is", async () => {
