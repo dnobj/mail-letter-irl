@@ -22,7 +22,7 @@
  * the letter card's address window empty on every preview ever rendered.
  *
  * Where the drop happens is worth being precise about, because it dictates
- * what a guard can be. At `@modelcontextprotocol/sdk` 1.29.0 the server does
+ * what a guard can be. At `@modelcontextprotocol/sdk` 1.31.0 the server does
  * NOT strip: `registerTools` hands the SDK a raw zod shape, and the SDK's
  * `validateToolOutput` calls `safeParseAsync` but discards `parseResult.data`,
  * so the unstripped result goes on the wire. The drop is client-side, when

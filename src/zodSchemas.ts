@@ -154,6 +154,14 @@ export const PREVIEW_MAIL_SERVICE_DESCRIPTION =
 // A client that fills an unset field with null or an empty string means no service, as it does for the
 // stationery: an ordinary letter, never a certified one.
 const noneForNullOrEmpty = (value: unknown): unknown => (value === null || value === '' ? undefined : value);
+/**
+ * A required choice that names its options when it is missing, as zod already does when it is wrong (#681): from MCP
+ * SDK 1.31 a missing field is refused as "Required" alone, which left the model nothing to go on.
+ */
+function requiredChoice<T extends string>(values: readonly [T, ...T[]]) {
+  return z.enum(values as [T, ...T[]], { required_error: `Required: one of ${values.join(", ")}` });
+}
+
 const previewMailServiceZ = z.preprocess(noneForNullOrEmpty, z.enum(MAIL_SERVICES).optional()).describe(PREVIEW_MAIL_SERVICE_DESCRIPTION);
 
 /** What a letter preview's output says when it is certified mail (#625): which service. Absent for an ordinary letter. */
@@ -317,7 +325,7 @@ export const listLetterPacksOutputZ = z.object({
 });
 
 export const createPackCheckoutInputZ = z.object({
-  pack: z.enum(["starter", "regular", "power"])
+  pack: requiredChoice(["starter", "regular", "power"])
 });
 
 export const redeemPromoCodeInputZ = z.object({
@@ -510,7 +518,7 @@ export const SET_STATIONERY_DESCRIPTION =
   "or handwritten, the letter in a handwriting face on faint ruled lines, which has no Greek, Hebrew or Vietnamese. " +
   "Each but classic prints the date at the top right.";
 /** set_stationery's theme as it is served while saved designs are not offered (#649): required, as before them. */
-export const setStationeryThemeRequiredZ = z.preprocess(themeName, z.enum(STATIONERY_THEMES)).describe(SET_STATIONERY_DESCRIPTION);
+export const setStationeryThemeRequiredZ = z.preprocess(themeName, requiredChoice(STATIONERY_THEMES)).describe(SET_STATIONERY_DESCRIPTION);
 export const setStationeryInputZ = z.object({
   draftId: z.string().describe("The draftId from a letter preview"),
   stationery: z.preprocess(themeName, z.enum(STATIONERY_THEMES).optional()).describe(SET_STATIONERY_DESCRIPTION),
@@ -616,7 +624,7 @@ export const SET_MAIL_SERVICE_DESCRIPTION =
   "Certified mail costs more and is paid with Pay & Send: no letter pack and no gift letter pays for it.";
 export const setMailServiceInputZ = z.object({
   draftId: z.string().describe("The draftId from a letter preview"),
-  mailService: z.enum(MAIL_SERVICES).describe(SET_MAIL_SERVICE_DESCRIPTION)
+  mailService: requiredChoice(MAIL_SERVICES).describe(SET_MAIL_SERVICE_DESCRIPTION)
 });
 
 // ============================================================================
@@ -1160,10 +1168,10 @@ export const DESIGN_ID_DESCRIPTION = "The design's id, which stationeryDesignId 
 export const DESIGN_CONFIRM_DESCRIPTION = "true, once the person has agreed: a deleted design cannot be brought back";
 export const saveStationeryDesignInputZ = z.object({
   name: z.string().describe(DESIGN_NAME_DESCRIPTION),
-  face: z.enum(STATIONERY_FACES).describe(DESIGN_FACE_DESCRIPTION),
-  ornament: z.enum(STATIONERY_ORNAMENTS).describe(DESIGN_ORNAMENT_DESCRIPTION),
+  face: requiredChoice(STATIONERY_FACES).describe(DESIGN_FACE_DESCRIPTION),
+  ornament: requiredChoice(STATIONERY_ORNAMENTS).describe(DESIGN_ORNAMENT_DESCRIPTION),
   ruled: z.boolean().describe(DESIGN_RULED_DESCRIPTION),
-  tone: z.enum(STATIONERY_TONES).describe(DESIGN_TONE_DESCRIPTION)
+  tone: requiredChoice(STATIONERY_TONES).describe(DESIGN_TONE_DESCRIPTION)
 });
 export const listStationeryDesignsInputZ = z.object({});
 export const deleteStationeryDesignInputZ = z.object({
