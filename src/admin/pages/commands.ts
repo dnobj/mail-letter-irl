@@ -184,7 +184,7 @@ ${input.mode !== "full" ? html`<p class="muted">Read-only mode: previews work, e
   if (isLeftForOperatorJob(job)) {
     const funding = isFundingHeldMailJob(job);
     const why = funding
-      ? `The letter pack that paid for this letter was ${job.holdReason === "funding_disputed" ? "lost to a dispute" : "refunded in full"}, so it waits here instead of printing.`
+      ? `The letter pack that paid for this letter was ${job.holdReason === "funding_disputed" ? "disputed" : "refunded in full"}, so it waits here instead of printing.`
       : "The account's sending is blocked, so this letter waits here instead of printing.";
     return html`<h2>Left for the operator</h2>
 <p>${why}</p>
@@ -199,7 +199,7 @@ ${isCancellableLeftJob(job)
   <input type="hidden" name="target" value="${job.jobId}">
   <button type="submit">Preview cancelling…</button>
 </form>`
-  : html`<p class="muted">A Pay &amp; Send letter is cancelled by refunding its order.</p>`}
+  : html`<p class="muted">A Pay &amp; Send letter is cancelled by refunding its order in the Stripe dashboard.</p>`}
 ${input.mode !== "full" ? html`<p class="muted">Read-only mode: previews work, execution is refused.</p>` : ""}`;
   }
   if (isHeldMailJob(job, input.now)) {

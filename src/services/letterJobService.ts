@@ -1002,8 +1002,27 @@ async function failBeforeDispatch(job: LetterJob, error: unknown, random: () => 
   // A class a lower layer attached (a missing letter: LETTER_NOT_FOUND) wins
   // over re-classification (#394).
   const errorClass = carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error');
+  let putBack = false;
   await transaction(async client => {
     const fundingOrderId = await lockFundingGraph(client, job);
+    // Mail left for the operator (#696), a claim a crash left behind among it, is put back as
+    // the marker puts it back: never failed, and nothing given back, without a person.
+    const left = await client.query<{ hold_reason: string | null; sends_blocked_reason: string | null }>(
+      `SELECT j.hold_reason, u.sends_blocked_reason
+         FROM letter_jobs j JOIN letters l ON l.letter_id = j.letter_id JOIN users u ON u.user_id = l.user_id
+        WHERE j.job_id = $1 FOR SHARE OF u`,
+      [job.job_id]
+    );
+    if (isFundingHoldReason(left.rows[0]?.hold_reason) || left.rows[0]?.sends_blocked_reason) {
+      await client.query(
+        `UPDATE letter_jobs SET status = 'pending', attempts = GREATEST(attempts - 1, 0), locked_at = NULL,
+           last_error = $2, error_message = $2, updated_at = NOW()
+         WHERE job_id = $1 AND provider_outcome = 'not_dispatched' AND status <> 'cancelled'`,
+        [job.job_id, errorClass]
+      );
+      putBack = true;
+      return;
+    }
     const owned = await client.query(
       // Cast every use of $2, for the reason given in failOrRescheduleJob: the
       // uncast form is rejected by PostgreSQL, which threw this whole
@@ -1064,6 +1083,8 @@ async function failBeforeDispatch(job: LetterJob, error: unknown, random: () => 
       await returnPrepaidCreditsForFailedLetter(client, job.letter_id, errorClass);
     }
   });
+  // Put back for the operator: waiting, as a scheduled retry is.
+  if (putBack) return true;
   return retryable;
 }
 
@@ -1387,8 +1408,10 @@ export async function cancelLeftLetterJobAsAdmin(params: {
     const held = letter.rows[0];
     const current = job.rows[0];
     if (!held || held.user_id !== params.expectedUserId) throw new AdminJobReleaseError('not_found');
+    // For update, not share: the return below changes the balance, and two cancels upgrading a
+    // share lock on one account would deadlock.
     const blocked = await client.query<{ sends_blocked_reason: string | null }>(
-      'SELECT sends_blocked_reason FROM users WHERE user_id = $1 FOR SHARE', [held.user_id]
+      'SELECT sends_blocked_reason FROM users WHERE user_id = $1 FOR UPDATE', [held.user_id]
     );
     const left = isFundingHoldReason(current?.hold_reason) || Boolean(blocked.rows[0]?.sends_blocked_reason);
     if (!current || current.letter_id !== letterId || !left ||
@@ -1406,6 +1429,10 @@ export async function cancelLeftLetterJobAsAdmin(params: {
     );
     await client.query(
       `UPDATE letters SET status = 'cancelled', status_updated_at = NOW(), updated_at = NOW() WHERE letter_id = $1`,
+      [letterId]
+    );
+    await client.query(
+      `INSERT INTO letter_status_history (letter_id, old_status, new_status, source) VALUES ($1, 'queued', 'cancelled', 'operator')`,
       [letterId]
     );
     await returnPrepaidCreditsForFailedLetter(client, letterId, 'operator_cancelled');

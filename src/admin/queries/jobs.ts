@@ -73,11 +73,6 @@ export function isCancellableLeftJob(job: JobView): boolean {
   return isLeftForOperatorJob(job) && !job.fundingOrderId && ["prepaid_balance", "gift_letter"].includes(job.fundingType);
 }
 
-/** What job.dispatch_now may release: held mail before its date, or mail held for its funding. */
-export function isReleasableMailJob(job: JobView, now: number = Date.now()): boolean {
-  return isHeldMailJob(job, now) || isFundingHeldMailJob(job);
-}
-
 function toJobView(row: JobJoinedRow): JobView {
   return {
     ...toJobDetail(row),

@@ -40,7 +40,8 @@ export function isHeldMailJobState(
 
 /**
  * Mail held because the money that paid for it was reversed (#696, decision D2): a pack
- * refunded in full (funding_reversed) or lost to a dispute (funding_disputed). Its job
+ * refunded in full (funding_reversed) or disputed (funding_disputed, held when a dispute that
+ * takes the money opens, and kept if it is won, for the operator to release). Its job
  * stays pending and never dispatched, as mail the outbox has not taken always is (a held
  * job must have reached the provider, 023's valid_letter_job_outcome_state), and carries
  * one of these as its hold_reason, which the outbox claim skips. The operator releases it

@@ -1626,6 +1626,28 @@ describe('mail left for the operator (#696)', () => {
     expect(block.sql).toContain('FOR SHARE');
   });
 
+  it('is put back, not failed, when it fails before dispatch: a claim a crash left behind on its last attempt', async () => {
+    mockClaims();
+    vi.mocked(getProviderForMailType).mockRejectedValueOnce(new Error('provider unavailable'));
+    const calls: Array<{ sql: string; params: unknown[] }> = [];
+    clientQuery.mockImplementation(async (sql: string, values: unknown[] = []) => {
+      calls.push({ sql, params: values });
+      if (sql.includes('SELECT j.hold_reason, u.sends_blocked_reason')) return { rows: [{ hold_reason: 'funding_disputed', sends_blocked_reason: null }] };
+      if (sql.startsWith('SELECT funding_order_id FROM letters')) return { rows: [{ funding_order_id: null }] };
+      if (sql.startsWith('SELECT letter_id FROM letter_jobs WHERE job_id = $1 FOR UPDATE')) return { rows: [{ letter_id: 'letter-1' }] };
+      return { rows: [] };
+    });
+    // Waiting again, as a scheduled retry is: no failure in the run.
+    expect(await processLetterJob('job-1')).toMatchObject({ completed: false, retryScheduled: true });
+    const left = calls.find(call => call.sql.includes('SELECT j.hold_reason, u.sends_blocked_reason'))!;
+    expect(left.sql).toContain('FOR SHARE OF u');
+    expect(left.params).toEqual(['job-1']);
+    expect(calls.some(call => call.sql.includes("UPDATE letter_jobs SET status = 'pending', attempts = GREATEST(attempts - 1, 0)"))).toBe(true);
+    // Not failed, and nothing given back.
+    expect(calls.some(call => call.sql.includes('SET status = $2::varchar'))).toBe(false);
+    expect(calls.some(call => call.sql.includes('UPDATE letters SET status'))).toBe(false);
+  });
+
   it('counts a put-back as neither sent nor failed in a run', async () => {
     mockClaims();
     markerClient({ holdReason: 'funding_reversed' });
@@ -1699,7 +1721,12 @@ describe('cancelLeftLetterJobAsAdmin: the operator cancels mail left for them (#
     const order = (fragment: string) => calls.findIndex(call => call.sql.includes(fragment));
     expect(order('pg_advisory_xact_lock')).toBeLessThan(order('FROM letters WHERE letter_id = $1 FOR UPDATE'));
     expect(order('FROM letters WHERE letter_id = $1 FOR UPDATE')).toBeLessThan(order('FROM letter_jobs WHERE job_id = $1 FOR UPDATE'));
-    expect(order('FROM letter_jobs WHERE job_id = $1 FOR UPDATE')).toBeLessThan(order('FROM users WHERE user_id = $1 FOR SHARE'));
+    // The account for update: the return changes its balance (#696 review round 2).
+    expect(order('FROM letter_jobs WHERE job_id = $1 FOR UPDATE')).toBeLessThan(order('FROM users WHERE user_id = $1 FOR UPDATE'));
+    // And its history, as the customer's cancel writes it.
+    const history = calls.find(call => call.sql.includes('INSERT INTO letter_status_history'))!;
+    expect(history.sql).toContain("'queued', 'cancelled', 'operator'");
+    expect(history.params).toEqual(['letter-1']);
   });
 
   it("cancels a blocked account's mail, held for nothing else", async () => {

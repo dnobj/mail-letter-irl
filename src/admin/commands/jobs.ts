@@ -265,13 +265,13 @@ export const jobDispatchNowCommand: CommandDefinition<Record<string, never>> = {
           ? [["Held until", `${job.heldUntil.toISOString()} (09:00 New York time on its mail date)`] as [string, string]]
           : []),
         ...(fundingHeld
-          ? [["Held because", job.holdReason === "funding_disputed" ? "the pack that paid for it was lost to a dispute" : "the pack that paid for it was refunded in full"] as [string, string]]
+          ? [["Held because", job.holdReason === "funding_disputed" ? "the pack that paid for it is disputed" : "the pack that paid for it was refunded in full"] as [string, string]]
           : []),
       ],
       warnings: [
         ...(fundingHeld
           ? [
-              "The money that paid for this letter went back. Sending it prints a letter nobody is paying for: release it only when the dispute is won, or you choose to.",
+              "The money that paid for this letter went back, or may. Sending it prints a letter nobody may be paying for: release it when a dispute is won, or when you choose to.",
               "If the account's sending is blocked, the letter still waits until it is unblocked.",
             ]
           : []),
@@ -328,7 +328,7 @@ export const jobCancelHeldCommand: CommandDefinition<Record<string, never>> = {
     if (!isCancellableLeftJob(job)) throw new AdminFoundationError("ADMIN_INVALID_STATE");
     const why =
       job.holdReason === "funding_disputed"
-        ? "the pack that paid for it was lost to a dispute"
+        ? "the pack that paid for it is disputed"
         : job.holdReason === "funding_reversed"
           ? "the pack that paid for it was refunded in full"
           : "the account's sending is blocked";
@@ -345,7 +345,7 @@ export const jobCancelHeldCommand: CommandDefinition<Record<string, never>> = {
       ],
       warnings: [
         "The letter is cancelled and never printed.",
-        "What paid for it goes back only if it can: nothing from a pack refunded or lost to a dispute, and no gift from a refunded or disputed purchase.",
+        "What paid for it goes back only if it can: nothing from a pack refunded or disputed, and no gift from a refunded or disputed purchase. After a dispute is won, release it instead: cancelling it then costs the customer the letter.",
         "The reason you give on this page is recorded with the cancel.",
       ],
     };

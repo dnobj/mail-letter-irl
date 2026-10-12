@@ -2359,6 +2359,7 @@ async function holdMailFundedByOrder(
          JOIN letters l ON l.letter_id = txn.reference_id
         WHERE txn.reference_type = 'letter'
           AND txn.type = 'deduction'
+          AND txn.user_id = $2
           AND l.user_id = $2
           AND lot.user_id = $2
           AND (lot.source_order_id = $1 OR lot.source_reference_id = $1

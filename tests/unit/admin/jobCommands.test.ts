@@ -22,7 +22,7 @@ import { renderLetter } from "../../../src/admin/pages/accounts.js";
 import { jobActionPanel } from "../../../src/admin/pages/commands.js";
 import { renderJobDetail } from "../../../src/admin/pages/operations.js";
 import { html } from "../../../src/admin/ui/html.js";
-import { isFundingHeldMailJob, isHeldMailJob, isReleasableMailJob, listAttentionJobs, readJob, type JobView } from "../../../src/admin/queries/jobs.js";
+import { isFundingHeldMailJob, isHeldMailJob, listAttentionJobs, readJob, type JobView } from "../../../src/admin/queries/jobs.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const RELEASE = new Date(Date.now() + 5 * DAY_MS);
@@ -331,11 +331,11 @@ describe("job.dispatch_now for mail held for its funding (#696)", () => {
     });
     expect(preview.display).toContainEqual(["Held because", "the pack that paid for it was refunded in full"]);
     expect(preview.display.some(([label]) => label === "Held until")).toBe(false);
-    expect(preview.warnings[0]).toMatch(/^The money that paid for this letter went back\./);
+    expect(preview.warnings[0]).toMatch(/^The money that paid for this letter went back, or may\./);
     expect(preview.warnings).toContain("If the account's sending is blocked, the letter still waits until it is unblocked.");
 
     const disputed = await jobDispatchNowCommand.preview(client({ ...FUNDING_HELD, hold_reason: "funding_disputed" }), "job-held", {});
-    expect(disputed.display).toContainEqual(["Held because", "the pack that paid for it was lost to a dispute"]);
+    expect(disputed.display).toContainEqual(["Held because", "the pack that paid for it is disputed"]);
   });
 
   it("previews held mail before its date with no funding warning", async () => {
@@ -357,14 +357,12 @@ describe("job.dispatch_now for mail held for its funding (#696)", () => {
     });
   });
 
-  it("is told apart from held mail, and both can be released", async () => {
+  it("is told apart from held mail", async () => {
     const funding = await jobView(FUNDING_HELD);
     expect(isFundingHeldMailJob(funding)).toBe(true);
     expect(isHeldMailJob(funding)).toBe(false);
-    expect(isReleasableMailJob(funding)).toBe(true);
     const held = await jobView();
     expect(isFundingHeldMailJob(held)).toBe(false);
-    expect(isReleasableMailJob(held)).toBe(true);
   });
 
   it("is offered on the job's page, saying why it waits", async () => {
@@ -373,7 +371,7 @@ describe("job.dispatch_now for mail held for its funding (#696)", () => {
     expect(panel).toContain("refunded in full");
     expect(panel).toContain('action="/commands/job.dispatch_now/preview"');
     const disputed = String(jobActionPanel({ job: await jobView({ ...FUNDING_HELD, hold_reason: "funding_disputed" }), mode: "full" }));
-    expect(disputed).toContain("lost to a dispute");
+    expect(disputed).toContain("letter was disputed, so it waits");
   });
 
   it("is listed among the jobs that need an operator", async () => {
@@ -402,7 +400,7 @@ describe("job.cancel_held: mail left for the operator (#696)", () => {
   it("previews mail held for its funding, or of a blocked account, saying why and what goes back", async () => {
     const preview = await jobCancelHeldCommand.preview(client(LEFT), "job-held", {});
     expect(preview.summary).toEqual({ letterId: "letter-1", userId: "auth0|u1", fundingType: "prepaid_balance", jobStatus: "pending" });
-    expect(preview.display).toContainEqual(["Held because", "the pack that paid for it was lost to a dispute"]);
+    expect(preview.display).toContainEqual(["Held because", "the pack that paid for it is disputed"]);
     expect(preview.warnings).toContain("The letter is cancelled and never printed.");
     const blocked = await jobCancelHeldCommand.preview(client(BLOCKED), "job-held", {});
     expect(blocked.display).toContainEqual(["Held because", "the account's sending is blocked"]);

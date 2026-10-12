@@ -553,7 +553,7 @@ hand (`account_erasure_followup`, migration 036, #453). That last one has no ord
 in force and, for the per-account limits, the first account's id. Held mail not at the printer by 18:00 New York time on its mail
 date raises `schedule_missed_mail_day` (migration 041, #535, warning), once per letter: its `details` hold the letter id and the
 mail date, and its order is a Pay & Send letter's, else none. Mail the provider cancelled after accepting it raises
-`held_mail_funding_reversed` (migration 056, #696), once per order: a warning that mail a letter pack paid for is held because the pack was refunded in full or lost to a dispute; its `details` hold the reason and how many letters. `provider_cancelled_mail` (migration 043, #566), once per letter: a warning when what paid for it came back, critical
+`provider_cancelled_mail` (migration 043, #566), once per letter: a warning when what paid for it came back, critical
 when a refund waits for a person (a Pay & Send letter, or one our record had already seen printing or mailed); its
 `details` hold the letter and account ids, the funding type, `refundForAPerson` and `statusBefore` (our record's status
 before the cancel), and its order is the Pay & Send order, else none. Each alert has a severity and a three-state lifecycle
@@ -561,6 +561,7 @@ before the cancel), and its order is the Pay & Send order, else none. Each alert
 consistent, and the acknowledging or resolving actor is stored as a hash. One alert per source event
 and type. The panel's acknowledge and resolve commands are the only writers besides the sweeps and the
 account erasure that raise them.
+`held_mail_funding_reversed` (migration 056, #696), once per order: a warning that mail a letter pack paid for is held because the pack was refunded in full or disputed; its `details` hold the reason and how many letters.
 
 ### commerce_operator_audit_events
 
