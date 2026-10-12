@@ -2193,6 +2193,163 @@ describe('saved designs on the Style tab (#649)', () => {
   });
 });
 
+describe('the content version the letter card sends (#695)', () => {
+  const STYLED = { stationery: { theme: 'classic', source: 'default' } };
+  const PAY = {
+    canSendNow: false,
+    sendEligibility: { packPays: false, payAndSend: { available: true, amountCents: 599, currency: 'usd' }, letterPack: { available: false } }
+  };
+  const restyled = (theme: string, version: string, page?: string) => ({
+    result: {
+      content: [],
+      structuredContent: { draftId: 'draft_0001', stationery: { theme, dateLine: 'October 1, 2026', source: 'asked' }, contentVersion: version, ...canSend, message: 'Restyled.' },
+      ...(page ? { _meta: { previewHtml: page } } : {})
+    }
+  });
+  const ready = (version: string, page: string, extra: Json = {}) => ({
+    result: {
+      content: [],
+      structuredContent: { draftId: 'draft_0001', status: 'ready', stationery: { theme: 'classic' }, contentVersion: version, ...canSend, ...extra },
+      _meta: { previewHtml: page }
+    }
+  });
+  const CHANGED = {
+    result: {
+      isError: true,
+      content: [{ type: 'text', text: 'This letter changed after it was shown, so nothing was sent. Show the person the letter as it is now (its preview card, or a new preview), and send it once they have seen it.' }]
+    }
+  };
+  const sentWith = (card: ReturnType<typeof mount>) => card.lastRequest('tools/call', 'send_letter')!.params.arguments;
+
+  it("sends the preview's version, and none for a preview that names none", async () => {
+    const card = mount();
+    await card.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
+    await card.click(card.byId('send-button'));
+    expect(sentWith(card)).toEqual({ draftId: 'draft_0001', confirm: true, contentVersion: 'v_preview' });
+
+    const older = mount();
+    await older.show(output(STYLED), ON);
+    await older.click(older.byId('send-button'));
+    expect(sentWith(older)).toEqual({ draftId: 'draft_0001', confirm: true });
+  });
+
+  it('sends the version of a restyle it drew, and keeps the last for one whose page did not come back', async () => {
+    const card = mount();
+    await card.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
+    await card.click(card.byId('style-row').querySelector('[data-theme="botanical"]')!);
+    await card.answer(restyled('botanical', 'v_botanical', PAGE), 'set_stationery');
+    await card.click(card.byId('send-button'));
+    expect(sentWith(card).contentVersion).toBe('v_botanical');
+
+    const pageless = mount();
+    await pageless.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
+    await pageless.click(pageless.byId('style-row').querySelector('[data-theme="botanical"]')!);
+    await pageless.answer(restyled('botanical', 'v_botanical'), 'set_stationery');
+    await pageless.click(pageless.byId('send-button'));
+    // The card still shows the classic page: what it sends is that, which the server refuses and the card draws again.
+    expect(sentWith(pageless).contentVersion).toBe('v_preview');
+  });
+
+  it('sends the version of the dates it set', async () => {
+    const card = mount();
+    await card.show(
+      output({ ...STYLED, contentVersion: 'v_preview', arrivalWindow: WINDOW, schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' }, deliveryEstimate: 'Goes to the printer Fri, Oct 9.' }),
+      ON
+    );
+    await card.click(card.byId('arrives-asap'));
+    await card.answer(
+      { result: { content: [], structuredContent: { draftId: 'draft_0001', schedule: null, contentVersion: 'v_asap', deliveryEstimate: 'Mailed in 1-2 business days', message: 'Cleared.' } } },
+      'set_arrival_date'
+    );
+    await card.click(card.byId('send-button'));
+    expect(sentWith(card).contentVersion).toBe('v_asap');
+  });
+
+  it('sends the version of a status answer it took, and not of one it did not', async () => {
+    const card = mount();
+    await card.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
+    // The chat changed the words since the preview: the status the card asked on opening draws them.
+    await card.answer(ready('v_chat', document1('Dear Sam, and more,\nPat')), 'get_draft_status');
+    await card.click(card.byId('send-button'));
+    expect(sentWith(card).contentVersion).toBe('v_chat');
+
+    // A status answer that lands after the card's own restyle is older than it: neither its page nor its version.
+    const restyledFirst = mount();
+    await restyledFirst.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
+    const asked = restyledFirst.lastRequest('tools/call', 'get_draft_status')!;
+    await restyledFirst.click(restyledFirst.byId('style-row').querySelector('[data-theme="botanical"]')!);
+    await restyledFirst.answer(restyled('botanical', 'v_botanical', PAGE), 'set_stationery');
+    await restyledFirst.answerTo(asked, ready('v_old', document1('Dear Sam,\nPat')));
+    await restyledFirst.click(restyledFirst.byId('send-button'));
+    expect(sentWith(restyledFirst).contentVersion).toBe('v_botanical');
+  });
+
+  it('draws the letter again when the send is refused for a change since, and sends it as it is now', async () => {
+    const card = mount();
+    await card.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
+    // Restyled by this card, so an ordinary status answer would not be taken.
+    await card.click(card.byId('style-row').querySelector('[data-theme="botanical"]')!);
+    await card.answer(restyled('botanical', 'v_botanical', PAGE), 'set_stationery');
+    const asks = card.requests('tools/call', 'get_draft_status').length;
+
+    await card.click(card.byId('send-button'));
+    await card.answer(CHANGED, 'send_letter');
+
+    expect(card.byId('error-message').textContent).toBe(
+      'This letter changed after it was shown here, so nothing was sent. It is shown again as it is now: check it, then press Send again.'
+    );
+    expect(card.byId('error-message').textContent).not.toContain('Failed to send');
+    expect((card.byId('send-button') as HTMLButtonElement).disabled).toBe(false);
+    expect(card.byId('send-button-text').textContent).toBe('Send Letter');
+    // Asked again, though it asked on opening.
+    expect(card.requests('tools/call', 'get_draft_status').length).toBe(asks + 1);
+    const NOW = document1('Dear Sam, and more,\nPat');
+    await card.answer(ready('v_now', NOW, { stationery: { theme: 'typewriter', dateLine: 'October 1, 2026' } }), 'get_draft_status');
+    expect(card.byId('mockup-container').innerHTML).toContain('<title>Dear Sam, and more,\nPat</title>');
+
+    await card.click(card.byId('send-button'));
+    expect(sentWith(card).contentVersion).toBe('v_now');
+  });
+
+  it('opens Pay & Send with the version it shows, and draws the letter again when the checkout is refused for a change since', async () => {
+    const card = mount();
+    await card.show(output({ ...STYLED, ...PAY, contentVersion: 'v_preview' }), ON);
+    await card.click(card.byId('pay-send-button'));
+    expect(card.lastRequest('tools/call', 'create_mail_checkout')!.params.arguments).toEqual({ draftId: 'draft_0001', contentVersion: 'v_preview' });
+
+    const asks = card.requests('tools/call', 'get_draft_status').length;
+    await card.answer(
+      {
+        result: {
+          isError: true,
+          content: [{ type: 'text', text: 'This mail changed after it was shown, so nothing was charged. Show the person the mail as it is now (its preview card, or a new preview), and open the payment once they have seen it.' }]
+        }
+      },
+      'create_mail_checkout'
+    );
+    expect(card.byId('error-message').textContent).toBe(
+      'This letter changed after it was shown here, so nothing was charged. It is shown again as it is now: check it, then press Pay & Send again.'
+    );
+    expect((card.byId('pay-send-button') as HTMLButtonElement).disabled).toBe(false);
+    expect(card.byId('pay-send-button-text').textContent).toBe('Pay & Send');
+    expect(card.requests('tools/call', 'get_draft_status').length).toBe(asks + 1);
+    await card.answer(ready('v_now', document1('Dear Sam, and more,\nPat'), PAY), 'get_draft_status');
+
+    await card.click(card.byId('pay-send-button'));
+    expect(card.lastRequest('tools/call', 'create_mail_checkout')!.params.arguments).toEqual({ draftId: 'draft_0001', contentVersion: 'v_now' });
+  });
+
+  it('keeps the other refusals as they were', async () => {
+    const card = mount();
+    await card.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
+    const asks = card.requests('tools/call', 'get_draft_status').length;
+    await card.click(card.byId('send-button'));
+    await card.answer({ result: { isError: true, content: [{ type: 'text', text: 'Not enough letters in your balance.' }] } }, 'send_letter');
+    expect(card.byId('error-message').textContent).toContain('Failed to send');
+    expect(card.requests('tools/call', 'get_draft_status').length).toBe(asks);
+  });
+});
+
 describe('the widget version after the certified card (#625)', () => {
   it('is bumped, so a host that cached the card fetches the new one', async () => {
     const { WIDGET_TEMPLATE_VERSION } = await import('../../../src/mcp/widgetUris.js');
