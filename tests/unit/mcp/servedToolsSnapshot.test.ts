@@ -45,10 +45,19 @@ const ON: Record<string, string> = {
   LETTER_IRL_ENVELOPE_REVEAL_ENABLED: 'true'
 };
 const OFF = Object.fromEntries(Object.keys(ON).map(key => [key, key === 'JIT_PURCHASE_ENABLED' ? 'false' : '']));
+// Most features need the PDF renderer, and certified mail and the postcard sizes Pay & Send, beside their own flag:
+// so each flag also alone on top of those two, and each one off from all on, which reaches the states a feature
+// is on with its neighbour off (layouts without sizes, stationery without designs).
+const BASE = { ...OFF, LETTER_IRL_PRINT_RENDERER: 'pdf', JIT_PURCHASE_ENABLED: 'true' };
 const CONFIGS: Array<[string, Record<string, string>]> = [
   ['all off', OFF],
   ['all on', ON],
-  ...Object.keys(ON).map(key => [`only ${key}`, { ...OFF, [key]: ON[key] }] as [string, Record<string, string>])
+  ['all on, image generation off', { ...ON, LETTER_IRL_IMAGE_GEN_MODE: 'off' }],
+  ...Object.keys(ON).map(key => [`only ${key}`, { ...OFF, [key]: ON[key] }] as [string, Record<string, string>]),
+  ...Object.keys(ON)
+    .filter(key => !(key in BASE) || BASE[key as keyof typeof BASE] === '')
+    .map(key => [`renderer and Pay & Send, and ${key}`, { ...BASE, [key]: ON[key] }] as [string, Record<string, string>]),
+  ...Object.keys(ON).map(key => [`all on but ${key}`, { ...ON, [key]: OFF[key] }] as [string, Record<string, string>])
 ];
 // One app of each kind: cards and purchases, cards without, a model that reads structuredContent, one that trusts
 // nothing, and a personal access token.
@@ -88,7 +97,9 @@ describe('what is served, before and after the tool catalogue (#687)', () => {
       vi.stubEnv('LETTER_IRL_OAUTH_SCOPES', 'openid email offline_access mail:read mail:draft mail:send');
       for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
       const config: Record<string, unknown> = { manifest: digest(buildManifest()) };
-      for (const app of APPS) {
+      // The combinations are about flags, so two apps carry them: one with cards and purchases, one with neither.
+      const apps = label.startsWith('renderer and') || label.startsWith('all on but') ? ['chatgpt', 'vscode'] : APPS;
+      for (const app of apps) {
         const tools = await served(app);
         config[app] = { names: tools.map(tool => tool.name).join(' '), digest: digest(tools) };
       }
@@ -96,5 +107,5 @@ describe('what is served, before and after the tool catalogue (#687)', () => {
       vi.unstubAllEnvs();
     }
     await expect(JSON.stringify(snapshot, null, 2)).toMatchFileSnapshot('./__snapshots__/servedTools.json');
-  }, 120_000);
+  }, 600_000);
 });

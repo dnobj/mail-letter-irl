@@ -166,7 +166,8 @@ export const TOOL_CATALOG: Readonly<Record<string, ToolCatalogEntry>> = {
 
 /** A tool's entry. A tool without one is a tool this file was not told of: an error, not a tool served by default. */
 export function getToolCatalogEntry(name: string): ToolCatalogEntry {
-  const entry = TOOL_CATALOG[name];
+  // Own entries only: "toString" is not a tool.
+  const entry = Object.hasOwn(TOOL_CATALOG, name) ? TOOL_CATALOG[name] : undefined;
   if (!entry) throw new Error(`Tool ${name} has no entry in src/mcp/toolCatalog.ts`);
   return entry;
 }
@@ -189,7 +190,7 @@ export const APP_ONLY_TOOLS: ReadonlySet<string> = new Set(
 
 /** The input fields a tool is served without, as this deployment stands. */
 export function withheldInputKeys(name: string): string[] {
-  const withheld = TOOL_CATALOG[name]?.withheldInputKeys;
+  const withheld = Object.hasOwn(TOOL_CATALOG, name) ? TOOL_CATALOG[name].withheldInputKeys : undefined;
   return withheld ? [...withheld()] : [];
 }
 

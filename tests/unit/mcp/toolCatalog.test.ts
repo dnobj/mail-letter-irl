@@ -30,6 +30,8 @@ describe('the tool catalogue', () => {
 
   it('refuses a tool it was not told of, rather than serving it by default', () => {
     expect(() => getToolCatalogEntry('no_such_tool')).toThrow(/no entry in src\/mcp\/toolCatalog\.ts/);
+    // Own entries only: an object's own property names are not tools.
+    expect(() => getToolCatalogEntry('toString')).toThrow(/no entry/);
   });
 
   it('stops registration at a tool without Zod shapes, where it was quietly left out', async () => {

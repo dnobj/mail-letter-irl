@@ -1142,8 +1142,9 @@ export async function registerLetterTools(
   for (const tool of toolDefs) {
     const inputShape = getServedInputSchema(tool.name);
     const outputShape = getZodOutputShape(tool.name);
-    // Every tool the server defines has both (#687): one without is a mistake to find at startup, never a tool
-    // quietly left unregistered.
+    // Every tool the server defines has both (#687): one without fails the connection that lists it, loudly, rather
+    // than being quietly left unregistered. Both shape maps list every tool whatever the flags, and the served-tools
+    // snapshot registers them all, so CI finds a gap before any connection does.
     if (!inputShape || !outputShape) {
       throw new Error(`Tool ${tool.name} has no ${inputShape ? "output" : "input"} schema in src/zodSchemas.ts`);
     }
