@@ -1712,6 +1712,9 @@ describe('cancelLeftLetterJobAsAdmin: the operator cancels mail left for them (#
   it.each([
     ['not left for the operator', { job: { hold_reason: null } }],
     ['Pay & Send, which its refund cancels', { letter: { funding_order_id: 'order-9', funding_type: 'jit_order' } }],
+    // Each mark of Pay & Send refuses on its own.
+    ['tied to an order', { letter: { funding_order_id: 'order-9' } }],
+    ['funded by an order', { letter: { funding_type: 'jit_order' } }],
     ['no longer queued', { letter: { status: 'cancelled' } }],
     ['taken by the outbox', { job: { status: 'processing' } }],
     ['dispatched', { job: { provider_outcome: 'dispatching' } }],

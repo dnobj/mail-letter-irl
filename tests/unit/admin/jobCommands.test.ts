@@ -411,6 +411,9 @@ describe("job.cancel_held: mail left for the operator (#696)", () => {
   it.each([
     ["not left for the operator", { hold_reason: null }],
     ["Pay & Send", { funding_type: "jit_order", funding_order_id: "order-1" }],
+    // Each mark of Pay & Send refuses on its own.
+    ["tied to an order", { funding_order_id: "order-1" }],
+    ["funded by an order", { funding_type: "jit_order" }],
     ["out of attempts", { attempts: 5 }],
     ["no longer queued", { letter_status: "cancelled" }],
   ])("refuses mail that is %s", async (_label, overrides) => {
