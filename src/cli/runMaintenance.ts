@@ -374,12 +374,60 @@ async function runRetentionRestores(): Promise<void> {
   }
 }
 
+export interface OutboxRunSummary {
+  batches: number;
+  processed: number;
+  completed: number;
+  retryScheduled: number;
+  failed: number;
+  paused?: true;
+  waiting?: number;
+}
+
+/**
+ * The outbox's share of a run (#700): batches of `batchLimit` while due mail
+ * is left, until one comes back short, which found no more, or `budgetMs`
+ * has passed; a batch in progress stops claiming then too. A mail date's held
+ * letters are all due at 09:00 New York time, more than one batch of 25, and
+ * one batch a run would send the rest an hour apart.
+ *
+ * Trouble ends the run's outbox as a single batch always did: a batch with a
+ * retry, or with no more letters sent than failed, or a run that has failed as
+ * many as a batch holds. A provider outage then holds or retries at most one
+ * batch a run, not every letter due, and a retried job is not claimed again
+ * in the same run once its backoff has passed; one letter the provider
+ * rejects, among letters it takes, does not stop the date's mail.
+ */
+export async function dispatchDueMail(
+  batchLimit: number,
+  budgetMs: number,
+  now: () => number = Date.now
+): Promise<OutboxRunSummary> {
+  const stopAt = now() + budgetMs;
+  const total: OutboxRunSummary = { batches: 0, processed: 0, completed: 0, retryScheduled: 0, failed: 0 };
+  for (;;) {
+    const batch = await processDueLetterJobs(batchLimit, { stopAt });
+    total.batches += 1;
+    total.processed += batch.processed;
+    total.completed += batch.completed;
+    total.retryScheduled += batch.retryScheduled;
+    total.failed += batch.failed;
+    if (batch.paused) return { ...total, paused: true, waiting: batch.waiting };
+    const trouble =
+      batch.retryScheduled > 0 || (batch.failed > 0 && batch.failed >= batch.completed) || total.failed >= batchLimit;
+    if (batch.processed < batchLimit || trouble || now() >= stopAt) return total;
+  }
+}
+
 export async function runMaintenance(): Promise<void> {
   // Was Math.max(1, Number.parseInt(...)), the shape envSettings exists to
   // replace: '1e3' parses to 1, so a request for 1000 dispatched ONE letter a
   // run, and a non-numeric value yielded NaN, which reached
   // processDueLetterJobs and stopped paid mail entirely (#153 review round 3).
   const batchLimit = positiveIntegerSetting('MAINTENANCE_OUTBOX_BATCH_SIZE', 25, 1);
+  // How long the outbox may keep claiming batches in one run (#700): well
+  // inside the hour, so the next run does not find this one still going.
+  const outboxBudgetSeconds = positiveIntegerSetting('MAINTENANCE_OUTBOX_TIME_BUDGET_SECONDS', 600, 1, 2700);
   console.log(`[Maintenance] Starting one-shot run at ${new Date().toISOString()}`);
 
   // FIRST, and wrapped. Retention has its own maintenance_tasks row because
@@ -401,7 +449,7 @@ export async function runMaintenance(): Promise<void> {
   // running before the outbox cannot race a send (#289).
   await runAccountErasures();
 
-  const outbox = await processDueLetterJobs(batchLimit);
+  const outbox = await dispatchDueMail(batchLimit, outboxBudgetSeconds * 1000);
   console.log('[Maintenance] Outbox summary:', outbox);
 
   // Held mail past 18:00 New York time on its mail date and still not at the

@@ -41,6 +41,12 @@ vi.mock('../../../src/services/commerceService.js', async importOriginal => ({
   getSendEligibility: vi.fn()
 }));
 
+// Room on the mail date (#700): every date has room unless a test says not.
+vi.mock('../../../src/services/mailDateCapacity.js', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../../src/services/mailDateCapacity.js')>()),
+  fullMailDate: vi.fn(async () => null)
+}));
+
 import { getLetterProvider } from '../../../src/services/providers/index.js';
 import { createDraft, createPostcardDraft } from '../../../src/services/draftService.js';
 import { getRecentUploadedImage } from '../../../src/services/recentUploadStore.js';
@@ -51,6 +57,7 @@ import {
 } from '../../../src/services/imageService.js';
 import { getGiftBalance } from '../../../src/services/giftLetterService.js';
 import { getSendEligibility } from '../../../src/services/commerceService.js';
+import { fullMailDate } from '../../../src/services/mailDateCapacity.js';
 import { quoteAndPreviewLetterTextOnlyTool } from '../../../src/tools/quoteAndPreviewLetterTextOnly.js';
 import { quoteAndPreviewLetterWithHeaderImageTool } from '../../../src/tools/quoteAndPreviewLetterWithHeaderImage.js';
 import { quoteAndPreviewLetterWithImageTool } from '../../../src/tools/quoteAndPreviewLetterWithImage.js';
@@ -264,6 +271,48 @@ describe('a date that cannot be met', () => {
     const output = await letter('text_only', { arriveBy: '2027-01-08' }, december);
     // Seven business days back from Fri, Jan 8 skip New Year's Day and the weekend.
     expect(output.deliveryEstimate).toBe('Goes to the printer Tue, Dec 29, and aims to arrive by Fri, Jan 8, 2027.');
+  });
+});
+
+describe('a full mail date (#700)', () => {
+  it('is refused, naming the nearest dates with room, before any picture or draft', async () => {
+    const full = { mailOn: '2026-10-06', openArrivals: ['2026-10-15', '2026-10-19'] };
+    vi.mocked(fullMailDate).mockResolvedValueOnce(full).mockResolvedValueOnce(full);
+    const ctx = context();
+    const error = await letter('header_image', { arriveBy: '2026-10-16' }, ctx).catch(e => e);
+
+    expect(error.message).toBe(
+      'Mail to arrive by Fri, Oct 16 (2026-10-16) is fully booked. ' +
+        'The nearest arrival dates with room are Thu, Oct 15 (2026-10-15) and Mon, Oct 19 (2026-10-19). ' +
+        'Choose one of those, or no date to mail as soon as possible.'
+    );
+    expect(error).toMatchObject({ diagnosticClass: 'validation_error' });
+    // Its own schedule, as the date check chose it, at the context's clock.
+    expect(fullMailDate).toHaveBeenCalledWith(expect.anything(), { arriveBy: '2026-10-16', mailOn: '2026-10-06' }, THURSDAY_MORNING);
+    expect(downloadAndProcessLetterImageWithPreview).not.toHaveBeenCalled();
+    expect(createDraft).not.toHaveBeenCalled();
+    expect(ctx.logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'quote.arrive_by_refused', reason: 'full' }),
+      expect.any(String)
+    );
+
+    await expect(postcard({ arriveBy: '2026-10-16' })).rejects.toThrow('Mail to arrive by Fri, Oct 16 (2026-10-16) is fully booked.');
+    expect(downloadAndProcessPostcardImageWithPreview).not.toHaveBeenCalled();
+    expect(createPostcardDraft).not.toHaveBeenCalled();
+  });
+
+  it('says to choose no date when no other date has room', async () => {
+    vi.mocked(fullMailDate).mockResolvedValueOnce({ mailOn: '2026-10-06', openArrivals: [] });
+    await expect(letter('text_only', { arriveBy: '2026-10-16' })).rejects.toThrow(
+      'Mail to arrive by Fri, Oct 16 (2026-10-16) is fully booked. No other arrival date on offer has room right now. ' +
+        'Choose no date to mail as soon as possible.'
+    );
+  });
+
+  it('is not asked about when no date is asked for, or the date is refused first', async () => {
+    await letter('text_only');
+    await letter('text_only', { arriveBy: '2026-10-12' }).catch(() => undefined);
+    expect(fullMailDate).not.toHaveBeenCalled();
   });
 });
 

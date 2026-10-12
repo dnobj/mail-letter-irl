@@ -37,7 +37,7 @@ import {
   createLetterDraftAndBuildOutput,
   type LetterQuoteOutput
 } from "./letterHelpers.js";
-import { previewSchedule } from "./arriveByInput.js";
+import { previewScheduleWithRoom } from "./arriveByInput.js";
 import { chooseStationery } from "./stationeryInput.js";
 import { chooseSignature } from "./signatureInput.js";
 import { chooseMailService } from "./mailServiceInput.js";
@@ -209,7 +209,7 @@ export async function previewLetter(
 
   // 1. Arrive-by (#535): checked first, so a date that cannot be met is refused
   // before any picture is fetched or address validated.
-  const schedule = previewSchedule(input.arriveBy, context);
+  const schedule = await previewScheduleWithRoom(input.arriveBy, context);
 
   // 2. Certified mail (#625): asked for, and offered, checked here for the same reason, and
   // known before the gift is decided: no gift letter pays for it.

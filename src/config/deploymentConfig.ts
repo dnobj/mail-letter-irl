@@ -782,6 +782,15 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     secret: false,
     services: ['api']
   },
+  // Letters held for one mail date (#700); the send refuses past it, so the
+  // preflight shows where it is set.
+  {
+    name: 'LETTER_IRL_SCHEDULE_DAILY_CAP',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
   {
     name: 'LETTER_IRL_GIFT_DAILY_SEND_CAP',
     requiredIn: 'production',

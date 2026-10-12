@@ -19,6 +19,8 @@ import {
 // the sends use them too); the previews keep importing them from here.
 export { describeDate, scheduleSentence };
 import type { DraftSchedule } from '../services/types.js';
+import { query } from '../db/index.js';
+import { fullMailDate, openArrivalsSentence } from '../services/mailDateCapacity.js';
 
 /** What a preview's output says about its arrival date (zodSchemas.ts's previewScheduleZ). */
 export interface PreviewScheduleOutput {
@@ -119,4 +121,28 @@ export function previewSchedule(arriveBy: unknown, context: ToolContext): Previe
       latestArrival: check.latestArrival
     }
   };
+}
+
+/**
+ * previewSchedule's check, and then room on its mail date (#700): a date
+ * LETTER_IRL_SCHEDULE_DAILY_CAP letters are already held for is refused,
+ * naming the nearest arrival dates with room. What the preview tools and
+ * set_arrival_date call. A draft holds no place on its date, so the send
+ * counts again, under a lock.
+ */
+export async function previewScheduleWithRoom(arriveBy: unknown, context: ToolContext): Promise<PreviewSchedule | undefined> {
+  const schedule = previewSchedule(arriveBy, context);
+  if (!schedule) return undefined;
+  const now = context.now();
+  const full = await fullMailDate({ query }, schedule.draft, now);
+  if (!full) return schedule;
+  context.logger.warn(
+    { correlationId: context.correlationId, event: 'quote.arrive_by_refused', reason: 'full' },
+    'An arrival date was refused'
+  );
+  throw refusal(
+    `Mail to arrive by ${describeDate(schedule.draft.arriveBy, now)} (${schedule.draft.arriveBy}) is fully booked. ` +
+      `${openArrivalsSentence(full.openArrivals, now, true)} ` +
+      (full.openArrivals.length > 0 ? 'Choose one of those, or no date to mail as soon as possible.' : 'Choose no date to mail as soon as possible.')
+  );
 }

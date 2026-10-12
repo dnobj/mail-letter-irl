@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ARRIVE_BY_DEFAULTS,
   isArriveByEnabled,
+  scheduleDailyCap,
   scheduleHorizonDays,
   scheduleLeadDays
 } from '../../../src/config/arriveBy.js';
@@ -62,5 +63,22 @@ describe('scheduleHorizonDays', () => {
     expect(scheduleHorizonDays({ LETTER_IRL_SCHEDULE_HORIZON_DAYS: '365' })).toBe(365);
     expect(scheduleHorizonDays({ LETTER_IRL_SCHEDULE_HORIZON_DAYS: '0' })).toBe(60);
     expect(scheduleHorizonDays({ LETTER_IRL_SCHEDULE_HORIZON_DAYS: '366' })).toBe(60);
+  });
+});
+
+describe('scheduleDailyCap (#700)', () => {
+  it('defaults to 200 letters a mail date', () => {
+    expect(ARRIVE_BY_DEFAULTS.dailyCap).toBe(200);
+    expect(scheduleDailyCap({})).toBe(200);
+    expect(scheduleDailyCap(PRODUCTION)).toBe(200);
+  });
+
+  it('takes a whole number from 1 to 100,000, and the default for anything else', () => {
+    expect(scheduleDailyCap({ LETTER_IRL_SCHEDULE_DAILY_CAP: '1' })).toBe(1);
+    expect(scheduleDailyCap({ LETTER_IRL_SCHEDULE_DAILY_CAP: '100000' })).toBe(100_000);
+    expect(scheduleDailyCap({ ...DEVELOPMENT, LETTER_IRL_SCHEDULE_DAILY_CAP: '5' })).toBe(5);
+    for (const value of ['0', '100001', '-3', '2.5', '1e3', 'many', '']) {
+      expect(scheduleDailyCap({ LETTER_IRL_SCHEDULE_DAILY_CAP: value }), value).toBe(200);
+    }
   });
 });

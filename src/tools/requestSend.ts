@@ -2,6 +2,8 @@ import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
 import { getDraft } from '../services/draftService.js';
 import { draftScheduleOf } from '../services/draftSchedule.js';
 import { earliestMailOn } from '../services/deliverySchedule.js';
+import { query } from '../db/index.js';
+import { chooseAgainSentence, fullMailDate, openArrivalsSentence } from '../services/mailDateCapacity.js';
 import type { LetterDraft } from '../services/types.js';
 import { sendConfirmationUrl } from '../config/sendConfirmation.js';
 import { isExtraService, mailServiceOf } from '../config/products.js';
@@ -64,7 +66,7 @@ export class SendConfirmationRefusedError extends Error {
   readonly diagnosticClass: string;
 
   constructor(
-    readonly code: 'DRAFT_NOT_FOUND' | 'DRAFT_ALREADY_SENT' | 'DRAFT_EXPIRED' | 'SCHEDULE_PASSED',
+    readonly code: 'DRAFT_NOT_FOUND' | 'DRAFT_ALREADY_SENT' | 'DRAFT_EXPIRED' | 'SCHEDULE_PASSED' | 'SCHEDULE_FULL',
     message: string
   ) {
     super(message);
@@ -129,6 +131,20 @@ async function handler(
       `The day this ${noun} was to go to the printer has passed, so it can no longer arrive by its date. ` +
         'Preview it again with a new arrival date, or with none to send it as soon as possible, then ask again.'
     );
+  }
+  // And a full one (#700), by a plain count: the page counts again, under the
+  // date's lock, when Send is pressed.
+  if (schedule) {
+    const full = await fullMailDate({ query }, schedule, context.now());
+    if (full) {
+      const noun = draft.mail_type === 'postcard' ? 'postcard' : 'letter';
+      throw new SendConfirmationRefusedError(
+        'SCHEDULE_FULL',
+        `Mail to arrive by this ${noun}'s date is now fully booked. ` +
+          `${openArrivalsSentence(full.openArrivals, context.now(), true)} ` +
+          chooseAgainSentence(full.openArrivals, 'then ask again')
+      );
+    }
   }
 
   const recipient = (draft.recipient ?? {}) as Record<string, unknown>;

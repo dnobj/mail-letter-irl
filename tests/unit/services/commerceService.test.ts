@@ -820,6 +820,62 @@ describe('commerceService', () => {
       return fulfillPaidOrder('order-1');
     }
 
+    const missedEvents = () =>
+      mocks.query.mock.calls.filter(([sql, params]) =>
+        String(sql).includes('INSERT INTO commerce_order_events') && (params as unknown[])[1] === 'jit.schedule_missed'
+      );
+
+    it.each([
+      ['the webhook', () => payAndSendWebhook()],
+      ['the hourly recovery', () => recoverPayAndSend()]
+    ])('records on the order a mail date that passed before %s fulfilled it (#700)', async (_label, fulfil) => {
+      mocks.createMail.mockResolvedValueOnce({ scheduleMissed: { arriveBy: '2026-10-16', mailOn: '2026-10-06' } });
+
+      await fulfil();
+
+      expect(missedEvents()).toHaveLength(1);
+      const [, params] = missedEvents()[0];
+      expect(params).toEqual(['order-1', 'jit.schedule_missed', null, null, JSON.stringify({ arriveBy: '2026-10-16', mailOn: '2026-10-06' })]);
+    });
+
+    it.each([
+      ['the webhook', () => payAndSendWebhook()],
+      ['the hourly recovery', () => recoverPayAndSend()]
+    ])('records the miss in its own savepoint, and still fulfils when %s cannot write it (#700 review round 3)', async (_label, fulfil) => {
+      mocks.createMail.mockResolvedValueOnce({ scheduleMissed: { arriveBy: '2026-10-16', mailOn: '2026-10-06' } });
+      const base = mocks.query.getMockImplementation();
+      // The helpers set their own implementation on the call; wrap it once they have.
+      const failing = (impl: typeof base) => async (sql: string, params?: unknown[]) => {
+        if (sql.includes('INSERT INTO commerce_order_events') && (params as unknown[])?.[1] === 'jit.schedule_missed') {
+          throw Object.assign(new Error('statement timeout'), { code: '57014' });
+        }
+        return impl!(sql, params);
+      };
+      const original = mocks.query.mockImplementation.bind(mocks.query);
+      const spy = vi.spyOn(mocks.query, 'mockImplementation').mockImplementation(impl => original(failing(impl as typeof base)));
+      try {
+        const result = await fulfil();
+        expect(JSON.stringify(result ?? null)).not.toContain('refund_pending');
+      } finally {
+        spy.mockRestore();
+      }
+      const sqls = mocks.query.mock.calls.map(([sql]) => String(sql));
+      expect(sqls).toContain('SAVEPOINT schedule_missed_event');
+      expect(sqls).toContain('ROLLBACK TO SAVEPOINT schedule_missed_event');
+      expect(sqls.some(sql => sql.includes("SET status = 'refund_pending'"))).toBe(false);
+    });
+
+    it.each([
+      ['the webhook', () => payAndSendWebhook()],
+      ['the hourly recovery', () => recoverPayAndSend()]
+    ])('records nothing when %s fulfils mail on its date, or with none (#700)', async (_label, fulfil) => {
+      await fulfil();
+      expect(mocks.createMail).toHaveBeenCalled();
+      expect(missedEvents()).toEqual([]);
+      // Nor tries to: no savepoint for an event it has no dates for.
+      expect(mocks.query.mock.calls.some(([sql]) => String(sql).includes('schedule_missed_event'))).toBe(false);
+    });
+
     it('grants a pack its image generations while the switch is on', async () => {
       await expect(packWebhook()).resolves.toMatchObject({ status: 'fulfilled' });
       expect(mocks.grantEntitlement).toHaveBeenCalledWith(
@@ -4217,6 +4273,110 @@ describe('commerceService', () => {
       await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).rejects.toMatchObject({ code });
 
       expect(dupState.calls).toEqual([]);
+    });
+
+    describe('room on its mail date (#700)', () => {
+      // A Thursday, 10:00 in New York: Fri Oct 16 mails on Tue Oct 6.
+      const THURSDAY_MORNING = new Date('2026-10-01T14:00:00Z');
+      let held: number;
+
+      beforeEach(() => {
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(THURSDAY_MORNING);
+        vi.stubEnv('LETTER_IRL_SCHEDULE_DAILY_CAP', '2');
+        draftRow = pendingDraft({ arrive_by: '2026-10-16', mail_on: '2026-10-06', expires_at: new Date(THURSDAY_MORNING.getTime() + 6 * 60 * 60_000) });
+        held = 2;
+        const base = mocks.query.getMockImplementation()!;
+        mocks.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
+          if (sql.includes('GROUP BY mail_on')) return { rows: [] };
+          if (sql.includes('AS held FROM letters')) return { rows: [{ held }] };
+          return base(sql, params);
+        });
+      });
+
+      afterEach(() => {
+        vi.useRealTimers();
+        vi.unstubAllEnvs();
+      });
+
+      it('refuses a full date before any order or session, naming the nearest dates with room', async () => {
+        await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).rejects.toMatchObject({
+          code: 'SCHEDULE_FULL',
+          openArrivals: ['2026-10-13', '2026-10-14', '2026-10-15']
+        });
+        expect(inserted()).toBe(false);
+        expect(mocks.createJitSession).not.toHaveBeenCalled();
+        // Under the draft's lock, by a plain count: no date lock is held across the payment.
+        expect(position('AS held FROM letters')).toBeGreaterThan(position('SELECT * FROM letter_drafts WHERE draft_id = $1 FOR UPDATE'));
+        expect(trail.some(sql => sql.includes('pg_advisory_xact_lock'))).toBe(false);
+        // Its own mail date's count.
+        const count = mocks.query.mock.calls.find(([sql]) => String(sql).includes('AS held FROM letters'))!;
+        expect(count[1]).toEqual(['2026-10-06']);
+      });
+
+      it('opens the checkout for a date with room', async () => {
+        held = 1;
+        await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).resolves.toMatchObject({ status: 'checkout_pending' });
+      });
+
+      it.each(['paid', 'fulfillment_pending'])(
+        'returns an order already %s as it always did, though its date has since filled or passed (review round 1)',
+        async status => {
+          activeRows = [currentOrder({ status, stripe_checkout_session_id: 'cs-paid', checkout_url: 'https://checkout.stripe.test/cs-paid' })];
+          for (const dates of [{}, { arrive_by: '2026-10-12', mail_on: '2026-09-30' }]) {
+            draftRow = { ...draftRow, ...dates };
+            await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).resolves.toMatchObject({ reused: true });
+          }
+          expect(trail.some(sql => sql.includes('AS held FROM letters'))).toBe(false);
+          expect(inserted()).toBe(false);
+        }
+      );
+
+      it('returns a session already open, counted when it was made, though its date has since filled (review round 2)', async () => {
+        activeRows = [currentOrder({ stripe_checkout_session_id: 'cs-open', checkout_url: 'https://checkout.stripe.test/cs-open' })];
+        await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).resolves.toMatchObject({ reused: true });
+        expect(trail.some(sql => sql.includes('AS held FROM letters'))).toBe(false);
+        expect(mocks.createJitSession).not.toHaveBeenCalled();
+      });
+
+      it('takes a checkout URL alone for an open session, as the reuse does', async () => {
+        activeRows = [currentOrder({ checkout_url: 'https://checkout.stripe.test/cs-url' })];
+        await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).resolves.toMatchObject({ reused: true });
+        expect(trail.some(sql => sql.includes('AS held FROM letters'))).toBe(false);
+      });
+
+      it('refuses a full date for an order whose session was never made, before one is', async () => {
+        activeRows = [currentOrder()];
+        await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).rejects.toMatchObject({
+          code: 'SCHEDULE_FULL',
+          diagnosticClass: 'SCHEDULE_FULL'
+        });
+        expect(mocks.createJitSession).not.toHaveBeenCalled();
+        // After the look for the draft's order.
+        expect(position('AS held FROM letters')).toBeGreaterThan(position('status = ANY($2::varchar[])'));
+      });
+
+      it('reuses an order whose session was never made when its date has room', async () => {
+        held = 1;
+        activeRows = [currentOrder()];
+        await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).resolves.toMatchObject({ reused: true });
+      });
+
+      it('refuses a passed date, classed, for an order whose session was never made', async () => {
+        activeRows = [currentOrder()];
+        draftRow = { ...draftRow, arrive_by: '2026-10-12', mail_on: '2026-09-30' };
+        await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).rejects.toMatchObject({
+          code: 'SCHEDULE_PASSED',
+          diagnosticClass: 'SCHEDULE_PASSED'
+        });
+        expect(mocks.createJitSession).not.toHaveBeenCalled();
+      });
+
+      it('returns a session already open though its date has passed, which may have been paid (review round 3)', async () => {
+        activeRows = [currentOrder({ stripe_checkout_session_id: 'cs-open', checkout_url: 'https://checkout.stripe.test/cs-open' })];
+        draftRow = { ...draftRow, arrive_by: '2026-10-12', mail_on: '2026-09-30' };
+        await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).resolves.toMatchObject({ reused: true });
+      });
     });
 
     describe('the content version the person was shown (#695)', () => {

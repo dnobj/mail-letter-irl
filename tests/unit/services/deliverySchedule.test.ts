@@ -14,6 +14,7 @@ import {
   isBusinessDay,
   latestArrival,
   mailOnFor,
+  nearestOpenArrivals,
   newYorkDate,
   newYorkTime,
   parseCalendarDate
@@ -296,5 +297,57 @@ describe('checking an arrival date', () => {
   it('uses the lead time and the horizon it is given', () => {
     expect(checkArrival('2026-10-02', NOW, { leadDays: 1, horizonDays: 60 })).toMatchObject({ ok: true, mailOn: '2026-10-01' });
     expect(checkArrival('2026-10-20', NOW, { leadDays: 7, horizonDays: 15 })).toMatchObject({ ok: false, reason: 'too_late', latestArrival: '2026-10-16' });
+  });
+});
+
+describe('the nearest arrival dates with room (#700)', () => {
+  // A Thursday, 10:00 in New York: the earliest arrival is Tue Oct 13 (Oct 12 is Columbus Day).
+  const NOW = new Date('2026-10-01T14:00:00Z');
+  const everyDate = () => true;
+
+  it('offers one arrival date per mail date: the first, a business day, not the weekend after it', () => {
+    const open = nearestOpenArrivals('2026-10-17', NOW, SETTINGS, everyDate, 3);
+    // Sat Oct 17 and Sun Oct 18 mail on Fri Oct 16's day, so Fri Oct 16 stands for all three.
+    expect(open).toEqual(['2026-10-15', '2026-10-16', '2026-10-19']);
+    for (const date of open) expect(isBusinessDay(date), date).toBe(true);
+  });
+
+  it('skips mail dates without room, takes the nearest, the earlier of two as near, and answers in date order', () => {
+    const full = new Set([mailOnFor('2026-10-16', 7), mailOnFor('2026-10-15', 7)]);
+    // Tue Oct 13 is three days off, Mon Oct 19 three, Tue Oct 20 four.
+    expect(nearestOpenArrivals('2026-10-16', NOW, SETTINGS, mailOn => !full.has(mailOn), 3)).toEqual([
+      '2026-10-13',
+      '2026-10-14',
+      '2026-10-19'
+    ]);
+    // Two as near, Thu Oct 15 and Mon Oct 19 from Sat Oct 17, whose own mail date is Fri Oct 16's:
+    // the earlier, when only one is asked for.
+    const friday = mailOnFor('2026-10-16', 7);
+    expect(nearestOpenArrivals('2026-10-17', NOW, SETTINGS, mailOn => mailOn !== friday, 1)).toEqual(['2026-10-15']);
+    expect(nearestOpenArrivals('2026-10-17', NOW, SETTINGS, mailOn => mailOn !== friday, 2)).toEqual(['2026-10-15', '2026-10-19']);
+  });
+
+  it('ranks a mail date by its nearest arrival date: a Monday asked for has the Friday before it one day off (review round 2)', () => {
+    const monday = mailOnFor('2026-10-19', 7);
+    // Fri Oct 16 mails on the day Sun Oct 18 does, one day off; so is Tue Oct 20: the earlier.
+    expect(nearestOpenArrivals('2026-10-19', NOW, SETTINGS, mailOn => mailOn !== monday, 1)).toEqual(['2026-10-16']);
+    expect(nearestOpenArrivals('2026-10-19', NOW, SETTINGS, mailOn => mailOn !== monday, 2)).toEqual(['2026-10-16', '2026-10-20']);
+  });
+
+  it('asks about every mail date on offer, from the earliest arrival to the latest, and none outside them', () => {
+    const asked: string[] = [];
+    nearestOpenArrivals('2026-10-16', NOW, SETTINGS, mailOn => { asked.push(mailOn); return false; });
+    expect(asked[0]).toBe(mailOnFor(earliestArrival(NOW, 7), 7));
+    expect(asked.at(-1)).toBe(mailOnFor(latestArrival(NOW, 60), 7));
+    expect(new Set(asked).size).toBe(asked.length);
+  });
+
+  it('answers none when no date has room, or none is on offer', () => {
+    expect(nearestOpenArrivals('2026-10-16', NOW, SETTINGS, () => false)).toEqual([]);
+    expect(nearestOpenArrivals('2026-10-16', NOW, { leadDays: 7, horizonDays: 2 }, everyDate)).toEqual([]);
+  });
+
+  it('offers three by default', () => {
+    expect(nearestOpenArrivals('2026-11-02', NOW, SETTINGS, everyDate)).toHaveLength(3);
   });
 });

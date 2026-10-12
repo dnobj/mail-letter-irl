@@ -321,6 +321,7 @@ describe('the confirmation page takes Pay & Send for mail no pack pays for (#579
       ['DRAFT_NOT_OWNED', 404, 'not_found'],
       ['DRAFT_EXPIRED', 410, 'expired'],
       ['SCHEDULE_PASSED', 409, 'schedule_passed'],
+      ['SCHEDULE_FULL', 409, 'schedule_full'],
       ['DRAFT_INVALID_STATE', 409, 'unsendable'],
       ['SOMETHING_NEW', 500, 'checkout_failed']
     ])('maps %s to %i %s, without the service message', (code, status, reason) => {

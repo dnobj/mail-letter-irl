@@ -134,6 +134,22 @@ describe('mail-type wording', () => {
     expect(friendlyDraftError(upstream, 'd-1', 'letter').message).toContain('The day this letter was to go to the printer has passed');
   });
 
+  it('says a full mail date needs another date, naming the open ones, and that nothing was sent (#700)', () => {
+    const upstream = Object.assign(new Error('Draft d-1 was to go to the printer on 2026-10-06, which is full'), {
+      code: 'SCHEDULE_FULL',
+      openArrivals: ['2026-10-15', '2026-10-19']
+    });
+    const friendly = friendlyDraftError(upstream, 'd-1', 'postcard').message;
+    expect(friendly).toMatch(
+      /^Mail to arrive by this postcard's date is now fully booked, so nothing was sent\. The nearest arrival dates with room are \w{3}, Oct 15(, 2026)? \(2026-10-15\) and \w{3}, Oct 19(, 2026)? \(2026-10-19\)\. Choose another arrival date for it, or none to send it as soon as possible, then send it again\.$/
+    );
+    expect(friendly).not.toContain('d-1');
+    expect(friendlyDraftError(Object.assign(new Error('x'), { code: 'SCHEDULE_FULL' }), 'd-1', 'letter').message).toContain(
+      "this letter's date is now fully booked, so nothing was sent. No other arrival date on offer has room right now. " +
+        'Choose no arrival date for it, to send it as soon as possible, then send it again.'
+    );
+  });
+
   it('says mail no pack pays for is paid with Pay & Send, and keeps the code for the tool layer (#579)', () => {
     const upstream = Object.assign(new Error('Draft d-1 is paid with Pay & Send, not a pack or gift letter'), {
       code: 'PACK_CANNOT_PAY'

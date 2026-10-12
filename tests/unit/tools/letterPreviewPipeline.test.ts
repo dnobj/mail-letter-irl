@@ -18,7 +18,7 @@ const { order, step, syncStep } = vi.hoisted(() => {
   };
 });
 
-vi.mock('../../../src/tools/arriveByInput.js', () => ({ previewSchedule: syncStep('schedule', { arriveBy: '2026-11-02' }) }));
+vi.mock('../../../src/tools/arriveByInput.js', () => ({ previewScheduleWithRoom: step('schedule', { arriveBy: '2026-11-02' }) }));
 vi.mock('../../../src/tools/mailServiceInput.js', async importOriginal => ({
   ...(await importOriginal<typeof import('../../../src/tools/mailServiceInput.js')>()),
   chooseMailService: syncStep('mailService', null)
@@ -57,7 +57,7 @@ import * as helpers from '../../../src/tools/letterHelpers.js';
 import { validatePrintableLetter } from '../../../src/tools/letterHelpers.js';
 import { downloadAndProcessLetterImageWithPreview } from '../../../src/services/imageService.js';
 import { resolvePreviewImageSource } from '../../../src/services/previewImageSource.js';
-import { previewSchedule } from '../../../src/tools/arriveByInput.js';
+import { previewScheduleWithRoom } from '../../../src/tools/arriveByInput.js';
 import { chooseSignature } from '../../../src/tools/signatureInput.js';
 import { chooseStationery } from '../../../src/tools/stationeryInput.js';
 import { quoteAndPreviewLetterTextOnlyTool } from '../../../src/tools/quoteAndPreviewLetterTextOnly.js';
@@ -211,7 +211,7 @@ describe('one letter-preview pipeline (#689)', () => {
       });
 
       it('fetches no picture when the arrival date is refused', async () => {
-        vi.mocked(previewSchedule).mockImplementationOnce(() => { throw new Error('too soon'); });
+        vi.mocked(previewScheduleWithRoom).mockImplementationOnce(async () => { throw new Error('too soon'); });
 
         await expect(tool.handler(input, context())).rejects.toThrow('too soon');
         expect(resolvePreviewImageSource).not.toHaveBeenCalled();

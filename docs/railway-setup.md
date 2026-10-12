@@ -147,6 +147,7 @@ LETTER_IRL_POSTCARD_SIZES_ENABLED=<true to preview and sell 4x6 and 11x6 postcar
 LETTER_IRL_CERTIFIED_MAIL_ENABLED=<true to sell certified mail letters through Pay & Send (#625), which needs their two prices below, to accept mailService on the letter previews and to list set_mail_service; unset is off>
 LETTER_IRL_SCHEDULE_LEAD_DAYS=<business days from the mail date to the arrival date; default 7, production refuses less than 3>
 LETTER_IRL_SCHEDULE_HORIZON_DAYS=<calendar days ahead an arrival date may be; default 60>
+LETTER_IRL_SCHEDULE_DAILY_CAP=<letters waiting at once for one mail date, across every account; default 200; outside 1-100000 or unparseable falls back to 200. Keep it within what the outbox sends between 09:00 and 18:00 New York time when a run stops at its first batch, MAINTENANCE_OUTBOX_BATCH_SIZE x 9 runs (225 by default), or a date's mail can still be waiting at the 18:00 missed-mail-day alert>
 # Photo upload through the card in apps with no file store (#474, docs/deployment.md): off unless
 # explicitly true. API service only.
 LETTER_IRL_CARD_UPLOAD_ENABLED=<true to let the upload card send photos in Claude; unset keeps it off>
@@ -250,8 +251,12 @@ CONTENT_RETENTION_ENABLED=
 CONTENT_RETENTION_DAYS=
 # Rows per sweep. Default 500; outside 1-5000 or unparseable falls back to 500.
 CONTENT_RETENTION_BATCH_SIZE=
-# Outbox rows retried per maintenance run. Default 25.
+# Outbox rows claimed per batch. Default 25. A run claims batches until one
+# comes back short or the time budget below has passed (#700).
 MAINTENANCE_OUTBOX_BATCH_SIZE=
+# Seconds a run may keep claiming outbox batches. Default 600; outside 1-2700
+# or unparseable falls back to 600.
+MAINTENANCE_OUTBOX_TIME_BUDGET_SECONDS=
 ```
 
 None of these is in `ENV_VAR_MANIFEST` yet, so `npm run preflight:cutover` does not report them.
