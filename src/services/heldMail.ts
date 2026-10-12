@@ -23,6 +23,27 @@ export function heldMailJobSql(alias: string): string {
       AND ${alias}.next_attempt_at > NOW())`;
 }
 
+/**
+ * Mail left for the operator (#696): a job held for its funding
+ * (fundingHeldJobSql), or of an account whose sending is blocked. A SQL
+ * condition on the letter_jobs row named `alias`. A plain read of users, no
+ * lock: the outbox's dispatch marker reads the same again under its locks and
+ * puts back a job that turned so between the claim and the mark (letterJobService).
+ * The outbox's claim, its marker and its waiting count leave such a job, and the maintenance run's
+ * count of late letters (#699) leaves its letter: it waits for a person, who
+ * may take weeks, as a dispute does.
+ */
+export function leftForOperatorSql(alias: string): string {
+  if (!/^[a-z_]+$/.test(alias)) throw new Error(`leftForOperatorSql: not a table alias: ${alias}`);
+  return `(${fundingHeldJobSql(alias)}
+       OR EXISTS (
+         SELECT 1 FROM letters held_letter
+           JOIN users held_user ON held_user.user_id = held_letter.user_id
+          WHERE held_letter.letter_id = ${alias}.letter_id
+            AND held_user.sends_blocked_reason IS NOT NULL
+       ))`;
+}
+
 /** The same as heldMailJobSql, for a job already read, at `now`. */
 export function isHeldMailJobState(
   job: { status: string; providerOutcome: string; attempts: number; mailHoldUntil: Date | null; nextAttemptAt: Date | null },

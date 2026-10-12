@@ -246,8 +246,11 @@ at `src/db/index.ts:32-37`. A `?sslmode=require` URL satisfies all three rules.
 
 | Rule | Severity | Raised when | Fix |
 |---|---|---|---|
-| `maintenance.heartbeat_url_invalid` | warning | `MAINTENANCE_HEARTBEAT_URL` is set but is not an https URL | Set the monitor's https ping URL, or unset it. The maintenance service prints it at every run (#408) |
-| `limits.operator_alert_url_invalid` | warning | `LETTER_IRL_OPERATOR_ALERT_URL` is set but is not an https URL | Set the https URL the notice is posted to (for example a healthchecks.io check's `/fail` URL), or unset it. The daily-limit alert still opens in the admin panel ([admin-panel-guide.md](admin-panel-guide.md)) |
+| `maintenance.heartbeat_url_invalid` | error for production maintenance, warning elsewhere | `MAINTENANCE_HEARTBEAT_URL` is set but is not an https URL | Set the monitor's https ping URL; outside production, or unset it. The maintenance service prints it at every run (#408) |
+| `limits.operator_alert_url_invalid` | error in production, warning elsewhere | `LETTER_IRL_OPERATOR_ALERT_URL` is set but is not an https URL | Set the https URL the notices are posted to (for example an ntfy topic, which tells every notice); outside production, or unset it. The alerts still open in the admin panel ([admin-panel-guide.md](admin-panel-guide.md)) |
+| `retention.mode_unknown` | warning | `CONTENT_RETENTION_MODE` is neither `enforce` nor `report` | Set one of the two: anything else only reports, as `report` does |
+
+Production requires all three of these variables (#699): `MAINTENANCE_HEARTBEAT_URL` and `CONTENT_RETENTION_MODE` on the maintenance service, and `LETTER_IRL_OPERATOR_ALERT_URL` on both the API and maintenance. Unset there, boot refuses with the presence error for the variable ([operational-acceptance.md](operational-acceptance.md)).
 
 ### Mail dispatch
 

@@ -13,11 +13,13 @@ vi.mock('../../../src/services/giftLetterService.js', () => ({ returnGiftLetterF
 import { query, transaction } from '../../../src/db/index.js';
 import { returnConsumedCreditsForLetter } from '../../../src/services/creditLedgerService.js';
 import { returnGiftLetterForFailedSendWithClient } from '../../../src/services/giftLetterService.js';
+import { leftForOperatorSql } from '../../../src/services/heldMail.js';
 import {
   CANCELLED_BY_CUSTOMER,
   MISSED_MAIL_DAY_ALERT,
   cancelScheduledMail,
-  raiseMissedMailDayAlerts
+  raiseMissedMailDayAlerts,
+  lettersPastMailDay
 } from '../../../src/services/scheduledMailService.js';
 
 const LETTER = 'ltr-1';
@@ -260,6 +262,8 @@ describe('raiseMissedMailDayAlerts (#535)', () => {
     expect(flat).toContain('held.mail_on IS NOT NULL');
     // Failed too: its retries ran out, or the provider refused it.
     expect(flat).toContain("held.status IN ('queued', 'processing', 'failed')");
+    // Never accepted: a letter being printed reads 'processing' after the status sync (#699 review round 2).
+    expect(flat).toContain("held.status IN ('queued', 'processing', 'failed') AND held.sent_at IS NULL AND");
     expect(flat).toContain("(held.mail_on + TIME '18:00') AT TIME ZONE 'America/New_York' < NOW()");
     // Once per letter, ever, even when two runs overlap (041's unique index).
     expect(flat).toContain("NOT EXISTS ( SELECT 1 FROM commerce_operational_alerts seen WHERE seen.alert_type = $1::varchar AND seen.details->>'letterId' = held.letter_id )");
@@ -274,5 +278,32 @@ describe('raiseMissedMailDayAlerts (#535)', () => {
   it('never throws: a failed check is logged and the hourly run goes on', async () => {
     vi.mocked(query).mockRejectedValue(Object.assign(new Error('relation does not exist'), { code: '42P01' }));
     await expect(raiseMissedMailDayAlerts()).resolves.toBe(0);
+  });
+});
+
+describe('lettersPastMailDay (#699)', () => {
+  beforeEach(() => {
+    vi.mocked(query).mockReset();
+  });
+
+  it('counts letters with a date still queued or taken after 18:00 New York time on their mail day', async () => {
+    vi.mocked(query).mockResolvedValue({ rows: [{ late: '3' }], rowCount: 1 } as never);
+
+    await expect(lettersPastMailDay()).resolves.toBe(3);
+
+    const flat = String(vi.mocked(query).mock.calls[0][0]).replace(/\s+/g, ' ');
+    expect(flat).toContain('held.mail_on IS NOT NULL');
+    // Not failed or held: each has its own alert and its own end.
+    expect(flat).toContain("held.status IN ('queued', 'processing') AND held.sent_at IS NULL AND");
+    expect(flat).toContain("(held.mail_on + TIME '18:00') AT TIME ZONE 'America/New_York' < NOW()");
+    // Not mail left for the operator, which waits for a person (review round 1).
+    expect(flat).toContain(
+      `AND NOT EXISTS ( SELECT 1 FROM letter_jobs left_job WHERE left_job.letter_id = held.letter_id AND ${leftForOperatorSql('left_job').replace(/\s+/g, ' ')} )`
+    );
+  });
+
+  it("answers 'unknown' when the count fails, which withholds the heartbeat too", async () => {
+    vi.mocked(query).mockRejectedValue(new Error('connection terminated'));
+    await expect(lettersPastMailDay()).resolves.toBe('unknown');
   });
 });

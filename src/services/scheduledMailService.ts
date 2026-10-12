@@ -15,6 +15,7 @@ import { CREDITS_PER_LETTER } from '../config/products.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 import { returnConsumedCreditsForLetter } from './creditLedgerService.js';
 import { returnGiftLetterForFailedSendWithClient } from './giftLetterService.js';
+import { leftForOperatorSql } from './heldMail.js';
 
 /** The failure code a cancel's return records (source_metadata.failure_code). */
 export const CANCELLED_BY_CUSTOMER = 'cancelled_by_customer';
@@ -29,6 +30,8 @@ export const MISSED_MAIL_DAY_ALERT = 'schedule_missed_mail_day';
  * ran out, or the provider refused it). Raises one operator alert per letter,
  * ever, and logs schedule.missed_mail_day with how many were new. A letter
  * held after an ambiguous dispatch is left out: it has its own critical alert.
+ * So is one the provider accepted (sent_at), whatever status the sync has
+ * written since: \`processing\` is how a letter being printed reads (#699).
  *
  * Once per letter: NOT EXISTS, with a partial unique index behind it (041)
  * and ON CONFLICT DO NOTHING, so two runs at once still raise one.
@@ -46,6 +49,7 @@ export async function raiseMissedMailDayAlerts(): Promise<number> {
          FROM letters held
         WHERE held.mail_on IS NOT NULL
           AND held.status IN ('queued', 'processing', 'failed')
+          AND held.sent_at IS NULL
           AND (held.mail_on + TIME '18:00') AT TIME ZONE 'America/New_York' < NOW()
           AND NOT EXISTS (
             SELECT 1 FROM commerce_operational_alerts seen
@@ -66,6 +70,43 @@ export async function raiseMissedMailDayAlerts(): Promise<number> {
       errorClass: classifyDiagnosticError(error, 'database_error')
     });
     return 0;
+  }
+}
+
+/**
+ * Letters with a mail date still waiting to go to the printer after 18:00 New
+ * York time on it (#699): queued or taken, and never accepted by the provider
+ * (no sent_at: the status sync writes `processing` for a letter the provider
+ * is printing, which is at the printer). The maintenance
+ * run withholds its heartbeat while there are any, so the monitor alerts until
+ * they go or a person settles them. 'unknown' when the count fails, which
+ * withholds too. Left out, each having its own alert and its own end, and each
+ * able to wait for weeks, which would keep the monitor alarming and hide a run
+ * that stops: letters that failed or are held after an ambiguous dispatch, and
+ * mail left for the operator (leftForOperatorSql: held for its funding, or of
+ * a blocked account), which the outbox's own waiting count leaves too.
+ */
+export async function lettersPastMailDay(): Promise<number | 'unknown'> {
+  try {
+    const late = await query<{ late: number | string }>(
+      `SELECT COUNT(*)::int AS late
+         FROM letters held
+        WHERE held.mail_on IS NOT NULL
+          AND held.status IN ('queued', 'processing')
+          AND held.sent_at IS NULL
+          AND (held.mail_on + TIME '18:00') AT TIME ZONE 'America/New_York' < NOW()
+          AND NOT EXISTS (
+            SELECT 1 FROM letter_jobs left_job
+             WHERE left_job.letter_id = held.letter_id
+               AND ${leftForOperatorSql('left_job')}
+          )`
+    );
+    return Number(late.rows[0]?.late ?? 0);
+  } catch (error) {
+    writeDiagnostic('error', 'schedule.past_mail_day_count_failed', {
+      errorClass: classifyDiagnosticError(error, 'database_error')
+    });
+    return 'unknown';
   }
 }
 

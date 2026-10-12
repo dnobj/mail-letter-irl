@@ -30,7 +30,8 @@ import { carriedDiagnosticClass, classifyDiagnosticError, writeDiagnostic } from
 import { summarizeProviderRejection } from './providerFailureSummary.js';
 import { enabledUnlessDisabled } from '../utils/envSettings.js';
 import { letterPrintText, signatureParagraph } from './previewService.js';
-import { fundingHeldJobSql, heldMailJobSql, isFundingHoldReason } from './heldMail.js';
+import { heldMailJobSql, isFundingHoldReason, leftForOperatorSql } from './heldMail.js';
+import { OPERATOR_NOTICES, reportToOperator } from './operatorNotify.js';
 
 const DEFAULT_MAX_ATTEMPTS = 5;
 const STALE_LOCK_MINUTES = 15;
@@ -186,23 +187,6 @@ export async function createLetterJob(letter: Letter): Promise<LetterJob> {
  */
 export function outboxDispatchEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return enabledUnlessDisabled('LETTER_IRL_OUTBOX_DISPATCH_ENABLED', env);
-}
-
-/**
- * Mail the outbox leaves where it is, for a person (#696): held for its funding (a pack
- * refunded in full or disputed), or of an account whose sending is blocked. A SQL
- * condition on the letter_jobs row named `alias`. A plain read of users, no lock: the
- * dispatch marker reads the same again under its locks and puts back a job that turned
- * so between the claim and the mark.
- */
-function leftForOperatorSql(alias: string): string {
-  return `(${fundingHeldJobSql(alias)}
-       OR EXISTS (
-         SELECT 1 FROM letters held_letter
-           JOIN users held_user ON held_user.user_id = held_letter.user_id
-          WHERE held_letter.letter_id = ${alias}.letter_id
-            AND held_user.sends_blocked_reason IS NOT NULL
-       ))`;
 }
 
 async function claimJob(jobId?: string): Promise<LetterJob | null> {
@@ -368,6 +352,9 @@ async function holdAmbiguousDispatch(job: LetterJob, error: unknown): Promise<vo
       [orderId, JSON.stringify({ jobId: job.job_id, errorClass })]
     );
   });
+  // Once the hold has committed (#699). Not waited for: this runs in a send's
+  // inline dispatch too; the maintenance run settles it before it exits.
+  reportToOperator('ambiguous_outcome', OPERATOR_NOTICES.ambiguousOutcome());
 }
 
 async function loadLetter(letterId: string): Promise<Letter> {

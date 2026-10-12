@@ -8,6 +8,7 @@
 import { query } from '../db/index.js';
 import { getLetterProvider } from './providers/index.js';
 import { failProviderCancelledLetter } from './letterJobService.js';
+import { notifyOperator, OPERATOR_NOTICES } from './operatorNotify.js';
 import { carriedDiagnosticClass, classifyDiagnosticError } from '../utils/diagnosticLog.js';
 
 export interface StatusSyncResult {
@@ -51,6 +52,9 @@ export async function syncLetterStatuses(
     errors: 0,
     details: []
   };
+  // Letters the provider cancelled that this sync failed (#566), told to the
+  // operator once at the end (#699).
+  let cancelled = 0;
 
   // Get provider
   const provider = getLetterProvider();
@@ -160,6 +164,7 @@ export async function syncLetterStatuses(
             providerRawStatus: providerStatus.statusMessage
           });
           if (outcome === 'unchanged') continue;
+          cancelled += 1;
         } else if (!dryRun) {
           // Update current status
           await query(
@@ -207,6 +212,7 @@ export async function syncLetterStatuses(
   }
 
   console.log(`✅ Status sync complete: checked=${result.checked}, updated=${result.updated}, errors=${result.errors}`);
+  if (cancelled > 0) await notifyOperator('provider_cancelled', OPERATOR_NOTICES.providerCancelled(cancelled));
 
   return result;
 }

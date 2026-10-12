@@ -18,7 +18,8 @@ import { purgeExpiredFeatureRequests } from '../services/featureRequestService.j
 import { purgeClosedAddressRequests } from '../services/addressRequestService.js';
 import { addressRequestRetentionDays } from '../config/addressRequests.js';
 import { processAccountErasures } from '../services/accountErasureService.js';
-import { raiseMissedMailDayAlerts } from '../services/scheduledMailService.js';
+import { lettersPastMailDay, raiseMissedMailDayAlerts } from '../services/scheduledMailService.js';
+import { notifyOperator, OPERATOR_NOTICES, settleOperatorNotices } from '../services/operatorNotify.js';
 import { enabledUnlessDisabled, positiveIntegerSetting } from '../utils/envSettings.js';
 import { reconcileGenerationReservations } from '../services/imageGenerationLimitService.js';
 import {
@@ -457,6 +458,8 @@ export async function runMaintenance(): Promise<void> {
   // Never throws, like the wrapped tasks above.
   const missedMailDays = await raiseMissedMailDayAlerts();
   console.log(`[Maintenance] Held mail past its mail day, newly alerted: ${missedMailDays}`);
+  // And the operator is told, once a run (#699).
+  if (missedMailDays > 0) await notifyOperator('missed_mail_day', OPERATOR_NOTICES.missedMailDay(missedMailDays));
 
   const commerce = await runCommerceMaintenance();
   console.log('[Maintenance] Commerce summary:', commerce);
@@ -525,16 +528,22 @@ export async function maintenanceEntry(): Promise<void> {
     // otherwise show in this log and nowhere the owner is told: the monitor
     // alerts until the outbox is switched back on (#451 review). A count that
     // failed withholds too: paused, it cannot say nothing waits.
+    //
+    // Nor while a letter with a date is still waiting after 18:00 on its mail
+    // day (#699): the run is fine, but mail promised for a day did not go. The
+    // monitor alerts until it goes or a person settles it.
     const waiting = await lettersWaitingBehindPause();
-    if (waiting !== 0) {
+    const late = await lettersPastMailDay();
+    if (waiting !== 0 || late !== 0) {
       const monitored = maintenanceHeartbeatUrl() !== null;
-      writeDiagnostic('warn', 'maintenance.heartbeat_withheld', { outboxWaiting: waiting, monitored });
-      const held =
-        waiting === 'unknown'
-          ? 'the outbox is paused and the letters waiting could not be counted'
-          : `the outbox is paused with ${waiting} waiting`;
+      writeDiagnostic('warn', 'maintenance.heartbeat_withheld', { outboxWaiting: waiting, pastMailDay: late, monitored });
+      const reasons: string[] = [];
+      if (waiting === 'unknown') reasons.push('the outbox is paused and the letters waiting could not be counted');
+      else if (waiting !== 0) reasons.push(`the outbox is paused with ${waiting} waiting`);
+      if (late === 'unknown') reasons.push('the letters past their mail day could not be counted');
+      else if (late !== 0) reasons.push(`${late === 1 ? '1 letter is' : `${late} letters are`} still waiting after their mail day`);
       console.log(
-        `[Maintenance] Heartbeat withheld: ${held}` +
+        `[Maintenance] Heartbeat withheld: ${reasons.join('; ')}` +
           (monitored ? '' : '. MAINTENANCE_HEARTBEAT_URL is not set, so no monitor will alert')
       );
     } else {
@@ -542,6 +551,9 @@ export async function maintenanceEntry(): Promise<void> {
       if (heartbeat !== 'skipped') console.log(`[Maintenance] Heartbeat ${heartbeat}`);
     }
   } finally {
+    // Notices started without waiting, by an ambiguous dispatch (#699), are
+    // posted before the process ends.
+    await settleOperatorNotices();
     closeTempImageStore();
     await closePool();
   }

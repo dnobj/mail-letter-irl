@@ -69,6 +69,7 @@ import { assertValidDeploymentConfig } from "../config/deploymentConfig.js";
 import { getReadiness } from "./readiness.js";
 import { kickPriceCatalog } from "../services/priceCatalog.js";
 import { reportDailyLimitDefaults } from "../services/dailyLimits.js";
+import { settleOperatorNotices } from "../services/operatorNotify.js";
 import { denyLegacyPublicAdminRoute } from "./legacyAdminRoutes.js";
 import { resolveCorsOriginFor } from "./corsOrigin.js";
 import { installProcessGuards, withRequestBoundary } from "./requestBoundary.js";
@@ -1080,6 +1081,10 @@ export async function startHttpServer() {
 
   const close = async () => {
     console.log('\n🛑 Shutting down gracefully...');
+    // Notices to the operator started without waiting (#699) are posted
+    // before the process ends, for at most three seconds: Railway's teardown
+    // is short, and the alert row in the database is what lasts.
+    await Promise.race([settleOperatorNotices(), new Promise(resolve => setTimeout(resolve, 3000).unref())]);
     try {
       await closePool();
     } catch (error) {

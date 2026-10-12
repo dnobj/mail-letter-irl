@@ -1,9 +1,11 @@
 /**
  * Where the operator is told that something needs them: an https URL that
- * takes a plain-text POST (LETTER_IRL_OPERATOR_ALERT_URL). A healthchecks.io
- * check's `/fail` address emails its owner; push services such as ntfy show
- * the text on a phone. Like MAINTENANCE_HEARTBEAT_URL it is a capability, so
- * it is never logged. The first user is the daily limits (migration 038).
+ * takes a plain-text POST (LETTER_IRL_OPERATOR_ALERT_URL), such as an ntfy
+ * topic, which shows every notice on a phone. (A healthchecks.io `/fail`
+ * address emails only when its check changes state, so it tells the first
+ * notice and then nothing.) Like MAINTENANCE_HEARTBEAT_URL it is a capability,
+ * so it is never logged. Its users: the daily limits (migration 038) and
+ * src/services/operatorNotify.ts (#699).
  */
 
 /** The URL when it is https with no credentials in it, else null. */

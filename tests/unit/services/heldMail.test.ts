@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { heldMailJobSql, isHeldMailJobState } from '../../../src/services/heldMail.js';
+import { fundingHeldJobSql, heldMailJobSql, isHeldMailJobState, leftForOperatorSql } from '../../../src/services/heldMail.js';
 
 describe('heldMailJobSql', () => {
   it('is one parenthesised condition, so an OR beside it cannot widen it', () => {
@@ -19,6 +19,18 @@ describe('heldMailJobSql', () => {
   it('takes a plain table alias only', () => {
     for (const alias of ['j', 'letter_jobs', 'held_job']) expect(() => heldMailJobSql(alias)).not.toThrow();
     for (const alias of ['', 'j.status', 'j; DROP TABLE x', 'J', 'j1']) expect(() => heldMailJobSql(alias), alias).toThrow();
+  });
+});
+
+describe('leftForOperatorSql (#696, #699)', () => {
+  it('is a funding hold, or a blocked account, on the job named', () => {
+    const sql = leftForOperatorSql('left_job').replace(/\s+/g, ' ');
+    expect(sql).toContain(fundingHeldJobSql('left_job').replace(/\s+/g, ' '));
+    expect(sql).toContain('WHERE held_letter.letter_id = left_job.letter_id AND held_user.sends_blocked_reason IS NOT NULL');
+  });
+
+  it('refuses anything but a plain alias', () => {
+    expect(() => leftForOperatorSql('j; DROP TABLE x')).toThrow('not a table alias');
   });
 });
 

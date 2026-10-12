@@ -37,6 +37,7 @@ import { draftScheduleOf } from './draftSchedule.js';
 import { STUCK_ORDER_CONDITION } from './stuckOrders.js';
 import { describeDate, earliestMailOn } from './deliverySchedule.js';
 import { fullMailDate } from './mailDateCapacity.js';
+import { OPERATOR_NOTICES, reportToOperator } from './operatorNotify.js';
 import { assertNoRecentDuplicateMail } from './duplicateMailService.js';
 import {
   createJitCheckoutSession,
@@ -2359,7 +2360,7 @@ async function stopFundedMailBeforeFinancialReversal(
        WHERE letter_id = $1 AND status NOT IN ('accepted','sent','in_transit','delivered','returned')`,
       [order.letter_id]
     );
-    await client.query(
+    const alert = await client.query(
       `INSERT INTO commerce_operational_alerts
          (source_event_id, order_id, alert_type, severity, details)
        VALUES ($1, $2, 'refunded_mail_already_dispatched', 'critical', $3)
@@ -2368,10 +2369,12 @@ async function stopFundedMailBeforeFinancialReversal(
         jobId: current.job_id, providerOutcome: current.provider_outcome
       })]
     );
+    // Told as the funding hold is (#699): inside the webhook's transaction, without waiting.
+    if ((alert.rowCount ?? 0) > 0) reportToOperator('refunded_mail_dispatched', OPERATOR_NOTICES.refundedMailDispatched());
     return 'held';
   }
   if (current.provider_outcome === 'accepted' || current.status === 'completed') {
-    await client.query(
+    const alert = await client.query(
       `INSERT INTO commerce_operational_alerts
          (source_event_id, order_id, alert_type, severity, details)
        VALUES ($1, $2, 'refunded_mail_already_dispatched', 'critical', $3)
@@ -2380,6 +2383,7 @@ async function stopFundedMailBeforeFinancialReversal(
         jobId: current.job_id, providerOutcome: 'accepted'
       })]
     );
+    if ((alert.rowCount ?? 0) > 0) reportToOperator('refunded_mail_dispatched', OPERATOR_NOTICES.refundedMailDispatched());
   }
   return 'none';
 }
@@ -2458,7 +2462,7 @@ async function holdMailFundedByOrder(
     held += job.rowCount ?? 0;
   }
   if (held > 0) {
-    await client.query(
+    const alert = await client.query(
       `INSERT INTO commerce_operational_alerts
          (source_event_id, order_id, alert_type, severity, details)
        VALUES ($1, $2, 'held_mail_funding_reversed', 'warning', $3)
@@ -2466,6 +2470,11 @@ async function holdMailFundedByOrder(
       [sourceEventId, order.order_id, JSON.stringify({ reason, letters: held })]
     );
     writeDiagnostic('warn', 'commerce.held_mail_funding_reversed', { reason, letters: held });
+    // The operator is told when the order's alert is first raised (#699),
+    // without waiting: this is inside the webhook's transaction. Should that
+    // roll back, Stripe sends the event again and the alert is raised then; a
+    // notice already posted only asks the operator to look.
+    if ((alert.rowCount ?? 0) > 0) reportToOperator('held_mail_funding', OPERATOR_NOTICES.heldMailFunding());
   }
   return held;
 }

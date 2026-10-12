@@ -14,18 +14,29 @@ Read from the production API's Railway variables on 2026-09-23:
 | `LETTER_IRL_BETA_GATE_ENABLED` | `false` | Open to everyone; no invited cohort (#179) |
 | `JIT_PURCHASE_ENABLED` | `true` | Pay & Send is sold |
 | `LETTER_IRL_GIFT_LETTERS_ENABLED` | unset (off) | Turned on at launch, with seed campaigns (#158) |
-| `CONTENT_RETENTION_MODE` (maintenance) | unset (report only) | Switched to `enforce` for #153, development first |
+| `CONTENT_RETENTION_MODE` (maintenance) | unset (report only) | Switched to `enforce` for #153, development first. Required in production since #699: set `report` or `enforce` before that promotion, or maintenance refuses to run |
 
 The daily ceilings (`LETTER_IRL_BETA_GLOBAL_DAILY_MAIL_CEILING`, `LETTER_IRL_BETA_ACCOUNT_DAILY_MAIL_CAP`, `LETTER_IRL_BETA_ACCOUNT_DAILY_CHARGE_CENTS`, `LETTER_IRL_GIFT_DAILY_SEND_CAP`) are the durable financial limits. They are separate from, and stronger than, the process-local HTTP rate limits; neither stands in for the other. Since migration 038 an operator can set any of them in the admin panel's Limits page, for everyone or one account, without a redeploy, and the first refusal of a UTC day by each opens a `daily_limit_reached` alert and posts to `LETTER_IRL_OPERATOR_ALERT_URL` ([admin-panel-guide.md](admin-panel-guide.md)).
 
 ## Watching it
 
 - **Failures inside a run** raise durable alerts (`commerce_operational_alerts`), shown on the admin panel's `/alerts` page, and a `maintenance.run_failed` line in the maintenance log. The panel's `/maintenance` page shows when each scheduled task last ran.
-- **A run that does not happen**, or keeps failing, is caught by the maintenance heartbeat. After a run finishes, maintenance calls `MAINTENANCE_HEARTBEAT_URL`; an external monitor alerts when the calls stop. A run that finishes with the outbox paused and letters waiting does not call it either, so a pause left on is caught the same way (below). Setup:
+- **A run that does not happen**, or keeps failing, is caught by the maintenance heartbeat. After a run finishes, maintenance calls `MAINTENANCE_HEARTBEAT_URL`; an external monitor alerts when the calls stop. A run that finishes with the outbox paused and letters waiting does not call it either, so a pause left on is caught the same way (below); nor one that finishes with a letter still waiting after 18:00 New York time on its mail day (#699). Production requires the URL: maintenance refuses to run without it (#699). Setup:
   1. At [healthchecks.io](https://healthchecks.io), create one check per environment: period 1 hour, grace 1 hour, email alerts to the owner.
   2. Set each check's ping URL as `MAINTENANCE_HEARTBEAT_URL` on the maintenance service in each environment: `letter-irl-maintenance` in production, `letter-irl-maintenance-dev` in development (the names in Railway's service list on 2026-09-23). The URL is a capability, so it lives only in Railway.
-  3. After the next hourly run, each check shows a ping. The maintenance log says `Heartbeat sent`. An unusable value logs `[config]` and `Heartbeat invalid` on every run instead.
-- **On a heartbeat alarm**, read the maintenance log first. `Heartbeat withheld` means the outbox is paused with letters waiting, or that they could not be counted. While that alarm stands, a run that stops happening raises nothing new, so check the last run times on the panel's `/maintenance` page as well.
+  3. After the next hourly run, each check shows a ping. A new healthchecks.io check does not alert until it has been pinged once, so confirm that first ping: in production a value maintenance cannot call stops every run (#699), and the monitor is the only thing that would say so. The maintenance log says `Heartbeat sent`. An unusable value logs `[config]` and `Heartbeat invalid` on every run instead.
+- **On a heartbeat alarm**, read the maintenance log first. `Heartbeat withheld` says why: the outbox is paused with letters waiting, letters are still waiting after their mail day, or one of the two could not be counted. For late letters, the admin panel's `/alerts` page has a `schedule_missed_mail_day` alert for each, unless raising it failed (`schedule.missed_mail_day_check_failed` in the maintenance log) or the run's 100 were raised first, when the next run raises the rest. While that alarm stands, a run that stops happening raises nothing new, so check the last run times on the panel's `/maintenance` page as well.
+- **Notices to the operator (#699).** `LETTER_IRL_OPERATOR_ALERT_URL`, required in production on the API and maintenance services, takes a plain-text POST for each of these, at most one of each kind an hour per process (`src/services/operatorNotify.ts`):
+  - a daily limit that refused someone (once a UTC day per limit);
+  - held mail that missed its mail day;
+  - letters the provider cancelled;
+  - a dispatch whose outcome is unknown;
+  - mail held because its funding was refunded or disputed;
+  - a Pay & Send order refunded or disputed after its letter went, or may have gone, to the provider.
+
+  A notice names no customer, letter or order: the Alerts page has them. A second notice of a kind within the hour is not posted (the Alerts page has it), so check the page after each one. A post that fails is not tried again: its letters' alerts are on the page, and are raised once. A refund the operator makes on purpose, of mail the provider has (a cancelled letter's, say), posts the refunded-after-dispatch notice too, as each dispute event on such an order does: its alert is critical by design, and the notice asks only that it be looked at. A status sync run from the admin panel posts nothing, since the panel's service has no alert URL; the operator who ran it sees what it changed.
+
+  Setup: a channel that tells the owner of every post. An ntfy topic does: pick a long random topic name (the URL is a capability), subscribe to it in the ntfy app on the owner's phone, and set `https://ntfy.sh/<topic>` on the API and maintenance services. A healthchecks.io `/fail` URL does not: a check emails only when it changes state, so after the first notice it stays down and tells nothing more until it is pinged up again.
 - **Who watches:** the owner, for held mail, refunds and disputes, through the admin panel: `/alerts`, and an order or account found through Lookup.
 
 ## Stopping and recovering

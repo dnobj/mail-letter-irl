@@ -10,6 +10,12 @@ const mocks = vi.hoisted(() => ({
 }));
 const { query, clientQuery, sendLetter } = mocks;
 
+// The operator's notices (#699): spied, never posted.
+vi.mock('../../../src/services/operatorNotify.js', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../../src/services/operatorNotify.js')>()),
+  reportToOperator: vi.fn(async () => 'sent')
+}));
+
 vi.mock('../../../src/db/index.js', () => ({
   query: mocks.query,
   transaction: mocks.transaction,
@@ -35,6 +41,7 @@ import {
   retryLetterJobAsAdmin,
   submitToProviderOnce,
 } from '../../../src/services/letterJobService.js';
+import { OPERATOR_NOTICES, reportToOperator } from '../../../src/services/operatorNotify.js';
 import { getProviderForMailType } from '../../../src/services/providers/index.js';
 import { estimateLines, validateCharacterLimit } from '../../../src/services/previewService.js';
 
@@ -956,6 +963,12 @@ describe('mail outbox retries', () => {
       expect.stringContaining("'mail_provider_outcome_ambiguous'"),
       expect.anything()
     );
+    // The operator is told, once the hold's transaction has finished (#699).
+    expect(reportToOperator).toHaveBeenCalledWith('ambiguous_outcome', OPERATOR_NOTICES.ambiguousOutcome());
+    const alertAt = clientQuery.mock.invocationCallOrder[
+      clientQuery.mock.calls.findIndex(([sql]) => String(sql).includes("'mail_provider_outcome_ambiguous'"))
+    ];
+    expect(vi.mocked(reportToOperator).mock.invocationCallOrder[0]).toBeGreaterThan(alertAt);
   });
 
   it.each([
