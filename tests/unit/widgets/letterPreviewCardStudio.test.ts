@@ -1025,6 +1025,29 @@ describe("the Words tab's editor (#586)", () => {
     }
   };
 
+  it('sends the version of the words it drew, and keeps the last for words whose page did not come back (#695)', async () => {
+    for (const [page, expected] of [[true, 'v_words'], [false, 'v_preview']] as const) {
+      const card = mount();
+      await card.show(output({ ...CLASSIC, contentVersion: 'v_preview' }), { ...ON, pageFit: FIT });
+      await card.click(card.tab('words'));
+      await card.click(card.byId('studio-words-open'));
+      await type(card, 'studio-words-body', 'Dear Sam,\n\nThe roses are out.');
+      await card.click(card.byId('studio-words-update'));
+      await card.answer(
+        {
+          result: {
+            content: [{ type: 'text', text: 'Changed.' }],
+            structuredContent: { draftId: 'draft_0001', ...canSend, wordsVersion: 'fedcba654321', contentVersion: 'v_words', message: 'Changed.' },
+            ...(page ? { _meta: { previewHtml: PAGE } } : {})
+          }
+        },
+        'set_letter_words'
+      );
+      await card.click(card.byId('send-button'));
+      expect(card.lastRequest('tools/call', 'send_letter')!.params.arguments.contentVersion, String(page)).toBe(expected);
+    }
+  });
+
   it('offers to change the words while room to write is offered, counting the room as they are written', async () => {
     const card = mount();
     await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
@@ -1626,6 +1649,15 @@ describe('the Mail choice on the Delivery tab (#648)', () => {
     }
   });
   const isCertified = (card: Card) => (text(card, 'studio-summary') ?? '').includes('certified mail');
+
+  it('sends the version of the service it set (#695)', async () => {
+    const card = mount();
+    await card.show(output({ ...CLASSIC, ...CERTIFIED_TERMS, contentVersion: 'v_preview' }), OFFERED);
+    await card.click(choice(card, 'standard'));
+    await card.answer(changed({ ...ORDINARY_TERMS, contentVersion: 'v_standard' }), SET);
+    await card.click(card.byId('send-button'));
+    expect(card.lastRequest('tools/call', 'send_letter')!.params.arguments.contentVersion).toBe('v_standard');
+  });
 
   it("offers the three services on the Delivery tab, with the preview's own pressed", async () => {
     const card = mount();
@@ -2337,6 +2369,26 @@ describe('the content version the letter card sends (#695)', () => {
 
     await card.click(card.byId('pay-send-button'));
     expect(card.lastRequest('tools/call', 'create_mail_checkout')!.params.arguments).toEqual({ draftId: 'draft_0001', contentVersion: 'v_now' });
+  });
+
+  it('takes the dates the draft has now over ones it set, once a send is refused for a change since', async () => {
+    const DATED = { schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' }, deliveryEstimate: 'Goes to the printer Fri, Oct 9.' };
+    const card = mount();
+    await card.show(output({ ...STYLED, contentVersion: 'v_preview', arrivalWindow: WINDOW, ...DATED }), ON);
+    await card.click(card.byId('arrives-asap'));
+    await card.answer(
+      { result: { content: [], structuredContent: { draftId: 'draft_0001', schedule: null, contentVersion: 'v_asap', deliveryEstimate: 'Mailed in 1-2 business days', message: 'Cleared.' } } },
+      'set_arrival_date'
+    );
+    expect(text(card, 'studio-summary')).toBe('Classic · black and white · mailed in 1-2 business days');
+
+    await card.click(card.byId('send-button'));
+    await card.answer(CHANGED, 'send_letter');
+    // The chat dated it again meanwhile: the card shows that, over the date it cleared.
+    await card.answer(ready('v_now', PAGE, DATED), 'get_draft_status');
+    expect(text(card, 'studio-summary')).not.toBe('Classic · black and white · mailed in 1-2 business days');
+    await card.click(card.byId('send-button'));
+    expect(sentWith(card).contentVersion).toBe('v_now');
   });
 
   it('keeps the other refusals as they were', async () => {

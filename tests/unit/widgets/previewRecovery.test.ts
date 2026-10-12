@@ -3215,3 +3215,32 @@ describe('PostcardPreviewCard waiting for a collage (#616)', () => {
     expect(harness.visible('upload-image-button')).toBe(false);
   });
 });
+
+describe('PostcardPreviewCard in ChatGPT, refused for a change since (#695)', () => {
+  it('asks what became of its draft, though it does not on opening there, and sends the version the answer gives', async () => {
+    let sends = 0;
+    const harness = mount(POSTCARD, {
+      toolOutput: POSTCARD.output('draft_host_0001', { contentVersion: 'v_preview' }),
+      draftStatus: args => ({ draftId: args.draftId, status: 'ready', contentVersion: 'v_now' }),
+      sendResponse: () =>
+        sends++ === 0
+          ? {
+              isError: true,
+              content: [{ type: 'text', text: 'This postcard changed after it was shown, so nothing was sent. Show the person the postcard as it is now (its preview card, or a new preview), and send it once they have seen it.' }]
+            }
+          : { structuredContent: { orderId: 'ord_sent_0001' } }
+    });
+    await flush();
+    // ChatGPT keeps the card's own state, so the postcard does not ask on opening there.
+    expect(harness.callsTo('get_draft_status')).toEqual([]);
+
+    await harness.click('send-button');
+    expect(harness.text('error-message')).toBe(
+      'This postcard changed after it was shown here, so nothing was sent. It is shown again as it is now: check it, then press Send again.'
+    );
+    expect(harness.callsTo('get_draft_status').map(call => call.args)).toEqual([{ draftId: 'draft_host_0001' }]);
+
+    await harness.click('send-button');
+    expect(harness.callsTo('send_postcard').map(call => call.args.contentVersion)).toEqual(['v_preview', 'v_now']);
+  });
+});
