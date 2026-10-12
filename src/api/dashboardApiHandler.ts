@@ -8,6 +8,8 @@
 
 import http from 'node:http';
 import { verifyWebhookSignature } from '../services/stripeService.js';
+import { isLetterPacksReturnUrl } from '../config/sendConfirmation.js';
+import { isProductionEnv } from '../config/deploymentConfig.js';
 import { createPackCheckout, processStripeWebhookEvent } from '../services/commerceService.js';
 import { SpendLimitError } from '../services/betaSpendLimits.js';
 import { PACK_PRODUCTS } from '../config/products.js';
@@ -93,6 +95,16 @@ export async function handleCreateCheckoutSession(
       res.statusCode = 400;
       res.json({
         error: 'Missing required fields: productId, successUrl, cancelUrl'
+      });
+      return;
+    }
+
+    // Only the website's letter packs page (#683): Stripe sends the person
+    // to these addresses after they pay.
+    if (!isLetterPacksReturnUrl(successUrl) || !isLetterPacksReturnUrl(cancelUrl)) {
+      res.statusCode = 400;
+      res.json({
+        error: "successUrl and cancelUrl must be the website's letter packs page"
       });
       return;
     }
@@ -246,6 +258,15 @@ export async function handleStripeWebhook(
       writeDiagnostic('warn', 'stripe.webhook_signature_invalid');
       res.statusCode = 400;
       res.end('Invalid signature');
+      return;
+    }
+
+    // An event from the other Stripe mode (#683): a test event at production,
+    // or a live one anywhere else, is refused and changes nothing.
+    if (event.livemode !== isProductionEnv()) {
+      writeDiagnostic('warn', 'stripe.webhook_mode_mismatch', { livemode: event.livemode === true });
+      res.statusCode = 400;
+      res.end('Event mode does not match this deployment');
       return;
     }
 

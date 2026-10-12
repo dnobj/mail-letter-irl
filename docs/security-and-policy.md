@@ -117,6 +117,11 @@ stable idempotency keys, leases, transactional outbox rows, and reconciliation.
   order; retry asks Stripe for and reattaches the same Session. A racing webhook
   can bind the order from signed metadata, and maintenance reconciles attached
   paid Sessions whose webhook was missed.
+- A pack checkout returns only to the website's letter packs page: the API
+  answers 400 for any other `successUrl` or `cancelUrl` (#683).
+- A webhook event whose `livemode` disagrees with the deployment (a test event
+  at production, a live one anywhere else) is answered 400 and changes nothing
+  (#683).
 - A paid webhook claims its event ID and locks the order in one transaction.
   Pack credit, its ledger audit, image entitlement, and final order state commit
   together. For JIT mail, the paid state, exact-draft consumption, letter,

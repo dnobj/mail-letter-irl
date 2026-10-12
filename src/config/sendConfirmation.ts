@@ -63,6 +63,32 @@ export function letterPacksPageUrl(env: NodeJS.ProcessEnv = process.env): string
 }
 
 /**
+ * Whether a pack checkout's return address is the website's letter packs page
+ * (#683). Stripe sends the person there after paying or turning back, so a
+ * request that starts a purchase cannot send them anywhere else: the
+ * website's origin (or its www twin) and the page's path, with any query.
+ */
+export function isLetterPacksReturnUrl(value: unknown, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (typeof value !== 'string' || value.length > 2048) return false;
+  let url: URL;
+  let site: URL;
+  try {
+    url = new URL(value);
+    site = new URL(websiteBaseUrl(env));
+  } catch {
+    return false;
+  }
+  if (url.username || url.password) return false;
+  const twin = site.hostname.startsWith('www.') ? site.hostname.slice(4) : `www.${site.hostname}`;
+  return (
+    url.protocol === site.protocol &&
+    url.port === site.port &&
+    (url.hostname === site.hostname || url.hostname === twin) &&
+    url.pathname === '/dashboard/letter-packs'
+  );
+}
+
+/**
  * The website's own Auth0 application. Only a token issued to it may confirm a
  * send: the REST routes accept the MCP audience, so a token held by any MCP
  * client is valid there too, and a local agent with a shell can read its own

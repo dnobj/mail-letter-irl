@@ -86,7 +86,7 @@ Gift mail held to arrive by a date (#535) still consumes its gift letter at the 
 - a seed campaign must still print its code then, so a letter held past the campaign's end prints its own card instead of a dead code;
 - a chain code's `LETTER_IRL_GIFT_CODE_TTL_DAYS` count from then, so the recipient gets the whole time however long the letter waited.
 
-Cancelling held gift mail before it prints (`cancel_scheduled_mail`, [letter-send-flow.md](letter-send-flow.md#confirmed-send-transaction)) returns the gift letter as a refused send does. The return uses the same `send_failed` record, so it happens once, and the code minted for the letter is voided as `send_cancelled`, since no recipient ever held it.
+Cancelling held gift mail before it prints (`cancel_scheduled_mail`, [letter-send-flow.md](letter-send-flow.md#confirmed-send-transaction)) returns the gift letter as a refused send does. The return uses the same `send_failed` record, so it happens once, and the code minted for the letter is voided as `send_cancelled`, since no recipient ever held it. Unlike a refused send, a cancelled gift comes back with its own expiry, not a fresh lifetime (#683): the cancel is the customer's. One that expired while the mail was held comes back expired, and the cancel says nothing usable came back. Cancelled mail is not counted against `LETTER_IRL_GIFT_DAILY_SEND_CAP`.
 
 ## Redeeming a code
 
@@ -128,7 +128,7 @@ The claim page is `letterirl.com/g/<code>` (the QR) or `letterirl.com/g` with th
 | Variable | Default | Meaning |
 |----------|---------|---------|
 | `LETTER_IRL_GIFT_LETTERS_ENABLED` | off | The programme. Only an explicit `true`, `1`, `yes`, `on` or `enabled` turns it on |
-| `LETTER_IRL_GIFT_DAILY_SEND_CAP` | 20 | Gift sends per UTC day, all accounts. 0 stops them. The admin panel's Limits page can set another value without a redeploy (migration 038) |
+| `LETTER_IRL_GIFT_DAILY_SEND_CAP` | 20 | Gift sends per UTC day, all accounts, not counting mail cancelled before it printed. 0 stops them. The admin panel's Limits page can set another value without a redeploy (migration 038) |
 | `LETTER_IRL_GIFT_CODE_TTL_DAYS` | 90 | How long a printed chain code stays redeemable |
 | `LETTER_IRL_GIFT_LETTER_TTL_DAYS` | 180 | How long an unsent gift letter lasts |
 | `LETTER_IRL_GIFT_OPERATOR_GENERATIONS` | 4 | The budget `gift.grant` uses when the operator names none |

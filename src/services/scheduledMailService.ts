@@ -277,8 +277,17 @@ async function giftBack(
   params: ReturnParams
 ): Promise<{ count: number; shortfall: ReturnShortfall }> {
   const count = await returnGiftLetterForFailedSendWithClient(client, params);
-  // The returned gift gets a fresh lifetime at least, so it is never expired.
-  return { count, shortfall: count > 0 ? 'none' : 'refunded' };
+  if (count === 0) return { count, shortfall: 'refunded' };
+  // The gift comes back with its own expiry (#683), so one that ran out while
+  // the mail was held comes back already expired: not counted, and the
+  // shortfall says why.
+  const returned = await client.query<{ expired: boolean }>(
+    `SELECT (expires_at IS NOT NULL AND expires_at <= NOW()) AS expired
+       FROM gift_letters
+      WHERE source = 'send_failed' AND source_reference_id = $1`,
+    [params.letterId]
+  );
+  return returned.rows[0]?.expired ? { count: 0, shortfall: 'expired' } : { count, shortfall: 'none' };
 }
 
 /**

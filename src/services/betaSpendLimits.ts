@@ -229,7 +229,8 @@ export async function assertChargeWithinDailyCap(
 
 /**
  * The gift letter budget (docs/gift-letters.md): gift letters sent per UTC day
- * across every account. Gift letters cost real postage and nobody pays for
+ * across every account. Held mail cancelled before it went to the printer
+ * spent no postage and is not counted (#683). Gift letters cost real postage and nobody pays for
  * them, so this is the ceiling on what the programme can spend in a day, and
  * it fails closed like everything else in this file.
  *
@@ -241,7 +242,8 @@ export async function assertGiftSendWithinDailyCap(client: SpendLimitQueryable):
   const cap = (await effectiveDailyLimits(client, ['gift_daily_send'], null)).gift_daily_send;
   const sent = await client.query<{ count: string }>(
     `SELECT COUNT(*) AS count FROM letters
-     WHERE funding_type = 'gift_letter' AND created_at >= ${UTC_DAY_START}`
+     WHERE funding_type = 'gift_letter' AND created_at >= ${UTC_DAY_START}
+       AND status <> 'cancelled'`
   );
   if (countOf(sent.rows) > cap) {
     reportDailyLimitReached('gift_daily_send', null, cap);
