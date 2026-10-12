@@ -9,13 +9,14 @@
  * they show; the send and the Pay & Send checkout take it back and compare it,
  * under the draft's lock, with the draft as it is (DRAFT_CHANGED_SINCE_SHOWN).
  *
- * It is a hash over every column that prints or decides delivery, read from the
- * stored row: the words and pages; the stationery, its design included; the
+ * It is a hash over every column an in-place edit can change, and every one that
+ * decides delivery, read from the stored row: the words and pages; the stationery, its design included; the
  * signature, the header, inline and front pictures (by their hash); the mail
  * service and the dates; a postcard's size and front; both addresses; the
  * layout; whether it is a gift letter, whose card page prints; and the renderer
  * that draws it. Not the preview's HTML, which is drawn from these, nor the
- * price. Always computed from the row as stored (jsonb returns its keys in one
+ * pictures' source addresses, which no edit changes, nor the price. A new
+ * in-place editor must add any column it writes that is not here. Always computed from the row as stored (jsonb returns its keys in one
  * order, dates come back as 'YYYY-MM-DD' strings), never from a tool's
  * arguments, so every reader agrees.
  */

@@ -19,6 +19,7 @@ import { getDraftState } from "../../../src/services/draftService.js";
 import { getDraftStatusTool } from "../../../src/tools/getDraftStatus.js";
 import { getDraftStatusOutputZ } from "../../../src/zodSchemas.js";
 import { wordsVersionOf } from "../../../src/tools/letterHelpers.js";
+import { contentVersionOf } from "../../../src/services/contentVersion.js";
 
 const DRAFT_ID = "0f1e2d3c-4b5a-4978-8796-a5b4c3d2e1f0";
 const ORDER_ID = "5a6a079a-ee06-41f5-a782-25f3016089f5";
@@ -66,6 +67,8 @@ describe("get_draft_status (#474)", () => {
     vi.mocked(getDraftState).mockResolvedValue(state() as any);
     await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual(READY);
     expect(getDraftState).toHaveBeenCalledWith(DRAFT_ID);
+    // The version of exactly the row it read (#695 review round 3).
+    await expect(ask({ draftId: DRAFT_ID })).resolves.toMatchObject({ contentVersion: contentVersionOf(state() as never) });
   });
 
   it("names a ready letter's pages when it has more than one, as set_stationery may have changed them (#586)", async () => {

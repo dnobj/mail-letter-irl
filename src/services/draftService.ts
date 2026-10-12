@@ -614,8 +614,9 @@ async function withChangeableDraft<R extends string | null>(
 /**
  * Locks a draft a tool may still change (its dates, its stationery, its words), or says
  * why it may not: it is the caller's, pending, unexpired and not emptied by an
- * erasure, with no live Pay & Send order but a checkout whose window has
- * passed. Someone else's draft is refused as a missing one, and is not locked.
+ * erasure, with no live Pay & Send order: a checkout whose window has passed
+ * no longer holds it, unless its Stripe session opened, which holds it until
+ * Stripe closes it (#695). Someone else's draft is refused as a missing one, and is not locked.
  *
  * An erasure empties a draft an order points at rather than deleting it, and
  * leaves it pending; no sweep visits it again (they skip redacted rows). A
