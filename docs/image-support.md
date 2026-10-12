@@ -274,6 +274,8 @@ Turning a photo upright by its EXIF orientation (`openUprightImage`, #617) adds 
 - `src/tools/quoteAndPreviewLetterWithImage.ts`
 - `src/tools/quoteAndPreviewPostcard.ts`
 
+The three letter tools are thin definitions over one pipeline, `src/tools/letterPreviewPipeline.ts` (#689). Each names its layout and its log events. The pipeline checks everything that costs nothing first, and it downloads and processes the picture only after the checks on what prints. `tests/unit/tools/letterPreviewPipeline.test.ts` pins that order.
+
 Each tool:
 1. Validates input (address, text length, image if provided)
 2. Processes image if present (download, validate, resize, encode)
