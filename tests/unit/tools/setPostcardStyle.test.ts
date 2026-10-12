@@ -456,6 +456,8 @@ describe('set_postcard_style refuses', () => {
     ['a legacy preview', () => vi.mocked(getDraftForPostcardStyle).mockResolvedValue({ ...draft(), renderer_version: null }), {}, 'DRAFT_NOT_DRAWN'],
     ['a preview of one page', () => vi.mocked(getDraftForPostcardStyle).mockResolvedValue({ ...draft(), preview_html: renderPostcardPreviewDocument(drawn().slice(0, 1)) }), {}, 'DRAFT_NOT_DRAWN'],
     ['a front the print cannot read', () => vi.mocked(getDraftForPostcardStyle).mockResolvedValue({ ...draft(), postcard_front: { layout: 'collage' } }), {}, 'DRAFT_NOT_DRAWN'],
+    // No stored picture: nothing to draw the front from, or to crop again at a new size (#690 review round 1).
+    ['a drawn postcard with no stored picture', () => vi.mocked(getDraftForPostcardStyle).mockResolvedValue({ ...draft(), front_image_data: null }), { size: '6x4' }, 'DRAFT_NOT_DRAWN'],
     [
       'a stored picture that cannot be read',
       () => vi.mocked(getDraftForPostcardStyle).mockResolvedValue({ ...draft(), front_image_data: 'data:image/png;base64,AAAA' }),

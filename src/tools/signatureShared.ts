@@ -15,7 +15,8 @@ export type SignatureRefusalCode =
   | 'SIGNATURE_TOO_SMALL'
   | 'CONFIRM_REQUIRED'
   | 'SIGNATURE_NOT_SAVED';
-// set_letter_signature refuses with DraftRefusedError, as the other draft editors do (#690).
+// set_letter_signature refuses the draft with DraftRefusedError, as the other draft editors do (#690);
+// its SIGNATURES_OFF, from requireSignatures, is still one of these.
 
 /**
  * Refusals the model can act on. The code doubles as the log's class, and no

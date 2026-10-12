@@ -115,7 +115,7 @@ async function handler(input: SetStationeryInput, context: ToolContext): Promise
     },
     context
   );
-  const { sender, recipient, bodyText, signOff, layoutType, imageData, pagesBefore } = draftLetter(draft);
+  const { sender, recipient, bodyText, signOff, layoutType, imageData, pagesBefore, gift } = draftLetter(draft);
 
   // The theme first, then what it prints, then the page, as a preview checks them. A design is
   // read as a preview reads it: only the account's own (#649).
@@ -137,7 +137,7 @@ async function handler(input: SetStationeryInput, context: ToolContext): Promise
     'pdf',
     // On as many pages as a preview may take (#586), and a gift letter on one:
     // it pays for one page only (#579), so a theme that runs it past is refused.
-    draft.is_gift_send ? 1 : letterPageLimit()
+    gift ? 1 : letterPageLimit()
   )!;
 
   // The letter's pages drawn again, as many as it takes now; the pages after
@@ -167,7 +167,7 @@ async function handler(input: SetStationeryInput, context: ToolContext): Promise
   );
   // Priced as it stands now: the pages are the draft's, as the send and the
   // checkout read them (#586).
-  const payment = letterPayment(letterOption(layout, draft.mail_service), Number(draft.required_credits ?? 2), draft.is_gift_send === true, context, draftId);
+  const payment = letterPayment(letterOption(layout, draft.mail_service), Number(draft.required_credits ?? 2), gift, context, draftId);
   return {
     draftId,
     stationery,

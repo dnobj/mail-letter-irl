@@ -43,13 +43,16 @@ export interface SetMailServiceOutput extends LetterTravel {
 }
 
 /** The draft's state, refused in a mail service change's words (#690), and the two kinds of draft no certified service suits. */
+const { changed: _neverRedrawn, ...MAIL_SERVICE_STATES } = draftRefusals({
+  mail: 'letter',
+  what: 'how it travels',
+  previewTakes: 'the letter previews take mailService themselves',
+  checkoutTail: 'Finish or let that payment lapse, or make a new preview.'
+});
+
 export const MAIL_SERVICE_REFUSALS: Record<MailServiceRefusal, DraftRefusal> = {
-  ...draftRefusals({
-    mail: 'letter',
-    what: 'how it travels',
-    previewTakes: 'the letter previews take mailService themselves',
-    checkoutTail: 'Finish or let that payment lapse, or make a new preview.'
-  }),
+  // The page is not drawn again for a service, so no change can refuse as 'changed'.
+  ...MAIL_SERVICE_STATES,
   not_a_letter: [
     'DRAFT_NOT_A_LETTER',
     'Certified mail is for letters, and a postcard always goes as ordinary mail. Make a letter preview to send certified mail.'
