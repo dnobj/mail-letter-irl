@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * The tests' type errors may only fall (#686). `npm run build` type-checks
  * src alone, so a test that calls a changed function the wrong way runs
