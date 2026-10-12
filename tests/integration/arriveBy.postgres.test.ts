@@ -1,4 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { copyFile, mkdir, mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { migrate } from '../../src/cli/migrate.js';
@@ -236,24 +239,16 @@ describePostgres('arrive-by (migration 040, #535)', () => {
       const after = (await pool.query('SELECT status, attempts FROM letter_jobs WHERE job_id = $1', [job.job_id])).rows[0];
       expect(after).toEqual({ status: 'pending', attempts: 0 });
 
-      // A hold is a pending job's only (#693): whichever writer moves the job on, the
-      // trigger ends its hold, and a hold set on a job that is not pending does not stay.
-      const claimed = await pool.query<{ mail_hold_until: Date | null }>(
-        "UPDATE letter_jobs SET status = 'processing', attempts = attempts + 1 WHERE job_id = $1 RETURNING mail_hold_until",
+      // The hold is kept for the job's life, as its metadata was (#693): once the run takes
+      // the job it is no longer held, by the shared predicate, but the panel still shows its date.
+      const heldNow = (await import('../../src/services/heldMail.js')).heldMailJobSql('letter_jobs');
+      const claimed = await pool.query<{ mail_hold_until: Date | null; held: boolean }>(
+        `UPDATE letter_jobs SET status = 'processing', attempts = attempts + 1 WHERE job_id = $1
+         RETURNING mail_hold_until, (${heldNow}) AS held`,
         [job.job_id]
       );
-      expect(claimed.rows[0].mail_hold_until).toBeNull();
-      const set = await pool.query<{ mail_hold_until: Date | null }>(
-        "UPDATE letter_jobs SET mail_hold_until = NOW() + INTERVAL '1 day' WHERE job_id = $1 RETURNING mail_hold_until",
-        [job.job_id]
-      );
-      expect(set.rows[0].mail_hold_until).toBeNull();
-      // And the check stands behind the trigger.
-      const check = await pool.query<{ ok: boolean }>(
-        `SELECT pg_get_constraintdef(oid) LIKE '%mail_hold_until IS NULL%' AS ok
-           FROM pg_constraint WHERE conname = 'letter_jobs_mail_hold_pending'`
-      );
-      expect(check.rows[0]?.ok).toBe(true);
+      expect(new Date(claimed.rows[0].mail_hold_until!).toISOString()).toBe(release.toISOString());
+      expect(claimed.rows[0].held).toBe(false);
     } finally {
       if (savedSwitch === undefined) delete process.env.LETTER_IRL_OUTBOX_DISPATCH_ENABLED;
       else process.env.LETTER_IRL_OUTBOX_DISPATCH_ENABLED = savedSwitch;
@@ -949,4 +944,74 @@ describePostgres('arrive-by (migration 040, #535)', () => {
     await drafts.cleanupOldDrafts(7);
     expect(await left()).toEqual([recentDraft]);
   }, 60_000);
+});
+
+describePostgres('migration 055: the hold as its own column (#693)', () => {
+  it('backfills the hold every job was created with, and leaves out a value it cannot read', async () => {
+    const baseUrl = validateDisposableDatabaseUrl(process.env.LIRL_TEST_DATABASE_URL);
+    const adminPool = new Pool({ connectionString: baseUrl });
+    const schema = schemaName('lirl_hold_backfill');
+    await adminPool.query(`CREATE SCHEMA ${schema}`);
+    const url = databaseUrlForSchema(baseUrl, schema);
+    const pool = new Pool({ connectionString: url });
+    const root = await mkdtemp(path.join(tmpdir(), 'lirl-055-'));
+    try {
+      // Every migration before 055, then jobs as the code before it wrote them.
+      const directory = path.join(root, 'migrations');
+      await mkdir(directory, { recursive: true });
+      const files = (await readdir(repositoryMigrations)).filter(file => file.endsWith('.sql'));
+      const hold = '055_letter_jobs_mail_hold_until.sql';
+      expect(files).toContain(hold);
+      for (const file of files.filter(file => file < hold)) {
+        await copyFile(path.join(repositoryMigrations, file), path.join(directory, file));
+      }
+      await migrate({ connectionString: url, migrationsDirectory: directory });
+
+      await pool.query("INSERT INTO users (user_id, email) VALUES ('hold-user', 'hold@example.test')");
+      const jobs: Record<string, { status: string; metadata: Record<string, unknown> }> = {
+        pending: { status: 'pending', metadata: { source: 'transactional-outbox', heldUntil: '2026-11-02T14:00:00.000Z' } },
+        // Taken by the run and gone: its hold is still the one it was created with.
+        completed: { status: 'completed', metadata: { source: 'transactional-outbox', heldUntil: '2026-10-06T13:00:00.000Z' } },
+        due: { status: 'pending', metadata: { source: 'transactional-outbox' } },
+        // Hand-written in another form: left without a hold rather than failing the migration.
+        malformed: { status: 'pending', metadata: { source: 'transactional-outbox', heldUntil: 'next Tuesday' } }
+      };
+      for (const [name, job] of Object.entries(jobs)) {
+        await pool.query(
+          `INSERT INTO letters (letter_id, user_id, content, recipient, credits_cost, status, mail_type)
+           VALUES ($1, 'hold-user', '{}'::jsonb, '{}'::jsonb, 2, 'queued', 'letter')`,
+          [`letter-${name}`]
+        );
+        await pool.query(
+          `INSERT INTO letter_jobs (job_id, letter_id, status, attempts, max_attempts, scheduled_at, idempotency_key,
+             next_attempt_at, provider_outcome, metadata)
+           VALUES ($1, $2, $3, 0, 5, NOW(), $2, NOW(), 'not_dispatched', $4::jsonb)`,
+          [randomUUID(), `letter-${name}`, job.status, JSON.stringify(job.metadata)]
+        );
+      }
+
+      await copyFile(path.join(repositoryMigrations, hold), path.join(directory, hold));
+      await migrate({ connectionString: url, migrationsDirectory: directory });
+
+      const after = await pool.query<{ letter_id: string; mail_hold_until: Date | null }>(
+        'SELECT letter_id, mail_hold_until FROM letter_jobs ORDER BY letter_id'
+      );
+      expect(Object.fromEntries(after.rows.map(row => [row.letter_id, row.mail_hold_until?.toISOString() ?? null]))).toEqual({
+        'letter-completed': '2026-10-06T13:00:00.000Z',
+        'letter-due': null,
+        'letter-malformed': null,
+        'letter-pending': '2026-11-02T14:00:00.000Z'
+      });
+
+      // As the migration says, its backfill may be run again: it changes nothing already set.
+      const sql = await readFile(path.join(repositoryMigrations, hold), 'utf8');
+      const again = await pool.query(sql.slice(sql.indexOf('UPDATE letter_jobs')));
+      expect(again.rowCount).toBe(0);
+    } finally {
+      await pool.end();
+      await adminPool.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+      await adminPool.end();
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
 });

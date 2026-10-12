@@ -11,16 +11,23 @@
 -- hold_reason (023) are the operator's hold on an unclear provider outcome,
 -- which this is not.
 --
--- The column keeps the hold the job was created with, as metadata.heldUntil
--- did: an operator's early release (job.dispatch_now) moves only
--- next_attempt_at, so the stuck-order condition counts its grace from the
--- later of the two. A job that leaves pending is no longer held, so the
--- column is cleared then by a trigger, whichever writer moves it (the claim,
--- a cancel, an erasure, an operator); the check holds any writer to that.
+-- The column means what metadata.heldUntil meant: the hold the job was
+-- created with, kept for the job's whole life, so the admin panel still shows
+-- that a job was dated mail after the run takes it. Whether a job is held now
+-- is src/services/heldMail.ts's predicate, which also asks that it is pending,
+-- never attempted and not yet due. An operator's early release
+-- (job.dispatch_now) moves only next_attempt_at, so the stuck-order condition
+-- counts its grace from the later of the two.
 --
--- Backfill: the jobs still pending that carry metadata.heldUntil. Development
--- data only; production holds none. The metadata key is left where it is, and
--- no longer written.
+-- Backfill: every job that carries metadata.heldUntil in the form the code
+-- writes (toISOString); one hand-written in any other form is left without a
+-- hold rather than failing the migration. Production holds none. The metadata
+-- key is left where it is, and no longer written or read.
+--
+-- A held job written by code from before this migration (the moments of a
+-- deploy, or a rollback across it) carries only the metadata key. The backfill
+-- is idempotent and may be run again as it stands to give those jobs their
+-- column.
 --
 -- letter_jobs predates 022 and 023 (001), so the legacy-scenario replay needs
 -- no guard here.
@@ -28,27 +35,9 @@
 ALTER TABLE letter_jobs ADD COLUMN mail_hold_until TIMESTAMPTZ;
 
 COMMENT ON COLUMN letter_jobs.mail_hold_until IS
-  'The end of an arrive-by hold (#535, #693): the job waits for its mail date until then. Set at creation for held mail only; cleared when the job leaves pending.';
+  'The hold an arrive-by job was created with (#535, #693): it waits for its mail date until then. Null for mail due at once. Held now: src/services/heldMail.ts.';
 
 UPDATE letter_jobs
    SET mail_hold_until = (metadata->>'heldUntil')::timestamptz
- WHERE status = 'pending'
-   AND metadata ? 'heldUntil';
-
-CREATE FUNCTION letter_jobs_end_mail_hold() RETURNS trigger
-LANGUAGE plpgsql AS $$
-BEGIN
-  IF NEW.status <> 'pending' THEN
-    NEW.mail_hold_until := NULL;
-  END IF;
-  RETURN NEW;
-END;
-$$;
-
-CREATE TRIGGER letter_jobs_end_mail_hold
-  BEFORE INSERT OR UPDATE OF status, mail_hold_until ON letter_jobs
-  FOR EACH ROW EXECUTE FUNCTION letter_jobs_end_mail_hold();
-
-ALTER TABLE letter_jobs
-  ADD CONSTRAINT letter_jobs_mail_hold_pending
-    CHECK (mail_hold_until IS NULL OR status = 'pending');
+ WHERE mail_hold_until IS NULL
+   AND metadata->>'heldUntil' ~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$';

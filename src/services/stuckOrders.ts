@@ -13,8 +13,8 @@
  * mail_hold_until, the end of its hold (migration 055, #693;
  * letterJobService.createLetterJobWithClient). It falls due then, or earlier
  * when an operator sends it now (job.dispatch_now), which moves only
- * next_attempt_at, so both are read. The run's claim ends both: it takes an
- * attempt, and the job leaves pending, which clears the column. The admin's reader role can read them:
+ * next_attempt_at, so both are read. The run's claim ends the grace: it takes
+ * an attempt. The admin's reader role can read them:
  * it reads letter_jobs whole, but not letters.mail_on.
  *
  * A SQL condition on `orders`, to put in a WHERE or a FILTER.
