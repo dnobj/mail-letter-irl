@@ -85,6 +85,36 @@ export const TOOL_SCOPES: Record<string, ProductScope> = {
   upload_photo_chunk: "mail:draft"
 };
 
+/**
+ * Tools a personal access token may not use, whatever its scopes (#685): those
+ * that cancel held mail or replace or remove what the person saved. A token is
+ * a long-lived key an agent holds, and none of these can be undone; an app
+ * signed in with OAuth keeps them. save_stationery_design stays, but adds only:
+ * a token cannot replace a design of the same name (saveDesign). The REST
+ * twins (/api/letters/:id/cancel, /api/signature) take no personal access
+ * token at all (authenticateRestRequest validates JWTs only).
+ */
+export const PERSONAL_TOKEN_REFUSED_TOOLS: ReadonlySet<string> = new Set([
+  "cancel_scheduled_mail",
+  "set_signature",
+  "clear_signature",
+  "delete_stationery_design",
+  "cancel_address_request"
+]);
+
+/** What a personal access token is told for one of those tools. */
+export const PERSONAL_TOKEN_REFUSAL =
+  "A personal access token can't cancel scheduled mail, replace or remove the saved signature, replace or delete a saved design, " +
+  "or cancel an address request. Do it on the Letter IRL website, or in an app signed in with your Letter IRL account.";
+
+/** A personal access token asked for a tool it may not use (#685). */
+export class PersonalTokenRefusedError extends Error {
+  constructor(readonly toolName: string) {
+    super(PERSONAL_TOKEN_REFUSAL);
+    this.name = "PersonalTokenRefusedError";
+  }
+}
+
 export function getRequiredToolScopes(toolName: string): ProductScope[] {
   const scope = TOOL_SCOPES[toolName];
   if (!scope) {
@@ -98,11 +128,15 @@ export function authorizeTool(
   authInfo: AuthenticatedUser | null,
   requireAuth = process.env.LETTER_IRL_REQUIRE_AUTH !== "false"
 ): void {
-  if (!requireAuth) {
-    return;
+  if (requireAuth) {
+    if (!authInfo) {
+      throw new Error("Authentication required");
+    }
+    requireScopes(authInfo, getRequiredToolScopes(toolName));
   }
-  if (!authInfo) {
-    throw new Error("Authentication required");
+  // What kind of credential it is, not what it may do, so it holds whether or
+  // not authentication is required (#685 review).
+  if (authInfo?.authType === "pat" && PERSONAL_TOKEN_REFUSED_TOOLS.has(toolName)) {
+    throw new PersonalTokenRefusedError(toolName);
   }
-  requireScopes(authInfo, getRequiredToolScopes(toolName));
 }

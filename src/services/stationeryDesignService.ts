@@ -87,7 +87,7 @@ export async function getDesign(userId: string, designId: string): Promise<Saved
 
 export type SaveDesignResult =
   | { ok: true; saved: SavedDesign; replaced: boolean }
-  | { ok: false; refusal: 'account_closed' | 'limit' };
+  | { ok: false; refusal: 'account_closed' | 'limit' | 'exists' };
 
 /**
  * Saves a design under a name: the account's design of that name, in any
@@ -96,11 +96,27 @@ export type SaveDesignResult =
  * account row is locked first, so two saves count one after the other, and
  * an erasure that commits while this waits leaves nothing to save onto:
  * erasure locks the same row. `name` is as designNameOf keeps it.
+ *
+ * With `replace: false` (a personal access token, #685) a design of that name
+ * is left as it is and the save refused as 'exists': a token may add a design,
+ * never overwrite one.
  */
-export async function saveDesign(userId: string, name: string, design: StationeryDesign): Promise<SaveDesignResult> {
+export async function saveDesign(
+  userId: string,
+  name: string,
+  design: StationeryDesign,
+  options: { replace: boolean } = { replace: true }
+): Promise<SaveDesignResult> {
   return transaction(async client => {
     const account = await lockAccount(client, userId);
     if (!account || account.erased_at) return { ok: false, refusal: 'account_closed' } as const;
+    if (!options.replace) {
+      const existing = await client.query(
+        'SELECT 1 FROM stationery_designs WHERE user_id = $1 AND lower(name) = lower($2)',
+        [userId, name]
+      );
+      if (existing.rows.length > 0) return { ok: false, refusal: 'exists' } as const;
+    }
     const replaced = await client.query<DesignRow>(
       `UPDATE stationery_designs
           SET name = $2, face = $3, ornament = $4, ruled = $5, tone = $6, updated_at = NOW()

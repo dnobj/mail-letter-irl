@@ -80,6 +80,26 @@ describe('saving a design (#649)', () => {
     expect(statements[1][1]).toEqual(['user-1', 'GARDEN', 'handwritten', 'sprig', true, 'medium']);
   });
 
+  it('without replace, refuses a name the account already has, whatever its case, and changes nothing (#685)', async () => {
+    const statements = inTransaction({ rows: [{ erased_at: null }] }, { rows: [{ '?column?': 1 }] });
+    expect(await saveDesign('user-1', 'GARDEN', DESIGN, { replace: false })).toEqual({ ok: false, refusal: 'exists' });
+    expect(statements).toHaveLength(2);
+    expect(statements[1][0]).toBe('SELECT 1 FROM stationery_designs WHERE user_id = $1 AND lower(name) = lower($2)');
+    expect(statements[1][1]).toEqual(['user-1', 'GARDEN']);
+  });
+
+  it('without replace, adds a design of a new name', async () => {
+    const statements = inTransaction(
+      { rows: [{ erased_at: null }] },
+      { rows: [] },
+      { rows: [] },
+      { rows: [{ count: '0' }] },
+      { rows: [row()] }
+    );
+    expect(await saveDesign('user-1', 'Garden', DESIGN, { replace: false })).toEqual({ ok: true, replaced: false, saved: SAVED });
+    expect(statements[4][0]).toContain('INSERT INTO stationery_designs');
+  });
+
   it(`adds a new one while the account holds fewer than ${MAX_STATIONERY_DESIGNS}`, async () => {
     const statements = inTransaction(
       { rows: [{ erased_at: null }] },

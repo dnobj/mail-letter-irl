@@ -103,7 +103,12 @@ import {
 import { AuthenticatedUser } from "../auth/tokenValidator.js";
 import { extractUserAgent, isMobileClient } from "../utils/mobileDetection.js";
 import { ToolMeta } from "../contracts/types.js";
-import { authorizeTool, getRequiredToolScopes } from "../auth/toolScopes.js";
+import {
+  authorizeTool,
+  getRequiredToolScopes,
+  PERSONAL_TOKEN_REFUSAL,
+  PersonalTokenRefusedError
+} from "../auth/toolScopes.js";
 import { SESSION_SCOPES, IDENTITY_SCOPES } from "../auth/oauthConfig.js";
 import { prepareAuthenticatedUser } from "../auth/identity.js";
 import { AccountErasedError } from "../auth/accountErased.js";
@@ -1296,6 +1301,7 @@ export async function registerLetterTools(
             if (authInfo?.authType === "pat") return buildTokenScopeToolResult(tool.name);
             return buildInsufficientScopeToolResult(error);
           }
+          if (error instanceof PersonalTokenRefusedError) return buildPersonalTokenRefusedToolResult(tool.name);
           throw error;
         }
         if (options.recheckAccountPerCall && authInfo) {
@@ -1463,6 +1469,15 @@ export function buildDuplicateMailToolResult(error: DuplicateMailError) {
 export const TOKEN_SCOPE_REFUSAL =
   "A personal access token can read your Letter IRL account and make previews, but it can't send, pay or buy. " +
   "To buy letters, use your Letter IRL dashboard at letterirl.com; to send, use an app signed in with your Letter IRL account.";
+
+/** A personal access token's refusal of a tool it may not use (#685), in words its agent can pass on. */
+export function buildPersonalTokenRefusedToolResult(toolName: string) {
+  writeDiagnostic("info", "auth.pat_tool_refused", { toolName });
+  return {
+    isError: true,
+    content: [{ type: "text" as const, text: PERSONAL_TOKEN_REFUSAL }]
+  };
+}
 
 export function buildTokenScopeToolResult(toolName: string) {
   writeDiagnostic("info", "auth.pat_scope_refused", { toolName });
