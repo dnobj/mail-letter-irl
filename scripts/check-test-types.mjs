@@ -3,33 +3,40 @@
  * src alone, so a test that calls a changed function the wrong way runs
  * until CI's tests meet it, or never fails at all. Fixing all of them at once
  * is a large change of its own, so this holds the count where it is: more
- * errors than the committed baseline fail; fewer lower the baseline, and the
- * new one is committed with the change that fixed them.
+ * errors than the committed baseline fail. After fixing some, lower the
+ * baseline on purpose with --update and commit it with the fix.
  *
- *   node scripts/check-test-types.mjs           check, and lower the baseline when it falls
- *   node scripts/check-test-types.mjs --check   check only (CI): never rewrites the baseline
+ *   node scripts/check-test-types.mjs            check (npm run verify, CI): never writes
+ *   node scripts/check-test-types.mjs --update   check, and lower the baseline when the count fell
+ *
+ * The check runs a whole tsc over src and tests: about 90 s and over 3 GB on
+ * this codebase today, so it is given a larger heap than Node's default.
  */
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+const HEAP_MB = 6144;
 
 /**
  * What a count means against the baseline: fail when it rose, lower the
- * baseline when it fell (unless only checking), and say which.
+ * baseline when it fell and an update was asked for, and say which.
  */
-export function ratchet({ count, baseline, checkOnly }) {
+export function ratchet({ count, baseline, update }) {
   if (count > baseline) {
     return { fail: true, baseline, message: `Test type errors rose from ${baseline} to ${count}.` };
   }
-  if (count < baseline && !checkOnly) {
+  if (count < baseline && update) {
     return {
       fail: false,
       baseline: count,
       message: `Test type errors fell from ${baseline} to ${count}: the baseline is now ${count}. Commit scripts/test-types-baseline.json.`
     };
   }
-  return { fail: false, baseline, message: `Test type errors: ${count} (baseline ${baseline}).` };
+  const fell = count < baseline ? ' They fell: run with --update to lower the baseline, and commit it.' : '';
+  return { fail: false, baseline, message: `Test type errors: ${count} (baseline ${baseline}).${fell}` };
 }
 
 /** The type errors in tsc's output, one line each. */
@@ -37,22 +44,38 @@ export function typeErrors(output) {
   return output.split(/\r?\n/).filter(line => /error TS\d+:/.test(line));
 }
 
+/**
+ * Diagnostics about the project rather than the code (a missing or broken
+ * tsconfig, no inputs, a bad option): tsc did not check the tests at all, so
+ * they are a failure, never a count. TS5xxx are option errors, TS6xxx project
+ * and file errors, TS18003 "No inputs were found".
+ */
+export function projectErrors(errors) {
+  return errors.filter(line => /error TS(5\d{3}|6\d{3}|18003):/.test(line));
+}
+
 function main() {
-  const BASELINE_FILE = new URL('./test-types-baseline.json', import.meta.url);
-  const checkOnly = process.argv.includes('--check');
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const baselineFile = join(root, 'scripts', 'test-types-baseline.json');
+  const update = process.argv.includes('--update');
 
   const tsc = createRequire(import.meta.url).resolve('typescript/bin/tsc');
-  const run = spawnSync(process.execPath, [tsc, '-p', 'tsconfig.tests.json'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  const run = spawnSync(
+    process.execPath,
+    [`--max-old-space-size=${HEAP_MB}`, tsc, '-p', join(root, 'tsconfig.tests.json')],
+    { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }
+  );
   const output = `${run.stdout}${run.stderr}`;
   const errors = typeErrors(output);
-  if (run.status !== 0 && errors.length === 0) {
-    console.error('tsc failed without reporting type errors:');
-    console.error(output.split(/\r?\n/).slice(0, 20).join('\n'));
+  const broken = projectErrors(errors);
+  if ((run.status !== 0 && errors.length === 0) || broken.length > 0 || run.error) {
+    console.error('tsc did not check the tests:');
+    console.error((broken.length > 0 ? broken : output.split(/\r?\n/).slice(0, 20)).join('\n') || String(run.error));
     process.exit(1);
   }
 
-  const baseline = JSON.parse(readFileSync(BASELINE_FILE, 'utf8')).errors;
-  const verdict = ratchet({ count: errors.length, baseline, checkOnly });
+  const baseline = JSON.parse(readFileSync(baselineFile, 'utf8')).errors;
+  const verdict = ratchet({ count: errors.length, baseline, update });
   if (verdict.fail) {
     const byFile = new Map();
     for (const line of errors) {
@@ -65,9 +88,11 @@ function main() {
     process.exit(1);
   }
   if (verdict.baseline !== baseline) {
-    writeFileSync(BASELINE_FILE, `${JSON.stringify({ errors: verdict.baseline }, null, 2)}\n`);
+    writeFileSync(baselineFile, `${JSON.stringify({ errors: verdict.baseline }, null, 2)}\n`);
   }
   console.log(verdict.message);
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) main();
+// Run as a script, whatever path or link it was started by; imported by its test, it runs nothing.
+const started = process.argv[1] ? realpathSync(process.argv[1]) : '';
+if (started && realpathSync(fileURLToPath(import.meta.url)) === started) main();

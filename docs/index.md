@@ -165,7 +165,7 @@ Kept for context. Most carry a banner saying what has changed; treat anything he
 npm run dev          # Development with watch
 npm run build        # Compile to dist/
 npm start            # Run the compiled server
-npm run verify       # Lint, build, unit and submission tests
+npm run verify       # Lint, build, the test type-check ratchet, unit and submission tests
 ```
 
 ### Admin Operations

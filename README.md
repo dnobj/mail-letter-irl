@@ -51,7 +51,7 @@ Other commands:
 npm run build               # tsc to dist/
 npm start                   # node dist/mcp/httpServer.js (build first)
 npm run maintenance         # one hourly maintenance pass, then exit (build first)
-npm run verify              # lint, build, unit and submission tests - mirrors CI
+npm run verify              # lint, build, the test type-check ratchet, unit and submission tests - mirrors CI
 npm run test:integration:local   # PostgreSQL suites against a local database
 npm run mcp:stdio           # stdio transport for local MCP clients
 ```

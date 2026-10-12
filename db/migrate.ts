@@ -45,4 +45,11 @@ async function migrate() {
   }
 }
 
+// There is no other command: one that was meant for something else (the old
+// "rollback") must not apply migrations instead.
+if (process.argv.length > 2) {
+  console.error(`Unknown argument "${process.argv[2]}". Run with no arguments to apply pending migrations.`);
+  process.exit(1);
+}
+
 migrate();

@@ -13,7 +13,7 @@ Source TypeScript lives in `src/`. The runtime entry point is `src/mcp/httpServe
 - `npm run db:migrate:prod`: Apply pending migrations with compiled JavaScript.
 - `npm run lint`: Run ESLint (there is no Prettier step).
 - `npm test` / `npm run test:run`: Run the Vitest suite under `tests/`.
-- `npm run verify`: Lint, build, unit tests and submission tests; mirrors the CI `checks` job.
+- `npm run verify`: Lint, build, the test type-check ratchet, unit tests and submission tests; mirrors the CI `checks` job. The ratchet (`scripts/check-test-types.mjs`) fails when the tests' tsc errors rise above `scripts/test-types-baseline.json`; after fixing some, run `npm run check:test-types -- --update` and commit the lower baseline.
 - `npm run test:integration:local`: The real-PostgreSQL suites against a local database; mirrors the CI `postgres-integration` job.
 - `npm run flow`, `npm run mcp:stdio`, `npm run mcp:http`: Local harness and transport commands.
 

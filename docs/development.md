@@ -352,7 +352,7 @@ letter-irl/
 │   ├── store/         # Account store used by the tool registry
 │   ├── tools/         # MCP tool implementations
 │   ├── utils/         # Diagnostics, env parsing, backoff
-│   └── workers/       # Daily maintenance and compatibility wrappers
+│   └── workers/       # Credit expiry and status sync, run by the maintenance pass
 ├── db/
 │   └── migrations/    # Forward-only SQL migrations (001_ ... 032_)
 ├── tests/

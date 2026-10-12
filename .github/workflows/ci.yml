@@ -58,9 +58,9 @@ jobs:
         run: npm run build
 
       # The tests' type errors may only fall (#686): more than the committed
-      # baseline fails. --check never rewrites the baseline here.
+      # baseline fails. Without --update it never rewrites the baseline.
       - name: Test type-check ratchet
-        run: node scripts/check-test-types.mjs --check
+        run: npm run check:test-types
 
       - name: Unit tests
         run: npm run test:unit
