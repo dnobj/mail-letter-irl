@@ -14,8 +14,15 @@ import { describe, expect, it } from 'vitest';
  * What it cannot see: a query that names letter_drafts in a join or a comma
  * join, a column list built in code (a ${COLUMNS} template), a CTE, a
  * schema-qualified table, RETURNING, or a SELECT nested in the select list.
- * It would also flag a comment that reads like a query. None of those is in
- * the source today; a new reader of a draft is reviewed for this by hand.
+ * It would also flag a comment that reads like a query. The only lists built in
+ * code are ${DRAFT_OPTION_COLUMNS}, which is whole (mailOptions.test.ts checks it);
+ * none of the others is in the source today, and a new reader of a draft is
+ * reviewed for this by hand.
+ *
+ * Kept beside the row type (#691, review round 1): DraftOptionRow makes a reader
+ * that DECLARES part of the option fail to compile, but every query declares its
+ * row type by hand and nothing checks the SQL against it. A list built from
+ * DRAFT_OPTION_COLUMNS is whole; this guards the rest, and the three whole-row reads.
  */
 
 /** The repository's src folder, whatever the directory the tests run from. */
@@ -62,5 +69,29 @@ describe('the draft columns a price is read from (#625)', () => {
     const whole = draftSelects().filter(select => select.columns.trim() === '*').map(select => select.file);
     expect(whole).toContain('src/services/commerceService.ts');
     expect(whole).toContain('src/services/mailSendService.ts');
+  });
+
+  it('locks the draft it charges for and sends by reading all of it (#691)', () => {
+    // prepareJitOrder checks the paid product against the option it reads here, and the send refuses a
+    // pack for mail no pack pays for by it: a narrower read would type-check, since the row type is taken on trust.
+    for (const [file, fn] of [
+      ['services/commerceService.ts', 'async function prepareJitOrder('],
+      ['services/mailSendService.ts', 'export async function createMailOrderFromDraftWithClient(']
+    ]) {
+      const text = readFileSync(join(SRC, file), 'utf8');
+      const start = text.indexOf(fn);
+      expect(start, `${file}: ${fn}`).toBeGreaterThan(-1);
+      // The function's own read: up to the next top-level function.
+      const end = text.slice(start + fn.length).search(/\n(export )?(async )?function /);
+      const body = end < 0 ? text.slice(start) : text.slice(start, start + fn.length + end);
+      expect(body, file).toContain("'SELECT * FROM letter_drafts WHERE draft_id = $1 FOR UPDATE'");
+    }
+  });
+
+  it('reads the whole draft the confirmation page and request_send price (#691)', () => {
+    // getDraft is typed LetterDraft, whose option columns are required, and the type is taken on trust.
+    const text = readFileSync(join(SRC, 'services/draftService.ts'), 'utf8');
+    const getDraft = text.slice(text.indexOf('export async function getDraft('), text.indexOf('export async function getDraftState('));
+    expect(getDraft).toContain('SELECT * FROM letter_drafts WHERE draft_id = $1');
   });
 });

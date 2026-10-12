@@ -8,7 +8,8 @@ import { CUSTOM_THEME, type PageFit } from '../render/index.js';
 import { getDesign } from '../services/stationeryDesignService.js';
 import type { PreviewStationery } from './stationeryInput.js';
 import { getDraftForStationery, setDraftStationery } from '../services/draftService.js';
-import { editorPageFit, layoutLetterForPreview, letterOption, letterPayment, pageChangeSentence, redrawLetterPreview, validatePrintableLetter, type LetterTravel } from './letterHelpers.js';
+import { editorPageFit, layoutLetterForPreview, letterPayment, pageChangeSentence, redrawLetterPreview, validatePrintableLetter, type LetterTravel } from './letterHelpers.js';
+import { letterOption } from '../services/mailOptions.js';
 import { draftLetter, draftRefusals, draftRefuser, editableDraft, type DraftRefusal } from './draftEdit.js';
 import { previewStationery, THEME_LIST } from './stationeryInput.js';
 

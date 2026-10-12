@@ -29,7 +29,8 @@ import {
   isSendConfirmationEnabled,
   websiteClientId
 } from '../config/sendConfirmation.js';
-import { draftMailOption, isPackPayable, jitProductMatching } from '../config/products.js';
+import { jitProductMatching } from '../config/products.js';
+import { draftMailOption, isPackPayable } from '../services/mailOptions.js';
 import { createJitCheckout, getSendEligibility, type SendEligibility } from '../services/commerceService.js';
 import { ensurePriceCatalog } from '../services/priceCatalog.js';
 import { getDraft } from '../services/draftService.js';
@@ -150,7 +151,7 @@ interface PostcardView {
  * alone otherwise. Null for a letter, and for a front the print cannot read,
  * so the page never names one that will not print.
  */
-function postcardView(draft: LetterDraft & { postcard_size?: string | null; postcard_front?: unknown }): PostcardView | null {
+function postcardView(draft: LetterDraft & { postcard_front?: unknown }): PostcardView | null {
   if (mailTypeOf(draft) !== 'postcard') return null;
   const size = draft.postcard_size ?? '6x9';
   // As the print reads it (renderPostcardForPrint): a front only with the

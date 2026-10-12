@@ -19,10 +19,10 @@ import {
   CERTIFIED_PAID_PER_SEND_REASON,
   PAID_PER_SEND_REASON,
   earlyGiftChoice,
-  letterOption,
   pageChangeSentence,
   reasonCannotSend
 } from '../../../src/tools/letterHelpers.js';
+import { letterOption } from '../../../src/services/mailOptions.js';
 import { GIFT_NOT_FOR_CERTIFIED, GIFT_PAYS_ONE_PAGE } from '../../../src/tools/giftSendChoice.js';
 import type { ToolContext } from '../../../src/contracts/types.js';
 

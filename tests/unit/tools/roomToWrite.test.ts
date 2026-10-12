@@ -60,7 +60,9 @@ import { quoteAndPreviewLetterWithHeaderImageTool } from '../../../src/tools/quo
 import { quoteAndPreviewLetterWithImageTool } from '../../../src/tools/quoteAndPreviewLetterWithImage.js';
 import { setStationeryTool } from '../../../src/tools/setStationery.js';
 import { isRoomToWriteOffered, letterPageLimit } from '../../../src/config/roomToWrite.js';
-import { draftMailOption, jitProductMatching } from '../../../src/config/products.js';
+import { jitProductMatching } from '../../../src/config/products.js';
+import { draftMailOption } from '../../../src/services/mailOptions.js';
+import { optionRow } from '../../fixtures/mailOptions.js';
 import { layoutGiftPage, layoutLetter, readImageDataUri, renderPreviewSvg, type Stationery } from '../../../src/render/index.js';
 import { letterPrintText, renderLetterPreviewDocument, stampedAddressLines } from '../../../src/services/previewService.js';
 import { sampleFundedCard } from '../../../src/services/giftLetterService.js';
@@ -231,7 +233,7 @@ describe('a longer letter, while room to write is offered', () => {
       const stored = drafted();
       const quoted = vi.mocked(getSendEligibility).mock.calls.at(-1)![2];
       // The checkout reads the draft row through draftMailOption: the same option, so the same price.
-      expect(quoted, String(pages)).toEqual(draftMailOption({ mail_type: 'letter', pages: stored.pages }));
+      expect(quoted, String(pages)).toEqual(draftMailOption(optionRow({ mail_type: 'letter', pages: stored.pages })));
       expect(jitProductMatching(quoted)?.productCode, String(pages)).toBe(product);
     }
   });
@@ -463,7 +465,7 @@ describe('set_stationery lays a letter out again on its pages, and prices it aga
     await restyle('botanical', context(10));
     const quoted = vi.mocked(getSendEligibility).mock.calls.at(-1)![2];
     expect(quoted).toEqual({ mailType: 'letter', pages: 2, mailService: 'certified' });
-    expect(quoted).toEqual(draftMailOption({ mail_type: 'letter', pages: stored.pages, mail_service: 'certified' }));
+    expect(quoted).toEqual(draftMailOption(optionRow({ mail_type: 'letter', pages: stored.pages, mail_service: 'certified' })));
     // One product whatever the pages: the service sets the price.
     expect(jitProductMatching(quoted)?.productCode).toBe('jit-letter-certified');
   });

@@ -12,7 +12,7 @@ import { writeDiagnostic } from '../utils/diagnosticLog.js';
 import { CUSTOM_THEME, stationeryOf, type Stationery } from '../render/stationery.js';
 import { postcardFrontOf, type PostcardFront } from '../render/postcard.js';
 import { POSTCARD_FRONT_RENDERER_VERSION, RENDERER_VERSION, rendererVersionFor } from '../render/pdf.js';
-import { MAX_LETTER_PAGES } from '../render/geometry.js';
+import { DRAFT_OPTION_COLUMNS, storedMailService, storedPages } from './mailOptions.js';
 import type {
   Letter,
   LetterDraft,
@@ -28,7 +28,6 @@ import type {
   MailService,
   PostcardSize,
 } from './types.js';
-import { MAIL_SERVICES } from '../config/certifiedMail.js';
 
 // Default draft expiration: 24 hours
 const DEFAULT_EXPIRATION_HOURS = 24;
@@ -77,46 +76,6 @@ function storedStationery(stationery: Stationery | null | undefined): Stationery
     writeDiagnostic('warn', 'draft.stationery_name_dropped', { theme: stored.theme });
   }
   return stored;
-}
-
-/**
- * The pages a letter draft records (#586): one unless its preview laid it out
- * on more, and never more than the renderer lays out. More than one only on a
- * letter our renderer drew and never on a gift send, whose free letter pays
- * for one page: migration 047's checks hold any writer to that. Refused here,
- * before anything is written.
- */
-function storedPages(params: CreateDraftParams): number {
-  const pages = params.pages ?? 1;
-  const known = Number.isInteger(pages) && pages >= 1 && pages <= MAX_LETTER_PAGES;
-  if (!known || (pages > 1 && (params.rendererVersion == null || params.isGiftSend === true))) {
-    // The previews lay a letter out before it gets here, so this is a defect, classed as a refusal.
-    throw Object.assign(new Error('The letter cannot be stored on that many pages.'), {
-      code: 'DRAFT_PAGES_INVALID',
-      diagnosticClass: 'validation_error'
-    });
-  }
-  return pages;
-}
-
-/**
- * How a letter draft travels (#625): standard unless its preview asked for
- * certified mail. A service other than standard only for a letter and never a
- * gift send, whose free letter pays for standard mail only (#579): migration
- * 052's checks hold any writer to that. Refused here, before anything is
- * written.
- */
-function storedMailService(params: { mailService?: MailService; isGiftSend?: boolean }): MailService {
-  const service = params.mailService ?? 'standard';
-  const known = (MAIL_SERVICES as readonly string[]).includes(service);
-  if (!known || (service !== 'standard' && params.isGiftSend === true)) {
-    // The previews check this before it gets here, so this is a defect, classed as a refusal.
-    throw Object.assign(new Error('The letter cannot be stored with that mail service.'), {
-      code: 'DRAFT_MAIL_SERVICE_INVALID',
-      diagnosticClass: 'validation_error'
-    });
-  }
-  return service;
 }
 
 /**
@@ -719,7 +678,7 @@ export type DraftForMailService = Pick<
 /** The caller's draft as set_mail_service prices it now, or null when it is not theirs or not there. */
 export async function getDraftForMailService(draftId: string, userId: string): Promise<DraftForMailService | null> {
   const result = await query<DraftForMailService>(
-    `SELECT mail_type, postcard_size, pages, mail_service, is_gift_send, required_credits, status
+    `SELECT ${DRAFT_OPTION_COLUMNS}, is_gift_send, required_credits, status
      FROM letter_drafts
      WHERE draft_id = $1 AND user_id = $2`,
     [draftId, userId]

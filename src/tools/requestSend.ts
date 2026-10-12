@@ -4,7 +4,8 @@ import { draftScheduleOf } from '../services/draftSchedule.js';
 import { earliestMailOn } from '../services/deliverySchedule.js';
 import type { LetterDraft } from '../services/types.js';
 import { sendConfirmationUrl } from '../config/sendConfirmation.js';
-import { draftMailOption, isExtraService, isPackPayable, mailServiceOf } from '../config/products.js';
+import { isExtraService, mailServiceOf } from '../config/products.js';
+import { draftMailOption, isPackPayable } from '../services/mailOptions.js';
 import type { CertifiedMailService } from '../services/types.js';
 
 /**

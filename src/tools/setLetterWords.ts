@@ -9,7 +9,6 @@ import { stationeryOf, type Layout, type PageFit } from '../render/index.js';
 import { getDraftForStationery, setDraftWords } from '../services/draftService.js';
 import {
   layoutLetterForPreview,
-  letterOption,
   letterPayment,
   letterRunsPast,
   pageChangeSentence,
@@ -23,6 +22,7 @@ import {
   editorPageFit
 } from './letterHelpers.js';
 import { draftLetter, draftRefusals, draftRefuser, editableDraft, type DraftRefusal } from './draftEdit.js';
+import { letterOption } from '../services/mailOptions.js';
 
 /**
  * A letter preview's words, changed without previewing it again (#586). The
