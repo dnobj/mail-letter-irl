@@ -358,6 +358,7 @@ describe('the bridge in an MCP Apps host', () => {
   it("hides an overflow of a pixel or two in ChatGPT's frame, and keeps a real one scrollable (#692)", () => {
     let observed: (() => void) | undefined;
     let scrollHeight = 699;
+    const frames: Array<() => void> = [];
     const dom = new JSDOM(bridgePage('<div></div>'), {
       runScripts: 'dangerously',
       beforeParse(window) {
@@ -367,18 +368,25 @@ describe('the bridge in an MCP Apps host', () => {
           constructor(callback: () => void) { observed = callback; }
           observe() {}
         };
-        // The frame's own measure, and the observer's work run at once in place of the next frame.
+        // The frame's own measure; the next frame runs when the test says.
         Object.defineProperty((window as any).Element.prototype, 'clientHeight', { configurable: true, get: () => 698 });
         Object.defineProperty((window as any).Element.prototype, 'scrollHeight', { configurable: true, get: () => scrollHeight });
-        (window as any).requestAnimationFrame = (callback: () => void) => { callback(); return 1; };
+        (window as any).requestAnimationFrame = (callback: () => void) => frames.push(callback);
       }
     });
     const root = dom.window.document.documentElement;
+    const grown = () => {
+      observed!();
+      frames.splice(0).forEach(frame => frame());
+    };
     // A pixel over, at once: hidden.
     expect(root.style.overflowY).toBe('hidden');
     // A real overflow, as the card grows: scrollable again.
     scrollHeight = 900;
     observed!();
+    // Not inside the observer's own callback: on the next frame.
+    expect(root.style.overflowY).toBe('hidden');
+    frames.splice(0).forEach(frame => frame());
     expect(root.style.overflowY).toBe('');
     // Two pixels over, told by the frame's own resize: hidden.
     scrollHeight = 700;
@@ -386,22 +394,22 @@ describe('the bridge in an MCP Apps host', () => {
     expect(root.style.overflowY).toBe('hidden');
     // Three pixels is a real overflow.
     scrollHeight = 701;
-    observed!();
+    grown();
     expect(root.style.overflowY).toBe('');
     // Fitting exactly: nothing to hide.
     scrollHeight = 698;
-    observed!();
+    grown();
     expect(root.style.overflowY).toBe('');
     // Hidden, then fitting once the scroll bar's room is back: it stays hidden, so the bar does not come and go.
     scrollHeight = 699;
-    observed!();
+    grown();
     expect(root.style.overflowY).toBe('hidden');
     scrollHeight = 698;
-    observed!();
+    grown();
     expect(root.style.overflowY).toBe('hidden');
     // And a real overflow still scrolls from there.
     scrollHeight = 760;
-    observed!();
+    grown();
     expect(root.style.overflowY).toBe('');
     dom.window.close();
   });
