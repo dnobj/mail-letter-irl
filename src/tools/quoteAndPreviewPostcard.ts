@@ -45,7 +45,7 @@ import { callingApp } from "../auth/clientProfiles.js";
 import { giftCardSummary, longestSendCard, resolveGiftSendChoice } from "./giftSendChoice.js";
 import {
   previewArrivalWindow,
-  previewSchedule,
+  previewScheduleWithRoom,
   scheduleSentence,
   type ArrivalWindow,
   type PreviewScheduleOutput
@@ -233,7 +233,7 @@ async function handler(
 
   // Arrive-by (#535): checked first, so a date that cannot be met is refused
   // before the picture is fetched or an address validated.
-  const schedule = previewSchedule(input.arriveBy, context);
+  const schedule = await previewScheduleWithRoom(input.arriveBy, context);
 
   // Track if we used the saved return address
   let usedSavedReturnAddress = false;

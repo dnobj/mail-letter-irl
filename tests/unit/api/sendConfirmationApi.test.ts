@@ -572,6 +572,8 @@ describe('refusalFor (#470)', () => {
     ['GIFT_LETTERS_DISABLED', 409, 'gift_unavailable'],
     ['GIFT_LETTER_UNAVAILABLE', 409, 'gift_unavailable'],
     ['SCHEDULE_PASSED', 409, 'schedule_passed'],
+    // Its mail date filled after the preview (#700).
+    ['SCHEDULE_FULL', 409, 'schedule_full'],
     ['PACK_CANNOT_PAY', 402, 'pay_per_send'],
     ['DRAFT_INVALID_STATE', 409, 'unsendable'],
     ['DRAFT_INCOMPLETE', 409, 'unsendable'],
@@ -588,6 +590,13 @@ describe('refusalFor (#470)', () => {
   it('tells the person a missed mail date needs a new preview (#535)', () => {
     expect(refusalFor(coded('SCHEDULE_PASSED')).body.message).toBe(
       'The day this was to go to the printer has passed, so it can no longer arrive by its date. Make a new preview with a new date.'
+    );
+  });
+
+  it('tells the person a full mail date needs another date, named without the YYYY-MM-DD (#700)', () => {
+    const full = Object.assign(coded('SCHEDULE_FULL'), { openArrivals: ['2026-10-15', '2026-10-19'] });
+    expect(refusalFor(full).body.message).toMatch(
+      /^Mail to arrive by its date is now fully booked, so nothing was sent\. The nearest arrival dates with room are \w{3}, Oct 15(, 2026)? and \w{3}, Oct 19(, 2026)?\. Choose another date for it in the chat, or none to send it as soon as possible, then come back and send it\.$/
     );
   });
 

@@ -238,6 +238,39 @@ export function checkArrival(arriveBy: string, now: Date, settings: ScheduleSett
 }
 
 /**
+ * The arrival dates on offer at `now` nearest `arriveBy` whose mail date
+ * `hasRoom` (#700), at most `count`, in date order. One per mail date: the
+ * first arrival date that mails on it, a business day, since the weekend and
+ * holiday dates after it mail on the same day. Nearer first, and of two as
+ * near, the earlier, which still arrives by the date asked for.
+ */
+export function nearestOpenArrivals(
+  arriveBy: CalendarDate,
+  now: Date,
+  settings: ScheduleSettings,
+  hasRoom: (mailOn: CalendarDate) => boolean,
+  count = 3
+): CalendarDate[] {
+  const earliest = earliestArrival(now, settings.leadDays);
+  const latest = latestArrival(now, settings.horizonDays);
+  const open: CalendarDate[] = [];
+  let lastMailOn: CalendarDate | undefined;
+  for (let date = earliest; date <= latest; date = addCalendarDays(date, 1)) {
+    const mailOn = mailOnFor(date, settings.leadDays);
+    if (mailOn === lastMailOn) continue;
+    lastMailOn = mailOn;
+    if (hasRoom(mailOn)) open.push(date);
+  }
+  const target = dayNumber(arriveBy);
+  return open
+    .map(date => ({ date, distance: Math.abs(dayNumber(date) - target) }))
+    .sort((a, b) => a.distance - b.distance || (a.date < b.date ? -1 : 1))
+    .slice(0, count)
+    .map(({ date }) => date)
+    .sort();
+}
+
+/**
  * A calendar date as Letter IRL says it: "Tue, Oct 13", with the year when it
  * is not this year in New York.
  */

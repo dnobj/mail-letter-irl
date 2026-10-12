@@ -3,6 +3,7 @@ import { formatAmountForCurrency } from '../config/products.js';
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
 import { createJitCheckout } from '../services/commerceService.js';
 import { SpendLimitError } from '../services/betaSpendLimits.js';
+import { openArrivalsOf, openArrivalsSentence } from '../services/mailDateCapacity.js';
 import {
   DuplicateMailError,
   duplicateMailMessage,
@@ -85,6 +86,13 @@ export function friendlyCheckoutError(error: unknown): Error {
       // Arrive-by (#535): refused before the charge, so nothing was paid.
       return friendly(
         'The day this mail was to go to the printer has passed, so it can no longer arrive by its date. Please create a new preview with a new arrival date.'
+      );
+    case 'SCHEDULE_FULL':
+      // #700: refused before the charge, so nothing was paid.
+      return friendly(
+        'Mail to arrive by its date is now fully booked, so nothing was charged. ' +
+          `${openArrivalsSentence(openArrivalsOf(error), new Date(), true)} ` +
+          'Set another date with set_arrival_date, or clear it to send as soon as possible, then try again.'
       );
     case 'PREPAID_BALANCE_AVAILABLE':
       return friendly(

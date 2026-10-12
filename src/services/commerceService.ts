@@ -35,7 +35,8 @@ import { isImageGenerationOff } from '../config/imageGeneration.js';
 import { createMailOrderFromDraftWithClient } from './mailSendService.js';
 import { draftScheduleOf } from './draftSchedule.js';
 import { STUCK_ORDER_CONDITION } from './stuckOrders.js';
-import { earliestMailOn } from './deliverySchedule.js';
+import { describeDate, earliestMailOn } from './deliverySchedule.js';
+import { fullMailDate } from './mailDateCapacity.js';
 import { assertNoRecentDuplicateMail } from './duplicateMailService.js';
 import {
   createJitCheckoutSession,
@@ -52,7 +53,7 @@ import {
   type CommerceProductConfig,
   type PackProductId
 } from './stripeService.js';
-import type { LetterDraft, MailType, Order, OrderStatus } from './types.js';
+import type { DraftSchedule, LetterDraft, MailType, Order, OrderStatus } from './types.js';
 import { type FundingHoldReason } from './heldMail.js';
 import {
   carriedDiagnosticClass,
@@ -583,6 +584,25 @@ function asCheckoutResult(order: Order, reused: boolean): CommerceCheckoutResult
   };
 }
 
+/**
+ * The order event that says a Pay & Send letter's mail date had passed by the
+ * time it was paid (#700), so it goes to the printer as soon as it can rather
+ * than waiting. get_purchase_status reads it (SCHEDULE_MISSED_EVENT).
+ */
+export const SCHEDULE_MISSED_EVENT = 'jit.schedule_missed';
+
+async function recordMissedSchedule(
+  client: Pick<pg.PoolClient, 'query'>,
+  orderId: string,
+  missed: DraftSchedule | undefined
+): Promise<void> {
+  if (!missed) return;
+  await recordOrderEvent(client, orderId, SCHEDULE_MISSED_EVENT, null, null, {
+    arriveBy: missed.arriveBy,
+    mailOn: missed.mailOn
+  });
+}
+
 export async function recordOrderEvent(
   client: Pick<pg.PoolClient, 'query'>,
   orderId: string,
@@ -928,6 +948,15 @@ async function prepareJitOrder(
     const schedule = draftScheduleOf(draft);
     if (schedule && schedule.mailOn < earliestMailOn(new Date())) {
       throw Object.assign(new Error('Draft has missed its mail date'), { code: 'SCHEDULE_PASSED' });
+    }
+    // And a full one (#700), read without the send's lock: after the charge
+    // the fulfilment mails it whatever the count, so this is the refusal that
+    // keeps a paid letter off a full date.
+    if (schedule) {
+      const full = await fullMailDate(client, schedule, new Date());
+      if (full) {
+        throw Object.assign(new Error('Draft mail date is full'), { code: 'SCHEDULE_FULL', openArrivals: full.openArrivals });
+      }
     }
 
     // ONE derivation for the whole transaction: the reprice branch and the
@@ -1741,7 +1770,7 @@ async function transitionPaidCheckout(
   await client.query('SAVEPOINT jit_fulfillment');
   try {
     const mailType = String(order.product_snapshot.mailType || 'letter') as MailType;
-    await createMailOrderFromDraftWithClient(client, {
+    const sent = await createMailOrderFromDraftWithClient(client, {
       draftId: order.draft_id!,
       userId: order.user_id,
       mailType,
@@ -1762,6 +1791,7 @@ async function transitionPaidCheckout(
       'paid',
       'fulfillment_pending'
     );
+    await recordMissedSchedule(client, order.order_id, sent.scheduleMissed);
     return 'fulfillment_pending';
   } catch (error) {
     await client.query('ROLLBACK TO SAVEPOINT jit_fulfillment');
@@ -3627,6 +3657,45 @@ function packPurchaseMessage(
   }
 }
 
+/**
+ * The dates SCHEDULE_MISSED_EVENT recorded for a Pay & Send order (#700), or
+ * undefined: its mail went to the printer as soon as it could.
+ */
+async function readMissedSchedule(order: Order): Promise<DraftSchedule | undefined> {
+  if (order.order_type !== 'jit_mail') return undefined;
+  const result = await query<{ arrive_by: unknown; mail_on: unknown }>(
+    `SELECT metadata->>'arriveBy' AS arrive_by, metadata->>'mailOn' AS mail_on
+       FROM commerce_order_events
+      WHERE order_id = $1 AND event_type = $2
+      ORDER BY created_at DESC LIMIT 1`,
+    [order.order_id, SCHEDULE_MISSED_EVENT]
+  );
+  const row = result.rows[0];
+  return row && typeof row.arrive_by === 'string' && typeof row.mail_on === 'string'
+    ? { arriveBy: row.arrive_by, mailOn: row.mail_on }
+    : undefined;
+}
+
+/**
+ * What a Pay & Send order whose mail date passed before it was paid adds to
+ * its status (#700), while it is being prepared or once it is with the
+ * printer. Nothing once it is refunded or held: its mail no longer goes.
+ */
+export function missedScheduleSentence(
+  status: PurchaseStatusResult['purchaseStatus'],
+  missed: DraftSchedule,
+  now: Date
+): string | undefined {
+  const by = describeDate(missed.arriveBy, now);
+  if (status === 'processing') {
+    return `It was paid for after the day it was to go to the printer to arrive by ${by}, so it goes to the printer as soon as it can instead, and may arrive after that date.`;
+  }
+  if (status === 'submitted') {
+    return `It was paid for after the day it was to go to the printer to arrive by ${by}, so it went to the printer as soon as it could instead, and may arrive after that date.`;
+  }
+  return undefined;
+}
+
 export async function getPurchaseStatus(
   userId: string,
   orderId: string
@@ -3643,6 +3712,8 @@ export async function getPurchaseStatus(
   }
   const purchaseStatus = publicPurchaseStatus(order.status);
   const pack = await readPackPurchaseFigures(order);
+  const missed = await readMissedSchedule(order);
+  const missedSentence = missed ? missedScheduleSentence(purchaseStatus, missed, new Date()) : undefined;
   return {
     orderId: order.order_id,
     purchaseStatus,
@@ -3663,7 +3734,9 @@ export async function getPurchaseStatus(
     // Letter packs only; every field absent (never null) on Pay & Send orders.
     ...(pack ?? {}),
     updatedAt: new Date(order.updated_at).toISOString(),
-    message: pack ? packPurchaseMessage(purchaseStatus, order, pack) : purchaseMessage(purchaseStatus)
+    message: pack
+      ? packPurchaseMessage(purchaseStatus, order, pack)
+      : [purchaseMessage(purchaseStatus), missedSentence].filter(Boolean).join(' ')
   };
 }
 
@@ -3741,7 +3814,7 @@ export async function fulfillPaidOrder(orderId: string): Promise<boolean> {
     if (!order || order.order_type !== 'jit_mail' || order.status !== 'paid') return false;
     await client.query('SAVEPOINT recovery_fulfillment');
     try {
-      await createMailOrderFromDraftWithClient(client, {
+      const sent = await createMailOrderFromDraftWithClient(client, {
         draftId: order.draft_id!,
         userId: order.user_id,
         mailType: String(order.product_snapshot.mailType || 'letter') as MailType,
@@ -3762,6 +3835,7 @@ export async function fulfillPaidOrder(orderId: string): Promise<boolean> {
         'paid',
         'fulfillment_pending'
       );
+      await recordMissedSchedule(client, orderId, sent.scheduleMissed);
       return true;
     } catch (error) {
       await client.query('ROLLBACK TO SAVEPOINT recovery_fulfillment');

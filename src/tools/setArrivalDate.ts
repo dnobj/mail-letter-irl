@@ -2,15 +2,16 @@ import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
 import { isArriveByEnabled } from '../config/arriveBy.js';
 import { DELIVERY_ESTIMATE } from '../content/delivery.js';
 import { setDraftSchedule, type DraftScheduleRefusal } from '../services/draftService.js';
-import { previewSchedule, scheduleSentence, type PreviewScheduleOutput } from './arriveByInput.js';
+import { previewScheduleWithRoom, scheduleSentence, type PreviewScheduleOutput } from './arriveByInput.js';
 import { isDraftIdShape } from './requestSend.js';
 import { DraftRefusedError, draftRefusals, type DraftRefusal } from './draftEdit.js';
 
 /**
  * A preview's arrival date, set, moved or cleared without previewing again
- * (#535). The date is checked as the preview tools check theirs
- * (previewSchedule), and the draft's dates change only while it waits to be
- * sent (setDraftSchedule). Nothing is sent here.
+ * (#535). The date is checked as the preview tools check theirs, with room
+ * on its mail date (previewScheduleWithRoom, #700), and the draft's dates
+ * change only while it waits to be sent (setDraftSchedule). Nothing is sent
+ * here.
  *
  * Listed only while LETTER_IRL_ARRIVE_BY_ENABLED is on (src/server.ts), and
  * refused while it is off, for an app that cached the list.
@@ -58,7 +59,7 @@ async function handler(
   // The date first, as the previews check theirs: a date that can't be met is
   // refused naming the dates on offer, before the draft is read. None, an
   // empty string included, clears it.
-  const schedule = previewSchedule(input.arriveBy, context);
+  const schedule = await previewScheduleWithRoom(input.arriveBy, context);
   let contentVersion: string | undefined;
   let contentVersionBefore: string | undefined;
   const refusal = isDraftIdShape(draftId)

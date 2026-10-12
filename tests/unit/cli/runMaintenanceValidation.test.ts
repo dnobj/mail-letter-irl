@@ -83,7 +83,7 @@ vi.mock('../../../src/services/maintenanceHeartbeat.js', async importOriginal =>
   sendMaintenanceHeartbeat: services.sendMaintenanceHeartbeat
 }));
 
-import { maintenanceEntry, writeMaintenanceFailure } from '../../../src/cli/runMaintenance.js';
+import { dispatchDueMail, maintenanceEntry, writeMaintenanceFailure } from '../../../src/cli/runMaintenance.js';
 
 type TaskRunner = (
   name: string,
@@ -711,5 +711,94 @@ describe('maintenance deployment validation', () => {
       expect(logged).not.toContain('secret-subject');
       expect(logged).not.toContain('example.invalid');
     });
+  });
+});
+
+describe('the outbox in batches, within a time budget (#700)', () => {
+  const batch = (processed: number, extra: Record<string, unknown> = {}) => ({
+    processed,
+    completed: processed,
+    retryScheduled: 0,
+    failed: 0,
+    ...extra
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    services.processDueLetterJobs.mockReset().mockResolvedValue({ processed: 0 });
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it('claims batches while each comes back full, and stops at the first that comes back short', async () => {
+    services.processDueLetterJobs
+      .mockResolvedValueOnce(batch(3))
+      .mockResolvedValueOnce(batch(3, { completed: 1, retryScheduled: 1, failed: 1 }))
+      .mockResolvedValueOnce(batch(2));
+
+    await expect(dispatchDueMail(3, 60_000, () => 1_000)).resolves.toEqual({
+      batches: 3,
+      processed: 8,
+      completed: 6,
+      retryScheduled: 1,
+      failed: 1
+    });
+    // Each batch of the limit, told when the budget ends.
+    expect(services.processDueLetterJobs.mock.calls).toEqual([
+      [3, { stopAt: 61_000 }],
+      [3, { stopAt: 61_000 }],
+      [3, { stopAt: 61_000 }]
+    ]);
+  });
+
+  it('starts no batch once the budget has passed, though the last came back full', async () => {
+    services.processDueLetterJobs.mockResolvedValue(batch(3));
+    const clock = [0, 10_000, 59_999, 60_000];
+    const now = () => clock.shift() ?? 60_000;
+
+    const summary = await dispatchDueMail(3, 60_000, now);
+
+    expect(summary).toMatchObject({ batches: 3, processed: 9 });
+    expect(services.processDueLetterJobs).toHaveBeenCalledTimes(3);
+  });
+
+  it('stops at a paused outbox, saying how much is waiting', async () => {
+    services.processDueLetterJobs.mockResolvedValueOnce({ ...batch(0), paused: true, waiting: 40 });
+
+    await expect(dispatchDueMail(25, 60_000)).resolves.toEqual({
+      batches: 1,
+      processed: 0,
+      completed: 0,
+      retryScheduled: 0,
+      failed: 0,
+      paused: true,
+      waiting: 40
+    });
+    expect(services.processDueLetterJobs).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs with the batch size and the budget the run is given, 25 and 600 seconds by default', async () => {
+    stubValidDevelopment();
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    vi.spyOn(Date, 'now').mockReturnValue(5_000);
+
+    await expect(maintenanceEntry()).resolves.toBeUndefined();
+    expect(services.processDueLetterJobs).toHaveBeenCalledWith(25, { stopAt: 605_000 });
+
+    services.processDueLetterJobs.mockClear();
+    vi.stubEnv('MAINTENANCE_OUTBOX_BATCH_SIZE', '40');
+    vi.stubEnv('MAINTENANCE_OUTBOX_TIME_BUDGET_SECONDS', '120');
+    await expect(maintenanceEntry()).resolves.toBeUndefined();
+    expect(services.processDueLetterJobs).toHaveBeenCalledWith(40, { stopAt: 125_000 });
+
+    for (const value of ['0', '2701', 'soon']) {
+      services.processDueLetterJobs.mockClear();
+      vi.stubEnv('MAINTENANCE_OUTBOX_TIME_BUDGET_SECONDS', value);
+      await expect(maintenanceEntry()).resolves.toBeUndefined();
+      expect(services.processDueLetterJobs, value).toHaveBeenCalledWith(40, { stopAt: 605_000 });
+    }
   });
 });

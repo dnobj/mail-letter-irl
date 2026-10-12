@@ -40,6 +40,7 @@ import { isDuplicateMailError } from '../services/duplicateMailService.js';
 import { SpendLimitError } from '../services/betaSpendLimits.js';
 import type { LetterDraft } from '../services/types.js';
 import { draftScheduleOf } from '../services/draftSchedule.js';
+import { openArrivalsOf, openArrivalsSentence } from '../services/mailDateCapacity.js';
 import { contentVersionOf } from '../services/contentVersion.js';
 import { stationeryOf, type Stationery } from '../render/stationery.js';
 import { postcardFrontOf } from '../render/postcard.js';
@@ -263,6 +264,15 @@ export function refusalFor(error: unknown): Refusal {
     case 'GIFT_LETTERS_DISABLED':
     case 'GIFT_LETTER_UNAVAILABLE':
       return refuse(409, 'gift_unavailable', 'The gift letter for this preview is no longer available. Make a new preview.');
+    // #700: its mail date filled after the preview. Nothing was sent or charged.
+    case 'SCHEDULE_FULL':
+      return refuse(
+        409,
+        'schedule_full',
+        'Mail to arrive by its date is now fully booked, so nothing was sent. ' +
+          `${openArrivalsSentence(openArrivalsOf(error), new Date(), false)} ` +
+          'Choose another date for it in the chat, or none to send it as soon as possible, then come back and send it.'
+      );
     case 'SCHEDULE_PASSED':
       return refuse(409, 'schedule_passed', 'The day this was to go to the printer has passed, so it can no longer arrive by its date. Make a new preview with a new date.');
     // #579: a pack pays only for a one-page letter or a 6x9 postcard.
@@ -410,6 +420,7 @@ export function checkoutRefusalFor(error: unknown): Refusal {
     case 'DRAFT_NOT_FOUND':
     case 'DRAFT_NOT_OWNED':
     case 'DRAFT_EXPIRED':
+    case 'SCHEDULE_FULL':
     case 'SCHEDULE_PASSED':
     case 'DRAFT_INVALID_STATE':
       return refusalFor(error);

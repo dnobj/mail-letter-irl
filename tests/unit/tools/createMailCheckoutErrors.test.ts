@@ -73,6 +73,16 @@ describe('friendlyCheckoutError terminality (#278)', () => {
     expect((friendly as { code?: string }).code).toBe('SCHEDULE_PASSED');
   });
 
+  it('refuses a full mail date before any charge, naming the open dates (#700)', () => {
+    const friendly = friendlyCheckoutError(
+      Object.assign(new Error('Draft mail date is full'), { code: 'SCHEDULE_FULL', openArrivals: ['2026-10-15'] })
+    );
+    expect(friendly.message).toMatch(
+      /^Mail to arrive by its date is now fully booked, so nothing was charged\. The nearest arrival date with room is \w{3}, Oct 15(, 2026)? \(2026-10-15\)\. Set another date with set_arrival_date, or clear it to send as soon as possible, then try again\.$/
+    );
+    expect((friendly as { code?: string }).code).toBe('SCHEDULE_FULL');
+  });
+
   it('never leaks the internal message', () => {
     const friendly = friendlyCheckoutError(
       Object.assign(new Error('cs_private pi_private'), { code: 'PROVIDER_ERROR' })

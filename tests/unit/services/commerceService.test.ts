@@ -820,6 +820,33 @@ describe('commerceService', () => {
       return fulfillPaidOrder('order-1');
     }
 
+    const missedEvents = () =>
+      mocks.query.mock.calls.filter(([sql, params]) =>
+        String(sql).includes('INSERT INTO commerce_order_events') && (params as unknown[])[1] === 'jit.schedule_missed'
+      );
+
+    it.each([
+      ['the webhook', () => payAndSendWebhook()],
+      ['the hourly recovery', () => recoverPayAndSend()]
+    ])('records on the order a mail date that passed before %s fulfilled it (#700)', async (_label, fulfil) => {
+      mocks.createMail.mockResolvedValueOnce({ scheduleMissed: { arriveBy: '2026-10-16', mailOn: '2026-10-06' } });
+
+      await fulfil();
+
+      expect(missedEvents()).toHaveLength(1);
+      const [, params] = missedEvents()[0];
+      expect(params).toEqual(['order-1', 'jit.schedule_missed', null, null, JSON.stringify({ arriveBy: '2026-10-16', mailOn: '2026-10-06' })]);
+    });
+
+    it.each([
+      ['the webhook', () => payAndSendWebhook()],
+      ['the hourly recovery', () => recoverPayAndSend()]
+    ])('records nothing when %s fulfils mail on its date, or with none (#700)', async (_label, fulfil) => {
+      await fulfil();
+      expect(mocks.createMail).toHaveBeenCalled();
+      expect(missedEvents()).toEqual([]);
+    });
+
     it('grants a pack its image generations while the switch is on', async () => {
       await expect(packWebhook()).resolves.toMatchObject({ status: 'fulfilled' });
       expect(mocks.grantEntitlement).toHaveBeenCalledWith(
@@ -4217,6 +4244,51 @@ describe('commerceService', () => {
       await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).rejects.toMatchObject({ code });
 
       expect(dupState.calls).toEqual([]);
+    });
+
+    describe('room on its mail date (#700)', () => {
+      // A Thursday, 10:00 in New York: Fri Oct 16 mails on Tue Oct 6.
+      const THURSDAY_MORNING = new Date('2026-10-01T14:00:00Z');
+      let held: number;
+
+      beforeEach(() => {
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(THURSDAY_MORNING);
+        vi.stubEnv('LETTER_IRL_SCHEDULE_DAILY_CAP', '2');
+        draftRow = pendingDraft({ arrive_by: '2026-10-16', mail_on: '2026-10-06', expires_at: new Date(THURSDAY_MORNING.getTime() + 6 * 60 * 60_000) });
+        held = 2;
+        const base = mocks.query.getMockImplementation()!;
+        mocks.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
+          if (sql.includes('GROUP BY mail_on')) return { rows: [] };
+          if (sql.includes('AS held FROM letters')) return { rows: [{ held }] };
+          return base(sql, params);
+        });
+      });
+
+      afterEach(() => {
+        vi.useRealTimers();
+        vi.unstubAllEnvs();
+      });
+
+      it('refuses a full date before any order or session, naming the nearest dates with room', async () => {
+        await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).rejects.toMatchObject({
+          code: 'SCHEDULE_FULL',
+          openArrivals: ['2026-10-13', '2026-10-14', '2026-10-15']
+        });
+        expect(inserted()).toBe(false);
+        expect(mocks.createJitSession).not.toHaveBeenCalled();
+        // Under the draft's lock, by a plain count: no date lock is held across the payment.
+        expect(position('AS held FROM letters')).toBeGreaterThan(position('SELECT * FROM letter_drafts WHERE draft_id = $1 FOR UPDATE'));
+        expect(trail.some(sql => sql.includes('pg_advisory_xact_lock'))).toBe(false);
+        // Its own mail date's count.
+        const count = mocks.query.mock.calls.find(([sql]) => String(sql).includes('AS held FROM letters'))!;
+        expect(count[1]).toEqual(['2026-10-06']);
+      });
+
+      it('opens the checkout for a date with room', async () => {
+        held = 1;
+        await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).resolves.toMatchObject({ status: 'checkout_pending' });
+      });
     });
 
     describe('the content version the person was shown (#695)', () => {

@@ -26,6 +26,9 @@ import { repositoryMigrations, validateDisposableDatabaseUrl } from './support/d
  *   frees the duplicate guard
  *   get_draft_status's read (getDraftState) gives a sent draft's letter as
  *   it stands, and only the draft owner's
+ *   a mail date takes at most LETTER_IRL_SCHEDULE_DAILY_CAP held letters,
+ *   one send of two racing for its last place, and a Pay & Send letter paid
+ *   after its mail date is recorded and told (#700)
  *
  * Against real PostgreSQL because the constraints, the DATE type, the job's
  * timestamps and the claim's predicate are the change's whole substance, and
@@ -950,6 +953,104 @@ describePostgres('arrive-by (migration 040, #535)', () => {
     await drafts.cleanupOldDrafts(7);
     expect(await left()).toEqual([recentDraft]);
   }, 60_000);
+
+  describe('room on a mail date (#700)', () => {
+    let capacity: typeof import('../../src/services/mailDateCapacity.js');
+    let commerce: typeof import('../../src/services/commerceService.js');
+    const saved = { cap: process.env.LETTER_IRL_SCHEDULE_DAILY_CAP, jit: process.env.JIT_PURCHASE_ENABLED };
+
+    beforeAll(async () => {
+      capacity = await import('../../src/services/mailDateCapacity.js');
+      commerce = await import('../../src/services/commerceService.js');
+    });
+
+    afterAll(() => {
+      for (const [name, value] of [
+        ['LETTER_IRL_SCHEDULE_DAILY_CAP', saved.cap],
+        ['JIT_PURCHASE_ENABLED', saved.jit]
+      ] as const) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    });
+
+    /** Five weeks out, a mail date no other case in this file holds mail for. */
+    function ownDate(): { arriveBy: string; mailOn: string } {
+      const arriveBy = schedule.addCalendarDays(schedule.newYorkDate(new Date()), 35);
+      return { arriveBy, mailOn: schedule.mailOnFor(arriveBy, 7) };
+    }
+
+    it('takes a mail date to its cap, refuses the next send writing nothing, and has room again once one is cancelled', async () => {
+      const dates = ownDate();
+      process.env.LETTER_IRL_SCHEDULE_DAILY_CAP = '2';
+      const userId = await seedUser(20);
+      const send = (draftId: string) => mailSend.createMailOrderFromDraft({ draftId, userId, mailType: 'letter' });
+
+      const first = await send(await seedDraft(userId, dates));
+      await send(await seedDraft(userId, dates));
+      await expect(capacity.fullMailDate(pool, dates, new Date())).resolves.toMatchObject({ mailOn: dates.mailOn });
+
+      const third = await seedDraft(userId, dates);
+      const refusal = await send(third).catch(error => error);
+      expect(refusal).toMatchObject({ code: 'SCHEDULE_FULL' });
+      // Nearest first, never the full date's own arrival dates.
+      expect(refusal.openArrivals).toHaveLength(3);
+      for (const date of refusal.openArrivals) expect(schedule.mailOnFor(date, 7)).not.toBe(dates.mailOn);
+      const draft = (await pool.query('SELECT status FROM letter_drafts WHERE draft_id = $1', [third])).rows[0];
+      expect(draft.status).toBe('pending');
+      const queued = await pool.query("SELECT COUNT(*)::int AS n FROM letters WHERE mail_on = $1::date AND status = 'queued'", [dates.mailOn]);
+      expect(queued.rows[0].n).toBe(2);
+      const balance = (await pool.query('SELECT credits FROM users WHERE user_id = $1', [userId])).rows[0];
+      expect(balance.credits).toBe(16);
+
+      // A cancelled letter leaves the count.
+      await expect(held.cancelScheduledMail({ letterId: first.letter.letter_id, userId })).resolves.toMatchObject({ ok: true });
+      await expect(capacity.fullMailDate(pool, dates, new Date())).resolves.toBeNull();
+      await expect(send(third)).resolves.toMatchObject({ alreadyConsumed: false });
+    }, 60_000);
+
+    it('lets one of two sends racing for the last place through, under the date lock', async () => {
+      const base = ownDate();
+      // A week later again, so the first case's letters do not count here.
+      const arriveBy = schedule.addCalendarDays(base.arriveBy, 7);
+      const dates = { arriveBy, mailOn: schedule.mailOnFor(arriveBy, 7) };
+      process.env.LETTER_IRL_SCHEDULE_DAILY_CAP = '1';
+      const [one, two] = [await seedUser(), await seedUser()];
+      const drafts2 = [await seedDraft(one, dates), await seedDraft(two, dates)];
+
+      const outcomes = await Promise.allSettled([
+        mailSend.createMailOrderFromDraft({ draftId: drafts2[0], userId: one, mailType: 'letter' }),
+        mailSend.createMailOrderFromDraft({ draftId: drafts2[1], userId: two, mailType: 'letter' })
+      ]);
+
+      expect(outcomes.filter(outcome => outcome.status === 'fulfilled')).toHaveLength(1);
+      const refused = outcomes.find(outcome => outcome.status === 'rejected') as PromiseRejectedResult;
+      expect(refused.reason).toMatchObject({ code: 'SCHEDULE_FULL' });
+      const queued = await pool.query("SELECT COUNT(*)::int AS n FROM letters WHERE mail_on = $1::date AND status = 'queued'", [dates.mailOn]);
+      expect(queued.rows[0].n).toBe(1);
+    }, 60_000);
+
+    it('records a Pay & Send letter whose mail date passed before it was paid, and get_purchase_status says so', async () => {
+      process.env.JIT_PURCHASE_ENABLED = 'true';
+      const userId = await seedUser(0);
+      const draftId = await seedDraft(userId);
+      await pool.query("UPDATE letter_drafts SET arrive_by = '2020-01-13', mail_on = '2020-01-02' WHERE draft_id = $1", [draftId]);
+      const orderId = await seedPayAndSend(userId, draftId, 'paid', '20 minutes');
+      await pool.query(`UPDATE orders SET product_snapshot = '{"mailType":"letter","name":"Pay & Send"}'::jsonb WHERE order_id = $1`, [orderId]);
+
+      await expect(commerce.fulfillPaidOrder(orderId)).resolves.toBe(true);
+
+      const events = await pool.query(
+        "SELECT metadata FROM commerce_order_events WHERE order_id = $1 AND event_type = 'jit.schedule_missed'",
+        [orderId]
+      );
+      expect(events.rows.map(row => row.metadata)).toEqual([{ arriveBy: '2020-01-13', mailOn: '2020-01-02' }]);
+      const letter = (await pool.query('SELECT l.arrive_by, l.mail_on FROM letters l JOIN letter_drafts d ON d.consumed_letter_id = l.letter_id WHERE d.draft_id = $1', [draftId])).rows[0];
+      expect([letter.arrive_by, letter.mail_on]).toEqual([null, null]);
+      const status = await commerce.getPurchaseStatus(userId, orderId);
+      expect(status.message).toContain('It was paid for after the day it was to go to the printer to arrive by Mon, Jan 13, 2020');
+    }, 60_000);
+  });
 });
 
 describePostgres('migration 055: the hold as its own column (#693)', () => {

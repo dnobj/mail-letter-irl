@@ -11,7 +11,8 @@ import { offUnlessExplicitlyEnabled, positiveIntegerSetting } from '../utils/env
 
 export const ARRIVE_BY_DEFAULTS = {
   leadDays: 7,
-  horizonDays: 60
+  horizonDays: 60,
+  dailyCap: 200
 } as const;
 
 /**
@@ -50,6 +51,23 @@ export function scheduleHorizonDays(env: NodeJS.ProcessEnv = process.env): numbe
     ARRIVE_BY_DEFAULTS.horizonDays,
     1,
     365,
+    env
+  );
+}
+
+/**
+ * How many letters may be held to go to the printer on one day (#700), across
+ * every account. The outbox sends a mail date's letters in the hourly runs
+ * from 09:00 New York time, and a date with more than it can send that day
+ * would miss its arrival dates; a full date is refused at the preview,
+ * set_arrival_date and the send, naming the nearest dates with room.
+ */
+export function scheduleDailyCap(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveIntegerSetting(
+    'LETTER_IRL_SCHEDULE_DAILY_CAP',
+    ARRIVE_BY_DEFAULTS.dailyCap,
+    1,
+    100_000,
     env
   );
 }

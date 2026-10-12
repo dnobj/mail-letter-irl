@@ -16,6 +16,7 @@ import { draftMailOption, isPackPayable } from './mailOptions.js';
 import type { GiftCardContent } from './giftCardRenderer.js';
 import { dispatchAt, earliestMailOn } from './deliverySchedule.js';
 import { draftScheduleOf } from './draftSchedule.js';
+import { fullMailDate } from './mailDateCapacity.js';
 import { writeDiagnostic } from '../utils/diagnosticLog.js';
 import type { DraftSchedule, Letter, LetterDraft, LetterJob, Order, PostcardDraft } from './types.js';
 
@@ -62,6 +63,11 @@ export interface CreateMailOrderResult {
   /** What paid for this mail. 'gift_letter' mail also prints giftCard. */
   fundingType: Letter['funding_type'];
   giftCard?: GiftCardContent;
+  /**
+   * The draft's dates when a Pay & Send letter's mail date had passed by the
+   * time it was paid (#700): it goes to the printer as soon as it can.
+   */
+  scheduleMissed?: DraftSchedule;
 }
 
 /**
@@ -119,16 +125,17 @@ function buildPostcardContent(draft: MailDraftRow): Record<string, unknown> {
  * after it has missed its date. A prepaid or gift send then refuses, so the
  * person can choose a new date. A Pay & Send order has already been charged,
  * so its mail goes as soon as it can instead (refusing would strand the
- * money, as for the caps below), and the miss is logged; createJitCheckout
- * refuses a passed date before any charge.
+ * money, as for the caps below): 'missed', which the paid fulfilment records
+ * on the order and get_purchase_status tells the person (#700).
+ * createJitCheckout refuses a passed date before any charge.
  */
-function sendSchedule(draft: MailDraftRow, funding: MailFunding, draftId: string): DraftSchedule | null {
+function sendSchedule(draft: MailDraftRow, funding: MailFunding, draftId: string): DraftSchedule | 'missed' | null {
   const schedule = draftScheduleOf(draft);
   if (!schedule) return null;
   if (schedule.mailOn >= earliestMailOn(new Date())) return schedule;
   if (funding.type === 'jit_order') {
     writeDiagnostic('warn', 'send.schedule_missed', { funding: funding.type, mailOn: schedule.mailOn });
-    return null;
+    return 'missed';
   }
   throw draftError('SCHEDULE_PASSED', `Draft ${draftId} was to go to the printer on ${schedule.mailOn}, which has passed`);
 }
@@ -290,8 +297,25 @@ export async function createMailOrderFromDraftWithClient(
   }
 
   // Held mail (#535): when it goes to the printer, decided before any value moves.
-  const schedule = sendSchedule(draft, funding, params.draftId);
+  const scheduled = sendSchedule(draft, funding, params.draftId);
+  const schedule = scheduled === 'missed' ? null : scheduled;
+  const missed = scheduled === 'missed' ? draftScheduleOf(draft) : null;
   const releaseAt = schedule ? dispatchAt(schedule.mailOn) : undefined;
+  // Room on its mail date (#700), counted under a lock on the date, so two
+  // sends cannot both take its last place. The lock comes after the draft's
+  // and before the account's, which the deduction and the gift take below; the
+  // paid fulfilment, which holds the account first, takes none. Pay & Send is
+  // not refused here: it has been charged, and its checkout refused a full date
+  // before the charge, so a date filled since takes it over the cap.
+  if (schedule && funding.type !== 'jit_order') {
+    const full = await fullMailDate(client, schedule, new Date(), { lock: true });
+    if (full) {
+      throw Object.assign(
+        draftError('SCHEDULE_FULL', `Draft ${params.draftId} was to go to the printer on ${schedule.mailOn}, which is full`),
+        { openArrivals: full.openArrivals }
+      );
+    }
+  }
 
   // A gift draft is funded by a gift letter instead of the balance. Pay & Send
   // ignores the flag: that path runs after Stripe has charged, and
@@ -514,7 +538,8 @@ export async function createMailOrderFromDraftWithClient(
     creditsRemaining,
     alreadyConsumed: false,
     fundingType,
-    giftCard
+    giftCard,
+    ...(missed ? { scheduleMissed: missed } : {})
   };
 }
 

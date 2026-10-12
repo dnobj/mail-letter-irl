@@ -12,7 +12,14 @@ vi.mock('../../../src/services/draftService.js', () => ({
   setDraftSchedule: vi.fn()
 }));
 
+// Room on the mail date (#700): every date has room unless a test says not.
+vi.mock('../../../src/services/mailDateCapacity.js', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../../src/services/mailDateCapacity.js')>()),
+  fullMailDate: vi.fn(async () => null)
+}));
+
 import { setDraftSchedule } from '../../../src/services/draftService.js';
+import { fullMailDate } from '../../../src/services/mailDateCapacity.js';
 import {
   SET_ARRIVAL_DATE_TOOL,
   setArrivalDateTool
@@ -53,6 +60,7 @@ describe('set_arrival_date (#535)', () => {
   beforeEach(() => {
     vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', 'true');
     vi.mocked(setDraftSchedule).mockReset().mockResolvedValue(null);
+    vi.mocked(fullMailDate).mockClear();
   });
 
   afterEach(() => {
@@ -157,6 +165,23 @@ describe('set_arrival_date (#535)', () => {
       expect.objectContaining({ event: 'draft.arrival_date_refused', reason }),
       expect.any(String)
     );
+  });
+
+  it('refuses a full mail date, naming the nearest dates with room, without touching the draft (#700)', async () => {
+    vi.mocked(fullMailDate).mockResolvedValueOnce({ mailOn: '2026-10-06', openArrivals: ['2026-10-15'] });
+
+    await expect(set({ draftId: DRAFT_ID, arriveBy: '2026-10-16' })).rejects.toThrow(
+      'Mail to arrive by Fri, Oct 16 (2026-10-16) is fully booked. The nearest arrival date with room is Thu, Oct 15 (2026-10-15). ' +
+        'Choose one of those, or leave arriveBy out to mail as soon as possible.'
+    );
+    expect(fullMailDate).toHaveBeenCalledWith(expect.anything(), { arriveBy: '2026-10-16', mailOn: '2026-10-06' }, THURSDAY_MORNING);
+    expect(setDraftSchedule).not.toHaveBeenCalled();
+  });
+
+  it('clears a date without asking about room (#700)', async () => {
+    vi.mocked(setDraftSchedule).mockResolvedValueOnce(null);
+    await set({ draftId: DRAFT_ID });
+    expect(fullMailDate).not.toHaveBeenCalled();
   });
 
   it('refuses a draft id of the wrong shape as not found, without reading anything', async () => {

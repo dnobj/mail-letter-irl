@@ -645,8 +645,8 @@ describe('ENV_VAR_MANIFEST', () => {
     expect(APPROVED_LIVE_PROVIDERS).toEqual(['postgrid']);
   });
 
-  it('lists the arrive-by flag and its two settings, API only (#535)', () => {
-    for (const name of ['LETTER_IRL_ARRIVE_BY_ENABLED', 'LETTER_IRL_SCHEDULE_LEAD_DAYS', 'LETTER_IRL_SCHEDULE_HORIZON_DAYS']) {
+  it('lists the arrive-by flag and its settings, API only (#535, #700)', () => {
+    for (const name of ['LETTER_IRL_ARRIVE_BY_ENABLED', 'LETTER_IRL_SCHEDULE_LEAD_DAYS', 'LETTER_IRL_SCHEDULE_HORIZON_DAYS', 'LETTER_IRL_SCHEDULE_DAILY_CAP']) {
       expect(ENV_VAR_MANIFEST.find(entry => entry.name === name), name).toEqual({
         name,
         requiredIn: 'production',

@@ -1218,10 +1218,15 @@ export async function lettersWaitingBehindPause(): Promise<number | 'unknown'> {
   }
 }
 
-/** Claim and process due jobs until the batch is empty or reaches its limit. */
+/**
+ * Claim and process due jobs until the batch is empty or reaches its limit,
+ * or `stopAt` (milliseconds since the epoch) has passed before a claim: the
+ * maintenance run's time budget (#700), which runs batches until one comes
+ * back short (src/cli/runMaintenance.ts).
+ */
 export async function processDueLetterJobs(
   limit = 25,
-  options: ProcessLetterJobOptions = {}
+  options: ProcessLetterJobOptions & { stopAt?: number } = {}
 ): Promise<{
   processed: number;
   completed: number;
@@ -1300,7 +1305,7 @@ export async function processDueLetterJobs(
     return { ...summary, paused: true, waiting: count };
   }
 
-  while (summary.processed < limit) {
+  while (summary.processed < limit && !(options.stopAt !== undefined && Date.now() >= options.stopAt)) {
     const job = await claimJob();
     if (!job) break;
     const result = await processClaimedJob(job, options);

@@ -27,6 +27,7 @@
  */
 
 import { BETA_ACCESS_MESSAGE } from '../auth/betaAccess.js';
+import { openArrivalsOf, openArrivalsSentence } from '../services/mailDateCapacity.js';
 import { SpendLimitError } from '../services/betaSpendLimits.js';
 import {
   DuplicateMailError,
@@ -65,6 +66,7 @@ export const HANDLED_DRAFT_ERROR_CODES = [
   'JIT_ORDER_NOT_PAID',
   'JIT_PRODUCT_MISMATCH',
   'PACK_CANNOT_PAY',
+  'SCHEDULE_FULL',
   'SCHEDULE_PASSED'
 ] as const;
 
@@ -155,6 +157,15 @@ export function friendlyDraftError(
   if (code === 'SCHEDULE_PASSED') {
     return new Error(
       `The day this ${noun} was to go to the printer has passed, so it can no longer arrive by its date. Please preview it again with a new arrival date, or with none to send it as soon as possible.`
+    );
+  }
+  // #700: its mail date filled after the preview. Upstream interpolates the
+  // draft id and the date; the open dates travel on the error.
+  if (code === 'SCHEDULE_FULL') {
+    return new Error(
+      `Mail to arrive by this ${noun}'s date is now fully booked, so nothing was sent. ` +
+        `${openArrivalsSentence(openArrivalsOf(error), new Date(), true)} ` +
+        'Set another date with set_arrival_date, or clear it to send as soon as possible, then send it again.'
     );
   }
   // #579. Upstream interpolates the draft id; this keeps the code, so the

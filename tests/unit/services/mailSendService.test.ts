@@ -25,6 +25,11 @@ let recentLetters: Record<string, any>[] = [];
 let duplicateQueries: Array<{ sql: string; params: any[] }> = [];
 // The letters INSERT as it ran, for the arrive-by dates (#535).
 let letterInsert: { sql: string; params: any[] } | undefined;
+// Room on a mail date (#700): letters held for the send's date, those held
+// across the window on offer, and the capacity queries in the order they ran.
+let heldOnDate = 0;
+let heldWindow: Array<{ mail_on: string; held: number }> = [];
+let capacityQueries: Array<{ sql: string; params: any[] }> = [];
 
 const EMPTY_MD5 = 'd41d8cd98f00b204e9800998ecf8427e';
 
@@ -100,6 +105,12 @@ const client = {
         : null;
       return { rows: commerceOrder ? [{ ...commerceOrder }] : [] };
     }
+    if (sql.includes('pg_advisory_xact_lock') || sql.includes('AS held FROM letters')) {
+      capacityQueries.push({ sql, params: params ?? [] });
+      if (sql.includes('GROUP BY mail_on')) return { rows: heldWindow };
+      if (sql.includes('AS held')) return { rows: [{ held: heldOnDate }] };
+      return { rows: [] };
+    }
     if (sql.includes('COUNT(*) AS count') && sql.includes('FROM letters')) {
       // The caps FAIL CLOSED, so an unanswered COUNT is a refusal rather than
       // a pass - which is why this branch has to exist at all.
@@ -156,6 +167,9 @@ describe('createMailOrderFromDraft', () => {
     recentLetters = [];
     duplicateQueries = [];
     letterInsert = undefined;
+    heldOnDate = 0;
+    heldWindow = [];
+    capacityQueries = [];
     mocks.diagnostics.length = 0;
     draft = {
       draft_id: 'draft-1',
@@ -893,6 +907,7 @@ describe('createMailOrderFromDraft', () => {
 
     afterEach(() => {
       vi.useRealTimers();
+      vi.unstubAllEnvs();
     });
 
     it('copies the dates to the letter and holds its job until 09:00 New York time on the mail date', async () => {
@@ -955,10 +970,13 @@ describe('createMailOrderFromDraft', () => {
       draft.mail_on = '2026-10-01';
       commerceOrder = { order_id: 'order-jit', order_type: 'jit_mail', product_code: 'jit-letter', user_id: 'user-1', draft_id: 'draft-1', status: 'paid' };
 
-      await send({ type: 'jit_order', orderId: 'order-jit' });
+      const result = await send({ type: 'jit_order', orderId: 'order-jit' });
 
       expect(dates()).toEqual([null, null]);
       expect(createOutboxJob.mock.calls[0][2]).toEqual({ notBefore: undefined });
+      // For the order's event and get_purchase_status (#700).
+      expect(result.scheduleMissed).toEqual({ arriveBy: '2026-10-12', mailOn: '2026-10-01' });
+      expect(capacityQueries).toEqual([]);
       expect(mocks.diagnostics).toContainEqual({
         level: 'warn',
         event: 'send.schedule_missed',
@@ -971,10 +989,89 @@ describe('createMailOrderFromDraft', () => {
       draft.mail_on = '2026-10-06';
       commerceOrder = { order_id: 'order-jit', order_type: 'jit_mail', product_code: 'jit-letter', user_id: 'user-1', draft_id: 'draft-1', status: 'paid' };
 
-      await send({ type: 'jit_order', orderId: 'order-jit' });
+      const result = await send({ type: 'jit_order', orderId: 'order-jit' });
 
       expect(dates()).toEqual(['2026-10-16', '2026-10-06']);
       expect(createOutboxJob.mock.calls[0][2]).toEqual({ notBefore: new Date('2026-10-06T13:00:00Z') });
+      expect(result.scheduleMissed).toBeUndefined();
+    });
+
+    it('counts room on its mail date under a lock on the date, before any value moves (#700)', async () => {
+      draft.arrive_by = '2026-10-16';
+      draft.mail_on = '2026-10-06';
+      vi.stubEnv('LETTER_IRL_SCHEDULE_DAILY_CAP', '3');
+      heldOnDate = 2;
+
+      await send();
+
+      expect(capacityQueries.map(query => query.params)).toEqual([['2026-10-06'], ['2026-10-06']]);
+      expect(capacityQueries[0].sql).toContain("pg_advisory_xact_lock(hashtext('letter_irl.mail_on'), hashtext($1))");
+      expect(capacityQueries[1].sql).toContain("status = 'queued'");
+      const calls = client.query.mock.calls.map(([sql]) => String(sql));
+      const lockAt = client.query.mock.invocationCallOrder[calls.findIndex(sql => sql.includes('pg_advisory_xact_lock'))];
+      expect(lockAt).toBeGreaterThan(client.query.mock.invocationCallOrder[calls.findIndex(sql => sql.startsWith('SELECT * FROM letter_drafts'))]);
+      expect(lockAt).toBeLessThan(deductCredits.mock.invocationCallOrder[0]);
+      expect(dates()).toEqual(['2026-10-16', '2026-10-06']);
+    });
+
+    it('refuses a prepaid send whose mail date is full, naming the nearest dates with room, before any value moves (#700)', async () => {
+      draft.arrive_by = '2026-10-16';
+      draft.mail_on = '2026-10-06';
+      vi.stubEnv('LETTER_IRL_SCHEDULE_DAILY_CAP', '3');
+      heldOnDate = 3;
+      // Tue Oct 13, the earliest on offer, mails on Oct 1 and Mon Oct 19 on Oct 7, both full too;
+      // Tue Oct 20 mails on Oct 8.
+      heldWindow = [
+        { mail_on: '2026-10-01', held: 4 },
+        { mail_on: '2026-10-06', held: 3 },
+        { mail_on: '2026-10-07', held: 3 },
+        { mail_on: '2026-10-08', held: 2 }
+      ];
+
+      const refusal = await send().catch(error => error);
+
+      expect(refusal).toMatchObject({ code: 'SCHEDULE_FULL', diagnosticClass: 'SCHEDULE_FULL' });
+      // Fri Oct 16 mails on the full Oct 6 (Columbus Day, Oct 12, is no business day), so the nearest
+      // others: Wed Oct 14 and Thu Oct 15 before it, and Tue Oct 20 after it.
+      expect(refusal.openArrivals).toEqual(['2026-10-14', '2026-10-15', '2026-10-20']);
+      expect(letterInsert).toBeUndefined();
+      expect(deductCredits).not.toHaveBeenCalled();
+      expect(createOutboxJob).not.toHaveBeenCalled();
+      expect(draft.status).toBe('pending');
+    });
+
+    it('refuses a gift send whose mail date is full too (#700)', async () => {
+      draft.arrive_by = '2026-10-16';
+      draft.mail_on = '2026-10-06';
+      draft.is_gift_send = true;
+      vi.stubEnv('LETTER_IRL_GIFT_LETTERS_ENABLED', 'true');
+      vi.stubEnv('LETTER_IRL_SCHEDULE_DAILY_CAP', '1');
+      heldOnDate = 1;
+
+      await expect(send()).rejects.toMatchObject({ code: 'SCHEDULE_FULL' });
+      expect(letterInsert).toBeUndefined();
+    });
+
+    it('never refuses a paid Pay & Send order for a full date, and takes no lock for it (#700)', async () => {
+      draft.arrive_by = '2026-10-16';
+      draft.mail_on = '2026-10-06';
+      vi.stubEnv('LETTER_IRL_SCHEDULE_DAILY_CAP', '1');
+      heldOnDate = 5;
+      commerceOrder = { order_id: 'order-jit', order_type: 'jit_mail', product_code: 'jit-letter', user_id: 'user-1', draft_id: 'draft-1', status: 'paid' };
+
+      await send({ type: 'jit_order', orderId: 'order-jit' });
+
+      expect(dates()).toEqual(['2026-10-16', '2026-10-06']);
+      expect(capacityQueries).toEqual([]);
+    });
+
+    it('counts nothing for mail with no date (#700)', async () => {
+      heldOnDate = 5;
+      vi.stubEnv('LETTER_IRL_SCHEDULE_DAILY_CAP', '1');
+
+      await send();
+
+      expect(capacityQueries).toEqual([]);
     });
 
     it('refuses dates it cannot read as calendar days rather than guessing the day', async () => {

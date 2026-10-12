@@ -1015,6 +1015,44 @@ describe('mail outbox retries', () => {
     expect(sendLetter).toHaveBeenCalledTimes(1);
   });
 
+  describe('the time budget of a run (#700)', () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    const claimQueries = () => query.mock.calls.filter(([sql]) => String(sql).includes('WITH candidate'));
+
+    it('claims until the outbox is empty while time is left', async () => {
+      vi.spyOn(Date, 'now').mockReturnValue(999);
+      mockClaims(1);
+      await expect(processDueLetterJobs(3, { stopAt: 1_000 })).resolves.toEqual({ processed: 1, completed: 1, retryScheduled: 0, failed: 0 });
+      expect(claimQueries()).toHaveLength(2);
+    });
+
+    it('claims nothing once it has passed, though its sweeps still run', async () => {
+      vi.spyOn(Date, 'now').mockReturnValue(1_000);
+      mockClaims(5);
+      await expect(processDueLetterJobs(3, { stopAt: 1_000 })).resolves.toEqual({ processed: 0, completed: 0, retryScheduled: 0, failed: 0 });
+      expect(claimQueries()).toEqual([]);
+      expect(query.mock.calls.some(([sql]) => String(sql).includes("provider_outcome = 'dispatching'"))).toBe(true);
+    });
+
+    it('stops claiming in the middle of a batch when it passes', async () => {
+      let clock = 0;
+      vi.spyOn(Date, 'now').mockImplementation(() => clock);
+      mockClaims(5);
+      sendLetter.mockImplementationOnce(async (...args: unknown[]) => {
+        clock = 1_000;
+        return (sendLetter.getMockImplementation() as (...a: unknown[]) => unknown)(...args);
+      });
+
+      const result = await processDueLetterJobs(3, { stopAt: 1_000 });
+
+      expect(result.processed).toBe(1);
+      expect(claimQueries()).toHaveLength(1);
+    });
+  });
+
   it('replays an exact admin retry but rejects reuse by a different actor or reason', async () => {
     const hash = (value: string) => createHash('sha256').update(value).digest('hex');
     clientQuery.mockImplementation(async (sql: string) => {
