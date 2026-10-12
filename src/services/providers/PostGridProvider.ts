@@ -1242,7 +1242,9 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       'canceled': 'failed'
     };
 
-    return statusMap[String(postgridStatus).toLowerCase()] ?? 'unrecognised';
+    // Own keys only: "constructor" is not a status (#682 review).
+    const key = String(postgridStatus).toLowerCase();
+    return Object.hasOwn(statusMap, key) ? statusMap[key] : 'unrecognised';
   }
 
   /**
@@ -1265,7 +1267,8 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       'canceled': 'Letter was canceled before sending'
     };
 
-    return messageMap[String(postgridStatus).toLowerCase()] || `Status: ${postgridStatus}`;
+    const key = String(postgridStatus).toLowerCase();
+    return Object.hasOwn(messageMap, key) ? messageMap[key] : `Status: ${postgridStatus}`;
   }
 
   /**

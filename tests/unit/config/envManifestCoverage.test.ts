@@ -36,7 +36,6 @@ const NOT_IN_MANIFEST: Record<string, string> = {
   LETTER_IRL_GIFT_LETTER_TTL_DAYS: 'lifetime with a default',
   LETTER_IRL_GIFT_OPERATOR_GENERATIONS: 'limit with a default',
   LETTER_IRL_GIFT_QR_FORMAT: 'format with a default',
-  LETTER_IRL_SERVER_INSTRUCTIONS: 'local override of the served instructions',
   LETTER_IRL_OAUTH_ALLOWED_ALGORITHMS: 'with a default',
   LETTER_IRL_OAUTH_SCOPES: 'with a default',
   LETTER_IRL_OAUTH_EMAIL_CLAIM: 'with a default',
@@ -46,10 +45,11 @@ const NOT_IN_MANIFEST: Record<string, string> = {
   LETTER_IRL_WIDGET_DOMAIN: 'with a default',
   LETTER_IRL_API_URL: 'with a default',
   LETTER_IRL_PACKS_URL: 'with a default',
-  LETTER_IRL_CHATGPT_PLUGIN_ID: 'with a default',
   // Each checked by its own rule in validateDeploymentConfig; unset is the production state.
   LETTER_IRL_REQUIRE_AUTH: 'checked by its own rule; on unless set to false',
   LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY: 'checked by its own rule; off unless set',
+  // Not a setting: a constant the code exports under this name.
+  LETTER_IRL_SERVER_INSTRUCTIONS: 'a TypeScript constant, not an environment variable',
   // Local development only.
   LETTER_IRL_DEFAULT_USER_ID: 'local development without sign-in',
   LETTER_IRL_DEFAULT_SENDER_ADDRESS: 'local development fallback sender',
@@ -96,6 +96,7 @@ describe('the deployment manifest names every LETTER_IRL_* setting (#682)', () =
   it('declares the home and custom stationery flags', () => {
     expect(declared).toContain('LETTER_IRL_HOME_ENABLED');
     expect(declared).toContain('LETTER_IRL_CUSTOM_STATIONERY_ENABLED');
+    expect(declared).toContain('LETTER_IRL_CHATGPT_PLUGIN_ID');
   });
 
   it('lists no name here that the code no longer reads, or that the manifest now has', () => {

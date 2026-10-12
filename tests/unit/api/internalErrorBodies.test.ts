@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { IncomingMessage, ServerResponse } from 'http';
+import { Readable } from 'node:stream';
 
 /**
  * A REST request that fails inside answers a fixed sentence and a reference, never the error's own text (#682). The
@@ -83,5 +84,62 @@ describe('a REST 500 says a fixed sentence and a reference (#682)', () => {
     expect(line, 'no diagnostic line').toBeDefined();
     expect(JSON.parse(line!)).toMatchObject({ errorClass: '23514', reference: body.reference });
     expect(logged.mock.calls.flat().map(String).join('\n')).not.toContain('secret_value_42');
+  });
+});
+
+describe("a caller's own mistake answers 4xx, not the fixed 500 (#682 review)", () => {
+  const signedIn = () => {
+    vi.mocked(authenticateRestRequest).mockResolvedValue({
+      ok: true,
+      user: { userId: 'auth0|user-1', scopes: ['mail:read', 'mail:draft', 'mail:send'] }
+    } as Awaited<ReturnType<typeof authenticateRestRequest>>);
+    vi.mocked(rateLimitAccount).mockResolvedValue(false);
+    vi.mocked(query).mockReset();
+    vi.mocked(query).mockResolvedValue({ rows: [{ count: '0' }], rowCount: 0 } as never);
+  };
+  const posting = (body: string) =>
+    Object.assign(Readable.from([Buffer.from(body)]), {
+      headers: { 'content-type': 'application/json' },
+      method: 'POST',
+      url: '/api/return-address'
+    }) as unknown as IncomingMessage;
+  const returnAddress = async () => (await import('../../../src/api/returnAddressApiHandler.js')).handleReturnAddressApiRequest;
+  const letters = async () => (await import('../../../src/api/letterApiHandler.js')).handleLetterApiRequest;
+
+  it('a body that is not JSON is 400', async () => {
+    signedIn();
+    const { captured, res } = fakeResponse();
+    await (await returnAddress())(posting('{not json'), res, '/api/return-address');
+    expect(captured.status).toBe(400);
+    expect(JSON.parse(captured.body).message).toBe('The request body is not valid JSON');
+  });
+
+  it('a body over the limit is 413', async () => {
+    signedIn();
+    const { captured, res } = fakeResponse();
+    await (await returnAddress())(posting(`{"name":"${'x'.repeat(300_000)}"}`), res, '/api/return-address');
+    expect(captured.status).toBe(413);
+  });
+
+  it.each([['/api/letters/%E0%A4%A'], ['/api/letters/%zz/cancel']])('a malformed letter id is 400: %s', async path => {
+    signedIn();
+    const { captured, res } = fakeResponse();
+    const method = path.endsWith('/cancel') ? 'POST' : 'GET';
+    await (await letters())({ headers: {}, method, url: path } as unknown as IncomingMessage, res, path);
+    expect(captured.status).toBe(400);
+    expect(JSON.parse(captured.body).message).toBe('The letter id is malformed');
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it('a limit that is not a number is the default, whatever the Host header', async () => {
+    signedIn();
+    const { captured, res } = fakeResponse();
+    const req = { headers: { host: 'bad host:x:y' }, method: 'GET', url: '/api/letters?limit=abc&offset=zz' } as unknown as IncomingMessage;
+    await (await letters())(req, res, '/api/letters');
+    expect(captured.status).toBe(200);
+    expect(JSON.parse(captured.body)).toMatchObject({ limit: 20, offset: 0 });
+    const params = vi.mocked(query).mock.calls.flatMap(call => (call[1] ?? []) as unknown[]);
+    expect(params).toContain(20);
+    expect(params.some(value => typeof value === 'number' && Number.isNaN(value))).toBe(false);
   });
 });

@@ -2012,7 +2012,7 @@ export function summarizeToolResult(
       const message = typeof result.message === "string" ? result.message : "The address request was checked.";
       const recipient = result.recipient as Record<string, unknown> | undefined;
       return recipient
-        ? `${message} The address, exactly as the recipient typed it: ${JSON.stringify(addressLine(recipient))}.`
+        ? `${message} The address the recipient gave, in their own words or as corrected for USPS: ${JSON.stringify(addressLine(recipient))}.`
         : message;
     }
     case "cancel_address_request":

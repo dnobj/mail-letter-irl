@@ -8,7 +8,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'http';
-import { readRequestBody, JSON_API_BODY_LIMIT_BYTES } from '../utils/requestBody.js';
+import { readRequestBody, JSON_API_BODY_LIMIT_BYTES, RequestBodyTooLargeError } from '../utils/requestBody.js';
 import {
   getReturnAddress,
   setReturnAddress,
@@ -44,9 +44,16 @@ async function parseBody(req: IncomingMessage): Promise<any> {
   try {
     return body ? JSON.parse(body) : {};
   } catch {
-    // A RequestBodyTooLargeError from above propagates with its own 413 rather
-    // than being flattened into this parse error.
-    throw new Error('Invalid JSON body');
+    // A RequestBodyTooLargeError from above is answered 413 by the handler,
+    // not flattened into this parse error.
+    throw new InvalidJsonBodyError();
+  }
+}
+
+/** A body that is not JSON: the caller's to fix, answered 400 (#682). */
+class InvalidJsonBodyError extends Error {
+  constructor() {
+    super('Invalid JSON body');
   }
 }
 
@@ -168,6 +175,14 @@ export async function handleReturnAddressApiRequest(
     return true;
 
   } catch (error) {
+    if (error instanceof InvalidJsonBodyError) {
+      sendJson(res, 400, { error: 'Bad request', message: 'The request body is not valid JSON' });
+      return true;
+    }
+    if (error instanceof RequestBodyTooLargeError) {
+      sendJson(res, 413, { error: 'Payload too large', message: 'The request body is too large' });
+      return true;
+    }
     sendInternalError(res, 'address.api_failed', error, 'Unable to complete return address request');
     return true;
   }

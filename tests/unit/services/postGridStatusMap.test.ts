@@ -55,6 +55,11 @@ describe("PostGrid's statuses (#566)", () => {
     expect(warn.mock.calls.flat().join('\n')).toContain('"length":10');
     expect(warn.mock.calls.flat().join('\n')).not.toContain('odd value');
     warn.mockClear();
+    // A name an object has of its own is not a status.
+    for (const inherited of ['constructor', '__proto__', 'toString']) {
+      await expect(answering(inherited).getStatus('letter_status_map')).resolves.toMatchObject({ status: 'unrecognised' });
+    }
+    warn.mockClear();
     await answering('ready').getStatus('letter_status_map');
     expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();

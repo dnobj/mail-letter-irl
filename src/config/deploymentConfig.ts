@@ -660,6 +660,18 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     services: ['api']
   },
   /**
+   * The ChatGPT app's id (src/services/letterHomeService.ts): the home card's
+   * link back to the app in ChatGPT. Unset, the home works without that link,
+   * so advisory; production needs it once the home is on (#682 review).
+   */
+  {
+    name: 'LETTER_IRL_CHATGPT_PLUGIN_ID',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  /**
    * The words editor (#647, src/config/wordsEditor.ts): a letter's words
    * changed in place on one page, without room to write, while the flag is on
    * and our renderer draws letters. Off unless set; listed so the preflight

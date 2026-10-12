@@ -22,6 +22,20 @@ import { certifiedFactsOf } from '../config/certifiedMail.js';
 import { mailServiceOf } from '../config/products.js';
 import { sendInternalError } from './internalError.js';
 
+/** A path segment decoded, or null when its percent-escapes are malformed (#682 review). */
+function decodedSegment(raw: string): string | null {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return null;
+  }
+}
+
+function malformedLetterId(res: ServerResponse): true {
+  sendJson(res, 400, { error: 'Bad request', message: 'The letter id is malformed' });
+  return true;
+}
+
 /**
  * Send JSON response
  */
@@ -63,7 +77,8 @@ export async function handleLetterApiRequest(
   try {
     // GET /api/letters - List letters for user
     if (pathname === '/api/letters' && req.method === 'GET') {
-      const url = new URL(req.url!, `http://${req.headers.host}`);
+      // Only the query is read, so the Host header plays no part (#682 review).
+      const url = new URL(req.url ?? pathname, 'http://localhost');
       await handleListLetters(res, authInfo, url.searchParams);
       return true;
     }
@@ -71,14 +86,17 @@ export async function handleLetterApiRequest(
     // POST /api/letters/:letterId/cancel - Cancel held mail (#535)
     const cancelMatch = pathname.match(/^\/api\/letters\/([^/]+)\/cancel$/);
     if (cancelMatch && req.method === 'POST') {
-      await handleCancelLetter(res, authInfo, decodeURIComponent(cancelMatch[1]));
+      const letterId = decodedSegment(cancelMatch[1]);
+      if (letterId === null) return malformedLetterId(res);
+      await handleCancelLetter(res, authInfo, letterId);
       return true;
     }
 
     // GET /api/letters/:letterId - Get specific letter details
     const letterMatch = pathname.match(/^\/api\/letters\/([^/]+)$/);
     if (letterMatch && req.method === 'GET') {
-      const letterId = decodeURIComponent(letterMatch[1]);
+      const letterId = decodedSegment(letterMatch[1]);
+      if (letterId === null) return malformedLetterId(res);
       await handleGetLetter(res, authInfo, letterId);
       return true;
     }
@@ -205,8 +223,11 @@ async function handleListLetters(
   authInfo: AuthInfo,
   queryParams: URLSearchParams
 ) {
+  // Not a number is the default, not a 500 from the database (#682 review).
   let limit = parseInt(queryParams.get('limit') || '20', 10);
   let offset = parseInt(queryParams.get('offset') || '0', 10);
+  if (!Number.isFinite(limit)) limit = 20;
+  if (!Number.isFinite(offset)) offset = 0;
   const status = queryParams.get('status');
 
   // Validate limits
