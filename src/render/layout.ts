@@ -427,7 +427,9 @@ function advanceLimit(fontName: FontName, paragraph: string, width: number, scal
   const advanceOf = (codePoint: number) => {
     let units = cache.get(codePoint);
     if (units === undefined) {
-      units = font.hasGlyphForCodePoint(codePoint) ? font.glyphForCodePoint(codePoint).advanceWidth : 0;
+      // A character the face lacks is drawn as its fallback glyph, at that glyph's advance: counted
+      // so, or the limit runs to the paragraph's end and each line's search shapes all of it (#694).
+      units = font.glyphForCodePoint(codePoint).advanceWidth;
       cache.set(codePoint, units);
     }
     return units * scale;
@@ -479,8 +481,10 @@ const RECENT_WRAPS = 4;
 
 /**
  * Lets the remembered wrappings go, with the words in them: a preview's layouts
- * call this when they are done (layoutLetterForPreview), so a person's letter
- * is not kept in memory after its request (#694 review round 3).
+ * call this when they are done (layoutLetterForPreview), so the letter is not
+ * kept past them (#694 review round 3). Other layouts (a gift letter's
+ * one-page check, the print at send) leave theirs until the next preview, or
+ * four more wrappings, push them out.
  */
 export function forgetRecentWraps(): void {
   recentWraps.clear();

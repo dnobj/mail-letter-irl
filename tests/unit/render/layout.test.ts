@@ -123,6 +123,16 @@ describe('wrapping paragraphs (#534)', () => {
     expect(shaped.length).toBeLessThan(layout.pages[0].linesUsed * 12);
   });
 
+  it('shapes no line candidate far past the line in text the face cannot draw (#694 review round 4)', () => {
+    // A character the face lacks is drawn as its fallback glyph; counted as nothing, the fit limit ran
+    // to the paragraph's end and each line's search shaped thousands of characters. The previews refuse
+    // such text first (the printable check); the layout must not depend on that.
+    vi.mocked(shape).mockClear();
+    layoutLetter({ text: '\u6f22'.repeat(30_000), layoutType: 'text_only', stationery: { theme: 'handwritten' } }, { maxPages: 3 });
+    const shaped = vi.mocked(shape).mock.calls.map(([, text]) => text.length);
+    expect(Math.max(...shaped)).toBeLessThan(400);
+  });
+
   it('bounds the shaping a hostile letter costs: one-letter words to the character cap, in Handwritten (#694)', () => {
     // The audit's worst case: 30,000 characters of one-letter words, Handwritten, three pages.
     // Before #694 this shaped once per word on every line, and every line of the text.

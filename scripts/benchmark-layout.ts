@@ -21,12 +21,19 @@ function oneLetterWords(characters: number): string {
   return 'a '.repeat(Math.ceil(characters / 2)).slice(0, characters);
 }
 
+/** Letters each with four combining accents: printable, and close to fitting, so no budget stops it. */
+function markHeavy(characters: number): string {
+  return 'e\u0301\u0300\u0302\u0308 '.repeat(Math.ceil(characters / 6)).slice(0, characters);
+}
+
 const CASES: Array<{ name: string; text: string; maxPages: number }> = [
   { name: '2,700 characters of prose', text: prose(2_700), maxPages: 1 },
   { name: '10,000 characters of prose', text: prose(10_000), maxPages: 1 },
   { name: '30,000 characters of prose, 3 pages', text: prose(30_000), maxPages: 3 },
   { name: '10,000 characters of one-letter words', text: oneLetterWords(10_000), maxPages: 1 },
-  { name: '30,000 characters of one-letter words, 3 pages', text: oneLetterWords(30_000), maxPages: 3 }
+  { name: '30,000 characters of one-letter words, 3 pages', text: oneLetterWords(30_000), maxPages: 3 },
+  // The worst found in review (#694 round 4): a refused signed preview lays it out twice, ~4.5 s.
+  { name: '30,000 characters of marked letters, 3 pages', text: markHeavy(30_000), maxPages: 3 }
 ];
 
 const FACES: Array<{ name: string; stationery: Stationery }> = [
