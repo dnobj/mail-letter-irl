@@ -1482,7 +1482,7 @@ export function validateDeploymentConfig(
     findings.push({
       severity: production ? 'error' : 'warning',
       rule: 'limits.operator_alert_url_invalid',
-      message: 'LETTER_IRL_OPERATOR_ALERT_URL must be an https URL, such as a healthchecks.io /fail URL'
+      message: 'LETTER_IRL_OPERATOR_ALERT_URL must be an https URL, such as an ntfy topic URL'
     });
   }
 

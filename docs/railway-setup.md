@@ -104,8 +104,10 @@ LETTER_IRL_BETA_ACCOUNT_DAILY_CHARGE_CENTS=<spend per account per day, in cents;
 # (migration 038), with no redeploy; these variables are the values in force when none is set there.
 # Where the operator is told what needs a person (src/services/operatorNotify.ts): a daily limit that
 # refused someone, held mail that missed its mail day, letters the provider cancelled, a dispatch whose
-# outcome is unknown, mail held for its funding. An https URL that takes a plain-text POST, such as a
-# healthchecks.io check's /fail URL or an ntfy topic. A capability: treat it as a secret. Set it on the
+# outcome is unknown, mail held for its funding. An https URL that takes a plain-text POST and tells the
+# owner of EVERY post, such as an ntfy topic (https://ntfy.sh/<topic>). Not a healthchecks.io /fail URL:
+# a check emails only when it changes state, so it tells the first notice and then nothing until it is
+# pinged up again. A capability: treat it as a secret. Set it on the
 # API service AND the maintenance service. Required in production (#699): boot refuses without it.
 LETTER_IRL_OPERATOR_ALERT_URL=<https URL; outside production, unset for the admin panel's alerts alone>
 # Gift letters (docs/gift-letters.md): off unless explicitly true. API service only.

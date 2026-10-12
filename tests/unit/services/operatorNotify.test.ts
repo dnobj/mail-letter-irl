@@ -146,11 +146,13 @@ describe('the words', () => {
       '1 letter with an arrival date did not reach the printer by 18:00 New York time on its mail day. See the Alerts page on the admin panel.'
     );
     expect(OPERATOR_NOTICES.missedMailDay(3)).toContain('3 letters with an arrival date did not reach the printer by 18:00 New York time on their mail day.');
+    // True whatever paid: a Pay & Send letter's refund is a person's decision (review round 1).
     expect(OPERATOR_NOTICES.providerCancelled(1)).toBe(
-      'The print provider cancelled 1 letter before printing. What paid for it goes back. See the Alerts page on the admin panel.'
+      "The print provider cancelled 1 letter before printing. A prepaid or gift letter's payment goes back on its own; a critical alert means a person must decide a refund. See the Alerts page on the admin panel."
     );
-    expect(OPERATOR_NOTICES.providerCancelled(2)).toContain('cancelled 2 letters before printing. What paid for them goes back.');
-    expect(OPERATOR_NOTICES.ambiguousOutcome()).toContain('the outcome is unknown');
+    expect(OPERATOR_NOTICES.providerCancelled(2)).toContain('cancelled 2 letters before printing.');
+    // True whatever the hold changed: a late signal on a settled job says so too.
+    expect(OPERATOR_NOTICES.ambiguousOutcome()).toContain('the outcome is unknown, so it may need checking');
     expect(OPERATOR_NOTICES.heldMailFunding()).toContain('refunded or disputed');
   });
 

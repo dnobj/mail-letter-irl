@@ -15,6 +15,7 @@ import { CREDITS_PER_LETTER } from '../config/products.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 import { returnConsumedCreditsForLetter } from './creditLedgerService.js';
 import { returnGiftLetterForFailedSendWithClient } from './giftLetterService.js';
+import { leftForOperatorSql } from './heldMail.js';
 
 /** The failure code a cancel's return records (source_metadata.failure_code). */
 export const CANCELLED_BY_CUSTOMER = 'cancelled_by_customer';
@@ -74,8 +75,11 @@ export async function raiseMissedMailDayAlerts(): Promise<number> {
  * York time on it (#699): queued or taken, not yet accepted. The maintenance
  * run withholds its heartbeat while there are any, so the monitor alerts until
  * they go or a person settles them. 'unknown' when the count fails, which
- * withholds too. Letters that failed or are held are left out: each has its
- * own alert and its own end, and would otherwise withhold it for good.
+ * withholds too. Left out, each having its own alert and its own end, and each
+ * able to wait for weeks, which would keep the monitor alarming and hide a run
+ * that stops: letters that failed or are held after an ambiguous dispatch, and
+ * mail left for the operator (leftForOperatorSql: held for its funding, or of
+ * a blocked account), which the outbox's own waiting count leaves too.
  */
 export async function lettersPastMailDay(): Promise<number | 'unknown'> {
   try {
@@ -84,7 +88,12 @@ export async function lettersPastMailDay(): Promise<number | 'unknown'> {
          FROM letters held
         WHERE held.mail_on IS NOT NULL
           AND held.status IN ('queued', 'processing')
-          AND (held.mail_on + TIME '18:00') AT TIME ZONE 'America/New_York' < NOW()`
+          AND (held.mail_on + TIME '18:00') AT TIME ZONE 'America/New_York' < NOW()
+          AND NOT EXISTS (
+            SELECT 1 FROM letter_jobs left_job
+             WHERE left_job.letter_id = held.letter_id
+               AND ${leftForOperatorSql('left_job')}
+          )`
     );
     return Number(late.rows[0]?.late ?? 0);
   } catch (error) {

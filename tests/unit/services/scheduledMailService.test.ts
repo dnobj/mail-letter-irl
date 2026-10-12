@@ -13,6 +13,7 @@ vi.mock('../../../src/services/giftLetterService.js', () => ({ returnGiftLetterF
 import { query, transaction } from '../../../src/db/index.js';
 import { returnConsumedCreditsForLetter } from '../../../src/services/creditLedgerService.js';
 import { returnGiftLetterForFailedSendWithClient } from '../../../src/services/giftLetterService.js';
+import { leftForOperatorSql } from '../../../src/services/heldMail.js';
 import {
   CANCELLED_BY_CUSTOMER,
   MISSED_MAIL_DAY_ALERT,
@@ -293,6 +294,10 @@ describe('lettersPastMailDay (#699)', () => {
     // Not failed or held: each has its own alert and its own end.
     expect(flat).toContain("held.status IN ('queued', 'processing')");
     expect(flat).toContain("(held.mail_on + TIME '18:00') AT TIME ZONE 'America/New_York' < NOW()");
+    // Not mail left for the operator, which waits for a person (review round 1).
+    expect(flat).toContain(
+      `AND NOT EXISTS ( SELECT 1 FROM letter_jobs left_job WHERE left_job.letter_id = held.letter_id AND ${leftForOperatorSql('left_job').replace(/\s+/g, ' ')} )`
+    );
   });
 
   it("answers 'unknown' when the count fails, which withholds the heartbeat too", async () => {

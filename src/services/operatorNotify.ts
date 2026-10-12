@@ -153,9 +153,9 @@ export const OPERATOR_NOTICES = {
   missedMailDay: (count: number) =>
     `${count === 1 ? '1 letter' : `${count} letters`} with an arrival date did not reach the printer by 18:00 New York time on ${count === 1 ? 'its' : 'their'} mail day. See the Alerts page on the admin panel.`,
   providerCancelled: (count: number) =>
-    `The print provider cancelled ${count === 1 ? '1 letter' : `${count} letters`} before printing. What paid for ${count === 1 ? 'it' : 'them'} goes back. See the Alerts page on the admin panel.`,
+    `The print provider cancelled ${count === 1 ? '1 letter' : `${count} letters`} before printing. A prepaid or gift letter's payment goes back on its own; a critical alert means a person must decide a refund. See the Alerts page on the admin panel.`,
   ambiguousOutcome: () =>
-    'A letter was sent to the print provider and the outcome is unknown. It is held until a person checks it with the provider. See the Alerts page on the admin panel.',
+    'A letter was sent to the print provider and the outcome is unknown, so it may need checking with the provider. See the Alerts page on the admin panel.',
   heldMailFunding: () =>
     'Mail paid for by a purchase that was refunded or disputed is held until a person sends or cancels it. See the Alerts page on the admin panel.'
 } as const;

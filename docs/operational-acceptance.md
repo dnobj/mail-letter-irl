@@ -33,7 +33,9 @@ The daily ceilings (`LETTER_IRL_BETA_GLOBAL_DAILY_MAIL_CEILING`, `LETTER_IRL_BET
   - a dispatch whose outcome is unknown;
   - mail held because its funding was refunded or disputed.
 
-  A notice names no customer, letter or order: the Alerts page has them. Setup: a healthchecks.io check of its own, separate from the heartbeat's, with its `/fail` URL set on both services, so each notice emails the owner; or an ntfy topic, for a phone.
+  A notice names no customer, letter or order: the Alerts page has them. A second notice of a kind within the hour is not posted (the Alerts page has it), so check the page after each one.
+
+  Setup: a channel that tells the owner of every post. An ntfy topic does: pick a long random topic name (the URL is a capability), subscribe to it in the ntfy app on the owner's phone, and set `https://ntfy.sh/<topic>` on the API and maintenance services. A healthchecks.io `/fail` URL does not: a check emails only when it changes state, so after the first notice it stays down and tells nothing more until it is pinged up again.
 - **Who watches:** the owner, for held mail, refunds and disputes, through the admin panel: `/alerts`, and an order or account found through Lookup.
 
 ## Stopping and recovering

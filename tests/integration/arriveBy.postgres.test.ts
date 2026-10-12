@@ -731,6 +731,30 @@ describePostgres('arrive-by (migration 040, #535)', () => {
     expect(await creditsOf(userId)).toBe(10);
   }, 60_000);
 
+  it('counts mail still waiting after its mail day, but not mail left for the operator (#699)', async () => {
+    const before = await held.lettersPastMailDay();
+    expect(typeof before).toBe('number');
+    const userId = await seedUser();
+    const letterId = await sendHeld(userId);
+    await pool.query("UPDATE letters SET arrive_by = '2020-01-13', mail_on = '2020-01-02' WHERE letter_id = $1", [letterId]);
+    await expect(held.lettersPastMailDay()).resolves.toBe((before as number) + 1);
+
+    // Held for its funding: it waits for a person, perhaps for weeks.
+    await pool.query("UPDATE letter_jobs SET hold_reason = 'funding_disputed' WHERE letter_id = $1", [letterId]);
+    await expect(held.lettersPastMailDay()).resolves.toBe(before);
+    await pool.query('UPDATE letter_jobs SET hold_reason = NULL WHERE letter_id = $1', [letterId]);
+    await expect(held.lettersPastMailDay()).resolves.toBe((before as number) + 1);
+
+    // Of a blocked account: the same.
+    await pool.query("UPDATE users SET sends_blocked_reason = 'payment_disputed' WHERE user_id = $1", [userId]);
+    await expect(held.lettersPastMailDay()).resolves.toBe(before);
+    await pool.query('UPDATE users SET sends_blocked_reason = NULL WHERE user_id = $1', [userId]);
+
+    // Once it fails, it has its own alert and its own end.
+    await pool.query("UPDATE letters SET status = 'failed' WHERE letter_id = $1", [letterId]);
+    await expect(held.lettersPastMailDay()).resolves.toBe(before);
+  }, 60_000);
+
   it("raises one alert for held mail not at the printer by 18:00 on its mail date, and none for mail that is", async () => {
     const userId = await seedUser();
     const late = randomUUID();
