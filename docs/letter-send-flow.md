@@ -531,6 +531,15 @@ An ambiguous outcome returns nothing. The piece may physically exist, and an unn
 
 A gift letter (`funding_type = 'gift_letter'`) consumed no credits, so its compensation is a gift: the same three paths void the code printed on it and grant a replacement gift letter with the same budget, once, keyed by the letter. Nothing is returned if the code was already redeemed, which proves the letter arrived, or if the purchase that granted the gift has been refunded or disputed. Either counts as compensation for the retry guard.
 
+## When the Money Goes Back: Mail Left for the Operator (#696)
+
+A letter sent with an arrival date (#535) can wait weeks for its mail date, paid for by a letter pack whose money may go back meanwhile. Decision D2: such mail waits for a person instead of printing, and is never cancelled automatically, because a dispute can be won.
+
+- **A pack refunded in full, or lost to a dispute** (a dispute that takes the money; a card network's inquiry takes none): `holdMailFundedByOrder` (`commerceService`) finds the letters whose deduction drew on the order's lots, or on lots returned from them, as retention reads them. Each letter still `queued` is locked, then its job; a job still `pending` or claimed (`processing`), never dispatched, takes the `hold_reason` `funding_reversed` or `funding_disputed`. One `held_mail_funding_reversed` alert is raised per order (migration 056). It runs before the pack's lots are revoked, and not while a refund is still pending, as it may fail. A proportional refund (unused letters only) holds nothing: what it leaves was paid for.
+- **The job keeps its state**: pending, never dispatched, as mail the outbox has not taken always is (a `held` job must have reached the provider). The funding hold is the `hold_reason` alone, `FUNDING_HOLD_REASONS` in `src/services/heldMail.ts`.
+- **The outbox leaves it**, and any mail of an account whose sending is blocked (`users.sends_blocked_reason`, set by a lost dispute or an erasure): the claim's due branch skips both, by a plain read. The dispatch marker reads the same again under its locks: a job that turned so between the claim and the mark, or a claim a crash left behind, goes back to pending with its attempt given back, never failed or refunded. The waiting count behind a pause leaves them out too.
+- **The operator** sees it on the attention list and the job's page, and releases it with **Send held mail now** (`job.dispatch_now`), due or not, which ends the hold; mail of a blocked account still waits until it is unblocked. Or the customer cancels it (`cancel_scheduled_mail`), or an erasure does.
+
 ## Hourly Recovery
 
 Railway runs `npm run maintenance` once per hour. Outbox recovery atomically claims due rows with `FOR UPDATE SKIP LOCKED`, allowing safe concurrency. Held mail (#535) is due from 09:00 New York time on its mail date. A job left in processing with a lock older than 15 minutes is treated as stale and can be reclaimed.
