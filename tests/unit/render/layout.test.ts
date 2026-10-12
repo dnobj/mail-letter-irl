@@ -4,7 +4,8 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { drawsGrapheme, layoutLetter, wrapParagraph, type Layout, type TextRun } from '../../../src/render/layout.js';
+import LineBreaker from 'linebreak';
+import { drawsGrapheme, layoutLetter, LINE_BUDGET_PER_PAGE, wrapParagraph, type Layout, type TextRun } from '../../../src/render/layout.js';
 import { isInvisible, mirrorOf } from '../../../src/render/bidi.js';
 
 // shape() is spied on, so a test can see what layoutLetter shapes; it still
@@ -110,11 +111,44 @@ describe('wrapping paragraphs (#534)', () => {
     // layoutLetter, the first candidate would be the whole 20,000 letters.
     vi.mocked(shape).mockClear();
     const layout = layoutLetter({ text: 'i'.repeat(20000), layoutType: 'text_only' });
-    expect(runs(layout).map(run => run.source).join('')).toBe('i'.repeat(20000));
+    // Laid out to its line budget and no further (#694): the start of the run, line by line.
+    expect(layout.truncated).toBe(true);
+    expect(layout.pages[0].linesUsed).toBe(LINE_BUDGET_PER_PAGE);
+    const drawn = runs(layout).map(run => run.source).join('');
+    expect('i'.repeat(20000).startsWith(drawn)).toBe(true);
+    expect(drawn.length).toBeGreaterThan(0);
     const shaped = vi.mocked(shape).mock.calls.map(([, text]) => text.length);
     expect(Math.max(...shaped)).toBeLessThan(400);
     // A binary search per line, not a shaping per letter.
     expect(shaped.length).toBeLessThan(layout.pages[0].linesUsed * 12);
+  });
+
+  it('bounds the shaping a hostile letter costs: one-letter words to the character cap, in Handwritten (#694)', () => {
+    // The audit's worst case: 30,000 characters of one-letter words, Handwritten, three pages.
+    // Before #694 this shaped once per word on every line, and every line of the text.
+    vi.mocked(shape).mockClear();
+    const text = 'a '.repeat(15000);
+    const layout = layoutLetter({ text, layoutType: 'text_only', stationery: { theme: 'handwritten' } }, { maxPages: 3 });
+    expect(layout.truncated).toBe(true);
+    expect(layout.overflowLines).toBeGreaterThan(0);
+    const lines = layout.pages.reduce((count, page) => count + page.linesUsed, 0);
+    expect(lines).toBe(3 * LINE_BUDGET_PER_PAGE);
+    // At most a few shapings for each line it lays out (a binary search over its breaks), and no
+    // more lines than the budget: a count, not a time, so the test is the same on any machine.
+    const shapings = vi.mocked(shape).mock.calls.length;
+    expect(shapings).toBeLessThan(lines * 20);
+    expect(shapings).toBeLessThan(5000);
+  });
+
+  it('lays out the same text again from the lines it already wrapped (#694)', () => {
+    vi.mocked(shape).mockClear();
+    const content = { text: 'b '.repeat(4000), layoutType: 'text_only' as const, stationery: { theme: 'typewriter' as const } };
+    const first = layoutLetter(content, { maxPages: 2 });
+    const once = vi.mocked(shape).mock.calls.length;
+    vi.mocked(shape).mockClear();
+    expect(layoutLetter(content, { maxPages: 2 })).toEqual(first);
+    // The second layout shapes only what it draws, none of the wrapping's candidates.
+    expect(vi.mocked(shape).mock.calls.length).toBeLessThan(once / 2);
   });
 
   it('survives a very long right-to-left segment without overflowing the stack (review round 3)', () => {
@@ -348,4 +382,82 @@ describe('what the renderer draws as written (#534)', () => {
     expect(drawsGrapheme(at(0x65) + acute.repeat(4))).toBe(true);
     expect(drawsGrapheme(at(0x65) + acute.repeat(5))).toBe(false);
   });
+});
+
+describe('the line search finds the breaks the scan found (#694)', () => {
+  /** wrapParagraph's line search before #694, verbatim: a scan of every break from the line's start. */
+  function scanned(paragraph: string, lineWidth: number, measure: (start: number, end: number) => number): string[] {
+    const whitespace = /\s/u;
+    const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+    if (paragraph.trim() === '') return [''];
+    const trimmedEnd = (start: number, end: number) => {
+      while (end > start && whitespace.test(paragraph[end - 1])) end -= 1;
+      return end;
+    };
+    const fits = (start: number, end: number) => measure(start, trimmedEnd(start, end)) <= lineWidth;
+    const breaks: number[] = [];
+    const breaker = new LineBreaker(paragraph);
+    for (let next = breaker.nextBreak(); next; next = breaker.nextBreak()) breaks.push(next.position);
+    const lines: string[] = [];
+    const push = (start: number, end: number) => {
+      const trimmed = trimmedEnd(start, end);
+      if (trimmed > start) lines.push(paragraph.slice(start, trimmed));
+    };
+    let start = 0;
+    let index = 0;
+    while (start < paragraph.length) {
+      let fit = -1;
+      for (; index < breaks.length; index++) {
+        const end = breaks[index];
+        if (end <= start) continue;
+        if (!fits(start, end)) break;
+        fit = end;
+      }
+      if (fit !== -1) {
+        push(start, fit);
+        start = fit;
+        continue;
+      }
+      const pieceEnd = breaks[index] ?? paragraph.length;
+      const ends: number[] = [];
+      for (const { segment, index: offset } of graphemeSegmenter.segment(paragraph.slice(start, pieceEnd))) ends.push(start + offset + segment.length);
+      let [low, high, best] = [1, ends.length - 1, 0];
+      while (low <= high) {
+        const middle = (low + high) >> 1;
+        if (fits(start, ends[middle])) [best, low] = [middle, middle + 1];
+        else high = middle - 1;
+      }
+      push(start, ends[best]);
+      start = ends[best];
+    }
+    return lines.length > 0 ? lines : [''];
+  }
+
+  /** A small seeded generator, so a failure names a paragraph that can be run again. */
+  function random(seed: number) {
+    let state = seed >>> 0;
+    return () => {
+      state = (state * 1664525 + 1013904223) >>> 0;
+      return state / 2 ** 32;
+    };
+  }
+
+  const WORDS = [
+    'a', 'I', 'AV', 'To', 'Ty', 'Wa', 'fi', 'office', 'affluent', 'waffle', 'letter', 'Vowel', 'yearly', 'LT', 'P.', '—', 'well-known',
+    'naïve', 'café', 'Ελλάδα', 'καλημέρα', 'Москва', 'привет', 'שלום', 'עולם', 'מכתב', '12,000', '(note)', '“quoted”', 'x'
+  ];
+
+  it.each(['Tinos-Regular', 'Cousine-Regular', 'Caveat-Regular'] as const)('in %s, over four hundred paragraphs', fontName => {
+    const face = loadFont(fontName);
+    const next = random(694);
+    for (let sample = 0; sample < 400; sample += 1) {
+      const count = 1 + Math.floor(next() * 60);
+      const paragraph = Array.from({ length: count }, () => WORDS[Math.floor(next() * WORDS.length)])
+        .join(next() < 0.2 ? '  ' : ' ');
+      const lineWidth = 40 + next() * 400;
+      const measure = (start: number, end: number) => shape(face, paragraph.slice(start, end)).advanceWidth * 12 / face.unitsPerEm;
+      const searched = wrapParagraph(paragraph, lineWidth, measure).map(({ start, end }) => paragraph.slice(start, end));
+      expect(searched, `sample ${sample}: ${JSON.stringify(paragraph)} at ${lineWidth}`).toEqual(scanned(paragraph, lineWidth, measure));
+    }
+  }, 120_000);
 });

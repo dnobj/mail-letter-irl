@@ -121,6 +121,12 @@ export interface Layout {
   title?: string;
   /** How many lines the text runs past the page; 0 when it fits. */
   overflowLines: number;
+  /**
+   * The text ran past the lines a layout lays out at most (#694), so the
+   * wrapping stopped there: the letter is longer than overflowLines says.
+   * Only on a letter far too long to print; absent on any other.
+   */
+  truncated?: true;
 }
 
 /** A line of a paragraph: code units [start, end), trailing spaces excluded. */
@@ -317,12 +323,23 @@ function fitSignature(image: RenderImage): { width: number; height: number } {
  * `fitLimit(start)` is an index past which no line from `start` can fit, a
  * cheap bound; longer candidates count as too wide without being shaped, so a
  * long unbroken run costs a few shapings per line, not the whole remainder.
+ *
+ * Each line's last break is found by binary search (#694), so a line of many
+ * short words costs a few shapings, not one per word. The width of a line
+ * ending at a break only grows as the break moves on: a break is a boundary,
+ * so the words before it are shaped alike whatever follows, and what is added
+ * has width. So the search finds the break the scan from the start found: the
+ * last that fits before the first that does not.
+ *
+ * `maxLines` stops the wrapping once that many lines are made (#694): a
+ * letter far too long to print is laid out no further than its budget.
  */
 export function wrapParagraph(
   paragraph: string,
   width: number,
   measure: (start: number, end: number) => number,
-  fitLimit: (start: number) => number = () => paragraph.length
+  fitLimit: (start: number) => number = () => paragraph.length,
+  maxLines: number = Infinity
 ): LineRange[] {
   if (paragraph.trim() === '') return [{ start: 0, end: 0 }];
   const trimmedEnd = (start: number, end: number) => {
@@ -347,15 +364,18 @@ export function wrapParagraph(
   };
   let start = 0;
   let index = 0;
-  while (start < paragraph.length) {
+  while (start < paragraph.length && lines.length < maxLines) {
     const limit = fitLimit(start);
-    let fit = -1;
-    for (; index < breaks.length; index++) {
-      const end = breaks[index];
-      if (end <= start) continue;
-      if (!fits(start, end, limit)) break;
-      fit = end;
+    while (index < breaks.length && breaks[index] <= start) index++;
+    // The first break from here that does not fit: one past the last that does.
+    let [first, past] = [index, breaks.length];
+    while (first < past) {
+      const middle = (first + past) >> 1;
+      if (fits(start, breaks[middle], limit)) first = middle + 1;
+      else past = middle;
     }
+    const fit = first > index ? breaks[first - 1] : -1;
+    index = first;
     if (fit !== -1) {
       push(start, fit);
       start = fit;
@@ -436,16 +456,45 @@ export interface WrappedLine {
  * measured exactly as it will be drawn.
  */
 export function wrapText(text: string, size: number, width: number, fontName: FontName = BODY_FONT): WrappedLine[] {
-  return wrapParagraphs(text, size, width, fontName).flat();
+  return wrapParagraphs(text, size, width, fontName).paragraphs.flat();
 }
 
-/** wrapText's lines, paragraph by paragraph: where a paragraph ends, for a signature's band (#608). */
-function wrapParagraphs(text: string, size: number, width: number, fontName: FontName): WrappedLine[][] {
+/** wrapParagraphs' answer: the lines, paragraph by paragraph, and whether the budget stopped it. */
+interface WrappedParagraphs {
+  paragraphs: WrappedLine[][];
+  truncated: boolean;
+}
+
+/**
+ * The last few wrappings, by everything that decides them (#694): a refused
+ * preview lays the same text out again in the same face, without its
+ * signature, and the lines are the same. Wrapping is pure, and no caller
+ * changes the lines it is given.
+ */
+const recentWraps = new Map<string, WrappedParagraphs>();
+const RECENT_WRAPS = 4;
+
+/**
+ * wrapText's lines, paragraph by paragraph: where a paragraph ends, for a
+ * signature's band (#608). With `maxLines` (#694), the wrapping stops once that
+ * many lines are made while text is left, and says so.
+ */
+function wrapParagraphs(text: string, size: number, width: number, fontName: FontName, maxLines: number = Infinity): WrappedParagraphs {
+  const key = `${fontName}|${size}|${width}|${maxLines}|${text}`;
+  const recent = recentWraps.get(key);
+  if (recent) return recent;
   const font = loadFont(fontName);
   const scale = size / font.unitsPerEm;
   const wrapped: WrappedLine[][] = [];
   const paragraphs = clampMarks(text).replace(/\r\n?/g, '\n').replace(/\t/g, TAB).split('\n');
-  for (const paragraph of paragraphs) {
+  let made = 0;
+  let truncated = false;
+  for (const [position, paragraph] of paragraphs.entries()) {
+    if (made >= maxLines) {
+      // Out of lines: only text past here, if there is any, makes the letter longer.
+      truncated = paragraphs.slice(position).some(rest => rest.trim() !== '');
+      break;
+    }
     const lines: WrappedLine[] = [];
     wrapped.push(lines);
     const bidi = paragraphBidi(paragraph);
@@ -454,11 +503,21 @@ function wrapParagraphs(text: string, size: number, width: number, fontName: Fon
     const visual = (start: number, end: number) => inFace(fontName, bidi.lineVisual(start, end));
     const measure = (start: number, end: number) => shape(font, visual(start, end)).advanceWidth * scale;
     const limit = advanceLimit(fontName, inFace(fontName, paragraph), width, scale);
-    for (const { start, end } of wrapParagraph(paragraph, width, measure, limit)) {
+    const ranges = wrapParagraph(paragraph, width, measure, limit, maxLines - made);
+    for (const { start, end } of ranges) {
       lines.push({ source: paragraph.slice(start, end), drawn: visual(start, end) });
     }
+    made += lines.length;
+    const last = ranges[ranges.length - 1];
+    if (made >= maxLines && last && paragraph.slice(last.end).trim() !== '') {
+      truncated = true;
+      break;
+    }
   }
-  return wrapped;
+  const result = { paragraphs: wrapped, truncated };
+  recentWraps.set(key, result);
+  if (recentWraps.size > RECENT_WRAPS) recentWraps.delete(recentWraps.keys().next().value!);
+  return result;
 }
 
 /**
@@ -496,12 +555,14 @@ interface PreparedLetter {
   lines: LetterLine[];
   /** The signature and its box, when the letter has one (#608). */
   signature?: { image: RenderImage; width: number; height: number };
+  /** The text ran past its line budget, and was wrapped no further (#694). */
+  truncated: boolean;
 }
 
 /** A wrapped line, or one of the lines a signature's band takes, which hold no text (#608). */
 type LetterLine = WrappedLine & { signature?: true };
 
-function prepareLetter(content: LetterContent): PreparedLetter {
+function prepareLetter(content: LetterContent, maxLines: number): PreparedLetter {
   const stationery: Stationery = content.stationery ?? { theme: 'classic' };
   const { font: fontName, size } = stationeryFace(stationery);
   const baseline = baselineOffset(size, LINE_PITCH, fontName);
@@ -518,7 +579,7 @@ function prepareLetter(content: LetterContent): PreparedLetter {
     textTop = bodyTop + box.height + IMAGE_GAP;
   }
   const inlineBox = image && content.layoutType === 'inline_image' ? fitImage(image, INLINE_IMAGE_MAX_HEIGHT) : undefined;
-  const paragraphs = wrapParagraphs(content.text, size, CONTENT_WIDTH, fontName);
+  const { paragraphs, truncated } = wrapParagraphs(content.text, size, CONTENT_WIDTH, fontName, maxLines);
   const lines: LetterLine[] = paragraphs.flat();
   let signature: PreparedLetter['signature'];
   if (content.signature) {
@@ -530,7 +591,7 @@ function prepareLetter(content: LetterContent): PreparedLetter {
     lines.splice(after, 0, ...band);
     signature = { image: content.signature.image, ...fitSignature(content.signature.image) };
   }
-  return { stationery, fontName, size, baseline, firstPageItems, textTop, image, inlineBox, lines, signature };
+  return { stationery, fontName, size, baseline, firstPageItems, textTop, image, inlineBox, lines, signature, truncated };
 }
 
 /**
@@ -611,16 +672,28 @@ function pageItems(
  * With `maxPages` above 1 (#586), a letter that does not fit one page flows on
  * to further pages. Lines past the last page allowed are still laid out, on
  * that page, so `overflowLines` can say by how much a letter is too long.
+ *
+ * Its text is wrapped to at most LINE_BUDGET_PER_PAGE lines for each page
+ * allowed (#694), twice what any page holds: a letter that could fit is laid
+ * out whole, exactly as before, and one far too long stops there, marked
+ * `truncated`, its overflowLines then the least it is over by.
  */
 export function layoutLetter(content: LetterContent, options: LayoutOptions = {}): Layout {
   const maxPages = options.maxPages ?? 1;
   if (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > MAX_LETTER_PAGES) {
     throw new RangeError(`A letter lays out on 1 to ${MAX_LETTER_PAGES} pages, not ${maxPages}`);
   }
-  const letter = prepareLetter(content);
+  const letter = prepareLetter(content, LINE_BUDGET_PER_PAGE * maxPages);
   const single = layoutOnePage(letter);
-  return maxPages === 1 || single.overflowLines === 0 ? single : flowPages(letter, maxPages);
+  const layout = maxPages === 1 || single.overflowLines === 0 ? single : flowPages(letter, maxPages);
+  return letter.truncated ? { ...layout, truncated: true } : layout;
 }
+
+/**
+ * The most text lines a layout wraps for each page it may fill (#694): twice
+ * the most any page holds (a later page, which has no theme above its text).
+ */
+export const LINE_BUDGET_PER_PAGE = 2 * linesBetween(CONTINUATION_TOP, BODY_BOTTOM);
 
 /**
  * One page, as every letter was laid out before #586: the lines from the

@@ -13,6 +13,7 @@
     "dev:env": "dotenv -e .env.dev -- tsx watch src/mcp/httpServer.ts",
     "lint": "eslint .",
     "manifest:generate": "tsx scripts/write-manifest.ts",
+    "benchmark:layout": "tsx scripts/benchmark-layout.ts",
     "test:submission": "vitest run tests/unit/auth/oauthMetadata.test.ts tests/unit/mcp/manifest.test.ts tests/unit/mcp/registerTools.test.ts tests/unit/mcp/widgetResources.test.ts tests/unit/mcp/submissionReadiness.test.ts",
     "check:submission": "npm run lint && npm run test:submission",
     "check:oauth-discovery": "tsx scripts/check-oauth-discovery.ts",
