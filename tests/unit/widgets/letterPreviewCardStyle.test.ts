@@ -169,7 +169,7 @@ describe('the Style row (#563)', () => {
     expect(Number.isNaN(Date.parse(shared.sharedAt))).toBe(false);
     // A sentence the person can read where ChatGPT shows it, naming no tool the model may not have (#668).
     expect(text).toContain('Several Letter IRL cards may each share a draft; the one shared latest is most likely the one the person means, so ask if unsure.');
-    // In ChatGPT the card asks no status, so a share never claims the draft is ready.
+    // The draft may have been sent from another card or the confirmation page since, so a share never claims it is ready.
     expect(text).not.toMatch(/ready/i);
     expect(text).toContain('It may have been sent or have expired since: a Letter IRL tool given this draftId says so.');
     expect(text).not.toMatch(/[{}]|get_draft_status/);

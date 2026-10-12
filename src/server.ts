@@ -172,7 +172,7 @@ const tools: McpToolDefinition<any, any>[] = [
   // The model's way to send, once the send rule is on (#470): a link where
   // the person sends the preview themselves. Listed only while the rule is on.
   requestSendTool,
-  // The preview card's question, in a host that keeps no state for it (#474):
+  // The preview card's question (#474), the letter card's in every host (#676):
   // was this draft sent, or has it expired? Card-only.
   getDraftStatusTool,
   // The upload card's way to send a photo in an app with no file store

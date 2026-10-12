@@ -156,7 +156,8 @@ function mountInChatGpt(meta: Json, extra: Json = {}) {
         toolResponseMetadata: meta,
         widgetState: null,
         setWidgetState: async () => undefined,
-        callTool: async () => ({}),
+        // The card asks what became of its draft in ChatGPT too (#676): ready.
+        callTool: async (name: string, args: Json) => (name === 'get_draft_status' ? { structuredContent: { draftId: args.draftId, status: 'ready' } } : {}),
         ...extra
       };
     }
@@ -166,13 +167,24 @@ function mountInChatGpt(meta: Json, extra: Json = {}) {
 }
 
 describe('the selected draft in ChatGPT (#650)', () => {
-  it('is shared at once through window.openai, where the card keeps its own state and asks no status', async () => {
+  it('is shared through window.openai once the server says the draft is ready (#676)', async () => {
     const updates: Json[] = [];
     const document = mountInChatGpt({ ...ON, modelContextEnabled: true }, { updateModelContext: async (value: Json) => { updates.push(value); return {}; } });
     await flush();
     expect(updates).toHaveLength(1);
     expect(updates[0].content[0].text).toMatch(/^Shared by a Letter IRL letter card on \d{4}-\d{2}-\d{2} at \d{2}:\d{2}:\d{2} UTC: the card shows the letter draft draft_0001\. /);
     expect(Array.from(document.querySelectorAll('button')).some(button => /conversation/i.test(button.textContent ?? ''))).toBe(false);
+  });
+
+  it('is never shared through window.openai for a draft the server says was sent (#676)', async () => {
+    const updates: Json[] = [];
+    mountInChatGpt({ ...ON, modelContextEnabled: true }, {
+      updateModelContext: async (value: Json) => { updates.push(value); return {}; },
+      callTool: async (name: string, args: Json) =>
+        name === 'get_draft_status' ? { structuredContent: { draftId: args.draftId, status: 'sent', orderId: 'order-9' } } : {}
+    });
+    await flush();
+    expect(updates.filter(update => update.content.length > 0)).toHaveLength(0);
   });
 
   it('is not shared through window.openai without the flag', async () => {
@@ -182,20 +194,16 @@ describe('the selected draft in ChatGPT (#650)', () => {
     expect(updates).toHaveLength(0);
   });
 
-  // ChatGPT carries model context on the MCP Apps handshake, not window.openai (#665). The letter card's own opening
-  // of it is withdrawn (#676): with it open, ChatGPT did not give a reopened card its kept state. The card keeps the
-  // logic, tested here with the attribute put back (`optIn`), for when the handshake keeps that state.
-  function framed(meta: Json, extra: Json = {}, optIn = true) {
+  // ChatGPT carries model context on the MCP Apps handshake, not window.openai (#665). The letter card, as served,
+  // opens it on request (#675, #676), once flagged and ready.
+  function framed(meta: Json, extra: Json = {}) {
     const sent: Json[] = [];
     const parent = { postMessage: (message: Json) => sent.push(JSON.parse(JSON.stringify(message))) };
     const served = stampPreviewTool(
       inlineHostBridge(fs.readFileSync(path.join(WIDGET_DIR, 'LetterPreviewCard.html'), 'utf-8'), WIDGET_DIR),
       'quote_and_preview_letter'
     );
-    const page = optIn ? served.replace('<html lang="en">', '<html lang="en" data-plugin-extensions="on-request">') : served;
-    // Put back for real, or the opt-in tests below pass for nothing.
-    if (optIn && !/<html[^>]*data-plugin-extensions="on-request"/.test(page)) throw new Error('the opt-in was not put back');
-    const dom = new JSDOM(page.replace('<script type="module">', '<script>'), {
+    const dom = new JSDOM(served.replace('<script type="module">', '<script>'), {
       runScripts: 'dangerously',
       beforeParse(window) {
         (window as any).setTimeout = () => 0;
@@ -203,7 +211,9 @@ describe('the selected draft in ChatGPT (#650)', () => {
         Object.defineProperty(window, 'parent', { value: parent, configurable: true });
         (window as any).openai = {
           theme: 'light', toolInput: ARGS, toolOutput: output(), toolResponseMetadata: meta, widgetState: null,
-          setWidgetState: async () => undefined, callTool: async () => ({}), ...extra
+          setWidgetState: async () => undefined,
+          callTool: async (name: string, args: Json) => (name === 'get_draft_status' ? { structuredContent: { draftId: args.draftId, status: 'ready' } } : {}),
+          ...extra
         };
       }
     });
@@ -231,12 +241,12 @@ describe('the selected draft in ChatGPT (#650)', () => {
     expect(card.requests('ui/initialize')).toHaveLength(1);
   });
 
-  it('as served, never opens the handshake, flagged or not, so a reopened card keeps its state (#676)', async () => {
+  it('as served, opens the handshake on request, as the server now answers for a reopened card (#676)', async () => {
     const served = fs.readFileSync(path.join(WIDGET_DIR, 'LetterPreviewCard.html'), 'utf-8');
-    expect(served).not.toMatch(/<html[^>]*data-plugin-extensions/);
-    const card = framed({ ...ON, modelContextEnabled: true }, {}, false);
+    expect(served).toMatch(/<html[^>]*data-plugin-extensions="on-request"/);
+    const card = framed({ ...ON, modelContextEnabled: true });
     await flush();
-    expect(card.sent).toHaveLength(0);
+    expect(card.requests('ui/initialize')).toHaveLength(1);
   });
 
   it('never opens the handshake for a card the server does not flag', async () => {
@@ -449,6 +459,35 @@ describe('the letter card as a studio (#580)', () => {
     await card.answer(
       { result: { content: [], structuredContent: { draftId: 'draft_0001', schedule: null, deliveryEstimate: 'Mailed in 1-2 business days', message: 'Cleared.' } } },
       'set_arrival_date'
+    );
+    expect(text(card, 'studio-summary')).toBe('black and white · mailed in 1-2 business days');
+  });
+
+  it('keeps a date the person set when a status answer asked before it comes after (#676 review round 2)', async () => {
+    const card = mount();
+    await card.show(
+      output({ arrivalWindow: WINDOW, schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' }, deliveryEstimate: 'Goes to the printer Fri, Oct 9.' }),
+      ON
+    );
+    await card.click(card.byId('arrives-asap'));
+    await card.answer(
+      { result: { content: [], structuredContent: { draftId: 'draft_0001', schedule: null, deliveryEstimate: 'Mailed in 1-2 business days', message: 'Cleared.' } } },
+      'set_arrival_date'
+    );
+    // The status the card asked on opening comes now, with the dates the draft had then.
+    await card.answer(
+      {
+        result: {
+          content: [],
+          structuredContent: {
+            draftId: 'draft_0001',
+            status: 'ready',
+            schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' },
+            deliveryEstimate: 'Goes to the printer Fri, Oct 9.'
+          }
+        }
+      },
+      'get_draft_status'
     );
     expect(text(card, 'studio-summary')).toBe('black and white · mailed in 1-2 business days');
   });

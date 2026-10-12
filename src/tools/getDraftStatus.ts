@@ -280,6 +280,8 @@ export const getDraftStatusTool: McpToolDefinition<GetDraftStatusInput, GetDraft
   meta: {
     'openai/toolInvocation/invoking': 'Checking the preview...',
     'openai/toolInvocation/invoked': 'Checked',
+    // The letter card asks it in ChatGPT too (#676), through window.openai.callTool, which needs this.
+    'openai/widgetAccessible': true,
     readOnlyHint: true
   },
   handler

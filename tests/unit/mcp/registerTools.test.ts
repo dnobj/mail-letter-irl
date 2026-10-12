@@ -29,6 +29,7 @@ import {
   DELIVERED_IS_ESTIMATED
 } from '../../../src/mcp/registerTools.js';
 import { cancelScheduledMailTool, getStartedTool, setArrivalDateTool } from '../../../src/tools/index.js';
+import { getDraftStatusTool } from '../../../src/tools/getDraftStatus.js';
 import {
   getOrderStatusOutputSchema,
   listOrdersOutputSchema,
@@ -408,6 +409,15 @@ describe('Tool Annotation Correctness (US-MCP-06, Issue #92)', () => {
 
     it('should declare noauth security scheme when auth is disabled', () => {
       expect(buildToolSecuritySchemes('send_letter', false)).toEqual([{ type: 'noauth' }]);
+    });
+
+    it('lets the letter card call get_draft_status in ChatGPT, and keeps it from the model (#676)', () => {
+      for (const sendRule of [true, false]) {
+        const meta = buildToolMeta(getDraftStatusTool.name, getDraftStatusTool.meta ?? {}, true, sendRule);
+        expect(meta['openai/widgetAccessible']).toBe(true);
+        expect(meta.ui).toMatchObject({ widgetAccessible: true, visibility: ['app'] });
+        expect(meta['openai/visibility']).toBe('private');
+      }
     });
 
     it('lets the cards call set_arrival_date and cancel_scheduled_mail, and leaves both to the model too (#535)', () => {
