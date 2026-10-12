@@ -478,6 +478,15 @@ const recentWraps = new Map<string, WrappedParagraphs>();
 const RECENT_WRAPS = 4;
 
 /**
+ * Lets the remembered wrappings go, with the words in them: a preview's layouts
+ * call this when they are done (layoutLetterForPreview), so a person's letter
+ * is not kept in memory after its request (#694 review round 3).
+ */
+export function forgetRecentWraps(): void {
+  recentWraps.clear();
+}
+
+/**
  * How a paragraph is measured as it will be drawn: bidi-reordered, in the
  * face's look-alikes, shaped; and its fit limit (advanceLimit). Exported for
  * the test that compares the line search with the scan it replaced (#694).
@@ -519,8 +528,11 @@ function wrapParagraphs(text: string, size: number, width: number, fontName: Fon
   const paragraphs = clampMarks(text).replace(/\r\n?/g, '\n').replace(/\t/g, TAB).split('\n');
   let written = 0;
   let truncated = false;
+  // Found once, so the check below costs nothing per paragraph (#694 review round 3).
+  let lastWithText = paragraphs.length - 1;
+  while (lastWithText >= 0 && paragraphs[lastWithText].trim() === '') lastWithText -= 1;
   for (const [position, paragraph] of paragraphs.entries()) {
-    if (written >= maxLines && paragraphs.slice(position).some(rest => rest.trim() !== '')) {
+    if (written >= maxLines && position <= lastWithText) {
       // Out of lines with text left: the letter is longer than this.
       truncated = true;
       break;

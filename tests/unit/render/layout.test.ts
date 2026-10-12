@@ -519,6 +519,17 @@ describe('the budget is part of what a wrapping is remembered by (#694 review ro
 });
 
 describe('blank paragraphs past the budget (#694 review round 2)', () => {
+  it('cost no more than the base did: the check for text left is made once (review round 3)', () => {
+    // The budget's written lines, then blank paragraphs to the three-page character cap. A check
+    // made for each blank paragraph over all those after it took seconds; the base took ~0.1 s.
+    const text = 'a\n'.repeat(3 * LINE_BUDGET_PER_PAGE) + '\n'.repeat(29_000);
+    const started = performance.now();
+    const layout = layoutLetter({ text, layoutType: 'text_only' }, { maxPages: 3 });
+    expect(layout.truncated).toBeUndefined();
+    // Generous for a slow machine; quadratic was ~5 s.
+    expect(performance.now() - started).toBeLessThan(1500);
+  });
+
   it('are laid out, so a letter whose text ends at the budget is counted exactly', () => {
     const text = Array.from({ length: LINE_BUDGET_PER_PAGE }, (_, index) => `Line ${index + 1}`).join('\n') + '\n \n';
     const layout = layoutLetter({ text, layoutType: 'text_only' });
@@ -540,7 +551,7 @@ describe('blank lines do not spend the line budget (#694 review round 1)', () =>
     expect(drawn).toEqual(expect.arrayContaining(['Dear Sam,', 'The part that matters.', 'Love, Pat']));
   });
 
-  it('never lets a truncated letter pass as one that fits', () => {
+  it('says a truncated letter is over (its overflow is past every page, so the floor of one is a guard only)', () => {
     const layout = layoutLetter({ text: 'word '.repeat(9000), layoutType: 'text_only' }, { maxPages: 3 });
     expect(layout.truncated).toBe(true);
     expect(layout.overflowLines).toBeGreaterThan(0);

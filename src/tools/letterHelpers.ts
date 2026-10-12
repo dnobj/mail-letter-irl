@@ -38,7 +38,7 @@ import {
   drawsGraphemeIn,
   GiftPageOverflow,
   layoutGiftPage,
-  layoutLetter,
+  layoutLetter, forgetRecentWraps,
   HEADLINE_LINES,
   pageFit,
   readImageDataUri,
@@ -675,6 +675,20 @@ export function layoutLetterForPreview(
   renderer: 'html' | 'pdf' = printRenderer(),
   /** The most pages it may take: the previews' limit (#586), or a draft's own pages when it is drawn again. */
   maxPages: number = letterPageLimit()
+): Layout | undefined {
+  try {
+    return layoutLetterForPreviewOnce(letter, context, renderer, maxPages);
+  } finally {
+    // The layouts below remember their wrappings while they share them; not past the call (#694).
+    forgetRecentWraps();
+  }
+}
+
+function layoutLetterForPreviewOnce(
+  letter: Parameters<typeof layoutLetterForPreview>[0],
+  context: ToolContext,
+  renderer: 'html' | 'pdf',
+  maxPages: number
 ): Layout | undefined {
   if (renderer !== 'pdf') return undefined;
   const { layoutType, stationery } = letter;
