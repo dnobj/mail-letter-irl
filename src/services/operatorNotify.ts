@@ -13,7 +13,12 @@ import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog
 export type OperatorNoticeOutcome = 'sent' | 'skipped' | 'invalid' | 'failed';
 
 /** What a notice is about: one is posted per kind per run (notifyOperator). */
-export type OperatorNoticeKind = 'missed_mail_day' | 'provider_cancelled' | 'ambiguous_outcome' | 'held_mail_funding';
+export type OperatorNoticeKind =
+  | 'missed_mail_day'
+  | 'provider_cancelled'
+  | 'ambiguous_outcome'
+  | 'held_mail_funding'
+  | 'refunded_mail_dispatched';
 
 export const OPERATOR_ALERT_TIMEOUT_MS = 10_000;
 
@@ -157,6 +162,8 @@ export const OPERATOR_NOTICES = {
     `The print provider cancelled ${count === 1 ? '1 letter' : `${count} letters`} before printing. A prepaid or gift letter's payment goes back on its own; a critical alert means a person must decide a refund. See the Alerts page on the admin panel.`,
   ambiguousOutcome: () =>
     'A letter was sent to the print provider and the outcome is unknown, so it may need checking with the provider. See the Alerts page on the admin panel.',
+  refundedMailDispatched: () =>
+    'A Pay & Send order was refunded or disputed after its letter went, or may have gone, to the print provider. A person must check it with the provider. See the Alerts page on the admin panel.',
   heldMailFunding: () =>
     'Mail paid for by a purchase that was refunded or disputed is held until a person sends or cancels it. See the Alerts page on the admin panel.'
 } as const;

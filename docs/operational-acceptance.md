@@ -25,13 +25,14 @@ The daily ceilings (`LETTER_IRL_BETA_GLOBAL_DAILY_MAIL_CEILING`, `LETTER_IRL_BET
   1. At [healthchecks.io](https://healthchecks.io), create one check per environment: period 1 hour, grace 1 hour, email alerts to the owner.
   2. Set each check's ping URL as `MAINTENANCE_HEARTBEAT_URL` on the maintenance service in each environment: `letter-irl-maintenance` in production, `letter-irl-maintenance-dev` in development (the names in Railway's service list on 2026-09-23). The URL is a capability, so it lives only in Railway.
   3. After the next hourly run, each check shows a ping. The maintenance log says `Heartbeat sent`. An unusable value logs `[config]` and `Heartbeat invalid` on every run instead.
-- **On a heartbeat alarm**, read the maintenance log first. `Heartbeat withheld` says why: the outbox is paused with letters waiting, letters are still waiting after their mail day, or one of the two could not be counted. For late letters, the admin panel's `/alerts` page has a `schedule_missed_mail_day` alert for each. While that alarm stands, a run that stops happening raises nothing new, so check the last run times on the panel's `/maintenance` page as well.
+- **On a heartbeat alarm**, read the maintenance log first. `Heartbeat withheld` says why: the outbox is paused with letters waiting, letters are still waiting after their mail day, or one of the two could not be counted. For late letters, the admin panel's `/alerts` page has a `schedule_missed_mail_day` alert for each, unless raising it failed (`schedule.missed_mail_day_check_failed` in the maintenance log) or the run's 100 were raised first, when the next run raises the rest. While that alarm stands, a run that stops happening raises nothing new, so check the last run times on the panel's `/maintenance` page as well.
 - **Notices to the operator (#699).** `LETTER_IRL_OPERATOR_ALERT_URL`, required in production on the API and maintenance services, takes a plain-text POST for each of these, at most one of each kind an hour per process (`src/services/operatorNotify.ts`):
   - a daily limit that refused someone (once a UTC day per limit);
   - held mail that missed its mail day;
   - letters the provider cancelled;
   - a dispatch whose outcome is unknown;
-  - mail held because its funding was refunded or disputed.
+  - mail held because its funding was refunded or disputed;
+  - a Pay & Send order refunded or disputed after its letter went, or may have gone, to the provider.
 
   A notice names no customer, letter or order: the Alerts page has them. A second notice of a kind within the hour is not posted (the Alerts page has it), so check the page after each one. A post that fails is not tried again: its letters' alerts are on the page, and are raised once. A status sync run from the admin panel posts nothing, since the panel's service has no alert URL; the operator who ran it sees what it changed.
 

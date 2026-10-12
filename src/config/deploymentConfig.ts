@@ -1464,11 +1464,12 @@ export function validateDeploymentConfig(
 
   // #408: the maintenance service's heartbeat (src/services/maintenanceHeartbeat.ts).
   // A URL maintenance cannot call leaves its monitor alerting every hour for a
-  // job that is running fine. An error in production, where the heartbeat is
-  // required (#699); a warning elsewhere.
+  // job that is running fine. An error for production maintenance, where the
+  // heartbeat is required (#699); a warning elsewhere, the API included, which
+  // never calls it.
   if (maintenanceHeartbeatUrlInvalid(env)) {
     findings.push({
-      severity: production ? 'error' : 'warning',
+      severity: production && service === 'maintenance' ? 'error' : 'warning',
       rule: 'maintenance.heartbeat_url_invalid',
       message: 'MAINTENANCE_HEARTBEAT_URL must be an https URL, such as a healthchecks.io ping URL'
     });

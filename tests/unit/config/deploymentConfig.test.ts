@@ -289,6 +289,13 @@ describe('validateDeploymentConfig in production', () => {
       }
     });
 
+    it('only warns the production API of a heartbeat URL it never calls (review round 3)', () => {
+      const bad = env({ MAINTENANCE_HEARTBEAT_URL: 'http://hc-ping.example/x' });
+      expect(ruleIds(bad, 'error')).not.toContain('maintenance.heartbeat_url_invalid');
+      expect(ruleIds(bad, 'warning')).toContain('maintenance.heartbeat_url_invalid');
+      expect(maintenanceErrors(bad)).toContain('maintenance.heartbeat_url_invalid');
+    });
+
     it('asks development for none of them', () => {
       expect(validateDeploymentConfig(VALID_DEV, 'maintenance').findings.filter(f => f.severity === 'error')).toEqual([]);
     });
