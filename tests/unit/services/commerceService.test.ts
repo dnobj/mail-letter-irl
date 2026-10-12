@@ -1586,7 +1586,7 @@ describe('commerceService', () => {
       expect(sql.some(statement => statement.includes('INSERT INTO orders'))).toBe(false);
     });
 
-    it("peeks a draft that is not the caller's, or gone, as a one-page letter, then refuses it under the lock (#691)", async () => {
+    it('peeks a draft that is gone as a one-page letter, then refuses it under the lock (#691)', async () => {
       mocks.getJitProduct.mockImplementation((() => ({
         productCode: 'jit-letter', priceId: 'price-1p', amountCents: 499,
         currency: 'usd', name: 'Pay & Send One Physical Letter', description: 'x', mailType: 'letter'

@@ -9,9 +9,10 @@
  * page, or a certified letter as a standard one. So the row draftMailOption takes
  * names all four (DraftOptionRow): a reader that declares part of them does not
  * compile. The compiler takes a query's declared row type on trust, so a query that
- * reads the option by name selects DRAFT_OPTION_COLUMNS, and the checkout and the
- * send lock the whole row (SELECT *); tests/unit/services/draftOptionColumns.test.ts
- * searches the source for the rest. The database holds any writer to the same rules
+ * reads the option by name selects DRAFT_OPTION_COLUMNS, and getDraft, the checkout and
+ * the send read the whole row (SELECT *). tests/unit/services/draftOptionColumns.test.ts
+ * pins those three reads and fails on a column list that selects pages without
+ * mail_service; any other partial reader is caught only in review. The database holds any writer to the same rules
  * (migrations 047, 052 and 053's checks); storedPages and storedMailService refuse
  * a draft that would break them before anything is written.
  */
@@ -35,6 +36,12 @@ export interface DraftOptionRow {
   pages: number | string | null;
   mail_service: string | null;
 }
+
+/** The columns a DraftOptionRow lets a reader leave out: none. */
+type OptionalOptionColumn = { [K in keyof DraftOptionRow]-?: object extends Pick<DraftOptionRow, K> ? K : never }[keyof DraftOptionRow];
+// Checked by the build, whatever the tests' type ratchet allows: no column of the option may be left out.
+const _everyOptionColumnIsRequired: [OptionalOptionColumn] extends [never] ? true : never = true;
+void _everyOptionColumnIsRequired;
 
 /**
  * The mail option a draft is, from its row: its mail type, a letter's printed

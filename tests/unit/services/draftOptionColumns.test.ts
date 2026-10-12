@@ -14,8 +14,10 @@ import { describe, expect, it } from 'vitest';
  * What it cannot see: a query that names letter_drafts in a join or a comma
  * join, a column list built in code (a ${COLUMNS} template), a CTE, a
  * schema-qualified table, RETURNING, or a SELECT nested in the select list.
- * It would also flag a comment that reads like a query. None of those is in
- * the source today; a new reader of a draft is reviewed for this by hand.
+ * It would also flag a comment that reads like a query. The only lists built in
+ * code are ${DRAFT_OPTION_COLUMNS}, which is whole (mailOptions.test.ts checks it);
+ * none of the others is in the source today, and a new reader of a draft is
+ * reviewed for this by hand.
  *
  * Kept beside the row type (#691, review round 1): DraftOptionRow makes a reader
  * that DECLARES part of the option fail to compile, but every query declares its
@@ -76,5 +78,12 @@ describe('the draft columns a price is read from (#625)', () => {
       const text = readFileSync(join(SRC, file), 'utf8');
       expect(text, file).toContain("'SELECT * FROM letter_drafts WHERE draft_id = $1 FOR UPDATE'");
     }
+  });
+
+  it('reads the whole draft the confirmation page and request_send price (#691)', () => {
+    // getDraft is typed LetterDraft, whose option columns are required, and the type is taken on trust.
+    const text = readFileSync(join(SRC, 'services/draftService.ts'), 'utf8');
+    const getDraft = text.slice(text.indexOf('export async function getDraft('), text.indexOf('export async function getDraftState('));
+    expect(getDraft).toContain('SELECT * FROM letter_drafts WHERE draft_id = $1');
   });
 });
