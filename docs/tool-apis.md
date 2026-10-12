@@ -126,7 +126,7 @@ Postcards take no signature.
 ### How the draft editors refuse (#690)
 
 The draft editors share one way to refuse a change to the draft, and to read the draft they change (`src/tools/draftEdit.ts`, #690). The editors are `set_arrival_date`, `set_mail_service`, `set_stationery`, `set_letter_words`, `set_letter_signature` and `set_postcard_style`. They share:
-- one error for refusing the draft, `DraftRefusedError`, whose code is the log's class (an editor's own refusals before it reads the draft keep theirs: `set_letter_signature`'s `SIGNATURES_OFF` is a `SignatureRefusedError`);
+- one error, `DraftRefusedError`, whose code is the log's class: every refusal an editor raises is one, except `SIGNATURES_OFF`, which `set_letter_signature` gets from the shared `requireSignatures` as a `SignatureRefusedError`;
 - the draft's state refusals, built from what each edit changes;
 - for the four that draw the page again (`set_stationery`, `set_letter_words`, `set_letter_signature` and `set_postcard_style`), one order of checks before the lock: not found (someone else's draft included), the wrong kind of mail, sent, expired (a draft an erasure emptied included), and not drawn by our renderer.
 

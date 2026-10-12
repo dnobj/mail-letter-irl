@@ -1,10 +1,10 @@
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
 import { isArriveByEnabled } from '../config/arriveBy.js';
 import { DELIVERY_ESTIMATE } from '../content/delivery.js';
-import { setDraftSchedule } from '../services/draftService.js';
+import { setDraftSchedule, type DraftScheduleRefusal } from '../services/draftService.js';
 import { previewSchedule, scheduleSentence, type PreviewScheduleOutput } from './arriveByInput.js';
 import { isDraftIdShape } from './requestSend.js';
-import { DraftRefusedError, draftRefusals } from './draftEdit.js';
+import { DraftRefusedError, draftRefusals, type DraftRefusal } from './draftEdit.js';
 
 /**
  * A preview's arrival date, set, moved or cleared without previewing again
@@ -32,11 +32,13 @@ export interface SetArrivalDateOutput {
 }
 
 /** The draft's state, refused in an arrival date's words (#690): a letter or a postcard, so "this mail". */
-export const ARRIVAL_DATE_REFUSALS = draftRefusals({
+const { changed: _neverRedrawn, ...ARRIVAL_DATE_STATES } = draftRefusals({
   mail: 'mail',
   what: 'its arrival date',
   previewTakes: 'the preview tools take arriveBy themselves'
 });
+// Nothing is drawn again for a date, so no change can refuse as 'changed'.
+export const ARRIVAL_DATE_REFUSALS: Record<DraftScheduleRefusal, DraftRefusal> = ARRIVAL_DATE_STATES;
 
 async function handler(
   input: SetArrivalDateInput,

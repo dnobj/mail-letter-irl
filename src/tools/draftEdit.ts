@@ -6,7 +6,7 @@
  * Each refuses in its own words but the same way: one error, whose code doubles as the
  * log's class (DraftRefusedError), the draft's state in words built from what the edit
  * changes (draftRefusals), and a warning logged under the editor's own event
- * (draftRefuser). The editors that draw the page again read the draft the same way first
+ * (draftRefuser; set_arrival_date logs the draft's state itself, as it always has). The editors that draw the page again read the draft the same way first
  * (editableDraft): not found, the wrong kind of mail, sent, expired or emptied by an
  * erasure, and not drawn by our renderer, in that order, so each says why at once. The
  * lock under which the change is written checks the state again (withChangeableDraft in
