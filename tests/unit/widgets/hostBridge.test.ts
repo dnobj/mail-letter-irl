@@ -367,8 +367,10 @@ describe('the bridge in an MCP Apps host', () => {
           constructor(callback: () => void) { observed = callback; }
           observe() {}
         };
-        Object.defineProperty(window, 'innerHeight', { configurable: true, value: 698 });
+        // The frame's own measure, and the observer's work run at once in place of the next frame.
+        Object.defineProperty((window as any).Element.prototype, 'clientHeight', { configurable: true, get: () => 698 });
         Object.defineProperty((window as any).Element.prototype, 'scrollHeight', { configurable: true, get: () => scrollHeight });
+        (window as any).requestAnimationFrame = (callback: () => void) => { callback(); return 1; };
       }
     });
     const root = dom.window.document.documentElement;
@@ -388,6 +390,17 @@ describe('the bridge in an MCP Apps host', () => {
     expect(root.style.overflowY).toBe('');
     // Fitting exactly: nothing to hide.
     scrollHeight = 698;
+    observed!();
+    expect(root.style.overflowY).toBe('');
+    // Hidden, then fitting once the scroll bar's room is back: it stays hidden, so the bar does not come and go.
+    scrollHeight = 699;
+    observed!();
+    expect(root.style.overflowY).toBe('hidden');
+    scrollHeight = 698;
+    observed!();
+    expect(root.style.overflowY).toBe('hidden');
+    // And a real overflow still scrolls from there.
+    scrollHeight = 760;
     observed!();
     expect(root.style.overflowY).toBe('');
     dom.window.close();
