@@ -223,6 +223,30 @@ describe('statusSyncService', () => {
       expect(result.details).toHaveLength(0);
     });
 
+    it("leaves a letter's status as it is when the provider's is unrecognised (#682)", async () => {
+      const testLetters = [createLetterRowForSync({
+        letterId: 'letter-unknown',
+        trackingId: 'track-unknown',
+        status: 'in_transit',
+      })];
+
+      vi.mocked(db.query)
+        .mockResolvedValueOnce({ rows: testLetters } as any)
+        .mockResolvedValue({ rows: [], rowCount: 1 } as any);
+
+      mockProvider.getStatus.mockResolvedValueOnce({
+        status: 'unrecognised',
+        statusMessage: 'Status: held_for_review',
+      });
+
+      const result = await syncLetterStatuses(false, 30);
+
+      expect(result).toMatchObject({ checked: 1, updated: 0, errors: 0 });
+      expect(result.details).toHaveLength(0);
+      // The letter list was the only query: nothing was written.
+      expect(db.query).toHaveBeenCalledTimes(1);
+    });
+
     it('should include status change details in result', async () => {
       const testLetters = [createLetterRowForSync({
         letterId: 'letter-detail',

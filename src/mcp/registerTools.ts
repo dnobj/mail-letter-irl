@@ -2007,10 +2007,13 @@ export function summarizeToolResult(
       // The sentence carries the link, which is given only here (#604).
       return typeof result.message === "string" ? result.message : "The address request is ready.";
     case "get_address_request": {
-      // With the address once answered, for an app whose model reads only the text (#604).
+      // With the address once answered, for an app whose model reads only the text (#604). The recipient typed it on
+      // a public page, so it is given as their quoted words, never as the tool's own sentence (#682).
       const message = typeof result.message === "string" ? result.message : "The address request was checked.";
       const recipient = result.recipient as Record<string, unknown> | undefined;
-      return recipient ? `${message} Address: ${addressLine(recipient)}.` : message;
+      return recipient
+        ? `${message} The address, exactly as the recipient typed it: ${JSON.stringify(addressLine(recipient))}.`
+        : message;
     }
     case "cancel_address_request":
       return typeof result.message === "string" ? result.message : "The address request was cancelled.";

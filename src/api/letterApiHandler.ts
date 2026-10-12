@@ -20,6 +20,7 @@ import { cancelledMessage } from '../tools/cancelScheduledMail.js';
 import { heldSendFields, waitsInOutbox } from '../tools/heldSend.js';
 import { certifiedFactsOf } from '../config/certifiedMail.js';
 import { mailServiceOf } from '../config/products.js';
+import { sendInternalError } from './internalError.js';
 
 /**
  * Send JSON response
@@ -89,12 +90,8 @@ export async function handleLetterApiRequest(
     });
     return true;
 
-  } catch (error: any) {
-    console.error('Letter API request failed');
-    sendJson(res, 500, {
-      error: 'Internal server error',
-      message: error.message
-    });
+  } catch (error: unknown) {
+    sendInternalError(res, 'letters.api_failed', error, 'Unable to complete letter request');
     return true;
   }
 }

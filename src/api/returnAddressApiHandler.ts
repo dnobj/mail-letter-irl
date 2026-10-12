@@ -14,13 +14,13 @@ import {
   setReturnAddress,
   clearReturnAddress
 } from '../services/returnAddressService.js';
-import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 import {
   authenticateRestRequest,
   sendRestAuthFailure,
   type RestAuthInfo as AuthInfo
 } from './middleware/restAuth.js';
 import { rateLimitAccount } from './middleware/rateLimit.js';
+import { sendInternalError } from './internalError.js';
 import { requiredRestScopes } from '../auth/restScopes.js';
 
 /**
@@ -168,13 +168,7 @@ export async function handleReturnAddressApiRequest(
     return true;
 
   } catch (error) {
-    writeDiagnostic('error', 'address.api_failed', {
-      errorClass: classifyDiagnosticError(error, 'database_error')
-    });
-    sendJson(res, 500, {
-      error: 'Internal server error',
-      message: error instanceof Error ? error.message : 'Unknown error'
-    });
+    sendInternalError(res, 'address.api_failed', error, 'Unable to complete return address request');
     return true;
   }
 }

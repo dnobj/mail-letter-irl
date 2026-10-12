@@ -640,6 +640,26 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
     services: ['api']
   },
   /**
+   * Letter IRL home (src/config/letterHome.ts) and saved stationery designs
+   * (#649, src/config/customStationery.ts): each off unless set, so absence is
+   * the intended production state until the owner switches it on; listed so
+   * the preflight shows which environments have them (#682). API only.
+   */
+  {
+    name: 'LETTER_IRL_HOME_ENABLED',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  {
+    name: 'LETTER_IRL_CUSTOM_STATIONERY_ENABLED',
+    requiredIn: 'production',
+    advisory: true,
+    secret: false,
+    services: ['api']
+  },
+  /**
    * The words editor (#647, src/config/wordsEditor.ts): a letter's words
    * changed in place on one page, without room to write, while the flag is on
    * and our renderer draws letters. Off unless set; listed so the preflight

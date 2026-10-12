@@ -630,6 +630,17 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       // Map PostGrid status to our status
       const status = this.mapStatus(response.status);
       const statusMessage = this.getStatusMessage(response.status);
+      if (status === 'unrecognised') {
+        // A status PostGrid has added since this was written: the letter keeps its own, and an operator is told the
+        // name, when it is shaped like PostGrid's own, or else only its length.
+        const raw = typeof response.status === 'string' ? response.status : '';
+        this.writeOperationDiagnostic(
+          'provider.postgrid.status_unrecognised',
+          operation,
+          /^[a-z][a-z_]{0,39}$/i.test(raw) ? { status: raw } : { length: raw.length },
+          'warn'
+        );
+      }
 
       const letterStatus: LetterStatus = {
         trackingId,
@@ -1231,7 +1242,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       'canceled': 'failed'
     };
 
-    return statusMap[postgridStatus.toLowerCase()] || 'accepted';
+    return statusMap[String(postgridStatus).toLowerCase()] ?? 'unrecognised';
   }
 
   /**
@@ -1254,7 +1265,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
       'canceled': 'Letter was canceled before sending'
     };
 
-    return messageMap[postgridStatus.toLowerCase()] || `Status: ${postgridStatus}`;
+    return messageMap[String(postgridStatus).toLowerCase()] || `Status: ${postgridStatus}`;
   }
 
   /**
