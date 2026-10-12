@@ -319,6 +319,55 @@ describe('the bridge in an MCP Apps host', () => {
     expect(sizes()).toHaveLength(1);
   });
 
+  it('tells ChatGPT its height in whole pixels rounded up, only when it changes, and not where ChatGPT cannot take it', () => {
+    let observed: (() => void) | undefined;
+    let measured = 794.78;
+    const told: number[] = [];
+    const page = (withCall: boolean) =>
+      new JSDOM(bridgePage('<div></div>'), {
+        runScripts: 'dangerously',
+        beforeParse(window) {
+          (window as any).openai = withCall ? { notifyIntrinsicHeight: (height: number) => { told.push(height); return Promise.resolve(); } } : {};
+          (window as any).ResizeObserver = class {
+            constructor(callback: () => void) { observed = callback; }
+            observe() {}
+          };
+          // jsdom does no layout: the page measures what the test says.
+          (window as any).Element.prototype.getBoundingClientRect = () => ({ height: measured }) as DOMRect;
+        }
+      });
+    const dom = page(true);
+    // Told at once, rounded up, so the frame is never a fraction of a pixel short.
+    expect(told).toEqual([795]);
+    observed!();
+    expect(told).toEqual([795]);
+    measured = 812.1;
+    observed!();
+    expect(told).toEqual([795, 813]);
+    // Nothing for no height.
+    measured = 0;
+    observed!();
+    expect(told).toEqual([795, 813]);
+    dom.window.close();
+    // A ChatGPT without the call: nothing breaks.
+    const without = page(false);
+    expect(without.window.letterIrlHost.kind).toBe('chatgpt');
+    without.window.close();
+  });
+
+  it('keeps working when ChatGPT refuses the height', async () => {
+    const dom = new JSDOM(bridgePage('<div></div>'), {
+      runScripts: 'dangerously',
+      beforeParse(window) {
+        (window as any).openai = { notifyIntrinsicHeight: () => Promise.reject(new Error('no')) };
+        (window as any).Element.prototype.getBoundingClientRect = () => ({ height: 100 }) as DOMRect;
+      }
+    });
+    await flush();
+    expect((dom.window as any).letterIrlHost.kind).toBe('chatgpt');
+    dom.window.close();
+  });
+
   it('stays quiet when the page is not framed, rather than answering itself', async () => {
     const sent: unknown[] = [];
     const dom = new JSDOM(bridgePage(), { runScripts: 'dangerously' });

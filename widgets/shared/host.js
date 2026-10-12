@@ -134,6 +134,24 @@
     capability("getFileDownloadUrl", "getFileDownloadUrl", function (api, request) { return api.getFileDownloadUrl(request); });
     window.letterIrlHost = chatgpt;
     window.addEventListener("openai:set_globals", changed);
+    // The card's height, whole pixels rounded up, each time it changes. ChatGPT measured a letter card's frame to a
+    // fraction of a pixel (794.78 px) and the card, a pixel taller, showed a scroll bar with nothing to scroll. As the
+    // MCP Apps path says it with ui/notifications/size-changed, ChatGPT is told it with notifyIntrinsicHeight.
+    var lastHeight = 0;
+    var reportHeight = function () {
+      var api = openai();
+      if (typeof api.notifyIntrinsicHeight !== "function") return;
+      var height = Math.ceil(document.documentElement.getBoundingClientRect().height);
+      if (!(height > 0) || height === lastHeight) return;
+      lastHeight = height;
+      try {
+        Promise.resolve(api.notifyIntrinsicHeight(height)).catch(function () {});
+      } catch (error) {
+        // A host that refuses it keeps measuring the card itself.
+      }
+    };
+    if (typeof ResizeObserver === "function") new ResizeObserver(reportHeight).observe(document.documentElement);
+    reportHeight();
     var asked = document.documentElement.getAttribute("data-plugin-extensions");
     if (asked !== null && window.parent && window.parent !== window) {
       var openOnce = function () {
