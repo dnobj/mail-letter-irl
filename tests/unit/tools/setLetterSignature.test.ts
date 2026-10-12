@@ -139,6 +139,17 @@ afterEach(() => {
 });
 
 describe('set_letter_signature', () => {
+  it('answers with the content version the change wrote, and none when the writer told none (#695)', async () => {
+    vi.mocked(getDraftForStationery).mockResolvedValue(draft());
+    vi.mocked(setDraftSignature).mockImplementation(async (...args: unknown[]) => {
+      (args.at(-1) as (version: string) => void)('0123456789abcdef');
+      return null;
+    });
+    expect(await run({ signature: true })).toMatchObject({ contentVersion: '0123456789abcdef' });
+    vi.mocked(setDraftSignature).mockResolvedValue(null);
+    expect(await run({ signature: true })).not.toHaveProperty('contentVersion');
+  });
+
   it('signs a letter with the signature as saved now, records pdf-4 in its page, and says what it did', async () => {
     const original = draft();
     vi.mocked(getDraftForStationery).mockResolvedValue(original);

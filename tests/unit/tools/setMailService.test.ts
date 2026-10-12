@@ -145,6 +145,16 @@ describe('set_mail_service (#625)', () => {
     expect(vi.mocked(getSendEligibility).mock.calls.at(-1)![2]).toEqual({ mailType: 'letter', mailService: service });
   });
 
+  it('answers with the content version the change wrote, and none when the writer told none (#695)', async () => {
+    vi.mocked(setDraftMailService).mockImplementation(async (...args: unknown[]) => {
+      (args.at(-1) as (version: string) => void)('0123456789abcdef');
+      return null;
+    });
+    expect(await set({ draftId: DRAFT_ID, mailService: 'standard' }, context(10))).toMatchObject({ contentVersion: '0123456789abcdef' });
+    vi.mocked(setDraftMailService).mockResolvedValue(null);
+    expect(await set({ draftId: DRAFT_ID, mailService: 'standard' }, context(10))).not.toHaveProperty('contentVersion');
+  });
+
   it('sets standard, and then the balance pays for a one-page letter again', async () => {
     vi.mocked(getDraftForMailService).mockResolvedValue(draft());
     const result = await set({ draftId: DRAFT_ID, mailService: 'standard' }, context(10));

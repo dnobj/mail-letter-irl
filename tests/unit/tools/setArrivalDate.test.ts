@@ -89,6 +89,16 @@ describe('set_arrival_date (#535)', () => {
     });
   });
 
+  it('answers with the content version the change wrote, and none when the writer told none (#695)', async () => {
+    vi.mocked(setDraftSchedule).mockImplementation(async (...args: unknown[]) => {
+      (args.at(-1) as (version: string) => void)('0123456789abcdef');
+      return null;
+    });
+    expect(await set({ draftId: DRAFT_ID, arriveBy: '2026-10-16' })).toMatchObject({ contentVersion: '0123456789abcdef' });
+    vi.mocked(setDraftSchedule).mockResolvedValue(null);
+    expect(await set({ draftId: DRAFT_ID, arriveBy: '2026-10-16' })).not.toHaveProperty('contentVersion');
+  });
+
   it('names the year of a date in another year', async () => {
     const result = await set({ draftId: DRAFT_ID, arriveBy: '2027-01-08' }, context(new Date('2026-11-20T15:00:00Z')));
     expect(result.schedule?.mailOn).toBe('2026-12-29');
