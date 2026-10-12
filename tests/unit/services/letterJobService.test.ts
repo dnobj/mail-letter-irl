@@ -1485,6 +1485,28 @@ describe('releaseHeldLetterJobAsAdmin: sending held mail now (#535)', () => {
     expect(writes(calls)).toEqual([]);
   });
 
+  it('releases mail held for its funding, due or not, and ends the hold (#696)', async () => {
+    for (const hold of ['funding_reversed', 'funding_disputed']) {
+      // A pack's letter sent for now, or one whose mail date passed while it was held.
+      const calls = heldClient({ job: { hold_reason: hold, mail_hold_until: null, still_held: false } });
+      await expect(releaseHeldLetterJobAsAdmin(params), hold).resolves.toEqual({ jobId: 'job-held', replayed: false });
+      const release = calls.find(call => call.sql.startsWith('UPDATE letter_jobs'))!;
+      expect(release.sql).toContain('hold_reason = NULL');
+      const audit = calls.find(call => call.sql.includes('INSERT INTO commerce_operator_audit_events'))!;
+      expect(JSON.parse(String(audit.params[3]))).toMatchObject({ fundingHold: hold });
+    }
+  });
+
+  it.each([
+    ['another hold', { hold_reason: 'provider_outcome_ambiguous' }],
+    ['attempted', { attempts: 1 }],
+    ['dispatched', { provider_outcome: 'dispatching' }],
+  ])('refuses mail held for its funding that is %s, writing nothing (#696)', async (_label, job) => {
+    const calls = heldClient({ job: { hold_reason: 'funding_reversed', mail_hold_until: null, still_held: false, ...job } });
+    await expect(releaseHeldLetterJobAsAdmin(params)).rejects.toMatchObject({ code: 'invalid_state' });
+    expect(writes(calls)).toEqual([]);
+  });
+
   it('refuses a job that does not exist', async () => {
     clientQuery.mockImplementation(async () => ({ rows: [] }));
     await expect(releaseHeldLetterJobAsAdmin(params)).rejects.toMatchObject({ code: 'not_found' });
@@ -1516,5 +1538,83 @@ describe('releaseHeldLetterJobAsAdmin: sending held mail now (#535)', () => {
         code: 'idempotency_conflict'
       });
     }
+  });
+});
+
+describe('mail left for the operator (#696)', () => {
+  const flat = (text: string) => text.replace(/\s+/g, ' ');
+  const LEFT = "(j_alias.provider_outcome = 'not_dispatched' AND j_alias.hold_reason IN ('funding_reversed', 'funding_disputed'))";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.transaction.mockImplementation(
+      async (callback: (client: { query: typeof clientQuery }) => Promise<unknown>) => callback({ query: clientQuery })
+    );
+  });
+
+  it('is not claimed when due: held for its funding, or of an account whose sending is blocked', async () => {
+    query.mockReset().mockResolvedValue({ rows: [] });
+    await processLetterJob('job-1');
+    const claim = flat(String(query.mock.calls[0]?.[0]));
+    const due = "(status IN ('pending', 'failed') AND next_attempt_at <= NOW() AND NOT (";
+    expect(claim).toContain(due + LEFT.replace(/j_alias/g, 'letter_jobs'));
+    expect(claim).toContain(
+      'OR EXISTS ( SELECT 1 FROM letters held_letter JOIN users held_user ON held_user.user_id = held_letter.user_id ' +
+        'WHERE held_letter.letter_id = letter_jobs.letter_id AND held_user.sends_blocked_reason IS NOT NULL ))'
+    );
+    // A claim a crash left behind is taken back whatever it is: the marker puts it back.
+    const stale = claim.slice(claim.indexOf("status = 'processing' AND locked_at"));
+    expect(stale).not.toContain('hold_reason');
+    expect(stale).not.toContain('sends_blocked_reason');
+  });
+
+  it('is not counted as waiting behind a pause', async () => {
+    vi.stubEnv('LETTER_IRL_OUTBOX_DISPATCH_ENABLED', 'false');
+    query.mockReset().mockResolvedValue({ rows: [{ count: '0' }] });
+    await lettersWaitingBehindPause();
+    const count = flat(String(query.mock.calls.map(call => String(call[0])).find(sql => sql.includes('COUNT(*)'))));
+    expect(count).toContain('AND NOT (' + LEFT.replace(/j_alias/g, 'letter_jobs'));
+    expect(count).toContain('held_user.sends_blocked_reason IS NOT NULL');
+    vi.unstubAllEnvs();
+  });
+
+  function markerClient(options: { holdReason?: string | null; blocked?: string | null }) {
+    const calls: Array<{ sql: string; params: unknown[] }> = [];
+    clientQuery.mockImplementation(async (sql: string, values: unknown[] = []) => {
+      calls.push({ sql, params: values });
+      if (sql.includes('SELECT jobs.letter_id')) return { rows: [{ letter_id: 'letter-1', funding_order_id: null }] };
+      if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...letter, user_id: 'user-1' }] };
+      if (sql.startsWith('SELECT * FROM letter_jobs')) return { rows: [{ ...job, hold_reason: options.holdReason ?? null }] };
+      if (sql.startsWith('SELECT sends_blocked_reason FROM users')) return { rows: [{ sends_blocked_reason: options.blocked ?? null }] };
+      return { rows: [] };
+    });
+    return calls;
+  }
+
+  it.each([
+    ['held for its funding since the claim', { holdReason: 'funding_reversed' }],
+    ['held for a dispute since the claim', { holdReason: 'funding_disputed' }],
+    ['of an account blocked since the claim', { blocked: 'payment_disputed' }],
+  ])('is put back by the dispatch marker when %s: pending, its attempt given back, nothing sent or failed', async (_label, options) => {
+    mockClaims();
+    const calls = markerClient(options);
+    const result = await processLetterJob('job-1');
+    expect(result).toMatchObject({ claimed: true, completed: false, retryScheduled: false, error: 'Left for the operator' });
+    expect(sendLetter).not.toHaveBeenCalled();
+    const back = calls.find(call => call.sql.includes("SET status = 'pending', attempts = GREATEST(attempts - 1, 0)"));
+    expect(back?.params).toEqual(['job-1']);
+    expect(calls.some(call => call.sql.includes("SET provider_outcome = 'dispatching'"))).toBe(false);
+    expect(calls.some(call => call.sql.includes('last_error'))).toBe(false);
+    // Read for its user, as the letter names it.
+    expect(calls.find(call => call.sql.startsWith('SELECT sends_blocked_reason FROM users'))?.params).toEqual(['user-1']);
+  });
+
+  it('is dispatched as before when neither', async () => {
+    mockClaims();
+    sendLetter.mockResolvedValue({ success: true, trackingId: 'provider-1', costCents: 100 });
+    const calls = markerClient({});
+    await processLetterJob('job-1');
+    expect(calls.some(call => call.sql.includes("SET provider_outcome = 'dispatching'"))).toBe(true);
+    expect(calls.some(call => call.sql.includes('GREATEST(attempts - 1, 0)'))).toBe(false);
   });
 });

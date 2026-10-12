@@ -4552,3 +4552,113 @@ describe('checkout refusal cleanup (#275)', () => {
     expect(statementsRun().some(sql => /last_error_code/.test(sql))).toBe(true);
   });
 });
+
+describe("mail a pack paid for, when the pack's money goes back (#696)", () => {
+  const packOrder = {
+    ...baseOrder, order_type: 'letter_pack', product_code: 'credit-pack-4',
+    draft_id: undefined, credits: 4, amount_cents: 500, currency: 'usd',
+    status: 'fulfilled', stripe_payment_intent_id: 'pi-hold', refund_attempts: 0
+  };
+  function script(order: Record<string, unknown> = packOrder) {
+    const calls: Array<{ sql: string; params: unknown[] }> = [];
+    mocks.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
+      calls.push({ sql, params });
+      if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-hold' }] };
+      if (sql.includes('UPDATE orders') && sql.includes('RETURNING order_id')) return { rows: [{ order_id: 'order-1' }] };
+      if (sql.includes('SELECT DISTINCT l.letter_id')) return { rows: [{ letter_id: 'letter-1' }, { letter_id: 'letter-2' }] };
+      if (sql.startsWith('SELECT status FROM letters WHERE letter_id')) {
+        // The second has gone to the printer: nothing to hold.
+        return { rows: [{ status: params[0] === 'letter-1' ? 'queued' : 'sent' }] };
+      }
+      if (sql.includes('SET hold_reason = $2')) return { rows: [{ job_id: 'job-1' }], rowCount: 1 };
+      if (sql.includes('FROM orders')) return { rows: [order] };
+      return { rows: [] };
+    });
+    return calls;
+  }
+  const refund = (status: string) => ({
+    id: 'evt-hold', type: 'refund.updated',
+    data: { object: { id: 're-hold', payment_intent: 'pi-hold', charge: 'ch-hold', amount: 500, status, metadata: {} } }
+  }) as any;
+  const dispute = (status: string) => ({
+    id: 'evt-hold', type: 'charge.dispute.created',
+    data: { object: { id: 'dp-hold', charge: 'ch-hold', payment_intent: 'pi-hold', amount: 500, currency: 'usd', reason: 'fraudulent', status } }
+  }) as any;
+  const holds = (calls: Array<{ sql: string; params: unknown[] }>) => calls.filter(call => call.sql.includes('SET hold_reason = $2'));
+  const alerts = (calls: Array<{ sql: string; params: unknown[] }>) =>
+    calls.filter(call => call.sql.includes("'held_mail_funding_reversed'"));
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.transaction.mockImplementation(async callback =>
+      callback({ query: (...args: [string, unknown[]?]) => mocks.query(...args) })
+    );
+    mocks.findRefund.mockResolvedValue({ id: 're-hold', status: 'succeeded' });
+  });
+
+  it('holds the queued letters a pack refunded in full paid for, before its lots go, and says so once', async () => {
+    const calls = script();
+    await processStripeWebhookEvent(refund('succeeded'));
+
+    const funded = calls.find(call => call.sql.includes('SELECT DISTINCT l.letter_id'))!;
+    expect(funded.params).toEqual(['order-1', 'user-1']);
+    // Through the lots the order bought, or lots returned from them.
+    expect(funded.sql).toContain('lot.source_order_id = $1');
+    expect(funded.sql).toContain('lot.related_ledger_id IN (SELECT ledger_id FROM credit_ledger WHERE source_order_id = $1)');
+    // Each letter locked before its job; only a queued one held, never dispatched mail.
+    expect(calls.filter(call => call.sql.startsWith('SELECT status FROM letters WHERE letter_id')).map(call => call.params))
+      .toEqual([['letter-1'], ['letter-2']]);
+    expect(holds(calls).map(call => call.params)).toEqual([['letter-1', 'funding_reversed']]);
+    expect(holds(calls)[0].sql).toContain("status IN ('pending', 'processing')");
+    expect(holds(calls)[0].sql).toContain("provider_outcome = 'not_dispatched'");
+    expect(alerts(calls)).toHaveLength(1);
+    expect(alerts(calls)[0].params).toEqual(['evt-hold', 'order-1', JSON.stringify({ reason: 'funding_reversed', letters: 1 })]);
+    // Before the account lock, so before the lots are revoked.
+    const holdAt = calls.findIndex(call => call.sql.includes('SET hold_reason = $2'));
+    expect(holdAt).toBeLessThan(calls.findIndex(call => call.sql === ACCOUNT_LOCK_SQL));
+  });
+
+  it('holds nothing while the refund is pending: it may still fail', async () => {
+    mocks.findRefund.mockResolvedValue({ id: 're-hold', status: 'pending' });
+    const calls = script();
+    await processStripeWebhookEvent(refund('pending'));
+    expect(calls.some(call => call.sql.includes('SELECT DISTINCT l.letter_id'))).toBe(false);
+    expect(alerts(calls)).toEqual([]);
+  });
+
+  it('holds them for a dispute that takes the money, as funding_disputed', async () => {
+    const calls = script();
+    await processStripeWebhookEvent(dispute('needs_response'));
+    expect(holds(calls).map(call => call.params)).toEqual([['letter-1', 'funding_disputed']]);
+    expect(alerts(calls)[0].params[2]).toBe(JSON.stringify({ reason: 'funding_disputed', letters: 1 }));
+  });
+
+  it("holds nothing for a card network's inquiry, which takes no money", async () => {
+    const calls = script();
+    await processStripeWebhookEvent(dispute('warning_needs_response'));
+    expect(calls.some(call => call.sql.includes('SELECT DISTINCT l.letter_id'))).toBe(false);
+  });
+
+  it('raises no alert when nothing was waiting', async () => {
+    const calls = script();
+    mocks.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
+      calls.push({ sql, params });
+      if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-hold' }] };
+      if (sql.includes('UPDATE orders') && sql.includes('RETURNING order_id')) return { rows: [{ order_id: 'order-1' }] };
+      if (sql.includes('SELECT DISTINCT l.letter_id')) return { rows: [{ letter_id: 'letter-1' }] };
+      if (sql.startsWith('SELECT status FROM letters WHERE letter_id')) return { rows: [{ status: 'queued' }] };
+      // Its job already taken past dispatch.
+      if (sql.includes('SET hold_reason = $2')) return { rows: [], rowCount: 0 };
+      if (sql.includes('FROM orders')) return { rows: [packOrder] };
+      return { rows: [] };
+    });
+    await processStripeWebhookEvent(refund('succeeded'));
+    expect(alerts(calls)).toEqual([]);
+  });
+
+  it("leaves a Pay & Send order's own letter to its own stop", async () => {
+    const calls = script({ ...packOrder, order_type: 'jit_mail', letter_id: null });
+    await processStripeWebhookEvent(refund('succeeded'));
+    expect(calls.some(call => call.sql.includes('SELECT DISTINCT l.letter_id'))).toBe(false);
+  });
+});
