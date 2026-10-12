@@ -301,22 +301,6 @@ export async function createMailOrderFromDraftWithClient(
   const schedule = scheduled === 'missed' ? null : scheduled;
   const missed = scheduled === 'missed' ? draftScheduleOf(draft) : null;
   const releaseAt = schedule ? dispatchAt(schedule.mailOn) : undefined;
-  // Room on its mail date (#700), counted under a lock on the date, so two
-  // sends cannot both take its last place. The lock comes after the draft's
-  // and before the account's, which the deduction and the gift take below; the
-  // paid fulfilment, which holds the account first, takes none. Pay & Send is
-  // not refused here: it has been charged, and its checkout refused a full date
-  // before the charge, so a date filled since takes it over the cap.
-  if (schedule && funding.type !== 'jit_order') {
-    const full = await fullMailDate(client, schedule, new Date(), { lock: true });
-    if (full) {
-      throw Object.assign(
-        draftError('SCHEDULE_FULL', `Draft ${params.draftId} was to go to the printer on ${schedule.mailOn}, which is full`),
-        { openArrivals: full.openArrivals }
-      );
-    }
-  }
-
   // A gift draft is funded by a gift letter instead of the balance. Pay & Send
   // ignores the flag: that path runs after Stripe has charged, and
   // createJitCheckout refuses a gift draft before any charge exists.
@@ -353,6 +337,23 @@ export async function createMailOrderFromDraftWithClient(
         'DRAFT_CHECKOUT_PENDING',
         `Draft ${params.draftId} has an active Pay & Send checkout`
       );
+    }
+    // Room on its mail date (#700), for a prepaid or gift send, after the open
+    // checkout's refusal, which says what can be done. Counted under a lock on
+    // the date, so two sends cannot both take its last place. The lock comes
+    // after the draft's and its orders', and before the account's, which the
+    // deduction and the gift take below; the paid fulfilment, which holds the
+    // account first, takes none. Pay & Send is not refused for a full date: it
+    // has been charged, and its checkout refused one before the charge, so a
+    // date filled since takes it over the cap.
+    if (schedule) {
+      const full = await fullMailDate(client, schedule, new Date(), { lock: true });
+      if (full) {
+        throw Object.assign(
+          draftError('SCHEDULE_FULL', `Draft ${params.draftId} was to go to the printer on ${schedule.mailOn}, which is full`),
+          { openArrivals: full.openArrivals }
+        );
+      }
     }
   } else {
     const orderResult = await client.query<Order>(

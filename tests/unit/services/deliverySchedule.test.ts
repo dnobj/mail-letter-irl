@@ -327,6 +327,13 @@ describe('the nearest arrival dates with room (#700)', () => {
     expect(nearestOpenArrivals('2026-10-17', NOW, SETTINGS, mailOn => mailOn !== friday, 2)).toEqual(['2026-10-15', '2026-10-19']);
   });
 
+  it('ranks a mail date by its nearest arrival date: a Monday asked for has the Friday before it one day off (review round 2)', () => {
+    const monday = mailOnFor('2026-10-19', 7);
+    // Fri Oct 16 mails on the day Sun Oct 18 does, one day off; so is Tue Oct 20: the earlier.
+    expect(nearestOpenArrivals('2026-10-19', NOW, SETTINGS, mailOn => mailOn !== monday, 1)).toEqual(['2026-10-16']);
+    expect(nearestOpenArrivals('2026-10-19', NOW, SETTINGS, mailOn => mailOn !== monday, 2)).toEqual(['2026-10-16', '2026-10-20']);
+  });
+
   it('asks about every mail date on offer, from the earliest arrival to the latest, and none outside them', () => {
     const asked: string[] = [];
     nearestOpenArrivals('2026-10-16', NOW, SETTINGS, mailOn => { asked.push(mailOn); return false; });

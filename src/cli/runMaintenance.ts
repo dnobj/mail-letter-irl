@@ -391,10 +391,12 @@ export interface OutboxRunSummary {
  * letters are all due at 09:00 New York time, more than one batch of 25, and
  * one batch a run would send the rest an hour apart.
  *
- * A batch that met trouble, a failure or a retry, ends the run's outbox as a
- * single batch always did: a provider outage then holds or retries at most
- * one batch a run, not every letter due, and a retried job is not claimed
- * again in the same run once its backoff has passed.
+ * Trouble ends the run's outbox as a single batch always did: a batch with a
+ * retry, or with no more letters sent than failed, or a run that has failed as
+ * many as a batch holds. A provider outage then holds or retries at most one
+ * batch a run, not every letter due, and a retried job is not claimed again
+ * in the same run once its backoff has passed; one letter the provider
+ * rejects, among letters it takes, does not stop the date's mail.
  */
 export async function dispatchDueMail(
   batchLimit: number,
@@ -411,7 +413,9 @@ export async function dispatchDueMail(
     total.retryScheduled += batch.retryScheduled;
     total.failed += batch.failed;
     if (batch.paused) return { ...total, paused: true, waiting: batch.waiting };
-    if (batch.processed < batchLimit || batch.failed > 0 || batch.retryScheduled > 0 || now() >= stopAt) return total;
+    const trouble =
+      batch.retryScheduled > 0 || (batch.failed > 0 && batch.failed >= batch.completed) || total.failed >= batchLimit;
+    if (batch.processed < batchLimit || trouble || now() >= stopAt) return total;
   }
 }
 

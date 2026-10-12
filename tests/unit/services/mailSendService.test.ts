@@ -1052,6 +1052,17 @@ describe('createMailOrderFromDraft', () => {
       expect(letterInsert).toBeUndefined();
     });
 
+    it('refuses a draft with an open checkout for that first, taking no date lock (#700 review round 2)', async () => {
+      draft.arrive_by = '2026-10-16';
+      draft.mail_on = '2026-10-06';
+      vi.stubEnv('LETTER_IRL_SCHEDULE_DAILY_CAP', '1');
+      heldOnDate = 1;
+      activeCheckout = true;
+
+      await expect(send()).rejects.toMatchObject({ code: 'DRAFT_CHECKOUT_PENDING' });
+      expect(capacityQueries).toEqual([]);
+    });
+
     it('never refuses a paid Pay & Send order for a full date, and takes no lock for it (#700)', async () => {
       draft.arrive_by = '2026-10-16';
       draft.mail_on = '2026-10-06';

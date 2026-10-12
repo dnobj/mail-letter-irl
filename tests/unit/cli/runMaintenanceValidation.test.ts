@@ -768,8 +768,9 @@ describe('the outbox in batches, within a time budget (#700)', () => {
   });
 
   it.each([
-    ['a failure', { completed: 2, failed: 1, retryScheduled: 0 }],
-    ['a retry', { completed: 2, failed: 0, retryScheduled: 1 }]
+    ['a retry', { completed: 2, failed: 0, retryScheduled: 1 }],
+    ['no more sent than failed', { completed: 1, failed: 1, retryScheduled: 0 }],
+    ['nothing sent and a failure', { completed: 0, failed: 1, retryScheduled: 0 }]
   ])('starts no batch after one with %s, as a single batch a run always stopped', async (_label, trouble) => {
     services.processDueLetterJobs
       .mockResolvedValueOnce(batch(3))
@@ -778,8 +779,22 @@ describe('the outbox in batches, within a time budget (#700)', () => {
 
     const summary = await dispatchDueMail(3, 60_000, () => 0);
 
-    expect(summary).toMatchObject({ batches: 2, processed: 6, completed: 5, failed: trouble.failed, retryScheduled: trouble.retryScheduled });
+    expect(summary).toMatchObject({ batches: 2, processed: 6, completed: 3 + trouble.completed, failed: trouble.failed, retryScheduled: trouble.retryScheduled });
     expect(services.processDueLetterJobs).toHaveBeenCalledTimes(2);
+  });
+
+  it('carries on past a letter the provider rejects among letters it takes (review round 2)', async () => {
+    services.processDueLetterJobs
+      .mockResolvedValueOnce(batch(3, { completed: 2, failed: 1 }))
+      .mockResolvedValueOnce(batch(3))
+      .mockResolvedValueOnce(batch(1));
+    await expect(dispatchDueMail(3, 60_000, () => 0)).resolves.toMatchObject({ batches: 3, processed: 7, failed: 1 });
+  });
+
+  it('stops once the run has failed as many as a batch holds', async () => {
+    for (let index = 0; index < 5; index += 1) services.processDueLetterJobs.mockResolvedValueOnce(batch(3, { completed: 2, failed: 1 }));
+    services.processDueLetterJobs.mockResolvedValueOnce(batch(0));
+    await expect(dispatchDueMail(3, 60_000, () => 0)).resolves.toMatchObject({ batches: 3, failed: 3 });
   });
 
   it('carries on after a batch whose only others were left for the operator', async () => {

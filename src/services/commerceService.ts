@@ -978,19 +978,25 @@ async function prepareJitOrder(
       [params.draftId, ACTIVE_JIT_STATUSES]
     );
     const existing = active.rows[0];
-    // A mail date already past (#535), or full (#700), is refused before the
-    // charge: after it, fulfilment mails as soon as it can, and over the cap.
-    // Not for an order already paid or further on, which is returned below as
-    // it always was: refusing it would tell someone charged that nothing was.
-    // The count is read without the send's lock; this is the refusal that
-    // keeps a paid letter off a full date.
-    if (schedule && (!existing || existing.status === 'checkout_pending')) {
-      if (schedule.mailOn < earliestMailOn(new Date())) {
-        throw Object.assign(new Error('Draft has missed its mail date'), {
-          code: 'SCHEDULE_PASSED',
-          diagnosticClass: 'SCHEDULE_PASSED'
-        });
-      }
+    // A mail date already past (#535) is refused before the charge: after it,
+    // fulfilment mails as soon as it can. Not for an order already paid or
+    // further on, which is returned below as it always was.
+    if (schedule && (!existing || existing.status === 'checkout_pending') && schedule.mailOn < earliestMailOn(new Date())) {
+      throw Object.assign(new Error('Draft has missed its mail date'), {
+        code: 'SCHEDULE_PASSED',
+        diagnosticClass: 'SCHEDULE_PASSED'
+      });
+    }
+    // A full one (#700) only where a new Stripe session would be opened: no
+    // order yet, or one whose session was never made. A session already open
+    // was counted when it was made, and is returned below: refusing it would
+    // change nothing, since it can still be paid, and could tell someone who
+    // has just paid that nothing was charged. The count is read without the
+    // send's lock; the paid fulfilment mails over the cap.
+    const opensSession =
+      !existing ||
+      (existing.status === 'checkout_pending' && !existing.stripe_checkout_session_id && !existing.checkout_url);
+    if (schedule && opensSession) {
       const full = await fullMailDate(client, schedule, new Date());
       if (full) {
         throw Object.assign(new Error('Draft mail date is full'), {

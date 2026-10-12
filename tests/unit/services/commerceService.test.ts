@@ -4303,14 +4303,34 @@ describe('commerceService', () => {
         }
       );
 
-      it('refuses a full date for a draft whose checkout is still open, which nothing has paid', async () => {
+      it('returns a session already open, counted when it was made, though its date has since filled (review round 2)', async () => {
         activeRows = [currentOrder({ stripe_checkout_session_id: 'cs-open', checkout_url: 'https://checkout.stripe.test/cs-open' })];
+        await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).resolves.toMatchObject({ reused: true });
+        expect(trail.some(sql => sql.includes('AS held FROM letters'))).toBe(false);
+        expect(mocks.createJitSession).not.toHaveBeenCalled();
+      });
+
+      it('takes a checkout URL alone for an open session, as the reuse does', async () => {
+        activeRows = [currentOrder({ checkout_url: 'https://checkout.stripe.test/cs-url' })];
+        await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).resolves.toMatchObject({ reused: true });
+        expect(trail.some(sql => sql.includes('AS held FROM letters'))).toBe(false);
+      });
+
+      it('refuses a full date for an order whose session was never made, before one is', async () => {
+        activeRows = [currentOrder()];
         await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).rejects.toMatchObject({
           code: 'SCHEDULE_FULL',
           diagnosticClass: 'SCHEDULE_FULL'
         });
+        expect(mocks.createJitSession).not.toHaveBeenCalled();
         // After the look for the draft's order.
         expect(position('AS held FROM letters')).toBeGreaterThan(position('status = ANY($2::varchar[])'));
+      });
+
+      it('reuses an order whose session was never made when its date has room', async () => {
+        held = 1;
+        activeRows = [currentOrder()];
+        await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).resolves.toMatchObject({ reused: true });
       });
 
       it('refuses a passed date, classed, for a draft whose checkout is still open', async () => {
