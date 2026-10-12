@@ -517,6 +517,18 @@ describe('returnGiftLetterForFailedSendWithClient', () => {
     expect(ran('INSERT INTO gift_letters')[0].params[7]).toBe(far);
   });
 
+  it("gives a customer's cancelled gift back with its own expiry, not a fresh one (#683)", async () => {
+    const near = new Date(Date.now() + 3 * 86_400_000);
+    for (const expires of [near, PAST, null]) {
+      state.handlers.length = 0;
+      state.log.length = 0;
+      on('SELECT * FROM gift_letters', [gift({ status: 'consumed', expires_at: expires })]);
+      on('SELECT * FROM gift_codes WHERE letter_id', [{ code: 'K7M2QX9A', status: 'issued' }]);
+      await returnGiftLetterForFailedSendWithClient(client, { letterId: 'letter-1', userId: 'user-1', failureCode: 'X', cause: 'cancelled' });
+      expect(ran('INSERT INTO gift_letters')[0].params[7]).toBe(expires);
+    }
+  });
+
   it('keeps a gift that never expired never expiring', async () => {
     on('SELECT * FROM gift_letters', [gift({ status: 'consumed', expires_at: null })]);
     on('SELECT * FROM gift_codes WHERE letter_id', [{ code: 'K7M2QX9A', status: 'issued' }]);

@@ -543,6 +543,85 @@ describePostgres('arrive-by (migration 040, #535)', () => {
     }
   }, 60_000);
 
+  it("a cancelled gift keeps its own expiry, and the day's gift count leaves the cancelled letter out (#683)", async () => {
+    const GIFT_ENV = {
+      LETTER_IRL_GIFT_LETTERS_ENABLED: 'true',
+      LETTER_IRL_GIFT_DAILY_SEND_CAP: '100000',
+      LETTER_IRL_GIFT_LANDING_BASE_URL: 'https://letterirl.test'
+    };
+    const saved = Object.fromEntries(Object.keys(GIFT_ENV).map(name => [name, process.env[name]]));
+    Object.assign(process.env, GIFT_ENV);
+    const limits = await import('../../src/services/betaSpendLimits.js');
+    const sendGift = async () => {
+      const userId = await seedUser();
+      await inTransaction(client =>
+        gifts.grantGiftLettersWithClient(client, {
+          userId,
+          quantity: 1,
+          generationsRemaining: 2,
+          source: 'operator',
+          sourceReferenceId: `test:${randomUUID()}`
+        })
+      );
+      const draftId = await seedDraft(userId, upcoming(), undefined, true);
+      const sent = await mailSend.createMailOrderFromDraft({ draftId, userId, mailType: 'letter' });
+      return { userId, letterId: sent.letter.letter_id };
+    };
+    try {
+      // Near the end of its life: it comes back with the same expiry, not a fresh one.
+      const near = await sendGift();
+      const original = (
+        await pool.query<{ expires_at: Date }>(
+          "UPDATE gift_letters SET expires_at = NOW() + INTERVAL '3 days' WHERE consumed_by_letter_id = $1 RETURNING expires_at",
+          [near.letterId]
+        )
+      ).rows[0].expires_at;
+      await expect(held.cancelScheduledMail(near)).resolves.toMatchObject({
+        ok: true,
+        cancelled: { returned: { kind: 'gift_letter', count: 1 }, shortfall: 'none' }
+      });
+      const back = await pool.query<{ expires_at: Date }>(
+        "SELECT expires_at FROM gift_letters WHERE source = 'send_failed' AND source_reference_id = $1",
+        [near.letterId]
+      );
+      expect(back.rows[0].expires_at.getTime()).toBe(original.getTime());
+
+      // Expired while the mail was held: it comes back expired, is not counted, and the shortfall says so.
+      const lapsed = await sendGift();
+      await pool.query(
+        "UPDATE gift_letters SET expires_at = NOW() - INTERVAL '1 hour' WHERE consumed_by_letter_id = $1",
+        [lapsed.letterId]
+      );
+      await expect(held.cancelScheduledMail(lapsed)).resolves.toMatchObject({
+        ok: true,
+        cancelled: { returned: { kind: 'gift_letter', count: 0 }, shortfall: 'expired' }
+      });
+
+      // The day's count. One gift letter that goes on, so the count is never empty.
+      await sendGift();
+      const today = await pool.query<{ total: string; going: string }>(
+        `SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE status <> 'cancelled') AS going FROM letters
+          WHERE funding_type = 'gift_letter' AND created_at >= date_trunc('day', NOW() AT TIME ZONE 'UTC')`
+      );
+      const total = Number(today.rows[0].total);
+      const going = Number(today.rows[0].going);
+      expect(total - going).toBeGreaterThanOrEqual(2);
+      // A cap one below every gift letter made today: the two cancelled here keep it within.
+      process.env.LETTER_IRL_GIFT_DAILY_SEND_CAP = String(total - 1);
+      await expect(inTransaction(client => limits.assertGiftSendWithinDailyCap(client))).resolves.toBeUndefined();
+      // One below the letters still going refuses, so the check is live.
+      process.env.LETTER_IRL_GIFT_DAILY_SEND_CAP = String(going - 1);
+      await expect(inTransaction(client => limits.assertGiftSendWithinDailyCap(client))).rejects.toMatchObject({
+        code: 'GIFT_DAILY_SEND_CAP'
+      });
+    } finally {
+      for (const [name, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  }, 60_000);
+
   it("refuses someone else's letter, mail with no date, mail the outbox has taken, and Pay & Send, changing nothing", async () => {
     const userId = await seedUser();
     const stranger = await seedUser();

@@ -42,6 +42,8 @@ import { SpendLimitError } from "../../../src/services/betaSpendLimits.js";
 describe("dashboard runtime logging privacy", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // The website the return addresses must be on (#683).
+    vi.stubEnv("LETTER_IRL_WEBSITE_BASE_URL", "https://example.test");
     rateLimitAccount.mockResolvedValue(false);
     authenticateHttpRequest.mockResolvedValue({
       userId: "auth0|private-user",
@@ -58,6 +60,7 @@ describe("dashboard runtime logging privacy", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   it("does not log or return arbitrary checkout exceptions", async () => {
@@ -66,7 +69,7 @@ describe("dashboard runtime logging privacy", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const req = {
       headers: {},
-      body: { productId: "credit-pack-4", successUrl: "https://example.test/ok", cancelUrl: "https://example.test/no" }
+      body: { productId: "credit-pack-4", successUrl: "https://example.test/dashboard/letter-packs?purchase=success", cancelUrl: "https://example.test/dashboard/letter-packs?purchase=cancelled" }
     };
     const res = { statusCode: 0, setHeader: vi.fn(), end: vi.fn() };
 
@@ -93,7 +96,7 @@ describe("dashboard runtime logging privacy", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const req = {
       headers: {},
-      body: { productId: "credit-pack-4", successUrl: "https://example.test/ok", cancelUrl: "https://example.test/no" }
+      body: { productId: "credit-pack-4", successUrl: "https://example.test/dashboard/letter-packs?purchase=success", cancelUrl: "https://example.test/dashboard/letter-packs?purchase=cancelled" }
     };
     const res = { statusCode: 0, setHeader: vi.fn(), end: vi.fn() };
 
@@ -120,7 +123,7 @@ describe("dashboard runtime logging privacy", () => {
       const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
       const req = {
         headers: {},
-        body: { productId: "credit-pack-4", successUrl: "https://example.test/ok", cancelUrl: "https://example.test/no" }
+        body: { productId: "credit-pack-4", successUrl: "https://example.test/dashboard/letter-packs?purchase=success", cancelUrl: "https://example.test/dashboard/letter-packs?purchase=cancelled" }
       };
       const res = { statusCode: 0, setHeader: vi.fn(), end: vi.fn() };
 
@@ -144,7 +147,7 @@ describe("dashboard runtime logging privacy", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const req = {
       headers: {},
-      body: { productId: "credit-pack-4", successUrl: "https://example.test/ok", cancelUrl: "https://example.test/no" }
+      body: { productId: "credit-pack-4", successUrl: "https://example.test/dashboard/letter-packs?purchase=success", cancelUrl: "https://example.test/dashboard/letter-packs?purchase=cancelled" }
     };
     const res = { statusCode: 0, setHeader: vi.fn(), end: vi.fn() };
 
@@ -172,7 +175,7 @@ describe("dashboard runtime logging privacy", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
     const req = {
       headers: {},
-      body: { productId: "credit-pack-100", successUrl: "https://example.test/ok", cancelUrl: "https://example.test/no" }
+      body: { productId: "credit-pack-100", successUrl: "https://example.test/dashboard/letter-packs?purchase=success", cancelUrl: "https://example.test/dashboard/letter-packs?purchase=cancelled" }
     };
     const res = { statusCode: 0, setHeader: vi.fn(), end: vi.fn() };
 
@@ -203,7 +206,7 @@ describe("dashboard runtime logging privacy", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const req = {
       headers: {},
-      body: { productId: "credit-pack-4", successUrl: "https://example.test/ok", cancelUrl: "https://example.test/no" }
+      body: { productId: "credit-pack-4", successUrl: "https://example.test/dashboard/letter-packs?purchase=success", cancelUrl: "https://example.test/dashboard/letter-packs?purchase=cancelled" }
     };
     const res = { statusCode: 0, setHeader: vi.fn(), end: vi.fn() };
 
@@ -229,7 +232,7 @@ describe("dashboard runtime logging privacy", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const req = {
       headers: {},
-      body: { productId: "credit-pack-999", successUrl: "https://example.test/ok", cancelUrl: "https://example.test/no" }
+      body: { productId: "credit-pack-999", successUrl: "https://example.test/dashboard/letter-packs?purchase=success", cancelUrl: "https://example.test/dashboard/letter-packs?purchase=cancelled" }
     };
     const res = { statusCode: 0, setHeader: vi.fn(), end: vi.fn() };
 
@@ -246,7 +249,7 @@ describe("dashboard runtime logging privacy", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const req = {
       headers: {},
-      body: { productId: "credit-pack-4", successUrl: "https://example.test/ok", cancelUrl: "https://example.test/no" }
+      body: { productId: "credit-pack-4", successUrl: "https://example.test/dashboard/letter-packs?purchase=success", cancelUrl: "https://example.test/dashboard/letter-packs?purchase=cancelled" }
     };
     const res = { statusCode: 0, setHeader: vi.fn(), end: vi.fn() };
 
@@ -265,6 +268,7 @@ describe("dashboard runtime logging privacy", () => {
     verifyWebhookSignature.mockReturnValue({
       id: "evt_private",
       type: "checkout.session.completed",
+      livemode: false,
       data: { object: { id: "cs_private" } }
     });
     processStripeWebhookEvent.mockRejectedValue(new Error(sensitive));

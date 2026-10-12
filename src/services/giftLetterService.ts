@@ -677,14 +677,16 @@ export async function returnGiftLetterForFailedSendWithClient(
   }
   if (gift.source_reversed_at) return 0;
 
-  // A fresh lifetime at least: a gift used near the end of its life and
-  // refused days later must not come back already expired, which would
-  // compensate the customer with nothing. One that never expired still never
-  // does.
+  // A failed send: a fresh lifetime at least, since a gift used near the end
+  // of its life and refused days later must not come back already expired,
+  // which would compensate the customer with nothing. One that never expired
+  // still never does. A customer's cancel (#683) gives it back as it was,
+  // expiry and all: the cancel is theirs, and a fresh lifetime would let held
+  // mail be cancelled to outlive the gift's own.
   const freshExpiry = daysFromNow(giftLetterTtlDays());
   const expiresAt =
-    gift.expires_at === null
-      ? null
+    cancelled || gift.expires_at === null
+      ? gift.expires_at
       : new Date(gift.expires_at).getTime() > freshExpiry.getTime()
         ? gift.expires_at
         : freshExpiry;

@@ -352,6 +352,15 @@ describe('operator values', () => {
     });
   });
 
+  it("leaves held mail cancelled before it printed out of the day's gift count (#683)", async () => {
+    const c = withOverrides([], { gifts: 0 });
+    await assertGiftSendWithinDailyCap(c);
+    const counted = (c as unknown as { query: ReturnType<typeof vi.fn> }).query.mock.calls
+      .map(call => String(call[0]))
+      .find(sql => sql.includes("funding_type = 'gift_letter'"));
+    expect(counted).toMatch(/status <> 'cancelled'/);
+  });
+
   it('refuses when the values cannot be read, like any other count', async () => {
     const c = {
       query: vi.fn(async (sql: string) => {

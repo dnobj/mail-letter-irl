@@ -33,8 +33,8 @@ function checkoutRequest() {
     headers: {},
     body: {
       productId: 'credit-pack-4',
-      successUrl: 'https://example.test/ok',
-      cancelUrl: 'https://example.test/no'
+      successUrl: 'https://example.test/dashboard/letter-packs?purchase=success',
+      cancelUrl: 'https://example.test/dashboard/letter-packs?purchase=cancelled'
     }
   };
 }

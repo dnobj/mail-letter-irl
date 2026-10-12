@@ -93,6 +93,7 @@ LETTER_IRL_SEND_CONFIRMATION_ENABLED=<true once the confirmation page is live>
 LETTER_IRL_WEBSITE_CLIENT_ID=<the website application's Client ID in this tenant>
 # Where the confirmation link points. Defaults to LETTER_IRL_GIFT_LANDING_BASE_URL.
 LETTER_IRL_WEBSITE_BASE_URL=<https://letterirl.com, or the development website's address>
+# Pack checkouts return only to this website's /dashboard/letter-packs (#683): a local website (http://localhost:3000) needs it set.
 LETTER_IRL_BETA_GATE_ENABLED=<true to restrict access to the invited cohort>
 LETTER_IRL_BETA_GLOBAL_DAILY_MAIL_CEILING=<global letters per day>
 LETTER_IRL_BETA_ACCOUNT_DAILY_MAIL_CAP=<letters per account per day>
