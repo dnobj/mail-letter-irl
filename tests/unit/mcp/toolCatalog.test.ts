@@ -16,7 +16,7 @@ import { partitionToolResult } from '../../../src/mcp/registerTools.js';
  * field a card reads from a result's _meta declared as the card's.
  */
 
-const DEFINED = Object.values(toolDefinitions)
+const DEFINED = (Object.values(toolDefinitions) as unknown[])
   .filter((value): value is { name: string; handler: unknown } => typeof value === 'object' && value !== null && 'handler' in value)
   .map(tool => tool.name)
   .sort();
@@ -29,6 +29,21 @@ describe('the tool catalogue', () => {
 
   it('refuses a tool it was not told of, rather than serving it by default', () => {
     expect(() => getToolCatalogEntry('no_such_tool')).toThrow(/no entry in src\/mcp\/toolCatalog\.ts/);
+  });
+
+  it('stops registration at a tool without Zod shapes, where it was quietly left out', async () => {
+    const { registerLetterTools } = await import('../../../src/mcp/registerTools.js');
+    const mcpServer = { registerResource: () => {}, registerTool: () => {} };
+    const appServer = { listTools: () => [{ name: 'no_shapes_tool', description: 'x', readOnly: true, meta: {} }], execute: async () => ({}) };
+    await expect(
+      registerLetterTools(mcpServer as never, appServer as never, {
+        userId: 'auth0|catalog',
+        claims: {},
+        token: 't',
+        authType: 'jwt',
+        scopes: ['mail:read']
+      })
+    ).rejects.toThrow(/no_shapes_tool has no input schema/);
   });
 
   it('makes the sends card-only, and keeps two tools for a card alone', () => {
