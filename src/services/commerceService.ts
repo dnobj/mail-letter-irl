@@ -1,5 +1,6 @@
 /** Platform-neutral commerce orchestration backed by the Stripe adapter. */
 
+import { contentVersionMatches } from './contentVersion.js';
 import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import type Stripe from 'stripe';
@@ -128,6 +129,12 @@ export interface CreateJitCheckoutParams {
    * request, as a changed price is.
    */
   returnTo?: { successUrl: string; cancelUrl: string };
+  /**
+   * The version of the draft the person was shown (#695, contentVersion.ts),
+   * compared under the draft's lock before anything is charged. None is let
+   * through for one release, and logged.
+   */
+  contentVersion?: string;
 }
 
 export interface PurchaseStatusResult {
@@ -901,6 +908,17 @@ async function prepareJitOrder(
     if (draft.is_gift_send) {
       throw Object.assign(new Error('Draft is a gift send'), { code: 'DRAFT_IS_GIFT' });
     }
+    // What the person saw (#695): an edit after it refuses the checkout, before any
+    // charge, so Pay & Send never takes money for mail they did not see. The draft
+    // is held by the order from here, so its paid fulfilment mails this content.
+    const shown = contentVersionMatches(params.contentVersion, draft);
+    if (shown === 'differs') {
+      throw Object.assign(new Error('Draft changed since it was shown'), {
+        code: 'DRAFT_CHANGED_SINCE_SHOWN',
+        diagnosticClass: 'DRAFT_CHANGED_SINCE_SHOWN'
+      });
+    }
+    if (shown === 'missing') writeDiagnostic('info', 'checkout.content_version_missing', {});
     // Arrive-by (#535): a mail date already past is refused before the charge.
     // After it, fulfilment mails as soon as it can (mailSendService). The send's
     // own reader, so dates it could not read fail here, before the charge.

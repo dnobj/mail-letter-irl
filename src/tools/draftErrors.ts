@@ -47,6 +47,7 @@ export const HANDLED_DRAFT_ERROR_CODES = [
   'ACCOUNT_SENDS_BLOCKED',
   'BETA_ACCESS_DENIED',
   'DRAFT_CANCELLED',
+  'DRAFT_CHANGED_SINCE_SHOWN',
   'DRAFT_CHECKOUT_PENDING',
   'DRAFT_EXPIRED',
   'DRAFT_FUNDING_CONFLICT',
@@ -160,6 +161,16 @@ export function friendlyDraftError(
   // tool layer can still tell this refusal from the others.
   if (code === 'PACK_CANNOT_PAY') {
     return Object.assign(new Error(packCannotPayText(mailType, isCertifiedRefusal(error))), { code });
+  }
+  // #695: an edit came after what the person saw. Keeps the code, so a card can
+  // tell this refusal from the others and draw the draft again.
+  if (code === 'DRAFT_CHANGED_SINCE_SHOWN') {
+    return Object.assign(
+      new Error(
+        `This ${noun} changed after it was shown, so nothing was sent. Show the person the ${noun} as it is now (its preview card, or get_draft_status), and send it once they have seen it.`
+      ),
+      { code }
+    );
   }
   if (code === 'DRAFT_CHECKOUT_PENDING') {
     return new Error(
