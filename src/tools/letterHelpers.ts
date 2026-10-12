@@ -38,7 +38,7 @@ import {
   drawsGraphemeIn,
   GiftPageOverflow,
   layoutGiftPage,
-  layoutLetter,
+  layoutLetter, forgetRecentWraps,
   HEADLINE_LINES,
   pageFit,
   readImageDataUri,
@@ -676,6 +676,20 @@ export function layoutLetterForPreview(
   /** The most pages it may take: the previews' limit (#586), or a draft's own pages when it is drawn again. */
   maxPages: number = letterPageLimit()
 ): Layout | undefined {
+  try {
+    return layoutLetterForPreviewOnce(letter, context, renderer, maxPages);
+  } finally {
+    // The layouts below remember their wrappings while they share them; not past the call (#694).
+    forgetRecentWraps();
+  }
+}
+
+function layoutLetterForPreviewOnce(
+  letter: Parameters<typeof layoutLetterForPreview>[0],
+  context: ToolContext,
+  renderer: 'html' | 'pdf',
+  maxPages: number
+): Layout | undefined {
   if (renderer !== 'pdf') return undefined;
   const { layoutType, stationery } = letter;
   const content = previewContent(letter);
@@ -710,6 +724,8 @@ export function layoutLetterForPreview(
     "Letter runs past its page"
   );
   const over = layout.overflowLines;
+  // Laid out only to its line budget (#694): over by at least that, and more.
+  const overBy = `${layout.truncated ? "more than " : ""}${over} line${over === 1 && !layout.truncated ? "" : "s"}`;
   // A theme with its own typeface (#563) sets the text to its own measure.
   const own = ownFaceTheme(stationery);
   // The theme's way out, leaving the headline out or choosing Classic, is
@@ -723,11 +739,11 @@ export function layoutLetterForPreview(
     new Error(
       // A theme the call did not name says where it came from.
       (themed ? rememberedPrefix(stationery) : "") +
-      `Letter is ${over} line${over === 1 ? "" : "s"} too long for ${pageWords(maxPages)}${LAYOUT_LABELS[layoutType]}` +
+      `Letter is ${overBy} too long for ${pageWords(maxPages)}${LAYOUT_LABELS[layoutType]}` +
       `${headline ? ` on the ${stationeryNamed(stationery!)} with a headline` : own ? ` on the ${stationeryNamed(stationery!)}` : ""}: ` +
       (longest
         ? `${pageWords(maxPages)} is the longest letter we print. `
-        : `it takes ${linesUsed} lines and the page holds ${linesAvailable}. `) +
+        : `it takes ${layout.truncated ? "more than " : ""}${linesUsed} lines and the page holds ${linesAvailable}. `) +
       (headline
         ? fitsPlain
           ? `The headline takes ${HEADLINE_LINES} lines: shorten the message, leave the headline out, or choose the classic stationery.`
@@ -737,7 +753,7 @@ export function layoutLetterForPreview(
             ? `The ${stationeryNamed(stationery!)} sets the text in its own typeface: shorten the message, or choose the classic stationery.`
             : `The ${stationeryNamed(stationery!)} sets the text in its own typeface, and the letter runs past ${past} on the classic stationery too: shorten the message.`
           : `Please shorten your message to fit on ${pageWords(maxPages)}.`) +
-      signatureWords(content, stationery, maxPages)
+      signatureWords(content, stationery, maxPages, layout.truncated === true)
     ),
     { diagnosticClass: "validation_error" }
   );
@@ -754,10 +770,13 @@ export const SIGNATURE_GIFT_WORDS =
 function signatureWords(
   content: ReturnType<typeof previewContent>,
   stationery: Stationery | PreviewStationery | undefined,
-  maxPages: number
+  maxPages: number,
+  /** The signed layout stopped at its line budget (#694): its text alone is past every page, so no layout is needed. */
+  truncated: boolean
 ): string {
   if (!content.signature) return "";
-  const fitsUnsigned = layoutLetter({ ...content, signature: undefined, stationery }, { maxPages }).overflowLines === 0;
+  // Otherwise laid out again from the lines already wrapped (the layout's recent wrappings, #694).
+  const fitsUnsigned = !truncated && layoutLetter({ ...content, signature: undefined, stationery }, { maxPages }).overflowLines === 0;
   return fitsUnsigned
     ? ` The signature takes ${SIGNATURE_LINES} lines, and without it the letter fits: preview it with signature: false to leave it off.`
     : ` The signature takes ${SIGNATURE_LINES} lines.`;
