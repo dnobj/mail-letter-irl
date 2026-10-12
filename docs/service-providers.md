@@ -183,6 +183,12 @@ shared database so a person can print, mail and update them
 It is not an approved live provider, so the production boot validator refuses it as
 `LETTER_PROVIDER`.
 
+**What it cannot take (#698):** it does not print what our renderer drew, so it does not declare
+`printsRenderedPdf`. A letter or postcard whose content records a `rendererVersion` (stationery, a
+signature, more than one page, a postcard front) that dispatches to it is refused before anything is
+submitted, and refunded (`renderer_refused`). Routing a mail type to it as a fallback during an outage
+refunds that mail rather than holding it; the routing preview says so. Nor does it sell certified mail (#625).
+
 ---
 
 ## Provider Interface

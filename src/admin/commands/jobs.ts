@@ -9,7 +9,7 @@ import {
 } from "../../services/letterJobService.js";
 import { AdminFoundationError } from "../errors.js";
 import { isHeldMailJob, readJob } from "../queries/jobs.js";
-import { providerSellsExtraServices } from "../../services/providers/extraServices.js";
+import { providerPrintsRenderedPdf, providerSellsExtraServices } from "../../services/providers/extraServices.js";
 import { mapDomainError, type CommandDefinition } from "./runner.js";
 
 const PROVIDERS = ["postgrid", "dummy", "diy"] as const;
@@ -107,6 +107,10 @@ export const jobResolveCommand: CommandDefinition<JobResolveInput> = {
               ...(providerSellsExtraServices(input.providerName)
                 ? []
                 : ["Manual fulfilment cannot send certified mail: accepting a certified letter with this provider is refused."]),
+              // Mail our renderer drew (#698): checked under the lock too.
+              ...(providerPrintsRenderedPdf(input.providerName)
+                ? []
+                : ["This provider does not print what our renderer drew: accepting a letter it drew (stationery, a signature, more than one page) is refused."]),
             ]
           : input.decision === "retry"
             ? ["Retry resends the letter through the outbox; the customer is not charged again."]

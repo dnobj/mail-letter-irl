@@ -1,3 +1,4 @@
+import { providerPrintsRenderedPdf } from "../../services/providers/extraServices.js";
 import { listProviders } from "../../services/providers/index.js";
 import { syncLetterStatuses } from "../../services/statusSyncService.js";
 import { setTierOverride } from "../../services/operatorAccountService.js";
@@ -123,6 +124,10 @@ export function createOpsCommands(overrides: Partial<OpsCommandSeams> = {}) {
         warnings: [
           "The dummy provider is refused at send time in production regardless of this table; production routing must name a live provider with its key configured.",
           "Routing changes apply to the next send; nothing in the outbox is re-routed.",
+          // #698: the outbox refuses, and refunds, drawn mail for a provider that cannot print it.
+          ...(providerPrintsRenderedPdf(input.provider)
+            ? []
+            : [`${input.provider} does not print what our renderer drew: every letter or postcard it drew that dispatches on this route, queued ones included, is refunded, not printed.`]),
         ],
       };
     },

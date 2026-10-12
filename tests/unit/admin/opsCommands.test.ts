@@ -69,6 +69,15 @@ describe("routing command", () => {
     await expect(routing.preview(scripted(), "carrier_pigeon", { provider: "dummy", enabled: true })).rejects.toMatchObject({ code: "ADMIN_NOT_FOUND" });
   });
 
+  it("warns that a route to a provider that does not print what our renderer drew refunds that mail (#698)", async () => {
+    const { routing } = createOpsCommands({ listProviders: () => ["postgrid", "dummy", "diy"] });
+    const WARNING = "does not print what our renderer drew";
+    const toDiy = await routing.preview(scripted(), "postcard", { provider: "diy", enabled: true });
+    expect(toDiy.warnings.some(warning => warning.startsWith("diy " + WARNING))).toBe(true);
+    const toDummy = await routing.preview(scripted(), "postcard", { provider: "dummy", enabled: true });
+    expect(toDummy.warnings.some(warning => warning.includes(WARNING))).toBe(false);
+  });
+
   it("updates the row against its version and never routes production to the dummy provider", async () => {
     const { routing } = createOpsCommands({ listProviders: () => ["postgrid", "dummy"] });
     const preview = await routing.preview(scripted(), "postcard", { provider: "dummy", enabled: true });

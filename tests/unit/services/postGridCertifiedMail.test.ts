@@ -12,7 +12,7 @@ import { DIYProvider } from '../../../src/services/providers/DIYProvider.js';
 import { DummyProvider } from '../../../src/services/providers/DummyProvider.js';
 import { PostGridProvider } from '../../../src/services/providers/PostGridProvider.js';
 import { RENDERER_VERSION } from '../../../src/render/index.js';
-import { providerSellsExtraServices } from '../../../src/services/providers/extraServices.js';
+import { drawnByRenderer, providerPrintsRenderedPdf, providerSellsExtraServices } from '../../../src/services/providers/extraServices.js';
 import type { LetterFulfillmentProvider } from '../../../src/services/providers/types.js';
 
 function provider() {
@@ -314,6 +314,29 @@ describe('the provider names that sell an extra service (#625)', () => {
     expect(providerSellsExtraServices('POSTGRID')).toBe(true);
     expect(providerSellsExtraServices('lob')).toBe(false);
     expect(providerSellsExtraServices('')).toBe(false);
+  });
+});
+
+describe('the provider names that print what our renderer drew (#698)', () => {
+  it('agree with what each provider says of itself', () => {
+    const providers = [
+      provider(),
+      new DummyProvider({ name: 'dummy', displayName: 'Dummy', enabled: true }, { verbose: false, delayMs: 0, failureRate: 0 }),
+      new DIYProvider({ name: 'diy', displayName: 'DIY', enabled: true, config: { verbose: false } })
+    ] as LetterFulfillmentProvider[];
+    for (const instance of providers) {
+      expect(providerPrintsRenderedPdf(instance.config.name), instance.config.name).toBe(instance.printsRenderedPdf === true);
+    }
+    expect(providerPrintsRenderedPdf('POSTGRID')).toBe(true);
+    expect(providerPrintsRenderedPdf('diy')).toBe(false);
+    expect(providerPrintsRenderedPdf('')).toBe(false);
+  });
+
+  it('reads a letter as drawn by any recorded rendererVersion, as the print does', () => {
+    for (const version of ['pdf-1', 'pdf-4', '', 'pdf-99', 0, false]) expect(drawnByRenderer({ rendererVersion: version }), String(version)).toBe(true);
+    for (const content of [{}, { rendererVersion: null }, { rendererVersion: undefined }, null, undefined]) {
+      expect(drawnByRenderer(content), JSON.stringify(content)).toBe(false);
+    }
   });
 });
 
