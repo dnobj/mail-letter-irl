@@ -40,7 +40,7 @@ Source: [official Plugin Extensions documentation](https://developers.openai.com
 
 The published privacy policy covers recipient names, addresses and connected AI interfaces. This slice adds no collection, street-address disclosure or retention schedule. Review this scope against the website's published policy before enabling it live. This PR neither changes policy wording nor enables the flag anywhere.
 
-**Before enabling `LETTER_IRL_HOME_ENABLED` in production,** run HOME-02 step 2 on ChatGPT web and Android: with the home on, the letter card opens the MCP Apps handshake to share its draft (#650, #676), and Send, Pay & Send, a reopened chat (a sent letter stays sent, a started checkout stays started) and the card's height must be checked with it open, a home card opened in the same chat first.
+**Before enabling `LETTER_IRL_HOME_ENABLED` in production,** run HOME-02 step 2 on ChatGPT web and Android: with the home on, the letter card opens the MCP Apps handshake to share its draft (#650, #676), and Send, Pay & Send, a reopened chat (a sent letter stays sent; after a started checkout, Pay & Send reopens the same checkout, never a second payment) and the card's height must be checked with it open, a home card opened in the same chat first.
 
 ## Remaining slices
 

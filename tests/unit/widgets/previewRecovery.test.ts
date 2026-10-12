@@ -2791,7 +2791,7 @@ describe('LetterPreviewCard in ChatGPT asks the server what became of its draft 
     expect(harness.actions()).toEqual([]);
   });
 
-  it('keeps offering Pay & Send for a ready draft, whose checkout, if one was started, Pay & Send reuses', async () => {
+  it('keeps offering Pay & Send for a ready draft (a checkout started before is reused by the server: commerceService tests)', async () => {
     const harness = mount(LETTER, {
       toolOutput: LETTER.output('draft_host_0001', eligibility(false)),
       draftStatus: args => ({ draftId: args.draftId, status: 'ready' })
