@@ -133,7 +133,9 @@ export async function createLetterJobWithClient(
   options: { notBefore?: Date } = {}
 ): Promise<LetterJob> {
   const notBefore = options.notBefore ?? null;
-  // The hold is its own column (055, #693): mail_hold_until, null for mail due now.
+  // The hold is its own column (055, #693): mail_hold_until, null for mail due now. For one
+  // release it is also written to the metadata, where code from before 055 reads it, so a
+  // rollback across 055 still knows its held mail; nothing here reads it.
   const result = await client.query<LetterJob>(
     `INSERT INTO letter_jobs (
        job_id, letter_id, status, attempts, max_attempts, scheduled_at,
@@ -147,7 +149,7 @@ export async function createLetterJobWithClient(
       randomUUID(),
       letter.letter_id,
       maxAttempts(),
-      JSON.stringify({ source: 'transactional-outbox' }),
+      JSON.stringify({ source: 'transactional-outbox', ...(notBefore ? { heldUntil: notBefore.toISOString() } : {}) }),
       notBefore,
     ]
   );

@@ -227,9 +227,9 @@ describePostgres('arrive-by (migration 040, #535)', () => {
         [job.job_id]
       );
       expect(same.rows[0].same).toBe(true);
-      // The hold is the job's own column (055, #693), and no longer in its metadata.
+      // The hold is the job's own column (055, #693), and for one release its metadata's too.
       expect(new Date(job.mail_hold_until).toISOString()).toBe(release.toISOString());
-      expect(job.metadata).toEqual({ source: 'transactional-outbox' });
+      expect(job.metadata).toEqual({ source: 'transactional-outbox', heldUntil: release.toISOString() });
       // The value moved at the send, as for any letter.
       const credits = (await pool.query('SELECT credits FROM users WHERE user_id = $1', [userId])).rows[0].credits;
       expect(credits).toBe(8);
@@ -968,13 +968,15 @@ describePostgres('migration 055: the hold as its own column (#693)', () => {
       await migrate({ connectionString: url, migrationsDirectory: directory });
 
       await pool.query("INSERT INTO users (user_id, email) VALUES ('hold-user', 'hold@example.test')");
-      const jobs: Record<string, { status: string; metadata: Record<string, unknown> }> = {
-        pending: { status: 'pending', metadata: { source: 'transactional-outbox', heldUntil: '2026-11-02T14:00:00.000Z' } },
-        // Taken by the run and gone: its hold is still the one it was created with.
-        completed: { status: 'completed', metadata: { source: 'transactional-outbox', heldUntil: '2026-10-06T13:00:00.000Z' } },
-        due: { status: 'pending', metadata: { source: 'transactional-outbox' } },
-        // Hand-written in another form: left without a hold rather than failing the migration.
-        malformed: { status: 'pending', metadata: { source: 'transactional-outbox', heldUntil: 'next Tuesday' } }
+      const jobs: Record<string, { status: string; outcome: string; metadata: Record<string, unknown> }> = {
+        pending: { status: 'pending', outcome: 'not_dispatched', metadata: { source: 'transactional-outbox', heldUntil: '2026-11-02T14:00:00.000Z' } },
+        // Taken by the run and accepted: its hold is still the one it was created with.
+        completed: { status: 'completed', outcome: 'accepted', metadata: { source: 'transactional-outbox', heldUntil: '2026-10-06T13:00:00.000Z' } },
+        due: { status: 'pending', outcome: 'not_dispatched', metadata: { source: 'transactional-outbox' } },
+        // Hand-written, not a time: left without a hold rather than failing the migration,
+        // whether or not it looks like one.
+        words: { status: 'pending', outcome: 'not_dispatched', metadata: { source: 'transactional-outbox', heldUntil: 'next Tuesday' } },
+        impossible: { status: 'pending', outcome: 'not_dispatched', metadata: { source: 'transactional-outbox', heldUntil: '2026-02-30T09:00:00.000Z' } }
       };
       for (const [name, job] of Object.entries(jobs)) {
         await pool.query(
@@ -985,8 +987,8 @@ describePostgres('migration 055: the hold as its own column (#693)', () => {
         await pool.query(
           `INSERT INTO letter_jobs (job_id, letter_id, status, attempts, max_attempts, scheduled_at, idempotency_key,
              next_attempt_at, provider_outcome, metadata)
-           VALUES ($1, $2, $3, 0, 5, NOW(), $2, NOW(), 'not_dispatched', $4::jsonb)`,
-          [randomUUID(), `letter-${name}`, job.status, JSON.stringify(job.metadata)]
+           VALUES ($1, $2, $3, 0, 5, NOW(), $2, NOW(), $5, $4::jsonb)`,
+          [randomUUID(), `letter-${name}`, job.status, JSON.stringify(job.metadata), job.outcome]
         );
       }
 
@@ -999,14 +1001,29 @@ describePostgres('migration 055: the hold as its own column (#693)', () => {
       expect(Object.fromEntries(after.rows.map(row => [row.letter_id, row.mail_hold_until?.toISOString() ?? null]))).toEqual({
         'letter-completed': '2026-10-06T13:00:00.000Z',
         'letter-due': null,
-        'letter-malformed': null,
-        'letter-pending': '2026-11-02T14:00:00.000Z'
+        'letter-impossible': null,
+        'letter-pending': '2026-11-02T14:00:00.000Z',
+        'letter-words': null
       });
 
-      // As the migration says, its backfill may be run again: it changes nothing already set.
+      // As the migration says, its backfill may be run again, from DO to the end: it gives a job
+      // that old code wrote meanwhile its column, and changes nothing already set.
+      await pool.query(
+        `UPDATE letter_jobs SET mail_hold_until = NULL, metadata = metadata || '{"heldUntil": "2026-12-01T14:00:00.000Z"}'::jsonb
+          WHERE letter_id = 'letter-due'`
+      );
       const sql = await readFile(path.join(repositoryMigrations, hold), 'utf8');
-      const again = await pool.query(sql.slice(sql.indexOf('UPDATE letter_jobs')));
-      expect(again.rowCount).toBe(0);
+      await pool.query(sql.slice(sql.indexOf('DO $$')));
+      const rerun = await pool.query<{ letter_id: string; mail_hold_until: Date | null }>(
+        'SELECT letter_id, mail_hold_until FROM letter_jobs ORDER BY letter_id'
+      );
+      expect(Object.fromEntries(rerun.rows.map(row => [row.letter_id, row.mail_hold_until?.toISOString() ?? null]))).toEqual({
+        'letter-completed': '2026-10-06T13:00:00.000Z',
+        'letter-due': '2026-12-01T14:00:00.000Z',
+        'letter-impossible': null,
+        'letter-pending': '2026-11-02T14:00:00.000Z',
+        'letter-words': null
+      });
     } finally {
       await pool.end();
       await adminPool.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);

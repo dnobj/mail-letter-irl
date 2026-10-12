@@ -78,10 +78,10 @@ export const ERASED_EMAIL_PATTERN = 'erased-%@erased.invalid';
 
 /**
  * Held mail an erasure cancels (#535, the owner's default): a prepaid or gift
- * letter waiting in the outbox for its mail date: its job held
- * (heldMailJobSql, as the pause count and the admin release read held mail,
- * #693), which takes the hold it was created with: a job scheduled ahead for
- * any other reason holds the account back rather than being cancelled. Read through the job, not letters.mail_on,
+ * letter waiting in the outbox for its mail date. Its job is held mail by
+ * heldMailJobSql (#693), as the pause count and the admin release read it,
+ * which requires the hold the job was created with; a job scheduled ahead for
+ * another reason holds the account back rather than being cancelled. Read through the job, not letters.mail_on,
  * because the admin reader role runs the preview and holds letter_jobs whole
  * but not that column.
  *

@@ -1218,8 +1218,8 @@ describe('createLetterJobWithClient: arrive-by holds (#535)', () => {
     // The hold is its column (055, #693): the same time as its schedule and its first attempt.
     expect(insert.sql).toMatch(/\$3, COALESCE\(\$5::timestamptz, NOW\(\)\), \$2,\s+COALESCE\(\$5::timestamptz, NOW\(\)\), \$4, \$5::timestamptz\)/);
     expect(insert.params[4]).toBe(notBefore);
-    // No longer in the metadata.
-    expect(JSON.parse(insert.params[3] as string)).toEqual({ source: 'transactional-outbox' });
+    // And in the metadata for one release, where code from before 055 reads it after a rollback.
+    expect(JSON.parse(insert.params[3] as string)).toEqual({ source: 'transactional-outbox', heldUntil: '2026-10-06T13:00:00.000Z' });
     // The letter is queued either way.
     expect(calls.some(call => call.sql.includes("UPDATE letters SET status = 'queued'"))).toBe(true);
   });
