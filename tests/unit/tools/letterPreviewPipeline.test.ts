@@ -63,9 +63,9 @@ import { quoteAndPreviewLetterTextOnlyTool } from '../../../src/tools/quoteAndPr
 import { quoteAndPreviewLetterWithHeaderImageTool } from '../../../src/tools/quoteAndPreviewLetterWithHeaderImage.js';
 import { quoteAndPreviewLetterWithImageTool } from '../../../src/tools/quoteAndPreviewLetterWithImage.js';
 import { MOBILE_IMAGE_ERRORS } from '../../../src/utils/mobileDetection.js';
-import type { ToolContext } from '../../../src/contracts/types.js';
+import type { Address, ToolContext } from '../../../src/contracts/types.js';
 
-const address = { name: 'Ada Lovelace', addressLine1: '1 Main St', city: 'Springfield', provinceOrState: 'IL', postalOrZip: '62701', country: 'US' };
+const address: Address = { name: 'Ada Lovelace', addressLine1: '1 Main St', city: 'Springfield', state: 'IL', postalCode: '62701', country: 'US' };
 const input = { sender: address, recipient: address, bodyText: 'Hello there.', signOff: 'Yours, Ada' };
 
 function context(isMobile = false): ToolContext {
@@ -76,6 +76,16 @@ function context(isMobile = false): ToolContext {
 const SHARED_BEFORE = ['schedule', 'mailService'];
 const CHECKS = ['sender', 'addresses', 'earlyGift', 'stationery', 'signature', 'characterCap', 'printable'];
 const AFTER = ['layout', 'giftLayout', 'provider', 'draft'];
+
+// The words each image tool's log lines always used: its events and how it names the picture.
+const LOG_WORDS = {
+  header: { events: 'quote.letter.header_image', start: 'Processing quote_and_preview_letter_with_header_image', noun: 'header image', Noun: 'Header image' },
+  inline: { events: 'quote.letter.image', start: 'Processing quote_and_preview_letter_with_image', noun: 'image', Noun: 'Image' }
+};
+
+/** Each line the tool logged at a level, as its event and message. */
+const logLines = (ctx: ToolContext, level: 'info' | 'warn' = 'info') =>
+  vi.mocked(ctx.logger[level]).mock.calls.map(([fields, message]) => [(fields as unknown as { event: string }).event, message]);
 
 const draftParams = () => vi.mocked(helpers.createLetterDraftAndBuildOutput).mock.calls[0][0];
 
@@ -97,6 +107,13 @@ describe('one letter-preview pipeline (#689)', () => {
     expect(vi.mocked(helpers.layoutLetterForPreview).mock.calls[0][0]).toMatchObject({ layoutType: 'text_only', imageData: undefined });
   });
 
+  it('a text-only letter writes the start line it always wrote', async () => {
+    const ctx = context();
+    await quoteAndPreviewLetterTextOnlyTool.handler(input, ctx);
+
+    expect(logLines(ctx)).toEqual([['quote.letter.text_only.start', 'Processing quote_and_preview_letter (text-only)']]);
+  });
+
   it('a text-only letter ignores an image a client sends anyway', async () => {
     await quoteAndPreviewLetterTextOnlyTool.handler({ ...input, imageUrl: 'https://example.test/a.png' } as typeof input, context());
 
@@ -115,6 +132,38 @@ describe('one letter-preview pipeline (#689)', () => {
         expect(order).toEqual([...SHARED_BEFORE, 'imageSource', ...CHECKS, 'processImage', ...AFTER]);
         expect(resolvePreviewImageSource).toHaveBeenCalledWith(expect.anything(), 'u1', layoutType);
         expect(downloadAndProcessLetterImageWithPreview).toHaveBeenCalledWith({ url: 'https://example.test/a.png' }, processAs, { actorId: 'u1' });
+      });
+
+      it('writes the log lines it always wrote, for each source of the picture', async () => {
+        const words = LOG_WORDS[prefix];
+        const ctx = context();
+        await tool.handler(input, ctx);
+        expect(logLines(ctx)).toEqual([
+          [`${words.events}.start`, words.start],
+          [`${words.events}.from_url`, `Using ${words.noun} from URL`],
+          [`${words.events}.processing`, `Processing ${words.noun}`],
+          [`${words.events}.processed`, `${words.Noun} processed successfully`]
+        ]);
+
+        for (const [resolved, event, message] of [
+          [{ kind: 'file', url: 'https://example.test/a.png' }, 'from_fileParams', `Using ${words.noun} from OpenAI fileParams`],
+          [{ kind: 'recent_upload', url: 'https://example.test/a.png', ageMs: 5, unresolvedReference: false }, 'from_recent_upload', `Using recent uploaded image fallback for letter with ${words.noun}`]
+        ] as const) {
+          vi.mocked(resolvePreviewImageSource).mockResolvedValueOnce(resolved as never);
+          const each = context();
+          await tool.handler(input, each);
+          expect(logLines(each)[1]).toEqual([`${words.events}.${event}`, message]);
+        }
+
+        vi.mocked(resolvePreviewImageSource).mockResolvedValueOnce({ kind: 'none' } as never);
+        const none = context();
+        await expect(tool.handler(input, none)).rejects.toThrow();
+        expect(logLines(none, 'warn')).toEqual([[`${words.events}.no_image`, `No ${words.noun} provided`]]);
+
+        vi.mocked(downloadAndProcessLetterImageWithPreview).mockRejectedValueOnce(new Error('decoder'));
+        const failed = context();
+        await expect(tool.handler(input, failed)).rejects.toThrow();
+        expect(logLines(failed, 'warn')).toEqual([[`${words.events}.failed`, `${words.Noun} processing failed`]]);
       });
 
       it('lays the letter out with the picture that prints, and gives the draft both versions and the source', async () => {
@@ -142,6 +191,14 @@ describe('one letter-preview pipeline (#689)', () => {
           1
         );
         expect(vi.mocked(helpers.letterRunsPast).mock.calls[0][0]).not.toHaveProperty('signatureImage');
+      });
+
+      it('says an unsigned letter does not fit one page by dropping a signature it does not have', async () => {
+        await tool.handler(input, context());
+
+        const fitsOnePageUnsigned = vi.mocked(helpers.giftForLayout).mock.calls[0][5]!;
+        expect(fitsOnePageUnsigned()).toBe(false);
+        expect(helpers.letterRunsPast).not.toHaveBeenCalled();
       });
 
       it('fetches no picture when the arrival date is refused', async () => {

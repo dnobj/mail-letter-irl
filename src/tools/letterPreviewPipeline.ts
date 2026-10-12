@@ -5,16 +5,19 @@
  * …_with_image) run the same sequence; only the image differs. Each tool names its layout
  * and its log events, and this runs the steps once, in this order:
  *
- *   1. schedule            2. mail service       (image: its source, refused when there is none)
- *   3. sender              4. addresses          5. early gift choice
+ *   1. schedule            2. mail service
+ *  2a. (image layouts) the picture's source, refused when there is none
+ *   3. sender              4. addresses          5. early gift choice, and the renderer read once
  *   6. stationery          7. signature          8. character cap
- *   9. printable check     (image: downloaded and processed)
+ *   9. printable check
+ *  9a. (image layouts) the picture downloaded and processed
  *  10. layout             11. gift layout       12. provider address check
  *  13. draft and output
  *
- * The order is the contract: every refusal that costs nothing comes before the picture is
- * fetched (#526, #535), the gift is known before what prints is checked (#534), and the
- * provider is asked last.
+ * The order is the contract: the date and the mail service are refused before anything is
+ * looked up (#535); the picture is only looked up before the checks on the addresses and the
+ * text, and downloaded after them, so a refusal costs no image work (#526); the gift is known
+ * before what prints is checked (#534); and the provider is asked last.
  */
 
 import { Address, ToolContext } from "../contracts/types.js";
@@ -211,7 +214,7 @@ export async function previewLetter(
   // known before the gift is decided: no gift letter pays for it.
   const mailService = chooseMailService(input.mailService, context);
 
-  // The picture's source, REQUIRED for an image layout. Only found here: it is downloaded
+  // 2a. The picture's source, REQUIRED for an image layout. Only found here: it is downloaded
   // and decoded after the checks on the addresses and the text, so a refusal costs no
   // image work (#526).
   const imageSource = step ? await imageSourceFor(input, step, events, context) : undefined;
@@ -250,7 +253,7 @@ export async function previewLetter(
     stationery
   );
 
-  // The picture, processed now the checks that cost nothing have passed.
+  // 9a. The picture, processed now the checks on the addresses and the text have passed.
   const picture = step && imageSource !== undefined ? await processImage(imageSource, step, events, context) : undefined;
   const imageData = picture?.data;
 
