@@ -414,9 +414,12 @@ export async function markExpiredDrafts(): Promise<number> {
  *
  * A sent draft whose letter waits for its mail date (#535) stays until
  * `olderThanDays` after that date: its confirmation link and a reopened card
- * read the letter through it (#564), and a wait can be 60 days. The date
- * cutoff is its own integer parameter; the timestamp one is never cast a
- * second way.
+ * read the letter through it (#564), and a wait can be 60 days. Once that
+ * letter is cancelled (#701), it stays `olderThanDays` after the cancel
+ * instead, as any sent draft does after its send: the mail is not going, and
+ * its content goes on the unpaid schedule (retentionService). The date cutoff
+ * is its own integer parameter; the timestamp one is never cast a second way,
+ * only compared again with a timestamp column.
  */
 export async function cleanupOldDrafts(olderThanDays: number = 7): Promise<number> {
   const cutoffDate = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000);
@@ -432,6 +435,7 @@ export async function cleanupOldDrafts(olderThanDays: number = 7): Promise<numbe
          SELECT 1 FROM letters
           WHERE letters.letter_id = letter_drafts.consumed_letter_id
             AND letters.mail_on >= CURRENT_DATE - $2::int
+            AND (letters.status <> 'cancelled' OR letters.status_updated_at >= $1)
        )
      RETURNING draft_id`,
     [cutoffDate, olderThanDays]

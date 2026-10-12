@@ -522,6 +522,95 @@ describePostgres('content retention sweep', () => {
     });
   });
 
+  describe('held mail its customer cancelled (#701)', () => {
+    /** A held letter, never printed, cancelled `cancelledDaysAgo` days ago by `source`. */
+    async function seedCancelledHeldLetter(options: {
+      cancelledDaysAgo: number;
+      source?: string;
+      sentDaysAgo?: number;
+    }): Promise<string> {
+      const userId = await seedUser();
+      const letterId = `letter_${randomUUID()}`;
+      await pool.query(
+        `INSERT INTO letters (
+           letter_id, user_id, content, recipient, credits_cost, status, preview_html, sent_at,
+           arrive_by, mail_on
+         ) VALUES ($1, $2, $3::jsonb, $4::jsonb, 2, 'cancelled', $5,
+                   CASE WHEN $6::int IS NULL THEN NULL ELSE NOW() - make_interval(days => $6::int) END,
+                   CURRENT_DATE + 30, CURRENT_DATE + 20)`,
+        [
+          letterId,
+          userId,
+          JSON.stringify({ bodyText: SECRET_BODY, signOff: 'Yours, Alex' }),
+          JSON.stringify({ name: 'Sam', addressLine1: SECRET_STREET, city: 'London' }),
+          `<p>${SECRET_BODY}</p>`,
+          options.sentDaysAgo ?? null
+        ]
+      );
+      await seedJob(letterId, 'cancelled');
+      await pool.query(
+        `INSERT INTO letter_status_history (letter_id, old_status, new_status, source, changed_at)
+         VALUES ($1, 'queued', 'cancelled', $2, NOW() - make_interval(days => $3::int))`,
+        [letterId, options.source ?? 'customer', options.cancelledDaysAgo]
+      );
+      return letterId;
+    }
+
+    it('anonymizes it 4 days after the cancel, with 3 more to recover it, and the restore puts it back', async () => {
+      const due = await seedCancelledHeldLetter({ cancelledDaysAgo: 5 });
+      const recent = await seedCancelledHeldLetter({ cancelledDaysAgo: 3 });
+
+      await expect(retention.previewCancelledHeldLetterContent()).resolves.toMatchObject({ pastWindow: 1, due: 1 });
+      expect(await retention.purgeCancelledHeldLetterContent()).toBe(1);
+
+      const row = await readLetter(due);
+      expect(row.content).toEqual({});
+      expect(row.recipient).toEqual({});
+      expect(row.preview_html).toBeNull();
+      expect(row.redacted_at).not.toBeNull();
+      expect(JSON.stringify(row)).not.toContain(SECRET_STREET);
+      expect((await readLetter(recent)).redacted_at).toBeNull();
+      // The copy goes 7 days after the cancel: in about 2 days.
+      const copy = await pool.query(
+        `SELECT source_table, EXTRACT(EPOCH FROM (purge_after - NOW())) / 86400 AS days_left
+           FROM redacted_content_quarantine WHERE source_id = $1`,
+        [due]
+      );
+      expect(copy.rows[0].source_table).toBe('letters');
+      expect(Number(copy.rows[0].days_left)).toBeGreaterThan(1.9);
+      expect(Number(copy.rows[0].days_left)).toBeLessThan(2.1);
+
+      await retention.restoreQuarantinedContent('letters', due);
+      const restored = await readLetter(due);
+      expect(restored.redacted_at).toBeNull();
+      expect(JSON.stringify(restored.recipient)).toContain(SECRET_STREET);
+    });
+
+    it("leaves an operator's cancel, printed mail and mail with no date on the letter schedule", async () => {
+      const byOperator = await seedCancelledHeldLetter({ cancelledDaysAgo: 30, source: 'operator' });
+      const printed = await seedCancelledHeldLetter({ cancelledDaysAgo: 30, sentDaysAgo: 31 });
+      const undated = await seedCancelledHeldLetter({ cancelledDaysAgo: 30 });
+      await pool.query('UPDATE letters SET arrive_by = NULL, mail_on = NULL WHERE letter_id = $1', [undated]);
+
+      expect(await retention.purgeCancelledHeldLetterContent()).toBe(0);
+      for (const letterId of [byOperator, printed, undated]) {
+        expect((await readLetter(letterId)).redacted_at, letterId).toBeNull();
+      }
+    });
+
+    it('holds one whose job is not settled', async () => {
+      const letterId = await seedCancelledHeldLetter({ cancelledDaysAgo: 30 });
+      await pool.query("UPDATE letter_jobs SET status = 'pending' WHERE letter_id = $1", [letterId]);
+      expect(await retention.purgeCancelledHeldLetterContent()).toBe(0);
+    });
+
+    it('runs in the retention sweep on its own window, whatever the caller asks for letters', async () => {
+      await seedCancelledHeldLetter({ cancelledDaysAgo: 5 });
+      const summary = await retention.runRetentionSweep(365, 100);
+      expect(summary).toMatchObject({ cancelledHeldLettersRedacted: 1, lettersRedacted: 0, errors: [] });
+    });
+  });
+
   describe('letters', () => {
     it('anonymizes content once the window has passed, and stamps redacted_at', async () => {
       const { letterId } = await seedSentLetter({ daysAgo: 91 });

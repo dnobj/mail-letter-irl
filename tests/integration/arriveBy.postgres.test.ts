@@ -995,6 +995,40 @@ describePostgres('arrive-by (migration 040, #535)', () => {
     expect(await left()).toEqual([recentDraft]);
   }, 60_000);
 
+  it("keeps a cancelled held letter's sent draft 7 days after the cancel, not until after its mail date (#701)", async () => {
+    const userId = await seedUser();
+    const letterId = await sendHeld(userId);
+    const draftId = (await pool.query('SELECT draft_id FROM letter_drafts WHERE consumed_letter_id = $1', [letterId])).rows[0].draft_id;
+    await expect(held.cancelScheduledMail({ letterId, userId })).resolves.toMatchObject({ ok: true });
+    // Sent eight days ago, as the sweep sees it; the trigger is off for this, inside a transaction.
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('ALTER TABLE letter_drafts DISABLE TRIGGER update_letter_drafts_updated_at');
+      await client.query("UPDATE letter_drafts SET updated_at = NOW() - INTERVAL '8 days' WHERE draft_id = $1", [draftId]);
+      await client.query('ALTER TABLE letter_drafts ENABLE TRIGGER update_letter_drafts_updated_at');
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+    const kept = async () =>
+      (await pool.query('SELECT 1 FROM letter_drafts WHERE draft_id = $1', [draftId])).rowCount === 1;
+
+    // Cancelled just now: its reopened card still reads it.
+    await drafts.cleanupOldDrafts(7);
+    expect(await kept()).toBe(true);
+    // Cancelled six days ago: kept; eight: it goes, though its mail date is weeks away.
+    await pool.query("UPDATE letters SET status_updated_at = NOW() - INTERVAL '6 days' WHERE letter_id = $1", [letterId]);
+    await drafts.cleanupOldDrafts(7);
+    expect(await kept()).toBe(true);
+    await pool.query("UPDATE letters SET status_updated_at = NOW() - INTERVAL '8 days' WHERE letter_id = $1", [letterId]);
+    await drafts.cleanupOldDrafts(7);
+    expect(await kept()).toBe(false);
+  }, 60_000);
+
   describe('room on a mail date (#700)', () => {
     let capacity: typeof import('../../src/services/mailDateCapacity.js');
     let commerce: typeof import('../../src/services/commerceService.js');

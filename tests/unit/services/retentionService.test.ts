@@ -21,6 +21,10 @@ const {
   previewExpiredLetterContent,
   previewPaidDraftContent,
   previewAbandonedDraftContent,
+  previewCancelledHeldLetterContent,
+  purgeCancelledHeldLetterContent,
+  SETTLED_JOB_STATUSES,
+  SETTLED_ORDER_STATUSES,
   runRetentionPreview,
   handleRetentionRestore,
   processRetentionRestores
@@ -71,6 +75,65 @@ describe('retention sweep guards (#153)', () => {
     mocks.transaction.mockImplementation(async (callback: (client: unknown) => unknown) =>
       callback({ query: mocks.query })
     );
+  });
+
+  describe('purgeCancelledHeldLetterContent (#701)', () => {
+    it("takes only held mail its customer cancelled, never printed, on the unpaid schedule from the cancel", async () => {
+      await purgeCancelledHeldLetterContent();
+
+      const sql = sqlFrom(mocks.query.mock.calls[0]);
+      const params = mocks.query.mock.calls[0][1] as unknown[];
+      expect(sql).toContain("AND l.status = 'cancelled' AND l.mail_on IS NOT NULL AND l.sent_at IS NULL");
+      // The customer's cancel, which nothing rewrites: an operator's (#696) keeps the letter schedule.
+      const cancelledAt =
+        "(SELECT MAX(h.changed_at) FROM letter_status_history h WHERE h.letter_id = l.letter_id AND h.new_status = 'cancelled' AND h.source = 'customer')";
+      expect(sql).toContain(`AND ${cancelledAt} < NOW() - make_interval(days => $1::int)`);
+      // 7 days: 4 live, 3 to recover, from the cancel.
+      expect(params[0]).toBe(4);
+      expect(params[5]).toBe(7);
+      expect(sql).toContain(`GREATEST(${cancelledAt} + make_interval(days => $6::int), NOW() + INTERVAL '1 day')`);
+      // The letter schedule's holds: its job settled, its order, and the money behind it.
+      expect(sql).toContain('AND NOT EXISTS ( SELECT 1 FROM letter_jobs j WHERE j.letter_id = l.letter_id AND NOT (j.status = ANY($2::varchar[])) )');
+      expect(sql).toContain('AND NOT EXISTS ( SELECT 1 FROM orders o WHERE o.letter_id = l.letter_id AND NOT (o.status = ANY($3::varchar[])) )');
+      expect(sql).toContain("lot.status = 'revoked'");
+      expect(sql).toContain('OR (o.order_id IS NULL AND lot.source_type::text = ANY($4::varchar[]))');
+      expect(params.slice(1, 4)).toEqual([SETTLED_JOB_STATUSES, SETTLED_ORDER_STATUSES, ['purchase', 'adjustment', 'refund']]);
+    });
+
+    it('saves the content as any letter is saved, so the restore puts it back, and never replaces a copy', async () => {
+      await purgeCancelledHeldLetterContent();
+
+      const sql = sqlFrom(mocks.query.mock.calls[0]);
+      expect(sql).toContain("SELECT 'letters', l.letter_id,");
+      expect(sql).toContain(
+        "jsonb_build_object( 'content', l.content, 'recipient', l.recipient, 'preview_html', to_jsonb(l.preview_html) )"
+      );
+      expect(sql).toContain('ON CONFLICT (source_table, source_id) DO NOTHING');
+      expect(sql).toContain("SET content = '{}'::jsonb, recipient = '{}'::jsonb, preview_html = NULL, redacted_at = NOW()");
+      expect(sql).toContain('LIMIT $5::int FOR UPDATE OF l SKIP LOCKED');
+    });
+
+    it('counts against the same predicate it enforces', async () => {
+      await previewCancelledHeldLetterContent();
+      const previewSql = sqlFrom(mocks.query.mock.calls[0]);
+      mocks.query.mockClear();
+      await purgeCancelledHeldLetterContent();
+      const enforceSql = sqlFrom(mocks.query.mock.calls[0]);
+      for (const clause of [
+        "AND l.status = 'cancelled' AND l.mail_on IS NOT NULL AND l.sent_at IS NULL",
+        "h.source = 'customer'",
+        'AND NOT (j.status = ANY($2::varchar[]))',
+        "lot.status = 'revoked'"
+      ]) {
+        expect(previewSql).toContain(clause);
+        expect(enforceSql).toContain(clause);
+      }
+    });
+
+    it('refuses a window it cannot split, and a batch out of range', async () => {
+      await expect(purgeCancelledHeldLetterContent(1)).rejects.toThrow('retentionDays must be an integer of at least 2');
+      await expect(purgeCancelledHeldLetterContent(7, 0)).rejects.toThrow('batchLimit must be an integer');
+    });
   });
 
   describe('purgeExpiredLetterContent', () => {
@@ -499,6 +562,7 @@ describe('retention sweep guards (#153)', () => {
 
       expect(summary).toEqual({
         lettersRedacted: 1,
+        cancelledHeldLettersRedacted: 1,
         draftsRedacted: 1,
         abandonedDraftsRedacted: 1,
         quarantinePurged: 1,
@@ -553,9 +617,9 @@ describe('retention sweep guards (#153)', () => {
       await runRetentionSweep(365, 9);
 
       const windows = mocks.query.mock.calls.map(call => (call[1] as unknown[])[0]);
-      // 365 -> 358 live for letters and paid drafts; 7 -> 4 for abandoned;
-      // the quarantine purge takes only a batch limit.
-      expect(windows).toEqual([358, 358, 4, 9]);
+      // 365 -> 358 live for letters and paid drafts; 7 -> 4 for cancelled held
+      // letters (#701) and abandoned drafts; the quarantine purge takes only a batch limit.
+      expect(windows).toEqual([358, 4, 358, 4, 9]);
     });
   });
 
@@ -570,7 +634,8 @@ describe('retention sweep guards (#153)', () => {
     it.each([
       ['letters', () => previewExpiredLetterContent()],
       ['paid drafts', () => previewPaidDraftContent()],
-      ['abandoned drafts', () => previewAbandonedDraftContent()]
+      ['abandoned drafts', () => previewAbandonedDraftContent()],
+      ['cancelled held letters', () => previewCancelledHeldLetterContent()]
     ])('%s preview issues a SELECT with no write verb and no lock', async (_name, run) => {
       await run();
 
@@ -650,9 +715,10 @@ describe('retention sweep guards (#153)', () => {
       expect(result.errors).toEqual([]);
       expect(result.letters.due).toBe(2);
       const windows = mocks.query.mock.calls.map(call => (call[1] as unknown[])[0]);
-      // 365 -> 358 live for letters and paid drafts; the abandoned sweep keeps
-      // its own published 7 -> 4, regardless of the caller.
-      expect(windows).toEqual([358, 358, 4]);
+      // 365 -> 358 live for letters and paid drafts; the cancelled held letters
+      // (#701) and the abandoned drafts keep their own published 7 -> 4, regardless of the caller.
+      expect(windows).toEqual([358, 4, 358, 4]);
+      expect(result.cancelledHeldLetters.due).toBe(2);
     });
 
     it('carries an error class, never a driver message, when a preview fails', async () => {
@@ -667,8 +733,8 @@ describe('retention sweep guards (#153)', () => {
 
       expect(result.errors[0]).toMatch(/^letters:/);
       expect(JSON.stringify(result)).not.toContain('Baker Street');
-      // The other two still ran.
-      expect(mocks.query).toHaveBeenCalledTimes(3);
+      // The others still ran.
+      expect(mocks.query).toHaveBeenCalledTimes(4);
     });
   });
 });

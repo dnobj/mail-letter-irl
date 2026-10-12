@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   ARRIVE_BY_DEFAULTS,
+  SCHEDULE_HORIZON_LIMIT_DAYS,
   isArriveByEnabled,
   scheduleDailyCap,
   scheduleHorizonDays,
@@ -56,13 +57,17 @@ describe('scheduleLeadDays', () => {
 });
 
 describe('scheduleHorizonDays', () => {
-  it('defaults to 60 days and takes 1 to 365', () => {
+  it('defaults to 60 days and takes 1 to 60, the limit the privacy policy states (#701)', () => {
     expect(ARRIVE_BY_DEFAULTS.horizonDays).toBe(60);
+    expect(SCHEDULE_HORIZON_LIMIT_DAYS).toBe(60);
     expect(scheduleHorizonDays({})).toBe(60);
     expect(scheduleHorizonDays({ LETTER_IRL_SCHEDULE_HORIZON_DAYS: '1' })).toBe(1);
-    expect(scheduleHorizonDays({ LETTER_IRL_SCHEDULE_HORIZON_DAYS: '365' })).toBe(365);
+    expect(scheduleHorizonDays({ LETTER_IRL_SCHEDULE_HORIZON_DAYS: '30' })).toBe(30);
+    expect(scheduleHorizonDays({ LETTER_IRL_SCHEDULE_HORIZON_DAYS: '60' })).toBe(60);
     expect(scheduleHorizonDays({ LETTER_IRL_SCHEDULE_HORIZON_DAYS: '0' })).toBe(60);
-    expect(scheduleHorizonDays({ LETTER_IRL_SCHEDULE_HORIZON_DAYS: '366' })).toBe(60);
+    // Past the limit, the default, which is the limit.
+    expect(scheduleHorizonDays({ LETTER_IRL_SCHEDULE_HORIZON_DAYS: '61' })).toBe(60);
+    expect(scheduleHorizonDays({ LETTER_IRL_SCHEDULE_HORIZON_DAYS: '365' })).toBe(60);
   });
 });
 

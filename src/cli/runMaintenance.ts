@@ -120,6 +120,7 @@ async function contentRetentionPass(): Promise<void> {
   if (result?.moreWaiting) {
     writeDiagnostic('warn', 'retention.backlog_remaining', {
       lettersRedacted: result.lettersRedacted,
+      cancelledHeldLettersRedacted: result.cancelledHeldLettersRedacted,
       draftsRedacted: result.draftsRedacted,
       abandonedDraftsRedacted: result.abandonedDraftsRedacted,
       quarantinePurged: result.quarantinePurged
@@ -160,6 +161,8 @@ async function contentRetentionReport(days: number): Promise<void> {
     lettersHeldBack: result.letters.heldBack,
     // -1 means nothing was due; the age is only meaningful when lettersDue > 0.
     lettersOldestDueDays: result.letters.oldestDueDays ?? -1,
+    cancelledHeldLettersDue: result.cancelledHeldLetters.due,
+    cancelledHeldLettersHeldBack: result.cancelledHeldLetters.heldBack,
     paidDraftsDue: result.paidDrafts.due,
     paidDraftsHeldBack: result.paidDrafts.heldBack,
     abandonedDraftsDue: result.abandonedDrafts.due,
