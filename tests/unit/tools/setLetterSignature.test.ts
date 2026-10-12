@@ -48,7 +48,7 @@ const SIGNATURE_SAYS: Record<string, string> = {
   DRAFT_NOT_A_LETTER: 'A signature is for letters. A postcard prints none.',
   DRAFT_ALREADY_SENT: "This letter has already been sent, so its signature can't change. list_orders shows it.",
   DRAFT_EXPIRED: 'This preview has expired. Make a new preview: the letter previews take signature themselves.',
-  DRAFT_CHECKOUT_PENDING: "This preview is tied to a Pay & Send payment, so its signature can't change now.",
+  DRAFT_CHECKOUT_PENDING: "This preview is tied to a Pay & Send payment, so its signature can't change now. Finish or let that payment lapse, or make a new preview.",
   DRAFT_NOT_DRAWN: 'This preview was not drawn in a way that can take a signature. Make a new preview, with signature if you like.',
   DRAFT_CHANGED: 'The letter changed while its page was being drawn again. Try the signature again.'
 };

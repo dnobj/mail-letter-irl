@@ -39,35 +39,35 @@ const BEFORE: Record<string, [Record<string, DraftRefusal>, Record<string, [stri
     not_found: ['DRAFT_NOT_FOUND', NOT_FOUND],
     sent: ['DRAFT_ALREADY_SENT', "This letter has already been sent, so its stationery can't change. list_orders shows it."],
     expired: ['DRAFT_EXPIRED', 'This preview has expired. Make a new preview: the letter previews take stationery themselves.'],
-    checkout_pending: ['DRAFT_CHECKOUT_PENDING', "This preview is tied to a Pay & Send payment, so its stationery can't change now."],
+    checkout_pending: ['DRAFT_CHECKOUT_PENDING', "This preview is tied to a Pay & Send payment, so its stationery can't change now. Finish or let that payment lapse, or make a new preview."],
     changed: ['DRAFT_CHANGED', 'The letter changed while its page was being drawn again. Try the stationery again.']
   }],
   set_letter_words: [WORDS_REFUSALS, {
     not_found: ['DRAFT_NOT_FOUND', "That preview wasn't found. Make a new preview with the words, then try again."],
     sent: ['DRAFT_ALREADY_SENT', "This letter has already been sent, so its words can't change. list_orders shows it."],
     expired: ['DRAFT_EXPIRED', 'This preview has expired. Make a new preview with the words.'],
-    checkout_pending: ['DRAFT_CHECKOUT_PENDING', "This preview is tied to a Pay & Send payment, so its words can't change now."],
+    checkout_pending: ['DRAFT_CHECKOUT_PENDING', "This preview is tied to a Pay & Send payment, so its words can't change now. Finish or let that payment lapse, or make a new preview."],
     changed: ['DRAFT_CHANGED', 'The letter changed while its page was being drawn again. Try the words again.']
   }],
   set_letter_signature: [SIGNATURE_REFUSALS, {
     not_found: ['DRAFT_NOT_FOUND', NOT_FOUND],
     sent: ['DRAFT_ALREADY_SENT', "This letter has already been sent, so its signature can't change. list_orders shows it."],
     expired: ['DRAFT_EXPIRED', 'This preview has expired. Make a new preview: the letter previews take signature themselves.'],
-    checkout_pending: ['DRAFT_CHECKOUT_PENDING', "This preview is tied to a Pay & Send payment, so its signature can't change now."],
+    checkout_pending: ['DRAFT_CHECKOUT_PENDING', "This preview is tied to a Pay & Send payment, so its signature can't change now. Finish or let that payment lapse, or make a new preview."],
     changed: ['DRAFT_CHANGED', 'The letter changed while its page was being drawn again. Try the signature again.']
   }],
   set_postcard_style: [POSTCARD_STYLE_REFUSALS, {
     not_found: ['DRAFT_NOT_FOUND', NOT_FOUND],
     sent: ['DRAFT_ALREADY_SENT', "This postcard has already been sent, so its size and layout can't change. list_orders shows it."],
     expired: ['DRAFT_EXPIRED', 'This preview has expired. Make a new preview: the postcard preview takes a size and a layout itself.'],
-    checkout_pending: ['DRAFT_CHECKOUT_PENDING', "This preview is tied to a Pay & Send payment, so its size and layout can't change now."],
+    checkout_pending: ['DRAFT_CHECKOUT_PENDING', "This preview is tied to a Pay & Send payment, so its size and layout can't change now. Finish or let that payment lapse, or make a new preview."],
     changed: ['DRAFT_CHANGED', 'The postcard changed while it was being drawn again. Try the change again.']
   }],
   set_arrival_date: [ARRIVAL_DATE_REFUSALS, {
     not_found: ['DRAFT_NOT_FOUND', NOT_FOUND],
     sent: ['DRAFT_ALREADY_SENT', "This mail has already been sent, so its arrival date can't change. list_orders shows it."],
     expired: ['DRAFT_EXPIRED', 'This preview has expired. Make a new preview: the preview tools take arriveBy themselves.'],
-    checkout_pending: ['DRAFT_CHECKOUT_PENDING', "This preview is tied to a Pay & Send payment, so its arrival date can't change now."]
+    checkout_pending: ['DRAFT_CHECKOUT_PENDING', "This preview is tied to a Pay & Send payment, so its arrival date can't change now. Finish or let that payment lapse, or make a new preview."]
   }],
   set_mail_service: [MAIL_SERVICE_REFUSALS, {
     not_found: ['DRAFT_NOT_FOUND', NOT_FOUND],

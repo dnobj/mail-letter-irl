@@ -4234,6 +4234,21 @@ describe('commerceService', () => {
         expect(position('SELECT * FROM letter_drafts WHERE draft_id = $1 FOR UPDATE')).toBeGreaterThanOrEqual(0);
       });
 
+      it('compares the draft as its lock reads it, not as any earlier read saw it', async () => {
+        const shown = contentVersionOf(draftRow);
+        const before = mocks.query.getMockImplementation()!;
+        // Only the locked read sees the change: a comparison against anything read before the lock would pass.
+        mocks.query.mockImplementation(async (sql: string, params: unknown[] = []) =>
+          sql.includes('SELECT * FROM letter_drafts WHERE draft_id = $1 FOR UPDATE')
+            ? { rows: [{ ...draftRow, body_text: 'Changed under the lock.' }] }
+            : before(sql, params)
+        );
+        await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1', contentVersion: shown }))
+          .rejects.toMatchObject({ code: 'DRAFT_CHANGED_SINCE_SHOWN' });
+        expect(inserted()).toBe(false);
+        expect(mocks.createJitSession).not.toHaveBeenCalled();
+      });
+
       it('opens a checkout named without a version for one release, and logs it', async () => {
         const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
         try {

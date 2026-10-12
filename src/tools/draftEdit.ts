@@ -41,7 +41,7 @@ export interface DraftRefusalWords {
   remake?: string;
   /** What a new preview takes, after a colon when the preview has expired: "the letter previews take stationery themselves". */
   previewTakes?: string;
-  /** Said after the Pay & Send sentence, when there is more to say. */
+  /** Said after the Pay & Send sentence: the way on. Every edit has one (#695 review round 2). */
   checkoutTail?: string;
   /** What to try again when the draft changed while it was drawn again: "stationery", "change". */
   retry?: string;
@@ -60,7 +60,7 @@ export function draftRefusals(words: DraftRefusalWords): Record<DraftRedrawRefus
     ],
     checkout_pending: [
       'DRAFT_CHECKOUT_PENDING',
-      `This preview is tied to a Pay & Send payment, so ${words.what} can't change now.${words.checkoutTail ? ` ${words.checkoutTail}` : ''}`
+      `This preview is tied to a Pay & Send payment, so ${words.what} can't change now. ${words.checkoutTail ?? 'Finish or let that payment lapse, or make a new preview.'}`
     ],
     changed: [
       'DRAFT_CHANGED',

@@ -301,9 +301,9 @@ after payment. A new checkout for mail sent, paid for or awaiting payment in the
 last 24 hours is refused unless `sendAnotherCopy` is true
 ([letter-send-flow.md](letter-send-flow.md#the-same-mail-twice)). A draft whose pages,
 and so its price, changed while the checkout was being made is refused before any
-order (`DRAFT_CHANGED`, #586), so trying again charges the price it has now. A `contentVersion` other than the draft's own, because the draft changed after the person saw it, is refused before any order (`DRAFT_CHANGED_SINCE_SHOWN`, #695; [letter-send-flow.md](letter-send-flow.md#what-the-person-saw-695)). And an earlier checkout,
-whose window passed before new words or a restyle changed the letter's product, is not reused: it is
-refused (`PREVIOUS_CHECKOUT_CLOSING`) until Stripe's webhook cancels it, usually within minutes, or the
+order (`DRAFT_CHANGED`, #586), so trying again charges the price it has now. A `contentVersion` other than the draft's own, because the draft changed after the person saw it, is refused before any order (`DRAFT_CHANGED_SINCE_SHOWN`, #695; [letter-send-flow.md](letter-send-flow.md#what-the-person-saw-695)). And an earlier checkout whose
+product no longer matches the letter's (one edited before #695 held drafts with an open session, or a
+change of which product a mail option maps to) is not reused: it is refused (`PREVIOUS_CHECKOUT_CLOSING`) until Stripe's webhook cancels it, usually within minutes, or the
 hourly sweep does when the webhook is missed.
 
 While the send rule is on, the tool is card-only like the send tools (#475):

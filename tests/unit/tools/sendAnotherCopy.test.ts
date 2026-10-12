@@ -76,7 +76,7 @@ describe.each(tools)('%s', (name, tool, mailType) => {
     const refusal = run({ draftId: 'draft-1', confirm: true, contentVersion: '0123456789abcdef' });
     await expect(refusal).rejects.toMatchObject({
       code: 'DRAFT_CHANGED_SINCE_SHOWN',
-      message: `This ${mailType} changed after it was shown, so nothing was sent. Show the person the ${mailType} as it is now (its preview card, or get_draft_status), and send it once they have seen it.`
+      message: `This ${mailType} changed after it was shown, so nothing was sent. Show the person the ${mailType} as it is now (its preview card, or a new preview), and send it once they have seen it.`
     });
   });
 

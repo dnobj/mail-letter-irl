@@ -493,7 +493,7 @@ describe('set_postcard_style refuses', () => {
     ['not_found', 'DRAFT_NOT_FOUND', "That preview wasn't found. Make a new preview, then try again."],
     ['sent', 'DRAFT_ALREADY_SENT', "This postcard has already been sent, so its size and layout can't change. list_orders shows it."],
     ['expired', 'DRAFT_EXPIRED', 'This preview has expired. Make a new preview: the postcard preview takes a size and a layout itself.'],
-    ['checkout_pending', 'DRAFT_CHECKOUT_PENDING', "This preview is tied to a Pay & Send payment, so its size and layout can't change now."],
+    ['checkout_pending', 'DRAFT_CHECKOUT_PENDING', "This preview is tied to a Pay & Send payment, so its size and layout can't change now. Finish or let that payment lapse, or make a new preview."],
     ['changed', 'DRAFT_CHANGED', 'The postcard changed while it was being drawn again. Try the change again.']
   ] as const)('what the lock refuses (%s), in its words', async (lock, code, message) => {
     vi.mocked(setDraftPostcardStyle).mockResolvedValue(lock);

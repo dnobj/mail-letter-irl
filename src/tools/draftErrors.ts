@@ -167,7 +167,7 @@ export function friendlyDraftError(
   if (code === 'DRAFT_CHANGED_SINCE_SHOWN') {
     return Object.assign(
       new Error(
-        `This ${noun} changed after it was shown, so nothing was sent. Show the person the ${noun} as it is now (its preview card, or get_draft_status), and send it once they have seen it.`
+        `This ${noun} changed after it was shown, so nothing was sent. Show the person the ${noun} as it is now (its preview card, or a new preview), and send it once they have seen it.`
       ),
       { code }
     );

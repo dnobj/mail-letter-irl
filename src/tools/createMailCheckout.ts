@@ -100,7 +100,7 @@ export function friendlyCheckoutError(error: unknown): Error {
     case 'DRAFT_CHANGED_SINCE_SHOWN':
       // An edit came after what the person saw (#695): refused before any order.
       return friendly(
-        'This mail changed after it was shown, so nothing was charged. Show the person the mail as it is now (its preview card, or get_draft_status), and open the payment once they have seen it.'
+        'This mail changed after it was shown, so nothing was charged. Show the person the mail as it is now (its preview card, or a new preview), and open the payment once they have seen it.'
       );
     case 'PREVIOUS_CHECKOUT_CLOSING':
       // The letter changed after its last checkout opened, and that checkout
