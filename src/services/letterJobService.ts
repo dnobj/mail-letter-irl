@@ -20,7 +20,7 @@ import type {
 } from './providers/types.js';
 import type { CertifiedMailService, Letter, LetterJob } from './types.js';
 import { isExtraService, mailServiceOf } from '../config/products.js';
-import { providerSellsExtraServices } from './providers/extraServices.js';
+import { drawnByRenderer, providerPrintsRenderedPdf, providerSellsExtraServices } from './providers/extraServices.js';
 import {
   isLetterAlreadyCompensated,
   returnConsumedCreditsForLetter
@@ -415,6 +415,22 @@ function extraServiceRefusal(
   return undefined;
 }
 
+/**
+ * Why this provider cannot print this mail as it was shown, or undefined when
+ * it can (#698): mail our renderer drew (its content records a rendererVersion)
+ * goes only to a provider that says it prints the renderer's PDF. Answered
+ * before anything is submitted, so it is a definite rejection, as for a
+ * service the provider cannot sell. Mail drawn by the legacy HTML asks nothing.
+ * "Drawn" is read as the print reads it (drawnByRenderer).
+ */
+function rendererRefusal(
+  provider: { printsRenderedPdf?: boolean },
+  letter: Letter
+): 'provider_cannot_print_rendered' | undefined {
+  if (!drawnByRenderer(letter.content)) return undefined;
+  return provider.printsRenderedPdf ? undefined : 'provider_cannot_print_rendered';
+}
+
 function postcardParams(letter: Letter, job: LetterJob): PostcardParams {
   const content = letter.content as Record<string, any>;
   const recipient = letter.recipient as Record<string, any>;
@@ -496,6 +512,23 @@ async function submitToProvider(
       error: `${provider.config.displayName} cannot send this letter's mail service (${refusal})`,
       // Its own class, kept in the columns an operator reads: nothing was sent, and the provider said nothing.
       metadata: { retryable: false, submissionOutcome: 'definite_rejection', errorClass: 'extra_service_refused' },
+    };
+    return { result: rejected, providerName: provider.config.name };
+  }
+
+  const unprintable = rendererRefusal(provider, letter);
+  if (unprintable) {
+    // As above: nothing was submitted, and the reason is a fixed word (#698).
+    writeDiagnostic('error', 'outbox.renderer_refused', {
+      jobId: job.job_id,
+      reason: unprintable,
+      provider: provider.config.name
+    });
+    const rejected: ProviderResult = {
+      success: false,
+      trackingId: '',
+      error: `${provider.config.displayName} cannot print mail our renderer drew (${unprintable})`,
+      metadata: { retryable: false, submissionOutcome: 'definite_rejection', errorClass: 'renderer_refused' },
     };
     return { result: rejected, providerName: provider.config.name };
   }
@@ -1394,14 +1427,19 @@ export async function resolveAmbiguousLetterJobAsAdmin(
 
     // Certified mail (#625) is accepted only by a provider that sells it: manual
     // fulfilment would print the letter as ordinary mail and record it accepted,
-    // after it was paid for as certified. A retry is safe (the dispatch asks the
-    // provider it routes to), and so is a rejection.
+    // after it was paid for as certified. Mail our renderer drew (#698) only by a
+    // provider that prints its PDF, as the dispatch refuses it. A retry is safe
+    // (the dispatch asks the provider it routes to), and so is a rejection.
     if (params.decision === 'accepted') {
-      const service = await client.query<{ mail_service: string | null }>(
-        'SELECT mail_service FROM letters WHERE letter_id = $1',
+      // Only the version from the content: not its images or signature, under these locks.
+      const service = await client.query<{ mail_service: string | null; renderer_version: unknown }>(
+        "SELECT mail_service, content->'rendererVersion' AS renderer_version FROM letters WHERE letter_id = $1",
         [ids.letter_id]
       );
       if (mailServiceOf(service.rows[0]?.mail_service) !== undefined && !providerSellsExtraServices(params.providerName)) {
+        throw new AdminMailResolutionError('invalid_state');
+      }
+      if (drawnByRenderer({ rendererVersion: service.rows[0]?.renderer_version }) && !providerPrintsRenderedPdf(params.providerName)) {
         throw new AdminMailResolutionError('invalid_state');
       }
     }

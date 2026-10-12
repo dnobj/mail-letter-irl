@@ -673,6 +673,47 @@ describePostgres('failed send returns the pack', () => {
     }, 60_000);
 
     /**
+     * Mail our renderer drew is accepted only from a provider that prints its PDF
+     * (#698), read from letters.content as stored: a missing key and a JSON null
+     * are the legacy HTML, any version is drawn, as the print reads it.
+     */
+    it.each([
+      ['no version', { body: 'test' }, true],
+      ['a JSON null version', { body: 'test', rendererVersion: null }, true],
+      ['a renderer version', { body: 'test', rendererVersion: 'pdf-1' }, false]
+    ] as const)('lets DIY accept a held letter with %s only when the legacy HTML drew it', async (_label, content, allowed) => {
+      resetStubProvider();
+      const { userId, letterId } = await seedSpentLetter({ lotA: 5, lotB: 1, spend: 2 });
+      const jobId = await queueJob(letterId);
+
+      stubProvider.nextResult = ambiguousFailure('stub timeout');
+      await jobs.processLetterJob(jobId);
+      await pool.query('UPDATE letters SET content = $2::jsonb WHERE letter_id = $1', [letterId, JSON.stringify(content)]);
+
+      const resolve = jobs.resolveAmbiguousLetterJobAsAdmin({
+        jobId,
+        expectedUserId: userId,
+        actorId: 'operator_test',
+        idempotencyKey: `resolve-diy-${jobId}`,
+        decision: 'accepted',
+        resolution: 'provider_confirmed_accepted',
+        providerName: 'diy',
+        providerTrackingId: `diy-tracking-${jobId}`
+      });
+
+      const letter = () => pool.query<{ status: string }>('SELECT status FROM letters WHERE letter_id = $1', [letterId]);
+      if (allowed) {
+        await resolve;
+        expect((await letter()).rows[0].status).toBe('accepted');
+      } else {
+        await expect(resolve).rejects.toMatchObject({ code: 'invalid_state' });
+        expect((await letter()).rows[0].status).not.toBe('accepted');
+      }
+      // Either way nothing comes back: the mail is still held or accepted.
+      expect(await credits(userId)).toBe(4);
+    }, 60_000);
+
+    /**
      * Two handlers reaching a terminal transition for the same letter at once.
      *
      * The interleaving is the dangerous one and it is real: a dispatch runs long

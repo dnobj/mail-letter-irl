@@ -51,6 +51,8 @@ export class DummyProvider implements LetterFulfillmentProvider {
   public readonly config: ProviderConfig;
   /** Simulated: it records the service it was asked for (#625). */
   public readonly supportsExtraServices = true;
+  /** It prints nothing, so it takes what the renderer drew as readily as any mail. */
+  public readonly printsRenderedPdf = true;
   private options: Required<DummyProviderOptions>;
 
   constructor(config: ProviderConfig, options: DummyProviderOptions = {}) {
