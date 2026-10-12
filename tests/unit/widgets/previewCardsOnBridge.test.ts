@@ -54,9 +54,9 @@ const POSTCARD: Spec = {
   waitMs: 45000,
   args: { recipient, message: 'Wish you were here.', imageUrl: 'https://example.com/beach.jpg' },
   output: (draftId, eligibility) => ({ draftId, lettersRequired: 1, message: 'Wish you were here.', ...eligibility }),
-  meta: { previewFrontHtml: '<html><body><div class="postcard-front">FRONT FROM META</div></body></html>' },
+  meta: { previewFrontHtml: '<html><body><div class="postcard-front"><img src="data:image/png;base64,RlJPTlRNRVRB" alt=""></div></body></html>' },
   pane: 'preview-front',
-  drawnFromMeta: 'FRONT FROM META'
+  drawnFromMeta: 'data:image/png;base64,RlJPTlRNRVRB'
 };
 
 const canSend = {

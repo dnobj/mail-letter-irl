@@ -261,7 +261,7 @@ export function getPublicBaseUrl(req: Pick<http.IncomingMessage, "headers">): st
   return `${proto}://${host}`;
 }
 
-async function serveWidget(
+export async function serveWidget(
   widgetName: string,
   res: http.ServerResponse
 ): Promise<boolean> {
@@ -272,6 +272,10 @@ async function serveWidget(
     const file = inlineHostBridge(await fs.readFile(filePath, "utf-8"), DEFAULT_WIDGET_DIR);
     res.statusCode = 200;
     res.setHeader("Content-Type", "text/html; charset=utf-8");
+    // No page may frame a card from here (#684): hosts load cards through
+    // resources/read, never this URL.
+    res.setHeader("Content-Security-Policy", "frame-ancestors 'none'");
+    res.setHeader("X-Frame-Options", "DENY");
     res.end(file);
     return true;
   } catch (error) {

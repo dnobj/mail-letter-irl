@@ -687,7 +687,10 @@
         const link = el("checkout-link");
         const note = el("note");
         const done = el("done");
-        const pending = Boolean(state.checkoutUrl) && state.status === "checkout_pending";
+        // Only an https link becomes the card's link (#684): anything else is no link.
+        const isHttps = (value) => typeof value === "string" && /^https:\/\//i.test(value);
+        const checkoutHref = [state.checkoutStartUrl, state.checkoutUrl].find(isHttps);
+        const pending = Boolean(checkoutHref) && state.status === "checkout_pending";
 
         // The tool's message field is written for the model (it says to show
         // the customer the link). The customer reads this card, so the
@@ -705,7 +708,7 @@
           // The start page records the way back into the conversation and
           // forwards to the same Stripe checkout (#372); a result from an
           // older server carries only the Stripe URL, which still works.
-          const openHref = state.checkoutStartUrl || state.checkoutUrl;
+          const openHref = checkoutHref;
           link.href = openHref;
           link.textContent = `Open secure checkout — ${formatAmount(state.amountCents, state.currency)}`;
           link.classList.remove("hidden");
