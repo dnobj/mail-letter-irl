@@ -1813,7 +1813,12 @@
       // gives its pages, a gift send's card the second; a legacy preview
       // gives none and gets the mockup below. Were that script not to run,
       // the card shows no page, never an uncleaned one, but the mockup.
-      const { renderedPages, cleanPage } = window.letterIrlPages ?? { renderedPages: () => null, cleanPage: null };
+      // Without the shared pages, no page and no preview picture: never one unchecked (#684).
+      const { renderedPages, cleanPage, previewImageElement } = window.letterIrlPages ?? {
+        renderedPages: () => null,
+        cleanPage: null,
+        previewImageElement: () => null
+      };
 
       // Kept across renders, so a status update does not shrink the page back.
       let pageZoomed = false;
@@ -1993,17 +1998,12 @@
         // fallback to headerImageData - that field is dropped from BOTH
         // channels by design (it is the full-quality original, which the draft
         // holds), so reading it here only ever yielded undefined.
+        // The picture goes in once the mockup is drawn (#684). An image
+        // letter must not look like a finished preview without its image (the
+        // card's own call may come back without it).
         const headerImage = meta.headerImagePreview ?? state.headerImagePreview;
-        if (layoutType === "header_image" && headerImage) {
-          mockupHtml += `
-            <div class="header-image-wrapper">
-              <img src="${headerImage}" alt="Header">
-            </div>
-          `;
-        } else if (layoutType === "header_image") {
-          // An image letter must not look like a finished preview without
-          // its image (the card's own call may come back without it).
-          mockupHtml += `<div class="header-image-wrapper">${IMAGE_NOT_SHOWN_HTML}</div>`;
+        if (layoutType === "header_image") {
+          mockupHtml += `<div class="header-image-wrapper" data-preview-image="header"></div>`;
         }
 
         // Body text - show full content (already validated by character limits)
@@ -2017,14 +2017,8 @@
         // Inline image (if applicable). Same channel and same reasoning as the
         // header image above.
         const inlineImage = meta.inlineImagePreview ?? state.inlineImagePreview;
-        if (layoutType === "inline_image" && inlineImage) {
-          mockupHtml += `
-            <div class="inline-image-wrapper">
-              <img src="${inlineImage}" alt="Photo">
-            </div>
-          `;
-        } else if (layoutType === "inline_image") {
-          mockupHtml += `<div class="inline-image-wrapper">${IMAGE_NOT_SHOWN_HTML}</div>`;
+        if (layoutType === "inline_image") {
+          mockupHtml += `<div class="inline-image-wrapper" data-preview-image="inline"></div>`;
         }
 
         mockupHtml += `
@@ -2034,6 +2028,16 @@
         mockupHtml += giftPageMockup(state.giftCard);
 
         container.innerHTML = mockupHtml;
+        fillPreviewImage(container.querySelector('[data-preview-image="header"]'), headerImage, "Header");
+        fillPreviewImage(container.querySelector('[data-preview-image="inline"]'), inlineImage, "Photo");
+      }
+
+      /** A preview picture into its place, made with DOM calls, or the note that it is not shown (#684). */
+      function fillPreviewImage(slot, value, alt) {
+        if (!slot) return;
+        const image = previewImageElement(value, alt);
+        if (image) slot.appendChild(image);
+        else slot.innerHTML = IMAGE_NOT_SHOWN_HTML;
       }
 
       function showLoading() {

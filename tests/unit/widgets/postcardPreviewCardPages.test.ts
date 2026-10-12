@@ -157,11 +157,13 @@ describe('PostcardPreviewCard: the postcard as it prints', () => {
     expect(groups[1].querySelector('svg > title')!.textContent).toBe('Dear Sam,\nWish you were here.\nPat');
   });
 
-  it('falls back to its own front and mockup, never an uncleaned page, if the shared pages did not run', () => {
+  it('falls back to its own mockup, never an uncleaned page or an unchecked picture, if the shared pages did not run', () => {
     const dom = mount({ previewHtml: RENDERED, previewFrontHtml: LEGACY_FRONT }, { withPages: false });
     const document = dom.window.document;
     expect(document.querySelector('.postcard-page')).toBeNull();
-    expect(document.querySelector('#preview-front .postcard-front img')).not.toBeNull();
+    // The picture is checked by the shared pages (#684): without them, none.
+    expect(document.querySelector('#preview-front img')).toBeNull();
+    expect(document.querySelector('#preview-front')!.textContent).toContain('No image preview available');
     expect(document.querySelector('#preview-back .postcard-back-mockup')).not.toBeNull();
   });
 
