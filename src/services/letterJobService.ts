@@ -1431,14 +1431,15 @@ export async function resolveAmbiguousLetterJobAsAdmin(
     // provider that prints its PDF, as the dispatch refuses it. A retry is safe
     // (the dispatch asks the provider it routes to), and so is a rejection.
     if (params.decision === 'accepted') {
-      const service = await client.query<{ mail_service: string | null; content: unknown }>(
-        'SELECT mail_service, content FROM letters WHERE letter_id = $1',
+      // Only the version from the content: not its images or signature, under these locks.
+      const service = await client.query<{ mail_service: string | null; renderer_version: unknown }>(
+        "SELECT mail_service, content->'rendererVersion' AS renderer_version FROM letters WHERE letter_id = $1",
         [ids.letter_id]
       );
       if (mailServiceOf(service.rows[0]?.mail_service) !== undefined && !providerSellsExtraServices(params.providerName)) {
         throw new AdminMailResolutionError('invalid_state');
       }
-      if (drawnByRenderer(service.rows[0]?.content) && !providerPrintsRenderedPdf(params.providerName)) {
+      if (drawnByRenderer({ rendererVersion: service.rows[0]?.renderer_version }) && !providerPrintsRenderedPdf(params.providerName)) {
         throw new AdminMailResolutionError('invalid_state');
       }
     }

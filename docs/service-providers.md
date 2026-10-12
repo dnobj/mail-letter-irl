@@ -184,10 +184,11 @@ It is not an approved live provider, so the production boot validator refuses it
 `LETTER_PROVIDER`.
 
 **What it cannot take (#698):** it does not print what our renderer drew, so it does not declare
-`printsRenderedPdf`. A letter or postcard whose content records a `rendererVersion` (stationery, a
-signature, more than one page, a postcard front) that dispatches to it is refused before anything is
-submitted, and refunded (`renderer_refused`). Routing a mail type to it as a fallback during an outage
-refunds that mail rather than holding it; the routing preview says so. Nor does it sell certified mail (#625).
+`printsRenderedPdf`. Any letter or postcard previewed on our renderer (its content records a
+`rendererVersion`; all mail while `LETTER_IRL_PRINT_RENDERER=pdf`) that is sent to it is refused before
+anything is submitted, and refunded (`renderer_refused`). Routing a mail type to it as a fallback during an
+outage refunds that mail, queued letters included, rather than holding it; the routing preview says so. Nor does
+it sell certified mail (#625).
 
 ---
 
@@ -199,6 +200,12 @@ All providers implement the `LetterFulfillmentProvider` interface:
 interface LetterFulfillmentProvider {
   // Configuration
   readonly config: ProviderConfig;
+
+  // What it can do, which the outbox asks before sending (absent means no):
+  // certified mail (#625), and mail our renderer drew (#698). Keep the name lists
+  // in src/services/providers/extraServices.ts in step; a test holds them together.
+  readonly supportsExtraServices?: boolean;
+  readonly printsRenderedPdf?: boolean;
 
   // Send a letter
   sendLetter(params: LetterParams): Promise<LetterResult>;

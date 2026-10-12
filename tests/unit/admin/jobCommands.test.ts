@@ -118,7 +118,7 @@ describe("job.resolve (#625)", () => {
     expect((await preview(decision, "diy")).warnings).not.toContain(WARNING);
   });
 
-  const DRAWN = "This provider does not print what our renderer drew: accepting a letter it drew (stationery, a signature, more than one page) is refused.";
+  const DRAWN = "This provider does not print what our renderer drew: accepting a letter previewed on our renderer (all mail while LETTER_IRL_PRINT_RENDERER=pdf) is refused.";
 
   it("warns when manual fulfilment is named to accept a letter: it does not print what our renderer drew (#698)", async () => {
     expect((await preview("accepted", "diy")).warnings).toContain(DRAWN);

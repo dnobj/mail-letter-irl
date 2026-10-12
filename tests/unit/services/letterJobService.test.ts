@@ -1090,7 +1090,9 @@ describe('mail outbox retries', () => {
         if (sql.startsWith('SELECT user_id, status, funding_order_id FROM letters')) {
           return { rows: [{ user_id: 'user-1', status: 'held', funding_order_id: null }] };
         }
-        if (sql.startsWith('SELECT mail_service, content FROM letters')) return { rows: [{ mail_service, content }] };
+        if (sql.startsWith("SELECT mail_service, content->'rendererVersion' AS renderer_version FROM letters")) {
+          return { rows: [{ mail_service, renderer_version: content.rendererVersion ?? null }] };
+        }
         if (sql.startsWith('SELECT * FROM letter_jobs')) {
           return { rows: [{ ...job, job_id: jobId, status: 'held', provider_outcome: 'ambiguous' }] };
         }

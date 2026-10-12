@@ -76,6 +76,9 @@ describe("routing command", () => {
     expect(toDiy.warnings.some(warning => warning.startsWith("diy " + WARNING))).toBe(true);
     const toDummy = await routing.preview(scripted(), "postcard", { provider: "dummy", enabled: true });
     expect(toDummy.warnings.some(warning => warning.includes(WARNING))).toBe(false);
+    // A disabled route sends nothing to it.
+    const disabled = await routing.preview(scripted(), "postcard", { provider: "diy", enabled: false });
+    expect(disabled.warnings.some(warning => warning.includes(WARNING))).toBe(false);
   });
 
   it("updates the row against its version and never routes production to the dummy provider", async () => {

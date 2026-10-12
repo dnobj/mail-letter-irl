@@ -110,7 +110,7 @@ export const jobResolveCommand: CommandDefinition<JobResolveInput> = {
               // Mail our renderer drew (#698): checked under the lock too.
               ...(providerPrintsRenderedPdf(input.providerName)
                 ? []
-                : ["This provider does not print what our renderer drew: accepting a letter it drew (stationery, a signature, more than one page) is refused."]),
+                : ["This provider does not print what our renderer drew: accepting a letter previewed on our renderer (all mail while LETTER_IRL_PRINT_RENDERER=pdf) is refused."]),
             ]
           : input.decision === "retry"
             ? ["Retry resends the letter through the outbox; the customer is not charged again."]

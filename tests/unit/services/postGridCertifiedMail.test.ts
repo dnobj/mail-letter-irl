@@ -13,6 +13,7 @@ import { DummyProvider } from '../../../src/services/providers/DummyProvider.js'
 import { PostGridProvider } from '../../../src/services/providers/PostGridProvider.js';
 import { RENDERER_VERSION } from '../../../src/render/index.js';
 import { drawnByRenderer, providerPrintsRenderedPdf, providerSellsExtraServices } from '../../../src/services/providers/extraServices.js';
+import { listProviders } from '../../../src/services/providers/index.js';
 import type { LetterFulfillmentProvider } from '../../../src/services/providers/types.js';
 
 function provider() {
@@ -324,6 +325,8 @@ describe('the provider names that print what our renderer drew (#698)', () => {
       new DummyProvider({ name: 'dummy', displayName: 'Dummy', enabled: true }, { verbose: false, delayMs: 0, failureRate: 0 }),
       new DIYProvider({ name: 'diy', displayName: 'DIY', enabled: true, config: { verbose: false } })
     ] as LetterFulfillmentProvider[];
+    // Every provider the registry knows is here: a new one must be added, with its answer.
+    expect(providers.map(instance => instance.config.name).sort()).toEqual([...listProviders()].sort());
     for (const instance of providers) {
       expect(providerPrintsRenderedPdf(instance.config.name), instance.config.name).toBe(instance.printsRenderedPdf === true);
     }
