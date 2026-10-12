@@ -729,7 +729,7 @@ export function layoutLetterForPreview(
       `${headline ? ` on the ${stationeryNamed(stationery!)} with a headline` : own ? ` on the ${stationeryNamed(stationery!)}` : ""}: ` +
       (longest
         ? `${pageWords(maxPages)} is the longest letter we print. `
-        : `it takes ${linesUsed} lines and the page holds ${linesAvailable}. `) +
+        : `it takes ${layout.truncated ? "more than " : ""}${linesUsed} lines and the page holds ${linesAvailable}. `) +
       (headline
         ? fitsPlain
           ? `The headline takes ${HEADLINE_LINES} lines: shorten the message, leave the headline out, or choose the classic stationery.`

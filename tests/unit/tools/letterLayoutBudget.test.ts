@@ -45,6 +45,23 @@ describe('a letter far too long to print (#694)', () => {
     expect(over).toBeGreaterThanOrEqual(3 * LINE_BUDGET_PER_PAGE - 3 * (LINE_BUDGET_PER_PAGE / 2));
   });
 
+  it('previews a letter whose blank stretch is longer than the budget, with its end (#694 review round 1)', () => {
+    const layout = layoutLetterForPreview(
+      { bodyText: 'Dear Sam,' + '\n'.repeat(200) + 'The part that matters.', signOff: 'Love, Pat', layoutType: 'text_only' },
+      context(),
+      'pdf',
+      3
+    )!;
+    expect(layout.truncated).toBeUndefined();
+    expect(JSON.stringify(layout)).toContain('The part that matters.');
+    expect(JSON.stringify(layout)).toContain('Love, Pat');
+  });
+
+  it('says it takes more than the lines it laid out, on one page', () => {
+    const message = refusal({ bodyText: 'word '.repeat(6000), signOff: 'Pat', layoutType: 'text_only' }, 1);
+    expect(message).toMatch(/: it takes more than \d+ lines and the page holds \d+\./);
+  });
+
   it('says exactly how many lines too long a letter is that the budget did not stop', () => {
     const message = refusal({ bodyText: 'word '.repeat(700), signOff: 'Pat', layoutType: 'text_only' }, 1);
     expect(message).toMatch(/^Letter is \d+ lines? too long for one page/);

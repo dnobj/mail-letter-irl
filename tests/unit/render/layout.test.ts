@@ -5,7 +5,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import LineBreaker from 'linebreak';
-import { drawsGrapheme, layoutLetter, LINE_BUDGET_PER_PAGE, wrapParagraph, type Layout, type TextRun } from '../../../src/render/layout.js';
+import { drawsGrapheme, layoutLetter, LINE_BUDGET_PER_PAGE, paragraphMeasure, wrapParagraph, type Layout, type TextRun } from '../../../src/render/layout.js';
 import { isInvisible, mirrorOf } from '../../../src/render/bidi.js';
 
 // shape() is spied on, so a test can see what layoutLetter shapes; it still
@@ -397,32 +397,41 @@ describe('what the renderer draws as written (#534)', () => {
 });
 
 describe('the line search finds the breaks the scan found (#694)', () => {
-  /** wrapParagraph's line search before #694, verbatim: a scan of every break from the line's start. */
-  function scanned(paragraph: string, lineWidth: number, measure: (start: number, end: number) => number): string[] {
-    const whitespace = /\s/u;
-    const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
-    if (paragraph.trim() === '') return [''];
+  /** wrapParagraph before #694, verbatim: each line's last break by a scan from its start. */
+  function scanned(
+    paragraph: string,
+    width: number,
+    measure: (start: number, end: number) => number,
+    fitLimit: (start: number) => number = () => paragraph.length
+  ): Array<{ start: number; end: number }> {
+    const WHITESPACE = /\s/u;
+    const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+    if (paragraph.trim() === '') return [{ start: 0, end: 0 }];
     const trimmedEnd = (start: number, end: number) => {
-      while (end > start && whitespace.test(paragraph[end - 1])) end -= 1;
+      while (end > start && WHITESPACE.test(paragraph[end - 1])) end -= 1;
       return end;
     };
-    const fits = (start: number, end: number) => measure(start, trimmedEnd(start, end)) <= lineWidth;
+    const fits = (start: number, end: number, limit: number) => {
+      const trimmed = trimmedEnd(start, end);
+      return trimmed <= limit && measure(start, trimmed) <= width;
+    };
     const breaks: number[] = [];
     const breaker = new LineBreaker(paragraph);
     for (let next = breaker.nextBreak(); next; next = breaker.nextBreak()) breaks.push(next.position);
-    const lines: string[] = [];
+    const lines: Array<{ start: number; end: number }> = [];
     const push = (start: number, end: number) => {
       const trimmed = trimmedEnd(start, end);
-      if (trimmed > start) lines.push(paragraph.slice(start, trimmed));
+      if (trimmed > start) lines.push({ start, end: trimmed });
     };
     let start = 0;
     let index = 0;
     while (start < paragraph.length) {
+      const limit = fitLimit(start);
       let fit = -1;
       for (; index < breaks.length; index++) {
         const end = breaks[index];
         if (end <= start) continue;
-        if (!fits(start, end)) break;
+        if (!fits(start, end, limit)) break;
         fit = end;
       }
       if (fit !== -1) {
@@ -431,18 +440,27 @@ describe('the line search finds the breaks the scan found (#694)', () => {
         continue;
       }
       const pieceEnd = breaks[index] ?? paragraph.length;
+      const stop = Math.min(pieceEnd, limit);
       const ends: number[] = [];
-      for (const { segment, index: offset } of graphemeSegmenter.segment(paragraph.slice(start, pieceEnd))) ends.push(start + offset + segment.length);
+      for (const { segment, index: offset } of graphemes.segment(paragraph.slice(start, pieceEnd))) {
+        const end = start + offset + segment.length;
+        if (ends.length > 0 && end > stop) break;
+        ends.push(end);
+      }
       let [low, high, best] = [1, ends.length - 1, 0];
       while (low <= high) {
         const middle = (low + high) >> 1;
-        if (fits(start, ends[middle])) [best, low] = [middle, middle + 1];
-        else high = middle - 1;
+        if (fits(start, ends[middle], limit)) {
+          best = middle;
+          low = middle + 1;
+        } else {
+          high = middle - 1;
+        }
       }
       push(start, ends[best]);
       start = ends[best];
     }
-    return lines.length > 0 ? lines : [''];
+    return lines.length > 0 ? lines : [{ start: 0, end: 0 }];
   }
 
   /** A small seeded generator, so a failure names a paragraph that can be run again. */
@@ -454,22 +472,56 @@ describe('the line search finds the breaks the scan found (#694)', () => {
     };
   }
 
+  // Kerning pairs and ligatures, Greek, Cyrillic, Hebrew mixed with Latin, numbers and
+  // punctuation, and breaks that are not after a space: a hyphen, a slash, a soft hyphen,
+  // a zero-width space, CJK, an ideographic space; and invisible marks a line drops.
   const WORDS = [
     'a', 'I', 'AV', 'To', 'Ty', 'Wa', 'fi', 'office', 'affluent', 'waffle', 'letter', 'Vowel', 'yearly', 'LT', 'P.', '—', 'well-known',
-    'naïve', 'café', 'Ελλάδα', 'καλημέρα', 'Москва', 'привет', 'שלום', 'עולם', 'מכתב', '12,000', '(note)', '“quoted”', 'x'
+    'naïve', 'café', 'Ελλάδα', 'καλημέρα', 'Москва', 'привет', 'שלום', 'עולם', 'מכתב', '12,000', '(note)', '“quoted”', 'x',
+    'and/or', 'self­reliant', 'zero​width', 'nbsp joined', '‎LRM', '‏RLM', 'ab‍cd', '漢字かな',
+    'full　width', 'tab\there', 'é', 'AVAVAVAVAVAVAVAVAVAVAVAVAV'
   ];
+  const SEPARATORS = [' ', ' ', ' ', '  ', ' / ', '-', '​'];
 
-  it.each(['Tinos-Regular', 'Cousine-Regular', 'Caveat-Regular'] as const)('in %s, over four hundred paragraphs', fontName => {
-    const face = loadFont(fontName);
-    const next = random(694);
-    for (let sample = 0; sample < 400; sample += 1) {
-      const count = 1 + Math.floor(next() * 60);
-      const paragraph = Array.from({ length: count }, () => WORDS[Math.floor(next() * WORDS.length)])
-        .join(next() < 0.2 ? '  ' : ' ');
-      const lineWidth = 40 + next() * 400;
-      const measure = (start: number, end: number) => shape(face, paragraph.slice(start, end)).advanceWidth * 12 / face.unitsPerEm;
-      const searched = wrapParagraph(paragraph, lineWidth, measure).map(({ start, end }) => paragraph.slice(start, end));
-      expect(searched, `sample ${sample}: ${JSON.stringify(paragraph)} at ${lineWidth}`).toEqual(scanned(paragraph, lineWidth, measure));
-    }
-  }, 120_000);
+  it.each(['Tinos-Regular', 'Cousine-Regular', 'Caveat-Regular'] as const)(
+    'in %s, through the measure the layout uses, over four hundred paragraphs',
+    fontName => {
+      const next = random(694);
+      for (let sample = 0; sample < 400; sample += 1) {
+        const count = 1 + Math.floor(next() * 60);
+        let paragraph = '';
+        for (let word = 0; word < count; word += 1) {
+          if (word > 0) paragraph += SEPARATORS[Math.floor(next() * SEPARATORS.length)];
+          paragraph += WORDS[Math.floor(next() * WORDS.length)];
+        }
+        const lineWidth = 40 + next() * 400;
+        const size = [11, 12, 14][Math.floor(next() * 3)];
+        const { measure, limit } = paragraphMeasure(paragraph, size, lineWidth, fontName);
+        const searched = wrapParagraph(paragraph, lineWidth, measure, limit);
+        expect(searched, `sample ${sample}: ${JSON.stringify(paragraph)} at ${lineWidth}, size ${size}`)
+          .toEqual(scanned(paragraph, lineWidth, measure, limit));
+      }
+    },
+    180_000
+  );
+});
+
+describe('blank lines do not spend the line budget (#694 review round 1)', () => {
+  // flowPages drops blank lines at the top of each later page, so a letter that fits can wrap
+  // many more lines than its pages hold. Counting them, the budget stopped such a letter and
+  // dropped its end, with overflowLines 0.
+  it.each([2, 3])('lays out a letter of a greeting, a long blank stretch and its words whole on %i pages', maxPages => {
+    const text = `Dear Sam,${'\n'.repeat(200)}The part that matters.\n\nLove, Pat`;
+    const layout = layoutLetter({ text, layoutType: 'text_only' }, { maxPages });
+    expect(layout.truncated).toBeUndefined();
+    expect(layout.overflowLines).toBe(0);
+    const drawn = layout.pages.flatMap(page => page.items.filter((item): item is TextRun => item.kind === 'text').map(run => run.source));
+    expect(drawn).toEqual(expect.arrayContaining(['Dear Sam,', 'The part that matters.', 'Love, Pat']));
+  });
+
+  it('never lets a truncated letter pass as one that fits', () => {
+    const layout = layoutLetter({ text: 'word '.repeat(9000), layoutType: 'text_only' }, { maxPages: 3 });
+    expect(layout.truncated).toBe(true);
+    expect(layout.overflowLines).toBeGreaterThan(0);
+  });
 });
