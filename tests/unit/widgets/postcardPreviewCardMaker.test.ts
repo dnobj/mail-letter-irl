@@ -756,6 +756,13 @@ describe('the content version the postcard card sends (#695)', () => {
     await changedFirst.answer(ready('v_old', '6x9', drawn()), 'get_draft_status');
     await changedFirst.click(changedFirst.byId('send-button'));
     expect(sentWith(changedFirst).contentVersion).toBe('v_4x6');
+
+    // A status answer with a size but no page draws no front: its version is not taken.
+    const pageless = mount();
+    await pageless.show(output({ size: '6x9', layout: 'full_bleed', contentVersion: 'v_preview' }), ON());
+    await pageless.answer(ready('v_chat', '6x4', null), 'get_draft_status');
+    await pageless.click(pageless.byId('send-button'));
+    expect(sentWith(pageless).contentVersion).toBe('v_preview');
   });
 
   it('draws the postcard again when the send is refused for a change since, and sends it as it is now', async () => {
