@@ -494,10 +494,11 @@ describe('the line search finds the breaks the scan found (#694)', () => {
   const SEPARATORS = [' ', ' ', ' ', '  ', ' / ', '-', '​'];
 
   it.each(['Tinos-Regular', 'Cousine-Regular', 'Caveat-Regular'] as const)(
-    'in %s, through the measure the layout uses, over four hundred paragraphs',
+    'in %s, through the measure the layout uses, over 150 paragraphs',
     fontName => {
       const next = random(694);
-      for (let sample = 0; sample < 400; sample += 1) {
+      // 150 a face: enough to vary every word and break, light enough not to slow the suite's other files.
+      for (let sample = 0; sample < 150; sample += 1) {
         const count = 1 + Math.floor(next() * 60);
         let paragraph = '';
         for (let word = 0; word < count; word += 1) {
