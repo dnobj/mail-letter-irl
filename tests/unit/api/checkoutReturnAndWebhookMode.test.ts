@@ -24,7 +24,9 @@ vi.mock('../../../src/api/middleware/rateLimit.js', async importOriginal => ({
 }));
 
 import { handleCreateCheckoutSession, handleStripeWebhook } from '../../../src/api/dashboardApiHandler.js';
-import { isLetterPacksReturnUrl } from '../../../src/config/sendConfirmation.js';
+import { letterPacksReturnUrl } from '../../../src/config/sendConfirmation.js';
+
+const isLetterPacksReturnUrl = (value: unknown, env: NodeJS.ProcessEnv) => letterPacksReturnUrl(value, env) !== null;
 
 function stubResponse() {
   return { statusCode: 0, setHeader: vi.fn(), end: vi.fn() };
@@ -75,6 +77,18 @@ describe("a pack checkout returns only to the website's letter packs page (#683)
     expect(isLetterPacksReturnUrl(url, SITE)).toBe(false);
   });
 
+  it("keeps the path of a website served below its origin, and nothing else's", () => {
+    const below = { LETTER_IRL_WEBSITE_BASE_URL: 'https://letterirl.test/app' };
+    expect(isLetterPacksReturnUrl('https://letterirl.test/app/dashboard/letter-packs?purchase=success', below)).toBe(true);
+    expect(isLetterPacksReturnUrl('https://letterirl.test/dashboard/letter-packs', below)).toBe(false);
+  });
+
+  it('gives the address as the parser reads it, which is what goes to Stripe', () => {
+    expect(letterPacksReturnUrl('HTTPS://LetterIRL.test:443/dashboard/letter-packs?purchase=success', SITE)).toBe(
+      'https://letterirl.test/dashboard/letter-packs?purchase=success'
+    );
+  });
+
   it('takes the bare host as the twin of a www website', () => {
     expect(isLetterPacksReturnUrl('https://letterirl.test/dashboard/letter-packs', { LETTER_IRL_WEBSITE_BASE_URL: 'https://www.letterirl.test' })).toBe(true);
   });
@@ -94,7 +108,7 @@ describe("a pack checkout returns only to the website's letter packs page (#683)
     expect(createPackCheckout).not.toHaveBeenCalled();
   });
 
-  it("starts the checkout for the website's own addresses", async () => {
+  it("starts the checkout for the website's own addresses, as the parser reads them", async () => {
     vi.stubEnv('LETTER_IRL_WEBSITE_BASE_URL', 'https://letterirl.test');
     const res = stubResponse();
     await handleCreateCheckoutSession(
@@ -102,13 +116,19 @@ describe("a pack checkout returns only to the website's letter packs page (#683)
         headers: {},
         body: {
           productId: 'credit-pack-4',
-          successUrl: 'https://letterirl.test/dashboard/letter-packs?purchase=success',
+          successUrl: 'https://LETTERIRL.test:443/dashboard/letter-packs?purchase=success',
           cancelUrl: 'https://letterirl.test/dashboard/letter-packs?purchase=cancelled'
         }
       } as never,
       res as never
     );
     expect(createPackCheckout).toHaveBeenCalledTimes(1);
+    expect(createPackCheckout).toHaveBeenCalledWith(
+      expect.objectContaining({
+        successUrl: 'https://letterirl.test/dashboard/letter-packs?purchase=success',
+        cancelUrl: 'https://letterirl.test/dashboard/letter-packs?purchase=cancelled'
+      })
+    );
     expect(res.statusCode).not.toBe(400);
   });
 });
@@ -122,6 +142,7 @@ describe('the Stripe webhook takes only events of this deployment\'s mode (#683)
   };
 
   it('outside production: a test event is processed, a live one refused', async () => {
+    vi.stubEnv('LETTER_IRL_DEPLOYMENT_ENVIRONMENT', 'development');
     expect((await deliver(false)).statusCode).not.toBe(400);
     expect(processStripeWebhookEvent).toHaveBeenCalledTimes(1);
     processStripeWebhookEvent.mockClear();
@@ -142,6 +163,7 @@ describe('the Stripe webhook takes only events of this deployment\'s mode (#683)
   });
 
   it('refuses an event that does not say its mode', async () => {
+    vi.stubEnv('LETTER_IRL_DEPLOYMENT_ENVIRONMENT', 'development');
     const refused = await deliver(undefined);
     expect(refused.statusCode).toBe(400);
     expect(processStripeWebhookEvent).not.toHaveBeenCalled();

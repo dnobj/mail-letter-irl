@@ -8,7 +8,7 @@
 
 import http from 'node:http';
 import { verifyWebhookSignature } from '../services/stripeService.js';
-import { isLetterPacksReturnUrl } from '../config/sendConfirmation.js';
+import { letterPacksReturnUrl } from '../config/sendConfirmation.js';
 import { isProductionEnv } from '../config/deploymentConfig.js';
 import { createPackCheckout, processStripeWebhookEvent } from '../services/commerceService.js';
 import { SpendLimitError } from '../services/betaSpendLimits.js';
@@ -101,7 +101,9 @@ export async function handleCreateCheckoutSession(
 
     // Only the website's letter packs page (#683): Stripe sends the person
     // to these addresses after they pay.
-    if (!isLetterPacksReturnUrl(successUrl) || !isLetterPacksReturnUrl(cancelUrl)) {
+    const successReturn = letterPacksReturnUrl(successUrl);
+    const cancelReturn = letterPacksReturnUrl(cancelUrl);
+    if (!successReturn || !cancelReturn) {
       res.statusCode = 400;
       res.json({
         error: "successUrl and cancelUrl must be the website's letter packs page"
@@ -135,8 +137,8 @@ export async function handleCreateCheckoutSession(
       userId: authInfo.userId,
       userEmail: userEmail || '',
       productId: productId as any,
-      successUrl,
-      cancelUrl
+      successUrl: successReturn,
+      cancelUrl: cancelReturn
     });
 
     // createPackCheckout either succeeds or THROWS - its result type's
