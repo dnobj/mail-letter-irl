@@ -15,12 +15,13 @@
  * the provider's structured metadata when present and otherwise from the
  * `HTTP <status>` prefix the provider client puts on every message.
  *
- * One class of ours is kept as it is: a refusal before any request (#625), when
- * a letter asks for a service the provider cannot sell. It is not the
+ * Our own classes are kept as they are: a refusal before any request, when a
+ * letter asks for a service the provider cannot sell (#625), or is mail our
+ * renderer drew for a provider that does not print it (#698). It is not the
  * provider's answer, and an operator reading the column should not be told it
  * was.
  */
-const REFUSAL_CLASSES: ReadonlySet<string> = new Set(['extra_service_refused']);
+const REFUSAL_CLASSES: ReadonlySet<string> = new Set(['extra_service_refused', 'renderer_refused']);
 
 export function summarizeProviderRejection(result: {
   error?: string;

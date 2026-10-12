@@ -17,6 +17,8 @@ vi.mock('../../../src/db/index.js', () => ({
 vi.mock('../../../src/services/providers/index.js', () => ({
   getProviderForMailType: vi.fn(async () => ({
     config: { name: 'postgrid', displayName: 'PostGrid' },
+    // As PostGrid does: it prints the PDF our renderer drew (#698).
+    printsRenderedPdf: true,
     sendLetter: mocks.sendLetter,
     sendPostcard: mocks.sendPostcard,
   })),
@@ -436,6 +438,91 @@ describe('mail outbox retries', () => {
         expect(statements.some(sql => sql.includes("SET status = 'held'"))).toBe(false);
         expect(statements.some(sql => sql.includes("provider_outcome = 'ambiguous'"))).toBe(false);
       });
+    });
+  });
+
+  describe('mail our renderer drew goes only to a provider that prints it (#698)', () => {
+    const providerWith = (capability: Record<string, unknown> = {}) =>
+      ({
+        config: { name: 'diy', displayName: 'DIY' },
+        sendLetter: mocks.sendLetter,
+        sendPostcard: mocks.sendPostcard,
+        ...capability,
+      }) as never;
+    const asRow = (over: Record<string, unknown>) => {
+      const row = { ...letter, ...over };
+      query.mockImplementation(async (sql: string) => {
+        if (sql.includes('WITH candidate')) return { rows: [{ ...job }] };
+        if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...row }] };
+        return { rows: [] };
+      });
+      const base = clientQuery.getMockImplementation()!;
+      clientQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
+        if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...row }] };
+        if (sql.includes('SELECT jobs.letter_id')) return { rows: [{ letter_id: 'letter-1', funding_order_id: 'order-1' }] };
+        if (sql.includes('SELECT funding_order_id FROM letters')) return { rows: [{ funding_order_id: 'order-1' }] };
+        if (sql.includes('SELECT status FROM orders')) return { rows: [{ status: 'fulfillment_pending' }] };
+        if (sql.includes('SELECT order_id FROM orders')) return { rows: [{ order_id: 'order-1' }] };
+        if (sql.includes('SELECT letter_id FROM letter_jobs')) return { rows: [{ letter_id: 'letter-1' }] };
+        if (sql.includes("SET status = 'refund_pending'")) return { rows: [{ order_id: 'order-1' }] };
+        if (sql.includes('SET status = $1::varchar')) return { rows: [], rowCount: 1 };
+        return base(sql, params);
+      });
+    };
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it.each([
+      ['a letter', { content: { ...letter.content, rendererVersion: 'pdf-1' } }, {}],
+      ['a letter with stationery', { content: { ...letter.content, rendererVersion: 'pdf-2' } }, { printsRenderedPdf: false }],
+      // An empty version is drawn too, as the print reads it (it would refuse to print it).
+      ['a letter with an empty version', { content: { ...letter.content, rendererVersion: '' } }, {}],
+      [
+        'a postcard',
+        { mail_type: 'postcard', content: { message: 'Hi', frontImageData: 'data:image/jpeg;base64,AAAA', postcardSize: '6x9', rendererVersion: 'pdf-1' } },
+        {}
+      ]
+    ])('refuses %s it drew to a provider that does not say it prints it, before anything is submitted', async (_name, row, capability) => {
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+      asRow(row);
+      vi.mocked(getProviderForMailType).mockResolvedValueOnce(providerWith(capability));
+
+      const result = await processLetterJob('job-1', {});
+
+      expect(sendLetter).not.toHaveBeenCalled();
+      expect(mocks.sendPostcard).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ completed: false, retryScheduled: false });
+      // What paid for it comes back, by the road any definite rejection takes, with its own class.
+      expect(clientQuery).toHaveBeenCalledWith(expect.stringContaining('WHERE order_id = $1'), ['order-1', 'renderer_refused']);
+      const statements = clientQuery.mock.calls.map(call => String(call[0]));
+      expect(statements.some(sql => sql.includes("SET status = 'held'"))).toBe(false);
+      const logged = errorLog.mock.calls.map(call => String(call[0])).find(line => line.includes('outbox.renderer_refused'));
+      expect(JSON.parse(logged!)).toMatchObject({
+        event: 'outbox.renderer_refused',
+        reason: 'provider_cannot_print_rendered',
+        jobId: 'job-1',
+        provider: 'diy'
+      });
+    });
+
+    it.each([undefined, null])('sends mail the legacy HTML drew (rendererVersion %j) to any provider', async renderer => {
+      asRow({ content: { ...letter.content, ...(renderer === undefined ? {} : { rendererVersion: renderer }) } });
+      vi.mocked(getProviderForMailType).mockResolvedValueOnce(providerWith());
+
+      await processLetterJob('job-1', {});
+
+      expect(sendLetter).toHaveBeenCalledTimes(1);
+    });
+
+    it('sends what it drew to a provider that prints it', async () => {
+      asRow({ content: { ...letter.content, rendererVersion: 'pdf-4' } });
+      vi.mocked(getProviderForMailType).mockResolvedValueOnce(providerWith({ printsRenderedPdf: true }));
+
+      await processLetterJob('job-1', {});
+
+      expect(sendLetter).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -996,14 +1083,16 @@ describe('mail outbox retries', () => {
 
   describe('certified mail (#625)', () => {
     const jobId = '00000000-0000-4000-8000-000000000311';
-    const held = (mail_service: string | undefined) => {
+    const held = (mail_service: string | undefined, content: Record<string, unknown> = {}) => {
       clientQuery.mockImplementation(async (sql: string) => {
         if (sql.includes('FROM commerce_operator_audit_events')) return { rows: [] };
         if (sql.includes('SELECT jobs.letter_id')) return { rows: [{ letter_id: 'letter-1', funding_order_id: null }] };
         if (sql.startsWith('SELECT user_id, status, funding_order_id FROM letters')) {
           return { rows: [{ user_id: 'user-1', status: 'held', funding_order_id: null }] };
         }
-        if (sql.startsWith('SELECT mail_service FROM letters')) return { rows: [{ mail_service }] };
+        if (sql.startsWith("SELECT mail_service, content->'rendererVersion' AS renderer_version FROM letters")) {
+          return { rows: [{ mail_service, renderer_version: content.rendererVersion ?? null }] };
+        }
         if (sql.startsWith('SELECT * FROM letter_jobs')) {
           return { rows: [{ ...job, job_id: jobId, status: 'held', provider_outcome: 'ambiguous' }] };
         }
@@ -1053,6 +1142,23 @@ describe('mail outbox retries', () => {
     it.each(['retry', 'rejected'] as const)('lets a certified letter be resolved as %s whatever the provider named', async decision => {
       held('certified');
       await expect(resolve(decision, 'diy')).resolves.toBeDefined();
+    });
+
+    // #698: the dispatch refuses drawn mail for a provider that does not print it; so does the resolution.
+    it.each(['pdf-1', 'pdf-2', 'pdf-4', ''])(
+      'refuses to resolve a letter our renderer drew (%j) as accepted by manual fulfilment, and writes nothing',
+      async version => {
+        held('standard', { rendererVersion: version });
+        await expect(resolve('accepted', 'diy')).rejects.toMatchObject({ code: 'invalid_state' });
+        expect(writes()).toEqual([]);
+      }
+    );
+
+    it('lets a letter our renderer drew be resolved as accepted by PostGrid, or as retry or rejected by anyone', async () => {
+      held('standard', { rendererVersion: 'pdf-2' });
+      await expect(resolve('accepted', 'postgrid')).resolves.toMatchObject({ letterStatus: 'accepted' });
+      held('standard', { rendererVersion: 'pdf-2' });
+      await expect(resolve('retry', 'diy')).resolves.toBeDefined();
     });
   });
 

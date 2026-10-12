@@ -117,6 +117,16 @@ describe("job.resolve (#625)", () => {
   it.each(["retry", "rejected"])("does not warn for %s, which manual fulfilment may be named for", async decision => {
     expect((await preview(decision, "diy")).warnings).not.toContain(WARNING);
   });
+
+  const DRAWN = "This provider does not print what our renderer drew: accepting a letter previewed on our renderer (all mail while LETTER_IRL_PRINT_RENDERER=pdf) is refused.";
+
+  it("warns when manual fulfilment is named to accept a letter: it does not print what our renderer drew (#698)", async () => {
+    expect((await preview("accepted", "diy")).warnings).toContain(DRAWN);
+  });
+
+  it.each(["postgrid", "dummy"])("does not warn of the renderer for %s, which prints it (#698)", async providerName => {
+    expect((await preview("accepted", providerName)).warnings).not.toContain(DRAWN);
+  });
 });
 
 describe("job.dispatch_now (#535)", () => {

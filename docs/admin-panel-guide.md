@@ -44,7 +44,8 @@ direction of failure.
 The three provider-error columns operators read (`letter_jobs.last_error`, `orders.last_error` and the
 `provider.terminal_failure` order event) hold an error class and HTTP status only, `provider_rejected
 http_400`, never the provider's message: PostGrid's validation messages name the field and value that
-failed, which can be a fragment of a recipient's address (migration 031). One class of ours reads differently:
+failed, which can be a fragment of a recipient's address (migration 031). Two classes of ours read differently:
+`renderer_refused` (#698) means the letter or postcard was drawn by our renderer and its provider does not print the renderer's PDF, so nothing was sent and what paid for it came back; the log line `outbox.renderer_refused` says so.
 `extra_service_refused` (#625) means the letter asked for a service (certified mail) its provider cannot sell, so
 nothing was sent and what paid for it came back; the log line `outbox.extra_service_refused` says which reason. Since migration 032 the same
 rule covers every stored error: `orders.last_error` under the fulfilment, recovery and refund codes,
@@ -350,7 +351,7 @@ Commands available:
 | Command | Target | What it calls |
 | --- | --- | --- |
 | Acknowledge / resolve alert | `commerce_operational_alerts` | `transitionCommerceAlert` (advisory lock, state machine, hashed audit) |
-| Resolve ambiguous job | `letter_jobs` held on `ambiguous` | `resolveAmbiguousLetterJobAsAdmin` (locks order → letter → job, refuses compensated letters, resolves the alert) |
+| Resolve ambiguous job | `letter_jobs` held on `ambiguous` | `resolveAmbiguousLetterJobAsAdmin` (locks order → letter → job, refuses compensated letters, resolves the alert). It refuses `accepted` from a provider that cannot have sent what the letter is: certified mail by one that does not sell it (#625), or mail our renderer drew by one that does not print its PDF, such as manual fulfilment (#698); the preview warns of both |
 | Retry failed job | `letter_jobs` in `failed / definite_failure` | `retryLetterJobAsAdmin` (same outbox row and provider key) |
 | Send held mail now | a letter held to arrive by a date, still waiting for its mail date (#535) | `releaseHeldLetterJobAsAdmin` (locks order → letter → job; the job becomes due at once, so the next hourly run sends it; audit operation `mail_job_release`) |
 | Refund unspent letters | a fulfilled `letter_pack` order | `refundPackLetters` (#323: letters leave first, then Stripe with the stored idempotency key; one per pack). Enabled only when `LETTER_IRL_PACK_REFUND_COMMAND_ENABLED=true` on the admin service; the flag has no effect on the API |
