@@ -518,7 +518,7 @@ export const SET_STATIONERY_DESCRIPTION =
   "or handwritten, the letter in a handwriting face on faint ruled lines, which has no Greek, Hebrew or Vietnamese. " +
   "Each but classic prints the date at the top right.";
 /** set_stationery's theme as it is served while saved designs are not offered (#649): required, as before them. */
-export const setStationeryThemeRequiredZ = z.preprocess(themeName, z.enum(STATIONERY_THEMES)).describe(SET_STATIONERY_DESCRIPTION);
+export const setStationeryThemeRequiredZ = z.preprocess(themeName, requiredChoice(STATIONERY_THEMES)).describe(SET_STATIONERY_DESCRIPTION);
 export const setStationeryInputZ = z.object({
   draftId: z.string().describe("The draftId from a letter preview"),
   stationery: z.preprocess(themeName, z.enum(STATIONERY_THEMES).optional()).describe(SET_STATIONERY_DESCRIPTION),

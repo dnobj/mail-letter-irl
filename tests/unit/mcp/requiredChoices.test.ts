@@ -1,8 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { createMcpServer } from '../../../src/mcp/httpServer.js';
+import type { ClientProfile } from '../../../src/auth/clientProfiles.js';
+import { LetterIrlServer } from '../../../src/server.js';
 import {
   createPackCheckoutInputZ,
   saveStationeryDesignInputZ,
-  setMailServiceInputZ
+  setMailServiceInputZ,
+  setStationeryThemeRequiredZ
 } from '../../../src/zodSchemas.js';
 
 /**
@@ -33,8 +39,56 @@ describe('required choices name their options when missing', () => {
     expect(issueFor(saveStationeryDesignInputZ, input, 'tone')).toMatch(/^Required: one of black, /);
   });
 
+  it("set_stationery's stationery, as served while saved designs are off", () => {
+    const parsed = setStationeryThemeRequiredZ.safeParse(undefined);
+    expect(parsed.success).toBe(false);
+    expect(parsed.error!.issues[0].message).toMatch(/^Required: one of classic, monogram, /);
+  });
+
   it('still names the options for a wrong value, and takes a right one', () => {
     expect(issueFor(createPackCheckoutInputZ, { pack: 'huge' }, 'pack')).toMatch(/starter.*regular.*power/);
     expect(createPackCheckoutInputZ.safeParse({ pack: 'starter' }).success).toBe(true);
+  });
+});
+
+describe('what a model is told for a missing choice, through the MCP server (#681)', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  /** A connection whose tools are the real ones, and whose app stops before doing anything. */
+  async function call(name: string, arguments_: Record<string, unknown>) {
+    vi.stubEnv('LETTER_IRL_REQUIRE_AUTH', 'true');
+    vi.stubEnv('LETTER_IRL_OAUTH_SCOPES', 'openid email offline_access mail:read mail:draft mail:send');
+    const real = new LetterIrlServer();
+    const execute = vi.fn(async () => {
+      throw new Error('stopped before the tool');
+    });
+    const appServer = { listTools: (client: ClientProfile) => real.listTools(client), execute } as unknown as LetterIrlServer;
+    const server = await createMcpServer(appServer, {
+      userId: 'auth0|test',
+      claims: { azp: 'https://chatgpt.com/oauth/abc/client.json' },
+      token: 'token',
+      authType: 'jwt',
+      scopes: ['mail:read', 'mail:draft', 'mail:send']
+    });
+    const client = new Client({ name: 'required-choices', version: '0.0.0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    const outcome = await client.callTool({ name, arguments: arguments_ }).catch(error => error);
+    expect(execute).not.toHaveBeenCalled();
+    return JSON.stringify(outcome);
+  }
+
+  it('set_stationery without stationery', async () => {
+    vi.stubEnv('LETTER_IRL_STATIONERY_ENABLED', 'true');
+    vi.stubEnv('LETTER_IRL_PRINT_RENDERER', 'pdf');
+    expect(await call('set_stationery', { draftId: '0f1e2d3c-4b5a-4978-8796-a5b4c3d2e1f0' })).toContain(
+      'Required: one of classic, monogram'
+    );
+  });
+
+  it('create_pack_checkout without pack', async () => {
+    expect(await call('create_pack_checkout', {})).toContain('Required: one of starter, regular, power');
   });
 });
