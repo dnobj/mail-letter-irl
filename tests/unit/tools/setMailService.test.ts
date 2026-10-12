@@ -27,7 +27,8 @@ vi.mock('../../../src/services/commerceService.js', async importOriginal => ({
 import { getDraftForMailService, setDraftMailService } from '../../../src/services/draftService.js';
 import { getSendEligibility } from '../../../src/services/commerceService.js';
 import { getGiftBalance } from '../../../src/services/giftLetterService.js';
-import { MailServiceRefusedError, SET_MAIL_SERVICE_TOOL, setMailServiceTool } from '../../../src/tools/setMailService.js';
+import { SET_MAIL_SERVICE_TOOL, setMailServiceTool } from '../../../src/tools/setMailService.js';
+import { DraftRefusedError } from '../../../src/tools/draftEdit.js';
 import { CERTIFIED_PAID_PER_SEND_REASON } from '../../../src/tools/letterHelpers.js';
 import { setMailServiceInputZ, setMailServiceOutputZ } from '../../../src/zodSchemas.js';
 import type { ToolContext } from '../../../src/contracts/types.js';
@@ -247,7 +248,7 @@ describe('the draft service refusing a change (#625)', () => {
     vi.mocked(setDraftMailService).mockResolvedValue(reason);
     const ctx = context();
     const error = await set({ draftId: DRAFT_ID, mailService: 'certified' }, ctx).catch(caught => caught);
-    expect(error).toBeInstanceOf(MailServiceRefusedError);
+    expect(error).toBeInstanceOf(DraftRefusedError);
     expect(error).toMatchObject({ code, message, diagnosticClass: code });
     // The draft is read once, before the change; its price is read again only once the change is made. Its id is not repeated.
     expect(getDraftForMailService).toHaveBeenCalledTimes(1);

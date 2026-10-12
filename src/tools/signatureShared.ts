@@ -14,17 +14,8 @@ export type SignatureRefusalCode =
   | 'NOT_A_SIGNATURE'
   | 'SIGNATURE_TOO_SMALL'
   | 'CONFIRM_REQUIRED'
-  | 'SIGNATURE_NOT_SAVED'
-  // set_letter_signature's (#608 part 4), as set_stationery's are.
-  | 'SIGNATURE_CHOICE_MISSING'
-  | 'SIGNATURE_NO_ROOM'
-  | 'DRAFT_NOT_FOUND'
-  | 'DRAFT_ALREADY_SENT'
-  | 'DRAFT_EXPIRED'
-  | 'DRAFT_CHECKOUT_PENDING'
-  | 'DRAFT_NOT_A_LETTER'
-  | 'DRAFT_NOT_DRAWN'
-  | 'DRAFT_CHANGED';
+  | 'SIGNATURE_NOT_SAVED';
+// set_letter_signature refuses with DraftRefusedError, as the other draft editors do (#690).
 
 /**
  * Refusals the model can act on. The code doubles as the log's class, and no

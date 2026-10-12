@@ -14,7 +14,7 @@ import {
   type PostcardFront,
   type RenderImage
 } from '../render/index.js';
-import { getDraftForPostcardStyle, setDraftPostcardStyle, type DraftRedrawRefusal } from '../services/draftService.js';
+import { getDraftForPostcardStyle, setDraftPostcardStyle } from '../services/draftService.js';
 import { ImageProcessingError, reprocessPostcardImage } from '../services/imageService.js';
 import {
   renderedPageImage,
@@ -26,7 +26,7 @@ import {
 import { letterPayment, validatePrintableCharacters, withDisplayImage } from './letterHelpers.js';
 import { fitPostcardFront, frontPrintedText, previewPostcardFront, type PostcardLayoutChoice } from './postcardFrontInput.js';
 import { RENDERED_POSTCARD_CHARACTER_CAPS } from './quoteAndPreviewPostcard.js';
-import { isDraftIdShape } from './requestSend.js';
+import { draftRefusals, draftRefuser, editableDraft, type DraftRefusal } from './draftEdit.js';
 
 /**
  * A postcard preview's size and front, changed without previewing it again
@@ -67,62 +67,22 @@ export interface SetPostcardStyleOutput {
   message: string;
 }
 
-/**
- * Refusals the model can act on. Like set_stationery's, none repeats the
- * draft id, and the code doubles as the log's class.
- */
-export class PostcardStyleRefusedError extends Error {
-  readonly diagnosticClass: string;
+/** The draft's state, refused in a postcard restyle's words (#690). 'changed': another change redrew it while this one was drawing. */
+export const POSTCARD_STYLE_REFUSALS = draftRefusals({
+  mail: 'postcard',
+  what: 'its size and layout',
+  previewTakes: 'the postcard preview takes a size and a layout itself'
+});
 
-  constructor(
-    readonly code:
-      | 'POSTCARD_STYLES_DISABLED'
-      | 'STYLE_MISSING'
-      | 'SIZE_NOT_OFFERED'
-      | 'DRAFT_NOT_FOUND'
-      | 'DRAFT_ALREADY_SENT'
-      | 'DRAFT_EXPIRED'
-      | 'DRAFT_CHECKOUT_PENDING'
-      | 'DRAFT_NOT_A_POSTCARD'
-      | 'DRAFT_NOT_DRAWN'
-      | 'DRAFT_CHANGED'
-      | 'GIFT_POSTCARD_SIZE'
-      | 'COLLAGE_SIZE'
-      | 'MESSAGE_TOO_LONG'
-      | 'PICTURE_UNAVAILABLE',
-    message: string
-  ) {
-    super(message);
-    this.name = 'PostcardStyleRefusedError';
-    this.diagnosticClass = code;
-  }
-}
-
-const REFUSALS: Record<DraftRedrawRefusal, [PostcardStyleRefusedError['code'], string]> = {
-  not_found: ['DRAFT_NOT_FOUND', "That preview wasn't found. Make a new preview, then try again."],
-  sent: ['DRAFT_ALREADY_SENT', "This postcard has already been sent, so its size and layout can't change. list_orders shows it."],
-  expired: ['DRAFT_EXPIRED', 'This preview has expired. Make a new preview: the postcard preview takes a size and a layout itself.'],
-  checkout_pending: [
-    'DRAFT_CHECKOUT_PENDING',
-    "This preview is tied to a Pay & Send payment, so its size and layout can't change now."
-  ],
-  // Another change redrew it while this one was drawing.
-  changed: ['DRAFT_CHANGED', 'The postcard changed while it was being drawn again. Try the change again.']
-};
-
-const NOT_DRAWN =
-  'This preview was not drawn in a way that can change its size or layout. Make a new preview, with the size and layout you want.';
+const NOT_DRAWN: DraftRefusal = [
+  'DRAFT_NOT_DRAWN',
+  'This preview was not drawn in a way that can change its size or layout. Make a new preview, with the size and layout you want.'
+];
 
 /** Each size as a sentence names it, the short side first. */
 const SIZE_NAMES: Readonly<Record<PostcardSize, string>> = { '6x9': 'a 6x9', '6x4': 'a 4x6', '6x11': 'an 11x6' };
 
-function refused(code: PostcardStyleRefusedError['code'], message: string, context: ToolContext): PostcardStyleRefusedError {
-  context.logger.warn(
-    { correlationId: context.correlationId, event: 'draft.postcard_style_refused', reason: code },
-    'A postcard style change was refused'
-  );
-  return new PostcardStyleRefusedError(code, message);
-}
+const refused = draftRefuser('draft.postcard_style_refused', 'A postcard style change was refused');
 
 /** Whether an argument was given: present, and not empty or blank, which models send for one left unset. */
 function given(value: unknown): boolean {
@@ -161,26 +121,30 @@ async function handler(input: SetPostcardStyleInput, context: ToolContext): Prom
   if (!askedSize && !askedFront) {
     throw refused('STYLE_MISSING', 'Name what to change: the size, or the layout with its caption or place.', context);
   }
-  const draftId = typeof input.draftId === 'string' ? input.draftId.trim() : '';
   const userId = context.user.userId;
-  const draft = isDraftIdShape(draftId) ? await getDraftForPostcardStyle(draftId, userId) : null;
-  if (!draft) throw refused(...REFUSALS.not_found, context);
-  if (draft.mail_type !== 'postcard') {
-    throw refused('DRAFT_NOT_A_POSTCARD', 'Sizes and layouts are for postcards. A letter changes its look with set_stationery.', context);
-  }
-  // Read before the lock, to say why at once; setDraftPostcardStyle checks
-  // again under it. A draft an erasure emptied is refused as the lock
-  // refuses it, before its empty content is drawn.
-  if (draft.status === 'consumed') throw refused(...REFUSALS.sent, context);
-  if (draft.status !== 'pending' || draft.redacted_at || !(new Date(draft.expires_at).getTime() > context.now().getTime())) {
-    throw refused(...REFUSALS.expired, context);
-  }
-  // Only a postcard our renderer drew, whose front reads as the print reads it.
+  // Read before the lock, to say why at once; setDraftPostcardStyle checks again under it.
+  const { draftId, draft } = await editableDraft(
+    {
+      draftId: input.draftId,
+      read: getDraftForPostcardStyle,
+      mailType: 'postcard',
+      wrongKind: ['DRAFT_NOT_A_POSTCARD', 'Sizes and layouts are for postcards. A letter changes its look with set_stationery.'],
+      // Only a postcard our renderer drew, whose front reads as the print reads it.
+      drawn: found =>
+        Boolean(found.renderer_version) &&
+        Boolean(found.front_image_data) &&
+        rendererDocumentPages(found.preview_html).length === 2 &&
+        (found.postcard_front == null || Boolean(postcardFrontOf(found.postcard_front))),
+      notDrawn: NOT_DRAWN,
+      refusals: POSTCARD_STYLE_REFUSALS,
+      refuse: refused
+    },
+    context
+  );
   const frontBefore = draft.postcard_front == null ? undefined : postcardFrontOf(draft.postcard_front) ?? undefined;
   const storedPages = rendererDocumentPages(draft.preview_html);
-  if (!draft.renderer_version || !draft.front_image_data || storedPages.length !== 2 || (draft.postcard_front != null && !frontBefore)) {
-    throw refused('DRAFT_NOT_DRAWN', NOT_DRAWN, context);
-  }
+  // Drawn, so its picture is stored.
+  const storedPicture = draft.front_image_data as string;
 
   const sizeBefore: PostcardSize = draft.postcard_size ?? '6x9';
   let size = sizeBefore;
@@ -262,12 +226,12 @@ async function handler(input: SetPostcardStyleInput, context: ToolContext): Prom
 
   // The picture: cropped again at a new size; otherwise the one it prints,
   // shown by the small copy on its front page.
-  let printImage = draft.front_image_data;
+  let printImage = storedPicture;
   let displayImage = renderedPageImage(storedPages[0]);
   let croppedAgain: string | undefined;
   if (size !== sizeBefore) {
     try {
-      const picture = await reprocessPostcardImage({ url: draft.front_image_url, stored: draft.front_image_data }, size, { actorId: userId });
+      const picture = await reprocessPostcardImage({ url: draft.front_image_url, stored: storedPicture }, size, { actorId: userId });
       printImage = croppedAgain = picture.base64DataUri;
       displayImage = picture.previewDataUri;
       context.logger.info(
@@ -279,7 +243,7 @@ async function handler(input: SetPostcardStyleInput, context: ToolContext): Prom
       throw refused('PICTURE_UNAVAILABLE', `${error.userMessage} The postcard stays as it is.`, context);
     }
   } else if (!displayImage) {
-    throw refused('DRAFT_NOT_DRAWN', NOT_DRAWN, context);
+    throw refused(...NOT_DRAWN, context);
   }
 
   // The picture as it prints; a stored one that cannot be read is a draft
@@ -288,7 +252,7 @@ async function handler(input: SetPostcardStyleInput, context: ToolContext): Prom
   try {
     image = readImageDataUri(printImage);
   } catch {
-    throw refused('DRAFT_NOT_DRAWN', NOT_DRAWN, context);
+    throw refused(...NOT_DRAWN, context);
   }
   // The front drawn again; the back too at a new size, and otherwise as it
   // was, a gift card's strip with it.
@@ -307,7 +271,7 @@ async function handler(input: SetPostcardStyleInput, context: ToolContext): Prom
     { size, front: front ?? null, previewHtml, frontImageData: croppedAgain, drawnFrom: { previewHtml: draft.preview_html } },
     context.now()
   );
-  if (refusal) throw refused(...REFUSALS[refusal], context);
+  if (refusal) throw refused(...POSTCARD_STYLE_REFUSALS[refusal], context);
 
   context.logger.info(
     {

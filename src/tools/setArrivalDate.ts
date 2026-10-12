@@ -1,9 +1,10 @@
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
 import { isArriveByEnabled } from '../config/arriveBy.js';
 import { DELIVERY_ESTIMATE } from '../content/delivery.js';
-import { setDraftSchedule, type DraftScheduleRefusal } from '../services/draftService.js';
+import { setDraftSchedule } from '../services/draftService.js';
 import { previewSchedule, scheduleSentence, type PreviewScheduleOutput } from './arriveByInput.js';
 import { isDraftIdShape } from './requestSend.js';
+import { DraftRefusedError, draftRefusals } from './draftEdit.js';
 
 /**
  * A preview's arrival date, set, moved or cleared without previewing again
@@ -30,44 +31,19 @@ export interface SetArrivalDateOutput {
   message: string;
 }
 
-/**
- * Refusals the model can act on. Like request_send's, none repeats the draft
- * id, and the code doubles as the log's class.
- */
-export class ArrivalDateRefusedError extends Error {
-  readonly diagnosticClass: string;
-
-  constructor(
-    readonly code:
-      | 'ARRIVE_BY_DISABLED'
-      | 'DRAFT_NOT_FOUND'
-      | 'DRAFT_ALREADY_SENT'
-      | 'DRAFT_EXPIRED'
-      | 'DRAFT_CHECKOUT_PENDING',
-    message: string
-  ) {
-    super(message);
-    this.name = 'ArrivalDateRefusedError';
-    this.diagnosticClass = code;
-  }
-}
-
-const REFUSALS: Record<DraftScheduleRefusal, [ArrivalDateRefusedError['code'], string]> = {
-  not_found: ['DRAFT_NOT_FOUND', "That preview wasn't found. Make a new preview, then try again."],
-  sent: ['DRAFT_ALREADY_SENT', "This mail has already been sent, so its arrival date can't change. list_orders shows it."],
-  expired: ['DRAFT_EXPIRED', 'This preview has expired. Make a new preview: the preview tools take arriveBy themselves.'],
-  checkout_pending: [
-    'DRAFT_CHECKOUT_PENDING',
-    "This preview is tied to a Pay & Send payment, so its arrival date can't change now."
-  ]
-};
+/** The draft's state, refused in an arrival date's words (#690): a letter or a postcard, so "this mail". */
+export const ARRIVAL_DATE_REFUSALS = draftRefusals({
+  mail: 'mail',
+  what: 'its arrival date',
+  previewTakes: 'the preview tools take arriveBy themselves'
+});
 
 async function handler(
   input: SetArrivalDateInput,
   context: ToolContext
 ): Promise<SetArrivalDateOutput> {
   if (!isArriveByEnabled()) {
-    throw new ArrivalDateRefusedError(
+    throw new DraftRefusedError(
       'ARRIVE_BY_DISABLED',
       'Arrival dates are not available yet. The preview mails as soon as it is sent.'
     );
@@ -77,16 +53,16 @@ async function handler(
   // refused naming the dates on offer, before the draft is read. None, an
   // empty string included, clears it.
   const schedule = previewSchedule(input.arriveBy, context);
-  const refused = isDraftIdShape(draftId)
+  const refusal = isDraftIdShape(draftId)
     ? await setDraftSchedule(draftId, context.user.userId, schedule?.draft ?? null, context.now())
     : 'not_found';
-  if (refused) {
+  if (refusal) {
+    // Logged by the draft's state, as it always was here, where the other editors log the code.
     context.logger.warn(
-      { correlationId: context.correlationId, event: 'draft.arrival_date_refused', reason: refused },
+      { correlationId: context.correlationId, event: 'draft.arrival_date_refused', reason: refusal },
       'An arrival date change was refused'
     );
-    const [code, message] = REFUSALS[refused];
-    throw new ArrivalDateRefusedError(code, message);
+    throw new DraftRefusedError(...ARRIVAL_DATE_REFUSALS[refusal]);
   }
 
   if (!schedule) {

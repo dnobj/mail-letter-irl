@@ -111,6 +111,13 @@ has no `signature`. An app that cached it and passes `true` anyway is refused (`
 than printed unsigned.
 Postcards take no signature.
 
+The draft editors share one way to refuse, and to read the draft they change (`src/tools/draftEdit.ts`, #690). The editors are `set_arrival_date`, `set_mail_service`, `set_stationery`, `set_letter_words`, `set_letter_signature` and `set_postcard_style`. They share:
+- one error, `DraftRefusedError`, whose code is the log's class;
+- the draft's state refusals, built from what each edit changes;
+- for the four that draw the page again (`set_stationery`, `set_letter_words`, `set_letter_signature` and `set_postcard_style`), one order of checks before the lock: not found (someone else's draft included), the wrong kind of mail, sent, expired (a draft an erasure emptied included), and not drawn by our renderer.
+
+`withChangeableDraft` in `src/services/draftService.ts` writes every change under the draft's lock, which checks its state again.
+
 - `quote_and_preview_letter`: Create a free draft preview for a text-only physical letter. Requires a real U.S. recipient address, `bodyText`, and `signOff`; sender is optional when a saved return address exists. Creates a draft, so it is not read-only. Uses `ui://widgets/LetterPreviewCard.html@v<N>`.
 - `quote_and_preview_letter_with_header_image`: Create a free draft preview for a letter with a header image at the top. Accepts an attached image or `imageUrl`. Creates a draft and uses `ui://widgets/LetterHeaderImagePreviewCard.html@v<N>`, which serves the letter card under its own name so the card knows which preview to repeat (#411).
 - `quote_and_preview_letter_with_image`: Create a free draft preview for a letter with an enclosed image after the signature. Accepts an attached image or `imageUrl`. Creates a draft and uses `ui://widgets/LetterInlineImagePreviewCard.html@v<N>`, the letter card under its own name for the same reason.

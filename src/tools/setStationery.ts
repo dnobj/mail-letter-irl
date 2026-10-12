@@ -1,4 +1,4 @@
-import type { Address, LetterLayoutType, McpToolDefinition, ToolContext } from '../contracts/types.js';
+import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
 import { isCustomStationeryOffered } from '../config/customStationery.js';
 import { isStationeryOffered } from '../config/stationery.js';
 import { letterPageLimit } from '../config/roomToWrite.js';
@@ -7,13 +7,9 @@ import type { SendEligibility } from '../services/commerceService.js';
 import { CUSTOM_THEME, type PageFit } from '../render/index.js';
 import { getDesign } from '../services/stationeryDesignService.js';
 import type { PreviewStationery } from './stationeryInput.js';
-import {
-  getDraftForStationery,
-  setDraftStationery,
-  type DraftRedrawRefusal
-} from '../services/draftService.js';
+import { getDraftForStationery, setDraftStationery } from '../services/draftService.js';
 import { editorPageFit, layoutLetterForPreview, letterOption, letterPayment, pageChangeSentence, redrawLetterPreview, validatePrintableLetter, type LetterTravel } from './letterHelpers.js';
-import { isDraftIdShape } from './requestSend.js';
+import { draftLetter, draftRefusals, draftRefuser, editableDraft, type DraftRefusal } from './draftEdit.js';
 import { previewStationery, THEME_LIST } from './stationeryInput.js';
 
 /**
@@ -57,54 +53,20 @@ export interface SetStationeryOutput extends LetterTravel {
   message: string;
 }
 
-/**
- * Refusals the model can act on. Like set_arrival_date's, none repeats the
- * draft id, and the code doubles as the log's class.
- */
-export class StationeryRefusedError extends Error {
-  readonly diagnosticClass: string;
+/** The draft's state, refused in a restyle's words (#690). 'changed': its words changed while the page was drawn again (#586). */
+export const STATIONERY_REFUSALS = draftRefusals({
+  mail: 'letter',
+  what: 'its stationery',
+  previewTakes: 'the letter previews take stationery themselves',
+  retry: 'stationery'
+});
 
-  constructor(
-    readonly code:
-      | 'STATIONERY_DISABLED'
-      | 'STATIONERY_MISSING'
-      | 'DRAFT_NOT_FOUND'
-      | 'DRAFT_ALREADY_SENT'
-      | 'DRAFT_EXPIRED'
-      | 'DRAFT_CHECKOUT_PENDING'
-      | 'DRAFT_NOT_A_LETTER'
-      | 'DRAFT_NOT_DRAWN'
-      | 'DRAFT_CHANGED',
-    message: string
-  ) {
-    super(message);
-    this.name = 'StationeryRefusedError';
-    this.diagnosticClass = code;
-  }
-}
+const NOT_DRAWN: DraftRefusal = [
+  'DRAFT_NOT_DRAWN',
+  "This preview was not drawn in a way that can take stationery. Make a new preview, with stationery if you like."
+];
 
-const REFUSALS: Record<DraftRedrawRefusal, [StationeryRefusedError['code'], string]> = {
-  not_found: ['DRAFT_NOT_FOUND', "That preview wasn't found. Make a new preview, then try again."],
-  sent: ['DRAFT_ALREADY_SENT', "This letter has already been sent, so its stationery can't change. list_orders shows it."],
-  expired: ['DRAFT_EXPIRED', 'This preview has expired. Make a new preview: the letter previews take stationery themselves.'],
-  checkout_pending: [
-    'DRAFT_CHECKOUT_PENDING',
-    "This preview is tied to a Pay & Send payment, so its stationery can't change now."
-  ],
-  // Its words changed while the page was drawn again (#586).
-  changed: ['DRAFT_CHANGED', 'The letter changed while its page was being drawn again. Try the stationery again.']
-};
-
-const NOT_DRAWN =
-  "This preview was not drawn in a way that can take stationery. Make a new preview, with stationery if you like.";
-
-function refused(code: StationeryRefusedError['code'], message: string, context: ToolContext): StationeryRefusedError {
-  context.logger.warn(
-    { correlationId: context.correlationId, event: 'draft.stationery_refused', reason: code },
-    'A stationery change was refused'
-  );
-  return new StationeryRefusedError(code, message);
-}
+const refused = draftRefuser('draft.stationery_refused', 'A stationery change was refused');
 
 /**
  * What the tool says it did, for the model and the person, and what changed
@@ -137,30 +99,23 @@ async function handler(input: SetStationeryInput, context: ToolContext): Promise
       context
     );
   }
-  const draftId = typeof input.draftId === 'string' ? input.draftId.trim() : '';
   const userId = context.user.userId;
-  const draft = isDraftIdShape(draftId) ? await getDraftForStationery(draftId, userId) : null;
-  if (!draft) throw refused(...REFUSALS.not_found, context);
-  if (draft.mail_type !== 'letter') {
-    throw refused('DRAFT_NOT_A_LETTER', 'Stationery is for letters. A postcard keeps its own design.', context);
-  }
-  // Read before the lock, to say why at once; setDraftStationery checks again
-  // under it. A draft an erasure emptied is refused as the lock refuses it,
-  // before its empty content is laid out (#573 review round 3).
-  if (draft.status === 'consumed') throw refused(...REFUSALS.sent, context);
-  if (draft.status !== 'pending' || draft.redacted_at || !(new Date(draft.expires_at).getTime() > context.now().getTime())) {
-    throw refused(...REFUSALS.expired, context);
-  }
-  // Only a letter our renderer drew can be drawn again in a theme.
-  if (!draft.renderer_version) throw refused('DRAFT_NOT_DRAWN', NOT_DRAWN, context);
-  // The pages its preview drew (#586): its own, then any gift card's.
-  const pagesBefore = Number(draft.pages ?? 1);
-
-  const sender = draft.sender as unknown as Address;
-  const recipient = draft.recipient as unknown as Address;
-  const bodyText = draft.body_text;
-  const signOff = draft.sign_off ?? '';
-  const layoutType = (draft.layout_type ?? 'text_only') as LetterLayoutType;
+  // Read before the lock, to say why at once; setDraftStationery checks again under it.
+  const { draftId, draft } = await editableDraft(
+    {
+      draftId: input.draftId,
+      read: getDraftForStationery,
+      mailType: 'letter',
+      wrongKind: ['DRAFT_NOT_A_LETTER', 'Stationery is for letters. A postcard keeps its own design.'],
+      // Only a letter our renderer drew can be drawn again in a theme.
+      drawn: found => Boolean(found.renderer_version),
+      notDrawn: NOT_DRAWN,
+      refusals: STATIONERY_REFUSALS,
+      refuse: refused
+    },
+    context
+  );
+  const { sender, recipient, bodyText, signOff, layoutType, imageData, pagesBefore } = draftLetter(draft);
 
   // The theme first, then what it prints, then the page, as a preview checks them. A design is
   // read as a preview reads it: only the account's own (#649).
@@ -175,12 +130,9 @@ async function handler(input: SetStationeryInput, context: ToolContext): Promise
     askedDesign
   )!;
   validatePrintableLetter({ sender, recipient, bodyText, signOff, senderIsSaved: false }, context, 'pdf', undefined, stationery);
-  const imageData = layoutType === 'header_image'
-    ? draft.header_image_data
-    : layoutType === 'inline_image' ? draft.inline_image_data : null;
   const layout = layoutLetterForPreview(
     // With the draft's own signature (#608), which a restyle keeps.
-    { bodyText, signOff, layoutType, imageData: imageData ?? undefined, signatureImage: draft.signature_image || undefined, stationery },
+    { bodyText, signOff, layoutType, imageData, signatureImage: draft.signature_image || undefined, stationery },
     context,
     'pdf',
     // On as many pages as a preview may take (#586), and a gift letter on one:
@@ -196,7 +148,7 @@ async function handler(input: SetStationeryInput, context: ToolContext): Promise
     { sender, recipient, bodyText, signOff },
     stationery
   );
-  if (previewHtml === null) throw refused('DRAFT_NOT_DRAWN', NOT_DRAWN, context);
+  if (previewHtml === null) throw refused(...NOT_DRAWN, context);
   const pages = layout.pages.length;
 
   // With the words it was drawn from, refused if they changed meanwhile (#586).
@@ -207,7 +159,7 @@ async function handler(input: SetStationeryInput, context: ToolContext): Promise
     { stationery, previewHtml, pages, drawnFrom: { bodyText: draft.body_text, signOff: draft.sign_off, signature: draft.signature_image } },
     context.now()
   );
-  if (refusal) throw refused(...REFUSALS[refusal], context);
+  if (refusal) throw refused(...STATIONERY_REFUSALS[refusal], context);
 
   context.logger.info(
     { correlationId: context.correlationId, event: 'draft.stationery_changed', theme: stationery.theme, pages, pagesBefore },
