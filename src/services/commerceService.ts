@@ -1215,7 +1215,8 @@ export async function createJitCheckout(
     `SELECT ${DRAFT_OPTION_COLUMNS} FROM letter_drafts WHERE draft_id = $1 AND user_id = $2`,
     [params.draftId, params.userId]
   );
-  // No row (not the caller's, or gone): a one-page letter, as an empty row always read; prepareJitOrder refuses it.
+  // No row (not the caller's, or gone): a one-page letter, as an empty row always read; prepareJitOrder
+  // refuses it, unless a daily cap refuses first.
   const peeked = draftPeek.rows.at(0);
   const peekedOption: MailOption = peeked ? draftMailOption(peeked) : { mailType: 'letter' };
   // The option's own code, sold or not, as the quote kicks: for an option

@@ -7,8 +7,11 @@
  * a letter's printed pages (migration 047, #586) and how a letter travels (052,
  * #625). A reader that loads some of them but not all prices a long letter as one
  * page, or a certified letter as a standard one. So the row draftMailOption takes
- * names all four (DraftOptionRow), and a query that reads the option selects them
- * together (DRAFT_OPTION_COLUMNS). The database holds any writer to the same rules
+ * names all four (DraftOptionRow): a reader that declares part of them does not
+ * compile. The compiler takes a query's declared row type on trust, so a query that
+ * reads the option by name selects DRAFT_OPTION_COLUMNS, and the checkout and the
+ * send lock the whole row (SELECT *); tests/unit/services/draftOptionColumns.test.ts
+ * searches the source for the rest. The database holds any writer to the same rules
  * (migrations 047, 052 and 053's checks); storedPages and storedMailService refuse
  * a draft that would break them before anything is written.
  */

@@ -1586,6 +1586,25 @@ describe('commerceService', () => {
       expect(sql.some(statement => statement.includes('INSERT INTO orders'))).toBe(false);
     });
 
+    it("peeks a draft that is not the caller's, or gone, as a one-page letter, then refuses it under the lock (#691)", async () => {
+      mocks.getJitProduct.mockImplementation((() => ({
+        productCode: 'jit-letter', priceId: 'price-1p', amountCents: 499,
+        currency: 'usd', name: 'Pay & Send One Physical Letter', description: 'x', mailType: 'letter'
+      })) as never);
+      mocks.query
+        .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValue({ rows: [] });
+
+      await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).rejects.toMatchObject({ code: 'DRAFT_NOT_FOUND' });
+
+      // No row reads as the plainest mail there is, never another kind: its price warms, and nothing is ordered.
+      expect(mocks.getJitProduct).toHaveBeenCalledWith({ mailType: 'letter' });
+      expect(mocks.getJitProduct).not.toHaveBeenCalledWith(expect.objectContaining({ mailType: 'postcard' }));
+      const sql = mocks.query.mock.calls.map(call => String(call[0]));
+      expect(sql.some(statement => statement.includes('INSERT INTO orders'))).toBe(false);
+    });
+
     it("prices a certified letter's checkout by its service from the peek on: its price warmed, its amount capped (#625)", async () => {
       // A day's limit between the standard price and the certified price.
       vi.stubEnv('LETTER_IRL_BETA_ACCOUNT_DAILY_CHARGE_CENTS', '700');

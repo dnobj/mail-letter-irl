@@ -2,8 +2,9 @@
  * Who pays (#691): one module reads a draft's mail option, and holds the rule for what a
  * pack or a gift letter pays for. A reader that loads part of the option prices a long
  * letter as one page, or a certified letter as a standard one; the row draftMailOption takes
- * names every column, so such a reader does not compile. These replace the test that
- * searched the source for queries (draftOptionColumns.test.ts, #625).
+ * names every column, so a reader that declares part of them does not compile. The SQL is
+ * never checked against the declared type: draftOptionColumns.test.ts still searches the
+ * source for a column list that leaves the service out, and pins the two locking reads.
  *
  * What the option is for each row: mailOptionPrices.test.ts and commerceService.test.ts;
  * letterOption: certifiedReaders.test.ts; the readers' own queries: draftService.test.ts
