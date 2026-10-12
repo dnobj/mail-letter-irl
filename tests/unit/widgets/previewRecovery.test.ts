@@ -3215,3 +3215,61 @@ describe('PostcardPreviewCard waiting for a collage (#616)', () => {
     expect(harness.visible('upload-image-button')).toBe(false);
   });
 });
+
+describe('PostcardPreviewCard in ChatGPT, refused for a change since (#695)', () => {
+  /** ChatGPT web hands a card's refused call back as a rejection wrapping its text (#434). */
+  const wrapped = (text: string) =>
+    new Error(
+      'Error code: INVALID_ARGUMENT; Error: RuntimeException: Error calling MCP tool: ' +
+        `[TextContent(type='text', text='${text}', annotations=None, meta=None)]`
+    );
+  const CHANGED_TEXT =
+    'This postcard changed after it was shown, so nothing was sent. Show the person the postcard as it is now (its preview card, or a new preview), and send it once they have seen it.';
+
+  it('asks what became of its draft, refused as ChatGPT refuses, though it does not ask on opening there', async () => {
+    const harness = mount(POSTCARD, {
+      toolOutput: POSTCARD.output('draft_host_0001', { contentVersion: 'v_preview' }),
+      draftStatus: args => ({ draftId: args.draftId, status: 'ready', contentVersion: 'v_now' }),
+      sendResponse: () => {
+        throw wrapped(CHANGED_TEXT);
+      }
+    });
+    await flush();
+    // ChatGPT keeps the card's own state, so the postcard does not ask on opening there.
+    expect(harness.callsTo('get_draft_status')).toEqual([]);
+
+    await harness.click('send-button');
+    expect(harness.callsTo('get_draft_status').map(call => call.args)).toEqual([{ draftId: 'draft_host_0001' }]);
+    // This answer gives no page to draw: the card says so, and keeps the version it shows.
+    expect(harness.text('error-message')).toBe(
+      "This postcard changed after it was shown here, so nothing was sent. This card can't show it as it is now: ask in the chat for a new preview, and send from that."
+    );
+    expect(harness.text('error-message')).not.toContain('Failed to send');
+
+    // Refused again for that version: it asks no more.
+    await harness.click('send-button');
+    expect(harness.callsTo('send_postcard').map(call => call.args.contentVersion)).toEqual(['v_preview', 'v_preview']);
+    expect(harness.callsTo('get_draft_status')).toHaveLength(1);
+  });
+
+  it.each([
+    ['send', 'send-button', 'send_postcard'],
+    ['pay', 'pay-send-button', 'create_mail_checkout']
+  ] as const)('knows the refusal of a %s however ChatGPT wraps it', async (_action, button, tool) => {
+    const harness = mount(POSTCARD, {
+      toolOutput: POSTCARD.output('draft_host_0001', { contentVersion: 'v_preview', ...(button === 'pay-send-button' ? eligibility(false) : {}) }),
+      draftStatus: args => ({ draftId: args.draftId, status: 'ready', contentVersion: 'v_now' }),
+      sendResponse: () => {
+        throw wrapped(CHANGED_TEXT);
+      },
+      checkoutResponse: () => {
+        throw wrapped('This mail changed after it was shown, so nothing was charged.');
+      }
+    });
+    await flush();
+    await harness.click(button);
+    expect(harness.callsTo(tool)).toHaveLength(1);
+    expect(harness.callsTo('get_draft_status')).toHaveLength(1);
+    expect(harness.text('error-message')).toContain('changed after it was shown here');
+  });
+});

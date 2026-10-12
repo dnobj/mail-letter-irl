@@ -174,10 +174,10 @@ afterEach(() => {
 describe('set_postcard_style at the same size', () => {
   it('answers with the content version the change wrote, and none when the writer told none (#695)', async () => {
     vi.mocked(setDraftPostcardStyle).mockImplementation(async (...args: unknown[]) => {
-      (args.at(-1) as (version: string) => void)('0123456789abcdef');
+      (args.at(-1) as (version: string, before: string) => void)('0123456789abcdef', 'fedcba9876543210');
       return null;
     });
-    expect(await run({ layout: 'border', caption: 'Cape Cod' })).toMatchObject({ contentVersion: '0123456789abcdef' });
+    expect(await run({ layout: 'border', caption: 'Cape Cod' })).toMatchObject({ contentVersion: '0123456789abcdef', contentVersionBefore: 'fedcba9876543210' });
     vi.mocked(setDraftPostcardStyle).mockResolvedValue(null);
     expect(await run({ layout: 'border', caption: 'Cape Cod' })).not.toHaveProperty('contentVersion');
   });

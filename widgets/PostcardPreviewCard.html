@@ -428,6 +428,38 @@
 
       let dataLoaded = false;
       let currentDraftId = null;
+      // The content version (#695) of the mail as this card shows it: the preview's, then each change the card drew,
+      // then a status answer it took. Send and Pay & Send name it, so the server refuses mail changed since (by the
+      // chat, or a change whose page did not come back here), and the card draws it again instead of sending it.
+      let shownVersion = { draftId: null, version: null };
+      function showVersion(draftId, version) {
+        if (typeof draftId === "string" && draftId && typeof version === "string" && version) {
+          shownVersion = { draftId, version };
+        }
+      }
+      // The version to send for this draft, or none (an older server's preview names none, and is sent as before).
+      function versionFor(draftId) {
+        return shownVersion.draftId === draftId ? shownVersion.version : null;
+      }
+      // An edit's version covers the whole draft (#695 review round 1): it is taken only when the edit was made to the
+      // version this card shows, so the edit's own change is the only one since. Made to another (the chat changed the
+      // draft meanwhile), the card asks for the draft as it is now, and draws it.
+      function takeEditVersion(draftId, version, before) {
+        const shown = versionFor(draftId);
+        if (!shown) return;
+        if (typeof before === "string" && before === shown) {
+          showVersion(draftId, version);
+          return;
+        }
+        askDraftState(draftId, true);
+      }
+
+      // A send or checkout refused for a change since, while the card asks for the draft as it is now:
+      // { draftId, action }. lastRefused: the version last refused, so a version refused twice is not asked about again.
+      let changed = null;
+      let lastRefused = null;
+      // A changed-notice that says the card could not show the mail: cleared once a later answer draws it whole.
+      let changedNotice = false;
       let currentEligibility = null;
       let sendInProgress = false;
       let checkoutInProgress = false;
@@ -467,6 +499,7 @@
       let arrivalChange = null;
       const picker = arrives.createPicker({
         host,
+        onVersion: (draftId, version, before) => takeEditVersion(draftId, version, before),
         row: document.getElementById("arrives-row"),
         input: document.getElementById("arrives-date"),
         asap: document.getElementById("arrives-asap"),
@@ -854,6 +887,9 @@
             }
             const page = result?._meta?.previewHtml;
             adoptMakerChange(draftId, data, page, true);
+            // Its version once its page is drawn (#695), and only when made to the version the card shows; without a page
+            // the card shows the last, and keeps its version.
+            if (typeof page === "string" && page) takeEditVersion(draftId, data.contentVersion, data.contentVersionBefore);
             if (frontChange) {
               maker.drafting = null;
               maker.editing = false;
@@ -1504,15 +1540,21 @@
       let draftState = null;
       const draftStateAsked = new Set();
 
-      function askDraftState(draftId) {
-        if (typeof host.setWidgetState === "function") return;
+      // force (#695): asked again after a send refused for a change since, in every host, the answer is taken
+      // whatever this card has set, and its version with it.
+      function askDraftState(draftId, force) {
+        if (!force && typeof host.setWidgetState === "function") return;
         if (typeof host.callTool !== "function") return;
-        if (typeof draftId !== "string" || !draftId || draftStateAsked.has(draftId)) return;
+        if (typeof draftId !== "string" || !draftId || (!force && draftStateAsked.has(draftId))) return;
         draftStateAsked.add(draftId);
         host.callTool("get_draft_status", { draftId }).then(
           (result) => {
             const answer = toolData(result);
-            if (answer.draftId !== draftId) return;
+            if (answer.draftId !== draftId) {
+              // An error result (a host that resolves a failed call) is an ask that failed, to try again.
+              if (force === true) changedRedrawn(draftId, result?.isError || typeof answer.draftId !== "string" ? "failed" : false);
+              return;
+            }
             // Both answers are final: a sent or expired draft never becomes
             // ready again, so a late one is still true. A send this card is
             // making or has made keeps the pill and the buttons meanwhile
@@ -1522,21 +1564,32 @@
             if (answer.status === "ready") {
               // The size and front it has now, with its page and price
               // (#594): the maker may have changed them since this preview.
-              if ((POSTCARD_SIZES.includes(answer.size) || POSTCARD_LAYOUTS.includes(answer.layout)) && mayAdoptStatus(draftId)) {
-                adoptMakerChange(draftId, answer, result?._meta?.previewHtml, false);
-              }
+              const statusPage = result?._meta?.previewHtml;
+              const frontTaken =
+                (POSTCARD_SIZES.includes(answer.size) || POSTCARD_LAYOUTS.includes(answer.layout)) && (force === true || mayAdoptStatus(draftId));
+              if (frontTaken) adoptMakerChange(draftId, answer, statusPage, false);
               // And what they mean for delivery, for the Delivery line.
-              if (
-                picker.adopt(draftId, answer.schedule) &&
-                typeof answer.deliveryEstimate === "string" &&
-                answer.deliveryEstimate
-              ) {
+              const datesTaken = picker.adopt(draftId, answer.schedule, force === true);
+              if (datesTaken && typeof answer.deliveryEstimate === "string" && answer.deliveryEstimate) {
                 arrivalChange = { draftId, schedule: picker.schedule(), deliveryEstimate: answer.deliveryEstimate };
               }
+              // Its version, once the card shows all it says (#695): its front, drawn from this answer, and its dates.
+              const drawnWhole =
+                frontTaken && typeof statusPage === "string" && statusPage !== "" && (datesTaken || !picker.follows(draftId));
+              if (drawnWhole) showVersion(draftId, answer.contentVersion);
+              if (drawnWhole && changed === null && changedNotice) {
+                changedNotice = false;
+                document.getElementById("error-message").style.display = "none";
+              }
+              if (force === true) changedRedrawn(draftId, drawnWhole);
               render();
               return;
             }
-            if (answer.status !== "sent" && answer.status !== "expired") return;
+            if (answer.status !== "sent" && answer.status !== "expired") {
+              if (force === true) changedRedrawn(draftId, false);
+              return;
+            }
+            if (force === true) changedRedrawn(draftId, null);
             draftState = {
               draftId,
               status: answer.status,
@@ -1549,7 +1602,9 @@
             render();
           },
           // Unanswered, the card shows the preview as the host gave it.
-          () => {},
+          () => {
+            if (force === true) changedRedrawn(draftId, "failed");
+          },
         );
       }
 
@@ -1634,6 +1689,65 @@
 
       // Nothing was sent or charged. Says why, and turns the button that was
       // pressed into the another-copy button.
+      // A send or a checkout refused because the mail changed after this card drew it (#695): nothing was sent or
+      // charged. The words are the server's (draftErrors, createMailCheckout).
+      const CHANGED_SINCE_SHOWN = "changed after it was shown";
+
+      // What the card says once it has asked (#695 review round 1): drawn whole, to check it and press again; not drawn
+      // (no page, or a part this card cannot show), to ask for a new preview; sent or expired meanwhile, nothing, as the
+      // card's own state says so.
+      function changedSaid(action, drawn) {
+        const nothing = `This ${MAIL_NOUN} changed after it was shown here, so nothing was ${action === "send" ? "sent" : "charged"}.`;
+        if (drawn === "asking") return `${nothing} Getting it as it is now…`;
+        if (drawn === "failed") return `${nothing} This card couldn't check it just now: try again in a moment.`;
+        return drawn
+          ? `${nothing} It is shown again as it is now: check it, then press ${action === "send" ? "Send" : "Pay & Send"} again.`
+          : `${nothing} This card can't show it as it is now: ask in the chat for a new preview, and ${action === "send" ? "send" : "pay"} from that.`;
+      }
+
+      function changedRedrawn(draftId, drawn) {
+        if (!changed || changed.draftId !== draftId) return;
+        const action = changed.action;
+        changed = null;
+        // Not an answer: the next refusal asks again.
+        if (drawn === "failed") lastRefused = null;
+        changedNotice = drawn !== true && drawn !== null;
+        const errorMessage = document.getElementById("error-message");
+        if (drawn === null) {
+          errorMessage.style.display = "none";
+        } else {
+          errorMessage.textContent = changedSaid(action, drawn);
+          errorMessage.style.display = "block";
+        }
+        // The buttons it held come back, with their own labels.
+        render();
+      }
+
+      // Says so, puts the pressed button back, and asks for the mail as it is now, to draw it whatever this card had set.
+      // A version refused twice is not asked about again: the card says to make a new preview.
+      // refused: the version the send or checkout named, which may be older than the one shown by the time it is refused.
+      function showChanged(action, draftId, refused) {
+        const errorMessage = document.getElementById("error-message");
+        const again = Boolean(refused) && refused === lastRefused;
+        lastRefused = refused || null;
+        changed = again ? null : { draftId, action };
+        changedNotice = true;
+        errorMessage.textContent = changedSaid(action, again ? false : "asking");
+        errorMessage.style.display = "block";
+        if (action === "send") {
+          const sendButton = document.getElementById("send-button");
+          sendButton.classList.remove("loading");
+          sendInProgress = false;
+        } else {
+          const payButton = document.getElementById("pay-send-button");
+          payButton.classList.remove("loading");
+          checkoutInProgress = false;
+        }
+        if (!again) askDraftState(draftId, true);
+        // Held while it asks, then drawn with their own labels (a dated or gift letter's, a price).
+        render();
+      }
+
       function showDuplicate(details, action) {
         anotherCopy = true;
         const errorMessage = document.getElementById("error-message");
@@ -2048,6 +2162,11 @@
 
         // Store draftId for send button
         currentDraftId = draftId;
+        // The preview's own version, the first time this draft is drawn (#695); later changes tell their own.
+        if (shownVersion.draftId !== draftId) {
+          shownVersion = { draftId, version: null };
+          showVersion(draftId, state.contentVersion);
+        }
         // The maker's too, before Send's hold is drawn below (#594).
         makerFollows(draftId);
         currentEligibility = sendEligibility || null;
@@ -2323,7 +2442,8 @@
         }
         // Setting a date or a style (#594): Send waits for the draft it sends.
         maker.heldShown = makerHolds();
-        const settingDate = picker.busy() || maker.heldShown;
+        // And the card asking for the draft as it is now, after a refusal for a change since (#695).
+        const settingDate = picker.busy() || maker.heldShown || changed !== null;
         const datedSend = Boolean(picker.schedule());
 
         if (!sendInProgress && !checkoutInProgress) {
@@ -2412,7 +2532,7 @@
 
       // Handle send button click
       async function handleSend() {
-        if (sendInProgress || !currentDraftId || picker.busy() || makerHolds()) return;
+        if (sendInProgress || changed !== null || !currentDraftId || picker.busy() || makerHolds()) return;
         draftActedOn = true;
 
         const sendButton = document.getElementById("send-button");
@@ -2437,10 +2557,14 @@
         sendButtonText.innerHTML = '<span class="spinner"></span> Sending...';
 
         const sentDraftId = currentDraftId;
+        // The version it shows as it sends (#695): a refusal names this one.
+        const sentVersion = versionFor(sentDraftId);
         try {
           // Call send_postcard via OpenAI callTool
           const sendArgs = { draftId: sentDraftId, confirm: true };
           if (anotherCopy) sendArgs.sendAnotherCopy = true;
+          // What it showed (#695): mail changed since is refused, and drawn again.
+          if (sentVersion) sendArgs.contentVersion = sentVersion;
           const result = await host.callTool("send_postcard", sendArgs);
           // A refused send comes back as an error result, not a rejection.
           if (result?.isError) {
@@ -2513,6 +2637,12 @@
           const duplicate = duplicateDetails(null, error);
           if (duplicate) {
             showDuplicate(duplicate, "send");
+            return;
+          }
+          // Refused for a change since (#695), as an error result or, in ChatGPT, a rejection wrapping its text.
+          if (String(error?.message ?? "").includes(CHANGED_SINCE_SHOWN)) {
+            showChanged("send", sentDraftId, sentVersion);
+            showPickerAgain();
             return;
           }
           // An error result arrives here with its text, and a host's
@@ -2790,7 +2920,7 @@
 
       async function handlePayAndSend() {
         // Not while the maker sets a style (#594): the checkout prices the draft as it stands.
-        if (checkoutInProgress || !currentDraftId || makerHolds()) return;
+        if (checkoutInProgress || changed !== null || !currentDraftId || makerHolds()) return;
         draftActedOn = true;
         const button = document.getElementById("pay-send-button");
         const buttonText = document.getElementById("pay-send-button-text");
@@ -2804,9 +2934,13 @@
         button.classList.add("loading");
         buttonText.innerHTML =
           '<span class="spinner"></span> Preparing checkout...';
+        // The version it shows as it pays (#695): a refusal names this one.
+        const paidVersion = versionFor(currentDraftId);
         try {
           const checkoutArgs = { draftId: currentDraftId };
           if (anotherCopy) checkoutArgs.sendAnotherCopy = true;
+          // What it showed (#695): mail changed since is refused before any charge, and drawn again.
+          if (paidVersion) checkoutArgs.contentVersion = paidVersion;
           const raw = await host.callTool("create_mail_checkout", checkoutArgs);
           if (raw?.isError) {
             const duplicate = duplicateDetails(raw, null);
@@ -2875,6 +3009,12 @@
           const duplicate = duplicateDetails(null, error);
           if (duplicate) {
             showDuplicate(duplicate, "pay");
+            showPickerAgain();
+            return;
+          }
+          // Refused for a change since (#695), as an error result or, in ChatGPT, a rejection wrapping its text.
+          if (String(error?.message ?? "").includes(CHANGED_SINCE_SHOWN)) {
+            showChanged("pay", currentDraftId, paidVersion);
             showPickerAgain();
             return;
           }

@@ -157,6 +157,10 @@
           state.schedule = scheduleOf(schedule);
           // Set here: a status answer asked before it does not take it back (#676).
           state.set = true;
+          // The content version (#695) of the draft with the dates the card now shows, for its Send to name.
+          if (typeof options.onVersion === "function" && typeof data.contentVersion === "string" && data.contentVersion) {
+            options.onVersion(draftId, data.contentVersion, data.contentVersionBefore);
+          }
           // A successful set names the dates on offer now.
           if (schedule && isCalendarDate(schedule.earliestArrival) && isCalendarDate(schedule.latestArrival)) {
             state.min = schedule.earliestArrival;
@@ -244,13 +248,21 @@
       // The dates the server says this draft has now (get_draft_status), for a
       // card shown again with its preview's first answer. False when the
       // picker is on another draft, or setting a date, and took nothing.
-      adopt: function (draftId, schedule) {
-        if (state.draftId !== draftId || state.busy || state.set) return false;
+      // force (#695): asked again after a send refused for a change since, the dates the draft has now are taken
+      // whatever this card has set.
+      adopt: function (draftId, schedule, force) {
+        if (state.draftId !== draftId || (!force && (state.busy || state.set))) return false;
+        if (force) state.set = false;
         state.schedule = scheduleOf(schedule);
         draw();
         return true;
       },
       hide: hide,
+      // Whether the row holds this draft's dates (#695): hidden, it takes none, so a status answer's dates are not
+      // the card's to show.
+      follows: function (draftId) {
+        return state.draftId === draftId;
+      },
       // The draft's dates as this card last set or saw them, or null.
       schedule: function () {
         return state.schedule;

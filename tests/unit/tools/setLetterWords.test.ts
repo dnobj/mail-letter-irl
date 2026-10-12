@@ -231,10 +231,10 @@ describe('set_letter_words', () => {
   it('answers with the content version the change wrote, and none when the writer told none (#695)', async () => {
     vi.mocked(getDraftForStationery).mockResolvedValue(draft({ bodyText: lines(10) }) as never);
     vi.mocked(setDraftWords).mockImplementation(async (...args: unknown[]) => {
-      (args.at(-1) as (version: string) => void)('0123456789abcdef');
+      (args.at(-1) as (version: string, before: string) => void)('0123456789abcdef', 'fedcba9876543210');
       return null;
     });
-    expect(await change('Dear Sam,\n\nThe garden is in.')).toMatchObject({ contentVersion: '0123456789abcdef' });
+    expect(await change('Dear Sam,\n\nThe garden is in.')).toMatchObject({ contentVersion: '0123456789abcdef', contentVersionBefore: 'fedcba9876543210' });
     vi.mocked(setDraftWords).mockResolvedValue(null);
     expect(await change('Dear Sam,\n\nThe garden is in.')).not.toHaveProperty('contentVersion');
   });

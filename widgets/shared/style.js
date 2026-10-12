@@ -160,6 +160,14 @@
     function isService(value) {
       return SERVICES.indexOf(value) !== -1;
     }
+    // The content version (#695) of what the card now shows, for its Send to name, with the version the change was
+    // made to: told only when the answer is drawn, so a change whose page did not come back keeps the last, and its
+    // send is refused and drawn again. The card takes it only when made to the version it shows.
+    function tellVersion(draftId, data) {
+      if (typeof options.onVersion === "function" && data && typeof data.contentVersion === "string" && data.contentVersion) {
+        options.onVersion(draftId, data.contentVersion, data.contentVersionBefore);
+      }
+    }
     // Terms taken from any answer: when they say how the letter travels, the Mail choice follows them.
     function adoptTerms(said) {
       state.terms = said;
@@ -359,6 +367,7 @@
           // keeps showing the last one and says so.
           if (typeof page === "string" && page) {
             state.previewHtml = page;
+            tellVersion(draftId, data);
           } else {
             state.message = "The style is changed, but its page did not come back here. Make the preview again to see it.";
           }
@@ -437,6 +446,7 @@
           var page = result && result._meta && result._meta.previewHtml;
           if (typeof page === "string" && page) {
             state.previewHtml = page;
+            tellVersion(draftId, data);
           } else {
             state.message = "The signature is changed, but its page did not come back here. Make the preview again to see it.";
           }
@@ -537,6 +547,7 @@
           // The terms say how the letter travels now, and with them the service the draft holds, whichever was pressed.
           adoptTerms(said);
           state.restyled = true;
+          tellVersion(draftId, data);
         })
         .catch(function (error) {
           if (state.draftId !== draftId) return;
@@ -631,6 +642,9 @@
       var signOff = element("studio-words-signoff");
       body.value = words.current.bodyText;
       signOff.value = words.current.signOff;
+      // What these words were written from (#695 review round 1): a status answer taken while they are written does not
+      // change which words they replace.
+      words.openedFrom = words.current;
       words.editing = true;
       words.message = "";
       words.error = false;
@@ -649,6 +663,7 @@
     function closeWords() {
       if (words.updating) return;
       words.editing = false;
+      words.openedFrom = null;
       words.message = "";
       words.error = false;
       drawWords();
@@ -666,7 +681,7 @@
       var signOff = element("studio-words-signoff").value;
       // The words it replaces: their version, so a change made elsewhere since
       // is not overwritten unseen (#593 review round 1).
-      var startedFrom = words.current;
+      var startedFrom = words.openedFrom || words.current;
       var args = { draftId: draftId, bodyText: bodyText, signOff: signOff };
       if (startedFrom && typeof startedFrom.version === "string") args.wordsVersion = startedFrom.version;
       state.busy = true;
@@ -708,6 +723,7 @@
           // keeps showing the last one and says so.
           if (typeof page === "string" && page) {
             state.previewHtml = page;
+            tellVersion(draftId, data);
             words.message = typeof data.message === "string" && data.message ? data.message : "The words are changed. Nothing has been sent.";
           } else {
             words.message = "The words are changed, but the page did not come back here. Make the preview again to see it.";
@@ -857,8 +873,11 @@
       // With it, what the letter costs now (#586), when the answer says, and
       // how full its pages are as the card knows it (fit, or null when it
       // does not: the status lays nothing out).
-      adopt: function (draftId, stationery, previewHtml, answer, fit) {
-        if (state.draftId !== draftId || state.busy || state.restyled || !stationery || !isDrawn(stationery.theme)) return false;
+      // force (#695): asked again after a send refused for a change since, the draft as it is now is taken whatever
+      // this card has set, and the card no longer counts it restyled.
+      adopt: function (draftId, stationery, previewHtml, answer, fit, force) {
+        if (state.draftId !== draftId || (!force && (state.busy || state.restyled)) || !stationery || !isDrawn(stationery.theme)) return false;
+        if (force) state.restyled = false;
         state.stationery = stationery;
         keepSlots(stationery);
         if (typeof previewHtml === "string" && previewHtml) state.previewHtml = previewHtml;

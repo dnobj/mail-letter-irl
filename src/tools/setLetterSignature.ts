@@ -34,6 +34,8 @@ interface SetLetterSignatureInput {
 export interface SetLetterSignatureOutput extends LetterTravel {
   /** The draft's content version once changed (#695): the send takes it back. */
   contentVersion?: string;
+  /** The version the change was made to (#695): a card takes contentVersion only when this is the one it shows. */
+  contentVersionBefore?: string;
   draftId: string;
   /** Whether the letter now prints the saved signature: asked for, always. */
   signature: PreviewSignatureOutput;
@@ -152,6 +154,7 @@ async function handler(input: SetLetterSignatureInput, context: ToolContext): Pr
 
   // With what it was drawn from, refused if any of it changed meanwhile.
   let contentVersion: string | undefined;
+  let contentVersionBefore: string | undefined;
   const refusal = await setDraftSignature(
     draftId,
     userId,
@@ -165,7 +168,7 @@ async function handler(input: SetLetterSignatureInput, context: ToolContext): Pr
         signature: draft.signature_image
       }
     },
-    context.now(), version => { contentVersion = version; }
+    context.now(), (version, before) => { contentVersion = version; contentVersionBefore = before; }
   );
   if (refusal) throw refused(...SIGNATURE_REFUSALS[refusal], context);
 
@@ -177,7 +180,7 @@ async function handler(input: SetLetterSignatureInput, context: ToolContext): Pr
   // checkout read them (#586).
   const payment = letterPayment(letterOption(layout, draft.mail_service), Number(draft.required_credits ?? 2), gift, context, draftId);
   return {
-    ...(contentVersion ? { contentVersion } : {}),
+    ...(contentVersion ? { contentVersion, contentVersionBefore } : {}),
     draftId,
     signature: { printed: signatureImage !== null, source: 'asked' },
     previewHtml,

@@ -92,7 +92,7 @@ describe('set_mail_service in tools/list and /manifest.json (#625)', () => {
     const tool = (await listed()).find(found => found.name === 'set_mail_service')!;
     const output = tool.outputSchema as Schema;
     expect(Object.keys(output.properties).sort()).toEqual(
-      ['canSendNow', 'contentVersion', 'deliveryClass', 'deliveryDisclaimer', 'draftId', 'mailService', 'message', 'pages', 'reasonCannotSend', 'sendEligibility'].sort()
+      ['canSendNow', 'contentVersion', 'contentVersionBefore', 'deliveryClass', 'deliveryDisclaimer', 'draftId', 'mailService', 'message', 'pages', 'reasonCannotSend', 'sendEligibility'].sort()
     );
     expect(output.properties.mailService.enum).toEqual(['certified', 'certified_return_receipt']);
     expect(output.required?.slice().sort()).toEqual(['canSendNow', 'draftId', 'message', 'sendEligibility']);

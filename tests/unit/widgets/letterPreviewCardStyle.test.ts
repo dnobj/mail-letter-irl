@@ -887,6 +887,17 @@ describe('the Signature switch (#608 part 4b)', () => {
     }
   });
 
+  it('sends the version of the signature it drew, and keeps the last for one whose page did not come back (#695)', async () => {
+    for (const [page, expected] of [[SIGNED_PAGE, 'v_signed'], [undefined, 'v_preview']] as const) {
+      const card = mount();
+      await card.show({ ...signed(false), contentVersion: 'v_preview' });
+      await flip(card);
+      await card.answer(switched(true, page, { contentVersion: 'v_signed', contentVersionBefore: 'v_preview' }), 'set_letter_signature');
+      await card.click('send-button');
+      expect(card.lastRequest('tools/call', 'send_letter')!.params.arguments.contentVersion, String(page !== undefined)).toBe(expected);
+    }
+  });
+
   it('signs or unsigns with set_letter_signature, holding Send meanwhile, and draws the page it answers with', async () => {
     const card = mount();
     await card.show(signed(false));
