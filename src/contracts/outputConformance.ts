@@ -41,6 +41,7 @@
 
 import type { z } from "zod";
 import type { McpToolDefinition } from "./types.js";
+import type { CardResultField } from "../mcp/toolCatalog.js";
 import type {
   quoteAndPreviewOutputZ,
   quoteAndPreviewPostcardOutputZ,
@@ -137,38 +138,14 @@ type MissingKeys<Output, Schema> = Exclude<keyof Schema, keyof Output>;
 
 /**
  * The fields `partitionToolResult` (src/mcp/registerTools.ts) removes from
- * structuredContent. Six are forwarded into `_meta` for the widget; three are
- * full-quality originals the draft already holds and are dropped from both
- * channels. Either way they are deliberately absent from the served schema,
- * so they are the one legitimate way to produce a field the schema omits.
- *
- * Keep in step with partitionToolResult. The widget data-contract test
- * (tests/unit/mcp/widgetResources.test.ts) derives its copy from the runtime
- * function; this list cannot, because types cannot read a value.
+ * structuredContent: the tool catalogue's card fields (CARD_RESULT_FIELDS,
+ * src/mcp/toolCatalog.ts, #687), forwarded into `_meta` for a card or, for
+ * full-quality originals the draft already holds, dropped. Either way they are
+ * deliberately absent from the served schema, so they are the one legitimate
+ * way to produce a field the schema omits. Read from the catalogue's own keys,
+ * so this cannot drift from what the partition does.
  */
-type MetaPartitioned =
-  | "previewHtml"
-  | "previewFrontHtml"
-  | "previewBackHtml"
-  | "headerImagePreview"
-  | "inlineImagePreview"
-  | "generatedImagePreview"
-  | "headerImageData"
-  | "inlineImageData"
-  | "frontImageData"
-  // get_started's card copy
-  | "title"
-  | "overview"
-  | "purchaseStep"
-  | "examplePrompts"
-  // the letter card's fit line (#586)
-  | "pageFit"
-  // a saved signature's picture (#608)
-  | "signatureImage"
-  // the letter card's choice of service (#648)
-  | "mailServices"
-  // the letter card's saved designs (#649)
-  | "stationeryDesigns";
+type MetaPartitioned = CardResultField;
 
 type UndeclaredKeys<Output, Schema> = Exclude<keyof Output, keyof Schema | MetaPartitioned>;
 

@@ -38,7 +38,7 @@ import type { PostcardSize } from '../services/types.js';
  * while it waits for its mail date (and whether it can be cancelled),
  * cancelled, or sent. A card never takes a draft's dates for the order's.
  *
- * Card-only (APP_ONLY_TOOLS in src/mcp/registerTools.ts): the model has no use
+ * Card-only (appOnly in src/mcp/toolCatalog.ts): the model has no use
  * for it, and apps that keep card-only tools from the model never show it.
  * Read-only, and a draft that is not the caller's reads as not found.
  */

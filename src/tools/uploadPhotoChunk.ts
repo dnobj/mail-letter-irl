@@ -18,7 +18,7 @@ import {
  * and makes the photo the account's recent upload, so the next preview with
  * no image uses it. The limits live in src/services/photoUploadService.ts.
  *
- * Card-only (APP_ONLY_TOOLS in src/mcp/registerTools.ts), and listed only
+ * Card-only (appOnly in src/mcp/toolCatalog.ts), and listed only
  * while LETTER_IRL_CARD_UPLOAD_ENABLED is on (src/config/cardUpload.ts).
  */
 export const UPLOAD_PHOTO_CHUNK_TOOL = 'upload_photo_chunk';

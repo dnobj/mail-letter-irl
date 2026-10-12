@@ -1,6 +1,5 @@
 import "dotenv/config";
 import { openLetterHomeTool } from './tools/openLetterHome.js';
-import { isLetterHomeEnabled } from './config/letterHome.js';
 import { randomUUID } from "node:crypto";
 import { assertBetaAccess } from "./auth/betaAccess.js";
 import { FileAccountStore } from "./store/fileAccountStore.js";
@@ -65,35 +64,6 @@ import {
   listStationeryDesignsTool,
   deleteStationeryDesignTool
 } from "./tools/index.js";
-import { REQUEST_SEND_TOOL } from "./tools/requestSend.js";
-import { UPLOAD_PHOTO_CHUNK_TOOL } from "./tools/uploadPhotoChunk.js";
-import { SET_ARRIVAL_DATE_TOOL } from "./tools/setArrivalDate.js";
-import { SET_STATIONERY_TOOL } from "./tools/setStationery.js";
-import { SET_MAIL_SERVICE_TOOL } from "./tools/setMailService.js";
-import { SET_LETTER_WORDS_TOOL } from "./tools/setLetterWords.js";
-import { SET_POSTCARD_STYLE_TOOL } from "./tools/setPostcardStyle.js";
-import { CANCEL_SCHEDULED_MAIL_TOOL } from "./tools/cancelScheduledMail.js";
-import { REQUEST_ADDRESS_TOOL } from "./tools/requestAddress.js";
-import { GET_ADDRESS_REQUEST_TOOL } from "./tools/getAddressRequest.js";
-import { CANCEL_ADDRESS_REQUEST_TOOL } from "./tools/cancelAddressRequest.js";
-import { SET_SIGNATURE_TOOL } from "./tools/setSignature.js";
-import { GET_SIGNATURE_TOOL } from "./tools/getSignature.js";
-import { CLEAR_SIGNATURE_TOOL } from "./tools/clearSignature.js";
-import { SET_LETTER_SIGNATURE_TOOL } from "./tools/setLetterSignature.js";
-import { SAVE_STATIONERY_DESIGN_TOOL } from "./tools/saveStationeryDesign.js";
-import { LIST_STATIONERY_DESIGNS_TOOL } from "./tools/listStationeryDesigns.js";
-import { DELETE_STATIONERY_DESIGN_TOOL } from "./tools/deleteStationeryDesign.js";
-import { isCustomStationeryOffered } from "./config/customStationery.js";
-import { isAddressRequestsEnabled } from "./config/addressRequests.js";
-import { isSignaturesOffered } from "./config/signatures.js";
-import { isCardUploadEnabled } from "./config/cardUpload.js";
-import { isArriveByEnabled } from "./config/arriveBy.js";
-import { isStationeryOffered } from "./config/stationery.js";
-import { isCertifiedMailOffered } from "./config/certifiedMail.js";
-import { isWordsEditorOffered } from "./config/wordsEditor.js";
-import { isPostcardSizesOffered } from "./config/postcardSizes.js";
-import { isPostcardLayoutsOffered } from "./config/postcardLayouts.js";
-import { isSendConfirmationEnabled } from "./config/sendConfirmation.js";
 import {
   McpToolDefinition,
   ToolContext,
@@ -102,7 +72,7 @@ import {
   Logger
 } from "./contracts/types.js";
 import { callingApp, type ClientProfile } from "./auth/clientProfiles.js";
-import { offersImageGeneration } from "./config/imageGeneration.js";
+import { isToolOffered } from "./mcp/toolCatalog.js";
 import { createLogger } from "./logging/index.js";
 import { carriedDiagnosticClass, classifyDiagnosticError } from "./utils/diagnosticLog.js";
 
@@ -213,58 +183,6 @@ export interface ServerResponse<Output> {
   result: Output;
   meta: Record<string, unknown>;
 }
-
-/**
- * The checkouts: listed only where the app takes purchases (#475). Claude
- * allows no purchases through connectors, and the Connectors Directory takes
- * no connector that executes financial transactions. There, letters are
- * bought on the website, which get_started, get_account_balance and
- * list_letter_packs link to.
- */
-export const IN_APP_PURCHASE_TOOLS: ReadonlySet<string> = new Set([
-  "create_pack_checkout",
-  "create_mail_checkout"
-]);
-
-/**
- * Letter IRL's AI image generation: listed only where the app allows it and
- * the switch is not off (offersImageGeneration, src/config/imageGeneration.ts).
- * Anthropic's Connectors Directory takes no connector that generates images
- * through AI models, so Claude is never offered it (#467).
- */
-export const IMAGE_GENERATION_TOOLS: ReadonlySet<string> = new Set(["generate_image_for_mail"]);
-
-/**
- * Address requests (#604): listed only while LETTER_IRL_ADDRESS_REQUESTS_ENABLED
- * is on, and each refuses while it is off.
- */
-export const ADDRESS_REQUEST_TOOLS: ReadonlySet<string> = new Set([
-  REQUEST_ADDRESS_TOOL,
-  GET_ADDRESS_REQUEST_TOOL,
-  CANCEL_ADDRESS_REQUEST_TOOL
-]);
-
-/**
- * Signatures (#608): listed only while LETTER_IRL_SIGNATURES_ENABLED is on and
- * our renderer draws letters, and each refuses otherwise.
- */
-export const STATIONERY_DESIGN_TOOLS: ReadonlySet<string> = new Set([
-  SAVE_STATIONERY_DESIGN_TOOL,
-  LIST_STATIONERY_DESIGNS_TOOL,
-  DELETE_STATIONERY_DESIGN_TOOL
-]);
-
-/**
- * Saved stationery designs (#649) are listed by STATIONERY_DESIGN_TOOLS above,
- * while designs are offered (LETTER_IRL_CUSTOM_STATIONERY_ENABLED with
- * stationery offered); each refuses otherwise.
- */
-export const SIGNATURE_TOOLS: ReadonlySet<string> = new Set([
-  SET_SIGNATURE_TOOL,
-  GET_SIGNATURE_TOOL,
-  CLEAR_SIGNATURE_TOOL,
-  SET_LETTER_SIGNATURE_TOOL
-]);
 
 /**
  * A tool's description as the calling app reads it (#484). Most tools say the
@@ -416,34 +334,11 @@ export class LetterIrlServer {
    * the list for an app that trusts nothing.
    */
   listTools(client: ClientProfile = callingApp(undefined)) {
-    // request_send points at the confirmation page, which ships with the send
-    // rule, so the tool is listed only while the rule is on. execute() still
-    // reaches it: a send tool answers an app without our card with its link
-    // (src/mcp/registerTools.ts).
-    const sendRule = isSendConfirmationEnabled();
-    const cardUpload = isCardUploadEnabled();
-    const arriveBy = isArriveByEnabled();
-    const stationery = isStationeryOffered();
-    const certifiedMail = isCertifiedMailOffered();
-    const wordsEditor = isWordsEditorOffered();
-    const postcardStyles = isPostcardSizesOffered() || isPostcardLayoutsOffered();
-    const addressRequests = isAddressRequestsEnabled();
-    const signatures = isSignaturesOffered();
-    const designs = isCustomStationeryOffered();
+    // What each app is offered lives in the tool catalogue (src/mcp/toolCatalog.ts, #687). request_send points at
+    // the confirmation page, which ships with the send rule, so it is listed only while the rule is on; execute()
+    // still reaches it: a send tool answers an app without our card with its link (src/mcp/registerTools.ts).
     return tools
-      .filter((tool) => isLetterHomeEnabled() || tool.name !== 'open_letter_home')
-      .filter((tool) => sendRule || tool.name !== REQUEST_SEND_TOOL)
-      .filter((tool) => cardUpload || tool.name !== UPLOAD_PHOTO_CHUNK_TOOL)
-      .filter((tool) => arriveBy || (tool.name !== SET_ARRIVAL_DATE_TOOL && tool.name !== CANCEL_SCHEDULED_MAIL_TOOL))
-      .filter((tool) => stationery || tool.name !== SET_STATIONERY_TOOL)
-      .filter((tool) => certifiedMail || tool.name !== SET_MAIL_SERVICE_TOOL)
-      .filter((tool) => wordsEditor || tool.name !== SET_LETTER_WORDS_TOOL)
-      .filter((tool) => postcardStyles || tool.name !== SET_POSTCARD_STYLE_TOOL)
-      .filter((tool) => addressRequests || !ADDRESS_REQUEST_TOOLS.has(tool.name))
-      .filter((tool) => signatures || !SIGNATURE_TOOLS.has(tool.name))
-      .filter((tool) => designs || !STATIONERY_DESIGN_TOOLS.has(tool.name))
-      .filter((tool) => client.inAppPurchases || !IN_APP_PURCHASE_TOOLS.has(tool.name))
-      .filter((tool) => offersImageGeneration(client) || !IMAGE_GENERATION_TOOLS.has(tool.name))
+      .filter((tool) => isToolOffered(tool.name, client))
       .map((tool) => ({
         name: tool.name,
         title: tool.title,

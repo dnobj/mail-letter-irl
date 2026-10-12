@@ -134,13 +134,10 @@ import { inlineHostBridge } from "./widgetHost.js";
 import { isSendConfirmationEnabled } from "../config/sendConfirmation.js";
 import { isArriveByEnabled } from "../config/arriveBy.js";
 import { isCustomStationeryOffered } from "../config/customStationery.js";
-import { isStationeryOffered } from "../config/stationery.js";
-import { isSignaturesOffered } from "../config/signatures.js";
-import { isCertifiedMailOffered } from "../config/certifiedMail.js";
 import { isExtraService } from "../config/products.js";
 import { isPostcardSizesOffered } from "../config/postcardSizes.js";
-import { isPostcardLayoutsOffered } from "../config/postcardLayouts.js";
 import { isPostcardCollagesOffered } from "../config/postcardCollages.js";
+import { APP_ONLY_TOOLS, CARD_ONLY_SEND_TOOLS, CARD_RESULT_FIELDS, withheldInputKeys } from "./toolCatalog.js";
 import { ENVELOPE_REVEAL_META, isEnvelopeRevealEnabled } from "../config/envelope.js";
 import { STUDIO_CARD_META, isStudioCardEnabled } from "../config/studioCard.js";
 import { scheduleSentence } from "../tools/arriveByInput.js";
@@ -530,20 +527,10 @@ export function buildToolSecuritySchemes(
 }
 
 /**
- * The tools that send, which the send rule (#470) makes card-only: the card's
- * Send and Pay & Send buttons can call them, the model cannot.
- *
- * Pay & Send joined them for launch (#475). Codex also reaches Letter IRL
- * through ChatGPT's own connection, where the server sees ChatGPT but no card
- * shows the preview, so a checkout the model started there would take payment
- * for mail nobody saw. The server cannot tell the two apart, and every card
- * that offers Pay & Send calls it itself, so no model starts it.
+ * The tools that send, card-only under the send rule (#470), and the tools only a card asks (#474): both in the
+ * tool catalogue (src/mcp/toolCatalog.ts, #687), exported here as they were.
  */
-export const CARD_ONLY_SEND_TOOLS: ReadonlySet<string> = new Set([
-  "send_letter",
-  "send_postcard",
-  "create_mail_checkout"
-]);
+export { APP_ONLY_TOOLS, CARD_ONLY_SEND_TOOLS } from "./toolCatalog.js";
 
 /**
  * Pay & Send: the person pays for the previewed mail and payment sends it.
@@ -551,15 +538,6 @@ export const CARD_ONLY_SEND_TOOLS: ReadonlySet<string> = new Set([
  * purchase gets the link instead, even from its card.
  */
 export const PAY_AND_SEND_TOOL = "create_mail_checkout";
-
-/**
- * Tools only a card asks, whatever the send rule: get_draft_status answers
- * the preview card about its own draft (#474), and upload_photo_chunk takes
- * the upload card's photo (#474, phase 3). The model has no use for either.
- * Unlike a send they need no person to press anything, so they are only
- * hidden from the model.
- */
-export const APP_ONLY_TOOLS: ReadonlySet<string> = new Set(["get_draft_status", "upload_photo_chunk"]);
 
 export function buildToolMeta(
   toolName: string,
@@ -1028,44 +1006,8 @@ export function servesStationeryThemeOnly(name: string): boolean {
   return name === "set_stationery" && !isCustomStationeryOffered();
 }
 
-/** The letter previews' stationery arguments (#563). */
-export const STATIONERY_INPUT_KEYS: readonly string[] = ["stationery", "monogram", "headline"];
-
-/** The postcard preview's front arguments (#594). */
-export const POSTCARD_FRONT_INPUT_KEYS: readonly string[] = ["layout", "caption", "place"];
-
-/** The postcard preview's collage photos (#616). */
-export const POSTCARD_COLLAGE_INPUT_KEYS: readonly string[] = ["images", "imageUrls"];
-
-/**
- * The input fields a tool is served without, as this deployment stands: the
- * four previews' `arriveBy` while LETTER_IRL_ARRIVE_BY_ENABLED is off (#535),
- * the three letter previews' stationery while it is not offered (#563), and
- * the postcard preview's and set_postcard_style's front while the layouts
- * are not, and set_postcard_style's size while the sizes are not (#594), and
- * the three letter previews' mailService while certified mail is not (#625).
- * tools/list (getServedInputSchema) and /manifest.json both ask this, so
- * they agree.
- */
-export function withheldInputKeys(name: string): string[] {
-  const withheld: string[] = [];
-  if (PREVIEW_TOOLS.has(name) && !isArriveByEnabled()) withheld.push("arriveBy");
-  if (LETTER_PREVIEW_TOOLS.has(name) && !isStationeryOffered()) withheld.push(...STATIONERY_INPUT_KEYS);
-  // A saved design (#649), on the letter previews, while designs are not offered. set_stationery is
-  // served as before them instead (servesStationeryThemeOnly).
-  if (LETTER_PREVIEW_TOOLS.has(name) && !isCustomStationeryOffered()) withheld.push("stationeryDesignId");
-  // The letter previews' signature (#608), while signatures are not offered.
-  if (LETTER_PREVIEW_TOOLS.has(name) && !isSignaturesOffered()) withheld.push("signature");
-  // The letter previews' mail service (#625), while certified mail is not offered.
-  if (LETTER_PREVIEW_TOOLS.has(name) && !isCertifiedMailOffered()) withheld.push("mailService");
-  if (name === "quote_and_preview_postcard" && !isPostcardLayoutsOffered()) withheld.push(...POSTCARD_FRONT_INPUT_KEYS);
-  // The postcard preview's collage photos, while collages are not offered (#616).
-  if (name === "quote_and_preview_postcard" && !isPostcardCollagesOffered()) withheld.push(...POSTCARD_COLLAGE_INPUT_KEYS);
-  // set_postcard_style takes each only while it is offered (#594).
-  if (name === "set_postcard_style" && !isPostcardSizesOffered()) withheld.push("size");
-  if (name === "set_postcard_style" && !isPostcardLayoutsOffered()) withheld.push(...POSTCARD_FRONT_INPUT_KEYS);
-  return withheld;
-}
+/** The fields withheld while their feature is off, and their groups: in the tool catalogue (#687). */
+export { POSTCARD_COLLAGE_INPUT_KEYS, POSTCARD_FRONT_INPUT_KEYS, STATIONERY_INPUT_KEYS, withheldInputKeys } from "./toolCatalog.js";
 
 export function getZodOutputShape(name: string) {
   const schema = zodOutputSchemas[name as ToolName];
@@ -1086,74 +1028,27 @@ export function partitionToolResult(
   // nothing to show. Large previews are never duplicated.
   keepCardCopy = false
 ): PartitionedToolResult {
-  const {
-    previewHtml,
-    previewFrontHtml,
-    previewBackHtml,
-    inlineImageData,
-    headerImageData,
-    frontImageData,
-    generatedImagePreview,
-    headerImagePreview,
-    inlineImagePreview,
-    // get_started's card copy. Display-only: the model does not act on any of
-    // it, and when it could see it, it restated the whole card in prose
-    // directly beneath a card already showing it. Same reasoning as the
-    // preview HTML above - a widget needs it, the model does not.
-    title,
-    overview,
-    purchaseStep,
-    examplePrompts,
-    // How full a letter's pages are (#586), for the card's fit line.
-    pageFit,
-    // A saved signature's picture (#608), for a card: the model reads its sentence.
-    signatureImage,
-    // The services a letter card's Delivery tab offers (#648): the model changes one with set_mail_service.
-    mailServices,
-    // The account's saved designs for a letter card's Style row (#649): the model lists them itself.
-    stationeryDesigns,
-    ...modelFacingData
-  } = result;
-
-  const cardCopy = keepCardCopy
-    ? {
-        ...(title !== undefined ? { title } : {}),
-        ...(overview !== undefined ? { overview } : {}),
-        ...(purchaseStep !== undefined ? { purchaseStep } : {}),
-        ...(examplePrompts !== undefined ? { examplePrompts } : {})
-      }
-    : {};
+  // Each field for a card, and what becomes of it, is in the tool catalogue (CARD_RESULT_FIELDS, #687): moved to
+  // _meta, moved and kept as the card's copy where its _meta may not reach it, or dropped. Everything else is the
+  // model's. A generated image's URL is the model's and the card's: it chains into a preview tool.
+  const modelFacingData: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(result)) {
+    if (!Object.hasOwn(CARD_RESULT_FIELDS, key)) modelFacingData[key] = value;
+  }
+  const cardMeta: Record<string, unknown> = {};
+  const cardCopy: Record<string, unknown> = {};
+  for (const [key, use] of Object.entries(CARD_RESULT_FIELDS) as Array<[string, string]>) {
+    const value = result[key];
+    if (value === undefined || use === "drop") continue;
+    cardMeta[key] = value;
+    if (use === "copy" && keepCardCopy) cardCopy[key] = value;
+  }
 
   return {
     structuredContent: { ...modelFacingData, ...cardCopy },
     _meta: {
       ...meta,
-      ...(previewHtml !== undefined ? { previewHtml } : {}),
-      ...(previewFrontHtml !== undefined ? { previewFrontHtml } : {}),
-      ...(previewBackHtml !== undefined ? { previewBackHtml } : {}),
-      // The letter card's images. Small by construction - the builder
-      // compresses them to roughly 3KB for exactly this trip - so unlike the
-      // *ImageData fields above they are forwarded rather than dropped. They
-      // travel here rather than in structuredContent for the same reason as
-      // everything else in this list: a widget needs them, the model does not.
-      //
-      // Before this they were in neither channel. The output schema does not
-      // declare them, so ChatGPT dropped them when it filtered
-      // structuredContent against the published schema, and nothing put them
-      // in _meta - a letter with a header or inline image rendered its card
-      // without one, silently. (The filtering is client-side: at SDK 1.31.0
-      // the server validates the result and ships it unstripped. Issue #257.)
-      ...(title !== undefined ? { title } : {}),
-      ...(overview !== undefined ? { overview } : {}),
-      ...(purchaseStep !== undefined ? { purchaseStep } : {}),
-      ...(examplePrompts !== undefined ? { examplePrompts } : {}),
-      ...(headerImagePreview !== undefined ? { headerImagePreview } : {}),
-      ...(inlineImagePreview !== undefined ? { inlineImagePreview } : {}),
-      ...(generatedImagePreview !== undefined ? { generatedImagePreview } : {}),
-      ...(pageFit !== undefined ? { pageFit } : {}),
-      ...(signatureImage !== undefined ? { signatureImage } : {}),
-      ...(mailServices !== undefined ? { mailServices } : {}),
-      ...(stationeryDesigns !== undefined ? { stationeryDesigns } : {}),
+      ...cardMeta,
       ...(modelFacingData.generatedImageUrl !== undefined
         ? { generatedImageUrl: modelFacingData.generatedImageUrl }
         : {})
@@ -1247,8 +1142,10 @@ export async function registerLetterTools(
   for (const tool of toolDefs) {
     const inputShape = getServedInputSchema(tool.name);
     const outputShape = getZodOutputShape(tool.name);
+    // Every tool the server defines has both (#687): one without is a mistake to find at startup, never a tool
+    // quietly left unregistered.
     if (!inputShape || !outputShape) {
-      continue;
+      throw new Error(`Tool ${tool.name} has no ${inputShape ? "output" : "input"} schema in src/zodSchemas.ts`);
     }
 
     // From an app that cannot be trusted to keep a card-only tool away from

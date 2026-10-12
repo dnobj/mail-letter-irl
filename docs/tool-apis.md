@@ -5,6 +5,8 @@
 
 The runtime MCP registry is the source of truth. The checked-in `manifest.json` is generated from that registry with `npm run manifest:generate`, and submission-facing tests verify that the manifest, widget list, and runtime tool registry stay aligned.
 
+Which tools an app is offered, which only a card may call, which input fields are withheld while their feature is off, and which result fields are the card's and never the model's are all in one place: the tool catalogue, `src/mcp/toolCatalog.ts` (#687). Every tool the server defines has an entry, and a tool without both Zod shapes stops the server at startup. `tests/unit/mcp/servedToolsSnapshot.test.ts` holds what `tools/list` and the manifest serve, for every flag and kind of app, so a change to what is served is made on purpose.
+
 Letter IRL currently exposes **24 tools** and **6 widgets**. Four more are listed only while their switch is on: `request_send` while the send rule is on, `upload_photo_chunk` while card upload is on, and `set_arrival_date` and `cancel_scheduled_mail` while arrival dates are on. So are `request_address`, `get_address_request` and `cancel_address_request`, while address requests are on (#604). The tools are:
 
 ## Onboarding
