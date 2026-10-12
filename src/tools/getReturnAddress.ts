@@ -1,5 +1,5 @@
 import { McpToolDefinition, ToolContext } from "../contracts/types.js";
-import { getReturnAddress, ReturnAddress } from "../services/returnAddressService.js";
+import { getReturnAddress } from "../services/returnAddressService.js";
 
 interface GetReturnAddressInput {
   // No input needed

@@ -14,8 +14,8 @@
  *
  * which forwards whatever the service wrote. mailSendService authors those
  * messages for ITS OWN consumers and interpolates internal values into them -
- * draft ids, order ids, and raw status labels. Fifteen codes are thrown there
- * and only eight had a branch, so seven of them were reaching the customer
+ * draft ids, order ids, and raw status labels. When this list was written,
+ * fifteen codes were thrown there and only eight had a branch, so seven were reaching the customer
  * verbatim: "Draft <uuid> is held", "Order <uuid> is payment_failed". That is
  * the same leak class as users.sends_blocked_reason, which took two rounds to
  * close on one surface while these stayed open on both.

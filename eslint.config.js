@@ -25,7 +25,12 @@ export default tseslint.config(
     },
     rules: {
       "@typescript-eslint/no-explicit-any": "off",
-      "@typescript-eslint/no-unused-vars": "off",
+      // On for src (#686); the tests block below keeps it off. A leading _ marks an
+      // argument kept for its position, and a rest sibling drops a key on purpose.
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        { argsIgnorePattern: "^_", ignoreRestSiblings: true, caughtErrors: "none" }
+      ],
       "@typescript-eslint/no-empty-object-type": "off",
       "@typescript-eslint/ban-ts-comment": "off",
       "no-console": "off"
@@ -46,7 +51,7 @@ export default tseslint.config(
     // CI helper scripts are plain Node ESM, not TypeScript, so the "**/*.ts"
     // block above does not reach them and they would fail no-undef on
     // `process` and `console`.
-    files: [".github/scripts/**/*.mjs"],
+    files: [".github/scripts/**/*.mjs", "scripts/**/*.mjs"],
     languageOptions: {
       sourceType: "module",
       globals: {

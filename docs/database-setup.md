@@ -242,9 +242,6 @@ npm run db:test
 # Run all pending migrations
 npm run db:migrate
 
-# View rollback info (manual process)
-npm run db:migrate:rollback
-
 # Start MCP server (uses database)
 npm run mcp:http
 ```

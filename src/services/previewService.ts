@@ -192,24 +192,6 @@ export function signatureParagraph(bodyText: string | null | undefined, signOff?
   return index;
 }
 
-// ============================================================================
-// Content Validation
-// ============================================================================
-
-/**
- * Get character limit for a given layout type
- */
-export function getCharacterLimit(layoutType: LetterLayoutType): number {
-  return LAYOUT_CHARACTER_LIMITS[layoutType];
-}
-
-/**
- * Get line limit for a given layout type
- */
-export function getLineLimit(layoutType: LetterLayoutType): number {
-  return LAYOUT_LINE_LIMITS[layoutType];
-}
-
 /**
  * Validate content against layout-specific character AND line limits.
  * Both limits must pass for the content to be valid.
@@ -272,21 +254,10 @@ export function validateCharacterLimit(
 export function estimateRequiredCredits(
   bodyText: string,
   signOff: string,
-  charsPerPage = LAYOUT_CHARACTER_LIMITS.text_only
+  _charsPerPage = LAYOUT_CHARACTER_LIMITS.text_only
 ): number {
   // Flat rate: All letters cost 2 credits (one page maximum)
   return 2;
-}
-
-// ============================================================================
-// Preview HTML Rendering
-// ============================================================================
-
-/**
- * Render minimal preview HTML for widget display (backward compatible)
- */
-export function renderPreviewHtml(input: PreviewInput): string {
-  return `<!doctype html><html><body><address>${input.sender.name}<br>${input.sender.addressLine1}</address><hr><p>${input.bodyText}</p><p>${input.signOff}</p></body></html>`;
 }
 
 /**

@@ -64,7 +64,7 @@ async function main() {
   console.log("Credits remaining:", balance.result.creditsRemaining);
 }
 
-main().catch((error) => {
+main().catch(() => {
   console.error("Flow harness failed");
   process.exitCode = 1;
 });

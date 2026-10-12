@@ -22,7 +22,6 @@
     "mcp:http": "tsx src/mcp/httpServer.ts",
     "db:test": "tsx scripts/test-db.ts",
     "db:migrate": "tsx db/migrate.ts",
-    "db:migrate:rollback": "tsx db/migrate.ts rollback",
     "test:postgrid": "tsx scripts/test-postgrid.ts",
     "admin:provision-access": "tsx scripts/provisionAdminDatabaseAccess.ts",
     "admin:start": "node dist/admin/server.js",
@@ -34,7 +33,8 @@
     "test:integration": "vitest run tests/integration",
     "test:integration:postgres": "vitest run tests/integration",
     "test:integration:local": "tsx scripts/run-integration-local.ts",
-    "verify": "npm run lint && npm run build && npm run test:unit && npm run test:submission",
+    "check:test-types": "node scripts/check-test-types.mjs",
+    "verify": "npm run lint && npm run build && npm run check:test-types && npm run test:unit && npm run test:submission",
     "test:coverage": "vitest run --coverage",
     "dev:local": "env $(cat .env.local | grep -v '^#' | grep -v '^$' | xargs) tsx watch src/mcp/httpServer.ts"
   },

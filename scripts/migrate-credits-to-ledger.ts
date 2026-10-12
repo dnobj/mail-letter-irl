@@ -26,14 +26,6 @@ interface User {
   created_at: Date;
 }
 
-interface LedgerEntry {
-  ledger_id: string;
-  user_id: string;
-  initial_amount: number;
-  remaining_amount: number;
-  source_type: string;
-}
-
 const args = process.argv.slice(2);
 const isDryRun = args.includes('--dry-run');
 const verifyOnly = args.includes('--verify-only');

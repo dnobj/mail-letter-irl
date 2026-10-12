@@ -56,11 +56,6 @@ function sharedScriptSource(widgetDir: string, file: string): string {
   return source;
 }
 
-/** The bridge script, read once per widget directory. */
-export function hostBridgeSource(widgetDir: string): string {
-  return sharedScriptSource(widgetDir, "host.js");
-}
-
 /**
  * The card as served: the bridge, and any other shared script, inlined where
  * the card asks for it. A `</script` inside a script would end the tag early,

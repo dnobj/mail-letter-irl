@@ -189,7 +189,7 @@ export class DummyProvider implements LetterFulfillmentProvider {
   /**
    * Estimate cost for a letter
    */
-  async estimateCost(params: LetterParams): Promise<CostEstimate> {
+  async estimateCost(_params: LetterParams): Promise<CostEstimate> {
     // Simulate delay
     await this.delay(100);
 
@@ -296,7 +296,6 @@ export class DummyProvider implements LetterFulfillmentProvider {
     currentStatus: LetterStatus['status']
   ): LetterStatus['events'] {
     const events: LetterStatus['events'] = [];
-    const now = new Date();
 
     events.push({
       timestamp: sentAt,

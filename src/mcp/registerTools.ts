@@ -147,7 +147,6 @@ import { scheduleSentence } from "../tools/arriveByInput.js";
 import { uploadsThroughCard } from "../config/cardUpload.js";
 import {
   REQUEST_SEND_TOOL,
-  SendConfirmationRefusedError,
   type RequestSendOutput
 } from "../tools/requestSend.js";
 

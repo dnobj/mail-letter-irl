@@ -100,7 +100,7 @@ async function testCreditFlow() {
     });
     console.log(`   ✅ Found ${history.total} transactions:\n`);
 
-    history.transactions.forEach((tx, index) => {
+    history.transactions.forEach((tx) => {
       const sign = tx.amount > 0 ? '+' : '';
       const emoji = tx.type === 'purchase' ? '💳' : tx.type === 'deduction' ? '📤' : '💸';
       console.log(`   ${emoji} ${tx.type.padEnd(10)} ${sign}${tx.amount} credits → Balance: ${tx.balance_after}`);

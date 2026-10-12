@@ -242,18 +242,6 @@ export async function createPostcardDraft(params: CreatePostcardDraftParams): Pr
   };
 }
 
-/**
- * Get a postcard draft by ID (without consuming it).
- * Returns null if not found or if not a postcard.
- */
-export async function getPostcardDraft(draftId: string): Promise<PostcardDraft | null> {
-  const result = await query<PostcardDraft>(
-    `SELECT * FROM letter_drafts WHERE draft_id = $1 AND mail_type = 'postcard'`,
-    [draftId]
-  );
-  return result.rows[0] || null;
-}
-
 // ============================================================================
 // Draft Consumption (Idempotent)
 // ============================================================================
@@ -419,19 +407,6 @@ export async function getDraftState(draftId: string): Promise<DraftState | null>
     [draftId]
   );
   return result.rows[0] || null;
-}
-
-/**
- * Get all pending drafts for a user.
- */
-export async function getPendingDrafts(userId: string): Promise<LetterDraft[]> {
-  const result = await query<LetterDraft>(
-    `SELECT * FROM letter_drafts
-     WHERE user_id = $1 AND status = 'pending' AND expires_at > NOW()
-     ORDER BY created_at DESC`,
-    [userId]
-  );
-  return result.rows;
 }
 
 // ============================================================================

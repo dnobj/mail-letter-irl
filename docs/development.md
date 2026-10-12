@@ -352,7 +352,7 @@ letter-irl/
 │   ├── store/         # Account store used by the tool registry
 │   ├── tools/         # MCP tool implementations
 │   ├── utils/         # Diagnostics, env parsing, backoff
-│   └── workers/       # Daily maintenance and compatibility wrappers
+│   └── workers/       # Credit expiry and status sync, run by the maintenance pass
 ├── db/
 │   └── migrations/    # Forward-only SQL migrations (001_ ... 032_)
 ├── tests/
@@ -431,10 +431,9 @@ Migrations are in `db/migrations/` with numeric prefixes:
 ```bash
 # Run pending migrations
 npm run db:migrate
-
-# Prints the last applied migration and recovery guidance; it does not roll anything back
-npm run db:migrate:rollback
 ```
+
+There are no down migrations and no rollback command: a schema is rolled forward by a new migration.
 
 ### Creating a Migration
 

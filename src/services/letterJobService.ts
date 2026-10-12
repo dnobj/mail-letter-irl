@@ -472,7 +472,7 @@ async function submitToProvider(
   provider: Awaited<ReturnType<typeof getProviderForMailType>>,
   letter: Letter,
   job: LetterJob,
-  options: ProcessLetterJobOptions
+  _options: ProcessLetterJobOptions
 ): Promise<{ result: ProviderResult; providerName: string }> {
   const mailType = letter.mail_type || 'letter';
 
@@ -1203,51 +1203,6 @@ export async function getJobByLetterId(letterId: string): Promise<LetterJob | nu
 export async function getJobById(jobId: string): Promise<LetterJob | null> {
   const result = await query<LetterJob>('SELECT * FROM letter_jobs WHERE job_id = $1', [jobId]);
   return result.rows[0] || null;
-}
-
-export async function getAllJobs(
-  limit = 50,
-  offset = 0,
-  status?: string
-): Promise<{ jobs: LetterJob[]; total: number }> {
-  const where = status ? ' WHERE status = $1' : '';
-  const listParams: unknown[] = status ? [status, limit, offset] : [limit, offset];
-  const limitIndex = status ? 2 : 1;
-  const countParams: unknown[] = status ? [status] : [];
-  const [jobsResult, countResult] = await Promise.all([
-    query<LetterJob>(
-      `SELECT * FROM letter_jobs${where}
-       ORDER BY created_at DESC LIMIT $${limitIndex} OFFSET $${limitIndex + 1}`,
-      listParams
-    ),
-    query<{ count: string }>(`SELECT COUNT(*) AS count FROM letter_jobs${where}`, countParams),
-  ]);
-
-  return { jobs: jobsResult.rows, total: Number.parseInt(countResult.rows[0].count, 10) };
-}
-
-export async function getJobsByUserId(
-  userId: string,
-  limit = 50,
-  offset = 0
-): Promise<{ jobs: LetterJob[]; total: number }> {
-  const [jobsResult, countResult] = await Promise.all([
-    query<LetterJob>(
-      `SELECT jobs.* FROM letter_jobs AS jobs
-       JOIN letters ON jobs.letter_id = letters.letter_id
-       WHERE letters.user_id = $1
-       ORDER BY jobs.created_at DESC LIMIT $2 OFFSET $3`,
-      [userId, limit, offset]
-    ),
-    query<{ count: string }>(
-      `SELECT COUNT(*) AS count FROM letter_jobs AS jobs
-       JOIN letters ON jobs.letter_id = letters.letter_id
-       WHERE letters.user_id = $1`,
-      [userId]
-    ),
-  ]);
-
-  return { jobs: jobsResult.rows, total: Number.parseInt(countResult.rows[0].count, 10) };
 }
 
 export class AdminJobRetryError extends Error {

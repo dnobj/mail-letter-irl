@@ -93,6 +93,6 @@ Check `docs/learnings/` for debugging notes and integration quirks:
 npm run dev          # Development with watch
 npm run start        # Production mode
 npm run db:migrate   # Run migrations
-npm run verify       # Lint, build, unit and submission tests (mirrors the CI `checks` job)
+npm run verify       # Lint, build, the test type-check ratchet, unit and submission tests (mirrors the CI `checks` job)
 npm run admin:dev    # Admin panel against .env.admin.local (docs/admin-panel-guide.md)
 ```

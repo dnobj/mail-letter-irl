@@ -91,13 +91,6 @@ const SSE_MESSAGES_PATH =
   process.env.LETTER_IRL_SSE_MESSAGES_PATH ?? "/mcp/sse/messages";
 const WIDGET_PATH = process.env.LETTER_IRL_WIDGET_PATH ?? "/widgets";
 const MANIFEST_ROUTE = process.env.LETTER_IRL_MANIFEST_ROUTE ?? "/manifest.json";
-const OPENID_CONFIG_ROUTE =
-  process.env.LETTER_IRL_OPENID_ROUTE ?? "/.well-known/openid-configuration";
-const PROTECTED_RESOURCE_ROUTE =
-  process.env.LETTER_IRL_PROTECTED_RESOURCE_ROUTE ??
-  "/.well-known/oauth-protected-resource";
-const AUTHORIZATION_SERVER_ROUTE =
-  process.env.LETTER_IRL_AUTH_SERVER_ROUTE ?? "/.well-known/oauth-authorization-server";
 const FALLBACK_ORIGIN =
   process.env.LETTER_IRL_DEFAULT_ORIGIN ?? `http://${DEFAULT_HOST}:${DEFAULT_PORT}`;
 const PUBLIC_BASE_URL =
@@ -237,10 +230,6 @@ function getAllowedOrigins(): string[] {
     .split(",")
     .map((entry) => entry.trim())
     .filter(Boolean);
-}
-
-function matchesWellKnownRoute(pathname: string, baseRoute: string) {
-  return pathname === baseRoute || pathname === `${baseRoute}${MCP_PATH}`;
 }
 
 function firstHeaderValue(value: string | string[] | undefined): string | undefined {
