@@ -96,6 +96,16 @@ describe('friendlyCheckoutError terminality (#278)', () => {
     expect((friendly as { code?: string }).code).toBe('DRAFT_CHANGED');
   });
 
+  it('says mail changed after it was shown was not charged, and keeps the code (#695)', () => {
+    const friendly = friendlyCheckoutError(
+      Object.assign(new Error('Draft changed since it was shown'), { code: 'DRAFT_CHANGED_SINCE_SHOWN', diagnosticClass: 'DRAFT_CHANGED_SINCE_SHOWN' })
+    );
+    expect(friendly.message).toBe(
+      'This mail changed after it was shown, so nothing was charged. Show the person the mail as it is now (its preview card, or a new preview), and open the payment once they have seen it.'
+    );
+    expect(friendly).toMatchObject({ code: 'DRAFT_CHANGED_SINCE_SHOWN', diagnosticClass: 'DRAFT_CHANGED_SINCE_SHOWN' });
+  });
+
   it('says a letter whose last payment link is still closing can be paid again in a few minutes (#593 review round 1)', () => {
     const friendly = friendlyCheckoutError(
       Object.assign(new Error('The previous checkout for this draft is still closing'), { code: 'PREVIOUS_CHECKOUT_CLOSING' })

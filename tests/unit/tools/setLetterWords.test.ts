@@ -78,7 +78,7 @@ const WORDS_SAYS: Record<string, string> = {
   DRAFT_NOT_A_LETTER: "A postcard's words are its message: make a new postcard preview with them.",
   DRAFT_ALREADY_SENT: "This letter has already been sent, so its words can't change. list_orders shows it.",
   DRAFT_EXPIRED: 'This preview has expired. Make a new preview with the words.',
-  DRAFT_CHECKOUT_PENDING: "This preview is tied to a Pay & Send payment, so its words can't change now.",
+  DRAFT_CHECKOUT_PENDING: "This preview is tied to a Pay & Send payment, so its words can't change now. Finish or let that payment lapse, or make a new preview.",
   DRAFT_NOT_DRAWN: 'This preview was not drawn in a way that can take new words. Make a new preview with them.',
   DRAFT_CHANGED: 'The letter changed while its page was being drawn again. Try the words again.'
 };
@@ -228,6 +228,17 @@ describe('set_letter_words on a signed gift letter (#612 review round 1)', () =>
 });
 
 describe('set_letter_words', () => {
+  it('answers with the content version the change wrote, and none when the writer told none (#695)', async () => {
+    vi.mocked(getDraftForStationery).mockResolvedValue(draft({ bodyText: lines(10) }) as never);
+    vi.mocked(setDraftWords).mockImplementation(async (...args: unknown[]) => {
+      (args.at(-1) as (version: string) => void)('0123456789abcdef');
+      return null;
+    });
+    expect(await change('Dear Sam,\n\nThe garden is in.')).toMatchObject({ contentVersion: '0123456789abcdef' });
+    vi.mocked(setDraftWords).mockResolvedValue(null);
+    expect(await change('Dear Sam,\n\nThe garden is in.')).not.toHaveProperty('contentVersion');
+  });
+
   it("changes a one-page letter's words on one page: drawn with them, written with what it was drawn in, priced as before", async () => {
     vi.mocked(getDraftForStationery).mockResolvedValue(draft({ bodyText: lines(10) }) as never);
 

@@ -311,6 +311,78 @@ describePostgres('a letter\'s signature (migration 051, #608)', () => {
     ).resolves.toBe('not_found');
   }, 60_000);
 
+  /**
+   * The content version (#695) is read two ways: the editors and get_draft_status
+   * select the pictures' hashes from the database, the send and the confirmation
+   * page hash the pictures they read. Both must give the same version, or every
+   * send after an edit would be refused.
+   */
+  it('gives one content version whoever reads it, and the send takes only the latest (#695)', async () => {
+    const userId = await seedUser();
+    const { draftId, contentVersion: shown } = await drafts.createDraft({
+      userId,
+      sender: SENDER,
+      recipient: RECIPIENT,
+      bodyText: `Hello ${randomUUID()}`,
+      signOff: 'Warmly,\nTest',
+      requiredCredits: 2,
+      previewHtml: PAGE,
+      layoutType: 'text_only',
+      rendererVersion: 'pdf-4',
+      stationery: BOTANICAL as never,
+      signatureImage: SIGNATURE
+    });
+    const { CONTENT_VERSION_COLUMNS, contentVersionOf } = await import('../../src/services/contentVersion.js');
+    /** The version as the editors and get_draft_status read it: the pictures hashed by the database. */
+    const draftContentVersion = async (id: string, owner: string) => {
+      const row = (await pool.query(
+        `SELECT ${CONTENT_VERSION_COLUMNS} FROM letter_drafts WHERE draft_id = $1 AND user_id = $2`, [id, owner]
+      )).rows[0];
+      return row ? contentVersionOf(row) : null;
+    };
+
+    expect(shown).toMatch(/^[0-9a-f]{16}$/);
+    // The database's hashes (get_draft_status, the editors) and Node's (the send, the page) agree.
+    expect(await draftContentVersion(draftId, userId)).toBe(shown);
+    expect(contentVersionOf((await drafts.getDraftState(draftId))!)).toBe(shown);
+    expect(contentVersionOf((await drafts.getDraft(draftId))!)).toBe(shown);
+    // Another account reads nothing.
+    expect(await draftContentVersion(draftId, `auth0|stranger-${randomUUID()}`)).toBeNull();
+
+    // Characters beyond ASCII hash alike in both, and a change to a picture changes the version.
+    await pool.query('UPDATE letter_drafts SET header_image_data = $2 WHERE draft_id = $1', [draftId, 'data:image/png;base64,\u00e9\u20ac\u{1F600}']);
+    const withHeader = await draftContentVersion(draftId, userId);
+    expect(withHeader).not.toBe(shown);
+    expect(contentVersionOf((await drafts.getDraft(draftId))!)).toBe(withHeader);
+    await pool.query('UPDATE letter_drafts SET header_image_data = NULL WHERE draft_id = $1', [draftId]);
+    expect(await draftContentVersion(draftId, userId)).toBe(shown);
+
+    // An edit tells its caller the version it wrote, read in its own transaction.
+    const row = (await pool.query<{ body_text: string; sign_off: string | null; stationery: unknown; signature_image: string | null }>(
+      'SELECT body_text, sign_off, stationery, signature_image FROM letter_drafts WHERE draft_id = $1', [draftId]
+    )).rows[0];
+    let written: string | undefined;
+    await expect(drafts.setDraftSignature(draftId, userId, {
+      signatureImage: null,
+      previewHtml: PAGE,
+      pages: 1,
+      drawnFrom: { words: { bodyText: row.body_text, signOff: row.sign_off }, stationery: row.stationery, signature: row.signature_image }
+    }, new Date(), version => { written = version; })).resolves.toBeNull();
+    expect(written).toMatch(/^[0-9a-f]{16}$/);
+    expect(written).not.toBe(shown);
+    expect(await draftContentVersion(draftId, userId)).toBe(written);
+    expect(contentVersionOf((await drafts.getDraft(draftId))!)).toBe(written);
+
+    // The send refuses the version shown before the edit, spending nothing, and takes the one after it.
+    await expect(mailSend.createMailOrderFromDraft({ draftId, userId, mailType: 'letter', contentVersion: shown }))
+      .rejects.toMatchObject({ code: 'DRAFT_CHANGED_SINCE_SHOWN' });
+    expect((await pool.query<{ status: string }>('SELECT status FROM letter_drafts WHERE draft_id = $1', [draftId])).rows[0].status)
+      .toBe('pending');
+    expect((await pool.query<{ credits: number }>('SELECT credits FROM users WHERE user_id = $1', [userId])).rows[0].credits).toBe(10);
+    const sent = await mailSend.createMailOrderFromDraft({ draftId, userId, mailType: 'letter', contentVersion: written });
+    expect(sent.alreadyConsumed).toBe(false);
+  }, 60_000);
+
   it("remembers a preview's explicit choice on the saved signature, and does nothing without one", async () => {
     const userId = await seedUser();
     await signatures.saveSignature(userId, { png: Buffer.from('89504e470d0a1a0a00000000', 'hex'), width: 600, height: 150 });

@@ -106,6 +106,8 @@ interface QuoteAndPreviewPostcardInput {
 }
 
 export interface QuoteAndPreviewPostcardOutput {
+  /** The version of the draft as stored (#695): the send takes it back, so what is mailed is what was shown. */
+  contentVersion?: string;
   previewFrontHtml: string;
   previewBackHtml: string;
   /**
@@ -676,6 +678,7 @@ async function handler(
     deliveryEstimate: schedule ? scheduleSentence(schedule.output, context.now()) : DELIVERY_ESTIMATE,
     deliveryDisclaimer: DELIVERY_DISCLAIMER,
     draftId: draftResult.draftId,
+    ...(draftResult.contentVersion ? { contentVersion: draftResult.contentVersion } : {}),
     draftExpiresAt: draftResult.expiresAt.toISOString(),
     message: input.message,
     recipientName: input.recipient.name,

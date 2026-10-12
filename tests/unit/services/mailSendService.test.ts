@@ -141,6 +141,7 @@ vi.mock('../../../src/utils/diagnosticLog.js', async importOriginal => ({
 }));
 
 import { createMailOrderFromDraft } from '../../../src/services/mailSendService.js';
+import { contentVersionOf } from '../../../src/services/contentVersion.js';
 
 describe('createMailOrderFromDraft', () => {
   beforeEach(() => {
@@ -258,6 +259,58 @@ describe('createMailOrderFromDraft', () => {
     await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter' });
     expect(savedLetter?.content).toMatchObject({ rendererVersion: 'pdf-1' });
     expect(savedLetter?.content).not.toHaveProperty('pages');
+  });
+
+  describe('the content version the person was shown (#695)', () => {
+    it('sends a draft whose version is the one shown', async () => {
+      const shown = contentVersionOf(draft);
+      await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter', contentVersion: shown });
+      expect(savedLetter).not.toBeNull();
+      expect(mocks.diagnostics.map(entry => entry.event)).not.toContain('send.content_version_missing');
+    });
+
+    it('refuses a draft changed after it was shown, before any letter is spent', async () => {
+      const shown = contentVersionOf(draft);
+      draft.body_text = 'Hello, changed';
+      await expect(createMailOrderFromDraft({
+        draftId: 'draft-1', userId: 'user-1', mailType: 'letter', contentVersion: shown
+      })).rejects.toMatchObject({ code: 'DRAFT_CHANGED_SINCE_SHOWN' });
+      expect(deductCredits).not.toHaveBeenCalled();
+      expect(createOutboxJob).not.toHaveBeenCalled();
+      expect(savedLetter).toBeNull();
+      expect(draft.status).toBe('pending');
+    });
+
+    it.each([
+      ['a version of another shape', 'not-a-version'],
+      ['a number', 42]
+    ])('refuses %s', async (_label, shown) => {
+      await expect(createMailOrderFromDraft({
+        draftId: 'draft-1', userId: 'user-1', mailType: 'letter', contentVersion: shown as never
+      })).rejects.toMatchObject({ code: 'DRAFT_CHANGED_SINCE_SHOWN' });
+      expect(deductCredits).not.toHaveBeenCalled();
+    });
+
+    it('sends a draft named without a version for one release, and logs it', async () => {
+      await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter' });
+      expect(savedLetter).not.toBeNull();
+      expect(mocks.diagnostics).toContainEqual(expect.objectContaining({
+        event: 'send.content_version_missing', fields: { mailType: 'letter' }
+      }));
+    });
+
+    it('leaves the fulfilment of a paid order alone: its checkout compared the version', async () => {
+      commerceOrder = {
+        order_id: 'order-jit', order_type: 'jit_mail', product_code: 'jit-letter',
+        user_id: 'user-1', draft_id: 'draft-1', status: 'paid'
+      };
+      await createMailOrderFromDraft({
+        draftId: 'draft-1', userId: 'user-1', mailType: 'letter',
+        funding: { type: 'jit_order', orderId: 'order-jit' }, contentVersion: 'stale-version'
+      });
+      expect(savedLetter).not.toBeNull();
+      expect(mocks.diagnostics.map(entry => entry.event)).not.toContain('send.content_version_missing');
+    });
   });
 
   describe('certified mail (#625)', () => {

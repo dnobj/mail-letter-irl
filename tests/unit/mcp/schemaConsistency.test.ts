@@ -77,8 +77,13 @@ describe('one tool contract (#688)', () => {
     const send = servedToolJsonSchemas('send_letter').inputSchema;
     expect(send.required).toEqual(expect.arrayContaining(['draftId', 'confirm']));
     const checkout = servedToolJsonSchemas('create_mail_checkout').inputSchema;
-    expect(Object.keys(checkout.properties)).toEqual(['draftId', 'sendAnotherCopy']);
+    expect(Object.keys(checkout.properties)).toEqual(['draftId', 'contentVersion', 'sendAnotherCopy']);
     expect(checkout.required).toEqual(['draftId']);
+    // The version the person was shown (#695): asked for, never required, for one release.
+    for (const schema of [send, checkout, servedToolJsonSchemas('send_postcard').inputSchema]) {
+      expect(schema.properties.contentVersion).toMatchObject({ type: 'string' });
+      expect(schema.required).not.toContain('contentVersion');
+    }
     expect(Object.keys(servedToolJsonSchemas('get_purchase_status').inputSchema.properties)).toEqual(['orderId']);
   });
 

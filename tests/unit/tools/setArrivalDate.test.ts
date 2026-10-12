@@ -69,7 +69,9 @@ describe('set_arrival_date (#535)', () => {
       DRAFT_ID,
       'auth0|owner',
       { arriveBy: '2026-10-16', mailOn: '2026-10-06' },
-      THURSDAY_MORNING
+      THURSDAY_MORNING,
+      // Told the content version once written (#695).
+      expect.any(Function)
     );
     expect(result).toEqual({
       draftId: DRAFT_ID,
@@ -87,6 +89,16 @@ describe('set_arrival_date (#535)', () => {
     });
   });
 
+  it('answers with the content version the change wrote, and none when the writer told none (#695)', async () => {
+    vi.mocked(setDraftSchedule).mockImplementation(async (...args: unknown[]) => {
+      (args.at(-1) as (version: string) => void)('0123456789abcdef');
+      return null;
+    });
+    expect(await set({ draftId: DRAFT_ID, arriveBy: '2026-10-16' })).toMatchObject({ contentVersion: '0123456789abcdef' });
+    vi.mocked(setDraftSchedule).mockResolvedValue(null);
+    expect(await set({ draftId: DRAFT_ID, arriveBy: '2026-10-16' })).not.toHaveProperty('contentVersion');
+  });
+
   it('names the year of a date in another year', async () => {
     const result = await set({ draftId: DRAFT_ID, arriveBy: '2027-01-08' }, context(new Date('2026-11-20T15:00:00Z')));
     expect(result.schedule?.mailOn).toBe('2026-12-29');
@@ -100,7 +112,7 @@ describe('set_arrival_date (#535)', () => {
   ])('clears the dates when arriveBy is %s', async (_label, extra) => {
     const result = await set({ draftId: DRAFT_ID, ...extra });
 
-    expect(setDraftSchedule).toHaveBeenCalledWith(DRAFT_ID, 'auth0|owner', null, THURSDAY_MORNING);
+    expect(setDraftSchedule).toHaveBeenCalledWith(DRAFT_ID, 'auth0|owner', null, THURSDAY_MORNING, expect.any(Function));
     expect(result).toEqual({
       draftId: DRAFT_ID,
       deliveryEstimate: DELIVERY_ESTIMATE,
@@ -132,7 +144,7 @@ describe('set_arrival_date (#535)', () => {
     ['not_found', 'DRAFT_NOT_FOUND', "That preview wasn't found. Make a new preview, then try again."],
     ['sent', 'DRAFT_ALREADY_SENT', "This mail has already been sent, so its arrival date can't change. list_orders shows it."],
     ['expired', 'DRAFT_EXPIRED', 'This preview has expired. Make a new preview: the preview tools take arriveBy themselves.'],
-    ['checkout_pending', 'DRAFT_CHECKOUT_PENDING', "This preview is tied to a Pay & Send payment, so its arrival date can't change now."]
+    ['checkout_pending', 'DRAFT_CHECKOUT_PENDING', "This preview is tied to a Pay & Send payment, so its arrival date can't change now. Finish or let that payment lapse, or make a new preview."]
   ] as const)('refuses a draft the service left alone (%s)', async (reason, code, message) => {
     vi.mocked(setDraftSchedule).mockResolvedValue(reason);
     const ctx = context();

@@ -51,6 +51,8 @@ interface SetPostcardStyleInput {
 }
 
 export interface SetPostcardStyleOutput {
+  /** The draft's content version once changed (#695): the send takes it back. */
+  contentVersion?: string;
   draftId: string;
   /** The size it is now: 6x9, or 6x4 (a 4x6) or 6x11 (an 11x6). */
   size: PostcardSize;
@@ -265,11 +267,12 @@ async function handler(input: SetPostcardStyleInput, context: ToolContext): Prom
   );
   const previewHtml = renderPostcardPreviewDocument(size === sizeBefore ? [drawn[0], storedPages[1]] : drawn);
 
+  let contentVersion: string | undefined;
   const refusal = await setDraftPostcardStyle(
     draftId,
     userId,
     { size, front: front ?? null, previewHtml, frontImageData: croppedAgain, drawnFrom: { previewHtml: draft.preview_html } },
-    context.now()
+    context.now(), version => { contentVersion = version; }
   );
   if (refusal) throw refused(...POSTCARD_STYLE_REFUSALS[refusal], context);
 
@@ -284,6 +287,7 @@ async function handler(input: SetPostcardStyleInput, context: ToolContext): Prom
     'A postcard preview was restyled'
   );
   return {
+    ...(contentVersion ? { contentVersion } : {}),
     draftId,
     size,
     layout: front?.layout ?? 'full_bleed',

@@ -216,6 +216,18 @@ describe('a held letter or postcard', () => {
   });
 });
 
+describe('the content version of the draft each preview made (#695)', () => {
+  it.each(Object.keys(LETTERS) as Array<keyof typeof LETTERS>)('%s: answers with it, for the send to take back', async layout => {
+    vi.mocked(createDraft).mockResolvedValue({ draftId: 'draft-1', expiresAt: new Date('2026-10-02T14:00:00Z'), contentVersion: '0123456789abcdef' });
+    expect(await letter(layout)).toMatchObject({ contentVersion: '0123456789abcdef' });
+  });
+
+  it('postcard: the same', async () => {
+    vi.mocked(createPostcardDraft).mockResolvedValue({ draftId: 'draft-2', expiresAt: new Date('2026-10-02T14:00:00Z'), contentVersion: 'fedcba9876543210' });
+    expect(await postcard()).toMatchObject({ contentVersion: 'fedcba9876543210' });
+  });
+});
+
 describe('a date that cannot be met', () => {
   it.each([
     ['too soon', '2026-10-12', 'The earliest this can arrive is Tue, Oct 13 (2026-10-13). Choose that date or later, or leave arriveBy out to mail as soon as possible.'],

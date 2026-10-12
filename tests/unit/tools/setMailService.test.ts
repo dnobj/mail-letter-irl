@@ -127,7 +127,7 @@ describe('set_mail_service (#625)', () => {
     vi.mocked(getDraftForMailService).mockResolvedValue(draft({ mail_service: service }));
     const result = await set({ draftId: DRAFT_ID, mailService: service }, context(10));
 
-    expect(setDraftMailService).toHaveBeenCalledWith(DRAFT_ID, 'auth0|owner', service, NOW);
+    expect(setDraftMailService).toHaveBeenCalledWith(DRAFT_ID, 'auth0|owner', service, NOW, expect.any(Function));
     expect(getDraftForMailService).toHaveBeenCalledWith(DRAFT_ID, 'auth0|owner');
     expect(result).toMatchObject({
       draftId: DRAFT_ID,
@@ -145,11 +145,21 @@ describe('set_mail_service (#625)', () => {
     expect(vi.mocked(getSendEligibility).mock.calls.at(-1)![2]).toEqual({ mailType: 'letter', mailService: service });
   });
 
+  it('answers with the content version the change wrote, and none when the writer told none (#695)', async () => {
+    vi.mocked(setDraftMailService).mockImplementation(async (...args: unknown[]) => {
+      (args.at(-1) as (version: string) => void)('0123456789abcdef');
+      return null;
+    });
+    expect(await set({ draftId: DRAFT_ID, mailService: 'standard' }, context(10))).toMatchObject({ contentVersion: '0123456789abcdef' });
+    vi.mocked(setDraftMailService).mockResolvedValue(null);
+    expect(await set({ draftId: DRAFT_ID, mailService: 'standard' }, context(10))).not.toHaveProperty('contentVersion');
+  });
+
   it('sets standard, and then the balance pays for a one-page letter again', async () => {
     vi.mocked(getDraftForMailService).mockResolvedValue(draft());
     const result = await set({ draftId: DRAFT_ID, mailService: 'standard' }, context(10));
 
-    expect(setDraftMailService).toHaveBeenCalledWith(DRAFT_ID, 'auth0|owner', 'standard', NOW);
+    expect(setDraftMailService).toHaveBeenCalledWith(DRAFT_ID, 'auth0|owner', 'standard', NOW, expect.any(Function));
     expect(result).not.toHaveProperty('mailService');
     // Ordinary mail says so in words too, so a card told of the change back draws First-Class again.
     expect(result).toMatchObject({ deliveryClass: 'USPS First-Class Mail', deliveryDisclaimer: 'USPS timing varies and can take longer.' });
@@ -200,7 +210,7 @@ describe('set_mail_service (#625)', () => {
 
   it('trims the draft id it was given', async () => {
     await set({ draftId: `  ${DRAFT_ID}  `, mailService: 'certified' });
-    expect(setDraftMailService).toHaveBeenCalledWith(DRAFT_ID, 'auth0|owner', 'certified', NOW);
+    expect(setDraftMailService).toHaveBeenCalledWith(DRAFT_ID, 'auth0|owner', 'certified', NOW, expect.any(Function));
   });
 
   it.each([undefined, null, '', 'Certified', ' certified', 'express', 0, ['certified']])(

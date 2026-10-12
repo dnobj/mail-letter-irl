@@ -12,6 +12,8 @@ import {
 interface CreateMailCheckoutInput {
   draftId: string;
   sendAnotherCopy?: boolean;
+  /** The content version the person was shown (#695). */
+  contentVersion?: string;
 }
 
 interface CreateMailCheckoutOutput {
@@ -95,6 +97,11 @@ export function friendlyCheckoutError(error: unknown): Error {
       return friendly(
         'This letter changed while its payment was being opened, so nothing was charged. Please try again.'
       );
+    case 'DRAFT_CHANGED_SINCE_SHOWN':
+      // An edit came after what the person saw (#695): refused before any order.
+      return friendly(
+        'This mail changed after it was shown, so nothing was charged. Show the person the mail as it is now (its preview card, or a new preview), and open the payment once they have seen it.'
+      );
     case 'PREVIOUS_CHECKOUT_CLOSING':
       // The letter changed after its last checkout opened, and that checkout
       // is still closing at the old price (#586): nothing is charged here.
@@ -156,7 +163,8 @@ async function handler(
     const result = await createJitCheckout({
       userId: context.user.userId,
       draftId: input.draftId,
-      allowDuplicate: input.sendAnotherCopy === true
+      allowDuplicate: input.sendAnotherCopy === true,
+      contentVersion: input.contentVersion
     });
     const pending = result.status === 'checkout_pending';
     return {

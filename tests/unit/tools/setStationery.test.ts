@@ -127,6 +127,17 @@ afterEach(() => {
 });
 
 describe('set_stationery', () => {
+  it('answers with the content version the change wrote, and none when the writer told none (#695)', async () => {
+    vi.mocked(getDraftForStationery).mockResolvedValue(draft());
+    vi.mocked(setDraftStationery).mockImplementation(async (...args: unknown[]) => {
+      (args.at(-1) as (version: string) => void)('0123456789abcdef');
+      return null;
+    });
+    expect(await run({ stationery: 'Botanical' })).toMatchObject({ contentVersion: '0123456789abcdef' });
+    vi.mocked(setDraftStationery).mockResolvedValue(null);
+    expect(await run({ stationery: 'Botanical' })).not.toHaveProperty('contentVersion');
+  });
+
   it('draws the letter again in the theme, records pdf-2 with it, and says what it did', async () => {
     vi.mocked(getDraftForStationery).mockResolvedValue(draft());
 

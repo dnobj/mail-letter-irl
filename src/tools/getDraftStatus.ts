@@ -1,3 +1,4 @@
+import { contentVersionOf } from '../services/contentVersion.js';
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
 import { DELIVERY_ESTIMATE } from '../content/delivery.js';
 import { scheduleSentence } from '../services/deliverySchedule.js';
@@ -51,6 +52,8 @@ interface GetDraftStatusInput {
 export interface GetDraftStatusOutput extends LetterTravel {
   draftId: string;
   status: 'ready' | 'sent' | 'expired' | 'not_found';
+  /** The version of a ready draft as it is now (#695). */
+  contentVersion?: string;
   /** The order the draft became, once sent. */
   orderId?: string;
   /** Ready: the draft's arrival dates (#535). Sent: the order's, from its letter. */
@@ -149,6 +152,8 @@ async function handler(
     : { draftId, status: 'ready', deliveryEstimate: DELIVERY_ESTIMATE };
   return {
     ...ready,
+    // The version of the mail as it is now (#695): a card that redraws from this sends it.
+    contentVersion: contentVersionOf(draft),
     ...styleNow(draft),
     ...signatureNow(draft),
     ...pagesNow(draft),

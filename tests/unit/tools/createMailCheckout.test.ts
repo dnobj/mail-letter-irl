@@ -75,6 +75,15 @@ describe("create_mail_checkout", () => {
     });
   });
 
+  it("hands commerce the content version the person was shown (#695)", async () => {
+    mocks.createJitCheckout.mockResolvedValueOnce({
+      orderId: "order-1", checkoutUrl: "https://checkout.stripe.com/c/pay/test", amountCents: 499, currency: "usd",
+      productDescription: "Pay & Send One Physical Letter", expiresAt: "2026-07-31T12:30:00.000Z", status: "checkout_pending", reused: false
+    });
+    await createMailCheckoutTool.handler({ draftId: "draft-1", contentVersion: "0123456789abcdef" }, context);
+    expect(mocks.createJitCheckout).toHaveBeenCalledWith(expect.objectContaining({ contentVersion: "0123456789abcdef" }));
+  });
+
   it("asks commerce for another copy only when the model says so (#412)", async () => {
     mocks.createJitCheckout.mockResolvedValue({
       orderId: "order-1",

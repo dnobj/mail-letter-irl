@@ -354,6 +354,12 @@ describePostgres('arrive-by (migration 040, #535)', () => {
     await expect(drafts.setDraftSchedule(draftId, userId, dates)).resolves.toBeNull();
     expect(await datesOf(draftId)).toEqual([dates.arriveBy, dates.mailOn]);
 
+    // Unless its Stripe session opened: that can still be paid until Stripe closes it,
+    // so the draft stays as it is paid for (#695).
+    await pool.query('UPDATE orders SET stripe_checkout_session_id = $2 WHERE order_id = $1', [orderId, `cs_test_${randomUUID()}`]);
+    await expect(drafts.setDraftSchedule(draftId, userId, null)).resolves.toBe('checkout_pending');
+    expect(await datesOf(draftId)).toEqual([dates.arriveBy, dates.mailOn]);
+
     // Paid, and every other live state, whatever the window.
     for (const status of ['paid', 'fulfillment_pending', 'refund_pending', 'disputed', 'held']) {
       await pool.query('UPDATE orders SET status = $2::varchar WHERE order_id = $1', [orderId, status]);

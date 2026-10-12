@@ -53,6 +53,8 @@ interface SetLetterWordsInput {
 }
 
 export interface SetLetterWordsOutput extends LetterTravel {
+  /** The draft's content version once changed (#695): the send takes it back. */
+  contentVersion?: string;
   draftId: string;
   /** The preview drawn again: for the card, in _meta, never the model's (partitionToolResult). */
   previewHtml: string;
@@ -213,12 +215,13 @@ async function handler(input: SetLetterWordsInput, context: ToolContext): Promis
 
   // With the stationery it was drawn in and the words it replaces, refused if
   // either changed meanwhile.
+  let contentVersion: string | undefined;
   const refusal = await setDraftWords(
     draftId,
     userId,
     // Drawn with the draft's signature (#608), which set_letter_signature changes in place.
     { bodyText, signOff, previewHtml, pages, drawnIn: draft.stationery, replacing, drawnWith: draft.signature_image },
-    context.now()
+    context.now(), version => { contentVersion = version; }
   );
   if (refusal) throw refused(...WORDS_REFUSALS[refusal], context);
 
@@ -236,6 +239,7 @@ async function handler(input: SetLetterWordsInput, context: ToolContext): Promis
       ? await giftLetterNote(context)
       : '';
   return {
+    ...(contentVersion ? { contentVersion } : {}),
     draftId,
     previewHtml,
     ...(pages > 1 ? { pages } : {}),

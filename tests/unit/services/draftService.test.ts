@@ -55,6 +55,7 @@ import {
   getDraftState,
   LIVE_PAY_AND_SEND_STATUSES,
 } from '../../../src/services/draftService.js';
+import { CONTENT_VERSION_COLUMNS, contentVersionColumns, contentVersionOf } from '../../../src/services/contentVersion.js';
 
 describe('draftService', () => {
   beforeEach(() => {
@@ -69,6 +70,23 @@ describe('draftService', () => {
   // createDraft Tests
   // ==========================================================================
   describe('createDraft', () => {
+    it('returns the content version of the draft as written, read back by its INSERT (#695)', async () => {
+      const row = { draft_id: 'draft-1', expires_at: new Date('2026-10-02T12:00:00Z'), mail_type: 'letter', body_text: 'Hello', signature_image_hash: 'ab' };
+      vi.mocked(db.query).mockResolvedValueOnce({ rows: [row], rowCount: 1, command: 'INSERT', oid: 0, fields: [] });
+
+      const result = await createDraft({
+        userId: testUsers.sarah.user_id,
+        sender: testAddresses.validSender,
+        recipient: testAddresses.validRecipient,
+        bodyText: 'Hello',
+        signOff: 'Love',
+        requiredCredits: 2,
+      });
+
+      expect(result.contentVersion).toBe(contentVersionOf(row));
+      expect(vi.mocked(db.query).mock.calls[0][0]).toContain(`RETURNING draft_id, expires_at, ${CONTENT_VERSION_COLUMNS}`);
+    });
+
     it('should create a draft with 24-hour expiration by default', async () => {
       const mockDraft = testDrafts.pending();
 
@@ -461,6 +479,23 @@ describe('draftService', () => {
   });
 
   describe('createPostcardDraft', () => {
+    it('returns the content version of the postcard as written, read back by its INSERT (#695)', async () => {
+      const row = { draft_id: 'draft-1', expires_at: new Date('2026-10-02T12:00:00Z'), mail_type: 'postcard', body_text: 'Hi', front_image_data_hash: 'cd' };
+      vi.mocked(db.query).mockResolvedValueOnce({ rows: [row], rowCount: 1, command: 'INSERT', oid: 0, fields: [] });
+
+      const result = await createPostcardDraft({
+        userId: testUsers.sarah.user_id,
+        sender: testAddresses.validSender as unknown as Record<string, unknown>,
+        recipient: testAddresses.validRecipient as unknown as Record<string, unknown>,
+        message: 'Hi',
+        frontImageData: 'data:image/jpeg;base64,AAAA',
+        frontImageUrl: 'https://files.example/a.jpg',
+      });
+
+      expect(result.contentVersion).toBe(contentVersionOf(row));
+      expect(vi.mocked(db.query).mock.calls[0][0]).toContain(`RETURNING draft_id, expires_at, ${CONTENT_VERSION_COLUMNS}`);
+    });
+
     it('records the renderer that drew the preview (#534 Phase 4), and none for the legacy HTML', async () => {
       const inserted = {
         rows: [{ draft_id: 'draft-1', expires_at: new Date('2026-10-02T12:00:00Z') }],
@@ -885,6 +920,8 @@ describe('draftService', () => {
       expect(live[0]).toMatch(/status = ANY\(\$2::varchar\[\]\)/);
       // A checkout whose window has passed can no longer be paid.
       expect(live[0]).toMatch(/status <> 'checkout_pending' OR checkout_expires_at IS NULL OR checkout_expires_at > NOW\(\)/);
+      // Past the window, a checkout whose Stripe session opened still holds it until Stripe closes it (#695).
+      expect(live[0]).toMatch(/OR stripe_checkout_session_id IS NOT NULL OR checkout_url IS NOT NULL\)/);
       expect(live[1]).toEqual(['draft-1', [...LIVE_PAY_AND_SEND_STATUSES]]);
       expect(update[0]).toMatch(/UPDATE letter_drafts\s+SET arrive_by = \$2::date, mail_on = \$3::date, updated_at = NOW\(\)\s+WHERE draft_id = \$1/);
       expect(update[1]).toEqual(['draft-1', '2026-10-16', '2026-10-06']);
@@ -922,6 +959,29 @@ describe('draftService', () => {
 
       await expect(setDraftSchedule('draft-1', 'auth0|owner', DATES, NOW)).resolves.toBe('checkout_pending');
 
+      expect(client.query).toHaveBeenCalledTimes(2);
+    });
+
+    it('tells its caller the content version it wrote, read in the same transaction (#695)', async () => {
+      const written = { mail_type: 'letter', body_text: 'Hello', arrive_by: '2026-10-16', mail_on: '2026-10-06', signature_image_hash: null };
+      const client = inTransaction({ rows: [pending] }, { rows: [] }, { rows: [] }, { rows: [written] });
+      const onWritten = vi.fn();
+
+      await expect(setDraftSchedule('draft-1', 'auth0|owner', DATES, NOW, onWritten)).resolves.toBeNull();
+
+      expect(onWritten).toHaveBeenCalledWith(contentVersionOf(written));
+      const read = client.query.mock.calls[3] as [string, unknown[]];
+      expect(read).toEqual([`SELECT ${CONTENT_VERSION_COLUMNS} FROM letter_drafts WHERE draft_id = $1`, ['draft-1']]);
+      expect(client.query).toHaveBeenCalledTimes(4);
+    });
+
+    it('tells nothing, and reads nothing more, when it changed nothing (#695)', async () => {
+      const client = inTransaction({ rows: [pending] }, { rows: [{ '?column?': 1 }] });
+      const onWritten = vi.fn();
+
+      await expect(setDraftSchedule('draft-1', 'auth0|owner', DATES, NOW, onWritten)).resolves.toBe('checkout_pending');
+
+      expect(onWritten).not.toHaveBeenCalled();
       expect(client.query).toHaveBeenCalledTimes(2);
     });
 
@@ -1179,11 +1239,13 @@ describe('draftService stationery (#563)', () => {
       ['its sign-off, gone', { sign_off: null }]
     ])('refuses a restyle drawn from words that changed under it: %s (#586)', async (_label, changed) => {
       const client = inTransaction({ rows: [pending] }, { rows: [] }, { rows: [{ ...DRAWN, ...changed }] });
+      const onWritten = vi.fn();
       await expect(
-        setDraftStationery('draft-1', 'auth0|owner', { stationery: BOTANICAL, previewHtml: PAGE, pages: 2, drawnFrom: WORDS }, NOW)
+        setDraftStationery('draft-1', 'auth0|owner', { stationery: BOTANICAL, previewHtml: PAGE, pages: 2, drawnFrom: WORDS }, NOW, onWritten)
       ).resolves.toBe('changed');
-      // Nothing written, nothing remembered.
+      // Nothing written, nothing remembered, and no version told (#695).
       expect(client.query).toHaveBeenCalledTimes(3);
+      expect(onWritten).not.toHaveBeenCalled();
     });
 
     it('takes a sign-off stored as none as the none it was drawn from', async () => {
@@ -1399,7 +1461,10 @@ describe('draftService postcard style (#594)', () => {
       expect(sql).toMatch(/CASE WHEN d\.status = 'pending' AND d\.renderer_version IS NOT NULL\s+THEN d\.preview_html END AS preview_html/);
       // Whether it is signed (#608), never the picture: an emptied copy reads as unsigned.
       expect(sql).toContain("(d.signature_image IS NOT NULL AND d.signature_image <> '') AS signed");
-      expect(sql).not.toMatch(/d\.signature_image(,|\s+FROM)/);
+      // The content version (#695) reads every picture by the hash the database computes, never its data.
+      expect(sql).toContain(contentVersionColumns('d.'));
+      const outsideHashes = sql.replace(/CASE WHEN d\.\w+ IS NULL OR d\.\w+ = '' THEN NULL ELSE encode\(sha256\(convert_to\(d\.\w+, 'UTF8'\)\), 'hex'\) END AS \w+_hash/g, '');
+      expect(outsideHashes).not.toMatch(/d\.(signature_image|header_image_data|inline_image_data|front_image_data)(,|\s+FROM)/);
     });
   });
 

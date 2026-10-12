@@ -643,6 +643,8 @@ export interface CreateDraftParams {
 export interface CreateDraftResult {
   draftId: string;
   expiresAt: Date;
+  /** The draft's content version as stored (#695, contentVersion.ts). */
+  contentVersion?: string;
 }
 
 export interface ConsumeDraftParams {
@@ -907,6 +909,8 @@ export interface CreatePostcardDraftParams {
 }
 
 export interface CreatePostcardDraftResult {
+  /** The draft's content version as stored (#695, contentVersion.ts). */
+  contentVersion?: string;
   draftId: string;
   expiresAt: Date;
 }

@@ -1,5 +1,6 @@
 /** Atomic draft consumption, funding, letter creation, and outbox insertion. */
 
+import { contentVersionMatches } from './contentVersion.js';
 import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import { transaction } from '../db/index.js';
@@ -44,6 +45,12 @@ export interface CreateMailOrderParams {
    * checkout is created.
    */
   allowDuplicate?: boolean;
+  /**
+   * The version of the draft the person was shown (#695, contentVersion.ts):
+   * the send mails that, or nothing. Pay & Send compares it when its checkout
+   * is created, and the paid fulfilment passes none.
+   */
+  contentVersion?: string;
 }
 
 export interface CreateMailOrderResult {
@@ -268,6 +275,18 @@ export async function createMailOrderFromDraftWithClient(
   }
   if (draft.status !== 'pending') {
     throw draftError('DRAFT_INVALID_STATE', `Draft ${params.draftId} is ${draft.status}`);
+  }
+
+  // What the person saw (#695), compared under the draft's lock: an edit that
+  // came after it refuses the send, which never mails a letter they did not see.
+  // A prepaid send that names no version is let through for one release, and
+  // logged; the paid fulfilment of Pay & Send was compared at its checkout.
+  if (funding.type === 'prepaid_balance') {
+    const shown = contentVersionMatches(params.contentVersion, draft);
+    if (shown === 'differs') {
+      throw draftError('DRAFT_CHANGED_SINCE_SHOWN', `Draft ${params.draftId} changed since it was shown`);
+    }
+    if (shown === 'missing') writeDiagnostic('info', 'send.content_version_missing', { mailType: actualMailType });
   }
 
   // Held mail (#535): when it goes to the printer, decided before any value moves.

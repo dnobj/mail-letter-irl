@@ -1,5 +1,6 @@
 /** Platform-neutral commerce orchestration backed by the Stripe adapter. */
 
+import { contentVersionMatches } from './contentVersion.js';
 import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import type Stripe from 'stripe';
@@ -128,6 +129,12 @@ export interface CreateJitCheckoutParams {
    * request, as a changed price is.
    */
   returnTo?: { successUrl: string; cancelUrl: string };
+  /**
+   * The version of the draft the person was shown (#695, contentVersion.ts),
+   * compared under the draft's lock before anything is charged. None is let
+   * through for one release, and logged.
+   */
+  contentVersion?: string;
 }
 
 export interface PurchaseStatusResult {
@@ -901,6 +908,19 @@ async function prepareJitOrder(
     if (draft.is_gift_send) {
       throw Object.assign(new Error('Draft is a gift send'), { code: 'DRAFT_IS_GIFT' });
     }
+    // What the person saw (#695): an edit after it refuses the checkout, before any
+    // charge, so Pay & Send never takes money for mail they did not see. The draft
+    // is held by the order from here (lockChangeableDraft: while its checkout can be
+    // paid, until Stripe closes a session that opened), so its paid fulfilment mails
+    // this content.
+    const shown = contentVersionMatches(params.contentVersion, draft);
+    if (shown === 'differs') {
+      throw Object.assign(new Error('Draft changed since it was shown'), {
+        code: 'DRAFT_CHANGED_SINCE_SHOWN',
+        diagnosticClass: 'DRAFT_CHANGED_SINCE_SHOWN'
+      });
+    }
+    if (shown === 'missing') writeDiagnostic('info', 'checkout.content_version_missing', {});
     // Arrive-by (#535): a mail date already past is refused before the charge.
     // After it, fulfilment mails as soon as it can (mailSendService). The send's
     // own reader, so dates it could not read fail here, before the charge.
@@ -985,12 +1005,13 @@ async function prepareJitOrder(
       } else if (existing.stripe_checkout_session_id || existing.checkout_url) {
         // A Stripe session already exists: the customer will pay exactly what
         // that session says, which matches this order row. Reuse is safe -
-        // unless the letter changed since (#586). New words or a restyle can
-        // change its pages, and so its product, once this checkout's window
-        // has passed (lockChangeableDraft), and that session is closing at
-        // the old price. Only Stripe's word (its webhook, or the sweep)
-        // cancels a session-bearing order, so this refuses until then rather
-        // than reuse it (#593 review round 1).
+        // unless the letter's product changed since (#586). No editor changes
+        // a draft while a session-bearing order is live (lockChangeableDraft,
+        // #695), so this now guards a draft edited before that rule, or a
+        // change of which product a mail option maps to, while that session is
+        // closing at the old price. Only Stripe's word (its webhook, or the
+        // sweep) cancels a session-bearing order, so this refuses until then
+        // rather than reuse it (#593 review round 1).
         // Judged by the option's own code, as the peek warms it.
         const draftProductCode = jitProductMatching(draftMailOption(draft))?.productCode;
         if (

@@ -15,6 +15,8 @@ interface SendPostcardInput {
   draftId: string;
   confirm: boolean;
   sendAnotherCopy?: boolean;
+  /** The content version the person was shown (#695). */
+  contentVersion?: string;
 }
 
 type PublicStatus =
@@ -83,6 +85,7 @@ async function handler(
       userId: context.user.userId,
       mailType: 'postcard',
       allowDuplicate: input.sendAnotherCopy === true,
+      contentVersion: input.contentVersion,
     });
   } catch (error) {
     throw friendlyDraftError(error, input.draftId);

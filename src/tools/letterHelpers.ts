@@ -104,6 +104,8 @@ export interface ValidationResults {
 }
 
 export interface LetterQuoteOutput {
+  /** The version of the draft as stored (#695): the send takes it back, so what is mailed is what was shown. */
+  contentVersion?: string;
   previewHtml: string;
   lettersRequired: number;
   canSendNow: boolean;
@@ -1375,6 +1377,8 @@ export async function createLetterDraftAndBuildOutput(
     // How it travels (#625): the send, the checkout and the confirmation page read it from the draft.
     ...(mailService ? { mailService } : {}),
   });
+  // As stored (#695): the version every later reader computes, the send's included.
+  const contentVersion = draftResult.contentVersion;
 
   context.logger.info(
     {
@@ -1440,6 +1444,7 @@ export async function createLetterDraftAndBuildOutput(
     ...(isCertifiedMailOffered() && !gift.isGift ? { mailServices: ["standard", "certified", "certified_return_receipt"] as Array<'standard' | 'certified' | 'certified_return_receipt'> } : {}),
     ...(stationeryDesigns ? { stationeryDesigns } : {}),
     draftId: draftResult.draftId,
+    ...(contentVersion ? { contentVersion } : {}),
     draftExpiresAt: draftResult.expiresAt.toISOString(),
     layoutType,
     // Small preview images for ChatGPT widget (~3KB each)
