@@ -50,7 +50,8 @@ function state(overrides: Record<string, unknown> = {}) {
   };
 }
 
-const READY = { draftId: DRAFT_ID, status: "ready", deliveryEstimate: DELIVERY_ESTIMATE };
+// A ready draft says its content version (#695), read from the row as the send reads it.
+const READY = { draftId: DRAFT_ID, status: "ready", contentVersion: expect.any(String), deliveryEstimate: DELIVERY_ESTIMATE };
 const CERTIFIED_CLASS: Record<string, string> = {
   certified: "USPS Certified Mail",
   certified_return_receipt: "USPS Certified Mail with an electronic return receipt"
@@ -298,6 +299,7 @@ describe("get_draft_status (#474)", () => {
     await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual({
       draftId: DRAFT_ID,
       status: "ready",
+      contentVersion: expect.any(String),
       schedule: { arriveBy: "2026-10-16", mailOn: "2026-10-06" },
       deliveryEstimate: "Goes to the printer Tue, Oct 6, and aims to arrive by Fri, Oct 16."
     });
@@ -445,7 +447,7 @@ describe("get_draft_status names a ready letter's style now (#563, #572)", () =>
     const stored = { theme: "custom", design, name: "Garden", dateLine: "October 1, 2026" };
     vi.mocked(getDraftState).mockResolvedValue(drawn({ stationery: { ...stored, designId: "3f2b8c1e-9a4d-4c7e-8b1f-2d6a5e9c0b7a" } }) as any);
     await expect(ask({ draftId: DRAFT_ID })).resolves.toEqual({ ...READY, stationery: stored, previewHtml: PAGE });
-    expect(getDraftStatusOutputZ.safeParse({ ...READY, stationery: stored, previewHtml: PAGE }).success).toBe(true);
+    expect(getDraftStatusOutputZ.safeParse({ ...READY, contentVersion: "0123456789abcdef", stationery: stored, previewHtml: PAGE }).success).toBe(true);
   });
 
   it("calls a page our renderer drew without a theme Classic", async () => {

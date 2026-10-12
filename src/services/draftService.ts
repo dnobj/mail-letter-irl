@@ -5,7 +5,7 @@
  * Prevents duplicate sends and double-charging when AI clients retry requests.
  */
 
-import { CONTENT_VERSION_COLUMNS, contentVersionOf, type ContentVersionRow } from './contentVersion.js';
+import { CONTENT_VERSION_COLUMNS, contentVersionColumns, contentVersionOf, type ContentVersionRow } from './contentVersion.js';
 import { createHash } from 'node:crypto';
 import { query, transaction } from '../db/index.js';
 import type pg from 'pg';
@@ -350,6 +350,14 @@ export interface DraftState
   letter_mail_on: string | null;
   /** Whether the draft holds a signature (#608): its copy is never read here. */
   signed: boolean;
+  /** What its content version is read from (#695): its addresses and layout, and the pictures by their hash. */
+  sender?: unknown;
+  recipient?: unknown;
+  layout_type?: string | null;
+  signature_image_hash?: string | null;
+  header_image_data_hash?: string | null;
+  inline_image_data_hash?: string | null;
+  front_image_data_hash?: string | null;
 }
 
 export async function getDraftState(draftId: string): Promise<DraftState | null> {
@@ -364,7 +372,9 @@ export async function getDraftState(draftId: string): Promise<DraftState | null>
             CASE WHEN d.status = 'pending' AND d.renderer_version IS NOT NULL
                  THEN d.preview_html END AS preview_html,
             l.status AS letter_status, l.funding_type AS letter_funding_type,
-            l.arrive_by AS letter_arrive_by, l.mail_on AS letter_mail_on
+            l.arrive_by AS letter_arrive_by, l.mail_on AS letter_mail_on,
+            -- What its content version is read from (#695), the pictures by their hash.
+            ${contentVersionColumns('d.')}
        FROM letter_drafts d
        LEFT JOIN letters l ON l.letter_id = d.consumed_letter_id AND l.user_id = d.user_id
       WHERE d.draft_id = $1`,

@@ -11,24 +11,45 @@
  *
  * It is a hash over every column that prints or decides delivery, read from the
  * stored row: the words and pages; the stationery, its design included; the
- * signature, the header, inline and front pictures (hashed); the mail service and
- * the dates; a postcard's size and front; both addresses; the layout; whether it
- * is a gift letter, whose card page prints; and the renderer that draws it. Not
- * the preview's HTML, which is drawn from these, nor the price. Always computed
- * from the row as stored (jsonb returns its keys in one order, dates come back as
- * 'YYYY-MM-DD' strings), never from a tool's arguments, so every reader agrees.
+ * signature, the header, inline and front pictures (by their hash); the mail
+ * service and the dates; a postcard's size and front; both addresses; the
+ * layout; whether it is a gift letter, whose card page prints; and the renderer
+ * that draws it. Not the preview's HTML, which is drawn from these, nor the
+ * price. Always computed from the row as stored (jsonb returns its keys in one
+ * order, dates come back as 'YYYY-MM-DD' strings), never from a tool's
+ * arguments, so every reader agrees.
  */
 
 import { createHash } from 'node:crypto';
 import { query } from '../db/index.js';
 
-/** The columns of letter_drafts the version is over, for a query's select list. */
-export const CONTENT_VERSION_COLUMNS =
-  'mail_type, sender, recipient, body_text, sign_off, pages, layout_type, stationery, signature_image, ' +
-  'header_image_data, inline_image_data, front_image_data, postcard_size, postcard_front, mail_service, ' +
-  'arrive_by, mail_on, is_gift_send, renderer_version';
+/** The pictures the version reads by their hash. */
+const PICTURES = ['signature_image', 'header_image_data', 'inline_image_data', 'front_image_data'] as const;
 
-/** A draft's row, as far as the version reads it. */
+/** Everything else it reads as stored. */
+const PLAIN = [
+  'mail_type', 'sender', 'recipient', 'body_text', 'sign_off', 'pages', 'layout_type', 'stationery',
+  'postcard_size', 'postcard_front', 'mail_service', 'arrive_by', 'mail_on', 'is_gift_send', 'renderer_version'
+] as const;
+
+/**
+ * A picture's hash computed by the database, exactly as pictureHash computes it
+ * here (the SHA-256 of its text, in hex), so a reader need not fetch megabytes
+ * of image data to know the version.
+ */
+function pictureHashColumn(alias: string, column: string): string {
+  const value = `${alias}${column}`;
+  return `CASE WHEN ${value} IS NULL OR ${value} = '' THEN NULL ELSE encode(sha256(convert_to(${value}, 'UTF8')), 'hex') END AS ${column}_hash`;
+}
+
+/** The columns of letter_drafts the version is over, for a query's select list, with an optional table alias ('d.'). */
+export function contentVersionColumns(alias = ''): string {
+  return [...PLAIN.map(column => `${alias}${column}`), ...PICTURES.map(column => pictureHashColumn(alias, column))].join(', ');
+}
+
+export const CONTENT_VERSION_COLUMNS = contentVersionColumns();
+
+/** A draft's row, as far as the version reads it: its pictures as data (SELECT *) or as hashes (contentVersionColumns). */
 export interface ContentVersionRow {
   mail_type?: string | null;
   sender?: unknown;
@@ -42,6 +63,10 @@ export interface ContentVersionRow {
   header_image_data?: string | null;
   inline_image_data?: string | null;
   front_image_data?: string | null;
+  signature_image_hash?: string | null;
+  header_image_data_hash?: string | null;
+  inline_image_data_hash?: string | null;
+  front_image_data_hash?: string | null;
   postcard_size?: string | null;
   postcard_front?: unknown;
   mail_service?: string | null;
@@ -53,7 +78,13 @@ export interface ContentVersionRow {
 
 /** A picture's own hash: the version need not carry megabytes, only notice a change. */
 function pictureHash(data: string | null | undefined): string | null {
-  return data ? createHash('sha256').update(data).digest('hex') : null;
+  return data ? createHash('sha256').update(data, 'utf8').digest('hex') : null;
+}
+
+/** The picture's hash from the database when it gave one, else from the data. */
+function pictureOf(row: ContentVersionRow, column: (typeof PICTURES)[number]): string | null {
+  const hashed = row[`${column}_hash`];
+  return hashed !== undefined ? hashed ?? null : pictureHash(row[column]);
 }
 
 /** A date as the row gives it: 'YYYY-MM-DD' (the DATE parser), whatever the driver hands back. */
@@ -73,10 +104,10 @@ export function contentVersionOf(row: ContentVersionRow): string {
     Number(row.pages ?? 1),
     row.layout_type ?? null,
     row.stationery ?? null,
-    pictureHash(row.signature_image),
-    pictureHash(row.header_image_data),
-    pictureHash(row.inline_image_data),
-    pictureHash(row.front_image_data),
+    pictureOf(row, 'signature_image'),
+    pictureOf(row, 'header_image_data'),
+    pictureOf(row, 'inline_image_data'),
+    pictureOf(row, 'front_image_data'),
     row.postcard_size ?? null,
     row.postcard_front ?? null,
     row.mail_service ?? 'standard',
