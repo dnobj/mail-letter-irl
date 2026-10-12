@@ -93,6 +93,17 @@ export function openArrivalsSentence(openArrivals: readonly CalendarDate[], now:
   return said.length === 1 ? `The nearest arrival date with room is ${list}.` : `The nearest arrival dates with room are ${list}.`;
 }
 
+/**
+ * What to do about a full date, after its open dates: another date, or no
+ * date when no other has room. `then` ends it ("then send it again"), and
+ * `where` says where to choose (" in the chat").
+ */
+export function chooseAgainSentence(openArrivals: readonly CalendarDate[], then: string, where = ''): string {
+  return openArrivals.length > 0
+    ? `Choose another arrival date for it${where}, or none to send it as soon as possible, ${then}.`
+    : `Choose no arrival date for it${where}, to send it as soon as possible, ${then}.`;
+}
+
 /** The arrival dates a full date's refusal carries (`openArrivals`, set by the send and the checkout), or none. */
 export function openArrivalsOf(error: unknown): CalendarDate[] {
   const dates = (error as { openArrivals?: unknown } | null)?.openArrivals;

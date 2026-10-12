@@ -8,6 +8,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  chooseAgainSentence,
   fullMailDate,
   openArrivalsOf,
   openArrivalsSentence
@@ -123,6 +124,16 @@ describe('the words for the open dates', () => {
     );
     expect(openArrivalsSentence(['2026-10-14'], NOW, false)).toBe('The nearest arrival date with room is Wed, Oct 14.');
     expect(openArrivalsSentence([], NOW, true)).toBe('No other arrival date on offer has room right now.');
+  });
+
+  it('says what to do next: another date, or none when no other has room (review round 3)', () => {
+    expect(chooseAgainSentence(['2026-10-14'], 'then send it again')).toBe(
+      'Choose another arrival date for it, or none to send it as soon as possible, then send it again.'
+    );
+    expect(chooseAgainSentence([], 'then ask again')).toBe('Choose no arrival date for it, to send it as soon as possible, then ask again.');
+    expect(chooseAgainSentence(['2026-10-14'], 'then come back and send it', ' in the chat')).toBe(
+      'Choose another arrival date for it in the chat, or none to send it as soon as possible, then come back and send it.'
+    );
   });
 
   it('reads the dates a refusal carries, and none from anything else', () => {

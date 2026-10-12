@@ -841,6 +841,33 @@ describe('commerceService', () => {
     it.each([
       ['the webhook', () => payAndSendWebhook()],
       ['the hourly recovery', () => recoverPayAndSend()]
+    ])('records the miss in its own savepoint, and still fulfils when %s cannot write it (#700 review round 3)', async (_label, fulfil) => {
+      mocks.createMail.mockResolvedValueOnce({ scheduleMissed: { arriveBy: '2026-10-16', mailOn: '2026-10-06' } });
+      const base = mocks.query.getMockImplementation();
+      // The helpers set their own implementation on the call; wrap it once they have.
+      const failing = (impl: typeof base) => async (sql: string, params?: unknown[]) => {
+        if (sql.includes('INSERT INTO commerce_order_events') && (params as unknown[])?.[1] === 'jit.schedule_missed') {
+          throw Object.assign(new Error('statement timeout'), { code: '57014' });
+        }
+        return impl!(sql, params);
+      };
+      const original = mocks.query.mockImplementation.bind(mocks.query);
+      const spy = vi.spyOn(mocks.query, 'mockImplementation').mockImplementation(impl => original(failing(impl as typeof base)));
+      try {
+        const result = await fulfil();
+        expect(JSON.stringify(result ?? null)).not.toContain('refund_pending');
+      } finally {
+        spy.mockRestore();
+      }
+      const sqls = mocks.query.mock.calls.map(([sql]) => String(sql));
+      expect(sqls).toContain('SAVEPOINT schedule_missed_event');
+      expect(sqls).toContain('ROLLBACK TO SAVEPOINT schedule_missed_event');
+      expect(sqls.some(sql => sql.includes("SET status = 'refund_pending'"))).toBe(false);
+    });
+
+    it.each([
+      ['the webhook', () => payAndSendWebhook()],
+      ['the hourly recovery', () => recoverPayAndSend()]
     ])('records nothing when %s fulfils mail on its date, or with none (#700)', async (_label, fulfil) => {
       await fulfil();
       expect(mocks.createMail).toHaveBeenCalled();
@@ -4333,13 +4360,20 @@ describe('commerceService', () => {
         await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).resolves.toMatchObject({ reused: true });
       });
 
-      it('refuses a passed date, classed, for a draft whose checkout is still open', async () => {
-        activeRows = [currentOrder({ stripe_checkout_session_id: 'cs-open', checkout_url: 'https://checkout.stripe.test/cs-open' })];
+      it('refuses a passed date, classed, for an order whose session was never made', async () => {
+        activeRows = [currentOrder()];
         draftRow = { ...draftRow, arrive_by: '2026-10-12', mail_on: '2026-09-30' };
         await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).rejects.toMatchObject({
           code: 'SCHEDULE_PASSED',
           diagnosticClass: 'SCHEDULE_PASSED'
         });
+        expect(mocks.createJitSession).not.toHaveBeenCalled();
+      });
+
+      it('returns a session already open though its date has passed, which may have been paid (review round 3)', async () => {
+        activeRows = [currentOrder({ stripe_checkout_session_id: 'cs-open', checkout_url: 'https://checkout.stripe.test/cs-open' })];
+        draftRow = { ...draftRow, arrive_by: '2026-10-12', mail_on: '2026-09-30' };
+        await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).resolves.toMatchObject({ reused: true });
       });
     });
 

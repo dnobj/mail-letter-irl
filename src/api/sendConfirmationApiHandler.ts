@@ -40,7 +40,7 @@ import { isDuplicateMailError } from '../services/duplicateMailService.js';
 import { SpendLimitError } from '../services/betaSpendLimits.js';
 import type { LetterDraft } from '../services/types.js';
 import { draftScheduleOf } from '../services/draftSchedule.js';
-import { openArrivalsOf, openArrivalsSentence } from '../services/mailDateCapacity.js';
+import { chooseAgainSentence, openArrivalsOf, openArrivalsSentence } from '../services/mailDateCapacity.js';
 import { contentVersionOf } from '../services/contentVersion.js';
 import { stationeryOf, type Stationery } from '../render/stationery.js';
 import { postcardFrontOf } from '../render/postcard.js';
@@ -271,7 +271,7 @@ export function refusalFor(error: unknown): Refusal {
         'schedule_full',
         'Mail to arrive by its date is now fully booked, so nothing was sent. ' +
           `${openArrivalsSentence(openArrivalsOf(error), new Date(), false)} ` +
-          'Choose another date for it in the chat, or none to send it as soon as possible, then come back and send it.'
+          chooseAgainSentence(openArrivalsOf(error), 'then come back and send it', ' in the chat')
       );
     case 'SCHEDULE_PASSED':
       return refuse(409, 'schedule_passed', 'The day this was to go to the printer has passed, so it can no longer arrive by its date. Make a new preview with a new date.');

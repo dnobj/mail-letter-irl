@@ -3,7 +3,7 @@ import { formatAmountForCurrency } from '../config/products.js';
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
 import { createJitCheckout } from '../services/commerceService.js';
 import { SpendLimitError } from '../services/betaSpendLimits.js';
-import { openArrivalsOf, openArrivalsSentence } from '../services/mailDateCapacity.js';
+import { chooseAgainSentence, openArrivalsOf, openArrivalsSentence } from '../services/mailDateCapacity.js';
 import {
   DuplicateMailError,
   duplicateMailMessage,
@@ -92,7 +92,7 @@ export function friendlyCheckoutError(error: unknown): Error {
       return friendly(
         'Mail to arrive by its date is now fully booked, so nothing was charged. ' +
           `${openArrivalsSentence(openArrivalsOf(error), new Date(), true)} ` +
-          'Choose another arrival date for it, or none to send it as soon as possible, then try again.'
+          chooseAgainSentence(openArrivalsOf(error), 'then try again')
       );
     case 'PREPAID_BALANCE_AVAILABLE':
       return friendly(

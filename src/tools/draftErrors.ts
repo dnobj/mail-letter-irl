@@ -27,7 +27,7 @@
  */
 
 import { BETA_ACCESS_MESSAGE } from '../auth/betaAccess.js';
-import { openArrivalsOf, openArrivalsSentence } from '../services/mailDateCapacity.js';
+import { chooseAgainSentence, openArrivalsOf, openArrivalsSentence } from '../services/mailDateCapacity.js';
 import { SpendLimitError } from '../services/betaSpendLimits.js';
 import {
   DuplicateMailError,
@@ -165,7 +165,7 @@ export function friendlyDraftError(
     return new Error(
       `Mail to arrive by this ${noun}'s date is now fully booked, so nothing was sent. ` +
         `${openArrivalsSentence(openArrivalsOf(error), new Date(), true)} ` +
-        'Choose another arrival date for it, or none to send it as soon as possible, then send it again.'
+        chooseAgainSentence(openArrivalsOf(error), 'then send it again')
     );
   }
   // #579. Upstream interpolates the draft id; this keeps the code, so the

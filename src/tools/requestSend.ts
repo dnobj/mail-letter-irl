@@ -3,7 +3,7 @@ import { getDraft } from '../services/draftService.js';
 import { draftScheduleOf } from '../services/draftSchedule.js';
 import { earliestMailOn } from '../services/deliverySchedule.js';
 import { query } from '../db/index.js';
-import { fullMailDate, openArrivalsSentence } from '../services/mailDateCapacity.js';
+import { chooseAgainSentence, fullMailDate, openArrivalsSentence } from '../services/mailDateCapacity.js';
 import type { LetterDraft } from '../services/types.js';
 import { sendConfirmationUrl } from '../config/sendConfirmation.js';
 import { isExtraService, mailServiceOf } from '../config/products.js';
@@ -142,7 +142,7 @@ async function handler(
         'SCHEDULE_FULL',
         `Mail to arrive by this ${noun}'s date is now fully booked. ` +
           `${openArrivalsSentence(full.openArrivals, context.now(), true)} ` +
-          'Choose another arrival date for it, or none to send it as soon as possible, then ask again.'
+          chooseAgainSentence(full.openArrivals, 'then ask again')
       );
     }
   }

@@ -145,7 +145,8 @@ describe('mail-type wording', () => {
     );
     expect(friendly).not.toContain('d-1');
     expect(friendlyDraftError(Object.assign(new Error('x'), { code: 'SCHEDULE_FULL' }), 'd-1', 'letter').message).toContain(
-      "this letter's date is now fully booked, so nothing was sent. No other arrival date on offer has room right now."
+      "this letter's date is now fully booked, so nothing was sent. No other arrival date on offer has room right now. " +
+        'Choose no arrival date for it, to send it as soon as possible, then send it again.'
     );
   });
 

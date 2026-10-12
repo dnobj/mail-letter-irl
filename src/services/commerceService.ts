@@ -591,16 +591,30 @@ function asCheckoutResult(order: Order, reused: boolean): CommerceCheckoutResult
  */
 export const SCHEDULE_MISSED_EVENT = 'jit.schedule_missed';
 
+/**
+ * In its own savepoint: the event says what happened, and never decides a
+ * fulfilment. One that cannot be written is logged and left, rather than
+ * failing the fulfilment it follows and refunding mail already queued.
+ */
 async function recordMissedSchedule(
   client: Pick<pg.PoolClient, 'query'>,
   orderId: string,
   missed: DraftSchedule | undefined
 ): Promise<void> {
   if (!missed) return;
-  await recordOrderEvent(client, orderId, SCHEDULE_MISSED_EVENT, null, null, {
-    arriveBy: missed.arriveBy,
-    mailOn: missed.mailOn
-  });
+  await client.query('SAVEPOINT schedule_missed_event');
+  try {
+    await recordOrderEvent(client, orderId, SCHEDULE_MISSED_EVENT, null, null, {
+      arriveBy: missed.arriveBy,
+      mailOn: missed.mailOn
+    });
+    await client.query('RELEASE SAVEPOINT schedule_missed_event');
+  } catch (error) {
+    await client.query('ROLLBACK TO SAVEPOINT schedule_missed_event');
+    writeDiagnostic('warn', 'commerce.schedule_missed_event_failed', {
+      errorClass: carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'database_error')
+    });
+  }
 }
 
 export async function recordOrderEvent(
@@ -978,24 +992,26 @@ async function prepareJitOrder(
       [params.draftId, ACTIVE_JIT_STATUSES]
     );
     const existing = active.rows[0];
-    // A mail date already past (#535) is refused before the charge: after it,
-    // fulfilment mails as soon as it can. Not for an order already paid or
-    // further on, which is returned below as it always was.
-    if (schedule && (!existing || existing.status === 'checkout_pending') && schedule.mailOn < earliestMailOn(new Date())) {
+    // Arrive-by's refusals before the charge (#535, #700), only where a new
+    // Stripe session would be opened: no order yet, or one whose session was
+    // never made. An open session, or an order paid or further on, is
+    // returned below as it always was: refusing it would change nothing,
+    // since a session can still be paid, and could tell someone who has just
+    // paid to buy again. Its fulfilment mails as soon as it can when its date
+    // has passed, and says so (jit.schedule_missed).
+    const opensSession =
+      !existing ||
+      (existing.status === 'checkout_pending' && !existing.stripe_checkout_session_id && !existing.checkout_url);
+    // A mail date already past.
+    if (schedule && opensSession && schedule.mailOn < earliestMailOn(new Date())) {
       throw Object.assign(new Error('Draft has missed its mail date'), {
         code: 'SCHEDULE_PASSED',
         diagnosticClass: 'SCHEDULE_PASSED'
       });
     }
-    // A full one (#700) only where a new Stripe session would be opened: no
-    // order yet, or one whose session was never made. A session already open
-    // was counted when it was made, and is returned below: refusing it would
-    // change nothing, since it can still be paid, and could tell someone who
-    // has just paid that nothing was charged. The count is read without the
-    // send's lock; the paid fulfilment mails over the cap.
-    const opensSession =
-      !existing ||
-      (existing.status === 'checkout_pending' && !existing.stripe_checkout_session_id && !existing.checkout_url);
+    // A full one, checked when a session is made: a session holds no place on
+    // the date, so its paid fulfilment can take the date over the cap. The
+    // count is read without the send's lock.
     if (schedule && opensSession) {
       const full = await fullMailDate(client, schedule, new Date());
       if (full) {

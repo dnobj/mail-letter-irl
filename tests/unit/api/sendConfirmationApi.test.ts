@@ -596,7 +596,12 @@ describe('refusalFor (#470)', () => {
   it('tells the person a full mail date needs another date, named without the YYYY-MM-DD (#700)', () => {
     const full = Object.assign(coded('SCHEDULE_FULL'), { openArrivals: ['2026-10-15', '2026-10-19'] });
     expect(refusalFor(full).body.message).toMatch(
-      /^Mail to arrive by its date is now fully booked, so nothing was sent\. The nearest arrival dates with room are \w{3}, Oct 15(, 2026)? and \w{3}, Oct 19(, 2026)?\. Choose another date for it in the chat, or none to send it as soon as possible, then come back and send it\.$/
+      /^Mail to arrive by its date is now fully booked, so nothing was sent\. The nearest arrival dates with room are \w{3}, Oct 15(, 2026)? and \w{3}, Oct 19(, 2026)?\. Choose another arrival date for it in the chat, or none to send it as soon as possible, then come back and send it\.$/
+    );
+    // No other date has room: no date at all, not "another" (review round 3).
+    expect(refusalFor(coded('SCHEDULE_FULL')).body.message).toBe(
+      'Mail to arrive by its date is now fully booked, so nothing was sent. No other arrival date on offer has room right now. ' +
+        'Choose no arrival date for it in the chat, to send it as soon as possible, then come back and send it.'
     );
   });
 
