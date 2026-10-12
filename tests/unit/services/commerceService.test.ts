@@ -4604,6 +4604,8 @@ describe("mail a pack paid for, when the pack's money goes back (#696)", () => {
     expect(funded.params).toEqual(['order-1', 'user-1']);
     // Through the lots the order bought, or lots returned from them.
     expect(funded.sql).toContain('lot.source_order_id = $1');
+    // Only the order's own account's letters.
+    expect(funded.sql).toContain('AND l.user_id = $2');
     expect(funded.sql).toContain('lot.related_ledger_id IN (SELECT ledger_id FROM credit_ledger WHERE source_order_id = $1)');
     // Each letter locked before its job; only a queued one held, never dispatched mail.
     expect(calls.filter(call => call.sql.startsWith('SELECT status FROM letters WHERE letter_id')).map(call => call.params))
