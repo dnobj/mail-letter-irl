@@ -5,170 +5,20 @@
  * For letters WITH images, use:
  * - quoteAndPreviewLetterWithHeaderImage (logo/letterhead at top)
  * - quoteAndPreviewLetterWithImage (image after signature)
+ *
+ * The steps are the letter-preview pipeline's (letterPreviewPipeline.ts, #689).
  */
 
-import { Address, McpToolDefinition, ToolContext } from "../contracts/types.js";
+import { McpToolDefinition } from "../contracts/types.js";
 import { widgetTemplateUri } from "../mcp/widgetUris.js";
-import { printRenderer } from "../config/printRenderer.js";
-import {
-  prepareSender,
-  validateAddresses,
-  validateAddressesWithProvider,
-  validateCharacterLimitForLayout,
-  validatePrintableLetter,
-  earlyGiftChoice,
-  giftForLayout,
-  layoutLetterForPreview,
-  letterRunsPast,
-  roomToWriteSentence,
-  createLetterDraftAndBuildOutput,
-  type LetterQuoteOutput
-} from "./letterHelpers.js";
-import { previewSchedule } from "./arriveByInput.js";
-import { chooseStationery } from "./stationeryInput.js";
-import { chooseSignature } from "./signatureInput.js";
-import { certifiedMailSentence, chooseMailService } from "./mailServiceInput.js";
+import { roomToWriteSentence, type LetterQuoteOutput } from "./letterHelpers.js";
+import { certifiedMailSentence } from "./mailServiceInput.js";
 import { previewSendStep } from "./previewSendStep.js";
+import { previewLetter, type LetterPreviewInput } from "./letterPreviewPipeline.js";
 
-// ============================================================================
-// Types
-// ============================================================================
-
-interface QuoteAndPreviewLetterTextOnlyInput {
-  sender?: Address;
-  recipient: Address;
-  bodyText: string;
-  signOff: string;
-  /** Send as the account's gift letter (docs/gift-letters.md). */
-  sendAsGift?: boolean;
-  /** The date it should arrive by, YYYY-MM-DD (#535); served only while the flag is on. */
-  arriveBy?: string;
-  /** The page's theme, its initials and its headline (#563); served only while stationery is offered. */
-  stationery?: string;
-  monogram?: string;
-  headline?: string;
-  /** The person's saved signature on the letter, or not (#608); left out, their last choice. */
-  signature?: boolean;
-  /** USPS Certified Mail, with or without an electronic return receipt (#625); served only while it is offered. */
-  mailService?: string;
-}
-
-// ============================================================================
-// Constants
-// ============================================================================
+type QuoteAndPreviewLetterTextOnlyInput = Omit<LetterPreviewInput, "image" | "imageUrl">;
 
 const OUTPUT_TEMPLATE = widgetTemplateUri("LetterPreviewCard");
-
-// ============================================================================
-// Handler
-// ============================================================================
-
-async function handler(
-  input: QuoteAndPreviewLetterTextOnlyInput,
-  context: ToolContext
-): Promise<LetterQuoteOutput> {
-  const layoutType = 'text_only';
-
-  context.logger.info(
-    {
-      correlationId: context.correlationId,
-      event: "quote.letter.text_only.start"
-    },
-    "Processing quote_and_preview_letter (text-only)"
-  );
-
-  // Arrive-by (#535): checked first, so a date that cannot be met is refused
-  // before any picture is fetched or address validated.
-  const schedule = previewSchedule(input.arriveBy, context);
-
-  // Certified mail (#625): asked for, and offered, checked here for the same reason, and
-  // known before the gift is decided: no gift letter pays for it.
-  const mailService = chooseMailService(input.mailService, context);
-
-  // Prepare sender (use saved return address if not provided)
-  const { sender, usedSavedReturnAddress, savedReturnAddressNote } = await prepareSender(input, context);
-
-  // Validate addresses
-  validateAddresses(sender, input.recipient, context);
-
-  // Decided first: a gift send's card page draws the sender's name, which
-  // must print and fit (#534). Not while room to write is offered (#586): the
-  // gift then waits for the pages (giftForLayout). The renderer is read once,
-  // so every check agrees.
-  const early = await earlyGiftChoice(input, context, mailService);
-  const renderer = printRenderer();
-
-  // Stationery (#563): the theme, asked for or remembered, and what it
-  // prints, checked before the printable check reads its initials and
-  // headline and the layout draws it.
-  const stationery = await chooseStationery(input, sender.name, context, renderer);
-
-  // The person's signature (#608): asked for or remembered, read once, and
-  // laid out with the letter, so the fit counts its three lines.
-  const signature = await chooseSignature(input.signature, context);
-
-  // Validate character limit
-  validateCharacterLimitForLayout(input.bodyText, input.signOff, layoutType, context, renderer);
-
-  // Refuse characters the print shows as boxes (#526)
-  validatePrintableLetter(
-    { sender, recipient: input.recipient, bodyText: input.bodyText, signOff: input.signOff, senderIsSaved: usedSavedReturnAddress },
-    context,
-    renderer,
-    early?.card,
-    stationery
-  );
-
-  // Our renderer measures the page itself (#534)
-  const printLayout = layoutLetterForPreview(
-    { bodyText: input.bodyText, signOff: input.signOff, layoutType, stationery, signatureImage: signature.image },
-    context,
-    renderer
-  );
-
-  // The gift, by the pages the letter takes, when it was not decided first (#586).
-  const gift = await giftForLayout(
-    early,
-    { sender, recipient: input.recipient, bodyText: input.bodyText, signOff: input.signOff, senderIsSaved: usedSavedReturnAddress, sendAsGift: input.sendAsGift },
-    printLayout,
-    context,
-    renderer,
-    // A signed letter its band pushes past one page fits without it (#608).
-    () => signature.image !== undefined && !letterRunsPast({ bodyText: input.bodyText, signOff: input.signOff, layoutType, stationery }, 1)
-  );
-
-  // Validate with PostGrid provider
-  const { senderValidation, recipientValidation, addressWarnings } = await validateAddressesWithProvider(
-    sender,
-    input.recipient,
-    context
-  );
-
-  // Create draft and build output
-  return createLetterDraftAndBuildOutput({
-    sender,
-    recipient: input.recipient,
-    bodyText: input.bodyText,
-    signOff: input.signOff,
-    layoutType,
-    usedSavedReturnAddress,
-    savedReturnAddressNote,
-    senderValidation,
-    recipientValidation,
-    addressWarnings,
-    gift,
-    printLayout,
-    schedule,
-    stationery,
-    signature,
-    mailService,
-    context
-  });
-}
-
-// ============================================================================
-// Tool Definition
-// ============================================================================
 
 export const quoteAndPreviewLetterTextOnlyTool: McpToolDefinition<
   QuoteAndPreviewLetterTextOnlyInput,
@@ -193,5 +43,10 @@ export const quoteAndPreviewLetterTextOnlyTool: McpToolDefinition<
     "openai/toolInvocation/invoked": "Preview ready"
     // Note: readOnlyHint is set by buildAnnotations() in registerTools.ts
   },
-  handler
+  // No image step: the pipeline reads no picture for a text-only letter.
+  handler: (input, context) =>
+    previewLetter(input, context, {
+      events: "quote.letter.text_only",
+      startMessage: "Processing quote_and_preview_letter (text-only)"
+    })
 };
