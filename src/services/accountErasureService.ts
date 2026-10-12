@@ -12,7 +12,7 @@ import {
   SETTLED_ORDER_STATUSES
 } from './retentionService.js';
 import { deleteUploadedPhoto } from './tempImageStore.js';
-import { heldMailJobSql } from './heldMail.js';
+import { fundingHeldJobSql, heldMailJobSql } from './heldMail.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 
 /**
@@ -90,11 +90,14 @@ export const ERASED_EMAIL_PATTERN = 'erased-%@erased.invalid';
  * ended it is due and holds the account until it mails. Pay & Send held mail is
  * not here: its order is in flight, and its refund is a person's decision.
  *
+ * Mail held for its funding (#696), a pack refunded in full or lost to a dispute,
+ * is cancelled with it, due or not: it waits for a person, and an erasure is one.
+ *
  * A SQL condition on `letters l` joined to its `letter_jobs j`.
  */
 const HELD_MAIL_CONDITION = `l.status = 'queued'
       AND l.funding_type IN ('prepaid_balance', 'gift_letter')
-      AND ${heldMailJobSql('j')}`;
+      AND (${heldMailJobSql('j')} OR (j.status = 'pending' AND ${fundingHeldJobSql('j')}))`;
 
 /** Refunds that are over; any other status is still moving money. */
 const SETTLED_PACK_REFUND_STATUSES = ['succeeded', 'failed', 'compensated'];

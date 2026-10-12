@@ -1416,7 +1416,7 @@ describe('releaseHeldLetterJobAsAdmin: sending held mail now (#535)', () => {
     );
     const update = calls.find(call => call.sql.startsWith('UPDATE letter_jobs'))!;
     expect(update.sql.replace(/\s+/g, ' ')).toBe(
-      'UPDATE letter_jobs SET next_attempt_at = NOW(), scheduled_at = NOW(), updated_at = NOW() WHERE job_id = $1 RETURNING next_attempt_at'
+      'UPDATE letter_jobs SET next_attempt_at = NOW(), scheduled_at = NOW(), hold_reason = NULL, updated_at = NOW() WHERE job_id = $1 RETURNING next_attempt_at'
     );
     expect(update.params).toEqual(['job-held']);
     // Nothing else: not the letter, not the order, not the job's metadata.

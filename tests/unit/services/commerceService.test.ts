@@ -749,7 +749,10 @@ describe('commerceService', () => {
     // Exact-match the account lock, not merely "contains FOR UPDATE": the
     // ledger statements this guards against are themselves SELECT ... FOR
     // UPDATE, so a looser predicate would still pass with the lock removed.
+    // The read of the letters a pack paid for (#696) comes first, a plain read: it locks
+    // each letter before the account, as every path that holds both does.
     const ordered = mocks.query.mock.calls
+      .filter(call => !String(call[0]).includes('SELECT DISTINCT l.letter_id'))
       .filter(call =>
         String(call[0]) === ACCOUNT_LOCK_SQL ||
         String(call[0]).includes('credit_ledger') ||

@@ -53,6 +53,7 @@ import {
   type PackProductId
 } from './stripeService.js';
 import type { LetterDraft, MailType, Order, OrderStatus } from './types.js';
+import { type FundingHoldReason } from './heldMail.js';
 import {
   carriedDiagnosticClass,
   classifyDiagnosticError,
@@ -2318,6 +2319,81 @@ async function stopFundedMailBeforeFinancialReversal(
 }
 
 /**
+ * Mail a letter pack paid for that has not gone to the printer, held for the operator
+ * when the pack is refunded in full or lost to a dispute (#696, decision D2).
+ *
+ * A refund absorbs the letters already spent (#150), and a dispute zeroes the rest; but a
+ * letter sent with an arrival date (#535) can wait weeks for its mail date, paid for by
+ * money that has now gone back. Such mail waits for a person instead of printing: its job
+ * keeps its state (pending, never dispatched) and takes a funding hold_reason, which the
+ * outbox claim skips and the dispatch marker refuses (heldMail.ts). The operator releases
+ * it (job.dispatch_now) or the customer cancels it. Never cancelled here: a dispute can be
+ * won. A proportional refund (unused letters only) does not come here: what it leaves was
+ * paid for.
+ *
+ * The letters are those whose deduction drew on the order's lots, or on lots re-issued
+ * from them (returned credits, related_ledger_id), as retentionService reads them. A job
+ * claimed but not yet marked dispatching is held too: the marker reads the hold under its
+ * lock and puts the job back. Mail already dispatching or accepted is past this, and its
+ * own alerts say so.
+ *
+ * Locks in the outbox's order: the order (the caller's), then each letter, then its job.
+ * One alert per order (056's unique index), however many events reach here.
+ */
+async function holdMailFundedByOrder(
+  client: pg.PoolClient,
+  order: Order,
+  sourceEventId: string,
+  reason: FundingHoldReason
+): Promise<number> {
+  if (order.order_type !== 'letter_pack') return 0;
+  const funded = await client.query<{ letter_id: string }>(
+    `SELECT DISTINCT l.letter_id
+       FROM credit_transactions txn
+       JOIN credit_consumption cc ON cc.transaction_id = txn.transaction_id
+       JOIN credit_ledger lot ON lot.ledger_id = cc.ledger_id
+       JOIN letters l ON l.letter_id = txn.reference_id
+      WHERE txn.reference_type = 'letter'
+        AND txn.type = 'deduction'
+        AND l.user_id = $2
+        AND (
+              lot.source_order_id = $1
+           OR lot.related_ledger_id IN (SELECT ledger_id FROM credit_ledger WHERE source_order_id = $1)
+            )
+      ORDER BY l.letter_id`,
+    [order.order_id, order.user_id]
+  );
+  let held = 0;
+  for (const { letter_id: letterId } of funded.rows) {
+    const letter = await client.query<{ status: string }>(
+      'SELECT status FROM letters WHERE letter_id = $1 FOR UPDATE',
+      [letterId]
+    );
+    if (letter.rows[0]?.status !== 'queued') continue;
+    const job = await client.query<{ job_id: string }>(
+      `UPDATE letter_jobs SET hold_reason = $2, updated_at = NOW()
+        WHERE letter_id = $1
+          AND status IN ('pending', 'processing')
+          AND provider_outcome = 'not_dispatched'
+        RETURNING job_id`,
+      [letterId, reason]
+    );
+    held += job.rowCount ?? 0;
+  }
+  if (held > 0) {
+    await client.query(
+      `INSERT INTO commerce_operational_alerts
+         (source_event_id, order_id, alert_type, severity, details)
+       VALUES ($1, $2, 'held_mail_funding_reversed', 'warning', $3)
+       ON CONFLICT DO NOTHING`,
+      [sourceEventId, order.order_id, JSON.stringify({ reason, letters: held })]
+    );
+    writeDiagnostic('warn', 'commerce.held_mail_funding_reversed', { reason, letters: held });
+  }
+  return held;
+}
+
+/**
  * A refund for less than the order amount that the app did not issue.
  *
  * Until #323 this was recorded as `ignored: true, reason: 'partial_refund'`
@@ -2861,6 +2937,9 @@ async function processRefundEvent(
     }
     await stopFundedMailBeforeFinancialReversal(client, order, eventId, 'payment_reversed');
     if (nextStatus === 'refunded' && order.order_type === 'letter_pack') {
+      // A pack refunded in full: its mail not yet printed waits for the operator (#696).
+      // Not while the refund is pending: it may still fail, and nothing else moves yet.
+      await holdMailFundedByOrder(client, order, eventId, 'funding_reversed');
       await revokePackLots(client, order, { credits: 'all' });
     }
     if (nextStatus === 'refunded') {
@@ -3286,6 +3365,8 @@ async function processDisputeEvent(
       const status = String(dispute.status || '');
       if (!NON_LOSS_DISPUTE_STATUSES.has(status)) {
         if (order.order_type === 'letter_pack') {
+          // Its mail not yet printed waits for the operator (#696): a dispute can be won.
+          await holdMailFundedByOrder(client, order, eventId, 'funding_disputed');
           await revokePackLots(client, order, { credits: 'all', cause: 'payment_disputed', disputeId: dispute.id });
         }
         await blockAccountSends(client, order.user_id, 'payment_disputed');

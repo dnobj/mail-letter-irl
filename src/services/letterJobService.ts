@@ -30,7 +30,7 @@ import { carriedDiagnosticClass, classifyDiagnosticError, writeDiagnostic } from
 import { summarizeProviderRejection } from './providerFailureSummary.js';
 import { enabledUnlessDisabled } from '../utils/envSettings.js';
 import { letterPrintText, signatureParagraph } from './previewService.js';
-import { heldMailJobSql } from './heldMail.js';
+import { fundingHeldJobSql, heldMailJobSql, isFundingHoldReason } from './heldMail.js';
 
 const DEFAULT_MAX_ATTEMPTS = 5;
 const STALE_LOCK_MINUTES = 15;
@@ -186,6 +186,23 @@ export function outboxDispatchEnabled(env: NodeJS.ProcessEnv = process.env): boo
   return enabledUnlessDisabled('LETTER_IRL_OUTBOX_DISPATCH_ENABLED', env);
 }
 
+/**
+ * Mail the outbox leaves where it is, for a person (#696): held for its funding (a pack
+ * refunded in full or lost to a dispute), or of an account whose sending is blocked. A SQL
+ * condition on the letter_jobs row named `alias`. A plain read of users, no lock: the
+ * dispatch marker reads the same again under its locks and puts back a job that turned
+ * so between the claim and the mark.
+ */
+function leftForOperatorSql(alias: string): string {
+  return `(${fundingHeldJobSql(alias)}
+       OR EXISTS (
+         SELECT 1 FROM letters held_letter
+           JOIN users held_user ON held_user.user_id = held_letter.user_id
+          WHERE held_letter.letter_id = ${alias}.letter_id
+            AND held_user.sends_blocked_reason IS NOT NULL
+       ))`;
+}
+
 async function claimJob(jobId?: string): Promise<LetterJob | null> {
   if (!outboxDispatchEnabled()) return null;
   const params: unknown[] = [];
@@ -200,7 +217,10 @@ async function claimJob(jobId?: string): Promise<LetterJob | null> {
          AND provider_outcome = 'not_dispatched'
          ${specificJobClause}
          AND (
-           (status IN ('pending', 'failed') AND next_attempt_at <= NOW())
+           (status IN ('pending', 'failed') AND next_attempt_at <= NOW()
+             AND NOT ${leftForOperatorSql('letter_jobs')})
+           -- A claim a crash left behind is taken back whatever it is: the marker puts
+           -- back one left for the operator (#696), instead of it staying processing.
            OR (
              status = 'processing'
              AND locked_at < NOW() - INTERVAL '${STALE_LOCK_MINUTES} minutes'
@@ -228,7 +248,10 @@ async function claimJob(jobId?: string): Promise<LetterJob | null> {
   return result.rows[0] || null;
 }
 
-async function markProviderDispatch(job: LetterJob): Promise<Letter> {
+/** The marker's answer for a job left for the operator (#696): put back, not dispatched. */
+const LEFT_FOR_OPERATOR = 'left_for_operator' as const;
+
+async function markProviderDispatch(job: LetterJob): Promise<Letter | typeof LEFT_FOR_OPERATOR> {
   return transaction(async client => {
     const relation = await client.query<{ letter_id: string; funding_order_id: string | null }>(
       `SELECT jobs.letter_id, letters.funding_order_id
@@ -263,6 +286,26 @@ async function markProviderDispatch(job: LetterJob): Promise<Letter> {
         current.provider_outcome !== 'not_dispatched' ||
         !['queued', 'processing'].includes(letter.status)) {
       throw new Error('Mail item is held or no longer dispatchable');
+    }
+    // Held for its funding, or its account blocked, since the claim (#696): back to
+    // pending, its attempt given back, so it neither fails nor counts against it, and
+    // waits for the operator as it would have had the claim seen it.
+    const blocked = await client.query<{ sends_blocked_reason: string | null }>(
+      'SELECT sends_blocked_reason FROM users WHERE user_id = $1',
+      [letter.user_id]
+    );
+    if (isFundingHoldReason(current.hold_reason) || blocked.rows[0]?.sends_blocked_reason) {
+      await client.query(
+        `UPDATE letter_jobs SET status = 'pending', attempts = GREATEST(attempts - 1, 0),
+           locked_at = NULL, updated_at = NOW()
+         WHERE job_id = $1`,
+        [job.job_id]
+      );
+      writeDiagnostic('info', 'outbox.left_for_operator', {
+        jobId: job.job_id,
+        reason: isFundingHoldReason(current.hold_reason) ? current.hold_reason : 'sends_blocked'
+      });
+      return LEFT_FOR_OPERATOR;
     }
     await client.query(
       `UPDATE letter_jobs
@@ -1035,7 +1078,11 @@ async function processClaimedJob(
     // it belongs on the retryable failBeforeDispatch path below, not in an
     // ambiguous hold.
     const provider = await resolveProviderForLetter(preview);
-    const letter = await markProviderDispatch(job);
+    const marked = await markProviderDispatch(job);
+    if (marked === LEFT_FOR_OPERATOR) {
+      return { claimed: true, completed: false, retryScheduled: false, job, error: 'Left for the operator' };
+    }
+    const letter = marked;
     dispatched = true;
     const { result, providerName } = await submitToProvider(provider, letter, job, options);
 
@@ -1121,7 +1168,8 @@ async function countWaitingLetterJobs(): Promise<number> {
             AND locked_at < NOW() - INTERVAL '${STALE_LOCK_MINUTES} minutes'
           )
         )
-        AND NOT (${heldMailJobSql('letter_jobs')})`
+        AND NOT (${heldMailJobSql('letter_jobs')})
+        AND NOT ${leftForOperatorSql('letter_jobs')}`
   );
   return Number(waiting.rows[0]?.count ?? 0);
 }
@@ -1830,10 +1878,11 @@ export async function releaseHeldLetterJobAsAdmin(params: {
       operator_resolution: string | null;
       mail_hold_until: Date | null;
       next_attempt_at: Date;
+      hold_reason: string | null;
       still_held: boolean;
     }>(
       `SELECT letter_id, status, provider_outcome, attempts, operator_resolution,
-              mail_hold_until, next_attempt_at,
+              mail_hold_until, next_attempt_at, hold_reason,
               (${heldMailJobSql('letter_jobs')}) AS still_held
        FROM letter_jobs WHERE job_id = $1 FOR UPDATE`, [params.jobId]
     );
@@ -1845,11 +1894,14 @@ export async function releaseHeldLetterJobAsAdmin(params: {
         held?.status !== 'queued' ||
         current.status !== 'pending' || current.provider_outcome !== 'not_dispatched' ||
         current.attempts !== 0 || current.operator_resolution ||
-        !current.mail_hold_until || current.still_held !== true) {
+        // Held mail not yet due, or mail held for its funding (#696), due or not: a dispute
+        // can outlast its mail date.
+        !((current.mail_hold_until && current.still_held === true) || isFundingHoldReason(current.hold_reason))) {
       throw new AdminJobReleaseError('invalid_state');
     }
+    // The funding hold ends with the release (#696); held mail never has one otherwise.
     const released = await client.query<{ next_attempt_at: Date }>(
-      `UPDATE letter_jobs SET next_attempt_at = NOW(), scheduled_at = NOW(), updated_at = NOW()
+      `UPDATE letter_jobs SET next_attempt_at = NOW(), scheduled_at = NOW(), hold_reason = NULL, updated_at = NOW()
        WHERE job_id = $1 RETURNING next_attempt_at`,
       [params.jobId]
     );
@@ -1861,7 +1913,12 @@ export async function releaseHeldLetterJobAsAdmin(params: {
       [idempotencyKeyHash,
         actorHash,
         jobHash,
-        JSON.stringify({ jobStatus: 'pending', heldUntil: current.mail_hold_until, nextAttemptAt: current.next_attempt_at }),
+        JSON.stringify({
+          jobStatus: 'pending',
+          heldUntil: current.mail_hold_until,
+          nextAttemptAt: current.next_attempt_at,
+          ...(isFundingHoldReason(current.hold_reason) ? { fundingHold: current.hold_reason } : {})
+        }),
         JSON.stringify({ jobStatus: 'pending', nextAttemptAt: released.rows[0]?.next_attempt_at ?? null }),
         JSON.stringify({ operatorReasonHash: reasonHash, expectedUserHash })]
     );

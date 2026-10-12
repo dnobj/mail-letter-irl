@@ -2,7 +2,7 @@ import type { CommandOutcome, CommandPreview } from "../commands/runner.js";
 import { html, join, type SafeHtml } from "../ui/html.js";
 import { formatDate } from "../ui/format.js";
 import { csrfField } from "../ui/layout.js";
-import { isHeldMailJob, type JobView } from "../queries/jobs.js";
+import { isFundingHeldMailJob, isHeldMailJob, type JobView } from "../queries/jobs.js";
 import { commandLink, definitionList } from "./common.js";
 
 /** The preview page: what will happen, and the confirmation form. */
@@ -178,6 +178,15 @@ ${input.mode !== "full" ? html`<p class="muted">Read-only mode: previews work, e
 <form method="get" action="/commands/job.retry/preview" class="inline">
   <input type="hidden" name="target" value="${job.jobId}">
   <button type="submit">Preview retry…</button>
+</form>
+${input.mode !== "full" ? html`<p class="muted">Read-only mode: previews work, execution is refused.</p>` : ""}`;
+  }
+  if (isFundingHeldMailJob(job)) {
+    return html`<h2>Held for its funding</h2>
+<p>The letter pack that paid for this letter was ${job.holdReason === "funding_disputed" ? "lost to a dispute" : "refunded in full"}, so it waits here instead of printing. Sending it prints a letter whose money went back; the customer can also cancel it.</p>
+<form method="get" action="/commands/job.dispatch_now/preview" class="inline">
+  <input type="hidden" name="target" value="${job.jobId}">
+  <button type="submit">Preview sending anyway…</button>
 </form>
 ${input.mode !== "full" ? html`<p class="muted">Read-only mode: previews work, execution is refused.</p>` : ""}`;
   }

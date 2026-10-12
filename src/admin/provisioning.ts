@@ -110,9 +110,14 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  * panel never reads a column that is not there. Both roles read letter_jobs
  * whole, and the release (job.dispatch_now) leaves the column as it is, so the
  * operator needs no new column. Nothing to re-run.
+ *
+ * 056 adds the alert type held_mail_funding_reversed (#696), with a partial
+ * unique index on its order. The roles read commerce_operational_alerts whole,
+ * and the release (job.dispatch_now) now also clears letter_jobs.hold_reason,
+ * already in the operator's list. Nothing to re-run; required, as the newest is.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
-  "055_letter_jobs_mail_hold_until.sql";
+  "056_held_mail_funding_reversed.sql";
 
 export interface AdminProvisioningArguments {
   environment: "development" | "production";

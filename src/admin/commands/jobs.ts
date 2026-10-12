@@ -8,7 +8,7 @@ import {
   type AmbiguousMailResolution,
 } from "../../services/letterJobService.js";
 import { AdminFoundationError } from "../errors.js";
-import { isHeldMailJob, readJob } from "../queries/jobs.js";
+import { isFundingHeldMailJob, isHeldMailJob, readJob } from "../queries/jobs.js";
 import { providerPrintsRenderedPdf, providerSellsExtraServices } from "../../services/providers/extraServices.js";
 import { mapDomainError, type CommandDefinition } from "./runner.js";
 
@@ -234,15 +234,18 @@ export const jobDispatchNowCommand: CommandDefinition<Record<string, never>> = {
   async preview(client, jobId) {
     const job = await readJob(client, jobId);
     if (!job) throw new AdminFoundationError("ADMIN_NOT_FOUND");
-    if (!isHeldMailJob(job) || !job.heldUntil) throw new AdminFoundationError("ADMIN_INVALID_STATE");
+    // Held mail before its date, or mail held for its funding (#696), due or not.
+    const fundingHeld = isFundingHeldMailJob(job);
+    if (!fundingHeld && (!isHeldMailJob(job) || !job.heldUntil)) throw new AdminFoundationError("ADMIN_INVALID_STATE");
     return {
       targetId: job.jobId,
       summary: {
         letterId: job.letterId,
         userId: job.userId,
         fundingOrderId: job.fundingOrderId,
-        heldUntil: job.heldUntil.toISOString(),
+        heldUntil: job.heldUntil ? job.heldUntil.toISOString() : null,
         jobStatus: job.status,
+        ...(fundingHeld ? { fundingHold: job.holdReason } : {}),
       },
       expectedVersion: job.updatedAt.toISOString(),
       display: [
@@ -257,9 +260,20 @@ export const jobDispatchNowCommand: CommandDefinition<Record<string, never>> = {
               ? "a gift letter"
               : "prepaid balance",
         ],
-        ["Held until", `${job.heldUntil.toISOString()} (09:00 New York time on its mail date)`],
+        ...(job.heldUntil
+          ? [["Held until", `${job.heldUntil.toISOString()} (09:00 New York time on its mail date)`] as [string, string]]
+          : []),
+        ...(fundingHeld
+          ? [["Held because", job.holdReason === "funding_disputed" ? "the pack that paid for it was lost to a dispute" : "the pack that paid for it was refunded in full"] as [string, string]]
+          : []),
       ],
       warnings: [
+        ...(fundingHeld
+          ? [
+              "The money that paid for this letter went back. Sending it prints a letter nobody is paying for: release it only when the dispute is won, or you choose to.",
+              "If the account's sending is blocked, the letter still waits until it is unblocked.",
+            ]
+          : []),
         "The letter goes to the printer at the next hourly maintenance run instead of on its mail date, so it may arrive well before the date the customer chose.",
         "The customer can still cancel it until that run takes it.",
         "The reason you give on this page is recorded with the release.",

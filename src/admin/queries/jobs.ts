@@ -1,5 +1,5 @@
 import type { AdminSqlClient } from "../database.js";
-import { isHeldMailJobState } from "../../services/heldMail.js";
+import { fundingHeldJobSql, isFundingHoldReason, isHeldMailJobState } from "../../services/heldMail.js";
 import { JOB_COLUMNS, toJobDetail, type JobDetailForLetter, type JobRow } from "./accounts.js";
 
 export interface JobView extends JobDetailForLetter {
@@ -41,6 +41,28 @@ export function isHeldMailJob(job: JobView, now: number = Date.now()): boolean {
   );
 }
 
+/**
+ * Mail held for its funding (#696): a pack refunded in full or lost to a dispute paid for
+ * it. The job pending and never attempted or dispatched, its letter queued, due or not: a
+ * dispute can outlast its mail date. The page offers job.dispatch_now for it too; the
+ * service checks the same again under its locks.
+ */
+export function isFundingHeldMailJob(job: JobView): boolean {
+  return (
+    job.status === "pending" &&
+    job.providerOutcome === "not_dispatched" &&
+    job.attempts === 0 &&
+    job.letterStatus === "queued" &&
+    !job.operatorResolution &&
+    isFundingHoldReason(job.holdReason)
+  );
+}
+
+/** What job.dispatch_now may release: held mail before its date, or mail held for its funding. */
+export function isReleasableMailJob(job: JobView, now: number = Date.now()): boolean {
+  return isHeldMailJob(job, now) || isFundingHeldMailJob(job);
+}
+
 function toJobView(row: JobJoinedRow): JobView {
   return {
     ...toJobDetail(row),
@@ -55,7 +77,8 @@ function toJobView(row: JobJoinedRow): JobView {
 
 /**
  * Jobs that need an operator: held (ambiguous provider outcome or accepted
- * after a refund), failed, or processing for longer than a dispatch takes.
+ * after a refund), held for their funding (#696), failed, or processing for
+ * longer than a dispatch takes.
  */
 export async function listAttentionJobs(
   client: AdminSqlClient,
@@ -64,6 +87,7 @@ export async function listAttentionJobs(
   const result = await client.query<JobJoinedRow>(
     `${JOB_JOINED_SQL}
      WHERE j.status IN ('held', 'failed')
+        OR (j.status = 'pending' AND ${fundingHeldJobSql("j")})
         OR (j.status = 'processing' AND j.locked_at < NOW() - INTERVAL '10 minutes')
      ORDER BY CASE j.status WHEN 'held' THEN 0 WHEN 'processing' THEN 1 ELSE 2 END, j.updated_at DESC
      LIMIT $1`,

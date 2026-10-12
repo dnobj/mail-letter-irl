@@ -239,10 +239,12 @@ describe("processing queued erasures", () => {
 
 describe("held mail (#535)", () => {
   const flat = (text: string) => text.replace(/\s+/g, " ");
+  // Held for its mail date, or held for its funding (#696), due or not.
   const HELD =
-    "l.status = 'queued' AND l.funding_type IN ('prepaid_balance', 'gift_letter') AND (j.status = 'pending' " +
+    "l.status = 'queued' AND l.funding_type IN ('prepaid_balance', 'gift_letter') AND ((j.status = 'pending' " +
     "AND j.provider_outcome = 'not_dispatched' AND j.attempts = 0 AND j.mail_hold_until IS NOT NULL " +
-    "AND j.next_attempt_at > NOW())";
+    "AND j.next_attempt_at > NOW()) OR (j.status = 'pending' AND (j.provider_outcome = 'not_dispatched' " +
+    "AND j.hold_reason IN ('funding_reversed', 'funding_disputed'))))";
 
   it("does not hold the account: the gate leaves held prepaid and gift mail out of both mail counts", async () => {
     const client = scriptedClient({ queue: [OPERATION()] });

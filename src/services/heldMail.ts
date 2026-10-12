@@ -37,3 +37,30 @@ export function isHeldMailJobState(
     job.nextAttemptAt.getTime() > now
   );
 }
+
+/**
+ * Mail held because the money that paid for it was reversed (#696, decision D2): a pack
+ * refunded in full (funding_reversed) or lost to a dispute (funding_disputed). Its job
+ * stays pending and never dispatched, as mail the outbox has not taken always is (a held
+ * job must have reached the provider, 023's valid_letter_job_outcome_state), and carries
+ * one of these as its hold_reason, which the outbox claim skips. The operator releases it
+ * (job.dispatch_now, which clears the reason) or the customer cancels it.
+ */
+export const FUNDING_HOLD_REASONS = ['funding_reversed', 'funding_disputed'] as const;
+export type FundingHoldReason = (typeof FUNDING_HOLD_REASONS)[number];
+
+/** Whether a job's hold_reason is a funding hold. */
+export function isFundingHoldReason(reason: string | null | undefined): reason is FundingHoldReason {
+  return typeof reason === 'string' && (FUNDING_HOLD_REASONS as readonly string[]).includes(reason);
+}
+
+/**
+ * A SQL condition on the letter_jobs row named `alias`: held for its funding (#696), not
+ * dispatched. Parenthesised; the reasons are this module's own constants, never input.
+ */
+export function fundingHeldJobSql(alias: string): string {
+  if (!/^[a-z_]+$/.test(alias)) throw new Error(`fundingHeldJobSql: not a table alias: ${alias}`);
+  const reasons = FUNDING_HOLD_REASONS.map(reason => `'${reason}'`).join(', ');
+  return `(${alias}.provider_outcome = 'not_dispatched'
+      AND ${alias}.hold_reason IN (${reasons}))`;
+}
