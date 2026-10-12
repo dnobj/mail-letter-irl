@@ -2398,6 +2398,10 @@ describe('the content version the letter card sends (#695)', () => {
     expect(card.byId('error-message').textContent).toBe(`${SAID_SENT} Getting it as it is now…`);
     // Held while it asks (#695 review round 2).
     expect((card.byId('send-button') as HTMLButtonElement).disabled).toBe(true);
+    // And a press meanwhile sends nothing.
+    const sends = card.requests('tools/call', 'send_letter').length;
+    await card.click(card.byId('send-button'));
+    expect(card.requests('tools/call', 'send_letter').length).toBe(sends);
     // Asked again, though it asked on opening.
     expect(card.requests('tools/call', 'get_draft_status').length).toBe(asks + 1);
     const NOW = document1('Dear Sam, and more,\nPat');
