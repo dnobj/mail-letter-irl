@@ -8,20 +8,21 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * tests/integration/adminCommands.postgres.test.ts.
  */
 
-const mocks = vi.hoisted(() => ({ release: vi.fn() }));
+const mocks = vi.hoisted(() => ({ release: vi.fn(), cancel: vi.fn() }));
 vi.mock("../../../src/services/letterJobService.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../src/services/letterJobService.js")>()),
   releaseHeldLetterJobAsAdmin: mocks.release,
+  cancelLeftLetterJobAsAdmin: mocks.cancel,
 }));
 
 import { findAdminCommand } from "../../../src/admin/commands/index.js";
-import { jobDispatchNowCommand, jobResolveCommand } from "../../../src/admin/commands/jobs.js";
+import { jobCancelHeldCommand, jobDispatchNowCommand, jobResolveCommand } from "../../../src/admin/commands/jobs.js";
 import type { AdminSqlClient } from "../../../src/admin/database.js";
 import { renderLetter } from "../../../src/admin/pages/accounts.js";
 import { jobActionPanel } from "../../../src/admin/pages/commands.js";
 import { renderJobDetail } from "../../../src/admin/pages/operations.js";
 import { html } from "../../../src/admin/ui/html.js";
-import { isHeldMailJob, readJob, type JobView } from "../../../src/admin/queries/jobs.js";
+import { isFundingHeldMailJob, isHeldMailJob, listAttentionJobs, readJob, type JobView } from "../../../src/admin/queries/jobs.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const RELEASE = new Date(Date.now() + 5 * DAY_MS);
@@ -88,6 +89,8 @@ const NOT_HELD: Array<[string, Record<string, unknown>]> = [
 beforeEach(() => {
   mocks.release.mockReset();
   mocks.release.mockResolvedValue({ jobId: "job-held", replayed: false });
+  mocks.cancel.mockReset();
+  mocks.cancel.mockResolvedValue({ jobId: "job-held", replayed: false });
 });
 
 describe("job.resolve (#625)", () => {
@@ -304,5 +307,155 @@ describe("held mail on the job page (#535)", () => {
 
   it("says execution is refused in read-only mode", async () => {
     expect(String(jobActionPanel({ job: await jobView(), mode: "read-only" }))).toContain("Read-only mode");
+  });
+});
+
+describe("job.dispatch_now for mail held for its funding (#696)", () => {
+  /** A pack's letter held because the pack was refunded: pending, never attempted, due already, no mail date. */
+  const FUNDING_HELD = {
+    ...HELD_ROW,
+    hold_reason: "funding_reversed",
+    held_until: null,
+    next_attempt_at: new Date(Date.now() - DAY_MS),
+  };
+
+  it("previews it, due or not, saying why it is held and what releasing it means", async () => {
+    const preview = await jobDispatchNowCommand.preview(client(FUNDING_HELD), "job-held", {});
+    expect(preview.summary).toEqual({
+      letterId: "letter-1",
+      userId: "auth0|u1",
+      fundingOrderId: null,
+      heldUntil: null,
+      jobStatus: "pending",
+      fundingHold: "funding_reversed",
+    });
+    expect(preview.display).toContainEqual(["Held because", "the pack that paid for it was refunded in full"]);
+    expect(preview.display.some(([label]) => label === "Held until")).toBe(false);
+    expect(preview.warnings[0]).toMatch(/^The money that paid for this letter went back, or may\./);
+    expect(preview.warnings).toContain("If the account's sending is blocked, the letter still waits until it is unblocked.");
+
+    const disputed = await jobDispatchNowCommand.preview(client({ ...FUNDING_HELD, hold_reason: "funding_disputed" }), "job-held", {});
+    expect(disputed.display).toContainEqual(["Held because", "the pack that paid for it is disputed"]);
+  });
+
+  it("previews held mail before its date with no funding warning", async () => {
+    const preview = await jobDispatchNowCommand.preview(client(HELD_ROW), "job-held", {});
+    expect(preview.warnings.some(warning => warning.startsWith("The money that paid"))).toBe(false);
+    expect(preview.summary).not.toHaveProperty("fundingHold");
+  });
+
+  it.each([
+    ["taken by the outbox", { status: "processing" }],
+    ["dispatched", { provider_outcome: "dispatching" }],
+    ["out of attempts", { attempts: 5 }],
+    ["no longer queued", { letter_status: "cancelled" }],
+    ["held for another reason", { hold_reason: "provider_outcome_ambiguous" }],
+  ])("refuses mail held for its funding that is %s", async (_label, overrides) => {
+    await expect(jobDispatchNowCommand.preview(client({ ...FUNDING_HELD, ...overrides }), "job-held", {})).rejects.toMatchObject({
+      code: "ADMIN_INVALID_STATE",
+    });
+  });
+
+  it("previews mail held for its funding after an operator resolved it for retry (#696 review round 3)", async () => {
+    const preview = await jobDispatchNowCommand.preview(
+      client({ ...FUNDING_HELD, operator_resolution: "provider_confirmed_rejected_retry" }),
+      "job-held",
+      {},
+    );
+    expect(preview.summary).toMatchObject({ fundingHold: "funding_reversed" });
+  });
+
+  it("is told apart from held mail", async () => {
+    const funding = await jobView(FUNDING_HELD);
+    expect(isFundingHeldMailJob(funding)).toBe(true);
+    expect(isHeldMailJob(funding)).toBe(false);
+    const held = await jobView();
+    expect(isFundingHeldMailJob(held)).toBe(false);
+  });
+
+  it("is offered on the job's page, saying why it waits", async () => {
+    const panel = String(jobActionPanel({ job: await jobView(FUNDING_HELD), mode: "full" }));
+    expect(panel).toContain("<h2>Left for the operator</h2>");
+    expect(panel).toContain("refunded in full");
+    expect(panel).toContain('action="/commands/job.dispatch_now/preview"');
+    const disputed = String(jobActionPanel({ job: await jobView({ ...FUNDING_HELD, hold_reason: "funding_disputed" }), mode: "full" }));
+    expect(disputed).toContain("letter was disputed, so it waits");
+  });
+
+  it("is listed among the jobs that need an operator", async () => {
+    const query = vi.fn(async () => ({ rows: [] }));
+    await listAttentionJobs({ query } as unknown as AdminSqlClient, 50);
+    const sql = String((query.mock.calls[0] as unknown[])[0]).replace(/\s+/g, " ");
+    expect(sql).toContain(
+      "OR (j.status = 'pending' AND (j.provider_outcome = 'not_dispatched' AND j.hold_reason IS NOT NULL AND j.hold_reason IN ('funding_reversed', 'funding_disputed')))"
+    );
+    // And a blocked account's mail, which nothing else lists.
+    expect(sql).toContain("OR (j.status = 'pending' AND j.provider_outcome = 'not_dispatched' AND u.sends_blocked_reason IS NOT NULL)");
+  });
+});
+
+describe("job.cancel_held: mail left for the operator (#696)", () => {
+  const LEFT = { ...HELD_ROW, hold_reason: "funding_disputed", held_until: null, next_attempt_at: new Date(Date.now() - DAY_MS) };
+  const BLOCKED = { ...HELD_ROW, hold_reason: null, held_until: null, next_attempt_at: new Date(Date.now() - DAY_MS), account_blocked: true };
+
+  it("is registered, and confirms with its own verb outside a panel transaction", () => {
+    expect(findAdminCommand("job.cancel_held")).toBe(jobCancelHeldCommand);
+    expect(jobCancelHeldCommand.targetType).toBe("letter_job");
+    expect(jobCancelHeldCommand.verb({})).toBe("CANCEL");
+    expect(jobCancelHeldCommand.transactional).toBe(false);
+  });
+
+  it("previews mail held for its funding, or of a blocked account, saying why and what goes back", async () => {
+    const preview = await jobCancelHeldCommand.preview(client(LEFT), "job-held", {});
+    expect(preview.summary).toEqual({ letterId: "letter-1", userId: "auth0|u1", fundingType: "prepaid_balance", jobStatus: "pending" });
+    expect(preview.display).toContainEqual(["Held because", "the pack that paid for it is disputed"]);
+    expect(preview.warnings).toContain("The letter is cancelled and never printed.");
+    const blocked = await jobCancelHeldCommand.preview(client(BLOCKED), "job-held", {});
+    expect(blocked.display).toContainEqual(["Held because", "the account's sending is blocked"]);
+  });
+
+  it.each([
+    ["not left for the operator", { hold_reason: null }],
+    ["Pay & Send", { funding_type: "jit_order", funding_order_id: "order-1" }],
+    // Each mark of Pay & Send refuses on its own.
+    ["tied to an order", { funding_order_id: "order-1" }],
+    ["funded by an order", { funding_type: "jit_order" }],
+    ["out of attempts", { attempts: 5 }],
+    ["no longer queued", { letter_status: "cancelled" }],
+  ])("refuses mail that is %s", async (_label, overrides) => {
+    await expect(jobCancelHeldCommand.preview(client({ ...LEFT, ...overrides }), "job-held", {})).rejects.toMatchObject({
+      code: "ADMIN_INVALID_STATE",
+    });
+  });
+
+  it("asks the service to cancel it for the previewed account, with the operator, the reason and the run's key", async () => {
+    const preview = await jobCancelHeldCommand.preview(client(LEFT), "job-held", {});
+    await expect(jobCancelHeldCommand.execute(execution("the dispute was lost for good"), "job-held", {}, preview)).resolves.toEqual({
+      jobStatus: "cancelled",
+      domainReplayed: false,
+    });
+    expect(mocks.cancel).toHaveBeenCalledWith({
+      jobId: "job-held",
+      expectedUserId: "auth0|u1",
+      actorId: "owner@example.com",
+      reason: "the dispute was lost for good",
+      idempotencyKey: "admin:run-1",
+    });
+    await expect(jobCancelHeldCommand.execute(execution("short"), "job-held", {}, preview)).rejects.toMatchObject({
+      code: "ADMIN_INVALID_REQUEST",
+    });
+  });
+
+  it("is offered on the page with the release for a funding hold, and alone for a blocked account", async () => {
+    const funding = String(jobActionPanel({ job: await jobView(LEFT), mode: "full" }));
+    expect(funding).toContain('action="/commands/job.dispatch_now/preview"');
+    expect(funding).toContain('action="/commands/job.cancel_held/preview"');
+    const blocked = String(jobActionPanel({ job: await jobView(BLOCKED), mode: "full" }));
+    expect(blocked).toContain("sending is blocked, so this letter waits here");
+    expect(blocked).not.toContain("job.dispatch_now");
+    expect(blocked).toContain('action="/commands/job.cancel_held/preview"');
+    const paid = String(jobActionPanel({ job: await jobView({ ...BLOCKED, funding_type: "jit_order", funding_order_id: "order-1" }), mode: "full" }));
+    expect(paid).not.toContain("job.cancel_held");
+    expect(paid).toContain("cancelled by refunding its order");
   });
 });

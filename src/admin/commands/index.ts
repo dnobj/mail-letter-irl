@@ -3,7 +3,7 @@ import { alertTransitionCommand } from "./alerts.js";
 import { createGiftCommands } from "./gifts.js";
 import { createImageCommands } from "./images.js";
 import { createLimitCommands } from "./limits.js";
-import { jobDispatchNowCommand, jobResolveCommand, jobRetryCommand } from "./jobs.js";
+import { jobCancelHeldCommand, jobDispatchNowCommand, jobResolveCommand, jobRetryCommand } from "./jobs.js";
 import { createOpsCommands } from "./ops.js";
 import { createPromoCommands } from "./promos.js";
 import { createRetentionCommands } from "./retention.js";
@@ -25,6 +25,7 @@ export const ADMIN_COMMANDS: ReadonlyArray<CommandDefinition<any>> = [
   jobResolveCommand,
   jobRetryCommand,
   jobDispatchNowCommand,
+  jobCancelHeldCommand,
   stripe.refundLetters,
   stripe.repairGrant,
   accounts.unblockSends,

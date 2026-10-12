@@ -35,6 +35,11 @@ Held mail is not cancelled when:
 - it is Pay & Send: it is a paid order not yet mailed, and holds the account back like any other, because
   its refund is a person's decision.
 
+Prepaid mail held for its funding (#696), a pack refunded in full or disputed, is cancelled the
+same way, due or not: it waits for a person, and an erasure is one. Other mail of an account whose
+sending is blocked, due and not held for its funding, still holds the erasure back: cancel it first
+(**Cancel mail left for the operator**, `job.cancel_held`).
+
 The unspent balance and unused gift letters are forfeited. If the customer wants money back, refund
 **before** erasing: the erasure blocks sends on the account, and a pack refund refuses a blocked account.
 

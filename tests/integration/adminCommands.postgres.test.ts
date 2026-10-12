@@ -373,6 +373,46 @@ describePostgres('admin commands through the operator role', () => {
     await expect(confirmation('job.dispatch_now', heldMailJobId, {})).rejects.toMatchObject({ code: 'ADMIN_INVALID_STATE' });
   }, 60_000);
 
+  it('cancels mail left for the operator under the operator role: job and letter cancelled, with its history, recorded once (#696)', async () => {
+    const leftLetterId = `letter_${randomUUID()}`;
+    const leftJobId = randomUUID();
+    await owner.query(
+      `INSERT INTO letters (letter_id, user_id, content, recipient, credits_cost, status, mail_type, funding_type)
+       VALUES ($1, $2, '{"body":"x"}'::jsonb, '{"name":"y"}'::jsonb, 2, 'queued', 'letter', 'prepaid_balance')`,
+      [leftLetterId, userId]
+    );
+    await owner.query(
+      `INSERT INTO letter_jobs (job_id, letter_id, status, attempts, max_attempts, scheduled_at, idempotency_key,
+         next_attempt_at, provider_outcome, hold_reason)
+       VALUES ($1, $2, 'pending', 0, 5, NOW(), $2, NOW(), 'not_dispatched', 'funding_reversed')`,
+      [leftJobId, leftLetterId]
+    );
+
+    const { command, fields } = await confirmation('job.cancel_held', leftJobId, {}, 'the pack was refunded in full');
+    const outcome = await runner.runAdminCommand(deps(), command, leftJobId, fields);
+    expect(outcome).toMatchObject({ status: 'succeeded', replayed: false, result: { jobStatus: 'cancelled', domainReplayed: false } });
+
+    const job = await owner.query<{ status: string; operator_resolution: string }>(
+      'SELECT status, operator_resolution FROM letter_jobs WHERE job_id = $1', [leftJobId]
+    );
+    expect(job.rows[0]).toEqual({ status: 'cancelled', operator_resolution: 'operator_cancelled' });
+    const letter = await owner.query<{ status: string }>('SELECT status FROM letters WHERE letter_id = $1', [leftLetterId]);
+    expect(letter.rows[0].status).toBe('cancelled');
+    const history = await owner.query(
+      "SELECT 1 FROM letter_status_history WHERE letter_id = $1 AND new_status = 'cancelled' AND source = 'operator'", [leftLetterId]
+    );
+    expect(history.rowCount).toBe(1);
+    // Migration 056 admits the operation.
+    const audit = await owner.query<{ operation: string }>(
+      'SELECT operation FROM commerce_operator_audit_events WHERE target_reference_hash = $1', [hash(leftJobId)]
+    );
+    expect(audit.rows.map(row => row.operation)).toEqual(['mail_job_cancel']);
+
+    const replay = await runner.runAdminCommand(deps(), command, leftJobId, fields);
+    expect(replay).toMatchObject({ commandId: outcome.commandId, status: 'succeeded', replayed: true });
+    await expect(confirmation('job.cancel_held', leftJobId, {})).rejects.toMatchObject({ code: 'ADMIN_INVALID_STATE' });
+  }, 60_000);
+
   it('refuses in read-only mode and without elevation, touching nothing', async () => {
     const { command, fields } = await confirmation('job.resolve', heldJobId, { decision: 'rejected', providerName: 'dummy' }).catch(() => ({
       command: commands.findAdminCommand('job.resolve')!,
