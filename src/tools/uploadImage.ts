@@ -13,10 +13,6 @@
 
 import { McpToolDefinition, ToolContext } from "../contracts/types.js";
 import { widgetTemplateUri } from "../mcp/widgetUris.js";
-import {
-  uploadImageInputSchema,
-  uploadImageOutputSchema
-} from "../schemas.js";
 import { isDebugEnabled } from "../utils/debug.js";
 import { isCardUploadEnabled, uploadsThroughCard } from "../config/cardUpload.js";
 import { normalizeUploadContext } from "../utils/uploadContext.js";
@@ -105,8 +101,6 @@ export const uploadImageTool: McpToolDefinition<
       ? " The widget sends the photo to Letter IRL and then asks for the preview in the conversation: call the preview tool with no image and no imageUrl, and Letter IRL uses the photo just uploaded."
       : " The widget uploads the file and returns an imageUrl to use in the next preview call."),
   readOnly: false,
-  inputSchema: uploadImageInputSchema,
-  outputSchema: uploadImageOutputSchema,
   meta: {
     "openai/outputTemplate": widgetTemplateUri("ImageUploadCard"),
     "openai/widgetAccessible": true,

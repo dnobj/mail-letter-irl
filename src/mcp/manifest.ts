@@ -1,36 +1,32 @@
 import { LetterIrlServer } from "../server.js";
-import { servesPostcardSixByNineOnly, servesStationeryThemeOnly, listedWidgets } from "./registerTools.js";
-import { withheldInputKeys } from "./toolCatalog.js";
-import { postcardSixByNineProperties } from "../schemas.js";
+import { getServedInputSchema, getZodOutputShape, listedWidgets } from "./registerTools.js";
+import { normalizeObjectSchema, objectFromShape } from "@modelcontextprotocol/sdk/server/zod-compat.js";
+import { toJsonSchemaCompat } from "@modelcontextprotocol/sdk/server/zod-json-schema-compat.js";
 import { DEFAULT_OAUTH_SCOPES } from "../auth/oauthConfig.js";
 import { buildServerInstructions } from "./serverInstructions.js";
 import { isSendConfirmationEnabled } from "../config/sendConfirmation.js";
 import { clientProfileNamed } from "../auth/clientProfiles.js";
 
 /**
- * A tool's input schema as tools/list serves it, without the fields this
- * deployment withholds (withheldInputKeys): the four previews' `arriveBy`
- * (#535) while LETTER_IRL_ARRIVE_BY_ENABLED is off, and the three letter
- * previews' stationery (#563) while it is not offered. set_arrival_date is
- * listed only while arrive-by is on, its own arriveBy with it. The postcard
- * preview's `message` and `size` are served as before the 4x6 and 11x6
- * (#594) while those are not offered (servesPostcardSixByNineOnly).
+ * A tool's schemas exactly as tools/list serves them (#688): the served Zod shapes (getServedInputSchema, with the
+ * fields this deployment withholds left out and the postcard and set_stationery served as before their features),
+ * converted by the SDK's own converter with the options its tools/list handler uses. So the manifest and tools/list
+ * cannot disagree, and src/zodSchemas.ts is the one tool contract.
  */
-function servedInputSchema(name: string, schema: unknown): unknown {
-  const declared = (schema as { properties?: Record<string, unknown> } | undefined)?.properties;
-  if (!declared) return schema;
-  let properties = servesPostcardSixByNineOnly(name) ? { ...declared, ...postcardSixByNineProperties } : declared;
-  // set_stationery as before saved designs (#649): a theme required, no stationeryDesignId.
-  const themeOnly = servesStationeryThemeOnly(name);
-  if (themeOnly) {
-    const { stationeryDesignId: _design, ...rest } = properties;
-    properties = rest;
-  }
-  const withheld = withheldInputKeys(name);
-  if (properties === declared && withheld.length === 0) return schema;
-  const served = Object.fromEntries(Object.entries(properties).filter(([key]) => !withheld.includes(key)));
-  const required = (schema as { required?: string[] }).required ?? [];
-  return { ...(schema as object), properties: served, ...(themeOnly ? { required: [...required, "stationery"] } : {}) };
+function servedJsonSchema(schema: unknown, pipeStrategy: "input" | "output"): unknown {
+  // As registerTool stores it: a raw shape, even an empty one, becomes an object schema first.
+  const isRawShape = typeof schema === "object" && schema !== null && !("_def" in schema) && !("_zod" in schema);
+  const stored = isRawShape ? objectFromShape(schema as Parameters<typeof objectFromShape>[0]) : schema;
+  const object = normalizeObjectSchema(stored as Parameters<typeof normalizeObjectSchema>[0]);
+  return object ? toJsonSchemaCompat(object, { strictUnions: true, pipeStrategy }) : { type: "object", properties: {} };
+}
+
+/** A tool's input and output schemas as tools/list and /manifest.json serve them, as this deployment stands. */
+export function servedToolJsonSchemas(name: string): { inputSchema: any; outputSchema: any } {
+  return {
+    inputSchema: servedJsonSchema(getServedInputSchema(name), "input"),
+    outputSchema: servedJsonSchema(getZodOutputShape(name), "output")
+  };
 }
 
 function getManifestUrls(publicBaseUrlOverride?: string) {
@@ -67,8 +63,7 @@ export function buildManifest(publicBaseUrl?: string) {
   const tools = server.listTools(chatgpt).map((tool) => ({
     name: tool.name,
     description: tool.description,
-    inputSchema: servedInputSchema(tool.name, tool.inputSchema),
-    outputSchema: tool.outputSchema
+    ...servedToolJsonSchemas(tool.name)
   }));
 
   return {

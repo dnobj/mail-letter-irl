@@ -1,6 +1,5 @@
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
 import { addressRequestDailyCap, addressRequestLinkDays } from '../config/addressRequests.js';
-import { requestAddressInputSchema, requestAddressOutputSchema } from '../schemas.js';
 import { createAddressRequest } from '../services/addressRequestService.js';
 import { getReturnAddress } from '../services/returnAddressService.js';
 import { AccountErasedError } from '../auth/accountErased.js';
@@ -113,8 +112,6 @@ export const requestAddressTool: McpToolDefinition<RequestAddressInput, RequestA
   title: 'Request an address',
   description: describe,
   readOnly: false,
-  inputSchema: requestAddressInputSchema,
-  outputSchema: requestAddressOutputSchema,
   meta: {
     'openai/toolInvocation/invoking': 'Making the address request...',
     'openai/toolInvocation/invoked': 'Address request ready',

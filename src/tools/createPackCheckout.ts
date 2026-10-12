@@ -9,7 +9,6 @@ import {
 import { isSendConfirmationEnabled } from '../config/sendConfirmation.js';
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
 import { widgetTemplateUri } from '../mcp/widgetUris.js';
-import { createPackCheckoutInputSchema, createPackCheckoutOutputSchema } from '../schemas.js';
 import { createPackCheckout, purchaseStartUrl } from '../services/commerceService.js';
 import { SpendLimitError } from '../services/betaSpendLimits.js';
 import { findUser } from '../services/userService.js';
@@ -179,8 +178,6 @@ export const createPackCheckoutTool: McpToolDefinition<
       ? 'To pay for one specific draft instead, the person presses Pay & Send on its preview card.'
       : 'Use create_mail_checkout instead to pay for one specific draft.'),
   readOnly: false,
-  inputSchema: createPackCheckoutInputSchema,
-  outputSchema: createPackCheckoutOutputSchema,
   meta: {
     'openai/outputTemplate': OUTPUT_TEMPLATE,
     'openai/toolInvocation/invoking': 'Preparing letter pack checkout...',

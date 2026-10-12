@@ -1,5 +1,4 @@
 import type { Address, LetterLayoutType, McpToolDefinition, ToolContext } from '../contracts/types.js';
-import { setLetterSignatureInputSchema, setLetterSignatureOutputSchema } from '../schemas.js';
 import { letterPageLimit } from '../config/roomToWrite.js';
 import { isWordsEditorOffered } from '../config/wordsEditor.js';
 import type { SendEligibility } from '../services/commerceService.js';
@@ -205,8 +204,6 @@ export const setLetterSignatureTool: McpToolDefinition<SetLetterSignatureInput, 
     `The signature takes ${SIGNATURE_LINES} lines, so a letter with no room for them is refused. The page is drawn again with the signature as it is saved now, ` +
     'and the choice is remembered for the next letter preview.',
   readOnly: false,
-  inputSchema: setLetterSignatureInputSchema,
-  outputSchema: setLetterSignatureOutputSchema,
   meta: {
     'openai/toolInvocation/invoking': 'Changing the signature...',
     'openai/toolInvocation/invoked': 'Signature changed',

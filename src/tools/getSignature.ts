@@ -1,5 +1,4 @@
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
-import { getSignatureInputSchema, getSignatureOutputSchema } from '../schemas.js';
 import { getSignature } from '../services/signatureService.js';
 import { requireSignatures, signatureImageUri } from './signatureShared.js';
 
@@ -48,8 +47,6 @@ export const getSignatureTool: McpToolDefinition<GetSignatureInput, GetSignature
   description:
     'Check whether the person has a saved signature for their letters, and when it was saved.',
   readOnly: true,
-  inputSchema: getSignatureInputSchema,
-  outputSchema: getSignatureOutputSchema,
   meta: {
     'openai/toolInvocation/invoking': 'Checking the signature...',
     'openai/toolInvocation/invoked': 'Signature checked'

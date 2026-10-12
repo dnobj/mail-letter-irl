@@ -158,16 +158,17 @@ describe('the postcard size in /manifest.json', () => {
   const postcard = () =>
     (buildManifest().tools as Array<{ name: string; inputSchema: Schema }>).find(tool => tool.name === 'quote_and_preview_postcard')!.inputSchema;
 
-  it('is the three sizes while offered, and the message may run to 2,000 characters', () => {
+  // The message's length is the tool's to refuse: tools/list never served a maxLength, and since the manifest is
+  // generated from the same shape (#688), neither does /manifest.json.
+  it('is the three sizes while offered', () => {
     offer('true', 'pdf', 'true');
     const { properties } = postcard();
+    // As tools/list serves it (#688): the manifest is generated from the same Zod shape.
     expect(properties.size.enum).toEqual(['6x9', '6x4', '6x11']);
-    expect(properties.size.default).toBe('6x9');
     expect(properties.size.description).toContain('a 4x6 or 11x6 is paid with Pay & Send');
-    expect(properties.message.maxLength).toBe(2_000);
   });
 
-  it('is the 6x9 alone while not offered, its message to 1,000 characters, as before, arrival dates on or off', () => {
+  it('is the 6x9 alone while not offered, as before, arrival dates on or off', () => {
     offer('true', 'pdf', 'true');
     const on = postcard();
     // With arrival dates on, nothing is withheld from the postcard: only narrowed.
@@ -176,14 +177,10 @@ describe('the postcard size in /manifest.json', () => {
       vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', arriveBy);
       const off = postcard();
       expect(Object.hasOwn(off.properties, 'arriveBy'), arriveBy).toBe(arriveBy === 'true');
-      expect(off.properties.size).toEqual({
-        type: 'string',
-        enum: ['6x9'],
-        default: '6x9',
-        description: 'Postcard size (currently only 6x9 is supported)'
-      });
-      expect(off.properties.message.maxLength).toBe(1_000);
-      expect(off.properties.message.description).toBe(on.properties.message.description);
+      expect(off.properties.size).toMatchObject({ type: 'string', enum: ['6x9'] });
+      // The 6x9's own room, as tools/list says it while the sizes are not offered.
+      expect(off.properties.message.description).toBe('Must fit the back of the postcard: 16 lines, about 500 characters of prose');
+      expect(on.properties.message.description).toContain("size gives the other sizes' room");
       // In the same place among the properties.
       expect(Object.keys(off.properties).filter(key => key !== 'arriveBy')).toEqual(Object.keys(on.properties));
     }

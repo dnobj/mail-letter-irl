@@ -20,9 +20,8 @@ This log captures short notes discovered while connecting Letter IRL to the Chat
 
 When validating letter content, we use two tiers of limits:
 
-**Soft Limits (Guidance)**: the line counts the manifest's prose names (`src/schemas.ts`, which feeds
-`/manifest.json` only). The tool descriptions served in `tools/list` state no line counts; a model
-learns a limit from the refusal sentence, which names it.
+**Soft Limits (Guidance)**: neither `tools/list` nor, since #688, `/manifest.json` (generated from the same
+Zod shapes) states line counts; a model learns a limit from the refusal sentence, which names it.
 - `inline_image`: 12 lines
 - `header_image`: 15 lines (17 until #534: with the sign-off, 15 fits both the renderer's 16 and the legacy 17)
 - `text_only`: 24 lines

@@ -1,5 +1,4 @@
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
-import { getAddressRequestInputSchema, getAddressRequestOutputSchema } from '../schemas.js';
 import {
   getAddressRequest,
   type AddressRequestState,
@@ -61,8 +60,6 @@ export const getAddressRequestTool: McpToolDefinition<GetAddressRequestInput, Ge
     'It may also say the recipient declined, the request was cancelled, or the link expired before an answer. ' +
     'Call it when the person says the recipient has answered, or asks.',
   readOnly: true,
-  inputSchema: getAddressRequestInputSchema,
-  outputSchema: getAddressRequestOutputSchema,
   meta: {
     'openai/toolInvocation/invoking': 'Checking the address request...',
     'openai/toolInvocation/invoked': 'Address request checked',

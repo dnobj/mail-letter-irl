@@ -1,5 +1,4 @@
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
-import { setMailServiceInputSchema, setMailServiceOutputSchema } from '../schemas.js';
 import { MAIL_SERVICES, isCertifiedMailOffered } from '../config/certifiedMail.js';
 import { draftMailOption, isExtraService, mailServiceOf } from '../config/products.js';
 import type { SendEligibility } from '../services/commerceService.js';
@@ -177,8 +176,6 @@ export const setMailServiceTool: McpToolDefinition<SetMailServiceInput, SetMailS
     'a gift letter, and a postcard or a gift letter cannot be certified. ' +
     'Give the draftId from the preview and mailService; the page does not change, its price does.',
   readOnly: false,
-  inputSchema: setMailServiceInputSchema,
-  outputSchema: setMailServiceOutputSchema,
   meta: {
     'openai/toolInvocation/invoking': 'Changing how the letter travels...',
     'openai/toolInvocation/invoked': 'Mail service changed',

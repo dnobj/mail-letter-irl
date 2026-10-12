@@ -3,10 +3,6 @@ import {
   ToolContext,
   OrderRecord
 } from "../contracts/types.js";
-import {
-  listOrdersInputSchema,
-  listOrdersOutputSchema
-} from "../schemas.js";
 import { listPackPurchases, type PackPurchaseSummary } from "../services/commerceService.js";
 import type { CertifiedMailService } from "../services/types.js";
 
@@ -129,8 +125,6 @@ export const listOrdersTool: McpToolDefinition<
   description:
     "List the user's recent orders: mailed letters and postcards (recipient and delivery status; use the order IDs with get_order_status) and letter pack purchases (payment status, letters in the pack, amount; use those order IDs with get_purchase_status). Use this when asked about a recent purchase, a pack, or whether a payment went through.",
   readOnly: true,
-  inputSchema: listOrdersInputSchema,
-  outputSchema: listOrdersOutputSchema,
   meta: {
     "openai/toolInvocation/invoking": "Loading your orders…",
     "openai/toolInvocation/invoked": "Order history",

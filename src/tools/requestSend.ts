@@ -1,5 +1,4 @@
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
-import { requestSendInputSchema, requestSendOutputSchema } from '../schemas.js';
 import { getDraft } from '../services/draftService.js';
 import { draftScheduleOf } from '../services/draftSchedule.js';
 import { earliestMailOn } from '../services/deliverySchedule.js';
@@ -161,8 +160,6 @@ export const requestSendTool: McpToolDefinition<RequestSendInput, RequestSendOut
     'they press Send on that page, or pay there with Pay & Send for mail no letter pack pays for. ' +
     'Use it when the person wants to send a preview and no preview card with a Send button is showing.',
   readOnly: true,
-  inputSchema: requestSendInputSchema,
-  outputSchema: requestSendOutputSchema,
   meta: {
     'openai/toolInvocation/invoking': 'Getting a link to send it...',
     'openai/toolInvocation/invoked': 'Link ready',

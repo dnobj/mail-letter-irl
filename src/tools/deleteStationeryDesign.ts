@@ -1,5 +1,4 @@
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
-import { deleteStationeryDesignInputSchema, deleteStationeryDesignOutputSchema } from '../schemas.js';
 import { deleteDesign } from '../services/stationeryDesignService.js';
 import { DesignRefusedError, requireDesigns } from './stationeryDesignShared.js';
 
@@ -47,8 +46,6 @@ export const deleteStationeryDesignTool: McpToolDefinition<DeleteStationeryDesig
     "Delete one of the person's saved stationery designs, by its designId. Letters already previewed or sent keep theirs. " +
     'Requires confirm: true, once the person has agreed. It cannot be undone; save_stationery_design saves one again.',
   readOnly: false,
-  inputSchema: deleteStationeryDesignInputSchema,
-  outputSchema: deleteStationeryDesignOutputSchema,
   meta: {
     'openai/toolInvocation/invoking': 'Deleting the design...',
     'openai/toolInvocation/invoked': 'Design deleted',

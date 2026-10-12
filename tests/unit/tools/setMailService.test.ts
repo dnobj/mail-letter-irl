@@ -29,9 +29,13 @@ import { getSendEligibility } from '../../../src/services/commerceService.js';
 import { getGiftBalance } from '../../../src/services/giftLetterService.js';
 import { MailServiceRefusedError, SET_MAIL_SERVICE_TOOL, setMailServiceTool } from '../../../src/tools/setMailService.js';
 import { CERTIFIED_PAID_PER_SEND_REASON } from '../../../src/tools/letterHelpers.js';
-import { setMailServiceInputSchema, setMailServiceOutputSchema } from '../../../src/schemas.js';
 import { setMailServiceInputZ, setMailServiceOutputZ } from '../../../src/zodSchemas.js';
 import type { ToolContext } from '../../../src/contracts/types.js';
+import { servedToolJsonSchemas } from '../../../src/mcp/manifest.js';
+
+// What tools/list and /manifest.json serve: Zod is the one tool contract (#688).
+const setMailServiceInputSchema = servedToolJsonSchemas('set_mail_service').inputSchema;
+const setMailServiceOutputSchema = servedToolJsonSchemas('set_mail_service').outputSchema;
 
 const DRAFT_ID = '0f1e2d3c-4b5a-4978-8796-a5b4c3d2e1f0';
 const NOW = new Date('2026-10-01T14:00:00Z');

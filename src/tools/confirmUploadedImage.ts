@@ -14,10 +14,6 @@
  */
 
 import { McpToolDefinition, ToolContext } from "../contracts/types.js";
-import {
-  confirmUploadedImageInputSchema,
-  confirmUploadedImageOutputSchema
-} from "../schemas.js";
 import { setRecentUploadedImage } from "../services/recentUploadStore.js";
 import { normalizeUploadContext } from "../utils/uploadContext.js";
 
@@ -81,8 +77,6 @@ export const confirmUploadedImageTool: McpToolDefinition<
   title: "Confirm an uploaded image",
   description: "Internal widget relay that confirms an uploaded image and returns the imageUrl plus next-step guidance. Not intended for direct user requests.",
   readOnly: false,
-  inputSchema: confirmUploadedImageInputSchema,
-  outputSchema: confirmUploadedImageOutputSchema,
   meta: {
     "openai/widgetAccessible": true,
     "openai/toolInvocation/invoking": "Processing uploaded photo...",

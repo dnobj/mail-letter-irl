@@ -55,23 +55,6 @@ export const clearReturnAddressTool: McpToolDefinition<
   description:
     "Clear your saved return address. After clearing it, you will need to provide a sender address when creating new mail.",
   readOnly: false,
-  inputSchema: {
-    type: "object",
-    properties: {
-      confirm: {
-        type: "boolean",
-        description: "Set to true to confirm clearing the return address"
-      }
-    },
-    required: ["confirm"]
-  },
-  outputSchema: {
-    type: "object",
-    properties: {
-      success: { type: "boolean" },
-      message: { type: "string" }
-    }
-  },
   meta: {
     "openai/toolInvocation/invoking": "Clearing return address...",
     "openai/toolInvocation/invoked": "Return address cleared",

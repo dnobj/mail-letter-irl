@@ -1,5 +1,4 @@
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
-import { clearSignatureInputSchema, clearSignatureOutputSchema } from '../schemas.js';
 import { clearSignature } from '../services/signatureService.js';
 import { requireSignatures, SignatureRefusedError } from './signatureShared.js';
 
@@ -48,8 +47,6 @@ export const clearSignatureTool: McpToolDefinition<ClearSignatureInput, ClearSig
     "Remove the person's saved signature. New letter previews then print none; letters already previewed keep theirs. " +
     'Requires confirm: true, once the person has agreed. It cannot be undone; set_signature saves one again.',
   readOnly: false,
-  inputSchema: clearSignatureInputSchema,
-  outputSchema: clearSignatureOutputSchema,
   meta: {
     'openai/toolInvocation/invoking': 'Removing the signature...',
     'openai/toolInvocation/invoked': 'Signature removed',

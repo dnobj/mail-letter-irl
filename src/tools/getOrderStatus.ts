@@ -3,10 +3,6 @@ import {
   ToolContext,
   OrderRecord
 } from "../contracts/types.js";
-import {
-  getOrderStatusInputSchema,
-  getOrderStatusOutputSchema
-} from "../schemas.js";
 import type { CertifiedMailService } from "../services/types.js";
 import { certifiedOrderNote } from "./certifiedOrder.js";
 
@@ -124,8 +120,6 @@ export const getOrderStatusTool: McpToolDefinition<
   title: "Check an order's status",
   description: "Retrieve the latest status timeline for a letter order. If no orderId is provided, returns the most recent order.",
   readOnly: true,
-  inputSchema: getOrderStatusInputSchema,
-  outputSchema: getOrderStatusOutputSchema,
   meta: {
     "openai/toolInvocation/invoking": "Checking letter status…",
     "openai/toolInvocation/invoked": "Latest status",

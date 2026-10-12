@@ -1,5 +1,4 @@
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
-import { cancelAddressRequestInputSchema, cancelAddressRequestOutputSchema } from '../schemas.js';
 import { cancelAddressRequest, type AddressRequestState } from '../services/addressRequestService.js';
 import { addressRequestMessage, requireAddressRequests } from './addressRequestShared.js';
 import { addressRequestNotFound } from './getAddressRequest.js';
@@ -58,8 +57,6 @@ export const cancelAddressRequestTool: McpToolDefinition<CancelAddressRequestInp
     "has the address another way, or shared the link by mistake. A request already answered, declined or expired is left as it is, and the answer says so. " +
     'It cannot be undone; a new request makes a new link.',
   readOnly: false,
-  inputSchema: cancelAddressRequestInputSchema,
-  outputSchema: cancelAddressRequestOutputSchema,
   meta: {
     'openai/toolInvocation/invoking': 'Cancelling the address request...',
     'openai/toolInvocation/invoked': 'Address request cancelled',

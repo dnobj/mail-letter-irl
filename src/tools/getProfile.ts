@@ -1,5 +1,4 @@
 import { McpToolDefinition, ToolContext } from "../contracts/types.js";
-import { getProfileInputSchema, getProfileOutputSchema } from "../schemas.js";
 import { findUser } from "../services/userService.js";
 import { VerifiedEmailRequiredError } from "../auth/verifiedEmail.js";
 import { AccountErasedError } from "../auth/accountErased.js";
@@ -89,8 +88,6 @@ export const getProfileTool: McpToolDefinition<Record<string, never>, GetProfile
   description:
     "Identifies the connected Letter IRL account: a stable account id and the account's email address.",
   readOnly: true,
-  inputSchema: getProfileInputSchema,
-  outputSchema: getProfileOutputSchema,
   meta: {
     // The marker ChatGPT discovers the profile tool by. It "does not enable
     // the feature or grant eligibility"; it says which tool answers.

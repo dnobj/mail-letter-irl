@@ -1,5 +1,4 @@
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
-import { cancelScheduledMailInputSchema, cancelScheduledMailOutputSchema } from '../schemas.js';
 import {
   cancelScheduledMail,
   type CancelledScheduledMail,
@@ -145,8 +144,6 @@ export const cancelScheduledMailTool: McpToolDefinition<CancelScheduledMailInput
     'Requires the orderId (from list_orders or the send) and confirm: true, after the person agrees, because it cannot be undone. ' +
     'Pay & Send orders and mail with no arrival date cannot be cancelled here.',
   readOnly: false,
-  inputSchema: cancelScheduledMailInputSchema,
-  outputSchema: cancelScheduledMailOutputSchema,
   meta: {
     'openai/toolInvocation/invoking': 'Cancelling the scheduled mail...',
     'openai/toolInvocation/invoked': 'Scheduled mail cancelled',

@@ -3,7 +3,6 @@ import {
   type McpToolDefinition,
   type ToolContext,
 } from '../contracts/types.js';
-import { sendPostcardInputSchema, sendPostcardOutputSchema } from '../schemas.js';
 import { processLetterJob } from '../services/letterJobService.js';
 import { asPostcardDraft, createMailOrderFromDraft } from '../services/mailSendService.js';
 import { hasReturnAddress } from '../services/returnAddressService.js';
@@ -199,8 +198,6 @@ export const sendPostcardTool: McpToolDefinition<SendPostcardInput, SendPostcard
       client
     ),
   readOnly: false,
-  inputSchema: sendPostcardInputSchema,
-  outputSchema: sendPostcardOutputSchema,
   meta: {
     'openai/toolInvocation/invoking': 'Sending postcard...',
     'openai/toolInvocation/invoked': 'Postcard sent',

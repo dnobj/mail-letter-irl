@@ -63,24 +63,6 @@ export const getStartedTool: McpToolDefinition<GetStartedInput, GetStartedOutput
       ? "Show a short getting-started guide for new Letter IRL users, including what the app can do, how to buy prepaid letters without leaving the conversation, and example prompts to try next."
       : "Get a short getting-started guide for new Letter IRL users: what the app can do, how to buy prepaid letters, and example prompts to try next.",
   readOnly: true,
-  inputSchema: {
-    type: "object",
-    properties: {},
-    required: []
-  },
-  outputSchema: {
-    type: "object",
-    required: ["title", "overview", "purchaseStep", "examplePrompts"],
-    properties: {
-      title: { type: "string" },
-      overview: { type: "string" },
-      purchaseStep: { type: "string" },
-      examplePrompts: {
-        type: "array",
-        items: { type: "string" }
-      }
-    }
-  },
   meta: {
     "openai/outputTemplate": OUTPUT_TEMPLATE,
     "openai/toolInvocation/invoking": "Opening getting-started guide...",

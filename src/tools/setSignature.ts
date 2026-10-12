@@ -1,6 +1,5 @@
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
 import type { ImageFileParam } from '../services/types.js';
-import { setSignatureInputSchema, setSignatureOutputSchema } from '../schemas.js';
 import { downloadSignatureSource } from '../services/imageService.js';
 import { cleanSignatureImage, SignatureImageError } from '../services/signatureImage.js';
 import { saveSignature } from '../services/signatureService.js';
@@ -108,8 +107,6 @@ export const setSignatureTool: McpToolDefinition<SetSignatureInput, SetSignature
   title: 'Save a signature',
   description: describe,
   readOnly: false,
-  inputSchema: setSignatureInputSchema,
-  outputSchema: setSignatureOutputSchema,
   meta: {
     'openai/fileParams': ['image'],
     'openai/toolInvocation/invoking': 'Saving the signature...',
