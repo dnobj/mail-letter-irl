@@ -755,7 +755,9 @@ describe('the outbox in batches, within a time budget (#700)', () => {
   });
 
   it('starts no batch once the budget has passed, though the last came back full', async () => {
-    services.processDueLetterJobs.mockResolvedValue(batch(3));
+    // Full batches, then a short one, so a run that ignored the budget would end, at the sixth.
+    for (let index = 0; index < 5; index += 1) services.processDueLetterJobs.mockResolvedValueOnce(batch(3));
+    services.processDueLetterJobs.mockResolvedValueOnce(batch(0));
     const clock = [0, 10_000, 59_999, 60_000];
     const now = () => clock.shift() ?? 60_000;
 

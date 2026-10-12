@@ -1032,7 +1032,8 @@ describePostgres('arrive-by (migration 040, #535)', () => {
 
     it('records a Pay & Send letter whose mail date passed before it was paid, and get_purchase_status says so', async () => {
       process.env.JIT_PURCHASE_ENABLED = 'true';
-      const userId = await seedUser(0);
+      // The fulfilment reads no balance: the order paid for it.
+      const userId = await seedUser();
       const draftId = await seedDraft(userId);
       await pool.query("UPDATE letter_drafts SET arrive_by = '2020-01-13', mail_on = '2020-01-02' WHERE draft_id = $1", [draftId]);
       const orderId = await seedPayAndSend(userId, draftId, 'paid', '20 minutes');
