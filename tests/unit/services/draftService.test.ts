@@ -1237,11 +1237,13 @@ describe('draftService stationery (#563)', () => {
       ['its sign-off, gone', { sign_off: null }]
     ])('refuses a restyle drawn from words that changed under it: %s (#586)', async (_label, changed) => {
       const client = inTransaction({ rows: [pending] }, { rows: [] }, { rows: [{ ...DRAWN, ...changed }] });
+      const onWritten = vi.fn();
       await expect(
-        setDraftStationery('draft-1', 'auth0|owner', { stationery: BOTANICAL, previewHtml: PAGE, pages: 2, drawnFrom: WORDS }, NOW)
+        setDraftStationery('draft-1', 'auth0|owner', { stationery: BOTANICAL, previewHtml: PAGE, pages: 2, drawnFrom: WORDS }, NOW, onWritten)
       ).resolves.toBe('changed');
-      // Nothing written, nothing remembered.
+      // Nothing written, nothing remembered, and no version told (#695).
       expect(client.query).toHaveBeenCalledTimes(3);
+      expect(onWritten).not.toHaveBeenCalled();
     });
 
     it('takes a sign-off stored as none as the none it was drawn from', async () => {
