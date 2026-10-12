@@ -4,7 +4,7 @@ vi.mock("../../../src/auth/identity.js", () => ({
   prepareAuthenticatedUser: vi.fn().mockResolvedValue(undefined)
 }));
 
-import { registerLetterTools } from "../../../src/mcp/registerTools.js";
+import { registerLetterTools, TOKEN_SCOPE_REFUSAL } from "../../../src/mcp/registerTools.js";
 import {
   authorizeTool,
   PERSONAL_TOKEN_REFUSAL,
@@ -100,11 +100,29 @@ describe("personal access tokens and the tools that cannot be undone (#685)", ()
     expect(execute).toHaveBeenCalledWith(expect.objectContaining({ toolName: name }));
   });
 
-  it("refuses in authorizeTool itself, after the scopes", () => {
+  it("refuses in authorizeTool itself, whether or not authentication is required", () => {
     for (const name of REFUSED) {
       expect(() => authorizeTool(name, pat, true)).toThrow(PersonalTokenRefusedError);
+      expect(() => authorizeTool(name, pat, false)).toThrow(PersonalTokenRefusedError);
       expect(() => authorizeTool(name, oauth, true)).not.toThrow();
+      expect(() => authorizeTool(name, oauth, false)).not.toThrow();
     }
+  });
+
+  it("checks the scopes first: a token without the scope is told what a token can do", async () => {
+    const readOnly: AuthenticatedUser = { ...pat, scopes: ["mail:read"] };
+    const { callbacks, execute } = await register(readOnly);
+    const result = await callbacks.get("cancel_scheduled_mail")!({ orderId: "o", confirm: true }, {});
+    expect(execute).not.toHaveBeenCalled();
+    expect(result).toEqual({ isError: true, content: [{ type: "text", text: TOKEN_SCOPE_REFUSAL }] });
+  });
+
+  it("names each thing a token cannot do, and not the return address, which it keeps", () => {
+    expect(PERSONAL_TOKEN_REFUSAL).toMatch(/cancel scheduled mail/);
+    expect(PERSONAL_TOKEN_REFUSAL).toMatch(/signature/);
+    expect(PERSONAL_TOKEN_REFUSAL).toMatch(/design/);
+    expect(PERSONAL_TOKEN_REFUSAL).toMatch(/address request/);
+    expect(PERSONAL_TOKEN_REFUSAL).not.toMatch(/return address/);
   });
 
   it("names the website and a signed-in app as where to do it", () => {
@@ -114,7 +132,9 @@ describe("personal access tokens and the tools that cannot be undone (#685)", ()
 });
 
 describe("the REST twins of those tools (#685)", () => {
-  it("each refused tool's REST twin, where it has one, is a route the website's JWT alone reaches", async () => {
+  // That these routes refuse a personal access token outright is pinned in tests/unit/api/restAuth.test.ts
+  // ("refuses a personal access token outright"); this names which routes they are.
+  it("are exactly these routes", async () => {
     const twins = REST_ROUTE_SCOPES.filter(route => route.twin && PERSONAL_TOKEN_REFUSED_TOOLS.has(route.twin));
     expect(twins.map(route => route.id).sort()).toEqual(["letters.cancel", "signature.clear", "signature.set"]);
     expect(findRestRoute("POST", "/api/letters/ltr_1/cancel")?.twin).toBe("cancel_scheduled_mail");

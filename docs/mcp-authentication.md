@@ -79,7 +79,7 @@ For MCP clients that don't support OAuth (custom agents, headless environments, 
 
 ### What a Token Can Do
 
-A token reads the account and makes previews (`mail:read`, `mail:draft`, #470). It cannot send, pay or buy: when an agent asks to send, it gets a link where the person checks the mail and sends it. It also cannot cancel scheduled mail, or replace or remove what is saved on the account (the signature, saved designs, address requests), whatever its scopes (#685): those tools answer with a sentence saying to do it on the website or in an app signed in with OAuth. The REST API takes no token at all.
+A token reads the account and makes previews (`mail:read`, `mail:draft`, #470). It cannot send, pay or buy: when an agent asks to send, it gets a link where the person checks the mail and sends it. It also cannot cancel scheduled mail, replace or remove the saved signature, replace or delete a saved design, or cancel an address request, whatever its scopes (#685): those tools answer with a sentence saying to do it on the website or in an app signed in with OAuth. It can still save a design under a new name, and set or clear the return address. The REST API takes no token, except to list tokens (`GET /api/tokens`).
 
 ### Getting a Token
 

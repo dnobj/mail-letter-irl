@@ -56,7 +56,7 @@ describe('save_stationery_design (#649)', () => {
     vi.mocked(saveDesign).mockResolvedValue({ ok: true, saved: SAVED, replaced: false });
     const ctx = context();
     const result = await call(saveStationeryDesignTool, { name: '  Garden  ', ...DESIGN }, ctx);
-    expect(saveDesign).toHaveBeenCalledWith('user-1', 'Garden', DESIGN);
+    expect(saveDesign).toHaveBeenCalledWith('user-1', 'Garden', DESIGN, { replace: true });
     expect(result).toEqual({
       designId: ID,
       name: 'Garden',
@@ -68,6 +68,21 @@ describe('save_stationery_design (#649)', () => {
     expect(saveStationeryDesignOutputZ.safeParse(result).success).toBe(true);
     // The log has the choices, never the name.
     expect(JSON.stringify(vi.mocked(ctx.logger.info).mock.calls)).not.toContain('Garden');
+  });
+
+  it('adds and never replaces for a personal access token (#685)', async () => {
+    const tokenContext = { ...context(), client: { name: 'token' } } as unknown as ToolContext;
+    vi.mocked(saveDesign).mockResolvedValue({ ok: false, refusal: 'exists' });
+    await expect(call(saveStationeryDesignTool, { name: 'Garden', ...DESIGN }, tokenContext)).rejects.toMatchObject({
+      code: 'DESIGN_NAME_TAKEN',
+      message: expect.stringMatching(/can save a new design but not replace one/)
+    });
+    expect(saveDesign).toHaveBeenCalledWith('user-1', 'Garden', DESIGN, { replace: false });
+    // At the limit, a token is not told to delete or replace one itself.
+    vi.mocked(saveDesign).mockResolvedValue({ ok: false, refusal: 'limit' });
+    const limited = call(saveStationeryDesignTool, { name: 'Other', ...DESIGN }, tokenContext);
+    await expect(limited).rejects.toMatchObject({ code: 'DESIGN_LIMIT' });
+    await expect(limited).rejects.not.toMatchObject({ message: expect.stringContaining('delete_stationery_design') });
   });
 
   it('says when it replaced the design of that name', async () => {

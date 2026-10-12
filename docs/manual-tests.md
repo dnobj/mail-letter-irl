@@ -893,6 +893,10 @@ Test Claude Desktop via mcp-remote.
 - [ ] `send_letter` sends nothing. With the send rule on, it answers with the confirmation link
       ([SEND-01](#send-01--only-the-person-sends-issue-470)); with the rule off, it is refused like
       a purchase
+- [ ] `cancel_scheduled_mail`, `set_signature`, `clear_signature`, `delete_stationery_design` and
+      `cancel_address_request` are refused with "A personal access token can't cancel scheduled mail, ..."
+      and change nothing; `save_stationery_design` under a name already saved is refused, under a new
+      name it saves (#685)
 - [ ] `last_used_at` updates in database
 
 ---

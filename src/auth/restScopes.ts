@@ -11,6 +11,9 @@
  * These routes accept only JWTs (authenticateRestRequest). Personal access
  * tokens reach MCP alone, where since #470 they carry their own scopes, read and
  * draft (migration 037), and are checked like any other token (requireScopes).
+ * The token routes are the exception: GET /api/tokens lists with one, and
+ * nothing else there takes one. The MCP twins of letters.cancel and
+ * signature.set/clear also refuse a personal access token (#685).
  */
 
 import { PRODUCT_SCOPES } from './oauthConfig.js';
