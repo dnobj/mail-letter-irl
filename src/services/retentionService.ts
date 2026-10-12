@@ -353,7 +353,11 @@ const ABANDONED_DRAFT_DUE_PREDICATE = `        WHERE d.redacted_at IS NULL
  * never printed, so on the unpaid schedule (UNPAID_DRAFT_RETENTION_DAYS),
  * known by its job's hold (letter_jobs.mail_hold_until, 055), which the cancel
  * leaves and the admin panel's reader role may read, as it may not
- * letters.mail_on; the panel's /retention page runs the preview (#701 review round 1),
+ * letters.mail_on; the panel's /retention page runs the preview (#701 review round 1).
+ * A job written while 055 was deploying carries its hold only in
+ * metadata.heldUntil until 055's backfill is run again (its header says how):
+ * such a letter is missed here and stays on the letter schedule, which keeps
+ * it longer, never shorter (#701 review round 2),
  * counted from the cancel, not 90 days from its creation. The cancel is the
  * customer's (letter_status_history, source 'customer', which
  * cancelScheduledMail writes and nothing rewrites): an operator's cancel of

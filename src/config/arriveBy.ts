@@ -9,7 +9,7 @@ import { offUnlessExplicitlyEnabled, positiveIntegerSetting } from '../utils/env
  * reads as live configuration when it is not.
  */
 
-/** The most calendar days ahead held mail may wait (#701): the privacy policy's limit. */
+/** The most calendar days ahead held mail may wait (#701): the limit the privacy policy is to state for it. */
 export const SCHEDULE_HORIZON_LIMIT_DAYS = 60;
 
 export const ARRIVE_BY_DEFAULTS = {
@@ -49,7 +49,7 @@ export function scheduleLeadDays(env: NodeJS.ProcessEnv = process.env): number {
 
 /**
  * How many calendar days ahead an arrival date may be: at most 60 (#701),
- * the limit the privacy policy states for how long held mail waits. A larger
+ * the limit the privacy policy is to state for how long held mail waits. A larger
  * value falls back to the default, which is the limit.
  */
 export function scheduleHorizonDays(env: NodeJS.ProcessEnv = process.env): number {

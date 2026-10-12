@@ -294,6 +294,28 @@ describePostgres('retention restore through the admin panel', () => {
 
   it('counts held mail its customer cancelled through the reader, as the /retention page does (#701)', async () => {
     // The reader may not read letters.mail_on or content: the preview reads neither.
-    await expect(retention.previewCancelledHeldLetterContent(7, reader)).resolves.toMatchObject({ due: expect.any(Number) });
+    const before = await retention.previewCancelledHeldLetterContent(7, reader);
+    const userId = `user_${randomUUID()}`;
+    const letterId = `letter_${randomUUID()}`;
+    await owner.query('INSERT INTO users (user_id, email, credits) VALUES ($1, $2, 0)', [userId, `${userId}@test.invalid`]);
+    await owner.query(
+      `INSERT INTO letters (letter_id, user_id, content, recipient, credits_cost, status, arrive_by, mail_on)
+       VALUES ($1, $2, '{"bodyText":"x"}'::jsonb, '{"name":"Sam"}'::jsonb, 2, 'cancelled', CURRENT_DATE + 30, CURRENT_DATE + 20)`,
+      [letterId, userId]
+    );
+    await owner.query(
+      `INSERT INTO letter_jobs (job_id, letter_id, status, idempotency_key, next_attempt_at, provider_outcome, mail_hold_until)
+       VALUES ($1, $2, 'cancelled', $3, NOW(), 'not_dispatched', NOW() + INTERVAL '20 days')`,
+      [`job_${randomUUID()}`, letterId, `idem_${randomUUID()}`]
+    );
+    await owner.query(
+      `INSERT INTO letter_status_history (letter_id, old_status, new_status, source, changed_at)
+       VALUES ($1, 'queued', 'cancelled', 'customer', NOW() - INTERVAL '5 days')`,
+      [letterId]
+    );
+
+    // The reader counts the row the owner's sweep would take, and no more.
+    await expect(retention.previewCancelledHeldLetterContent(7, reader)).resolves.toMatchObject({ due: before.due + 1 });
+    await expect(retention.previewCancelledHeldLetterContent(7, owner)).resolves.toMatchObject({ due: before.due + 1 });
   }, 60_000);
 });
