@@ -5,7 +5,6 @@ import {
   type OrderRecord,
   type ToolContext,
 } from '../contracts/types.js';
-import { sendLetterInputSchema, sendLetterOutputSchema } from '../schemas.js';
 import { createOrderRecord } from '../services/orderService.js';
 import { processLetterJob } from '../services/letterJobService.js';
 import { createMailOrderFromDraft } from '../services/mailSendService.js';
@@ -226,8 +225,6 @@ export const sendLetterTool: McpToolDefinition<SendLetterInput, SendLetterOutput
       client
     ),
   readOnly: false,
-  inputSchema: sendLetterInputSchema,
-  outputSchema: sendLetterOutputSchema,
   meta: {
     'openai/toolInvocation/invoking': 'Sending letter...',
     'openai/toolInvocation/invoked': 'Letter sent',

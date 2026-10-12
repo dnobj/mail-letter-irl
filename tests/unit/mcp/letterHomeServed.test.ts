@@ -14,13 +14,17 @@ import { getRequiredToolScopes } from '../../../src/auth/toolScopes.js';
 import { query } from '../../../src/db/index.js';
 import { openLetterHomeInputZ, openLetterHomeOutputZ } from '../../../src/zodSchemas.js';
 import { websiteBaseUrl } from '../../../src/config/sendConfirmation.js';
-import { openLetterHomeInputSchema, openLetterHomeOutputSchema } from '../../../src/schemas.js';
-import { toolInputSchemas } from '../../../src/mcp/toolSchemas.js';
 import { DELIVERED_IS_ESTIMATED, HOME_CARD_SHOWS_THE_LIST, summarizeToolResult } from '../../../src/mcp/registerTools.js';
 import { CLIENT_PROFILE_NAMES, clientProfileNamed } from '../../../src/auth/clientProfiles.js';
 import { HOME_ORDER_STATUS_DESCRIPTION, ORDER_STATUS_DESCRIPTION } from '../../../src/zodSchemas.js';
-import { getOrderStatusOutputSchema, listOrdersOutputSchema } from '../../../src/schemas.js';
 import { STEERING_COPY_REV } from '../../../src/mcp/steeringRev.js';
+import { servedToolJsonSchemas } from '../../../src/mcp/manifest.js';
+
+// What tools/list and /manifest.json serve: Zod is the one tool contract (#688).
+const openLetterHomeInputSchema = servedToolJsonSchemas('open_letter_home').inputSchema;
+const openLetterHomeOutputSchema = servedToolJsonSchemas('open_letter_home').outputSchema;
+const getOrderStatusOutputSchema = servedToolJsonSchemas('get_order_status').outputSchema;
+const listOrdersOutputSchema = servedToolJsonSchemas('list_orders').outputSchema;
 
 const connections: Array<{ server: McpServer; client: Client }> = [];
 async function connect(scopes = ['mail:read'], userId = 'auth0|owner') {
@@ -94,7 +98,6 @@ describe('Letter IRL home on the MCP wire', () => {
 
   it('keeps empty arguments and output properties coherent across all schema layers', () => {
     expect(openLetterHomeInputZ.parse({})).toEqual({});
-    expect(toolInputSchemas.open_letter_home.parse({})).toEqual({});
     expect(openLetterHomeInputSchema.properties).toEqual({});
     expect(Object.keys(openLetterHomeOutputZ.shape).sort()).toEqual(Object.keys(openLetterHomeOutputSchema.properties as object).sort());
     expect(openLetterHomeInputZ.safeParse({ userId: 'other' }).success).toBe(false);

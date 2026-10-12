@@ -498,10 +498,9 @@ Production and development environments have different values:
 1. Create the tool in `src/tools/myTool.ts` and export it from `src/tools/index.ts`
 2. Add it to the `tools` array in `src/server.ts`
 3. Add its Zod input and output shapes to `src/zodSchemas.ts` and to both maps in
-   `src/mcp/registerTools.ts`. **A tool missing from those maps is silently not registered**, and
-   these shapes are what ChatGPT receives
-4. Add its JSON schemas to `src/schemas.ts` (the manifest is generated from these) and its input schema
-   to `src/mcp/toolSchemas.ts`
+   `src/mcp/registerTools.ts`. These shapes are the one tool contract (#688): what ChatGPT receives, and
+   what `/manifest.json` is generated from. A tool missing from those maps fails the connection that lists it
+4. Add its entry to the tool catalogue, `src/mcp/toolCatalog.ts` (#687)
 5. Add tests in `tests/unit/tools/myTool.test.ts`
 6. Run `npm run manifest:generate` and `npm run test:submission`, and update
    [tool-apis.md](tool-apis.md)

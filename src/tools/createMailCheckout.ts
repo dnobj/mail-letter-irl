@@ -1,7 +1,6 @@
 import { carriedDiagnosticClass, isTerminalDiagnosticClass } from '../utils/diagnosticLog.js';
 import { formatAmountForCurrency } from '../config/products.js';
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
-import { createMailCheckoutInputSchema, createMailCheckoutOutputSchema } from '../schemas.js';
 import { createJitCheckout } from '../services/commerceService.js';
 import { SpendLimitError } from '../services/betaSpendLimits.js';
 import {
@@ -187,8 +186,6 @@ export const createMailCheckoutTool: McpToolDefinition<
   description:
     'Create or reuse a Stripe-hosted Pay & Send checkout for one owned letter or postcard draft. The price and physical product come only from server configuration. Successful payment authorizes the exact draft to be mailed automatically; do not call send_letter or send_postcard afterward. If the same mail was sent or paid for from this account in the last 24 hours, the call is refused and says so; repeat it with sendAnotherCopy: true only after the user asks for another copy.',
   readOnly: false,
-  inputSchema: createMailCheckoutInputSchema,
-  outputSchema: createMailCheckoutOutputSchema,
   meta: {
     'openai/toolInvocation/invoking': 'Preparing secure checkout...',
     'openai/toolInvocation/invoked': 'Pay & Send checkout ready',

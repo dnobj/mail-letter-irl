@@ -1,5 +1,4 @@
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
-import { setArrivalDateInputSchema, setArrivalDateOutputSchema } from '../schemas.js';
 import { isArriveByEnabled } from '../config/arriveBy.js';
 import { DELIVERY_ESTIMATE } from '../content/delivery.js';
 import { setDraftSchedule, type DraftScheduleRefusal } from '../services/draftService.js';
@@ -117,8 +116,6 @@ export const setArrivalDateTool: McpToolDefinition<SetArrivalDateInput, SetArriv
     'goes to the printer as soon as it is sent. With a date set, once it is sent, Letter IRL holds the mail and sends it ' +
     'to the printer in time; USPS does not guarantee First-Class dates.',
   readOnly: false,
-  inputSchema: setArrivalDateInputSchema,
-  outputSchema: setArrivalDateOutputSchema,
   meta: {
     'openai/toolInvocation/invoking': 'Setting the arrival date...',
     'openai/toolInvocation/invoked': 'Arrival date updated',

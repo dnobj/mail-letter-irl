@@ -450,35 +450,6 @@ export const generateImageForMailTool: McpToolDefinition<
       ? "Call this whenever the user asks Letter IRL to generate, create, draw, or make an image. When the user has Letter IRL image generations remaining it generates the image immediately and returns an imageUrl for postcard and letter previews. With none left it returns guidance: ChatGPT's built-in image generation creates images free when the request does not mention Letter IRL. Follow its response."
       : "Call this whenever the user wants an image made for a letter or postcard. When the user has Letter IRL image generations remaining it generates the image immediately and returns an imageUrl for postcard and letter previews. With none left it says so, and the user can use an image of their own instead. Follow its response.",
   readOnly: false,
-  inputSchema: {
-    type: "object",
-    properties: {
-      prompt: {
-        type: "string",
-        description: "The image the user asked for, in their words."
-      },
-      context: {
-        type: "string",
-        enum: ["postcard", "header_image", "inline_image"],
-        description: "Optional mail context."
-      }
-    },
-    required: []
-  },
-  outputSchema: {
-    type: "object",
-    required: ["mode", "status", "message", "suggestedNextStep"],
-    properties: {
-      mode: { type: "string", enum: ["generated", "redirect"] },
-      status: { type: "string" },
-      message: { type: "string" },
-      suggestedNextStep: { type: "string" },
-      prompt: { type: "string" },
-      generatedImageUrl: { type: "string" },
-      generationsRemaining: { type: "integer" },
-      redirectStyle: { type: "string", enum: ["resend", "handoff"] }
-    }
-  },
   meta: {
     "openai/outputTemplate": widgetTemplateUri("ImageRoutingCard"),
     "openai/toolInvocation/invoking": "Working on the image...",

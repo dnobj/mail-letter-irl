@@ -1,6 +1,5 @@
 import { CREDITS_PER_LETTER } from '../config/products.js';
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
-import { redeemPromoCodeInputSchema, redeemPromoCodeOutputSchema } from '../schemas.js';
 import { redeemCode } from '../services/codeRedemptionService.js';
 import { findUser } from '../services/userService.js';
 
@@ -94,8 +93,6 @@ export const redeemPromoCodeTool: McpToolDefinition<
   description:
     'Redeem a promo code or a gift code from a printed letter to add letters to the account. Returns redeemed: false with the reason when a code is invalid, expired, or already used - that is an ordinary answer, not an error. Letters must still be sent afterward.',
   readOnly: false,
-  inputSchema: redeemPromoCodeInputSchema,
-  outputSchema: redeemPromoCodeOutputSchema,
   meta: {
     'openai/toolInvocation/invoking': 'Redeeming promo code...',
     'openai/toolInvocation/invoked': 'Promo code processed',

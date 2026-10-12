@@ -19,8 +19,12 @@ import {
   setArrivalDateTool
 } from '../../../src/tools/setArrivalDate.js';
 import { DELIVERY_ESTIMATE } from '../../../src/content/delivery.js';
-import { setArrivalDateInputSchema, setArrivalDateOutputSchema } from '../../../src/schemas.js';
 import type { ToolContext } from '../../../src/contracts/types.js';
+import { servedToolJsonSchemas } from '../../../src/mcp/manifest.js';
+
+// What tools/list and /manifest.json serve: Zod is the one tool contract (#688).
+const setArrivalDateInputSchema = servedToolJsonSchemas('set_arrival_date').inputSchema;
+const setArrivalDateOutputSchema = servedToolJsonSchemas('set_arrival_date').outputSchema;
 
 const DRAFT_ID = '0f1e2d3c-4b5a-4978-8796-a5b4c3d2e1f0';
 // A Thursday, 10:00 in New York: today is still a mail date.
@@ -172,8 +176,6 @@ describe('set_arrival_date (#535)', () => {
     expect(setArrivalDateTool.readOnly).toBe(false);
     expect(setArrivalDateTool.meta).toMatchObject({ readOnlyHint: false, idempotentHint: true });
     expect(setArrivalDateTool.meta).not.toHaveProperty('destructiveHint');
-    expect(setArrivalDateTool.inputSchema).toBe(setArrivalDateInputSchema);
-    expect(setArrivalDateTool.outputSchema).toBe(setArrivalDateOutputSchema);
     expect(setArrivalDateInputSchema.required).toEqual(['draftId']);
     expect(setArrivalDateOutputSchema.required).toEqual(['draftId', 'deliveryEstimate', 'message']);
   });

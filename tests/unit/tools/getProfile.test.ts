@@ -10,6 +10,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ToolContext } from "../../../src/contracts/types.js";
+import { getProfileInputZ, getProfileOutputZ } from "../../../src/zodSchemas.js";
 
 vi.mock("../../../src/services/userService.js", () => ({
   findUser: vi.fn()
@@ -43,8 +44,9 @@ describe("get_profile", () => {
   });
 
   it("takes no arguments and publishes an output schema requiring id", () => {
-    expect(getProfileTool.inputSchema).toEqual({ type: "object", properties: {} });
-    expect(getProfileTool.outputSchema).toMatchObject({ type: "object", required: ["id"] });
+    // The schemas tools/list and /manifest.json serve: Zod is the one tool contract (#688).
+    expect(Object.keys(getProfileInputZ.shape)).toEqual([]);
+    expect(getProfileOutputZ.shape.id.isOptional()).toBe(false);
   });
 
   it("returns the account row's own key as the id, with the confirmed address", async () => {

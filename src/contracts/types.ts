@@ -124,8 +124,8 @@ export interface McpToolDefinition<Input, Output> {
   title: string;
   description: ToolDescription;
   readOnly: boolean;
-  inputSchema: JsonSchema;
-  outputSchema: JsonSchema;
+  // Its input and output schemas are Zod's alone (src/zodSchemas.ts, #688): tools/list and /manifest.json both
+  // serve them, so a tool definition carries none of its own.
   meta: ToolMeta;
   handler: (input: Input, context: ToolContext) => Promise<Output>;
 }

@@ -132,7 +132,8 @@ describe('the postcard front in /manifest.json', () => {
   it('is served while offered, and withheld otherwise', () => {
     offer('true', 'pdf');
     const on = postcard();
-    expect(on.properties.layout).toMatchObject({ type: 'string', enum: ['full_bleed', 'border', 'greetings'], default: 'full_bleed' });
+    // As tools/list serves it (#688): the manifest is generated from the same Zod shape.
+    expect(on.properties.layout).toMatchObject({ type: 'string', enum: ['full_bleed', 'border', 'greetings'] });
     expect(on.properties.caption.type).toBe('string');
     expect(on.properties.place.type).toBe('string');
     for (const [enabled, renderer] of [['', 'pdf'], ['true', 'html']]) {

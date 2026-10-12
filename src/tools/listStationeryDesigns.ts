@@ -1,5 +1,4 @@
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
-import { listStationeryDesignsInputSchema, listStationeryDesignsOutputSchema } from '../schemas.js';
 import { listDesigns, MAX_STATIONERY_DESIGNS, rememberedDesign } from '../services/stationeryDesignService.js';
 import { designOutput, requireDesigns, type DesignOutput } from './stationeryDesignShared.js';
 
@@ -42,8 +41,6 @@ export const listStationeryDesignsTool: McpToolDefinition<ListStationeryDesignsI
     "List the person's saved stationery designs, with each one's designId, name and choices, and the one their next letter preview " +
     'is drawn in when it names no stationery.',
   readOnly: true,
-  inputSchema: listStationeryDesignsInputSchema,
-  outputSchema: listStationeryDesignsOutputSchema,
   meta: {
     'openai/toolInvocation/invoking': 'Checking the designs...',
     'openai/toolInvocation/invoked': 'Designs checked'

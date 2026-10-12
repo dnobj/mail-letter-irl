@@ -331,12 +331,9 @@ exact price, and the configured letter-pack destination.
 
 ## Schema Notes
 
-- Three files define tool schemas, and they reach different places:
-  - `src/zodSchemas.ts` holds the Zod input and output shapes that `src/mcp/registerTools.ts` passes to `mcpServer.registerTool`. The SDK turns them into the JSON Schema returned by MCP `tools/list`, which is what ChatGPT reads, and validates calls against them. **A contract change that ChatGPT must see goes here.** `src/contracts/outputConformance.ts` proves at compile time that each tool's output type matches its served output schema.
-  - `src/schemas.ts` holds the JSON schemas on each tool module's definition object. `/manifest.json` and the checked-in `manifest.json` are generated from these, not from the Zod shapes, so the two must be changed together.
-  - `src/mcp/toolSchemas.ts` holds Zod input schemas that type the registration maps and back `tests/unit/mcp/schemaConsistency.test.ts`. Nothing serves them.
-- Registration iterates the tool list in `src/server.ts` and **silently skips** any tool missing from the Zod input or output map in `registerTools.ts`.
-- Adding a tool therefore touches: `src/tools/<tool>.ts`; its export in `src/tools/index.ts`; the `tools` array in `src/server.ts` (order matters, see [learnings/openai-app-sdk-notes.md](learnings/openai-app-sdk-notes.md)); `src/zodSchemas.ts` and both maps in `src/mcp/registerTools.ts`; `src/schemas.ts`; `src/mcp/toolSchemas.ts`; then `npm run manifest:generate` and `npm run test:submission`.
+- **One tool contract (#688).** `src/zodSchemas.ts` holds every tool's Zod input and output shapes, which `src/mcp/registerTools.ts` passes to `mcpServer.registerTool`. The SDK turns them into the JSON Schema returned by MCP `tools/list`, which is what ChatGPT reads, and validates calls against them. `/manifest.json` and the checked-in `manifest.json` are generated from the same served shapes with the SDK's own converter (`servedToolJsonSchemas` in `src/mcp/manifest.ts`), so the two cannot disagree: `tests/unit/mcp/schemaConsistency.test.ts` holds them equal. A tool definition carries no schemas of its own. `src/contracts/outputConformance.ts` proves at compile time that each tool's output type matches its served output schema.
+- Registration iterates the tool list in `src/server.ts`; a tool missing from the Zod input or output map in `registerTools.ts` fails the connection that lists it (#687).
+- Adding a tool therefore touches: `src/tools/<tool>.ts`; its export in `src/tools/index.ts`; the `tools` array in `src/server.ts` (order matters, see [learnings/openai-app-sdk-notes.md](learnings/openai-app-sdk-notes.md)); its entry in `src/mcp/toolCatalog.ts`; `src/zodSchemas.ts` and both maps in `src/mcp/registerTools.ts`; then `npm run manifest:generate` and `npm run test:submission`.
 - Tool responses split data intentionally:
   - `structuredContent`: compact model-facing fields validated by the runtime output schema.
   - `content`: short model narration.

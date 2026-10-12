@@ -344,8 +344,6 @@ export class LetterIrlServer {
         title: tool.title,
         description: describeTool(tool, client),
         readOnly: tool.readOnly,
-        inputSchema: tool.inputSchema,
-        outputSchema: tool.outputSchema,
         meta: tool.meta
       }));
   }

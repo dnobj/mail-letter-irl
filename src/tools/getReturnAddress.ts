@@ -56,19 +56,6 @@ export const getReturnAddressTool: McpToolDefinition<
   description:
     "Get your saved return address. This is the default sender address used when you create mail without specifying one.",
   readOnly: true,
-  inputSchema: {
-    type: "object",
-    properties: {},
-    required: []
-  },
-  outputSchema: {
-    type: "object",
-    properties: {
-      hasAddress: { type: "boolean" },
-      message: { type: "string" },
-      address: { type: "object" }
-    }
-  },
   meta: {
     "openai/toolInvocation/invoking": "Checking return address...",
     "openai/toolInvocation/invoked": "Return address retrieved",

@@ -30,13 +30,14 @@ import {
 } from '../../../src/mcp/registerTools.js';
 import { cancelScheduledMailTool, getStartedTool, setArrivalDateTool } from '../../../src/tools/index.js';
 import { getDraftStatusTool } from '../../../src/tools/getDraftStatus.js';
-import {
-  getOrderStatusOutputSchema,
-  listOrdersOutputSchema,
-  sendLetterOutputSchema,
-  sendPostcardOutputSchema
-} from '../../../src/schemas.js';
 import { clientProfileNamed } from '../../../src/auth/clientProfiles.js';
+import { servedToolJsonSchemas } from '../../../src/mcp/manifest.js';
+
+// What tools/list and /manifest.json serve: Zod is the one tool contract (#688).
+const getOrderStatusOutputSchema = servedToolJsonSchemas('get_order_status').outputSchema;
+const listOrdersOutputSchema = servedToolJsonSchemas('list_orders').outputSchema;
+const sendLetterOutputSchema = servedToolJsonSchemas('send_letter').outputSchema;
+const sendPostcardOutputSchema = servedToolJsonSchemas('send_postcard').outputSchema;
 
 /**
  * Tool definitions matching the actual tools in the codebase.

@@ -1,8 +1,4 @@
 import { McpToolDefinition, ToolContext } from "../contracts/types.js";
-import {
-  getAccountBalanceInputSchema,
-  getAccountBalanceOutputSchema
-} from "../schemas.js";
 import { getBalance, getDetailedBalance } from "../services/creditService.js";
 import { findUser } from "../services/userService.js";
 import { getGenerationQuota } from "../services/imageGenerationLimitService.js";
@@ -192,8 +188,6 @@ export const getAccountBalanceTool: McpToolDefinition<
       ? "Check how many prepaid letters remain on this account. Letters can be bought without leaving the conversation: list_letter_packs shows the sizes, create_pack_checkout buys one."
       : "Check how many prepaid letters remain on this account. Letter packs are bought on the Letter IRL website, and the result gives the link when none are left.",
   readOnly: true,
-  inputSchema: getAccountBalanceInputSchema,
-  outputSchema: getAccountBalanceOutputSchema,
   meta: {
     "openai/toolInvocation/invoking": "Checking letter balance…",
     "openai/toolInvocation/invoked": "Balance updated",

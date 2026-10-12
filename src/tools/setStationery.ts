@@ -1,5 +1,4 @@
 import type { Address, LetterLayoutType, McpToolDefinition, ToolContext } from '../contracts/types.js';
-import { setStationeryInputSchema, setStationeryOutputSchema } from '../schemas.js';
 import { isCustomStationeryOffered } from '../config/customStationery.js';
 import { isStationeryOffered } from '../config/stationery.js';
 import { letterPageLimit } from '../config/roomToWrite.js';
@@ -239,8 +238,6 @@ export const setStationeryTool: McpToolDefinition<SetStationeryInput, SetStation
     'each call states them afresh, so a headline is kept only when given again. ' +
     'The page is drawn again, and the choice is remembered for the next letter preview.',
   readOnly: false,
-  inputSchema: setStationeryInputSchema,
-  outputSchema: setStationeryOutputSchema,
   meta: {
     'openai/toolInvocation/invoking': 'Changing the stationery...',
     'openai/toolInvocation/invoked': 'Stationery changed',

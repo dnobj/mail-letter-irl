@@ -14,8 +14,12 @@ import {
   ScheduledMailRefusedError,
   cancelScheduledMailTool
 } from '../../../src/tools/cancelScheduledMail.js';
-import { cancelScheduledMailInputSchema, cancelScheduledMailOutputSchema } from '../../../src/schemas.js';
 import type { ToolContext } from '../../../src/contracts/types.js';
+import { servedToolJsonSchemas } from '../../../src/mcp/manifest.js';
+
+// What tools/list and /manifest.json serve: Zod is the one tool contract (#688).
+const cancelScheduledMailInputSchema = servedToolJsonSchemas('cancel_scheduled_mail').inputSchema;
+const cancelScheduledMailOutputSchema = servedToolJsonSchemas('cancel_scheduled_mail').outputSchema;
 
 const ORDER = 'ltr-1';
 
@@ -127,8 +131,6 @@ describe('cancel_scheduled_mail (#535)', () => {
     expect(CANCEL_SCHEDULED_MAIL_TOOL).toBe('cancel_scheduled_mail');
     expect(cancelScheduledMailTool.readOnly).toBe(false);
     expect(cancelScheduledMailTool.meta).toMatchObject({ readOnlyHint: false, destructiveHint: true, idempotentHint: true });
-    expect(cancelScheduledMailTool.inputSchema).toBe(cancelScheduledMailInputSchema);
-    expect(cancelScheduledMailTool.outputSchema).toBe(cancelScheduledMailOutputSchema);
     expect(cancelScheduledMailInputSchema.required).toEqual(['orderId', 'confirm']);
     expect(cancelScheduledMailTool.description).toContain('confirm: true');
     // It promises only what is sure: part or none may come back (refunded,

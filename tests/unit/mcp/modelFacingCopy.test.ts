@@ -23,7 +23,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LetterIrlServer } from '../../../src/server.js';
 import { CARD_ONLY_SEND_TOOLS, summarizeToolResult } from '../../../src/mcp/registerTools.js';
-import { buildManifest } from '../../../src/mcp/manifest.js';
+import { buildManifest, servedToolJsonSchemas } from '../../../src/mcp/manifest.js';
 import { buildServerInstructions } from '../../../src/mcp/serverInstructions.js';
 import { CLIENT_PROFILE_NAMES, clientProfileNamed } from '../../../src/auth/clientProfiles.js';
 import { sendToolDescription } from '../../../src/tools/previewSendStep.js';
@@ -253,7 +253,8 @@ describe('tool text in every app', () => {
       for (const sendRule of ['true', 'false']) {
         vi.stubEnv('LETTER_IRL_SEND_CONFIRMATION_ENABLED', sendRule);
         for (const tool of new LetterIrlServer().listTools(clientProfileNamed(name))) {
-          for (const text of [tool.title, tool.description, ...modelFacingStrings(tool.inputSchema)]) {
+          // The input schema as served (#688): a tool definition carries none of its own.
+          for (const text of [tool.title, tool.description, ...modelFacingStrings(servedToolJsonSchemas(tool.name).inputSchema)]) {
             expect(text, `${tool.name} (flags ${on}, paid per send ${paidPerSend}, images ${imageGen}, send rule ${sendRule})`).not.toMatch(A_REMOVED_RISK_SENTENCE);
           }
         }

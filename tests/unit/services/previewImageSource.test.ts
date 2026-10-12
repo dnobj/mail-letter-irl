@@ -37,7 +37,6 @@ import {
   usableImageFile
 } from '../../../src/utils/imageFileParam.js';
 import { getZodInputShape } from '../../../src/mcp/registerTools.js';
-import { toolInputSchemas } from '../../../src/mcp/toolSchemas.js';
 import { quoteAndPreviewLetterWithImageTool } from '../../../src/tools/quoteAndPreviewLetterWithImage.js';
 import { quoteAndPreviewLetterWithHeaderImageTool } from '../../../src/tools/quoteAndPreviewLetterWithHeaderImage.js';
 import { quoteAndPreviewPostcardTool } from '../../../src/tools/quoteAndPreviewPostcard.js';
@@ -101,8 +100,7 @@ describe.each(['quote_and_preview_letter_with_header_image', 'quote_and_preview_
       ...extras
     };
     const layers = [
-      ['served', z.object(getZodInputShape(tool)!)],
-      ['typed', toolInputSchemas[tool as keyof typeof toolInputSchemas]]
+      ['served', z.object(getZodInputShape(tool)!)]
     ] as const;
 
     it.each(layers)('%s layer keeps a named picture as the marker', (_label, schema) => {

@@ -1,5 +1,4 @@
 import type { Address, LetterLayoutType, McpToolDefinition, ToolContext } from '../contracts/types.js';
-import { setLetterWordsInputSchema, setLetterWordsOutputSchema } from '../schemas.js';
 import { letterPageLimit } from '../config/roomToWrite.js';
 import { isWordsEditorOffered } from '../config/wordsEditor.js';
 import { isGiftLettersEnabled } from '../config/giftLetters.js';
@@ -301,8 +300,6 @@ export const setLetterWordsTool: McpToolDefinition<SetLetterWordsInput, SetLette
         'stays on one page.'
       : 'stationery on one page: words that do not fit are refused.'),
   readOnly: false,
-  inputSchema: setLetterWordsInputSchema,
-  outputSchema: setLetterWordsOutputSchema,
   meta: {
     'openai/toolInvocation/invoking': 'Changing the words...',
     'openai/toolInvocation/invoked': 'Words changed',

@@ -1,6 +1,5 @@
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
 import { DELIVERY_ESTIMATE } from '../content/delivery.js';
-import { getDraftStatusInputSchema, getDraftStatusOutputSchema } from '../schemas.js';
 import { scheduleSentence } from '../services/deliverySchedule.js';
 import { getDraftState, type DraftState } from '../services/draftService.js';
 import { isStationeryOffered } from '../config/stationery.js';
@@ -275,8 +274,6 @@ export const getDraftStatusTool: McpToolDefinition<GetDraftStatusInput, GetDraft
     "Used by Letter IRL's preview card: says whether a previewed letter or postcard is still ready to send, " +
     'has been sent (with its order id and where that order stands), or has expired.',
   readOnly: true,
-  inputSchema: getDraftStatusInputSchema,
-  outputSchema: getDraftStatusOutputSchema,
   meta: {
     'openai/toolInvocation/invoking': 'Checking the preview...',
     'openai/toolInvocation/invoked': 'Checked',

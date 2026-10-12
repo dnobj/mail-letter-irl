@@ -1,5 +1,4 @@
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
-import { uploadPhotoChunkInputSchema, uploadPhotoChunkOutputSchema } from '../schemas.js';
 import { isCardUploadEnabled } from '../config/cardUpload.js';
 import { ImageProcessingError } from '../services/imageService.js';
 import { classifyDiagnosticError } from '../utils/diagnosticLog.js';
@@ -70,8 +69,6 @@ export const uploadPhotoChunkTool: McpToolDefinition<PhotoChunkInput, PhotoChunk
     "Used by Letter IRL's upload card: receives a photo the person picked, in chunks, and keeps it " +
     'for their next letter or postcard preview. Not for direct use.',
   readOnly: false,
-  inputSchema: uploadPhotoChunkInputSchema,
-  outputSchema: uploadPhotoChunkOutputSchema,
   meta: {
     'openai/widgetAccessible': true,
     'openai/toolInvocation/invoking': 'Uploading the photo...',

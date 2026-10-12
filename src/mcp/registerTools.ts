@@ -7,7 +7,6 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import { fileURLToPath } from "url";
 import { LetterIrlServer } from "../server.js";
-import { toolInputSchemas } from "./toolSchemas.js";
 import { WIDGET_TEMPLATE_VERSION, widgetTemplateUri } from "./widgetUris.js";
 import {
   DUPLICATE_MAIL_META_KEY,
@@ -811,7 +810,12 @@ export async function registerWidgetResources(
   console.log(`📦 Registered widget resource template: ui://widgets/{name}.html@v{version}`);
 }
 
-type ToolName = keyof typeof toolInputSchemas;
+/**
+ * A tool's name, as the input map below names it; the output map must take exactly the same names (its type says
+ * so). A tool the server defines but the maps miss fails registration, which the served-tools snapshot reaches for
+ * every tool (#688: Zod is the one tool contract; the typed copy that named them, src/mcp/toolSchemas.ts, is gone).
+ */
+type ToolName = keyof typeof zodInputSchemaMap;
 
 const DEFAULT_USER_ID = process.env.LETTER_IRL_DEFAULT_USER_ID ?? "mcp-user";
 
@@ -840,7 +844,7 @@ function resolveToolUserId(authInfo: AuthenticatedUser | null): string {
   return DEFAULT_USER_ID;
 }
 
-const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
+const zodInputSchemaMap = {
   // Letter tools - three separate tools for different layouts
   quote_and_preview_letter: quoteAndPreviewInputZ,
   quote_and_preview_letter_with_header_image: quoteAndPreviewLetterWithHeaderImageInputZ,
@@ -891,6 +895,7 @@ const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = {
   // Confirm uploaded image tool (widget relay)
   confirm_uploaded_image: confirmUploadedImageInputZ
 };
+const zodInputSchemas: Record<ToolName, z.ZodObject<any>> = zodInputSchemaMap;
 
 const zodOutputSchemas: Record<ToolName, z.ZodObject<any>> = {
   // Letter tools - three separate tools for different layouts

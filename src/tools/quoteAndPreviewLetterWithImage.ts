@@ -11,10 +11,6 @@ import { Address, McpToolDefinition, ToolContext } from "../contracts/types.js";
 import { widgetTemplateUri } from "../mcp/widgetUris.js";
 import { printRenderer } from "../config/printRenderer.js";
 import {
-  quoteAndPreviewLetterWithImageInputSchema,
-  quoteAndPreviewOutputSchema
-} from "../schemas.js";
-import {
   prepareSender,
   validateAddresses,
   validateAddressesWithProvider,
@@ -309,8 +305,6 @@ export const quoteAndPreviewLetterWithImageTool: McpToolDefinition<
   // readOnly: false because this tool creates draft records in the database
   // See docs/learnings/tool-annotation-decision.md for rationale
   readOnly: false,
-  inputSchema: quoteAndPreviewLetterWithImageInputSchema,
-  outputSchema: quoteAndPreviewOutputSchema,
   meta: {
     "openai/outputTemplate": OUTPUT_TEMPLATE,
     "openai/widgetAccessible": true,

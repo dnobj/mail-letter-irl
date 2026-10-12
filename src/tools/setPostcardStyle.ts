@@ -1,5 +1,4 @@
 import type { Address, McpToolDefinition, ToolContext } from '../contracts/types.js';
-import { setPostcardStyleInputSchema, setPostcardStyleOutputSchema } from '../schemas.js';
 import { isPostcardSizesOffered, offeredPostcardSizes } from '../config/postcardSizes.js';
 import { isPostcardLayoutsOffered } from '../config/postcardLayouts.js';
 import { isPackPayable } from '../config/products.js';
@@ -359,8 +358,6 @@ export const setPostcardStyleTool: McpToolDefinition<SetPostcardStyleInput, SetP
     );
   },
   readOnly: false,
-  inputSchema: setPostcardStyleInputSchema,
-  outputSchema: setPostcardStyleOutputSchema,
   meta: {
     'openai/toolInvocation/invoking': 'Changing the postcard...',
     'openai/toolInvocation/invoked': 'Postcard changed',

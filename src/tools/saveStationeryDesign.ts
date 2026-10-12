@@ -1,6 +1,5 @@
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
 import { designNameOf, designOf } from '../render/stationery.js';
-import { saveStationeryDesignInputSchema, saveStationeryDesignOutputSchema } from '../schemas.js';
 import { MAX_STATIONERY_DESIGNS, saveDesign } from '../services/stationeryDesignService.js';
 import { DesignRefusedError, designOutput, requireDesigns, type DesignOutput } from './stationeryDesignShared.js';
 
@@ -88,8 +87,6 @@ export const saveStationeryDesignTool: McpToolDefinition<SaveStationeryDesignInp
     `An account keeps at most ${MAX_STATIONERY_DESIGNS}. ` +
     'A letter is drawn in a saved design with its designId as stationeryDesignId on a letter preview or set_stationery.',
   readOnly: false,
-  inputSchema: saveStationeryDesignInputSchema,
-  outputSchema: saveStationeryDesignOutputSchema,
   meta: {
     'openai/toolInvocation/invoking': 'Saving the design...',
     'openai/toolInvocation/invoked': 'Design saved',

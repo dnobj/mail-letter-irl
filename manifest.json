@@ -11,22 +11,9 @@
       "description": "Preview a text-only physical letter draft. Requires a real U.S. recipient mailing address and text that fits the text-only letter limit. Send later with send_letter.",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "recipient",
-          "bodyText",
-          "signOff"
-        ],
         "properties": {
           "sender": {
             "type": "object",
-            "required": [
-              "name",
-              "addressLine1",
-              "city",
-              "state",
-              "postalCode",
-              "country"
-            ],
             "properties": {
               "name": {
                 "type": "string"
@@ -35,7 +22,8 @@
                 "type": "string"
               },
               "addressLine2": {
-                "type": "string"
+                "type": "string",
+                "description": "Apartment, suite, or unit, e.g. \"Suite 8701\" - never fold it into addressLine1."
               },
               "city": {
                 "type": "string"
@@ -50,10 +38,6 @@
                 "type": "string"
               }
             },
-            "description": "Return address (optional - will use saved return address if not provided)"
-          },
-          "recipient": {
-            "type": "object",
             "required": [
               "name",
               "addressLine1",
@@ -62,59 +46,201 @@
               "postalCode",
               "country"
             ],
-            "properties": {
-              "name": {
-                "type": "string"
-              },
-              "addressLine1": {
-                "type": "string"
-              },
-              "addressLine2": {
-                "type": "string"
-              },
-              "city": {
-                "type": "string"
-              },
-              "state": {
-                "type": "string"
-              },
-              "postalCode": {
-                "type": "string"
-              },
-              "country": {
-                "type": "string"
-              }
-            }
+            "additionalProperties": false
+          },
+          "recipient": {
+            "$ref": "#/properties/sender"
           },
           "bodyText": {
-            "type": "string",
-            "description": "Letter body. Must not exceed 1600 characters OR 24 lines. Write as continuous paragraphs - do NOT put blank lines between sentences."
+            "type": "string"
           },
           "signOff": {
-            "type": "string",
-            "description": "Closing/signature (e.g., 'Sincerely, Name')"
+            "type": "string"
           },
           "sendAsGift": {
             "type": "boolean",
             "description": "Set true only when the user asks to send this as their gift letter: it is free and adds a printed page with a card for the recipient. Leave it out otherwise; a gift letter is then used only if the balance cannot pay."
           }
-        }
+        },
+        "required": [
+          "recipient",
+          "bodyText",
+          "signOff"
+        ],
+        "additionalProperties": true,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       },
       "outputSchema": {
         "type": "object",
-        "required": [
-          "previewHtml",
-          "lettersRequired",
-          "canSendNow",
-          "sendEligibility",
-          "draftId",
-          "draftExpiresAt",
-          "layoutType"
-        ],
         "properties": {
+          "lettersRequired": {
+            "type": "number"
+          },
+          "canSendNow": {
+            "type": "boolean"
+          },
+          "reasonCannotSend": {
+            "type": "string"
+          },
+          "sendEligibility": {
+            "type": "object",
+            "properties": {
+              "payAndSend": {
+                "type": "object",
+                "properties": {
+                  "available": {
+                    "type": "boolean"
+                  },
+                  "amountCents": {
+                    "type": "integer"
+                  },
+                  "currency": {
+                    "type": "string"
+                  },
+                  "displayAmount": {
+                    "type": "string"
+                  },
+                  "productDescription": {
+                    "type": "string"
+                  },
+                  "unavailableReason": {
+                    "type": "string"
+                  },
+                  "pageUrl": {
+                    "type": "string",
+                    "description": "Where the person pays for this with Pay & Send and so sends it, in an app that cannot open Pay & Send itself"
+                  }
+                },
+                "required": [
+                  "available"
+                ],
+                "additionalProperties": false
+              },
+              "letterPack": {
+                "type": "object",
+                "properties": {
+                  "available": {
+                    "type": "boolean"
+                  },
+                  "purchaseUrl": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "available",
+                  "purchaseUrl"
+                ],
+                "additionalProperties": false
+              },
+              "packPays": {
+                "type": "boolean",
+                "const": false,
+                "description": "False when letter packs and gift letters cannot pay for this mail: it is paid with Pay & Send, whatever the balance"
+              }
+            },
+            "required": [
+              "payAndSend",
+              "letterPack"
+            ],
+            "additionalProperties": false
+          },
+          "deliveryClass": {
+            "type": "string"
+          },
+          "estimatedDeliveryDays": {
+            "type": "integer"
+          },
+          "deliveryEstimate": {
+            "type": "string"
+          },
+          "deliveryDisclaimer": {
+            "type": "string"
+          },
+          "draftId": {
+            "type": "string"
+          },
+          "draftExpiresAt": {
+            "type": "string"
+          },
+          "layoutType": {
+            "type": "string",
+            "enum": [
+              "text_only",
+              "header_image",
+              "inline_image"
+            ]
+          },
+          "usedSavedReturnAddress": {
+            "type": "boolean"
+          },
+          "savedReturnAddressNote": {
+            "type": "string"
+          },
+          "senderAddressValidation": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "verified",
+                  "corrected",
+                  "failed",
+                  "unverified"
+                ]
+              },
+              "originalAddress": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "addressLine1": {
+                    "type": "string"
+                  },
+                  "addressLine2": {
+                    "type": "string"
+                  },
+                  "city": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string"
+                  },
+                  "postalCode": {
+                    "type": "string"
+                  },
+                  "country": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "verifiedAddress": {
+                "$ref": "#/properties/senderAddressValidation/properties/originalAddress"
+              },
+              "errors": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "suggestions": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "recipientAddressValidation": {
+            "$ref": "#/properties/senderAddressValidation"
+          },
+          "addressWarnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "giftCard": {
             "type": "object",
-            "description": "Present on a gift send: the card its extra printed page carries",
             "properties": {
               "state": {
                 "type": "string",
@@ -126,35 +252,34 @@
               "description": {
                 "type": "string"
               }
-            }
+            },
+            "required": [
+              "state",
+              "description"
+            ],
+            "additionalProperties": false
           },
           "giftLettersAvailable": {
             "type": "integer",
-            "description": "Unsent gift letters on the account, when there are any"
+            "minimum": 0
           },
           "schedule": {
             "type": "object",
-            "description": "The arrival date asked for, when there was one (#535): when it goes to the printer and the dates on offer",
             "properties": {
               "arriveBy": {
-                "type": "string",
-                "description": "The date it should arrive by, YYYY-MM-DD in New York"
+                "type": "string"
               },
               "mailOn": {
-                "type": "string",
-                "description": "The day it goes to the printer, YYYY-MM-DD"
+                "type": "string"
               },
               "releasesAt": {
-                "type": "string",
-                "description": "ISO time the hold ends: 09:00 New York time on the mail date, sent to the printer within the hour"
+                "type": "string"
               },
               "earliestArrival": {
-                "type": "string",
-                "description": "The first arrival date on offer, YYYY-MM-DD"
+                "type": "string"
               },
               "latestArrival": {
-                "type": "string",
-                "description": "The last arrival date on offer, YYYY-MM-DD"
+                "type": "string"
               }
             },
             "required": [
@@ -163,11 +288,11 @@
               "releasesAt",
               "earliestArrival",
               "latestArrival"
-            ]
+            ],
+            "additionalProperties": false
           },
           "arrivalWindow": {
             "type": "object",
-            "description": "The arrival dates that can be chosen now: what can be scheduled, not when this mail arrives",
             "properties": {
               "earliestArrival": {
                 "type": "string",
@@ -181,11 +306,12 @@
             "required": [
               "earliestArrival",
               "latestArrival"
-            ]
+            ],
+            "additionalProperties": false,
+            "description": "The arrival dates that can be chosen now: what can be scheduled, not when this mail arrives"
           },
           "stationery": {
             "type": "object",
-            "description": "While stationery is offered: the stationery the page was drawn in, with the date line, initials and headline it prints, and why: asked for, the account's last choice, or classic by default",
             "properties": {
               "theme": {
                 "type": "string",
@@ -210,7 +336,6 @@
               },
               "design": {
                 "type": "object",
-                "description": "With the custom theme: its design's choices",
                 "properties": {
                   "face": {
                     "type": "string",
@@ -247,19 +372,18 @@
                   "ornament",
                   "ruled",
                   "tone"
-                ]
+                ],
+                "additionalProperties": false,
+                "description": "With the custom theme: its design's choices"
               },
               "dateLine": {
-                "type": "string",
-                "description": "The date it prints at the top right, as written"
+                "type": "string"
               },
               "monogram": {
-                "type": "string",
-                "description": "The initials it prints"
+                "type": "string"
               },
               "headline": {
-                "type": "string",
-                "description": "The headline it prints above the letter"
+                "type": "string"
               },
               "source": {
                 "type": "string",
@@ -274,11 +398,12 @@
             "required": [
               "theme",
               "source"
-            ]
+            ],
+            "additionalProperties": false,
+            "description": "While stationery is offered: the stationery the page was drawn in, with the date line, initials and headline it prints, and why: asked for, the account's last choice, or classic by default"
           },
           "signature": {
             "type": "object",
-            "description": "While signatures are offered: whether the letter prints the person's saved signature, and why",
             "properties": {
               "printed": {
                 "type": "boolean"
@@ -296,7 +421,9 @@
             "required": [
               "printed",
               "source"
-            ]
+            ],
+            "additionalProperties": false,
+            "description": "While signatures are offered: whether the letter prints the person's saved signature, and why"
           },
           "mailService": {
             "type": "string",
@@ -315,173 +442,18 @@
           "wordsVersion": {
             "type": "string",
             "description": "While a letter's words can be changed in place: the version of the letter's words, which set_letter_words takes to say which words it replaces"
-          },
-          "previewHtml": {
-            "type": "string"
-          },
-          "lettersRequired": {
-            "type": "number",
-            "description": "Letters required from balance (always 1 for standard letter)"
-          },
-          "canSendNow": {
-            "type": "boolean"
-          },
-          "reasonCannotSend": {
-            "type": "string"
-          },
-          "sendEligibility": {
-            "type": "object",
-            "required": [
-              "payAndSend",
-              "letterPack"
-            ],
-            "properties": {
-              "payAndSend": {
-                "type": "object",
-                "required": [
-                  "available"
-                ],
-                "properties": {
-                  "available": {
-                    "type": "boolean"
-                  },
-                  "amountCents": {
-                    "type": "integer"
-                  },
-                  "currency": {
-                    "type": "string"
-                  },
-                  "displayAmount": {
-                    "type": "string"
-                  },
-                  "productDescription": {
-                    "type": "string"
-                  },
-                  "unavailableReason": {
-                    "type": "string"
-                  },
-                  "pageUrl": {
-                    "type": "string",
-                    "description": "Where the person pays for this with Pay & Send and so sends it, in an app that cannot open Pay & Send itself"
-                  }
-                }
-              },
-              "letterPack": {
-                "type": "object",
-                "required": [
-                  "available",
-                  "purchaseUrl"
-                ],
-                "properties": {
-                  "available": {
-                    "type": "boolean"
-                  },
-                  "purchaseUrl": {
-                    "type": "string"
-                  }
-                }
-              },
-              "packPays": {
-                "type": "boolean",
-                "const": false,
-                "description": "False when letter packs and gift letters cannot pay for this mail: it is paid with Pay & Send, whatever the balance"
-              }
-            }
-          },
-          "deliveryClass": {
-            "type": "string"
-          },
-          "estimatedDeliveryDays": {
-            "type": "integer"
-          },
-          "deliveryEstimate": {
-            "type": "string"
-          },
-          "deliveryDisclaimer": {
-            "type": "string"
-          },
-          "usedSavedReturnAddress": {
-            "type": "boolean"
-          },
-          "savedReturnAddressNote": {
-            "type": "string"
-          },
-          "addressWarnings": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "draftId": {
-            "type": "string",
-            "description": "Unique draft ID required for send_letter"
-          },
-          "draftExpiresAt": {
-            "type": "string",
-            "description": "ISO timestamp when draft expires (24h)"
-          },
-          "layoutType": {
-            "type": "string",
-            "enum": [
-              "text_only",
-              "header_image",
-              "inline_image"
-            ],
-            "description": "Detected or specified layout type"
-          },
-          "headerImageData": {
-            "type": "string",
-            "description": "Base64 data URI of processed header image (for widget preview)"
-          },
-          "inlineImageData": {
-            "type": "string",
-            "description": "Base64 data URI of processed inline image (for widget preview)"
-          },
-          "senderAddressValidation": {
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "verified",
-                  "corrected",
-                  "failed"
-                ]
-              },
-              "errors": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "suggestions": {
-                "type": "string"
-              }
-            }
-          },
-          "recipientAddressValidation": {
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "verified",
-                  "corrected",
-                  "failed"
-                ]
-              },
-              "errors": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "suggestions": {
-                "type": "string"
-              }
-            }
           }
-        }
+        },
+        "required": [
+          "lettersRequired",
+          "canSendNow",
+          "sendEligibility",
+          "draftId",
+          "draftExpiresAt",
+          "layoutType"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       }
     },
     {
@@ -489,22 +461,9 @@
       "description": "Preview a physical letter draft with a header image at the top. Requires a real U.S. recipient mailing address. If the user refers to an image already generated, shown, or attached earlier in this conversation, call this tool first to reuse that image. Otherwise prefer a direct file attachment or explicit imageUrl. Use upload_image only after an actual failed handoff or upload problem. Send later with send_letter.",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "recipient",
-          "bodyText",
-          "signOff"
-        ],
         "properties": {
           "sender": {
             "type": "object",
-            "required": [
-              "name",
-              "addressLine1",
-              "city",
-              "state",
-              "postalCode",
-              "country"
-            ],
             "properties": {
               "name": {
                 "type": "string"
@@ -513,7 +472,8 @@
                 "type": "string"
               },
               "addressLine2": {
-                "type": "string"
+                "type": "string",
+                "description": "Apartment, suite, or unit, e.g. \"Suite 8701\" - never fold it into addressLine1."
               },
               "city": {
                 "type": "string"
@@ -528,10 +488,6 @@
                 "type": "string"
               }
             },
-            "description": "Return address (optional - will use saved return address if not provided)"
-          },
-          "recipient": {
-            "type": "object",
             "required": [
               "name",
               "addressLine1",
@@ -540,41 +496,19 @@
               "postalCode",
               "country"
             ],
-            "properties": {
-              "name": {
-                "type": "string"
-              },
-              "addressLine1": {
-                "type": "string"
-              },
-              "addressLine2": {
-                "type": "string"
-              },
-              "city": {
-                "type": "string"
-              },
-              "state": {
-                "type": "string"
-              },
-              "postalCode": {
-                "type": "string"
-              },
-              "country": {
-                "type": "string"
-              }
-            }
+            "additionalProperties": false
+          },
+          "recipient": {
+            "$ref": "#/properties/sender"
           },
           "bodyText": {
-            "type": "string",
-            "description": "Letter body. Must not exceed 1100 characters OR 15 lines. Write as continuous paragraphs - do NOT put blank lines between sentences."
+            "type": "string"
           },
           "signOff": {
-            "type": "string",
-            "description": "Closing/signature (e.g., 'Sincerely, Name')"
+            "type": "string"
           },
           "image": {
             "type": "object",
-            "description": "Header image file attachment (recommended method)",
             "properties": {
               "download_url": {
                 "type": "string"
@@ -592,33 +526,196 @@
             "required": [
               "download_url",
               "file_id"
-            ]
+            ],
+            "additionalProperties": false
           },
           "imageUrl": {
-            "type": "string",
-            "description": "URL of header image (fallback if no file attached)"
+            "type": "string"
           },
           "sendAsGift": {
             "type": "boolean",
             "description": "Set true only when the user asks to send this as their gift letter: it is free and adds a printed page with a card for the recipient. Leave it out otherwise; a gift letter is then used only if the balance cannot pay."
           }
-        }
+        },
+        "required": [
+          "recipient",
+          "bodyText",
+          "signOff"
+        ],
+        "additionalProperties": true,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       },
       "outputSchema": {
         "type": "object",
-        "required": [
-          "previewHtml",
-          "lettersRequired",
-          "canSendNow",
-          "sendEligibility",
-          "draftId",
-          "draftExpiresAt",
-          "layoutType"
-        ],
         "properties": {
+          "lettersRequired": {
+            "type": "number"
+          },
+          "canSendNow": {
+            "type": "boolean"
+          },
+          "reasonCannotSend": {
+            "type": "string"
+          },
+          "sendEligibility": {
+            "type": "object",
+            "properties": {
+              "payAndSend": {
+                "type": "object",
+                "properties": {
+                  "available": {
+                    "type": "boolean"
+                  },
+                  "amountCents": {
+                    "type": "integer"
+                  },
+                  "currency": {
+                    "type": "string"
+                  },
+                  "displayAmount": {
+                    "type": "string"
+                  },
+                  "productDescription": {
+                    "type": "string"
+                  },
+                  "unavailableReason": {
+                    "type": "string"
+                  },
+                  "pageUrl": {
+                    "type": "string",
+                    "description": "Where the person pays for this with Pay & Send and so sends it, in an app that cannot open Pay & Send itself"
+                  }
+                },
+                "required": [
+                  "available"
+                ],
+                "additionalProperties": false
+              },
+              "letterPack": {
+                "type": "object",
+                "properties": {
+                  "available": {
+                    "type": "boolean"
+                  },
+                  "purchaseUrl": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "available",
+                  "purchaseUrl"
+                ],
+                "additionalProperties": false
+              },
+              "packPays": {
+                "type": "boolean",
+                "const": false,
+                "description": "False when letter packs and gift letters cannot pay for this mail: it is paid with Pay & Send, whatever the balance"
+              }
+            },
+            "required": [
+              "payAndSend",
+              "letterPack"
+            ],
+            "additionalProperties": false
+          },
+          "deliveryClass": {
+            "type": "string"
+          },
+          "estimatedDeliveryDays": {
+            "type": "integer"
+          },
+          "deliveryEstimate": {
+            "type": "string"
+          },
+          "deliveryDisclaimer": {
+            "type": "string"
+          },
+          "draftId": {
+            "type": "string"
+          },
+          "draftExpiresAt": {
+            "type": "string"
+          },
+          "layoutType": {
+            "type": "string",
+            "enum": [
+              "text_only",
+              "header_image",
+              "inline_image"
+            ]
+          },
+          "usedSavedReturnAddress": {
+            "type": "boolean"
+          },
+          "savedReturnAddressNote": {
+            "type": "string"
+          },
+          "senderAddressValidation": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "verified",
+                  "corrected",
+                  "failed",
+                  "unverified"
+                ]
+              },
+              "originalAddress": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "addressLine1": {
+                    "type": "string"
+                  },
+                  "addressLine2": {
+                    "type": "string"
+                  },
+                  "city": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string"
+                  },
+                  "postalCode": {
+                    "type": "string"
+                  },
+                  "country": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "verifiedAddress": {
+                "$ref": "#/properties/senderAddressValidation/properties/originalAddress"
+              },
+              "errors": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "suggestions": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "recipientAddressValidation": {
+            "$ref": "#/properties/senderAddressValidation"
+          },
+          "addressWarnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "giftCard": {
             "type": "object",
-            "description": "Present on a gift send: the card its extra printed page carries",
             "properties": {
               "state": {
                 "type": "string",
@@ -630,35 +727,34 @@
               "description": {
                 "type": "string"
               }
-            }
+            },
+            "required": [
+              "state",
+              "description"
+            ],
+            "additionalProperties": false
           },
           "giftLettersAvailable": {
             "type": "integer",
-            "description": "Unsent gift letters on the account, when there are any"
+            "minimum": 0
           },
           "schedule": {
             "type": "object",
-            "description": "The arrival date asked for, when there was one (#535): when it goes to the printer and the dates on offer",
             "properties": {
               "arriveBy": {
-                "type": "string",
-                "description": "The date it should arrive by, YYYY-MM-DD in New York"
+                "type": "string"
               },
               "mailOn": {
-                "type": "string",
-                "description": "The day it goes to the printer, YYYY-MM-DD"
+                "type": "string"
               },
               "releasesAt": {
-                "type": "string",
-                "description": "ISO time the hold ends: 09:00 New York time on the mail date, sent to the printer within the hour"
+                "type": "string"
               },
               "earliestArrival": {
-                "type": "string",
-                "description": "The first arrival date on offer, YYYY-MM-DD"
+                "type": "string"
               },
               "latestArrival": {
-                "type": "string",
-                "description": "The last arrival date on offer, YYYY-MM-DD"
+                "type": "string"
               }
             },
             "required": [
@@ -667,11 +763,11 @@
               "releasesAt",
               "earliestArrival",
               "latestArrival"
-            ]
+            ],
+            "additionalProperties": false
           },
           "arrivalWindow": {
             "type": "object",
-            "description": "The arrival dates that can be chosen now: what can be scheduled, not when this mail arrives",
             "properties": {
               "earliestArrival": {
                 "type": "string",
@@ -685,11 +781,12 @@
             "required": [
               "earliestArrival",
               "latestArrival"
-            ]
+            ],
+            "additionalProperties": false,
+            "description": "The arrival dates that can be chosen now: what can be scheduled, not when this mail arrives"
           },
           "stationery": {
             "type": "object",
-            "description": "While stationery is offered: the stationery the page was drawn in, with the date line, initials and headline it prints, and why: asked for, the account's last choice, or classic by default",
             "properties": {
               "theme": {
                 "type": "string",
@@ -714,7 +811,6 @@
               },
               "design": {
                 "type": "object",
-                "description": "With the custom theme: its design's choices",
                 "properties": {
                   "face": {
                     "type": "string",
@@ -751,19 +847,18 @@
                   "ornament",
                   "ruled",
                   "tone"
-                ]
+                ],
+                "additionalProperties": false,
+                "description": "With the custom theme: its design's choices"
               },
               "dateLine": {
-                "type": "string",
-                "description": "The date it prints at the top right, as written"
+                "type": "string"
               },
               "monogram": {
-                "type": "string",
-                "description": "The initials it prints"
+                "type": "string"
               },
               "headline": {
-                "type": "string",
-                "description": "The headline it prints above the letter"
+                "type": "string"
               },
               "source": {
                 "type": "string",
@@ -778,11 +873,12 @@
             "required": [
               "theme",
               "source"
-            ]
+            ],
+            "additionalProperties": false,
+            "description": "While stationery is offered: the stationery the page was drawn in, with the date line, initials and headline it prints, and why: asked for, the account's last choice, or classic by default"
           },
           "signature": {
             "type": "object",
-            "description": "While signatures are offered: whether the letter prints the person's saved signature, and why",
             "properties": {
               "printed": {
                 "type": "boolean"
@@ -800,7 +896,9 @@
             "required": [
               "printed",
               "source"
-            ]
+            ],
+            "additionalProperties": false,
+            "description": "While signatures are offered: whether the letter prints the person's saved signature, and why"
           },
           "mailService": {
             "type": "string",
@@ -819,173 +917,18 @@
           "wordsVersion": {
             "type": "string",
             "description": "While a letter's words can be changed in place: the version of the letter's words, which set_letter_words takes to say which words it replaces"
-          },
-          "previewHtml": {
-            "type": "string"
-          },
-          "lettersRequired": {
-            "type": "number",
-            "description": "Letters required from balance (always 1 for standard letter)"
-          },
-          "canSendNow": {
-            "type": "boolean"
-          },
-          "reasonCannotSend": {
-            "type": "string"
-          },
-          "sendEligibility": {
-            "type": "object",
-            "required": [
-              "payAndSend",
-              "letterPack"
-            ],
-            "properties": {
-              "payAndSend": {
-                "type": "object",
-                "required": [
-                  "available"
-                ],
-                "properties": {
-                  "available": {
-                    "type": "boolean"
-                  },
-                  "amountCents": {
-                    "type": "integer"
-                  },
-                  "currency": {
-                    "type": "string"
-                  },
-                  "displayAmount": {
-                    "type": "string"
-                  },
-                  "productDescription": {
-                    "type": "string"
-                  },
-                  "unavailableReason": {
-                    "type": "string"
-                  },
-                  "pageUrl": {
-                    "type": "string",
-                    "description": "Where the person pays for this with Pay & Send and so sends it, in an app that cannot open Pay & Send itself"
-                  }
-                }
-              },
-              "letterPack": {
-                "type": "object",
-                "required": [
-                  "available",
-                  "purchaseUrl"
-                ],
-                "properties": {
-                  "available": {
-                    "type": "boolean"
-                  },
-                  "purchaseUrl": {
-                    "type": "string"
-                  }
-                }
-              },
-              "packPays": {
-                "type": "boolean",
-                "const": false,
-                "description": "False when letter packs and gift letters cannot pay for this mail: it is paid with Pay & Send, whatever the balance"
-              }
-            }
-          },
-          "deliveryClass": {
-            "type": "string"
-          },
-          "estimatedDeliveryDays": {
-            "type": "integer"
-          },
-          "deliveryEstimate": {
-            "type": "string"
-          },
-          "deliveryDisclaimer": {
-            "type": "string"
-          },
-          "usedSavedReturnAddress": {
-            "type": "boolean"
-          },
-          "savedReturnAddressNote": {
-            "type": "string"
-          },
-          "addressWarnings": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "draftId": {
-            "type": "string",
-            "description": "Unique draft ID required for send_letter"
-          },
-          "draftExpiresAt": {
-            "type": "string",
-            "description": "ISO timestamp when draft expires (24h)"
-          },
-          "layoutType": {
-            "type": "string",
-            "enum": [
-              "text_only",
-              "header_image",
-              "inline_image"
-            ],
-            "description": "Detected or specified layout type"
-          },
-          "headerImageData": {
-            "type": "string",
-            "description": "Base64 data URI of processed header image (for widget preview)"
-          },
-          "inlineImageData": {
-            "type": "string",
-            "description": "Base64 data URI of processed inline image (for widget preview)"
-          },
-          "senderAddressValidation": {
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "verified",
-                  "corrected",
-                  "failed"
-                ]
-              },
-              "errors": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "suggestions": {
-                "type": "string"
-              }
-            }
-          },
-          "recipientAddressValidation": {
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "verified",
-                  "corrected",
-                  "failed"
-                ]
-              },
-              "errors": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "suggestions": {
-                "type": "string"
-              }
-            }
           }
-        }
+        },
+        "required": [
+          "lettersRequired",
+          "canSendNow",
+          "sendEligibility",
+          "draftId",
+          "draftExpiresAt",
+          "layoutType"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       }
     },
     {
@@ -993,22 +936,9 @@
       "description": "Preview a physical letter draft with an enclosed image after the signature. Requires a real U.S. recipient mailing address. If the user refers to an image already generated, shown, or attached earlier in this conversation, call this tool first to reuse that image. Otherwise prefer a direct file attachment or explicit imageUrl. Use upload_image only after an actual failed handoff or upload problem. Send later with send_letter.",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "recipient",
-          "bodyText",
-          "signOff"
-        ],
         "properties": {
           "sender": {
             "type": "object",
-            "required": [
-              "name",
-              "addressLine1",
-              "city",
-              "state",
-              "postalCode",
-              "country"
-            ],
             "properties": {
               "name": {
                 "type": "string"
@@ -1017,7 +947,8 @@
                 "type": "string"
               },
               "addressLine2": {
-                "type": "string"
+                "type": "string",
+                "description": "Apartment, suite, or unit, e.g. \"Suite 8701\" - never fold it into addressLine1."
               },
               "city": {
                 "type": "string"
@@ -1032,10 +963,6 @@
                 "type": "string"
               }
             },
-            "description": "Return address (optional - will use saved return address if not provided)"
-          },
-          "recipient": {
-            "type": "object",
             "required": [
               "name",
               "addressLine1",
@@ -1044,41 +971,19 @@
               "postalCode",
               "country"
             ],
-            "properties": {
-              "name": {
-                "type": "string"
-              },
-              "addressLine1": {
-                "type": "string"
-              },
-              "addressLine2": {
-                "type": "string"
-              },
-              "city": {
-                "type": "string"
-              },
-              "state": {
-                "type": "string"
-              },
-              "postalCode": {
-                "type": "string"
-              },
-              "country": {
-                "type": "string"
-              }
-            }
+            "additionalProperties": false
+          },
+          "recipient": {
+            "$ref": "#/properties/sender"
           },
           "bodyText": {
-            "type": "string",
-            "description": "Letter body. Must not exceed 800 characters OR 12 lines. Write as continuous paragraphs - do NOT put blank lines between sentences."
+            "type": "string"
           },
           "signOff": {
-            "type": "string",
-            "description": "Closing/signature (e.g., 'Sincerely, Name')"
+            "type": "string"
           },
           "image": {
             "type": "object",
-            "description": "Image file attachment (recommended method)",
             "properties": {
               "download_url": {
                 "type": "string"
@@ -1096,33 +1001,196 @@
             "required": [
               "download_url",
               "file_id"
-            ]
+            ],
+            "additionalProperties": false
           },
           "imageUrl": {
-            "type": "string",
-            "description": "URL of image (fallback if no file attached)"
+            "type": "string"
           },
           "sendAsGift": {
             "type": "boolean",
             "description": "Set true only when the user asks to send this as their gift letter: it is free and adds a printed page with a card for the recipient. Leave it out otherwise; a gift letter is then used only if the balance cannot pay."
           }
-        }
+        },
+        "required": [
+          "recipient",
+          "bodyText",
+          "signOff"
+        ],
+        "additionalProperties": true,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       },
       "outputSchema": {
         "type": "object",
-        "required": [
-          "previewHtml",
-          "lettersRequired",
-          "canSendNow",
-          "sendEligibility",
-          "draftId",
-          "draftExpiresAt",
-          "layoutType"
-        ],
         "properties": {
+          "lettersRequired": {
+            "type": "number"
+          },
+          "canSendNow": {
+            "type": "boolean"
+          },
+          "reasonCannotSend": {
+            "type": "string"
+          },
+          "sendEligibility": {
+            "type": "object",
+            "properties": {
+              "payAndSend": {
+                "type": "object",
+                "properties": {
+                  "available": {
+                    "type": "boolean"
+                  },
+                  "amountCents": {
+                    "type": "integer"
+                  },
+                  "currency": {
+                    "type": "string"
+                  },
+                  "displayAmount": {
+                    "type": "string"
+                  },
+                  "productDescription": {
+                    "type": "string"
+                  },
+                  "unavailableReason": {
+                    "type": "string"
+                  },
+                  "pageUrl": {
+                    "type": "string",
+                    "description": "Where the person pays for this with Pay & Send and so sends it, in an app that cannot open Pay & Send itself"
+                  }
+                },
+                "required": [
+                  "available"
+                ],
+                "additionalProperties": false
+              },
+              "letterPack": {
+                "type": "object",
+                "properties": {
+                  "available": {
+                    "type": "boolean"
+                  },
+                  "purchaseUrl": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "available",
+                  "purchaseUrl"
+                ],
+                "additionalProperties": false
+              },
+              "packPays": {
+                "type": "boolean",
+                "const": false,
+                "description": "False when letter packs and gift letters cannot pay for this mail: it is paid with Pay & Send, whatever the balance"
+              }
+            },
+            "required": [
+              "payAndSend",
+              "letterPack"
+            ],
+            "additionalProperties": false
+          },
+          "deliveryClass": {
+            "type": "string"
+          },
+          "estimatedDeliveryDays": {
+            "type": "integer"
+          },
+          "deliveryEstimate": {
+            "type": "string"
+          },
+          "deliveryDisclaimer": {
+            "type": "string"
+          },
+          "draftId": {
+            "type": "string"
+          },
+          "draftExpiresAt": {
+            "type": "string"
+          },
+          "layoutType": {
+            "type": "string",
+            "enum": [
+              "text_only",
+              "header_image",
+              "inline_image"
+            ]
+          },
+          "usedSavedReturnAddress": {
+            "type": "boolean"
+          },
+          "savedReturnAddressNote": {
+            "type": "string"
+          },
+          "senderAddressValidation": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "verified",
+                  "corrected",
+                  "failed",
+                  "unverified"
+                ]
+              },
+              "originalAddress": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "addressLine1": {
+                    "type": "string"
+                  },
+                  "addressLine2": {
+                    "type": "string"
+                  },
+                  "city": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string"
+                  },
+                  "postalCode": {
+                    "type": "string"
+                  },
+                  "country": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "verifiedAddress": {
+                "$ref": "#/properties/senderAddressValidation/properties/originalAddress"
+              },
+              "errors": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "suggestions": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "recipientAddressValidation": {
+            "$ref": "#/properties/senderAddressValidation"
+          },
+          "addressWarnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "giftCard": {
             "type": "object",
-            "description": "Present on a gift send: the card its extra printed page carries",
             "properties": {
               "state": {
                 "type": "string",
@@ -1134,35 +1202,34 @@
               "description": {
                 "type": "string"
               }
-            }
+            },
+            "required": [
+              "state",
+              "description"
+            ],
+            "additionalProperties": false
           },
           "giftLettersAvailable": {
             "type": "integer",
-            "description": "Unsent gift letters on the account, when there are any"
+            "minimum": 0
           },
           "schedule": {
             "type": "object",
-            "description": "The arrival date asked for, when there was one (#535): when it goes to the printer and the dates on offer",
             "properties": {
               "arriveBy": {
-                "type": "string",
-                "description": "The date it should arrive by, YYYY-MM-DD in New York"
+                "type": "string"
               },
               "mailOn": {
-                "type": "string",
-                "description": "The day it goes to the printer, YYYY-MM-DD"
+                "type": "string"
               },
               "releasesAt": {
-                "type": "string",
-                "description": "ISO time the hold ends: 09:00 New York time on the mail date, sent to the printer within the hour"
+                "type": "string"
               },
               "earliestArrival": {
-                "type": "string",
-                "description": "The first arrival date on offer, YYYY-MM-DD"
+                "type": "string"
               },
               "latestArrival": {
-                "type": "string",
-                "description": "The last arrival date on offer, YYYY-MM-DD"
+                "type": "string"
               }
             },
             "required": [
@@ -1171,11 +1238,11 @@
               "releasesAt",
               "earliestArrival",
               "latestArrival"
-            ]
+            ],
+            "additionalProperties": false
           },
           "arrivalWindow": {
             "type": "object",
-            "description": "The arrival dates that can be chosen now: what can be scheduled, not when this mail arrives",
             "properties": {
               "earliestArrival": {
                 "type": "string",
@@ -1189,11 +1256,12 @@
             "required": [
               "earliestArrival",
               "latestArrival"
-            ]
+            ],
+            "additionalProperties": false,
+            "description": "The arrival dates that can be chosen now: what can be scheduled, not when this mail arrives"
           },
           "stationery": {
             "type": "object",
-            "description": "While stationery is offered: the stationery the page was drawn in, with the date line, initials and headline it prints, and why: asked for, the account's last choice, or classic by default",
             "properties": {
               "theme": {
                 "type": "string",
@@ -1218,7 +1286,6 @@
               },
               "design": {
                 "type": "object",
-                "description": "With the custom theme: its design's choices",
                 "properties": {
                   "face": {
                     "type": "string",
@@ -1255,19 +1322,18 @@
                   "ornament",
                   "ruled",
                   "tone"
-                ]
+                ],
+                "additionalProperties": false,
+                "description": "With the custom theme: its design's choices"
               },
               "dateLine": {
-                "type": "string",
-                "description": "The date it prints at the top right, as written"
+                "type": "string"
               },
               "monogram": {
-                "type": "string",
-                "description": "The initials it prints"
+                "type": "string"
               },
               "headline": {
-                "type": "string",
-                "description": "The headline it prints above the letter"
+                "type": "string"
               },
               "source": {
                 "type": "string",
@@ -1282,11 +1348,12 @@
             "required": [
               "theme",
               "source"
-            ]
+            ],
+            "additionalProperties": false,
+            "description": "While stationery is offered: the stationery the page was drawn in, with the date line, initials and headline it prints, and why: asked for, the account's last choice, or classic by default"
           },
           "signature": {
             "type": "object",
-            "description": "While signatures are offered: whether the letter prints the person's saved signature, and why",
             "properties": {
               "printed": {
                 "type": "boolean"
@@ -1304,7 +1371,9 @@
             "required": [
               "printed",
               "source"
-            ]
+            ],
+            "additionalProperties": false,
+            "description": "While signatures are offered: whether the letter prints the person's saved signature, and why"
           },
           "mailService": {
             "type": "string",
@@ -1323,173 +1392,18 @@
           "wordsVersion": {
             "type": "string",
             "description": "While a letter's words can be changed in place: the version of the letter's words, which set_letter_words takes to say which words it replaces"
-          },
-          "previewHtml": {
-            "type": "string"
-          },
-          "lettersRequired": {
-            "type": "number",
-            "description": "Letters required from balance (always 1 for standard letter)"
-          },
-          "canSendNow": {
-            "type": "boolean"
-          },
-          "reasonCannotSend": {
-            "type": "string"
-          },
-          "sendEligibility": {
-            "type": "object",
-            "required": [
-              "payAndSend",
-              "letterPack"
-            ],
-            "properties": {
-              "payAndSend": {
-                "type": "object",
-                "required": [
-                  "available"
-                ],
-                "properties": {
-                  "available": {
-                    "type": "boolean"
-                  },
-                  "amountCents": {
-                    "type": "integer"
-                  },
-                  "currency": {
-                    "type": "string"
-                  },
-                  "displayAmount": {
-                    "type": "string"
-                  },
-                  "productDescription": {
-                    "type": "string"
-                  },
-                  "unavailableReason": {
-                    "type": "string"
-                  },
-                  "pageUrl": {
-                    "type": "string",
-                    "description": "Where the person pays for this with Pay & Send and so sends it, in an app that cannot open Pay & Send itself"
-                  }
-                }
-              },
-              "letterPack": {
-                "type": "object",
-                "required": [
-                  "available",
-                  "purchaseUrl"
-                ],
-                "properties": {
-                  "available": {
-                    "type": "boolean"
-                  },
-                  "purchaseUrl": {
-                    "type": "string"
-                  }
-                }
-              },
-              "packPays": {
-                "type": "boolean",
-                "const": false,
-                "description": "False when letter packs and gift letters cannot pay for this mail: it is paid with Pay & Send, whatever the balance"
-              }
-            }
-          },
-          "deliveryClass": {
-            "type": "string"
-          },
-          "estimatedDeliveryDays": {
-            "type": "integer"
-          },
-          "deliveryEstimate": {
-            "type": "string"
-          },
-          "deliveryDisclaimer": {
-            "type": "string"
-          },
-          "usedSavedReturnAddress": {
-            "type": "boolean"
-          },
-          "savedReturnAddressNote": {
-            "type": "string"
-          },
-          "addressWarnings": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "draftId": {
-            "type": "string",
-            "description": "Unique draft ID required for send_letter"
-          },
-          "draftExpiresAt": {
-            "type": "string",
-            "description": "ISO timestamp when draft expires (24h)"
-          },
-          "layoutType": {
-            "type": "string",
-            "enum": [
-              "text_only",
-              "header_image",
-              "inline_image"
-            ],
-            "description": "Detected or specified layout type"
-          },
-          "headerImageData": {
-            "type": "string",
-            "description": "Base64 data URI of processed header image (for widget preview)"
-          },
-          "inlineImageData": {
-            "type": "string",
-            "description": "Base64 data URI of processed inline image (for widget preview)"
-          },
-          "senderAddressValidation": {
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "verified",
-                  "corrected",
-                  "failed"
-                ]
-              },
-              "errors": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "suggestions": {
-                "type": "string"
-              }
-            }
-          },
-          "recipientAddressValidation": {
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "verified",
-                  "corrected",
-                  "failed"
-                ]
-              },
-              "errors": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "suggestions": {
-                "type": "string"
-              }
-            }
           }
-        }
+        },
+        "required": [
+          "lettersRequired",
+          "canSendNow",
+          "sendEligibility",
+          "draftId",
+          "draftExpiresAt",
+          "layoutType"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       }
     },
     {
@@ -1497,60 +1411,38 @@
       "description": "Send a physical letter using a draft from a preview tool. Requires a draftId and confirm: true. A retry returns the existing order, and the response may suggest saving the sender as your return address. If the same mail was sent or paid for from this account in the last 24 hours, the call is refused and says so; repeat it with sendAnotherCopy: true only after the user asks for another copy.",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "draftId",
-          "confirm"
-        ],
         "properties": {
           "draftId": {
-            "type": "string",
-            "description": "Draft ID from quote_and_preview_letter"
+            "type": "string"
           },
           "confirm": {
-            "type": "boolean",
-            "description": "Must be true or request fails"
+            "type": "boolean"
           },
           "sendAnotherCopy": {
             "type": "boolean",
             "description": "Set true only after the user explicitly asks for another copy of mail that was already sent or paid for in the last 24 hours. Leave it out otherwise."
           }
-        }
+        },
+        "required": [
+          "draftId",
+          "confirm"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       },
       "outputSchema": {
         "type": "object",
-        "required": [
-          "orderId",
-          "currentStatus",
-          "statusTimeline",
-          "recipientSummary",
-          "lettersRemaining"
-        ],
         "properties": {
           "orderId": {
             "type": "string"
           },
           "currentStatus": {
-            "type": "string",
-            "enum": [
-              "pending",
-              "accepted",
-              "printing",
-              "in_transit",
-              "delivered",
-              "returned",
-              "failed",
-              "cancelled",
-              "scheduled"
-            ]
+            "type": "string"
           },
           "statusTimeline": {
             "type": "array",
             "items": {
               "type": "object",
-              "required": [
-                "timestampISO",
-                "statusText"
-              ],
               "properties": {
                 "timestampISO": {
                   "type": "string"
@@ -1558,16 +1450,16 @@
                 "statusText": {
                   "type": "string"
                 }
-              }
+              },
+              "required": [
+                "timestampISO",
+                "statusText"
+              ],
+              "additionalProperties": false
             }
           },
           "recipientSummary": {
             "type": "object",
-            "required": [
-              "name",
-              "city",
-              "state"
-            ],
             "properties": {
               "name": {
                 "type": "string"
@@ -1578,22 +1470,36 @@
               "state": {
                 "type": "string"
               }
-            }
+            },
+            "required": [
+              "name",
+              "city",
+              "state"
+            ],
+            "additionalProperties": false
           },
           "lettersRemaining": {
-            "type": "number",
-            "description": "Number of letters remaining in user's balance"
-          },
-          "previewFirstPageHtml": {
-            "type": "string"
+            "type": "number"
           },
           "isRetry": {
-            "type": "boolean",
-            "description": "True if this was an idempotent retry (draft already consumed)"
+            "type": "boolean"
+          },
+          "trackingSupport": {
+            "type": "string",
+            "enum": [
+              "none",
+              "estimated_only",
+              "carrier_tracking"
+            ]
+          },
+          "saveReturnAddressNote": {
+            "type": "string"
+          },
+          "suggestSaveReturnAddress": {
+            "type": "boolean"
           },
           "schedule": {
             "type": "object",
-            "description": "Sent with an arrival date: the date it aims to arrive by and the day it goes to the printer, YYYY-MM-DD. It waits until then.",
             "properties": {
               "arriveBy": {
                 "type": "string"
@@ -1605,22 +1511,24 @@
             "required": [
               "arriveBy",
               "mailOn"
-            ]
+            ],
+            "additionalProperties": false,
+            "description": "Sent with an arrival date: the date it aims to arrive by and the day it goes to the printer, YYYY-MM-DD. It waits until then."
           },
           "cancellable": {
             "type": "boolean",
             "description": "With an arrival date: whether it can still be cancelled free, before it goes to the printer"
-          },
-          "trackingSupport": {
-            "type": "string",
-            "enum": [
-              "none",
-              "estimated_only",
-              "carrier_tracking"
-            ],
-            "description": "Tracking capability level. 'estimated_only' = periodic status updates available but delivery is estimated (not confirmed). Use get_order_status to check current status."
           }
-        }
+        },
+        "required": [
+          "orderId",
+          "currentStatus",
+          "statusTimeline",
+          "recipientSummary",
+          "lettersRemaining"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       }
     },
     {
@@ -1628,41 +1536,34 @@
       "description": "Create or reuse a Stripe-hosted Pay & Send checkout for one owned letter or postcard draft. The price and physical product come only from server configuration. Successful payment authorizes the exact draft to be mailed automatically; do not call send_letter or send_postcard afterward. If the same mail was sent or paid for from this account in the last 24 hours, the call is refused and says so; repeat it with sendAnotherCopy: true only after the user asks for another copy.",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "draftId"
-        ],
         "properties": {
           "draftId": {
-            "type": "string",
-            "description": "Owned pending draft ID from a letter or postcard preview"
+            "type": "string"
           },
           "sendAnotherCopy": {
             "type": "boolean",
             "description": "Set true only after the user explicitly asks for another copy of mail that was already sent or paid for in the last 24 hours. Leave it out otherwise."
           }
-        }
+        },
+        "required": [
+          "draftId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       },
       "outputSchema": {
         "type": "object",
-        "required": [
-          "orderId",
-          "amountCents",
-          "currency",
-          "productDescription",
-          "status",
-          "reused",
-          "message"
-        ],
         "properties": {
           "orderId": {
             "type": "string"
           },
           "checkoutUrl": {
             "type": "string",
-            "description": "Stripe-hosted checkout URL"
+            "format": "uri"
           },
           "amountCents": {
-            "type": "integer"
+            "type": "integer",
+            "exclusiveMinimum": 0
           },
           "currency": {
             "type": "string"
@@ -1682,7 +1583,18 @@
           "message": {
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "orderId",
+          "amountCents",
+          "currency",
+          "productDescription",
+          "status",
+          "reused",
+          "message"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       }
     },
     {
@@ -1690,9 +1602,6 @@
       "description": "Create a Stripe-hosted checkout to buy a pack of prepaid letters. The result carries a checkoutUrl that the customer must be shown as a link to click; nothing opens automatically and no card is guaranteed to render, so present the link. The price and pack sizes come only from server configuration. Payment adds letters to the account balance, for the customer to send mail with afterward. Use create_mail_checkout instead to pay for one specific draft.",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "pack"
-        ],
         "properties": {
           "pack": {
             "type": "string",
@@ -1700,13 +1609,61 @@
               "starter",
               "regular",
               "power"
-            ],
-            "description": "Pack size: starter (2 letters), regular (5 letters), power (50 letters)"
+            ]
           }
-        }
+        },
+        "required": [
+          "pack"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       },
       "outputSchema": {
         "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string"
+          },
+          "checkoutUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Stripe-hosted checkout URL. Present it to the customer as a link to click; nothing opens on its own (#322)."
+          },
+          "checkoutStartUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Same checkout via Letter IRL's start page; used by the card. Present checkoutUrl to the customer."
+          },
+          "letters": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "amountCents": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "currency": {
+            "type": "string"
+          },
+          "displayAmount": {
+            "type": "string"
+          },
+          "productDescription": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "reused": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
         "required": [
           "orderId",
           "letters",
@@ -1718,48 +1675,8 @@
           "reused",
           "message"
         ],
-        "properties": {
-          "orderId": {
-            "type": "string"
-          },
-          "checkoutUrl": {
-            "type": "string",
-            "description": "Stripe-hosted checkout URL. Present it to the customer as a link to click; nothing opens on its own."
-          },
-          "checkoutStartUrl": {
-            "type": "string",
-            "description": "Same checkout via Letter IRL's start page, which records the way back into the conversation; used by the card. Present checkoutUrl to the customer."
-          },
-          "letters": {
-            "type": "integer",
-            "description": "Letters this pack adds to the balance"
-          },
-          "amountCents": {
-            "type": "integer"
-          },
-          "currency": {
-            "type": "string"
-          },
-          "displayAmount": {
-            "type": "string",
-            "description": "Amount formatted for the currency, e.g. 5.00"
-          },
-          "productDescription": {
-            "type": "string"
-          },
-          "expiresAt": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "reused": {
-            "type": "boolean"
-          },
-          "message": {
-            "type": "string"
-          }
-        }
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       }
     },
     {
@@ -1772,23 +1689,11 @@
       },
       "outputSchema": {
         "type": "object",
-        "required": [
-          "packs",
-          "message"
-        ],
         "properties": {
           "packs": {
             "type": "array",
             "items": {
               "type": "object",
-              "required": [
-                "pack",
-                "letters",
-                "amountCents",
-                "currency",
-                "displayAmount",
-                "description"
-              ],
               "properties": {
                 "pack": {
                   "type": "string",
@@ -1800,28 +1705,43 @@
                 },
                 "letters": {
                   "type": "integer",
-                  "description": "Letters this pack adds to the balance"
+                  "exclusiveMinimum": 0
                 },
                 "amountCents": {
-                  "type": "integer"
+                  "type": "integer",
+                  "exclusiveMinimum": 0
                 },
                 "currency": {
                   "type": "string"
                 },
                 "displayAmount": {
-                  "type": "string",
-                  "description": "Server-formatted price for this currency"
+                  "type": "string"
                 },
                 "description": {
                   "type": "string"
                 }
-              }
+              },
+              "required": [
+                "pack",
+                "letters",
+                "amountCents",
+                "currency",
+                "displayAmount",
+                "description"
+              ],
+              "additionalProperties": false
             }
           },
           "message": {
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "packs",
+          "message"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       }
     },
     {
@@ -1829,42 +1749,44 @@
       "description": "Redeem a promo code or a gift code from a printed letter to add letters to the account. Returns redeemed: false with the reason when a code is invalid, expired, or already used - that is an ordinary answer, not an error. Letters must still be sent afterward.",
       "inputSchema": {
         "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          }
+        },
         "required": [
           "code"
         ],
-        "properties": {
-          "code": {
-            "type": "string",
-            "description": "The promo code to redeem"
-          }
-        }
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       },
       "outputSchema": {
         "type": "object",
-        "required": [
-          "redeemed",
-          "message"
-        ],
         "properties": {
           "redeemed": {
             "type": "boolean"
           },
           "letters": {
             "type": "integer",
-            "description": "Letters added to the balance"
+            "minimum": 0
           },
           "giftLetters": {
             "type": "integer",
-            "description": "Gift letters added: free sends that print a card for the recipient"
+            "minimum": 0
           },
           "expiresAt": {
-            "type": "string",
-            "description": "When the added letters expire, if they do"
+            "type": "string"
           },
           "message": {
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "redeemed",
+          "message"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       }
     },
     {
@@ -1872,28 +1794,19 @@
       "description": "Get the payment, fulfillment, or refund status of an owned Pay & Send or letter-pack purchase.",
       "inputSchema": {
         "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string"
+          }
+        },
         "required": [
           "orderId"
         ],
-        "properties": {
-          "orderId": {
-            "type": "string",
-            "description": "Commerce order ID returned by checkout"
-          }
-        }
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       },
       "outputSchema": {
         "type": "object",
-        "required": [
-          "orderId",
-          "purchaseStatus",
-          "orderStatus",
-          "productDescription",
-          "amountCents",
-          "currency",
-          "updatedAt",
-          "message"
-        ],
         "properties": {
           "orderId": {
             "type": "string"
@@ -1937,22 +1850,28 @@
             "type": "string"
           },
           "letters": {
-            "type": "integer"
+            "type": "integer",
+            "exclusiveMinimum": 0
           },
           "lettersRemaining": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": 0
           },
           "lettersRefunded": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": 0
           },
           "perLetterCents": {
-            "type": "integer"
+            "type": "integer",
+            "exclusiveMinimum": 0
           },
           "refundableAmountCents": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": 0
           },
           "amountRefundedCents": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": 0
           },
           "updatedAt": {
             "type": "string"
@@ -1960,7 +1879,19 @@
           "message": {
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "orderId",
+          "purchaseStatus",
+          "orderStatus",
+          "productDescription",
+          "amountCents",
+          "currency",
+          "updatedAt",
+          "message"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       }
     },
     {
@@ -1972,17 +1903,12 @@
           "orderId": {
             "type": "string"
           }
-        }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       },
       "outputSchema": {
         "type": "object",
-        "required": [
-          "orderId",
-          "currentStatus",
-          "statusTimeline",
-          "recipientSummary",
-          "trackingSupport"
-        ],
         "properties": {
           "orderId": {
             "type": "string"
@@ -1995,10 +1921,6 @@
             "type": "array",
             "items": {
               "type": "object",
-              "required": [
-                "timestampISO",
-                "statusText"
-              ],
               "properties": {
                 "timestampISO": {
                   "type": "string"
@@ -2006,16 +1928,16 @@
                 "statusText": {
                   "type": "string"
                 }
-              }
+              },
+              "required": [
+                "timestampISO",
+                "statusText"
+              ],
+              "additionalProperties": false
             }
           },
           "recipientSummary": {
             "type": "object",
-            "required": [
-              "name",
-              "city",
-              "state"
-            ],
             "properties": {
               "name": {
                 "type": "string"
@@ -2026,13 +1948,28 @@
               "state": {
                 "type": "string"
               }
-            }
+            },
+            "required": [
+              "name",
+              "city",
+              "state"
+            ],
+            "additionalProperties": false
           },
           "canSendFollowUp": {
             "type": "boolean"
           },
           "followUpSuggestedPrompt": {
             "type": "string"
+          },
+          "trackingSupport": {
+            "type": "string",
+            "enum": [
+              "none",
+              "estimated_only",
+              "carrier_tracking"
+            ],
+            "description": "How the order can be tracked. estimated_only: the status comes from the printer, and delivery is estimated, not confirmed by a carrier. carrier_tracking: USPS's own tracking number is stored for a letter that went out (certified mail), so USPS's page shows the scans; this status is still the printer's."
           },
           "arriveBy": {
             "type": "string",
@@ -2045,15 +1982,6 @@
           "cancellable": {
             "type": "boolean",
             "description": "With an arrival date: whether it can still be cancelled free, before it goes to the printer"
-          },
-          "trackingSupport": {
-            "type": "string",
-            "enum": [
-              "none",
-              "estimated_only",
-              "carrier_tracking"
-            ],
-            "description": "How the order can be tracked. estimated_only: the status comes from the printer, and delivery is estimated, not confirmed by a carrier. carrier_tracking: USPS's own tracking number is stored for a letter that went out (certified mail), so USPS's page shows the scans; this status is still the printer's."
           },
           "mailService": {
             "type": "string",
@@ -2075,26 +2003,30 @@
             "type": "string",
             "description": "Certified mail only: what to tell the person about the tracking number and the return receipt. It promises nothing about delivery or legal effect."
           }
-        }
+        },
+        "required": [
+          "orderId",
+          "currentStatus",
+          "statusTimeline",
+          "recipientSummary"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       }
     },
     {
       "name": "get_account_balance",
       "description": "Check how many prepaid letters remain on this account. Letters can be bought without leaving the conversation: list_letter_packs shows the sizes, create_pack_checkout buys one.",
       "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
         "properties": {}
       },
       "outputSchema": {
         "type": "object",
-        "required": [
-          "lettersRemaining",
-          "canSendStandardLetter"
-        ],
         "properties": {
           "lettersRemaining": {
-            "type": "number",
-            "description": "Number of letters remaining in user's balance"
+            "type": "number"
           },
           "canSendStandardLetter": {
             "type": "boolean"
@@ -2103,8 +2035,7 @@
             "type": "string"
           },
           "lettersExpiringSoon": {
-            "type": "number",
-            "description": "Number of letters expiring within 7 days"
+            "type": "number"
           },
           "expiringLettersDetails": {
             "type": "array",
@@ -2120,22 +2051,27 @@
                 "daysUntilExpiry": {
                   "type": "number"
                 }
-              }
+              },
+              "additionalProperties": false
             }
           },
           "imageGenerationsRemaining": {
-            "type": "integer",
-            "description": "Number of explicit image-entitlement units remaining"
+            "type": "integer"
           },
           "imageGenerationsAllowance": {
-            "type": "integer",
-            "description": "Total image-entitlement units granted by qualifying purchases"
+            "type": "integer"
           },
           "giftLettersRemaining": {
             "type": "integer",
-            "description": "Unsent gift letters: free sends that print a card for the recipient. Not included in lettersRemaining."
+            "minimum": 0
           }
-        }
+        },
+        "required": [
+          "lettersRemaining",
+          "canSendStandardLetter"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       }
     },
     {
@@ -2145,41 +2081,25 @@
         "type": "object",
         "properties": {
           "limit": {
-            "type": "number",
-            "description": "Maximum number of orders to return (default: 10)"
+            "type": "number"
           }
-        }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       },
       "outputSchema": {
         "type": "object",
-        "required": [
-          "orders",
-          "total",
-          "packPurchases",
-          "packPurchaseTotal"
-        ],
         "properties": {
           "orders": {
             "type": "array",
             "items": {
               "type": "object",
-              "required": [
-                "orderId",
-                "recipient",
-                "status",
-                "sentAt"
-              ],
               "properties": {
                 "orderId": {
                   "type": "string"
                 },
                 "recipient": {
                   "type": "object",
-                  "required": [
-                    "name",
-                    "city",
-                    "state"
-                  ],
                   "properties": {
                     "name": {
                       "type": "string"
@@ -2190,7 +2110,13 @@
                     "state": {
                       "type": "string"
                     }
-                  }
+                  },
+                  "required": [
+                    "name",
+                    "city",
+                    "state"
+                  ],
+                  "additionalProperties": false
                 },
                 "status": {
                   "type": "string",
@@ -2227,28 +2153,20 @@
                   "type": "string",
                   "description": "Certified mail only, with the tracking number: the USPS page that shows where the piece is."
                 }
-              }
+              },
+              "required": [
+                "orderId"
+              ],
+              "additionalProperties": false
             }
           },
           "total": {
-            "type": "number",
-            "description": "Total number of orders for this user"
+            "type": "number"
           },
           "packPurchases": {
             "type": "array",
-            "description": "Letter pack purchases, newest first. Use the orderId with get_purchase_status.",
             "items": {
               "type": "object",
-              "required": [
-                "orderId",
-                "productDescription",
-                "letters",
-                "purchaseStatus",
-                "amountCents",
-                "currency",
-                "displayAmount",
-                "createdAt"
-              ],
               "properties": {
                 "orderId": {
                   "type": "string"
@@ -2257,8 +2175,8 @@
                   "type": "string"
                 },
                 "letters": {
-                  "type": "number",
-                  "description": "Letters the pack adds to the account"
+                  "type": "integer",
+                  "minimum": 0
                 },
                 "purchaseStatus": {
                   "type": "string",
@@ -2271,30 +2189,46 @@
                     "refunded",
                     "on_hold",
                     "cancelled"
-                  ],
-                  "description": "submitted means paid and the letters are on the account"
+                  ]
                 },
                 "amountCents": {
-                  "type": "number"
+                  "type": "integer"
                 },
                 "currency": {
                   "type": "string"
                 },
                 "displayAmount": {
-                  "type": "string",
-                  "description": "Amount formatted for the currency, e.g. 5.00"
+                  "type": "string"
                 },
                 "createdAt": {
                   "type": "string"
                 }
-              }
+              },
+              "required": [
+                "orderId",
+                "productDescription",
+                "letters",
+                "purchaseStatus",
+                "amountCents",
+                "currency",
+                "displayAmount",
+                "createdAt"
+              ],
+              "additionalProperties": false
             }
           },
           "packPurchaseTotal": {
-            "type": "number",
-            "description": "Total number of letter pack purchases for this user"
+            "type": "number"
           }
-        }
+        },
+        "required": [
+          "orders",
+          "total",
+          "packPurchases",
+          "packPurchaseTotal"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       }
     },
     {
@@ -2302,21 +2236,9 @@
       "description": "Create a preview of a physical postcard draft with a front image and back message. Use this when the user wants to make, create, design, or preview a postcard through Letter IRL. Requires a real U.S. recipient mailing address. If the user refers to an image already generated, shown, or attached earlier in this conversation, call this tool first to reuse that image. Otherwise prefer a direct file attachment for the image, pass imageUrl when a generated or hosted image is already available, and use upload_image only if no attachment or usable imageUrl made it through after a direct preview attempt. If sender is omitted, the saved return address is used automatically. Send later with send_postcard.",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "recipient",
-          "message"
-        ],
         "properties": {
           "sender": {
             "type": "object",
-            "required": [
-              "name",
-              "addressLine1",
-              "city",
-              "state",
-              "postalCode",
-              "country"
-            ],
             "properties": {
               "name": {
                 "type": "string"
@@ -2325,7 +2247,8 @@
                 "type": "string"
               },
               "addressLine2": {
-                "type": "string"
+                "type": "string",
+                "description": "Apartment, suite, or unit, e.g. \"Suite 8701\" - never fold it into addressLine1."
               },
               "city": {
                 "type": "string"
@@ -2340,10 +2263,6 @@
                 "type": "string"
               }
             },
-            "description": "Return address (optional - will use saved return address if not provided)"
-          },
-          "recipient": {
-            "type": "object",
             "required": [
               "name",
               "addressLine1",
@@ -2352,46 +2271,23 @@
               "postalCode",
               "country"
             ],
-            "properties": {
-              "name": {
-                "type": "string"
-              },
-              "addressLine1": {
-                "type": "string"
-              },
-              "addressLine2": {
-                "type": "string"
-              },
-              "city": {
-                "type": "string"
-              },
-              "state": {
-                "type": "string"
-              },
-              "postalCode": {
-                "type": "string"
-              },
-              "country": {
-                "type": "string"
-              }
-            }
+            "additionalProperties": false
+          },
+          "recipient": {
+            "$ref": "#/properties/sender"
           },
           "message": {
             "type": "string",
-            "description": "Message for the back of the postcard. It must fit the back: 16 lines, about 500 characters of prose",
-            "maxLength": 1000
+            "description": "Must fit the back of the postcard: 16 lines, about 500 characters of prose"
           },
           "size": {
             "type": "string",
             "enum": [
               "6x9"
-            ],
-            "default": "6x9",
-            "description": "Postcard size (currently only 6x9 is supported)"
+            ]
           },
           "image": {
             "type": "object",
-            "description": "Image file attachment for postcard front (recommended method)",
             "properties": {
               "download_url": {
                 "type": "string"
@@ -2409,33 +2305,226 @@
             "required": [
               "download_url",
               "file_id"
-            ]
+            ],
+            "additionalProperties": false
           },
           "imageUrl": {
-            "type": "string",
-            "description": "REQUIRED when using a hosted image: set this to the imageUrl returned by confirm_uploaded_image (the upload widget flow) or another publicly accessible image URL. This is the URL of the image for the postcard front."
+            "type": "string"
           },
           "sendAsGift": {
             "type": "boolean",
             "description": "Set true only when the user asks to send this as their gift letter: it is free and adds a printed page with a card for the recipient. Leave it out otherwise; a gift letter is then used only if the balance cannot pay."
           }
-        }
+        },
+        "required": [
+          "recipient",
+          "message"
+        ],
+        "additionalProperties": true,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       },
       "outputSchema": {
         "type": "object",
-        "required": [
-          "previewFrontHtml",
-          "previewBackHtml",
-          "lettersRequired",
-          "canSendNow",
-          "sendEligibility",
-          "draftId",
-          "draftExpiresAt"
-        ],
         "properties": {
+          "lettersRequired": {
+            "type": "number"
+          },
+          "canSendNow": {
+            "type": "boolean"
+          },
+          "reasonCannotSend": {
+            "type": "string"
+          },
+          "sendEligibility": {
+            "type": "object",
+            "properties": {
+              "payAndSend": {
+                "type": "object",
+                "properties": {
+                  "available": {
+                    "type": "boolean"
+                  },
+                  "amountCents": {
+                    "type": "integer"
+                  },
+                  "currency": {
+                    "type": "string"
+                  },
+                  "displayAmount": {
+                    "type": "string"
+                  },
+                  "productDescription": {
+                    "type": "string"
+                  },
+                  "unavailableReason": {
+                    "type": "string"
+                  },
+                  "pageUrl": {
+                    "type": "string",
+                    "description": "Where the person pays for this with Pay & Send and so sends it, in an app that cannot open Pay & Send itself"
+                  }
+                },
+                "required": [
+                  "available"
+                ],
+                "additionalProperties": false
+              },
+              "letterPack": {
+                "type": "object",
+                "properties": {
+                  "available": {
+                    "type": "boolean"
+                  },
+                  "purchaseUrl": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "available",
+                  "purchaseUrl"
+                ],
+                "additionalProperties": false
+              },
+              "packPays": {
+                "type": "boolean",
+                "const": false,
+                "description": "False when letter packs and gift letters cannot pay for this mail: it is paid with Pay & Send, whatever the balance"
+              }
+            },
+            "required": [
+              "payAndSend",
+              "letterPack"
+            ],
+            "additionalProperties": false
+          },
+          "deliveryClass": {
+            "type": "string"
+          },
+          "estimatedDeliveryDays": {
+            "type": "integer"
+          },
+          "deliveryEstimate": {
+            "type": "string"
+          },
+          "deliveryDisclaimer": {
+            "type": "string"
+          },
+          "draftId": {
+            "type": "string"
+          },
+          "draftExpiresAt": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "recipientName": {
+            "type": "string"
+          },
+          "recipientAddressLine1": {
+            "type": "string"
+          },
+          "recipientAddressLine2": {
+            "type": "string"
+          },
+          "recipientCity": {
+            "type": "string"
+          },
+          "recipientState": {
+            "type": "string"
+          },
+          "recipientPostalCode": {
+            "type": "string"
+          },
+          "senderName": {
+            "type": "string"
+          },
+          "senderAddressLine1": {
+            "type": "string"
+          },
+          "senderAddressLine2": {
+            "type": "string"
+          },
+          "senderCity": {
+            "type": "string"
+          },
+          "senderState": {
+            "type": "string"
+          },
+          "senderPostalCode": {
+            "type": "string"
+          },
+          "usedSavedReturnAddress": {
+            "type": "boolean"
+          },
+          "savedReturnAddressNote": {
+            "type": "string"
+          },
+          "senderAddressValidation": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "verified",
+                  "corrected",
+                  "failed",
+                  "unverified"
+                ]
+              },
+              "originalAddress": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "addressLine1": {
+                    "type": "string"
+                  },
+                  "addressLine2": {
+                    "type": "string"
+                  },
+                  "city": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string"
+                  },
+                  "postalCode": {
+                    "type": "string"
+                  },
+                  "country": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "verifiedAddress": {
+                "$ref": "#/properties/senderAddressValidation/properties/originalAddress"
+              },
+              "errors": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "suggestions": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "recipientAddressValidation": {
+            "$ref": "#/properties/senderAddressValidation"
+          },
+          "addressWarnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "giftCard": {
             "type": "object",
-            "description": "Present on a gift send: the card its extra printed page carries",
             "properties": {
               "state": {
                 "type": "string",
@@ -2447,35 +2536,34 @@
               "description": {
                 "type": "string"
               }
-            }
+            },
+            "required": [
+              "state",
+              "description"
+            ],
+            "additionalProperties": false
           },
           "giftLettersAvailable": {
             "type": "integer",
-            "description": "Unsent gift letters on the account, when there are any"
+            "minimum": 0
           },
           "schedule": {
             "type": "object",
-            "description": "The arrival date asked for, when there was one (#535): when it goes to the printer and the dates on offer",
             "properties": {
               "arriveBy": {
-                "type": "string",
-                "description": "The date it should arrive by, YYYY-MM-DD in New York"
+                "type": "string"
               },
               "mailOn": {
-                "type": "string",
-                "description": "The day it goes to the printer, YYYY-MM-DD"
+                "type": "string"
               },
               "releasesAt": {
-                "type": "string",
-                "description": "ISO time the hold ends: 09:00 New York time on the mail date, sent to the printer within the hour"
+                "type": "string"
               },
               "earliestArrival": {
-                "type": "string",
-                "description": "The first arrival date on offer, YYYY-MM-DD"
+                "type": "string"
               },
               "latestArrival": {
-                "type": "string",
-                "description": "The last arrival date on offer, YYYY-MM-DD"
+                "type": "string"
               }
             },
             "required": [
@@ -2484,11 +2572,11 @@
               "releasesAt",
               "earliestArrival",
               "latestArrival"
-            ]
+            ],
+            "additionalProperties": false
           },
           "arrivalWindow": {
             "type": "object",
-            "description": "The arrival dates that can be chosen now: what can be scheduled, not when this mail arrives",
             "properties": {
               "earliestArrival": {
                 "type": "string",
@@ -2502,7 +2590,9 @@
             "required": [
               "earliestArrival",
               "latestArrival"
-            ]
+            ],
+            "additionalProperties": false,
+            "description": "The arrival dates that can be chosen now: what can be scheduled, not when this mail arrives"
           },
           "size": {
             "type": "string",
@@ -2533,159 +2623,17 @@
           "collagePhotos": {
             "type": "integer",
             "description": "How many photos the front draws, when it is a collage"
-          },
-          "previewFrontHtml": {
-            "type": "string",
-            "description": "HTML preview of postcard front (image)"
-          },
-          "previewBackHtml": {
-            "type": "string",
-            "description": "HTML preview of postcard back (message)"
-          },
-          "previewHtml": {
-            "type": "string",
-            "description": "The postcard as it prints, front and back as SVG, when our renderer drew it (#534)"
-          },
-          "lettersRequired": {
-            "type": "number",
-            "description": "Letters required from balance (always 1 for 6x9 postcard)"
-          },
-          "canSendNow": {
-            "type": "boolean"
-          },
-          "reasonCannotSend": {
-            "type": "string"
-          },
-          "sendEligibility": {
-            "type": "object",
-            "required": [
-              "payAndSend",
-              "letterPack"
-            ],
-            "properties": {
-              "payAndSend": {
-                "type": "object",
-                "required": [
-                  "available"
-                ],
-                "properties": {
-                  "available": {
-                    "type": "boolean"
-                  },
-                  "amountCents": {
-                    "type": "integer"
-                  },
-                  "currency": {
-                    "type": "string"
-                  },
-                  "displayAmount": {
-                    "type": "string"
-                  },
-                  "productDescription": {
-                    "type": "string"
-                  },
-                  "unavailableReason": {
-                    "type": "string"
-                  },
-                  "pageUrl": {
-                    "type": "string",
-                    "description": "Where the person pays for this with Pay & Send and so sends it, in an app that cannot open Pay & Send itself"
-                  }
-                }
-              },
-              "letterPack": {
-                "type": "object",
-                "required": [
-                  "available",
-                  "purchaseUrl"
-                ],
-                "properties": {
-                  "available": {
-                    "type": "boolean"
-                  },
-                  "purchaseUrl": {
-                    "type": "string"
-                  }
-                }
-              },
-              "packPays": {
-                "type": "boolean",
-                "const": false,
-                "description": "False when letter packs and gift letters cannot pay for this mail: it is paid with Pay & Send, whatever the balance"
-              }
-            }
-          },
-          "deliveryClass": {
-            "type": "string"
-          },
-          "estimatedDeliveryDays": {
-            "type": "integer"
-          },
-          "deliveryEstimate": {
-            "type": "string"
-          },
-          "deliveryDisclaimer": {
-            "type": "string"
-          },
-          "draftId": {
-            "type": "string",
-            "description": "Unique draft ID required for send_postcard"
-          },
-          "draftExpiresAt": {
-            "type": "string",
-            "description": "ISO timestamp when draft expires (24h)"
-          },
-          "usedSavedReturnAddress": {
-            "type": "boolean"
-          },
-          "savedReturnAddressNote": {
-            "type": "string"
-          },
-          "senderAddressValidation": {
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "verified",
-                  "corrected",
-                  "failed"
-                ]
-              },
-              "errors": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "suggestions": {
-                "type": "string"
-              }
-            }
-          },
-          "recipientAddressValidation": {
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "verified",
-                  "corrected",
-                  "failed"
-                ]
-              },
-              "errors": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "suggestions": {
-                "type": "string"
-              }
-            }
           }
-        }
+        },
+        "required": [
+          "lettersRequired",
+          "canSendNow",
+          "sendEligibility",
+          "draftId",
+          "draftExpiresAt"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       }
     },
     {
@@ -2693,60 +2641,38 @@
       "description": "Send a physical postcard using a draft from quote_and_preview_postcard. Requires a draftId and confirm: true. A retry returns the existing order, and the response may suggest saving the sender as your return address. If the same mail was sent or paid for from this account in the last 24 hours, the call is refused and says so; repeat it with sendAnotherCopy: true only after the user asks for another copy.",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "draftId",
-          "confirm"
-        ],
         "properties": {
           "draftId": {
-            "type": "string",
-            "description": "Draft ID from quote_and_preview_postcard"
+            "type": "string"
           },
           "confirm": {
-            "type": "boolean",
-            "description": "Must be true or request fails"
+            "type": "boolean"
           },
           "sendAnotherCopy": {
             "type": "boolean",
             "description": "Set true only after the user explicitly asks for another copy of mail that was already sent or paid for in the last 24 hours. Leave it out otherwise."
           }
-        }
+        },
+        "required": [
+          "draftId",
+          "confirm"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       },
       "outputSchema": {
         "type": "object",
-        "required": [
-          "orderId",
-          "currentStatus",
-          "statusTimeline",
-          "recipientSummary",
-          "lettersRemaining"
-        ],
         "properties": {
           "orderId": {
             "type": "string"
           },
           "currentStatus": {
-            "type": "string",
-            "enum": [
-              "pending",
-              "accepted",
-              "printing",
-              "in_transit",
-              "delivered",
-              "returned",
-              "failed",
-              "cancelled",
-              "scheduled"
-            ]
+            "type": "string"
           },
           "statusTimeline": {
             "type": "array",
             "items": {
               "type": "object",
-              "required": [
-                "timestampISO",
-                "statusText"
-              ],
               "properties": {
                 "timestampISO": {
                   "type": "string"
@@ -2754,16 +2680,16 @@
                 "statusText": {
                   "type": "string"
                 }
-              }
+              },
+              "required": [
+                "timestampISO",
+                "statusText"
+              ],
+              "additionalProperties": false
             }
           },
           "recipientSummary": {
             "type": "object",
-            "required": [
-              "name",
-              "city",
-              "state"
-            ],
             "properties": {
               "name": {
                 "type": "string"
@@ -2774,25 +2700,36 @@
               "state": {
                 "type": "string"
               }
-            }
+            },
+            "required": [
+              "name",
+              "city",
+              "state"
+            ],
+            "additionalProperties": false
           },
           "lettersRemaining": {
-            "type": "number",
-            "description": "Number of letters remaining in user's balance"
-          },
-          "previewFrontHtml": {
-            "type": "string"
-          },
-          "previewBackHtml": {
-            "type": "string"
+            "type": "number"
           },
           "isRetry": {
-            "type": "boolean",
-            "description": "True if this was an idempotent retry (draft already consumed)"
+            "type": "boolean"
+          },
+          "trackingSupport": {
+            "type": "string",
+            "enum": [
+              "none",
+              "estimated_only",
+              "carrier_tracking"
+            ]
+          },
+          "saveReturnAddressNote": {
+            "type": "string"
+          },
+          "suggestSaveReturnAddress": {
+            "type": "boolean"
           },
           "schedule": {
             "type": "object",
-            "description": "Sent with an arrival date: the date it aims to arrive by and the day it goes to the printer, YYYY-MM-DD. It waits until then.",
             "properties": {
               "arriveBy": {
                 "type": "string"
@@ -2804,22 +2741,24 @@
             "required": [
               "arriveBy",
               "mailOn"
-            ]
+            ],
+            "additionalProperties": false,
+            "description": "Sent with an arrival date: the date it aims to arrive by and the day it goes to the printer, YYYY-MM-DD. It waits until then."
           },
           "cancellable": {
             "type": "boolean",
             "description": "With an arrival date: whether it can still be cancelled free, before it goes to the printer"
-          },
-          "trackingSupport": {
-            "type": "string",
-            "enum": [
-              "none",
-              "estimated_only",
-              "carrier_tracking"
-            ],
-            "description": "Tracking capability level. 'estimated_only' = periodic status updates available but delivery is estimated (not confirmed). Use get_order_status to check current status."
           }
-        }
+        },
+        "required": [
+          "orderId",
+          "currentStatus",
+          "statusTimeline",
+          "recipientSummary",
+          "lettersRemaining"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       }
     },
     {
@@ -2827,22 +2766,20 @@
       "description": "Used by Letter IRL's preview card: says whether a previewed letter or postcard is still ready to send, has been sent (with its order id and where that order stands), or has expired.",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "draftId"
-        ],
         "properties": {
           "draftId": {
             "type": "string",
             "description": "The draftId from a letter or postcard preview"
           }
-        }
+        },
+        "required": [
+          "draftId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       },
       "outputSchema": {
         "type": "object",
-        "required": [
-          "draftId",
-          "status"
-        ],
         "properties": {
           "draftId": {
             "type": "string"
@@ -2862,7 +2799,6 @@
           },
           "schedule": {
             "type": "object",
-            "description": "Arrival dates, YYYY-MM-DD: a ready draft's, or a sent order's",
             "properties": {
               "arriveBy": {
                 "type": "string"
@@ -2874,7 +2810,9 @@
             "required": [
               "arriveBy",
               "mailOn"
-            ]
+            ],
+            "additionalProperties": false,
+            "description": "Arrival dates, YYYY-MM-DD: a ready draft's, or a sent order's"
           },
           "deliveryEstimate": {
             "type": "string",
@@ -2902,6 +2840,87 @@
           "canSendNow": {
             "type": "boolean",
             "description": "A ready letter while room to write or certified mail is offered, or a postcard while its sizes or layouts are: whether the balance or a gift letter pays for it now"
+          },
+          "mailService": {
+            "type": "string",
+            "enum": [
+              "certified",
+              "certified_return_receipt"
+            ],
+            "description": "With the terms, for a letter that is certified mail now: which service. Absent beside the delivery words: ordinary mail"
+          },
+          "deliveryClass": {
+            "type": "string",
+            "description": "With the terms, for a letter that is certified mail or while certified mail is offered: how it is delivered now, as a new preview would say it. A card draws it on its Delivery line"
+          },
+          "deliveryDisclaimer": {
+            "type": "string",
+            "description": "With it, the words that qualify the delivery"
+          },
+          "reasonCannotSend": {
+            "type": "string"
+          },
+          "sendEligibility": {
+            "type": "object",
+            "properties": {
+              "payAndSend": {
+                "type": "object",
+                "properties": {
+                  "available": {
+                    "type": "boolean"
+                  },
+                  "amountCents": {
+                    "type": "integer"
+                  },
+                  "currency": {
+                    "type": "string"
+                  },
+                  "displayAmount": {
+                    "type": "string"
+                  },
+                  "productDescription": {
+                    "type": "string"
+                  },
+                  "unavailableReason": {
+                    "type": "string"
+                  },
+                  "pageUrl": {
+                    "type": "string",
+                    "description": "Where the person pays for this with Pay & Send and so sends it, in an app that cannot open Pay & Send itself"
+                  }
+                },
+                "required": [
+                  "available"
+                ],
+                "additionalProperties": false
+              },
+              "letterPack": {
+                "type": "object",
+                "properties": {
+                  "available": {
+                    "type": "boolean"
+                  },
+                  "purchaseUrl": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "available",
+                  "purchaseUrl"
+                ],
+                "additionalProperties": false
+              },
+              "packPays": {
+                "type": "boolean",
+                "const": false,
+                "description": "False when letter packs and gift letters cannot pay for this mail: it is paid with Pay & Send, whatever the balance"
+              }
+            },
+            "required": [
+              "payAndSend",
+              "letterPack"
+            ],
+            "additionalProperties": false
           },
           "size": {
             "type": "string",
@@ -2940,87 +2959,8 @@
             "type": "string",
             "description": "While a letter's words can be changed in place: the version of the letter's words, which set_letter_words takes to say which words it replaces"
           },
-          "mailService": {
-            "type": "string",
-            "enum": [
-              "certified",
-              "certified_return_receipt"
-            ],
-            "description": "With the terms, for a letter that is certified mail now: which service. Absent beside the delivery words: ordinary mail"
-          },
-          "deliveryClass": {
-            "type": "string",
-            "description": "With the terms, for a letter that is certified mail or while certified mail is offered: how it is delivered now, as a new preview would say it. A card draws it on its Delivery line"
-          },
-          "deliveryDisclaimer": {
-            "type": "string",
-            "description": "With it, the words that qualify the delivery"
-          },
-          "reasonCannotSend": {
-            "type": "string"
-          },
-          "sendEligibility": {
-            "type": "object",
-            "required": [
-              "payAndSend",
-              "letterPack"
-            ],
-            "properties": {
-              "payAndSend": {
-                "type": "object",
-                "required": [
-                  "available"
-                ],
-                "properties": {
-                  "available": {
-                    "type": "boolean"
-                  },
-                  "amountCents": {
-                    "type": "integer"
-                  },
-                  "currency": {
-                    "type": "string"
-                  },
-                  "displayAmount": {
-                    "type": "string"
-                  },
-                  "productDescription": {
-                    "type": "string"
-                  },
-                  "unavailableReason": {
-                    "type": "string"
-                  },
-                  "pageUrl": {
-                    "type": "string",
-                    "description": "Where the person pays for this with Pay & Send and so sends it, in an app that cannot open Pay & Send itself"
-                  }
-                }
-              },
-              "letterPack": {
-                "type": "object",
-                "required": [
-                  "available",
-                  "purchaseUrl"
-                ],
-                "properties": {
-                  "available": {
-                    "type": "boolean"
-                  },
-                  "purchaseUrl": {
-                    "type": "string"
-                  }
-                }
-              },
-              "packPays": {
-                "type": "boolean",
-                "const": false,
-                "description": "False when letter packs and gift letters cannot pay for this mail: it is paid with Pay & Send, whatever the balance"
-              }
-            }
-          },
           "stationery": {
             "type": "object",
-            "description": "A ready letter's stationery now, while stationery is offered; its page goes to the card",
             "properties": {
               "theme": {
                 "type": "string",
@@ -3041,7 +2981,6 @@
               },
               "design": {
                 "type": "object",
-                "description": "With the custom theme: its design's choices",
                 "properties": {
                   "face": {
                     "type": "string",
@@ -3078,7 +3017,9 @@
                   "ornament",
                   "ruled",
                   "tone"
-                ]
+                ],
+                "additionalProperties": false,
+                "description": "With the custom theme: its design's choices"
               },
               "dateLine": {
                 "type": "string"
@@ -3092,13 +3033,21 @@
             },
             "required": [
               "theme"
-            ]
+            ],
+            "additionalProperties": false,
+            "description": "A ready letter's stationery now, while stationery is offered; its page goes to the card"
           },
           "signature": {
             "type": "boolean",
             "description": "A ready letter our renderer drew, while signatures are offered: whether it prints the person's saved signature now; its page goes to the card"
           }
-        }
+        },
+        "required": [
+          "draftId",
+          "status"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       }
     },
     {
@@ -3108,8 +3057,7 @@
         "type": "object",
         "properties": {
           "prompt": {
-            "type": "string",
-            "description": "The image the user asked for, in their words."
+            "type": "string"
           },
           "context": {
             "type": "string",
@@ -3117,20 +3065,14 @@
               "postcard",
               "header_image",
               "inline_image"
-            ],
-            "description": "Optional mail context."
+            ]
           }
         },
-        "required": []
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       },
       "outputSchema": {
         "type": "object",
-        "required": [
-          "mode",
-          "status",
-          "message",
-          "suggestedNextStep"
-        ],
         "properties": {
           "mode": {
             "type": "string",
@@ -3164,7 +3106,15 @@
               "handoff"
             ]
           }
-        }
+        },
+        "required": [
+          "mode",
+          "status",
+          "message",
+          "suggestedNextStep"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       }
     },
     {
@@ -3174,33 +3124,25 @@
         "type": "object",
         "properties": {
           "name": {
-            "type": "string",
-            "description": "Your name as it should appear on letters"
+            "type": "string"
           },
           "addressLine1": {
-            "type": "string",
-            "description": "Street address (e.g., '123 Main Street')"
+            "type": "string"
           },
           "addressLine2": {
-            "type": "string",
-            "description": "Apartment, suite, unit, etc. (optional)"
+            "type": "string"
           },
           "city": {
-            "type": "string",
-            "description": "City name"
+            "type": "string"
           },
           "state": {
-            "type": "string",
-            "description": "State (2-letter code, e.g., 'CA', 'NY')"
+            "type": "string"
           },
           "postalCode": {
-            "type": "string",
-            "description": "ZIP code (5-digit or ZIP+4)"
+            "type": "string"
           },
           "country": {
-            "type": "string",
-            "description": "Country (currently only 'US' is supported)",
-            "default": "US"
+            "type": "string"
           }
         },
         "required": [
@@ -3209,7 +3151,9 @@
           "city",
           "state",
           "postalCode"
-        ]
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       },
       "outputSchema": {
         "type": "object",
@@ -3221,7 +3165,40 @@
             "type": "string"
           },
           "address": {
-            "type": "object"
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "addressLine1": {
+                "type": "string"
+              },
+              "addressLine2": {
+                "type": "string",
+                "description": "Apartment, suite, or unit, e.g. \"Suite 8701\" - never fold it into addressLine1."
+              },
+              "city": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              },
+              "postalCode": {
+                "type": "string"
+              },
+              "country": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "addressLine1",
+              "city",
+              "state",
+              "postalCode",
+              "country"
+            ],
+            "additionalProperties": false
           },
           "wasAutoCorrected": {
             "type": "boolean"
@@ -3235,16 +3212,23 @@
               "type": "string"
             }
           }
-        }
+        },
+        "required": [
+          "success",
+          "message",
+          "wasAutoCorrected"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       }
     },
     {
       "name": "get_return_address",
       "description": "Get your saved return address. This is the default sender address used when you create mail without specifying one.",
       "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
-        "properties": {},
-        "required": []
+        "properties": {}
       },
       "outputSchema": {
         "type": "object",
@@ -3256,9 +3240,48 @@
             "type": "string"
           },
           "address": {
-            "type": "object"
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "addressLine1": {
+                "type": "string"
+              },
+              "addressLine2": {
+                "type": "string",
+                "description": "Apartment, suite, or unit, e.g. \"Suite 8701\" - never fold it into addressLine1."
+              },
+              "city": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              },
+              "postalCode": {
+                "type": "string"
+              },
+              "country": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "addressLine1",
+              "city",
+              "state",
+              "postalCode",
+              "country"
+            ],
+            "additionalProperties": false
           }
-        }
+        },
+        "required": [
+          "hasAddress",
+          "message"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       }
     },
     {
@@ -3268,13 +3291,14 @@
         "type": "object",
         "properties": {
           "confirm": {
-            "type": "boolean",
-            "description": "Set to true to confirm clearing the return address"
+            "type": "boolean"
           }
         },
         "required": [
           "confirm"
-        ]
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       },
       "outputSchema": {
         "type": "object",
@@ -3285,7 +3309,13 @@
           "message": {
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "success",
+          "message"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       }
     },
     {
@@ -3293,19 +3323,15 @@
       "description": "Submit a feature request to the Letter IRL team for unsupported capabilities or product improvements. Use this for missing mail formats, workflows, or integrations, not for billing or bug support.",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "title",
-          "description"
-        ],
         "properties": {
           "title": {
             "type": "string",
-            "description": "Brief title for the feature request (max 200 characters)",
+            "minLength": 1,
             "maxLength": 200
           },
           "description": {
             "type": "string",
-            "description": "Detailed description of the feature you'd like to see (max 2000 characters)",
+            "minLength": 1,
             "maxLength": 2000
           },
           "category": {
@@ -3317,93 +3343,92 @@
               "mail_type",
               "international",
               "other"
-            ],
-            "description": "Category of the feature request. Defaults to 'other' if not specified."
+            ]
           },
           "attemptedAction": {
             "type": "string",
-            "description": "What you were trying to do when you realized this feature was needed (max 255 characters)",
             "maxLength": 255
           },
           "contactEmail": {
             "type": "string",
-            "description": "Email address to contact about this feature request (optional, uses account email if not provided)",
             "maxLength": 255
           },
           "okToContact": {
-            "type": "boolean",
-            "description": "Whether the user consents to being contacted about this feature request"
+            "type": "boolean"
           }
-        }
+        },
+        "required": [
+          "title",
+          "description"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       },
       "outputSchema": {
         "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "requestId": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          }
+        },
         "required": [
           "success",
           "requestId",
           "message",
           "category"
         ],
-        "properties": {
-          "success": {
-            "type": "boolean",
-            "description": "Whether the feature request was submitted successfully"
-          },
-          "requestId": {
-            "type": "string",
-            "description": "Unique identifier for the submitted feature request"
-          },
-          "message": {
-            "type": "string",
-            "description": "Confirmation message to display to the user"
-          },
-          "category": {
-            "type": "string",
-            "description": "The category assigned to the feature request"
-          }
-        }
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       }
     },
     {
       "name": "get_profile",
       "description": "Identifies the connected Letter IRL account: a stable account id and the account's email address.",
       "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
         "properties": {}
       },
       "outputSchema": {
         "type": "object",
-        "required": [
-          "id"
-        ],
         "properties": {
           "id": {
             "type": "string",
-            "description": "Stable, opaque account id. Unchanged across token refresh, reconnection and scope upgrades; never reassigned."
+            "minLength": 1,
+            "pattern": "\\S",
+            "description": "Stable, opaque account id. Unchanged across token refresh, reconnection and scope upgrades; never reassigned to another profile."
           },
           "email": {
             "type": "string",
             "description": "The confirmed email address the account is opened on"
           }
-        }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       }
     },
     {
       "name": "get_started",
       "description": "Show a short getting-started guide for new Letter IRL users, including what the app can do, how to buy prepaid letters without leaving the conversation, and example prompts to try next.",
       "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
-        "properties": {},
-        "required": []
+        "properties": {}
       },
       "outputSchema": {
         "type": "object",
-        "required": [
-          "title",
-          "overview",
-          "purchaseStep",
-          "examplePrompts"
-        ],
         "properties": {
           "title": {
             "type": "string"
@@ -3420,7 +3445,9 @@
               "type": "string"
             }
           }
-        }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       }
     },
     {
@@ -3433,10 +3460,38 @@
             "type": "string",
             "description": "What the photo is for: 'postcard', 'header_image' or 'inline_image'."
           }
-        }
+        },
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       },
       "outputSchema": {
         "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "acceptedFormats": {
+            "type": "string"
+          },
+          "maxSizeMB": {
+            "type": "number"
+          },
+          "context": {
+            "type": "string"
+          },
+          "debugEnabled": {
+            "type": "boolean"
+          },
+          "debugEndpoint": {
+            "type": "string"
+          },
+          "cardUploadAvailable": {
+            "type": "boolean"
+          }
+        },
         "required": [
           "status",
           "message",
@@ -3445,40 +3500,8 @@
           "context",
           "debugEnabled"
         ],
-        "properties": {
-          "status": {
-            "type": "string",
-            "description": "Always 'awaiting_upload' — actual upload happens in widget"
-          },
-          "message": {
-            "type": "string",
-            "description": "Guidance text for the user based on context"
-          },
-          "acceptedFormats": {
-            "type": "string",
-            "description": "Accepted image formats (e.g., 'JPEG, PNG, WebP')"
-          },
-          "maxSizeMB": {
-            "type": "number",
-            "description": "Maximum file size in megabytes"
-          },
-          "context": {
-            "type": "string",
-            "description": "What the photo is for, as the server read it: 'postcard', 'header_image', 'inline_image', or empty string"
-          },
-          "debugEnabled": {
-            "type": "boolean",
-            "description": "True when server-side DEBUG flag enables widget diagnostic logging"
-          },
-          "debugEndpoint": {
-            "type": "string",
-            "description": "Optional absolute URL for debug beacon ingestion"
-          },
-          "cardUploadAvailable": {
-            "type": "boolean",
-            "description": "True when the card may send the photo itself, in an app with no file store (#474)"
-          }
-        }
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       }
     },
     {
@@ -3486,41 +3509,41 @@
       "description": "Internal widget relay that confirms an uploaded image and returns the imageUrl plus next-step guidance. Not intended for direct user requests.",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "imageUrl"
-        ],
         "properties": {
           "imageUrl": {
-            "type": "string",
-            "description": "Download URL of the uploaded image"
+            "type": "string"
           },
           "context": {
             "type": "string",
             "description": "What the photo is for: 'postcard', 'header_image' or 'inline_image'."
           }
-        }
+        },
+        "required": [
+          "imageUrl"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       },
       "outputSchema": {
         "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "imageUrl": {
+            "type": "string"
+          },
+          "suggestedNextStep": {
+            "type": "string"
+          }
+        },
         "required": [
           "status",
           "imageUrl",
           "suggestedNextStep"
         ],
-        "properties": {
-          "status": {
-            "type": "string",
-            "description": "Always 'ready' — image has been uploaded and URL is available"
-          },
-          "imageUrl": {
-            "type": "string",
-            "description": "Download URL of the uploaded image"
-          },
-          "suggestedNextStep": {
-            "type": "string",
-            "description": "Instruction for which preview tool to call next with the imageUrl"
-          }
-        }
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
       }
     }
   ],

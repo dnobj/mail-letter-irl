@@ -57,10 +57,6 @@ import {
   type GiftCardState
 } from "../services/giftCardRenderer.js";
 import { widgetTemplateUri } from "../mcp/widgetUris.js";
-import {
-  quoteAndPreviewPostcardInputSchema,
-  quoteAndPreviewPostcardOutputSchema
-} from "../schemas.js";
 import { createPostcardDraft } from "../services/draftService.js";
 import { getReturnAddress } from "../services/returnAddressService.js";
 import {
@@ -768,8 +764,6 @@ export const quoteAndPreviewPostcardTool: McpToolDefinition<
   // readOnly: false because this tool creates draft records in the database
   // See docs/learnings/tool-annotation-decision.md for rationale
   readOnly: false,
-  inputSchema: quoteAndPreviewPostcardInputSchema,
-  outputSchema: quoteAndPreviewPostcardOutputSchema,
   meta: {
     "openai/outputTemplate": OUTPUT_TEMPLATE,
     "openai/widgetAccessible": true,
