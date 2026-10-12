@@ -367,14 +367,14 @@ describePostgres('account erasure', () => {
 
   /**
    * Holds a letter's job as a send with a mail date creates it: due at its
-   * release, which it also carries as heldUntil. Ten days out unless a test
+   * release, which it also carries as mail_hold_until (055, #693). Ten days out unless a test
    * says otherwise; a past offset is held mail whose hold has ended.
    */
   async function holdJob(letterId: string, offset = '10 days'): Promise<void> {
     await owner.query(
       `UPDATE letter_jobs
           SET next_attempt_at = NOW() + $2::interval,
-              metadata = jsonb_build_object('source', 'transactional-outbox', 'heldUntil', (NOW() + $2::interval)::text)
+              mail_hold_until = NOW() + $2::interval
         WHERE letter_id = $1`,
       [letterId, offset]
     );
@@ -521,7 +521,7 @@ describePostgres('account erasure', () => {
   it('leaves a job scheduled ahead without a hold holding the account (#535)', async () => {
     const { userId } = await seedUser();
     // Pending, never attempted and not yet due, but not created as held mail:
-    // only a send with a mail date writes heldUntil.
+    // only a send with a mail date sets mail_hold_until.
     const ahead = await seedLetter(userId, 'queued');
     await seedJob(ahead, { status: 'pending', outcome: 'not_dispatched', attempts: 0 });
     await owner.query("UPDATE letter_jobs SET next_attempt_at = NOW() + INTERVAL '10 days' WHERE letter_id = $1", [ahead]);

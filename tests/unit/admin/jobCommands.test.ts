@@ -223,9 +223,10 @@ describe("held mail on the job page (#535)", () => {
   it("reads the job's hold, and calls it held only while it is not yet due", async () => {
     const reader = client(HELD_ROW);
     await readJob(reader, "job-held");
-    // From the job's metadata, which the reader role reads whole; never letters.mail_on.
+    // From the job's own column (055, #693), which the reader role reads with the job; never letters.mail_on.
     const [text] = (reader.query as unknown as { mock: { calls: Array<[string]> } }).mock.calls[0];
-    expect(text).toContain("j.metadata->>'heldUntil' AS held_until");
+    expect(text).toContain("j.mail_hold_until AS held_until");
+    expect(text).not.toContain("heldUntil");
     expect(text).not.toContain("mail_on");
 
     const held = await jobView();

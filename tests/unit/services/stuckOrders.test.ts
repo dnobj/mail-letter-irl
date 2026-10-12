@@ -23,8 +23,10 @@ describe('STUCK_ORDER_CONDITION', () => {
     expect(sql).toContain("AND NOT ( status = 'fulfillment_pending' AND EXISTS (");
     expect(sql).toContain('held.funding_order_id = orders.order_id');
     expect(sql).toContain("held.status = 'queued'");
-    expect(sql).toContain("held_job.metadata->>'heldUntil' IS NOT NULL");
-    expect(sql).toContain("(held_job.metadata->>'heldUntil')::timestamptz > NOW() - INTERVAL '90 minutes'");
+    // The hold the job was created with, its own column (055, #693), which the admin reader reads with the job.
+    expect(sql).toContain('held_job.mail_hold_until IS NOT NULL');
+    expect(sql).toContain("held_job.mail_hold_until > NOW() - INTERVAL '90 minutes'");
+    expect(sql).not.toContain('metadata');
     // Only until it is first tried, or 90 minutes after it falls due when an
     // operator sends it before its hold ends (job.dispatch_now).
     expect(sql).toContain('AND held_job.attempts = 0');

@@ -1,4 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { copyFile, mkdir, mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { migrate } from '../../src/cli/migrate.js';
@@ -224,7 +227,9 @@ describePostgres('arrive-by (migration 040, #535)', () => {
         [job.job_id]
       );
       expect(same.rows[0].same).toBe(true);
-      expect(job.metadata).toMatchObject({ source: 'transactional-outbox', heldUntil: release.toISOString() });
+      // The hold is the job's own column (055, #693), and for one release its metadata's too.
+      expect(new Date(job.mail_hold_until).toISOString()).toBe(release.toISOString());
+      expect(job.metadata).toEqual({ source: 'transactional-outbox', heldUntil: release.toISOString() });
       // The value moved at the send, as for any letter.
       const credits = (await pool.query('SELECT credits FROM users WHERE user_id = $1', [userId])).rows[0].credits;
       expect(credits).toBe(8);
@@ -233,6 +238,17 @@ describePostgres('arrive-by (migration 040, #535)', () => {
       await expect(jobs.processLetterJob(job.job_id)).resolves.toMatchObject({ claimed: false });
       const after = (await pool.query('SELECT status, attempts FROM letter_jobs WHERE job_id = $1', [job.job_id])).rows[0];
       expect(after).toEqual({ status: 'pending', attempts: 0 });
+
+      // The hold is kept for the job's life, as its metadata was (#693): once the run takes
+      // the job it is no longer held, by the shared predicate, but the panel still shows its date.
+      const heldNow = (await import('../../src/services/heldMail.js')).heldMailJobSql('letter_jobs');
+      const claimed = await pool.query<{ mail_hold_until: Date | null; held: boolean }>(
+        `UPDATE letter_jobs SET status = 'processing', attempts = attempts + 1 WHERE job_id = $1
+         RETURNING mail_hold_until, (${heldNow}) AS held`,
+        [job.job_id]
+      );
+      expect(new Date(claimed.rows[0].mail_hold_until!).toISOString()).toBe(release.toISOString());
+      expect(claimed.rows[0].held).toBe(false);
     } finally {
       if (savedSwitch === undefined) delete process.env.LETTER_IRL_OUTBOX_DISPATCH_ENABLED;
       else process.env.LETTER_IRL_OUTBOX_DISPATCH_ENABLED = savedSwitch;
@@ -801,7 +817,7 @@ describePostgres('arrive-by (migration 040, #535)', () => {
 
     // Its hold ended 3 hours ago and it has not gone: stuck.
     await pool.query(
-      "UPDATE letter_jobs SET attempts = 0, metadata = jsonb_set(metadata, '{heldUntil}', to_jsonb((NOW() - INTERVAL '3 hours')::text)) WHERE letter_id = $1",
+      "UPDATE letter_jobs SET attempts = 0, mail_hold_until = NOW() - INTERVAL '3 hours' WHERE letter_id = $1",
       [letterId]
     );
     expect(await stuck(orderId)).toBe(1);
@@ -928,4 +944,91 @@ describePostgres('arrive-by (migration 040, #535)', () => {
     await drafts.cleanupOldDrafts(7);
     expect(await left()).toEqual([recentDraft]);
   }, 60_000);
+});
+
+describePostgres('migration 055: the hold as its own column (#693)', () => {
+  it('backfills the hold every job was created with, and leaves out a value it cannot read', async () => {
+    const baseUrl = validateDisposableDatabaseUrl(process.env.LIRL_TEST_DATABASE_URL);
+    const adminPool = new Pool({ connectionString: baseUrl });
+    const schema = schemaName('lirl_hold_backfill');
+    await adminPool.query(`CREATE SCHEMA ${schema}`);
+    const url = databaseUrlForSchema(baseUrl, schema);
+    const pool = new Pool({ connectionString: url });
+    const root = await mkdtemp(path.join(tmpdir(), 'lirl-055-'));
+    try {
+      // Every migration before 055, then jobs as the code before it wrote them.
+      const directory = path.join(root, 'migrations');
+      await mkdir(directory, { recursive: true });
+      const files = (await readdir(repositoryMigrations)).filter(file => file.endsWith('.sql'));
+      const hold = '055_letter_jobs_mail_hold_until.sql';
+      expect(files).toContain(hold);
+      for (const file of files.filter(file => file < hold)) {
+        await copyFile(path.join(repositoryMigrations, file), path.join(directory, file));
+      }
+      await migrate({ connectionString: url, migrationsDirectory: directory });
+
+      await pool.query("INSERT INTO users (user_id, email) VALUES ('hold-user', 'hold@example.test')");
+      const jobs: Record<string, { status: string; outcome: string; metadata: Record<string, unknown> }> = {
+        pending: { status: 'pending', outcome: 'not_dispatched', metadata: { source: 'transactional-outbox', heldUntil: '2026-11-02T14:00:00.000Z' } },
+        // Taken by the run and accepted: its hold is still the one it was created with.
+        completed: { status: 'completed', outcome: 'accepted', metadata: { source: 'transactional-outbox', heldUntil: '2026-10-06T13:00:00.000Z' } },
+        due: { status: 'pending', outcome: 'not_dispatched', metadata: { source: 'transactional-outbox' } },
+        // Hand-written, not a time: left without a hold rather than failing the migration,
+        // whether or not it looks like one.
+        words: { status: 'pending', outcome: 'not_dispatched', metadata: { source: 'transactional-outbox', heldUntil: 'next Tuesday' } },
+        impossible: { status: 'pending', outcome: 'not_dispatched', metadata: { source: 'transactional-outbox', heldUntil: '2026-02-30T09:00:00.000Z' } }
+      };
+      for (const [name, job] of Object.entries(jobs)) {
+        await pool.query(
+          `INSERT INTO letters (letter_id, user_id, content, recipient, credits_cost, status, mail_type)
+           VALUES ($1, 'hold-user', '{}'::jsonb, '{}'::jsonb, 2, 'queued', 'letter')`,
+          [`letter-${name}`]
+        );
+        await pool.query(
+          `INSERT INTO letter_jobs (job_id, letter_id, status, attempts, max_attempts, scheduled_at, idempotency_key,
+             next_attempt_at, provider_outcome, metadata)
+           VALUES ($1, $2, $3, 0, 5, NOW(), $2, NOW(), $5, $4::jsonb)`,
+          [randomUUID(), `letter-${name}`, job.status, JSON.stringify(job.metadata), job.outcome]
+        );
+      }
+
+      await copyFile(path.join(repositoryMigrations, hold), path.join(directory, hold));
+      await migrate({ connectionString: url, migrationsDirectory: directory });
+
+      const after = await pool.query<{ letter_id: string; mail_hold_until: Date | null }>(
+        'SELECT letter_id, mail_hold_until FROM letter_jobs ORDER BY letter_id'
+      );
+      expect(Object.fromEntries(after.rows.map(row => [row.letter_id, row.mail_hold_until?.toISOString() ?? null]))).toEqual({
+        'letter-completed': '2026-10-06T13:00:00.000Z',
+        'letter-due': null,
+        'letter-impossible': null,
+        'letter-pending': '2026-11-02T14:00:00.000Z',
+        'letter-words': null
+      });
+
+      // As the migration says, its backfill may be run again, from DO to the end: it gives a job
+      // that old code wrote meanwhile its column, and changes nothing already set.
+      await pool.query(
+        `UPDATE letter_jobs SET mail_hold_until = NULL, metadata = metadata || '{"heldUntil": "2026-12-01T14:00:00.000Z"}'::jsonb
+          WHERE letter_id = 'letter-due'`
+      );
+      const sql = await readFile(path.join(repositoryMigrations, hold), 'utf8');
+      await pool.query(sql.slice(sql.indexOf('DO $$')));
+      const rerun = await pool.query<{ letter_id: string; mail_hold_until: Date | null }>(
+        'SELECT letter_id, mail_hold_until FROM letter_jobs ORDER BY letter_id'
+      );
+      expect(Object.fromEntries(rerun.rows.map(row => [row.letter_id, row.mail_hold_until?.toISOString() ?? null]))).toEqual({
+        'letter-completed': '2026-10-06T13:00:00.000Z',
+        'letter-due': '2026-12-01T14:00:00.000Z',
+        'letter-impossible': null,
+        'letter-pending': '2026-11-02T14:00:00.000Z',
+        'letter-words': null
+      });
+    } finally {
+      await pool.end();
+      await adminPool.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+      await adminPool.end();
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
 });

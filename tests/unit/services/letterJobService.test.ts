@@ -1107,7 +1107,10 @@ describe("the outbox's stop (#444)", () => {
     vi.unstubAllEnvs();
   });
 
-  const HELD_NOT_DUE = "AND NOT (status = 'pending' AND attempts = 0 AND next_attempt_at > NOW())";
+  // Held mail as the shared predicate reads it (heldMailJobSql, #693).
+  const HELD_NOT_DUE =
+    "AND NOT ((letter_jobs.status = 'pending' AND letter_jobs.provider_outcome = 'not_dispatched' AND letter_jobs.attempts = 0 " +
+    "AND letter_jobs.mail_hold_until IS NOT NULL AND letter_jobs.next_attempt_at > NOW()))";
 
   it('still settles what a crash left behind, then says how much is waiting and claims nothing', async () => {
     vi.stubEnv('LETTER_IRL_OUTBOX_DISPATCH_ENABLED', 'false');
@@ -1211,9 +1214,11 @@ describe('createLetterJobWithClient: arrive-by holds (#535)', () => {
     await createLetterJobWithClient(client, letter, { notBefore });
 
     const insert = calls.find(call => call.sql.includes('INSERT INTO letter_jobs'))!;
-    expect(insert.sql).toMatch(/max_attempts, scheduled_at,\s+idempotency_key, next_attempt_at, metadata/);
-    expect(insert.sql).toMatch(/\$3, COALESCE\(\$5::timestamptz, NOW\(\)\), \$2,\s+COALESCE\(\$5::timestamptz, NOW\(\)\), \$4\)/);
+    expect(insert.sql).toMatch(/max_attempts, scheduled_at,\s+idempotency_key, next_attempt_at, metadata, mail_hold_until/);
+    // The hold is its column (055, #693): the same time as its schedule and its first attempt.
+    expect(insert.sql).toMatch(/\$3, COALESCE\(\$5::timestamptz, NOW\(\)\), \$2,\s+COALESCE\(\$5::timestamptz, NOW\(\)\), \$4, \$5::timestamptz\)/);
     expect(insert.params[4]).toBe(notBefore);
+    // And in the metadata for one release, where code from before 055 reads it after a rollback.
     expect(JSON.parse(insert.params[3] as string)).toEqual({ source: 'transactional-outbox', heldUntil: '2026-10-06T13:00:00.000Z' });
     // The letter is queued either way.
     expect(calls.some(call => call.sql.includes("UPDATE letters SET status = 'queued'"))).toBe(true);
@@ -1245,7 +1250,7 @@ describe('releaseHeldLetterJobAsAdmin: sending held mail now (#535)', () => {
     provider_outcome: 'not_dispatched',
     attempts: 0,
     operator_resolution: null,
-    held_until: '2026-10-16T13:00:00.000Z',
+    mail_hold_until: new Date('2026-10-16T13:00:00.000Z'),
     next_attempt_at: new Date('2026-10-16T13:00:00.000Z'),
     still_held: true
   };
@@ -1297,8 +1302,12 @@ describe('releaseHeldLetterJobAsAdmin: sending held mail now (#535)', () => {
 
     // Held or not by the database's clock, and by the hold the job carries.
     const read = calls.find(call => call.sql.includes('FROM letter_jobs WHERE job_id = $1 FOR UPDATE'))!;
-    expect(read.sql).toContain("metadata->>'heldUntil' AS held_until");
-    expect(read.sql).toContain('next_attempt_at > NOW() AS still_held');
+    expect(read.sql).toContain('mail_hold_until, next_attempt_at,');
+    // Held as every reader of held mail reads it (heldMailJobSql, #693).
+    expect(read.sql.replace(/\s+/g, ' ')).toContain(
+      "((letter_jobs.status = 'pending' AND letter_jobs.provider_outcome = 'not_dispatched' AND letter_jobs.attempts = 0 " +
+        "AND letter_jobs.mail_hold_until IS NOT NULL AND letter_jobs.next_attempt_at > NOW())) AS still_held"
+    );
     const update = calls.find(call => call.sql.startsWith('UPDATE letter_jobs'))!;
     expect(update.sql.replace(/\s+/g, ' ')).toBe(
       'UPDATE letter_jobs SET next_attempt_at = NOW(), scheduled_at = NOW(), updated_at = NOW() WHERE job_id = $1 RETURNING next_attempt_at'
@@ -1355,7 +1364,7 @@ describe('releaseHeldLetterJobAsAdmin: sending held mail now (#535)', () => {
 
   it.each([
     ['due already: released, or past its 09:00', { job: { still_held: false } }],
-    ['not held mail at all', { job: { held_until: null } }],
+    ['not held mail at all', { job: { mail_hold_until: null } }],
     ['attempted', { job: { attempts: 1 } }],
     ['taken by the outbox', { job: { status: 'processing' } }],
     ['dispatched', { job: { provider_outcome: 'dispatching' } }],
