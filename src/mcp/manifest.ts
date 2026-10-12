@@ -1,5 +1,6 @@
 import { LetterIrlServer } from "../server.js";
-import { servesPostcardSixByNineOnly, servesStationeryThemeOnly, listedWidgets, withheldInputKeys } from "./registerTools.js";
+import { servesPostcardSixByNineOnly, servesStationeryThemeOnly, listedWidgets } from "./registerTools.js";
+import { withheldInputKeys } from "./toolCatalog.js";
 import { postcardSixByNineProperties } from "../schemas.js";
 import { DEFAULT_OAUTH_SCOPES } from "../auth/oauthConfig.js";
 import { buildServerInstructions } from "./serverInstructions.js";
