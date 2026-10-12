@@ -920,6 +920,8 @@ describe('draftService', () => {
       expect(live[0]).toMatch(/status = ANY\(\$2::varchar\[\]\)/);
       // A checkout whose window has passed can no longer be paid.
       expect(live[0]).toMatch(/status <> 'checkout_pending' OR checkout_expires_at IS NULL OR checkout_expires_at > NOW\(\)/);
+      // Past the window, a checkout whose Stripe session opened still holds it until Stripe closes it (#695).
+      expect(live[0]).toMatch(/OR stripe_checkout_session_id IS NOT NULL OR checkout_url IS NOT NULL\)/);
       expect(live[1]).toEqual(['draft-1', [...LIVE_PAY_AND_SEND_STATUSES]]);
       expect(update[0]).toMatch(/UPDATE letter_drafts\s+SET arrive_by = \$2::date, mail_on = \$3::date, updated_at = NOW\(\)\s+WHERE draft_id = \$1/);
       expect(update[1]).toEqual(['draft-1', '2026-10-16', '2026-10-06']);

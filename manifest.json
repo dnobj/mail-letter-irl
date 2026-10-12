@@ -1432,7 +1432,7 @@
           },
           "contentVersion": {
             "type": "string",
-            "description": "The contentVersion of the mail the person saw, from its preview, the last change to it, or get_draft_status. If the mail changed since, nothing is sent and the answer says to show it again"
+            "description": "The contentVersion of the mail the person saw, from its preview or the last change to it. If the mail changed since, nothing is sent and the answer says to show it again"
           },
           "sendAnotherCopy": {
             "type": "boolean",
@@ -1558,7 +1558,7 @@
           },
           "contentVersion": {
             "type": "string",
-            "description": "The contentVersion of the mail the person saw, from its preview, the last change to it, or get_draft_status. If the mail changed since, nothing is sent and the answer says to show it again"
+            "description": "The contentVersion of the mail the person saw, from its preview or the last change to it. If the mail changed since, nothing is sent and the answer says to show it again"
           },
           "sendAnotherCopy": {
             "type": "boolean",
@@ -2674,7 +2674,7 @@
           },
           "contentVersion": {
             "type": "string",
-            "description": "The contentVersion of the mail the person saw, from its preview, the last change to it, or get_draft_status. If the mail changed since, nothing is sent and the answer says to show it again"
+            "description": "The contentVersion of the mail the person saw, from its preview or the last change to it. If the mail changed since, nothing is sent and the answer says to show it again"
           },
           "sendAnotherCopy": {
             "type": "boolean",

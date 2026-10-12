@@ -332,7 +332,14 @@ describePostgres('a letter\'s signature (migration 051, #608)', () => {
       stationery: BOTANICAL as never,
       signatureImage: SIGNATURE
     });
-    const { contentVersionOf, draftContentVersion } = await import('../../src/services/contentVersion.js');
+    const { CONTENT_VERSION_COLUMNS, contentVersionOf } = await import('../../src/services/contentVersion.js');
+    /** The version as the editors and get_draft_status read it: the pictures hashed by the database. */
+    const draftContentVersion = async (id: string, owner: string) => {
+      const row = (await pool.query(
+        `SELECT ${CONTENT_VERSION_COLUMNS} FROM letter_drafts WHERE draft_id = $1 AND user_id = $2`, [id, owner]
+      )).rows[0];
+      return row ? contentVersionOf(row) : null;
+    };
 
     expect(shown).toMatch(/^[0-9a-f]{16}$/);
     // The database's hashes (get_draft_status, the editors) and Node's (the send, the page) agree.

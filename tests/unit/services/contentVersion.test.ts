@@ -5,17 +5,13 @@
  */
 
 import { createHash } from 'node:crypto';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-
-const mocks = vi.hoisted(() => ({ query: vi.fn() }));
-vi.mock('../../../src/db/index.js', () => ({ query: mocks.query }));
+import { describe, expect, it } from 'vitest';
 
 import {
   CONTENT_VERSION_COLUMNS,
   contentVersionColumns,
   contentVersionMatches,
   contentVersionOf,
-  draftContentVersion,
   type ContentVersionRow
 } from '../../../src/services/contentVersion.js';
 
@@ -108,7 +104,7 @@ describe('contentVersionOf', () => {
 describe('contentVersionMatches', () => {
   const version = contentVersionOf(ROW);
 
-  it.each([undefined, null, ''])('calls %j missing', shown => {
+  it.each([undefined, null, '', '   '])('calls %j missing', shown => {
     expect(contentVersionMatches(shown, ROW)).toBe('missing');
   });
 
@@ -146,25 +142,5 @@ describe('the columns it reads', () => {
       expect(columns.replace(/CASE WHEN .*? END AS \w+/g, '')).not.toContain(`d.${picture}`);
     }
     expect(CONTENT_VERSION_COLUMNS).toBe(contentVersionColumns());
-  });
-});
-
-describe('draftContentVersion', () => {
-  beforeEach(() => {
-    mocks.query.mockReset();
-  });
-
-  it("reads the caller's own draft", async () => {
-    mocks.query.mockResolvedValue({ rows: [ROW] });
-    await expect(draftContentVersion('draft-1', 'user-1')).resolves.toBe(contentVersionOf(ROW));
-    expect(mocks.query).toHaveBeenCalledWith(
-      `SELECT ${CONTENT_VERSION_COLUMNS} FROM letter_drafts WHERE draft_id = $1 AND user_id = $2`,
-      ['draft-1', 'user-1']
-    );
-  });
-
-  it('is null for a draft that is not theirs or not there', async () => {
-    mocks.query.mockResolvedValue({ rows: [] });
-    await expect(draftContentVersion('draft-1', 'user-2')).resolves.toBeNull();
   });
 });

@@ -644,7 +644,11 @@ async function lockChangeableDraft(
      WHERE draft_id = $1
        AND order_type = 'jit_mail'
        AND status = ANY($2::varchar[])
-       AND (status <> 'checkout_pending' OR checkout_expires_at IS NULL OR checkout_expires_at > NOW())
+       AND (status <> 'checkout_pending' OR checkout_expires_at IS NULL OR checkout_expires_at > NOW()
+            -- A Stripe session, once opened, can still be paid until Stripe closes it (its
+            -- webhook, or the sweep, cancels the order): the draft is held till then, so
+            -- what is paid for is what is mailed (#695).
+            OR stripe_checkout_session_id IS NOT NULL OR checkout_url IS NOT NULL)
      LIMIT 1`,
     [draftId, [...LIVE_PAY_AND_SEND_STATUSES]]
   );

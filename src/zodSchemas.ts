@@ -297,7 +297,7 @@ export const quoteAndPreviewLetterWithImageInputZ = z.object({
 
 // What the person was shown (#695, src/services/contentVersion.ts): the send mails that, or nothing.
 const CONTENT_VERSION_INPUT_DESCRIPTION =
-  "The contentVersion of the mail the person saw, from its preview, the last change to it, or get_draft_status. If the mail changed since, nothing is sent and the answer says to show it again";
+  "The contentVersion of the mail the person saw, from its preview or the last change to it. If the mail changed since, nothing is sent and the answer says to show it again";
 const contentVersionInputZ = z.string().optional().describe(CONTENT_VERSION_INPUT_DESCRIPTION);
 const contentVersionOutputZ = z
   .string()

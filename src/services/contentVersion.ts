@@ -21,7 +21,6 @@
  */
 
 import { createHash } from 'node:crypto';
-import { query } from '../db/index.js';
 
 /** The pictures the version reads by their hash. */
 const PICTURES = ['signature_image', 'header_image_data', 'inline_image_data', 'front_image_data'] as const;
@@ -119,16 +118,6 @@ export function contentVersionOf(row: ContentVersionRow): string {
   return createHash('sha256').update(JSON.stringify(fields)).digest('hex').slice(0, 16);
 }
 
-/** The caller's draft's content version, read as stored, or null when it is not theirs or not there. */
-export async function draftContentVersion(draftId: string, userId: string): Promise<string | null> {
-  const result = await query<ContentVersionRow>(
-    `SELECT ${CONTENT_VERSION_COLUMNS} FROM letter_drafts WHERE draft_id = $1 AND user_id = $2`,
-    [draftId, userId]
-  );
-  const row = result.rows[0];
-  return row ? contentVersionOf(row) : null;
-}
-
 /**
  * Whether a send names the version of the draft as it is now. A send that names
  * none is let through for one release, and said so in the log, while the cards and
@@ -136,6 +125,7 @@ export async function draftContentVersion(draftId: string, userId: string): Prom
  * is refused.
  */
 export function contentVersionMatches(shown: unknown, row: ContentVersionRow): 'matches' | 'missing' | 'differs' {
-  if (shown === undefined || shown === null || shown === '') return 'missing';
-  return typeof shown === 'string' && shown.trim() === contentVersionOf(row) ? 'matches' : 'differs';
+  const given = typeof shown === 'string' ? shown.trim() : shown;
+  if (given === undefined || given === null || given === '') return 'missing';
+  return given === contentVersionOf(row) ? 'matches' : 'differs';
 }

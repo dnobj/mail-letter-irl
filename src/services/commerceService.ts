@@ -910,7 +910,9 @@ async function prepareJitOrder(
     }
     // What the person saw (#695): an edit after it refuses the checkout, before any
     // charge, so Pay & Send never takes money for mail they did not see. The draft
-    // is held by the order from here, so its paid fulfilment mails this content.
+    // is held by the order from here (lockChangeableDraft: while its checkout can be
+    // paid, until Stripe closes a session that opened), so its paid fulfilment mails
+    // this content.
     const shown = contentVersionMatches(params.contentVersion, draft);
     if (shown === 'differs') {
       throw Object.assign(new Error('Draft changed since it was shown'), {
