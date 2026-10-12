@@ -44,6 +44,27 @@ describe("PostGrid's statuses (#566)", () => {
     await expect(provider.getStatus('letter_status_map')).resolves.toMatchObject({ status: ours });
   });
 
+  it("leaves a status it does not know as unrecognised, and names it to the operator (#682)", async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await expect(answering('held_for_review').getStatus('letter_status_map')).resolves.toMatchObject({ status: 'unrecognised' });
+    expect(warn.mock.calls.flat().join('\n')).toContain('"event":"provider.postgrid.status_unrecognised"');
+    expect(warn.mock.calls.flat().join('\n')).toContain('"status":"held_for_review"');
+    warn.mockClear();
+    // Not shaped like PostGrid's own names: only its length.
+    await expect(answering('odd value!').getStatus('letter_status_map')).resolves.toMatchObject({ status: 'unrecognised' });
+    expect(warn.mock.calls.flat().join('\n')).toContain('"length":10');
+    expect(warn.mock.calls.flat().join('\n')).not.toContain('odd value');
+    warn.mockClear();
+    // A name an object has of its own is not a status.
+    for (const inherited of ['constructor', '__proto__', 'toString']) {
+      await expect(answering(inherited).getStatus('letter_status_map')).resolves.toMatchObject({ status: 'unrecognised' });
+    }
+    warn.mockClear();
+    await answering('ready').getStatus('letter_status_map');
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
   it('says a cancelled piece was cancelled before sending, in either spelling', async () => {
     for (const postgrid of ['cancelled', 'canceled']) {
       await expect(answering(postgrid).getStatus('letter_status_map')).resolves.toMatchObject({

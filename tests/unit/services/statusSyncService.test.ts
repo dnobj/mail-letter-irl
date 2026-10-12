@@ -223,6 +223,57 @@ describe('statusSyncService', () => {
       expect(result.details).toHaveLength(0);
     });
 
+    it("leaves a letter's status as it is when the provider's is unrecognised (#682)", async () => {
+      const testLetters = [createLetterRowForSync({
+        letterId: 'letter-unknown',
+        trackingId: 'track-unknown',
+        status: 'in_transit',
+      })];
+
+      vi.mocked(db.query)
+        .mockResolvedValueOnce({ rows: testLetters } as any)
+        .mockResolvedValue({ rows: [], rowCount: 1 } as any);
+
+      mockProvider.getStatus.mockResolvedValueOnce({
+        status: 'unrecognised',
+        statusMessage: 'Status: held_for_review',
+      });
+
+      const result = await syncLetterStatuses(false, 30);
+
+      expect(result).toMatchObject({ checked: 1, updated: 0, errors: 0 });
+      expect(result.details).toHaveLength(0);
+      // The letter list was the only query: nothing was written.
+      expect(db.query).toHaveBeenCalledTimes(1);
+    });
+
+    it("still stores a certified letter's USPS number when the provider's status is unrecognised (#682)", async () => {
+      const testLetters = [{
+        ...createLetterRowForSync({ letterId: 'letter-cert', trackingId: 'track-cert', status: 'in_transit' }),
+        mail_service: 'certified',
+        carrier_tracking_number: null
+      }];
+
+      vi.mocked(db.query)
+        .mockResolvedValueOnce({ rows: testLetters } as any)
+        .mockResolvedValue({ rows: [], rowCount: 1 } as any);
+
+      mockProvider.getStatus.mockResolvedValueOnce({
+        status: 'unrecognised',
+        statusMessage: 'Status: held_for_review',
+        carrierTrackingNumber: '9407111899223197428490'
+      });
+
+      const result = await syncLetterStatuses(false, 30);
+
+      expect(result).toMatchObject({ checked: 1, updated: 0, errors: 0 });
+      // The number, and nothing about the status.
+      expect(db.query).toHaveBeenCalledTimes(2);
+      const [sql, params] = vi.mocked(db.query).mock.calls[1] as [string, unknown[]];
+      expect(sql).toContain('carrier_tracking_number');
+      expect(params).toEqual(['letter-cert', '9407111899223197428490']);
+    });
+
     it('should include status change details in result', async () => {
       const testLetters = [createLetterRowForSync({
         letterId: 'letter-detail',
