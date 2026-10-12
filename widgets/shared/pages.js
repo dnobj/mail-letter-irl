@@ -82,5 +82,36 @@
     return node;
   }
 
-  window.letterIrlPages = { renderedPages: renderedPages, cleanPage: cleanPage };
+  // A legacy preview's picture (#684): a data URL of a raster image and
+  // nothing else, so a value that is not one never reaches a src, and the
+  // <img> is made with DOM calls, never from a string.
+  var PREVIEW_IMAGE = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/;
+
+  /** An <img> of a preview picture, or null when the value is not one. */
+  function previewImageElement(value, alt) {
+    if (typeof value !== "string" || !PREVIEW_IMAGE.test(value)) return null;
+    var image = document.createElement("img");
+    image.src = value;
+    image.alt = alt;
+    return image;
+  }
+
+  /**
+   * The picture of a legacy postcard front (generatePreviewFrontHtml in
+   * src/tools/quoteAndPreviewPostcard.ts), read from its <img>, or null. Only
+   * its src is taken; nothing else of the document reaches the card.
+   */
+  function legacyFrontImage(previewHtml) {
+    if (typeof previewHtml !== "string" || previewHtml.indexOf("<img") === -1) return null;
+    var doc = new DOMParser().parseFromString(previewHtml, "text/html");
+    var image = doc.querySelector(".postcard-front img") || doc.querySelector("img");
+    return image ? image.getAttribute("src") : null;
+  }
+
+  window.letterIrlPages = {
+    renderedPages: renderedPages,
+    cleanPage: cleanPage,
+    previewImageElement: previewImageElement,
+    legacyFrontImage: legacyFrontImage
+  };
 })();

@@ -273,10 +273,10 @@ describe('the postcard card as a postcard maker (#580)', () => {
   it("flips a preview our renderer did not draw: the card's own front and its mockup of the back (#580 maker review round 1)", async () => {
     const card = mount();
     await card.show(output(), {
-      previewFrontHtml: '<html><body><div class="postcard-front">FRONT FROM META</div></body></html>',
+      previewFrontHtml: '<html><body><div class="postcard-front"><img src="data:image/png;base64,RlJPTlRNRVRB" alt=""></div></body></html>',
       [STUDIO]: true
     });
-    expect(card.byId('preview-front').textContent).toContain('FRONT FROM META');
+    expect(card.byId('preview-front').querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,RlJPTlRNRVRB');
     await card.click(card.byId('studio-flip'));
     expect(card.side()).toBe('back');
     expect(card.byId('preview-back').querySelector('.postcard-back-mockup')).not.toBeNull();

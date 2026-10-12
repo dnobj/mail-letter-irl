@@ -418,7 +418,13 @@
       // Our renderer's pages, and the cleaner that keeps the card safe from
       // them (widgets/shared/pages.js, #534). Were that script not to run, the
       // card shows no page, never an uncleaned one, and falls back to its own.
-      const { renderedPages, cleanPage } = window.letterIrlPages ?? { renderedPages: () => null, cleanPage: null };
+      // Without the shared pages, no page and no preview picture: never one unchecked (#684).
+      const { renderedPages, cleanPage, previewImageElement, legacyFrontImage } = window.letterIrlPages ?? {
+        renderedPages: () => null,
+        cleanPage: null,
+        previewImageElement: () => null,
+        legacyFrontImage: () => null
+      };
 
       let dataLoaded = false;
       let currentDraftId = null;
@@ -1956,12 +1962,6 @@
         pane.appendChild(page);
       }
 
-      function extractBodyContent(html) {
-        if (!html) return null;
-        const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-        return bodyMatch ? bodyMatch[1] : html;
-      }
-
       function render() {
         applyTheme();
         adoptKeptState();
@@ -2068,11 +2068,17 @@
 
         // Render front preview (image)
         const previewFront = document.getElementById("preview-front");
-        const frontContent = printed ? null : extractBodyContent(previewFrontHtml);
+        // A legacy front: its picture alone, made with DOM calls (#684).
+        const frontImage = printed
+          ? null
+          : previewImageElement(legacyFrontImage(previewFrontHtml), "Postcard front");
         if (printed) {
           showPage(previewFront, pages[0], "The front of your postcard, as it prints");
-        } else if (frontContent) {
-          previewFront.innerHTML = frontContent;
+        } else if (frontImage) {
+          const frame = document.createElement("div");
+          frame.className = "postcard-front";
+          frame.appendChild(frontImage);
+          previewFront.replaceChildren(frame);
         } else {
           previewFront.innerHTML = '<div class="preview-loading">No image preview available</div>';
         }
@@ -2767,6 +2773,8 @@
       // Reveal the checkout link, the customer's route to paying when the
       // host does not open a tab. See handlePayAndSend for why it exists.
       function showCheckoutLink(href, label) {
+        // Only an https link becomes the card's link (#684); the order is still followed.
+        if (!isHttpsUrl(href)) return;
         const link = document.getElementById("checkout-link");
         link.href = href;
         link.textContent = label;
@@ -2855,7 +2863,7 @@
           startStatusPolling("Checkout open - waiting for payment");
 
           try {
-            await host.openLink(result.checkoutUrl);
+            if (isHttpsUrl(result.checkoutUrl)) await host.openLink(result.checkoutUrl);
             buttonText.textContent = "Checkout Opened";
           } catch {
             // The host declined to open a tab. Not an error worth showing as
@@ -2972,7 +2980,7 @@
           render();
 
           try {
-            await host.openLink(result.checkoutUrl);
+            if (isHttpsUrl(result.checkoutUrl)) await host.openLink(result.checkoutUrl);
           } catch {
             // Nothing to do: the link is already on screen.
           }
