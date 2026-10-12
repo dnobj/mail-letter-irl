@@ -232,35 +232,3 @@ export async function purgeExpiredFeatureRequests(): Promise<number> {
   );
   return result.rowCount ?? 0;
 }
-
-/**
- * Get feature requests for a user (for future dashboard use)
- */
-export async function getUserFeatureRequests(
-  userId: string,
-  limit = 20
-): Promise<FeatureRequest[]> {
-  const result = await query<FeatureRequest>(
-    `SELECT * FROM feature_requests
-     WHERE user_id = $1
-     ORDER BY created_at DESC
-     LIMIT $2`,
-    [userId, limit]
-  );
-
-  return result.rows;
-}
-
-/**
- * Get a single feature request by ID
- */
-export async function getFeatureRequest(
-  requestId: string
-): Promise<FeatureRequest | null> {
-  const result = await query<FeatureRequest>(
-    `SELECT * FROM feature_requests WHERE request_id = $1`,
-    [requestId]
-  );
-
-  return result.rows[0] || null;
-}

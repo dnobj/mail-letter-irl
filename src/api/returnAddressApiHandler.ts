@@ -19,11 +19,7 @@ import {
   setReturnAddress,
   clearReturnAddress
 } from '../services/returnAddressService.js';
-import {
-  authenticateRestRequest,
-  sendRestAuthFailure,
-  type RestAuthInfo as AuthInfo
-} from './middleware/restAuth.js';
+import { authenticateRestRequest, sendRestAuthFailure } from './middleware/restAuth.js';
 import { rateLimitAccount } from './middleware/rateLimit.js';
 import { sendInternalError } from './internalError.js';
 import { requiredRestScopes } from '../auth/restScopes.js';

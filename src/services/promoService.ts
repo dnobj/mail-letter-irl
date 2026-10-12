@@ -23,7 +23,6 @@ import {
   PromoRefusalCode,
   CreditLedgerEntry,
 } from './types.js';
-import { addCreditsToLedger } from './creditLedgerService.js';
 import { ensureAccountRowWithClient, findUser } from './userService.js';
 import { grantGiftLettersWithClient } from './giftLetterService.js';
 import { normalizeEmail } from './giftCodes.js';
@@ -178,30 +177,6 @@ export async function listCampaigns(
     campaigns: result.rows,
     total: parseInt(countResult.rows[0].count, 10),
   };
-}
-
-/**
- * Update campaign status
- */
-export async function updateCampaignStatus(
-  campaignId: string,
-  status: PromoCampaignStatus
-): Promise<PromoCampaign> {
-  const result = await query<PromoCampaign>(
-    `UPDATE promo_campaigns
-     SET status = $1, updated_at = NOW()
-     WHERE campaign_id = $2
-     RETURNING *`,
-    [status, campaignId]
-  );
-
-  if (result.rows.length === 0) {
-    throw new Error(`Campaign not found: ${campaignId}`);
-  }
-
-  console.log(`📢 Updated promo campaign status to: ${status}`);
-
-  return result.rows[0];
 }
 
 /**
@@ -512,33 +487,6 @@ async function grantPromoCreditsWithClient(
 }
 
 /**
- * Get redemptions for a campaign
- */
-export async function getCampaignRedemptions(
-  campaignId: string,
-  limit = 50,
-  offset = 0
-): Promise<{ redemptions: PromoRedemption[]; total: number }> {
-  const result = await query<PromoRedemption>(
-    `SELECT * FROM promo_redemptions
-     WHERE campaign_id = $1
-     ORDER BY redeemed_at DESC
-     LIMIT $2 OFFSET $3`,
-    [campaignId, limit, offset]
-  );
-
-  const countResult = await query<{ count: string }>(
-    'SELECT COUNT(*) as count FROM promo_redemptions WHERE campaign_id = $1',
-    [campaignId]
-  );
-
-  return {
-    redemptions: result.rows,
-    total: parseInt(countResult.rows[0].count, 10),
-  };
-}
-
-/**
  * Get user's promo redemptions
  */
 export async function getUserRedemptions(
@@ -582,33 +530,6 @@ export async function getUserRedemptions(
       updated_at: row.updated_at,
     },
   }));
-}
-
-/**
- * Delete a promo campaign
- * Only allows deletion if there are no redemptions
- */
-export async function deleteCampaign(campaignId: string): Promise<{ success: boolean; error?: string }> {
-  // Check if campaign exists
-  const campaign = await getCampaignById(campaignId);
-  if (!campaign) {
-    return { success: false, error: 'Campaign not found' };
-  }
-
-  // Check for existing redemptions
-  if (campaign.current_redemptions > 0) {
-    return {
-      success: false,
-      error: `Cannot delete campaign with ${campaign.current_redemptions} existing redemption(s). Set status to 'ended' instead.`,
-    };
-  }
-
-  // Delete the campaign
-  await query('DELETE FROM promo_campaigns WHERE campaign_id = $1', [campaignId]);
-
-  console.log('🗑️ Deleted promo campaign');
-
-  return { success: true };
 }
 
 // ============================================================================

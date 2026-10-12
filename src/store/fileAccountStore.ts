@@ -220,7 +220,7 @@ export class FileAccountStore {
     };
   }
 
-  async persist(account: UserAccount): Promise<void> {
+  async persist(_account: UserAccount): Promise<void> {
     // No-op for database-backed store
     // Orders are persisted by sendLetter tool directly to the database
     writeDiagnostic("info", "account.persist_noop");

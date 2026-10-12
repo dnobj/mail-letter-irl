@@ -11,7 +11,7 @@ Source TypeScript lives in `src/`. The runtime entry point is `src/mcp/httpServe
 - `npm start`: Run the compiled HTTP API with Node.
 - `npm run maintenance`: Run hourly maintenance once and exit.
 - `npm run db:migrate:prod`: Apply pending migrations with compiled JavaScript.
-- `npm run lint`: Enforce ESLint and Prettier.
+- `npm run lint`: Run ESLint (there is no Prettier step).
 - `npm test` / `npm run test:run`: Run the Vitest suite under `tests/`.
 - `npm run verify`: Lint, build, unit tests and submission tests; mirrors the CI `checks` job.
 - `npm run test:integration:local`: The real-PostgreSQL suites against a local database; mirrors the CI `postgres-integration` job.

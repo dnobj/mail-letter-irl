@@ -98,10 +98,6 @@ export const AdminErrorEnvelopeSchema = z
   })
   .strict();
 
-export function adminSuccessEnvelopeSchema<T extends z.ZodTypeAny>(data: T) {
-  return z.object({ ok: z.literal(true), data }).strict();
-}
-
 export const AdminActorSchema = z
   .object({
     id: OperatorLoginSchema,

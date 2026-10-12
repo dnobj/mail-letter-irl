@@ -307,8 +307,6 @@ export async function deductCreditsFromLedgerWithClient(
       throw new Error('User not found');
     }
 
-    const user = userResult.rows[0];
-
     // Get available ledger entries in consumption order
     // FIFO with expiration priority: expire soonest first, then oldest
     const ledgerResult = await client.query<CreditLedgerEntry>(
@@ -429,7 +427,6 @@ export async function getDetailedBalance(
   );
 
   const entries = result.rows;
-  const now = new Date();
   const thirtyDaysFromNow = new Date();
   thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
 
@@ -550,33 +547,6 @@ export async function getLedgerEntries(
     entries: result.rows,
     total: parseInt(countResult.rows[0].count, 10),
   };
-}
-
-/**
- * Get credits expiring within specified days
- */
-export async function getExpiringCredits(
-  userId: string,
-  withinDays: number
-): Promise<{ total: number; entries: CreditLedgerEntry[] }> {
-  const futureDate = new Date();
-  futureDate.setDate(futureDate.getDate() + withinDays);
-
-  const result = await query<CreditLedgerEntry>(
-    `SELECT * FROM credit_ledger
-     WHERE user_id = $1
-       AND status = 'active'
-       AND remaining_amount > 0
-       AND expires_at IS NOT NULL
-       AND expires_at > NOW()
-       AND expires_at <= $2
-     ORDER BY expires_at ASC`,
-    [userId, futureDate]
-  );
-
-  const total = result.rows.reduce((sum, entry) => sum + entry.remaining_amount, 0);
-
-  return { total, entries: result.rows };
 }
 
 /**

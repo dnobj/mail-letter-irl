@@ -61,7 +61,6 @@ import {
   quoteAndPreviewPostcardInputSchema,
   quoteAndPreviewPostcardOutputSchema
 } from "../schemas.js";
-import type { AddressValidationInput, AddressValidationResult } from "../services/providers/types.js";
 import { createPostcardDraft } from "../services/draftService.js";
 import { getReturnAddress } from "../services/returnAddressService.js";
 import {

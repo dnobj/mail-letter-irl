@@ -290,38 +290,6 @@ export function checkRateLimit(
 }
 
 /**
- * Rate limit middleware that sends 429 response if limit exceeded
- *
- * @returns true if request was blocked (response already sent), false otherwise
- */
-export function rateLimitMiddleware(
-  req: IncomingMessage,
-  res: ServerResponse,
-  endpointType: keyof typeof RATE_LIMITS
-): boolean {
-  const result = checkRateLimit(req, endpointType);
-
-  // Set rate limit headers
-  res.setHeader('X-RateLimit-Limit', result.limit);
-  res.setHeader('X-RateLimit-Remaining', result.remaining);
-  res.setHeader('X-RateLimit-Reset', Math.ceil(result.resetMs / 1000));
-
-  if (!result.allowed) {
-    res.statusCode = 429;
-    res.setHeader('Content-Type', 'application/json');
-    res.setHeader('Retry-After', Math.ceil(result.resetMs / 1000));
-    res.end(JSON.stringify({
-      error: 'Too Many Requests',
-      message: `Rate limit exceeded. Please wait ${Math.ceil(result.resetMs / 1000)} seconds before retrying.`,
-      retryAfter: Math.ceil(result.resetMs / 1000),
-    }));
-    return true; // Request was blocked
-  }
-
-  return false; // Request allowed
-}
-
-/**
  * Cleanup expired entries to prevent memory leaks
  */
 function cleanupExpiredEntries(): void {
@@ -339,28 +307,6 @@ function cleanupExpiredEntries(): void {
 
 // Start cleanup interval
 setInterval(cleanupExpiredEntries, CLEANUP_INTERVAL_MS);
-
-/**
- * Get current rate limit stats (for monitoring/debugging)
- */
-export function getRateLimitStats(): {
-  totalEntries: number;
-  entriesByType: Record<string, number>;
-} {
-  const entriesByType: Record<string, number> = {};
-
-  // Use Array.from for ES5 compatibility
-  const keys = Array.from(rateLimitStore.keys());
-  for (const key of keys) {
-    const type = key.split(':')[1] || 'unknown';
-    entriesByType[type] = (entriesByType[type] || 0) + 1;
-  }
-
-  return {
-    totalEntries: rateLimitStore.size,
-    entriesByType,
-  };
-}
 
 // ============================================================================
 // Tier-Aware Rate Limiting (Async)
@@ -606,7 +552,6 @@ export function rateLimitMiddlewareWithGlobal(
   const ipResult = checkRateLimit(req, endpointType);
 
   if (!ipResult.allowed) {
-    const clientIp = getClientIdentifier(req);
     console.warn(`⚠️ Rate limit hit (IP scope) on ${endpointType}`);
     incrementBlockedCount(endpointType, 'ip');
 
@@ -662,13 +607,6 @@ export function getBlockedRequestCounts(): Record<string, number> {
     result[key] = count;
   }
   return result;
-}
-
-/**
- * Reset blocked request counts (useful for testing)
- */
-export function resetBlockedRequestCounts(): void {
-  blockedRequestCounts.clear();
 }
 
 /**

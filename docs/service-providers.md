@@ -573,9 +573,9 @@ Error: Provider connection validation failed
 
 ### Letters Stuck in Queue
 
-**Check:** Is worker running?
+**Check:** Has the outbox run? Letters are dispatched from `letter_jobs` by the send itself and by the hourly maintenance run, which recovers any left pending:
 ```bash
-ps aux | grep letterWorker
+npm run maintenance
 ```
 
 **Check:** Is provider configured?
@@ -591,7 +591,7 @@ For provider integration help:
 - DummyProvider: See `src/services/providers/DummyProvider.ts`
 - Interface definition: See `src/services/providers/types.ts`
 - Factory: See `src/services/providers/index.ts`
-- Worker integration: See `src/workers/letterWorker.ts`
+- Outbox integration: See `src/services/letterJobService.ts`
 
 ---
 

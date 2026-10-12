@@ -1,6 +1,6 @@
 import type { OrderDetail } from "../queries/orders.js";
 import { html, type SafeHtml } from "../ui/html.js";
-import { creditsToLetters, formatMoney, statusBadge, yesNo } from "../ui/format.js";
+import { formatMoney, statusBadge, yesNo } from "../ui/format.js";
 import {
   accountLink,
   alertLink,

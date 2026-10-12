@@ -36,7 +36,6 @@ import {
   addCreditsToLedgerWithClient,
   deductCreditsFromLedger,
   getDetailedBalance as getLedgerDetailedBalance,
-  getAvailableCredits,
   hasSufficientCredits as ledgerHasSufficientCredits,
 } from './creditLedgerService.js';
 
@@ -85,22 +84,6 @@ export async function deductCredits(params: DeductCreditsParams): Promise<Credit
     user: result.user,
     transaction: result.transaction,
   };
-}
-
-/**
- * Deduct credits with consumption details
- *
- * Returns information about which ledger entries were consumed.
- */
-export async function deductCreditsWithDetails(
-  params: DeductCreditsParams
-): Promise<CreditLedgerOperationResult> {
-  return await deductCreditsFromLedger({
-    userId: params.userId,
-    credits: params.credits,
-    letterId: params.letterId,
-    description: params.description,
-  });
 }
 
 /**

@@ -431,10 +431,9 @@ Migrations are in `db/migrations/` with numeric prefixes:
 ```bash
 # Run pending migrations
 npm run db:migrate
-
-# Prints the last applied migration and recovery guidance; it does not roll anything back
-npm run db:migrate:rollback
 ```
+
+There are no down migrations and no rollback command: a schema is rolled forward by a new migration.
 
 ### Creating a Migration
 

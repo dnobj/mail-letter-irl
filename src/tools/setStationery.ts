@@ -5,7 +5,7 @@ import { isStationeryOffered } from '../config/stationery.js';
 import { letterPageLimit } from '../config/roomToWrite.js';
 import { isWordsEditorOffered } from '../config/wordsEditor.js';
 import type { SendEligibility } from '../services/commerceService.js';
-import { CUSTOM_THEME, type PageFit, type Stationery } from '../render/index.js';
+import { CUSTOM_THEME, type PageFit } from '../render/index.js';
 import { getDesign } from '../services/stationeryDesignService.js';
 import type { PreviewStationery } from './stationeryInput.js';
 import {
