@@ -1,6 +1,7 @@
 import type { McpToolDefinition, ToolContext } from '../contracts/types.js';
 import { MAIL_SERVICES, isCertifiedMailOffered } from '../config/certifiedMail.js';
-import { draftMailOption, isExtraService, mailServiceOf } from '../config/products.js';
+import { isExtraService, mailServiceOf } from '../config/products.js';
+import { draftMailOption } from '../services/mailOptions.js';
 import type { SendEligibility } from '../services/commerceService.js';
 import { getDraftForMailService, setDraftMailService, type MailServiceRefusal } from '../services/draftService.js';
 import type { CertifiedMailService } from '../services/types.js';

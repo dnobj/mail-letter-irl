@@ -67,34 +67,6 @@ export interface MailOption {
 }
 
 /**
- * The mail option a draft is, from its row: its mail type, a letter's printed
- * pages (migration 047, #586) and a postcard's size. Here, beside the option,
- * so the send, the checkout and the confirmation page read it alike: a reader
- * that loads only part of the row must load `pages` too, or a long letter is
- * priced as one page.
- */
-export function draftMailOption(draft: {
-  mail_type?: string | null;
-  postcard_size?: string | null;
-  pages?: number | string | null;
-  mail_service?: string | null;
-}): MailOption {
-  const mailType = (draft.mail_type || 'letter') as MailType;
-  if (mailType === 'postcard') return { mailType, postcardSize: (draft.postcard_size || '6x9') as PostcardSize };
-  // A SMALLINT comes back from pg as a number; anything else is read as its number.
-  const pages = Number(draft.pages ?? 1);
-  // The column holds only these three values (a CHECK, #625); a reader that
-  // loads only part of the row must load `mail_service` too, or a certified
-  // letter is priced as a standard one.
-  const mailService = mailServiceOf(draft.mail_service);
-  return {
-    mailType,
-    ...(pages > 1 ? { pages } : {}),
-    ...(mailService ? { mailService } : {})
-  };
-}
-
-/**
  * The service a stored value (a draft's mail_service) names, as a MailOption
  * carries it: absent for standard, null and the empty string; the certified
  * services as they are; and any OTHER text as itself, so that it fails closed
@@ -465,21 +437,6 @@ function configuredRow(
     expectedAmountCents: definition.expectedAmountCents,
     expectedCurrency: currency
   };
-}
-
-/**
- * Whether a letter pack or a gift letter pays for this mail (#579): a one-page
- * standard letter, in any layout and stationery, or a 6x9 postcard, the mail
- * sold before the options. Everything else is paid per send through Pay & Send,
- * at its own price. An unknown mail type is a letter, as it is priced.
- */
-export function isPackPayable(option: MailOption): boolean {
-  // Certified mail costs the carrier far more than a letter: never a pack's
-  // (#625). Nor is a service this code does not know.
-  if ((option.mailService ?? 'standard') !== 'standard') return false;
-  return option.mailType === 'postcard'
-    ? (option.postcardSize ?? '6x9') === '6x9'
-    : (option.pages ?? 1) === 1;
 }
 
 /**

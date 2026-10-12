@@ -29,7 +29,8 @@ import {
   isSendConfirmationEnabled,
   websiteClientId
 } from '../config/sendConfirmation.js';
-import { draftMailOption, isPackPayable, jitProductMatching } from '../config/products.js';
+import { jitProductMatching } from '../config/products.js';
+import { draftMailOption, isPackPayable } from '../services/mailOptions.js';
 import { createJitCheckout, getSendEligibility, type SendEligibility } from '../services/commerceService.js';
 import { ensurePriceCatalog } from '../services/priceCatalog.js';
 import { getDraft } from '../services/draftService.js';

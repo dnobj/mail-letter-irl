@@ -15,14 +15,13 @@ import {
 import {
   CREDITS_PER_LETTER,
   PACK_PRODUCTS,
-  draftMailOption,
   formatAmountForCurrency,
-  isPackPayable,
   jitProductMatching,
   normalizedCurrency,
   packCurrency,
   type MailOption
 } from '../config/products.js';
+import { DRAFT_OPTION_COLUMNS, draftMailOption, isPackPayable, type DraftOptionRow } from './mailOptions.js';
 import { lockAccountForBalanceChange } from './accountLock.js';
 import { addCreditsToLedgerWithClient } from './creditLedgerService.js';
 import { grantImageEntitlementWithClient } from './imageGenerationLimitService.js';
@@ -1212,16 +1211,13 @@ export async function createJitCheckout(
   // caps were checked at, so neither the warm-up nor the caps go stale. And
   // with its mail service (#625): without it a certified letter would warm
   // the standard price and meet the charge cap at the standard amount.
-  const draftPeek = await query<{
-    mail_type: string | null;
-    postcard_size: string | null;
-    pages: number | null;
-    mail_service: string | null;
-  }>(
-    'SELECT mail_type, postcard_size, pages, mail_service FROM letter_drafts WHERE draft_id = $1 AND user_id = $2',
+  const draftPeek = await query<DraftOptionRow>(
+    `SELECT ${DRAFT_OPTION_COLUMNS} FROM letter_drafts WHERE draft_id = $1 AND user_id = $2`,
     [params.draftId, params.userId]
   );
-  const peekedOption = draftMailOption(draftPeek.rows[0] ?? {});
+  // No row (not the caller's, or gone): a one-page letter, as an empty row always read; prepareJitOrder refuses it.
+  const peeked = draftPeek.rows.at(0);
+  const peekedOption: MailOption = peeked ? draftMailOption(peeked) : { mailType: 'letter' };
   // The option's own code, sold or not, as the quote kicks: for an option
   // whose flag is off it clears what the catalog recorded while it was sold.
   const peekedProduct = jitProductMatching(peekedOption);

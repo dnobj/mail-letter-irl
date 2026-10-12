@@ -59,7 +59,9 @@ import { quoteAndPreviewLetterWithImageTool } from '../../../src/tools/quoteAndP
 import { CERTIFIED_PAID_PER_SEND_REASON } from '../../../src/tools/letterHelpers.js';
 import { GIFT_NOT_FOR_CERTIFIED } from '../../../src/tools/giftSendChoice.js';
 import { CERTIFIED_NOT_OFFERED } from '../../../src/tools/mailServiceInput.js';
-import { draftMailOption, jitProductMatching } from '../../../src/config/products.js';
+import { jitProductMatching } from '../../../src/config/products.js';
+import { draftMailOption } from '../../../src/services/mailOptions.js';
+import { optionRow } from '../../fixtures/mailOptions.js';
 import type { Address, ToolContext } from '../../../src/contracts/types.js';
 
 function png(width: number, height: number): string {
@@ -155,7 +157,7 @@ describe.each(Object.keys(TOOLS) as (keyof typeof TOOLS)[])('the %s letter previ
       // Priced as the checkout will read the draft row.
       const quoted = vi.mocked(getSendEligibility).mock.calls.at(-1)![2];
       expect(quoted).toEqual({ mailType: 'letter', mailService: service });
-      expect(quoted).toEqual(draftMailOption({ mail_type: 'letter', pages: draft.pages, mail_service: draft.mailService }));
+      expect(quoted).toEqual(draftMailOption(optionRow({ mail_type: 'letter', pages: draft.pages, mail_service: draft.mailService })));
       expect(jitProductMatching(quoted)?.productCode).toBe(service === 'certified' ? 'jit-letter-certified' : 'jit-letter-certified-receipt');
     }
   );

@@ -505,7 +505,7 @@ export type DraftStatus = 'pending' | 'consumed' | 'expired' | 'cancelled';
 export interface LetterDraft {
   draft_id: string;
   user_id: string;
-  mail_type?: MailType;
+  mail_type: MailType;
   sender: Record<string, unknown>;       // Address JSON
   recipient: Record<string, unknown>;    // Address JSON
   body_text: string;
@@ -562,15 +562,15 @@ export interface LetterDraft {
    * both sides when more than 1. Only a letter our renderer drew, and never a
    * gift send, runs past one page; it is paid per send (#579).
    */
-  pages?: number;
+  pages: number;
   /**
    * How a letter travels (migration 052, #625): standard first-class mail, or
    * USPS Certified Mail with or without an electronic return receipt. Only a
    * letter that is not a gift send is ever certified; it is paid per send (#579).
    */
-  mail_service?: MailService;
+  mail_service: MailService;
   /** A postcard's size (migration 012): '6x9', or '6x4' or '6x11' (#594); null for a letter. */
-  postcard_size?: string | null;
+  postcard_size: string | null;
   /**
    * A postcard's front when not full bleed (migration 048, #594): a border
    * with its caption, or a greeting with its place, as postcardFrontOf reads

@@ -22,7 +22,8 @@ import { printRenderer } from "../config/printRenderer.js";
 import { isPostcardSizesOffered, offeredPostcardSizes } from "../config/postcardSizes.js";
 import { isPostcardLayoutsOffered } from "../config/postcardLayouts.js";
 import { frontChoice, frontPrintedText, previewPostcardFront, type PostcardLayoutChoice } from "./postcardFrontInput.js";
-import { isPackPayable, type MailOption } from "../config/products.js";
+import { type MailOption } from "../config/products.js";
+import { isPackPayable } from "../services/mailOptions.js";
 import {
   drawsGrapheme,
   GiftStripOverflow,

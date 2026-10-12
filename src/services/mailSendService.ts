@@ -10,7 +10,8 @@ import { createLetterJobWithClient } from './letterJobService.js';
 import { assertNoRecentDuplicateMail } from './duplicateMailService.js';
 import { consumeGiftLetterForSendWithClient } from './giftLetterService.js';
 import { isGiftLettersEnabled } from '../config/giftLetters.js';
-import { draftMailOption, isPackPayable, jitProductMatching } from '../config/products.js';
+import { jitProductMatching } from '../config/products.js';
+import { draftMailOption, isPackPayable } from './mailOptions.js';
 import type { GiftCardContent } from './giftCardRenderer.js';
 import { dispatchAt, earliestMailOn } from './deliverySchedule.js';
 import { draftScheduleOf } from './draftSchedule.js';
@@ -27,7 +28,7 @@ interface MailDraftRow extends LetterDraft {
   mail_type: SendMailType;
   front_image_data?: string;
   front_image_url?: string;
-  postcard_size?: string;
+  postcard_size: string | null;
   /** A postcard's front other than full bleed (#594, migration 048); null for full bleed. */
   postcard_front?: unknown;
 }

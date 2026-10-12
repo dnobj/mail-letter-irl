@@ -12,17 +12,17 @@ import {
   JIT_PRODUCTS,
   POSTCARD_SIZES_FLAG,
   ROOM_TO_WRITE_FLAG,
-  draftMailOption,
   getConfiguredProduct,
   getConfiguredProducts,
   isConfiguredProductCode,
   isJitProductSold,
-  isPackPayable,
   jitProductFor,
   isExtraService,
   jitProductMatching,
   mailServiceOf
 } from '../../../src/config/products.js';
+import { draftMailOption, isPackPayable } from '../../../src/services/mailOptions.js';
+import { optionRow } from '../../fixtures/mailOptions.js';
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -368,6 +368,6 @@ describe('draftMailOption reads the service (#625)', () => {
       { mailType: 'postcard', postcardSize: '6x4' }
     ]
   ])('%o is %o', (row, option) => {
-    expect(draftMailOption(row)).toEqual(option);
+    expect(draftMailOption(optionRow(row))).toEqual(option);
   });
 });

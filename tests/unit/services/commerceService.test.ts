@@ -209,7 +209,8 @@ import {
   revokePackLots,
   runCommerceMaintenance
 } from '../../../src/services/commerceService.js';
-import { draftMailOption } from '../../../src/config/products.js';
+import { draftMailOption } from '../../../src/services/mailOptions.js';
+import { optionRow } from '../../fixtures/mailOptions.js';
 import { LIVE_PAY_AND_SEND_STATUSES } from '../../../src/services/draftService.js';
 import { clearDiagnosticChangeSlot } from '../../../src/utils/diagnosticLog.js';
 
@@ -1453,27 +1454,27 @@ describe('commerceService', () => {
     };
 
     it("reads a draft's option: its mail type and postcard size, letters one page", () => {
-      expect(draftMailOption({ mail_type: 'postcard', postcard_size: '6x11' })).toEqual({
+      expect(draftMailOption(optionRow({ mail_type: 'postcard', postcard_size: '6x11' }))).toEqual({
         mailType: 'postcard',
         postcardSize: '6x11'
       });
-      expect(draftMailOption({ mail_type: 'postcard', postcard_size: null })).toEqual({
+      expect(draftMailOption(optionRow({ mail_type: 'postcard', postcard_size: null }))).toEqual({
         mailType: 'postcard',
         postcardSize: '6x9'
       });
-      expect(draftMailOption({ mail_type: 'letter', postcard_size: '6x9' })).toEqual({ mailType: 'letter' });
-      expect(draftMailOption({})).toEqual({ mailType: 'letter' });
+      expect(draftMailOption(optionRow({ mail_type: 'letter', postcard_size: '6x9' }))).toEqual({ mailType: 'letter' });
+      expect(draftMailOption(optionRow({}))).toEqual({ mailType: 'letter' });
     });
 
     it("reads a letter's pages, and a postcard's never (#586)", () => {
-      expect(draftMailOption({ mail_type: 'letter', pages: 2 })).toEqual({ mailType: 'letter', pages: 2 });
-      expect(draftMailOption({ mail_type: 'letter', pages: 3 })).toEqual({ mailType: 'letter', pages: 3 });
+      expect(draftMailOption(optionRow({ mail_type: 'letter', pages: 2 }))).toEqual({ mailType: 'letter', pages: 2 });
+      expect(draftMailOption(optionRow({ mail_type: 'letter', pages: 3 }))).toEqual({ mailType: 'letter', pages: 3 });
       // One page is the letter it always was.
-      expect(draftMailOption({ mail_type: 'letter', pages: 1 })).toEqual({ mailType: 'letter' });
-      expect(draftMailOption({ mail_type: 'letter', pages: null })).toEqual({ mailType: 'letter' });
+      expect(draftMailOption(optionRow({ mail_type: 'letter', pages: 1 }))).toEqual({ mailType: 'letter' });
+      expect(draftMailOption(optionRow({ mail_type: 'letter', pages: null }))).toEqual({ mailType: 'letter' });
       // A count read back as text is still a count.
-      expect(draftMailOption({ mail_type: 'letter', pages: '2' })).toEqual({ mailType: 'letter', pages: 2 });
-      expect(draftMailOption({ mail_type: 'postcard', postcard_size: '6x9', pages: 2 })).toEqual({
+      expect(draftMailOption(optionRow({ mail_type: 'letter', pages: '2' }))).toEqual({ mailType: 'letter', pages: 2 });
+      expect(draftMailOption(optionRow({ mail_type: 'postcard', postcard_size: '6x9', pages: 2 }))).toEqual({
         mailType: 'postcard',
         postcardSize: '6x9'
       });

@@ -1,7 +1,7 @@
 import type { Address, McpToolDefinition, ToolContext } from '../contracts/types.js';
 import { isPostcardSizesOffered, offeredPostcardSizes } from '../config/postcardSizes.js';
 import { isPostcardLayoutsOffered } from '../config/postcardLayouts.js';
-import { isPackPayable } from '../config/products.js';
+import { isPackPayable } from '../services/mailOptions.js';
 import type { SendEligibility } from '../services/commerceService.js';
 import type { PostcardSize } from '../services/types.js';
 import {

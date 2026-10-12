@@ -52,12 +52,13 @@ import {
   type StationeryDesign
 } from "../render/index.js";
 import { getSendEligibility, type SendEligibility } from "../services/commerceService.js";
-import { isExtraService, isPackPayable, mailServiceOf, type MailOption } from "../config/products.js";
+import { isExtraService, mailServiceOf, type MailOption } from "../config/products.js";
+import { isPackPayable, letterOption } from "../services/mailOptions.js";
 import { isCertifiedMailOffered } from "../config/certifiedMail.js";
 import { callingApp, type ClientProfile } from "../auth/clientProfiles.js";
 import { isSendConfirmationEnabled, letterPacksPageUrl, sendConfirmationUrl } from "../config/sendConfirmation.js";
 import { GIFT_PAYS_ONE_PAGE, giftCardSummary, resolveGiftSendChoice, type GiftSendChoice } from "./giftSendChoice.js";
-import type { CertifiedMailService, MailService } from "../services/types.js";
+import type { CertifiedMailService } from "../services/types.js";
 import { giftLetterPageCopy } from "../services/giftCardRenderer.js";
 import { rememberedPrefix, type PreviewStationery } from "./stationeryInput.js";
 import { rememberStationery } from "../services/stationeryDefaultService.js";
@@ -1238,22 +1239,6 @@ export function letterPayment(
     ...(canSendNow ? {} : { reasonCannotSend: reasonCannotSend(option) }),
     sendEligibility: previewSendEligibility(available, requiredCredits, option, isGift, callingApp(context), draftId),
     ...(option.mailType === "letter" ? travelFields(option.mailService) : {})
-  };
-}
-
-/**
- * A letter's option for its price (#579, #586, #625): its pages, when its
- * layout runs past one, and the mail service the draft holds, when it is not
- * standard (read as the rest of the code reads a row's: mailServiceOf, so an
- * unknown value is carried and prices as nothing, never as standard mail).
- */
-export function letterOption(layout: Layout | undefined, mailService?: MailService | string | null): MailOption {
-  const pages = layout?.pages.length ?? 1;
-  const service = mailServiceOf(mailService);
-  return {
-    mailType: "letter",
-    ...(pages > 1 ? { pages } : {}),
-    ...(service ? { mailService: service } : {})
   };
 }
 
