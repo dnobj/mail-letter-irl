@@ -15,9 +15,10 @@
  *  13. draft and output
  *
  * The order is the contract: the date and the mail service are refused before anything is
- * looked up (#535); the picture is only looked up before the checks on the addresses and the
+ * looked up (#535, #625); the picture is only looked up before the checks on the addresses and the
  * text, and downloaded after them, so a refusal costs no image work (#526); the gift is known
- * before what prints is checked (#534); and the provider is asked last.
+ * before what prints is checked when it can be (#534), and otherwise settled by the pages
+ * (#586); and the provider is asked last.
  */
 
 import { Address, ToolContext } from "../contracts/types.js";

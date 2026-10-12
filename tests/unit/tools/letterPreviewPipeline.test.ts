@@ -59,6 +59,7 @@ import { downloadAndProcessLetterImageWithPreview } from '../../../src/services/
 import { resolvePreviewImageSource } from '../../../src/services/previewImageSource.js';
 import { previewSchedule } from '../../../src/tools/arriveByInput.js';
 import { chooseSignature } from '../../../src/tools/signatureInput.js';
+import { chooseStationery } from '../../../src/tools/stationeryInput.js';
 import { quoteAndPreviewLetterTextOnlyTool } from '../../../src/tools/quoteAndPreviewLetterTextOnly.js';
 import { quoteAndPreviewLetterWithHeaderImageTool } from '../../../src/tools/quoteAndPreviewLetterWithHeaderImage.js';
 import { quoteAndPreviewLetterWithImageTool } from '../../../src/tools/quoteAndPreviewLetterWithImage.js';
@@ -91,7 +92,8 @@ const draftParams = () => vi.mocked(helpers.createLetterDraftAndBuildOutput).moc
 
 beforeEach(() => {
   order.length = 0;
-  vi.clearAllMocks();
+  // Reset, not cleared: a once-value a failing test left queued must not reach the next one.
+  vi.resetAllMocks();
 });
 
 describe('one letter-preview pipeline (#689)', () => {
@@ -130,7 +132,14 @@ describe('one letter-preview pipeline (#689)', () => {
         await tool.handler(input, context());
 
         expect(order).toEqual([...SHARED_BEFORE, 'imageSource', ...CHECKS, 'processImage', ...AFTER]);
-        expect(resolvePreviewImageSource).toHaveBeenCalledWith(expect.anything(), 'u1', layoutType);
+        // Each step reads the tool's own input, not a stripped copy.
+        expect(resolvePreviewImageSource).toHaveBeenCalledWith(input, 'u1', layoutType);
+        expect(helpers.earlyGiftChoice).toHaveBeenCalledWith(input, expect.anything(), null);
+        expect(chooseStationery).toHaveBeenCalledWith(input, 'Ada Lovelace', expect.anything(), 'pdf');
+        expect(validatePrintableLetter).toHaveBeenCalledWith(
+          { sender: address, recipient: address, bodyText: input.bodyText, signOff: input.signOff, senderIsSaved: false },
+          expect.anything(), 'pdf', undefined, undefined
+        );
         expect(downloadAndProcessLetterImageWithPreview).toHaveBeenCalledWith({ url: 'https://example.test/a.png' }, processAs, { actorId: 'u1' });
       });
 
@@ -217,9 +226,9 @@ describe('one letter-preview pipeline (#689)', () => {
       });
 
       it('refuses a letter with no picture before any check on the addresses, in the exact words for the device (the desktop words are a prefix of the mobile ones)', async () => {
-        vi.mocked(resolvePreviewImageSource).mockResolvedValueOnce({ kind: 'none' } as never);
+        vi.mocked(resolvePreviewImageSource).mockImplementationOnce(async () => { order.push('imageSource'); return { kind: 'none' } as never; });
         await expect(tool.handler(input, context(true))).rejects.toMatchObject({ message: MOBILE_IMAGE_ERRORS.letterWithImage });
-        expect(order).toEqual([...SHARED_BEFORE]);
+        expect(order).toEqual([...SHARED_BEFORE, 'imageSource']);
 
         vi.mocked(resolvePreviewImageSource).mockResolvedValueOnce({ kind: 'none' } as never);
         await expect(tool.handler(input, context(false))).rejects.toMatchObject({ message: MOBILE_IMAGE_ERRORS.desktop });
