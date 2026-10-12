@@ -122,7 +122,8 @@ ahead on 2026-09-28, with migrations `033` to `037`:
   only ChatGPT's is imported until the launch promotion. All use an exact `/mcp` audience with
   `mail:read`, `mail:draft`, `mail:send`. The server tells the apps apart by the token's client
   (`src/auth/clientProfiles.ts`). The website and REST API use the same Auth0 API since 2026-09-14.
-  Personal access tokens read and draft only (#470).
+  Personal access tokens read and draft only (#470), and cannot cancel scheduled mail or replace or remove
+  saved data (#685).
   ([auth0-setup.md](auth0-setup.md), [auth0-tenant-configuration.md](auth0-tenant-configuration.md))
 - **Operator access:** a separate admin panel service per environment, reachable only over the owner's
   tailnet. The public API returns 404 for every legacy admin path.
