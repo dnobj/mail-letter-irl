@@ -291,4 +291,9 @@ describePostgres('retention restore through the admin panel', () => {
       code: '42501'
     });
   }, 60_000);
+
+  it('counts held mail its customer cancelled through the reader, as the /retention page does (#701)', async () => {
+    // The reader may not read letters.mail_on or content: the preview reads neither.
+    await expect(retention.previewCancelledHeldLetterContent(7, reader)).resolves.toMatchObject({ due: expect.any(Number) });
+  }, 60_000);
 });

@@ -19,7 +19,10 @@ import type { JobStatus, LetterStatus, OrderStatus } from './types.js';
  *     ones it can; purgeAbandonedDraftContent handles the ones the schema
  *     forbids deleting. cleanupOldDrafts() also deletes a sent draft with no
  *     order 7 days after the send (its letter keeps the content), except a
- *     held letter's, which it keeps until 7 days after the mail date (#564).
+ *     held letter's, which it keeps until 7 days after the mail date (#564),
+ *     or, once that letter is cancelled, 7 days after the cancel (#701).
+ *   - Held mail its customer cancelled, never printed: the unpaid 7 days,
+ *     from the cancel (purgeCancelledHeldLetterContent, #701).
  *
  * REDACTION MOVES CONTENT TO QUARANTINE; IT DOES NOT DESTROY IT
  * Two max-effort reviews of the direct-overwrite design each found ways it
@@ -348,6 +351,9 @@ const ABANDONED_DRAFT_DUE_PREDICATE = `        WHERE d.redacted_at IS NULL
 /**
  * Held mail its customer cancelled before it went to the printer (#701):
  * never printed, so on the unpaid schedule (UNPAID_DRAFT_RETENTION_DAYS),
+ * known by its job's hold (letter_jobs.mail_hold_until, 055), which the cancel
+ * leaves and the admin panel's reader role may read, as it may not
+ * letters.mail_on; the panel's /retention page runs the preview (#701 review round 1),
  * counted from the cancel, not 90 days from its creation. The cancel is the
  * customer's (letter_status_history, source 'customer', which
  * cancelScheduledMail writes and nothing rewrites): an operator's cancel of
@@ -361,9 +367,14 @@ const ABANDONED_DRAFT_DUE_PREDICATE = `        WHERE d.redacted_at IS NULL
 const CANCELLED_HELD_LETTER_CANCELLED_AT = `(SELECT MAX(h.changed_at) FROM letter_status_history h
                  WHERE h.letter_id = l.letter_id AND h.new_status = 'cancelled' AND h.source = 'customer')`;
 
+const CANCELLED_HELD_LETTER_HELD = `EXISTS (
+                SELECT 1 FROM letter_jobs hj
+                 WHERE hj.letter_id = l.letter_id AND hj.mail_hold_until IS NOT NULL
+              )`;
+
 const CANCELLED_HELD_LETTER_DUE_PREDICATE = `        WHERE l.redacted_at IS NULL
           AND l.status = 'cancelled'
-          AND l.mail_on IS NOT NULL
+          AND ${CANCELLED_HELD_LETTER_HELD}
           AND l.sent_at IS NULL
           AND ${CANCELLED_HELD_LETTER_CANCELLED_AT} < NOW() - make_interval(days => $1::int)
           AND NOT EXISTS (
@@ -690,26 +701,22 @@ ${ABANDONED_DRAFT_DUE_PREDICATE}
 }
 
 /**
- * Expire the recovery window.
- *
- * This is the statement that finally destroys content, and it is deliberately
- * the simplest one in the module: one table, one column, one direction, no
- * joins, no status lists, nothing that a future migration can invalidate. All
- * the judgement lives upstream in the sweeps, where a mistake is recoverable.
+ * REPORT MODE for held mail its customer cancelled (#701). Writes nothing.
+ * `db` is the pool unless given: a test runs it as the admin panel's reader role.
  */
-/** REPORT MODE for held mail its customer cancelled (#701). Writes nothing. */
 export async function previewCancelledHeldLetterContent(
-  retentionDays = UNPAID_DRAFT_RETENTION_DAYS
+  retentionDays = UNPAID_DRAFT_RETENTION_DAYS,
+  db: SqlClient = { query }
 ): Promise<RetentionPreview> {
   assertRetentionArgs(retentionDays, 1);
   const { liveDays } = splitRetentionWindow(retentionDays);
   const params = [liveDays, SETTLED_JOB_STATUSES, SETTLED_ORDER_STATUSES, MONEY_BACKED_SOURCE_TYPES];
-  const result = await query(
+  const result = await db.query(
     `SELECT
        (SELECT COUNT(*) FROM letters l
          WHERE l.redacted_at IS NULL
            AND l.status = 'cancelled'
-           AND l.mail_on IS NOT NULL
+           AND ${CANCELLED_HELD_LETTER_HELD}
            AND l.sent_at IS NULL
            AND ${CANCELLED_HELD_LETTER_CANCELLED_AT} < NOW() - make_interval(days => $1::int)
        ) AS past_window,
@@ -776,6 +783,14 @@ ${CANCELLED_HELD_LETTER_DUE_PREDICATE}
   return result.rowCount ?? 0;
 }
 
+/**
+ * Expire the recovery window.
+ *
+ * This is the statement that finally destroys content, and it is deliberately
+ * the simplest one in the module: one table, one column, one direction, no
+ * joins, no status lists, nothing that a future migration can invalidate. All
+ * the judgement lives upstream in the sweeps, where a mistake is recoverable.
+ */
 export async function purgeExpiredQuarantine(batchLimit = DEFAULT_BATCH_LIMIT): Promise<number> {
   assertRetentionArgs(2, batchLimit);
   const result = await query(

@@ -121,6 +121,21 @@ describe("the Retention page", () => {
     expect(page).not.toContain("native code");
   });
 
+  it("shows the cancelled held letters an enforcing run would take (#701)", () => {
+    const preview = (due: number, heldBack = 0) => ({ pastWindow: due + heldBack, due, heldBack, oldestDueDays: null, newestDueDays: null });
+    const page = retentionPage({
+      report: {
+        letters: preview(3),
+        cancelledHeldLetters: preview(2, 1),
+        paidDrafts: preview(0),
+        abandonedDrafts: preview(1),
+        errors: []
+      }
+    });
+    expect(page).toContain("cancelled held letters due");
+    expect(page).toContain("2 (held back: 1; 7 days from the customer's cancel, #701)");
+  });
+
   it("says when nothing has been restored yet", () => {
     expect(retentionPage()).toContain("none yet.");
   });

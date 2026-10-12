@@ -548,6 +548,8 @@ describePostgres('content retention sweep', () => {
         ]
       );
       await seedJob(letterId, 'cancelled');
+      // Held mail is known by its job's hold, which the cancel leaves (055).
+      await pool.query("UPDATE letter_jobs SET mail_hold_until = NOW() + INTERVAL '20 days' WHERE letter_id = $1", [letterId]);
       await pool.query(
         `INSERT INTO letter_status_history (letter_id, old_status, new_status, source, changed_at)
          VALUES ($1, 'queued', 'cancelled', $2, NOW() - make_interval(days => $3::int))`,
@@ -591,10 +593,39 @@ describePostgres('content retention sweep', () => {
       const printed = await seedCancelledHeldLetter({ cancelledDaysAgo: 30, sentDaysAgo: 31 });
       const undated = await seedCancelledHeldLetter({ cancelledDaysAgo: 30 });
       await pool.query('UPDATE letters SET arrive_by = NULL, mail_on = NULL WHERE letter_id = $1', [undated]);
+      await pool.query('UPDATE letter_jobs SET mail_hold_until = NULL WHERE letter_id = $1', [undated]);
 
       expect(await retention.purgeCancelledHeldLetterContent()).toBe(0);
       for (const letterId of [byOperator, printed, undated]) {
         expect((await readLetter(letterId)).redacted_at, letterId).toBeNull();
+      }
+    });
+
+    it('keeps it on the letter schedule when the pack that paid for it was refunded or is disputed (review round 1)', async () => {
+      for (const orderStatus of ['disputed', 'refunded']) {
+        const { letterId, orderId } = await seedPrepaidLetterFundedByPack({ daysAgo: 1, orderStatus: 'fulfilled' });
+        await pool.query(
+          `UPDATE letters SET status = 'cancelled', sent_at = NULL, arrive_by = CURRENT_DATE + 30, mail_on = CURRENT_DATE + 20
+            WHERE letter_id = $1`,
+          [letterId]
+        );
+        await seedJob(letterId, 'cancelled');
+        await pool.query("UPDATE letter_jobs SET mail_hold_until = NOW() + INTERVAL '20 days' WHERE letter_id = $1", [letterId]);
+        await pool.query(
+          `INSERT INTO letter_status_history (letter_id, old_status, new_status, source, changed_at)
+           VALUES ($1, 'queued', 'cancelled', 'customer', NOW() - INTERVAL '30 days')`,
+          [letterId]
+        );
+        if (orderStatus === 'refunded') {
+          // A pack refunded in full revokes its lots.
+          await pool.query("UPDATE credit_ledger SET status = 'revoked' WHERE source_order_id = $1", [orderId]);
+        }
+        await pool.query('UPDATE orders SET status = $2 WHERE order_id = $1', [orderId, orderStatus]);
+
+        await expect(retention.previewCancelledHeldLetterContent(), orderStatus).resolves.toMatchObject({ due: 0, heldBack: 1 });
+        expect(await retention.purgeCancelledHeldLetterContent(), orderStatus).toBe(0);
+        expect((await readLetter(letterId)).redacted_at, orderStatus).toBeNull();
+        await pool.query('TRUNCATE letter_jobs, letters, credit_consumption, credit_transactions, credit_ledger, orders RESTART IDENTITY CASCADE');
       }
     });
 

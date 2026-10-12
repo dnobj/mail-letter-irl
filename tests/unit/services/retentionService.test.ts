@@ -83,7 +83,9 @@ describe('retention sweep guards (#153)', () => {
 
       const sql = sqlFrom(mocks.query.mock.calls[0]);
       const params = mocks.query.mock.calls[0][1] as unknown[];
-      expect(sql).toContain("AND l.status = 'cancelled' AND l.mail_on IS NOT NULL AND l.sent_at IS NULL");
+      expect(sql).toContain("AND l.status = 'cancelled' AND EXISTS ( SELECT 1 FROM letter_jobs hj WHERE hj.letter_id = l.letter_id AND hj.mail_hold_until IS NOT NULL ) AND l.sent_at IS NULL");
+      // Never letters.mail_on, which the admin panel's reader role may not read (review round 1).
+      expect(sql).not.toContain('mail_on');
       // The customer's cancel, which nothing rewrites: an operator's (#696) keeps the letter schedule.
       const cancelledAt =
         "(SELECT MAX(h.changed_at) FROM letter_status_history h WHERE h.letter_id = l.letter_id AND h.new_status = 'cancelled' AND h.source = 'customer')";
@@ -120,7 +122,7 @@ describe('retention sweep guards (#153)', () => {
       await purgeCancelledHeldLetterContent();
       const enforceSql = sqlFrom(mocks.query.mock.calls[0]);
       for (const clause of [
-        "AND l.status = 'cancelled' AND l.mail_on IS NOT NULL AND l.sent_at IS NULL",
+        "AND l.status = 'cancelled' AND EXISTS ( SELECT 1 FROM letter_jobs hj WHERE hj.letter_id = l.letter_id AND hj.mail_hold_until IS NOT NULL ) AND l.sent_at IS NULL",
         "h.source = 'customer'",
         'AND NOT (j.status = ANY($2::varchar[]))',
         "lot.status = 'revoked'"
@@ -128,6 +130,15 @@ describe('retention sweep guards (#153)', () => {
         expect(previewSql).toContain(clause);
         expect(enforceSql).toContain(clause);
       }
+    });
+
+    it('reads nothing the admin panel\'s reader role may not, and runs on the client it is given', async () => {
+      const db = { query: vi.fn(async () => ({ rows: [{ past_window: '1', due: '1', oldest_due_days: '5', newest_due_days: '5' }], rowCount: 1 })) };
+      await expect(previewCancelledHeldLetterContent(7, db as never)).resolves.toMatchObject({ due: 1 });
+      expect(mocks.query).not.toHaveBeenCalled();
+      const sql = String((db.query.mock.calls[0] as unknown[])[0]);
+      expect(sql).not.toContain('mail_on');
+      expect(sql).not.toMatch(/l\.(content|recipient|preview_html|arrive_by)/);
     });
 
     it('refuses a window it cannot split, and a batch out of range', async () => {
@@ -600,6 +611,15 @@ describe('retention sweep guards (#153)', () => {
       expect(summary.draftsRedacted).toBe(2);
       expect(summary.abandonedDraftsRedacted).toBe(2);
       expect(summary.quarantinePurged).toBe(2);
+    });
+
+    it('flags more work when the cancelled held letters fill their batch alone (#701)', async () => {
+      // letters, cancelled held letters, paid drafts, abandoned drafts, quarantine.
+      mocks.query
+        .mockResolvedValueOnce({ rows: [], rowCount: 0 })
+        .mockResolvedValueOnce({ rows: [], rowCount: 5 })
+        .mockResolvedValue({ rows: [], rowCount: 0 });
+      expect(await runRetentionSweep(90, 5)).toMatchObject({ cancelledHeldLettersRedacted: 5, moreWaiting: true });
     });
 
     it('flags more work when a batch fills OR a sweep failed', async () => {
