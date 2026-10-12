@@ -698,7 +698,7 @@ describePostgres('failed send returns the pack', () => {
         decision: 'accepted',
         resolution: 'provider_confirmed_accepted',
         providerName: 'diy',
-        providerTrackingId: 'diy-tracking-1'
+        providerTrackingId: `diy-tracking-${jobId}`
       });
 
       const letter = () => pool.query<{ status: string }>('SELECT status FROM letters WHERE letter_id = $1', [letterId]);
