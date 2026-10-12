@@ -54,6 +54,11 @@ export interface StubProvider {
   onSend?: () => Promise<void> | void;
   /** Whether the provider says it sells extra services such as certified mail (#625). Absent is no. */
   supportsExtraServices?: boolean;
+  /**
+   * Whether it says it prints what our renderer drew (#698). Absent is yes, as
+   * PostGrid says, so the suites that send drawn mail are unchanged; false is no.
+   */
+  printsRenderedPdf?: boolean;
   /** What a status read answers for a tracking id. Unset, a status read throws, as it always did. */
   statusFor?: (trackingId: string) => LetterStatus;
   /** Every tracking id a status read was made for, in order. */
@@ -103,6 +108,7 @@ export function resetStubProvider(): void {
   stubProvider.defaultResult = definiteRejection();
   stubProvider.calls = [];
   stubProvider.supportsExtraServices = undefined;
+  stubProvider.printsRenderedPdf = undefined;
   stubProvider.statusFor = undefined;
   stubProvider.statusCalls = [];
 }
@@ -144,6 +150,9 @@ export async function installStubProvider(): Promise<void> {
     // Read at each dispatch, so a test changes it by mutating `stubProvider`.
     get supportsExtraServices() {
       return stubProvider.supportsExtraServices === true;
+    },
+    get printsRenderedPdf() {
+      return stubProvider.printsRenderedPdf !== false;
     },
     async sendLetter(params: LetterParams): Promise<LetterResult> {
       stubProvider.calls.push({ mailType: 'letter', params });

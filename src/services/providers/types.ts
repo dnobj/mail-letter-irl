@@ -255,6 +255,15 @@ export interface LetterFulfillmentProvider {
   readonly supportsExtraServices?: boolean;
 
   /**
+   * Whether this provider prints mail our renderer drew (#534, #698): a letter
+   * or postcard whose content records a rendererVersion, printed from the PDF
+   * the preview showed. Absent means no: the dispatch rejects such mail before
+   * anything is submitted (nothing is sent; what paid for it comes back),
+   * rather than let the provider print it some other way than it was shown.
+   */
+  readonly printsRenderedPdf?: boolean;
+
+  /**
    * Send a letter
    * @param params Letter parameters
    * @returns Result with tracking ID

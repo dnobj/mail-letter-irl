@@ -419,6 +419,8 @@ export class PostGridProvider implements LetterFulfillmentProvider {
   public readonly config: ProviderConfig;
   /** Certified mail and its return receipt, as PostGrid's `extraService` (#625). */
   public readonly supportsExtraServices = true;
+  /** It prints the PDF the preview showed (renderForPrint, #534). */
+  public readonly printsRenderedPdf = true;
   private options: Required<PostGridProviderOptions>;
 
   constructor(config: ProviderConfig, options: PostGridProviderOptions) {

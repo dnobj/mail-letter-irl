@@ -115,7 +115,10 @@ describePostgres('certified mail at the letter, the dispatch and the status sync
    * A letter the outbox can dispatch, paid for by a Pay & Send order that awaits
    * fulfilment.
    */
-  async function seedPaidLetter(service: string): Promise<{ userId: string; letterId: string; orderId: string }> {
+  async function seedPaidLetter(
+    service: string,
+    content: Record<string, unknown> = {}
+  ): Promise<{ userId: string; letterId: string; orderId: string }> {
     const userId = await seedUser();
     const orderId = await seedOrderFor(userId);
     const letterId = randomUUID();
@@ -126,7 +129,7 @@ describePostgres('certified mail at the letter, the dispatch and the status sync
       [
         letterId,
         userId,
-        JSON.stringify({ bodyText: 'Dear Sam', signOff: 'Regards', layoutType: 'text_only' }),
+        JSON.stringify({ bodyText: 'Dear Sam', signOff: 'Regards', layoutType: 'text_only', ...content }),
         JSON.stringify({
           name: 'Sam Rivera', addressLine1: '350 5th Ave', city: 'New York', state: 'NY', postalCode: '10118', country: 'US'
         }),
@@ -345,6 +348,51 @@ describePostgres('certified mail at the letter, the dispatch and the status sync
         [orderId]
       );
       expect(events.rowCount).toBe(1);
+    }, 60_000);
+  });
+
+  describe('mail our renderer drew, for a provider that does not print it (#698)', () => {
+    async function jobAndLetter(jobId: string, letterId: string) {
+      const job = await pool.query<{ status: string; provider_outcome: string }>(
+        'SELECT status, provider_outcome FROM letter_jobs WHERE job_id = $1',
+        [jobId]
+      );
+      return { job: job.rows[0], letter: await letterNow(letterId) };
+    }
+
+    it('is turned away before the provider is asked, and the order that paid goes to refund', async () => {
+      stubProvider.printsRenderedPdf = false;
+      stubProvider.nextResult = providerSuccess('would-be-sent');
+      const { letterId, orderId } = await seedPaidLetter('standard', { rendererVersion: 'pdf-1' });
+      const jobId = await queueJob(letterId);
+
+      await jobs.processLetterJob(jobId);
+
+      expect(stubProvider.calls).toHaveLength(0);
+      const { job, letter } = await jobAndLetter(jobId, letterId);
+      expect(job).toMatchObject({ status: 'failed', provider_outcome: 'definite_failure' });
+      expect(letter.status).toBe('failed');
+      const order = await pool.query<{ status: string; last_error_code: string; last_error: string }>(
+        'SELECT status, last_error_code, last_error FROM orders WHERE order_id = $1',
+        [orderId]
+      );
+      expect(order.rows[0]).toEqual({
+        status: 'refund_pending',
+        last_error_code: 'PROVIDER_SUBMISSION_FAILED',
+        last_error: 'renderer_refused'
+      });
+    }, 60_000);
+
+    it('goes to a provider that prints it', async () => {
+      stubProvider.nextResult = providerSuccess('stub-drawn');
+      const { letterId } = await seedPaidLetter('standard', { rendererVersion: 'pdf-1' });
+      const jobId = await queueJob(letterId);
+
+      await jobs.processLetterJob(jobId);
+
+      expect(stubProvider.calls).toHaveLength(1);
+      const { job } = await jobAndLetter(jobId, letterId);
+      expect(job).toMatchObject({ status: 'completed', provider_outcome: 'accepted' });
     }, 60_000);
   });
 

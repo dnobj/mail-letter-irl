@@ -46,6 +46,12 @@ describe('summarizeProviderRejection', () => {
     ).toBe("extra_service_refused");
   });
 
+  it("keeps the renderer's refusal class as it is too (#698)", () => {
+    expect(
+      summarizeProviderRejection({ error: "DIY cannot print mail our renderer drew (provider_cannot_print_rendered)", metadata: { errorClass: "renderer_refused" } }),
+    ).toBe("renderer_refused");
+  });
+
   it("keeps no other class a result names: only the one we know", () => {
     for (const errorClass of ["render_refused", "PRIVATE LANE", "", 5, undefined, null]) {
       expect(summarizeProviderRejection({ error: "HTTP 400 x", metadata: { errorClass } as never })).toBe("provider_rejected http_400");

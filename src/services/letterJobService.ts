@@ -415,6 +415,22 @@ function extraServiceRefusal(
   return undefined;
 }
 
+/**
+ * Why this provider cannot print this mail as it was shown, or undefined when
+ * it can (#698): mail our renderer drew (its content records a rendererVersion)
+ * goes only to a provider that says it prints the renderer's PDF. Answered
+ * before anything is submitted, so it is a definite rejection, as for a
+ * service the provider cannot sell. Mail drawn by the legacy HTML asks nothing.
+ */
+function rendererRefusal(
+  provider: { printsRenderedPdf?: boolean },
+  letter: Letter
+): 'provider_cannot_print_rendered' | undefined {
+  const renderer = (letter.content as Record<string, unknown> | null)?.rendererVersion;
+  if (renderer === undefined || renderer === null || renderer === '') return undefined;
+  return provider.printsRenderedPdf ? undefined : 'provider_cannot_print_rendered';
+}
+
 function postcardParams(letter: Letter, job: LetterJob): PostcardParams {
   const content = letter.content as Record<string, any>;
   const recipient = letter.recipient as Record<string, any>;
@@ -496,6 +512,23 @@ async function submitToProvider(
       error: `${provider.config.displayName} cannot send this letter's mail service (${refusal})`,
       // Its own class, kept in the columns an operator reads: nothing was sent, and the provider said nothing.
       metadata: { retryable: false, submissionOutcome: 'definite_rejection', errorClass: 'extra_service_refused' },
+    };
+    return { result: rejected, providerName: provider.config.name };
+  }
+
+  const unprintable = rendererRefusal(provider, letter);
+  if (unprintable) {
+    // As above: nothing was submitted, and the reason is a fixed word (#698).
+    writeDiagnostic('error', 'outbox.renderer_refused', {
+      jobId: job.job_id,
+      reason: unprintable,
+      provider: provider.config.name
+    });
+    const rejected: ProviderResult = {
+      success: false,
+      trackingId: '',
+      error: `${provider.config.displayName} cannot print mail our renderer drew (${unprintable})`,
+      metadata: { retryable: false, submissionOutcome: 'definite_rejection', errorClass: 'renderer_refused' },
     };
     return { result: rejected, providerName: provider.config.name };
   }
