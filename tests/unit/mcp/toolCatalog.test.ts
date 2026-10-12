@@ -7,7 +7,8 @@ import {
   CARD_ONLY_SEND_TOOLS,
   CARD_RESULT_FIELDS,
   TOOL_CATALOG,
-  getToolCatalogEntry
+  getToolCatalogEntry,
+  withheldInputKeys
 } from '../../../src/mcp/toolCatalog.js';
 import { partitionToolResult } from '../../../src/mcp/registerTools.js';
 
@@ -68,6 +69,44 @@ describe('the tool catalogue', () => {
     expect(read.size).toBeGreaterThan(5);
     const undeclared = [...read].filter(field => !Object.hasOwn(CARD_RESULT_FIELDS, field) && !alsoInMeta.has(field));
     expect(undeclared).toEqual([]);
+  });
+
+  it('keeps each card field where it went before the catalogue: moved, kept as the card copy, or dropped', () => {
+    expect(CARD_RESULT_FIELDS).toEqual({
+      previewHtml: 'meta',
+      previewFrontHtml: 'meta',
+      previewBackHtml: 'meta',
+      title: 'copy',
+      overview: 'copy',
+      purchaseStep: 'copy',
+      examplePrompts: 'copy',
+      headerImagePreview: 'meta',
+      inlineImagePreview: 'meta',
+      generatedImagePreview: 'meta',
+      pageFit: 'meta',
+      signatureImage: 'meta',
+      mailServices: 'meta',
+      stationeryDesigns: 'meta',
+      inlineImageData: 'drop',
+      headerImageData: 'drop',
+      frontImageData: 'drop'
+    });
+  });
+
+  it("withholds set_postcard_style's size while the sizes are off and its front while the layouts are", () => {
+    const env = { LETTER_IRL_PRINT_RENDERER: 'pdf', LETTER_IRL_POSTCARD_SIZES_ENABLED: '', LETTER_IRL_POSTCARD_LAYOUTS_ENABLED: 'true' };
+    const saved = Object.fromEntries(Object.keys(env).map(key => [key, process.env[key]]));
+    try {
+      Object.assign(process.env, env);
+      expect(withheldInputKeys('set_postcard_style')).toEqual(['size']);
+      process.env.LETTER_IRL_POSTCARD_LAYOUTS_ENABLED = '';
+      expect(withheldInputKeys('set_postcard_style')).toEqual(expect.arrayContaining(['layout', 'caption', 'place']));
+    } finally {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
   });
 
   it('moves, copies and drops each card field as declared, and leaves the rest to the model', () => {
