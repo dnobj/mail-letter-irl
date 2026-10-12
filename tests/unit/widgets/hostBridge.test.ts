@@ -355,6 +355,44 @@ describe('the bridge in an MCP Apps host', () => {
     without.window.close();
   });
 
+  it("hides an overflow of a pixel or two in ChatGPT's frame, and keeps a real one scrollable (#692)", () => {
+    let observed: (() => void) | undefined;
+    let scrollHeight = 699;
+    const dom = new JSDOM(bridgePage('<div></div>'), {
+      runScripts: 'dangerously',
+      beforeParse(window) {
+        // A ChatGPT that does not take the height: the frame is its own measure.
+        (window as any).openai = {};
+        (window as any).ResizeObserver = class {
+          constructor(callback: () => void) { observed = callback; }
+          observe() {}
+        };
+        Object.defineProperty(window, 'innerHeight', { configurable: true, value: 698 });
+        Object.defineProperty((window as any).Element.prototype, 'scrollHeight', { configurable: true, get: () => scrollHeight });
+      }
+    });
+    const root = dom.window.document.documentElement;
+    // A pixel over, at once: hidden.
+    expect(root.style.overflowY).toBe('hidden');
+    // A real overflow, as the card grows: scrollable again.
+    scrollHeight = 900;
+    observed!();
+    expect(root.style.overflowY).toBe('');
+    // Two pixels over, told by the frame's own resize: hidden.
+    scrollHeight = 700;
+    dom.window.dispatchEvent(new dom.window.Event('resize'));
+    expect(root.style.overflowY).toBe('hidden');
+    // Three pixels is a real overflow.
+    scrollHeight = 701;
+    observed!();
+    expect(root.style.overflowY).toBe('');
+    // Fitting exactly: nothing to hide.
+    scrollHeight = 698;
+    observed!();
+    expect(root.style.overflowY).toBe('');
+    dom.window.close();
+  });
+
   it('keeps working when ChatGPT refuses the height', async () => {
     const dom = new JSDOM(bridgePage('<div></div>'), {
       runScripts: 'dangerously',

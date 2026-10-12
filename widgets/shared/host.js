@@ -150,8 +150,22 @@
         // A host that refuses it keeps measuring the card itself.
       }
     };
-    if (typeof ResizeObserver === "function") new ResizeObserver(reportHeight).observe(document.documentElement);
-    reportHeight();
+    // ChatGPT went on sizing the frame from its own measure (698.78 px on DEV, 2026-10-11, after #692), so the page,
+    // whose scroll height is whole pixels, still overflowed it by one and showed a scroll bar with nothing to scroll.
+    // An overflow of two pixels or less is hidden; a real one still scrolls.
+    var root = document.documentElement;
+    var fitOverflow = function () {
+      var over = root.scrollHeight - window.innerHeight;
+      var hide = over > 0 && over <= 2;
+      if ((root.style.overflowY === "hidden") !== hide) root.style.overflowY = hide ? "hidden" : "";
+    };
+    var measured = function () {
+      reportHeight();
+      fitOverflow();
+    };
+    if (typeof ResizeObserver === "function") new ResizeObserver(measured).observe(root);
+    window.addEventListener("resize", fitOverflow);
+    measured();
     var asked = document.documentElement.getAttribute("data-plugin-extensions");
     if (asked !== null && window.parent && window.parent !== window) {
       var openOnce = function () {
