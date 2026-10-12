@@ -1137,7 +1137,7 @@ export function partitionToolResult(
       // declare them, so ChatGPT dropped them when it filtered
       // structuredContent against the published schema, and nothing put them
       // in _meta - a letter with a header or inline image rendered its card
-      // without one, silently. (The filtering is client-side: at SDK 1.29.0
+      // without one, silently. (The filtering is client-side: at SDK 1.31.0
       // the server validates the result and ships it unstripped. Issue #257.)
       ...(title !== undefined ? { title } : {}),
       ...(overview !== undefined ? { overview } : {}),
