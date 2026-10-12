@@ -274,12 +274,15 @@ Turning a photo upright by its EXIF orientation (`openUprightImage`, #617) adds 
 - `src/tools/quoteAndPreviewLetterWithImage.ts`
 - `src/tools/quoteAndPreviewPostcard.ts`
 
-Each tool:
-1. Validates input (address, text length, image if provided)
-2. Processes image if present (download, validate, resize, encode)
-3. Generates HTML preview
-4. Creates draft record in database
-5. Returns preview with base64 image (widget) or lean response (model)
+The three letter tools are thin definitions over one pipeline, `src/tools/letterPreviewPipeline.ts` (#689). Each names its layout and its log events. Its header lists the steps in order, and `tests/unit/tools/letterPreviewPipeline.test.ts` pins that order:
+1. The arrival date and the mail service are checked.
+2. An image layout finds its picture's source, and refuses a letter without one. This is a lookup only.
+3. The sender, the addresses, the gift, the stationery, the signature, the length and the printable characters are checked.
+4. The picture is downloaded and processed (validated, resized, encoded) only after those checks, so a refusal costs no image work.
+5. The letter is laid out, the gift settled by its pages, and the addresses checked with the provider.
+6. The draft is created, and the preview returned with a small base64 image (widget) or a lean response (model).
+
+The postcard tool runs its own sequence.
 
 **Performance Optimization** (PR #97):
 - Widget displays full base64 preview
