@@ -823,8 +823,9 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
    * Where the operator is told what needs a person (src/services/operatorNotify.ts):
    * a daily limit that refused someone (migration 038) from the API, and from
    * both the API and maintenance, held mail that missed its mail day, letters
-   * the provider cancelled, a dispatch whose outcome is unknown, and mail held
-   * for its funding (#699). A capability, like the heartbeat, so the preflight
+   * the provider cancelled, a dispatch whose outcome is unknown, mail held for
+   * its funding, and a Pay & Send order refunded or disputed after its letter
+   * went, or may have gone, to the provider (#699). A capability, like the heartbeat, so the preflight
    * treats it as secret. Required in production on both services (#699); a
    * value it cannot post to is an error in production and a warning elsewhere
    * (limits.operator_alert_url_invalid).

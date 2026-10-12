@@ -4837,6 +4837,32 @@ describe("mail a pack paid for, when the pack's money goes back (#696)", () => {
     }
   });
 
+  it('tells the operator when a dispute opens on a Pay & Send order whose letter the provider has (#699 review round 4)', async () => {
+    const jitOrder = {
+      ...baseOrder, order_type: 'jit_mail', letter_id: 'letter-9', status: 'fulfilled',
+      stripe_payment_intent_id: 'pi-hold', refund_attempts: 0
+    };
+    const calls = script(jitOrder);
+    const base = mocks.query.getMockImplementation()!;
+    mocks.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
+      if (sql.includes('SELECT job_id, status, provider_outcome FROM letter_jobs')) {
+        calls.push({ sql, params });
+        return { rows: [{ job_id: 'job-9', status: 'completed', provider_outcome: 'accepted' }] };
+      }
+      if (sql.includes("'refunded_mail_already_dispatched'")) {
+        calls.push({ sql, params });
+        return { rows: [], rowCount: 1 };
+      }
+      return base(sql, params);
+    });
+    vi.mocked(reportToOperator).mockClear();
+
+    await processStripeWebhookEvent(dispute('needs_response'));
+
+    expect(calls.some(call => call.sql.includes("'refunded_mail_already_dispatched'"))).toBe(true);
+    expect(reportToOperator).toHaveBeenCalledWith('refunded_mail_dispatched', OPERATOR_NOTICES.refundedMailDispatched());
+  });
+
   it('holds nothing while the refund is pending: it may still fail', async () => {
     mocks.findRefund.mockResolvedValue({ id: 're-hold', status: 'pending' });
     const calls = script();
