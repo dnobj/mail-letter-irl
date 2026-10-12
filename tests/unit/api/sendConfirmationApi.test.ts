@@ -39,6 +39,7 @@ import {
   refusalFor
 } from '../../../src/api/sendConfirmationApiHandler.js';
 import * as diagnostics from '../../../src/utils/diagnosticLog.js';
+import { contentVersionOf } from '../../../src/services/contentVersion.js';
 
 const DRAFT_ID = '0f1e2d3c-4b5a-4978-8796-a5b4c3d2e1f0';
 const PATH = `/api/sends/${DRAFT_ID}`;
@@ -231,7 +232,9 @@ describe('the confirmation page API (#470)', () => {
         isGiftSend: false,
         recipient: { name: 'Sam Rivera', addressLine1: '1 Main St', city: 'Austin', state: 'TX', postalCode: '78701' },
         schedule: null,
-        stationery: null
+        stationery: null,
+        // The version of what it shows (#695), for Send to take back.
+        contentVersion: contentVersionOf(draft() as never)
       });
       // Only the address fields the page shows.
       expect(json().recipient.country).toBeUndefined();
@@ -386,6 +389,26 @@ describe('the confirmation page API (#470)', () => {
       expect(createMailOrderFromDraft).toHaveBeenLastCalledWith(expect.objectContaining({ allowDuplicate: false }));
       await call('POST', JSON.stringify({ sendAnotherCopy: 1 }));
       expect(createMailOrderFromDraft).toHaveBeenLastCalledWith(expect.objectContaining({ allowDuplicate: false }));
+    });
+
+    it('sends the content version the page drew, for the service to compare (#695)', async () => {
+      signedIn();
+      vi.mocked(getDraft).mockResolvedValue(draft() as any);
+      vi.mocked(createMailOrderFromDraft).mockResolvedValue(created as any);
+      await call('POST', JSON.stringify({ contentVersion: '0123456789abcdef' }));
+      expect(createMailOrderFromDraft).toHaveBeenLastCalledWith(expect.objectContaining({ contentVersion: '0123456789abcdef' }));
+      // Null is none, as an absent one is: the service lets it through for one release.
+      await call('POST', JSON.stringify({ contentVersion: null }));
+      expect(vi.mocked(createMailOrderFromDraft).mock.lastCall?.[0].contentVersion).toBeUndefined();
+    });
+
+    it.each([42, true, { version: 'x' }, ['x']])('refuses a content version of %j before sending (#695)', async contentVersion => {
+      signedIn();
+      vi.mocked(getDraft).mockResolvedValue(draft() as any);
+      const { state, json } = await call('POST', JSON.stringify({ contentVersion }));
+      expect(state.status).toBe(400);
+      expect(json()).toEqual({ error: 'invalid_content_version' });
+      expect(createMailOrderFromDraft).not.toHaveBeenCalled();
     });
 
     it('returns the first order for a second press, without dispatching again', async () => {
@@ -544,6 +567,8 @@ describe('refusalFor (#470)', () => {
     ['DRAFT_EXPIRED', 410, 'expired'],
     ['DRAFT_CANCELLED', 410, 'expired'],
     ['DRAFT_CHECKOUT_PENDING', 409, 'checkout_open'],
+    // An edit came after the page drew it (#695).
+    ['DRAFT_CHANGED_SINCE_SHOWN', 409, 'changed_since_shown'],
     ['GIFT_LETTERS_DISABLED', 409, 'gift_unavailable'],
     ['GIFT_LETTER_UNAVAILABLE', 409, 'gift_unavailable'],
     ['SCHEDULE_PASSED', 409, 'schedule_passed'],

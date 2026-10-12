@@ -116,7 +116,7 @@ the 4x6) and its front (`layout`, with its `caption` or `place`) as the print
 reads them: only for a postcard drawn as `pdf-3`, the photo alone otherwise
 (#594). For a front the print cannot read, `postcard` is left out, size and
 all. The `POST`:
-- runs the same service as the tools, below, so every check applies;
+- runs the same service as the tools, below, so every check applies, the content version the `GET` gave included ([What the Person Saw](#what-the-person-saw-695));
 - rewords the service's refusals for the page.
 
 **Mail no pack pays for (#579)** is paid on the page with Pay & Send:
@@ -224,6 +224,16 @@ Database constraints enforce one outbox row and one stable idempotency key per l
 - **An account erasure** cancels prepaid and gift mail still waiting for its mail date, with nothing returned, once nothing else holds the account back ([Account Erasure](account-erasure.md)). Held mail that is due, and held Pay & Send mail, hold the erasure back until they mail.
 - **A held gift letter** decides its card as of the moment it goes to the printer. A seed campaign that will have ended by then does not print its code, and a chain code's 90 days count from then ([Gift Letters](gift-letters.md)).
 - **DATE columns** are read as 'YYYY-MM-DD' strings (`src/db/dateParser.ts`). A draft whose dates are anything else is refused rather than read as some day.
+
+## What the Person Saw (#695)
+
+A send names a draft by its id, and a draft can change after the person saw it: `set_letter_words`, `set_stationery`, `set_letter_signature`, `set_arrival_date`, `set_mail_service` and `set_postcard_style` all change it in place, from the chat or from the card. So every reader of a draft gives its **content version**, and the send and the Pay & Send checkout take it back.
+
+- **What it is.** `contentVersionOf` in [contentVersion.ts](../src/services/contentVersion.ts): 16 hex characters of a SHA-256 over every column that prints or decides delivery, read from the stored row. These are the words and pages; the stationery, its design included; the signature, header, inline and front pictures, by their hash; the mail service and both dates; a postcard's size and front; both addresses; the layout; whether it is a gift letter; and the renderer. It does not cover the preview's HTML, which is drawn from these, or the price.
+- **Who gives it.** Every preview (`contentVersion` on its answer), every in-place editor (the version it wrote, read in its own transaction), `get_draft_status` while the draft is ready, and the confirmation page's `GET /api/sends/:draftId`. The editors and `get_draft_status` read the pictures' hashes from the database (`encode(sha256(convert_to(x, 'UTF8')), 'hex')`); the send and the page hash the pictures they read. The two agree, which `signatureDrafts.postgres.test.ts` proves against a real database, characters beyond ASCII included.
+- **Who takes it.** `send_letter`, `send_postcard` and `create_mail_checkout` take an optional `contentVersion`, and the page's `POST /api/sends/:draftId` and `/checkout` take it in their body; a body's `contentVersion` that is not a string is refused (`400 invalid_content_version`). The send compares it under the draft's lock, before any letter is spent. The checkout compares it under the same lock, before any order or Stripe session. The paid fulfilment does not compare again: the order holds the draft from its checkout on.
+- **A version that differs** is refused with `DRAFT_CHANGED_SINCE_SHOWN`, nothing sent or charged. The tools say to show the person the mail as it is now and send once they have seen it. The page answers `409 changed_since_shown` and asks the person to refresh.
+- **No version**, for one release, is let through and logged (`send.content_version_missing`, `checkout.content_version_missing`), while the cards and the confirmation page come to send it. A later change makes it required.
 
 ## The Same Mail Twice
 

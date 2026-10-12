@@ -232,6 +232,20 @@ describe('the confirmation page takes Pay & Send for mail no pack pays for (#579
       expect(json()).toMatchObject({ status: 'paid', checkoutUrl: null, expiresAt: null, reused: true });
     });
 
+    it('opens the checkout with the content version the page drew (#695)', async () => {
+      vi.mocked(getDraft).mockResolvedValue(draft() as never);
+      await call('POST', CHECKOUT, JSON.stringify({ contentVersion: '0123456789abcdef' }));
+      expect(vi.mocked(createJitCheckout).mock.calls[0][0]).toMatchObject({ contentVersion: '0123456789abcdef' });
+    });
+
+    it('refuses a content version that is not a string, before any checkout (#695)', async () => {
+      vi.mocked(getDraft).mockResolvedValue(draft() as never);
+      const { state, json } = await call('POST', CHECKOUT, JSON.stringify({ contentVersion: 7 }));
+      expect(state.status).toBe(400);
+      expect(json()).toEqual({ error: 'invalid_content_version' });
+      expect(createJitCheckout).not.toHaveBeenCalled();
+    });
+
     it('takes only POST', async () => {
       const { state } = await call('GET', CHECKOUT);
       expect(state.status).toBe(405);
@@ -292,6 +306,8 @@ describe('the confirmation page takes Pay & Send for mail no pack pays for (#579
       ['JIT_OPTION_NOT_SOLD', 409, 'not_sold'],
       // Its pages, and so its price, changed while the payment opened (#586).
       ['DRAFT_CHANGED', 409, 'changed'],
+      // An edit came after the page drew it (#695).
+      ['DRAFT_CHANGED_SINCE_SHOWN', 409, 'changed_since_shown'],
       // Its last payment link is still closing at the old price (#593 review round 1).
       ['PREVIOUS_CHECKOUT_CLOSING', 409, 'closing'],
       ['JIT_DISABLED', 503, 'pay_unavailable'],

@@ -73,6 +73,10 @@
       "outputSchema": {
         "type": "object",
         "properties": {
+          "contentVersion": {
+            "type": "string",
+            "description": "The version of this mail as it is now: send it with the send, so what is mailed is what the person saw"
+          },
           "lettersRequired": {
             "type": "number"
           },
@@ -548,6 +552,10 @@
       "outputSchema": {
         "type": "object",
         "properties": {
+          "contentVersion": {
+            "type": "string",
+            "description": "The version of this mail as it is now: send it with the send, so what is mailed is what the person saw"
+          },
           "lettersRequired": {
             "type": "number"
           },
@@ -1023,6 +1031,10 @@
       "outputSchema": {
         "type": "object",
         "properties": {
+          "contentVersion": {
+            "type": "string",
+            "description": "The version of this mail as it is now: send it with the send, so what is mailed is what the person saw"
+          },
           "lettersRequired": {
             "type": "number"
           },
@@ -1418,6 +1430,10 @@
           "confirm": {
             "type": "boolean"
           },
+          "contentVersion": {
+            "type": "string",
+            "description": "The contentVersion of the mail the person saw, from its preview, the last change to it, or get_draft_status. If the mail changed since, nothing is sent and the answer says to show it again"
+          },
           "sendAnotherCopy": {
             "type": "boolean",
             "description": "Set true only after the user explicitly asks for another copy of mail that was already sent or paid for in the last 24 hours. Leave it out otherwise."
@@ -1539,6 +1555,10 @@
         "properties": {
           "draftId": {
             "type": "string"
+          },
+          "contentVersion": {
+            "type": "string",
+            "description": "The contentVersion of the mail the person saw, from its preview, the last change to it, or get_draft_status. If the mail changed since, nothing is sent and the answer says to show it again"
           },
           "sendAnotherCopy": {
             "type": "boolean",
@@ -2326,6 +2346,10 @@
       "outputSchema": {
         "type": "object",
         "properties": {
+          "contentVersion": {
+            "type": "string",
+            "description": "The version of this mail as it is now: send it with the send, so what is mailed is what the person saw"
+          },
           "lettersRequired": {
             "type": "number"
           },
@@ -2648,6 +2672,10 @@
           "confirm": {
             "type": "boolean"
           },
+          "contentVersion": {
+            "type": "string",
+            "description": "The contentVersion of the mail the person saw, from its preview, the last change to it, or get_draft_status. If the mail changed since, nothing is sent and the answer says to show it again"
+          },
           "sendAnotherCopy": {
             "type": "boolean",
             "description": "Set true only after the user explicitly asks for another copy of mail that was already sent or paid for in the last 24 hours. Leave it out otherwise."
@@ -2781,6 +2809,10 @@
       "outputSchema": {
         "type": "object",
         "properties": {
+          "contentVersion": {
+            "type": "string",
+            "description": "The version of this mail as it is now: send it with the send, so what is mailed is what the person saw"
+          },
           "draftId": {
             "type": "string"
           },

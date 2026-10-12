@@ -671,7 +671,7 @@ describe('set_arrival_date (#535)', () => {
 
   it('has input and output shapes for registration', () => {
     expect(Object.keys(getZodInputShape('set_arrival_date')!)).toEqual(['draftId', 'arriveBy']);
-    expect(Object.keys(getZodOutputShape('set_arrival_date')!)).toEqual(['draftId', 'schedule', 'deliveryEstimate', 'message']);
+    expect(Object.keys(getZodOutputShape('set_arrival_date')!)).toEqual(['contentVersion', 'draftId', 'schedule', 'deliveryEstimate', 'message']);
     // Served as declared: it is listed only while the flag is on.
     expect(getServedInputSchema('set_arrival_date')).toBe(getZodInputShape('set_arrival_date'));
   });

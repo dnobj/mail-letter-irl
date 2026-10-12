@@ -40,6 +40,7 @@ import { isDuplicateMailError } from '../services/duplicateMailService.js';
 import { SpendLimitError } from '../services/betaSpendLimits.js';
 import type { LetterDraft } from '../services/types.js';
 import { draftScheduleOf } from '../services/draftSchedule.js';
+import { contentVersionOf } from '../services/contentVersion.js';
 import { stationeryOf, type Stationery } from '../render/stationery.js';
 import { postcardFrontOf } from '../render/postcard.js';
 import { POSTCARD_FRONT_RENDERER_VERSION } from '../render/pdf.js';
@@ -188,6 +189,8 @@ async function showDraft(res: ServerResponse, draft: LetterDraft, userId: string
     mailType: mailTypeOf(draft),
     state,
     expiresAt: new Date(draft.expires_at).toISOString(),
+    // The version of what this answer shows (#695): Send and Pay take it back.
+    contentVersion: contentVersionOf(draft),
     orderId: state === 'sent' ? draft.consumed_letter_id ?? null : null,
     recipient: addressView(draft.recipient),
     sender: addressView(draft.sender),
@@ -252,6 +255,9 @@ export function refusalFor(error: unknown): Refusal {
     case 'DRAFT_EXPIRED':
     case 'DRAFT_CANCELLED':
       return refuse(410, 'expired', 'This preview has expired. Make a new preview, then send it from there.');
+    // An edit came after this page drew it (#695): nothing was sent.
+    case 'DRAFT_CHANGED_SINCE_SHOWN':
+      return refuse(409, 'changed_since_shown', 'This changed after this page showed it, so nothing was sent. Refresh this page to see it as it is now, then press Send.');
     case 'DRAFT_CHECKOUT_PENDING':
       return refuse(409, 'checkout_open', 'A payment for this preview is still open. Finish it, or wait for it to expire, then try again.');
     case 'GIFT_LETTERS_DISABLED':
@@ -282,13 +288,14 @@ export function refusalFor(error: unknown): Refusal {
 }
 
 /**
- * The body of a send or a checkout: `{ sendAnotherCopy? }`, or empty. Null
- * once the request has been answered, for a body too large or not JSON.
+ * The body of a send or a checkout: `{ sendAnotherCopy?, contentVersion? }`, or
+ * empty. Null once the request has been answered, for a body too large, not
+ * JSON, or with a content version that is not a string.
  */
 async function readSendBody(
   req: IncomingMessage,
   res: ServerResponse
-): Promise<{ sendAnotherCopy?: unknown } | null> {
+): Promise<{ sendAnotherCopy?: unknown; contentVersion?: string } | null> {
   let raw: string;
   try {
     raw = await readRequestBody(req, { limitBytes: JSON_API_BODY_LIMIT_BYTES });
@@ -302,13 +309,21 @@ async function readSendBody(
     throw error;
   }
   if (!raw.trim()) return {};
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? parsed : {};
+    parsed = JSON.parse(raw);
   } catch {
     sendJson(res, 400, { error: 'invalid_json' });
     return null;
   }
+  if (!parsed || typeof parsed !== 'object') return {};
+  // The version the page drew (#695), checked by the service; null is none.
+  const { contentVersion } = parsed as { contentVersion?: unknown };
+  if (contentVersion !== undefined && contentVersion !== null && typeof contentVersion !== 'string') {
+    sendJson(res, 400, { error: 'invalid_content_version' });
+    return null;
+  }
+  return { ...parsed, contentVersion: contentVersion ?? undefined };
 }
 
 async function sendDraft(req: IncomingMessage, res: ServerResponse, draft: LetterDraft, userId: string): Promise<void> {
@@ -322,7 +337,8 @@ async function sendDraft(req: IncomingMessage, res: ServerResponse, draft: Lette
       draftId: draft.draft_id,
       userId,
       mailType,
-      allowDuplicate: body.sendAnotherCopy === true
+      allowDuplicate: body.sendAnotherCopy === true,
+      contentVersion: body.contentVersion
     });
     if (!created.alreadyConsumed && !created.job) {
       throw new Error('Mail was created without an outbox record');
@@ -408,6 +424,9 @@ export function checkoutRefusalFor(error: unknown): Refusal {
     // Its pages, and so its price, changed while the payment was opening (#586).
     case 'DRAFT_CHANGED':
       return refuse(409, 'changed', 'This letter changed while its payment was opening. Refresh this page to see it, then pay.');
+    // An edit came after this page drew it (#695): nothing was charged.
+    case 'DRAFT_CHANGED_SINCE_SHOWN':
+      return refuse(409, 'changed_since_shown', 'This changed after this page showed it, so nothing was charged. Refresh this page to see it as it is now, then pay.');
     // It changed after its last payment link opened, which is still closing (#586).
     case 'PREVIOUS_CHECKOUT_CLOSING':
       return refuse(409, 'closing', 'This letter changed after its last payment link was opened, and that link is still closing. Try again in a few minutes; it can take up to an hour.');
@@ -434,6 +453,7 @@ async function checkoutDraft(req: IncomingMessage, res: ServerResponse, draft: L
       userId,
       draftId: draft.draft_id,
       allowDuplicate: body.sendAnotherCopy === true,
+      contentVersion: body.contentVersion,
       returnTo: confirmationCheckoutReturnUrls(draft.draft_id)
     });
     writeDiagnostic('info', 'send.confirmation_checkout', { mailType, status: result.status, reused: result.reused });

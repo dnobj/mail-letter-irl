@@ -64,6 +64,22 @@ describe.each(tools)('%s', (name, tool, mailType) => {
     });
   });
 
+  it('hands the service the content version the person was shown (#695)', async () => {
+    await run({ draftId: 'draft-1', confirm: true, contentVersion: '0123456789abcdef' }).catch(() => undefined);
+    expect(mocks.createMailOrderFromDraft).toHaveBeenCalledWith(expect.objectContaining({ contentVersion: '0123456789abcdef' }));
+  });
+
+  it('says a draft changed since it was shown was not sent, and keeps the code for the card (#695)', async () => {
+    mocks.createMailOrderFromDraft.mockRejectedValueOnce(
+      Object.assign(new Error('Draft draft-1 changed since it was shown'), { code: 'DRAFT_CHANGED_SINCE_SHOWN' })
+    );
+    const refusal = run({ draftId: 'draft-1', confirm: true, contentVersion: '0123456789abcdef' });
+    await expect(refusal).rejects.toMatchObject({
+      code: 'DRAFT_CHANGED_SINCE_SHOWN',
+      message: `This ${mailType} changed after it was shown, so nothing was sent. Show the person the ${mailType} as it is now (its preview card, or get_draft_status), and send it once they have seen it.`
+    });
+  });
+
   it('words a duplicate refusal for this tool and keeps its details', async () => {
     const duplicate = { kind: 'checkout_open' as const, mailType, recipientName: 'Sam', ageSeconds: 61 };
     mocks.createMailOrderFromDraft.mockRejectedValueOnce(new DuplicateMailError(duplicate));

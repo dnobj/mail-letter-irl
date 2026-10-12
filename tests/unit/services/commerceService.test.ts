@@ -213,6 +213,7 @@ import { draftMailOption } from '../../../src/services/mailOptions.js';
 import { optionRow } from '../../fixtures/mailOptions.js';
 import { LIVE_PAY_AND_SEND_STATUSES } from '../../../src/services/draftService.js';
 import { clearDiagnosticChangeSlot } from '../../../src/utils/diagnosticLog.js';
+import { contentVersionOf } from '../../../src/services/contentVersion.js';
 
 const baseOrder = {
   order_id: 'order-1',
@@ -4213,6 +4214,36 @@ describe('commerceService', () => {
       await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).rejects.toMatchObject({ code });
 
       expect(dupState.calls).toEqual([]);
+    });
+
+    describe('the content version the person was shown (#695)', () => {
+      it('opens the checkout for the version shown', async () => {
+        const result = await createJitCheckout({ userId: 'user-1', draftId: 'draft-1', contentVersion: contentVersionOf(draftRow) });
+        expect(result.status).toBe('checkout_pending');
+        expect(mocks.createJitSession).toHaveBeenCalled();
+      });
+
+      it('refuses a draft changed after it was shown, before any order or session', async () => {
+        const shown = contentVersionOf(draftRow);
+        draftRow = pendingDraft({ mail_service: 'certified' });
+        await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1', contentVersion: shown }))
+          .rejects.toMatchObject({ code: 'DRAFT_CHANGED_SINCE_SHOWN', diagnosticClass: 'DRAFT_CHANGED_SINCE_SHOWN' });
+        expect(inserted()).toBe(false);
+        expect(mocks.createJitSession).not.toHaveBeenCalled();
+        // Under the draft's lock, so no edit lands between the comparison and the order.
+        expect(position('SELECT * FROM letter_drafts WHERE draft_id = $1 FOR UPDATE')).toBeGreaterThanOrEqual(0);
+      });
+
+      it('opens a checkout named without a version for one release, and logs it', async () => {
+        const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+        try {
+          const result = await createJitCheckout({ userId: 'user-1', draftId: 'draft-1' });
+          expect(result.status).toBe('checkout_pending');
+          expect(log.mock.calls.map(call => String(call[0])).join(' ')).toContain('checkout.content_version_missing');
+        } finally {
+          log.mockRestore();
+        }
+      });
     });
 
     it('reads the dates as the send does, so ones it could not read fail before any charge (#535)', async () => {
