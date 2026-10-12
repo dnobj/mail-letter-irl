@@ -26,8 +26,8 @@ export const LAYOUT_CHARACTER_LIMITS: Record<LetterLayoutType, number> = {
 };
 
 // Line limits by layout type
-// SOFT LIMITS: guidance, named only in the manifest's prose (src/schemas.ts).
-// The served tool descriptions state no line counts; the refusal sentence does.
+// SOFT LIMITS: guidance. Neither tools/list nor /manifest.json (generated from the same Zod shapes, #688) states
+// line counts; the refusal sentence does.
 export const LAYOUT_LINE_LIMITS_SOFT: Record<LetterLayoutType, number> = {
   text_only: 24,        // Full page of text
   header_image: 15,     // Reduced for 2" header image: with the sign-off it fits our renderer's 16 (#534) and the legacy 17

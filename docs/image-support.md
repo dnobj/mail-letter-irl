@@ -246,12 +246,12 @@ Turning a photo upright by its EXIF orientation (`openUprightImage`, #617) adds 
 **File**: `src/zodSchemas.ts` (the one tool contract, #688)
 
 **Letter Schemas**:
-- `quoteAndPreviewLetterTextOnlyInputSchema` - No image parameters
-- `quoteAndPreviewLetterWithHeaderImageInputSchema` - Header image parameters
-- `quoteAndPreviewLetterWithImageInputSchema` - Inline image parameters
+- `quoteAndPreviewInputZ` - No image parameters
+- `quoteAndPreviewLetterWithHeaderImageInputZ` - Header image parameters
+- `quoteAndPreviewLetterWithImageInputZ` - Inline image parameters
 
 **Postcard Schema**:
-- `quoteAndPreviewPostcardInputSchema` - Front image parameters
+- `quoteAndPreviewPostcardInputZ` - Front image parameters
 
 **Image Parameters** (all schemas with images):
 ```typescript

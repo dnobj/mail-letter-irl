@@ -16,8 +16,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  * sees, so they come from one place and are absent, never null, on Pay & Send
  * orders.
  *
- * The schema under test is the SERVED one (zodSchemas.ts), not the tool
- * definition's copy in schemas.ts; registerTools serves the former.
+ * The schema under test is the SERVED one (zodSchemas.ts), which registerTools
+ * serves and /manifest.json is generated from (#688).
  */
 
 const mocks = vi.hoisted(() => ({ query: vi.fn(), transaction: vi.fn() }));

@@ -811,9 +811,9 @@ export async function registerWidgetResources(
 }
 
 /**
- * A tool's name, as the input map below names it. The output map takes exactly the same names, and the tool
- * catalogue's test holds both to the tools the server defines (#688: Zod is the one tool contract; the typed copy
- * that named them, src/mcp/toolSchemas.ts, is gone).
+ * A tool's name, as the input map below names it; the output map must take exactly the same names (its type says
+ * so). A tool the server defines but the maps miss fails registration, which the served-tools snapshot reaches for
+ * every tool (#688: Zod is the one tool contract; the typed copy that named them, src/mcp/toolSchemas.ts, is gone).
  */
 type ToolName = keyof typeof zodInputSchemaMap;
 

@@ -15,7 +15,7 @@ For owner-managed submission tasks such as organization verification, screenshot
   `mcp/www_authenticate` challenges
 - UI: Widgets served as MCP resources with `text/html;profile=mcp-app`
 - Onboarding: supported via app description, app instructions, and the `get_started` tool/widget
-- Compatibility manifest: runtime-derived at `/manifest.json`; checked-in `manifest.json` is a generated snapshot
+- Compatibility manifest: runtime-derived at `/manifest.json`; checked-in `manifest.json` is a generated snapshot. Since #688 each tool's schemas are exactly what `tools/list` serves, so each is its own JSON Schema root: its `$ref`s (`#/properties/...`) resolve within that tool's input or output schema, not against the manifest file as a whole
 
 ## Submission-critical facts
 

@@ -12,8 +12,8 @@
  * instead of dropping it. The marker still satisfies the served object schema,
  * so the JSON schema ChatGPT reads does not change.
  *
- * Pure on purpose: both schema layers import it, and neither may pull in the
- * database.
+ * Pure on purpose: the schema layer (src/zodSchemas.ts) imports it, and may not
+ * pull in the database.
  */
 
 import type { ImageFileParam } from "../services/types.js";
