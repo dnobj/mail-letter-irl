@@ -11,14 +11,16 @@
  * createLetterJobWithClient sets only for held mail) and not yet due. A SQL
  * condition on the letter_jobs row named `alias`, by the database's clock.
  * Due already, a job is no longer held: an operator's release (job.dispatch_now)
- * moves only next_attempt_at, and leaves the hold it ended.
+ * moves only next_attempt_at, and leaves the hold it ended. Parenthesised, so it
+ * stands as one condition wherever it goes; the alias is a plain name.
  */
 export function heldMailJobSql(alias: string): string {
-  return `${alias}.status = 'pending'
+  if (!/^[a-z_]+$/.test(alias)) throw new Error(`heldMailJobSql: not a table alias: ${alias}`);
+  return `(${alias}.status = 'pending'
       AND ${alias}.provider_outcome = 'not_dispatched'
       AND ${alias}.attempts = 0
       AND ${alias}.mail_hold_until IS NOT NULL
-      AND ${alias}.next_attempt_at > NOW()`;
+      AND ${alias}.next_attempt_at > NOW())`;
 }
 
 /** The same as heldMailJobSql, for a job already read, at `now`. */

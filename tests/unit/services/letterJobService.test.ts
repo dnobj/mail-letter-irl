@@ -1109,8 +1109,8 @@ describe("the outbox's stop (#444)", () => {
 
   // Held mail as the shared predicate reads it (heldMailJobSql, #693).
   const HELD_NOT_DUE =
-    "AND NOT (letter_jobs.status = 'pending' AND letter_jobs.provider_outcome = 'not_dispatched' AND letter_jobs.attempts = 0 " +
-    "AND letter_jobs.mail_hold_until IS NOT NULL AND letter_jobs.next_attempt_at > NOW())";
+    "AND NOT ((letter_jobs.status = 'pending' AND letter_jobs.provider_outcome = 'not_dispatched' AND letter_jobs.attempts = 0 " +
+    "AND letter_jobs.mail_hold_until IS NOT NULL AND letter_jobs.next_attempt_at > NOW()))";
 
   it('still settles what a crash left behind, then says how much is waiting and claims nothing', async () => {
     vi.stubEnv('LETTER_IRL_OUTBOX_DISPATCH_ENABLED', 'false');
@@ -1305,8 +1305,8 @@ describe('releaseHeldLetterJobAsAdmin: sending held mail now (#535)', () => {
     expect(read.sql).toContain('mail_hold_until, next_attempt_at,');
     // Held as every reader of held mail reads it (heldMailJobSql, #693).
     expect(read.sql.replace(/\s+/g, ' ')).toContain(
-      "(letter_jobs.status = 'pending' AND letter_jobs.provider_outcome = 'not_dispatched' AND letter_jobs.attempts = 0 " +
-        "AND letter_jobs.mail_hold_until IS NOT NULL AND letter_jobs.next_attempt_at > NOW()) AS still_held"
+      "((letter_jobs.status = 'pending' AND letter_jobs.provider_outcome = 'not_dispatched' AND letter_jobs.attempts = 0 " +
+        "AND letter_jobs.mail_hold_until IS NOT NULL AND letter_jobs.next_attempt_at > NOW())) AS still_held"
     );
     const update = calls.find(call => call.sql.startsWith('UPDATE letter_jobs'))!;
     expect(update.sql.replace(/\s+/g, ' ')).toBe(

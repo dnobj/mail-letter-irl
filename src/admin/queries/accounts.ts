@@ -567,7 +567,7 @@ export interface JobDetailForLetter {
   updatedAt: Date;
   /**
    * When a letter held to arrive by a date becomes due (#535): 09:00 New York
-   * time on its mail date, from the job's metadata. Null for any other job.
+   * time on its mail date, from letter_jobs.mail_hold_until (055, #693). Null for any other job.
    * Kept after an early release, which moves only nextAttemptAt.
    */
   heldUntil: Date | null;
