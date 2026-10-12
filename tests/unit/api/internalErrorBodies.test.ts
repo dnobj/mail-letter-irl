@@ -121,6 +121,19 @@ describe("a caller's own mistake answers 4xx, not the fixed 500 (#682 review)", 
     expect(captured.status).toBe(413);
   });
 
+  it('a body that arrives too slowly is 408', async () => {
+    signedIn();
+    const { RequestBodyTimeoutError } = await import('../../../src/utils/requestBody.js');
+    const slow = Object.assign(new Readable({ read() { this.destroy(new RequestBodyTimeoutError()); } }), {
+      headers: { 'content-type': 'application/json' },
+      method: 'POST',
+      url: '/api/return-address'
+    }) as unknown as IncomingMessage;
+    const { captured, res } = fakeResponse();
+    await (await returnAddress())(slow, res, '/api/return-address');
+    expect(captured.status).toBe(408);
+  });
+
   it.each([['/api/letters/%E0%A4%A'], ['/api/letters/%zz/cancel']])('a malformed letter id is 400: %s', async path => {
     signedIn();
     const { captured, res } = fakeResponse();

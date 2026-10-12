@@ -8,7 +8,12 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'http';
-import { readRequestBody, JSON_API_BODY_LIMIT_BYTES, RequestBodyTooLargeError } from '../utils/requestBody.js';
+import {
+  readRequestBody,
+  JSON_API_BODY_LIMIT_BYTES,
+  RequestBodyTimeoutError,
+  RequestBodyTooLargeError
+} from '../utils/requestBody.js';
 import {
   getReturnAddress,
   setReturnAddress,
@@ -181,6 +186,10 @@ export async function handleReturnAddressApiRequest(
     }
     if (error instanceof RequestBodyTooLargeError) {
       sendJson(res, 413, { error: 'Payload too large', message: 'The request body is too large' });
+      return true;
+    }
+    if (error instanceof RequestBodyTimeoutError) {
+      sendJson(res, 408, { error: 'Request timeout', message: 'The request body arrived too slowly' });
       return true;
     }
     sendInternalError(res, 'address.api_failed', error, 'Unable to complete return address request');
