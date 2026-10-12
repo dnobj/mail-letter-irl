@@ -2773,6 +2773,8 @@
       // Reveal the checkout link, the customer's route to paying when the
       // host does not open a tab. See handlePayAndSend for why it exists.
       function showCheckoutLink(href, label) {
+        // Only an https link becomes the card's link (#684); the order is still followed.
+        if (!isHttpsUrl(href)) return;
         const link = document.getElementById("checkout-link");
         link.href = href;
         link.textContent = label;
@@ -2861,7 +2863,7 @@
           startStatusPolling("Checkout open - waiting for payment");
 
           try {
-            await host.openLink(result.checkoutUrl);
+            if (isHttpsUrl(result.checkoutUrl)) await host.openLink(result.checkoutUrl);
             buttonText.textContent = "Checkout Opened";
           } catch {
             // The host declined to open a tab. Not an error worth showing as
@@ -2978,7 +2980,7 @@
           render();
 
           try {
-            await host.openLink(result.checkoutUrl);
+            if (isHttpsUrl(result.checkoutUrl)) await host.openLink(result.checkoutUrl);
           } catch {
             // Nothing to do: the link is already on screen.
           }

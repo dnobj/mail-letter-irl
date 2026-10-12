@@ -544,6 +544,20 @@ describe('PackCheckoutCard rendered without a tool result', () => {
     expect(card.href('checkout-link')).toBe('https://checkout.stripe.com/c/pay/cs_retry_starter');
   });
 
+  it.each(['javascript:alert(1)', 'http://checkout.example/pay'])(
+    'makes no link of a checkout address that is not https: %s (#684)',
+    async hostile => {
+      const card = mount();
+      card.deliver(pendingCheckout({ checkoutUrl: hostile }));
+      expect(card.href('checkout-link')).not.toBe(hostile);
+      expect(card.visible('checkout-link')).toBe(false);
+      // Beside an https one, the https one is the link.
+      const both = mount();
+      both.deliver(pendingCheckout({ checkoutStartUrl: hostile }));
+      expect(both.href('checkout-link')).toBe('https://checkout.stripe.com/c/pay/cs_host');
+    }
+  );
+
   it('gives way to a host result that arrives after the empty state but before any click', async () => {
     const card = mount({ toolInput: { pack: 'starter' } });
     await card.runNextTimer();

@@ -84,8 +84,8 @@ describe("the letter card's legacy preview pictures (#684)", () => {
       const slot = dom.window.document.querySelector(wrapper)!;
       expect(slot.querySelector('img')).toBeNull();
       expect(slot.textContent).toContain('Image not shown on this card');
-      await new Promise(resolve => setTimeout(resolve, 0));
-      expect((dom.window as unknown as { __pwned?: number }).__pwned).toBeUndefined();
+      // Nothing the value carried became markup: jsdom loads no images, so a handler is checked for, not waited on.
+      expect(dom.window.document.querySelector('[onerror], [onload]')).toBeNull();
     }
   );
 });
@@ -105,9 +105,7 @@ describe("the postcard card's legacy front (#684)", () => {
     );
     const pane = dom.window.document.getElementById('preview-front')!;
     expect(pane.querySelectorAll('img')).toHaveLength(1);
-    expect(pane.querySelector('script, a')).toBeNull();
-    await new Promise(resolve => setTimeout(resolve, 0));
-    expect((dom.window as unknown as { __pwned?: number }).__pwned).toBeUndefined();
+    expect(pane.querySelector('script, a, [onerror]')).toBeNull();
   });
 
   it.each(HOSTILE)('refuses a front whose picture is %s', async value => {
@@ -115,8 +113,7 @@ describe("the postcard card's legacy front (#684)", () => {
     const pane = dom.window.document.getElementById('preview-front')!;
     expect(pane.querySelector('img')).toBeNull();
     expect(pane.textContent).toContain('No image preview available');
-    await new Promise(resolve => setTimeout(resolve, 0));
-    expect((dom.window as unknown as { __pwned?: number }).__pwned).toBeUndefined();
+    expect(dom.window.document.querySelector('[onerror], [onload]')).toBeNull();
   });
 
   it('refuses a front with markup but no picture', () => {

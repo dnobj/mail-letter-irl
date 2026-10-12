@@ -98,7 +98,7 @@ function toolOutputFixture() {
 
 function mount(
   card: string,
-  options: { openExternalRejects?: boolean } = {}
+  options: { openExternalRejects?: boolean; mailCheckoutUrl?: string } = {}
 ): Harness {
   // The card as served, with the host bridge inlined (#474).
   const html = inlineHostBridge(
@@ -150,7 +150,7 @@ function mount(
             return {
               structuredContent: {
                 orderId: 'ord_test_0001',
-                checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test'
+                checkoutUrl: options.mailCheckoutUrl ?? 'https://checkout.stripe.com/c/pay/cs_test'
               }
             };
           }
@@ -457,6 +457,17 @@ describe.each(CARDS)('%s purchase status', card => {
     expect(harness.text('status-pill')).toBe('Paid - preparing mail');
     expect(harness.pendingTimers().length).toBe(0);
   });
+
+  it.each(['javascript:alert(1)', 'http://checkout.example/pay', 'data:text/html,x'])(
+    'makes no link of a checkout address that is not https: %s (#684)',
+    async hostile => {
+      const refusing = mount(card, { mailCheckoutUrl: hostile });
+      await checkout(refusing);
+      const link = refusing.document.getElementById('checkout-link');
+      expect(link?.getAttribute('href') ?? '').not.toBe(hostile);
+      expect(refusing.document.querySelector(`[href="${hostile}"]`)).toBeNull();
+    }
+  );
 
   it('still shows the checkout link and polls when the host will not open a tab', async () => {
     // Protects what shipped in #304: openExternal resolving without opening
