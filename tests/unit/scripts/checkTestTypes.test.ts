@@ -43,5 +43,7 @@ describe('the test type-check ratchet', () => {
     ];
     expect(projectErrors(lines)).toHaveLength(3);
     expect(projectErrors([lines[3]])).toHaveLength(0);
+    // The same codes on a line of a test are an error in the test, counted like any other.
+    expect(projectErrors(["tests/a.test.ts(1,2): error TS5097: An import path can only end with a '.ts' extension."])).toHaveLength(0);
   });
 });

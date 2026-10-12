@@ -48,10 +48,11 @@ export function typeErrors(output) {
  * Diagnostics about the project rather than the code (a missing or broken
  * tsconfig, no inputs, a bad option): tsc did not check the tests at all, so
  * they are a failure, never a count. TS5xxx are option errors, TS6xxx project
- * and file errors, TS18003 "No inputs were found".
+ * and file errors, TS18003 "No inputs were found". Only a line with no file
+ * location: the same codes reported on a line of a test are counted.
  */
 export function projectErrors(errors) {
-  return errors.filter(line => /error TS(5\d{3}|6\d{3}|18003):/.test(line));
+  return errors.filter(line => /^error TS(5\d{3}|6\d{3}|18003):/.test(line));
 }
 
 function main() {
@@ -94,5 +95,10 @@ function main() {
 }
 
 // Run as a script, whatever path or link it was started by; imported by its test, it runs nothing.
-const started = process.argv[1] ? realpathSync(process.argv[1]) : '';
+let started = '';
+try {
+  started = process.argv[1] ? realpathSync(process.argv[1]) : '';
+} catch {
+  // Started by a path that is not there (another tool's runner): not run as a script.
+}
 if (started && realpathSync(fileURLToPath(import.meta.url)) === started) main();
