@@ -150,8 +150,33 @@
         // A host that refuses it keeps measuring the card itself.
       }
     };
-    if (typeof ResizeObserver === "function") new ResizeObserver(reportHeight).observe(document.documentElement);
+    // ChatGPT went on sizing the frame from its own measure (698.78 px on DEV, 2026-10-11, after #692), so the page,
+    // whose scroll height is whole pixels, still overflowed it by one and showed a scroll bar with nothing to scroll.
+    // An overflow of two pixels or less is hidden; a real one still scrolls. Measured against clientHeight, as the
+    // browser decides on the scroll bar. Once hidden it stays hidden while nothing overflows: the scroll bar's going
+    // widens the page, which can shorten it, and showing the bar again for that would flicker.
+    var root = document.documentElement;
+    var fitOverflow = function () {
+      var over = root.scrollHeight - root.clientHeight;
+      var hidden = root.style.overflowY === "hidden";
+      var hide = over <= 2 && (over > 0 || hidden);
+      if (hidden !== hide) root.style.overflowY = hide ? "hidden" : "";
+    };
+    // From the observer, a frame later: changing the observed page's width inside its own callback is a loop the
+    // browser reports.
+    var fitSoon = function () {
+      if (typeof window.requestAnimationFrame === "function") window.requestAnimationFrame(fitOverflow);
+      else setTimeout(fitOverflow, 0);
+    };
+    if (typeof ResizeObserver === "function") {
+      new ResizeObserver(function () {
+        reportHeight();
+        fitSoon();
+      }).observe(root);
+    }
+    window.addEventListener("resize", fitOverflow);
     reportHeight();
+    fitOverflow();
     var asked = document.documentElement.getAttribute("data-plugin-extensions");
     if (asked !== null && window.parent && window.parent !== window) {
       var openOnce = function () {
