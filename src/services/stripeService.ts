@@ -350,14 +350,28 @@ export async function createPartialPaymentRefund(params: {
 /**
  * Every refund on a payment, newest first. The pack-refund sweep lists BEFORE
  * it retries a create, because Stripe may prune an idempotency key after 24
- * hours and a retry past that point would create a second refund.
+ * hours and a retry past that point would create a second refund. Refused
+ * rather than partial when there is more than one page (#730): the sweep
+ * compensates on "not in the list", which a partial list would make wrong.
+ * A pack is at most 50 letters, so a hundred refunds on one payment is not a
+ * real case.
  */
 export async function listPaymentRefunds(paymentIntentId: string): Promise<Stripe.Refund[]> {
   const refunds = await getStripeClient().refunds.list(
     { payment_intent: paymentIntentId, limit: 100 },
     BACKGROUND_REQUEST_OPTIONS
   );
-  return refunds.data;
+  return wholeRefundList(refunds);
+}
+
+/** A page of refunds that is the whole list, or an error. */
+export function wholeRefundList(page: { data: Stripe.Refund[]; has_more: boolean }): Stripe.Refund[] {
+  if (page.has_more) {
+    throw Object.assign(new Error('More refunds than one page; not deciding on part of the list'), {
+      diagnosticClass: 'refund_list_incomplete'
+    });
+  }
+  return page.data;
 }
 export async function retrieveRefund(refundId: string): Promise<Stripe.Refund> {
   return getStripeClient().refunds.retrieve(refundId, undefined, BACKGROUND_REQUEST_OPTIONS);

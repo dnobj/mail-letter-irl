@@ -28,6 +28,7 @@ export const ADMIN_ERROR_HTTP_STATUS = {
   ADMIN_DATABASE_HOST_MISMATCH: 503,
   ADMIN_DATABASE_NAME_MISMATCH: 503,
   ADMIN_DATABASE_ROLE_MISMATCH: 503,
+  ADMIN_READER_ROLE_TOO_WIDE: 503,
   ADMIN_TAILSCALE_UNAVAILABLE: 503,
   ADMIN_TAILSCALE_NEEDS_LOGIN: 503,
   ADMIN_TAILSCALE_TAG_MISMATCH: 503,
@@ -77,6 +78,8 @@ const ADMIN_PUBLIC_MESSAGES: Record<AdminErrorCode, string> = {
     "The selected database name does not match local admin configuration.",
   ADMIN_DATABASE_ROLE_MISMATCH:
     "The connected database role does not match the requested admin mode.",
+  ADMIN_READER_ROLE_TOO_WIDE:
+    "The admin reader role can read what its column grants withhold.",
   ADMIN_TAILSCALE_UNAVAILABLE: "The Tailscale daemon did not become ready.",
   ADMIN_TAILSCALE_NEEDS_LOGIN:
     "The Tailscale node needs a login and no auth key was provided.",

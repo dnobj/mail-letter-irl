@@ -2330,8 +2330,13 @@ the lookup-by-email variant of step 1 is still open).
    no `Origin` at all, both answered `403` with the body `forbidden`; `/audit` shows `admin.request_denied`
    for route `account.reveal` with `ADMIN_CSRF_REJECTED`.)
 
-**Pass criteria:** Every denial is a constant body plus an audit row; nothing on the private network
-reaches an application route.
+5. [ ] From a page on another tailnet node (or any other site), load the panel's URL as an image
+   (`<img src="https://<panel>/">`) a few times. Verify the panel's `/audit` shows no new
+   `admin.session_start` or denial rows for them, and that a session already elevated in another tab
+   is still elevated (#730).
+
+**Pass criteria:** Every denial is a constant body plus an audit row, but for the quiet refusal of a
+request another site sent (step 5); nothing on the private network reaches an application route.
 
 ### ADMIN-READ-05 — Keyboard-only navigation and 200 % zoom
 
