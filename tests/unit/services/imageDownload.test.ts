@@ -14,6 +14,19 @@ import { _testing as imageServiceTesting } from '../../../src/services/imageServ
 
 type Reply = string[] | 'hang' | { code: string };
 
+/** One resolver per query, as resolvePublicAddress makes them: the A query's first. */
+function resolversOf(four: Reply, six: Reply = { code: 'ENODATA' }) {
+  const a = resolverOf(four, { code: 'ENODATA' });
+  const aaaa = resolverOf([], six);
+  const made: ImageHostResolver[] = [];
+  const make = () => {
+    const next = made.length === 0 ? a.resolver : aaaa.resolver;
+    made.push(next);
+    return next;
+  };
+  return { make, aCancel: a.cancel, aaaaCancel: aaaa.cancel };
+}
+
 /** A resolver that answers each query from a table, fails it, or never answers. */
 function resolverOf(four: Reply, six: Reply = { code: 'ENODATA' }) {
   const cancel = vi.fn();
@@ -67,11 +80,27 @@ describe('image hosts resolve off the thread pool, every address checked (#730)'
 
   it('does not let an AAAA query that never answers hold an IPv4 download', async () => {
     vi.useFakeTimers();
-    const { resolver, cancel } = resolverOf([V4], 'hang');
-    const pending = resolvePublicAddress('example.test', live(), () => resolver);
-    await vi.advanceTimersByTimeAsync(DNS_CONFIG.aaaaGraceMs);
+    const { make, aaaaCancel } = resolversOf([V4], 'hang');
+    const pending = resolvePublicAddress('example.test', live(), make);
+    await vi.advanceTimersByTimeAsync(DNS_CONFIG.aaaaGraceMs - 1);
+    expect(aaaaCancel).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
     await expect(pending).resolves.toEqual([{ address: V4, family: 4 }]);
-    expect(cancel).toHaveBeenCalled();
+    expect(aaaaCancel).toHaveBeenCalled();
+  });
+
+  it('leaves no AAAA query running when the A query fails', async () => {
+    const { make, aaaaCancel } = resolversOf({ code: 'ESERVFAIL' }, 'hang');
+    await expect(resolvePublicAddress('example.test', live(), make)).resolves.toBeNull();
+    expect(aaaaCancel).toHaveBeenCalled();
+  });
+
+  it('asks the AAAA question of the second resolver and the A question of the first', async () => {
+    const { make } = resolversOf([V4], [V6]);
+    await expect(resolvePublicAddress('example.test', live(), make)).resolves.toEqual([
+      { address: V4, family: 4 },
+      { address: V6, family: 6 }
+    ]);
   });
 
   it.each([

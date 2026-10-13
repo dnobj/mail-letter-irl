@@ -89,10 +89,8 @@ export async function resolvePublicAddress(
       ? Promise.race([
           aaaa,
           new Promise<Answer>(resolve => {
-            grace = setTimeout(() => {
-              v6Resolver.cancel();
-              resolve({ ok: false });
-            }, DNS_CONFIG.aaaaGraceMs);
+            // The finally below cancels the query left running.
+            grace = setTimeout(() => resolve({ ok: false }), DNS_CONFIG.aaaaGraceMs);
           })
         ])
       : aaaa
@@ -107,6 +105,9 @@ export async function resolvePublicAddress(
   } finally {
     clearTimeout(grace);
     signal.removeEventListener('abort', cancel);
+    // A query still running (the AAAA query, after the A query failed) must
+    // not outlive the call: a settled one ignores it.
+    cancel();
   }
 }
 
