@@ -833,7 +833,8 @@ export async function startHttpServer() {
 
     if (url.pathname === MCP_PATH && req.method === "OPTIONS") {
       // A browser's preflight carries no credential: answered before the
-      // limiter and sign-in, as the SSE route answered it until #730.
+      // limiter and sign-in, as the SSE route answered it until #730. Every
+      // client today is a server-side one; /mcp's POST sets no CORS origin.
       respondToCorsPreflight(res, resolveCorsOrigin(req.headers.origin));
       return;
     }
