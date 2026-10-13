@@ -2,13 +2,13 @@
   "name": "Letter IRL",
   "version": "0.1.0",
   "description": "Draft, preview, and mail real physical letters and postcards through USPS from ChatGPT. Buy prepaid letters without leaving the conversation, or pay for a single letter as you send it.",
-  "instructions": "Letter IRL drafts, previews, and sends real physical letters and postcards in the U.S.\nAlways create a preview draft before sending. Preview tools make free drafts.\nOnly call send_letter or send_postcard after the user has reviewed a draft and clearly confirms sending.\nDo not say mail has been sent unless the send tool succeeds.\nIf send_letter, send_postcard or create_mail_checkout says the same mail was already sent, paid for, or is awaiting payment, tell the user and repeat the call with sendAnotherCopy: true only if they ask for another copy.\nA preview exists only when the preview tool's result includes a draftId, and a checkout only when its result includes a checkoutUrl. If a Letter IRL tool call returns no result, say it did not complete: the preview card offers a Create my preview button, or offer to try again. Never describe a draft, order or checkout you did not receive.\nUse saved return addresses when available, and ask for missing real U.S. mailing addresses when required.\nFor image mail, reuse existing conversation images or hosted imageUrl values before opening upload_image.\nFor an image request addressed to Letter IRL, call generate_image_for_mail and follow its response exactly: it either generates the image in-turn using the user's remaining Letter IRL image generations, or returns routing guidance with a copy-ready prompt. For image requests not addressed to Letter IRL, use ChatGPT's built-in image generation (image_gen); its images attach to Letter IRL previews directly.\nIf a specific image fails to hand off to a preview tool, open upload_image so the user can pick it from their ChatGPT library or upload it - that preserves the exact image they approved.\nFor unsupported formats, integrations, or product ideas, offer submit_feature_request instead of promising support.\nNo tool can request or issue a refund. If the user asks for one, tell them to email support@letterirl.com from the email on their Letter IRL account, quoting the order id from get_purchase_status; refunds are decided by a person, so never promise, estimate, or deny a refund or an amount.",
+  "instructions": "Letter IRL drafts, previews, and sends real physical letters and postcards in the U.S.\nAlways create a preview draft before sending. Preview tools make free drafts.\nMail is sent only by the person, never by you: when a preview card is showing, they press its Send button; when there is no card, call request_send and give them its link, where they check the mail and send it themselves.\nDo not say mail has been sent unless the send tool succeeds.\nIf the same mail was sent recently, the preview card or the confirmation page says so and offers another copy itself.\nA preview exists only when the preview tool's result includes a draftId, and a checkout only when its result includes a checkoutUrl. If a Letter IRL tool call returns no result, say it did not complete: the preview card offers a Create my preview button, or offer to try again. Never describe a draft, order or checkout you did not receive.\nUse saved return addresses when available, and ask for missing real U.S. mailing addresses when required.\nFor image mail, reuse existing conversation images or hosted imageUrl values before opening upload_image.\nFor an image request addressed to Letter IRL, call generate_image_for_mail and follow its response exactly: it either generates the image in-turn using the user's remaining Letter IRL image generations, or returns routing guidance with a copy-ready prompt. For image requests not addressed to Letter IRL, use ChatGPT's built-in image generation (image_gen); its images attach to Letter IRL previews directly.\nIf a specific image fails to hand off to a preview tool, open upload_image so the user can pick it from their ChatGPT library or upload it - that preserves the exact image they approved.\nFor unsupported formats, integrations, or product ideas, offer submit_feature_request instead of promising support.\nNo tool can request or issue a refund. If the user asks for one, tell them to email support@letterirl.com from the email on their Letter IRL account, quoting the order id from get_purchase_status; refunds are decided by a person, so never promise, estimate, or deny a refund or an amount.",
   "contactEmail": "support@letterirl.com",
   "legalInfoUrl": "https://letterirl.com/terms",
   "tools": [
     {
       "name": "quote_and_preview_letter",
-      "description": "Preview a text-only physical letter draft. Requires a real U.S. recipient mailing address and text that fits the text-only letter limit. Send later with send_letter.",
+      "description": "Preview a text-only physical letter draft. Requires a real U.S. recipient mailing address and text that fits the text-only letter limit. The person sends it with Send on the preview card, or, if no card shows, on the page request_send links to.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -462,7 +462,7 @@
     },
     {
       "name": "quote_and_preview_letter_with_header_image",
-      "description": "Preview a physical letter draft with a header image at the top. Requires a real U.S. recipient mailing address. If the user refers to an image already generated, shown, or attached earlier in this conversation, call this tool first to reuse that image. Otherwise prefer a direct file attachment or explicit imageUrl. Use upload_image only after an actual failed handoff or upload problem. Send later with send_letter.",
+      "description": "Preview a physical letter draft with a header image at the top. Requires a real U.S. recipient mailing address. If the user refers to an image already generated, shown, or attached earlier in this conversation, call this tool first to reuse that image. Otherwise prefer a direct file attachment or explicit imageUrl. Use upload_image only after an actual failed handoff or upload problem. The person sends it with Send on the preview card, or, if no card shows, on the page request_send links to.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -941,7 +941,7 @@
     },
     {
       "name": "quote_and_preview_letter_with_image",
-      "description": "Preview a physical letter draft with an enclosed image after the signature. Requires a real U.S. recipient mailing address. If the user refers to an image already generated, shown, or attached earlier in this conversation, call this tool first to reuse that image. Otherwise prefer a direct file attachment or explicit imageUrl. Use upload_image only after an actual failed handoff or upload problem. Send later with send_letter.",
+      "description": "Preview a physical letter draft with an enclosed image after the signature. Requires a real U.S. recipient mailing address. If the user refers to an image already generated, shown, or attached earlier in this conversation, call this tool first to reuse that image. Otherwise prefer a direct file attachment or explicit imageUrl. Use upload_image only after an actual failed handoff or upload problem. The person sends it with Send on the preview card, or, if no card shows, on the page request_send links to.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1619,7 +1619,7 @@
     },
     {
       "name": "create_pack_checkout",
-      "description": "Create a Stripe-hosted checkout to buy a pack of prepaid letters. The result carries a checkoutUrl that the customer must be shown as a link to click; nothing opens automatically and no card is guaranteed to render, so present the link. The price and pack sizes come only from server configuration. Payment adds letters to the account balance, for the customer to send mail with afterward. Use create_mail_checkout instead to pay for one specific draft.",
+      "description": "Create a Stripe-hosted checkout to buy a pack of prepaid letters. The result carries a checkoutUrl that the customer must be shown as a link to click; nothing opens automatically and no card is guaranteed to render, so present the link. The price and pack sizes come only from server configuration. Payment adds letters to the account balance, for the customer to send mail with afterward. To pay for one specific draft instead, the person presses Pay & Send on its preview card.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -2253,7 +2253,7 @@
     },
     {
       "name": "quote_and_preview_postcard",
-      "description": "Create a preview of a physical postcard draft with a front image and back message. Use this when the user wants to make, create, design, or preview a postcard through Letter IRL. Requires a real U.S. recipient mailing address. If the user refers to an image already generated, shown, or attached earlier in this conversation, call this tool first to reuse that image. Otherwise prefer a direct file attachment for the image, pass imageUrl when a generated or hosted image is already available, and use upload_image only if no attachment or usable imageUrl made it through after a direct preview attempt. If sender is omitted, the saved return address is used automatically. Send later with send_postcard.",
+      "description": "Create a preview of a physical postcard draft with a front image and back message. Use this when the user wants to make, create, design, or preview a postcard through Letter IRL. Requires a real U.S. recipient mailing address. If the user refers to an image already generated, shown, or attached earlier in this conversation, call this tool first to reuse that image. Otherwise prefer a direct file attachment for the image, pass imageUrl when a generated or hosted image is already available, and use upload_image only if no attachment or usable imageUrl made it through after a direct preview attempt. If sender is omitted, the saved return address is used automatically. The person sends it with Send on the preview card, or, if no card shows, on the page request_send links to.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -2784,6 +2784,105 @@
           "statusTimeline",
           "recipientSummary",
           "lettersRemaining"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "request_send",
+      "description": "Get a link where the person checks a previewed letter or postcard and sends it themselves on letterirl.com: they press Send on that page, or pay there with Pay & Send for mail no letter pack pays for. Use it when the person wants to send a preview and no preview card with a Send button is showing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "draftId": {
+            "type": "string",
+            "description": "The draftId from a letter or postcard preview"
+          }
+        },
+        "required": [
+          "draftId"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "draftId": {
+            "type": "string"
+          },
+          "mailType": {
+            "type": "string",
+            "enum": [
+              "letter",
+              "postcard"
+            ]
+          },
+          "confirmationUrl": {
+            "type": "string",
+            "description": "Where the person checks the preview and sends it themselves"
+          },
+          "expiresAtISO": {
+            "type": "string"
+          },
+          "recipientSummary": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "city": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "city",
+              "state"
+            ],
+            "additionalProperties": false
+          },
+          "schedule": {
+            "type": "object",
+            "properties": {
+              "arriveBy": {
+                "type": "string"
+              },
+              "mailOn": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "arriveBy",
+              "mailOn"
+            ],
+            "additionalProperties": false,
+            "description": "The preview's arrival dates, YYYY-MM-DD: once sent, it waits until its mail date"
+          },
+          "paidPerSend": {
+            "type": "boolean",
+            "const": true,
+            "description": "Present when the person pays for it with Pay & Send on that page: letter packs and gift letters pay only for one-page letters and 6x9 postcards, and never for certified mail"
+          },
+          "mailService": {
+            "type": "string",
+            "enum": [
+              "certified",
+              "certified_return_receipt"
+            ],
+            "description": "Present only when the letter goes as certified mail: certified, or certified_return_receipt (with an electronic return receipt). Paid with Pay & Send."
+          }
+        },
+        "required": [
+          "draftId",
+          "mailType",
+          "confirmationUrl",
+          "expiresAtISO",
+          "recipientSummary"
         ],
         "additionalProperties": false,
         "$schema": "http://json-schema.org/draft-07/schema#"

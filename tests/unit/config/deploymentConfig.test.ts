@@ -277,8 +277,10 @@ describe('validateDeploymentConfig in production', () => {
       expect(validateDeploymentConfig(dev, 'server').findings.map(f => f.rule)).not.toContain('send_confirmation.required');
     });
 
-    it('then needs the website application in production', () => {
-      expect(ruleIds(env({ LETTER_IRL_WEBSITE_CLIENT_ID: undefined }), 'error')).toContain('send_confirmation.website_client_missing');
+    it('then needs the website application in production, which is its own finding', () => {
+      const errors = ruleIds(env({ LETTER_IRL_WEBSITE_CLIENT_ID: undefined }), 'error');
+      expect(errors).toContain('send_confirmation.website_client_missing');
+      expect(errors).not.toContain('send_confirmation.required');
     });
   });
 

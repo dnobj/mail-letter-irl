@@ -180,9 +180,9 @@ The portal's submission steps as of September 2026 (With MCP, Universal endpoint
       used in `src/` on 2026-09-23. The send rule (#470) now emits both on `send_letter`,
       `send_postcard` and `create_mail_checkout` (#475) while `LETTER_IRL_SEND_CONFIRMATION_ENABLED`
       is on, so that ChatGPT keeps the tools from its model and the card can still call them.
-      Before the rule goes on in production, confirm in ChatGPT that the model cannot call
-      `send_letter` or `create_mail_checkout`, and that the card's Send and Pay & Send buttons
-      still can (docs/letter-send-flow.md, Rollout).
+      Production requires the rule (#730). After the promotion that carries it, confirm in
+      ChatGPT that the model cannot call `send_letter` or `create_mail_checkout`, and that the
+      card's Send and Pay & Send buttons still can (docs/letter-send-flow.md, Rollout).
 - [ ] **Stable OAuth callback and CIMD id (August 2026).** They rely on RFC 9207 issuer
       identification, which the production Auth0 discovery did not advertise on 2026-09-16. Keep
       the imported CIMD client; do not swap it for the stable URL without testing the swap.

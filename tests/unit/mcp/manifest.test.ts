@@ -86,6 +86,8 @@ describe("Compatibility manifest", () => {
     vi.stubEnv("LETTER_IRL_ADDRESS_REQUESTS_ENABLED", "");
     vi.stubEnv("LETTER_IRL_SIGNATURES_ENABLED", "");
     vi.stubEnv("LETTER_IRL_CERTIFIED_MAIL_ENABLED", "");
+    // And the send rule on, which production requires (#730).
+    vi.stubEnv("LETTER_IRL_SEND_CONFIRMATION_ENABLED", "true");
     const snapshot = fs.readFileSync(manifestPath, "utf-8");
     const previousPublicBaseUrl = process.env.LETTER_IRL_PUBLIC_BASE_URL;
     process.env.LETTER_IRL_PUBLIC_BASE_URL = "https://api.letterirl.com";
