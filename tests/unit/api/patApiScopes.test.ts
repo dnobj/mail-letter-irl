@@ -133,9 +133,12 @@ describe('personal access token routes', () => {
       expect(writeSpy).toHaveBeenCalledWith('warn', 'auth.pat_client_refused', { configured: true });
     });
 
-    it("refuses everyone when the website's application is not configured", async () => {
+    it.each([
+      ["the website's", jwt(ALL)],
+      ['no', { ...jwt(ALL), claims: {} }]
+    ])("refuses everyone when the website's application is not configured: a token naming %s application", async (_label, user) => {
       vi.stubEnv('LETTER_IRL_WEBSITE_CLIENT_ID', '');
-      vi.mocked(validateAuthorizationHeader).mockResolvedValue(jwt(ALL));
+      vi.mocked(validateAuthorizationHeader).mockResolvedValue(user as AuthenticatedUser);
       const mint = response();
       await handlePATApiRequest(request('POST', { name: 'Laptop' }), mint.res, '/api/tokens');
       expect(mint.state.status).toBe(403);
