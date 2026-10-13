@@ -1105,7 +1105,8 @@ export const ACCOUNT_UNAVAILABLE_MESSAGE = "Letter IRL could not read your accou
 export interface RegisterToolsOptions {
   /**
    * Decide the account on every tool call, from that call alone. For the
-   * legacy SSE transport, where one server serves the whole stream: without it
+   * legacy SSE transport (retired, #730), where one server served the whole
+   * stream, and kept for any transport whose server outlives a call: without it
    * an account erased mid-session (#289) kept every tool until the connection
    * closed. A call whose check cannot read the account is refused rather than
    * run, since a tombstone is exactly what it may be about to write to (#446

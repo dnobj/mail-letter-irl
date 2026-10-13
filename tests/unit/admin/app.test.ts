@@ -106,6 +106,7 @@ describe("admin request pipeline", () => {
     name: "elevate",
     write: true,
   });
+  const whoisCalls = vi.fn(async () => ({ login: "owner@example.com", displayName: "Owner", nodeName: "laptop.tail1234.ts.net" }));
   let server: http.Server;
   let port = 0;
 
@@ -115,7 +116,7 @@ describe("admin request pipeline", () => {
       pools,
       sessions,
       elevation: new ElevationGuard(),
-      whois: { whois: async () => ({ login: "owner@example.com", displayName: "Owner", nodeName: "laptop.tail1234.ts.net" }) },
+      whois: { whois: whoisCalls },
       audit: new AdminAuditWriter(),
       router,
       nodeName: HOST,
@@ -217,6 +218,87 @@ describe("admin request pipeline", () => {
     }, "reason=support+ticket+123&_csrf=" + "0".repeat(64));
     expect(badToken.status).toBe(403);
     expect(audits.at(-1)).toMatchObject({ errorCode: "ADMIN_CSRF_REJECTED" });
+  });
+
+  it("refuses a cross-site request with no session before sign-in: no session, no whois, no audit row (#730)", async () => {
+    const sessionsBefore = sessions.size;
+    const auditsBefore = audits.length;
+    const whoisBefore = whoisCalls.mock.calls.length;
+    for (const dest of ["image", "script", "empty"]) {
+      const reply = await send(port, "GET", "/", { ...identity, "sec-fetch-site": "cross-site", "sec-fetch-mode": "no-cors", "sec-fetch-dest": dest });
+      expect(reply.status, dest).toBe(403);
+      expect(reply.headers["set-cookie"], dest).toBeUndefined();
+    }
+    const sameSite = await send(port, "POST", "/writes/echo", { ...identity, "sec-fetch-site": "same-site", "sec-fetch-mode": "cors", "sec-fetch-dest": "empty" }, "x=1");
+    expect(sameSite.status).toBe(403);
+    // Navigated, but into a frame: not the operator following a link.
+    const framed = await send(port, "GET", "/", { ...identity, "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "iframe" });
+    expect(framed.status).toBe(403);
+    // A form another site submits, as a top-level navigation: still refused.
+    const posted = await send(port, "POST", "/writes/echo", { ...identity, "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" }, "x=1");
+    expect(posted.status).toBe(403);
+    // Shaped like a navigation, but a page's own speculation rules sent it.
+    for (const purpose of [{ "sec-purpose": "prefetch" }, { "sec-purpose": "prefetch;prerender" }, { purpose: "prefetch" }] as Array<Record<string, string>>) {
+      const speculative = await send(port, "GET", "/", { ...identity, "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "document", ...purpose });
+      expect(speculative.status, JSON.stringify(purpose)).toBe(403);
+    }
+    const head = await send(port, "HEAD", "/", { ...identity, "sec-fetch-site": "cross-site", "sec-fetch-mode": "no-cors", "sec-fetch-dest": "image" });
+    expect(head.status).toBe(403);
+    // Another tailnet node is same-site and sends the cookie: a stale one is not a live session.
+    const stale = await send(port, "GET", "/", { ...identity, cookie: `${SESSION_COOKIE_NAME}=stale-or-forged`, "sec-fetch-site": "same-site", "sec-fetch-mode": "no-cors", "sec-fetch-dest": "image" });
+    expect(stale.status).toBe(403);
+    expect(String(stale.headers["set-cookie"])).toContain("Max-Age=0");
+    expect(sessions.size).toBe(sessionsBefore);
+    expect(audits.length).toBe(auditsBefore);
+    expect(whoisCalls.mock.calls.length).toBe(whoisBefore);
+  });
+
+  it("lets a request another site sent use a live session, and still audits a CSRF attempt with it", async () => {
+    const first = await send(port, "GET", "/", identity);
+    const sessionId = String(first.headers["set-cookie"]).split(";")[0].split("=")[1];
+    const live = { ...identity, cookie: `${SESSION_COOKIE_NAME}=${sessionId}` };
+    const image = await send(port, "GET", "/lookup", { ...live, "sec-fetch-site": "same-site", "sec-fetch-mode": "no-cors", "sec-fetch-dest": "image" });
+    expect(image.status).toBe(200);
+    const auditsBefore = audits.length;
+    const posted = await send(port, "POST", "/writes/echo", {
+      ...live,
+      "content-type": "application/x-www-form-urlencoded",
+      "sec-fetch-site": "cross-site",
+      "sec-fetch-mode": "cors",
+      "sec-fetch-dest": "empty",
+      origin: `https://${HOST}`,
+    }, "x=1");
+    expect(posted.status).toBe(403);
+    expect(audits.length).toBeGreaterThan(auditsBefore);
+    expect(audits.at(-1)).toMatchObject({ errorCode: "ADMIN_CSRF_REJECTED" });
+  });
+
+  it("records a cookie presented from another peer, even on a request another site sent", async () => {
+    const theirs = sessions.create({ login: "owner@example.com", name: "Owner", node: "laptop", peerAddress: "100.64.0.99" });
+    const auditsBefore = audits.length;
+    const reply = await send(port, "GET", "/", {
+      ...identity,
+      cookie: `${SESSION_COOKIE_NAME}=${theirs.id}`,
+      "sec-fetch-site": "same-site",
+      "sec-fetch-mode": "no-cors",
+      "sec-fetch-dest": "image",
+    });
+    expect(reply.status).toBe(200);
+    expect(audits.slice(auditsBefore)).toContainEqual(
+      expect.objectContaining({ action: "admin.session_start", input: expect.stringContaining('"replaced":"binding_mismatch"') }),
+    );
+  });
+
+  it("still audits a direct connection that fails the proxy checks, whatever its Sec-Fetch headers", async () => {
+    const auditsBefore = audits.length;
+    const reply = await send(port, "GET", "/", { "sec-fetch-site": "cross-site", "sec-fetch-mode": "no-cors", "sec-fetch-dest": "image" });
+    expect(reply.status).toBe(401);
+    expect(audits.length).toBeGreaterThan(auditsBefore);
+  });
+
+  it("lets a link the operator follows from another site open the page", async () => {
+    const reply = await send(port, "GET", "/", { ...identity, "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" });
+    expect(reply.status).toBe(200);
   });
 
   it("performs the audited email reveal with a valid token and refuses a thin reason", async () => {
