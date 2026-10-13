@@ -208,6 +208,7 @@ export function createAdminRequestListener(
     );
 
     if (!auth.ok && auth.quiet) {
+      if (cookies.has(SESSION_COOKIE_NAME)) cookiesToSet.push(clearedSessionCookie());
       constant(403);
       return;
     }

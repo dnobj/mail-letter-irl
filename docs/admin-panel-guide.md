@@ -101,8 +101,9 @@ elevated, and only if all are elevated the oldest of those.
 
 State-changing requests additionally need `Sec-Fetch-Site` of `same-origin` or `none`, an `Origin` equal
 to the panel's origin, and the per-session CSRF token in the form. Responses carry a strict nonce-based
-Content Security Policy, `Cache-Control: no-store` and a correlation id. Denials, failures, session starts
-and reveals all write `admin_audit_events`, which is append-only at the database. Requests are limited to 240
+Content Security Policy, `Cache-Control: no-store` and a correlation id. Denials (but for the quiet
+refusal of a request another site sent, above), failures, session starts and reveals all write
+`admin_audit_events`, which is append-only at the database. Requests are limited to 240
 a minute per operator, and to 10 a minute per login on the elevation route. Individual denial rows are
 capped at sixty a minute for the process; beyond that they are counted and written as one
 `admin.request_denied_burst` row per minute with the count, the error codes and the number of distinct

@@ -164,10 +164,12 @@ export async function authenticateAdminRequest(
     request.cookie("__Host-lirl_admin"),
     { login, peerAddress },
   );
-  if (resolution.kind !== "ok" && options.allowNewSession === false) {
+  if ((resolution.kind === "missing" || resolution.kind === "expired") && options.allowNewSession === false) {
     // Another site made the browser send this, and it holds no live session:
     // no whois, no session, no audit row (#730). A stale cookie, which every
-    // redeploy and idle expiry leaves behind, does not count as live.
+    // redeploy and idle expiry leaves behind, does not count as live. A cookie
+    // presented from another login or peer (binding_mismatch) is a theft
+    // signal and goes on to be recorded as before.
     return { ok: false, code: "ADMIN_UNAUTHENTICATED", reason: "cross_site_new_session", presentedLogin: login, quiet: true };
   }
   if (resolution.kind === "ok") {
