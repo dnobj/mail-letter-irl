@@ -127,6 +127,18 @@ describe('what a 401 says (#730)', () => {
     expect(`${captured.body} ${challenge}`).not.toMatch(/revoked|expired|not found|password|10\.0\.0\.4/i);
   });
 
+  it('writes why to the log, without the text', async () => {
+    vi.mocked(validateAuthorizationHeader).mockRejectedValue(new Error('Token has been revoked'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { res } = fakeResponse();
+    await authenticateRequest(request('Bearer lirl_pat_abc'), res, 'https://api.example');
+    const lines = warn.mock.calls.map(([line]) => String(line)).filter(line => line.includes('"event":"auth.mcp_rejected"'));
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0])).toMatchObject({ authType: 'pat', reason: 'revoked' });
+    expect(lines[0]).not.toContain('Token has been revoked');
+    warn.mockRestore();
+  });
+
   it('keeps the words for a missing header, which a client acts on', async () => {
     vi.mocked(validateAuthorizationHeader).mockRejectedValue(new Error('Missing Authorization header'));
     const { captured, res } = fakeResponse();
