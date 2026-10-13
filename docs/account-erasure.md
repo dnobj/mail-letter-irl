@@ -126,8 +126,8 @@ operator sends now (`job.dispatch_now`) between the preview and the run.
   This does not wait for the Auth0 deletion: a Google or Apple sign-in brings back the same subject, and
   a token issued before the erasure stays valid for up to a day. The dashboard shows the sentence from
   website #36 on; before that it shows an empty account.
-- **Sessions already open are refused too.** A legacy SSE session opened before the erasure is refused on
-  its next tool call. One thing can still slip through in the moment the erasure commits: a tool call
+- **Sessions already open are refused too.** Every MCP request is signed in and checked on its own (the
+  legacy SSE sessions that outlived calls are retired, #730). One thing can still slip through in the moment the erasure commits: a tool call
   already past sign-in can write one draft. Nothing reads it, and the draft cleanup deletes it within
   about eight days.
 - **A restyle caught mid-way writes nothing back.** The remembered stationery is kept off the tombstone by

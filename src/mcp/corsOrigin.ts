@@ -6,7 +6,8 @@
  * browser will accept. There is no wildcard. Until 2026-09 an `Origin: null`
  * request (a `file://` page or a sandboxed frame) was answered with `*`, a
  * leftover from a deleted local-file admin page (audit A-11); it let any such
- * page call the SSE and public promo routes with a token it already held.
+ * page call the (since retired) SSE and the public promo routes with a token
+ * it already held.
  * Deleted, and pinned by corsOrigin.test.ts.
  */
 export function resolveCorsOriginFor(
