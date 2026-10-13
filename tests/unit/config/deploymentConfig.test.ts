@@ -47,6 +47,9 @@ const VALID_PROD: NodeJS.ProcessEnv = {
   LETTER_IRL_OPERATOR_ALERT_URL: 'https://hc-ping.example/fixture/fail',
   MAINTENANCE_HEARTBEAT_URL: 'https://hc-ping.example/fixture',
   CONTENT_RETENTION_MODE: 'enforce',
+  // Required on in production since #730, with the website's application.
+  LETTER_IRL_SEND_CONFIRMATION_ENABLED: 'true',
+  LETTER_IRL_WEBSITE_CLIENT_ID: 'website-client-fixture',
 };
 
 const VALID_DEV: NodeJS.ProcessEnv = {
@@ -254,6 +257,29 @@ describe('validateDeploymentConfig in production', () => {
     expect(ruleIds(env({ MAINTENANCE_HEARTBEAT_URL: 'https://hc-ping.com/abc' }))).not.toContain(
       'maintenance.heartbeat_url_invalid'
     );
+  });
+
+  describe('the send rule production requires (#730)', () => {
+    it('refuses the production API with the rule off, unset or misspelt', () => {
+      expect(ruleIds(VALID_PROD, 'error')).not.toContain('send_confirmation.required');
+      for (const value of [undefined, 'false', '0', 'ture', '']) {
+        expect(ruleIds(env({ LETTER_IRL_SEND_CONFIRMATION_ENABLED: value }), 'error'), String(value)).toContain('send_confirmation.required');
+      }
+      for (const value of ['true', ' TRUE ', '1', 'yes', 'on']) {
+        expect(ruleIds(env({ LETTER_IRL_SEND_CONFIRMATION_ENABLED: value }), 'error'), value).not.toContain('send_confirmation.required');
+      }
+    });
+
+    it('asks neither production maintenance nor development for it', () => {
+      const off = env({ LETTER_IRL_SEND_CONFIRMATION_ENABLED: undefined });
+      expect(validateDeploymentConfig(off, 'maintenance').findings.map(f => f.rule)).not.toContain('send_confirmation.required');
+      const dev = env({ LETTER_IRL_SEND_CONFIRMATION_ENABLED: undefined }, VALID_DEV);
+      expect(validateDeploymentConfig(dev, 'server').findings.map(f => f.rule)).not.toContain('send_confirmation.required');
+    });
+
+    it('then needs the website application in production', () => {
+      expect(ruleIds(env({ LETTER_IRL_WEBSITE_CLIENT_ID: undefined }), 'error')).toContain('send_confirmation.website_client_missing');
+    });
   });
 
   describe('the monitoring production requires (#699)', () => {

@@ -55,7 +55,10 @@ const FULL_PRODUCTION_NAMES = [
   'LETTER_IRL_OAUTH_PROD_ISSUER',
   'LETTER_IRL_OAUTH_CIMD_ENFORCEMENT',
   // Required in production since #699.
-  'LETTER_IRL_OPERATOR_ALERT_URL'
+  'LETTER_IRL_OPERATOR_ALERT_URL',
+  // Required on in production since #730.
+  'LETTER_IRL_SEND_CONFIRMATION_ENABLED',
+  'LETTER_IRL_WEBSITE_CLIENT_ID'
 ];
 
 describe('diffManifest', () => {
