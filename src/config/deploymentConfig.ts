@@ -493,8 +493,9 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
   },
   /**
    * The website's own Auth0 application: the only one whose tokens may
-   * confirm a send. Missing while the rule is on is its own rule's finding,
-   * and the rule is on in production (#730), so production needs it.
+   * confirm a send, or make and revoke a personal access token (#730).
+   * Missing is its own rule's finding: an error in production, a warning
+   * elsewhere while the send rule is on.
    */
   {
     name: 'LETTER_IRL_WEBSITE_CLIENT_ID',
@@ -1526,15 +1527,16 @@ export function validateDeploymentConfig(
     });
   }
 
-  // #470: with the send rule on and no website application named, the
-  // confirmation page refuses every send, and apps without our card cannot
-  // send at all. An error in production, where that is a customer outage.
-  if (isSendConfirmationEnabled(env) && !websiteClientId(env)) {
+  // #470: with no website application named, the confirmation page refuses
+  // every send, and apps without our card cannot send at all; nor can anyone
+  // make or revoke a personal access token (#730). An error in production,
+  // where that is a customer outage. The API only: maintenance serves neither.
+  if (surface === 'server' && !websiteClientId(env) && (production || isSendConfirmationEnabled(env))) {
     findings.push({
       severity: production ? 'error' : 'warning',
       rule: 'send_confirmation.website_client_missing',
       message:
-        'LETTER_IRL_SEND_CONFIRMATION_ENABLED is on without LETTER_IRL_WEBSITE_CLIENT_ID, so nobody can send from the confirmation page'
+        'LETTER_IRL_WEBSITE_CLIENT_ID is not set, so nobody can send from the confirmation page or make a personal access token'
     });
   }
 

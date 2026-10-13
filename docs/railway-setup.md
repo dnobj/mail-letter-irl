@@ -89,7 +89,8 @@ LETTER_IRL_OUTBOX_DISPATCH_ENABLED=<true; false pauses the outbox>
 # The send rule (#470, docs/letter-send-flow.md): only the person finishes a send, from our card or
 # the website's confirmation page. Off unless explicitly true. API service only.
 LETTER_IRL_SEND_CONFIRMATION_ENABLED=<true; production refuses to start without it (#730), and needs LETTER_IRL_WEBSITE_CLIENT_ID with it>
-# The website's own Auth0 application's Client ID: the only token that may confirm a send.
+# The website's own Auth0 application's Client ID: the only token that may confirm a send, or make
+# or revoke a personal access token (#730). Production refuses to start without it.
 LETTER_IRL_WEBSITE_CLIENT_ID=<the website application's Client ID in this tenant>
 # Where the confirmation link points. Defaults to LETTER_IRL_GIFT_LANDING_BASE_URL.
 LETTER_IRL_WEBSITE_BASE_URL=<https://letterirl.com, or the development website's address>
