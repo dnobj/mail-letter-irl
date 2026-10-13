@@ -299,7 +299,7 @@ Production is a separate, owner-approved operation after the implementation PR i
 3. Import the production CIMD into the production Auth0 tenant.
 4. Apply the approved API access, scopes, connection policy, and resource compatibility settings.
 5. Deploy the already accepted code through the normal dev-to-master promotion.
-6. Test a controlled production account: fresh link, consent, get_started, image generation, preview, reconnect, revoke, and controlled send only when explicitly authorized.
+6. Test a controlled production user account: fresh link, consent, get_started, image generation, preview, reconnect, revoke, and controlled send only when explicitly authorized.
 7. Monitor authorization failures, client count, error rate, and sensitive logging.
 8. Disable production DCR and the static shim only after successful observation and dependency confirmation. Remove the static client's MCP API grant if a rollback granted one.
 9. Record the final production configuration and rollback owner.

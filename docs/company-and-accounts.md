@@ -22,8 +22,8 @@ production Auth0 tenant, Railway, app testing in ChatGPT).
 
 ## OpenAI Registration
 
-Letter IRL is submitted and managed under the OpenAI organization of `Objective Works`, with
-`Letter IRL` as the app/product name. Organization identity verification was completed on May 31, 2026.
+Letter IRL is submitted and managed under the OpenAI organization of `Objective Works`, in the
+`Mail Letter IRL` project, with `Letter IRL` as the app/product name. Organization identity verification was completed on May 31, 2026.
 See `docs/chatgpt-app-submission.md` and `docs/app-submission/openai-test-cases.md` for the submission
 materials and reviewer test cases.
 

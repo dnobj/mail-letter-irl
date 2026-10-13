@@ -45,7 +45,7 @@ Remaining:
 - [x] Confirm the selected OpenAI project has global data residency and is eligible for app review. Dashboard `GEOGRAPHY` column shows `Global`.
 - [ ] Use the dedicated testing ChatGPT account for focused Letter IRL testing.
 - [ ] Keep the owner's personal ChatGPT account separate from app testing and review prep.
-- [x] Record the final OpenAI organization/project names in `docs/company-and-accounts.md` once confirmed.
+- [x] Record the final OpenAI organization and project (`Mail Letter IRL`); their IDs are kept privately (#730).
 
 ### Public Company and Support Information
 
