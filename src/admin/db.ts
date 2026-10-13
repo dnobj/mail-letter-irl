@@ -103,6 +103,8 @@ export interface ReaderSeparation {
   readsDraftBody: boolean;
   readsReturnAddress: boolean;
   readsTokenHash: boolean;
+  readsLetterPreview: boolean;
+  readsAddressRequests: boolean;
   unrestricted: boolean;
   privilegedMember: boolean;
   ownerMember: boolean;
@@ -131,6 +133,8 @@ export async function readReaderSeparation(
     draft_body: boolean;
     return_address: boolean;
     token_hash: boolean;
+    letter_preview: boolean;
+    address_requests: boolean;
     unrestricted: boolean;
     privileged_member: boolean;
     owner_member: boolean;
@@ -141,6 +145,11 @@ export async function readReaderSeparation(
        has_column_privilege(r.oid, 'letter_drafts', 'body_text', 'SELECT') AS draft_body,
        has_column_privilege(r.oid, 'users', 'return_address', 'SELECT') AS return_address,
        has_column_privilege(r.oid, 'personal_access_tokens', 'token_hash', 'SELECT') AS token_hash,
+       has_column_privilege(r.oid, 'letters', 'preview_html', 'SELECT') AS letter_preview,
+       -- A table the reader is never granted: one that exists on every branch
+       -- this panel runs against, read safely where it does not.
+       COALESCE((SELECT has_table_privilege(r.oid, c.oid, 'SELECT') FROM pg_class AS c
+                  WHERE c.oid = to_regclass('address_requests')), false) AS address_requests,
        (r.rolsuper OR r.rolbypassrls) AS unrestricted,
        EXISTS (
          SELECT 1 FROM pg_roles AS member_of
@@ -151,6 +160,10 @@ export async function readReaderSeparation(
               OR member_of.rolsuper
               OR member_of.rolbypassrls
               OR has_column_privilege(member_of.oid, 'letters', 'content', 'SELECT')
+              OR has_column_privilege(member_of.oid, 'letters', 'recipient', 'SELECT')
+              OR has_column_privilege(member_of.oid, 'letter_drafts', 'body_text', 'SELECT')
+              OR has_column_privilege(member_of.oid, 'users', 'return_address', 'SELECT')
+              OR has_column_privilege(member_of.oid, 'personal_access_tokens', 'token_hash', 'SELECT')
             )
        ) AS privileged_member,
        pg_has_role(r.oid, (SELECT relowner FROM pg_class WHERE oid = 'letters'::regclass), 'MEMBER') AS owner_member
@@ -166,6 +179,8 @@ export async function readReaderSeparation(
     readsDraftBody: row.draft_body,
     readsReturnAddress: row.return_address,
     readsTokenHash: row.token_hash,
+    readsLetterPreview: row.letter_preview,
+    readsAddressRequests: row.address_requests,
     unrestricted: row.unrestricted,
     privilegedMember: row.privileged_member,
     ownerMember: row.owner_member,

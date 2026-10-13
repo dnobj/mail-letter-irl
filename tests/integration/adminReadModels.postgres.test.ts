@@ -255,6 +255,8 @@ describePostgres('admin read models through the reader role', () => {
       readsDraftBody: false,
       readsReturnAddress: false,
       readsTokenHash: false,
+      readsLetterPreview: false,
+      readsAddressRequests: false,
       unrestricted: false,
       privilegedMember: false,
       ownerMember: false
