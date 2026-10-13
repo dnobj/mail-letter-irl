@@ -505,7 +505,7 @@ See [`tests/integration/README.md`](../tests/integration/README.md) for how to s
 3. Confirm no development URLs, test keys, or dummy-provider settings enter production.
    The boot validator enforces the key-mode and provider rules; the review still
    catches URLs and anything outside the validator's reach.
-4. Merge backend `dev` into `master` and website `dev` into `main` through reviewed PRs.
+4. Merge backend `dev` into `master` and website `dev` into `main` through reviewed PRs. Usually the API goes first. When the promotion first carries the send rule (#730), the website goes first, so the confirmation page is live when `request_send` starts linking to it ([letter-send-flow.md](letter-send-flow.md), Rollout). Before choosing, check the website's `dev` to `main` diff for any API route it calls that `master` does not have yet.
 5. Confirm migrations completed before the new API deployment became active. The
    pre-deploy command does this automatically and halts the deploy on failure, so
    the check is to read the deploy log for the migrator's own output and confirm
@@ -528,6 +528,7 @@ See [`tests/integration/README.md`](../tests/integration/README.md) for how to s
 - Admin foundation rollback: retain migration 022 plus marker, command, operation, and audit evidence; revoke
   environment-specific role access separately if access was provisioned.
 - Mail safety: retain `letter_jobs` rows and stable idempotency keys during every rollback.
+- The send rule cannot be turned off in production (#730). If the confirmation page or the website's client id breaks after launch, stop mail with `LETTER_IRL_MAIL_SENDING_ENABLED`, or roll back.
 - Image safety: keep the bucket and credentials in place while any 15-minute image URL may still be active.
 
 Never point development at production Neon to work around a deployment problem.
