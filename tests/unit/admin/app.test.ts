@@ -247,6 +247,7 @@ describe("admin request pipeline", () => {
     // Another tailnet node is same-site and sends the cookie: a stale one is not a live session.
     const stale = await send(port, "GET", "/", { ...identity, cookie: `${SESSION_COOKIE_NAME}=stale-or-forged`, "sec-fetch-site": "same-site", "sec-fetch-mode": "no-cors", "sec-fetch-dest": "image" });
     expect(stale.status).toBe(403);
+    expect(String(stale.headers["set-cookie"])).toContain("Max-Age=0");
     expect(sessions.size).toBe(sessionsBefore);
     expect(audits.length).toBe(auditsBefore);
     expect(whoisCalls.mock.calls.length).toBe(whoisBefore);
