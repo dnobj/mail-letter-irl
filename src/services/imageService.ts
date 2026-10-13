@@ -24,7 +24,6 @@
  * - US-LAYOUT-04: Letter Layout Image Processing
  */
 
-import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import sharp, { type Metadata, type OverlayOptions, type Sharp } from 'sharp';
 import type { ImageFileParam, ProcessedImage, PostcardSize, LetterImageType } from './types.js';
@@ -35,6 +34,12 @@ import {
 } from './tempImageStore.js';
 import { ConcurrencyGateError, createConcurrencyGate, type ConcurrencyGate } from '../utils/concurrencyGate.js';
 import { COLLAGE_MAX_PHOTOS, COLLAGE_MIN_PHOTOS, collageCells } from './collageArrangement.js';
+import {
+  isUnsafeIpAddress,
+  remoteImageTransport,
+  resolvePublicAddress,
+  type PinnedAddress
+} from './imageDownload.js';
 
 // ============================================================================
 // Configuration
@@ -276,7 +281,12 @@ export function runImageDecode<T>(work: () => Promise<T>, actorId?: string): Pro
   return runGated(decodeGate, work, actorId);
 }
 
-async function validateRemoteImageUrl(url: string): Promise<URL> {
+/**
+ * The URL, checked, and the address to connect to: https only, and a host
+ * whose every address is public (#730: resolved under the download's
+ * deadline, off the thread pool, src/services/imageDownload.ts).
+ */
+async function validateRemoteImageUrl(url: string, signal: AbortSignal): Promise<{ parsed: URL; pinned: PinnedAddress }> {
   let parsed: URL;
 
   try {
@@ -290,72 +300,19 @@ async function validateRemoteImageUrl(url: string): Promise<URL> {
   }
 
   const host = parsed.hostname.replace(/^\[|\]$/g, '');
-  if (isUnsafeIpAddress(host)) {
-    throw new ImageProcessingError('DOWNLOAD_FAILED', DOWNLOAD_FAILED_MESSAGE);
-  }
-
-  if (!isIP(host)) {
-    const addresses = await lookup(host, { all: true, verbatim: true });
-    if (addresses.length === 0 || addresses.some(({ address }) => isUnsafeIpAddress(address))) {
+  const literal = isIP(host);
+  if (literal) {
+    if (isUnsafeIpAddress(host)) {
       throw new ImageProcessingError('DOWNLOAD_FAILED', DOWNLOAD_FAILED_MESSAGE);
     }
+    return { parsed, pinned: { address: host, family: literal === 6 ? 6 : 4 } };
   }
 
-  return parsed;
-}
-
-function isUnsafeIpAddress(address: string): boolean {
-  const ipv4Mapped = address.toLowerCase().match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  if (ipv4Mapped) {
-    return isUnsafeIpv4Address(ipv4Mapped[1]);
+  const pinned = await resolvePublicAddress(host, signal);
+  if (!pinned) {
+    throw new ImageProcessingError('DOWNLOAD_FAILED', DOWNLOAD_FAILED_MESSAGE);
   }
-
-  const ipVersion = isIP(address);
-  if (ipVersion === 4) {
-    return isUnsafeIpv4Address(address);
-  }
-  if (ipVersion === 6) {
-    return isUnsafeIpv6Address(address);
-  }
-  return false;
-}
-
-function isUnsafeIpv4Address(address: string): boolean {
-  const parts = address.split('.').map((part) => Number.parseInt(part, 10));
-  if (parts.length !== 4 || parts.some((part) => Number.isNaN(part) || part < 0 || part > 255)) {
-    return true;
-  }
-
-  const [a, b, c] = parts;
-  return (
-    a === 0 ||
-    a === 10 ||
-    a === 127 ||
-    a >= 224 ||
-    (a === 100 && b >= 64 && b <= 127) ||
-    (a === 169 && b === 254) ||
-    (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 168) ||
-    (a === 192 && b === 0 && c === 0) ||
-    (a === 192 && b === 0 && c === 2) ||
-    (a === 198 && (b === 18 || b === 19)) ||
-    (a === 198 && b === 51 && c === 100) ||
-    (a === 203 && b === 0 && c === 113)
-  );
-}
-
-function isUnsafeIpv6Address(address: string): boolean {
-  const normalized = address.toLowerCase();
-  return (
-    normalized === '::' ||
-    normalized === '::1' ||
-    normalized.startsWith('::ffff:') ||
-    normalized.startsWith('fc') ||
-    normalized.startsWith('fd') ||
-    /^fe[89ab]/.test(normalized) ||
-    normalized.startsWith('ff') ||
-    normalized.startsWith('2001:db8')
-  );
+  return { parsed, pinned };
 }
 
 /**
@@ -368,14 +325,13 @@ async function fetchRemoteImage(
   signal: AbortSignal,
   redirectsRemaining = REMOTE_IMAGE_FETCH_CONFIG.maxRedirects
 ): Promise<Response> {
-  const parsed = await validateRemoteImageUrl(url);
-  const response = await fetch(parsed.toString(), {
-    redirect: 'manual',
-    signal,
-  });
+  const { parsed, pinned } = await validateRemoteImageUrl(url, signal);
+  const response = await remoteImageTransport.fetch(parsed.toString(), { signal, pinned });
 
   if (response.status >= 300 && response.status < 400) {
     const location = response.headers.get('location');
+    // The redirect's own body is not read; let its connection go.
+    await response.body?.cancel?.().catch(() => undefined);
     if (!location || redirectsRemaining <= 0) {
       throw new ImageProcessingError('DOWNLOAD_FAILED', DOWNLOAD_FAILED_MESSAGE);
     }

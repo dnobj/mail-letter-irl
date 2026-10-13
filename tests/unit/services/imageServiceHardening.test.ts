@@ -10,6 +10,7 @@ import {
   reprocessPostcardImage,
 } from '../../../src/services/imageService.js';
 import { ConcurrencyGateError } from '../../../src/utils/concurrencyGate.js';
+import { remoteImageTransport } from '../../../src/services/imageDownload.js';
 
 /**
  * Real bytes, no sharp mock. imageService.test.ts mocks sharp and fetch's
@@ -114,7 +115,7 @@ describe('image pipeline hardening', () => {
   const fetchMock = vi.fn();
 
   beforeEach(() => {
-    vi.stubGlobal('fetch', fetchMock);
+    remoteImageTransport.fetch = fetchMock as never;
   });
 
   afterEach(() => {

@@ -15,6 +15,7 @@ vi.mock('../../../src/services/tempImageStore.js', async (importOriginal) => ({
 }));
 
 import { getImage, getUploadedPhoto, UPLOADED_PHOTO_REFERENCE } from '../../../src/services/tempImageStore.js';
+import { remoteImageTransport } from '../../../src/services/imageDownload.js';
 
 /**
  * Postcard collages (#616): two to four photos downloaded and drawn on one
@@ -236,7 +237,7 @@ async function expectCell(
 
 describe('postcard collages (#616)', () => {
   beforeEach(() => {
-    vi.stubGlobal('fetch', fetchMock);
+    remoteImageTransport.fetch = fetchMock as never;
     vi.mocked(getUploadedPhoto).mockReset();
     vi.mocked(getImage).mockReset();
   });
