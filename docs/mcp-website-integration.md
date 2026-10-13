@@ -211,7 +211,7 @@ interface Token {
 
 **Base URL:** `https://api.letterirl.com` (production) or env variable
 
-**Endpoints:**
+**Endpoints:** making and revoking a token take the website's own sign-in: a token issued to another application (a connected app's) is refused with `403 website_only`, as a send is (#730). Any token with `mail:read` may list them.
 
 ```typescript
 // Create token
