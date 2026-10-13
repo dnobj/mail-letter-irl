@@ -2319,6 +2319,87 @@ describe('commerceService', () => {
     );
   });
 
+  describe('a dispute that escalates, and one already settled (#730)', () => {
+    const disputedOrder = { ...baseOrder, status: 'fulfilled', stripe_payment_intent_id: 'pi-1' };
+
+    async function deliver(
+      type: string,
+      status: string,
+      prior?: { status: string; resolved_at: Date | null }
+    ) {
+      mocks.query.mockImplementation(async (sql: string) => {
+        if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-1' }] };
+        if (sql.includes('SELECT status, resolved_at FROM stripe_disputes')) return { rows: prior ? [prior] : [] };
+        if (sql.includes('SELECT * FROM orders')) return { rows: [disputedOrder] };
+        return { rows: [] };
+      });
+      await expect(processStripeWebhookEvent({
+        id: 'evt-1', type, data: { object: {
+          id: 'dp-1', payment_intent: 'pi-1', charge: 'ch-1', amount: 499,
+          currency: 'usd', reason: 'fraudulent', status
+        } }
+      } as any)).resolves.toEqual({ duplicate: false });
+    }
+    const calls = (fragment: string) =>
+      (mocks.query.mock.calls as unknown as Array<[string, unknown[]]>).filter(([sql]) => String(sql).includes(fragment));
+    const blocked = () => calls('sends_blocked_reason = COALESCE(sends_blocked_reason, $2)').length > 0;
+    const disputeAlerts = () =>
+      calls('INSERT INTO commerce_operational_alerts (').filter(([, params]) => params[2] === 'stripe_dispute_created');
+
+    it.each(['charge.dispute.updated', 'charge.dispute.funds_withdrawn'])(
+      'restricts the account when an inquiry becomes a chargeback (%s), and tells the operator once',
+      async type => {
+        await deliver(type, 'needs_response', { status: 'warning_needs_response', resolved_at: null });
+        expect(blocked()).toBe(true);
+        expect(disputeAlerts()).toHaveLength(1);
+        expect(JSON.parse(String(disputeAlerts()[0][1][4]))).toMatchObject({ escalatedBy: type });
+      }
+    );
+
+    it('treats an escalation with no earlier event as the first loss', async () => {
+      await deliver('charge.dispute.funds_withdrawn', 'needs_response');
+      expect(blocked()).toBe(true);
+      expect(disputeAlerts()).toHaveLength(1);
+    });
+
+    it('records a later update within the chargeback without a second alert', async () => {
+      await deliver('charge.dispute.updated', 'under_review', { status: 'needs_response', resolved_at: null });
+      expect(blocked()).toBe(true);
+      expect(disputeAlerts()).toHaveLength(0);
+    });
+
+    it('leaves an inquiry that is still an inquiry alone', async () => {
+      await deliver('charge.dispute.updated', 'warning_under_review', { status: 'warning_needs_response', resolved_at: null });
+      expect(blocked()).toBe(false);
+      expect(disputeAlerts()).toHaveLength(0);
+    });
+
+    it.each(['charge.dispute.created', 'charge.dispute.updated', 'charge.dispute.funds_withdrawn'])(
+      'changes nothing for %s delivered after the dispute closed',
+      async type => {
+        await deliver(type, 'needs_response', { status: 'won', resolved_at: new Date() });
+        expect(blocked()).toBe(false);
+        expect(disputeAlerts()).toHaveLength(0);
+        expect(calls("UPDATE orders SET status = 'disputed'")).toHaveLength(0);
+        const event = calls('INSERT INTO commerce_order_events');
+        expect(event).toHaveLength(1);
+        expect(JSON.parse(String(event[0][1][4]))).toMatchObject({ ignoredAfterClose: true });
+      }
+    );
+
+    it('still acts on a losing close after an earlier one', async () => {
+      await deliver('charge.dispute.closed', 'lost', { status: 'lost', resolved_at: new Date() });
+      expect(blocked()).toBe(true);
+    });
+
+    it('keeps a settled dispute\'s status when a late event is recorded', async () => {
+      await deliver('charge.dispute.updated', 'needs_response', { status: 'won', resolved_at: new Date() });
+      const upsert = calls('INSERT INTO stripe_disputes');
+      expect(upsert).toHaveLength(1);
+      expect(String(upsert[0][0])).toMatch(/WHEN stripe_disputes\.resolved_at IS NOT NULL AND EXCLUDED\.resolved_at IS NULL\s+THEN stripe_disputes\.status/);
+    });
+  });
+
   it('repairs a fulfilled pack grant atomically through the exact order/session binding', async () => {
     const packOrder = {
       ...baseOrder,

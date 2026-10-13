@@ -3320,7 +3320,13 @@ async function recordDispute(
        amount_cents = EXCLUDED.amount_cents,
        currency = EXCLUDED.currency,
        reason = COALESCE(EXCLUDED.reason, stripe_disputes.reason),
-       status = EXCLUDED.status,
+       -- A settled dispute keeps the status it closed with: a created or
+       -- updated event delivered after the close carries an older status.
+       status = CASE
+         WHEN stripe_disputes.resolved_at IS NOT NULL AND EXCLUDED.resolved_at IS NULL
+           THEN stripe_disputes.status
+         ELSE EXCLUDED.status
+       END,
        evidence_due_by = COALESCE(EXCLUDED.evidence_due_by, stripe_disputes.evidence_due_by),
        stripe_created_at = COALESCE(EXCLUDED.stripe_created_at, stripe_disputes.stripe_created_at),
        -- Never clear a resolution: a replayed created event arriving after a
@@ -3371,9 +3377,22 @@ async function blockAccountSends(
   );
 }
 
+/**
+ * The dispute events that carry its state (#730). An inquiry opens as
+ * `warning_needs_response` and revokes nothing; when the bank escalates it to
+ * a chargeback, Stripe updates the same dispute (`updated`, and
+ * `funds_withdrawn` when the money leaves), so those revoke as `created`
+ * would. `funds_reinstated` is left to `closed`, which compensates.
+ */
+export type DisputeEventType =
+  | 'charge.dispute.created'
+  | 'charge.dispute.updated'
+  | 'charge.dispute.funds_withdrawn'
+  | 'charge.dispute.closed';
+
 async function processDisputeEvent(
   eventId: string,
-  eventType: 'charge.dispute.created' | 'charge.dispute.closed',
+  eventType: DisputeEventType,
   dispute: Stripe.Dispute
 ): Promise<StripeEventProcessingResult> {
   return transaction(async client => {
@@ -3381,6 +3400,17 @@ async function processDisputeEvent(
       return { duplicate: true };
     }
     const closed = eventType === 'charge.dispute.closed';
+    const escalation = eventType === 'charge.dispute.updated' || eventType === 'charge.dispute.funds_withdrawn';
+    // What we knew before this event. An event that is not a close, delivered
+    // after the close, carries an older status: acting on it would revoke a
+    // won dispute's letters again and block the account for good.
+    const prior = await client.query<{ status: string; resolved_at: Date | null }>(
+      'SELECT status, resolved_at FROM stripe_disputes WHERE dispute_id = $1 FOR UPDATE',
+      [dispute.id]
+    );
+    const settledBefore = !closed && Boolean(prior.rows[0]?.resolved_at);
+    const status = String(dispute.status || '');
+    const lossNow = !NON_LOSS_DISPUTE_STATUSES.has(status);
     const paymentIntentId = typeof dispute.payment_intent === 'string'
       ? dispute.payment_intent
       : dispute.payment_intent?.id;
@@ -3418,6 +3448,16 @@ async function processDisputeEvent(
       );
       return { duplicate: false };
     }
+    if (order && settledBefore) {
+      await client.query('UPDATE stripe_webhook_events SET order_id = $2 WHERE event_id = $1', [
+        eventId, order.order_id
+      ]);
+      await recordOrderEvent(client, order.order_id, eventType, order.status, order.status, {
+        disputeStatus: dispute.status,
+        ignoredAfterClose: true
+      });
+      return { duplicate: false };
+    }
     if (order) {
       await client.query('UPDATE stripe_webhook_events SET order_id = $2 WHERE event_id = $1', [
         eventId, order.order_id
@@ -3444,12 +3484,12 @@ async function processDisputeEvent(
       // chargeback would confiscate a paying customer's balance. Anything
       // unrecognised is treated as a loss, which is the safe default.
       //
-      // Applied on created AND on any losing close, because Stripe can deliver
-      // these out of order and a close arriving without its create must still
-      // revoke rather than leave the packs quietly spendable. Both operations
-      // are idempotent, so the second event is a no-op.
-      const status = String(dispute.status || '');
-      if (!NON_LOSS_DISPUTE_STATUSES.has(status)) {
+      // Applied on created, on an escalation (updated, funds_withdrawn) AND on
+      // any losing close, because Stripe can deliver these out of order and a
+      // close arriving without its create must still revoke rather than leave
+      // the packs quietly spendable. Each operation is idempotent, so a later
+      // event is a no-op.
+      if (lossNow) {
         if (order.order_type === 'letter_pack') {
           // Its mail not yet printed waits for the operator (#696): a dispute can be won.
           await holdMailFundedByOrder(client, order, eventId, 'funding_disputed');
@@ -3482,6 +3522,14 @@ async function processDisputeEvent(
         );
       }
     }
+    // An escalation is told once: when the dispute first becomes a loss. Its
+    // other updates (evidence submitted, a status within the chargeback) are
+    // recorded on the order and the dispute row only.
+    if (escalation) {
+      const priorStatus = prior.rows[0]?.status;
+      const firstLoss = lossNow && (priorStatus === undefined || NON_LOSS_DISPUTE_STATUSES.has(priorStatus));
+      if (!firstLoss) return { duplicate: false };
+    }
     const severity = closed
       ? dispute.status === 'lost'
         ? 'critical'
@@ -3504,7 +3552,8 @@ async function processDisputeEvent(
           reason: dispute.reason || null,
           amountCents: dispute.amount,
           currency: dispute.currency,
-          chargeReferencePresent: Boolean(dispute.charge)
+          chargeReferencePresent: Boolean(dispute.charge),
+          ...(escalation ? { escalatedBy: eventType } : {})
         })
       ]
     );
@@ -3532,6 +3581,8 @@ export async function processStripeWebhookEvent(
     case 'charge.refunded':
       return processRefundEvent(event.id, event.type, event.data.object as Stripe.Charge);
     case 'charge.dispute.created':
+    case 'charge.dispute.updated':
+    case 'charge.dispute.funds_withdrawn':
     case 'charge.dispute.closed':
       return processDisputeEvent(
         event.id,

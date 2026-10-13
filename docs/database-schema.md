@@ -545,7 +545,7 @@ operator's typed reason lives in `admin_audit_events` alone (#394).
 
 ### commerce_operational_alerts
 
-The operator alert queue: dispute created or closed, ambiguous mail-provider outcome, refunded mail
+The operator alert queue: dispute created (or escalated from an inquiry, #730) or closed, ambiguous mail-provider outcome, refunded mail
 already dispatched, unmatched money event, and the steps an account erasure leaves an operator to do by
 hand (`account_erasure_followup`, migration 036, #453). That last one has no order or source event; its
 `details` hold the account id and nothing else. A daily limit's first refusal of a UTC day opens

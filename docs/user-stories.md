@@ -546,7 +546,7 @@ There is a mobile workaround - ask me about it if you want to try.
 **So that** fraud is tracked and accounts are flagged
 
 **Acceptance Criteria:**
-- [ ] Webhook receives `charge.dispute.created` event
+- [ ] Webhook receives `charge.dispute.created` event, and `charge.dispute.updated` / `charge.dispute.funds_withdrawn` when an inquiry becomes a chargeback (#730)
 - [ ] Dispute recorded in `stripe_disputes` table
 - [ ] Alert created for admin dashboard
 - [ ] User's credits revoked (same as refund)
