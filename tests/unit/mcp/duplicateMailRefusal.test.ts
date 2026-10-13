@@ -78,7 +78,7 @@ describe("duplicate mail refusals", () => {
 
     expect(appServer.execute).toHaveBeenCalledTimes(1);
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toMatch(/^Possible duplicate: This same postcard to Sam Rivera/);
+    expect(result.content[0].text).toMatch(/^Possible duplicate: This same postcard to "Sam Rivera"/);
     expect(result._meta["letterirl/duplicateMail"]).toMatchObject({ kind: "paid", ageMinutes: 122 });
     expect(result.structuredContent).toBeUndefined();
   });

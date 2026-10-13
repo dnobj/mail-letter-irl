@@ -18,7 +18,6 @@ interface GetOrderStatusOutput {
   // Note: previewThumbnailHtml removed for performance (US-LETTER-04)
   // Preview was already shown at send time; status is for tracking delivery
   canSendFollowUp?: boolean;
-  followUpSuggestedPrompt?: string;
   trackingSupport: "none" | "estimated_only" | "carrier_tracking";
   /** Sent with an arrival date (#535): its dates, and whether it can still be cancelled free. */
   arriveBy?: string;
@@ -91,7 +90,6 @@ async function handler(
     statusTimeline: order.statusTimeline,
     recipientSummary: order.recipientSummary,
     canSendFollowUp: true,
-    followUpSuggestedPrompt: `Write a follow-up letter to ${order.recipientSummary.name}.`,
     // Carrier tracking only once USPS's number is stored, and not for a letter that did not go out (#625); until then, like any mail, estimated.
     trackingSupport:
       order.certified?.carrierTrackingNumber && order.currentStatus !== "failed" && order.currentStatus !== "cancelled"
