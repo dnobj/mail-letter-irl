@@ -30,8 +30,9 @@ import { checkoutHosts } from '../config/checkoutDomain.js';
  * page through window.openai.openExternal. For an allowlisted redirect
  * domain, ChatGPT appends a `redirectUrl` query parameter to that link. The
  * start page keeps it in a same-site cookie on this origin and forwards to
- * Stripe; the return page reads the cookie back. Stateless, and nothing is
- * stored against the order.
+ * Stripe; the return page reads the cookie back. Nothing is stored against
+ * the order; the start page reads the checkout address the order recorded
+ * (#730), so it has its own rate limits.
  */
 
 export const CHATGPT_WEB_URL = 'https://chatgpt.com/';

@@ -25,7 +25,7 @@
 import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { RATE_LIMITS } from '../../../src/api/middleware/rateLimit.js';
+import { GLOBAL_RATE_LIMITS, RATE_LIMITS } from '../../../src/api/middleware/rateLimit.js';
 import { TIER_RATE_MULTIPLIERS } from '../../../src/services/tierService.js';
 
 function read(relative: string): string {
@@ -194,5 +194,6 @@ describe('the purchase start page (#730)', () => {
 
   it('has a per-address limit far below its limit in all', () => {
     expect(RATE_LIMITS.purchase_start.maxRequests).toBe(30);
+    expect(GLOBAL_RATE_LIMITS.purchase_start.maxRequests).toBe(3000);
   });
 });

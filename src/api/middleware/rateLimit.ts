@@ -29,7 +29,7 @@ const rateLimitStore = new Map<string, RateLimitEntry>();
 const blockedRequestCounts = new Map<string, number>();
 
 // Global rate limit configuration (system-wide, not per-IP)
-const GLOBAL_RATE_LIMITS: Record<string, RateLimitConfig> = {
+export const GLOBAL_RATE_LIMITS: Record<string, RateLimitConfig> = {
   'promo_public': {
     windowMs: 60 * 1000,      // 1 minute
     maxRequests: 100,         // 100 total per minute (protects against distributed attacks)
