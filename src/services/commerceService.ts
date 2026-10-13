@@ -3398,6 +3398,9 @@ async function processDisputeEvent(
     if (!(await claimStripeEvent(client, eventId, eventType, dispute.id))) {
       return { duplicate: true };
     }
+    // One dispute's events, one at a time, whether or not an order matches
+    // (#730): the order's lock below covers only a matched one.
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`stripe_dispute:${dispute.id}`]);
     const closed = eventType === 'charge.dispute.closed';
     const escalation = eventType === 'charge.dispute.updated' || eventType === 'charge.dispute.funds_withdrawn';
     const status = String(dispute.status || '');
@@ -3419,23 +3422,24 @@ async function processDisputeEvent(
         )
       : { rows: [] as Order[] };
     const order = orderResult.rows[0];
-    // What we knew before this event (#730), read after the order's lock, which
-    // serialises the events of one dispute. Only a close acts on every
-    // delivery. Any other event acts only when it brings something new:
+    // What we knew before this event (#730), read under the dispute's lock.
+    // Only a close acts on every delivery. Any other event acts only when it brings something new:
     // - after the close, it carries an older status, and acting on it would
     //   revoke a won dispute's letters again and block the account for good
     //   (an inquiry closes as warning_closed only once the network can no
     //   longer escalate it);
-    // - once the dispute is a loss, its effects are in place: repeating them
-    //   on each update would hold again mail an operator released, and raise
-    //   the funded-mail alert again;
+    // - once the dispute is a loss whose effects ran, they are in place:
+    //   repeating them on each update would hold again mail an operator
+    //   released, and raise the funded-mail alert again. A row recorded while
+    //   no order matched (user_id still null) ran none, so its next event acts;
     // - an update to an inquiry that is still an inquiry changes nothing.
-    const prior = await client.query<{ status: string; resolved_at: Date | null }>(
-      'SELECT status, resolved_at FROM stripe_disputes WHERE dispute_id = $1 FOR UPDATE',
+    const prior = await client.query<{ status: string; resolved_at: Date | null; user_id: string | null }>(
+      'SELECT status, resolved_at, user_id FROM stripe_disputes WHERE dispute_id = $1 FOR UPDATE',
       [dispute.id]
     );
     const priorStatus = prior.rows[0]?.status;
-    const priorLoss = priorStatus !== undefined && !NON_LOSS_DISPUTE_STATUSES.has(priorStatus);
+    const priorStatusIsLoss = priorStatus !== undefined && !NON_LOSS_DISPUTE_STATUSES.has(priorStatus);
+    const priorLoss = priorStatusIsLoss && prior.rows[0]?.user_id != null;
     const settledBefore = !closed && Boolean(prior.rows[0]?.resolved_at);
     const recordedOnly = closed
       ? undefined
@@ -3458,9 +3462,9 @@ async function processDisputeEvent(
         `UPDATE stripe_webhook_events SET processing_status = 'unmatched'
          WHERE event_id = $1`, [eventId]
       );
-      // One alert per unmatched dispute, and one for its close: not one for
-      // each update Stripe sends while it is open.
-      if (!closed && prior.rows[0]) return { duplicate: false };
+      // One alert when an unmatched dispute opens, one when it becomes a loss,
+      // and one for its close: not one for each update Stripe sends.
+      if (!closed && prior.rows[0] && (priorStatusIsLoss || !lossNow)) return { duplicate: false };
       await client.query(
         `INSERT INTO commerce_operational_alerts
            (source_event_id, alert_type, severity, details)

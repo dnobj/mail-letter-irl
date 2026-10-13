@@ -2325,12 +2325,14 @@ describe('commerceService', () => {
     async function deliver(
       type: string,
       status: string,
-      prior?: { status: string; resolved_at: Date | null },
+      prior?: { status: string; resolved_at: Date | null; user_id?: string | null },
       order: unknown = disputedOrder
     ) {
       mocks.query.mockImplementation(async (sql: string) => {
         if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-1' }] };
-        if (sql.includes('SELECT status, resolved_at FROM stripe_disputes')) return { rows: prior ? [prior] : [] };
+        if (sql.includes('SELECT status, resolved_at, user_id FROM stripe_disputes')) {
+          return { rows: prior ? [{ user_id: 'user-1', ...prior }] : [] };
+        }
         if (sql.includes('SELECT * FROM orders')) return { rows: order ? [order] : [] };
         return { rows: [] };
       });
@@ -2376,9 +2378,19 @@ describe('commerceService', () => {
     it('reads what it knew only after locking the order, which serialises one dispute\'s events', async () => {
       await deliver('charge.dispute.updated', 'needs_response', { status: 'warning_needs_response', resolved_at: null });
       const order = all().findIndex(([sql]) => sql.includes('SELECT * FROM orders'));
-      const prior = all().findIndex(([sql]) => sql.includes('SELECT status, resolved_at FROM stripe_disputes'));
+      const prior = all().findIndex(([sql]) => sql.includes('SELECT status, resolved_at, user_id FROM stripe_disputes'));
+      const lock = all().findIndex(([sql]) => sql.includes('pg_advisory_xact_lock'));
       expect(order).toBeGreaterThan(-1);
       expect(prior).toBeGreaterThan(order);
+      expect(lock).toBeGreaterThan(-1);
+      expect(lock).toBeLessThan(prior);
+      expect(all()[lock][1]).toEqual(['stripe_dispute:dp-1']);
+    });
+
+    it('acts on a loss recorded while no order matched, whose effects never ran', async () => {
+      await deliver('charge.dispute.updated', 'under_review', { status: 'needs_response', resolved_at: null, user_id: null });
+      expect(blocked()).toBe(true);
+      expect(markedDisputed()).toBe(true);
     });
 
     it.each([
@@ -2444,6 +2456,14 @@ describe('commerceService', () => {
       mocks.query.mockClear();
       await deliver('charge.dispute.closed', 'lost', { status: 'under_review', resolved_at: null }, null);
       expect(alertsOfType('stripe_money_event_unmatched')).toHaveLength(1);
+    });
+
+    it('alerts again when an unmatched inquiry becomes a chargeback, and not for its other updates', async () => {
+      await deliver('charge.dispute.updated', 'needs_response', { status: 'warning_needs_response', resolved_at: null, user_id: null }, null);
+      expect(alertsOfType('stripe_money_event_unmatched')).toHaveLength(1);
+      mocks.query.mockClear();
+      await deliver('charge.dispute.updated', 'warning_under_review', { status: 'warning_needs_response', resolved_at: null, user_id: null }, null);
+      expect(alertsOfType('stripe_money_event_unmatched')).toHaveLength(0);
     });
   });
 
