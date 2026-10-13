@@ -46,7 +46,9 @@ describe('the send rule settings', () => {
   });
 });
 
-describe('the boot finding for a send rule with no website application', () => {
+// Outside production. Production asks for the application whatever the rule
+// says (#730): deploymentConfig.test.ts, 'the send rule production requires'.
+describe('the boot finding for a send rule with no website application, outside production', () => {
   const rule = 'send_confirmation.website_client_missing';
   const findingOf = (env: NodeJS.ProcessEnv) =>
     validateDeploymentConfig(env).findings.find((finding) => finding.rule === rule);

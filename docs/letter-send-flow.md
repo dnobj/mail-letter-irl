@@ -134,7 +134,7 @@ all. The `POST`:
 - **Production:** required since #730: the promotion that carries it does not start until it is on.
   - **Before that promotion:**
     - promote the website first this time, with its confirmation page (website #39, #41). Its calls to `/api/sends` fail against the older API until the API's promotion lands, which is harmless, since nothing links to the page until `request_send` is live;
-    - set and apply `LETTER_IRL_SEND_CONFIRMATION_ENABLED=true` and `LETTER_IRL_WEBSITE_CLIENT_ID` (the production website's client id) on the production API, as [deployment.md](deployment.md)'s first step says for every preflight gap. The build production runs before that promotion has no send rule and ignores both;
+    - set and apply `LETTER_IRL_SEND_CONFIRMATION_ENABLED=true` and `LETTER_IRL_WEBSITE_CLIENT_ID` (the production website's client id; the website's token page needs it too, #730) on the production API, as [deployment.md](deployment.md)'s first step says for every preflight gap. The build production runs before that promotion has no send rule and ignores both;
     - confirm `LETTER_IRL_IMAGE_GEN_MODE=off` on the production API, as the checked-in manifest assumes (24 tools).
   - **After it:**
     - refresh the production connector;

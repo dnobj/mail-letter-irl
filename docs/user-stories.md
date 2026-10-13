@@ -1130,6 +1130,7 @@ See [gift-letters.md](gift-letters.md). Built behind `LETTER_IRL_GIFT_LETTERS_EN
 
 **Acceptance Criteria:**
 - [ ] Accessible from dashboard after OAuth login
+- [ ] Only the website's own sign-in may create one; a token issued to another app gets 403 `website_only` (#730)
 - [ ] Generates cryptographically secure token
 - [ ] Token shown once at creation (not retrievable later)
 - [ ] User can name/label the token for identification
@@ -1152,7 +1153,7 @@ See [gift-letters.md](gift-letters.md). Built behind `LETTER_IRL_GIFT_LETTERS_EN
 
 **Acceptance Criteria:**
 - [ ] Can view list of active tokens (name, created date, last used)
-- [ ] Can revoke individual tokens
+- [ ] Can revoke individual tokens, from the website's own sign-in only (#730)
 - [ ] Revocation is immediate
 - [ ] Revoked tokens return 401 on next use
 - [ ] Revocation logged for audit

@@ -29,7 +29,7 @@ const rateLimitStore = new Map<string, RateLimitEntry>();
 const blockedRequestCounts = new Map<string, number>();
 
 // Global rate limit configuration (system-wide, not per-IP)
-const GLOBAL_RATE_LIMITS: Record<string, RateLimitConfig> = {
+export const GLOBAL_RATE_LIMITS: Record<string, RateLimitConfig> = {
   'promo_public': {
     windowMs: 60 * 1000,      // 1 minute
     maxRequests: 100,         // 100 total per minute (protects against distributed attacks)
@@ -56,6 +56,13 @@ const GLOBAL_RATE_LIMITS: Record<string, RateLimitConfig> = {
   'checkout': {
     windowMs: 60 * 1000,
     maxRequests: 200,
+  },
+  // The purchase start page (#730): one indexed read per checkout opened.
+  // Far above checkout traffic, so a few addresses cannot fill it for
+  // everyone; it bounds a flood, the per-address limit an abuser.
+  'purchase_start': {
+    windowMs: 60 * 1000,
+    maxRequests: 3000,
   },
   // Promo codes are operator-chosen words, so a guess is cheap and a hit is
   // spendable balance. The unauthenticated validator has had both limits
@@ -104,6 +111,12 @@ export const RATE_LIMITS: Record<string, RateLimitConfig> = {
   'checkout': {
     windowMs: 60 * 1000,      // 1 minute
     maxRequests: 60,
+  },
+  // The purchase start page (#730), unauthenticated and reading the
+  // database: a person opens one checkout at a time.
+  'purchase_start': {
+    windowMs: 60 * 1000,
+    maxRequests: 30,
   },
   // Stripe checkout per account, checked after authentication: the limit on
   // one customer creating checkout sessions.
