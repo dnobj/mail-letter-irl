@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
+import { isElevated } from "./elevation.js";
 
 /**
  * In-memory operator sessions.
@@ -83,7 +84,7 @@ export class AdminSessionStore {
       // Never an elevated one while another can go (#730): a flood of new
       // sessions must not cost the operator the elevation they just entered.
       const byAge = [...this.sessions.values()].sort((a, b) => a.lastSeenAt - b.lastSeenAt);
-      const oldest = byAge.find((session) => !(session.elevatedUntil !== null && session.elevatedUntil > now)) ?? byAge[0];
+      const oldest = byAge.find((session) => !isElevated(session, now)) ?? byAge[0];
       if (oldest) this.sessions.delete(oldest.id);
     }
     const session: AdminSession = {

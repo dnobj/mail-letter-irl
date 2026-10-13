@@ -188,13 +188,6 @@ export function createAdminRequestListener(
       const value = request.headers[name.toLowerCase()];
       return Array.isArray(value) ? value[0] : value;
     };
-    // Only without a session: a request carrying one goes on to sign-in, so a
-    // cross-site POST is still refused there and audited as a CSRF attempt.
-    if (!cookies.has(SESSION_COOKIE_NAME) && isCrossSiteSubresource(method, header)) {
-      constant(403);
-      return;
-    }
-
     const peer = request.socket.remoteAddress;
     const auth = await authenticateAdminRequest(
       {
@@ -208,9 +201,16 @@ export function createAdminRequestListener(
         whois: options.whois,
         sessions: options.sessions,
         localDev,
+        // A request another site sent may use a live session (and a POST is
+        // then refused as CSRF, audited) but never start one (#730).
+        allowNewSession: !isCrossSiteSubresource(method, header),
       },
     );
 
+    if (!auth.ok && auth.quiet) {
+      constant(403);
+      return;
+    }
     if (!auth.ok) {
       const key = `${peer ?? "?"}:${auth.presentedLogin ?? "-"}`;
       const deniedActor = auth.presentedLogin ?? ANONYMOUS_ACTOR.id;

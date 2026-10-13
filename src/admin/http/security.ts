@@ -82,13 +82,19 @@ export interface StateChangeRefusal {
  * a fetch from a page the operator happens to visit. Refused before sign-in,
  * so it starts no session, runs no whois and writes no audit row; enough of
  * them used to push an elevated session out. A top-level navigation (a link
- * the operator follows) is let through as a GET, which changes nothing. A
- * request without the header is not a browser's, and is left to sign-in.
+ * the operator follows) is let through as a GET, which changes nothing; a
+ * prefetch or prerender looks like one but comes from a page's own rules, not
+ * a click, so it is not. A request without the header is not a browser's.
+ * Another node in the tailnet is same-site (ts.net is a public suffix), so a
+ * same-site request counts too.
  */
 export function isCrossSiteSubresource(method: string, header: (name: string) => string | undefined): boolean {
   const site = header("sec-fetch-site");
   if (site !== "cross-site" && site !== "same-site") return false;
+  const purpose = `${header("sec-purpose") ?? ""} ${header("purpose") ?? ""}`.toLowerCase();
+  const speculative = purpose.includes("prefetch") || purpose.includes("prerender");
   const navigation =
+    !speculative &&
     (method === "GET" || method === "HEAD") &&
     header("sec-fetch-mode") === "navigate" &&
     header("sec-fetch-dest") === "document";
