@@ -20,7 +20,7 @@ ChatGPT, Claude and other MCP apps, and manage their account on letterirl.com.
 
 - **Mail:** text-only letters, letters with a header image, letters with an enclosed image, and
   postcards. Every send starts from a preview draft. Under the send rule (#470,
-  `LETTER_IRL_SEND_CONFIRMATION_ENABLED`, on in development), only the person sends: with our
+  `LETTER_IRL_SEND_CONFIRMATION_ENABLED`, on in development and required in production, #730), only the person sends: with our
   card's **Send**, or on the website's confirmation page, whose link `request_send` gives an app
   that shows no card ([letter-send-flow.md](letter-send-flow.md)).
 - **Printing:** PostGrid prints the legacy HTML in Open Sans (#526). Our own renderer (#534) lays

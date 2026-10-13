@@ -87,7 +87,10 @@ const READY_PROD: NodeJS.ProcessEnv = {
   LETTER_IRL_ALLOWED_HOSTS: 'api.fixture.example',
   LETTER_IRL_ALLOWED_ORIGINS: 'https://chatgpt.com',
   // Required in production since #699; the API posts the operator's notices.
-  LETTER_IRL_OPERATOR_ALERT_URL: 'https://hc-ping.example/readyz/fail'
+  LETTER_IRL_OPERATOR_ALERT_URL: 'https://hc-ping.example/readyz/fail',
+  // Required on in production since #730.
+  LETTER_IRL_SEND_CONFIRMATION_ENABLED: 'true',
+  LETTER_IRL_WEBSITE_CLIENT_ID: 'website-client-fixture'
 };
 
 function routableDb(rows: Array<{ mail_type: string; provider: string }> = []): void {

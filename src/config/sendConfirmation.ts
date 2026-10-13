@@ -15,9 +15,9 @@ import { offUnlessExplicitlyEnabled } from '../utils/envSettings.js';
  *   letterirl.com, where the person, signed in, sees the preview and presses
  *   Send. request_send gives the same link when the model is asked to send.
  *
- * Off unless explicitly enabled, so a deploy changes nothing until the
- * confirmation page is live and the ChatGPT regression pass has run with the
- * rule on. It is meant to be on in production before launch.
+ * Off unless explicitly enabled, so development can run either way.
+ * Production refuses to start with it off (send_confirmation.required in
+ * src/config/deploymentConfig.ts, #730).
  */
 export function isSendConfirmationEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return offUnlessExplicitlyEnabled('LETTER_IRL_SEND_CONFIRMATION_ENABLED', env);

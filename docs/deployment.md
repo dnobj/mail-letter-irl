@@ -257,7 +257,8 @@ Production requires all three of these variables (#699): `MAINTENANCE_HEARTBEAT_
 | Rule | Severity | Raised when | Fix |
 |---|---|---|---|
 | `outbox.dispatch_paused` | warning | `LETTER_IRL_OUTBOX_DISPATCH_ENABLED` holds anything but an affirmative, so the outbox is paused and nothing goes to the print provider (#444) | Intended during a printing incident. Otherwise set it to `true` on the API and the maintenance service ([operational-acceptance.md](operational-acceptance.md)). The API prints it at boot, maintenance at every run |
-| `send_confirmation.website_client_missing` | error in production, warning elsewhere | `LETTER_IRL_SEND_CONFIRMATION_ENABLED` is on and `LETTER_IRL_WEBSITE_CLIENT_ID` is not set, so the confirmation page refuses every send and apps without our card cannot send at all (#470) | Set `LETTER_IRL_WEBSITE_CLIENT_ID` on the API to the Client ID of the website's own Auth0 application in that tenant, or turn the rule off |
+| `send_confirmation.required` | error (production API) | `LETTER_IRL_SEND_CONFIRMATION_ENABLED` is not `true`, so the send tools would be offered to the model instead of mail going out only when the person sends it (#470, #730) | Set `LETTER_IRL_SEND_CONFIRMATION_ENABLED=true` on the production API, with `LETTER_IRL_WEBSITE_CLIENT_ID`. The cutover preflight checks names only, so a value of `false` passes it and fails here |
+| `send_confirmation.website_client_missing` | error in production, warning elsewhere | `LETTER_IRL_SEND_CONFIRMATION_ENABLED` is on and `LETTER_IRL_WEBSITE_CLIENT_ID` is not set, so the confirmation page refuses every send and apps without our card cannot send at all (#470) | Set `LETTER_IRL_WEBSITE_CLIENT_ID` on the API to the Client ID of the website's own Auth0 application in that tenant, or, outside production, turn the rule off |
 
 ## Development Release Procedure
 
@@ -504,7 +505,7 @@ See [`tests/integration/README.md`](../tests/integration/README.md) for how to s
 3. Confirm no development URLs, test keys, or dummy-provider settings enter production.
    The boot validator enforces the key-mode and provider rules; the review still
    catches URLs and anything outside the validator's reach.
-4. Merge backend `dev` into `master` and website `dev` into `main` through reviewed PRs.
+4. Merge backend `dev` into `master` and website `dev` into `main` through reviewed PRs. Usually the API goes first. When the promotion first carries the send rule (#730), the website goes first, so the confirmation page is live when `request_send` starts linking to it ([letter-send-flow.md](letter-send-flow.md), Rollout). Before choosing, check the website's `dev` to `main` diff for any API route it calls that `master` does not have yet.
 5. Confirm migrations completed before the new API deployment became active. The
    pre-deploy command does this automatically and halts the deploy on failure, so
    the check is to read the deploy log for the migrator's own output and confirm
@@ -527,6 +528,7 @@ See [`tests/integration/README.md`](../tests/integration/README.md) for how to s
 - Admin foundation rollback: retain migration 022 plus marker, command, operation, and audit evidence; revoke
   environment-specific role access separately if access was provisioned.
 - Mail safety: retain `letter_jobs` rows and stable idempotency keys during every rollback.
+- The send rule cannot be turned off in production (#730). If the confirmation page or the website's client id breaks after launch, stop mail with `LETTER_IRL_MAIL_SENDING_ENABLED`, or roll back.
 - Image safety: keep the bucket and credentials in place while any 15-minute image URL may still be active.
 
 Never point development at production Neon to work around a deployment problem.

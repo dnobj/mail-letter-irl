@@ -471,15 +471,17 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
   },
   /**
    * The send rule (#470, src/config/sendConfirmation.ts): mail goes out only
-   * when the person sends it, from our card or the confirmation page. Advisory
-   * while it is rolled out; meant to be on in production before launch.
+   * when the person sends it, from our card or the confirmation page. Required
+   * on in production (#730): off, the send tools are the model's to call. Its
+   * own rule (send_confirmation.required) says so, since a value that is set
+   * but not on passes a presence check.
    */
   {
     name: 'LETTER_IRL_SEND_CONFIRMATION_ENABLED',
     requiredIn: 'production',
-    advisory: true,
     secret: false,
-    services: ['api']
+    services: ['api'],
+    checkedBy: 'send_confirmation.required'
   },
   /** The website, for the confirmation link. Defaults to the gift landing address. */
   {
@@ -491,12 +493,12 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
   },
   /**
    * The website's own Auth0 application: the only one whose tokens may
-   * confirm a send. Missing while the rule is on is its own rule's finding.
+   * confirm a send. Missing while the rule is on is its own rule's finding,
+   * and the rule is on in production (#730), so production needs it.
    */
   {
     name: 'LETTER_IRL_WEBSITE_CLIENT_ID',
     requiredIn: 'production',
-    advisory: true,
     secret: false,
     services: ['api'],
     checkedBy: 'send_confirmation.website_client_missing'
@@ -1509,6 +1511,18 @@ export function validateDeploymentConfig(
       rule: 'outbox.dispatch_paused',
       message:
         'LETTER_IRL_OUTBOX_DISPATCH_ENABLED pauses the outbox: nothing goes to the print provider until it is set to true'
+    });
+  }
+
+  // #730: the send rule is on in production. Off, send_letter, send_postcard
+  // and create_mail_checkout are offered to the model as ordinary tools, and
+  // the person's press on a card or the confirmation page is no longer what
+  // sends. The API only: maintenance never offers a tool.
+  if (production && surface === 'server' && !isSendConfirmationEnabled(env)) {
+    findings.push({
+      severity: 'error',
+      rule: 'send_confirmation.required',
+      message: 'LETTER_IRL_SEND_CONFIRMATION_ENABLED must be true in production, so mail goes out only when the person sends it'
     });
   }
 
