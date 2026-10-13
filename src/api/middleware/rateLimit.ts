@@ -10,7 +10,7 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 import { getCachedUserTier, getTierMultiplier } from '../../services/tierService.js';
 import type { UserTier } from '../../services/types.js';
-import { carriesVerifiedToken, resetVerifiedTokens } from '../../auth/signInPool.js';
+import { resetVerifiedTokens, takeExemption } from '../../auth/signInPool.js';
 
 interface RateLimitEntry {
   count: number;
@@ -444,8 +444,9 @@ export async function rateLimitMiddlewareWithTier(
 
   // The per-identifier limit above bounds one client. Routes with a global
   // entry also refuse at that ceiling whatever the mix of identifiers. On the
-  // MCP and REST routes a recently verified token skips it (#730).
-  if (VERIFIED_SKIP_GLOBAL.has(endpointType) && carriesVerifiedToken(req.headers.authorization)) {
+  // MCP and REST routes a recently verified token skips it, up to a bound per
+  // account (#730).
+  if (VERIFIED_SKIP_GLOBAL.has(endpointType) && takeExemption(req.headers.authorization)) {
     return false;
   }
   const globalResult = checkGlobalRateLimit(endpointType);

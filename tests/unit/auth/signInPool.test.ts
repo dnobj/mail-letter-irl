@@ -12,6 +12,8 @@ import {
   carriesVerifiedToken,
   rememberVerifiedToken,
   resetVerifiedTokens,
+  takeExemption,
+  verifiedAccount,
   VERIFIED_TOKEN_CONFIG
 } from '../../../src/auth/signInPool.js';
 import { validateAuthorizationHeader, validateJWTToken } from '../../../src/auth/tokenValidator.js';
@@ -28,7 +30,7 @@ describe('tokens verified recently (#730)', () => {
   beforeEach(() => resetVerifiedTokens());
 
   it('knows a verified token by its bearer header, until it expires or ten minutes pass', () => {
-    rememberVerifiedToken('tok-a', undefined, T0);
+    rememberVerifiedToken('tok-a', 'user-1', undefined, T0);
     expect(carriesVerifiedToken('Bearer tok-a', T0 + 1)).toBe(true);
     expect(carriesVerifiedToken('bearer tok-a', T0 + 1)).toBe(true);
     expect(carriesVerifiedToken(['Bearer tok-a'], T0 + 1)).toBe(true);
@@ -37,26 +39,54 @@ describe('tokens verified recently (#730)', () => {
     expect(carriesVerifiedToken('Basic tok-a', T0 + 1)).toBe(false);
     expect(carriesVerifiedToken('Bearer tok-a', T0 + VERIFIED_TOKEN_CONFIG.verifiedForMs)).toBe(false);
 
-    rememberVerifiedToken('tok-c', T0 + 5000, T0);
+    rememberVerifiedToken('tok-c', 'user-1', T0 + 5000, T0);
     expect(carriesVerifiedToken('Bearer tok-c', T0 + 4999)).toBe(true);
     expect(carriesVerifiedToken('Bearer tok-c', T0 + 5000)).toBe(false);
   });
 
   it('keeps no expired token, so none can crowd out a live one', () => {
-    rememberVerifiedToken('live', undefined, T0);
-    for (let i = 0; i < VERIFIED_TOKEN_CONFIG.maxVerified; i += 1) rememberVerifiedToken(`gone-${i}`, T0 - 1, T0);
+    rememberVerifiedToken('live', 'user-1', undefined, T0);
+    for (let i = 0; i < VERIFIED_TOKEN_CONFIG.maxVerified; i += 1) rememberVerifiedToken(`gone-${i}`, 'user-1', T0 - 1, T0);
     expect(carriesVerifiedToken('Bearer live', T0 + 1)).toBe(true);
   });
 
   it('holds a bounded number of tokens, dropping the oldest', () => {
-    for (let i = 0; i <= VERIFIED_TOKEN_CONFIG.maxVerified; i += 1) rememberVerifiedToken(`tok-${i}`, undefined, T0);
+    for (let i = 0; i <= VERIFIED_TOKEN_CONFIG.maxVerified; i += 1) rememberVerifiedToken(`tok-${i}`, 'user-1', undefined, T0);
     expect(carriesVerifiedToken('Bearer tok-0', T0)).toBe(false);
     expect(carriesVerifiedToken('Bearer tok-1', T0)).toBe(true);
     expect(carriesVerifiedToken(`Bearer tok-${VERIFIED_TOKEN_CONFIG.maxVerified}`, T0)).toBe(true);
   });
 
+  it('matches a token whatever whitespace surrounds it, as the REST parser trims', () => {
+    rememberVerifiedToken(' tok-t ', 'user-1', undefined, T0);
+    expect(carriesVerifiedToken('Bearer tok-t', T0 + 1)).toBe(true);
+    expect(carriesVerifiedToken('Bearer  tok-t ', T0 + 1)).toBe(true);
+    expect(carriesVerifiedToken('Bearer    ', T0 + 1)).toBe(false);
+  });
+
+  it('knows which account a token signed in', () => {
+    rememberVerifiedToken('tok-a', 'user-a', undefined, T0);
+    rememberVerifiedToken('tok-b', 'user-b', undefined, T0);
+    expect(verifiedAccount('Bearer tok-a', T0)).toBe('user-a');
+    expect(verifiedAccount('Bearer tok-b', T0)).toBe('user-b');
+  });
+
+  it('exempts an account a bounded number of times a minute, across all its tokens', () => {
+    rememberVerifiedToken('tok-1', 'user-a', undefined, T0);
+    rememberVerifiedToken('tok-2', 'user-a', undefined, T0);
+    rememberVerifiedToken('tok-3', 'user-b', undefined, T0);
+    for (let i = 0; i < VERIFIED_TOKEN_CONFIG.exemptPerAccountPerMinute; i += 1) {
+      expect(takeExemption(i % 2 ? 'Bearer tok-1' : 'Bearer tok-2', T0)).toBe(true);
+    }
+    expect(takeExemption('Bearer tok-1', T0)).toBe(false);
+    expect(takeExemption('Bearer tok-2', T0)).toBe(false);
+    expect(takeExemption('Bearer tok-3', T0)).toBe(true);
+    expect(takeExemption('Bearer tok-1', T0 + VERIFIED_TOKEN_CONFIG.windowMs)).toBe(true);
+    expect(takeExemption('Bearer unknown', T0)).toBe(false);
+  });
+
   it('is emptied with the rate-limit state', () => {
-    rememberVerifiedToken('tok-a');
+    rememberVerifiedToken('tok-a', 'user-1');
     clearRateLimitState();
     expect(carriesVerifiedToken('Bearer tok-a')).toBe(false);
   });
@@ -94,10 +124,10 @@ describe('what the token validator remembers (#730)', () => {
     vi.restoreAllMocks();
   });
 
-  it('remembers a token that verifies, until it expires', async () => {
+  it('remembers a token that verifies, with its account, until it expires', async () => {
     const token = await sign();
     await validateJWTToken(token, keySet, ['mail:send']);
-    expect(carriesVerifiedToken(`Bearer ${token}`)).toBe(true);
+    expect(verifiedAccount(`Bearer ${token}`)).toBe('auth0|user-1');
     expect(carriesVerifiedToken(`Bearer ${token}`, Date.now() + 5 * 60 * 1000 + 1000)).toBe(false);
   });
 
@@ -116,7 +146,7 @@ describe('what the token validator remembers (#730)', () => {
     await expect(validateAuthorizationHeader('Bearer lirl_pat_bad')).rejects.toThrow();
     vi.mocked(validateToken).mockResolvedValueOnce({ valid: true, userId: 'pat-user', tokenId: 't1', scopes: [] } as never);
     await validateAuthorizationHeader('Bearer lirl_pat_good');
-    expect(carriesVerifiedToken('Bearer lirl_pat_good')).toBe(true);
+    expect(verifiedAccount('Bearer lirl_pat_good')).toBe('pat-user');
     expect(carriesVerifiedToken('Bearer lirl_pat_bad')).toBe(false);
   });
 
@@ -158,7 +188,7 @@ describe('the MCP and REST backstop leaves a recently verified token alone (#730
   beforeEach(() => clearRateLimitState());
 
   it.each(['mcp', 'api'] as const)('%s: junk from many addresses fills it, refusing junk and the unknown, never a verified token', async type => {
-    rememberVerifiedToken('good-token');
+    rememberVerifiedToken('good-token', 'user-1');
     const ceiling = checkGlobalRateLimit(type).limit; // this call takes one slot
     let refused = 0;
     for (let i = 0; i < ceiling; i += 1) {
@@ -179,7 +209,7 @@ describe('the MCP and REST backstop leaves a recently verified token alone (#730
   });
 
   it('counts nothing for a verified token, so signed-in traffic cannot fill it either', async () => {
-    rememberVerifiedToken('good-token');
+    rememberVerifiedToken('good-token', 'user-1');
     const before = checkGlobalRateLimit('mcp').remaining;
     for (let i = 0; i < 20; i += 1) {
       const { res } = response();
@@ -188,8 +218,19 @@ describe('the MCP and REST backstop leaves a recently verified token alone (#730
     expect(checkGlobalRateLimit('mcp').remaining).toBe(before - 1);
   });
 
+  it('counts one credential past its account\'s exemptions, from however many addresses', async () => {
+    rememberVerifiedToken('good-token', 'user-1');
+    const before = checkGlobalRateLimit('mcp').remaining;
+    const sent = VERIFIED_TOKEN_CONFIG.exemptPerAccountPerMinute + 30;
+    for (let i = 0; i < sent; i += 1) {
+      const { res } = response();
+      await rateLimitMiddlewareWithTier(request('Bearer good-token', addressOf(i)), res, 'mcp');
+    }
+    expect(checkGlobalRateLimit('mcp').remaining).toBe(before - 1 - 30);
+  });
+
   it('still holds a verified token to its per-address limit', async () => {
-    rememberVerifiedToken('good-token');
+    rememberVerifiedToken('good-token', 'user-1');
     let refused = false;
     for (let i = 0; i < 1000 && !refused; i += 1) {
       const { res } = response();
@@ -199,7 +240,7 @@ describe('the MCP and REST backstop leaves a recently verified token alone (#730
   });
 
   it('leaves the other routes to their own backstops, verified or not', async () => {
-    rememberVerifiedToken('good-token');
+    rememberVerifiedToken('good-token', 'user-1');
     const ceiling = checkGlobalRateLimit('checkout').limit;
     let refused = 0;
     for (let i = 0; i < ceiling; i += 1) {

@@ -103,7 +103,7 @@ async function validatePATToken(token: string): Promise<AuthenticatedUser> {
   // keeps working forever, so removing someone from the cohort would revoke
   // their OAuth access and leave their PAT alive.
   assertBetaAccess(result.userId!);
-  rememberVerifiedToken(token);
+  rememberVerifiedToken(token, result.userId!);
 
   return {
     userId: result.userId!,
@@ -178,6 +178,6 @@ export async function validateJWTToken(
     });
     throw error;
   }
-  rememberVerifiedToken(token, typeof user.claims.exp === "number" ? user.claims.exp * 1000 : undefined);
+  rememberVerifiedToken(token, user.userId, typeof user.claims.exp === "number" ? user.claims.exp * 1000 : undefined);
   return user;
 }
