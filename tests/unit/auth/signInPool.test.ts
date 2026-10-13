@@ -187,6 +187,15 @@ describe('what the token validator remembers (#730)', () => {
     expect(carriesVerifiedToken(`Bearer ${short}`)).toBe(false);
   });
 
+  it('does not remember a JWT whose account is not admitted', async () => {
+    vi.stubEnv('LETTER_IRL_BETA_GATE_ENABLED', 'true');
+    vi.stubEnv('LETTER_IRL_BETA_ALLOWED_SUBJECTS', 'someone-else');
+    vi.stubEnv('LETTER_IRL_ADMIN_USER_IDS', '');
+    const token = await sign();
+    await expect(validateJWTToken(token, keySet)).rejects.toThrow();
+    expect(carriesVerifiedToken(`Bearer ${token}`)).toBe(false);
+  });
+
   it('remembers a personal access token that passes, and not one that fails', async () => {
     vi.mocked(validateToken).mockResolvedValueOnce({ valid: false, error: 'Invalid token' } as never);
     await expect(validateAuthorizationHeader('Bearer lirl_pat_bad')).rejects.toThrow();
