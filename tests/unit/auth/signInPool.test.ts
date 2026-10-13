@@ -35,6 +35,13 @@ describe('the failed sign-in pool (#730)', () => {
     expect(failedSignInPool(T0 + SIGN_IN_POOL_CONFIG.windowMs).full).toBe(false);
   });
 
+  it('fills again in a later minute', () => {
+    const later = T0 + 5 * SIGN_IN_POOL_CONFIG.windowMs;
+    recordFailedSignIn(T0);
+    for (let i = 0; i < SIGN_IN_POOL_CONFIG.maxFailures; i += 1) recordFailedSignIn(later);
+    expect(failedSignInPool(later + 1).full).toBe(true);
+  });
+
   it('knows a verified token by its bearer header, until it expires or ten minutes pass', () => {
     rememberVerifiedToken('tok-a', undefined, T0);
     expect(carriesVerifiedToken('Bearer tok-a', T0 + 1)).toBe(true);
@@ -50,6 +57,12 @@ describe('the failed sign-in pool (#730)', () => {
 
     rememberVerifiedToken('tok-d', T0 - 1, T0);
     expect(carriesVerifiedToken('Bearer tok-d', T0)).toBe(false);
+  });
+
+  it('keeps no expired token, so none can crowd out a live one', () => {
+    rememberVerifiedToken('live', undefined, T0);
+    for (let i = 0; i < SIGN_IN_POOL_CONFIG.maxVerified; i += 1) rememberVerifiedToken(`gone-${i}`, T0 - 1, T0);
+    expect(carriesVerifiedToken('Bearer live', T0 + 1)).toBe(true);
   });
 
   it('holds a bounded number of tokens, dropping the oldest', () => {
