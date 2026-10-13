@@ -133,8 +133,8 @@ all. The `POST`:
 - **Development:** on since 2026-09-25, with all three conditions met. SEND-01 passed there ([manual-tests.md](manual-tests.md)).
 - **Production:** required since #730: the promotion that carries it does not start until it is on.
   - **Before that promotion:**
-    - confirm the production website already serves the confirmation page (website #39, #41); the usual order promotes the API first;
-    - stage `LETTER_IRL_SEND_CONFIRMATION_ENABLED=true` and `LETTER_IRL_WEBSITE_CLIENT_ID` (the production website's client id) on the production API so they deploy with the promotion. Applied on their own, they redeploy the build already in production with the rule on.
+    - promote the website first this time, with its confirmation page (website #39, #41). Its calls to `/api/sends` fail against the older API until the API's promotion lands, which is harmless, since nothing links to the page until `request_send` is live;
+    - set and apply `LETTER_IRL_SEND_CONFIRMATION_ENABLED=true` and `LETTER_IRL_WEBSITE_CLIENT_ID` (the production website's client id) on the production API, as [deployment.md](deployment.md)'s first step says for every preflight gap. The build production runs before that promotion has no send rule and ignores both.
   - **After it:**
     - refresh the production connector;
     - make a production send from the card and from the page.

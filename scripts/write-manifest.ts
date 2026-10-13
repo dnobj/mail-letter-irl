@@ -36,6 +36,8 @@ process.env.LETTER_IRL_CERTIFIED_MAIL_ENABLED = "false";
 process.env.LETTER_IRL_SEND_CONFIRMATION_ENABLED = "true";
 // And image generation is off at launch (docs/app-instructions.md).
 process.env.LETTER_IRL_IMAGE_GEN_MODE = "off";
+// And the card's photo upload, which adds an app-only tool.
+process.env.LETTER_IRL_CARD_UPLOAD_ENABLED = "false";
 
 const { stringifyManifest } = await import("../src/mcp/manifest.js");
 
