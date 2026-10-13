@@ -171,3 +171,28 @@ describe('the REST limits', () => {
     expect(source.slice(limited, limited + 120)).toContain(`'${limit}'`);
   });
 });
+
+describe('the purchase start page (#730)', () => {
+  const block = httpServer.slice(
+    httpServer.indexOf("url.pathname === '/purchase/start'"),
+    httpServer.indexOf("url.pathname === '/purchase/start'") + 2500
+  );
+
+  it('checks its own limits before it reads the database', () => {
+    const limit = block.indexOf("rateLimitMiddlewareWithGlobal(req, res, 'purchase_start')");
+    const lookup = block.indexOf('resolvePurchaseStart(');
+    expect(limit).toBeGreaterThan(-1);
+    expect(lookup).toBeGreaterThan(limit);
+  });
+
+  it('answers a failed lookup with a 503 that is not stored and says when to try again', () => {
+    const failed = block.slice(block.indexOf('} catch (error) {'), block.indexOf('} catch (error) {') + 700);
+    expect(failed).toContain('res.statusCode = 503;');
+    expect(failed).toContain("res.setHeader('Cache-Control', 'no-store');");
+    expect(failed).toContain("res.setHeader('Retry-After', '5');");
+  });
+
+  it('has a per-address limit far below its limit in all', () => {
+    expect(RATE_LIMITS.purchase_start.maxRequests).toBe(30);
+  });
+});

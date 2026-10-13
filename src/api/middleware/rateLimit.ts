@@ -57,10 +57,12 @@ const GLOBAL_RATE_LIMITS: Record<string, RateLimitConfig> = {
     windowMs: 60 * 1000,
     maxRequests: 200,
   },
-  // The purchase start page (#730): one read per checkout opened.
+  // The purchase start page (#730): one indexed read per checkout opened.
+  // Far above checkout traffic, so a few addresses cannot fill it for
+  // everyone; it bounds a flood, the per-address limit an abuser.
   'purchase_start': {
     windowMs: 60 * 1000,
-    maxRequests: 300,
+    maxRequests: 3000,
   },
   // Promo codes are operator-chosen words, so a guess is cheap and a hit is
   // spendable balance. The unauthenticated validator has had both limits

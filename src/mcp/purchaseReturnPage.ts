@@ -121,8 +121,12 @@ export function checkoutSessionIdOf(to: string | null | undefined): string | nul
   return match ? match[1] : null;
 }
 
-/** Why the start page refused a link, for its log line: no values. */
-export type PurchaseStartRefusal = 'host' | 'no_session' | 'not_ours';
+/**
+ * Why the start page refused a link, for its log line: no values. 'not_ours':
+ * no order recorded the session; 'recorded_host': one did, at a host no
+ * longer allowed (STRIPE_CHECKOUT_DOMAIN changed since).
+ */
+export type PurchaseStartRefusal = 'host' | 'no_session' | 'not_ours' | 'recorded_host';
 
 const NOT_VALID = 'This checkout link is not valid. Ask for a new checkout in ChatGPT.';
 
@@ -143,8 +147,9 @@ export function decidePurchaseStart(params: {
   | { status: 400; body: string; refusal: PurchaseStartRefusal } {
   if (!parseCheckoutTarget(params.to)) return { status: 400, body: NOT_VALID, refusal: 'host' };
   if (!checkoutSessionIdOf(params.to)) return { status: 400, body: NOT_VALID, refusal: 'no_session' };
+  if (!params.ourCheckoutUrl) return { status: 400, body: NOT_VALID, refusal: 'not_ours' };
   const location = parseCheckoutTarget(params.ourCheckoutUrl);
-  if (!location) return { status: 400, body: NOT_VALID, refusal: 'not_ours' };
+  if (!location) return { status: 400, body: NOT_VALID, refusal: 'recorded_host' };
   const back = parseChatgptReturnUrl(params.redirectUrl);
   return { status: 302, location, cookie: back ? returnCookieHeader(back) : null };
 }

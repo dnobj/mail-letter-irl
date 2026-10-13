@@ -213,6 +213,7 @@ The server instructions add, while these are listed, that `request_address` is t
 - `POST /api/public/address-requests/decline` with `{ token }`.
 - **Outcomes:** 200 `{ ok: true }` when done. 409 `{ reason }` for a link already answered, declined, cancelled or expired. 404 `{ reason: "not_found" }` for an unknown link, and for everything while the feature is off.
 - **Limits:** a 4 KB body (413), read within 30 seconds (408), and the `address_public` rate limits (20 a minute per IP, 200 in all). Answers are `no-store` and `no-referrer`.
+- The purchase start page (`/purchase/start`, #372) has its own limits, `purchase_start`: 30 a minute per IP, 3000 in all (#730).
 - **Logs** carry an outcome and an error class only: never the token, a name or an address.
 
 ## Signatures

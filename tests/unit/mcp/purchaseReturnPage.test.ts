@@ -201,7 +201,7 @@ describe('decidePurchaseStart', () => {
   it('refuses a recorded address that is not Stripe checkout, and says why each link was refused', () => {
     expect(decidePurchaseStart({ ourCheckoutUrl: 'https://evil.example/', to: CHECKOUT, redirectUrl: null })).toMatchObject({
       status: 400,
-      refusal: 'not_ours'
+      refusal: 'recorded_host'
     });
     expect(decidePurchaseStart({ ourCheckoutUrl: CHECKOUT, to: 'https://evil.example/', redirectUrl: null })).toMatchObject({
       status: 400,
