@@ -3742,12 +3742,15 @@ export function missedScheduleSentence(
 }
 
 /**
- * Whether one of our orders opened this Stripe Checkout Session (#730): the
- * purchase start page forwards only to those.
+ * The checkout address one of our orders recorded for this Stripe Checkout
+ * Session, or null (#730): the purchase start page forwards only there.
  */
-export async function isOurCheckoutSession(sessionId: string): Promise<boolean> {
-  const result = await query('SELECT 1 FROM orders WHERE stripe_checkout_session_id = $1 LIMIT 1', [sessionId]);
-  return (result.rowCount ?? 0) > 0;
+export async function ourCheckoutUrl(sessionId: string): Promise<string | null> {
+  const result = await query<{ checkout_url: string | null }>(
+    'SELECT checkout_url FROM orders WHERE stripe_checkout_session_id = $1 LIMIT 1',
+    [sessionId]
+  );
+  return result.rows[0]?.checkout_url ?? null;
 }
 
 export async function getPurchaseStatus(

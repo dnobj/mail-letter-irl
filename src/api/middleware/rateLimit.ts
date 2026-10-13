@@ -57,6 +57,11 @@ const GLOBAL_RATE_LIMITS: Record<string, RateLimitConfig> = {
     windowMs: 60 * 1000,
     maxRequests: 200,
   },
+  // The purchase start page (#730): one read per checkout opened.
+  'purchase_start': {
+    windowMs: 60 * 1000,
+    maxRequests: 300,
+  },
   // Promo codes are operator-chosen words, so a guess is cheap and a hit is
   // spendable balance. The unauthenticated validator has had both limits
   // since it was written; the authenticated twins had neither.
@@ -104,6 +109,12 @@ export const RATE_LIMITS: Record<string, RateLimitConfig> = {
   'checkout': {
     windowMs: 60 * 1000,      // 1 minute
     maxRequests: 60,
+  },
+  // The purchase start page (#730), unauthenticated and reading the
+  // database: a person opens one checkout at a time.
+  'purchase_start': {
+    windowMs: 60 * 1000,
+    maxRequests: 30,
   },
   // Stripe checkout per account, checked after authentication: the limit on
   // one customer creating checkout sessions.

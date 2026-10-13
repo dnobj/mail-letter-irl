@@ -107,35 +107,60 @@ export function readReturnCookie(cookieHeader: string | undefined): string | nul
 }
 
 /**
- * The Checkout Session a checkout link opens (`cs_live_…` or `cs_test_…`,
- * a segment of its path), or null: on checkout.stripe.com or our own checkout
- * domain, as parseCheckoutTarget allows. The route asks whether one of our
- * orders opened it (#730).
+ * The Checkout Session a checkout link opens, or null: Stripe's hosted page
+ * is `/c/pay/cs_live_…` or `/c/pay/cs_test_…`, on checkout.stripe.com or our
+ * own checkout domain, as parseCheckoutTarget allows, with no query. The
+ * whole path is the session's, so no other segment can name one (#730).
  */
 export function checkoutSessionIdOf(to: string | null | undefined): string | null {
   const target = parseCheckoutTarget(to);
   if (!target) return null;
-  const match = /\/(cs_(?:live|test)_[A-Za-z0-9]+)(?:\/|$)/.exec(new URL(target).pathname);
+  const url = new URL(target);
+  if (url.search) return null;
+  const match = /^\/c\/pay\/(cs_(?:live|test)_[A-Za-z0-9]+)\/?$/.exec(url.pathname);
   return match ? match[1] : null;
 }
 
+/** Why the start page refused a link, for its log line: no values. */
+export type PurchaseStartRefusal = 'host' | 'no_session' | 'not_ours';
+
+const NOT_VALID = 'This checkout link is not valid. Ask for a new checkout in ChatGPT.';
+
 /**
  * The start page's decision for one request. A pure function so the route
- * can be tested without booting the server. `ourSession` is whether one of
- * our orders opened the link's Checkout Session (#730): Stripe's hosts alone
- * would forward to anyone's checkout under our name.
+ * can be tested without booting the server. `ourCheckoutUrl` is the checkout
+ * address one of our orders recorded for the link's Checkout Session, or
+ * null when none did (#730). The page forwards there, never to the address
+ * it was given: Stripe's hosts alone would forward to anyone's checkout under
+ * our name.
  */
 export function decidePurchaseStart(params: {
   to: string | null;
   redirectUrl: string | null;
-  ourSession: boolean;
-}): { status: 302; location: string; cookie: string | null } | { status: 400; body: string } {
-  const target = parseCheckoutTarget(params.to);
-  if (!target || !params.ourSession) {
-    return { status: 400, body: 'This checkout link is not valid. Ask for a new checkout in ChatGPT.' };
-  }
+  ourCheckoutUrl: string | null;
+}):
+  | { status: 302; location: string; cookie: string | null }
+  | { status: 400; body: string; refusal: PurchaseStartRefusal } {
+  if (!parseCheckoutTarget(params.to)) return { status: 400, body: NOT_VALID, refusal: 'host' };
+  if (!checkoutSessionIdOf(params.to)) return { status: 400, body: NOT_VALID, refusal: 'no_session' };
+  const location = parseCheckoutTarget(params.ourCheckoutUrl);
+  if (!location) return { status: 400, body: NOT_VALID, refusal: 'not_ours' };
   const back = parseChatgptReturnUrl(params.redirectUrl);
-  return { status: 302, location: target, cookie: back ? returnCookieHeader(back) : null };
+  return { status: 302, location, cookie: back ? returnCookieHeader(back) : null };
+}
+
+/**
+ * The start page for one request, with the lookup it needs: the checkout
+ * address our order recorded for a session id, or null (#730). A lookup that
+ * throws is the route's to answer.
+ */
+export async function resolvePurchaseStart(
+  params: { to: string | null; redirectUrl: string | null },
+  ourCheckoutUrlFor: (sessionId: string) => Promise<string | null>
+): Promise<ReturnType<typeof decidePurchaseStart>> {
+  const sessionId = checkoutSessionIdOf(params.to);
+  const ourCheckoutUrl = sessionId ? await ourCheckoutUrlFor(sessionId) : null;
+  return decidePurchaseStart({ ...params, ourCheckoutUrl });
 }
 
 /**
@@ -253,6 +278,8 @@ export function purchaseStartDiagnostics(params: {
     hasRedirectUrl: params.query.has('redirectUrl'),
     redirectHost: hostOnly(params.query.get('redirectUrl')),
     targetOk: params.decision.status === 302,
+    // Why a link was refused, if it was (#730): no values.
+    refusal: params.decision.status === 400 ? params.decision.refusal : 'none',
     returnKept: params.decision.status === 302 && params.decision.cookie !== null,
     refererHost: hostOnly(params.referer),
     client: clientClass(params.userAgent)

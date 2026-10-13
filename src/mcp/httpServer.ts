@@ -36,12 +36,11 @@ import {
 import { validatePromoCodePublic } from "../services/promoService.js";
 import { lookupGiftCodePublic } from "../services/giftLetterService.js";
 import { giftCodeFromPath } from "../services/giftCodes.js";
-import { isOurCheckoutSession } from "../services/commerceService.js";
+import { ourCheckoutUrl } from "../services/commerceService.js";
 import { closePool } from "../db/index.js";
 import { rateLimitMiddlewareWithTier, rateLimitMiddlewareWithGlobal } from "../api/middleware/rateLimit.js";
 import {
-  checkoutSessionIdOf,
-  decidePurchaseStart,
+  resolvePurchaseStart,
   purchaseReturnDiagnostics,
   purchaseStartDiagnostics,
   readReturnCookie,
@@ -622,18 +621,31 @@ export async function startHttpServer() {
 
     // Checkout start page (#372): the card opens this through openExternal so
     // ChatGPT can append the way back into the conversation; the page keeps it
-    // in a same-site cookie and forwards to Stripe. Stateless; only Stripe's
-    // hosted checkout is an accepted destination and only ChatGPT origins an
-    // accepted return, so it is not an open redirect.
+    // in a same-site cookie and forwards to Stripe. It forwards only to the
+    // checkout address one of our orders recorded for the link's session
+    // (#730), looked up by the session's indexed id, and only to a ChatGPT
+    // origin as the return, so it is not an open redirect.
     if (url.pathname === '/purchase/start' && req.method === 'GET') {
-      // Only to a checkout one of our orders opened (#730), looked up by its
-      // session id, which is indexed.
-      const sessionId = checkoutSessionIdOf(url.searchParams.get('to'));
-      const decision = decidePurchaseStart({
-        to: url.searchParams.get('to'),
-        redirectUrl: url.searchParams.get('redirectUrl'),
-        ourSession: sessionId !== null && (await isOurCheckoutSession(sessionId))
-      });
+      // Its own limits, per address and in all: it reads the database
+      // without a sign-in (#730).
+      if (rateLimitMiddlewareWithGlobal(req, res, 'purchase_start')) return;
+      let decision: Awaited<ReturnType<typeof resolvePurchaseStart>>;
+      try {
+        decision = await resolvePurchaseStart(
+          { to: url.searchParams.get('to'), redirectUrl: url.searchParams.get('redirectUrl') },
+          ourCheckoutUrl
+        );
+      } catch (error) {
+        writeDiagnostic('error', 'purchase.start_lookup_failed', {
+          errorClass: classifyDiagnosticError(error, 'database_error')
+        });
+        res.statusCode = 503;
+        res.setHeader('Cache-Control', 'no-store');
+        res.setHeader('Retry-After', '5');
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.end('Checkout could not be opened just now. Try again in a moment.');
+        return;
+      }
       // Presence, hosts and outcome only: the return link names a
       // conversation and the target is a live checkout session.
       writeDiagnostic("info", "purchase.start", purchaseStartDiagnostics({

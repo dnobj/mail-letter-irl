@@ -25,6 +25,7 @@ import {
   chatgptReturnLink,
   checkoutSessionIdOf,
   decidePurchaseStart,
+  resolvePurchaseStart,
   isApplePhoneOrTablet,
   parseChatgptReturnUrl,
   parseCheckoutTarget,
@@ -98,20 +99,69 @@ describe('checkoutSessionIdOf (#730)', () => {
   it("reads the Checkout Session from a Stripe checkout link's path", () => {
     expect(checkoutSessionIdOf(CHECKOUT)).toBe('cs_test_abc');
     expect(checkoutSessionIdOf('https://checkout.stripe.com/c/pay/cs_live_a1B2c3#frag')).toBe('cs_live_a1B2c3');
+    expect(checkoutSessionIdOf('https://checkout.stripe.com/c/pay/cs_live_a1B2c3/')).toBe('cs_live_a1B2c3');
   });
 
-  it('reads none from a link that is not Stripe checkout, or has no session in its path', () => {
+  it('reads it on our own checkout domain too (#373)', () => {
+    vi.stubEnv('STRIPE_CHECKOUT_DOMAIN', 'pay.example.test');
+    try {
+      expect(checkoutSessionIdOf('https://pay.example.test/c/pay/cs_live_a1B2c3#frag')).toBe('cs_live_a1B2c3');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('reads none from a link that is not Stripe checkout, or whose whole path is not a session', () => {
     expect(checkoutSessionIdOf('https://evil.example/c/pay/cs_test_abc')).toBeNull();
     expect(checkoutSessionIdOf('https://checkout.stripe.com/c/pay/?s=cs_test_abc')).toBeNull();
     expect(checkoutSessionIdOf('https://checkout.stripe.com/c/pay/xcs_test_abc')).toBeNull();
     expect(checkoutSessionIdOf('https://checkout.stripe.com/c/pay/cs_other_abc')).toBeNull();
+    // Only the session's own path: no other segment, and no query, may name one.
+    expect(checkoutSessionIdOf('https://checkout.stripe.com/x/cs_test_abc')).toBeNull();
+    expect(checkoutSessionIdOf('https://checkout.stripe.com/c/pay/cs_test_abc/more')).toBeNull();
+    expect(checkoutSessionIdOf('https://checkout.stripe.com/c/pay/cs_test_abc?next=1')).toBeNull();
     expect(checkoutSessionIdOf(null)).toBeNull();
+  });
+});
+
+describe('resolvePurchaseStart (#730)', () => {
+  it('looks up the session the link names, and forwards to what our order recorded', async () => {
+    const lookup = vi.fn(async () => CHECKOUT);
+    await expect(resolvePurchaseStart({ to: CHECKOUT, redirectUrl: null }, lookup)).resolves.toMatchObject({
+      status: 302,
+      location: CHECKOUT
+    });
+    expect(lookup).toHaveBeenCalledWith('cs_test_abc');
+  });
+
+  it('refuses a session none of our orders opened', async () => {
+    await expect(resolvePurchaseStart({ to: CHECKOUT, redirectUrl: null }, async () => null)).resolves.toMatchObject({
+      status: 400,
+      refusal: 'not_ours'
+    });
+  });
+
+  it('asks nothing of the database for a link with no session', async () => {
+    const lookup = vi.fn(async () => CHECKOUT);
+    await expect(resolvePurchaseStart({ to: 'https://evil.example/', redirectUrl: null }, lookup)).resolves.toMatchObject({
+      status: 400,
+      refusal: 'host'
+    });
+    expect(lookup).not.toHaveBeenCalled();
+  });
+
+  it("leaves a lookup that fails to the route", async () => {
+    await expect(
+      resolvePurchaseStart({ to: CHECKOUT, redirectUrl: null }, async () => {
+        throw new Error('connection terminated');
+      })
+    ).rejects.toThrow('connection terminated');
   });
 });
 
 describe('decidePurchaseStart', () => {
   it('forwards to the checkout and keeps a valid return link in a same-site cookie', () => {
-    const decision = decidePurchaseStart({ ourSession: true, to: CHECKOUT, redirectUrl: CONVERSATION });
+    const decision = decidePurchaseStart({ ourCheckoutUrl: CHECKOUT, to: CHECKOUT, redirectUrl: CONVERSATION });
 
     expect(decision.status).toBe(302);
     if (decision.status !== 302) throw new Error('unreachable');
@@ -126,7 +176,7 @@ describe('decidePurchaseStart', () => {
   });
 
   it('forwards without a cookie when no acceptable return link was appended', () => {
-    const decision = decidePurchaseStart({ ourSession: true, to: CHECKOUT, redirectUrl: 'https://evil.example/' });
+    const decision = decidePurchaseStart({ ourCheckoutUrl: CHECKOUT, to: CHECKOUT, redirectUrl: 'https://evil.example/' });
 
     expect(decision.status).toBe(302);
     if (decision.status !== 302) throw new Error('unreachable');
@@ -134,15 +184,36 @@ describe('decidePurchaseStart', () => {
   });
 
   it('refuses a Stripe checkout none of our orders opened (#730)', () => {
-    const decision = decidePurchaseStart({ ourSession: false, to: CHECKOUT, redirectUrl: CONVERSATION });
+    const decision = decidePurchaseStart({ ourCheckoutUrl: null, to: CHECKOUT, redirectUrl: CONVERSATION });
 
     expect(decision.status).toBe(400);
     if (decision.status !== 400) throw new Error('unreachable');
     expect(decision.body).toMatch(/not valid/i);
+    expect(decision.refusal).toBe('not_ours');
+  });
+
+  it('forwards to the address our order recorded, never the one it was given (#730)', () => {
+    const recorded = 'https://checkout.stripe.com/c/pay/cs_test_abc#recorded';
+    const decision = decidePurchaseStart({ ourCheckoutUrl: recorded, to: CHECKOUT, redirectUrl: null });
+    expect(decision).toMatchObject({ status: 302, location: recorded });
+  });
+
+  it('refuses a recorded address that is not Stripe checkout, and says why each link was refused', () => {
+    expect(decidePurchaseStart({ ourCheckoutUrl: 'https://evil.example/', to: CHECKOUT, redirectUrl: null })).toMatchObject({
+      status: 400,
+      refusal: 'not_ours'
+    });
+    expect(decidePurchaseStart({ ourCheckoutUrl: CHECKOUT, to: 'https://evil.example/', redirectUrl: null })).toMatchObject({
+      status: 400,
+      refusal: 'host'
+    });
+    expect(
+      decidePurchaseStart({ ourCheckoutUrl: CHECKOUT, to: 'https://checkout.stripe.com/c/pay/', redirectUrl: null })
+    ).toMatchObject({ status: 400, refusal: 'no_session' });
   });
 
   it('refuses a destination that is not Stripe checkout', () => {
-    const decision = decidePurchaseStart({ ourSession: true, to: 'https://evil.example/', redirectUrl: CONVERSATION });
+    const decision = decidePurchaseStart({ ourCheckoutUrl: CHECKOUT, to: 'https://evil.example/', redirectUrl: CONVERSATION });
 
     expect(decision.status).toBe(400);
     if (decision.status !== 400) throw new Error('unreachable');
@@ -256,7 +327,7 @@ describe('purchase page diagnostics', () => {
   // without writing a conversation id, a checkout session or a cookie.
 
   it('records that a return link arrived, from which host, and that it was kept, without the values', () => {
-    const decision = decidePurchaseStart({ ourSession: true, to: CHECKOUT, redirectUrl: CONVERSATION });
+    const decision = decidePurchaseStart({ ourCheckoutUrl: CHECKOUT, to: CHECKOUT, redirectUrl: CONVERSATION });
     const fields = purchaseStartDiagnostics({
       query: new URLSearchParams({ to: CHECKOUT, redirectUrl: CONVERSATION }),
       referer: CONVERSATION,
@@ -269,6 +340,7 @@ describe('purchase page diagnostics', () => {
       hasRedirectUrl: true,
       redirectHost: 'chatgpt.com',
       targetOk: true,
+      refusal: 'none',
       returnKept: true,
       refererHost: 'chatgpt.com',
       client: 'other'
@@ -283,7 +355,7 @@ describe('purchase page diagnostics', () => {
       query: new URLSearchParams({ to: CHECKOUT }),
       referer: undefined,
       userAgent: ANDROID_UA,
-      decision: decidePurchaseStart({ ourSession: true, to: CHECKOUT, redirectUrl: null })
+      decision: decidePurchaseStart({ ourCheckoutUrl: CHECKOUT, to: CHECKOUT, redirectUrl: null })
     });
     expect(none).toMatchObject({
       queryKeys: 'to',
@@ -300,7 +372,7 @@ describe('purchase page diagnostics', () => {
       query: new URLSearchParams({ to: CHECKOUT, redirectUrl: planted }),
       referer: undefined,
       userAgent: IPHONE_UA,
-      decision: decidePurchaseStart({ ourSession: true, to: CHECKOUT, redirectUrl: planted })
+      decision: decidePurchaseStart({ ourCheckoutUrl: CHECKOUT, to: CHECKOUT, redirectUrl: planted })
     });
     expect(rejected).toMatchObject({
       hasRedirectUrl: true,
@@ -317,7 +389,7 @@ describe('purchase page diagnostics', () => {
       query,
       referer: 'not a url either',
       userAgent: undefined,
-      decision: decidePurchaseStart({ ourSession: true, to: 'https://evil.example/', redirectUrl: 'not a url' })
+      decision: decidePurchaseStart({ ourCheckoutUrl: CHECKOUT, to: 'https://evil.example/', redirectUrl: 'not a url' })
     });
 
     expect(fields).toMatchObject({
