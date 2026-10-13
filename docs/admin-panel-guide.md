@@ -91,9 +91,12 @@ every client, which fixes all devices at once; lowering a laptop's adapter MTU f
 
 A request another site made the browser send (`Sec-Fetch-Site` of `cross-site` or `same-site`, which
 includes another node in the tailnet: an image, a script, a fetch, a frame or a prefetch) may use a live
-session but never starts one (#730). Without a live session it gets a constant 403 after the loopback,
-Funnel, host and login checks and before whois: no session, no audit row (the one denial that writes
-none, so a flood of them cannot fill the table). With a live session a POST is refused as a CSRF attempt
+session but never starts one (#730). Without a live session it gets a constant 403 after every proxy
+and allowlist check (loopback, Funnel, protocol, host, peer address, login) and before whois: no
+session, no audit row (the one denial that writes none, so a flood of them cannot fill the table), and
+it does not count against the per-operator limit, as it does nothing else. A cookie presented from
+another login or peer is the exception: that is a theft signal, so the session is rotated and the
+`admin.session_start` row records it, as before. With a live session a POST is refused as a CSRF attempt
 and audited, as before. A link the operator follows from another site (a top-level GET navigation)
 still opens the page. Browsers that send no `Sec-Fetch-*` headers (Safari before 16.4) get no such
 gate. The panel holds at most 100 sessions; when full it drops the least recently used one that is not

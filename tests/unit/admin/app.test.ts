@@ -273,6 +273,22 @@ describe("admin request pipeline", () => {
     expect(audits.at(-1)).toMatchObject({ errorCode: "ADMIN_CSRF_REJECTED" });
   });
 
+  it("records a cookie presented from another peer, even on a request another site sent", async () => {
+    const theirs = sessions.create({ login: "owner@example.com", name: "Owner", node: "laptop", peerAddress: "100.64.0.99" });
+    const auditsBefore = audits.length;
+    const reply = await send(port, "GET", "/", {
+      ...identity,
+      cookie: `${SESSION_COOKIE_NAME}=${theirs.id}`,
+      "sec-fetch-site": "same-site",
+      "sec-fetch-mode": "no-cors",
+      "sec-fetch-dest": "image",
+    });
+    expect(reply.status).toBe(200);
+    expect(audits.slice(auditsBefore)).toContainEqual(
+      expect.objectContaining({ action: "admin.session_start", input: expect.stringContaining('"replaced":"binding_mismatch"') }),
+    );
+  });
+
   it("still audits a direct connection that fails the proxy checks, whatever its Sec-Fetch headers", async () => {
     const auditsBefore = audits.length;
     const reply = await send(port, "GET", "/", { "sec-fetch-site": "cross-site", "sec-fetch-mode": "no-cors", "sec-fetch-dest": "image" });

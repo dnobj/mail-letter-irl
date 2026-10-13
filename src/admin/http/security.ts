@@ -79,9 +79,11 @@ export interface StateChangeRefusal {
 
 /**
  * A request another site made the browser send (#730): an image, a script or
- * a fetch from a page the operator happens to visit. Refused before sign-in,
- * so it starts no session, runs no whois and writes no audit row; enough of
- * them used to push an elevated session out. A top-level navigation (a link
+ * a fetch from a page the operator happens to visit. Without a live session
+ * it is refused once the proxy and allowlist checks pass, so it starts no
+ * session, runs no whois and writes no audit row; enough of them used to push
+ * an elevated session out. (A cookie presented from another login or peer is
+ * a theft signal instead: the session is rotated and audited, as before.) A top-level navigation (a link
  * the operator follows) is let through as a GET, which changes nothing; a
  * prefetch or prerender looks like one but comes from a page's own rules, not
  * a click, so it is not. A request without the header is not a browser's.
