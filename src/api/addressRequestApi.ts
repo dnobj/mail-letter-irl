@@ -103,6 +103,14 @@ export function resetVerificationBudgets(): void {
  */
 const HIDDEN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Co}\p{Cn}\p{Cs}]/u;
 
+/**
+ * What a recipient's name may hold (#730): letters and marks in any script,
+ * digits, spaces and the punctuation names use (O'Brien, Smith-Jones,
+ * Dr. A. Lee, Jr., Smith & Co). The name reaches the model in tool results,
+ * so nothing that reads as markup, a link or a command.
+ */
+const NAME_LIKE = /^[\p{L}\p{M}\p{N} .,'\u2019&-]+$/u;
+
 type Json = Record<string, unknown>;
 
 function sendJson(res: ServerResponse, status: number, body: Json): void {
@@ -170,7 +178,9 @@ export function givenAddressOf(raw: unknown): { ok: true; address: GivenAddress 
   const nine = typedZip ? ZIP_NINE.exec(typedZip) : null;
   const postalCode = nine ? `${nine[1]}-${nine[2]}` : typedZip;
   const fields: AddressFieldProblem[] = [];
-  if (body.name !== undefined && body.name !== null && (name === undefined || !fits(name, ADDRESS_FIELD_LIMITS.name))) fields.push('name');
+  if (body.name !== undefined && body.name !== null && (name === undefined || !fits(name, ADDRESS_FIELD_LIMITS.name) || (name !== '' && !NAME_LIKE.test(name)))) {
+    fields.push('name');
+  }
   if (!line1 || !fits(line1, ADDRESS_FIELD_LIMITS.addressLine1)) fields.push('addressLine1');
   if (body.addressLine2 !== undefined && body.addressLine2 !== null && (line2 === undefined || !fits(line2, ADDRESS_FIELD_LIMITS.addressLine2))) {
     fields.push('addressLine2');
