@@ -119,6 +119,15 @@ describe('what the token validator remembers (#730)', () => {
     expect(carriesVerifiedToken('Bearer lirl_pat_good')).toBe(true);
     expect(carriesVerifiedToken('Bearer lirl_pat_bad')).toBe(false);
   });
+
+  it('does not remember a personal access token whose account is not admitted', async () => {
+    vi.stubEnv('LETTER_IRL_BETA_GATE_ENABLED', 'true');
+    vi.stubEnv('LETTER_IRL_BETA_ALLOWED_SUBJECTS', 'someone-else');
+    vi.stubEnv('LETTER_IRL_ADMIN_USER_IDS', '');
+    vi.mocked(validateToken).mockResolvedValueOnce({ valid: true, userId: 'pat-user', tokenId: 't2', scopes: [] } as never);
+    await expect(validateAuthorizationHeader('Bearer lirl_pat_outsider')).rejects.toThrow();
+    expect(carriesVerifiedToken('Bearer lirl_pat_outsider')).toBe(false);
+  });
 });
 
 describe('the MCP and REST backstop leaves a recently verified token alone (#730)', () => {
