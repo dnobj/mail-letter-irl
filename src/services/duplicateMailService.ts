@@ -147,7 +147,8 @@ export function describeMailAge(ageSeconds: number): string {
 /** Written for the model: what happened, and what it may do next. */
 export function duplicateMailMessage(duplicate: DuplicateMail, tool: DuplicateMailTool): string {
   const noun = duplicate.mailType;
-  const to = duplicate.recipientName ? ` to ${duplicate.recipientName}` : '';
+  // Quoted (#730): a recipient may have typed the name on a public page.
+  const to = duplicate.recipientName ? ` to ${JSON.stringify(duplicate.recipientName)}` : '';
   const when = describeMailAge(duplicate.ageSeconds);
   const what =
     duplicate.kind === 'sent'

@@ -274,7 +274,7 @@ describe('duplicate refusals survive', () => {
     const friendly = friendlyDraftError(source, 'draft-1', mailType);
     expect(friendly).toBeInstanceOf(DuplicateMailError);
     expect((friendly as DuplicateMailError).duplicate).toEqual({ ...duplicate, mailType });
-    expect(friendly.message).toContain('This same ' + mailType + ' to Sam Rivera was already sent from this account 10 minutes ago.');
+    expect(friendly.message).toContain('This same ' + mailType + ' to "Sam Rivera" was already sent from this account 10 minutes ago.');
     expect(friendly.message).toContain(advice);
   });
 
