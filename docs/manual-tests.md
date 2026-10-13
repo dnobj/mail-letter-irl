@@ -1766,7 +1766,8 @@ PostGrid test-mode verification; a refused field costs none.
 3. [ ] Type a test address (Test Addresses (US), below) without its ZIP code, leaving the name blank,
    and press **Send my address**. Verify the ZIP field is marked and focused, and the note under the
    fields reads "Check the fields marked above." without naming the printer. Add an emoji to the city
-   and send again: the note now names the printer.
+   and send again: the note now names the printer. Type `Note: Jane` as the name and send again:
+   the name is marked (#730; a colon is not taken in a name). Clear the name.
 4. [ ] Take the emoji out, add the ZIP code, and press **Send my address**. Verify **Thank you**.
 5. [ ] Ask the assistant what became of the request. Verify `get_address_request` says `answered`,
    with the address as given (or as USPS corrected it). As the recipient left the name blank, its

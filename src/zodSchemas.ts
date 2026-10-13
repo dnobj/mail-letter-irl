@@ -902,7 +902,6 @@ export const getOrderStatusOutputZ = z.object({
   statusTimeline: z.array(statusTimelineEntryZ),
   recipientSummary: recipientSummaryZ,
   canSendFollowUp: z.boolean().optional(),
-  followUpSuggestedPrompt: z.string().optional(),
   trackingSupport: trackingSupportZ.optional().describe(ORDER_TRACKING_SUPPORT_DESCRIPTION),
   arriveBy: z.string().optional().describe("Sent with an arrival date: the date it aims to arrive by, YYYY-MM-DD"),
   mailOn: z.string().optional().describe("Sent with an arrival date: the day it goes to the printer, YYYY-MM-DD"),
