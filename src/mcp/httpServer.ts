@@ -7,7 +7,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { promises as fs } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { LetterIrlServer } from "../server.js";
 import { registerLetterTools, type RegisterToolsOptions } from "./registerTools.js";
 import { logMcpClientRequests } from "./clientRequestLog.js";
@@ -78,7 +77,6 @@ import { APPS_CHALLENGE_PATH, appsChallengeResponse } from "./appsChallenge.js";
 import { logRestRequestOnFinish } from "../api/restRequestLog.js";
 import { OAUTH_NOT_CONFIGURED } from "../auth/oauthErrors.js";
 import { clientLogFields, resolveClientProfile } from "../auth/clientProfiles.js";
-import { closeSseSessionOnce } from "./sseSessionClose.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -88,9 +86,16 @@ const DEFAULT_HOST = process.env.LETTER_IRL_HTTP_HOST ?? "0.0.0.0";
 // Railway sets PORT env var; fall back to LETTER_IRL_HTTP_PORT for local dev
 const DEFAULT_PORT = Number(process.env.PORT ?? process.env.LETTER_IRL_HTTP_PORT ?? "8090");
 const MCP_PATH = process.env.LETTER_IRL_MCP_PATH ?? "/mcp";
-const SSE_PATH = process.env.LETTER_IRL_SSE_PATH ?? "/mcp/sse";
-const SSE_MESSAGES_PATH =
-  process.env.LETTER_IRL_SSE_MESSAGES_PATH ?? "/mcp/sse/messages";
+/**
+ * The legacy SSE transport's paths, retired (#730). Its message POSTs carried
+ * no credential, only the session id in the query string, and a stream ran on
+ * the token it opened with until it closed. Every client Letter IRL supports
+ * speaks streamable HTTP at MCP_PATH; these answer 410 and say so. Both
+ * deployments ran it at GET /mcp with its messages at /messages
+ * (set by two SSE path variables this code no longer reads); the
+ * defaults were /mcp/sse and /mcp/sse/messages.
+ */
+const RETIRED_SSE_PATHS: ReadonlySet<string> = new Set(["/mcp/sse", "/mcp/sse/messages", "/messages"]);
 const WIDGET_PATH = process.env.LETTER_IRL_WIDGET_PATH ?? "/widgets";
 const MANIFEST_ROUTE = process.env.LETTER_IRL_MANIFEST_ROUTE ?? "/manifest.json";
 const FALLBACK_ORIGIN =
@@ -171,12 +176,6 @@ export function validateEnvironment() {
     );
   }
 }
-
-type SseSession = {
-  server: McpServer;
-  transport: SSEServerTransport;
-  authInfo: AuthenticatedUser | null;
-};
 
 /**
  * Parse request body with timeout and error handling
@@ -302,7 +301,6 @@ export async function startHttpServer() {
 
   const letterServer = new LetterIrlServer();
   let cachedToolNames: Set<string> | null = null;
-  const sseSessions = new Map<string, SseSession>();
   const allowedHosts = getAllowedHosts();
   const allowedOrigins = getAllowedOrigins();
 
@@ -321,127 +319,6 @@ export async function startHttpServer() {
       "Access-Control-Allow-Headers": "authorization, content-type, mcp-session-id"
     });
     res.end();
-  };
-
-  const handleSseStreamRequest = async (
-    req: http.IncomingMessage,
-    res: http.ServerResponse
-  ) => {
-    const origin = resolveCorsOrigin(req.headers.origin);
-    res.setHeader("Access-Control-Allow-Origin", origin);
-    res.setHeader("Access-Control-Expose-Headers", "mcp-session-id");
-
-    const acceptHeader = req.headers.accept ?? "";
-    if (!acceptHeader.includes("text/event-stream")) {
-      res.writeHead(406, { "Content-Type": "application/json" });
-      res.end(
-        JSON.stringify({
-          error: "Not Acceptable: Client must accept text/event-stream"
-        })
-      );
-      return;
-    }
-
-    const authInfo = await authenticateRequest(req, res, getPublicBaseUrl(req));
-    if (authInfo === null) {
-      return;
-    }
-
-    // One server for the whole stream, so the account is decided per call
-    // rather than once at connection (#446 review).
-    const sessionServer = await createMcpServer(letterServer, authInfo, { recheckAccountPerCall: true });
-
-    const sseTransport = new SSEServerTransport(SSE_MESSAGES_PATH, res, {
-      allowedHosts,
-      allowedOrigins,
-      enableDnsRebindingProtection: true
-    });
-
-    // Once only: closing the server closes the transport, which calls this
-    // again (src/mcp/sseSessionClose.ts).
-    sseTransport.onclose = closeSseSessionOnce(
-      () => sessionServer.close(),
-      () => sseSessions.delete(sseTransport.sessionId)
-    );
-    sseTransport.onerror = (error) => {
-      writeDiagnostic("error", "mcp.sse_transport_error", {
-        errorClass: classifyDiagnosticError(error, "transport_error")
-      });
-    };
-
-    try {
-      await sessionServer.connect(sseTransport);
-      sseSessions.set(sseTransport.sessionId, {
-        server: sessionServer,
-        transport: sseTransport,
-        authInfo
-      });
-      writeDiagnostic("info", "mcp.sse_session_established", {
-        authType: authInfo?.authType ?? "disabled",
-        ...clientLogFields(authInfo)
-      });
-    } catch (error) {
-      writeDiagnostic("error", "mcp.sse_session_start_failed", {
-        errorClass: classifyDiagnosticError(error, "transport_error")
-      });
-      try {
-        await sessionServer.close();
-      } catch (closeError) {
-        writeDiagnostic("warn", "mcp.sse_session_close_failed", {
-          errorClass: classifyDiagnosticError(closeError, "transport_error")
-        });
-      }
-      if (!res.headersSent) {
-        res.writeHead(500, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Failed to establish SSE connection" }));
-      }
-    }
-  };
-
-  const handleSsePostRequest = async (
-    req: http.IncomingMessage,
-    res: http.ServerResponse,
-    url: URL
-  ) => {
-    const origin = resolveCorsOrigin(req.headers.origin);
-    res.setHeader("Access-Control-Allow-Origin", origin);
-    res.setHeader(
-      "Access-Control-Allow-Headers",
-      "authorization, content-type, mcp-session-id"
-    );
-
-    const sessionId = url.searchParams.get("sessionId");
-    if (!sessionId) {
-      res.writeHead(400).end("Missing sessionId query parameter");
-      return;
-    }
-
-    const session = sseSessions.get(sessionId);
-    if (!session) {
-      res.writeHead(404).end("Unknown session");
-      return;
-    }
-
-    (req as any).auth = session.authInfo ?? undefined;
-
-    // Tool calls arrive here on the legacy transport. Until 2026-09-13 this
-    // route had no limiter at all, so one SSE stream bought unlimited tool
-    // calls. It runs after the session lookup, which is where the account
-    // becomes known, so the limit is per account like the modern transport's.
-    if (await rateLimitMiddlewareWithTier(req, res, 'mcp_account')) {
-      return;
-    }
-
-    try {
-      await session.transport.handlePostMessage(req, res);
-    } catch (error) {
-      writeDiagnostic("error", "mcp.sse_message_failed", {
-        errorClass: classifyDiagnosticError(error, "transport_error")
-      });
-      if (!res.headersSent) {
-        res.writeHead(500).end("Failed to process message");
-      }
-    }
   };
 
   // Every route runs inside one exception boundary (src/mcp/requestBoundary.ts):
@@ -490,30 +367,12 @@ export async function startHttpServer() {
       return;
     }
 
-    if (
-      req.method === "OPTIONS" &&
-      (url.pathname === SSE_PATH || url.pathname === SSE_MESSAGES_PATH)
-    ) {
-      respondToCorsPreflight(res, resolveCorsOrigin(req.headers.origin));
-      return;
-    }
-
-    if (req.method === "GET" && url.pathname === SSE_PATH) {
-      // Rate limit SSE connection attempts
-      if (await rateLimitMiddlewareWithTier(req, res, 'mcp')) {
-        return; // Rate limited
-      }
-      await handleSseStreamRequest(req, res);
-      return;
-    }
-
-    if (url.pathname === SSE_MESSAGES_PATH) {
-      if (req.method === "POST") {
-        await handleSsePostRequest(req, res, url);
-        return;
-      }
-      res.writeHead(405, { Allow: "POST, OPTIONS" });
-      res.end();
+    if (RETIRED_SSE_PATHS.has(url.pathname)) {
+      res.writeHead(410, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      res.end(JSON.stringify({
+        error: "gone",
+        message: `The SSE transport is retired. Connect with streamable HTTP at ${MCP_PATH}.`
+      }));
       return;
     }
 
@@ -972,6 +831,23 @@ export async function startHttpServer() {
       return;
     }
 
+    if (url.pathname === MCP_PATH && req.method === "OPTIONS") {
+      // A browser's preflight carries no credential: answered before the
+      // limiter and sign-in, as the SSE route answered it until #730. Every
+      // client today is a server-side one; /mcp's POST sets no CORS origin.
+      respondToCorsPreflight(res, resolveCorsOrigin(req.headers.origin));
+      return;
+    }
+
+    if (url.pathname === MCP_PATH && req.method === "GET") {
+      // No server-initiated stream (#730): every request builds its own
+      // server and transport, so a GET stream would carry nothing and only
+      // hold a connection open. The MCP spec allows 405 here.
+      res.writeHead(405, { Allow: "POST, OPTIONS", "Cache-Control": "no-store" });
+      res.end();
+      return;
+    }
+
     if (url.pathname === MCP_PATH) {
       // Rate limit MCP tool calls
       if (await rateLimitMiddlewareWithTier(req, res, 'mcp')) {
@@ -1075,6 +951,8 @@ export async function startHttpServer() {
   await new Promise<void>((resolve) => {
     server.listen(DEFAULT_PORT, DEFAULT_HOST, () => {
       console.log(`Letter IRL MCP HTTP server listening on http://${DEFAULT_HOST}:${DEFAULT_PORT}`);
+      // nixpacks.toml sets it (#730); this line is how a deploy shows it took.
+      writeDiagnostic("info", "boot.thread_pool", { size: Number(process.env.UV_THREADPOOL_SIZE) || 4 });
       // Price warmup AFTER the port binds, fire-and-forget (#275 stage A). An
       // earlier revision awaited this above, ~650 lines before listen, which
       // meant a Stripe outage held the socket closed - a probe against a
@@ -1086,10 +964,6 @@ export async function startHttpServer() {
       // has its own environment (migration 038). Never throws.
       void reportDailyLimitDefaults();
       console.log(`  MCP endpoint: http://${DEFAULT_HOST}:${DEFAULT_PORT}${MCP_PATH}`);
-      console.log(`  SSE stream: http://${DEFAULT_HOST}:${DEFAULT_PORT}${SSE_PATH}`);
-      console.log(
-        `  SSE messages: http://${DEFAULT_HOST}:${DEFAULT_PORT}${SSE_MESSAGES_PATH}?sessionId=...`
-      );
       console.log(`  Widget assets: http://${DEFAULT_HOST}:${DEFAULT_PORT}${WIDGET_PATH}/<name>.html`);
       resolve();
     });

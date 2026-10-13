@@ -23,6 +23,7 @@ import {
   ImageProcessingError,
   inspectUploadedPhoto
 } from '../../../src/services/imageService.js';
+import { remoteImageTransport } from '../../../src/services/imageDownload.js';
 
 const jpeg = (width = 640, height = 480) =>
   sharp({ create: { width, height, channels: 3, background: { r: 30, g: 60, b: 90 } } }).jpeg().toBuffer();
@@ -44,7 +45,7 @@ describe('an uploaded photo in the image service (#474)', () => {
 
   beforeEach(() => {
     vi.mocked(getUploadedPhoto).mockReset();
-    vi.stubGlobal('fetch', fetchSpy);
+    remoteImageTransport.fetch = fetchSpy as never;
   });
   afterEach(() => {
     vi.unstubAllGlobals();

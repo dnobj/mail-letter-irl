@@ -917,7 +917,9 @@ exactly:
 - `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
   `checkout.session.async_payment_failed`, `checkout.session.expired`
 - `refund.created`, `refund.updated`, `refund.failed`, `charge.refunded`
-- `charge.dispute.created`, `charge.dispute.closed`
+- `charge.dispute.created`, `charge.dispute.updated`, `charge.dispute.funds_withdrawn`,
+  `charge.dispute.closed` (the middle two since #730: an inquiry that becomes a chargeback
+  arrives as one of them, and without them its letters stay spendable until it closes)
 
 Anything else is recorded and ignored. A refund event that is not subscribed
 fails silently: the money goes back and the letters stay, and only the

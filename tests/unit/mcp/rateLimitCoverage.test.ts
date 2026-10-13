@@ -10,7 +10,7 @@
  *     user arrives from OpenAI's shared egress, so customers shared one
  *     bucket and the tier multipliers were unreachable code.
  *  2. `POST /mcp/sse/messages` carried no limiter at all, so one SSE stream
- *     bought unlimited tool calls.
+ *     bought unlimited tool calls. (The SSE transport is retired, #730.)
  *  3. The credit-API prefix test named `/api/credits` while the handler also
  *     owns `/api/promo/*` and `/api/users/me`, so promo codes could be
  *     guessed at line rate on the authenticated route while the
@@ -57,15 +57,31 @@ describe('the MCP limits', () => {
     );
   });
 
-  it('checks the account limit on both transports', () => {
-    // Streamable HTTP, after authenticateRequest returns a subject.
+  it('checks the account limit on the MCP transport', () => {
+    // Streamable HTTP, after authenticateRequest returns a subject. The legacy
+    // SSE transport is retired (#730).
     expect(httpServer).toMatch(
       /\(req as any\)\.auth = authInfo;\s*\n\s*if \(await rateLimitMiddlewareWithTier\(req, res, 'mcp_account'\)\)/
     );
-    // Legacy SSE, after the session lookup supplies the subject.
-    expect(httpServer).toMatch(
-      /\(req as any\)\.auth = session\.authInfo[\s\S]{0,600}?rateLimitMiddlewareWithTier\(req, res, 'mcp_account'\)/
-    );
+  });
+
+  it('answers a preflight on /mcp before the limiter and sign-in, and a GET with 405 (#730)', () => {
+    const preflight = httpServer.indexOf('if (url.pathname === MCP_PATH && req.method === "OPTIONS") {');
+    const get = httpServer.indexOf('if (url.pathname === MCP_PATH && req.method === "GET") {');
+    const limiter = httpServer.indexOf("if (await rateLimitMiddlewareWithTier(req, res, 'mcp')) {");
+    expect(preflight).toBeGreaterThan(-1);
+    expect(get).toBeGreaterThan(preflight);
+    expect(limiter).toBeGreaterThan(get);
+    expect(httpServer.slice(preflight, preflight + 600)).toContain('respondToCorsPreflight(res, resolveCorsOrigin(req.headers.origin));');
+    expect(httpServer.slice(get, get + 500)).toContain('res.writeHead(405, { Allow: "POST, OPTIONS"');
+  });
+
+  it('answers the retired SSE paths 410, before anything else runs for them (#730)', () => {
+    const route = httpServer.indexOf('if (RETIRED_SSE_PATHS.has(url.pathname)) {');
+    expect(route).toBeGreaterThan(-1);
+    expect(httpServer.slice(route, route + 400)).toContain('res.writeHead(410');
+    expect(httpServer).toContain('new Set(["/mcp/sse", "/mcp/sse/messages", "/messages"])');
+    expect(httpServer).not.toMatch(/SSEServerTransport|handleSse|sseSessions/);
   });
 
   it('sets the subject before the account limit runs, or it would key on the address again', () => {

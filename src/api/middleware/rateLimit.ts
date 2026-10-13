@@ -10,6 +10,7 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 import { getCachedUserTier, getTierMultiplier } from '../../services/tierService.js';
 import type { UserTier } from '../../services/types.js';
+import { resetVerifiedTokens, takeExemption } from '../../auth/signInPool.js';
 
 interface RateLimitEntry {
   count: number;
@@ -45,6 +46,9 @@ export const GLOBAL_RATE_LIMITS: Record<string, RateLimitConfig> = {
   // many addresses cannot burn JWKS verification or bcrypt compares at line
   // rate. Each sits well above its per-identifier limit and far above any
   // traffic this service has seen, so a hit is an incident, not a busy day.
+  // On mcp and api a request with a token verified here recently is neither
+  // counted nor refused (#730, src/auth/signInPool.ts), so junk tokens cannot
+  // refuse the people already signed in.
   'mcp': {
     windowMs: 60 * 1000,
     maxRequests: 1200,
@@ -439,7 +443,12 @@ export async function rateLimitMiddlewareWithTier(
   }
 
   // The per-identifier limit above bounds one client. Routes with a global
-  // entry also refuse at that ceiling whatever the mix of identifiers.
+  // entry also refuse at that ceiling whatever the mix of identifiers. On the
+  // MCP and REST routes a recently verified token skips it, up to a bound per
+  // account (#730).
+  if (VERIFIED_SKIP_GLOBAL.has(endpointType) && takeExemption(req.headers.authorization)) {
+    return false;
+  }
   const globalResult = checkGlobalRateLimit(endpointType);
   if (!globalResult.allowed) {
     console.warn(`⚠️ Rate limit hit (global): ${endpointType} - system-wide limit reached`);
@@ -462,6 +471,9 @@ export async function rateLimitMiddlewareWithTier(
 
   return false;
 }
+
+/** The routes whose shared backstop a recently verified token skips (#730). */
+const VERIFIED_SKIP_GLOBAL: ReadonlySet<string> = new Set(['mcp', 'api']);
 
 /** The per-account limits a REST handler applies once it knows the account. */
 export type AccountRateLimit = 'api_account' | 'checkout_account';
@@ -628,4 +640,5 @@ export function getBlockedRequestCounts(): Record<string, number> {
 export function clearRateLimitState(): void {
   rateLimitStore.clear();
   blockedRequestCounts.clear();
+  resetVerifiedTokens();
 }

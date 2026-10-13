@@ -113,15 +113,9 @@ describe("the erasure panel", () => {
 describe("which MCP transport decides the account on every call (#446 review)", () => {
   const httpServer = readFileSync(join(process.cwd(), "src/mcp/httpServer.ts"), "utf8");
 
-  it("rechecks on the legacy SSE stream, whose one server outlives any single call, and only there", () => {
+  it("builds a server per request, which decides the account per call; the SSE stream that outlived calls is retired (#730)", () => {
     const calls = httpServer.match(/createMcpServer\(letterServer, authInfo(?:, \{[^}]*\})?\)/g) ?? [];
-    expect(calls).toEqual([
-      "createMcpServer(letterServer, authInfo, { recheckAccountPerCall: true })",
-      "createMcpServer(letterServer, authInfo)",
-    ]);
-    // The first is the SSE session's server.
-    expect(httpServer).toMatch(
-      /createMcpServer\(letterServer, authInfo, \{ recheckAccountPerCall: true \}\);\s*\n\s*\n\s*const sseTransport = new SSEServerTransport/
-    );
+    expect(calls).toEqual(["createMcpServer(letterServer, authInfo)"]);
+    expect(httpServer).not.toMatch(/SSEServerTransport/);
   });
 });

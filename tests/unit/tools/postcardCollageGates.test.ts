@@ -48,6 +48,7 @@ import { getGiftBalance } from '../../../src/services/giftLetterService.js';
 import { getSendEligibility } from '../../../src/services/commerceService.js';
 import { quoteAndPreviewPostcardTool } from '../../../src/tools/quoteAndPreviewPostcard.js';
 import type { Address, ToolContext } from '../../../src/contracts/types.js';
+import { remoteImageTransport } from '../../../src/services/imageDownload.js';
 
 type Rgb = [number, number, number];
 const RED: Rgb = [255, 0, 0];
@@ -138,7 +139,7 @@ const near = (actual: Rgb, expected: Rgb) => actual.every((channel, i) => Math.a
 beforeEach(() => {
   vi.clearAllMocks();
   fetchMock.mockReset();
-  vi.stubGlobal('fetch', fetchMock);
+  remoteImageTransport.fetch = fetchMock as never;
   vi.stubEnv('LETTER_IRL_PRINT_RENDERER', 'pdf');
   vi.stubEnv('LETTER_IRL_POSTCARD_COLLAGES_ENABLED', 'true');
   vi.mocked(getLetterProvider).mockReturnValue({} as never);

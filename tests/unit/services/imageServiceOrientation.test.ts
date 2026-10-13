@@ -7,6 +7,7 @@ import {
   downloadAndProcessPostcardImageWithPreview,
   reprocessPostcardImage,
 } from '../../../src/services/imageService.js';
+import { remoteImageTransport } from '../../../src/services/imageDownload.js';
 
 /**
  * Photos are printed upright (#617). A phone stores a portrait photo's pixels as the sensor read them and
@@ -132,7 +133,7 @@ describe('photos are printed upright (#617)', () => {
   const fetchMock = vi.fn();
 
   beforeEach(() => {
-    vi.stubGlobal('fetch', fetchMock);
+    remoteImageTransport.fetch = fetchMock as never;
   });
 
   afterEach(() => {
