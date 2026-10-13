@@ -3741,6 +3741,18 @@ export function missedScheduleSentence(
   return undefined;
 }
 
+/**
+ * The checkout address one of our orders recorded for this Stripe Checkout
+ * Session, or null (#730): the purchase start page forwards only there.
+ */
+export async function ourCheckoutUrl(sessionId: string): Promise<string | null> {
+  const result = await query<{ checkout_url: string | null }>(
+    'SELECT checkout_url FROM orders WHERE stripe_checkout_session_id = $1 LIMIT 1',
+    [sessionId]
+  );
+  return result.rows[0]?.checkout_url ?? null;
+}
+
 export async function getPurchaseStatus(
   userId: string,
   orderId: string

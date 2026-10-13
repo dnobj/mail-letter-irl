@@ -4,7 +4,8 @@
  * With a custom domain active, Stripe returns Checkout Session URLs on it,
  * such as https://pay.letterirl.com/c/pay/cs_live_..., instead of on
  * checkout.stripe.com. Two things here forward only to hosts they know: the
- * start page (/purchase/start, #372), which refuses any other target, and the
+ * start page (/purchase/start, #372), which refuses any other target, and
+ * forwards only to a session one of our orders opened (#730), and the
  * widgets' redirect list. STRIPE_CHECKOUT_DOMAIN names the custom host for
  * both, beside checkout.stripe.com, which always stays: a session opened
  * before the switch keeps its URL. The domain is added once, in live mode,
