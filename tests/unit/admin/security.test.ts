@@ -5,6 +5,7 @@ import {
   buildSecurityHeaders,
   checkStateChangingRequest,
   createCsrfToken,
+  isCrossSiteSubresource,
   createNonce,
   parseFormBody,
   verifyCsrfToken,
@@ -17,6 +18,33 @@ function request(headers: Record<string, string>, method = "POST") {
 }
 
 const ORIGINS = ["https://letter-irl-admin-dev.tail1234.ts.net"];
+
+describe("which requests another site made the browser send (#730)", () => {
+  const ask = (method: string, headers: Record<string, string>) =>
+    isCrossSiteSubresource(method, (name) => headers[name.toLowerCase()]);
+
+  it("leaves requests that are not a browser's, or are the panel's own, alone", () => {
+    expect(ask("GET", {})).toBe(false);
+    expect(ask("GET", { "sec-fetch-site": "none" })).toBe(false);
+    expect(ask("POST", { "sec-fetch-site": "same-origin" })).toBe(false);
+    expect(ask("GET", { "sec-purpose": "prefetch" })).toBe(false);
+  });
+
+  it("names cross-site and same-site subresources, frames, form posts and speculative loads", () => {
+    expect(ask("GET", { "sec-fetch-site": "cross-site", "sec-fetch-mode": "no-cors", "sec-fetch-dest": "image" })).toBe(true);
+    expect(ask("GET", { "sec-fetch-site": "same-site", "sec-fetch-mode": "cors", "sec-fetch-dest": "empty" })).toBe(true);
+    expect(ask("GET", { "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "iframe" })).toBe(true);
+    expect(ask("POST", { "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" })).toBe(true);
+    expect(ask("GET", { "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "document", "sec-purpose": "prefetch;prerender" })).toBe(true);
+    expect(ask("GET", { "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "document", purpose: "Prefetch" })).toBe(true);
+  });
+
+  it("lets a link the operator follows through, by GET or HEAD", () => {
+    for (const method of ["GET", "HEAD"]) {
+      expect(ask(method, { "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" })).toBe(false);
+    }
+  });
+});
 
 describe("admin browser-boundary checks", () => {
   it("accepts a same-origin form post and nothing looser", () => {

@@ -22,6 +22,7 @@ import {
   SlidingWindowLimiter,
   buildSecurityHeaders,
   checkStateChangingRequest,
+  isCrossSiteSubresource,
   createCsrfToken,
   createNonce,
   parseFormBody,
@@ -183,14 +184,15 @@ export function createAdminRequestListener(
     const constant = (status: number) =>
       finish(status, CONSTANT_BODIES[status] ?? "error", "text/plain; charset=utf-8");
 
+    const header = (name: string) => {
+      const value = request.headers[name.toLowerCase()];
+      return Array.isArray(value) ? value[0] : value;
+    };
     const peer = request.socket.remoteAddress;
     const auth = await authenticateAdminRequest(
       {
         remoteAddress: peer,
-        header: (name) => {
-          const value = request.headers[name.toLowerCase()];
-          return Array.isArray(value) ? value[0] : value;
-        },
+        header,
         cookie: (name) => cookies.get(name),
       },
       {
@@ -199,9 +201,17 @@ export function createAdminRequestListener(
         whois: options.whois,
         sessions: options.sessions,
         localDev,
+        // A request another site sent may use a live session (and a POST is
+        // then refused as CSRF, audited) but never start one (#730).
+        allowNewSession: !isCrossSiteSubresource(method, header),
       },
     );
 
+    if (!auth.ok && auth.quiet) {
+      if (cookies.has(SESSION_COOKIE_NAME)) cookiesToSet.push(clearedSessionCookie());
+      constant(403);
+      return;
+    }
     if (!auth.ok) {
       const key = `${peer ?? "?"}:${auth.presentedLogin ?? "-"}`;
       const deniedActor = auth.presentedLogin ?? ANONYMOUS_ACTOR.id;

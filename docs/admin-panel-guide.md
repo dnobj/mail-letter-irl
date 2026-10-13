@@ -89,10 +89,24 @@ requests get through and full-size ones hang, so curl works while a browser whos
 segments times out on every page. Lowering the daemon's MTU makes it advertise a smaller segment size to
 every client, which fixes all devices at once; lowering a laptop's adapter MTU fixes one.
 
+A request another site made the browser send (`Sec-Fetch-Site` of `cross-site` or `same-site`, which
+includes another node in the tailnet: an image, a script, a fetch, a frame or a prefetch) may use a live
+session but never starts one (#730). Without a live session it gets a constant 403 after every proxy
+and allowlist check (loopback, Funnel, protocol, host, peer address, login) and before whois: no
+session, no audit row (the one denial that writes none, so a flood of them cannot fill the table), and
+it does not count against the per-operator limit, as it does nothing else. A cookie presented from
+another login or peer is the exception: that is a theft signal, so the session is rotated and the
+`admin.session_start` row records it, as before. With a live session a POST is refused as a CSRF attempt
+and audited, as before. A link the operator follows from another site (a top-level GET navigation)
+still opens the page. Browsers that send no `Sec-Fetch-*` headers (Safari before 16.4) get no such
+gate. The panel holds at most 100 sessions; when full it drops the least recently used one that is not
+elevated, and only if all are elevated the oldest of those.
+
 State-changing requests additionally need `Sec-Fetch-Site` of `same-origin` or `none`, an `Origin` equal
 to the panel's origin, and the per-session CSRF token in the form. Responses carry a strict nonce-based
-Content Security Policy, `Cache-Control: no-store` and a correlation id. Denials, failures, session starts
-and reveals all write `admin_audit_events`, which is append-only at the database. Requests are limited to 240
+Content Security Policy, `Cache-Control: no-store` and a correlation id. Denials (but for the quiet
+refusal of a request another site sent, above), failures, session starts and reveals all write
+`admin_audit_events`, which is append-only at the database. Requests are limited to 240
 a minute per operator, and to 10 a minute per login on the elevation route. Individual denial rows are
 capped at sixty a minute for the process; beyond that they are counted and written as one
 `admin.request_denied_burst` row per minute with the count, the error codes and the number of distinct
