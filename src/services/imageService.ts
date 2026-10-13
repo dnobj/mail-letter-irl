@@ -286,7 +286,7 @@ export function runImageDecode<T>(work: () => Promise<T>, actorId?: string): Pro
  * whose every address is public (#730: resolved under the download's
  * deadline, off the thread pool, src/services/imageDownload.ts).
  */
-async function validateRemoteImageUrl(url: string, signal: AbortSignal): Promise<{ parsed: URL; pinned: PinnedAddress }> {
+async function validateRemoteImageUrl(url: string, signal: AbortSignal): Promise<{ parsed: URL; pinned: PinnedAddress[] }> {
   let parsed: URL;
 
   try {
@@ -305,7 +305,7 @@ async function validateRemoteImageUrl(url: string, signal: AbortSignal): Promise
     if (isUnsafeIpAddress(host)) {
       throw new ImageProcessingError('DOWNLOAD_FAILED', DOWNLOAD_FAILED_MESSAGE);
     }
-    return { parsed, pinned: { address: host, family: literal === 6 ? 6 : 4 } };
+    return { parsed, pinned: [{ address: host, family: literal === 6 ? 6 : 4 }] };
   }
 
   const pinned = await resolvePublicAddress(host, signal);
@@ -470,6 +470,10 @@ async function downloadRemoteImage(
       );
     } finally {
       clearTimeout(deadline);
+      // Ends a response refused before its body was read (#730): with no
+      // pooled agent, nothing else would close its socket while the peer
+      // keeps it open. Nothing to end after a body read to its end.
+      controller.abort();
     }
   }, options.actorId);
 }

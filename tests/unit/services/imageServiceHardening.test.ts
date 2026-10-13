@@ -13,7 +13,7 @@ import { ConcurrencyGateError } from '../../../src/utils/concurrencyGate.js';
 import { remoteImageTransport } from '../../../src/services/imageDownload.js';
 
 /**
- * Real bytes, no sharp mock. imageService.test.ts mocks sharp and fetch's
+ * Real bytes, no sharp mock. imageService.test.ts mocks sharp and the download's
  * body, which is how an unbounded decode, a header-only format check and a
  * body read with no deadline all survived. Everything here hands sharp the
  * bytes a customer's server could send.

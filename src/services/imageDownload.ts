@@ -21,14 +21,30 @@ import type { LookupAddress, LookupOneOptions } from 'node:dns';
 import { isIP } from 'node:net';
 import { Readable } from 'node:stream';
 
-/** The address a download connects to: one its host resolved to, checked. */
+/** An address a download may connect to: one its host resolved to, checked. */
 export interface PinnedAddress {
   address: string;
   family: 4 | 6;
 }
 
-/** Per query: c-ares backs off between tries, and the deadline cancels it. */
-export const DNS_CONFIG = { timeoutMs: 4_000, tries: 2 } as const;
+/**
+ * Per query: c-ares backs off between tries, and the deadline cancels it.
+ * Once the A query has answered, the AAAA query has `aaaaGraceMs` more: a
+ * nameserver that drops AAAA queries must not hold an IPv4 download.
+ */
+export const DNS_CONFIG = { timeoutMs: 4_000, tries: 2, aaaaGraceMs: 1_500 } as const;
+
+type Answer = { ok: true; addresses: string[] } | { ok: false; code?: string };
+
+function answerOf(query: Promise<string[]>): Promise<Answer> {
+  return query.then(
+    addresses => ({ ok: true as const, addresses }),
+    (error: NodeJS.ErrnoException) => ({ ok: false as const, code: error?.code })
+  );
+}
+
+/** The host has no such record, as opposed to a query that failed. */
+const NO_RECORD = new Set(['ENODATA', 'ENOTFOUND']);
 
 /** What resolution needs from a resolver: so tests can stand one in. */
 export interface ImageHostResolver {
@@ -42,28 +58,55 @@ function defaultResolver(): ImageHostResolver {
 }
 
 /**
- * The address to connect to for `host`, or null: when it resolves to nothing,
- * when any address it resolves to is not public (a host cannot be half safe),
- * or when the deadline passes first. IPv4 is preferred when there is one.
+ * The addresses to connect to for `host`, IPv4 first, or null: when it
+ * resolves to nothing, when any address it resolves to is not public (a host
+ * cannot be half safe), when the A query failed rather than found no record
+ * (an IPv6-only pin would then stand in for a host that has IPv4), or when
+ * the deadline passes first. An AAAA answer later than the grace is left out,
+ * and so is never connected to.
  */
 export async function resolvePublicAddress(
   host: string,
   signal: AbortSignal,
   makeResolver: () => ImageHostResolver = defaultResolver
-): Promise<PinnedAddress | null> {
+): Promise<PinnedAddress[] | null> {
   if (signal.aborted) return null;
-  const resolver = makeResolver();
-  const cancel = () => resolver.cancel();
+  // One resolver each, so the AAAA query can be cancelled alone.
+  const v4Resolver = makeResolver();
+  const v6Resolver = makeResolver();
+  const cancel = () => {
+    v4Resolver.cancel();
+    v6Resolver.cancel();
+  };
   signal.addEventListener('abort', cancel, { once: true });
+  let grace: ReturnType<typeof setTimeout> | undefined;
   try {
-    const [v4, v6] = await Promise.allSettled([resolver.resolve4(host), resolver.resolve6(host)]);
+    const aaaa = answerOf(v6Resolver.resolve6(host));
+    const a = await answerOf(v4Resolver.resolve4(host));
     if (signal.aborted) return null;
-    const four = v4.status === 'fulfilled' ? v4.value : [];
-    const six = v6.status === 'fulfilled' ? v6.value : [];
+    if (!a.ok && !NO_RECORD.has(a.code ?? '')) return null;
+    const four = a.ok ? a.addresses : [];
+    const six = await (four.length > 0
+      ? Promise.race([
+          aaaa,
+          new Promise<Answer>(resolve => {
+            grace = setTimeout(() => {
+              v6Resolver.cancel();
+              resolve({ ok: false });
+            }, DNS_CONFIG.aaaaGraceMs);
+          })
+        ])
+      : aaaa
+    ).then(answer => (answer.ok ? answer.addresses : []));
+    if (signal.aborted) return null;
     if (four.length + six.length === 0) return null;
     if ([...four, ...six].some(isUnsafeIpAddress)) return null;
-    return four.length > 0 ? { address: four[0], family: 4 } : { address: six[0], family: 6 };
+    return [
+      ...four.map(address => ({ address, family: 4 as const })),
+      ...six.map(address => ({ address, family: 6 as const }))
+    ];
   } finally {
+    clearTimeout(grace);
     signal.removeEventListener('abort', cancel);
   }
 }
@@ -128,27 +171,25 @@ export function ipv6Groups(address: string): number[] | null {
 }
 
 /**
- * Not public: unspecified, loopback, IPv4-mapped and IPv4-compatible, unique
- * local, link and site local, multicast, documentation (2001:db8::/32,
- * 3fff::/20), and the ranges that carry an IPv4 address or reach one through
- * a translator: NAT64 (64:ff9b::/96, 64:ff9b:1::/48), 6to4 (2002::/16), and
- * the IETF protocol block holding Teredo (2001::/23). Also discard
- * (100::/64) and SRv6 (5f00::/16).
+ * Not public: all of ::/8 (unspecified, loopback, IPv4-mapped, -compatible
+ * and -translated, and NAT64's 64:ff9b::/96 and 64:ff9b:1::/48: nothing
+ * global lives there), unique local, link and site local, multicast,
+ * documentation (2001:db8::/32, 3fff::/20), 6to4 (2002::/16), the IETF
+ * protocol block holding Teredo (2001::/23), discard (100::/64) and SRv6
+ * (5f00::/16).
  */
 export function isUnsafeIpv6Address(address: string): boolean {
   const g = ipv6Groups(address);
   if (!g) return true;
-  const [g0, g1, g2, g3, g4, g5] = g;
-  const firstFiveZero = g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0;
+  const [g0, g1, g2, g3] = g;
   return (
-    (firstFiveZero && (g5 === 0 || g5 === 0xffff)) ||
+    g0 <= 0x00ff ||
     (g0 & 0xfe00) === 0xfc00 ||
     (g0 & 0xffc0) === 0xfe80 ||
     (g0 & 0xffc0) === 0xfec0 ||
     (g0 & 0xff00) === 0xff00 ||
     (g0 === 0x2001 && g1 === 0x0db8) ||
     (g0 === 0x3fff && g1 < 0x1000) ||
-    (g0 === 0x0064 && g1 === 0xff9b) ||
     g0 === 0x2002 ||
     (g0 === 0x2001 && g1 < 0x0200) ||
     (g0 === 0x0100 && g1 === 0 && g2 === 0 && g3 === 0) ||
@@ -167,10 +208,11 @@ const NULL_BODY_STATUSES = new Set([101, 103, 204, 205, 304]);
  * TLS still names and verifies the host. No connection is pooled: a pooled
  * socket is keyed by host, not by the address it reached.
  */
-function requestPinned(url: string, init: { signal: AbortSignal; pinned: PinnedAddress }): Promise<Response> {
+function requestPinned(url: string, init: { signal: AbortSignal; pinned: PinnedAddress[] }): Promise<Response> {
   const target = new URL(url);
   const host = target.hostname.replace(/^\[|\]$/g, '');
-  const { address, family } = init.pinned;
+  const pinned = init.pinned;
+  if (pinned.length === 0) return Promise.reject(new Error('no address'));
   return new Promise<Response>((resolve, reject) => {
     const request = https.request(
       {
@@ -187,8 +229,9 @@ function requestPinned(url: string, init: { signal: AbortSignal; pinned: PinnedA
           options: LookupOneOptions & { all?: boolean },
           callback: (error: Error | null, address: string | LookupAddress[], family?: number) => void
         ) => {
-          if (options?.all) callback(null, [{ address, family }]);
-          else callback(null, address, family);
+          // Every checked address, for happy eyeballs; the first otherwise.
+          if (options?.all) callback(null, pinned.map(({ address, family }) => ({ address, family })));
+          else callback(null, pinned[0].address, pinned[0].family);
         }) as never
       },
       response => {
@@ -218,5 +261,5 @@ function requestPinned(url: string, init: { signal: AbortSignal; pinned: PinnedA
 
 /** How a download reaches its host. Tests stand in for `fetch`. */
 export const remoteImageTransport = {
-  fetch: requestPinned as (url: string, init: { signal: AbortSignal; pinned: PinnedAddress }) => Promise<Response>
+  fetch: requestPinned as (url: string, init: { signal: AbortSignal; pinned: PinnedAddress[] }) => Promise<Response>
 };

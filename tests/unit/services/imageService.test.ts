@@ -86,7 +86,7 @@ describe('imageService', () => {
     it('should allow public HTTPS IP image URLs', async () => {
       await expect(
         imageServiceTesting.validateRemoteImageUrl('https://8.8.8.8/image.jpg', new AbortController().signal)
-      ).resolves.toMatchObject({ parsed: expect.any(URL), pinned: { address: '8.8.8.8', family: 4 } });
+      ).resolves.toMatchObject({ parsed: expect.any(URL), pinned: [{ address: '8.8.8.8', family: 4 }] });
     });
 
     it('should reject images larger than 10MB based on Content-Length header', async () => {
