@@ -124,17 +124,21 @@ all. The `POST`:
 - `POST /api/sends/:draftId/checkout`, the website's alone like the rest and `mail:send` like `create_mail_checkout`, opens the Stripe checkout (`createJitCheckout`). It returns to the page: `?paid=1` when paid, `?paid=0` when turned back. The order records those addresses, so a retry from the page reuses the page's own sessionless order, and a sessionless one an app began is replaced. An order with a Stripe session already open is reused as it is, wherever that session returns: one session, one charge, and the paid webhook sends the mail either way.
 - Paying sends the mail, as everywhere else; the route itself sends nothing. Its refusals are worded for the page (`checkoutRefusalFor`), and `{ sendAnotherCopy: true }` buys another copy, as the send's body does.
 
-**Rollout.** The rule is off by default. It is turned on once:
+**Rollout.** The rule is off by default in development and test. Production refuses to start without it (`send_confirmation.required`, #730), and with it needs `LETTER_IRL_WEBSITE_CLIENT_ID`. It was turned on in development once:
 - the website's confirmation page is live (website #39);
 - the ChatGPT DEV regression pass has run with it on. It includes asking the model to send a preview: it must point to the card's Send button, or give the link, and never reach `send_letter` itself. Since #475 it also includes asking it to pay for one: it must point to the card's Pay & Send, and never reach `create_mail_checkout`, while the card's button still opens a checkout;
 - the development log shows ChatGPT's tokens resolving to the `chatgpt` profile.
 
 **Where it stands.**
 - **Development:** on since 2026-09-25, with all three conditions met. SEND-01 passed there ([manual-tests.md](manual-tests.md)).
-- **Production:** off. It goes on with the promotion that carries #479, #480, #481 and website #41, and needs:
-  - `LETTER_IRL_WEBSITE_CLIENT_ID`, the production website's client id;
-  - the production connector refreshed;
-  - a production send from the card and from the page.
+- **Production:** required since #730: the promotion that carries it does not start until it is on.
+  - **Before that promotion:**
+    - promote the website first this time, with its confirmation page (website #39, #41). Its calls to `/api/sends` fail against the older API until the API's promotion lands, which is harmless, since nothing links to the page until `request_send` is live;
+    - set and apply `LETTER_IRL_SEND_CONFIRMATION_ENABLED=true` and `LETTER_IRL_WEBSITE_CLIENT_ID` (the production website's client id) on the production API, as [deployment.md](deployment.md)'s first step says for every preflight gap. The build production runs before that promotion has no send rule and ignores both;
+    - confirm `LETTER_IRL_IMAGE_GEN_MODE=off` on the production API, as the checked-in manifest assumes (24 tools).
+  - **After it:**
+    - refresh the production connector;
+    - make a production send from the card and from the page.
 
 A Pay & Send checkout opened before the switch still mails when the person
 pays, for as long as the checkout lasts: at most the draft's 24 hours. The
