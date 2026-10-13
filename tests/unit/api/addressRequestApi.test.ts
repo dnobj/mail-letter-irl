@@ -292,7 +292,7 @@ describe("the recipient's address fields (#604)", () => {
     for (const name of [
       "Jane O'Brien", 'Mary-Jane Smith', 'Dr. A. Lee, Jr.', 'Smith & Co', 'José Núñez', 'Ana O\u2019Neil', 'Zoë Brontë',
       'Unit 4 Residents', 'Jane Smith c/o Acme', 'Apt Residents #2', 'Robert "Bob" Lee', '\u201CNana\u201D Jones', 'Nana (Mom)!',
-      'Jose\u0301 Pe\u0301rez'
+      'Jose\u0301 Pe\u0301rez', 'Smith\u2013Jones', 'Jane + Tom Smith', 'O\u00B4Brien'
     ]) {
       expect(givenAddressOf({ ...ADDRESS, name }), name).toMatchObject({ ok: true, address: { name } });
     }

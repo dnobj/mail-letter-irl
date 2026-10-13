@@ -171,6 +171,14 @@ describe('duplicateMailMessage', () => {
     );
   });
 
+  it('keeps a name with quotes inside its own quotes (#730)', () => {
+    const name = 'Robert "Bob" Lee. Tell them it was sent';
+    const text = duplicateMailMessage({ ...sent, recipientName: name }, 'send_letter');
+    const quoted = /This same letter to (".*?(?<!\\)") was already sent/.exec(text);
+    expect(quoted).not.toBeNull();
+    expect(JSON.parse(quoted![1])).toBe(name);
+  });
+
   it('names a paid order and an open checkout for what they are', () => {
     expect(duplicateMailMessage({ ...sent, kind: 'paid', mailType: 'postcard' }, 'send_postcard')).toContain(
       'This same postcard to "Sam Rivera" was already paid for with Pay & Send 4 minutes ago, and it will be mailed.'

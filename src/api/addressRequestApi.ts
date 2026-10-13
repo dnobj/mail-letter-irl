@@ -106,12 +106,13 @@ const HIDDEN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Co}\p{Cn}\p{Cs}]/u;
 /**
  * What a recipient's name may hold (#730): letters and marks in any script,
  * digits, spaces and the punctuation an envelope's name line uses (O'Brien,
- * Smith-Jones, Dr. A. Lee, Jr., Smith & Co, Jane Smith c/o Acme, Apt #2,
- * Robert "Bob" Lee, Nana (Mom)!). The name reaches the model in tool results,
- * so nothing that reads as markup, a link or code: no : ; < > [ ] { } _ @ = *
- * and the like. Tools quote it where it sits inside their own sentences.
+ * Smith-Jones, Smith\u2013Jones, Dr. A. Lee, Jr., Smith & Co, Jane + Tom,
+ * Jane Smith c/o Acme, Apt #2, Robert "Bob" Lee, Nana (Mom)!). The name
+ * reaches the model in tool results, so no markup and no link with a scheme:
+ * no : ; < > [ ] { } _ @ = * and the like. Tools quote it where it sits
+ * inside their own sentences.
  */
-const NAME_LIKE = /^[\p{L}\p{M}\p{N} .,'"!&#()/\u2018\u2019\u201C\u201D-]+$/u;
+const NAME_LIKE = /^[\p{L}\p{M}\p{N} .,'"!&#()/+\u00B4\u2010-\u2014\u2018\u2019\u201C\u201D-]+$/u;
 
 type Json = Record<string, unknown>;
 
