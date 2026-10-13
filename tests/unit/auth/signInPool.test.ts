@@ -102,7 +102,9 @@ describe('tokens verified recently (#730)', () => {
     exhaust('Bearer t-first', T0);
     expect(takeExemption('Bearer t-first', T0)).toBe(false);
     othersAsk(VERIFIED_TOKEN_CONFIG.maxVerified, T0 + 1);
-    // u-first's window was the oldest and was dropped, so it starts afresh.
+    // u-first's window was the oldest and was dropped, so it starts afresh
+    // (its token, also the oldest, left the verified set: it signs in again).
+    rememberVerifiedToken('t-first', 'u-first', undefined, T0 + 2);
     expect(takeExemption('Bearer t-first', T0 + 2)).toBe(true);
   });
 
