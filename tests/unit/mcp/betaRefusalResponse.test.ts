@@ -97,6 +97,37 @@ describe('writeBetaRefusal', () => {
   });
 });
 
+describe('what a 401 says (#730)', () => {
+  beforeEach(() => {
+    vi.mocked(validateAuthorizationHeader).mockReset();
+  });
+
+  it.each([
+    ['a database fault', new Error('connection terminated: password authentication failed for user "x" at 10.0.0.4:5432')],
+    ['a revoked token', new Error('Token has been revoked')],
+    ['an expired token', new Error('Token expired')],
+    ['a token not found', new Error('Token not found')],
+    ['something not an Error', 'raw string'],
+  ])('says one fixed sentence for %s, in the body and the challenge', async (_label, failure) => {
+    vi.mocked(validateAuthorizationHeader).mockRejectedValue(failure);
+    const { captured, res } = fakeResponse();
+    await authenticateRequest(request('Bearer token'), res, 'https://api.example');
+    expect(captured.status).toBe(401);
+    const said = JSON.parse(captured.body).error.message;
+    expect(said).toBe('The access token is not valid. Sign in again.');
+    const challenge = String(Object.entries(captured.headers).find(([name]) => name.toLowerCase() === 'www-authenticate')?.[1]);
+    expect(challenge).toContain('error_description="The access token is not valid. Sign in again."');
+    expect(`${captured.body} ${challenge}`).not.toMatch(/revoked|expired|not found|password|10\.0\.0\.4/i);
+  });
+
+  it('keeps the words for a missing header, which a client acts on', async () => {
+    vi.mocked(validateAuthorizationHeader).mockRejectedValue(new Error('Missing Authorization header'));
+    const { captured, res } = fakeResponse();
+    await authenticateRequest(request(), res, 'https://api.example');
+    expect(JSON.parse(captured.body).error.message).toBe('Missing Authorization header');
+  });
+});
+
 describe('authenticateRequest reaches the branch', () => {
   beforeEach(() => {
     vi.mocked(validateAuthorizationHeader).mockReset();

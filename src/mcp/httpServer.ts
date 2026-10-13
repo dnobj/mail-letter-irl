@@ -63,7 +63,7 @@ import {
   classifyDiagnosticError,
   writeDiagnostic
 } from "../utils/diagnosticLog.js";
-import { buildWwwAuthenticateChallenge } from "../auth/oauthChallenge.js";
+import { buildWwwAuthenticateChallenge, InsufficientScopeError } from "../auth/oauthChallenge.js";
 import { validatePublicServerAdminConfiguration } from "../admin/config.js";
 import { assertValidDeploymentConfig } from "../config/deploymentConfig.js";
 import { getReadiness } from "./readiness.js";
@@ -1020,6 +1020,20 @@ function writeBetaRefusal(res: http.ServerResponse): void {
   res.end(JSON.stringify(body));
 }
 
+/**
+ * What a 401 says, in the body and in the challenge's error_description: a
+ * fixed sentence, never the error's own text (#730). A database fault in the
+ * personal-token lookup carried the driver's message, and the token
+ * validator's "revoked" or "expired" told a guesser that a token with that
+ * suffix exists. A missing header and a scope the token lacks keep their own
+ * words: the client acts on them, and they are this server's.
+ */
+export function publicAuthFailureMessage(error: unknown): string {
+  if (error instanceof InsufficientScopeError) return error.message;
+  if (error instanceof Error && error.message === "Missing Authorization header") return error.message;
+  return "The access token is not valid. Sign in again.";
+}
+
 async function authenticateRequest(
   req: http.IncomingMessage,
   res: http.ServerResponse,
@@ -1072,7 +1086,7 @@ async function authenticateRequest(
       }));
       return null;
     }
-    const message = error instanceof Error ? error.message : String(error);
+    const message = publicAuthFailureMessage(error);
     const challenge = buildWwwAuthenticateChallenge(message, publicBaseUrl);
     const body = {
       jsonrpc: "2.0",
