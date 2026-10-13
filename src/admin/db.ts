@@ -96,6 +96,105 @@ export async function verifyDatabaseIdentity(
   };
 }
 
+/** What `verifyReaderSeparation` found, each true one a way past the column grants. */
+export interface ReaderSeparation {
+  readsLetterContent: boolean;
+  readsLetterRecipient: boolean;
+  readsDraftBody: boolean;
+  readsReturnAddress: boolean;
+  readsTokenHash: boolean;
+  readsLetterPreview: boolean;
+  readsAddressRequests: boolean;
+  unrestricted: boolean;
+  privilegedMember: boolean;
+  ownerMember: boolean;
+}
+
+/**
+ * The reader role reads letters, drafts, users and tokens column by column,
+ * never content, recipients, return addresses or token hashes
+ * (ADMIN_READER_COLUMN_GRANTS). A table-wide grant by mistake, a superuser or
+ * BYPASSRLS role, or membership of any role that can read letter content
+ * (pg_read_all_data, neon_superuser, the tables' owner, the operator role),
+ * even a membership without INHERIT, which SET ROLE can still use, reads them
+ * anyway, and the grants say nothing (#730). Asked of the database itself, by
+ * role name, so the panel checks the role it connected as at boot and
+ * provisioning checks the role it is about to grant to. The tables resolve on
+ * the caller's search_path, as every read model's do. One name parameter, one
+ * type throughout.
+ */
+export async function readReaderSeparation(
+  client: Pick<pg.Pool, "query">,
+  role: string,
+): Promise<ReaderSeparation | null> {
+  const result = await client.query<{
+    letters_content: boolean;
+    letters_recipient: boolean;
+    draft_body: boolean;
+    return_address: boolean;
+    token_hash: boolean;
+    letter_preview: boolean;
+    address_requests: boolean;
+    unrestricted: boolean;
+    privileged_member: boolean;
+    owner_member: boolean;
+  }>(
+    `SELECT
+       has_column_privilege(r.oid, 'letters', 'content', 'SELECT') AS letters_content,
+       has_column_privilege(r.oid, 'letters', 'recipient', 'SELECT') AS letters_recipient,
+       has_column_privilege(r.oid, 'letter_drafts', 'body_text', 'SELECT') AS draft_body,
+       has_column_privilege(r.oid, 'users', 'return_address', 'SELECT') AS return_address,
+       has_column_privilege(r.oid, 'personal_access_tokens', 'token_hash', 'SELECT') AS token_hash,
+       has_column_privilege(r.oid, 'letters', 'preview_html', 'SELECT') AS letter_preview,
+       -- A table the reader is never granted: one that exists on every branch
+       -- this panel runs against, read safely where it does not.
+       COALESCE((SELECT has_table_privilege(r.oid, c.oid, 'SELECT') FROM pg_class AS c
+                  WHERE c.oid = to_regclass('address_requests')), false) AS address_requests,
+       (r.rolsuper OR r.rolbypassrls) AS unrestricted,
+       EXISTS (
+         SELECT 1 FROM pg_roles AS member_of
+          WHERE member_of.oid <> r.oid
+            AND pg_has_role(r.oid, member_of.oid, 'MEMBER')
+            AND (
+              member_of.rolname IN ('pg_read_all_data', 'neon_superuser')
+              OR member_of.rolsuper
+              OR member_of.rolbypassrls
+              OR has_column_privilege(member_of.oid, 'letters', 'content', 'SELECT')
+              OR has_column_privilege(member_of.oid, 'letters', 'recipient', 'SELECT')
+              OR has_column_privilege(member_of.oid, 'letter_drafts', 'body_text', 'SELECT')
+              OR has_column_privilege(member_of.oid, 'users', 'return_address', 'SELECT')
+              OR has_column_privilege(member_of.oid, 'personal_access_tokens', 'token_hash', 'SELECT')
+            )
+       ) AS privileged_member,
+       pg_has_role(r.oid, (SELECT relowner FROM pg_class WHERE oid = 'letters'::regclass), 'MEMBER') AS owner_member
+     FROM pg_roles AS r
+     WHERE r.rolname = $1::name`,
+    [role],
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  return {
+    readsLetterContent: row.letters_content,
+    readsLetterRecipient: row.letters_recipient,
+    readsDraftBody: row.draft_body,
+    readsReturnAddress: row.return_address,
+    readsTokenHash: row.token_hash,
+    readsLetterPreview: row.letter_preview,
+    readsAddressRequests: row.address_requests,
+    unrestricted: row.unrestricted,
+    privilegedMember: row.privileged_member,
+    ownerMember: row.owner_member,
+  };
+}
+
+/** Refuses a reader role that can read past its column grants (#730). */
+export async function verifyReaderSeparation(client: Pick<pg.Pool, "query">, role: string): Promise<void> {
+  const separation = await readReaderSeparation(client, role);
+  if (!separation || Object.values(separation).some(Boolean)) {
+    throw new AdminFoundationError("ADMIN_READER_ROLE_TOO_WIDE");
+  }
+}
+
 /** Every read model runs inside a READ ONLY transaction on the reader pool. */
 export async function withReadOnlyTransaction<T>(
   pool: pg.Pool,
