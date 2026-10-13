@@ -34,7 +34,7 @@ Both repositories use the same branching strategy: `feature/*` → `dev` → `ma
 ├─────────────────────────────────────────────────────────────────┤
 │  Git Branch: master (API) / main (Website)                       │
 │  Auth0: dev-njmdyqf8n25rqgy7.us.auth0.com (prod tenant)         │
-│         Account: dnicholl@letterirl.com                          │
+│         Account: the production account                          │
 │  Neon: production branch                                         │
 │  Railway API: api.letterirl.com                                  │
 │  Railway Website: letterirl.com                                  │
@@ -49,7 +49,7 @@ Both repositories use the same branching strategy: `feature/*` → `dev` → `ma
 ├─────────────────────────────────────────────────────────────────┤
 │  Git Branch: dev (both repos)                                    │
 │  Auth0: dev-ky21dxn3qmi71hjl.us.auth0.com (dev tenant)          │
-│         Account: dnicholl@objective.works                        │
+│         Account: the organization account                        │
 │  Neon: dev branch (independent; never copied from production)   │
 │  Railway API: letter-irl-api-development.up.railway.app          │
 │  Railway Website: mail-letter-irl-website-development...        │
@@ -79,7 +79,7 @@ master/main (production) ──────────────────�
 |--------|------------|-------------|
 | Git Branch (API) | `master` | `dev` |
 | Git Branch (Website) | `main` | `dev` |
-| Auth0 Tenant | `dev-njmdyqf8n25rqgy7` (dnicholl@letterirl.com) | `dev-ky21dxn3qmi71hjl` (dnicholl@objective.works) |
+| Auth0 Tenant | `dev-njmdyqf8n25rqgy7` (the production account) | `dev-ky21dxn3qmi71hjl` (the organization account) |
 | Neon Branch | `production` | `dev` (independent; never copied from production) |
 | Stripe Mode | Live (`sk_live_`) | Test (`sk_test_`) |
 | PostGrid | Live (real mail) | Test mode (no real mail) |
@@ -103,7 +103,7 @@ master/main (production) ──────────────────�
 
 The development tenant is already configured:
 - **Tenant**: `dev-ky21dxn3qmi71hjl.us.auth0.com`
-- **Account**: dnicholl@objective.works
+- **Account**: the organization account
 - **Connections**: Google, Microsoft, Apple, GitHub, Username-Password
 - **DCR**: Enabled today (Settings → Advanced → OIDC Dynamic Application Registration). It should be off: DCR is rollback inventory only
 - **MCP API**: `https://letter-irl-api-development.up.railway.app/mcp`, also the website's audience

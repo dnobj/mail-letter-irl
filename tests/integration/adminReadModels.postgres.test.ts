@@ -5,7 +5,7 @@ import { migrate } from '../../src/cli/migrate.js';
 import { repositoryMigrations, validateDisposableDatabaseUrl } from './support/disposableDatabase.js';
 import { AdminAuditWriter } from '../../src/admin/auditService.js';
 import { parseAdminEnvironmentConfig } from '../../src/admin/config.js';
-import { verifyDatabaseIdentity, withReadOnlyTransaction } from '../../src/admin/db.js';
+import { readReaderSeparation, verifyDatabaseIdentity, verifyReaderSeparation, withReadOnlyTransaction } from '../../src/admin/db.js';
 import { ADMIN_LATEST_REQUIRED_MIGRATION, buildAdminGrantStatements } from '../../src/admin/provisioning.js';
 import { readAccountDetail, revealAccountEmail } from '../../src/admin/queries/accounts.js';
 import { countAlerts, listAlerts, listUnmatchedWebhookEvents } from '../../src/admin/queries/alerts.js';
@@ -245,6 +245,53 @@ describePostgres('admin read models through the reader role', () => {
     await expect(
       verifyDatabaseIdentity(reader, { role: OPERATOR_ROLE, environment: 'development' })
     ).rejects.toMatchObject({ code: 'ADMIN_DATABASE_ROLE_MISMATCH' });
+  });
+
+  it('finds the provisioned reader separated, and a role that reads past the grants refused (#730)', async () => {
+    await expect(verifyReaderSeparation(reader, READER_ROLE)).resolves.toBeUndefined();
+    await expect(readReaderSeparation(reader, READER_ROLE)).resolves.toEqual({
+      readsLetterContent: false,
+      readsLetterRecipient: false,
+      readsDraftBody: false,
+      readsReturnAddress: false,
+      readsTokenHash: false,
+      readsLetterPreview: false,
+      readsAddressRequests: false,
+      unrestricted: false,
+      privilegedMember: false,
+      ownerMember: false
+    });
+
+    const wide = `lirl_wide_${randomUUID().replace(/-/g, '').slice(0, 10)}`;
+    await adminPool.query(`CREATE ROLE "${wide}" NOLOGIN`);
+    try {
+      await adminPool.query(`GRANT pg_read_all_data TO "${wide}"`);
+      await expect(readReaderSeparation(owner, wide)).resolves.toMatchObject({ privilegedMember: true, readsLetterContent: true });
+      await expect(verifyReaderSeparation(owner, wide)).rejects.toMatchObject({ code: 'ADMIN_READER_ROLE_TOO_WIDE' });
+      await adminPool.query(`REVOKE pg_read_all_data FROM "${wide}"`);
+
+      // A membership without INHERIT reads nothing itself, but SET ROLE can use it.
+      await adminPool.query(`GRANT "${OPERATOR_ROLE}" TO "${wide}" WITH INHERIT FALSE`);
+      await expect(readReaderSeparation(owner, wide)).resolves.toMatchObject({ readsLetterContent: false, privilegedMember: true });
+      await expect(verifyReaderSeparation(owner, wide)).rejects.toMatchObject({ code: 'ADMIN_READER_ROLE_TOO_WIDE' });
+      await adminPool.query(`REVOKE "${OPERATOR_ROLE}" FROM "${wide}"`);
+
+      // A table-wide grant by mistake on another withheld table.
+      await owner.query(`GRANT SELECT ON letter_drafts TO "${wide}"`);
+      await expect(readReaderSeparation(owner, wide)).resolves.toMatchObject({ readsDraftBody: true });
+      await owner.query(`REVOKE SELECT ON letter_drafts FROM "${wide}"`);
+
+      const tableOwner = (await owner.query<{ owner: string }>(
+        `SELECT pg_get_userbyid(relowner) AS owner FROM pg_class WHERE oid = 'letters'::regclass`
+      )).rows[0].owner;
+      await adminPool.query(`GRANT "${tableOwner}" TO "${wide}"`);
+      await expect(readReaderSeparation(owner, wide)).resolves.toMatchObject({ ownerMember: true });
+      await expect(verifyReaderSeparation(owner, wide)).rejects.toMatchObject({ code: 'ADMIN_READER_ROLE_TOO_WIDE' });
+    } finally {
+      await adminPool.query(`DROP OWNED BY "${wide}"`).catch(() => undefined);
+      await adminPool.query(`DROP ROLE IF EXISTS "${wide}"`);
+    }
+    await expect(verifyReaderSeparation(owner, 'no_such_role_anywhere')).rejects.toMatchObject({ code: 'ADMIN_READER_ROLE_TOO_WIDE' });
   });
 
   it('refuses a write inside the read-only transaction wrapper', async () => {

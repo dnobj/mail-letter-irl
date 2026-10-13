@@ -2330,8 +2330,13 @@ the lookup-by-email variant of step 1 is still open).
    no `Origin` at all, both answered `403` with the body `forbidden`; `/audit` shows `admin.request_denied`
    for route `account.reveal` with `ADMIN_CSRF_REJECTED`.)
 
-**Pass criteria:** Every denial is a constant body plus an audit row; nothing on the private network
-reaches an application route.
+5. [ ] From a page on another tailnet node (or any other site), load the panel's URL as an image
+   (`<img src="https://<panel>/">`) a few times. Verify the panel's `/audit` shows no new
+   `admin.session_start` or denial rows for them, and that a session already elevated in another tab
+   is still elevated (#730).
+
+**Pass criteria:** Every denial is a constant body plus an audit row, but for the quiet refusal of a
+request another site sent (step 5); nothing on the private network reaches an application route.
 
 ### ADMIN-READ-05 — Keyboard-only navigation and 200 % zoom
 
@@ -2682,7 +2687,7 @@ it when the panel shipped.
    Both refusals are in `/audit` as `admin.request_failed`.)
 3. [x] Redeem the code with a test account (`redeem_promo_code`); verify the campaign page lists the
    redemption with a masked email and that "delete" is no longer offered. End the campaign.
-   (testlirl02 through Claude: the page read "1 of 1", listed `t***@davidnicholl.com` with its
+   (testlirl02 through Claude: the page read "1 of 1", listed a masked address with its
    lot, and said "Redeemed campaigns are ended, never deleted." A fresh preview ended it.)
 4. [ ] `/images`: with an ambiguous reservation (decision rules in
    [deployment.md](deployment.md#operator-recovery-through-the-admin-panel)), preview "release as

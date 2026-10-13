@@ -19,3 +19,7 @@ browser-test-procedures/config/.env.production
 manual-test-logs/
 !manual-test-logs/README.md
 .env.local-tokens
+
+# The owner's private notes: account mapping, security findings, runbooks (#730).
+# Never committed; the repository is public.
+docs/private/

@@ -57,7 +57,7 @@ Preserve environment isolation and verify deployment assumptions against `docs/i
 
 ## Organization Context
 
-Use `docs/company-and-accounts.md` as the non-secret source of truth. The organization is `Objective Works` (`dnicholl@objective.works`) with `Letter IRL` as the DBA/product name. Never store credentials or private billing details in Git.
+Use `docs/company-and-accounts.md` as the non-secret source of truth. The organization is `Objective Works`, with `Letter IRL` as the DBA/product name; that file also defines the account role words the other docs use. Never store credentials or private billing details in Git.
 
 ## Agent Platform Strategy
 

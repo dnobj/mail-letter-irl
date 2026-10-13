@@ -123,7 +123,7 @@ Letter Packs are purchased on the Letter IRL website and then used by the ChatGP
 
 ## Notes
 
-- In the May 31, 2026 dev run, the 2-letter pack successfully added 2 letters to `testlirl@davidnicholl.com`.
+- In the May 31, 2026 dev run, the 2-letter pack successfully added 2 letters to the dev test account.
 - The transaction history label displayed `Purchased credit-pack-4 via Stripe Checkout` while the user-facing balance correctly increased by 2 letters. This is acceptable for the run but worth watching for copy clarity.
 - A successful purchase may also refresh image-generation entitlement metadata returned by `get_account_balance`.
 

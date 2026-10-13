@@ -4,7 +4,7 @@ import http from "node:http";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { AdminAuditWriter } from "./auditService.js";
-import { closeAdminPools, createAdminPools, verifyDatabaseIdentity, type AdminPools } from "./db.js";
+import { closeAdminPools, createAdminPools, verifyDatabaseIdentity, verifyReaderSeparation, type AdminPools } from "./db.js";
 import { AdminConfigurationError, AdminFoundationError } from "./errors.js";
 import { clientScriptPath, createAdminRequestListener, type RouteHandler } from "./http/app.js";
 import { AdminRouter } from "./http/router.js";
@@ -161,6 +161,7 @@ export async function main(): Promise<void> {
     role: config.readerRole,
     environment: config.environment,
   });
+  await verifyReaderSeparation(pools.reader, readerIdentity.roleName);
   if (pools.operator) {
     await verifyDatabaseIdentity(pools.operator, {
       role: config.operatorRole,
