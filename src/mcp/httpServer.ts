@@ -36,9 +36,11 @@ import {
 import { validatePromoCodePublic } from "../services/promoService.js";
 import { lookupGiftCodePublic } from "../services/giftLetterService.js";
 import { giftCodeFromPath } from "../services/giftCodes.js";
+import { isOurCheckoutSession } from "../services/commerceService.js";
 import { closePool } from "../db/index.js";
 import { rateLimitMiddlewareWithTier, rateLimitMiddlewareWithGlobal } from "../api/middleware/rateLimit.js";
 import {
+  checkoutSessionIdOf,
   decidePurchaseStart,
   purchaseReturnDiagnostics,
   purchaseStartDiagnostics,
@@ -624,9 +626,13 @@ export async function startHttpServer() {
     // hosted checkout is an accepted destination and only ChatGPT origins an
     // accepted return, so it is not an open redirect.
     if (url.pathname === '/purchase/start' && req.method === 'GET') {
+      // Only to a checkout one of our orders opened (#730), looked up by its
+      // session id, which is indexed.
+      const sessionId = checkoutSessionIdOf(url.searchParams.get('to'));
       const decision = decidePurchaseStart({
         to: url.searchParams.get('to'),
-        redirectUrl: url.searchParams.get('redirectUrl')
+        redirectUrl: url.searchParams.get('redirectUrl'),
+        ourSession: sessionId !== null && (await isOurCheckoutSession(sessionId))
       });
       // Presence, hosts and outcome only: the return link names a
       // conversation and the target is a live checkout session.

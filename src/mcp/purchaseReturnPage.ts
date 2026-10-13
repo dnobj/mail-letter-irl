@@ -107,15 +107,31 @@ export function readReturnCookie(cookieHeader: string | undefined): string | nul
 }
 
 /**
+ * The Checkout Session a checkout link opens (`cs_live_…` or `cs_test_…`,
+ * a segment of its path), or null: on checkout.stripe.com or our own checkout
+ * domain, as parseCheckoutTarget allows. The route asks whether one of our
+ * orders opened it (#730).
+ */
+export function checkoutSessionIdOf(to: string | null | undefined): string | null {
+  const target = parseCheckoutTarget(to);
+  if (!target) return null;
+  const match = /\/(cs_(?:live|test)_[A-Za-z0-9]+)(?:\/|$)/.exec(new URL(target).pathname);
+  return match ? match[1] : null;
+}
+
+/**
  * The start page's decision for one request. A pure function so the route
- * can be tested without booting the server.
+ * can be tested without booting the server. `ourSession` is whether one of
+ * our orders opened the link's Checkout Session (#730): Stripe's hosts alone
+ * would forward to anyone's checkout under our name.
  */
 export function decidePurchaseStart(params: {
   to: string | null;
   redirectUrl: string | null;
+  ourSession: boolean;
 }): { status: 302; location: string; cookie: string | null } | { status: 400; body: string } {
   const target = parseCheckoutTarget(params.to);
-  if (!target) {
+  if (!target || !params.ourSession) {
     return { status: 400, body: 'This checkout link is not valid. Ask for a new checkout in ChatGPT.' };
   }
   const back = parseChatgptReturnUrl(params.redirectUrl);

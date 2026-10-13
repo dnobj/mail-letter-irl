@@ -27,7 +27,7 @@ vi.mock('../../../src/db/index.js', () => ({
   pool: {}
 }));
 
-import { getPurchaseStatus } from '../../../src/services/commerceService.js';
+import { getPurchaseStatus, isOurCheckoutSession } from '../../../src/services/commerceService.js';
 import { getPurchaseStatusOutputZ } from '../../../src/zodSchemas.js';
 
 function orderRow(overrides: Record<string, unknown>) {
@@ -216,5 +216,18 @@ describe('a Pay & Send order whose mail date passed before it was paid (#700)', 
       .mockResolvedValueOnce({ rows: [{ remaining_credits: 8 }] });
     await getPurchaseStatus('user-1', 'order-1');
     expect(mocks.query.mock.calls.some(([sql]) => String(sql).includes('commerce_order_events'))).toBe(false);
+  });
+});
+
+describe('isOurCheckoutSession (#730)', () => {
+  beforeEach(() => {
+    mocks.query.mockReset();
+  });
+
+  it('asks whether one of our orders opened the session, by its indexed id', async () => {
+    mocks.query.mockResolvedValueOnce({ rows: [{}], rowCount: 1 }).mockResolvedValueOnce({ rows: [], rowCount: 0 });
+    await expect(isOurCheckoutSession('cs_test_ours')).resolves.toBe(true);
+    await expect(isOurCheckoutSession('cs_test_theirs')).resolves.toBe(false);
+    expect(mocks.query.mock.calls[0]).toEqual(['SELECT 1 FROM orders WHERE stripe_checkout_session_id = $1 LIMIT 1', ['cs_test_ours']]);
   });
 });

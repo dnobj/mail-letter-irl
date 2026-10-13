@@ -3741,6 +3741,15 @@ export function missedScheduleSentence(
   return undefined;
 }
 
+/**
+ * Whether one of our orders opened this Stripe Checkout Session (#730): the
+ * purchase start page forwards only to those.
+ */
+export async function isOurCheckoutSession(sessionId: string): Promise<boolean> {
+  const result = await query('SELECT 1 FROM orders WHERE stripe_checkout_session_id = $1 LIMIT 1', [sessionId]);
+  return (result.rowCount ?? 0) > 0;
+}
+
 export async function getPurchaseStatus(
   userId: string,
   orderId: string
