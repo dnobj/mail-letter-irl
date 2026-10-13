@@ -109,7 +109,9 @@ at PostgreSQL as well as at the route.
 
 In the Neon SQL editor on the **development** branch (the editor runs as the owner role), create the two
 login roles **without passwords**. Console-created roles get `neon_superuser`, so the roles must come from
-SQL; but the editor keeps every statement in the project's query history and names it with an AI service,
+SQL (a reader that is a superuser, BYPASSRLS, a member of `neon_superuser` or `pg_read_all_data`, or a
+member of the tables' owner reads past its column grants: provisioning refuses it before committing, and the
+panel refuses to start with it, `ADMIN_READER_ROLE_TOO_WIDE`, #730); but the editor keeps every statement in the project's query history and names it with an AI service,
 so no statement that sets a final password may ever run there.
 
 ```sql
