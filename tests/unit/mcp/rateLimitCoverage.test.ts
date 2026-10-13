@@ -57,15 +57,20 @@ describe('the MCP limits', () => {
     );
   });
 
-  it('checks the account limit on both transports', () => {
-    // Streamable HTTP, after authenticateRequest returns a subject.
+  it('checks the account limit on the MCP transport', () => {
+    // Streamable HTTP, after authenticateRequest returns a subject. The legacy
+    // SSE transport is retired (#730).
     expect(httpServer).toMatch(
       /\(req as any\)\.auth = authInfo;\s*\n\s*if \(await rateLimitMiddlewareWithTier\(req, res, 'mcp_account'\)\)/
     );
-    // Legacy SSE, after the session lookup supplies the subject.
-    expect(httpServer).toMatch(
-      /\(req as any\)\.auth = session\.authInfo[\s\S]{0,600}?rateLimitMiddlewareWithTier\(req, res, 'mcp_account'\)/
-    );
+  });
+
+  it('answers the retired SSE paths 410, before anything else runs for them (#730)', () => {
+    const route = httpServer.indexOf('if (RETIRED_SSE_PATHS.has(url.pathname)) {');
+    expect(route).toBeGreaterThan(-1);
+    expect(httpServer.slice(route, route + 400)).toContain('res.writeHead(410');
+    expect(httpServer).toContain('new Set(["/mcp/sse", "/mcp/sse/messages"])');
+    expect(httpServer).not.toMatch(/SSEServerTransport|handleSse|sseSessions/);
   });
 
   it('sets the subject before the account limit runs, or it would key on the address again', () => {

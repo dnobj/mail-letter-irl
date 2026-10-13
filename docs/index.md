@@ -150,7 +150,7 @@ Kept for context. Most carry a banner saying what has changed; treat anything he
 - [PostGrid API Research](postgrid-api-research.md) - PostGrid research notes
 - [Account Switching Guide](account-switching-guide.md) - switching accounts; its `switch_account` tool was removed
 - [OAuth Plan](oauth-plan.md) - original Google Cloud/Firestore identity plan (never built)
-- [MCP SSE Plan](mcp-sse-plan.md) - SSE transport plan
+- [MCP SSE Plan](mcp-sse-plan.md) - SSE transport plan (superseded: the transport is retired, #730)
 - [Generated Image Result Bridge Plan](generated-image-result-bridge-plan.md) - `_meta` partitioning design
 - [Admin Interface Modernization Plan](admin-interface-modernization-plan.md) - superseded local-only admin plan; see the Admin Panel Guide
 - [Archived Dashboard Implementation](archive/dashboard-implementation.md), [quick reference](archive/dashboard-quick-reference.md), [setup guide](archive/dashboard-setup-guide.md) - the first customer dashboard
