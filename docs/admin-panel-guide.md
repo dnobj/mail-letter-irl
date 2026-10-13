@@ -109,9 +109,7 @@ at PostgreSQL as well as at the route.
 
 In the Neon SQL editor on the **development** branch (the editor runs as the owner role), create the two
 login roles **without passwords**. Console-created roles get `neon_superuser`, so the roles must come from
-SQL (a reader that is a superuser, BYPASSRLS, a member of `neon_superuser` or `pg_read_all_data`, or a
-member of the tables' owner reads past its column grants: provisioning refuses it before committing, and the
-panel refuses to start with it, `ADMIN_READER_ROLE_TOO_WIDE`, #730); but the editor keeps every statement in the project's query history and names it with an AI service,
+SQL; but the editor keeps every statement in the project's query history and names it with an AI service,
 so no statement that sets a final password may ever run there.
 
 ```sql
@@ -489,6 +487,7 @@ login standing in for the Serve proxy. Local-dev mode is refused on Railway, und
 | Block everyone instantly | Remove the grant line from the policy, or delete the machine from the Machines page, or set `ADMIN_MODE=read-only` and redeploy. |
 | The container is running as root | The deploy log says `[entrypoint] WARNING: could not hand … to node`, and the newest `admin.boot` row in `/audit` carries `uid: 0`. The entrypoint stays up as root rather than refusing, because a volume-backed service that will not boot is an outage. Read the two lines above the warning to see which step failed, fix the volume's ownership, and redeploy; a healthy boot logs `[entrypoint] dropping to node` and records `uid: 1000`. |
 | Rollback | Redeploy the previous image; the node identity persists on the volume. Audit tables are never dropped. |
+| `ADMIN_READER_ROLE_TOO_WIDE` at boot or when provisioning | The reader role can read past its column grants (#730): it is a superuser or BYPASSRLS, holds a table-wide grant on a withheld table, or is a member (even without INHERIT) of a role that can read letter content, such as `neon_superuser`, `pg_read_all_data`, the owner or the operator role. As the owner, run `SELECT m.rolname FROM pg_roles r JOIN pg_auth_members a ON a.member = r.oid JOIN pg_roles m ON m.oid = a.roleid WHERE r.rolname = '<reader role>'`, revoke what it lists (and any table-wide grant), re-run provisioning, and redeploy. Provisioning commits nothing while the check fails. |
 
 ## Audit
 

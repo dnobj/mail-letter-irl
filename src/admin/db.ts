@@ -100,19 +100,26 @@ export async function verifyDatabaseIdentity(
 export interface ReaderSeparation {
   readsLetterContent: boolean;
   readsLetterRecipient: boolean;
+  readsDraftBody: boolean;
+  readsReturnAddress: boolean;
+  readsTokenHash: boolean;
   unrestricted: boolean;
   privilegedMember: boolean;
   ownerMember: boolean;
 }
 
 /**
- * The reader role reads letters column by column, never their content or
- * recipient (ADMIN_READER_COLUMN_GRANTS). A superuser or BYPASSRLS role, a
- * member of pg_read_all_data or neon_superuser, or a member of the tables'
- * owner reads them anyway, and the grants say nothing (#730). Asked of the
- * database itself, by role name, so the panel checks the role it connected as
- * at boot and provisioning checks the role it is about to grant to. One name
- * parameter, one type throughout.
+ * The reader role reads letters, drafts, users and tokens column by column,
+ * never content, recipients, return addresses or token hashes
+ * (ADMIN_READER_COLUMN_GRANTS). A table-wide grant by mistake, a superuser or
+ * BYPASSRLS role, or membership of any role that can read letter content
+ * (pg_read_all_data, neon_superuser, the tables' owner, the operator role),
+ * even a membership without INHERIT, which SET ROLE can still use, reads them
+ * anyway, and the grants say nothing (#730). Asked of the database itself, by
+ * role name, so the panel checks the role it connected as at boot and
+ * provisioning checks the role it is about to grant to. The tables resolve on
+ * the caller's search_path, as every read model's do. One name parameter, one
+ * type throughout.
  */
 export async function readReaderSeparation(
   client: Pick<pg.Pool, "query">,
@@ -121,6 +128,9 @@ export async function readReaderSeparation(
   const result = await client.query<{
     letters_content: boolean;
     letters_recipient: boolean;
+    draft_body: boolean;
+    return_address: boolean;
+    token_hash: boolean;
     unrestricted: boolean;
     privileged_member: boolean;
     owner_member: boolean;
@@ -128,11 +138,20 @@ export async function readReaderSeparation(
     `SELECT
        has_column_privilege(r.oid, 'letters', 'content', 'SELECT') AS letters_content,
        has_column_privilege(r.oid, 'letters', 'recipient', 'SELECT') AS letters_recipient,
+       has_column_privilege(r.oid, 'letter_drafts', 'body_text', 'SELECT') AS draft_body,
+       has_column_privilege(r.oid, 'users', 'return_address', 'SELECT') AS return_address,
+       has_column_privilege(r.oid, 'personal_access_tokens', 'token_hash', 'SELECT') AS token_hash,
        (r.rolsuper OR r.rolbypassrls) AS unrestricted,
        EXISTS (
-         SELECT 1 FROM pg_roles AS privileged
-          WHERE privileged.rolname IN ('pg_read_all_data', 'neon_superuser')
-            AND pg_has_role(r.oid, privileged.oid, 'MEMBER')
+         SELECT 1 FROM pg_roles AS member_of
+          WHERE member_of.oid <> r.oid
+            AND pg_has_role(r.oid, member_of.oid, 'MEMBER')
+            AND (
+              member_of.rolname IN ('pg_read_all_data', 'neon_superuser')
+              OR member_of.rolsuper
+              OR member_of.rolbypassrls
+              OR has_column_privilege(member_of.oid, 'letters', 'content', 'SELECT')
+            )
        ) AS privileged_member,
        pg_has_role(r.oid, (SELECT relowner FROM pg_class WHERE oid = 'letters'::regclass), 'MEMBER') AS owner_member
      FROM pg_roles AS r
@@ -144,6 +163,9 @@ export async function readReaderSeparation(
   return {
     readsLetterContent: row.letters_content,
     readsLetterRecipient: row.letters_recipient,
+    readsDraftBody: row.draft_body,
+    readsReturnAddress: row.return_address,
+    readsTokenHash: row.token_hash,
     unrestricted: row.unrestricted,
     privilegedMember: row.privileged_member,
     ownerMember: row.owner_member,

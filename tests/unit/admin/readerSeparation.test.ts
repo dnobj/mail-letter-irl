@@ -4,6 +4,9 @@ import { readReaderSeparation, verifyReaderSeparation } from "../../../src/admin
 const CLEAN = {
   letters_content: false,
   letters_recipient: false,
+  draft_body: false,
+  return_address: false,
+  token_hash: false,
   unrestricted: false,
   privileged_member: false,
   owner_member: false,
@@ -23,8 +26,13 @@ describe("the admin reader role's column separation (#730)", () => {
     for (const probe of [
       "has_column_privilege(r.oid, 'letters', 'content', 'SELECT')",
       "has_column_privilege(r.oid, 'letters', 'recipient', 'SELECT')",
+      "has_column_privilege(r.oid, 'letter_drafts', 'body_text', 'SELECT')",
+      "has_column_privilege(r.oid, 'users', 'return_address', 'SELECT')",
+      "has_column_privilege(r.oid, 'personal_access_tokens', 'token_hash', 'SELECT')",
       "r.rolsuper OR r.rolbypassrls",
       "'pg_read_all_data', 'neon_superuser'",
+      "OR has_column_privilege(member_of.oid, 'letters', 'content', 'SELECT')",
+      "member_of.oid <> r.oid",
       "pg_has_role(r.oid, (SELECT relowner FROM pg_class WHERE oid = 'letters'::regclass), 'MEMBER')",
     ]) {
       expect(sql, probe).toContain(probe);
@@ -46,6 +54,9 @@ describe("the admin reader role's column separation (#730)", () => {
     await expect(readReaderSeparation(client({ ...CLEAN, owner_member: true }) as never, "r")).resolves.toEqual({
       readsLetterContent: false,
       readsLetterRecipient: false,
+      readsDraftBody: false,
+      readsReturnAddress: false,
+      readsTokenHash: false,
       unrestricted: false,
       privilegedMember: false,
       ownerMember: true,

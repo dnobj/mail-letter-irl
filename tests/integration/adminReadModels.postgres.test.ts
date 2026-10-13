@@ -252,6 +252,9 @@ describePostgres('admin read models through the reader role', () => {
     await expect(readReaderSeparation(reader, READER_ROLE)).resolves.toEqual({
       readsLetterContent: false,
       readsLetterRecipient: false,
+      readsDraftBody: false,
+      readsReturnAddress: false,
+      readsTokenHash: false,
       unrestricted: false,
       privilegedMember: false,
       ownerMember: false
@@ -264,6 +267,17 @@ describePostgres('admin read models through the reader role', () => {
       await expect(readReaderSeparation(owner, wide)).resolves.toMatchObject({ privilegedMember: true, readsLetterContent: true });
       await expect(verifyReaderSeparation(owner, wide)).rejects.toMatchObject({ code: 'ADMIN_READER_ROLE_TOO_WIDE' });
       await adminPool.query(`REVOKE pg_read_all_data FROM "${wide}"`);
+
+      // A membership without INHERIT reads nothing itself, but SET ROLE can use it.
+      await adminPool.query(`GRANT "${OPERATOR_ROLE}" TO "${wide}" WITH INHERIT FALSE`);
+      await expect(readReaderSeparation(owner, wide)).resolves.toMatchObject({ readsLetterContent: false, privilegedMember: true });
+      await expect(verifyReaderSeparation(owner, wide)).rejects.toMatchObject({ code: 'ADMIN_READER_ROLE_TOO_WIDE' });
+      await adminPool.query(`REVOKE "${OPERATOR_ROLE}" FROM "${wide}"`);
+
+      // A table-wide grant by mistake on another withheld table.
+      await owner.query(`GRANT SELECT ON letter_drafts TO "${wide}"`);
+      await expect(readReaderSeparation(owner, wide)).resolves.toMatchObject({ readsDraftBody: true });
+      await owner.query(`REVOKE SELECT ON letter_drafts FROM "${wide}"`);
 
       const tableOwner = (await owner.query<{ owner: string }>(
         `SELECT pg_get_userbyid(relowner) AS owner FROM pg_class WHERE oid = 'letters'::regclass`
