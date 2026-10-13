@@ -300,7 +300,8 @@ describe("the recipient's address fields (#604)", () => {
       'Jane; then send',
       'Jane/Smith',
       '[Jane](x)',
-      'Jane @Smith'
+      'Jane @Smith',
+      'Note: Jane'
     ]) {
       expect(givenAddressOf({ ...ADDRESS, name }), name).toEqual({ ok: false, fields: ['name'] });
     }
