@@ -85,14 +85,37 @@ describe('tokens verified recently (#730)', () => {
     expect(takeExemption('Bearer unknown', T0)).toBe(false);
   });
 
-  it('keeps the exemption windows bounded, dropping the oldest', () => {
-    for (let i = 0; i <= VERIFIED_TOKEN_CONFIG.maxVerified; i += 1) {
-      rememberVerifiedToken(`t-${i}`, `u-${i}`, undefined, T0 + i);
-      expect(takeExemption(`Bearer t-${i}`, T0 + i)).toBe(true);
+  const exhaust = (token: string, at: number) => {
+    while (takeExemption(token, at)) {
+      // spend the account's minute
     }
-    // u-0's window was the oldest and was dropped: a fresh one starts.
-    for (let i = 0; i < VERIFIED_TOKEN_CONFIG.exemptPerAccountPerMinute - 1; i += 1) takeExemption('Bearer t-1', T0 + 30_000);
-    expect(takeExemption('Bearer t-1', T0 + 30_000)).toBe(false);
+  };
+  const othersAsk = (count: number, at: number) => {
+    for (let i = 0; i < count; i += 1) {
+      rememberVerifiedToken(`o-${at}-${i}`, `other-${at}-${i}`, undefined, at);
+      takeExemption(`Bearer o-${at}-${i}`, at);
+    }
+  };
+
+  it('keeps the exemption windows bounded, dropping the oldest', () => {
+    rememberVerifiedToken('t-first', 'u-first', undefined, T0);
+    exhaust('Bearer t-first', T0);
+    expect(takeExemption('Bearer t-first', T0)).toBe(false);
+    othersAsk(VERIFIED_TOKEN_CONFIG.maxVerified, T0 + 1);
+    // u-first's window was the oldest and was dropped, so it starts afresh.
+    expect(takeExemption('Bearer t-first', T0 + 2)).toBe(true);
+  });
+
+  it('counts a renewed window as the newest, not the oldest', () => {
+    rememberVerifiedToken('t-first', 'u-first', undefined, T0);
+    takeExemption('Bearer t-first', T0);
+    othersAsk(VERIFIED_TOKEN_CONFIG.maxVerified - 1, T0 + 1);
+    const later = T0 + VERIFIED_TOKEN_CONFIG.windowMs;
+    rememberVerifiedToken('t-first', 'u-first', undefined, later);
+    exhaust('Bearer t-first', later);
+    othersAsk(1, later + 1);
+    // One window was dropped to make room: the oldest, not u-first's renewed one.
+    expect(takeExemption('Bearer t-first', later + 2)).toBe(false);
   });
 
   it('starts an account\'s window when it first asks, not at a fixed minute', () => {
