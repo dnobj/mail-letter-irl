@@ -211,7 +211,7 @@ interface Token {
 
 **Base URL:** `https://api.letterirl.com` (production) or env variable
 
-**Endpoints:**
+**Endpoints:** making and revoking a token take the website's own sign-in: a token issued to another application (a connected app's) is refused with `403 website_only`, as a send is (#730). Any token with `mail:read` may list them.
 
 ```typescript
 // Create token
@@ -248,7 +248,7 @@ Headers: { Authorization: Bearer <jwt> }
 Response: { success: true }
 ```
 
-**Note:** Token creation/revocation requires JWT auth (from Auth0 login), not PAT auth. This prevents using a PAT to create more PATs.
+**Note:** Token creation/revocation requires the website's own JWT (from Auth0 login), not PAT auth and not a connected app's token. This prevents using a PAT to create more PATs, and a connected app from making a credential that outlives its connection (#730).
 
 ---
 
