@@ -42,6 +42,7 @@ import { lockAccountForBalanceChange } from './accountLock.js';
 import {
   compensatePackRefund,
   lockPackRefund,
+  raisePackRefundAlertOnce,
   recordOrderEvent,
   revokePackLots,
   settlePackRefund,
@@ -543,7 +544,11 @@ async function handleStripeFailure(row: PackRefundRow, error: unknown): Promise<
  * key may be pruned after 24 hours and a blind retry past that point would
  * create a second refund; only if nothing is found is the create retried with
  * the stored key. Rows pending for 30 days are re-read from Stripe. Rows past
- * the attempt limit are compensated.
+ * the attempt limit are compensated only once Stripe has said it holds no
+ * refund for them (#730): the last create may have refunded after timing out,
+ * and compensating then would leave the customer the money and the letters.
+ * While Stripe cannot be asked, such a row waits for the next sweep, with one
+ * alert for the operator.
  */
 export async function reconcilePackRefunds(
   stripeRefunds: PackRefundOperations = livePackRefundOperations,
@@ -560,25 +565,37 @@ export async function reconcilePackRefunds(
     [delaySeconds]
   );
   for (const row of due.rows) {
+    const atLimit = row.stripe_attempts >= attemptLimit;
+    let refunds: Awaited<ReturnType<PackRefundOperations['listPaymentRefunds']>>;
     try {
-      if (row.stripe_attempts >= attemptLimit) {
+      refunds = await stripeRefunds.listPaymentRefunds(row.stripe_payment_intent_id);
+    } catch (error) {
+      const errorClass = carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'provider_error');
+      writeDiagnostic('error', 'pack_refund.sweep_failed', { errorClass });
+      if (atLimit) {
+        // An alert that cannot be written is the log line above's to carry.
+        await transaction(client =>
+          raisePackRefundAlertOnce(client, row, 'stripe_unconfirmed', { attempts: row.stripe_attempts, errorClass })
+        ).catch(() => undefined);
+      }
+      continue;
+    }
+    try {
+      const found = refunds.find(refund => refund.metadata?.packRefundId === row.pack_refund_id);
+      if (found) {
+        await finalizeWithStripe(row, found, 'pack_refund.sweep_adopted');
+        result.adopted += 1;
+      } else if (atLimit) {
         const outcome = await transaction(async client => {
           await client.query('SELECT order_id FROM orders WHERE order_id = $1 FOR UPDATE', [row.order_id]);
           const locked = await lockPackRefund(client, row.pack_refund_id);
           if (!locked || locked.status !== 'letters_revoked') return null;
           return compensatePackRefund(client, locked, {
             lastErrorCode: 'PACK_REFUND_STRIPE_UNREACHABLE',
-            failureReason: `Stripe unreachable after ${row.stripe_attempts} attempts`
+            failureReason: `No refund at Stripe after ${row.stripe_attempts} attempts`
           });
         });
         if (outcome) result.compensated += 1;
-        continue;
-      }
-      const refunds = await stripeRefunds.listPaymentRefunds(row.stripe_payment_intent_id);
-      const found = refunds.find(refund => refund.metadata?.packRefundId === row.pack_refund_id);
-      if (found) {
-        await finalizeWithStripe(row, found, 'pack_refund.sweep_adopted');
-        result.adopted += 1;
       } else {
         await submitPackRefund(row, stripeRefunds);
         result.retried += 1;

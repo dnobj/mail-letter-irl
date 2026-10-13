@@ -2679,6 +2679,15 @@ export async function settlePackRefund(
         ignored: true,
         reason: row.status === 'succeeded' ? 'already_settled' : 'settled_after_failure'
       });
+      // The money went back after all, and a compensated row also gave the
+      // letters back (#730): the customer holds both until someone decides.
+      if (row.status === 'compensated' || row.status === 'failed') {
+        await raisePackRefundAlertOnce(client, row, 'refunded_after_compensation', {
+          settledAfter: row.status,
+          stripeRefundId: outcome.id,
+          amountCents: row.amount_cents
+        });
+      }
       return row.status;
     }
     await client.query(
@@ -2716,6 +2725,29 @@ export async function settlePackRefund(
     stripeRefundId: outcome.id
   });
   return 'stripe_pending';
+}
+
+/**
+ * One open critical `pack_refund_failed` alert per proportional refund and
+ * kind (#730): the sweep runs hourly and Stripe may repeat an event, and the
+ * operator needs one line to act on, not one an hour.
+ */
+export async function raisePackRefundAlertOnce(
+  client: Pick<pg.PoolClient, 'query'>,
+  row: Pick<PackRefundRow, 'pack_refund_id' | 'order_id'>,
+  kind: 'stripe_unconfirmed' | 'refunded_after_compensation',
+  details: Record<string, unknown>
+): Promise<void> {
+  await client.query(
+    `INSERT INTO commerce_operational_alerts (order_id, alert_type, severity, details)
+     SELECT $1, 'pack_refund_failed', 'critical', $2::jsonb
+      WHERE NOT EXISTS (
+        SELECT 1 FROM commerce_operational_alerts
+         WHERE alert_type = 'pack_refund_failed' AND status <> 'resolved'
+           AND details->>'packRefundId' = $3 AND details->>'kind' = $4
+      )`,
+    [row.order_id, JSON.stringify({ packRefundId: row.pack_refund_id, kind, ...details }), row.pack_refund_id, kind]
+  );
 }
 
 /**

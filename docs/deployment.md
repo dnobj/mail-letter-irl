@@ -612,7 +612,12 @@ before it ever retries a create, because Stripe may prune an idempotency key
 after 24 hours. `PACK_REFUND_RETRY_DELAY_SECONDS` (default 300, minimum 60) is
 how long a row waits before the sweep touches it; `PACK_REFUND_STRIPE_ATTEMPT_LIMIT`
 (default 5) is how many unanswered attempts it tolerates before it compensates
-the customer with a new ledger lot and opens a `pack_refund_failed` alert.
+the customer with a new ledger lot and opens a `pack_refund_failed` alert, and
+only once Stripe has listed the payment's refunds and none is this command's
+(#730): while Stripe cannot be asked the row waits, with one alert (`kind`
+`stripe_unconfirmed`). A refund that succeeds after its command was
+compensated or failed opens one alert too (`refunded_after_compensation`):
+the customer then holds the money and, if compensated, the letters.
 Neither is in the preflight manifest; both are optional.
 
 Amounts are read from the Stripe Prices themselves - there are no configured
