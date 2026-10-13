@@ -34,6 +34,8 @@ process.env.LETTER_IRL_HOME_ENABLED = "false";
 process.env.LETTER_IRL_CERTIFIED_MAIL_ENABLED = "false";
 // The send rule is on: production does not start without it (#730).
 process.env.LETTER_IRL_SEND_CONFIRMATION_ENABLED = "true";
+// And image generation is off at launch (docs/app-instructions.md).
+process.env.LETTER_IRL_IMAGE_GEN_MODE = "off";
 
 const { stringifyManifest } = await import("../src/mcp/manifest.js");
 

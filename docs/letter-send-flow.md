@@ -131,10 +131,13 @@ all. The `POST`:
 
 **Where it stands.**
 - **Development:** on since 2026-09-25, with all three conditions met. SEND-01 passed there ([manual-tests.md](manual-tests.md)).
-- **Production:** required since #730: the promotion that carries it does not start until it is on. Before that promotion:
-  - set `LETTER_IRL_SEND_CONFIRMATION_ENABLED=true` and `LETTER_IRL_WEBSITE_CLIENT_ID` (the production website's client id) on the production API;
-  - after it, refresh the production connector;
-  - then make a production send from the card and from the page.
+- **Production:** required since #730: the promotion that carries it does not start until it is on.
+  - **Before that promotion:**
+    - confirm the production website already serves the confirmation page (website #39, #41); the usual order promotes the API first;
+    - stage `LETTER_IRL_SEND_CONFIRMATION_ENABLED=true` and `LETTER_IRL_WEBSITE_CLIENT_ID` (the production website's client id) on the production API so they deploy with the promotion. Applied on their own, they redeploy the build already in production with the rule on.
+  - **After it:**
+    - refresh the production connector;
+    - make a production send from the card and from the page.
 
 A Pay & Send checkout opened before the switch still mails when the person
 pays, for as long as the checkout lasts: at most the draft's 24 hours. The
