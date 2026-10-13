@@ -176,7 +176,9 @@ and the letters, because nothing but the webhook revokes them. The list is:
 - `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
   `checkout.session.async_payment_failed`, `checkout.session.expired`
 - `refund.created`, `refund.updated`, `refund.failed`, `charge.refunded`
-- `charge.dispute.created`, `charge.dispute.closed`
+- `charge.dispute.created`, `charge.dispute.updated`, `charge.dispute.funds_withdrawn`,
+  `charge.dispute.closed` (the middle two since #730: an inquiry that becomes a chargeback
+  arrives as one of them, and without them its letters stay spendable until it closes)
 
 `OPENAI_APPS_CHALLENGE_TOKEN` holds the ChatGPT plugin portal's domain-verification token (#407).
 The API serves it at `/.well-known/openai-apps-challenge` and answers 404 while it is unset. Set
