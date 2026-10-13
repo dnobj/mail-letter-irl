@@ -89,6 +89,12 @@ requests get through and full-size ones hang, so curl works while a browser whos
 segments times out on every page. Lowering the daemon's MTU makes it advertise a smaller segment size to
 every client, which fixes all devices at once; lowering a laptop's adapter MTU fixes one.
 
+A request without a session that another site made the browser send (`Sec-Fetch-Site` of `cross-site` or
+`same-site`: an image, a script or a fetch) is refused with 403 before sign-in, so it starts no session,
+runs no whois and writes no audit row (#730). A link the operator follows from another site (a top-level
+GET navigation) still opens the page. The panel holds at most 100 sessions; when full it drops the
+least recently used one that is not elevated, so a flood cannot cost the operator an elevation.
+
 State-changing requests additionally need `Sec-Fetch-Site` of `same-origin` or `none`, an `Origin` equal
 to the panel's origin, and the per-session CSRF token in the form. Responses carry a strict nonce-based
 Content Security Policy, `Cache-Control: no-store` and a correlation id. Denials, failures, session starts

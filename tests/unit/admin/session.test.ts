@@ -84,12 +84,35 @@ describe("admin session store", () => {
     expect(sessions.resolve(first.id, binding)).toEqual({ kind: "missing" });
     expect(sessions.resolve(rotated.id, binding).kind).toBe("ok");
 
+    // Still elevated (until 42): the newer session goes instead (#730).
     now.value = 10;
-    sessions.create(binding);
+    const second = sessions.create(binding);
     now.value = 20;
+    const third = sessions.create(binding);
+    expect(sessions.size).toBe(2);
+    expect(sessions.resolve(rotated.id, binding).kind).toBe("ok");
+    expect(sessions.resolve(second.id, binding)).toEqual({ kind: "missing" });
+
+    // Once its elevation has lapsed, the oldest goes, as before.
+    now.value = 50;
     sessions.create(binding);
     expect(sessions.size).toBe(2);
     expect(sessions.resolve(rotated.id, binding)).toEqual({ kind: "missing" });
+    expect(sessions.resolve(third.id, binding).kind).toBe("ok");
+  });
+
+  it("drops the oldest even when every session is elevated, so a new one can start", () => {
+    const now = { value: 0 };
+    const sessions = store(now, { max: 2 });
+    const a = sessions.create(binding);
+    a.elevatedUntil = 1000;
+    now.value = 1;
+    const b = sessions.create(binding);
+    b.elevatedUntil = 1000;
+    now.value = 2;
+    sessions.create(binding);
+    expect(sessions.size).toBe(2);
+    expect(sessions.resolve(a.id, binding)).toEqual({ kind: "missing" });
   });
 
   it("parses and serialises the one cookie with the __Host- attributes", () => {

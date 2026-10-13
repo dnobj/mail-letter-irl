@@ -219,6 +219,25 @@ describe("admin request pipeline", () => {
     expect(audits.at(-1)).toMatchObject({ errorCode: "ADMIN_CSRF_REJECTED" });
   });
 
+  it("refuses a cross-site request with no session before sign-in: no session, no audit row (#730)", async () => {
+    const sessionsBefore = sessions.size;
+    const auditsBefore = audits.length;
+    for (const dest of ["image", "script", "empty"]) {
+      const reply = await send(port, "GET", "/", { ...identity, "sec-fetch-site": "cross-site", "sec-fetch-mode": "no-cors", "sec-fetch-dest": dest });
+      expect(reply.status, dest).toBe(403);
+      expect(reply.headers["set-cookie"], dest).toBeUndefined();
+    }
+    const sameSite = await send(port, "POST", "/writes/echo", { ...identity, "sec-fetch-site": "same-site", "sec-fetch-mode": "cors", "sec-fetch-dest": "empty" }, "x=1");
+    expect(sameSite.status).toBe(403);
+    expect(sessions.size).toBe(sessionsBefore);
+    expect(audits.length).toBe(auditsBefore);
+  });
+
+  it("lets a link the operator follows from another site open the page", async () => {
+    const reply = await send(port, "GET", "/", { ...identity, "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" });
+    expect(reply.status).toBe(200);
+  });
+
   it("performs the audited email reveal with a valid token and refuses a thin reason", async () => {
     const first = await send(port, "GET", "/", identity);
     const sessionId = String(first.headers["set-cookie"]).split(";")[0].split("=")[1];

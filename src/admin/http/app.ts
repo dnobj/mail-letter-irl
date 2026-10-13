@@ -22,6 +22,7 @@ import {
   SlidingWindowLimiter,
   buildSecurityHeaders,
   checkStateChangingRequest,
+  isCrossSiteSubresource,
   createCsrfToken,
   createNonce,
   parseFormBody,
@@ -183,14 +184,22 @@ export function createAdminRequestListener(
     const constant = (status: number) =>
       finish(status, CONSTANT_BODIES[status] ?? "error", "text/plain; charset=utf-8");
 
+    const header = (name: string) => {
+      const value = request.headers[name.toLowerCase()];
+      return Array.isArray(value) ? value[0] : value;
+    };
+    // Only without a session: a request carrying one goes on to sign-in, so a
+    // cross-site POST is still refused there and audited as a CSRF attempt.
+    if (!cookies.has(SESSION_COOKIE_NAME) && isCrossSiteSubresource(method, header)) {
+      constant(403);
+      return;
+    }
+
     const peer = request.socket.remoteAddress;
     const auth = await authenticateAdminRequest(
       {
         remoteAddress: peer,
-        header: (name) => {
-          const value = request.headers[name.toLowerCase()];
-          return Array.isArray(value) ? value[0] : value;
-        },
+        header,
         cookie: (name) => cookies.get(name),
       },
       {

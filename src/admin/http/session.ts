@@ -76,15 +76,16 @@ export class AdminSessionStore {
 
   create(binding: SessionBinding): AdminSession {
     this.prune();
+    const now = this.now();
     if (this.sessions.size >= this.maxSessions) {
       // Drop the oldest rather than refuse: an operator locked out by their
       // own stale tabs would be worse than a stale tab losing its session.
-      const oldest = [...this.sessions.values()].sort(
-        (a, b) => a.lastSeenAt - b.lastSeenAt,
-      )[0];
+      // Never an elevated one while another can go (#730): a flood of new
+      // sessions must not cost the operator the elevation they just entered.
+      const byAge = [...this.sessions.values()].sort((a, b) => a.lastSeenAt - b.lastSeenAt);
+      const oldest = byAge.find((session) => !(session.elevatedUntil !== null && session.elevatedUntil > now)) ?? byAge[0];
       if (oldest) this.sessions.delete(oldest.id);
     }
-    const now = this.now();
     const session: AdminSession = {
       id: newSessionId(),
       createdAt: now,

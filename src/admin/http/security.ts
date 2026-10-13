@@ -77,6 +77,24 @@ export interface StateChangeRefusal {
     | "content_type_not_form";
 }
 
+/**
+ * A request another site made the browser send (#730): an image, a script or
+ * a fetch from a page the operator happens to visit. Refused before sign-in,
+ * so it starts no session, runs no whois and writes no audit row; enough of
+ * them used to push an elevated session out. A top-level navigation (a link
+ * the operator follows) is let through as a GET, which changes nothing. A
+ * request without the header is not a browser's, and is left to sign-in.
+ */
+export function isCrossSiteSubresource(method: string, header: (name: string) => string | undefined): boolean {
+  const site = header("sec-fetch-site");
+  if (site !== "cross-site" && site !== "same-site") return false;
+  const navigation =
+    (method === "GET" || method === "HEAD") &&
+    header("sec-fetch-mode") === "navigate" &&
+    header("sec-fetch-dest") === "document";
+  return !navigation;
+}
+
 export function checkStateChangingRequest(
   request: RequestView,
   expectedOrigins: readonly string[],
