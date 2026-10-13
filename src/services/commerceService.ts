@@ -3482,9 +3482,11 @@ async function processDisputeEvent(
         eventId, order.order_id
       ]);
       // The order shows the dispute's current status, as the dispute row does.
+      // Display only: updated_at stays, as the refund retry and the stuck-order
+      // alarm read it.
       if (!keepStoredStatus) {
         await client.query(
-          'UPDATE orders SET stripe_dispute_status = $2, updated_at = NOW() WHERE order_id = $1',
+          'UPDATE orders SET stripe_dispute_status = $2 WHERE order_id = $1',
           [order.order_id, dispute.status]
         );
       }
