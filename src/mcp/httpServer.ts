@@ -90,9 +90,12 @@ const MCP_PATH = process.env.LETTER_IRL_MCP_PATH ?? "/mcp";
  * The legacy SSE transport's paths, retired (#730). Its message POSTs carried
  * no credential, only the session id in the query string, and a stream ran on
  * the token it opened with until it closed. Every client Letter IRL supports
- * speaks streamable HTTP at MCP_PATH; these answer 410 and say so.
+ * speaks streamable HTTP at MCP_PATH; these answer 410 and say so. Both
+ * deployments ran it at GET /mcp with its messages at /messages
+ * (set by two SSE path variables this code no longer reads); the
+ * defaults were /mcp/sse and /mcp/sse/messages.
  */
-const RETIRED_SSE_PATHS: ReadonlySet<string> = new Set(["/mcp/sse", "/mcp/sse/messages"]);
+const RETIRED_SSE_PATHS: ReadonlySet<string> = new Set(["/mcp/sse", "/mcp/sse/messages", "/messages"]);
 const WIDGET_PATH = process.env.LETTER_IRL_WIDGET_PATH ?? "/widgets";
 const MANIFEST_ROUTE = process.env.LETTER_IRL_MANIFEST_ROUTE ?? "/manifest.json";
 const FALLBACK_ORIGIN =
@@ -825,6 +828,22 @@ export async function startHttpServer() {
     }
     const sendsApiHandled = await handleSendConfirmationApiRequest(req, res, url.pathname);
     if (sendsApiHandled) {
+      return;
+    }
+
+    if (url.pathname === MCP_PATH && req.method === "OPTIONS") {
+      // A browser's preflight carries no credential: answered before the
+      // limiter and sign-in, as the SSE route answered it until #730.
+      respondToCorsPreflight(res, resolveCorsOrigin(req.headers.origin));
+      return;
+    }
+
+    if (url.pathname === MCP_PATH && req.method === "GET") {
+      // No server-initiated stream (#730): every request builds its own
+      // server and transport, so a GET stream would carry nothing and only
+      // hold a connection open. The MCP spec allows 405 here.
+      res.writeHead(405, { Allow: "POST, OPTIONS", "Cache-Control": "no-store" });
+      res.end();
       return;
     }
 
