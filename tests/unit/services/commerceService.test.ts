@@ -2325,12 +2325,13 @@ describe('commerceService', () => {
     async function deliver(
       type: string,
       status: string,
-      prior?: { status: string; resolved_at: Date | null }
+      prior?: { status: string; resolved_at: Date | null },
+      order: unknown = disputedOrder
     ) {
       mocks.query.mockImplementation(async (sql: string) => {
         if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-1' }] };
         if (sql.includes('SELECT status, resolved_at FROM stripe_disputes')) return { rows: prior ? [prior] : [] };
-        if (sql.includes('SELECT * FROM orders')) return { rows: [disputedOrder] };
+        if (sql.includes('SELECT * FROM orders')) return { rows: order ? [order] : [] };
         return { rows: [] };
       });
       await expect(processStripeWebhookEvent({
@@ -2340,19 +2341,29 @@ describe('commerceService', () => {
         } }
       } as any)).resolves.toEqual({ duplicate: false });
     }
-    const calls = (fragment: string) =>
-      (mocks.query.mock.calls as unknown as Array<[string, unknown[]]>).filter(([sql]) => String(sql).includes(fragment));
+    const all = () => mocks.query.mock.calls as unknown as Array<[string, unknown[]]>;
+    const calls = (fragment: string) => all().filter(([sql]) => String(sql).includes(fragment));
     const blocked = () => calls('sends_blocked_reason = COALESCE(sends_blocked_reason, $2)').length > 0;
-    const disputeAlerts = () =>
-      calls('INSERT INTO commerce_operational_alerts (').filter(([, params]) => params[2] === 'stripe_dispute_created');
+    const markedDisputed = () => calls("UPDATE orders SET status = 'disputed'").length > 0;
+    const alertsOfType = (type: string) =>
+      calls('INSERT INTO commerce_operational_alerts').filter(([sql, params]) => params[2] === type || sql.includes(`'${type}'`));
+    const disputeAlerts = () => alertsOfType('stripe_dispute_created');
+    const keptStoredStatus = () => calls('INSERT INTO stripe_disputes')[0][1][11];
+    const recordedOnly = () => {
+      const event = calls('INSERT INTO commerce_order_events');
+      expect(event).toHaveLength(1);
+      return JSON.parse(String(event[0][1][4])).recordedOnly;
+    };
 
     it.each(['charge.dispute.updated', 'charge.dispute.funds_withdrawn'])(
       'restricts the account when an inquiry becomes a chargeback (%s), and tells the operator once',
       async type => {
         await deliver(type, 'needs_response', { status: 'warning_needs_response', resolved_at: null });
         expect(blocked()).toBe(true);
+        expect(markedDisputed()).toBe(true);
         expect(disputeAlerts()).toHaveLength(1);
         expect(JSON.parse(String(disputeAlerts()[0][1][4]))).toMatchObject({ escalatedBy: type });
+        expect(keptStoredStatus()).toBe(false);
       }
     );
 
@@ -2362,41 +2373,77 @@ describe('commerceService', () => {
       expect(disputeAlerts()).toHaveLength(1);
     });
 
-    it('records a later update within the chargeback without a second alert', async () => {
-      await deliver('charge.dispute.updated', 'under_review', { status: 'needs_response', resolved_at: null });
-      expect(blocked()).toBe(true);
+    it('reads what it knew only after locking the order, which serialises one dispute\'s events', async () => {
+      await deliver('charge.dispute.updated', 'needs_response', { status: 'warning_needs_response', resolved_at: null });
+      const order = all().findIndex(([sql]) => sql.includes('SELECT * FROM orders'));
+      const prior = all().findIndex(([sql]) => sql.includes('SELECT status, resolved_at FROM stripe_disputes'));
+      expect(order).toBeGreaterThan(-1);
+      expect(prior).toBeGreaterThan(order);
+    });
+
+    it.each([
+      ['charge.dispute.updated', 'under_review'],
+      ['charge.dispute.funds_withdrawn', 'needs_response'],
+      ['charge.dispute.created', 'needs_response']
+    ])('records %s (%s) on a dispute already a loss, and repeats nothing', async (type, status) => {
+      await deliver(type, status, { status: 'needs_response', resolved_at: null });
+      expect(blocked()).toBe(false);
+      expect(markedDisputed()).toBe(false);
       expect(disputeAlerts()).toHaveLength(0);
+      expect(recordedOnly()).toBe('already_a_loss');
+      expect(keptStoredStatus()).toBe(false);
+    });
+
+    it("keeps the chargeback's status when an inquiry's older event arrives after it", async () => {
+      await deliver('charge.dispute.created', 'warning_needs_response', { status: 'needs_response', resolved_at: null });
+      expect(blocked()).toBe(false);
+      expect(recordedOnly()).toBe('already_a_loss');
+      expect(keptStoredStatus()).toBe(true);
     });
 
     it('leaves an inquiry that is still an inquiry alone', async () => {
       await deliver('charge.dispute.updated', 'warning_under_review', { status: 'warning_needs_response', resolved_at: null });
       expect(blocked()).toBe(false);
+      expect(markedDisputed()).toBe(false);
       expect(disputeAlerts()).toHaveLength(0);
+      expect(recordedOnly()).toBe('still_an_inquiry');
+    });
+
+    it('still opens an inquiry as before', async () => {
+      await deliver('charge.dispute.created', 'warning_needs_response');
+      expect(blocked()).toBe(false);
+      expect(markedDisputed()).toBe(true);
+      expect(disputeAlerts()).toHaveLength(1);
     });
 
     it.each(['charge.dispute.created', 'charge.dispute.updated', 'charge.dispute.funds_withdrawn'])(
-      'changes nothing for %s delivered after the dispute closed',
+      'changes nothing for %s delivered after the dispute closed, and keeps its status',
       async type => {
         await deliver(type, 'needs_response', { status: 'won', resolved_at: new Date() });
         expect(blocked()).toBe(false);
         expect(disputeAlerts()).toHaveLength(0);
-        expect(calls("UPDATE orders SET status = 'disputed'")).toHaveLength(0);
-        const event = calls('INSERT INTO commerce_order_events');
-        expect(event).toHaveLength(1);
-        expect(JSON.parse(String(event[0][1][4]))).toMatchObject({ ignoredAfterClose: true });
+        expect(markedDisputed()).toBe(false);
+        expect(recordedOnly()).toBe('after_close');
+        expect(keptStoredStatus()).toBe(true);
       }
     );
 
     it('still acts on a losing close after an earlier one', async () => {
       await deliver('charge.dispute.closed', 'lost', { status: 'lost', resolved_at: new Date() });
       expect(blocked()).toBe(true);
+      expect(keptStoredStatus()).toBe(false);
     });
 
-    it('keeps a settled dispute\'s status when a late event is recorded', async () => {
-      await deliver('charge.dispute.updated', 'needs_response', { status: 'won', resolved_at: new Date() });
-      const upsert = calls('INSERT INTO stripe_disputes');
-      expect(upsert).toHaveLength(1);
-      expect(String(upsert[0][0])).toMatch(/WHEN stripe_disputes\.resolved_at IS NOT NULL AND EXCLUDED\.resolved_at IS NULL\s+THEN stripe_disputes\.status/);
+    it('raises one unmatched alert per dispute, not one per update, and one for its close', async () => {
+      await deliver('charge.dispute.created', 'needs_response', undefined, null);
+      expect(alertsOfType('stripe_money_event_unmatched')).toHaveLength(1);
+      mocks.query.mockClear();
+      await deliver('charge.dispute.updated', 'under_review', { status: 'needs_response', resolved_at: null }, null);
+      expect(alertsOfType('stripe_money_event_unmatched')).toHaveLength(0);
+      expect(calls("SET processing_status = 'unmatched'")).toHaveLength(1);
+      mocks.query.mockClear();
+      await deliver('charge.dispute.closed', 'lost', { status: 'under_review', resolved_at: null }, null);
+      expect(alertsOfType('stripe_money_event_unmatched')).toHaveLength(1);
     });
   });
 

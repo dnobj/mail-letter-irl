@@ -3301,7 +3301,8 @@ async function recordDispute(
   client: Pick<pg.PoolClient, 'query'>,
   dispute: Stripe.Dispute,
   userId: string | null,
-  closed: boolean
+  closed: boolean,
+  keepStoredStatus = false
 ): Promise<void> {
   const chargeId = typeof dispute.charge === 'string' ? dispute.charge : dispute.charge?.id;
   const paymentIntentId = typeof dispute.payment_intent === 'string'
@@ -3320,13 +3321,10 @@ async function recordDispute(
        amount_cents = EXCLUDED.amount_cents,
        currency = EXCLUDED.currency,
        reason = COALESCE(EXCLUDED.reason, stripe_disputes.reason),
-       -- A settled dispute keeps the status it closed with: a created or
-       -- updated event delivered after the close carries an older status.
-       status = CASE
-         WHEN stripe_disputes.resolved_at IS NOT NULL AND EXCLUDED.resolved_at IS NULL
-           THEN stripe_disputes.status
-         ELSE EXCLUDED.status
-       END,
+       -- Kept when the event carries an older status than the one stored
+       -- (#730): delivered after the close, or an inquiry's status after the
+       -- chargeback. processDisputeEvent decides.
+       status = CASE WHEN $12::boolean THEN stripe_disputes.status ELSE EXCLUDED.status END,
        evidence_due_by = COALESCE(EXCLUDED.evidence_due_by, stripe_disputes.evidence_due_by),
        stripe_created_at = COALESCE(EXCLUDED.stripe_created_at, stripe_disputes.stripe_created_at),
        -- Never clear a resolution: a replayed created event arriving after a
@@ -3344,7 +3342,8 @@ async function recordDispute(
       String(dispute.status || 'open'),
       dispute.evidence_details?.due_by ? new Date(dispute.evidence_details.due_by * 1000) : null,
       dispute.created ? new Date(dispute.created * 1000) : null,
-      closed ? new Date() : null
+      closed ? new Date() : null,
+      keepStoredStatus
     ]
   );
 }
@@ -3401,14 +3400,6 @@ async function processDisputeEvent(
     }
     const closed = eventType === 'charge.dispute.closed';
     const escalation = eventType === 'charge.dispute.updated' || eventType === 'charge.dispute.funds_withdrawn';
-    // What we knew before this event. An event that is not a close, delivered
-    // after the close, carries an older status: acting on it would revoke a
-    // won dispute's letters again and block the account for good.
-    const prior = await client.query<{ status: string; resolved_at: Date | null }>(
-      'SELECT status, resolved_at FROM stripe_disputes WHERE dispute_id = $1 FOR UPDATE',
-      [dispute.id]
-    );
-    const settledBefore = !closed && Boolean(prior.rows[0]?.resolved_at);
     const status = String(dispute.status || '');
     const lossNow = !NON_LOSS_DISPUTE_STATUSES.has(status);
     const paymentIntentId = typeof dispute.payment_intent === 'string'
@@ -3428,15 +3419,48 @@ async function processDisputeEvent(
         )
       : { rows: [] as Order[] };
     const order = orderResult.rows[0];
+    // What we knew before this event (#730), read after the order's lock, which
+    // serialises the events of one dispute. Only a close acts on every
+    // delivery. Any other event acts only when it brings something new:
+    // - after the close, it carries an older status, and acting on it would
+    //   revoke a won dispute's letters again and block the account for good
+    //   (an inquiry closes as warning_closed only once the network can no
+    //   longer escalate it);
+    // - once the dispute is a loss, its effects are in place: repeating them
+    //   on each update would hold again mail an operator released, and raise
+    //   the funded-mail alert again;
+    // - an update to an inquiry that is still an inquiry changes nothing.
+    const prior = await client.query<{ status: string; resolved_at: Date | null }>(
+      'SELECT status, resolved_at FROM stripe_disputes WHERE dispute_id = $1 FOR UPDATE',
+      [dispute.id]
+    );
+    const priorStatus = prior.rows[0]?.status;
+    const priorLoss = priorStatus !== undefined && !NON_LOSS_DISPUTE_STATUSES.has(priorStatus);
+    const settledBefore = !closed && Boolean(prior.rows[0]?.resolved_at);
+    const recordedOnly = closed
+      ? undefined
+      : settledBefore
+        ? 'after_close'
+        : priorLoss
+          ? 'already_a_loss'
+          : escalation && !lossNow
+            ? 'still_an_inquiry'
+            : undefined;
     // Persist before the unmatched-order branch returns. An unmatched dispute is
     // still money leaving the account, and the operator reviewing it needs the
     // record regardless of whether we could tie it to an order.
-    await recordDispute(client, dispute, order?.user_id ?? null, closed);
+    await recordDispute(
+      client, dispute, order?.user_id ?? null, closed,
+      settledBefore || (!closed && priorLoss && !lossNow)
+    );
     if (!order) {
       await client.query(
         `UPDATE stripe_webhook_events SET processing_status = 'unmatched'
          WHERE event_id = $1`, [eventId]
       );
+      // One alert per unmatched dispute, and one for its close: not one for
+      // each update Stripe sends while it is open.
+      if (!closed && prior.rows[0]) return { duplicate: false };
       await client.query(
         `INSERT INTO commerce_operational_alerts
            (source_event_id, alert_type, severity, details)
@@ -3448,13 +3472,13 @@ async function processDisputeEvent(
       );
       return { duplicate: false };
     }
-    if (order && settledBefore) {
+    if (order && recordedOnly) {
       await client.query('UPDATE stripe_webhook_events SET order_id = $2 WHERE event_id = $1', [
         eventId, order.order_id
       ]);
       await recordOrderEvent(client, order.order_id, eventType, order.status, order.status, {
         disputeStatus: dispute.status,
-        ignoredAfterClose: true
+        recordedOnly
       });
       return { duplicate: false };
     }
@@ -3521,14 +3545,6 @@ async function processDisputeEvent(
           [order.order_id, resolutionCode, dispute.id]
         );
       }
-    }
-    // An escalation is told once: when the dispute first becomes a loss. Its
-    // other updates (evidence submitted, a status within the chargeback) are
-    // recorded on the order and the dispute row only.
-    if (escalation) {
-      const priorStatus = prior.rows[0]?.status;
-      const firstLoss = lossNow && (priorStatus === undefined || NON_LOSS_DISPUTE_STATUSES.has(priorStatus));
-      if (!firstLoss) return { duplicate: false };
     }
     const severity = closed
       ? dispute.status === 'lost'

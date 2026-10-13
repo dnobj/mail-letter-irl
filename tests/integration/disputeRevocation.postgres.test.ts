@@ -603,6 +603,29 @@ describePostgres('dispute and refund pack revocation', () => {
     expect(stillOpen.rowCount).toBe(0);
   }, 60_000);
 
+  it("an inquiry's created event arriving after the escalation leaves the chargeback standing (#730)", async () => {
+    const { userId, orderId, paymentIntentId } = await seedPackHolder({ credits: 10 });
+    const disputeId = `dp_${randomUUID().slice(0, 8)}`;
+    const at = (status: string) => disputeFixture({ id: disputeId, payment_intent: paymentIntentId, status } as never);
+
+    await commerceService.processStripeWebhookEvent(disputeEvent('charge.dispute.updated', at('needs_response')));
+    await commerceService.processStripeWebhookEvent(disputeEvent('charge.dispute.created', at('warning_needs_response')));
+    await commerceService.processStripeWebhookEvent(disputeEvent('charge.dispute.updated', at('under_review')));
+
+    const account = await readAccount(userId);
+    expect(account.credits).toBe(0);
+    expect(account.sends_blocked_reason).toBe('payment_disputed');
+    const row = await pool.query<{ status: string }>('SELECT status FROM stripe_disputes WHERE dispute_id = $1', [disputeId]);
+    expect(row.rows[0].status).toBe('under_review');
+    const order = await pool.query<{ stripe_dispute_status: string }>('SELECT stripe_dispute_status FROM orders WHERE order_id = $1', [orderId]);
+    expect(order.rows[0].stripe_dispute_status).toBe('needs_response');
+    const alerts = await pool.query(
+      `SELECT 1 FROM commerce_operational_alerts WHERE order_id = $1 AND alert_type = 'stripe_dispute_created'`,
+      [orderId]
+    );
+    expect(alerts.rowCount).toBe(1);
+  }, 60_000);
+
   it('revokes on charge.dispute.updated as well (#730)', async () => {
     const { userId, paymentIntentId } = await seedPackHolder({ credits: 10 });
     const disputeId = `dp_${randomUUID().slice(0, 8)}`;
