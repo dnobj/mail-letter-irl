@@ -112,7 +112,7 @@ describe('get_order_status tool', () => {
       });
     });
 
-    it('should include canSendFollowUp and followUpSuggestedPrompt', async () => {
+    it('should include canSendFollowUp, and no prompt built from the recipient\'s name (#730)', async () => {
       // Arrange
       const mockOrder = createMockOrder('order-123', true);
       const context = createMockContext([mockOrder]);
@@ -122,7 +122,8 @@ describe('get_order_status tool', () => {
 
       // Assert
       expect(result.canSendFollowUp).toBe(true);
-      expect(result.followUpSuggestedPrompt).toContain('Jane Recipient');
+      expect(result).not.toHaveProperty('followUpSuggestedPrompt');
+      expect(JSON.stringify(result)).not.toMatch(/Write a follow-up letter/);
     });
   });
 

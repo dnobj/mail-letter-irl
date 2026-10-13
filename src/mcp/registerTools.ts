@@ -1407,7 +1407,8 @@ function packRuleText(certified: boolean): string {
  */
 export function sendLinkText(result: RequestSendOutput): string {
   const what = result.mailType === "postcard" ? "postcard" : "letter";
-  const to = result.recipientSummary?.name ? ` to ${result.recipientSummary.name}` : "";
+  // Quoted (#730): a recipient may have typed the name on a public page.
+  const to = result.recipientSummary?.name ? ` to ${JSON.stringify(result.recipientSummary.name)}` : "";
   // Mail no pack pays for is paid on that page, with Pay & Send (#579).
   if (result.paidPerSend === true) {
     return (
