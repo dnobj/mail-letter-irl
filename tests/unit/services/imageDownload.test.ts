@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ipv6Groups,
   isUnsafeIpAddress,
+  isUnsafeIpv6Address,
   remoteImageTransport,
   resolvePublicAddress,
   type ImageHostResolver
@@ -68,6 +69,22 @@ describe('image hosts resolve off the thread pool, every address checked (#730)'
     expect(cancel).toHaveBeenCalled();
   });
 
+  it('drops an answer that arrives after the deadline', async () => {
+    let answer: (addresses: string[]) => void = () => undefined;
+    const resolver: ImageHostResolver = {
+      resolve4: () => new Promise<string[]>(resolve => {
+        answer = resolve;
+      }),
+      resolve6: () => Promise.resolve([]),
+      cancel: () => undefined
+    };
+    const controller = new AbortController();
+    const pending = resolvePublicAddress('late.test', controller.signal, () => resolver);
+    controller.abort();
+    answer(['93.184.216.34']);
+    await expect(pending).resolves.toBeNull();
+  });
+
   it('asks nothing once the deadline has passed', async () => {
     const controller = new AbortController();
     controller.abort();
@@ -88,6 +105,10 @@ describe('addresses that are not public (#730)', () => {
     expect(isUnsafeIpAddress(address) || ipv6Groups(address) === null).toBe(true);
   });
 
+  it('refuses what it cannot read as an IPv6 address', () => {
+    for (const text of ['1::2::3', 'zzzz::1', '1:2:3']) expect(isUnsafeIpv6Address(text), text).toBe(true);
+  });
+
   it.each(['2606:2800:220:1:248:1893:25c8:1946', '2a00:1450:4009:81f::200e', '2001:4860:4860::8888', '100:1::1'])(
     '%s is public',
     address => {
@@ -101,6 +122,8 @@ describe('addresses that are not public (#730)', () => {
     expect(ipv6Groups('2001:db8::')).toEqual([0x2001, 0xdb8, 0, 0, 0, 0, 0, 0]);
     expect(ipv6Groups('1:2:3:4:5:6:7:8')).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
     expect(ipv6Groups('1::2::3')).toBeNull();
+    expect(ipv6Groups('1:2:3:4:5:6:7')).toBeNull();
+    expect(ipv6Groups('1:2:3')).toBeNull();
     expect(ipv6Groups('1:2:3:4:5:6:7:8:9')).toBeNull();
     expect(ipv6Groups('12345::')).toBeNull();
     expect(ipv6Groups('::1.2.3.256')).toBeNull();
