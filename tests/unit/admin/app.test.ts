@@ -238,7 +238,7 @@ describe("admin request pipeline", () => {
     const posted = await send(port, "POST", "/writes/echo", { ...identity, "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" }, "x=1");
     expect(posted.status).toBe(403);
     // Shaped like a navigation, but a page's own speculation rules sent it.
-    for (const purpose of [{ "sec-purpose": "prefetch" }, { "sec-purpose": "prefetch;prerender" }, { purpose: "prefetch" }]) {
+    for (const purpose of [{ "sec-purpose": "prefetch" }, { "sec-purpose": "prefetch;prerender" }, { purpose: "prefetch" }] as Array<Record<string, string>>) {
       const speculative = await send(port, "GET", "/", { ...identity, "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "document", ...purpose });
       expect(speculative.status, JSON.stringify(purpose)).toBe(403);
     }
