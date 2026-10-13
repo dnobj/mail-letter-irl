@@ -1,59 +1,47 @@
 # Company and Account Ownership
 
-Last updated: July 16, 2026
+Last updated: October 13, 2026
 
-This document is the non-secret source of truth for the organization and account ownership context behind Letter IRL. Keep credentials, API keys, passwords, recovery codes, private tax IDs, and private billing details out of this file.
+The non-secret, public part of the organization behind Letter IRL. Which account administers which
+service, the OpenAI organization and project IDs, and the testing accounts are kept out of this public
+repository (#730): they are the owner's, in `docs/private/company-and-accounts.md` on the owner's machine.
 
 ## Organization Identity
 
 - Registered organization for platform/vendor accounts: `Objective Works`
-- Primary organization account email: `dnicholl@objective.works`
 - Public product / DBA: `Letter IRL`
 - Public website: `https://letterirl.com`
 - Support contact: `support@letterirl.com`
 
-Use `Objective Works` as the organization/company identity where a vendor platform asks for the registered organization, with `Letter IRL` as the DBA/product name.
+Use `Objective Works` as the organization/company identity where a vendor platform asks for the
+registered organization, with `Letter IRL` as the DBA/product name.
 
 ## OpenAI Registration
 
-Letter IRL should be submitted and managed under the OpenAI organization associated with `Objective Works` / `dnicholl@objective.works`, using `Letter IRL` as the app/product name.
+Letter IRL is submitted and managed under the OpenAI organization of `Objective Works`, with
+`Letter IRL` as the app/product name. Organization identity verification was completed on May 31, 2026.
+See `docs/chatgpt-app-submission.md` and `docs/app-submission/openai-test-cases.md` for the submission
+materials and reviewer test cases.
 
-Track the exact OpenAI organization, project, owner account, and identity verification status here when confirmed. Do not store secret keys or sensitive account recovery details in documentation.
+## Testing Accounts
 
-Current operational assumption:
+App testing uses a dedicated ChatGPT account, kept separate from the owner's personal one so app-review
+state, OAuth connections and test conversations do not mix. ChatGPT account identity and Letter IRL/Auth0
+identity can differ: when debugging quotas, credits or account-specific behavior, check the account the
+app's tools report (`get_account_balance`) rather than assuming it matches the visible ChatGPT account.
 
-- OpenAI registered organization name: `Objective Works`
-- OpenAI organization ID: `org-sGKDRRMOeTxvkxhnsvnCRa6J`
-- OpenAI submission project name: `Mail Letter IRL`
-- OpenAI submission project ID: `proj_6tiqBTLBrGtxtdVz6ms1Acdd`
-- OpenAI owner/contact account: `dnicholl@objective.works`
-- OpenAI app/product name: `Letter IRL`
-- OpenAI identity verification status: completed on May 31, 2026
+## Related Services
 
-See `docs/chatgpt-app-submission.md` and `docs/app-submission/openai-test-cases.md` for app submission materials and reviewer test cases.
-
-## ChatGPT Testing Accounts
-
-- Dedicated Letter IRL testing ChatGPT account: `dnicholl@letterirl.com`
-- Previous testing ChatGPT account: `dnicholl@objective.works`
-- Primary personal ChatGPT account: `openai@davidnicholl.com`
-
-Use the `dnicholl@letterirl.com` ChatGPT account for focused Letter IRL app testing and submission prep. Keep it separate from the primary personal ChatGPT account to avoid mixing app-review state, OAuth connections, test conversations, and platform configuration.
-
-ChatGPT account identity and Letter IRL/Auth0 OAuth identity can differ during testing. When debugging quotas, credits, or account-specific behavior, verify the OAuth account returned by app tools such as `get_account_balance` rather than assuming it matches the visible ChatGPT account.
-
-## Related Accounts
-
-| Area | Production / Public Identity | Development / Admin Identity | Notes |
+| Area | Production | Development | Notes |
 | --- | --- | --- | --- |
-| Auth0 | `dnicholl@letterirl.com` | `dnicholl@objective.works` | Separate production and development tenants. See `docs/auth0-tenant-configuration.md`. |
-| Railway | `dnicholl@letterirl.com` | Same account, isolated `production` and `development` environments | One Railway project contains separate API, website, maintenance, and bucket resources per environment. |
-| Neon | `dnicholl@objective.works` | Same account/project, isolated production and `dev` branches | Keep the two database branches and pooled connection strings isolated. |
-| Stripe / ACP | Letter IRL merchant/product identity | Stripe test mode for development | Keep live/test payment contexts separate. See `docs/acp-stripe-integration.md`. |
-| PostGrid | Live mail provider configuration | Dummy/test provider configuration | Avoid sending real mail from dev/test flows unless explicitly intended. |
+| Auth0 | Production tenant | Development tenant | Separate tenants. See `docs/auth0-tenant-configuration.md`. |
+| Railway | `production` environment | `development` environment | One project with separate API, website, maintenance and bucket resources per environment. |
+| Neon | `production` branch | `dev` branch | Keep the two branches and pooled connection strings isolated. |
+| Stripe / ACP | Live mode | Test mode | See `docs/acp-stripe-integration.md`. |
+| PostGrid | Live mail provider | Test mode | Avoid sending real mail from dev/test flows unless explicitly intended. |
 
 ## Maintenance Notes
 
-- Update this file when platform ownership, verification status, or account responsibilities change.
+- Keep account emails, organization and project IDs and recovery details out of this file; they go in
+  `docs/private`.
 - Prefer linking to detailed setup docs instead of duplicating environment-specific configuration here.
-- Keep this document safe to commit and share with future agents.

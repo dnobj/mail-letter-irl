@@ -32,8 +32,8 @@ Letter IRL uses **two separate Auth0 tenants** for complete isolation between pr
 
 | Environment | Tenant Domain | Account Email |
 |-------------|---------------|---------------|
-| **Production** | `dev-njmdyqf8n25rqgy7.us.auth0.com` | dnicholl@letterirl.com |
-| **Development** | `dev-ky21dxn3qmi71hjl.us.auth0.com` | dnicholl@objective.works |
+| **Production** | `dev-njmdyqf8n25rqgy7.us.auth0.com` | the production account |
+| **Development** | `dev-ky21dxn3qmi71hjl.us.auth0.com` | the organization account |
 
 Each tenant has the same applications configured:
 
@@ -70,7 +70,7 @@ Two consequences worth knowing before touching anything here:
 ### 1. Create Auth0 Account
 
 1. Go to [auth0.com](https://auth0.com)
-2. Sign up with your email (e.g., `dnicholl@letterirl.com`)
+2. Sign up with your email (e.g., the production account)
 3. Create a new tenant
 
 ### 2. Tenant Configuration
@@ -344,7 +344,7 @@ AUTH0_SCOPE=openid profile email offline_access mail:read mail:draft mail:send
 ## Checklist
 
 ### Production Tenant (dev-njmdyqf8n25rqgy7)
-- [x] Account created (dnicholl@letterirl.com)
+- [x] Account created (the production account)
 - [x] Environment tag set to Production
 - [x] Website application created (Regular Web App)
 - [x] MCP API created (`https://api.letterirl.com/mcp`)
@@ -362,7 +362,7 @@ AUTH0_SCOPE=openid profile email offline_access mail:read mail:draft mail:send
 - [x] Environment variables configured in Railway
 
 ### Development Tenant (dev-ky21dxn3qmi71hjl)
-- [x] Account exists (dnicholl@objective.works)
+- [x] Account exists (the organization account)
 - [x] Website application configured and authorized for the MCP API (2026-09-14)
 - [x] Dedicated DEV `/mcp` API created and the ChatGPT CIMD client imported
 - [x] Default audience repointed to the MCP API, then `https://letter-irl/api` deleted (2026-09-14)

@@ -9,13 +9,10 @@ This checklist tracks the non-code items the project owner needs to gather, veri
 
 - Submission status: pre-submission
 - Submitting organization: `Objective Works`
-- OpenAI organization ID: `org-sGKDRRMOeTxvkxhnsvnCRa6J`
-- OpenAI submission project: `Mail Letter IRL` (`proj_6tiqBTLBrGtxtdVz6ms1Acdd`)
+- OpenAI organization ID: recorded privately
+- OpenAI submission project: `Mail Letter IRL` (ID recorded privately)
 - DBA / product name: `Letter IRL`
-- Owner/contact account: `dnicholl@objective.works`
-- Dedicated ChatGPT testing account: `dnicholl@letterirl.com`
-- Previous ChatGPT testing account: `dnicholl@objective.works`
-- Primary personal ChatGPT account, kept separate: `openai@davidnicholl.com`
+- Owner/contact account, ChatGPT testing accounts and the owner's personal account (kept separate): recorded privately (#730)
 - Organization verification: completed on May 31, 2026
 - Primary submission docs: `docs/chatgpt-app-submission.md`, `docs/app-submission/openai-test-cases.md`, `docs/app-submission/demo-scenarios.md`
 
@@ -43,11 +40,11 @@ Remaining:
 ### OpenAI Platform Access
 
 - [x] Confirm `Objective Works` organization verification is approved by OpenAI.
-- [x] Confirm the submitting account has the `Owner` role in the OpenAI organization. `dnicholl@objective.works` is listed as Organization Owner.
-- [x] Confirm the app will be submitted from the intended OpenAI organization/project: `Objective Works` / `Mail Letter IRL` (`proj_6tiqBTLBrGtxtdVz6ms1Acdd`).
+- [x] Confirm the submitting account has the `Owner` role in the OpenAI organization. The organization account is listed as Organization Owner.
+- [x] Confirm the app will be submitted from the intended OpenAI organization/project: `Objective Works` / `Mail Letter IRL` (ID recorded privately).
 - [x] Confirm the selected OpenAI project has global data residency and is eligible for app review. Dashboard `GEOGRAPHY` column shows `Global`.
-- [ ] Use the dedicated `dnicholl@letterirl.com` ChatGPT account for focused Letter IRL testing.
-- [ ] Keep the primary `openai@davidnicholl.com` ChatGPT account separate from app testing and review prep.
+- [ ] Use the dedicated testing ChatGPT account for focused Letter IRL testing.
+- [ ] Keep the owner's personal ChatGPT account separate from app testing and review prep.
 - [x] Record the final OpenAI organization/project names in `docs/company-and-accounts.md` once confirmed.
 
 ### Public Company and Support Information

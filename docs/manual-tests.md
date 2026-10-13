@@ -2682,7 +2682,7 @@ it when the panel shipped.
    Both refusals are in `/audit` as `admin.request_failed`.)
 3. [x] Redeem the code with a test account (`redeem_promo_code`); verify the campaign page lists the
    redemption with a masked email and that "delete" is no longer offered. End the campaign.
-   (testlirl02 through Claude: the page read "1 of 1", listed `t***@davidnicholl.com` with its
+   (testlirl02 through Claude: the page read "1 of 1", listed a masked address with its
    lot, and said "Redeemed campaigns are ended, never deleted." A fresh preview ended it.)
 4. [ ] `/images`: with an ambiguous reservation (decision rules in
    [deployment.md](deployment.md#operator-recovery-through-the-admin-panel)), preview "release as

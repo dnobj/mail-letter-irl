@@ -54,8 +54,8 @@ so that application's callbacks must stay OpenAI's alone.
 
 | Environment | Tenant Domain | Account |
 |-------------|---------------|---------|
-| **Development** | `dev-ky21dxn3qmi71hjl.us.auth0.com` | dnicholl@objective.works |
-| **Production** | `dev-njmdyqf8n25rqgy7.us.auth0.com` | dnicholl@letterirl.com |
+| **Development** | `dev-ky21dxn3qmi71hjl.us.auth0.com` | the organization account |
+| **Production** | `dev-njmdyqf8n25rqgy7.us.auth0.com` | the production account |
 
 ---
 
@@ -1328,8 +1328,8 @@ Letter IRL uses separate Auth0 tenants for complete environment isolation:
 
 | Environment | Auth0 Tenant | Account | Purpose |
 |-------------|--------------|---------|---------|
-| **Production** | `dev-njmdyqf8n25rqgy7.us.auth0.com` | dnicholl@letterirl.com | Live users, real payments |
-| **Development** | `dev-ky21dxn3qmi71hjl.us.auth0.com` | dnicholl@objective.works | Testing, sync from production |
+| **Production** | `dev-njmdyqf8n25rqgy7.us.auth0.com` | the production account | Live users, real payments |
+| **Development** | `dev-ky21dxn3qmi71hjl.us.auth0.com` | the organization account | Testing, sync from production |
 
 ### Configuration Parity Checklist
 

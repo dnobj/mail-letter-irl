@@ -77,7 +77,7 @@ npm run build
 ## Remaining work before submission
 
 - [x] Complete OpenAI Platform identity verification for `Objective Works` as the registered organization / `Letter IRL` as the DBA. Completed on May 31, 2026.
-- [x] Confirm your OpenAI Platform account has the `Owner` role for the submitting organization. `dnicholl@objective.works` is listed as Organization Owner.
+- [x] Confirm your OpenAI Platform account has the `Owner` role for the submitting organization. The organization account is listed as Organization Owner.
 - [x] Confirm the OpenAI project used for submission has global data residency. Dashboard `GEOGRAPHY` column shows `Global`.
 - [x] Verify the production MCP server and OAuth endpoints are live on the public domains you will submit. May 31, 2026 check: `api.letterirl.com` manifest, OAuth metadata, MCP CORS preflight, and unauthenticated auth challenge all advertise the canonical production domain.
 - [x] Review the production widget CSP and confirm it allows only the exact required domains (issue #228; one deliberate exclusion - the Azure blob host behind Library picks - recorded in `docs/learnings/widget-csp-enforcement.md`)
