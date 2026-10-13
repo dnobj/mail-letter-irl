@@ -951,6 +951,8 @@ export async function startHttpServer() {
   await new Promise<void>((resolve) => {
     server.listen(DEFAULT_PORT, DEFAULT_HOST, () => {
       console.log(`Letter IRL MCP HTTP server listening on http://${DEFAULT_HOST}:${DEFAULT_PORT}`);
+      // nixpacks.toml sets it (#730); this line is how a deploy shows it took.
+      writeDiagnostic("info", "boot.thread_pool", { size: Number(process.env.UV_THREADPOOL_SIZE) || 4 });
       // Price warmup AFTER the port binds, fire-and-forget (#275 stage A). An
       // earlier revision awaited this above, ~650 lines before listen, which
       // meant a Stripe outage held the socket closed - a probe against a
