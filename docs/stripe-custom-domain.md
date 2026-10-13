@@ -10,7 +10,7 @@ The app guidelines ask for purchases to complete on our own domain. Stripe can s
 
 The letter pack card opens our start page, `https://api.letterirl.com/purchase/start`, which forwards to the Checkout Session's URL (#372). The Pay & Send buttons on the preview cards open the Checkout URL itself. With the custom domain active, Stripe returns that URL on `pay.letterirl.com` either way.
 
-The start page forwards only to hosts it knows (`src/config/checkoutDomain.ts`). `STRIPE_CHECKOUT_DOMAIN` adds ours beside `checkout.stripe.com`, which always stays, because a session opened before the switch keeps its old URL.
+The start page forwards only to hosts it knows (`src/config/checkoutDomain.ts`). `STRIPE_CHECKOUT_DOMAIN` adds ours beside `checkout.stripe.com`, which always stays, because a session opened before the switch keeps its old URL. It also forwards only to a Checkout Session one of our orders opened, to the address that order recorded (#730). It reads the session id from the link's path (`/c/pay/cs_…`), so the custom domain works the same.
 
 The domain is added once, in live mode; a sandbox cannot add one. Stripe's docs suggest test-mode sessions of the same account may still use it. Development shares that account, so it sets the variable too. An extra allowed host costs nothing, and without it every development checkout would stop on our page.
 
