@@ -229,6 +229,12 @@ describe("admin request pipeline", () => {
     }
     const sameSite = await send(port, "POST", "/writes/echo", { ...identity, "sec-fetch-site": "same-site", "sec-fetch-mode": "cors", "sec-fetch-dest": "empty" }, "x=1");
     expect(sameSite.status).toBe(403);
+    // Navigated, but into a frame: not the operator following a link.
+    const framed = await send(port, "GET", "/", { ...identity, "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "iframe" });
+    expect(framed.status).toBe(403);
+    // A form another site submits, as a top-level navigation: still refused.
+    const posted = await send(port, "POST", "/writes/echo", { ...identity, "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" }, "x=1");
+    expect(posted.status).toBe(403);
     expect(sessions.size).toBe(sessionsBefore);
     expect(audits.length).toBe(auditsBefore);
   });
