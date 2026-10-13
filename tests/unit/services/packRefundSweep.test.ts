@@ -24,6 +24,7 @@ import { wholeRefundList } from '../../../src/services/stripeService.js';
 const ROW = {
   pack_refund_id: 'pr-1',
   order_id: 'order-1',
+  created_at: new Date(),
   user_id: 'user-1',
   letters: 2,
   credits: 4,
@@ -110,7 +111,26 @@ describe('the pack-refund sweep asks Stripe before it compensates (#730)', () =>
   it('decides on a whole list of refunds only', () => {
     const refund = { id: 're_1' } as never;
     expect(wholeRefundList({ data: [refund], has_more: false })).toEqual([refund]);
-    expect(() => wholeRefundList({ data: [refund], has_more: true })).toThrow();
+    expect(() => wholeRefundList({ data: [refund], has_more: true })).toThrow(expect.objectContaining({ diagnosticClass: 'refund_list_incomplete' }));
+  });
+
+  it('alerts for a row below the limit once it has waited a day on a Stripe that cannot be asked', async () => {
+    const old = { ...ROW, stripe_attempts: 1, created_at: new Date(Date.now() - 25 * 60 * 60 * 1000) };
+    vi.mocked(query).mockImplementation((async (sql: string) =>
+      sql.includes("status = 'letters_revoked' AND updated_at") ? { rows: [old] } : { rows: [] }) as never);
+    vi.mocked(lockPackRefund).mockResolvedValue({ ...old } as never);
+    const down = stripeSeam(async () => {
+      throw new Error('down');
+    });
+    await reconcilePackRefunds(down as never, { retryDelaySeconds: 60 });
+    expect(raisePackRefundAlertOnce).toHaveBeenCalledWith(client, expect.objectContaining({ pack_refund_id: 'pr-1' }), 'stripe_unconfirmed', expect.objectContaining({ attempts: 1 }));
+    expect(compensatePackRefund).not.toHaveBeenCalled();
+  });
+
+  it('takes the least recently touched rows first', async () => {
+    await reconcilePackRefunds(stripeSeam(async () => []) as never, { retryDelaySeconds: 60 });
+    const [sql] = vi.mocked(query).mock.calls.find(([text]) => String(text).includes("status = 'letters_revoked' AND updated_at"))!;
+    expect(String(sql)).toMatch(/ORDER BY updated_at ASC, created_at ASC/);
   });
 
   it('below the limit, retries the create when Stripe holds none, and stays quiet when it cannot be asked', async () => {

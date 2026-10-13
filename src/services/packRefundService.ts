@@ -70,6 +70,9 @@ const TERMINAL_STRIPE_REFUND_CODES = new Set([
   'amount_too_small'
 ]);
 
+/** How long a command may wait on a Stripe that cannot be asked before it alerts (#730). */
+const UNCONFIRMED_ALERT_AFTER_MS = 24 * 60 * 60 * 1000;
+
 /** Dispute statuses under which no money was, or will be, taken from us. */
 const NON_LOSS_DISPUTE_STATUSES = [
   'won',
@@ -558,10 +561,12 @@ export async function reconcilePackRefunds(
   const delaySeconds =
     options.retryDelaySeconds ?? positiveIntegerSetting('PACK_REFUND_RETRY_DELAY_SECONDS', 300, 60);
   const attemptLimit = positiveIntegerSetting('PACK_REFUND_STRIPE_ATTEMPT_LIMIT', 5, 1);
+  // Least recently touched first, so rows Stripe cannot be asked about, whose
+  // turn moves on below, do not keep newer ones from their turn (#730).
   const due = await query<PackRefundRow>(
     `SELECT * FROM commerce_pack_refunds
       WHERE status = 'letters_revoked' AND updated_at <= NOW() - ($1 * INTERVAL '1 second')
-      ORDER BY created_at ASC LIMIT 50`,
+      ORDER BY updated_at ASC, created_at ASC LIMIT 50`,
     [delaySeconds]
   );
   for (const row of due.rows) {
@@ -583,7 +588,11 @@ export async function reconcilePackRefunds(
           `UPDATE commerce_pack_refunds SET updated_at = NOW() WHERE pack_refund_id = $1`,
           [row.pack_refund_id]
         );
-        if (atLimit) {
+        // At the attempt limit, or after a day of waiting: a failed list
+        // spends no attempt, so a row Stripe can never be asked about would
+        // otherwise wait with its letters taken and no one told.
+        const waitedMs = Date.now() - new Date(locked.created_at).getTime();
+        if (atLimit || waitedMs >= UNCONFIRMED_ALERT_AFTER_MS) {
           await raisePackRefundAlertOnce(client, locked, 'stripe_unconfirmed', { attempts: locked.stripe_attempts, errorClass });
         }
       }).catch(() => undefined); // the log line above carries a failure here

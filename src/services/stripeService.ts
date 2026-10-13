@@ -366,7 +366,11 @@ export async function listPaymentRefunds(paymentIntentId: string): Promise<Strip
 
 /** A page of refunds that is the whole list, or an error. */
 export function wholeRefundList(page: { data: Stripe.Refund[]; has_more: boolean }): Stripe.Refund[] {
-  if (page.has_more) throw new Error('More refunds than one page; not deciding on part of the list');
+  if (page.has_more) {
+    throw Object.assign(new Error('More refunds than one page; not deciding on part of the list'), {
+      diagnosticClass: 'refund_list_incomplete'
+    });
+  }
   return page.data;
 }
 export async function retrieveRefund(refundId: string): Promise<Stripe.Refund> {
