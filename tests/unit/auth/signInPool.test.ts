@@ -10,70 +10,59 @@ vi.mock('../../../src/services/patService.js', () => ({
 
 import {
   carriesVerifiedToken,
-  failedSignInPool,
-  recordFailedSignIn,
   rememberVerifiedToken,
-  resetSignInPool,
-  SIGN_IN_POOL_CONFIG
+  resetVerifiedTokens,
+  VERIFIED_TOKEN_CONFIG
 } from '../../../src/auth/signInPool.js';
 import { validateAuthorizationHeader, validateJWTToken } from '../../../src/auth/tokenValidator.js';
 import { validateToken } from '../../../src/services/patService.js';
-import { clearRateLimitState, rateLimitMiddlewareWithTier } from '../../../src/api/middleware/rateLimit.js';
+import {
+  checkGlobalRateLimit,
+  clearRateLimitState,
+  rateLimitMiddlewareWithTier
+} from '../../../src/api/middleware/rateLimit.js';
 
 const T0 = 1_000_000_000_000;
 
-describe('the failed sign-in pool (#730)', () => {
-  beforeEach(() => resetSignInPool());
-
-  it('fills at its limit within a minute, and empties with the next', () => {
-    for (let i = 0; i < SIGN_IN_POOL_CONFIG.maxFailures - 1; i += 1) recordFailedSignIn(T0);
-    expect(failedSignInPool(T0).full).toBe(false);
-    recordFailedSignIn(T0);
-    expect(failedSignInPool(T0 + 1000)).toMatchObject({ full: true, limit: SIGN_IN_POOL_CONFIG.maxFailures, resetMs: 59_000 });
-    expect(failedSignInPool(T0 + SIGN_IN_POOL_CONFIG.windowMs).full).toBe(false);
-    recordFailedSignIn(T0 + SIGN_IN_POOL_CONFIG.windowMs);
-    expect(failedSignInPool(T0 + SIGN_IN_POOL_CONFIG.windowMs).full).toBe(false);
-  });
-
-  it('fills again in a later minute', () => {
-    const later = T0 + 5 * SIGN_IN_POOL_CONFIG.windowMs;
-    recordFailedSignIn(T0);
-    for (let i = 0; i < SIGN_IN_POOL_CONFIG.maxFailures; i += 1) recordFailedSignIn(later);
-    expect(failedSignInPool(later + 1).full).toBe(true);
-  });
+describe('tokens verified recently (#730)', () => {
+  beforeEach(() => resetVerifiedTokens());
 
   it('knows a verified token by its bearer header, until it expires or ten minutes pass', () => {
     rememberVerifiedToken('tok-a', undefined, T0);
     expect(carriesVerifiedToken('Bearer tok-a', T0 + 1)).toBe(true);
     expect(carriesVerifiedToken('bearer tok-a', T0 + 1)).toBe(true);
+    expect(carriesVerifiedToken(['Bearer tok-a'], T0 + 1)).toBe(true);
     expect(carriesVerifiedToken('Bearer tok-b', T0 + 1)).toBe(false);
     expect(carriesVerifiedToken(undefined, T0 + 1)).toBe(false);
     expect(carriesVerifiedToken('Basic tok-a', T0 + 1)).toBe(false);
-    expect(carriesVerifiedToken('Bearer tok-a', T0 + SIGN_IN_POOL_CONFIG.verifiedForMs)).toBe(false);
+    expect(carriesVerifiedToken('Bearer tok-a', T0 + VERIFIED_TOKEN_CONFIG.verifiedForMs)).toBe(false);
 
     rememberVerifiedToken('tok-c', T0 + 5000, T0);
     expect(carriesVerifiedToken('Bearer tok-c', T0 + 4999)).toBe(true);
     expect(carriesVerifiedToken('Bearer tok-c', T0 + 5000)).toBe(false);
-
-    rememberVerifiedToken('tok-d', T0 - 1, T0);
-    expect(carriesVerifiedToken('Bearer tok-d', T0)).toBe(false);
   });
 
   it('keeps no expired token, so none can crowd out a live one', () => {
     rememberVerifiedToken('live', undefined, T0);
-    for (let i = 0; i < SIGN_IN_POOL_CONFIG.maxVerified; i += 1) rememberVerifiedToken(`gone-${i}`, T0 - 1, T0);
+    for (let i = 0; i < VERIFIED_TOKEN_CONFIG.maxVerified; i += 1) rememberVerifiedToken(`gone-${i}`, T0 - 1, T0);
     expect(carriesVerifiedToken('Bearer live', T0 + 1)).toBe(true);
   });
 
   it('holds a bounded number of tokens, dropping the oldest', () => {
-    for (let i = 0; i <= SIGN_IN_POOL_CONFIG.maxVerified; i += 1) rememberVerifiedToken(`tok-${i}`, undefined, T0);
+    for (let i = 0; i <= VERIFIED_TOKEN_CONFIG.maxVerified; i += 1) rememberVerifiedToken(`tok-${i}`, undefined, T0);
     expect(carriesVerifiedToken('Bearer tok-0', T0)).toBe(false);
     expect(carriesVerifiedToken('Bearer tok-1', T0)).toBe(true);
-    expect(carriesVerifiedToken(`Bearer tok-${SIGN_IN_POOL_CONFIG.maxVerified}`, T0)).toBe(true);
+    expect(carriesVerifiedToken(`Bearer tok-${VERIFIED_TOKEN_CONFIG.maxVerified}`, T0)).toBe(true);
+  });
+
+  it('is emptied with the rate-limit state', () => {
+    rememberVerifiedToken('tok-a');
+    clearRateLimitState();
+    expect(carriesVerifiedToken('Bearer tok-a')).toBe(false);
   });
 });
 
-describe('what the token validator tells the pool (#730)', () => {
+describe('what the token validator remembers (#730)', () => {
   const issuer = 'https://dev-test.auth0.com/';
   const audience = 'https://dev-api.example.com/mcp';
   let keys: Awaited<ReturnType<typeof generateKeyPair>>;
@@ -92,7 +81,7 @@ describe('what the token validator tells the pool (#730)', () => {
   });
 
   beforeEach(() => {
-    resetSignInPool();
+    resetVerifiedTokens();
     vi.stubEnv('LETTER_IRL_OAUTH_ISSUER', issuer);
     vi.stubEnv('LETTER_IRL_OAUTH_JWKS_URI', `${issuer}.well-known/jwks.json`);
     vi.stubEnv('LETTER_IRL_OAUTH_AUDIENCE', audience);
@@ -105,54 +94,39 @@ describe('what the token validator tells the pool (#730)', () => {
     vi.restoreAllMocks();
   });
 
-  const failures = () => {
-    const before = failedSignInPool().full;
-    expect(before).toBe(false);
-    // Read the count through the pool's limit: one more failure than recorded fills it.
-    let added = 0;
-    while (!failedSignInPool().full) {
-      recordFailedSignIn();
-      added += 1;
-    }
-    return SIGN_IN_POOL_CONFIG.maxFailures - added;
-  };
-
-  it('remembers a token that verifies, and counts nothing', async () => {
+  it('remembers a token that verifies, until it expires', async () => {
     const token = await sign();
     await validateJWTToken(token, keySet, ['mail:send']);
     expect(carriesVerifiedToken(`Bearer ${token}`)).toBe(true);
-    expect(failures()).toBe(0);
+    expect(carriesVerifiedToken(`Bearer ${token}`, Date.now() + 5 * 60 * 1000 + 1000)).toBe(false);
   });
 
-  it('counts a token whose signature fails, and does not remember it', async () => {
+  it('remembers neither a token whose signature fails nor one short of a scope', async () => {
     const other = await generateKeyPair('RS256');
-    const token = await sign(undefined, other.privateKey);
-    await expect(validateJWTToken(token, keySet)).rejects.toThrow();
-    expect(carriesVerifiedToken(`Bearer ${token}`)).toBe(false);
-    expect(failures()).toBe(1);
+    const forged = await sign(undefined, other.privateKey);
+    await expect(validateJWTToken(forged, keySet)).rejects.toThrow();
+    const short = await sign('mail:read');
+    await expect(validateJWTToken(short, keySet, ['mail:send'])).rejects.toThrow('insufficient_scope');
+    expect(carriesVerifiedToken(`Bearer ${forged}`)).toBe(false);
+    expect(carriesVerifiedToken(`Bearer ${short}`)).toBe(false);
   });
 
-  it('does not count a verified token short of a scope, nor remember it', async () => {
-    const token = await sign('mail:read');
-    await expect(validateJWTToken(token, keySet, ['mail:send'])).rejects.toThrow('insufficient_scope');
-    expect(carriesVerifiedToken(`Bearer ${token}`)).toBe(false);
-    expect(failures()).toBe(0);
-  });
-
-  it('counts a personal access token that fails, and remembers one that passes', async () => {
+  it('remembers a personal access token that passes, and not one that fails', async () => {
     vi.mocked(validateToken).mockResolvedValueOnce({ valid: false, error: 'Invalid token' } as never);
     await expect(validateAuthorizationHeader('Bearer lirl_pat_bad')).rejects.toThrow();
     vi.mocked(validateToken).mockResolvedValueOnce({ valid: true, userId: 'pat-user', tokenId: 't1', scopes: [] } as never);
     await validateAuthorizationHeader('Bearer lirl_pat_good');
     expect(carriesVerifiedToken('Bearer lirl_pat_good')).toBe(true);
     expect(carriesVerifiedToken('Bearer lirl_pat_bad')).toBe(false);
-    expect(failures()).toBe(1);
   });
 });
 
-describe('the MCP and REST backstop refuses only the unverified, and only while failures fill it (#730)', () => {
-  function request(authorization?: string, address = '198.51.100.7'): IncomingMessage {
-    return { headers: { 'x-forwarded-for': address, ...(authorization ? { authorization } : {}) }, socket: { remoteAddress: '10.0.0.1' } } as unknown as IncomingMessage;
+describe('the MCP and REST backstop leaves a recently verified token alone (#730)', () => {
+  function request(authorization: string | undefined, address: string): IncomingMessage {
+    return {
+      headers: { 'x-forwarded-for': address, ...(authorization ? { authorization } : {}) },
+      socket: { remoteAddress: '10.0.0.1' }
+    } as unknown as IncomingMessage;
   }
   function response() {
     const state = { status: 0, headers: {} as Record<string, unknown> };
@@ -170,36 +144,59 @@ describe('the MCP and REST backstop refuses only the unverified, and only while 
     };
     return { res: res as unknown as ServerResponse, state };
   }
-  const fill = () => {
-    for (let i = 0; i < SIGN_IN_POOL_CONFIG.maxFailures; i += 1) recordFailedSignIn();
-  };
+  const addressOf = (i: number) => `198.51.${Math.floor(i / 250)}.${i % 250}`;
 
   beforeEach(() => clearRateLimitState());
 
-  it.each(['mcp', 'api'] as const)('%s: any request passes while the pool has room, however many there are', async type => {
-    for (let i = 0; i < 1500; i += 1) {
+  it.each(['mcp', 'api'] as const)('%s: junk from many addresses fills it, refusing junk and the unknown, never a verified token', async type => {
+    rememberVerifiedToken('good-token');
+    const ceiling = checkGlobalRateLimit(type).limit; // this call takes one slot
+    let refused = 0;
+    for (let i = 0; i < ceiling; i += 1) {
       const { res } = response();
-      expect(await rateLimitMiddlewareWithTier(request('Bearer junk', `198.51.${Math.floor(i / 250)}.${i % 250}`), res, type)).toBe(false);
+      if (await rateLimitMiddlewareWithTier(request('Bearer junk', addressOf(i)), res, type)) refused += 1;
+    }
+    expect(refused).toBe(1);
+    const junk = response();
+    expect(await rateLimitMiddlewareWithTier(request('Bearer junk', '203.0.113.1'), junk.res, type)).toBe(true);
+    expect(junk.state.status).toBe(429);
+    expect(junk.state.headers['x-ratelimit-scope']).toBe('global');
+    const unknown = response();
+    expect(await rateLimitMiddlewareWithTier(request(undefined, '203.0.113.2'), unknown.res, type)).toBe(true);
+    for (let i = 0; i < 50; i += 1) {
+      const good = response();
+      expect(await rateLimitMiddlewareWithTier(request('Bearer good-token', `203.0.114.${i}`), good.res, type)).toBe(false);
     }
   });
 
-  it.each(['mcp', 'api'] as const)('%s: a full pool refuses a junk or missing token, and lets a verified one through', async type => {
-    fill();
+  it('counts nothing for a verified token, so signed-in traffic cannot fill it either', async () => {
     rememberVerifiedToken('good-token');
-    const junk = response();
-    expect(await rateLimitMiddlewareWithTier(request('Bearer junk'), junk.res, type)).toBe(true);
-    expect(junk.state.status).toBe(429);
-    expect(junk.state.headers['x-ratelimit-scope']).toBe('global');
-    expect(Number(junk.state.headers['retry-after'])).toBeGreaterThan(0);
-    const none = response();
-    expect(await rateLimitMiddlewareWithTier(request(undefined, '198.51.100.8'), none.res, type)).toBe(true);
-    const good = response();
-    expect(await rateLimitMiddlewareWithTier(request('Bearer good-token', '198.51.100.9'), good.res, type)).toBe(false);
+    const before = checkGlobalRateLimit('mcp').remaining;
+    for (let i = 0; i < 20; i += 1) {
+      const { res } = response();
+      await rateLimitMiddlewareWithTier(request('Bearer good-token', addressOf(i)), res, 'mcp');
+    }
+    expect(checkGlobalRateLimit('mcp').remaining).toBe(before - 1);
   });
 
-  it('leaves the other routes to their own backstops', async () => {
-    fill();
-    const { res } = response();
-    expect(await rateLimitMiddlewareWithTier(request('Bearer junk'), res, 'checkout')).toBe(false);
+  it('still holds a verified token to its per-address limit', async () => {
+    rememberVerifiedToken('good-token');
+    let refused = false;
+    for (let i = 0; i < 1000 && !refused; i += 1) {
+      const { res } = response();
+      refused = await rateLimitMiddlewareWithTier(request('Bearer good-token', '198.51.100.7'), res, 'mcp');
+    }
+    expect(refused).toBe(true);
+  });
+
+  it('leaves the other routes to their own backstops, verified or not', async () => {
+    rememberVerifiedToken('good-token');
+    const ceiling = checkGlobalRateLimit('checkout').limit;
+    let refused = 0;
+    for (let i = 0; i < ceiling; i += 1) {
+      const { res } = response();
+      if (await rateLimitMiddlewareWithTier(request('Bearer good-token', addressOf(i)), res, 'checkout')) refused += 1;
+    }
+    expect(refused).toBe(1);
   });
 });

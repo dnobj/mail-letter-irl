@@ -17,7 +17,7 @@ import {
 } from "../utils/diagnosticLog.js";
 import { InsufficientScopeError } from "./oauthChallenge.js";
 import { assertBetaAccess } from "./betaAccess.js";
-import { recordFailedSignIn, rememberVerifiedToken } from "./signInPool.js";
+import { rememberVerifiedToken } from "./signInPool.js";
 
 export interface AuthenticatedUser {
   userId: string;
@@ -88,7 +88,6 @@ export async function validateAuthorizationHeader(
 async function validatePATToken(token: string): Promise<AuthenticatedUser> {
   const result = await validatePAT(token);
   if (!result.valid) {
-    recordFailedSignIn();
     throw new Error(result.error || "Invalid token");
   }
 
@@ -164,8 +163,6 @@ export async function validateJWTToken(
     writeDiagnostic("warn", "auth.jwt_rejected", {
       errorClass: classifyDiagnosticError(error, "authorization_error")
     });
-    // A verified token short of a scope is not a failed sign-in (#730).
-    if (!(error instanceof InsufficientScopeError)) recordFailedSignIn();
     throw error;
   }
 

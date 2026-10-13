@@ -10,7 +10,7 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 import { getCachedUserTier, getTierMultiplier } from '../../services/tierService.js';
 import type { UserTier } from '../../services/types.js';
-import { carriesVerifiedToken, failedSignInPool, resetSignInPool } from '../../auth/signInPool.js';
+import { carriesVerifiedToken, resetVerifiedTokens } from '../../auth/signInPool.js';
 
 interface RateLimitEntry {
   count: number;
@@ -42,12 +42,21 @@ export const GLOBAL_RATE_LIMITS: Record<string, RateLimitConfig> = {
     maxRequests: 200,
   },
   // Backstops for the routes that had only per-identifier limits (audit A-05).
-  // A per-identifier limit bounds one client; these bound everyone at once.
-  // Each sits well above its per-identifier limit and far above any traffic
-  // this service has seen, so a hit is an incident, not a busy day. The MCP
-  // and REST routes' backstop counts failed sign-ins only (#730,
-  // src/auth/signInPool.ts): counting every request let a few addresses with
-  // junk tokens refuse everyone.
+  // A per-identifier limit bounds one client; these bound everyone at once, so
+  // many addresses cannot burn JWKS verification or bcrypt compares at line
+  // rate. Each sits well above its per-identifier limit and far above any
+  // traffic this service has seen, so a hit is an incident, not a busy day.
+  // On mcp and api a request with a token verified here recently is neither
+  // counted nor refused (#730, src/auth/signInPool.ts), so junk tokens cannot
+  // refuse the people already signed in.
+  'mcp': {
+    windowMs: 60 * 1000,
+    maxRequests: 1200,
+  },
+  'api': {
+    windowMs: 60 * 1000,
+    maxRequests: 2000,
+  },
   'checkout': {
     windowMs: 60 * 1000,
     maxRequests: 200,
@@ -434,12 +443,12 @@ export async function rateLimitMiddlewareWithTier(
   }
 
   // The per-identifier limit above bounds one client. Routes with a global
-  // entry also refuse at that ceiling whatever the mix of identifiers. The MCP
-  // and REST routes refuse only a request without a recently verified token,
-  // and only while failed sign-ins fill their pool (#730).
-  const globalResult = SIGN_IN_POOLED.has(endpointType)
-    ? signInPoolResult(req)
-    : checkGlobalRateLimit(endpointType);
+  // entry also refuse at that ceiling whatever the mix of identifiers. On the
+  // MCP and REST routes a recently verified token skips it (#730).
+  if (VERIFIED_SKIP_GLOBAL.has(endpointType) && carriesVerifiedToken(req.headers.authorization)) {
+    return false;
+  }
+  const globalResult = checkGlobalRateLimit(endpointType);
   if (!globalResult.allowed) {
     console.warn(`⚠️ Rate limit hit (global): ${endpointType} - system-wide limit reached`);
     incrementBlockedCount(endpointType, 'global');
@@ -462,17 +471,8 @@ export async function rateLimitMiddlewareWithTier(
   return false;
 }
 
-/** The routes whose shared backstop is the failed sign-in pool (#730). */
-const SIGN_IN_POOLED: ReadonlySet<string> = new Set(['mcp', 'api']);
-
-function signInPoolResult(req: IncomingMessage): { allowed: boolean; limit: number; resetMs: number } {
-  const pool = failedSignInPool();
-  return {
-    allowed: !pool.full || carriesVerifiedToken(req.headers.authorization),
-    limit: pool.limit,
-    resetMs: pool.resetMs
-  };
-}
+/** The routes whose shared backstop a recently verified token skips (#730). */
+const VERIFIED_SKIP_GLOBAL: ReadonlySet<string> = new Set(['mcp', 'api']);
 
 /** The per-account limits a REST handler applies once it knows the account. */
 export type AccountRateLimit = 'api_account' | 'checkout_account';
@@ -639,5 +639,5 @@ export function getBlockedRequestCounts(): Record<string, number> {
 export function clearRateLimitState(): void {
   rateLimitStore.clear();
   blockedRequestCounts.clear();
-  resetSignInPool();
+  resetVerifiedTokens();
 }
