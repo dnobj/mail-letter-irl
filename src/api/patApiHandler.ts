@@ -2,9 +2,9 @@
  * Personal Access Token (PAT) API Request Handler
  *
  * Handles PAT management routes:
- * - POST /api/tokens   - Create new token (JWT only)
+ * - POST /api/tokens   - Create new token (the website's own JWT only, #730)
  * - GET /api/tokens    - List user's tokens
- * - DELETE /api/tokens/:id - Revoke token (JWT only)
+ * - DELETE /api/tokens/:id - Revoke token (the website's own JWT only, #730)
  *
  * User Stories:
  * - US-MCP-01: Generate Personal Access Token

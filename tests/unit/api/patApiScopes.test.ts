@@ -46,6 +46,7 @@ import {
   TokenExpiryError
 } from '../../../src/services/patService.js';
 import { rateLimitAccount } from '../../../src/api/middleware/rateLimit.js';
+import * as diagnostics from '../../../src/utils/diagnosticLog.js';
 import { handlePATApiRequest } from '../../../src/api/patApiHandler.js';
 import { prepareAuthenticatedUser } from '../../../src/auth/identity.js';
 import { AccountErasedError, ACCOUNT_ERASED_MESSAGE } from '../../../src/auth/accountErased.js';
@@ -92,6 +93,8 @@ function response() {
 }
 
 describe('personal access token routes', () => {
+  let writeSpy: ReturnType<typeof vi.spyOn>;
+
   beforeEach(() => {
     vi.mocked(validateAuthorizationHeader).mockReset();
     vi.mocked(createToken).mockReset();
@@ -100,6 +103,7 @@ describe('personal access token routes', () => {
     vi.mocked(rateLimitAccount).mockReset();
     vi.mocked(rateLimitAccount).mockResolvedValue(false);
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    writeSpy = vi.spyOn(diagnostics, 'writeDiagnostic');
     vi.stubEnv('LETTER_IRL_WEBSITE_CLIENT_ID', WEBSITE);
   });
 
@@ -126,6 +130,7 @@ describe('personal access token routes', () => {
 
       expect(createToken).not.toHaveBeenCalled();
       expect(revokeToken).not.toHaveBeenCalled();
+      expect(writeSpy).toHaveBeenCalledWith('warn', 'auth.pat_client_refused', { configured: true });
     });
 
     it("refuses everyone when the website's application is not configured", async () => {
@@ -134,7 +139,33 @@ describe('personal access token routes', () => {
       const mint = response();
       await handlePATApiRequest(request('POST', { name: 'Laptop' }), mint.res, '/api/tokens');
       expect(mint.state.status).toBe(403);
+      const revoke = response();
+      await handlePATApiRequest(request('DELETE'), revoke.res, '/api/tokens/7');
+      expect(revoke.state.status).toBe(403);
       expect(createToken).not.toHaveBeenCalled();
+      expect(revokeToken).not.toHaveBeenCalled();
+      expect(writeSpy).toHaveBeenCalledWith('warn', 'auth.pat_client_refused', { configured: false });
+    });
+
+    it('reads the client id before azp, as the send rule does', async () => {
+      vi.mocked(validateAuthorizationHeader).mockResolvedValue({
+        ...jwt(ALL),
+        claims: { client_id: 'claude-code-client', azp: WEBSITE }
+      } as AuthenticatedUser);
+      const mint = response();
+      await handlePATApiRequest(request('POST', { name: 'Laptop' }), mint.res, '/api/tokens');
+      expect(mint.state.status).toBe(403);
+      expect(createToken).not.toHaveBeenCalled();
+    });
+
+    it('rate-limits another application before refusing it', async () => {
+      vi.mocked(validateAuthorizationHeader).mockResolvedValue(jwt(ALL, 'claude-code-client'));
+      vi.mocked(rateLimitAccount).mockResolvedValue(true);
+      const mint = response();
+      await handlePATApiRequest(request('POST', { name: 'Laptop' }), mint.res, '/api/tokens');
+      expect(rateLimitAccount).toHaveBeenCalled();
+      expect(mint.state.status).not.toBe(403);
+      expect(writeSpy).not.toHaveBeenCalledWith('warn', 'auth.pat_client_refused', expect.anything());
     });
 
     it('still lets another application list tokens', async () => {
@@ -151,6 +182,7 @@ describe('personal access token routes', () => {
       const revoke = response();
       await handlePATApiRequest(request('DELETE'), revoke.res, '/api/tokens/7');
       expect(revokeToken).toHaveBeenCalledWith('auth0|user-1', 7);
+      expect(revoke.state.status).toBe(200);
     });
   });
 

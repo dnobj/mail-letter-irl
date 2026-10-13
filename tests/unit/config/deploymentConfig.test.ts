@@ -282,6 +282,16 @@ describe('validateDeploymentConfig in production', () => {
       expect(errors).toContain('send_confirmation.website_client_missing');
       expect(errors).not.toContain('send_confirmation.required');
     });
+
+    it('needs the website application on the production API whatever the rule says, for personal access tokens too', () => {
+      const neither = env({ LETTER_IRL_WEBSITE_CLIENT_ID: undefined, LETTER_IRL_SEND_CONFIRMATION_ENABLED: undefined });
+      expect(ruleIds(neither, 'error')).toContain('send_confirmation.website_client_missing');
+      const rules = (input: NodeJS.ProcessEnv) =>
+        validateDeploymentConfig(input, 'maintenance').findings.map(f => f.rule);
+      expect(rules(env({ LETTER_IRL_WEBSITE_CLIENT_ID: undefined }))).not.toContain('send_confirmation.website_client_missing');
+      const devOff = env({ LETTER_IRL_WEBSITE_CLIENT_ID: undefined, LETTER_IRL_SEND_CONFIRMATION_ENABLED: undefined }, VALID_DEV);
+      expect(validateDeploymentConfig(devOff, 'server').findings.map(f => f.rule)).not.toContain('send_confirmation.website_client_missing');
+    });
   });
 
   describe('the monitoring production requires (#699)', () => {

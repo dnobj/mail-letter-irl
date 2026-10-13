@@ -248,7 +248,7 @@ Headers: { Authorization: Bearer <jwt> }
 Response: { success: true }
 ```
 
-**Note:** Token creation/revocation requires JWT auth (from Auth0 login), not PAT auth. This prevents using a PAT to create more PATs.
+**Note:** Token creation/revocation requires the website's own JWT (from Auth0 login), not PAT auth and not a connected app's token. This prevents using a PAT to create more PATs, and a connected app from making a credential that outlives its connection (#730).
 
 ---
 
