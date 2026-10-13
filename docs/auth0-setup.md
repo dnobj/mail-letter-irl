@@ -70,7 +70,7 @@ Two consequences worth knowing before touching anything here:
 ### 1. Create Auth0 Account
 
 1. Go to [auth0.com](https://auth0.com)
-2. Sign up with your email (e.g., the production account)
+2. Sign up with the account that will own the tenant
 3. Create a new tenant
 
 ### 2. Tenant Configuration

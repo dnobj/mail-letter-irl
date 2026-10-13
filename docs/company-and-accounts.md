@@ -16,6 +16,10 @@ repository (#730): they are the owner's, in `docs/private/company-and-accounts.m
 Use `Objective Works` as the organization/company identity where a vendor platform asks for the
 registered organization, with `Letter IRL` as the DBA/product name.
 
+Two admin logins exist, and the other docs name them by role: **the organization account** (the
+development Auth0 tenant, Neon, the OpenAI organization's owner) and **the production account** (the
+production Auth0 tenant, Railway, app testing in ChatGPT).
+
 ## OpenAI Registration
 
 Letter IRL is submitted and managed under the OpenAI organization of `Objective Works`, with
