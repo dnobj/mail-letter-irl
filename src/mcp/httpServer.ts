@@ -1031,7 +1031,33 @@ function writeBetaRefusal(res: http.ServerResponse): void {
 export function publicAuthFailureMessage(error: unknown): string {
   if (error instanceof InsufficientScopeError) return error.message;
   if (error instanceof Error && error.message === "Missing Authorization header") return error.message;
-  return "The access token is not valid. Sign in again.";
+  return "The access token is not valid. Sign in again, or make a new access token.";
+}
+
+/**
+ * Why a token was refused, for the log alone, from a fixed set (#730): the
+ * answer no longer says, so support reads it here. Never the error's text.
+ */
+export function authFailureLogFields(error: unknown, authorization: string | undefined): {
+  authType: "none" | "pat" | "jwt";
+  reason: "header" | "revoked" | "expired" | "not_found" | "format" | "other";
+} {
+  const header = authorization ?? "";
+  const token = /^Bearer\s+(.+)$/i.exec(header)?.[1] ?? "";
+  const authType = !token ? "none" : token.startsWith("lirl_pat_") ? "pat" : "jwt";
+  const text = (error instanceof Error ? error.message : "").toLowerCase();
+  const reason = !token
+    ? "header"
+    : text.includes("revoked")
+      ? "revoked"
+      : text.includes("expired") || text.includes('"exp"')
+        ? "expired"
+        : text.includes("not found")
+          ? "not_found"
+          : text.includes("format") || text.includes("invalid compact") || text.includes("malformed")
+            ? "format"
+            : "other";
+  return { authType, reason };
 }
 
 async function authenticateRequest(
@@ -1086,6 +1112,7 @@ async function authenticateRequest(
       }));
       return null;
     }
+    writeDiagnostic("warn", "auth.mcp_rejected", authFailureLogFields(error, req.headers.authorization));
     const message = publicAuthFailureMessage(error);
     const challenge = buildWwwAuthenticateChallenge(message, publicBaseUrl);
     const body = {

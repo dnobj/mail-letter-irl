@@ -41,7 +41,13 @@ vi.mock('../../../src/auth/tokenValidator.js', () => ({
 }));
 
 import { validateAuthorizationHeader } from '../../../src/auth/tokenValidator.js';
-import { authenticateRequest, writeBetaRefusal } from '../../../src/mcp/httpServer.js';
+import {
+  authenticateRequest,
+  authFailureLogFields,
+  publicAuthFailureMessage,
+  writeBetaRefusal
+} from '../../../src/mcp/httpServer.js';
+import { InsufficientScopeError } from '../../../src/auth/oauthChallenge.js';
 
 /** Minimal ServerResponse capturing what was written. */
 function fakeResponse() {
@@ -114,9 +120,10 @@ describe('what a 401 says (#730)', () => {
     await authenticateRequest(request('Bearer token'), res, 'https://api.example');
     expect(captured.status).toBe(401);
     const said = JSON.parse(captured.body).error.message;
-    expect(said).toBe('The access token is not valid. Sign in again.');
+    expect(said).toBe('The access token is not valid. Sign in again, or make a new access token.');
     const challenge = String(Object.entries(captured.headers).find(([name]) => name.toLowerCase() === 'www-authenticate')?.[1]);
-    expect(challenge).toContain('error_description="The access token is not valid. Sign in again."');
+    expect(challenge).toContain('error_description="The access token is not valid. Sign in again, or make a new access token."');
+    expect(challenge).toContain('error="invalid_token"');
     expect(`${captured.body} ${challenge}`).not.toMatch(/revoked|expired|not found|password|10\.0\.0\.4/i);
   });
 
@@ -125,6 +132,23 @@ describe('what a 401 says (#730)', () => {
     const { captured, res } = fakeResponse();
     await authenticateRequest(request(), res, 'https://api.example');
     expect(JSON.parse(captured.body).error.message).toBe('Missing Authorization header');
+    const challenge = String(Object.entries(captured.headers).find(([name]) => name.toLowerCase() === 'www-authenticate')?.[1]);
+    expect(challenge).toContain('error_description="Missing Authorization header"');
+  });
+
+  it("keeps a scope refusal's own words, which name only scopes", () => {
+    const error = new InsufficientScopeError(['mail:send']);
+    expect(publicAuthFailureMessage(error)).toBe(error.message);
+  });
+
+  it('logs why, from a fixed set, never the text', () => {
+    expect(authFailureLogFields(new Error('Missing Authorization header'), undefined)).toEqual({ authType: 'none', reason: 'header' });
+    expect(authFailureLogFields(new Error('Token has been revoked'), 'Bearer lirl_pat_abc')).toEqual({ authType: 'pat', reason: 'revoked' });
+    expect(authFailureLogFields(new Error('Token expired'), 'Bearer lirl_pat_abc')).toEqual({ authType: 'pat', reason: 'expired' });
+    expect(authFailureLogFields(new Error('Token not found'), 'Bearer lirl_pat_abc')).toEqual({ authType: 'pat', reason: 'not_found' });
+    expect(authFailureLogFields(new Error('"exp" claim timestamp check failed'), 'Bearer eyJ.a.b')).toEqual({ authType: 'jwt', reason: 'expired' });
+    expect(authFailureLogFields(new Error('Invalid Compact JWS'), 'Bearer junk')).toEqual({ authType: 'jwt', reason: 'format' });
+    expect(authFailureLogFields(new Error('connection terminated'), 'Bearer junk')).toEqual({ authType: 'jwt', reason: 'other' });
   });
 });
 
