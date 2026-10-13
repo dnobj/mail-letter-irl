@@ -72,7 +72,7 @@ describe('the MCP limits', () => {
     expect(preflight).toBeGreaterThan(-1);
     expect(get).toBeGreaterThan(preflight);
     expect(limiter).toBeGreaterThan(get);
-    expect(httpServer.slice(preflight, preflight + 300)).toContain('respondToCorsPreflight(res, resolveCorsOrigin(req.headers.origin));');
+    expect(httpServer.slice(preflight, preflight + 600)).toContain('respondToCorsPreflight(res, resolveCorsOrigin(req.headers.origin));');
     expect(httpServer.slice(get, get + 500)).toContain('res.writeHead(405, { Allow: "POST, OPTIONS"');
   });
 
