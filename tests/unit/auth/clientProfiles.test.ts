@@ -244,9 +244,7 @@ describe("clientLogFields (#473)", () => {
     expect(httpServer).toMatch(
       /const clientFields = clientLogFields\(authInfo\);[\s\S]{0,300}?writeDiagnostic\("info", "mcp\.request_received", \{[^}]*\.\.\.clientFields\s*\}\);/
     );
-    expect(httpServer).toMatch(
-      /writeDiagnostic\("info", "mcp\.sse_session_established", \{[^}]*\.\.\.clientLogFields\(authInfo\)\s*\}\);/
-    );
+    // The legacy SSE stream logged a line of its own; it is retired (#730).
     expect(httpServer).toMatch(
       /logMcpClientRequests\(\s*parsedBody,\s*req\.headers\["user-agent"\],\s*cachedToolNames \?\? new Set\(\),\s*clientFields\.client\s*\);/
     );

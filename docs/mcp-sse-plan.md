@@ -1,5 +1,7 @@
 # HTTP SSE Transport Plan
 
+> **Superseded (#730).** The SSE transport this plan added is retired: every client Letter IRL supports speaks streamable HTTP at `/mcp`, and `/mcp/sse` answers 410. Kept for history.
+
 ## Why SSE is Required
 ChatGPT connectors read the manifest `servers` array to discover an SSE endpoint before attempting any tool calls. Our current Letter IRL HTTP server only exposes the `StreamableHTTPServerTransport` path (`src/mcp/httpServer.ts:111`) and the manifest does not advertise an SSE server entry, so ChatGPT falls back to its default and reports `Not found`. We need a dedicated SSE transport (matching OpenAI's examples) plus an explicit manifest stanza.
 

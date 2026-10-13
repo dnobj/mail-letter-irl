@@ -18,8 +18,6 @@ const NOT_IN_MANIFEST: Record<string, string> = {
   LETTER_IRL_MCP_PATH: 'route with a default',
   LETTER_IRL_OPENID_ROUTE: 'route with a default',
   LETTER_IRL_PROTECTED_RESOURCE_ROUTE: 'route with a default',
-  LETTER_IRL_SSE_MESSAGES_PATH: 'route with a default',
-  LETTER_IRL_SSE_PATH: 'route with a default',
   LETTER_IRL_WIDGET_DIR: 'path with a default',
   LETTER_IRL_WIDGET_PATH: 'route with a default',
   LETTER_IRL_HTTP_HOST: 'listener with a default',
