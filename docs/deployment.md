@@ -615,10 +615,15 @@ how long a row waits before the sweep touches it; `PACK_REFUND_STRIPE_ATTEMPT_LI
 the customer with a new ledger lot and opens a `pack_refund_failed` alert, and
 only once Stripe has listed the payment's refunds and none is this command's
 (#730): while Stripe cannot be asked the row waits, with one alert (`kind`
-`stripe_unconfirmed`). A refund that succeeds after its command was
-compensated or failed opens one alert too (`refunded_after_compensation`):
-the customer then holds the money and, if compensated, the letters.
-Neither is in the preflight manifest; both are optional.
+`stripe_unconfirmed`). The `stripe_unconfirmed` alert closes itself once
+the command settles. A refund that succeeds after its command was
+compensated opens one alert too (`refunded_after_compensation`): the
+customer then holds the money and the letters. After a command whose
+compensation was withheld for a dispute or a hold, it is
+`refunded_after_withheld`: the letters stay revoked, so do not compensate
+by hand. `PACK_REFUND_RETRY_DELAY_SECONDS` and
+`PACK_REFUND_STRIPE_ATTEMPT_LIMIT` are not in the preflight manifest; both
+are optional.
 
 Amounts are read from the Stripe Prices themselves - there are no configured
 cent amounts to keep in step (#275). A paid amount or currency mismatch against

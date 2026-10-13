@@ -488,6 +488,13 @@ describePostgres('proportional pack refund command', () => {
       expect(await packRefund.reconcilePackRefunds(back.seam, { retryDelaySeconds: 0 })).toMatchObject({ adopted: 1, compensated: 0 });
       expect((await commandRows(orderId))[0]).toMatchObject({ status: 'succeeded', stripe_refund_id: listed.id });
       expect((await readUser(userId)).credits).toBe(6);
+      // Settled, so the waiting alert closed itself.
+      const open = await pool.query(
+        `SELECT 1 FROM commerce_operational_alerts
+          WHERE order_id = $1 AND details->>'kind' = 'stripe_unconfirmed' AND status <> 'resolved'`,
+        [orderId]
+      );
+      expect(open.rowCount).toBe(0);
     } finally {
       if (previous === undefined) delete process.env.PACK_REFUND_STRIPE_ATTEMPT_LIMIT;
       else process.env.PACK_REFUND_STRIPE_ATTEMPT_LIMIT = previous;

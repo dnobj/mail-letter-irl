@@ -19,6 +19,7 @@ import {
   type PackRefundRow
 } from '../../../src/services/commerceService.js';
 import { reconcilePackRefunds } from '../../../src/services/packRefundService.js';
+import { wholeRefundList } from '../../../src/services/stripeService.js';
 
 const ROW = {
   pack_refund_id: 'pr-1',
@@ -80,7 +81,7 @@ describe('the pack-refund sweep asks Stripe before it compensates (#730)', () =>
     const stripe = stripeSeam(async () => []);
     const result = await reconcilePackRefunds(stripe as never, { retryDelaySeconds: 60 });
     expect(result).toMatchObject({ compensated: 1, retried: 0 });
-    expect(compensatePackRefund).toHaveBeenCalledWith(client, expect.objectContaining({ pack_refund_id: 'pr-1' }), expect.objectContaining({ lastErrorCode: 'PACK_REFUND_STRIPE_UNREACHABLE' }));
+    expect(compensatePackRefund).toHaveBeenCalledWith(client, expect.objectContaining({ pack_refund_id: 'pr-1' }), expect.objectContaining({ lastErrorCode: 'PACK_REFUND_NOT_AT_STRIPE', failureReason: 'not_at_stripe' }));
     expect(stripe.createPartialPaymentRefund).not.toHaveBeenCalled();
   });
 
@@ -92,6 +93,24 @@ describe('the pack-refund sweep asks Stripe before it compensates (#730)', () =>
     expect(result).toMatchObject({ compensated: 0, adopted: 0, retried: 0 });
     expect(compensatePackRefund).not.toHaveBeenCalled();
     expect(raisePackRefundAlertOnce).toHaveBeenCalledWith(client, expect.objectContaining({ pack_refund_id: 'pr-1' }), 'stripe_unconfirmed', expect.objectContaining({ attempts: 5 }));
+    // Its turn moves back, so it does not hold the front of the queue.
+    expect(client.query).toHaveBeenCalledWith(expect.stringContaining('SET updated_at = NOW()'), ['pr-1']);
+  });
+
+  it('writes nothing for a row that settled while Stripe could not be asked', async () => {
+    vi.mocked(lockPackRefund).mockResolvedValue({ ...ROW, status: 'succeeded' } as never);
+    const stripe = stripeSeam(async () => {
+      throw new Error('down');
+    });
+    await reconcilePackRefunds(stripe as never, { retryDelaySeconds: 60 });
+    expect(raisePackRefundAlertOnce).not.toHaveBeenCalled();
+    expect(client.query).not.toHaveBeenCalledWith(expect.stringContaining('SET updated_at = NOW()'), expect.anything());
+  });
+
+  it('decides on a whole list of refunds only', () => {
+    const refund = { id: 're_1' } as never;
+    expect(wholeRefundList({ data: [refund], has_more: false })).toEqual([refund]);
+    expect(() => wholeRefundList({ data: [refund], has_more: true })).toThrow();
   });
 
   it('below the limit, retries the create when Stripe holds none, and stays quiet when it cannot be asked', async () => {
@@ -107,6 +126,25 @@ describe('the pack-refund sweep asks Stripe before it compensates (#730)', () =>
     await reconcilePackRefunds(down as never, { retryDelaySeconds: 60 });
     expect(raisePackRefundAlertOnce).not.toHaveBeenCalled();
     expect(compensatePackRefund).not.toHaveBeenCalled();
+    expect(client.query).toHaveBeenCalledWith(expect.stringContaining('SET updated_at = NOW()'), ['pr-1']);
+  });
+});
+
+describe('the "Stripe could not be asked" alert closes when the command settles (#730)', () => {
+  it('is resolved when a letters_revoked command settles or is compensated, and not otherwise', async () => {
+    const actual = await vi.importActual<typeof import('../../../src/services/commerceService.js')>(
+      '../../../src/services/commerceService.js'
+    );
+    const resolved = (db: { query: ReturnType<typeof vi.fn> }) =>
+      db.query.mock.calls.some(([sql, params]) => String(sql).includes("resolution_code = 'pack_refund_settled'") && (params as unknown[])[0] === 'pr-1');
+    for (const outcome of ['succeeded', 'pending', 'failed'] as const) {
+      const db = { query: vi.fn(async (..._args: unknown[]) => ({ rows: [] })) };
+      await actual.settlePackRefund(db as never, { ...ROW } as PackRefundRow, { id: 're_1', status: outcome }, 'refund.updated');
+      expect(resolved(db), outcome).toBe(true);
+    }
+    const settled = { query: vi.fn(async (..._args: unknown[]) => ({ rows: [] })) };
+    await actual.settlePackRefund(settled as never, { ...ROW, status: 'succeeded' } as PackRefundRow, { id: 're_1', status: 'succeeded' }, 'refund.updated');
+    expect(resolved(settled)).toBe(false);
   });
 });
 
@@ -125,8 +163,9 @@ describe('a refund that succeeds after it was given up on (#730)', () => {
         expect(alert, status).toBeDefined();
         const [sql, params] = alert as unknown as [string, unknown[]];
         expect(sql).toContain('WHERE NOT EXISTS');
-        expect(JSON.parse(String(params[1]))).toMatchObject({ packRefundId: 'pr-1', kind: 'refunded_after_compensation', settledAfter: status, stripeRefundId: 're_1' });
-        expect(params.slice(2)).toEqual(['pr-1', 'refunded_after_compensation']);
+        const kind = status === 'compensated' ? 'refunded_after_compensation' : 'refunded_after_withheld';
+        expect(JSON.parse(String(params[1]))).toMatchObject({ packRefundId: 'pr-1', kind, settledAfter: status, stripeRefundId: 're_1' });
+        expect(params.slice(2)).toEqual(['pr-1', kind]);
       }
     }
   });

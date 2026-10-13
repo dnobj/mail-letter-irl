@@ -572,12 +572,21 @@ export async function reconcilePackRefunds(
     } catch (error) {
       const errorClass = carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'provider_error');
       writeDiagnostic('error', 'pack_refund.sweep_failed', { errorClass });
-      if (atLimit) {
-        // An alert that cannot be written is the log line above's to carry.
-        await transaction(client =>
-          raisePackRefundAlertOnce(client, row, 'stripe_unconfirmed', { attempts: row.stripe_attempts, errorClass })
-        ).catch(() => undefined);
-      }
+      // Waits for the next sweep: its updated_at moves, so rows Stripe cannot
+      // be asked about do not hold the front of the queue (#730). Under the
+      // same locks as every other path, and only while it still waits.
+      await transaction(async client => {
+        await client.query('SELECT order_id FROM orders WHERE order_id = $1 FOR UPDATE', [row.order_id]);
+        const locked = await lockPackRefund(client, row.pack_refund_id);
+        if (!locked || locked.status !== 'letters_revoked') return;
+        await client.query(
+          `UPDATE commerce_pack_refunds SET updated_at = NOW() WHERE pack_refund_id = $1`,
+          [row.pack_refund_id]
+        );
+        if (atLimit) {
+          await raisePackRefundAlertOnce(client, locked, 'stripe_unconfirmed', { attempts: locked.stripe_attempts, errorClass });
+        }
+      }).catch(() => undefined); // the log line above carries a failure here
       continue;
     }
     try {
@@ -591,8 +600,9 @@ export async function reconcilePackRefunds(
           const locked = await lockPackRefund(client, row.pack_refund_id);
           if (!locked || locked.status !== 'letters_revoked') return null;
           return compensatePackRefund(client, locked, {
-            lastErrorCode: 'PACK_REFUND_STRIPE_UNREACHABLE',
-            failureReason: `No refund at Stripe after ${row.stripe_attempts} attempts`
+            // Stripe answered, and holds no refund for this command.
+            lastErrorCode: 'PACK_REFUND_NOT_AT_STRIPE',
+            failureReason: 'not_at_stripe'
           });
         });
         if (outcome) result.compensated += 1;
