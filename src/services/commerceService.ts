@@ -2664,6 +2664,7 @@ export async function settlePackRefund(
   source: string
 ): Promise<PackRefundStatus> {
   const status = outcome.status ?? 'pending';
+  if (row.status === 'letters_revoked') await resolveUnconfirmedPackRefundAlert(client, row.pack_refund_id);
   if (status === 'failed' || status === 'canceled') {
     if (row.status === 'failed' || row.status === 'compensated') return row.status;
     return compensatePackRefund(client, row, {
@@ -2679,6 +2680,18 @@ export async function settlePackRefund(
         ignored: true,
         reason: row.status === 'succeeded' ? 'already_settled' : 'settled_after_failure'
       });
+      // The money went back after all (#730). A compensated row also gave
+      // the letters back, so the customer holds both until someone decides. A
+      // failed row withheld compensation under a dispute or a hold: the
+      // letters stay revoked, so compensating by hand now would pay twice.
+      if (row.status === 'compensated' || row.status === 'failed') {
+        await raisePackRefundAlertOnce(
+          client,
+          row,
+          row.status === 'compensated' ? 'refunded_after_compensation' : 'refunded_after_withheld',
+          { settledAfter: row.status, stripeRefundId: outcome.id, amountCents: row.amount_cents }
+        );
+      }
       return row.status;
     }
     await client.query(
@@ -2719,6 +2732,46 @@ export async function settlePackRefund(
 }
 
 /**
+ * One open critical `pack_refund_failed` alert per proportional refund and
+ * kind (#730): the sweep runs hourly and Stripe may repeat an event, and the
+ * operator needs one line to act on, not one an hour.
+ */
+export async function raisePackRefundAlertOnce(
+  client: Pick<pg.PoolClient, 'query'>,
+  row: Pick<PackRefundRow, 'pack_refund_id' | 'order_id'>,
+  kind: 'stripe_unconfirmed' | 'refunded_after_compensation' | 'refunded_after_withheld',
+  details: Record<string, unknown>
+): Promise<void> {
+  await client.query(
+    `INSERT INTO commerce_operational_alerts (order_id, alert_type, severity, details)
+     SELECT $1, 'pack_refund_failed', 'critical', $2::jsonb
+      WHERE NOT EXISTS (
+        SELECT 1 FROM commerce_operational_alerts
+         WHERE alert_type = 'pack_refund_failed' AND status <> 'resolved'
+           AND details->>'packRefundId' = $3 AND details->>'kind' = $4
+      )`,
+    [row.order_id, JSON.stringify({ packRefundId: row.pack_refund_id, kind, ...details }), row.pack_refund_id, kind]
+  );
+}
+
+/**
+ * Close the "Stripe could not be asked" alert once the command leaves
+ * `letters_revoked` (#730): whatever Stripe said has been acted on.
+ */
+async function resolveUnconfirmedPackRefundAlert(
+  client: Pick<pg.PoolClient, 'query'>,
+  packRefundId: string
+): Promise<void> {
+  await client.query(
+    `UPDATE commerce_operational_alerts
+        SET status = 'resolved', resolved_at = NOW(), resolution_code = 'pack_refund_settled', updated_at = NOW()
+      WHERE alert_type = 'pack_refund_failed' AND status <> 'resolved'
+        AND details->>'packRefundId' = $1 AND details->>'kind' = 'stripe_unconfirmed'`,
+    [packRefundId]
+  );
+}
+
+/**
  * Make the customer whole after a proportional refund that will not pay out:
  * Stripe refused it, the sweep gave up, or the bank returned it later.
  *
@@ -2734,6 +2787,7 @@ export async function compensatePackRefund(
   row: PackRefundRow,
   params: { lastErrorCode: string; failureReason?: string | null; stripeRefundId?: string | null }
 ): Promise<'compensated' | 'failed'> {
+  await resolveUnconfirmedPackRefundAlert(client, row.pack_refund_id);
   const orderResult = await client.query<Order>(
     'SELECT * FROM orders WHERE order_id = $1 FOR UPDATE',
     [row.order_id]
