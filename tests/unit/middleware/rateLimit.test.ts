@@ -392,8 +392,9 @@ describe('client identifier and global backstops (audit A-05)', () => {
     expect(checkRateLimit(eleventh, 'promo_public').allowed).toBe(false);
   });
 
+  // mcp and api: the failed sign-in pool, tests/unit/auth/signInPool.test.ts (#730).
   it('configures a global backstop for the routes that had none', () => {
-    for (const type of ['mcp', 'api', 'checkout']) {
+    for (const type of ['checkout']) {
       expect(checkGlobalRateLimit(type).limit).toBeGreaterThan(0);
     }
   });
