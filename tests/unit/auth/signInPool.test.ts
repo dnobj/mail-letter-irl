@@ -85,6 +85,24 @@ describe('tokens verified recently (#730)', () => {
     expect(takeExemption('Bearer unknown', T0)).toBe(false);
   });
 
+  it('keeps the exemption windows bounded, dropping the oldest', () => {
+    for (let i = 0; i <= VERIFIED_TOKEN_CONFIG.maxVerified; i += 1) {
+      rememberVerifiedToken(`t-${i}`, `u-${i}`, undefined, T0 + i);
+      expect(takeExemption(`Bearer t-${i}`, T0 + i)).toBe(true);
+    }
+    // u-0's window was the oldest and was dropped: a fresh one starts.
+    for (let i = 0; i < VERIFIED_TOKEN_CONFIG.exemptPerAccountPerMinute - 1; i += 1) takeExemption('Bearer t-1', T0 + 30_000);
+    expect(takeExemption('Bearer t-1', T0 + 30_000)).toBe(false);
+  });
+
+  it('starts an account\'s window when it first asks, not at a fixed minute', () => {
+    rememberVerifiedToken('tok-w', 'user-w', undefined, T0);
+    const start = T0 + 45_000;
+    for (let i = 0; i < VERIFIED_TOKEN_CONFIG.exemptPerAccountPerMinute; i += 1) expect(takeExemption('Bearer tok-w', start)).toBe(true);
+    expect(takeExemption('Bearer tok-w', start + VERIFIED_TOKEN_CONFIG.windowMs - 1)).toBe(false);
+    expect(takeExemption('Bearer tok-w', start + VERIFIED_TOKEN_CONFIG.windowMs)).toBe(true);
+  });
+
   it('is emptied with the rate-limit state', () => {
     rememberVerifiedToken('tok-a', 'user-1');
     clearRateLimitState();
@@ -131,7 +149,10 @@ describe('what the token validator remembers (#730)', () => {
     expect(carriesVerifiedToken(`Bearer ${token}`, Date.now() + 5 * 60 * 1000 + 1000)).toBe(false);
   });
 
-  it('remembers neither a token whose signature fails nor one short of a scope', async () => {
+  // Production callers check scopes after validating (restAuth, toolScopes);
+  // a token that authenticates is remembered there whatever its scopes. Here
+  // the validator is asked for a scope itself, and refuses before remembering.
+  it('remembers neither a token whose signature fails nor one refused for a scope it was asked for', async () => {
     const other = await generateKeyPair('RS256');
     const forged = await sign(undefined, other.privateKey);
     await expect(validateJWTToken(forged, keySet)).rejects.toThrow();
@@ -227,6 +248,18 @@ describe('the MCP and REST backstop leaves a recently verified token alone (#730
       await rateLimitMiddlewareWithTier(request('Bearer good-token', addressOf(i)), res, 'mcp');
     }
     expect(checkGlobalRateLimit('mcp').remaining).toBe(before - 1 - 30);
+  });
+
+  it('shares one account budget across mcp and api', async () => {
+    rememberVerifiedToken('good-token', 'user-1');
+    for (let i = 0; i < VERIFIED_TOKEN_CONFIG.exemptPerAccountPerMinute; i += 1) {
+      const { res } = response();
+      await rateLimitMiddlewareWithTier(request('Bearer good-token', addressOf(i)), res, i % 2 ? 'mcp' : 'api');
+    }
+    const before = checkGlobalRateLimit('api').remaining;
+    const { res } = response();
+    await rateLimitMiddlewareWithTier(request('Bearer good-token', '203.0.113.50'), res, 'api');
+    expect(checkGlobalRateLimit('api').remaining).toBe(before - 2);
   });
 
   it('still holds a verified token to its per-address limit', async () => {

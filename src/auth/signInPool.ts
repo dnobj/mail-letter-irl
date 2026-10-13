@@ -75,7 +75,7 @@ export function verifiedAccount(authorization: string | string[] | undefined, no
   return entry.userId;
 }
 
-/** Whether the request's bearer token passed authentication here recently. */
+/** Whether the request's bearer token passed authentication here recently (tests read it). */
 export function carriesVerifiedToken(authorization: string | string[] | undefined, now = Date.now()): boolean {
   return verifiedAccount(authorization, now) !== null;
 }
@@ -89,13 +89,16 @@ export function takeExemption(authorization: string | string[] | undefined, now 
   if (userId === null) return false;
   let entry = exemptions.get(userId);
   if (!entry || now - entry.windowStart >= VERIFIED_TOKEN_CONFIG.windowMs) {
-    if (exemptions.size >= VERIFIED_TOKEN_CONFIG.maxVerified) {
-      for (const [id, old] of exemptions) {
-        if (now - old.windowStart >= VERIFIED_TOKEN_CONFIG.windowMs) exemptions.delete(id);
-      }
-    }
+    // Re-inserted, so the map runs oldest window first and the bound below
+    // drops the windows that started longest ago.
+    exemptions.delete(userId);
     entry = { count: 0, windowStart: now };
     exemptions.set(userId, entry);
+    while (exemptions.size > VERIFIED_TOKEN_CONFIG.maxVerified) {
+      const oldest = exemptions.keys().next().value;
+      if (oldest === undefined) break;
+      exemptions.delete(oldest);
+    }
   }
   if (entry.count >= VERIFIED_TOKEN_CONFIG.exemptPerAccountPerMinute) return false;
   entry.count += 1;
