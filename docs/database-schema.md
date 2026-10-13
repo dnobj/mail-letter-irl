@@ -362,7 +362,7 @@ Chargeback tracking for admin monitoring.
 | amount_cents | INTEGER | NO | - | Dispute amount |
 | currency | TEXT | NO | 'usd' | Currency |
 | reason | TEXT | YES | - | Dispute reason |
-| status | TEXT | NO | 'open' | open, won, lost, under_review |
+| status | TEXT | NO | 'open' | Stripe's dispute status: warning_needs_response, warning_under_review, warning_closed (an inquiry), needs_response, under_review, won, lost, prevented; kept against an older status delivered late (#730) |
 | evidence_due_by | TIMESTAMPTZ | YES | - | Evidence deadline |
 | stripe_created_at | TIMESTAMPTZ | YES | - | When Stripe created dispute |
 | created_at | TIMESTAMPTZ | NO | NOW() | Record creation |

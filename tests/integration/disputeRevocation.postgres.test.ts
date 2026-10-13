@@ -618,7 +618,7 @@ describePostgres('dispute and refund pack revocation', () => {
     const row = await pool.query<{ status: string }>('SELECT status FROM stripe_disputes WHERE dispute_id = $1', [disputeId]);
     expect(row.rows[0].status).toBe('under_review');
     const order = await pool.query<{ stripe_dispute_status: string }>('SELECT stripe_dispute_status FROM orders WHERE order_id = $1', [orderId]);
-    expect(order.rows[0].stripe_dispute_status).toBe('needs_response');
+    expect(order.rows[0].stripe_dispute_status).toBe('under_review');
     const alerts = await pool.query(
       `SELECT 1 FROM commerce_operational_alerts WHERE order_id = $1 AND alert_type = 'stripe_dispute_created'`,
       [orderId]

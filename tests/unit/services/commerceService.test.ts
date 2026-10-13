@@ -2369,10 +2369,30 @@ describe('commerceService', () => {
       }
     );
 
-    it('treats an escalation with no earlier event as the first loss', async () => {
+    it('treats an escalation with no earlier event as the first loss, not as an escalated inquiry', async () => {
       await deliver('charge.dispute.funds_withdrawn', 'needs_response');
       expect(blocked()).toBe(true);
       expect(disputeAlerts()).toHaveLength(1);
+      expect(JSON.parse(String(disputeAlerts()[0][1][4]))).not.toHaveProperty('escalatedBy');
+    });
+
+    it('takes a loss after an inquiry closed as real', async () => {
+      await deliver('charge.dispute.updated', 'needs_response', { status: 'warning_closed', resolved_at: new Date() });
+      expect(blocked()).toBe(true);
+      expect(keptStoredStatus()).toBe(false);
+    });
+
+    it("keeps an unmatched row's loss against an inquiry's older event", async () => {
+      await deliver('charge.dispute.created', 'warning_needs_response', { status: 'needs_response', resolved_at: null, user_id: null }, null);
+      expect(keptStoredStatus()).toBe(true);
+    });
+
+    it("updates the order's dispute status on a recorded event, unless the stored one stands", async () => {
+      await deliver('charge.dispute.updated', 'under_review', { status: 'needs_response', resolved_at: null });
+      expect(calls('UPDATE orders SET stripe_dispute_status = $2')[0][1]).toEqual(['order-1', 'under_review']);
+      mocks.query.mockClear();
+      await deliver('charge.dispute.updated', 'needs_response', { status: 'won', resolved_at: new Date() });
+      expect(calls('UPDATE orders SET stripe_dispute_status = $2')).toHaveLength(0);
     });
 
     it('reads what it knew only after locking the order, which serialises one dispute\'s events', async () => {

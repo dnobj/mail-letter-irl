@@ -3440,7 +3440,10 @@ async function processDisputeEvent(
     const priorStatus = prior.rows[0]?.status;
     const priorStatusIsLoss = priorStatus !== undefined && !NON_LOSS_DISPUTE_STATUSES.has(priorStatus);
     const priorLoss = priorStatusIsLoss && prior.rows[0]?.user_id != null;
-    const settledBefore = !closed && Boolean(prior.rows[0]?.resolved_at);
+    // An inquiry closes as warning_closed once the network can no longer
+    // escalate it; a loss after that is taken as real, not stale.
+    const settledBefore =
+      !closed && Boolean(prior.rows[0]?.resolved_at) && !(priorStatus === 'warning_closed' && lossNow);
     const recordedOnly = closed
       ? undefined
       : settledBefore
@@ -3453,10 +3456,10 @@ async function processDisputeEvent(
     // Persist before the unmatched-order branch returns. An unmatched dispute is
     // still money leaving the account, and the operator reviewing it needs the
     // record regardless of whether we could tie it to an order.
-    await recordDispute(
-      client, dispute, order?.user_id ?? null, closed,
-      settledBefore || (!closed && priorLoss && !lossNow)
-    );
+    // The stored status stands against an older one: after the close, or an
+    // inquiry's status after a loss (recorded with or without an order).
+    const keepStoredStatus = settledBefore || (!closed && priorStatusIsLoss && !lossNow);
+    await recordDispute(client, dispute, order?.user_id ?? null, closed, keepStoredStatus);
     if (!order) {
       await client.query(
         `UPDATE stripe_webhook_events SET processing_status = 'unmatched'
@@ -3480,6 +3483,13 @@ async function processDisputeEvent(
       await client.query('UPDATE stripe_webhook_events SET order_id = $2 WHERE event_id = $1', [
         eventId, order.order_id
       ]);
+      // The order shows the dispute's current status, as the dispute row does.
+      if (!keepStoredStatus) {
+        await client.query(
+          'UPDATE orders SET stripe_dispute_status = $2, updated_at = NOW() WHERE order_id = $1',
+          [order.order_id, dispute.status]
+        );
+      }
       await recordOrderEvent(client, order.order_id, eventType, order.status, order.status, {
         disputeStatus: dispute.status,
         recordedOnly
@@ -3573,7 +3583,8 @@ async function processDisputeEvent(
           amountCents: dispute.amount,
           currency: dispute.currency,
           chargeReferencePresent: Boolean(dispute.charge),
-          ...(escalation ? { escalatedBy: eventType } : {})
+          // An inquiry that became a chargeback; not a chargeback's own first event.
+          ...(escalation && priorStatus?.startsWith('warning_') ? { escalatedBy: eventType } : {})
         })
       ]
     );
