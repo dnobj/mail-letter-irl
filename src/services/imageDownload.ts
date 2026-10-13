@@ -83,7 +83,6 @@ export async function resolvePublicAddress(
   try {
     const aaaa = answerOf(v6Resolver.resolve6(host));
     const a = await answerOf(v4Resolver.resolve4(host));
-    if (signal.aborted) return null;
     if (!a.ok && !NO_RECORD.has(a.code ?? '')) return null;
     const four = a.ok ? a.addresses : [];
     const six = await (four.length > 0
