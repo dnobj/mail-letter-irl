@@ -595,7 +595,11 @@ export async function reconcilePackRefunds(
         if (atLimit || waitedMs >= UNCONFIRMED_ALERT_AFTER_MS) {
           await raisePackRefundAlertOnce(client, locked, 'stripe_unconfirmed', { attempts: locked.stripe_attempts, errorClass });
         }
-      }).catch(() => undefined); // the log line above carries a failure here
+      }).catch(waitError => {
+        writeDiagnostic('error', 'pack_refund.sweep_wait_failed', {
+          errorClass: classifyDiagnosticError(waitError, 'database_error')
+        });
+      });
       continue;
     }
     try {

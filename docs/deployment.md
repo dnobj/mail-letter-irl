@@ -615,9 +615,11 @@ how long a row waits before the sweep touches it; `PACK_REFUND_STRIPE_ATTEMPT_LI
 the customer with a new ledger lot and opens a `pack_refund_failed` alert, and
 only once Stripe has listed the payment's refunds and none is this command's
 (#730): while Stripe cannot be asked the row waits, with one alert (`kind`
-`stripe_unconfirmed`) once it reaches the attempt limit or has waited a
-day. A payment with more than 100 refunds also waits rather than being
-decided on part of the list (error class `refund_list_incomplete`). The `stripe_unconfirmed` alert closes itself once
+`stripe_unconfirmed`) once it reaches the attempt limit or a day has
+passed since its letters were taken. A payment with more than 100 refunds
+also waits rather than being decided on part of the list (error class
+`refund_list_incomplete`). A command compensated because Stripe holds no
+refund for it records `PACK_REFUND_NOT_AT_STRIPE` (`not_at_stripe`). The `stripe_unconfirmed` alert closes itself once
 the command settles. A refund that succeeds after its command was
 compensated opens one alert too (`refunded_after_compensation`): the
 customer then holds the money and the letters. After a command whose
