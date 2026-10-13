@@ -160,11 +160,14 @@ describe('personal access token routes', () => {
 
     it('rate-limits another application before refusing it', async () => {
       vi.mocked(validateAuthorizationHeader).mockResolvedValue(jwt(ALL, 'claude-code-client'));
-      vi.mocked(rateLimitAccount).mockResolvedValue(true);
+      vi.mocked(rateLimitAccount).mockImplementation(async (_req, res) => {
+        res.statusCode = 429;
+        res.end('{"error":"rate_limited"}');
+        return true;
+      });
       const mint = response();
       await handlePATApiRequest(request('POST', { name: 'Laptop' }), mint.res, '/api/tokens');
-      expect(rateLimitAccount).toHaveBeenCalled();
-      expect(mint.state.status).not.toBe(403);
+      expect(mint.state.status).toBe(429);
       expect(writeSpy).not.toHaveBeenCalledWith('warn', 'auth.pat_client_refused', expect.anything());
     });
 
