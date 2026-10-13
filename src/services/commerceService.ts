@@ -3440,10 +3440,7 @@ async function processDisputeEvent(
     const priorStatus = prior.rows[0]?.status;
     const priorStatusIsLoss = priorStatus !== undefined && !NON_LOSS_DISPUTE_STATUSES.has(priorStatus);
     const priorLoss = priorStatusIsLoss && prior.rows[0]?.user_id != null;
-    // An inquiry closes as warning_closed once the network can no longer
-    // escalate it; a loss after that is taken as real, not stale.
-    const settledBefore =
-      !closed && Boolean(prior.rows[0]?.resolved_at) && !(priorStatus === 'warning_closed' && lossNow);
+    const settledBefore = !closed && Boolean(prior.rows[0]?.resolved_at);
     const recordedOnly = closed
       ? undefined
       : settledBefore
@@ -3457,8 +3454,9 @@ async function processDisputeEvent(
     // still money leaving the account, and the operator reviewing it needs the
     // record regardless of whether we could tie it to an order.
     // The stored status stands against an older one: after the close, or an
-    // inquiry's status after a loss (recorded with or without an order).
-    const keepStoredStatus = settledBefore || (!closed && priorStatusIsLoss && !lossNow);
+    // inquiry's status after a loss whose effects ran. A loss recorded while
+    // no order matched is not kept: its next loss event then acts.
+    const keepStoredStatus = settledBefore || (!closed && priorLoss && !lossNow);
     await recordDispute(client, dispute, order?.user_id ?? null, closed, keepStoredStatus);
     if (!order) {
       await client.query(

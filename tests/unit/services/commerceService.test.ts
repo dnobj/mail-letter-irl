@@ -2376,15 +2376,16 @@ describe('commerceService', () => {
       expect(JSON.parse(String(disputeAlerts()[0][1][4]))).not.toHaveProperty('escalatedBy');
     });
 
-    it('takes a loss after an inquiry closed as real', async () => {
+    it('records a loss after an inquiry closed as stale: the network can no longer escalate it', async () => {
       await deliver('charge.dispute.updated', 'needs_response', { status: 'warning_closed', resolved_at: new Date() });
-      expect(blocked()).toBe(true);
-      expect(keptStoredStatus()).toBe(false);
+      expect(blocked()).toBe(false);
+      expect(recordedOnly()).toBe('after_close');
     });
 
-    it("keeps an unmatched row's loss against an inquiry's older event", async () => {
-      await deliver('charge.dispute.created', 'warning_needs_response', { status: 'needs_response', resolved_at: null, user_id: null }, null);
-      expect(keptStoredStatus()).toBe(true);
+    it("does not keep a loss no order matched against an inquiry's event, so the next loss acts", async () => {
+      await deliver('charge.dispute.created', 'warning_needs_response', { status: 'needs_response', resolved_at: null, user_id: null });
+      expect(keptStoredStatus()).toBe(false);
+      expect(blocked()).toBe(false);
     });
 
     it("updates the order's dispute status on a recorded event, unless the stored one stands", async () => {
