@@ -1064,5 +1064,21 @@ describePostgres('content retention sweep', () => {
       expect((await readDraft(sixDays)).body_text).toBe(SECRET_BODY);
       expect(await readDraft(eightDays)).toBeUndefined();
     });
+
+    it("keeps a cancelled draft its 7 days from the cancel, however old its expiry", async () => {
+      const { cleanupOldDrafts } = await import("../../src/services/draftService.js");
+      const userId = await seedUser();
+      // Expired 6 days ago, cancelled 6 days and an hour ago: only an expired draft goes by its expiry.
+      const cancelled = await seedContentDraft({ daysAgo: 6, userId });
+      await setDraft(
+        cancelled,
+        `UPDATE letter_drafts SET status = 'cancelled', consumed_at = NULL,
+           updated_at = NOW() - INTERVAL '6 days 1 hour'
+         WHERE draft_id = $1`,
+        []
+      );
+      expect(await cleanupOldDrafts(7)).toBe(0);
+      expect((await readDraft(cancelled)).body_text).toBe(SECRET_BODY);
+    });
   });
 });
