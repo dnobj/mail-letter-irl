@@ -194,6 +194,29 @@ describe("write elevation", () => {
     expect(tries).toBeLessThan(60);
   });
 
+  it("counts five more after a lock lifts, saying how many are left, then locks for twice as long", () => {
+    const { guard, newSession } = harness();
+    const current = newSession();
+    const now = 1_700_000_000_000;
+    let last = attemptElevation(current, guard, SECRET, "000000", policy, now);
+    for (let attempt = 1; attempt < 5; attempt += 1) last = attemptElevation(current, guard, SECRET, "000000", policy, now + attempt);
+    expect(last).toMatchObject({ ok: false, reason: "locked", lockedUntil: now + 4 + policy.failureWindowMs });
+    const lifted = now + 4 + policy.failureWindowMs + 1;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      expect(attemptElevation(current, guard, SECRET, "000000", policy, lifted + attempt)).toMatchObject({
+        ok: false,
+        reason: "invalid",
+        failuresLeft: 4 - attempt,
+        lockedUntil: null,
+      });
+    }
+    expect(attemptElevation(current, guard, SECRET, "000000", policy, lifted + 4)).toMatchObject({
+      ok: false,
+      reason: "locked",
+      lockedUntil: lifted + 4 + 2 * policy.failureWindowMs,
+    });
+  });
+
   it("starts the count again once a code is accepted", () => {
     const { guard, newSession } = harness();
     const current = newSession();
