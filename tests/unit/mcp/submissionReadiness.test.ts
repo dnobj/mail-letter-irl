@@ -126,20 +126,23 @@ describe("Submission readiness checks", () => {
 
   it("should derive public metadata URLs from the forwarded custom domain when no base URL is configured", () => {
     vi.stubEnv("LETTER_IRL_PUBLIC_BASE_URL", "");
-    const publicBaseUrl = getPublicBaseUrl({
-      headers: {
-        "x-forwarded-host": "api.letterirl.com",
-        "x-forwarded-proto": "https",
-        host: "letter-irl-api-production.up.railway.app"
-      }
-    });
+    try {
+      const publicBaseUrl = getPublicBaseUrl({
+        headers: {
+          "x-forwarded-host": "api.letterirl.com",
+          "x-forwarded-proto": "https",
+          host: "letter-irl-api-production.up.railway.app"
+        }
+      });
 
-    expect(publicBaseUrl).toBe("https://api.letterirl.com");
-    expect(buildManifest(publicBaseUrl).servers[0].url).toBe("https://api.letterirl.com/mcp");
-    expect(buildWwwAuthenticateChallenge("Missing Authorization header", publicBaseUrl)).toContain(
-      'resource_metadata="https://api.letterirl.com/.well-known/oauth-protected-resource"'
-    );
-    vi.unstubAllEnvs();
+      expect(publicBaseUrl).toBe("https://api.letterirl.com");
+      expect(buildManifest(publicBaseUrl).servers[0].url).toBe("https://api.letterirl.com/mcp");
+      expect(buildWwwAuthenticateChallenge("Missing Authorization header", publicBaseUrl)).toContain(
+        'resource_metadata="https://api.letterirl.com/.well-known/oauth-protected-resource"'
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("should return a standards-aligned insufficient-scope challenge", () => {
