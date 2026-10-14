@@ -1707,7 +1707,9 @@ describe('mail left for the operator (#696)', () => {
     expect(left.sql).toContain('FOR SHARE OF u');
     expect(left.params).toEqual(['job-1']);
     const back = calls.find(call => call.sql.includes("UPDATE letter_jobs SET status = 'pending', attempts = GREATEST(attempts - 1, 0)"))!;
-    expect(back.sql).toContain("status = 'processing'");
+    // Held to this claim (#730): still processing, at the attempts it set.
+    expect(back.sql).toContain("status = 'processing' AND attempts = $3::int");
+    expect(back.params[2]).toBe(5);
     // Not failed, and nothing given back.
     expect(calls.some(call => call.sql.includes('SET status = $2::varchar'))).toBe(false);
     expect(calls.some(call => call.sql.includes('UPDATE letters SET status'))).toBe(false);
