@@ -1004,4 +1004,40 @@ describePostgres('content retention sweep', () => {
       expect(summary.moreWaiting).toBe(true);
     });
   });
+
+  describe("unsent drafts, by their own expiry (#730)", () => {
+    /** An order-less draft, expired `expiredDaysAgo` ago and marked so `markedDaysAgo` ago. */
+    async function expiredDraft(expiredDaysAgo: number, markedDaysAgo: number): Promise<string> {
+      const userId = await seedUser();
+      const draftId = await seedContentDraft({ daysAgo: expiredDaysAgo + 1, userId });
+      await pool.query(
+        `UPDATE letter_drafts SET status = 'expired', consumed_at = NULL,
+           expires_at = NOW() - make_interval(days => $2::int, hours => 1),
+           updated_at = NOW() - make_interval(days => $3::int)
+         WHERE draft_id = $1`,
+        [draftId, expiredDaysAgo, markedDaysAgo]
+      );
+      return draftId;
+    }
+
+    it("deletes an unsent draft 6 days after it expired, however late a run marked it", async () => {
+      const { cleanupOldDrafts } = await import("../../src/services/draftService.js");
+      // Expired 6 days and an hour ago, marked expired only yesterday.
+      const late = await expiredDraft(6, 1);
+      // Expired 5 days and an hour ago: not yet.
+      const recent = await expiredDraft(5, 5);
+      expect(await cleanupOldDrafts(7)).toBe(1);
+      expect(await readDraft(late)).toBeUndefined();
+      expect((await readDraft(recent)).body_text).toBe(SECRET_BODY);
+    });
+
+    it("keeps a sent draft its 7 days from the send, as before", async () => {
+      const { cleanupOldDrafts } = await import("../../src/services/draftService.js");
+      const userId = await seedUser();
+      const sixDays = await seedContentDraft({ daysAgo: 6, userId });
+      await pool.query(`UPDATE letter_drafts SET updated_at = NOW() - INTERVAL '6 days 1 hour' WHERE draft_id = $1`, [sixDays]);
+      expect(await cleanupOldDrafts(7)).toBe(0);
+      expect((await readDraft(sixDays)).body_text).toBe(SECRET_BODY);
+    });
+  });
 });

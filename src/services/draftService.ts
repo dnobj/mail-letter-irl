@@ -420,14 +420,22 @@ export async function markExpiredDrafts(): Promise<number> {
  * its content goes on the unpaid schedule (retentionService). The date cutoff
  * is its own integer parameter; the timestamp one is never cast a second way,
  * only compared again with a timestamp column.
+ *
+ * An unsent draft is measured from its own expiry, not from when a run marked
+ * it expired (#730): the privacy policy says an unsent draft's content is
+ * deleted within 7 days, and the run that marks it can come a day after the
+ * expiry. Its cutoff ($3) is a day earlier than the others', because this
+ * sweep itself runs once a day: a draft it just misses goes at the next run,
+ * still inside the 7 days.
  */
 export async function cleanupOldDrafts(olderThanDays: number = 7): Promise<number> {
   const cutoffDate = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000);
+  const unsentCutoff = new Date(Date.now() - Math.max(olderThanDays - 1, 0) * 24 * 60 * 60 * 1000);
 
   const result = await query(
     `DELETE FROM letter_drafts
      WHERE status IN ('consumed', 'expired', 'cancelled')
-       AND updated_at < $1
+       AND (CASE WHEN status = 'expired' THEN expires_at < $3 ELSE updated_at < $1 END)
        AND NOT EXISTS (
          SELECT 1 FROM orders WHERE orders.draft_id = letter_drafts.draft_id
        )
@@ -438,7 +446,7 @@ export async function cleanupOldDrafts(olderThanDays: number = 7): Promise<numbe
             AND (letters.status <> 'cancelled' OR letters.status_updated_at >= $1)
        )
      RETURNING draft_id`,
-    [cutoffDate, olderThanDays]
+    [cutoffDate, olderThanDays, unsentCutoff]
   );
 
   const count = result.rowCount ?? 0;

@@ -860,6 +860,18 @@ describe('draftService', () => {
       expect(Math.abs(before - 7 * 24 * 60 * 60 * 1000 - params[0].getTime())).toBeLessThan(5_000);
       expect(params[1]).toBe(7);
     });
+
+    it('measures an unsent draft from its own expiry, a day inside the published 7 (#730)', async () => {
+      vi.mocked(db.query).mockResolvedValueOnce({ rows: [], rowCount: 0, command: 'DELETE', oid: 0, fields: [] });
+      const before = Date.now();
+      await cleanupOldDrafts(7);
+      const [sql, params] = vi.mocked(db.query).mock.calls[0] as unknown as [string, [Date, number, Date]];
+      expect(sql.replace(/\s+/g, ' ')).toContain("(CASE WHEN status = 'expired' THEN expires_at < $3 ELSE updated_at < $1 END)");
+      expect(sql.match(/\$3/g)).toHaveLength(1);
+      expect(params[2]).toBeInstanceOf(Date);
+      // Six days: the sweep runs once a day, so a draft it just misses still goes inside the seven.
+      expect(Math.abs(before - 6 * 24 * 60 * 60 * 1000 - params[2].getTime())).toBeLessThan(5_000);
+    });
   });
 
   // ==========================================================================
