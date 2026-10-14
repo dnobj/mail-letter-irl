@@ -842,10 +842,15 @@ describe('draftService', () => {
 
       await expect(cleanupOldDrafts(7)).resolves.toBe(1);
 
-      const [sql, params] = vi.mocked(db.query).mock.calls[0] as unknown as [string, [Date, number]];
+      const [sql, params] = vi.mocked(db.query).mock.calls[0] as unknown as [string, [Date, number, Date, Date]];
+      expect(params).toHaveLength(4);
       expect(sql).toMatch(/NOT EXISTS \(\s*SELECT 1 FROM orders WHERE orders\.draft_id = letter_drafts\.draft_id\s*\)/);
       expect(sql).toMatch(
-        /NOT EXISTS \(\s*SELECT 1 FROM letters\s+WHERE letters\.letter_id = letter_drafts\.consumed_letter_id\s+AND letters\.mail_on >= CURRENT_DATE - \$2::int\s+AND \(letters\.status <> 'cancelled' OR letters\.status_updated_at >= \$4\)\s*\)/
+        /NOT EXISTS \(\s*SELECT 1 FROM letters\s+WHERE letters\.letter_id = letter_drafts\.consumed_letter_id\s+AND letters\.mail_on >= CURRENT_DATE - \$2::int\s+AND letters\.status <> 'cancelled'\s*\)/
+      );
+      // A cancelled held letter's cancel is the draft's clock, in place of its send (#764 review).
+      expect(sql.replace(/\s+/g, ' ')).toContain(
+        "ELSE COALESCE( (SELECT letters.status_updated_at < $4 FROM letters WHERE letters.letter_id = letter_drafts.consumed_letter_id AND letters.status = 'cancelled' AND letters.mail_on IS NOT NULL), letter_drafts.updated_at < $1) END"
       );
       // The timestamp cutoffs and the day count are separate parameters: one
       // parameter cast two ways silently takes the first type. Each cutoff is
@@ -859,8 +864,8 @@ describe('draftService', () => {
       expect(params[0]).toBeInstanceOf(Date);
       expect(Math.abs(before - 7 * 24 * 60 * 60 * 1000 - params[0].getTime())).toBeLessThan(5_000);
       expect(params[1]).toBe(7);
-      const cancelled = (params as unknown as Date[])[3];
-      expect(Math.abs(before - 4 * 24 * 60 * 60 * 1000 - cancelled.getTime())).toBeLessThan(5_000);
+      expect(params[3]).toBeInstanceOf(Date);
+      expect(Math.abs(before - 4 * 24 * 60 * 60 * 1000 - params[3].getTime())).toBeLessThan(5_000);
     });
 
     it('measures an unsent draft from its own expiry, four days, whatever olderThanDays is (#730)', async () => {
@@ -868,7 +873,7 @@ describe('draftService', () => {
       const before = Date.now();
       await cleanupOldDrafts(7);
       const [sql, params] = vi.mocked(db.query).mock.calls[0] as unknown as [string, [Date, number, Date]];
-      expect(sql.replace(/\s+/g, ' ')).toContain("(CASE WHEN status = 'expired' THEN expires_at < $3 ELSE updated_at < $1 END)");
+      expect(sql.replace(/\s+/g, ' ')).toContain("(CASE WHEN status = 'expired' THEN expires_at < $3 ELSE COALESCE(");
       expect(sql.match(/\$3/g)).toHaveLength(1);
       expect(params[2]).toBeInstanceOf(Date);
       // Four days: inside the seven from the expiry or from creation, with room for the daily sweep's drift.
