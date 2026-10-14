@@ -42,6 +42,7 @@ import {
 import { readRequestBody, RequestBodyTimeoutError } from '../../../src/utils/requestBody.js';
 
 const TOKEN = 'AbCdEfGhIjKlMnOpQrStUvWx';
+const REQUEST_ID = '6f1c1d2e-0000-4000-8000-000000000001';
 const ORIGIN = 'https://letterirl.example';
 const WAITING = { state: 'waiting', senderFirstName: 'Pat', expiresAt: '2026-10-09T14:00:00.000Z' };
 const ADDRESS = { addressLine1: ' 1 Main  St ', addressLine2: '  ', city: 'Tucson', state: 'az', postalCode: '85701' };
@@ -85,8 +86,8 @@ const validateAddress = vi.fn();
 beforeEach(() => {
   vi.stubEnv('LETTER_IRL_ADDRESS_REQUESTS_ENABLED', 'true');
   vi.mocked(readAddressRequestPage).mockReset().mockResolvedValue(WAITING as never);
-  vi.mocked(answerAddressRequest).mockReset().mockResolvedValue({ ok: true });
-  vi.mocked(declineAddressRequest).mockReset().mockResolvedValue({ ok: true });
+  vi.mocked(answerAddressRequest).mockReset().mockResolvedValue({ ok: true, requestId: REQUEST_ID });
+  vi.mocked(declineAddressRequest).mockReset().mockResolvedValue({ ok: true, requestId: REQUEST_ID });
   validateAddress.mockReset().mockResolvedValue({ status: 'verified', originalAddress: {}, errors: [] });
   vi.mocked(getLetterProvider).mockReturnValue({ validateAddress } as never);
   vi.mocked(rateLimitMiddlewareWithGlobal).mockClear();
@@ -151,6 +152,23 @@ describe('the address request routes (#604)', () => {
     await expect(call('decline', { token: TOKEN })).resolves.toMatchObject({ status: 409, json: { reason: 'answered' } });
     vi.mocked(declineAddressRequest).mockResolvedValueOnce({ ok: false, refusal: 'not_found' });
     await expect(call('decline', { token: TOKEN })).resolves.toMatchObject({ status: 404, json: { reason: 'not_found' } });
+    expect(writeDiagnostic).not.toHaveBeenCalledWith('warn', 'address_request.reported', expect.anything());
+  });
+
+  it("closes a reported link as declined, and logs the request's id alone (#730)", async () => {
+    await expect(call('decline', { token: TOKEN, report: true })).resolves.toMatchObject({ status: 200, json: { ok: true } });
+    expect(declineAddressRequest).toHaveBeenCalledWith(TOKEN);
+    expect(writeDiagnostic).toHaveBeenCalledWith('info', 'address_request.decline', { outcome: 'declined', report: true });
+    expect(writeDiagnostic).toHaveBeenCalledWith('warn', 'address_request.reported', { requestId: REQUEST_ID });
+    // Only true reports: anything else is a plain decline.
+    vi.mocked(writeDiagnostic).mockClear();
+    await call('decline', { token: TOKEN, report: 'yes' });
+    expect(writeDiagnostic).toHaveBeenCalledWith('info', 'address_request.decline', { outcome: 'declined', report: false });
+    expect(writeDiagnostic).not.toHaveBeenCalledWith('warn', 'address_request.reported', expect.anything());
+    // A link already closed is not reported again.
+    vi.mocked(declineAddressRequest).mockResolvedValueOnce({ ok: false, refusal: 'answered' });
+    await expect(call('decline', { token: TOKEN, report: true })).resolves.toMatchObject({ status: 409 });
+    expect(writeDiagnostic).not.toHaveBeenCalledWith('warn', 'address_request.reported', expect.anything());
   });
 
   it('keeps a verified answer trimmed, with no name or empty line of its own', async () => {
@@ -224,7 +242,20 @@ describe('the address request routes (#604)', () => {
       address: { addressLine1: '', city: 'C'.repeat(61), state: 'XX', postalCode: '8570', name: 'Ruth\u0007' }
     });
     expect(answer).toMatchObject({ status: 400, json: { reason: 'invalid', fields: ['name', 'addressLine1', 'city', 'state', 'postalCode'] } });
+    // None of them is the printer's.
+    expect(answer.json.unprintable).toEqual([]);
     expect(validateAddress).not.toHaveBeenCalled();
+  });
+
+  it('names the fields the printer cannot print, so the page names the printer only then (#730)', async () => {
+    const answer = await call('answer', {
+      token: TOKEN,
+      address: { ...ADDRESS, name: '\u674E\u534E', city: 'Tucson \u{1F600}', addressLine2: 'Apt 4\u202E' }
+    });
+    expect(answer).toMatchObject({
+      status: 400,
+      json: { reason: 'invalid', fields: ['name', 'addressLine2', 'city'], unprintable: ['name', 'city'] }
+    });
   });
 
   it('spends at most the budget of PostGrid checks on one link, then refuses before asking (#606 review round 1)', async () => {
@@ -282,7 +313,7 @@ describe("the recipient's address fields (#604)", () => {
 
   it('refuses a field with hidden or unprintable characters, or too long', () => {
     expect(givenAddressOf({ ...ADDRESS, addressLine1: '1 Main St\u202E' })).toEqual({ ok: false, fields: ['addressLine1'] });
-    expect(givenAddressOf({ ...ADDRESS, city: 'Tucson \u{1F600}' })).toEqual({ ok: false, fields: ['city'] });
+    expect(givenAddressOf({ ...ADDRESS, city: 'Tucson \u{1F600}' })).toEqual({ ok: false, fields: ['city'], unprintable: ['city'] });
     expect(givenAddressOf({ ...ADDRESS, addressLine2: 'A'.repeat(101) })).toEqual({ ok: false, fields: ['addressLine2'] });
     expect(givenAddressOf({ ...ADDRESS, name: 7 })).toEqual({ ok: false, fields: ['name'] });
     expect(givenAddressOf(null)).toEqual({ ok: false, fields: ['addressLine1', 'city', 'state', 'postalCode'] });
@@ -311,5 +342,10 @@ describe("the recipient's address fields (#604)", () => {
     }
     // An empty name is left out, as before.
     expect(givenAddressOf({ ...ADDRESS, name: '   ' })).toMatchObject({ ok: true });
+    // A name refused for its punctuation is not the printer's; one in a script the printer lacks is.
+    expect(givenAddressOf({ ...ADDRESS, name: 'Jane_Smith' })).toEqual({ ok: false, fields: ['name'] });
+    expect(givenAddressOf({ ...ADDRESS, name: 'Jane \u{1F600}' })).toEqual({ ok: false, fields: ['name'], unprintable: ['name'] });
+    // A hidden character is said apart from the printer, even beside one it cannot print.
+    expect(givenAddressOf({ ...ADDRESS, addressLine1: '1 Main St\u200B' })).toEqual({ ok: false, fields: ['addressLine1'] });
   });
 });
