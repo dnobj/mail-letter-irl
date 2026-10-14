@@ -1032,11 +1032,11 @@ describePostgres('arrive-by (migration 040, #535)', () => {
     // Cancelled just now: its reopened card still reads it.
     await drafts.cleanupOldDrafts(7);
     expect(await kept()).toBe(true);
-    // Cancelled six days ago: kept; eight: it goes, though its mail date is weeks away.
-    await pool.query("UPDATE letters SET status_updated_at = NOW() - INTERVAL '6 days' WHERE letter_id = $1", [letterId]);
+    // Cancelled three days ago: kept; five: it goes, though its mail date is weeks away (4 days, #730).
+    await pool.query("UPDATE letters SET status_updated_at = NOW() - INTERVAL '3 days' WHERE letter_id = $1", [letterId]);
     await drafts.cleanupOldDrafts(7);
     expect(await kept()).toBe(true);
-    await pool.query("UPDATE letters SET status_updated_at = NOW() - INTERVAL '8 days' WHERE letter_id = $1", [letterId]);
+    await pool.query("UPDATE letters SET status_updated_at = NOW() - INTERVAL '5 days' WHERE letter_id = $1", [letterId]);
     await drafts.cleanupOldDrafts(7);
     expect(await kept()).toBe(false);
   }, 60_000);

@@ -845,20 +845,22 @@ describe('draftService', () => {
       const [sql, params] = vi.mocked(db.query).mock.calls[0] as unknown as [string, [Date, number]];
       expect(sql).toMatch(/NOT EXISTS \(\s*SELECT 1 FROM orders WHERE orders\.draft_id = letter_drafts\.draft_id\s*\)/);
       expect(sql).toMatch(
-        /NOT EXISTS \(\s*SELECT 1 FROM letters\s+WHERE letters\.letter_id = letter_drafts\.consumed_letter_id\s+AND letters\.mail_on >= CURRENT_DATE - \$2::int\s+AND \(letters\.status <> 'cancelled' OR letters\.status_updated_at >= \$1\)\s*\)/
+        /NOT EXISTS \(\s*SELECT 1 FROM letters\s+WHERE letters\.letter_id = letter_drafts\.consumed_letter_id\s+AND letters\.mail_on >= CURRENT_DATE - \$2::int\s+AND \(letters\.status <> 'cancelled' OR letters\.status_updated_at >= \$4\)\s*\)/
       );
-      // The timestamp cutoff and the day count are separate parameters: one
-      // parameter cast two ways silently takes the first type. The cutoff is
-      // compared twice, each time with a timestamptz column and never cast;
-      // the second keeps a cancelled held letter's draft as long after the
-      // cancel as a sent draft after its send (#701).
-      expect(sql.match(/\$1/g)).toHaveLength(2);
+      // The timestamp cutoffs and the day count are separate parameters: one
+      // parameter cast two ways silently takes the first type. Each cutoff is
+      // used once, with a timestamp column, and never cast. A cancelled held
+      // letter's draft goes 4 days after the cancel (#701, #730).
+      expect(sql.match(/\$1/g)).toHaveLength(1);
       expect(sql).toContain('updated_at < $1');
-      expect(sql).not.toMatch(/\$1::/);
+      expect(sql).not.toMatch(/\$[14]::/);
       expect(sql.match(/\$2/g)).toHaveLength(1);
+      expect(sql.match(/\$4/g)).toHaveLength(1);
       expect(params[0]).toBeInstanceOf(Date);
       expect(Math.abs(before - 7 * 24 * 60 * 60 * 1000 - params[0].getTime())).toBeLessThan(5_000);
       expect(params[1]).toBe(7);
+      const cancelled = (params as unknown as Date[])[3];
+      expect(Math.abs(before - 4 * 24 * 60 * 60 * 1000 - cancelled.getTime())).toBeLessThan(5_000);
     });
 
     it('measures an unsent draft from its own expiry, four days, whatever olderThanDays is (#730)', async () => {
