@@ -250,7 +250,7 @@ describe("admin command runner", () => {
     const database = fakeDatabase();
     const state = { version: "v1", executions: [] as Array<{ key: string; reason: string; client: boolean }> };
     const base = echoCommand(state);
-    // A preview that names its target canonically, as gift.void_code does a typed code.
+    // A preview that names its target canonically, as several commands do (an id's case, a code's dashes).
     const command: CommandDefinition<EchoInput> = {
       ...base,
       async preview(client, targetId, input) {

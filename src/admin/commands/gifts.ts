@@ -228,12 +228,14 @@ export function createGiftCommands(overrides: Partial<GiftCommandSeams> = {}) {
     },
     async execute(execution, target) {
       if (!execution.client) throw new AdminFoundationError("ADMIN_INTERNAL_ERROR");
+      // The preview names every void by its letter, which is what reaches here.
       const letterId = letterOf(target);
+      if (letterId === null) throw new AdminFoundationError("ADMIN_INVALID_REQUEST");
       const result = await execution.client.query<{ code: string; letter_id: string }>(
         `UPDATE gift_codes SET status = 'void', voided_at = NOW(), void_reason = 'operator'
-          WHERE ${letterId !== null ? "letter_id" : "code"} = $1 AND status = 'issued'
+          WHERE letter_id = $1 AND status = 'issued'
           RETURNING code, letter_id`,
-        [letterId ?? target],
+        [letterId],
       );
       const voided = result.rows[0];
       if (!voided) throw new AdminFoundationError("ADMIN_INVALID_STATE");

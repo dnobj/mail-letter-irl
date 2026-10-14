@@ -226,18 +226,20 @@ describe("gift.void_code", () => {
     const { voidCode } = createGiftCommands();
     const client = scripted({ code: [ISSUED] });
     const preview = await voidCode.preview(client, "K7M2QX9A", {});
-    // Void, so spent: in full, as printed.
-    await expect(voidCode.execute(execution(client), "K7M2QX9A", {}, preview)).resolves.toEqual({
+    // Executed with the target the preview names, as the runner does; void, so spent: in full, as printed.
+    await expect(voidCode.execute(execution(client), preview.targetId, {}, preview)).resolves.toEqual({
       code: "K7M2-QX9A",
       letterId: "letter-1",
       status: "void",
     });
     const update = client.query.mock.calls.find(([sql]) => String(sql).includes("UPDATE gift_codes"));
     expect(String(update?.[0])).toContain("void_reason = 'operator'");
-    expect(String(update?.[0])).toContain("AND status = 'issued'");
+    expect(String(update?.[0])).toContain("WHERE letter_id = $1 AND status = 'issued'");
+    // A bare code never reaches execute from the runner; called that way, it is refused.
+    await expect(voidCode.execute(execution(client), "K7M2QX9A", {}, preview)).rejects.toMatchObject({ code: "ADMIN_INVALID_REQUEST" });
 
     const raced = { query: vi.fn(async () => ({ rows: [] })) };
-    await expect(voidCode.execute(execution(raced), "K7M2QX9A", {}, preview)).rejects.toMatchObject({ code: "ADMIN_INVALID_STATE" });
+    await expect(voidCode.execute(execution(raced), preview.targetId, {}, preview)).rejects.toMatchObject({ code: "ADMIN_INVALID_STATE" });
   });
 
   it("names the code by its letter from the panel's buttons, so the page never carries it (#730)", async () => {
