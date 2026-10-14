@@ -212,7 +212,9 @@ export function createGiftCommands(overrides: Partial<GiftCommandSeams> = {}) {
       if (view.status !== "issued") throw new AdminFoundationError("ADMIN_INVALID_STATE");
       const shown = shownGiftCode(view.code, view.status);
       return {
-        targetId: letterId !== null ? `${LETTER_TARGET}${letterId}` : view.code,
+        // By its letter however it was named, so the confirmation, its phrase
+        // and the run's records carry the letter, not an issued code (#730).
+        targetId: `${LETTER_TARGET}${view.letterId}`,
         summary: { code: shown, letterId: view.letterId, status: view.status, issuedToUserId: view.issuedToUserId },
         display: [
           ["Code", shown],

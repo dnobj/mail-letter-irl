@@ -209,7 +209,8 @@ describe("gift.void_code", () => {
   it("accepts the code as printed and previews only an issued one, showing it masked", async () => {
     const { voidCode } = createGiftCommands();
     const preview = await voidCode.preview(scripted({ code: [ISSUED] }), "k7m2-qx9a", {});
-    expect(preview.targetId).toBe("K7M2QX9A");
+    // Named by its letter from here on: the confirmation and the records never carry the code.
+    expect(preview.targetId).toBe("letter:letter-1");
     // The page and the run's record show the issued code masked (#730).
     expect(JSON.stringify(preview.display)).not.toContain("K7M2");
     expect(JSON.stringify(preview.summary)).not.toContain("K7M2");
