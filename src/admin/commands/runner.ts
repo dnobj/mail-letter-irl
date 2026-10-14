@@ -24,6 +24,9 @@ import { createAdminPreviewDigest, normalizeAdminCommandInput, validateAdminComm
  *               changed since the preview is refused as stale
  *            -> full mode, live elevation, exact phrase
  *            -> admin_command_runs row (replay returns the prior outcome)
+ *            -> for a command with lockVersion, the target's row held and its
+ *               version checked again inside the operator transaction, so
+ *               the check and the write are atomic (#730)
  *            -> the domain call, with the run id as its idempotency key
  *            -> admin_audit_events row and the command's completion
  *
@@ -310,7 +313,13 @@ export async function runAdminCommand<I>(
       // Held from here to the commit: the version the preview was checked at
       // is the one the write sees. A refusal rolls the run row back with it.
       if (definition.lockVersion && prepared.preview.expectedVersion !== undefined) {
-        const current = await definition.lockVersion(client, prepared.preview.targetId);
+        let current: string | null;
+        try {
+          current = await definition.lockVersion(client, prepared.preview.targetId);
+        } catch (error) {
+          // A row held past the statement timeout fails as execute() would.
+          throw mapDomainError(error);
+        }
         if (current !== prepared.preview.expectedVersion) throw new AdminFoundationError("ADMIN_STALE_PREVIEW");
       }
       const execution: CommandExecution = {

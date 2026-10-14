@@ -706,6 +706,21 @@ describePostgres('admin commands through the operator role', () => {
     await expect(confirmation('routing.update', 'postcard', { provider: 'lob', enabled: 'on' })).rejects.toMatchObject({ code: 'ADMIN_INVALID_REQUEST' });
   }, 60_000);
 
+  it('grants gift letters as the operator role, holding the account row through the write (#730)', async () => {
+    const countGifts = async () =>
+      (await owner.query<{ n: number }>('SELECT COUNT(*)::int AS n FROM gift_letters WHERE user_id = $1', [userId])).rows[0].n;
+    const before = await countGifts();
+    const grant = await confirmation('gift.grant', userId, { quantity: '1', generationsRemaining: '0' });
+    expect(await runner.runAdminCommand(deps(), grant.command, userId, grant.fields)).toMatchObject({ status: 'succeeded', result: { granted: 1 } });
+    expect(await countGifts()).toBe(before + 1);
+
+    // The account moved after the preview: refused, and nothing granted.
+    const stale = await confirmation('gift.grant', userId, { quantity: '1', generationsRemaining: '0' });
+    await owner.query(`UPDATE users SET updated_at = NOW() + INTERVAL '1 second' WHERE user_id = $1`, [userId]);
+    await expect(runner.runAdminCommand(deps(), stale.command, userId, stale.fields)).rejects.toMatchObject({ code: 'ADMIN_STALE_PREVIEW' });
+    expect(await countGifts()).toBe(before + 1);
+  }, 60_000);
+
   it('sets a daily limit until midnight UTC and for one account, replaces it, and clears it, as the operator role', async () => {
     const { effectiveDailyLimits } = await import('../../src/services/dailyLimits.js');
 
