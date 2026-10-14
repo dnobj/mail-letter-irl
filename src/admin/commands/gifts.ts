@@ -4,7 +4,7 @@ import { normalizeGiftCode } from "../../services/giftCodes.js";
 import { grantGiftLettersWithClient, seedCodeHold, type SeedCodeHold } from "../../services/giftLetterService.js";
 import type { AdminSqlClient } from "../database.js";
 import { AdminFoundationError } from "../errors.js";
-import { readGiftCode } from "../queries/gifts.js";
+import { readGiftCode, readGiftCodeByLetter, shownGiftCode } from "../queries/gifts.js";
 import { readCampaignByCode, type CampaignView } from "../queries/promos.js";
 import { type CommandDefinition } from "./runner.js";
 
@@ -181,6 +181,20 @@ export function createGiftCommands(overrides: Partial<GiftCommandSeams> = {}) {
     },
   };
 
+  /**
+   * A void names its code either as printed, typed by an operator from what a
+   * customer reads out, or by the letter it was printed on, which is how the
+   * panel's buttons name it, so no page or audit row carries an issued code
+   * the operator did not type (#730).
+   */
+  const LETTER_TARGET = "letter:";
+  function letterOf(target: string): string | null {
+    if (!target.startsWith(LETTER_TARGET)) return null;
+    const letterId = target.slice(LETTER_TARGET.length);
+    if (!letterId || letterId.length > 200 || /\s/.test(letterId)) throw new AdminFoundationError("ADMIN_INVALID_REQUEST");
+    return letterId;
+  }
+
   const voidCode: CommandDefinition<Record<string, never>> = {
     name: "gift.void_code",
     title: "Void a gift code",
@@ -190,16 +204,20 @@ export function createGiftCommands(overrides: Partial<GiftCommandSeams> = {}) {
     verb: () => "VOID-CODE",
     parseInput: () => ({}),
     async preview(client, target) {
-      const code = normalizeGiftCode(target);
-      if (!code) throw new AdminFoundationError("ADMIN_INVALID_REQUEST");
-      const view = await readGiftCode(client, code);
+      const letterId = letterOf(target);
+      const code = letterId === null ? normalizeGiftCode(target) : null;
+      if (letterId === null && !code) throw new AdminFoundationError("ADMIN_INVALID_REQUEST");
+      const view = letterId !== null ? await readGiftCodeByLetter(client, letterId) : await readGiftCode(client, code!);
       if (!view) throw new AdminFoundationError("ADMIN_NOT_FOUND");
       if (view.status !== "issued") throw new AdminFoundationError("ADMIN_INVALID_STATE");
+      const shown = shownGiftCode(view.code, view.status);
       return {
-        targetId: code,
-        summary: { code, status: view.status, issuedToUserId: view.issuedToUserId },
+        // By its letter however it was named, so the confirmation, its phrase
+        // and the run's records carry the letter, not an issued code (#730).
+        targetId: `${LETTER_TARGET}${view.letterId}`,
+        summary: { code: shown, letterId: view.letterId, status: view.status, issuedToUserId: view.issuedToUserId },
         display: [
-          ["Code", code],
+          ["Code", shown],
           ["Issued to", view.issuedToUserId],
           ["Printed on letter", view.letterId],
           ["Would grant", `a gift letter with budget ${view.grantsGenerationsRemaining}`],
@@ -208,16 +226,21 @@ export function createGiftCommands(overrides: Partial<GiftCommandSeams> = {}) {
         warnings: ["The recipient holding this code will be told it is no longer valid. This cannot be undone."],
       };
     },
-    async execute(execution, code) {
+    async execute(execution, target) {
       if (!execution.client) throw new AdminFoundationError("ADMIN_INTERNAL_ERROR");
-      const result = await execution.client.query<{ code: string }>(
+      // The preview names every void by its letter, which is what reaches here.
+      const letterId = letterOf(target);
+      if (letterId === null) throw new AdminFoundationError("ADMIN_INVALID_REQUEST");
+      const result = await execution.client.query<{ code: string; letter_id: string }>(
         `UPDATE gift_codes SET status = 'void', voided_at = NOW(), void_reason = 'operator'
-          WHERE code = $1 AND status = 'issued'
-          RETURNING code`,
-        [code],
+          WHERE letter_id = $1 AND status = 'issued'
+          RETURNING code, letter_id`,
+        [letterId],
       );
-      if (!result.rows[0]) throw new AdminFoundationError("ADMIN_INVALID_STATE");
-      return { code, status: "void" };
+      const voided = result.rows[0];
+      if (!voided) throw new AdminFoundationError("ADMIN_INVALID_STATE");
+      // Void now, so spent: in full, as every page shows a void code.
+      return { code: shownGiftCode(voided.code, "void"), letterId: voided.letter_id, status: "void" };
     },
   };
 

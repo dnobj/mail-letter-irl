@@ -67,18 +67,48 @@ export function registerReadRoutes(
     return context.render("Overview", renderOverview(data));
   }, { name: "overview" });
 
+  // The form only. A lookup is a POST (#730): an identifier can be an email,
+  // which a query string would leave in the browser's history and in any log
+  // of the URL. An old link's `q` is not run.
   router.add("GET", "/lookup", async (context) => {
-    const raw = context.url.searchParams.get("q") ?? undefined;
+    const recent = await context.read((client) => listRecentAccounts(client, 10));
+    return context.render(
+      "Lookup",
+      renderLookup({ term: null, matches: null, invalid: false, recent, csrfToken: context.csrfToken }),
+    );
+  }, { name: "lookup" });
+
+  // A read, so allowed in read-only mode. Finding an account by its email
+  // shows who it is, so that lookup is audited, as a reveal is: the matches,
+  // never the address.
+  router.add("POST", "/lookup", async (context) => {
+    const raw = context.form?.get("q") ?? undefined;
     const term = normalizeLookupTerm(raw);
     const data = await context.read(async (client) => ({
       matches: term ? await lookupIdentifier(client, term) : null,
       recent: await listRecentAccounts(client, 10),
     }));
+    if (term && term.includes("@")) {
+      const accounts = (data.matches ?? []).filter((match) => match.kind === "account").map((match) => match.id);
+      await context.appendAudit({
+        action: "pii.lookup",
+        targetType: "user",
+        ...(accounts[0] ? { targetId: accounts[0] } : {}),
+        inputSummary: { field: "email", matches: accounts.length, accounts },
+        outcome: "succeeded",
+      });
+    }
     return context.render(
       "Lookup",
-      renderLookup({ term: term ?? raw ?? null, matches: data.matches, invalid: raw !== undefined && term === null, recent: data.recent }),
+      renderLookup({
+        term: term ?? raw ?? null,
+        matches: data.matches,
+        invalid: raw !== undefined && term === null,
+        recent: data.recent,
+        csrfToken: context.csrfToken,
+      }),
     );
-  }, { name: "lookup" });
+  }, { name: "lookup.search", write: false });
 
   router.add("GET", "/accounts/:userId", async (context) => {
     const detail = await context.read((client) => readAccountDetail(client, context.params.userId));

@@ -35,7 +35,8 @@ function scripted(overrides: { account?: unknown[]; campaign?: unknown[]; availa
     if (text.includes("FROM promo_campaigns WHERE code")) return { rows: overrides.campaign ?? [] };
     if (text.includes("COUNT(*) AS count FROM gift_letters")) return { rows: [{ count: overrides.available ?? "0" }] };
     if (text.includes("FROM gift_codes WHERE code")) return { rows: overrides.code ?? [] };
-    if (text.includes("UPDATE gift_codes")) return { rows: [{ code: "K7M2QX9A" }] };
+    if (text.includes("FROM gift_codes WHERE letter_id")) return { rows: overrides.code ?? [] };
+    if (text.includes("UPDATE gift_codes")) return { rows: [{ code: "K7M2QX9A", letter_id: "letter-1" }] };
     return { rows: [] };
   });
   return { query } as unknown as AdminSqlClient & { query: typeof query };
@@ -205,10 +206,15 @@ describe("gift.void_code", () => {
     created_at: new Date("2026-09-17T00:00:00Z"),
   };
 
-  it("accepts the code as printed and previews only an issued one", async () => {
+  it("accepts the code as printed and previews only an issued one, showing it masked", async () => {
     const { voidCode } = createGiftCommands();
     const preview = await voidCode.preview(scripted({ code: [ISSUED] }), "k7m2-qx9a", {});
-    expect(preview.targetId).toBe("K7M2QX9A");
+    // Named by its letter from here on: the confirmation and the records never carry the code.
+    expect(preview.targetId).toBe("letter:letter-1");
+    // The page and the run's record show the issued code masked (#730).
+    expect(JSON.stringify(preview.display)).not.toContain("K7M2");
+    expect(JSON.stringify(preview.summary)).not.toContain("K7M2");
+    expect(preview.display).toContainEqual(["Code", "••••-••9A"]);
     await expect(voidCode.preview(scripted({ code: [{ ...ISSUED, status: "redeemed" }] }), "K7M2QX9A", {})).rejects.toMatchObject({
       code: "ADMIN_INVALID_STATE",
     });
@@ -220,12 +226,36 @@ describe("gift.void_code", () => {
     const { voidCode } = createGiftCommands();
     const client = scripted({ code: [ISSUED] });
     const preview = await voidCode.preview(client, "K7M2QX9A", {});
-    await expect(voidCode.execute(execution(client), "K7M2QX9A", {}, preview)).resolves.toEqual({ code: "K7M2QX9A", status: "void" });
+    // Executed with the target the preview names, as the runner does; void, so spent: in full, as printed.
+    await expect(voidCode.execute(execution(client), preview.targetId, {}, preview)).resolves.toEqual({
+      code: "K7M2-QX9A",
+      letterId: "letter-1",
+      status: "void",
+    });
     const update = client.query.mock.calls.find(([sql]) => String(sql).includes("UPDATE gift_codes"));
     expect(String(update?.[0])).toContain("void_reason = 'operator'");
-    expect(String(update?.[0])).toContain("AND status = 'issued'");
+    expect(String(update?.[0])).toContain("WHERE letter_id = $1 AND status = 'issued'");
+    // A bare code never reaches execute from the runner; called that way, it is refused.
+    await expect(voidCode.execute(execution(client), "K7M2QX9A", {}, preview)).rejects.toMatchObject({ code: "ADMIN_INVALID_REQUEST" });
 
     const raced = { query: vi.fn(async () => ({ rows: [] })) };
-    await expect(voidCode.execute(execution(raced), "K7M2QX9A", {}, preview)).rejects.toMatchObject({ code: "ADMIN_INVALID_STATE" });
+    await expect(voidCode.execute(execution(raced), preview.targetId, {}, preview)).rejects.toMatchObject({ code: "ADMIN_INVALID_STATE" });
+  });
+
+  it("names the code by its letter from the panel's buttons, so the page never carries it (#730)", async () => {
+    const { voidCode } = createGiftCommands();
+    const client = scripted({ code: [ISSUED] });
+    const preview = await voidCode.preview(client, "letter:letter-1", {});
+    expect(preview.targetId).toBe("letter:letter-1");
+    expect(JSON.stringify(preview)).not.toContain("K7M2");
+    const read = client.query.mock.calls.find(([sql]) => String(sql).includes("FROM gift_codes WHERE letter_id"));
+    expect(read?.[1]).toEqual(["letter-1"]);
+    await expect(voidCode.execute(execution(client), "letter:letter-1", {}, preview)).resolves.toMatchObject({ status: "void" });
+    const update = client.query.mock.calls.find(([sql]) => String(sql).includes("UPDATE gift_codes"));
+    expect(String(update?.[0])).toContain("WHERE letter_id = $1 AND status = 'issued'");
+    expect(update?.[1]).toEqual(["letter-1"]);
+    await expect(voidCode.preview(scripted(), "letter:", {})).rejects.toMatchObject({ code: "ADMIN_INVALID_REQUEST" });
+    await expect(voidCode.preview(scripted(), "letter:a b", {})).rejects.toMatchObject({ code: "ADMIN_INVALID_REQUEST" });
+    await expect(voidCode.preview(scripted(), "letter:nope", {})).rejects.toMatchObject({ code: "ADMIN_NOT_FOUND" });
   });
 });

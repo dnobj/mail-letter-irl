@@ -31,7 +31,13 @@ has column-level `SELECT` on `users`, `letters`, `letter_drafts`, `personal_acce
 omits those columns (`src/admin/provisioning.ts`), and
 `tests/integration/adminReadModels.postgres.test.ts` proves a `SELECT content FROM letters` fails as
 that role. An email address is masked until an operator reveals it with a reason, which writes a
-`pii.reveal` audit event.
+`pii.reveal` audit event. Lookup is a form that posts (#730), so an identifier, which can be an email,
+never sits in a URL; a lookup by email writes a `pii.lookup` event with the matched account ids, never
+the address (refreshing the result page posts the form again, and writes another). An issued gift code
+is a bearer value for a free letter, so it shows only its last two characters (`••••-••9A`), and its
+void button names the letter it was printed on; a redeemed or void code shows in full. A command preview
+lists every value its link carries into the confirmation, so a crafted link cannot fill a field the
+preview does not show.
 
 The two ledger `description` columns are on that list because a derived string can carry personal
 data as surely as a source column: the send path wrote `Letter to <recipient name>` there until

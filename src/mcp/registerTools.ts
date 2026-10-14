@@ -619,6 +619,17 @@ const WIDGET_BY_NAME = new Map<string, { file: string; description: string }>([
 ]);
 
 /**
+ * A card's file name, for the /widgets web route, or null if `name` is not a
+ * card this deployment serves (the Letter Home card while its flag is off).
+ * Resolved against WIDGET_BY_NAME, so a caller's string never reaches a path.
+ */
+export function servedWidgetFile(name: string): string | null {
+  const widget = WIDGET_BY_NAME.get(name);
+  if (!widget || (name === LETTER_HOME_WIDGET.name && !isLetterHomeEnabled())) return null;
+  return widget.file;
+}
+
+/**
  * Read one widget's HTML as an MCP resource payload, or null if `name` is not
  * a widget we serve.
  *

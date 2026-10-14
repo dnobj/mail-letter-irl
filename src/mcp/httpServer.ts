@@ -8,7 +8,7 @@ import { promises as fs } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { LetterIrlServer } from "../server.js";
-import { registerLetterTools, type RegisterToolsOptions } from "./registerTools.js";
+import { registerLetterTools, servedWidgetFile, type RegisterToolsOptions } from "./registerTools.js";
 import { logMcpClientRequests } from "./clientRequestLog.js";
 import { buildServerInstructions } from "./serverInstructions.js";
 import { isSendConfirmationEnabled } from "../config/sendConfirmation.js";
@@ -238,7 +238,16 @@ function firstHeaderValue(value: string | string[] | undefined): string | undefi
   return raw?.split(",")[0]?.trim();
 }
 
+/**
+ * The origin the manifest, the OAuth metadata and the 401 challenge name.
+ * Pinned to LETTER_IRL_PUBLIC_BASE_URL wherever it is set (#730): taken from a
+ * request's forwarded headers, a caller could name another host in the URLs
+ * those documents hand to clients. Both deployments set it; a local run or a
+ * test without it still reads the request.
+ */
 export function getPublicBaseUrl(req: Pick<http.IncomingMessage, "headers">): string {
+  const configured = process.env.LETTER_IRL_PUBLIC_BASE_URL?.trim();
+  if (configured) return configured.replace(/\/+$/, "");
   const host = firstHeaderValue(req.headers["x-forwarded-host"]) ?? firstHeaderValue(req.headers.host);
   if (!host) {
     return PUBLIC_BASE_URL;
@@ -255,16 +264,20 @@ export async function serveWidget(
   widgetName: string,
   res: http.ServerResponse
 ): Promise<boolean> {
-  const safeName = path.basename(widgetName);
-  const filePath = path.join(DEFAULT_WIDGET_DIR, safeName);
+  // Only a card the app serves, by its own file name (#730): the directory
+  // also holds notes and shared parts, and a card while its flag is off.
+  const file = servedWidgetFile(widgetName.replace(/\.html$/, ""));
+  if (!file) return false;
+  const filePath = path.join(DEFAULT_WIDGET_DIR, `${file}.html`);
   try {
     // With the shared bridge inlined (#474), as resources/read serves it.
     const file = inlineHostBridge(await fs.readFile(filePath, "utf-8"), DEFAULT_WIDGET_DIR);
     res.statusCode = 200;
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     // No page may frame a card from here (#684): hosts load cards through
-    // resources/read, never this URL.
-    res.setHeader("Content-Security-Policy", "frame-ancestors 'none'");
+    // resources/read, never this URL. Opened directly, a card runs as an
+    // opaque origin with no network, so it is a picture of itself (#730).
+    res.setHeader("Content-Security-Policy", "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; frame-ancestors 'none'");
     res.setHeader("X-Frame-Options", "DENY");
     res.end(file);
     return true;
@@ -951,7 +964,7 @@ export async function startHttpServer() {
   await new Promise<void>((resolve) => {
     server.listen(DEFAULT_PORT, DEFAULT_HOST, () => {
       console.log(`Letter IRL MCP HTTP server listening on http://${DEFAULT_HOST}:${DEFAULT_PORT}`);
-      // nixpacks.toml sets it (#730); this line is how a deploy shows it took.
+      // A Railway service variable sets it (#730, #745); this line is how a deploy shows it took.
       writeDiagnostic("info", "boot.thread_pool", { size: Number(process.env.UV_THREADPOOL_SIZE) || 4 });
       // Price warmup AFTER the port binds, fire-and-forget (#275 stage A). An
       // earlier revision awaited this above, ~650 lines before listen, which

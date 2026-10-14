@@ -141,7 +141,10 @@ export async function prepareCommandPreview<I>(
     input,
     normalizedInput,
     preview,
-    previewDigest: previewDigestFor(definition.name, targetId, normalizedInput, preview.summary),
+    // The target as the preview names it, which is what the confirmation form
+    // sends back: a code typed as printed ("k7m2-qx9a") and its canonical form
+    // must bind the same digest, or the confirm is refused as stale (#730).
+    previewDigest: previewDigestFor(definition.name, preview.targetId, normalizedInput, preview.summary),
     idempotencyKey,
     phrase: expectedPhrase(environment, definition.verb(input), preview.targetId),
   };
