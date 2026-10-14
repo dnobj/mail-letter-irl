@@ -10,7 +10,7 @@ import { repositoryMigrations, validateDisposableDatabaseUrl } from './support/d
  *   sent letter content          -> anonymized at 90 days
  *   drafts on a PAID order       -> the same schedule
  *   drafts on an abandoned one   -> anonymized at 7 days (they cannot be deleted)
- *   unsent, no order at all      -> deleted at 7 days by cleanupOldDrafts
+ *   unsent, no order at all      -> deleted 4 days after expiry by cleanupOldDrafts
  *
  * These run against real PostgreSQL because every property that matters is a
  * property of the STATEMENT: the boundary, the allow-list holds, the
@@ -1002,6 +1002,83 @@ describePostgres('content retention sweep', () => {
       expect(summary.errors.join(' ')).not.toMatch(/received/);
       // A failed sweep must not read as "caught up".
       expect(summary.moreWaiting).toBe(true);
+    });
+  });
+
+  describe("unsent drafts, by their own expiry (#730)", () => {
+    /**
+     * Sets a draft's columns with the updated_at trigger off, inside a
+     * transaction, so the times written are the times read (the trigger would
+     * set updated_at to now).
+     */
+    async function setDraft(draftId: string, sql: string, params: unknown[]): Promise<void> {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query('ALTER TABLE letter_drafts DISABLE TRIGGER update_letter_drafts_updated_at');
+        await client.query(sql, [draftId, ...params]);
+        await client.query('ALTER TABLE letter_drafts ENABLE TRIGGER update_letter_drafts_updated_at');
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+    }
+
+    /** An order-less draft, expired `expiredDaysAgo` days and an hour ago, and marked so `markedDaysAgo` days ago. */
+    async function expiredDraft(expiredDaysAgo: number, markedDaysAgo: number): Promise<string> {
+      const userId = await seedUser();
+      const draftId = await seedContentDraft({ daysAgo: expiredDaysAgo + 1, userId });
+      await setDraft(
+        draftId,
+        `UPDATE letter_drafts SET status = 'expired', consumed_at = NULL,
+           expires_at = NOW() - make_interval(days => $2::int, hours => 1),
+           updated_at = NOW() - make_interval(days => $3::int)
+         WHERE draft_id = $1`,
+        [expiredDaysAgo, markedDaysAgo]
+      );
+      return draftId;
+    }
+
+    it("deletes an unsent draft 4 days after it expired, however late a run marked it", async () => {
+      const { cleanupOldDrafts } = await import("../../src/services/draftService.js");
+      // Expired 4 days and an hour ago, marked expired only yesterday.
+      const late = await expiredDraft(4, 1);
+      // Expired 3 days and an hour ago, marked 8 days ago by its own clock: not yet.
+      const recent = await expiredDraft(3, 8);
+      expect(await cleanupOldDrafts(7)).toBe(1);
+      expect(await readDraft(late)).toBeUndefined();
+      expect((await readDraft(recent)).body_text).toBe(SECRET_BODY);
+    });
+
+    it("keeps a sent draft its 7 days from the send, as before", async () => {
+      const { cleanupOldDrafts } = await import("../../src/services/draftService.js");
+      const userId = await seedUser();
+      const sixDays = await seedContentDraft({ daysAgo: 6, userId });
+      const eightDays = await seedContentDraft({ daysAgo: 8, userId });
+      await setDraft(sixDays, `UPDATE letter_drafts SET updated_at = NOW() - INTERVAL '6 days 1 hour' WHERE draft_id = $1`, []);
+      await setDraft(eightDays, `UPDATE letter_drafts SET updated_at = NOW() - INTERVAL '8 days' WHERE draft_id = $1`, []);
+      expect(await cleanupOldDrafts(7)).toBe(1);
+      expect((await readDraft(sixDays)).body_text).toBe(SECRET_BODY);
+      expect(await readDraft(eightDays)).toBeUndefined();
+    });
+
+    it("keeps a cancelled draft its 7 days from the cancel, however old its expiry", async () => {
+      const { cleanupOldDrafts } = await import("../../src/services/draftService.js");
+      const userId = await seedUser();
+      // Expired 6 days ago, cancelled 6 days and an hour ago: only an expired draft goes by its expiry.
+      const cancelled = await seedContentDraft({ daysAgo: 6, userId });
+      await setDraft(
+        cancelled,
+        `UPDATE letter_drafts SET status = 'cancelled', consumed_at = NULL,
+           updated_at = NOW() - INTERVAL '6 days 1 hour'
+         WHERE draft_id = $1`,
+        []
+      );
+      expect(await cleanupOldDrafts(7)).toBe(0);
+      expect((await readDraft(cancelled)).body_text).toBe(SECRET_BODY);
     });
   });
 });

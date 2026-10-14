@@ -129,7 +129,7 @@ operator sends now (`job.dispatch_now`) between the preview and the run.
 - **Sessions already open are refused too.** Every MCP request is signed in and checked on its own (the
   legacy SSE sessions that outlived calls are retired, #730). One thing can still slip through in the moment the erasure commits: a tool call
   already past sign-in can write one draft. Nothing reads it, and the draft cleanup deletes it within
-  about eight days.
+  about six days.
 - **A restyle caught mid-way writes nothing back.** The remembered stationery is kept off the tombstone by
   its two writers, a restyle and a preview made in a chosen style, which skip an erased account
   (`AND erased_at IS NULL`). The `users_erased_tombstone` check covers only the address and the email.

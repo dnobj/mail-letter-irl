@@ -439,8 +439,8 @@ export type ErasureOutcome =
  *     spending an attempt; the gate then sees whatever the send left behind.
  *   - a tool call already past sign-in when this commits can still write one
  *     draft to the tombstone. Nothing reads it, and the draft cleanup deletes
- *     it within about eight days (expired a day after its expiry, deleted a
- *     week after that).
+ *     it within about six days (it expires a day after it is written, and goes
+ *     at the first daily sweep 4 days after that, #730).
  *
  * Order within the writes matters in one place: the saved copies are found
  * through the drafts, so they are deleted before the drafts are.

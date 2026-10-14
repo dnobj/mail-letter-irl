@@ -408,8 +408,9 @@ export async function markExpiredDrafts(): Promise<number> {
 }
 
 /**
- * Delete drafts that are done with: sent (consumed), expired or cancelled,
- * last changed more than `olderThanDays` ago, and never paid for by an order.
+ * Delete drafts that are done with, and never paid for by an order: sent
+ * (consumed) or cancelled, last changed more than `olderThanDays` ago; or
+ * expired unsent, by their own expiry, as below.
  * The hourly maintenance calls it once a day.
  *
  * A sent draft whose letter waits for its mail date (#535) stays until
@@ -420,14 +421,28 @@ export async function markExpiredDrafts(): Promise<number> {
  * its content goes on the unpaid schedule (retentionService). The date cutoff
  * is its own integer parameter; the timestamp one is never cast a second way,
  * only compared again with a timestamp column.
+ *
+ * An unsent draft is measured from its own expiry, not from when a run marked
+ * it expired (#730): the privacy policy says an unsent draft's content is
+ * deleted within 7 days, and the run that marks it can come a day after the
+ * expiry. Its cutoff ($3) is UNSENT_DRAFT_DAYS_AFTER_EXPIRY, fixed rather than
+ * taken from `olderThanDays`. Four days meets the 7 however they are counted:
+ * from the expiry, or from the draft's creation a day before it. This sweep
+ * runs once a day and that day drifts (the next run waits a full day from the
+ * end of the last, so it usually comes about 25 hours later), so a draft it
+ * just misses goes at the next run, still inside the 7. Earlier costs nothing:
+ * the draft expired unsent and nothing paid for it.
  */
+export const UNSENT_DRAFT_DAYS_AFTER_EXPIRY = 4;
+
 export async function cleanupOldDrafts(olderThanDays: number = 7): Promise<number> {
   const cutoffDate = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000);
+  const unsentCutoff = new Date(Date.now() - UNSENT_DRAFT_DAYS_AFTER_EXPIRY * 24 * 60 * 60 * 1000);
 
   const result = await query(
     `DELETE FROM letter_drafts
      WHERE status IN ('consumed', 'expired', 'cancelled')
-       AND updated_at < $1
+       AND (CASE WHEN status = 'expired' THEN expires_at < $3 ELSE updated_at < $1 END)
        AND NOT EXISTS (
          SELECT 1 FROM orders WHERE orders.draft_id = letter_drafts.draft_id
        )
@@ -438,7 +453,7 @@ export async function cleanupOldDrafts(olderThanDays: number = 7): Promise<numbe
             AND (letters.status <> 'cancelled' OR letters.status_updated_at >= $1)
        )
      RETURNING draft_id`,
-    [cutoffDate, olderThanDays]
+    [cutoffDate, olderThanDays, unsentCutoff]
   );
 
   const count = result.rowCount ?? 0;
