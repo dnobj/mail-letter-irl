@@ -804,6 +804,29 @@ describePostgres('content retention sweep', () => {
       expect((await readLetter(letterId)).content).toEqual({});
     });
 
+    /** #730: a letter that failed for good, its job failed by a definite rejection. */
+    async function seedFailedLetter(jobOutcome: 'definite_failure' | 'not_dispatched'): Promise<string> {
+      const { letterId } = await seedSentLetter({ daysAgo: 400, status: 'failed' });
+      await pool.query(
+        `INSERT INTO letter_jobs (job_id, letter_id, status, idempotency_key, next_attempt_at, provider_outcome)
+         VALUES ($1, $2, 'failed', $3, NOW(), $4)`,
+        [`job_${randomUUID()}`, letterId, `idem_${randomUUID()}`, jobOutcome]
+      );
+      return letterId;
+    }
+
+    it('redacts a letter that failed for good, though its failed job could still be retried by hand (#730)', async () => {
+      const letterId = await seedFailedLetter('definite_failure');
+      expect(await retention.purgeExpiredLetterContent()).toBe(1);
+      expect((await readLetter(letterId)).content).toEqual({});
+    });
+
+    it('HOLDS a failed letter whose job could still be sent by the outbox (#730)', async () => {
+      const letterId = await seedFailedLetter('not_dispatched');
+      expect(await retention.purgeExpiredLetterContent()).toBe(0);
+      expect((await readLetter(letterId)).content.bodyText).toBe(SECRET_BODY);
+    });
+
     it('respects the batch limit', async () => {
       await seedSentLetter({ daysAgo: 400 });
       await seedSentLetter({ daysAgo: 400 });

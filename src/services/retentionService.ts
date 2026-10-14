@@ -13,7 +13,8 @@ import type { JobStatus, LetterStatus, OrderStatus } from './types.js';
  * docs/privacy-policy.md (#153).
  *
  * THE APPROVED SCHEDULE
- *   - Sent letter content: 90 days.
+ *   - Sent letter content: 90 days. A letter that failed for good counts from
+ *     its creation, and its failed job no longer holds it (#730).
  *   - Drafts attached to a PAID order: the same schedule.
  *   - Unsent drafts never paid for: within 7 days (#730: deleted 4 days after
  *     their expiry, for the daily sweep's drift). cleanupOldDrafts() DELETES the
@@ -274,6 +275,21 @@ export const DRAFT_REDACTION_SET = `
             redacted_at = NOW()`;
 
 /**
+ * A failed job that holds nothing back (#730): its letter failed for good (the
+ * provider refused it, a definite failure) and the job is not left for the
+ * operator to resolve. Such a job stays 'failed' rather than settled, because
+ * the operator's retry may send the letter again, so without this its content
+ * was never redacted. Past the retention window it is; the retry and the
+ * dispatch both refuse a redacted letter, so nothing empty is ever mailed.
+ */
+function retiredFailedJob(job: string): string {
+  return `(${job}.status = 'failed'
+                        AND ${job}.provider_outcome = 'definite_failure'
+                        AND ${job}.operator_resolution IS NULL
+                        AND EXISTS (SELECT 1 FROM letters fl WHERE fl.letter_id = ${job}.letter_id AND fl.status = 'failed'))`;
+}
+
+/**
  * THE DUE PREDICATES, DEFINED ONCE.
  *
  * Each is shared verbatim between the REPORT path (a plain SELECT) and the
@@ -291,6 +307,7 @@ const LETTER_DUE_PREDICATE = `        WHERE l.redacted_at IS NULL
                 SELECT 1 FROM letter_jobs j
                  WHERE j.letter_id = l.letter_id
                    AND NOT (j.status = ANY($3::varchar[]))
+                   AND NOT ${retiredFailedJob('j')}
               )
           AND NOT EXISTS (
                 SELECT 1 FROM orders o
@@ -330,6 +347,7 @@ const PAID_DRAFT_DUE_PREDICATE = `        WHERE d.redacted_at IS NULL
                  WHERE d.consumed_letter_id IS NOT NULL
                    AND j.letter_id = d.consumed_letter_id
                    AND NOT (j.status = ANY($4::varchar[]))
+                   AND NOT ${retiredFailedJob('j')}
               )`;
 
 const ABANDONED_DRAFT_DUE_PREDICATE = `        WHERE d.redacted_at IS NULL
@@ -347,6 +365,7 @@ const ABANDONED_DRAFT_DUE_PREDICATE = `        WHERE d.redacted_at IS NULL
                  WHERE d.consumed_letter_id IS NOT NULL
                    AND j.letter_id = d.consumed_letter_id
                    AND NOT (j.status = ANY($3::varchar[]))
+                   AND NOT ${retiredFailedJob('j')}
               )`;
 
 /**
