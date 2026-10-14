@@ -27,6 +27,7 @@ import { storeUploadedPhoto } from '../../../src/services/tempImageStore.js';
 import { setRecentUploadedImage } from '../../../src/services/recentUploadStore.js';
 import {
   MAX_CHUNK_CHARS,
+  CHUNK_IDLE_MS,
   MAX_CHUNKS,
   MAX_PENDING_BYTES,
   MAX_PHOTO_BYTES,
@@ -261,6 +262,40 @@ describe('photo uploads through the card (#474)', () => {
     );
     expect(late.code).toBe('OUT_OF_ORDER');
     expect(late.message).toBe('That upload was interrupted. Choose the photo again.');
+  });
+
+  it('drops an upload that sends no chunk for too long, within the window (#730)', async () => {
+    await receivePhotoChunk(USER, { uploadId: ID, index: 0, total: 3, data: b64(300) }, NOW);
+    // A chunk inside the idle limit keeps it going, and starts the limit again.
+    await receivePhotoChunk(USER, { uploadId: ID, index: 1, total: 3, data: b64(300) }, NOW + CHUNK_IDLE_MS);
+    const idle = await refusal(
+      receivePhotoChunk(USER, { uploadId: ID, index: 2, total: 3, data: b64(300) }, NOW + 2 * CHUNK_IDLE_MS + 1)
+    );
+    expect(idle.code).toBe('OUT_OF_ORDER');
+    expect(NOW + 2 * CHUNK_IDLE_MS + 1 - NOW).toBeLessThan(UPLOAD_WINDOW_MS);
+  });
+
+  it('frees the memory an idle upload held, so stalled uploads cannot keep others out (#730)', async () => {
+    const chunk = b64(3 * (MAX_CHUNK_CHARS / 4));
+    const perChunk = Buffer.from(chunk, 'base64').length;
+    const perAccount = Math.floor(MAX_PHOTO_BYTES / perChunk);
+    let held = 0;
+    let account = 0;
+    let index = 0;
+    while (held + perChunk <= MAX_PENDING_BYTES) {
+      if (index === perAccount) {
+        account += 1;
+        index = 0;
+      }
+      await receivePhotoChunk(`auth0|stalled-${account}`, { uploadId: ID, index, total: MAX_CHUNKS, data: chunk }, NOW);
+      held += perChunk;
+      index += 1;
+    }
+    expect((await refusal(receivePhotoChunk(USER, { uploadId: ID, index: 0, total: 2, data: chunk }, NOW))).code).toBe('BUSY');
+    // The stalled uploads send nothing more; past the idle limit their memory is free.
+    await expect(
+      receivePhotoChunk(USER, { uploadId: ID, index: 0, total: 2, data: chunk }, NOW + CHUNK_IDLE_MS + 1)
+    ).resolves.toMatchObject({ received: 1, total: 2, done: false });
   });
 
   it.each([

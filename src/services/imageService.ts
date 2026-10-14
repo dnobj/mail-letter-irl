@@ -593,14 +593,22 @@ export async function downloadAndProcessPostcardImageWithPreview(
  * prints from, which was cropped to its old size. `from` says which.
  */
 export async function reprocessPostcardImage(
-  source: { url: string | null; stored: string },
+  source: { url: string | null; stored: string; storedSize: PostcardSize },
   size: PostcardSize,
   options: ImageProcessingOptions = {}
 ): Promise<ProcessedPostcardImage & { from: 'source' | 'stored' }> {
   if (source.url) {
     try {
       const downloaded = await downloadImage(source.url, options);
-      return { ...(await processPostcardBuffer(downloaded, size, options)), from: 'source' };
+      // The link may now hold another picture (#730). Made at the size the
+      // stored copy was made at, the same picture gives the same bytes, so the
+      // original's fuller crop is used only then; anything else, including a
+      // picture processed by another version of the library, falls back to
+      // the stored copy, the picture the person approved.
+      const asStored = await processPostcardBuffer(downloaded, source.storedSize, options);
+      if (asStored.base64DataUri === source.stored) {
+        return { ...(await processPostcardBuffer(downloaded, size, options)), from: 'source' };
+      }
     } catch (error) {
       // A link that no longer opens, or bytes that no longer make a picture:
       // the stored copy, the picture the person approved, stands in. A busy

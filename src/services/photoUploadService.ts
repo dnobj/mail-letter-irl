@@ -16,7 +16,9 @@
  * - one photo held: a finished upload replaces the photo held before it;
  * - DAILY uploads started in a rolling 24 hours (dailyPhotoUploadsPerAccount);
  * - a chunk of at most MAX_CHUNK_CHARS base64, at most MAX_CHUNKS chunks and
- *   MAX_PHOTO_BYTES in all, finished within UPLOAD_WINDOW_MS;
+ *   MAX_PHOTO_BYTES in all, finished within UPLOAD_WINDOW_MS, with no more
+ *   than CHUNK_IDLE_MS between chunks (#730: eight stalled uploads could
+ *   otherwise hold the whole memory budget for the window);
  * - across all accounts, at most MAX_PENDING_BYTES held in memory.
  *
  * Every call comes through the MCP server, so only a signed-in account with
@@ -35,6 +37,8 @@ export const MAX_CHUNK_CHARS = 512 * 1024;
 export const MAX_CHUNKS = 24;
 export const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
 export const UPLOAD_WINDOW_MS = 10 * 60 * 1000;
+/** The longest an upload may go without a chunk: room for one on a slow phone connection. */
+export const CHUNK_IDLE_MS = 2 * 60 * 1000;
 export const MAX_PENDING_BYTES = 64 * 1024 * 1024;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -90,6 +94,8 @@ interface PendingUpload {
   chunks: Buffer[];
   bytes: number;
   startedAtMs: number;
+  /** When its last chunk came, for CHUNK_IDLE_MS. */
+  lastChunkAtMs: number;
 }
 
 const pending = new Map<string, PendingUpload>();
@@ -119,7 +125,7 @@ function pendingBytes(): number {
 /** Forget what no longer counts, so memory stays bounded by recent use. */
 function dropExpired(nowMs: number): void {
   for (const [userId, upload] of pending) {
-    if (nowMs - upload.startedAtMs > UPLOAD_WINDOW_MS) pending.delete(userId);
+    if (nowMs - upload.startedAtMs > UPLOAD_WINDOW_MS || nowMs - upload.lastChunkAtMs > CHUNK_IDLE_MS) pending.delete(userId);
   }
   for (const [userId, done] of finished) {
     if (nowMs - done.atMs > UPLOAD_WINDOW_MS) finished.delete(userId);
@@ -205,7 +211,7 @@ export async function receivePhotoChunk(
       throw new PhotoUploadRefusedError('BUSY', 'Photo uploads are busy right now. Please try again in a minute.');
     }
     startedAt.set(userId, [...starts, nowMs]);
-    upload = { uploadId: input.uploadId, total: input.total, context, chunks: [], bytes: 0, startedAtMs: nowMs };
+    upload = { uploadId: input.uploadId, total: input.total, context, chunks: [], bytes: 0, startedAtMs: nowMs, lastChunkAtMs: nowMs };
     pending.set(userId, upload);
   }
 
@@ -232,6 +238,7 @@ export async function receivePhotoChunk(
   }
   upload.chunks.push(chunk);
   upload.bytes += chunk.length;
+  upload.lastChunkAtMs = nowMs;
 
   if (upload.chunks.length < upload.total) {
     return { uploadId: upload.uploadId, received: upload.chunks.length, total: upload.total, done: false };

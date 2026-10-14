@@ -264,7 +264,7 @@ describe('set_postcard_style at a new size', () => {
   it('crops the picture again from its source, lays the back out at the size, and prices it per send', async () => {
     const output = await run({ size: '6x4' });
 
-    expect(reprocessPostcardImage).toHaveBeenCalledWith({ url: SOURCE, stored: PRINT['6x9'] }, '6x4', { actorId: 'user-1' });
+    expect(reprocessPostcardImage).toHaveBeenCalledWith({ url: SOURCE, stored: PRINT['6x9'], storedSize: '6x9' }, '6x4', { actorId: 'user-1' });
     const change = stored();
     expect(change).toMatchObject({ size: '6x4', front: null, frontImageData: PRINT['6x4'] });
     expect(rendererDocumentPages(change.previewHtml)).toEqual(drawn({ size: '6x4', small: SMALL_AGAIN }));
@@ -387,7 +387,7 @@ describe('set_postcard_style at a new size', () => {
   it('crops a photo again at a new size: only a collage keeps its size', async () => {
     // The same call on a draft that records its link goes through.
     await run({ size: '6x4' });
-    expect(reprocessPostcardImage).toHaveBeenCalledWith({ url: SOURCE, stored: PRINT['6x9'] }, '6x4', { actorId: 'user-1' });
+    expect(reprocessPostcardImage).toHaveBeenCalledWith({ url: SOURCE, stored: PRINT['6x9'], storedSize: '6x9' }, '6x4', { actorId: 'user-1' });
   });
 
   it('refuses when the picture cannot be cropped again, leaving the postcard as it is', async () => {
