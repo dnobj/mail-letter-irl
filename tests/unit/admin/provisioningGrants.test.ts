@@ -61,6 +61,10 @@ describe("admin grant statements", () => {
     expect(ADMIN_READER_COLUMN_GRANTS.personal_access_tokens).not.toContain(
       "token_hash",
     );
+    // The SHA-256 a token is found by (059, #730).
+    expect(ADMIN_READER_COLUMN_GRANTS.personal_access_tokens).not.toContain(
+      "token_lookup",
+    );
     expect(ADMIN_READER_COLUMN_GRANTS.feature_requests).not.toContain(
       "contact_email",
     );

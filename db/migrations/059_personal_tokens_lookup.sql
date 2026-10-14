@@ -29,4 +29,4 @@ CREATE UNIQUE INDEX idx_pat_token_lookup ON personal_access_tokens (token_lookup
   WHERE token_lookup IS NOT NULL;
 
 COMMENT ON COLUMN personal_access_tokens.token_lookup IS
-  'SHA-256 (hex) of the whole token, how validateToken finds it (#730). NULL only on a token made before 059 and not used since.';
+  'SHA-256 (hex) of the whole token, how validateToken finds it (#730). NULL only on a token made without one (before 059, or by an older image) and not used since.';

@@ -327,8 +327,10 @@ export async function validateToken(rawToken: string): Promise<ValidateTokenResu
  * match, so from then on it is found by that. A token may be made to last up
  * to MAX_TOKEN_LIFETIME_DAYS, and an older image (during the pre-deploy, or
  * after a rollback across 059) still makes tokens without a hash, so this
- * stays until `SELECT max(expires_at) FROM personal_access_tokens WHERE token_lookup IS NULL` is NULL or past. Until then every miss runs this
- * read too, and compares only against live tokens that have no hash.
+ * stays until this is NULL or past:
+ *   SELECT max(expires_at) FROM personal_access_tokens WHERE token_lookup IS NULL
+ * Until then every miss runs this read too, and compares only against live
+ * tokens that have no hash.
  *
  * It reads live tokens only, so a revoked or expired token without a hash is
  * logged as not found rather than as revoked or expired. Callers see the same
