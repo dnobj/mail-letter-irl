@@ -537,11 +537,12 @@ describePostgres('beta spend limits', () => {
         // Seen waiting on a lock by the server itself, not guessed from a delay.
         let waitingOnLock = false;
         for (let tries = 0; tries < 100 && !waitingOnLock && !settled; tries += 1) {
-          const seen = await pool.query<{ wait_event_type: string | null }>(
-            'SELECT wait_event_type FROM pg_stat_activity WHERE pid = $1',
+          const seen = await pool.query<{ wait_event_type: string | null; wait_event: string | null }>(
+            'SELECT wait_event_type, wait_event FROM pg_stat_activity WHERE pid = $1',
             [bPid]
           );
-          waitingOnLock = seen.rows[0]?.wait_event_type === 'Lock';
+          // The cap's own lock, not some row the fixtures happen to share.
+          waitingOnLock = seen.rows[0]?.wait_event_type === 'Lock' && seen.rows[0]?.wait_event === 'advisory';
           if (!waitingOnLock) await new Promise(resolve => setTimeout(resolve, 50));
         }
         expect(settled).toBe(false);
