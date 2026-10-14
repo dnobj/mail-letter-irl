@@ -76,6 +76,15 @@ export interface CommandDefinition<I> {
   execute(execution: CommandExecution, targetId: string, input: I, preview: CommandPreview): Promise<AdminJsonObject>;
   /** True when execute() writes through `execution.client` only. */
   transactional: boolean;
+  /**
+   * For a transactional command whose preview carries an expectedVersion: the
+   * target's version read again inside the operator transaction, holding the
+   * target's row until it ends (null when the row is gone). The preview is
+   * re-derived on the reader, outside that transaction, so without this the
+   * target could change between the check and the write; the runner refuses a
+   * version that moved (#730).
+   */
+  lockVersion?(client: pg.PoolClient, targetId: string): Promise<string | null>;
   /** Extra gate a command may impose (e.g. a feature flag). */
   enabled?(config: AdminRuntimeConfig): boolean;
 }
@@ -298,6 +307,12 @@ export async function runAdminCommand<I>(
         return priorOutcome(begun.commandRun);
       }
       await deps.audit.markCommandRunning(client, begun.commandRun.id);
+      // Held from here to the commit: the version the preview was checked at
+      // is the one the write sees. A refusal rolls the run row back with it.
+      if (definition.lockVersion && prepared.preview.expectedVersion !== undefined) {
+        const current = await definition.lockVersion(client, prepared.preview.targetId);
+        if (current !== prepared.preview.expectedVersion) throw new AdminFoundationError("ADMIN_STALE_PREVIEW");
+      }
       const execution: CommandExecution = {
         commandId: begun.commandRun.id,
         idempotencyKey: `admin:${begun.commandRun.id}`,

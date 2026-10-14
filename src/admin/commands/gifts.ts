@@ -7,6 +7,7 @@ import { AdminFoundationError } from "../errors.js";
 import { readGiftCode, readGiftCodeByLetter, shownGiftCode } from "../queries/gifts.js";
 import { readCampaignByCode, type CampaignView } from "../queries/promos.js";
 import { type CommandDefinition } from "./runner.js";
+import { lockAccountVersion } from "./accountVersionLock.js";
 
 /**
  * Operator gift commands (docs/gift-letters.md): seeding an account with gift
@@ -103,6 +104,7 @@ export function createGiftCommands(overrides: Partial<GiftCommandSeams> = {}) {
     title: "Grant gift letters",
     action: "gift.grant",
     targetType: "user",
+    lockVersion: lockAccountVersion,
     transactional: true,
     verb: () => "GRANT-GIFTS",
     parseInput(fields) {
