@@ -19,11 +19,13 @@ Production API and website remain warm. Development API and website use Railway 
 
 ## API Settings
 
-**Do not set the build, start or pre-deploy commands in the dashboard.** They are
-committed: `nixpacks.toml` holds build and start, `railway.toml` holds the
-pre-deploy command, and Railway's config-as-code overrides dashboard values. The
-block below records what those files produce so this guide can be checked against
-them; it is not a list of things to type in. Railway stops reading these files on
+**Do not set the pre-deploy command in the dashboard.** `railway.toml` holds it,
+and Railway's config-as-code overrides dashboard values. The API builds with
+Railpack, Railway's default builder, which runs `npm ci`, `npm run build` and
+`npm start` from `package.json` on the Node version `engines.node` names; a
+start command in the dashboard (development has `npm start`) only repeats it. The
+block below records what the API runs so this guide can be checked against it;
+it is not a list of things to type in. Railway stops reading these files on
 2026-12-01 (config-as-code is deprecated); see the deadline note in
 [deployment.md](deployment.md).
 
@@ -34,6 +36,7 @@ Healthcheck path and region are dashboard settings and do have to be set here.
 Build command: npm run build
 Pre-deploy command: npm run db:migrate:prod
 Start command: npm start
+Variable: UV_THREADPOOL_SIZE=16 (both environments; read when the process starts)
 Healthcheck path: /healthz
 Production region: US East
 Development region: US West (current; review separately before changing)

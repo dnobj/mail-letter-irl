@@ -30,7 +30,8 @@ Feature branches target `dev`. Do not merge feature branches directly to `master
 
 ## Backend Release Settings
 
-Railway builds the backend once with Node 22 and these commands:
+Railway builds the backend once with Railpack, its default builder, on the Node
+version `engines.node` in `package.json` names (22), with these commands:
 
 ```text
 Install: npm ci
@@ -40,10 +41,19 @@ API start: npm start
 Cron start: npm run maintenance
 ```
 
-All five come from files in this repository, not from the Railway dashboard:
-`nixpacks.toml` sets install, build and start; `railway.toml` sets the
-pre-deploy command. Railway's config-as-code overrides dashboard values, and
-fields absent from those files keep theirs.
+Install, build and the API's start are Railpack's own steps for a Node project:
+`npm ci`, then the `build` and `start` scripts in `package.json`. The cron's start
+command is a dashboard setting on the maintenance service. `railway.toml` sets
+the pre-deploy command; Railway's config-as-code overrides dashboard values, and
+fields absent from it keep theirs. Runtime settings, such as
+`UV_THREADPOOL_SIZE=16` (#730), are Railway service variables in each
+environment.
+
+Until 2026-10-13 this said a `nixpacks.toml` set install, build, start and the
+thread pool. Railway had been building with Railpack, which never reads that
+file, so the file was deleted, the thread pool became a service variable, and
+`engines.node` now pins the Node version Railpack would otherwise choose for
+itself: production's cron had been built on Node 24 while the API ran on 22.
 
 **Deadline.** Railway has deprecated config-as-code: existing `railway.toml`
 files stop being read on **2026-12-01**, and services created after 2026-08-28
