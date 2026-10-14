@@ -5,7 +5,7 @@ vi.mock("../../../src/db/index.js", () => ({
 }));
 
 import { query } from "../../../src/db/index.js";
-import { createUser, EmailAlreadyLinkedError, getOrCreateUser } from "../../../src/services/userService.js";
+import { createUser, EmailAlreadyLinkedError, getOrCreateUser, updateUserEmail } from "../../../src/services/userService.js";
 import { AccountErasedError } from "../../../src/auth/accountErased.js";
 
 const rawSubject = "auth0|real-persistence-subject";
@@ -131,7 +131,8 @@ describe("a first insert that finds a conflict (#457)", () => {
     );
 
     const lookup = vi.mocked(query).mock.calls[2];
-    expect(String(lookup[0])).toContain("WHERE email = $1");
+    // Any case: the comparison the unique index makes (#730).
+    expect(String(lookup[0])).toContain("WHERE lower(email) = lower($1)");
     expect(lookup[1]).toEqual([newEmail]);
     const output = warn.mock.calls.flat().map(String).join("\n");
     expect(output).toContain('"event":"identity.email_already_linked"');
@@ -148,5 +149,18 @@ describe("a first insert that finds a conflict (#457)", () => {
     const failure = createUser({ userId: rawSubject, email: newEmail });
     await expect(failure).rejects.toThrow("User not found");
     await expect(failure).rejects.not.toBeInstanceOf(EmailAlreadyLinkedError);
+  });
+
+  it("names the collision on the case-insensitive email index, and passes any other failure along (#730)", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.mocked(query).mockRejectedValueOnce(
+      Object.assign(new Error("duplicate key"), { code: "23505", constraint: "users_email_lower_key" }) as never
+    );
+    await expect(updateUserEmail(rawSubject, newEmail)).rejects.toBeInstanceOf(EmailAlreadyLinkedError);
+
+    // 001's inline UNIQUE is gone since 058; a 23505 on any other index is not this collision.
+    const other = Object.assign(new Error("duplicate key"), { code: "23505", constraint: "users_email_key" });
+    vi.mocked(query).mockRejectedValueOnce(other as never);
+    await expect(updateUserEmail(rawSubject, newEmail)).rejects.toBe(other);
   });
 });

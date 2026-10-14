@@ -64,16 +64,19 @@ statement clears `erased_at`. The admin panel reads an account as erased from th
 neither admin role is granted `erased_at`.
 
 **Indexes:**
-- `idx_users_email` on email
+- `users_email_lower_key`, unique, on `lower(email)` (058; it replaced `idx_users_email`)
 - `idx_users_created_at` on created_at
 - `idx_users_tier` on tier
 
-**The UNIQUE on `email` is load-bearing, and PostgreSQL calls it
-`users_email_key`.** Auth0 mints a subject per sign-in method, so one person
+**The unique index on `lower(email)` is load-bearing, and it is called
+`users_email_lower_key`.** Auth0 mints a subject per sign-in method, so one person
 arriving by a second method presents an address the first already holds. The
-constraint is what stops that becoming two accounts.
-- **Moving an address, or opening an account inside a grant:** `EmailAlreadyLinkedError` matches the constraint's name on a 23505, in `updateUserEmail` and in `ensureAccountRowWithClient`. A migration that renames or replaces the constraint has to update `EMAIL_UNIQUE_CONSTRAINT` in `src/services/userService.ts` to match.
-- **Opening an account on a first request:** `createUser` skips a conflict on any unique index, then reads what the conflict was (#457). The subject's own row means a request made at the same moment opened it. Otherwise, another subject holding the address is the collision.
+index is what stops that becoming two accounts, and since migration 058 (#730) it
+ignores case: `Bob@example.com` and `bob@example.com` are one address. Until then
+it was 001's inline UNIQUE, `users_email_key`, which compared the address as written.
+The address itself is kept as the sign-in gave it.
+- **Moving an address, or opening an account inside a grant:** `EmailAlreadyLinkedError` matches the constraint's name on a 23505, in `updateUserEmail` and in `ensureAccountRowWithClient`. A migration that renames or replaces the index has to update `EMAIL_UNIQUE_CONSTRAINT` in `src/services/userService.ts` to match.
+- **Opening an account on a first request:** `createUser` skips a conflict on any unique index, then reads what the conflict was (#457). The subject's own row means a request made at the same moment opened it. Otherwise, another subject holding the address, in any case, is the collision (`getUserByEmail` compares `lower(email)`, as the index does).
 
 Both are proven against a real database in `tests/integration/accountIdentity.postgres.test.ts` (`src/services/userService.ts`).
 
@@ -909,6 +912,7 @@ Production provisioning and the first production connection remain separate owne
 | 55 | 055_letter_jobs_mail_hold_until.sql | `letter_jobs.mail_hold_until` (#693): the hold an arrive-by job was created with, which `metadata.heldUntil` held until now, backfilled from it row by row (a value that is not a time is left out, with a notice, rather than failing the migration; the backfill may be run again). For one release the code also still writes `metadata.heldUntil`, so a rollback across 055 still knows its held mail. Held now is one predicate, `src/services/heldMail.ts`. Provisioning: no re-run (both roles read `letter_jobs` whole, and the release writes no new column); `ADMIN_LATEST_REQUIRED_MIGRATION` is 055, since the panel reads the column |
 | 56 | 056_held_mail_funding_reversed.sql | The `held_mail_funding_reversed` alert type (#696), restated inside the `to_regclass` guard as 043 does, and a partial unique index on its order (`idx_commerce_alerts_held_mail_funding_order`) so it is raised once per order; and the operator audit operation `mail_job_cancel` (`job.cancel_held`), restated as 042 does. The hold itself is a `letter_jobs.hold_reason` (023), `funding_reversed` or `funding_disputed`, on a job still pending. Provisioning: no re-run (the roles read the alerts table whole, and the release's new write, `hold_reason`, is in the operator's list); `ADMIN_LATEST_REQUIRED_MIGRATION` is 056 |
 | 57 | 057_personal_tokens_expire.sql | `personal_access_tokens.expires_at` (#730) is NOT NULL, defaulting to 90 days from insertion. A token stored with none gets one first: 90 days after it was made, but never sooner than 30 days from the migration. Provisioning: no re-run (the reader role already reads the column, and neither role writes the table); `ADMIN_LATEST_REQUIRED_MIGRATION` is 057 |
+| 58 | 058_users_email_case_insensitive.sql | `users.email` is unique whatever its case (#730): `users_email_lower_key`, a unique index on `lower(email)`, replaces 001's inline `users_email_key`, and the plain `idx_users_email` goes. Addresses that already differ only in case stop the migration with a message naming the problem, for an operator to join or correct the accounts first; development and production had none. `EMAIL_UNIQUE_CONSTRAINT` names the new index. Provisioning: no re-run (indexes carry no grants); `ADMIN_LATEST_REQUIRED_MIGRATION` is 058 |
 
 ---
 

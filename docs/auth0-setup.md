@@ -50,7 +50,8 @@ A Letter IRL account is still keyed on the Auth0 subject (`users.user_id`), but
 the subject is no longer the identity. Auth0 mints one per sign-in method, and
 a post-login Action links the methods that share a **confirmed** email address
 into a single Auth0 user, whose primary subject is the one Letter IRL sees. The
-identity is therefore the address, which `users.email` holds UNIQUE.
+identity is therefore the address, which `users.email` holds UNIQUE whatever its case
+(migration 058).
 
 Two consequences worth knowing before touching anything here:
 
