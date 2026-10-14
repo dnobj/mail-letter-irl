@@ -37,7 +37,8 @@ describe.skipIf(!built)('the signature analysis on a worker thread (#730)', () =
       ticks += 1;
     }, 5);
     try {
-      const answer = await runSignatureAnalysis(grey, width, height, true);
+      // No fourth argument: the compiled server's own default.
+      const answer = await runSignatureAnalysis(grey, width, height);
       expect(answer).toEqual(expected);
     } finally {
       clearInterval(timer);
