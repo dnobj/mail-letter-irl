@@ -15,8 +15,8 @@ import { VerifiedEmailRequiredError } from '../../src/auth/verifiedEmail.js';
  *     one inside a grant, raise `EmailAlreadyLinkedError` by matching
  *     `users_email_lower_key` on a 23505 (#730: before 058, `users_email_key`). (`createUser` no longer does: since #457
  *     it skips the conflict and looks the address up.) A mocked client agrees
- *     with whatever name the code writes; only PostgreSQL knows what it
- *     actually called the inline UNIQUE in 001_initial_schema.sql. If a
+ *     with whatever name the code writes; only PostgreSQL knows which index
+ *     a duplicate address actually hits. If a
  *     future migration renames or replaces it, this is what goes red instead
  *     of a customer getting "database error" and no account.
  *   - **The rollback.** A grant refused for want of an address must leave

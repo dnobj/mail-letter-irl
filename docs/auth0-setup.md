@@ -54,8 +54,10 @@ identity is therefore the address, which `users.email` holds UNIQUE whatever its
 (migration 058). The Action's lookup is narrower: Auth0 stores a password user's
 address in lower case but a social provider's as the provider sent it, and its
 users-by-email search matches case. Two confirmed Auth0 users whose addresses
-differ only in case are therefore not linked, and the second to arrive is
-answered 409, for support to join the two.
+differ only in case are therefore not linked. Whichever of the two opens a
+Letter IRL account first keeps it, and the other is refused with the
+"already belongs to a Letter IRL account" sentence (a 409 on the REST API, an
+error result in a chat), for support to join the two.
 
 Two consequences worth knowing before touching anything here:
 
