@@ -41,7 +41,7 @@
 
 - Letter content, sender and recipient addresses, and draft content are kept only for the
   periods published in `docs/privacy-policy.md` (90 days after sending; unsent drafts 24 hours,
-  content cleared within 7 days of the expiry, which `cleanupOldDrafts` meets by deleting at 5, room for the daily sweep's drift, #730; uploaded image links within 48 hours of the last upload, which the
+  content deleted within 7 days: `cleanupOldDrafts` deletes it 4 days after the expiry, #730; uploaded image links within 48 hours of the last upload, which the
   `recent-uploads-sweep` meets by deleting them at 24 hours; feature requests 12 months). An
   address request (#604), with any address a recipient gave through it, goes
   `LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS` (7) days after it closes, or after its link expires

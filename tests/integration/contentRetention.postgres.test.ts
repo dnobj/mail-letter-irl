@@ -10,7 +10,7 @@ import { repositoryMigrations, validateDisposableDatabaseUrl } from './support/d
  *   sent letter content          -> anonymized at 90 days
  *   drafts on a PAID order       -> the same schedule
  *   drafts on an abandoned one   -> anonymized at 7 days (they cannot be deleted)
- *   unsent, no order at all      -> deleted at 7 days by cleanupOldDrafts
+ *   unsent, no order at all      -> deleted 4 days after expiry by cleanupOldDrafts
  *
  * These run against real PostgreSQL because every property that matters is a
  * property of the STATEMENT: the boundary, the allow-list holds, the
@@ -1042,12 +1042,12 @@ describePostgres('content retention sweep', () => {
       return draftId;
     }
 
-    it("deletes an unsent draft 5 days after it expired, however late a run marked it", async () => {
+    it("deletes an unsent draft 4 days after it expired, however late a run marked it", async () => {
       const { cleanupOldDrafts } = await import("../../src/services/draftService.js");
-      // Expired 5 days and an hour ago, marked expired only yesterday.
-      const late = await expiredDraft(5, 1);
-      // Expired 4 days and an hour ago, marked 8 days ago by its own clock: not yet.
-      const recent = await expiredDraft(4, 8);
+      // Expired 4 days and an hour ago, marked expired only yesterday.
+      const late = await expiredDraft(4, 1);
+      // Expired 3 days and an hour ago, marked 8 days ago by its own clock: not yet.
+      const recent = await expiredDraft(3, 8);
       expect(await cleanupOldDrafts(7)).toBe(1);
       expect(await readDraft(late)).toBeUndefined();
       expect((await readDraft(recent)).body_text).toBe(SECRET_BODY);
