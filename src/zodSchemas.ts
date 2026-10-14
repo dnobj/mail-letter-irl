@@ -5,6 +5,20 @@ import { MAX_LETTER_PAGES } from "./render/geometry.js";
 import { MAIL_SERVICES } from "./config/certifiedMail.js";
 import { EXTRA_SERVICES } from "./config/products.js";
 
+/**
+ * The longest image link a tool takes (#730), in characters. Image links are
+ * https only (src/services/imageService.ts), and a real one is well under this;
+ * a longer one is refused before anything is fetched or logged.
+ */
+export const IMAGE_URL_MAX_LENGTH = 2048;
+const IMAGE_URL_TOO_LONG =
+  `An image link can be at most ${IMAGE_URL_MAX_LENGTH} characters. Use a shorter link to the photo, or upload it with upload_image.`;
+/**
+ * An image link a tool takes: a string, bounded. A new schema each call, so the
+ * generated JSON Schema states it in place rather than as a $ref to another tool.
+ */
+export const imageUrlZ = () => z.string().max(IMAGE_URL_MAX_LENGTH, IMAGE_URL_TOO_LONG);
+
 export const addressZ = z.object({
   name: z.string(),
   addressLine1: z.string(),
@@ -264,7 +278,7 @@ export const quoteAndPreviewLetterWithHeaderImageInputZ = z.object({
   // Image from file attachment - OpenAI Apps SDK requires explicit schema definition
   image: imageFileParamZ.optional(),
   // Alternative: direct image URL
-  imageUrl: z.string().optional(),
+  imageUrl: imageUrlZ().optional(),
   sendAsGift: sendAsGiftZ,
   arriveBy: arriveByZ,
   stationery: stationeryZ,
@@ -284,7 +298,7 @@ export const quoteAndPreviewLetterWithImageInputZ = z.object({
   // Image from file attachment - OpenAI Apps SDK requires explicit schema definition
   image: imageFileParamZ.optional(),
   // Alternative: direct image URL
-  imageUrl: z.string().optional(),
+  imageUrl: imageUrlZ().optional(),
   sendAsGift: sendAsGiftZ,
   arriveBy: arriveByZ,
   stationery: stationeryZ,
@@ -483,11 +497,11 @@ export const quoteAndPreviewPostcardInputZ = z.object({
   // Mobile may send file_id without download_url (sediment:// protocol)
   image: imageFileParamZ.optional(),
   // Alternative: direct image URL (for when fileParams isn't available)
-  imageUrl: z.string().optional(),
+  imageUrl: imageUrlZ().optional(),
   // Two to four photos for a collage (#616): withheld while collages are not offered (withheldInputKeys).
   // A blank string where a list belongs is no list (preprocessPhotoList); the JSON Schema is the array's.
   images: z.preprocess(preprocessPhotoList, z.array(imageFileElementZ).optional()).describe(POSTCARD_COLLAGE_IMAGES_DESCRIPTION),
-  imageUrls: z.preprocess(preprocessPhotoList, z.array(z.string()).optional()).describe(POSTCARD_COLLAGE_IMAGE_URLS_DESCRIPTION),
+  imageUrls: z.preprocess(preprocessPhotoList, z.array(imageUrlZ()).optional()).describe(POSTCARD_COLLAGE_IMAGE_URLS_DESCRIPTION),
   sendAsGift: sendAsGiftZ,
   arriveBy: arriveByZ
 });
@@ -617,7 +631,7 @@ export const SIGNATURE_REMOVED_DESCRIPTION = "Whether a saved signature was remo
 
 export const setSignatureInputZ = z.object({
   image: imageFileParamZ.optional().describe(SIGNATURE_IMAGE_DESCRIPTION),
-  imageUrl: z.string().optional().describe(SIGNATURE_IMAGE_URL_DESCRIPTION)
+  imageUrl: imageUrlZ().optional().describe(SIGNATURE_IMAGE_URL_DESCRIPTION)
 });
 
 export const getSignatureInputZ = z.object({});
@@ -687,7 +701,7 @@ export const generateImageForMailInputZ = z.object({
 // ============================================================================
 
 export const confirmUploadedImageInputZ = z.object({
-  imageUrl: z.string(),
+  imageUrl: imageUrlZ(),
   context: z.string().optional().describe("What the photo is for: 'postcard', 'header_image' or 'inline_image'.")
 });
 

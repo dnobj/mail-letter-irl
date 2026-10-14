@@ -534,7 +534,8 @@
             "additionalProperties": false
           },
           "imageUrl": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 2048
           },
           "sendAsGift": {
             "type": "boolean",
@@ -1013,7 +1014,8 @@
             "additionalProperties": false
           },
           "imageUrl": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 2048
           },
           "sendAsGift": {
             "type": "boolean",
@@ -2326,7 +2328,8 @@
             "additionalProperties": false
           },
           "imageUrl": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 2048
           },
           "sendAsGift": {
             "type": "boolean",
@@ -3572,7 +3575,8 @@
         "type": "object",
         "properties": {
           "imageUrl": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 2048
           },
           "context": {
             "type": "string",
