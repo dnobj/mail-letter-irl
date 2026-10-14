@@ -426,7 +426,7 @@ describe('refusal reports', () => {
  * an open Pay & Send checkout counts as the letter it will become.
  */
 describe('counting under a lock, with open checkouts', () => {
-  const LOCK = "hashtext('letter_irl.daily_cap')";
+  const LOCK = 'pg_advisory_xact_lock(hashtext($1), hashtext($2))';
   function statements(c: never): Array<{ sql: string; params: unknown[] }> {
     return (c as unknown as { query: ReturnType<typeof vi.fn> }).query.mock.calls.map(call => ({
       sql: String(call[0]),
@@ -438,10 +438,11 @@ describe('counting under a lock, with open checkouts', () => {
     const c = client({});
     await assertMailWithinDailyCaps(c, 'u1', 0);
     const ran = statements(c).filter(s => !s.sql.includes('daily_limit_overrides'));
-    expect(ran.map(s => (s.sql.includes(LOCK) ? `lock ${s.params[0]}` : s.sql.includes('user_id = $1') ? 'count account' : 'count global'))).toEqual([
-      'lock account_daily_mail:u1',
+    expect(ran.map(s => (s.sql.includes(LOCK) ? `lock ${s.params.join(' ')}` : s.sql.includes('user_id = $1') ? 'count account' : 'count global'))).toEqual([
+      // An account's key in a class of its own.
+      'lock letter_irl.daily_cap.account account_daily_mail:u1',
       'count account',
-      'lock global_daily_mail',
+      'lock letter_irl.daily_cap global_daily_mail',
       'count global'
     ]);
   });
@@ -455,6 +456,7 @@ describe('counting under a lock, with open checkouts', () => {
       expect(sql).toContain("o.order_type = 'jit_mail'");
       expect(sql).toContain("o.status IN ('checkout_pending', 'paid', 'fulfillment_pending')");
       expect(sql).toContain('NOT EXISTS (SELECT 1 FROM letters l WHERE l.funding_order_id = o.order_id)');
+      expect(sql).toContain("AND (o.status <> 'checkout_pending' OR o.checkout_expires_at IS NULL OR o.checkout_expires_at > NOW())");
     }
     expect(counts[0]).toContain('o.user_id = $1 AND');
     expect(counts[1]).not.toContain('user_id = $1');
@@ -472,7 +474,7 @@ describe('counting under a lock, with open checkouts', () => {
     const c = client({});
     await assertGiftSendWithinDailyCap(c);
     const ran = statements(c).filter(s => !s.sql.includes('daily_limit_overrides'));
-    expect(ran[0]).toEqual({ sql: expect.stringContaining(LOCK), params: ['gift_daily_send'] });
+    expect(ran[0]).toEqual({ sql: expect.stringContaining(LOCK), params: ['letter_irl.daily_cap', 'gift_daily_send'] });
     expect(ran[1].sql).toContain("funding_type = 'gift_letter'");
   });
 });

@@ -150,7 +150,7 @@ vi.mock('../../../src/services/priceCatalog.js', async importOriginal => {
  */
 function spendCapAnswer(sql: unknown): Promise<{ rows: unknown[]; rowCount: number }> | null {
   if (typeof sql !== 'string') return null;
-  if (sql.includes("hashtext('letter_irl.daily_cap')")) return Promise.resolve({ rows: [], rowCount: 1 });
+  if (sql.includes('pg_advisory_xact_lock(hashtext($1), hashtext($2))')) return Promise.resolve({ rows: [], rowCount: 1 });
   if (sql.includes('COUNT(*) AS count') && sql.includes('FROM letters')) {
     const scoped = sql.includes('user_id = $1');
     const open = sql.includes('UNION ALL') ? capState.openToday : 0;
@@ -4418,7 +4418,7 @@ describe('commerceService', () => {
     it('checks the mail caps again inside the transaction once the order is a row, under their locks (#730)', async () => {
       await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).resolves.toMatchObject({ success: true, reused: false });
 
-      const firstLock = position("hashtext('letter_irl.daily_cap')");
+      const firstLock = position('pg_advisory_xact_lock(hashtext($1), hashtext($2))');
       // The early answer, before the transaction, counts letters alone and takes no lock.
       expect(position('COUNT(*) AS count FROM letters')).toBeLessThan(position(INSERT));
       expect(position(INSERT)).toBeLessThan(firstLock);

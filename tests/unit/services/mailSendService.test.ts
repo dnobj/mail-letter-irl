@@ -108,8 +108,8 @@ const client = {
       return { rows: commerceOrder ? [{ ...commerceOrder }] : [] };
     }
     // The daily caps' own lock (#730), apart from the mail date's below.
-    if (sql.includes("hashtext('letter_irl.daily_cap')")) {
-      capLocks.push(params?.[0] as string);
+    if (sql.includes('pg_advisory_xact_lock(hashtext($1), hashtext($2))')) {
+      capLocks.push(params?.[1] as string);
       return { rows: [] };
     }
     if (sql.includes('pg_advisory_xact_lock') || sql.includes('AS held FROM letters')) {
