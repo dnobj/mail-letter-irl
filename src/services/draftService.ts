@@ -458,7 +458,7 @@ export async function cleanupOldDrafts(olderThanDays: number = 7): Promise<numbe
 
   const count = result.rowCount ?? 0;
   if (count > 0) {
-    console.log(`📝 Cleaned up ${count} old drafts (sent or cancelled ${olderThanDays} days ago, or expired ${UNSENT_DRAFT_DAYS_AFTER_EXPIRY} days ago)`);
+    console.log(`📝 Cleaned up ${count} old drafts (sent or cancelled more than ${olderThanDays} days ago, or expired more than ${UNSENT_DRAFT_DAYS_AFTER_EXPIRY} days ago)`);
   }
 
   return count;

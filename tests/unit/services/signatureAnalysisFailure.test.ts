@@ -32,7 +32,7 @@ describe('a signature analysis that fails', () => {
     expect(writeDiagnostic).toHaveBeenCalledWith(
       'error',
       'signature.analysis_failed',
-      expect.objectContaining({ errorClass: expect.any(String) })
+      { errorClass: 'unknown_error' }
     );
   });
 });
