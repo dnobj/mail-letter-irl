@@ -124,9 +124,14 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  * lower(email) replaces the inline UNIQUE and the plain email index. Indexes
  * carry no grants, and the panel's lookup already compares lower(email).
  * Nothing to re-run; required, as the newest is.
+ *
+ * 059 adds personal_access_tokens.token_lookup (#730), the SHA-256 a token is
+ * found by. The reader's column list on that table is explicit and leaves it
+ * out, and neither role writes the table. Nothing to re-run; required, as the
+ * newest is.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
-  "058_users_email_case_insensitive.sql";
+  "059_personal_tokens_lookup.sql";
 
 export interface AdminProvisioningArguments {
   environment: "development" | "production";

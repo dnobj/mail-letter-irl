@@ -121,6 +121,7 @@ lirl_pat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ### Token Security
 
 - Tokens are hashed (bcrypt) - we never store the raw token
+- A token is found by the SHA-256 of the whole token, one indexed read (#730, migration 059), so what a request sends does not choose how much work is done
 - Shown only once at creation
 - Can be revoked anytime from the dashboard
 - Reads and drafts only (migration 037, #470). A token can use the read and preview tools and ask for the confirmation link (`request_send`). It cannot send, pay, redeem a promo code, or mint or revoke tokens. A send from a token becomes the link where the person sends it themselves ([letter-send-flow.md](letter-send-flow.md))
