@@ -25,7 +25,7 @@ Railpack, Railway's default builder, which runs `npm ci`, `npm run build` and
 `npm start` from `package.json` on the Node version `engines.node` names; a
 start command in the dashboard (development has `npm start`) only repeats it. The
 block below records what the API runs so this guide can be checked against it;
-it is not a list of things to type in. Railway stops reading these files on
+it is not a list of things to type in. Railway stops reading `railway.toml` on
 2026-12-01 (config-as-code is deprecated); see the deadline note in
 [deployment.md](deployment.md).
 

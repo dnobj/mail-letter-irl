@@ -42,8 +42,9 @@ Cron start: npm run maintenance
 ```
 
 Install, build and the API's start are Railpack's own steps for a Node project:
-`npm ci`, then the `build` and `start` scripts in `package.json`. The cron's start
-command is a dashboard setting on the maintenance service. `railway.toml` sets
+`npm ci`, then the `build` and `start` scripts in `package.json`. The cron's build
+and start commands are dashboard settings on the maintenance service, its build
+repeating Railpack's. `railway.toml` sets
 the pre-deploy command; Railway's config-as-code overrides dashboard values, and
 fields absent from it keep theirs. Runtime settings, such as
 `UV_THREADPOOL_SIZE=16` (#730), are Railway service variables in each
