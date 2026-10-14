@@ -28,8 +28,13 @@ export interface TailscaleAuthOptions {
   expectedHost: string | null;
   whois: WhoisClient;
   sessions: AdminSessionStore;
-  /** Development on a workstation: the configured login replaces the proxy. */
-  localDev?: { login: string; name: string } | null;
+  /**
+   * Development on a workstation: the configured login replaces the proxy.
+   * `hosts` are the names the panel answers to there (localhost and
+   * 127.0.0.1 at its port): a page on another name that resolves to loopback
+   * (DNS rebinding) is refused (#730).
+   */
+  localDev?: { login: string; name: string; hosts: readonly string[] } | null;
   /** False for a request another site sent: it may use a live session, never start one (#730). */
   allowNewSession?: boolean;
 }
@@ -112,6 +117,10 @@ export async function authenticateAdminRequest(
   let nodeFromWhois: (() => Promise<string | null>) | null = null;
 
   if (options.localDev) {
+    const host = (request.header("host") ?? "").trim().toLowerCase();
+    if (!options.localDev.hosts.includes(host)) {
+      return denied("ADMIN_UNAUTHENTICATED", "host_mismatch");
+    }
     login = options.localDev.login;
     name = options.localDev.name;
     peerAddress = request.remoteAddress;
