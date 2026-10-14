@@ -31,9 +31,12 @@ concurrency:
 # The token reads the repository and nothing else (#730): no job writes to it,
 # comments, or publishes. A job that needs more asks for it itself.
 #
-# Actions are pinned to a commit, not a tag, so a moved or hijacked tag cannot
-# change what runs here. The comment names the release; to update one, take the
-# commit its new tag points at (gh api repos/actions/<name>/git/ref/tags/<tag>).
+# Actions are pinned to a commit, and the database image to a digest, not a
+# tag, so a moved or hijacked tag cannot change what runs here. The comment
+# names the release. To update an action, take the commit its new tag names,
+# which `gh api repos/actions/<name>/commits/<tag> --jq .sha` gives for a
+# lightweight or annotated tag alike; for the image, the tag's digest on Docker
+# Hub. Nothing updates them on its own.
 permissions:
   contents: read
 
@@ -90,7 +93,7 @@ jobs:
     services:
       postgres:
         # Major version matches production (Neon PostgreSQL 17).
-        image: postgres:17
+        image: postgres:17@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3 # 17, 2026-10-07
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
