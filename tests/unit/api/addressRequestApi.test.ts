@@ -156,7 +156,10 @@ describe('the address request routes (#604)', () => {
   });
 
   it("closes a reported link as declined, and logs the request's id alone (#730)", async () => {
-    await expect(call('decline', { token: TOKEN, report: true })).resolves.toMatchObject({ status: 200, json: { ok: true, reported: true } });
+    const reported = await call('decline', { token: TOKEN, report: true });
+    expect(reported.status).toBe(200);
+    // Exactly this: nothing of the request or its sender.
+    expect(reported.json).toEqual({ ok: true, reported: true });
     expect(declineAddressRequest).toHaveBeenCalledWith(TOKEN);
     expect(writeDiagnostic).toHaveBeenCalledWith('info', 'address_request.decline', { outcome: 'declined', report: true });
     expect(writeDiagnostic).toHaveBeenCalledWith('warn', 'address_request.reported', { requestId: REQUEST_ID });
