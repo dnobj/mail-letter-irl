@@ -129,9 +129,14 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  * found by. The reader's column list on that table is explicit and leaves it
  * out, and neither role writes the table. Nothing to re-run; required, as the
  * newest is.
+ *
+ * 060 adds the alert type refund_not_completed (#730), with a partial unique
+ * index on its order while open. The roles read commerce_operational_alerts
+ * whole, and the panel's alert commands already transition any type. Nothing
+ * to re-run; required, as the newest is.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
-  "059_personal_tokens_lookup.sql";
+  "060_refund_not_completed_alert.sql";
 
 export interface AdminProvisioningArguments {
   environment: "development" | "production";
