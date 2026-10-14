@@ -567,7 +567,7 @@ before the cancel), and its order is the Pay & Send order, else none. Each alert
 consistent, and the acknowledging or resolving actor is stored as a hash. One alert per source event
 and type. The panel's acknowledge and resolve commands are the only writers besides the sweeps and the
 account erasure that raise them.
-`refund_not_completed` (migration 060, #730), critical, at most one open per order: a full refund failed or was cancelled at Stripe, and the hourly sweep holds the order (`last_error_code` `REFUND_NOT_COMPLETED`, which it and the refund claim skip) instead of refunding again; its `details` hold the refund id and status. A person refunds another way in Stripe, whose webhook completes the order, or leaves it and resolves the alert.
+`refund_not_completed` (migration 060, #730), critical, at most one open per order: a full refund failed or was cancelled at Stripe, and the hourly sweep holds the order (`last_error_code` `REFUND_NOT_COMPLETED`, which it and the refund claim skip) instead of refunding again, and so does the webhook when a full refund comes back failed or cancelled; its `details` hold the refund id and status. A person refunds another way in Stripe, whose webhook completes the order, clears the hold and resolves the alert (`order_refunded`), or resolves it by hand (docs/deployment.md).
 `held_mail_funding_reversed` (migration 056, #696), once per order: a warning that mail a letter pack paid for is held because the pack was refunded in full or disputed; its `details` hold the reason and how many letters.
 
 ### commerce_operator_audit_events

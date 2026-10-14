@@ -640,6 +640,22 @@ by hand. `PACK_REFUND_RETRY_DELAY_SECONDS` and
 `PACK_REFUND_STRIPE_ATTEMPT_LIMIT` are not in the preflight manifest; both
 are optional.
 
+A full refund that fails or is cancelled at Stripe is never made again by the
+hourly sweep (#730). The order is held, `refund_pending` with
+`last_error_code` `REFUND_NOT_COMPLETED`, which the sweep and the refund claim
+skip, and a critical `refund_not_completed` alert opens (one open per order),
+whether the sweep or the refund's own webhook saw it first. Two ways out:
+
+- **Refund again in Stripe** (a different card, or once the cause is fixed).
+  Its webhook completes the order, clears the hold and closes the alert itself.
+  If that refund also fails, the order is held again, and a new alert opens
+  once the earlier one is resolved.
+- **The money went back another way, or should not go back.** Resolve the
+  alert. The order stays `refund_pending` and counts as stuck until an engineer
+  settles it in the database: no panel command does this yet, because the
+  right end state (refunded, with the pack's letters revoked, or kept) is a
+  person's decision.
+
 Amounts are read from the Stripe Prices themselves - there are no configured
 cent amounts to keep in step (#275). A paid amount or currency mismatch against
 the order row is quarantined as `refund_pending`; it is never fulfilled. Keep Stripe test/live keys, Price IDs, webhook secrets, Railway URLs,

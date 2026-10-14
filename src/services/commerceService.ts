@@ -3100,11 +3100,28 @@ async function processRefundEvent(
            refund_pending_at = CASE WHEN $2::varchar = 'refund_pending' THEN COALESCE(refund_pending_at, NOW()) ELSE refund_pending_at END,
            refunded_at = CASE WHEN $2::varchar = 'refunded' THEN NOW() ELSE refunded_at END,
            amount_refunded_cents = CASE WHEN $2::varchar = 'refunded' THEN amount_cents ELSE amount_refunded_cents END,
+           -- A refund held for a person (#730) is done with once the order is.
+           last_error = CASE WHEN $2::varchar = 'refunded' AND last_error_code = 'REFUND_NOT_COMPLETED' THEN NULL ELSE last_error END,
+           last_error_code = CASE WHEN $2::varchar = 'refunded' AND last_error_code = 'REFUND_NOT_COMPLETED' THEN NULL ELSE last_error_code END,
            updated_at = NOW()
        WHERE order_id = $1`,
       [order.order_id, nextStatus, isRefund ? refundOrCharge.id : null]
     );
     await recordOrderEvent(client, order.order_id, eventType, order.status, nextStatus);
+    if (nextStatus === 'refunded') {
+      await client.query(
+        `UPDATE commerce_operational_alerts
+            SET status = 'resolved', resolved_at = NOW(), resolution_code = 'order_refunded', updated_at = NOW()
+          WHERE order_id = $1 AND alert_type = 'refund_not_completed' AND status <> 'resolved'`,
+        [order.order_id]
+      );
+    } else if (isRefund && ['failed', 'canceled'].includes(refundStatus ?? '')) {
+      // A full refund that failed or was cancelled waits for a person, never
+      // for the sweep to make another (#730), whoever made it.
+      if (await holdRefundNotCompletedWithClient(client, order.order_id, { id: refundOrCharge.id, status: refundStatus })) {
+        reportToOperator('refund_not_completed', OPERATOR_NOTICES.refundNotCompleted());
+      }
+    }
     return { duplicate: false, orderId: order.order_id, status: nextStatus };
   });
 }
@@ -4237,31 +4254,54 @@ export async function requestRefund(
  * whose webhook completes the order, or leaves it and resolves the alert.
  */
 async function holdRefundNotCompleted(order: RefundClaim, ended: Stripe.Refund): Promise<void> {
-  const raised = await transaction(async client => {
-    const held = await client.query<{ order_id: string }>(
-      `UPDATE orders
-       SET last_error_code = 'REFUND_NOT_COMPLETED',
-           last_error = 'The refund failed or was cancelled at Stripe; a person decides',
-           updated_at = NOW()
-       WHERE order_id = $1 AND status = 'refund_pending'
-       RETURNING order_id`,
-      [order.order_id]
-    );
-    if (!held.rows[0]) return false;
-    const alert = await client.query(
-      `INSERT INTO commerce_operational_alerts (order_id, alert_type, severity, details)
-       VALUES ($1, 'refund_not_completed', 'critical', $2)
-       ON CONFLICT DO NOTHING`,
-      [order.order_id, JSON.stringify({ refundId: ended.id, refundStatus: ended.status ?? null })]
-    );
-    await recordOrderEvent(client, order.order_id, 'refund.not_completed', 'refund_pending', 'refund_pending', {
-      refundId: ended.id,
-      refundStatus: ended.status ?? null
-    });
-    return (alert.rowCount ?? 0) > 0;
+  // Only while the order still names the refund the sweep read: a webhook that
+  // recorded a new refund meanwhile has left nothing to hold.
+  const raised = await transaction(client =>
+    holdRefundNotCompletedWithClient(client, order.order_id, ended, order.stripe_refund_id ?? null)
+  );
+  if (raised) reportToOperator('refund_not_completed', OPERATOR_NOTICES.refundNotCompleted());
+}
+
+/**
+ * The hold itself, in the caller's transaction (#730): REFUND_NOT_COMPLETED,
+ * which the sweep and the refund claim skip, one open critical alert per
+ * order, and an order event. Raised by the sweep for a refund it finds ended,
+ * and by the webhook when a full refund fails or is cancelled, so a second
+ * refund that also fails, made in Stripe after the first, is held and told
+ * again. Answers whether a new alert opened, for the operator's notice.
+ *
+ * `readRefundId`, when given, is the refund id the caller read: the order is
+ * held only while it still names that one.
+ */
+async function holdRefundNotCompletedWithClient(
+  client: Pick<pg.PoolClient, 'query'>,
+  orderId: string,
+  ended: { id: string; status?: string | null },
+  readRefundId?: string | null
+): Promise<boolean> {
+  const sameRefund = readRefundId === undefined ? '' : ' AND stripe_refund_id IS NOT DISTINCT FROM $2';
+  const held = await client.query<{ order_id: string }>(
+    `UPDATE orders
+     SET last_error_code = 'REFUND_NOT_COMPLETED',
+         last_error = 'The refund failed or was cancelled at Stripe; a person decides',
+         updated_at = NOW()
+     WHERE order_id = $1 AND status = 'refund_pending'${sameRefund}
+     RETURNING order_id`,
+    readRefundId === undefined ? [orderId] : [orderId, readRefundId]
+  );
+  if (!held.rows[0]) return false;
+  const alert = await client.query(
+    `INSERT INTO commerce_operational_alerts (order_id, alert_type, severity, details)
+     VALUES ($1, 'refund_not_completed', 'critical', $2)
+     ON CONFLICT DO NOTHING`,
+    [orderId, JSON.stringify({ refundId: ended.id, refundStatus: ended.status ?? null })]
+  );
+  await recordOrderEvent(client, orderId, 'refund.not_completed', 'refund_pending', 'refund_pending', {
+    refundId: ended.id,
+    refundStatus: ended.status ?? null
   });
   writeDiagnostic('warn', 'commerce.refund_not_completed', { refundStatus: ended.status ?? 'unknown' });
-  if (raised) reportToOperator('refund_not_completed', OPERATOR_NOTICES.refundNotCompleted());
+  return (alert.rowCount ?? 0) > 0;
 }
 
 export async function runCommerceMaintenance(): Promise<CommerceMaintenanceResult> {

@@ -233,6 +233,58 @@ describePostgres('refund finalization', () => {
     expect(revocations.rowCount).toBe(1);
   }, 60_000);
 
+  /** A Refund event as Stripe sends it, for a refund made in the dashboard (no metadata). */
+  function refundEvent(type: string, paymentIntentId: string, status: string, id = `re_${randomUUID().replace(/-/g, '').slice(0, 20)}`) {
+    return {
+      id: `evt_${randomUUID().replace(/-/g, '')}`,
+      type,
+      data: { object: { id, object: 'refund', status, amount: 1999, payment_intent: paymentIntentId, charge: null, metadata: {} } }
+    } as unknown as Stripe.Event;
+  }
+
+  async function openAlerts(orderId: string): Promise<number> {
+    const { rows } = await pool.query<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM commerce_operational_alerts
+        WHERE order_id = $1 AND alert_type = 'refund_not_completed' AND status <> 'resolved'`,
+      [orderId]
+    );
+    return rows[0].n;
+  }
+
+  it('holds an order when its full refund comes back cancelled, again after a resolved alert, and lets go once refunded (#730)', async () => {
+    const { userId, orderId, paymentIntentId } = await seedRefundablePack(6);
+
+    await commerce.processStripeWebhookEvent(refundEvent('refund.updated', paymentIntentId, 'canceled'));
+    expect(await readOrder(orderId)).toMatchObject({ status: 'refund_pending', last_error_code: 'REFUND_NOT_COMPLETED' });
+    expect(await openAlerts(orderId)).toBe(1);
+
+    // A second failure while the alert is open adds none; after it is resolved, a new one opens.
+    await commerce.processStripeWebhookEvent(refundEvent('refund.failed', paymentIntentId, 'failed'));
+    expect(await openAlerts(orderId)).toBe(1);
+    await pool.query(
+      `UPDATE commerce_operational_alerts SET status = 'resolved', resolved_at = NOW(), resolution_code = 'test', updated_at = NOW()
+        WHERE order_id = $1 AND alert_type = 'refund_not_completed'`,
+      [orderId]
+    );
+    await commerce.processStripeWebhookEvent(refundEvent('refund.updated', paymentIntentId, 'canceled'));
+    expect(await openAlerts(orderId)).toBe(1);
+
+    // The person refunds again in Stripe, and it succeeds: the order completes,
+    // the hold clears, and the open alert closes itself.
+    await commerce.processStripeWebhookEvent(refundEvent('refund.created', paymentIntentId, 'succeeded'));
+    const done = await readOrder(orderId);
+    expect(done).toMatchObject({ status: 'refunded', last_error_code: null });
+    expect(await openAlerts(orderId)).toBe(0);
+    const closed = await pool.query<{ resolution_code: string }>(
+      `SELECT resolution_code FROM commerce_operational_alerts
+        WHERE order_id = $1 AND alert_type = 'refund_not_completed' ORDER BY created_at DESC LIMIT 1`,
+      [orderId]
+    );
+    expect(closed.rows[0].resolution_code).toBe('order_refunded');
+    const account = await pool.query<{ credits: number }>('SELECT credits FROM users WHERE user_id = $1', [userId]);
+    expect(account.rows[0].credits).toBe(0);
+  }, 60_000);
+
   it('holds an order whose refund was cancelled at Stripe for a person, once, and refunds nothing (#730)', async () => {
     const { userId, orderId } = await seedRefundablePack(6);
     await pool.query(`UPDATE orders SET stripe_refund_id = 're_cancelled' WHERE order_id = $1`, [orderId]);
