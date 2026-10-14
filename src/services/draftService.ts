@@ -418,9 +418,11 @@ export async function markExpiredDrafts(): Promise<number> {
  * read the letter through it (#564), and a wait can be 60 days. Once that
  * letter is cancelled (#701), the cancel is its clock instead of the send:
  * it goes CANCELLED_HELD_DRAFT_DAYS after the cancel ($4), however long ago or
- * recently it was sent. The mail is not going, and its content goes on the
- * unpaid schedule (retentionService), which quarantines the letter's own copy
- * at 4 days and empties it at 7. Four days, not 7, because this sweep runs
+ * recently it was sent. The mail is not going. After a customer's cancel with
+ * no money hold, the letter's own content goes on the unpaid schedule
+ * (retentionService), which quarantines it at 4 days and empties it at 7; an
+ * operator's cancel or a refunded pack keeps it on the letter schedule, and
+ * the draft goes at 4 days all the same. Four days, not 7, because this sweep runs
  * once a day and drifts to about 25 hours, more when a run fails before it:
  * at 7 the draft could outlast the letter's copy (#730). Nor the send's 7
  * days when the cancel came soon after the send: that kept the draft days
@@ -476,7 +478,7 @@ export async function cleanupOldDrafts(olderThanDays: number = 7): Promise<numbe
 
   const count = result.rowCount ?? 0;
   if (count > 0) {
-    console.log(`📝 Cleaned up ${count} old drafts (sent or cancelled more than ${olderThanDays} days ago, or expired more than ${UNSENT_DRAFT_DAYS_AFTER_EXPIRY} days ago)`);
+    console.log(`📝 Cleaned up ${count} old drafts (sent or cancelled more than ${olderThanDays} days ago, a cancelled held letter's more than ${CANCELLED_HELD_DRAFT_DAYS} days after the cancel, or expired more than ${UNSENT_DRAFT_DAYS_AFTER_EXPIRY} days ago)`);
   }
 
   return count;
