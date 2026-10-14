@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { dirname } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 /**
@@ -22,5 +24,16 @@ describe("the auth key's file", () => {
     } finally {
       await file.remove();
     }
+  });
+
+  it("leaves no directory behind when the write fails", async () => {
+    let written = "";
+    vi.mocked(writeFile).mockImplementationOnce(async (path) => {
+      written = String(path);
+      throw new Error("ENOSPC");
+    });
+    await expect(writeSecretFile("tskey-auth-kTEST-secret")).rejects.toThrow("ENOSPC");
+    expect(written).not.toBe("");
+    expect(existsSync(dirname(written))).toBe(false);
   });
 });

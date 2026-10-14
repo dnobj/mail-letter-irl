@@ -18,9 +18,15 @@ export interface SecretFile {
  */
 export async function writeSecretFile(secret: string): Promise<SecretFile> {
   const dir = await mkdtemp(join(tmpdir(), "lirl-ts-"));
+  const remove = () => rm(dir, { recursive: true, force: true });
   const path = join(dir, "authkey");
-  await writeFile(path, secret, { mode: 0o600, flag: "wx" });
-  return { path, remove: () => rm(dir, { recursive: true, force: true }) };
+  try {
+    await writeFile(path, secret, { mode: 0o600, flag: "wx" });
+  } catch (error) {
+    await remove().catch(() => undefined);
+    throw error;
+  }
+  return { path, remove };
 }
 
 /**
