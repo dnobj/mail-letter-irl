@@ -175,6 +175,8 @@ export interface Letter {
   carrier_tracking_number?: string | null;
   created_at: Date;
   sent_at?: Date;
+  /** When content retention emptied the letter (migration 026): set, there is nothing left to print. */
+  redacted_at?: Date | null;
 }
 
 // ============================================================================

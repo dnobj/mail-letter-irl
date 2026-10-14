@@ -804,6 +804,52 @@ describePostgres('content retention sweep', () => {
       expect((await readLetter(letterId)).content).toEqual({});
     });
 
+    /**
+     * #730: a letter that failed, never sent (no sent_at), made 400 days ago,
+     * with one failed job in the given state.
+     */
+    async function seedFailedLetter(job: { outcome: 'definite_failure' | 'not_dispatched'; attempts: number }): Promise<{ userId: string; letterId: string }> {
+      const userId = await seedUser();
+      const letterId = `letter_${randomUUID()}`;
+      await pool.query(
+        `INSERT INTO letters (letter_id, user_id, content, recipient, credits_cost, status, created_at)
+         VALUES ($1, $2, $3::jsonb, $4::jsonb, 2, 'failed', NOW() - INTERVAL '400 days')`,
+        [letterId, userId, JSON.stringify({ bodyText: SECRET_BODY }), JSON.stringify({ addressLine1: SECRET_STREET })]
+      );
+      await pool.query(
+        `INSERT INTO letter_jobs (job_id, letter_id, status, idempotency_key, next_attempt_at, provider_outcome, attempts, max_attempts)
+         VALUES ($1, $2, 'failed', $3, NOW(), $4, $5, 3)`,
+        [`job_${randomUUID()}`, letterId, `idem_${randomUUID()}`, job.outcome, job.attempts]
+      );
+      return { userId, letterId };
+    }
+
+    it.each([
+      ['refused by the provider, though the operator could retry it by hand', { outcome: 'definite_failure' as const, attempts: 1 }],
+      ['out of attempts before it reached the provider', { outcome: 'not_dispatched' as const, attempts: 3 }]
+    ])('redacts a letter that failed for good, %s, counted from its creation (#730)', async (_label, job) => {
+      const { letterId } = await seedFailedLetter(job);
+      expect(await retention.purgeExpiredLetterContent()).toBe(1);
+      expect((await readLetter(letterId)).content).toEqual({});
+    });
+
+    it('HOLDS a failed letter whose job the outbox could still send (#730)', async () => {
+      const { letterId } = await seedFailedLetter({ outcome: 'not_dispatched', attempts: 1 });
+      expect(await retention.purgeExpiredLetterContent()).toBe(0);
+      expect((await readLetter(letterId)).content.bodyText).toBe(SECRET_BODY);
+    });
+
+    it('HOLDS a failed Pay & Send letter until its refund is settled (#730)', async () => {
+      const { userId, letterId } = await seedFailedLetter({ outcome: 'definite_failure', attempts: 1 });
+      const orderId = await seedJitOrder({ userId, status: 'refund_pending', letterId });
+      expect(await retention.purgeExpiredLetterContent()).toBe(0);
+      expect((await readLetter(letterId)).content.bodyText).toBe(SECRET_BODY);
+
+      await pool.query(`UPDATE orders SET status = 'refunded' WHERE order_id = $1`, [orderId]);
+      expect(await retention.purgeExpiredLetterContent()).toBe(1);
+      expect((await readLetter(letterId)).content).toEqual({});
+    });
+
     it('respects the batch limit', async () => {
       await seedSentLetter({ daysAgo: 400 });
       await seedSentLetter({ daysAgo: 400 });

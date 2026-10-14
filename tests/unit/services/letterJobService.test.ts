@@ -1136,6 +1136,39 @@ describe('mail outbox retries', () => {
     })).rejects.toMatchObject({ code: 'idempotency_conflict' });
   });
 
+  /** #730: a letter content retention emptied has nothing left to print. */
+  it('never dispatches a letter whose content retention redacted', async () => {
+    mockClaims(1);
+    const base = clientQuery.getMockImplementation() as (sql: string, ...rest: unknown[]) => Promise<unknown>;
+    clientQuery.mockImplementation((async (sql: string, ...rest: unknown[]) =>
+      sql.startsWith('SELECT * FROM letters')
+        ? { rows: [{ ...letter, redacted_at: new Date('2026-01-01T00:00:00Z') }] }
+        : base(sql, ...rest)) as never);
+
+    await processDueLetterJobs(1).catch(() => undefined);
+    expect(sendLetter).not.toHaveBeenCalled();
+  });
+
+  it('refuses to retry a letter whose content retention redacted', async () => {
+    clientQuery.mockImplementation((async (sql: string) => {
+      if (sql.includes('FROM commerce_operator_audit_events')) return { rows: [] };
+      if (sql.includes('SELECT jobs.letter_id')) return { rows: [{ letter_id: 'letter-1', funding_order_id: null }] };
+      if (sql.includes('FROM letters WHERE letter_id = $1 FOR UPDATE')) {
+        return { rows: [{ status: 'failed', user_id: 'user-1', funding_order_id: null, redacted_at: new Date('2026-01-01T00:00:00Z') }] };
+      }
+      if (sql.includes('FROM letter_jobs WHERE job_id = $1 FOR UPDATE')) {
+        return { rows: [{ ...job, letter_id: 'letter-1', status: 'failed', provider_outcome: 'definite_failure', operator_resolution: null }] };
+      }
+      return { rows: [] };
+    }) as never);
+
+    await expect(retryLetterJobAsAdmin({
+      jobId: 'job-1', expectedUserId: 'user-1', actorId: 'admin-1', reason: 'provider confirmed rejection',
+      idempotencyKey: 'retry-job-redacted-001'
+    })).rejects.toMatchObject({ code: 'invalid_state' });
+    expect(clientQuery.mock.calls.some(([sql]) => String(sql).includes("SET status = 'pending'"))).toBe(false);
+  });
+
   it('records a confirmed ambiguous acceptance without calling the mail provider again', async () => {
     const jobId = '00000000-0000-4000-8000-000000000301';
     clientQuery.mockImplementation(async (sql: string) => {
