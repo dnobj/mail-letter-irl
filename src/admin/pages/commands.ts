@@ -26,6 +26,13 @@ export function renderCommandPreview(input: {
 <p class="muted">Preview. Nothing has happened yet. The confirmation below is bound to exactly this state; if the target changes before you confirm, the command is refused as stale.</p>
 ${definitionList(input.preview.display.map(([label, value]) => [label, value] as [string, string]))}
 ${
+  // What the link that opened this preview carries into the confirmation, as
+  // sent: a crafted link cannot fill a field the preview does not show (#730).
+  input.hiddenFields.length > 0
+    ? html`<h2>Values sent with this command</h2>${definitionList(input.hiddenFields)}`
+    : ""
+}
+${
   input.preview.warnings.length > 0
     ? html`<div class="flash flash-warn" role="status"><ul>${join(input.preview.warnings.map((warning) => html`<li>${warning}</li>`))}</ul></div>`
     : ""

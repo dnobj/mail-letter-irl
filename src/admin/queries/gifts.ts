@@ -146,6 +146,21 @@ export async function listGiftCodes(
   return result.rows.map(toGiftCodeView);
 }
 
+/** The code printed on a letter: each letter prints at most one. */
+export async function readGiftCodeByLetter(client: AdminSqlClient, letterId: string): Promise<GiftCodeView | null> {
+  const result = await client.query<GiftCodeRow>(`SELECT ${CODE_COLUMNS} FROM gift_codes WHERE letter_id = $1`, [letterId]);
+  return result.rows[0] ? toGiftCodeView(result.rows[0]) : null;
+}
+
+/**
+ * A code as the panel shows it (#730): an issued code is a bearer value for a
+ * free letter, so only its last two characters, enough to match one a customer
+ * reads out; a redeemed or void one is spent, so in full. Read as printed.
+ */
+export function shownGiftCode(code: string, status: string): string {
+  return status === "issued" ? `••••-••${code.slice(-2)}` : `${code.slice(0, 4)}-${code.slice(4)}`;
+}
+
 export async function readGiftCode(client: AdminSqlClient, code: string): Promise<GiftCodeView | null> {
   const result = await client.query<GiftCodeRow>(`SELECT ${CODE_COLUMNS} FROM gift_codes WHERE code = $1`, [code]);
   return result.rows[0] ? toGiftCodeView(result.rows[0]) : null;

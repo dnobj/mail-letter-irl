@@ -47,6 +47,10 @@ function scriptedPool(audits: Array<Record<string, unknown>>) {
       audits.push({ actor: values[0], action: values[6], targetId: values[8], outcome: values[13], errorCode: values[14], input: values[10] });
       return { rows: [{ id: "audit-1", occurredAt: new Date() }] };
     }
+    // The lookup by an exact email (src/admin/queries/lookup.ts).
+    if (text.includes("lower(email) = lower($1)")) {
+      return { rows: values[0] === "customer@example.com" || values[0] === USER_ROW.user_id ? [{ user_id: USER_ROW.user_id }] : [] };
+    }
     if (/FROM users WHERE user_id = \$1/.test(text) && values[0] === USER_ROW.user_id) {
       return { rows: [USER_ROW] };
     }
@@ -192,7 +196,7 @@ describe("admin request pipeline", () => {
     const missing = await send(port, "GET", "/nope", identity);
     expect(missing.status).toBe(404);
     expect(missing.body).toContain("ADMIN_NOT_FOUND");
-    const wrongMethod = await send(port, "POST", "/lookup", identity);
+    const wrongMethod = await send(port, "POST", "/", identity);
     expect(wrongMethod.status).toBe(405);
   });
 
@@ -325,6 +329,52 @@ describe("admin request pipeline", () => {
     const masked = await send(port, "GET", "/accounts/auth0%7Cuser1", identity);
     expect(masked.body).toContain("c***@example.com");
     expect(masked.body).not.toContain("customer@example.com");
+  });
+
+  it("looks up by POST only, and audits a lookup by email with its matches, never the address (#730)", async () => {
+    const first = await send(port, "GET", "/", identity);
+    const sessionId = String(first.headers["set-cookie"]).split(";")[0].split("=")[1];
+    const token = createCsrfToken(config.sessionSecret, sessionId);
+    const headers = {
+      ...identity,
+      cookie: `${SESSION_COOKIE_NAME}=${sessionId}`,
+      "content-type": "application/x-www-form-urlencoded",
+      "sec-fetch-site": "same-origin",
+      origin: `https://${HOST}`,
+    };
+    // An old link's query is not run: the address would sit in the URL.
+    const linked = await send(port, "GET", "/lookup?q=customer%40example.com", { ...identity, cookie: headers.cookie });
+    expect(linked.status).toBe(200);
+    expect(linked.body).not.toContain("auth0|user1</a>");
+    expect(linked.body).toContain('method="post" action="/lookup"');
+    expect(linked.body).toContain('name="_csrf"');
+
+    const auditsBefore = audits.length;
+    const found = await send(port, "POST", "/lookup", headers, `q=customer%40example.com&_csrf=${token}`);
+    expect(found.status).toBe(200);
+    expect(found.body).toContain("Account auth0|user1");
+    const lookup = audits.slice(auditsBefore).find((audit) => audit.action === "pii.lookup");
+    expect(lookup).toMatchObject({ targetId: "auth0|user1", outcome: "succeeded" });
+    expect(JSON.parse(String(lookup?.input))).toMatchObject({ field: "email", matches: 1, accounts: ["auth0|user1"] });
+    expect(JSON.stringify(audits)).not.toContain("customer@example.com");
+
+    // An identifier that is not an email is not personal data: no row.
+    const byId = audits.length;
+    const plain = await send(port, "POST", "/lookup", headers, `q=auth0%7Cuser1&_csrf=${token}`);
+    expect(plain.status).toBe(200);
+    expect(audits.slice(byId).some((audit) => audit.action === "pii.lookup")).toBe(false);
+
+    // An email that matches nothing is still a lookup of that address.
+    const none = audits.length;
+    await send(port, "POST", "/lookup", headers, `q=nobody%40example.com&_csrf=${token}`);
+    const miss = audits.slice(none).find((audit) => audit.action === "pii.lookup");
+    expect(miss).toMatchObject({ outcome: "succeeded" });
+    expect(miss?.targetId ?? null).toBeNull();
+    expect(JSON.parse(String(miss?.input))).toMatchObject({ field: "email", matches: 0, accounts: [] });
+
+    // And it is a POST with the token, like any other.
+    const forged = await send(port, "POST", "/lookup", headers, "q=customer%40example.com&_csrf=" + "0".repeat(64));
+    expect(forged.status).toBe(403);
   });
 
   it("refuses write routes in read-only mode before the handler runs", async () => {
