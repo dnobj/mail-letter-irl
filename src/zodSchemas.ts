@@ -7,10 +7,11 @@ import { EXTRA_SERVICES } from "./config/products.js";
 
 /**
  * The longest image link a tool takes (#730), in characters. Image links are
- * https only (src/services/imageService.ts), and a real one is well under this;
- * a longer one is refused before anything is fetched or logged.
+ * https only (src/services/imageService.ts). A signed link can be long (an S3
+ * link made with temporary credentials can pass 2000), so this leaves room; a
+ * longer one is refused before anything is fetched or logged.
  */
-export const IMAGE_URL_MAX_LENGTH = 2048;
+export const IMAGE_URL_MAX_LENGTH = 4096;
 const IMAGE_URL_TOO_LONG =
   `An image link can be at most ${IMAGE_URL_MAX_LENGTH} characters. Use a shorter link to the photo, or upload it with upload_image.`;
 /**
@@ -242,11 +243,24 @@ export const quoteAndPreviewInputZ = z.object({
 // image, and any other string becomes a marker for a picture the server
 // cannot open, which the handlers do not replace with an older upload (#414;
 // see utils/imageFileParam.ts and services/previewImageSource.ts).
+/**
+ * The longest file link a host may hand over in a file object (#730). Looser
+ * than an image link: the host writes it, signed. Checked at run time only,
+ * since a file object's JSON Schema must match the Apps SDK contract above
+ * exactly (a refinement adds nothing to it; servedToolsSnapshot.test.ts).
+ */
+export const FILE_DOWNLOAD_URL_MAX_LENGTH = 8192;
+const FILE_LINK_TOO_LONG =
+  `A file's link can be at most ${FILE_DOWNLOAD_URL_MAX_LENGTH} characters. Upload the photo with upload_image instead.`;
+/** A file object's link: a string, bounded at run time. */
+const fileDownloadUrlZ = () =>
+  z.string().refine((value) => value.length <= FILE_DOWNLOAD_URL_MAX_LENGTH, { message: FILE_LINK_TOO_LONG });
+
 const imageFileParamZ = z.preprocess(
   preprocessImageFileParam,
   z
     .object({
-      download_url: z.string(),
+      download_url: fileDownloadUrlZ(),
       file_id: z.string(),
       mime_type: z.string().optional(),
       file_name: z.string().optional()
@@ -262,7 +276,7 @@ const imageFileParamZ = z.preprocess(
 const imageFileElementZ = z.preprocess(
   preprocessImageFileElement,
   z.object({
-    download_url: z.string(),
+    download_url: fileDownloadUrlZ(),
     file_id: z.string(),
     mime_type: z.string().optional(),
     file_name: z.string().optional()

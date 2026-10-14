@@ -535,7 +535,7 @@
           },
           "imageUrl": {
             "type": "string",
-            "maxLength": 2048
+            "maxLength": 4096
           },
           "sendAsGift": {
             "type": "boolean",
@@ -1015,7 +1015,7 @@
           },
           "imageUrl": {
             "type": "string",
-            "maxLength": 2048
+            "maxLength": 4096
           },
           "sendAsGift": {
             "type": "boolean",
@@ -2329,7 +2329,7 @@
           },
           "imageUrl": {
             "type": "string",
-            "maxLength": 2048
+            "maxLength": 4096
           },
           "sendAsGift": {
             "type": "boolean",
@@ -3576,7 +3576,7 @@
         "properties": {
           "imageUrl": {
             "type": "string",
-            "maxLength": 2048
+            "maxLength": 4096
           },
           "context": {
             "type": "string",

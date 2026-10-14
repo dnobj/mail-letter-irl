@@ -17,8 +17,9 @@ import { createMcpServer } from '../../../src/mcp/httpServer.js';
 import { type ClientProfile } from '../../../src/auth/clientProfiles.js';
 import { LetterIrlServer } from '../../../src/server.js';
 
-/** The limit, written out: the constant moving would otherwise move the test with it. */
-const LIMIT = 2048;
+/** The limits, written out: the constants moving would otherwise move the test with them. */
+const LIMIT = 4096;
+const FILE_LIMIT = 8192;
 
 const received: Array<Record<string, unknown>> = [];
 
@@ -70,6 +71,18 @@ const CALLS: Array<[string, string, (url: string) => Record<string, unknown>]> =
   ['confirm_uploaded_image', 'imageUrl', url => ({ imageUrl: url, context: 'postcard' })]
 ];
 
+/** A file object as a host hands it over, with the given link. */
+const file = (url: string) => ({ download_url: url, file_id: 'file-1', mime_type: 'image/jpeg', file_name: 'photo.jpg' });
+
+/** Each input that takes a file object, as a call carrying a file with the given link there. */
+const FILE_CALLS: Array<[string, string, (url: string) => Record<string, unknown>]> = [
+  ['quote_and_preview_letter_with_header_image', 'image', url => ({ ...LETTER, image: file(url) })],
+  ['quote_and_preview_letter_with_image', 'image', url => ({ ...LETTER, image: file(url) })],
+  ['quote_and_preview_postcard', 'image', url => ({ ...POSTCARD, image: file(url) })],
+  ['quote_and_preview_postcard', 'images', url => ({ ...POSTCARD, images: [file(link(40)), file(url)] })],
+  ['set_signature', 'image', url => ({ image: file(url) })]
+];
+
 async function call(client: Client, name: string, args: Record<string, unknown>): Promise<string> {
   const outcome = await client.callTool({ name, arguments: args }).catch((error: unknown) => error);
   return outcome instanceof Error ? outcome.message : JSON.stringify(outcome);
@@ -102,6 +115,34 @@ describe('image links (#730)', () => {
     const client = await connected();
     const said = await call(client, name, args(link(LIMIT)));
     expect(said).not.toContain('An image link can be at most');
+    expect(received).toHaveLength(1);
+  });
+});
+
+describe("a file object's link (#730)", () => {
+  it("keeps the Apps SDK's file contract in tools/list: a plain string, no limit stated", async () => {
+    const tools = new Map((await (await connected()).listTools()).tools.map(tool => [tool.name, tool]));
+    for (const [name, key] of FILE_CALLS) {
+      const property = tools.get(name)?.inputSchema.properties?.[key] as
+        | { properties?: Record<string, unknown>; items?: { properties?: Record<string, unknown> } }
+        | undefined;
+      const object = key === 'images' ? property?.items : property;
+      expect(object?.properties?.download_url, `${name}.${key}`).toEqual({ type: 'string' });
+    }
+  });
+
+  it.each(FILE_CALLS)('%s refuses a file in %s whose link is past the limit, before the app sees it', async (name, _key, args) => {
+    const client = await connected();
+    const said = await call(client, name, args(link(FILE_LIMIT + 1)));
+    expect(said).toContain(`A file's link can be at most ${FILE_LIMIT} characters`);
+    expect(said).toContain('upload_image');
+    expect(received).toHaveLength(0);
+  });
+
+  it.each(FILE_CALLS)('%s takes a file in %s whose link is at the limit', async (name, _key, args) => {
+    const client = await connected();
+    const said = await call(client, name, args(link(FILE_LIMIT)));
+    expect(said).not.toContain("A file's link can be at most");
     expect(received).toHaveLength(1);
   });
 });
