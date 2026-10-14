@@ -324,8 +324,15 @@ export async function validateToken(rawToken: string): Promise<ValidateTokenResu
  * A token made before migration 059 has no lookup hash. It is found as tokens
  * were before, by its last four characters and a bcrypt compare, but only
  * among live tokens still without one, and is given its hash on the first
- * match, so from then on it is found by that. Every such token expires within
- * 90 days of 057; after that this reads nothing and compares nothing.
+ * match, so from then on it is found by that. A token may be made to last up
+ * to MAX_TOKEN_LIFETIME_DAYS, and an older image (during the pre-deploy, or
+ * after a rollback across 059) still makes tokens without a hash, so this
+ * stays until `SELECT max(expires_at) FROM personal_access_tokens WHERE token_lookup IS NULL` is NULL or past. Until then every miss runs this
+ * read too, and compares only against live tokens that have no hash.
+ *
+ * It reads live tokens only, so a revoked or expired token without a hash is
+ * logged as not found rather than as revoked or expired. Callers see the same
+ * fixed words either way (#743).
  */
 async function findTokenMadeBeforeLookup(
   rawToken: string,

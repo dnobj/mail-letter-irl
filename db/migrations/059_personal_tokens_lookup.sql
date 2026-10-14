@@ -12,9 +12,13 @@
 -- cannot be reversed or guessed, and a key would only be one more secret to
 -- keep and rotate. token_hash (bcrypt) stays as it was.
 --
--- Tokens made before this have no lookup: src/services/patService.ts finds
--- them as before and fills it in on their first use. Every one of them
--- expires within 90 days of 057, after which none is left without.
+-- Tokens made without one (before this, or by an older image while the
+-- pre-deploy runs or after a rollback across it) have no lookup:
+-- src/services/patService.ts finds them as before and fills it in on their
+-- first use. A token may be made to last up to 365 days, so one can stay
+-- without a lookup that long after the last such token was made; before the
+-- old way is removed, check none is left:
+--   SELECT max(expires_at) FROM personal_access_tokens WHERE token_lookup IS NULL;
 --
 -- The admin reader's column list on this table is explicit (provisioning),
 -- so neither role is granted the new column.

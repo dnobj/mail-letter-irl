@@ -129,6 +129,21 @@ describePostgres('finding a personal access token by its hash', () => {
     );
   });
 
+  it('refuses an expired token found by its hash, and logs an old revoked one as not found', async () => {
+    const created = await patService.createToken(USER_ID, 'Laptop');
+    await pool.query(`UPDATE personal_access_tokens SET expires_at = NOW() - INTERVAL '1 minute' WHERE token_id = $1`, [created.tokenId]);
+    expect(await patService.validateToken(created.token)).toEqual({ valid: false, error: 'Token has expired' });
+
+    // The old way reads live tokens only.
+    const raw = `lirl_pat_${'d'.repeat(28)}rev1`;
+    await pool.query(
+      `INSERT INTO personal_access_tokens (user_id, name, token_hash, token_prefix, status)
+       VALUES ($1, 'Revoked before 059', $2, 'rev1', 'revoked')`,
+      [USER_ID, await bcrypt.hash(raw, 4)]
+    );
+    expect(await patService.validateToken(raw)).toEqual({ valid: false, error: 'Token not found' });
+  });
+
   it('does not find an unknown token either way', async () => {
     await patService.createToken(USER_ID, 'Laptop');
     expect(await patService.validateToken(`lirl_pat_${'c'.repeat(32)}`)).toEqual({ valid: false, error: 'Token not found' });
