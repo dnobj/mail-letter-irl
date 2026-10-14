@@ -50,7 +50,7 @@ export async function readMaintenanceHealth(
   const stuck = await client.query<{ stuck: string; quarantined: string }>(
     `SELECT
        COUNT(*) FILTER (WHERE ${STUCK_ORDER_CONDITION})::text AS stuck,
-       COUNT(*) FILTER (WHERE last_error_code = 'PAYMENT_AMOUNT_MISMATCH')::text AS quarantined
+       COUNT(*) FILTER (WHERE last_error_code IN ('PAYMENT_AMOUNT_MISMATCH', 'REFUND_NOT_COMPLETED'))::text AS quarantined
      FROM orders`,
   );
   const webhooks = await client.query<{ unmatched: string; last_received: Date | null }>(

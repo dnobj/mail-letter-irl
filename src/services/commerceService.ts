@@ -4093,7 +4093,7 @@ export async function requestRefund(
          -- caller of this exported money-mover (an admin bulk-retry, another
          -- sweep) must hit the same wall. Operator release = clearing the
          -- marker (#278 round 8).
-         AND (last_error_code IS NULL OR last_error_code <> 'PAYMENT_AMOUNT_MISMATCH')
+         AND (last_error_code IS NULL OR last_error_code NOT IN ('PAYMENT_AMOUNT_MISMATCH', 'REFUND_NOT_COMPLETED'))
          AND stripe_payment_intent_id IS NOT NULL
          AND (
            refund_attempts = 0
@@ -4119,10 +4119,13 @@ export async function requestRefund(
   if (!order?.stripe_payment_intent_id) return false;
   try {
     let refund: Stripe.Refund | null = null;
+    let ended: Stripe.Refund | null = null;
     if (order.stripe_refund_id) {
       try {
         const existingRefund = await stripeRefunds.retrieveRefund(order.stripe_refund_id);
-        if (!['failed', 'canceled'].includes(existingRefund.status || '')) {
+        if (['failed', 'canceled'].includes(existingRefund.status || '')) {
+          ended = existingRefund;
+        } else {
           refund = existingRefund;
         }
       } catch {
@@ -4130,7 +4133,22 @@ export async function requestRefund(
         // covers a persisted stale ID without risking a duplicate refund.
       }
     }
-    refund ??= await stripeRefunds.findPaymentRefund(order.stripe_payment_intent_id, order.order_id);
+    if (!refund) {
+      const found = await stripeRefunds.findPaymentRefund(
+        order.stripe_payment_intent_id,
+        order.order_id,
+        order.amount_known === false ? null : order.amount_cents
+      );
+      refund = found.live;
+      ended ??= found.ended;
+    }
+    // A refund that failed or was cancelled is a person's question, never an
+    // instruction to refund again (#730): one an operator cancelled in Stripe
+    // came back an hour later, and one that failed went to the same card.
+    if (!refund && ended) {
+      await holdRefundNotCompleted(order, ended);
+      return false;
+    }
     if (!refund) {
       let attempt = order.refund_attempts;
       if (order.stripe_refund_id) {
@@ -4210,6 +4228,40 @@ export async function requestRefund(
     );
     return false;
   }
+}
+
+/**
+ * Hold an order whose refund failed or was cancelled at Stripe for a person
+ * (#730): REFUND_NOT_COMPLETED, which the sweep and the refund claim skip, and
+ * one open critical alert per order. The person refunds another way in Stripe,
+ * whose webhook completes the order, or leaves it and resolves the alert.
+ */
+async function holdRefundNotCompleted(order: RefundClaim, ended: Stripe.Refund): Promise<void> {
+  const raised = await transaction(async client => {
+    const held = await client.query<{ order_id: string }>(
+      `UPDATE orders
+       SET last_error_code = 'REFUND_NOT_COMPLETED',
+           last_error = 'The refund failed or was cancelled at Stripe; a person decides',
+           updated_at = NOW()
+       WHERE order_id = $1 AND status = 'refund_pending'
+       RETURNING order_id`,
+      [order.order_id]
+    );
+    if (!held.rows[0]) return false;
+    const alert = await client.query(
+      `INSERT INTO commerce_operational_alerts (order_id, alert_type, severity, details)
+       VALUES ($1, 'refund_not_completed', 'critical', $2)
+       ON CONFLICT DO NOTHING`,
+      [order.order_id, JSON.stringify({ refundId: ended.id, refundStatus: ended.status ?? null })]
+    );
+    await recordOrderEvent(client, order.order_id, 'refund.not_completed', 'refund_pending', 'refund_pending', {
+      refundId: ended.id,
+      refundStatus: ended.status ?? null
+    });
+    return (alert.rowCount ?? 0) > 0;
+  });
+  writeDiagnostic('warn', 'commerce.refund_not_completed', { refundStatus: ended.status ?? 'unknown' });
+  if (raised) reportToOperator('refund_not_completed', OPERATOR_NOTICES.refundNotCompleted());
 }
 
 export async function runCommerceMaintenance(): Promise<CommerceMaintenanceResult> {
@@ -4304,7 +4356,9 @@ export async function runCommerceMaintenance(): Promise<CommerceMaintenanceResul
        -- lane recovers refund/dispute events whose Stripe-side refund already
        -- exists, and requestRefund discovers it (findPaymentRefund-first)
        -- rather than creating another.
-       AND (last_error_code IS NULL OR last_error_code <> 'PAYMENT_AMOUNT_MISMATCH')
+       -- REFUND_NOT_COMPLETED likewise (#730): a refund that failed or was
+       -- cancelled at Stripe waits for a person, never for another refund.
+       AND (last_error_code IS NULL OR last_error_code NOT IN ('PAYMENT_AMOUNT_MISMATCH', 'REFUND_NOT_COMPLETED'))
        AND refund_attempts < $2
        AND (
          refund_attempts = 0

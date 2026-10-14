@@ -527,7 +527,7 @@ The tool response reports one of:
 
 ## Terminal Failure and the Letter Pack
 
-A confirmed send consumes the Letter Pack before the provider is called, so a terminal failure owes the customer compensation. A pay-per-send order moves to `refund_pending` and Stripe settles it. A prepaid send has its pack returned to the credit ledger.
+A confirmed send consumes the Letter Pack before the provider is called, so a terminal failure owes the customer compensation. A pay-per-send order moves to `refund_pending` and Stripe settles it. The hourly sweep adopts a refund already made for the order, by the app or in the Stripe dashboard for the whole amount, before it makes one. A refund that failed or was cancelled at Stripe is not made again: the order is held (`REFUND_NOT_COMPLETED`) and a critical `refund_not_completed` alert asks a person (#730). A prepaid send has its pack returned to the credit ledger.
 
 The return posts new compensating lots rather than reversing the original ones. It mirrors the original per-lot split recorded in `credit_consumption`, and each returned lot inherits its source lot's expiry, because credits are consumed FIFO by `expires_at` and collapsing them would silently move credits between expiry windows. It stores a stable failure code, never provider text.
 

@@ -377,26 +377,45 @@ export async function retrieveRefund(refundId: string): Promise<Stripe.Refund> {
   return getStripeClient().refunds.retrieve(refundId, undefined, BACKGROUND_REQUEST_OPTIONS);
 }
 
+/**
+ * What a payment's refunds say about one order's full refund (#730).
+ *
+ * `live` is the refund to adopt: one the app made for this order (it names
+ * the order in metadata), or one made in the Stripe dashboard, which names
+ * nothing, for at least the whole known amount. `ended` is such a refund
+ * that failed or was cancelled: the sweep then holds the order for a person
+ * rather than make another. A proportional refund carries its command id and
+ * is never the order's refund: adopting one would finalise a whole-pack
+ * revocation against a partial payment (#323). A refund naming another order
+ * is not this one's, and one naming nothing is adopted only against a known
+ * amount, so a dashboard partial is never taken for the whole.
+ */
+export interface OrderRefundSearch {
+  live: Stripe.Refund | null;
+  ended: Stripe.Refund | null;
+}
+
+export function classifyOrderRefunds(
+  refunds: Stripe.Refund[],
+  orderId: string,
+  knownAmountCents: number | null
+): OrderRefundSearch {
+  const theOrders = refunds.filter(refund => {
+    if (refund.metadata?.packRefundId) return false;
+    if (refund.metadata?.orderId) return refund.metadata.orderId === orderId;
+    return knownAmountCents !== null && knownAmountCents > 0 && refund.amount >= knownAmountCents;
+  });
+  const ended = (refund: Stripe.Refund) => ['failed', 'canceled'].includes(refund.status || '');
+  return {
+    live: theOrders.find(refund => !ended(refund)) ?? null,
+    ended: theOrders.find(ended) ?? null
+  };
+}
+
 export async function findPaymentRefund(
   paymentIntentId: string,
-  orderId: string
-): Promise<Stripe.Refund | null> {
-  const refunds = await getStripeClient().refunds.list(
-    {
-      payment_intent: paymentIntentId,
-      limit: 100
-    },
-    BACKGROUND_REQUEST_OPTIONS
-  );
-  return (
-    refunds.data.find(
-      refund =>
-        refund.metadata?.orderId === orderId &&
-        // A proportional refund carries the command id and is never 'the'
-        // refund of an order: adopting one here would finalise a whole-pack
-        // revocation against a partial payment (#323).
-        !refund.metadata?.packRefundId &&
-        !['failed', 'canceled'].includes(refund.status || '')
-    ) || null
-  );
+  orderId: string,
+  knownAmountCents: number | null
+): Promise<OrderRefundSearch> {
+  return classifyOrderRefunds(await listPaymentRefunds(paymentIntentId), orderId, knownAmountCents);
 }

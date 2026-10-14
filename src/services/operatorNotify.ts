@@ -18,7 +18,8 @@ export type OperatorNoticeKind =
   | 'provider_cancelled'
   | 'ambiguous_outcome'
   | 'held_mail_funding'
-  | 'refunded_mail_dispatched';
+  | 'refunded_mail_dispatched'
+  | 'refund_not_completed';
 
 export const OPERATOR_ALERT_TIMEOUT_MS = 10_000;
 
@@ -165,5 +166,7 @@ export const OPERATOR_NOTICES = {
   refundedMailDispatched: () =>
     'A Pay & Send order was refunded or disputed after its letter went, or may have gone, to the print provider. A person must check it with the provider. See the Alerts page on the admin panel.',
   heldMailFunding: () =>
-    'Mail paid for by a purchase that was refunded or disputed is held until a person sends or cancels it. See the Alerts page on the admin panel.'
+    'Mail paid for by a purchase that was refunded or disputed is held until a person sends or cancels it. See the Alerts page on the admin panel.',
+  refundNotCompleted: () =>
+    'A refund failed or was cancelled at Stripe, and the order waits for a person instead of being refunded again. Refund it another way in Stripe, or leave it. See the Alerts page on the admin panel.'
 } as const;
