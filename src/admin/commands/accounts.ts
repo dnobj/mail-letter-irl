@@ -18,6 +18,7 @@ import { AdminFoundationError } from "../errors.js";
 import { readImageQuota } from "../queries/accounts.js";
 import { readOrderVersion } from "../queries/orders.js";
 import { mapDomainError, type CommandDefinition } from "./runner.js";
+import { lockAccountVersion } from "./accountVersionLock.js";
 
 /**
  * Account and order operations that are pure database writes, so each runs
@@ -129,6 +130,7 @@ export function createAccountCommands(overrides: Partial<AccountCommandSeams> = 
     title: "Lift send block",
     action: "account.unblock_sends",
     targetType: "user",
+    lockVersion: lockAccountVersion,
     transactional: true,
     verb: () => "UNBLOCK",
     parseInput: () => ({}),
@@ -171,6 +173,7 @@ export function createAccountCommands(overrides: Partial<AccountCommandSeams> = 
     title: "Adjust letter balance",
     action: "account.adjust_balance",
     targetType: "user",
+    lockVersion: lockAccountVersion,
     transactional: true,
     verb: (input) => (input.direction === "add" ? "ADD-LETTERS" : "REMOVE-LETTERS"),
     parseInput(fields) {
@@ -234,6 +237,7 @@ export function createAccountCommands(overrides: Partial<AccountCommandSeams> = 
     title: "Grant image generations",
     action: "account.grant_images",
     targetType: "user",
+    lockVersion: lockAccountVersion,
     transactional: true,
     verb: () => "GRANT-IMAGES",
     parseInput(fields) {
@@ -323,6 +327,7 @@ export function createAccountCommands(overrides: Partial<AccountCommandSeams> = 
     title: "Erase account",
     action: "account.erase",
     targetType: "user",
+    lockVersion: lockAccountVersion,
     transactional: true,
     verb: () => "ERASE",
     parseInput: () => ({}),

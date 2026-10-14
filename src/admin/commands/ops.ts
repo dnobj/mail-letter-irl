@@ -6,6 +6,7 @@ import { USER_TIERS, type UserTier } from "../../services/types.js";
 import { AdminFoundationError } from "../errors.js";
 import { readRoutingRow } from "../queries/ops.js";
 import { mapDomainError, type CommandDefinition } from "./runner.js";
+import { lockAccountVersion } from "./accountVersionLock.js";
 
 /**
  * Slice-5 operations: tier override, provider routing validated against the
@@ -50,6 +51,7 @@ export function createOpsCommands(overrides: Partial<OpsCommandSeams> = {}) {
     title: "Set tier override",
     action: "account.set_tier",
     targetType: "user",
+    lockVersion: lockAccountVersion,
     transactional: true,
     verb: (input) => (input.tier === "clear" ? "CLEAR-TIER" : `SET-TIER-${input.tier.toUpperCase()}`),
     parseInput(fields) {
