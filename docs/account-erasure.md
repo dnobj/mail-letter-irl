@@ -148,7 +148,7 @@ operator sends now (`job.dispatch_now`) between the preview and the run.
   longer, the erasure stands and the run logs `account_erasure.uploaded_photo_delete_failed`; the
   photo expires within 15 minutes anyway. An upload still in progress is only in the API process's
   memory. It goes when the next upload call from any account finds it more than ten minutes old, or
-  when the API restarts.
+  two minutes without a chunk (#730), or when the API restarts.
 
 ## Reopening an account by hand
 
