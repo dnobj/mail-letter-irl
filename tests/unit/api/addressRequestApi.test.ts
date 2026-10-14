@@ -345,7 +345,21 @@ describe("the recipient's address fields (#604)", () => {
     // A name refused for its punctuation is not the printer's; one in a script the printer lacks is.
     expect(givenAddressOf({ ...ADDRESS, name: 'Jane_Smith' })).toEqual({ ok: false, fields: ['name'] });
     expect(givenAddressOf({ ...ADDRESS, name: 'Jane \u{1F600}' })).toEqual({ ok: false, fields: ['name'], unprintable: ['name'] });
-    // A hidden character is said apart from the printer, even beside one it cannot print.
-    expect(givenAddressOf({ ...ADDRESS, addressLine1: '1 Main St\u200B' })).toEqual({ ok: false, fields: ['addressLine1'] });
+    // A hidden character alone is not the printer's; beside one it cannot print, the field is.
+    expect(givenAddressOf({ ...ADDRESS, addressLine1: '1 Main St\u202E' })).toEqual({ ok: false, fields: ['addressLine1'] });
+    expect(givenAddressOf({ ...ADDRESS, addressLine1: '1 Main St\u202E \u{1F600}' })).toEqual({
+      ok: false,
+      fields: ['addressLine1'],
+      unprintable: ['addressLine1']
+    });
+    // An emoji joined by U+200D, or a flag made with tag characters, is the printer's, not a hidden character.
+    for (const city of ['Tucson \u{1F469}\u200D\u{1F4BB}', 'Leeds \u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}']) {
+      expect(givenAddressOf({ ...ADDRESS, city }), city).toEqual({ ok: false, fields: ['city'], unprintable: ['city'] });
+    }
+    expect(givenAddressOf({ ...ADDRESS, name: 'The Lees \u{1F468}\u200D\u{1F469}\u200D\u{1F467}' })).toEqual({
+      ok: false,
+      fields: ['name'],
+      unprintable: ['name']
+    });
   });
 });

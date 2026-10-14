@@ -18,6 +18,7 @@
  * first name and the request's state, and logs nothing of the token, the names
  * or the address: an outcome and an error class at most. While address
  * requests are off, or for a token it does not know, each answers 404 alike.
+ * A report's log line adds the request's id, which names no one.
  *
  * The address is checked as a preview checks one: U.S. only, its fields
  * bounded and printable in the font PostGrid stamps them in, then PostGrid's
@@ -170,9 +171,16 @@ function fits(value: string, limit: number): boolean {
   return [...value].length <= limit && !HIDDEN.test(value) && unprintableCharacters(value).length === 0;
 }
 
-/** Whether the field holds a character the printer cannot print that the person can see (#730). */
+/** Every hidden character, to take out of a field before the printer is asked about it. */
+const HIDDEN_ALL = new RegExp(HIDDEN.source, 'gu');
+
+/**
+ * Whether the field holds a character the person can see that the printer
+ * cannot print (#730). Hidden characters come out first, not whole graphemes
+ * with one in them: an emoji joined by U+200D or a flag's tags is the printer's.
+ */
 function printerCannot(value: string | undefined): boolean {
-  return value !== undefined && unprintableCharacters(value).some(character => !HIDDEN.test(character));
+  return value !== undefined && unprintableCharacters(value.replace(HIDDEN_ALL, '')).length > 0;
 }
 
 export type AddressFieldProblem = 'name' | 'addressLine1' | 'addressLine2' | 'city' | 'state' | 'postalCode';
