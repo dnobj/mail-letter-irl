@@ -205,12 +205,12 @@ describe('photos are printed upright (#617)', () => {
 
     // From its source: the tagged original is turned again.
     fetchMock.mockResolvedValueOnce(respond(photo, 'image/jpeg'));
-    const fromSource = await reprocessPostcardImage({ url: REMOTE, stored: first.base64DataUri }, '6x11');
+    const fromSource = await reprocessPostcardImage({ url: REMOTE, stored: first.base64DataUri, storedSize: '6x9' }, '6x11');
     expect(fromSource.from).toBe('source');
     expect(await quarters(fromSource.base64DataUri)).toEqual(SEEN['6']);
 
     // From the stored copy, which is upright and carries no tag: turning it again leaves it as it is.
-    const fromStored = await reprocessPostcardImage({ url: null, stored: first.base64DataUri }, '6x4');
+    const fromStored = await reprocessPostcardImage({ url: null, stored: first.base64DataUri, storedSize: '6x9' }, '6x4');
     expect(fromStored.from).toBe('stored');
     expect(await quarters(fromStored.base64DataUri)).toEqual(SEEN['6']);
   });

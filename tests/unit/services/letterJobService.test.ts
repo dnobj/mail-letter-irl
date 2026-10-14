@@ -88,6 +88,22 @@ const letter = {
   mail_type: 'letter',
 };
 
+/**
+ * The suite's database, with the job's locked row at the given attempts: a
+ * claim at those attempts holds it (#730), and the dispatch marker checks so.
+ * Returns the undo.
+ */
+function lockedJobAt(attempts: number, extra: (sql: string) => { rows: unknown[] } | undefined = () => undefined) {
+  const base = clientQuery.getMockImplementation()! as (...args: unknown[]) => Promise<{ rows: Array<Record<string, unknown>> }>;
+  clientQuery.mockImplementation(async (sql: string, ...rest: unknown[]) => {
+    const own = extra(sql);
+    if (own) return own;
+    const answer = await base(sql, ...rest);
+    return sql.startsWith('SELECT * FROM letter_jobs') ? { ...answer, rows: answer.rows.map(row => ({ ...row, attempts })) } : answer;
+  });
+  return () => clientQuery.mockImplementation(base as never);
+}
+
 function mockClaims(numberOfClaims = 1) {
   let claims = 0;
   query.mockImplementation(async (sql: string) => {
@@ -646,6 +662,26 @@ describe('mail outbox retries', () => {
     expect(sendLetter.mock.calls[0][0].giftCard).toBeUndefined();
   });
 
+  it('marks nothing and sends nothing for a claimant whose job a later claim now holds (#730)', async () => {
+    let dispatchMarked = false;
+    // The job's row now holds a later claim's attempts; the funding graph locks as it is.
+    const undo = lockedJobAt(job.attempts + 1, (sql) => {
+      if (sql.includes("SET provider_outcome = 'dispatching'")) dispatchMarked = true;
+      if (sql.startsWith('SELECT funding_order_id FROM letters')) return { rows: [{ funding_order_id: null }] };
+      if (sql.startsWith('SELECT letter_id FROM letter_jobs WHERE job_id = $1 FOR UPDATE')) return { rows: [{ letter_id: 'letter-1' }] };
+      return undefined;
+    });
+    mockClaims();
+    try {
+      await expect(processLetterJob('job-1')).resolves.toMatchObject({ completed: false, retryScheduled: false });
+      expect(dispatchMarked).toBe(false);
+      expect(sendLetter).not.toHaveBeenCalled();
+      expect(clientQuery).not.toHaveBeenCalledWith(expect.stringContaining('attempts = GREATEST(attempts - 1, 0)'), expect.anything());
+    } finally {
+      undo();
+    }
+  });
+
   it('retries, not holds, when the provider cannot even be resolved', async () => {
     // Issue #155's runtime guards make getProviderForMailType throw in
     // production (dummy refused, construction failure rethrown). The provider
@@ -683,12 +719,13 @@ describe('mail outbox retries', () => {
     // first and this counter stays at zero.
     expect(getProviderForMailType).toHaveBeenCalledTimes(1);
     expect(sendLetter).not.toHaveBeenCalled();
-    // A job cancelled meanwhile (#535: a customer's cancel of held mail) is
-    // never brought back to pending by a claimant that lost it.
-    const failed = clientQuery.mock.calls
-      .map(([sql]) => String(sql).replace(/\s+/g, ' '))
-      .find(sql => sql.includes('UPDATE letter_jobs SET status = $2::varchar'));
-    expect(failed).toContain("WHERE job_id = $1 AND provider_outcome = 'not_dispatched' AND status <> 'cancelled'");
+    // Only the claim that holds the job settles it (#730): a claimant that lost
+    // it to a cancel (#535) or to another worker never brings it back to pending.
+    const failedCall = clientQuery.mock.calls.find(([sql]) => String(sql).includes('UPDATE letter_jobs SET status = $2::varchar'));
+    const failed = String(failedCall?.[0]).replace(/\s+/g, ' ');
+    expect(failed).toContain("WHERE job_id = $1 AND provider_outcome = 'not_dispatched' AND status = 'processing' AND attempts = $5::int");
+    // The attempts this claim set: the claimed job's own.
+    expect((failedCall?.[1] as unknown[])[4]).toEqual(expect.any(Number));
     expect(clientQuery).not.toHaveBeenCalledWith(
       expect.stringContaining("SET status = 'held'"),
       expect.anything()
@@ -826,9 +863,11 @@ describe('mail outbox retries', () => {
       metadata: { retryable: true },
     });
 
+    // The claimed job's own row: the claim set its attempts.
+    const undo = lockedJobAt(5);
     const result = await processLetterJob('job-1', {
       random: () => 0,
-    });
+    }).finally(undo);
 
     expect(result).toMatchObject({ completed: false, retryScheduled: false });
     expect(clientQuery).toHaveBeenCalledWith(
@@ -1706,10 +1745,36 @@ describe('mail left for the operator (#696)', () => {
     expect(left.sql).toContain('FOR SHARE OF u');
     expect(left.params).toEqual(['job-1']);
     const back = calls.find(call => call.sql.includes("UPDATE letter_jobs SET status = 'pending', attempts = GREATEST(attempts - 1, 0)"))!;
-    expect(back.sql).toContain("status = 'processing'");
+    // Held to this claim (#730): still processing, at the attempts it set.
+    expect(back.sql).toContain("status = 'processing' AND attempts = $3::int");
+    expect(back.params[2]).toBe(5);
     // Not failed, and nothing given back.
     expect(calls.some(call => call.sql.includes('SET status = $2::varchar'))).toBe(false);
     expect(calls.some(call => call.sql.includes('UPDATE letters SET status'))).toBe(false);
+  });
+
+  it.each([false, true])('schedules a retry only for the claim that still holds the job (superseded meanwhile: %s) (#730)', async superseded => {
+    // A retry left by this claim's own count.
+    query.mockImplementation(async (sql: string) => {
+      if (sql.includes('WITH candidate')) return { rows: [{ ...job, attempts: 1, max_attempts: 5 }] };
+      if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...letter }] };
+      return { rows: [] };
+    });
+    vi.mocked(getProviderForMailType).mockRejectedValueOnce(new Error('provider unavailable'));
+    const calls: Array<{ sql: string; params: unknown[] }> = [];
+    clientQuery.mockImplementation(async (sql: string, values: unknown[] = []) => {
+      calls.push({ sql, params: values });
+      if (sql.includes('UPDATE letter_jobs SET status = $2::varchar')) return { rows: [], rowCount: superseded ? 0 : 1 };
+      if (sql.startsWith('SELECT funding_order_id FROM letters')) return { rows: [{ funding_order_id: null }] };
+      if (sql.startsWith('SELECT letter_id FROM letter_jobs WHERE job_id = $1 FOR UPDATE')) return { rows: [{ letter_id: 'letter-1' }] };
+      return { rows: [] };
+    });
+    expect(await processLetterJob('job-1')).toMatchObject({ completed: false, retryScheduled: !superseded });
+    const settle = calls.find(call => call.sql.includes('UPDATE letter_jobs SET status = $2::varchar'))!;
+    // Held to the claim: the attempts it set.
+    expect(settle.params[4]).toBe(1);
+    // A superseded claimant touches nothing else.
+    expect(calls.some(call => call.sql.includes('UPDATE letters SET status'))).toBe(!superseded);
   });
 
   it('counts a put-back as neither sent nor failed in a run', async () => {

@@ -575,6 +575,50 @@ describePostgres('failed send returns the pack', () => {
     }, 60_000);
 
     /**
+     * A claimant that stalled past its lock (#730). Worker A claimed the job
+     * and stalled; the lock went stale, worker B took the job, failed it before
+     * dispatch on its last attempt and gave the pack back. A then wakes and
+     * settles its own failure: it must change nothing, or it would walk the
+     * refunded letter back to queued and its job back to pending.
+     */
+    it('lets a claimant that lost its job to another worker change nothing', async () => {
+      resetStubProvider();
+      const { userId, letterId } = await seedSpentLetter({ lotA: 5, lotB: 1, spend: 2 });
+      const jobId = await queueJob(letterId, 2);
+      const claimed = async () =>
+        (
+          await pool.query(
+            `UPDATE letter_jobs SET status = 'processing', attempts = attempts + 1, locked_at = NOW()
+              WHERE job_id = $1 RETURNING *`,
+            [jobId]
+          )
+        ).rows[0];
+      // A's claim, then its lock goes stale.
+      const stale = await claimed();
+      expect(stale.attempts).toBe(1);
+      await pool.query(`UPDATE letter_jobs SET locked_at = NOW() - INTERVAL '1 hour' WHERE job_id = $1`, [jobId]);
+      await pool.query(`UPDATE letters SET status = 'processing' WHERE letter_id = $1`, [letterId]);
+      // B's claim, on the last attempt: its pre-dispatch failure settles the job and returns the pack.
+      const current = await claimed();
+      expect(current.attempts).toBe(2);
+      await jobs.failBeforeDispatch(current, new Error('renderer unavailable'), () => 0);
+      const settled = await pool.query<{ status: string }>('SELECT status FROM letter_jobs WHERE job_id = $1', [jobId]);
+      expect(settled.rows[0].status).toBe('failed');
+      expect(await credits(userId)).toBe(6);
+
+      // A wakes, with a retry left by its own count: it schedules nothing.
+      await expect(jobs.failBeforeDispatch(stale, new Error('renderer unavailable'), () => 0)).resolves.toBe(false);
+      const after = await pool.query<{ status: string; attempts: number }>(
+        'SELECT status, attempts FROM letter_jobs WHERE job_id = $1', [jobId]
+      );
+      expect(after.rows[0]).toMatchObject({ status: 'failed', attempts: 2 });
+      const letter = await pool.query<{ status: string }>('SELECT status FROM letters WHERE letter_id = $1', [letterId]);
+      expect(letter.rows[0].status).toBe('failed');
+      expect(await credits(userId)).toBe(6);
+      expect(stubProvider.calls.length).toBe(0);
+    }, 60_000);
+
+    /**
      * Crash boundary: the process died after dispatching to the provider.
      *
      * The piece may well have been printed and posted - the crash destroyed the
