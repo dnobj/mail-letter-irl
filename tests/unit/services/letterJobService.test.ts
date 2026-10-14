@@ -88,6 +88,22 @@ const letter = {
   mail_type: 'letter',
 };
 
+/**
+ * The suite's database, with the job's locked row at the given attempts: a
+ * claim at those attempts holds it (#730), and the dispatch marker checks so.
+ * Returns the undo.
+ */
+function lockedJobAt(attempts: number, extra: (sql: string) => { rows: unknown[] } | undefined = () => undefined) {
+  const base = clientQuery.getMockImplementation()! as (...args: unknown[]) => Promise<{ rows: Array<Record<string, unknown>> }>;
+  clientQuery.mockImplementation(async (sql: string, ...rest: unknown[]) => {
+    const own = extra(sql);
+    if (own) return own;
+    const answer = await base(sql, ...rest);
+    return sql.startsWith('SELECT * FROM letter_jobs') ? { ...answer, rows: answer.rows.map(row => ({ ...row, attempts })) } : answer;
+  });
+  return () => clientQuery.mockImplementation(base as never);
+}
+
 function mockClaims(numberOfClaims = 1) {
   let claims = 0;
   query.mockImplementation(async (sql: string) => {
@@ -646,6 +662,26 @@ describe('mail outbox retries', () => {
     expect(sendLetter.mock.calls[0][0].giftCard).toBeUndefined();
   });
 
+  it('marks nothing and sends nothing for a claimant whose job a later claim now holds (#730)', async () => {
+    let dispatchMarked = false;
+    // The job's row now holds a later claim's attempts; the funding graph locks as it is.
+    const undo = lockedJobAt(job.attempts + 1, (sql) => {
+      if (sql.includes("SET provider_outcome = 'dispatching'")) dispatchMarked = true;
+      if (sql.startsWith('SELECT funding_order_id FROM letters')) return { rows: [{ funding_order_id: null }] };
+      if (sql.startsWith('SELECT letter_id FROM letter_jobs WHERE job_id = $1 FOR UPDATE')) return { rows: [{ letter_id: 'letter-1' }] };
+      return undefined;
+    });
+    mockClaims();
+    try {
+      await expect(processLetterJob('job-1')).resolves.toMatchObject({ completed: false, retryScheduled: false });
+      expect(dispatchMarked).toBe(false);
+      expect(sendLetter).not.toHaveBeenCalled();
+      expect(clientQuery).not.toHaveBeenCalledWith(expect.stringContaining('attempts = GREATEST(attempts - 1, 0)'), expect.anything());
+    } finally {
+      undo();
+    }
+  });
+
   it('retries, not holds, when the provider cannot even be resolved', async () => {
     // Issue #155's runtime guards make getProviderForMailType throw in
     // production (dummy refused, construction failure rethrown). The provider
@@ -827,9 +863,11 @@ describe('mail outbox retries', () => {
       metadata: { retryable: true },
     });
 
+    // The claimed job's own row: the claim set its attempts.
+    const undo = lockedJobAt(5);
     const result = await processLetterJob('job-1', {
       random: () => 0,
-    });
+    }).finally(undo);
 
     expect(result).toMatchObject({ completed: false, retryScheduled: false });
     expect(clientQuery).toHaveBeenCalledWith(

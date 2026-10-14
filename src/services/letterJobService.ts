@@ -268,7 +268,10 @@ async function markProviderDispatch(job: LetterJob): Promise<Letter | typeof LEF
     );
     const letter = letterResult.rows[0];
     const current = lockedJob.rows[0];
-    if (!letter || !current || current.status !== 'processing' ||
+    // Still this claim's job (#730): processing, at the attempts this claim set.
+    // A claimant that stalled past its lock and lost the job to a later claim
+    // neither marks it dispatching nor puts it back.
+    if (!letter || !current || current.status !== 'processing' || current.attempts !== job.attempts ||
         current.provider_outcome !== 'not_dispatched' ||
         !['queued', 'processing'].includes(letter.status)) {
       throw new Error('Mail item is held or no longer dispatchable');
