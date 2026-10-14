@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createAccountCommands } from "../../../src/admin/commands/accounts.js";
+import { lockAccountVersion } from "../../../src/admin/commands/accountVersionLock.js";
+import { createGiftCommands } from "../../../src/admin/commands/gifts.js";
+import { createOpsCommands } from "../../../src/admin/commands/ops.js";
 import { createImageCommands } from "../../../src/admin/commands/images.js";
 import { createPromoCommands } from "../../../src/admin/commands/promos.js";
 import type { AdminSqlClient } from "../../../src/admin/database.js";
@@ -170,6 +173,29 @@ describe("account commands", () => {
     // The reason stays on the audit row; the order event carries only the cleared code (#394).
     expect(calls.release).toEqual([["order_1"]]);
     expect(JSON.stringify(calls.release)).not.toContain("support ticket 42");
+  });
+});
+
+describe("account versions held through the write (#730)", () => {
+  it("gives every command versioned by the account the account's lock, and no other command", () => {
+    const accounts = createAccountCommands();
+    const ops = createOpsCommands();
+    const gifts = createGiftCommands();
+    for (const command of [accounts.unblockSends, accounts.adjustBalance, accounts.grantImages, accounts.erase, ops.setTier, gifts.grant]) {
+      expect(command.targetType).toBe("user");
+      expect(command.lockVersion).toBe(lockAccountVersion);
+    }
+    expect(accounts.releaseQuarantine.lockVersion).toBeUndefined();
+    expect(ops.routing.lockVersion).toBeUndefined();
+  });
+
+  it("reads the account's version holding its row, in the form the previews give it", async () => {
+    const query = vi.fn(async () => ({ rows: [{ updated_at: ACCOUNT_ROW.updated_at }] }));
+    await expect(lockAccountVersion({ query } as never, "auth0|u1")).resolves.toBe("2026-09-06T10:00:00.000Z");
+    expect(query).toHaveBeenCalledWith("SELECT updated_at FROM users WHERE user_id = $1 FOR UPDATE", ["auth0|u1"]);
+
+    const missing = vi.fn(async () => ({ rows: [] }));
+    await expect(lockAccountVersion({ query: missing } as never, "auth0|gone")).resolves.toBeNull();
   });
 });
 
