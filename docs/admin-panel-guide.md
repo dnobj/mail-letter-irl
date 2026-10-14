@@ -305,7 +305,7 @@ problem, not a Tailscale one.
 | `STRIPE_SECRET_KEY` | a **restricted** test-mode key (Checkout Sessions read, Refunds read/write, Charges read, PaymentIntents read, Disputes read); needed for the Stripe page and the refund and repair commands. The service refuses to boot on a full `sk_` key, so this is enforced rather than advised |
 | `LETTER_IRL_PACK_REFUND_COMMAND_ENABLED` | `true` to enable the proportional-refund command on this service; unset otherwise (the house rule: full refunds of unused packs only) |
 | `LETTER_PROVIDER`, `LETTER_PROVIDER_API_KEY`, `LETTER_PROVIDER_CONFIG` | **required for any command that talks to the mail provider** (status sync, retry, ambiguous-job resolution): without them the process falls back to the dummy provider even in production, the banner reads `mail: unset`, and a status sync answers `Letter not found` for real letters. Wire them as Railway references to the API service, `${{letter-irl-api.LETTER_PROVIDER}}` and so on, never as pasted values; the banner then reads `mail: postgrid` |
-| `TS_AUTHKEY` | the one-off key, first boot only |
+| `TS_AUTHKEY` | the one-off key, first boot only. The supervisor hands it to `tailscale up` as a file (`--auth-key=file:`, mode 600, in a temporary directory removed after the call), never on the command line where a process list would show it (#730) |
 
 The service must **not** receive the API's owner `DATABASE_URL`.
 
@@ -353,7 +353,8 @@ Commands exist only in full mode. To enable it in development:
 Every command follows the same path: **preview** (what will happen, bound to the target's current
 state) → **elevation** (a six-digit code on `/elevate`; valid 60 minutes in development, 10 in
 production; five failures in fifteen minutes lock elevation for that operator, on every session
-they hold, until the window passes; success rotates the session id) →
+they hold, for fifteen minutes, and each further lock lasts twice the one before, up to a day,
+until a code is accepted (#730); a restart clears it; success rotates the session id) →
 **typed confirmation** (`CONFIRM <id>` in development, `PRODUCTION <VERB> <id>` in production) plus a
 reason → an `admin_command_runs` row keyed by the preview's idempotency key → the domain service, which
 receives `admin:<run id>` as its own idempotency key → an `admin_audit_events` row with the before and
@@ -485,8 +486,10 @@ npm run admin:dev
 ```
 
 This builds, then starts the panel in `local-dev` mode on `http://localhost:8790` with the configured
-login standing in for the Serve proxy. Local-dev mode is refused on Railway, under
-`NODE_ENV=production`, and outside the development environment. There is no Tailscale involvement.
+login standing in for the Serve proxy. It answers only requests whose `Host` is `localhost` or
+`127.0.0.1` at its port, so a page on another name that resolves to loopback (DNS rebinding) is
+refused (#730). Local-dev mode is refused on Railway, under `NODE_ENV=production`, and outside the
+development environment. There is no Tailscale involvement.
 
 ## Runbook
 
