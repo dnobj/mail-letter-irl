@@ -165,11 +165,11 @@ describe('the day window', () => {
     expect(sql).toMatch(/created_at >= date_trunc/);
   });
 
-  it('applies no status filter', async () => {
+  it('applies no status filter to letters', async () => {
     // A cap that forgives cancelled or failed rows is one an error loop walks
-    // straight through.
+    // straight through. Only open checkouts are chosen by status (#730).
     const c = client({});
-    await assertMailWithinDailyCaps(c, 'u1', 1);
+    await assertMailWithinDailyCaps(c, 'u1', 1, { openCheckouts: false });
     const sql = (c as unknown as { query: ReturnType<typeof vi.fn> }).query.mock.calls
       .map(call => String(call[0]))
       .join('\n');
@@ -417,5 +417,62 @@ describe('refusal reports', () => {
       code: 'SPEND_LIMIT_UNVERIFIABLE'
     });
     expect(mocks.reported).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * #730: a count is a ceiling only if nothing adds a row between it and the
+ * commit, so each cap is counted under its own transaction-scoped lock, and
+ * an open Pay & Send checkout counts as the letter it will become.
+ */
+describe('counting under a lock, with open checkouts', () => {
+  const LOCK = "hashtext('letter_irl.daily_cap')";
+  function statements(c: never): Array<{ sql: string; params: unknown[] }> {
+    return (c as unknown as { query: ReturnType<typeof vi.fn> }).query.mock.calls.map(call => ({
+      sql: String(call[0]),
+      params: (call[1] as unknown[]) ?? []
+    }));
+  }
+
+  it('locks the account, then the global count, each before it counts', async () => {
+    const c = client({});
+    await assertMailWithinDailyCaps(c, 'u1', 0);
+    const ran = statements(c).filter(s => !s.sql.includes('daily_limit_overrides'));
+    expect(ran.map(s => (s.sql.includes(LOCK) ? `lock ${s.params[0]}` : s.sql.includes('user_id = $1') ? 'count account' : 'count global'))).toEqual([
+      'lock account_daily_mail:u1',
+      'count account',
+      'lock global_daily_mail',
+      'count global'
+    ]);
+  });
+
+  it('counts open Pay & Send orders without a letter yet, beside the letters', async () => {
+    const c = client({});
+    await assertMailWithinDailyCaps(c, 'u1', 0);
+    const counts = statements(c).filter(s => s.sql.includes('COUNT(*) AS count')).map(s => s.sql.replace(/\s+/g, ' '));
+    for (const sql of counts) {
+      expect(sql).toContain('UNION ALL');
+      expect(sql).toContain("o.order_type = 'jit_mail'");
+      expect(sql).toContain("o.status IN ('checkout_pending', 'paid', 'fulfillment_pending')");
+      expect(sql).toContain('NOT EXISTS (SELECT 1 FROM letters l WHERE l.funding_order_id = o.order_id)');
+    }
+    expect(counts[0]).toContain('o.user_id = $1 AND');
+    expect(counts[1]).not.toContain('user_id = $1');
+  });
+
+  it('takes no lock and counts letters alone when asked, as the early checkout answer does', async () => {
+    const c = client({});
+    await assertMailWithinDailyCaps(c, 'u1', 1, { openCheckouts: false, lock: false });
+    const ran = statements(c);
+    expect(ran.some(s => s.sql.includes(LOCK))).toBe(false);
+    expect(ran.some(s => s.sql.includes('UNION ALL'))).toBe(false);
+  });
+
+  it('locks the gift budget before counting it', async () => {
+    const c = client({});
+    await assertGiftSendWithinDailyCap(c);
+    const ran = statements(c).filter(s => !s.sql.includes('daily_limit_overrides'));
+    expect(ran[0]).toEqual({ sql: expect.stringContaining(LOCK), params: ['gift_daily_send'] });
+    expect(ran[1].sql).toContain("funding_type = 'gift_letter'");
   });
 });
