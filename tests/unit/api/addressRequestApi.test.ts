@@ -353,6 +353,11 @@ describe("the recipient's address fields (#604)", () => {
       fields: ['addressLine1'],
       unprintable: ['addressLine1']
     });
+    expect(givenAddressOf({ ...ADDRESS, addressLine2: 'Apt 4 \u{1F600}' })).toEqual({
+      ok: false,
+      fields: ['addressLine2'],
+      unprintable: ['addressLine2']
+    });
     // An emoji joined by U+200D, or a flag made with tag characters, is the printer's, not a hidden character.
     for (const city of ['Tucson \u{1F469}\u200D\u{1F4BB}', 'Leeds \u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}']) {
       expect(givenAddressOf({ ...ADDRESS, city }), city).toEqual({ ok: false, fields: ['city'], unprintable: ['city'] });

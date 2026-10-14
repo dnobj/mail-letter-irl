@@ -178,6 +178,8 @@ const HIDDEN_ALL = new RegExp(HIDDEN.source, 'gu');
  * Whether the field holds a character the person can see that the printer
  * cannot print (#730). Hidden characters come out first, not whole graphemes
  * with one in them: an emoji joined by U+200D or a flag's tags is the printer's.
+ * A character the runtime's Unicode tables do not know yet (a new emoji) or a
+ * private-use one counts as hidden, so its field is refused without the note.
  */
 function printerCannot(value: string | undefined): boolean {
   return value !== undefined && unprintableCharacters(value.replace(HIDDEN_ALL, '')).length > 0;
