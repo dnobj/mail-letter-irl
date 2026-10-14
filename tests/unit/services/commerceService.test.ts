@@ -3895,10 +3895,10 @@ describe('commerceService', () => {
         expect(statements.some(s => s.sql.includes("ELSE 'REFUND_NOT_COMPLETED' END"))).toBe(false);
       });
 
-      it('holds nothing for an older refund\'s failure while the order names a newer one', async () => {
-        const statements = webhookStatements('refund_pending', 're-newer');
+      it('holds on a failure whichever refund the order named, since Stripe sends a refund\'s events in no set order', async () => {
+        const statements = webhookStatements('refund_pending', 're-other');
         await processStripeWebhookEvent(event('refund.updated', 'failed'));
-        expect(statements.some(s => s.sql.includes("ELSE 'REFUND_NOT_COMPLETED' END"))).toBe(false);
+        expect(statements.some(s => s.sql.includes("ELSE 'REFUND_NOT_COMPLETED' END"))).toBe(true);
       });
 
       it('releases a hold when the sweep finishes the refund itself', async () => {

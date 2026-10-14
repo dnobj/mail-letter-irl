@@ -3107,15 +3107,12 @@ async function processRefundEvent(
     await recordOrderEvent(client, order.order_id, eventType, order.status, nextStatus);
     if (nextStatus === 'refunded') {
       await releaseRefundHold(client, order.order_id);
-    } else if (
-      isRefund &&
-      ['failed', 'canceled'].includes(refundStatus ?? '') &&
-      // Not for an older refund's event: a newer one the order names is still
-      // going, and its own outcome decides (#730).
-      (!order.stripe_refund_id || order.stripe_refund_id === refundOrCharge.id)
-    ) {
+    } else if (isRefund && ['failed', 'canceled'].includes(refundStatus ?? '')) {
       // A full refund that failed or was cancelled waits for a person, never
-      // for the sweep to make another (#730), whoever made it.
+      // for the sweep to make another (#730), whoever made it, and whichever
+      // refund the order named: Stripe does not promise the order of a
+      // refund's events. A newer refund that succeeds releases the hold
+      // through its own webhook (releaseRefundHold).
       if (await holdRefundNotCompletedWithClient(client, order.order_id, { id: refundOrCharge.id, status: refundStatus })) {
         reportToOperator('refund_not_completed', OPERATOR_NOTICES.refundNotCompleted());
       }

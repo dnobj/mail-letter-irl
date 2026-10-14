@@ -269,6 +269,15 @@ describePostgres('refund finalization', () => {
     await commerce.processStripeWebhookEvent(refundEvent('refund.updated', paymentIntentId, 'canceled'));
     expect(await openAlerts(orderId)).toBe(1);
 
+    // A newer refund whose failure arrives before anything else about it is held too.
+    await pool.query(
+      `UPDATE commerce_operational_alerts SET status = 'resolved', resolved_at = NOW(), resolution_code = 'test', updated_at = NOW()
+        WHERE order_id = $1 AND alert_type = 'refund_not_completed'`,
+      [orderId]
+    );
+    await commerce.processStripeWebhookEvent(refundEvent('refund.failed', paymentIntentId, 'failed'));
+    expect(await openAlerts(orderId)).toBe(1);
+
     // The person refunds again in Stripe, and it succeeds: the order completes,
     // the hold clears, and the open alert closes itself.
     await commerce.processStripeWebhookEvent(refundEvent('refund.created', paymentIntentId, 'succeeded'));
