@@ -5,6 +5,24 @@ import { MAX_LETTER_PAGES } from "./render/geometry.js";
 import { MAIL_SERVICES } from "./config/certifiedMail.js";
 import { EXTRA_SERVICES } from "./config/products.js";
 
+/**
+ * The longest image link a tool takes (#730), in characters. Image links are
+ * https only (src/services/imageService.ts). A signed link can be long (an S3
+ * link made with temporary credentials can pass 2000), so this leaves room; a
+ * longer one is refused before anything is fetched or logged.
+ */
+export const IMAGE_URL_MAX_LENGTH = 4096;
+const IMAGE_URL_TOO_LONG =
+  `An image link can be at most ${IMAGE_URL_MAX_LENGTH} characters. Use a shorter link to the photo, or upload it with upload_image.`;
+/** A signature's link: upload_image takes no signature, so it is not offered. */
+const SIGNATURE_URL_TOO_LONG =
+  `A signature photo's link can be at most ${IMAGE_URL_MAX_LENGTH} characters. Use a shorter link, or attach the photo.`;
+/**
+ * An image link a tool takes: a string, bounded. A new schema each call, so the
+ * generated JSON Schema states it in place rather than as a $ref to another tool.
+ */
+export const imageUrlZ = (tooLong = IMAGE_URL_TOO_LONG) => z.string().max(IMAGE_URL_MAX_LENGTH, tooLong);
+
 export const addressZ = z.object({
   name: z.string(),
   addressLine1: z.string(),
@@ -228,11 +246,24 @@ export const quoteAndPreviewInputZ = z.object({
 // image, and any other string becomes a marker for a picture the server
 // cannot open, which the handlers do not replace with an older upload (#414;
 // see utils/imageFileParam.ts and services/previewImageSource.ts).
+/**
+ * The longest file link a host may hand over in a file object (#730). Looser
+ * than an image link: the host writes it, signed. Checked at run time only,
+ * since a file object's JSON Schema must match the Apps SDK contract above
+ * exactly (a refinement adds nothing to it; servedToolsSnapshot.test.ts).
+ */
+export const FILE_DOWNLOAD_URL_MAX_LENGTH = 8192;
+const FILE_LINK_TOO_LONG =
+  `A file's link can be at most ${FILE_DOWNLOAD_URL_MAX_LENGTH} characters. Upload the photo with upload_image instead.`;
+/** A file object's link: a string, bounded at run time. */
+const fileDownloadUrlZ = () =>
+  z.string().refine((value) => value.length <= FILE_DOWNLOAD_URL_MAX_LENGTH, { message: FILE_LINK_TOO_LONG });
+
 const imageFileParamZ = z.preprocess(
   preprocessImageFileParam,
   z
     .object({
-      download_url: z.string(),
+      download_url: fileDownloadUrlZ(),
       file_id: z.string(),
       mime_type: z.string().optional(),
       file_name: z.string().optional()
@@ -248,7 +279,7 @@ const imageFileParamZ = z.preprocess(
 const imageFileElementZ = z.preprocess(
   preprocessImageFileElement,
   z.object({
-    download_url: z.string(),
+    download_url: fileDownloadUrlZ(),
     file_id: z.string(),
     mime_type: z.string().optional(),
     file_name: z.string().optional()
@@ -264,7 +295,7 @@ export const quoteAndPreviewLetterWithHeaderImageInputZ = z.object({
   // Image from file attachment - OpenAI Apps SDK requires explicit schema definition
   image: imageFileParamZ.optional(),
   // Alternative: direct image URL
-  imageUrl: z.string().optional(),
+  imageUrl: imageUrlZ().optional(),
   sendAsGift: sendAsGiftZ,
   arriveBy: arriveByZ,
   stationery: stationeryZ,
@@ -284,7 +315,7 @@ export const quoteAndPreviewLetterWithImageInputZ = z.object({
   // Image from file attachment - OpenAI Apps SDK requires explicit schema definition
   image: imageFileParamZ.optional(),
   // Alternative: direct image URL
-  imageUrl: z.string().optional(),
+  imageUrl: imageUrlZ().optional(),
   sendAsGift: sendAsGiftZ,
   arriveBy: arriveByZ,
   stationery: stationeryZ,
@@ -483,11 +514,11 @@ export const quoteAndPreviewPostcardInputZ = z.object({
   // Mobile may send file_id without download_url (sediment:// protocol)
   image: imageFileParamZ.optional(),
   // Alternative: direct image URL (for when fileParams isn't available)
-  imageUrl: z.string().optional(),
+  imageUrl: imageUrlZ().optional(),
   // Two to four photos for a collage (#616): withheld while collages are not offered (withheldInputKeys).
   // A blank string where a list belongs is no list (preprocessPhotoList); the JSON Schema is the array's.
   images: z.preprocess(preprocessPhotoList, z.array(imageFileElementZ).optional()).describe(POSTCARD_COLLAGE_IMAGES_DESCRIPTION),
-  imageUrls: z.preprocess(preprocessPhotoList, z.array(z.string()).optional()).describe(POSTCARD_COLLAGE_IMAGE_URLS_DESCRIPTION),
+  imageUrls: z.preprocess(preprocessPhotoList, z.array(imageUrlZ()).optional()).describe(POSTCARD_COLLAGE_IMAGE_URLS_DESCRIPTION),
   sendAsGift: sendAsGiftZ,
   arriveBy: arriveByZ
 });
@@ -617,7 +648,7 @@ export const SIGNATURE_REMOVED_DESCRIPTION = "Whether a saved signature was remo
 
 export const setSignatureInputZ = z.object({
   image: imageFileParamZ.optional().describe(SIGNATURE_IMAGE_DESCRIPTION),
-  imageUrl: z.string().optional().describe(SIGNATURE_IMAGE_URL_DESCRIPTION)
+  imageUrl: imageUrlZ(SIGNATURE_URL_TOO_LONG).optional().describe(SIGNATURE_IMAGE_URL_DESCRIPTION)
 });
 
 export const getSignatureInputZ = z.object({});
@@ -687,7 +718,7 @@ export const generateImageForMailInputZ = z.object({
 // ============================================================================
 
 export const confirmUploadedImageInputZ = z.object({
-  imageUrl: z.string(),
+  imageUrl: imageUrlZ(),
   context: z.string().optional().describe("What the photo is for: 'postcard', 'header_image' or 'inline_image'.")
 });
 
