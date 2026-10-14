@@ -23,13 +23,14 @@ const FILE_LIMIT = 8192;
 
 const received: Array<Record<string, unknown>> = [];
 
-async function connected() {
+async function connected(flags: Record<string, string> = {}) {
   vi.stubEnv('LETTER_IRL_REQUIRE_AUTH', 'true');
   vi.stubEnv('LETTER_IRL_OAUTH_SCOPES', 'openid email offline_access mail:read mail:draft mail:send');
   // Every tool that takes an image link is listed: collages, and signatures with the renderer that draws them.
   vi.stubEnv('LETTER_IRL_POSTCARD_COLLAGES_ENABLED', 'true');
   vi.stubEnv('LETTER_IRL_PRINT_RENDERER', 'pdf');
   vi.stubEnv('LETTER_IRL_SIGNATURES_ENABLED', 'true');
+  for (const [name, value] of Object.entries(flags)) vi.stubEnv(name, value);
   const real = new LetterIrlServer();
   const appServer = {
     listTools: (client: ClientProfile) => real.listTools(client),
@@ -106,8 +107,14 @@ describe('image links (#730)', () => {
   it.each(CALLS)('%s refuses a %s past the limit before the app sees it, and says what to do', async (name, _key, args) => {
     const client = await connected();
     const said = await call(client, name, args(link(LIMIT + 1)));
-    expect(said).toContain(`An image link can be at most ${LIMIT} characters`);
-    expect(said).toContain('upload_image');
+    if (name === 'set_signature') {
+      // upload_image takes no signature, so it is not offered.
+      expect(said).toContain(`A signature photo's link can be at most ${LIMIT} characters`);
+      expect(said).not.toContain('upload_image');
+    } else {
+      expect(said).toContain(`An image link can be at most ${LIMIT} characters`);
+      expect(said).toContain('upload_image');
+    }
     expect(received).toHaveLength(0);
   });
 
@@ -136,6 +143,19 @@ describe("a file object's link (#730)", () => {
     const said = await call(client, name, args(link(FILE_LIMIT + 1)));
     expect(said).toContain(`A file's link can be at most ${FILE_LIMIT} characters`);
     expect(said).toContain('upload_image');
+    expect(received).toHaveLength(0);
+  });
+
+  it('is checked on a preview served while a field is withheld, which passes unknown keys through', async () => {
+    // Arrive-by off: the previews are served as passthrough objects (getServedInputSchema).
+    const client = await connected({ LETTER_IRL_ARRIVE_BY_ENABLED: '' });
+    const served = (await client.listTools()).tools.find(tool => tool.name === 'quote_and_preview_letter_with_image');
+    // The shape a withheld field gives: unknown keys pass through (registerTools.ts).
+    expect(served?.inputSchema.additionalProperties).toBe(true);
+    const said = await call(client, 'quote_and_preview_letter_with_image', { ...LETTER, image: file(link(FILE_LIMIT + 1)) });
+    expect(said).toContain(`A file's link can be at most ${FILE_LIMIT} characters`);
+    const linkSaid = await call(client, 'quote_and_preview_postcard', { ...POSTCARD, imageUrl: link(LIMIT + 1) });
+    expect(linkSaid).toContain(`An image link can be at most ${LIMIT} characters`);
     expect(received).toHaveLength(0);
   });
 

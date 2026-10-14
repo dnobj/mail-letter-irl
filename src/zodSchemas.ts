@@ -14,11 +14,14 @@ import { EXTRA_SERVICES } from "./config/products.js";
 export const IMAGE_URL_MAX_LENGTH = 4096;
 const IMAGE_URL_TOO_LONG =
   `An image link can be at most ${IMAGE_URL_MAX_LENGTH} characters. Use a shorter link to the photo, or upload it with upload_image.`;
+/** A signature's link: upload_image takes no signature, so it is not offered. */
+const SIGNATURE_URL_TOO_LONG =
+  `A signature photo's link can be at most ${IMAGE_URL_MAX_LENGTH} characters. Use a shorter link, or attach the photo.`;
 /**
  * An image link a tool takes: a string, bounded. A new schema each call, so the
  * generated JSON Schema states it in place rather than as a $ref to another tool.
  */
-export const imageUrlZ = () => z.string().max(IMAGE_URL_MAX_LENGTH, IMAGE_URL_TOO_LONG);
+export const imageUrlZ = (tooLong = IMAGE_URL_TOO_LONG) => z.string().max(IMAGE_URL_MAX_LENGTH, tooLong);
 
 export const addressZ = z.object({
   name: z.string(),
@@ -645,7 +648,7 @@ export const SIGNATURE_REMOVED_DESCRIPTION = "Whether a saved signature was remo
 
 export const setSignatureInputZ = z.object({
   image: imageFileParamZ.optional().describe(SIGNATURE_IMAGE_DESCRIPTION),
-  imageUrl: imageUrlZ().optional().describe(SIGNATURE_IMAGE_URL_DESCRIPTION)
+  imageUrl: imageUrlZ(SIGNATURE_URL_TOO_LONG).optional().describe(SIGNATURE_IMAGE_URL_DESCRIPTION)
 });
 
 export const getSignatureInputZ = z.object({});
