@@ -30,7 +30,9 @@ function schemaName(prefix: string): string {
 
 function databaseUrlForSchema(baseUrl: string, schema: string): string {
   const url = new URL(baseUrl);
-  url.searchParams.set('options', `-c search_path=${schema},public`);
+  // UTC, so INTERVAL '90 days' is exactly 90 x 24 hours: in a zone with daylight
+  // saving a clock change inside the window moves it by an hour (CI and Neon are UTC).
+  url.searchParams.set('options', `-c search_path=${schema},public -c TimeZone=UTC`);
   return url.toString();
 }
 
