@@ -66,7 +66,7 @@
     "@types/node": "^20.11.30",
     "@types/pdfkit": "^0.17.6",
     "@types/pg": "^8.11.0",
-    "@vitest/coverage-v8": "^4.0.15",
+    "@vitest/coverage-v8": "^4.1.11",
     "dotenv-cli": "^11.0.0",
     "eslint": "^9.0.0",
     "eslint-config-prettier": "^9.1.0",
@@ -80,7 +80,7 @@
     "tsx": "^4.6.2",
     "typescript": "^5.4.5",
     "typescript-eslint": "^8.57.1",
-    "vitest": "^4.0.15"
+    "vitest": "^4.1.11"
   },
   "overrides": {
     "sharp": "^0.35.5",
