@@ -345,8 +345,9 @@ describe("the recipient's address fields (#604)", () => {
     // A name refused for its punctuation is not the printer's; one in a script the printer lacks is.
     expect(givenAddressOf({ ...ADDRESS, name: 'Jane_Smith' })).toEqual({ ok: false, fields: ['name'] });
     expect(givenAddressOf({ ...ADDRESS, name: 'Jane \u{1F600}' })).toEqual({ ok: false, fields: ['name'], unprintable: ['name'] });
-    // A hidden character alone is not the printer's; beside one it cannot print, the field is.
+    // A hidden character alone is not the printer's, nor are several; beside one it cannot print, the field is.
     expect(givenAddressOf({ ...ADDRESS, addressLine1: '1 Main St\u202E' })).toEqual({ ok: false, fields: ['addressLine1'] });
+    expect(givenAddressOf({ ...ADDRESS, addressLine1: '1\u202E Main\u2066 St\u202E' })).toEqual({ ok: false, fields: ['addressLine1'] });
     expect(givenAddressOf({ ...ADDRESS, addressLine1: '1 Main St\u202E \u{1F600}' })).toEqual({
       ok: false,
       fields: ['addressLine1'],
