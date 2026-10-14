@@ -311,7 +311,7 @@ problem, not a Tailscale one.
 | `STRIPE_SECRET_KEY` | a **restricted** test-mode key (Checkout Sessions read, Refunds read/write, Charges read, PaymentIntents read, Disputes read); needed for the Stripe page and the refund and repair commands. The service refuses to boot on a full `sk_` key, so this is enforced rather than advised |
 | `LETTER_IRL_PACK_REFUND_COMMAND_ENABLED` | `true` to enable the proportional-refund command on this service; unset otherwise (the house rule: full refunds of unused packs only) |
 | `LETTER_PROVIDER`, `LETTER_PROVIDER_API_KEY`, `LETTER_PROVIDER_CONFIG` | **required for any command that talks to the mail provider** (status sync, retry, ambiguous-job resolution): without them the process falls back to the dummy provider even in production, the banner reads `mail: unset`, and a status sync answers `Letter not found` for real letters. Wire them as Railway references to the API service, `${{letter-irl-api.LETTER_PROVIDER}}` and so on, never as pasted values; the banner then reads `mail: postgrid` |
-| `TS_AUTHKEY` | the one-off key, first boot only |
+| `TS_AUTHKEY` | the one-off key, first boot only. The supervisor hands it to `tailscale up` as a file (`--auth-key=file:`, mode 600, in a temporary directory removed after the call), never on the command line where a process list would show it (#730) |
 
 The service must **not** receive the API's owner `DATABASE_URL`.
 
@@ -358,8 +358,10 @@ Commands exist only in full mode. To enable it in development:
 
 Every command follows the same path: **preview** (what will happen, bound to the target's current
 state) → **elevation** (a six-digit code on `/elevate`; valid 60 minutes in development, 10 in
-production; five failures in fifteen minutes lock elevation for that operator, on every session
-they hold, until the window passes; success rotates the session id) →
+production; every fifth failure since that operator's last accepted code locks elevation for
+them, on every session they hold, however far apart the failures came: fifteen minutes the first
+time, and each further lock twice the one before, up to a day (#730); an accepted code starts the
+count again, and a restart clears it; success rotates the session id) →
 **typed confirmation** (`CONFIRM <id>` in development, `PRODUCTION <VERB> <id>` in production) plus a
 reason → an `admin_command_runs` row keyed by the preview's idempotency key → the domain service, which
 receives `admin:<run id>` as its own idempotency key → an `admin_audit_events` row with the before and
@@ -491,16 +493,19 @@ npm run admin:dev
 ```
 
 This builds, then starts the panel in `local-dev` mode on `http://localhost:8790` with the configured
-login standing in for the Serve proxy. Local-dev mode is refused on Railway, under
-`NODE_ENV=production`, and outside the development environment. There is no Tailscale involvement.
+login standing in for the Serve proxy. It answers only requests whose `Host` is `localhost` or
+`127.0.0.1` at its port, so a page on another name that resolves to loopback (DNS rebinding) is
+refused (#730). Local-dev mode is refused on Railway, under `NODE_ENV=production`, and outside the
+development environment. There is no Tailscale involvement.
 
 ## Runbook
 
 | Situation | Steps |
 | --- | --- |
+| Locked out of elevation (the lock page shows when it lifts; locks double up to a day) | Wait it out, or redeploy the admin service: the lock and its count live in the process, and a restart clears them. If you did not cause the failures, treat it as a compromised operator device: remove the device in the Tailscale console first. |
 | Re-register the node (volume replaced, tag changed, suspected key compromise) | Delete the old machine in the console; mint a new one-off, tagged, pre-approved (pre-signed with Tailnet Lock) key with 1-day expiry; set `TS_AUTHKEY`; redeploy; confirm the name and tag; delete the variable. No standing key exists to rotate. |
 | Revoke a device (lost or stolen laptop or phone) | Delete the device on the Machines page (immediate); if it was a Tailnet Lock signing node, remove and rotate it from another signing node and re-issue disablement secrets; restart the admin service, which drops every session; if the identity provider account may be compromised, rotate its credential and passkeys and review the console audit log. |
-| Panel unreachable | Read the deploy log. `NeedsLogin` on first boot: the one-off key expired, mint again. "Locked out": sign the node. Device approval pending: approve. Volume detached: re-register. `ADMIN_TAILSCALE_TAG_MISMATCH` or `ADMIN_TAILSCALE_NAME_MISMATCH`: the node carries the wrong tag or name; fix the key's tag or the hostname variable. `ADMIN_PUBLIC_DOMAIN_PRESENT`: a domain was generated; remove it. Serverless enabled: disable it. |
+| Panel unreachable | Read the deploy log. `NeedsLogin` on first boot: the one-off key expired, mint again. "Locked out": sign the node. Device approval pending: approve. Volume detached: re-register. `ADMIN_TAILSCALE_TAG_MISMATCH` or `ADMIN_TAILSCALE_NAME_MISMATCH`: the node carries the wrong tag or name; fix the key's tag or the hostname variable. `ADMIN_PUBLIC_DOMAIN_PRESENT`: a domain was generated; remove it. Serverless enabled: disable it. "could not write the auth key file" then `ADMIN_TAILSCALE_UNAVAILABLE`: the container's `/tmp` is not writable or is full; redeploy with `TS_AUTHKEY` still set. |
 | Pages hang in a browser while curl answers | Packet size, not DNS. Compare a plain request with one carrying a 1600-byte header: `curl -H "X-Pad: $(printf 'a%.0s' $(seq 1 1600))" <panel url>`. If only the padded one hangs, the path's MTU has dropped below the daemon's: confirm the deploy log shows `envknob: TS_DEBUG_MTU="1200"`, and if it does, set a lower `TS_DEBUG_MTU` on the service. Measured 2026-09-08: 1248 passed, 1260 did not. |
 | Reach the panel from the phone | Install Tailscale, sign in with the same identity, approve or sign the phone from the laptop, open the URL. Keep the TOTP authenticator on a different device from the one browsing when writes are intended. |
 | Certificate problems | Serve requests and renews the certificate itself. Confirm HTTPS is enabled on the DNS page and the node name is unchanged, then redeploy. |

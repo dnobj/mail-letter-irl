@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  MAX_LOCK_MS,
   attemptElevation,
   dropElevation,
   isElevated,
@@ -87,6 +88,39 @@ describe("write elevation", () => {
     expect(attemptElevation(current, guard, SECRET, codeAt(later), policy, later).ok).toBe(true);
   });
 
+  it("doubles each lock after the first, up to a day, until a code is accepted (#730)", () => {
+    const { guard, newSession } = harness();
+    const current = newSession();
+    let at = 1_700_000_000_000;
+    /** Five wrong codes from `at`: the lock they earn, in ms from the fifth. */
+    const lockAfterFive = () => {
+      let result = attemptElevation(current, guard, SECRET, "000000", policy, at);
+      for (let attempt = 2; attempt <= 5; attempt += 1) {
+        expect(result.ok).toBe(false);
+        result = attemptElevation(current, guard, SECRET, "000000", policy, at + attempt);
+      }
+      expect(result).toMatchObject({ ok: false, reason: "locked" });
+      const lockedFor = (result as { lockedUntil: number }).lockedUntil - (at + 5);
+      at = (result as { lockedUntil: number }).lockedUntil + 1;
+      return lockedFor;
+    };
+    const window = policy.failureWindowMs;
+    expect(lockAfterFive()).toBe(window);
+    expect(lockAfterFive()).toBe(window * 2);
+    expect(lockAfterFive()).toBe(window * 4);
+    expect(lockAfterFive()).toBe(window * 8);
+    expect(lockAfterFive()).toBe(window * 16);
+    expect(lockAfterFive()).toBe(window * 32);
+    // 15 minutes x 128 is past a day: a lock is never longer than one.
+    expect(lockAfterFive()).toBe(window * 64);
+    expect(lockAfterFive()).toBe(MAX_LOCK_MS);
+    expect(lockAfterFive()).toBe(MAX_LOCK_MS);
+    // A code accepted after the last lock: the next lock is the first again.
+    expect(attemptElevation(current, guard, SECRET, codeAt(at), policy, at).ok).toBe(true);
+    at += 60_000;
+    expect(lockAfterFive()).toBe(window);
+  });
+
   it("keeps the lock when every attempt arrives on a brand-new session", () => {
     // A request that presents no cookie is authenticated by the Tailscale
     // headers alone and is given a fresh session. When the failure count lived
@@ -122,14 +156,77 @@ describe("write elevation", () => {
     );
   });
 
-  it("forgets failures older than the window", () => {
+  it("counts failures since the last accepted code, however far apart they come (#730)", () => {
     const { guard, newSession } = harness();
     const current = newSession();
     const now = 1_700_000_000_000;
     for (let attempt = 1; attempt <= 4; attempt += 1) {
       attemptElevation(current, guard, SECRET, "000000", policy, now + attempt);
     }
-    const later = now + policy.failureWindowMs + 10;
-    expect(attemptElevation(current, guard, SECRET, "000000", policy, later)).toMatchObject({ ok: false, reason: "invalid", failuresLeft: 4 });
+    // A day later, the fifth still counts.
+    const later = now + 24 * 60 * 60_000;
+    expect(attemptElevation(current, guard, SECRET, "000000", policy, later)).toMatchObject({ ok: false, reason: "locked" });
+  });
+
+  it("locks a guesser who paces four tries per window, and doubles the locks", () => {
+    const { guard, newSession } = harness();
+    const current = newSession();
+    let at = 1_700_000_000_000;
+    let tries = 0;
+    const locks: number[] = [];
+    // Four tries per window, for two days: each try waits out any lock.
+    const end = at + 2 * 24 * 60 * 60_000;
+    while (at < end) {
+      for (let attempt = 0; attempt < 4 && at < end; attempt += 1) {
+        const lock = guard.lockedUntil("owner@example.com", at);
+        if (lock !== null) at = lock + 1;
+        const result = attemptElevation(current, guard, SECRET, "000000", policy, at);
+        tries += 1;
+        if (!result.ok && result.reason === "locked" && result.lockedUntil !== null) locks.push(result.lockedUntil - at);
+        at += 1;
+      }
+      at += policy.failureWindowMs;
+    }
+    // Locked from the fifth try on, each lock twice the last until the cap.
+    expect(locks.slice(0, 4)).toEqual([1, 2, 4, 8].map((factor) => policy.failureWindowMs * factor));
+    expect(Math.max(...locks)).toBe(MAX_LOCK_MS);
+    // Far from the ~384 tries two windows' pacing used to allow in a day.
+    expect(tries).toBeLessThan(60);
+  });
+
+  it("counts five more after a lock lifts, saying how many are left, then locks for twice as long", () => {
+    const { guard, newSession } = harness();
+    const current = newSession();
+    const now = 1_700_000_000_000;
+    let last = attemptElevation(current, guard, SECRET, "000000", policy, now);
+    for (let attempt = 1; attempt < 5; attempt += 1) last = attemptElevation(current, guard, SECRET, "000000", policy, now + attempt);
+    expect(last).toMatchObject({ ok: false, reason: "locked", lockedUntil: now + 4 + policy.failureWindowMs });
+    const lifted = now + 4 + policy.failureWindowMs + 1;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      expect(attemptElevation(current, guard, SECRET, "000000", policy, lifted + attempt)).toMatchObject({
+        ok: false,
+        reason: "invalid",
+        failuresLeft: 4 - attempt,
+        lockedUntil: null,
+      });
+    }
+    expect(attemptElevation(current, guard, SECRET, "000000", policy, lifted + 4)).toMatchObject({
+      ok: false,
+      reason: "locked",
+      lockedUntil: lifted + 4 + 2 * policy.failureWindowMs,
+    });
+  });
+
+  it("starts the count again once a code is accepted", () => {
+    const { guard, newSession } = harness();
+    const current = newSession();
+    const now = 1_700_000_000_000;
+    for (let attempt = 1; attempt <= 4; attempt += 1) attemptElevation(current, guard, SECRET, "000000", policy, now + attempt);
+    expect(attemptElevation(current, guard, SECRET, codeAt(now), policy, now + 10).ok).toBe(true);
+    expect(attemptElevation(current, guard, SECRET, "000000", policy, now + 20)).toMatchObject({
+      ok: false,
+      reason: "invalid",
+      failuresLeft: 4,
+    });
   });
 });

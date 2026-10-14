@@ -162,7 +162,7 @@ export function registerCommandRoutes(
         lockedUntil: attempt.lockedUntil ? new Date(attempt.lockedUntil) : null,
         message:
           attempt.reason === "locked"
-            ? "Too many failed codes; elevation is locked for this operator until the window passes."
+            ? "Too many failed codes; elevation is locked for this operator until the time shown. Each lock lasts twice the last, up to a day."
             : attempt.reason === "replayed"
               ? "That code was already used; wait for the next one."
               : `The code was not accepted (${attempt.failuresLeft} attempts left before lockout).`,
