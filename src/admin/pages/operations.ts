@@ -205,7 +205,7 @@ ${definitionList([
   ["database marker", html`<code>${health.marker ?? "missing"}</code>`],
   ["latest migration", html`<code>${health.latestMigration ?? "unknown"}</code>`],
   ["stuck orders (paid / fulfilment pending / refund pending for 30+ min)", health.stuckOrders],
-  ["orders in amount-mismatch quarantine", health.quarantinedOrders],
+  ["orders held for a person (amount mismatch, or a refund that did not complete)", health.quarantinedOrders],
   ["outbox due now", health.outbox.pendingDue],
   ["outbox scheduled later", health.outbox.pendingLater],
   ["processing for 10+ min", health.outbox.processingStale],

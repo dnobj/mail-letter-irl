@@ -3115,6 +3115,18 @@ async function processRefundEvent(
       [order.order_id, nextStatus, isRefund ? refundOrCharge.id : null]
     );
     await recordOrderEvent(client, order.order_id, eventType, order.status, nextStatus);
+    if (nextStatus === 'refunded') {
+      await clearRefundHold(client, order.order_id);
+    } else if (isRefund && ['failed', 'canceled'].includes(refundStatus ?? '')) {
+      // A full refund that failed or was cancelled waits for a person, never
+      // for the sweep to make another (#730), whoever made it, and whichever
+      // refund the order named: Stripe does not promise the order of a
+      // refund's events. A newer refund that succeeds releases the hold
+      // through its own webhook (clearRefundHold).
+      if (await holdRefundNotCompletedWithClient(client, order.order_id, { id: refundOrCharge.id, status: refundStatus })) {
+        reportToOperator('refund_not_completed', OPERATOR_NOTICES.refundNotCompleted());
+      }
+    }
     return { duplicate: false, orderId: order.order_id, status: nextStatus };
   });
 }
@@ -4103,7 +4115,7 @@ export async function requestRefund(
          -- caller of this exported money-mover (an admin bulk-retry, another
          -- sweep) must hit the same wall. Operator release = clearing the
          -- marker (#278 round 8).
-         AND (last_error_code IS NULL OR last_error_code <> 'PAYMENT_AMOUNT_MISMATCH')
+         AND (last_error_code IS NULL OR last_error_code NOT IN ('PAYMENT_AMOUNT_MISMATCH', 'REFUND_NOT_COMPLETED'))
          AND stripe_payment_intent_id IS NOT NULL
          AND (
            refund_attempts = 0
@@ -4129,10 +4141,13 @@ export async function requestRefund(
   if (!order?.stripe_payment_intent_id) return false;
   try {
     let refund: Stripe.Refund | null = null;
+    let ended: Stripe.Refund | null = null;
     if (order.stripe_refund_id) {
       try {
         const existingRefund = await stripeRefunds.retrieveRefund(order.stripe_refund_id);
-        if (!['failed', 'canceled'].includes(existingRefund.status || '')) {
+        if (['failed', 'canceled'].includes(existingRefund.status || '')) {
+          ended = existingRefund;
+        } else {
           refund = existingRefund;
         }
       } catch {
@@ -4140,7 +4155,22 @@ export async function requestRefund(
         // covers a persisted stale ID without risking a duplicate refund.
       }
     }
-    refund ??= await stripeRefunds.findPaymentRefund(order.stripe_payment_intent_id, order.order_id);
+    if (!refund) {
+      const found = await stripeRefunds.findPaymentRefund(
+        order.stripe_payment_intent_id,
+        order.order_id,
+        order.amount_known === false ? null : order.amount_cents
+      );
+      refund = found.live;
+      ended ??= found.ended;
+    }
+    // A refund that failed or was cancelled is a person's question, never an
+    // instruction to refund again (#730): one an operator cancelled in Stripe
+    // came back an hour later, and one that failed went to the same card.
+    if (!refund && ended) {
+      await holdRefundNotCompleted(order, ended);
+      return false;
+    }
     if (!refund) {
       let attempt = order.refund_attempts;
       if (order.stripe_refund_id) {
@@ -4191,6 +4221,7 @@ export async function requestRefund(
       );
       if (!finalized?.rows[0]) return;
       if (nextStatus === 'refunded') {
+        await clearRefundHold(client, orderId);
         if (order.order_type === 'letter_pack') {
           await revokePackLots(client, order, { credits: 'all' });
         }
@@ -4220,6 +4251,82 @@ export async function requestRefund(
     );
     return false;
   }
+}
+
+/**
+ * Hold an order whose refund failed or was cancelled at Stripe for a person
+ * (#730): REFUND_NOT_COMPLETED, which the sweep and the refund claim skip, and
+ * one open critical alert per order. The person refunds another way in Stripe,
+ * whose webhook completes the order, or leaves it and resolves the alert.
+ */
+async function holdRefundNotCompleted(order: RefundClaim, ended: Stripe.Refund): Promise<void> {
+  // Only while the order still names the refund the sweep read: a webhook that
+  // recorded a new refund meanwhile has left nothing to hold.
+  const raised = await transaction(client =>
+    holdRefundNotCompletedWithClient(client, order.order_id, ended, order.stripe_refund_id ?? null)
+  );
+  if (raised) reportToOperator('refund_not_completed', OPERATOR_NOTICES.refundNotCompleted());
+}
+
+/**
+ * The hold itself, in the caller's transaction (#730): REFUND_NOT_COMPLETED,
+ * which the sweep and the refund claim skip, one open critical alert per
+ * order, and an order event. Raised by the sweep for a refund it finds ended,
+ * and by the webhook when a full refund fails or is cancelled, so a second
+ * refund that also fails, made in Stripe after the first, is held and told
+ * again. Answers whether a new alert opened, for the operator's notice.
+ *
+ * `readRefundId`, when given, is the refund id the caller read: the order is
+ * held only while it still names that one.
+ */
+async function holdRefundNotCompletedWithClient(
+  client: Pick<pg.PoolClient, 'query'>,
+  orderId: string,
+  ended: { id: string; status?: string | null },
+  readRefundId?: string | null
+): Promise<boolean> {
+  const sameRefund = readRefundId === undefined ? '' : ' AND stripe_refund_id IS NOT DISTINCT FROM $2';
+  // An amount-mismatch quarantine keeps its own code and message, which the
+  // panel's release reads; the alert below still opens.
+  const held = await client.query<{ order_id: string }>(
+    `UPDATE orders
+     SET last_error = CASE WHEN last_error_code = 'PAYMENT_AMOUNT_MISMATCH' THEN last_error
+                           ELSE 'The refund failed or was cancelled at Stripe; a person decides' END,
+         last_error_code = CASE WHEN last_error_code = 'PAYMENT_AMOUNT_MISMATCH' THEN last_error_code
+                                ELSE 'REFUND_NOT_COMPLETED' END,
+         updated_at = NOW()
+     WHERE order_id = $1 AND status = 'refund_pending'${sameRefund}
+     RETURNING order_id`,
+    readRefundId === undefined ? [orderId] : [orderId, readRefundId]
+  );
+  if (!held.rows[0]) return false;
+  const alert = await client.query(
+    `INSERT INTO commerce_operational_alerts (order_id, alert_type, severity, details)
+     VALUES ($1, 'refund_not_completed', 'critical', $2)
+     ON CONFLICT DO NOTHING`,
+    [orderId, JSON.stringify({ refundId: ended.id, refundStatus: ended.status ?? null })]
+  );
+  await recordOrderEvent(client, orderId, 'refund.not_completed', 'refund_pending', 'refund_pending', {
+    refundId: ended.id,
+    refundStatus: ended.status ?? null
+  });
+  writeDiagnostic('warn', 'commerce.refund_not_completed', { refundStatus: ended.status ?? 'unknown' });
+  return (alert.rowCount ?? 0) > 0;
+}
+
+/**
+ * Once the order is refunded, by the webhook or by the sweep, its hold's code
+ * goes (#730). Its alert stays open for a person to resolve after checking the
+ * refund in Stripe: the event that completed the order may be a late one for
+ * a refund that has since failed, which Stripe allows, and closing the alert
+ * would hide the one sign of that.
+ */
+async function clearRefundHold(client: Pick<pg.PoolClient, 'query'>, orderId: string): Promise<void> {
+  await client.query(
+    `UPDATE orders SET last_error_code = NULL, last_error = NULL, updated_at = NOW()
+      WHERE order_id = $1 AND last_error_code = 'REFUND_NOT_COMPLETED'`,
+    [orderId]
+  );
 }
 
 export async function runCommerceMaintenance(): Promise<CommerceMaintenanceResult> {
@@ -4314,7 +4421,9 @@ export async function runCommerceMaintenance(): Promise<CommerceMaintenanceResul
        -- lane recovers refund/dispute events whose Stripe-side refund already
        -- exists, and requestRefund discovers it (findPaymentRefund-first)
        -- rather than creating another.
-       AND (last_error_code IS NULL OR last_error_code <> 'PAYMENT_AMOUNT_MISMATCH')
+       -- REFUND_NOT_COMPLETED likewise (#730): a refund that failed or was
+       -- cancelled at Stripe waits for a person, never for another refund.
+       AND (last_error_code IS NULL OR last_error_code NOT IN ('PAYMENT_AMOUNT_MISMATCH', 'REFUND_NOT_COMPLETED'))
        AND refund_attempts < $2
        AND (
          refund_attempts = 0
