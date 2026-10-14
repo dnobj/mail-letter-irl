@@ -398,6 +398,23 @@ describe("admin command runner", () => {
     expect([...database.runs.values()].map((run) => run.status)).toEqual(["succeeded"]);
   });
 
+  it("fails a lock that errors as a domain failure, and leaves no run behind", async () => {
+    const database = fakeDatabase();
+    const state = { version: "v1", executions: [] as Array<{ key: string; reason: string; client: boolean }> };
+    const command: CommandDefinition<EchoInput> = {
+      ...echoCommand(state, true),
+      async lockVersion() {
+        // A row held past the statement timeout.
+        throw Object.assign(new Error("canceling statement due to statement timeout"), { code: "57014" });
+      },
+    };
+    const runner = deps(database);
+    const fields = await confirmationFields(command, runner);
+    await expect(runAdminCommand(runner, command, "fixture-1", fields)).rejects.toMatchObject({ code: "ADMIN_INTERNAL_ERROR" });
+    expect(state.executions).toEqual([]);
+    expect(database.runs.size).toBe(0);
+  });
+
   it("asks for no lock when the preview carries no version", async () => {
     const database = fakeDatabase();
     const state = { version: "v1", executions: [] as Array<{ key: string; reason: string; client: boolean }> };
