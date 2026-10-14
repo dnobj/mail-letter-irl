@@ -135,7 +135,12 @@ describe('the public widget route (#684)', () => {
     } as unknown as ServerResponse;
     expect(await serveWidget('LetterPreviewCard.html', res)).toBe(true);
     expect(res.statusCode).toBe(200);
-    expect(headers['content-security-policy']).toBe("frame-ancestors 'none'");
+    const csp = String(headers['content-security-policy']);
+    expect(csp).toContain("frame-ancestors 'none'");
+    // Opened directly, a card is sandboxed with no network (#730).
+    expect(csp).toContain('sandbox allow-scripts');
+    expect(csp).toContain("default-src 'none'");
+    expect(csp).not.toContain('allow-same-origin');
     expect(headers['x-frame-options']).toBe('DENY');
   });
 });
