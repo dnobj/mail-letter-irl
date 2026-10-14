@@ -16,7 +16,9 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createMcpServer } from '../../../src/mcp/httpServer.js';
 import { type ClientProfile } from '../../../src/auth/clientProfiles.js';
 import { LetterIrlServer } from '../../../src/server.js';
-import { IMAGE_URL_MAX_LENGTH } from '../../../src/zodSchemas.js';
+
+/** The limit, written out: the constant moving would otherwise move the test with it. */
+const LIMIT = 2048;
 
 const received: Array<Record<string, unknown>> = [];
 
@@ -84,21 +86,21 @@ describe('image links (#730)', () => {
     for (const [name, key] of CALLS) {
       const property = tools.get(name)?.inputSchema.properties?.[key] as { maxLength?: number; items?: { maxLength?: number } } | undefined;
       expect(property, `${name}.${key}`).toBeDefined();
-      expect(key === 'imageUrls' ? property?.items?.maxLength : property?.maxLength, `${name}.${key}`).toBe(IMAGE_URL_MAX_LENGTH);
+      expect(key === 'imageUrls' ? property?.items?.maxLength : property?.maxLength, `${name}.${key}`).toBe(LIMIT);
     }
   });
 
   it.each(CALLS)('%s refuses a %s past the limit before the app sees it, and says what to do', async (name, _key, args) => {
     const client = await connected();
-    const said = await call(client, name, args(link(IMAGE_URL_MAX_LENGTH + 1)));
-    expect(said).toContain(`An image link can be at most ${IMAGE_URL_MAX_LENGTH} characters`);
+    const said = await call(client, name, args(link(LIMIT + 1)));
+    expect(said).toContain(`An image link can be at most ${LIMIT} characters`);
     expect(said).toContain('upload_image');
     expect(received).toHaveLength(0);
   });
 
   it.each(CALLS)('%s takes a %s at the limit', async (name, _key, args) => {
     const client = await connected();
-    const said = await call(client, name, args(link(IMAGE_URL_MAX_LENGTH)));
+    const said = await call(client, name, args(link(LIMIT)));
     expect(said).not.toContain('An image link can be at most');
     expect(received).toHaveLength(1);
   });
