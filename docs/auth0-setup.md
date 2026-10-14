@@ -50,7 +50,14 @@ A Letter IRL account is still keyed on the Auth0 subject (`users.user_id`), but
 the subject is no longer the identity. Auth0 mints one per sign-in method, and
 a post-login Action links the methods that share a **confirmed** email address
 into a single Auth0 user, whose primary subject is the one Letter IRL sees. The
-identity is therefore the address, which `users.email` holds UNIQUE.
+identity is therefore the address, which `users.email` holds UNIQUE whatever its case
+(migration 058). The Action's lookup is narrower: Auth0 stores a password user's
+address in lower case but a social provider's as the provider sent it, and its
+users-by-email search matches case. Two confirmed Auth0 users whose addresses
+differ only in case are therefore not linked. Whichever of the two opens a
+Letter IRL account first keeps it, and the other is refused with the
+"already belongs to a Letter IRL account" sentence (a 409 on the REST API, an
+error result in a chat), for support to join the two.
 
 Two consequences worth knowing before touching anything here:
 

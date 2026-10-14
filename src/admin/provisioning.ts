@@ -119,9 +119,14 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  * 057 gives every personal access token an expiry and holds the column NOT
  * NULL with a default (#730). The reader already reads expires_at, and neither
  * role writes the table. Nothing to re-run; required, as the newest is.
+ *
+ * 058 makes users.email unique whatever its case (#730): an index on
+ * lower(email) replaces the inline UNIQUE and the plain email index. Indexes
+ * carry no grants, and the panel's lookup already compares lower(email).
+ * Nothing to re-run; required, as the newest is.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
-  "057_personal_tokens_expire.sql";
+  "058_users_email_case_insensitive.sql";
 
 export interface AdminProvisioningArguments {
   environment: "development" | "production";

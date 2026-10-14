@@ -826,8 +826,9 @@ no way back, because the secondary identity can no longer sign in on its own.
 
 So, per tenant, before the Action goes into the flow:
 
-1. Page `GET /api/v2/users` and group the confirmed addresses yourself - the
-   Management API has no group-by. For every address held by more than one
+1. Page `GET /api/v2/users` and group the confirmed addresses yourself, ignoring
+   case as the database does (migration 058) - the Management API has no
+   group-by, and its users-by-email search matches case. For every address held by more than one
    Auth0 user, note the oldest by `created_at`.
 2. For each of those, ask the database which subject holds the row:
    `SELECT user_id FROM users WHERE lower(email) = lower($1)`. The oldest Auth0
