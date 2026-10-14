@@ -142,6 +142,7 @@ describe('cleanSignatureImage', () => {
     const error = await refusal(blank);
     expect(error).toBeInstanceOf(SignatureImageError);
     expect(error).toMatchObject({ code: 'NO_SIGNATURE_FOUND' });
+    expect((error as Error).message).toContain("We couldn't find a signature in that picture.");
     expect((error as Error).message).toContain('Sign in dark ink');
   });
 
