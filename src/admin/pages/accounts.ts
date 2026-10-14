@@ -20,9 +20,11 @@ export function renderLookup(input: {
   matches: LookupMatch[] | null;
   invalid: boolean;
   recent: AccountListItem[];
+  csrfToken: string;
 }): SafeHtml {
   return html`<h1>Lookup</h1>
-<form method="get" action="/lookup" class="stack" role="search">
+<form method="post" action="/lookup" class="stack" role="search">
+  ${csrfField(input.csrfToken)}
   <label for="q">Exact identifier: Auth0 subject, email, order, letter, job, Stripe payment intent / session / refund / charge / dispute / event id, alert id, pack refund id, command id</label>
   <input type="search" id="q" name="q" value="${input.term ?? ""}" maxlength="255" autocomplete="off" required>
   <div><button type="submit">Look up</button></div>

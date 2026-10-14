@@ -218,13 +218,34 @@ describe("tailnet request authentication", () => {
     });
   });
 
+  const LOCAL_DEV = { login: "owner@example.com", name: "local developer", hosts: ["localhost:8790", "127.0.0.1:8790"] };
+
   it("uses the configured login in local-dev mode and ignores inbound identity headers", async () => {
     const { options, whois } = harness();
     const result = await authenticateAdminRequest(
-      view({ "tailscale-user-login": "attacker@example.com" }),
-      { ...options, expectedHost: null, localDev: { login: "owner@example.com", name: "local developer" } },
+      view({ "tailscale-user-login": "attacker@example.com", host: "localhost:8790" }),
+      { ...options, expectedHost: null, localDev: LOCAL_DEV },
     );
     expect(result).toMatchObject({ ok: true, actor: { id: "owner@example.com", node: "local-dev" } });
     expect(whois.whois).not.toHaveBeenCalled();
   });
+
+  it.each(["127.0.0.1:8790", "LOCALHOST:8790"])("answers to the workstation's own name in local-dev mode (%s)", async (host) => {
+    const { options } = harness();
+    const result = await authenticateAdminRequest(view({ host }), { ...options, expectedHost: null, localDev: LOCAL_DEV });
+    expect(result).toMatchObject({ ok: true });
+  });
+
+  it.each([["a rebinding page's name", "evil.test:8790"], ["another port", "localhost:9999"], ["no Host", undefined]])(
+    "refuses %s in local-dev mode, so a DNS-rebinding page reads nothing (#730)",
+    async (_label, host) => {
+      const { options } = harness();
+      const result = await authenticateAdminRequest(view(host === undefined ? {} : { host }), {
+        ...options,
+        expectedHost: null,
+        localDev: LOCAL_DEV,
+      });
+      expect(result).toMatchObject({ ok: false, code: "ADMIN_UNAUTHENTICATED", reason: "host_mismatch" });
+    },
+  );
 });

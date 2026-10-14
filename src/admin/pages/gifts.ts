@@ -1,4 +1,4 @@
-import type { GiftCodeView, GiftLetterView, GiftProgrammeTotals } from "../queries/gifts.js";
+import { shownGiftCode, type GiftCodeView, type GiftLetterView, type GiftProgrammeTotals } from "../queries/gifts.js";
 import { html, type SafeHtml } from "../ui/html.js";
 import { statusBadge } from "../ui/format.js";
 import { accountLink, definitionList, table, when } from "./common.js";
@@ -13,7 +13,7 @@ function codeTable(codes: GiftCodeView[], empty: string): SafeHtml {
     "gift_codes",
     ["Code", "Issued to", "Letter", "Grants budget", "Status", "Expires", "Redeemed by", ""],
     codes.map((code) => [
-      html`<span class="mono">${printed(code.code)}</span>`,
+      html`<span class="mono">${shownGiftCode(code.code, code.status)}</span>`,
       accountLink(code.issuedToUserId),
       html`<span class="mono">${code.letterId}</span>`,
       html`${code.grantsGenerationsRemaining}`,
@@ -22,7 +22,7 @@ function codeTable(codes: GiftCodeView[], empty: string): SafeHtml {
       code.redeemedByUserId ? accountLink(code.redeemedByUserId) : html`—`,
       code.status === "issued"
         ? html`<form method="get" action="/commands/gift.void_code/preview" class="inline">
-  <input type="hidden" name="target" value="${code.code}">
+  <input type="hidden" name="target" value="letter:${code.letterId}">
   <button type="submit" class="danger">Void…</button>
 </form>`
         : html``,
