@@ -11,22 +11,22 @@
 -- with an error that says nothing of what to do, and that the deploy log's
 -- diagnostic reduces to its class; the check below stops first, as a
 -- unique_violation (so that diagnostic reads 23505 on 058), with a message
--- saying what to do for anyone running it by hand. The table is locked first,
--- so no sign-up can add such a pair between the check and the index. Joining the
+-- saying what to do for anyone running it by hand. The table is not locked
+-- before the check: holding a lower lock and then upgrading to the ALTER's can
+-- deadlock against a send that holds an account row and then updates it. A
+-- pair added in the instant between the check and the index fails the index
+-- build instead, which rolls the whole run back just the same. Joining the
 -- accounts is an operator's decision, so the migration waits for one. Find
 -- them with: SELECT lower(email) FROM users GROUP BY 1 HAVING COUNT(*) > 1.
 -- When this was written, development and production held none.
 --
 -- lower() folds case by the database's locale. Neon's use PostgreSQL's builtin
 -- C.UTF-8, which folds Unicode letters (development and production, checked
--- 2026-10-14), as
--- JavaScript's toLowerCase() does for the gift and promo rules. Under a plain
+-- 2026-10-14), much as JavaScript's toLowerCase() does for the gift and promo
+-- rules (PostgreSQL maps letter by letter, so a rare letter such as a dotted
+-- capital I folds differently). Under a plain
 -- "C" locale only ASCII would fold, and a non-ASCII address could count as two
 -- here and one there.
-
--- SHARE ROW EXCLUSIVE: reads go on, writes wait until the run commits (the
--- ALTER below takes the table outright anyway).
-LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE;
 
 DO $$
 BEGIN
