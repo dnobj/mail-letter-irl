@@ -123,7 +123,6 @@ export function cleanSignatureImage(input: Buffer, actorId?: string): Promise<Cl
   return runImageDecode(() => cleanSignature(input), actorId);
 }
 
-
 async function cleanSignature(input: Buffer): Promise<CleanedSignature> {
   const header = await readImageHeader(input);
   const { longEdge, shortEdge } = SIGNATURE_CLEANING.minSource;
