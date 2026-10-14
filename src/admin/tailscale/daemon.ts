@@ -1,4 +1,27 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { AdminFoundationError, type AdminErrorCode } from "../errors.js";
+
+/** A file holding a secret, and how to remove it. */
+export interface SecretFile {
+  path: string;
+  remove: () => Promise<void>;
+}
+
+/**
+ * Writes the auth key to a file only this process's user can read, in a new
+ * directory under the container's own temp space (not the volume), for
+ * `tailscale up --auth-key=file:...`. On the command line the key could be
+ * read by anything that lists processes (#730).
+ */
+export async function writeSecretFile(secret: string): Promise<SecretFile> {
+  const dir = await mkdtemp(join(tmpdir(), "lirl-ts-"));
+  const path = join(dir, "authkey");
+  await writeFile(path, secret, { mode: 0o600, flag: "wx" });
+  return { path, remove: () => rm(dir, { recursive: true, force: true }) };
+}
 
 /**
  * Supervision of `tailscaled` inside the admin container.
@@ -60,8 +83,10 @@ export interface TailscaleSupervisorOptions {
   stateFile: string;
   socketPath: string;
   appPort: number;
-  /** TS_AUTHKEY, present on the first boot only. Never logged. */
+  /** TS_AUTHKEY, present on the first boot only. Never logged, never on a command line. */
   authKey?: string;
+  /** Where the key is written for `up` (writeSecretFile); injectable for tests. */
+  writeSecret?: (secret: string) => Promise<SecretFile>;
   spawnDaemon: () => DaemonHandle;
   cli: TailscaleCli;
   sleep?: (ms: number) => Promise<void>;
@@ -324,11 +349,17 @@ export class TailscaleSupervisor {
           "--accept-dns=false",
           "--timeout=90s",
         ];
-        if (needsKey && this.options.authKey) {
-          args.push(`--auth-key=${this.options.authKey}`);
-        }
+        const keyFile = needsKey && this.options.authKey
+          ? await (this.options.writeSecret ?? writeSecretFile)(this.options.authKey)
+          : null;
+        if (keyFile) args.push(`--auth-key=file:${keyFile.path}`);
         this.log(`issuing up (key ${needsKey ? "present" : "not needed"})`);
-        const result = await this.cli(args, 120_000);
+        let result: Awaited<ReturnType<typeof this.cli>>;
+        try {
+          result = await this.cli(args, 120_000);
+        } finally {
+          await keyFile?.remove().catch(() => undefined);
+        }
         upIssued = true;
         if (result.code !== 0) {
           this.log(`up failed: ${describeFailure(result)}`);

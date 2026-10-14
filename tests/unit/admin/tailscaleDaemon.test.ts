@@ -1,8 +1,11 @@
+import { existsSync, readFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { parseWhois } from "../../../src/admin/tailscale/cli.js";
 import {
   TailscaleSupervisor,
+  writeSecretFile,
   assertNodeIdentity,
   refuseIfPublicDomain,
   summarizeStatus,
@@ -12,6 +15,26 @@ import {
 } from "../../../src/admin/tailscale/daemon.js";
 
 const AUTH_KEY = "tskey-auth-kTESTKEY-secretsecret";
+const KEY_PATH = "/tmp/lirl-ts-test/authkey";
+
+/** Where the supervisor writes the key: records what it wrote and whether it was removed, and when. */
+function secretFiles(calls?: string[][]) {
+  const written: string[] = [];
+  const removed: Array<{ upsBefore: number }> = [];
+  return {
+    written,
+    removed,
+    writeSecret: async (secret: string) => {
+      written.push(secret);
+      return {
+        path: KEY_PATH,
+        remove: async () => {
+          removed.push({ upsBefore: (calls ?? []).filter((args) => args[0] === "up").length });
+        },
+      };
+    },
+  };
+}
 
 function statusJson(
   backendState: string,
@@ -85,6 +108,7 @@ function supervisor(
   daemon: DaemonHandle,
   options: {
     authKey?: string;
+    writeSecret?: (secret: string) => Promise<{ path: string; remove: () => Promise<void> }>;
     log?: string[];
     readyTimeoutMs?: number;
     noStateGraceMs?: number;
@@ -98,6 +122,7 @@ function supervisor(
     socketPath: "/data/tailscale/tailscaled.sock",
     appPort: 8790,
     authKey: options.authKey,
+    writeSecret: options.writeSecret ?? secretFiles().writeSecret,
     spawnDaemon: () => daemon,
     cli,
     sleep: async () => {},
@@ -119,7 +144,8 @@ describe("Tailscale supervisor", () => {
     ]);
     const daemon = fakeDaemon();
     const log: string[] = [];
-    const sut = supervisor(cli, daemon.handle, { authKey: AUTH_KEY, log });
+    const files = secretFiles(calls);
+    const sut = supervisor(cli, daemon.handle, { authKey: AUTH_KEY, log, writeSecret: files.writeSecret });
 
     const identity = await sut.start();
 
@@ -133,8 +159,13 @@ describe("Tailscale supervisor", () => {
       "--advertise-tags=tag:dev-admin",
       "--accept-dns=false",
       "--timeout=90s",
-      `--auth-key=${AUTH_KEY}`,
+      // The key goes as a file, never on the command line where a process list shows it (#730).
+      `--auth-key=file:${KEY_PATH}`,
     ]);
+    expect(calls.flat().join(" ")).not.toContain(AUTH_KEY);
+    expect(files.written).toEqual([AUTH_KEY]);
+    // Removed once up has run.
+    expect(files.removed).toEqual([{ upsBefore: 1 }]);
     expect(calls).toContainEqual([
       "serve",
       "--bg",
@@ -214,7 +245,39 @@ describe("Tailscale supervisor", () => {
 
     const up = calls.find((args) => args[0] === "up");
     expect(up).toBeDefined();
-    expect(up!.some((arg) => arg === `--auth-key=${AUTH_KEY}`)).toBe(true);
+    expect(up!.some((arg) => arg === `--auth-key=file:${KEY_PATH}`)).toBe(true);
+  });
+
+  it("removes the key file even when up fails", async () => {
+    const { cli, calls } = scriptedCli([statusJson("NeedsLogin", { Tags: [], DNSName: "" })], {
+      up: () => ({ code: 1, stdout: "", stderr: "backend error" }),
+    });
+    const files = secretFiles(calls);
+    const sut = supervisor(cli, fakeDaemon().handle, { authKey: AUTH_KEY, writeSecret: files.writeSecret });
+    await expect(sut.start()).rejects.toMatchObject({ code: "ADMIN_TAILSCALE_UNAVAILABLE" });
+    expect(files.removed).toEqual([{ upsBefore: 1 }]);
+  });
+
+  it("writes no key file when no key is needed", async () => {
+    const { cli } = scriptedCli([statusJson("Stopped"), statusJson("Running"), statusJson("Running")]);
+    const files = secretFiles();
+    await supervisor(cli, fakeDaemon().handle, { authKey: AUTH_KEY, writeSecret: files.writeSecret }).start();
+    expect(files.written).toEqual([]);
+  });
+
+  it("writes the key to a private file of its own, and removes its directory", async () => {
+    const file = await writeSecretFile(AUTH_KEY);
+    try {
+      expect(readFileSync(file.path, "utf8")).toBe(AUTH_KEY);
+      expect(file.path).not.toMatch(/^\/data\b/);
+      if (process.platform !== "win32") {
+        const { statSync } = await import("node:fs");
+        expect(statSync(file.path).mode & 0o777).toBe(0o600);
+      }
+    } finally {
+      await file.remove();
+    }
+    expect(existsSync(dirname(file.path))).toBe(false);
   });
 
   it("re-asserts settings without a key when the node is merely Stopped", async () => {

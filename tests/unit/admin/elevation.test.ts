@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  MAX_LOCK_MS,
   attemptElevation,
   dropElevation,
   isElevated,
@@ -85,6 +86,39 @@ describe("write elevation", () => {
     // The lock lifts with the window, and old failures no longer count.
     const later = now + 5 + policy.failureWindowMs + 1;
     expect(attemptElevation(current, guard, SECRET, codeAt(later), policy, later).ok).toBe(true);
+  });
+
+  it("doubles each lock after the first, up to a day, until a code is accepted (#730)", () => {
+    const { guard, newSession } = harness();
+    const current = newSession();
+    let at = 1_700_000_000_000;
+    /** Five wrong codes from `at`: the lock they earn, in ms from the fifth. */
+    const lockAfterFive = () => {
+      let result = attemptElevation(current, guard, SECRET, "000000", policy, at);
+      for (let attempt = 2; attempt <= 5; attempt += 1) {
+        expect(result.ok).toBe(false);
+        result = attemptElevation(current, guard, SECRET, "000000", policy, at + attempt);
+      }
+      expect(result).toMatchObject({ ok: false, reason: "locked" });
+      const lockedFor = (result as { lockedUntil: number }).lockedUntil - (at + 5);
+      at = (result as { lockedUntil: number }).lockedUntil + 1;
+      return lockedFor;
+    };
+    const window = policy.failureWindowMs;
+    expect(lockAfterFive()).toBe(window);
+    expect(lockAfterFive()).toBe(window * 2);
+    expect(lockAfterFive()).toBe(window * 4);
+    expect(lockAfterFive()).toBe(window * 8);
+    expect(lockAfterFive()).toBe(window * 16);
+    expect(lockAfterFive()).toBe(window * 32);
+    // 15 minutes x 128 is past a day: a lock is never longer than one.
+    expect(lockAfterFive()).toBe(window * 64);
+    expect(lockAfterFive()).toBe(MAX_LOCK_MS);
+    expect(lockAfterFive()).toBe(MAX_LOCK_MS);
+    // A code accepted after the last lock: the next lock is the first again.
+    expect(attemptElevation(current, guard, SECRET, codeAt(at), policy, at).ok).toBe(true);
+    at += 60_000;
+    expect(lockAfterFive()).toBe(window);
   });
 
   it("keeps the lock when every attempt arrives on a brand-new session", () => {

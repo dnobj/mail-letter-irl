@@ -138,7 +138,11 @@ export function createAdminRequestListener(
       ];
   const localDev =
     options.config.tailscale.mode === "local-dev" && options.config.tailscale.localDevLogin
-      ? { login: options.config.tailscale.localDevLogin, name: "local developer" }
+      ? {
+          login: options.config.tailscale.localDevLogin,
+          name: "local developer",
+          hosts: [`localhost:${options.config.appPort}`, `127.0.0.1:${options.config.appPort}`],
+        }
       : null;
 
   return (request, response) => {
