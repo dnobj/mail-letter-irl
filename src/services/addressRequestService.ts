@@ -212,7 +212,7 @@ export async function readAddressRequestPage(token: unknown): Promise<AddressReq
 }
 
 export type CloseByTokenResult =
-  | { ok: true }
+  | { ok: true; requestId: string }
   | { ok: false; refusal: 'not_found' | Exclude<AddressRequestState, 'waiting'> };
 
 /**
@@ -239,7 +239,7 @@ async function closeByToken(
       RETURNING request_id`,
     [hash, closing.status, address, name ?? null]
   );
-  if (closed.rows[0]) return { ok: true };
+  if (closed.rows[0]) return { ok: true, requestId: closed.rows[0].request_id };
   const page = await readAddressRequestPage(token);
   if (!page) return { ok: false, refusal: 'not_found' };
   // Still waiting here means it expired between the two statements' clocks.

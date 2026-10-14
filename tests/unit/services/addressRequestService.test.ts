@@ -203,7 +203,7 @@ describe('answering and declining by the link (#604)', () => {
 
   it('answers only a waiting, unexpired request, with the address as JSON and its name beside it', async () => {
     vi.mocked(query).mockResolvedValueOnce(result([{ request_id: REQUEST_ID }]));
-    await expect(answerAddressRequest(token, ADDRESS)).resolves.toEqual({ ok: true });
+    await expect(answerAddressRequest(token, ADDRESS)).resolves.toEqual({ ok: true, requestId: REQUEST_ID });
     const [sql, params] = vi.mocked(query).mock.calls[0];
     expect(flat(sql)).toContain("address = $3::jsonb || jsonb_build_object('name', COALESCE($4::text, recipient_name))");
     expect(flat(sql)).toContain("WHERE token_hash = $1 AND status = 'waiting' AND expires_at > NOW()");
@@ -220,7 +220,7 @@ describe('answering and declining by the link (#604)', () => {
 
   it('declines with no address', async () => {
     vi.mocked(query).mockResolvedValueOnce(result([{ request_id: REQUEST_ID }]));
-    await expect(declineAddressRequest(token)).resolves.toEqual({ ok: true });
+    await expect(declineAddressRequest(token)).resolves.toEqual({ ok: true, requestId: REQUEST_ID });
     expect(vi.mocked(query).mock.calls[0][1]).toEqual([hash, 'declined', null, null]);
   });
 
