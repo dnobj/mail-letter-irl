@@ -88,9 +88,11 @@ describePostgres('migration 058 on addresses that differ only in case', () => {
     );
 
     await copyFile(path.join(repositoryMigrations, migration058), path.join(directory, migration058));
-    await expect(migrate({ connectionString: scoped, migrationsDirectory: directory })).rejects.toThrow(
-      /differ only in case/
-    );
+    // A unique_violation, so the deploy log's diagnostic names it; the message says what to do.
+    await expect(migrate({ connectionString: scoped, migrationsDirectory: directory })).rejects.toMatchObject({
+      code: '23505',
+      message: expect.stringMatching(/differ only in case/)
+    });
     const before = await indexesOnUsers();
     expect(before).toContain('users_email_key');
     expect(before).toContain('idx_users_email');

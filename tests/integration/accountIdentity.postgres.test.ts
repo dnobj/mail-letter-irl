@@ -145,6 +145,10 @@ describePostgres('one account per address', () => {
       await expect(
         ledger.addCreditsToLedger({ userId: subject('upper'), email: shouting, credits: 1, sourceType: 'adjustment' })
       ).rejects.toBeInstanceOf(users.EmailAlreadyLinkedError);
+      // The write that adds nothing (a gift redemption) opens with DO NOTHING on user_id only.
+      await expect(
+        users.ensureAccountRowWithClient(pool, { userId: subject('upper'), email: shouting })
+      ).rejects.toBeInstanceOf(users.EmailAlreadyLinkedError);
       expect((await users.getUserByEmail(shouting))?.email).toBe(email);
     });
 

@@ -7,17 +7,27 @@
 -- own-code check) seeing two people. The address is kept as the sign-in gave
 -- it; only its uniqueness ignores case.
 --
--- Two accounts already differing only in case would make the index fail with
--- a bare 23505; the check below names the problem instead. Joining them is an
--- operator's decision, so the migration stops and waits for one. When this
--- was written, development and production held none.
+-- Two accounts already differing only in case would make the index fail on a
+-- duplicate key it does not name; the check below stops first, as a
+-- unique_violation (so the deploy log's diagnostic reads 23505 on 058), with a
+-- message saying what to do for anyone running it by hand. Joining the
+-- accounts is an operator's decision, so the migration waits for one. Find
+-- them with: SELECT lower(email) FROM users GROUP BY 1 HAVING COUNT(*) > 1.
+-- When this was written, development and production held none.
+--
+-- lower() folds case by the database's locale. Neon's use PostgreSQL's builtin
+-- C.UTF-8, which folds Unicode letters (development, checked 2026-10-14), as
+-- JavaScript's toLowerCase() does for the gift and promo rules. Under a plain
+-- "C" locale only ASCII would fold, and a non-ASCII address could count as two
+-- here and one there.
 
 DO $$
 BEGIN
   IF EXISTS (
     SELECT 1 FROM users GROUP BY lower(email) HAVING COUNT(*) > 1
   ) THEN
-    RAISE EXCEPTION 'users holds addresses that differ only in case; join or correct those accounts before migration 058';
+    RAISE EXCEPTION 'users holds addresses that differ only in case; join or correct those accounts before migration 058'
+      USING ERRCODE = 'unique_violation';
   END IF;
 END $$;
 
