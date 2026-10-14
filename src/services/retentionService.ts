@@ -22,7 +22,7 @@ import type { JobStatus, LetterStatus, OrderStatus } from './types.js';
  *     forbids deleting. cleanupOldDrafts() also deletes a sent draft with no
  *     order 7 days after the send (its letter keeps the content), except a
  *     held letter's, which it keeps until 7 days after the mail date (#564),
- *     or, once that letter is cancelled, 7 days after the cancel (#701).
+ *     or, once that letter is cancelled, 4 days after the cancel (#701, #730).
  *   - Held mail its customer cancelled, never printed: the unpaid 7 days,
  *     from the cancel (purgeCancelledHeldLetterContent, #701).
  *

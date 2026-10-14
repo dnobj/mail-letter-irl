@@ -416,11 +416,19 @@ export async function markExpiredDrafts(): Promise<number> {
  * A sent draft whose letter waits for its mail date (#535) stays until
  * `olderThanDays` after that date: its confirmation link and a reopened card
  * read the letter through it (#564), and a wait can be 60 days. Once that
- * letter is cancelled (#701), it stays `olderThanDays` after the cancel
- * instead, as any sent draft does after its send: the mail is not going, and
- * its content goes on the unpaid schedule (retentionService). The date cutoff
- * is its own integer parameter; the timestamp one is never cast a second way,
- * only compared again with a timestamp column.
+ * letter is cancelled (#701), the cancel is its clock instead of the send:
+ * it goes CANCELLED_HELD_DRAFT_DAYS after the cancel ($4), however long ago or
+ * recently it was sent. The mail is not going. After a customer's cancel with
+ * no money hold, the letter's own content goes on the unpaid schedule
+ * (retentionService), which quarantines it at 4 days and empties it at 7; an
+ * operator's cancel or a refunded pack keeps it on the letter schedule, and
+ * the draft goes at 4 days all the same. Four days, not 7, because this sweep runs
+ * once a day and drifts to about 25 hours, more when a run fails before it:
+ * at 7 the draft could outlast the letter's copy (#730). Nor the send's 7
+ * days when the cancel came soon after the send: that kept the draft days
+ * past the letter's copy too (#764 review). The date cutoff is its own
+ * integer parameter; each timestamp parameter is used once, uncast, with a
+ * timestamp column.
  *
  * An unsent draft is measured from its own expiry, not from when a run marked
  * it expired (#730): the privacy policy says an unsent draft's content is
@@ -435,14 +443,26 @@ export async function markExpiredDrafts(): Promise<number> {
  */
 export const UNSENT_DRAFT_DAYS_AFTER_EXPIRY = 4;
 
+/** A cancelled held letter's sent draft goes this many days after the cancel (#701, #730). */
+export const CANCELLED_HELD_DRAFT_DAYS = 4;
+
 export async function cleanupOldDrafts(olderThanDays: number = 7): Promise<number> {
   const cutoffDate = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000);
   const unsentCutoff = new Date(Date.now() - UNSENT_DRAFT_DAYS_AFTER_EXPIRY * 24 * 60 * 60 * 1000);
+  const cancelledCutoff = new Date(Date.now() - CANCELLED_HELD_DRAFT_DAYS * 24 * 60 * 60 * 1000);
 
   const result = await query(
     `DELETE FROM letter_drafts
      WHERE status IN ('consumed', 'expired', 'cancelled')
-       AND (CASE WHEN status = 'expired' THEN expires_at < $3 ELSE updated_at < $1 END)
+       AND (CASE
+              WHEN status = 'expired' THEN expires_at < $3
+              ELSE COALESCE(
+                (SELECT letters.status_updated_at < $4 FROM letters
+                  WHERE letters.letter_id = letter_drafts.consumed_letter_id
+                    AND letters.status = 'cancelled'
+                    AND letters.mail_on IS NOT NULL),
+                letter_drafts.updated_at < $1)
+            END)
        AND NOT EXISTS (
          SELECT 1 FROM orders WHERE orders.draft_id = letter_drafts.draft_id
        )
@@ -450,15 +470,15 @@ export async function cleanupOldDrafts(olderThanDays: number = 7): Promise<numbe
          SELECT 1 FROM letters
           WHERE letters.letter_id = letter_drafts.consumed_letter_id
             AND letters.mail_on >= CURRENT_DATE - $2::int
-            AND (letters.status <> 'cancelled' OR letters.status_updated_at >= $1)
+            AND letters.status <> 'cancelled'
        )
      RETURNING draft_id`,
-    [cutoffDate, olderThanDays, unsentCutoff]
+    [cutoffDate, olderThanDays, unsentCutoff, cancelledCutoff]
   );
 
   const count = result.rowCount ?? 0;
   if (count > 0) {
-    console.log(`📝 Cleaned up ${count} old drafts (sent or cancelled more than ${olderThanDays} days ago, or expired more than ${UNSENT_DRAFT_DAYS_AFTER_EXPIRY} days ago)`);
+    console.log(`📝 Cleaned up ${count} old drafts (sent or cancelled more than ${olderThanDays} days ago, a cancelled held letter's more than ${CANCELLED_HELD_DRAFT_DAYS} days after the cancel, or expired more than ${UNSENT_DRAFT_DAYS_AFTER_EXPIRY} days ago)`);
   }
 
   return count;

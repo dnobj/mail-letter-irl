@@ -995,7 +995,7 @@ describePostgres('arrive-by (migration 040, #535)', () => {
     expect(await left()).toEqual([recentDraft]);
   }, 60_000);
 
-  it("keeps a cancelled held letter's sent draft 7 days after the cancel, not until after its mail date (#701)", async () => {
+  it("keeps a cancelled held letter's sent draft 4 days after the cancel, whenever it was sent and whatever its mail date (#701, #730)", async () => {
     const userId = await seedUser();
     // Promotional credits: this file's own lots are adjustments with no order, which the
     // retention sweeps' money hold keeps back (#729), and that is not what this case is about.
@@ -1012,31 +1012,38 @@ describePostgres('arrive-by (migration 040, #535)', () => {
       [letterId]
     );
     await expect(retention.previewCancelledHeldLetterContent()).resolves.toMatchObject({ due: dueBefore + 1 });
-    // Sent eight days ago, as the sweep sees it; the trigger is off for this, inside a transaction.
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      await client.query('ALTER TABLE letter_drafts DISABLE TRIGGER update_letter_drafts_updated_at');
-      await client.query("UPDATE letter_drafts SET updated_at = NOW() - INTERVAL '8 days' WHERE draft_id = $1", [draftId]);
-      await client.query('ALTER TABLE letter_drafts ENABLE TRIGGER update_letter_drafts_updated_at');
-      await client.query('COMMIT');
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    // When the draft was sent, as the sweep sees it; the trigger is off for this, inside a transaction.
+    const sentAgo = async (interval: string) => {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query('ALTER TABLE letter_drafts DISABLE TRIGGER update_letter_drafts_updated_at');
+        await client.query('UPDATE letter_drafts SET updated_at = NOW() - $2::interval WHERE draft_id = $1', [draftId, interval]);
+        await client.query('ALTER TABLE letter_drafts ENABLE TRIGGER update_letter_drafts_updated_at');
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+    };
+    const cancelledAgo = (interval: string) =>
+      pool.query('UPDATE letters SET status_updated_at = NOW() - $2::interval WHERE letter_id = $1', [letterId, interval]);
     const kept = async () =>
       (await pool.query('SELECT 1 FROM letter_drafts WHERE draft_id = $1', [draftId])).rowCount === 1;
 
-    // Cancelled just now: its reopened card still reads it.
+    // Sent eight days ago and cancelled just now: its reopened card still reads it.
+    await sentAgo('8 days');
     await drafts.cleanupOldDrafts(7);
     expect(await kept()).toBe(true);
-    // Cancelled six days ago: kept; eight: it goes, though its mail date is weeks away.
-    await pool.query("UPDATE letters SET status_updated_at = NOW() - INTERVAL '6 days' WHERE letter_id = $1", [letterId]);
+    // Sent five days ago and cancelled soon after, so the send's own 7 days are not up:
+    // the cancel decides. Just under 4 days after it, kept; just over, it goes (#730).
+    await sentAgo('5 days');
+    await cancelledAgo('3 days 21 hours');
     await drafts.cleanupOldDrafts(7);
     expect(await kept()).toBe(true);
-    await pool.query("UPDATE letters SET status_updated_at = NOW() - INTERVAL '8 days' WHERE letter_id = $1", [letterId]);
+    await cancelledAgo('4 days 3 hours');
     await drafts.cleanupOldDrafts(7);
     expect(await kept()).toBe(false);
   }, 60_000);
