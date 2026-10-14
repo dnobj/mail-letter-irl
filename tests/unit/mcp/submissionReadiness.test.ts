@@ -109,7 +109,23 @@ describe("Submission readiness checks", () => {
     expect(metadata).not.toHaveProperty("client_id_metadata_document_supported");
   });
 
-  it("should derive public metadata URLs from the forwarded custom domain", () => {
+  it("pins public metadata URLs to the configured base URL, whatever the request forwards (#730)", () => {
+    vi.stubEnv("LETTER_IRL_PUBLIC_BASE_URL", "https://api.example.test/");
+    try {
+      const publicBaseUrl = getPublicBaseUrl({
+        headers: { "x-forwarded-host": "evil.example", "x-forwarded-proto": "http", host: "evil.example" }
+      });
+      expect(publicBaseUrl).toBe("https://api.example.test");
+      expect(buildWwwAuthenticateChallenge("Missing Authorization header", publicBaseUrl)).toContain(
+        'resource_metadata="https://api.example.test/.well-known/oauth-protected-resource"'
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("should derive public metadata URLs from the forwarded custom domain when no base URL is configured", () => {
+    vi.stubEnv("LETTER_IRL_PUBLIC_BASE_URL", "");
     const publicBaseUrl = getPublicBaseUrl({
       headers: {
         "x-forwarded-host": "api.letterirl.com",
