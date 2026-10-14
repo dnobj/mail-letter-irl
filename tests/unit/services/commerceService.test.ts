@@ -3915,12 +3915,11 @@ describe('commerceService', () => {
         const cleared = statements.find(s => s.sql.includes('SET last_error_code = NULL, last_error = NULL'));
         expect(cleared?.sql).toContain("WHERE order_id = $1 AND last_error_code = 'REFUND_NOT_COMPLETED'");
         expect(cleared?.params).toEqual(['order-1']);
-        const closed = statements.find(s => s.sql.includes("resolution_code = 'order_refunded'"));
-        expect(closed?.sql).toContain("alert_type = 'refund_not_completed' AND status <> 'resolved'");
-        expect(closed?.params).toEqual(['order-1']);
+        // The alert stays open for a person: the completing event may be a stale one.
+        expect(statements.some(s => s.sql.includes('commerce_operational_alerts') && s.sql.includes("status = 'resolved'"))).toBe(false);
       }
 
-      it('clears the hold and closes its alert once the order is refunded', async () => {
+      it('clears the hold\'s code once the order is refunded, and leaves its alert for a person', async () => {
         const statements = webhookStatements('refund_pending');
         await processStripeWebhookEvent(event('refund.created', 'succeeded'));
         expectReleased(statements);
@@ -3933,20 +3932,22 @@ describe('commerceService', () => {
         expect(statements.some(s => s.sql.includes("ELSE 'REFUND_NOT_COMPLETED' END"))).toBe(true);
       });
 
-      it('releases a hold when the sweep finishes the refund itself', async () => {
-        const statements = claimedOrder(null);
-        mocks.findRefund.mockResolvedValue({ live: { id: 're-live', status: 'succeeded' }, ended: null });
-        mocks.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
-          statements.push({ sql: sql.replace(/\s+/g, ' '), params });
-          if (sql.includes('WITH candidate AS')) {
-            return { rows: [{ ...baseOrder, status: 'refund_pending', refund_attempts: 1, previous_refund_attempts: 1, stripe_payment_intent_id: 'pi-1' }] };
-          }
-          if (sql.includes('SET stripe_refund_id = $2')) return { rows: [{ order_id: 'order-1' }], rowCount: 1 };
-          return { rows: [], rowCount: 0 };
-        });
-        await expect(requestRefund('order-1')).resolves.toBe(true);
-        expectReleased(statements);
+    });
+
+    it('clears a hold\'s code when the sweep finishes the refund itself', async () => {
+      const statements = claimedOrder(null);
+      mocks.findRefund.mockResolvedValue({ live: { id: 're-live', status: 'succeeded' }, ended: null });
+      mocks.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
+        statements.push({ sql: sql.replace(/\s+/g, ' '), params });
+        if (sql.includes('WITH candidate AS')) {
+          return { rows: [{ ...baseOrder, status: 'refund_pending', refund_attempts: 1, previous_refund_attempts: 1, stripe_payment_intent_id: 'pi-1' }] };
+        }
+        if (sql.includes('SET stripe_refund_id = $2')) return { rows: [{ order_id: 'order-1' }], rowCount: 1 };
+        return { rows: [], rowCount: 0 };
       });
+      await expect(requestRefund('order-1')).resolves.toBe(true);
+      const cleared = statements.find(s => s.sql.includes('SET last_error_code = NULL, last_error = NULL'));
+      expect(cleared?.params).toEqual(['order-1']);
     });
 
     it('adopts a live refund over an ended one', async () => {

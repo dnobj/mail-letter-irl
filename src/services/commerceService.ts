@@ -3116,13 +3116,13 @@ async function processRefundEvent(
     );
     await recordOrderEvent(client, order.order_id, eventType, order.status, nextStatus);
     if (nextStatus === 'refunded') {
-      await releaseRefundHold(client, order.order_id);
+      await clearRefundHold(client, order.order_id);
     } else if (isRefund && ['failed', 'canceled'].includes(refundStatus ?? '')) {
       // A full refund that failed or was cancelled waits for a person, never
       // for the sweep to make another (#730), whoever made it, and whichever
       // refund the order named: Stripe does not promise the order of a
       // refund's events. A newer refund that succeeds releases the hold
-      // through its own webhook (releaseRefundHold).
+      // through its own webhook (clearRefundHold).
       if (await holdRefundNotCompletedWithClient(client, order.order_id, { id: refundOrCharge.id, status: refundStatus })) {
         reportToOperator('refund_not_completed', OPERATOR_NOTICES.refundNotCompleted());
       }
@@ -4221,7 +4221,7 @@ export async function requestRefund(
       );
       if (!finalized?.rows[0]) return;
       if (nextStatus === 'refunded') {
-        await releaseRefundHold(client, orderId);
+        await clearRefundHold(client, orderId);
         if (order.order_type === 'letter_pack') {
           await revokePackLots(client, order, { credits: 'all' });
         }
@@ -4315,20 +4315,16 @@ async function holdRefundNotCompletedWithClient(
 }
 
 /**
- * A refund held for a person (#730) is done with once the order is refunded,
- * by the webhook or by the sweep: the hold's code goes, and its open alert
- * closes itself (`order_refunded`).
+ * Once the order is refunded, by the webhook or by the sweep, its hold's code
+ * goes (#730). Its alert stays open for a person to resolve after checking the
+ * refund in Stripe: the event that completed the order may be a late one for
+ * a refund that has since failed, which Stripe allows, and closing the alert
+ * would hide the one sign of that.
  */
-async function releaseRefundHold(client: Pick<pg.PoolClient, 'query'>, orderId: string): Promise<void> {
+async function clearRefundHold(client: Pick<pg.PoolClient, 'query'>, orderId: string): Promise<void> {
   await client.query(
     `UPDATE orders SET last_error_code = NULL, last_error = NULL, updated_at = NOW()
       WHERE order_id = $1 AND last_error_code = 'REFUND_NOT_COMPLETED'`,
-    [orderId]
-  );
-  await client.query(
-    `UPDATE commerce_operational_alerts
-        SET status = 'resolved', resolved_at = NOW(), resolution_code = 'order_refunded', updated_at = NOW()
-      WHERE order_id = $1 AND alert_type = 'refund_not_completed' AND status <> 'resolved'`,
     [orderId]
   );
 }

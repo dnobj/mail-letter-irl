@@ -251,7 +251,7 @@ describePostgres('refund finalization', () => {
     return rows[0].n;
   }
 
-  it('holds an order when its full refund comes back cancelled, again after a resolved alert, and lets go once refunded (#730)', async () => {
+  it('holds an order when its full refund comes back cancelled, again after a resolved alert, and clears the hold once refunded (#730)', async () => {
     const { userId, orderId, paymentIntentId } = await seedRefundablePack(6);
 
     await commerce.processStripeWebhookEvent(refundEvent('refund.updated', paymentIntentId, 'canceled'));
@@ -278,18 +278,12 @@ describePostgres('refund finalization', () => {
     await commerce.processStripeWebhookEvent(refundEvent('refund.failed', paymentIntentId, 'failed'));
     expect(await openAlerts(orderId)).toBe(1);
 
-    // The person refunds again in Stripe, and it succeeds: the order completes,
-    // the hold clears, and the open alert closes itself.
+    // The person refunds again in Stripe, and it succeeds: the order completes
+    // and the hold's code clears; the alert stays for the person to resolve.
     await commerce.processStripeWebhookEvent(refundEvent('refund.created', paymentIntentId, 'succeeded'));
     const done = await readOrder(orderId);
     expect(done).toMatchObject({ status: 'refunded', last_error_code: null });
-    expect(await openAlerts(orderId)).toBe(0);
-    const closed = await pool.query<{ resolution_code: string }>(
-      `SELECT resolution_code FROM commerce_operational_alerts
-        WHERE order_id = $1 AND alert_type = 'refund_not_completed' ORDER BY created_at DESC LIMIT 1`,
-      [orderId]
-    );
-    expect(closed.rows[0].resolution_code).toBe('order_refunded');
+    expect(await openAlerts(orderId)).toBe(1);
     const account = await pool.query<{ credits: number }>('SELECT credits FROM users WHERE user_id = $1', [userId]);
     expect(account.rows[0].credits).toBe(0);
   }, 60_000);

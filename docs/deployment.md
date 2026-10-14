@@ -641,15 +641,19 @@ by hand. `PACK_REFUND_RETRY_DELAY_SECONDS` and
 are optional.
 
 A full refund that fails or is cancelled at Stripe is never made again by the
-hourly sweep (#730). The order is held, `refund_pending` with
-`last_error_code` `REFUND_NOT_COMPLETED`, which the sweep and the refund claim
-skip, and a critical `refund_not_completed` alert opens (one open per order),
-whether the sweep or the refund's own webhook saw it first. Two ways out:
+hourly sweep (#730). While the order waits for its refund (`refund_pending`),
+it is held, with `last_error_code` `REFUND_NOT_COMPLETED`, which the sweep and
+the refund claim skip, and a critical `refund_not_completed` alert opens (one
+open per order), whether the sweep or the refund's own webhook saw it first.
+While that alert is open, a later failure on the same order opens no second
+one and sends no notice: check the order's refunds in Stripe before resolving
+it. A refund that fails after the order was already marked refunded is still
+only recorded on the order (`already_refunded`), with no alert. Two ways out:
 
 - **Refund again in Stripe** (a different card, or once the cause is fixed).
-  Its webhook completes the order, clears the hold and closes the alert itself.
-  If that refund also fails, the order is held again, and a new alert opens
-  once the earlier one is resolved.
+  Its webhook completes the order and clears the hold's code. The alert stays
+  open: resolve it once Stripe shows the refund succeeded, since an event can
+  arrive late and Stripe lets a refund fail after it succeeded.
 - **The money went back another way, or should not go back.** Resolve the
   alert. The order stays `refund_pending` and counts as stuck until an engineer
   settles it in the database: no panel command does this yet, because the
