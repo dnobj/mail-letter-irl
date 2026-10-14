@@ -804,25 +804,37 @@ describePostgres('content retention sweep', () => {
       expect((await readLetter(letterId)).content).toEqual({});
     });
 
-    /** #730: a letter that failed for good, its job failed by a definite rejection. */
-    async function seedFailedLetter(jobOutcome: 'definite_failure' | 'not_dispatched'): Promise<string> {
-      const { letterId } = await seedSentLetter({ daysAgo: 400, status: 'failed' });
+    /**
+     * #730: a letter that failed, never sent (no sent_at), made 400 days ago,
+     * with one failed job in the given state.
+     */
+    async function seedFailedLetter(job: { outcome: 'definite_failure' | 'not_dispatched'; attempts: number; resolution?: string }): Promise<string> {
+      const userId = await seedUser();
+      const letterId = `letter_${randomUUID()}`;
       await pool.query(
-        `INSERT INTO letter_jobs (job_id, letter_id, status, idempotency_key, next_attempt_at, provider_outcome)
-         VALUES ($1, $2, 'failed', $3, NOW(), $4)`,
-        [`job_${randomUUID()}`, letterId, `idem_${randomUUID()}`, jobOutcome]
+        `INSERT INTO letters (letter_id, user_id, content, recipient, credits_cost, status, created_at)
+         VALUES ($1, $2, $3::jsonb, $4::jsonb, 2, 'failed', NOW() - INTERVAL '400 days')`,
+        [letterId, userId, JSON.stringify({ bodyText: SECRET_BODY }), JSON.stringify({ addressLine1: SECRET_STREET })]
+      );
+      await pool.query(
+        `INSERT INTO letter_jobs (job_id, letter_id, status, idempotency_key, next_attempt_at, provider_outcome, attempts, max_attempts, operator_resolution)
+         VALUES ($1, $2, 'failed', $3, NOW(), $4, $5, 3, $6)`,
+        [`job_${randomUUID()}`, letterId, `idem_${randomUUID()}`, job.outcome, job.attempts, job.resolution ?? null]
       );
       return letterId;
     }
 
-    it('redacts a letter that failed for good, though its failed job could still be retried by hand (#730)', async () => {
-      const letterId = await seedFailedLetter('definite_failure');
+    it.each([
+      ['refused by the provider, though the operator could retry it by hand', { outcome: 'definite_failure' as const, attempts: 1 }],
+      ['out of attempts before it reached the provider', { outcome: 'not_dispatched' as const, attempts: 3 }]
+    ])('redacts a letter that failed for good, %s, counted from its creation (#730)', async (_label, job) => {
+      const letterId = await seedFailedLetter(job);
       expect(await retention.purgeExpiredLetterContent()).toBe(1);
       expect((await readLetter(letterId)).content).toEqual({});
     });
 
-    it('HOLDS a failed letter whose job could still be sent by the outbox (#730)', async () => {
-      const letterId = await seedFailedLetter('not_dispatched');
+    it('HOLDS a failed letter whose job the outbox could still send (#730)', async () => {
+      const letterId = await seedFailedLetter({ outcome: 'not_dispatched', attempts: 1 });
       expect(await retention.purgeExpiredLetterContent()).toBe(0);
       expect((await readLetter(letterId)).content.bodyText).toBe(SECRET_BODY);
     });

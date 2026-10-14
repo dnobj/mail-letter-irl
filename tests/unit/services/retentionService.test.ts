@@ -204,7 +204,7 @@ describe('retention sweep guards (#153)', () => {
         'AND NOT EXISTS ( SELECT 1 FROM letter_jobs j WHERE j.letter_id = l.letter_id ' +
           'AND NOT (j.status = ANY($3::varchar[])) ' +
           // A letter that failed for good is not held by its failed job (#730).
-          "AND NOT (j.status = 'failed' AND j.provider_outcome = 'definite_failure' AND j.operator_resolution IS NULL AND EXISTS (SELECT 1 FROM letters fl WHERE fl.letter_id = j.letter_id AND fl.status = 'failed')) )"
+          "AND NOT (j.status = 'failed' AND NOT (j.provider_outcome = 'not_dispatched' AND j.attempts < j.max_attempts) AND EXISTS (SELECT 1 FROM letters fl WHERE fl.letter_id = j.letter_id AND fl.status = 'failed')) )"
       );
     });
 
@@ -335,7 +335,7 @@ describe('retention sweep guards (#153)', () => {
       expect(sqlFrom(mocks.query.mock.calls[0])).toContain(
         'AND NOT EXISTS ( SELECT 1 FROM letter_jobs j WHERE d.consumed_letter_id IS NOT NULL ' +
           `AND j.letter_id = d.consumed_letter_id AND NOT (j.status = ANY($${jobParam}::varchar[])) ` +
-          "AND NOT (j.status = 'failed' AND j.provider_outcome = 'definite_failure' AND j.operator_resolution IS NULL AND EXISTS (SELECT 1 FROM letters fl WHERE fl.letter_id = j.letter_id AND fl.status = 'failed')) )"
+          "AND NOT (j.status = 'failed' AND NOT (j.provider_outcome = 'not_dispatched' AND j.attempts < j.max_attempts) AND EXISTS (SELECT 1 FROM letters fl WHERE fl.letter_id = j.letter_id AND fl.status = 'failed')) )"
       );
       const params = mocks.query.mock.calls[0][1] as unknown[];
       expect(params[jobParam - 1]).toEqual(['completed', 'cancelled']);
@@ -684,7 +684,7 @@ describe('retention sweep guards (#153)', () => {
         'AND NOT EXISTS ( SELECT 1 FROM letter_jobs j WHERE j.letter_id = l.letter_id ' +
           'AND NOT (j.status = ANY($3::varchar[])) ' +
           // A letter that failed for good is not held by its failed job (#730).
-          "AND NOT (j.status = 'failed' AND j.provider_outcome = 'definite_failure' AND j.operator_resolution IS NULL AND EXISTS (SELECT 1 FROM letters fl WHERE fl.letter_id = j.letter_id AND fl.status = 'failed')) )",
+          "AND NOT (j.status = 'failed' AND NOT (j.provider_outcome = 'not_dispatched' AND j.attempts < j.max_attempts) AND EXISTS (SELECT 1 FROM letters fl WHERE fl.letter_id = j.letter_id AND fl.status = 'failed')) )",
         'LEFT JOIN orders o ON o.order_id = lot.source_order_id'
       ]) {
         expect(previewSql).toContain(clause);
