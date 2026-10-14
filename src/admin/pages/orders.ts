@@ -25,7 +25,7 @@ ${
 }
 ${
   order.lastErrorCode
-    ? html`<div class="flash flash-warn" role="status">Last error code <code>${order.lastErrorCode}</code>${order.lastErrorCode === "PAYMENT_AMOUNT_MISMATCH" ? html` — this order is quarantined from the automatic refund sweep until an operator releases it.` : ""}</div>`
+    ? html`<div class="flash flash-warn" role="status">Last error code <code>${order.lastErrorCode}</code>${order.lastErrorCode === "PAYMENT_AMOUNT_MISMATCH" ? html` — this order is quarantined from the automatic refund sweep until an operator releases it.` : ""}${order.lastErrorCode === "REFUND_NOT_COMPLETED" ? html` — its refund failed or was cancelled at Stripe, and the sweep will not make another. Refund it another way in Stripe, or settle it by hand, and resolve its <code>refund_not_completed</code> alert (deployment.md).` : ""}</div>`
     : ""
 }
 ${definitionList([

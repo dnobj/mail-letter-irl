@@ -138,8 +138,8 @@ const REMOTE_IMAGE_FETCH_CONFIG = {
  * else.
  *
  * A signature's pixel work runs on a worker thread of its own inside this
- * gate (#730): at most three at once, each about 10 MB of thread and 15 MB of
- * arrays, about 75 MB beside the decodes above.
+ * gate (#730): at most three at once, each about 10 MB of thread and up to
+ * about 25 MB of arrays at 1600 px a side, inside the decode slot it holds.
  *
  * A collage (#616) holds up to four input buffers at once, and then their
  * tiles, so it is bounded by a gate of its own around the whole of it, its

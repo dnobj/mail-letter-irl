@@ -641,7 +641,9 @@ by hand. `PACK_REFUND_RETRY_DELAY_SECONDS` and
 are optional.
 
 A full refund that fails or is cancelled at Stripe is never made again by the
-hourly sweep (#730). While the order waits for its refund (`refund_pending`),
+hourly sweep (#730). The first run after this reached an environment holds
+every `refund_pending` order whose stored refund had already ended, one alert
+each, where it used to refund them again. While the order waits for its refund (`refund_pending`),
 it is held, with `last_error_code` `REFUND_NOT_COMPLETED`, which the sweep and
 the refund claim skip, and a critical `refund_not_completed` alert opens (one
 open per order), whether the sweep or the refund's own webhook saw it first.

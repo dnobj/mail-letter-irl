@@ -34,6 +34,7 @@
 import { Worker } from 'node:worker_threads';
 import sharp, { type OutputInfo } from 'sharp';
 import { ImageProcessingError, openImage, readImageHeader, runImageDecode } from './imageService.js';
+import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 import { analyseSignature, SIGNATURE_CLEANING, type SignatureAnalysis } from './signatureAnalysis.js';
 
 export { closing, rankFilter, SIGNATURE_CLEANING } from './signatureAnalysis.js';
@@ -156,6 +157,12 @@ async function cleanSignature(input: Buffer): Promise<CleanedSignature> {
   try {
     analysis = await runSignatureAnalysis(grey.data, width, height);
   } catch (error) {
+    // The person is told to try another picture; the operator is told that
+    // the analysis itself failed (a missing worker file, out of memory, the
+    // timeout), which is not the picture's fault (#730).
+    writeDiagnostic('error', 'signature.analysis_failed', {
+      errorClass: classifyDiagnosticError(error, 'unknown_error'),
+    });
     throw new ImageProcessingError(
       'PROCESSING_FAILED',
       'Image could not be processed. Please try a different image.',
