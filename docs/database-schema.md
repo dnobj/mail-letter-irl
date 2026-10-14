@@ -474,7 +474,7 @@ Personal access tokens (`lirl_pat_…`). People make them on the website, under 
 | token_hash | VARCHAR(255) | NO | - | Bcrypt hash of token |
 | token_prefix | CHAR(4) | NO | - | Last 4 characters, for display |
 | status | pat_status | NO | 'active' | `active` or `revoked` |
-| expires_at | TIMESTAMPTZ | YES | - | Expiration (NULL = never) |
+| expires_at | TIMESTAMPTZ | NO | NOW() + 90 days | When the token stops working. Every token has one since 057 (#730), which gave each older token 90 days from its creation, never sooner than 30 days from the migration |
 | last_used_at | TIMESTAMPTZ | YES | - | Last usage timestamp |
 | created_at | TIMESTAMPTZ | NO | NOW() | Token creation |
 | revoked_at | TIMESTAMPTZ | YES | - | When it was revoked |
