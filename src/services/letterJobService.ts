@@ -984,12 +984,24 @@ async function failOrRescheduleJob(
   return !terminal;
 }
 
-async function failBeforeDispatch(job: LetterJob, error: unknown, random: () => number): Promise<boolean> {
+/**
+ * Settles a job that failed before the provider was called. Every write is
+ * conditioned on this claimant still holding the job: status 'processing' and
+ * the attempts count its claim set (#730). A claim adds one to attempts and a
+ * put-back takes one away while leaving the job pending, so a claimant that
+ * stalled past its lock, and lost the job to another worker that has since
+ * failed it, refunded it or put it back, changes nothing. Exported for the
+ * PostgreSQL test of exactly that (failedSendRefund.postgres.test.ts).
+ */
+export async function failBeforeDispatch(job: LetterJob, error: unknown, random: () => number): Promise<boolean> {
   const retryable = job.attempts < job.max_attempts;
   // A class a lower layer attached (a missing letter: LETTER_NOT_FOUND) wins
   // over re-classification (#394).
   const errorClass = carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error');
   let putBack = false;
+  // Whether this claimant still held the job and settled it; a superseded one
+  // schedules nothing, whatever its own count says.
+  let settled = false;
   await transaction(async client => {
     const fundingOrderId = await lockFundingGraph(client, job);
     // Mail left for the operator (#696), a claim a crash left behind among it, is put back as
@@ -1004,8 +1016,8 @@ async function failBeforeDispatch(job: LetterJob, error: unknown, random: () => 
       const back = await client.query(
         `UPDATE letter_jobs SET status = 'pending', attempts = GREATEST(attempts - 1, 0), locked_at = NULL,
            last_error = $2, error_message = $2, updated_at = NOW()
-         WHERE job_id = $1 AND provider_outcome = 'not_dispatched' AND status = 'processing'`,
-        [job.job_id, errorClass]
+         WHERE job_id = $1 AND provider_outcome = 'not_dispatched' AND status = 'processing' AND attempts = $3::int`,
+        [job.job_id, errorClass, job.attempts]
       );
       // Only a job this claimant still holds: another worker may have put it back, or settled it.
       putBack = Boolean(back.rowCount);
@@ -1017,15 +1029,18 @@ async function failBeforeDispatch(job: LetterJob, error: unknown, random: () => 
       // uncast form is rejected by PostgreSQL, which threw this whole
       // transaction away on every pre-dispatch failure, retryable or terminal.
       //
-      // The predicate also skips a job cancelled meanwhile: a claimant that
-      // stalled past its lock, and lost the job to a customer's cancel of held
-      // mail (#535) or a refund's cancel, must not bring it back to pending.
+      // The predicate holds this claimant to its claim (#730): still
+      // processing, at the attempts its claim set. A claimant that stalled past
+      // its lock, and lost the job to a customer's cancel of held mail (#535),
+      // a refund's cancel, or another worker that failed it and gave the money
+      // back, must not bring it back to pending or walk its letter to queued.
       `UPDATE letter_jobs SET status = $2::varchar, next_attempt_at = $3, locked_at = NULL,
          completed_at = CASE WHEN $2::varchar = 'failed' THEN NOW() ELSE NULL END,
          last_error = $4, error_message = $4, updated_at = NOW()
-       WHERE job_id = $1 AND provider_outcome = 'not_dispatched' AND status <> 'cancelled'`,
+       WHERE job_id = $1 AND provider_outcome = 'not_dispatched'
+         AND status = 'processing' AND attempts = $5::int`,
       [job.job_id, retryable ? 'pending' : 'failed',
-        new Date(Date.now() + retryDelayMilliseconds(job.attempts, random)), errorClass]
+        new Date(Date.now() + retryDelayMilliseconds(job.attempts, random)), errorClass, job.attempts]
     );
     // The job predicate above already refuses a job that has since been
     // dispatched; the writes below have to answer to it rather than run anyway.
@@ -1039,6 +1054,7 @@ async function failBeforeDispatch(job: LetterJob, error: unknown, random: () => 
       });
       return;
     }
+    settled = true;
     await client.query(
       `UPDATE letters SET status = $2, updated_at = NOW()
        WHERE letter_id = $1 AND status NOT IN ('held','cancelled')`,
@@ -1074,7 +1090,7 @@ async function failBeforeDispatch(job: LetterJob, error: unknown, random: () => 
   });
   // Put back for the operator: waiting, as a scheduled retry is.
   if (putBack) return true;
-  return retryable;
+  return settled && retryable;
 }
 
 async function processClaimedJob(

@@ -683,12 +683,13 @@ describe('mail outbox retries', () => {
     // first and this counter stays at zero.
     expect(getProviderForMailType).toHaveBeenCalledTimes(1);
     expect(sendLetter).not.toHaveBeenCalled();
-    // A job cancelled meanwhile (#535: a customer's cancel of held mail) is
-    // never brought back to pending by a claimant that lost it.
-    const failed = clientQuery.mock.calls
-      .map(([sql]) => String(sql).replace(/\s+/g, ' '))
-      .find(sql => sql.includes('UPDATE letter_jobs SET status = $2::varchar'));
-    expect(failed).toContain("WHERE job_id = $1 AND provider_outcome = 'not_dispatched' AND status <> 'cancelled'");
+    // Only the claim that holds the job settles it (#730): a claimant that lost
+    // it to a cancel (#535) or to another worker never brings it back to pending.
+    const failedCall = clientQuery.mock.calls.find(([sql]) => String(sql).includes('UPDATE letter_jobs SET status = $2::varchar'));
+    const failed = String(failedCall?.[0]).replace(/\s+/g, ' ');
+    expect(failed).toContain("WHERE job_id = $1 AND provider_outcome = 'not_dispatched' AND status = 'processing' AND attempts = $5::int");
+    // The attempts this claim set: the claimed job's own.
+    expect((failedCall?.[1] as unknown[])[4]).toEqual(expect.any(Number));
     expect(clientQuery).not.toHaveBeenCalledWith(
       expect.stringContaining("SET status = 'held'"),
       expect.anything()
@@ -1710,6 +1711,30 @@ describe('mail left for the operator (#696)', () => {
     // Not failed, and nothing given back.
     expect(calls.some(call => call.sql.includes('SET status = $2::varchar'))).toBe(false);
     expect(calls.some(call => call.sql.includes('UPDATE letters SET status'))).toBe(false);
+  });
+
+  it.each([false, true])('schedules a retry only for the claim that still holds the job (superseded meanwhile: %s) (#730)', async superseded => {
+    // A retry left by this claim's own count.
+    query.mockImplementation(async (sql: string) => {
+      if (sql.includes('WITH candidate')) return { rows: [{ ...job, attempts: 1, max_attempts: 5 }] };
+      if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...letter }] };
+      return { rows: [] };
+    });
+    vi.mocked(getProviderForMailType).mockRejectedValueOnce(new Error('provider unavailable'));
+    const calls: Array<{ sql: string; params: unknown[] }> = [];
+    clientQuery.mockImplementation(async (sql: string, values: unknown[] = []) => {
+      calls.push({ sql, params: values });
+      if (sql.includes('UPDATE letter_jobs SET status = $2::varchar')) return { rows: [], rowCount: superseded ? 0 : 1 };
+      if (sql.startsWith('SELECT funding_order_id FROM letters')) return { rows: [{ funding_order_id: null }] };
+      if (sql.startsWith('SELECT letter_id FROM letter_jobs WHERE job_id = $1 FOR UPDATE')) return { rows: [{ letter_id: 'letter-1' }] };
+      return { rows: [] };
+    });
+    expect(await processLetterJob('job-1')).toMatchObject({ completed: false, retryScheduled: !superseded });
+    const settle = calls.find(call => call.sql.includes('UPDATE letter_jobs SET status = $2::varchar'))!;
+    // Held to the claim: the attempts it set.
+    expect(settle.params[4]).toBe(1);
+    // A superseded claimant touches nothing else.
+    expect(calls.some(call => call.sql.includes('UPDATE letters SET status'))).toBe(!superseded);
   });
 
   it('counts a put-back as neither sent nor failed in a run', async () => {
