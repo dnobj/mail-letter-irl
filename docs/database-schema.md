@@ -475,6 +475,7 @@ Personal access tokens (`lirl_pat_…`). People make them on the website, under 
 | user_id | VARCHAR(255) | NO | - | FK to users |
 | name | VARCHAR(100) | NO | - | User-friendly name |
 | token_hash | VARCHAR(255) | NO | - | Bcrypt hash of token |
+| token_lookup | CHAR(64) | YES | - | SHA-256 (hex) of the whole token, how `validateToken` finds it (059, #730). NULL only on a token made without one (before 059, or by an older image) and not used since: that one is found by its last four characters and a bcrypt compare, and given its hash on first use. A token may last up to 365 days, so check `SELECT max(expires_at) FROM personal_access_tokens WHERE token_lookup IS NULL` before removing that path. A revoked or expired token without a hash is logged as not found |
 | token_prefix | CHAR(4) | NO | - | Last 4 characters, for display |
 | status | pat_status | NO | 'active' | `active` or `revoked` |
 | expires_at | TIMESTAMPTZ | NO | NOW() + 90 days | When the token stops working. Every token has one since 057 (#730), which gave each older token 90 days from its creation, never sooner than 30 days from the migration |
@@ -484,8 +485,10 @@ Personal access tokens (`lirl_pat_…`). People make them on the website, under 
 | scopes | TEXT[] | NO | `{mail:read,mail:draft}` | What the token may do (037, #470). The allowed values are `mail:read`, `mail:draft` and `mail:send`, and nothing grants `mail:send` today, so no token sends. A send from a token becomes the confirmation link (docs/letter-send-flow.md) |
 
 **Indexes:**
-- `idx_personal_access_tokens_user_id` on user_id
-- `idx_personal_access_tokens_token_hash` on token_hash
+- `idx_pat_user_id` on user_id
+- `idx_pat_user_active` on user_id, where active
+- `idx_pat_expires_at` on expires_at, where active
+- `idx_pat_token_lookup`, unique, on token_lookup where it is set (059)
 
 ---
 
@@ -833,7 +836,7 @@ database marker, rejects privileged roles, and reapplies the grant set in `src/a
 - **Reader** (`letter_irl_admin_reader_<env>`): `SELECT` on the commerce, ledger, outbox, alert, audit
   and admin tables, and **column-level** `SELECT` on `users` (no `return_address`), `letters` (no
   `content`, `recipient`, `preview_html`), `letter_drafts` (no bodies, addresses, validations or
-  images), `personal_access_tokens` (no `token_hash`, no `scopes`), `feature_requests` (no `contact_email`),
+  images), `personal_access_tokens` (no `token_hash`, no `token_lookup`, no `scopes`), `feature_requests` (no `contact_email`),
   `redacted_content_quarantine` (no `content`), and `credit_transactions` and `credit_ledger` (no
   `description`); `INSERT` on `admin_audit_events` only; no `EXECUTE` on functions, including the
   `PUBLIC` default.
@@ -913,6 +916,7 @@ Production provisioning and the first production connection remain separate owne
 | 56 | 056_held_mail_funding_reversed.sql | The `held_mail_funding_reversed` alert type (#696), restated inside the `to_regclass` guard as 043 does, and a partial unique index on its order (`idx_commerce_alerts_held_mail_funding_order`) so it is raised once per order; and the operator audit operation `mail_job_cancel` (`job.cancel_held`), restated as 042 does. The hold itself is a `letter_jobs.hold_reason` (023), `funding_reversed` or `funding_disputed`, on a job still pending. Provisioning: no re-run (the roles read the alerts table whole, and the release's new write, `hold_reason`, is in the operator's list); `ADMIN_LATEST_REQUIRED_MIGRATION` is 056 |
 | 57 | 057_personal_tokens_expire.sql | `personal_access_tokens.expires_at` (#730) is NOT NULL, defaulting to 90 days from insertion. A token stored with none gets one first: 90 days after it was made, but never sooner than 30 days from the migration. Provisioning: no re-run (the reader role already reads the column, and neither role writes the table); `ADMIN_LATEST_REQUIRED_MIGRATION` is 057 |
 | 58 | 058_users_email_case_insensitive.sql | `users.email` is unique whatever its case (#730): `users_email_lower_key`, a unique index on `lower(email)`, replaces 001's inline `users_email_key`, and the plain `idx_users_email` goes. Addresses that already differ only in case stop the migration with a unique_violation (23505 in the deploy log) whose message names the problem, for an operator to join or correct the accounts first; development and production had none. `EMAIL_UNIQUE_CONSTRAINT` names the new index. Code from before 058 (the old image while the pre-deploy runs, or a rollback across 058) still names `users_email_key`: a collision is still refused, but reaches the customer as a generic error instead of the "already belongs" sentence. Provisioning: no re-run (indexes carry no grants); `ADMIN_LATEST_REQUIRED_MIGRATION` is 058 |
+| 59 | 059_personal_tokens_lookup.sql | `personal_access_tokens.token_lookup` (#730): the SHA-256 of the whole token, unique where set (`idx_pat_token_lookup`), so a token is found by one indexed read, not by its last four characters and a bcrypt compare per match. Tokens made without it are found the old way and given the hash on first use; one can last up to 365 days, so the old way stays until none is left without a hash. Provisioning: no re-run (the reader's column list leaves it out, and neither role writes the table); `ADMIN_LATEST_REQUIRED_MIGRATION` is 059 |
 
 ---
 

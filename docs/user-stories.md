@@ -1136,6 +1136,7 @@ See [gift-letters.md](gift-letters.md). Built behind `LETTER_IRL_GIFT_LETTERS_EN
 - [ ] Token shown once at creation (not retrievable later)
 - [ ] User can name/label the token for identification
 - [ ] Token stored as bcrypt hash in database
+- [ ] Token found by the SHA-256 of the whole token, not by its last four characters (#730)
 - [ ] Token associated with user account
 - [ ] Token expires: 90 days by default, or a requested date within 365 days; a past date is refused (tokens created before this rule keep their stored expiry)
 - [ ] Returns token in format: `lirl_pat_xxxxxxxxxxxx`

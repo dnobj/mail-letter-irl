@@ -11,6 +11,7 @@
  *
  * Security:
  * - Tokens are bcrypt hashed before storage
+ * - A token is found by the SHA-256 of the whole token (059, #730)
  * - Raw tokens are shown once at creation, never stored
  * - Token prefix (last 4 chars) stored for UI identification
  * - Every new token expires: 90 days by default, 365 at most
@@ -19,7 +20,7 @@
 import crypto from 'crypto';
 import bcrypt from 'bcrypt';
 import { query } from '../db/index.js';
-import { writeDiagnostic } from '../utils/diagnosticLog.js';
+import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 import type {
   PersonalAccessToken,
   CreateTokenResult,
@@ -55,6 +56,15 @@ export function isValidTokenFormat(token: string): boolean {
   }
   const body = token.slice(TOKEN_PREFIX.length);
   return body.length === TOKEN_BODY_LENGTH && /^[a-z0-9]+$/.test(body);
+}
+
+/**
+ * How a token is found (#730): the SHA-256 (hex) of the whole token, matched
+ * exactly through a unique index (migration 059). A token carries about 165
+ * random bits, so the hash cannot be reversed or guessed; no key is needed.
+ */
+export function tokenLookupHash(rawToken: string): string {
+  return crypto.createHash('sha256').update(rawToken, 'utf8').digest('hex');
 }
 
 // ============================================================================
@@ -158,10 +168,10 @@ export async function createToken(
 
   // Insert into database
   const result = await query<PersonalAccessToken>(
-    `INSERT INTO personal_access_tokens (user_id, name, token_hash, token_prefix, expires_at)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO personal_access_tokens (user_id, name, token_hash, token_prefix, expires_at, token_lookup)
+     VALUES ($1, $2, $3, $4, $5, $6)
      RETURNING token_id, name, expires_at`,
-    [userId, name, tokenHash, tokenPrefix, expiresAt]
+    [userId, name, tokenHash, tokenPrefix, expiresAt, tokenLookupHash(rawToken)]
   );
 
   const row = result.rows[0];
@@ -277,64 +287,85 @@ export async function validateToken(rawToken: string): Promise<ValidateTokenResu
     return { valid: false, error: 'Invalid token format' };
   }
 
-  // Extract prefix for efficient lookup
-  const tokenBody = rawToken.slice(TOKEN_PREFIX.length);
-  const tokenPrefix = tokenBody.slice(-4);
-
-  // Find active tokens with matching prefix
-  const result = await query<PersonalAccessToken>(
-    `SELECT token_id, user_id, token_hash, status, expires_at, scopes
+  // One indexed read by the whole token's hash (#730): what a request sends
+  // no longer chooses how many rows are read or bcrypt compares are run.
+  const lookup = tokenLookupHash(rawToken);
+  const found = await query<PersonalAccessToken>(
+    `SELECT token_id, user_id, status, expires_at, scopes
      FROM personal_access_tokens
-     WHERE token_prefix = $1 AND status = 'active'`,
-    [tokenPrefix]
+     WHERE token_lookup = $1`,
+    [lookup]
   );
+  const token = found.rows[0] ?? (await findTokenMadeBeforeLookup(rawToken, lookup));
 
-  if (result.rows.length === 0) {
+  // The reasons only reach the server's log: the MCP and REST answers are
+  // fixed words whatever they are (#743).
+  if (!token) {
     return { valid: false, error: 'Token not found' };
   }
-
-  // Check each matching token (usually just one, but prefix could theoretically collide)
-  for (const token of result.rows) {
-    // Check expiration
-    if (token.expires_at && new Date(token.expires_at) < new Date()) {
-      continue; // Try next token if expired
-    }
-
-    // Verify hash
-    const isMatch = await bcrypt.compare(rawToken, token.token_hash);
-    if (isMatch) {
-      return {
-        valid: true,
-        userId: token.user_id,
-        tokenId: token.token_id,
-        scopes: Array.isArray(token.scopes) ? token.scopes : [],
-      };
-    }
-  }
-
-  // Check if any tokens with this prefix are revoked
-  const revokedCheck = await query<PersonalAccessToken>(
-    `SELECT token_id FROM personal_access_tokens
-     WHERE token_prefix = $1 AND status = 'revoked'`,
-    [tokenPrefix]
-  );
-
-  if (revokedCheck.rows.length > 0) {
+  if (token.status !== 'active') {
     return { valid: false, error: 'Token has been revoked' };
   }
-
-  // Check if any tokens with this prefix are expired
-  const expiredCheck = await query<PersonalAccessToken>(
-    `SELECT token_id FROM personal_access_tokens
-     WHERE token_prefix = $1 AND expires_at IS NOT NULL AND expires_at < NOW()`,
-    [tokenPrefix]
-  );
-
-  if (expiredCheck.rows.length > 0) {
+  // No expiry is refused, not read as never expiring: 057 holds the column
+  // NOT NULL, so a NULL could only come from a schema that lost that.
+  if (!token.expires_at || new Date(token.expires_at) <= new Date()) {
     return { valid: false, error: 'Token has expired' };
   }
 
-  return { valid: false, error: 'Token not found' };
+  return {
+    valid: true,
+    userId: token.user_id,
+    tokenId: token.token_id,
+    scopes: Array.isArray(token.scopes) ? token.scopes : [],
+  };
+}
+
+/**
+ * A token made before migration 059 has no lookup hash. It is found as tokens
+ * were before, by its last four characters and a bcrypt compare, but only
+ * among live tokens still without one, and is given its hash on the first
+ * match, so from then on it is found by that. A token may be made to last up
+ * to MAX_TOKEN_LIFETIME_DAYS, and an older image (during the pre-deploy, or
+ * after a rollback across 059) still makes tokens without a hash, so this
+ * stays until this is NULL or past:
+ *   SELECT max(expires_at) FROM personal_access_tokens WHERE token_lookup IS NULL
+ * Until then every miss runs this read too, and compares only against live
+ * tokens that have no hash.
+ *
+ * It reads live tokens only, so a revoked or expired token without a hash is
+ * logged as not found rather than as revoked or expired. Callers see the same
+ * fixed words either way (#743).
+ */
+async function findTokenMadeBeforeLookup(
+  rawToken: string,
+  lookup: string
+): Promise<PersonalAccessToken | null> {
+  const suffix = rawToken.slice(-4);
+  const result = await query<PersonalAccessToken>(
+    `SELECT token_id, user_id, token_hash, status, expires_at, scopes
+     FROM personal_access_tokens
+     WHERE token_prefix = $1 AND token_lookup IS NULL
+       AND status = 'active' AND expires_at > NOW()`,
+    [suffix]
+  );
+
+  for (const token of result.rows) {
+    if (await bcrypt.compare(rawToken, token.token_hash)) {
+      // Filled once; a second request racing this one finds it already set.
+      // Failing to fill it costs only the next request a compare.
+      await query(
+        `UPDATE personal_access_tokens SET token_lookup = $2
+         WHERE token_id = $1 AND token_lookup IS NULL`,
+        [token.token_id, lookup]
+      ).catch((error) => {
+        writeDiagnostic('warn', 'auth.pat_lookup_fill_failed', {
+          errorClass: classifyDiagnosticError(error, 'database_error')
+        });
+      });
+      return token;
+    }
+  }
+  return null;
 }
 
 // ============================================================================
