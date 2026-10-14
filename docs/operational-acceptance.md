@@ -16,6 +16,8 @@ Read from the production API's Railway variables on 2026-09-23:
 | `LETTER_IRL_GIFT_LETTERS_ENABLED` | unset (off) | Turned on at launch, with seed campaigns (#158) |
 | `CONTENT_RETENTION_MODE` (maintenance) | unset (report only) | Switched to `enforce` for #153, development first. Required in production since #699: set `report` or `enforce` before that promotion, or maintenance refuses to run |
 
+Since #730 an unpaid Pay & Send checkout holds its place in the mail ceilings until it expires (about 40 minutes), so a few accounts that open checkouts and never pay can hold the global ceiling shut for that long, each bounded by its own account cap and charge cap. Raise the ceiling in the admin panel if that bites.
+
 The daily ceilings (`LETTER_IRL_BETA_GLOBAL_DAILY_MAIL_CEILING`, `LETTER_IRL_BETA_ACCOUNT_DAILY_MAIL_CAP`, `LETTER_IRL_BETA_ACCOUNT_DAILY_CHARGE_CENTS`, `LETTER_IRL_GIFT_DAILY_SEND_CAP`) are the durable financial limits. They are separate from, and stronger than, the process-local HTTP rate limits; neither stands in for the other. Since migration 038 an operator can set any of them in the admin panel's Limits page, for everyone or one account, without a redeploy, and the first refusal of a UTC day by each opens a `daily_limit_reached` alert and posts to `LETTER_IRL_OPERATOR_ALERT_URL` ([admin-panel-guide.md](admin-panel-guide.md)).
 
 ## Watching it

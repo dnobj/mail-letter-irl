@@ -71,6 +71,58 @@ export interface SpendLimitQueryable {
 /** Both sides plain timestamps, so no session-time-zone conversion occurs. */
 const UTC_DAY_START = "date_trunc('day', NOW() AT TIME ZONE 'UTC')";
 
+/**
+ * One cap at a time (#730). A count is only a ceiling if nothing else can
+ * add a row between the count and the commit: two sends counting at once both
+ * saw room for one. So each cap's count is taken under a transaction-scoped
+ * advisory lock on its key, held until the commit that adds this send's row,
+ * and the next count waits for it and sees that row.
+ *
+ * Keys are always taken in one order, the account's, then the global one,
+ * then the gift budget's, so two holders never wait on each other. A caller
+ * reaching a cap already holds its own account row and takes no other
+ * account's afterwards. With the plain query() (no transaction) the lock
+ * ends with its statement, which is no worse than before.
+ *
+ * An account's key has a class of its own, so no account's hash can ever be
+ * the global or the gift key's, which would take those two out of order.
+ */
+const DAILY_CAP_CLASS = 'letter_irl.daily_cap';
+const ACCOUNT_DAILY_CAP_CLASS = 'letter_irl.daily_cap.account';
+
+async function lockDailyCap(client: SpendLimitQueryable, lockClass: string, key: string): Promise<void> {
+  await client.query('SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))', [lockClass, key]);
+}
+
+/**
+ * Today's mail, as the caps count it: every letters row (no status filter,
+ * below), and, unless told not to, every Pay & Send order still open (#730),
+ * which will become a letter once paid, so capacity it may use is not given to
+ * another send meanwhile. An order is counted until its letter exists, then
+ * the letter is; one that failed or was refunded no longer holds room, nor does
+ * a checkout past its expiry: no payment can start after it, so abandoned
+ * checkouts cannot hold the day's room shut until the sweep reaches them. A
+ * payment already under way that lands later is fulfilled anyway, as all Pay &
+ * Send fulfilment is, past any cap.
+ */
+function mailTodayCount(scope: 'account' | 'global', openCheckouts: boolean): string {
+  const account = scope === 'account' ? 'user_id = $1 AND ' : '';
+  if (!openCheckouts) {
+    return `SELECT COUNT(*) AS count FROM letters WHERE ${account}created_at >= ${UTC_DAY_START}`;
+  }
+  const orderAccount = scope === 'account' ? 'o.user_id = $1 AND ' : '';
+  return `SELECT COUNT(*) AS count FROM (
+       SELECT letter_id FROM letters WHERE ${account}created_at >= ${UTC_DAY_START}
+       UNION ALL
+       SELECT o.order_id FROM orders o
+        WHERE ${orderAccount}o.order_type = 'jit_mail'
+          AND o.status IN ('checkout_pending', 'paid', 'fulfillment_pending')
+          AND (o.status <> 'checkout_pending' OR o.checkout_expires_at IS NULL OR o.checkout_expires_at > NOW())
+          AND o.created_at >= ${UTC_DAY_START}
+          AND NOT EXISTS (SELECT 1 FROM letters l WHERE l.funding_order_id = o.order_id)
+     ) AS today`;
+}
+
 export class SpendLimitError extends Error {
   readonly code: string;
   constructor(code: string, message: string) {
@@ -121,8 +173,13 @@ function countOf(rows: Array<{ count: string }> | undefined): number {
 export async function assertMailWithinDailyCaps(
   client: SpendLimitQueryable,
   userId: string,
-  inFlight: number
+  inFlight: number,
+  options: { openCheckouts?: boolean; lock?: boolean } = {}
 ): Promise<void> {
+  const openCheckouts = options.openCheckouts ?? true;
+  // Locks only mean something inside the caller's transaction; the early
+  // checkout answer has none, and asks for none.
+  const lock = options.lock ?? true;
   if (!isMailSendingEnabled()) {
     throw new SpendLimitError(
       'MAIL_SENDING_DISABLED',
@@ -134,11 +191,8 @@ export async function assertMailWithinDailyCaps(
   // environment's (src/services/dailyLimits.ts).
   const limits = await effectiveDailyLimits(client, ['account_daily_mail', 'global_daily_mail'], userId);
 
-  const perAccount = await client.query<{ count: string }>(
-    `SELECT COUNT(*) AS count FROM letters
-     WHERE user_id = $1 AND created_at >= ${UTC_DAY_START}`,
-    [userId]
-  );
+  if (lock) await lockDailyCap(client, ACCOUNT_DAILY_CAP_CLASS, `account_daily_mail:${userId}`);
+  const perAccount = await client.query<{ count: string }>(mailTodayCount('account', openCheckouts), [userId]);
   const accountCap = limits.account_daily_mail;
   if (countOf(perAccount.rows) + inFlight > accountCap) {
     reportDailyLimitReached('account_daily_mail', userId, accountCap);
@@ -151,9 +205,8 @@ export async function assertMailWithinDailyCaps(
     );
   }
 
-  const global = await client.query<{ count: string }>(
-    `SELECT COUNT(*) AS count FROM letters WHERE created_at >= ${UTC_DAY_START}`
-  );
+  if (lock) await lockDailyCap(client, DAILY_CAP_CLASS, 'global_daily_mail');
+  const global = await client.query<{ count: string }>(mailTodayCount('global', openCheckouts));
   if (countOf(global.rows) + inFlight > limits.global_daily_mail) {
     reportDailyLimitReached('global_daily_mail', userId, limits.global_daily_mail);
     // Deliberately does NOT name the global number: it is our operating
@@ -240,6 +293,7 @@ export async function assertChargeWithinDailyCap(
  */
 export async function assertGiftSendWithinDailyCap(client: SpendLimitQueryable): Promise<void> {
   const cap = (await effectiveDailyLimits(client, ['gift_daily_send'], null)).gift_daily_send;
+  await lockDailyCap(client, DAILY_CAP_CLASS, 'gift_daily_send');
   const sent = await client.query<{ count: string }>(
     `SELECT COUNT(*) AS count FROM letters
      WHERE funding_type = 'gift_letter' AND created_at >= ${UTC_DAY_START}
