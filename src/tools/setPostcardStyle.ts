@@ -235,7 +235,11 @@ async function handler(input: SetPostcardStyleInput, context: ToolContext): Prom
   let croppedAgain: string | undefined;
   if (size !== sizeBefore) {
     try {
-      const picture = await reprocessPostcardImage({ url: draft.front_image_url, stored: storedPicture }, size, { actorId: userId });
+      const picture = await reprocessPostcardImage(
+        { url: draft.front_image_url, stored: storedPicture, storedSize: sizeBefore },
+        size,
+        { actorId: userId }
+      );
       printImage = croppedAgain = picture.base64DataUri;
       displayImage = picture.previewDataUri;
       context.logger.info(

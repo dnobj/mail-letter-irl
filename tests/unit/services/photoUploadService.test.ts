@@ -27,6 +27,7 @@ import { storeUploadedPhoto } from '../../../src/services/tempImageStore.js';
 import { setRecentUploadedImage } from '../../../src/services/recentUploadStore.js';
 import {
   MAX_CHUNK_CHARS,
+  CHUNK_IDLE_MS,
   MAX_CHUNKS,
   MAX_PENDING_BYTES,
   MAX_PHOTO_BYTES,
@@ -261,6 +262,56 @@ describe('photo uploads through the card (#474)', () => {
     );
     expect(late.code).toBe('OUT_OF_ORDER');
     expect(late.message).toBe('That upload was interrupted. Choose the photo again.');
+  });
+
+  it('drops an upload that sends no chunk for too long, within the window (#730)', async () => {
+    // Two minutes, written out: a slow phone's chunk 90 seconds after the last is still taken.
+    expect(CHUNK_IDLE_MS).toBe(2 * 60 * 1000);
+    await receivePhotoChunk(USER, { uploadId: ID, index: 0, total: 4, data: b64(300) }, NOW);
+    await expect(
+      receivePhotoChunk(USER, { uploadId: ID, index: 1, total: 4, data: b64(300) }, NOW + 90_000)
+    ).resolves.toMatchObject({ received: 2 });
+    // Each chunk starts the limit again: this one is two minutes after the last, four after the first.
+    await expect(
+      receivePhotoChunk(USER, { uploadId: ID, index: 2, total: 4, data: b64(300) }, NOW + 90_000 + CHUNK_IDLE_MS)
+    ).resolves.toMatchObject({ received: 3 });
+    const idle = await refusal(
+      receivePhotoChunk(USER, { uploadId: ID, index: 3, total: 4, data: b64(300) }, NOW + 90_000 + 2 * CHUNK_IDLE_MS + 1)
+    );
+    expect(idle.code).toBe('OUT_OF_ORDER');
+    expect(90_000 + 2 * CHUNK_IDLE_MS + 1).toBeLessThan(UPLOAD_WINDOW_MS);
+  });
+
+  it('starts the idle limit again on a chunk sent again', async () => {
+    await receivePhotoChunk(USER, { uploadId: ID, index: 0, total: 2, data: b64(300) }, NOW);
+    // The same chunk again, just inside the limit: the card is still there.
+    await receivePhotoChunk(USER, { uploadId: ID, index: 0, total: 2, data: b64(300) }, NOW + CHUNK_IDLE_MS);
+    await expect(
+      receivePhotoChunk(USER, { uploadId: ID, index: 1, total: 2, data: b64(300) }, NOW + 2 * CHUNK_IDLE_MS)
+    ).resolves.toMatchObject({ done: true });
+  });
+
+  it('frees the memory an idle upload held, so stalled uploads cannot keep others out (#730)', async () => {
+    const chunk = b64(3 * (MAX_CHUNK_CHARS / 4));
+    const perChunk = Buffer.from(chunk, 'base64').length;
+    const perAccount = Math.floor(MAX_PHOTO_BYTES / perChunk);
+    let held = 0;
+    let account = 0;
+    let index = 0;
+    while (held + perChunk <= MAX_PENDING_BYTES) {
+      if (index === perAccount) {
+        account += 1;
+        index = 0;
+      }
+      await receivePhotoChunk(`auth0|stalled-${account}`, { uploadId: ID, index, total: MAX_CHUNKS, data: chunk }, NOW);
+      held += perChunk;
+      index += 1;
+    }
+    expect((await refusal(receivePhotoChunk(USER, { uploadId: ID, index: 0, total: 2, data: chunk }, NOW))).code).toBe('BUSY');
+    // The stalled uploads send nothing more; past the idle limit their memory is free.
+    await expect(
+      receivePhotoChunk(USER, { uploadId: ID, index: 0, total: 2, data: chunk }, NOW + CHUNK_IDLE_MS + 1)
+    ).resolves.toMatchObject({ received: 1, total: 2, done: false });
   });
 
   it.each([

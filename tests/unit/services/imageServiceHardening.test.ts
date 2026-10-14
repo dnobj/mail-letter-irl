@@ -61,8 +61,13 @@ const pngHeaderBomb = (width: number, height: number): Buffer => pngHeader(width
 /** Settles a promise into its value or its error, so a rejection is never left unhandled. */
 const outcomeOf = <T,>(promise: Promise<T>): Promise<T | unknown> => promise.then((value) => value, (error: unknown) => error);
 
-async function solid(format: 'png' | 'jpeg' | 'webp' | 'gif', width: number, height: number): Promise<Buffer> {
-  const base = sharp({ create: { width, height, channels: 3, background: { r: 200, g: 40, b: 40 } } });
+async function solid(
+  format: 'png' | 'jpeg' | 'webp' | 'gif',
+  width: number,
+  height: number,
+  background: { r: number; g: number; b: number } = { r: 200, g: 40, b: 40 }
+): Promise<Buffer> {
+  const base = sharp({ create: { width, height, channels: 3, background } });
   if (format === 'png') return base.png().toBuffer();
   if (format === 'jpeg') return base.jpeg().toBuffer();
   if (format === 'webp') return base.webp().toBuffer();
@@ -528,27 +533,40 @@ describe('image pipeline hardening', () => {
     });
   });
   describe('a postcard picture cropped again at a new size (#594)', () => {
-    it('crops it from its source while that still opens', async () => {
-      fetchMock.mockResolvedValueOnce(responseWith(bodyOf(await solid('jpeg', 1600, 1200)), { 'content-type': 'image/jpeg' }));
-      const stored = `data:image/jpeg;base64,${(await solid('jpeg', 2700, 1800)).toString('base64')}`;
-      const result = await reprocessPostcardImage({ url: REMOTE, stored }, '6x11', { actorId: 'user-1' });
+    it('crops it from its source while that still opens and still holds the picture the postcard has', async () => {
+      const source = await solid('jpeg', 1600, 1200);
+      // The copy the preview stored, made from that source at its size.
+      fetchMock.mockResolvedValueOnce(responseWith(bodyOf(source), { 'content-type': 'image/jpeg' }));
+      const stored = (await downloadAndProcessPostcardImageWithPreview({ url: REMOTE }, '6x9')).base64DataUri;
+      fetchMock.mockResolvedValueOnce(responseWith(bodyOf(source), { 'content-type': 'image/jpeg' }));
+      const result = await reprocessPostcardImage({ url: REMOTE, stored, storedSize: '6x9' }, '6x11', { actorId: 'user-1' });
       expect(result.from).toBe('source');
       expect(result).toMatchObject({ originalWidth: 1600, originalHeight: 1200, processedWidth: 3300, processedHeight: 1800 });
       await expect(dimensionsOf(result.base64DataUri)).resolves.toMatchObject({ width: 3300, height: 1800, format: 'jpeg' });
       await expect(dimensionsOf(result.previewDataUri)).resolves.toMatchObject({ width: 400, height: 218 });
-      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('crops the stored copy when the link now holds another picture (#730)', async () => {
+      fetchMock.mockResolvedValueOnce(responseWith(bodyOf(await solid('jpeg', 1600, 1200)), { 'content-type': 'image/jpeg' }));
+      const stored = (await downloadAndProcessPostcardImageWithPreview({ url: REMOTE }, '6x9')).base64DataUri;
+      // The same address, another picture behind it.
+      fetchMock.mockResolvedValueOnce(responseWith(bodyOf(await solid('jpeg', 1600, 1200, { r: 0, g: 0, b: 255 })), { 'content-type': 'image/jpeg' }));
+      const result = await reprocessPostcardImage({ url: REMOTE, stored, storedSize: '6x9' }, '6x11');
+      expect(result.from).toBe('stored');
+      await expect(dimensionsOf(result.base64DataUri)).resolves.toMatchObject({ width: 3300, height: 1800 });
     });
 
     it('crops the copy the draft prints from when the source no longer opens, or there is none', async () => {
       const stored = `data:image/jpeg;base64,${(await solid('jpeg', 2700, 1800)).toString('base64')}`;
       fetchMock.mockResolvedValueOnce(responseWith(null, {}, 404));
-      const gone = await reprocessPostcardImage({ url: REMOTE, stored }, '6x4');
+      const gone = await reprocessPostcardImage({ url: REMOTE, stored, storedSize: '6x9' }, '6x4');
       expect(gone).toMatchObject({ from: 'stored', originalWidth: 2700, originalHeight: 1800 });
       await expect(dimensionsOf(gone.base64DataUri)).resolves.toMatchObject({ width: 1800, height: 1200 });
       await expect(dimensionsOf(gone.previewDataUri)).resolves.toMatchObject({ width: 400, height: 267 });
 
       fetchMock.mockReset();
-      const none = await reprocessPostcardImage({ url: null, stored }, '6x11');
+      const none = await reprocessPostcardImage({ url: null, stored, storedSize: '6x9' }, '6x11');
       expect(none.from).toBe('stored');
       await expect(dimensionsOf(none.base64DataUri)).resolves.toMatchObject({ width: 3300, height: 1800 });
       expect(fetchMock).not.toHaveBeenCalled();
@@ -557,21 +575,21 @@ describe('image pipeline hardening', () => {
     it('crops the stored copy when the source opens but its bytes no longer make a picture (#601 review round 1)', async () => {
       const stored = `data:image/jpeg;base64,${(await solid('jpeg', 2700, 1800)).toString('base64')}`;
       fetchMock.mockResolvedValueOnce(responseWith(bodyOf(Buffer.from('<html>moved</html>')), { 'content-type': 'image/jpeg' }));
-      const result = await reprocessPostcardImage({ url: REMOTE, stored }, '6x11');
+      const result = await reprocessPostcardImage({ url: REMOTE, stored, storedSize: '6x9' }, '6x11');
       expect(result).toMatchObject({ from: 'stored', originalWidth: 2700, originalHeight: 1800 });
     });
 
     it('says the service is busy rather than cropping the stored copy silently (#601 review round 1)', async () => {
       const stored = `data:image/jpeg;base64,${(await solid('jpeg', 2700, 1800)).toString('base64')}`;
       vi.spyOn(_testing.downloadGate, 'run').mockRejectedValueOnce(new ConcurrencyGateError('image-download', 'queue_full'));
-      const error = await rejection(reprocessPostcardImage({ url: REMOTE, stored }, '6x11'));
+      const error = await rejection(reprocessPostcardImage({ url: REMOTE, stored, storedSize: '6x9' }, '6x11'));
       expect(error.code).toBe('SERVICE_BUSY');
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
     it('refuses a stored copy it cannot read, as the image service refuses', async () => {
       for (const stored of ['', 'https://files.example/beach.jpg', 'data:text/plain;base64,AAAA', 'data:image/jpeg,raw']) {
-        const error = await rejection(reprocessPostcardImage({ url: null, stored }, '6x9'));
+        const error = await rejection(reprocessPostcardImage({ url: null, stored, storedSize: '6x9' }, '6x9'));
         expect(error.code, stored).toBe('PROCESSING_FAILED');
         expect(error.userMessage).toBe("The postcard's stored picture cannot be read.");
       }
@@ -580,7 +598,7 @@ describe('image pipeline hardening', () => {
     it('decodes through the decode gate, under the account', async () => {
       const decodeRun = vi.spyOn(_testing.decodeGate, 'run');
       const stored = `data:image/png;base64,${(await solid('png', 900, 600)).toString('base64')}`;
-      await reprocessPostcardImage({ url: null, stored }, '6x9', { actorId: 'user-1' });
+      await reprocessPostcardImage({ url: null, stored, storedSize: '6x9' }, '6x9', { actorId: 'user-1' });
       expect(decodeRun).toHaveBeenCalledTimes(1);
       expect(decodeRun.mock.calls[0][1]).toBe('user-1');
     });
