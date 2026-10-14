@@ -599,7 +599,7 @@ else to ask.
 
 **Auth0 mints a subject per sign-in method.** Without this Action, one person
 signing in with Google and with a password is two subjects presenting one
-address - and `users.email` is `NOT NULL UNIQUE`, so the second one collides,
+address - and `users.email` is `NOT NULL` and unique whatever its case (migration 058), so the second one collides,
 is refused, and that person has no account. This Action makes the address the
 identity by joining the identities behind it.
 

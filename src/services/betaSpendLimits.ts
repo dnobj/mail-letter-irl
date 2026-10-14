@@ -103,7 +103,9 @@ async function lockDailyCap(client: SpendLimitQueryable, lockClass: string, key:
  * a checkout past its expiry: no payment can start after it, so abandoned
  * checkouts cannot hold the day's room shut until the sweep reaches them. A
  * payment already under way that lands later is fulfilled anyway, as all Pay &
- * Send fulfilment is, past any cap.
+ * Send fulfilment is, past any cap. An order counts on the UTC day it was
+ * made: one made just before midnight and paid just after holds its place on
+ * the first day, and its letter counts on the second.
  */
 function mailTodayCount(scope: 'account' | 'global', openCheckouts: boolean): string {
   const account = scope === 'account' ? 'user_id = $1 AND ' : '';
