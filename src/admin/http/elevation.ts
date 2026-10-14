@@ -8,11 +8,13 @@ import { decodeBase32, verifyTotp } from "./totp.js";
  * Step-up for writes. Tailnet membership is continuous, so the application
  * checks a second factor itself: a TOTP code from an authenticator the owner
  * keeps on another device. Success marks the session elevated for a bounded
- * time (10 minutes in production, 60 in development); five failures inside
- * fifteen minutes lock elevation for the operator. Each lock after the first
- * lasts twice the one before, up to a day, until a code is accepted (#730), so
- * a steady guesser gets a few dozen tries on the first day and a handful a day
- * after, not hundreds. Every production command requires a live elevation.
+ * time (10 minutes in production, 60 in development). Every fifth failure
+ * since the operator's last accepted code locks elevation for them, however
+ * far apart the failures came: fifteen minutes the first time, and each
+ * further lock twice the one before, up to a day (#730). Counting within a
+ * window instead let a guesser who paced four tries per window go on for
+ * ever; now any guesser gets a few dozen tries the first day and five a day
+ * after. Every production command requires a live elevation.
  */
 
 /** The longest one lock lasts, however many came before it. */
@@ -29,8 +31,8 @@ export type ElevationAttempt =
   | { ok: false; reason: "locked" | "invalid" | "replayed"; lockedUntil: number | null; failuresLeft: number };
 
 interface LoginElevationState {
-  /** Timestamps of recent failures, pruned to the policy window. */
-  failures: number[];
+  /** Failures since a code was last accepted: every `maxFailures`-th locks. */
+  failures: number;
   lockedUntil: number | null;
   /** Locks applied since a code was last accepted: each doubles the next. */
   lockouts: number;
@@ -76,20 +78,18 @@ export class ElevationGuard {
   }
 
   /**
-   * Record a failed attempt, applying the lock once the policy's threshold is
-   * reached inside its window.
+   * Record a failed attempt, applying a lock at every `maxFailures`-th since
+   * the last accepted code. The lock lasts the policy's window, doubled for
+   * each lock before it, up to MAX_LOCK_MS.
    */
   recordFailure(
     login: string,
     now: number,
     policy: ElevationPolicy,
   ): { lockedUntil: number | null; failuresLeft: number } {
-    const state = this.byLogin.get(login) ?? { failures: [], lockedUntil: null, lockouts: 0 };
-    state.failures = state.failures.filter(
-      (at) => now - at < policy.failureWindowMs,
-    );
-    state.failures.push(now);
-    if (state.failures.length >= policy.maxFailures) {
+    const state = this.byLogin.get(login) ?? { failures: 0, lockedUntil: null, lockouts: 0 };
+    state.failures += 1;
+    if (state.failures % policy.maxFailures === 0) {
       const lockMs = Math.min(policy.failureWindowMs * 2 ** state.lockouts, MAX_LOCK_MS);
       state.lockouts += 1;
       state.lockedUntil = now + lockMs;
@@ -99,7 +99,7 @@ export class ElevationGuard {
     this.byLogin.set(login, state);
     return {
       lockedUntil: null,
-      failuresLeft: Math.max(policy.maxFailures - state.failures.length, 0),
+      failuresLeft: policy.maxFailures - (state.failures % policy.maxFailures),
     };
   }
 

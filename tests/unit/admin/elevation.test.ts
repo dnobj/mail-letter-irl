@@ -156,14 +156,54 @@ describe("write elevation", () => {
     );
   });
 
-  it("forgets failures older than the window", () => {
+  it("counts failures since the last accepted code, however far apart they come (#730)", () => {
     const { guard, newSession } = harness();
     const current = newSession();
     const now = 1_700_000_000_000;
     for (let attempt = 1; attempt <= 4; attempt += 1) {
       attemptElevation(current, guard, SECRET, "000000", policy, now + attempt);
     }
-    const later = now + policy.failureWindowMs + 10;
-    expect(attemptElevation(current, guard, SECRET, "000000", policy, later)).toMatchObject({ ok: false, reason: "invalid", failuresLeft: 4 });
+    // A day later, the fifth still counts.
+    const later = now + 24 * 60 * 60_000;
+    expect(attemptElevation(current, guard, SECRET, "000000", policy, later)).toMatchObject({ ok: false, reason: "locked" });
+  });
+
+  it("locks a guesser who paces four tries per window, and doubles the locks", () => {
+    const { guard, newSession } = harness();
+    const current = newSession();
+    let at = 1_700_000_000_000;
+    let tries = 0;
+    const locks: number[] = [];
+    // Four tries per window, for two days: each try waits out any lock.
+    const end = at + 2 * 24 * 60 * 60_000;
+    while (at < end) {
+      for (let attempt = 0; attempt < 4 && at < end; attempt += 1) {
+        const lock = guard.lockedUntil("owner@example.com", at);
+        if (lock !== null) at = lock + 1;
+        const result = attemptElevation(current, guard, SECRET, "000000", policy, at);
+        tries += 1;
+        if (!result.ok && result.reason === "locked" && result.lockedUntil !== null) locks.push(result.lockedUntil - at);
+        at += 1;
+      }
+      at += policy.failureWindowMs;
+    }
+    // Locked from the fifth try on, each lock twice the last until the cap.
+    expect(locks.slice(0, 4)).toEqual([1, 2, 4, 8].map((factor) => policy.failureWindowMs * factor));
+    expect(Math.max(...locks)).toBe(MAX_LOCK_MS);
+    // Far from the ~384 tries two windows' pacing used to allow in a day.
+    expect(tries).toBeLessThan(60);
+  });
+
+  it("starts the count again once a code is accepted", () => {
+    const { guard, newSession } = harness();
+    const current = newSession();
+    const now = 1_700_000_000_000;
+    for (let attempt = 1; attempt <= 4; attempt += 1) attemptElevation(current, guard, SECRET, "000000", policy, now + attempt);
+    expect(attemptElevation(current, guard, SECRET, codeAt(now), policy, now + 10).ok).toBe(true);
+    expect(attemptElevation(current, guard, SECRET, "000000", policy, now + 20)).toMatchObject({
+      ok: false,
+      reason: "invalid",
+      failuresLeft: 4,
+    });
   });
 });

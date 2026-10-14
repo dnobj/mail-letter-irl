@@ -258,6 +258,20 @@ describe("Tailscale supervisor", () => {
     expect(files.removed).toEqual([{ upsBefore: 1 }]);
   });
 
+  it("fails as unavailable, issuing no up, when the key file cannot be written", async () => {
+    const { cli, calls } = scriptedCli([statusJson("NeedsLogin", { Tags: [], DNSName: "" })]);
+    const daemon = fakeDaemon();
+    const sut = supervisor(cli, daemon.handle, {
+      authKey: AUTH_KEY,
+      writeSecret: async () => {
+        throw new Error("ENOSPC");
+      },
+    });
+    await expect(sut.start()).rejects.toMatchObject({ code: "ADMIN_TAILSCALE_UNAVAILABLE" });
+    expect(calls.some((args) => args[0] === "up")).toBe(false);
+    expect(daemon.killed).not.toBeNull();
+  });
+
   it("writes no key file when no key is needed", async () => {
     const { cli } = scriptedCli([statusJson("Stopped"), statusJson("Running"), statusJson("Running")]);
     const files = secretFiles();

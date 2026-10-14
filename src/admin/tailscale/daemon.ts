@@ -349,9 +349,15 @@ export class TailscaleSupervisor {
           "--accept-dns=false",
           "--timeout=90s",
         ];
-        const keyFile = needsKey && this.options.authKey
-          ? await (this.options.writeSecret ?? writeSecretFile)(this.options.authKey)
-          : null;
+        let keyFile: SecretFile | null = null;
+        if (needsKey && this.options.authKey) {
+          try {
+            keyFile = await (this.options.writeSecret ?? writeSecretFile)(this.options.authKey);
+          } catch {
+            this.log("could not write the auth key file");
+            return this.fail("ADMIN_TAILSCALE_UNAVAILABLE");
+          }
+        }
         if (keyFile) args.push(`--auth-key=file:${keyFile.path}`);
         this.log(`issuing up (key ${needsKey ? "present" : "not needed"})`);
         let result: Awaited<ReturnType<typeof this.cli>>;
