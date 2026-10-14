@@ -3100,22 +3100,20 @@ async function processRefundEvent(
            refund_pending_at = CASE WHEN $2::varchar = 'refund_pending' THEN COALESCE(refund_pending_at, NOW()) ELSE refund_pending_at END,
            refunded_at = CASE WHEN $2::varchar = 'refunded' THEN NOW() ELSE refunded_at END,
            amount_refunded_cents = CASE WHEN $2::varchar = 'refunded' THEN amount_cents ELSE amount_refunded_cents END,
-           -- A refund held for a person (#730) is done with once the order is.
-           last_error = CASE WHEN $2::varchar = 'refunded' AND last_error_code = 'REFUND_NOT_COMPLETED' THEN NULL ELSE last_error END,
-           last_error_code = CASE WHEN $2::varchar = 'refunded' AND last_error_code = 'REFUND_NOT_COMPLETED' THEN NULL ELSE last_error_code END,
            updated_at = NOW()
        WHERE order_id = $1`,
       [order.order_id, nextStatus, isRefund ? refundOrCharge.id : null]
     );
     await recordOrderEvent(client, order.order_id, eventType, order.status, nextStatus);
     if (nextStatus === 'refunded') {
-      await client.query(
-        `UPDATE commerce_operational_alerts
-            SET status = 'resolved', resolved_at = NOW(), resolution_code = 'order_refunded', updated_at = NOW()
-          WHERE order_id = $1 AND alert_type = 'refund_not_completed' AND status <> 'resolved'`,
-        [order.order_id]
-      );
-    } else if (isRefund && ['failed', 'canceled'].includes(refundStatus ?? '')) {
+      await releaseRefundHold(client, order.order_id);
+    } else if (
+      isRefund &&
+      ['failed', 'canceled'].includes(refundStatus ?? '') &&
+      // Not for an older refund's event: a newer one the order names is still
+      // going, and its own outcome decides (#730).
+      (!order.stripe_refund_id || order.stripe_refund_id === refundOrCharge.id)
+    ) {
       // A full refund that failed or was cancelled waits for a person, never
       // for the sweep to make another (#730), whoever made it.
       if (await holdRefundNotCompletedWithClient(client, order.order_id, { id: refundOrCharge.id, status: refundStatus })) {
@@ -4216,6 +4214,7 @@ export async function requestRefund(
       );
       if (!finalized?.rows[0]) return;
       if (nextStatus === 'refunded') {
+        await releaseRefundHold(client, orderId);
         if (order.order_type === 'letter_pack') {
           await revokePackLots(client, order, { credits: 'all' });
         }
@@ -4280,10 +4279,14 @@ async function holdRefundNotCompletedWithClient(
   readRefundId?: string | null
 ): Promise<boolean> {
   const sameRefund = readRefundId === undefined ? '' : ' AND stripe_refund_id IS NOT DISTINCT FROM $2';
+  // An amount-mismatch quarantine keeps its own code and message, which the
+  // panel's release reads; the alert below still opens.
   const held = await client.query<{ order_id: string }>(
     `UPDATE orders
-     SET last_error_code = 'REFUND_NOT_COMPLETED',
-         last_error = 'The refund failed or was cancelled at Stripe; a person decides',
+     SET last_error = CASE WHEN last_error_code = 'PAYMENT_AMOUNT_MISMATCH' THEN last_error
+                           ELSE 'The refund failed or was cancelled at Stripe; a person decides' END,
+         last_error_code = CASE WHEN last_error_code = 'PAYMENT_AMOUNT_MISMATCH' THEN last_error_code
+                                ELSE 'REFUND_NOT_COMPLETED' END,
          updated_at = NOW()
      WHERE order_id = $1 AND status = 'refund_pending'${sameRefund}
      RETURNING order_id`,
@@ -4302,6 +4305,25 @@ async function holdRefundNotCompletedWithClient(
   });
   writeDiagnostic('warn', 'commerce.refund_not_completed', { refundStatus: ended.status ?? 'unknown' });
   return (alert.rowCount ?? 0) > 0;
+}
+
+/**
+ * A refund held for a person (#730) is done with once the order is refunded,
+ * by the webhook or by the sweep: the hold's code goes, and its open alert
+ * closes itself (`order_refunded`).
+ */
+async function releaseRefundHold(client: Pick<pg.PoolClient, 'query'>, orderId: string): Promise<void> {
+  await client.query(
+    `UPDATE orders SET last_error_code = NULL, last_error = NULL, updated_at = NOW()
+      WHERE order_id = $1 AND last_error_code = 'REFUND_NOT_COMPLETED'`,
+    [orderId]
+  );
+  await client.query(
+    `UPDATE commerce_operational_alerts
+        SET status = 'resolved', resolved_at = NOW(), resolution_code = 'order_refunded', updated_at = NOW()
+      WHERE order_id = $1 AND alert_type = 'refund_not_completed' AND status <> 'resolved'`,
+    [orderId]
+  );
 }
 
 export async function runCommerceMaintenance(): Promise<CommerceMaintenanceResult> {

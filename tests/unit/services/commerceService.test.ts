@@ -3803,7 +3803,7 @@ describe('commerceService', () => {
             ]
           };
         }
-        if (sql.includes("last_error_code = 'REFUND_NOT_COMPLETED'")) return { rows: [{ order_id: 'order-1' }], rowCount: 1 };
+        if (sql.includes("ELSE 'REFUND_NOT_COMPLETED' END")) return { rows: [{ order_id: 'order-1' }], rowCount: 1 };
         if (sql.includes("'refund_not_completed'")) return { rows: [], rowCount: 1 };
         return { rows: [], rowCount: 0 };
       });
@@ -3817,7 +3817,10 @@ describe('commerceService', () => {
       await expect(requestRefund('order-1')).resolves.toBe(false);
 
       expect(mocks.createRefund).not.toHaveBeenCalled();
-      const hold = statements.find(s => s.sql.includes("SET last_error_code = 'REFUND_NOT_COMPLETED'"));
+      const hold = statements.find(s => s.sql.includes("ELSE 'REFUND_NOT_COMPLETED' END"));
+      // An amount-mismatch quarantine keeps its own code and message.
+      expect(hold?.sql).toContain("last_error_code = CASE WHEN last_error_code = 'PAYMENT_AMOUNT_MISMATCH' THEN last_error_code ELSE 'REFUND_NOT_COMPLETED' END");
+      expect(hold?.sql).toContain("last_error = CASE WHEN last_error_code = 'PAYMENT_AMOUNT_MISMATCH' THEN last_error");
       // Only while the order still names the refund the sweep read.
       expect(hold?.sql).toContain("WHERE order_id = $1 AND status = 'refund_pending' AND stripe_refund_id IS NOT DISTINCT FROM $2");
       expect(hold?.params).toEqual(['order-1', 're-ended']);
@@ -3833,21 +3836,22 @@ describe('commerceService', () => {
       await expect(requestRefund('order-1')).resolves.toBe(false);
 
       expect(mocks.createRefund).not.toHaveBeenCalled();
-      expect(statements.some(s => s.sql.includes("SET last_error_code = 'REFUND_NOT_COMPLETED'"))).toBe(true);
+      expect(statements.some(s => s.sql.includes("ELSE 'REFUND_NOT_COMPLETED' END"))).toBe(true);
     });
 
     describe('from the webhook', () => {
-      function webhookStatements(orderStatus: string) {
+      function webhookStatements(orderStatus: string, storedRefundId: string | null = null) {
         const statements: Array<{ sql: string; params: unknown[] }> = [];
         const order = {
           ...baseOrder, order_type: 'letter_pack', product_code: 'credit-pack-4', draft_id: undefined,
           credits: 4, amount_cents: 500, currency: 'usd', status: orderStatus,
-          stripe_payment_intent_id: 'pi-held', refund_attempts: 1, amount_refunded_cents: 0
+          stripe_payment_intent_id: 'pi-held', refund_attempts: 1, amount_refunded_cents: 0,
+          stripe_refund_id: storedRefundId
         };
         mocks.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
           statements.push({ sql: sql.replace(/\s+/g, ' '), params });
           if (sql.includes('INSERT INTO stripe_webhook_events')) return { rows: [{ event_id: 'evt-held' }], rowCount: 1 };
-          if (sql.includes("last_error_code = 'REFUND_NOT_COMPLETED'") && sql.includes('RETURNING order_id')) {
+          if (sql.includes("ELSE 'REFUND_NOT_COMPLETED' END") && sql.includes('RETURNING order_id')) {
             return { rows: [{ order_id: 'order-1' }], rowCount: 1 };
           }
           if (sql.includes("'refund_not_completed', 'critical'")) return { rows: [], rowCount: 1 };
@@ -3862,7 +3866,7 @@ describe('commerceService', () => {
       it.each(['failed', 'canceled'])('holds the order when a full refund comes back %s', async status => {
         const statements = webhookStatements('refund_pending');
         await processStripeWebhookEvent(event('refund.updated', status));
-        const hold = statements.find(s => s.sql.includes("SET last_error_code = 'REFUND_NOT_COMPLETED'"));
+        const hold = statements.find(s => s.sql.includes("ELSE 'REFUND_NOT_COMPLETED' END"));
         expect(hold?.sql).toContain("WHERE order_id = $1 AND status = 'refund_pending' RETURNING");
         expect(hold?.params).toEqual(['order-1']);
         const alert = statements.find(s => s.sql.includes("'refund_not_completed', 'critical'"));
@@ -3872,19 +3876,44 @@ describe('commerceService', () => {
       it('holds nothing for a refund still going', async () => {
         const statements = webhookStatements('refund_pending');
         await processStripeWebhookEvent(event('refund.updated', 'pending'));
-        expect(statements.some(s => s.sql.includes("SET last_error_code = 'REFUND_NOT_COMPLETED'"))).toBe(false);
+        expect(statements.some(s => s.sql.includes("ELSE 'REFUND_NOT_COMPLETED' END"))).toBe(false);
       });
+
+      function expectReleased(statements: Array<{ sql: string; params: unknown[] }>) {
+        const cleared = statements.find(s => s.sql.includes('SET last_error_code = NULL, last_error = NULL'));
+        expect(cleared?.sql).toContain("WHERE order_id = $1 AND last_error_code = 'REFUND_NOT_COMPLETED'");
+        expect(cleared?.params).toEqual(['order-1']);
+        const closed = statements.find(s => s.sql.includes("resolution_code = 'order_refunded'"));
+        expect(closed?.sql).toContain("alert_type = 'refund_not_completed' AND status <> 'resolved'");
+        expect(closed?.params).toEqual(['order-1']);
+      }
 
       it('clears the hold and closes its alert once the order is refunded', async () => {
         const statements = webhookStatements('refund_pending');
         await processStripeWebhookEvent(event('refund.created', 'succeeded'));
-        const finished = statements.find(s => s.sql.includes('SET status = $2::varchar') && s.sql.includes('amount_refunded_cents'));
-        expect(finished?.sql).toContain("last_error_code = CASE WHEN $2::varchar = 'refunded' AND last_error_code = 'REFUND_NOT_COMPLETED' THEN NULL ELSE last_error_code END");
-        expect(finished?.sql).toContain("last_error = CASE WHEN $2::varchar = 'refunded' AND last_error_code = 'REFUND_NOT_COMPLETED' THEN NULL ELSE last_error END");
-        const closed = statements.find(s => s.sql.includes("resolution_code = 'order_refunded'"));
-        expect(closed?.sql).toContain("alert_type = 'refund_not_completed' AND status <> 'resolved'");
-        expect(closed?.params).toEqual(['order-1']);
-        expect(statements.some(s => s.sql.includes("SET last_error_code = 'REFUND_NOT_COMPLETED'"))).toBe(false);
+        expectReleased(statements);
+        expect(statements.some(s => s.sql.includes("ELSE 'REFUND_NOT_COMPLETED' END"))).toBe(false);
+      });
+
+      it('holds nothing for an older refund\'s failure while the order names a newer one', async () => {
+        const statements = webhookStatements('refund_pending', 're-newer');
+        await processStripeWebhookEvent(event('refund.updated', 'failed'));
+        expect(statements.some(s => s.sql.includes("ELSE 'REFUND_NOT_COMPLETED' END"))).toBe(false);
+      });
+
+      it('releases a hold when the sweep finishes the refund itself', async () => {
+        const statements = claimedOrder(null);
+        mocks.findRefund.mockResolvedValue({ live: { id: 're-live', status: 'succeeded' }, ended: null });
+        mocks.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
+          statements.push({ sql: sql.replace(/\s+/g, ' '), params });
+          if (sql.includes('WITH candidate AS')) {
+            return { rows: [{ ...baseOrder, status: 'refund_pending', refund_attempts: 1, previous_refund_attempts: 1, stripe_payment_intent_id: 'pi-1' }] };
+          }
+          if (sql.includes('SET stripe_refund_id = $2')) return { rows: [{ order_id: 'order-1' }], rowCount: 1 };
+          return { rows: [], rowCount: 0 };
+        });
+        await expect(requestRefund('order-1')).resolves.toBe(true);
+        expectReleased(statements);
       });
     });
 

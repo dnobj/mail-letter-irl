@@ -654,7 +654,12 @@ whether the sweep or the refund's own webhook saw it first. Two ways out:
   alert. The order stays `refund_pending` and counts as stuck until an engineer
   settles it in the database: no panel command does this yet, because the
   right end state (refunded, with the pack's letters revoked, or kept) is a
-  person's decision.
+  person's decision. For a Pay & Send order, the refund already cancelled its
+  letter if the letter had not gone to the printer: keeping the order means
+  sending that mail again, not only settling the row.
+
+An amount-mismatch quarantine whose refund fails keeps its own code, so the
+panel can still release it; the alert opens all the same.
 
 Amounts are read from the Stripe Prices themselves - there are no configured
 cent amounts to keep in step (#275). A paid amount or currency mismatch against
