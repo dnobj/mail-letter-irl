@@ -6,12 +6,19 @@
  *
  *   POST /api/public/address-requests/page     { token }                    -> { state, senderFirstName, expiresAt }
  *   POST /api/public/address-requests/answer   { token, address: { name?, addressLine1, addressLine2?, city, state, postalCode } }
- *   POST /api/public/address-requests/decline  { token }
+ *   POST /api/public/address-requests/decline  { token, report? }
+ *
+ * A refused answer names the fields it refused, and among them the ones that
+ * hold a character the printer cannot print, so the page names the printer
+ * only then. A decline with `report: true` is the recipient saying they do
+ * not know the sender (#730): the link closes as declined, and the request's
+ * id is logged for an operator to look at.
  *
  * Each route is rate-limited per IP and in all, answers only the sender's
  * first name and the request's state, and logs nothing of the token, the names
  * or the address: an outcome and an error class at most. While address
  * requests are off, or for a token it does not know, each answers 404 alike.
+ * A report's log line adds the request's id, which names no one.
  *
  * The address is checked as a preview checks one: U.S. only, its fields
  * bounded and printable in the font PostGrid stamps them in, then PostGrid's
@@ -164,13 +171,30 @@ function fits(value: string, limit: number): boolean {
   return [...value].length <= limit && !HIDDEN.test(value) && unprintableCharacters(value).length === 0;
 }
 
+/** Every hidden character, to take out of a field before the printer is asked about it. */
+const HIDDEN_ALL = new RegExp(HIDDEN.source, 'gu');
+
+/**
+ * Whether the field holds a character the person can see that the printer
+ * cannot print (#730). Hidden characters come out first, not whole graphemes
+ * with one in them: an emoji joined by U+200D or a flag's tags is the printer's.
+ * A character the runtime's Unicode tables do not know yet (a new emoji) or a
+ * private-use one counts as hidden, so its field is refused without the note.
+ */
+function printerCannot(value: string | undefined): boolean {
+  return value !== undefined && unprintableCharacters(value.replace(HIDDEN_ALL, '')).length > 0;
+}
+
 export type AddressFieldProblem = 'name' | 'addressLine1' | 'addressLine2' | 'city' | 'state' | 'postalCode';
 
 /**
- * The address a page sent, trimmed and bounded, or the fields it got wrong.
- * An absent or empty line 2 or name is left out.
+ * The address a page sent, trimmed and bounded, or the fields it got wrong,
+ * with those of them the printer cannot print when there are any. An absent
+ * or empty line 2 or name is left out.
  */
-export function givenAddressOf(raw: unknown): { ok: true; address: GivenAddress } | { ok: false; fields: AddressFieldProblem[] } {
+export function givenAddressOf(
+  raw: unknown
+): { ok: true; address: GivenAddress } | { ok: false; fields: AddressFieldProblem[]; unprintable?: AddressFieldProblem[] } {
   const body = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Json) : {};
   const name = tidy(body.name);
   const line1 = tidy(body.addressLine1);
@@ -191,7 +215,11 @@ export function givenAddressOf(raw: unknown): { ok: true; address: GivenAddress 
   if (!city || !fits(city, ADDRESS_FIELD_LIMITS.city)) fields.push('city');
   if (!state || !US_STATE_CODES.includes(state)) fields.push('state');
   if (!postalCode || !ZIP_CODE.test(postalCode)) fields.push('postalCode');
-  if (fields.length > 0) return { ok: false, fields };
+  if (fields.length > 0) {
+    const typed: Partial<Record<AddressFieldProblem, string | undefined>> = { name, addressLine1: line1, addressLine2: line2, city };
+    const unprintable = fields.filter(field => printerCannot(typed[field]));
+    return unprintable.length > 0 ? { ok: false, fields, unprintable } : { ok: false, fields };
+  }
   return {
     ok: true,
     address: {
@@ -287,10 +315,16 @@ export async function handleAddressRequestApiRequest(
     }
 
     if (route === 'decline') {
+      const report = body.report === true;
       const result = await declineAddressRequest(token);
-      if (result.ok) sendJson(res, 200, { ok: true });
+      // `reported` tells the page the report was taken, which an API without
+      // reports would never say.
+      if (result.ok) sendJson(res, 200, report ? { ok: true, reported: true } : { ok: true });
       else refused(res, result.refusal);
-      writeDiagnostic('info', 'address_request.decline', { outcome: result.ok ? 'declined' : result.refusal });
+      writeDiagnostic('info', 'address_request.decline', { outcome: result.ok ? 'declined' : result.refusal, report });
+      // The request's id alone, never the sender's: an operator finds the
+      // account from it while the row is kept.
+      if (report && result.ok) writeDiagnostic('warn', 'address_request.reported', { requestId: result.requestId });
       return true;
     }
 
@@ -306,7 +340,7 @@ export async function handleAddressRequestApiRequest(
     }
     const given = givenAddressOf(body.address);
     if (!given.ok) {
-      sendJson(res, 400, { reason: 'invalid', fields: given.fields });
+      sendJson(res, 400, { reason: 'invalid', fields: given.fields, unprintable: given.unprintable ?? [] });
       return true;
     }
     const wait = typeof token === 'string' ? verificationWait(token) : VERIFICATION_WINDOW_MS / 1000;

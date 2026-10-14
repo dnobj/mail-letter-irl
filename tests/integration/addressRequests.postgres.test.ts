@@ -172,7 +172,7 @@ describePostgres('address requests (#604)', () => {
     const userId = await seedUser();
     const unnamed = await made(userId, 'Grandma Ruth');
     const { name: _name, ...withoutName } = ADDRESS;
-    await expect(service.answerAddressRequest(unnamed.token, withoutName)).resolves.toEqual({ ok: true });
+    await expect(service.answerAddressRequest(unnamed.token, withoutName)).resolves.toEqual({ ok: true, requestId: unnamed.request.requestId });
     await expect(service.getAddressRequest({ userId, requestId: unnamed.request.requestId })).resolves.toMatchObject({
       address: { ...withoutName, name: 'Grandma Ruth' }
     });
@@ -217,7 +217,7 @@ describePostgres('address requests (#604)', () => {
   it('takes a decline once, and refuses an answer after it', async () => {
     const userId = await seedUser();
     const { request, token } = await made(userId);
-    await expect(service.declineAddressRequest(token)).resolves.toEqual({ ok: true });
+    await expect(service.declineAddressRequest(token)).resolves.toEqual({ ok: true, requestId: request.requestId });
     await expect(service.answerAddressRequest(token, ADDRESS)).resolves.toEqual({ ok: false, refusal: 'declined' });
     const stored = await service.getAddressRequest({ userId, requestId: request.requestId });
     expect(stored).toMatchObject({ state: 'declined', address: null });
