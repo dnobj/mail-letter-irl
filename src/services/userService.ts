@@ -12,12 +12,14 @@ import { VerifiedEmailRequiredError } from '../auth/verifiedEmail.js';
 import { AccountErasedError } from '../auth/accountErased.js';
 
 /**
- * The name PostgreSQL gives the inline UNIQUE on users.email
- * (db/migrations/001_initial_schema.sql:7). Asserted against a real database
- * in tests/integration/accountIdentity.postgres.test.ts, because a mocked
- * client will happily agree with whatever name is written here.
+ * The unique index on lower(users.email): one account per address, whatever
+ * its case (db/migrations/058_users_email_case_insensitive.sql, #730; until
+ * then 001's inline users_email_key, which compared the address as written).
+ * Asserted against a real database in
+ * tests/integration/accountIdentity.postgres.test.ts, because a mocked client
+ * will happily agree with whatever name is written here.
  */
-const EMAIL_UNIQUE_CONSTRAINT = 'users_email_key';
+const EMAIL_UNIQUE_CONSTRAINT = 'users_email_lower_key';
 
 /**
  * No instruction to "sign in the way you did the first time": after Auth0
@@ -103,11 +105,12 @@ export async function findUser(userId: string): Promise<User | null> {
 }
 
 /**
- * Get user by email
+ * Get user by email, whatever its case: the same comparison the unique index
+ * makes, so the account the collision was on is the one found.
  */
 export async function getUserByEmail(email: string): Promise<User | null> {
   const result = await query<User>(
-    'SELECT * FROM users WHERE email = $1',
+    'SELECT * FROM users WHERE lower(email) = lower($1)',
     [email]
   );
 

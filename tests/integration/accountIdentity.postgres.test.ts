@@ -13,10 +13,10 @@ import { VerifiedEmailRequiredError } from '../../src/auth/verifiedEmail.js';
  *
  *   - **The constraint name.** Moving an account onto an address, and opening
  *     one inside a grant, raise `EmailAlreadyLinkedError` by matching
- *     `users_email_key` on a 23505. (`createUser` no longer does: since #457
+ *     `users_email_lower_key` on a 23505 (#730: before 058, `users_email_key`). (`createUser` no longer does: since #457
  *     it skips the conflict and looks the address up.) A mocked client agrees
- *     with whatever name the code writes; only PostgreSQL knows what it
- *     actually called the inline UNIQUE in 001_initial_schema.sql. If a
+ *     with whatever name the code writes; only PostgreSQL knows which index
+ *     a duplicate address actually hits. If a
  *     future migration renames or replaces it, this is what goes red instead
  *     of a customer getting "database error" and no account.
  *   - **The rollback.** A grant refused for want of an address must leave
@@ -125,6 +125,43 @@ describePostgres('one account per address', () => {
       );
     });
 
+    it('is the same address in any case (#730)', async () => {
+      // One mailbox, two spellings: an identity provider is free to send
+      // Bob@example.com where another sent bob@example.com.
+      const email = address();
+      await seedAccount(email);
+      const shouting = email.toUpperCase();
+
+      await expect(users.createUser({ userId: subject('upper'), email: shouting })).rejects.toBeInstanceOf(
+        users.EmailAlreadyLinkedError
+      );
+      await expect(users.getOrCreateUser(subject('upper'), shouting)).rejects.toBeInstanceOf(
+        users.EmailAlreadyLinkedError
+      );
+      const mover = await seedAccount(address());
+      await expect(users.updateUserEmail(mover, shouting)).rejects.toBeInstanceOf(
+        users.EmailAlreadyLinkedError
+      );
+      await expect(
+        ledger.addCreditsToLedger({ userId: subject('upper'), email: shouting, credits: 1, sourceType: 'adjustment' })
+      ).rejects.toBeInstanceOf(users.EmailAlreadyLinkedError);
+      // The write that adds nothing (a gift redemption) opens with DO NOTHING on user_id only.
+      await expect(
+        users.ensureAccountRowWithClient(pool, { userId: subject('upper'), email: shouting })
+      ).rejects.toBeInstanceOf(users.EmailAlreadyLinkedError);
+      expect((await users.getUserByEmail(shouting))?.email).toBe(email);
+    });
+
+    it('lets an account change the case of its own address', async () => {
+      const email = address();
+      const userId = await seedAccount(email);
+      const recased = email.toUpperCase();
+
+      const again = await users.getOrCreateUser(userId, recased);
+      expect(again.user_id).toBe(userId);
+      expect(again.email).toBe(recased);
+    });
+
     it('does not fire when the same subject presents the same address again', async () => {
       // getOrCreateUser runs on every authenticated call. The common case -
       // an account that exists, with the address it already has - must not be
@@ -182,7 +219,7 @@ describePostgres('one account per address', () => {
     it('never mistakes its own race for another account holding the address (#457)', async () => {
       // Two inserts of one subject with one address can meet on the email
       // index before the primary key. While the primary key was the only
-      // conflict target, the loser raised a 23505 on users_email_key and was
+      // conflict target, the loser raised a 23505 on the email index and was
       // taken for another account holding the address: harmless to the
       // customer, whom identity.ts carried on, but logged as the collision
       // for every new account's first dashboard load.
