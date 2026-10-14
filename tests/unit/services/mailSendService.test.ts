@@ -30,6 +30,8 @@ let letterInsert: { sql: string; params: any[] } | undefined;
 let heldOnDate = 0;
 let heldWindow: Array<{ mail_on: string; held: number }> = [];
 let capacityQueries: Array<{ sql: string; params: any[] }> = [];
+// The daily caps' lock keys (#730), in the order they were taken.
+let capLocks: string[] = [];
 
 const EMPTY_MD5 = 'd41d8cd98f00b204e9800998ecf8427e';
 
@@ -105,6 +107,11 @@ const client = {
         : null;
       return { rows: commerceOrder ? [{ ...commerceOrder }] : [] };
     }
+    // The daily caps' own lock (#730), apart from the mail date's below.
+    if (sql.includes('pg_advisory_xact_lock(hashtext($1), hashtext($2))')) {
+      capLocks.push(params?.[1] as string);
+      return { rows: [] };
+    }
     if (sql.includes('pg_advisory_xact_lock') || sql.includes('AS held FROM letters')) {
       capacityQueries.push({ sql, params: params ?? [] });
       if (sql.includes('GROUP BY mail_on')) return { rows: heldWindow };
@@ -170,6 +177,7 @@ describe('createMailOrderFromDraft', () => {
     heldOnDate = 0;
     heldWindow = [];
     capacityQueries = [];
+    capLocks = [];
     mocks.diagnostics.length = 0;
     draft = {
       draft_id: 'draft-1',
@@ -729,6 +737,11 @@ describe('createMailOrderFromDraft', () => {
    */
   describe('the daily mail caps', () => {
     afterEach(() => vi.unstubAllEnvs());
+
+    it('counts each cap under its lock inside the send, the account first (#730)', async () => {
+      await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter' });
+      expect(capLocks).toEqual(['account_daily_mail:user-1', 'global_daily_mail']);
+    });
 
     it('refuses over the per-account cap and rolls the deduction back', async () => {
       vi.stubEnv('LETTER_IRL_BETA_ACCOUNT_DAILY_MAIL_CAP', '3');

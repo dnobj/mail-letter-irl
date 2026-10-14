@@ -10,7 +10,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const capState = vi.hoisted(() => ({
   chargedTodayCents: 0,
   lettersTodayForUser: 0,
-  lettersTodayGlobal: 0
+  lettersTodayGlobal: 0,
+  /** Open Pay & Send orders today, added where a count includes them (#730). */
+  openToday: 0
 }));
 
 /**
@@ -140,6 +142,39 @@ vi.mock('../../../src/services/priceCatalog.js', async importOriginal => {
   };
 });
 
+/**
+ * The mail caps' own statements: their lock, and today's count, answered from
+ * capState. Pay & Send checks them twice, before the transaction and inside
+ * prepareJitOrder's once the order is a row (#730), so a transaction's client
+ * is answered the same way, whatever client a test hands its callback.
+ */
+function spendCapAnswer(sql: unknown): Promise<{ rows: unknown[]; rowCount: number }> | null {
+  if (typeof sql !== 'string') return null;
+  if (sql.includes('pg_advisory_xact_lock(hashtext($1), hashtext($2))')) return Promise.resolve({ rows: [], rowCount: 1 });
+  if (sql.includes('COUNT(*) AS count') && sql.includes('FROM letters')) {
+    const scoped = sql.includes('user_id = $1');
+    const open = sql.includes('UNION ALL') ? capState.openToday : 0;
+    return Promise.resolve({
+      rows: [{ count: String((scoped ? capState.lettersTodayForUser : capState.lettersTodayGlobal) + open) }],
+      rowCount: 1
+    });
+  }
+  return null;
+}
+
+function withSpendCapAnswers<C extends { query: (...args: never[]) => unknown }>(client: C): C {
+  if (!client || typeof client.query !== 'function') return client;
+  const inner = client.query.bind(client) as (sql: string, params?: unknown[]) => unknown;
+  return Object.assign(Object.create(Object.getPrototypeOf(client)), client, {
+    query: (sql: string, params?: unknown[]) => {
+      const capped = spendCapAnswer(sql);
+      if (!capped) return inner(sql, params);
+      dupState.trail?.push(sql);
+      return capped;
+    }
+  });
+}
+
 vi.mock('../../../src/db/index.js', () => ({
   // Intercepted ahead of mocks.query so the spend cap's aggregate is always
   // answered, whatever a given test does to mocks.query. Everything else falls
@@ -157,18 +192,14 @@ vi.mock('../../../src/db/index.js', () => ({
         rowCount: 1
       });
     }
-    if (typeof sql === 'string' && sql.includes('COUNT(*) AS count') && sql.includes('FROM letters')) {
-      // Pay & Send is the one path that charges AND mails, so it consults the
-      // mail ceilings here too - before any order row exists.
-      const scoped = sql.includes('user_id = $1');
-      return Promise.resolve({
-        rows: [{ count: String(scoped ? capState.lettersTodayForUser : capState.lettersTodayGlobal) }],
-        rowCount: 1
-      });
-    }
+    // Pay & Send is the one path that charges AND mails, so it consults the
+    // mail ceilings here too - before any order row exists.
+    const capped = spendCapAnswer(sql);
+    if (capped) return capped;
     return mocks.query(sql, params);
   },
-  transaction: mocks.transaction
+  transaction: (callback: (client: never) => unknown) =>
+    mocks.transaction((client: never) => callback(withSpendCapAnswers(client as never) as never))
 }));
 // The operator's notices (#699): spied, never posted.
 vi.mock('../../../src/services/operatorNotify.js', async importOriginal => ({
@@ -290,6 +321,7 @@ describe('commerceService', () => {
     capState.chargedTodayCents = 0;
     capState.lettersTodayForUser = 0;
     capState.lettersTodayGlobal = 0;
+    capState.openToday = 0;
     dupState.draft = null;
     dupState.letters = [];
     dupState.orders = [];
@@ -4531,6 +4563,31 @@ describe('commerceService', () => {
       expect(tagged('letters')).toHaveLength(1);
       expect(position('duplicate mail check: orders')).toBeLessThan(position(INSERT));
       expect(mocks.createJitSession).toHaveBeenCalledTimes(1);
+    });
+
+    it('checks the mail caps again inside the transaction once the order is a row, under their locks (#730)', async () => {
+      await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).resolves.toMatchObject({ success: true, reused: false });
+
+      const firstLock = position('pg_advisory_xact_lock(hashtext($1), hashtext($2))');
+      // The early answer, before the transaction, counts letters alone and takes no lock.
+      expect(position('COUNT(*) AS count FROM letters')).toBeLessThan(position(INSERT));
+      expect(position(INSERT)).toBeLessThan(firstLock);
+      expect(firstLock).toBeLessThan(position('UNION ALL'));
+    });
+
+    it('refuses the place an open checkout already holds, before any Stripe session (#730)', async () => {
+      vi.stubEnv('LETTER_IRL_BETA_ACCOUNT_DAILY_MAIL_CAP', '3');
+      capState.lettersTodayForUser = 2;
+      // Another open checkout today, and this one once inserted.
+      capState.openToday = 2;
+      try {
+        await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).rejects.toMatchObject({
+          code: 'ACCOUNT_DAILY_MAIL_CAP'
+        });
+        expect(mocks.createJitSession).not.toHaveBeenCalled();
+      } finally {
+        vi.unstubAllEnvs();
+      }
     });
 
     it('buys another copy when the person asked, without checking', async () => {

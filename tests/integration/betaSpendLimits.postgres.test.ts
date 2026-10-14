@@ -432,4 +432,131 @@ describePostgres('beta spend limits', () => {
       ]);
     });
   });
+
+  /**
+   * #730: each cap is counted under its own lock, held to the commit, and an
+   * open Pay & Send checkout counts as the letter it will become.
+   */
+  describe('counting under a lock, with open checkouts', () => {
+    afterEach(async () => {
+      await pool.query('DELETE FROM letters');
+      await pool.query('DELETE FROM orders');
+      await pool.query('DELETE FROM letter_drafts');
+    });
+
+    async function seedDraft(userId: string): Promise<string> {
+      const draftId = randomUUID();
+      await pool.query(
+        `INSERT INTO letter_drafts (draft_id, user_id, sender, recipient, body_text, sign_off, required_credits, status, expires_at)
+         VALUES ($1, $2, '{}'::jsonb, '{}'::jsonb, 'Hi', 'Yours', 2, 'pending', NOW() + INTERVAL '1 day')`,
+        [draftId, userId]
+      );
+      return draftId;
+    }
+
+    /** A Pay & Send order today, open unless a status says otherwise. */
+    async function seedJitOrder(userId: string, status: string, checkoutExpiresIn = '30 minutes'): Promise<string> {
+      const orderId = randomUUID();
+      await pool.query(
+        `INSERT INTO orders (order_id, user_id, order_type, draft_id, credits, amount_cents, status, created_at,
+                             product_code, idempotency_key, checkout_expires_at)
+         VALUES ($1, $2, 'jit_mail', $3, NULL, 499, $4, NOW() AT TIME ZONE 'UTC', 'jit-letter', $5,
+                 NOW() + $6::interval)`,
+        [orderId, userId, await seedDraft(userId), status, 'seed:' + orderId, checkoutExpiresIn]
+      );
+      return orderId;
+    }
+
+    async function seedLetterFor(userId: string, orderId: string | null = null, client: pg.PoolClient | pg.Pool = pool): Promise<void> {
+      await client.query(
+        `INSERT INTO letters (letter_id, user_id, content, recipient, credits_cost, status, funding_type, funding_order_id)
+         VALUES ($1, $2, '{}'::jsonb, '{}'::jsonb, 1, 'sent', $3, $4)`,
+        [randomUUID(), userId, orderId ? 'jit_order' : 'prepaid_balance', orderId]
+      );
+    }
+
+    async function check(userId: string, inFlight = 0): Promise<unknown> {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await limits.assertMailWithinDailyCaps(client, userId, inFlight);
+        await client.query('COMMIT');
+        return undefined;
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+    }
+
+    it('counts an open checkout, once its letter exists counts the letter alone, and lets go of the rest', async () => {
+      process.env.LETTER_IRL_BETA_ACCOUNT_DAILY_MAIL_CAP = '2';
+      // Open, paid and being fulfilled hold room; so does a letter.
+      await seedJitOrder(USER, 'checkout_pending');
+      await seedJitOrder(USER, 'paid');
+      await expect(check(USER, 1)).rejects.toMatchObject({ code: 'ACCOUNT_DAILY_MAIL_CAP' });
+
+      // A fulfilled order with its letter counts once.
+      await pool.query('DELETE FROM orders');
+      const fulfilled = await seedJitOrder(USER, 'fulfillment_pending');
+      await seedLetterFor(USER, fulfilled);
+      await expect(check(USER, 1)).resolves.toBeUndefined();
+
+      // Cancelled, refunded and failed orders, and a checkout past its expiry, hold none.
+      await pool.query('DELETE FROM letters');
+      await pool.query('DELETE FROM orders');
+      for (const status of ['cancelled', 'refund_pending', 'payment_failed']) await seedJitOrder(USER, status);
+      await seedJitOrder(USER, 'checkout_pending', '-1 minute');
+      await expect(check(USER, 2)).resolves.toBeUndefined();
+    });
+
+    it.each([
+      ['the account cap', 'LETTER_IRL_BETA_ACCOUNT_DAILY_MAIL_CAP', [USER, USER], 'ACCOUNT_DAILY_MAIL_CAP'],
+      ['the global ceiling', 'LETTER_IRL_BETA_GLOBAL_DAILY_MAIL_CEILING', [USER, OTHER], 'GLOBAL_DAILY_MAIL_CEILING']
+    ] as const)('lets only one of two sends at once take the last place under %s', async (_label, variable, [first, second], code) => {
+      process.env[variable] = '2';
+      // One letter already today, so the cap of 2 has one place left.
+      await seedLetterFor(first);
+
+      const a = await pool.connect();
+      const b = await pool.connect();
+      const bPid = (await b.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+      try {
+        await a.query('BEGIN');
+        await b.query('BEGIN');
+        // Each send has written its letter, as the send path has when it checks.
+        await seedLetterFor(first, null, a);
+        await seedLetterFor(second, null, b);
+        await expect(limits.assertMailWithinDailyCaps(a, first, 0)).resolves.toBeUndefined();
+
+        // The second waits on the first's lock, so it counts after the first commits.
+        let settled = false;
+        const waiting = limits.assertMailWithinDailyCaps(b, second, 0).finally(() => { settled = true; });
+        waiting.catch(() => undefined);
+        // Seen waiting on a lock by the server itself, not guessed from a delay.
+        let waitingOnLock = false;
+        for (let tries = 0; tries < 100 && !waitingOnLock && !settled; tries += 1) {
+          const seen = await pool.query<{ wait_event_type: string | null }>(
+            'SELECT wait_event_type FROM pg_stat_activity WHERE pid = $1',
+            [bPid]
+          );
+          waitingOnLock = seen.rows[0]?.wait_event_type === 'Lock';
+          if (!waitingOnLock) await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        expect(settled).toBe(false);
+        expect(waitingOnLock).toBe(true);
+
+        await a.query('COMMIT');
+        await expect(waiting).rejects.toMatchObject({ code });
+      } finally {
+        // Whatever failed, neither connection goes back holding a lock or a letter.
+        await a.query('ROLLBACK').catch(() => undefined);
+        await b.query('ROLLBACK').catch(() => undefined);
+        a.release();
+        b.release();
+      }
+    }, 30_000);
+  });
+
 });

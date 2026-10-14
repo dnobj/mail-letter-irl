@@ -1239,6 +1239,12 @@ async function prepareJitOrder(
     // The send block read before this transaction ran before any erasure that
     // held the account row; this one runs after the insert waited it out (#449).
     await assertAccountMayPurchase(client, params.userId);
+    // The mail caps again, now that this order is a row they count (#730):
+    // under their locks, so two checkouts at once cannot both take the last
+    // place, and with open checkouts counted, so the room an unpaid order will
+    // use is not sold twice. inFlight is 0, as on the send path: the count
+    // includes this order. A refusal rolls the insert back.
+    await assertMailWithinDailyCaps(client, params.userId, 0);
     await recordOrderEvent(client, orderId, 'order.created', null, 'checkout_pending');
     return { order: inserted.rows[0], reused: false };
   });
@@ -1314,8 +1320,12 @@ export async function createJitCheckout(
   // funding precisely because this is where it gets capped.
   //
   // inFlight is 1: the letters row is not written until fulfilment, so today's
-  // count does not yet include this send.
-  await assertMailWithinDailyCaps({ query }, params.userId, 1);
+  // count does not yet include this send. An early answer only, before the
+  // price is warmed and the draft locked, counting letters alone, since an
+  // open checkout this call may reuse would otherwise count twice: the caps
+  // are checked again, under their locks, once prepareJitOrder has inserted
+  // the order (#730).
+  await assertMailWithinDailyCaps({ query }, params.userId, 1, { openCheckouts: false, lock: false });
   const checkedCents = getJitProductConfig(peekedOption)?.amountCents ?? 0;
   await assertChargeWithinDailyCap(params.userId, checkedCents);
 
