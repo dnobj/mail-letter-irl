@@ -317,7 +317,9 @@ export async function handleAddressRequestApiRequest(
     if (route === 'decline') {
       const report = body.report === true;
       const result = await declineAddressRequest(token);
-      if (result.ok) sendJson(res, 200, { ok: true });
+      // `reported` tells the page the report was taken, which an API without
+      // reports would never say.
+      if (result.ok) sendJson(res, 200, report ? { ok: true, reported: true } : { ok: true });
       else refused(res, result.refusal);
       writeDiagnostic('info', 'address_request.decline', { outcome: result.ok ? 'declined' : result.refusal, report });
       // The request's id alone, never the sender's: an operator finds the

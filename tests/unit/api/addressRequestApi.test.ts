@@ -156,13 +156,14 @@ describe('the address request routes (#604)', () => {
   });
 
   it("closes a reported link as declined, and logs the request's id alone (#730)", async () => {
-    await expect(call('decline', { token: TOKEN, report: true })).resolves.toMatchObject({ status: 200, json: { ok: true } });
+    await expect(call('decline', { token: TOKEN, report: true })).resolves.toMatchObject({ status: 200, json: { ok: true, reported: true } });
     expect(declineAddressRequest).toHaveBeenCalledWith(TOKEN);
     expect(writeDiagnostic).toHaveBeenCalledWith('info', 'address_request.decline', { outcome: 'declined', report: true });
     expect(writeDiagnostic).toHaveBeenCalledWith('warn', 'address_request.reported', { requestId: REQUEST_ID });
     // Only true reports: anything else is a plain decline.
     vi.mocked(writeDiagnostic).mockClear();
-    await call('decline', { token: TOKEN, report: 'yes' });
+    expect((await call('decline', { token: TOKEN, report: 'yes' })).json).toEqual({ ok: true });
+    expect((await call('decline', { token: TOKEN })).json).toEqual({ ok: true });
     expect(writeDiagnostic).toHaveBeenCalledWith('info', 'address_request.decline', { outcome: 'declined', report: false });
     expect(writeDiagnostic).not.toHaveBeenCalledWith('warn', 'address_request.reported', expect.anything());
     // A link already closed is not reported again.
