@@ -408,8 +408,9 @@ export async function markExpiredDrafts(): Promise<number> {
 }
 
 /**
- * Delete drafts that are done with: sent (consumed), expired or cancelled,
- * last changed more than `olderThanDays` ago, and never paid for by an order.
+ * Delete drafts that are done with, and never paid for by an order: sent
+ * (consumed) or cancelled, last changed more than `olderThanDays` ago; or
+ * expired unsent, by their own expiry, as below.
  * The hourly maintenance calls it once a day.
  *
  * A sent draft whose letter waits for its mail date (#535) stays until
@@ -424,13 +425,15 @@ export async function markExpiredDrafts(): Promise<number> {
  * An unsent draft is measured from its own expiry, not from when a run marked
  * it expired (#730): the privacy policy says an unsent draft's content is
  * deleted within 7 days, and the run that marks it can come a day after the
- * expiry. Its cutoff ($3) is a day earlier than the others', because this
- * sweep itself runs once a day: a draft it just misses goes at the next run,
- * still inside the 7 days.
+ * expiry. Its cutoff ($3) is two days earlier than the others': this sweep
+ * runs once a day, and that day drifts (the next run waits a full day from
+ * the end of the last, so it usually comes about 25 hours later), so a draft
+ * it just misses still goes inside the 7 days. Earlier costs nothing: the
+ * draft expired unsent and nothing paid for it.
  */
 export async function cleanupOldDrafts(olderThanDays: number = 7): Promise<number> {
   const cutoffDate = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000);
-  const unsentCutoff = new Date(Date.now() - Math.max(olderThanDays - 1, 0) * 24 * 60 * 60 * 1000);
+  const unsentCutoff = new Date(Date.now() - Math.max(olderThanDays - 2, 0) * 24 * 60 * 60 * 1000);
 
   const result = await query(
     `DELETE FROM letter_drafts

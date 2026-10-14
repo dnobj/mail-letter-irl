@@ -1006,26 +1006,48 @@ describePostgres('content retention sweep', () => {
   });
 
   describe("unsent drafts, by their own expiry (#730)", () => {
-    /** An order-less draft, expired `expiredDaysAgo` ago and marked so `markedDaysAgo` ago. */
+    /**
+     * Sets a draft's columns with the updated_at trigger off, inside a
+     * transaction, so the times written are the times read (the trigger would
+     * set updated_at to now).
+     */
+    async function setDraft(draftId: string, sql: string, params: unknown[]): Promise<void> {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query('ALTER TABLE letter_drafts DISABLE TRIGGER update_letter_drafts_updated_at');
+        await client.query(sql, [draftId, ...params]);
+        await client.query('ALTER TABLE letter_drafts ENABLE TRIGGER update_letter_drafts_updated_at');
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+    }
+
+    /** An order-less draft, expired `expiredDaysAgo` days and an hour ago, and marked so `markedDaysAgo` days ago. */
     async function expiredDraft(expiredDaysAgo: number, markedDaysAgo: number): Promise<string> {
       const userId = await seedUser();
       const draftId = await seedContentDraft({ daysAgo: expiredDaysAgo + 1, userId });
-      await pool.query(
+      await setDraft(
+        draftId,
         `UPDATE letter_drafts SET status = 'expired', consumed_at = NULL,
            expires_at = NOW() - make_interval(days => $2::int, hours => 1),
            updated_at = NOW() - make_interval(days => $3::int)
          WHERE draft_id = $1`,
-        [draftId, expiredDaysAgo, markedDaysAgo]
+        [expiredDaysAgo, markedDaysAgo]
       );
       return draftId;
     }
 
-    it("deletes an unsent draft 6 days after it expired, however late a run marked it", async () => {
+    it("deletes an unsent draft 5 days after it expired, however late a run marked it", async () => {
       const { cleanupOldDrafts } = await import("../../src/services/draftService.js");
-      // Expired 6 days and an hour ago, marked expired only yesterday.
-      const late = await expiredDraft(6, 1);
-      // Expired 5 days and an hour ago: not yet.
-      const recent = await expiredDraft(5, 5);
+      // Expired 5 days and an hour ago, marked expired only yesterday.
+      const late = await expiredDraft(5, 1);
+      // Expired 4 days and an hour ago, marked 8 days ago by its own clock: not yet.
+      const recent = await expiredDraft(4, 8);
       expect(await cleanupOldDrafts(7)).toBe(1);
       expect(await readDraft(late)).toBeUndefined();
       expect((await readDraft(recent)).body_text).toBe(SECRET_BODY);
@@ -1035,9 +1057,12 @@ describePostgres('content retention sweep', () => {
       const { cleanupOldDrafts } = await import("../../src/services/draftService.js");
       const userId = await seedUser();
       const sixDays = await seedContentDraft({ daysAgo: 6, userId });
-      await pool.query(`UPDATE letter_drafts SET updated_at = NOW() - INTERVAL '6 days 1 hour' WHERE draft_id = $1`, [sixDays]);
-      expect(await cleanupOldDrafts(7)).toBe(0);
+      const eightDays = await seedContentDraft({ daysAgo: 8, userId });
+      await setDraft(sixDays, `UPDATE letter_drafts SET updated_at = NOW() - INTERVAL '6 days 1 hour' WHERE draft_id = $1`, []);
+      await setDraft(eightDays, `UPDATE letter_drafts SET updated_at = NOW() - INTERVAL '8 days' WHERE draft_id = $1`, []);
+      expect(await cleanupOldDrafts(7)).toBe(1);
       expect((await readDraft(sixDays)).body_text).toBe(SECRET_BODY);
+      expect(await readDraft(eightDays)).toBeUndefined();
     });
   });
 });
