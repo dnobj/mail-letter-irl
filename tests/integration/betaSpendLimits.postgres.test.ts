@@ -521,6 +521,7 @@ describePostgres('beta spend limits', () => {
 
       const a = await pool.connect();
       const b = await pool.connect();
+      const bPid = (await b.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0].pid;
       try {
         await a.query('BEGIN');
         await b.query('BEGIN');
@@ -533,13 +534,25 @@ describePostgres('beta spend limits', () => {
         let settled = false;
         const waiting = limits.assertMailWithinDailyCaps(b, second, 0).finally(() => { settled = true; });
         waiting.catch(() => undefined);
-        await new Promise(resolve => setTimeout(resolve, 300));
+        // Seen waiting on a lock by the server itself, not guessed from a delay.
+        let waitingOnLock = false;
+        for (let tries = 0; tries < 100 && !waitingOnLock && !settled; tries += 1) {
+          const seen = await pool.query<{ wait_event_type: string | null }>(
+            'SELECT wait_event_type FROM pg_stat_activity WHERE pid = $1',
+            [bPid]
+          );
+          waitingOnLock = seen.rows[0]?.wait_event_type === 'Lock';
+          if (!waitingOnLock) await new Promise(resolve => setTimeout(resolve, 50));
+        }
         expect(settled).toBe(false);
+        expect(waitingOnLock).toBe(true);
 
         await a.query('COMMIT');
         await expect(waiting).rejects.toMatchObject({ code });
-        await b.query('ROLLBACK');
       } finally {
+        // Whatever failed, neither connection goes back holding a lock or a letter.
+        await a.query('ROLLBACK').catch(() => undefined);
+        await b.query('ROLLBACK').catch(() => undefined);
         a.release();
         b.release();
       }
