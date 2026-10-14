@@ -40,7 +40,8 @@
 ## Auditability and Retention
 
 - Letter content, sender and recipient addresses, and draft content are kept only for the
-  periods published in `docs/privacy-policy.md` (90 days after sending; unsent drafts 24 hours,
+  periods published in `docs/privacy-policy.md` (90 days after sending, and 90 days after its creation for a letter
+  that failed for good, whose failed job no longer holds it, #730; the retry and the dispatch refuse a redacted letter; unsent drafts 24 hours,
   content deleted within 7 days: `cleanupOldDrafts` deletes it 4 days after the expiry, #730; uploaded image links within 48 hours of the last upload, which the
   `recent-uploads-sweep` meets by deleting them at 24 hours; feature requests 12 months). An
   address request (#604), with any address a recipient gave through it, goes

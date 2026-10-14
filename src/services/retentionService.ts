@@ -13,7 +13,8 @@ import type { JobStatus, LetterStatus, OrderStatus } from './types.js';
  * docs/privacy-policy.md (#153).
  *
  * THE APPROVED SCHEDULE
- *   - Sent letter content: 90 days.
+ *   - Sent letter content: 90 days. A letter that failed for good counts from
+ *     its creation, and its failed job no longer holds it (#730).
  *   - Drafts attached to a PAID order: the same schedule.
  *   - Unsent drafts never paid for: within 7 days (#730: deleted 4 days after
  *     their expiry, for the daily sweep's drift). cleanupOldDrafts() DELETES the
@@ -81,9 +82,11 @@ export const REDACTABLE_LETTER_STATUSES: LetterStatus[] = [
 ];
 
 /**
- * Job states that are finished. 'failed' is NOT here: claimJob dispatches on
- * `status IN ('pending','failed')`, and the operator retry route re-enqueues
- * failed jobs at any age, so a failed job can still become a mailed letter.
+ * Job states that are finished. 'failed' is NOT here: claimJob takes a failed
+ * job that is not_dispatched with attempts left, and the operator's retry
+ * re-queues a definite failure, so a failed job can still become a mailed
+ * letter. A letter that failed for good is the exception (retiredFailedJob):
+ * its job holds nothing, and the retry refuses it once it is redacted.
  */
 export const SETTLED_JOB_STATUSES: JobStatus[] = ['completed', 'cancelled'];
 
@@ -274,6 +277,23 @@ export const DRAFT_REDACTION_SET = `
             redacted_at = NOW()`;
 
 /**
+ * A failed job that holds nothing back (#730): its letter failed for good. The
+ * job stays 'failed' rather than settled, so without this the letter's content
+ * was never redacted. "For good" is the account erasure's own test of a
+ * finished failed job: anything but one the outbox could still claim
+ * (`not_dispatched` with attempts left). That covers a provider's definite
+ * rejection, the operator's resolution of an ambiguous send as rejected, and a
+ * job that ran out of attempts before reaching the provider. Past the
+ * retention window such a letter is redacted; the operator's retry and the
+ * dispatch both refuse a redacted letter, so nothing empty is ever mailed.
+ */
+function retiredFailedJob(job: string): string {
+  return `(${job}.status = 'failed'
+                        AND NOT (${job}.provider_outcome = 'not_dispatched' AND ${job}.attempts < ${job}.max_attempts)
+                        AND EXISTS (SELECT 1 FROM letters fl WHERE fl.letter_id = ${job}.letter_id AND fl.status = 'failed'))`;
+}
+
+/**
  * THE DUE PREDICATES, DEFINED ONCE.
  *
  * Each is shared verbatim between the REPORT path (a plain SELECT) and the
@@ -291,6 +311,7 @@ const LETTER_DUE_PREDICATE = `        WHERE l.redacted_at IS NULL
                 SELECT 1 FROM letter_jobs j
                  WHERE j.letter_id = l.letter_id
                    AND NOT (j.status = ANY($3::varchar[]))
+                   AND NOT ${retiredFailedJob('j')}
               )
           AND NOT EXISTS (
                 SELECT 1 FROM orders o
@@ -330,6 +351,7 @@ const PAID_DRAFT_DUE_PREDICATE = `        WHERE d.redacted_at IS NULL
                  WHERE d.consumed_letter_id IS NOT NULL
                    AND j.letter_id = d.consumed_letter_id
                    AND NOT (j.status = ANY($4::varchar[]))
+                   AND NOT ${retiredFailedJob('j')}
               )`;
 
 const ABANDONED_DRAFT_DUE_PREDICATE = `        WHERE d.redacted_at IS NULL
@@ -347,6 +369,7 @@ const ABANDONED_DRAFT_DUE_PREDICATE = `        WHERE d.redacted_at IS NULL
                  WHERE d.consumed_letter_id IS NOT NULL
                    AND j.letter_id = d.consumed_letter_id
                    AND NOT (j.status = ANY($3::varchar[]))
+                   AND NOT ${retiredFailedJob('j')}
               )`;
 
 /**

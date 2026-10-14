@@ -271,9 +271,10 @@ async function markProviderDispatch(job: LetterJob): Promise<Letter | typeof LEF
     // Still this claim's job (#730): processing, at the attempts this claim set.
     // A claimant that stalled past its lock and lost the job to a later claim
     // neither marks it dispatching nor puts it back.
+    // A letter whose content retention has redacted (#730) has nothing left to print.
     if (!letter || !current || current.status !== 'processing' || current.attempts !== job.attempts ||
         current.provider_outcome !== 'not_dispatched' ||
-        !['queued', 'processing'].includes(letter.status)) {
+        !['queued', 'processing'].includes(letter.status) || letter.redacted_at) {
       throw new Error('Mail item is held or no longer dispatchable');
     }
     // Held for its funding, or its account blocked, since the claim (#696): back to
@@ -1886,8 +1887,10 @@ export async function retryLetterJobAsAdmin(params: {
           fundingOrder.last_error_code || ''
         ) && fundingOrder.refund_attempts === 0 && !fundingOrder.stripe_refund_id;
     }
-    const letter = await client.query<{ status: string; user_id: string; funding_order_id: string | null }>(
-      'SELECT status, user_id, funding_order_id FROM letters WHERE letter_id = $1 FOR UPDATE', [ids.letter_id]
+    const letter = await client.query<{
+      status: string; user_id: string; funding_order_id: string | null; redacted_at: Date | null;
+    }>(
+      'SELECT status, user_id, funding_order_id, redacted_at FROM letters WHERE letter_id = $1 FOR UPDATE', [ids.letter_id]
     );
     const job = await client.query<LetterJob>(
       'SELECT * FROM letter_jobs WHERE job_id = $1 FOR UPDATE', [params.jobId]
@@ -1898,6 +1901,8 @@ export async function retryLetterJobAsAdmin(params: {
         letter.rows[0]?.funding_order_id !== ids.funding_order_id ||
         current.operator_resolution || letter.rows[0]?.user_id !== params.expectedUserId ||
         letter.rows[0]?.status !== 'failed' ||
+        // Its content redacted by retention (#730): a retry would mail an empty page.
+        letter.rows[0]?.redacted_at ||
         (ids.funding_order_id && orderStatus !== 'fulfillment_pending' && !retryableJitRefund)) {
       throw new AdminJobRetryError('invalid_state');
     }
