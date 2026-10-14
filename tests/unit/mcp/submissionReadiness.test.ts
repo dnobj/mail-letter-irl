@@ -139,6 +139,7 @@ describe("Submission readiness checks", () => {
     expect(buildWwwAuthenticateChallenge("Missing Authorization header", publicBaseUrl)).toContain(
       'resource_metadata="https://api.letterirl.com/.well-known/oauth-protected-resource"'
     );
+    vi.unstubAllEnvs();
   });
 
   it("should return a standards-aligned insufficient-scope challenge", () => {
