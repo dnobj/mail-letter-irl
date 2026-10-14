@@ -2284,6 +2284,9 @@ the lookup-by-email variant of step 1 is still open).
 1. [x] Look the account up by exact email; verify the email is masked on the account page. (Looked up by
    exact Auth0 subject: one match, plus the recent-accounts table with masked emails. Before the reveal
    the only full email address in the page source was the operator's own in the banner.)
+   - [ ] (#730) Look it up by exact email with the form: the address is not in the URL, and `/audit` shows a
+     `pii.lookup` row with the matched account id and no address. Opening `/lookup?q=<the email>` runs
+     nothing.
 2. [x] Verify the ledger lots show initial and remaining credits, and the letters table shows metadata
    only: no content, no recipient, no address anywhere on the page. (The letters table is captioned
    "metadata only; content and recipients are never shown here".)

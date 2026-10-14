@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { renderCommandPreview } from "../../../src/admin/pages/commands.js";
-import { renderGifts } from "../../../src/admin/pages/gifts.js";
+import { accountGiftPanel, renderGifts } from "../../../src/admin/pages/gifts.js";
 import type { GiftCodeView } from "../../../src/admin/queries/gifts.js";
 
 /**
@@ -39,6 +39,12 @@ describe("a command preview", () => {
     expect(page).toMatch(/<dt>note<\/dt>\s*<dd>from a link<\/dd>/);
   });
 
+  it("shows a carried value as text, never as markup", () => {
+    const page = preview([["note", '<script>alert("x")</script>']]);
+    expect(page).not.toContain("<script>");
+    expect(page).toContain("&lt;script&gt;");
+  });
+
   it("adds nothing when the link carries no values", () => {
     expect(preview([])).not.toContain("Values sent with this command");
   });
@@ -64,6 +70,12 @@ describe("gift codes on the panel", () => {
     const page = String(renderGifts({ totals: { available: 0, sentToday: 0, codesIssued: 1, codesRedeemed: 0 }, codes: [CODE], mode: "full" }));
     expect(page).not.toContain("K7M2");
     expect(page).toContain("••••-••9A");
+    expect(page).toContain('name="target" value="letter:letter-1"');
+  });
+
+  it("masks it on an account's page too", () => {
+    const page = String(accountGiftPanel({ userId: "sender-1", letters: [], codes: [CODE], defaultGenerations: 2, mode: "full" }));
+    expect(page).not.toContain("K7M2");
     expect(page).toContain('name="target" value="letter:letter-1"');
   });
 

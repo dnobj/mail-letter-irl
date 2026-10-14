@@ -246,6 +246,25 @@ describe("admin command runner", () => {
     expect(database.runs.size).toBe(0);
   });
 
+  it("binds the target as the preview names it, so a target typed another way confirms (#730)", async () => {
+    const database = fakeDatabase();
+    const state = { version: "v1", executions: [] as Array<{ key: string; reason: string; client: boolean }> };
+    const base = echoCommand(state);
+    // A preview that names its target canonically, as gift.void_code does a typed code.
+    const command: CommandDefinition<EchoInput> = {
+      ...base,
+      async preview(client, targetId, input) {
+        return { ...(await base.preview(client, targetId, input)), targetId: targetId.toUpperCase() };
+      },
+    };
+    const runner = deps(database);
+    // Previewed from what was typed; confirmed with the target the preview's form carries.
+    const fields = await confirmationFields(command, runner, {}, "fixture-1");
+    const outcome = await runAdminCommand(runner, command, "FIXTURE-1", fields);
+    expect(outcome).toMatchObject({ status: "succeeded", errorCode: null });
+    expect(state.executions).toHaveLength(1);
+  });
+
   it("runs a self-transactional command with the run id as its key, records it, and replays on a second submit", async () => {
     const database = fakeDatabase();
     const state = { version: "v1", executions: [] as Array<{ key: string; reason: string; client: boolean }> };
