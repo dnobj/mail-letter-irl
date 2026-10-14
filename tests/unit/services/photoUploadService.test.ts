@@ -265,14 +265,21 @@ describe('photo uploads through the card (#474)', () => {
   });
 
   it('drops an upload that sends no chunk for too long, within the window (#730)', async () => {
-    await receivePhotoChunk(USER, { uploadId: ID, index: 0, total: 3, data: b64(300) }, NOW);
-    // A chunk inside the idle limit keeps it going, and starts the limit again.
-    await receivePhotoChunk(USER, { uploadId: ID, index: 1, total: 3, data: b64(300) }, NOW + CHUNK_IDLE_MS);
+    // Two minutes, written out: a slow phone's chunk 90 seconds after the last is still taken.
+    expect(CHUNK_IDLE_MS).toBe(2 * 60 * 1000);
+    await receivePhotoChunk(USER, { uploadId: ID, index: 0, total: 4, data: b64(300) }, NOW);
+    await expect(
+      receivePhotoChunk(USER, { uploadId: ID, index: 1, total: 4, data: b64(300) }, NOW + 90_000)
+    ).resolves.toMatchObject({ received: 2 });
+    // Each chunk starts the limit again: this one is two minutes after the last, four after the first.
+    await expect(
+      receivePhotoChunk(USER, { uploadId: ID, index: 2, total: 4, data: b64(300) }, NOW + 90_000 + CHUNK_IDLE_MS)
+    ).resolves.toMatchObject({ received: 3 });
     const idle = await refusal(
-      receivePhotoChunk(USER, { uploadId: ID, index: 2, total: 3, data: b64(300) }, NOW + 2 * CHUNK_IDLE_MS + 1)
+      receivePhotoChunk(USER, { uploadId: ID, index: 3, total: 4, data: b64(300) }, NOW + 90_000 + 2 * CHUNK_IDLE_MS + 1)
     );
     expect(idle.code).toBe('OUT_OF_ORDER');
-    expect(NOW + 2 * CHUNK_IDLE_MS + 1 - NOW).toBeLessThan(UPLOAD_WINDOW_MS);
+    expect(90_000 + 2 * CHUNK_IDLE_MS + 1).toBeLessThan(UPLOAD_WINDOW_MS);
   });
 
   it('frees the memory an idle upload held, so stalled uploads cannot keep others out (#730)', async () => {
