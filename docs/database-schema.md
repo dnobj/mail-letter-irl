@@ -474,7 +474,7 @@ Personal access tokens (`lirl_pat_…`). People make them on the website, under 
 | token_hash | VARCHAR(255) | NO | - | Bcrypt hash of token |
 | token_prefix | CHAR(4) | NO | - | Last 4 characters, for display |
 | status | pat_status | NO | 'active' | `active` or `revoked` |
-| expires_at | TIMESTAMPTZ | YES | - | Expiration (NULL = never) |
+| expires_at | TIMESTAMPTZ | NO | NOW() + 90 days | When the token stops working. Every token has one since 057 (#730), which gave each older token 90 days from its creation, never sooner than 30 days from the migration |
 | last_used_at | TIMESTAMPTZ | YES | - | Last usage timestamp |
 | created_at | TIMESTAMPTZ | NO | NOW() | Token creation |
 | revoked_at | TIMESTAMPTZ | YES | - | When it was revoked |
@@ -908,6 +908,7 @@ Production provisioning and the first production connection remain separate owne
 | 54 | 054_stationery_designs.sql | `stationery_designs` (#649): an account's saved designs, a name and four choices, at most ten per account (counted by the service). `users.stationery_design_id`, the remembered design, with the composite `users_stationery_design_owned` (only the account's own; deleting it clears the column). `letter_drafts_stationery_theme_known` admits `custom`. No provisioning re-run: neither admin role is granted the table, and the reader's users column list leaves the column out |
 | 55 | 055_letter_jobs_mail_hold_until.sql | `letter_jobs.mail_hold_until` (#693): the hold an arrive-by job was created with, which `metadata.heldUntil` held until now, backfilled from it row by row (a value that is not a time is left out, with a notice, rather than failing the migration; the backfill may be run again). For one release the code also still writes `metadata.heldUntil`, so a rollback across 055 still knows its held mail. Held now is one predicate, `src/services/heldMail.ts`. Provisioning: no re-run (both roles read `letter_jobs` whole, and the release writes no new column); `ADMIN_LATEST_REQUIRED_MIGRATION` is 055, since the panel reads the column |
 | 56 | 056_held_mail_funding_reversed.sql | The `held_mail_funding_reversed` alert type (#696), restated inside the `to_regclass` guard as 043 does, and a partial unique index on its order (`idx_commerce_alerts_held_mail_funding_order`) so it is raised once per order; and the operator audit operation `mail_job_cancel` (`job.cancel_held`), restated as 042 does. The hold itself is a `letter_jobs.hold_reason` (023), `funding_reversed` or `funding_disputed`, on a job still pending. Provisioning: no re-run (the roles read the alerts table whole, and the release's new write, `hold_reason`, is in the operator's list); `ADMIN_LATEST_REQUIRED_MIGRATION` is 056 |
+| 57 | 057_personal_tokens_expire.sql | `personal_access_tokens.expires_at` (#730) is NOT NULL, defaulting to 90 days from insertion. A token stored with none gets one first: 90 days after it was made, but never sooner than 30 days from the migration. Provisioning: no re-run (the reader role already reads the column, and neither role writes the table); `ADMIN_LATEST_REQUIRED_MIGRATION` is 057 |
 
 ---
 

@@ -114,10 +114,14 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  * 056 adds the alert type held_mail_funding_reversed (#696), with a partial
  * unique index on its order. The roles read commerce_operational_alerts whole,
  * and the release (job.dispatch_now) now also clears letter_jobs.hold_reason,
- * already in the operator's list. Nothing to re-run; required, as the newest is.
+ * already in the operator's list. Nothing to re-run.
+ *
+ * 057 gives every personal access token an expiry and holds the column NOT
+ * NULL with a default (#730). The reader already reads expires_at, and neither
+ * role writes the table. Nothing to re-run; required, as the newest is.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
-  "056_held_mail_funding_reversed.sql";
+  "057_personal_tokens_expire.sql";
 
 export interface AdminProvisioningArguments {
   environment: "development" | "production";

@@ -94,8 +94,8 @@ export class TokenExpiryError extends Error {
  * The expiry to store for a new token (audit A-02). A token that never expires
  * stays valid long after the client it was made for is gone, so none is issued
  * any more: no requested expiry means the default, and a requested one must be
- * in the future and within the maximum. Tokens created before this rule keep
- * whatever expiry they were stored with, which may be none.
+ * in the future and within the maximum. Tokens created before this rule were
+ * given one by migration 057 (#730), and the column now refuses a token without.
  */
 export function resolveTokenExpiry(requested: Date | undefined, now: Date = new Date()): Date {
   if (requested === undefined) {
