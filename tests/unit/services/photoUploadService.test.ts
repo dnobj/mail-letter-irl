@@ -282,6 +282,15 @@ describe('photo uploads through the card (#474)', () => {
     expect(90_000 + 2 * CHUNK_IDLE_MS + 1).toBeLessThan(UPLOAD_WINDOW_MS);
   });
 
+  it('starts the idle limit again on a chunk sent again', async () => {
+    await receivePhotoChunk(USER, { uploadId: ID, index: 0, total: 2, data: b64(300) }, NOW);
+    // The same chunk again, just inside the limit: the card is still there.
+    await receivePhotoChunk(USER, { uploadId: ID, index: 0, total: 2, data: b64(300) }, NOW + CHUNK_IDLE_MS);
+    await expect(
+      receivePhotoChunk(USER, { uploadId: ID, index: 1, total: 2, data: b64(300) }, NOW + 2 * CHUNK_IDLE_MS)
+    ).resolves.toMatchObject({ done: true });
+  });
+
   it('frees the memory an idle upload held, so stalled uploads cannot keep others out (#730)', async () => {
     const chunk = b64(3 * (MAX_CHUNK_CHARS / 4));
     const perChunk = Buffer.from(chunk, 'base64').length;

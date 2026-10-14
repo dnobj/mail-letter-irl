@@ -220,6 +220,8 @@ export async function receivePhotoChunk(
   }
   // The chunk just received, sent again: the same answer, nothing appended.
   if (input.index === upload.chunks.length - 1) {
+    // A chunk sent again is the card still there: the idle limit starts again.
+    upload.lastChunkAtMs = nowMs;
     return { uploadId: upload.uploadId, received: upload.chunks.length, total: upload.total, done: false };
   }
   if (input.index !== upload.chunks.length) {

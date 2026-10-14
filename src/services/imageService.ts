@@ -588,9 +588,12 @@ export async function downloadAndProcessPostcardImageWithPreview(
 
 /**
  * A postcard's picture cropped again at another size (#594, set_postcard_style),
- * by the same steps as a preview's: from its source while that still opens,
- * which keeps the whole picture to crop from, or else from the copy the draft
- * prints from, which was cropped to its old size. `from` says which.
+ * by the same steps as a preview's: from its source while that still opens and
+ * still holds the same picture (#730, checked below), which keeps the whole
+ * picture to crop from, or else from the copy the draft prints from, which was
+ * cropped to its old size. `from` says which. Once a crop comes from the
+ * stored copy, the link can no longer match it, so later crops do too: a
+ * picture that may have changed is never trusted back.
  */
 export async function reprocessPostcardImage(
   source: { url: string | null; stored: string; storedSize: PostcardSize },
