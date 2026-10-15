@@ -453,6 +453,14 @@ describePostgres('proportional pack refund command', () => {
       refunds: { list: async () => ({ has_more: false, data: [bare] }) }
     } as unknown as Stripe);
     expect(forThisOrder(byId)).toEqual([]);
+    // A second refund carrying the same command's metadata is not the
+    // command's: it is reported as one the app did not issue.
+    const second = { ...listed, id: stripeId('re') } as unknown as Stripe.Refund;
+    const copied = await reconciliation.reconcileStripePayments(1, {
+      ...stripe,
+      refunds: { list: async () => ({ has_more: false, data: [second] }) }
+    } as unknown as Stripe);
+    expect(forThisOrder(copied).map(discrepancy => discrepancy.type)).toEqual(['unmatched_partial_refund']);
   }, 60_000);
 
   it('settles once when the webhook hears first, and treats replays and siblings as no-ops', async () => {

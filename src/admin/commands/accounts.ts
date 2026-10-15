@@ -302,7 +302,7 @@ export function createAccountCommands(overrides: Partial<AccountCommandSeams> = 
           ["Quarantine", order.lastErrorCode],
         ],
         warnings: [
-          "Releasing lets the hourly maintenance run act on the order: a refund_pending order will be refunded on the next sweep, unless its refund already failed or was cancelled at Stripe, when the sweep holds it for a person instead (REFUND_NOT_COMPLETED).",
+          "Releasing lets the hourly maintenance run act on the order: a refund_pending order will be refunded on the next sweep, unless its refund already failed or was cancelled at Stripe, when the sweep holds it for a person instead (REFUND_NOT_COMPLETED). An order at the refund attempt limit is not picked up at all.",
           "If the money should stay, refund deliberately instead, or leave the quarantine in place.",
         ],
       };

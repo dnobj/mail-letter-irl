@@ -1294,6 +1294,8 @@ full mode (`ADMIN-STRIPE-02` walks the panel steps).
       `refund` ledger row with `reason: partial_refund`, `letters_refunded: 3`;
       `credit_transactions` `-6`; `orders.credits_refunded = 6`; one
       `commerce_operator_audit_events` row with `operation = pack_refund`.
+- [ ] Admin panel → Stripe reconciliation: nothing listed for this order (the
+      panel's own settled refund is matched to its command, #730).
 - [ ] Replay the confirm with the same idempotency key: `replayed: true`, no
       second refund in Stripe. Send a second command for the same order: refused
       as already issued.

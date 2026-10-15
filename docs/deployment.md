@@ -681,12 +681,17 @@ ways out:
   person on the panel's health page (and, while `refund_pending`, as stuck)
   until an engineer settles it in the database: no panel command does this
   yet, because the right end state (refunded, with the pack's letters
-  revoked, or kept) is a person's decision. Until then, a partial refund on
-  it is also listed on the Stripe reconciliation page on each run that covers
-  it: settled by hand already, it needs nothing more. If that partial refund
-  later fails, it comes back as a new `stripe_partial_refund_unmatched` alert
-  whose details show `refundStatus: failed`, with no notice: the money did
-  not go back after all. For a Pay & Send order, the refund already
+  revoked, or kept) is a person's decision. While the order is not yet
+  settled, a partial refund on it is also listed on the Stripe
+  reconciliation page on each run that covers it; the operator's decision is
+  recorded already, so it needs nothing more. A pack's listing stops only
+  once the settlement marks the order `refunded` and writes its `refund`
+  ledger row. If that partial refund later fails while the order is not
+  settled, it comes back as a new `stripe_partial_refund_unmatched` alert
+  whose `events` show `refundStatus: failed`, with no notice: the money did
+  not go back after all. Once the order is settled as `refunded` in full, a
+  later failure is only recorded on the order (`already_refunded`), as
+  above. For a Pay & Send order, the refund already
   cancelled its letter if the letter had not gone to the printer: keeping the
   order means sending that mail again, not only settling the row.
 
@@ -714,7 +719,10 @@ owed depends on Stripe's current view.
 An amount-mismatch quarantine whose refund fails keeps its own code and note,
 so the panel can still release it; the alert opens all the same. Releasing
 it does not refund it: the next sweep finds the ended refund and holds the
-order as `REFUND_NOT_COMPLETED`. Make the same checks in Stripe first.
+order as `REFUND_NOT_COMPLETED`, unless the order is already at
+`JIT_REFUND_RETRY_LIMIT` attempts, when the sweep skips it and it stays
+`refund_pending` with no code, counted as stuck. Make the same checks in
+Stripe first.
 
 Amounts are read from the Stripe Prices themselves - there are no configured
 cent amounts to keep in step (#275). A paid amount or currency mismatch against
