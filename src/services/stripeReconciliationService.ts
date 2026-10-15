@@ -438,12 +438,33 @@ export async function reconcileStripePayments(
 
       const matchedRefund = refundCheck.rows[0];
       if (!matchedRefund || matchedRefund.status !== 'refunded' || !matchedRefund.pack_reversal_recorded) {
-        unprocessedRefunds++;
-        // A succeeded refund for less than the order is one the app did not
-        // issue (#323): the customer keeps the letters. The webhook opened a
-        // stripe_partial_refund_unmatched alert; this is the second net.
-        const partial =
+        const lessThanTheOrder =
           typeof matchedRefund?.amount_cents === 'number' && refund.amount < matchedRefund.amount_cents;
+        // A proportional pack refund the panel issued (#730) is the app's own:
+        // its command row names the Stripe refund (or the refund names the
+        // row), and once settled it revoked the letters it paid back, leaving
+        // the order fulfilled. Settled, it is no discrepancy; not yet settled,
+        // it is reviewed as any unprocessed refund, never as one the app did
+        // not issue.
+        let ownCommand: { status: string } | undefined;
+        if (lessThanTheOrder) {
+          const packRefundId =
+            typeof refund.metadata?.packRefundId === 'string' ? refund.metadata.packRefundId : null;
+          const commandCheck = await query<{ status: string }>(
+            `SELECT status FROM commerce_pack_refunds
+              WHERE stripe_refund_id = $1 OR pack_refund_id::text = $2
+              LIMIT 1`,
+            [refund.id, packRefundId ?? '']
+          );
+          ownCommand = commandCheck.rows[0];
+          if (ownCommand?.status === 'succeeded') continue;
+        }
+        unprocessedRefunds++;
+        // A succeeded refund for less than the order that no command of the
+        // app's names is one the app did not issue (#323): the customer keeps
+        // the letters. The webhook opened a stripe_partial_refund_unmatched
+        // alert; this is the second net.
+        const partial = lessThanTheOrder && !ownCommand;
         discrepancies.push(
           partial
             ? {
@@ -457,9 +478,10 @@ export async function reconcileStripePayments(
                 message: 'A partial refund exists in Stripe that the app did not issue; the customer keeps the letters',
                 // "The remainder" is not always owed: after a lost chargeback
                 // for part of the charge, the rest of the charge already went
-                // back through the dispute (#730).
+                // back through the dispute, and a refund of what is left then
+                // never completes the order (#730).
                 suggestedAction:
-                  'Review the stripe_partial_refund_unmatched alert for the order and any dispute in Stripe: refund what is still owed (a refund of the whole remainder takes the full path; money a lost chargeback returned is not owed again) or record the decision',
+                  'Review the stripe_partial_refund_unmatched alert for the order and any dispute in Stripe: refund what is still owed, or record the decision. Money a lost chargeback returned is not owed again, and after one the order is settled by hand (docs/deployment.md)',
               }
             : {
                 type: 'unprocessed_refund',

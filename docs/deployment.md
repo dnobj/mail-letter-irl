@@ -669,7 +669,11 @@ ways out:
   less than the order (the rest went back through a lost chargeback) does
   not complete it: the order stays held and a
   `stripe_partial_refund_unmatched` alert opens too. Settle it the second
-  way once Stripe shows that refund succeeded.
+  way once Stripe shows that refund succeeded. After a Dashboard partial
+  refund, a refund of the rest completes the order through
+  `charge.refunded`, but its own refund event can arrive first and open, or
+  add to, a partial-refund alert: resolve that one once the order shows
+  `refunded`.
 - **The money went back another way, or should not go back.** Resolve the
   alert, and the `stripe_partial_refund_unmatched` one too if a refund for
   less than the order opened it. The order keeps its hold's code and stays
@@ -677,9 +681,14 @@ ways out:
   person on the panel's health page (and, while `refund_pending`, as stuck)
   until an engineer settles it in the database: no panel command does this
   yet, because the right end state (refunded, with the pack's letters
-  revoked, or kept) is a person's decision. For a Pay & Send order, the refund already cancelled its
-  letter if the letter had not gone to the printer: keeping the order means
-  sending that mail again, not only settling the row.
+  revoked, or kept) is a person's decision. Until then, a partial refund on
+  it is also listed on the Stripe reconciliation page on each run that covers
+  it: settled by hand already, it needs nothing more. If that partial refund
+  later fails, it comes back as a new `stripe_partial_refund_unmatched` alert
+  whose details show `refundStatus: failed`, with no notice: the money did
+  not go back after all. For a Pay & Send order, the refund already
+  cancelled its letter if the letter had not gone to the printer: keeping the
+  order means sending that mail again, not only settling the row.
 
 A held order that is disputed afterwards becomes `disputed` and keeps the
 code (a later refund event can move it back to `refund_pending`). Check
@@ -703,8 +712,9 @@ The order page says the same for every order held with
 owed depends on Stripe's current view.
 
 An amount-mismatch quarantine whose refund fails keeps its own code and note,
-so the panel can still release it; the alert opens all the same. Make the
-same checks in Stripe before releasing it.
+so the panel can still release it; the alert opens all the same. Releasing
+it does not refund it: the next sweep finds the ended refund and holds the
+order as `REFUND_NOT_COMPLETED`. Make the same checks in Stripe first.
 
 Amounts are read from the Stripe Prices themselves - there are no configured
 cent amounts to keep in step (#275). A paid amount or currency mismatch against
