@@ -455,8 +455,11 @@ export async function reconcileStripePayments(
                 stripeAmount: refund.amount,
                 ourAmount: matchedRefund?.amount_cents ?? undefined,
                 message: 'A partial refund exists in Stripe that the app did not issue; the customer keeps the letters',
+                // "The remainder" is not always owed: after a lost chargeback
+                // for part of the charge, the rest of the charge already went
+                // back through the dispute (#730).
                 suggestedAction:
-                  'Review the stripe_partial_refund_unmatched alert for the order: refund the remainder (which takes the full path) or record the decision',
+                  'Review the stripe_partial_refund_unmatched alert for the order and any dispute in Stripe: refund what is still owed (a refund of the whole remainder takes the full path; money a lost chargeback returned is not owed again) or record the decision',
               }
             : {
                 type: 'unprocessed_refund',

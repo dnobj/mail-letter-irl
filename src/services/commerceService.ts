@@ -2496,8 +2496,9 @@ async function holdMailFundedByOrder(
  * on commerce_order_events and nothing else happened: the money went back to
  * the card, the letters stayed on the account, and no operator ever saw it.
  * It is now operator work. Balances are deliberately left alone here, because
- * the only correct responses are a person's (refund the remainder, which takes
- * the full path, or record a decision), so the alert is the whole point.
+ * the only correct responses are a person's (refund what is still owed, the
+ * remainder taking the full path, unless a lost chargeback already returned
+ * it; or record a decision), so the alert is the whole point.
  *
  * One Dashboard partial arrives as refund.created, refund.updated AND
  * charge.refunded, in no guaranteed order. The alert table is unique per
@@ -4256,8 +4257,10 @@ export async function requestRefund(
 /**
  * Hold an order whose refund failed or was cancelled at Stripe for a person
  * (#730): REFUND_NOT_COMPLETED, which the sweep and the refund claim skip, and
- * one open critical alert per order. The person refunds it again in Stripe,
- * whose webhook completes the order, or leaves it and resolves the alert.
+ * one open critical alert per order. The person refunds what is still owed in
+ * Stripe, whose webhook completes the order on a full refund, or settles it
+ * by hand; either way they resolve the alert only once the money went back
+ * or it was settled (docs/deployment.md).
  */
 async function holdRefundNotCompleted(order: RefundClaim, ended: Stripe.Refund): Promise<void> {
   // Only while the order still names the refund the sweep read: a webhook that

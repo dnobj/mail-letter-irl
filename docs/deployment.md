@@ -671,10 +671,13 @@ ways out:
   `stripe_partial_refund_unmatched` alert opens too. Settle it the second
   way once Stripe shows that refund succeeded.
 - **The money went back another way, or should not go back.** Resolve the
-  alert. The order stays `refund_pending` and counts as stuck until an engineer
-  settles it in the database: no panel command does this yet, because the
-  right end state (refunded, with the pack's letters revoked, or kept) is a
-  person's decision. For a Pay & Send order, the refund already cancelled its
+  alert, and the `stripe_partial_refund_unmatched` one too if a refund for
+  less than the order opened it. The order keeps its hold's code and stays
+  `refund_pending` or `disputed`. It is counted among the orders held for a
+  person on the panel's health page (and, while `refund_pending`, as stuck)
+  until an engineer settles it in the database: no panel command does this
+  yet, because the right end state (refunded, with the pack's letters
+  revoked, or kept) is a person's decision. For a Pay & Send order, the refund already cancelled its
   letter if the letter had not gone to the printer: keeping the order means
   sending that mail again, not only settling the row.
 
@@ -697,11 +700,11 @@ shows:
 
 The order page says the same for every order held with
 `REFUND_NOT_COMPLETED`, and names no step by the dispute's status: what is
-owed depends on Stripe's current view. An amount-mismatch order whose refund
-failed keeps its own code and note: make the same checks before releasing it.
+owed depends on Stripe's current view.
 
-An amount-mismatch quarantine whose refund fails keeps its own code, so the
-panel can still release it; the alert opens all the same.
+An amount-mismatch quarantine whose refund fails keeps its own code and note,
+so the panel can still release it; the alert opens all the same. Make the
+same checks in Stripe before releasing it.
 
 Amounts are read from the Stripe Prices themselves - there are no configured
 cent amounts to keep in step (#275). A paid amount or currency mismatch against

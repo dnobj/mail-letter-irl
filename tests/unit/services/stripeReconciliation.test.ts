@@ -347,7 +347,9 @@ describe('Stripe Reconciliation Service (US-RECONCILE-01)', () => {
       // but named for what it is, so the operator reads the right alert.
       expect(result.summary.unprocessedRefunds).toBe(1);
       expect(result.discrepancies).toContainEqual(expect.objectContaining({
-        type: 'unmatched_partial_refund', orderId: 'order-pack', stripeAmount: 200, ourAmount: 500
+        type: 'unmatched_partial_refund', orderId: 'order-pack', stripeAmount: 200, ourAmount: 500,
+        // Not "refund the remainder": a lost chargeback may have returned it (#730).
+        suggestedAction: expect.stringContaining('money a lost chargeback returned is not owed again'),
       }));
       expect(result.discrepancies).not.toContainEqual(expect.objectContaining({ type: 'unprocessed_refund' }));
     });
