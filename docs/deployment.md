@@ -653,13 +653,15 @@ open per order), whether the sweep or the refund's own webhook saw it first.
 While that alert is open, a later failure on the same order opens no second
 one and sends no notice: check the order's refunds in Stripe before resolving
 it. A refund that fails after the order was already marked refunded is still
-only recorded on the order (`already_refunded`), with no alert. Two ways out:
+only recorded on the order (`already_refunded`), with no alert. Check the
+order's refunds in Stripe first: one made since may still be pending, and the
+order completes only when it succeeds. Two ways out:
 
 - **Refund again in Stripe**, once the cause is fixed (a Stripe refund goes
   back to the original payment method). Its webhook completes the order and
-  clears the hold's code. The alert stays
-  open: resolve it once Stripe shows the refund succeeded, since an event can
-  arrive late and Stripe lets a refund fail after it succeeded.
+  clears the hold's code. The alert stays open: resolve it once Stripe shows
+  the refund succeeded, since an event can arrive late and Stripe lets a
+  refund fail after it succeeded.
 - **The money went back another way, or should not go back.** Resolve the
   alert. The order stays `refund_pending` and counts as stuck until an engineer
   settles it in the database: no panel command does this yet, because the
@@ -667,6 +669,12 @@ only recorded on the order (`already_refunded`), with no alert. Two ways out:
   person's decision. For a Pay & Send order, the refund already cancelled its
   letter if the letter had not gone to the printer: keeping the order means
   sending that mail again, not only settling the row.
+
+A held order that is disputed afterwards becomes `disputed` and keeps the
+code, and the order page no longer tells you to refund it: Stripe refuses a
+refund while a chargeback is open, and the dispute decides where the money
+goes. An inquiry does not stop a refund. Check the dispute in Stripe before
+refunding or resolving the alert.
 
 An amount-mismatch quarantine whose refund fails keeps its own code, so the
 panel can still release it; the alert opens all the same.

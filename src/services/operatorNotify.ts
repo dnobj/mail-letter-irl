@@ -168,5 +168,5 @@ export const OPERATOR_NOTICES = {
   heldMailFunding: () =>
     'Mail paid for by a purchase that was refunded or disputed is held until a person sends or cancels it. See the Alerts page on the admin panel.',
   refundNotCompleted: () =>
-    'A refund failed or was cancelled at Stripe, and the order waits for a person instead of being refunded again. Refund it again in Stripe once the cause is fixed, or leave it. See the Alerts page on the admin panel.'
+    'A refund failed or was cancelled at Stripe, and the order waits for a person instead of being refunded again. Check its refunds and any dispute in Stripe, then refund it again once the cause is fixed, or leave it. See the Alerts page on the admin panel.'
 } as const;

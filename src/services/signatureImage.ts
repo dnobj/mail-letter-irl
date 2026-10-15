@@ -78,12 +78,19 @@ const ANALYSIS_TIMEOUT_MS = 30_000;
 
 /**
  * How an analysis failed, for the operator's log: a fixed word, never the
- * picture or an error's own text. 'worker_error' is a worker that could not
- * start or threw (a missing worker file says this), 'exit' one that ended
- * without answering (out of memory), 'timeout' one that took too long, and
- * 'in_thread' the analysis run here, from source.
+ * picture or an error's own text. 'out_of_memory' is a worker that ran out
+ * of heap, 'worker_error' one that could not be made or start (a missing
+ * worker file says this) or threw, 'exit' one that ended without answering
+ * or erring, 'timeout' one that took too long, and 'in_thread' the analysis
+ * run here, from source. The log says 'unknown' for anything else.
  */
-export type SignatureAnalysisFailure = 'worker_error' | 'exit' | 'timeout' | 'in_thread';
+export type SignatureAnalysisFailure = 'out_of_memory' | 'worker_error' | 'exit' | 'timeout' | 'in_thread';
+
+/** Node says a worker ran out of heap with an 'error' before its 'exit'. */
+function workerFailure(error: unknown): SignatureAnalysisFailure {
+  const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
+  return code === 'ERR_WORKER_OUT_OF_MEMORY' ? 'out_of_memory' : 'worker_error';
+}
 
 export class SignatureAnalysisError extends Error {
   constructor(readonly failure: SignatureAnalysisFailure, cause?: unknown) {
@@ -129,7 +136,7 @@ export function runSignatureAnalysis(
     };
     const timer = setTimeout(() => finish(() => reject(new SignatureAnalysisError('timeout'))), timeoutMs);
     worker.once('message', (result: SignatureAnalysis) => finish(() => resolve(result)));
-    worker.once('error', (error) => finish(() => reject(new SignatureAnalysisError('worker_error', error))));
+    worker.once('error', (error) => finish(() => reject(new SignatureAnalysisError(workerFailure(error), error))));
     worker.once('exit', (code) => finish(() => reject(new SignatureAnalysisError('exit', new Error(`exit code ${code}`)))));
   });
 }

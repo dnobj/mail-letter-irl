@@ -16,15 +16,18 @@ import {
 
 /**
  * Why an order is held as REFUND_NOT_COMPLETED, and what an operator can do.
- * Only an order still waiting for its refund can be refunded again: one that
- * has since moved on (a dispute, say: Stripe refuses a refund on a disputed
- * charge) is not told to refund it (#730).
+ * Such an order is held only while it waits for its refund, and moves on
+ * only to refunded (which clears the code) or disputed. A disputed one is not
+ * told to refund: while a chargeback is open Stripe refuses a refund, and the
+ * dispute decides where the money goes; an inquiry does not stop one, so
+ * Stripe is where to look (#730). Either way a new refund may already be
+ * pending at Stripe, where its webhook has not yet completed the order.
  */
 function heldRefundNote(status: string): SafeHtml {
   if (status === "refund_pending") {
-    return html` — its refund failed or was cancelled at Stripe, and the sweep will not make another. Refund it again in Stripe once the cause is fixed, or settle it by hand, and resolve its <code>refund_not_completed</code> alert (docs/deployment.md).`;
+    return html` — its refund failed or was cancelled at Stripe, and the sweep will not make another. Check its refunds in Stripe first, since a new one may still be pending. Then refund it again in Stripe once the cause is fixed, or settle it by hand, and resolve its <code>refund_not_completed</code> alert (docs/deployment.md).`;
   }
-  return html` — its refund failed or was cancelled at Stripe, and the order has since become <code>${status}</code>, so do not refund it from here. Check its refunds and any dispute in Stripe before resolving its <code>refund_not_completed</code> alert (docs/deployment.md).`;
+  return html` — its refund failed or was cancelled at Stripe, and the order has since become <code>${status}</code>. Check its refunds and any dispute in Stripe before refunding it: Stripe refuses a refund while a chargeback is open, and the dispute decides where the money goes. Then resolve its <code>refund_not_completed</code> alert (docs/deployment.md).`;
 }
 
 export function renderOrder(input: { detail: OrderDetail; actions: SafeHtml }): SafeHtml {

@@ -29,16 +29,16 @@ describe('the order page', () => {
     const text = page('REFUND_NOT_COMPLETED');
     expect(text).toContain('<code>REFUND_NOT_COMPLETED</code>');
     expect(text).toContain('its refund failed or was cancelled at Stripe, and the sweep will not make another');
-    expect(text).toContain('Refund it again in Stripe once the cause is fixed');
+    expect(text).toContain('Check its refunds in Stripe first, since a new one may still be pending. Then refund it again in Stripe once the cause is fixed');
     expect(text).toContain('<code>refund_not_completed</code> alert');
     expect(text).not.toContain('quarantined from the automatic refund sweep');
   });
 
   it('does not tell an operator to refund a held order that has since been disputed', () => {
     const text = page('REFUND_NOT_COMPLETED', 'disputed');
-    expect(text).toContain('the order has since become <code>disputed</code>, so do not refund it from here');
+    expect(text).toContain('the order has since become <code>disputed</code>. Check its refunds and any dispute in Stripe before refunding it: Stripe refuses a refund while a chargeback is open');
     expect(text).toContain('<code>refund_not_completed</code> alert');
-    expect(text).not.toContain('Refund it again in Stripe');
+    expect(text).not.toContain('refund it again in Stripe');
     expect(text).not.toContain('the sweep will not make another');
   });
 
