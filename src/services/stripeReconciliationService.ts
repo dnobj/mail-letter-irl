@@ -493,7 +493,8 @@ export async function reconcileStripePayments(
         const ownCommand = lessThanTheOrder && matchedRefund
           ? await panelPackRefundFor(refund, matchedRefund.order_id)
           : undefined;
-        if (ownCommand?.status === 'succeeded' && ownCommand.stripe_refund_id === refund.id) continue;
+        // A settled row always names its refund, so one returned here names this one.
+        if (ownCommand?.status === 'succeeded') continue;
         unprocessedRefunds++;
         if (ownCommand) {
           panelRefundsUnsettled++;
