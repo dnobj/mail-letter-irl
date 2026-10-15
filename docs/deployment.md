@@ -653,12 +653,15 @@ open per order), whether the sweep or the refund's own webhook saw it first.
 While that alert is open, a later failure on the same order opens no second
 one and sends no notice: check the order's refunds in Stripe before resolving
 it. A refund that fails after the order was already marked refunded is still
-only recorded on the order (`already_refunded`), with no alert. Check the
-order's refunds in Stripe first: one made since may still be pending, and the
-order completes only when it succeeds. Two ways out:
+only recorded on the order (`already_refunded`), with no alert.
 
-- **Refund again in Stripe**, once the cause is fixed (a Stripe refund goes
-  back to the original payment method). Its webhook completes the order and
+Before acting, check the order's refunds in Stripe: one made since may still
+be pending (the order completes only when it succeeds), and the failed one
+says why it failed. Then check for a dispute, below. Two ways out:
+
+- **Refund again in Stripe**, if the cause can be fixed. A refund goes back
+  to the original payment method, so one that failed because the card is
+  closed or lost fails again: take the second way. Its webhook completes the order and
   clears the hold's code. The alert stays open: resolve it once Stripe shows
   the refund succeeded, since an event can arrive late and Stripe lets a
   refund fail after it succeeded.
@@ -671,10 +674,15 @@ order completes only when it succeeds. Two ways out:
   sending that mail again, not only settling the row.
 
 A held order that is disputed afterwards becomes `disputed` and keeps the
-code, and the order page no longer tells you to refund it: Stripe refuses a
-refund while a chargeback is open, and the dispute decides where the money
-goes. An inquiry does not stop a refund. Check the dispute in Stripe before
-refunding or resolving the alert.
+code (a later refund event can move it back to `refund_pending`). The order
+page goes by the dispute's own status, not the order's:
+
+- **A chargeback open** (`needs_response`, `under_review`): Stripe refuses a
+  refund until it closes. Leave the alert open until then.
+- **A chargeback lost:** the money already went back through the dispute. Do
+  not refund again; resolve the alert.
+- **An inquiry (`warning_*`), or a dispute won or prevented:** no chargeback
+  moved the money, so the refund is still owed, as above.
 
 An amount-mismatch quarantine whose refund fails keeps its own code, so the
 panel can still release it; the alert opens all the same.

@@ -64,7 +64,7 @@ describe('a signature analysis worker that fails', () => {
 
   it('names one that threw', async () => {
     const { answer, worker } = start();
-    worker.emit('error', Object.assign(new Error('missing'), { code: 'ERR_MODULE_NOT_FOUND' }));
+    worker.emit('error', Object.assign(new Error('missing'), { code: 'MODULE_NOT_FOUND' }));
     expect(await answer).toMatchObject({ error: { failure: 'worker_error' } });
   });
 

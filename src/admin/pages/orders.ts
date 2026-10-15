@@ -15,19 +15,35 @@ import {
 } from "./common.js";
 
 /**
- * Why an order is held as REFUND_NOT_COMPLETED, and what an operator can do.
- * Such an order is held only while it waits for its refund, and moves on
- * only to refunded (which clears the code) or disputed. A disputed one is not
- * told to refund: while a chargeback is open Stripe refuses a refund, and the
- * dispute decides where the money goes; an inquiry does not stop one, so
- * Stripe is where to look (#730). Either way a new refund may already be
- * pending at Stripe, where its webhook has not yet completed the order.
+ * Why an order is held as REFUND_NOT_COMPLETED, and what an operator can do
+ * (#730). What decides it is the order's dispute, not its status: a dispute
+ * moves the order to disputed, and a later refund event can move it back to
+ * refund_pending, while the dispute's own status stays as Stripe last said.
+ *
+ * - A chargeback open (needs_response, under_review): Stripe refuses a refund
+ *   until it closes.
+ * - A chargeback lost: the money already went back through the dispute.
+ * - Otherwise (no dispute, an inquiry open or closed, a dispute won or
+ *   prevented): no chargeback moved the money, so the refund is still owed.
+ *   A new one may already be pending at Stripe, and a refund that failed
+ *   because the card can no longer take one (closed, lost) fails again, since
+ *   a refund goes back to the original payment method.
  */
-function heldRefundNote(status: string): SafeHtml {
-  if (status === "refund_pending") {
-    return html` — its refund failed or was cancelled at Stripe, and the sweep will not make another. Check its refunds in Stripe first, since a new one may still be pending. Then refund it again in Stripe once the cause is fixed, or settle it by hand, and resolve its <code>refund_not_completed</code> alert (docs/deployment.md).`;
+const OPEN_CHARGEBACK = new Set(["needs_response", "under_review"]);
+
+function heldRefundNote(disputeStatus: string | null): SafeHtml {
+  const held = html` — its refund failed or was cancelled at Stripe, and the sweep will not make another.`;
+  const alert = html`<code>refund_not_completed</code> alert (docs/deployment.md)`;
+  if (disputeStatus && OPEN_CHARGEBACK.has(disputeStatus)) {
+    return html`${held} A chargeback is open on it (<code>${disputeStatus}</code>): Stripe refuses a refund until it closes. Check the dispute in Stripe, and leave its ${alert} open until it does.`;
   }
-  return html` — its refund failed or was cancelled at Stripe, and the order has since become <code>${status}</code>. Check its refunds and any dispute in Stripe before refunding it: Stripe refuses a refund while a chargeback is open, and the dispute decides where the money goes. Then resolve its <code>refund_not_completed</code> alert (docs/deployment.md).`;
+  if (disputeStatus === "lost") {
+    return html`${held} It lost a chargeback, so the money already went back through the dispute: do not refund it again. Check the dispute in Stripe, then resolve its ${alert}.`;
+  }
+  const dispute = disputeStatus
+    ? html` Its dispute (<code>${disputeStatus}</code>) moved no money, so the refund is still owed.`
+    : "";
+  return html`${held}${dispute} Check its refunds in Stripe first: a new one may still be pending, and the failed one says why. If the card can no longer take a refund (closed or lost), refunding again fails the same way, so the money must go back another way and the order be settled by hand. Otherwise refund it again in Stripe. Then resolve its ${alert}.`;
 }
 
 export function renderOrder(input: { detail: OrderDetail; actions: SafeHtml }): SafeHtml {
@@ -41,7 +57,7 @@ ${
 }
 ${
   order.lastErrorCode
-    ? html`<div class="flash flash-warn" role="status">Last error code <code>${order.lastErrorCode}</code>${order.lastErrorCode === "PAYMENT_AMOUNT_MISMATCH" ? html` — this order is quarantined from the automatic refund sweep until an operator releases it.` : ""}${order.lastErrorCode === "REFUND_NOT_COMPLETED" ? heldRefundNote(order.status) : ""}</div>`
+    ? html`<div class="flash flash-warn" role="status">Last error code <code>${order.lastErrorCode}</code>${order.lastErrorCode === "PAYMENT_AMOUNT_MISMATCH" ? html` — this order is quarantined from the automatic refund sweep until an operator releases it.` : ""}${order.lastErrorCode === "REFUND_NOT_COMPLETED" ? heldRefundNote(order.stripeDisputeStatus) : ""}</div>`
     : ""
 }
 ${definitionList([
