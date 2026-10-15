@@ -76,20 +76,49 @@ const ANALYSIS_WORKER = new URL('./signatureAnalysisWorker.js', import.meta.url)
 /** A worker that has not answered by now is ended, and the picture refused as unprocessable. */
 const ANALYSIS_TIMEOUT_MS = 30_000;
 
+/**
+ * How an analysis failed, for the operator's log: a fixed word, never the
+ * picture or an error's own text. 'worker_error' is a worker that could not
+ * start or threw (a missing worker file says this), 'exit' one that ended
+ * without answering (out of memory), 'timeout' one that took too long, and
+ * 'in_thread' the analysis run here, from source.
+ */
+export type SignatureAnalysisFailure = 'worker_error' | 'exit' | 'timeout' | 'in_thread';
+
+export class SignatureAnalysisError extends Error {
+  constructor(readonly failure: SignatureAnalysisFailure, cause?: unknown) {
+    super(`signature analysis failed: ${failure}`, { cause });
+    this.name = 'SignatureAnalysisError';
+  }
+}
+
 export function runSignatureAnalysis(
   grey: Uint8Array,
   width: number,
   height: number,
-  offThread: boolean = ANALYSE_OFF_THREAD
+  offThread: boolean = ANALYSE_OFF_THREAD,
+  timeoutMs: number = ANALYSIS_TIMEOUT_MS
 ): Promise<SignatureAnalysis> {
-  if (!offThread) return Promise.resolve(analyseSignature(grey, width, height));
+  if (!offThread) {
+    try {
+      return Promise.resolve(analyseSignature(grey, width, height));
+    } catch (error) {
+      return Promise.reject(new SignatureAnalysisError('in_thread', error));
+    }
+  }
   // A copy of its own: sharp's buffer may share memory that cannot be moved.
   const pixels = new Uint8Array(grey);
   return new Promise((resolve, reject) => {
-    const worker = new Worker(ANALYSIS_WORKER, {
-      workerData: { grey: pixels, width, height },
-      transferList: [pixels.buffer],
-    });
+    let worker: Worker;
+    try {
+      worker = new Worker(ANALYSIS_WORKER, {
+        workerData: { grey: pixels, width, height },
+        transferList: [pixels.buffer],
+      });
+    } catch (error) {
+      reject(new SignatureAnalysisError('worker_error', error));
+      return;
+    }
     let settled = false;
     const finish = (settle: () => void) => {
       if (settled) return;
@@ -98,13 +127,10 @@ export function runSignatureAnalysis(
       settle();
       void worker.terminate();
     };
-    const timer = setTimeout(
-      () => finish(() => reject(new Error('signature analysis timed out'))),
-      ANALYSIS_TIMEOUT_MS
-    );
+    const timer = setTimeout(() => finish(() => reject(new SignatureAnalysisError('timeout'))), timeoutMs);
     worker.once('message', (result: SignatureAnalysis) => finish(() => resolve(result)));
-    worker.once('error', (error) => finish(() => reject(error)));
-    worker.once('exit', (code) => finish(() => reject(new Error(`signature analysis ended with code ${code}`))));
+    worker.once('error', (error) => finish(() => reject(new SignatureAnalysisError('worker_error', error))));
+    worker.once('exit', (code) => finish(() => reject(new SignatureAnalysisError('exit', new Error(`exit code ${code}`)))));
   });
 }
 
@@ -158,10 +184,11 @@ async function cleanSignature(input: Buffer): Promise<CleanedSignature> {
     analysis = await runSignatureAnalysis(grey.data, width, height);
   } catch (error) {
     // The person is told to try another picture; the operator is told that
-    // the analysis itself failed (a missing worker file, out of memory, the
-    // timeout), which is not the picture's fault (#730).
+    // the analysis itself failed, and how (a missing worker file, out of
+    // memory, the timeout), which is not the picture's fault (#730).
     writeDiagnostic('error', 'signature.analysis_failed', {
       errorClass: classifyDiagnosticError(error, 'unknown_error'),
+      failure: error instanceof SignatureAnalysisError ? error.failure : 'unknown',
     });
     throw new ImageProcessingError(
       'PROCESSING_FAILED',

@@ -14,6 +14,19 @@ import {
   when,
 } from "./common.js";
 
+/**
+ * Why an order is held as REFUND_NOT_COMPLETED, and what an operator can do.
+ * Only an order still waiting for its refund can be refunded again: one that
+ * has since moved on (a dispute, say: Stripe refuses a refund on a disputed
+ * charge) is not told to refund it (#730).
+ */
+function heldRefundNote(status: string): SafeHtml {
+  if (status === "refund_pending") {
+    return html` — its refund failed or was cancelled at Stripe, and the sweep will not make another. Refund it again in Stripe once the cause is fixed, or settle it by hand, and resolve its <code>refund_not_completed</code> alert (docs/deployment.md).`;
+  }
+  return html` — its refund failed or was cancelled at Stripe, and the order has since become <code>${status}</code>, so do not refund it from here. Check its refunds and any dispute in Stripe before resolving its <code>refund_not_completed</code> alert (docs/deployment.md).`;
+}
+
 export function renderOrder(input: { detail: OrderDetail; actions: SafeHtml }): SafeHtml {
   const { detail } = input;
   const { order, pack } = detail;
@@ -25,7 +38,7 @@ ${
 }
 ${
   order.lastErrorCode
-    ? html`<div class="flash flash-warn" role="status">Last error code <code>${order.lastErrorCode}</code>${order.lastErrorCode === "PAYMENT_AMOUNT_MISMATCH" ? html` — this order is quarantined from the automatic refund sweep until an operator releases it.` : ""}${order.lastErrorCode === "REFUND_NOT_COMPLETED" ? html` — its refund failed or was cancelled at Stripe, and the sweep will not make another. Refund it another way in Stripe, or settle it by hand, and resolve its <code>refund_not_completed</code> alert (docs/deployment.md).` : ""}</div>`
+    ? html`<div class="flash flash-warn" role="status">Last error code <code>${order.lastErrorCode}</code>${order.lastErrorCode === "PAYMENT_AMOUNT_MISMATCH" ? html` — this order is quarantined from the automatic refund sweep until an operator releases it.` : ""}${order.lastErrorCode === "REFUND_NOT_COMPLETED" ? heldRefundNote(order.status) : ""}</div>`
     : ""
 }
 ${definitionList([

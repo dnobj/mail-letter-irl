@@ -642,10 +642,11 @@ are optional.
 
 A full refund that fails or is cancelled at Stripe is never made again by the
 hourly sweep (#730). Once this reaches an environment, the sweep holds a
-`refund_pending` order whose stored refund had already ended, with one alert
-each, where it used to refund it again: up to 25 orders a run, so a backlog
-takes more than one run, and an order already at `JIT_REFUND_RETRY_LIMIT`
-attempts is not picked up at all. While the order waits for its refund (`refund_pending`),
+`refund_pending` order whose refund had already ended (the stored one, or one
+it finds for the payment), with one alert each, where it used to refund it
+again: up to 25 orders a run, so a backlog takes more than one run, and an
+order already at `JIT_REFUND_RETRY_LIMIT` attempts is not picked up at all.
+While the order waits for its refund (`refund_pending`),
 it is held, with `last_error_code` `REFUND_NOT_COMPLETED`, which the sweep and
 the refund claim skip, and a critical `refund_not_completed` alert opens (one
 open per order), whether the sweep or the refund's own webhook saw it first.
@@ -654,8 +655,9 @@ one and sends no notice: check the order's refunds in Stripe before resolving
 it. A refund that fails after the order was already marked refunded is still
 only recorded on the order (`already_refunded`), with no alert. Two ways out:
 
-- **Refund again in Stripe** (a different card, or once the cause is fixed).
-  Its webhook completes the order and clears the hold's code. The alert stays
+- **Refund again in Stripe**, once the cause is fixed (a Stripe refund goes
+  back to the original payment method). Its webhook completes the order and
+  clears the hold's code. The alert stays
   open: resolve it once Stripe shows the refund succeeded, since an event can
   arrive late and Stripe lets a refund fail after it succeeded.
 - **The money went back another way, or should not go back.** Resolve the
