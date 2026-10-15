@@ -455,8 +455,8 @@ export async function reconcileStripePayments(
           typeof matchedRefund?.amount_cents === 'number' && refund.amount < matchedRefund.amount_cents;
         // A proportional pack refund the panel issued and settled, with this
         // very refund, for this order and amount: it revoked the letters it
-        // paid back and left the order fulfilled, so it is no discrepancy
-        // (#730). Nothing looser: three review rounds found every looser
+        // paid back when it ran, so it is no discrepancy whatever the order's
+        // status since (#730). Nothing looser: three review rounds found every looser
         // match, and every advice chosen by a command's status, hiding a
         // payout or giving a wrong instruction.
         if (partial && matchedRefund && (await settledPanelPackRefund(refund, matchedRefund.order_id))) continue;

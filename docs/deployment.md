@@ -673,7 +673,10 @@ ways out:
   refund, a refund of the rest completes the order through
   `charge.refunded`, but its own refund event can arrive first and open, or
   add to, a partial-refund alert: resolve that one once the order shows
-  `refunded`.
+  `refunded` and Stripe shows both refunds succeeded. Stripe counts a
+  pending refund in the charge's refunded total, so the order can show
+  `refunded` first, and a refund that fails after that is only recorded on
+  the order (`already_refunded`), with no alert.
 - **The money went back another way, or should not go back.** Resolve the
   alert, and the `stripe_partial_refund_unmatched` one too if a refund for
   less than the order opened it. The order keeps its hold's code and stays
@@ -684,9 +687,10 @@ ways out:
   revoked, or kept) is a person's decision. While the order is not yet
   settled, a partial refund on it is also listed on the Stripe
   reconciliation page on each run that covers it; the operator's decision is
-  recorded already, so it needs nothing more. A pack's listing stops only
-  once the settlement marks the order `refunded` and writes its `refund`
-  ledger row. If that partial refund later fails while the order is not
+  recorded already, so it needs nothing more. A pack's listing stops once
+  the order is marked `refunded` and has a `refund` ledger row, which a
+  proportional refund from the panel has already written: the listing
+  ending is no proof the settlement itself is complete. If that partial refund later fails while the order is not
   settled, it comes back as a new `stripe_partial_refund_unmatched` alert
   whose `events` show `refundStatus: failed`, with no notice: the money did
   not go back after all. Once the order is settled as `refunded` in full, a
