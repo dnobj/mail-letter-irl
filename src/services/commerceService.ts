@@ -4256,7 +4256,7 @@ export async function requestRefund(
 /**
  * Hold an order whose refund failed or was cancelled at Stripe for a person
  * (#730): REFUND_NOT_COMPLETED, which the sweep and the refund claim skip, and
- * one open critical alert per order. The person refunds another way in Stripe,
+ * one open critical alert per order. The person refunds it again in Stripe,
  * whose webhook completes the order, or leaves it and resolves the alert.
  */
 async function holdRefundNotCompleted(order: RefundClaim, ended: Stripe.Refund): Promise<void> {
