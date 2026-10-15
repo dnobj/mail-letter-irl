@@ -156,7 +156,7 @@ describe('the words', () => {
     expect(OPERATOR_NOTICES.heldMailFunding()).toContain('refunded or disputed');
     // Stale by the time someone reads it, perhaps: Stripe first (#730).
     expect(OPERATOR_NOTICES.refundNotCompleted()).toBe(
-      'A refund failed or was cancelled at Stripe, and the order waits for a person instead of being refunded again. Check its refunds, any dispute and why the refund failed in Stripe before refunding it again. See the Alerts page on the admin panel.'
+      'A refund failed or was cancelled at Stripe, and the order waits for a person instead of being refunded again. Check its refunds and any dispute in Stripe before refunding it again. See the order page on the admin panel, linked from its alert on the Alerts page.'
     );
   });
 

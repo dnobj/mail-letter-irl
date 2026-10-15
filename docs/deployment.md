@@ -674,15 +674,21 @@ says why it failed. Then check for a dispute, below. Two ways out:
   sending that mail again, not only settling the row.
 
 A held order that is disputed afterwards becomes `disputed` and keeps the
-code (a later refund event can move it back to `refund_pending`). The order
-page goes by the dispute's own status, not the order's:
+code (a later refund event can move it back to `refund_pending`). Check
+every dispute on the payment in Stripe, not only the status the order page
+shows:
 
 - **A chargeback open** (`needs_response`, `under_review`): Stripe refuses a
   refund until it closes. Leave the alert open until then.
-- **A chargeback lost:** the money already went back through the dispute. Do
-  not refund again; resolve the alert.
+- **A chargeback lost:** the disputed amount already went back through the
+  dispute. A dispute can be for less than the charge; the rest is still owed.
 - **An inquiry (`warning_*`), or a dispute won or prevented:** no chargeback
   moved the money, so the refund is still owed, as above.
+- **A status not listed here:** read it in Stripe's documentation before
+  refunding.
+
+The order page says the same for every held order, and names no step by the
+dispute's status: what is owed depends on Stripe's current view.
 
 An amount-mismatch quarantine whose refund fails keeps its own code, so the
 panel can still release it; the alert opens all the same.
