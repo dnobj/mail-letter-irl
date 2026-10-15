@@ -656,15 +656,20 @@ it. A refund that fails after the order was already marked refunded is still
 only recorded on the order (`already_refunded`), with no alert.
 
 Before acting, check the order's refunds in Stripe: one made since may still
-be pending (the order completes only when it succeeds), and the failed one
-says why it failed. Then check for a dispute, below. Two ways out:
+be pending (the order completes only when it succeeds), and a failed one may
+say why (a cancelled one says nothing). Then check for a dispute, below. Two
+ways out:
 
-- **Refund again in Stripe**, if the cause can be fixed. A refund goes back
-  to the original payment method, so one that failed because the card is
-  closed or lost fails again: take the second way. Its webhook completes the order and
-  clears the hold's code. The alert stays open: resolve it once Stripe shows
-  the refund succeeded, since an event can arrive late and Stripe lets a
-  refund fail after it succeeded.
+- **Refund again in Stripe**, if the cause can be fixed. A full refund's
+  webhook completes the order and clears the hold's code. The alert stays
+  open: resolve it once Stripe shows the refund succeeded, since an event can
+  arrive late and Stripe lets a refund fail after it succeeded. A refund goes
+  back to the original payment method, so one that failed because the card
+  was closed, lost or stolen fails again: take the second way. A refund for
+  less than the order (the rest went back through a lost chargeback) does
+  not complete it: the order stays held and a
+  `stripe_partial_refund_unmatched` alert opens too. Settle it the second
+  way once Stripe shows that refund succeeded.
 - **The money went back another way, or should not go back.** Resolve the
   alert. The order stays `refund_pending` and counts as stuck until an engineer
   settles it in the database: no panel command does this yet, because the
@@ -678,17 +683,22 @@ code (a later refund event can move it back to `refund_pending`). Check
 every dispute on the payment in Stripe, not only the status the order page
 shows:
 
-- **A chargeback open** (`needs_response`, `under_review`): Stripe refuses a
-  refund until it closes. Leave the alert open until then.
+- **A chargeback open** (`needs_response`, `under_review`): wait. Stripe
+  may refuse a refund until it closes (a dispute for part of the charge may
+  still let the rest be refunded), and nothing goes back another way
+  meanwhile. Leave the alert open until then.
 - **A chargeback lost:** the disputed amount already went back through the
-  dispute. A dispute can be for less than the charge; the rest is still owed.
+  dispute, and is not owed again. A dispute can be for less than the charge;
+  the rest is still owed.
 - **An inquiry (`warning_*`), or a dispute won or prevented:** no chargeback
   moved the money, so the refund is still owed, as above.
 - **A status not listed here:** read it in Stripe's documentation before
   refunding.
 
-The order page says the same for every held order, and names no step by the
-dispute's status: what is owed depends on Stripe's current view.
+The order page says the same for every order held with
+`REFUND_NOT_COMPLETED`, and names no step by the dispute's status: what is
+owed depends on Stripe's current view. An amount-mismatch order whose refund
+failed keeps its own code and note: make the same checks before releasing it.
 
 An amount-mismatch quarantine whose refund fails keeps its own code, so the
 panel can still release it; the alert opens all the same.

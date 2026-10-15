@@ -22,7 +22,7 @@ import {
  * to look at rather than what to do. Three review rounds found a branch on
  * the stored dispute status giving a wrong instruction each time.
  */
-const HELD_REFUND_NOTE = html` — its refund failed or was cancelled at Stripe, and the sweep will not make another. Before refunding again, check in Stripe its refunds (a new one may still be pending, and the failed one says why) and any dispute on the payment (Stripe refuses a refund while a chargeback is open, and a lost one has already returned the disputed amount). Refund only what is still owed; if the card can no longer take a refund (closed or lost), it must go back another way and the order be settled by hand. Then resolve its <code>refund_not_completed</code> alert (docs/deployment.md).`;
+const HELD_REFUND_NOTE = html` — its refund failed or was cancelled at Stripe, and the sweep will not make another. Before refunding again, check in Stripe its refunds (a new one may still be pending, and a failed one may say why) and any dispute on the payment. While a chargeback is open, wait: Stripe may refuse a refund, and nothing goes back another way. Money a lost chargeback returned is not owed again. Refund only what is still owed; if the card was closed, lost or stolen and cannot take a refund, the money must go back another way and the order be settled by hand. Resolve its <code>refund_not_completed</code> alert only once Stripe shows the money went back, or it was settled by hand (docs/deployment.md).`;
 
 export function renderOrder(input: { detail: OrderDetail; actions: SafeHtml }): SafeHtml {
   const { detail } = input;

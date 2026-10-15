@@ -26,9 +26,13 @@ function page(lastErrorCode: string | null, status = 'refund_pending', stripeDis
   return String(renderOrder({ detail: detail as never, actions: html`` }));
 }
 
-/** The note's words, from its error code to its alert. */
+/** The note's words, from its error code to its runbook. */
 function note(text: string): string {
-  return text.slice(text.indexOf('<code>REFUND_NOT_COMPLETED</code>'), text.indexOf('(docs/deployment.md)'));
+  const start = text.indexOf('<code>REFUND_NOT_COMPLETED</code>');
+  const end = text.indexOf('(docs/deployment.md)');
+  expect(start).toBeGreaterThanOrEqual(0);
+  expect(end).toBeGreaterThan(start);
+  return text.slice(start, end);
 }
 
 describe('the order page', () => {
@@ -36,10 +40,14 @@ describe('the order page', () => {
     const text = page('REFUND_NOT_COMPLETED');
     expect(text).toContain('<code>REFUND_NOT_COMPLETED</code>');
     expect(text).toContain('its refund failed or was cancelled at Stripe, and the sweep will not make another.');
-    expect(text).toContain('Before refunding again, check in Stripe its refunds (a new one may still be pending, and the failed one says why)');
-    expect(text).toContain('and any dispute on the payment (Stripe refuses a refund while a chargeback is open, and a lost one has already returned the disputed amount)');
-    expect(text).toContain('Refund only what is still owed; if the card can no longer take a refund (closed or lost), it must go back another way and the order be settled by hand.');
-    expect(text).toContain('<code>refund_not_completed</code> alert');
+    expect(note(text)).toBe(
+      '<code>REFUND_NOT_COMPLETED</code> — its refund failed or was cancelled at Stripe, and the sweep will not make another. ' +
+        'Before refunding again, check in Stripe its refunds (a new one may still be pending, and a failed one may say why) and any dispute on the payment. ' +
+        'While a chargeback is open, wait: Stripe may refuse a refund, and nothing goes back another way. ' +
+        'Money a lost chargeback returned is not owed again. ' +
+        'Refund only what is still owed; if the card was closed, lost or stolen and cannot take a refund, the money must go back another way and the order be settled by hand. ' +
+        'Resolve its <code>refund_not_completed</code> alert only once Stripe shows the money went back, or it was settled by hand '
+    );
     expect(text).not.toContain('quarantined from the automatic refund sweep');
   });
 
