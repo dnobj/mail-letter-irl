@@ -298,16 +298,16 @@ describe('PackCheckoutCard with a tool result', () => {
 describe('PackCheckoutCard and the way back into the conversation (#372)', () => {
   const START_URL = 'https://api.example.test/purchase/start?to=' + encodeURIComponent('https://checkout.stripe.com/c/pay/cs_host');
 
-  it('points the button and the convenience open at the start page when the result carries one', async () => {
+  it('points the button at the start page when the result carries one, and opens nothing by itself', async () => {
     // The start page forwards to the same Stripe checkout after keeping the
     // return link ChatGPT appends; an older result without it still links
     // straight to Stripe.
     const card = mount({ toolOutput: pendingCheckout({ checkoutStartUrl: START_URL }) });
-    // The convenience open is a microtask after render.
     await flush();
 
     expect(card.href('checkout-link')).toBe(START_URL);
-    expect(card.opened).toEqual([START_URL]);
+    // A payment page opens only when the customer presses the link (#730).
+    expect(card.opened).toEqual([]);
     expect(card.visible('fallback')).toBe(false);
   });
 
@@ -320,7 +320,7 @@ describe('PackCheckoutCard and the way back into the conversation (#372)', () =>
 
     await card.click('checkout-link');
 
-    expect(card.opened).toEqual([START_URL, START_URL]);
+    expect(card.opened).toEqual([START_URL]);
     const fallbackTimer = card.pendingTimers().find(timer => timer.delay === 1500);
     expect(fallbackTimer).toBeDefined();
     expect(card.pendingTimers().length).toBe(timersBefore + 1);
@@ -396,7 +396,10 @@ describe('PackCheckoutCard rendered without a tool result', () => {
     expect(card.text('price')).toBe('5.00');
     expect(card.text('message')).toBe('Pay USD 5.00 to add 2 letters to your account.');
     expect(card.text('order-line')).toBe('Order ord_retry_0001');
-    // The one convenience open, with the retry's own URL.
+    // Nothing opens until the customer presses the link, even after pressing
+    // the card's own button to make the checkout (#730).
+    expect(card.opened).toEqual([]);
+    await card.click('checkout-link');
     expect(card.opened).toEqual(['https://checkout.stripe.com/c/pay/cs_retry_starter']);
   });
 
@@ -1045,7 +1048,7 @@ describe('PackCheckoutCard in a reopened conversation', () => {
     // pins that choice so it cannot change silently.
     const card = mount({ toolOutput: pendingCheckout() });
     await flush();
-    expect(card.opened).toEqual(['https://checkout.stripe.com/c/pay/cs_host']);
+    expect(card.opened).toEqual([]);
 
     card.deliverWidgetState(kept({ order: { ...KEPT_ORDER, orderId: 'ord_retry_0001' } }));
     await flush();
@@ -1060,7 +1063,7 @@ describe('PackCheckoutCard in a reopened conversation', () => {
     await flush();
 
     expect(card.visible('checkout-link')).toBe(true);
-    expect(card.opened).toEqual(['https://checkout.stripe.com/c/pay/cs_host']);
+    expect(card.opened).toEqual([]);
     expect(card.saves).toEqual([]);
   });
 

@@ -157,7 +157,6 @@
       const POLL_BUDGET_MS = 600000;
       const CHECK_STATUS_LABEL = "Check status";
 
-      let opened = false;
       let emptyTimer = null;
       let emptyShown = false;
       let retryBusy = false;
@@ -716,17 +715,8 @@
           note.textContent = `Stripe handles the payment. Nothing is sent until you choose what to mail. ${expiry}`.trim();
           note.classList.remove("hidden");
           done.classList.add("hidden");
-          // A reopened card never opens the checkout by itself: the customer
-          // came back to the conversation, not to pay again.
-          if (resumed) opened = true;
-          if (!opened && window.openai?.openExternal) {
-            // Ask the host to open the checkout once, as a convenience. The
-            // anchor above is what the customer relies on if the host declines.
-            opened = true;
-            Promise.resolve()
-              .then(() => window.openai.openExternal({ href: openHref }))
-              .catch(() => {});
-          }
+          // The card never opens the checkout by itself (#730): a payment page
+          // opens only when the customer presses the link above.
           startStatusPolling(state.orderId, { slow: isResumedOrder(state) });
         } else {
           link.classList.add("hidden");
