@@ -66,41 +66,17 @@ interface Discrepancy {
   suggestedAction: string;
 }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 /**
- * The proportional pack refund command (commerce_pack_refunds) a Stripe refund
- * belongs to, or none (#730). It belongs only when the row is for the same
- * order and the same amount, and either names this refund or names none yet
- * while the refund's metadata names the row: the checks the webhook makes
- * before it settles one. A row found by this refund's id wins over one only
- * its metadata names.
+ * Whether a Stripe refund is a proportional pack refund the panel issued and
+ * settled with this very refund, for this order and this amount (#730).
  */
-async function panelPackRefundFor(
-  refund: Stripe.Refund,
-  orderId: string
-): Promise<{ status: string; stripe_refund_id: string | null } | undefined> {
-  const named = refund.metadata?.packRefundId;
-  const packRefundId = typeof named === 'string' && UUID.test(named) ? named : null;
-  const rows = await query<{
-    pack_refund_id: string;
-    status: string;
-    order_id: string;
-    amount_cents: number;
-    stripe_refund_id: string | null;
-  }>(
-    `SELECT pack_refund_id, status, order_id, amount_cents, stripe_refund_id
-       FROM commerce_pack_refunds
-      WHERE stripe_refund_id = $1 OR pack_refund_id = $2::uuid`,
-    [refund.id, packRefundId]
+async function settledPanelPackRefund(refund: Stripe.Refund, orderId: string): Promise<boolean> {
+  const settled = await query(
+    `SELECT 1 FROM commerce_pack_refunds
+      WHERE stripe_refund_id = $1 AND order_id = $2 AND amount_cents = $3 AND status = 'succeeded'`,
+    [refund.id, orderId, refund.amount]
   );
-  const belongs = rows.rows.filter(
-    (row) =>
-      row.order_id === orderId &&
-      row.amount_cents === refund.amount &&
-      (row.stripe_refund_id === refund.id || (row.stripe_refund_id === null && row.pack_refund_id === packRefundId))
-  );
-  return belongs.find((row) => row.stripe_refund_id === refund.id) ?? belongs[0];
+  return (settled.rowCount ?? 0) > 0;
 }
 
 /**
@@ -124,8 +100,6 @@ export async function reconcileStripePayments(
   let missingInStripe = 0;
   let amountMismatches = 0;
   let unprocessedRefunds = 0;
-  /** Of those, the panel's own proportional pack refunds not yet settled (#730). */
-  let panelRefundsUnsettled = 0;
 
   // 1. Fetch completed checkout sessions from Stripe
   const stripePayments = new Map<string, {
@@ -477,45 +451,22 @@ export async function reconcileStripePayments(
 
       const matchedRefund = refundCheck.rows[0];
       if (!matchedRefund || matchedRefund.status !== 'refunded' || !matchedRefund.pack_reversal_recorded) {
-        const lessThanTheOrder =
+        const partial =
           typeof matchedRefund?.amount_cents === 'number' && refund.amount < matchedRefund.amount_cents;
-        // A proportional pack refund the panel issued (#730) is the app's own,
-        // but only when its command row is this refund's: the same order, the
-        // same amount, and either the row names this refund or names none yet
-        // while the refund's metadata names the row. Metadata alone proves
-        // nothing (it can be copied onto a second refund, or name another
-        // order's command), and the webhook holds the same three checks.
-        //  - Settled with this refund: it revoked the letters it paid back and
-        //    left the order fulfilled, so it is no discrepancy.
-        //  - Not settled (or compensated or failed since): reviewed as the
-        //    panel's own, whose letters were revoked when it began.
-        //  - Anything else for less than the order: one the app did not issue.
-        const ownCommand = lessThanTheOrder && matchedRefund
-          ? await panelPackRefundFor(refund, matchedRefund.order_id)
-          : undefined;
-        // A settled row always names its refund, so one returned here names this one.
-        if (ownCommand?.status === 'succeeded') continue;
+        // A proportional pack refund the panel issued and settled, with this
+        // very refund, for this order and amount: it revoked the letters it
+        // paid back and left the order fulfilled, so it is no discrepancy
+        // (#730). Nothing looser: three review rounds found every looser
+        // match, and every advice chosen by a command's status, hiding a
+        // payout or giving a wrong instruction.
+        if (partial && matchedRefund && (await settledPanelPackRefund(refund, matchedRefund.order_id))) continue;
         unprocessedRefunds++;
-        if (ownCommand) {
-          panelRefundsUnsettled++;
-          discrepancies.push({
-            type: 'unprocessed_refund',
-            severity: 'high',
-            stripeSessionId: paymentIntentReference,
-            orderId: matchedRefund?.order_id,
-            fundingType: matchedRefund?.order_type,
-            stripeAmount: refund.amount,
-            message: `A proportional pack refund the panel issued succeeded at Stripe, but its command is ${ownCommand.status}`,
-            suggestedAction:
-              'Its letters were revoked when the command began: do not deduct them again. The pack-refund sweep adopts a refund it has not heard of; a compensated or failed command has a pack_refund_failed alert (docs/deployment.md)',
-          });
-          continue;
-        }
-        // A succeeded refund for less than the order that no command of the
-        // app's matches is one the app did not issue (#323): the customer keeps
-        // the letters. The webhook opened a stripe_partial_refund_unmatched
-        // alert; this is the second net.
-        const partial = lessThanTheOrder;
+        // Any other succeeded refund for less than the order has no settled
+        // record here. It may be a Dashboard partial refund (the webhook opened
+        // a stripe_partial_refund_unmatched alert; this is the second net), a
+        // panel command not settled or compensated since, or the rest of a
+        // charge after a lost chargeback. The advice says what to check rather
+        // than what it is.
         discrepancies.push(
           partial
             ? {
@@ -526,13 +477,9 @@ export async function reconcileStripePayments(
                 fundingType: matchedRefund?.order_type,
                 stripeAmount: refund.amount,
                 ourAmount: matchedRefund?.amount_cents ?? undefined,
-                message: 'A partial refund exists in Stripe that the app did not issue; the customer keeps the letters',
-                // "The remainder" is not always owed: after a lost chargeback
-                // for part of the charge, the rest of the charge already went
-                // back through the dispute, and a refund of what is left then
-                // never completes the order (#730).
+                message: 'A refund for less than the order exists in Stripe with no settled record in the app',
                 suggestedAction:
-                  'Review the stripe_partial_refund_unmatched alert for the order and any dispute in Stripe: refund what is still owed, or record the decision. Money a lost chargeback returned is not owed again, and after one the order is settled by hand (docs/deployment.md)',
+                  "Before deducting letters or refunding, check what it is: the order's alerts (stripe_partial_refund_unmatched, pack_refund_failed), its pack refund commands, and any dispute in Stripe. Letters may already have been revoked or given back, and money a lost chargeback returned is not owed again. Then refund what is still owed, revoke what was paid back, or record the decision (docs/deployment.md)",
               }
             : {
                 type: 'unprocessed_refund',
@@ -559,17 +506,10 @@ export async function reconcileStripePayments(
     );
   }
 
-  if (unprocessedRefunds > panelRefundsUnsettled) {
+  if (unprocessedRefunds > 0) {
     recommendations.push(
-      `HIGH: ${unprocessedRefunds - panelRefundsUnsettled} refunds in Stripe were not processed. ` +
-      `Review and deduct credits from affected users.`
-    );
-  }
-
-  if (panelRefundsUnsettled > 0) {
-    recommendations.push(
-      `HIGH: ${panelRefundsUnsettled} proportional pack refunds the panel issued have not settled. ` +
-      `Their letters were revoked already: do not deduct them again (docs/deployment.md).`
+      `HIGH: ${unprocessedRefunds} refunds in Stripe were not processed. ` +
+      `Review each before deducting credits or refunding: some letters may already have been revoked or given back (docs/deployment.md).`
     );
   }
 

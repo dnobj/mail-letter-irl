@@ -419,7 +419,7 @@ describePostgres('proportional pack refund command', () => {
     expect((await readOrder(orderId)).amount_refunded_cents).toBe(400);
   }, 60_000);
 
-  it("is the app's own to the Stripe reconciliation: reviewed while unsettled, nothing once settled (#730)", async () => {
+  it("is no discrepancy to the Stripe reconciliation once settled with that refund, and reviewed until then (#730)", async () => {
     const reconciliation = await import('../../src/services/stripeReconciliationService.js');
     const { orderId } = await seedPackHolder({ credits: 10, amountCents: 1000 });
     const flaky = stubStripe({
@@ -436,31 +436,39 @@ describePostgres('proportional pack refund command', () => {
     const forThisOrder = (result: Awaited<ReturnType<typeof reconciliation.reconcileStripePayments>>) =>
       result.discrepancies.filter(discrepancy => discrepancy.orderId === orderId);
 
+    // Not settled: reviewed, with advice that names what to check, not what it is.
     const unsettled = await reconciliation.reconcileStripePayments(1, stripe);
-    expect(forThisOrder(unsettled).map(discrepancy => discrepancy.type)).toEqual(['unprocessed_refund']);
+    expect(forThisOrder(unsettled)).toEqual([expect.objectContaining({
+      type: 'unmatched_partial_refund',
+      suggestedAction: expect.stringContaining('Letters may already have been revoked or given back')
+    })]);
 
     const sweepSeam = stubStripe({ createStatus: 'succeeded', listed: [listed] });
     await packRefund.reconcilePackRefunds(sweepSeam.seam, { retryDelaySeconds: 0 });
     expect((await commandRows(orderId))[0]).toMatchObject({ status: 'succeeded', stripe_refund_id: listed.id });
 
-    // Settled: found by the refund's id on the row, and no discrepancy at all.
+    // Settled with this refund, for this order and amount: no discrepancy.
     const settled = await reconciliation.reconcileStripePayments(1, stripe);
     expect(forThisOrder(settled)).toEqual([]);
-    // Without the metadata too: the row names the refund.
+    // The metadata plays no part: the row names the refund.
     const bare = { ...listed, metadata: {} } as unknown as Stripe.Refund;
     const byId = await reconciliation.reconcileStripePayments(1, {
       ...stripe,
       refunds: { list: async () => ({ has_more: false, data: [bare] }) }
     } as unknown as Stripe);
     expect(forThisOrder(byId)).toEqual([]);
-    // A second refund carrying the same command's metadata is not the
-    // command's: it is reported as one the app did not issue.
-    const second = { ...listed, id: stripeId('re') } as unknown as Stripe.Refund;
-    const copied = await reconciliation.reconcileStripePayments(1, {
-      ...stripe,
-      refunds: { list: async () => ({ has_more: false, data: [second] }) }
-    } as unknown as Stripe);
-    expect(forThisOrder(copied).map(discrepancy => discrepancy.type)).toEqual(['unmatched_partial_refund']);
+    // A second refund carrying the same command's metadata, or the same id
+    // for another amount, is not the settled command's: it is reviewed.
+    for (const other of [
+      { ...listed, id: stripeId('re') },
+      { ...listed, amount: listed.amount + 100 }
+    ] as unknown as Stripe.Refund[]) {
+      const result = await reconciliation.reconcileStripePayments(1, {
+        ...stripe,
+        refunds: { list: async () => ({ has_more: false, data: [other] }) }
+      } as unknown as Stripe);
+      expect(forThisOrder(result).map(discrepancy => discrepancy.type)).toEqual(['unmatched_partial_refund']);
+    }
   }, 60_000);
 
   it('settles once when the webhook hears first, and treats replays and siblings as no-ops', async () => {

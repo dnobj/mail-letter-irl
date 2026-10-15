@@ -331,15 +331,15 @@ describe('Stripe Reconciliation Service (US-RECONCILE-01)', () => {
     });
 
     describe('a refund for less than the order (#323, #730)', () => {
-      const COMMAND = '11111111-1111-4111-8111-111111111111';
       const ADVICE =
-        'Review the stripe_partial_refund_unmatched alert for the order and any dispute in Stripe: refund what is still owed, or record the decision. Money a lost chargeback returned is not owed again, and after one the order is settled by hand (docs/deployment.md)';
+        "Before deducting letters or refunding, check what it is: the order's alerts (stripe_partial_refund_unmatched, pack_refund_failed), its pack refund commands, and any dispute in Stripe. Letters may already have been revoked or given back, and money a lost chargeback returned is not owed again. Then refund what is still owed, revoke what was paid back, or record the decision (docs/deployment.md)";
 
-      /** One refund of 200 on a 500 pack, and the command rows the lookup finds. */
-      async function reconcileWith(refund: Record<string, unknown>, commandRows: Array<Record<string, unknown>>) {
+      /** One refund of 200 on a 500 pack, and whether a settled panel command names it. */
+      async function reconcileWith(settledCommand: boolean) {
         mockSessionsList.mockResolvedValue({ data: [], has_more: false });
         mockRefundsList.mockResolvedValue({ data: [{
-          id: 're_partial', status: 'succeeded', payment_intent: 'pi_pack', amount: 200, ...refund
+          id: 're_partial', status: 'succeeded', payment_intent: 'pi_pack', amount: 200,
+          metadata: { packRefundId: '11111111-1111-4111-8111-111111111111' }
         }] });
         mockQuery
           .mockResolvedValueOnce({ rows: [] })
@@ -348,78 +348,44 @@ describe('Stripe Reconciliation Service (US-RECONCILE-01)', () => {
             order_id: 'order-pack', order_type: 'letter_pack', status: 'fulfilled',
             amount_cents: 500, pack_reversal_recorded: false
           }] })
-          .mockResolvedValueOnce({ rows: commandRows });
+          .mockResolvedValueOnce(settledCommand ? { rows: [{ '?column?': 1 }], rowCount: 1 } : { rows: [], rowCount: 0 });
         return reconcileStripePayments(1);
       }
 
-      function row(overrides: Record<string, unknown>) {
-        return { pack_refund_id: COMMAND, status: 'succeeded', order_id: 'order-pack', amount_cents: 200, stripe_refund_id: 're_partial', ...overrides };
-      }
-
-      it('reports one the app did not issue as unmatched_partial_refund', async () => {
-        const result = await reconcileWith({}, []);
-        // Still counted as unprocessed - the money moved and no reversal exists -
-        // but named for what it is, so the operator reads the right alert.
+      it('reports one with no settled record, saying what to check rather than what it is', async () => {
+        const result = await reconcileWith(false);
+        // Still counted as unprocessed - the money moved and no reversal exists.
         expect(result.summary.unprocessedRefunds).toBe(1);
         expect(result.discrepancies).toEqual([expect.objectContaining({
           type: 'unmatched_partial_refund', orderId: 'order-pack', stripeAmount: 200, ourAmount: 500,
-          // Not "refund the remainder": a lost chargeback may have returned it (#730).
+          message: 'A refund for less than the order exists in Stripe with no settled record in the app',
+          // Not "refund the remainder", nor "the customer keeps the letters": a
+          // panel command may have revoked or given them back, and a lost
+          // chargeback may have returned the rest.
           suggestedAction: ADVICE,
         })]);
-        expect(result.recommendations).toContainEqual(expect.stringContaining('1 refunds in Stripe were not processed'));
-        const lookup = mockQuery.mock.calls[3];
-        expect(lookup[0]).toContain('FROM commerce_pack_refunds');
-        expect(lookup[1]).toEqual(['re_partial', null]);
+        expect(result.recommendations).toContainEqual(
+          'HIGH: 1 refunds in Stripe were not processed. Review each before deducting credits or refunding: some letters may already have been revoked or given back (docs/deployment.md).'
+        );
       });
 
-      it('reports nothing for the panel command it settled', async () => {
-        const result = await reconcileWith({ metadata: { packRefundId: COMMAND } }, [row({})]);
+      it('asks only for a settled panel command naming this very refund, for this order and amount', async () => {
+        await reconcileWith(false);
+        const lookup = mockQuery.mock.calls[3];
+        expect(String(lookup[0]).replace(/\s+/g, ' ')).toContain(
+          "FROM commerce_pack_refunds WHERE stripe_refund_id = $1 AND order_id = $2 AND amount_cents = $3 AND status = 'succeeded'"
+        );
+        // The refund's metadata is no evidence: it can be copied onto a second refund.
+        expect(lookup[1]).toEqual(['re_partial', 'order-pack', 200]);
+      });
+
+      it('reports nothing for a panel command settled with this refund', async () => {
+        const result = await reconcileWith(true);
         expect(result.summary.unprocessedRefunds).toBe(0);
         expect(result.discrepancies).toEqual([]);
-        expect(mockQuery.mock.calls[3][1]).toEqual(['re_partial', COMMAND]);
-      });
-
-      it('reviews a panel command that has not settled as its own, never as one the app did not issue', async () => {
-        for (const commandRow of [
-          row({ status: 'letters_revoked', stripe_refund_id: null }),
-          row({ status: 'stripe_pending' }),
-          row({ status: 'compensated', stripe_refund_id: null }),
-        ]) {
-          mockQuery.mockReset();
-          const result = await reconcileWith({ metadata: { packRefundId: COMMAND } }, [commandRow]);
-          expect(result.summary.unprocessedRefunds).toBe(1);
-          expect(result.discrepancies).toEqual([expect.objectContaining({
-            type: 'unprocessed_refund',
-            orderId: 'order-pack',
-            message: `A proportional pack refund the panel issued succeeded at Stripe, but its command is ${commandRow.status}`,
-            suggestedAction: expect.stringContaining('do not deduct them again'),
-          })]);
-          expect(result.recommendations).toEqual([expect.stringContaining('1 proportional pack refunds the panel issued have not settled')]);
-        }
-      });
-
-      it.each([
-        ['a second refund naming a command settled with another', row({ stripe_refund_id: 're_first' })],
-        ["metadata naming another order's command", row({ order_id: 'order-other', stripe_refund_id: null, status: 'letters_revoked' })],
-        ['a command for another amount', row({ amount_cents: 150 })],
-      ])('reports %s as one the app did not issue', async (_case, commandRow) => {
-        const result = await reconcileWith({ metadata: { packRefundId: COMMAND } }, [commandRow]);
-        expect(result.discrepancies).toEqual([expect.objectContaining({ type: 'unmatched_partial_refund', suggestedAction: ADVICE })]);
-      });
-
-      it('prefers the command that names this refund over one its metadata names', async () => {
-        const result = await reconcileWith(
-          { metadata: { packRefundId: COMMAND } },
-          [row({ status: 'letters_revoked', stripe_refund_id: null }), row({ pack_refund_id: '22222222-2222-4222-8222-222222222222' })]
-        );
-        expect(result.discrepancies).toEqual([]);
-      });
-
-      it('asks for no command by metadata that is not a command id', async () => {
-        await reconcileWith({ metadata: { packRefundId: "x' OR 1=1" } }, []);
-        expect(mockQuery.mock.calls[3][1]).toEqual(['re_partial', null]);
       });
     });
+
     it('requires a pack refund ledger reversal linked through the authoritative order', async () => {
       mockSessionsList.mockResolvedValue({ data: [], has_more: false });
       mockRefundsList.mockResolvedValue({ data: [{
