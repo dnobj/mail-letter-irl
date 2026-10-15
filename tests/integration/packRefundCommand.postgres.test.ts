@@ -419,6 +419,42 @@ describePostgres('proportional pack refund command', () => {
     expect((await readOrder(orderId)).amount_refunded_cents).toBe(400);
   }, 60_000);
 
+  it("is the app's own to the Stripe reconciliation: reviewed while unsettled, nothing once settled (#730)", async () => {
+    const reconciliation = await import('../../src/services/stripeReconciliationService.js');
+    const { orderId } = await seedPackHolder({ credits: 10, amountCents: 1000 });
+    const flaky = stubStripe({
+      createError: Object.assign(new Error('socket hang up'), { type: 'StripeConnectionError' })
+    });
+    await packRefund.refundPackLetters(command(orderId, 2), flaky.seam, COMMAND_ENV);
+    // Stripe made the refund, but the command row has not heard: only the
+    // refund's metadata names the command.
+    const listed = refundFor(flaky.created[0], 'succeeded');
+    const stripe = {
+      checkout: { sessions: { list: async () => ({ has_more: false, data: [] }) } },
+      refunds: { list: async () => ({ has_more: false, data: [listed] }) }
+    } as unknown as Stripe;
+    const forThisOrder = (result: Awaited<ReturnType<typeof reconciliation.reconcileStripePayments>>) =>
+      result.discrepancies.filter(discrepancy => discrepancy.orderId === orderId);
+
+    const unsettled = await reconciliation.reconcileStripePayments(1, stripe);
+    expect(forThisOrder(unsettled).map(discrepancy => discrepancy.type)).toEqual(['unprocessed_refund']);
+
+    const sweepSeam = stubStripe({ createStatus: 'succeeded', listed: [listed] });
+    await packRefund.reconcilePackRefunds(sweepSeam.seam, { retryDelaySeconds: 0 });
+    expect((await commandRows(orderId))[0]).toMatchObject({ status: 'succeeded', stripe_refund_id: listed.id });
+
+    // Settled: found by the refund's id on the row, and no discrepancy at all.
+    const settled = await reconciliation.reconcileStripePayments(1, stripe);
+    expect(forThisOrder(settled)).toEqual([]);
+    // Without the metadata too: the row names the refund.
+    const bare = { ...listed, metadata: {} } as unknown as Stripe.Refund;
+    const byId = await reconciliation.reconcileStripePayments(1, {
+      ...stripe,
+      refunds: { list: async () => ({ has_more: false, data: [bare] }) }
+    } as unknown as Stripe);
+    expect(forThisOrder(byId)).toEqual([]);
+  }, 60_000);
+
   it('settles once when the webhook hears first, and treats replays and siblings as no-ops', async () => {
     const { orderId } = await seedPackHolder({ credits: 10, amountCents: 1000 });
     const pendingStripe = stubStripe({ createStatus: 'pending' });
