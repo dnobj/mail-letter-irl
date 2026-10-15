@@ -669,14 +669,35 @@ ways out:
   less than the order (the rest went back through a lost chargeback) does
   not complete it: the order stays held and a
   `stripe_partial_refund_unmatched` alert opens too. Settle it the second
-  way once Stripe shows that refund succeeded.
+  way once Stripe shows that refund succeeded. After a Dashboard partial
+  refund, a refund of the rest completes the order through
+  `charge.refunded`, but its own refund event can arrive first and open, or
+  add to, a partial-refund alert: resolve that one once the order shows
+  `refunded` and Stripe shows both refunds succeeded. Stripe counts a
+  pending refund in the charge's refunded total, so the order can show
+  `refunded` first, and a refund that fails after that is only recorded on
+  the order (`already_refunded`), with no alert.
 - **The money went back another way, or should not go back.** Resolve the
-  alert. The order stays `refund_pending` and counts as stuck until an engineer
-  settles it in the database: no panel command does this yet, because the
-  right end state (refunded, with the pack's letters revoked, or kept) is a
-  person's decision. For a Pay & Send order, the refund already cancelled its
-  letter if the letter had not gone to the printer: keeping the order means
-  sending that mail again, not only settling the row.
+  alert, and the `stripe_partial_refund_unmatched` one too if a refund for
+  less than the order opened it. The order keeps its hold's code and stays
+  `refund_pending` or `disputed`. It is counted among the orders held for a
+  person on the panel's health page (and, while `refund_pending`, as stuck)
+  until an engineer settles it in the database: no panel command does this
+  yet, because the right end state (refunded, with the pack's letters
+  revoked, or kept) is a person's decision. While the order is not yet
+  settled, a partial refund on it is also listed on the Stripe
+  reconciliation page on each run that covers it; the operator's decision is
+  recorded already, so it needs nothing more. A pack's listing stops once
+  the order is marked `refunded` and has a `refund` ledger row, which a
+  proportional refund from the panel has already written: the listing
+  ending is no proof the settlement itself is complete. If that partial refund later fails while the order is not
+  settled, it comes back as a new `stripe_partial_refund_unmatched` alert
+  whose `events` show `refundStatus: failed`, with no notice: the money did
+  not go back after all. Once the order is settled as `refunded` in full, a
+  later failure is only recorded on the order (`already_refunded`), as
+  above. For a Pay & Send order, the refund already
+  cancelled its letter if the letter had not gone to the printer: keeping the
+  order means sending that mail again, not only settling the row.
 
 A held order that is disputed afterwards becomes `disputed` and keeps the
 code (a later refund event can move it back to `refund_pending`). Check
@@ -697,11 +718,15 @@ shows:
 
 The order page says the same for every order held with
 `REFUND_NOT_COMPLETED`, and names no step by the dispute's status: what is
-owed depends on Stripe's current view. An amount-mismatch order whose refund
-failed keeps its own code and note: make the same checks before releasing it.
+owed depends on Stripe's current view.
 
-An amount-mismatch quarantine whose refund fails keeps its own code, so the
-panel can still release it; the alert opens all the same.
+An amount-mismatch quarantine whose refund fails keeps its own code and note,
+so the panel can still release it; the alert opens all the same. Releasing
+it does not refund it: the next sweep finds the ended refund and holds the
+order as `REFUND_NOT_COMPLETED`, unless the order is already at
+`JIT_REFUND_RETRY_LIMIT` attempts, when the sweep skips it and it stays
+`refund_pending` with no code, counted as stuck. Make the same checks in
+Stripe first.
 
 Amounts are read from the Stripe Prices themselves - there are no configured
 cent amounts to keep in step (#275). A paid amount or currency mismatch against
