@@ -642,22 +642,34 @@ are optional.
 
 A full refund that fails or is cancelled at Stripe is never made again by the
 hourly sweep (#730). Once this reaches an environment, the sweep holds a
-`refund_pending` order whose stored refund had already ended, with one alert
-each, where it used to refund it again: up to 25 orders a run, so a backlog
-takes more than one run, and an order already at `JIT_REFUND_RETRY_LIMIT`
-attempts is not picked up at all. While the order waits for its refund (`refund_pending`),
+`refund_pending` order whose refund had already ended (the stored one, or one
+it finds for the payment), with one alert each, where it used to refund it
+again: up to 25 orders a run, so a backlog takes more than one run, and an
+order already at `JIT_REFUND_RETRY_LIMIT` attempts is not picked up at all.
+While the order waits for its refund (`refund_pending`),
 it is held, with `last_error_code` `REFUND_NOT_COMPLETED`, which the sweep and
 the refund claim skip, and a critical `refund_not_completed` alert opens (one
 open per order), whether the sweep or the refund's own webhook saw it first.
 While that alert is open, a later failure on the same order opens no second
 one and sends no notice: check the order's refunds in Stripe before resolving
 it. A refund that fails after the order was already marked refunded is still
-only recorded on the order (`already_refunded`), with no alert. Two ways out:
+only recorded on the order (`already_refunded`), with no alert.
 
-- **Refund again in Stripe** (a different card, or once the cause is fixed).
-  Its webhook completes the order and clears the hold's code. The alert stays
+Before acting, check the order's refunds in Stripe: one made since may still
+be pending (the order completes only when it succeeds), and a failed one may
+say why (a cancelled one says nothing). Then check for a dispute, below. Two
+ways out:
+
+- **Refund again in Stripe**, if the cause can be fixed. A full refund's
+  webhook completes the order and clears the hold's code. The alert stays
   open: resolve it once Stripe shows the refund succeeded, since an event can
-  arrive late and Stripe lets a refund fail after it succeeded.
+  arrive late and Stripe lets a refund fail after it succeeded. A refund goes
+  back to the original payment method, so one that failed because the card
+  was closed, lost or stolen fails again: take the second way. A refund for
+  less than the order (the rest went back through a lost chargeback) does
+  not complete it: the order stays held and a
+  `stripe_partial_refund_unmatched` alert opens too. Settle it the second
+  way once Stripe shows that refund succeeded.
 - **The money went back another way, or should not go back.** Resolve the
   alert. The order stays `refund_pending` and counts as stuck until an engineer
   settles it in the database: no panel command does this yet, because the
@@ -665,6 +677,28 @@ only recorded on the order (`already_refunded`), with no alert. Two ways out:
   person's decision. For a Pay & Send order, the refund already cancelled its
   letter if the letter had not gone to the printer: keeping the order means
   sending that mail again, not only settling the row.
+
+A held order that is disputed afterwards becomes `disputed` and keeps the
+code (a later refund event can move it back to `refund_pending`). Check
+every dispute on the payment in Stripe, not only the status the order page
+shows:
+
+- **A chargeback open** (`needs_response`, `under_review`): wait. Stripe
+  may refuse a refund until it closes (a dispute for part of the charge may
+  still let the rest be refunded), and nothing goes back another way
+  meanwhile. Leave the alert open until then.
+- **A chargeback lost:** the disputed amount already went back through the
+  dispute, and is not owed again. A dispute can be for less than the charge;
+  the rest is still owed.
+- **An inquiry (`warning_*`), or a dispute won or prevented:** no chargeback
+  moved the money, so the refund is still owed, as above.
+- **A status not listed here:** read it in Stripe's documentation before
+  refunding.
+
+The order page says the same for every order held with
+`REFUND_NOT_COMPLETED`, and names no step by the dispute's status: what is
+owed depends on Stripe's current view. An amount-mismatch order whose refund
+failed keeps its own code and note: make the same checks before releasing it.
 
 An amount-mismatch quarantine whose refund fails keeps its own code, so the
 panel can still release it; the alert opens all the same.

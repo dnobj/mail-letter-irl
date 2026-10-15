@@ -59,4 +59,14 @@ describe.skipIf(!built)('the signature analysis on a worker thread (#730)', () =
     const blank = new Uint8Array(400 * 200).fill(240);
     await expect(runSignatureAnalysis(blank, 400, 200, true)).resolves.toEqual({ ok: false, refusal: 'NO_SIGNATURE_FOUND' });
   }, 30_000);
+
+  it('ends a worker that takes too long, and says it timed out', async () => {
+    const { runSignatureAnalysis } = (await import(compiled.href)) as typeof import('../../../src/services/signatureImage.js');
+    const width = 1600;
+    const height = 1000;
+    await expect(runSignatureAnalysis(page(width, height), width, height, true, 1)).rejects.toMatchObject({
+      name: 'SignatureAnalysisError',
+      failure: 'timeout',
+    });
+  }, 30_000);
 });
