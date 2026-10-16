@@ -2,8 +2,9 @@
  * Temporary Image Handler
  *
  * Serves generated images from the private temporary image store.
- * Images were stored by the removed generate_image_fallback tool and served here; the endpoint remains for any unexpired tokens and possible future writers (see docs/learnings/generate-image-removal-decision.md)
- * so the preview tools can download them via imageUrl.
+ * generate_image_for_mail stores each image it generates there, and this route
+ * serves it by token so the preview tools can download it via imageUrl
+ * (see docs/learnings/generate-image-removal-decision.md, Addendum 3).
  *
  * Route: GET /api/temp-image/:token
  * No authentication required — the random token acts as a capability URL.

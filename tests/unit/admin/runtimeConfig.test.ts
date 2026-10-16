@@ -122,9 +122,33 @@ describe("admin runtime configuration", () => {
     expect(config.tailscale.tag).toBe("tag:prod-admin");
     expect(config.tailscale.hostname).toBe("letter-irl-admin-prod");
     expect(config.session.elevationTtlMs).toBe(10 * 60_000);
-    expect(problemsOf({ ...validDevelopmentEnv, STRIPE_SECRET_KEY: "sk_live_placeholder" })).toEqual([
-      "STRIPE_SECRET_KEY must not be a live key in development",
+    expect(problemsOf({ ...validDevelopmentEnv, STRIPE_SECRET_KEY: "sk_live_placeholder" })).toEqual(
+      expect.arrayContaining([
+        "STRIPE_SECRET_KEY must not be a live key in development",
+        expect.stringContaining("must be a restricted key"),
+      ]),
+    );
+  });
+
+  it("refuses a full secret key on the admin service, in either environment", () => {
+    // The guide has always said to use a restricted key here, because the
+    // panel reads Stripe and issues refunds. The service now refuses to boot
+    // without one rather than trusting the runbook.
+    expect(problemsOf({ ...validDevelopmentEnv, STRIPE_SECRET_KEY: "sk_test_placeholder" })).toEqual([
+      "STRIPE_SECRET_KEY on the admin service must be a restricted key (rk_), not a full secret key",
     ]);
+    expect(problemsOf({ ...validDevelopmentEnv, STRIPE_SECRET_KEY: "rk_test_placeholder" })).toEqual([]);
+    // Absent stays allowed: the Stripe page reports the key as absent and the
+    // commands that need it are disabled.
+    const { STRIPE_SECRET_KEY: _omitted, ...withoutKey } = validDevelopmentEnv;
+    expect(problemsOf(withoutKey)).toEqual([]);
+  });
+
+  it("classifies a malformed key as absent rather than as a test key", () => {
+    // Anything without a recognised prefix used to fall through to "test",
+    // which would have let a production service boot on a typo.
+    const problems = problemsOf({ ...validDevelopmentEnv, STRIPE_SECRET_KEY: "not-a-key" });
+    expect(problems).toEqual(["STRIPE_SECRET_KEY does not look like a Stripe secret key"]);
   });
 
   it("allows local-dev mode only off Railway, in development, with an allowlisted login", () => {

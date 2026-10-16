@@ -2,6 +2,17 @@ import { html, join, raw, type SafeHtml } from "./html.js";
 import { formatDate } from "./format.js";
 
 /**
+ * The document referrer policy, which MUST equal the Referrer-Policy response
+ * header (buildSecurityHeaders). A meta tag overrides the header for the
+ * document, so when the two disagree the tag silently wins: that is how the
+ * panel kept sending no-referrer after the header changed, and under
+ * no-referrer a browser serialises the Origin of a form post as null, which
+ * the browser-boundary check then refuses. security.test.ts asserts they
+ * match.
+ */
+export const REFERRER_POLICY = "same-origin";
+
+/**
  * The page shell: environment banner, navigation, flash, body. The stylesheet
  * is inline under the response nonce so the strict CSP needs no `unsafe-inline`.
  */
@@ -111,7 +122,7 @@ export function renderPage(options: PageShellOptions): string {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="referrer" content="no-referrer">
+<meta name="referrer" content="${REFERRER_POLICY}">
 <title>${options.title} · Letter IRL admin (${banner.environment})</title>
 <style nonce="${options.nonce}">${raw(STYLES)}</style>
 </head>

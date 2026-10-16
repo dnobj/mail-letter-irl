@@ -1,4 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// The first test in this file pays for importing a whole server module graph
+// (every tool, the commerce and Stripe code, the database client, the auth
+// stack). On a cold transform cache or a busy disk that import alone took
+// about 12 s on 2026-09-13, over vitest's 10 s default, while CI does it in a
+// few seconds. Raised from 30 s to 60 s later the same day: under a full
+// parallel run on a loaded workstation three of these files still timed out
+// while each passed alone. The limit is per test and says nothing about how
+// fast the app boots; nothing here measures boot time.
+vi.setConfig({ testTimeout: 60_000 });
+
 import { widgetTemplateUri } from "../../../src/mcp/widgetUris.js";
 import { getOpenIdConfiguration } from "../../../src/auth/metadata.js";
 import {
@@ -42,10 +53,11 @@ describe("Submission readiness checks", () => {
     expect(buildToolSecuritySchemes("send_letter", true)).toEqual([
       {
         type: "oauth2",
-        // offline_access is requested here, never enforced: ChatGPT unions
-        // these per-tool lists to build its authorization request rather than
-        // reading scopes_supported (issue #160).
-        scopes: ["mail:send", "offline_access"]
+        // offline_access and the identity scopes are requested here, never
+        // enforced. ChatGPT unions these per-tool lists for offline_access
+        // (#160); it did not for the identity scopes (#424), which stay for
+        // clients that honour the tags.
+        scopes: ["mail:send", "offline_access", "openid", "email"]
       }
     ]);
   });
@@ -66,7 +78,7 @@ describe("Submission readiness checks", () => {
     expect(meta.securitySchemes).toEqual([
       {
         type: "oauth2",
-        scopes: ["mail:draft", "offline_access"]
+        scopes: ["mail:draft", "offline_access", "openid", "email"]
       }
     ]);
     expect(meta["openai/widgetAccessible"]).toBe(true);
@@ -97,20 +109,40 @@ describe("Submission readiness checks", () => {
     expect(metadata).not.toHaveProperty("client_id_metadata_document_supported");
   });
 
-  it("should derive public metadata URLs from the forwarded custom domain", () => {
-    const publicBaseUrl = getPublicBaseUrl({
-      headers: {
-        "x-forwarded-host": "api.letterirl.com",
-        "x-forwarded-proto": "https",
-        host: "letter-irl-api-production.up.railway.app"
-      }
-    });
+  it("pins public metadata URLs to the configured base URL, whatever the request forwards (#730)", () => {
+    vi.stubEnv("LETTER_IRL_PUBLIC_BASE_URL", "https://api.example.test/");
+    try {
+      const publicBaseUrl = getPublicBaseUrl({
+        headers: { "x-forwarded-host": "evil.example", "x-forwarded-proto": "http", host: "evil.example" }
+      });
+      expect(publicBaseUrl).toBe("https://api.example.test");
+      expect(buildWwwAuthenticateChallenge("Missing Authorization header", publicBaseUrl)).toContain(
+        'resource_metadata="https://api.example.test/.well-known/oauth-protected-resource"'
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
 
-    expect(publicBaseUrl).toBe("https://api.letterirl.com");
-    expect(buildManifest(publicBaseUrl).servers[0].url).toBe("https://api.letterirl.com/mcp");
-    expect(buildWwwAuthenticateChallenge("Missing Authorization header", publicBaseUrl)).toContain(
-      'resource_metadata="https://api.letterirl.com/.well-known/oauth-protected-resource"'
-    );
+  it("should derive public metadata URLs from the forwarded custom domain when no base URL is configured", () => {
+    vi.stubEnv("LETTER_IRL_PUBLIC_BASE_URL", "");
+    try {
+      const publicBaseUrl = getPublicBaseUrl({
+        headers: {
+          "x-forwarded-host": "api.letterirl.com",
+          "x-forwarded-proto": "https",
+          host: "letter-irl-api-production.up.railway.app"
+        }
+      });
+
+      expect(publicBaseUrl).toBe("https://api.letterirl.com");
+      expect(buildManifest(publicBaseUrl).servers[0].url).toBe("https://api.letterirl.com/mcp");
+      expect(buildWwwAuthenticateChallenge("Missing Authorization header", publicBaseUrl)).toContain(
+        'resource_metadata="https://api.letterirl.com/.well-known/oauth-protected-resource"'
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("should return a standards-aligned insufficient-scope challenge", () => {

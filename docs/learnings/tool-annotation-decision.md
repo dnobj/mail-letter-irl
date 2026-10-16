@@ -1,6 +1,6 @@
 # Tool Annotation Decision: readOnlyHint and idempotentHint Correctness
 
-**Last Updated:** December 31, 2025
+**Last Updated:** September 16, 2026 (addendum; the December 31, 2025 decision is kept as written above it)
 **Purpose:** Document the decision to correct tool annotations for OpenAI Apps SDK compliance
 **GitHub Issues:** #92 (readOnlyHint), #94 (idempotentHint)
 
@@ -92,7 +92,7 @@ annotations: {
 ```typescript
 annotations: {
   readOnlyHint: false,    // Modifies credits, creates letter record
-  destructiveHint: false, // Non-destructive (credits can be refunded)
+  destructiveHint: true,  // Mail cannot be recalled once printed (see the September 2026 addendum)
   openWorldHint: true,    // Sends physical mail via PostGrid/USPS
   idempotentHint: true    // Draft consumption makes retries safe
 }
@@ -106,7 +106,7 @@ annotations: {
 }
 ```
 
-### Destructive Tools (clear_return_address)
+### Destructive Tools (clear_return_address, as decided in December 2025; six tools since September 2026, and `cancel_scheduled_mail` while arrival dates are on; see the addendum)
 
 ```typescript
 annotations: {
@@ -139,16 +139,67 @@ The annotations help ChatGPT "categorize and present tools appropriately" withou
 | `quote_and_preview_letter_with_header_image` | false | false | true | **false** |
 | `quote_and_preview_letter_with_image` | false | false | true | **false** |
 | `quote_and_preview_postcard` | false | false | true | **false** |
-| `send_letter` | false | false | true | true |
-| `send_postcard` | false | false | true | true |
+| `send_letter` | false | **true** | true | true |
+| `send_postcard` | false | **true** | true | true |
 | `get_account_balance` | true | - | - | - |
 | `list_orders` | true | - | - | - |
 | `get_order_status` | true | - | - | - |
 | `get_return_address` | true | - | - | - |
-| `set_return_address` | false | false | true | true |
+| `set_return_address` | false | **true** | true | true |
 | `clear_return_address` | false | true | false | true |
 
-**Note:** Quote/preview tools have `idempotentHint: false` because each call creates a new draft record (see #94).
+**Note:** Quote/preview tools have `idempotentHint: false` because each call creates a new draft record (see #94). The bold destructive values changed in September 2026; see the addendum below.
+
+---
+
+## Addendum, September 16, 2026: irreversible outcomes are destructive
+
+The December decision read `destructiveHint` as "deletes or overwrites user data" and marked the
+send tools non-destructive because credits can be refunded. OpenAI's current app-review guidance
+([developers.openai.com/plugins/deploy/app-review](https://developers.openai.com/plugins/deploy/app-review),
+checked September 16, 2026) is broader: set the destructive annotation to `true` if the tool "can cause irreversible outcomes
+(deleting, overwriting, sending messages or transactions you can't undo, revoking access, or
+destructive admin actions), even in only select modes, through default parameters, or through
+indirect side effects", and explain in the justification what is irreversible and which safeguards
+apply (confirmation steps, dry runs, scoping). Since June 2026 ChatGPT users can also choose how
+often tools ask for permission; OpenAI describes the "important actions" level as a contextual
+judgement that already covers sending and purchases, so the annotation is the signal OpenAI asks for
+and one input to that judgement, not a switch that guarantees a prompt.
+
+Under that reading `buildAnnotations()` now marks six tools destructive, and a seventh, `cancel_scheduled_mail`, while arrival dates are on (#535):
+
+| Tool | Why |
+|------|-----|
+| `send_letter`, `send_postcard` | Physical mail cannot be recalled once printed; the terms say so. |
+| `set_return_address` | Overwrites the saved address in place. |
+| `create_mail_checkout` | Starts a payment the customer cannot undo alone, and a successful payment authorises the mail itself. |
+| `create_pack_checkout` | Starts a payment the customer cannot undo alone (refunds are discretionary). |
+| `clear_return_address` | Deletes the saved address (unchanged). |
+| `cancel_scheduled_mail` | Listed only while arrival dates are on (#535). A cancelled order cannot be restored; it must be sent again. It returns the letter, and needs `confirm: true`. |
+
+Still non-destructive, with the reasoning: `redeem_promo_code` spends a code but only adds letters
+for the customer; `generate_image_for_mail` consumes one generation and produces an image;
+`confirm_uploaded_image` overwrites only a pointer to the customer's latest upload;
+`submit_feature_request` and `upload_image` create records. The quote and preview tools create
+drafts that expire on their own, and `set_arrival_date` (#535, listed only while arrival dates are
+on) changes only such a draft's dates; it sends nothing, and the same date twice changes nothing
+more, so it is also idempotent.
+
+`set_stationery` (#563), `set_letter_words` (#586) and `set_mail_service` (#625, how a letter travels:
+ordinary or certified) are non-destructive and idempotent on the same
+grounds: each changes only a draft, which sends nothing and expires on its own. `set_letter_words`
+replaces the person's words in place, which reads like `set_return_address`, but only words its
+caller has seen: a change names the version of the words it replaces (`wordsVersion`) and is refused,
+with the words as they are now, if they changed since, on the letter card or in the chat. So the
+caller can always set the words it replaced back, unlike a saved address overwritten unseen (#593
+review round 1).
+
+The `confirm: true` requirement on the send tools and the transactional idempotency (a consumed
+draft cannot be sent twice) remain the safeguards to describe in the justification. They are not a
+reason to omit the annotation. `buildAnnotations()` is what fills the MCP `annotations` block ChatGPT
+reads; the inline `meta` objects in the tool files (spread into `_meta` by `buildToolMeta()`) mirror
+the same hints beside the OpenAI display keys, and `scripts/verify-tool-annotations.ts` checks that
+the mirror agrees.
 
 ---
 

@@ -11,7 +11,7 @@
  * sell?" had no tool answer, so the model could only infer one from prose.
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ToolContext } from '../../../src/contracts/types.js';
 
 const mocks = vi.hoisted(() => ({
@@ -28,6 +28,14 @@ vi.mock('../../../src/services/stripeService.js', () => ({
 
 import { listLetterPacksTool } from '../../../src/tools/listLetterPacks.js';
 import { PACK_CHOICES, PACK_PRODUCTS } from '../../../src/config/products.js';
+import { clientProfileNamed, type ClientProfileName } from '../../../src/auth/clientProfiles.js';
+
+// Resolved here rather than with describeTool from src/server.js, whose module
+// graph needs more of stripeService than this file mocks.
+function described(app: ClientProfileName): string {
+  const description = listLetterPacksTool.description;
+  return typeof description === 'function' ? description(clientProfileNamed(app)) : description;
+}
 
 const context = {
   user: { userId: 'user-1', creditsRemaining: 0, orders: [] },
@@ -140,8 +148,51 @@ describe('list_letter_packs', () => {
     // The catalogue names its products after credits - 'credit-pack-4' is two
     // letters - so a leak here misstates the quantity as well as the word.
     const result = await listLetterPacksTool.handler({}, context);
-    const surfaced = JSON.stringify(result) + listLetterPacksTool.description;
+    const surfaced =
+      JSON.stringify(result) +
+      described('chatgpt') +
+      described('claude');
 
     expect(surfaced).not.toMatch(/credit/i);
+  });
+});
+
+/**
+ * Where packs are bought, per app (#475). An app that takes no purchases is
+ * not offered create_pack_checkout, so the list says where the packs are sold
+ * and gives the link, which Claude had dropped when paraphrasing.
+ */
+describe('list_letter_packs: where packs are bought', () => {
+  const inApp = (app: ClientProfileName) => ({ ...(context as object), client: clientProfileNamed(app) }) as unknown as ToolContext;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.ensurePriceCatalog.mockResolvedValue(undefined);
+    mocks.getPackProductConfig.mockImplementation((code: string) => pricedAsConfigured(code));
+    vi.stubEnv('LETTER_IRL_WEBSITE_BASE_URL', 'https://website.example');
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('says only what is available where the app takes purchases', async () => {
+    const result = await listLetterPacksTool.handler({}, inApp('chatgpt'));
+    expect(result.message).toBe(`${result.packs.length} letter packs are available to buy.`);
+  });
+
+  it.each(['claude', 'claude_code', 'codex', 'vscode', 'hermes', 'token', 'generic'] as const)(
+    'gives %s the letter packs link',
+    async app => {
+      const result = await listLetterPacksTool.handler({}, inApp(app));
+      expect(result.packs.length).toBeGreaterThan(0);
+      expect(result.message).toBe(
+        `${result.packs.length} letter packs are available to buy. They are bought on the Letter IRL website, not in this app. Give the person this link: https://website.example/dashboard/letter-packs`
+      );
+    }
+  );
+
+  it('points at the checkout in its description only where the app takes purchases', () => {
+    expect(described('chatgpt')).toContain('create_pack_checkout');
+    const elsewhere = described('claude');
+    expect(elsewhere).toContain('Packs are bought on the Letter IRL website, not in this app');
+    expect(elsewhere).not.toMatch(/checkout/i);
   });
 });

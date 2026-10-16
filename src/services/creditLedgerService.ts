@@ -15,6 +15,8 @@ import { transaction, query } from '../db/index.js';
 import type pg from 'pg';
 import { writeDiagnostic } from '../utils/diagnosticLog.js';
 import { lockAccountForBalanceChange } from './accountLock.js';
+import { ensureAccountRowWithClient } from './userService.js';
+import { isGiftLetterCompensated } from './giftLetterService.js';
 import {
   User,
   CreditTransaction,
@@ -22,7 +24,6 @@ import {
   CreditConsumption,
   AddCreditsToLedgerParams,
   DeductCreditsFromLedgerParams,
-  RefundCreditsToLedgerParams,
   GetLedgerEntriesParams,
   CreditBalanceDetailed,
   CreditLedgerOperationResult,
@@ -100,18 +101,15 @@ export async function addCreditsToLedger(
   }
 
   return await transaction(async (client) => {
-    // Upsert user (create if doesn't exist)
-    const userResult = await client.query<User>(
-      `INSERT INTO users (user_id, email, credits, credits_purchased, credits_used)
-       VALUES ($1, $2, $3, $3, 0)
-       ON CONFLICT (user_id) DO UPDATE
-       SET credits = users.credits + $3,
-           credits_purchased = users.credits_purchased + $3,
-           updated_at = NOW()
-       RETURNING *`,
-      [userId, email || `${userId}@unknown.com`, credits]
-    );
-    const user = userResult.rows[0];
+    // Open the account if this grant carries an address, credit it either way.
+    // An account that does not exist and has no address to open it from is
+    // refused rather than invented; see ensureAccountRowWithClient.
+    const user = await ensureAccountRowWithClient(client, {
+      userId,
+      email,
+      credits,
+      countAsPurchased: true
+    });
 
     // Create ledger entry
     const ledgerResult = await client.query<CreditLedgerEntry>(
@@ -208,25 +206,28 @@ export async function addCreditsToLedgerWithClient(
     }
   }
 
-  const userResult = await client.query<User>(
-    `INSERT INTO users (user_id, email, credits, credits_purchased, credits_used)
-     VALUES ($1, $2, $3, $3, 0)
-     ON CONFLICT (user_id) DO UPDATE
-     SET credits = users.credits + $3,
-         credits_purchased = users.credits_purchased + $3,
-         updated_at = NOW()
-     RETURNING *`,
-    [userId, email || `${userId}@unknown.com`, credits]
-  );
-  const user = userResult.rows[0];
+  const user = await ensureAccountRowWithClient(client, {
+    userId,
+    email,
+    credits,
+    countAsPurchased: true
+  });
 
+  // RETURNING names its columns rather than *, here and on the transaction
+  // insert below: the admin operator role has no SELECT on the description
+  // columns, and PostgreSQL requires SELECT on every column a RETURNING clause
+  // names. This path is reached by the operator's balance adjustment (issue
+  // #162 security review).
   const ledgerResult = await client.query<CreditLedgerEntry>(
     `INSERT INTO credit_ledger (
        user_id, initial_amount, remaining_amount, source_type,
        source_reference_id, source_order_id, source_metadata, activated_at,
        expires_at, expiration_policy, expiration_days, status, description
      ) VALUES ($1, $2, $2, $3, $4, $10, $5, NOW(), $6, $7, $8, 'active', $9)
-     RETURNING *`,
+     RETURNING ledger_id, user_id, initial_amount, remaining_amount, source_type,
+               source_reference_id, source_order_id, source_metadata, activated_at,
+               expires_at, expiration_policy, expiration_days, status,
+               related_ledger_id, created_at, updated_at`,
     [
       userId,
       credits,
@@ -246,7 +247,8 @@ export async function addCreditsToLedgerWithClient(
     `INSERT INTO credit_transactions (
        user_id, amount, balance_after, type, reference_type, reference_id, description
      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-     RETURNING *`,
+     RETURNING transaction_id, user_id, amount, balance_after, type,
+               reference_type, reference_id, created_at`,
     [
       userId,
       credits,
@@ -304,8 +306,6 @@ export async function deductCreditsFromLedgerWithClient(
     if (userResult.rows.length === 0) {
       throw new Error('User not found');
     }
-
-    const user = userResult.rows[0];
 
     // Get available ledger entries in consumption order
     // FIFO with expiration priority: expire soonest first, then oldest
@@ -410,121 +410,6 @@ export async function deductCreditsFromLedgerWithClient(
 }
 
 /**
- * Refund credits to user's ledger
- *
- * Creates a new ledger entry linked to the original (if provided).
- * Can inherit expiration from original or set new expiration.
- *
- * @throws Error if credits <= 0
- * @throws Error if user not found
- */
-export async function refundCreditsToLedger(
-  params: RefundCreditsToLedgerParams
-): Promise<CreditLedgerOperationResult> {
-  const {
-    userId,
-    originalLedgerId,
-    credits,
-    orderId,
-    reason,
-    inheritExpiration,
-    newExpirationDays,
-  } = params;
-
-  if (credits <= 0) {
-    throw new Error('Credits must be positive');
-  }
-
-  return await transaction(async (client) => {
-    // Get original ledger entry if provided
-    let expiresAt: Date | null = null;
-    let expirationPolicy: string = 'never';
-    let expirationDays: number | null = null;
-
-    if (originalLedgerId && inheritExpiration) {
-      const originalResult = await client.query<CreditLedgerEntry>(
-        'SELECT * FROM credit_ledger WHERE ledger_id = $1',
-        [originalLedgerId]
-      );
-      if (originalResult.rows.length > 0) {
-        const original = originalResult.rows[0];
-        expiresAt = original.expires_at || null;
-        expirationPolicy = original.expiration_policy || 'never';
-        expirationDays = original.expiration_days || null;
-      }
-    } else if (newExpirationDays) {
-      expiresAt = new Date();
-      expiresAt.setDate(expiresAt.getDate() + newExpirationDays);
-      expirationPolicy = 'days_from_activation';
-      expirationDays = newExpirationDays;
-    }
-
-    // Update user balance
-    const userResult = await client.query<User>(
-      `UPDATE users
-       SET credits = credits + $1,
-           credits_purchased = credits_purchased - $1,
-           updated_at = NOW()
-       WHERE user_id = $2
-       RETURNING *`,
-      [credits, userId]
-    );
-
-    if (userResult.rows.length === 0) {
-      throw new Error('User not found');
-    }
-
-    const user = userResult.rows[0];
-
-    // Create ledger entry for refund
-    const ledgerResult = await client.query<CreditLedgerEntry>(
-      `INSERT INTO credit_ledger (
-        user_id, initial_amount, remaining_amount, source_type,
-        source_reference_id, activated_at, expires_at,
-        expiration_policy, expiration_days, status, description, related_ledger_id
-      ) VALUES ($1, $2, $2, 'refund', $3, NOW(), $4, $5, $6, 'active', $7, $8)
-      RETURNING *`,
-      [
-        userId,
-        credits,
-        orderId || null,
-        expiresAt,
-        expirationPolicy,
-        expirationDays,
-        reason || `Refunded ${credits} credits`,
-        originalLedgerId || null,
-      ]
-    );
-    const ledgerEntry = ledgerResult.rows[0];
-
-    // Record transaction
-    const txResult = await client.query<CreditTransaction>(
-      `INSERT INTO credit_transactions (
-        user_id, amount, balance_after, type, reference_type, reference_id, description
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-      RETURNING *`,
-      [
-        userId,
-        credits,
-        user.credits,
-        'refund',
-        'order',
-        orderId || ledgerEntry.ledger_id,
-        reason || `Refunded ${credits} credits`,
-      ]
-    );
-    const txn = txResult.rows[0];
-
-    writeDiagnostic('info', 'credits.ledger_refunded', {
-      credits,
-      newBalance: user.credits
-    });
-
-    return { user, transaction: txn, ledgerEntry };
-  });
-}
-
-/**
  * Get detailed credit balance with expiration breakdown
  */
 export async function getDetailedBalance(
@@ -542,7 +427,6 @@ export async function getDetailedBalance(
   );
 
   const entries = result.rows;
-  const now = new Date();
   const thirtyDaysFromNow = new Date();
   thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
 
@@ -663,33 +547,6 @@ export async function getLedgerEntries(
     entries: result.rows,
     total: parseInt(countResult.rows[0].count, 10),
   };
-}
-
-/**
- * Get credits expiring within specified days
- */
-export async function getExpiringCredits(
-  userId: string,
-  withinDays: number
-): Promise<{ total: number; entries: CreditLedgerEntry[] }> {
-  const futureDate = new Date();
-  futureDate.setDate(futureDate.getDate() + withinDays);
-
-  const result = await query<CreditLedgerEntry>(
-    `SELECT * FROM credit_ledger
-     WHERE user_id = $1
-       AND status = 'active'
-       AND remaining_amount > 0
-       AND expires_at IS NOT NULL
-       AND expires_at > NOW()
-       AND expires_at <= $2
-     ORDER BY expires_at ASC`,
-    [userId, futureDate]
-  );
-
-  const total = result.rows.reduce((sum, entry) => sum + entry.remaining_amount, 0);
-
-  return { total, entries: result.rows };
 }
 
 /**
@@ -895,6 +752,9 @@ export async function isLetterAlreadyCompensated(
   params: { letterId: string; userId: string }
 ): Promise<boolean> {
   if (await hasReturnedCreditsForLetter(client, params)) return true;
+  // A gift letter consumed no credits; its compensation is a returned gift
+  // or the reversal of the purchase that granted it.
+  if (await isGiftLetterCompensated(client, params.letterId)) return true;
   const consumed = await client.query<{ all_revoked: boolean | null }>(
     `SELECT bool_and(lot.status = 'revoked') AS all_revoked
        FROM credit_consumption consumption
@@ -909,11 +769,27 @@ export async function isLetterAlreadyCompensated(
   return consumed.rows[0]?.all_revoked === true;
 }
 
+/**
+ * Why a letter's credits go back: its send failed, or the person cancelled it
+ * while it was held (#535, scheduledMailService). Both are recorded under the
+ * reason 'send_failed', so the exactly-once marker above and the operator's
+ * retry guard (isLetterAlreadyCompensated) count either: the letter's value
+ * went back before it mailed. failure_code says which, and the descriptions,
+ * which the account's history shows, say it in words.
+ */
+export type CreditReturnCause = 'failed' | 'cancelled';
+
+/**
+ * Returns the credits re-issued, those already expired included: they are on
+ * record but neither in the balance nor in the account's history (below).
+ */
 export async function returnConsumedCreditsForLetter(
   client: Pick<pg.PoolClient, 'query'>,
-  params: { letterId: string; userId: string; failureCode: string }
+  params: { letterId: string; userId: string; failureCode: string; cause?: CreditReturnCause }
 ): Promise<number> {
   const { letterId, userId, failureCode } = params;
+  const cancelled = params.cause === 'cancelled';
+  const description = `Returned after ${cancelled ? 'cancelled' : 'failed'} send ${letterId}`;
   await lockAccountForBalanceChange(client, userId);
 
   if (await hasReturnedCreditsForLetter(client, { letterId, userId })) return 0;
@@ -929,11 +805,16 @@ export async function returnConsumedCreditsForLetter(
     status: string;
     source_reference_id: string | null;
     stripe_session_id: string | null;
+    expired: boolean;
   }>(
+    // expired is decided by the database's clock, as every balance read does
+    // (expires_at > NOW()), so a lot is never counted one way here and the
+    // other way there.
     `SELECT consumption.ledger_id, consumption.amount,
             lot.expires_at, lot.expiration_policy, lot.status,
             lot.source_reference_id,
-            lot.source_metadata->>'stripe_session_id' AS stripe_session_id
+            lot.source_metadata->>'stripe_session_id' AS stripe_session_id,
+            (lot.expires_at IS NOT NULL AND lot.expires_at <= NOW()) AS expired
        FROM credit_consumption consumption
        JOIN credit_transactions txn ON txn.transaction_id = consumption.transaction_id
        JOIN credit_ledger lot ON lot.ledger_id = consumption.ledger_id
@@ -945,7 +826,14 @@ export async function returnConsumedCreditsForLetter(
   );
   if (consumed.rows.length === 0) return 0;
 
+  // returned counts every credit re-issued; usable, those not already expired.
+  // A lot keeps its expiry, so one that ran out since the deduction (a send
+  // that failed late, or mail held to a date and cancelled, #535) comes back
+  // as 'expired': on record, so the exactly-once marker and the retry guard
+  // see it, but never in the cached balance or the account's history, which
+  // would otherwise show a letter the ledger will not spend.
   let returned = 0;
+  let usable = 0;
   for (const lot of consumed.rows) {
     if (lot.amount <= 0) continue;
     // A revoked lot was already paid back in cash. Refunding a pack zeroes its
@@ -959,7 +847,7 @@ export async function returnConsumedCreditsForLetter(
          user_id, initial_amount, remaining_amount, source_type,
          source_reference_id, source_metadata, activated_at,
          expires_at, expiration_policy, status, description, related_ledger_id
-       ) VALUES ($1, $2, $2, 'adjustment', $3, $4, NOW(), $5, $6, 'active', $7, $8)`,
+       ) VALUES ($1, $2, $2, 'adjustment', $3, $4, NOW(), $5, $6, $9, $7, $8)`,
       [
         userId,
         lot.amount,
@@ -987,31 +875,36 @@ export async function returnConsumedCreditsForLetter(
         }),
         lot.expires_at,
         lot.expiration_policy,
-        `Returned after failed send ${letterId}`,
-        lot.ledger_id
+        description,
+        lot.ledger_id,
+        lot.expired ? 'expired' : 'active'
       ]
     );
     returned += lot.amount;
+    if (!lot.expired) usable += lot.amount;
   }
   if (returned === 0) return 0;
 
-  await client.query(
-    `UPDATE users SET credits = credits + $1, updated_at = NOW() WHERE user_id = $2`,
-    [returned, userId]
-  );
+  if (usable > 0) {
+    await client.query(
+      `UPDATE users SET credits = credits + $1, updated_at = NOW() WHERE user_id = $2`,
+      [usable, userId]
+    );
 
-  // balance_after is read after the update above, so the snapshot matches the
-  // balance this transaction produced.
-  await client.query(
-    `INSERT INTO credit_transactions (
-       user_id, amount, balance_after, type, reference_type, reference_id, description
-     ) SELECT $1::varchar, $2::int, credits, 'refund', 'letter', $3::varchar, $4::text
-         FROM users WHERE user_id = $1::varchar`,
-    [userId, returned, letterId, `Returned after failed send ${letterId}`]
-  );
+    // balance_after is read after the update above, so the snapshot matches the
+    // balance this transaction produced.
+    await client.query(
+      `INSERT INTO credit_transactions (
+         user_id, amount, balance_after, type, reference_type, reference_id, description
+       ) SELECT $1::varchar, $2::int, credits, 'refund', 'letter', $3::varchar, $4::text
+           FROM users WHERE user_id = $1::varchar`,
+      [userId, usable, letterId, description]
+    );
+  }
 
-  writeDiagnostic('info', 'credits.returned_after_failed_send', {
+  writeDiagnostic('info', cancelled ? 'credits.returned_after_cancelled_send' : 'credits.returned_after_failed_send', {
     creditsReturned: returned,
+    creditsExpired: returned - usable,
     lotsRestored: consumed.rows.length
   });
 

@@ -15,6 +15,9 @@ export const ADMIN_ERROR_HTTP_STATUS = {
   ADMIN_INVALID_STATE: 409,
   ADMIN_PAYLOAD_TOO_LARGE: 413,
   ADMIN_RATE_LIMITED: 429,
+  // Never thrown: the code on the one admin.request_denied_burst audit row a
+  // minute carries when denials exceed the individual-row budget (A-15).
+  ADMIN_DENIAL_BURST: 429,
   ADMIN_INVALID_CONFIGURATION: 500,
   ADMIN_LEGACY_ROUTES_DISABLED: 500,
   ADMIN_AUDIT_WRITE_FAILED: 500,
@@ -25,6 +28,7 @@ export const ADMIN_ERROR_HTTP_STATUS = {
   ADMIN_DATABASE_HOST_MISMATCH: 503,
   ADMIN_DATABASE_NAME_MISMATCH: 503,
   ADMIN_DATABASE_ROLE_MISMATCH: 503,
+  ADMIN_READER_ROLE_TOO_WIDE: 503,
   ADMIN_TAILSCALE_UNAVAILABLE: 503,
   ADMIN_TAILSCALE_NEEDS_LOGIN: 503,
   ADMIN_TAILSCALE_TAG_MISMATCH: 503,
@@ -57,6 +61,7 @@ const ADMIN_PUBLIC_MESSAGES: Record<AdminErrorCode, string> = {
   ADMIN_INVALID_STATE: "The target is not in a state that permits this action.",
   ADMIN_PAYLOAD_TOO_LARGE: "The request body exceeds the configured limit.",
   ADMIN_RATE_LIMITED: "Too many requests; slow down.",
+  ADMIN_DENIAL_BURST: "Denials exceeded the per-minute audit budget; the burst row carries the counts.",
   ADMIN_INVALID_CONFIGURATION: "The admin configuration is invalid.",
   ADMIN_LEGACY_ROUTES_DISABLED: "Legacy public admin routes are disabled.",
   ADMIN_AUDIT_WRITE_FAILED: "The admin audit event could not be recorded.",
@@ -73,6 +78,8 @@ const ADMIN_PUBLIC_MESSAGES: Record<AdminErrorCode, string> = {
     "The selected database name does not match local admin configuration.",
   ADMIN_DATABASE_ROLE_MISMATCH:
     "The connected database role does not match the requested admin mode.",
+  ADMIN_READER_ROLE_TOO_WIDE:
+    "The admin reader role can read what its column grants withhold.",
   ADMIN_TAILSCALE_UNAVAILABLE: "The Tailscale daemon did not become ready.",
   ADMIN_TAILSCALE_NEEDS_LOGIN:
     "The Tailscale node needs a login and no auth key was provided.",

@@ -8,7 +8,9 @@ export interface AlertView {
   status: string;
   orderId: string | null;
   sourceEventId: string | null;
-  /** Serialized, bounded; alert details never carry PII by policy. */
+  /** The account the details name, when they name one: an erasure's follow-up (#453). */
+  accountUserId: string | null;
+  /** Serialized, bounded; by policy alert details carry no personal data beyond an account id. */
   details: string;
   createdAt: Date;
   updatedAt: Date;
@@ -47,6 +49,11 @@ export function serializeDetails(details: unknown, maxLength = 2000): string {
   return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
 }
 
+function accountOf(details: unknown): string | null {
+  const userId = (details as { userId?: unknown } | null)?.userId;
+  return typeof userId === "string" && userId.length > 0 ? userId : null;
+}
+
 function toAlertView(row: AlertRow): AlertView {
   return {
     alertId: row.alert_id,
@@ -55,6 +62,7 @@ function toAlertView(row: AlertRow): AlertView {
     status: row.status,
     orderId: row.order_id,
     sourceEventId: row.source_event_id,
+    accountUserId: accountOf(row.details),
     details: serializeDetails(row.details),
     createdAt: row.created_at,
     updatedAt: row.updated_at,

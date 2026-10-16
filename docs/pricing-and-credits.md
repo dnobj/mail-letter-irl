@@ -1,6 +1,7 @@
 # Letter IRL Pricing & Packages
 
-**Last Updated:** February 5, 2026
+**Last Updated:** October 2, 2026
+**Purpose:** Letter pack and Pay & Send pricing, letter specifications, and refund handling
 
 ## Overview
 
@@ -22,20 +23,32 @@ Letter IRL offers letter packages for purchase. Users buy letter packs and use t
 
 **Best Value:** Power Pack - 10% discount per letter compared to Regular
 
+**Gift letter:** while `LETTER_IRL_GIFT_LETTERS_ENABLED` is on, every pack also grants one gift
+letter: a free send that prints a card for the recipient with a code for a letter of their own
+([Gift Letters](gift-letters.md)). The pack price does not change. At most one further free letter
+descends from each pack's gift, so the most a pack's gift can cost is about $2.66 in postage.
+
 ---
 
 ## Letter Specifications
 
 ### Standard Letter
-- **Page Limit:** One page maximum (~1,800 characters)
+- **Page Limit:** One page; the character limit depends on the layout (below)
 - **Delivery:** Standard First Class Mail (USPS)
 - **Features:** Black & white, single-sided
 
 ### Character Limits
-- **Maximum:** ~1,800 characters total (body text + sign-off)
-- **Approximately:** 300-400 words, or about 2-3 paragraphs
-- **Font:** Times New Roman, 12pt
-- **Margins:** Standard (1 inch all sides, 3.5 inch top for address window)
+
+| Layout | Tool | Characters (body + sign-off) | Lines |
+|--------|------|------------------------------|-------|
+| Text only | `quote_and_preview_letter` | 1,600 | 24 |
+| Header image | `quote_and_preview_letter_with_header_image` | 1,100 | 17 |
+| Enclosed image | `quote_and_preview_letter_with_image` | 800 | 12 |
+| Postcard (6x9) | `quote_and_preview_postcard` | 500 (message) | - |
+
+The limits are `LAYOUT_CHARACTER_LIMITS` and `LAYOUT_LINE_LIMITS` in `src/services/previewService.ts`.
+
+A text-only letter holds roughly 250-300 words.
 
 ---
 
@@ -57,15 +70,18 @@ We plan to introduce additional letter types:
 
 ## Payment Methods
 
-### Stripe Checkout
-- **Primary Method:** Credit/debit card via Stripe
-- **Security:** PCI-compliant, encrypted transactions
-- **Accepted Cards:** Visa, Mastercard, American Express, Discover
+### Stripe Checkout (current)
+- **How:** Stripe-hosted Checkout, opened from the ChatGPT card (`create_pack_checkout`,
+  `create_mail_checkout`) or from the letterirl.com dashboard. Letter IRL never sees card data
+- **Methods:** cards, plus whatever wallets and methods are enabled in Stripe for the account
+- **Security:** PCI-compliant, handled entirely by Stripe
 
-### OpenAI Agentic Commerce (Coming Soon)
-- **In-ChatGPT Purchases:** Buy letter packs directly in conversation
-- **Seamless:** No leaving ChatGPT
-- **Same Pricing:** Identical packages and rates
+### Agentic Commerce Protocol (planned, platform-gated)
+- **Goal:** complete the purchase inside ChatGPT without leaving the conversation
+- **Status:** not available to Letter IRL yet. In-ChatGPT checkout is limited-access, and OpenAI's app
+  guidelines, when last checked (2026-09-13), allowed commerce only for physical goods, not credits.
+  Pay & Send is therefore the likelier first ACP product
+- **Plan:** [acp-implementation-guide.md](acp-implementation-guide.md)
 
 ---
 
@@ -123,7 +139,7 @@ promise, and no tool in ChatGPT can request it. To ask:
 
 **Advantages:**
 1. **Predictable costs** - Know exactly what you'll pay
-2. **No hidden fees** - Letters never expire
+2. **No hidden fees** - Letters stay valid for 24 months from purchase
 3. **Volume discounts** - Save more with larger purchases
 4. **Flexibility** - Use letters when you need them
 5. **Future-ready** - Easy to add premium letter types
@@ -164,7 +180,7 @@ For high-volume users (500+ letters/month), contact us for custom pricing:
 - Custom integrations and API access
 - SLA guarantees
 
-Email: support@letter-irl.com
+Email: support@letterirl.com
 
 ---
 
@@ -175,10 +191,10 @@ This pricing is effective as of November 19, 2025 and subject to change. Users w
 **Version:** 1.0
 **Effective Date:** November 19, 2025
 
-# Pay & Send pricing
+## Pay & Send Pricing
 
-Pay & Send sells one exact physical letter or postcard and does not add prepaid
-balance. Letter packs remain the discounted prepaid option. **JIT amounts are
+Pay & Send sells one exact physical letter or postcard for **$4.99** and does not add
+prepaid balance. Letter packs remain the discounted prepaid option. **JIT amounts are
 pinned in code**, not environment configuration: `src/config/products.ts` holds
 `expectedAmountCents`, and the catalogue refuses to sell a product whose Stripe
 Price does not resolve to exactly that figure. The `*_AMOUNT_CENTS` variables
@@ -186,6 +202,41 @@ were removed in #275 and exist nowhere in `src/`, `scripts/` or `.env.example`.
 Approving a launch price other than the pinned one requires a code edit and a
 deploy, not a Railway change.
 Payment authorizes immediate fulfillment of the immutable previewed item.
+
+### The mail options (#578, proposed)
+
+Letters longer than one page and postcards in other sizes are sold through Pay &
+Send only, each at its own price. The prices are the proposal on epic #537,
+used in development until the owner approves them:
+
+| Option | Product | Price | Flag |
+|--------|---------|-------|------|
+| One-page letter | `jit-letter` | $4.99 | none |
+| Two-page letter, double-sided | `jit-letter-2-pages` | $5.99 | `LETTER_IRL_ROOM_TO_WRITE_ENABLED` |
+| Three-page letter, double-sided | `jit-letter-3-pages` | $6.99 | `LETTER_IRL_ROOM_TO_WRITE_ENABLED` |
+| 4x6 postcard | `jit-postcard-4x6` | $3.99 | `LETTER_IRL_POSTCARD_SIZES_ENABLED` |
+| 6x9 postcard | `jit-postcard` | $4.99 | none |
+| 11x6 postcard | `jit-postcard-11x6` | $5.99 | `LETTER_IRL_POSTCARD_SIZES_ENABLED` |
+| Certified mail letter (one to three pages) | `jit-letter-certified` | $11.99 | `LETTER_IRL_CERTIFIED_MAIL_ENABLED` |
+| Certified mail letter with electronic return receipt | `jit-letter-certified-receipt` | $14.99 | `LETTER_IRL_CERTIFIED_MAIL_ENABLED` |
+
+Certified mail (#625) is USPS Certified Mail, sent through PostGrid's `extraService`, for a letter only: never a
+postcard, never a gift send. The price is flat for one to three pages. PostGrid's public prices are $6.94 for certified
+mail and $9.85 with the electronic return receipt. If those include the letter itself, these prices leave about $4.40
+after Stripe's fee; if they are added to the letter's own cost of roughly $1.06 (our 2025 notes of PostGrid's price list, in
+[layout-options-research.md](learnings/layout-options-research.md), list certified as an add-on), about $3.30. That is
+to be confirmed with PostGrid. They are the proposal on issue #625, the owner's call, used in development until
+approved. Production waits for that approval.
+
+- **Flags:** an option is sold only while its flag is on, as well as Pay & Send. Each flag also switches its option on, so an option is never offered without a price. The longer letters and the 4x6 and 11x6 postcards are offered only on our renderer as well (`LETTER_IRL_PRINT_RENDERER=pdf`, #586, #594).
+- **Off:** with its flag off, an option has no price at all. A quote offers no Pay & Send for it, and a checkout is refused rather than charging a smaller option's price.
+- **Ordering:** a checkout is priced by the product its order recorded.
+- **Fulfilment:** a paid order mails only the mail it paid for. A draft whose option no longer matches the order's product, such as a letter that changed length after its checkout opened, is refused (`JIT_PRODUCT_MISMATCH`) and the order goes to `refund_pending`, rather than mailing at another option's price (#586). A letter's pages are stored on its draft (`letter_drafts.pages`, migration 047), and every price, refusal and checkout reads them there.
+- **Packs and gift letters** pay for one-page standard letters and 6x9 postcards only (#579), in any layout and stationery. Every other option, certified mail included (#625), is paid per send with Pay & Send, whatever the balance:
+  - the quote offers no pack and no send from the balance for it;
+  - the send refuses a pack or gift letter for it (`PACK_CANNOT_PAY`);
+  - a Pay & Send checkout for it is never refused because the balance could pay.
+- **Where it is paid:** in an app that takes purchases (ChatGPT), on the card. In Claude, VS Code and for agents, on the confirmation page that the card's button and `request_send` link to.
 
 Qualifying purchases grant explicit image entitlements. The defaults are five
 per prepaid physical-mail entitlement and two future generations per completed

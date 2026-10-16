@@ -7,6 +7,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { friendlyCheckoutError } from '../../../src/tools/createMailCheckout.js';
+import { SpendLimitError } from '../../../src/services/betaSpendLimits.js';
 import { friendlyDraftError as letterDraftError } from '../../../src/tools/sendLetter.js';
 import { friendlyDraftError as postcardDraftError } from '../../../src/tools/sendPostcard.js';
 
@@ -64,11 +65,64 @@ describe('friendlyCheckoutError terminality (#278)', () => {
     expect((friendly as { diagnosticClass?: string }).diagnosticClass).toBe(diagnosticClass);
   });
 
+  it('refuses a missed mail date before any charge, with a new preview as the way on (#535)', () => {
+    const friendly = friendlyCheckoutError(Object.assign(new Error('Draft has missed its mail date'), { code: 'SCHEDULE_PASSED' }));
+    expect(friendly.message).toBe(
+      'The day this mail was to go to the printer has passed, so it can no longer arrive by its date. Please create a new preview with a new arrival date.'
+    );
+    expect((friendly as { code?: string }).code).toBe('SCHEDULE_PASSED');
+  });
+
+  it('refuses a full mail date before any charge, naming the open dates (#700)', () => {
+    const friendly = friendlyCheckoutError(
+      Object.assign(new Error('Draft mail date is full'), { code: 'SCHEDULE_FULL', openArrivals: ['2026-10-15'] })
+    );
+    expect(friendly.message).toMatch(
+      /^Mail to arrive by its date is now fully booked, so nothing was charged\. The nearest arrival date with room is \w{3}, Oct 15(, 2026)? \(2026-10-15\)\. Choose another arrival date for it, or none to send it as soon as possible, then try again\.$/
+    );
+    expect((friendly as { code?: string }).code).toBe('SCHEDULE_FULL');
+  });
+
   it('never leaks the internal message', () => {
     const friendly = friendlyCheckoutError(
       Object.assign(new Error('cs_private pi_private'), { code: 'PROVIDER_ERROR' })
     );
     expect(friendly.message).not.toContain('cs_private');
+  });
+
+  it('refuses an option no longer sold, with a new preview as the way on (#578)', () => {
+    const friendly = friendlyCheckoutError(
+      Object.assign(new Error('Pay & Send does not sell this mail option'), { code: 'JIT_OPTION_NOT_SOLD' })
+    );
+    expect(friendly.message).toBe("Pay & Send isn't available for this mail. Please create a new preview.");
+    expect((friendly as { code?: string }).code).toBe('JIT_OPTION_NOT_SOLD');
+  });
+
+  it('says a letter that changed while its payment opened can be tried again, nothing charged (#586)', () => {
+    const friendly = friendlyCheckoutError(
+      Object.assign(new Error('The draft changed while its checkout was being made'), { code: 'DRAFT_CHANGED' })
+    );
+    expect(friendly.message).toBe('This letter changed while its payment was being opened, so nothing was charged. Please try again.');
+    expect((friendly as { code?: string }).code).toBe('DRAFT_CHANGED');
+  });
+
+  it('says mail changed after it was shown was not charged, and keeps the code (#695)', () => {
+    const friendly = friendlyCheckoutError(
+      Object.assign(new Error('Draft changed since it was shown'), { code: 'DRAFT_CHANGED_SINCE_SHOWN', diagnosticClass: 'DRAFT_CHANGED_SINCE_SHOWN' })
+    );
+    expect(friendly.message).toBe(
+      'This mail changed after it was shown, so nothing was charged. Show the person the mail as it is now (its preview card, or a new preview), and open the payment once they have seen it.'
+    );
+    expect(friendly).toMatchObject({ code: 'DRAFT_CHANGED_SINCE_SHOWN', diagnosticClass: 'DRAFT_CHANGED_SINCE_SHOWN' });
+  });
+
+  it('says a letter whose last payment link is still closing can be paid again in a few minutes (#593 review round 1)', () => {
+    const friendly = friendlyCheckoutError(
+      Object.assign(new Error('The previous checkout for this draft is still closing'), { code: 'PREVIOUS_CHECKOUT_CLOSING' })
+    );
+    expect(friendly.message).toBe(
+      'This letter changed after its last payment link was opened, and that link is still closing. Please try again in a few minutes; it can take up to an hour.'
+    );
   });
 });
 
@@ -115,5 +169,24 @@ describe('account-blocked wording on the send surface (#278)', () => {
     });
 
     expect(friendlyDraftError(upstream, 'draft-1').message).not.toBe('raw upstream text');
+  });
+});
+
+/**
+ * A daily limit on Pay & Send (#511's follow-up). Pay & Send checks the day's
+ * mail count and the day's spending before it creates anything, and both
+ * refusals say when the account can go again. The default branch used to
+ * replace them with "Please try again", which cannot work until the next day.
+ */
+describe('friendlyCheckoutError and the daily limits', () => {
+  it.each([
+    ['ACCOUNT_DAILY_MAIL_CAP', 'This account has reached its daily limit of 3 letters and postcards. Please try again tomorrow.'],
+    ['ACCOUNT_DAILY_CHARGE_CAP', 'This account has reached its daily purchase limit. Please try again tomorrow.'],
+    ['CHARGE_ABOVE_DAILY_CAP', 'This purchase is more than one account can spend in a day, so it cannot be bought. Please choose a smaller pack.']
+  ])('passes on the %s sentence as it is', (code, sentence) => {
+    const friendly = friendlyCheckoutError(new SpendLimitError(code, sentence));
+    expect(friendly.message).toBe(sentence);
+    expect((friendly as Error & { code?: string }).code).toBe(code);
+    expect(friendly.message).not.toBe('Unable to create Pay & Send checkout. Please try again.');
   });
 });

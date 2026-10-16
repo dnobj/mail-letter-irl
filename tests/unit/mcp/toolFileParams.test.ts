@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
-import { toolInputSchemas } from '../../../src/mcp/toolSchemas.js';
 import { getZodInputShape } from '../../../src/mcp/registerTools.js';
+import { UNRESOLVED_IMAGE_FILE_ID } from '../../../src/utils/imageFileParam.js';
 
 /**
  * Issue #227. The Apps SDK file-param contract is enforced against the SERVED
@@ -21,18 +21,17 @@ const IMAGE_TOOLS = [
 ] as const;
 
 function servedImageSchema(tool: (typeof IMAGE_TOOLS)[number]): Record<string, unknown> {
-  const converted = zodToJsonSchema(toolInputSchemas[tool] as never) as {
+  const converted = zodToJsonSchema(z.object(getZodInputShape(tool)!) as never) as {
     properties?: Record<string, Record<string, unknown>>;
   };
   return converted.properties?.image ?? {};
 }
 
 describe('SERVED file-param schemas via registerTools (the layer that mattered)', () => {
-  // Round 2 of this bug: toolSchemas.ts is imported by registerTools for its
-  // TYPES only - the schemas actually served to ChatGPT come from
-  // zodSchemas.ts via zodInputSchemas/getZodInputShape, where the image param
-  // was z.any() (serializing to {}). These pin the true serving path: the
-  // SDK converts the shape returned by getZodInputShape.
+  // Round 2 of this bug: the schemas served to ChatGPT come from zodSchemas.ts
+  // via getZodInputShape, where the image param was z.any() (serializing to {}).
+  // These pin the true serving path: the SDK converts the shape returned by
+  // getZodInputShape. (A typed copy, toolSchemas.ts, was deleted in #688.)
   it.each(IMAGE_TOOLS)('%s serves the four-property file object through getZodInputShape', tool => {
     const shape = getZodInputShape(tool);
     expect(shape).toBeDefined();
@@ -51,7 +50,7 @@ describe('SERVED file-param schemas via registerTools (the layer that mattered)'
     expect((image.required as string[]).sort()).toEqual(['download_url', 'file_id']);
   });
 
-  it.each(IMAGE_TOOLS)('%s degrades mobile string values to no-image at the served layer', tool => {
+  it.each(IMAGE_TOOLS)('%s parses mobile string values without an error at the served layer', tool => {
     const shape = getZodInputShape(tool);
     const schema = z.object(shape);
     const base = {
@@ -68,9 +67,17 @@ describe('SERVED file-param schemas via registerTools (the layer that mattered)'
       tool === 'quote_and_preview_postcard'
         ? { message: 'hi' }
         : { bodyText: 'hi', signOff: 'bye' };
-    for (const value of ['', 'attached', 'chat_upload://image_0', '/mnt/data/x.png', 'file_0000abcd']) {
+    // '' means nothing attached. Any other string names a picture the server
+    // cannot open, kept as a marker so the handlers do not print an older
+    // upload in its place (#414).
+    const parsedEmpty = schema.parse({ ...base, ...extras, image: '' }) as { image?: unknown };
+    expect(parsedEmpty.image).toBeUndefined();
+    for (const value of ['attached', 'chat_upload://image_0', '/mnt/data/x.png', 'file_0000abcd']) {
       const parsed = schema.parse({ ...base, ...extras, image: value }) as { image?: unknown };
-      expect(parsed.image, `string ${JSON.stringify(value)} must degrade to absent`).toBeUndefined();
+      expect(parsed.image, `string ${JSON.stringify(value)} must become the marker`).toEqual({
+        download_url: '',
+        file_id: UNRESOLVED_IMAGE_FILE_ID
+      });
     }
     const withFile = schema.parse({
       ...base,
@@ -97,12 +104,13 @@ describe('served file-param schemas (Apps SDK contract)', () => {
     expect((image.required as string[]).sort()).toEqual(['download_url', 'file_id']);
   });
 
-  it.each(IMAGE_TOOLS)('%s tolerates mobile string values by degrading to no-image', tool => {
+  it.each(IMAGE_TOOLS)('%s tolerates mobile string values without a validation error', tool => {
     // Mobile sends strings instead of file objects ('' when nothing attached;
     // 'chat_upload'/'chat_upload://image_0' per openai-apps-sdk-examples#185;
-    // 'attached' observed historically). Each must parse cleanly to an ABSENT
-    // image so the handlers' graceful picker fallback runs - never a zod
-    // validation error surfaced to the model.
+    // 'attached' observed historically). Each must parse cleanly - never a
+    // zod validation error surfaced to the model. '' becomes an absent image;
+    // any other string becomes the unresolved marker (#414), which the
+    // handlers answer with the upload picker guidance.
     const base = {
       recipient: {
         name: 'R',
@@ -117,14 +125,19 @@ describe('served file-param schemas (Apps SDK contract)', () => {
       tool === 'quote_and_preview_postcard'
         ? { message: 'hi' }
         : { bodyText: 'hi', signOff: 'bye' };
-    for (const value of ['', 'attached', 'chat_upload', 'chat_upload://image_0', '/mnt/data/x.png', 'file_0000abcd']) {
-      const parsed = toolInputSchemas[tool].parse({ ...base, ...extras, image: value }) as {
+    const parsedEmpty = z.object(getZodInputShape(tool)!).parse({ ...base, ...extras, image: '' }) as { image?: unknown };
+    expect(parsedEmpty.image).toBeUndefined();
+    for (const value of ['attached', 'chat_upload', 'chat_upload://image_0', '/mnt/data/x.png', 'file_0000abcd']) {
+      const parsed = z.object(getZodInputShape(tool)!).parse({ ...base, ...extras, image: value }) as {
         image?: unknown;
       };
-      expect(parsed.image, `string ${JSON.stringify(value)} must degrade to absent`).toBeUndefined();
+      expect(parsed.image, `string ${JSON.stringify(value)} must become the marker`).toEqual({
+        download_url: '',
+        file_id: UNRESOLVED_IMAGE_FILE_ID
+      });
     }
     // And a real file object passes through intact.
-    const withFile = toolInputSchemas[tool].parse({
+    const withFile = z.object(getZodInputShape(tool)!).parse({
       ...base,
       ...extras,
       image: { download_url: 'https://files.example/f1', file_id: 'file_1', mime_type: 'image/png' }

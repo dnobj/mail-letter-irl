@@ -1,5 +1,10 @@
 # Scope and Goals
 
+> **Historical (November 2025): the original v1 scope.** Much of it has since changed. Payments and
+> purchases are no longer a non-goal: letter packs and Pay & Send are live, and letters cost 2
+> internal credits each, shown to users as letters. For the current product see
+> [status.md](status.md) and [business-overview.md](business-overview.md).
+
 ## Product Snapshot
 - **Product name:** Letter IRL
 - **Primary objective:** Enable ChatGPT users to draft, review, and mail physical letters using the Apps SDK integration.
@@ -26,7 +31,8 @@
 - Payments or credit purchases.
 - Batch, bulk, or campaign mailings.
 - Special delivery classes (certified, registered, signature-required).
-- Legal compliance automations, notarization, or authenticity QR codes.
+- Legal compliance automations, notarization, or authenticity QR codes. (The QR on a gift
+  letter's card is a claim link, not an authenticity mark; see gift-letters.md.)
 - Automatic verification of letter authenticity (kept on roadmap).
 
 ## Hand-off Notes

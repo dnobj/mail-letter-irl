@@ -17,14 +17,20 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../../../src/services/commerceService.js', () => ({
-  createPackCheckout: mocks.createPackCheckout
+  createPackCheckout: mocks.createPackCheckout,
+  // The real helper derives the origin from env; the shape is all that
+  // matters here.
+  purchaseStartUrl: (checkoutUrl: string) =>
+    `https://api.example.test/purchase/start?to=${encodeURIComponent(checkoutUrl)}`
 }));
 vi.mock('../../../src/services/userService.js', () => ({
   findUser: mocks.findUser
 }));
 
 import { createPackCheckoutTool } from '../../../src/tools/createPackCheckout.js';
+import { clientProfileNamed } from '../../../src/auth/clientProfiles.js';
 import { PACK_PRODUCTS } from '../../../src/config/products.js';
+import { SpendLimitError } from '../../../src/services/betaSpendLimits.js';
 
 const context = {
   user: { userId: 'user-1', creditsRemaining: 0, orders: [] },
@@ -68,6 +74,35 @@ describe('create_pack_checkout', () => {
       expect.objectContaining({ productId: productCode, userId: 'user-1' })
     );
     expect(result.letters).toBe(letters);
+  });
+
+  it('tells the model to present the checkout link, and quotes the server-formatted price', async () => {
+    // Issue #322: in production the model twice described a checkout as
+    // "ready" or "shown above" with no link, once with a fabricated URL. The
+    // message is the field it reads most reliably, so the instruction lives
+    // there as well as in the description; displayAmount keeps the card and
+    // the prose quoting one figure.
+    const result = await createPackCheckoutTool.handler({ pack: 'regular' } as never, context);
+
+    expect(result.checkoutUrl).toBe('https://checkout.stripe.com/c/pay/cs_test');
+    expect(result.displayAmount).toBe('10.00');
+    expect(result.message).toMatch(/checkoutUrl as a link/i);
+    expect(result.message).toMatch(/not opened/i);
+    expect(result.message).toMatch(/USD 10\.00/);
+  });
+
+  it('adds a start-page URL for the card that leads to the same checkout, only while payable', async () => {
+    // #372: the card opens the start page through the host so ChatGPT can
+    // append the way back into the conversation. The model still presents
+    // checkoutUrl; the start URL wraps it and exists only for a pending order.
+    const pending = await createPackCheckoutTool.handler({ pack: 'starter' } as never, context);
+    expect(pending.checkoutStartUrl).toBe(
+      `https://api.example.test/purchase/start?to=${encodeURIComponent('https://checkout.stripe.com/c/pay/cs_test')}`
+    );
+
+    mocks.createPackCheckout.mockResolvedValue(checkoutResult({ status: 'fulfilled', reused: true }));
+    const paid = await createPackCheckoutTool.handler({ pack: 'starter' } as never, context);
+    expect(paid.checkoutStartUrl).toBeUndefined();
   });
 
   it('reports the letter counts the catalogue defines, not a local copy', async () => {
@@ -174,6 +209,22 @@ describe('create_pack_checkout', () => {
       expect(terminal.message).not.toBe(transient.message);
     });
 
+    it("passes on a daily limit's own sentence, never 'try again' (2026-09-28)", async () => {
+      // A pack above the day's limit is refused every day, so the default
+      // "Please try again" sent the customer round in a circle.
+      const sentence =
+        'This purchase is more than one account can spend in a day, so it cannot be bought. Please choose a smaller pack.';
+      mocks.createPackCheckout.mockRejectedValueOnce(new SpendLimitError('CHARGE_ABOVE_DAILY_CAP', sentence));
+      const error = await createPackCheckoutTool.handler({ pack: 'power' } as never, context).then(
+        () => {
+          throw new Error('expected a rejection');
+        },
+        (rejected: Error) => rejected
+      );
+      expect(error.message).toBe(sentence);
+      expect((error as Error & { code?: string }).code).toBe('CHARGE_ABOVE_DAILY_CAP');
+    });
+
     it('says something useful for an unrecognised code', async () => {
       const error = await failWith('SOMETHING_NEW');
       expect(error.message).toBe('Unable to start the letter pack checkout. Please try again.');
@@ -188,6 +239,13 @@ describe('create_pack_checkout', () => {
     const customerFacing = [result.message, result.productDescription].join(' ');
 
     expect(customerFacing).not.toMatch(/credit/i);
-    expect(createPackCheckoutTool.description).not.toMatch(/credit/i);
+    // Its description differs with the send rule (#475): check both.
+    const { description } = createPackCheckoutTool;
+    for (const rule of ['false', 'true']) {
+      vi.stubEnv('LETTER_IRL_SEND_CONFIRMATION_ENABLED', rule);
+      const text = typeof description === 'function' ? description(clientProfileNamed('chatgpt')) : description;
+      expect(text, rule).not.toMatch(/credit/i);
+    }
+    vi.unstubAllEnvs();
   });
 });

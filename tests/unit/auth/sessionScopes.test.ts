@@ -7,9 +7,9 @@
  * joined the per-tool vocabulary - by being added to PRODUCT_SCOPES, or named
  * in TOOL_SCOPES - then every caller holding a valid token without it would
  * start failing closed with insufficient_scope. PAT callers would break
- * immediately: they authorize with no scopes at all (tokenValidator.ts returns
- * early for authType "pat"), so any tool requiring a scope they cannot obtain
- * would be permanently denied.
+ * immediately: a personal access token carries product scopes only (migration
+ * 037, #470), so any tool requiring a scope it cannot obtain would be
+ * permanently denied.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -42,7 +42,7 @@ describe('session scopes (issue #160)', () => {
         expect(
           sessionScopes.has(scope),
           `${toolName} requires the session scope "${scope}"; session scopes are ` +
-            `requested from Auth0, not demanded of callers, and PAT callers carry no scopes at all`
+            `requested from Auth0, not demanded of callers, and PAT callers carry product scopes only`
         ).toBe(false);
       }
     }
@@ -109,10 +109,10 @@ describe('session scopes are requested per tool but never enforced', () => {
         expect(sessionScopes.has(scope)).toBe(false);
         expect(requested).toContain(scope);
       }
-      // Requested minus enforced must be exactly the session scopes - nothing
-      // else may sneak into the consent screen.
+      // Requested minus enforced must be exactly the session and identity
+      // scopes - nothing else may sneak into the consent screen.
       const extra = requested.filter(scope => !enforced.includes(scope));
-      expect(new Set(extra)).toEqual(new Set(SESSION_SCOPES));
+      expect(new Set(extra)).toEqual(new Set([...SESSION_SCOPES, ...IDENTITY_SCOPES]));
     }
   });
 
@@ -121,5 +121,97 @@ describe('session scopes are requested per tool but never enforced', () => {
       type: string;
     }>;
     expect(schemes).toEqual([{ type: 'noauth' }]);
+  });
+});
+
+/**
+ * Identity scopes (issue #424).
+ *
+ * Declared on every tool since #425. What they do NOT do is worth stating
+ * here, because this file is where the next reader will look: ChatGPT asks
+ * for them, but Auth0 grants no OIDC scope to its CIMD client (strict
+ * third-party mode), so they never produce an ID token for ChatGPT. Its
+ * OAUTH_OWNER_PROFILE_ID_MISSING failure was the connector's "OIDC enabled"
+ * setting, and with that off ChatGPT identifies the account through the
+ * profile tool (src/tools/getProfile.ts), not through these. They stay
+ * because advertising and requesting must agree, and because a client
+ * registered outside strict mode can use them.
+ *
+ * So the two halves still have to hold, as for the session scope in #160 -
+ * asked for on every tool, enforced by none - and a PAT caller, who carries
+ * product scopes only, must never be denied by one.
+ */
+describe('identity scopes (issue #424)', () => {
+  it('asks for every identity scope on every tool', () => {
+    for (const toolName of Object.keys(TOOL_SCOPES)) {
+      const requested = (
+        buildToolSecuritySchemes(toolName, true) as Array<{ scopes?: string[] }>
+      ).flatMap(scheme => scheme.scopes ?? []);
+      for (const scope of IDENTITY_SCOPES) {
+        expect(
+          requested,
+          `${toolName} does not request the identity scope "${scope}", so a turn ` +
+            `scoped to it would ask a client that honours tool scope tags for less ` +
+            `than the others do`
+        ).toContain(scope);
+      }
+    }
+  });
+
+  it('requests openid, which is the one that makes Auth0 issue an ID token', () => {
+    // Named on its own because it is the one with a consequence at the
+    // authorization server; email only labels the account once it exists.
+    expect(IDENTITY_SCOPES).toContain('openid');
+    const requested = (
+      buildToolSecuritySchemes('get_account_balance', true) as Array<{ scopes?: string[] }>
+    ).flatMap(scheme => scheme.scopes ?? []);
+    expect(requested).toContain('openid');
+  });
+
+  it('lets no tool require an identity scope', () => {
+    // The PAT half, and the reason these may never join PRODUCT_SCOPES or
+    // TOOL_SCOPES: a personal access token carries product scopes only
+    // (migration 037, #470), so a tool demanding openid would deny every PAT
+    // caller permanently.
+    const identityScopes = new Set<string>(IDENTITY_SCOPES);
+    for (const toolName of Object.keys(TOOL_SCOPES)) {
+      for (const scope of getRequiredToolScopes(toolName)) {
+        expect(
+          identityScopes.has(scope),
+          `${toolName} requires the identity scope "${scope}"; identity scopes are ` +
+            `requested from Auth0, not demanded of callers, and PAT callers carry product scopes only`
+        ).toBe(false);
+      }
+    }
+  });
+
+  it('keeps the identity scopes out of the product vocabulary', () => {
+    for (const scope of IDENTITY_SCOPES) {
+      expect(PRODUCT_SCOPES).not.toContain(scope);
+    }
+  });
+
+  it('asks for nothing it does not also advertise', () => {
+    // Not "DEFAULT_OAUTH_SCOPES contains IDENTITY_SCOPES" - that is spread
+    // from it and cannot fail. The real property is that the two channels
+    // agree: the per-tool securitySchemes carry the request, DEFAULT_OAUTH_SCOPES
+    // is what the metadata documents, and a scope in the first and not the
+    // second is the #160 drift pointing the other way.
+    //
+    // The deployment-time half of this lives in oauthConfig.test.ts, because
+    // LETTER_IRL_OAUTH_SCOPES can override the default and validateOAuthConfig
+    // is what refuses a deployment that requests more than it advertises.
+    const advertised = new Set<string>(DEFAULT_OAUTH_SCOPES);
+    for (const toolName of Object.keys(TOOL_SCOPES)) {
+      const requested = (
+        buildToolSecuritySchemes(toolName, true) as Array<{ scopes?: string[] }>
+      ).flatMap(scheme => scheme.scopes ?? []);
+      for (const scope of requested) {
+        expect(
+          advertised.has(scope),
+          `${toolName} requests "${scope}", which is not in the advertised vocabulary`
+        ).toBe(true);
+      }
+    }
   });
 });

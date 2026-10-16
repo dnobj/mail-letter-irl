@@ -1,0 +1,181 @@
+# Account Erasure
+
+**Last Updated:** October 2, 2026
+**Purpose:** How a customer's request to delete their account is carried out (#289), and what the operator does by hand
+
+The privacy policy promises deletion on request. Erasure **anonymises** the account: the customer's
+content and identity go, and the money records stay, without personal details, for accounting. That is
+the owner's decision on #289 (2026-09-23).
+
+---
+
+## What it removes and what it keeps
+
+| Removed | Kept, without personal details |
+|---------|--------------------------------|
+| The email (replaced by a placeholder), the saved return address and the remembered stationery (#563), theme or design (#649) | The account row, as a tombstone, so the kept records keep their links |
+| The content, addresses and rendered preview of every letter, with its copy of the signature (#608) | Each letter's status, tracking id, cost and dates, and for a certified letter (#625) the way it travelled and its USPS tracking number, kept beside the tracking id |
+| Drafts (emptied instead when an order refers to one) | Orders, ledger lots and transactions, with their descriptions cleared |
+| Retention copies of letters and drafts | Disputes and refunds |
+| Personal access tokens, the upload link and feature requests | Gift letters, and gift codes another account redeemed |
+| Address requests (#604), with any address a recipient gave. The preview does not count them: neither admin role reads the table | |
+| The saved signature (#608), a picture of the person's handwriting. The preview does not count it either: neither admin role reads the table | |
+| Saved stationery designs (#649), with the names the person gave them, and the remembered design. The preview does not count them: neither admin role reads the table. A draft's or a letter's copy of a design goes with the draft or the letter | |
+| The photo uploaded through the card, from the image store (#474) | |
+| Gift codes nobody has redeemed, so a card already in the post stops working | The admin audit trail, kept two years as the privacy policy says |
+| The address a seed code was claimed with | |
+
+Failed mail jobs that an operator could still retry are cancelled, so nothing can mail an empty letter.
+
+Prepaid and gift mail held to arrive by a date (#535), and still waiting for its mail date, is cancelled
+before it prints. Nothing goes back, because the balance and gift letters go with the account. The
+erasure cancels it only once nothing else holds the account back, so a refused erasure leaves it to mail.
+Held mail is not cancelled when:
+- its mail date has come: it is due, and holds the account back until it mails;
+- it is Pay & Send: it is a paid order not yet mailed, and holds the account back like any other, because
+  its refund is a person's decision. Two remedies end that hold (#701), and the operator chooses:
+  - **refund the order in full** in the Stripe dashboard: the refund's webhook cancels the letter before
+    it prints, and the order, once refunded, no longer holds the erasure back. A partial refund only raises
+    an alert, and the letter still mails. A letter the outbox has already taken is held for a person
+    instead, with a critical alert (`refunded_mail_already_dispatched`);
+  - **send it now**: the admin panel's **Send held mail now** (`job.dispatch_now`) makes it due at once,
+    the next hourly run mails it, and the erasure can be queued again once it has.
+
+  Waiting for its mail date also ends it, which can be up to 60 days away.
+
+Prepaid mail held for its funding (#696), a pack refunded in full or disputed, is cancelled the
+same way, due or not: it waits for a person, and an erasure is one. Other mail of an account whose
+sending is blocked, due and not held for its funding, still holds the erasure back: cancel it first
+(**Cancel mail left for the operator**, `job.cancel_held`).
+
+The unspent balance and unused gift letters are forfeited. If the customer wants money back, refund
+**before** erasing: the erasure blocks sends on the account, and a pack refund refuses a blocked account.
+
+---
+
+## How to run it
+
+1. In the admin panel, find the account (Lookup, by email or id) and open it.
+2. Under **Erase account**, choose **Preview erasing this account**. The preview shows what is still in
+   flight, what will be removed and what will be kept. The command refuses while any of these holds:
+   - an open checkout, or a paid order not yet mailed;
+   - a letter or mail job still on its way (prepaid and gift mail still waiting for its mail date does not
+     count: the erasure cancels it, and the preview counts it and warns);
+   - an open dispute (a disputed order counts as settled once every dispute on its payment has closed,
+     won or lost);
+   - a refund in progress;
+   - an image generation in flight.
+
+   Wait for it to settle, or settle it deliberately, then preview again. If the customer wants their held
+   mail sent, wait until it mails. The preview also warns about open
+   operational alerts on the account's orders, such as compensation still owed after a dispute. Settle
+   those first, because nothing owed can reach the account after it is erased.
+3. Elevate, then type the phrase (`CONFIRM <id>` in development, `PRODUCTION ERASE <id>` in production)
+   and a reason. **Keep the customer's name and email out of the reason:** the audit trail keeps it for
+   two years.
+4. Confirming **queues** the erasure. The next hourly maintenance run carries it out. The account page
+   then shows one of three things:
+   - queued;
+   - erased, with counts;
+   - refused or failed, with the reason.
+
+   A refused or failed erasure can be queued again.
+5. Once it has run, some steps are done by hand. The erasure opens an `account_erasure_followup` alert
+   (#453) in the same transaction that erases the account. The alert is on **Alerts**, and on the
+   Overview while it is among the ten newest active alerts. The account page links it and says the
+   follow-up is still to do. It carries the account id and
+   nothing else, and it stays open until you resolve it. No service can delete Auth0 users; doing it
+   from the panel is #454. Do these steps:
+   - **Auth0:** in the environment's tenant (see [Auth0 Tenant Configuration](auth0-tenant-configuration.md)),
+     open User Management → Users, search for the account id, and delete the user. That removes the name
+     and email Auth0 holds, and every sign-in method linked into that user. Sign-in is already refused
+     without it (see below).
+   - Remove the id from `LETTER_IRL_BETA_ALLOWED_SUBJECTS` and `LETTER_IRL_ADMIN_USER_IDS` on the API
+     service, if it is listed in either.
+   - Resolve the alert with the code `auth0_user_deleted`, which its resolve form fills in. It needs
+     elevation, like any command.
+   - **Stripe** keeps its own payment records under its own obligations; nothing is deleted there.
+     **PostGrid** keeps the letters it printed. If the request covers them, ask PostGrid support to delete
+     the letters with the tracking ids shown on the account page.
+6. Reply to the customer.
+
+---
+
+## Why it is queued
+
+The panel's operator database role cannot read or change a customer's email, address or letter content
+(`src/admin/provisioning.ts`). That is deliberate, and erasure keeps it that way: the panel can only
+**ask** for a whole account to be erased, behind the preview, elevation, phrase and audit row, by adding
+an `admin_operations` row. The maintenance service carries it out as the database owner, the role the
+retention sweep already scrubs content with (`src/services/accountErasureService.ts`). It reads the gate
+again under the account's locks first, because the account can change in the hour between.
+
+An unexpected failure is taken back whole and retried an hour later, three attempts in all. A lock
+conflict with a send in progress is retried at the next run without counting against them. A refusal by
+the gate is not retried: an open dispute can take months, and the operator queues again when it settles.
+Held mail whose mail date comes before the run is due by then, and the run erases before it sends mail,
+so that erasure is refused: queue it again once the letter has mailed. The same goes for held mail an
+operator sends now (`job.dispatch_now`) between the preview and the run.
+
+---
+
+## After erasure
+
+- **Sign-in is refused.** Every sign-in to the erased account gets one sentence pointing at support: in
+  ChatGPT, on the website dashboard and through the API, token management included (`AccountErasedError`).
+  This does not wait for the Auth0 deletion: a Google or Apple sign-in brings back the same subject, and
+  a token issued before the erasure stays valid for up to a day. The dashboard shows the sentence from
+  website #36 on; before that it shows an empty account.
+- **Sessions already open are refused too.** Every MCP request is signed in and checked on its own (the
+  legacy SSE sessions that outlived calls are retired, #730). One thing can still slip through in the moment the erasure commits: a tool call
+  already past sign-in can write one draft. Nothing reads it, and the draft cleanup deletes it within
+  about six days.
+- **A restyle caught mid-way writes nothing back.** The remembered stationery is kept off the tombstone by
+  its two writers, a restyle and a preview made in a chosen style, which skip an erased account
+  (`AND erased_at IS NULL`). The `users_erased_tombstone` check covers only the address and the email.
+  A restyle or a new arrival date that waited on the erasure finds its draft emptied and is refused, so
+  nothing is written back into a draft no sweep visits again (#563).
+- **A checkout caught mid-way is refused.** Both checkouts read the account again after inserting their
+  order, in the same transaction. The insert waits for an erasure that holds the account row, so that
+  read sees the erasure, and the rollback leaves no order and no Stripe session (#449).
+- **A new account is possible.** The customer can open one with a different sign-in method on the same
+  address, because the tombstone no longer holds it.
+- **The upload link may linger briefly.** The API process can hold it in memory for up to six hours.
+  Nothing can reach it, since every request from the account is refused.
+- **An uploaded photo is deleted after the erasure, not by the database.** It lives in the image
+  store, so the delete is kept out of the transaction: the run deletes the photos of the accounts it
+  erased once its database work is done, allowing each delete ten seconds. If one fails or takes
+  longer, the erasure stands and the run logs `account_erasure.uploaded_photo_delete_failed`; the
+  photo expires within 15 minutes anyway. An upload still in progress is only in the API process's
+  memory. It goes when the next upload call from any account finds it more than ten minutes old, or
+  two minutes without a chunk (#730), or when the API restarts.
+
+## Reopening an account by hand
+
+If the person wants to come back with the same Google or Apple sign-in, support can reopen the tombstone.
+On the owner connection, clear the marker and give the row a confirmed address **in the same statement**.
+The `users_erased_tombstone` check refuses a real address while `erased_at` is set:
+
+```sql
+UPDATE users SET erased_at = NULL, email = '<their confirmed address>' WHERE user_id = '<id>';
+```
+
+Then lift the send block from the panel (**Lift send block**) if nothing else justifies it. Erased content
+stays erased. The balance and history are as they were.
+
+If the erasure's follow-up alert is still open, **do not delete the Auth0 user**: the person is signing back
+in with it. Resolve the alert with `account_reopened` instead. The account page no longer shows the erasure
+once the account is reopened, so find the alert on `/alerts`.
+
+---
+
+## Evidence
+
+Manual case `ERASE-01` in [Manual Tests](manual-tests.md). The PostgreSQL suite
+`tests/integration/accountErasure.postgres.test.ts` covers the rest against the roles the two halves run as:
+- the gate;
+- every scrub, and what is kept;
+- the retry and savepoint behaviour;
+- the follow-up alert, which commits with the tombstone or not at all;
+- held mail, cancelled only once nothing else holds the account back;
+- the sign-in refusal.

@@ -5,6 +5,25 @@ Recorded September 7 from the September 5 source review of DEV commit
 implementation plan or a runtime/security audit. Revalidate findings against
 the implementation before scheduling changes.
 
+## Status on 2026-10-15
+
+Revalidated against `dev` at `4c8c77b`, about 300 commits after the reviewed
+revision. Line counts are a rough signal, as the review says, not a measure.
+
+| Priority | Status | What is there now |
+| --- | --- | --- |
+| 1 | Done | One schema layer since #688: `src/zodSchemas.ts` serves `tools/list` and generates the manifest; `src/schemas.ts` and `src/mcp/toolSchemas.ts` are gone. |
+| 2 | Open | `src/services/commerceService.ts` still holds checkout, payment events, refunds, disputes and recovery, and has grown from about 2,800 lines to about 4,500. |
+| 3 | Partly | `widgets/shared/` now holds the host bridge (`host.js`), shared styles and page helpers, built into each card. The two preview cards are still large (about 3,300 lines each, up from about 1,060), mostly from features added since. |
+| 4 | Open | `src/mcp/httpServer.ts` (about 1,160 lines) and `src/mcp/registerTools.ts` (about 1,970, up from about 850) still combine the responsibilities listed. |
+| 5 | Open | `src/store/fileAccountStore.ts` still queries PostgreSQL under its file-store name, and `persist()` is still a no-op. |
+| 6 | Done | `src/api/adminApiHandler.ts` is gone, and the hardened panel in `src/admin/` is the operator interface (#162, closed). |
+
+Of the additional considerations, `AGENTS.md` now describes CI correctly, and
+issues #69 and #162 are closed, so neither constrains the open items. Nothing
+here has been scheduled; the evaluation sequence below still applies to the
+open rows.
+
 ## Direction and foundations to preserve
 
 Keep one deployable application with clearer internal module boundaries. There

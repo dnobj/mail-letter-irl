@@ -1,3 +1,4 @@
+import type { ErasureFollowupView, ErasureOperationView } from "../../services/accountErasureService.js";
 import type { AccountDetail } from "../queries/accounts.js";
 import type { EntitlementView } from "../queries/images.js";
 import type { OrderDetail } from "../queries/orders.js";
@@ -63,6 +64,68 @@ ${table(
   ]),
   "none.",
 )}`;
+}
+
+/**
+ * Erasure, last on the account page (#289): where the account stands, and the
+ * entry point to the preview when it can be erased. The result shown is the
+ * worker's own record, counts and codes only.
+ */
+export function accountErasurePanel(input: {
+  userId: string;
+  erased: boolean;
+  erasure: ErasureOperationView | null;
+  /** The follow-up alert the erasure opened (#453); null for none, as before migration 036. */
+  followup: ErasureFollowupView | null;
+  mode: string;
+}): SafeHtml {
+  const { erasure } = input;
+  const form = html`<form method="get" action="/commands/account.erase/preview" class="inline">
+  <input type="hidden" name="target" value="${input.userId}">
+  <button type="submit">Preview erasing this account…</button>
+</form>`;
+  let body: SafeHtml;
+  if (input.erased) {
+    // Two operators confirming at once queue two erasures; the second finds
+    // the account already erased, and the counts are on the first.
+    const byEarlier = erasure?.result?.alreadyErased === true;
+    body = html`<p>Erased${erasure?.completedAt ? html` ${when(erasure.completedAt)}` : ""}. ${erasureFollowup(input.followup)}</p>
+${
+  byEarlier
+    ? html`<p class="muted">The newest erasure found the account already erased; the counts are on the one before it.</p>`
+    : erasure?.result
+      ? html`<p class="muted mono">${JSON.stringify(erasure.result)}</p>`
+      : ""
+}`;
+  } else if (erasure && (erasure.status === "pending" || erasure.status === "processing")) {
+    body = html`<p>Erasure queued ${when(erasure.requestedAt)}. The next hourly maintenance run carries it out${erasure.attempts > 0 ? html`; ${erasure.attempts} attempts so far` : ""}.</p>`;
+  } else if (erasure?.status === "failed") {
+    body = html`<p>The last erasure did not run: <span class="mono">${erasure.errorCode ?? "unknown"}</span>${erasure.completedAt ? html`, ${when(erasure.completedAt)}` : ""}.</p>
+${erasure.result ? html`<p class="muted mono">${JSON.stringify(erasure.result)}</p>` : ""}
+${form}`;
+  } else {
+    body = html`<p class="muted">Removes the email, the saved address, letter content and addresses, drafts, uploads, access tokens, feature requests and unredeemed gift codes. Orders, the ledger, disputes and refunds are kept, without personal details.</p>
+${form}`;
+  }
+  return html`<h2>Erase account</h2>
+${body}
+${input.mode !== "full" ? html`<p class="muted">Read-only mode: the preview works, queuing is refused.</p>` : ""}`;
+}
+
+/**
+ * Where the work an erasure leaves by hand stands: the Auth0 user and the two
+ * id lists (docs/account-erasure.md). An account erased before migration 036
+ * has no alert, and gets the plain reminder.
+ */
+function erasureFollowup(followup: ErasureFollowupView | null): SafeHtml {
+  if (!followup) {
+    return html`The Auth0 user with this id is deleted by hand, in the tenant (docs/account-erasure.md).`;
+  }
+  const link = html`<a href="/alerts/${encodeURIComponent(followup.alertId)}">follow-up alert</a>`;
+  if (followup.status === "resolved") {
+    return html`Follow-up done: the ${link} was resolved${followup.resolvedAt ? html` ${when(followup.resolvedAt)}` : ""}${followup.resolutionCode ? html` (<code>${followup.resolutionCode}</code>)` : ""}.`;
+  }
+  return html`<strong>Still to do by hand:</strong> delete the Auth0 user with this id in the tenant, and take the id out of the beta and admin lists if it is there. The ${link} has the steps; resolve it when they are done.`;
 }
 
 /** The quarantine release on the order page, shown only while quarantined. */

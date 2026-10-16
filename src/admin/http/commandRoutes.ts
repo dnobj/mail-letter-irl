@@ -1,3 +1,4 @@
+import { ERASURE_FOLLOWUP_ALERT, ERASURE_FOLLOWUP_RESOLUTION } from "../../services/accountErasureService.js";
 import { AdminFoundationError } from "../errors.js";
 import { prepareCommandPreview, runAdminCommand, type CommandDefinition } from "../commands/runner.js";
 import {
@@ -28,6 +29,10 @@ function safeReturn(value: string | null | undefined): string {
   return value;
 }
 
+function lockedUntilDate(lockedUntil: number | null): Date | null {
+  return lockedUntil === null ? null : new Date(lockedUntil);
+}
+
 function backHrefFor(command: CommandDefinition<any>, targetId: string): string {
   switch (command.targetType) {
     case "commerce_alert":
@@ -42,16 +47,26 @@ function backHrefFor(command: CommandDefinition<any>, targetId: string): string 
       return /^[0-9a-f-]{36}$/i.test(targetId) ? `/promos/${encodeURIComponent(targetId)}` : "/promos";
     case "image_reservation":
       return "/images";
+    case "gift_code":
+      return "/gifts";
+    case "quarantine":
+      return "/retention";
     case "provider_routing":
     case "provider":
       return "/routing";
+    case "daily_limit":
+      return "/limits";
     default:
       return "/";
   }
 }
 
-function targetIdFrom(context: RequestContext): string {
-  const target = (context.form?.get("target") ?? context.url.searchParams.get("target") ?? "").trim();
+function targetIdFrom(context: RequestContext, command: CommandDefinition<any>): string {
+  const explicit = (context.form?.get("target") ?? context.url.searchParams.get("target") ?? "").trim();
+  // Only a command that names its target from its own fields may omit it
+  // (promo.create: the typed code). Before this, the create form had no way to
+  // send one and every campaign creation was refused.
+  const target = explicit || (command.targetFromFields?.(fieldsFrom(context)) ?? "").trim();
   if (!target || target.length > 255) throw new AdminFoundationError("ADMIN_INVALID_REQUEST");
   return target;
 }
@@ -82,10 +97,7 @@ export function registerCommandRoutes(
         csrfToken: context.csrfToken,
         returnTo: safeReturn(context.url.searchParams.get("return")),
         elevatedUntil: isElevated(context.session, now) ? new Date(context.session.elevatedUntil as number) : null,
-        lockedUntil:
-          context.session.elevationLockedUntil && context.session.elevationLockedUntil > now
-            ? new Date(context.session.elevationLockedUntil)
-            : null,
+        lockedUntil: lockedUntilDate(context.elevation.lockedUntil(context.session.login, now)),
         message: null,
         ttlMinutes: Math.round(context.config.session.elevationTtlMs / 60_000),
         mode: context.config.mode,
@@ -99,6 +111,7 @@ export function registerCommandRoutes(
     if (!context.config.totpSecret) throw new AdminFoundationError("ADMIN_COMMAND_DISABLED");
     const attempt = attemptElevation(
       context.session,
+      context.elevation,
       context.config.totpSecret,
       context.form?.get("code") ?? "",
       {
@@ -129,7 +142,14 @@ export function registerCommandRoutes(
     await context.appendAudit({
       action: "admin.elevation_denied",
       targetType: "session",
-      inputSummary: { reason: attempt.reason, failuresLeft: attempt.failuresLeft },
+      inputSummary: {
+        reason: attempt.reason,
+        failuresLeft: attempt.failuresLeft,
+        // The lock is the condition worth seeing in /audit on its own: it
+        // means an operator's codes have failed repeatedly, and it now holds
+        // across every session that login opens.
+        locked: attempt.lockedUntil !== null,
+      },
       outcome: "denied",
       errorCode: attempt.reason === "locked" ? "ADMIN_ELEVATION_LOCKED" : "ADMIN_FORBIDDEN",
     });
@@ -142,7 +162,7 @@ export function registerCommandRoutes(
         lockedUntil: attempt.lockedUntil ? new Date(attempt.lockedUntil) : null,
         message:
           attempt.reason === "locked"
-            ? "Too many failed codes; elevation is locked for this session."
+            ? "Too many failed codes; elevation is locked for this operator until the time shown. Each lock lasts twice the last, up to a day."
             : attempt.reason === "replayed"
               ? "That code was already used; wait for the next one."
               : `The code was not accepted (${attempt.failuresLeft} attempts left before lockout).`,
@@ -162,7 +182,7 @@ export function registerCommandRoutes(
   router.add("GET", "/commands/:name/preview", async (context) => {
     const command = byName.get(context.params.name);
     if (!command) throw new AdminFoundationError("ADMIN_NOT_FOUND");
-    const targetId = targetIdFrom(context);
+    const targetId = targetIdFrom(context, command);
     const fields = fieldsFrom(context);
     const prepared = await context.read((client) =>
       prepareCommandPreview(command, client, context.config.environment, targetId, fields),
@@ -191,7 +211,7 @@ export function registerCommandRoutes(
   router.add("POST", "/commands/:name", async (context) => {
     const command = byName.get(context.params.name);
     if (!command) throw new AdminFoundationError("ADMIN_NOT_FOUND");
-    const targetId = targetIdFrom(context);
+    const targetId = targetIdFrom(context, command);
     const fields = fieldsFrom(context);
     const outcome = await runAdminCommand(
       {
@@ -201,6 +221,7 @@ export function registerCommandRoutes(
         audit: context.audit,
         actor: context.actor,
         session: context.session,
+        elevation: context.elevation,
         sessionIdHash: hashSessionId(context.session.id),
         correlationId: context.correlationId,
         now: () => Date.now(),
@@ -216,8 +237,13 @@ export function registerCommandRoutes(
   }, { name: "command.execute", write: true });
 
   return {
-    alertActions: (context, alertId, status) => alertActionPanel({ alertId, status, mode: context.config.mode }),
-    jobActions: (context, jobId, status, providerOutcome) =>
-      jobActionPanel({ jobId, status, providerOutcome, mode: context.config.mode }),
+    alertActions: (context, alertId, status, alertType) =>
+      alertActionPanel({
+        alertId,
+        status,
+        mode: context.config.mode,
+        suggestedResolution: alertType === ERASURE_FOLLOWUP_ALERT ? ERASURE_FOLLOWUP_RESOLUTION : "",
+      }),
+    jobActions: (context, job) => jobActionPanel({ job, mode: context.config.mode }),
   };
 }

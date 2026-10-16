@@ -348,12 +348,21 @@ describe('refundPackLetters', () => {
     expect(JSON.parse(String(lot[3]))).toMatchObject({
       reason: 'partial_refund_failed',
       pack_refund_id: result.packRefundId,
-      compensates_ledger_id: 'audit-1'
+      compensates_ledger_id: 'audit-1',
+      failure_reason: 'provider_error'
     });
     expect(calls('SET credits = credits + $1, credits_purchased = credits_purchased + $1')).toHaveLength(1);
     const statusUpdate = calls("SET status = 'compensated'")[0][1] as unknown[];
     expect(statusUpdate[1]).toBe('charge_already_refunded');
-    expect(calls("'pack_refund_failed', 'critical'")).toHaveLength(1);
+    // The failure text is the class, never a slice of Stripe's message (#394).
+    expect(statusUpdate[2]).toBe('provider_error');
+    const alerts = calls("'pack_refund_failed', 'critical'");
+    expect(alerts).toHaveLength(1);
+    expect(JSON.parse(String((alerts[0][1] as unknown[])[1]))).toMatchObject({
+      lastErrorCode: 'charge_already_refunded',
+      failureReason: 'provider_error'
+    });
+    expect(JSON.stringify(mocks.query.mock.calls.map(([, params]) => params))).not.toContain('already been refunded');
   });
 
   it('leaves the letters revoked and counts the attempt when Stripe gives no answer', async () => {

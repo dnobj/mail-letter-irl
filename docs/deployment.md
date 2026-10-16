@@ -1,6 +1,7 @@
 # Deployment Guide
 
-Last updated: August 24, 2026
+**Last Updated:** October 4, 2026
+**Purpose:** Release process, environment checks, boot validation rules, and migration safety
 
 Letter IRL deploys development first. Production is promoted only after automated and manual verification succeeds in development.
 
@@ -29,7 +30,8 @@ Feature branches target `dev`. Do not merge feature branches directly to `master
 
 ## Backend Release Settings
 
-Railway builds the backend once with Node 22 and these commands:
+Railway builds the backend once with Railpack, its default builder, on the Node
+version `engines.node` in `package.json` names (22), with these commands:
 
 ```text
 Install: npm ci
@@ -39,10 +41,20 @@ API start: npm start
 Cron start: npm run maintenance
 ```
 
-All five come from files in this repository, not from the Railway dashboard:
-`nixpacks.toml` sets install, build and start; `railway.toml` sets the
-pre-deploy command. Railway's config-as-code overrides dashboard values, and
-fields absent from those files keep theirs.
+Install, build and the API's start are Railpack's own steps for a Node project:
+`npm ci`, then the `build` and `start` scripts in `package.json`. The cron's build
+and start commands are dashboard settings on the maintenance service, its build
+repeating Railpack's. `railway.toml` sets
+the pre-deploy command; Railway's config-as-code overrides dashboard values, and
+fields absent from it keep theirs. Runtime settings, such as
+`UV_THREADPOOL_SIZE=16` (#730), are Railway service variables in each
+environment.
+
+Until 2026-10-13 this said a `nixpacks.toml` set install, build, start and the
+thread pool. Railway had been building with Railpack, which never reads that
+file, so the file was deleted, the thread pool became a service variable, and
+`engines.node` now pins the Node version Railpack would otherwise choose for
+itself: production's cron had been built on Node 24 while the API ran on 22.
 
 **Deadline.** Railway has deprecated config-as-code: existing `railway.toml`
 files stop being read on **2026-12-01**, and services created after 2026-08-28
@@ -156,9 +168,15 @@ Still verified by a human, without printing secret values:
   the tailnet-only admin service ([admin-panel-guide.md](admin-panel-guide.md)), which is where the
   issue #69 image-reservation recovery and the outbox recovery now live.
 
-`WORKER_POLLING_SECONDS` and `WORKER_TRIGGER_ON_SEND` are legacy rollout safeguards. The compiled API ignores them after the transactional-outbox release; remove them after the new maintenance service is verified.
+`WORKER_POLLING_SECONDS` and `WORKER_TRIGGER_ON_SEND` are legacy rollout safeguards from the July 2026
+transactional-outbox rollout. Nothing in `src/` reads them. Both environments run the outbox release,
+so delete either variable wherever it is still set.
 
-As of July 16, 2026, development has the transactional-outbox release and hourly maintenance service deployed. Production remains on the previous release with `WORKER_POLLING_SECONDS=600` and `WORKER_TRIGGER_ON_SEND=true` until the remaining manual acceptance checks pass.
+`CONTENT_RETENTION_MODE` switches the letter and draft retention sweep from reporting what it would
+clear to clearing it (#153). Unset, it reports. It is set to `enforce` on development first, and on
+production only after a development run has been checked (`RETENTION-01` in
+[manual-tests.md](manual-tests.md)); never as a side effect of a release. See the variable list in
+[railway-setup.md](railway-setup.md).
 
 ## Boot validation rules
 
@@ -184,7 +202,7 @@ development state in another.
 | Rule | Severity | Raised when | Fix |
 |---|---|---|---|
 | `provider.live_provider_required` | error | `LETTER_PROVIDER` is not an approved live provider in production — **the implicit `dummy` default counts**, so leaving it unset fails | Set `LETTER_PROVIDER=postgrid` |
-| `provider.api_key_required` | error | `LETTER_PROVIDER_API_KEY` unset in production | Set it. **`POSTGRID_API_KEY` does not satisfy this** — it is read by nothing this rule checks |
+| `provider.api_key_required` | error | `LETTER_PROVIDER_API_KEY` unset in production | Set it. **`POSTGRID_API_KEY` does not satisfy this** — it is read by nothing this rule checks. The provider factory does read it, and prefers it over `LETTER_PROVIDER_API_KEY`, so never set both |
 | `provider.live_mode_required` | error | `LETTER_PROVIDER_CONFIG` lacks `"mode": "live"` in production | Add the mode |
 | `provider.config_json_invalid` | error in production, else warning | `LETTER_PROVIDER_CONFIG` is not valid JSON | Fix the JSON |
 | `provider.test_key_in_production` | error | The provider key carries a `test_` prefix in production | Use the live key |
@@ -199,6 +217,7 @@ development state in another.
 | `stripe.live_key_required` | error | `STRIPE_SECRET_KEY` is not `sk_live_`/`rk_live_` in production | Use the live key |
 | `stripe.live_key_outside_production` | error | A live Stripe key outside production | Use the test key — this one charges real cards |
 | `stripe.webhook_secret_malformed` | error in production, else warning | `STRIPE_WEBHOOK_SECRET` does not begin `whsec_` | Copy it again from the Stripe endpoint |
+| `stripe.checkout_domain_invalid` | error in production, else warning | `STRIPE_CHECKOUT_DOMAIN` is set but is not a bare host name | Set the host alone, such as `pay.letterirl.com` (#373) |
 | `stripe.pack_price_incomplete` | error in production, else warning | A `STRIPE_PRICE_*` is missing or is not a `price_…` id | Set every pack price id. Amounts come from the Price itself (#275), never from an env var |
 | `stripe.jit_config_incomplete` | error in production, else warning | `JIT_PURCHASE_ENABLED=true` with a missing or malformed `STRIPE_JIT_*_PRICE_ID` | Set the price ids, or turn Pay & Send off |
 | `stripe.currency_unset` | warning | `STRIPE_CURRENCY` is unset | Set it to match the currency the Prices are denominated in |
@@ -211,7 +230,8 @@ development state in another.
 | `http.allowed_origins_required` | error | `LETTER_IRL_ALLOWED_ORIGINS` unset in production | Set it. The fallback allowlists localhost origins |
 | `debug.enabled_in_production` | error | `DEBUG` is enabled in production | Unset it. It serves the unauthenticated `/debug/widgets` route and discloses container paths |
 | `debug.verbose_logging_in_production` | warning | `DEBUG_CONTENT` or `DEBUG_IMAGE` in production | Unset it — it widens what reaches the logs |
-| `auth.enforcement_disabled_in_production` | warning | `LETTER_IRL_REQUIRE_AUTH=false` | Re-enable authentication; production is otherwise unauthenticated |
+| `auth.enforcement_disabled_in_production` | error | `LETTER_IRL_REQUIRE_AUTH=false` in production | Re-enable authentication. Callers admitted with no subject would share one account, and the cohort gate that once bounded that is switched off |
+| `auth.oauth_validation_not_enforced` | error | `LETTER_IRL_OAUTH_CIMD_ENFORCEMENT` is not `true` in production | Set it. Without it the issuer, audience, algorithm and JWKS configuration is never validated at boot, so a mis-set value fails at the first token instead of at deploy |
 
 ### Database TLS
 
@@ -232,6 +252,24 @@ at `src/db/index.ts:32-37`. A `?sslmode=require` URL satisfies all three rules.
 | `bucket.config_required` | error | `TEMP_IMAGE_STORE=memory` in production | Configure the bucket credentials; memory storage loses images on restart |
 | `bucket.region_defaulted` | warning | No bucket region configured | Set it rather than relying on the `auto` default |
 | `config.placeholder_value` | error | A manifest variable holds a placeholder rather than a credential | Replace it with the real value |
+
+### Maintenance
+
+| Rule | Severity | Raised when | Fix |
+|---|---|---|---|
+| `maintenance.heartbeat_url_invalid` | error for production maintenance, warning elsewhere | `MAINTENANCE_HEARTBEAT_URL` is set but is not an https URL | Set the monitor's https ping URL; outside production, or unset it. The maintenance service prints it at every run (#408) |
+| `limits.operator_alert_url_invalid` | error in production, warning elsewhere | `LETTER_IRL_OPERATOR_ALERT_URL` is set but is not an https URL | Set the https URL the notices are posted to (for example an ntfy topic, which tells every notice); outside production, or unset it. The alerts still open in the admin panel ([admin-panel-guide.md](admin-panel-guide.md)) |
+| `retention.mode_unknown` | warning | `CONTENT_RETENTION_MODE` is neither `enforce` nor `report` | Set one of the two: anything else only reports, as `report` does |
+
+Production requires all three of these variables (#699): `MAINTENANCE_HEARTBEAT_URL` and `CONTENT_RETENTION_MODE` on the maintenance service, and `LETTER_IRL_OPERATOR_ALERT_URL` on both the API and maintenance. Unset there, boot refuses with the presence error for the variable ([operational-acceptance.md](operational-acceptance.md)).
+
+### Mail dispatch
+
+| Rule | Severity | Raised when | Fix |
+|---|---|---|---|
+| `outbox.dispatch_paused` | warning | `LETTER_IRL_OUTBOX_DISPATCH_ENABLED` holds anything but an affirmative, so the outbox is paused and nothing goes to the print provider (#444) | Intended during a printing incident. Otherwise set it to `true` on the API and the maintenance service ([operational-acceptance.md](operational-acceptance.md)). The API prints it at boot, maintenance at every run |
+| `send_confirmation.required` | error (production API) | `LETTER_IRL_SEND_CONFIRMATION_ENABLED` is not `true`, so the send tools would be offered to the model instead of mail going out only when the person sends it (#470, #730) | Set `LETTER_IRL_SEND_CONFIRMATION_ENABLED=true` on the production API, with `LETTER_IRL_WEBSITE_CLIENT_ID`. The cutover preflight checks names only, so a value of `false` passes it and fails here |
+| `send_confirmation.website_client_missing` | error in production, warning elsewhere while the send rule is on | `LETTER_IRL_WEBSITE_CLIENT_ID` is not set on the API, so the confirmation page refuses every send, apps without our card cannot send at all (#470), and nobody can make or revoke a personal access token (#730) | Set `LETTER_IRL_WEBSITE_CLIENT_ID` on the API to the Client ID of the website's own Auth0 application in that tenant. Outside production, turning the send rule off silences the warning, but the website's token page still needs the variable |
 
 ## Development Release Procedure
 
@@ -257,6 +295,9 @@ at `src/db/index.ts:32-37`. A `?sslmode=require` URL satisfies all three rules.
 9. Leave Neon idle for more than five minutes and confirm the development compute suspends.
 
 ## Migration 021/022/023 integration gate
+
+PRs #164 and #165 merged long ago; the merge sequence below is kept as the record of how these
+migrations were integrated. The content-identity table is still live: do not alter the three files.
 
 Issue #69 owns `021_jit_commerce_foundation.sql` and `023_jit_recovery_state_machines.sql`. Issue #162
 owns `022_admin_audit.sql`, which refuses to apply unless 021 is already recorded. Because 022 cannot
@@ -296,7 +337,7 @@ It applies the real repository migrations with the real migrator and compares co
 defaults, indexes, triggers, functions, and table privileges across `001-020 -> 021 -> 022`,
 `001-020 -> 021 -> 023 -> 022`, and `001-020 -> 021 -> 022 -> 023`.
 
-### Safe merge sequence
+### Safe merge sequence (historical)
 
 1. Merge issue #69 (PR #164) into `dev` first. It carries 021 and 023 and does not depend on 022.
 2. Confirm the three blob IDs above are unchanged on the merged `dev` and on the issue #162 branch.
@@ -321,6 +362,10 @@ The pre-deploy command runs the migration while the **old** image is still
 serving, and only then starts the new one. So between the migration committing
 and the new image accepting traffic, the previous code runs against the new
 schema.
+
+The reverse must not happen: the new image must never serve on a database behind its migrations.
+Since 038 every send and checkout reads `daily_limit_overrides` first, and on a database without it
+they all refuse (failing closed, logged as `database_error`) until the migration is applied.
 
 Every migration therefore has to be backward-compatible with the deployed
 version of the code:
@@ -471,7 +516,7 @@ See [`tests/integration/README.md`](../tests/integration/README.md) for how to s
 3. Confirm no development URLs, test keys, or dummy-provider settings enter production.
    The boot validator enforces the key-mode and provider rules; the review still
    catches URLs and anything outside the validator's reach.
-4. Merge backend `dev` into `master` and website `dev` into `main` through reviewed PRs.
+4. Merge backend `dev` into `master` and website `dev` into `main` through reviewed PRs. Usually the API goes first. When the promotion first carries the send rule (#730), the website goes first, so the confirmation page is live when `request_send` starts linking to it ([letter-send-flow.md](letter-send-flow.md), Rollout). Before choosing, check the website's `dev` to `main` diff for any API route it calls that `master` does not have yet.
 5. Confirm migrations completed before the new API deployment became active. The
    pre-deploy command does this automatically and halts the deploy on failure, so
    the check is to read the deploy log for the migrator's own output and confirm
@@ -494,6 +539,7 @@ See [`tests/integration/README.md`](../tests/integration/README.md) for how to s
 - Admin foundation rollback: retain migration 022 plus marker, command, operation, and audit evidence; revoke
   environment-specific role access separately if access was provisioned.
 - Mail safety: retain `letter_jobs` rows and stable idempotency keys during every rollback.
+- The send rule cannot be turned off in production (#730). If the confirmation page or the website's client id breaks after launch, stop mail with `LETTER_IRL_MAIL_SENDING_ENABLED`, or roll back.
 - Image safety: keep the bucket and credentials in place while any 15-minute image URL may still be active.
 
 Never point development at production Neon to work around a deployment problem.
@@ -521,6 +567,33 @@ real migrations fail to converge.
 Configure development and production independently:
 
 - `STRIPE_JIT_LETTER_PRICE_ID` and `STRIPE_JIT_POSTCARD_PRICE_ID`
+- the mail options' prices, only while their flags are on (#578):
+  `STRIPE_JIT_LETTER_TWO_PAGES_PRICE_ID` and `STRIPE_JIT_LETTER_THREE_PAGES_PRICE_ID` with
+  `LETTER_IRL_ROOM_TO_WRITE_ENABLED` (which also lets the letter previews run to three pages, #586), and `STRIPE_JIT_POSTCARD_4X6_PRICE_ID` and
+  `STRIPE_JIT_POSTCARD_11X6_PRICE_ID` with `LETTER_IRL_POSTCARD_SIZES_ENABLED`, and
+  `STRIPE_JIT_LETTER_CERTIFIED_PRICE_ID` and `STRIPE_JIT_LETTER_CERTIFIED_RECEIPT_PRICE_ID` with
+  `LETTER_IRL_CERTIFIED_MAIL_ENABLED` (certified mail, #625)
+  - In Stripe test mode, make every option's Price in one command (#624). Set `STRIPE_SECRET_KEY` in your own shell to a
+    Stripe **test** key (never in a chat; use the Stripe account the development services use) and run
+    `npx tsx scripts/create-option-prices.ts --out dev-option-prices.txt`; add `--dry-run` to look first. It finds or
+    creates a Product and a one-time Price for each option under the lookup key `letter-irl-<productCode>`, at the amount
+    the product table pins, in `--currency` (default: `JIT_CURRENCY`, else `STRIPE_CURRENCY`, else `usd`, read from your
+    shell, so match the development services), and writes `NAME=price_...` lines to the file. A live key is refused; a
+    Price under the lookup key that is archived, recurring, in another currency or at another amount is refused and left
+    alone; a second run changes nothing; `--out` replaces only a file an earlier run wrote. The Products carry the table's
+    name, not its description. Set the lines on the development api and maintenance services, then turn the option's
+    flag on, except `LETTER_IRL_CERTIFIED_MAIL_ENABLED`, which waits for the rollout below (#625). Production
+    Prices are made in the dashboard once the price proposal (#578) is approved.
+  - **Certified mail (#625) rollout.** Only a build from the send (migration 053) on reads `letters.mail_service`;
+    an older build prints a certified letter as ordinary first-class mail, after it was paid for as certified.
+    So turn `LETTER_IRL_CERTIFIED_MAIL_ENABLED` on only once **both** the api and the maintenance service run that
+    build, and before rolling either of them back below it while certified letters wait, set
+    `LETTER_IRL_OUTBOX_DISPATCH_ENABLED=false` on both. After migration 053, re-run
+    `npm run admin:provision-access` in each environment: the admin panel's provider status sync (the operator
+    role) now writes `letters.carrier_tracking_number`.
+    And turn it on only when the whole path is in: the previews' words promise a tracking number, so the orders
+    must show it first (`get_order_status`, `list_orders` and `GET /api/letters`, part 5), and the letter card's
+    pay note must not give a certified letter the one-page pack rule (part 7), and the website must say what it is and show the number (the website's part 8).
 - `JIT_CURRENCY` (amounts come from the Stripe Prices above, not from variables).
   Pay & Send may use a different currency from the packs; each product's Price
   is validated against its own expected currency.
@@ -550,8 +623,110 @@ before it ever retries a create, because Stripe may prune an idempotency key
 after 24 hours. `PACK_REFUND_RETRY_DELAY_SECONDS` (default 300, minimum 60) is
 how long a row waits before the sweep touches it; `PACK_REFUND_STRIPE_ATTEMPT_LIMIT`
 (default 5) is how many unanswered attempts it tolerates before it compensates
-the customer with a new ledger lot and opens a `pack_refund_failed` alert.
-Neither is in the preflight manifest; both are optional.
+the customer with a new ledger lot and opens a `pack_refund_failed` alert, and
+only once Stripe has listed the payment's refunds and none is this command's
+(#730): while Stripe cannot be asked the row waits, with one alert (`kind`
+`stripe_unconfirmed`) once it reaches the attempt limit or a day has
+passed since its letters were taken. A payment with more than 100 refunds
+also waits rather than being decided on part of the list (error class
+`refund_list_incomplete`). A command compensated because Stripe holds no
+refund for it records `PACK_REFUND_NOT_AT_STRIPE` (`not_at_stripe`). The `stripe_unconfirmed` alert closes itself once
+the command settles. A refund that succeeds after its command was
+compensated opens one alert too (`refunded_after_compensation`): the
+customer then holds the money and the letters. After a command whose
+compensation was withheld for a dispute or a hold, it is
+`refunded_after_withheld`: the letters stay revoked, so do not compensate
+by hand. `PACK_REFUND_RETRY_DELAY_SECONDS` and
+`PACK_REFUND_STRIPE_ATTEMPT_LIMIT` are not in the preflight manifest; both
+are optional.
+
+A full refund that fails or is cancelled at Stripe is never made again by the
+hourly sweep (#730). Once this reaches an environment, the sweep holds a
+`refund_pending` order whose refund had already ended (the stored one, or one
+it finds for the payment), with one alert each, where it used to refund it
+again: up to 25 orders a run, so a backlog takes more than one run, and an
+order already at `JIT_REFUND_RETRY_LIMIT` attempts is not picked up at all.
+While the order waits for its refund (`refund_pending`),
+it is held, with `last_error_code` `REFUND_NOT_COMPLETED`, which the sweep and
+the refund claim skip, and a critical `refund_not_completed` alert opens (one
+open per order), whether the sweep or the refund's own webhook saw it first.
+While that alert is open, a later failure on the same order opens no second
+one and sends no notice: check the order's refunds in Stripe before resolving
+it. A refund that fails after the order was already marked refunded is still
+only recorded on the order (`already_refunded`), with no alert.
+
+Before acting, check the order's refunds in Stripe: one made since may still
+be pending (the order completes only when it succeeds), and a failed one may
+say why (a cancelled one says nothing). Then check for a dispute, below. Two
+ways out:
+
+- **Refund again in Stripe**, if the cause can be fixed. A full refund's
+  webhook completes the order and clears the hold's code. The alert stays
+  open: resolve it once Stripe shows the refund succeeded, since an event can
+  arrive late and Stripe lets a refund fail after it succeeded. A refund goes
+  back to the original payment method, so one that failed because the card
+  was closed, lost or stolen fails again: take the second way. A refund for
+  less than the order (the rest went back through a lost chargeback) does
+  not complete it: the order stays held and a
+  `stripe_partial_refund_unmatched` alert opens too. Settle it the second
+  way once Stripe shows that refund succeeded. After a Dashboard partial
+  refund, a refund of the rest completes the order through
+  `charge.refunded`, but its own refund event can arrive first and open, or
+  add to, a partial-refund alert: resolve that one once the order shows
+  `refunded` and Stripe shows both refunds succeeded. Stripe counts a
+  pending refund in the charge's refunded total, so the order can show
+  `refunded` first, and a refund that fails after that is only recorded on
+  the order (`already_refunded`), with no alert.
+- **The money went back another way, or should not go back.** Resolve the
+  alert, and the `stripe_partial_refund_unmatched` one too if a refund for
+  less than the order opened it. The order keeps its hold's code and stays
+  `refund_pending` or `disputed`. It is counted among the orders held for a
+  person on the panel's health page (and, while `refund_pending`, as stuck)
+  until an engineer settles it in the database: no panel command does this
+  yet, because the right end state (refunded, with the pack's letters
+  revoked, or kept) is a person's decision. While the order is not yet
+  settled, a partial refund on it is also listed on the Stripe
+  reconciliation page on each run that covers it; the operator's decision is
+  recorded already, so it needs nothing more. A pack's listing stops once
+  the order is marked `refunded` and has a `refund` ledger row, which a
+  proportional refund from the panel has already written: the listing
+  ending is no proof the settlement itself is complete. If that partial refund later fails while the order is not
+  settled, it comes back as a new `stripe_partial_refund_unmatched` alert
+  whose `events` show `refundStatus: failed`, with no notice: the money did
+  not go back after all. Once the order is settled as `refunded` in full, a
+  later failure is only recorded on the order (`already_refunded`), as
+  above. For a Pay & Send order, the refund already
+  cancelled its letter if the letter had not gone to the printer: keeping the
+  order means sending that mail again, not only settling the row.
+
+A held order that is disputed afterwards becomes `disputed` and keeps the
+code (a later refund event can move it back to `refund_pending`). Check
+every dispute on the payment in Stripe, not only the status the order page
+shows:
+
+- **A chargeback open** (`needs_response`, `under_review`): wait. Stripe
+  may refuse a refund until it closes (a dispute for part of the charge may
+  still let the rest be refunded), and nothing goes back another way
+  meanwhile. Leave the alert open until then.
+- **A chargeback lost:** the disputed amount already went back through the
+  dispute, and is not owed again. A dispute can be for less than the charge;
+  the rest is still owed.
+- **An inquiry (`warning_*`), or a dispute won or prevented:** no chargeback
+  moved the money, so the refund is still owed, as above.
+- **A status not listed here:** read it in Stripe's documentation before
+  refunding.
+
+The order page says the same for every order held with
+`REFUND_NOT_COMPLETED`, and names no step by the dispute's status: what is
+owed depends on Stripe's current view.
+
+An amount-mismatch quarantine whose refund fails keeps its own code and note,
+so the panel can still release it; the alert opens all the same. Releasing
+it does not refund it: the next sweep finds the ended refund and holds the
+order as `REFUND_NOT_COMPLETED`, unless the order is already at
+`JIT_REFUND_RETRY_LIMIT` attempts, when the sweep skips it and it stays
+`refund_pending` with no code, counted as stuck. Make the same checks in
+Stripe first.
 
 Amounts are read from the Stripe Prices themselves - there are no configured
 cent amounts to keep in step (#275). A paid amount or currency mismatch against
@@ -577,6 +752,18 @@ and are hashed in the audit.
 when the payment or provider evidence is conclusive, with a stable non-PII resolution code. The alert
 transition and its audit row commit in one transaction; Stripe dispute-close events still auto-resolve the
 matching dispute alert.
+
+**A reported address request** (an `address_request_reported` alert, #730). A recipient who did not
+know who sent them an address request link pressed "I don't know who sent this": the link closed and
+nothing was shared. The alert names the account that made the link. One report can be a recipient who
+forgot the sender; several against one account, or one against an account with many requests, suggests
+someone collecting addresses. An operator notice is posted too, since the evidence does not last:
+the reported request is deleted `LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS` (set on the maintenance
+service, 7 by default) after it closes, the account's earlier requests sooner, and all of them at once
+if the account is erased. Review soon. There is no
+panel command to block an account's requests: an engineer looks at the account's other
+`address_requests` while they are kept, and `LETTER_IRL_ADDRESS_REQUESTS_ENABLED=false` turns the
+feature off for everyone. Resolve the alert once reviewed, with a code such as `report_reviewed`.
 
 **Ambiguous mail** (`/jobs`, a job `held / ambiguous`). Reconcile the job against the provider using
 its reference, then resolve with one conclusive pair:
@@ -611,6 +798,112 @@ Ambiguous mail is never refunded and never automatically or manually
 re-dispatched: the panel's retry refuses it, and only a resolution with
 conclusive provider evidence can finish it. Each
 ambiguous outcome raises a durable `mail_provider_outcome_ambiguous` alert.
+
+**A hold whose class is `render_refused` never reached PostGrid (#534).** Our own renderer refused to
+draw the letter or postcard before any request was made. The reason is one of:
+- `unknown_version`: a renderer version this build cannot print, or one that is the other kind of mail's:
+  a postcard recording stationery's `pdf-2`, or a letter recording a postcard front's `pdf-3` (#594);
+- `image`: an image it could not read;
+- `overflow`: a letter that no longer lays out as it was previewed (it now lays out on more or fewer pages
+  than it was previewed on, or past three, #586), a postcard message past its room on the back, or a
+  postcard front's caption or place past its room on the front ("The caption runs ...in past its room on
+  the front.", #594);
+- `pages`: a letter's page count no writer stores (#586): a count outside 1 to 3, or more than one page
+  on the legacy HTML or beside a gift card;
+- `size`: a postcard size no writer stores, on either print path, or a gift postcard at any size but 6x9
+  (#579). The sizes are `6x4`, `6x9` and `6x11`, which PostGrid calls 6x4, 9x6 and 11x6, and our renderer
+  draws all three (#594);
+- `render`: anything else that failed to lay out or draw: a letter's gift card, or its stationery (#563), included.
+  "The postcard was drawn with a front this build cannot read." means a `pdf-3` postcard's
+  `content.postcardFront` is not one this build reads (`postcardFrontOf`, #594).
+  Two of its messages are stationery's: "The letter was drawn in stationery this build cannot read." means
+  the stored theme is not one this build reads (`stationeryOf`): look at the letter's `content.stationery`.
+  "The letter could not be laid out: The stationery's headline does not fit." (or `dateLine`, or
+  `monogram`: the slot's key) was measured to fit when it was previewed, under the same version, so it is
+  an overflow a renderer change caused.
+
+The log line `provider.postgrid.render_refused` names the reason and the letter id, and for a `size`
+hold the postcard's stored size (`postcardSize`). Neither the hold, which stores only its class, nor the
+log keeps the refusal's message; the messages quoted below are what each case says. Decide by the reason,
+and where a reason has more than one case, by the letter's stored content (`content.pages`,
+`content.postcardSize`, `content.postcardFront`, `content.rendererVersion`, `content.giftCard`, the image, the stationery):
+- **Retry** when a build can print it: deploy that build, then resolve the letter with a retry
+  (`provider_confirmed_rejected_retry`). That covers:
+  - a version this build does not know;
+  - an image our reader does not take: "The image is not a JPEG or PNG data URI." or "The image's size,
+    ..., is empty or over 50 megapixels." (unless it is truly empty);
+  - a drawing fault;
+  - an overflow that a renderer change caused. A letter refused as `overflow` was measured to fit when
+    it was previewed, under the same version, so a deploy changed the wrapping. Fix the renderer rather
+    than refund. A stationery slot that "does not fit" is the same case, and so is a letter that "lays
+    out on N page(s), not the M it was previewed on" (#586). A letter's content never changes after the
+    send, so an `overflow` of a letter always means the renderer changed. If it was changed on purpose
+    and the letter cannot print as it was previewed, as can happen to mail held for an arrival date
+    (#535), set its `content.pages` to the count it now lays out on (remove the key for one page), retry,
+    and settle any difference in price with the customer by hand. One that now runs past three pages
+    ("runs N line(s) past 3 pages") cannot print at all: reject it;
+  - stationery this build cannot read, once a build that reads the stored theme is deployed. Stored
+    stationery is refused when the draft is made unless the print reads it back, so this means the
+    build changed, not the letter. A front this build cannot read is the same case (#594), and so is a
+    front's caption or place that no longer fits: it was measured to fit when it was previewed.
+- **Reject** when the content itself cannot print, resolving it as rejected
+  (`provider_confirmed_rejected_refund`):
+  - a postcard message that is too long in any build;
+  - an `unknown_version` hold for a version that is the other kind of mail's: "A postcard is never drawn in
+    stationery: ..." (`pdf-2` on a postcard) or "A letter is never drawn with a postcard's front: ..." (`pdf-3`
+    on a letter, #594). This build knows the version, and no build prints it on that mail. Migration 048's
+    checks refuse a `pdf-3` letter, and no writer stores stationery on a postcard (a postcard draft's INSERT
+    writes none, and `set_stationery` refuses a postcard), so the stored letter was changed by hand;
+  - every `size` hold: 'A postcard cannot be printed at size "...".' (a size no writer stores), or "A gift
+    postcard is 6x9, not ..." (a gift card on another size). The draft's checks (migration 012) and the
+    preview and the send (#579) refuse both, so the stored letter was changed by hand;
+  - stored image data that is not an image. "The image is neither a JPEG nor a PNG with a readable size."
+    can be either this or a form of JPEG our reader misses, so look at the stored data before deciding;
+  - a gift card that runs past the page because of the sender's name ("The gift card runs ... past the
+    page's bottom margin.");
+  - every `pages` hold: "The letter's page count is not a whole number from 1 to 3.", or more than one
+    page on the legacy HTML or beside a gift card. The draft's checks (migration 047) and the send refuse
+    these, so the stored letter was changed by hand. The reason alone decides this one.
+
+Reject, which refunds, only when it can never be printed and no earlier attempt of the
+letter reached PostGrid, that is, every earlier hold was also `render_refused`. Check the earlier holds
+before refunding: the job page shows only the latest class, because a retry clears `last_error`.
+- Each hold's class is also in its `mail_provider_outcome_ambiguous` alert.
+- Open `/alerts?filter=all`, then open each `mail_provider_outcome_ambiguous` alert. The list shows no
+  job id, and it pages 50 at a time. An alert's own page shows its details, with the `jobId` and the
+  `errorClass`, and how it was resolved.
+- A prepaid letter's alerts carry no order id, so they are not listed under its order.
+- If any earlier hold was not `render_refused`, treat the letter like any other ambiguous hold.
+
+A retry of a letter whose earlier attempt did reach PostGrid reuses that attempt's `Idempotency-Key`.
+Probe P7 showed PostGrid replaying the first letter for a reused key whatever the body, for requests
+seconds apart. How long PostGrid keeps a key is not documented (`docs/learnings/postgrid-pdf-rendering.md`).
+
+**Rolling back below migration 039.** Do not roll the API back to a build older than migration 039 while
+letters with `content.rendererVersion` are queued or held, or while drafts with `renderer_version` are
+unexpired (24 hours). An older build ignores the version and sends them as HTML, printed from a different
+layout than the person previewed.
+- Postcards set a later floor: the build that merged #545 is the first to print a postcard's version. Do
+  not roll back below it while postcards with `content.rendererVersion` are queued or held, or postcard
+  drafts with `renderer_version` are unexpired.
+- Stationery sets another (#563): migration 044's build is the first to print `pdf-2`, and the first whose
+  retention sweeps and erasure clear the `stationery` column.
+  - An older build cannot print `pdf-2`, so it holds such a letter as `render_refused` (`unknown_version`)
+    rather than printing it as Classic. Roll back only with no `pdf-2` letter queued or held, or retry the
+    holds once the newer build is back.
+  - An older build would redact a themed draft but keep its date line, initials and headline, and no later
+    sweep revisits a redacted draft. Roll back only with no `pdf-2` draft whose content is still live
+    (`redacted_at IS NULL`), not merely none unexpired: drafts expire in 24 hours, but are swept days later.
+- The 4x6 and 11x6 postcards set another (#594): #596's build is the first to print a `6x4` or `6x11`
+  postcard with `content.rendererVersion`. An older build holds one as `render_refused` (`size`), and the
+  Reject guidance above would then refund mail that can print. Do not roll back below it while such a
+  postcard is queued or held, or such a draft is unexpired; if one is held after all, retry it once the newer
+  build is back.
+- Postcard fronts set another (#594): migration 048's build is the first to print `pdf-3`, a postcard with a
+  border or a greeting, and the first whose retention sweeps and erasure clear the `postcard_front` column's
+  caption or place. An older build holds a `pdf-3` postcard as `render_refused` (`unknown_version`) rather
+  than printing it full bleed, and would redact a draft but keep its caption or place. Roll back only with no
+  `pdf-3` postcard queued or held and no `pdf-3` draft whose content is still live (`redacted_at IS NULL`).
 
 `stripe_money_event_unmatched` covers two different situations, and they have
 different recovery paths.
@@ -711,10 +1004,14 @@ Env: `OPENAI_API_KEY` (absence degrades to the redirect card - never
 boot-fails), `OPENAI_IMAGE_MODEL`/`OPENAI_IMAGE_QUALITY` (cost dials),
 `LETTER_IRL_IMAGE_STARTER_CREDITS` (default 3, one-time per user),
 `LETTER_IRL_IMAGE_DAILY_CEILING` (default 200; **0 is a kill switch that
-blocks all generation**), `LETTER_IRL_IMAGE_GEN_MODE` (`on` | `off` |
-`mobile_only`, default `on` - the product switch for whether @Letter IRL
-requests may generate server-side at all; `mobile_only` limits spend to the
-surface where built-in generation is genuinely unavailable). Redirect responses
+blocks all generation**), `LETTER_IRL_IMAGE_GEN_MODE` (`on` | `mobile_only` |
+`redirect` | `off`, default `on` - the product switch; `mobile_only` limits
+spend to the surface where built-in generation is genuinely unavailable;
+`redirect` never generates but keeps the tool and its redirect card; `off`
+removes the feature: no app is offered the tool, no purchase grants image
+generations, and nothing reports how many are left. Set `on` again, or
+remove the variable, and redeploy to bring it back; see
+`src/config/imageGeneration.ts`). Redirect responses
 are surface-aware on every path: confirmed desktop gets a "handoff" card
 (the model generates in the same turn when built-in generation is present;
 on mention-scoped turns it tells the user a bare "go ahead" reply
@@ -724,3 +1021,56 @@ the copy-ready prompt,
 The temp-image store (TEMP_IMAGE_* vars) is a hard dependency of the
 generated path and is preflighted before any credit is reserved.
 
+### Photo upload through the card (#474, phase 3)
+
+In an app with no file store for cards (Claude), the upload card sends the
+photo itself through the card-only `upload_photo_chunk`
+([tool-apis.md](tool-apis.md), [ui-widgets.md](ui-widgets.md)). API service
+only:
+
+- `LETTER_IRL_CARD_UPLOAD_ENABLED`: off unless set to an explicit yes (`true`,
+  `1`, `yes`, `on` or `enabled`); anything else, a typo included, leaves it
+  off. Off, the tool is not listed, a call is refused, and `upload_image`
+  tells the card to offer no upload, so the card asks for a link to the photo
+  instead. On, Claude's instructions also offer the upload card for an image
+  that is not at a link. ChatGPT is unaffected either way: it keeps its own
+  file store.
+- `LETTER_IRL_PHOTO_UPLOADS_PER_DAY`: uploads an account may start in a
+  rolling 24 hours; default 20, from 1 to 1000.
+
+The finished photo goes to the same private bucket as generated images, under
+`uploaded-photos/` and a key made from a hash of the account id. It is never
+served at an address. There is one per account, so a new upload replaces the
+one before. It is readable for 15 minutes: a read after that deletes it, and
+otherwise the hourly maintenance run's `cleanupExpiredImages` does. Account
+erasure deletes it once the run's database work is done, allowing ten seconds
+(`account_erasure.uploaded_photo_delete_failed` if that fails, since it
+expires anyway). Unfinished uploads are held in the API process's memory and
+never reach storage.
+
+A chunk is at most 512 Ki base64 characters, so `LETTER_IRL_MCP_BODY_LIMIT_BYTES`
+must stay above about 600 KiB for uploads to work; its default is 1 MiB.
+
+Every bucket request, for generated images as well as uploaded photos, has
+time limits (`BUCKET_REQUEST_LIMITS` in `src/services/tempImageStore.ts`). An
+attempt gives up after 5 seconds without a connection, 30 seconds without a
+response, or 30 seconds of silence while a response is read. The SDK retries a
+timed-out attempt up to three times, so a request that hangs every time is
+given up after about a minute and a half. The SDK's default is to wait
+indefinitely, which would leave an account's upload unable to finish, and the
+account unable to start another, until a restart. Bodies are sent at once,
+without waiting for "100 Continue" (`expectContinueHeader: false`), so a store
+that never sends it cannot hold a large upload until it times out.
+
+## Words editor flag
+
+`LETTER_IRL_WORDS_EDITOR_ENABLED` lets a letter's words be changed in place, on the card's Words tab and with `set_letter_words`, without room to write (#647). The letter then stays on one page: words that do not fit are refused, and the card's editor says how much room is left on the page. Room to write (`LETTER_IRL_ROOM_TO_WRITE_ENABLED`) turns the editor on by itself, on up to three pages. Needs our renderer (`LETTER_IRL_PRINT_RENDERER=pdf`). Default off; refresh the connector after turning it on, since `set_letter_words` is then listed.
+
+## Letter IRL home flag
+
+`LETTER_IRL_HOME_ENABLED` adds the read-only `open_letter_home` tool and its global Plugin Extensions entrypoint. Default off. Reconnect/refresh the development connector after enabling it, and complete HOME-01 before live enablement. No migration is needed; this read expects the existing schema through migration 053. Turning it off refuses cached tool calls and widget reads. See [Letter IRL home](letter-home.md).
+
+
+### Optional home share links
+
+`LETTER_IRL_CHATGPT_PLUGIN_ID` is the actual installed plugin's non-secret ID, not a connector name. While the home flag is on, a configured safe ID adds ChatGPT share links for the selected draft/order. Leave it unset for developer connections without a plugin ID; the home and selection remain usable. No fabricated default or production change. HOME-03 checks navigation in the owner's ChatGPT host.

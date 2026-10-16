@@ -1,4 +1,5 @@
 import { query } from '../db/index.js';
+import { carriedDiagnosticClass, classifyDiagnosticError } from '../utils/diagnosticLog.js';
 
 interface MaintenanceTaskRow {
   task_name: string;
@@ -46,12 +47,15 @@ export async function runMaintenanceTaskIfDue<T>(
     );
     return { ran: true, result };
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown maintenance error';
+    // A class, never the message: the admin reader role can select this
+    // column, and a driver message can quote a value (#394). A wrapper that
+    // already resolved a class (the sweeps in runMaintenance) wins.
+    const errorClass = carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error');
     await query(
       `UPDATE maintenance_tasks
        SET locked_at = NULL, last_status = 'failed', last_error = $2, updated_at = NOW()
        WHERE task_name = $1`,
-      [taskName, message]
+      [taskName, errorClass]
     );
     throw error;
   }

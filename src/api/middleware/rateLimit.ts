@@ -10,6 +10,7 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 import { getCachedUserTier, getTierMultiplier } from '../../services/tierService.js';
 import type { UserTier } from '../../services/types.js';
+import { resetVerifiedTokens, takeExemption } from '../../auth/signInPool.js';
 
 interface RateLimitEntry {
   count: number;
@@ -29,10 +30,50 @@ const rateLimitStore = new Map<string, RateLimitEntry>();
 const blockedRequestCounts = new Map<string, number>();
 
 // Global rate limit configuration (system-wide, not per-IP)
-const GLOBAL_RATE_LIMITS: Record<string, RateLimitConfig> = {
+export const GLOBAL_RATE_LIMITS: Record<string, RateLimitConfig> = {
   'promo_public': {
     windowMs: 60 * 1000,      // 1 minute
     maxRequests: 100,         // 100 total per minute (protects against distributed attacks)
+  },
+  // The address request page (#604): a token is 144 random bits, so this
+  // bounds load, not guessing.
+  'address_public': {
+    windowMs: 60 * 1000,
+    maxRequests: 200,
+  },
+  // Backstops for the routes that had only per-identifier limits (audit A-05).
+  // A per-identifier limit bounds one client; these bound everyone at once, so
+  // many addresses cannot burn JWKS verification or bcrypt compares at line
+  // rate. Each sits well above its per-identifier limit and far above any
+  // traffic this service has seen, so a hit is an incident, not a busy day.
+  // On mcp and api a request with a token verified here recently is neither
+  // counted nor refused (#730, src/auth/signInPool.ts), so junk tokens cannot
+  // refuse the people already signed in.
+  'mcp': {
+    windowMs: 60 * 1000,
+    maxRequests: 1200,
+  },
+  'api': {
+    windowMs: 60 * 1000,
+    maxRequests: 2000,
+  },
+  'checkout': {
+    windowMs: 60 * 1000,
+    maxRequests: 200,
+  },
+  // The purchase start page (#730): one indexed read per checkout opened.
+  // Far above checkout traffic, so a few addresses cannot fill it for
+  // everyone; it bounds a flood, the per-address limit an abuser.
+  'purchase_start': {
+    windowMs: 60 * 1000,
+    maxRequests: 3000,
+  },
+  // Promo codes are operator-chosen words, so a guess is cheap and a hit is
+  // spendable balance. The unauthenticated validator has had both limits
+  // since it was written; the authenticated twins had neither.
+  'promo_authenticated': {
+    windowMs: 60 * 1000,
+    maxRequests: 100,
   },
 };
 
@@ -51,48 +92,144 @@ export const RATE_LIMITS: Record<string, RateLimitConfig> = {
     windowMs: 60 * 60 * 1000, // 1 hour
     maxRequests: 20,          // 20 letters per hour
   },
-  // General API endpoints
+  // REST API, keyed on the SOURCE ADDRESS because it is checked in
+  // httpServer.ts before the handler authenticates. Like 'mcp', it bounds the
+  // cost of admitting a request, not a customer: the website's dashboard calls
+  // this API from its own server, so every dashboard user arrives from one
+  // address, and at the old 100 a few busy dashboards refused each other. The
+  // per-account limit below is what bounds a customer.
   'api': {
     windowMs: 60 * 1000,      // 1 minute
-    maxRequests: 100,         // 100 requests per minute
+    maxRequests: 600,
   },
-  // Stripe checkout - prevent abuse
+  // REST API, keyed on the AUTHENTICATED ACCOUNT. Each handler checks it
+  // straight after authentication (rateLimitAccount). A dashboard page makes
+  // one to three calls, so sixty is far above a person clicking around.
+  'api_account': {
+    windowMs: 60 * 1000,      // 1 minute
+    maxRequests: 60,
+  },
+  // Stripe checkout, keyed on the source address before authentication. The
+  // same shared-address problem as 'api': at 10, the eleventh Buy Now click in
+  // a minute across every dashboard user was refused.
   'checkout': {
     windowMs: 60 * 1000,      // 1 minute
-    maxRequests: 10,          // 10 checkout attempts per minute
+    maxRequests: 60,
+  },
+  // The purchase start page (#730), unauthenticated and reading the
+  // database: a person opens one checkout at a time.
+  'purchase_start': {
+    windowMs: 60 * 1000,
+    maxRequests: 30,
+  },
+  // Stripe checkout per account, checked after authentication: the limit on
+  // one customer creating checkout sessions.
+  'checkout_account': {
+    windowMs: 60 * 1000,      // 1 minute
+    maxRequests: 10,
   },
   // Admin API - moderate limits
   'admin': {
     windowMs: 60 * 1000,      // 1 minute
     maxRequests: 50,          // 50 requests per minute
   },
-  // MCP tool calls
+  // MCP transport, keyed on the SOURCE ADDRESS because it is checked before
+  // authentication, where there is no account to key on. Its job is to bound
+  // the cost of admitting a request (a JWT verification, or a bcrypt compare
+  // for a personal access token), not to bound a customer.
+  //
+  // 600 rather than 60 because every ChatGPT user arrives from OpenAI's
+  // shared egress addresses: at 60 a handful of concurrent customers behind
+  // one address would refuse each other. The per-account limit below is what
+  // actually bounds a customer, and the global backstop bounds everyone.
   'mcp': {
     windowMs: 60 * 1000,      // 1 minute
-    maxRequests: 60,          // 60 tool calls per minute
+    maxRequests: 600,
+  },
+  // MCP tool calls, keyed on the AUTHENTICATED ACCOUNT. This is the limit the
+  // product means by "60 tool calls per minute". Until 2026-09-13 it did not
+  // exist: the only MCP limiter ran before authentication, so req.auth was
+  // never set, every call was keyed on the source address, and the tier
+  // multipliers below were unreachable code on this path.
+  //
+  // A checkout card polls get_purchase_status every three seconds for the
+  // first minute, so one active card is about twenty calls a minute. Sixty
+  // leaves room for two cards and the model's own calls at once.
+  'mcp_account': {
+    windowMs: 60 * 1000,      // 1 minute
+    maxRequests: 60,
+  },
+  // Authenticated promo validation and redemption. Same shape as the public
+  // validator: tight per identifier, with a global backstop.
+  'promo_authenticated': {
+    windowMs: 60 * 1000,      // 1 minute
+    maxRequests: 10,
   },
   // Public promo code validation - prevent brute force enumeration
   'promo_public': {
     windowMs: 60 * 1000,      // 1 minute
     maxRequests: 10,          // 10 per minute per IP (generous for legitimate use)
   },
+  // The address request page (#604): one read and an answer per visit, with
+  // room for corrections after a refusal.
+  'address_public': {
+    windowMs: 60 * 1000,
+    maxRequests: 20,
+  },
 };
 
 /**
- * Get client identifier from request
- * Uses X-Forwarded-For for proxied requests, falls back to socket address
+ * How many proxies between the client and this process append their own
+ * address to X-Forwarded-For. Measured on Railway, 2026-09-08: the edge sets
+ * the client's address itself (a client-supplied value never reached the
+ * first position), then one internal hop appends one of two addresses of its
+ * own. So the header arrives as "<client>, <internal>", and the client is the
+ * hop before the last. Override with TRUSTED_PROXY_HOPS if the topology
+ * changes; 0 means the last hop is the client.
  */
-export function getClientIdentifier(req: IncomingMessage): string {
-  // Check for forwarded IP (from reverse proxy)
-  const forwardedFor = req.headers['x-forwarded-for'];
-  if (forwardedFor) {
-    const ips = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor;
-    // Take the first IP (original client)
-    return ips.split(',')[0].trim();
-  }
+const TRUSTED_PROXY_HOPS = (() => {
+  const raw = process.env.TRUSTED_PROXY_HOPS;
+  const parsed = raw === undefined ? NaN : Number(raw);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : 1;
+})();
 
-  // Fall back to direct connection IP
-  return req.socket.remoteAddress || 'unknown';
+/**
+ * The hops of X-Forwarded-For in order, oldest first. Several header lines
+ * are one list; blanks are dropped.
+ */
+export function forwardedForHops(header: string | string[] | undefined): string[] {
+  if (!header) return [];
+  const lines = Array.isArray(header) ? header : [header];
+  return lines
+    .flatMap((line) => line.split(','))
+    .map((hop) => hop.trim())
+    .filter((hop) => hop.length > 0);
+}
+
+/**
+ * The client's address given the hops and the number of trusted proxies that
+ * appended theirs: the hop just before the trusted ones. With fewer hops than
+ * expected (a direct connection, a local proxy) the first hop is the client.
+ *
+ * Neither end of the list is right on its own. The first hop is whatever the
+ * client wrote when the edge appends rather than replaces; the last hop is the
+ * proxy's own address when an internal hop appends, which is what a "last hop"
+ * version of this function keyed on for an hour in development on 2026-09-08,
+ * sharing every client's budget across two proxy addresses. The review's
+ * concern (audit A-05) was the first; the measurement above rules out both.
+ */
+export function clientAddressFromHops(hops: readonly string[], trustedProxyHops: number): string | null {
+  if (hops.length === 0) return null;
+  const index = hops.length - 1 - trustedProxyHops;
+  return hops[Math.max(0, index)];
+}
+
+export function getClientIdentifier(req: IncomingMessage): string {
+  return (
+    clientAddressFromHops(forwardedForHops(req.headers['x-forwarded-for']), TRUSTED_PROXY_HOPS) ??
+    req.socket.remoteAddress ??
+    'unknown'
+  );
 }
 
 /**
@@ -170,38 +307,6 @@ export function checkRateLimit(
 }
 
 /**
- * Rate limit middleware that sends 429 response if limit exceeded
- *
- * @returns true if request was blocked (response already sent), false otherwise
- */
-export function rateLimitMiddleware(
-  req: IncomingMessage,
-  res: ServerResponse,
-  endpointType: keyof typeof RATE_LIMITS
-): boolean {
-  const result = checkRateLimit(req, endpointType);
-
-  // Set rate limit headers
-  res.setHeader('X-RateLimit-Limit', result.limit);
-  res.setHeader('X-RateLimit-Remaining', result.remaining);
-  res.setHeader('X-RateLimit-Reset', Math.ceil(result.resetMs / 1000));
-
-  if (!result.allowed) {
-    res.statusCode = 429;
-    res.setHeader('Content-Type', 'application/json');
-    res.setHeader('Retry-After', Math.ceil(result.resetMs / 1000));
-    res.end(JSON.stringify({
-      error: 'Too Many Requests',
-      message: `Rate limit exceeded. Please wait ${Math.ceil(result.resetMs / 1000)} seconds before retrying.`,
-      retryAfter: Math.ceil(result.resetMs / 1000),
-    }));
-    return true; // Request was blocked
-  }
-
-  return false; // Request allowed
-}
-
-/**
  * Cleanup expired entries to prevent memory leaks
  */
 function cleanupExpiredEntries(): void {
@@ -219,28 +324,6 @@ function cleanupExpiredEntries(): void {
 
 // Start cleanup interval
 setInterval(cleanupExpiredEntries, CLEANUP_INTERVAL_MS);
-
-/**
- * Get current rate limit stats (for monitoring/debugging)
- */
-export function getRateLimitStats(): {
-  totalEntries: number;
-  entriesByType: Record<string, number>;
-} {
-  const entriesByType: Record<string, number> = {};
-
-  // Use Array.from for ES5 compatibility
-  const keys = Array.from(rateLimitStore.keys());
-  for (const key of keys) {
-    const type = key.split(':')[1] || 'unknown';
-    entriesByType[type] = (entriesByType[type] || 0) + 1;
-  }
-
-  return {
-    totalEntries: rateLimitStore.size,
-    entriesByType,
-  };
-}
 
 // ============================================================================
 // Tier-Aware Rate Limiting (Async)
@@ -359,7 +442,59 @@ export async function rateLimitMiddlewareWithTier(
     return true;
   }
 
+  // The per-identifier limit above bounds one client. Routes with a global
+  // entry also refuse at that ceiling whatever the mix of identifiers. On the
+  // MCP and REST routes a recently verified token skips it, up to a bound per
+  // account (#730).
+  if (VERIFIED_SKIP_GLOBAL.has(endpointType) && takeExemption(req.headers.authorization)) {
+    return false;
+  }
+  const globalResult = checkGlobalRateLimit(endpointType);
+  if (!globalResult.allowed) {
+    console.warn(`⚠️ Rate limit hit (global): ${endpointType} - system-wide limit reached`);
+    incrementBlockedCount(endpointType, 'global');
+    res.setHeader('X-RateLimit-Limit', globalResult.limit);
+    res.setHeader('X-RateLimit-Remaining', 0);
+    res.setHeader('X-RateLimit-Reset', Math.ceil(globalResult.resetMs / 1000));
+    res.setHeader('X-RateLimit-Scope', 'global');
+    res.statusCode = 429;
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Retry-After', Math.ceil(globalResult.resetMs / 1000));
+    res.end(JSON.stringify({
+      error: 'Too Many Requests',
+      message: `Rate limit exceeded. Please wait ${Math.ceil(globalResult.resetMs / 1000)} seconds before retrying.`,
+      retryAfter: Math.ceil(globalResult.resetMs / 1000),
+      tier: result.tier,
+    }));
+    return true;
+  }
+
   return false;
+}
+
+/** The routes whose shared backstop a recently verified token skips (#730). */
+const VERIFIED_SKIP_GLOBAL: ReadonlySet<string> = new Set(['mcp', 'api']);
+
+/** The per-account limits a REST handler applies once it knows the account. */
+export type AccountRateLimit = 'api_account' | 'checkout_account';
+
+/**
+ * The account stage of a REST limit, for a handler that has just
+ * authenticated. The address stage runs in httpServer.ts before
+ * authentication, where there is no account to key on, and the website's
+ * proxy sends every dashboard user from one address, so only this stage can
+ * bound a customer. Publishes the subject on req.auth, which is what the
+ * limiter keys on.
+ * @returns true if the request was refused with 429
+ */
+export async function rateLimitAccount(
+  req: IncomingMessage,
+  res: ServerResponse,
+  userId: string,
+  limit: AccountRateLimit
+): Promise<boolean> {
+  (req as IncomingMessage & { auth?: { userId: string } }).auth = { userId };
+  return rateLimitMiddlewareWithTier(req, res, limit);
 }
 
 // ============================================================================
@@ -442,7 +577,6 @@ export function rateLimitMiddlewareWithGlobal(
   const ipResult = checkRateLimit(req, endpointType);
 
   if (!ipResult.allowed) {
-    const clientIp = getClientIdentifier(req);
     console.warn(`⚠️ Rate limit hit (IP scope) on ${endpointType}`);
     incrementBlockedCount(endpointType, 'ip');
 
@@ -501,16 +635,10 @@ export function getBlockedRequestCounts(): Record<string, number> {
 }
 
 /**
- * Reset blocked request counts (useful for testing)
- */
-export function resetBlockedRequestCounts(): void {
-  blockedRequestCounts.clear();
-}
-
-/**
  * Clear all rate limit state (useful for testing)
  */
 export function clearRateLimitState(): void {
   rateLimitStore.clear();
   blockedRequestCounts.clear();
+  resetVerifiedTokens();
 }

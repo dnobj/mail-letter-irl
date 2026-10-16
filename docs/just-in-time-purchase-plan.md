@@ -132,7 +132,7 @@ Introduce a platform-neutral commerce service with operations such as:
 - `recordPaymentEvent(providerEvent)`
 - `fulfillPaidOrder(orderId)`
 - `getPurchaseStatus(userId, orderId)`
-- `requestRefund(orderId, reason)`
+- `requestRefund(orderId)` (the reason parameter was removed by #394; the refund event records the order's error code)
 
 Keep Stripe-specific Checkout, webhook signature verification, event mapping, and refunds behind a Stripe adapter. This lets a future ChatGPT Instant Checkout/SPT adapter fund the same commerce order and call the same fulfillment transaction.
 

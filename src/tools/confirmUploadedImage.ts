@@ -14,11 +14,8 @@
  */
 
 import { McpToolDefinition, ToolContext } from "../contracts/types.js";
-import {
-  confirmUploadedImageInputSchema,
-  confirmUploadedImageOutputSchema
-} from "../schemas.js";
 import { setRecentUploadedImage } from "../services/recentUploadStore.js";
+import { normalizeUploadContext } from "../utils/uploadContext.js";
 
 interface ConfirmUploadedImageInput {
   imageUrl: string;
@@ -48,8 +45,11 @@ async function handler(
   input: ConfirmUploadedImageInput,
   context: ToolContext
 ): Promise<ConfirmUploadedImageOutput> {
-  const hint = input.context || "";
-  await setRecentUploadedImage(context.user.userId, input.imageUrl, input.context);
+  // One of the three, or none: a context in other words would keep the recent
+  // upload from matching its preview (#474).
+  const uploadContext = normalizeUploadContext(input.context);
+  const hint = uploadContext ?? "";
+  await setRecentUploadedImage(context.user.userId, input.imageUrl, uploadContext);
 
   context.logger.info(
     {
@@ -60,7 +60,7 @@ async function handler(
     "Confirm uploaded image invoked"
   );
 
-  const suggestedNextStep = buildNextStep(input.context, input.imageUrl);
+  const suggestedNextStep = buildNextStep(uploadContext, input.imageUrl);
 
   return {
     status: "ready",
@@ -74,10 +74,9 @@ export const confirmUploadedImageTool: McpToolDefinition<
   ConfirmUploadedImageOutput
 > = {
   name: "confirm_uploaded_image",
+  title: "Confirm an uploaded image",
   description: "Internal widget relay that confirms an uploaded image and returns the imageUrl plus next-step guidance. Not intended for direct user requests.",
   readOnly: false,
-  inputSchema: confirmUploadedImageInputSchema,
-  outputSchema: confirmUploadedImageOutputSchema,
   meta: {
     "openai/widgetAccessible": true,
     "openai/toolInvocation/invoking": "Processing uploaded photo...",

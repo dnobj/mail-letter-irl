@@ -45,9 +45,16 @@ export const TIER_RATE_MULTIPLIERS: Record<UserTier, Record<string, number>> = {
   trusted: {
     auth: 1.5,        // 10 -> 15/min
     send_letter: 2.5, // 20 -> 50/hr
-    api: 2.0,         // 100 -> 200/min
-    checkout: 2.0,    // 10 -> 20/min
-    mcp: 2.0,         // 60 -> 120/min
+    // The address stages (api, checkout, mcp) are checked before
+    // authentication, where there is no account and so no tier: their entries
+    // never apply. They stay equal to the account stages, so a limit that
+    // moves after authentication keeps the same headroom.
+    api: 2.0,
+    api_account: 2.0, // 60 -> 120/min per account
+    checkout: 2.0,
+    checkout_account: 2.0, // 10 -> 20/min per account
+    mcp: 2.0,
+    mcp_account: 2.0, // 60 -> 120/min per account
     // admin: unchanged (no entry = 1x)
   },
 };
@@ -146,39 +153,6 @@ export async function calculateUserTier(userId: string): Promise<TierCalculation
 }
 
 /**
- * Update a single user's tier based on current criteria.
- * Only updates calculated tier - respects tier_override.
- */
-export async function updateUserTier(userId: string): Promise<User> {
-  const calculation = await calculateUserTier(userId);
-
-  const result = await query<User>(
-    `UPDATE users
-     SET tier = $1,
-         tier_calculated_at = NOW(),
-         updated_at = NOW()
-     WHERE user_id = $2
-     RETURNING *`,
-    [calculation.tier, userId]
-  );
-
-  if (result.rows.length === 0) {
-    throw new Error(`User not found: ${userId}`);
-  }
-
-  const user = result.rows[0];
-  invalidateTierCache(userId);
-
-  const effectiveTier = getEffectiveTier(user);
-  console.log(
-    `   Tier updated: calculated=${calculation.tier}, effective=${effectiveTier} ` +
-    `(purchases: ${calculation.purchaseCount}, days since qualifying: ${calculation.daysSinceQualifyingPurchase ?? 'N/A'})`
-  );
-
-  return user;
-}
-
-/**
  * Batch update tiers for all users.
  * Used by daily background job.
  *
@@ -186,7 +160,6 @@ export async function updateUserTier(userId: string): Promise<User> {
  * - Only updates users whose calculated tier differs from current
  */
 export async function updateAllUserTiers(): Promise<TierUpdateBatchResult> {
-  const trustedCriteria = TIER_PROMOTION_CRITERIA.trusted!;
 
   // Get all users with their purchase info
   const usersResult = await query<{
@@ -296,14 +269,4 @@ export function invalidateTierCache(userId: string): void {
  */
 export function clearTierCache(): void {
   tierCache.clear();
-}
-
-/**
- * Get tier cache stats for monitoring
- */
-export function getTierCacheStats(): { size: number; ttlMs: number } {
-  return {
-    size: tierCache.size,
-    ttlMs: TIER_CACHE_TTL_MS,
-  };
 }

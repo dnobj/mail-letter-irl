@@ -1,0 +1,641 @@
+import { Readable } from 'node:stream';
+import type { IncomingMessage, ServerResponse } from 'http';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+/**
+ * The confirmation page's API (#470).
+ *
+ * Where the person presses Send, so the one door the model must never open:
+ * only the website's own application may call it, only for the caller's own
+ * draft, and a refusal is worded for the page rather than for a model. These
+ * drive the real handler; authentication's outcome, the draft store, the send
+ * service, the outbox and the balance read are faked.
+ */
+
+vi.mock('../../../src/api/middleware/restAuth.js', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../../src/api/middleware/restAuth.js')>()),
+  authenticateRestRequest: vi.fn()
+}));
+vi.mock('../../../src/api/middleware/rateLimit.js', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../../src/api/middleware/rateLimit.js')>()),
+  rateLimitAccount: vi.fn()
+}));
+vi.mock('../../../src/services/draftService.js', () => ({ getDraft: vi.fn() }));
+vi.mock('../../../src/services/mailSendService.js', () => ({ createMailOrderFromDraft: vi.fn() }));
+vi.mock('../../../src/services/letterJobService.js', () => ({ processLetterJob: vi.fn() }));
+vi.mock('../../../src/db/index.js', () => ({ query: vi.fn() }));
+
+import { authenticateRestRequest } from '../../../src/api/middleware/restAuth.js';
+import { rateLimitAccount } from '../../../src/api/middleware/rateLimit.js';
+import { getDraft } from '../../../src/services/draftService.js';
+import { createMailOrderFromDraft } from '../../../src/services/mailSendService.js';
+import { processLetterJob } from '../../../src/services/letterJobService.js';
+import { query } from '../../../src/db/index.js';
+import { DuplicateMailError } from '../../../src/services/duplicateMailService.js';
+import { SpendLimitError } from '../../../src/services/betaSpendLimits.js';
+import { BETA_ACCESS_MESSAGE } from '../../../src/auth/betaAccess.js';
+import {
+  handleSendConfirmationApiRequest,
+  refusalFor
+} from '../../../src/api/sendConfirmationApiHandler.js';
+import * as diagnostics from '../../../src/utils/diagnosticLog.js';
+import { contentVersionOf } from '../../../src/services/contentVersion.js';
+
+const DRAFT_ID = '0f1e2d3c-4b5a-4978-8796-a5b4c3d2e1f0';
+const PATH = `/api/sends/${DRAFT_ID}`;
+const WEBSITE = 'WebsiteClient01';
+
+function request(method: string, body?: string): IncomingMessage {
+  return Object.assign(Readable.from(body === undefined ? [] : [Buffer.from(body)]), {
+    method,
+    headers: { authorization: 'Bearer x' }
+  }) as unknown as IncomingMessage;
+}
+
+function response() {
+  const state = { status: 0, body: '', headers: {} as Record<string, unknown> };
+  const res = {
+    statusCode: 0,
+    setHeader(name: string, value: unknown) {
+      state.headers[name.toLowerCase()] = value;
+    },
+    end(chunk?: string) {
+      state.status = this.statusCode;
+      state.body = chunk ?? '';
+    }
+  };
+  return { res: res as unknown as ServerResponse, state, json: () => JSON.parse(state.body) };
+}
+
+function signedIn(clientId: string | null = WEBSITE, userId = 'auth0|owner') {
+  vi.mocked(authenticateRestRequest).mockResolvedValue({
+    ok: true,
+    user: { userId, scopes: ['mail:read', 'mail:draft', 'mail:send'], clientId: clientId ?? undefined }
+  });
+}
+
+function draft(overrides: Record<string, unknown> = {}) {
+  return {
+    draft_id: DRAFT_ID,
+    user_id: 'auth0|owner',
+    mail_type: 'letter',
+    status: 'pending',
+    expires_at: new Date(Date.now() + 3_600_000),
+    required_credits: 2,
+    recipient: { name: 'Sam Rivera', addressLine1: '1 Main St', city: 'Austin', state: 'TX', postalCode: '78701', country: 'US' },
+    sender: { name: 'Ada', addressLine1: '2 Oak Ave', city: 'Austin', state: 'TX', postalCode: '78702' },
+    body_text: 'Hello',
+    sign_off: 'Love',
+    preview_html: '<div>preview</div>',
+    ...overrides
+  };
+}
+
+async function call(method: string, body?: string, path = PATH) {
+  const out = response();
+  const handled = await handleSendConfirmationApiRequest(request(method, body), out.res, path);
+  return { handled, ...out };
+}
+
+describe('the confirmation page API (#470)', () => {
+  let writeSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.stubEnv('LETTER_IRL_SEND_CONFIRMATION_ENABLED', 'true');
+    vi.stubEnv('LETTER_IRL_WEBSITE_CLIENT_ID', WEBSITE);
+    vi.mocked(authenticateRestRequest).mockReset();
+    vi.mocked(rateLimitAccount).mockReset();
+    vi.mocked(rateLimitAccount).mockResolvedValue(false);
+    vi.mocked(getDraft).mockReset();
+    vi.mocked(createMailOrderFromDraft).mockReset();
+    vi.mocked(processLetterJob).mockReset();
+    vi.mocked(query).mockReset();
+    vi.mocked(query).mockResolvedValue({ rows: [{ credits: 7 }] } as any);
+    writeSpy = vi.spyOn(diagnostics, 'writeDiagnostic').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    writeSpy.mockRestore();
+  });
+
+  it('leaves other paths to the next handler', async () => {
+    expect((await call('GET', undefined, '/api/sendsx')).handled).toBe(false);
+    expect((await call('GET', undefined, '/api/letters')).handled).toBe(false);
+  });
+
+  it('does not exist while the rule is off', async () => {
+    vi.stubEnv('LETTER_IRL_SEND_CONFIRMATION_ENABLED', 'false');
+    signedIn();
+    const { handled, state } = await call('POST');
+    expect(handled).toBe(true);
+    expect(state.status).toBe(404);
+    expect(authenticateRestRequest).not.toHaveBeenCalled();
+    expect(createMailOrderFromDraft).not.toHaveBeenCalled();
+  });
+
+  it('answers 404 for the bare prefix and deeper paths', async () => {
+    signedIn();
+    expect((await call('GET', undefined, '/api/sends')).state.status).toBe(404);
+    expect((await call('GET', undefined, `/api/sends/${DRAFT_ID}/x`)).state.status).toBe(404);
+  });
+
+  it('allows only GET and POST', async () => {
+    const { state } = await call('DELETE');
+    expect(state.status).toBe(405);
+    expect(state.headers.allow).toBe('GET, POST');
+  });
+
+  it("asks for the route's scope: read to look, send to send", async () => {
+    signedIn();
+    vi.mocked(getDraft).mockResolvedValue(draft() as any);
+    await call('GET');
+    expect(authenticateRestRequest).toHaveBeenLastCalledWith(expect.anything(), ['mail:read']);
+    vi.mocked(createMailOrderFromDraft).mockResolvedValue({ alreadyConsumed: true, letter: { letter_id: 'L1' }, creditsRemaining: 4 } as any);
+    await call('POST');
+    expect(authenticateRestRequest).toHaveBeenLastCalledWith(expect.anything(), ['mail:send']);
+  });
+
+  it('passes an authentication failure through with its own status', async () => {
+    vi.mocked(authenticateRestRequest).mockResolvedValue({ ok: false, reason: 'rejected', status: 401, message: 'no' });
+    const { state } = await call('POST');
+    expect(state.status).toBe(401);
+    expect(getDraft).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['an MCP client', 'https://claude.ai/oauth/mcp-oauth-client-metadata'],
+    ['ChatGPT', 'https://chatgpt.com/oauth/AbC123/client.json'],
+    ['a token with no application', null]
+  ])('refuses %s before reading the draft', async (_label, clientId) => {
+    signedIn(clientId);
+    const { state, json } = await call('POST', '{}');
+    expect(state.status).toBe(403);
+    expect(json()).toEqual({ error: 'website_only', message: 'Mail is sent from letterirl.com.' });
+    expect(getDraft).not.toHaveBeenCalled();
+    expect(createMailOrderFromDraft).not.toHaveBeenCalled();
+  });
+
+  it('refuses everyone while no website application is configured', async () => {
+    vi.stubEnv('LETTER_IRL_WEBSITE_CLIENT_ID', '');
+    signedIn('');
+    const { state } = await call('POST', '{}');
+    expect(state.status).toBe(403);
+    expect(writeSpy).toHaveBeenCalledWith('warn', 'send.confirmation_client_refused', { configured: false });
+  });
+
+  it("answers someone else's draft exactly as a missing one", async () => {
+    signedIn();
+    vi.mocked(getDraft).mockResolvedValue(draft({ user_id: 'auth0|someone-else' }) as any);
+    const theirs = await call('GET');
+    vi.mocked(getDraft).mockResolvedValue(null);
+    const missing = await call('GET');
+    expect(theirs.state.status).toBe(404);
+    expect(theirs.state.body).toBe(missing.state.body);
+  });
+
+  it("limits each account's calls, and a limited call goes no further", async () => {
+    signedIn();
+    vi.mocked(getDraft).mockResolvedValue(draft() as any);
+    await call('GET');
+    expect(rateLimitAccount).toHaveBeenCalledWith(expect.anything(), expect.anything(), 'auth0|owner', 'api_account');
+
+    vi.mocked(getDraft).mockClear();
+    vi.mocked(rateLimitAccount).mockResolvedValue(true);
+    const limited = await call('POST', '{}');
+    expect(limited.handled).toBe(true);
+    expect(getDraft).not.toHaveBeenCalled();
+    expect(createMailOrderFromDraft).not.toHaveBeenCalled();
+  });
+
+  it.each(['not-a-uuid', '%E0%A4%A', `${DRAFT_ID}x`])('never asks the database about %j', async (id) => {
+    signedIn();
+    const { state } = await call('GET', undefined, `/api/sends/${id}`);
+    expect(state.status).toBe(404);
+    expect(getDraft).not.toHaveBeenCalled();
+  });
+
+  describe('GET', () => {
+    it('shows a ready draft with its preview, cost and balance', async () => {
+      signedIn();
+      vi.mocked(getDraft).mockResolvedValue(draft() as any);
+      const { state, json } = await call('GET');
+      expect(state.status).toBe(200);
+      expect(json()).toMatchObject({
+        draftId: DRAFT_ID,
+        mailType: 'letter',
+        state: 'ready',
+        orderId: null,
+        previewHtml: '<div>preview</div>',
+        lettersRequired: 1,
+        lettersAvailable: 3,
+        isGiftSend: false,
+        recipient: { name: 'Sam Rivera', addressLine1: '1 Main St', city: 'Austin', state: 'TX', postalCode: '78701' },
+        schedule: null,
+        stationery: null,
+        // The version of what it shows (#695), for Send to take back.
+        contentVersion: contentVersionOf(draft() as never)
+      });
+      // Only the address fields the page shows.
+      expect(json().recipient.country).toBeUndefined();
+      expect(query).toHaveBeenCalledWith('SELECT credits FROM users WHERE user_id = $1', ['auth0|owner']);
+    });
+
+    it.each([
+      ['sent', { status: 'consumed', consumed_letter_id: 'L9' }, 'L9'],
+      ['expired', { status: 'expired' }, null],
+      ['expired', { status: 'cancelled' }, null],
+      ['expired', { expires_at: new Date(Date.now() - 1000) }, null],
+      // A pending draft an erasure emptied is no longer to send (#573 review round 3)...
+      ['expired', { redacted_at: new Date(Date.now() - 1000), body_text: '', preview_html: null }, null],
+      // ...while a sent one the sweep emptied is still sent.
+      ['sent', { status: 'consumed', consumed_letter_id: 'L9', redacted_at: new Date(Date.now() - 1000) }, 'L9']
+    ])('shows a %s draft as such', async (expected, overrides, orderId) => {
+      signedIn();
+      vi.mocked(getDraft).mockResolvedValue(draft(overrides) as any);
+      const { json } = await call('GET');
+      expect(json().state).toBe(expected);
+      expect(json().orderId).toBe(orderId);
+      expect(writeSpy).toHaveBeenCalledWith('info', 'send.confirmation_viewed', { mailType: 'letter', state: expected });
+    });
+
+    it("shows a draft's arrival dates, and none it cannot read (#535)", async () => {
+      signedIn();
+      vi.mocked(getDraft).mockResolvedValue(draft({ arrive_by: '2026-10-16', mail_on: '2026-10-06' }) as any);
+      expect((await call('GET')).json().schedule).toEqual({ arriveBy: '2026-10-16', mailOn: '2026-10-06' });
+      vi.mocked(getDraft).mockResolvedValue(draft({ arrive_by: '2026-10-16', mail_on: null }) as any);
+      expect((await call('GET')).json().schedule).toBeNull();
+    });
+
+    it("names a themed draft's stationery as the print reads it, and none for Classic or one it cannot read (#563)", async () => {
+      signedIn();
+      const celebration = { theme: 'celebration', dateLine: 'October 1, 2026', headline: 'Happy Birthday!' };
+      vi.mocked(getDraft).mockResolvedValue(draft({ renderer_version: 'pdf-2', stationery: { ...celebration, colour: 'red' } }) as any);
+      expect((await call('GET')).json().stationery).toEqual(celebration);
+      for (const stationery of [null, { theme: 'classic' }, { theme: 'floral' }, { theme: 'botanical', headline: 7 }]) {
+        vi.mocked(getDraft).mockResolvedValue(draft({ renderer_version: 'pdf-2', stationery }) as any);
+        expect((await call('GET')).json().stationery, JSON.stringify(stationery)).toBeNull();
+      }
+    });
+
+    it("names a postcard's size and front as the print reads them, and nothing of them for a letter (#594)", async () => {
+      signedIn();
+      const postcard = (overrides: Record<string, unknown>) => draft({ mail_type: 'postcard', postcard_size: '6x9', postcard_front: null, ...overrides });
+      vi.mocked(getDraft).mockResolvedValue(postcard({}) as any);
+      expect((await call('GET')).json().postcard).toEqual({ size: '6x9', layout: 'full_bleed' });
+      vi.mocked(getDraft).mockResolvedValue(postcard({ postcard_size: '6x4', renderer_version: 'pdf-3', postcard_front: { layout: 'border', caption: 'Cape Cod', extra: 1 } }) as any);
+      expect((await call('GET')).json().postcard).toEqual({ size: '6x4', layout: 'border', caption: 'Cape Cod' });
+      vi.mocked(getDraft).mockResolvedValue(postcard({ renderer_version: 'pdf-3', postcard_front: { layout: 'border' } }) as any);
+      expect((await call('GET')).json().postcard).toEqual({ size: '6x9', layout: 'border' });
+      vi.mocked(getDraft).mockResolvedValue(postcard({ postcard_size: '6x11', renderer_version: 'pdf-3', postcard_front: { layout: 'greetings', place: 'Rye' } }) as any);
+      expect((await call('GET')).json().postcard).toEqual({ size: '6x11', layout: 'greetings', place: 'Rye' });
+      // A size no writer leaves out reads as the 6x9 every postcard was before.
+      vi.mocked(getDraft).mockResolvedValue(postcard({ postcard_size: null }) as any);
+      expect((await call('GET')).json().postcard).toEqual({ size: '6x9', layout: 'full_bleed' });
+      // A row without the column reads as no front.
+      const { postcard_front: _omitted, ...withoutFront } = postcard({}) as Record<string, unknown>;
+      vi.mocked(getDraft).mockResolvedValue(withoutFront as any);
+      expect((await call('GET')).json().postcard).toEqual({ size: '6x9', layout: 'full_bleed' });
+      // As the print reads it: a front only with pdf-3, whatever the row holds (#602 review round 1).
+      for (const renderer_version of ['pdf-1', null]) {
+        vi.mocked(getDraft).mockResolvedValue(postcard({ renderer_version, postcard_front: { layout: 'border', caption: 'Cape Cod' } }) as any);
+        expect((await call('GET')).json().postcard, String(renderer_version)).toEqual({ size: '6x9', layout: 'full_bleed' });
+      }
+      // A front the print cannot read is not named, nor anything of a letter.
+      // A pdf-3 postcard with no front (which 048 refuses) is held by the print, so it is not named either.
+      for (const overrides of [
+        { renderer_version: 'pdf-3', postcard_front: { layout: 'collage' } },
+        { renderer_version: 'pdf-3', postcard_front: null },
+        { mail_type: 'letter' }
+      ]) {
+        vi.mocked(getDraft).mockResolvedValue(postcard(overrides) as any);
+        expect((await call('GET')).json(), JSON.stringify(overrides)).not.toHaveProperty('postcard');
+      }
+    });
+
+    it('counts a long letter and a postcard as the preview tools do', async () => {
+      signedIn();
+      vi.mocked(getDraft).mockResolvedValue(draft({ required_credits: 5 }) as any);
+      expect((await call('GET')).json().lettersRequired).toBe(3);
+      vi.mocked(getDraft).mockResolvedValue(draft({ mail_type: 'postcard', required_credits: 4 }) as any);
+      expect((await call('GET')).json().lettersRequired).toBe(1);
+    });
+
+    it('names the pages of a letter longer than one, which no pack pays for, and nothing otherwise (#586)', async () => {
+      signedIn();
+      vi.mocked(getDraft).mockResolvedValue(draft({ pages: 2, renderer_version: 'pdf-1' }) as any);
+      const two = (await call('GET')).json();
+      expect(two.pages).toBe(2);
+      expect(two.packPays).toBe(false);
+      vi.mocked(getDraft).mockResolvedValue(draft({ pages: 3, renderer_version: 'pdf-1' }) as any);
+      expect((await call('GET')).json().pages).toBe(3);
+      for (const overrides of [{ pages: 1 }, {}, { mail_type: 'postcard', pages: 2 }]) {
+        vi.mocked(getDraft).mockResolvedValue(draft(overrides) as any);
+        expect((await call('GET')).json(), JSON.stringify(overrides)).not.toHaveProperty('pages');
+      }
+    });
+
+    it('names certified mail, which no pack pays for, and nothing for standard mail (#625)', async () => {
+      signedIn();
+      for (const mail_service of ['certified', 'certified_return_receipt']) {
+        vi.mocked(getDraft).mockResolvedValue(draft({ mail_service }) as any);
+        const body = (await call('GET')).json();
+        expect(body.mailService, mail_service).toBe(mail_service);
+        expect(body.packPays, mail_service).toBe(false);
+      }
+      for (const overrides of [{ mail_service: 'standard' }, {}, { mail_service: null }, { mail_type: 'postcard', mail_service: 'certified' }]) {
+        vi.mocked(getDraft).mockResolvedValue(draft(overrides) as any);
+        expect((await call('GET')).json(), JSON.stringify(overrides)).not.toHaveProperty('mailService');
+      }
+    });
+  });
+
+  describe('POST', () => {
+    const created = {
+      alreadyConsumed: false,
+      letter: { letter_id: 'L1' },
+      job: { job_id: 'J1' },
+      creditsRemaining: 5
+    };
+
+    beforeEach(() => {
+      vi.mocked(processLetterJob).mockResolvedValue({ claimed: true, completed: true, retryScheduled: false } as any);
+    });
+
+    it("sends the person's own draft and hands it to the printer", async () => {
+      signedIn();
+      vi.mocked(getDraft).mockResolvedValue(draft() as any);
+      vi.mocked(createMailOrderFromDraft).mockResolvedValue(created as any);
+      const { state, json } = await call('POST', '{}');
+      expect(createMailOrderFromDraft).toHaveBeenCalledWith({
+        draftId: DRAFT_ID,
+        userId: 'auth0|owner',
+        mailType: 'letter',
+        allowDuplicate: false
+      });
+      expect(processLetterJob).toHaveBeenCalledWith('J1');
+      expect(state.status).toBe(200);
+      expect(json()).toEqual({ orderId: 'L1', alreadySent: false, lettersRemaining: 2 });
+      expect(writeSpy).toHaveBeenCalledWith('info', 'send.confirmed_on_website', { mailType: 'letter', outcome: 'sent' });
+    });
+
+    it('sends a postcard as a postcard, and another copy only when asked', async () => {
+      signedIn();
+      vi.mocked(getDraft).mockResolvedValue(draft({ mail_type: 'postcard' }) as any);
+      vi.mocked(createMailOrderFromDraft).mockResolvedValue(created as any);
+      await call('POST', JSON.stringify({ sendAnotherCopy: true }));
+      expect(createMailOrderFromDraft).toHaveBeenCalledWith(expect.objectContaining({ mailType: 'postcard', allowDuplicate: true }));
+      await call('POST', JSON.stringify({ sendAnotherCopy: 'yes' }));
+      expect(createMailOrderFromDraft).toHaveBeenLastCalledWith(expect.objectContaining({ allowDuplicate: false }));
+      await call('POST', JSON.stringify({ sendAnotherCopy: 1 }));
+      expect(createMailOrderFromDraft).toHaveBeenLastCalledWith(expect.objectContaining({ allowDuplicate: false }));
+    });
+
+    it('sends the content version the page drew, for the service to compare (#695)', async () => {
+      signedIn();
+      vi.mocked(getDraft).mockResolvedValue(draft() as any);
+      vi.mocked(createMailOrderFromDraft).mockResolvedValue(created as any);
+      await call('POST', JSON.stringify({ contentVersion: '0123456789abcdef' }));
+      expect(createMailOrderFromDraft).toHaveBeenLastCalledWith(expect.objectContaining({ contentVersion: '0123456789abcdef' }));
+      // Null is none, as an absent one is: the service lets it through for one release.
+      await call('POST', JSON.stringify({ contentVersion: null }));
+      expect(vi.mocked(createMailOrderFromDraft).mock.lastCall?.[0].contentVersion).toBeUndefined();
+    });
+
+    it.each([42, true, { version: 'x' }, ['x']])('refuses a content version of %j before sending (#695)', async contentVersion => {
+      signedIn();
+      vi.mocked(getDraft).mockResolvedValue(draft() as any);
+      const { state, json } = await call('POST', JSON.stringify({ contentVersion }));
+      expect(state.status).toBe(400);
+      expect(json()).toEqual({ error: 'invalid_content_version' });
+      expect(createMailOrderFromDraft).not.toHaveBeenCalled();
+    });
+
+    it('returns the first order for a second press, without dispatching again', async () => {
+      signedIn();
+      vi.mocked(getDraft).mockResolvedValue(draft() as any);
+      vi.mocked(createMailOrderFromDraft).mockResolvedValue({ ...created, alreadyConsumed: true, job: undefined } as any);
+      const { json } = await call('POST');
+      expect(json()).toEqual({ orderId: 'L1', alreadySent: true, lettersRemaining: 2 });
+      expect(processLetterJob).not.toHaveBeenCalled();
+      expect(writeSpy).toHaveBeenCalledWith('info', 'send.confirmed_on_website', { mailType: 'letter', outcome: 'already_sent' });
+    });
+
+    it('reports a committed send as sent even when the printer hand-off fails', async () => {
+      signedIn();
+      vi.mocked(getDraft).mockResolvedValue(draft() as any);
+      vi.mocked(createMailOrderFromDraft).mockResolvedValue(created as any);
+      vi.mocked(processLetterJob).mockRejectedValue(new Error('provider down'));
+      const { state } = await call('POST');
+      expect(state.status).toBe(200);
+      expect(writeSpy).toHaveBeenCalledWith('warn', 'send.confirmation_dispatch_deferred', expect.objectContaining({ mailType: 'letter' }));
+    });
+
+    describe('with an arrival date (#535)', () => {
+      const DATES = { arrive_by: '2026-10-16', mail_on: '2026-10-06' };
+      const SCHEDULE = { arriveBy: '2026-10-16', mailOn: '2026-10-06' };
+      const held = (letter: Record<string, unknown> = {}, nextAttemptAt = new Date(Date.now() + 86_400_000)) => ({
+        ...created,
+        letter: { letter_id: 'L1', status: 'queued', funding_type: 'prepaid_balance', ...DATES, ...letter },
+        job: { job_id: 'J1', next_attempt_at: nextAttemptAt }
+      });
+
+      it('says it is scheduled, with its dates, while it waits for its mail date', async () => {
+        signedIn();
+        vi.mocked(getDraft).mockResolvedValue(draft() as any);
+        vi.mocked(createMailOrderFromDraft).mockResolvedValue(held() as any);
+        vi.mocked(processLetterJob).mockResolvedValue({ claimed: false, completed: false, retryScheduled: false } as any);
+
+        const { json } = await call('POST', '{}');
+
+        expect(json()).toEqual({
+          orderId: 'L1',
+          alreadySent: false,
+          lettersRemaining: 2,
+          schedule: SCHEDULE,
+          scheduled: true,
+          cancellable: true
+        });
+      });
+
+      it('is not scheduled once due: taken, or behind a pause', async () => {
+        signedIn();
+        vi.mocked(getDraft).mockResolvedValue(draft() as any);
+        vi.mocked(createMailOrderFromDraft).mockResolvedValue(held({}, new Date(Date.now() - 60_000)) as any);
+        vi.mocked(processLetterJob).mockResolvedValue({ claimed: false, completed: false, retryScheduled: false } as any);
+        expect((await call('POST', '{}')).json()).toMatchObject({ schedule: SCHEDULE, scheduled: false, cancellable: false });
+
+        vi.mocked(processLetterJob).mockResolvedValue({ claimed: true, completed: true, retryScheduled: false } as any);
+        expect((await call('POST', '{}')).json()).toMatchObject({ scheduled: false, cancellable: false });
+      });
+
+      it('keeps the hold when the hand-off throws: a job held past now was not taken', async () => {
+        signedIn();
+        vi.mocked(getDraft).mockResolvedValue(draft() as any);
+        vi.mocked(createMailOrderFromDraft).mockResolvedValue(held() as any);
+        vi.mocked(processLetterJob).mockRejectedValue(new Error('database away'));
+        expect((await call('POST', '{}')).json()).toMatchObject({ scheduled: true, cancellable: true });
+      });
+
+      it('answers a second press as the letter stands, and Pay & Send as not cancellable', async () => {
+        signedIn();
+        vi.mocked(getDraft).mockResolvedValue(draft() as any);
+        vi.mocked(createMailOrderFromDraft).mockResolvedValue({ ...held(), alreadyConsumed: true, job: undefined } as any);
+        expect((await call('POST', '{}')).json()).toMatchObject({ alreadySent: true, scheduled: true, cancellable: true });
+
+        vi.mocked(createMailOrderFromDraft).mockResolvedValue({ ...held({ status: 'accepted' }), alreadyConsumed: true, job: undefined } as any);
+        expect((await call('POST', '{}')).json()).toMatchObject({ schedule: SCHEDULE, scheduled: false, cancellable: false });
+
+        vi.mocked(createMailOrderFromDraft).mockResolvedValue({ ...held({ funding_type: 'jit_order' }), alreadyConsumed: true, job: undefined } as any);
+        expect((await call('POST', '{}')).json()).toMatchObject({ scheduled: true, cancellable: false });
+        expect(processLetterJob).not.toHaveBeenCalled();
+      });
+    });
+
+    it('refuses a body that is not JSON, before sending', async () => {
+      signedIn();
+      vi.mocked(getDraft).mockResolvedValue(draft() as any);
+      const { state } = await call('POST', '{nope');
+      expect(state.status).toBe(400);
+      expect(createMailOrderFromDraft).not.toHaveBeenCalled();
+    });
+
+    it('answers an oversized body with 413, before sending', async () => {
+      signedIn();
+      vi.mocked(getDraft).mockResolvedValue(draft() as any);
+      const req = Object.assign(Readable.from([]), {
+        method: 'POST',
+        headers: { authorization: 'Bearer x', 'content-length': String(64 * 1024 * 1024) }
+      }) as unknown as IncomingMessage;
+      const out = response();
+      await handleSendConfirmationApiRequest(req, out.res, PATH);
+      expect(out.state.status).toBe(413);
+      expect(out.json()).toEqual({ error: 'too_large' });
+      expect(createMailOrderFromDraft).not.toHaveBeenCalled();
+    });
+
+    it('answers a mail row with no outbox job as a failure, and logs it as one', async () => {
+      signedIn();
+      vi.mocked(getDraft).mockResolvedValue(draft() as any);
+      vi.mocked(createMailOrderFromDraft).mockResolvedValue({ ...created, job: undefined } as any);
+      const { state, json } = await call('POST');
+      expect(state.status).toBe(500);
+      expect(json().error).toBe('send_failed');
+      expect(writeSpy).toHaveBeenCalledWith('error', 'send.confirmation_refused', expect.objectContaining({ reason: 'send_failed' }));
+    });
+
+    it('turns a service refusal into the page\'s words', async () => {
+      signedIn();
+      vi.mocked(getDraft).mockResolvedValue(draft() as any);
+      vi.mocked(createMailOrderFromDraft).mockRejectedValue(new Error('Insufficient credits. Required: 2, Available: 0'));
+      const { state, json } = await call('POST');
+      expect(state.status).toBe(402);
+      expect(json()).toEqual({
+        error: 'no_letters',
+        message: "You don't have enough letters for this. Buy letters, then come back and press Send."
+      });
+      expect(writeSpy).toHaveBeenCalledWith('info', 'send.confirmation_refused', expect.objectContaining({ reason: 'no_letters' }));
+    });
+  });
+});
+
+describe('refusalFor (#470)', () => {
+  const coded = (code: string) => Object.assign(new Error(`internal ${code} detail`), { code });
+
+  it('describes a duplicate by its fields, never by a service message', () => {
+    const refusal = refusalFor(
+      new DuplicateMailError({ kind: 'sent', mailType: 'letter', recipientName: 'Sam', ageSeconds: 7_325 } as any, 'internal text')
+    );
+    expect(refusal.status).toBe(409);
+    expect(refusal.body).toEqual({
+      error: 'duplicate',
+      message: 'The same mail went out from this account in the last 24 hours.',
+      duplicate: { kind: 'sent', mailType: 'letter', recipientName: 'Sam', ageMinutes: 122 }
+    });
+  });
+
+  it('passes a spending limit through, since its words are ours', () => {
+    const refusal = refusalFor(new SpendLimitError('MAIL_SENDING_DISABLED', 'Sending is paused right now.'));
+    expect(refusal).toMatchObject({ status: 429, body: { error: 'limit', message: 'Sending is paused right now.' } });
+  });
+
+  it.each([
+    ['ACCOUNT_SENDS_BLOCKED', 403, 'blocked'],
+    ['BETA_ACCESS_DENIED', 403, 'beta'],
+    ['DRAFT_NOT_FOUND', 404, 'not_found'],
+    ['DRAFT_NOT_OWNED', 404, 'not_found'],
+    ['DRAFT_EXPIRED', 410, 'expired'],
+    ['DRAFT_CANCELLED', 410, 'expired'],
+    ['DRAFT_CHECKOUT_PENDING', 409, 'checkout_open'],
+    // An edit came after the page drew it (#695).
+    ['DRAFT_CHANGED_SINCE_SHOWN', 409, 'changed_since_shown'],
+    ['GIFT_LETTERS_DISABLED', 409, 'gift_unavailable'],
+    ['GIFT_LETTER_UNAVAILABLE', 409, 'gift_unavailable'],
+    ['SCHEDULE_PASSED', 409, 'schedule_passed'],
+    // Its mail date filled after the preview (#700).
+    ['SCHEDULE_FULL', 409, 'schedule_full'],
+    ['PACK_CANNOT_PAY', 402, 'pay_per_send'],
+    ['DRAFT_INVALID_STATE', 409, 'unsendable'],
+    ['DRAFT_INCOMPLETE', 409, 'unsendable'],
+    ['DRAFT_WRONG_MAIL_TYPE', 409, 'unsendable'],
+    ['DRAFT_FUNDING_CONFLICT', 409, 'unsendable'],
+    ['SOMETHING_NEW', 500, 'send_failed']
+  ])('maps %s to %i %s, without the service message', (code, status, reason) => {
+    const refusal = refusalFor(coded(code));
+    expect(refusal.status).toBe(status);
+    expect(refusal.body.error).toBe(reason);
+    expect(JSON.stringify(refusal.body)).not.toContain('internal');
+  });
+
+  it('tells the person a missed mail date needs a new preview (#535)', () => {
+    expect(refusalFor(coded('SCHEDULE_PASSED')).body.message).toBe(
+      'The day this was to go to the printer has passed, so it can no longer arrive by its date. Make a new preview with a new date.'
+    );
+  });
+
+  it('tells the person a full mail date needs another date, named without the YYYY-MM-DD (#700)', () => {
+    const full = Object.assign(coded('SCHEDULE_FULL'), { openArrivals: ['2026-10-15', '2026-10-19'] });
+    expect(refusalFor(full).body.message).toMatch(
+      /^Mail to arrive by its date is now fully booked, so nothing was sent\. The nearest arrival dates with room are \w{3}, Oct 15(, 2026)? and \w{3}, Oct 19(, 2026)?\. Choose another arrival date for it in the chat, or none to send it as soon as possible, then come back and send it\.$/
+    );
+    // No other date has room: no date at all, not "another" (review round 3).
+    expect(refusalFor(coded('SCHEDULE_FULL')).body.message).toBe(
+      'Mail to arrive by its date is now fully booked, so nothing was sent. No other arrival date on offer has room right now. ' +
+        'Choose no arrival date for it in the chat, to send it as soon as possible, then come back and send it.'
+    );
+  });
+
+  it('says certified mail is paid with Pay & Send, not that packs pay for one-page letters (#625)', () => {
+    const certified = Object.assign(coded('PACK_CANNOT_PAY'), { certified: true });
+    expect(refusalFor(certified)).toMatchObject({ status: 402, body: { error: 'pay_per_send' } });
+    expect(refusalFor(certified).body.message).toBe('Certified mail is paid with Pay & Send. Letter packs and gift letters do not pay for it.');
+    // A flag that is not true is not the claim.
+    for (const certifiedFlag of [false, 'true', 1, undefined]) {
+      expect(refusalFor(Object.assign(coded('PACK_CANNOT_PAY'), { certified: certifiedFlag })).body.message, String(certifiedFlag)).toBe(
+        'Letter packs and gift letters pay for one-page letters and 6x9 postcards. This one is paid with Pay & Send.'
+      );
+    }
+  });
+
+  it('says which mail a pack pays for, and how this one is paid (#579)', () => {
+    expect(refusalFor(coded('PACK_CANNOT_PAY')).body.message).toBe(
+      'Letter packs and gift letters pay for one-page letters and 6x9 postcards. This one is paid with Pay & Send.'
+    );
+  });
+
+  it('uses the beta message for a beta refusal', () => {
+    expect(refusalFor(coded('BETA_ACCESS_DENIED')).body.message).toBe(BETA_ACCESS_MESSAGE);
+  });
+
+  it('matches the ledger sentence only at its start', () => {
+    expect(refusalFor(new Error('Insufficient credits. Required: 2')).reason).toBe('no_letters');
+    expect(refusalFor(new Error('Wrapped: Insufficient credits.')).reason).toBe('send_failed');
+    expect(refusalFor(new Error('Insufficient creditsX')).reason).toBe('send_failed');
+  });
+
+  it('never forwards an unknown error', () => {
+    const refusal = refusalFor(new Error('connect ECONNREFUSED 10.0.0.1:5432'));
+    expect(refusal.status).toBe(500);
+    expect(JSON.stringify(refusal.body)).not.toContain('ECONNREFUSED');
+  });
+});

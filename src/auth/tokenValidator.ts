@@ -9,6 +9,7 @@ import {
   updateLastUsed,
   TOKEN_PREFIX as PAT_PREFIX
 } from "../services/patService.js";
+import { OAUTH_NOT_CONFIGURED } from "./oauthErrors.js";
 import { getOAuthConfig } from "./oauthConfig.js";
 import {
   classifyDiagnosticError,
@@ -16,6 +17,7 @@ import {
 } from "../utils/diagnosticLog.js";
 import { InsufficientScopeError } from "./oauthChallenge.js";
 import { assertBetaAccess } from "./betaAccess.js";
+import { rememberVerifiedToken } from "./signInPool.js";
 
 export interface AuthenticatedUser {
   userId: string;
@@ -48,13 +50,16 @@ export function parseTokenScopes(claims: Record<string, unknown>): string[] {
   return [];
 }
 
+/**
+ * Every scope the route or tool needs, from a token of either kind. A personal
+ * access token used to pass every check here, mail:send included; since #470
+ * it carries its own scopes (migration 037), read and draft only, and is
+ * checked like any other token.
+ */
 export function requireScopes(
   user: AuthenticatedUser,
   requiredScopes: readonly string[]
 ): void {
-  if (user.authType === "pat") {
-    return;
-  }
   const missing = requiredScopes.filter((scope) => !user.scopes.includes(scope));
   if (missing.length > 0) {
     throw new InsufficientScopeError(missing);
@@ -98,13 +103,14 @@ async function validatePATToken(token: string): Promise<AuthenticatedUser> {
   // keeps working forever, so removing someone from the cohort would revoke
   // their OAuth access and leave their PAT alive.
   assertBetaAccess(result.userId!);
+  rememberVerifiedToken(token, result.userId!);
 
   return {
     userId: result.userId!,
     claims: { authType: "pat", tokenId: result.tokenId },
     token,
     authType: "pat",
-    scopes: []
+    scopes: result.scopes ?? []
   };
 }
 
@@ -114,13 +120,17 @@ export async function validateJWTToken(
   requiredScopes: readonly string[] = []
 ): Promise<AuthenticatedUser> {
   const config = getOAuthConfig();
-  if (!config.issuer || !config.jwksUri || config.audience.length === 0) {
-    throw new Error("OAuth validation not configured");
+  // Exactly one audience, the MCP resource. validateOAuthConfig refuses more at
+  // boot, but only while CIMD enforcement is on; this holds the same rule on
+  // every request, so a stray second audience is a configuration fault (503 on
+  // the REST routes and on MCP) rather than a second set of accepted tokens.
+  if (!config.issuer || !config.jwksUri || config.audience.length !== 1) {
+    throw new Error(OAUTH_NOT_CONFIGURED);
   }
 
   const options: JWTVerifyOptions = {
     issuer: config.issuer,
-    audience: config.audience.length === 1 ? config.audience[0] : config.audience,
+    audience: config.audience[0],
     algorithms: config.algorithms
   };
 
@@ -168,5 +178,6 @@ export async function validateJWTToken(
     });
     throw error;
   }
+  rememberVerifiedToken(token, user.userId, typeof user.claims.exp === "number" ? user.claims.exp * 1000 : undefined);
   return user;
 }

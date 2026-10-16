@@ -419,6 +419,58 @@ describePostgres('proportional pack refund command', () => {
     expect((await readOrder(orderId)).amount_refunded_cents).toBe(400);
   }, 60_000);
 
+  it("is no discrepancy to the Stripe reconciliation once settled with that refund, and reviewed until then (#730)", async () => {
+    const reconciliation = await import('../../src/services/stripeReconciliationService.js');
+    const { orderId } = await seedPackHolder({ credits: 10, amountCents: 1000 });
+    const flaky = stubStripe({
+      createError: Object.assign(new Error('socket hang up'), { type: 'StripeConnectionError' })
+    });
+    await packRefund.refundPackLetters(command(orderId, 2), flaky.seam, COMMAND_ENV);
+    // Stripe made the refund, but the command row has not heard: only the
+    // refund's metadata names the command.
+    const listed = refundFor(flaky.created[0], 'succeeded');
+    const stripe = {
+      checkout: { sessions: { list: async () => ({ has_more: false, data: [] }) } },
+      refunds: { list: async () => ({ has_more: false, data: [listed] }) }
+    } as unknown as Stripe;
+    const forThisOrder = (result: Awaited<ReturnType<typeof reconciliation.reconcileStripePayments>>) =>
+      result.discrepancies.filter(discrepancy => discrepancy.orderId === orderId);
+
+    // Not settled: reviewed, with advice that names what to check, not what it is.
+    const unsettled = await reconciliation.reconcileStripePayments(1, stripe);
+    expect(forThisOrder(unsettled)).toEqual([expect.objectContaining({
+      type: 'unmatched_partial_refund',
+      suggestedAction: expect.stringContaining('Letters may already have been revoked or given back')
+    })]);
+
+    const sweepSeam = stubStripe({ createStatus: 'succeeded', listed: [listed] });
+    await packRefund.reconcilePackRefunds(sweepSeam.seam, { retryDelaySeconds: 0 });
+    expect((await commandRows(orderId))[0]).toMatchObject({ status: 'succeeded', stripe_refund_id: listed.id });
+
+    // Settled with this refund, for this order and amount: no discrepancy.
+    const settled = await reconciliation.reconcileStripePayments(1, stripe);
+    expect(forThisOrder(settled)).toEqual([]);
+    // The metadata plays no part: the row names the refund.
+    const bare = { ...listed, metadata: {} } as unknown as Stripe.Refund;
+    const byId = await reconciliation.reconcileStripePayments(1, {
+      ...stripe,
+      refunds: { list: async () => ({ has_more: false, data: [bare] }) }
+    } as unknown as Stripe);
+    expect(forThisOrder(byId)).toEqual([]);
+    // A second refund carrying the same command's metadata, or the same id
+    // for another amount, is not the settled command's: it is reviewed.
+    for (const other of [
+      { ...listed, id: stripeId('re') },
+      { ...listed, amount: listed.amount + 100 }
+    ] as unknown as Stripe.Refund[]) {
+      const result = await reconciliation.reconcileStripePayments(1, {
+        ...stripe,
+        refunds: { list: async () => ({ has_more: false, data: [other] }) }
+      } as unknown as Stripe);
+      expect(forThisOrder(result).map(discrepancy => discrepancy.type)).toEqual(['unmatched_partial_refund']);
+    }
+  }, 60_000);
+
   it('settles once when the webhook hears first, and treats replays and siblings as no-ops', async () => {
     const { orderId } = await seedPackHolder({ credits: 10, amountCents: 1000 });
     const pendingStripe = stubStripe({ createStatus: 'pending' });
@@ -459,6 +511,63 @@ describePostgres('proportional pack refund command', () => {
     expect(await readUser(userId)).toEqual({ credits: 0, credits_purchased: 0 });
     expect(await lots(userId)).toEqual([{ source_type: 'purchase', status: 'revoked', remaining_amount: 0 }]);
     expect(await alerts(orderId)).toEqual([]);
+  }, 60_000);
+
+  it('at the attempt limit, adopts what Stripe holds and waits with one alert when Stripe cannot be asked (#730)', async () => {
+    const previous = process.env.PACK_REFUND_STRIPE_ATTEMPT_LIMIT;
+    process.env.PACK_REFUND_STRIPE_ATTEMPT_LIMIT = '1';
+    try {
+      const flaky = stubStripe({ createError: Object.assign(new Error('socket hang up'), { type: 'StripeConnectionError' }) });
+      const { userId, orderId } = await seedPackHolder({ credits: 10, amountCents: 1000 });
+      await packRefund.refundPackLetters(command(orderId, 2), flaky.seam, COMMAND_ENV);
+      expect((await commandRows(orderId))[0]).toMatchObject({ status: 'letters_revoked', stripe_attempts: 1 });
+
+      const down = {
+        ...flaky.seam,
+        async listPaymentRefunds(): Promise<Stripe.Refund[]> {
+          throw Object.assign(new Error('socket hang up'), { type: 'StripeConnectionError' });
+        }
+      };
+      await packRefund.reconcilePackRefunds(down, { retryDelaySeconds: 0 });
+      await packRefund.reconcilePackRefunds(down, { retryDelaySeconds: 0 });
+      expect((await commandRows(orderId))[0]).toMatchObject({ status: 'letters_revoked' });
+      expect((await readUser(userId)).credits).toBe(6);
+      const waiting = (await alerts(orderId)).filter(alert => alert.details.kind === 'stripe_unconfirmed');
+      expect(waiting).toHaveLength(1);
+
+      const listed = refundFor(flaky.created[0], 'succeeded');
+      const back = stubStripe({ listed: [listed] });
+      expect(await packRefund.reconcilePackRefunds(back.seam, { retryDelaySeconds: 0 })).toMatchObject({ adopted: 1, compensated: 0 });
+      expect((await commandRows(orderId))[0]).toMatchObject({ status: 'succeeded', stripe_refund_id: listed.id });
+      expect((await readUser(userId)).credits).toBe(6);
+      // Settled, so the waiting alert closed itself.
+      const open = await pool.query(
+        `SELECT 1 FROM commerce_operational_alerts
+          WHERE order_id = $1 AND details->>'kind' = 'stripe_unconfirmed' AND status <> 'resolved'`,
+        [orderId]
+      );
+      expect(open.rowCount).toBe(0);
+    } finally {
+      if (previous === undefined) delete process.env.PACK_REFUND_STRIPE_ATTEMPT_LIMIT;
+      else process.env.PACK_REFUND_STRIPE_ATTEMPT_LIMIT = previous;
+    }
+  }, 60_000);
+
+  it('a refund that succeeds after it was compensated raises one alert (#730)', async () => {
+    const { orderId } = await seedPackHolder({ credits: 10, amountCents: 1000 });
+    const stripe = stubStripe({ createStatus: 'succeeded' });
+    await packRefund.refundPackLetters(command(orderId, 2), stripe.seam, COMMAND_ENV);
+    const refundId = (await commandRows(orderId))[0].stripe_refund_id!;
+    await commerce.processStripeWebhookEvent(refundEvent('refund.failed', refundFor(stripe.created[0], 'failed', refundId)));
+    expect((await commandRows(orderId))[0]).toMatchObject({ status: 'compensated' });
+
+    const late = refundFor(stripe.created[0], 'succeeded', refundId);
+    await commerce.processStripeWebhookEvent(refundEvent('refund.updated', late));
+    await commerce.processStripeWebhookEvent(refundEvent('refund.updated', late));
+    const after = (await alerts(orderId)).filter(alert => alert.details.kind === 'refunded_after_compensation');
+    expect(after).toHaveLength(1);
+    expect(after[0].details).toMatchObject({ settledAfter: 'compensated', stripeRefundId: refundId, amountCents: 400 });
+    expect((await commandRows(orderId))[0]).toMatchObject({ status: 'compensated' });
   }, 60_000);
 
   it('a refund that fails after settling is compensated and lowers the confirmed figure', async () => {

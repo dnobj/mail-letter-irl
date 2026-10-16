@@ -35,15 +35,25 @@ describe("temporary static-registration rollback", () => {
     ]);
   });
 
-  it("accepts legacy audiences only while rollback mode is enabled", () => {
+  it("no longer widens the accepted audiences in rollback mode", () => {
+    // The legacy audience merge is gone: a LETTER_IRL_OAUTH_LEGACY_AUDIENCES
+    // left behind in an environment changes nothing, flag on or off.
     vi.stubEnv("LETTER_IRL_OAUTH_AUDIENCE", "https://dev.example.com/mcp");
     vi.stubEnv("LETTER_IRL_OAUTH_LEGACY_AUDIENCES", "https://letter-irl/api");
     expect(getOAuthConfig().audience).toEqual(["https://dev.example.com/mcp"]);
 
     vi.stubEnv("LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY", "true");
-    expect(getOAuthConfig().audience).toEqual([
-      "https://dev.example.com/mcp",
-      "https://letter-irl/api"
-    ]);
+    expect(getOAuthConfig().audience).toEqual(["https://dev.example.com/mcp"]);
+  });
+
+  it("refuses a second audience in rollback mode too", () => {
+    vi.stubEnv("LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY", "true");
+    vi.stubEnv(
+      "LETTER_IRL_OAUTH_AUDIENCE",
+      "https://dev.example.com/mcp https://letter-irl/api"
+    );
+    expect(validateOAuthConfig(getOAuthConfig())).toContain(
+      "LETTER_IRL_OAUTH_AUDIENCE must name exactly one audience, the MCP resource"
+    );
   });
 });

@@ -6,7 +6,24 @@
  */
 export const PRODUCT_SCOPES = ["mail:read", "mail:draft", "mail:send"] as const;
 
-export const IDENTITY_SCOPES = ["openid", "profile", "email"] as const;
+/**
+ * Identity scopes: advertised, and since #425 asked for on every tool. Never
+ * demanded by a tool. ChatGPT does ask for them, but Auth0 grants none of
+ * them to ChatGPT: its CIMD client is a strict third-party client, and strict
+ * mode supports no OIDC scopes and no ID token in Auth0's current release
+ * (#424). ChatGPT identifies a connected account through the profile tool
+ * (src/tools/getProfile.ts) instead, and its connector must be created with
+ * "OIDC enabled" unticked, or the first link fails. These stay because
+ * advertising and requesting must agree, and because a client registered
+ * outside strict mode can use them.
+ *
+ * `profile` is deliberately absent. OpenAI's Apps SDK auth guidance names
+ * `openid` and `email`; `profile` is the widest OIDC scope - name, picture,
+ * locale and more - and is asked for by nothing we know of. Add it only if
+ * ChatGPT is shown to need a display name for its account picker, and say so
+ * here when you do.
+ */
+export const IDENTITY_SCOPES = ["openid", "email"] as const;
 
 /**
  * Grant types this deployment supports, advertised in authorization-server
@@ -75,11 +92,14 @@ export function getOAuthConfig(env: NodeJS.ProcessEnv = process.env): OAuthConfi
   const mcpPath = env.LETTER_IRL_MCP_PATH ?? "/mcp";
   const staticDcrCompatibility =
     env.LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY === "true";
+  // One audience in every mode. LETTER_IRL_OAUTH_LEGACY_AUDIENCES used to be
+  // merged in under the static-DCR flag. It began as part of that rollback (the
+  // recorded legacy client and audience), and the website's tokens for the
+  // retired https://letter-irl/api audience later came to depend on it. The
+  // website and the REST routes moved onto the MCP audience in September 2026,
+  // and a rollback token carries the /mcp audience too, because ChatGPT sends
+  // the /mcp resource. Nothing needs a second audience.
   const audience = parseList(env.LETTER_IRL_OAUTH_AUDIENCE);
-
-  if (staticDcrCompatibility) {
-    audience.push(...parseList(env.LETTER_IRL_OAUTH_LEGACY_AUDIENCES));
-  }
 
   return {
     issuer: env.LETTER_IRL_OAUTH_ISSUER ?? "",
@@ -155,13 +175,24 @@ export function validateOAuthConfig(
   } else if (!config.audience.includes(config.resource)) {
     errors.push("LETTER_IRL_OAUTH_AUDIENCE must include the exact MCP resource");
   }
-  if (!config.staticDcrCompatibility && config.audience.length !== 1) {
-    errors.push("CIMD mode requires exactly one MCP audience");
+  // Both modes. The static-DCR flag used to allow a second audience because the
+  // legacy merge added one; with the merge gone, a second audience could only be
+  // a mistake in LETTER_IRL_OAUTH_AUDIENCE.
+  if (config.audience.length !== 1) {
+    errors.push("LETTER_IRL_OAUTH_AUDIENCE must name exactly one audience, the MCP resource");
   }
   if (config.algorithms.length !== 1 || config.algorithms[0] !== "RS256") {
     errors.push("LETTER_IRL_OAUTH_ALLOWED_ALGORITHMS must be exactly RS256");
   }
-  for (const scope of PRODUCT_SCOPES) {
+  // Every scope a tool asks the customer to grant must be advertised here
+  // too. These are two separate channels - the per-tool securitySchemes carry
+  // the request, this list is what the metadata documents - and
+  // LETTER_IRL_OAUTH_SCOPES can override the default. Without this a
+  // deployment can request openid and offline_access per tool while
+  // advertising neither, which is the same advertised-versus-requested drift
+  // that caused #160, just pointing the other way. It bites hardest
+  // in static-DCR mode, where our metadata IS the document ChatGPT reads.
+  for (const scope of [...PRODUCT_SCOPES, ...SESSION_SCOPES, ...IDENTITY_SCOPES]) {
     if (!config.scopes.includes(scope)) {
       errors.push(`LETTER_IRL_OAUTH_SCOPES must include ${scope}`);
     }

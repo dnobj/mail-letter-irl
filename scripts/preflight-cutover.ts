@@ -22,6 +22,8 @@
  *   worth flagging before a cutover.
  * - Static-DCR variables ('when-static-dcr') follow the same rule against
  *   LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY (issue #270).
+ * - A mail option's price (an entry with a `flag`) is required only when its
+ *   flag's name exists as well (#578).
  * - 'development' entries are the mirror of 'production' ones: demanded only in
  *   the development environment, never in production. The environment-isolation
  *   issuer allowlists are one per environment and must not be swapped.
@@ -106,6 +108,8 @@ export function diffManifest(
     if (!entry.advisory) {
       if (entry.condition === 'when-jit-enabled' && !jitFlagSet) continue;
       if (entry.condition === 'when-static-dcr' && !staticDcrFlagSet) continue;
+      // A mail option's price, by the same names-only rule (#578).
+      if (entry.flag && !present.has(entry.flag)) continue;
     }
 
     const satisfied = [entry.name, ...(entry.aliases ?? [])].some(name => present.has(name));
@@ -141,7 +145,9 @@ export function diffManifest(
       const conditionNote = conditionSubject
         ? entry.advisory
           ? ` [parity check; ${conditionSubject} is ${conditionSatisfied ? 'set' : 'not set here'}]`
-          : ` [required because ${conditionSubject} is set]`
+          : entry.flag
+            ? ` [required because ${conditionSubject} and ${entry.flag} are set]`
+            : ` [required because ${conditionSubject} is set]`
         : '';
       const gap = { entry, note: `${entry.name}${aliasNote}${conditionNote}` };
       if (entry.advisory) advisory.push(gap);

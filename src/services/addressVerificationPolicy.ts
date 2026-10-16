@@ -21,7 +21,7 @@ import type { AddressValidationResult } from "./providers/types.js";
  * (the #200 repro rejected every form of a suite). Policy decision (owner,
  * Aug 22 2026): S and D proceed with a warning; genuine address failures
  * still block; a verification transport failure must never masquerade as an
- * invalid address (docs/ADDRESS-VALIDATION.md documents verification as
+ * invalid address (docs/address-validation.md documents verification as
  * non-blocking when unavailable).
  */
 

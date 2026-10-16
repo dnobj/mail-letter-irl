@@ -5,8 +5,8 @@ import { migrate } from '../../src/cli/migrate.js';
 import { repositoryMigrations, validateDisposableDatabaseUrl } from './support/disposableDatabase.js';
 import { AdminAuditWriter } from '../../src/admin/auditService.js';
 import { parseAdminEnvironmentConfig } from '../../src/admin/config.js';
-import { verifyDatabaseIdentity, withReadOnlyTransaction } from '../../src/admin/db.js';
-import { buildAdminGrantStatements } from '../../src/admin/provisioning.js';
+import { readReaderSeparation, verifyDatabaseIdentity, verifyReaderSeparation, withReadOnlyTransaction } from '../../src/admin/db.js';
+import { ADMIN_LATEST_REQUIRED_MIGRATION, buildAdminGrantStatements } from '../../src/admin/provisioning.js';
 import { readAccountDetail, revealAccountEmail } from '../../src/admin/queries/accounts.js';
 import { countAlerts, listAlerts, listUnmatchedWebhookEvents } from '../../src/admin/queries/alerts.js';
 import { listAuditEvents } from '../../src/admin/queries/audit.js';
@@ -139,7 +139,7 @@ describePostgres('admin read models through the reader role', () => {
     }
     const deduction = await owner.query<{ transaction_id: number }>(
       `INSERT INTO credit_transactions (user_id, amount, balance_after, type, reference_type, reference_id, description)
-       VALUES ($1, -2, 2, 'deduction', 'letter', $2, 'Letter sent') RETURNING transaction_id`,
+       VALUES ($1, -2, 2, 'deduction', 'letter', $2, 'Letter to Wilhelmina Ashgrove') RETURNING transaction_id`,
       [userId, sentLetterId]
     );
     await owner.query(
@@ -198,8 +198,15 @@ describePostgres('admin read models through the reader role', () => {
       'SELECT return_address FROM users LIMIT 1',
       'SELECT token_hash FROM personal_access_tokens LIMIT 1',
       'SELECT body_text FROM letter_drafts LIMIT 1',
+      // The two free-text ledger descriptions: the send path wrote the
+      // recipient's name here, and an operator adjustment wrote the operator's
+      // reason (issue #162 security review, A-01 and A-13).
+      'SELECT description FROM credit_transactions LIMIT 1',
+      'SELECT description FROM credit_ledger LIMIT 1',
       'SELECT * FROM letters LIMIT 1',
       'SELECT * FROM users LIMIT 1',
+      'SELECT * FROM credit_transactions LIMIT 1',
+      'SELECT * FROM credit_ledger LIMIT 1',
       `UPDATE users SET credits = 0 WHERE user_id = '${userId}'`,
       `UPDATE commerce_operational_alerts SET status = 'resolved'`,
       `INSERT INTO credit_ledger (user_id, initial_amount, remaining_amount, source_type) VALUES ('${userId}', 1, 1, 'adjustment')`,
@@ -209,6 +216,12 @@ describePostgres('admin read models through the reader role', () => {
     }
     await expect(reader.query('SELECT letter_id, status, tracking_id FROM letters LIMIT 1')).resolves.toBeTruthy();
     await expect(reader.query('SELECT user_id, email, credits FROM users LIMIT 1')).resolves.toBeTruthy();
+    await expect(
+      reader.query('SELECT transaction_id, amount, balance_after, type FROM credit_transactions LIMIT 1')
+    ).resolves.toBeTruthy();
+    await expect(
+      reader.query('SELECT ledger_id, initial_amount, remaining_amount, status FROM credit_ledger LIMIT 1')
+    ).resolves.toBeTruthy();
     // The reader records its own audit rows, and can never rewrite them.
     const audit = await reader.query<{ id: string }>(
       `INSERT INTO admin_audit_events (actor_sid, actor_name, environment, mode, session_id_hash, correlation_id,
@@ -234,6 +247,53 @@ describePostgres('admin read models through the reader role', () => {
     ).rejects.toMatchObject({ code: 'ADMIN_DATABASE_ROLE_MISMATCH' });
   });
 
+  it('finds the provisioned reader separated, and a role that reads past the grants refused (#730)', async () => {
+    await expect(verifyReaderSeparation(reader, READER_ROLE)).resolves.toBeUndefined();
+    await expect(readReaderSeparation(reader, READER_ROLE)).resolves.toEqual({
+      readsLetterContent: false,
+      readsLetterRecipient: false,
+      readsDraftBody: false,
+      readsReturnAddress: false,
+      readsTokenHash: false,
+      readsLetterPreview: false,
+      readsAddressRequests: false,
+      unrestricted: false,
+      privilegedMember: false,
+      ownerMember: false
+    });
+
+    const wide = `lirl_wide_${randomUUID().replace(/-/g, '').slice(0, 10)}`;
+    await adminPool.query(`CREATE ROLE "${wide}" NOLOGIN`);
+    try {
+      await adminPool.query(`GRANT pg_read_all_data TO "${wide}"`);
+      await expect(readReaderSeparation(owner, wide)).resolves.toMatchObject({ privilegedMember: true, readsLetterContent: true });
+      await expect(verifyReaderSeparation(owner, wide)).rejects.toMatchObject({ code: 'ADMIN_READER_ROLE_TOO_WIDE' });
+      await adminPool.query(`REVOKE pg_read_all_data FROM "${wide}"`);
+
+      // A membership without INHERIT reads nothing itself, but SET ROLE can use it.
+      await adminPool.query(`GRANT "${OPERATOR_ROLE}" TO "${wide}" WITH INHERIT FALSE`);
+      await expect(readReaderSeparation(owner, wide)).resolves.toMatchObject({ readsLetterContent: false, privilegedMember: true });
+      await expect(verifyReaderSeparation(owner, wide)).rejects.toMatchObject({ code: 'ADMIN_READER_ROLE_TOO_WIDE' });
+      await adminPool.query(`REVOKE "${OPERATOR_ROLE}" FROM "${wide}"`);
+
+      // A table-wide grant by mistake on another withheld table.
+      await owner.query(`GRANT SELECT ON letter_drafts TO "${wide}"`);
+      await expect(readReaderSeparation(owner, wide)).resolves.toMatchObject({ readsDraftBody: true });
+      await owner.query(`REVOKE SELECT ON letter_drafts FROM "${wide}"`);
+
+      const tableOwner = (await owner.query<{ owner: string }>(
+        `SELECT pg_get_userbyid(relowner) AS owner FROM pg_class WHERE oid = 'letters'::regclass`
+      )).rows[0].owner;
+      await adminPool.query(`GRANT "${tableOwner}" TO "${wide}"`);
+      await expect(readReaderSeparation(owner, wide)).resolves.toMatchObject({ ownerMember: true });
+      await expect(verifyReaderSeparation(owner, wide)).rejects.toMatchObject({ code: 'ADMIN_READER_ROLE_TOO_WIDE' });
+    } finally {
+      await adminPool.query(`DROP OWNED BY "${wide}"`).catch(() => undefined);
+      await adminPool.query(`DROP ROLE IF EXISTS "${wide}"`);
+    }
+    await expect(verifyReaderSeparation(owner, 'no_such_role_anywhere')).rejects.toMatchObject({ code: 'ADMIN_READER_ROLE_TOO_WIDE' });
+  });
+
   it('refuses a write inside the read-only transaction wrapper', async () => {
     await expect(
       withReadOnlyTransaction(reader, (client) =>
@@ -256,6 +316,12 @@ describePostgres('admin read models through the reader role', () => {
     expect(held).toMatchObject({ jobId: heldJobId, jobStatus: 'held', jobHoldReason: 'provider_timeout', hasTrackingId: false });
     expect(JSON.stringify(detail)).not.toContain('private words');
     expect(JSON.stringify(detail)).not.toContain('Private');
+    // The seeded transaction description carries a recipient's name in the
+    // shape the send path used to write. The account detail must not carry it:
+    // this is the case whose absence let A-01 through, because the earlier
+    // assertions only covered columns that hold content directly.
+    expect(JSON.stringify(detail)).not.toContain('Wilhelmina');
+    expect(JSON.stringify(detail)).not.toContain('Ashgrove');
     expect(await withReadOnlyTransaction(reader, (client) => revealAccountEmail(client, userId))).toBe(email);
     expect(await withReadOnlyTransaction(reader, (client) => readAccountDetail(client, 'auth0|nobody'))).toBeNull();
   });
@@ -310,7 +376,10 @@ describePostgres('admin read models through the reader role', () => {
   it('reports maintenance health from the reader role', async () => {
     const health = await withReadOnlyTransaction(reader, (client) => readMaintenanceHealth(client));
     expect(health.marker).toBe('development');
-    expect(health.latestMigration).toBe('029_proportional_pack_refunds.sql');
+    // Not a literal: provisioningGrants.test.ts already proves this constant is
+    // the newest migration on disk, so naming it here leaves one place to edit
+    // when a migration lands rather than two that drift.
+    expect(health.latestMigration).toBe(ADMIN_LATEST_REQUIRED_MIGRATION);
     expect(health.outbox.held).toBe(1);
     expect(health.alerts).toEqual({ open: 1, acknowledged: 0, critical: 1 });
     expect(health.unmatchedWebhookEvents).toBe(1);

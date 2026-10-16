@@ -140,17 +140,27 @@ describe("production JWT validator", () => {
 describe("PAT separation", () => {
   afterEach(() => vi.clearAllMocks());
 
-  it("routes PATs to the PAT validator and treats tool scopes separately", async () => {
+  it("routes PATs to the PAT validator and holds them to their own scopes (#470)", async () => {
     vi.mocked(validateToken).mockResolvedValue({
       valid: true,
       userId: "pat-user",
-      tokenId: "token-1"
-    });
+      tokenId: "token-1",
+      scopes: ["mail:read", "mail:draft"]
+    } as any);
     const result = await validateAuthorizationHeader("Bearer lirl_pat_secret");
     expect(result.authType).toBe("pat");
-    expect(result.scopes).toEqual([]);
-    expect(() => requireScopes(result, ["mail:send"])).not.toThrow();
+    expect(result.scopes).toEqual(["mail:read", "mail:draft"]);
+    expect(() => requireScopes(result, ["mail:draft"])).not.toThrow();
+    // It used to pass every check, send included.
+    expect(() => requireScopes(result, ["mail:send"])).toThrow("insufficient_scope");
     expect(updateLastUsed).toHaveBeenCalledWith("token-1");
+  });
+
+  it("gives a PAT whose row carries no scopes nothing at all", async () => {
+    vi.mocked(validateToken).mockResolvedValue({ valid: true, userId: "pat-user", tokenId: "token-2" } as any);
+    const result = await validateAuthorizationHeader("Bearer lirl_pat_secret");
+    expect(result.scopes).toEqual([]);
+    expect(() => requireScopes(result, ["mail:read"])).toThrow("insufficient_scope");
   });
 
   it("rejects malformed authorization headers without leaking the credential", async () => {

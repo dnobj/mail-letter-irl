@@ -1,0 +1,86 @@
+# Operational Acceptance
+
+**Last Updated:** September 23, 2026
+**Purpose:** What must be true, and recorded, about running Letter IRL before access opens to everyone (#408)
+
+Launch opens access to everyone on day one (#158). This page records how the running service is watched, stopped and recovered, with the evidence for each. Fill in the Evidence column as each item is done; keep it sanitised (timestamps, commit ids, counts; never secrets or personal data).
+
+## State at launch
+
+Read from the production API's Railway variables on 2026-09-23:
+
+| Setting | Value | Meaning |
+|---------|-------|---------|
+| `LETTER_IRL_BETA_GATE_ENABLED` | `false` | Open to everyone; no invited cohort (#179) |
+| `JIT_PURCHASE_ENABLED` | `true` | Pay & Send is sold |
+| `LETTER_IRL_GIFT_LETTERS_ENABLED` | unset (off) | Turned on at launch, with seed campaigns (#158) |
+| `CONTENT_RETENTION_MODE` (maintenance) | unset (report only) | Switched to `enforce` for #153, development first. Required in production since #699: set `report` or `enforce` before that promotion, or maintenance refuses to run |
+
+Since #730 an unpaid Pay & Send checkout holds its place in the mail ceilings until it expires (about 40 minutes), so a few accounts that open checkouts and never pay can hold the global ceiling shut for that long, each bounded by its own account cap and charge cap. Raise the ceiling in the admin panel if that bites.
+
+The daily ceilings (`LETTER_IRL_BETA_GLOBAL_DAILY_MAIL_CEILING`, `LETTER_IRL_BETA_ACCOUNT_DAILY_MAIL_CAP`, `LETTER_IRL_BETA_ACCOUNT_DAILY_CHARGE_CENTS`, `LETTER_IRL_GIFT_DAILY_SEND_CAP`) are the durable financial limits. They are separate from, and stronger than, the process-local HTTP rate limits; neither stands in for the other. Since migration 038 an operator can set any of them in the admin panel's Limits page, for everyone or one account, without a redeploy, and the first refusal of a UTC day by each opens a `daily_limit_reached` alert and posts to `LETTER_IRL_OPERATOR_ALERT_URL` ([admin-panel-guide.md](admin-panel-guide.md)).
+
+## Watching it
+
+- **Failures inside a run** raise durable alerts (`commerce_operational_alerts`), shown on the admin panel's `/alerts` page, and a `maintenance.run_failed` line in the maintenance log. The panel's `/maintenance` page shows when each scheduled task last ran.
+- **A run that does not happen**, or keeps failing, is caught by the maintenance heartbeat. After a run finishes, maintenance calls `MAINTENANCE_HEARTBEAT_URL`; an external monitor alerts when the calls stop. A run that finishes with the outbox paused and letters waiting does not call it either, so a pause left on is caught the same way (below); nor one that finishes with a letter still waiting after 18:00 New York time on its mail day (#699). Production requires the URL: maintenance refuses to run without it (#699). Setup:
+  1. At [healthchecks.io](https://healthchecks.io), create one check per environment: period 1 hour, grace 1 hour, email alerts to the owner.
+  2. Set each check's ping URL as `MAINTENANCE_HEARTBEAT_URL` on the maintenance service in each environment: `letter-irl-maintenance` in production, `letter-irl-maintenance-dev` in development (the names in Railway's service list on 2026-09-23). The URL is a capability, so it lives only in Railway.
+  3. After the next hourly run, each check shows a ping. A new healthchecks.io check does not alert until it has been pinged once, so confirm that first ping: in production a value maintenance cannot call stops every run (#699), and the monitor is the only thing that would say so. The maintenance log says `Heartbeat sent`. An unusable value logs `[config]` and `Heartbeat invalid` on every run instead.
+- **On a heartbeat alarm**, read the maintenance log first. `Heartbeat withheld` says why: the outbox is paused with letters waiting, letters are still waiting after their mail day, or one of the two could not be counted. For late letters, the admin panel's `/alerts` page has a `schedule_missed_mail_day` alert for each, unless raising it failed (`schedule.missed_mail_day_check_failed` in the maintenance log) or the run's 100 were raised first, when the next run raises the rest. While that alarm stands, a run that stops happening raises nothing new, so check the last run times on the panel's `/maintenance` page as well.
+- **Notices to the operator (#699).** `LETTER_IRL_OPERATOR_ALERT_URL`, required in production on the API and maintenance services, takes a plain-text POST for each of these, at most one of each kind an hour per process (`src/services/operatorNotify.ts`):
+  - a daily limit that refused someone (once a UTC day per limit);
+  - held mail that missed its mail day;
+  - letters the provider cancelled;
+  - a dispatch whose outcome is unknown;
+  - mail held because its funding was refunded or disputed;
+  - a Pay & Send order refunded or disputed after its letter went, or may have gone, to the provider;
+  - a refund that failed or was cancelled at Stripe (#730);
+  - an address request link its recipient reported as from someone they do not know (#730).
+
+  A notice names no customer, letter or order: the Alerts page has them. A second notice of a kind within the hour is not posted (the Alerts page has it), so check the page after each one. A post that fails is not tried again: its letters' alerts are on the page, and are raised once. A refund the operator makes on purpose, of mail the provider has (a cancelled letter's, say), posts the refunded-after-dispatch notice too, as a dispute on such an order does when it opens, closes, or becomes a chargeback (once; its other updates are only recorded, #730): its alert is critical by design, and the notice asks only that it be looked at. A status sync run from the admin panel posts nothing, since the panel's service has no alert URL; the operator who ran it sees what it changed.
+
+  Setup: a channel that tells the owner of every post. An ntfy topic does: pick a long random topic name (the URL is a capability), subscribe to it in the ntfy app on the owner's phone, and set `https://ntfy.sh/<topic>` on the API and maintenance services. A healthchecks.io `/fail` URL does not: a check emails only when it changes state, so after the first notice it stays down and tells nothing more until it is pinged up again.
+- **Who watches:** the owner, for held mail, refunds and disputes, through the admin panel: `/alerts`, and an order or account found through Lookup.
+
+## Stopping and recovering
+
+| To stop | Set | Undo |
+|---------|-----|------|
+| New sends, and new Pay & Send checkouts | `LETTER_IRL_MAIL_SENDING_ENABLED=false` on the API service | Set it back to `true` |
+| New Pay & Send checkouts | `JIT_PURCHASE_ENABLED=false` on the API service | Set it back to `true` |
+| Gift sends | `LETTER_IRL_GIFT_DAILY_SEND_CAP=0` on the API service | Restore the cap |
+| **Everything the service sends to the printer**: letters already queued, their retries, and paid Pay & Send orders being fulfilled | `LETTER_IRL_OUTBOX_DISPATCH_ENABLED=false` on **both** the API and the maintenance service | Set it back to `true` on both (#444) |
+
+Each change redeploys the service it is set on. Undo a switch by setting its value, not by deleting the variable: a variable deleted through the Railway API does not redeploy the service, so the old value stays in force. For the outbox switch, write `false`: a blank value counts as unset, which is on.
+
+The first three refuse new work only. The outbox switch is the one that stops the printer:
+- **When it pauses:** neither dispatcher hands anything to the provider: not the API right after a send, not maintenance. A new send is queued, and the customer is told `pending`, "Queued for the print provider". The hand-run `scripts/test-postgrid*` scripts call PostGrid directly and are not covered.
+- **What waits:** every waiting letter keeps its place, attempts and backoff.
+- **What still runs:** maintenance's two crash sweeps, which never call the provider. Setting the switch redeploys the API, and a send that redeploy catches mid-dispatch is settled by them 15 minutes later like any crash: held for an operator, with a critical alert, if the provider may have it, or failed and refunded if it had not reached the provider on its last attempt. So a held job can appear right after the switch is set.
+- **What shows:** each maintenance run logs `outbox.dispatch_paused` with the count waiting, and both services print a `[config]` warning while the switch is off: the API at boot, maintenance at every run. While letters are waiting, maintenance withholds its heartbeat, so the external monitor alerts and stays alerting until the switch is back on. The alarm arrives two to three hours after the first letter queues behind the pause (the next hourly run, then the check's period and grace), and only once the heartbeat is set up (the first Evidence row below); until then a pause shows only in the maintenance log and the panel's outbox count. Mail held to arrive by a date (#535) is not waiting behind a pause until 09:00 New York time on its mail date: a pause whose only queued mail is held and not yet due still sends the heartbeat, and the alarm comes after the first such letter's release. A held letter not at the printer by 18:00 that day also raises a `schedule_missed_mail_day` alert ([admin-panel-guide.md](admin-panel-guide.md)).
+- **When it resumes:** the next maintenance run sends the queue and the heartbeat, and sends from the API go out immediately again.
+
+For a printing incident, set the outbox switch first; add the first switch too if new sends should be refused rather than queued.
+
+Rehearse both on development:
+1. **Outbox switch:** with it off on both services, send a letter. Confirm the response says `pending`, "Queued for the print provider", that the letter stays `queued` with its outbox job `pending`, and that nothing reaches PostGrid. After the next maintenance run, confirm `outbox.dispatch_paused` with a count that includes the letter, and `Heartbeat withheld` in its log. Switch it back on and confirm the next maintenance run sends the letter and the heartbeat.
+2. **Sending switch:** with nothing queued, set it, confirm a new send is refused and nothing reaches PostGrid, then set it back and confirm a send works.
+
+## Restore drill
+
+Neon keeps history for point-in-time restore. The drill only reads:
+
+1. In the Neon console, create a branch from the production branch at a past point, one hour ago, named `restore-drill-<date>`.
+2. Time it from create to the branch answering a query: that is the recovery time.
+3. On the branch, check `SELECT count(*) FROM letters`, `SELECT max(created_at) FROM orders`, and that the newest row of `migrations` is the newest migration. How far back the data reaches is the recovery point.
+4. Record both below, then delete the branch.
+
+## Evidence
+
+| Item | Date | Result | Evidence |
+|------|------|--------|----------|
+| Heartbeat checks created and pinging (both environments) | | | |
+| Outbox and sending switches rehearsed on development | 2026-09-24 | Both passed | **Outbox switch (build 7e92ba0):** with it `false` on both services, a sent letter stayed `queued` with its job `pending` and nothing reached PostGrid. The 13:00 UTC run logged `outbox.dispatch_paused` with 1 waiting, and "Heartbeat withheld … 1 waiting". Set back to `true`, the 14:00 run logged `processed: 1, completed: 1` and PostGrid (test) accepted the letter. Development has no heartbeat URL, so no heartbeat was sent. **Sending switch (build c25f86d):** with it `false`, Send on a ready card answered "Sending is temporarily paused. Please try again later." Nothing reached PostGrid and the balance was unchanged: the send's ledger deduction rolled back, although its log line is written. Set back to `true`, the same card sent at 21:01 UTC and PostGrid (test) accepted it |
+| Restore drill: recovery time and recovery point | | | |
+| Operator for held mail, refunds and disputes confirmed | | | |

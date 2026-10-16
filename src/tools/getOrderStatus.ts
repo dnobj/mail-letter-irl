@@ -3,10 +3,8 @@ import {
   ToolContext,
   OrderRecord
 } from "../contracts/types.js";
-import {
-  getOrderStatusInputSchema,
-  getOrderStatusOutputSchema
-} from "../schemas.js";
+import type { CertifiedMailService } from "../services/types.js";
+import { certifiedOrderNote } from "./certifiedOrder.js";
 
 interface GetOrderStatusInput {
   orderId?: string;
@@ -20,8 +18,16 @@ interface GetOrderStatusOutput {
   // Note: previewThumbnailHtml removed for performance (US-LETTER-04)
   // Preview was already shown at send time; status is for tracking delivery
   canSendFollowUp?: boolean;
-  followUpSuggestedPrompt?: string;
   trackingSupport: "none" | "estimated_only" | "carrier_tracking";
+  /** Sent with an arrival date (#535): its dates, and whether it can still be cancelled free. */
+  arriveBy?: string;
+  mailOn?: string;
+  cancellable?: boolean;
+  /** Sent as USPS Certified Mail (#625): the service, the carrier's number and its link once there is one, and what to say about them. */
+  mailService?: CertifiedMailService;
+  carrierTrackingNumber?: string;
+  carrierTrackingUrl?: string;
+  certifiedNote?: string;
 }
 
 
@@ -84,8 +90,23 @@ async function handler(
     statusTimeline: order.statusTimeline,
     recipientSummary: order.recipientSummary,
     canSendFollowUp: true,
-    followUpSuggestedPrompt: `Write a follow-up letter to ${order.recipientSummary.name}.`,
-    trackingSupport: "estimated_only"
+    // Carrier tracking only once USPS's number is stored, and not for a letter that did not go out (#625); until then, like any mail, estimated.
+    trackingSupport:
+      order.certified?.carrierTrackingNumber && order.currentStatus !== "failed" && order.currentStatus !== "cancelled"
+        ? "carrier_tracking"
+        : "estimated_only",
+    ...(order.schedule
+      ? { arriveBy: order.schedule.arriveBy, mailOn: order.schedule.mailOn, cancellable: order.cancellable === true }
+      : {}),
+    ...(order.certified
+      ? {
+          mailService: order.certified.mailService,
+          ...(order.certified.carrierTrackingNumber
+            ? { carrierTrackingNumber: order.certified.carrierTrackingNumber, carrierTrackingUrl: order.certified.carrierTrackingUrl }
+            : {}),
+          certifiedNote: certifiedOrderNote(order.certified, order.currentStatus)
+        }
+      : {})
   };
 }
 
@@ -94,10 +115,9 @@ export const getOrderStatusTool: McpToolDefinition<
   GetOrderStatusOutput
 > = {
   name: "get_order_status",
+  title: "Check an order's status",
   description: "Retrieve the latest status timeline for a letter order. If no orderId is provided, returns the most recent order.",
   readOnly: true,
-  inputSchema: getOrderStatusInputSchema,
-  outputSchema: getOrderStatusOutputSchema,
   meta: {
     "openai/toolInvocation/invoking": "Checking letter status…",
     "openai/toolInvocation/invoked": "Latest status",

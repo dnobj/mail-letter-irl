@@ -3,9 +3,11 @@ import { describe, expect, it } from 'vitest';
 import {
   friendlyDraftError,
   HANDLED_DRAFT_ERROR_CODES,
+  packCannotPayText,
   type DraftMailType
 } from '../../../src/tools/draftErrors.js';
 import { SpendLimitError } from '../../../src/services/betaSpendLimits.js';
+import { DuplicateMailError } from '../../../src/services/duplicateMailService.js';
 
 /**
  * The send surface's redaction guarantee, made exhaustive (#179).
@@ -122,6 +124,72 @@ describe('the fall-through', () => {
 describe('mail-type wording', () => {
   const withCode = (code: string) => Object.assign(new Error('upstream'), { code });
 
+  it('says a missed mail date needs a new preview, naming the mail (#535)', () => {
+    const upstream = Object.assign(new Error('Draft d-1 was to go to the printer on 2026-10-06, which has passed'), {
+      code: 'SCHEDULE_PASSED'
+    });
+    expect(friendlyDraftError(upstream, 'd-1', 'postcard').message).toBe(
+      'The day this postcard was to go to the printer has passed, so it can no longer arrive by its date. Please preview it again with a new arrival date, or with none to send it as soon as possible.'
+    );
+    expect(friendlyDraftError(upstream, 'd-1', 'letter').message).toContain('The day this letter was to go to the printer has passed');
+  });
+
+  it('says a full mail date needs another date, naming the open ones, and that nothing was sent (#700)', () => {
+    const upstream = Object.assign(new Error('Draft d-1 was to go to the printer on 2026-10-06, which is full'), {
+      code: 'SCHEDULE_FULL',
+      openArrivals: ['2026-10-15', '2026-10-19']
+    });
+    const friendly = friendlyDraftError(upstream, 'd-1', 'postcard').message;
+    expect(friendly).toMatch(
+      /^Mail to arrive by this postcard's date is now fully booked, so nothing was sent\. The nearest arrival dates with room are \w{3}, Oct 15(, 2026)? \(2026-10-15\) and \w{3}, Oct 19(, 2026)? \(2026-10-19\)\. Choose another arrival date for it, or none to send it as soon as possible, then send it again\.$/
+    );
+    expect(friendly).not.toContain('d-1');
+    expect(friendlyDraftError(Object.assign(new Error('x'), { code: 'SCHEDULE_FULL' }), 'd-1', 'letter').message).toContain(
+      "this letter's date is now fully booked, so nothing was sent. No other arrival date on offer has room right now. " +
+        'Choose no arrival date for it, to send it as soon as possible, then send it again.'
+    );
+  });
+
+  it('says mail no pack pays for is paid with Pay & Send, and keeps the code for the tool layer (#579)', () => {
+    const upstream = Object.assign(new Error('Draft d-1 is paid with Pay & Send, not a pack or gift letter'), {
+      code: 'PACK_CANNOT_PAY'
+    });
+    const postcard = friendlyDraftError(upstream, 'd-1', 'postcard');
+    expect(postcard.message).toBe(
+      'This postcard is paid with Pay & Send, not from the balance: letter packs and gift letters pay for one-page letters and 6x9 postcards.'
+    );
+    expect((postcard as { code?: string }).code).toBe('PACK_CANNOT_PAY');
+    expect(friendlyDraftError(upstream, 'd-1', 'letter').message).toContain('This letter is paid with Pay & Send');
+    expect(postcard.message).not.toContain('d-1');
+  });
+
+  it('says a Pay & Send order that paid for other mail sent nothing, naming the mail (#586)', () => {
+    const upstream = Object.assign(new Error("Order o-1 paid for jit-letter, not draft d-1's mail"), {
+      code: 'JIT_PRODUCT_MISMATCH'
+    });
+    expect(friendlyDraftError(upstream, 'd-1', 'letter').message).toBe(
+      'That Pay & Send order paid for different mail than this letter is now, so it was not sent.'
+    );
+    expect(friendlyDraftError(upstream, 'd-1', 'postcard').message).toContain('than this postcard is now');
+  });
+
+  it('says certified mail is paid with Pay & Send, not that packs pay for one-page letters (#625)', () => {
+    const upstream = Object.assign(new Error('Draft d-1 is paid with Pay & Send, not a pack or gift letter'), {
+      code: 'PACK_CANNOT_PAY',
+      certified: true
+    });
+    const letter = friendlyDraftError(upstream, 'd-1', 'letter');
+    expect(letter.message).toBe('This letter is certified mail, which is paid with Pay & Send, not from the balance or a gift letter.');
+    // The code is kept, so the tool layer can still tell it from the others.
+    expect(letter).toMatchObject({ code: 'PACK_CANNOT_PAY' });
+    expect(letter.message).not.toContain('d-1');
+    // Only a flag that is exactly true says it.
+    for (const certified of [false, 'true', 1, undefined]) {
+      const plain = Object.assign(new Error('x'), { code: 'PACK_CANNOT_PAY', certified });
+      expect(friendlyDraftError(plain, 'd-1', 'letter').message, String(certified)).toBe(packCannotPayText('letter'));
+    }
+  });
+
   it('points a wrong-type draft at the other tool', () => {
     expect(friendlyDraftError(withCode('DRAFT_WRONG_MAIL_TYPE'), 'd', 'letter').message).toBe(
       'This is a postcard draft. Please use send_postcard instead.'
@@ -185,6 +253,33 @@ describe('spend-limit wording survives', () => {
     const lookalike = Object.assign(new Error('Please try again tomorrow.'), {
       code: 'ACCOUNT_DAILY_MAIL_CAP'
     });
+    expect(friendlyDraftError(lookalike, 'draft-1', 'letter').message).toBe(
+      'Unable to send letter. Please contact Letter IRL support.'
+    );
+  });
+});
+
+/**
+ * The duplicate refusal (#412) is server-authored and must reach the model
+ * with the right tool's retry advice and its details intact, for the widget.
+ */
+describe('duplicate refusals survive', () => {
+  const duplicate = { kind: 'sent' as const, mailType: 'letter' as const, recipientName: 'Sam Rivera', ageSeconds: 600 };
+
+  it.each<[DraftMailType, string]>([
+    ['letter', 'call send_letter again with the same draftId, confirm: true and sendAnotherCopy: true.'],
+    ['postcard', 'call send_postcard again with the same draftId, confirm: true and sendAnotherCopy: true.']
+  ])('%s: keeps the details and names the right tool', (mailType, advice) => {
+    const source = new DuplicateMailError({ ...duplicate, mailType });
+    const friendly = friendlyDraftError(source, 'draft-1', mailType);
+    expect(friendly).toBeInstanceOf(DuplicateMailError);
+    expect((friendly as DuplicateMailError).duplicate).toEqual({ ...duplicate, mailType });
+    expect(friendly.message).toContain('This same ' + mailType + ' to "Sam Rivera" was already sent from this account 10 minutes ago.');
+    expect(friendly.message).toContain(advice);
+  });
+
+  it('is keyed on the type, not the code', () => {
+    const lookalike = Object.assign(new Error('Possible duplicate: trust me'), { code: 'DUPLICATE_RECENT_MAIL' });
     expect(friendlyDraftError(lookalike, 'draft-1', 'letter').message).toBe(
       'Unable to send letter. Please contact Letter IRL support.'
     );

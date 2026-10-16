@@ -28,9 +28,21 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# The token reads the repository and nothing else (#730): no job writes to it,
+# comments, or publishes. A job that needs more asks for it itself.
+#
+# Actions are pinned to a commit, and the database image to a digest, not a
+# tag, so a moved or hijacked tag cannot change what runs here. The comment
+# names the release. To update an action, take the commit its new tag names,
+# which `gh api repos/actions/<name>/commits/<tag> --jq .sha` gives for a
+# lightweight or annotated tag alike; for the image, the tag's digest on Docker
+# Hub. Nothing updates them on its own.
+permissions:
+  contents: read
+
 env:
-  # Matches Railway's runtime (node@22.23.1). Drift here means CI proves nothing
-  # about what actually ships.
+  # Matches engines.node in package.json, which Railway's Railpack builds with.
+  # Drift here means CI proves nothing about what actually ships.
   NODE_VERSION: '22'
 
 jobs:
@@ -39,9 +51,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -56,6 +70,11 @@ jobs:
 
       - name: TypeScript production build
         run: npm run build
+
+      # The tests' type errors may only fall (#686): more than the committed
+      # baseline fails. Without --update it never rewrites the baseline.
+      - name: Test type-check ratchet
+        run: npm run check:test-types
 
       - name: Unit tests
         run: npm run test:unit
@@ -74,7 +93,7 @@ jobs:
     services:
       postgres:
         # Major version matches production (Neon PostgreSQL 17).
-        image: postgres:17
+        image: postgres:17@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3 # 17, 2026-10-07
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -96,9 +115,11 @@ jobs:
       LETTER_IRL_ADMIN_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/letterirl_admin_test
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -124,7 +145,7 @@ jobs:
 
       - name: Upload integration report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: integration-report
           path: integration-report.json

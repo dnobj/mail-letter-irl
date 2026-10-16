@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createAccountCommands } from "../../../src/admin/commands/accounts.js";
+import { lockAccountVersion } from "../../../src/admin/commands/accountVersionLock.js";
+import { createGiftCommands } from "../../../src/admin/commands/gifts.js";
+import { createOpsCommands } from "../../../src/admin/commands/ops.js";
 import { createImageCommands } from "../../../src/admin/commands/images.js";
 import { createPromoCommands } from "../../../src/admin/commands/promos.js";
 import type { AdminSqlClient } from "../../../src/admin/database.js";
@@ -87,12 +90,12 @@ describe("account commands", () => {
         return "lifted" as const;
       }),
       countStandingDisputes: vi.fn(async () => 0),
-      releaseAmountMismatchQuarantine: vi.fn(async (_client: unknown, orderId: string, reason: string) => {
-        calls.release.push([orderId, reason]);
+      releaseAmountMismatchQuarantine: vi.fn(async (_client: unknown, orderId: string) => {
+        calls.release.push([orderId]);
         return "released" as const;
       }),
-      adjustCreditsWithClient: vi.fn(async (_client: unknown, userId: string, amount: number, reason: string) => {
-        calls.adjust.push([userId, amount, reason]);
+      adjustCreditsWithClient: vi.fn(async (_client: unknown, userId: string, amount: number) => {
+        calls.adjust.push([userId, amount]);
         return { user: { credits: 4 + amount } as never, transaction: { transaction_id: 7 } as never };
       }),
       grantOperatorImageEntitlement: vi.fn(async (_client: unknown, params: unknown) => {
@@ -126,7 +129,7 @@ describe("account commands", () => {
     });
   });
 
-  it("adjusts in letters, refuses removing more than the ledger holds, and prefixes the reason", async () => {
+  it("adjusts in letters, refuses removing more than the ledger holds, and keeps the operator's reason out of the ledger", async () => {
     const { calls, commands } = harness();
     expect(commands.adjustBalance.parseInput(new Map([["letters", "2"], ["direction", "add"]]))).toEqual({ letters: 2, direction: "add" });
     expect(() => commands.adjustBalance.parseInput(new Map([["letters", "0"], ["direction", "add"]]))).toThrowError(expect.objectContaining({ code: "ADMIN_INVALID_REQUEST" }));
@@ -141,7 +144,11 @@ describe("account commands", () => {
 
     const result = await commands.adjustBalance.execute(execution({}), "auth0|u1", { letters: 2, direction: "remove" }, preview);
     expect(result).toEqual({ creditsAfter: 0, transactionId: 7 });
-    expect(calls.adjust).toEqual([["auth0|u1", -4, "Operator adjustment: support ticket 42"]]);
+    // The operator's reason never reaches the ledger seam: the description is
+    // a fixed label inside the service, and the reason belongs to the audit
+    // trail alone (A-13, #394).
+    expect(calls.adjust).toEqual([["auth0|u1", -4]]);
+    expect(JSON.stringify(calls.adjust)).not.toContain("support ticket 42");
     expect(commands.adjustBalance.verb({ letters: 1, direction: "add" })).toBe("ADD-LETTERS");
   });
 
@@ -163,7 +170,32 @@ describe("account commands", () => {
       commands.releaseQuarantine.preview(scripted({ order: [{ ...ORDER_ROW, last_error_code: null }] }), "order_1", {}),
     ).rejects.toMatchObject({ code: "ADMIN_INVALID_STATE" });
     await commands.releaseQuarantine.execute(execution({}), "order_1", {}, preview);
-    expect(calls.release).toEqual([["order_1", "support ticket 42"]]);
+    // The reason stays on the audit row; the order event carries only the cleared code (#394).
+    expect(calls.release).toEqual([["order_1"]]);
+    expect(JSON.stringify(calls.release)).not.toContain("support ticket 42");
+  });
+});
+
+describe("account versions held through the write (#730)", () => {
+  it("gives every command versioned by the account the account's lock, and no other command", () => {
+    const accounts = createAccountCommands();
+    const ops = createOpsCommands();
+    const gifts = createGiftCommands();
+    for (const command of [accounts.unblockSends, accounts.adjustBalance, accounts.grantImages, accounts.erase, ops.setTier, gifts.grant]) {
+      expect(command.targetType).toBe("user");
+      expect(command.lockVersion).toBe(lockAccountVersion);
+    }
+    expect(accounts.releaseQuarantine.lockVersion).toBeUndefined();
+    expect(ops.routing.lockVersion).toBeUndefined();
+  });
+
+  it("reads the account's version holding its row, in the form the previews give it", async () => {
+    const query = vi.fn(async () => ({ rows: [{ updated_at: ACCOUNT_ROW.updated_at }] }));
+    await expect(lockAccountVersion({ query } as never, "auth0|u1")).resolves.toBe("2026-09-06T10:00:00.000Z");
+    expect(query).toHaveBeenCalledWith("SELECT updated_at FROM users WHERE user_id = $1 FOR UPDATE", ["auth0|u1"]);
+
+    const missing = vi.fn(async () => ({ rows: [] }));
+    await expect(lockAccountVersion({ query: missing } as never, "auth0|gone")).resolves.toBeNull();
   });
 });
 
@@ -201,6 +233,7 @@ describe("promo commands", () => {
       maxPerUser: 1,
       requiresNewUser: true,
       endsAt: "2026-12-31",
+      giftGenerationsRemaining: null,
     });
     expect(() => commands.create.parseInput(new Map([["code", "no spaces here"], ["name", "x"], ["creditsAmount", "2"]]))).toThrowError(
       expect.objectContaining({ code: "ADMIN_INVALID_REQUEST" }),
@@ -214,6 +247,35 @@ describe("promo commands", () => {
     expect(preview.expectedVersion).toBeUndefined();
     await commands.create.execute(execution({}), "WELCOME10", input, preview);
     expect(seams.createCampaignWithClient).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ code: "WELCOME10", createdBy: "owner@example.com", requiresNewUser: true }));
+  });
+
+  it("creates a seed campaign that grants a gift letter, and refuses a budget out of range", async () => {
+    const { seams, commands } = harness();
+    const input = commands.create.parseInput(
+      new Map([
+        ["code", "jane-smith"],
+        ["name", "Jane's readers"],
+        ["creditsAmount", "0"],
+        ["maxTotalRedemptions", "200"],
+        ["giftGenerationsRemaining", "1"],
+        ["requiresNewUser", "on"],
+      ]),
+    );
+    expect(input).toMatchObject({ code: "JANE-SMITH", creditsAmount: 0, giftGenerationsRemaining: 1, maxTotalRedemptions: 200 });
+    const preview = await commands.create.preview(scripted(), "JANE-SMITH", input);
+    expect(preview.display).toContainEqual(["Gift letter", "seed code: grants a gift letter with budget 1"]);
+    // The cap is the cost bound on a multi-use seed; the preview says so.
+    expect(preview.warnings.some((warning) => warning.includes("total redemptions cap is the cost bound"))).toBe(true);
+    await commands.create.execute(execution({}), "JANE-SMITH", input, preview);
+    expect(seams.createCampaignWithClient).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ code: "JANE-SMITH", giftGenerationsRemaining: 1 }),
+    );
+    for (const budget of ["21", "-1", "x"]) {
+      expect(() =>
+        commands.create.parseInput(new Map([["code", "SEED"], ["name", "x"], ["creditsAmount", "0"], ["giftGenerationsRemaining", budget]])),
+      ).toThrowError(expect.objectContaining({ code: "ADMIN_INVALID_REQUEST" }));
+    }
   });
 
   it("allows only the documented status transitions and binds the campaign version", async () => {
@@ -283,5 +345,204 @@ describe("image reservation command", () => {
       decision: "release",
       resolution: "customer_compensation",
     });
+  });
+});
+
+describe("account.erase (#289)", () => {
+  const CLEAR = {
+    ordersInFlight: 0,
+    lettersInFlight: 0,
+    jobsInFlight: 0,
+    disputesOpen: 0,
+    refundsInFlight: 0,
+    imagesInFlight: 0,
+  };
+  const SCOPE = {
+    letters: 3,
+    draftsToDelete: 1,
+    draftsToScrub: 1,
+    savedCopies: 0,
+    accessTokens: 1,
+    featureRequests: 0,
+    unredeemedGiftCodes: 1,
+    seedCodeEmails: 1,
+    failedJobsToCancel: 0,
+    heldMailToCancel: 0,
+    ordersKept: 2,
+    unusedGiftLetters: 2,
+    openAlerts: 0,
+  };
+  const COMMAND_ID = "22222222-2222-4222-8222-222222222222";
+
+  function erasure(overrides: Record<string, unknown> = {}) {
+    const seams = {
+      readAccountErased: vi.fn().mockResolvedValue(false),
+      readLatestErasure: vi.fn().mockResolvedValue(null),
+      readErasureBlockers: vi.fn().mockResolvedValue(CLEAR),
+      readErasureScope: vi.fn().mockResolvedValue(SCOPE),
+      enqueueAccountErasure: vi.fn().mockResolvedValue("op-1"),
+      ...overrides,
+    };
+    return { seams, command: createAccountCommands(seams as never).erase };
+  }
+
+  it("previews counts only, and on confirmation queues the account and nothing else", async () => {
+    const { seams, command } = erasure();
+    const preview = await command.preview(scripted(), "auth0|u1", {});
+    expect(preview.summary).toEqual({ blocked: false, blockers: CLEAR, scope: SCOPE, creditsForfeited: 4 });
+    expect(preview.expectedVersion).toBe("2026-09-06T10:00:00.000Z");
+    expect(command.verb({})).toBe("ERASE");
+    expect(command.transactional).toBe(true);
+
+    const client = { query: vi.fn() };
+    const result = await command.execute(execution(client), "auth0|u1", {}, preview);
+    expect(result).toEqual({ operationId: "op-1", status: "queued" });
+    expect(seams.enqueueAccountErasure).toHaveBeenCalledWith(client, {
+      commandId: COMMAND_ID,
+      environment: "development",
+      userId: "auth0|u1",
+    });
+    // The command itself writes nothing but the queue row.
+    expect(client.query).not.toHaveBeenCalled();
+  });
+
+  it("shows what holds it back, and refuses to queue while anything does", async () => {
+    const { seams, command } = erasure({
+      readErasureBlockers: vi.fn().mockResolvedValue({ ...CLEAR, ordersInFlight: 2, disputesOpen: 1 }),
+    });
+    const preview = await command.preview(scripted(), "auth0|u1", {});
+    expect(preview.summary).toMatchObject({ blocked: true, blockers: { ordersInFlight: 2, disputesOpen: 1 } });
+    expect(preview.display).toContainEqual(["Still in flight", "2 orders not settled; 1 open disputes"]);
+    expect(preview.warnings[0]).toMatch(/will refuse/);
+
+    await expect(command.execute(execution({ query: vi.fn() }), "auth0|u1", {}, preview)).rejects.toMatchObject({
+      code: "ADMIN_INVALID_STATE",
+    });
+    expect(seams.enqueueAccountErasure).not.toHaveBeenCalled();
+  });
+
+  it("names every kind of blocker it counts", async () => {
+    const { command } = erasure({
+      readErasureBlockers: vi.fn().mockResolvedValue({
+        ordersInFlight: 1,
+        lettersInFlight: 1,
+        jobsInFlight: 1,
+        disputesOpen: 1,
+        refundsInFlight: 1,
+        imagesInFlight: 1,
+      }),
+    });
+    const preview = await command.preview(scripted(), "auth0|u1", {});
+    expect(preview.display).toContainEqual([
+      "Still in flight",
+      "1 orders not settled; 1 letters on their way; 1 mail jobs that could still send; 1 open disputes; " +
+        "1 refunds in progress; 1 image generations in flight",
+    ]);
+  });
+
+  it("refuses an account that is already erased or already queued, and allows another try after a refusal", async () => {
+    await expect(
+      erasure({ readAccountErased: vi.fn().mockResolvedValue(true) }).command.preview(scripted(), "auth0|u1", {}),
+    ).rejects.toMatchObject({ code: "ADMIN_INVALID_STATE" });
+    for (const status of ["pending", "processing"]) {
+      await expect(
+        erasure({ readLatestErasure: vi.fn().mockResolvedValue({ status }) }).command.preview(scripted(), "auth0|u1", {}),
+        status,
+      ).rejects.toMatchObject({ code: "ADMIN_INVALID_STATE" });
+    }
+    // A refused or failed erasure, or one on an account reopened by hand since
+    // (its email is real again, so it no longer reads as erased).
+    for (const status of ["failed", "succeeded"]) {
+      const preview = await erasure({ readLatestErasure: vi.fn().mockResolvedValue({ status }) }).command.preview(
+        scripted(),
+        "auth0|u1",
+        {},
+      );
+      expect(preview.summary.blocked, status).toBe(false);
+    }
+  });
+
+  it("refuses an account that does not exist", async () => {
+    await expect(erasure().command.preview(scripted({ account: [] }), "auth0|none", {})).rejects.toMatchObject({
+      code: "ADMIN_NOT_FOUND",
+    });
+  });
+
+  it("warns about a forfeit only when there is something to forfeit", async () => {
+    const forfeit = /forfeited/;
+    const withBalance = await erasure().command.preview(scripted(), "auth0|u1", {});
+    expect(withBalance.warnings.some((warning) => forfeit.test(warning))).toBe(true);
+
+    const onlyGifts = await erasure().command.preview(scripted({ account: [{ ...ACCOUNT_ROW, credits: 0 }] }), "auth0|u1", {});
+    expect(onlyGifts.warnings.some((warning) => forfeit.test(warning))).toBe(true);
+
+    const nothing = await erasure({ readErasureScope: vi.fn().mockResolvedValue({ ...SCOPE, unusedGiftLetters: 0 }) }).command.preview(
+      scripted({ account: [{ ...ACCOUNT_ROW, credits: 0 }] }),
+      "auth0|u1",
+      {},
+    );
+    expect(nothing.warnings.some((warning) => forfeit.test(warning))).toBe(false);
+  });
+
+  it("warns about open alerts on the account's orders only when there are some", async () => {
+    const quiet = await erasure().command.preview(scripted(), "auth0|u1", {});
+    expect(quiet.warnings.some((warning) => /alerts/.test(warning))).toBe(false);
+    const owed = await erasure({ readErasureScope: vi.fn().mockResolvedValue({ ...SCOPE, openAlerts: 2 }) }).command.preview(
+      scripted(),
+      "auth0|u1",
+      {},
+    );
+    expect(owed.warnings).toContainEqual(expect.stringMatching(/^2 operational alerts/));
+  });
+
+  it("counts the held mail it cancels, and warns about it only when there is some (#535)", async () => {
+    const heldWarning = /held to arrive by a date/;
+    const quiet = await erasure().command.preview(scripted(), "auth0|u1", {});
+    expect(quiet.display).toContainEqual(["Held mail cancelled", "0 letters waiting for their mail date, with nothing returned"]);
+    expect(quiet.warnings.some((warning) => heldWarning.test(warning))).toBe(false);
+
+    const held = await erasure({ readErasureScope: vi.fn().mockResolvedValue({ ...SCOPE, heldMailToCancel: 2 }) }).command.preview(
+      scripted(),
+      "auth0|u1",
+      {},
+    );
+    expect(held.summary).toMatchObject({ blocked: false, scope: { heldMailToCancel: 2 } });
+    expect(held.display).toContainEqual(["Held mail cancelled", "2 letters waiting for their mail date, with nothing returned"]);
+    expect(held.warnings).toContainEqual(
+      expect.stringMatching(/^2 letters held to arrive by a date are cancelled before they print, and nothing goes back/),
+    );
+    // Mail released before the run is due by then: it mails, and the run refuses.
+    expect(held.warnings).toContainEqual(expect.stringMatching(/comes before the hourly run that erases is due by then, so it mails instead and that run refuses the erasure/));
+  });
+
+  it("always warns that it is irreversible, and what the operator does by hand afterwards", async () => {
+    const preview = await erasure().command.preview(scripted(), "auth0|u1", {});
+    expect(preview.warnings.join("\n")).toMatch(/Irreversible/);
+    expect(preview.warnings.join("\n")).toMatch(/Auth0 user/);
+    expect(preview.warnings.join("\n")).toMatch(/reason/);
+  });
+});
+
+describe("an erased account takes nothing (#446 review)", () => {
+  const erased = { readAccountErased: vi.fn().mockResolvedValue(true) };
+
+  it("refuses a balance adjustment, an image grant and an unblock", async () => {
+    const commands = createAccountCommands(erased as never);
+    await expect(commands.adjustBalance.preview(scripted(), "auth0|u1", { letters: 1, direction: "add" })).rejects.toMatchObject({
+      code: "ADMIN_INVALID_STATE",
+    });
+    await expect(commands.grantImages.preview(scripted(), "auth0|u1", { quantity: 1 })).rejects.toMatchObject({
+      code: "ADMIN_INVALID_STATE",
+    });
+    await expect(commands.unblockSends.preview(scripted(), "auth0|u1", {})).rejects.toMatchObject({
+      code: "ADMIN_INVALID_STATE",
+    });
+  });
+
+  it("still previews all three for an account that is not erased", async () => {
+    const commands = createAccountCommands({ readAccountErased: vi.fn().mockResolvedValue(false) } as never);
+    await expect(commands.adjustBalance.preview(scripted(), "auth0|u1", { letters: 1, direction: "add" })).resolves.toBeTruthy();
+    await expect(commands.grantImages.preview(scripted(), "auth0|u1", { quantity: 1 })).resolves.toBeTruthy();
+    await expect(commands.unblockSends.preview(scripted(), "auth0|u1", {})).resolves.toBeTruthy();
   });
 });

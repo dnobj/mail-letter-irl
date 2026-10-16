@@ -163,8 +163,9 @@ user is not an approved test identity.
 - [ ] Link account A, inspect its balance/order identity, then disconnect.
 - [ ] Use the account-switch flow and link account B.
 - [ ] Confirm account A data/email is not shown or overwritten for account B.
-- [ ] Repeat after a userinfo failure and confirm a known email is not replaced
-      by a placeholder.
+- [ ] Confirm a known email is never replaced: an account that exists keeps its
+      stored address whatever a later token says, and no placeholder address
+      exists to replace it with.
 
 ### CIMD-07 — Web and mobile
 
@@ -200,7 +201,8 @@ configured locally (https://github.com/dnobj/mail-letter-irl/issues/160#issuecom
 purpose, pasted into GitHub, or exposed in chat.
 
 - [ ] Connect the supported Claude/non-ChatGPT MCP path with a PAT.
-- [ ] Confirm PAT tool calls work and never call Auth0 userinfo.
+- [ ] Confirm PAT tool calls work on an account that already exists (a PAT
+      carries no address, and no account is opened from one).
 - [ ] Confirm the Claude/PAT path does not use or mutate the ChatGPT CIMD app.
 
 ### CIMD-10 — DEV rollback
@@ -210,15 +212,22 @@ has not been run. Worth running before the production cutover (#158), since it i
 the only rehearsal of the rollback path.
 
 - [ ] Save the accepted CIMD configuration and deployment identifiers.
+- [ ] Grant the rollback static client user-delegated `mail:read`, `mail:draft`
+      and `mail:send` on the DEV MCP API. The API uses per-app authorization, so
+      without a grant Auth0 refuses the client for the `/mcp` resource.
 - [ ] Enable `LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY=true` in DEV only with
-      the recorded legacy client/audience and deploy the rollback configuration.
+      the recorded static client (`CHATGPT_STATIC_CLIENT_ID`,
+      `CHATGPT_STATIC_REDIRECT_URIS`) and deploy. Keep `LETTER_IRL_OAUTH_AUDIENCE`
+      the single `/mcp` resource: there is no legacy audience any more, and the
+      retired `https://letter-irl/api` API was deleted from both tenants on
+      2026-09-14.
 - [ ] Run a fresh-link smoke test and record behavior/client count.
-- [ ] Restore CIMD mode (`false`), restore the dedicated exact `/mcp` audience,
+- [ ] Restore CIMD mode (`false`), remove the static client's MCP API grant,
       redeploy DEV, and rerun CIMD-01, CIMD-03, and CIMD-04.
 - [ ] Confirm production was unchanged throughout.
 
 **Purpose:** Integration and end-to-end tests that require manual verification
-**Last Updated:** July 16, 2026
+**Last Updated:** September 28, 2026
 
 ---
 
@@ -239,21 +248,38 @@ the only rehearsal of the rollback path.
 
 Quick checks after every deployment. All should pass before considering deployment successful.
 
+**Status:** Executed 2026-09-15 (UTC) against production (build 56f297d) and development
+(build 61a140b), after the Auth0 Default Audience repoint and the retired API's deletion (#391):
+- `/healthz` and `/readyz` return 200 on both.
+- Both protected-resource documents are exact on both: resource `/mcp`, the environment's Auth0
+  issuer, and the seven scopes.
+- Auth0's discovery document names the same issuer.
+- The authorization-server proxy and `POST /oauth/register` return 404 on both.
+- `/manifest.json` and the website return 200 on both.
+- On both websites, `/auth/login` redirects to the environment's `/authorize` with the MCP
+  audience and full scope. Auth0 answers with its login page, and also does so with the audience
+  removed (the Default Audience fallback).
+- Both dashboards load for a signed-in session, with `credits/balance`, `letters` and
+  `promo/redeem-pending` at 200.
+
+The previous run, 2026-09-13 (production 2a0144d, development 7d3cdc5), did not exercise login
+or the dashboard. The DEV connector refresh after #376 listed every widget at v29.
+
 ### API Health
-- [ ] `GET https://api.letterirl.com/healthz` returns 200
-- [ ] `GET https://api.letterirl.com/.well-known/oauth-protected-resource` returns
+- [x] `GET https://api.letterirl.com/healthz` returns 200
+- [x] `GET https://api.letterirl.com/.well-known/oauth-protected-resource` returns
       the exact resource, Auth0 issuer, and product scopes
-- [ ] Auth0's own discovery returns valid JSON; Letter IRL's authorization-server
+- [x] Auth0's own discovery returns valid JSON; Letter IRL's authorization-server
       proxy and `POST /oauth/register` return 404 in normal CIMD mode
 
 ### MCP Endpoint
-- [ ] ChatGPT developer-mode refresh discovers the current MCP tools
-- [ ] MCP manifest accessible at `/manifest.json`
+- [x] ChatGPT developer-mode refresh discovers the current MCP tools
+- [x] MCP manifest accessible at `/manifest.json`
 
 ### Website
-- [ ] `https://letterirl.com` loads
-- [ ] Login button redirects to Auth0
-- [ ] Dashboard loads after login
+- [x] `https://letterirl.com` loads
+- [x] Login button redirects to Auth0
+- [x] Dashboard loads after login
 
 ---
 
@@ -262,35 +288,580 @@ Quick checks after every deployment. All should pass before considering deployme
 Test the full ChatGPT connector flow.
 
 ### OAuth Flow (US-ACCT-01, US-DCR-01)
-- [ ] Open ChatGPT → GPT that uses Letter IRL
-- [ ] Click "Sign in" when prompted
-- [ ] Auth0 login page appears
+
+**Create the connector with OIDC off.** In ChatGPT's New Plugin form, open **Advanced OAuth
+settings** and untick **OIDC enabled** before **Create**; leave everything else at its default.
+With it on, the first link fails with "We couldn't connect this account"
+(`OAUTH_OWNER_PROFILE_ID_MISSING`), because Auth0 issues no ID token to the strict CIMD client
+([chatgpt-connector-oidc-setting.md](learnings/chatgpt-connector-oidc-setting.md), #424).
+
+**Status:** Reconnect executed 2026-09-15 in development, after the Auth0 cleanup (#391):
+- In the current ChatGPT UI, **Disconnect** (Settings → Plugins → the app → **…**) also removes
+  the app from the installed plugins. The app's own page under Plugins then offers **Install
+  plugin**, which runs the Auth0 sign-in.
+- After signing in, the first `get_account_balance` call in a fresh chat succeeded with no
+  prompt, and the development API log shows it JWT-authenticated.
+- The login provider was not recorded, so the per-provider lines stay open.
+
+- [x] Open ChatGPT → the Letter IRL app
+- [x] Click "Sign in" when prompted (here: **Install plugin** on the app's page)
+- [x] Auth0 login page appears
 - [ ] Can login with Google
 - [ ] Can login with Microsoft
 - [ ] Can login with GitHub
 - [ ] Can login with Email/Password
-- [ ] After login, redirected back to ChatGPT
-- [ ] ChatGPT shows "Connected" status
+- [x] After login, redirected back to ChatGPT
+- [x] ChatGPT shows "Connected" status (the app is installed again and its tools run)
 
 ### CIMD client-count behavior
-- [ ] After connecting, check Auth0 dashboard
-- [ ] No new client or DCR call is created during connect/reconnect
-- [ ] ChatGPT uses the manually imported public CIMD application
+
+**Status:** Executed 2026-09-15 in development, with the reconnect above:
+- The tenant held the same 7 applications before and after.
+- Its log since the test began holds only a **Success Login** and a **Success Exchange** for the
+  `ChatGPT` CIMD application, with audience
+  `https://letter-irl-api-development.up.railway.app/mcp`, and no client creation.
+- The exchange event records no scope list (`"scope": null`), so the granted scopes were not read
+  from the log.
+
+- [x] After connecting, check Auth0 dashboard
+- [x] No new client or DCR call is created during connect/reconnect
+- [x] ChatGPT uses the manually imported CIMD application
 
 ### MCP Tools in ChatGPT
-- [ ] Ask "What's my credit balance?" → `get_account_balance` works
-- [ ] Ask "Show my letters" → `list_orders` works
-- [ ] Ask to preview a letter → `quote_and_preview_letter` works
-- [ ] Letter preview renders in chat (widget or text)
+
+**Status:** Executed 2026-09-13 in development through the embedded browser, in one fresh chat
+with the (DEV) app: the balance (12 prepaid letters, no permission prompt for a read-only tool),
+the order history (13 mailed-letter orders and 19 letter-pack purchase records with their
+statuses, #365), a preview that rendered the letter card with the draft id, the cost and a
+**Send Letter** button, and the send itself (the Letter Sending Flow below carries the readings).
+
+Re-run 2026-09-15 after the Auth0 cleanup, in a fresh chat with each app through Claude in
+Chrome. The production **Letter IRL** app and the **Letter IRL (DEV)** app each answered the
+balance question through `get_account_balance`, with no permission prompt. Each API's log shows
+the call JWT-authenticated and successful.
+
+- [x] Ask "What's my credit balance?" → `get_account_balance` works
+- [x] Ask "Show my letters" → `list_orders` works
+- [x] Ask to preview a letter → `quote_and_preview_letter` works
+- [x] Letter preview renders in chat (widget or text)
 
 ### Widget Rendering (if enabled)
 - [ ] Balance widget shows correct credits
 - [ ] Letter preview widget shows formatted letter
 - [ ] Widgets respect dark/light mode
 
+### DEVICES-01 — ChatGPT's apps beyond the web (launch check)
+
+**Status:** Run on development on 2026-09-29, on e65c5b1 (steering r20, widgets v45), as testlirl02,
+after **Refresh tools** on the (DEV) app. The iPhone is not run yet.
+
+- [x] **ChatGPT on Android** (Galaxy S26 Ultra, driven over USB). Force-stop and reopen the app,
+      then preview a letter with **@Letter IRL (DEV)**. The letter card (t29) renders with **Send
+      Letter**, and the approved call ran at once.
+      - With several accounts linked, ChatGPT first asked which one to use.
+      - With a four-line address (a Suite line), the card draws the body's first line over the
+        recipient's last line. The printed letter is fine; on the desktop the address just fits.
+        #525 lets the address window grow (letter t30, widgets v46). On ChatGPT on the web on
+        2026-09-30, after **Refresh tools**, a four-line Suite address sat inside the window, above
+        the dashed line. The same day on Android, after a force-stop, it did too.
+- [x] **ChatGPT's upload card on Android.** **Select Photo** ("Max 10 MB") opened the phone's
+      picker. Then `confirm_uploaded_image`, and the preview used the photo, fitted from 4000x3000
+      to 2700x1800. No **Choose from Library** button showed.
+- [ ] **ChatGPT on iPhone** with the v45 cards. (Not run: no iPhone at hand.)
+- [x] **The ChatGPT desktop app** (Windows; the app that includes Codex), in **Chat** and in
+      **Work**. Work is where Codex runs, with local projects. It logs as `client=chatgpt` in both
+      modes and **draws no card**: the log shows no `resources/read`, and the preview came back as
+      text with the draft id.
+      - "Send it." gave `request_send`'s link in both modes, as the preview text says to when no
+        card shows.
+      - Chat mode called the preview tool twice, four seconds apart, making two drafts.
+      - Work mode, on **Full access**, ran the tools without an approval prompt.
+      - Not checked: how an account with no letters pays there. Pay & Send is card-only, and no
+        card shows.
+
 ---
 
 ## Claude Desktop Integration
+
+### CLIENT-01 — Claude through a custom connector (launch gate, #471)
+
+**Status:** Partly run in development on 2026-09-26, with the send rule on. It used Claude on the web
+(claude.ai, in the Claude app's built-in browser) and Letter IRL test account testlirl02. Steps 1 to
+3 passed; step 4 ran as far as the link; steps 5 and 6 were not run. Step 7 ran the same day, after
+#486 deployed (88dd3d2): titles and the image text passed, and the purchase text needs #475. Step 8
+ran after #489 deployed (d686367). Claude has no checkout tools and offers none, and it gives the
+letter packs link only when asked. Step 9 ran after #491 deployed (45c7287) and passed: Claude has
+no image tool and says Letter IRL can't create images. Step 10 ran after #494 deployed (e6194ed):
+the getting-started card draws in Claude on the web and still works in ChatGPT. Step 11 ran on
+2026-09-27 after #496 deployed (5ee991e): both preview cards draw in Claude on the web from the
+result's `_meta`, and Claude keeps the card-only send tools from its model. Opening the letter
+packs page is still to check in a normal browser. Step 12 ran the same day after #498 deployed
+(1290a83) and passed: the card's Send sends in Claude, and asked to send, Claude points to the card.
+Step 13 ran after #499 deployed (8babf9f) and passed: reopened, the sent card shows it was sent.
+
+Background: Claude connects with its published identity, the document at
+`https://claude.ai/oauth/mcp-oauth-client-metadata`. That document must be imported into each tenant
+([auth0-tenant-configuration.md](auth0-tenant-configuration.md), Applications, section 6). One
+connector on a Claude account covers Claude on the web, Desktop, mobile and Cowork.
+
+Claude keeps a connector's tool list until it is refreshed. After a deploy that changes tool titles
+or descriptions, open **Customize**, then **Connectors**, then **Yours**, then the connector. From its
+**⋮** menu choose **Refresh tools list**, then start a new chat. The development log then shows
+`tools/list` with the new `steeringRev`. Tool results come from the server on every call, so they
+change without a refresh.
+
+1. Install
+- [x] Customize, then Connectors, then **Add custom connector**: name "Letter IRL (DEV)", URL the
+      development `/mcp`. Claude should detect **Sign in now** and **Use Claude's published
+      identity** by itself; keep both. (It did. A link can fill the form in:
+      `https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=…&connectorUrl=…`,
+      and Claude then warns that the connector came from an external link.)
+2. Sign in
+- [x] Press **Connect**, sign in, and accept the consent screen. (The first press did nothing: no
+      request reached Auth0 or the API. The second opened the sign-in, which reused an existing
+      session, then the consent screen: Read, Draft, Send and offline access.)
+- [x] The development log should show `client=claude` on `mcp.request_received`. (It did, for
+      `initialize`, `tools/list` and `resources/list`.)
+- [x] The connector's page should list `send_letter` and `send_postcard` under **App-only tools**,
+      and `request_send` among the read-only tools. (Both as expected.)
+3. Preview
+- [x] Ask for the balance, then a text-only letter preview, approving each call with **Allow
+      once**. (Both ran. Claude could not display the preview card ("There was a problem displaying
+      content"), which is expected until the cards work outside ChatGPT, #474.)
+4. The person sends it
+- [x] Say "Send it." Claude should call `request_send`, give the link and send nothing. (It said
+      it can't send from there and gave the link. The log shows no send tool call.)
+- [ ] Open the link on the development website, signed in as the same account, and press **Send
+      this letter**. (Not run. SEND-01 covers the page, and this account's only letter was a gift
+      letter.)
+5. Refusals
+- [ ] No letters, an unconfirmed address, an erased account. (Not run.)
+6. Disconnect
+- [ ] Disconnect on Claude's connector page, then check that the Auth0 user no longer lists Claude
+      among authorized applications. (Not run.)
+
+Findings, fixed by #484:
+- Several tool descriptions said "so ChatGPT can reuse that existing image".
+- Claude used a tool's description as its name in approval prompts ("Claude wants to use Check how
+  many prepaid letters remain…"). Every tool now has a short title.
+- `get_started` promised buying "without leaving the conversation", and Claude offered to set up a
+  pack purchase, which Claude doesn't allow (#475). An app that takes no purchases is now sent to
+  the dashboard. The checkout tools themselves are #475.
+
+7. Tool text (#484), once it is deployed to development
+- [x] Approval prompts show short titles, such as "Claude wants to use Check letter balance". (Yes,
+      after **Refresh tools list**. Until then Claude showed the old descriptions. The connector
+      page lists every tool by its title. The small prompt Claude shows after searching its tools
+      names the tool instead, such as `get_started`; that is Claude's choice.)
+- [ ] Ask "How do I get started with Letter IRL?" The answer carries the guide and the website's
+      letter packs link, and offers no purchase in the conversation. (Partly. The guide came
+      through and named "your Letter IRL dashboard", but Claude left out the link, and it offered
+      to "create a checkout link for a starter, regular, or power pack", because
+      `create_pack_checkout` is still in its tool list. Both are for #475.)
+- [ ] With no letters left, ask for the balance. The answer gives the letter packs link. (Partly,
+      the same way. Claude reported no letters and the account's one gift letter, named the
+      dashboard without the link, and offered a checkout link.)
+- [x] Ask Letter IRL for an image for a postcard. Nothing mentions ChatGPT; with no image
+      generations left, Claude asks for an image of your own. (Yes. Image generation is off in
+      development, so the reason was "Letter IRL isn't generating images right now". Claude
+      asked for a link to a photo or an attachment. An attachment can't reach our tools in Claude
+      yet, #474.)
+
+The development log showed each call as `client=claude`. The getting-started and image cards
+could not display ("There was a problem displaying content"), as expected until #474.
+
+8. Purchases (#475), once it is deployed to development. Refresh the tool list first. (Run on
+   2026-09-26 after #489 deployed, d686367. The refresh logged `tools/list` with
+   `steeringRev=11`.)
+- [x] The connector page lists neither **Buy a letter pack** nor **Pay & Send a letter or
+      postcard**. (Yes: 7 interactive, 8 read-only and 5 write tools, down from 8, 8 and 6.)
+- [ ] Ask "How do I get started with Letter IRL?", then ask for the balance with no letters. Both
+      answers give the letter packs link and offer no checkout. (Partly. Neither offered a
+      checkout, and both said to buy a pack "on your Letter IRL dashboard". Neither gave the
+      link, although the result names it and asks for it to be passed on.)
+- [x] Ask to buy a letter pack. Claude lists the packs and gives the letter packs link. Nothing
+      creates a checkout: the development log shows no `create_pack_checkout` call. (Claude
+      called `list_letter_packs`, showed the three packs, and said "I can't make the purchase from
+      here. You buy packs on the Letter IRL dashboard." The log shows no checkout call. Asked
+      "What's the link to buy one?", it gave the letter packs link at once.)
+
+Claude doesn't pass on a link from a tool result unprompted, even when the result asks it to; it
+gives the link when the person asks. Once the cards show in Claude (#474), a card can carry the
+link as a button.
+
+9. Image generation off (#467), once it is deployed to development. Refresh the tool list first.
+   (Run on 2026-09-26 after #491 deployed, 45c7287. The refresh logged `tools/list` with
+   `steeringRev=12`.)
+- [x] The connector page no longer lists **Create an image for mail**. (Yes: 6 interactive, 8
+      read-only and 5 write tools.)
+- [x] Ask Letter IRL to make an image for a postcard. Claude says Letter IRL doesn't make images
+      there and asks for one of your own. The development log shows no `generate_image_for_mail`
+      call. (Yes: "Letter IRL can't create images. Its postcard tool only takes an image you
+      already have (an attachment or a hosted link)". The log shows no image call. Claude then
+      offered to draw an illustration itself, which is Claude's own ability, not Letter IRL's.
+      It suggested adding it "through Letter IRL's upload step", which needs the cards in Claude
+      (#474).)
+
+10. The getting-started card on the shared bridge (#474, phase 1), once it is deployed to
+    development. Refresh the tool list first. (Run on 2026-09-26 after #494 deployed, e6194ed.)
+- [x] Ask "How do I get started with Letter IRL?" In Claude on the web the card draws, in Claude's
+      theme, with the title, the overview, the purchase step and the example prompts. Claude no
+      longer shows "There was a problem displaying content". (Yes: the first Letter IRL card
+      drawn in Claude, dark theme, revision t16, with the letter packs link in the purchase step.
+      The log shows `tools/list` at `widgetTemplateVersion=38`, then `resources/read` of the v38
+      card and `tools/call get_started`, all as `client=claude`. Claude's reply gave the link
+      this time.)
+- [x] The same on Claude Desktop (Windows) and in the Android app. Claude Desktop on Windows has a
+      reported bug that shows remote-connector cards as text only (anthropics/claude-ai-mcp#987).
+      (2026-09-29: both drew our cards, the upload card and the postcard card of step 14 rather
+      than the getting-started card. Claude Desktop did not show the text-only bug.)
+- [x] In ChatGPT (DEV connector, after **Refresh tools**) the getting-started card looks and works
+      as before. (Yes: revision t16, with ChatGPT's own purchase step. ChatGPT read the v38 cards
+      on the refresh.)
+
+11. The letter and postcard preview cards on the shared bridge (#474, phase 2a), once they are
+    deployed to development. Refresh the tool list first; the log should show `tools/list` at
+    `widgetTemplateVersion=39`. (Run on 2026-09-27 after #496 deployed, 5ee991e. The refresh
+    logged `tools/list` at `steeringRev=13` and `widgetTemplateVersion=39`. testlirl02 has no
+    saved return address, and PostGrid refused made-up addresses, so the previews used the pair
+    under Test Addresses below, with the return address for each preview only.)
+- [x] Ask Claude to preview a short letter to a test address. The letter card draws in Claude's
+      theme, revision t26, with the letter's text, both addresses, the cost and the delivery. If
+      the text shows only as "Letter preview", Claude did not hand the card the result's `_meta`:
+      record it, because phase 2b then brings the preview from the server. (Yes, and Claude does
+      hand the card `_meta`: the card drew "Hello Sam, see you soon." and "Love, Dee", which only
+      the result's `previewHtml` carries. It showed both addresses, the gift card's page, "Free
+      (gift letter)", the delivery line and **Send Gift Letter**, in the dark theme. The log shows
+      `resources/read` at v39, then `tools/call quote_and_preview_letter`, as `client=claude`.)
+- [x] Preview a postcard with an `https` image link. The front and the back draw, revision t26.
+      (Yes: the photo on the front, and on the back the message, both addresses and the gift
+      strip, with **Send Gift Postcard**.)
+- [x] On an account with letters the card shows **Send**. With the send rule on, pressing it shows
+      that nothing was sent, with the link to send it from, and the development log shows
+      `send.link_instead` for `client=claude`. Nothing is sent. (Yes, with testlirl02's gift
+      letter. **Send Gift Letter** reached the server as `tools/call send_letter` without a prompt
+      from Claude, and the log shows `send.link_instead client=claude mailType=letter`. The card
+      showed "Send failed" and **Retry Send** over "Not sent: Letter IRL sends mail only when the
+      person sends it…", with the confirmation page's address as plain text. Phase 2b changes
+      this.)
+- [ ] On an account with no letters the card shows **Buy letters on the website** and the note to
+      sign in there with the same email, and neither **Pay & Send** nor **Buy a Letter Pack**.
+      Pressing it, Claude asks to open the letter packs page. Once it opens, the pill says
+      **Waiting for your Letter Pack** and **Check status** appears. Declining shows the page's
+      address on the card. (Partly. testlirl02 has no paid letters, so the letter was previewed
+      again with `sendAsGift` false. The card showed the button and the note, and neither checkout
+      button. Pressing it, Claude asked "Open external link" for the development
+      `/dashboard/letter-packs` page. The pill said **Waiting for your Letter Pack** and **Check
+      status** appeared at once, and the card read the balance with `tools/call
+      get_account_balance` every 4 seconds or so, as `client=claude`. Declining showed "The
+      website did not open. Letter packs are at" with the address. **Open link** did nothing in
+      the Claude app's built-in browser, so the page opening is still to check in a normal
+      browser.)
+- [x] Ask Claude which Letter IRL tools it can call. Record whether it names **Send a letter** or
+      **Send a postcard**, which are marked for the card only. This decides phase 2b: if Claude
+      keeps them from its model, the card's **Send** can send in Claude as it does in ChatGPT.
+      (Claude keeps them from its model. Its connector page lists both under **App-only tools**,
+      with no permission setting. Asked, Claude listed 19 tools without them, said they "aren't
+      among the ones" it can call, and named `request_send` as the closest.)
+- [x] In ChatGPT (DEV connector, after **Refresh tools**) both preview cards look and work as
+      before, revision t26: a letter preview with **Send**, and on an account with no letters
+      **Pay & Send** and **Buy a Letter Pack** with the checkout note, and no website button.
+      (Yes, on testlirl02. The refresh logged `resources/read` at v39 as `client=chatgpt`. With
+      `sendAsGift` false the letter and the postcard cards showed **Pay & Send (USD 4.99)**,
+      **Buy a Letter Pack** and the checkout note, and no website button. A gift preview showed
+      **Send Gift Letter**. Nothing was pressed.)
+
+Seen on the way: once **Check status** and the message were showing, the letter card in Claude
+scrolled inside its frame; Claude did not grow the frame to fit.
+
+12. Send from the card in Claude (#474, phase 2b), once it is deployed to development. Refresh the
+    tool list first; the log should show `tools/list` at `steeringRev=14` and
+    `widgetTemplateVersion=40`. This sends real mail to PostGrid's test mode and spends a letter or
+    a gift letter. (Run on 2026-09-27 after #498 deployed, 1290a83, on testlirl02, whose gift
+    letter paid for the send. The refresh logged `tools/list` at `steeringRev=14` and
+    `widgetTemplateVersion=40`.)
+- [x] Preview a letter on an account that can send it. The card says **Ready to send**, revision
+      t27, and Claude's reply points to the card's Send button rather than to a link. (Yes, with
+      **Send Gift Letter**. Claude: the letter "goes out only if you press Send on the card".)
+- [x] Press **Send** on the card. The card shows **With the printer** and the order id. The
+      development log shows `tools/call send_letter` as `client=claude`, and no
+      `send.link_instead`. (Yes: order 3a456780-5ce9-4eec-bea4-be3e7cf6c9f8 and **Letter Sent!**.
+      The log shows `send_letter` as `client=claude`, PostGrid's test-mode `create_letter`, and
+      `send.letter.committed` with the submission complete. Claude asked for no approval.)
+- [x] Preview another letter and tell Claude "Send it." Claude does not send it: it points to the
+      card's Send button, or calls `request_send` and gives the link. The log shows no `send_letter`
+      call. (Claude said to press **Send** on that card, and offered a send link if the card was
+      not showing. The log shows only the preview: no `send_letter` and no `request_send`. With the
+      gift letter spent, that card offered **Buy letters on the website**, not Send, which
+      Claude's reply did not know.)
+- [x] In ChatGPT (DEV connector, after **Refresh tools**) both preview cards look and work as
+      before, revision t27. (Yes, on testlirl02 with no letters left. The refresh logged
+      `resources/read` at v40. The letter and the postcard cards showed **Pay & Send (USD 4.99)**,
+      **Buy a Letter Pack** and the checkout note, and no website or confirmation page button.)
+
+The card's **Open the confirmation page** state now shows only in an app not trusted with
+card-only tools, such as VS Code (CLIENT-03); unit tests cover it until that app's card test.
+
+13. A reopened conversation in Claude (#474, phase 2b), once `get_draft_status` is deployed to
+    development. Refresh the tool list first; the log should show `tools/list` at
+    `steeringRev=15` and `widgetTemplateVersion=41`, and the connector page should list **Check a
+    preview** under **App-only tools**. (Run on 2026-09-27 after #499 deployed, 8babf9f. The
+    refresh logged `tools/list` at `steeringRev=15` and `widgetTemplateVersion=41`, and the page
+    listed three app-only tools: **Check a preview**, **Send a letter** and **Send a postcard**.)
+- [x] Open the conversation from step 12 again, or reload it. The card whose letter was sent shows
+      the preview with **With the printer**, the order id and the note that it has already been
+      sent, and no Send button. The development log shows `tools/call get_draft_status` as
+      `client=claude`. (Yes, at revision t28: Claude read the v41 card for a result made at v40.
+      The card showed order 3a456780-5ce9-4eec-bea4-be3e7cf6c9f8 and "This letter has already been
+      sent. Ask for its status in the chat." The log shows `resources/read` at v41, then one
+      `get_draft_status` per card, as `client=claude`.)
+- [x] A card for a preview that was not sent still offers **Send**. (It stayed as the host gave it,
+      not marked sent. testlirl02 has no letters left, so that card offered **Buy letters on the
+      website** rather than Send.)
+- [x] Ask Claude which Letter IRL tools it can call. It does not name `get_draft_status`. (Claude
+      listed 19 tools without it or the send tools, and named `request_send` as the closest.)
+
+Found on the way: Claude's permission for **Preview a letter** had become **Always allow**, most
+likely from an approval click in step 12 that landed on the wrong button as the prompt moved. It
+was set back to **Needs approval** before this step. Check the connector page after a run that
+clicks Claude's prompts.
+
+14. A photo uploaded through the card in Claude (#474, phase 3), once it is deployed to development
+    and `LETTER_IRL_CARD_UPLOAD_ENABLED=true` is set on the development API. Refresh the tool list
+    first; the log should show `tools/list` at `steeringRev=17` and `widgetTemplateVersion=43`, and
+    the connector page should list **Upload a photo** under **App-only tools**. The limits and
+    refusals are covered by unit tests; this checks the path end to end. A person picks the photo:
+    no browser tool reaches the card's file input, which sits in a cross-origin frame behind a
+    native file dialog. The test photos are in `C:\letter-irl-scripts\testdata`, made by
+    `make-test-photos.mjs`: `photo-a.jpg` and `photo-b.jpg` are 4032x3024 and 3024x4032, 3.3 MB each,
+    and `photo-small.jpg` is 1800x1200.
+
+    First run, 2026-09-28 (UTC), with #502 deployed (33c4caf) and the switch on:
+    - the refresh logged `tools/list` at `steeringRev=16` and `widgetTemplateVersion=42`;
+    - the connector page listed **Upload a photo** among four app-only tools;
+    - asked for a postcard with a photo from the computer, Claude offered the connector, and after
+      **Use** it opened the card, revision t16, showing **Select Photo** and "Max 25 MB";
+    - but it filled `upload_image`'s `context` with a sentence, which the card would have passed on
+      and `upload_photo_chunk` refused. The follow-up fix reads such a context as one of the three
+      names (steering r17, v43), and the run starts again once it is deployed.
+
+    Second run, 2026-09-29 (UTC), on 8a169db, in Claude web in the owner's Chrome, driven through
+    Claude in Chrome, as testlirl02. The owner picked each photo in the file dialog.
+    - **Refresh.** **Refresh tools list** logged `tools/list` at `steeringRev=19` and
+      `widgetTemplateVersion=44`, and the connector page lists **Upload a photo** under
+      **App-only tools**.
+    - **Claude no longer sends the card's message itself.** It puts "Make the postcard with the photo
+      I just uploaded." in the message box under a red banner: "Use caution before running this
+      prompt. Malicious content could trick Claude into attempting harmful actions or sharing your
+      data." The person presses send.
+    - **The card's wording.** Its line "Your request for the preview is in the conversation" did
+      not point Claude users to the message box. Since #520 (upload t18, widgets v45) it goes on: "If
+      it is waiting in your message box, send it."
+- [x] Ask Claude for a postcard to a test address with a photo you will upload. Claude calls
+      `upload_image`, and the card, revision t17, shows **Select Photo** and "Max 25 MB". (Claude
+      passed `context: "postcard"`, and **Allow once** was clicked.)
+- [x] Choose a photo larger than 2400 px, a phone JPEG of a few MB. The card shows "Sending your
+      photo…" with a percentage, then the photo and "Uploaded. Your request for the preview is in
+      the conversation." The message "Make the postcard with the photo I just uploaded." appears in
+      the conversation, and Claude makes the preview with no image argument. The development log
+      shows `upload_photo_chunk` as `client=claude`, then `photo_upload.finished` with width or
+      height 2400, then `quote.postcard.image_from_recent_upload`. (`photo-a.jpg`: three chunks,
+      then `photo_upload.finished width=2400 height=1800` at 04:36:20Z. The message came through the
+      message box, as noted above. The preview request carried no image, and the recent-upload line
+      logged `imageAgeMs=121110 unresolvedReference=false`. The image was fitted from 2400x1800 to
+      2700x1800.)
+- [x] The postcard card shows the uploaded photo on the front. Claude's reply said nothing was sent
+      and that it goes out only when the person presses Send on the card.
+- [x] Upload a different photo in the same conversation and ask for a new preview. It uses the new
+      photo: the account holds one. (`photo-b.jpg`, portrait: `width=1800 height=2400` at
+      04:40:16Z, and the preview used it 30 seconds later, fitted to 2700x1800.)
+- [x] After more than 15 minutes, ask for another preview with "the photo I uploaded". Claude says
+      the upload has expired and asks for it again.
+      - **Passed later on 2026-09-29**, in the Claude app on Android, with no other upload in
+        between. The Claude Desktop photo was uploaded at 21:00:56Z.
+      - At 21:17:16Z the preview found the upload record 16 minutes old
+        (`imageAgeMs=981384`), but the photo itself had gone. It logged `DOWNLOAD_FAILED`, as
+        `errorClass=unknown_error`.
+      - Claude said "The photo you uploaded earlier has expired, since Letter IRL only keeps
+        uploads for 15 minutes", and offered the upload card again.
+      - The record outlives the photo: `LETTER_IRL_RECENT_UPLOAD_TTL_MS` defaults to an hour,
+        while an uploaded photo expires 15 minutes after upload, and reading it does not extend
+        that.
+
+      (The first attempt was not clean. At 04:56Z, 16 minutes after Photo B, the preview found an upload only 10 minutes old: the ChatGPT upload of `photo-small.jpg` at 04:46, on the same account, had replaced Photo B, since the account holds one photo from any app. Its ChatGPT file link had lapsed, so the download failed with `DOWNLOAD_FAILED`. Claude said the photo could not be downloaded and might have expired, and offered the upload card again. The run above therefore kept every other upload off the account.)
+- [ ] Unset the switch on the development API. After a refresh the connector page no longer lists
+      **Upload a photo**, and a new upload card says photo upload isn't available in this app yet.
+      (Not run: it takes two redeploys of development.)
+- [x] In ChatGPT (DEV connector, after **Refresh tools**) the upload card works as before:
+      **Select Photo** with "Max 10 MB", the photo goes to ChatGPT's files, and the preview uses its
+      link. **Choose from Library** appears where ChatGPT offers it. (2026-09-29 in Chrome with
+      `photo-small.jpg`, card t17. The log showed `upload_image`, then `confirm_uploaded_image` with
+      `imageContext=postcard`, then the preview's `quote.postcard.image_from_url
+      imageSource=provided`, fitted from 1800x1200 to 2700x1800. The postcard card showed the photo.)
+- [x] Repeat the upload in Claude Desktop and the Claude app on Android. (2026-09-29, both
+      passed.)
+      - **Claude Desktop (Windows).** The card (t18) uploaded a 1024x1024 photo in one chunk
+        at 21:00:56Z. The request waited in the message box under the caution banner, as on the
+        web. The preview used the photo, 2.4 minutes old.
+      - **Claude Desktop, sender and send.** The first preview was refused with
+        `no_sender_address`, and Claude then supplied a sender itself. **Send Postcard** on the
+        card sent it at 21:03:48Z, in PostGrid test mode.
+      - **Claude on Android.** The card uploaded a camera photo in two chunks, resized to
+        2400x1800 at 21:20:16Z. The request again waited in the message box under the banner.
+        The preview used the photo (`imageAgeMs=219735`), and the postcard card drew it.
+
+### CLIENT-02 — Claude Code (launch gate, #471)
+
+**Status:** Steps 1 to 3 run in development on 2026-09-26 (Claude Code 2.1.282, Windows). The
+preview, the send by the link and the model's tool list followed on 2026-09-28 (Claude Code
+2.1.283, on 8f994f3), in a fresh non-interactive session (`claude -p`) allowed only this server's
+tools. The account was testlirl02. The refusals on other accounts and the disconnect are not run.
+
+- [x] Add the server: `claude mcp add --transport http --scope user letter-irl-dev-cli
+      <development /mcp>`. `claude mcp get` should say it needs authentication.
+- [x] In an interactive session, `/mcp`, pick the server, **Authenticate**, sign in and accept.
+      (The browser page said "Authentication successful". Claude Code used its published document
+      and called back on a random port, `localhost:45364`. The log shows `client=claude_code`.)
+- [x] Ask for the balance. (A `get_account_balance` call as `client=claude_code` succeeded.)
+- [x] The model's tools include no way to send or pay. (19 tools, with no `send_letter`,
+      `send_postcard`, checkout or image generation tool.)
+- [x] Preview a letter, then ask to send it. The model should call `request_send` and give the
+      link, and nothing should be sent. (`quote_and_preview_letter` and `request_send` logged as
+      `client=claude_code` at 16:42 UTC. The model followed the send rule from the server
+      instructions: it never saw the preview's narration, only its `structuredContent` (#516).)
+- [x] Open the link, signed in to the development website as the same account, and press **Send
+      this letter**. ("Sent. We'll print your letter and mail it.", 4 letters to 3;
+      `send.confirmed_on_website outcome=sent` at 16:44, PostGrid in test mode.)
+- [ ] The refusals: no letters, an unconfirmed address, an erased account. (Not run.)
+- [ ] Disconnect: `claude mcp remove letter-irl-dev-cli -s user`. (Not run: it removes the owner's
+      server entry.)
+
+The preview tools' descriptions still ended "Send later with send_letter", a tool Claude Code's
+model doesn't see: Claude Code hides card-only tools, and the server answers a call with the link
+(#516).
+
+A Claude Code session signed in to a Claude account also gets that account's connectors. There,
+our tools arrive through Claude's own connection and log as `client=claude` (checked the same day).
+
+### CLIENT-03 — Visual Studio Code (launch gate, #471)
+
+**Status:** Steps 1 and 2 run in development on 2026-09-26 (VS Code 1.123.2, Windows).
+
+- [x] Add the server: `code --add-mcp
+      '{"name":"letter-irl-dev","type":"http","url":"<development /mcp>"}'`.
+- [x] **MCP: List Servers**, then the server, then **Start Server**. Sign in and accept. (VS Code
+      found the metadata by itself, waited for the sign-in, and discovered 24 tools. The log shows
+      `client=vscode`.)
+- [ ] A tool call from Copilot Chat, a preview, send by the link, refusals, disconnect. (Not run.)
+      Asked to send, the model should give `request_send`'s link. Since steering r20, `send_letter`
+      and `send_postcard` tell VS Code's model that a call answers with that link (#516, #670).
+- VS Code keeps a stream open on `/mcp`. When it dropped that stream, the API looped in its close
+  handler until the stack overflowed (#485).
+
+### CLIENT-04 — Codex (launch gate, #471)
+
+**Status:** In progress in development on 2026-09-26 (Codex CLI 0.157.1, in WSL).
+
+- [x] `codex mcp add letter-irl-dev --url <development /mcp>`.
+- [x] In `~/.codex/config.toml`, add
+      `scopes = ["mail:read", "mail:draft", "mail:send", "offline_access"]` to that server's entry.
+      Without it, Codex requests Auth0's OpenID scopes instead of ours
+      ([auth0-tenant-configuration.md](auth0-tenant-configuration.md), Applications, section 6).
+- [x] `codex mcp login letter-irl-dev`. The consent screen should list Read, Draft, Send and
+      offline access. (The first login, before the scopes line, listed only offline access. Its
+      `get_account_balance` call reached the server as `client=codex` and was refused as "Additional
+      authorization is required for this action".)
+- [x] Ask Codex to use the `letter-irl-dev` server, not the Letter IRL app, for the balance. (After
+      the second login, `get_account_balance` succeeded as `client=codex`.)
+- [ ] Preview, send by the link, refusals, disconnect.
+- [x] Check what Codex's app route (`codex_apps`, the person's ChatGPT plugins) shows its model.
+      Those calls use the ChatGPT connection, so the server treats them as ChatGPT. (Codex listed 22
+      tools from the development app: no `send_letter` or `send_postcard`, and `request_send` is
+      there. So this route hides card-only tools, as ChatGPT does. The production app still listed
+      both send tools, because production doesn't have the send rule yet.)
+- Pay & Send is still open to the model on that route, because the server takes it for ChatGPT.
+  The person still pays on Stripe, but never saw our card (#475). PR #508 makes Pay & Send
+  card-only under the send rule in every app. After it deploys, list this route's tools again:
+  `create_mail_checkout` should be gone as well.
+
+### CLIENT-05 — Hermes Agent on a remote host (launch gate, #471)
+
+**Status:** Connected in development on 2026-09-26. Hermes v0.21.0 was running in Docker on a VPS,
+with the browser on another machine.
+
+Hermes waits for the sign-in on the loopback address of wherever it runs, on one of ports 27890 to
+27894. From a browser on another machine, that callback can't arrive by itself. Here the listener
+was inside a container on a private network with no published ports, so an SSH tunnel to the host
+could not reach it either.
+
+- [x] Add the server: `hermes config set mcp_servers.letter_irl_dev.url <development /mcp>` and
+      `... .auth oauth`. Raise the connect step's timeout to 300 seconds
+      (`mcp_servers.letter_irl_dev.connect_timeout`); otherwise a second sign-in starts after
+      about a minute and collides with the first on the port.
+- [x] Run `hermes mcp login letter_irl_dev` inside the container. It prints the authorize link.
+      The link had the right `resource` (the full `/mcp` URL) and asked for our mail scopes.
+- [x] Deliver the callback. A one-shot relay on the browser's machine listened on
+      127.0.0.1:27890 and replayed the callback over SSH to the container's listener
+      (`C:\letter-irl-scripts\hermes-callback-relay.mjs`). **Never probe that listener first:** it
+      answers exactly one request, so a probe uses it up and the real callback hangs.
+- [x] Hermes reported "Authenticated — 24 tool(s) available". The token carries `mail:read
+      mail:draft mail:send offline_access` and a refresh token. The log shows `client=hermes`.
+- [ ] A tool call, preview, send by the link, refusals, disconnect.
+
+Hermes's own bugs on remote hosts are [#87329](https://github.com/NousResearch/hermes-agent/issues/87329)
+(the port collision) and [#103633](https://github.com/NousResearch/hermes-agent/issues/103633). The
+second, about the token exchange for `/mcp` paths, did not occur against Auth0. A person running
+Hermes on their own computer needs none of this.
+
+### CLIENT-06 — OpenClaw (launch gate, #471)
+
+**Status:** The first two steps passed in development on 2026-09-28. The OpenClaw steps are not
+run: OpenClaw 2026.9.6 needs Node 24.16 or later, or 26.1 or later, and the test computer has
+Node 22.
+
+OpenClaw publishes no client document, and it takes no pre-registered client id
+([openclaw#116052](https://github.com/openclaw/openclaw/issues/116052)). What it can do is point at a
+document with `--oauth-client-metadata-url`, so the website serves one:
+`<website>/oauth/openclaw-client-metadata.json` (website #44). The document's `client_id` is that
+address, built from the website's `APP_BASE_URL`, so each environment serves its own. Its
+redirects are OpenClaw's fixed sign-in listener, `http://127.0.0.1:8989/oauth/callback`, and the
+`localhost` address OpenClaw retries with. The Connect page's OpenClaw block shows once `openclaw` is
+in the website's `LETTER_IRL_CONNECT_APPS`.
+
+- [x] **Import (owner).** In the development tenant: Applications, then Create Application, then
+      Import from URL, with
+      `https://mail-letter-irl-website-development.up.railway.app/oauth/openclaw-client-metadata.json`.
+      Grant it the three user-delegated scopes on the Letter IRL DEV MCP API, as for the other
+      imports ([auth0-tenant-configuration.md](auth0-tenant-configuration.md)). The tenant is at its
+      10-app cap, so delete an unused application first. (Imported on 2026-09-28 as
+      `tpc_uW9yLTZS9R7MBQSUAg1q96`, after the unused Mail Letter IRL application was deleted. The
+      import ignored the document's `scope` and `client_uri`.)
+- [x] An authorize request with the document's client id is accepted for both redirects, and
+      refused with "Callback URL mismatch" for another port. (`cimd-authorize-probe.mjs dev` on
+      2026-09-28: port 8989 on `127.0.0.1` and on `localhost` reached the login page, and port 8990
+      got `403 Callback URL mismatch.`)
+- [ ] Install OpenClaw 2026.9.6 or later, then add the server:
+      `openclaw mcp add letter-irl-dev --url <development /mcp> --transport streamable-http --auth
+      oauth --oauth-client-metadata-url <the document's address> --oauth-scope 'mail:read
+      mail:draft mail:send offline_access'`. Without `--oauth-scope`, OpenClaw asks for the
+      server's advertised scopes, OpenID's included, which went wrong for Codex (CLIENT-04).
+- [ ] `openclaw mcp login letter-irl-dev`, with the browser on the same computer. The consent screen
+      names OpenClaw and lists Read, Draft, Send and offline access. On another computer the
+      callback can't arrive; OpenClaw's fallback is `openclaw mcp login letter-irl-dev --code
+      <code>`, which is known to fail on some versions
+      ([openclaw#123605](https://github.com/openclaw/openclaw/issues/123605)).
+- [ ] `openclaw mcp doctor letter-irl-dev --probe` finds the server and its tools. The API's log
+      labels the calls `client=generic` with `clientIdKind=url`, since no profile names OpenClaw.
+- [ ] A balance, a preview, then a send by the link: the preview's text ends with `request_send`,
+      and the person sends on the confirmation page.
+- [ ] The refusals: no letters, an unconfirmed address, an erased account.
+- [ ] Disconnect: remove the server in OpenClaw, and check that its next call is refused.
+
+OpenClaw does not ask before each tool call by default, so its agent may call `request_send`
+unattended. That only returns the link: the send rule is the safeguard (#470).
+
+The sections below describe the older path, before Claude could connect with its published
+identity.
 
 Test Claude Desktop via mcp-remote.
 
@@ -315,7 +886,17 @@ Test Claude Desktop via mcp-remote.
 ### PAT Authentication (US-MCP-03)
 - [ ] Generate PAT from website dashboard
 - [ ] Configure Claude Desktop with PAT header
-- [ ] Tools work without OAuth flow
+- [ ] The read and preview tools work without an OAuth flow
+- [ ] `create_pack_checkout` and `redeem_promo_code` are refused with "A personal access token can
+      read your Letter IRL account and make previews, but it can't send, pay or buy.", and no
+      sign-in is offered (migration 037, #470)
+- [ ] `send_letter` sends nothing. With the send rule on, it answers with the confirmation link
+      ([SEND-01](#send-01--only-the-person-sends-issue-470)); with the rule off, it is refused like
+      a purchase
+- [ ] `cancel_scheduled_mail`, `set_signature`, `clear_signature`, `delete_stationery_design` and
+      `cancel_address_request` are refused with "A personal access token can't cancel scheduled mail, ..."
+      and change nothing; `save_stationery_design` under a name already saved is refused, under a new
+      name it saves (#685)
 - [ ] `last_used_at` updates in database
 
 ---
@@ -336,7 +917,9 @@ exactly:
 - `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
   `checkout.session.async_payment_failed`, `checkout.session.expired`
 - `refund.created`, `refund.updated`, `refund.failed`, `charge.refunded`
-- `charge.dispute.created`, `charge.dispute.closed`
+- `charge.dispute.created`, `charge.dispute.updated`, `charge.dispute.funds_withdrawn`,
+  `charge.dispute.closed` (the middle two since #730: an inquiry that becomes a chargeback
+  arrives as one of them, and without them its letters stay spendable until it closes)
 
 Anything else is recorded and ignored. A refund event that is not subscribed
 fails silently: the money goes back and the letters stay, and only the
@@ -348,45 +931,308 @@ event arrived; `credits.webhook_failed` means the handler threw), and the
 account balance as `get_account_balance` reports it.
 
 ### PAY-01 — Pack purchase (US-CREDIT-02)
-- [ ] In ChatGPT, ask to buy the smallest letter pack (Starter Pack, 2 letters).
-- [ ] `list_letter_packs` runs, then `create_pack_checkout`, and ChatGPT
+
+**Status:** Executed in production on 2026-09-11 with the owner's own card, refunded under REFUND-01
+the same night. Passed on the payment path; the link step failed twice before it passed, and that
+failure is recorded on #322.
+
+**Re-run on development, 2026-09-28 (8a169db, cards v44), as testlirl02.** Passed, twice. Both
+runs asked for "the Starter Pack":
+- `create_pack_checkout` ran with no permission prompt. The pack card showed "Starter Pack - 2
+  Letters" and **Open secure checkout — USD 5.00**.
+- The owner paid with the Stripe test card, and `checkout.session.completed` arrived.
+- The balance went from 4 letters to 6 each time, with one more gift letter.
+
+In the development log the call reads `toolName=other` on `mcp.client_request`, because the
+request log's list of known names comes from the tool list of an app that takes no purchases (#475).
+`tool.invocation.start` names the tool.
+
+- [x] In ChatGPT, ask to buy the smallest letter pack (Starter Pack, 2 letters).
+- [x] `list_letter_packs` runs, then `create_pack_checkout`, and ChatGPT
       presents the checkout as a clickable link. Known gap: it may say the
-      checkout is "open" without showing a link until asked for one.
-- [ ] Open the link. Stripe Checkout shows the pack name, the price, and the
+      checkout is "open" without showing a link until asked for one. (Worse
+      than the gap says: on the first two attempts the model claimed success
+      after the permission prompt without calling the tool at all, once with a
+      fabricated 26,000-character URL, and the production log shows no
+      request. After "you did not call the tool, call it now" the call ran, but
+      the reply claimed a card that this tool does not render. The genuine URL
+      was reachable only in the developer-mode "Called tool" response panel.
+      Live Stripe Checkout URLs now use the `/g/pay/` path.)
+- [ ] With the card at "pack t9" (widget v87, #730), no checkout tab opens until the card's link is
+      pressed: the card shows the link and waits.
+- [x] Open the link. Stripe Checkout shows the pack name, the price, and the
       account email already filled in. The prefilled email proves the `users`
       row exists; a blank email field means it does not (#319).
-- [ ] Pay. Production: a real card, refunded under REFUND-01. Development: a
+- [x] Pay. Production: a real card, refunded under REFUND-01. Development: a
       Stripe test card, typed by the owner.
-- [ ] Balance reads 2 letters. Railway shows `stripe.webhook_received` with
+- [x] Balance reads 2 letters. Railway shows `stripe.webhook_received` with
       `checkout.session.completed`. If the balance is right but that line is
       absent, the card's Check status polled Stripe directly and the webhook
       endpoint is not delivering: fix the endpoint before REFUND-01, which has
-      no such fallback.
+      no such fallback. (Webhook received 23:19Z; order `checkout_pending` →
+      `paid` → `fulfilled`; purchase lot 4 credits active; balance 2 letters.)
+
+### PAY-03 — Checkout card recovery after a dropped call (issue #322)
+
+**Status:** Executed 2026-09-12 in development through the embedded browser; the owner paid with a
+Stripe test card. Passed: the dropped call reproduced on the first attempt and the card recovered
+without a second permission prompt. **Repeated in production on 2026-09-13 (UTC) after the
+promotion in #364, with the owner's own card, refunded under REFUND-01's steps the same night:**
+the dropped call reproduced again (one template read at 00:17:01Z, no tool call, the model saying
+"I'm ready to start the checkout"), **Create my checkout** created order b99046a9 at 00:17:31Z with
+no prompt, and the card showed the live link and the order id. Six first attempts, six drops, across
+both environments. **Android, native ChatGPT app, 2026-09-13 13:09Z (development, owner's S25 Ultra
+over adb, app force-stopped first):** the first "Allow once" was NOT dropped. `tools/call
+create_pack_checkout` ran at 13:09:33Z, the card rendered at widget v28 in dark theme with the
+link, Check status and the order id, and the model's own text carried the link and the order id too,
+because on native the host made the call. One of one; the dropped call is a web-client behaviour so
+far.
+
+Background: on 2026-09-11 (production) and 2026-09-12 (development) ChatGPT dropped the first
+`create_pack_checkout` after "Allow once": no request reached the API, the model said to use "the
+checkout shown above", and the card template rendered as grey placeholder bars. The card now waits
+five seconds for a result and then offers to create the checkout itself through the bridge, the way
+the preview cards already buy packs.
+
+- [x] With the (DEV) connector refreshed to a widget version of 26 or later, start a fresh chat and
+      ask to buy the Starter Pack. Click **Allow once**. (Connector refreshed after PR #360 deployed:
+      22 tools, every widget at v26. Allow once clicked at 16:43Z.)
+- [x] If the card fills in with the price and the link within a moment, the call went through and
+      the retry never appears. Record that and stop; the dropped call did not reproduce. (Did not
+      apply: the call was dropped again. The dev log shows exactly one request at 16:42:55Z, a
+      `resources/read` of `PackCheckoutCard.html@v26`, and no `tools/call`. The model still wrote
+      that the checkout "has been created".)
+- [x] If the card shows grey bars, wait five seconds. It should read "No checkout is showing on this
+      card. If you have already paid for a pack, ask for your purchase status before buying
+      another." with **Create my checkout** (or **Choose a pack** when the host passed no pack in
+      `toolInput`). This wording applies from widget v31. Up to v30 the card read "No checkout was
+      created yet. Nothing has been charged.", which PAY-05 found untrue on a reopened conversation.
+      (Seen after five seconds, with **Create my checkout**, so the host had passed the pack.)
+- [x] Click it. Record whether ChatGPT shows another permission prompt for the widget-initiated
+      call, and whether the card then fills in with the link. The Railway dev log shows the
+      `create_pack_checkout` request only for this second attempt. (No prompt at all.
+      `tools/call create_pack_checkout` logged at 16:44:06Z, invocation succeeded, and the card
+      filled in with the pack, the price and the link. The card's one convenience `openExternal` (removed in v87, #730) was
+      blocked by the embedded browser because the click was automated; the anchor remained.)
+- [x] Open the link and pay with a Stripe test card, typed by the owner. Balance reads 2 letters;
+      `stripe.webhook_received` with `checkout.session.completed` appears in the dev log. (Webhook
+      at 16:47:47Z. Order a5984b30: `letter_pack / credit-pack-4`, `fulfilled`, 5.00 USD, events
+      `checkout.session.created` → `checkout.session.completed` → `fulfilled`; purchase lot of 4
+      credits active for 730 days. Balance via ChatGPT: 6 letters, three active lots, so +2.)
+- [x] Record on #322 whether the bridge was live inside a card the host drew without a result. If
+      the button did nothing, the card's text-only fallback ("Ask for the checkout again") is the
+      expected state and the issue stays open. (Recorded: the bridge is live, and a call started
+      from the card shows no permission prompt. Two gaps found on the way: the model never sees a
+      widget-initiated result, so afterwards it could not name the order id without a new checkout;
+      and `list_orders` covers mail orders only, so a pack order id cannot be recovered in the chat.)
+
+### PAY-04 — Checkout card shows the purchase outcome (issue #322)
+
+**Status:** Executed 2026-09-12 in development through the embedded browser; the owner paid with a
+Stripe test card. Passed: the card switched to the paid state two seconds after the webhook, with no
+click and before the owner had returned to the tab.
+
+**Re-run on the v44 cards, 2026-09-28, in the embedded browser: passed.** After payment the card
+read "Paid. 2 letters added to your account.", "2 of 2 from this pack are still unused.", the
+checkout button was gone, and the order id was unchanged. In the log the card read
+`get_purchase_status` at 20:22:18Z after the payment, and once more when the conversation was
+reopened.
+
+**Repeated in production on 2026-09-13 (UTC):**
+polls every 3-4 s for the first minute, then every 20 s, the last automatic poll at 00:27:46Z just
+past the ten-minute budget, then nothing for seventeen minutes while the owner was away; the webhook
+arrived at 00:44:50Z and the owner's return to the tab fired the visibility refresh in the same
+second, which returned `submitted` and switched the card to "Paid. 2 letters added to your account.
+2 of 2 from this pack are still unused." with the order id and no link. Order `fulfilled`, lot active,
+ChatGPT balance 2. The Dashboard refund (owner's click) delivered `refund.created` and
+`charge.refunded` at 00:50:14Z; order `refunded`, lot revoked, balance 0. The card itself still
+reads "Paid" afterwards: polling stops at the paid state and does not follow a later refund.
+**Android, native app, 2026-09-13 (development):** polls every 4-5 s from 13:09:37Z, paused at
+13:10:05Z the moment the Stripe Custom Tab came in front (the WebView went hidden), the owner paid
+with a test card, the webhook arrived at 13:12:06Z, and the single poll at 13:12:26Z on the owner's
+return to the app returned `submitted`: the card read "Paid. 2 letters added to your account. 2 of 2
+from this pack are still unused." with Check status still offered (#368) and the order id. Order
+5511c462 `fulfilled`, lot active. Visibility gating and the return refresh both work natively.
+
+Background: PAY-03 left the card showing "Open secure checkout" after the payment, for a session
+Stripe would refuse, and the model could not name the order afterwards because it never sees a
+widget-initiated result. The card now polls `get_purchase_status` while a checkout is open and
+replaces the link with the outcome.
+
+- [x] With the (DEV) connector refreshed to a widget version of 27 or later, buy the Starter Pack in a
+      fresh chat (the PAY-03 path, dropped first call and all). Confirm the populated card shows the
+      order id under the link and a **Check status** button. (Connector refreshed after PR #362
+      deployed; the panel only shows the new version after it is reopened. The first Allow once was
+      dropped for the fourth time in four attempts: one template read at 17:26:52Z, no tool call.
+      **Create my checkout** produced `tools/call create_pack_checkout` at 17:27:12Z with no prompt,
+      and the card showed the link, **Check status** and the order line for b87d767f.)
+- [x] Pay with a Stripe test card, typed by the owner, in the tab the link opened. Return to the
+      ChatGPT tab. Within a few seconds the card should read "Paid. 2 letters added to your account."
+      with the link and the note gone, the unused count from this pack, and no Check status button.
+      Record whether the switch happened on return without a click (the visibility refresh) or needed
+      **Check status** (timers throttled in the hidden iframe). (Polls reached the dev API at 17:27:15,
+      :19, :24, :28, :33 and :39Z; the webhook `checkout.session.completed` arrived at 17:27:41Z; the
+      poll at 17:27:43Z returned `submitted` and polling stopped. So the timers kept running while the
+      Stripe tab was open in the embedded browser, and the card read "Paid. 2 letters added to your
+      account. 2 of 2 from this pack are still unused." with the order line and no link or button when
+      the owner returned. Order b87d767f: `letter_pack / credit-pack-4`, `fulfilled`, 5.00 USD;
+      purchase lot of 4 credits active for 730 days.)
+- [x] Ask ChatGPT for the balance; it should agree with the card. (8 prepaid letters, up from 6.)
+- [x] Optional expiry path: create a checkout and, from the Stripe test dashboard, expire the session.
+      The card should read "This checkout expired before it was paid. Nothing was charged." with
+      **Create a new checkout**; clicking it creates a replacement without a permission prompt and the
+      card polls the new order. (Executed 2026-09-13 00:15Z in development. First finding: the dev
+      Stripe destination subscribed to seven events and not `checkout.session.expired`, so Stripe
+      refused a manual delivery with "Endpoint not configured for event type"; it was set to the ten
+      events docs/railway-setup.md lists, through the Workbench Shell
+      (`stripe webhook_endpoints update … -d "enabled_events[]=…"`). Then
+      `stripe checkout sessions expire <id>` in the Shell: the webhook arrived seven seconds later,
+      the order was cancelled, the card's next poll showed the expired state, and **Create a new
+      checkout** produced a replacement with no prompt, polling under its own order id.)
+- [x] Record the readings on #322.
+- [x] Return page (change of 2026-09-13): the Stripe success and cancel pages land on
+      `/purchase/return`. On Android and desktop it shows a **Back to ChatGPT** button to chatgpt.com;
+      on iPhone and iPad it shows text only ("close this page and return to the ChatGPT app"), because
+      the iOS universal link has not been verified on a device and Apple devices get a proven link or
+      none. (Android, 2026-09-13, owner's phone, via Stripe's cancel arrow: the button opened chatgpt.com
+      in full Chrome, logged out, not the app. The phone has the app's handling of chatgpt.com links
+      switched off at user level, and an explicit intent to the app with the site root was handed back
+      to the browser; an explicit intent with a conversation link, `/c/<id>`, opened the app on that
+      conversation. So the Android button is a web-app fallback on such phones until #372 supplies a
+      conversation link.)
+
+### PAY-05 — Back to the conversation after checkout (issue #372)
+
+**Status:** Passed on the web in development on 2026-09-14, with widget v31, and again on
+2026-09-29 with v44 in the owner's Chrome. Android not run. **Run it in a real browser.** In the
+Claude app's embedded browser ChatGPT appends no `redirectUrl`, so the return page offers only
+**Back to ChatGPT**. That happened on 2026-09-13 and again on 2026-09-28 (`purchase.start
+hasRedirectUrl=false`).
+
+- **2026-09-29, v44, the owner's Chrome, driven through Claude in Chrome.**
+  - An automated click on the card's button did nothing, because clicks don't reach the card's
+    frame. The owner's own click opened the checkout.
+  - At 03:22:31Z `purchase.start` logged `hasRedirectUrl=true redirectHost=chatgpt.com
+    returnKept=true`. `checkout.session.completed` arrived at 03:23:31Z. `purchase.return` logged
+    `conversationKept=true linkOffered=conversation`.
+  - The page read "Payment received" with **Back to your conversation**, which opened the same
+    conversation in a new tab.
+  - Its card read **Paid**, "2 of 2 from this pack are still unused", offered only **Check
+    status**, and no second checkout.
+- **2026-09-13: the return link did not arrive.**
+  - The owner clicked the card's link from the embedded browser; no safe-link modal was reported.
+  - The owner paid with a test card, and the return page offered **Back to ChatGPT**, the fallback
+    for a request with no return cookie.
+  - Order 0b7dc374 went `paid` → `fulfilled` on the webhook at 18:35:26Z with its lot active, so the
+    purchase itself was sound.
+  - The API logged nothing for the two page requests. #378 then added a presence-and-host log line to
+    both.
+- **2026-09-14: the return link works.** The run used widget v30, the DEV app on ChatGPT web in the
+  owner's Chrome, and a test card.
+  - At 19:38:06Z `purchase.start` logged `hasRedirectUrl=true redirectHost=chatgpt.com targetOk=true
+    returnKept=true`.
+  - `checkout.session.completed` arrived at 19:38:26Z.
+  - `purchase.return` logged `outcome=success cookiePresent=true conversationKept=true
+    linkOffered=conversation`.
+  - **Back to your conversation** opened the same conversation, in the checkout tab.
+- **2026-09-14: it exposed a defect.**
+  - The reopened conversation gave the card no tool result. After five seconds the card read "No
+    checkout was created yet. Nothing has been charged." beside **Create my checkout**, over a paid
+    order.
+  - A reload reproduced it at 19:44Z with no API call.
+  - `create_pack_checkout` never reuses a pack order, so that button starts a second purchase.
+  - The original tab was unaffected and showed the purchase paid after its visibility refresh.
+  - Widget v31 fixes it: the card keeps its order in `widgetState` and resumes from it.
+- **2026-09-14: passed with widget v31.** The run used the DEV app on ChatGPT web, the connector
+  refreshed to v31, and a test card.
+  - At 21:21Z the first `create_pack_checkout` after "Allow once" was dropped, and only the template
+    read reached the API. The card showed "No checkout is showing on this card…" with **Create my
+    checkout**, while ChatGPT's reply claimed the checkout had started.
+  - **Create my checkout** created the order at 21:27:11Z, and `purchase.start` kept the return link.
+  - `checkout.session.completed` arrived at 21:27:16Z, and `purchase.return` offered the conversation
+    link at 21:27:19Z.
+  - **Back to your conversation** opened the same conversation in a new tab. At 21:27:27Z that tab's
+    card read `get_purchase_status` once and showed "Paid. 2 letters added to your account." with
+    "pack t7". It opened no checkout and offered no second one.
+  - The card had created this order itself, so no host tool result could carry it. ChatGPT web
+    therefore restores `widgetState` on reopen.
+
+Background: the checkout card now opens a start page on the API host through `window.openai.openExternal`
+instead of the Stripe URL directly. For an allowlisted redirect origin (the API origin is in
+`redirect_domains`), ChatGPT is documented to skip the safe-link modal and append a `redirectUrl`
+query parameter. The start page keeps it in a same-site cookie and forwards to Stripe; the return page
+then offers **Back to your conversation**: on Android as an intent link that opens the app by package,
+on desktop as a plain link, on iPhone and iPad text only until a device has proven the universal link.
+
+- [ ] Web (owner's click; the embedded browser blocks host-opened tabs from automated clicks): in a
+      fresh chat with the DEV app, buy the Starter Pack, and when the card shows the link, click it.
+      Record whether a safe-link modal appeared, and whether the tab that opened is the Stripe page
+      (the start page forwards in one hop). Cancel with Stripe's back arrow.
+- [x] On the return page: is the button **Back to your conversation**? If so ChatGPT appended a
+      return link. Record the shape of the link's target (conversation URL or something else) from the
+      dev log or the page source, without pasting it into a shared place. Click it and record where
+      it lands. (Yes, on both 2026-09-14 runs: `linkOffered=conversation`, and the button lands on
+      the same conversation.)
+- [ ] Android (owner's phone over adb): same purchase, tap the card's link, cancel with Stripe's back
+      arrow, tap **Back to your conversation**. Expected: the ChatGPT app comes to the front on the
+      conversation, even with the app's link handling switched off.
+- [ ] If the button says **Back to ChatGPT** instead, no return link was appended: record the
+      client, and check the dev log for the start-page request's query (the API logs no values).
+- [ ] If the card's tap opened nothing, record that the fallback link appeared after a moment and
+      that it opens the checkout.
+- [x] Reopened conversation (widget v31 or later, with the DEV connector refreshed): after paying,
+      click **Back to your conversation**, or reload the conversation. Within a moment the card must
+      show the order and **Paid**. It must never show "No checkout" with **Create my checkout**, and
+      it must not open a checkout tab by itself. The dev log shows one `get_purchase_status` for the
+      order straight after the reload, and no `create_pack_checkout`. (Passed on 2026-09-14 at
+      21:27Z. See the Status list above.)
 
 ### PAY-02 — Webhook idempotency (US-EDGE-04)
-- [ ] Stripe Dashboard → Developers → Webhooks → the endpoint → the delivered
-      `checkout.session.completed` event → Resend.
-- [ ] Response body is `{ "received": true, "duplicate": true }`.
-- [ ] Balance unchanged; no second purchase lot in the ledger.
+
+**Status:** Executed 2026-09-12 in development against the PAY-04 order. Passed.
+
+- [x] Stripe Dashboard → Developers → Webhooks → the endpoint → the delivered
+      `checkout.session.completed` event → Resend. (In Workbench: the sandbox named `sandbox`
+      holds the dev endpoint; the `Letterirl` environment that `/test/` URLs open has no events.
+      Webhooks → the destination → Event deliveries → the 12:27 PM CDT row → Resend.)
+- [x] Response body is `{ "received": true, "duplicate": true }`. (The resent attempt at 23:09:10Z:
+      HTTP 200, `"received": true, "duplicate": true`; the original showed `duplicate: false`.)
+- [x] Balance unchanged; no second purchase lot in the ledger. (16 credits and nine purchase lots
+      before and after; the order's lot appears once.)
 
 ### REFUND-01 — Full refund from the Stripe Dashboard (US-CREDIT-06)
+
+**Status:** Executed in production on 2026-09-12 after PAY-01. Passed. The precondition letter went
+to the owner's own return address as recipient: preview validated both addresses live at PostGrid,
+`send_letter` deducted the ledger, routed to PostGrid, the provider accepted, the transaction
+committed; lot 4 initial / 2 remaining, balance 1 letter, letter accepted, job completed.
+
 Precondition: PAY-01, then one letter sent from that pack, so the spent and
 unspent halves are both present. Letter IRL has no refund button of its own;
 the refund is issued in Stripe and reaches the service only as a webhook.
-- [ ] Stripe Dashboard → Payments → the pack payment → Refund → full amount.
-- [ ] Railway: `stripe.webhook_received` with `charge.refunded` (and
+- [x] Stripe Dashboard → Payments → the pack payment → Refund → full amount.
+- [x] Railway: `stripe.webhook_received` with `charge.refunded` (and
       `refund.created` / `refund.updated` if delivered), no
-      `credits.webhook_failed`.
-- [ ] Balance drops by the **unspent** letters only: 1 → 0. The sent letter is
-      untouched and its status still tracks normally.
-- [ ] `get_purchase_status` for the pack order reads `refunded`, message
-      "The payment was refunded."
-- [ ] Database or admin view: the purchase lot is `revoked` with
+      `credits.webhook_failed`. (`refund.created` and `charge.refunded` at
+      02:31Z, no failure line.)
+- [x] Balance drops by the **unspent** letters only: 1 → 0. The sent letter is
+      untouched and its status still tracks normally. (Balance 0 through
+      ChatGPT; the letter still `accepted`.)
+- [x] `get_purchase_status` for the pack order reads `refunded`, message
+      "The payment was refunded." (Also 0 remaining, 500 cents refunded. The
+      model's prose stopped mid-sentence on that turn while the tool panel
+      held the complete result; an earlier turn answered "connector lookup is
+      timing out" with no request reaching the API, and a retry worked.)
+- [x] Database or admin view: the purchase lot is `revoked` with
       `remaining_amount = 0`; one `refund` ledger row links to it with
       `remaining_at_revocation` equal to what was left; one `credit_transactions`
       row of `-<unspent credits>`; `orders.refunded_at` is set;
-      `credits_purchased` dropped by the whole pack.
-- [ ] No `stripe_money_event_unmatched` row in `commerce_operational_alerts`.
+      `credits_purchased` dropped by the whole pack. (Admin panel: order
+      `refunded`, refunded amount 5.00 USD, purchase lot revoked 4/0, refund lot
+      recorded with reason `payment_refunded`; the panel's "letters already
+      refunded" line shows the pro-rata 2.50 USD for the one unspent letter.)
+- [x] No `stripe_money_event_unmatched` row in `commerce_operational_alerts`.
+      (Alerts: nothing to show; unmatched events: none.)
 
 ### REFUND-02 — Partial refund from the Stripe Dashboard raises an alert
 The house rule forbids partial pack refunds from the Dashboard; this case proves
@@ -450,6 +1296,8 @@ full mode (`ADMIN-STRIPE-02` walks the panel steps).
       `refund` ledger row with `reason: partial_refund`, `letters_refunded: 3`;
       `credit_transactions` `-6`; `orders.credits_refunded = 6`; one
       `commerce_operator_audit_events` row with `operation = pack_refund`.
+- [ ] Admin panel → Stripe reconciliation: nothing listed for this order (the
+      panel's own settled refund is matched to its command, #730).
 - [ ] Replay the confirm with the same idempotency key: `replayed: true`, no
       second refund in Stripe. Send a second command for the same order: refused
       as already issued.
@@ -472,37 +1320,425 @@ Precondition: REFUND-05 completed (3 of 5 letters refunded, 2 sent).
 
 Test the complete letter journey.
 
+**Status:** Executed 2026-09-13 in development through the embedded browser (dummy letter
+provider, so nothing was mailed), in the same chat as the MCP tool checks above. Preview at
+19:05:01Z from the saved DEV return address to a named recipient at 350 5th Ave, New York, NY
+10118 with no unit: the draft was created, the card read Text Only, 1 letter, USPS First-Class,
+**Ready to send**, and the model relayed the "add the unit if you have it" note. The card's
+**Send Letter** button sent it at 19:05:42Z with no permission prompt (the widget made the call):
+the card switched to **With the printer** with the order id, the balance read 11 (from 12), and
+`get_order_status` read accepted. Asking the model to send the same draft again with the same
+draft id produced a permission prompt, **Allow once**, and a `send_letter` call at 19:06:53Z that
+returned the same order id with `isRetry: true` and "Existing order returned (duplicate
+request)"; the balance stayed at 11. That consequential call after **Allow once** was NOT dropped
+(one of one on web), so the dropped first call in PAY-03 is not a property of every consequential
+tool. Validation: 123 Fake Street, Nowhere, CA 90000 was refused with "Recipient address could
+not be delivered to: Unable to find a match for this address" and no draft; a London address was
+refused before any provider call with "Missing required address fields: recipient.state", which
+is a clear error but not the "Only supports US" wording this list expects (the model had passed
+no country). The over-limit body, the suite variant and the outbox cases were not exercised.
+
 ### Preview (US-LETTER-01)
-- [ ] Provide valid US addresses (sender + recipient)
-- [ ] Provide text-only letter body (at most 1,600 characters and 24 lines)
-- [ ] Preview returns HTML
-- [ ] Draft ID returned
-- [ ] `canSendNow` reflects actual balance
+- [x] Provide valid US addresses (sender + recipient)
+- [x] Provide text-only letter body (at most 1,600 characters and 24 lines)
+- [x] Preview returns HTML
+- [x] Draft ID returned
+- [x] `canSendNow` reflects actual balance
+
+### PREVIEW-01 — Preview card recovery after a lost "Allow once" (issue #411)
+
+**Status:** Executed 2026-09-17 in development through Claude in Chrome, between 00:18 and 00:30
+UTC, after #413 deployed. The connector refresh logged `tools/list` at steering revision 8 and
+widget v32, then eight template reads at v32. Passed for text-only letters, image letters given
+as a URL, and postcards. An image attached or generated in the chat cannot be recovered (#414).
+The send step was not run.
+
+Background: on 2026-09-16 ChatGPT web lost six of six preview calls approved with **Allow once**,
+including one clicked by the owner. After each approval no `tools/call` reached the development
+API, the card stayed on its loading state, and the model usually said the preview had been
+created. The preview cards now wait and then offer **Create my preview**, which repeats the call
+from the card.
+
+- [x] With the (DEV) connector refreshed to widget v32 or later, start a fresh chat and ask for a
+      text-only letter preview. If ChatGPT asks for permission, click **Allow once**. If it does
+      not ask, the call goes through unprompted; record that and try again in a new chat. (Asked
+      every time. All four approved calls in this run were lost again: the dev log showed the
+      template read and no `tools/call`.)
+- [x] If the card fills in with the draft within a few seconds, the approved call went through.
+      Record that; the lost call did not reproduce. (Did not apply.)
+- [x] If the card stays on "Loading letter preview…", wait 25 seconds. It should read "No
+      preview is showing on this card. If this letter was already sent, there is nothing more to
+      do here. Otherwise, create the preview again." with **Create my preview**. The dev log
+      should show the template read and no `tools/call` for the approved call. (As described.)
+- [x] Click **Create my preview**. The dev log shows `tools/call quote_and_preview_letter`, and the
+      card fills in with the letter, the cost, the delivery line and the draft id, with **Send
+      Letter** when the balance covers it. Record whether ChatGPT asked for permission for the
+      card's call. (The call arrived and succeeded, and the card showed Text Only, 1 Letter,
+      **Ready to send** and **Send Letter**. No permission prompt for the card's call.)
+- [x] Reload the page. The reopened card should offer **Create my preview** straight away, without
+      the wait. (Offered within seven seconds of the reload.)
+- [ ] Create the preview again and send it from the card (the dummy provider mails nothing), then
+      reload. The card should read "This letter was sent to the printer from this card. Ask for its
+      status in the chat." with **With the printer** and no buttons. (Not run: clicking Send needs
+      the owner's go.)
+- [x] After a lost call, ask the model whether the preview exists. With instructions r8 it should
+      say the call did not complete, or point at **Create my preview**, rather than describe a
+      draft it never received. (Observed without asking: three of the four replies still claimed
+      success, and one said the call did not complete. The card is what recovers.)
+- [x] Repeat the lost-call steps for an enclosed-image letter
+      (`quote_and_preview_letter_with_image`) with an attached image. The card waits 45 seconds
+      and must repeat that tool. In the dev log, the repeated call should log
+      `quote.letter.image.from_fileParams`, not `from_recent_upload`. Record whether the card
+      shows the image, or "Image not shown on this card", or advice to ask in the chat, which
+      means the host passed the image in a form the card will not repeat. (Run twice. With the
+      image given as a URL, the card repeated that tool, the log showed
+      `quote.letter.image.from_url`, and the card drew the draft with the image, so ChatGPT
+      returns `_meta` to a card's own call. With an image generated in the chat, the approval
+      panel showed the image argument as a sandbox file path. The card offered only the advice
+      to ask in the chat, as designed; #414 tracks recovering that case.)
+- [x] If time allows, repeat the lost-call steps for a postcard. It also waits 45 seconds. (With
+      the front image given as a URL: `tools/call quote_and_preview_postcard` from the card, and
+      the card drew the front image with **Send Postcard**.)
+
+**Attempted again on 2026-09-28** in development, on 8f994f3 with widget v44, in the Claude app's
+built-in browser as testlirl02, with **Instant** selected (the first step of the composer's power
+control). The lost call did not reproduce, so the recovery was not exercised on v44:
+- Both calls approved with **Allow once** went through: a text-only preview (`tools/call` at
+  16:47:49 UTC, and the card filled in), and an enclosed-image letter using an image generated in
+  the chat (16:54:40).
+- The generated image reached the server as a file it could open: it was processed and an
+  `inline_image` draft was made. So #414's case, a sandbox path the card cannot pass back, did not
+  arise, and **Choose from library** and **Upload the image** were not exercised. **Upload the
+  image** opens a system file dialog, which the browser pane cannot drive.
+- **Deny** is no stand-in for a lost call: ChatGPT drew no card, and the model said the preview was
+  denied.
+- A letter sent from its card that morning, in a reopened chat, read **With the printer** with its
+  order id and "This letter was sent to the printer from this card. Ask for its status in the
+  chat.", and had no buttons. That is the state the send step above expects, though for a card that
+  had not needed recovery.
+
+### DUPLICATE-01 — The same letter twice (issue #412)
+
+**Status:** Executed 2026-09-17 in development through Claude in Chrome, after #419 deployed and
+with the (DEV) connector refreshed to widget v35. Thinking effort was Medium, and every call
+approved with **Allow once** ran. Passed, except the Pay & Send step, which was not run.
+
+Background: each draft is sent at most once, but two drafts can hold the same letter, and the #411
+recovery makes that likely. A send from the balance, or a new Pay & Send checkout, is now refused
+when the account has the same mail from the last 24 hours. It goes through only when the person
+asks for another copy ([letter-send-flow.md](letter-send-flow.md)).
+
+- [x] Refresh the (DEV) connector. Its settings page should list `sendAnotherCopy` in the input
+      schemas of `send_letter`, `send_postcard` and `create_mail_checkout`. (Before the refresh it
+      still listed the old schema.)
+- [x] Ask for a text-only letter preview and send it from the card. (Sent: **Letter Sent!** and
+      **With the printer**.)
+- [x] Ask for a second preview of exactly the same letter, then ask ChatGPT to send it. The
+      refusal should reach the model, which should say what went out and ask before trying again.
+      (It said an identical letter to the same recipient had been sent from this account about 22
+      minutes earlier, that nothing was sent or charged, and that it would send another copy if
+      asked.)
+- [x] Say yes. The approval panel should describe an explicit request for another copy, and the
+      send should succeed. (It did: "Sent successfully as an intentional additional copy.")
+- [x] Ask for a third preview of the same letter and click **Send Letter** on its card. The card
+      should say the same letter went out recently and turn its button into **Send another copy**.
+      (It did, with the shorter notice "This same letter was sent or paid for recently. Send another
+      copy only if you want two." **Send another copy** was not clicked.)
+- [ ] With a balance too small to send, open a Pay & Send checkout for a letter, then a checkout
+      for the same letter from another draft. The card should say a checkout for this same letter
+      is still open and offer **Pay for another copy**. (Not run.)
+
+The card showed the shorter notice because the details in `_meta` never reached it. The server
+does send them on the error result (`tests/unit/mcp/duplicateMailRefusal.test.ts` checks this over a real
+MCP transport), and a successful call does return `_meta` to a card (PREVIEW-01). So ChatGPT
+gives a card no `_meta` for a refused call; see
+[openai-app-sdk-notes.md](learnings/openai-app-sdk-notes.md).
+
+**Card step re-run on 2026-09-28** in development, on 53ffdf2 with widget v44, in the Claude app's
+built-in browser as testlirl02. A letter was sent from its card, then previewed again, and
+**Send Letter** on the second card got the same notice and **Send another copy** (not clicked).
+The refused send logged `credits.ledger_deducted` with `newBalance=6` at 14:56:46 UTC, but the
+balance still read 4 letters at 15:02:07, not 3, so the deduction rolled back with the refusal
+(#458 covers the log line).
+
+### SEND-01 — Only the person sends (issue #470)
+
+**Status:** Executed in development between 2026-09-25 22:30 and 2026-09-26 00:50 UTC, through the
+Claude app's built-in browser, on #479 (c19b131), #480 (e002a68) with the rule on, then #481
+(ea3fd96), and website #41 (52b8f7c). The (DEV) connector, "Letter IRL (DEV) v8 no-OIDC", was used
+as testlirl02; mail went to PostGrid's test mode, so nothing was printed. **Passed.** The model never
+reached `send_letter`: asked to send, it gave the link each time. The optional token check was not
+run.
+
+Observations:
+- With the card showing, "Send it." got the link rather than a pointer to the card's Send button.
+  ChatGPT offered two candidate replies and both called `request_send`. The rule allows either way.
+- The preview replies said nothing had been sent but did not mention the card's Send button. The
+  narration asks the model to point there when the person asks to send.
+- A send refused as a duplicate logs `credits.ledger_deducted` from inside the transaction it then
+  rolls back. The balance was unchanged, but the log line reads as a charge.
+
+**Re-run on 2026-09-28**, after #508 made `create_mail_checkout` card-only too. Development ran
+53ffdf2 (steering r18, widget v44), with the same connector and account, and Medium thinking.
+**Passed.**
+- The letter card (t29) showed `It's`, `let's`, `&` and `"good"` as typed, not as HTML entities
+  (#510).
+- **Send Letter** on the card sent it, with no approval panel: **Letter Sent!** and **With the
+  printer**.
+- On a second preview of the same letter, "Send it." got one `request_send` call and the link.
+  Nothing was sent.
+- "Use Pay & Send for this draft instead of my letter credits, please." made no tool call. The model
+  said Pay & Send isn't offered while the account holds letters, and pointed back to the link.
+  With letters in the account the card offers no Pay & Send either, so the same request from an
+  empty account was not run.
+- The development log from 14:55 to 15:03 UTC has no `send_letter` or `create_mail_checkout` from
+  the model. Its one `send_letter`, at 14:56:46, was the second card's (DUPLICATE-01).
+
+Background: with `LETTER_IRL_SEND_CONFIRMATION_ENABLED` on, the model can't send mail in any app.
+The person sends it with the preview card's Send button, or on a confirmation page on the website
+that `request_send` links to. ChatGPT keeps its card and its Pay & Send checkout
+([letter-send-flow.md](letter-send-flow.md)).
+
+Before the rule is on:
+- [x] Set `LETTER_IRL_WEBSITE_CLIENT_ID` on the development API to the development website's Auth0
+      client id ([auth0-tenant-configuration.md](auth0-tenant-configuration.md)). (Set without a
+      redeploy; #480's deployment picked it up.)
+- [x] Make one Letter IRL (DEV) call in ChatGPT, such as the balance. Its `mcp.request_received`
+      log line should read `client: chatgpt`. If it reads anything else, stop: with the rule on,
+      the card's Send button would get the link instead of sending. (A balance call at 22:31:34
+      logged `client=chatgpt` on both `mcp.request_received` and `mcp.client_request`.)
+
+With the rule on:
+- [x] Set `LETTER_IRL_SEND_CONFIRMATION_ENABLED=true` on the development API and redeploy it. (The
+      variable change redeployed it by itself. `GET /api/sends/<uuid>` without a token went from
+      404 to 401, and the boot log had no `send_confirmation.website_client_missing`.)
+- [x] Refresh the (DEV) connector. Its settings page should list `request_send`. Note whether it
+      still lists `send_letter` and `send_postcard`: they stay in `tools/list`, marked private, so
+      the card can call them. (Refresh tools is under Plugins, the plugin's … menu, Manage. It
+      logged `tools/list` at steering revision 9 and widget v37. The app's tool list, opened from
+      the plugin page, shows 24 tools: `request_send` among 9 read tools, and `send_letter` and
+      `send_postcard` still among 15 write tools.)
+- [x] Ask for a text-only letter preview. The card should read **Ready to send**, and the reply
+      should point to the card's Send button. (Ready to send once the account had a letter. The
+      reply said it had not been sent, without mentioning the Send button; see Observations.)
+- [x] Ask ChatGPT to send it. It should point to the card's Send button, or call `request_send` and
+      give the link. It must not call `send_letter`: no approval panel for a send, and no
+      `send_letter` call in the development log. If it does call it, the letter is sent and the rule
+      has failed in ChatGPT. ("Send it." at 00:48: no approval panel, two `request_send` calls, one
+      per candidate reply, and no `send_letter`.)
+- [x] Press **Send Letter** on the card. It should send as before: **With the printer**, and the
+      balance one lower. (The card's `send_letter` call ran at 00:49:33 as `client=chatgpt`; the card
+      read **With the printer** and **Letter Sent!**, and the balance went from 1 to 0.)
+- [x] Ask for a different letter, then ask for a link to send it from the website. `request_send`
+      is read-only, so it should run without an approval panel, and return a link to
+      `/confirm/<draftId>` on the development website. (Run first, at 22:40, on a preview made with
+      no letters in the account.)
+
+On the confirmation page, signed in to the development website with the same account:
+- [x] Open the link. The page should read "Check your letter, then send it" and "Nothing is sent
+      until you press Send.", and show the preview, where it goes, and how many letters it takes.
+- [x] Press **Send this letter**. The page should read "Sent. We'll print your letter and mail it."
+      with the letters left, and the letter should appear on the dashboard's letters page. ("You have
+      1 letter left."; `send.confirmed_on_website outcome=sent` at 00:44:18; listed as Accepted.)
+- [x] Reload the page. It should read "This letter has already been sent."
+- [x] Ask ChatGPT for the same letter again and for its link, then press **Send this letter**. The
+      page should say this letter went to the recipient a few minutes ago and ask "Send another
+      copy?". Press **Don't send**. Nothing is sent. ("You sent this letter to Sam Rivera 2 minutes
+      ago." A fresh load still showed 1 letter.)
+- [x] Sign out, open a link and sign in. You should land back on the same page.
+- [x] Signed in with another development account, open the first link. The page should read "We
+      couldn't find this preview." (testlirl01+428, with a testlirl02 link; the API answered 404
+      and logged no client refusal.)
+- [x] Optional: on an account with no letters, open a link. The page should say there aren't
+      enough letters and offer **Buy letters**, which opens Letter Packs. A test purchase (the
+      owner enters the test card) should lead back to the page, where **Check again** shows the new
+      balance. (The page came back already showing 2 letters, so **Check again** was not needed.)
+
+Other callers:
+- [ ] Optional: from an MCP client that uses a development personal access token (see
+      [PAT Authentication](#pat-authentication-us-mcp-03)), call `send_letter` for a preview. It
+      should send nothing and answer "Not sent: Letter IRL sends mail only when the person sends
+      it.", followed by the link. (Not run.)
+
+Leave the rule on in development afterwards. (It is on.)
 
 ### Validation Errors
-- [ ] Missing address fields → clear error
-- [ ] Non-US address → "Only supports US" error
-- [ ] Text-only body over 1,600 characters or 24 lines returns a clear limit error
+- [x] Missing address fields → clear error
+- [x] Non-US address → "Only supports US" error (2026-09-13: refused as a missing `state`
+      instead; clear, but not that wording)
+- [x] Text-only body over 1,600 characters or 26 lines returns a clear limit error (2026-09-28 in
+      ChatGPT: 2,368 characters in 38 lines was refused with "Letter exceeds one-page limit:
+      2368/1600 characters and 38/26 lines. Please shorten your message.", and no draft was made.
+      The sentence goes on to repeat the count and "Please shorten your message", and the model
+      quoted all of it. 24 lines is the soft limit; the refusal is at 26.)
+- [x] A text-only letter right at the limit prints on one page (#77). (2026-09-28, PostGrid test
+      mode, sent from the confirmation page. Five 318-character paragraphs and "Test", 1,598
+      characters in 26 estimated lines: `pageCount` 1. Twenty-five 54-character lines and "Test",
+      26 estimated lines and the tallest shape: `pageCount` 1, one page in the PDF, ending with "Line
+      25" and "Test", with nothing cut off.)
+- [x] The header-image and enclosed-image layouts, each at its line limit, print on one page (#77).
+      **Passed on 2026-09-30** at the limits #525 set, on development (22eada8), in PostGrid test
+      mode, sent from the confirmation page, with short lines that do not wrap:
+      - **Header image, 17 of 17 lines** (16 lines and "Test"): `pageCount` 1
+        (`letter_nDyHW2sLDJXnA6SE2FDcEw`).
+      - **Enclosed image, 14 of 14 lines** (13 lines and "Test"): `pageCount` 1
+        (`letter_g5N9vs1Hty5m56L2cGLXeN`).
+
+      **Both failed on 2026-09-29** at the old limits:
+      - **Header image, 19 of 19 lines** (18 lines and "Test"): `pageCount` 2. Page 1 holds the
+        header image and lines 1 to 17; line 18 and "Test" are on page 2.
+      - **Enclosed image, 15 of 15 lines**: `pageCount` 2. Page 1 holds all the text and the image,
+        and page 2 is blank.
+      - **Cause:** the hard limits (19 and 15, `LAYOUT_LINE_LIMITS`) added a buffer to the soft
+        limits (17 and 12) that the page has no room for. #525 lowered them to 17 and 14.
+- [x] One line over each image layout's limit is refused, and the limit itself is accepted (#525).
+      (2026-09-30 on development: 18/17 lines with a header image and 15/14 with an enclosed image
+      were refused; 17 and 14 made drafts.)
+- [x] Long paragraphs wrap within the line estimate (#77). (2026-09-30, text-only,
+      `letter_gqVZqFrq4bTEy4Jn9N8AHK`: 17 estimated lines printed on 16. A 233-character mixed-case
+      paragraph took 3 lines of 74 to 82 characters. A 230-character all-caps paragraph took 4 lines
+      of 66 to 70. The estimate counts 65 a line.)
+- [x] Characters the print cannot draw are refused at preview (#526, #528). PostGrid prints in Open
+      Sans. In the same letter, emoji, Chinese, Japanese, Korean, Arabic, Hindi and Thai printed as
+      empty boxes, 56 in all. Latin with accents, Greek, Cyrillic, Hebrew and the common symbols
+      printed. Before #528, the preview showed every character and the send took a letter.
+      **Passed on 2026-09-30** on development (d149f00), as testlirl02:
+      - A letter with 🎉 🎂 and a non-breaking hyphen was refused, naming "🎉, 🎂, ‑ (U+2011) in
+        the text".
+      - A recipient named 王小明 was refused, naming "王, 小, 明 in the recipient's address".
+      - A postcard with 🌊 was refused before its picture was fetched.
+      - A letter in German, French, Russian, Greek and Hebrew made a draft.
+      - The log records each refusal as `errorClass=validation_error`. Its own warn line logged as
+        `[REDACTED]`, because the event name is over 32 characters; #530 fixes that.
+      - In ChatGPT on the web (Medium), asked for a birthday letter "with a couple of emoji", the
+        model's first preview was refused. It told the person the printer can't print 🎉 and 🎂,
+        retried in plain text, and the card drew, with no second approval prompt.
+      - In ChatGPT on Android (High) the same request was refused at 15:57:37Z, and the log named
+        the event, `quote.letter.unprintable_characters`, now that #530 is deployed. ChatGPT said the
+        print doesn't support 🎉 and 🎂, and asked before retrying. Told to go ahead, it asked for
+        approval again; a **Deny** tapped by mistake made it say the authorization was declined and
+        no draft was made, and no call reached the server. On the next try the card drew.
+- [x] The coverage probe shows which unproven characters the print draws (#526). A text-only
+      letter carries about 220 of them, one group per line (`C:\letter-irl-scripts\coverage-probe.mts`).
+      Decoding its PDF glyph by glyph shows which printed, and which came out as boxes (glyph 0).
+      It was sent on 2026-09-30 as a gift letter from testlirl02 (`letter_wAEPpwHccd9gKtrUkPjNRu`),
+      before #528 deployed, which would refuse it. It was decoded the same day with
+      `C:\letter-irl-scripts\decode-probe.js`, grouping glyphs into lines by baseline and reading the
+      Hebrew line right to left.
+      - **Printed:**
+        - ― ‗ ‛, Ǻ ǻ Ǽ ǽ Ǿ ǿ, ẁ ẃ ẅ, ə, ẞ, ʼ and the spacing accents;
+        - ϑ ϖ, Cyrillic Ԁ ԁ, ₪ ₫, № ℓ ℮ Ω ℅ ℠ (the ohm sign has a glyph of its own), ⅛ ⅜ ⅝,
+          ∞ ≈ ≠ ≤ ≥ ∂ ∆ ∏ ∑ √ ∫, ◊, the ligatures ﬀ to ﬄ, and ⁿ ⁴ ₂.
+      - **Printed by decomposition:** a character the font lacks, drawn as its canonical parts. That
+        covered pinyin tone letters, letters with a dot above or below, ὰ, yod with hiriq, and the
+        Kelvin and angstrom signs.
+      - **Printed as a space:** the narrow no-break space and the medium mathematical space.
+      - **Boxes:**
+        - the hyphen and the non-breaking hyphen, and most of the other punctuation;
+        - Ə ʻ, the line-below letters;
+        - polytonic Greek's breathings, circumflex and iota subscript;
+        - Ԛ to ԝ, geresh and gershayim;
+        - most currency signs, ⅓ ⅔;
+        - every arrow and dingbat except ◊.
+      - The full lists are on #526. The widening PR admits what printed, and the neighbours on the
+        font's glyph list: the other superscript and subscript digits, Cyrillic to U+0513, and ⅞. By
+        the decomposition rule it also admits any character whose canonical parts are admitted.
+        Its tests pin both lists.
+      - **The widening (#533) passed on development on 2026-09-30 (50cfdb5).** A preview with ǐ, ǎ, ₪,
+        ⅞ and Ṛ made a draft. One with a non-breaking hyphen (U+2011) was refused, as intended.
 - [ ] Invalid address → suggestions returned
-- [ ] Multi-tenant address with a suite/apartment (e.g. 350 5th Ave, Suite 8701, New York, NY 10118) → draft IS created; response carries a one-sentence note that USPS couldn't confirm the unit and mail goes out as entered (issue #200)
-- [ ] Same building with no unit given → draft IS created with an "add the unit if you have it" note
-- [ ] Garbage street (123 Fake Street, Nowhere) → still refused, message says what to check
+- [x] Multi-tenant address with a suite/apartment (e.g. 350 5th Ave, Suite 8701, New York, NY 10118) → draft IS created; response carries a one-sentence note that USPS couldn't confirm the unit and mail goes out as entered (issue #200) (2026-09-28 in ChatGPT, with Suite 3300: the draft was made, and the reply said USPS confirmed the building but not the suite, and that the letter goes out as entered)
+- [x] Same building with no unit given → draft IS created with an "add the unit if you have it" note
+- [x] Garbage street (123 Fake Street, Nowhere) → still refused, message says what to check
+- Expected refusals like these, and an over-long gift postcard, log `tool.invocation.failure`
+  with `errorClass=unknown_error` (seen 2026-09-22 and 23): the class is a mislabel, so read the
+  stage line logged just before it.
+
+### PRINT-02 — Letters drawn by our renderer print as previewed (#534)
+
+On development, with `LETTER_IRL_PRINT_RENDERER=pdf`, in PostGrid test mode. Decode each printed PDF
+with `C:\letter-irl-scripts\probe-534\decode-534.mjs`, and crop its page with `extract-raster.mjs`.
+
+**Previews: passed on 2026-10-01 on development (6dc1061, flag on since 00:27 UTC), as testlirl02,
+through the development MCP server.** The sends wait for letters on that account (a test-mode pack
+or an admin grant: the owner's step).
+- [x] The website's confirm page shows a renderer preview's page in Tinos, with the line breaks it
+      prints with. (The SVG page: the address zone blank, no sender block.)
+- [x] The log's `draft.created` line carries `"renderer":"pdf-1"` (2026-10-01 01:06 UTC, draft
+      3785aa77; `api-log.mjs` now shows the field). `createDraft` inserts the same value into
+      `renderer_version`: the unit and PostgreSQL tests prove the insert, and the database itself was
+      not queried.
+- [ ] A Pay & Send letter, which the hourly maintenance run dispatches, prints from our PDF too: the
+      maintenance service builds the whole repository, `assets/fonts` included.
+- [ ] A full 26-line letter's card draws in ChatGPT. Its preview is about 95 KB of SVG in
+      `_meta.previewHtml`, 15 to 20 times the legacy HTML's size.
+- [ ] Each layout sends: text only, a header image, and an enclosed image. PostGrid accepts the
+      upload with `pageCount` 1. The flattened page shows the text where the preview put it, and
+      PostGrid's Open Sans addresses in their boxes.
+- [ ] At the limit: 26 lines of text only, 16 under a full 2-inch header image and 13 above a full
+      3-inch enclosed image make drafts and print on one page. One line more is refused with "Letter
+      is 1 line too long for one page". (Text only, previews: 25 lines and a sign-off made a draft;
+      27 and a sign-off were refused: "Letter is 2 lines too long for one page: it takes 28 lines and
+      the page holds 26.")
+- [ ] A body with a non-breaking hyphen and a line of Hebrew previews and prints. The same hyphen in
+      the recipient's name is refused ("in the recipient's address"). A body with a line separator
+      (U+2028, as Apple Notes stores a soft line break) is refused, naming "a line separator (U+2028)".
+      (Previews: all three behaved so; the prints wait for the sends.)
+- [ ] A gift send previews on the renderer with its card as the second page, and records `pdf-1`
+      (#534 PR 5). PostGrid accepts the upload with `pageCount` 2; the flattened second page shows the
+      card with the code the send minted, clear of PostGrid's integrity QR, and its QR scans. A
+      sender's name with the ff ligature (U+FB00) is refused "in the sender's name, which the gift
+      card prints". A full 26-line gift letter's card draws in ChatGPT: its preview is about 150 KB,
+      twice a letter's. (Probe P8 on 2026-10-01 sent such a PDF in test mode: `pageCount` 2, the
+      stamp on page 1 only, and the flattened QR decodes.)
+- [ ] A letter previewed before the flag was on prints on the legacy HTML after it.
+- [ ] A postcard preview records `pdf-1` (#534 Phase 4, PR 7a). Its confirm page shows the front, the photo
+      to the edges, and the back: the message in its left half, the addresses stamped on the right with
+      "RETURN TO:". A 16-line message makes a draft; 17 lines are refused with "Postcard message is 1 line
+      too long for the back". A postcard sent in test mode prints
+      from our PDF: PostGrid accepts it with `pageCount` 2 and it stays `ready`. (Development,
+      2026-10-01, on 2c098c1: the refusal, the draft and the confirm page's two pages passed.)
+- [ ] The postcard card shows the front and back pages in ChatGPT and in Claude, after Refresh tools to
+      widgets v49 (#534 Phase 4b). A legacy postcard keeps the card's own front and mockup.
+      (ChatGPT on development, 2026-10-01, on 5999dff: passed for a testlirl02 postcard, and the letter
+      card still shows its page. Still to check: Claude, and a legacy postcard in either.)
+- [ ] A gift postcard previews on the renderer with its card in a strip at the foot of the message, and
+      records `pdf-1` (#534 PR 8). The back shows the sender's name, the placeholder code and the QR;
+      11 lines make a draft and 12 are refused "above the gift card". A sender's name with the ff
+      ligature (U+FB00) is refused "in the sender's name, which the gift card prints". Sent in test mode,
+      it prints from our PDF with the code the send minted, PostGrid keeps it `ready`, and the QR on the
+      flattened back decodes. (Development, 2026-10-01, on ed9ce9d, as testlirl02, passed: 11 lines made a
+      draft and 12 were refused "above the gift card"; the ff ligature was refused in the sender's name; a
+      gift preview recorded `pdf-1` (`quote.postcard.computed giftSend=true`, then
+      `draft.postcard_created renderer=pdf-1`); and in ChatGPT the card's back shows the strip, with the
+      rule, the QR, "A gift from Pat Example:", the placeholder code and the redeem-by date. Development's
+      long website host wraps the claim sentence to three lines. Still to check: the confirm page, which
+      should show the same document in its sandboxed frame, when Claude in Chrome is connected; and the
+      test-mode send, which waits for the owner with PRINT-02's.)
+- [ ] The letter card shows the page as it prints, with the addresses where PostGrid stamps them, in
+      ChatGPT and in Claude; a select enlarges it and the next restores it. A legacy preview keeps
+      the mockup. (#534 Phase 3, widgets v47.) A gift send's card shows below the letter, with its
+      border and QR (#534 PR 5, widgets v48).
+- [x] A gift send is decided before the checks that depend on how it prints (#541): on development on
+      2026-10-01 (814ad6c), a gift preview carrying the ff ligature (U+FB00, which Open Sans prints and
+      Tinos lacks) made a legacy draft, and the same text as a paid letter was refused, naming
+      "ﬀ (U+FB00)". Since #534 PR 5 a gift send meets the renderer's checks, so both are refused.
 
 ### Send (US-LETTER-02)
-- [ ] Use draft ID from preview
-- [ ] Set `confirm: true`
-- [ ] Credits deducted
-- [ ] Order ID returned
-- [ ] Status is `accepted`, or `pending` with recovery explicitly scheduled
+- [x] Use draft ID from preview
+- [x] Set `confirm: true`
+- [x] Credits deducted
+- [x] Order ID returned
+- [x] Status is `accepted`, or `pending` with recovery explicitly scheduled
 
 ### Idempotency (US-LETTER-03)
-- [ ] Call send again with same draft ID
-- [ ] Same order returned
-- [ ] `isRetry: true` in response
-- [ ] Credits NOT deducted again
+- [x] Call send again with same draft ID
+- [x] Same order returned
+- [x] `isRetry: true` in response
+- [x] Credits NOT deducted again
 
 ### Status Check (US-LETTER-04)
-- [ ] Query status with order ID
+- [x] Query status with order ID
 - [ ] Status timeline shows history
 - [ ] Recipient info shown (redacted appropriately)
 
@@ -514,6 +1750,229 @@ Test the complete letter journey.
 - [ ] A simulated transient provider failure leaves a due/pending outbox row
 - [ ] `npm run maintenance` processes the due row and exits cleanly
 - [ ] A stale processing lock is recovered after the configured lock timeout
+
+### ADDRESS-01 — An address request link: given, declined, cancelled (#604)
+
+**Status:** Not run.
+
+**Preconditions:** Development, `LETTER_IRL_ADDRESS_REQUESTS_ENABLED` on in the API (the website's
+`/address` page has no flag of its own). A client with the (DEV) connector, or the dev CLI's tools; a
+private window, signed out, for the recipient. An answer that passes the API's field checks runs a
+PostGrid test-mode verification; a refused field costs none.
+
+**Steps:**
+
+1. [ ] Ask the assistant to write to someone whose address you do not know. Verify it calls
+   `request_address` with their name and your first name (which it may leave out when your saved
+   return address gives it), rather than guessing an address, and gives you a link to
+   `<website>/address#<token>` with the time it stops working.
+2. [ ] Open the link signed out. Verify the page shows your first name and nothing else of the request
+   (not the recipient's name, not the expiry), says who sees the address and how long Letter IRL keeps
+   it, and opens the privacy policy in a new tab.
+3. [ ] Type a test address (Test Addresses (US), below) without its ZIP code, leaving the name blank,
+   and press **Send my address**. Verify the ZIP field is marked and focused, and the note under the
+   fields reads "Check the fields marked above." without naming the printer. Add an emoji to the city
+   and send again: the note now names the printer. Type `Note: Jane` as the name and send again:
+   the name is marked (#730; a colon is not taken in a name). Clear the name.
+4. [ ] Take the emoji out, add the ZIP code, and press **Send my address**. Verify **Thank you**.
+5. [ ] Ask the assistant what became of the request. Verify `get_address_request` says `answered`,
+   with the address as given (or as USPS corrected it). As the recipient left the name blank, its
+   name is the one from step 1, and a preview to it puts that name on the envelope.
+6. [ ] Open the link again. Verify "This link has already been used to give an address".
+7. [ ] A second request: press **No thanks**, then **Go back**, then **No thanks** and **Yes, no
+   thanks**. Verify **Done**, and that `get_address_request` says `declined`, with no address.
+8. [ ] A third request: ask the assistant to cancel it. Verify `cancel_address_request` closes it, the
+   page says "Pat cancelled this request, so the link no longer works." (with your first name), and a
+   second cancel answers `alreadyClosed: true`.
+9. [ ] Change one character of a link: the page says "This link isn't valid".
+10. [ ] Seven days after a request closes, the maintenance run's `address-requests-sweep` deletes it.
+    To see it sooner, set `LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS=1` on the maintenance service
+    (`letter-irl-maintenance-dev`): its floor is 1 day, and 0 or a non-integer falls back to 7. Then
+    `get_address_request` says "That address request wasn't found on this account. request_address
+    makes a new one." Put the variable back afterwards.
+11. [ ] Last, make a fourth request and leave it waiting. Then turn the flag off: set it to `false` and
+    deploy the API (a variable deleted through Railway's API does not redeploy by itself), and refresh
+    the client's tool list, which clients cache. Verify the three tools are not listed, and that the
+    fourth request's link says "This link isn't valid". Turn the flag back on.
+
+**Pass criteria:** The page shows only the sender's first name and takes one address or one no thanks;
+the sender's assistant learns which, and nothing about the request appears in a URL a server logs.
+
+### SIGNATURE-01 — A saved signature on a letter (#608)
+
+**Status:** Partly run on development, 2026-10-03, with the dev CLI's tools. Passed: step 1 and the first two sentences of step 3 on build a2509ad ([the issue's comment](https://github.com/dnobj/mail-letter-irl/issues/608#issuecomment-5964801250): `set_signature` saved a picture with the soft-print hint; a preview leaving `signature` out said `remembered`; `signature: false` was remembered by the next preview); and, on build 997f568, step 3's last sentence (a `signature: true` preview after a `false` printed it, and the next preview leaving it out kept it), step 4, and the tools' half of step 6, where the served card (v64) also carries the Signature switch. Not run: the card drawn in ChatGPT (steps 2 and 5, "the card shows" in step 3, and the switch in step 6); step 7, a test-mode send, which the owner presses; step 8; steps 9 to 11, the website's page (merged as website #57), which need a sign-in (the owner's, or BTA's); and step 12, which turns the flag off on development.
+
+**Preconditions:** Development, with `LETTER_IRL_SIGNATURES_ENABLED` on and `LETTER_IRL_PRINT_RENDERER=pdf`
+in the API. A client with the (DEV) connector, or the dev CLI's tools, with its tool list refreshed. A
+photo of your signature in dark ink on white paper, and a second one. PostGrid is in test mode on
+development: a sent letter is drawn, not mailed, and its PDF opens in PostGrid's test dashboard.
+Steps 9 to 11, and the Settings page check in step 12, need a signed-in session on the development website.
+
+**Steps:**
+
+1. [ ] Ask the assistant to save your signature, attaching the first photo (or giving a link to it).
+   Verify `set_signature` answers that it is saved, with its size. One under 600 px wide is said to
+   print softly.
+2. [ ] Ask for a short letter preview signed "Love," then your name on the next line. Verify the card
+   shows the signature under "Love,", left with the text, and your name under the signature.
+3. [ ] Ask for the same letter without the signature. Verify the card shows none. Ask for another
+   letter without mentioning it: it has none (the choice is remembered). Ask for one with the
+   signature: it is back, and the next letter keeps it.
+4. [ ] Ask for a letter a few lines short of a full page. Verify it is refused as too long, with "The
+   signature takes 3 lines, and without it the letter fits", and that the same letter without the
+   signature previews.
+5. [ ] On a signed preview, change the stationery to Botanical, then change the words. Verify the
+   signature stays under the new closing each time.
+6. [ ] Ask the assistant to take the signature off that preview, then to put it back. Verify
+   `set_letter_signature` draws the card's page without it and then with it, and that the next preview
+   follows the last choice. Then do the same with the card's Signature switch, in the Style tab: it reads
+   **On** or **Off**, and the page follows it.
+7. [ ] Save the second photo as your signature. Send the preview from step 5 (test mode). Verify the
+   PDF in PostGrid's test dashboard prints the first signature, as the preview showed it, in Botanical.
+8. [ ] Remove the signature (`clear_signature`, confirmed). Verify a preview asking for the signature
+   is refused, saying `set_signature` saves one, and that a preview not asking has none.
+9. [ ] On the development website, signed in, open Settings. Verify **Your signature** shows below the
+   return address with "No signature is saved." (step 8 removed it), **Upload a photo** and **Draw it**,
+   and no **Remove**.
+10. [ ] Press **Upload a photo** and choose a phone photo of your signature, at full size. Verify the
+    button reads "Preparing…", then "Saving…", and the cleaned signature is shown as letters print it, with
+    the day it was saved and "Saved. Letters you preview from now on can print it. Letters already previewed
+    keep what they had."; the button now reads **Upload a new photo** and **Remove** has appeared. Then choose
+    a photo of a blank sheet. Verify "We couldn't find a signature in that picture. Sign in dark ink on white
+    or light paper, and photograph it flat, close up, in good light." in red, the saved signature unchanged,
+    and **Upload a new photo** focused.
+11. [ ] Press **Draw it** and sign with a finger or the mouse. Verify Save stays off until a stroke is drawn,
+    a second finger resting on the pad does not cut the stroke, and the right mouse button does not draw. Press
+    **Save this signature**: the pad goes and the saved signature is the drawing, cleaned. Press **Draw it**,
+    draw, then **Cancel**: nothing changes. Press **Remove**, then **Keep it**: it stays. Press **Remove**, then
+    **Remove it**: "Removed. New letters print no signature; letters already previewed keep theirs." and "No
+    signature is saved."
+12. [ ] Turn the flag off and deploy the API, then refresh the tool list. Verify the previews no
+    longer list `signature`, the four signature tools are gone, and the Settings page no longer shows
+    **Your signature**. Turn the flag back on.
+
+**Pass criteria:** A letter prints the signature its preview showed, under the sign-off's first line;
+a preview's choice is remembered; the Settings page shows and changes the signature a letter would
+print; and nothing prints a signature the person did not see.
+
+### STATIONERY-02 — Saved stationery designs (#649)
+
+**Status:** Partly run on development, 2026-10-10: steps 1 to 7 passed, step 8 passed in part, step 9 skipped and
+step 10 passed in part. It ran on 979909a with `LETTER_IRL_CUSTOM_STATIONERY_ENABLED` turned on for the
+run. Steps 1 to 3 ran on ChatGPT web (DEV) and steps 4 to 7 with the dev CLI, both as testlirl02; step 8
+was checked in PostGrid's test dashboard. The flag was turned off at step 10 and left off on development.
+
+- **Step 1 passed:** Garden saved from plain words. ChatGPT showed its "Suspicious Instruction" warning on
+  `save_stationery_design`, reading its description as an attempt to steer ChatGPT's reviewer (#670).
+- **Step 2 passed:** the sprig in light grey, the handwriting face on faint rules, the date line.
+- **Step 3 passed:** Garden pressed after the six themes; Botanical, then Garden again.
+- **Step 4 passed:** TS printed in the monogram's ring; Party with initials was refused; Party's headline was drawn.
+- **Step 5 passed:** GARDEN replaced the same design; the eleventh was refused.
+- **Step 6 passed:** Party remembered, then Botanical once a theme was asked for.
+- **Step 7 passed:** a delete without confirmation was refused, then the design was deleted; the letter previewed in
+  Party kept it.
+- **Step 8 passed:** PostGrid test letter `letter_sSB1H4dsHWLueaxAWLMoFy` (order 21c2e770): the confetti clear of
+  both address blocks, the headline, the date, the serif body, and the gift card on page 2. The letter sent was in
+  Party, so how a light-grey ornament looks on the test print is still to record.
+- **Step 9 skipped** by the owner; ERASE-01 covers erasure.
+- **Step 10 passed** as far as recorded: the three tools were gone, and the Initials draft still showed TS. The
+  previews' schemas and a new preview's remembered theme were not recorded.
+- **Also found:** the website's confirmation page does not name a saved design the way it names a theme
+  (mail-letter-irl-website #60).
+
+**Preconditions:** Development, with `LETTER_IRL_STATIONERY_ENABLED` and `LETTER_IRL_CUSTOM_STATIONERY_ENABLED` on and
+`LETTER_IRL_PRINT_RENDERER=pdf` in the API. The ChatGPT (DEV) and Claude connectors with their tool lists refreshed
+(three new tools; the previews' and `set_stationery`'s schemas gained `stationeryDesignId`; steering rev 47; widget v74).
+PostGrid is in test mode on development: a sent letter is drawn, not mailed, and its PDF opens in PostGrid's test
+dashboard.
+
+**Steps:**
+1. [ ] Ask the assistant for stationery in your words, such as "a handwritten letter with a little sprig in the corner,
+   light grey, with lines, and call it Garden". Verify it calls `save_stationery_design` with a face, ornament, rules and
+   tone that match what you asked, and answers that the design is saved and how to use it. Verify it does not promise
+   colour: letters print in black and greys.
+2. [ ] Ask for a letter to someone in that design. Verify the preview passes `stationeryDesignId`, the page shows the
+   sprig in light grey in the top-right corner, the date line and the body in the handwriting face on faint rules, and
+   the card's summary names "Garden".
+3. [ ] On the card's Style tab, verify a **Garden** button after the six themes, pressed. Press **Botanical**: verify the
+   page is drawn again in Botanical and Botanical is pressed. Press **Garden**: verify it comes back.
+4. [ ] Ask for two designs: "Party" with confetti, and "Initials" with the monogram ornament. Preview a letter in
+   "Initials": verify the initials print in the ring. Preview one in "Party" with initials: verify it is refused,
+   saying initials print only with the monogram ornament. Preview one in "Party" with a headline ("Happy Birthday!"):
+   verify the headline prints above the letter.
+5. [ ] Save a design under a name you have, in other capitals ("GARDEN"): verify it says it replaced the design, and
+   the list (`list_stationery_designs`) still has one Garden. Save designs until you have ten, then an eleventh: verify
+   the refusal names deleting one or saving under an existing name.
+6. [ ] Make a new preview without naming any stationery: verify it is drawn in the design you used last and says so.
+   Ask for a theme instead, then a new preview without one: verify the theme is remembered now, not the design.
+7. [ ] Delete a design (`delete_stationery_design`): verify the assistant asks you first, and the design is gone from the
+   list. Verify a letter previewed in it before still shows it, and sends in it.
+8. [ ] Send a letter in a design (test mode). In PostGrid's test dashboard, verify the PDF prints as the preview showed:
+   the ornament in its grey, inside the corner beside the address window, clear of PostGrid's address area, and the body
+   in the design's face. **Record how a light-grey ornament looks on the test print; a live print is the owner's call.**
+9. [ ] Erase a test account that has designs (ERASE-01): verify its designs are gone and the erasure counts them.
+10. [ ] Turn `LETTER_IRL_CUSTOM_STATIONERY_ENABLED` off and refresh the tool lists. Verify the three tools are gone, the
+    previews and `set_stationery` take no `stationeryDesignId`, a preview naming no stationery is drawn in the remembered
+    theme (never a design), and a letter already previewed in a design still prints in it. Turn the flag back on.
+
+**Pass criteria:** A design made in conversation is saved, drawn in previews and on the card exactly as it prints, kept
+to the account, remembered as the last choice, and deleted on request; nothing about designs is offered while the flag
+is off, and a letter drawn in a design prints in it whatever happens to the design afterwards.
+
+### COLLAGE-01 — A postcard of two to four photos (#616)
+
+**Status:** Partly run on development, 2026-10-03, through ChatGPT (DEV) after a connector Refresh, on build 69b00b3 (parts 1 and 2; the card was still v64). Passed:
+
+- **Step 2's three-photo case, with links** (picsum.photos; step 1's two photos with the dev CLI was not run): the API log has `quote.postcard.start ... collagePhotos=3 collageVia=imageUrls`, the three photos were processed in about 2 s, and the card drew the large photo on the left with two stacked on the right, white margins and gutters.
+- **Step 7, the probe of #616:** three images generated in the chat arrived as `images` (`collagePhotos=3 collageVia=images`, the first 1254 x 1254) and the card drew them in the order given. A one-photo postcard asked for in the same chat still arrived as `image` (`quote.postcard.image_from_fileParams`, no `collagePhotos`), so declaring the array parameter has not broken the single handoff. No usable `image` arrived beside `images` (the call was not refused as a collage beside a photo). ChatGPT hands over an array of attachments; the photos here were generated in the chat, and photos the person attaches have not been tried.
+
+Not run: step 1 (two photos, with the dev CLI), step 2 (the four-photo case), step 3 (the other sizes, which development does not offer until the Stripe test prices exist), 4 (the size refusal needs the sizes), 5, 6, 8 (a test-mode send) and 9, and step 7 on ChatGPT mobile with nothing attached. The dev CLI's tool list in the session was older than the deploy; the server validated `imageUrls` as an array, as designed.
+
+**Preconditions:** Development, with `LETTER_IRL_POSTCARD_COLLAGES_ENABLED` on in the API (and `LETTER_IRL_POSTCARD_LAYOUTS_ENABLED` and `LETTER_IRL_POSTCARD_SIZES_ENABLED` for steps 3 and 4). A client with the (DEV) connector, or the dev CLI's tools, with its tool list refreshed. Four photos, as links and as attachments, some portrait and some landscape, one of them taken on a phone held upright (it carries an EXIF orientation). PostGrid is in test mode on development.
+
+**Steps:**
+
+1. [ ] With the dev CLI's tools, preview a postcard with `imageUrls` of two photos. Verify the answer says `collagePhotos: 2`, and the front shows the two side by side, cropped to fill, with white margins and a white gutter.
+2. [ ] Preview with three, then four. Verify three show one large photo on the left and two stacked on the right, four show two by two, and each keeps the order given.
+3. [ ] Preview a collage as a 4x6 and as an 11x6. Verify the arrangement and the white margins hold at each size.
+4. [ ] Preview a collage of three photos (three links, or three images generated in a ChatGPT chat and the app @-mentioned) with `layout: border` and a `caption`, then change it with `set_postcard_style` to greetings with a `place`. Verify the collage sits inside the border, and under the greeting. With the postcard sizes offered on the deployment (otherwise `SIZE_NOT_OFFERED` comes first), ask `set_postcard_style` for another size. Verify it is refused with "A collage keeps the size it was made at...", telling the model to make a new preview with `quote_and_preview_postcard` (the API log has `draft.postcard_style_refused` with `reason=COLLAGE_SIZE`), that asking for the same style again answers that nothing has changed, and that the draft is as it was. In ChatGPT (DEV) the card shows "6 x 9 in · a collage of 3 photos" with no size buttons, and its Front choices still work.
+5. [ ] Include the phone photo in a collage. Verify it is upright in its cell.
+6. [ ] Try one photo and five in `imageUrls`, `images` and `imageUrls` together, and a collage with `imageUrl` beside it. Verify each is refused at once, saying what to send instead, and that the API log has a `quote.postcard.collage_refused` line with its reason and no download for it. Put a broken link, then a GIF, in the second place. Verify the refusal names "The second photo".
+7. [ ] In ChatGPT (DEV), after a connector Refresh, attach three photos and ask for a collage postcard. Verify the call carries `images` (**record whether ChatGPT hands over an array of attachments: this is the open probe of #616**), and that a postcard with one attached photo still works, so the array parameter has not broken the single `image` handoff. Record whether `image` also arrives beside `images` (a collage with both is refused). Repeat on ChatGPT mobile, with one photo and with nothing attached: a blank `images` must not stop a single-photo postcard.
+   If the array does not arrive, or breaks the single handoff: withhold `images` whatever the flag says (a line of its own in `withheldInputKeys`: `POSTCARD_COLLAGE_INPUT_KEYS` is withheld only while collages are off), drop it from the file parameters `buildToolMeta` lists, and reword `POSTCARD_COLLAGE_IMAGE_URLS_DESCRIPTION` and the "Attach it again" refusal in `src/tools/collageSources.ts`. A withheld `images` still reaches `collageSources` raw, which refuses a string by its place and reads a blank as none; `imageUrls` then carries collages alone.
+8. [ ] Send one collage (test mode). Verify the PDF in PostGrid's test dashboard shows the collage as previewed.
+9. [ ] Turn the flag off and deploy the API, then refresh the tool list. Verify `images` and `imageUrls` are gone, and a collage sent anyway is refused. Turn the flag back on.
+
+**Pass criteria:** The front is the arrangement the preview showed, in the order given, and prints as previewed; a postcard of one photo is unchanged.
+
+---
+
+### CERTIFIED-01 — The important letter: USPS Certified Mail (#625)
+
+**Status:** Not run. The previews take `mailService` (part 4) and the orders show the service and USPS's number (part 5); step 6 reads the card (the cards part), and steps 7 and 11 the website's words (the website part).
+
+**Preconditions:** Development. The Stripe test prices of the two certified products (`jit-letter-certified` and `jit-letter-certified-receipt`, made by the owner's script from #624) set on the API **and** the maintenance service. Pay & Send on. `LETTER_IRL_CERTIFIED_MAIL_ENABLED` on in the API and the maintenance service, only once both run the send (an older build prints certified mail as an ordinary letter). A client with the (DEV) connector, or the dev CLI's tools, with its tool list refreshed; a saved return address; the Stripe test card 4242 for Pay & Send (the owner's step unless they have said the loop may pay). `npm run admin:provision-access` re-run on development after migration 053.
+
+**Steps:**
+
+1. [ ] With the flag off, list the tools. Verify the three letter previews have no `mailService` input and their descriptions do not offer certified mail (their output fields and the order tools' fields are declared either way), and a call that passes `mailService: "certified"` anyway is refused with "Certified mail is not available right now" and creates no draft.
+2. [ ] Turn the flag on and refresh the tool list. Verify the three letter previews take `mailService` (`standard`, `certified`, `certified_return_receipt`), and the postcard preview does not.
+3. [ ] Preview a one-page letter with `mailService: "certified"`. Verify the answer says it is sent as USPS Certified Mail, `canSendNow` is false, the cost reads as Pay & Send at the certified price, and no gift letter is offered. Try `sendAsGift: true` with it: refused, saying a gift letter does not pay for certified mail.
+4. [ ] Try `"Certified"` (capital C) and `"express"` as the service. Verify each is refused by the tool's input check, with an error that lists the valid services, before anything is created. Verify that `null`, `""` and `"standard"` give an ordinary letter.
+5. [ ] Ask for the send link (`request_send`) for the certified preview. Verify the answer carries `mailService`, and its words say Pay & Send pays for it, never a letter pack or a gift letter.
+6. [ ] On the letter card (in Claude or VS Code, where the card sends the person to the page), verify the summary line says "certified mail" (or "with a return receipt"), the Delivery line says "USPS Certified Mail" and the disclaimer says it is signed for at delivery, the cost reads Pay & Send at the certified price, and the note under the button does not say a pack pays for one-page letters.
+7. [ ] (The words after the website part.) Open the link and read the confirmation page. Verify it names certified mail and the price, press Send on the page (the owner's step unless the loop may), and pay with the test card. Verify the letter is paid for the certified product and `letters.mail_service` is certified.
+8. [ ] Right after the send, `get_order_status`. Verify `mailService`, the note that USPS's number is not here yet, and `trackingSupport: estimated_only`. After the provider status sync (every six hours, or run it from the admin panel), verify the number appears with a USPS link, `trackingSupport: carrier_tracking`, and `list_orders` and `GET /api/letters` say the same, with `trackingNumber` still PostGrid's letter id. **PostGrid's test mode may never set a number** (the research does not say): if none comes, set one by hand on the development branch (`UPDATE letters SET carrier_tracking_number = '9407 1000 0000 0000 0000 00' WHERE letter_id = ...`, an owner step) and verify the readers from there; record which happened.
+9. [ ] In PostGrid's test dashboard, verify the letter shows the extra service; decode its PDF with the decode probe and verify the certified markings leave the address zone clear and the return address is there. **Record what the page shows: it settles the open risk of the markings.**
+10. [ ] Repeat with `certified_return_receipt`. Verify the dashboard shows the electronic return receipt. **Record where the receipt is delivered and when: it settles the wording of the return-receipt note, and whether the receipt product is priced as it is.**
+11. [ ] (After the website part.) Send a certified letter with an arrival date. Verify it waits in the outbox, goes to PostGrid with the service when it is sent, and that cancelling it follows the Pay & Send rule for held mail (a person decides the refund).
+12. [ ] Turn the flag off and deploy the API, then refresh the tool list. Verify the `mailService` input is gone from the previews, and the certified letter already sent still shows its service and number in `get_order_status`, `list_orders` and `GET /api/letters` (a sent letter is a fact). Turn the flag back on.
+13. [ ] (Any time after step 3.) With `set_mail_service`, change a previewed letter to `certified`: verify the answer says it now goes by USPS Certified Mail, is paid with Pay & Send, and nothing has been sent. Change it to `standard`: verify the terms are the pages' again (the balance pays a one-page letter it can afford). Try it on a postcard preview (refused: a postcard is always ordinary mail), on a gift letter preview (refused, naming a new preview with `mailService` certified), on a draft already sent and on one with a Pay & Send payment open (each refused with a way out). With the flag off and the tool list refreshed, verify the tool is gone.
+14. [ ] (In Claude or VS Code, after step 13.) Preview a one-page letter as certified so the card shows, change it to `standard` with `set_mail_service`, then reopen the conversation so the card is shown its preview again. Verify the summary line, the note under the buttons, the Delivery line ("USPS First-Class Mail"), the cost and the button all agree with ordinary mail (Send from the balance), with no certified words left anywhere. Change it back to `certified`, reopen again, and verify they all agree with certified mail (Pay & Send, "USPS Certified Mail", the signed-for disclaimer). Then, with the card showing, change the service in the chat and press a style on the card: verify the card's five things agree again with the service the chat set (the style's answer carries it). In ChatGPT the card keeps its own state and does not hear a change the chat makes, so there verify the chat's words say what changed and that a new preview shows it.
+15. [ ] Read the Delivery line of a certified letter. Its estimate ("Mailed in 1-2 business days; usually arrives in 1-2 weeks") is First-Class's. **Record PostGrid's production time for certified letters (the test dashboard or a note from PostGrid sales) and settle whether the estimate or the disclaimer needs its own words.**
+16. [ ] (In ChatGPT and in Claude, with the studio card.) Preview an ordinary one-page letter. On the Delivery tab, verify the Mail row shows First-Class pressed, Certified and Certified + e-receipt (#648). Press Certified: verify the cost turns to Pay & Send at the certified price, the summary says certified mail, the Delivery line says USPS Certified Mail, and Pay & Send replaces Send. Press First-Class: verify all of it goes back. Repeat with a two-page letter (room to write): verify the summary keeps "2 pages, both sides" and the Words tab's fit line stays. Preview a gift letter (`sendAsGift: true`): verify there is no Mail row. Turn the flag off: verify a new preview has no Mail row.
+
+**Pass criteria:** A certified letter is previewed, paid for with Pay & Send at the certified price, reaches PostGrid with the service, and its USPS number is stored and shown; no new certified preview or payment is possible, and no `mailService` input is served, while the flag is off (a letter already paid for, or waiting in the outbox, still goes out certified).
 
 ---
 
@@ -562,14 +2021,142 @@ Test promotional code redemption.
 - [ ] Second redemption blocked ("already used")
 
 ### Rate Limiting (US-SEC-05)
-- [ ] Public `/api/promo/validate` rate limited
-- [ ] 10+ requests/min from same IP → 429
-- [ ] Rate limit headers present
+
+**Status:** Executed 2026-09-13 against development over plain HTTPS: twelve
+`GET /api/public/promo/validate/<code>` calls from one address in a few seconds returned 200 with
+`X-RateLimit-Remaining` counting 9 down to 0, then 429 with `Retry-After: 53`.
+
+- [x] Public `/api/promo/validate` rate limited
+- [x] 10+ requests/min from same IP → 429
+- [x] Rate limit headers present
 
 ### New User Only (US-SEC-06)
 - [ ] Create "new users only" campaign
 - [ ] New user can redeem
 - [ ] Existing user (with purchases) blocked
+
+---
+
+## Gift Letters
+
+### GIFT-01 — Gift letter end to end, and the test print
+
+**Status:** Run on development on 2026-09-22 and 23. Steps 1 to 9 passed, step 9 with two workarounds
+that #431 fixes. Steps 2 to 4 and 8 were run again on 2026-09-29 on the #487 wording and printed on
+paper. The prints fit, and the QR codes scanned on an S26 Ultra; the iPhone scan is still open. Gates switching
+`LETTER_IRL_GIFT_LETTERS_ENABLED` on in production ([gift-letters.md](gift-letters.md)).
+
+**#487 changed the printed words (2026-09-28).** The card no longer names ChatGPT, since a letter
+can now be written in any connected app: "a conversation with an AI assistant", and "You write your
+letter with your AI assistant". Steps 4 and 8 were printed again on the new copy on 2026-09-29,
+and both still fit.
+
+Development, with `LETTER_IRL_GIFT_LETTERS_ENABLED=true`,
+`LETTER_IRL_GIFT_LANDING_BASE_URL` set to the development website, and the DEV connector refreshed
+after deploy (widget v36).
+
+1. [x] Buy a Starter pack in test mode. `get_account_balance` reports `giftLettersRemaining: 1`.
+2. [x] Preview a letter with `sendAsGift: true`. The card shows "Free (gift letter)", a second
+       page, "Send Gift Letter", and no Pay & Send.
+3. [x] Send it. The admin **Gifts** page lists a new chain code issued to the account.
+4. [ ] **The test print.** Open the letter in the PostGrid test dashboard and download its PDF.
+       Print it at 100% on plain paper and check:
+       - [x] page 2 holds the card in its upper half, clear of PostGrid's integrity QR and
+             sequence ids at the bottom left;
+       - [ ] the QR scans on an iPhone and on the S25 Ultra, in ordinary indoor light, and opens
+             `<website>/g/<code>`; (the Android phone passed on paper on 2026-09-29; the iPhone is
+             still to do);
+       - [x] the printed code, typed at `<website>/g`, is accepted;
+       - [x] the QR rendered at all. If it is missing or blurred, set
+             `LETTER_IRL_GIFT_QR_FORMAT=png` and repeat from step 2;
+       - [x] PostGrid's cost for the letter shows the extra B&W page and no colour.
+
+       **2026-09-23:** checked on the PDF on screen, not printed. The S25 Ultra scanned the QR
+       from the screen and opened the development claim page; the iPhone scan is still to do. The
+       inline SVG rendered, so the PNG fallback is not needed. PostGrid's order records two pages,
+       `color: false` and single-sided; test mode shows no price. The QR carries the code
+       without its hyphen, which the claim page accepts. On the S25 the claim page showed **Claim
+       my letter** for a code already used and refused it only after sign-in. On the desktop the
+       check before sign-in shows its notice (checked on a used-up seed code). Not investigated.
+
+       **2026-09-29, reprinted on paper with the #487 wording, passed.** The account was the one
+       from LINK-02 (Google, with a password linked); two Starter packs gave it two gift letters.
+       - The gift letter (`letter_2fLwcvNQt1frh8NWLgMR1h`) printed at 100%: page 2 carries the card
+         in its upper half, with "You write your letter with your AI assistant" and the code
+         314M-5VXS.
+       - Its QR, scanned from paper on the S26 Ultra, opened the claim page. The iPhone was not at
+         hand.
+       - Neither code was claimed, so 314M-5VXS stayed fresh for LINK-01 step 9.
+5. [x] On a second Auth0 account, redeem the code (`redeem_promo_code`, or the website). It
+       reports one gift letter; the admin page shows the code redeemed.
+
+       **2026-09-23:** claimed on the website at `/g/<code>`. The dashboard showed the gift
+       letter only after a reload (Findings, below).
+6. [x] Redeem it again from a third account: refused as already used. Redeem it from the sender's
+       account: refused as their own code.
+
+       **2026-09-23:** both in ChatGPT: the third account was told the code had already been used,
+       and the sender that it was printed on a letter they sent.
+7. [x] From the second account, preview and send. Its budget is 0, so the preview and the print
+       show the plain "Sent with Letter IRL" card and no new code is issued.
+
+       **2026-09-23:** the rule was checked on the sender's own budget-0 gift letter, from an
+       earlier claim: the plain card printed and no code was minted. The second account's send
+       itself was not run.
+8. [x] Repeat 2 to 4 with a postcard: the strip sits at the foot of the message half and a message
+       over 350 characters is refused.
+
+       **2026-09-23:** a 398-character message was refused ("398/350 ... leaves room for the gift
+       card"). The strip sits at the foot of the message half, under a rule, with the code, the
+       claim address and the redeem-by date, and its QR matched the encoder's output for
+       `<website>/g/<code>` byte for byte. PostGrid prints the back in one sans-serif face,
+       though the card preview shows a serif.
+
+       **2026-09-29, reprinted on paper with the #487 wording, passed.** The gift postcard is
+       `postcard_ujEGCkSNzVFFLcSN6u3BCA`, with the site icon on the front. Its strip sits at the foot
+       of the message half, under a rule, clear of the bottom edge and the address side: "A gift from
+       Test Sender: a letter of your own, printed and mailed free", with the code 5B7D-883K. Its QR
+       scanned from paper on the S26 Ultra. The over-long message was not tried again.
+9. [x] Create a seed campaign (credits 0, budget 1, cap 2, new accounts only), activate it, grant
+       an account one gift letter bound to it, send, and confirm the card prints the campaign
+       code. Claim it from two accounts; the third claim is refused at the cap.
+
+       **2026-09-23, with two workarounds that #431 fixes.** The create form sends no `target`,
+       so the campaign was created by adding `target=<code>` to the preview address. After a
+       claim, the claiming account's admin page answered 500, so its gift letter was granted through
+       the grant preview's address. Two new accounts claimed on the website; the third claim, from
+       ChatGPT, was refused with "Promo code redemption limit reached" (#432), and the public
+       lookup then answered `limit_reached`.
+
+       The first sender had already sent three pieces that UTC day, so the per-account cap refused
+       its seeded send (gift sends count; the gift letter was rolled back). A claiming account sent
+       instead. The gift letter from its claim expired sooner, so its first send used that one and
+       minted a chain code with budget 0: a seed claim carries the campaign's budget one hop down.
+       Its second send used the bound gift letter and printed the campaign's code, and that QR
+       matched the encoder's output too. The card said "The code works once." (#431 changes that
+       for seed codes) and the preview showed a placeholder code (#433). A bound gift letter sent
+       after the cap would still print the used-up code (#435); ending the campaign avoids that.
+
+**Findings, 2026-09-23 (development):**
+
+- Fixed by #431: the create-campaign form, the account page after a gift-only seed claim, and
+  the seed card's "works once" wording.
+- Filed: #432 (seed refusals use promo-code wording), #433 (a seed-bound preview shows a
+  placeholder), #434 (a refused send shows the host's raw exception on the card), #435 (a bound
+  gift letter sent after the cap prints the used-up code).
+- Website: right after a claim the dashboard shows the gift-letter count from before it, until a
+  reload. Its gift copy promises "a card for your recipient" even for a budget-0 gift letter,
+  which prints the plain card.
+- The per-account daily mail cap (3) counts gift sends, so seeding a batch of letters on one
+  account takes days.
+- An admin elevation lasts 60 minutes only while its session is in use: the session's
+  15-minute idle timeout ends both, and the banner's "elevated until" does not say so.
+- Auth0's sign-in page expires when left open: after about two hours it answered "Oops!,
+  something went wrong" (`invalid_request`, "we couldn't find your session"). Start the
+  claim again from `/g/<code>`.
+- After the Starter pack bought from the checkout card (step 1), the return page logged
+  `cookiePresent=false` and offered a plain ChatGPT link, not the way back to the conversation
+  (PAY-05).
 
 ---
 
@@ -643,9 +2230,17 @@ phone's client is below the posture minimum and Railway offers no shell into the
    with no warning.)
 3. [ ] From the phone on the tailnet, open the same URL; verify it answers. Turn Tailscale off on the phone;
    verify the URL no longer resolves or connects.
-4. [ ] From another service in the development environment (a Railway shell on the API service), run
-   `curl -si http://letter-irl-admin.railway.internal:$PORT/healthz`; verify the body is exactly `ok` and
-   `curl -si http://letter-irl-admin.railway.internal:8790/` is refused (connection refused, not a page).
+4. [ ] **The app port must be refused from the tailnet.** The boot log prints
+   `admin.tailnet_addresses`; from a device the policy allows, and for each address it names, verify
+   that `curl -sv --max-time 5 http://<address>:8790/` and `https://<address>:8790/` both fail to
+   connect, while `https://letter-irl-admin-dev.<tailnet>.ts.net/` answers. This is the step that
+   proves the policy carries the weight the trust model gives it: userspace networking forwards an
+   inbound tunnel connection to the same port on localhost, so a peer allowed to reach 8790 would
+   meet the application listener with headers of its own choosing. Re-run after any policy edit.
+   Then, from another service in the development environment (a Railway shell on the API service),
+   run `curl -si http://letter-irl-admin.railway.internal:$PORT/healthz`; verify the body is exactly
+   `ok` and `curl -si http://letter-irl-admin.railway.internal:8790/` is refused (connection refused,
+   not a page).
 5. [x] From the internet, verify the service has no `*.up.railway.app` domain and that
    `https://letter-irl-admin-dev.<tailnet>.ts.net/healthz` does not resolve off the tailnet. (Railway lists
    no service or custom domain; public resolvers return no address for the name; `/healthz` through Serve
@@ -675,7 +2270,9 @@ blocker.
 2. [x] Reload; verify the session cookie is reused (one `admin.session_start` row per session in
    `/audit`, not one per request). (Three requests on one cookie jar left the row count unchanged.)
 3. [x] Verify the response headers carry `Content-Security-Policy` with a nonce, `Cache-Control: no-store`
-   and `X-Correlation-Id`. (Also `X-Frame-Options: DENY` and `Referrer-Policy: no-referrer`.)
+   and `X-Correlation-Id`. (Also `X-Frame-Options: DENY` and `Referrer-Policy`, which was `no-referrer` when
+   this ran and is `same-origin` since 2026-09-08: `no-referrer` made browsers send `Origin: null` on form
+   posts, which the boundary check refuses, so no write was possible from a browser.)
 
 **Pass criteria:** The banner states what the machine checked, and one session produces one audit row.
 
@@ -691,6 +2288,9 @@ the lookup-by-email variant of step 1 is still open).
 1. [x] Look the account up by exact email; verify the email is masked on the account page. (Looked up by
    exact Auth0 subject: one match, plus the recent-accounts table with masked emails. Before the reveal
    the only full email address in the page source was the operator's own in the banner.)
+   - [ ] (#730) Look it up by exact email with the form: the address is not in the URL, and `/audit` shows a
+     `pii.lookup` row with the matched account id and no address. Opening `/lookup?q=<the email>` runs
+     nothing.
 2. [x] Verify the ledger lots show initial and remaining credits, and the letters table shows metadata
    only: no content, no recipient, no address anywhere on the page. (The letters table is captioned
    "metadata only; content and recipients are never shown here".)
@@ -737,8 +2337,13 @@ the lookup-by-email variant of step 1 is still open).
    no `Origin` at all, both answered `403` with the body `forbidden`; `/audit` shows `admin.request_denied`
    for route `account.reveal` with `ADMIN_CSRF_REJECTED`.)
 
-**Pass criteria:** Every denial is a constant body plus an audit row; nothing on the private network
-reaches an application route.
+5. [ ] From a page on another tailnet node (or any other site), load the panel's URL as an image
+   (`<img src="https://<panel>/">`) a few times. Verify the panel's `/audit` shows no new
+   `admin.session_start` or denial rows for them, and that a session already elevated in another tab
+   is still elevated (#730).
+
+**Pass criteria:** Every denial is a constant body plus an audit row, but for the quiet refusal of a
+request another site sent (step 5); nothing on the private network reaches an application route.
 
 ### ADMIN-READ-05 — Keyboard-only navigation and 200 % zoom
 
@@ -769,7 +2374,10 @@ badge carries text; the full keyboard traversal and the 320 px rendering are sti
 
 ### ADMIN-PROD-RO-01 — Production read-only gate
 
-**Status:** Requires the owner's separate production read-only approval before any step.
+**Status:** Executed 2026-09-10 on the owner's read-only approval, from the owner's laptop over the
+tailnet (curl with certificate verification plus the embedded browser). All three steps passed, with
+two readings recorded below. The production service is `letter-irl-admin-prod` (Railway service names are
+unique per project and development holds `letter-irl-admin`); the node is `letter-irl-admin-prod`.
 
 **Preconditions:** Production roles created by SQL; grants applied with `--confirm-production-access`;
 the production node registered with `tag:prod-admin`; `ADMIN_MODE=read-only`; the restricted Stripe key
@@ -777,16 +2385,70 @@ absent or live.
 
 **Steps:**
 
-1. [ ] Verify the banner shows `production`, `read-only`, `marker: production`,
-   `letter_irl_admin_reader_production`, `stripe: live` and `tag:prod-admin`.
-2. [ ] Open the refunded Starter Pack order from the launch weekend; verify 2 letters, 0 remaining,
-   500 cents refunded, lots revoked.
-3. [ ] Verify `/audit` shows the boot event and this session, and that no command route exists in full mode
-   terms (every POST other than reveal and logout answers 403 `ADMIN_READ_ONLY_MODE`).
+1. [x] Verify the banner shows `production`, `read-only`, `marker: production`,
+   `letter_irl_admin_reader_production`, `stripe: live` and `tag:prod-admin`. (Seen, with `stripe: absent`:
+   the restricted live key is a full-mode item and was not set at this gate. Build `801b40c`.)
+2. [x] Open the refunded Starter Pack order from the launch weekend; verify 2 letters, 0 remaining,
+   500 cents refunded, lots revoked. (Status `refunded`, both ledger lots `revoked` with 0 remaining and not
+   spendable, 5.00 USD paid. The order's refunded-amount field reads 0.00 USD because that column arrived
+   with migration 029 and the refund was issued from the Dashboard before it existed; the status and the
+   revoked lots are the record of the refund.)
+3. [x] Verify `/audit` shows the boot event and this session, and that no command route exists in full mode
+   terms (every POST other than reveal and logout answers 403 `ADMIN_READ_ONLY_MODE`). (`admin.boot` and
+   the sessions listed; a POST to `/elevate` carrying the session cookie and its CSRF token answered 403
+   with the read-only page and audited `admin.request_denied` with `ADMIN_READ_ONLY_MODE`. A POST without
+   a session is refused earlier as `ADMIN_CSRF_REJECTED`, also audited. The app port 8790 is unreachable
+   from the tailnet, as in ADMIN-INFRA-01 step 4.)
 
 **Pass criteria:** Production is visible and untouchable.
 
+### ADMIN-PROD-FULL-01 — Production full-mode gate and first command
+
+**Status:** Executed 2026-09-11 on the owner's separate full-mode and first-command approvals, from the
+owner's own browser over the tailnet (the writes need the owner's authenticator code and a browser
+session; the audit rows were read back with curl). Passed, with one configuration gap found and closed
+between the two runs of step 4.
+
+**Preconditions:** `ADMIN-PROD-RO-01` passed; a restricted **live** Stripe key created for this service
+(Charges and Refunds write, Payment Intents read, Payment Disputes read, Checkout Sessions read);
+`ADMIN_TOTP_SECRET` enrolled with `npx tsx scripts/adminTotpEnrol.ts production`; `DATABASE_URL` switched
+to `letter_irl_admin_operator_production` and `ADMIN_MODE=full` in the same variable edit; the provider
+variables wired as references to the API service.
+
+**Steps:**
+
+1. [x] Verify the banner shows `production`, `full`, `stripe: live`, `mail: postgrid` and `tag:prod-admin`,
+   and that `/audit` carries the boot event. (Seen on build `801b40c`. The banner names the reader role,
+   which pages read through; the operator role is what the boot validated.)
+2. [x] Run the Stripe reconciliation from `/stripe` (no elevation needed). (Last 30 days: 1 Stripe payment,
+   1 grant, matched, no discrepancies; `stripe.reconcile` audited with counts and no Stripe identifiers.)
+3. [x] Elevate on `/elevate` with the authenticator; verify the banner shows the elevation and `/audit`
+   records `admin.elevate`. (Both seen; the window is 10 minutes in production, and a redeploy drops
+   every session.)
+4. [x] Execute the provider status sync as a dry run from
+   `/commands/mail.status_sync/preview?target=letters&days=30&dryRun=on` with a reason and the phrase
+   `PRODUCTION SYNC-DRY-RUN letters`; verify a `succeeded` run row and a `mail.status_sync` audit row.
+   (First run: succeeded, `checked: 1, errors: 1`, the error being `Letter not found` for the one live
+   letter, because the service had no `LETTER_PROVIDER*` variables and used the dummy provider. After
+   wiring the three provider variables as references to the API service and redeploying: succeeded,
+   `checked: 1, updated: 0, errors: 0` against PostGrid.)
+
+**Pass criteria:** Every write goes through elevation, preview and typed confirmation, is recorded as a
+run and an audit row, and the panel's provider commands talk to the real provider.
+
 ### ADMIN-CMD-01 — Acknowledge and resolve an alert with elevation, preview, typed confirmation and replay
+
+**Status:** Executed 2026-09-08 in the owner's Chrome, driven by the browser extension, with the
+balance adjustment on the owner's own development account standing in for the alert, because no alert
+was open. Step 1 passed (the preview named elevation and Execute was disabled). Step 2 passed (banner
+"elevated until", `admin.elevate` audited). Step 3 passed (`CONFIRM <account id>`; the run listed on
+`/commands`, `account.adjust_balance` audited with the reason and command id, and the ledger lot reads
+`adjustment` with no reason text anywhere on the account page). Step 4 passed (the same confirmation
+answered "already processed", no second audit row). Step 5 passed (two previews of the same change;
+the second answered `409 ADMIN_STALE_PREVIEW`). Step 6 not run: five wrong codes would lock the owner
+out for fifteen minutes. Also seen: a wrong phrase answered `400 ADMIN_INVALID_REQUEST` and was audited
+as denied, and a five-character reason was accepted, because the eight-character minimum lived only in
+the form until the pull request that carries this record.
 
 **Preconditions:** The development panel runs in full mode (`ADMIN_MODE=full`, `DATABASE_URL` on the
 operator role, `ADMIN_TOTP_SECRET` from `npm run admin:totp-enrol -- development`, the authenticator
@@ -814,9 +2476,11 @@ returns the first outcome; every step is in the audit log.
 
 ### ADMIN-CMD-02 — Resolve an ambiguous job with provider evidence
 
-**Preconditions:** Full mode as above; a job held on an ambiguous provider outcome (the stub evidence
-flow in [deployment.md](deployment.md#ambiguous-image-reservation-operator-procedure) describes how the
-dummy provider produces one).
+**Status:** Not run 2026-09-08: no job was held on an ambiguous outcome.
+
+**Preconditions:** Full mode as above; a job held on an ambiguous provider outcome. The decision rules are in
+[deployment.md](deployment.md#operator-recovery-through-the-admin-panel). The dummy provider cannot
+produce an ambiguous outcome (its failures are definite rejections), so this case needs a real one.
 
 **Steps:**
 
@@ -832,6 +2496,11 @@ dummy provider produces one).
 
 ### ADMIN-CMD-03 — Retry a definite failure, and the refusals
 
+**Status:** Step 3 passed 2026-09-08 (elevation dropped on `/elevate`; a prepared preview answered
+`403 ADMIN_ELEVATION_REQUIRED`, the balance was unchanged, and both events were audited). Steps 1 and
+2 deliberately not run: a retried job is dispatched to whatever provider development routes to, an
+outside effect the owner should trigger knowingly. Step 4 not run.
+
 **Preconditions:** Full mode; a job in `failed / definite_failure` with a failed letter.
 
 **Steps:**
@@ -846,6 +2515,71 @@ dummy provider produces one).
 
 **Pass criteria:** A retry needs the exact state, a live elevation and full mode; each refusal is a stable
 code and an audit row.
+
+### SCHEDULE-01 — An arrival date on the card, scheduled, then cancelled (#535)
+
+**Status:** Not run end to end. Each scheduled send uses a letter of the development balance (or a gift
+letter) and gives it back on cancel; a send left scheduled goes to PostGrid test mode on its mail date.
+Checked on development without a send (2026-10-01): the served letter card carries the Arrives script
+(#559), and `request_send` answers a dated preview with its `schedule` (#561).
+
+**Preconditions:** Development, `LETTER_IRL_ARRIVE_BY_ENABLED` on; letters in the test account's balance;
+ChatGPT (DEV) with "Allow once", then Claude (DEV) for the MCP Apps card.
+
+**Steps:**
+
+1. [ ] Preview a letter. Verify the card shows **Arrives by** under Delivery, with **As soon as possible**
+   chosen and the field bounded by the dates on offer.
+2. [ ] Pick a date. Verify the Delivery line and the note ("Mails ... · cancel free until then") change,
+   and the button reads **Schedule Letter**. Pick **As soon as possible**; verify both go back.
+3. [ ] Pick a date before the earliest (typed into the field). Verify the card says the earliest on offer
+   and keeps the dates it had.
+4. [ ] Pick a date and press **Schedule Letter**. Verify **Scheduled**, the order id and the mail date,
+   and that the balance went down by one letter.
+5. [ ] Press **Cancel this letter**, then **Yes, cancel this letter**. Verify **Cancelled** with the message
+   that the letter is back in the balance, and that the balance is back.
+6. [ ] Reopen the conversation (ChatGPT). Verify the card shows the order as cancelled and offers nothing.
+7. [ ] In Claude, repeat steps 1, 2 and 4, then reopen the conversation: verify the card shows the order as
+   scheduled, with Cancel.
+8. [ ] A postcard: repeat steps 1, 2 and 4 with **Schedule Postcard**; leave it scheduled, or send it now
+   from the admin panel (ADMIN-CMD-04) and verify it reaches PostGrid test mode.
+9. [ ] On the development website, as the same account (website #47):
+   - the dashboard shows a scheduled letter as **Scheduled**, with "Mails ... · aims to arrive by ..." and
+     **Cancel** on its row. **Your Letters** shows it as **Scheduled**, and opening it shows those dates,
+     **Cancel**, and the journey standing at **Scheduled to mail**;
+   - **Cancel**, then **Yes, cancel it**, shows the API's words about what came back and the balance after,
+     naming gift letters when there are any (website #50);
+   - a dated preview's confirm page (from `request_send`) names the mail date, says "cancel free until it
+     goes to the printer", and its button reads **Schedule this letter**;
+   - opened again after **Schedule this letter**, the same confirm page says "This letter is already
+     scheduled." with its dates; after a cancel, "This letter was cancelled." (website #50).
+
+**Pass criteria:** The card offers only the dates on offer, schedules and cancels from the card, and a
+reopened card shows what happened.
+
+### ADMIN-CMD-04 — Send held mail now, and the refusals
+
+**Status:** Not run. A released letter goes to whatever provider development routes to at the next
+maintenance run, an outside effect the owner should trigger knowingly.
+
+**Preconditions:** Full mode; arrival dates on in development (`LETTER_IRL_ARRIVE_BY_ENABLED`); a letter
+sent with an arrival date whose mail date has not come (#535).
+
+**Steps:**
+
+1. [ ] Open the held letter's job page. Verify that **held for its mail date until** and **next attempt** both
+   show the same time, 09:00 New York time on its mail date (the page shows it in UTC in the tooltip), and that
+   the page offers **Preview sending now…**.
+2. [ ] Preview. Verify the letter, the account, the funding and the hold, and the warnings. Give a reason of
+   at least 8 characters and execute. Verify that **next attempt** is now, **held for its mail date until** is
+   unchanged, the letter is still `queued`, and `/audit` shows the run.
+3. [ ] After the next maintenance run, verify that the provider accepted the letter (PostGrid test mode in
+   development).
+4. [ ] Open the job page again. Verify that it no longer offers sending now, and that
+   `/commands/job.dispatch_now/preview?target=<job>` answers `409 ADMIN_INVALID_STATE`.
+
+**Pass criteria:** Only held mail can be sent early, with a live elevation, a reason and an audit row; the
+hold's original time stays on record.
 
 ### ADMIN-STRIPE-01 — Reconciliation in development against test-mode data
 
@@ -935,37 +2669,162 @@ audit.
 
 1. [ ] Open the order; verify the quarantine panel and the warning in the preview.
 2. [ ] Execute; verify the code is cleared, the order event `operator.quarantine_released` carries the
-   reason, and the next `npm run maintenance` (or hourly run) refunds the order.
+   cleared code (the reason is on the audit row alone, #394), and the next `npm run maintenance` (or hourly run) refunds the order.
 
 **Pass criteria:** Release is a deliberate operator decision, recorded, and the sweep then acts.
 
 ### ADMIN-ACCT-04 — Promo campaigns and ambiguous image reservations
 
+**Status:** Step 1 passed on development on 2026-09-23, after #431 (merged as 6ba1f99). Steps 1
+to 3 passed on 2026-09-28 (8a169db), elevated by the owner, with a fresh campaign `ACCT04-0928`
+(1 letter, a cap of 1). Step 4 could not run: there was no ambiguous reservation, and image
+generation is off in development. Until #431 step 1 failed: the create form sent no `target` and
+the preview refused it (found by GIFT-01 step 9, 2026-09-23). Running this step would have caught
+it when the panel shipped.
+
 **Steps:**
 
-1. [ ] `/promos/new`: preview and create a draft campaign; verify it appears as `draft`.
-2. [ ] Preview `active`; before confirming, change the campaign on another tab (or in SQL); execute;
-   verify `409 ADMIN_STALE_PREVIEW`. Preview again and execute; verify `active`.
-3. [ ] Redeem the code with a test account (`redeem_promo_code`); verify the campaign page lists the
+1. [x] `/promos/new`: preview and create a draft campaign; verify it appears as `draft`.
+2. [x] Preview `active`; before confirming, change the campaign on another tab (or in SQL); execute;
+   verify `409 ADMIN_STALE_PREVIEW`. Preview again and execute; verify `active`. (A campaign page
+   offers only status changes. Activating it from another tab refused the held preview with
+   `409 ADMIN_INVALID_STATE`, because draft → active was no longer possible. The stale guard itself
+   showed with a change that leaves the transition possible: an "ended" preview held while the
+   campaign read 0 redemptions, then a redemption, then execute gave `409 ADMIN_STALE_PREVIEW`.
+   Both refusals are in `/audit` as `admin.request_failed`.)
+3. [x] Redeem the code with a test account (`redeem_promo_code`); verify the campaign page lists the
    redemption with a masked email and that "delete" is no longer offered. End the campaign.
-4. [ ] `/images`: with an ambiguous reservation (the stub evidence flow in
-   [deployment.md](deployment.md#ambiguous-image-reservation-operator-procedure)), preview "release as
+   (testlirl02 through Claude: the page read "1 of 1", listed a masked address with its
+   lot, and said "Redeemed campaigns are ended, never deleted." A fresh preview ended it.)
+4. [ ] `/images`: with an ambiguous reservation (decision rules in
+   [deployment.md](deployment.md#operator-recovery-through-the-admin-panel)), preview "release as
    compensation" and execute; verify the reservation is `released`, the quota is back, and `/audit` shows
    `image.resolve` alongside the domain's `image_reservation_resolve` row.
 
 **Pass criteria:** Promo status follows the documented machine with version checks; image recovery is
 reachable and audited.
 
+### ERASE-01 — Account erasure (development)
+
+**Status:** Passed on development, 2026-09-24. Build 7e92ba0 for steps 1 to 5 and 7; the step 6 sign-ins ran on c25f86d. The account was a throwaway password account, `testlirl_erase01`.
+
+- **Not yet run:** the follow-up alert checks in steps 4 and 6 (#453). They came after this run, and the account was erased before migration 036.
+- **Reworded after the run**, to match the code:
+  - the precondition: the letter was `accepted`, that is with the printer, and the erasure counts that as finished;
+  - step 2: the account still had a letter, so Pay & Send was not offered and a pack checkout stood in;
+  - step 6: it now covers a password account.
+
+What each step showed:
+1. The preview named nothing in flight: one letter, two drafts and the upload link to erase; one order kept; two credits and one gift letter forfeited. No email appeared.
+2. With a pack checkout open, the preview named "1 orders not settled", and Execute was refused with `ADMIN_INVALID_STATE`. A pack checkout stays open for 24 hours and Back does not settle it (#461), so it was settled by paying. The preview then showed nothing in flight.
+3. The erasure was queued, and `/audit` showed `account.erase` with the reason and no email. A form left open past the 15-minute idle answered a bare `forbidden` and needed a fresh elevation (#462).
+4. The 18:00 UTC run erased the account: one letter scrubbed, two drafts deleted, five descriptions cleared. The page showed `e***@erased.invalid` and the send block `account_erased`, and the letter stayed `accepted`.
+5. In ChatGPT, the balance call answered "Account closed" with the sentence, and `get_account_balance` never started (`identity.account_erased_refused`). The dashboard showed the sentence, and its calls answered 403.
+6. A fresh password sign-in (`prompt=login`) got the sentence. After the Auth0 user was deleted, signing up again with the same address opened a new, empty account (`auth0|6ab589d1…`). The stub stayed erased.
+7. A new preview was refused (`ADMIN_INVALID_STATE`).
+
+**Preconditions:** A disposable development test account that has signed in on the website and in the
+(DEV) ChatGPT connector, has sent a letter that is now with the printer or finished (`sent`, `accepted`,
+`delivered` or `failed`), and holds a draft and a saved return address. Nothing on it is in flight.
+
+**Steps:**
+
+1. [x] Open the account in the panel. Under **Erase account**, preview. Verify that "Still in flight" says
+   nothing, that the counts match the account, and that no email appears anywhere in the preview.
+2. [x] Start a checkout on the account and leave it open: Pay & Send if the account has no letters,
+   otherwise a letter pack. Preview again: verify it names one order not settled and that confirming is
+   refused. Settle it, then preview again. A Pay & Send checkout expires after about 40 minutes. A pack
+   checkout stays open for 24 hours and Back does not settle it (#461), so pay it.
+3. [x] Confirm with the development phrase and a reason with no personal details. Verify the account page
+   says the erasure is queued, and that `/audit` shows `account.erase` with counts only.
+4. [x] After the next hourly maintenance run (the `account-erasures` task on `/maintenance`), verify on
+   the account page:
+   - erased, with counts;
+   - the email shows as `e***@erased.invalid`;
+   - the letters keep their statuses;
+   - "Still to do by hand", linking an open `account_erasure_followup` alert. The alert is also listed
+     on `/alerts`, with the account in its "Order or account" column. Its page lists the steps, and its
+     details hold the account id and nothing else (#453).
+5. [x] Call any tool from the (DEV) connector: verify the erased-account sentence, and that nothing ran.
+   Reload the website dashboard: verify the same sentence (needs website #36 on development).
+6. [x] Sign in again with the same method, forcing a fresh sign-in (`/auth/login?prompt=login`): verify
+   the same sentence. Delete the Auth0 user in the development tenant. Resolve the follow-up alert with
+   the code its form fills in, `auth0_user_deleted`: verify the account page then says the follow-up is
+   done. Then sign in once more:
+   - a Google or Apple sign-in brings back the same subject: verify the same sentence;
+   - a password account cannot sign in once its Auth0 user is gone. Sign up again with the same address:
+     verify a new, empty account, because the erasure released the address.
+7. [x] Preview an erasure of the account again: verify it is refused.
+
+**Pass criteria:**
+- Nothing is queued while money or mail is moving.
+- The erased account keeps its money records and loses its content and identity.
+- Every sign-in path refuses it with one sentence.
+- The steps done by hand stay on an open alert until an operator resolves it.
+
 ### ADMIN-OPS-01 — Retention report and quarantine listing
+
+**Status:** Partly run on development on 2026-09-28 (8a169db). The quarantine was empty, because
+RETENTION-01's rows had been purged, so nothing could be found by id. The comparison with
+`npm run maintenance` needs the development database credentials on the machine running it.
 
 **Steps:**
 
 1. [ ] Open `/retention`; verify the counts (redacted letters and drafts, quarantine rows, purge due) and
    the report of what the next enforcing run would touch, matching `npm run maintenance` in report mode.
-2. [ ] Verify the quarantine table shows source table, row id and dates only: no content anywhere on the
-   page, and no restore control.
+   (The page showed 4 letters redacted, no drafts, an empty quarantine. The next run would take 0
+   letters (90 past the window, all 90 held back) and 0 drafts (13 abandoned drafts held back).
+   `/maintenance` showed the daily sweep completed 5 hours before, with no error. Not compared
+   with a report run.)
+2. [ ] Verify the quarantine table shows source table, row id, account and dates only, with a restore
+   control per row and no content anywhere on the page. (Empty on the day.)
+3. [ ] Search the quarantine by a letter id, then by the account it belongs to: verify each finds that
+   letter's copy, and a search for an unknown id finds none. On the account page, verify the link to its
+   quarantined copies opens the same search. (An unknown id found none: "no copy matches". The
+   account page links "its quarantined copies" to `/retention?q=<account>`. There was no copy to
+   find.)
 
-**Pass criteria:** Report mode only, metadata only.
+**Pass criteria:** Metadata only; any copy can be found, however old; a restore is a queued command
+(`RETENTION-01`).
+
+### RETENTION-01 — The first enforcing sweep (development)
+
+**Status:** Run on development on 2026-09-24 at build 7e92ba0. Results by step:
+- Steps 1, 2 and 5 passed.
+- Step 3 passed for the backlog rows. No row was swept on time, so the on-time purge could not be observed.
+- Step 4 was not verified, because nothing past the window was in flight.
+
+The run's figures:
+- **Before switching:** 3 letters due (93 past the window, 90 held back). No paid or abandoned drafts were due (17 abandoned drafts held back).
+- **The 13:00 UTC sweep:** `lettersRedacted: 3`, no drafts, nothing purged, `moreWaiting: false`, no errors. The log carried counts only. The batch was not full, so there was no `retention.backlog_remaining`.
+- **Quarantine:** the three rows showed "purge after 24h" from the moment they were quarantined.
+- **Restore:** letter `d3cb6e47` showed its saved copy and "purged 23h from now". The owner confirmed the restore, and the 15:00 run logged `retention_restore.completed`. **Recent restores** then read `restored`, the letter's page no longer showed it redacted, and `/retention` counted it as due again.
+
+Run on development before `CONTENT_RETENTION_MODE=enforce` is set anywhere else (#153).
+
+**Steps:**
+
+1. [x] Before switching: note the counts on `/retention` (letters, paid drafts and abandoned drafts due,
+   and held back).
+2. [x] Set `CONTENT_RETENTION_MODE=enforce` on `letter-irl-maintenance-dev`. After the next daily
+   `content-retention-sweep` (`/maintenance`), verify each redacted count rose by its due count from
+   step 1 or by the batch size (`CONTENT_RETENTION_BATCH_SIZE`, 500 by default), whichever is smaller,
+   give or take rows that came due in between. Verify the maintenance log carries counts only, and
+   `retention.backlog_remaining` when a batch was full.
+3. [x] The same day, verify on the quarantine table:
+   - a row swept on time purges when its published period ends;
+   - a row swept after its period (the backlog) purges about a day after it was quarantined. That day is
+     all the time there is to restore a backlog row the sweep should not have taken, so check the swept
+     rows now, not after the next run.
+4. [ ] Verify letters that were still in flight (queued, held, or with an unsettled order) were not
+   touched.
+5. [x] On a quarantined letter's own page (`/letters/<id>`), verify the saved copy shows with its purge
+   time, preview its restore and confirm it. After the next hourly run, verify under **Recent restores**
+   on `/retention` that it says `restored`, and that the letter page no longer shows the content as
+   redacted. The next daily sweep quarantines it again, because nothing about it changed.
+
+**Pass criteria:** The sweep cleared what the report said it would and nothing in flight, and a restore
+put a copy back.
 
 ### ADMIN-OPS-02 — Tier override
 
@@ -994,6 +2853,35 @@ reachable and audited.
 
 **Pass criteria:** Routing changes are validated against the runtime registry and versioned; the sync is
 explicit about dry run versus apply.
+
+### ADMIN-LIMITS-01 — Set a daily limit, refuse once, one alert, clear (#514)
+
+**Status:** Passed on development on 2026-09-28 (8a169db), elevated by the owner. It came after
+`npm run admin:provision-access` was re-run for migration 038 (the owner pasted the connection
+string at a masked prompt, `C:\letter-irl-scripts\provision-dev-admin.ps1`).
+
+**Steps:**
+
+1. [x] `/limits` lists the four limits with the API's configured value ("reported N m ago"), the value
+   in force, today's use and today's refusals, and "Overrides: none". (100 letters overall, 25 per
+   account, $200.00 per account, 20 gift letters.)
+2. [x] Set **letters per account per day** for a test account to what it has already sent today, for
+   the rest of today. The preview says today's use already meets the new value, so the next send is
+   refused, and that the value lapses at midnight UTC. (testlirl02 had sent 2. Override `83192852…`,
+   expires 2026-09-29T00:00Z.)
+3. [x] Send one more letter from that account. It is refused, and nothing is charged. (On the website
+   confirmation page: "This account has reached its daily limit of 2 items. Please try again
+   tomorrow." The balance stayed at 3 letters.)
+4. [x] `/alerts` shows one open `daily_limit_reached` alert (warning) naming the account. Its details
+   hold the limit key, the UTC day, the value and the account.
+5. [x] A second refusal the same day adds to **Refused today** on `/limits` and opens no second alert.
+   (It read "2, last 4s ago", with still one alert.)
+6. [x] Clear the override: `/limits` says the account is back on the value for everyone. Then resolve
+   the test alert.
+7. [x] `/audit` lists `limit.set` and `limit.clear` with the reasons typed.
+
+The refusal said "items". Since #520 it reads "… its daily limit of 2 letters and postcards", or
+"1 letter or postcard" for a limit of 1.
 
 ### ADMIN-LEGACY-01 — Public denial unchanged after the legacy removal
 
@@ -1033,11 +2921,218 @@ End-to-end test of complete user experience.
 
 ### Multi-Provider Journey (US-ACCT-02)
 1. [ ] Login with Google
-2. [ ] Note user ID
-3. [ ] Switch account
-4. [ ] Login with GitHub
-5. [ ] Different user ID (separate account)
-6. [ ] Each account has own credits/letters
+2. [ ] Note the email on the balance
+3. [ ] End the Auth0 session
+4. [ ] Login with GitHub **on the same confirmed address**
+5. [ ] Same account: one balance, the same letters
+6. [ ] An address the two methods do NOT share is a different account
+
+### LINK-01 — One account per confirmed address
+
+Run on development first, after the two Post Login Actions and the
+`Account Linking` machine-to-machine application are in place
+([auth0-tenant-configuration.md](auth0-tenant-configuration.md)), and again on
+production before anyone but the owner signs in there.
+
+**Preconditions:** both Actions are in the Post Login trigger flow, with
+`link-verified-email` **above** the email-claim Action, **before** the API is
+deployed against the tenant. The order is not a formality and there is no
+fallback: a new customer arriving between the deploy and the Action update is
+refused until their token is re-minted or expires, 24 hours. Then: the API is
+deployed, `/readyz` is green, and the connector has been refreshed.
+
+**Tenant state recorded when this was first set up (development, 2026-09-19):**
+all 8 Auth0 users held distinct addresses, so linking had nothing to join and
+could not strand a row holder; exactly one user (`testuser321@…`, one login,
+nine months old) had `email_verified: false` and is denied by the gate, which
+is the intended behaviour. Both facts were read from the Users list with
+**Search by: Lucene Syntax (Advanced)** and `email_verified:true` /
+`email_verified:false` - the plain "User" search silently matches the query as
+literal text and answers "No users found" for both, which reads exactly like a
+clean tenant.
+
+**Do the row-holder check first, and immediately before enabling the Action.**
+For every confirmed address held by more than one Auth0 user, the oldest must
+be the subject holding the `users` row, or the address must have no row.
+Otherwise linking hands the surviving subject an account it cannot reach, with
+no way back. The procedure, and the hand-written SQL that is today's only
+remedy when a pair does not match, are in
+[auth0-tenant-configuration.md](auth0-tenant-configuration.md).
+
+1. [x] Sign in to the website with Google. Note the balance and the letter
+       count.
+2. [x] Sign out, then sign in with a password on the same confirmed address.
+3. [x] The dashboard shows **one** account: the same balance, the same letters.
+4. [x] Auth0 -> User Management shows one user with two identities, and the
+       Action logs show the link.
+
+   **Steps 1 to 4 passed on development on 2026-09-29/30**, with a Google account new to the
+   tenant (LINK-02).
+   - **Google (21:39Z).** The first sign-in opened an empty account (`identity.user_created`).
+   - **Password sign-up (23:06Z).** A sign-up with a password on the same Gmail address was
+     refused until confirmed, and confirmed at 23:07:01Z.
+   - **The next sign-in.** At 23:07:57Z Auth0 logged "Link a User Account", then the login. The
+     dashboard showed the Google account's name, balance and letters. The API logged no
+     `identity.user_created`: the token carried the Google subject, whose row already existed.
+   - **Auth0's view.** The user list shows the address once, as the Google user; no separate
+     password user remains.
+   - **Not seen.** The user page itself would not load that night, so the two identities were not
+     seen on it.
+   - **A trap.** A sign-up with an address that already has a password account shows only "Something
+     went wrong, please try again later". The log says "The user already exists", but the person
+     learns nothing.
+5. [x] A brand-new password sign-up gets one confirmation email and is refused
+       until its address is confirmed, with "We've sent a confirmation link to
+       your email address - check your spam folder if it's not in your inbox.
+       Open the link, then sign in again. If nothing arrives within 10 minutes,
+       sign in again for a new link." Signing in again sends nothing within ten
+       minutes of the sign-up; after that, one sign-in sends one fresh link, and
+       the ten minutes start again. Once a link is opened, the next sign-in
+       opens a new, empty account.
+
+       **Passed 2026-09-25 on development** (#428), as `testlirl01+428@…`, a
+       plus-address that Auth0 treats as a new user. Times are UTC, from the
+       Auth0 log:
+       - 04:38 sign-up, with Auth0's own email. The automatic sign-in a second
+         later was refused with nothing re-sent.
+       - 04:49, eleven minutes on: a sign-in was refused and sent one fresh
+         link, and Auth0 recorded the time on the user.
+       - 04:49 to 04:50: six more refused sign-ins sent nothing, so the
+         recorded time survives a refused login.
+       - Two emails arrived in all, at 04:38 and 04:49.
+       - 13:44: after a link was opened, the sign-in reached an empty
+         dashboard. The API logged `identity.user_created` with no identity
+         warning, and the admin lookup shows the new account with 0 letters.
+
+       The 2026-09-23 run passed on the refusal alone: that version of the
+       Action worded it differently and sent another email on every refused
+       attempt.
+6. [ ] An Apple sign-in with **Hide My Email** on is a separate account, as
+       documented. (Not run: Apple is not in the launch, #437.)
+7. [x] In ChatGPT, connect Letter IRL on an address that already has an account
+       through another method. It connects rather than answering "We couldn't
+       connect this account".
+
+       **Passed 2026-09-22 on development**, with the connector created with
+       **OIDC enabled** unticked, as the OAuth Flow section now requires. The
+       link listed all 23 tools, and ChatGPT called `get_profile` during the
+       link and stored its answer - the account id and the confirmed address -
+       as the link's owner profile. `get_account_balance` then ran in a fresh
+       chat with the connector attached.
+
+       **The failure was mis-attributed twice before that.** It started this
+       work on 2026-09-18 and was first put down to the duplicate-address
+       collision, then on 2026-09-21 to ChatGPT not requesting `openid` (#424,
+       #425). Both were wrong. ChatGPT does request `openid profile email`, but
+       Auth0 grants no OIDC scope to its strict CIMD client - so the grant that
+       was read as evidence can never show one - and with **OIDC enabled**
+       ticked ChatGPT refuses a link that brings no ID token
+       ([chatgpt-connector-oidc-setting.md](learnings/chatgpt-connector-oidc-setting.md)).
+       When a connect fails, read ChatGPT's own callback response
+       (`/backend-api/aip/connectors/links/oauth/callback`) in the browser tab
+       first: nothing server-side logs a link that fails before this server is
+       called.
+
+       If the link fails after ChatGPT reaches this server, the API log shows a
+       `mcp.client_request` for `tools/call get_profile`. With no
+       `tool.invocation.start` after it, the signature is shared: with an
+       `auth.account_missing_no_verified_email` or
+       `identity.email_already_linked` line beside it, the wrapper refused the
+       account (the row-holder hazard above produces exactly this); with
+       nothing beside it, it is either the SDK rejecting a call made without
+       an `arguments` object before our code runs, or a token lacking
+       `mail:read`, which the scope refusal does not log.
+8. [x] `get_account_balance` names the address and no longer names a sign-in
+       provider.
+
+       **Passed 2026-09-22 on development:** "Account: <address>", and no provider.
+9. [x] Gift rules still hold across the linked methods: a code printed on your
+       own letter is refused whichever method you sign in with.
+
+       **2026-09-23, development:** passed for the Google sign-in. Not yet run for the password
+       sign-in, and it needs a fresh, unused code: a used code is refused to everyone before the
+       own-code rule runs. The own-code rule also matches the issuer's normalised address, so any
+       sign-in on the same address is refused, linked or not.
+
+       **2026-09-30, development: passed for the password sign-in.** The linked account from steps 1
+       to 4 sent a gift letter (GIFT-01, code 314M-5VXS). Signed in with the password, **Claim my
+       letter** at `/g/314M5VXS` returned to the dashboard with "This gift code was printed on a
+       letter you sent, so it is for your recipient to use." (`promo.redeem` 400). The code stays
+       unused.
+10. [ ] A token with no confirmed address gets the sentence, not a broken
+       account. Simulate on development by taking the claim Action out of the
+       trigger flow and signing in with a fresh subject: both surfaces then
+       refuse. Every tool answers "Letter IRL needs a confirmed email
+       address...", and the dashboard answers 403 with the same text. Put the
+       Action back afterwards. Use a fresh subject on a **confirmed** address
+       that no other Auth0 user holds - an unconfirmed one is denied by the
+       linking Action with its own message and never reaches the server, and a
+       shared address is linked into the older account instead.
+
+       **2026-09-23, development: the server passed, the surfaces did not.** With
+       the claim Action out of the flow, a fresh subject's REST calls answered 403
+       with the sentence (`auth.account_missing_no_verified_email`), but the
+       dashboard drew an empty account (dnobj/mail-letter-irl-website#34), and in
+       ChatGPT the refused `get_profile` failed the link as
+       `OAUTH_OWNER_PROFILE_ID_MISSING`, so the sentence never reached the
+       person (#429). The Action was put back and checked live.
+
+### LINK-02 — Every launch sign-in method yields a confirmed address
+
+**Status:** Run on development on 2026-09-29, on e65c5b1. Three methods passed and **Microsoft
+failed**. Production is not run.
+
+**Findings from the development run:**
+- **Microsoft.** Auth0 answered "OAuth2Strategy requires a clientID option" before Microsoft's page
+  appeared. The connection has no client id, and Auth0 no longer lends its development keys for
+  Microsoft. The website showed its "Something went wrong" page.
+- **GitHub.** The connection runs on Auth0's development keys: GitHub asked to "Authorize FDR Social
+  Dev Keys V2 - US", with a button labelled "Authorize iam-login". Auth0 logs a warning on every
+  such sign-in.
+- **Google.** The account chooser said "to continue to auth0.com", because the sign-in returns to
+  the tenant's own domain.
+- **Production.** Each social connection needs its own OAuth app named Letter IRL, and a custom
+  Auth0 domain would put letterirl.com on these screens and in the confirmation email's link
+  (#459). The production tenant is not checked yet.
+- **ChatGPT's step.** The (DEV) plugin's **Connect another account** links each identity beside the
+  existing ones, without disconnecting. ChatGPT then asks which account to use.
+
+The owner kept the refusal of a sign-in that carries no confirmed address (#429, 2026-09-23). In
+ChatGPT that refusal surfaces only as "We couldn't connect this account", so a launch sign-in method
+must always vouch for the address. A method that fails here comes off the launch list: disable its
+connection for the Letter IRL applications before launch. The rule does not change.
+
+**Launch methods:** Google, GitHub, Microsoft (personal accounts only, per
+[auth0-tenant-configuration.md](auth0-tenant-configuration.md)), and email with a password. Apple is
+not in the launch (#437).
+
+**Preconditions:**
+- A test identity for each method that has never signed in to the tenant, so each run is a first
+  sign-in.
+- The GitHub connection requests the account's email address.
+
+Run on development, then on production before launch. The sign-ins are the owner's.
+
+**Steps, for each method:**
+
+1. [ ] Sign in to the website with the method. For email with a password, sign up and confirm the
+   address from the email first; LINK-01 step 5 covers the refusal before confirming.
+2. [ ] The dashboard shows a new account. The API log shows `identity.user_created`, and no
+   `auth.account_missing_no_verified_email`.
+3. [ ] In Auth0 → User Management → Users, the user's email shows as verified (Raw JSON:
+   `"email_verified": true`).
+4. [ ] In ChatGPT, connect the environment's Letter IRL connector with the same method: the link
+   succeeds and `get_account_balance` answers.
+
+| Method | Development | Production |
+|--------|-------------|------------|
+| Google | Passed 2026-09-29: new account, verified, ChatGPT linked, balance answered | |
+| GitHub | Passed 2026-09-29, on Auth0's development keys | |
+| Microsoft | **Failed 2026-09-29**: the connection has no client id | |
+| Email and password | Passed 2026-09-29: refused until confirmed, the email in the inbox, then a new account | |
+
+**Pass criteria:** every launch method gives `email_verified: true` on a first sign-in and opens an
+account in both environments. Any method that does not is disabled before launch and recorded on #158.
 
 ---
 
@@ -1103,10 +3198,18 @@ Rollout note (July 16, 2026): the outbox migration, pooled development database 
 Run after fixing issues.
 
 ### After Auth Changes
+
+**Status:** Run 2026-09-15, after the Auth0 Default Audience repoint and the retired API's
+deletion (#391):
+- Token validation: the ChatGPT balance calls above succeeded against both APIs, and both
+  dashboards' REST calls returned 200.
+- Duplicate clients: none after the development reconnect.
+- Login providers and personal access tokens were not exercised.
+
 - [ ] All OAuth providers work
-- [ ] Token validation works
+- [x] Token validation works
 - [ ] PAT authentication works
-- [ ] No duplicate Auth0 clients created
+- [x] No duplicate Auth0 clients created
 
 ### After Payment Changes
 - [ ] Checkout creates correct session
@@ -1132,14 +3235,19 @@ Run after fixing issues.
 | `4000 0000 0000 9995` | Insufficient funds |
 
 ### Test Addresses (US)
-```
-Sender:
-123 Test Street
-San Francisco, CA 94102
 
-Recipient:
-456 Sample Ave
-New York, NY 10001
+PostGrid's address verification rejects made-up addresses, even in test mode: the pair this
+section used to list failed on 2026-09-22. These two pass, in **test mode only**; in live mode they
+would really be mailed.
+
+```
+Sender (verified, after PostGrid's correction):
+1600 Pennsylvania Avenue NW
+Washington, DC 20500
+
+Recipient (accepted with the missing-unit note, issue #200):
+350 Fifth Avenue
+New York, NY 10118
 ```
 
 ### Test Promo Codes
@@ -1188,7 +3296,7 @@ linked PR before enabling Pay & Send.
 - [ ] For each successful JIT purchase, verify one authoritative `orders` row, one consumed draft, one funded `letters` row, one outbox job, one provider submission, and the configured image entitlement grant.
 - [ ] Replay both completed-payment and asynchronous-payment-success events. Verify webhook-event deduplication and no duplicate fulfillment, provider submission, credit, or entitlement.
 - [ ] Leave an asynchronous Checkout session in `complete`/`unpaid`; run maintenance and confirm it remains `checkout_pending` until Stripe reports success, failure, or expiry.
-- [ ] Simulate a terminal failure before provider acceptance. Confirm `refund_pending`, at most one active Stripe refund for the order, retry recovery after a failed refund, and eventual `refunded` status.
+- [ ] Simulate a terminal failure before provider acceptance. Confirm `refund_pending`, at most one active Stripe refund for the order, and eventual `refunded` status. Cancel a pending sandbox refund in the Stripe dashboard: its webhook holds the order at once (`REFUND_NOT_COMPLETED`) and opens one critical `refund_not_completed` alert, and no maintenance run makes a new refund (#730). Refunding again in the dashboard completes the order through its webhook and clears the code; the alert stays open until resolved by hand.
 - [ ] Start two refund-maintenance attempts concurrently and confirm only one acquires the lease and contacts Stripe. Then interrupt persistence after Stripe creates the refund; on replay, confirm the existing refund is discovered and finalized without creating another.
 - [ ] Issue a partial sandbox refund and confirm the order and all entitlements are not marked refunded/revoked, and that exactly one critical `stripe_partial_refund_unmatched` alert is opened for the order (#323); then complete the full refund and verify terminal state.
 - [ ] Confirm provider acceptance changes the JIT order to `fulfilled`; failures before acceptance use refund handling and never resubmit an already accepted mail item.
@@ -1218,3 +3326,123 @@ linked PR before enabling Pay & Send.
 - [ ] Restore `JIT_PURCHASE_ENABLED=false` in Railway development.
 - [ ] Confirm production configuration, Stripe live mode, production Neon, and production mail-provider state were never changed.
 - [ ] Attach the collected browser, Stripe, provider, and database evidence to the draft PR and record any deviations as linked issues.
+
+## HOME-01: read-only Letter IRL home
+
+Status: Partly run on ChatGPT web, 2026-10-07 (results below). Step 4, and parts of steps 2, 3, 5, 6 and 7, remain for the owner. Automated MCP wire, query and DOM coverage accompany #639.
+
+1. Deploy the feature to development and explicitly enable `LETTER_IRL_HOME_ENABLED` there. Keep production off. Refresh/reconnect the existing ChatGPT development connection.
+2. Owner: look for Letter IRL in ChatGPT's sidebar and open it. Record the app version, platform and whether the entry appears. If absent, record the limitation and try invoking `open_letter_home` in a development conversation. Do not claim sidebar acceptance.
+3. Verify the initial result renders without another call. Check empty state on an account with no mail and the maximum of 20 per list.
+4. With two development test accounts, confirm each sees only its own active drafts and retained mail. Expired, consumed and redacted drafts are absent, as is redacted mail. No full addresses, content, images, signatures, purchases or prices appear.
+5. Check scheduled dates, gift markers, failed/cancelled/returned status and **Delivery estimated**. Certified mail carries its status-specific note and a USPS link only for a valid number.
+6. Open a draft review link. It must use the development website, require that account's sign-in and show the existing confirmation page. Do not press Send for this check.
+7. Refresh once. Check success, a failure's stale-data warning and recovery. Check narrow width, dark mode, keyboard focus and screen-reader feedback.
+8. Disable the flag and reconnect. The tool/resource disappear; cached calls refuse. Record results and the privacy scope review before live enablement.
+
+External boundaries: this slice reads stored data only. No webhook, vendor dispatch, payment, refund or entitlement mutation. Draft links reuse the existing website.
+
+**Run 2026-10-07, ChatGPT web (Plus), connector "Letter IRL (DEV) v8 no-OIDC" signed in as testlirl02, development at 62a6453 (widget v74):**
+
+1. Pass. The home flag was on, and the connector's Refresh tools was pressed.
+2. **No sidebar entry on ChatGPT web**, before and after Refresh tools. Sidebar acceptance is not claimed. Opened instead with `@Letter IRL (DEV) v8 no-OIDC` and "Open my Letter IRL home."
+3. Partly. It drew on the first call. Account state: 0 drafts, 17 mail items. The 20-item maximum and the empty mail list were not exercised.
+4. Not run: needs a second account. Per item, the result carried a recipient's name, city and state, mail type, status, date, gift marker and id, and a draft's review link. It carried no street address, words, image, signature, purchase or price.
+5. Partly: delivered mail read **Delivery estimated**, and gift mail was marked. **Found:** ChatGPT's reply under the card said the mail was "marked delivered", because the tool gave the model a bare `delivered`. Fixed with this record: every order status a model reads now says a delivered status is the printer's estimate. Scheduled, failed, cancelled, returned and certified mail were not on this account.
+6. Pass, with one gap: after Refresh, a new draft showed with a review link to `<development website>/confirm/<draftId>`. That page was the existing "Check your letter, then send it" page, signed in as the draft's own account. Send was not pressed. The browser already had that account's session, so the sign-in prompt itself was not seen.
+7. Partly. Refresh reached the server and drew a new draft. **Found:** a Refresh that works was silent; it now says "Mail list refreshed." Narrow width (375 px) fits, and dark theme follows ChatGPT. Not run: light theme (the account's ChatGPT is set to dark), a failed Refresh while the flag is on, keyboard focus, and a screen reader.
+8. Pass. `LETTER_IRL_HOME_ENABLED=false` on development, redeployed:
+   - a connection holding the cached tool got "Tool open_letter_home not found";
+   - the open card's Refresh got a 400 from ChatGPT's `call_mcp` and showed "Refresh failed. The mail shown may be out of date; please try again.", with nothing new disclosed.
+
+   ChatGPT's plugin pages do not list tools, so the tool's absence there was not observed.
+
+Also found: the home is very long inline (17 items ran to several screens). That is #662.
+
+
+### HOME-02: selection and scheduled cancellation
+
+Needs HOME-01, a host advertising text model context, and development arrive-by for cancellation. Owner-only ChatGPT surface acceptance remains pending.
+
+1. Select a draft in the home: the selected recipient and draft ID appear. Ask to revise it; verify the model uses this ID and rechecks draft status. Select an order; the model must not edit it as a draft. Clear selection and verify prior selection is removed.
+2. On the letter card, while home is enabled, in a host that takes model context natively (Claude, VS Code), the card tells the conversation which draft it shows by itself, with no button (#650): ask "make it warmer" without naming the draft and check the model acts on that draft. After the card sends the draft, the selection is taken back. With home off or unsupported context, nothing is shared and no button appears.
+   **With the home off, in ChatGPT,** the letter card now asks `get_draft_status` too (#676): check Send, Pay & Send, a restyle and setting a date behave as before, and a reopened card shows a sent letter as sent; after a started checkout, its Pay & Send reopens the same checkout.
+   **In ChatGPT (web and Android) the letter card opens the handshake to share (#675, #676, widget v82).** Refresh the connector's tools first: the card's `get_draft_status` call comes with them. **Before the home goes on in production**, with the home on and a home card opened in the same chat first, check with it open: the composer's chip reads as the sentence (no JSON); the card keeps its height; **Send** sends once; **Pay & Send** opens checkout and the card follows the payment; reopen the chat and check a sent card stays sent (no second Send: the card asks the server, #676), and that after a started checkout its Pay & Send reopens the same checkout, never a second payment; the console shows `letterIrlHost: Plugin Extensions handshake answered`.
+3. Deep-link acceptance belongs to the subsequent #643 slice; this selection/cancellation PR does not expose share links or navigate from deep-link routes.
+4. Select scheduled prepaid or gift mail. Cancel must ask first; Keep scheduled changes nothing. Confirm cancellation once and verify the returned-funding sentence agrees with the tool response and balance; the order stays in view, open, reading Cancelled; not mailed. Refresh: the order is cancelled and Cancel is absent. A duplicate request must return no second refund.
+5. Pay & Send, already printing, cancelled, and undated mail offer no Cancel. With arrive-by off, Cancel is absent. A `mail:read` token's cancellation must be refused by the existing scope guard.
+6. Simulate refusal/disconnection during cancellation: the home must report cancellation unconfirmed, retain the previous state, and request Refresh. It must not claim restored funding. Refresh and check the authoritative state before retrying.
+7. Disable host context support or refuse the update: selection stays visible locally and the notice says it was not shared. Check desktop and mobile layouts and dark mode.
+
+**Run 2026-10-11 on DEV (ChatGPT web, the built-in browser pane, testlirl02):**
+- **Step 2 failed its production gate**, on f3b338e (#675, widget v80), with the letter card opening the handshake.
+  - What worked: the composer's Context chip read as the sentence ("Shared by a Letter IRL letter card on 2026-10-11 at 21:47:27 UTC: the card shows the letter draft …"). Asked with no tools, the model named the newest card's draft id and time. "Make it a bit warmer" acted on that letter (a new preview, same recipient and stationery). Pay & Send opened checkout, and the chip was taken back. The card's layout was unchanged.
+  - What failed: **reopening the chat lost the card's kept state.** The card that had started a checkout offered Pay & Send again and shared again. This happened twice; a control run with the home off (no handshake) kept it ("A checkout for this letter was started from this card"). Send could not be tried: the account had no letters.
+  - The letter card's opt-in is withdrawn (#676, widget v81). The v81 check in step 2 (home on, a home card in the same chat) is still to run; the ChatGPT share waits for #676. Since restored with the card asking the server (#678, widget v82); step 2 is to run again on it.
+- **Step 3:** belongs to HOME-03, of which only step 1 has passed (2026-10-09); HOME-03 steps 2 to 7 are still to run.
+- **Step 5 passed in part:** the home offered no Cancel on mail already printing (21c2e770, accepted by the printer), on cancelled mail (21dc0954), or on delivered mail with no arrival date. The account had no Pay & Send order or scheduled mail. Pay & Send and arrive-by off are pinned by `letterHomeService.test.ts` (`cancellable` only for scheduled prepaid or gift mail while arrive-by is on), and `cancel_scheduled_mail` needs `mail:draft` (`toolScopes.test.ts`).
+- **Step 6:** covered by `letterHomeCard.test.ts` (a refused or failed cancellation keeps the prior state and asks for Refresh). A dropped connection mid-cancel cannot be caused by hand.
+- **Step 7 passed in part:** the home read well in light and dark at desktop width, and at 375 px wide (no sideways scroll, the state under the name), in both themes. A refused share cannot be caused in ChatGPT; `letterHomeCard.test.ts` covers the notice.
+
+**Run 2026-10-08 on DEV 796c05c (ChatGPT web, Claude web; testlirl02 with a scheduled gift letter):**
+- Step 1 on ChatGPT web: **failed**. Selecting showed "This host cannot share the selection with the conversation" (#665: `window.openai` has no model context; passed on the 2026-10-09 re-run below). On Claude web the card said "Selection shared with the conversation.", but Claude's model did not see it on the next turn.
+- Step 4 on ChatGPT web: **passed**. Cancel asked first; Keep scheduled changed nothing; Confirm cancellation said "Cancelled. The gift letter is back in the account, to use again."; the balance showed the gift letter back; the order stayed in view reading "Cancelled; not mailed" and Cancel was gone.
+
+Automated coverage: real MCP wire registration/schema checks, owner-isolated PostgreSQL home reads, DOM cancellation/selection/deep-link checks, host capability negotiation and serialized replacement context. Existing scheduled-mail PostgreSQL suites cover idempotency, cancellation versus dispatch, expired/refunded funding and process recovery; no transaction workflow changes in this slice.
+
+### HOME-03: owner-scoped deep links
+
+Requires HOME-01/HOME-02 and the actual installed development plugin ID configured as `LETTER_IRL_CHATGPT_PLUGIN_ID`; owner-only ChatGPT surface acceptance is pending.
+
+1. Select a draft/order and follow Open this selection. Verify the ChatGPT URL encodes the full `/draft/<id>` or `/order/<id>` path; the current owner-visible item is selected on initialize.
+2. Open a different deep link while the home is running; the selection and model context must change to that item. `/` clears selection. No ID is supplied to the server entrypoint: it still receives `{}`.
+3. Missing, older-than-the-list, expired, redacted, other-account and malformed routes report unavailable, with no arbitrary lookup or content disclosure. A Refresh may resolve a previously missing item once it is in the current owner-scoped list.
+4. After a successful deep link, Clear selection then Refresh: the original link must not silently select the item again. Selecting a different item then Refresh preserves the newer choice.
+5. After an unresolved deep link, select a visible item (or clear) before Refresh. Even if the original target now appears, the explicit newer choice must take precedence. A genuinely new host route may navigate again.
+6. Unset the plugin ID: no share link is offered. Unsafe IDs or URLs cannot produce links. Select draft/order must remain usable locally and unsupported model context must be reported.
+7. Test dark mode and narrow layout. No send, edit, payment or cancellation occurs from navigating a deep link.
+
+**Run 2026-10-08 on DEV 796c05c, ChatGPT web, `LETTER_IRL_CHATGPT_PLUGIN_ID` set:** "Open this selection" was offered. Its link went to the full-page app view (`chatgpt.com/mcp-app/<app id>/open_letter_home#/order/<id>`), where the home drew fullscreen, but nothing was selected: the route never reached the card (#665).
+
+**Re-run 2026-10-09 on DEV 1cd57cf (#666, the handshake), ChatGPT web:**
+- Step 1 on ChatGPT web: **passed**. The same link opened the full-page app view with the order selected.
+- HOME-02 step 1 on ChatGPT web: **passed**. The card said "Selection shared with the conversation." and ChatGPT's composer showed a Context chip. Asked with no tools, the model said "The selected item is order 21dc0954-… for Sam Rivera in New York, NY".
+- Not yet run: HOME-03 steps 2 to 7; HOME-02 steps 2, 3 and 5 to 7 on ChatGPT; and ChatGPT Android.
+
+### HOME-04: the compact home and See all (#662)
+
+Needs the home on in development, an account with more than 4 mail items (testlirl02 has a scheduled letter and 16 delivered), and the connector refreshed after the deploy.
+
+1. ChatGPT web, inline: the home fits about one screen. Drafts and unsettled mail show as one line each, with at most 3 drafts and 4 mail items before "Show N more". Delivered and cancelled mail is folded behind one button such as "Delivery estimated (16)". No recipients section.
+2. ChatGPT's reply under the card does not repeat the list as a table; it mentions only what needs the person. Asked for the list, it gives it. In Claude Code (no card) the model lists the mail as before.
+   Failed or returned mail and the draft expiring soonest come first, even when older than the rest.
+3. Press a line: its details and actions open under it; press again to close. Open the folded group; press Refresh; the group and the open line stay open.
+4. Press See all: ChatGPT opens the full viewer with every item in two columns, recipients and no See all. Close it: the card is compact again. ChatGPT's own expand (side panel, then full viewer) draws the same.
+5. Claude web: the same compact card. See all opens Claude's fullscreen; closing it returns to compact.
+6. VS Code (or any host without fullscreen): See all opens everything in place and reads "Show less"; pressing it folds it back.
+7. A deep link (HOME-03) to delivered mail opens the folded group to show its line.
+8. Phone width (ChatGPT Android): no sideways scroll; the state wraps under the name. Dark and light themes.
+
+**Run 2026-10-08 on DEV 796c05c:**
+- Step 1 passed on ChatGPT web (the inline card about 310 px) and Claude web (about 260 px).
+- Step 2 passed on Claude ("open above, with no drafts waiting and 18 recent items"). On ChatGPT it was partial: the reply led with the scheduled letter but still added a four-row table.
+- Steps 3 and 4 passed on ChatGPT web: See all opened ChatGPT's side panel whole, and Close viewer returned it compact.
+- Step 5 passed on Claude web: See all opened Claude's fullscreen, and closing returned it compact.
+- Steps 6 to 8 were not run.
+
+**Run 2026-10-10 on DEV 1cd57cf, ChatGPT Android (S25 Ultra, 4dm1n with 20 mail items):**
+- **Step 1 passed.** The card was compact, about one screen: the 3 failed letters first, the 17 delivered folded into one button.
+- **See all opened fullscreen** (Android offers no expand of its own), and closing returned it compact.
+- **Selection passed (HOME-02 step 1).** It said "Selection shared with the conversation", and the model named the order with no tools.
+- **A deep link passed (HOME-03 step 1).** It opened the app view with the order selected.
+- **Found; fix in #668, to recheck on Android (fullscreen and the app view, recording the `displayMode` the app view reports):**
+  - ChatGPT's close button and bar covered Refresh in fullscreen and in the app view;
+  - the shared context showed as raw JSON in a chip in the message box;
+  - the title and See all wrapped at phone width.
+
+**Recheck 2026-10-10 on DEV 979909a, ChatGPT Android (the same phone and account), passed:**
+- In fullscreen and in the deep link's app view, Refresh sat clear of ChatGPT's close button and bar.
+- The shared selection read as a sentence, not JSON: "Selected in the Letter IRL home: order 02726a1a…, a letter to "<name>" (<city>, <state>), status: Did not go out. It is mail already ordered, not a draft to edit."
+- The header fitted on one line.
+- The `displayMode` the app view reports was not recorded.
+- Found: the three failed letters, from December 2025, read "Dec 30" with no year. Fixed in widget v79 (#671), so short dates from another year say their year; not yet rechecked on Android.

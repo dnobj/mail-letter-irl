@@ -10,6 +10,7 @@ vi.mock("../../../src/services/commerceService.js", () => ({
 }));
 
 import { createMailCheckoutTool } from "../../../src/tools/createMailCheckout.js";
+import { DuplicateMailError } from "../../../src/services/duplicateMailService.js";
 
 const context = {
   user: {
@@ -69,7 +70,48 @@ describe("create_mail_checkout", () => {
     });
     expect(mocks.createJitCheckout).toHaveBeenCalledWith({
       userId: "user-1",
-      draftId: "draft-1"
+      draftId: "draft-1",
+      allowDuplicate: false
+    });
+  });
+
+  it("hands commerce the content version the person was shown (#695)", async () => {
+    mocks.createJitCheckout.mockResolvedValueOnce({
+      orderId: "order-1", checkoutUrl: "https://checkout.stripe.com/c/pay/test", amountCents: 499, currency: "usd",
+      productDescription: "Pay & Send One Physical Letter", expiresAt: "2026-07-31T12:30:00.000Z", status: "checkout_pending", reused: false
+    });
+    await createMailCheckoutTool.handler({ draftId: "draft-1", contentVersion: "0123456789abcdef" }, context);
+    expect(mocks.createJitCheckout).toHaveBeenCalledWith(expect.objectContaining({ contentVersion: "0123456789abcdef" }));
+  });
+
+  it("asks commerce for another copy only when the model says so (#412)", async () => {
+    mocks.createJitCheckout.mockResolvedValue({
+      orderId: "order-1",
+      checkoutUrl: "https://checkout.stripe.com/c/pay/test",
+      amountCents: 499,
+      currency: "usd",
+      productDescription: "Pay & Send One Physical Letter",
+      status: "checkout_pending",
+      reused: false
+    });
+
+    await createMailCheckoutTool.handler({ draftId: "draft-1", sendAnotherCopy: true }, context);
+    await createMailCheckoutTool.handler({ draftId: "draft-1", sendAnotherCopy: "yes" as never }, context);
+
+    expect(mocks.createJitCheckout.mock.calls.map(([params]) => params.allowDuplicate)).toEqual([true, false]);
+  });
+
+  it("gives a duplicate refusal this tool's own retry advice (#412)", async () => {
+    const duplicate = { kind: "sent" as const, mailType: "letter" as const, recipientName: "Sam", ageSeconds: 120 };
+    mocks.createJitCheckout.mockRejectedValueOnce(new DuplicateMailError(duplicate));
+
+    const refusal = createMailCheckoutTool.handler({ draftId: "draft-1" }, context);
+
+    await expect(refusal).rejects.toBeInstanceOf(DuplicateMailError);
+    await expect(refusal).rejects.toMatchObject({
+      code: "DUPLICATE_RECENT_MAIL",
+      duplicate,
+      message: expect.stringContaining("call create_mail_checkout again with the same draftId and sendAnotherCopy: true")
     });
   });
 

@@ -12,7 +12,7 @@ This log captures short notes discovered while connecting Letter IRL to the Chat
 - Resolution: remove the custom session ID generator so the transport remains stateless. `Mcp-Session-Id` headers are no longer required for subsequent requests.
 
 ## 2025-11-08 — OAuth Reality Check
-- Google Identity Platform / Firebase Auth does **not** expose RFC 7591 dynamic client registration to external developers; you must create OAuth clients manually in the console, so ChatGPT’s connector flow can’t auto-register there.citestackoverflow.com/questions/30385666/which-well-known-openid-providers-is-a-new-site-expected-to-support
+- Google Identity Platform / Firebase Auth does **not** expose RFC 7591 dynamic client registration to external developers; you must create OAuth clients manually in the console, so ChatGPT’s connector flow can’t auto-register there. ([source](https://stackoverflow.com/questions/30385666/which-well-known-openid-providers-is-a-new-site-expected-to-support))
 - We added a `/oauth/register` stub that returns a pre-provisioned client ID to unblock testing, but a production deployment should rely on an identity provider that supports RFC 7591 (e.g., Auth0/Okta CIC).
 - If you want to stay on Google Cloud, the recommended best-of-breed approach is: Auth0 for identity (dynamic registration), Firestore/Cloud Run/etc. for data, with the MCP server validating Auth0-issued tokens.
 
@@ -20,36 +20,76 @@ This log captures short notes discovered while connecting Letter IRL to the Chat
 
 When validating letter content, we use two tiers of limits:
 
-**Soft Limits (Guidance)**: What we tell ChatGPT to aim for in tool descriptions
+**Soft Limits (Guidance)**: neither `tools/list` nor, since #688, `/manifest.json` (generated from the same
+Zod shapes) states line counts; a model learns a limit from the refusal sentence, which names it.
 - `inline_image`: 12 lines
-- `header_image`: 17 lines
+- `header_image`: 15 lines (17 until #534: with the sign-off, 15 fits both the renderer's 16 and the legacy 17)
 - `text_only`: 24 lines
 
 **Hard Limits (Validation)**: What we actually enforce during validation
-- `inline_image`: 15 lines (+3 buffer)
-- `header_image`: 19 lines (+2 buffer)
+- `inline_image`: 14 lines (+2 buffer)
+- `header_image`: 17 lines (no buffer: a 17-line body with a sign-off is refused and retried)
 - `text_only`: 26 lines (+2 buffer)
+
+**A buffer never passes the page.** Until 2026-09-29 the image layouts allowed 15 and 19 lines. A
+print check in PostGrid's test mode printed a second page for both (#77):
+- at 19 lines the header layout put lines 18 and 19 on page 2, with 17 on page 1 under the
+  2-inch image;
+- the inline layout printed a blank second page at 15.
+
+At the new limits, a header-image letter at 17 lines and an inline-image letter at 14 each printed
+on one page (2026-09-30).
+
+Past the page, a letter prints, and is billed, an extra sheet. Lines are counted on
+`letterPrintText`, the text exactly as the provider prints it. The print used to keep a body's
+trailing blank lines, which the count dropped. `tests/unit/services/pageLineLimits.test.ts` holds
+each limit under what the check printed on one page.
 
 **Why the buffer?**
 Even when ChatGPT follows instructions perfectly, line counts can exceed soft limits due to:
 1. **Sign-off formatting**: "With warm regards,\nDave" adds 2 lines, not 1
 2. **Character wrapping**: 612 chars ÷ 65 chars/line = 9.4 → rounds to 10 lines
-3. **Separator lines**: We add `\n\n` between body and sign-off (1 blank line)
+3. **The sign-off's own line**: it starts on the line after the body (a single `\n`, no blank line
+   since 2026-01-03), so a body at the soft limit plus a sign-off is over it
 
-**Example scenario** (actual failure before fix):
+**Example scenario** (the failure that introduced the buffer, 2025-12-29, recounted for today's join):
 - User content: 647 chars, 0 newlines in body (following instructions!)
 - Body: ~612 chars → 10 lines
-- `\n\n` separator → 1 blank line
 - Sign-off with `\n` → 2 lines
-- **Total: 13 lines** (over soft limit of 12, but under hard limit of 15)
+- **Total: 12 lines**: at the inline soft limit of 12, and under the hard limit of 14. (With the
+  blank separator line of the time, it was 13.)
 
 **Implementation**:
 - `LAYOUT_LINE_LIMITS_SOFT` - for documentation/reference
 - `LAYOUT_LINE_LIMITS` - used in actual validation
-- Tool descriptions mention soft limits to guide ChatGPT
-- Validation uses hard limits to avoid unnecessary retries
+- The manifest's prose mentions the soft limits; the served tool descriptions do not
+- Validation uses hard limits to avoid unnecessary retries, never past what prints on one page
 
 **Files**: `src/services/previewService.ts`
+
+---
+
+## 2026-09-30 — PostGrid Prints in Open Sans
+
+Our print HTML names Times New Roman for letters, Georgia for postcards and the gift card, and
+Courier New for the gift code. PostGrid prints all of them in **Open Sans**, Regular or Bold; its
+PDFs embed no other font. The preview is serif, so the paper doesn't match it (#526).
+
+Open Sans draws Latin (with Vietnamese), Greek, Cyrillic and Hebrew, and common symbols (€ £ ¥ © ®
+™ — – “ ” ‘ ’ … •). Emoji, Chinese, Japanese, Korean, Arabic, Hindi and Thai print as empty boxes
+(the font's `.notdef` glyph). The preview shows them, and nothing warns the sender.
+
+For line counts, 12pt Open Sans across 6.5 inches holds 74 to 82 mixed-case characters a line, and
+66 to 70 capitals. `CHARS_PER_LINE` (65) holds for both.
+
+**Reading a printed letter:**
+- On a PostGrid letter's page, expand **Raw Data** for `pageCount`, and for the PDF's link as `url`.
+- Fetch the PDF from that page rather than copying the link out: the link is signed.
+- Font names are the PDF's `/BaseFont` entries, stored uncompressed.
+- A glyph id of 0 in the text is a `.notdef` box.
+- Some PDFs come back rewritten by Ghostscript, whose text layer (ToUnicode) is wrong for dashes,
+  quotes and some Greek and Hebrew letters. Check those glyphs by their widths in the font's `/W`
+  array: an em dash is 1000, an en dash 500, a digit 572.
 
 ---
 
@@ -63,7 +103,10 @@ ChatGPT generates the permission prompt text (the dialog asking the user to appr
 
 **Solution:**
 - Start descriptions with action-accurate verbs: "PREVIEW a letter..." instead of "Create a letter..."
-- Explicitly state side effects (or lack thereof): "This does NOT send anything."
+- ~~Explicitly state side effects (or lack thereof): "This does NOT send anything."~~ **Superseded (#543, #670,
+  2026-10-11):** ChatGPT's approval dialog flags a description that says what the tool does not do as a "Suspicious
+  Instruction" steering its risk rating. Say what the tool does and where the person sends; the annotations carry the
+  risk. See [the style guide](../tool-description-style-guide.md).
 - Clarify what the tool actually does: "Creates a DRAFT for the user to review."
 
 **Example (before):**
@@ -76,7 +119,7 @@ Permission prompt showed: "Send Letter?" ❌
 ```
 "PREVIEW a letter with an IMAGE enclosed after the signature. This does NOT send anything."
 ```
-Permission prompt should show: "Create Preview?" ✓
+Permission prompt should show: "Create Preview?" ✓ (Its second sentence is the kind #670 removed; see above.)
 
 **Key Insight:**
 The `readOnlyHint: true` metadata tells ChatGPT the tool doesn't mutate state, but it doesn't affect the permission prompt text. The prompt text is derived from the description's natural language, so word choice matters.

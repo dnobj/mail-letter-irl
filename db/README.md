@@ -14,7 +14,7 @@ the migration that removes it.
 
 Applied files are recorded in the `migrations` ledger table by filename, so a
 file that has run once is never run again. Migrations are forward-only: there
-are no down-migrations, and `npm run db:migrate:rollback` only prints guidance.
+are no down-migrations and no rollback command: a schema is rolled forward by a new migration.
 
 ## Constraint: every migration must be transaction-safe
 

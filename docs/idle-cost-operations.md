@@ -1,6 +1,12 @@
 # Idle-Cost Operations
 
-Last updated: July 16, 2026
+**Last Updated:** September 16, 2026
+**Purpose:** Cost controls, idle observation targets, and the Serverless rollback runbook
+
+> **Rollout complete.** The transactional-outbox release described below reached production on
+> 2026-08-28, and production no longer runs the ten-minute polling safeguard. The Rollout Checkpoint
+> section is kept as the record of the July 2026 development acceptance; the baseline, daily checks
+> and rollback procedures still apply.
 
 This runbook keeps idle infrastructure inexpensive without adding production cold starts.
 
@@ -30,14 +36,15 @@ Verified in development on July 16, 2026:
 - both development web services have slept and returned their first health responses in under `1.4s`;
 - a maintenance run against a suspended Neon compute completed in about one second and closed all clients.
 
-Still required before production promotion:
+The July 2026 checklist also required these before production promotion (all since superseded by the
+production releases recorded in [manual-tests.md](manual-tests.md)):
 
 - prove a generated image remains available through an API restart;
 - render an MCP widget and generate or reuse an image after wake-up;
 - complete the zero-balance, simulated-purchase, send, and status manual flow;
 - observe combined Neon usage for seven idle days.
 
-Production still runs the pre-outbox release with a temporary ten-minute polling safeguard. Its compute can suspend between polls but will continue to wake periodically until the accepted development release is promoted.
+At the time, production still ran the pre-outbox release with a temporary ten-minute polling safeguard. That release and its safeguard are gone; production now wakes only for requests and the hourly maintenance run.
 
 Serverless health acceptance result (July 16, 2026): after both web services reported `Sleeping`, the first API health response completed in `1.34s` and the first website health response in `1.38s`. Manifest, OAuth metadata, ChatGPT CORS preflight, and the website homepage passed immediately after wake-up. Keep Serverless enabled while the authenticated ChatGPT checks remain pending.
 

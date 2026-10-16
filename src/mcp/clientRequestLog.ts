@@ -1,4 +1,5 @@
 import { writeDiagnostic } from "../utils/diagnosticLog.js";
+import type { ClientProfileName } from "../auth/clientProfiles.js";
 import { STEERING_COPY_REV } from "./steeringRev.js";
 import { WIDGET_TEMPLATE_VERSION } from "./widgetUris.js";
 
@@ -16,7 +17,8 @@ import { WIDGET_TEMPLATE_VERSION } from "./widgetUris.js";
  * method is clamped to a known protocol set, tool names outside our registry
  * collapse to "other", and resource URIs are logged only when they are our
  * own ui:// template identifiers. Raw user agents are never logged - only
- * the coarse class.
+ * the coarse class. The app is logged as its profile name (#473), never as
+ * its client id.
  */
 
 const LOGGED_METHODS = new Set([
@@ -54,7 +56,8 @@ type JsonRpcish = { method?: unknown; params?: { name?: unknown; uri?: unknown }
 export function logMcpClientRequests(
   parsedBody: unknown,
   userAgent: string | undefined,
-  knownToolNames: ReadonlySet<string>
+  knownToolNames: ReadonlySet<string>,
+  client?: ClientProfileName
 ): void {
   const messages: JsonRpcish[] = Array.isArray(parsedBody)
     ? (parsedBody as JsonRpcish[])
@@ -72,6 +75,9 @@ export function logMcpClientRequests(
       rpcMethod: method,
       clientClass: classifyClient(userAgent)
     };
+    if (client) {
+      fields.client = client;
+    }
 
     if (method === "tools/list") {
       // Record what this response will serve, so a later behavioral question

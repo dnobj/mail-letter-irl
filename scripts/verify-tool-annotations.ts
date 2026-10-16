@@ -24,15 +24,23 @@ const toolsDir = join(process.cwd(), "src", "tools");
 const expectedAnnotations: Record<string, { file: string; annotations: string[] }> = {
   send_letter: {
     file: "sendLetter.ts",
-    annotations: ["openWorldHint: true", "idempotentHint: true"],
+    annotations: ["destructiveHint: true", "openWorldHint: true", "idempotentHint: true"],
   },
   send_postcard: {
     file: "sendPostcard.ts",
-    annotations: ["openWorldHint: true", "idempotentHint: true"],
+    annotations: ["destructiveHint: true", "openWorldHint: true", "idempotentHint: true"],
   },
   set_return_address: {
     file: "setReturnAddress.ts",
-    annotations: ["openWorldHint: true"],
+    annotations: ["destructiveHint: true", "openWorldHint: true"],
+  },
+  create_mail_checkout: {
+    file: "createMailCheckout.ts",
+    annotations: ["destructiveHint: true", "openWorldHint: true", "idempotentHint: true"],
+  },
+  create_pack_checkout: {
+    file: "createPackCheckout.ts",
+    annotations: ["destructiveHint: true", "openWorldHint: true"],
   },
   clear_return_address: {
     file: "clearReturnAddress.ts",

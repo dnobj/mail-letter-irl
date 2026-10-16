@@ -38,7 +38,6 @@ export interface LedgerLotView {
   activatedAt: Date;
   expiresAt: Date | null;
   expirationPolicy: string | null;
-  description: string | null;
   relatedLedgerId: string | null;
   createdAt: Date;
   /** Active, unexpired and holding credits: the lots consumption would touch. */
@@ -99,7 +98,8 @@ export interface RedemptionView {
   campaignCode: string;
   campaignName: string;
   redeemedAt: Date;
-  ledgerId: string;
+  /** Null when a seed campaign granted only a gift letter (migration 033). */
+  ledgerId: string | null;
 }
 
 export interface TokenView {
@@ -120,7 +120,6 @@ export interface TransactionView {
   type: string;
   referenceType: string | null;
   referenceId: string | null;
-  description: string | null;
   createdAt: Date;
 }
 
@@ -193,7 +192,7 @@ function toAccountSummary(row: AccountRow, ledgerAvailable: number): AccountSumm
 export const LOT_COLUMNS = `
   ledger_id, initial_amount, remaining_amount, source_type::text AS source_type,
   source_reference_id, source_order_id, source_metadata->>'reason' AS source_reason,
-  status::text AS status, activated_at, expires_at, expiration_policy, description,
+  status::text AS status, activated_at, expires_at, expiration_policy,
   related_ledger_id, created_at,
   (status = 'active' AND remaining_amount > 0 AND (expires_at IS NULL OR expires_at > NOW())) AS spendable
 `;
@@ -210,7 +209,6 @@ export interface LotRow {
   activated_at: Date;
   expires_at: Date | null;
   expiration_policy: string | null;
-  description: string | null;
   related_ledger_id: string | null;
   created_at: Date;
   spendable: boolean;
@@ -229,7 +227,6 @@ export function toLotView(row: LotRow): LedgerLotView {
     activatedAt: row.activated_at,
     expiresAt: row.expires_at,
     expirationPolicy: row.expiration_policy,
-    description: row.description,
     relatedLedgerId: row.related_ledger_id,
     createdAt: row.created_at,
     spendable: row.spendable,
@@ -411,7 +408,7 @@ export async function readAccountDetail(
     code: string;
     name: string;
     redeemed_at: Date;
-    ledger_id: string;
+    ledger_id: string | null;
   }>(
     `SELECT c.code, c.name, r.redeemed_at, r.ledger_id
      FROM promo_redemptions r JOIN promo_campaigns c ON c.campaign_id = r.campaign_id
@@ -439,10 +436,11 @@ export async function readAccountDetail(
     type: string;
     reference_type: string | null;
     reference_id: string | null;
-    description: string | null;
     created_at: Date;
   }>(
-    `SELECT transaction_id, amount, balance_after, type, reference_type, reference_id, description, created_at
+    // No description: the reader role has no SELECT on it, and it is the
+    // column that carried recipient names (issue #162 security review).
+    `SELECT transaction_id, amount, balance_after, type, reference_type, reference_id, created_at
      FROM credit_transactions WHERE user_id = $1 ORDER BY created_at DESC, transaction_id DESC LIMIT 50`,
     [userId],
   );
@@ -481,7 +479,6 @@ export async function readAccountDetail(
       type: t.type,
       referenceType: t.reference_type,
       referenceId: t.reference_id,
-      description: t.description,
       createdAt: t.created_at,
     })),
     openDisputes: Number(disputes.rows[0]?.count ?? 0),
@@ -546,6 +543,8 @@ export interface LetterDetail {
     changedAt: Date;
   }>;
   job: JobDetailForLetter | null;
+  /** The quarantined copy of a redacted letter's content, while its window is open (#450 review). */
+  savedCopy: { quarantineId: string; purgeAfter: Date } | null;
 }
 
 export interface JobDetailForLetter {
@@ -566,13 +565,20 @@ export interface JobDetailForLetter {
   lastError: string | null;
   createdAt: Date;
   updatedAt: Date;
+  /**
+   * When a letter held to arrive by a date becomes due (#535): 09:00 New York
+   * time on its mail date, from letter_jobs.mail_hold_until (055, #693). Null for any other job.
+   * Kept after an early release, which moves only nextAttemptAt.
+   */
+  heldUntil: Date | null;
 }
 
 export const JOB_COLUMNS = `
   j.job_id, j.status, j.provider_outcome, j.attempts, j.max_attempts, j.scheduled_at,
   j.next_attempt_at, j.locked_at, (j.provider_order_id IS NOT NULL) AS has_provider_order_id,
   j.provider_dispatch_started_at, j.held_at, j.hold_reason, j.operator_resolution, j.resolved_at,
-  left(j.last_error, 200) AS last_error, j.created_at, j.updated_at
+  left(j.last_error, 200) AS last_error, j.created_at, j.updated_at,
+  j.mail_hold_until AS held_until
 `;
 
 export interface JobRow {
@@ -593,6 +599,15 @@ export interface JobRow {
   last_error: string | null;
   created_at: Date;
   updated_at: Date;
+  /** mail_hold_until (055, #693): a timestamptz, which pg reads as a Date. */
+  held_until: Date | string | null;
+}
+
+/** The end of the job's hold, or null when it has none or it is not a time. */
+function heldUntilOf(value: Date | string | null): Date | null {
+  if (!value) return null;
+  const at = new Date(value);
+  return Number.isNaN(at.getTime()) ? null : at;
 }
 
 export function toJobDetail(row: JobRow): JobDetailForLetter {
@@ -614,6 +629,7 @@ export function toJobDetail(row: JobRow): JobDetailForLetter {
     lastError: row.last_error,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    heldUntil: heldUntilOf(row.held_until),
   };
 }
 
@@ -648,6 +664,12 @@ export async function readLetterDetail(
     `SELECT ${JOB_COLUMNS} FROM letter_jobs j WHERE j.letter_id = $1`,
     [letterId],
   );
+  // Metadata only; the reader cannot select the saved content.
+  const saved = await client.query<{ quarantine_id: string; purge_after: Date }>(
+    `SELECT quarantine_id, purge_after FROM redacted_content_quarantine
+     WHERE source_table = 'letters' AND source_id = $1`,
+    [letterId],
+  );
   return {
     letter: toLetterView(row),
     userId: row.user_id,
@@ -659,5 +681,8 @@ export async function readLetterDetail(
       changedAt: h.changed_at,
     })),
     job: job.rows[0] ? toJobDetail(job.rows[0]) : null,
+    savedCopy: saved.rows[0]
+      ? { quarantineId: saved.rows[0].quarantine_id, purgeAfter: saved.rows[0].purge_after }
+      : null,
   };
 }

@@ -1,14 +1,26 @@
 import { AuthenticatedUser, requireScopes } from "./tokenValidator.js";
+import { PRODUCT_SCOPES } from "./oauthConfig.js";
 
-export type ProductScope = "mail:read" | "mail:draft" | "mail:send";
+/**
+ * Derived, not hand-written. This type is what stops a session or identity
+ * scope being enforced by a tool - putting "openid" in TOOL_SCOPES has to fail
+ * the build, because a personal access token carries product scopes only
+ * (migration 037, #470) and would then be denied permanently. A hand-maintained
+ * union could drift from PRODUCT_SCOPES and quietly stop guarding that.
+ */
+export type ProductScope = (typeof PRODUCT_SCOPES)[number];
 
 export const TOOL_SCOPES: Record<string, ProductScope> = {
   get_started: "mail:read",
   generate_image_for_mail: "mail:draft",
   get_account_balance: "mail:read",
+  // Read-only identity lookup; ChatGPT calls it with the connection's own
+  // credentials at link time, so it gates on the lightest product scope.
+  get_profile: "mail:read",
   get_purchase_status: "mail:read",
   get_order_status: "mail:read",
   list_orders: "mail:read",
+  open_letter_home: "mail:read",
   get_return_address: "mail:read",
   quote_and_preview_letter: "mail:draft",
   quote_and_preview_letter_with_header_image: "mail:draft",
@@ -31,8 +43,77 @@ export const TOOL_SCOPES: Record<string, ProductScope> = {
   // union unchanged.
   redeem_promo_code: "mail:send",
   send_letter: "mail:send",
-  send_postcard: "mail:send"
+  send_postcard: "mail:send",
+  // Hands back a link and sends nothing: the person sends from the page, with
+  // the website's own token (#470). So it sits with the drafting tools, and a
+  // token that can preview can also ask for the link.
+  request_send: "mail:draft",
+  // The preview card asks what became of its draft (#474): a read of the
+  // caller's own draft, so it gates on the lightest product scope.
+  get_draft_status: "mail:read",
+  // Changes a preview's arrival date (#535): part of drafting, and it sends
+  // nothing, so it sits with the drafting tools.
+  set_arrival_date: "mail:draft",
+  set_stationery: "mail:draft",
+  // Changes how a letter preview travels (#625): drafting, and it sends nothing.
+  set_mail_service: "mail:draft",
+  // Changes a preview's words (#586): drafting, and it sends nothing.
+  set_letter_words: "mail:draft",
+  // Changes a postcard preview's size and front (#594): drafting, and it sends nothing.
+  set_postcard_style: "mail:draft",
+  // Cancels held mail (#535): it only ever returns value to the person, so it
+  // sits with the drafting tools, as the issue decided.
+  cancel_scheduled_mail: "mail:draft",
+  // Address requests (#604): drafting, and they send nothing. Reading one is
+  // drafting too, not mail:read: its answer is a third party's address.
+  request_address: "mail:draft",
+  get_address_request: "mail:draft",
+  cancel_address_request: "mail:draft",
+  // A saved signature (#608): saving and removing one are drafting, as the
+  // return address's are; reading it is a read of the account's own data.
+  set_signature: "mail:draft",
+  get_signature: "mail:read",
+  clear_signature: "mail:draft",
+  set_letter_signature: "mail:draft",
+  // Saved stationery designs (#649): saving and deleting one are drafting, as a
+  // signature's are; listing them is a read of the account's own data.
+  save_stationery_design: "mail:draft",
+  list_stationery_designs: "mail:read",
+  delete_stationery_design: "mail:draft",
+  // Keeps a photo for the account's next preview (#474, phase 3): the upload
+  // card's part of drafting, so it sits with the drafting tools.
+  upload_photo_chunk: "mail:draft"
 };
+
+/**
+ * Tools a personal access token may not use, whatever its scopes (#685): those
+ * that cancel held mail or replace or remove what the person saved. A token is
+ * a long-lived key an agent holds, and none of these can be undone; an app
+ * signed in with OAuth keeps them. save_stationery_design stays, but adds only:
+ * a token cannot replace a design of the same name (saveDesign). The REST
+ * twins (/api/letters/:id/cancel, /api/signature) take no personal access
+ * token at all (authenticateRestRequest validates JWTs only).
+ */
+export const PERSONAL_TOKEN_REFUSED_TOOLS: ReadonlySet<string> = new Set([
+  "cancel_scheduled_mail",
+  "set_signature",
+  "clear_signature",
+  "delete_stationery_design",
+  "cancel_address_request"
+]);
+
+/** What a personal access token is told for one of those tools. */
+export const PERSONAL_TOKEN_REFUSAL =
+  "A personal access token can't cancel scheduled mail, replace or remove the saved signature, replace or delete a saved design, " +
+  "or cancel an address request. Do it on the Letter IRL website, or in an app signed in with your Letter IRL account.";
+
+/** A personal access token asked for a tool it may not use (#685). */
+export class PersonalTokenRefusedError extends Error {
+  constructor(readonly toolName: string) {
+    super(PERSONAL_TOKEN_REFUSAL);
+    this.name = "PersonalTokenRefusedError";
+  }
+}
 
 export function getRequiredToolScopes(toolName: string): ProductScope[] {
   const scope = TOOL_SCOPES[toolName];
@@ -47,11 +128,15 @@ export function authorizeTool(
   authInfo: AuthenticatedUser | null,
   requireAuth = process.env.LETTER_IRL_REQUIRE_AUTH !== "false"
 ): void {
-  if (!requireAuth) {
-    return;
+  if (requireAuth) {
+    if (!authInfo) {
+      throw new Error("Authentication required");
+    }
+    requireScopes(authInfo, getRequiredToolScopes(toolName));
   }
-  if (!authInfo) {
-    throw new Error("Authentication required");
+  // What kind of credential it is, not what it may do, so it holds whether or
+  // not authentication is required (#685 review).
+  if (authInfo?.authType === "pat" && PERSONAL_TOKEN_REFUSED_TOOLS.has(toolName)) {
+    throw new PersonalTokenRefusedError(toolName);
   }
-  requireScopes(authInfo, getRequiredToolScopes(toolName));
 }

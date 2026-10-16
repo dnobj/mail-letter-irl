@@ -9,9 +9,32 @@ import type { IncomingMessage, ServerResponse } from 'http';
 import { query } from '../db/index.js';
 import {
   authenticateRestRequest,
-  restAuthErrorLabel,
+  sendRestAuthFailure,
   type RestAuthInfo as AuthInfo
 } from './middleware/restAuth.js';
+import { rateLimitAccount } from './middleware/rateLimit.js';
+import { requiredRestScopes } from '../auth/restScopes.js';
+import { cancelScheduledMail, type ScheduledMailRefusal } from '../services/scheduledMailService.js';
+import type { LetterStatus } from '../services/types.js';
+import { cancelledMessage } from '../tools/cancelScheduledMail.js';
+import { heldSendFields, waitsInOutbox } from '../tools/heldSend.js';
+import { certifiedFactsOf } from '../config/certifiedMail.js';
+import { mailServiceOf } from '../config/products.js';
+import { sendInternalError } from './internalError.js';
+
+/** A path segment decoded, or null when its percent-escapes are malformed (#682 review). */
+function decodedSegment(raw: string): string | null {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return null;
+  }
+}
+
+function malformedLetterId(res: ServerResponse): true {
+  sendJson(res, 400, { error: 'Bad request', message: 'The letter id is malformed' });
+  return true;
+}
 
 /**
  * Send JSON response
@@ -36,14 +59,17 @@ export async function handleLetterApiRequest(
     return false; // Not a letter API route, continue to next handler
   }
 
-  // Authenticate request
-  const auth = await authenticateRestRequest(req);
+  // Authenticate, including the route's scope (src/auth/restScopes.ts). The
+  // status comes from the auth layer: 401 rejected, 403 not admitted or
+  // missing a scope, 503 server not configured. Hardcoding 401 told a refused
+  // beta user to authenticate again, which succeeds and is refused again.
+  const auth = await authenticateRestRequest(req, requiredRestScopes(req.method, pathname));
   if (!auth.ok) {
-    // Status comes from the auth layer: 401 rejected, 403 not admitted,
-    // 503 server not configured. Hardcoding 401 told a refused beta user to
-    // authenticate again, which succeeds and is refused again.
-    sendJson(res, auth.status, { error: restAuthErrorLabel(auth.status), message: auth.message });
+    sendRestAuthFailure(res, auth);
     return true;
+  }
+  if (await rateLimitAccount(req, res, auth.user.userId, 'api_account')) {
+    return true; // Rate limited
   }
   const authInfo = auth.user;
 
@@ -51,15 +77,26 @@ export async function handleLetterApiRequest(
   try {
     // GET /api/letters - List letters for user
     if (pathname === '/api/letters' && req.method === 'GET') {
-      const url = new URL(req.url!, `http://${req.headers.host}`);
+      // Only the query is read, so the Host header plays no part (#682 review).
+      const url = new URL(req.url ?? pathname, 'http://localhost');
       await handleListLetters(res, authInfo, url.searchParams);
+      return true;
+    }
+
+    // POST /api/letters/:letterId/cancel - Cancel held mail (#535)
+    const cancelMatch = pathname.match(/^\/api\/letters\/([^/]+)\/cancel$/);
+    if (cancelMatch && req.method === 'POST') {
+      const letterId = decodedSegment(cancelMatch[1]);
+      if (letterId === null) return malformedLetterId(res);
+      await handleCancelLetter(res, authInfo, letterId);
       return true;
     }
 
     // GET /api/letters/:letterId - Get specific letter details
     const letterMatch = pathname.match(/^\/api\/letters\/([^/]+)$/);
     if (letterMatch && req.method === 'GET') {
-      const letterId = decodeURIComponent(letterMatch[1]);
+      const letterId = decodedSegment(letterMatch[1]);
+      if (letterId === null) return malformedLetterId(res);
       await handleGetLetter(res, authInfo, letterId);
       return true;
     }
@@ -71,14 +108,58 @@ export async function handleLetterApiRequest(
     });
     return true;
 
-  } catch (error: any) {
-    console.error('Letter API request failed');
-    sendJson(res, 500, {
-      error: 'Internal server error',
-      message: error.message
-    });
+  } catch (error: unknown) {
+    sendInternalError(res, 'letters.api_failed', error, 'Unable to complete letter request');
     return true;
   }
+}
+
+/**
+ * A refusal in the website's words: cancel_scheduled_mail's name the tools a
+ * model can call next, which a page has no use for.
+ */
+export const CANCEL_REFUSAL_WORDS: Record<ScheduledMailRefusal, string> = {
+  not_found: "That letter wasn't found.",
+  not_scheduled: 'Only mail scheduled to arrive by a date can be cancelled. This letter goes to the printer as soon as it can.',
+  pay_and_send:
+    "A Pay & Send order can't be cancelled here. Email support@letterirl.com from the email on your account, " +
+    'quoting the order id; refunds are decided by a person.',
+  too_late: "This letter has gone to the printer, or did not go out, so it can't be cancelled.",
+  busy: "This letter is going to the printer right now, so it can't be cancelled."
+};
+
+/**
+ * POST /api/letters/:letterId/cancel - held mail cancelled (#535), the
+ * website's cancel_scheduled_mail through the same service. 200 with what
+ * went back, a repeat included; 404 for a letter that is not the caller's;
+ * 409 for any other refusal, with its reason (as `error` and `code`) and
+ * words.
+ */
+async function handleCancelLetter(res: ServerResponse, authInfo: AuthInfo, letterId: string) {
+  const result = await cancelScheduledMail({ letterId, userId: authInfo.userId });
+  if (!result.ok) {
+    // The reason twice: `code` is what the website's API client reads, and
+    // `error` what the other routes answer.
+    sendJson(res, result.refusal === 'not_found' ? 404 : 409, {
+      error: result.refusal,
+      code: result.refusal,
+      message: CANCEL_REFUSAL_WORDS[result.refusal]
+    });
+    return;
+  }
+  const { cancelled } = result;
+  sendJson(res, 200, {
+    letterId: cancelled.letterId,
+    status: 'cancelled',
+    alreadyCancelled: cancelled.alreadyCancelled,
+    returned: cancelled.returned,
+    // What of its cost did not come back usable, for the page to show as it
+    // likes; the message says it in words.
+    shortfall: cancelled.shortfall,
+    arriveBy: cancelled.arriveBy,
+    mailOn: cancelled.mailOn,
+    message: cancelledMessage(cancelled)
+  });
 }
 
 /**
@@ -91,11 +172,47 @@ interface LetterRow {
   recipient: any;
   credits_cost: number;
   status: string;
-  preview_html: string | null;
+  /** Selected by the single-letter route only. */
+  preview_html?: string | null;
   tracking_id: string | null;
   created_at: Date;
   sent_at: Date | null;
   provider: string | null;
+  /** Arrival dates (#535): both 'YYYY-MM-DD', or both null. */
+  arrive_by: string | null;
+  mail_on: string | null;
+  funding_type: string | null;
+  /** How it travelled (migration 053, #625), and the USPS number once the status sync has it. */
+  mail_service: string | null;
+  carrier_tracking_number: string | null;
+}
+
+/**
+ * What the list may be filtered by: every status a letter can have (the
+ * letters table's valid_letter_status), which the compiler keeps complete,
+ * and `scheduled` (#535): queued with an arrival date, waiting for its mail
+ * date.
+ */
+const LETTER_STATUSES: Record<LetterStatus, true> = {
+  draft: true,
+  queued: true,
+  processing: true,
+  held: true,
+  sent: true,
+  accepted: true,
+  in_transit: true,
+  delivered: true,
+  returned: true,
+  failed: true,
+  cancelled: true
+};
+export const LETTER_STATUS_FILTERS: readonly string[] = [...Object.keys(LETTER_STATUSES), 'scheduled'];
+
+/** The filter's condition, after the user's: a status, or held mail waiting for its date. */
+function statusCondition(status: string, params: unknown[]): string {
+  if (status === 'scheduled') return ` AND status = 'queued' AND mail_on IS NOT NULL`;
+  params.push(status);
+  return ` AND status = $${params.length}`;
 }
 
 /**
@@ -106,8 +223,11 @@ async function handleListLetters(
   authInfo: AuthInfo,
   queryParams: URLSearchParams
 ) {
+  // Not a number is the default, not a 500 from the database (#682 review).
   let limit = parseInt(queryParams.get('limit') || '20', 10);
   let offset = parseInt(queryParams.get('offset') || '0', 10);
+  if (!Number.isFinite(limit)) limit = 20;
+  if (!Number.isFinite(offset)) offset = 0;
   const status = queryParams.get('status');
 
   // Validate limits
@@ -116,28 +236,28 @@ async function handleListLetters(
   if (offset < 0) offset = 0;
 
   // Validate status if provided
-  const validStatuses = ['draft', 'queued', 'processing', 'sent', 'failed', 'cancelled'];
-  if (status && !validStatuses.includes(status)) {
+  if (status && !LETTER_STATUS_FILTERS.includes(status)) {
     sendJson(res, 400, {
       error: 'Invalid status',
-      message: `Status must be one of: ${validStatuses.join(', ')}`
+      message: `Status must be one of: ${LETTER_STATUS_FILTERS.join(', ')}`
     });
     return;
   }
 
-  // Build query
+  // Build query. preview_html stays on the single-letter route: a page our
+  // renderer drew is about 95 KB (#534), and the list never shows it.
   let sql = `
     SELECT
       letter_id, user_id, content, recipient, credits_cost, status,
-      preview_html, tracking_id, created_at, sent_at, provider
+      tracking_id, created_at, sent_at, provider, arrive_by, mail_on, funding_type,
+      mail_service, carrier_tracking_number
     FROM letters
     WHERE user_id = $1
   `;
   const params: any[] = [authInfo.userId];
 
   if (status) {
-    params.push(status);
-    sql += ` AND status = $${params.length}`;
+    sql += statusCondition(status, params);
   }
 
   sql += ` ORDER BY created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
@@ -151,8 +271,7 @@ async function handleListLetters(
   let countSql = `SELECT COUNT(*) FROM letters WHERE user_id = $1`;
   const countParams: any[] = [authInfo.userId];
   if (status) {
-    countParams.push(status);
-    countSql += ` AND status = $${countParams.length}`;
+    countSql += statusCondition(status, countParams);
   }
   const countResult = await query(countSql, countParams);
   const total = parseInt(countResult.rows[0].count, 10);
@@ -176,7 +295,8 @@ async function handleGetLetter(
   const result = await query<LetterRow>(`
     SELECT
       letter_id, user_id, content, recipient, credits_cost, status,
-      preview_html, tracking_id, created_at, sent_at, provider
+      preview_html, tracking_id, created_at, sent_at, provider, arrive_by, mail_on, funding_type,
+      mail_service, carrier_tracking_number
     FROM letters
     WHERE letter_id = $1 AND user_id = $2
   `, [letterId, authInfo.userId]);
@@ -226,6 +346,11 @@ function formatLetterResponse(row: LetterRow): any {
   // Extract recipient info from JSONB
   const recipient = row.recipient || {};
   const content = row.content || {};
+  // Sent with an arrival date (#535): it waits, queued, for its mail date,
+  // and can be cancelled free until then unless Pay & Send paid for it.
+  const waiting = waitsInOutbox(row.status as LetterStatus);
+  const held = heldSendFields(row, waiting);
+  const certified = certifiedFactsOf(row);
 
   return {
     letterId: row.letter_id,
@@ -233,7 +358,20 @@ function formatLetterResponse(row: LetterRow): any {
     creditsCost: row.credits_cost,
     createdAt: row.created_at?.toISOString(),
     sentAt: row.sent_at?.toISOString(),
+    // The printer's id for the letter, not a carrier number: the USPS number of certified mail is carrierTrackingNumber below.
     trackingNumber: row.tracking_id,
+
+    // How it travelled (#625): standard, or USPS Certified Mail with or without an electronic return receipt, with the USPS number and its link once the status sync has it
+    // An ordinary letter is standard; text this code does not know is unknown (null), never called standard.
+    mailService: certified?.mailService ?? (mailServiceOf(row.mail_service) === undefined ? 'standard' : null),
+    carrierTrackingNumber: certified?.carrierTrackingNumber ?? null,
+    carrierTrackingUrl: certified?.carrierTrackingUrl ?? null,
+
+    // Arrival dates, when it was sent with them (#535)
+    arriveBy: held?.schedule.arriveBy ?? null,
+    mailOn: held?.schedule.mailOn ?? null,
+    scheduled: Boolean(held) && waiting,
+    cancellable: held?.cancellable ?? false,
 
     // Recipient summary
     recipient: {

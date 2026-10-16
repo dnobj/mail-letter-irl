@@ -5,8 +5,8 @@
  * Letters are picked up by the letter-irl-diy dashboard via shared database.
  *
  * Flow:
- * 1. letterWorker calls sendLetter() - we return success
- * 2. letterWorker writes provider='diy' to database
+ * 1. the outbox (letterJobService) calls sendLetter() - we return success
+ * 2. the outbox writes provider='diy' to the database
  * 3. letter-irl-diy dashboard queries WHERE provider='diy' to show pending orders
  * 4. You print, mail, and update status via dashboard
  */
@@ -19,6 +19,7 @@ import type {
   CostEstimate,
   ProviderConfig,
 } from './types.js';
+import { mailServiceOf } from '../../config/products.js';
 
 export class DIYProvider implements LetterFulfillmentProvider {
   public readonly config: ProviderConfig;
@@ -36,10 +37,23 @@ export class DIYProvider implements LetterFulfillmentProvider {
   /**
    * Mark letter for DIY fulfillment
    *
-   * Just returns success - letterWorker handles writing to database.
+   * Just returns success - the outbox (letterJobService) writes to the database.
    * The letter-irl-diy dashboard will pick it up from the shared database.
    */
   async sendLetter(params: LetterParams): Promise<LetterResult> {
+    // Manual fulfilment mails standard first-class mail. An extra service
+    // (certified mail, #625) would be queued as an ordinary letter with nothing
+    // marking it, after being paid for: refused before anything is queued, an
+    // authoritative rejection, so what paid for it comes back.
+    if (mailServiceOf(params.extraService) !== undefined) {
+      return {
+        success: false,
+        trackingId: '',
+        error: 'Manual fulfilment cannot send an extra service such as certified mail.',
+        metadata: { retryable: false, submissionOutcome: 'definite_rejection', errorClass: 'extra_service_refused' }
+      };
+    }
+
     const letterId = params.metadata?.letterId;
 
     if (this.verbose) {

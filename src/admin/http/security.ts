@@ -1,6 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 import type { AdminErrorCode } from "../errors.js";
+import { REFERRER_POLICY } from "../ui/layout.js";
 
 /**
  * Browser-boundary hardening for the panel: response headers with a per-
@@ -38,7 +39,14 @@ export function buildSecurityHeaders(nonce: string): Record<string, string> {
       "object-src 'none'",
     ].join("; "),
     "Cache-Control": "no-store",
-    "Referrer-Policy": "no-referrer",
+    // NOT no-referrer, and the difference is load-bearing. Per Fetch, a
+    // non-CORS request whose method is not GET or HEAD has its Origin header
+    // serialised as `null` when the referrer policy is "no-referrer", so every
+    // form POST in this panel arrived with `Origin: null` and was refused by
+    // checkStateChangingRequest below. "same-origin" still sends no referrer
+    // to any other origin, which is the privacy goal, while letting the
+    // browser put a real Origin on our own posts.
+    "Referrer-Policy": REFERRER_POLICY,
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
     "Permissions-Policy":
@@ -52,21 +60,73 @@ export function buildSecurityHeaders(nonce: string): Record<string, string> {
  * A POST is accepted only when the browser itself says it came from this
  * origin. Absent metadata is a refusal, not a pass: every supported browser
  * sends Sec-Fetch-Site and Origin on a form submission.
+ *
+ * The returned detail names which condition failed. It goes into the audit
+ * row, not into the response, which stays a constant body. Without it a
+ * refusal said only "browser_boundary", and working out that a `no-referrer`
+ * response header was nulling the Origin took a packet capture from the
+ * operator's browser.
  */
+export interface StateChangeRefusal {
+  code: AdminErrorCode;
+  detail:
+    | "method_not_post"
+    | "sec_fetch_site_missing_or_cross_site"
+    | "origin_missing_or_null"
+    | "origin_mismatch"
+    | "content_type_not_form";
+}
+
+/**
+ * A request another site made the browser send (#730): an image, a script or
+ * a fetch from a page the operator happens to visit. Without a live session
+ * it is refused once the proxy and allowlist checks pass, so it starts no
+ * session, runs no whois and writes no audit row; enough of them used to push
+ * an elevated session out. (A cookie presented from another login or peer is
+ * a theft signal instead: the session is rotated and audited, as before.) A top-level navigation (a link
+ * the operator follows) is let through as a GET, which changes nothing; a
+ * prefetch or prerender looks like one but comes from a page's own rules, not
+ * a click, so it is not. A request without the header is not a browser's.
+ * Another node in the tailnet is same-site (ts.net is a public suffix), so a
+ * same-site request counts too.
+ */
+export function isCrossSiteSubresource(method: string, header: (name: string) => string | undefined): boolean {
+  const site = header("sec-fetch-site");
+  if (site !== "cross-site" && site !== "same-site") return false;
+  const purpose = `${header("sec-purpose") ?? ""} ${header("purpose") ?? ""}`.toLowerCase();
+  const speculative = purpose.includes("prefetch") || purpose.includes("prerender");
+  const navigation =
+    !speculative &&
+    (method === "GET" || method === "HEAD") &&
+    header("sec-fetch-mode") === "navigate" &&
+    header("sec-fetch-dest") === "document";
+  return !navigation;
+}
+
 export function checkStateChangingRequest(
   request: RequestView,
   expectedOrigins: readonly string[],
-): AdminErrorCode | null {
-  if (request.method !== "POST") return "ADMIN_METHOD_NOT_ALLOWED";
+): StateChangeRefusal | null {
+  if (request.method !== "POST") {
+    return { code: "ADMIN_METHOD_NOT_ALLOWED", detail: "method_not_post" };
+  }
   const site = request.header("sec-fetch-site");
-  if (site !== "same-origin" && site !== "none") return "ADMIN_CSRF_REJECTED";
+  if (site !== "same-origin" && site !== "none") {
+    return { code: "ADMIN_CSRF_REJECTED", detail: "sec_fetch_site_missing_or_cross_site" };
+  }
   const origin = request.header("origin");
-  if (!origin || !expectedOrigins.includes(origin.toLowerCase())) {
-    return "ADMIN_CSRF_REJECTED";
+  if (!origin || origin.toLowerCase() === "null") {
+    // Distinguished from a mismatch on purpose: a null Origin means the
+    // browser withheld it, which is a property of the response headers or the
+    // embedding, not of the caller's address.
+    return { code: "ADMIN_CSRF_REJECTED", detail: "origin_missing_or_null" };
+  }
+  if (!expectedOrigins.includes(origin.toLowerCase())) {
+    return { code: "ADMIN_CSRF_REJECTED", detail: "origin_mismatch" };
   }
   const contentType = (request.header("content-type") ?? "").toLowerCase();
   if (!contentType.startsWith("application/x-www-form-urlencoded")) {
-    return "ADMIN_INVALID_REQUEST";
+    return { code: "ADMIN_INVALID_REQUEST", detail: "content_type_not_form" };
   }
   return null;
 }

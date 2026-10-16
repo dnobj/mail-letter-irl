@@ -1,13 +1,13 @@
 # Privacy Policy
 
 **Effective Date:** December 2025
-**Last Updated:** August 26, 2026
+**Last Updated:** September 27, 2026
 
 ---
 
 ## Overview
 
-Letter IRL ("we," "our," or "us") provides a service that lets you send physical letters through AI assistants like ChatGPT. This Privacy Policy explains what data we collect, how we use it, and your rights.
+Letter IRL is operated by Objective Works ("we," "our," or "us"). It is a service that lets you send physical letters through AI assistants like ChatGPT. This Privacy Policy explains what data we collect, how we use it, and your rights.
 
 By using Letter IRL, you agree to this policy.
 
@@ -102,7 +102,10 @@ We may disclose information if required by law (e.g., subpoena, court order) or 
 |-----------|-----------------|
 | **Letter Content** | 90 days after sending (for delivery verification and disputes) |
 | **Letter Drafts** | Unsent drafts expire after 24 hours, and their content is deleted within 7 days. Drafts you have paid for follow the letter-content schedule above. |
+| **Uploaded Image Links** | Deleted within 48 hours of your last upload. An image you use in a draft or letter follows the schedules above. |
+| **Feature Requests** | Deleted 12 months after you submit them. |
 | **Account Data** | Retained while your account is active |
+| **Support and Audit Records** | Records of actions our team takes on your account are kept for up to 2 years after the action, including after your account is deleted. |
 | **Transaction History** | Retained for accounting and legal compliance |
 | **Expired Credits** | Records retained, but credits no longer usable |
 
@@ -162,6 +165,7 @@ We may update this Privacy Policy from time to time. We'll notify you of signifi
 
 Questions about this Privacy Policy? Contact us at:
 
+**Operator:** Objective Works, doing business as Letter IRL
 **Email:** policy-team@letterirl.com
 **Website:** https://letterirl.com
 

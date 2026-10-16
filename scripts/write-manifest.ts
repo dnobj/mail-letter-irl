@@ -10,6 +10,35 @@ const manifestPath = path.resolve(__dirname, "..", "manifest.json");
 // submission endpoint, even when a developer's local .env points at ngrok.
 process.env.LETTER_IRL_PUBLIC_BASE_URL = "https://api.letterirl.com";
 
+// And the tools production lists: arrival dates (#535) stay off there until
+// the owner's word, whatever a developer's .env turns on. Set before the
+// import below, whose dotenv/config leaves a variable already set alone.
+process.env.LETTER_IRL_ARRIVE_BY_ENABLED = "false";
+// Stationery (#563) likewise.
+process.env.LETTER_IRL_STATIONERY_ENABLED = "false";
+// And room to write (#586).
+process.env.LETTER_IRL_ROOM_TO_WRITE_ENABLED = "false";
+// And the words editor on its own (#647).
+process.env.LETTER_IRL_WORDS_EDITOR_ENABLED = "false";
+// And the 4x6 and 11x6 postcards, and the postcard layouts (#594).
+process.env.LETTER_IRL_POSTCARD_SIZES_ENABLED = "false";
+process.env.LETTER_IRL_POSTCARD_LAYOUTS_ENABLED = "false";
+// And postcard collages (#616).
+process.env.LETTER_IRL_POSTCARD_COLLAGES_ENABLED = "false";
+// And address requests (#604).
+process.env.LETTER_IRL_ADDRESS_REQUESTS_ENABLED = "false";
+// And signatures (#608).
+process.env.LETTER_IRL_SIGNATURES_ENABLED = "false";
+process.env.LETTER_IRL_HOME_ENABLED = "false";
+// And certified mail (#625).
+process.env.LETTER_IRL_CERTIFIED_MAIL_ENABLED = "false";
+// The send rule is on: production does not start without it (#730).
+process.env.LETTER_IRL_SEND_CONFIRMATION_ENABLED = "true";
+// And image generation is off at launch (docs/app-instructions.md).
+process.env.LETTER_IRL_IMAGE_GEN_MODE = "off";
+// And the card's photo upload, which adds an app-only tool.
+process.env.LETTER_IRL_CARD_UPLOAD_ENABLED = "false";
+
 const { stringifyManifest } = await import("../src/mcp/manifest.js");
 
 fs.writeFileSync(manifestPath, stringifyManifest(), "utf-8");

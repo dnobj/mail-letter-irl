@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
+import { isElevated } from "./elevation.js";
 
 /**
  * In-memory operator sessions.
@@ -24,12 +25,13 @@ export interface AdminSession extends SessionBinding {
   id: string;
   createdAt: number;
   lastSeenAt: number;
+  /**
+   * Elevation is a property of this browser, so it stays here. The failure
+   * history, the lock and the last accepted TOTP counter do not: a session is
+   * cheap to replace, so anything the second factor relies on lives in
+   * ElevationGuard instead (see elevation.ts).
+   */
   elevatedUntil: number | null;
-  /** Timestamps of recent elevation failures, pruned to the window. */
-  elevationFailures: number[];
-  elevationLockedUntil: number | null;
-  /** The last TOTP counter accepted, so a code cannot be replayed. */
-  lastTotpCounter: number | null;
   /** One message shown on the next page render, then cleared. */
   flash: { tone: "ok" | "warn" | "bad"; text: string } | null;
 }
@@ -75,23 +77,21 @@ export class AdminSessionStore {
 
   create(binding: SessionBinding): AdminSession {
     this.prune();
+    const now = this.now();
     if (this.sessions.size >= this.maxSessions) {
       // Drop the oldest rather than refuse: an operator locked out by their
       // own stale tabs would be worse than a stale tab losing its session.
-      const oldest = [...this.sessions.values()].sort(
-        (a, b) => a.lastSeenAt - b.lastSeenAt,
-      )[0];
+      // Never an elevated one while another can go (#730): a flood of new
+      // sessions must not cost the operator the elevation they just entered.
+      const byAge = [...this.sessions.values()].sort((a, b) => a.lastSeenAt - b.lastSeenAt);
+      const oldest = byAge.find((session) => !isElevated(session, now)) ?? byAge[0];
       if (oldest) this.sessions.delete(oldest.id);
     }
-    const now = this.now();
     const session: AdminSession = {
       id: newSessionId(),
       createdAt: now,
       lastSeenAt: now,
       elevatedUntil: null,
-      elevationFailures: [],
-      elevationLockedUntil: null,
-      lastTotpCounter: null,
       flash: null,
       ...binding,
     };
@@ -107,9 +107,16 @@ export class AdminSessionStore {
   }
 
   /**
-   * Look a session up and re-check its binding. Any mismatch destroys the
-   * session: a cookie presented from another login, another peer address or
-   * another node is treated as theft, not as a new device.
+   * Look a session up and re-check its binding. A mismatch destroys the
+   * session: a cookie presented from another login or another peer address is
+   * treated as theft, not as a new device.
+   *
+   * The node is stored on the session but not compared here, and this comment
+   * used to claim it was. It cannot be: the node name comes from a whois of
+   * the peer address, which runs only when a session is created, so comparing
+   * it per request would mean a whois per request. Little is lost, because the
+   * node is derived from the peer address that is compared - a cookie arriving
+   * from another device brings another address with it.
    */
   resolve(
     id: string | undefined,

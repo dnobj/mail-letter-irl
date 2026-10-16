@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { openLetterHomeTool } from './tools/openLetterHome.js';
 import { randomUUID } from "node:crypto";
 import { assertBetaAccess } from "./auth/betaAccess.js";
 import { FileAccountStore } from "./store/fileAccountStore.js";
@@ -25,27 +26,64 @@ import {
   sendPostcardTool,
   // Feedback tools
   submitFeatureRequestTool,
+  getProfileTool,
   getStartedTool,
   // Image upload tool
   uploadImageTool,
   // Image-intent router (returns routing guidance; does not generate)
   generateImageForMailTool,
   // Confirm uploaded image tool (widget relay)
-  confirmUploadedImageTool
+  confirmUploadedImageTool,
+  // A link where the person sends a preview themselves (#470)
+  requestSendTool,
+  getDraftStatusTool,
+  uploadPhotoChunkTool,
+  // A preview's arrival date, changed without previewing again (#535)
+  setArrivalDateTool,
+  // A letter preview's stationery, changed without previewing again (#563)
+  setStationeryTool,
+  // How a letter preview travels, changed without previewing again (#625)
+  setMailServiceTool,
+  // A letter preview's words, changed without previewing again (#586)
+  setLetterWordsTool,
+  // A postcard preview's size and front, changed without previewing again (#594)
+  setPostcardStyleTool,
+  // Held mail cancelled before it goes to the printer (#535)
+  cancelScheduledMailTool,
+  // A link asking someone for their address, and what became of it (#604)
+  requestAddressTool,
+  getAddressRequestTool,
+  cancelAddressRequestTool,
+  // A saved signature, read, and removed (#608)
+  setSignatureTool,
+  getSignatureTool,
+  clearSignatureTool,
+  setLetterSignatureTool,
+  // Saved stationery designs (#649)
+  saveStationeryDesignTool,
+  listStationeryDesignsTool,
+  deleteStationeryDesignTool
 } from "./tools/index.js";
 import {
   McpToolDefinition,
   ToolContext,
+  ToolDescription,
   UserAccount,
   Logger
 } from "./contracts/types.js";
+import { callingApp, type ClientProfile } from "./auth/clientProfiles.js";
+import { isToolOffered } from "./mcp/toolCatalog.js";
 import { createLogger } from "./logging/index.js";
 import { carriedDiagnosticClass, classifyDiagnosticError } from "./utils/diagnosticLog.js";
 
 const tools: McpToolDefinition<any, any>[] = [
-  // ChatGPT currently appears to expose only the first 12 registered actions
-  // for this dev app. Keep core preview/send/status inside that first page of
-  // tools; place auxiliary/internal tools later.
+  openLetterHomeTool,
+  // An early observation was that ChatGPT exposed only the first 12
+  // registered actions. It ingests the whole list now - the #160 learning
+  // shows the 18th tool on the connector page with its security schemes, and
+  // get_profile is found by its _meta marker wherever it sits - but the order
+  // still reads as priority, so core preview/send/status stay first and
+  // auxiliary tools follow.
   // Letter tools - three separate tools for different layouts
   quoteAndPreviewLetterTextOnlyTool,
   quoteAndPreviewLetterWithHeaderImageTool,
@@ -63,6 +101,53 @@ const tools: McpToolDefinition<any, any>[] = [
   // Postcard tools
   quoteAndPreviewPostcardTool,
   sendPostcardTool,
+  // A preview's arrival date, set, moved or cleared without previewing again
+  // (#535). Listed only while LETTER_IRL_ARRIVE_BY_ENABLED is on.
+  setArrivalDateTool,
+  // Held mail cancelled before it goes to the printer (#535), its letter or
+  // gift letter returned. Listed only while LETTER_IRL_ARRIVE_BY_ENABLED is on;
+  // the website cancels through its own route whatever the flag.
+  cancelScheduledMailTool,
+  // A letter preview's stationery, changed without previewing again, and
+  // remembered for the next (#563). Listed only while stationery is offered.
+  setStationeryTool,
+  // How a letter preview travels, ordinary or certified, changed without
+  // previewing again and priced again (#625). Listed only while certified mail
+  // is offered.
+  setMailServiceTool,
+  // A letter preview's words, changed without previewing again, on up to the
+  // pages a preview may take (#586). Listed only while room to write is offered.
+  setLetterWordsTool,
+  // A postcard preview's size and front, changed without previewing again, and
+  // priced again (#594). Listed only while the sizes or the layouts are offered.
+  setPostcardStyleTool,
+  // A private link asking someone for their address, what became of it, and
+  // closing it (#604). Listed only while LETTER_IRL_ADDRESS_REQUESTS_ENABLED is on.
+  requestAddressTool,
+  getAddressRequestTool,
+  cancelAddressRequestTool,
+  // The person's signature, saved once for their letters, read, and removed
+  // (#608). Listed only while signatures are offered.
+  setSignatureTool,
+  getSignatureTool,
+  clearSignatureTool,
+  // A preview signed or unsigned in place (#608 part 4), by the model or the
+  // letter card's Signature switch.
+  setLetterSignatureTool,
+  // The person's stationery designs, made with the chat, saved, listed and
+  // deleted (#649). Listed only while designs are offered.
+  saveStationeryDesignTool,
+  listStationeryDesignsTool,
+  deleteStationeryDesignTool,
+  // The model's way to send, once the send rule is on (#470): a link where
+  // the person sends the preview themselves. Listed only while the rule is on.
+  requestSendTool,
+  // The preview card's question (#474), the letter card's in every host (#676):
+  // was this draft sent, or has it expired? Card-only.
+  getDraftStatusTool,
+  // The upload card's way to send a photo in an app with no file store
+  // (#474, phase 3). Card-only, and listed only while its switch is on.
+  uploadPhotoChunkTool,
   // Image-intent router: must stay inside the exposed set so @-mention
   // generate requests land on it instead of a capability narration.
   generateImageForMailTool,
@@ -73,6 +158,7 @@ const tools: McpToolDefinition<any, any>[] = [
   clearReturnAddressTool,
   // Feedback tools
   submitFeatureRequestTool,
+  getProfileTool,
   getStartedTool,
   // Image upload tool
   uploadImageTool,
@@ -89,11 +175,21 @@ export interface ServerRequest<Input> {
    * @see US-POSTCARD-04: Mobile Image Graceful Degradation
    */
   isMobile?: boolean;
+  /** The app the call came from (#473), for text that differs per app (#484). */
+  client?: ClientProfile;
 }
 
 export interface ServerResponse<Output> {
   result: Output;
   meta: Record<string, unknown>;
+}
+
+/**
+ * A tool's description as the calling app reads it (#484). Most tools say the
+ * same to every app; a few give each app its own words.
+ */
+export function describeTool(tool: { description: ToolDescription }, client: ClientProfile): string {
+  return typeof tool.description === "function" ? tool.description(client) : tool.description;
 }
 
 export function summarizeToolInput(input: unknown): Record<string, unknown> {
@@ -124,7 +220,8 @@ export class LetterIrlServer {
     userId: string,
     logger: Logger,
     correlationId: string,
-    isMobile?: boolean
+    isMobile?: boolean,
+    client?: ClientProfile
   ): Promise<ToolContext> {
     const account = await this.store.getOrCreate(userId);
     return {
@@ -135,7 +232,8 @@ export class LetterIrlServer {
       },
       logger,
       correlationId,
-      isMobile
+      isMobile,
+      client
     };
   }
 
@@ -173,7 +271,8 @@ export class LetterIrlServer {
       request.userId,
       requestLogger.child({ stage: "tool-handler" }),
       correlationId,
-      request.isMobile
+      request.isMobile,
+      request.client
     );
 
     try {
@@ -211,16 +310,42 @@ export class LetterIrlServer {
     }
   }
 
-  listTools() {
-    return tools.map((tool) => ({
-      name: tool.name,
-      title: tool.title,
-      description: tool.description,
-      readOnly: tool.readOnly,
-      inputSchema: tool.inputSchema,
-      outputSchema: tool.outputSchema,
-      meta: tool.meta
-    }));
+  /**
+   * Every tool's name, whatever the app and the switches: the names a log may
+   * record for a call (src/mcp/clientRequestLog.ts). listTools() without an
+   * app drops the checkouts (#475), so a log built from it named every
+   * checkout call "other" (#520).
+   */
+  toolNames(): string[] {
+    return tools.map((tool) => tool.name);
+  }
+
+  /**
+   * The tools as one app sees them: each description in that app's words
+   * (#484), the checkouts only where it takes purchases (#475), image
+   * generation only where it is allowed (#467), set_arrival_date and
+   * cancel_scheduled_mail only while arrival dates are on (#535), and
+   * set_stationery only while stationery is offered (#563),
+   * set_mail_service only while certified mail is (#625),
+   * set_letter_words only while the words can be changed in place (room to write, #586, or the words editor, #647),
+   * set_postcard_style only while the postcard sizes or layouts are (#594),
+   * and the three address request tools only while those are on (#604).
+   * Without an app,
+   * the list for an app that trusts nothing.
+   */
+  listTools(client: ClientProfile = callingApp(undefined)) {
+    // What each app is offered lives in the tool catalogue (src/mcp/toolCatalog.ts, #687). request_send points at
+    // the confirmation page, which ships with the send rule, so it is listed only while the rule is on; execute()
+    // still reaches it: a send tool answers an app without our card with its link (src/mcp/registerTools.ts).
+    return tools
+      .filter((tool) => isToolOffered(tool.name, client))
+      .map((tool) => ({
+        name: tool.name,
+        title: tool.title,
+        description: describeTool(tool, client),
+        readOnly: tool.readOnly,
+        meta: tool.meta
+      }));
   }
 }
 

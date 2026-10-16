@@ -1,6 +1,7 @@
 # Development Guide
 
-**Last Updated:** December 18, 2025
+**Last Updated:** September 16, 2026
+**Purpose:** Context, local setup, workflow, and common tasks for developers and AI agents
 
 This document provides context for developers and AI agents working on Letter IRL.
 
@@ -33,7 +34,7 @@ Both repositories use the same branching strategy: `feature/*` → `dev` → `ma
 ├─────────────────────────────────────────────────────────────────┤
 │  Git Branch: master (API) / main (Website)                       │
 │  Auth0: dev-njmdyqf8n25rqgy7.us.auth0.com (prod tenant)         │
-│         Account: dnicholl@letterirl.com                          │
+│         Account: the production account                          │
 │  Neon: production branch                                         │
 │  Railway API: api.letterirl.com                                  │
 │  Railway Website: letterirl.com                                  │
@@ -41,15 +42,15 @@ Both repositories use the same branching strategy: `feature/*` → `dev` → `ma
 │  PostGrid: live mode                                             │
 └─────────────────────────────────────────────────────────────────┘
            │
-           │ npm run dev:sync
+           │ code promotion only; no data flows this way
            ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │  DEVELOPMENT                                                     │
 ├─────────────────────────────────────────────────────────────────┤
 │  Git Branch: dev (both repos)                                    │
 │  Auth0: dev-ky21dxn3qmi71hjl.us.auth0.com (dev tenant)          │
-│         Account: dnicholl@objective.works                        │
-│  Neon: dev branch (copy of production)                          │
+│         Account: the organization account                        │
+│  Neon: dev branch (independent; never copied from production)   │
 │  Railway API: letter-irl-api-development.up.railway.app          │
 │  Railway Website: mail-letter-irl-website-development...        │
 │  Stripe: test mode                                               │
@@ -78,11 +79,11 @@ master/main (production) ──────────────────�
 |--------|------------|-------------|
 | Git Branch (API) | `master` | `dev` |
 | Git Branch (Website) | `main` | `dev` |
-| Auth0 Tenant | `dev-njmdyqf8n25rqgy7` (dnicholl@letterirl.com) | `dev-ky21dxn3qmi71hjl` (dnicholl@objective.works) |
-| Neon Branch | `production` | `dev` (synced via `npm run dev:sync`) |
+| Auth0 Tenant | `dev-njmdyqf8n25rqgy7` (the production account) | `dev-ky21dxn3qmi71hjl` (the organization account) |
+| Neon Branch | `production` | `dev` (independent; never copied from production) |
 | Stripe Mode | Live (`sk_live_`) | Test (`sk_test_`) |
 | PostGrid | Live (real mail) | Test mode (no real mail) |
-| Admin Routes | Disabled | Disabled |
+| Admin Panel | `letter-irl-admin-prod` (tailnet-only) | `letter-irl-admin` (tailnet-only) |
 | API URL | `api.letterirl.com` | `letter-irl-api-development.up.railway.app` |
 | Website URL | `letterirl.com` | `mail-letter-irl-website-development.up.railway.app` |
 
@@ -92,7 +93,7 @@ master/main (production) ──────────────────�
 
 ### Prerequisites
 
-- Node.js 20+
+- Node.js 22
 - npm
 - Auth0 CLI (`npm install -g auth0-cli`)
 - Stripe CLI (`brew install stripe/stripe-cli/stripe`)
@@ -102,27 +103,27 @@ master/main (production) ──────────────────�
 
 The development tenant is already configured:
 - **Tenant**: `dev-ky21dxn3qmi71hjl.us.auth0.com`
-- **Account**: dnicholl@objective.works
+- **Account**: the organization account
 - **Connections**: Google, Microsoft, Apple, GitHub, Username-Password
-- **DCR**: Enabled (Settings → Advanced → OIDC Dynamic Application Registration)
-- **API Audience**: `https://letter-irl/api`
+- **DCR**: Enabled today (Settings → Advanced → OIDC Dynamic Application Registration). It should be off: DCR is rollback inventory only
+- **MCP API**: `https://letter-irl-api-development.up.railway.app/mcp`, also the website's audience
 - **Website Client ID**: `ZQF6j9WoG0097thWKnCJwNyeJZtUlqOX`
 
 If you need to configure a new development tenant, follow these steps:
 1. Go to [Auth0](https://auth0.com) and create a new tenant
 2. Configure connections (same as production): Google, Microsoft, Apple, GitHub, Username-Password
-3. Enable DCR: Settings → Advanced → OIDC Dynamic Application Registration
-4. Create API: `https://letter-irl/api`
-5. Set Default Audience: Settings → General → API Authorization Settings
-6. Create Regular Web Application for the website
-7. Create M2M Application for sync script with Management API access
+3. Enable Client ID Metadata Document registration: Settings → Advanced (leave DCR off)
+4. Create the MCP API: identifier = the environment's canonical `/mcp` URL, permissions `mail:read`, `mail:draft`, `mail:send`
+5. Set Default Audience to that API: Settings → General → API Authorization Settings
+6. Create a Regular Web Application for the website, and authorize it for the MCP API with all three permissions
 
 ### 2. Create Neon Development Branch
 
 1. Go to [Neon Console](https://console.neon.tech/)
 2. Navigate to your project → Branches
-3. Create new branch: `dev` from `main`
-4. Copy the connection string
+3. Create a new, empty branch named `dev`. Do not branch it from production: development never holds a
+   copy of production data (see [Development data](#development-data))
+4. Run `npm run db:migrate` against it, then copy the pooled connection string
 
 ### 3. Configure Environment
 
@@ -151,24 +152,24 @@ npm run dev
 
 ---
 
-## Syncing from Production
+## Development data
 
-The `dev:sync` command refreshes development from production:
-
-```bash
-npm run dev:sync
-```
-
-This performs:
-1. Recreates Neon dev branch from main
-2. Exports Username-Password users from production Auth0
-3. Imports users to development Auth0 (preserving user_ids)
+Development does not receive a copy of production. The `dev:sync` command was
+removed on 2026-09-13: it recreated the dev Neon branch from production and
+imported production Auth0 users into the development tenant, so development held
+every letter, recipient address and customer record production held, and running
+it needed production credentials on a workstation. Seed dev from fixtures or
+work against an empty branch.
 
 ### User ID Strategy
 
-Social login users (Google, GitHub, etc.) automatically have matching IDs across tenants because the ID comes from the provider.
+Social login users (Google, GitHub, etc.) automatically have matching IDs across
+tenants because the ID comes from the provider, so a subject created in one
+tenant is recognisable in the other with no import.
 
-Username-Password users (`auth0|xxx`) need to be imported to preserve IDs.
+Username-Password users (`auth0|xxx`) do not match across tenants. That is
+accepted: create a test account in the development tenant instead of importing a
+production one.
 
 ---
 
@@ -176,7 +177,7 @@ Username-Password users (`auth0|xxx`) need to be imported to preserve IDs.
 
 ### Prerequisites
 
-- Node.js 20+
+- Node.js 22
 - PostgreSQL (or use Neon cloud)
 - Stripe CLI (for webhook testing)
 
@@ -192,7 +193,8 @@ DATABASE_URL=postgres://...
 # Auth0 (production tenant)
 LETTER_IRL_OAUTH_ISSUER=https://dev-njmdyqf8n25rqgy7.us.auth0.com/
 LETTER_IRL_OAUTH_JWKS_URI=https://dev-njmdyqf8n25rqgy7.us.auth0.com/.well-known/jwks.json
-LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl/api
+LETTER_IRL_MCP_RESOURCE=https://api.letterirl.com/mcp
+LETTER_IRL_OAUTH_AUDIENCE=https://api.letterirl.com/mcp
 
 # Stripe (live mode)
 STRIPE_SECRET_KEY=sk_live_...
@@ -223,7 +225,8 @@ DATABASE_URL=postgres://...?options=branch%3Ddev
 # Auth0 (dev tenant)
 LETTER_IRL_OAUTH_ISSUER=https://dev-ky21dxn3qmi71hjl.us.auth0.com/
 LETTER_IRL_OAUTH_JWKS_URI=https://dev-ky21dxn3qmi71hjl.us.auth0.com/.well-known/jwks.json
-LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl/api
+LETTER_IRL_MCP_RESOURCE=https://letter-irl-api-development.up.railway.app/mcp
+LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl-api-development.up.railway.app/mcp
 
 # Stripe (test mode)
 STRIPE_SECRET_KEY=sk_test_...
@@ -245,7 +248,8 @@ npm run db:migrate
 # Start the server (development mode with hot reload)
 npm run dev
 
-# Server runs on http://localhost:8090
+# Server runs on http://localhost:8090 by default
+# (PORT or LETTER_IRL_HTTP_PORT override it; .env.example sets 8788)
 ```
 
 ### Running Tests
@@ -259,7 +263,15 @@ npm test
 
 # Run with coverage
 npm run test:coverage
+
+# Everything CI's first job runs: lint, build, unit, submission
+npm run verify
+
+# The PostgreSQL suites against a local database (CI's second job)
+npm run test:integration:local
 ```
+
+See [testing.md](testing.md) for the suites and their guards.
 
 ---
 
@@ -326,21 +338,30 @@ Format: `<type>: <description>`
 ```
 letter-irl/
 ├── src/
-│   ├── api/           # REST API handlers
-│   ├── auth/          # Token validation
-│   ├── db/            # Database queries
-│   ├── mcp/           # MCP server (httpServer.ts, stdioServer.ts)
-│   ├── services/      # Business logic
+│   ├── admin/         # Tailnet-only operator panel (separate Railway service)
+│   ├── api/           # REST API handlers and middleware
+│   ├── auth/          # Token validation, scopes, beta access
+│   ├── cli/           # migrate, runMaintenance, flow harness
+│   ├── config/        # Deployment validation, product/price table
+│   ├── content/       # Shared delivery wording
+│   ├── contracts/     # Shared types and output-schema conformance
+│   ├── db/            # Connection pool and Neon wake-up retry
+│   ├── logging/       # Structured logger
+│   ├── mcp/           # HTTP/stdio servers, tool and widget registration, manifest
+│   ├── services/      # Business logic and the SQL that goes with it
+│   ├── store/         # Account store used by the tool registry
 │   ├── tools/         # MCP tool implementations
-│   └── workers/       # Background jobs
+│   ├── utils/         # Diagnostics, env parsing, backoff
+│   └── workers/       # Credit expiry and status sync, run by the maintenance pass
 ├── db/
-│   └── migrations/    # SQL migrations (001_, 002_, etc.)
+│   └── migrations/    # Forward-only SQL migrations (001_ ... 032_)
 ├── tests/
-│   ├── fixtures/      # Test data
+│   ├── fixtures/      # Test data (personas, credits, letters, postcards, promos, tokens, admin)
+│   ├── integration/   # Real-PostgreSQL suites (opt-in locally, always in CI)
 │   ├── mocks/         # Database mocks
-│   └── unit/          # Unit tests
-├── docs/              # Documentation
-└── public/            # Static files (admin panel)
+│   └── unit/          # Unit tests, grouped by subsystem
+├── widgets/           # Apps SDK widget HTML
+└── docs/              # Documentation
 ```
 
 ---
@@ -410,43 +431,26 @@ Migrations are in `db/migrations/` with numeric prefixes:
 ```bash
 # Run pending migrations
 npm run db:migrate
-
-# Rollback last migration
-npm run db:migrate:rollback
 ```
+
+There are no down migrations and no rollback command: a schema is rolled forward by a new migration.
 
 ### Creating a Migration
 
 1. Create file: `db/migrations/NNN_description.sql`
-2. Write the "up" SQL (the changes you want to make)
+2. Write the SQL. It runs inside one transaction with every other pending file, and while the
+   previous image is still serving, so it must be safe for the code already deployed
 3. Run migration: `npm run db:migrate`
 4. Update `docs/database-schema.md` if schema changed
 
-### Migration Rollback Policy
+[db/README.md](../db/README.md) has the constraints (no `CONCURRENTLY`, never edit an applied file,
+destructive changes take two deploys).
 
-**For new migrations (going forward):** Include a rollback section in your migration file:
+### Recovering from a bad migration
 
-```sql
--- UP: Add new table
-CREATE TABLE example (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name TEXT NOT NULL
-);
-
--- DOWN (rollback) - commented out, run manually if needed
--- DROP TABLE IF EXISTS example;
-```
-
-**For existing migrations (001-011):** No rollback scripts exist. These migrations established the production schema and rolling them back would require a full database rebuild.
-
-**Why this policy:**
-- Writing rollbacks is easiest when the migration is fresh
-- Retroactive rollback scripts are error-prone and rarely tested
-- Production rollbacks should be rare and carefully planned
-
-**If you need to rollback:**
-1. For recent migrations with rollback scripts: Run the DOWN section manually
-2. For older migrations: Restore from Neon backup or recreate from scratch
+Migrations are forward-only; no migration file carries a down section. To undo a change, write a new
+migration that reverses it. If data was damaged, restore from a Neon point-in-time branch. A failed
+migration rolls back as a whole, and Railway keeps the previous image serving.
 
 ---
 
@@ -457,7 +461,7 @@ CREATE TABLE example (
 | Environment | URL | Branch | Auto-deploy |
 |-------------|-----|--------|-------------|
 | Production | api.letterirl.com | `master` | Yes |
-| Development | xxx.up.railway.app | `dev` | Yes |
+| Development | letter-irl-api-development.up.railway.app | `dev` | Yes |
 
 ### Railway Configuration
 
@@ -467,7 +471,7 @@ CREATE TABLE example (
 - API URL: `api.letterirl.com`
 - Website URL: `letterirl.com`
 - All production credentials (live Stripe, live PostGrid)
-- Admin routes disabled
+- Public admin routes return 404; operators use `letter-irl-admin-prod` over the tailnet
 
 **Development Environment:**
 - API Branch: `dev`
@@ -475,7 +479,7 @@ CREATE TABLE example (
 - API URL: `https://letter-irl-api-development.up.railway.app`
 - Website URL: `https://mail-letter-irl-website-development.up.railway.app`
 - Test credentials (test Stripe, PostGrid test mode)
-- Admin routes disabled
+- Public admin routes return 404; operators use `letter-irl-admin` over the tailnet
 
 ### Environment Variables on Railway
 
@@ -491,23 +495,32 @@ Production and development environments have different values:
 
 ### Adding a New MCP Tool
 
-1. Create tool in `src/tools/myTool.ts`
-2. Register in `src/mcp/httpServer.ts`
-3. Add tests in `tests/unit/tools/myTool.test.ts`
-4. Update tool documentation
+1. Create the tool in `src/tools/myTool.ts` and export it from `src/tools/index.ts`
+2. Add it to the `tools` array in `src/server.ts`
+3. Add its Zod input and output shapes to `src/zodSchemas.ts` and to both maps in
+   `src/mcp/registerTools.ts`. These shapes are the one tool contract (#688): what ChatGPT receives, and
+   what `/manifest.json` is generated from. A tool missing from those maps fails the connection that lists it
+4. Add its entry to the tool catalogue, `src/mcp/toolCatalog.ts` (#687)
+5. Add tests in `tests/unit/tools/myTool.test.ts`
+6. Run `npm run manifest:generate` and `npm run test:submission`, and update
+   [tool-apis.md](tool-apis.md)
 
 ### Adding an API Endpoint
 
 1. Add handler in `src/api/` (or extend existing handler)
-2. Register route in `src/mcp/httpServer.ts`
-3. Add tests
+2. Register the route in `src/mcp/httpServer.ts`, add a new route family to `REST_API_PREFIXES` there so
+   it is request-logged, and put it behind a rate limiter like its neighbours
+3. Give it the scope its MCP twin requires (`src/auth/restScopes.ts`)
+4. Add tests
 
 ### Adding a Database Table
 
 1. Create migration in `db/migrations/`
 2. Run `npm run db:migrate`
 3. Update `database-schema.md`
-4. Add queries in `src/db/`
+4. Add queries in the service that owns the table (`src/services/`); admin read models live in
+   `src/admin/queries/`
+5. If operators should see it, decide its admin reader grants (`src/admin/provisioning.ts`)
 
 ---
 
@@ -515,12 +528,14 @@ Production and development environments have different values:
 
 ### Common Issues
 
-**"OAuth validation not configured"**
+**"Authentication is not configured on this server"** (503 from the REST routes and `/mcp`; checkout says "Authentication is not configured")
+- Each refused request logs `auth.validation_not_configured`
 - Check `LETTER_IRL_OAUTH_ISSUER` and `LETTER_IRL_OAUTH_JWKS_URI` are set
+- Check `LETTER_IRL_OAUTH_AUDIENCE` names exactly one audience, the MCP resource
 
 **"Stripe webhook signature verification failed"**
 - Ensure `STRIPE_WEBHOOK_SECRET` matches your webhook endpoint
-- For local testing, use Stripe CLI: `stripe listen --forward-to localhost:8090/api/stripe/webhook`
+- For local testing, use Stripe CLI: `stripe listen --forward-to localhost:8090/webhooks/stripe`
 
 **Database connection errors**
 - Check `DATABASE_URL` is correct
@@ -549,7 +564,7 @@ npm run dev  # Logs to stdout
 - Use `async/await` over raw promises
 - Prefer explicit return types on exported functions
 - Use Zod for runtime validation
-- Database queries in `src/db/`, business logic in `src/services/`
+- Business logic and its SQL live in `src/services/`; `src/db/` holds only the pool and `query`/`transaction` helpers
 
 ---
 

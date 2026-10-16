@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-plugin-extensions="on-request">
   <head>
     <meta charset="utf-8" />
     <title>LetterPreviewCard</title>
@@ -13,10 +13,8 @@
       body{margin:0;padding:0;background:transparent;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;color:var(--tb)}
       .w{background:var(--sf);border:1px solid var(--bd);border-radius:16px;overflow:hidden;max-width:100%}
       .hd{display:flex;align-items:center;gap:7px;padding:11px 14px 10px;border-bottom:1px solid var(--bd2)}
-      .logo{width:17px;height:11px;flex:none;display:block}
-      /* One parametric SVG for both themes (assets/brand/letterirl-mark-small.svg):
-         the mark reads --li-blue, which the dark scope lightens. */
-      .dark{--li-blue:#6f98f2}
+      .logo{width:22.5px;height:14px;flex:none;display:block;background:url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFoAAAA4CAMAAABKSh9hAAAAw1BMVEVMaXEXZqUyotUef7r4d1UYb64bdrOae371d1F6eYQum8/delfrfFkpksjpe1fmfl0jicL5dE7kelvfgGDheVdcjKfkf2PwcUsmcqZnmbNYlrPZfV/Rd1sxfq42jrthnro7fqRHpcvoZUZIm78tcJ1YpsM4fqhDfJ/Vel1GncJFfJ49dpzggGJWmLNKkLLOeF7mb081c5zWcFVEi7M/c4/eYkRElb2OkpXPbVKxZlvWXEL8flj3elHzflk8q9zfWTongbc6m2IhAAAAO3RSTlMA/v7+/v7+Av0F/g35/u7J/v6UOi4Zqf7+DSxfIf39Rbb6/qTtp+Bzh+pUluhljUz+yMylNP7J56XZ9VSM55UAAAAJcEhZcwAAA+gAAAPoAbV7UmsAAAY8SURBVFjDrZgLc6JKEIXHiAwjGCUJAj7wESO+4zvZAsT//6vu6QEVsqtmN7drNyUUfjRnunsOMvYl+NXIXSGE4DdCXC4/f02w6yE4+3bwPJvTd63OfPH2injLx+J1LlPhuKA5eroXIz2XlGDWfDP2vEoZ8SDjcIlxh7uCd97G4w/DCO5FNYvmzJ0PvUqlVpFRTuMhjV6Hua676PV6H4ZiKtrvoSiaqSim/JxF41k7Q69WS8EZOrD431swPNTb4dD7MLO0bMgzWojIoKGy8L3asSbZ2WRPmowtXAPy4QOp3RDCVMIQN1HW+nnt3VevKNEVb7zfbF7xLxdz1M68d+iNZ6Zdrf85nur1app//4zm7sYrFgH2houO5f6hluju48Ph4WMZx5/nqs3XsmDPM80Mw0jb2YkgdG4B8rFYGfoW45evXMB0MO9Bno84jnefQp4430Ckf59nimmaSrTbnbQWbOKoRWTdbTDGr/QFZ28HrOavOO73lyNxujWX30iOnmcRllGLdnE/RXNuDSnnWtdlV5sRiuyBHv+Kd7t+3wCb+iDTbYK9zwIt0oLZZxzbCRoPsjgi5yORb7SyNZbVve4jbAPdlnk+3AfkEOUeGs33uK+FqSCNNnIuDhvs5oxoSHRDX9vL5dI2nrJsmTPUMM3HJnvfaSk6Tbo9YbdGE2cNWsVxg7XWINt29CSy6/w+QzFrIOMmy9CUgnBGSkMOOZz4XTQHG2RNM0ZcXi6SqgvRpJHRZDprGmd0p60WVUr69sxMBOng2V7Wka1FIdi0krpUI6QWhxpYuWaUzhAOPVRVHVrszjQmdBloyNCqBhgfEdZSyKEPNZIVpEe4oJnoFlX1uLlHBross6ZqaFVpzexopHNJxpEic6bDC9oaIumjfwfNCV2WWTPJDjXThN5JbaBRgsembKIsujEAGlJ/H02EVpVGKPTWQTYVO3x8Rwl+QW8dQnf+Jmt20gTs6oymv2muW1TdnCrk79Ee0OO0r9K1xOgPFFuzNTOOf7VkY4gv6NI30B1sEQ9769yAlHeyj5mmjXm4rLaSdchrXfqG1vNyufKwdzNnKG80j6kYu3i3DAPJFl8rxLlfIQugy3uRXieHaav+GAWBUX0f7foRNsRE70xdr5C1urlnWcS+jF1zkZJFsmHoz83R6B2DamQE2MwVsPVsN06dpBtvm6HGuIKs55ekWWab4WJEutvausWz6Hm7pJac2zMEey4sSsW7DF6e7gDU6ELnej0y7aWtQO+LIBAbaLXrXkfj+6JLxmQvrskl9KdIw7BdrlvNyCS0rJapWiqVnDm7gWYdjwyKzwT/w+ZJ8xhsA+S+vR6hO0/b7naAtEuDxvW9QCBpsiiNk7xfjag0C0+R3e+jwCNFCepSA0obaHV1bW8kdyM924ZlTEfqslOjTdNV/yRybEdKGDzJ8oSXG5RoJa/s6HTBkCybt7251BDlEwaor4RRGDWTIiIfItmrP+68PJGjVoGj1Fsv1+P55Rn7PfxklDRmMms2YCOGc5dlbNHJByykHHsL/Vd9vBWzR4V2Ms1oXorU7Sbs9mrLeC51VIffJj/oTeR8MLO2N0zifBwE5CXNoK5n3lIS9u9zSgh30YazKnqLdHNJTHrOX1/8Np0Jonor4yMEE7K61aHL8yvobiqU85FaiqMtQunN5R20NOmUmxxE0Yx2zNzyWoMCEvezRQIxGivyPyCTdW8+GhQQ1TBOn04fTyeqo5ecGyS07xRk32Q9keu3a7A/R4/IjL8834uXFzQ4/1qiK1rGLkve4JJ+a3SPZI6Pta5FDuNbr435+qKhiH2sUChg/qUtDI41bUty0du48maMfye+TmM0u1MqFAaWXDpK0PIHcFWUc9v/m9fc35/CHULp0pSlrwUAw1OpxEalC/HvaLQ65KD9gLjuZDpoqwm5PXUT6/KvSUMPoAsrZOd2pkPHQY07BF51GP+JHCTAgLKeNnxwZceXyPesJoKJH3GRtE/1URgMUq5ED32Xcc5/RuasW7iEHFPOavJjsEy6MciRncF0K27/7PLt+vAvZMcZdCcW+/HqnUbqKkm34AxWU+Ky/4VL/bLF0CuA6k8skdiOi4v5odTbqe9vkx8U8m/9P8/68hME+3+EkPEfbhHbzMBpNEAAAAAASUVORK5CYII=") center/contain no-repeat}
+      .dark .logo{background-image:url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFoAAAA4CAMAAABKSh9hAAAAq1BMVEVMaXFrps51v+JrrdP3dk9noMqgoKV9obTebVf2dlNwttpnm8PbeVnydU3qelaKv9XfgGB4qsvceVbrfFqUtMXmfl3meVqMtMeRuMvkf2OIrsPYfl92osDsaUmEwdp7pcCGssniYUHigGKEq8B/pr9+r8mBsMiLr8PWfmDOd13ffGDkbk2Hv9fZd1jLalbHb1OvpKL8f1n7eVXzfVd+xOSDzOx9utl3stTeVzltLl3SAAAAMXRSTlMA/v7+/v4IAgP9/f0p/u6mOv4O+hbIlClIqmFd5/7yxo7+53mi5bc4lE16/tzRyZfnJpz/XgAAAAlwSFlzAAAD6AAAA+gBtXtSawAABdFJREFUWMOtmItyokAQRQeF4aHERTAigoj4ihoTwKj//2V7e0YMGtRsuV2VKk3w2Ny5/SCMXYV+J8oLjNqgK4zybzr7CWY3Q+f6/QsuwjB+fNbzg3GnJsadVCaOC4ar5euDWPEqGWAv6Mz2+/2ujK9KbHy6wu9sRp+umz2KXvdCCi+d7RtWGY2L2I1A5nw8+tp9uoVq1oaq0g/CzM9onch+vLcuo4oe4yKv8/U1+rRtU7XrySXbrqC5ztOD1WxK4u6nIhsPcnS+drtPU83z/JYOuZrLr3k/o3Wvs29SWPvDbF5zioHOWQryaKLavUF9vA4GEzOnMKNt94ps7WfjhcfrnedtKOn18fgB914UgXzFOfvzbkKSwkwiKQh+ycaCvJ+lHtNvlA0LSKHP4/GYfBiwrXFlYQPkSU5yF0lSOoSzwFGIPO+zc9H9SJuR0qMtyMma2LpxWSEGyEVh2iAfI4kGy5s1FaVpzbkomhtkvvmCBbdJkkSR+wESr7KR89skhxbZBN9eOgRyHJSmcphzdpNMztvsGo2Rv42Ajtxl97KUDSKrcI87fDsmJ1/rrC+SnvXZvQbC+iMqnEV3a6/Xks2MSs5QgzztDtlbAuOf0OMD0E6A9Jn+CN1n7S3Itu0u+TdaF2qYtvoyRPprVRVZ404p6cNcnN9D9MJg7Xc7sk3bXcmrcYCUM8SwC+TM2dBV1UyifUcBOmB326VEN3Y+I3YBH4AtHMiFN3Iq/ZchHcCwOPUQ0gPomfdbNG6u3ctgswJ6S1HoBMF2h8KDZzTjMekxfdDkK2jKu0dnZhekN3kDd2GqlLN+gfZmijjE++OjioaeYNtocO6KCzLkyXGCpI9Ey5Lph4T2/wWNySf1LtxVl8g5vPHGfqJb/4Den64TmtioPrc3KdA2VPW9LcuTVwQhtPYL9GIP9KasK+N0lmaW2wj1eNy2qTBE1vY/on2gd5uzkQQbhrNprNjoh+temxlX6PB36GBnWbsNP18n2ZRx7ibHJMozsHUhiF1xiPYLh4wJ3flGE3vwUmSZ23v7SNZFoWbQ26geI48VTXPmDypG5x0MezF8z90fffXParV6QxP8cNFC1Bzs7jca6TiaooT3q1HX+xtC198cusiShoBtgl1FB46mkdi3mzVVaoBNYj+6brxiv2NG1+gOChW6U96VHuLNgFZifmcOQI85km7Et64xjO6ysNd25L63v30NRZqU9p2DxFz2D1hQdilurV4RZL507QhTYrs8HyPqLARaC+9MGd2gpC2hRx0blS/0jtYYnesiN7OBuD/sLoqQxKuXm5YJUrrZoPZo3NiuEd3XKEkwcwtTzV5Ft4XaIm1nXs/WaXpaEMRZXG3NP5L/wAIU5QViKNFcmkRz4n7d7dIZ7ptWcz/Grtq+HX8Q2yhC4RfnHRgGmBK7pcwCTvAq/7RbHZoW9Y927+VeTF6oY6km5ub3xwWbEl+wy+mLr0kd2toONPJX6KB5JfDm8hcIW80GXVbDvvIgtsixIEMOg3VpcD2KLBu0q+YCW9gk5FdikM6U89zD6F5m6jlM8VOu7PI9ranFZNU1rhavsNXSlLRqEqy1i/ggyLGHfXD44rpSVFeGeHl+I973lu3rpy8WtIAOKx7BC546FnY27LAena4wwf1oI2OdX6J16q1KXH3yZIv5QZHbMfXF+56uiHu14WKOaa2WErDzks9wfrT8gDzlJ9vcrsSySPWaUh4rQFPX1sUTMZ70QgFWDk7Kf/2MW7s9U60r0/KpQIA1QltwOufsCbRPh9iSw9fzp6EjwErTGXvsmaRRDFPIocWcuOPQcYTHAY599gxXtmxkrUwXqchXhuLEaCmcPYOmyecIV1O6rRIcBt7tB7JfkuGYGHqUQdyDyPiphMtWH2oVMhKeLnSm82fJlFv6zXVa4RRKEPg/kFHkMlvNCeOp7/2fhE/7LZbVFqip74mFS+b7fNZoJ4s0COQ/FOSDvl5+53+LJ512HX8BecPH7lQkjhUAAAAASUVORK5CYII=")}
       .hd b{font-size:12.5px;font-weight:600;color:var(--tx)}
       .hd span.ctx{margin-left:auto;font-size:11.5px;color:var(--mut)}
       .bd{padding:14px}
@@ -25,7 +23,10 @@
          Class names are generated by renderLetterMockup(). */
       .letter-mockup-container{display:flex;justify-content:center}
       .letter-mockup{width:222px;max-width:100%;aspect-ratio:8.5/11;background:#fdfcf8;border:1px solid #e6e0d2;border-radius:4px;box-shadow:0 2px 10px rgba(43,36,29,.12);overflow:hidden;display:flex;flex-direction:column;position:relative;color:#2b241d}
-      .address-window{height:30%;background:rgba(128,113,90,.06);display:flex;flex-direction:column;justify-content:flex-start;padding:9px 11px;border-bottom:1px dashed #d9cdb8;position:relative}
+      /* The window grows to fit: a return address and a four-line recipient
+         (a Suite line) are taller than 30%, and a fixed height let the city
+         line run into the body (Android, 2026-09-29). */
+      .address-window{min-height:30%;flex-shrink:0;background:rgba(128,113,90,.06);display:flex;flex-direction:column;justify-content:flex-start;padding:9px 11px;border-bottom:1px dashed #d9cdb8;position:relative}
       .return-address{font-family:Georgia,"Times New Roman",serif;font-size:6.5px;line-height:1.45;color:#8a7a64;text-transform:uppercase;letter-spacing:.02em}
       .recipient-address{font-family:Georgia,"Times New Roman",serif;font-size:7.5px;line-height:1.5;color:#2b241d;text-transform:uppercase;margin:9px 0 0 34%}
       .address-window-label{font-size:8px;color:#a8916b;text-transform:uppercase;letter-spacing:.08em;text-align:center;align-self:center;margin:auto}
@@ -36,6 +37,47 @@
       .sign-off{margin-top:5px;white-space:pre-wrap;font-size:7.2px}
       .inline-image-wrapper{width:100%;max-height:25%;margin-top:5px;display:flex;justify-content:center}
       .inline-image-wrapper img{max-width:100%;max-height:100%;object-fit:contain;border-radius:3px}
+      /* Gift letter page 2 (docs/gift-letters.md): a miniature of the card
+         the send prints on an extra page. Drawn from state.giftCard; the code
+         is a placeholder because it does not exist until the send. */
+      .letter-mockup-container{gap:10px;flex-wrap:wrap;align-items:flex-start}
+      .gift-page-mockup{width:120px;aspect-ratio:8.5/11;background:#fdfcf8;border:1px solid #e6e0d2;border-radius:4px;box-shadow:0 2px 10px rgba(43,36,29,.12);padding:10px 8px;box-sizing:border-box;color:#2b241d;font-family:Georgia,"Times New Roman",serif;position:relative}
+      .gift-mini-card{border:1px solid #2b241d;border-radius:5px;padding:6px 5px;text-align:left}
+      .gift-mini-eyebrow{font-size:5px;letter-spacing:.1em;text-transform:uppercase;color:#8a7a64;margin-bottom:3px}
+      .gift-mini-title{font-size:7.5px;line-height:1.25;margin-bottom:5px}
+      .gift-mini-qr{width:30px;height:30px;background:repeating-conic-gradient(#2b241d 0 25%,#fdfcf8 0 50%) 0 0/6px 6px;border:2px solid #fdfcf8;outline:1px solid #2b241d;margin-bottom:4px}
+      .gift-mini-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:6.5px;font-weight:700;letter-spacing:.05em}
+      .gift-page-label{position:absolute;bottom:4px;right:6px;font-size:6px;color:#a8916b;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+      .image-not-shown{width:100%;border:1px dashed #d9cdb8;border-radius:3px;padding:6px 4px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:7px;color:#8a7a64;text-align:center}
+      /* The page as it prints (#534): our renderer's SVG, with the addresses
+         where PostGrid stamps them. White, not cream: it is the print. A
+         select enlarges it to the card's width, and again restores it. */
+      .letter-page-view{display:flex;flex-direction:column;align-items:center;gap:6px;width:100%;max-width:300px}
+      .letter-page-view.zoomed{max-width:none}
+      .letter-page{position:relative;width:100%;border:1px solid #e6e0d2;border-radius:4px;background:#fff;box-shadow:0 2px 10px rgba(43,36,29,.12);cursor:zoom-in}
+      .letter-page-view.zoomed .letter-page{cursor:zoom-out}
+      .letter-page > svg{display:block;width:100%;height:auto;border-radius:4px}
+      .letter-page > svg + svg{border-top:1px dashed #d9cdb8}
+      .page-zoom{border:0;background:none;padding:2px 6px;font:inherit;font-size:11px;color:var(--mut);cursor:pointer;text-decoration:underline}
+      /* The envelope reveal (#576): over the page's top third, where a letter
+         folded in three shows through a window envelope. Every motion stays in
+         the page's box; sealed, the box is the envelope's height. */
+      .letter-page > svg.envelope{position:absolute;left:0;top:0;width:100%;height:auto;border:0;border-radius:4px 4px 0 0;pointer-events:none}
+      /* The view is the size container, so a clip can be the envelope's height
+         (264/612 of the width, 43.137cqw) whatever the pages' height: a gift
+         letter's two pages fold to one envelope. */
+      .envelope-opening,.envelope-sealing,.envelope-sealed{container-type:inline-size}
+      .envelope-opening .letter-page{animation:envelope-unfold .6s ease-out .2s both}
+      .envelope-opening svg.envelope{animation:envelope-away .8s ease-out both}
+      .envelope-sealing .letter-page{animation:envelope-fold .7s ease-in both}
+      .envelope-sealing svg.envelope{animation:envelope-back .7s ease-in both}
+      .envelope-sealed .letter-page{aspect-ratio:612/264;overflow:hidden}
+      .letter-page-view.envelope-sealed .letter-page{cursor:pointer}
+      @keyframes envelope-unfold{from{clip-path:inset(0 0 calc(100% - 43.137cqw) 0)}to{clip-path:inset(0)}}
+      @keyframes envelope-away{from{opacity:1;transform:none}to{opacity:0;transform:translateY(12%)}}
+      @keyframes envelope-fold{from{clip-path:inset(0)}to{clip-path:inset(0 0 calc(100% - 43.137cqw) 0)}}
+      @keyframes envelope-back{from{opacity:0;transform:translateY(12%)}to{opacity:1;transform:none}}
+      @media (prefers-reduced-motion: reduce){.envelope-opening .letter-page,.envelope-opening svg.envelope,.envelope-sealing .letter-page,.envelope-sealing svg.envelope{animation:none}}
 
       /* Layout badge - production color semantics kept */
       .layout-badge{position:absolute;top:7px;right:7px;font-size:6.5px;font-weight:700;letter-spacing:.1em;padding:2.5px 7px;border-radius:4px;text-transform:uppercase;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
@@ -56,6 +98,7 @@
       .status-pill.alert{color:var(--er);background:var(--erbg)}
 
       .note{background:var(--sf2);border:1px solid var(--bd2);border-radius:8px;padding:7px 10px;font-size:11px;color:var(--mut);line-height:1.45;margin-top:10px}
+      .empty-hint{font-size:11px;color:var(--mut);line-height:1.45;margin:8px 2px 0}
 
       /* Action buttons: primary ink pill (inverts in dark), secondary outline */
       .send-button{display:flex;width:100%;justify-content:center;align-items:center;gap:7px;border-radius:999px;padding:10px 16px;font-size:13px;font-weight:600;font-family:inherit;cursor:pointer;box-sizing:border-box;border:none;margin-top:12px;background:var(--pri);color:var(--prit);transition:opacity .15s ease}
@@ -66,6 +109,23 @@
       .purchase-actions{display:grid;gap:0}
       .send-button.secondary{color:var(--tx);background:transparent;border:1px solid var(--bd);margin-top:8px}
       .send-button.secondary:hover:not(:disabled){background:var(--sf2);opacity:1}
+      /* The Arrives row (#535) */
+      .arrives-controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:flex-end}
+      .arrives-controls input[type=date]{font:inherit;font-size:12px;color:var(--tx);background:var(--sf);border:1px solid var(--bd);border-radius:6px;padding:2px 6px}
+      .arrives-controls input[type=date]:disabled{opacity:.6}
+      /* The Style row (#563) */
+      .style-controls{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;justify-content:flex-end}
+      .style-controls .link-button[aria-disabled=true]{cursor:default}
+      .style-controls .link-button[aria-disabled=true]:not([aria-pressed=true]){opacity:.45}
+      /* The Signature switch (#608): on and off are both pressable, so a pill, not a link. */
+      .signature-switch{font:inherit;font-size:12px;font-weight:600;border:1px solid var(--bd);border-radius:999px;padding:3px 11px;background:var(--sf);color:var(--tx);cursor:pointer}
+      .signature-switch[aria-checked=true]{background:var(--pri);border-color:var(--pri);color:var(--prit)}
+      .signature-switch[aria-disabled=true]{cursor:default;opacity:.6}
+      .signature-switch:focus-visible{outline:2px solid var(--tx);outline-offset:1px}
+      .studio .signature-switch{padding:5px 11px}
+      .link-button{font:inherit;font-size:11.5px;background:none;border:none;padding:0;color:var(--mut);text-decoration:underline;cursor:pointer;overflow-wrap:anywhere}
+      .link-button[aria-pressed=true],.link-button:disabled{color:var(--tx);text-decoration:none;cursor:default}
+      .note.alert{color:var(--er);background:var(--erbg);border-color:transparent}
       .checkout-link{text-decoration:none}
       .checkout-link:hover{opacity:.9}
       @keyframes spin{to{transform:rotate(360deg)}}
@@ -82,11 +142,76 @@
       @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
       .preview-loading{display:flex;align-items:center;justify-content:center;min-height:200px;color:var(--faint);font-size:11.5px;width:100%}
       .rev{font-size:10px;opacity:.5;text-align:right;color:var(--mut);padding:0 14px 9px;margin:0}
+
+      /* The studio card (#580): while the preview's _meta carries
+         letterirl/studioCard, widgets/shared/studio.js lays the card out from
+         #studio-template, moving the card's own rows, notes and buttons into
+         it. Nothing here applies to a card without the studio class. Two
+         columns from 560px, so the card stays under Claude's frame (about
+         700px tall, 2026-09-27). */
+      .studio .hd,.studio .bd,.studio .rows{display:none}
+      .studio .meta{padding:0 14px}
+      .studio-hd{display:flex;align-items:center;gap:10px;padding:14px 14px 0}
+      .studio-icon{width:32px;height:32px;flex:none;border-radius:8px;background:var(--sf2);border:1px solid var(--bd2);display:flex;align-items:center;justify-content:center}
+      .studio-heading{display:flex;flex-direction:column;flex:1;min-width:0}
+      .studio-title{font-size:14px;font-weight:700;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .studio-sub{font-size:12px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .studio-hd .status-pill{flex:none;max-width:45%;text-align:right}
+      .studio-body{display:flex;flex-direction:column;align-items:center;gap:14px;padding:14px}
+      .studio-page{width:100%;max-width:300px;display:flex;flex-direction:column;align-items:center}
+      .studio-side{width:100%;min-width:0;display:flex;flex-direction:column;gap:12px}
+      .studio-body.zoomed{align-items:stretch}
+      .studio-body.zoomed .studio-page{max-width:none}
+      @media (min-width:560px){
+        .studio-body{flex-direction:row;align-items:flex-start}
+        .studio-page{flex:0 0 min(300px,45%)}
+        .studio-side{flex:1}
+        .studio-body.zoomed{flex-direction:column}
+        .studio-body.zoomed .studio-page{flex:none}
+      }
+      .studio-tabs{display:flex;gap:4px;background:var(--sf2);border:1px solid var(--bd2);border-radius:12px;padding:4px}
+      .studio-tab{flex:1;min-width:0;height:32px;border:0;border-radius:9px;background:transparent;font:inherit;font-size:12.5px;font-weight:600;color:var(--mut);cursor:pointer}
+      .studio-tab[aria-selected=true]{background:var(--sf);color:var(--tx);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+      .studio-tab:focus-visible,.studio-words:focus-visible{outline:2px solid var(--tx);outline-offset:1px}
+      .studio-panel{display:flex;flex-direction:column;gap:10px}
+      .studio-panel[hidden]{display:none}
+      .style-designs{display:contents}
+      .style-designs[hidden]{display:none}
+      .studio-panel .info-row{padding:6px 0}
+      .studio-panel .note,.studio-side > .note{margin-top:0}
+      .studio #style-row,.studio #signature-row,.studio #service-row,.studio #arrives-row{flex-direction:column;align-items:stretch;gap:8px;border-bottom:0;padding:0}
+      .studio #style-label,.studio #signature-label,.studio #service-label,.studio #arrives-row .info-label{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase}
+      .studio #style-row .style-controls,.studio #signature-row .style-controls,.studio #service-row .style-controls,.studio #arrives-row .arrives-controls{justify-content:flex-start;text-align:left;gap:6px}
+      .studio #style-row .link-button,.studio #service-row .link-button,.studio #arrives-row .link-button{border:1px solid var(--bd);border-radius:999px;padding:5px 11px;font-size:12px;font-weight:600;color:var(--tx);text-decoration:none;background:var(--sf)}
+      .studio #style-row .link-button[aria-pressed=true],.studio #service-row .link-button[aria-pressed=true],.studio #arrives-row .link-button[aria-pressed=true]{background:var(--pri);border-color:var(--pri);color:var(--prit)}
+      .studio #arrives-row input[type=date]{font-size:12.5px;padding:4px 8px;border-radius:999px}
+      .studio-quiet{margin:0;font-size:12px;color:var(--mut);line-height:1.45}
+      .studio-words{max-height:300px;overflow:auto;white-space:pre-wrap;word-wrap:break-word;font-family:Georgia,"Times New Roman",serif;font-size:13px;line-height:1.55;color:var(--tx);background:var(--sf2);border:1px solid var(--bd2);border-radius:10px;padding:10px 12px}
+      .studio-words[hidden],.studio-words-edit[hidden],.studio-panel .note[hidden],#studio-words-open[hidden]{display:none}
+      /* The Words tab's editor (#586). */
+      .studio-words-edit{display:flex;flex-direction:column;gap:6px}
+      .studio-words-edit label{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--mut)}
+      .studio-words-edit textarea{width:100%;box-sizing:border-box;font-family:Georgia,"Times New Roman",serif;font-size:13px;line-height:1.55;color:var(--tx);background:var(--sf);border:1px solid var(--bd);border-radius:10px;padding:8px 10px;resize:vertical}
+      .studio-words-actions{display:flex;flex-wrap:wrap;gap:8px}
+      .studio-panel .words-button{font:inherit;border:1px solid var(--bd);border-radius:999px;padding:5px 11px;font-size:12px;font-weight:600;color:var(--tx);background:var(--sf);cursor:pointer;align-self:flex-start}
+      .studio-panel .words-button.primary{background:var(--pri);border-color:var(--pri);color:var(--prit)}
+      .studio-panel .words-button[aria-disabled=true]{opacity:.6;cursor:default}
+      .studio-ft{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;margin:0 14px;padding:12px 0 14px;border-top:1px solid var(--bd2)}
+      .studio-sum{flex:1 1 160px;min-width:0;display:flex;flex-direction:column}
+      .studio-cost{font-size:14px;font-weight:700;color:var(--tx)}
+      .studio-summary{font-size:12px;color:var(--mut)}
+      .studio-ft #send-button{width:auto;flex:0 0 auto;margin:0;padding:10px 20px}
+      .studio-ft > :not(.studio-sum):not(#send-button){flex:1 1 100%}
+      /* A letter of more than one page shows one page at a time. */
+      .page-tools{display:flex;align-items:center;justify-content:center;gap:10px}
+      .page-count{font-size:11px;color:var(--mut)}
+      .studio .letter-page .print-page{border-top:0}
+      .studio .letter-page .print-page:not(.shown){display:none}
     </style>
   </head>
   <body>
     <div class="w" id="card">
-      <div class="hd"><span class="logo"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 21"><path fill="none" stroke="var(--li-blue,#2563eb)" stroke-width="3" stroke-linejoin="round" d="M11.3 2.4c5.2 0 9.4 3.3 9.4 7.4 0 4.1-4.2 7.4-9.4 7.4-.8 0-1.6-.1-2.4-.2l-5.7 2.6 1.8-4.1C3 14.2 1.9 12 1.9 9.8c0-4.1 4.2-7.4 9.4-7.4Z"></path><g transform="rotate(-8 24 8.6)"><rect x="16.5" y="3" width="14.6" height="10" rx="1.6" fill="var(--li-orange,#f97316)"></rect><path fill="none" stroke="#fff" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" d="m18 4.7 5.8 4 5.8-4"></path></g></svg></span><b>Letter IRL</b><span class="ctx">Letter</span></div>
+      <div class="hd"><span class="logo" aria-hidden="true"></span><b>Letter IRL</b><span class="ctx">Letter</span></div>
       <div class="bd">
         <div class="letter-mockup-container" id="mockup-container">
           <div class="preview-loading">Loading letter preview&hellip;</div>
@@ -94,32 +219,121 @@
       </div>
       <div class="meta">
         <div class="rows">
-          <div class="info-row">
+          <div class="info-row" id="layout-row">
             <span class="info-label">Layout</span>
             <span class="info-value" id="layout-type">&mdash;</span>
           </div>
-          <div class="info-row">
+          <div class="info-row" id="cost-row">
             <span class="info-label">Cost</span>
             <span class="info-value" id="cost">&mdash;</span>
           </div>
-          <div class="info-row">
+          <div class="info-row" id="delivery-row">
             <span class="info-label">Delivery</span>
             <span class="info-value" id="delivery">&mdash;</span>
           </div>
-          <div class="info-row">
+          <!-- Arrival dates (#535): shown while the preview offers dates and
+               this card can set one. widgets/shared/arrives.js draws it. -->
+          <div class="info-row" id="arrives-row" style="display: none">
+            <label class="info-label" for="arrives-date">Arrives by</label>
+            <span class="info-value arrives-controls">
+              <input type="date" id="arrives-date" />
+              <button type="button" class="link-button" id="arrives-asap" aria-pressed="true">As soon as possible</button>
+            </span>
+          </div>
+          <!-- Stationery (#563): shown while the preview names its stationery
+               and this card can change it. widgets/shared/style.js draws it. -->
+          <div class="info-row" id="style-row" style="display: none">
+            <span class="info-label" id="style-label">Style</span>
+            <span class="info-value style-controls" role="group" aria-labelledby="style-label">
+              <button type="button" class="link-button" data-theme="classic" aria-pressed="false">Classic</button>
+              <button type="button" class="link-button" data-theme="monogram" aria-pressed="false">Monogram</button>
+              <button type="button" class="link-button" data-theme="botanical" aria-pressed="false">Botanical</button>
+              <button type="button" class="link-button" data-theme="celebration" aria-pressed="false">Celebration</button>
+              <button type="button" class="link-button" data-theme="typewriter" aria-pressed="false">Typewriter</button>
+              <button type="button" class="link-button" data-theme="handwritten" aria-pressed="false">Handwritten</button>
+              <!-- The person's saved designs (#649), one button each, named as they saved it; drawn by style.js
+                   from the preview's _meta.stationeryDesigns while designs are offered. -->
+              <span class="style-designs" id="style-designs" hidden></span>
+            </span>
+          </div>
+          <!-- The person's saved signature on the letter (#608), while the
+               preview says one is saved and this card can change the draft.
+               widgets/shared/style.js draws it, beside the Style row. -->
+          <div class="info-row" id="signature-row" style="display: none">
+            <span class="info-label" id="signature-label">Signature</span>
+            <span class="info-value style-controls">
+              <button type="button" class="signature-switch" id="signature-switch" role="switch" aria-checked="false" aria-labelledby="signature-label">Off</button>
+            </span>
+          </div>
+          <!-- How the letter travels (#648): ordinary mail or certified mail, while the preview offers certified mail.
+               widgets/shared/style.js draws it with the Style row; the studio puts it on the Delivery tab. -->
+          <div class="info-row" id="service-row" style="display: none">
+            <span class="info-label" id="service-label">Mail</span>
+            <span class="info-value style-controls" role="group" aria-labelledby="service-label">
+              <button type="button" class="link-button" data-service="standard" aria-pressed="false">First-Class</button>
+              <button type="button" class="link-button" data-service="certified" aria-pressed="false">Certified</button>
+              <button type="button" class="link-button" data-service="certified_return_receipt" aria-pressed="false">Certified + e-receipt</button>
+            </span>
+          </div>
+          <div class="info-row" id="status-row">
             <span class="info-label">Status</span>
             <span class="status-pill" id="status-pill">Loading...</span>
           </div>
-          <div class="info-row">
+          <div class="info-row" id="id-row">
             <span class="info-label" id="id-label">Draft</span>
             <span class="info-value mono" id="id-value">&mdash;</span>
           </div>
         </div>
+        <div class="note" id="arrives-note" style="display: none" aria-live="polite"></div>
+        <div class="note" id="style-note" style="display: none" aria-live="polite"></div>
+        <div class="note" id="service-note" style="display: none" aria-live="polite"></div>
         <div class="note" id="note" style="display: none"></div>
+        <!-- Shown when no result arrived (#411), or for a reopened card that
+             already sent its letter or started a checkout. -->
+        <div id="empty-state" style="display: none">
+          <div class="note" id="empty-message"></div>
+          <button class="send-button" id="retry-button" style="display: none">
+            <span id="retry-button-text">Create my preview</span>
+          </button>
+          <!-- An image attached or generated in the chat reaches this card as
+               a reference it cannot pass back (#414). The person picks the
+               image again, and the card previews it by link. -->
+          <button class="send-button" id="choose-image-button" style="display: none">
+            <span id="choose-image-button-text">Choose from library</span>
+          </button>
+          <button class="send-button secondary" id="upload-image-button" style="display: none">
+            <span id="upload-image-button-text">Upload the image</span>
+          </button>
+          <input type="file" id="image-file-input" accept="image/png,image/jpeg,image/webp" hidden />
+          <!-- Only after a wait that ran out. A card cannot tell which model
+               is selected (neither window.openai nor the request metadata
+               says), so the tip names the setting where the loss shows up. -->
+          <p class="empty-hint" id="empty-hint" style="display: none">
+            Tip: with Instant selected, ChatGPT sometimes doesn't run an action you approved. A higher thinking effort can help.
+          </p>
+        </div>
         <!-- Send button - US-MCP-08 -->
         <button class="send-button" id="send-button" disabled>
           <span id="send-button-text">Send Letter</span>
         </button>
+        <!-- Sent with an arrival date (#535): it waits for its mail date and
+             can be cancelled free until then. -->
+        <div id="scheduled" style="display: none">
+          <div class="note" id="scheduled-note" aria-live="polite"></div>
+          <button class="send-button secondary" id="cancel-scheduled-button" style="display: none">
+            <span id="cancel-scheduled-button-text">Cancel this letter</span>
+          </button>
+        </div>
+        <button
+          class="send-button"
+          id="send-page-button"
+          style="display: none"
+        >
+          Open the confirmation page
+        </button>
+        <div class="note" id="send-page-note" style="display: none">
+          Not sent: in this app, mail is sent from Letter IRL's confirmation page. Open it, check the letter, and press Send there.
+        </div>
         <div
           class="purchase-actions"
           id="purchase-actions"
@@ -130,6 +344,22 @@
           </button>
           <button class="send-button secondary" id="buy-pack-button">
             Buy a Letter Pack
+          </button>
+          <button
+            class="send-button"
+            id="website-packs-button"
+            style="display: none"
+          >
+            Buy letters on the website
+          </button>
+          <!-- Mail no pack pays for (#579), in an app with no checkout: paid
+               with Pay & Send on the confirmation page, which sends it. -->
+          <button
+            class="send-button"
+            id="pay-page-button"
+            style="display: none"
+          >
+            Pay &amp; Send on letterirl.com
           </button>
           <div id="pack-options" style="display: none"></div>
           <a
@@ -147,7 +377,7 @@
           >
             Check status
           </button>
-          <div class="note">Checkout opens in your browser. Paying sends it automatically - this card updates when you return to this tab, or use Check status.</div>
+          <div class="note" id="checkout-note">Checkout opens in your browser. Paying sends it automatically - this card updates when you return to this tab, or use Check status.</div>
         </div>
         <div
           id="error-message"
@@ -155,18 +385,143 @@
           style="display: none"
         ></div>
       </div>
-      <p class="rev">letter t21</p>
+      <p class="rev">letter t37</p>
     </div>
 
+    <!-- The studio card (#580): widgets/shared/studio.js lays the card out
+         from this while the preview's _meta turns it on. Each data-slot is
+         replaced by the card's own element with that id, moved. -->
+    <template id="studio-template">
+      <div class="studio-hd">
+        <span class="studio-icon" aria-hidden="true"><span class="logo"></span></span>
+        <div class="studio-heading">
+          <span class="studio-title" id="studio-title">Your letter</span>
+          <span class="studio-sub" id="studio-sub"></span>
+        </div>
+        <span data-slot="status-pill"></span>
+      </div>
+      <div class="studio-body" id="studio-body">
+        <div class="studio-page">
+          <span data-slot="mockup-container"></span>
+        </div>
+        <div class="studio-side">
+          <div class="studio-tabs" role="tablist" aria-labelledby="studio-title">
+            <button type="button" class="studio-tab" role="tab" id="studio-tab-style" aria-controls="studio-panel-style" data-tab="style">Style</button>
+            <button type="button" class="studio-tab" role="tab" id="studio-tab-words" aria-controls="studio-panel-words" data-tab="words">Words</button>
+            <button type="button" class="studio-tab" role="tab" id="studio-tab-delivery" aria-controls="studio-panel-delivery" data-tab="delivery">Delivery</button>
+          </div>
+          <div class="studio-panel" role="tabpanel" id="studio-panel-style" aria-labelledby="studio-tab-style" data-tab="style">
+            <span data-slot="style-row"></span>
+            <span data-slot="signature-row"></span>
+            <p class="studio-quiet" id="studio-style-quiet"></p>
+            <span data-slot="style-note"></span>
+            <span data-slot="layout-row"></span>
+          </div>
+          <div class="studio-panel" role="tabpanel" id="studio-panel-words" aria-labelledby="studio-tab-words" data-tab="words" hidden>
+            <div class="studio-words" id="studio-words" tabindex="0" aria-label="The letter's words"></div>
+            <div class="studio-words-edit" id="studio-words-edit" hidden>
+              <label for="studio-words-body">The letter</label>
+              <textarea id="studio-words-body" rows="10" aria-describedby="studio-words-count"></textarea>
+              <label for="studio-words-signoff">Signed</label>
+              <textarea id="studio-words-signoff" rows="2"></textarea>
+              <p class="studio-quiet" id="studio-words-count" hidden></p>
+              <div class="studio-words-actions">
+                <button type="button" class="words-button primary" id="studio-words-update">Update the page</button>
+                <button type="button" class="words-button" id="studio-words-cancel">Cancel</button>
+              </div>
+            </div>
+            <p class="studio-quiet" id="studio-fit" hidden></p>
+            <p class="note" id="studio-words-note" role="status" hidden></p>
+            <button type="button" class="words-button" id="studio-words-open" hidden>Change the words</button>
+            <p class="studio-quiet" id="studio-words-chat">To change the words, ask in the chat.</p>
+          </div>
+          <div class="studio-panel" role="tabpanel" id="studio-panel-delivery" aria-labelledby="studio-tab-delivery" data-tab="delivery" hidden>
+            <span data-slot="arrives-row"></span>
+            <span data-slot="arrives-note"></span>
+            <span data-slot="scheduled"></span>
+            <span data-slot="service-row"></span>
+            <span data-slot="service-note"></span>
+            <span data-slot="delivery-row"></span>
+            <span data-slot="id-row"></span>
+          </div>
+          <span data-slot="note"></span>
+        </div>
+      </div>
+      <div class="studio-ft">
+        <div class="studio-sum">
+          <span class="studio-cost" id="studio-cost"></span>
+          <span class="studio-summary" id="studio-summary"></span>
+        </div>
+        <span data-slot="send-button"></span>
+        <span data-slot="send-page-button"></span>
+        <span data-slot="send-page-note"></span>
+        <span data-slot="purchase-actions"></span>
+        <span data-slot="error-message"></span>
+      </div>
+    </template>
+
+    <!-- letter-irl:host -->
+    <!-- letter-irl:pages -->
+    <!-- letter-irl:arrives -->
+    <!-- letter-irl:style -->
+    <!-- letter-irl:envelope -->
+    <!-- letter-irl:studio -->
     <script type="module">
-      // Per OpenAI docs, data may not be available immediately
-      // Must listen for 'openai:set_globals' event
+      // The card talks to its host only through window.letterIrlHost
+      // (widgets/shared/host.js, #474): window.openai in ChatGPT, MCP Apps in
+      // Claude and VS Code. Data may not be available immediately, so the
+      // card re-renders on host.onChange.
+      const host = window.letterIrlHost;
+      // The draft last told to the conversation, and the queue of those updates (#650: shareSelection).
+      let sharedDraftId = "";
+      let shareChain = Promise.resolve();
+      let sharedAt = 0;
+      // A share asked for by a use of the card too soon after the last, made when the wait is over.
+      let shareLater = false;
+      let lastUseAt = 0;
+      // The time the last share carried, so a delayed share never goes back in time.
+      let carriedAt = 0;
+      // The draft get_draft_status last answered "ready" for, in a host where the card asks (#650 review round 1).
+      let statusReadyFor = null;
+
       //
       // US-LAYOUT-05: Visual letter mockup with layout-aware rendering
       // US-MCP-08: Send button calls send_letter via callTool
 
       let dataLoaded = false;
       let currentDraftId = null;
+      // The content version (#695) of the mail as this card shows it: the preview's, then each change the card drew,
+      // then a status answer it took. Send and Pay & Send name it, so the server refuses mail changed since (by the
+      // chat, or a change whose page did not come back here), and the card draws it again instead of sending it.
+      let shownVersion = { draftId: null, version: null };
+      function showVersion(draftId, version) {
+        if (typeof draftId === "string" && draftId && typeof version === "string" && version) {
+          shownVersion = { draftId, version };
+        }
+      }
+      // The version to send for this draft, or none (an older server's preview names none, and is sent as before).
+      function versionFor(draftId) {
+        return shownVersion.draftId === draftId ? shownVersion.version : null;
+      }
+      // An edit's version covers the whole draft (#695 review round 1): it is taken only when the edit was made to the
+      // version this card shows, so the edit's own change is the only one since. Made to another (the chat changed the
+      // draft meanwhile), the card asks for the draft as it is now, and draws it.
+      function takeEditVersion(draftId, version, before) {
+        const shown = versionFor(draftId);
+        if (!shown) return;
+        if (typeof before === "string" && before === shown) {
+          showVersion(draftId, version);
+          return;
+        }
+        askDraftState(draftId, true);
+      }
+
+      // A send or checkout refused for a change since, while the card asks for the draft as it is now:
+      // { draftId, action }. lastRefused: the version last refused, so a version refused twice is not asked about again.
+      let changed = null;
+      let lastRefused = null;
+      // A changed-notice that says the card could not show the mail: cleared once a later answer draws it whole.
+      let changedNotice = false;
       let currentEligibility = null;
       let sendInProgress = false;
       let checkoutInProgress = false;
@@ -193,8 +548,1280 @@
       let pollStartedAt = 0;
       let pollDeadline = 0;
 
+      // ---- Arrival dates (#535) -------------------------------------------
+      //
+      // The Arrives row sets the draft's date through set_arrival_date, and a
+      // letter sent with one waits for its mail date, with Cancel until then.
+      // Both live in widgets/shared/arrives.js; this card tells them what to
+      // draw, and redraws when they change something.
+      const arrives = window.letterIrlArrives;
+      // What set_arrival_date last said about this card's draft:
+      // {draftId, schedule, deliveryEstimate}. render() shows its estimate.
+      let arrivalChange = null;
+      const picker = arrives.createPicker({
+        host,
+        onVersion: (draftId, version, before) => takeEditVersion(draftId, version, before),
+        row: document.getElementById("arrives-row"),
+        input: document.getElementById("arrives-date"),
+        asap: document.getElementById("arrives-asap"),
+        note: document.getElementById("arrives-note"),
+        readableError,
+        resultText,
+        onSet() {
+          draftActedOn = true;
+        },
+        onChange(change) {
+          arrivalChange = change;
+          render();
+        },
+        onBusy() {
+          render();
+        },
+      });
+      const scheduled = arrives.createScheduled({
+        host,
+        block: document.getElementById("scheduled"),
+        note: document.getElementById("scheduled-note"),
+        button: document.getElementById("cancel-scheduled-button"),
+        buttonText: document.getElementById("cancel-scheduled-button-text"),
+        noun: "letter",
+        readableError,
+        resultText,
+        onCancelled() {
+          keep({ cancelled: true });
+          const statusPill = document.getElementById("status-pill");
+          statusPill.classList.remove("ok", "alert");
+          statusPill.textContent = "Cancelled";
+          refreshStudio();
+        },
+      });
+
+      // ---- Stationery (#563) -----------------------------------------------
+      //
+      // The Style row changes the draft's stationery through set_stationery,
+      // which answers with the page drawn again; the card shows that page in
+      // place of the preview's. It lives in widgets/shared/style.js; this card
+      // tells it what to draw, and redraws when it changes something.
+      // The envelope reveal (#576), while the preview's _meta turns it on. It
+      // lives in widgets/shared/envelope.js; were that script not to run, the
+      // card shows the page as it always has.
+      const envelope = window.letterIrlEnvelope
+        ? window.letterIrlEnvelope.createEnvelope({
+            win: window,
+            enabled: () => currentMeta()[window.letterIrlEnvelope.ENVELOPE_META] === true,
+          })
+        : null;
+
+      const styleRow = window.letterIrlStyle.createStyle({
+        host,
+        onVersion: (draftId, version, before) => takeEditVersion(draftId, version, before),
+        row: document.getElementById("style-row"),
+        buttons: Array.from(document.querySelectorAll("#style-row [data-theme]")),
+        // The person's saved designs (#649): their buttons go here, from the preview's _meta.
+        designsElement: document.getElementById("style-designs"),
+        designs() {
+          return currentMeta().stationeryDesigns;
+        },
+        note: document.getElementById("style-note"),
+        // The Signature switch (#608), beside the styles.
+        signatureRow: document.getElementById("signature-row"),
+        signatureSwitch: document.getElementById("signature-switch"),
+        // The Mail choice (#648), on the Delivery tab: the services the preview's _meta offers.
+        serviceRow: document.getElementById("service-row"),
+        serviceButtons: Array.from(document.querySelectorAll("#service-row [data-service]")),
+        serviceNote: document.getElementById("service-note"),
+        mailServices() {
+          return currentMeta().mailServices;
+        },
+        // How full the preview's pages are, which a change of service keeps.
+        previewFit() {
+          return currentMeta().pageFit ?? null;
+        },
+        readableError,
+        resultText,
+        // Not while this card sends the letter or starts paying for it.
+        idle() {
+          return !sendInProgress && !checkoutInProgress;
+        },
+        onSet() {
+          draftActedOn = true;
+        },
+        onChange() {
+          render();
+        },
+        onBusy() {
+          render();
+        },
+        // The Words tab's editor (#586), drawn by the studio.
+        wordsElement(id) {
+          return document.getElementById(id);
+        },
+      });
+
+      // ---- The studio card (#580) -------------------------------------------
+      //
+      // While the preview's _meta turns it on, the card lays itself out as a
+      // studio: a header naming the letter, the page beside Style, Words and
+      // Delivery tabs, and a footer with the cost and Send. The rows, notes
+      // and buttons in it are the card's own, moved, so each still calls the
+      // tool a model would. It lives in widgets/shared/studio.js; were that
+      // script not to run, the card is laid out as it always was.
+      const studio = window.letterIrlStudio
+        ? window.letterIrlStudio.createStudio({
+            card: document.getElementById("card"),
+            template: document.getElementById("studio-template"),
+            enabled: () => currentMeta()[window.letterIrlStudio.STUDIO_META] === true,
+          })
+        : null;
+      // The preview render() last drew, for a refresh after a send.
+      let studioState = null;
+      // What get_purchase_status last said of the order this card's Pay &
+      // Send opened (#579), for the studio's header and footer.
+      let purchaseState = null;
+      // The page of a longer letter the studio shows, kept through a redraw
+      // of the same draft, such as a restyle.
+      let studioPage = { draftId: null, index: 0 };
+      // A Pay & Send order that stopped before its mail went (#579): how the
+      // studio heads it and sums it up. The pill names the status itself.
+      const HALTED_ORDERS = new Map([
+        ["payment_failed", { stage: "Draft", timing: "the payment did not go through" }],
+        ["refund_pending", { stage: "Refunded", timing: "being refunded, nothing will be mailed" }],
+        ["refunded", { stage: "Refunded", timing: "refunded, nothing will be mailed" }],
+        ["on_hold", { stage: "On hold", timing: "on hold" }],
+        ["cancelled", { stage: "Cancelled", timing: "cancelled, nothing will be mailed" }],
+      ]);
+
+      // The letter's words: as this card last set them (#586), or as the call
+      // that drew the preview gave them.
+      function currentWords(draftId) {
+        const set = styleRow.words(draftId);
+        if (set) return set;
+        const args = retryResult ? retryResult.args : host.toolInput();
+        const output = retryResult ? retryResult.output : host.toolOutput();
+        return {
+          bodyText: typeof args?.bodyText === "string" ? args.bodyText : "",
+          signOff: typeof args?.signOff === "string" ? args.signOff : "",
+          // The version a change of them names (#593 review round 1).
+          version: typeof output?.wordsVersion === "string" ? output.wordsVersion : undefined,
+        };
+      }
+
+      function letterWords(draftId) {
+        const { bodyText, signOff } = currentWords(draftId);
+        return [bodyText.trim(), signOff.trim()].filter(Boolean).join("\n\n");
+      }
+
+      // A letter's terms as this card last heard them (#586): a restyle, or a
+      // status answer, may have changed its pages since the preview, and with
+      // them who pays. Laid over the preview's answer, so the card draws one
+      // price everywhere.
+      function withTerms(output) {
+        const terms = output && typeof output.draftId === "string" ? styleRow.terms(output.draftId) : null;
+        if (!terms) return output;
+        const latestTerms = { ...output, canSendNow: terms.canSendNow, sendEligibility: terms.sendEligibility };
+        if (terms.reasonCannotSend) latestTerms.reasonCannotSend = terms.reasonCannotSend;
+        else delete latestTerms.reasonCannotSend;
+        if (terms.pages > 1) latestTerms.pages = terms.pages;
+        else delete latestTerms.pages;
+        // And how it travels (#625), from the answer that gave those terms (a status, or a restyle, new words, a signature or a
+        // change of service made from here): the service, and the words that say how it is delivered, so the summary, the note,
+        // the Delivery line, the price and the buttons all come from one answer. An answer that says nothing of it leaves the
+        // preview's.
+        if (terms.travel) {
+          latestTerms.mailService = terms.travel.mailService;
+          latestTerms.deliveryClass = terms.travel.deliveryClass;
+          latestTerms.deliveryDisclaimer = terms.travel.deliveryDisclaimer;
+        }
+        return latestTerms;
+      }
+
+      // The certified service a state names (#625), or "": only the two values the server writes. The state is the
+      // preview's with the service of the latest terms laid over it (withTerms).
+      function certifiedOf(state) {
+        const said = state?.mailService;
+        return said === "certified" || said === "certified_return_receipt" ? said : "";
+      }
+
+      // The pages a letter prints on (#586): one unless it says more.
+      function pagesOf(state) {
+        return state?.pages === 2 || state?.pages === 3 ? state.pages : 1;
+      }
+
+      // How full the letter's pages are (#586), from the last restyle or the
+      // preview: the Words tab's fit line. Empty where nothing says.
+      // How full the letter's pages are as last counted: by the last change
+      // this card heard of, or the preview. Null where nothing counted them.
+      function latestFit(state) {
+        const terms = styleRow.terms(state.draftId);
+        return (terms ? terms.pageFit : currentMeta().pageFit) ?? null;
+      }
+
+      function fitText(state) {
+        const pages = pagesOf(state);
+        if (pages === 2) return "Runs on to the back of the page: printed on both sides of one sheet.";
+        if (pages === 3) return "Three pages, on two sheets: the longest letter we print.";
+        const fit = latestFit(state);
+        const room = fit?.pages === 1 ? Number(fit.roomCharacters) : NaN;
+        return Number.isFinite(room) && room > 0
+          ? `Fits on one page, with room for about ${room.toLocaleString("en-US")} more characters.`
+          : "";
+      }
+
+      // The stationery the page is drawn in: the Style row's pressed theme,
+      // or the preview's; null where stationery is not offered.
+      function stationeryName(state) {
+        const pressed = document.querySelector('#style-row [data-theme][aria-pressed="true"], #style-row [data-design-id][aria-pressed="true"]');
+        if (pressed) return pressed.textContent.trim();
+        // A saved design (#649) by the name it was saved under.
+        if (state.stationery?.theme === "custom") return typeof state.stationery.name === "string" && state.stationery.name ? state.stationery.name : null;
+        const theme = state.stationery?.theme;
+        return typeof theme === "string" && theme ? theme.charAt(0).toUpperCase() + theme.slice(1) : null;
+      }
+
+      /**
+       * Fills the studio's header, Words tab and footer from the preview and
+       * what the card has done, and shows the tab that matters first: Style,
+       * or Delivery once the letter has a date. Nothing while the card is
+       * not a studio.
+       */
+      function refreshStudio(state = studioState) {
+        if (!state || !studio || !studio.update()) return;
+        studioState = state;
+        const settled = settledDraft();
+        const sentOrder = sentOrderOf(settled);
+        const sentByCard = saved?.draftId === state.draftId && saved?.sent === true;
+        // The order this card's Pay & Send opened (#579), as its status last said.
+        const purchase = trackedOrderId !== null ? purchaseState : null;
+        const paid = purchase === "processing" || purchase === "submitted";
+        const halted = HALTED_ORDERS.get(purchase) ?? null;
+        const sent = settled?.status === "sent" || sentByCard || purchase === "submitted";
+        const cancelled = sentOrder === "cancelled" || (saved?.draftId === state.draftId && saved?.cancelled === true);
+        const expired = settled?.status === "expired";
+        const args = retryResult ? retryResult.args : host.toolInput();
+        const to = state.recipientAddressValidation?.originalAddress || args?.recipient || null;
+        const name = typeof to?.name === "string" ? to.name.trim() : "";
+        document.getElementById("studio-title").textContent = name ? `Letter to ${name}` : "Your letter";
+        const place = [to?.city, [to?.state, to?.postalCode].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+        const stage = cancelled
+          ? "Cancelled"
+          : halted
+            ? halted.stage
+            : expired
+              ? "Expired"
+              : sent
+                ? "Sent"
+                : paid
+                  ? "Paid"
+                  : "Draft";
+        document.getElementById("studio-sub").textContent = [stage, place].filter(Boolean).join(" · ");
+
+        const words = letterWords(state.draftId);
+        document.getElementById("studio-words").textContent = words || "The words are on the page.";
+        const fit = fitText(state);
+        const fitLine = document.getElementById("studio-fit");
+        fitLine.textContent = fit;
+        fitLine.hidden = !fit;
+        // The words can change here while room to write is offered, as the
+        // preview's count says (#586), and only where the Style row shows: the
+        // card's one word on whether the draft can still change, the row goes
+        // once the letter is sent, paid for, expired or on its confirmation page.
+        const offered = Boolean(currentMeta().pageFit || styleRow.terms(state.draftId)?.pageFit);
+        styleRow.showWords(state.draftId, currentWords(state.draftId), latestFit(state), offered, Boolean(state.giftCard));
+
+        // Under the Style tab the row's label would repeat the tab's name.
+        document.getElementById("style-label").textContent = "Stationery";
+        // Letters print in black and greys; one with its picture prints in
+        // colour (an image layout, src/services/letterJobService.ts).
+        const ink = state.layoutType === "header_image" || state.layoutType === "inline_image" ? "colour" : "black and white";
+        // The Style tab says what the page is in when there is nothing to choose.
+        const theme = stationeryName(state);
+        const quiet = document.getElementById("studio-style-quiet");
+        quiet.textContent = theme ? `${theme} stationery, printed in ${ink}.` : `Printed in ${ink}.`;
+        quiet.style.display = document.getElementById("style-row").style.display === "none" ? "" : "none";
+
+        const sendEligibility = state.sendEligibility;
+        const payAndSend = sendEligibility?.payAndSend;
+        const letters = state.lettersRequired ?? 1;
+        document.getElementById("studio-cost").textContent = state.giftCard
+          ? "Free: a gift letter"
+          : paid
+            ? payAndSend?.amountCents
+              ? `Paid ${formatPayAmount(payAndSend)}`
+              : "Paid with Pay & Send"
+            : sendEligibility?.packPays === false
+              ? payAndSend?.amountCents
+                ? `Pay & Send ${formatPayAmount(payAndSend)}`
+                : "Paid when you send it"
+              : `${letters} letter${letters === 1 ? "" : "s"}`;
+
+        // Once sent, the dates are the server's or the send's own, never the
+        // picker's: the chat may have changed them since this preview. A Pay &
+        // Send order with the printer has no date left to wait for, and an
+        // expired preview none to keep.
+        const held =
+          settled?.status === "sent" || purchase === "submitted"
+            ? sentOrder === "scheduled"
+              ? arrives.scheduleOf(settled.schedule)
+              : null
+            : expired
+              ? null
+              : sentByCard
+                ? arrives.scheduleOf(saved.schedule)
+                : picker.schedule();
+        const estimate =
+          arrivalChange?.draftId === state.draftId && arrivalChange.deliveryEstimate
+            ? arrivalChange.deliveryEstimate
+            : state.deliveryEstimate;
+        const timing = cancelled
+          ? "cancelled, nothing will be mailed"
+          : halted
+            ? halted.timing
+            : expired
+              ? "the preview has expired"
+              : held
+                ? `held until ${arrives.describeDate(held.mailOn)}`
+                : sent
+                  ? "with the printer"
+                  : paid
+                    ? "paid, going to the printer"
+                    : typeof estimate === "string" && estimate
+                      ? estimate.charAt(0).toLowerCase() + estimate.slice(1)
+                      : "First Class";
+        const pages = pagesOf(state);
+        const certified = certifiedOf(state);
+        const service = certified ? (certified === "certified" ? "certified mail" : "certified mail with a return receipt") : null;
+        document.getElementById("studio-summary").textContent = [theme, ink, pages > 1 ? `${pages} pages, both sides` : null, service, timing]
+          .filter(Boolean)
+          .join(" · ");
+
+        studio.suggest(held || cancelled ? "delivery" : "style");
+      }
+
+      // ---- Recovery: a preview call that never arrived (#411) -------------
+      //
+      // On ChatGPT web a preview call approved with "Allow once" can be lost
+      // inside the host: the approval goes out, no request reaches Letter IRL,
+      // the host still draws this card with no result, and the model says the
+      // preview is ready (2026-09-16: six approvals of six, one of them a
+      // person's own click). Calls a card makes do reach the server, which is
+      // how the pack card has recovered from the same loss since #322. After a
+      // wait this card offers the same: it repeats the preview with the
+      // arguments the host passed, and draws that result exactly as it would
+      // draw the host's.
+      //
+      // The host mounts this card while the preview call is still running, so
+      // the wait has to outlast a slow live call: a host result that lands
+      // after the card made its own preview is a second draft of the same
+      // letter. A text-only preview checks two addresses one after the other,
+      // each allowed 10 seconds by the PostGrid client; an image preview
+      // first downloads its image under a 20-second deadline. A host result
+      // that arrives after the wait still renders, and it replaces a preview
+      // this card made until the card acts on its own draft (see render()).
+      const TEXT_PREVIEW_WAIT_MS = 25000;
+      const IMAGE_PREVIEW_WAIT_MS = 45000;
+      // How long the button waits on the card's own call before it can be
+      // pressed again. A result that arrives later is still drawn, as long as
+      // the card has no preview by then.
+      const RETRY_TIMEOUT_MS = 60000;
+      const RETRY_LABEL = "Create my preview";
+      // ---- Recovery with an image picked on the card (#414) ---------------
+      //
+      // ChatGPT passes an image attached or generated in the chat to this
+      // card as a sandbox path, which the server cannot open. The person
+      // picks the image again, from the ChatGPT library or from the device,
+      // and the card previews it by link: getFileDownloadUrl, then the
+      // stamped tool with imageUrl in place of image, as the upload card does.
+      const CHOOSE_LABEL = "Choose from library";
+      const UPLOAD_LABEL = "Upload the image";
+      const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"];
+      const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+      // The host calls of a pick or an upload have no timeout: the library
+      // picker waits on the person, and an upload can be slow. Each call gets
+      // its own two-minute wait, after which the buttons come back so the
+      // person can try again. A new attempt replaces the waiting one; if the
+      // waiting one answers first, it carries on.
+      const IMAGE_WAIT_MS = 120000;
+      // Bumped by every image pick or upload, so a late answer from an older
+      // one changes nothing.
+      let imageFlow = 0;
+      // The tools that draw this card. The server stamps the one that drew it
+      // into the page (stampPreviewTool in src/mcp/registerTools.ts); a page
+      // without that stamp offers no retry.
+      const PREVIEW_TOOLS = [
+        "quote_and_preview_letter",
+        "quote_and_preview_letter_with_header_image",
+        "quote_and_preview_letter_with_image",
+      ];
+      let emptyTimer = null;
+      let emptyShown = false;
+      let retryBusy = false;
+      // A preview this card created itself: { output, meta, args }.
+      let retryResult = null;
+      // Set when the card first tries to send or pay for the draft on screen.
+      // From then on a late host result never replaces the card's own draft,
+      // whether that attempt succeeded or not: a send that failed on the
+      // card's side may still have gone out, and the server recognises a
+      // repeated send only when it names the same draft.
+      let draftActedOn = false;
+
+      function previewTool() {
+        const tag = document.querySelector('meta[name="letter-irl-preview-tool"]');
+        const name = tag ? tag.getAttribute("content") : null;
+        return PREVIEW_TOOLS.includes(name) ? name : null;
+      }
+
+      // An attached image the card can pass back exactly as the host gave it:
+      // none, the empty string some clients send for "no file", or the file
+      // object the server reads. Anything else, such as a bare file
+      // reference or a sandbox path, names a picture the server cannot open
+      // (#414), so the card asks for the image again instead.
+      function imageArgumentRepeatable(image) {
+        if (image === undefined || image === "") return true;
+        return fileObjectUsable(image);
+      }
+
+      function fileObjectUsable(image) {
+        return Boolean(
+          image &&
+            typeof image === "object" &&
+            typeof image.download_url === "string" &&
+            image.download_url &&
+            typeof image.file_id === "string",
+        );
+      }
+
+      // An image link the card can pass back: none, the empty string, or an
+      // https address. The server refuses any other link, such as a sandbox
+      // path given as imageUrl, unless a usable file object comes with it.
+      function imageUrlRepeatable(input) {
+        const url = input.imageUrl;
+        if (url === undefined || url === "" || isHttpsUrl(url)) return true;
+        return fileObjectUsable(input.image);
+      }
+
+      // The stamped tool and the host's arguments, when they describe a whole
+      // letter; otherwise null.
+      function hostRequest() {
+        const tool = previewTool();
+        const input = host.toolInput();
+        if (!tool || !input || typeof input !== "object" || Array.isArray(input)) return null;
+        if (!input.recipient || typeof input.recipient !== "object") return null;
+        if (typeof input.bodyText !== "string" || typeof input.signOff !== "string") return null;
+        return { tool, input };
+      }
+
+      // The call this card can repeat faithfully, or null.
+      function retryRequest() {
+        const asked = hostRequest();
+        if (!asked) return null;
+        const { tool, input } = asked;
+        // Image arguments on the text-only template mean the page was drawn
+        // for an image letter. Repeating the call would drop the image, so the
+        // card asks for the preview again in the chat instead.
+        if (
+          tool === "quote_and_preview_letter" &&
+          (input.image !== undefined || input.imageUrl !== undefined)
+        ) {
+          return null;
+        }
+        if (!imageArgumentRepeatable(input.image) || !imageUrlRepeatable(input)) return null;
+        return { tool, args: input };
+      }
+
+      // The call to make with an image the person picks again, when the
+      // host's image is the only thing this card cannot pass back; otherwise
+      // null. Its arguments leave the image out, and the pick adds imageUrl.
+      function imageRequest() {
+        const asked = hostRequest();
+        if (!asked || asked.tool === "quote_and_preview_letter") return null;
+        if (imageArgumentRepeatable(asked.input.image) && imageUrlRepeatable(asked.input)) return null;
+        const { image, imageUrl, ...args } = asked.input;
+        return { tool: asked.tool, args };
+      }
+
+      function isHttpsUrl(value) {
+        return typeof value === "string" && /^https:\/\//i.test(value);
+      }
+
+      function canPreviewByLink() {
+        return (
+          Boolean(imageRequest()) &&
+          typeof host.callTool === "function" &&
+          typeof host.getFileDownloadUrl === "function"
+        );
+      }
+
+      function canChooseImage() {
+        return canPreviewByLink() && typeof host.selectFiles === "function";
+      }
+
+      function canUploadImage() {
+        return canPreviewByLink() && typeof host.uploadFile === "function";
+      }
+
+      // The tool output this card is drawing: its own preview if it made one,
+      // otherwise the host's.
+      function currentOutput() {
+        return retryResult ? retryResult.output : host.toolOutput();
+      }
+
+      // The widget-only half of the same result: preview HTML, image previews.
+      function currentMeta() {
+        return (retryResult ? retryResult.meta : host.toolMeta()) || {};
+      }
+
+      // ---- Kept state: reopened conversations -------------------------------
+      //
+      // A reopened conversation restores widgetState and toolInput but not the
+      // tool result, so this card mounts empty again and would offer a new
+      // preview. A new preview of a letter already sent is one click from a
+      // second letter, so what this card has done is kept in widgetState, and
+      // a card that sent its letter or started paying for it never offers the
+      // preview again (the pack card learned this in PAY-05). Only identifiers
+      // are kept.
+      const SAVED_STATE_VERSION = 1;
+      // This card's own copy of what it keeps, so consecutive saves build on
+      // each other even when the host applies widgetState asynchronously.
+      let saved = null;
+      // The kept state this card found before keeping anything itself, which
+      // means the conversation was reopened. Null for a live card.
+      let resumed = null;
+
+      function readSaved() {
+        const value = host.widgetState();
+        if (!value || typeof value !== "object" || value.v !== SAVED_STATE_VERSION) return null;
+        if (typeof value.draftId !== "string" || !value.draftId) return null;
+        return value;
+      }
+
+      function adoptKeptState() {
+        if (resumed || saved) return;
+        const kept = readSaved();
+        if (!kept) return;
+        saved = kept;
+        resumed = kept;
+        // Anything the empty card said before, such as a wait message, is
+        // about a state this card no longer shows.
+        document.getElementById("error-message").style.display = "none";
+      }
+
+      function keep(patch) {
+        saved = { ...(saved || readSaved() || {}), ...patch, v: SAVED_STATE_VERSION };
+        // A send or a payment this card made takes the draft back from the conversation (#650).
+        shareSelection();
+        if (typeof host.setWidgetState !== "function") return;
+        const snapshot = saved;
+        Promise.resolve()
+          .then(() => host.setWidgetState(snapshot))
+          .catch(() => {});
+      }
+
+      function keptOrderId(kept) {
+        return typeof kept?.orderId === "string" && kept.orderId ? kept.orderId : null;
+      }
+
+      function armEmptyTimer() {
+        if (emptyTimer !== null || emptyShown) return;
+        const wait =
+          previewTool() === "quote_and_preview_letter"
+            ? TEXT_PREVIEW_WAIT_MS
+            : IMAGE_PREVIEW_WAIT_MS;
+        emptyTimer = setTimeout(() => {
+          emptyTimer = null;
+          if (dataLoaded) return;
+          emptyShown = true;
+          render();
+        }, wait);
+      }
+
+      function cancelEmptyTimer() {
+        if (emptyTimer === null) return;
+        clearTimeout(emptyTimer);
+        emptyTimer = null;
+      }
+
+      function hideEmptyState() {
+        document.getElementById("empty-state").style.display = "none";
+        document.getElementById("empty-hint").style.display = "none";
+      }
+
+      // No result arrived, and the wait (or a reopened conversation) says none
+      // is coming.
+      function showEmptyState() {
+        document.getElementById("card").classList.remove("loading");
+        document.getElementById("mockup-container").innerHTML =
+          '<div class="preview-loading">No preview is showing on this card.</div>';
+        const statusPill = document.getElementById("status-pill");
+        statusPill.classList.remove("ok", "alert");
+        statusPill.textContent = "No preview";
+        document.getElementById("id-label").textContent = "Draft";
+        document.getElementById("id-value").textContent = "—";
+        document.getElementById("send-button").style.display = "none";
+        const canRetry =
+          Boolean(retryRequest()) && typeof host.callTool === "function";
+        const canChoose = canChooseImage();
+        const canUpload = canUploadImage();
+        let next = "Otherwise, ask for the preview again in the chat.";
+        if (canRetry) next = "Otherwise, create the preview again.";
+        else if (canChoose && canUpload) next = "Otherwise, choose the image from your ChatGPT library or upload it again, and this card creates the preview.";
+        else if (canChoose) next = "Otherwise, choose the image from your ChatGPT library, and this card creates the preview.";
+        else if (canUpload) next = "Otherwise, upload the image again, and this card creates the preview.";
+        document.getElementById("empty-message").textContent =
+          "No preview is showing on this card. If this letter was already sent, there is nothing more to do here. " + next;
+        document.getElementById("retry-button").style.display = canRetry ? "flex" : "none";
+        document.getElementById("choose-image-button").style.display = canChoose ? "flex" : "none";
+        document.getElementById("upload-image-button").style.display = canUpload ? "flex" : "none";
+        // A reopened card is empty because the host does not replay results,
+        // not because a call was lost. The tip is about ChatGPT's Instant
+        // mode, so no other app shows it (#474).
+        document.getElementById("empty-hint").style.display =
+          resumed || host.kind !== "chatgpt" ? "none" : "block";
+        document.getElementById("empty-state").style.display = "block";
+      }
+
+      // A reopened card that already sent its letter or started a checkout.
+      // Nothing here offers the preview, the send or the payment again.
+      function showKeptOrder(kept) {
+        const orderId = keptOrderId(kept);
+        document.getElementById("card").classList.remove("loading");
+        document.getElementById("mockup-container").innerHTML =
+          '<div class="preview-loading">A reopened conversation does not show the preview again.</div>';
+        document.getElementById("id-label").textContent = kept.sent ? "Order" : "Purchase";
+        document.getElementById("id-value").textContent = orderId || "—";
+        document.getElementById("send-button").style.display = "none";
+        document.getElementById("retry-button").style.display = "none";
+        document.getElementById("choose-image-button").style.display = "none";
+        document.getElementById("upload-image-button").style.display = "none";
+        document.getElementById("empty-hint").style.display = "none";
+        document.getElementById("empty-message").textContent = kept.sent
+          ? "This letter was sent to the printer from this card. Ask for its status in the chat."
+          : "A checkout for this letter was started from this card.";
+        document.getElementById("empty-state").style.display = "block";
+        const statusPill = document.getElementById("status-pill");
+        const keptSchedule = arrives.scheduleOf(kept.schedule);
+        // Cancelled from here: before the conversation was reopened, or
+        // since (the kept state above is what the card found on opening).
+        const keptCancelled = Boolean(kept.cancelled) || scheduled.cancelled(orderId);
+        // Sent with a date (#535): waiting for it, or cancelled from here. Once
+        // its mail date is behind it in New York, the card cannot know what
+        // became of it, and says what it says of any send.
+        if (kept.sent && keptSchedule && (keptCancelled || !arrives.mailDatePassed(keptSchedule))) {
+          statusPill.classList.remove("ok", "alert");
+          statusPill.textContent = keptCancelled ? "Cancelled" : "Scheduled";
+          document.getElementById("empty-message").textContent = keptCancelled
+            ? "This letter was cancelled from this card. Nothing will be mailed."
+            : "This letter was sent from this card to go to the printer on its mail date.";
+          scheduled.show(orderId, keptSchedule, keptCancelled, kept.cancellable !== false);
+          return;
+        }
+        if (kept.sent) {
+          // The same words the card used when the send succeeded. A kept
+          // order whose mail date has passed since the last draw has no
+          // Scheduled block any more.
+          scheduled.hide();
+          statusPill.classList.remove("alert");
+          statusPill.classList.add("ok");
+          statusPill.textContent = "With the printer";
+          return;
+        }
+        if (!orderId || typeof host.callTool !== "function") {
+          statusPill.classList.remove("ok", "alert");
+          statusPill.textContent = "Checkout started";
+          return;
+        }
+        document.getElementById("purchase-actions").style.display = "grid";
+        document.getElementById("pay-send-button").style.display = "none";
+        document.getElementById("buy-pack-button").style.display = "none";
+        document.getElementById("pack-options").style.display = "none";
+        // Once following, the pill, the polling and the link belong to the
+        // status refresh; later renders only redraw the rows above.
+        if (trackedOrderId !== null) return;
+        trackedOrderId = orderId;
+        const checkoutUrl = isHttpsUrl(kept.checkoutUrl) ? kept.checkoutUrl : null;
+        startStatusPolling("Checking the purchase...");
+        void refreshPurchaseStatus().then((settled) => {
+          if (settled) return;
+          // Unpaid, or not known yet: the kept link is the way to pay.
+          if (checkoutUrl) showCheckoutLink(checkoutUrl, "Open checkout");
+          scheduleStatusPoll();
+        });
+      }
+
+      function previewOutput(result) {
+        if (!result || result.isError) return null;
+        const output = result.structuredContent || result;
+        return output && typeof output.draftId === "string" && output.draftId
+          ? output
+          : null;
+      }
+
+      function resultText(result) {
+        const parts = Array.isArray(result?.content) ? result.content : [];
+        const part = parts.find(
+          (entry) => entry && entry.type === "text" && typeof entry.text === "string",
+        );
+        return part ? part.text : "";
+      }
+
+      // A refusal reaches this card's own callTool as a rejection whose
+      // message wraps the server's sentence in the host's Python-style repr
+      // (#434), for example:
+      //   Error code: INVALID_ARGUMENT; Error: RuntimeException: Error calling
+      //   MCP tool: [TextContent(type='text', text='<sentence>', annotations=None, meta=None)]
+      // Show the first sentence alone, read as Python writes a string: in
+      // double quotes when it holds a ' and no ", otherwise in single quotes
+      // with a backslash before each '; with \\, \n, \t and \r escaped, and
+      // \x, \u or \U hex for a character that does not print. Anything else
+      // shows as it came.
+      function readableError(error) {
+        const message =
+          typeof error === "string" ? error : typeof error?.message === "string" ? error.message : "";
+        const wrapped = message.match(/TextContent\(type=['"]text['"], text=(['"])((?:\\[\s\S]|(?!\1)[^\\])*)\1/);
+        if (wrapped) {
+          const sentence = wrapped[2]
+            .replace(/\\(x[0-9a-f]{2}|u[0-9a-f]{4}|U[0-9a-f]{8}|[\s\S])/g, (_, escape) => {
+              if (escape.length > 1) {
+                const point = parseInt(escape.slice(1), 16);
+                return point <= 0x10ffff ? String.fromCodePoint(point) : "";
+              }
+              return escape === "n" || escape === "t" ? " " : escape === "r" ? "" : escape;
+            })
+            .trim();
+          if (sentence) return sentence;
+        }
+        return message || "Unknown error";
+      }
+
+      // ---- The same mail twice (#412) ------------------------------------
+      //
+      // The server refuses a send or a checkout for mail that went out, was
+      // paid for or is awaiting payment in the last 24 hours, unless the
+      // person asks for another copy. The refusal comes back as an error
+      // result with its details in _meta. Its text starts with
+      // DUPLICATE_PREFIX, which is all that is left when a host drops _meta
+      // or turns the error into a rejection. A host may put its own words in
+      // front of a rejection's message, so the prefix is looked for anywhere.
+      const DUPLICATE_META_KEY = "letterirl/duplicateMail";
+      const DUPLICATE_PREFIX = "Possible duplicate:";
+      const MAIL_NOUN = "letter";
+      const ANOTHER_COPY_SEND_LABEL = "Send another copy";
+      const ANOTHER_COPY_PAY_LABEL = "Pay for another copy";
+      // Set once the person has been told about the earlier copy. From then
+      // on, this card's send or checkout asks for another copy.
+      let anotherCopy = false;
+
+      // An app not yet trusted with card-only tools gets a link instead of a
+      // send (#470, src/auth/clientProfiles.ts): the server answers this
+      // card's Send as it answers the model there, with the page where the
+      // person checks the mail and sends it. The answer is recognised by its
+      // text, which every host passes back (#412), and the page is the
+      // /confirm/ address in it for this card's own draft.
+      const SEND_BY_LINK_MARKER = "sends mail only when the person sends it";
+      // {url, draftId} once the server has given this card's draft its page.
+      let sendPage = null;
+
+      function sendPageFrom(text, draftId) {
+        if (typeof text !== "string" || !text.includes(SEND_BY_LINK_MARKER)) return null;
+        const match = text.match(/https:\/\/[^\s"'<>\\]+\/confirm\/[A-Za-z0-9_.~%-]+/);
+        if (!match || typeof draftId !== "string") return null;
+        return match[0].endsWith(`/confirm/${encodeURIComponent(draftId)}`) ? match[0] : null;
+      }
+
+      function sendPageShown() {
+        return sendPage !== null && sendPage.draftId === currentDraftId;
+      }
+
+      // What the server says became of the host's draft (#474): MCP Apps has
+      // no widgetState, and Claude hands a reopened card the preview's result
+      // again, which would offer Send for mail that has gone. ChatGPT keeps
+      // the card's own state, but not always: with the Plugin Extensions
+      // handshake open, a reopened card was given none (#676). So the card
+      // asks in every host, and the server's answer is the truth. A Pay & Send
+      // checkout started before is not named: Pay & Send on the draft again
+      // reuses it, with its link (createJitCheckout). {draftId, status,
+      // orderId, schedule, orderStatus, cancellable} once the draft turns out
+      // to be sent or expired.
+      let draftState = null;
+      const draftStateAsked = new Set();
+
+      // force (#695): asked again after a send refused for a change since, the answer is taken whatever this card
+      // has set, and its version with it.
+      function askDraftState(draftId, force) {
+        if (typeof host.callTool !== "function") return;
+        if (typeof draftId !== "string" || !draftId || (!force && draftStateAsked.has(draftId))) return;
+        draftStateAsked.add(draftId);
+        host.callTool("get_draft_status", { draftId }).then(
+          (result) => {
+            const answer = toolData(result);
+            if (answer.draftId !== draftId) {
+              // An error result (a host that resolves a failed call) is an ask that failed, to try again.
+              if (force === true) changedRedrawn(draftId, result?.isError || typeof answer.draftId !== "string" ? "failed" : false);
+              return;
+            }
+            // Both answers are final: a sent or expired draft never becomes
+            // ready again, so a late one is still true. A send this card is
+            // making or has made keeps the pill and the buttons meanwhile
+            // (cardIsShowingDraft).
+            // A draft still ready keeps its preview, with the dates it has
+            // now: this card may have changed them since that preview (#535).
+            if (answer.status === "ready") {
+              statusReadyFor = draftId;
+              // And the style it is in now, with its page (#563): this card,
+              // or the chat, may have restyled it since that preview.
+              // How full its pages are (#592 review round 1): the preview's own
+              // count while its page is still the preview's; none once the chat
+              // has changed it, as the status counts nothing again.
+              const statusPage = result?._meta?.previewHtml;
+              const statusFit =
+                typeof statusPage === "string" && statusPage === currentMeta().previewHtml ? currentMeta().pageFit ?? null : null;
+              // The terms it carries, with how the letter travels now (#625), are taken together or not at all: the style row
+              // refuses an answer for another draft, while the card sets a style, and for a preview that named no stationery.
+              const styleTaken = styleRow.adopt(draftId, answer.stationery, statusPage, answer, statusFit, force === true);
+              // And what they mean for delivery, for the Delivery line.
+              const datesTaken = picker.adopt(draftId, answer.schedule, force === true);
+              if (datesTaken && typeof answer.deliveryEstimate === "string" && answer.deliveryEstimate) {
+                arrivalChange = { draftId, schedule: picker.schedule(), deliveryEstimate: answer.deliveryEstimate };
+              }
+              // Its version, once the card shows all it says (#695): its page, drawn from this answer, and its dates.
+              const drawnWhole =
+                styleTaken && typeof statusPage === "string" && statusPage !== "" && (datesTaken || !picker.follows(draftId));
+              if (drawnWhole) showVersion(draftId, answer.contentVersion);
+              if (drawnWhole && changed === null && changedNotice) {
+                changedNotice = false;
+                document.getElementById("error-message").style.display = "none";
+              }
+              if (force === true) changedRedrawn(draftId, drawnWhole);
+              render();
+              return;
+            }
+            if (answer.status !== "sent" && answer.status !== "expired") {
+              if (force === true) changedRedrawn(draftId, false);
+              return;
+            }
+            if (force === true) changedRedrawn(draftId, null);
+            draftState = {
+              draftId,
+              status: answer.status,
+              orderId: typeof answer.orderId === "string" ? answer.orderId : null,
+              schedule: arrives.scheduleOf(answer.schedule),
+              // Where the order stands (#535), from its letter, not the draft.
+              orderStatus: ["scheduled", "cancelled", "sent"].includes(answer.orderStatus) ? answer.orderStatus : null,
+              cancellable: answer.cancellable === true,
+            };
+            render();
+          },
+          // Unanswered, the card shows the preview as the host gave it.
+          () => {
+            if (force === true) changedRedrawn(draftId, "failed");
+          },
+        );
+      }
+
+      function settledDraft() {
+        return draftState !== null && draftState.draftId === currentDraftId ? draftState : null;
+      }
+
+      // Where a sent draft's order stands (#535), by the server's answer:
+      // "scheduled" while it waits for its mail date, "cancelled", or "sent"
+      // (anything else, an older server's answer included). A cancel made on
+      // this card since counts at once. Null for a draft not sent.
+      function sentOrderOf(settled) {
+        if (settled?.status !== "sent") return null;
+        if (settled.orderStatus === "cancelled") return "cancelled";
+        if (settled.orderStatus === "scheduled") return scheduled.cancelled(settled.orderId) ? "cancelled" : "scheduled";
+        return "sent";
+      }
+
+      function showSendPage(url, draftId) {
+        sendPage = { url, draftId };
+        sendInProgress = false;
+        const sendButton = document.getElementById("send-button");
+        sendButton.classList.remove("loading");
+        sendButton.disabled = false;
+        document.getElementById("error-message").style.display = "none";
+        render();
+      }
+
+      async function handleSendPage() {
+        if (!sendPageShown()) return;
+        const url = sendPage.url;
+        const errorMessage = document.getElementById("error-message");
+        errorMessage.style.display = "none";
+        let opened = false;
+        if (typeof host.openLink === "function") {
+          try {
+            // A host that declines answers with isError rather than failing.
+            opened = !(await host.openLink(url))?.isError;
+          } catch {
+            opened = false;
+          }
+        }
+        if (!opened) {
+          errorMessage.textContent = `The page did not open. It is at ${url}`;
+          errorMessage.style.display = "block";
+        }
+      }
+
+      // The refusal's details, {} when only its text says so, or null.
+      function duplicateDetails(result, error) {
+        const details = result?._meta?.[DUPLICATE_META_KEY];
+        if (details && typeof details === "object") return details;
+        const text = error ? String(error?.message ?? "") : resultText(result);
+        return text.includes(DUPLICATE_PREFIX) ? {} : null;
+      }
+
+      function duplicateAge(minutes) {
+        if (typeof minutes !== "number" || !Number.isFinite(minutes)) return "recently";
+        if (minutes < 1) return "less than a minute ago";
+        if (minutes < 60) return minutes === 1 ? "1 minute ago" : `${minutes} minutes ago`;
+        const hours = Math.floor(minutes / 60);
+        return hours === 1 ? "1 hour ago" : `${hours} hours ago`;
+      }
+
+      function duplicateNotice(details) {
+        const name =
+          typeof details.recipientName === "string" && details.recipientName
+            ? ` to ${details.recipientName}`
+            : "";
+        const when = duplicateAge(details.ageMinutes);
+        if (details.kind === "sent") {
+          return `You already sent this same ${MAIL_NOUN}${name} ${when}. Send another copy only if you want two.`;
+        }
+        if (details.kind === "paid") {
+          return `You already paid to send this same ${MAIL_NOUN}${name} ${when}. Send another copy only if you want two.`;
+        }
+        if (details.kind === "checkout_open") {
+          return `A checkout for this same ${MAIL_NOUN}${name} was started ${when} and is still open. If you pay for both, two copies are mailed.`;
+        }
+        return `This same ${MAIL_NOUN} was sent or paid for recently. Send another copy only if you want two.`;
+      }
+
+      // Nothing was sent or charged. Says why, and turns the button that was
+      // pressed into the another-copy button.
+      // A send or a checkout refused because the mail changed after this card drew it (#695): nothing was sent or
+      // charged. The words are the server's (draftErrors, createMailCheckout).
+      const CHANGED_SINCE_SHOWN = "changed after it was shown";
+
+      // What the card says once it has asked (#695 review round 1): drawn whole, to check it and press again; not drawn
+      // (no page, or a part this card cannot show), to ask for a new preview; sent or expired meanwhile, nothing, as the
+      // card's own state says so.
+      function changedSaid(action, drawn) {
+        const nothing = `This ${MAIL_NOUN} changed after it was shown here, so nothing was ${action === "send" ? "sent" : "charged"}.`;
+        if (drawn === "asking") return `${nothing} Getting it as it is now…`;
+        if (drawn === "failed") return `${nothing} This card couldn't check it just now: try again in a moment.`;
+        return drawn
+          ? `${nothing} It is shown again as it is now: check it, then press ${action === "send" ? "Send" : "Pay & Send"} again.`
+          : `${nothing} This card can't show it as it is now: ask in the chat for a new preview, and ${action === "send" ? "send" : "pay"} from that.`;
+      }
+
+      function changedRedrawn(draftId, drawn) {
+        if (!changed || changed.draftId !== draftId) return;
+        const action = changed.action;
+        changed = null;
+        // Not an answer: the next refusal asks again.
+        if (drawn === "failed") lastRefused = null;
+        changedNotice = drawn !== true && drawn !== null;
+        const errorMessage = document.getElementById("error-message");
+        if (drawn === null) {
+          errorMessage.style.display = "none";
+        } else {
+          errorMessage.textContent = changedSaid(action, drawn);
+          errorMessage.style.display = "block";
+        }
+        // The buttons it held come back, with their own labels.
+        render();
+      }
+
+      // Says so, puts the pressed button back, and asks for the mail as it is now, to draw it whatever this card had set.
+      // A version refused twice is not asked about again: the card says to make a new preview.
+      // refused: the version the send or checkout named, which may be older than the one shown by the time it is refused.
+      function showChanged(action, draftId, refused) {
+        const errorMessage = document.getElementById("error-message");
+        const again = Boolean(refused) && refused === lastRefused;
+        lastRefused = refused || null;
+        changed = again ? null : { draftId, action };
+        changedNotice = true;
+        errorMessage.textContent = changedSaid(action, again ? false : "asking");
+        errorMessage.style.display = "block";
+        if (action === "send") {
+          const sendButton = document.getElementById("send-button");
+          sendButton.classList.remove("loading");
+          sendInProgress = false;
+        } else {
+          const payButton = document.getElementById("pay-send-button");
+          payButton.classList.remove("loading");
+          checkoutInProgress = false;
+        }
+        if (!again) askDraftState(draftId, true);
+        // Held while it asks, then drawn with their own labels (a dated or gift letter's, a price).
+        render();
+      }
+
+      function showDuplicate(details, action) {
+        anotherCopy = true;
+        const errorMessage = document.getElementById("error-message");
+        errorMessage.textContent = duplicateNotice(details);
+        errorMessage.style.display = "block";
+        if (action === "send") {
+          const sendButton = document.getElementById("send-button");
+          sendButton.classList.remove("loading");
+          sendButton.disabled = false;
+          document.getElementById("send-button-text").textContent = ANOTHER_COPY_SEND_LABEL;
+          sendInProgress = false;
+          shareSelection();
+        } else {
+          const payButton = document.getElementById("pay-send-button");
+          payButton.classList.remove("loading");
+          payButton.disabled = false;
+          document.getElementById("pay-send-button-text").textContent = ANOTHER_COPY_PAY_LABEL;
+          checkoutInProgress = false;
+        }
+      }
+
+      async function handleCreatePreview() {
+        if (retryBusy || dataLoaded) return;
+        const request = retryRequest();
+        if (!request || typeof host.callTool !== "function") return;
+        retryBusy = true;
+        try {
+          await runPreview(
+            request,
+            document.getElementById("retry-button"),
+            document.getElementById("retry-button-text"),
+            RETRY_LABEL,
+          );
+        } finally {
+          retryBusy = false;
+        }
+      }
+
+      // Calls the preview tool from the card and draws the result the way
+      // render() draws the host's. The caller holds retryBusy.
+      async function runPreview(request, button, buttonText, label) {
+        const errorMessage = document.getElementById("error-message");
+        button.disabled = true;
+        button.classList.add("loading");
+        buttonText.innerHTML = '<span class="spinner"></span> Creating preview...';
+        errorMessage.style.display = "none";
+        // The first preview to arrive is the one drawn, whenever it arrives:
+        // the host's, this call's, or an earlier call's that outlasted its
+        // timeout. Any later one is left unused.
+        const drawn = Promise.resolve()
+          .then(() => host.callTool(request.tool, request.args))
+          .then((result) => {
+            const output = previewOutput(result);
+            if (!output) {
+              throw new Error(resultText(result) || "The preview was not returned.");
+            }
+            if (dataLoaded) return;
+            retryResult = { output, meta: result?._meta || {}, args: request.args };
+            render();
+          });
+        const TIMED_OUT = {};
+        let timer = null;
+        const timedOut = new Promise((resolve) => {
+          timer = setTimeout(() => resolve(TIMED_OUT), RETRY_TIMEOUT_MS);
+        });
+        try {
+          const outcome = await Promise.race([drawn, timedOut]);
+          if (outcome === TIMED_OUT && !dataLoaded) {
+            errorMessage.textContent =
+              "No preview yet. It will appear here if it arrives. You can also try again, or ask for the preview in the chat.";
+            errorMessage.style.display = "block";
+          }
+        } catch (error) {
+          if (!dataLoaded) {
+            errorMessage.textContent = `Unable to create the preview: ${readableError(error)}`;
+            errorMessage.style.display = "block";
+          }
+        } finally {
+          clearTimeout(timer);
+          button.disabled = false;
+          button.classList.remove("loading");
+          buttonText.textContent = label;
+        }
+      }
+
+      function showImageError(text) {
+        const errorMessage = document.getElementById("error-message");
+        errorMessage.textContent = text;
+        errorMessage.style.display = "block";
+      }
+
+      function setImageButtonsDisabled(disabled) {
+        document.getElementById("choose-image-button").disabled = disabled;
+        document.getElementById("upload-image-button").disabled = disabled;
+      }
+
+      // A reopened card that sent its mail or started paying shows only that.
+      function keptOrderShown() {
+        return Boolean(resumed && (resumed.sent === true || resumed.checkout === true));
+      }
+
+      // Starts a pick or an upload. It holds retryBusy until it ends.
+      function beginImageFlow(buttonText, busyHtml) {
+        const flow = ++imageFlow;
+        retryBusy = true;
+        setImageButtonsDisabled(true);
+        buttonText.innerHTML = busyHtml;
+        document.getElementById("error-message").style.display = "none";
+        return flow;
+      }
+
+      // Runs one host call of a pick or an upload, and gives the buttons back
+      // if it has not answered after IMAGE_WAIT_MS. The call keeps waiting;
+      // imageFlowCurrent decides whether its answer is still used.
+      async function waitForHost(flow, buttonText, label, call) {
+        const wait = setTimeout(() => {
+          if (flow !== imageFlow || !retryBusy || dataLoaded || keptOrderShown()) return;
+          retryBusy = false;
+          setImageButtonsDisabled(false);
+          buttonText.textContent = label;
+          showImageError("Still waiting for the image. If nothing happened, please try again.");
+        }, IMAGE_WAIT_MS);
+        try {
+          return await call();
+        } finally {
+          clearTimeout(wait);
+        }
+      }
+
+      // Whether an answer for this flow should still be used: no newer
+      // attempt, no preview, no kept order. A flow whose buttons were given
+      // back takes them again.
+      function imageFlowCurrent(flow, buttonText, busyHtml) {
+        if (flow !== imageFlow || dataLoaded || keptOrderShown()) return false;
+        if (!retryBusy) {
+          retryBusy = true;
+          setImageButtonsDisabled(true);
+          buttonText.innerHTML = busyHtml;
+          document.getElementById("error-message").style.display = "none";
+        }
+        return true;
+      }
+
+      // Previews a picked or uploaded file by link. The preview call has its
+      // own timeout.
+      async function previewFile(fileId, flow, button, buttonText, label, busyHtml) {
+        let url = null;
+        try {
+          const result = await waitForHost(flow, buttonText, label, () =>
+            host.getFileDownloadUrl({ fileId }),
+          );
+          url = result?.downloadUrl || result?.download_url || null;
+        } catch (error) {
+          url = null;
+        }
+        if (!imageFlowCurrent(flow, buttonText, busyHtml)) return;
+        const request = imageRequest();
+        if (!request) return;
+        if (!isHttpsUrl(url)) {
+          showImageError("Unable to get a link to that image. Please try again.");
+          return;
+        }
+        await runPreview(
+          { tool: request.tool, args: { ...request.args, imageUrl: url } },
+          button,
+          buttonText,
+          label,
+        );
+      }
+
+      async function handleChooseImage() {
+        if (retryBusy || dataLoaded || !canChooseImage()) return;
+        const button = document.getElementById("choose-image-button");
+        const buttonText = document.getElementById("choose-image-button-text");
+        const busyHtml = '<span class="spinner"></span> Opening your library...';
+        const flow = beginImageFlow(buttonText, busyHtml);
+        try {
+          let files = null;
+          try {
+            files = await waitForHost(flow, buttonText, CHOOSE_LABEL, () => host.selectFiles());
+          } catch (error) {
+            files = null;
+          }
+          if (!imageFlowCurrent(flow, buttonText, busyHtml)) return;
+          const picked = Array.isArray(files) ? files[0] : null;
+          const fileId = picked?.fileId || picked?.file_id;
+          if (typeof fileId !== "string" || !fileId) {
+            showImageError("No image was chosen.");
+            return;
+          }
+          const mimeType = picked.mimeType || picked.mime_type;
+          if (mimeType && !IMAGE_TYPES.includes(mimeType)) {
+            showImageError("That file is not a JPEG, PNG or WebP image.");
+            return;
+          }
+          await previewFile(fileId, flow, button, buttonText, CHOOSE_LABEL, busyHtml);
+        } finally {
+          if (flow === imageFlow) {
+            retryBusy = false;
+            setImageButtonsDisabled(false);
+            buttonText.textContent = CHOOSE_LABEL;
+          }
+        }
+      }
+
+      function handleUploadImage() {
+        if (retryBusy || dataLoaded || !canUploadImage()) return;
+        document.getElementById("image-file-input").click();
+      }
+
+      async function handleImageFile(event) {
+        const input = event.target;
+        const file = input.files && input.files[0];
+        input.value = "";
+        if (!file || dataLoaded || !canUploadImage()) return;
+        if (retryBusy) {
+          // An earlier pick answered after its buttons came back, and it is
+          // still being previewed.
+          showImageError("An image you chose earlier is still on its way. Try again once it has arrived.");
+          return;
+        }
+        if (!IMAGE_TYPES.includes(file.type)) {
+          showImageError("That file is not a JPEG, PNG or WebP image.");
+          return;
+        }
+        if (file.size > MAX_IMAGE_BYTES) {
+          showImageError("That image is larger than 10 MB.");
+          return;
+        }
+        const button = document.getElementById("upload-image-button");
+        const buttonText = document.getElementById("upload-image-button-text");
+        const busyHtml = '<span class="spinner"></span> Uploading...';
+        const flow = beginImageFlow(buttonText, busyHtml);
+        try {
+          let fileId = null;
+          let failed = false;
+          let failure = null;
+          try {
+            const uploaded = await waitForHost(flow, buttonText, UPLOAD_LABEL, () => host.uploadFile(file));
+            fileId = uploaded?.fileId || uploaded?.file_id || null;
+          } catch (error) {
+            failed = true;
+            failure = error;
+          }
+          if (!imageFlowCurrent(flow, buttonText, busyHtml)) return;
+          if (failed) {
+            showImageError(`Unable to upload the image: ${failure?.message || "Unknown error"}`);
+            return;
+          }
+          if (typeof fileId !== "string" || !fileId) {
+            showImageError("The upload did not return a file.");
+            return;
+          }
+          await previewFile(fileId, flow, button, buttonText, UPLOAD_LABEL, busyHtml);
+        } finally {
+          if (flow === imageFlow) {
+            retryBusy = false;
+            setImageButtonsDisabled(false);
+            buttonText.textContent = UPLOAD_LABEL;
+          }
+        }
+      }
+
       function applyTheme() {
-        const theme = window.openai?.theme ?? "light";
+        const theme = host.theme();
         document.documentElement.classList.toggle("dark", theme === "dark");
       }
 
@@ -206,6 +1833,20 @@
           .replace(/>/g, "&gt;")
           .replace(/"/g, "&quot;")
           .replace(/'/g, "&#039;");
+      }
+
+      // The letter's text arrives inside the server's preview HTML, escaped
+      // by previewService's escapeHtml. Read it back to text before drawing,
+      // or escapeHtml above escapes it a second time and the card shows
+      // "Let&#039;s" for "Let's". &amp; goes last, so an escaped "&lt;"
+      // the customer typed stays the text "&lt;".
+      function unescapeHtml(text) {
+        return text
+          .replace(/&lt;/g, "<")
+          .replace(/&gt;/g, ">")
+          .replace(/&quot;/g, '"')
+          .replace(/&#0*39;/g, "'")
+          .replace(/&amp;/g, "&");
       }
 
       function truncateText(text, maxLength) {
@@ -235,6 +1876,10 @@
         }
       }
 
+      // The address fields are the customer's own input echoed back by the
+      // tool (originalAddress), which the card writes into innerHTML with the
+      // rest of the mockup. They are text, never markup: a recipient name
+      // pasted from a document must not be able to run in this frame.
       function formatAddress(addr) {
         if (!addr) return null;
         const lines = [];
@@ -247,10 +1892,150 @@
           .replace(", ", ", ")
           .replace(/,([^,]*)$/, " $1");
         if (cityLine) lines.push(cityLine);
-        return lines.join("<br>");
+        return lines.map(line => escapeHtml(String(line))).join("<br>");
+      }
+
+      /**
+       * The extra page a gift letter prints (docs/gift-letters.md), in
+       * miniature. Funded cards carry a code for a free letter of the
+       * recipient's own; unfunded ones only say the letter was sent with
+       * Letter IRL. Returns "" for every other letter.
+       */
+      function giftPageMockup(giftCard) {
+        if (!giftCard || (giftCard.state !== "funded" && giftCard.state !== "unfunded")) return "";
+        const funded = giftCard.state === "funded";
+        return `
+          <div class="gift-page-mockup" aria-label="Extra printed page: ${funded ? "gift card" : "Letter IRL card"}">
+            <div class="gift-mini-card">
+              <div class="gift-mini-eyebrow">${funded ? "A gift inside" : "Sent with Letter IRL"}</div>
+              <div class="gift-mini-title">${funded ? "A letter for you to send" : "This letter began as a conversation"}</div>
+              <div class="gift-mini-qr" aria-hidden="true"></div>
+              <div class="gift-mini-code">${funded ? "XXXX-XXXX" : "letterirl.com"}</div>
+            </div>
+            <span class="gift-page-label">Page 2</span>
+          </div>`;
+      }
+
+      const IMAGE_NOT_SHOWN_HTML =
+        '<div class="image-not-shown">Image not shown on this card</div>';
+
+      // Our renderer's pages, and the cleaner that keeps the card safe from
+      // them (widgets/shared/pages.js, #534): a preview our renderer drew
+      // gives its pages, a gift send's card the second; a legacy preview
+      // gives none and gets the mockup below. Were that script not to run,
+      // the card shows no page, never an uncleaned one, but the mockup.
+      // Without the shared pages, no page and no preview picture: never one unchecked (#684).
+      const { renderedPages, cleanPage, previewImageElement } = window.letterIrlPages ?? {
+        renderedPages: () => null,
+        cleanPage: null,
+        previewImageElement: () => null
+      };
+
+      // Kept across renders, so a status update does not shrink the page back.
+      let pageZoomed = false;
+      // The page view shown last, so a redraw that changes nothing keeps it:
+      // an envelope's opening or fold (#576) plays on rather than being cut
+      // short, and the label can say the letter is sealed.
+      let shownPage = null;
+
+      /**
+       * The page as it prints, with the layout's badge. The pages are a labelled
+       * group that keeps each page's title, the letter's text, for screen
+       * readers. A select on the page, or the button below it, enlarges it.
+       */
+      function renderLetterPage(state, pages, html) {
+        const container = document.getElementById("mockup-container");
+        // The studio (#580) shows a letter's pages one at a time.
+        const inStudio = Boolean(studio?.on());
+        const key = `${currentDraftId}\n${state.layoutType || "text_only"}\n${inStudio}\n${html}`;
+        if (shownPage && shownPage.key === key && shownPage.view.parentNode === container) {
+          shownPage.label();
+          return;
+        }
+        container.textContent = "";
+        const layoutType = state.layoutType || "text_only";
+        const view = document.createElement("div");
+        view.className = "letter-page-view";
+        const page = document.createElement("div");
+        page.className = "letter-page";
+        page.setAttribute("role", "group");
+        page.setAttribute("aria-label", "Your letter as it prints");
+        const badge = document.createElement("span");
+        badge.className = `layout-badge ${getLayoutBadgeClass(layoutType)}`;
+        badge.textContent = getLayoutLabel(layoutType);
+        page.appendChild(badge);
+        const printed = pages.map(svg => page.appendChild(document.importNode(cleanPage(svg), true)));
+        const zoom = document.createElement("button");
+        zoom.type = "button";
+        zoom.className = "page-zoom";
+        // In the studio, a letter of more than one page (a gift letter's card
+        // page) shows one at a time, so the card keeps its height.
+        const paged = inStudio && printed.length > 1;
+        const count = document.createElement("span");
+        count.className = "page-count";
+        const step = document.createElement("button");
+        step.type = "button";
+        step.className = "page-zoom";
+        // A redraw of the same draft, such as a restyle, keeps the page shown.
+        let pageShown =
+          paged && studioPage.draftId === currentDraftId && studioPage.index < printed.length ? studioPage.index : 0;
+        const apply = () => {
+          const sealed = Boolean(envelope?.sealed(currentDraftId));
+          // The label carries the state, so no aria-pressed as well.
+          view.classList.toggle("zoomed", pageZoomed);
+          document.getElementById("studio-body")?.classList.toggle("zoomed", pageZoomed);
+          zoom.textContent = sealed ? "Show the letter" : pageZoomed ? "Show smaller" : "Enlarge";
+          if (paged) {
+            // Sealed, the envelope's windows show the first page's addresses.
+            if (sealed) pageShown = 0;
+            studioPage = { draftId: currentDraftId, index: pageShown };
+            printed.forEach((svg, index) => svg.classList.toggle("shown", index === pageShown));
+            count.textContent = `Page ${pageShown + 1} of ${printed.length}`;
+            step.textContent = pageShown + 1 < printed.length ? "Next page" : "First page";
+            count.hidden = sealed;
+            step.hidden = sealed;
+          }
+        };
+        const toggle = () => {
+          // A sealed letter (#576) opens rather than grows.
+          if (envelope?.sealed(currentDraftId)) envelope.unseal();
+          else pageZoomed = !pageZoomed;
+          apply();
+        };
+        page.addEventListener("click", toggle);
+        zoom.addEventListener("click", toggle);
+        if (paged) {
+          for (const svg of printed) svg.classList.add("print-page");
+          step.addEventListener("click", () => {
+            pageShown = (pageShown + 1) % printed.length;
+            apply();
+          });
+          const tools = document.createElement("div");
+          tools.className = "page-tools";
+          tools.append(count, zoom, step);
+          view.append(page, tools);
+        } else {
+          view.append(page, zoom);
+        }
+        container.appendChild(view);
+        envelope?.dress(view, page, currentDraftId);
+        apply();
+        shownPage = { key, view, label: apply };
+      }
+
+      // The preview's page as this card shows it: the one the Style row set
+      // for this draft (#563), or the preview's own.
+      function shownPreviewHtml(state) {
+        return styleRow.previewHtml(currentDraftId) ?? currentMeta().previewHtml ?? state.previewHtml;
       }
 
       function renderLetterMockup(state) {
+        const html = shownPreviewHtml(state);
+        const pages = renderedPages(html);
+        if (pages) {
+          renderLetterPage(state, pages, html);
+          return;
+        }
         const container = document.getElementById("mockup-container");
         const layoutType = state.layoutType || "text_only";
 
@@ -263,15 +2048,15 @@
         let signOff = "";
 
         // Attempt to parse from previewHtml if direct fields not available
-        const previewHtml =
-          window.openai?.toolResponseMetadata?.previewHtml ?? state.previewHtml;
+        const meta = currentMeta();
+        const previewHtml = shownPreviewHtml(state);
         if (previewHtml) {
           // Try to extract body
           const bodyMatch = previewHtml.match(
             /<div class="letter-body">([\s\S]*?)<\/div>/,
           );
           if (bodyMatch) {
-            bodyText = bodyMatch[1].replace(/<[^>]+>/g, "").trim();
+            bodyText = unescapeHtml(bodyMatch[1].replace(/<[^>]+>/g, "")).trim();
           }
 
           // Try to extract sign-off
@@ -279,8 +2064,15 @@
             /<div class="sign-off">([\s\S]*?)<\/div>/,
           );
           if (signOffMatch) {
-            signOff = signOffMatch[1].replace(/<[^>]+>/g, "").trim();
+            signOff = unescapeHtml(signOffMatch[1].replace(/<[^>]+>/g, "")).trim();
           }
+        }
+
+        // A preview this card made may come back without the widget-only
+        // metadata; the text it sent is the same letter.
+        if (!bodyText && !signOff && retryResult) {
+          bodyText = typeof retryResult.args.bodyText === "string" ? retryResult.args.bodyText : "";
+          signOff = typeof retryResult.args.signOff === "string" ? retryResult.args.signOff : "";
         }
 
         // Fallback to raw body text display
@@ -317,15 +2109,12 @@
         // fallback to headerImageData - that field is dropped from BOTH
         // channels by design (it is the full-quality original, which the draft
         // holds), so reading it here only ever yielded undefined.
-        const headerImage =
-          window.openai?.toolResponseMetadata?.headerImagePreview ??
-          state.headerImagePreview;
-        if (layoutType === "header_image" && headerImage) {
-          mockupHtml += `
-            <div class="header-image-wrapper">
-              <img src="${headerImage}" alt="Header">
-            </div>
-          `;
+        // The picture goes in once the mockup is drawn (#684). An image
+        // letter must not look like a finished preview without its image (the
+        // card's own call may come back without it).
+        const headerImage = meta.headerImagePreview ?? state.headerImagePreview;
+        if (layoutType === "header_image") {
+          mockupHtml += `<div class="header-image-wrapper" data-preview-image="header"></div>`;
         }
 
         // Body text - show full content (already validated by character limits)
@@ -338,23 +2127,28 @@
 
         // Inline image (if applicable). Same channel and same reasoning as the
         // header image above.
-        const inlineImage =
-          window.openai?.toolResponseMetadata?.inlineImagePreview ??
-          state.inlineImagePreview;
-        if (layoutType === "inline_image" && inlineImage) {
-          mockupHtml += `
-            <div class="inline-image-wrapper">
-              <img src="${inlineImage}" alt="Photo">
-            </div>
-          `;
+        const inlineImage = meta.inlineImagePreview ?? state.inlineImagePreview;
+        if (layoutType === "inline_image") {
+          mockupHtml += `<div class="inline-image-wrapper" data-preview-image="inline"></div>`;
         }
 
         mockupHtml += `
             </div>
           </div>
         `;
+        mockupHtml += giftPageMockup(state.giftCard);
 
         container.innerHTML = mockupHtml;
+        fillPreviewImage(container.querySelector('[data-preview-image="header"]'), headerImage, "Header");
+        fillPreviewImage(container.querySelector('[data-preview-image="inline"]'), inlineImage, "Photo");
+      }
+
+      /** A preview picture into its place, made with DOM calls, or the note that it is not shown (#684). */
+      function fillPreviewImage(slot, value, alt) {
+        if (!slot) return;
+        const image = previewImageElement(value, alt);
+        if (image) slot.appendChild(image);
+        else slot.innerHTML = IMAGE_NOT_SHOWN_HTML;
       }
 
       function showLoading() {
@@ -379,21 +2173,65 @@
         sendButton.disabled = true;
       }
 
+      // Draws the card, then tells the conversation which draft it shows (#650).
       function render() {
+        renderCard();
+        shareSelection();
+      }
+
+      function renderCard() {
         applyTheme();
-        const state = window.openai?.toolOutput;
+        adoptKeptState();
+        if (keptOrderShown()) {
+          // Whatever else arrives, a reopened card that sent this letter or
+          // started paying for it shows that and nothing else.
+          cancelEmptyTimer();
+          showKeptOrder(resumed);
+          return;
+        }
+
+        // The host's result replaces a preview this card made itself, until
+        // the card first tries to send or pay for its own draft. Both drafts
+        // hold the same letter and the host's is the one the conversation
+        // knows, so switching keeps a send from the card and a send from the
+        // chat on one draft, which the server sends only once. From the first
+        // attempt on, successful or not, the card keeps its own draft.
+        const hostOutput = host.toolOutput();
+        if (retryResult && hostOutput?.draftId !== undefined && !draftActedOn) {
+          retryResult = null;
+        }
+        const state = withTerms(retryResult ? retryResult.output : host.toolOutput());
 
         // Check if we have actual data
         if (!state || state.draftId === undefined) {
           if (!dataLoaded) {
-            showLoading();
+            if (resumed || emptyShown) {
+              // A reopened conversation gets no result back, so there is
+              // nothing to wait for.
+              cancelEmptyTimer();
+              emptyShown = true;
+              showEmptyState();
+            } else {
+              showLoading();
+              armEmptyTimer();
+            }
           }
           return;
         }
 
+        cancelEmptyTimer();
+        if (!dataLoaded) {
+          // The first preview on this card. Nothing from the empty state
+          // still applies, including a failed retry's error; a send or
+          // checkout error can only appear after this point.
+          hideEmptyState();
+          document.getElementById("error-message").style.display = "none";
+        }
         dataLoaded = true;
         const card = document.getElementById("card");
         card.classList.remove("loading");
+        // Laid out as a studio (#580) before the page is drawn into it.
+        studio?.update();
 
         const {
           lettersRequired,
@@ -411,7 +2249,18 @@
 
         // Store draftId for send button
         currentDraftId = draftId;
+        // The preview's own version, the first time this draft is drawn (#695); later changes tell their own.
+        if (shownVersion.draftId !== draftId) {
+          shownVersion = { draftId, version: null };
+          showVersion(draftId, state.contentVersion);
+        }
         currentEligibility = sendEligibility || null;
+        if (!retryResult) askDraftState(draftId);
+        const settled = settledDraft();
+        const sentOrder = sentOrderOf(settled);
+        if (typeof draftId === "string" && draftId && saved?.draftId !== draftId) {
+          keep({ draftId });
+        }
 
         // Render the letter mockup (US-LAYOUT-05)
         renderLetterMockup(state);
@@ -422,19 +2271,34 @@
           header_image: "Header Image",
           inline_image: "Inline Image",
         };
+        // With its pages, for a longer letter (#586).
         document.getElementById("layout-type").textContent =
-          layoutLabels[layoutType] || "Text Only";
+          (layoutLabels[layoutType] || "Text Only") + (pagesOf(state) > 1 ? ` · ${pagesOf(state)} pages, both sides` : "");
+
+        // A gift send is free and needs no balance (docs/gift-letters.md).
+        const isGiftSend = Boolean(state.giftCard);
 
         // Cost - lettersRequired is already in letters (1 letter = 1 standard letter)
+        // Mail no pack pays for (#579), such as a longer letter (#586), says its price.
         const letters = lettersRequired ?? 1;
-        document.getElementById("cost").textContent =
-          `${letters} Letter${letters === 1 ? "" : "s"}`;
+        const costPayAndSend = sendEligibility?.payAndSend;
+        document.getElementById("cost").textContent = isGiftSend
+          ? "Free (gift letter)"
+          : sendEligibility?.packPays === false
+            ? costPayAndSend?.amountCents
+              ? `Pay & Send ${formatPayAmount(costPayAndSend)}`
+              : "Paid when you send it"
+            : `${letters} Letter${letters === 1 ? "" : "s"}`;
 
-        // Delivery info
+        // Delivery info. A date this card set (#535) brings its own estimate.
+        const estimate =
+          arrivalChange?.draftId === draftId && arrivalChange.deliveryEstimate
+            ? arrivalChange.deliveryEstimate
+            : deliveryEstimate;
         const deliveryText = [];
         if (deliveryClass) deliveryText.push(deliveryClass);
-        if (deliveryEstimate) {
-          deliveryText.push(deliveryEstimate);
+        if (estimate) {
+          deliveryText.push(estimate);
         } else if (estimatedDeliveryDays) {
           deliveryText.push(`~${estimatedDeliveryDays} days`);
         }
@@ -454,16 +2318,35 @@
         // letters. They agree exactly under flat pricing, which is pinned by
         // tests/unit/tools/letterBalanceEquivalence.test.ts - if that test
         // reddens, this line is what it is warning about.
+        //
+        // A gift send spends a gift letter, not the balance, so a refreshed
+        // balance says nothing about it. Nor about mail no pack pays for
+        // (#579): that is paid per send, whatever the balance.
+        const packPays = sendEligibility?.packPays !== false;
         const effectiveCanSendNow =
-          refreshedLetters !== null
-            ? refreshedLetters >= (lettersRequired ?? 1)
-            : canSendNow;
+          isGiftSend || !packPays
+            ? canSendNow
+            : refreshedLetters !== null
+              ? refreshedLetters >= (lettersRequired ?? 1)
+              : canSendNow;
 
         // Status pill - only while this card still describes a draft.
         if (cardIsShowingDraft()) {
           const statusPill = document.getElementById("status-pill");
           statusPill.classList.remove("ok", "alert");
-          if (effectiveCanSendNow) {
+          if (sentOrder === "scheduled" || sentOrder === "cancelled") {
+            // Sent with a date (#535), as the card's own send would say.
+            statusPill.textContent = sentOrder === "cancelled" ? "Cancelled" : "Scheduled";
+          } else if (settled?.status === "sent") {
+            // The words the card uses when its own send succeeds.
+            statusPill.classList.add("ok");
+            statusPill.textContent = "With the printer";
+          } else if (settled?.status === "expired") {
+            statusPill.classList.add("alert");
+            statusPill.textContent = "Preview expired";
+          } else if (sendPageShown()) {
+            statusPill.textContent = "Send it on the confirmation page";
+          } else if (effectiveCanSendNow) {
             statusPill.classList.add("ok");
             statusPill.textContent = "Ready to send";
           } else if (packPurchasePending) {
@@ -478,16 +2361,33 @@
         }
 
         // Note about saved return address
+        // and, on a gift send, what the extra page is. Both are shown: they
+        // say different things and neither is long.
         const noteEl = document.getElementById("note");
-        if (savedReturnAddressNote) {
-          noteEl.textContent = savedReturnAddressNote;
+        const noteParts = [];
+        if (sentOrder === "scheduled") {
+          noteParts.push("This letter has already been sent, to go to the printer on its mail date.");
+        } else if (sentOrder === "cancelled") {
+          noteParts.push("This letter was sent with a date, then cancelled. Nothing will be mailed.");
+        } else if (settled?.status === "sent") {
+          noteParts.push("This letter has already been sent. Ask for its status in the chat.");
+        } else if (settled?.status === "expired") {
+          noteParts.push("This preview has expired. Ask for a new one in the chat.");
+        }
+        if (isGiftSend && state.giftCard.description) noteParts.push(state.giftCard.description);
+        if (savedReturnAddressNote) noteParts.push(savedReturnAddressNote);
+        if (noteParts.length > 0) {
+          noteEl.textContent = noteParts.join(" ");
           noteEl.style.display = "block";
         } else {
           noteEl.style.display = "none";
         }
 
         // Show Draft ID - same ownership rule as the status pill above.
-        if (cardIsShowingDraft()) {
+        if (cardIsShowingDraft() && settled?.status === "sent") {
+          document.getElementById("id-label").textContent = "Order";
+          document.getElementById("id-value").textContent = settled.orderId || "-";
+        } else if (cardIsShowingDraft()) {
           document.getElementById("id-label").textContent = "Draft";
           document.getElementById("id-value").textContent = draftId || "—";
         }
@@ -502,10 +2402,39 @@
         );
         const buyPackButton = document.getElementById("buy-pack-button");
 
+        // The Arrives row, while this card still describes a draft it can
+        // send (#535). A sent one that waits for its mail date offers Cancel.
+        picker.show(
+          draftId,
+          state,
+          cardIsShowingDraft() && !checkoutInProgress && !settled && !sendPageShown(),
+        );
+        // The Style row, on the same terms (#563).
+        styleRow.show(
+          draftId,
+          state,
+          cardIsShowingDraft() && !checkoutInProgress && !settled && !sendPageShown(),
+        );
+        if (cardIsShowingDraft() && (sentOrder === "scheduled" || sentOrder === "cancelled")) {
+          scheduled.show(settled.orderId, settled.schedule, sentOrder === "cancelled", settled.cancellable);
+        } else if (cardIsShowingDraft()) {
+          scheduled.hide();
+        }
+        // Either row setting something on the draft holds the Send buttons,
+        // and so do words being written that are not set yet (#586).
+        // And the card asking for the draft as it is now, after a refusal for a change since (#695).
+        const settingDate = picker.busy() || styleRow.busy() || styleRow.editing() || changed !== null;
+        const datedSend = Boolean(picker.schedule());
+
         if (!sendInProgress && !checkoutInProgress) {
-          sendButton.style.display = effectiveCanSendNow ? "flex" : "none";
-          sendButton.disabled = !effectiveCanSendNow;
-          sendButtonText.textContent = "Send Letter";
+          const onSendPage = sendPageShown();
+          sendButton.style.display = effectiveCanSendNow && !onSendPage ? "flex" : "none";
+          sendButton.disabled = !effectiveCanSendNow || settingDate;
+          document.getElementById("send-page-button").style.display = onSendPage ? "flex" : "none";
+          document.getElementById("send-page-note").style.display = onSendPage ? "block" : "none";
+          sendButtonText.textContent = anotherCopy
+            ? ANOTHER_COPY_SEND_LABEL
+            : `${datedSend ? "Schedule" : "Send"} ${isGiftSend ? "Gift Letter" : "Letter"}`;
 
           const payAndSend = sendEligibility?.payAndSend;
           const letterPack = sendEligibility?.letterPack;
@@ -520,9 +2449,11 @@
           purchaseActions.style.display =
             !effectiveCanSendNow || payAndSendAvailable ? "grid" : "none";
           paySendButton.style.display = payAndSendAvailable ? "flex" : "none";
-          paySendButton.disabled = !payAndSendAvailable;
+          paySendButton.disabled = !payAndSendAvailable || settingDate;
           if (payAndSendAvailable && payAndSend.amountCents) {
-            paySendButtonText.textContent = `Pay & Send (${formatPayAmount(payAndSend)})`;
+            paySendButtonText.textContent = anotherCopy
+              ? ANOTHER_COPY_PAY_LABEL
+              : `Pay & Send (${formatPayAmount(payAndSend)})`;
           }
           const packsBuyable = !effectiveCanSendNow && Boolean(letterPack?.available);
           buyPackButton.style.display =
@@ -531,12 +2462,60 @@
           // true means there is nothing left to buy.
           document.getElementById("pack-options").style.display =
             packsBuyable && packOptionsOpen ? "grid" : "none";
+          // An app that takes no purchases (#475) offers neither button
+          // above; the server says so with letterPack.available false and
+          // the website's letter packs page as purchaseUrl (#474).
+          // Never for mail no pack pays for (#579): a pack would not send it.
+          const packsOnWebsite =
+            !effectiveCanSendNow &&
+            packPays &&
+            letterPack?.available === false &&
+            isHttpsUrl(letterPack?.purchaseUrl) &&
+            typeof host.openLink === "function";
+          document.getElementById("website-packs-button").style.display =
+            packsOnWebsite ? "flex" : "none";
+          // That mail, in an app with no checkout, is paid on the
+          // confirmation page (#579), which the server names.
+          const payOnPage =
+            !effectiveCanSendNow &&
+            isHttpsUrl(payAndSend?.pageUrl) &&
+            typeof host.openLink === "function";
+          document.getElementById("pay-page-button").style.display =
+            payOnPage ? "flex" : "none";
+          // Not while words are written and not set (#593 review round 1).
+          document.getElementById("pay-page-button").disabled = styleRow.editing();
+          // The note describes a checkout this card opens, so it shows only
+          // where there is one to open.
+          const checkoutNote = document.getElementById("checkout-note");
+          if (payAndSendAvailable || packsBuyable) {
+            checkoutNote.textContent = CHECKOUT_NOTE;
+            checkoutNote.style.display = "block";
+          } else if (payOnPage) {
+            checkoutNote.textContent = certifiedOf(state) ? CERTIFIED_PAY_PAGE_NOTE : PAY_PAGE_NOTE;
+            checkoutNote.style.display = "block";
+          } else if (packsOnWebsite) {
+            checkoutNote.textContent = WEBSITE_PACKS_NOTE;
+            checkoutNote.style.display = "block";
+          } else {
+            checkoutNote.style.display = "none";
+          }
+          // Nothing to press on a draft that was sent or has expired, and an
+          // earlier failure to send it no longer says anything true.
+          if (settled) {
+            sendButton.style.display = "none";
+            purchaseActions.style.display = "none";
+            document.getElementById("send-page-button").style.display = "none";
+            document.getElementById("send-page-note").style.display = "none";
+            document.getElementById("error-message").style.display = "none";
+          }
         }
+        refreshStudio(state);
       }
 
       // Handle send button click - US-MCP-08
       async function handleSend() {
-        if (sendInProgress || !currentDraftId) return;
+        if (sendInProgress || changed !== null || !currentDraftId || picker.busy() || styleRow.busy() || styleRow.editing()) return;
+        draftActedOn = true;
 
         const sendButton = document.getElementById("send-button");
         const sendButtonText = document.getElementById("send-button-text");
@@ -550,16 +2529,34 @@
 
         // Show loading state
         sendInProgress = true;
+        styleRow.hold(true);
         sendButton.disabled = true;
         sendButton.classList.add("loading");
         sendButtonText.innerHTML = '<span class="spinner"></span> Sending...';
 
+        const sentDraftId = currentDraftId;
+        // The version it shows as it sends (#695): a refusal names this one.
+        const sentVersion = versionFor(sentDraftId);
         try {
           // Call send_letter via OpenAI callTool
-          const result = await window.openai.callTool("send_letter", {
-            draftId: currentDraftId,
-            confirm: true,
-          });
+          const sendArgs = { draftId: sentDraftId, confirm: true };
+          if (anotherCopy) sendArgs.sendAnotherCopy = true;
+          // What it showed (#695): mail changed since is refused, and drawn again.
+          if (sentVersion) sendArgs.contentVersion = sentVersion;
+          const result = await host.callTool("send_letter", sendArgs);
+          // A refused send comes back as an error result, not a rejection.
+          if (result?.isError) {
+            const duplicate = duplicateDetails(result, null);
+            if (duplicate) {
+              showDuplicate(duplicate, "send");
+              // The draft is still to send: the rows a redraw hid come back.
+              showPickerAgain();
+              return;
+            }
+            // Thrown with its text, where the catch below also finds the
+            // confirmation page's address (#470).
+            throw new Error(resultText(result) || "The letter was not sent.");
+          }
 
           // Extract orderId - callTool may return different structures
           const orderId =
@@ -567,6 +2564,42 @@
             result?.structuredContent?.orderId ||
             result?.content?.[0]?.text?.match(/Order ID: ([a-f0-9-]+)/i)?.[1] ||
             null;
+
+          // Where the mail stands, as the send says (#535): sent with a date
+          // and waiting for it, it is scheduled, and can be cancelled from
+          // here until then unless Pay & Send paid for it. Not the card's own
+          // idea of the dates: the chat may have changed them.
+          const sendAnswer = toolData(result);
+          const sentSchedule =
+            sendAnswer.currentStatus === "scheduled" ? arrives.scheduleOf(sendAnswer.schedule) : null;
+          const sentCancellable = sendAnswer.cancellable === true;
+
+          // A reopened conversation must not offer this letter again.
+          keep({
+            draftId: sentDraftId,
+            sent: true,
+            ...(typeof orderId === "string" && orderId ? { orderId } : {}),
+            ...(sentSchedule ? { schedule: sentSchedule } : {}),
+            ...(sentSchedule && !sentCancellable ? { cancellable: false } : {}),
+          });
+
+          if (sentSchedule) {
+            statusPill.classList.remove("ok", "alert");
+            statusPill.textContent = "Scheduled";
+            idLabel.textContent = "Order";
+            idValue.textContent = orderId || "Confirmed";
+            sendButton.classList.remove("loading");
+            sendButtonText.innerHTML = "Letter Scheduled";
+            picker.hide();
+            styleRow.hide();
+            // The letter folds into its envelope (#576).
+            envelope?.seal(sentDraftId);
+            shownPage?.label();
+            scheduled.show(orderId, sentSchedule, false, sentCancellable);
+            // Where Cancel now is, in the studio (#580).
+            studio?.select("delivery");
+            return;
+          }
 
           // Same state, same words as the purchase flow above: a prepaid
           // send dispatches inline and also stops at provider acceptance, so
@@ -577,6 +2610,11 @@
           statusPill.classList.remove("ok", "alert");
           statusPill.classList.add("ok");
           statusPill.textContent = "With the printer";
+          // A sent letter's style can no longer change (#563).
+          styleRow.hide();
+          // The letter folds into its envelope (#576).
+          envelope?.seal(sentDraftId);
+          shownPage?.label();
 
           // Change Draft label to Order and show order ID
           idLabel.textContent = "Order";
@@ -587,8 +2625,28 @@
           sendButtonText.innerHTML = "Letter Sent!";
           // Keep button disabled
         } catch (error) {
+          const duplicate = duplicateDetails(null, error);
+          if (duplicate) {
+            showDuplicate(duplicate, "send");
+            showPickerAgain();
+            return;
+          }
+          // Refused for a change since (#695), as an error result or, in ChatGPT, a rejection wrapping its text.
+          if (String(error?.message ?? "").includes(CHANGED_SINCE_SHOWN)) {
+            showChanged("send", sentDraftId, sentVersion);
+            showPickerAgain();
+            return;
+          }
+          // An error result arrives here with its text, and a host's
+          // rejection with its message. Not readableError: that keeps only
+          // the first sentence, and the page's address is in the second.
+          const page = sendPageFrom(String(error?.message ?? ""), sentDraftId);
+          if (page) {
+            showSendPage(page, sentDraftId);
+            return;
+          }
           // Show error message
-          errorMessage.textContent = `Failed to send: ${error.message || "Unknown error"}`;
+          errorMessage.textContent = `Failed to send: ${readableError(error)}`;
           errorMessage.style.display = "block";
 
           // Reset button for retry
@@ -602,6 +2660,16 @@
           statusPill.textContent = "Send failed";
 
           sendInProgress = false;
+          // A host redraw during the send hid the rows; they come back with
+          // the draft, which is still to send.
+          showPickerAgain();
+        } finally {
+          // A failed send leaves the row usable again; a sent letter has none.
+          styleRow.hold(false);
+          // A send that did not go out shares its draft again; one that did has taken it back (#650).
+          shareSelection();
+          // The studio's header and footer say what the send did (#580).
+          refreshStudio();
         }
       }
 
@@ -639,6 +2707,7 @@
       function applyPurchaseStatus(status) {
         const statusPill = document.getElementById("status-pill");
         const state = status.purchaseStatus;
+        purchaseState = typeof state === "string" ? state : null;
         statusPill.classList.remove("ok", "alert");
         if (state === "submitted") {
           statusPill.classList.add("ok");
@@ -675,6 +2744,8 @@
         // dispatches inline too, the only cost of this line is a card that
         // updates when the user returns rather than on a timer - which is why
         // this is a comment rather than a pinned test.
+        // The studio's header and footer follow the order (#580).
+        refreshStudio();
         return state === "processing" || TERMINAL_PURCHASE_STATUSES.includes(state);
       }
 
@@ -682,12 +2753,12 @@
       // handler, and the timer. The in-flight guard is what keeps them from
       // overlapping. Resolves true when the status is terminal.
       function lettersRequiredForDraft() {
-        return window.openai?.toolOutput?.lettersRequired ?? 1;
+        return currentOutput()?.lettersRequired ?? 1;
       }
 
       async function refreshOrderStatus() {
         const status = toolData(
-          await window.openai.callTool("get_purchase_status", {
+          await host.callTool("get_purchase_status", {
             orderId: trackedOrderId,
           }),
         );
@@ -701,7 +2772,7 @@
       // point render() has taken over and there is nothing left to wait for.
       async function refreshLetterBalance() {
         const balance = toolData(
-          await window.openai.callTool("get_account_balance", {}),
+          await host.callTool("get_account_balance", {}),
         );
         if (typeof balance.lettersRemaining !== "number") return false;
         refreshedLetters = balance.lettersRemaining;
@@ -831,31 +2902,58 @@
       // Reveal the checkout link, the customer's route to paying when the
       // host does not open a tab. See handlePayAndSend for why it exists.
       function showCheckoutLink(href, label) {
+        // Only an https link becomes the card's link (#684); the order is still followed.
+        if (!isHttpsUrl(href)) return;
         const link = document.getElementById("checkout-link");
         link.href = href;
         link.textContent = label;
         link.style.display = "flex";
       }
 
+      // The Arrives row after a checkout that did not open, drawn as render()
+      // would draw it now: a host redraw during the call took it away.
+      function showPickerAgain() {
+        const output = retryResult ? retryResult.output : host.toolOutput();
+        picker.show(currentDraftId, output, cardIsShowingDraft() && !settledDraft() && !sendPageShown());
+        styleRow.show(currentDraftId, output, cardIsShowingDraft() && !settledDraft() && !sendPageShown());
+      }
+
       async function handlePayAndSend() {
-        if (checkoutInProgress || !currentDraftId) return;
+        if (checkoutInProgress || changed !== null || !currentDraftId || picker.busy() || styleRow.busy() || styleRow.editing()) return;
+        draftActedOn = true;
         const button = document.getElementById("pay-send-button");
         const buttonText = document.getElementById("pay-send-button-text");
         const errorMessage = document.getElementById("error-message");
         const idLabel = document.getElementById("id-label");
         const idValue = document.getElementById("id-value");
         checkoutInProgress = true;
+        picker.hide();
+        styleRow.hide();
+        // The studio's Style tab says what the page is in, now the row has gone (#580).
+        refreshStudio();
         errorMessage.style.display = "none";
         button.disabled = true;
         button.classList.add("loading");
         buttonText.innerHTML =
           '<span class="spinner"></span> Preparing checkout...';
+        // The version it shows as it pays (#695): a refusal names this one.
+        const paidVersion = versionFor(currentDraftId);
         try {
-          const result = toolData(
-            await window.openai.callTool("create_mail_checkout", {
-              draftId: currentDraftId,
-            }),
-          );
+          const checkoutArgs = { draftId: currentDraftId };
+          if (anotherCopy) checkoutArgs.sendAnotherCopy = true;
+          // What it showed (#695): mail changed since is refused before any charge, and drawn again.
+          if (paidVersion) checkoutArgs.contentVersion = paidVersion;
+          const raw = await host.callTool("create_mail_checkout", checkoutArgs);
+          if (raw?.isError) {
+            const duplicate = duplicateDetails(raw, null);
+            if (duplicate) {
+              showDuplicate(duplicate, "pay");
+              showPickerAgain();
+              return;
+            }
+            throw new Error(resultText(raw) || "Checkout URL was not returned");
+          }
+          const result = toolData(raw);
           if (!result.checkoutUrl) {
             throw new Error(result.message || "Checkout URL was not returned");
           }
@@ -865,6 +2963,14 @@
           idLabel.textContent = "Purchase";
           idValue.textContent = result.orderId;
           button.classList.remove("loading");
+          // A reopened conversation follows this order, and offers this link
+          // while it is unpaid, instead of offering the letter again.
+          const keptCheckout = { draftId: currentDraftId, checkout: true };
+          if (typeof result.orderId === "string" && result.orderId) {
+            keptCheckout.orderId = result.orderId;
+          }
+          if (isHttpsUrl(result.checkoutUrl)) keptCheckout.checkoutUrl = result.checkoutUrl;
+          keep(keptCheckout);
 
           // Show the link BEFORE handing off to the host, and never hide it
           // again. On 2026-08-29 openExternal resolved without opening
@@ -893,7 +2999,7 @@
           startStatusPolling("Checkout open - waiting for payment");
 
           try {
-            await window.openai.openExternal({ href: result.checkoutUrl });
+            if (isHttpsUrl(result.checkoutUrl)) await host.openLink(result.checkoutUrl);
             buttonText.textContent = "Checkout Opened";
           } catch {
             // The host declined to open a tab. Not an error worth showing as
@@ -902,12 +3008,29 @@
             buttonText.textContent = "Use the checkout link below";
           }
         } catch (error) {
-          errorMessage.textContent = `Unable to open checkout: ${error.message || "Unknown error"}`;
+          const duplicate = duplicateDetails(null, error);
+          if (duplicate) {
+            showDuplicate(duplicate, "pay");
+            showPickerAgain();
+            return;
+          }
+          // Refused for a change since (#695), as an error result or, in ChatGPT, a rejection wrapping its text.
+          if (String(error?.message ?? "").includes(CHANGED_SINCE_SHOWN)) {
+            showChanged("pay", currentDraftId, paidVersion);
+            showPickerAgain();
+            return;
+          }
+          // No checkout: the date row comes back with the button.
+          showPickerAgain();
+          errorMessage.textContent = `Unable to open checkout: ${readableError(error)}`;
           errorMessage.style.display = "block";
           button.classList.remove("loading");
           button.disabled = false;
           buttonText.textContent = "Retry Pay & Send";
           checkoutInProgress = false;
+        } finally {
+          // The rows went with the checkout; the studio says what is left (#580).
+          refreshStudio();
         }
       }
 
@@ -926,7 +3049,7 @@
         errorMessage.style.display = "none";
         try {
           const listed = toolData(
-            await window.openai.callTool("list_letter_packs", {}),
+            await host.callTool("list_letter_packs", {}),
           );
           const packs = Array.isArray(listed.packs) ? listed.packs : [];
           if (!packs.length) {
@@ -939,7 +3062,7 @@
           // Deliberately NOT a fallback to buying the smallest pack. After a
           // click that now means "show me the options", a surprise purchase is
           // the worst outcome available.
-          errorMessage.textContent = `Unable to load letter packs: ${error.message || "Unknown error"}`;
+          errorMessage.textContent = `Unable to load letter packs: ${readableError(error)}`;
           errorMessage.style.display = "block";
         } finally {
           button.disabled = false;
@@ -980,7 +3103,7 @@
           // expected outcome. A tool call creates the session for the
           // authenticated user, and that whole class of failure goes away.
           const result = toolData(
-            await window.openai.callTool("create_pack_checkout", { pack }),
+            await host.callTool("create_pack_checkout", { pack }),
           );
           if (!result.checkoutUrl) {
             throw new Error(result.message || "Checkout URL was not returned");
@@ -1002,12 +3125,12 @@
           render();
 
           try {
-            await window.openai.openExternal({ href: result.checkoutUrl });
+            if (isHttpsUrl(result.checkoutUrl)) await host.openLink(result.checkoutUrl);
           } catch {
             // Nothing to do: the link is already on screen.
           }
         } catch (error) {
-          errorMessage.textContent = `Unable to start the letter pack checkout: ${error.message || "Unknown error"}`;
+          errorMessage.textContent = `Unable to start the letter pack checkout: ${readableError(error)}`;
           errorMessage.style.display = "block";
           // Put the sizes back rather than stranding the customer on a card
           // with no way to retry.
@@ -1016,16 +3139,102 @@
         }
       }
 
+      const CHECKOUT_NOTE =
+        "Checkout opens in your browser. Paying sends it automatically - this card updates when you return to this tab, or use Check status.";
+      const WEBSITE_PACKS_NOTE =
+        "Letter packs are sold on the website. Sign in there with the same email you use here - this card updates when you return to this tab, or use Check status.";
+      // Certified mail (#625) is paid per send whatever its pages, so the rule about what a pack pays for does not apply to it.
+      const CERTIFIED_PAY_PAGE_NOTE =
+        "Certified mail is paid with Pay & Send on Letter IRL's page, which sends it once you pay.";
+      const PAY_PAGE_NOTE =
+        "Letter packs pay for one-page letters and 6x9 postcards. This one is paid with Pay & Send on Letter IRL's page, which sends it once you pay.";
+
+      // Mail no pack pays for, in an app with no checkout (#579): the page
+      // that takes the Pay & Send payment, as the server named it.
+      async function handlePayPage() {
+        // The page would take the words the draft has, not the ones being written.
+        if (styleRow.editing()) return;
+        const url = currentEligibility?.payAndSend?.pageUrl;
+        if (!isHttpsUrl(url) || typeof host.openLink !== "function") return;
+        const errorMessage = document.getElementById("error-message");
+        errorMessage.style.display = "none";
+        let opened = false;
+        try {
+          // A host that declines answers with isError rather than failing.
+          opened = !(await host.openLink(url))?.isError;
+        } catch {
+          opened = false;
+        }
+        if (!opened) {
+          errorMessage.textContent = `The page did not open. It is at ${url}`;
+          errorMessage.style.display = "block";
+        }
+      }
+
+      // Where the app takes no purchases (#475), letters are bought on the
+      // website (#474). As with a pack bought here, the balance is the only
+      // thing to watch, so the card waits for the letters the same way, and
+      // each open starts the wait afresh, as each checkout does. It waits even
+      // when the host would not open the page: the address is on the card,
+      // and the person may open it themselves.
+      async function handleWebsitePacks() {
+        const url = currentEligibility?.letterPack?.purchaseUrl;
+        if (!isHttpsUrl(url) || typeof host.openLink !== "function") return;
+        const errorMessage = document.getElementById("error-message");
+        errorMessage.style.display = "none";
+        packPurchasePending = true;
+        startStatusPolling();
+        render();
+        let opened = false;
+        try {
+          // A host that declines answers with isError rather than failing.
+          opened = !(await host.openLink(url))?.isError;
+        } catch {
+          opened = false;
+        }
+        if (!opened) {
+          errorMessage.textContent = `The website did not open. Letter packs are at ${url}`;
+          errorMessage.style.display = "block";
+        }
+      }
+
       // Attach click handler
       document
         .getElementById("send-button")
         .addEventListener("click", handleSend);
+      document
+        .getElementById("send-page-button")
+        .addEventListener("click", () => {
+          void handleSendPage();
+        });
       document
         .getElementById("pay-send-button")
         .addEventListener("click", handlePayAndSend);
       document
         .getElementById("buy-pack-button")
         .addEventListener("click", handleBuyPack);
+      document
+        .getElementById("website-packs-button")
+        .addEventListener("click", () => {
+          void handleWebsitePacks();
+        });
+      document
+        .getElementById("pay-page-button")
+        .addEventListener("click", () => {
+          void handlePayPage();
+        });
+      document
+        .getElementById("retry-button")
+        .addEventListener("click", handleCreatePreview);
+      document
+        .getElementById("choose-image-button")
+        .addEventListener("click", handleChooseImage);
+      document
+        .getElementById("upload-image-button")
+        .addEventListener("click", handleUploadImage);
+      document
+        .getElementById("image-file-input")
+        .addEventListener("change", handleImageFile);
       document
         .getElementById("check-status-button")
         .addEventListener("click", () => {
@@ -1047,11 +3256,89 @@
         });
       });
 
+      // The draft this card shows, told to the conversation by itself (#650), so "make it warmer" acts on it: only
+      // where the host takes model context and the preview is flagged for it (the home's selection context), and only
+      // a draft known to be ready, which is after get_draft_status says "ready" (in every host since #676): a reopened
+      // card may show a preview long since sent. A draft this card made itself (a retry
+      // preview) is ready by its making. The share is taken back (an empty update) once the draft stops being ready, and
+      // it is made again, with a later time, when the person uses the card: each card is its own instance, so several
+      // cards may share at once, and the time tells the model which one the person showed or touched last.
+      // Each update replaces this card's last (ui/update-model-context is idempotent); they go one after another, each
+      // given up after 10 seconds so a host that never answers cannot hold the rest back. Failures say nothing on the
+      // card: there is nothing the person could do about them.
+      const SHARE_TIMEOUT_MS = 10000;
+      const RESHARE_AFTER_MS = 10000;
+      function shareSelection(touched = false, usedAt = 0, immediate = false) {
+        const flagged = currentMeta().modelContextEnabled === true;
+        const asks = typeof host.callTool === "function";
+        const confirmed = !asks || statusReadyFor === currentDraftId || retryResult?.output?.draftId === currentDraftId;
+        // Not while a send is out or after it (sendInProgress stays set once sent), nor once a checkout is tracked, nor
+        // for a reopened card's kept order, nor once the person was sent to the confirmation page. A draft the server
+        // says was sent or expired is never confirmed ready: get_draft_status answers once, and finally.
+        const ready =
+          flagged && typeof currentDraftId === "string" && currentDraftId && confirmed &&
+          cardIsShowingDraft() && !keptOrderShown() && !sendPageShown();
+        // In ChatGPT what carries model context opens only when there is a draft to share and no other way to share it;
+        // its answer redraws the card, which shares then. With the handshake open, ChatGPT did not give a reopened card
+        // its kept state (#676), so the card asks the server what became of its draft in every host (askDraftState).
+        if (ready && typeof host.updateModelContext !== "function" && typeof host.openPluginExtensions === "function") {
+          host.openPluginExtensions();
+        }
+        if (typeof host.updateModelContext !== "function") return;
+        const draftId = ready ? currentDraftId : "";
+        const now = Date.now();
+        // The time a share carries is the time of the use that asked for it, so a share that waited still says when.
+        if (touched && !usedAt) lastUseAt = now;
+        const at = touched ? usedAt || now : now;
+        const again = touched && draftId && draftId === sharedDraftId && (immediate || now - sharedAt >= RESHARE_AFTER_MS);
+        // A use too soon after the last share is not lost: one share follows when the wait is over, so the card the
+        // latest use always carries the latest time.
+        if (touched && draftId && draftId === sharedDraftId && !again) {
+          if (!shareLater) {
+            shareLater = true;
+            setTimeout(() => {
+              shareLater = false;
+              // A share made meanwhile already carries this use, or a later one.
+              if (lastUseAt > carriedAt) shareSelection(true, lastUseAt);
+            }, Math.max(0, RESHARE_AFTER_MS - (now - sharedAt)));
+          }
+          return;
+        }
+        if (draftId === sharedDraftId && !again) return;
+        sharedDraftId = draftId;
+        sharedAt = now;
+        carriedAt = at;
+        // A sentence, not JSON: ChatGPT shows what a card shares to the person, in a chip in the message box (#668). The
+        // time is UTC to the second, written out, so the model can still tell which card shared last. It does not say the
+        // draft is ready: it may have been sent from another card, or on the confirmation page, since.
+        const stamp = new Date(at).toISOString();
+        const content = draftId
+          ? [{ type: "text", text:
+              "Shared by a Letter IRL letter card on " + stamp.slice(0, 10) + " at " + stamp.slice(11, 19) + " UTC: the card " +
+              "shows the letter draft " + draftId + ". Several Letter IRL cards may each share a draft; the one shared " +
+              "latest is most likely the one the person means, so ask if unsure. It may have been sent or have expired " +
+              "since: a Letter IRL tool given this draftId says so." }]
+          : [];
+        shareChain = shareChain
+          .then(() => Promise.race([
+            host.updateModelContext({ content }),
+            new Promise((resolve) => setTimeout(resolve, SHARE_TIMEOUT_MS)),
+          ]))
+          .catch(() => {});
+      }
+      // Using the card shows which draft the person means.
+      // A click, not a pointer going down: scrolling past a card on a phone is not a use of it. A click shares at once,
+      // since clicks are few; keys, which come many at a time while someone types, wait their turn. Both are heard as
+      // they bubble, after the card's own handler: a press of Send has already started the send, so it takes the
+      // draft back rather than sharing it again.
+      document.addEventListener("click", () => shareSelection(true, 0, true));
+      document.addEventListener("keydown", () => shareSelection(true));
+
       // Initial render (will show loading state)
       render();
 
       // Listen for data updates (per OpenAI docs)
-      window.addEventListener("openai:set_globals", () => {
+      host.onChange(() => {
         render();
       });
     </script>

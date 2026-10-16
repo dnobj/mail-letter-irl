@@ -18,12 +18,20 @@ import type {
   PostcardResult,
   PostcardSize,
 } from './providers/types.js';
-import type { Letter, LetterJob } from './types.js';
+import type { CertifiedMailService, Letter, LetterJob } from './types.js';
+import { isExtraService, mailServiceOf } from '../config/products.js';
+import { drawnByRenderer, providerPrintsRenderedPdf, providerSellsExtraServices } from './providers/extraServices.js';
 import {
   isLetterAlreadyCompensated,
   returnConsumedCreditsForLetter
 } from './creditLedgerService.js';
-import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
+import { returnGiftLetterForFailedSendWithClient } from './giftLetterService.js';
+import { carriedDiagnosticClass, classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
+import { summarizeProviderRejection } from './providerFailureSummary.js';
+import { enabledUnlessDisabled } from '../utils/envSettings.js';
+import { letterPrintText, signatureParagraph } from './previewService.js';
+import { heldMailJobSql, isFundingHoldReason, leftForOperatorSql } from './heldMail.js';
+import { OPERATOR_NOTICES, reportToOperator } from './operatorNotify.js';
 
 const DEFAULT_MAX_ATTEMPTS = 5;
 const STALE_LOCK_MINUTES = 15;
@@ -49,6 +57,8 @@ export interface ProcessLetterJobResult {
   retryScheduled: boolean;
   job?: LetterJob;
   error?: string;
+  /** Put back for the operator by the dispatch marker (#696): neither sent nor failed. */
+  leftForOperator?: boolean;
 }
 
 function maxAttempts(): number {
@@ -117,13 +127,24 @@ export async function submitToProviderOnce(
 /** Insert an outbox row using the caller's transaction. */
 export async function createLetterJobWithClient(
   client: pg.PoolClient,
-  letter: Letter
+  letter: Letter,
+  /**
+   * Arrive-by mail (#535) is held until `notBefore`: the claim takes a job
+   * only once next_attempt_at has passed, the inline dispatch right after a
+   * send included. Unset, the job is due now.
+   */
+  options: { notBefore?: Date } = {}
 ): Promise<LetterJob> {
+  const notBefore = options.notBefore ?? null;
+  // The hold is its own column (055, #693): mail_hold_until, null for mail due now. For one
+  // release it is also written to the metadata, where code from before 055 reads it, so a
+  // rollback across 055 still knows its held mail; nothing here reads it.
   const result = await client.query<LetterJob>(
     `INSERT INTO letter_jobs (
        job_id, letter_id, status, attempts, max_attempts, scheduled_at,
-       idempotency_key, next_attempt_at, metadata
-     ) VALUES ($1, $2, 'pending', 0, $3, NOW(), $2, NOW(), $4)
+       idempotency_key, next_attempt_at, metadata, mail_hold_until
+     ) VALUES ($1, $2, 'pending', 0, $3, COALESCE($5::timestamptz, NOW()), $2,
+               COALESCE($5::timestamptz, NOW()), $4, $5::timestamptz)
      ON CONFLICT (letter_id) DO UPDATE
      SET updated_at = NOW()
      RETURNING *`,
@@ -131,7 +152,8 @@ export async function createLetterJobWithClient(
       randomUUID(),
       letter.letter_id,
       maxAttempts(),
-      JSON.stringify({ source: 'transactional-outbox' }),
+      JSON.stringify({ source: 'transactional-outbox', ...(notBefore ? { heldUntil: notBefore.toISOString() } : {}) }),
+      notBefore,
     ]
   );
 
@@ -148,7 +170,27 @@ export async function createLetterJob(letter: Letter): Promise<LetterJob> {
   return transaction((client) => createLetterJobWithClient(client, letter));
 }
 
+/**
+ * The outbox's own stop (#444).
+ *
+ * LETTER_IRL_MAIL_SENDING_ENABLED refuses NEW work, and deliberately lets paid
+ * Pay & Send fulfilment through. Neither it nor anything else stopped what the
+ * outbox had already queued: its letters, their retries and paid orders being
+ * fulfilled all went to the printer on the next run, which is the wrong answer
+ * during a printing incident. Off, this claims nothing, so every queued job
+ * keeps its status, attempts and backoff and goes out when it is switched back
+ * on. Both processes dispatch - the API right after a send, maintenance for
+ * everything else - so it is set on BOTH services to pause
+ * (docs/operational-acceptance.md). On when unset; any value other than an
+ * affirmative, a typo included, pauses, which is the failure that mails
+ * nothing wrong.
+ */
+export function outboxDispatchEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return enabledUnlessDisabled('LETTER_IRL_OUTBOX_DISPATCH_ENABLED', env);
+}
+
 async function claimJob(jobId?: string): Promise<LetterJob | null> {
+  if (!outboxDispatchEnabled()) return null;
   const params: unknown[] = [];
   const specificJobClause = jobId ? `AND job_id = $1` : '';
   if (jobId) params.push(jobId);
@@ -161,7 +203,10 @@ async function claimJob(jobId?: string): Promise<LetterJob | null> {
          AND provider_outcome = 'not_dispatched'
          ${specificJobClause}
          AND (
-           (status IN ('pending', 'failed') AND next_attempt_at <= NOW())
+           (status IN ('pending', 'failed') AND next_attempt_at <= NOW()
+             AND NOT ${leftForOperatorSql('letter_jobs')})
+           -- A claim a crash left behind is taken back whatever it is: the marker puts
+           -- back one left for the operator (#696), instead of it staying processing.
            OR (
              status = 'processing'
              AND locked_at < NOW() - INTERVAL '${STALE_LOCK_MINUTES} minutes'
@@ -189,7 +234,10 @@ async function claimJob(jobId?: string): Promise<LetterJob | null> {
   return result.rows[0] || null;
 }
 
-async function markProviderDispatch(job: LetterJob): Promise<Letter> {
+/** The marker's answer for a job left for the operator (#696): put back, not dispatched. */
+const LEFT_FOR_OPERATOR = 'left_for_operator' as const;
+
+async function markProviderDispatch(job: LetterJob): Promise<Letter | typeof LEFT_FOR_OPERATOR> {
   return transaction(async client => {
     const relation = await client.query<{ letter_id: string; funding_order_id: string | null }>(
       `SELECT jobs.letter_id, letters.funding_order_id
@@ -220,10 +268,34 @@ async function markProviderDispatch(job: LetterJob): Promise<Letter> {
     );
     const letter = letterResult.rows[0];
     const current = lockedJob.rows[0];
-    if (!letter || !current || current.status !== 'processing' ||
+    // Still this claim's job (#730): processing, at the attempts this claim set.
+    // A claimant that stalled past its lock and lost the job to a later claim
+    // neither marks it dispatching nor puts it back.
+    // A letter whose content retention has redacted (#730) has nothing left to print.
+    if (!letter || !current || current.status !== 'processing' || current.attempts !== job.attempts ||
         current.provider_outcome !== 'not_dispatched' ||
-        !['queued', 'processing'].includes(letter.status)) {
+        !['queued', 'processing'].includes(letter.status) || letter.redacted_at) {
       throw new Error('Mail item is held or no longer dispatchable');
+    }
+    // Held for its funding, or its account blocked, since the claim (#696): back to
+    // pending, its attempt given back, so it neither fails nor counts against it, and
+    // waits for the operator as it would have had the claim seen it.
+    const blocked = await client.query<{ sends_blocked_reason: string | null }>(
+      'SELECT sends_blocked_reason FROM users WHERE user_id = $1 FOR SHARE',
+      [letter.user_id]
+    );
+    if (isFundingHoldReason(current.hold_reason) || blocked.rows[0]?.sends_blocked_reason) {
+      await client.query(
+        `UPDATE letter_jobs SET status = 'pending', attempts = GREATEST(attempts - 1, 0),
+           locked_at = NULL, updated_at = NOW()
+         WHERE job_id = $1`,
+        [job.job_id]
+      );
+      writeDiagnostic('info', 'outbox.left_for_operator', {
+        jobId: job.job_id,
+        reason: isFundingHoldReason(current.hold_reason) ? current.hold_reason : 'sends_blocked'
+      });
+      return LEFT_FOR_OPERATOR;
     }
     await client.query(
       `UPDATE letter_jobs
@@ -284,12 +356,20 @@ async function holdAmbiguousDispatch(job: LetterJob, error: unknown): Promise<vo
       [orderId, JSON.stringify({ jobId: job.job_id, errorClass })]
     );
   });
+  // Once the hold has committed (#699). Not waited for: this runs in a send's
+  // inline dispatch too; the maintenance run settles it before it exits.
+  reportToOperator('ambiguous_outcome', OPERATOR_NOTICES.ambiguousOutcome());
 }
 
 async function loadLetter(letterId: string): Promise<Letter> {
   const result = await query<Letter>('SELECT * FROM letters WHERE letter_id = $1', [letterId]);
   if (!result.rows[0]) {
-    throw new Error(`Letter not found for outbox job: ${letterId}`);
+    // The code doubles as the class, so a job failed by this stores
+    // LETTER_NOT_FOUND, never the id-bearing message (#394).
+    throw Object.assign(new Error(`Letter not found for outbox job: ${letterId}`), {
+      code: 'LETTER_NOT_FOUND',
+      diagnosticClass: 'LETTER_NOT_FOUND'
+    });
   }
   return result.rows[0];
 }
@@ -319,18 +399,72 @@ function letterParams(letter: Letter, job: LetterJob): LetterParams {
           country: normalizeCountryToUS(content.sender.country),
         }
       : undefined,
-    message: `${content.bodyText}\n${content.signOff || ''}`.trim(),
+    // The same text validation counted lines on (#77).
+    message: letterPrintText(content.bodyText, content.signOff),
     color: content.layoutType !== 'text_only' && Boolean(content.headerImageData || content.inlineImageData),
-    doubleSided: false,
+    // Two or three pages print on both sides of the paper (#586); the print
+    // checks the count against the layout and holds a letter that disagrees.
+    pages: content.pages,
+    doubleSided: Number(content.pages ?? 1) > 1,
     layoutType: content.layoutType || 'text_only',
     headerImageData: content.headerImageData,
     inlineImageData: content.inlineImageData,
+    giftCard: content.giftCard,
+    rendererVersion: content.rendererVersion,
+    stationery: content.stationery,
+    // Under the sign-off's first line, where the preview drew it (#608).
+    signature:
+      typeof content.signatureImage === 'string' && content.signatureImage !== ''
+        ? { image: content.signatureImage, closingParagraph: signatureParagraph(content.bodyText, content.signOff) }
+        : undefined,
+    // Certified mail (#625): the service as the letter holds it, none being
+    // none. Text this code does not know is handed over as it is and never
+    // read as standard mail: extraServiceRefusal turns it away before this is
+    // built, and a provider refuses it too.
+    extraService: mailServiceOf(letter.mail_service) as CertifiedMailService | undefined,
     metadata: {
       letterId: letter.letter_id,
       userId: letter.user_id,
       creditsCost: letter.credits_cost,
     },
   };
+}
+
+/**
+ * Why this letter cannot go to this provider with the service it asks for, or
+ * undefined when nothing stands in the way. The answer comes before anything
+ * is submitted, so it is a definite rejection: the letter fails and what paid
+ * for it comes back. A letter that asks for a service is never mailed as a
+ * standard one - not when the text is unknown to this code (a newer deploy's
+ * service, a row edited by hand), not by a provider that does not say it can
+ * sell the service, and not as a postcard.
+ */
+function extraServiceRefusal(
+  provider: { supportsExtraServices?: boolean },
+  letter: Letter
+): 'unknown_service' | 'postcard' | 'provider_cannot_sell' | undefined {
+  const service = mailServiceOf(letter.mail_service);
+  if (service === undefined) return undefined;
+  if (!isExtraService(service)) return 'unknown_service';
+  if ((letter.mail_type || 'letter') === 'postcard') return 'postcard';
+  if (!provider.supportsExtraServices) return 'provider_cannot_sell';
+  return undefined;
+}
+
+/**
+ * Why this provider cannot print this mail as it was shown, or undefined when
+ * it can (#698): mail our renderer drew (its content records a rendererVersion)
+ * goes only to a provider that says it prints the renderer's PDF. Answered
+ * before anything is submitted, so it is a definite rejection, as for a
+ * service the provider cannot sell. Mail drawn by the legacy HTML asks nothing.
+ * "Drawn" is read as the print reads it (drawnByRenderer).
+ */
+function rendererRefusal(
+  provider: { printsRenderedPdf?: boolean },
+  letter: Letter
+): 'provider_cannot_print_rendered' | undefined {
+  if (!drawnByRenderer(letter.content)) return undefined;
+  return provider.printsRenderedPdf ? undefined : 'provider_cannot_print_rendered';
 }
 
 function postcardParams(letter: Letter, job: LetterJob): PostcardParams {
@@ -361,6 +495,10 @@ function postcardParams(letter: Letter, job: LetterJob): PostcardParams {
     frontImageBase64: content.frontImageData,
     backMessage: content.message,
     size: (content.postcardSize || '6x9') as PostcardSize,
+    giftCard: content.giftCard,
+    rendererVersion: content.rendererVersion,
+    // A front other than full bleed (#594): read by the print for 'pdf-3' only.
+    front: content.postcardFront,
     metadata: {
       letterId: letter.letter_id,
       userId: letter.user_id,
@@ -390,9 +528,46 @@ async function submitToProvider(
   provider: Awaited<ReturnType<typeof getProviderForMailType>>,
   letter: Letter,
   job: LetterJob,
-  options: ProcessLetterJobOptions
+  _options: ProcessLetterJobOptions
 ): Promise<{ result: ProviderResult; providerName: string }> {
   const mailType = letter.mail_type || 'letter';
+
+  const refusal = extraServiceRefusal(provider, letter);
+  if (refusal) {
+    // Nothing was submitted, so this is an authoritative rejection. The
+    // reason is a fixed word, never the letter's text, for the operator who
+    // reads why a paid certified letter came back.
+    writeDiagnostic('error', 'outbox.extra_service_refused', {
+      jobId: job.job_id,
+      reason: refusal,
+      provider: provider.config.name
+    });
+    const rejected: ProviderResult = {
+      success: false,
+      trackingId: '',
+      error: `${provider.config.displayName} cannot send this letter's mail service (${refusal})`,
+      // Its own class, kept in the columns an operator reads: nothing was sent, and the provider said nothing.
+      metadata: { retryable: false, submissionOutcome: 'definite_rejection', errorClass: 'extra_service_refused' },
+    };
+    return { result: rejected, providerName: provider.config.name };
+  }
+
+  const unprintable = rendererRefusal(provider, letter);
+  if (unprintable) {
+    // As above: nothing was submitted, and the reason is a fixed word (#698).
+    writeDiagnostic('error', 'outbox.renderer_refused', {
+      jobId: job.job_id,
+      reason: unprintable,
+      provider: provider.config.name
+    });
+    const rejected: ProviderResult = {
+      success: false,
+      trackingId: '',
+      error: `${provider.config.displayName} cannot print mail our renderer drew (${unprintable})`,
+      metadata: { retryable: false, submissionOutcome: 'definite_rejection', errorClass: 'renderer_refused' },
+    };
+    return { result: rejected, providerName: provider.config.name };
+  }
 
   const result = await submitToProviderOnce(async () => {
     if (mailType === 'postcard') {
@@ -559,11 +734,14 @@ async function recoverProviderAcceptancePersistence(
  * Return a prepaid send's credits when the job ends terminally.
  *
  * Only for prepaid_balance letters: jit_order funding is compensated by moving
- * the order to refund_pending, which the Stripe path then settles.
+ * the order to refund_pending, which the Stripe path then settles. A gift
+ * letter gets its gift back and the code it printed voided
+ * (returnGiftLetterForFailedSendWithClient).
  *
  * Idempotent inside returnConsumedCreditsForLetter, so replayed failure
  * handling, a re-run of maintenance, or two concurrent handlers that both reach
- * a terminal transition cannot return the pack twice.
+ * a terminal transition cannot return the pack twice. The gift return keys on
+ * the letter the same way.
  */
 async function returnPrepaidCreditsForFailedLetter(
   client: Pick<pg.PoolClient, 'query'>,
@@ -575,11 +753,127 @@ async function returnPrepaidCreditsForFailedLetter(
     [letterId]
   );
   const row = letter.rows[0];
+  if (row?.funding_type === 'gift_letter') {
+    await returnGiftLetterForFailedSendWithClient(client, {
+      letterId,
+      userId: row.user_id,
+      failureCode
+    });
+    return;
+  }
   if (!row || row.funding_type !== 'prepaid_balance') return;
   await returnConsumedCreditsForLetter(client, {
     letterId,
     userId: row.user_id,
     failureCode
+  });
+}
+
+/** The operator alert for mail the provider cancelled after accepting it (migration 043, #566). */
+export const PROVIDER_CANCELLED_ALERT = 'provider_cancelled_mail';
+
+/** Letter statuses past which nothing changes: the status sync's terminal list. */
+export const ENDED_LETTER_STATUSES = ['delivered', 'returned', 'failed', 'cancelled'];
+
+/**
+ * What our own record says before a provider's cancel: accepted, and not yet
+ * printing. Only then does the cancel prove nothing was mailed, so only then
+ * does what paid come back by itself. A cancel after the sync saw printing
+ * (`processing`) or mailing (`in_transit`) contradicts PostGrid's lifecycle,
+ * and a person decides.
+ */
+const NOT_YET_PRINTING_STATUSES = ['accepted', 'sent'];
+
+/**
+ * A letter the provider cancelled after accepting it (#566): PostGrid's
+ * `cancelled`, which it allows only before a piece is printed, so nothing was
+ * mailed. The status sync calls this instead of writing the status itself.
+ *
+ * In one transaction, under the canonical lock order (the funding order, the
+ * letter, its jobs), and only while the letter has not already ended:
+ * - the letter fails, with a history row from the sync;
+ * - what paid for it comes back as for a definite rejection: a prepaid send's
+ *   credits, or the gift letter with the code it printed voided. Exactly once,
+ *   since the returns key on the letter. Only while our record says accepted
+ *   and not yet printing: a cancel after the sync saw it printing or mailed
+ *   contradicts the provider's own lifecycle, and is left to a person;
+ * - a Pay & Send order was fulfilled when the provider accepted the letter,
+ *   and nothing here moves it: a person decides its refund;
+ * - one 'provider_cancelled_mail' alert per letter says so: a warning when
+ *   what paid came back, critical when a person must decide a refund. It
+ *   names the status our record held before the cancel.
+ *
+ * Every parameter is used once, with one type (the varchar parameter defect).
+ */
+export async function failProviderCancelledLetter(params: {
+  letterId: string;
+  providerRawStatus: string;
+}): Promise<'failed' | 'unchanged'> {
+  return transaction(async (client) => {
+    const relation = await client.query<{ funding_order_id: string | null }>(
+      'SELECT funding_order_id FROM letters WHERE letter_id = $1', [params.letterId]
+    );
+    if (!relation.rows[0]) return 'unchanged';
+    const orderId = relation.rows[0].funding_order_id || null;
+    if (orderId) {
+      await client.query('SELECT order_id FROM orders WHERE order_id = $1 FOR UPDATE', [orderId]);
+    }
+    const locked = await client.query<{
+      status: string;
+      user_id: string;
+      funding_type: string | null;
+      funding_order_id: string | null;
+    }>(
+      'SELECT status, user_id, funding_type, funding_order_id FROM letters WHERE letter_id = $1 FOR UPDATE',
+      [params.letterId]
+    );
+    const letter = locked.rows[0];
+    if (!letter || (letter.funding_order_id || null) !== orderId) {
+      throw new Error('Funding graph changed while acquiring canonical locks');
+    }
+    await client.query('SELECT job_id FROM letter_jobs WHERE letter_id = $1 ORDER BY job_id FOR UPDATE', [params.letterId]);
+    if (ENDED_LETTER_STATUSES.includes(letter.status)) return 'unchanged';
+
+    await client.query(
+      `UPDATE letters
+       SET status = 'failed', status_updated_at = NOW(), provider_raw_status = $2, updated_at = NOW()
+       WHERE letter_id = $1`,
+      [params.letterId, params.providerRawStatus]
+    );
+    await client.query(
+      `INSERT INTO letter_status_history (letter_id, old_status, new_status, provider_raw_status, source)
+       VALUES ($1, $2, 'failed', $3, 'sync')`,
+      [params.letterId, letter.status, params.providerRawStatus]
+    );
+    // What paid comes back by itself only for prepaid or gift mail our record
+    // shows was not yet printing; anything else is for a person.
+    const forAPerson = orderId !== null || !NOT_YET_PRINTING_STATUSES.includes(letter.status);
+    if (!forAPerson) {
+      await returnPrepaidCreditsForFailedLetter(client, params.letterId, 'provider_cancelled');
+    }
+    await client.query(
+      `INSERT INTO commerce_operational_alerts (order_id, alert_type, severity, details)
+       VALUES ($1, $2::varchar, $3::varchar,
+               jsonb_build_object('letterId', $4::text, 'userId', $5::text, 'fundingType', $6::text,
+                                  'refundForAPerson', $7::boolean, 'statusBefore', $8::text))
+       ON CONFLICT DO NOTHING`,
+      [
+        orderId,
+        PROVIDER_CANCELLED_ALERT,
+        forAPerson ? 'critical' : 'warning',
+        params.letterId,
+        letter.user_id,
+        letter.funding_type ?? 'unknown',
+        forAPerson,
+        letter.status
+      ]
+    );
+    writeDiagnostic('warn', 'provider.cancelled_mail', {
+      fundingType: letter.funding_type ?? 'unknown',
+      statusBefore: letter.status,
+      refundForAPerson: forAPerson
+    });
+    return 'failed';
   });
 }
 
@@ -589,6 +883,12 @@ async function failOrRescheduleJob(
   random: () => number
 ): Promise<boolean> {
   const error = result.error || 'Provider returned an unsuccessful result';
+  // What the three columns below receive. The raw message stays out of the
+  // database: a provider validation message can name the field and value that
+  // failed, which for a rejected letter is a fragment of the recipient's
+  // address (audit A-08). The ambiguous and exception paths store a class only;
+  // this keeps the status code as the operational signal.
+  const storedError = summarizeProviderRejection(result);
   // Fail safe: only an explicit `definite_rejection` may compensate a paid send.
   // A provider that reports no classification has not proved that the piece was
   // refused, and an unnecessary hold is recoverable while refunding physically
@@ -598,7 +898,11 @@ async function failOrRescheduleJob(
   // is therefore safe to compensate with a refund. Ambiguous failures retain
   // durable outbox work and stable idempotency until reconciliation succeeds.
   if (ambiguous) {
-    await holdAmbiguousDispatch(job, new Error(error));
+    // A class the provider names (render_refused: our renderer refused before
+    // any request) marks the hold and its alert; anything else is held as
+    // provider_error, since classifyDiagnosticError keeps only safe codes.
+    const errorClass = result.metadata?.errorClass;
+    await holdAmbiguousDispatch(job, Object.assign(new Error(error), typeof errorClass === 'string' ? { code: errorClass } : {}));
     return false;
   }
   const terminal = true;
@@ -633,7 +937,7 @@ async function failOrRescheduleJob(
            provider_outcome = CASE WHEN $1::varchar = 'failed' THEN 'definite_failure' ELSE provider_outcome END,
            last_error = $3, error_message = $3, updated_at = NOW()
        WHERE job_id = $4 AND status = 'processing' AND provider_outcome = 'dispatching'`,
-      [terminal ? 'failed' : 'pending', nextAttemptAt, error, job.job_id]
+      [terminal ? 'failed' : 'pending', nextAttemptAt, storedError, job.job_id]
     );
     // Nothing below may run on a job this result no longer owns - not the
     // letter transition, not the order's move to refund_pending, and above all
@@ -658,14 +962,14 @@ async function failOrRescheduleJob(
          WHERE order_id = $1 AND order_type = 'jit_mail'
            AND status = 'fulfillment_pending'
          RETURNING order_id`,
-        [fundingOrderId, error]
+        [fundingOrderId, storedError]
       );
       if (refundOrder.rows[0]) {
         await client.query(
           `INSERT INTO commerce_order_events (
              order_id, event_type, from_status, to_status, metadata
            ) VALUES ($1, 'provider.terminal_failure', 'fulfillment_pending', 'refund_pending', $2)`,
-          [refundOrder.rows[0].order_id, JSON.stringify({ error })]
+          [refundOrder.rows[0].order_id, JSON.stringify({ errorClass: storedError })]
         );
       }
     }
@@ -684,21 +988,63 @@ async function failOrRescheduleJob(
   return !terminal;
 }
 
-async function failBeforeDispatch(job: LetterJob, error: unknown, random: () => number): Promise<boolean> {
+/**
+ * Settles a job that failed before the provider was called. Every write is
+ * conditioned on this claimant still holding the job: status 'processing' and
+ * the attempts count its claim set (#730). A claim adds one to attempts and a
+ * put-back takes one away while leaving the job pending, so a claimant that
+ * stalled past its lock, and lost the job to another worker that has since
+ * failed it, refunded it or put it back, changes nothing. Exported for the
+ * PostgreSQL test of exactly that (failedSendRefund.postgres.test.ts).
+ */
+export async function failBeforeDispatch(job: LetterJob, error: unknown, random: () => number): Promise<boolean> {
   const retryable = job.attempts < job.max_attempts;
-  const errorClass = classifyDiagnosticError(error, 'unknown_error');
+  // A class a lower layer attached (a missing letter: LETTER_NOT_FOUND) wins
+  // over re-classification (#394).
+  const errorClass = carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error');
+  let putBack = false;
+  // Whether this claimant still held the job and settled it; a superseded one
+  // schedules nothing, whatever its own count says.
+  let settled = false;
   await transaction(async client => {
     const fundingOrderId = await lockFundingGraph(client, job);
+    // Mail left for the operator (#696), a claim a crash left behind among it, is put back as
+    // the marker puts it back: never failed, and nothing given back, without a person.
+    const left = await client.query<{ hold_reason: string | null; sends_blocked_reason: string | null }>(
+      `SELECT j.hold_reason, u.sends_blocked_reason
+         FROM letter_jobs j JOIN letters l ON l.letter_id = j.letter_id JOIN users u ON u.user_id = l.user_id
+        WHERE j.job_id = $1 FOR SHARE OF u`,
+      [job.job_id]
+    );
+    if (isFundingHoldReason(left.rows[0]?.hold_reason) || left.rows[0]?.sends_blocked_reason) {
+      const back = await client.query(
+        `UPDATE letter_jobs SET status = 'pending', attempts = GREATEST(attempts - 1, 0), locked_at = NULL,
+           last_error = $2, error_message = $2, updated_at = NOW()
+         WHERE job_id = $1 AND provider_outcome = 'not_dispatched' AND status = 'processing' AND attempts = $3::int`,
+        [job.job_id, errorClass, job.attempts]
+      );
+      // Only a job this claimant still holds: another worker may have put it back, or settled it.
+      putBack = Boolean(back.rowCount);
+      if (!putBack) writeDiagnostic('warn', 'outbox.pre_dispatch_transition_superseded', { jobId: job.job_id, errorClass });
+      return;
+    }
     const owned = await client.query(
       // Cast every use of $2, for the reason given in failOrRescheduleJob: the
       // uncast form is rejected by PostgreSQL, which threw this whole
       // transaction away on every pre-dispatch failure, retryable or terminal.
+      //
+      // The predicate holds this claimant to its claim (#730): still
+      // processing, at the attempts its claim set. A claimant that stalled past
+      // its lock, and lost the job to a customer's cancel of held mail (#535),
+      // a refund's cancel, or another worker that failed it and gave the money
+      // back, must not bring it back to pending or walk its letter to queued.
       `UPDATE letter_jobs SET status = $2::varchar, next_attempt_at = $3, locked_at = NULL,
          completed_at = CASE WHEN $2::varchar = 'failed' THEN NOW() ELSE NULL END,
          last_error = $4, error_message = $4, updated_at = NOW()
-       WHERE job_id = $1 AND provider_outcome = 'not_dispatched'`,
+       WHERE job_id = $1 AND provider_outcome = 'not_dispatched'
+         AND status = 'processing' AND attempts = $5::int`,
       [job.job_id, retryable ? 'pending' : 'failed',
-        new Date(Date.now() + retryDelayMilliseconds(job.attempts, random)), errorClass]
+        new Date(Date.now() + retryDelayMilliseconds(job.attempts, random)), errorClass, job.attempts]
     );
     // The job predicate above already refuses a job that has since been
     // dispatched; the writes below have to answer to it rather than run anyway.
@@ -712,6 +1058,7 @@ async function failBeforeDispatch(job: LetterJob, error: unknown, random: () => 
       });
       return;
     }
+    settled = true;
     await client.query(
       `UPDATE letters SET status = $2, updated_at = NOW()
        WHERE letter_id = $1 AND status NOT IN ('held','cancelled')`,
@@ -745,7 +1092,9 @@ async function failBeforeDispatch(job: LetterJob, error: unknown, random: () => 
       await returnPrepaidCreditsForFailedLetter(client, job.letter_id, errorClass);
     }
   });
-  return retryable;
+  // Put back for the operator: waiting, as a scheduled retry is.
+  if (putBack) return true;
+  return settled && retryable;
 }
 
 async function processClaimedJob(
@@ -761,7 +1110,11 @@ async function processClaimedJob(
     // it belongs on the retryable failBeforeDispatch path below, not in an
     // ambiguous hold.
     const provider = await resolveProviderForLetter(preview);
-    const letter = await markProviderDispatch(job);
+    const marked = await markProviderDispatch(job);
+    if (marked === LEFT_FOR_OPERATOR) {
+      return { claimed: true, completed: false, retryScheduled: false, job, error: 'Left for the operator', leftForOperator: true };
+    }
+    const letter = marked;
     dispatched = true;
     const { result, providerName } = await submitToProvider(provider, letter, job, options);
 
@@ -826,11 +1179,69 @@ export async function processLetterJob(
   return processClaimedJob(job, options);
 }
 
-/** Claim and process due jobs until the batch is empty or reaches its limit. */
+/**
+ * The jobs a paused outbox holds back: everything claimJob would take once
+ * switched back on, due now or later. Its own predicate without the
+ * next_attempt_at clause, so a claim a crash left behind counts too - the
+ * redeploy that sets the switch is one such crash (#451 review).
+ */
+async function countWaitingLetterJobs(): Promise<number> {
+  // Held mail (#535) is not waiting behind a pause until its date, so it is
+  // left out (heldMailJobSql): every other job is created due, and a retry has
+  // an attempt.
+  const waiting = await query<{ count: string }>(
+    `SELECT COUNT(*)::text AS count FROM letter_jobs
+      WHERE attempts < max_attempts
+        AND provider_outcome = 'not_dispatched'
+        AND (
+          status IN ('pending', 'failed')
+          OR (
+            status = 'processing'
+            AND locked_at < NOW() - INTERVAL '${STALE_LOCK_MINUTES} minutes'
+          )
+        )
+        AND NOT (${heldMailJobSql('letter_jobs')})
+        AND NOT ${leftForOperatorSql('letter_jobs')}`
+  );
+  return Number(waiting.rows[0]?.count ?? 0);
+}
+
+/**
+ * How many letters a paused outbox is holding back: 0 without a query while it
+ * dispatches, and 'unknown' when the count itself failed. Maintenance withholds
+ * its heartbeat unless this is 0, so a pause left on reaches the monitor
+ * (#451 review). Never throws: it runs after a run that finished, and a failed
+ * count must not relabel that run as failed.
+ */
+export async function lettersWaitingBehindPause(): Promise<number | 'unknown'> {
+  if (outboxDispatchEnabled()) return 0;
+  try {
+    return await countWaitingLetterJobs();
+  } catch (error) {
+    writeDiagnostic('warn', 'outbox.waiting_count_failed', {
+      errorClass: classifyDiagnosticError(error, 'database_error')
+    });
+    return 'unknown';
+  }
+}
+
+/**
+ * Claim and process due jobs until the batch is empty or reaches its limit,
+ * or `stopAt` (milliseconds since the epoch) has passed before a claim: the
+ * maintenance run's time budget (#700), which runs batches until one comes
+ * back short (src/cli/runMaintenance.ts).
+ */
 export async function processDueLetterJobs(
   limit = 25,
-  options: ProcessLetterJobOptions = {}
-): Promise<{ processed: number; completed: number; retryScheduled: number; failed: number }> {
+  options: ProcessLetterJobOptions & { stopAt?: number } = {}
+): Promise<{
+  processed: number;
+  completed: number;
+  retryScheduled: number;
+  failed: number;
+  paused?: true;
+  waiting?: number;
+}> {
   const summary = { processed: 0, completed: 0, retryScheduled: 0, failed: 0 };
 
   const staleDispatched = await query<LetterJob>(
@@ -860,11 +1271,22 @@ export async function processDueLetterJobs(
   // reclaimable by claimJob and will simply be retried, which is the better
   // outcome; stealing it here would convert a recoverable job into a terminal
   // failure and a refund the customer did not need.
+  // Mail left for the operator (#696) is put back, not failed: it was never to be sent
+  // without a person, and failing it would cancel it and give back what paid for it.
+  await query(
+    `UPDATE letter_jobs SET status = 'pending', attempts = GREATEST(attempts - 1, 0), locked_at = NULL,
+       updated_at = NOW()
+     WHERE status = 'processing' AND provider_outcome = 'not_dispatched'
+       AND attempts >= max_attempts
+       AND locked_at < NOW() - INTERVAL '${STALE_LOCK_MINUTES} minutes'
+       AND ${leftForOperatorSql('letter_jobs')}`
+  );
   const staleUndispatched = await query<LetterJob>(
     `SELECT * FROM letter_jobs
      WHERE status = 'processing' AND provider_outcome = 'not_dispatched'
        AND attempts >= max_attempts
        AND locked_at < NOW() - INTERVAL '${STALE_LOCK_MINUTES} minutes'
+       AND NOT ${leftForOperatorSql('letter_jobs')}
      ORDER BY locked_at LIMIT $1`,
     [limit]
   );
@@ -881,34 +1303,26 @@ export async function processDueLetterJobs(
     );
   }
 
-  while (summary.processed < limit) {
+  // Paused (#444): claim nothing, and say how much is waiting, once a run. The
+  // two sweeps above still ran: they settle jobs a crash left in 'processing'
+  // and never call the provider.
+  if (!outboxDispatchEnabled()) {
+    const count = await countWaitingLetterJobs();
+    writeDiagnostic('warn', 'outbox.dispatch_paused', { waiting: count });
+    return { ...summary, paused: true, waiting: count };
+  }
+
+  while (summary.processed < limit && !(options.stopAt !== undefined && Date.now() >= options.stopAt)) {
     const job = await claimJob();
     if (!job) break;
     const result = await processClaimedJob(job, options);
     summary.processed += 1;
     if (result.completed) summary.completed += 1;
     else if (result.retryScheduled) summary.retryScheduled += 1;
-    else summary.failed += 1;
+    else if (!result.leftForOperator) summary.failed += 1;
   }
 
   return summary;
-}
-
-export async function updateJobStatus(
-  jobId: string,
-  status: LetterJob['status'],
-  error?: string
-): Promise<void> {
-  await query(
-    // Cast every use of $1, for the reason given in failOrRescheduleJob.
-    `UPDATE letter_jobs
-     SET status = $1::varchar, last_error = $2, error_message = $2,
-         locked_at = CASE WHEN $1::varchar = 'processing' THEN NOW() ELSE NULL END,
-         completed_at = CASE WHEN $1::varchar IN ('completed', 'failed', 'cancelled') THEN NOW() ELSE NULL END,
-         updated_at = NOW()
-     WHERE job_id = $3`,
-    [status, error || null, jobId]
-  );
 }
 
 export async function getJobByLetterId(letterId: string): Promise<LetterJob | null> {
@@ -924,52 +1338,136 @@ export async function getJobById(jobId: string): Promise<LetterJob | null> {
   return result.rows[0] || null;
 }
 
-export async function getAllJobs(
-  limit = 50,
-  offset = 0,
-  status?: string
-): Promise<{ jobs: LetterJob[]; total: number }> {
-  const where = status ? ' WHERE status = $1' : '';
-  const listParams: unknown[] = status ? [status, limit, offset] : [limit, offset];
-  const limitIndex = status ? 2 : 1;
-  const countParams: unknown[] = status ? [status] : [];
-  const [jobsResult, countResult] = await Promise.all([
-    query<LetterJob>(
-      `SELECT * FROM letter_jobs${where}
-       ORDER BY created_at DESC LIMIT $${limitIndex} OFFSET $${limitIndex + 1}`,
-      listParams
-    ),
-    query<{ count: string }>(`SELECT COUNT(*) AS count FROM letter_jobs${where}`, countParams),
-  ]);
-
-  return { jobs: jobsResult.rows, total: Number.parseInt(countResult.rows[0].count, 10) };
-}
-
-export async function getJobsByUserId(
-  userId: string,
-  limit = 50,
-  offset = 0
-): Promise<{ jobs: LetterJob[]; total: number }> {
-  const [jobsResult, countResult] = await Promise.all([
-    query<LetterJob>(
-      `SELECT jobs.* FROM letter_jobs AS jobs
-       JOIN letters ON jobs.letter_id = letters.letter_id
-       WHERE letters.user_id = $1
-       ORDER BY jobs.created_at DESC LIMIT $2 OFFSET $3`,
-      [userId, limit, offset]
-    ),
-    query<{ count: string }>(
-      `SELECT COUNT(*) AS count FROM letter_jobs AS jobs
-       JOIN letters ON jobs.letter_id = letters.letter_id
-       WHERE letters.user_id = $1`,
-      [userId]
-    ),
-  ]);
-
-  return { jobs: jobsResult.rows, total: Number.parseInt(countResult.rows[0].count, 10) };
-}
-
 export class AdminJobRetryError extends Error {
+  constructor(readonly code: 'not_found' | 'invalid_state' | 'idempotency_conflict') {
+    super(code);
+  }
+}
+
+/**
+ * Cancel mail left for the operator (#696, decision D2: the operator releases or cancels): a
+ * prepaid or gift letter whose job is held for its funding (a pack refunded in full or lost
+ * to a dispute), or whose account's sending is blocked, never dispatched. The job and the
+ * letter are cancelled, and what paid for it goes back as a failed send's would
+ * (returnPrepaidCreditsForFailedLetter): nothing from a revoked lot, no gift from a refunded
+ * or disputed purchase. A Pay & Send letter is not cancelled here: its order's refund cancels
+ * it (stopFundedMailBeforeFinancialReversal).
+ *
+ * Locks the letter, then the job, as the outbox does. Idempotent through the operator audit,
+ * as the release is, under its own operation, mail_job_cancel (migration 056).
+ */
+export async function cancelLeftLetterJobAsAdmin(params: {
+  jobId: string;
+  expectedUserId: string;
+  actorId: string;
+  reason: string;
+  idempotencyKey: string;
+}): Promise<{ jobId: string; replayed: boolean }> {
+  return transaction(async client => {
+    const idempotencyKeyHash = createHash('sha256').update(params.idempotencyKey).digest('hex');
+    const actorHash = createHash('sha256').update(params.actorId).digest('hex');
+    const jobHash = createHash('sha256').update(params.jobId).digest('hex');
+    const reasonHash = createHash('sha256').update(params.reason).digest('hex');
+    const expectedUserHash = createHash('sha256').update(params.expectedUserId).digest('hex');
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [params.idempotencyKey]);
+    const replay = await client.query<{
+      operation: string;
+      target_type: string;
+      target_reference_hash: string;
+      actor_subject_hash: string;
+      operator_reason_hash: string | null;
+      expected_user_hash: string | null;
+    }>(
+      `SELECT operation, target_type, target_reference_hash, actor_subject_hash,
+              provider_evidence->>'operatorReasonHash' AS operator_reason_hash,
+              provider_evidence->>'expectedUserHash' AS expected_user_hash
+       FROM commerce_operator_audit_events
+       WHERE idempotency_key_hash = $1`,
+      [idempotencyKeyHash]
+    );
+    if (replay.rows[0]) {
+      const existing = replay.rows[0];
+      if (
+        existing.operation !== 'mail_job_cancel' ||
+        existing.target_type !== 'letter_job' ||
+        existing.target_reference_hash !== jobHash ||
+        existing.actor_subject_hash !== actorHash ||
+        existing.operator_reason_hash !== reasonHash ||
+        existing.expected_user_hash !== expectedUserHash
+      ) {
+        throw new AdminJobReleaseError('idempotency_conflict');
+      }
+      return { jobId: params.jobId, replayed: true };
+    }
+    const relation = await client.query<{ letter_id: string }>(
+      'SELECT letter_id FROM letter_jobs WHERE job_id = $1', [params.jobId]
+    );
+    const letterId = relation.rows[0]?.letter_id;
+    if (!letterId) throw new AdminJobReleaseError('not_found');
+    const letter = await client.query<{ status: string; user_id: string; funding_type: string; funding_order_id: string | null }>(
+      'SELECT status, user_id, funding_type, funding_order_id FROM letters WHERE letter_id = $1 FOR UPDATE', [letterId]
+    );
+    const job = await client.query<{
+      letter_id: string;
+      status: string;
+      provider_outcome: string;
+      attempts: number;
+      max_attempts: number;
+      hold_reason: string | null;
+      operator_resolution: string | null;
+    }>(
+      `SELECT letter_id, status, provider_outcome, attempts, max_attempts, hold_reason, operator_resolution
+       FROM letter_jobs WHERE job_id = $1 FOR UPDATE`, [params.jobId]
+    );
+    const held = letter.rows[0];
+    const current = job.rows[0];
+    if (!held || held.user_id !== params.expectedUserId) throw new AdminJobReleaseError('not_found');
+    // For update, not share: the return below changes the balance, and two cancels upgrading a
+    // share lock on one account would deadlock.
+    const blocked = await client.query<{ sends_blocked_reason: string | null }>(
+      'SELECT sends_blocked_reason FROM users WHERE user_id = $1 FOR UPDATE', [held.user_id]
+    );
+    const left = isFundingHoldReason(current?.hold_reason) || Boolean(blocked.rows[0]?.sends_blocked_reason);
+    if (!current || current.letter_id !== letterId || !left ||
+        held.status !== 'queued' || held.funding_order_id ||
+        !['prepaid_balance', 'gift_letter'].includes(held.funding_type) ||
+        current.status !== 'pending' || current.provider_outcome !== 'not_dispatched' ||
+        current.attempts >= current.max_attempts ||
+        (current.operator_resolution && !isFundingHoldReason(current.hold_reason))) {
+      throw new AdminJobReleaseError('invalid_state');
+    }
+    await client.query(
+      `UPDATE letter_jobs SET status = 'cancelled', completed_at = NOW(), locked_at = NULL,
+         operator_resolution = 'operator_cancelled', resolved_at = NOW(), updated_at = NOW()
+       WHERE job_id = $1`,
+      [params.jobId]
+    );
+    await client.query(
+      `UPDATE letters SET status = 'cancelled', status_updated_at = NOW(), updated_at = NOW() WHERE letter_id = $1`,
+      [letterId]
+    );
+    await client.query(
+      `INSERT INTO letter_status_history (letter_id, old_status, new_status, source) VALUES ($1, 'queued', 'cancelled', 'operator')`,
+      [letterId]
+    );
+    await returnPrepaidCreditsForFailedLetter(client, letterId, 'operator_cancelled');
+    await client.query(
+      `INSERT INTO commerce_operator_audit_events
+         (idempotency_key_hash, actor_subject_hash, operation, target_type,
+          target_reference_hash, reason_code, before_state, after_state, provider_evidence)
+       VALUES ($1, $2, 'mail_job_cancel', 'letter_job', $3, 'operator_cancelled_held_mail', $4, $5, $6)`,
+      [idempotencyKeyHash,
+        actorHash,
+        jobHash,
+        JSON.stringify({ jobStatus: 'pending', ...(isFundingHoldReason(current.hold_reason) ? { fundingHold: current.hold_reason } : { accountBlocked: true }) }),
+        JSON.stringify({ jobStatus: 'cancelled' }),
+        JSON.stringify({ operatorReasonHash: reasonHash, expectedUserHash })]
+    );
+    return { jobId: params.jobId, replayed: false };
+  });
+}
+
+export class AdminJobReleaseError extends Error {
   constructor(readonly code: 'not_found' | 'invalid_state' | 'idempotency_conflict') {
     super(code);
   }
@@ -1144,6 +1642,25 @@ export async function resolveAmbiguousLetterJobAsAdmin(
       throw new AdminMailResolutionError(currentLetter?.user_id === params.expectedUserId
         ? 'invalid_state'
         : 'not_found');
+    }
+
+    // Certified mail (#625) is accepted only by a provider that sells it: manual
+    // fulfilment would print the letter as ordinary mail and record it accepted,
+    // after it was paid for as certified. Mail our renderer drew (#698) only by a
+    // provider that prints its PDF, as the dispatch refuses it. A retry is safe
+    // (the dispatch asks the provider it routes to), and so is a rejection.
+    if (params.decision === 'accepted') {
+      // Only the version from the content: not its images or signature, under these locks.
+      const service = await client.query<{ mail_service: string | null; renderer_version: unknown }>(
+        "SELECT mail_service, content->'rendererVersion' AS renderer_version FROM letters WHERE letter_id = $1",
+        [ids.letter_id]
+      );
+      if (mailServiceOf(service.rows[0]?.mail_service) !== undefined && !providerSellsExtraServices(params.providerName)) {
+        throw new AdminMailResolutionError('invalid_state');
+      }
+      if (drawnByRenderer({ rendererVersion: service.rows[0]?.renderer_version }) && !providerPrintsRenderedPdf(params.providerName)) {
+        throw new AdminMailResolutionError('invalid_state');
+      }
     }
 
     // Issue #151. Once the pack is back, only 'rejected' is still safe - and it
@@ -1370,8 +1887,10 @@ export async function retryLetterJobAsAdmin(params: {
           fundingOrder.last_error_code || ''
         ) && fundingOrder.refund_attempts === 0 && !fundingOrder.stripe_refund_id;
     }
-    const letter = await client.query<{ status: string; user_id: string; funding_order_id: string | null }>(
-      'SELECT status, user_id, funding_order_id FROM letters WHERE letter_id = $1 FOR UPDATE', [ids.letter_id]
+    const letter = await client.query<{
+      status: string; user_id: string; funding_order_id: string | null; redacted_at: Date | null;
+    }>(
+      'SELECT status, user_id, funding_order_id, redacted_at FROM letters WHERE letter_id = $1 FOR UPDATE', [ids.letter_id]
     );
     const job = await client.query<LetterJob>(
       'SELECT * FROM letter_jobs WHERE job_id = $1 FOR UPDATE', [params.jobId]
@@ -1382,6 +1901,8 @@ export async function retryLetterJobAsAdmin(params: {
         letter.rows[0]?.funding_order_id !== ids.funding_order_id ||
         current.operator_resolution || letter.rows[0]?.user_id !== params.expectedUserId ||
         letter.rows[0]?.status !== 'failed' ||
+        // Its content redacted by retention (#730): a retry would mail an empty page.
+        letter.rows[0]?.redacted_at ||
         (ids.funding_order_id && orderStatus !== 'fulfillment_pending' && !retryableJitRefund)) {
       throw new AdminJobRetryError('invalid_state');
     }
@@ -1440,6 +1961,150 @@ export async function retryLetterJobAsAdmin(params: {
           orderStatus: beforeOrderStatus
         }),
         JSON.stringify({ jobStatus: 'pending', providerOutcome: 'not_dispatched', orderStatus }),
+        JSON.stringify({ operatorReasonHash: reasonHash, expectedUserHash })]
+    );
+    return { jobId: params.jobId, replayed: false };
+  });
+}
+
+/**
+ * Release held mail early (#535, the admin panel's job.dispatch_now): its job
+ * becomes due now, so the next maintenance run sends it as an ordinary letter
+ * instead of waiting for its mail date. Only mail still held (heldMailJobSql:
+ * the job pending, never attempted or dispatched, carrying its hold and not yet
+ * due), its letter queued, and a Pay & Send letter's order still awaiting
+ * fulfilment.
+ *
+ * Only next_attempt_at and scheduled_at move. mail_hold_until keeps the
+ * original time (#693): the stuck-order condition, which reads it, then counts
+ * its grace from the later of the two. The
+ * operator audit row records the hold that ended. Locks in the outbox's order:
+ * the order, the letter, the job. The customer can still cancel the letter
+ * until the run takes it.
+ */
+export async function releaseHeldLetterJobAsAdmin(params: {
+  jobId: string;
+  expectedUserId: string;
+  actorId: string;
+  reason: string;
+  idempotencyKey: string;
+}): Promise<{ jobId: string; replayed: boolean }> {
+  return transaction(async client => {
+    const idempotencyKeyHash = createHash('sha256').update(params.idempotencyKey).digest('hex');
+    const actorHash = createHash('sha256').update(params.actorId).digest('hex');
+    const jobHash = createHash('sha256').update(params.jobId).digest('hex');
+    const reasonHash = createHash('sha256').update(params.reason).digest('hex');
+    const expectedUserHash = createHash('sha256').update(params.expectedUserId).digest('hex');
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [params.idempotencyKey]);
+    const replay = await client.query<{
+      operation: string;
+      target_type: string;
+      target_reference_hash: string;
+      actor_subject_hash: string;
+      operator_reason_hash: string | null;
+      expected_user_hash: string | null;
+    }>(
+      `SELECT operation, target_type, target_reference_hash, actor_subject_hash,
+              provider_evidence->>'operatorReasonHash' AS operator_reason_hash,
+              provider_evidence->>'expectedUserHash' AS expected_user_hash
+       FROM commerce_operator_audit_events
+       WHERE idempotency_key_hash = $1`,
+      [idempotencyKeyHash]
+    );
+    if (replay.rows[0]) {
+      const existing = replay.rows[0];
+      if (
+        existing.operation !== 'mail_job_release' ||
+        existing.target_type !== 'letter_job' ||
+        existing.target_reference_hash !== jobHash ||
+        existing.actor_subject_hash !== actorHash ||
+        existing.operator_reason_hash !== reasonHash ||
+        existing.expected_user_hash !== expectedUserHash
+      ) {
+        throw new AdminJobReleaseError('idempotency_conflict');
+      }
+      return { jobId: params.jobId, replayed: true };
+    }
+    const relation = await client.query<{ letter_id: string; funding_order_id: string | null }>(
+      `SELECT jobs.letter_id, letters.funding_order_id FROM letter_jobs AS jobs
+       JOIN letters ON letters.letter_id = jobs.letter_id WHERE jobs.job_id = $1`, [params.jobId]
+    );
+    const ids = relation.rows[0];
+    if (!ids) throw new AdminJobReleaseError('not_found');
+    if (ids.funding_order_id) {
+      const order = await client.query<{ status: string; user_id: string }>(
+        'SELECT status, user_id FROM orders WHERE order_id = $1 FOR UPDATE', [ids.funding_order_id]
+      );
+      const fundingOrder = order.rows[0];
+      if (!fundingOrder || fundingOrder.user_id !== params.expectedUserId) {
+        throw new AdminJobReleaseError('not_found');
+      }
+      if (fundingOrder.status !== 'fulfillment_pending') throw new AdminJobReleaseError('invalid_state');
+    }
+    const letter = await client.query<{ status: string; user_id: string; funding_order_id: string | null }>(
+      'SELECT status, user_id, funding_order_id FROM letters WHERE letter_id = $1 FOR UPDATE', [ids.letter_id]
+    );
+    // Due or not by the database's clock, the one the claim reads.
+    const job = await client.query<{
+      letter_id: string;
+      status: string;
+      provider_outcome: string;
+      attempts: number;
+      operator_resolution: string | null;
+      mail_hold_until: Date | null;
+      next_attempt_at: Date;
+      hold_reason: string | null;
+      max_attempts: number;
+      still_held: boolean;
+    }>(
+      `SELECT letter_id, status, provider_outcome, attempts, operator_resolution,
+              mail_hold_until, next_attempt_at, hold_reason, max_attempts,
+              (${heldMailJobSql('letter_jobs')}) AS still_held
+       FROM letter_jobs WHERE job_id = $1 FOR UPDATE`, [params.jobId]
+    );
+    const current = job.rows[0];
+    const held = letter.rows[0];
+    // A funding hold (#696) may have spent attempts before it was held: a retry, or a claim
+    // the marker put back. Any left will do.
+    const fundingHeld = isFundingHoldReason(current?.hold_reason);
+    if (!current || current.letter_id !== ids.letter_id ||
+        held?.funding_order_id !== ids.funding_order_id ||
+        held?.user_id !== params.expectedUserId ||
+        held?.status !== 'queued' ||
+        current.status !== 'pending' || current.provider_outcome !== 'not_dispatched' ||
+        (fundingHeld ? current.attempts >= current.max_attempts : current.attempts !== 0) ||
+        // A funding hold may come after an operator resolved the job for retry: still theirs to release.
+        (current.operator_resolution && !fundingHeld) ||
+        // Held mail not yet due, or mail held for its funding (#696), due or not: a dispute
+        // can outlast its mail date.
+        !((current.mail_hold_until && current.still_held === true) || fundingHeld)) {
+      throw new AdminJobReleaseError('invalid_state');
+    }
+    // The funding hold ends with the release (#696), and its mail keeps its own date: due now if
+    // that has passed, else on it. Held mail released early is due now, as before.
+    const released = await client.query<{ next_attempt_at: Date }>(
+      `UPDATE letter_jobs
+          SET next_attempt_at = CASE WHEN $2::boolean THEN GREATEST(next_attempt_at, NOW()) ELSE NOW() END,
+              scheduled_at = CASE WHEN $2::boolean THEN GREATEST(scheduled_at, NOW()) ELSE NOW() END,
+              hold_reason = NULL, updated_at = NOW()
+        WHERE job_id = $1 RETURNING next_attempt_at`,
+      [params.jobId, fundingHeld]
+    );
+    await client.query(
+      `INSERT INTO commerce_operator_audit_events
+         (idempotency_key_hash, actor_subject_hash, operation, target_type,
+          target_reference_hash, reason_code, before_state, after_state, provider_evidence)
+       VALUES ($1, $2, 'mail_job_release', 'letter_job', $3, 'operator_released_hold', $4, $5, $6)`,
+      [idempotencyKeyHash,
+        actorHash,
+        jobHash,
+        JSON.stringify({
+          jobStatus: 'pending',
+          heldUntil: current.mail_hold_until,
+          nextAttemptAt: current.next_attempt_at,
+          ...(fundingHeld ? { fundingHold: current.hold_reason } : {})
+        }),
+        JSON.stringify({ jobStatus: 'pending', nextAttemptAt: released.rows[0]?.next_attempt_at ?? null }),
         JSON.stringify({ operatorReasonHash: reasonHash, expectedUserHash })]
     );
     return { jobId: params.jobId, replayed: false };

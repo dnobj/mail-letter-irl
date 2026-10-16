@@ -1,0 +1,2584 @@
+/**
+ * The letter card as a studio (#580): while the preview's _meta carries
+ * letterirl/studioCard, the card lays itself out with a header naming the
+ * letter, the page beside Style, Words and Delivery tabs, and a footer with
+ * the cost and Send. The rows and buttons are the card's own, moved, so each
+ * still calls its tool (Principle 2). Without the switch nothing moves.
+ * Framed by a fake MCP Apps host, as letterPreviewCardStyle.test.ts is.
+ */
+
+import { describe, expect, it } from 'vitest';
+import { JSDOM } from 'jsdom';
+import * as fs from 'fs';
+import * as path from 'path';
+import { inlineHostBridge } from '../../../src/mcp/widgetHost.js';
+import { stampPreviewTool } from '../../../src/mcp/registerTools.js';
+
+const WIDGET_DIR = path.resolve(__dirname, '../../../widgets');
+const STUDIO = 'letterirl/studioCard';
+const REVEAL = 'letterirl/envelopeReveal';
+
+type Json = Record<string, any>;
+
+const recipient = { name: 'Sam Rivera', addressLine1: '1 Main St', city: 'Springfield', state: 'IL', postalCode: '62701' };
+const ARGS = { recipient, bodyText: 'Dear Sam,\n\nThe garden is in.', signOff: 'Love,\nPat' };
+const svg = (title: string) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 612 792" role="img"><title>${title}</title><rect width="612" height="792" fill="#fff"/></svg>`;
+const document1 = (...titles: string[]) =>
+  '<!DOCTYPE html><html><body data-renderer="pdf-1">' +
+  titles.map(svg).join('') +
+  '<div hidden><div class="letter-body">Dear Sam,</div><div class="sign-off">Pat</div></div></body></html>';
+const PAGE = document1('Dear Sam,\nPat');
+const GIFT_PAGES = document1('Dear Sam,\nPat', 'A letter for you');
+const WINDOW = { earliestArrival: '2026-10-14', latestArrival: '2026-11-30' };
+
+const canSend = {
+  canSendNow: true,
+  sendEligibility: {
+    payAndSend: { available: false, unavailableReason: "Pay & Send isn't available in this app." },
+    letterPack: { available: false, purchaseUrl: 'https://letterirl.example/packs' }
+  }
+};
+
+const output = (extra: Json = {}) => ({
+  draftId: 'draft_0001',
+  layoutType: 'text_only',
+  lettersRequired: 1,
+  deliveryClass: 'First Class',
+  deliveryEstimate: 'Mailed in 1-2 business days',
+  ...canSend,
+  ...extra
+});
+
+async function flush(times = 8): Promise<void> {
+  for (let i = 0; i < times; i += 1) await new Promise(resolve => setImmediate(resolve));
+}
+
+/** The card as served, in a fake MCP Apps host. */
+function mount() {
+  const served = stampPreviewTool(
+    inlineHostBridge(fs.readFileSync(path.join(WIDGET_DIR, 'LetterPreviewCard.html'), 'utf-8'), WIDGET_DIR),
+    'quote_and_preview_letter'
+  );
+  const sent: Json[] = [];
+  const parent = { postMessage: (message: Json) => sent.push(JSON.parse(JSON.stringify(message))) };
+  const dom = new JSDOM(served.replace('<script type="module">', '<script>'), {
+    runScripts: 'dangerously',
+    beforeParse(window) {
+      Object.defineProperty(window, 'parent', { value: parent, configurable: true });
+      Object.defineProperty(window.document, 'hidden', { get: () => false });
+      (window as any).setTimeout = () => 0;
+      (window as any).clearTimeout = () => undefined;
+      (window as any).matchMedia = (query: string) => ({ matches: query.includes('reduce'), addEventListener() {}, removeEventListener() {} });
+    }
+  });
+  const window = dom.window as any;
+  const document = window.document as Document;
+  const deliver = async (message: Json) => {
+    window.dispatchEvent(new window.MessageEvent('message', { data: { jsonrpc: '2.0', ...message }, source: parent }));
+    await flush();
+  };
+  const lastRequest = (method: string, name?: string) =>
+    [...sent].reverse().find(message => message.method === method && message.id !== undefined && (name === undefined || message.params?.name === name));
+  let initialized = false;
+  const byId = (id: string) => document.getElementById(id) as HTMLElement;
+  return {
+    window,
+    document,
+    lastRequest,
+    /** Every request of a method (and tool), oldest first. */
+    requests: (method: string, name?: string) =>
+      sent.filter(message => message.method === method && message.id !== undefined && (name === undefined || message.params?.name === name)),
+    /** Answers one request in particular. */
+    async answerTo(request: Json, reply: Json) {
+      await deliver({ id: request.id, ...reply });
+    },
+    byId,
+    async show(result: Json, meta: Json, args: Json = ARGS) {
+      await flush();
+      if (!initialized) {
+        initialized = true;
+        await deliver({
+          id: lastRequest('ui/initialize')!.id,
+          result: { protocolVersion: '2026-01-26', hostInfo: { name: 'fake' }, hostContext: {}, hostCapabilities: {} }
+        });
+        await deliver({ method: 'ui/notifications/tool-input', params: { arguments: args } });
+      }
+      await deliver({
+        method: 'ui/notifications/tool-result',
+        params: { content: [{ type: 'text', text: 'Preview ready.' }], structuredContent: result, _meta: meta }
+      });
+    },
+    async answer(reply: Json, name: string) {
+      const request = lastRequest('tools/call', name);
+      if (!request) throw new Error(`the card sent no ${name}`);
+      await deliver({ id: request.id, ...reply });
+    },
+    async click(element: Element) {
+      element.dispatchEvent(new window.Event('click'));
+      await flush();
+    },
+    async key(element: Element, key: string) {
+      element.dispatchEvent(new window.KeyboardEvent('keydown', { key, bubbles: true }));
+      await flush();
+    },
+    tab: (name: string) => document.querySelector(`[role="tab"][data-tab="${name}"]`) as HTMLElement,
+    selected: () =>
+      Array.from(document.querySelectorAll('[role="tab"]'))
+        .filter(tab => tab.getAttribute('aria-selected') === 'true')
+        .map(tab => tab.getAttribute('data-tab')),
+    shownPanels: () =>
+      Array.from(document.querySelectorAll('[role="tabpanel"]'))
+        .filter(panel => !(panel as HTMLElement).hidden)
+        .map(panel => panel.getAttribute('data-tab')),
+    within: (id: string) => byId(id)?.parentElement?.closest('.studio-panel, .studio-hd, .studio-ft, .studio-page, .studio-side, .rows, .meta, .bd')
+  };
+}
+
+const ON = { previewHtml: PAGE, [STUDIO]: true };
+const text = (card: ReturnType<typeof mount>, id: string) => card.byId(id).textContent;
+
+/** The card as served, in ChatGPT: window.openai carries the result and its _meta. */
+function mountInChatGpt(meta: Json, extra: Json = {}) {
+  const served = stampPreviewTool(
+    inlineHostBridge(fs.readFileSync(path.join(WIDGET_DIR, 'LetterPreviewCard.html'), 'utf-8'), WIDGET_DIR),
+    'quote_and_preview_letter'
+  );
+  const dom = new JSDOM(served.replace('<script type="module">', '<script>'), {
+    runScripts: 'dangerously',
+    beforeParse(window) {
+      (window as any).setTimeout = () => 0;
+      (window as any).clearTimeout = () => undefined;
+      (window as any).openai = {
+        theme: 'light',
+        toolInput: ARGS,
+        toolOutput: output(),
+        toolResponseMetadata: meta,
+        widgetState: null,
+        setWidgetState: async () => undefined,
+        // The card asks what became of its draft in ChatGPT too (#676): ready.
+        callTool: async (name: string, args: Json) => (name === 'get_draft_status' ? { structuredContent: { draftId: args.draftId, status: 'ready' } } : {}),
+        ...extra
+      };
+    }
+  });
+  dom.window.dispatchEvent(new dom.window.Event('openai:set_globals'));
+  return dom.window.document;
+}
+
+describe('the selected draft in ChatGPT (#650)', () => {
+  it('is shared through window.openai once the server says the draft is ready (#676)', async () => {
+    const updates: Json[] = [];
+    const document = mountInChatGpt({ ...ON, modelContextEnabled: true }, { updateModelContext: async (value: Json) => { updates.push(value); return {}; } });
+    await flush();
+    expect(updates).toHaveLength(1);
+    expect(updates[0].content[0].text).toMatch(/^Shared by a Letter IRL letter card on \d{4}-\d{2}-\d{2} at \d{2}:\d{2}:\d{2} UTC: the card shows the letter draft draft_0001\. /);
+    expect(Array.from(document.querySelectorAll('button')).some(button => /conversation/i.test(button.textContent ?? ''))).toBe(false);
+  });
+
+  it('is never shared through window.openai for a draft the server says was sent (#676)', async () => {
+    const updates: Json[] = [];
+    mountInChatGpt({ ...ON, modelContextEnabled: true }, {
+      updateModelContext: async (value: Json) => { updates.push(value); return {}; },
+      callTool: async (name: string, args: Json) =>
+        name === 'get_draft_status' ? { structuredContent: { draftId: args.draftId, status: 'sent', orderId: 'order-9' } } : {}
+    });
+    await flush();
+    expect(updates.filter(update => update.content.length > 0)).toHaveLength(0);
+  });
+
+  it('is not shared through window.openai without the flag', async () => {
+    const updates: Json[] = [];
+    mountInChatGpt(ON, { updateModelContext: async (value: Json) => { updates.push(value); return {}; } });
+    await flush();
+    expect(updates).toHaveLength(0);
+  });
+
+  // ChatGPT carries model context on the MCP Apps handshake, not window.openai (#665). The letter card, as served,
+  // opens it on request (#675, #676), once flagged and ready.
+  function framed(meta: Json, extra: Json = {}) {
+    const sent: Json[] = [];
+    const parent = { postMessage: (message: Json) => sent.push(JSON.parse(JSON.stringify(message))) };
+    const served = stampPreviewTool(
+      inlineHostBridge(fs.readFileSync(path.join(WIDGET_DIR, 'LetterPreviewCard.html'), 'utf-8'), WIDGET_DIR),
+      'quote_and_preview_letter'
+    );
+    const dom = new JSDOM(served.replace('<script type="module">', '<script>'), {
+      runScripts: 'dangerously',
+      beforeParse(window) {
+        (window as any).setTimeout = () => 0;
+        (window as any).clearTimeout = () => undefined;
+        Object.defineProperty(window, 'parent', { value: parent, configurable: true });
+        (window as any).openai = {
+          theme: 'light', toolInput: ARGS, toolOutput: output(), toolResponseMetadata: meta, widgetState: null,
+          setWidgetState: async () => undefined,
+          callTool: async (name: string, args: Json) => (name === 'get_draft_status' ? { structuredContent: { draftId: args.draftId, status: 'ready' } } : {}),
+          ...extra
+        };
+      }
+    });
+    const window = dom.window as any;
+    window.dispatchEvent(new window.Event('openai:set_globals'));
+    const deliver = (message: Json) =>
+      window.dispatchEvent(new window.MessageEvent('message', { data: { jsonrpc: '2.0', ...message }, source: parent }));
+    const requests = (method: string) => sent.filter(message => message.method === method);
+    return { sent, deliver, requests };
+  }
+
+  it('opens the handshake only when flagged, and shares once ChatGPT takes model context there', async () => {
+    const card = framed({ ...ON, modelContextEnabled: true });
+    await flush();
+    const opened = card.requests('ui/initialize');
+    expect(opened).toHaveLength(1);
+    expect(String(opened[0].id)).toMatch(/^lirl-ext-/);
+    expect(card.requests('ui/update-model-context')).toHaveLength(0);
+    card.deliver({ id: opened[0].id, result: { hostCapabilities: { experimental: { 'openai/modelContext': {} } } } });
+    await flush();
+    const shared = card.requests('ui/update-model-context');
+    expect(shared).toHaveLength(1);
+    expect(shared[0].params.content[0].text).toContain('the card shows the letter draft draft_0001.');
+    // Drawn again, it is not opened again.
+    expect(card.requests('ui/initialize')).toHaveLength(1);
+  });
+
+  it('as served, opens the handshake on request, as the server now answers for a reopened card (#676)', async () => {
+    const served = fs.readFileSync(path.join(WIDGET_DIR, 'LetterPreviewCard.html'), 'utf-8');
+    expect(served).toMatch(/<html[^>]*data-plugin-extensions="on-request"/);
+    const card = framed({ ...ON, modelContextEnabled: true });
+    await flush();
+    expect(card.requests('ui/initialize')).toHaveLength(1);
+  });
+
+  it('never opens the handshake for a card the server does not flag', async () => {
+    const card = framed(ON);
+    await flush();
+    expect(card.sent).toHaveLength(0);
+  });
+
+  it('never opens the handshake for a flagged card with no draft to share, nor where ChatGPT takes model context itself', async () => {
+    // A reopened card whose letter was already sent: flagged, but nothing to share.
+    const sent = framed({ ...ON, modelContextEnabled: true }, { widgetState: { v: 1, draftId: 'draft_0001', sent: true, orderId: 'order-9' } });
+    await flush();
+    expect(sent.requests('ui/initialize')).toHaveLength(0);
+    const native: Json[] = [];
+    const own = framed({ ...ON, modelContextEnabled: true }, { updateModelContext: async (value: Json) => { native.push(value); return {}; } });
+    await flush();
+    expect(own.requests('ui/initialize')).toHaveLength(0);
+    expect(native).toHaveLength(1);
+  });
+});
+
+describe('the letter studio in ChatGPT (#580 maker review round 1)', () => {
+  it('lays itself out from the switch in toolResponseMetadata, and not without it', async () => {
+    const document = mountInChatGpt(ON);
+    await flush();
+    expect(document.getElementById('card')!.classList.contains('studio')).toBe(true);
+    expect(document.getElementById('studio-title')!.textContent).toBe('Letter to Sam Rivera');
+    expect(document.getElementById('studio-words')!.textContent).toBe('Dear Sam,\n\nThe garden is in.\n\nLove,\nPat');
+
+    const off = mountInChatGpt({ previewHtml: PAGE });
+    await flush();
+    expect(off.getElementById('card')!.classList.contains('studio')).toBe(false);
+  });
+});
+
+describe('the letter card without the studio switch (#580)', () => {
+  it('is laid out as it always was: nothing moves and the template stays a template', async () => {
+    const card = mount();
+    await card.show(output({ stationery: { theme: 'classic', source: 'default' }, arrivalWindow: WINDOW }), { previewHtml: PAGE });
+    expect(card.byId('card').classList.contains('studio')).toBe(false);
+    expect(card.byId('studio-body')).toBeNull();
+    expect(card.document.querySelector('[role="tab"]')).toBeNull();
+    expect(card.within('style-row')!.className).toBe('rows');
+    expect(card.within('arrives-row')!.className).toBe('rows');
+    expect(card.byId('mockup-container').parentElement!.className).toBe('bd');
+    expect(card.byId('send-button').parentElement!.className).toBe('meta');
+    expect(card.byId('status-pill').parentElement!.id).toBe('status-row');
+    expect(card.byId('style-label').textContent).toBe('Style');
+  });
+
+  it('shows every page of a longer letter at once, as before', async () => {
+    const card = mount();
+    await card.show(output(), { previewHtml: GIFT_PAGES });
+    const pages = card.document.querySelectorAll('.letter-page > svg[role="img"]');
+    expect(pages).toHaveLength(2);
+    expect(Array.from(pages).some(page => page.classList.contains('print-page'))).toBe(false);
+    expect(card.document.querySelector('.page-tools')).toBeNull();
+  });
+});
+
+describe('the letter card as a studio (#580)', () => {
+  it('names the letter in its header, with the status beside it', async () => {
+    const card = mount();
+    await card.show(output(), ON);
+    expect(card.byId('card').classList.contains('studio')).toBe(true);
+    expect(text(card, 'studio-title')).toBe('Letter to Sam Rivera');
+    expect(text(card, 'studio-sub')).toBe('Draft · Springfield, IL 62701');
+    expect(card.within('status-pill')!.className).toBe('studio-hd');
+    expect(text(card, 'status-pill')).toBe('Ready to send');
+  });
+
+  it('names the recipient as the server checked the address, and says "Your letter" with no name', async () => {
+    const checked = mount();
+    await checked.show(
+      output({ recipientAddressValidation: { originalAddress: { name: 'Ruth Reed', city: 'Tucson', state: 'AZ', postalCode: '85719' } } }),
+      ON
+    );
+    expect(text(checked, 'studio-title')).toBe('Letter to Ruth Reed');
+    expect(text(checked, 'studio-sub')).toBe('Draft · Tucson, AZ 85719');
+
+    const nameless = mount();
+    await nameless.show(output(), ON, { ...ARGS, recipient: { ...recipient, name: '  ' } });
+    expect(text(nameless, 'studio-title')).toBe('Your letter');
+  });
+
+  it("moves the card's own rows into the tabs, and the page and Send beside them", async () => {
+    const card = mount();
+    await card.show(output({ stationery: { theme: 'classic', source: 'default' }, arrivalWindow: WINDOW }), ON);
+    const panel = (id: string) => card.byId(id).closest('.studio-panel')?.getAttribute('data-tab');
+    expect(panel('style-row')).toBe('style');
+    // The Signature switch beside the styles (#608 part 4b).
+    expect(panel('signature-row')).toBe('style');
+    expect(panel('style-note')).toBe('style');
+    expect(panel('layout-row')).toBe('style');
+    expect(panel('arrives-row')).toBe('delivery');
+    expect(panel('arrives-note')).toBe('delivery');
+    expect(panel('scheduled')).toBe('delivery');
+    expect(panel('delivery-row')).toBe('delivery');
+    expect(panel('id-row')).toBe('delivery');
+    expect(card.byId('mockup-container').parentElement!.className).toBe('studio-page');
+    for (const id of ['send-button', 'purchase-actions', 'send-page-button', 'send-page-note', 'error-message']) {
+      expect(card.byId(id).parentElement!.className, id).toBe('studio-ft');
+    }
+    expect(card.byId('note').parentElement!.className).toBe('studio-side');
+    // Each moved once: no element is left behind or doubled.
+    expect(card.document.querySelectorAll('#style-row')).toHaveLength(1);
+    expect(card.document.querySelectorAll('[data-slot]')).toHaveLength(0);
+  });
+
+  it('opens on Style, with one tab in the tab order and the others reached by arrow keys', async () => {
+    const card = mount();
+    await card.show(output(), ON);
+    expect(card.selected()).toEqual(['style']);
+    expect(card.shownPanels()).toEqual(['style']);
+    expect(['style', 'words', 'delivery'].map(name => card.tab(name).tabIndex)).toEqual([0, -1, -1]);
+    for (const name of ['style', 'words', 'delivery']) {
+      const tab = card.tab(name);
+      expect(card.byId(tab.getAttribute('aria-controls')!).getAttribute('aria-labelledby')).toBe(tab.id);
+    }
+
+    await card.key(card.tab('style'), 'ArrowRight');
+    expect(card.selected()).toEqual(['words']);
+    expect(card.shownPanels()).toEqual(['words']);
+    expect(card.document.activeElement).toBe(card.tab('words'));
+    expect(['style', 'words', 'delivery'].map(name => card.tab(name).tabIndex)).toEqual([-1, 0, -1]);
+    await card.key(card.tab('words'), 'End');
+    expect(card.selected()).toEqual(['delivery']);
+    await card.key(card.tab('delivery'), 'ArrowRight');
+    expect(card.selected()).toEqual(['style']);
+    await card.key(card.tab('style'), 'ArrowLeft');
+    expect(card.selected()).toEqual(['delivery']);
+    await card.key(card.tab('delivery'), 'Home');
+    expect(card.selected()).toEqual(['style']);
+    // Any other key leaves the tabs alone.
+    await card.key(card.tab('style'), 'ArrowRight');
+    await card.key(card.tab('words'), 'ArrowDown');
+    expect(card.selected()).toEqual(['words']);
+  });
+
+  it("shows the letter's words, as the call gave them, on the Words tab", async () => {
+    const card = mount();
+    await card.show(output(), ON);
+    await card.click(card.tab('words'));
+    expect(card.shownPanels()).toEqual(['words']);
+    expect(text(card, 'studio-words')).toBe('Dear Sam,\n\nThe garden is in.\n\nLove,\nPat');
+  });
+
+  it('says where the words are when the call gave none', async () => {
+    const card = mount();
+    await card.show(output(), ON, { recipient });
+    expect(text(card, 'studio-words')).toBe('The words are on the page.');
+  });
+
+  it('opens on Delivery for a letter with a date, and holds it there in the summary', async () => {
+    const card = mount();
+    await card.show(output({ arrivalWindow: WINDOW, schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' } }), ON);
+    expect(card.selected()).toEqual(['delivery']);
+    expect(text(card, 'studio-summary')).toMatch(/^black and white · held until Fri, Oct 9(, 2026)?$/);
+  });
+
+  it('holds a letter the server says is waiting for its mail date, and opens on Delivery', async () => {
+    const card = mount();
+    await card.show(output(), ON);
+    await card.answer(
+      {
+        result: {
+          content: [],
+          structuredContent: {
+            draftId: 'draft_0001',
+            status: 'sent',
+            orderId: 'order-1',
+            orderStatus: 'scheduled',
+            schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' },
+            cancellable: true
+          }
+        }
+      },
+      'get_draft_status'
+    );
+    expect(card.selected()).toEqual(['delivery']);
+    expect(text(card, 'studio-sub')).toBe('Sent · Springfield, IL 62701');
+    expect(text(card, 'studio-summary')).toMatch(/^black and white · held until Fri, Oct 9(, 2026)?$/);
+  });
+
+  it('says a letter the server says was cancelled will not be mailed, on Delivery', async () => {
+    const card = mount();
+    await card.show(output(), ON);
+    await card.answer(
+      {
+        result: {
+          content: [],
+          structuredContent: { draftId: 'draft_0001', status: 'sent', orderId: 'order-1', orderStatus: 'cancelled', schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' } }
+        }
+      },
+      'get_draft_status'
+    );
+    expect(card.selected()).toEqual(['delivery']);
+    expect(text(card, 'studio-sub')).toBe('Cancelled · Springfield, IL 62701');
+    expect(text(card, 'studio-summary')).toBe('black and white · cancelled, nothing will be mailed');
+  });
+
+  it("takes the estimate a cleared date brings, not the dated preview's", async () => {
+    const card = mount();
+    await card.show(
+      output({ arrivalWindow: WINDOW, schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' }, deliveryEstimate: 'Goes to the printer Fri, Oct 9.' }),
+      ON
+    );
+    await card.click(card.byId('arrives-asap'));
+    expect(card.lastRequest('tools/call', 'set_arrival_date')!.params.arguments).toEqual({ draftId: 'draft_0001' });
+    await card.answer(
+      { result: { content: [], structuredContent: { draftId: 'draft_0001', schedule: null, deliveryEstimate: 'Mailed in 1-2 business days', message: 'Cleared.' } } },
+      'set_arrival_date'
+    );
+    expect(text(card, 'studio-summary')).toBe('black and white · mailed in 1-2 business days');
+  });
+
+  it('keeps a date the person set when a status answer asked before it comes after (#676 review round 2)', async () => {
+    const card = mount();
+    await card.show(
+      output({ arrivalWindow: WINDOW, schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' }, deliveryEstimate: 'Goes to the printer Fri, Oct 9.' }),
+      ON
+    );
+    await card.click(card.byId('arrives-asap'));
+    await card.answer(
+      { result: { content: [], structuredContent: { draftId: 'draft_0001', schedule: null, deliveryEstimate: 'Mailed in 1-2 business days', message: 'Cleared.' } } },
+      'set_arrival_date'
+    );
+    // The status the card asked on opening comes now, with the dates the draft had then.
+    await card.answer(
+      {
+        result: {
+          content: [],
+          structuredContent: {
+            draftId: 'draft_0001',
+            status: 'ready',
+            schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' },
+            deliveryEstimate: 'Goes to the printer Fri, Oct 9.'
+          }
+        }
+      },
+      'get_draft_status'
+    );
+    expect(text(card, 'studio-summary')).toBe('black and white · mailed in 1-2 business days');
+  });
+
+  it('keeps the tab the person picked when the preview changes under it', async () => {
+    const card = mount();
+    await card.show(output({ arrivalWindow: WINDOW }), ON);
+    await card.click(card.tab('words'));
+    await card.show(output({ arrivalWindow: WINDOW, schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' } }), ON);
+    expect(card.selected()).toEqual(['words']);
+  });
+
+  it('sums the letter up in the footer: its cost, stationery, ink and when it mails', async () => {
+    const card = mount();
+    await card.show(output({ stationery: { theme: 'botanical', source: 'asked' } }), ON);
+    expect(text(card, 'studio-cost')).toBe('1 letter');
+    expect(text(card, 'studio-summary')).toBe('Botanical · black and white · mailed in 1-2 business days');
+    expect(card.byId('send-button').style.display).toBe('flex');
+  });
+
+  it("says how full a letter's pages are on the Words tab, and a longer letter's pages in the footer (#586)", async () => {
+    const PAY_AND_SEND = { packPays: false, payAndSend: { available: true, amountCents: 599, currency: 'usd' }, letterPack: { available: false } };
+    const two = mount();
+    await two.show(output({ pages: 2, canSendNow: false, sendEligibility: PAY_AND_SEND }), { ...ON, pageFit: { pages: 2, sheets: 1 } });
+    expect(text(two, 'studio-fit')).toBe('Runs on to the back of the page: printed on both sides of one sheet.');
+    expect(two.byId('studio-fit').hidden).toBe(false);
+    expect(text(two, 'studio-summary')).toBe('black and white · 2 pages, both sides · mailed in 1-2 business days');
+    expect(text(two, 'studio-cost')).toBe('Pay & Send USD 5.99');
+
+    const three = mount();
+    await three.show(output({ pages: 3, canSendNow: false, sendEligibility: PAY_AND_SEND }), ON);
+    expect(text(three, 'studio-fit')).toBe('Three pages, on two sheets: the longest letter we print.');
+    expect(text(three, 'studio-summary')).toBe('black and white · 3 pages, both sides · mailed in 1-2 business days');
+
+    // One page: the room it has left, while room to write gives its fit.
+    const one = mount();
+    await one.show(output(), { ...ON, pageFit: { pages: 1, sheets: 1, roomLines: 20, roomCharacters: 1940, charactersPerLine: 97 } });
+    expect(text(one, 'studio-fit')).toBe('Fits on one page, with room for about 1,940 more characters.');
+    expect(text(one, 'studio-summary')).toBe('black and white · mailed in 1-2 business days');
+
+    // And nothing where no fit is given, as while room to write is not offered.
+    const plain = mount();
+    await plain.show(output(), ON);
+    expect(text(plain, 'studio-fit')).toBe('');
+    expect(plain.byId('studio-fit').hidden).toBe(true);
+  });
+
+  it('says how full the page is after a restyle, from what the restyle gave (#586)', async () => {
+    const card = mount();
+    const fit = (roomCharacters: number) => ({ pages: 1, sheets: 1, doubleSided: false, roomLines: Math.ceil(roomCharacters / 64), roomCharacters, charactersPerLine: 64 });
+    await card.show(output({ stationery: { theme: 'classic', source: 'default' } }), { ...ON, pageFit: fit(1940) });
+    expect(text(card, 'studio-fit')).toBe('Fits on one page, with room for about 1,940 more characters.');
+
+    const restyle = async (theme: string, roomCharacters: number) => {
+      await card.click(card.byId('style-row').querySelector(`[data-theme="${theme}"]`)!);
+      await card.answer(
+        {
+          result: {
+            content: [],
+            structuredContent: { draftId: 'draft_0001', stationery: { theme, dateLine: 'October 1, 2026', source: 'asked' }, ...canSend, message: 'Restyled.' },
+            _meta: { previewHtml: PAGE, pageFit: fit(roomCharacters) }
+          }
+        },
+        'set_stationery'
+      );
+    };
+    await restyle('typewriter', 512);
+    expect(text(card, 'studio-fit')).toBe('Fits on one page, with room for about 512 more characters.');
+
+    // A page with no room left says nothing of room.
+    await restyle('botanical', 0);
+    expect(text(card, 'studio-fit')).toBe('');
+    expect(card.byId('studio-fit').hidden).toBe(true);
+  });
+
+  it("keeps the preview's fit through the card's status answer, and drops it once the chat has changed the page (#592 review round 1)", async () => {
+    const FIT = { pages: 1, sheets: 1, doubleSided: false, roomLines: 20, roomCharacters: 1940, charactersPerLine: 97 };
+    // The answer a host that keeps no state gets on the card's first render.
+    const status = (page: string) => ({
+      result: {
+        content: [],
+        structuredContent: {
+          draftId: 'draft_0001',
+          status: 'ready',
+          deliveryEstimate: 'Mailed in 1-2 business days',
+          stationery: { theme: 'classic' },
+          ...canSend
+        },
+        _meta: { previewHtml: page }
+      }
+    });
+
+    const same = mount();
+    await same.show(output({ stationery: { theme: 'classic', source: 'default' } }), { ...ON, pageFit: FIT });
+    await same.answer(status(PAGE), 'get_draft_status');
+    expect(text(same, 'studio-fit')).toBe('Fits on one page, with room for about 1,940 more characters.');
+    expect(same.byId('studio-fit').hidden).toBe(false);
+
+    // The chat changed the page since the preview: the status counts nothing again.
+    const changed = mount();
+    await changed.show(output({ stationery: { theme: 'classic', source: 'default' } }), { ...ON, pageFit: FIT });
+    await changed.answer(status(document1('Dear Sam, and more,\nPat')), 'get_draft_status');
+    expect(text(changed, 'studio-fit')).toBe('');
+    expect(changed.byId('studio-fit').hidden).toBe(true);
+  });
+
+  it('says a letter with its picture prints in colour (#584 review round 1)', async () => {
+    const card = mount();
+    await card.show(output({ layoutType: 'header_image', stationery: { theme: 'classic', source: 'default' } }), ON);
+    expect(text(card, 'studio-summary')).toBe('Classic · colour · mailed in 1-2 business days');
+
+    const plain = mount();
+    await plain.show(output({ layoutType: 'inline_image' }), ON);
+    expect(text(plain, 'studio-style-quiet')).toBe('Printed in colour.');
+    expect(text(plain, 'studio-summary')).toBe('colour · mailed in 1-2 business days');
+  });
+
+  it("says a letter the server has with the printer is there, whatever date its preview had (#584 review round 1)", async () => {
+    const card = mount();
+    await card.show(
+      output({ arrivalWindow: WINDOW, schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' }, deliveryEstimate: 'Goes to the printer Fri, Oct 9.' }),
+      ON
+    );
+    await card.answer(
+      { result: { content: [], structuredContent: { draftId: 'draft_0001', status: 'sent', orderId: 'order-1', orderStatus: 'sent', schedule: null } } },
+      'get_draft_status'
+    );
+    expect(text(card, 'status-pill')).toBe('With the printer');
+    expect(text(card, 'studio-sub')).toBe('Sent · Springfield, IL 62701');
+    expect(text(card, 'studio-summary')).toBe('black and white · with the printer');
+  });
+
+  it('says a letter its own send put with the printer is there, though the card had a date (#584 review round 1)', async () => {
+    const card = mount();
+    await card.show(output({ arrivalWindow: WINDOW, schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' } }), ON);
+    // The chat cleared the date before the send: the send says where the letter is.
+    await card.click(card.byId('send-button'));
+    await card.answer(
+      { result: { content: [{ type: 'text', text: 'Sent.' }], structuredContent: { orderId: 'order-1', currentStatus: 'sent' } } },
+      'send_letter'
+    );
+    expect(text(card, 'studio-summary')).toBe('black and white · with the printer');
+  });
+
+  it('says an expired preview has expired (#584 review round 1)', async () => {
+    const card = mount();
+    await card.show(output(), ON);
+    await card.answer({ result: { content: [], structuredContent: { draftId: 'draft_0001', status: 'expired' } } }, 'get_draft_status');
+    expect(text(card, 'status-pill')).toBe('Preview expired');
+    expect(text(card, 'studio-sub')).toBe('Expired · Springfield, IL 62701');
+    expect(text(card, 'studio-summary')).toBe('black and white · the preview has expired');
+  });
+
+  it('follows a Pay & Send order: the stationery once its row goes, then paid, then with the printer (#584 review round 1)', async () => {
+    const card = mount();
+    await card.show(
+      output({
+        stationery: { theme: 'botanical', source: 'asked' },
+        canSendNow: false,
+        sendEligibility: { packPays: false, payAndSend: { available: true, amountCents: 599, currency: 'usd' }, letterPack: { available: false } }
+      }),
+      ON
+    );
+    expect(text(card, 'studio-cost')).toBe('Pay & Send USD 5.99');
+    await card.click(card.byId('pay-send-button'));
+    // The Style row goes with the checkout; the tab says what the page is in.
+    expect(card.byId('style-row').style.display).toBe('none');
+    expect(card.byId('studio-style-quiet').style.display).toBe('');
+    expect(text(card, 'studio-style-quiet')).toBe('Botanical stationery, printed in black and white.');
+    await card.answer(
+      { result: { content: [], structuredContent: { orderId: 'order-1', checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_1' } } },
+      'create_mail_checkout'
+    );
+    expect(text(card, 'studio-sub')).toBe('Draft · Springfield, IL 62701');
+
+    await card.click(card.byId('check-status-button'));
+    await card.answer({ result: { content: [], structuredContent: { orderId: 'order-1', purchaseStatus: 'processing' } } }, 'get_purchase_status');
+    expect(text(card, 'studio-sub')).toBe('Paid · Springfield, IL 62701');
+    expect(text(card, 'studio-cost')).toBe('Paid USD 5.99');
+    expect(text(card, 'studio-summary')).toBe('Botanical · black and white · paid, going to the printer');
+
+    await card.click(card.byId('check-status-button'));
+    await card.answer({ result: { content: [], structuredContent: { orderId: 'order-1', purchaseStatus: 'submitted' } } }, 'get_purchase_status');
+    expect(text(card, 'studio-sub')).toBe('Sent · Springfield, IL 62701');
+    expect(text(card, 'studio-summary')).toBe('Botanical · black and white · with the printer');
+  });
+
+  it('holds a dated Pay & Send order while it waits, then says it is with the printer (#584 review round 2)', async () => {
+    const card = mount();
+    await card.show(
+      output({
+        arrivalWindow: WINDOW,
+        schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' },
+        canSendNow: false,
+        sendEligibility: { packPays: false, payAndSend: { available: true, amountCents: 599, currency: 'usd' }, letterPack: { available: false } }
+      }),
+      ON
+    );
+    await card.click(card.byId('pay-send-button'));
+    await card.answer(
+      { result: { content: [], structuredContent: { orderId: 'order-1', checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_1' } } },
+      'create_mail_checkout'
+    );
+    await card.click(card.byId('check-status-button'));
+    await card.answer({ result: { content: [], structuredContent: { orderId: 'order-1', purchaseStatus: 'processing' } } }, 'get_purchase_status');
+    expect(text(card, 'studio-summary')).toMatch(/^black and white · held until Fri, Oct 9(, 2026)?$/);
+    await card.click(card.byId('check-status-button'));
+    await card.answer({ result: { content: [], structuredContent: { orderId: 'order-1', purchaseStatus: 'submitted' } } }, 'get_purchase_status');
+    expect(text(card, 'studio-sub')).toBe('Sent · Springfield, IL 62701');
+    expect(text(card, 'studio-summary')).toBe('black and white · with the printer');
+  });
+
+  it.each([
+    ['payment_failed', 'Draft', 'the payment did not go through'],
+    ['refund_pending', 'Refunded', 'being refunded, nothing will be mailed'],
+    ['refunded', 'Refunded', 'refunded, nothing will be mailed'],
+    ['on_hold', 'On hold', 'on hold'],
+    ['cancelled', 'Cancelled', 'cancelled, nothing will be mailed']
+  ])('never promises mail for a Pay & Send order %s (#584 review round 2)', async (status, stage, timing) => {
+    const card = mount();
+    await card.show(
+      output({ canSendNow: false, sendEligibility: { packPays: false, payAndSend: { available: true, amountCents: 599, currency: 'usd' }, letterPack: { available: false } } }),
+      ON
+    );
+    await card.click(card.byId('pay-send-button'));
+    await card.answer(
+      { result: { content: [], structuredContent: { orderId: 'order-1', checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_1' } } },
+      'create_mail_checkout'
+    );
+    await card.click(card.byId('check-status-button'));
+    await card.answer(
+      { result: { content: [], structuredContent: { orderId: 'order-1', purchaseStatus: status, message: 'The order stopped.' } } },
+      'get_purchase_status'
+    );
+    expect(text(card, 'studio-sub')).toBe(`${stage} · Springfield, IL 62701`);
+    expect(text(card, 'studio-summary')).toBe(`black and white · ${timing}`);
+  });
+
+  it('opens an expired dated preview on Style: it holds no date any more (#584 review round 2)', async () => {
+    const card = mount();
+    await card.show(output({ arrivalWindow: WINDOW, schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' } }), ON);
+    expect(card.selected()).toEqual(['delivery']);
+    await card.answer({ result: { content: [], structuredContent: { draftId: 'draft_0001', status: 'expired' } } }, 'get_draft_status');
+    expect(card.selected()).toEqual(['style']);
+    expect(text(card, 'studio-summary')).toBe('black and white · the preview has expired');
+  });
+
+  it('brings the Style row back when Pay & Send cannot open a checkout', async () => {
+    const card = mount();
+    await card.show(
+      output({
+        stationery: { theme: 'botanical', source: 'asked' },
+        canSendNow: false,
+        sendEligibility: { packPays: false, payAndSend: { available: true, amountCents: 599, currency: 'usd' }, letterPack: { available: false } }
+      }),
+      ON
+    );
+    await card.click(card.byId('pay-send-button'));
+    expect(card.byId('studio-style-quiet').style.display).toBe('');
+    await card.answer({ result: { isError: true, content: [{ type: 'text', text: 'Pay & Send is not available right now.' }] } }, 'create_mail_checkout');
+    expect(card.byId('style-row').style.display).toBe('');
+    expect(card.byId('studio-style-quiet').style.display).toBe('none');
+  });
+
+  it('names a Pay & Send payment without a price plainly', async () => {
+    const card = mount();
+    await card.show(
+      output({ canSendNow: false, sendEligibility: { packPays: false, payAndSend: { available: true }, letterPack: { available: false } } }),
+      ON
+    );
+    await card.click(card.byId('pay-send-button'));
+    await card.answer(
+      { result: { content: [], structuredContent: { orderId: 'order-1', checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_test_1' } } },
+      'create_mail_checkout'
+    );
+    await card.click(card.byId('check-status-button'));
+    await card.answer({ result: { content: [], structuredContent: { orderId: 'order-1', purchaseStatus: 'processing' } } }, 'get_purchase_status');
+    expect(text(card, 'studio-cost')).toBe('Paid with Pay & Send');
+  });
+
+  it('names the price of mail no pack pays for, and a gift letter as free', async () => {
+    const paid = mount();
+    await paid.show(
+      output({
+        canSendNow: false,
+        sendEligibility: {
+          packPays: false,
+          payAndSend: { available: true, amountCents: 599, currency: 'usd' },
+          letterPack: { available: false }
+        }
+      }),
+      ON
+    );
+    // As the card's own Pay & Send button writes it.
+    expect(text(paid, 'studio-cost')).toBe('Pay & Send USD 5.99');
+
+    const gift = mount();
+    await gift.show(output({ giftCard: { state: 'funded', description: 'A free letter goes with it.' } }), ON);
+    expect(text(gift, 'studio-cost')).toBe('Free: a gift letter');
+
+    const two = mount();
+    await two.show(output({ lettersRequired: 2 }), ON);
+    expect(text(two, 'studio-cost')).toBe('2 letters');
+
+    const unpriced = mount();
+    await unpriced.show(output({ canSendNow: false, sendEligibility: { packPays: false, payAndSend: { available: false } } }), ON);
+    expect(text(unpriced, 'studio-cost')).toBe('Paid when you send it');
+  });
+
+  it('says what the page is printed in when there is no style to choose, and nothing when there is', async () => {
+    const plain = mount();
+    await plain.show(output(), ON);
+    expect(plain.byId('style-row').style.display).toBe('none');
+    expect(text(plain, 'studio-style-quiet')).toBe('Printed in black and white.');
+    expect(plain.byId('studio-style-quiet').style.display).toBe('');
+
+    const styled = mount();
+    await styled.show(output({ stationery: { theme: 'classic', source: 'default' } }), ON);
+    expect(styled.byId('style-row').style.display).toBe('');
+    expect(styled.byId('studio-style-quiet').style.display).toBe('none');
+    // Under the Style tab, the row is named for what it chooses.
+    expect(text(styled, 'style-label')).toBe('Stationery');
+  });
+
+  it('changes the style with set_stationery from the Style tab, as the row always did, and names it in the summary', async () => {
+    const card = mount();
+    await card.show(output({ stationery: { theme: 'classic', source: 'default' } }), ON);
+    expect(text(card, 'studio-summary')).toBe('Classic · black and white · mailed in 1-2 business days');
+    await card.click(card.document.querySelector('#style-row [data-theme="botanical"]')!);
+    expect(card.lastRequest('tools/call', 'set_stationery')!.params.arguments).toEqual({ draftId: 'draft_0001', stationery: 'botanical' });
+    await card.answer(
+      {
+        result: {
+          content: [{ type: 'text', text: 'Restyled.' }],
+          structuredContent: { draftId: 'draft_0001', stationery: { theme: 'botanical', dateLine: 'October 1, 2026', source: 'asked' } },
+          _meta: { previewHtml: PAGE }
+        }
+      },
+      'set_stationery'
+    );
+    expect(text(card, 'studio-summary')).toBe('Botanical · black and white · mailed in 1-2 business days');
+  });
+
+  it('names the stationery once its row has gone with the send', async () => {
+    const card = mount();
+    await card.show(output({ stationery: { theme: 'botanical', source: 'asked' } }), ON);
+    expect(card.byId('studio-style-quiet').style.display).toBe('none');
+    await card.click(card.byId('send-button'));
+    await card.answer({ result: { content: [{ type: 'text', text: 'Sent.' }], structuredContent: { orderId: 'order-1' } } }, 'send_letter');
+    expect(card.byId('style-row').style.display).toBe('none');
+    expect(card.byId('studio-style-quiet').style.display).toBe('');
+    expect(text(card, 'studio-style-quiet')).toBe('Botanical stationery, printed in black and white.');
+  });
+
+  it('sends with send_letter from the footer, then says it was sent', async () => {
+    const card = mount();
+    await card.show(output(), ON);
+    await card.click(card.byId('send-button'));
+    expect(card.lastRequest('tools/call', 'send_letter')!.params.arguments).toEqual({ draftId: 'draft_0001', confirm: true });
+    await card.answer({ result: { content: [{ type: 'text', text: 'Sent.' }], structuredContent: { orderId: 'order-1' } } }, 'send_letter');
+    expect(text(card, 'studio-sub')).toBe('Sent · Springfield, IL 62701');
+    expect(text(card, 'status-pill')).toBe('With the printer');
+  });
+
+  it('shows Delivery, where Cancel is, once a letter is sent with a date; a cancel says nothing will be mailed', async () => {
+    const card = mount();
+    await card.show(output({ arrivalWindow: WINDOW, schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' } }), ON);
+    await card.click(card.tab('style'));
+    await card.click(card.byId('send-button'));
+    await card.answer(
+      {
+        result: {
+          content: [{ type: 'text', text: 'Scheduled.' }],
+          structuredContent: { orderId: 'order-1', currentStatus: 'scheduled', schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' }, cancellable: true }
+        }
+      },
+      'send_letter'
+    );
+    expect(card.selected()).toEqual(['delivery']);
+    expect(text(card, 'studio-sub')).toBe('Sent · Springfield, IL 62701');
+    expect(text(card, 'studio-summary')).toMatch(/held until Fri, Oct 9/);
+    expect(card.byId('cancel-scheduled-button').style.display).toBe('flex');
+
+    // Cancel asks once more before it calls the tool.
+    await card.click(card.byId('cancel-scheduled-button'));
+    expect(text(card, 'cancel-scheduled-button-text')).toBe('Yes, cancel this letter');
+    await card.click(card.byId('cancel-scheduled-button'));
+    await card.answer({ result: { content: [{ type: 'text', text: 'Cancelled.' }], structuredContent: { orderId: 'order-1', status: 'cancelled' } } }, 'cancel_scheduled_mail');
+    expect(text(card, 'status-pill')).toBe('Cancelled');
+    expect(text(card, 'studio-sub')).toBe('Cancelled · Springfield, IL 62701');
+    expect(text(card, 'studio-summary')).toBe('black and white · cancelled, nothing will be mailed');
+  });
+
+  it('shows a longer letter one page at a time, and the first page once sealed', async () => {
+    const card = mount();
+    await card.show(output(), { previewHtml: GIFT_PAGES, [STUDIO]: true, [REVEAL]: true });
+    const pages = Array.from(card.document.querySelectorAll('.letter-page > svg.print-page'));
+    expect(pages).toHaveLength(2);
+    const shown = () => pages.map(page => page.classList.contains('shown'));
+    expect(shown()).toEqual([true, false]);
+    expect(card.document.querySelector('.page-count')!.textContent).toBe('Page 1 of 2');
+    const step = card.document.querySelector('.page-tools .page-zoom:last-child') as HTMLElement;
+    expect(step.textContent).toBe('Next page');
+
+    await card.click(step);
+    expect(shown()).toEqual([false, true]);
+    expect(card.document.querySelector('.page-count')!.textContent).toBe('Page 2 of 2');
+    expect(step.textContent).toBe('First page');
+    // From the last page, back to the first.
+    await card.click(step);
+    expect(shown()).toEqual([true, false]);
+    await card.click(step);
+    expect(shown()).toEqual([false, true]);
+
+    await card.click(card.byId('send-button'));
+    await card.answer({ result: { content: [{ type: 'text', text: 'Sent.' }], structuredContent: { orderId: 'order-1' } } }, 'send_letter');
+    expect(shown()).toEqual([true, false]);
+    expect((card.document.querySelector('.page-count') as HTMLElement).hidden).toBe(true);
+    expect(step.hidden).toBe(true);
+  });
+
+  it('keeps the page shown through a restyle (#584 review round 1)', async () => {
+    const card = mount();
+    await card.show(output({ stationery: { theme: 'classic', source: 'default' } }), { previewHtml: GIFT_PAGES, [STUDIO]: true });
+    await card.click(card.document.querySelector('.page-tools .page-zoom:last-child')!);
+    expect(card.document.querySelector('.page-count')!.textContent).toBe('Page 2 of 2');
+    await card.click(card.document.querySelector('#style-row [data-theme="botanical"]')!);
+    await card.answer(
+      {
+        result: {
+          content: [{ type: 'text', text: 'Restyled.' }],
+          structuredContent: { draftId: 'draft_0001', stationery: { theme: 'botanical', dateLine: 'October 1, 2026', source: 'asked' } },
+          _meta: { previewHtml: document1('October 1, 2026\nDear Sam,\nPat', 'A letter for you') }
+        }
+      },
+      'set_stationery'
+    );
+    const pages = Array.from(card.document.querySelectorAll('.letter-page > svg.print-page'));
+    expect(pages[0].querySelector('title')!.textContent).toBe('October 1, 2026\nDear Sam,\nPat');
+    expect(pages.map(page => page.classList.contains('shown'))).toEqual([false, true]);
+    expect(card.document.querySelector('.page-count')!.textContent).toBe('Page 2 of 2');
+  });
+
+  it('starts another draft on its first page', async () => {
+    const card = mount();
+    await card.show(output(), { previewHtml: GIFT_PAGES, [STUDIO]: true });
+    await card.click(card.document.querySelector('.page-tools .page-zoom:last-child')!);
+    expect(card.document.querySelector('.page-count')!.textContent).toBe('Page 2 of 2');
+    await card.show(output({ draftId: 'draft_0002' }), { previewHtml: GIFT_PAGES, [STUDIO]: true });
+    expect(card.document.querySelector('.page-count')!.textContent).toBe('Page 1 of 2');
+  });
+
+  it('names its tabs by the letter, and spaces its note as the panels do (#584 review round 1)', async () => {
+    const card = mount();
+    await card.show(output(), ON);
+    expect(card.document.querySelector('[role="tablist"]')!.getAttribute('aria-labelledby')).toBe('studio-title');
+    const served = inlineHostBridge(fs.readFileSync(path.join(WIDGET_DIR, 'LetterPreviewCard.html'), 'utf-8'), WIDGET_DIR);
+    expect(served).toContain('.studio-panel .note,.studio-side > .note{margin-top:0}');
+  });
+
+  it('grows the page across the card when it is enlarged', async () => {
+    const card = mount();
+    await card.show(output(), ON);
+    await card.click(card.document.querySelector('.page-zoom')!);
+    expect(card.byId('studio-body').classList.contains('zoomed')).toBe(true);
+    await card.click(card.document.querySelector('.page-zoom')!);
+    expect(card.byId('studio-body').classList.contains('zoomed')).toBe(false);
+  });
+
+  it('becomes a studio when a later result turns it on, and stays one', async () => {
+    const card = mount();
+    await card.show(output(), { previewHtml: GIFT_PAGES });
+    expect(card.byId('card').classList.contains('studio')).toBe(false);
+    expect(card.document.querySelector('.page-tools')).toBeNull();
+    await card.show(output(), { previewHtml: GIFT_PAGES, [STUDIO]: true });
+    expect(card.byId('card').classList.contains('studio')).toBe(true);
+    // The page is drawn again for the studio, one page at a time.
+    expect(card.document.querySelector('.page-tools')).not.toBeNull();
+    await card.show(output(), { previewHtml: GIFT_PAGES });
+    expect(card.byId('card').classList.contains('studio')).toBe(true);
+    expect(card.document.querySelectorAll('.studio-hd')).toHaveLength(1);
+  });
+});
+
+describe("the Words tab's editor (#586)", () => {
+  const FIT = { pages: 1, sheets: 1, doubleSided: false, roomLines: 20, roomCharacters: 1940, charactersPerLine: 97 };
+  const PAY_AND_SEND = { packPays: false, payAndSend: { available: true, amountCents: 599, currency: 'usd' }, letterPack: { available: false } };
+  // The preview's words carry their version, which a change of them names (#593 review round 1).
+  const VERSION = 'abcdef123456';
+  const CLASSIC = { stationery: { theme: 'classic', source: 'default' }, wordsVersion: VERSION };
+  const TWO_PAGES = document1('Dear Sam,\nPat', 'And more,\nPat');
+  /** set_letter_words' refusal of unseen words, as the model reads it: with the whole letter. */
+  const UNSEEN =
+    "Nothing was changed: the letter's words now are not the ones that wordsVersion names. The letter card can change them too. " +
+    'The letter\'s words now are below, at wordsVersion "chat00000000". Make the change to these words, then call set_letter_words again with that wordsVersion.' +
+    '\n\nDear Sam,\n\nThe chat wrote this.\n\nLove, Pat';
+  /** The draft as get_draft_status gives it: ready, with its words now. */
+  const status = (words: Json, page = PAGE) => ({
+    result: {
+      content: [],
+      structuredContent: {
+        draftId: 'draft_0001',
+        status: 'ready',
+        deliveryEstimate: 'Mailed in 1-2 business days',
+        stationery: { theme: 'classic' },
+        ...canSend,
+        ...words
+      },
+      _meta: { previewHtml: page }
+    }
+  });
+
+  /** Types into an editor field, as the person would. */
+  async function type(card: ReturnType<typeof mount>, id: string, value: string) {
+    const field = card.byId(id) as HTMLTextAreaElement;
+    field.value = value;
+    field.dispatchEvent(new card.window.Event('input'));
+    await flush();
+  }
+
+  /** The answer set_letter_words gives a letter that now runs on to two pages. */
+  const ranOn = {
+    result: {
+      content: [{ type: 'text', text: 'Changed.' }],
+      structuredContent: {
+        draftId: 'draft_0001',
+        pages: 2,
+        canSendNow: false,
+        reasonCannotSend: 'Letter packs and gift letters pay for one-page letters and 6x9 postcards; this one is paid with Pay & Send.',
+        sendEligibility: PAY_AND_SEND,
+        wordsVersion: 'fedcba654321',
+        message: "The letter's words are changed and its page is drawn again. It now runs to two pages, printed on both sides, and is paid with Pay & Send. Nothing has been sent."
+      },
+      _meta: { previewHtml: TWO_PAGES, pageFit: { pages: 2, sheets: 1, doubleSided: true, roomLines: 30, roomCharacters: 2900, charactersPerLine: 97 } }
+    }
+  };
+
+  it('sends the version of the words it drew, and keeps the last for words whose page did not come back (#695)', async () => {
+    for (const [page, expected] of [[true, 'v_words'], [false, 'v_preview']] as const) {
+      const card = mount();
+      await card.show(output({ ...CLASSIC, contentVersion: 'v_preview' }), { ...ON, pageFit: FIT });
+      await card.click(card.tab('words'));
+      await card.click(card.byId('studio-words-open'));
+      await type(card, 'studio-words-body', 'Dear Sam,\n\nThe roses are out.');
+      await card.click(card.byId('studio-words-update'));
+      await card.answer(
+        {
+          result: {
+            content: [{ type: 'text', text: 'Changed.' }],
+            structuredContent: { draftId: 'draft_0001', ...canSend, wordsVersion: 'fedcba654321', contentVersion: 'v_words', contentVersionBefore: 'v_preview', message: 'Changed.' },
+            ...(page ? { _meta: { previewHtml: PAGE } } : {})
+          }
+        },
+        'set_letter_words'
+      );
+      await card.click(card.byId('send-button'));
+      expect(card.lastRequest('tools/call', 'send_letter')!.params.arguments.contentVersion, String(page)).toBe(expected);
+    }
+  });
+
+  it('replaces the words it was opened on, though a status answer brings others while they are written (#695 review round 1)', async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
+    await card.click(card.tab('words'));
+    await card.click(card.byId('studio-words-open'));
+    // The chat changed the words: the status asked on opening brings them while the editor is open.
+    await card.answer(
+      {
+        result: {
+          content: [],
+          structuredContent: { draftId: 'draft_0001', status: 'ready', stationery: { theme: 'classic' }, bodyText: 'Dear Sam, from the chat.', signOff: 'Pat', wordsVersion: 'chat12345678', ...canSend },
+          _meta: { previewHtml: PAGE }
+        }
+      },
+      'get_draft_status'
+    );
+    await type(card, 'studio-words-body', 'Dear Sam,\n\nThe roses are out.');
+    await card.click(card.byId('studio-words-update'));
+    // Written from the preview's words: the server refuses them over the chat's, rather than overwrite them unseen.
+    expect(card.lastRequest('tools/call', 'set_letter_words')!.params.arguments.wordsVersion).toBe(VERSION);
+  });
+
+  it('offers to change the words while room to write is offered, counting the room as they are written', async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
+    await card.click(card.tab('words'));
+    expect(card.byId('studio-words-open').hidden).toBe(false);
+    expect(card.byId('studio-words-chat').hidden).toBe(true);
+    expect(card.byId('studio-words-edit').hidden).toBe(true);
+
+    await card.click(card.byId('studio-words-open'));
+    expect(card.byId('studio-words-edit').hidden).toBe(false);
+    expect(card.byId('studio-words').hidden).toBe(true);
+    expect((card.byId('studio-words-body') as HTMLTextAreaElement).value).toBe(ARGS.bodyText);
+    expect((card.byId('studio-words-signoff') as HTMLTextAreaElement).value).toBe(ARGS.signOff);
+    expect(text(card, 'studio-words-count')).toBe('About 1,940 characters left on this page.');
+
+    await type(card, 'studio-words-body', `${ARGS.bodyText} And the roses.`);
+    expect(text(card, 'studio-words-count')).toBe('About 1,925 characters left on this page.');
+    await type(card, 'studio-words-body', `${ARGS.bodyText}${'x'.repeat(2000)}`);
+    expect(text(card, 'studio-words-count')).toBe('About 60 characters past this page: Update the page to see how it runs on.');
+  });
+
+  it('sets them with set_letter_words, then draws the page, the price and the words it gave', async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
+    await card.click(card.tab('words'));
+    await card.click(card.byId('studio-words-open'));
+    await type(card, 'studio-words-body', 'Dear Sam,\n\nThe garden is in, and the roses are out.');
+    await type(card, 'studio-words-signoff', 'Love, Pat');
+
+    await card.click(card.byId('studio-words-update'));
+    expect(card.lastRequest('tools/call', 'set_letter_words')!.params.arguments).toEqual({
+      draftId: 'draft_0001',
+      bodyText: 'Dear Sam,\n\nThe garden is in, and the roses are out.',
+      signOff: 'Love, Pat',
+      // The version of the words it replaces: the preview's.
+      wordsVersion: VERSION
+    });
+    // One change at a time: the page waits, and so does the Style row.
+    expect(text(card, 'studio-words-update')).toBe('Updating the page…');
+    expect(card.byId('studio-words-update').getAttribute('aria-disabled')).toBe('true');
+    expect(card.document.querySelector('#style-row [data-theme="botanical"]')!.getAttribute('aria-disabled')).toBe('true');
+
+    await card.answer(ranOn, 'set_letter_words');
+    expect(card.byId('studio-words-edit').hidden).toBe(true);
+    expect(text(card, 'studio-words')).toBe('Dear Sam,\n\nThe garden is in, and the roses are out.\n\nLove, Pat');
+    expect(text(card, 'studio-words-note')).toBe(ranOn.result.structuredContent.message);
+    expect(text(card, 'studio-cost')).toBe('Pay & Send USD 5.99');
+    expect(text(card, 'studio-summary')).toBe('Classic · black and white · 2 pages, both sides · mailed in 1-2 business days');
+    expect(text(card, 'studio-fit')).toBe('Runs on to the back of the page: printed on both sides of one sheet.');
+    expect(card.document.querySelectorAll('#mockup-container svg')).toHaveLength(2);
+    expect(card.byId('studio-words-update').getAttribute('aria-disabled')).toBe('false');
+
+    // Opened again, it starts from the words it set, counted on the back of the page.
+    await card.click(card.byId('studio-words-open'));
+    expect((card.byId('studio-words-body') as HTMLTextAreaElement).value).toBe('Dear Sam,\n\nThe garden is in, and the roses are out.');
+    expect(text(card, 'studio-words-count')).toBe('About 2,900 characters left on the back of the page.');
+    // And a second change names the version the first gave.
+    await card.click(card.byId('studio-words-update'));
+    expect(card.lastRequest('tools/call', 'set_letter_words')!.params.arguments.wordsVersion).toBe('fedcba654321');
+  });
+
+  it('says why the words were not changed, and keeps them', async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
+    await card.click(card.tab('words'));
+    await card.click(card.byId('studio-words-open'));
+    await type(card, 'studio-words-body', 'Dear Sam,\n\nMuch longer.');
+    await card.click(card.byId('studio-words-update'));
+    await card.answer(
+      { result: { isError: true, content: [{ type: 'text', text: 'This preview has expired. Make a new preview with the words.' }] } },
+      'set_letter_words'
+    );
+    expect(text(card, 'studio-words-note')).toBe('This preview has expired. Make a new preview with the words.');
+    expect(card.byId('studio-words-note').classList.contains('alert')).toBe(true);
+    expect(card.byId('studio-words-edit').hidden).toBe(false);
+    expect((card.byId('studio-words-body') as HTMLTextAreaElement).value).toBe('Dear Sam,\n\nMuch longer.');
+    expect(text(card, 'studio-cost')).toBe('1 letter');
+  });
+
+  it("says its copy of the words is out of date when the server refuses unseen words, in its own words, keeping what was typed (#593 review rounds 2 and 3)", async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
+    await card.click(card.tab('words'));
+    await card.click(card.byId('studio-words-open'));
+    await type(card, 'studio-words-body', 'Dear Sam,\n\nMy own change.');
+    const asked = card.requests('tools/call', 'get_draft_status').length;
+    await card.click(card.byId('studio-words-update'));
+    await card.answer({ result: { isError: true, content: [{ type: 'text', text: UNSEEN }] } }, 'set_letter_words');
+    // Never the refusal written for the model, which carries the whole letter.
+    expect(text(card, 'studio-words-note')).toBe("The words were not changed: this card's copy of them is out of date. Ask in the chat to change them, or make the preview again.");
+    expect(text(card, 'studio-words-note')).not.toContain('wordsVersion');
+    expect(card.byId('studio-words-edit').hidden).toBe(false);
+    expect((card.byId('studio-words-body') as HTMLTextAreaElement).value).toBe('Dear Sam,\n\nMy own change.');
+    // It fetches nothing to catch up: the server's version check keeps the chat's words safe.
+    expect(card.requests('tools/call', 'get_draft_status')).toHaveLength(asked);
+    expect(card.document.querySelectorAll('#mockup-container svg')).toHaveLength(1);
+  });
+
+  it('says so too when the host hands the refusal back wrapped, as a rejection (#593 review round 3)', async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
+    await card.click(card.tab('words'));
+    await card.click(card.byId('studio-words-open'));
+    await card.click(card.byId('studio-words-update'));
+    // As a host that rejects the call writes it (#434): the sentence inside its own words.
+    const wrapped =
+      "Error code: INVALID_ARGUMENT; Error: RuntimeException: Error calling MCP tool: [TextContent(type='text', text=" +
+      JSON.stringify(UNSEEN) +
+      ', annotations=None, meta=None)]';
+    await card.answer({ error: { code: -32603, message: wrapped } }, 'set_letter_words');
+    expect(text(card, 'studio-words-note')).toBe("The words were not changed: this card's copy of them is out of date. Ask in the chat to change them, or make the preview again.");
+  });
+
+  it('says its copy is out of date when its preview carried no version, keeping what was typed', async () => {
+    const card = mount();
+    // A preview from before the version (#593): no wordsVersion.
+    await card.show(output({ stationery: { theme: 'classic', source: 'default' } }), { ...ON, pageFit: FIT });
+    await card.click(card.tab('words'));
+    await card.click(card.byId('studio-words-open'));
+    await type(card, 'studio-words-body', 'Dear Sam,\n\nMy own change.');
+    await card.click(card.byId('studio-words-update'));
+    expect(card.lastRequest('tools/call', 'set_letter_words')!.params.arguments).not.toHaveProperty('wordsVersion');
+    await card.answer(
+      { result: { isError: true, content: [{ type: 'text', text: 'Nothing was changed: give wordsVersion, the version of the words this change replaces.' }] } },
+      'set_letter_words'
+    );
+    expect(text(card, 'studio-words-note')).toBe("The words were not changed: this card's copy of them is out of date. Ask in the chat to change them, or make the preview again.");
+    expect((card.byId('studio-words-body') as HTMLTextAreaElement).value).toBe('Dear Sam,\n\nMy own change.');
+  });
+
+  it("shows and edits the draft's words when the card's status answer gives them changed in the chat", async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
+    await card.answer(status({ bodyText: 'Dear Sam,\n\nThe chat wrote this.', signOff: 'Pat', wordsVersion: 'chat00000000' }, TWO_PAGES), 'get_draft_status');
+    await card.click(card.tab('words'));
+    expect(text(card, 'studio-words')).toBe('Dear Sam,\n\nThe chat wrote this.\n\nPat');
+    await card.click(card.byId('studio-words-open'));
+    expect((card.byId('studio-words-body') as HTMLTextAreaElement).value).toBe('Dear Sam,\n\nThe chat wrote this.');
+    await card.click(card.byId('studio-words-update'));
+    expect(card.lastRequest('tools/call', 'set_letter_words')!.params.arguments.wordsVersion).toBe('chat00000000');
+  });
+
+  it('puts the words back as they were on Cancel', async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
+    await card.click(card.tab('words'));
+    await card.click(card.byId('studio-words-open'));
+    await type(card, 'studio-words-body', 'Something else.');
+    // Words not set yet: sending now would mail the draft's own, so Send waits.
+    expect((card.byId('send-button') as HTMLButtonElement).disabled).toBe(true);
+    await card.click(card.byId('send-button'));
+    expect(card.lastRequest('tools/call', 'send_letter')).toBeUndefined();
+    await card.click(card.byId('studio-words-cancel'));
+    expect((card.byId('send-button') as HTMLButtonElement).disabled).toBe(false);
+    // Focus goes back to Change the words, the boxes having gone.
+    expect(card.document.activeElement).toBe(card.byId('studio-words-open'));
+    expect(card.byId('studio-words-edit').hidden).toBe(true);
+    expect(card.lastRequest('tools/call', 'set_letter_words')).toBeUndefined();
+    await card.click(card.byId('studio-words-open'));
+    expect((card.byId('studio-words-body') as HTMLTextAreaElement).value).toBe(ARGS.bodyText);
+  });
+
+  it('holds Pay & Send while words are being written, as it holds Send', async () => {
+    const card = mount();
+    const TWO_FIT = { pages: 2, sheets: 1, doubleSided: true, roomLines: 10, roomCharacters: 970, charactersPerLine: 97 };
+    await card.show(output({ ...CLASSIC, pages: 2, canSendNow: false, sendEligibility: PAY_AND_SEND }), { ...ON, pageFit: TWO_FIT });
+    expect((card.byId('pay-send-button') as HTMLButtonElement).disabled).toBe(false);
+    await card.click(card.tab('words'));
+    await card.click(card.byId('studio-words-open'));
+    expect((card.byId('pay-send-button') as HTMLButtonElement).disabled).toBe(true);
+    await card.click(card.byId('pay-send-button'));
+    expect(card.lastRequest('tools/call', 'create_mail_checkout')).toBeUndefined();
+    // Counted on the back of the page, and past it.
+    expect(text(card, 'studio-words-count')).toBe('About 970 characters left on the back of the page.');
+  });
+
+  it('holds the confirmation page, where an app takes no payment, while words are being written (#593 review round 1)', async () => {
+    const card = mount();
+    const onPage = { packPays: false, payAndSend: { available: false, pageUrl: 'https://letterirl.example/send/draft_0001' }, letterPack: { available: false } };
+    const TWO_FIT = { pages: 2, sheets: 1, doubleSided: true, roomLines: 10, roomCharacters: 970, charactersPerLine: 97 };
+    await card.show(output({ ...CLASSIC, pages: 2, canSendNow: false, sendEligibility: onPage }), { ...ON, pageFit: TWO_FIT });
+    expect(card.byId('pay-page-button').style.display).toBe('flex');
+    expect((card.byId('pay-page-button') as HTMLButtonElement).disabled).toBe(false);
+    await card.click(card.tab('words'));
+    await card.click(card.byId('studio-words-open'));
+    expect((card.byId('pay-page-button') as HTMLButtonElement).disabled).toBe(true);
+    await card.click(card.byId('pay-page-button'));
+    expect(card.lastRequest('ui/open-link')).toBeUndefined();
+    await card.click(card.byId('studio-words-cancel'));
+    expect((card.byId('pay-page-button') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('counts past the third page as more than we print', async () => {
+    const card = mount();
+    const THREE_FIT = { pages: 3, sheets: 2, doubleSided: true, roomLines: 1, roomCharacters: 100, charactersPerLine: 97 };
+    await card.show(output({ ...CLASSIC, pages: 3, canSendNow: false, sendEligibility: PAY_AND_SEND }), { ...ON, pageFit: THREE_FIT });
+    await card.click(card.tab('words'));
+    await card.click(card.byId('studio-words-open'));
+    expect(text(card, 'studio-words-count')).toBe('About 100 characters left on the third page.');
+    await type(card, 'studio-words-body', `${ARGS.bodyText}${'x'.repeat(300)}`);
+    expect(text(card, 'studio-words-count')).toBe('About 200 characters past the third page, more than we print.');
+  });
+
+  it("keeps its own page and price when the status answer it asked for first arrives after the words changed", async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
+    await card.click(card.tab('words'));
+    await card.click(card.byId('studio-words-open'));
+    await type(card, 'studio-words-body', 'Dear Sam,\n\nLonger now.');
+    await card.click(card.byId('studio-words-update'));
+    await card.answer(ranOn, 'set_letter_words');
+    // The answer to the question the card asked on its first render: the page before.
+    await card.answerTo(
+      card.requests('tools/call', 'get_draft_status')[0],
+      {
+        result: {
+          content: [],
+          structuredContent: { draftId: 'draft_0001', status: 'ready', deliveryEstimate: 'Mailed in 1-2 business days', stationery: { theme: 'classic' }, ...canSend },
+          _meta: { previewHtml: PAGE }
+        }
+      }
+    );
+    expect(card.document.querySelectorAll('#mockup-container svg')).toHaveLength(2);
+    expect(text(card, 'studio-cost')).toBe('Pay & Send USD 5.99');
+  });
+
+  it('starts a new draft in the card from its own words', async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
+    await card.click(card.tab('words'));
+    await card.click(card.byId('studio-words-open'));
+    await type(card, 'studio-words-body', 'Dear Sam,\n\nLonger now.');
+    await card.click(card.byId('studio-words-update'));
+    await card.answer(ranOn, 'set_letter_words');
+    expect(text(card, 'studio-words')).toBe('Dear Sam,\n\nLonger now.\n\nLove,\nPat');
+
+    for (const time of ['once', 'again']) {
+      await card.show({ ...output(CLASSIC), draftId: 'draft_0002' }, { ...ON, pageFit: FIT });
+      expect(text(card, 'studio-words'), time).toBe('Dear Sam,\n\nThe garden is in.\n\nLove,\nPat');
+    }
+    // And its editor opens on its own words.
+    await card.click(card.byId('studio-words-open'));
+    expect((card.byId('studio-words-body') as HTMLTextAreaElement).value).toBe(ARGS.bodyText);
+  });
+
+  it('says the words must fit one page when the letter may run to one page (#647)', async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, pageFit: { ...FIT, maxPages: 1 } });
+    await card.click(card.tab('words'));
+    await card.click(card.byId('studio-words-open'));
+    await type(card, 'studio-words-body', `${ARGS.bodyText}${'x'.repeat(2000)}`);
+    expect(text(card, 'studio-words-count')).toBe('About 60 characters past this page, and this letter must fit on one page.');
+  });
+
+  it('says a gift letter is one page when the words run past it', async () => {
+    const card = mount();
+    await card.show(output({ ...CLASSIC, giftCard: { state: 'funded' } }), { ...ON, pageFit: FIT });
+    await card.click(card.tab('words'));
+    await card.click(card.byId('studio-words-open'));
+    await type(card, 'studio-words-body', `${ARGS.bodyText}${'x'.repeat(2000)}`);
+    expect(text(card, 'studio-words-count')).toBe('About 60 characters past this page, and a gift letter is one page.');
+  });
+
+  it('is not offered while room to write is not, nor once the letter is sent', async () => {
+    const plain = mount();
+    await plain.show(output(CLASSIC), ON);
+    expect(plain.byId('studio-words-open').hidden).toBe(true);
+    expect(plain.byId('studio-words-chat').hidden).toBe(false);
+
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
+    await card.click(card.byId('send-button'));
+    await card.answer({ result: { content: [{ type: 'text', text: 'Sent.' }], structuredContent: { orderId: 'order-1' } } }, 'send_letter');
+    expect(card.byId('studio-words-open').hidden).toBe(true);
+    expect(card.byId('studio-words-chat').hidden).toBe(false);
+  });
+});
+
+describe('certified mail on the card (#625)', () => {
+  const ON_PAGE = {
+    packPays: false,
+    payAndSend: { available: false, amountCents: 1199, currency: 'usd', pageUrl: 'https://letterirl.example/send/draft_0001' },
+    letterPack: { available: false, purchaseUrl: 'https://letterirl.example/packs' }
+  };
+  const PACK_RULE = 'Letter packs pay for one-page letters and 6x9 postcards.';
+  const certified = (service = 'certified') =>
+    output({
+      mailService: service,
+      canSendNow: false,
+      reasonCannotSend: 'Certified mail is paid with Pay & Send.',
+      sendEligibility: ON_PAGE,
+      deliveryClass: service === 'certified' ? 'USPS Certified Mail' : 'USPS Certified Mail with an electronic return receipt'
+    });
+
+  it('tells a certified letter that Pay & Send on the page pays for it, not the pack rule', async () => {
+    const card = mount();
+    await card.show(certified(), ON);
+    expect(card.byId('pay-page-button').style.display).toBe('flex');
+    const note = text(card, 'checkout-note');
+    expect(note).toBe("Certified mail is paid with Pay & Send on Letter IRL's page, which sends it once you pay.");
+    expect(note).not.toContain(PACK_RULE);
+    expect(card.byId('checkout-note').style.display).toBe('block');
+  });
+
+  it('keeps the pack rule for mail no pack pays for that is not certified (a two-page letter)', async () => {
+    const card = mount();
+    await card.show(output({ pages: 2, canSendNow: false, sendEligibility: ON_PAGE }), ON);
+    expect(text(card, 'checkout-note')).toContain(PACK_RULE);
+    expect(text(card, 'checkout-note')).not.toContain('Certified');
+  });
+
+  it('names the service in the summary and the price in the footer', async () => {
+    const plain = mount();
+    await plain.show(certified(), ON);
+    expect(text(plain, 'studio-summary')).toContain('certified mail');
+    expect(text(plain, 'studio-summary')).not.toContain('return receipt');
+    expect(text(plain, 'studio-cost')).toBe('Pay & Send USD 11.99');
+
+    const receipt = mount();
+    await receipt.show(certified('certified_return_receipt'), ON);
+    expect(text(receipt, 'studio-summary')).toContain('certified mail with a return receipt');
+  });
+
+  it('shows the server\'s delivery class, which says what the letter travels by', async () => {
+    const card = mount();
+    await card.show(certified('certified_return_receipt'), ON);
+    expect(text(card, 'delivery')).toContain('USPS Certified Mail with an electronic return receipt');
+  });
+
+  it('says nothing of certified mail for an ordinary letter, or for a service it does not know', async () => {
+    for (const mailService of [undefined, 'standard', 'express', 7]) {
+      const card = mount();
+      await card.show(output({ ...(mailService === undefined ? {} : { mailService }) }), ON);
+      expect(text(card, 'studio-summary'), String(mailService)).not.toContain('certified');
+    }
+    const unknown = mount();
+    await unknown.show(output({ mailService: 'express', pages: 2, canSendNow: false, sendEligibility: ON_PAGE }), ON);
+    expect(text(unknown, 'checkout-note')).toContain(PACK_RULE);
+  });
+});
+
+describe('how the letter travels, as the latest answer with its terms says (#625)', () => {
+  // The style row takes the terms of an answer only for a letter whose preview named a stationery.
+  const CLASSIC = { stationery: { theme: 'classic', source: 'default' } };
+  const ON_PAGE = {
+    packPays: false,
+    payAndSend: { available: false, amountCents: 1199, currency: 'usd', pageUrl: 'https://letterirl.example/send/draft_0001' },
+    letterPack: { available: false, purchaseUrl: 'https://letterirl.example/packs' }
+  };
+  const DISCLAIMER =
+    'USPS timing varies and can take longer. Certified mail is signed for at delivery; if no one signs for it or collects it from the Post Office, USPS returns it to the sender.';
+  const CERTIFIED_WORDS = { deliveryClass: 'USPS Certified Mail', deliveryDisclaimer: DISCLAIMER };
+  const RECEIPT_WORDS = { deliveryClass: 'USPS Certified Mail with an electronic return receipt', deliveryDisclaimer: DISCLAIMER };
+  const FIRST_CLASS = { deliveryClass: 'USPS First-Class Mail', deliveryDisclaimer: 'USPS timing varies and can take longer.' };
+  // The terms of a certified letter and of an ordinary one, each with how it travels, as the server answers them.
+  const CERTIFIED_TERMS = {
+    canSendNow: false,
+    reasonCannotSend: 'Certified mail is paid with Pay & Send.',
+    sendEligibility: ON_PAGE,
+    mailService: 'certified',
+    ...CERTIFIED_WORDS
+  };
+  const ORDINARY_TERMS = { ...canSend, ...FIRST_CLASS };
+  const certifiedPreview = () => output({ ...CLASSIC, ...CERTIFIED_TERMS });
+  const ordinaryPreview = () => output({ ...CLASSIC, ...ORDINARY_TERMS });
+  const status = (extra: Json) => ({
+    result: {
+      content: [],
+      structuredContent: { draftId: 'draft_0001', status: 'ready', deliveryEstimate: 'Mailed in 1-2 business days', stationery: { theme: 'classic' }, ...extra },
+      _meta: { previewHtml: PAGE }
+    }
+  });
+  const ASK = 'get_draft_status';
+  // The card sets a style, and the server answers with the draft's terms as they are now.
+  const restyled = async (card: ReturnType<typeof mount>, terms: Json, draftId = 'draft_0001') => {
+    await card.click(card.byId('style-row').querySelector('[data-theme="botanical"]')!);
+    await card.answer(
+      {
+        result: {
+          content: [],
+          structuredContent: { draftId, stationery: { theme: 'botanical', dateLine: 'October 1, 2026', source: 'asked' }, ...terms, message: 'Restyled.' },
+          _meta: { previewHtml: PAGE }
+        }
+      },
+      'set_stationery'
+    );
+  };
+  // The five things a person reads and presses, which must come from one answer and so agree.
+  const agree = (card: ReturnType<typeof mount>, kind: 'certified' | 'ordinary', label = '') => {
+    const summary = text(card, 'studio-summary');
+    const delivery = text(card, 'delivery');
+    if (kind === 'certified') {
+      expect(summary, label).toContain('certified mail');
+      expect(delivery, label).toContain('USPS Certified Mail');
+      expect(delivery, label).toContain('signed for at delivery');
+      expect(card.byId('checkout-note').style.display, label).toBe('block');
+      expect(text(card, 'checkout-note'), label).toContain('Certified mail is paid');
+      expect(text(card, 'studio-cost'), label).toBe('Pay & Send USD 11.99');
+      expect(card.byId('pay-page-button').style.display, label).toBe('flex');
+      expect(card.byId('send-button').style.display, label).not.toBe('flex');
+    } else {
+      expect(summary, label).not.toContain('certified');
+      expect(delivery, label).toContain('USPS First-Class Mail');
+      expect(delivery, label).not.toContain('Certified');
+      expect(delivery, label).not.toContain('signed for');
+      // A note that is hidden may still hold its last words: what counts is what is shown.
+      const note = card.byId('checkout-note');
+      expect(note.style.display === 'block' && text(card, 'checkout-note').includes('Certified mail is paid'), label).toBe(false);
+      expect(text(card, 'studio-cost'), label).toBe('1 letter');
+      expect(card.byId('send-button').style.display, label).toBe('flex');
+      expect(card.byId('pay-page-button').style.display, label).not.toBe('flex');
+    }
+  };
+
+  it('follows a status that says the letter is ordinary mail now, in all five things', async () => {
+    const card = mount();
+    await card.show(certifiedPreview(), ON);
+    agree(card, 'certified', 'preview');
+    await card.answerTo(card.requests('tools/call', ASK)[0], status(ORDINARY_TERMS));
+    agree(card, 'ordinary', 'status');
+  });
+
+  it('follows a status that says the letter is certified now, in all five things', async () => {
+    const card = mount();
+    await card.show(ordinaryPreview(), ON);
+    agree(card, 'ordinary', 'preview');
+    await card.answerTo(card.requests('tools/call', ASK)[0], status(CERTIFIED_TERMS));
+    agree(card, 'certified', 'status');
+  });
+
+  it('names the return receipt as the status gives it', async () => {
+    const card = mount();
+    await card.show(certifiedPreview(), ON);
+    await card.answerTo(
+      card.requests('tools/call', ASK)[0],
+      status({ ...CERTIFIED_TERMS, mailService: 'certified_return_receipt', ...RECEIPT_WORDS })
+    );
+    expect(text(card, 'studio-summary')).toContain('certified mail with a return receipt');
+    expect(text(card, 'delivery')).toContain('USPS Certified Mail with an electronic return receipt');
+    agree(card, 'certified', 'receipt');
+  });
+
+  it('keeps the preview when the status gives no terms (a letter it does not price)', async () => {
+    const card = mount();
+    await card.show(certifiedPreview(), ON);
+    await card.answerTo(card.requests('tools/call', ASK)[0], status({}));
+    agree(card, 'certified', 'no terms');
+  });
+
+  it('keeps the words of the preview when an older server gives terms without how the letter travels', async () => {
+    const card = mount();
+    await card.show(certifiedPreview(), ON);
+    await card.answerTo(
+      card.requests('tools/call', ASK)[0],
+      status({ canSendNow: false, reasonCannotSend: 'Certified mail is paid with Pay & Send.', sendEligibility: ON_PAGE })
+    );
+    agree(card, 'certified', 'older server');
+  });
+
+  it('reads a service it does not know as ordinary mail, and drops the certified words of the preview', async () => {
+    const card = mount();
+    await card.show(certifiedPreview(), ON);
+    await card.answerTo(card.requests('tools/call', ASK)[0], status({ ...ORDINARY_TERMS, mailService: 'express' }));
+    expect(text(card, 'studio-summary')).not.toContain('certified');
+  });
+
+  it('keeps the service of a preview that came after, whatever the status said of the one before', async () => {
+    const card = mount();
+    await card.show(certifiedPreview(), ON);
+    await card.answerTo(card.requests('tools/call', ASK)[0], status(ORDINARY_TERMS));
+    agree(card, 'ordinary', 'first');
+    await card.show({ ...certifiedPreview(), draftId: 'draft_0002' }, ON);
+    agree(card, 'certified', 'second');
+  });
+
+  it('keeps each draft its own service when the answers arrive out of order', async () => {
+    const card = mount();
+    await card.show(certifiedPreview(), ON);
+    const first = card.requests('tools/call', ASK)[0];
+    await card.show({ ...certifiedPreview(), draftId: 'draft_0002' }, ON);
+    // The answer for the first draft, late: the card is on the second now, which it says nothing of.
+    await card.answerTo(first, status(ORDINARY_TERMS));
+    agree(card, 'certified', 'late answer');
+    // The second draft has its own answer, which is taken.
+    await card.answerTo(card.requests('tools/call', ASK)[1], status({ draftId: 'draft_0002', ...ORDINARY_TERMS }));
+    agree(card, 'ordinary', 'own answer');
+  });
+
+  it('takes nothing from a status for a preview that named no stationery: its card has no row to take the terms', async () => {
+    const card = mount();
+    await card.show(output({ ...CERTIFIED_TERMS }), ON);
+    await card.answerTo(card.requests('tools/call', ASK)[0], status(ORDINARY_TERMS));
+    agree(card, 'certified', 'no stationery');
+  });
+
+  it('takes nothing from a status that lands while the card is setting a style, and the restyle answer governs', async () => {
+    const card = mount();
+    await card.show(certifiedPreview(), ON);
+    await card.click(card.byId('style-row').querySelector('[data-theme="botanical"]')!);
+    // A status that says the opposite of the preview, landing while the style is being set: refused, not taken.
+    await card.answerTo(card.requests('tools/call', ASK)[0], status(ORDINARY_TERMS));
+    agree(card, 'certified', 'while setting');
+    // The chat made the letter ordinary before the style was pressed: the server prices and words it so.
+    await card.answer(
+      {
+        result: {
+          content: [],
+          structuredContent: { draftId: 'draft_0001', stationery: { theme: 'botanical', dateLine: 'October 1, 2026', source: 'asked' }, ...ORDINARY_TERMS, message: 'Restyled.' },
+          _meta: { previewHtml: PAGE }
+        }
+      },
+      'set_stationery'
+    );
+    agree(card, 'ordinary', 'restyle answer');
+  });
+
+  it('brings the words of a change made from the card with its price, so a letter the chat turned ordinary is ordinary in all five things', async () => {
+    const card = mount();
+    await card.show(certifiedPreview(), ON);
+    await card.answerTo(card.requests('tools/call', ASK)[0], status(CERTIFIED_TERMS));
+    agree(card, 'certified', 'status');
+    // The chat turns it ordinary and the card cannot hear that. The person presses a style, and the server answers as the draft is now.
+    await restyled(card, ORDINARY_TERMS);
+    agree(card, 'ordinary', 'restyle');
+  });
+
+  it('ignores a status that lands after the card restyled the draft: the restyle is the later word', async () => {
+    const card = mount();
+    await card.show(certifiedPreview(), ON);
+    await restyled(card, ORDINARY_TERMS);
+    agree(card, 'ordinary', 'restyle');
+    await card.answerTo(card.requests('tools/call', ASK)[0], status(CERTIFIED_TERMS));
+    agree(card, 'ordinary', 'late status');
+  });
+
+  it('keeps the service of the draft a restyle is for, whatever an earlier draft was told', async () => {
+    const card = mount();
+    await card.show(certifiedPreview(), ON);
+    await card.answerTo(card.requests('tools/call', ASK)[0], status(ORDINARY_TERMS));
+    await card.show({ ...certifiedPreview(), draftId: 'draft_0002' }, ON);
+    await restyled(card, CERTIFIED_TERMS, 'draft_0002');
+    agree(card, 'certified', 'second draft restyled');
+  });
+
+  it('keeps the words of the preview when an older server restyles without saying how the letter travels', async () => {
+    const card = mount();
+    await card.show(certifiedPreview(), ON);
+    await restyled(card, { canSendNow: false, reasonCannotSend: 'Certified mail is paid with Pay & Send.', sendEligibility: ON_PAGE });
+    agree(card, 'certified', 'older server restyle');
+  });
+});
+
+describe('the Mail choice on the Delivery tab (#648)', () => {
+  const CLASSIC = { stationery: { theme: 'classic', source: 'default' } };
+  const ALL = ['standard', 'certified', 'certified_return_receipt'];
+  const OFFERED = { ...ON, mailServices: ALL };
+  const ON_PAGE = {
+    packPays: false,
+    payAndSend: { available: false, amountCents: 1199, currency: 'usd', pageUrl: 'https://letterirl.example/send/draft_0001' },
+    letterPack: { available: false, purchaseUrl: 'https://letterirl.example/packs' }
+  };
+  const DISCLAIMER =
+    'USPS timing varies and can take longer. Certified mail is signed for at delivery; if no one signs for it or collects it from the Post Office, USPS returns it to the sender.';
+  const CERTIFIED_TERMS = {
+    canSendNow: false,
+    reasonCannotSend: 'Certified mail is paid with Pay & Send.',
+    sendEligibility: ON_PAGE,
+    mailService: 'certified',
+    deliveryClass: 'USPS Certified Mail',
+    deliveryDisclaimer: DISCLAIMER
+  };
+  const RECEIPT_TERMS = { ...CERTIFIED_TERMS, mailService: 'certified_return_receipt', deliveryClass: 'USPS Certified Mail with an electronic return receipt' };
+  const ORDINARY_TERMS = { ...canSend, deliveryClass: 'USPS First-Class Mail', deliveryDisclaimer: 'USPS timing varies and can take longer.' };
+  const ordinary = () => output({ ...CLASSIC, ...ORDINARY_TERMS });
+  const certified = () => output({ ...CLASSIC, ...CERTIFIED_TERMS });
+  const SET = 'set_mail_service';
+  const ASK = 'get_draft_status';
+  type Card = ReturnType<typeof mount>;
+  const choice = (card: Card, service: string) => card.byId('service-row').querySelector(`[data-service="${service}"]`) as HTMLElement;
+  const choices = (card: Card) => Array.from(card.byId('service-row').querySelectorAll('[data-service]')) as HTMLElement[];
+  const pressed = (card: Card) => choices(card).filter(button => button.getAttribute('aria-pressed') === 'true').map(button => button.dataset.service);
+  const shown = (card: Card) => choices(card).filter(button => !button.hidden).map(button => button.dataset.service);
+  const waiting = (card: Card) => choices(card).map(button => button.getAttribute('aria-disabled'));
+  const changed = (terms: Json, draftId = 'draft_0001') => ({
+    result: { content: [{ type: 'text', text: 'Changed.' }], structuredContent: { draftId, ...terms, message: 'Changed.' } }
+  });
+  const restyle = (terms: Json) => ({
+    result: {
+      content: [],
+      structuredContent: { draftId: 'draft_0001', stationery: { theme: 'botanical', dateLine: 'October 1, 2026', source: 'asked' }, ...terms, message: 'Restyled.' },
+      _meta: { previewHtml: PAGE }
+    }
+  });
+  const status = (extra: Json) => ({
+    result: {
+      content: [],
+      structuredContent: { draftId: 'draft_0001', status: 'ready', deliveryEstimate: 'Mailed in 1-2 business days', stationery: { theme: 'classic' }, ...extra },
+      _meta: { previewHtml: PAGE }
+    }
+  });
+  const isCertified = (card: Card) => (text(card, 'studio-summary') ?? '').includes('certified mail');
+
+  it('sends the version of the service it set (#695)', async () => {
+    const card = mount();
+    await card.show(output({ ...CLASSIC, ...CERTIFIED_TERMS, contentVersion: 'v_preview' }), OFFERED);
+    await card.click(choice(card, 'standard'));
+    await card.answer(changed({ ...ORDINARY_TERMS, contentVersion: 'v_standard', contentVersionBefore: 'v_preview' }), SET);
+    await card.click(card.byId('send-button'));
+    expect(card.lastRequest('tools/call', 'send_letter')!.params.arguments.contentVersion).toBe('v_standard');
+  });
+
+  it("offers the three services on the Delivery tab, with the preview's own pressed", async () => {
+    const card = mount();
+    await card.show(ordinary(), OFFERED);
+    expect(card.byId('service-row').style.display).toBe('');
+    expect(card.byId('service-row').closest('.studio-panel')?.id).toBe('studio-panel-delivery');
+    expect(shown(card)).toEqual(ALL);
+    expect(pressed(card)).toEqual(['standard']);
+    expect(choices(card).map(button => button.textContent)).toEqual(['First-Class', 'Certified', 'Certified + e-receipt']);
+
+    const plain = mount();
+    await plain.show(certified(), OFFERED);
+    expect(pressed(plain)).toEqual(['certified']);
+
+    const receipt = mount();
+    await receipt.show(output({ ...CLASSIC, ...RECEIPT_TERMS }), OFFERED);
+    expect(pressed(receipt)).toEqual(['certified_return_receipt']);
+  });
+
+  it('offers nothing when the preview offers no choice: no services, one, only ones it does not know, or no stationery', async () => {
+    const cases: Array<[string, Json, Json]> = [
+      ['none', ON, ordinary()],
+      ['one', { ...ON, mailServices: ['standard'] }, ordinary()],
+      ['unknown', { ...ON, mailServices: ['standard', 'express', 7] }, ordinary()],
+      ['not a list', { ...ON, mailServices: 'standard,certified' }, ordinary()],
+      ['no stationery', OFFERED, output({ ...ORDINARY_TERMS })]
+    ];
+    for (const [label, meta, result] of cases) {
+      const card = mount();
+      await card.show(result, meta);
+      expect(card.byId('service-row').style.display, label).toBe('none');
+    }
+  });
+
+  it('shows only the services offered', async () => {
+    const card = mount();
+    await card.show(ordinary(), { ...ON, mailServices: ['standard', 'certified', 'registered'] });
+    expect(card.byId('service-row').style.display).toBe('');
+    expect(shown(card)).toEqual(['standard', 'certified']);
+  });
+
+  it('changes the service with set_mail_service, and the price, the summary and the Delivery line follow its answer', async () => {
+    const card = mount();
+    await card.show(ordinary(), OFFERED);
+    await card.click(choice(card, 'certified'));
+    const asked = card.requests('tools/call', SET);
+    expect(asked).toHaveLength(1);
+    expect(asked[0].params.arguments).toEqual({ draftId: 'draft_0001', mailService: 'certified' });
+    // While the server answers: the choice is pressed, every choice waits, and the letter is as it was.
+    expect(pressed(card)).toEqual(['certified']);
+    expect(waiting(card)).toEqual(['true', 'true', 'true']);
+    expect(isCertified(card)).toBe(false);
+    expect(card.byId('send-button').disabled).toBe(true);
+    // A second press meanwhile sends nothing.
+    await card.click(choice(card, 'certified_return_receipt'));
+    expect(card.requests('tools/call', SET)).toHaveLength(1);
+
+    await card.answer(changed(CERTIFIED_TERMS), SET);
+    expect(pressed(card)).toEqual(['certified']);
+    expect(waiting(card)).toEqual(['false', 'false', 'false']);
+    expect(isCertified(card)).toBe(true);
+    expect(text(card, 'delivery')).toContain('USPS Certified Mail');
+    expect(text(card, 'studio-cost')).toBe('Pay & Send USD 11.99');
+    expect(card.byId('pay-page-button').style.display).toBe('flex');
+    expect(card.byId('send-button').style.display).not.toBe('flex');
+  });
+
+  it('goes back to First-Class, and the letter is ordinary mail again', async () => {
+    const card = mount();
+    await card.show(certified(), OFFERED);
+    await card.click(choice(card, 'standard'));
+    expect(card.requests('tools/call', SET)[0].params.arguments).toEqual({ draftId: 'draft_0001', mailService: 'standard' });
+    await card.answer(changed(ORDINARY_TERMS), SET);
+    expect(pressed(card)).toEqual(['standard']);
+    expect(isCertified(card)).toBe(false);
+    expect(text(card, 'delivery')).toContain('USPS First-Class Mail');
+    expect(text(card, 'studio-cost')).toBe('1 letter');
+    expect(card.byId('send-button').style.display).toBe('flex');
+  });
+
+  it('takes the service from the answer, not from the press', async () => {
+    const card = mount();
+    await card.show(ordinary(), OFFERED);
+    await card.click(choice(card, 'certified'));
+    // The chat chose the receipt meanwhile, and the server answers with what the draft holds.
+    await card.answer(changed(RECEIPT_TERMS), SET);
+    expect(pressed(card)).toEqual(['certified_return_receipt']);
+  });
+
+  it('asks for the pressed service again, so a card that missed a change in the chat hears the draft as it is', async () => {
+    const card = mount();
+    await card.show(certified(), OFFERED);
+    await card.click(choice(card, 'certified'));
+    expect(card.requests('tools/call', SET)[0].params.arguments).toEqual({ draftId: 'draft_0001', mailService: 'certified' });
+    // The chat had made it ordinary, and the server keeps the service pressed: the answer says certified again.
+    await card.answer(changed(CERTIFIED_TERMS), SET);
+    expect(pressed(card)).toEqual(['certified']);
+    expect(isCertified(card)).toBe(true);
+  });
+
+  it('sends nothing for a service the preview did not offer', async () => {
+    const card = mount();
+    await card.show(ordinary(), { ...ON, mailServices: ['standard', 'certified'] });
+    await card.click(choice(card, 'certified_return_receipt'));
+    expect(card.requests('tools/call', SET)).toHaveLength(0);
+  });
+
+  it('drops a refusal for one draft when the card is shown another, and hides it once the letter is sent', async () => {
+    const card = mount();
+    await card.show(ordinary(), OFFERED);
+    await card.click(choice(card, 'certified'));
+    await card.answer({ result: { isError: true, content: [{ type: 'text', text: 'Refused.' }] } }, SET);
+    expect(card.byId('service-note').style.display).toBe('block');
+    await card.show({ ...ordinary(), draftId: 'draft_0002' }, OFFERED);
+    expect(card.byId('service-note').style.display).toBe('none');
+    expect(card.byId('service-note').classList.contains('alert')).toBe(false);
+
+    const sent = mount();
+    await sent.show(ordinary(), OFFERED);
+    await sent.click(choice(sent, 'certified'));
+    await sent.answer({ result: { isError: true, content: [{ type: 'text', text: 'Refused.' }] } }, SET);
+    await sent.click(sent.byId('send-button'));
+    await sent.answer({ result: { content: [{ type: 'text', text: 'Sent.' }], structuredContent: { orderId: 'order-1' } } }, 'send_letter');
+    expect(sent.byId('service-note').style.display).toBe('none');
+  });
+
+  it('says a refusal in its own note on the Delivery tab, and keeps the service the letter has', async () => {
+    const card = mount();
+    await card.show(ordinary(), OFFERED);
+    await card.click(choice(card, 'certified'));
+    await card.answer(
+      {
+        result: {
+          isError: true,
+          content: [{ type: 'text', text: 'A gift letter does not pay for certified mail. Make a new preview with mailService certified: it is paid with Pay & Send, not by a gift letter.' }]
+        }
+      },
+      SET
+    );
+    expect(pressed(card)).toEqual(['standard']);
+    expect(waiting(card)).toEqual(['false', 'false', 'false']);
+    expect(isCertified(card)).toBe(false);
+    const note = card.byId('service-note');
+    expect(note.style.display).toBe('block');
+    // In the person's words: the refusal is written for the model.
+    expect(note.textContent).toBe("A gift letter can't go by certified mail. Ask in the chat for a new preview to send it certified.");
+    expect(note.classList.contains('alert')).toBe(true);
+    expect(note.closest('.studio-panel')?.id).toBe('studio-panel-delivery');
+    expect(card.byId('style-note').style.display).toBe('none');
+    // The next change starts afresh.
+    await card.click(choice(card, 'certified'));
+    expect(note.style.display).toBe('none');
+    await card.answer(changed(CERTIFIED_TERMS), SET);
+    expect(note.style.display).toBe('none');
+    expect(note.classList.contains('alert')).toBe(false);
+    expect(pressed(card)).toEqual(['certified']);
+  });
+
+  it("says each of set_mail_service's refusals in the person's words, and anything else as it came", async () => {
+    const cases: Array<[string, string]> = [
+      ["This letter has already been sent, so how it travels can't change. list_orders shows it.", "This letter has already been sent, so how it travels can't change now."],
+      ['This letter was sent just after the change was made, so it went with the service it holds now. list_orders shows it.', 'This letter was sent just as it was changed. Its order says how it travels.'],
+      ['This preview has expired. Make a new preview: the letter previews take mailService themselves.', 'This preview has expired. Ask in the chat for a new one.'],
+      [
+        "This preview is tied to a Pay & Send payment, so how it travels can't change now. Finish or let that payment lapse, or make a new preview.",
+        "A Pay & Send payment is open for this letter, so how it travels can't change now."
+      ],
+      ['Certified mail is for letters, and a postcard always goes as ordinary mail. Make a letter preview to send certified mail.', 'A postcard always goes as ordinary mail.'],
+      ["That preview wasn't found. Make a new preview, then try again.", "That preview wasn't found. Ask in the chat for a new one."],
+      ['Certified mail is not available right now. The preview stays as it is.', 'Certified mail is not available right now. The preview stays as it is.'],
+      // Certified mail turned off since the preview: the tool is no longer listed, and the connection says so.
+      ['MCP error -32602: Tool set_mail_service not found', 'Certified mail is not available right now. The preview stays as it is.'],
+      // Another error that only looks like one of ours is said as it came.
+      ['Token has expired', 'Token has expired'],
+      ['Tool set_stationery not found', 'Tool set_stationery not found']
+    ];
+    for (const [refusal, said] of cases) {
+      const card = mount();
+      await card.show(ordinary(), OFFERED);
+      await card.click(choice(card, 'certified'));
+      await card.answer({ result: { isError: true, content: [{ type: 'text', text: refusal }] } }, SET);
+      expect(text(card, 'service-note'), refusal).toBe(said);
+    }
+  });
+
+  it("takes a longer letter's pages from the answer, and keeps how full they are: a change of service leaves the page as it is", async () => {
+    const PAY_AND_SEND = { packPays: false, payAndSend: { available: true, amountCents: 599, currency: 'usd' }, letterPack: { available: false } };
+    const card = mount();
+    await card.show(output({ ...CLASSIC, ...ORDINARY_TERMS, pages: 2, canSendNow: false, sendEligibility: PAY_AND_SEND }), {
+      ...OFFERED,
+      pageFit: { pages: 2, sheets: 1 }
+    });
+    expect(text(card, 'studio-summary')).toContain('2 pages, both sides');
+    const fit = text(card, 'studio-fit');
+    expect(fit).toBe('Runs on to the back of the page: printed on both sides of one sheet.');
+    await card.click(choice(card, 'certified'));
+    await card.answer(changed({ ...CERTIFIED_TERMS, pages: 2 }), SET);
+    expect(isCertified(card)).toBe(true);
+    expect(text(card, 'studio-summary')).toContain('2 pages, both sides');
+    expect(text(card, 'studio-fit')).toBe(fit);
+    // And back again, from the terms the card now holds.
+    await card.click(choice(card, 'standard'));
+    await card.answer(changed({ ...ORDINARY_TERMS, canSendNow: false, sendEligibility: PAY_AND_SEND, pages: 2 }), SET);
+    expect(text(card, 'studio-summary')).toContain('2 pages, both sides');
+    expect(text(card, 'studio-fit')).toBe(fit);
+
+    const one = mount();
+    await one.show(ordinary(), { ...OFFERED, pageFit: { pages: 1, sheets: 1, roomLines: 20, roomCharacters: 1940, charactersPerLine: 97 } });
+    await one.click(choice(one, 'certified'));
+    await one.answer(changed(CERTIFIED_TERMS), SET);
+    expect(text(one, 'studio-fit')).toBe('Fits on one page, with room for about 1,940 more characters.');
+    expect(text(one, 'studio-summary')).not.toContain('pages');
+  });
+
+  it('keeps how full the page is as the last restyle gave it, not as the preview did', async () => {
+    const fit = (roomCharacters: number) => ({ pages: 1, sheets: 1, doubleSided: false, roomLines: Math.ceil(roomCharacters / 64), roomCharacters, charactersPerLine: 64 });
+    const card = mount();
+    await card.show(ordinary(), { ...OFFERED, pageFit: fit(1940) });
+    await card.click(card.byId('style-row').querySelector('[data-theme="typewriter"]')!);
+    await card.answer({ ...restyle(ORDINARY_TERMS), result: { ...restyle(ORDINARY_TERMS).result, _meta: { previewHtml: PAGE, pageFit: fit(512) } } }, 'set_stationery');
+    expect(text(card, 'studio-fit')).toBe('Fits on one page, with room for about 512 more characters.');
+    await card.click(choice(card, 'certified'));
+    await card.answer(changed(CERTIFIED_TERMS), SET);
+    expect(text(card, 'studio-fit')).toBe('Fits on one page, with room for about 512 more characters.');
+  });
+
+  it('takes the pages the answer gives, which the chat may have changed unheard, and drops a fit for other pages', async () => {
+    const card = mount();
+    await card.show(ordinary(), { ...OFFERED, pageFit: { pages: 1, sheets: 1, roomLines: 20, roomCharacters: 1940, charactersPerLine: 97 } });
+    expect(text(card, 'studio-fit')).toBe('Fits on one page, with room for about 1,940 more characters.');
+    await card.click(choice(card, 'certified'));
+    await card.answer(changed({ ...CERTIFIED_TERMS, pages: 3 }), SET);
+    expect(text(card, 'studio-summary')).toContain('3 pages, both sides');
+    // The one-page room is for words the chat has changed since: it is not said of a three-page letter.
+    expect(text(card, 'studio-fit')).not.toContain('room for about 1,940');
+
+    // Nor counted in the Words editor, which is where the fit is read.
+    const open = mount();
+    await open.show(ordinary(), { ...OFFERED, pageFit: { pages: 1, sheets: 1, roomLines: 20, roomCharacters: 1940, charactersPerLine: 97 } });
+    await open.click(open.tab('words'));
+    await open.click(open.byId('studio-words-open'));
+    expect(text(open, 'studio-words-count')).toBe('About 1,940 characters left on this page.');
+    await open.click(choice(open, 'certified'));
+    await open.answer(changed({ ...CERTIFIED_TERMS, pages: 2 }), SET);
+    expect(text(open, 'studio-summary')).toContain('2 pages, both sides');
+    expect(text(open, 'studio-words-count')).not.toContain('1,940');
+  });
+
+  it('takes no status after a change made here: the change is the later word', async () => {
+    const card = mount();
+    await card.show(ordinary(), OFFERED);
+    await card.click(choice(card, 'certified'));
+    await card.answer(changed(CERTIFIED_TERMS), SET);
+    await card.answerTo(card.requests('tools/call', ASK)[0], status(ORDINARY_TERMS));
+    expect(pressed(card)).toEqual(['certified']);
+    expect(isCertified(card)).toBe(true);
+  });
+
+  it('reads a service it does not know, in a status, as First-Class', async () => {
+    const card = mount();
+    await card.show(certified(), OFFERED);
+    await card.answerTo(card.requests('tools/call', ASK)[0], status({ ...ORDINARY_TERMS, mailService: 'express' }));
+    expect(pressed(card)).toEqual(['standard']);
+  });
+
+  it('takes no press, and shows no note, once a preview without stationery has put the row away', async () => {
+    const card = mount();
+    await card.show(ordinary(), OFFERED);
+    await card.click(choice(card, 'certified'));
+    const pending = card.requests('tools/call', SET)[0];
+    // A preview that named no stationery: the row goes, though its answer for the first draft is still to come.
+    await card.show(output({ ...ORDINARY_TERMS, draftId: 'draft_0002' }), OFFERED);
+    expect(card.byId('service-row').style.display).toBe('none');
+    await card.answerTo(pending, { result: { isError: true, content: [{ type: 'text', text: 'Refused.' }] } });
+    expect(card.byId('service-note').style.display).toBe('none');
+    await card.click(choice(card, 'certified_return_receipt'));
+    expect(card.requests('tools/call', SET)).toHaveLength(1);
+  });
+
+  it('takes no press while the letter is being sent', async () => {
+    const card = mount();
+    await card.show(ordinary(), OFFERED);
+    await card.click(card.byId('send-button'));
+    await card.click(choice(card, 'certified'));
+    expect(card.requests('tools/call', SET)).toHaveLength(0);
+  });
+
+  it('is shown without the studio too, among the rows', async () => {
+    const card = mount();
+    await card.show(ordinary(), { previewHtml: PAGE, mailServices: ALL });
+    expect(card.byId('service-row').style.display).toBe('');
+    expect(card.byId('service-row').closest('.studio-panel')).toBeNull();
+    await card.click(choice(card, 'certified'));
+    expect(card.requests('tools/call', SET)).toHaveLength(1);
+  });
+
+  it('says so, and changes nothing, when the answer is for another draft or gives no terms', async () => {
+    const cases: Array<[string, Json]> = [
+      ['another draft', changed(CERTIFIED_TERMS, 'draft_0009')],
+      ['no terms', { result: { content: [], structuredContent: { draftId: 'draft_0001', message: 'Changed.' } } }]
+    ];
+    for (const [label, reply] of cases) {
+      const card = mount();
+      await card.show(ordinary(), OFFERED);
+      await card.click(choice(card, 'certified'));
+      await card.answer(reply, SET);
+      expect(pressed(card), label).toEqual(['standard']);
+      expect(isCertified(card), label).toBe(false);
+      expect(text(card, 'service-note'), label).toContain('Make the preview again');
+    }
+  });
+
+  it('ignores an answer for a draft the card has moved on from', async () => {
+    const card = mount();
+    await card.show(ordinary(), OFFERED);
+    await card.click(choice(card, 'certified'));
+    const late = card.requests('tools/call', SET)[0];
+    await card.show({ ...ordinary(), draftId: 'draft_0002' }, OFFERED);
+    await card.answerTo(late, changed(CERTIFIED_TERMS));
+    expect(pressed(card)).toEqual(['standard']);
+    expect(isCertified(card)).toBe(false);
+    expect(waiting(card)).toEqual(['false', 'false', 'false']);
+    // Nor once the card draws the new draft again: nothing of the late answer was kept for it.
+    await card.show({ ...ordinary(), draftId: 'draft_0002' }, OFFERED);
+    expect(pressed(card)).toEqual(['standard']);
+    expect(isCertified(card)).toBe(false);
+    // And the new draft changes as its own.
+    await card.click(choice(card, 'certified_return_receipt'));
+    expect(card.requests('tools/call', SET)[1].params.arguments).toEqual({ draftId: 'draft_0002', mailService: 'certified_return_receipt' });
+  });
+
+  it('follows a status that says the chat changed the service, and keeps it when a status says nothing of it', async () => {
+    const card = mount();
+    await card.show(ordinary(), OFFERED);
+    await card.answerTo(card.requests('tools/call', ASK)[0], status(RECEIPT_TERMS));
+    expect(pressed(card)).toEqual(['certified_return_receipt']);
+
+    const quiet = mount();
+    await quiet.show(certified(), OFFERED);
+    await quiet.answerTo(quiet.requests('tools/call', ASK)[0], status({ canSendNow: false, sendEligibility: ON_PAGE }));
+    expect(pressed(quiet)).toEqual(['certified']);
+  });
+
+  it('follows a restyle that says the letter travels another way now', async () => {
+    const card = mount();
+    await card.show(certified(), OFFERED);
+    await card.click(card.byId('style-row').querySelector('[data-theme="botanical"]')!);
+    await card.answer(restyle(ORDINARY_TERMS), 'set_stationery');
+    expect(pressed(card)).toEqual(['standard']);
+  });
+
+  it('waits while a style is being set, and is gone once the letter is sent', async () => {
+    const card = mount();
+    await card.show(ordinary(), OFFERED);
+    await card.click(card.byId('style-row').querySelector('[data-theme="botanical"]')!);
+    await card.click(choice(card, 'certified'));
+    expect(card.requests('tools/call', SET)).toHaveLength(0);
+    await card.answer(restyle(ORDINARY_TERMS), 'set_stationery');
+    await card.click(card.byId('send-button'));
+    await card.answer({ result: { content: [{ type: 'text', text: 'Sent.' }], structuredContent: { orderId: 'order-1' } } }, 'send_letter');
+    expect(card.byId('service-row').style.display).toBe('none');
+    await card.click(choice(card, 'certified'));
+    expect(card.requests('tools/call', SET)).toHaveLength(0);
+  });
+});
+
+describe('saved designs on the Style tab (#649)', () => {
+  const ID = '3f2b8c1e-9a4d-4c7e-8b1f-2d6a5e9c0b7a';
+  const OTHER = '4f2b8c1e-9a4d-4c7e-8b1f-2d6a5e9c0b7a';
+  const DESIGN = { face: 'handwritten', ornament: 'sprig', ruled: true, tone: 'medium' };
+  const DESIGNS = [
+    { designId: ID, name: 'Garden', design: DESIGN },
+    { designId: OTHER, name: 'Grandma <b>Ruth</b>', design: { ...DESIGN, ornament: 'monogram' } }
+  ];
+  const CLASSIC = { stationery: { theme: 'classic', source: 'default' } };
+  const GARDEN = { stationery: { theme: 'custom', design: DESIGN, name: 'Garden', designId: ID, dateLine: 'October 1, 2026', source: 'asked' } };
+  type Card = ReturnType<typeof mount>;
+  const designButtons = (card: Card) => Array.from(card.byId('style-designs').querySelectorAll('[data-design-id]')) as HTMLElement[];
+  const pressedStyle = (card: Card) =>
+    Array.from(card.byId('style-row').querySelectorAll('[aria-pressed="true"]')).map(button => button.getAttribute('data-theme') ?? `design:${button.getAttribute('data-design-id')}`);
+  const restyled = (stationery: Json) => ({
+    result: {
+      content: [],
+      structuredContent: { draftId: 'draft_0001', stationery, ...canSend, message: 'Restyled.' },
+      _meta: { previewHtml: PAGE }
+    }
+  });
+
+  it("draws a button for each of the person's designs, named as they saved it, as text", async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, stationeryDesigns: DESIGNS });
+    expect(card.byId('style-designs').hidden).toBe(false);
+    expect(designButtons(card).map(button => button.textContent)).toEqual(['Garden', 'Grandma <b>Ruth</b>']);
+    expect(card.byId('style-designs').querySelector('b')).toBeNull();
+    expect(designButtons(card).map(button => button.getAttribute('aria-pressed'))).toEqual(['false', 'false']);
+    expect(pressedStyle(card)).toEqual(['classic']);
+  });
+
+  it('draws none without designs, or from anything that is not one', async () => {
+    for (const meta of [ON, { ...ON, stationeryDesigns: [] }, { ...ON, stationeryDesigns: 'Garden' }, { ...ON, stationeryDesigns: [null, { name: 'x' }, { designId: ID }, { designId: '', name: 'x' }, { designId: ID, name: '' }] }]) {
+      const card = mount();
+      await card.show(output(CLASSIC), meta);
+      expect(designButtons(card), JSON.stringify(meta).slice(0, 60)).toHaveLength(0);
+      expect(card.byId('style-designs').hidden).toBe(true);
+    }
+  });
+
+  it('shows the Style row for a letter drawn in a design, with the design pressed, and names it in the summary', async () => {
+    const card = mount();
+    await card.show(output(GARDEN), { ...ON, stationeryDesigns: DESIGNS });
+    expect(card.byId('style-row').style.display).toBe('');
+    expect(pressedStyle(card)).toEqual([`design:${ID}`]);
+    expect(text(card, 'studio-summary')).toContain('Garden');
+    expect(text(card, 'studio-summary')).not.toContain('Custom');
+  });
+
+  it('names a design not among the buttons by its name, and presses nothing', async () => {
+    const card = mount();
+    await card.show(output(GARDEN), ON);
+    expect(card.byId('style-row').style.display).toBe('');
+    expect(pressedStyle(card)).toEqual([]);
+    expect(text(card, 'studio-summary')).toContain('Garden');
+  });
+
+  it("draws the letter in a design with set_stationery, and takes the answer's design", async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, stationeryDesigns: DESIGNS });
+    await card.click(designButtons(card)[0]);
+    const asked = card.requests('tools/call', 'set_stationery');
+    expect(asked).toHaveLength(1);
+    expect(asked[0].params.arguments).toEqual({ draftId: 'draft_0001', stationeryDesignId: ID });
+    // While the server answers, the design shows pressed.
+    expect(pressedStyle(card)).toEqual([`design:${ID}`]);
+    // And every design waits with the themes.
+    expect(designButtons(card).map(button => button.getAttribute('aria-disabled'))).toEqual(['true', 'true']);
+    await card.answer(restyled(GARDEN.stationery), 'set_stationery');
+    expect(pressedStyle(card)).toEqual([`design:${ID}`]);
+    expect(designButtons(card).map(button => button.getAttribute('aria-disabled'))).toEqual(['false', 'false']);
+    expect(text(card, 'studio-summary')).toContain('Garden');
+    // Pressing it again asks nothing.
+    await card.click(designButtons(card)[0]);
+    expect(card.requests('tools/call', 'set_stationery')).toHaveLength(1);
+    // And back to a theme.
+    await card.click(card.byId('style-row').querySelector('[data-theme="botanical"]')!);
+    expect(card.requests('tools/call', 'set_stationery')[1].params.arguments).toEqual({ draftId: 'draft_0001', stationery: 'botanical' });
+  });
+
+  it('says so, and keeps the style, when the answer is not the design asked for', async () => {
+    for (const answer of [{ theme: 'botanical', source: 'asked' }, { ...GARDEN.stationery, designId: OTHER }]) {
+      const card = mount();
+      await card.show(output(CLASSIC), { ...ON, stationeryDesigns: DESIGNS });
+      await card.click(designButtons(card)[0]);
+      await card.answer(restyled(answer), 'set_stationery');
+      expect(pressedStyle(card), JSON.stringify(answer)).toEqual(['classic']);
+      expect(text(card, 'style-note')).toContain('The style may have changed');
+    }
+  });
+
+  it("takes back what a design printed when it is pressed again: its headline and initials", async () => {
+    const card = mount();
+    await card.show(output({ stationery: { ...GARDEN.stationery, headline: 'For Sam' } }), { ...ON, stationeryDesigns: DESIGNS });
+    await card.click(card.byId('style-row').querySelector('[data-theme="classic"]')!);
+    await card.answer(restyled({ theme: 'classic', source: 'asked' }), 'set_stationery');
+    await card.click(designButtons(card)[0]);
+    expect(card.requests('tools/call', 'set_stationery')[1].params.arguments).toEqual({ draftId: 'draft_0001', stationeryDesignId: ID, headline: 'For Sam' });
+  });
+
+  it("labels each design's button as the person's design, so a screen reader tells it from a theme of the same name", async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, stationeryDesigns: [{ designId: ID, name: 'Classic', design: DESIGN }] });
+    expect(designButtons(card)[0].getAttribute('aria-label')).toBe('Classic, your design');
+    expect(designButtons(card)[0].textContent).toBe('Classic');
+  });
+
+  it("says a design deleted since the preview in the person's words, and puts its button away", async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, stationeryDesigns: DESIGNS });
+    await card.click(designButtons(card)[0]);
+    await card.answer(
+      {
+        result: {
+          isError: true,
+          content: [{ type: 'text', text: "That stationery design was not found. list_stationery_designs lists the account's designs, with their designId." }]
+        }
+      },
+      'set_stationery'
+    );
+    expect(text(card, 'style-note')).toBe('That design was deleted. Make the preview again to see your designs.');
+    expect(designButtons(card).map(button => button.textContent)).toEqual(['Grandma <b>Ruth</b>']);
+    expect(pressedStyle(card)).toEqual(['classic']);
+
+    // A keyboard press: focus goes to the style the letter keeps, not to the page.
+    const keyed = mount();
+    await keyed.show(output(CLASSIC), { ...ON, stationeryDesigns: DESIGNS });
+    designButtons(keyed)[0].focus();
+    await keyed.click(designButtons(keyed)[0]);
+    await keyed.answer(
+      { result: { isError: true, content: [{ type: 'text', text: 'That stationery design was not found.' }] } },
+      'set_stationery'
+    );
+    expect(keyed.document.activeElement).toBe(keyed.byId('style-row').querySelector('[data-theme="classic"]'));
+    // Another refusal is said as it came, and keeps the buttons.
+    const other = mount();
+    await other.show(output(CLASSIC), { ...ON, stationeryDesigns: DESIGNS });
+    await other.click(designButtons(other)[0]);
+    await other.answer({ result: { isError: true, content: [{ type: 'text', text: 'Stationery is not available yet.' }] } }, 'set_stationery');
+    expect(text(other, 'style-note')).toBe('Stationery is not available yet.');
+    expect(designButtons(other)).toHaveLength(2);
+
+    // Designs turned off since the preview: the tool asks the model for a theme; the card says it plainly.
+    const off = mount();
+    await off.show(output(CLASSIC), { ...ON, stationeryDesigns: DESIGNS });
+    await off.click(designButtons(off)[0]);
+    await off.answer(
+      { result: { isError: true, content: [{ type: 'text', text: 'Name the stationery: classic, monogram, botanical, celebration, typewriter or handwritten.' }] } },
+      'set_stationery'
+    );
+    expect(text(off, 'style-note')).toBe("Saved designs aren't available now. Make the preview again to see the styles.");
+  });
+
+  it('carries initials back only into a design whose ornament is the monogram', async () => {
+    const card = mount();
+    await card.show(output({ stationery: { ...GARDEN.stationery, monogram: 'PR' } }), { ...ON, stationeryDesigns: DESIGNS });
+    await card.click(card.byId('style-row').querySelector('[data-theme="classic"]')!);
+    await card.answer(restyled({ theme: 'classic', source: 'asked' }), 'set_stationery');
+    await card.click(designButtons(card)[0]);
+    // Garden draws a sprig: no initials go with it.
+    expect(card.requests('tools/call', 'set_stationery')[1].params.arguments).toEqual({ draftId: 'draft_0001', stationeryDesignId: ID });
+
+    const monogram = mount();
+    const initials = { theme: 'custom', design: { ...DESIGN, ornament: 'monogram' }, name: 'Grandma <b>Ruth</b>', designId: OTHER, monogram: 'PR', source: 'asked' };
+    await monogram.show(output({ stationery: initials }), { ...ON, stationeryDesigns: DESIGNS });
+    await monogram.click(monogram.byId('style-row').querySelector('[data-theme="classic"]')!);
+    await monogram.answer(restyled({ theme: 'classic', source: 'asked' }), 'set_stationery');
+    await monogram.click(designButtons(monogram)[1]);
+    expect(monogram.requests('tools/call', 'set_stationery')[1].params.arguments).toEqual({ draftId: 'draft_0001', stationeryDesignId: OTHER, monogram: 'PR' });
+  });
+
+  it('presses no design for a status naming one replaced since under the same name, so the current one can be pressed', async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, stationeryDesigns: DESIGNS });
+    await card.answerTo(card.requests('tools/call', 'get_draft_status')[0], {
+      result: {
+        content: [],
+        structuredContent: { draftId: 'draft_0001', status: 'ready', stationery: { theme: 'custom', design: { ...DESIGN, tone: 'dark' }, name: 'Garden' } },
+        _meta: { previewHtml: PAGE }
+      }
+    });
+    expect(pressedStyle(card)).toEqual([]);
+    await card.click(designButtons(card)[0]);
+    expect(card.requests('tools/call', 'set_stationery')[0].params.arguments).toEqual({ draftId: 'draft_0001', stationeryDesignId: ID });
+  });
+
+  it('presses a design a status names by its name, though the status gives no id', async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, stationeryDesigns: DESIGNS });
+    await card.answerTo(card.requests('tools/call', 'get_draft_status')[0], {
+      result: {
+        content: [],
+        structuredContent: { draftId: 'draft_0001', status: 'ready', stationery: { theme: 'custom', design: DESIGN, name: 'Garden' } },
+        _meta: { previewHtml: PAGE }
+      }
+    });
+    expect(pressedStyle(card)).toEqual([`design:${ID}`]);
+  });
+});
+
+describe('the content version the letter card sends (#695)', () => {
+  const STYLED = { stationery: { theme: 'classic', source: 'default' } };
+  const PAY = {
+    canSendNow: false,
+    sendEligibility: { packPays: false, payAndSend: { available: true, amountCents: 599, currency: 'usd' }, letterPack: { available: false } }
+  };
+  /** A restyle's answer: the version it wrote, and the version it was made to. */
+  const restyled = (theme: string, version: string, page?: string, before = 'v_preview') => ({
+    result: {
+      content: [],
+      structuredContent: {
+        draftId: 'draft_0001',
+        stationery: { theme, dateLine: 'October 1, 2026', source: 'asked' },
+        contentVersion: version,
+        contentVersionBefore: before,
+        ...canSend,
+        message: 'Restyled.'
+      },
+      ...(page ? { _meta: { previewHtml: page } } : {})
+    }
+  });
+  const ready = (version: string, page: string | null, extra: Json = {}) => ({
+    result: {
+      content: [],
+      structuredContent: { draftId: 'draft_0001', status: 'ready', stationery: { theme: 'classic' }, contentVersion: version, ...canSend, ...extra },
+      ...(page ? { _meta: { previewHtml: page } } : {})
+    }
+  });
+  const CHANGED_TEXT =
+    'This letter changed after it was shown, so nothing was sent. Show the person the letter as it is now (its preview card, or a new preview), and send it once they have seen it.';
+  const CHANGED = { result: { isError: true, content: [{ type: 'text', text: CHANGED_TEXT }] } };
+  const sentWith = (card: ReturnType<typeof mount>) => card.lastRequest('tools/call', 'send_letter')!.params.arguments;
+  const restyle = (card: ReturnType<typeof mount>, theme: string) => card.click(card.byId('style-row').querySelector(`[data-theme="${theme}"]`)!);
+  const SAID_SENT = 'This letter changed after it was shown here, so nothing was sent.';
+
+  it("sends the preview's version, and none for a preview that names none", async () => {
+    const card = mount();
+    await card.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
+    await card.click(card.byId('send-button'));
+    expect(sentWith(card)).toEqual({ draftId: 'draft_0001', confirm: true, contentVersion: 'v_preview' });
+
+    const older = mount();
+    await older.show(output(STYLED), ON);
+    await older.click(older.byId('send-button'));
+    expect(sentWith(older)).toEqual({ draftId: 'draft_0001', confirm: true });
+  });
+
+  it('sends the version of a restyle it drew, made to the version it shows, and keeps the last for one whose page did not come back', async () => {
+    const card = mount();
+    await card.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
+    await restyle(card, 'botanical');
+    await card.answer(restyled('botanical', 'v_botanical', PAGE), 'set_stationery');
+    await card.click(card.byId('send-button'));
+    expect(sentWith(card).contentVersion).toBe('v_botanical');
+
+    const pageless = mount();
+    await pageless.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
+    await restyle(pageless, 'botanical');
+    await pageless.answer(restyled('botanical', 'v_botanical'), 'set_stationery');
+    await pageless.click(pageless.byId('send-button'));
+    // The card still shows the classic page: what it sends is that, which the server refuses and the card draws again.
+    expect(sentWith(pageless).contentVersion).toBe('v_preview');
+  });
+
+  it('takes no version from an edit made to another, and draws the draft as it is now instead (#695 review round 1)', async () => {
+    const card = mount();
+    await card.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
+    const asks = card.requests('tools/call', 'get_draft_status').length;
+    // The chat changed the words meanwhile: the restyle was made to their version, not the one the card shows.
+    await restyle(card, 'botanical');
+    await card.answer(restyled('botanical', 'v_both', PAGE, 'v_chat'), 'set_stationery');
+    expect(card.requests('tools/call', 'get_draft_status').length).toBe(asks + 1);
+
+    // Once the draft as it is now is drawn, its version is the one sent.
+    const NOW = document1('Dear Sam, and more,\nPat');
+    await card.answer(ready('v_now', NOW, { stationery: { theme: 'botanical', dateLine: 'October 1, 2026' } }), 'get_draft_status');
+    expect(card.byId('mockup-container').innerHTML).toContain('<title>Dear Sam, and more,\nPat</title>');
+    await card.click(card.byId('send-button'));
+    expect(sentWith(card).contentVersion).toBe('v_now');
+
+    // Asked, and answered with nothing to draw: the edit's version is still not taken.
+    const unanswered = mount();
+    await unanswered.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
+    await restyle(unanswered, 'botanical');
+    await unanswered.answer(restyled('botanical', 'v_both', PAGE, 'v_chat'), 'set_stationery');
+    await unanswered.answer(ready('v_now', null), 'get_draft_status');
+    await unanswered.click(unanswered.byId('send-button'));
+    expect(sentWith(unanswered).contentVersion).toBe('v_preview');
+  });
+
+  it('sends the version of the dates it set, and not of dates set on a draft changed meanwhile', async () => {
+    const DATED = { arrivalWindow: WINDOW, schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' }, deliveryEstimate: 'Goes to the printer Fri, Oct 9.' };
+    const cleared = (version: string, before: string) => ({
+      result: { content: [], structuredContent: { draftId: 'draft_0001', schedule: null, contentVersion: version, contentVersionBefore: before, deliveryEstimate: 'Mailed in 1-2 business days', message: 'Cleared.' } }
+    });
+    const card = mount();
+    await card.show(output({ ...STYLED, contentVersion: 'v_preview', ...DATED }), ON);
+    await card.click(card.byId('arrives-asap'));
+    await card.answer(cleared('v_asap', 'v_preview'), 'set_arrival_date');
+    await card.click(card.byId('send-button'));
+    expect(sentWith(card).contentVersion).toBe('v_asap');
+
+    const chat = mount();
+    await chat.show(output({ ...STYLED, contentVersion: 'v_preview', ...DATED }), ON);
+    await chat.click(chat.byId('arrives-asap'));
+    // The chat changed the words before the date was cleared: the version covers words this card never drew.
+    await chat.answer(cleared('v_words_and_date', 'v_chat_words'), 'set_arrival_date');
+    await chat.click(chat.byId('send-button'));
+    expect(sentWith(chat).contentVersion).toBe('v_preview');
+  });
+
+  it('sends the version of a status answer it took, and not of one it did not', async () => {
+    const card = mount();
+    await card.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
+    // The chat changed the words since the preview: the status the card asked on opening draws them.
+    await card.answer(ready('v_chat', document1('Dear Sam, and more,\nPat')), 'get_draft_status');
+    await card.click(card.byId('send-button'));
+    expect(sentWith(card).contentVersion).toBe('v_chat');
+
+    // A status answer that lands after the card's own restyle is older than it: neither its page nor its version.
+    const restyledFirst = mount();
+    await restyledFirst.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
+    const asked = restyledFirst.lastRequest('tools/call', 'get_draft_status')!;
+    await restyle(restyledFirst, 'botanical');
+    await restyledFirst.answer(restyled('botanical', 'v_botanical', PAGE), 'set_stationery');
+    await restyledFirst.answerTo(asked, ready('v_old', document1('Dear Sam,\nPat')));
+    await restyledFirst.click(restyledFirst.byId('send-button'));
+    expect(sentWith(restyledFirst).contentVersion).toBe('v_botanical');
+
+    // A status answer with no page draws nothing: its version is not taken.
+    const pageless = mount();
+    await pageless.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
+    await pageless.answer(ready('v_chat', null), 'get_draft_status');
+    await pageless.click(pageless.byId('send-button'));
+    expect(sentWith(pageless).contentVersion).toBe('v_preview');
+  });
+
+  it('draws the letter again when the send is refused for a change since, and sends it as it is now', async () => {
+    const card = mount();
+    await card.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
+    // Restyled by this card, so an ordinary status answer would not be taken.
+    await restyle(card, 'botanical');
+    await card.answer(restyled('botanical', 'v_botanical', PAGE), 'set_stationery');
+    const asks = card.requests('tools/call', 'get_draft_status').length;
+
+    await card.click(card.byId('send-button'));
+    await card.answer(CHANGED, 'send_letter');
+
+    expect(card.byId('error-message').textContent).toBe(`${SAID_SENT} Getting it as it is now…`);
+    // Held while it asks (#695 review round 2).
+    expect((card.byId('send-button') as HTMLButtonElement).disabled).toBe(true);
+    // And a press meanwhile sends nothing.
+    const sends = card.requests('tools/call', 'send_letter').length;
+    await card.click(card.byId('send-button'));
+    expect(card.requests('tools/call', 'send_letter').length).toBe(sends);
+    // Asked again, though it asked on opening.
+    expect(card.requests('tools/call', 'get_draft_status').length).toBe(asks + 1);
+    const NOW = document1('Dear Sam, and more,\nPat');
+    await card.answer(ready('v_now', NOW, { stationery: { theme: 'typewriter', dateLine: 'October 1, 2026' } }), 'get_draft_status');
+    expect(card.byId('mockup-container').innerHTML).toContain('<title>Dear Sam, and more,\nPat</title>');
+    expect(card.byId('error-message').textContent).toBe(`${SAID_SENT} It is shown again as it is now: check it, then press Send again.`);
+    expect((card.byId('send-button') as HTMLButtonElement).disabled).toBe(false);
+    expect(card.byId('send-button-text').textContent).toBe('Send Letter');
+
+    await card.click(card.byId('send-button'));
+    expect(sentWith(card).contentVersion).toBe('v_now');
+  });
+
+  it('says it cannot show the letter as it is now when the answer draws nothing, and keeps the version it shows (#695 review round 1)', async () => {
+    // A preview without stationery: the card draws no page from a status answer.
+    const card = mount();
+    await card.show(output({ contentVersion: 'v_preview' }), ON);
+    await card.click(card.byId('send-button'));
+    await card.answer(CHANGED, 'send_letter');
+    await card.answer(ready('v_now', document1('Dear Sam, and more,\nPat')), 'get_draft_status');
+    expect(card.byId('error-message').textContent).toBe(
+      `${SAID_SENT} This card can't show it as it is now: ask in the chat for a new preview, and send from that.`
+    );
+    await card.click(card.byId('send-button'));
+    expect(sentWith(card).contentVersion).toBe('v_preview');
+
+    // Refused again for the same version: it says so at once, and does not ask again.
+    const asks = card.requests('tools/call', 'get_draft_status').length;
+    await card.answer(CHANGED, 'send_letter');
+    expect(card.requests('tools/call', 'get_draft_status').length).toBe(asks);
+    expect(card.byId('error-message').textContent).toBe(
+      `${SAID_SENT} This card can't show it as it is now: ask in the chat for a new preview, and send from that.`
+    );
+  });
+
+  it('says to try again when it could not ask, and asks again on the next refusal (#695 review round 2)', async () => {
+    const card = mount();
+    await card.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
+    await card.click(card.byId('send-button'));
+    await card.answer(CHANGED, 'send_letter');
+    await card.answer({ error: { code: -32000, message: 'The host could not reach the app.' } }, 'get_draft_status');
+    expect(card.byId('error-message').textContent).toBe(`${SAID_SENT} This card couldn't check it just now: try again in a moment.`);
+    expect((card.byId('send-button') as HTMLButtonElement).disabled).toBe(false);
+
+    const asks = card.requests('tools/call', 'get_draft_status').length;
+    await card.click(card.byId('send-button'));
+    await card.answer(CHANGED, 'send_letter');
+    expect(card.requests('tools/call', 'get_draft_status').length).toBe(asks + 1);
+    expect(card.byId('error-message').textContent).toBe(`${SAID_SENT} Getting it as it is now…`);
+  });
+
+  it('says to try again when the ask comes back as an error result (#695 review round 3)', async () => {
+    const card = mount();
+    await card.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
+    await card.click(card.byId('send-button'));
+    await card.answer(CHANGED, 'send_letter');
+    await card.answer({ result: { isError: true, content: [{ type: 'text', text: 'Something went wrong.' }] } }, 'get_draft_status');
+    expect(card.byId('error-message').textContent).toBe(`${SAID_SENT} This card couldn't check it just now: try again in a moment.`);
+  });
+
+  it('counts as refused the version it sent, not one it drew while the send was out (#695 review round 3)', async () => {
+    const card = mount();
+    await card.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
+    const opening = card.lastRequest('tools/call', 'get_draft_status')!;
+    await card.click(card.byId('send-button'));
+    // While the send is out, the status asked on opening draws the chat's change: the card now shows v_chat.
+    await card.answerTo(opening, ready('v_chat', document1('Dear Sam, and more,\nPat')));
+    await card.answer(CHANGED, 'send_letter');
+    // Its ask answers with nothing to draw.
+    await card.answer(ready('v_now', null), 'get_draft_status');
+    await card.click(card.byId('send-button'));
+    expect(sentWith(card).contentVersion).toBe('v_chat');
+    // v_chat was never refused before: refused now, the card asks again.
+    const asks = card.requests('tools/call', 'get_draft_status').length;
+    await card.answer(CHANGED, 'send_letter');
+    expect(card.requests('tools/call', 'get_draft_status').length).toBe(asks + 1);
+  });
+
+  it('knows the refusal however ChatGPT wraps it, on the letter too', async () => {
+    const card = mount();
+    await card.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
+    const asks = card.requests('tools/call', 'get_draft_status').length;
+    await card.click(card.byId('send-button'));
+    await card.answer({ error: { code: -32000, message: `Error code: INVALID_ARGUMENT; Error: RuntimeException: Error calling MCP tool: [TextContent(type='text', text='${CHANGED_TEXT}', annotations=None, meta=None)]` } }, 'send_letter');
+    expect(card.requests('tools/call', 'get_draft_status').length).toBe(asks + 1);
+    expect(card.byId('error-message').textContent).toBe(`${SAID_SENT} Getting it as it is now…`);
+  });
+
+  it('clears a notice that it could not show the letter once a later answer draws it whole', async () => {
+    const card = mount();
+    await card.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
+    await card.click(card.byId('send-button'));
+    await card.answer(CHANGED, 'send_letter');
+    await card.answer(ready('v_now', null), 'get_draft_status');
+    expect(card.byId('error-message').style.display).toBe('block');
+    // A restyle made to another version asks again; this answer draws the letter whole.
+    await restyle(card, 'botanical');
+    await card.answer(restyled('botanical', 'v_later', PAGE, 'v_now'), 'set_stationery');
+    await card.answer(ready('v_later', PAGE, { stationery: { theme: 'botanical', dateLine: 'October 1, 2026' } }), 'get_draft_status');
+    expect(card.byId('error-message').style.display).toBe('none');
+    await card.click(card.byId('send-button'));
+    expect(sentWith(card).contentVersion).toBe('v_later');
+  });
+
+  it('says nothing more of it once the draft turns out sent meanwhile', async () => {
+    const card = mount();
+    await card.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
+    await card.click(card.byId('send-button'));
+    await card.answer(CHANGED, 'send_letter');
+    await card.answer({ result: { content: [], structuredContent: { draftId: 'draft_0001', status: 'sent', orderId: 'order-9' } } }, 'get_draft_status');
+    expect(card.byId('error-message').style.display).toBe('none');
+  });
+
+  it('opens Pay & Send with the version it shows, and draws the letter again when the checkout is refused for a change since', async () => {
+    const card = mount();
+    await card.show(output({ ...STYLED, ...PAY, contentVersion: 'v_preview' }), ON);
+    await card.click(card.byId('pay-send-button'));
+    expect(card.lastRequest('tools/call', 'create_mail_checkout')!.params.arguments).toEqual({ draftId: 'draft_0001', contentVersion: 'v_preview' });
+
+    const asks = card.requests('tools/call', 'get_draft_status').length;
+    await card.answer(
+      {
+        result: {
+          isError: true,
+          content: [{ type: 'text', text: 'This mail changed after it was shown, so nothing was charged. Show the person the mail as it is now (its preview card, or a new preview), and open the payment once they have seen it.' }]
+        }
+      },
+      'create_mail_checkout'
+    );
+    expect((card.byId('pay-send-button') as HTMLButtonElement).disabled).toBe(true);
+    expect(card.requests('tools/call', 'get_draft_status').length).toBe(asks + 1);
+    await card.answer(ready('v_now', document1('Dear Sam, and more,\nPat'), PAY), 'get_draft_status');
+    expect(card.byId('error-message').textContent).toBe(
+      'This letter changed after it was shown here, so nothing was charged. It is shown again as it is now: check it, then press Pay & Send again.'
+    );
+    // Back, with its own label: the price, as render() draws it.
+    expect((card.byId('pay-send-button') as HTMLButtonElement).disabled).toBe(false);
+    expect(card.byId('pay-send-button-text').textContent).toMatch(/^Pay & Send \(/);
+
+    await card.click(card.byId('pay-send-button'));
+    expect(card.lastRequest('tools/call', 'create_mail_checkout')!.params.arguments).toEqual({ draftId: 'draft_0001', contentVersion: 'v_now' });
+  });
+
+  it('takes the dates the draft has now over ones it set, once a send is refused for a change since', async () => {
+    const DATED = { schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' }, deliveryEstimate: 'Goes to the printer Fri, Oct 9.' };
+    const card = mount();
+    await card.show(output({ ...STYLED, contentVersion: 'v_preview', arrivalWindow: WINDOW, ...DATED }), ON);
+    await card.click(card.byId('arrives-asap'));
+    await card.answer(
+      { result: { content: [], structuredContent: { draftId: 'draft_0001', schedule: null, contentVersion: 'v_asap', contentVersionBefore: 'v_preview', deliveryEstimate: 'Mailed in 1-2 business days', message: 'Cleared.' } } },
+      'set_arrival_date'
+    );
+    expect(text(card, 'studio-summary')).toBe('Classic · black and white · mailed in 1-2 business days');
+
+    await card.click(card.byId('send-button'));
+    await card.answer(CHANGED, 'send_letter');
+    // The chat dated it again meanwhile: the card shows that, over the date it cleared.
+    await card.answer(ready('v_now', PAGE, DATED), 'get_draft_status');
+    expect(text(card, 'studio-summary')).not.toBe('Classic · black and white · mailed in 1-2 business days');
+    await card.click(card.byId('send-button'));
+    expect(sentWith(card).contentVersion).toBe('v_now');
+  });
+
+  it('keeps the other refusals as they were', async () => {
+    const card = mount();
+    await card.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
+    const asks = card.requests('tools/call', 'get_draft_status').length;
+    await card.click(card.byId('send-button'));
+    await card.answer({ result: { isError: true, content: [{ type: 'text', text: 'Not enough letters in your balance.' }] } }, 'send_letter');
+    expect(card.byId('error-message').textContent).toContain('Failed to send');
+    expect(card.requests('tools/call', 'get_draft_status').length).toBe(asks);
+  });
+});
+
+describe('the widget version after the certified card (#625)', () => {
+  it('is bumped, so a host that cached the card fetches the new one', async () => {
+    const { WIDGET_TEMPLATE_VERSION } = await import('../../../src/mcp/widgetUris.js');
+    expect(WIDGET_TEMPLATE_VERSION).toBeGreaterThanOrEqual(66);
+  });
+});

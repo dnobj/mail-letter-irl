@@ -16,13 +16,35 @@
  * REST handlers share, so the accepted audience set has one source of truth.
  * The response contract is unchanged: same status codes, same bodies, so the
  * website's proxy and its client see exactly what they saw before.
+ *
+ * It also checks the route's scope (audit A-03), the same check restAuth
+ * makes: a valid token without the scope gets 403 and a WWW-Authenticate
+ * challenge naming what is missing, never one of the 401s below.
  */
 
 import http from 'node:http';
 import { AuthenticatedUser } from '../../services/types.js';
-import { parseCookies } from '../../utils/cookies.js';
-import { validateJWTToken } from '../../auth/tokenValidator.js';
+import {
+  requireScopes,
+  validateJWTToken,
+  type AuthenticatedUser as ValidatedUser
+} from '../../auth/tokenValidator.js';
+import { InsufficientScopeError } from '../../auth/oauthChallenge.js';
+import { OAUTH_NOT_CONFIGURED } from '../../auth/oauthErrors.js';
+import { writeDiagnostic } from '../../utils/diagnosticLog.js';
 import { BetaAccessDeniedError, BETA_ACCESS_MESSAGE } from '../../auth/betaAccess.js';
+import {
+  VerifiedEmailRequiredError,
+  VERIFIED_EMAIL_MESSAGE
+} from '../../auth/verifiedEmail.js';
+import { prepareAuthenticatedUser } from '../../auth/identity.js';
+import {
+  EmailAlreadyLinkedError,
+  EMAIL_ALREADY_LINKED_MESSAGE
+} from '../../services/userService.js';
+import { AccountErasedError, ACCOUNT_ERASED_MESSAGE } from '../../auth/accountErased.js';
+import type { ProductScope } from '../../auth/toolScopes.js';
+import { insufficientScope } from './restAuth.js';
 
 function respond(res: http.ServerResponse | undefined, statusCode: number, body: Record<string, unknown>): void {
   if (!res) return;
@@ -32,16 +54,20 @@ function respond(res: http.ServerResponse | undefined, statusCode: number, body:
 }
 
 /**
- * Authenticate HTTP request - works with both Bearer tokens and cookies
+ * Authenticate HTTP request from its Bearer token. Cookies are not credentials
+ * here: the access_token cookie fallback was removed (audit A-11) because it
+ * was a latent CSRF vector and nothing set the cookie.
  * For use with plain Node.js http.IncomingMessage
  *
  * @param req - HTTP incoming message
- * @param res - HTTP server response (optional, for error responses)
+ * @param res - HTTP server response (for error responses)
+ * @param requiredScopes - What the route requires, from requiredRestScopes
  * @returns AuthenticatedUser or null if authentication fails
  */
 export async function authenticateHttpRequest(
   req: http.IncomingMessage,
-  res?: http.ServerResponse
+  res: http.ServerResponse | undefined,
+  requiredScopes: readonly ProductScope[]
 ): Promise<AuthenticatedUser | null> {
   let token: string | null = null;
 
@@ -51,23 +77,14 @@ export async function authenticateHttpRequest(
     token = authHeader.substring(7);
   }
 
-  // If no bearer token, try to get from cookie
-  if (!token) {
-    const cookies = parseCookies(req.headers.cookie);
-    token = cookies.access_token || null;
-  }
-
   if (!token) {
     respond(res, 401, { error: 'Authentication required' });
     return null;
   }
 
+  let user: ValidatedUser;
   try {
-    const user = await validateJWTToken(token);
-    return {
-      userId: user.userId,
-      email: typeof user.claims.email === 'string' ? user.claims.email : undefined
-    };
+    user = await validateJWTToken(token);
   } catch (error: unknown) {
     // Not an authentication failure: the token was good and the account is
     // simply not admitted. 401 here would send the caller back to Auth0 to
@@ -76,9 +93,11 @@ export async function authenticateHttpRequest(
       respond(res, 403, { error: BETA_ACCESS_MESSAGE });
       return null;
     }
-    // validateJWTToken already emitted the structured diagnostic.
+    // validateJWTToken logs a token it rejects. A server that cannot validate
+    // anything throws before that log, so it is logged here.
     const message = error instanceof Error ? error.message : '';
-    if (message === 'OAuth validation not configured') {
+    if (message === OAUTH_NOT_CONFIGURED) {
+      writeDiagnostic('error', 'auth.validation_not_configured');
       respond(res, 503, { error: 'Authentication is not configured' });
       return null;
     }
@@ -91,5 +110,45 @@ export async function authenticateHttpRequest(
       respond(res, 401, { error: 'Invalid or expired token' });
     }
     return null;
+  }
+
+  // After validation, not inside it: the catch above would answer a scope
+  // refusal with 401.
+  try {
+    requireScopes(user, requiredScopes);
+  } catch (error: unknown) {
+    if (error instanceof InsufficientScopeError) {
+      const failure = insufficientScope(error);
+      if (res && failure.challenge) {
+        res.setHeader('WWW-Authenticate', failure.challenge);
+      }
+      respond(res, failure.status, { error: failure.message });
+      return null;
+    }
+    throw error;
+  }
+
+  // The account row, as in restAuth. This middleware's one caller is the
+  // checkout route, which writes an order keyed on users(user_id): without a
+  // row, a first-time buyer's Buy Now fails on the foreign key and is reported
+  // as a database error. `email` came from the standard claim, which Auth0
+  // does not put on an access token minted for a custom API.
+  try {
+    const email = (await prepareAuthenticatedUser(user)) ?? undefined;
+    return { userId: user.userId, email };
+  } catch (error: unknown) {
+    if (error instanceof VerifiedEmailRequiredError) {
+      respond(res, 403, { error: VERIFIED_EMAIL_MESSAGE });
+      return null;
+    }
+    if (error instanceof EmailAlreadyLinkedError) {
+      respond(res, 409, { error: EMAIL_ALREADY_LINKED_MESSAGE });
+      return null;
+    }
+    if (error instanceof AccountErasedError) {
+      respond(res, 403, { error: ACCOUNT_ERASED_MESSAGE });
+      return null;
+    }
+    throw error;
   }
 }

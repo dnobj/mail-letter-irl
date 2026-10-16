@@ -15,12 +15,14 @@ import { html, type SafeHtml } from "../ui/html.js";
 import { renderPage, type BannerModel, type FlashMessage, type NavItem } from "../ui/layout.js";
 import { readRequestBody, RequestBodyTooLargeError } from "../../utils/requestBody.js";
 import { classifyDiagnosticError, writeDiagnostic } from "../../utils/diagnosticLog.js";
+import type { ElevationGuard } from "./elevation.js";
 import type { AdminRouter } from "./router.js";
 import {
   FORM_BODY_LIMIT_BYTES,
   SlidingWindowLimiter,
   buildSecurityHeaders,
   checkStateChangingRequest,
+  isCrossSiteSubresource,
   createCsrfToken,
   createNonce,
   parseFormBody,
@@ -36,6 +38,7 @@ import {
   type AdminSession,
 } from "./session.js";
 import { authenticateAdminRequest, type AuthenticatedActor } from "./tailscaleAuth.js";
+import { DenialAuditBudget, denialBurstEvent } from "./denialAuditBudget.js";
 
 /**
  * The request pipeline: correlation id, authentication, session, browser-
@@ -63,6 +66,8 @@ export interface RequestContext {
   pools: AdminPools;
   audit: AdminAuditWriter;
   sessions: AdminSessionStore;
+  /** Elevation state that outlives a session: failures, lock, TOTP counter. */
+  elevation: ElevationGuard;
   /** Run a read model inside a READ ONLY transaction on the reader pool. */
   read<T>(callback: (client: AdminSqlClient) => Promise<T>): Promise<T>;
   /** The operator pool, or a refusal in read-only mode. */
@@ -86,6 +91,7 @@ export interface AdminAppOptions {
   config: AdminRuntimeConfig;
   pools: AdminPools;
   sessions: AdminSessionStore;
+  elevation: ElevationGuard;
   whois: WhoisClient;
   audit: AdminAuditWriter;
   router: AdminRouter<RouteHandler>;
@@ -95,6 +101,8 @@ export interface AdminAppOptions {
   nav: NavItem[];
   clientScript: { path: string; body: string };
   now?: () => number;
+  /** Shared with the server so the pending burst row is flushed at shutdown. */
+  denialBudget?: DenialAuditBudget;
 }
 
 const ANONYMOUS_ACTOR = { id: "anonymous@unauthenticated", name: "anonymous" };
@@ -111,8 +119,16 @@ export function createAdminRequestListener(
 ): (request: IncomingMessage, response: ServerResponse) => void {
   const now = options.now ?? (() => Date.now());
   const requestLimiter = new SlidingWindowLimiter(240, 60_000, now);
+  // A human types one six-digit code at a time, so the elevation route gets a
+  // limit of its own well below the general one. Keyed on the login, like the
+  // lock it protects, so dropping the session cookie does not reset it.
+  const elevationLimiter = new SlidingWindowLimiter(10, 60_000, now);
   const denialLimiter = new SlidingWindowLimiter(30, 60_000, now);
-  const denialAuditLimiter = new SlidingWindowLimiter(60, 60_000, now);
+  // Sixty individual denial rows a minute for the process; beyond that the
+  // denials are counted and written as one admin.request_denied_burst row per
+  // window instead of being dropped (audit A-15).
+  const denialBudget = options.denialBudget ?? new DenialAuditBudget({ limit: 60, windowMs: 60_000, now });
+  denialBudget.setSink((summary) => safeAudit(options, denialBurstEvent(summary)));
   const allowedLogins = new Set(options.config.operatorLogins);
   const expectedOrigins = options.nodeName
     ? [`https://${options.nodeName}`]
@@ -122,7 +138,11 @@ export function createAdminRequestListener(
       ];
   const localDev =
     options.config.tailscale.mode === "local-dev" && options.config.tailscale.localDevLogin
-      ? { login: options.config.tailscale.localDevLogin, name: "local developer" }
+      ? {
+          login: options.config.tailscale.localDevLogin,
+          name: "local developer",
+          hosts: [`localhost:${options.config.appPort}`, `127.0.0.1:${options.config.appPort}`],
+        }
       : null;
 
   return (request, response) => {
@@ -168,14 +188,15 @@ export function createAdminRequestListener(
     const constant = (status: number) =>
       finish(status, CONSTANT_BODIES[status] ?? "error", "text/plain; charset=utf-8");
 
+    const header = (name: string) => {
+      const value = request.headers[name.toLowerCase()];
+      return Array.isArray(value) ? value[0] : value;
+    };
     const peer = request.socket.remoteAddress;
     const auth = await authenticateAdminRequest(
       {
         remoteAddress: peer,
-        header: (name) => {
-          const value = request.headers[name.toLowerCase()];
-          return Array.isArray(value) ? value[0] : value;
-        },
+        header,
         cookie: (name) => cookies.get(name),
       },
       {
@@ -184,12 +205,27 @@ export function createAdminRequestListener(
         whois: options.whois,
         sessions: options.sessions,
         localDev,
+        // A request another site sent may use a live session (and a POST is
+        // then refused as CSRF, audited) but never start one (#730).
+        allowNewSession: !isCrossSiteSubresource(method, header),
       },
     );
 
+    if (!auth.ok && auth.quiet) {
+      if (cookies.has(SESSION_COOKIE_NAME)) cookiesToSet.push(clearedSessionCookie());
+      constant(403);
+      return;
+    }
     if (!auth.ok) {
       const key = `${peer ?? "?"}:${auth.presentedLogin ?? "-"}`;
-      if (denialLimiter.allow(key) && denialAuditLimiter.allow("denials")) {
+      const deniedActor = auth.presentedLogin ?? ANONYMOUS_ACTOR.id;
+      // Two caps on individual rows, one per peer and login and one for the
+      // process. Neither silences a denial: what is not written on its own is
+      // counted into the window's burst row.
+      const individually = denialLimiter.allow(key)
+        ? await denialBudget.admit(deniedActor, auth.code)
+        : (await denialBudget.suppress(deniedActor, auth.code), false);
+      if (individually) {
         await safeAudit(options, {
           actor: auth.presentedLogin
             ? { id: auth.presentedLogin, name: "denied" }
@@ -224,6 +260,21 @@ export function createAdminRequestListener(
       });
     }
     if (!requestLimiter.allow(actor.id)) {
+      // A denial like any other, under the same budget, so a flood cannot
+      // make the audit table the amplifier.
+      if (await denialBudget.admit(actor.id, "ADMIN_RATE_LIMITED")) {
+        await safeAudit(options, {
+          actor,
+          sessionIdHash: hashSessionId(session.id),
+          correlationId,
+          action: "admin.request_denied",
+          targetType: "route",
+          targetId: url.pathname.slice(0, 255),
+          inputSummary: { reason: "rate_limited" },
+          outcome: "denied",
+          errorCode: "ADMIN_RATE_LIMITED",
+        });
+      }
       constant(429);
       return;
     }
@@ -262,11 +313,11 @@ export function createAdminRequestListener(
           action: "admin.request_denied",
           targetType: "route",
           targetId: matched.route.name,
-          inputSummary: { reason: "browser_boundary" },
+          inputSummary: { reason: "browser_boundary", detail: boundary.detail },
           outcome: "denied",
-          errorCode: boundary,
+          errorCode: boundary.code,
         });
-        constant(boundary === "ADMIN_METHOD_NOT_ALLOWED" ? 405 : 403);
+        constant(boundary.code === "ADMIN_METHOD_NOT_ALLOWED" ? 405 : 403);
         return;
       }
       let body: string;
@@ -290,6 +341,24 @@ export function createAdminRequestListener(
           errorCode: "ADMIN_CSRF_REJECTED",
         });
         constant(403);
+        return;
+      }
+      if (
+        (matched.route.name === "elevate" || matched.route.name === "elevate.drop") &&
+        !elevationLimiter.allow(actor.id)
+      ) {
+        await safeAudit(options, {
+          actor,
+          sessionIdHash: hashSessionId(session.id),
+          correlationId,
+          action: "admin.request_denied",
+          targetType: "route",
+          targetId: matched.route.name,
+          inputSummary: { reason: "elevation_rate_limited" },
+          outcome: "denied",
+          errorCode: "ADMIN_RATE_LIMITED",
+        });
+        constant(429);
         return;
       }
       if (matched.route.write && options.config.mode !== "full") {
@@ -339,6 +408,7 @@ export function createAdminRequestListener(
       pools: options.pools,
       audit: options.audit,
       sessions: options.sessions,
+      elevation: options.elevation,
       read: (callback) => withReadOnlyTransaction(options.pools.reader, callback),
       requireOperatorPool: () => {
         if (!options.pools.operator) throw new AdminFoundationError("ADMIN_READ_ONLY_MODE");
@@ -392,7 +462,10 @@ export function createAdminRequestListener(
         code,
         errorClass: classifyDiagnosticError(error, "unknown_error"),
       });
-      if (status >= 500 || status === 403 || status === 409) {
+      // Every failure of a write route is audited whatever its status: a 400
+      // during a command preview or execution is an attempt an operator made,
+      // and a fumbling or probing operator should leave a trace (A-15).
+      if (matched.route.write || status >= 500 || status === 403 || status === 409) {
         await safeAudit(options, {
           actor,
           sessionIdHash: hashSessionId(session.id),

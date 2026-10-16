@@ -29,6 +29,11 @@ const SAFE_ERROR_CODES = new Set([
   // gets for the guard actually firing is the generic database_error, which is
   // the mislabel #213 was about.
   "23514",
+  // insufficient_privilege. The admin panel's operator role has a column list
+  // for what it may update; a column a service starts to set that the list
+  // lacks fails with this and nowhere else (#625 review: the carrier number),
+  // and without the code it read as the mail provider's failure.
+  "42501",
   "28P01",
   "3D000",
   "42P01",
@@ -36,6 +41,11 @@ const SAFE_ERROR_CODES = new Set([
   // migrator holds the migration lock" instead of the useless generic
   // "database_error"; the code itself carries no user or secret data.
   "55P03",
+  // Our own renderer refused to draw a letter before any request to PostGrid
+  // (#534). That attempt submitted nothing, so the hold's usual resolution is
+  // a retry once a build that can print it is deployed (deployment.md);
+  // without this code the hold said only provider_error.
+  "render_refused",
   // Stripe's documented error-code taxonomy, same footing as the JOSE codes
   // above: a fixed public enum carrying no PII or secret. Surfaced so a failed
   // checkout says "resource_missing" (the Price ID does not exist in this

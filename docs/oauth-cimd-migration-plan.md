@@ -1,6 +1,16 @@
 # ChatGPT OAuth migration: Auth0 public CIMD with PKCE
 
-Status: implementation-ready  
+> **Shipped, with one correction.** CIMD is live in both tenants: the production CIMD client was
+> imported on 2026-09-05, and the website and REST API moved onto the same MCP API on 2026-09-14
+> ([auth0-setup.md](auth0-setup.md)). The plan below assumed a public client with
+> `token_endpoint_auth_method: none` and no `private_key_jwt`. That shape turned out to be
+> unachievable: ChatGPT's CIMD document declares `private_key_jwt`, and Auth0 applies the declared
+> method as given, without Enterprise. Where this plan says `none` or "public client", read the
+> corrected contract header in [auth0-tenant-configuration.md](auth0-tenant-configuration.md).
+> Open acceptance cases: CIMD-06, CIMD-07, CIMD-09 and CIMD-10 in [manual-tests.md](manual-tests.md).
+> Kept as the design record.
+
+Status: shipped (see note above)  
 Tracking issue: https://github.com/dnobj/mail-letter-irl/issues/160  
 Target branches: dev first; master only after acceptance  
 Last reviewed: 2026-07-23
@@ -92,6 +102,13 @@ Selected end state:
 - no acceptance of arbitrary audiences.
 
 Create a dedicated MCP API identifier rather than changing the existing website/REST audience in place. If a compatibility phase is needed, implement and test it only in DEV first. Never change the production audience implicitly.
+
+**Update, 2026-09-14: the website and REST exception was reversed.** Keeping the website on its own audience only worked while the static-DCR flag merged `LETTER_IRL_OAUTH_LEGACY_AUDIENCES` into the accepted set, so the dashboard broke silently when the flag went off. Now:
+- the website requests each environment's MCP audience with the product scopes;
+- every REST route requires the scope its MCP twin requires;
+- the server accepts exactly one audience in every mode.
+
+`https://letter-irl/api` is retired. It was deleted from both tenants on 2026-09-14, after each environment's website requested the MCP audience and each tenant's Default Audience was repointed to its MCP API.
 
 ### Scopes
 
@@ -240,7 +257,7 @@ After DEV acceptance:
 
 1. Disable Auth0 DCR in the development tenant if inventory confirms no other client depends on it.
 2. Disable the Letter IRL static registration compatibility flag.
-3. Remove the DEV static client setting.
+3. Remove the DEV static client setting, and the static client's MCP API grant if a rollback granted one.
 4. Re-run the full OAuth and image-generation manual suite.
 5. Observe DEV for an agreed soak period and confirm no new Auth0 clients, authorization errors, or scope failures.
 
@@ -282,9 +299,9 @@ Production is a separate, owner-approved operation after the implementation PR i
 3. Import the production CIMD into the production Auth0 tenant.
 4. Apply the approved API access, scopes, connection policy, and resource compatibility settings.
 5. Deploy the already accepted code through the normal dev-to-master promotion.
-6. Test a controlled production account: fresh link, consent, get_started, image generation, preview, reconnect, revoke, and controlled send only when explicitly authorized.
+6. Test a controlled production user account: fresh link, consent, get_started, image generation, preview, reconnect, revoke, and controlled send only when explicitly authorized.
 7. Monitor authorization failures, client count, error rate, and sensitive logging.
-8. Disable production DCR and the static shim only after successful observation and dependency confirmation.
+8. Disable production DCR and the static shim only after successful observation and dependency confirmation. Remove the static client's MCP API grant if a rollback granted one.
 9. Record the final production configuration and rollback owner.
 
 Do not combine this promotion with unrelated deployment or database changes.
@@ -301,7 +318,9 @@ If DEV or production linking fails:
    configured on the rollback Auth0 client. In compatibility mode, protected
    resource discovery points to Letter IRL's authorization-server proxy, which
    advertises `/oauth/register`; the static registration response returns only
-   that explicit inventory.
+   that explicit inventory. Grant the rollback client user-delegated
+   `mail:read`, `mail:draft` and `mail:send` on the MCP API, and remove that
+   grant when the rollback ends (Phase 6 step 3 in DEV, Phase 8 step 8 in production).
 3. Restore the previously recorded Auth0 application, API access, connection, and discovery settings.
 4. Re-enable DCR only if the prior working state required it and the security impact is understood.
 5. Restore the previous deployment version if server metadata or validation caused the failure.

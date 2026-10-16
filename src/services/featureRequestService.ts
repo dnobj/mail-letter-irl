@@ -5,6 +5,7 @@
  * - Submit feature requests
  * - Rate limiting (5 requests per user per 24 hours)
  * - Query user's feature requests
+ * - Retention sweep: delete requests 12 months after submission (#393)
  *
  * User Story: US-FEEDBACK-01
  */
@@ -64,6 +65,13 @@ export interface SubmitFeatureRequestResult {
 // Rate limit: 5 requests per user per 24 hours
 const RATE_LIMIT_COUNT = 5;
 const RATE_LIMIT_HOURS = 24;
+
+/**
+ * How long a feature request is kept: months after created_at (#393). The
+ * period is published in docs/privacy-policy.md (the Feature Requests row), so
+ * a change here is a policy change and both copies of the policy move with it.
+ */
+export const FEATURE_REQUEST_RETENTION_MONTHS = 12;
 
 // Validation limits
 const MAX_TITLE_LENGTH = 200;
@@ -205,33 +213,22 @@ export async function submitFeatureRequest(
 }
 
 /**
- * Get feature requests for a user (for future dashboard use)
+ * Delete feature requests older than the published period (#393).
+ *
+ * Keyed on created_at on purpose: nothing updates a row after submission
+ * (neither admin role holds UPDATE on this table, so status, admin_notes,
+ * reviewed_at and resolved_at are never set), so any other clock would never
+ * fire. The optional contact email has no period of its own; it goes with the
+ * request it belongs to. One time-only DELETE, no joins and no batching: the
+ * table holds a handful of rows per active user and nothing references it.
+ * Returns a count; callers log the count, never a title, a description or an
+ * address.
  */
-export async function getUserFeatureRequests(
-  userId: string,
-  limit = 20
-): Promise<FeatureRequest[]> {
-  const result = await query<FeatureRequest>(
-    `SELECT * FROM feature_requests
-     WHERE user_id = $1
-     ORDER BY created_at DESC
-     LIMIT $2`,
-    [userId, limit]
+export async function purgeExpiredFeatureRequests(): Promise<number> {
+  const result = await query(
+    `DELETE FROM feature_requests
+      WHERE created_at < NOW() - make_interval(months => $1::int)`,
+    [FEATURE_REQUEST_RETENTION_MONTHS]
   );
-
-  return result.rows;
-}
-
-/**
- * Get a single feature request by ID
- */
-export async function getFeatureRequest(
-  requestId: string
-): Promise<FeatureRequest | null> {
-  const result = await query<FeatureRequest>(
-    `SELECT * FROM feature_requests WHERE request_id = $1`,
-    [requestId]
-  );
-
-  return result.rows[0] || null;
+  return result.rowCount ?? 0;
 }

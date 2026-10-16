@@ -181,7 +181,9 @@ server must send:
 - `Content-Security-Policy` allowing only self-hosted scripts/styles and denying objects, frames, base URI,
   forms outside self, and all non-self connections;
 - `Cache-Control: no-store`, `Pragma: no-cache`, `X-Content-Type-Options: nosniff`,
-  `Referrer-Policy: no-referrer`, and a restrictive `Permissions-Policy`;
+  `Referrer-Policy: same-origin` (not `no-referrer`: under that policy browsers send `Origin: null` on form
+  posts, which the browser-boundary check refuses, so the panel could not write at all), and a restrictive
+  `Permissions-Policy`;
 - `frame-ancestors 'none'` and no inline script, inline event handler, or unreviewed dynamic HTML sink.
 
 Render untrusted data with text nodes or framework escaping only. Letter body/preview content remains

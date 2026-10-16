@@ -13,11 +13,9 @@
 
 import { McpToolDefinition, ToolContext } from "../contracts/types.js";
 import { widgetTemplateUri } from "../mcp/widgetUris.js";
-import {
-  uploadImageInputSchema,
-  uploadImageOutputSchema
-} from "../schemas.js";
 import { isDebugEnabled } from "../utils/debug.js";
+import { isCardUploadEnabled, uploadsThroughCard } from "../config/cardUpload.js";
+import { normalizeUploadContext } from "../utils/uploadContext.js";
 
 interface UploadImageInput {
   context?: string;
@@ -31,6 +29,11 @@ interface UploadImageOutput {
   context: string;
   debugEnabled: boolean;
   debugEndpoint?: string;
+  /**
+   * Whether the card may send the photo itself (upload_photo_chunk), which it
+   * does only in an app with no file store for it, such as Claude (#474).
+   */
+  cardUploadAvailable: boolean;
 }
 
 const ACCEPTED_FORMATS = "JPEG, PNG, WebP";
@@ -54,7 +57,9 @@ async function handler(
   input: UploadImageInput,
   context: ToolContext
 ): Promise<UploadImageOutput> {
-  const hint = input.context || "";
+  // One of the three, or none: the card passes it on to the upload and the
+  // recent upload, which know only these (#474).
+  const hint = normalizeUploadContext(input.context) ?? "";
   const guidanceMessage =
     CONTEXT_MESSAGES[hint] ||
     "Select a photo to use in your letter or postcard.";
@@ -75,19 +80,27 @@ async function handler(
     maxSizeMB: MAX_SIZE_MB,
     context: hint,
     debugEnabled: isDebugEnabled(),
-    debugEndpoint: buildDebugEndpoint()
+    debugEndpoint: buildDebugEndpoint(),
+    cardUploadAvailable: isCardUploadEnabled()
   };
 }
+
+const WHEN_TO_UPLOAD =
+  "Open the image upload widget for letters or postcards only as a fallback when a direct file attachment is unavailable or was not passed through to a preview tool. Do not use this when a generated imageUrl, hosted imageUrl, or working file attachment is already available. Do not use this just because the user referenced an image generated earlier in the same conversation. Reuse that existing conversation image first. Only open this widget after an actual failed handoff or when the user explicitly needs upload help.";
 
 export const uploadImageTool: McpToolDefinition<
   UploadImageInput,
   UploadImageOutput
 > = {
   name: "upload_image",
-  description: "Open the image upload widget for letters or postcards only as a fallback when a direct file attachment is unavailable or was not passed through to a preview tool. Do not use this when a generated imageUrl, hosted imageUrl, or working file attachment is already available. Do not use this just because the user referenced an image generated earlier in the same conversation. Reuse that existing conversation image first. Only open this widget after an actual failed handoff or when the user explicitly needs upload help. The widget uploads the file and returns an imageUrl to use in the next preview call.",
+  title: "Upload an image",
+  // Where the card sends the photo itself there is no imageUrl (#474).
+  description: (client) =>
+    WHEN_TO_UPLOAD +
+    (uploadsThroughCard(client)
+      ? " The widget sends the photo to Letter IRL and then asks for the preview in the conversation: call the preview tool with no image and no imageUrl, and Letter IRL uses the photo just uploaded."
+      : " The widget uploads the file and returns an imageUrl to use in the next preview call."),
   readOnly: false,
-  inputSchema: uploadImageInputSchema,
-  outputSchema: uploadImageOutputSchema,
   meta: {
     "openai/outputTemplate": widgetTemplateUri("ImageUploadCard"),
     "openai/widgetAccessible": true,

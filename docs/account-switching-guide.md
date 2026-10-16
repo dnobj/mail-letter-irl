@@ -1,6 +1,12 @@
 # Account Switching Guide
 
-**Last Updated:** November 18, 2025
+**Last Updated:** September 16, 2026
+
+> **Partly out of date.** The `switch_account` tool this guide recommends was removed
+> (commit `b5045bf`, "not useful in practice"); no Letter IRL tool logs you out. Switch accounts by
+> disconnecting Letter IRL in ChatGPT's app settings, ending the Auth0 session (Method 2), and
+> connecting again. The Auth0 logout URL below is the **development** tenant; production uses
+> `https://dev-njmdyqf8n25rqgy7.us.auth0.com/v2/logout`.
 
 This guide explains how to switch between different accounts or authentication methods when using Letter IRL in ChatGPT.
 
@@ -30,7 +36,9 @@ You might want to switch accounts to:
 
 ## How to Switch Accounts
 
-### Method 1: Using the `switch_account` Tool (Recommended)
+### Method 1: Using the `switch_account` Tool (removed)
+
+This tool no longer exists. The description below is kept for history.
 
 The easiest way to switch accounts is by asking ChatGPT directly:
 
@@ -71,18 +79,9 @@ To see which account you're currently using, simply ask for your balance:
 - "Check my credits"
 - "How many credits do I have?"
 
-**Response includes:**
-```
-Account: user@example.com (Google)
-Balance: 195 credits — That's enough for 97 letters.
-
-Tip: Use the switch_account tool to log in with a different account.
-```
-
-This shows:
-- ✅ Your email address
-- ✅ Your authentication provider
-- ✅ Your credit balance
+`get_account_balance` returns the letters remaining, letters expiring soon, and image generations
+left. It does not return the email address or login provider, so the balance alone does not identify
+the account. The letterirl.com dashboard shows the signed-in account.
 
 ---
 
@@ -114,19 +113,26 @@ This shows:
 
 ## Account Data
 
-**Important:** Each authentication method creates a **separate account** with:
-- Separate credit balance
-- Separate letter history
-- Separate user profile
+**Your account is your email address.** Sign in with Google today and with a
+password tomorrow, on the same confirmed address, and you arrive at the same
+account: one balance, one letter history, one profile.
 
-If you sign in with Google and later sign in with Microsoft, these will be **two different accounts**.
+The linking happens at sign-in, in an Auth0 post-login Action, and it needs the
+address to be **confirmed** - otherwise anyone could claim someone else's
+account by typing their address into a new sign-up. So:
 
-### Account Linking (Future Feature)
+- A new password account must confirm its address before its first sign-in.
+- An Apple sign-in that hides your address behind a private relay address is a
+  different address, and therefore a different account. Turn off "Hide My
+  Email" if you want it joined to the rest.
+- If a sign-in arrives with no confirmed address at all, Letter IRL opens no
+  account and says so, rather than opening one it cannot connect to you.
 
-Currently, Letter IRL creates separate accounts for each authentication method. In the future, we may add account linking to allow:
-- Merging multiple authentication methods to one account
-- Transferring credits between accounts
-- Unified letter history across authentication methods
+### Accounts opened before this (2026-09)
+
+Letter IRL used to key an account on the sign-in method, so one person could
+have several. Those accounts still exist and are merged on request - email
+support@letterirl.com from the address they share.
 
 ---
 
@@ -163,9 +169,12 @@ Currently, Letter IRL creates separate accounts for each authentication method. 
 
 **Problem:** You signed in with a different authentication method.
 
-**Cause:** Each authentication method creates a separate account.
+**Cause:** The two methods carry different email addresses - an Apple private
+relay address, a work address and a personal one, or an account opened before
+2026-09, when each method was its own account.
 
-**Solution:** Log out and sign in with the original authentication method you used.
+**Solution:** Sign in with the method whose address matches the account, or
+email support@letterirl.com to have the two joined.
 
 ### "Session Expired"
 
@@ -191,16 +200,23 @@ Currently, Letter IRL creates separate accounts for each authentication method. 
 ## FAQs
 
 **Q: Can I merge accounts from different providers?**
-A: Not currently. Each authentication method creates a separate account. Account linking is a planned future feature.
+A: Methods sharing one confirmed address are joined automatically at sign-in.
+Accounts on genuinely different addresses, and accounts opened before 2026-09,
+are merged by support: email support@letterirl.com from one of the addresses.
 
 **Q: Will my credits transfer if I switch accounts?**
-A: No. Credits are tied to each individual account. If you switch to a different authentication method, you'll have a separate credit balance.
+A: There is nothing to transfer when both methods carry the same confirmed
+address - it is one balance. Two different addresses are two accounts, and
+their balances stay where they are until the accounts are merged.
 
 **Q: How do I know which account I'm using?**
-A: Check your balance - it displays your email and authentication provider.
+A: Check your balance - it displays the account's email address. It no longer
+names a sign-in method, because an account can have several.
 
 **Q: Can I use the same email with different providers?**
-A: Yes, but they will still be separate accounts. For example, `user@gmail.com` via Google and `user@gmail.com` via Email/Password are two different accounts.
+A: Yes, and it is one account. `user@gmail.com` through Google and
+`user@gmail.com` through Email/Password are the same account, provided the
+address is confirmed on both.
 
 **Q: What happens to my letters if I switch accounts?**
 A: Your letters stay with the account that created them. To access old letters, sign back in with the original authentication method.
@@ -242,6 +258,5 @@ If you encounter issues with account switching:
 
 ---
 
-**Last Updated:** November 18, 2025
 **Feature Version:** 0.1.0
-**Tool Added:** Phase 1 Enhancement
+**Tool:** `switch_account`, added in Phase 1 and later removed (`b5045bf`)

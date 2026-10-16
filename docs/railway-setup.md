@@ -1,6 +1,7 @@
 # Railway Setup Guide
 
-Last updated: August 24, 2026
+**Last Updated:** September 23, 2026
+**Purpose:** Exact Railway services, commands, branches, variables, and Serverless policy
 
 Letter IRL uses one Railway project with `production` and `development` environments. Environment isolation is achieved with per-environment variables and branch deployment settings, not separate Railway projects.
 
@@ -10,18 +11,21 @@ Letter IRL uses one Railway project with `production` and `development` environm
 | --- | --- | --- | --- | --- |
 | `letter-irl-api` | backend repo | `master` | `dev` | HTTP API/MCP |
 | `mail-letter-irl-website` | website repo | `main` | `dev` | Next standalone server |
-| `letter-irl-maintenance` | backend repo | `master` | `dev` | hourly cron |
+| `letter-irl-maintenance` / `letter-irl-maintenance-dev` | backend repo | `master` (`letter-irl-maintenance`) | `dev` (`-dev`) | hourly cron |
 | `letter-irl-images` | Railway bucket | environment-owned | environment-owned | private S3-compatible storage |
+| `letter-irl-admin` / `letter-irl-admin-prod` | backend repo, `Dockerfile.admin` | `master` (`-prod`) | `dev` | tailnet-only admin panel, no public domain |
 
-Production API and website remain warm. Development API and website use Railway Serverless; cold health acceptance passed, while authenticated ChatGPT acceptance remains. The cron service is scheduled, not continuously running.
+Production API and website remain warm. Development API and website use Railway Serverless. The cron service is scheduled, not continuously running. The admin services are configured in the dashboard, not by config-as-code; their variables and settings are in [admin-panel-guide.md](admin-panel-guide.md).
 
 ## API Settings
 
-**Do not set the build, start or pre-deploy commands in the dashboard.** They are
-committed: `nixpacks.toml` holds build and start, `railway.toml` holds the
-pre-deploy command, and Railway's config-as-code overrides dashboard values. The
-block below records what those files produce so this guide can be checked against
-them; it is not a list of things to type in. Railway stops reading these files on
+**Do not set the pre-deploy command in the dashboard.** `railway.toml` holds it,
+and Railway's config-as-code overrides dashboard values. The API builds with
+Railpack, Railway's default builder, which runs `npm ci`, `npm run build` and
+`npm start` from `package.json` on the Node version `engines.node` names; a
+start command in the dashboard (development has `npm start`) only repeats it. The
+block below records what the API runs so this guide can be checked against it;
+it is not a list of things to type in. Railway stops reading `railway.toml` on
 2026-12-01 (config-as-code is deprecated); see the deadline note in
 [deployment.md](deployment.md).
 
@@ -32,6 +36,7 @@ Healthcheck path and region are dashboard settings and do have to be set here.
 Build command: npm run build
 Pre-deploy command: npm run db:migrate:prod
 Start command: npm start
+Variable: UV_THREADPOOL_SIZE=16 (both environments; read when the process starts)
 Healthcheck path: /healthz
 Production region: US East
 Development region: US West (current; review separately before changing)
@@ -80,14 +85,89 @@ LETTER_PROVIDER_CONFIG={"mode":"live"}
 STRIPE_SECRET_KEY=<sk_live_ in production; sk_test_ in development - never crossed>
 STRIPE_WEBHOOK_SECRET=<whsec_ for that environment's webhook endpoint>
 STRIPE_PRICE_STARTER=<price_ id>
-LETTER_IRL_MAIL_SENDING_ENABLED=<true to allow sending; the kill switch>
+LETTER_IRL_MAIL_SENDING_ENABLED=<true to allow sending; refuses new sends when false>
+# The outbox switch (#444): false pauses everything going to the printer, queued mail included.
+# Set it on the API AND the maintenance service. Unset or blank means on; write false to pause.
+LETTER_IRL_OUTBOX_DISPATCH_ENABLED=<true; false pauses the outbox>
+# The send rule (#470, docs/letter-send-flow.md): only the person finishes a send, from our card or
+# the website's confirmation page. Off unless explicitly true. API service only.
+LETTER_IRL_SEND_CONFIRMATION_ENABLED=<true; production refuses to start without it (#730), and needs LETTER_IRL_WEBSITE_CLIENT_ID with it>
+# The website's own Auth0 application's Client ID: the only token that may confirm a send, or make
+# or revoke a personal access token (#730). Production refuses to start without it.
+LETTER_IRL_WEBSITE_CLIENT_ID=<the website application's Client ID in this tenant>
+# Where the confirmation link points. Defaults to LETTER_IRL_GIFT_LANDING_BASE_URL.
+LETTER_IRL_WEBSITE_BASE_URL=<https://letterirl.com, or the development website's address>
+# Pack checkouts return only to this website's /dashboard/letter-packs (#683): a local website (http://localhost:3000) needs it set.
 LETTER_IRL_BETA_GATE_ENABLED=<true to restrict access to the invited cohort>
-LETTER_IRL_BETA_DAILY_MAIL_CAP=<global letters per day>
+LETTER_IRL_BETA_GLOBAL_DAILY_MAIL_CEILING=<global letters per day>
 LETTER_IRL_BETA_ACCOUNT_DAILY_MAIL_CAP=<letters per account per day>
-LETTER_IRL_BETA_ACCOUNT_DAILY_SPEND_CAP_CENTS=<spend per account per day>
+# At least the dearest pack's price (the Power Pack, 9000): the default, 6000, is below it,
+# so no account could buy that pack (2026-09-28).
+LETTER_IRL_BETA_ACCOUNT_DAILY_CHARGE_CENTS=<spend per account per day, in cents; default 6000>
+# The four daily limits can also be set, for everyone or one account, in the admin panel's Limits page
+# (migration 038), with no redeploy; these variables are the values in force when none is set there.
+# Where the operator is told what needs a person (src/services/operatorNotify.ts): a daily limit that
+# refused someone, held mail that missed its mail day, letters the provider cancelled, a dispatch whose
+# outcome is unknown, mail held for its funding, a Pay & Send order refunded or disputed after its letter
+# went, or may have gone, to the provider, a refund that failed or was cancelled at Stripe, an address request link its
+# recipient reported (#730). An https URL that takes a plain-text POST and tells the
+# owner of EVERY post, such as an ntfy topic (https://ntfy.sh/<topic>). Not a healthchecks.io /fail URL:
+# a check emails only when it changes state, so it tells the first notice and then nothing until it is
+# pinged up again. A capability: treat it as a secret. Set it on the
+# API service AND the maintenance service. Required in production (#699): boot refuses without it.
+LETTER_IRL_OPERATOR_ALERT_URL=<https URL; outside production, unset for the admin panel's alerts alone>
+# Gift letters (docs/gift-letters.md): off unless explicitly true. API service only.
+LETTER_IRL_GIFT_LETTERS_ENABLED=<true to turn the programme on; unset keeps it off>
+LETTER_IRL_GIFT_DAILY_SEND_CAP=<gift sends per UTC day, all accounts; default 20; 0 stops them>
+LETTER_IRL_GIFT_LANDING_BASE_URL=<the website the printed QR opens; default https://letterirl.com>
+# Letter previews drawn by our own renderer, printed from our PDF (#534, docs/letter-send-flow.md).
+# Read at preview time only; a letter prints with the version its draft recorded. API service only.
+LETTER_IRL_PRINT_RENDERER=<pdf to turn it on; unset keeps the legacy HTML>
+LETTER_IRL_ARRIVE_BY_ENABLED=<true to offer arrival dates on previews (#535); unset is off>
+# Stationery on the three letter previews (#563): offered only while LETTER_IRL_PRINT_RENDERER is pdf.
+LETTER_IRL_STATIONERY_ENABLED=<true to offer themes on letter previews; unset is off>
+# Postcard layouts (#594, docs/letter-send-flow.md): a border with a caption, or "Greetings from" a place,
+# offered only while LETTER_IRL_PRINT_RENDERER is pdf. API service only: the print draws a stored front whatever the flag.
+LETTER_IRL_POSTCARD_LAYOUTS_ENABLED=<true to offer postcard layouts on postcard previews; unset is off>
+# Postcard collages (#616, docs/image-support.md): two to four photos drawn as one front. API service only. It needs neither
+# our renderer nor Pay & Send: the print draws the stored picture whatever the flag.
+LETTER_IRL_POSTCARD_COLLAGES_ENABLED=<true to offer collages of two to four photos on postcard previews; unset is off>
+# Address requests (#604, docs/tool-apis.md): a private link asking someone for their address. API service only.
+# The link lives on LETTER_IRL_WEBSITE_BASE_URL. Its days and the caps per account have defaults (7; 10 waiting, 20 a day).
+LETTER_IRL_ADDRESS_REQUESTS_ENABLED=<true to list request_address, get_address_request and cancel_address_request; unset is off>
+LETTER_IRL_ADDRESS_REQUEST_LINK_DAYS=<days a link works, 1 to 30; default 7>
+LETTER_IRL_ADDRESS_REQUEST_WAITING_CAP=<requests an account may have waiting, 1 to 100; default 10>
+LETTER_IRL_ADDRESS_REQUEST_DAILY_CAP=<requests an account may make in 24 hours, 1 to 500; default 20>
+# Maintenance service: how long a closed address request, and any address given, is kept (#604; the owner's value).
+LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS=<days after it closes, or after its link expires unanswered, 1 to 365; default 7>
+# Signatures (#608, docs/tool-apis.md#signatures): a saved picture of the person's signature, and /api/signature for the
+# website. Offered only while LETTER_IRL_PRINT_RENDERER is pdf. API service only; production waits for the owner.
+LETTER_IRL_SIGNATURES_ENABLED=<true to list set_signature, get_signature, clear_signature and set_letter_signature; unset is off>
+LETTER_IRL_CUSTOM_STATIONERY_ENABLED=<true, with stationery offered, to list save_stationery_design, list_stationery_designs and delete_stationery_design and let the letter previews and set_stationery take stationeryDesignId (#649); unset is off>
+# The words editor (#647, docs/deployment.md): a letter's words changed in place on one page, without room to write.
+# Offered only while LETTER_IRL_PRINT_RENDERER is pdf; room to write turns it on by itself. API service only.
+LETTER_IRL_WORDS_EDITOR_ENABLED=<true to change a letter's words in place on one page; unset is off>
+# The letter card's envelope reveal (#576, docs/ui-widgets.md): cards only, nothing prints differently.
+LETTER_IRL_ENVELOPE_REVEAL_ENABLED=<true to open previews from an envelope; unset is off>
+# The studio card (#580, docs/ui-widgets.md): the letter card laid out with Style, Words and Delivery tabs. Cards only.
+LETTER_IRL_STUDIO_CARD_ENABLED=<true to lay letter cards out as a studio; unset is off>
+# The mail options (#578, docs/pricing-and-credits.md): each flag sells its options through Pay & Send,
+# at their own prices, and needs their Stripe Prices below. API and maintenance services.
+LETTER_IRL_ROOM_TO_WRITE_ENABLED=<true to preview and sell two- and three-page letters; unset is off>
+LETTER_IRL_POSTCARD_SIZES_ENABLED=<true to preview and sell 4x6 and 11x6 postcards, with LETTER_IRL_PRINT_RENDERER=pdf; unset is off>
+LETTER_IRL_CERTIFIED_MAIL_ENABLED=<true to sell certified mail letters through Pay & Send (#625), which needs their two prices below, to accept mailService on the letter previews and to list set_mail_service; unset is off>
+LETTER_IRL_SCHEDULE_LEAD_DAYS=<business days from the mail date to the arrival date; default 7, production refuses less than 3>
+LETTER_IRL_SCHEDULE_HORIZON_DAYS=<calendar days ahead an arrival date may be; default 60, at most 60 (the limit the privacy policy is to state, #701); a larger value falls back to 60>
+LETTER_IRL_SCHEDULE_DAILY_CAP=<letters waiting at once for one mail date, across every account; default 200; outside 1-100000 or unparseable falls back to 200. Keep it within what the outbox sends between 09:00 and 18:00 New York time when a run stops at its first batch, MAINTENANCE_OUTBOX_BATCH_SIZE x 9 runs (225 by default), or a date's mail can still be waiting at the 18:00 missed-mail-day alert>
+# Photo upload through the card in apps with no file store (#474, docs/deployment.md): off unless
+# explicitly true. API service only.
+LETTER_IRL_CARD_UPLOAD_ENABLED=<true to let the upload card send photos in Claude; unset keeps it off>
+LETTER_IRL_PHOTO_UPLOADS_PER_DAY=<uploads an account may start in 24 hours; default 20>
 STRIPE_PRICE_REGULAR=<price_ id>
 STRIPE_PRICE_POWER=<price_ id>
 STRIPE_CURRENCY=usd
+# At launch, in both environments: the custom Checkout host (docs/stripe-custom-domain.md, #373).
+STRIPE_CHECKOUT_DOMAIN=<bare host such as pay.letterirl.com; unset keeps checkout.stripe.com only>
 # Amounts are read from these Prices at startup - do not mirror them here (#275).
 ```
 
@@ -100,7 +180,14 @@ and the letters, because nothing but the webhook revokes them. The list is:
 - `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
   `checkout.session.async_payment_failed`, `checkout.session.expired`
 - `refund.created`, `refund.updated`, `refund.failed`, `charge.refunded`
-- `charge.dispute.created`, `charge.dispute.closed`
+- `charge.dispute.created`, `charge.dispute.updated`, `charge.dispute.funds_withdrawn`,
+  `charge.dispute.closed` (the middle two since #730: an inquiry that becomes a chargeback
+  arrives as one of them, and without them its letters stay spendable until it closes)
+
+`OPENAI_APPS_CHALLENGE_TOKEN` holds the ChatGPT plugin portal's domain-verification token (#407).
+The API serves it at `/.well-known/openai-apps-challenge` and answers 404 while it is unset. Set
+it on the production API service when the portal issues a token at submission. The token is
+served publicly, so it is not a secret, but it belongs to the portal's record, not to Git.
 
 Confirm it in the Stripe Dashboard under Developers, Webhooks, for each
 environment's endpoint, and again after any endpoint is recreated.
@@ -121,6 +208,29 @@ In development set `LETTER_PROVIDER_CONFIG={"mode":"test"}`. When
 `STRIPE_JIT_POSTCARD_PRICE_ID`, and — if Pay & Send sells in a different
 currency from the packs — `JIT_CURRENCY`.
 
+The mail options' prices (#578) are needed only while their flags are on,
+with Pay & Send:
+
+- `LETTER_IRL_ROOM_TO_WRITE_ENABLED`: `STRIPE_JIT_LETTER_TWO_PAGES_PRICE_ID` and
+  `STRIPE_JIT_LETTER_THREE_PAGES_PRICE_ID`;
+- `LETTER_IRL_POSTCARD_SIZES_ENABLED`: `STRIPE_JIT_POSTCARD_4X6_PRICE_ID` and
+  `STRIPE_JIT_POSTCARD_11X6_PRICE_ID`;
+- `LETTER_IRL_CERTIFIED_MAIL_ENABLED` (#625): `STRIPE_JIT_LETTER_CERTIFIED_PRICE_ID` and
+  `STRIPE_JIT_LETTER_CERTIFIED_RECEIPT_PRICE_ID`. Leave it off until the send carries the service (the api and
+  the maintenance service both run it, [deployment.md](deployment.md)).
+
+In Stripe test mode, `npx tsx scripts/create-option-prices.ts` makes all of these Prices at the amounts the product
+table pins and writes the variable lines (#624; see [deployment.md](deployment.md), the Pay & Send rollout).
+
+Without them, production refuses to boot and development warns. The flags stay
+unset in production until the owner approves the prices. Leave a flag unset
+rather than `false`: the cutover preflight reads variable names, not values, so a
+flag set to `false` still makes it demand that option's prices.
+
+Letter packs and gift letters pay only for one-page letters and 6x9 postcards
+(#579): the options above are always paid per send, with Pay & Send, whatever
+the balance.
+
 **Do not delete the old `*_AMOUNT_CENTS` variables until this build is the one
 serving** — the previous image's validator requires them in production, and
 removing them early bricks that image on its next restart.
@@ -140,6 +250,30 @@ The preflight (`npm run preflight:cutover -- --env <environment>`) verifies the
 price ids are *set* — it reads names, never values. Committed variables require
 an explicit service **Redeploy** to reach the running instance (issue #213).
 
+Content retention variables, read only by the maintenance service (`src/cli/runMaintenance.ts`):
+
+```env
+# Only the exact word `enforce` makes the sweep clear content; anything else,
+# including unset, runs the daily report. Set on development first, then on
+# production after RETENTION-01 passes there (#153).
+CONTENT_RETENTION_MODE=
+# On when unset. Any value other than true/1/yes/on/enabled - including a typo -
+# skips the retention pass entirely, report included.
+CONTENT_RETENTION_ENABLED=
+# Sent-letter content period in days. Default 90; below 2 or unparseable falls back to 90.
+CONTENT_RETENTION_DAYS=
+# Rows per sweep. Default 500; outside 1-5000 or unparseable falls back to 500.
+CONTENT_RETENTION_BATCH_SIZE=
+# Outbox rows claimed per batch. Default 25. A run claims batches until one
+# comes back short or the time budget below has passed (#700).
+MAINTENANCE_OUTBOX_BATCH_SIZE=
+# Seconds a run may keep claiming outbox batches. Default 600; outside 1-2700
+# or unparseable falls back to 600.
+MAINTENANCE_OUTBOX_TIME_BUDGET_SECONDS=
+```
+
+None of these is in `ENV_VAR_MANIFEST` yet, so `npm run preflight:cutover` does not report them.
+
 Use Railway variable references to the bucket service. Do not copy bucket credentials into Git, screenshots, logs, or documentation. The application also accepts Railway's standard `BUCKET`, `AWS_ENDPOINT_URL`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, and `AWS_SECRET_ACCESS_KEY` names.
 
 Leave `ADMIN_ENABLED` unset. A `true` value fails API startup, and there is no public admin route in
@@ -148,7 +282,8 @@ the owner's tailnet; its setup is in [admin-panel-guide.md](admin-panel-guide.md
 
 ## Maintenance Settings
 
-Create `letter-irl-maintenance` from the backend repository in both environments:
+The maintenance service is `letter-irl-maintenance` in production and `letter-irl-maintenance-dev` in
+development (the names in Railway's service list on 2026-09-23). Create each from the backend repository:
 
 ```text
 Build command: npm run build
@@ -159,6 +294,8 @@ Public domain: none
 ```
 
 Reference the same backend variables used by the API, including the environment-specific database and bucket references. The command closes all clients and exits. Investigate any run that is still active near the next hour.
+
+`MAINTENANCE_HEARTBEAT_URL` is the maintenance service's own: an external monitor's ping URL (for example a healthchecks.io check), called after every run that finishes. The monitor alerts when the calls stop, which covers a run that never happens and one that keeps failing ([operational-acceptance.md](operational-acceptance.md), #408). Production requires it (#699): maintenance refuses to run without it, or with a value that is not https (`maintenance.heartbeat_url_invalid`). Elsewhere, unset, nothing is called, and a value that is not https only warns. It is a capability, so keep it in Railway only. The run also withholds the call while the outbox is paused with letters waiting, or while a letter with an arrival date is still waiting after 18:00 New York time on its mail day.
 
 ## Website Settings
 
@@ -191,7 +328,7 @@ Keep automatic deploys enabled. A feature branch must reach `dev` through a PR b
 
 After enabling, leave development idle for more than ten minutes. Confirm Railway reports both services asleep, then test MCP connect, image/widget rendering, login, and dashboard access. Disable Serverless if first-use recovery exceeds three seconds or any flow fails.
 
-The public post-wake health, manifest, OAuth metadata, CORS, and homepage checks pass. Authenticated ChatGPT widget and image checks remain required before production promotion.
+The public post-wake health, manifest, OAuth metadata, CORS, and homepage checks passed in July 2026, and the authenticated ChatGPT widget and image flows have since passed against development (see [manual-tests.md](manual-tests.md)). Re-run them after any Serverless change.
 
 ## Budget Controls
 
@@ -214,6 +351,8 @@ Current development placement is API and website in Railway US West, maintenance
 - `/healthz` and `/api/health` return successfully.
 - Migrations show issue #69's `021_jit_commerce_foundation.sql` before `022_admin_audit.sql`.
 - Maintenance logs show one short run and clean process exit.
+- Maintenance logs show `recent_uploads.swept` and no `recent_uploads.sweep_failed`.
+- Maintenance logs show `feature_requests.swept` and no `feature_requests.sweep_failed`.
 - An image remains retrievable after API restart for its documented 15 minutes.
 - Development sleeps after ten idle minutes.
 - Neon suspends after five database-idle minutes.

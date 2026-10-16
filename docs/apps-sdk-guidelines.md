@@ -1,6 +1,7 @@
 # OpenAI Apps SDK Guidelines
 
-Last verified: May 30, 2026
+**Last Updated:** September 16, 2026 (Apps SDK guidance last verified May 30, 2026)
+**Purpose:** The subset of Apps SDK guidance that materially affects Letter IRL
 
 This file records the subset of current Apps SDK guidance that materially affects Letter IRL. Treat official OpenAI documentation as the normative source.
 
@@ -23,8 +24,11 @@ This file records the subset of current Apps SDK guidance that materially affect
 - Expose protected-resource metadata with the exact `/mcp` resource, real Auth0
   issuer, and product scopes. Clients discover authorization-server and CIMD
   capabilities from Auth0 itself; Letter IRL must not synthesize them.
-- Use the OpenAI-hosted CIMD URL as the public client ID with authorization code,
-  PKCE S256, and `token_endpoint_auth_method: none`.
+- Use the OpenAI-hosted CIMD URL as the client ID with authorization code, PKCE S256,
+  and the client authentication method the CIMD document declares (currently `private_key_jwt`;
+  Auth0 takes the document's method as given, see the corrected contract header in
+  [auth0-tenant-configuration.md](auth0-tenant-configuration.md)). OpenAI sanctions both `none` and
+  `private_key_jwt`.
 - Add `securitySchemes` to tool metadata.
 - Return `_meta["mcp/www_authenticate"]` on auth-required tool errors so ChatGPT can trigger account-linking flows.
 - Keep ChatGPT CIMD separate from Claude/PAT authentication. The static DCR shim

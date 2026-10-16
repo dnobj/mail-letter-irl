@@ -14,6 +14,24 @@ export interface SpawnTailscaledOptions {
   log?: (line: string) => void;
 }
 
+/**
+ * Tunnel MTU for tailscaled's userspace network stack, which also sets the TCP
+ * segment size it advertises to every peer.
+ *
+ * Tailscale's default is 1280, and the direct UDP path between an operator's
+ * laptop and the Railway container silently drops tunnel packets of about 1260
+ * bytes and up (measured 2026-09-08: 1248 passed, 1260 did not). Small requests
+ * got through and full-size ones hung, so curl worked while Chrome, whose TLS
+ * handshake spans two segments, timed out on every page. 1200 leaves margin
+ * below the cutoff. Lowering it here rather than on the laptop fixes every
+ * client at once; a service variable of the same name still overrides it.
+ */
+export const DEFAULT_TAILSCALE_MTU = 1200;
+
+export function tailscaledEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return { ...env, TS_DEBUG_MTU: env.TS_DEBUG_MTU ?? String(DEFAULT_TAILSCALE_MTU) };
+}
+
 export function spawnTailscaled(options: SpawnTailscaledOptions): DaemonHandle {
   const log = options.log ?? ((line: string) => console.log(line));
   const child = spawn(
@@ -23,7 +41,7 @@ export function spawnTailscaled(options: SpawnTailscaledOptions): DaemonHandle {
       `--state=${options.stateFile}`,
       `--socket=${options.socketPath}`,
     ],
-    { stdio: ["ignore", "pipe", "pipe"] },
+    { stdio: ["ignore", "pipe", "pipe"], env: tailscaledEnvironment(process.env) },
   );
   const forward = (stream: NodeJS.ReadableStream | null, label: string) => {
     if (!stream) return;

@@ -1,8 +1,8 @@
 # DCR Static Client Workaround
 
-> Historical rollback record. As of July 23, 2026, the target ChatGPT design is
-> Auth0 manual public CIMD with authorization code + PKCE S256,
-> `token_endpoint_auth_method: none`, and a dedicated exact `/mcp` audience.
+> Historical rollback record. The live ChatGPT design is Auth0 manual CIMD with
+> authorization code + PKCE S256, the client authentication method the CIMD document
+> declares (`private_key_jwt`, corrected 2026-09-05), and a dedicated exact `/mcp` audience.
 > This workaround is available only behind
 > `LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY=true` for an environment-specific
 > rollback. It is disabled by default and must not be shared with Claude/PAT.

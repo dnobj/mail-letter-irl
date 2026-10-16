@@ -62,7 +62,7 @@ async function testCreditFlow() {
       userId: TEST_USER_ID,
       credits: 2,
       letterId: 'letter_test_001',
-      description: 'Test letter to John Doe'
+      description: 'Sent letter (2 credits)'
     });
     console.log(`   ✅ Deducted 2 credits`);
     console.log(`   📊 New balance: ${deduction1.user.credits} credits\n`);
@@ -100,7 +100,7 @@ async function testCreditFlow() {
     });
     console.log(`   ✅ Found ${history.total} transactions:\n`);
 
-    history.transactions.forEach((tx, index) => {
+    history.transactions.forEach((tx) => {
       const sign = tx.amount > 0 ? '+' : '';
       const emoji = tx.type === 'purchase' ? '💳' : tx.type === 'deduction' ? '📤' : '💸';
       console.log(`   ${emoji} ${tx.type.padEnd(10)} ${sign}${tx.amount} credits → Balance: ${tx.balance_after}`);

@@ -1,5 +1,6 @@
 /** Platform-neutral commerce orchestration backed by the Stripe adapter. */
 
+import { contentVersionMatches } from './contentVersion.js';
 import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import type Stripe from 'stripe';
@@ -16,20 +17,35 @@ import {
   CREDITS_PER_LETTER,
   PACK_PRODUCTS,
   formatAmountForCurrency,
-  jitProductCode,
+  jitProductMatching,
   normalizedCurrency,
-  packCurrency
+  packCurrency,
+  type MailOption
 } from '../config/products.js';
+import { DRAFT_OPTION_COLUMNS, draftMailOption, isPackPayable, type DraftOptionRow } from './mailOptions.js';
 import { lockAccountForBalanceChange } from './accountLock.js';
 import { addCreditsToLedgerWithClient } from './creditLedgerService.js';
 import { grantImageEntitlementWithClient } from './imageGenerationLimitService.js';
+import {
+  grantGiftLettersWithClient,
+  revokeGiftLettersForOrderWithClient
+} from './giftLetterService.js';
+import { isGiftLettersEnabled } from '../config/giftLetters.js';
+import { isImageGenerationOff } from '../config/imageGeneration.js';
 import { createMailOrderFromDraftWithClient } from './mailSendService.js';
+import { draftScheduleOf } from './draftSchedule.js';
+import { STUCK_ORDER_CONDITION } from './stuckOrders.js';
+import { describeDate, earliestMailOn } from './deliverySchedule.js';
+import { fullMailDate } from './mailDateCapacity.js';
+import { OPERATOR_NOTICES, reportToOperator } from './operatorNotify.js';
+import { assertNoRecentDuplicateMail } from './duplicateMailService.js';
 import {
   createJitCheckoutSession,
   createPackCheckoutSession,
   createPaymentRefund,
   findPaymentRefund,
   getJitProductConfig,
+  getJitProductConfigForCode,
   getPackProductConfig,
   isJitPurchaseEnabled,
   retrieveCheckoutSession,
@@ -38,7 +54,8 @@ import {
   type CommerceProductConfig,
   type PackProductId
 } from './stripeService.js';
-import type { LetterDraft, MailType, Order, OrderStatus } from './types.js';
+import type { DraftSchedule, LetterDraft, MailType, Order, OrderStatus } from './types.js';
+import { type FundingHoldReason } from './heldMail.js';
 import {
   carriedDiagnosticClass,
   classifyDiagnosticError,
@@ -106,6 +123,21 @@ export interface CreatePackCheckoutParams {
 export interface CreateJitCheckoutParams {
   userId: string;
   draftId: string;
+  /** The person asked for another copy of mail sent or paid for in the last 24 hours (#412). */
+  allowDuplicate?: boolean;
+  /**
+   * Where Stripe returns the person, when not the purchase return page: the
+   * confirmation page, which takes the payment for mail no pack pays for
+   * (#579). Recorded with the order, so a retry from elsewhere is a new
+   * request, as a changed price is.
+   */
+  returnTo?: { successUrl: string; cancelUrl: string };
+  /**
+   * The version of the draft the person was shown (#695, contentVersion.ts),
+   * compared under the draft's lock before anything is charged. None is let
+   * through for one release, and logged.
+   */
+  contentVersion?: string;
 }
 
 export interface PurchaseStatusResult {
@@ -171,11 +203,22 @@ export interface SendEligibility {
     displayAmount?: string;
     productDescription?: string;
     unavailableReason?: string;
+    /**
+     * In an app that cannot open Pay & Send itself, the page where the person
+     * pays for mail no pack pays for, and so sends it (#579).
+     */
+    pageUrl?: string;
   };
   letterPack: {
     available: boolean;
     purchaseUrl: string;
   };
+  /**
+   * False when letter packs and gift letters cannot pay for this mail (#579):
+   * it is paid per send with Pay & Send, whatever the balance. Absent when
+   * they can, as for every mail before the options.
+   */
+  packPays?: false;
 }
 
 function integerSetting(name: string, fallback: number): number {
@@ -192,12 +235,29 @@ function refundRetryDelaySeconds(): number {
   );
 }
 
+/** Why a quote offers no Pay & Send for an option this deployment does not sell (#578). */
+export const OPTION_NOT_SOLD_REASON = "Pay & Send isn't available for this mail.";
+
+/**
+ * Kicks the catalog for a quote's product. An option this deployment does not
+ * sell kicks with its own code all the same: that is what clears whatever the
+ * catalog recorded while it was sold, before its flag went off (#278 round 8).
+ */
+function kickForOption(option: MailOption, reason: string): void {
+  const product = jitProductMatching(option);
+  if (product) kickPriceCatalog(product.productCode, reason);
+}
+
 export function getSendEligibility(
   availableCredits: number,
   requiredCredits: number,
-  mailType: MailType
+  option: MailOption
 ): SendEligibility {
-  const prepaidEligible = availableCredits >= requiredCredits;
+  // Packs and gift letters pay only for a one-page letter or a 6x9 postcard
+  // (#579). For any other option the balance cannot pay, so Pay & Send is the
+  // way whatever the balance, and no pack is offered.
+  const packPays = isPackPayable(option);
+  const prepaidEligible = packPays && availableCredits >= requiredCredits;
   // One enabled read per call (three separate env reads before, against this
   // codebase's own hoisting standard), and the disabled default short-circuits
   // before building a product config whose only fate was to be discarded
@@ -218,25 +278,26 @@ export function getSendEligibility(
   // depends on it.
   return {
     payAndSend: jitEnabled
-      ? enabledPayAndSend(mailType, prepaidEligible)
-      : disabledPayAndSend(mailType),
+      ? enabledPayAndSend(option, prepaidEligible)
+      : disabledPayAndSend(option),
     letterPack: {
-      available: true,
+      available: packPays,
       purchaseUrl:
         process.env.LETTER_IRL_PACKS_URL ||
         process.env.LETTER_IRL_PUBLIC_BASE_URL ||
         'https://letterirl.com'
-    }
+    },
+    ...(packPays ? {} : { packPays: false as const })
   };
 }
 
-function disabledPayAndSend(mailType: MailType): SendEligibility['payAndSend'] {
+function disabledPayAndSend(option: MailOption): SendEligibility['payAndSend'] {
   // Still kick with the code: the catalog's unsold gate clears leftover
   // state recorded before the toggle - cooldowns AND memos, both mail types -
   // so neither an un-archived Price nor an archived one resurfaces stale
   // answers on re-enable. Without this, nothing would ever call with a JIT
   // code while disabled (#278 rounds 7-8).
-  kickPriceCatalog(jitProductCode(mailType), 'send_eligibility_disabled');
+  kickForOption(option, 'send_eligibility_disabled');
   return {
     available: false,
     unavailableReason: 'Pay & Send is not enabled.'
@@ -244,16 +305,21 @@ function disabledPayAndSend(mailType: MailType): SendEligibility['payAndSend'] {
 }
 
 function enabledPayAndSend(
-  mailType: MailType,
+  option: MailOption,
   prepaidEligible: boolean
 ): SendEligibility['payAndSend'] {
-  const product = getJitProductConfig(mailType);
   // The eligibility accessor owns its own warmup kick - UNGATED beyond the
   // enabled check above, which is what makes the catalog's unsold-state
   // clearing reachable: gating the kick harder meant nothing ever called with
   // a JIT code while disabled, so toggle-off leftovers survived to resurface
   // on re-enable, the exact bug the clearing exists for (#278 round 7).
-  kickPriceCatalog(product.productCode, 'send_eligibility');
+  const product = getJitProductConfig(option);
+  kickForOption(option, 'send_eligibility');
+  if (!product) {
+    // An option whose flag is off has no price: nothing to report as
+    // unpriced, and never a smaller option's price (#578).
+    return { available: false, unavailableReason: OPTION_NOT_SOLD_REASON };
+  }
   const configured = Boolean(product.priceId && product.amountCents > 0);
   if (configured) clearDiagnosticChangeSlot(`commerce.pay_and_send_unpriced:${product.productCode}`);
   const allowedWithBalance = process.env.JIT_ALLOW_WITH_PREPAID_BALANCE === 'true';
@@ -392,19 +458,39 @@ function appendQuery(base: string, values: Record<string, string>): string {
     .join('&')}`;
 }
 
-function checkoutReturnUrls(orderId: string): {
-  successUrl: string;
-  cancelUrl: string;
-} {
+/**
+ * The origin that serves /purchase/return and /purchase/start. Derived the
+ * way the return URLs always were: an explicit return URL wins, then the
+ * public base, then the API URL, then production's API host.
+ */
+function purchasePagesBase(): string {
   const publicBase = (
     process.env.JIT_CHECKOUT_RETURN_URL ||
     process.env.LETTER_IRL_PUBLIC_BASE_URL ||
     process.env.LETTER_IRL_API_URL ||
     'https://api.letterirl.com/purchase/return'
   ).replace(/\/$/, '');
-  const returnBase = publicBase.endsWith('/purchase/return')
-    ? publicBase
-    : `${publicBase}/purchase/return`;
+  return publicBase.endsWith('/purchase/return')
+    ? publicBase.slice(0, -'/purchase/return'.length)
+    : publicBase;
+}
+
+/**
+ * The start page the checkout card opens instead of the Stripe URL itself
+ * (#372). It forwards to the same checkout after keeping the way back into
+ * the conversation that ChatGPT appends for allowlisted redirect targets.
+ */
+export function purchaseStartUrl(checkoutUrl: string): string {
+  return appendQuery(`${purchasePagesBase()}/purchase/start`, {
+    to: encodeURIComponent(checkoutUrl)
+  });
+}
+
+function checkoutReturnUrls(orderId: string): {
+  successUrl: string;
+  cancelUrl: string;
+} {
+  const returnBase = `${purchasePagesBase()}/purchase/return`;
   return {
     successUrl: appendQuery(returnBase, {
       outcome: 'success',
@@ -426,6 +512,61 @@ function productSnapshot(product: CommerceProductConfig): Record<string, unknown
   };
 }
 
+/**
+ * The line a pack's grant writes into the customer's history, which the
+ * website shows as it is (#460). Named as the customer bought it: the name
+ * the order recorded at checkout, then the catalogue's, and never the
+ * internal product code. The repair after a missed webhook writes the same
+ * line; that it was a repair is on the order event, not in the history.
+ */
+function packPurchaseLine(order: Pick<Order, 'product_code' | 'product_snapshot'>): string {
+  const recorded = (order.product_snapshot as { name?: unknown } | null)?.name;
+  if (typeof recorded === 'string' && recorded.trim()) return `Purchased ${recorded.trim()}`;
+  const product = PACK_PRODUCTS.find(candidate => candidate.productCode === order.product_code);
+  return `Purchased ${product?.name ?? 'a letter pack'}`;
+}
+
+/**
+ * The parts of a Pay & Send checkout request that follow configuration, and so
+ * can change between two attempts on one order (#279): the Stripe Price and
+ * the return URLs. Everything else Stripe receives - the order id, its
+ * metadata, the expiry - is fixed by the order row.
+ *
+ * Recorded on the order when it is inserted. A retry re-sends the order's
+ * idempotency key, and Stripe answers a key it has seen with different
+ * parameters by refusing, not by replaying; that refusal is not terminal, so
+ * the order stayed checkout_pending and blocked the draft until its window
+ * ran out.
+ */
+interface JitStripeRequest {
+  priceId: string;
+  successUrl: string;
+  cancelUrl: string;
+}
+
+function jitStripeRequest(
+  orderId: string,
+  product: CommerceProductConfig,
+  returnTo?: CreateJitCheckoutParams['returnTo']
+): JitStripeRequest {
+  const urls = returnTo ?? checkoutReturnUrls(orderId);
+  return { priceId: product.priceId, successUrl: urls.successUrl, cancelUrl: urls.cancelUrl };
+}
+
+/** The request an order recorded at insert, or null for an order from before #279. */
+function recordedStripeRequest(order: Order): JitStripeRequest | null {
+  const recorded = (order.product_snapshot as { stripeRequest?: Partial<JitStripeRequest> } | null)?.stripeRequest;
+  if (
+    !recorded ||
+    typeof recorded.priceId !== 'string' ||
+    typeof recorded.successUrl !== 'string' ||
+    typeof recorded.cancelUrl !== 'string'
+  ) {
+    return null;
+  }
+  return { priceId: recorded.priceId, successUrl: recorded.successUrl, cancelUrl: recorded.cancelUrl };
+}
+
 function asCheckoutResult(order: Order, reused: boolean): CommerceCheckoutResult {
   return {
     success: true,
@@ -442,6 +583,39 @@ function asCheckoutResult(order: Order, reused: boolean): CommerceCheckoutResult
     status: order.status,
     reused
   };
+}
+
+/**
+ * The order event that says a Pay & Send letter's mail date had passed by the
+ * time it was paid (#700), so it goes to the printer as soon as it can rather
+ * than waiting. get_purchase_status reads it (SCHEDULE_MISSED_EVENT).
+ */
+export const SCHEDULE_MISSED_EVENT = 'jit.schedule_missed';
+
+/**
+ * In its own savepoint: the event says what happened, and never decides a
+ * fulfilment. One that cannot be written is logged and left, rather than
+ * failing the fulfilment it follows and refunding mail already queued.
+ */
+async function recordMissedSchedule(
+  client: Pick<pg.PoolClient, 'query'>,
+  orderId: string,
+  missed: DraftSchedule | undefined
+): Promise<void> {
+  if (!missed) return;
+  await client.query('SAVEPOINT schedule_missed_event');
+  try {
+    await recordOrderEvent(client, orderId, SCHEDULE_MISSED_EVENT, null, null, {
+      arriveBy: missed.arriveBy,
+      mailOn: missed.mailOn
+    });
+    await client.query('RELEASE SAVEPOINT schedule_missed_event');
+  } catch (error) {
+    await client.query('ROLLBACK TO SAVEPOINT schedule_missed_event');
+    writeDiagnostic('warn', 'commerce.schedule_missed_event_failed', {
+      errorClass: carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'database_error')
+    });
+  }
 }
 
 export async function recordOrderEvent(
@@ -612,6 +786,40 @@ export function assertConfiguredAmount(
   }
 }
 
+/**
+ * Refuse a checkout for an account that is erased or has sends blocked, read
+ * AFTER the order insert and inside the same transaction (#449).
+ *
+ * The insert's foreign key takes a KEY SHARE lock on the account row, so when
+ * an erasure holds that row the insert waits for it. Under READ COMMITTED this
+ * read then sees the erasure's commit, and the throw rolls the insert back: no
+ * order, and no Stripe session, because the session is created after this
+ * transaction. A read before the insert cannot close that window, since it
+ * runs before the erasure starts.
+ *
+ * A pack purchase is refused for a blocked account as well, which the pack
+ * tool's "Purchasing is disabled" answer already assumed and nothing enforced:
+ * the panel's pack refund refuses a blocked account, so a pack bought while
+ * blocked could only be refunded by hand in Stripe.
+ */
+async function assertAccountMayPurchase(
+  client: Pick<pg.PoolClient, 'query'>,
+  userId: string
+): Promise<void> {
+  const account = await client.query<{ erased_at: Date | null; sends_blocked_reason: string | null }>(
+    'SELECT erased_at, sends_blocked_reason FROM users WHERE user_id = $1',
+    [userId]
+  );
+  const row = account.rows[0];
+  if (!row || row.erased_at || row.sends_blocked_reason) {
+    // Never the block's label: it is an internal moderation reason (#278 r12).
+    throw Object.assign(new Error('Purchasing is disabled on this account'), {
+      code: 'ACCOUNT_SENDS_BLOCKED',
+      diagnosticClass: 'authorization_error'
+    });
+  }
+}
+
 export async function createPackCheckout(
   params: CreatePackCheckoutParams
 ): Promise<CommerceCheckoutResult> {
@@ -647,23 +855,29 @@ export async function createPackCheckout(
 
   const orderId = randomUUID();
   const idempotencyKey = `pack-checkout:${orderId}`;
-  const inserted = await query<Order>(
-    `INSERT INTO orders (
-       order_id, user_id, order_type, product_code, product_snapshot, credits,
-       amount_cents, currency, payment_provider, idempotency_key, status
-     ) VALUES ($1, $2, 'letter_pack', $3, $4, $5, $6, $7, 'stripe', $8, 'checkout_pending')
-     RETURNING *`,
-    [
-      orderId,
-      params.userId,
-      product.productCode,
-      JSON.stringify(productSnapshot(product)),
-      product.credits,
-      product.amountCents,
-      product.currency,
-      idempotencyKey
-    ]
-  );
+  // One transaction with the account check, which reads after the insert has
+  // waited out any erasure holding the account row (#449).
+  const inserted = await transaction(async client => {
+    const row = await client.query<Order>(
+      `INSERT INTO orders (
+         order_id, user_id, order_type, product_code, product_snapshot, credits,
+         amount_cents, currency, payment_provider, idempotency_key, status
+       ) VALUES ($1, $2, 'letter_pack', $3, $4, $5, $6, $7, 'stripe', $8, 'checkout_pending')
+       RETURNING *`,
+      [
+        orderId,
+        params.userId,
+        product.productCode,
+        JSON.stringify(productSnapshot(product)),
+        product.credits,
+        product.amountCents,
+        product.currency,
+        idempotencyKey
+      ]
+    );
+    await assertAccountMayPurchase(client, params.userId);
+    return row;
+  });
 
   const returnUrls = checkoutReturnUrls(orderId);
   const checkout = await createPackCheckoutSession({
@@ -687,7 +901,9 @@ export async function createPackCheckout(
 }
 
 async function prepareJitOrder(
-  params: CreateJitCheckoutParams
+  params: CreateJitCheckoutParams,
+  /** The price the caps were checked at, from the peek (#586). */
+  checkedCents: number
 ): Promise<{ order: Order; reused: boolean }> {
   return transaction(async client => {
     const draftResult = await client.query<LetterDraft>(
@@ -722,12 +938,50 @@ async function prepareJitOrder(
         code: 'DRAFT_EXPIRED'
       });
     }
+    // A gift draft is free and prints a gift card; selling it would charge
+    // for a free letter and print a card nobody paid the budget for. Refused
+    // here, before any charge, because fulfilment runs after one.
+    if (draft.is_gift_send) {
+      throw Object.assign(new Error('Draft is a gift send'), { code: 'DRAFT_IS_GIFT' });
+    }
+    // What the person saw (#695): an edit after it refuses the checkout, before any
+    // charge, so Pay & Send never takes money for mail they did not see. The draft
+    // is held by the order from here (lockChangeableDraft: while its checkout can be
+    // paid, until Stripe closes a session that opened), so its paid fulfilment mails
+    // this content.
+    const shown = contentVersionMatches(params.contentVersion, draft);
+    if (shown === 'differs') {
+      throw Object.assign(new Error('Draft changed since it was shown'), {
+        code: 'DRAFT_CHANGED_SINCE_SHOWN',
+        diagnosticClass: 'DRAFT_CHANGED_SINCE_SHOWN'
+      });
+    }
+    if (shown === 'missing') writeDiagnostic('info', 'checkout.content_version_missing', {});
+    // Arrive-by (#535): the dates, read by the send's own reader, so dates it
+    // could not read fail here, before the charge. Checked below, once the
+    // draft's order is known.
+    const schedule = draftScheduleOf(draft);
 
     // ONE derivation for the whole transaction: the reprice branch and the
     // insert below must price against the SAME row or they silently diverge
     // (#278 round 8).
-    const actualMailType = (draft.mail_type || 'letter') as MailType;
-    const product = getJitProductConfig(actualMailType);
+    const product = getJitProductConfig(draftMailOption(draft));
+    if (!product) {
+      // Its option's flag is off: no price exists, so nothing is sold, and a
+      // smaller option's price is never charged for it (#578).
+      throw Object.assign(new Error('Pay & Send does not sell this mail option'), {
+        code: 'JIT_OPTION_NOT_SOLD'
+      });
+    }
+    // The caps were checked at the peek's price (#586): new words or a restyle
+    // since then can change the letter's pages, and so its price. Refused
+    // before any order or session, so a retry peeks again and checks the caps
+    // at the price it charges.
+    if (product.amountCents !== checkedCents) {
+      throw Object.assign(new Error('The draft changed while its checkout was being made'), {
+        code: 'DRAFT_CHANGED'
+      });
+    }
 
     const active = await client.query<Order>(
       `SELECT * FROM orders
@@ -739,6 +993,36 @@ async function prepareJitOrder(
       [params.draftId, ACTIVE_JIT_STATUSES]
     );
     const existing = active.rows[0];
+    // Arrive-by's refusals before the charge (#535, #700), only where a new
+    // Stripe session would be opened: no order yet, or one whose session was
+    // never made. An open session, or an order paid or further on, is
+    // returned below as it always was: refusing it would change nothing,
+    // since a session can still be paid, and could tell someone who has just
+    // paid to buy again. Its fulfilment mails as soon as it can when its date
+    // has passed, and says so (jit.schedule_missed).
+    const opensSession =
+      !existing ||
+      (existing.status === 'checkout_pending' && !existing.stripe_checkout_session_id && !existing.checkout_url);
+    // A mail date already past.
+    if (schedule && opensSession && schedule.mailOn < earliestMailOn(new Date())) {
+      throw Object.assign(new Error('Draft has missed its mail date'), {
+        code: 'SCHEDULE_PASSED',
+        diagnosticClass: 'SCHEDULE_PASSED'
+      });
+    }
+    // A full one, checked when a session is made: a session holds no place on
+    // the date, so its paid fulfilment can take the date over the cap. The
+    // count is read without the send's lock.
+    if (schedule && opensSession) {
+      const full = await fullMailDate(client, schedule, new Date());
+      if (full) {
+        throw Object.assign(new Error('Draft mail date is full'), {
+          code: 'SCHEDULE_FULL',
+          diagnosticClass: 'SCHEDULE_FULL',
+          openArrivals: full.openArrivals
+        });
+      }
+    }
     if (existing) {
       if (
         existing.status === 'checkout_pending' &&
@@ -783,7 +1067,26 @@ async function prepareJitOrder(
         );
       } else if (existing.stripe_checkout_session_id || existing.checkout_url) {
         // A Stripe session already exists: the customer will pay exactly what
-        // that session says, which matches this order row. Reuse is safe.
+        // that session says, which matches this order row. Reuse is safe -
+        // unless the letter's product changed since (#586). No editor changes
+        // a draft while a session-bearing order is live (lockChangeableDraft,
+        // #695), so this now guards a draft edited before that rule, or a
+        // change of which product a mail option maps to, while that session is
+        // closing at the old price. Only Stripe's word (its webhook, or the
+        // sweep) cancels a session-bearing order, so this refuses until then
+        // rather than reuse it (#593 review round 1).
+        // Judged by the option's own code, as the peek warms it.
+        const draftProductCode = jitProductMatching(draftMailOption(draft))?.productCode;
+        if (
+          existing.status === 'checkout_pending' &&
+          existing.product_code &&
+          draftProductCode &&
+          existing.product_code !== draftProductCode
+        ) {
+          throw Object.assign(new Error('The previous checkout for this draft is still closing'), {
+            code: 'PREVIOUS_CHECKOUT_CLOSING'
+          });
+        }
         return { order: existing, reused: true };
       } else if (existing.status !== 'checkout_pending') {
         // A sessionless row in a funded/held state exists only via operator
@@ -808,33 +1111,66 @@ async function prepareJitOrder(
         // the refund lane (#278 round 7). Nothing was ever paid on this row,
         // so cancelling it is free; a fresh order is inserted below at the
         // current price.
-        if (
+        //
+        // The retry also re-sends this row's idempotency key, and Stripe
+        // refuses a key it has seen with different parameters (#279). So the
+        // row is reused only when the retry would send the same request: the
+        // same Price, not just the same amount (a Price repointed at the same
+        // amount passed the amount check), and the same return URLs. A row
+        // from before the request was recorded is judged on amount and
+        // currency alone, as it always was.
+        const recorded = recordedStripeRequest(existing);
+        const current = jitStripeRequest(existing.order_id, product, params.returnTo);
+        const samePrice =
           existing.amount_cents === product.amountCents &&
           // The same normalizer on BOTH sides: a legacy row's padded currency
           // must not fail a comparison its paid-amount sibling passes (#278
           // round 8).
-          normalizedCurrency(existing.currency, '') === normalizedCurrency(product.currency, '')
-        ) {
+          normalizedCurrency(existing.currency, '') === normalizedCurrency(product.currency, '') &&
+          (recorded === null || recorded.priceId === current.priceId);
+        const sameReturn =
+          recorded === null ||
+          (recorded.successUrl === current.successUrl && recorded.cancelUrl === current.cancelUrl);
+        if (samePrice && sameReturn) {
           return { order: existing, reused: true };
         }
-        await client.query(
-          `UPDATE orders SET status = 'cancelled',
-             last_error_code = 'PRICE_CHANGED_BEFORE_SESSION',
-             last_error = $2, updated_at = NOW()
-           WHERE order_id = $1 AND status = 'checkout_pending'`,
-          // The PAIR. This branch is reached only from a row whose session
-          // creation already failed, so last_error always holds that older,
-          // unrelated message - round 12 fixed the sibling 60 lines above
-          // and left this one (#278 round 13).
-          [existing.order_id, 'Configured price changed before a session was opened']
-        );
-        await recordOrderEvent(
-          client,
-          existing.order_id,
-          'checkout.repriced_locally',
-          existing.status,
-          'cancelled'
-        );
+        if (samePrice) {
+          // Only the return URLs moved, with their configuration. Nothing was
+          // paid on this row either, so it cancels as free as a repriced one.
+          await client.query(
+            `UPDATE orders SET status = 'cancelled',
+               last_error_code = 'CHECKOUT_REQUEST_CHANGED_BEFORE_SESSION',
+               last_error = $2, updated_at = NOW()
+             WHERE order_id = $1 AND status = 'checkout_pending'`,
+            [existing.order_id, 'Checkout return address changed before a session was opened']
+          );
+          await recordOrderEvent(
+            client,
+            existing.order_id,
+            'checkout.request_changed_locally',
+            existing.status,
+            'cancelled'
+          );
+        } else {
+          await client.query(
+            `UPDATE orders SET status = 'cancelled',
+               last_error_code = 'PRICE_CHANGED_BEFORE_SESSION',
+               last_error = $2, updated_at = NOW()
+             WHERE order_id = $1 AND status = 'checkout_pending'`,
+            // The PAIR. This branch is reached only from a row whose session
+            // creation already failed, so last_error always holds that older,
+            // unrelated message - round 12 fixed the sibling 60 lines above
+            // and left this one (#278 round 13).
+            [existing.order_id, 'Configured price changed before a session was opened']
+          );
+          await recordOrderEvent(
+            client,
+            existing.order_id,
+            'checkout.repriced_locally',
+            existing.status,
+            'cancelled'
+          );
+        }
       }
     }
 
@@ -850,7 +1186,9 @@ async function prepareJitOrder(
         diagnosticClass: failure.diagnosticClass
       });
     }
-    if (process.env.JIT_ALLOW_WITH_PREPAID_BALANCE !== 'true') {
+    // Only mail a pack can pay for (#579): an option is paid per send, so a
+    // balance never stands in the way of its checkout.
+    if (process.env.JIT_ALLOW_WITH_PREPAID_BALANCE !== 'true' && isPackPayable(draftMailOption(draft))) {
       const balance = await client.query<{ credits: number }>(
         'SELECT credits FROM users WHERE user_id = $1',
         [params.userId]
@@ -864,6 +1202,21 @@ async function prepareJitOrder(
 
     const orderId = randomUUID();
     const expiresAt = checkoutExpiry(new Date(draft.expires_at));
+    // #412: a NEW checkout for the same mail sent, paid for or awaiting
+    // payment in the last 24 hours is refused unless the person asked for
+    // another copy. Here, as the last refusal before the insert, because only
+    // here is a new order certain: every reuse has returned above, a stale or
+    // repriced row has just been cancelled for a replacement, the draft is
+    // locked and pending, and no Stripe session exists. Checking earlier, with
+    // the caps, had to guess which rows prepareJitOrder reuses, and guessed
+    // wrong for those two. A throw rolls the transaction back, cancellation
+    // included, so a refusal changes nothing.
+    //
+    // Best effort under concurrency, unlike the send from balance: two
+    // checkouts for two identical drafts lock different rows, so both can pass.
+    if (!params.allowDuplicate) {
+      await assertNoRecentDuplicateMail(client, { userId: params.userId, draftId: params.draftId });
+    }
     const inserted = await client.query<Order>(
       `INSERT INTO orders (
          order_id, user_id, order_type, draft_id, product_code, product_snapshot,
@@ -876,13 +1229,22 @@ async function prepareJitOrder(
         params.userId,
         params.draftId,
         product.productCode,
-        JSON.stringify(productSnapshot(product)),
+        JSON.stringify({ ...productSnapshot(product), stripeRequest: jitStripeRequest(orderId, product, params.returnTo) }),
         product.amountCents,
         product.currency,
         `jit-checkout:${orderId}`,
         expiresAt
       ]
     );
+    // The send block read before this transaction ran before any erasure that
+    // held the account row; this one runs after the insert waited it out (#449).
+    await assertAccountMayPurchase(client, params.userId);
+    // The mail caps again, now that this order is a row they count (#730):
+    // under their locks, so two checkouts at once cannot both take the last
+    // place, and with open checkouts counted, so the room an unpaid order will
+    // use is not sold twice. inFlight is 0, as on the send path: the count
+    // includes this order. A refusal rolls the insert back.
+    await assertMailWithinDailyCaps(client, params.userId, 0);
     await recordOrderEvent(client, orderId, 'order.created', null, 'checkout_pending');
     return { order: inserted.rows[0], reused: false };
   });
@@ -924,19 +1286,33 @@ export async function createJitCheckout(
   }
 
   // Which product is being bought decides which price must be verified, so
-  // read the draft's mail type BEFORE the money transaction (a network await
+  // read the draft's mail option BEFORE the money transaction (a network await
   // must never run inside it) and ensure exactly that product - ensuring both
   // JIT products coupled a letter checkout to a hanging postcard lookup
   // (#278 round 5). USER-SCOPED and AFTER the send-block gate: an unscoped
   // peek let any authenticated caller make another user's draft id steer
   // catalog work before authorization said no (#278 round 7). Advisory only -
-  // prepareJitOrder re-reads FOR UPDATE and owns the real ownership check.
-  const draftPeek = await query<{ mail_type: string | null }>(
-    'SELECT mail_type FROM letter_drafts WHERE draft_id = $1 AND user_id = $2',
+  // prepareJitOrder re-reads FOR UPDATE and owns the real ownership check,
+  // and refuses an option this deployment does not sell (#578).
+  // With its pages (#586): without them a long letter would warm the one-page
+  // price and meet the charge cap at the one-page amount. A restyle can change
+  // them between this peek and the lock (#591, and new words, #586):
+  // prepareJitOrder refuses an order whose locked price is not the one the
+  // caps were checked at, so neither the warm-up nor the caps go stale. And
+  // with its mail service (#625): without it a certified letter would warm
+  // the standard price and meet the charge cap at the standard amount.
+  const draftPeek = await query<DraftOptionRow>(
+    `SELECT ${DRAFT_OPTION_COLUMNS} FROM letter_drafts WHERE draft_id = $1 AND user_id = $2`,
     [params.draftId, params.userId]
   );
-  const peekedMailType = (draftPeek.rows[0]?.mail_type || 'letter') as MailType;
-  await ensurePriceCatalog(jitProductCode(peekedMailType));
+  // No row (not the caller's, or gone): a one-page letter, as an empty row always read; prepareJitOrder
+  // refuses it, unless the price warm-up or a daily cap refuses first.
+  const peeked = draftPeek.rows.at(0);
+  const peekedOption: MailOption = peeked ? draftMailOption(peeked) : { mailType: 'letter' };
+  // The option's own code, sold or not, as the quote kicks: for an option
+  // whose flag is off it clears what the catalog recorded while it was sold.
+  const peekedProduct = jitProductMatching(peekedOption);
+  if (peekedProduct) await ensurePriceCatalog(peekedProduct.productCode);
 
   // Pay & Send is the one path that both charges AND mails, so both ceilings
   // apply - and both are checked HERE, before prepareJitOrder creates an order
@@ -944,14 +1320,18 @@ export async function createJitCheckout(
   // funding precisely because this is where it gets capped.
   //
   // inFlight is 1: the letters row is not written until fulfilment, so today's
-  // count does not yet include this send.
-  await assertMailWithinDailyCaps({ query }, params.userId, 1);
-  await assertChargeWithinDailyCap(
-    params.userId,
-    getJitProductConfig(peekedMailType).amountCents
-  );
+  // count does not yet include this send. An early answer only, before the
+  // price is warmed and the draft locked, counting letters alone, since an
+  // open checkout this call may reuse would otherwise count twice: the caps
+  // are checked again, under their locks, once prepareJitOrder has inserted
+  // the order (#730).
+  await assertMailWithinDailyCaps({ query }, params.userId, 1, { openCheckouts: false, lock: false });
+  const checkedCents = getJitProductConfig(peekedOption)?.amountCents ?? 0;
+  await assertChargeWithinDailyCap(params.userId, checkedCents);
 
-  const prepared = await prepareJitOrder(params);
+  // The same-mail check (#412) runs inside prepareJitOrder, just before a new
+  // order is inserted: only there is it known that the call buys something.
+  const prepared = await prepareJitOrder(params, checkedCents);
   // The asymmetry with prepareJitOrder's reuse branch is DELIBERATE (#279).
   //
   // That branch accepts `stripe_checkout_session_id || checkout_url`; this one
@@ -980,22 +1360,40 @@ export async function createJitCheckout(
   // never does.
   //
   // #279's OTHER suggestion - give the reuse branch the price-id comparison its
-  // comment assumes - is sound and still open. The reprice gate can only
-  // compare amount and currency because productSnapshot persists no price id,
-  // so a repoint at the same amount passes it unnoticed.
+  // comment assumes - is done: a JIT order records the Price and return URLs
+  // it sends Stripe (jitStripeRequest), and prepareJitOrder reuses a
+  // sessionless order only when a retry would send the same request.
   if (prepared.order.status !== 'checkout_pending' || prepared.order.checkout_url) {
     return asCheckoutResult(prepared.order, true);
   }
 
-  const mailType = String(prepared.order.product_snapshot.mailType || 'letter') as MailType;
   // ONE fresh derivation, as it was through round 10. Rounds 11-12 spliced
   // the row's amount together with a live price id (and then the row's price
   // id too), which round 13 showed strands a checkout on an archived Price
   // that the pre-round-11 code completed successfully. The race that
   // motivated the splice was a concurrent memo invalidation, and that
-  // machinery is gone (#278 round 13).
-  const product = getJitProductConfig(mailType);
-  const urls = checkoutReturnUrls(prepared.order.order_id);
+  // machinery is gone (#278 round 13). Derived from the order's own product,
+  // not its mail type, so an option's order is never priced as another
+  // option (#578).
+  const product = getJitProductConfigForCode(prepared.order.product_code);
+  if (!product) {
+    // The order names a product this deployment no longer sells: a code gone
+    // from the table, or an option whose flag went off across a redeploy
+    // since the order was made (within one request, prepareJitOrder has
+    // already refused it). A configuration fault, which cancels the order, as
+    // an unpriced one does.
+    throw await failCheckoutCreation(
+      prepared.order.order_id,
+      {
+        success: false,
+        errorCode: 'PRICE_ID_NOT_CONFIGURED',
+        diagnosticClass: 'configuration_error',
+        error: `Pay & Send no longer sells ${prepared.order.product_code}`
+      },
+      'Failed to create Pay & Send checkout'
+    );
+  }
+  const urls = params.returnTo ?? checkoutReturnUrls(prepared.order.order_id);
   const checkout = await createJitCheckoutSession({
     orderId: prepared.order.order_id,
     product,
@@ -1163,6 +1561,20 @@ async function claimStripeEvent(
   return Boolean(claimed.rows[0]);
 }
 
+/**
+ * The image generations a purchase brings: none while image generation is
+ * switched off (LETTER_IRL_IMAGE_GEN_MODE=off, src/config/imageGeneration.ts),
+ * so nobody is handed generations they cannot use. Like the grant itself it is
+ * per order, and turning the switch back on does not backfill.
+ */
+async function grantPurchaseImageEntitlement(
+  client: Pick<pg.PoolClient, 'query'>,
+  params: Parameters<typeof grantImageEntitlementWithClient>[1]
+): Promise<void> {
+  if (isImageGenerationOff()) return;
+  await grantImageEntitlementWithClient(client, params);
+}
+
 function packImageGrant(credits: number): number {
   const perLetter = integerSetting(
     'IMAGE_ENTITLEMENTS_PER_PACK_LETTER',
@@ -1221,7 +1633,7 @@ export async function repairFulfilledPackGrant(
        FOR UPDATE`,
       [order.order_id]
     );
-    await grantImageEntitlementWithClient(client, {
+    await grantPurchaseImageEntitlement(client, {
       userId: order.user_id,
       sourceType: 'letter_pack',
       sourceReferenceId: order.order_id,
@@ -1244,7 +1656,7 @@ export async function repairFulfilledPackGrant(
         currency: order.currency
       },
       expirationDays: PURCHASE_CREDIT_EXPIRY_DAYS,
-      description: `Repaired ${order.product_code} grant after Stripe reconciliation`
+      description: packPurchaseLine(order)
     });
     await recordOrderEvent(
       client,
@@ -1365,15 +1777,29 @@ async function transitionPaidCheckout(
         currency: order.currency
       },
       expirationDays: PURCHASE_CREDIT_EXPIRY_DAYS,
-      description: `Purchased ${order.product_code} via Stripe Checkout`
+      description: packPurchaseLine(order)
     });
-    await grantImageEntitlementWithClient(client, {
+    await grantPurchaseImageEntitlement(client, {
       userId: order.user_id,
       sourceType: 'letter_pack',
       sourceReferenceId: order.order_id,
       sourceOrderId: order.order_id,
       quantity: packImageGrant(credits)
     });
+    // docs/gift-letters.md. Only while the programme is on: a pack bought
+    // with it off grants none, and turning it on later does not backfill.
+    // Idempotent per order, like the two grants above.
+    const packProduct = PACK_PRODUCTS.find(product => product.productCode === order.product_code);
+    if (packProduct && packProduct.giftLetters > 0 && isGiftLettersEnabled()) {
+      await grantGiftLettersWithClient(client, {
+        userId: order.user_id,
+        quantity: packProduct.giftLetters,
+        generationsRemaining: packProduct.giftGenerationsRemaining,
+        source: 'pack_purchase',
+        sourceReferenceId: order.order_id,
+        sourceOrderId: order.order_id
+      });
+    }
     await client.query(
       `UPDATE orders
        SET status = 'fulfilled', fulfilled_at = NOW(), completed_at = NOW(), updated_at = NOW()
@@ -1387,13 +1813,13 @@ async function transitionPaidCheckout(
   await client.query('SAVEPOINT jit_fulfillment');
   try {
     const mailType = String(order.product_snapshot.mailType || 'letter') as MailType;
-    await createMailOrderFromDraftWithClient(client, {
+    const sent = await createMailOrderFromDraftWithClient(client, {
       draftId: order.draft_id!,
       userId: order.user_id,
       mailType,
       funding: { type: 'jit_order', orderId: order.order_id }
     });
-    await grantImageEntitlementWithClient(client, {
+    await grantPurchaseImageEntitlement(client, {
       userId: order.user_id,
       sourceType: 'jit_order',
       sourceReferenceId: order.order_id,
@@ -1401,6 +1827,10 @@ async function transitionPaidCheckout(
       quantity: integerSetting('IMAGE_ENTITLEMENTS_PER_JIT_ORDER', 2)
     });
     await client.query('RELEASE SAVEPOINT jit_fulfillment');
+    // After the release, a throw is meant to abort the whole transaction: the
+    // catch's ROLLBACK TO a released savepoint fails, so nothing commits and
+    // Stripe retries, rather than refunding mail already queued. The miss's
+    // event cannot throw for itself (its own savepoint, #700 review round 3).
     await recordOrderEvent(
       client,
       order.order_id,
@@ -1408,17 +1838,22 @@ async function transitionPaidCheckout(
       'paid',
       'fulfillment_pending'
     );
+    await recordMissedSchedule(client, order.order_id, sent.scheduleMissed);
     return 'fulfillment_pending';
   } catch (error) {
     await client.query('ROLLBACK TO SAVEPOINT jit_fulfillment');
-    const message = error instanceof Error ? error.message : 'JIT fulfillment failed';
+    // A class, never the message: inside the savepoint everything but the
+    // draft checks is SQL, and a draft check carries its own code as the class
+    // (mailSendService.draftError). The message interpolates draft ids and raw
+    // status labels, and both columns are readable by the admin reader role (#394).
+    const errorClass = carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'database_error');
     await client.query(
       `UPDATE orders
        SET status = 'refund_pending', refund_pending_at = NOW(),
            last_error_code = 'JIT_FULFILLMENT_REJECTED', last_error = $2,
            updated_at = NOW()
        WHERE order_id = $1`,
-      [order.order_id, message]
+      [order.order_id, errorClass]
     );
     await recordOrderEvent(
       client,
@@ -1426,7 +1861,7 @@ async function transitionPaidCheckout(
       'jit.fulfillment_rejected',
       'paid',
       'refund_pending',
-      { error: message }
+      { errorClass }
     );
     return 'refund_pending';
   }
@@ -1641,9 +2076,30 @@ export async function revokePackLots(
       options.cause === 'partial_refund' ? 'payment_refunded' : options.cause ?? 'payment_refunded',
       options.disputeId
     );
+    // The pack's gift letters go with it (docs/gift-letters.md). Idempotent,
+    // and outside revokeWholePack's early return so a replayed reversal that
+    // finds no credit lots left still settles them.
+    await revokeGiftLettersForOrderWithClient(
+      client,
+      order.order_id,
+      options.cause === 'payment_disputed' ? 'payment_disputed' : 'payment_refunded'
+    );
     return { creditsTaken: taken, lots: [] };
   }
-  return revokePackCreditsProportionally(client, order, options.credits, options.packRefundId);
+  const proportional = await revokePackCreditsProportionally(
+    client,
+    order,
+    options.credits,
+    options.packRefundId
+  );
+  // A proportional refund that takes every letter left on the pack reverses
+  // what remains of the purchase, so its gift letters go too; one that leaves
+  // letters behind leaves the gift with them. Never voids printed codes: a
+  // refund is not a fraud signal (docs/gift-letters.md).
+  if (proportional.exhausted) {
+    await revokeGiftLettersForOrderWithClient(client, order.order_id, 'payment_refunded');
+  }
+  return { creditsTaken: proportional.creditsTaken, lots: proportional.lots };
 }
 
 async function revokeWholePack(
@@ -1779,7 +2235,7 @@ async function revokePackCreditsProportionally(
   order: Order,
   credits: number,
   packRefundId?: string
-): Promise<{ creditsTaken: number; lots: RevokedPackLot[] }> {
+): Promise<{ creditsTaken: number; lots: RevokedPackLot[]; exhausted: boolean }> {
   if (!Number.isInteger(credits) || credits <= 0) {
     throw new Error(`revokePackLots: credits must be a positive integer, got ${credits}`);
   }
@@ -1874,7 +2330,7 @@ async function revokePackCreditsProportionally(
       `Proportional refund of ${letters} ${letters === 1 ? 'letter' : 'letters'} for ${order.order_id}`
     ]
   );
-  return { creditsTaken: credits, lots: taken };
+  return { creditsTaken: credits, lots: taken, exhausted: available === credits };
 }
 async function stopFundedMailBeforeFinancialReversal(
   client: pg.PoolClient,
@@ -1914,7 +2370,7 @@ async function stopFundedMailBeforeFinancialReversal(
        WHERE letter_id = $1 AND status NOT IN ('accepted','sent','in_transit','delivered','returned')`,
       [order.letter_id]
     );
-    await client.query(
+    const alert = await client.query(
       `INSERT INTO commerce_operational_alerts
          (source_event_id, order_id, alert_type, severity, details)
        VALUES ($1, $2, 'refunded_mail_already_dispatched', 'critical', $3)
@@ -1923,10 +2379,12 @@ async function stopFundedMailBeforeFinancialReversal(
         jobId: current.job_id, providerOutcome: current.provider_outcome
       })]
     );
+    // Told as the funding hold is (#699): inside the webhook's transaction, without waiting.
+    if ((alert.rowCount ?? 0) > 0) reportToOperator('refunded_mail_dispatched', OPERATOR_NOTICES.refundedMailDispatched());
     return 'held';
   }
   if (current.provider_outcome === 'accepted' || current.status === 'completed') {
-    await client.query(
+    const alert = await client.query(
       `INSERT INTO commerce_operational_alerts
          (source_event_id, order_id, alert_type, severity, details)
        VALUES ($1, $2, 'refunded_mail_already_dispatched', 'critical', $3)
@@ -1935,8 +2393,100 @@ async function stopFundedMailBeforeFinancialReversal(
         jobId: current.job_id, providerOutcome: 'accepted'
       })]
     );
+    if ((alert.rowCount ?? 0) > 0) reportToOperator('refunded_mail_dispatched', OPERATOR_NOTICES.refundedMailDispatched());
   }
   return 'none';
+}
+
+/**
+ * Mail a letter pack paid for that has not gone to the printer, held for the operator
+ * when the pack is refunded in full or disputed (#696, decision D2).
+ *
+ * A refund absorbs the letters already spent (#150), and a dispute zeroes the rest; but a
+ * letter sent with an arrival date (#535) can wait weeks for its mail date, paid for by
+ * money that has now gone back. Such mail waits for a person instead of printing: its job
+ * keeps its state (pending, never dispatched) and takes a funding hold_reason, which the
+ * outbox claim skips and the dispatch marker refuses (heldMail.ts). The operator releases
+ * it (job.dispatch_now) or the customer cancels it. Never cancelled here: a dispute can be
+ * won. A proportional refund (unused letters only) does not come here: what it leaves was
+ * paid for.
+ *
+ * The letters are those whose deduction drew on the pack's lots as revokeWholePack finds
+ * them (the purchase lot and every lot returned from it carry the order id, or its
+ * checkout session), and the gift letters the pack granted. Read before the account lock,
+ * as every path that holds a letter and the account locks the letter first; a send that
+ * commits between this read and the revocation is not held (milliseconds). A job
+ * claimed but not yet marked dispatching is held too: the marker reads the hold under its
+ * lock and puts the job back. Mail already dispatching or accepted is past this, and its
+ * own alerts say so.
+ *
+ * Locks in the outbox's order: the order (the caller's), then each letter, then its job.
+ * One alert per order (056's unique index), however many events reach here.
+ */
+async function holdMailFundedByOrder(
+  client: pg.PoolClient,
+  order: Order,
+  sourceEventId: string,
+  reason: FundingHoldReason
+): Promise<number> {
+  if (order.order_type !== 'letter_pack') return 0;
+  const funded = await client.query<{ letter_id: string }>(
+    `SELECT letter_id FROM (
+       SELECT l.letter_id
+         FROM credit_transactions txn
+         JOIN credit_consumption cc ON cc.transaction_id = txn.transaction_id
+         JOIN credit_ledger lot ON lot.ledger_id = cc.ledger_id
+         JOIN letters l ON l.letter_id = txn.reference_id
+        WHERE txn.reference_type = 'letter'
+          AND txn.type = 'deduction'
+          AND txn.user_id = $2
+          AND l.user_id = $2
+          AND lot.user_id = $2
+          AND (lot.source_order_id = $1 OR lot.source_reference_id = $1
+               OR lot.source_metadata->>'stripe_session_id' = $3)
+       UNION
+       SELECT l.letter_id
+         FROM gift_letters g
+         JOIN letters l ON l.letter_id = g.consumed_by_letter_id
+        WHERE g.source_order_id = $1
+          AND l.user_id = $2
+     ) funded
+     ORDER BY letter_id`,
+    [order.order_id, order.user_id, order.stripe_checkout_session_id || null]
+  );
+  let held = 0;
+  for (const { letter_id: letterId } of funded.rows) {
+    const letter = await client.query<{ status: string }>(
+      'SELECT status FROM letters WHERE letter_id = $1 FOR UPDATE',
+      [letterId]
+    );
+    if (letter.rows[0]?.status !== 'queued') continue;
+    const job = await client.query<{ job_id: string }>(
+      `UPDATE letter_jobs SET hold_reason = $2, updated_at = NOW()
+        WHERE letter_id = $1
+          AND status IN ('pending', 'processing')
+          AND provider_outcome = 'not_dispatched'
+        RETURNING job_id`,
+      [letterId, reason]
+    );
+    held += job.rowCount ?? 0;
+  }
+  if (held > 0) {
+    const alert = await client.query(
+      `INSERT INTO commerce_operational_alerts
+         (source_event_id, order_id, alert_type, severity, details)
+       VALUES ($1, $2, 'held_mail_funding_reversed', 'warning', $3)
+       ON CONFLICT DO NOTHING`,
+      [sourceEventId, order.order_id, JSON.stringify({ reason, letters: held })]
+    );
+    writeDiagnostic('warn', 'commerce.held_mail_funding_reversed', { reason, letters: held });
+    // The operator is told when the order's alert is first raised (#699),
+    // without waiting: this is inside the webhook's transaction. Should that
+    // roll back, Stripe sends the event again and the alert is raised then; a
+    // notice already posted only asks the operator to look.
+    if ((alert.rowCount ?? 0) > 0) reportToOperator('held_mail_funding', OPERATOR_NOTICES.heldMailFunding());
+  }
+  return held;
 }
 
 /**
@@ -1946,8 +2496,9 @@ async function stopFundedMailBeforeFinancialReversal(
  * on commerce_order_events and nothing else happened: the money went back to
  * the card, the letters stayed on the account, and no operator ever saw it.
  * It is now operator work. Balances are deliberately left alone here, because
- * the only correct responses are a person's (refund the remainder, which takes
- * the full path, or record a decision), so the alert is the whole point.
+ * the only correct responses are a person's (refund what is still owed, the
+ * remainder taking the full path, unless a lost chargeback already returned
+ * it; or record a decision), so the alert is the whole point.
  *
  * One Dashboard partial arrives as refund.created, refund.updated AND
  * charge.refunded, in no guaranteed order. The alert table is unique per
@@ -2124,6 +2675,7 @@ export async function settlePackRefund(
   source: string
 ): Promise<PackRefundStatus> {
   const status = outcome.status ?? 'pending';
+  if (row.status === 'letters_revoked') await resolveUnconfirmedPackRefundAlert(client, row.pack_refund_id);
   if (status === 'failed' || status === 'canceled') {
     if (row.status === 'failed' || row.status === 'compensated') return row.status;
     return compensatePackRefund(client, row, {
@@ -2139,6 +2691,18 @@ export async function settlePackRefund(
         ignored: true,
         reason: row.status === 'succeeded' ? 'already_settled' : 'settled_after_failure'
       });
+      // The money went back after all (#730). A compensated row also gave
+      // the letters back, so the customer holds both until someone decides. A
+      // failed row withheld compensation under a dispute or a hold: the
+      // letters stay revoked, so compensating by hand now would pay twice.
+      if (row.status === 'compensated' || row.status === 'failed') {
+        await raisePackRefundAlertOnce(
+          client,
+          row,
+          row.status === 'compensated' ? 'refunded_after_compensation' : 'refunded_after_withheld',
+          { settledAfter: row.status, stripeRefundId: outcome.id, amountCents: row.amount_cents }
+        );
+      }
       return row.status;
     }
     await client.query(
@@ -2179,6 +2743,46 @@ export async function settlePackRefund(
 }
 
 /**
+ * One open critical `pack_refund_failed` alert per proportional refund and
+ * kind (#730): the sweep runs hourly and Stripe may repeat an event, and the
+ * operator needs one line to act on, not one an hour.
+ */
+export async function raisePackRefundAlertOnce(
+  client: Pick<pg.PoolClient, 'query'>,
+  row: Pick<PackRefundRow, 'pack_refund_id' | 'order_id'>,
+  kind: 'stripe_unconfirmed' | 'refunded_after_compensation' | 'refunded_after_withheld',
+  details: Record<string, unknown>
+): Promise<void> {
+  await client.query(
+    `INSERT INTO commerce_operational_alerts (order_id, alert_type, severity, details)
+     SELECT $1, 'pack_refund_failed', 'critical', $2::jsonb
+      WHERE NOT EXISTS (
+        SELECT 1 FROM commerce_operational_alerts
+         WHERE alert_type = 'pack_refund_failed' AND status <> 'resolved'
+           AND details->>'packRefundId' = $3 AND details->>'kind' = $4
+      )`,
+    [row.order_id, JSON.stringify({ packRefundId: row.pack_refund_id, kind, ...details }), row.pack_refund_id, kind]
+  );
+}
+
+/**
+ * Close the "Stripe could not be asked" alert once the command leaves
+ * `letters_revoked` (#730): whatever Stripe said has been acted on.
+ */
+async function resolveUnconfirmedPackRefundAlert(
+  client: Pick<pg.PoolClient, 'query'>,
+  packRefundId: string
+): Promise<void> {
+  await client.query(
+    `UPDATE commerce_operational_alerts
+        SET status = 'resolved', resolved_at = NOW(), resolution_code = 'pack_refund_settled', updated_at = NOW()
+      WHERE alert_type = 'pack_refund_failed' AND status <> 'resolved'
+        AND details->>'packRefundId' = $1 AND details->>'kind' = 'stripe_unconfirmed'`,
+    [packRefundId]
+  );
+}
+
+/**
  * Make the customer whole after a proportional refund that will not pay out:
  * Stripe refused it, the sweep gave up, or the bank returned it later.
  *
@@ -2194,6 +2798,7 @@ export async function compensatePackRefund(
   row: PackRefundRow,
   params: { lastErrorCode: string; failureReason?: string | null; stripeRefundId?: string | null }
 ): Promise<'compensated' | 'failed'> {
+  await resolveUnconfirmedPackRefundAlert(client, row.pack_refund_id);
   const orderResult = await client.query<Order>(
     'SELECT * FROM orders WHERE order_id = $1 FOR UPDATE',
     [row.order_id]
@@ -2483,6 +3088,9 @@ async function processRefundEvent(
     }
     await stopFundedMailBeforeFinancialReversal(client, order, eventId, 'payment_reversed');
     if (nextStatus === 'refunded' && order.order_type === 'letter_pack') {
+      // A pack refunded in full: its mail not yet printed waits for the operator (#696).
+      // Not while the refund is pending: it may still fail, and nothing else moves yet.
+      await holdMailFundedByOrder(client, order, eventId, 'funding_reversed');
       await revokePackLots(client, order, { credits: 'all' });
     }
     if (nextStatus === 'refunded') {
@@ -2508,6 +3116,18 @@ async function processRefundEvent(
       [order.order_id, nextStatus, isRefund ? refundOrCharge.id : null]
     );
     await recordOrderEvent(client, order.order_id, eventType, order.status, nextStatus);
+    if (nextStatus === 'refunded') {
+      await clearRefundHold(client, order.order_id);
+    } else if (isRefund && ['failed', 'canceled'].includes(refundStatus ?? '')) {
+      // A full refund that failed or was cancelled waits for a person, never
+      // for the sweep to make another (#730), whoever made it, and whichever
+      // refund the order named: Stripe does not promise the order of a
+      // refund's events. A newer refund that succeeds releases the hold
+      // through its own webhook (clearRefundHold).
+      if (await holdRefundNotCompletedWithClient(client, order.order_id, { id: refundOrCharge.id, status: refundStatus })) {
+        reportToOperator('refund_not_completed', OPERATOR_NOTICES.refundNotCompleted());
+      }
+    }
     return { duplicate: false, orderId: order.order_id, status: nextStatus };
   });
 }
@@ -2758,7 +3378,8 @@ async function recordDispute(
   client: Pick<pg.PoolClient, 'query'>,
   dispute: Stripe.Dispute,
   userId: string | null,
-  closed: boolean
+  closed: boolean,
+  keepStoredStatus = false
 ): Promise<void> {
   const chargeId = typeof dispute.charge === 'string' ? dispute.charge : dispute.charge?.id;
   const paymentIntentId = typeof dispute.payment_intent === 'string'
@@ -2777,7 +3398,10 @@ async function recordDispute(
        amount_cents = EXCLUDED.amount_cents,
        currency = EXCLUDED.currency,
        reason = COALESCE(EXCLUDED.reason, stripe_disputes.reason),
-       status = EXCLUDED.status,
+       -- Kept when the event carries an older status than the one stored
+       -- (#730): delivered after the close, or an inquiry's status after the
+       -- chargeback. processDisputeEvent decides.
+       status = CASE WHEN $12::boolean THEN stripe_disputes.status ELSE EXCLUDED.status END,
        evidence_due_by = COALESCE(EXCLUDED.evidence_due_by, stripe_disputes.evidence_due_by),
        stripe_created_at = COALESCE(EXCLUDED.stripe_created_at, stripe_disputes.stripe_created_at),
        -- Never clear a resolution: a replayed created event arriving after a
@@ -2795,7 +3419,8 @@ async function recordDispute(
       String(dispute.status || 'open'),
       dispute.evidence_details?.due_by ? new Date(dispute.evidence_details.due_by * 1000) : null,
       dispute.created ? new Date(dispute.created * 1000) : null,
-      closed ? new Date() : null
+      closed ? new Date() : null,
+      keepStoredStatus
     ]
   );
 }
@@ -2828,16 +3453,35 @@ async function blockAccountSends(
   );
 }
 
+/**
+ * The dispute events that carry its state (#730). An inquiry opens as
+ * `warning_needs_response` and revokes nothing; when the bank escalates it to
+ * a chargeback, Stripe updates the same dispute (`updated`, and
+ * `funds_withdrawn` when the money leaves), so those revoke as `created`
+ * would. `funds_reinstated` is left to `closed`, which compensates.
+ */
+export type DisputeEventType =
+  | 'charge.dispute.created'
+  | 'charge.dispute.updated'
+  | 'charge.dispute.funds_withdrawn'
+  | 'charge.dispute.closed';
+
 async function processDisputeEvent(
   eventId: string,
-  eventType: 'charge.dispute.created' | 'charge.dispute.closed',
+  eventType: DisputeEventType,
   dispute: Stripe.Dispute
 ): Promise<StripeEventProcessingResult> {
   return transaction(async client => {
     if (!(await claimStripeEvent(client, eventId, eventType, dispute.id))) {
       return { duplicate: true };
     }
+    // One dispute's events, one at a time, whether or not an order matches
+    // (#730): the order's lock below covers only a matched one.
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`stripe_dispute:${dispute.id}`]);
     const closed = eventType === 'charge.dispute.closed';
+    const escalation = eventType === 'charge.dispute.updated' || eventType === 'charge.dispute.funds_withdrawn';
+    const status = String(dispute.status || '');
+    const lossNow = !NON_LOSS_DISPUTE_STATUSES.has(status);
     const paymentIntentId = typeof dispute.payment_intent === 'string'
       ? dispute.payment_intent
       : dispute.payment_intent?.id;
@@ -2855,15 +3499,50 @@ async function processDisputeEvent(
         )
       : { rows: [] as Order[] };
     const order = orderResult.rows[0];
+    // What we knew before this event (#730), read under the dispute's lock.
+    // Only a close acts on every delivery. Any other event acts only when it brings something new:
+    // - after the close, it carries an older status, and acting on it would
+    //   revoke a won dispute's letters again and block the account for good
+    //   (an inquiry closes as warning_closed only once the network can no
+    //   longer escalate it);
+    // - once the dispute is a loss whose effects ran, they are in place:
+    //   repeating them on each update would hold again mail an operator
+    //   released, and raise the funded-mail alert again. A row recorded while
+    //   no order matched (user_id still null) ran none, so its next event acts;
+    // - an update to an inquiry that is still an inquiry changes nothing.
+    const prior = await client.query<{ status: string; resolved_at: Date | null; user_id: string | null }>(
+      'SELECT status, resolved_at, user_id FROM stripe_disputes WHERE dispute_id = $1 FOR UPDATE',
+      [dispute.id]
+    );
+    const priorStatus = prior.rows[0]?.status;
+    const priorStatusIsLoss = priorStatus !== undefined && !NON_LOSS_DISPUTE_STATUSES.has(priorStatus);
+    const priorLoss = priorStatusIsLoss && prior.rows[0]?.user_id != null;
+    const settledBefore = !closed && Boolean(prior.rows[0]?.resolved_at);
+    const recordedOnly = closed
+      ? undefined
+      : settledBefore
+        ? 'after_close'
+        : priorLoss
+          ? 'already_a_loss'
+          : escalation && !lossNow
+            ? 'still_an_inquiry'
+            : undefined;
     // Persist before the unmatched-order branch returns. An unmatched dispute is
     // still money leaving the account, and the operator reviewing it needs the
     // record regardless of whether we could tie it to an order.
-    await recordDispute(client, dispute, order?.user_id ?? null, closed);
+    // The stored status stands against an older one: after the close, or an
+    // inquiry's status after a loss whose effects ran. A loss recorded while
+    // no order matched is not kept: its next loss event then acts.
+    const keepStoredStatus = settledBefore || (!closed && priorLoss && !lossNow);
+    await recordDispute(client, dispute, order?.user_id ?? null, closed, keepStoredStatus);
     if (!order) {
       await client.query(
         `UPDATE stripe_webhook_events SET processing_status = 'unmatched'
          WHERE event_id = $1`, [eventId]
       );
+      // One alert when an unmatched dispute opens, one when it becomes a loss,
+      // and one for its close: not one for each update Stripe sends.
+      if (!closed && prior.rows[0] && (priorStatusIsLoss || !lossNow)) return { duplicate: false };
       await client.query(
         `INSERT INTO commerce_operational_alerts
            (source_event_id, alert_type, severity, details)
@@ -2873,6 +3552,25 @@ async function processDisputeEvent(
           hasPaymentIntent: Boolean(paymentIntentId), hasCharge: Boolean(disputeChargeId),
           hasMetadataOrder: Boolean(metadataOrderId) })]
       );
+      return { duplicate: false };
+    }
+    if (order && recordedOnly) {
+      await client.query('UPDATE stripe_webhook_events SET order_id = $2 WHERE event_id = $1', [
+        eventId, order.order_id
+      ]);
+      // The order shows the dispute's current status, as the dispute row does.
+      // Display only: updated_at stays, as the refund retry and the stuck-order
+      // alarm read it.
+      if (!keepStoredStatus) {
+        await client.query(
+          'UPDATE orders SET stripe_dispute_status = $2 WHERE order_id = $1',
+          [order.order_id, dispute.status]
+        );
+      }
+      await recordOrderEvent(client, order.order_id, eventType, order.status, order.status, {
+        disputeStatus: dispute.status,
+        recordedOnly
+      });
       return { duplicate: false };
     }
     if (order) {
@@ -2901,13 +3599,15 @@ async function processDisputeEvent(
       // chargeback would confiscate a paying customer's balance. Anything
       // unrecognised is treated as a loss, which is the safe default.
       //
-      // Applied on created AND on any losing close, because Stripe can deliver
-      // these out of order and a close arriving without its create must still
-      // revoke rather than leave the packs quietly spendable. Both operations
-      // are idempotent, so the second event is a no-op.
-      const status = String(dispute.status || '');
-      if (!NON_LOSS_DISPUTE_STATUSES.has(status)) {
+      // Applied on created, on an escalation (updated, funds_withdrawn) AND on
+      // any losing close, because Stripe can deliver these out of order and a
+      // close arriving without its create must still revoke rather than leave
+      // the packs quietly spendable. Each operation is idempotent, so a later
+      // event is a no-op.
+      if (lossNow) {
         if (order.order_type === 'letter_pack') {
+          // Its mail not yet printed waits for the operator (#696): a dispute can be won.
+          await holdMailFundedByOrder(client, order, eventId, 'funding_disputed');
           await revokePackLots(client, order, { credits: 'all', cause: 'payment_disputed', disputeId: dispute.id });
         }
         await blockAccountSends(client, order.user_id, 'payment_disputed');
@@ -2959,7 +3659,9 @@ async function processDisputeEvent(
           reason: dispute.reason || null,
           amountCents: dispute.amount,
           currency: dispute.currency,
-          chargeReferencePresent: Boolean(dispute.charge)
+          chargeReferencePresent: Boolean(dispute.charge),
+          // An inquiry that became a chargeback; not a chargeback's own first event.
+          ...(escalation && priorStatus?.startsWith('warning_') ? { escalatedBy: eventType } : {})
         })
       ]
     );
@@ -2987,6 +3689,8 @@ export async function processStripeWebhookEvent(
     case 'charge.refunded':
       return processRefundEvent(event.id, event.type, event.data.object as Stripe.Charge);
     case 'charge.dispute.created':
+    case 'charge.dispute.updated':
+    case 'charge.dispute.funds_withdrawn':
     case 'charge.dispute.closed':
       return processDisputeEvent(
         event.id,
@@ -3157,6 +3861,57 @@ function packPurchaseMessage(
   }
 }
 
+/**
+ * The dates SCHEDULE_MISSED_EVENT recorded for a Pay & Send order (#700), or
+ * undefined: its mail went to the printer as soon as it could.
+ */
+async function readMissedSchedule(order: Order): Promise<DraftSchedule | undefined> {
+  if (order.order_type !== 'jit_mail') return undefined;
+  const result = await query<{ arrive_by: unknown; mail_on: unknown }>(
+    `SELECT metadata->>'arriveBy' AS arrive_by, metadata->>'mailOn' AS mail_on
+       FROM commerce_order_events
+      WHERE order_id = $1 AND event_type = $2
+      ORDER BY created_at DESC LIMIT 1`,
+    [order.order_id, SCHEDULE_MISSED_EVENT]
+  );
+  const row = result.rows[0];
+  return row && typeof row.arrive_by === 'string' && typeof row.mail_on === 'string'
+    ? { arriveBy: row.arrive_by, mailOn: row.mail_on }
+    : undefined;
+}
+
+/**
+ * What a Pay & Send order whose mail date passed before it was paid adds to
+ * its status (#700), while it is being prepared or once it is with the
+ * printer. Nothing once it is refunded or held: its mail no longer goes.
+ */
+export function missedScheduleSentence(
+  status: PurchaseStatusResult['purchaseStatus'],
+  missed: DraftSchedule,
+  now: Date
+): string | undefined {
+  const by = describeDate(missed.arriveBy, now);
+  if (status === 'processing') {
+    return `Its payment was confirmed too late for it to go to the printer in time to arrive by ${by}, so it goes to the printer as soon as it can instead, and may arrive after that date.`;
+  }
+  if (status === 'submitted') {
+    return `Its payment was confirmed too late for it to go to the printer in time to arrive by ${by}, so it went to the printer as soon as it could instead, and may arrive after that date.`;
+  }
+  return undefined;
+}
+
+/**
+ * The checkout address one of our orders recorded for this Stripe Checkout
+ * Session, or null (#730): the purchase start page forwards only there.
+ */
+export async function ourCheckoutUrl(sessionId: string): Promise<string | null> {
+  const result = await query<{ checkout_url: string | null }>(
+    'SELECT checkout_url FROM orders WHERE stripe_checkout_session_id = $1 LIMIT 1',
+    [sessionId]
+  );
+  return result.rows[0]?.checkout_url ?? null;
+}
+
 export async function getPurchaseStatus(
   userId: string,
   orderId: string
@@ -3173,6 +3928,8 @@ export async function getPurchaseStatus(
   }
   const purchaseStatus = publicPurchaseStatus(order.status);
   const pack = await readPackPurchaseFigures(order);
+  const missed = await readMissedSchedule(order);
+  const missedSentence = missed ? missedScheduleSentence(purchaseStatus, missed, new Date()) : undefined;
   return {
     orderId: order.order_id,
     purchaseStatus,
@@ -3193,7 +3950,73 @@ export async function getPurchaseStatus(
     // Letter packs only; every field absent (never null) on Pay & Send orders.
     ...(pack ?? {}),
     updatedAt: new Date(order.updated_at).toISOString(),
-    message: pack ? packPurchaseMessage(purchaseStatus, order, pack) : purchaseMessage(purchaseStatus)
+    message: pack
+      ? packPurchaseMessage(purchaseStatus, order, pack)
+      : [purchaseMessage(purchaseStatus), missedSentence].filter(Boolean).join(' ')
+  };
+}
+
+export interface PackPurchaseSummary {
+  orderId: string;
+  productDescription: string;
+  letters: number;
+  purchaseStatus: PurchaseStatusResult['purchaseStatus'];
+  amountCents: number;
+  currency: string;
+  displayAmount: string;
+  createdAt: string;
+}
+
+/**
+ * The customer's letter-pack purchases, newest first, in the same public
+ * status vocabulary as getPurchaseStatus.
+ *
+ * Until #365 a pack purchase could not be found from the conversation at all:
+ * list_orders covered mailed letters only, and get_purchase_status needs an
+ * order id the model never sees when the checkout card created the checkout
+ * itself. Every status is listed, pending and cancelled included, because "did
+ * my purchase go through?" is the question this answers.
+ */
+export async function listPackPurchases(
+  userId: string,
+  limit: number
+): Promise<{ purchases: PackPurchaseSummary[]; total: number }> {
+  const rows = await query<
+    Pick<
+      Order,
+      | 'order_id'
+      | 'status'
+      | 'product_code'
+      | 'product_snapshot'
+      | 'credits'
+      | 'amount_cents'
+      | 'currency'
+      | 'created_at'
+    >
+  >(
+    `SELECT order_id, status, product_code, product_snapshot, credits, amount_cents, currency, created_at
+       FROM orders
+      WHERE user_id = $1 AND order_type = 'letter_pack'
+      ORDER BY created_at DESC
+      LIMIT $2`,
+    [userId, limit]
+  );
+  const count = await query<{ total: number | string }>(
+    `SELECT COUNT(*) AS total FROM orders WHERE user_id = $1 AND order_type = 'letter_pack'`,
+    [userId]
+  );
+  return {
+    purchases: rows.rows.map(row => ({
+      orderId: row.order_id,
+      productDescription: String(row.product_snapshot?.name || row.product_code),
+      letters: Math.floor((row.credits ?? 0) / CREDITS_PER_LETTER),
+      purchaseStatus: publicPurchaseStatus(row.status),
+      amountCents: row.amount_cents,
+      currency: row.currency,
+      displayAmount: formatAmountForCurrency(row.amount_cents, row.currency),
+      createdAt: new Date(row.created_at).toISOString()
+    })),
+    total: Number(count.rows[0]?.total ?? 0)
   };
 }
 
@@ -3207,13 +4030,13 @@ export async function fulfillPaidOrder(orderId: string): Promise<boolean> {
     if (!order || order.order_type !== 'jit_mail' || order.status !== 'paid') return false;
     await client.query('SAVEPOINT recovery_fulfillment');
     try {
-      await createMailOrderFromDraftWithClient(client, {
+      const sent = await createMailOrderFromDraftWithClient(client, {
         draftId: order.draft_id!,
         userId: order.user_id,
         mailType: String(order.product_snapshot.mailType || 'letter') as MailType,
         funding: { type: 'jit_order', orderId }
       });
-      await grantImageEntitlementWithClient(client, {
+      await grantPurchaseImageEntitlement(client, {
         userId: order.user_id,
         sourceType: 'jit_order',
         sourceReferenceId: order.order_id,
@@ -3221,6 +4044,8 @@ export async function fulfillPaidOrder(orderId: string): Promise<boolean> {
         quantity: integerSetting('IMAGE_ENTITLEMENTS_PER_JIT_ORDER', 2)
       });
       await client.query('RELEASE SAVEPOINT recovery_fulfillment');
+      // As in the webhook's fulfilment: a throw after the release aborts the
+      // whole transaction, and the next run tries again.
       await recordOrderEvent(
         client,
         orderId,
@@ -3228,22 +4053,25 @@ export async function fulfillPaidOrder(orderId: string): Promise<boolean> {
         'paid',
         'fulfillment_pending'
       );
+      await recordMissedSchedule(client, orderId, sent.scheduleMissed);
       return true;
     } catch (error) {
       await client.query('ROLLBACK TO SAVEPOINT recovery_fulfillment');
-      const message = error instanceof Error ? error.message : 'Recovery failed';
+      // A class, never the message, for the same reason as the JIT catch (#394).
+      const errorClass = carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'database_error');
       await client.query(
         `UPDATE orders SET status = 'refund_pending', refund_pending_at = NOW(),
            last_error_code = 'RECOVERY_FAILED', last_error = $2, updated_at = NOW()
          WHERE order_id = $1`,
-        [orderId, message]
+        [orderId, errorClass]
       );
       await recordOrderEvent(
         client,
         orderId,
         'maintenance.fulfillment_failed',
         'paid',
-        'refund_pending'
+        'refund_pending',
+        { errorClass }
       );
       return false;
     }
@@ -3274,7 +4102,6 @@ const liveRefundOperations: RefundOperations = {
 
 export async function requestRefund(
   orderId: string,
-  reason: string,
   stripeRefunds: RefundOperations = liveRefundOperations
 ): Promise<boolean> {
   const retryLimit = integerSetting('JIT_REFUND_RETRY_LIMIT', 5);
@@ -3289,36 +4116,39 @@ export async function requestRefund(
          -- caller of this exported money-mover (an admin bulk-retry, another
          -- sweep) must hit the same wall. Operator release = clearing the
          -- marker (#278 round 8).
-         AND (last_error_code IS NULL OR last_error_code <> 'PAYMENT_AMOUNT_MISMATCH')
+         AND (last_error_code IS NULL OR last_error_code NOT IN ('PAYMENT_AMOUNT_MISMATCH', 'REFUND_NOT_COMPLETED'))
          AND stripe_payment_intent_id IS NOT NULL
          AND (
            refund_attempts = 0
-           OR updated_at <= NOW() - ($4 * INTERVAL '1 second')
+           OR updated_at <= NOW() - ($3::int * INTERVAL '1 second')
          )
        FOR UPDATE
      )
      UPDATE orders AS refundable
      SET refund_attempts = CASE
            WHEN refundable.stripe_refund_id IS NULL
-             AND candidate.refund_attempts < $3
+             AND candidate.refund_attempts < $2::int
              THEN candidate.refund_attempts + 1
            ELSE refundable.refund_attempts
          END,
          refund_pending_at = COALESCE(refund_pending_at, NOW()),
-         last_error = $2, updated_at = NOW()
+         updated_at = NOW()
      FROM candidate
      WHERE refundable.order_id = candidate.order_id
      RETURNING refundable.*, candidate.refund_attempts AS previous_refund_attempts`,
-    [orderId, reason, retryLimit, refundRetryDelaySeconds()]
+    [orderId, retryLimit, refundRetryDelaySeconds()]
   );
   const order = claimed.rows[0];
   if (!order?.stripe_payment_intent_id) return false;
   try {
     let refund: Stripe.Refund | null = null;
+    let ended: Stripe.Refund | null = null;
     if (order.stripe_refund_id) {
       try {
         const existingRefund = await stripeRefunds.retrieveRefund(order.stripe_refund_id);
-        if (!['failed', 'canceled'].includes(existingRefund.status || '')) {
+        if (['failed', 'canceled'].includes(existingRefund.status || '')) {
+          ended = existingRefund;
+        } else {
           refund = existingRefund;
         }
       } catch {
@@ -3326,7 +4156,22 @@ export async function requestRefund(
         // covers a persisted stale ID without risking a duplicate refund.
       }
     }
-    refund ??= await stripeRefunds.findPaymentRefund(order.stripe_payment_intent_id, order.order_id);
+    if (!refund) {
+      const found = await stripeRefunds.findPaymentRefund(
+        order.stripe_payment_intent_id,
+        order.order_id,
+        order.amount_known === false ? null : order.amount_cents
+      );
+      refund = found.live;
+      ended ??= found.ended;
+    }
+    // A refund that failed or was cancelled is a person's question, never an
+    // instruction to refund again (#730): one an operator cancelled in Stripe
+    // came back an hour later, and one that failed went to the same card.
+    if (!refund && ended) {
+      await holdRefundNotCompleted(order, ended);
+      return false;
+    }
     if (!refund) {
       let attempt = order.refund_attempts;
       if (order.stripe_refund_id) {
@@ -3377,6 +4222,7 @@ export async function requestRefund(
       );
       if (!finalized?.rows[0]) return;
       if (nextStatus === 'refunded') {
+        await clearRefundHold(client, orderId);
         if (order.order_type === 'letter_pack') {
           await revokePackLots(client, order, { credits: 'all' });
         }
@@ -3387,9 +4233,11 @@ export async function requestRefund(
           [orderId]
         );
       }
+      // The refund id and the code that put the order here. The sweep used to
+      // pass the order's previous last_error text through as a "reason" (#394).
       await recordOrderEvent(client, orderId, 'refund.requested', 'refund_pending', nextStatus, {
-        reason,
-        refundId: refund.id
+        refundId: refund.id,
+        lastErrorCode: order.last_error_code ?? null
       });
     });
     return true;
@@ -3397,10 +4245,91 @@ export async function requestRefund(
     await query(
       `UPDATE orders SET last_error_code = 'REFUND_REQUEST_FAILED', last_error = $2,
          updated_at = NOW() WHERE order_id = $1 AND status = 'refund_pending'`,
-      [orderId, error instanceof Error ? error.message : 'Refund request failed']
+      // unknown_error, not provider_error, as the fallback: this block mixes
+      // Stripe calls with SQL, and a pg SQLSTATE outside the allowlist must not
+      // be labelled a provider fault (#188, #213). Never the message (#394).
+      [orderId, carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error')]
     );
     return false;
   }
+}
+
+/**
+ * Hold an order whose refund failed or was cancelled at Stripe for a person
+ * (#730): REFUND_NOT_COMPLETED, which the sweep and the refund claim skip, and
+ * one open critical alert per order. The person refunds what is still owed in
+ * Stripe, whose webhook completes the order on a full refund, or settles it
+ * by hand; either way they resolve the alert only once the money went back
+ * or it was settled (docs/deployment.md).
+ */
+async function holdRefundNotCompleted(order: RefundClaim, ended: Stripe.Refund): Promise<void> {
+  // Only while the order still names the refund the sweep read: a webhook that
+  // recorded a new refund meanwhile has left nothing to hold.
+  const raised = await transaction(client =>
+    holdRefundNotCompletedWithClient(client, order.order_id, ended, order.stripe_refund_id ?? null)
+  );
+  if (raised) reportToOperator('refund_not_completed', OPERATOR_NOTICES.refundNotCompleted());
+}
+
+/**
+ * The hold itself, in the caller's transaction (#730): REFUND_NOT_COMPLETED,
+ * which the sweep and the refund claim skip, one open critical alert per
+ * order, and an order event. Raised by the sweep for a refund it finds ended,
+ * and by the webhook when a full refund fails or is cancelled, so a second
+ * refund that also fails, made in Stripe after the first, is held and told
+ * again. Answers whether a new alert opened, for the operator's notice.
+ *
+ * `readRefundId`, when given, is the refund id the caller read: the order is
+ * held only while it still names that one.
+ */
+async function holdRefundNotCompletedWithClient(
+  client: Pick<pg.PoolClient, 'query'>,
+  orderId: string,
+  ended: { id: string; status?: string | null },
+  readRefundId?: string | null
+): Promise<boolean> {
+  const sameRefund = readRefundId === undefined ? '' : ' AND stripe_refund_id IS NOT DISTINCT FROM $2';
+  // An amount-mismatch quarantine keeps its own code and message, which the
+  // panel's release reads; the alert below still opens.
+  const held = await client.query<{ order_id: string }>(
+    `UPDATE orders
+     SET last_error = CASE WHEN last_error_code = 'PAYMENT_AMOUNT_MISMATCH' THEN last_error
+                           ELSE 'The refund failed or was cancelled at Stripe; a person decides' END,
+         last_error_code = CASE WHEN last_error_code = 'PAYMENT_AMOUNT_MISMATCH' THEN last_error_code
+                                ELSE 'REFUND_NOT_COMPLETED' END,
+         updated_at = NOW()
+     WHERE order_id = $1 AND status = 'refund_pending'${sameRefund}
+     RETURNING order_id`,
+    readRefundId === undefined ? [orderId] : [orderId, readRefundId]
+  );
+  if (!held.rows[0]) return false;
+  const alert = await client.query(
+    `INSERT INTO commerce_operational_alerts (order_id, alert_type, severity, details)
+     VALUES ($1, 'refund_not_completed', 'critical', $2)
+     ON CONFLICT DO NOTHING`,
+    [orderId, JSON.stringify({ refundId: ended.id, refundStatus: ended.status ?? null })]
+  );
+  await recordOrderEvent(client, orderId, 'refund.not_completed', 'refund_pending', 'refund_pending', {
+    refundId: ended.id,
+    refundStatus: ended.status ?? null
+  });
+  writeDiagnostic('warn', 'commerce.refund_not_completed', { refundStatus: ended.status ?? 'unknown' });
+  return (alert.rowCount ?? 0) > 0;
+}
+
+/**
+ * Once the order is refunded, by the webhook or by the sweep, its hold's code
+ * goes (#730). Its alert stays open for a person to resolve after checking the
+ * refund in Stripe: the event that completed the order may be a late one for
+ * a refund that has since failed, which Stripe allows, and closing the alert
+ * would hide the one sign of that.
+ */
+async function clearRefundHold(client: Pick<pg.PoolClient, 'query'>, orderId: string): Promise<void> {
+  await client.query(
+    `UPDATE orders SET last_error_code = NULL, last_error = NULL, updated_at = NOW()
+      WHERE order_id = $1 AND last_error_code = 'REFUND_NOT_COMPLETED'`,
+    [orderId]
+  );
 }
 
 export async function runCommerceMaintenance(): Promise<CommerceMaintenanceResult> {
@@ -3479,8 +4408,8 @@ export async function runCommerceMaintenance(): Promise<CommerceMaintenanceResul
   expiredCheckouts += orphaned.rowCount || 0;
 
   let refundAttempts = 0;
-  const refunds = await query<{ order_id: string; last_error: string | null }>(
-    `SELECT order_id, last_error FROM orders
+  const refunds = await query<{ order_id: string }>(
+    `SELECT order_id FROM orders
      WHERE status = 'refund_pending'
        AND stripe_payment_intent_id IS NOT NULL
        -- A PAYMENT_AMOUNT_MISMATCH quarantine is a question for an operator,
@@ -3495,7 +4424,9 @@ export async function runCommerceMaintenance(): Promise<CommerceMaintenanceResul
        -- lane recovers refund/dispute events whose Stripe-side refund already
        -- exists, and requestRefund discovers it (findPaymentRefund-first)
        -- rather than creating another.
-       AND (last_error_code IS NULL OR last_error_code <> 'PAYMENT_AMOUNT_MISMATCH')
+       -- REFUND_NOT_COMPLETED likewise (#730): a refund that failed or was
+       -- cancelled at Stripe waits for a person, never for another refund.
+       AND (last_error_code IS NULL OR last_error_code NOT IN ('PAYMENT_AMOUNT_MISMATCH', 'REFUND_NOT_COMPLETED'))
        AND refund_attempts < $2
        AND (
          refund_attempts = 0
@@ -3507,9 +4438,7 @@ export async function runCommerceMaintenance(): Promise<CommerceMaintenanceResul
   );
   for (const order of refunds.rows) {
     try {
-      if (
-        await requestRefund(order.order_id, order.last_error || 'Pre-provider fulfillment failure')
-      ) {
+      if (await requestRefund(order.order_id)) {
         refundAttempts += 1;
       }
     } catch (error) {
@@ -3521,8 +4450,7 @@ export async function runCommerceMaintenance(): Promise<CommerceMaintenanceResul
 
   const stuck = await query<{ count: string }>(
     `SELECT COUNT(*) AS count FROM orders
-     WHERE status IN ('paid', 'fulfillment_pending', 'refund_pending')
-       AND updated_at < NOW() - INTERVAL '30 minutes'`
+     WHERE ${STUCK_ORDER_CONDITION}`
   );
   const stuckOrders = Number.parseInt(stuck.rows[0]?.count || '0', 10);
   if (stuckOrders > 0) {

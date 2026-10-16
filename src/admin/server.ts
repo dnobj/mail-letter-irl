@@ -4,22 +4,25 @@ import http from "node:http";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { AdminAuditWriter } from "./auditService.js";
-import { closeAdminPools, createAdminPools, verifyDatabaseIdentity, type AdminPools } from "./db.js";
+import { closeAdminPools, createAdminPools, verifyDatabaseIdentity, verifyReaderSeparation, type AdminPools } from "./db.js";
 import { AdminConfigurationError, AdminFoundationError } from "./errors.js";
 import { clientScriptPath, createAdminRequestListener, type RouteHandler } from "./http/app.js";
 import { AdminRouter } from "./http/router.js";
 import { registerAccountRoutes } from "./http/accountRoutes.js";
 import { registerCommandRoutes } from "./http/commandRoutes.js";
+import { registerLimitRoutes } from "./http/limitRoutes.js";
 import { registerOpsRoutes } from "./http/opsRoutes.js";
 import { registerStripeRoutes } from "./http/stripeRoutes.js";
 import { join } from "./ui/html.js";
 import { NAV_ITEMS, registerReadRoutes } from "./http/routes.js";
 import { ADMIN_COMMANDS } from "./commands/index.js";
+import { ElevationGuard } from "./http/elevation.js";
 import { AdminSessionStore, hashSessionId } from "./http/session.js";
 import { parseAdminRuntimeConfig, type AdminRuntimeConfig } from "./runtimeConfig.js";
 import { createTailscaleCli, createWhoisClient, spawnTailscaled, type WhoisClient } from "./tailscale/cli.js";
 import { TailscaleSupervisor, refuseIfPublicDomain, type TailscaleNodeIdentity } from "./tailscale/daemon.js";
 import { classifyDiagnosticError, writeDiagnostic } from "../utils/diagnosticLog.js";
+import { DenialAuditBudget } from "./http/denialAuditBudget.js";
 
 /**
  * The admin service entrypoint. Boot order:
@@ -135,6 +138,13 @@ export async function main(): Promise<void> {
     });
     identity = await supervisor.start();
     state.tailscale = true;
+    // The addresses ADMIN-INFRA-01 probes: the app port must be refused on
+    // each of them from an allowed device, which is what proves the tailnet
+    // policy is doing the job the panel's trust model gives it.
+    writeDiagnostic("info", "admin.tailnet_addresses", {
+      addresses: identity.tailscaleIps.join(","),
+      node: identity.dnsName,
+    });
     if (config.tailscale.authKey) {
       console.warn("[admin] TS_AUTHKEY is still set; delete the variable now that the node is registered.");
     }
@@ -151,6 +161,7 @@ export async function main(): Promise<void> {
     role: config.readerRole,
     environment: config.environment,
   });
+  await verifyReaderSeparation(pools.reader, readerIdentity.roleName);
   if (pools.operator) {
     await verifyDatabaseIdentity(pools.operator, {
       role: config.operatorRole,
@@ -160,6 +171,9 @@ export async function main(): Promise<void> {
   state.database = true;
 
   const audit = new AdminAuditWriter();
+  // Owned here rather than inside the listener so the shutdown path can flush
+  // the pending burst row before the pools close.
+  const denialBudget = new DenialAuditBudget({ limit: 60, windowMs: 60_000 });
   const bootCorrelation = randomUUID();
   await audit.appendEvent(pools.reader, {
     actor: { id: "system@letter-irl-admin", name: "admin service" },
@@ -180,6 +194,11 @@ export async function main(): Promise<void> {
       letterProvider: config.letterProvider,
       databaseRole: readerIdentity.roleName,
       marker: readerIdentity.marker,
+      // 0 means the entrypoint could not hand the volume to the unprivileged
+      // user and stayed root, which it also warns about in the deploy log.
+      // Recording it here puts the answer in the audit trail rather than in a
+      // log line nobody re-reads.
+      uid: process.getuid ? process.getuid() : -1,
     },
     outcome: "succeeded",
   });
@@ -189,11 +208,16 @@ export async function main(): Promise<void> {
     idleTtlMs: config.session.idleTtlMs,
     absoluteTtlMs: config.session.absoluteTtlMs,
   });
+  // One guard for the process, beside the session store and with the same
+  // lifetime: the elevation lock and the accepted TOTP counter have to outlive
+  // any session for either to mean anything.
+  const elevation = new ElevationGuard();
   const router = new AdminRouter<RouteHandler>();
   const extensions = registerCommandRoutes(router, ADMIN_COMMANDS);
   const stripeExtensions = registerStripeRoutes(router);
   const accountExtensions = registerAccountRoutes(router);
   registerOpsRoutes(router);
+  registerLimitRoutes(router);
   registerReadRoutes(router, clientScript, {
     ...extensions,
     accountActions: accountExtensions.accountActions,
@@ -207,8 +231,10 @@ export async function main(): Promise<void> {
     config,
     pools,
     sessions,
+    elevation,
     whois,
     audit,
+    denialBudget,
     router,
     nodeName: identity?.dnsName ?? null,
     banner: {
@@ -245,6 +271,7 @@ export async function main(): Promise<void> {
     app.close();
     health.close();
     sessions.destroyAll();
+    await denialBudget.flush();
     await closeAdminPools(pools);
     await supervisor?.stop();
     process.exit(0);

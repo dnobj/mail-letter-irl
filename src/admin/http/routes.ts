@@ -8,7 +8,7 @@ import { listRecentAccounts, readAccountDetail, readLetterDetail, revealAccountE
 import { listAlerts, listRecentWebhookEvents, listUnmatchedWebhookEvents, parseAlertFilter, readAlert } from "../queries/alerts.js";
 import { listAuditEvents, listCommandRuns, listOperatorAuditEvents, readCommandRun } from "../queries/audit.js";
 import { listBlockedAccounts, listDisputes } from "../queries/disputes.js";
-import { listAttentionJobs, listRecentJobs, readJob } from "../queries/jobs.js";
+import { listAttentionJobs, listRecentJobs, readJob, type JobView } from "../queries/jobs.js";
 import { lookupIdentifier, normalizeLookupTerm } from "../queries/lookup.js";
 import { readMaintenanceHealth } from "../queries/maintenance.js";
 import { readOrderDetail } from "../queries/orders.js";
@@ -27,8 +27,8 @@ import { AdminRouter } from "./router.js";
 
 export interface RouteExtensions {
   /** Per-target action panels supplied by the command slices. */
-  alertActions?: (context: RequestContext, alertId: string, status: string) => SafeHtml;
-  jobActions?: (context: RequestContext, jobId: string, status: string, providerOutcome: string) => SafeHtml;
+  alertActions?: (context: RequestContext, alertId: string, status: string, alertType: string) => SafeHtml;
+  jobActions?: (context: RequestContext, job: JobView) => SafeHtml;
   orderActions?: (context: RequestContext, detail: OrderDetail) => SafeHtml | Promise<SafeHtml>;
   accountActions?: (context: RequestContext, detail: AccountDetail) => SafeHtml | Promise<SafeHtml>;
 }
@@ -40,11 +40,13 @@ export const NAV_ITEMS = [
   { href: "/jobs", label: "Jobs" },
   { href: "/disputes", label: "Disputes" },
   { href: "/promos", label: "Promos" },
+  { href: "/gifts", label: "Gifts" },
   { href: "/images", label: "Images" },
   { href: "/maintenance", label: "Maintenance" },
   { href: "/stripe", label: "Stripe" },
   { href: "/routing", label: "Routing" },
   { href: "/retention", label: "Retention" },
+  { href: "/limits", label: "Limits" },
   { href: "/support", label: "Support" },
   { href: "/audit", label: "Audit" },
   { href: "/commands", label: "Commands" },
@@ -65,18 +67,48 @@ export function registerReadRoutes(
     return context.render("Overview", renderOverview(data));
   }, { name: "overview" });
 
+  // The form only. A lookup is a POST (#730): an identifier can be an email,
+  // which a query string would leave in the browser's history and in any log
+  // of the URL. An old link's `q` is not run.
   router.add("GET", "/lookup", async (context) => {
-    const raw = context.url.searchParams.get("q") ?? undefined;
+    const recent = await context.read((client) => listRecentAccounts(client, 10));
+    return context.render(
+      "Lookup",
+      renderLookup({ term: null, matches: null, invalid: false, recent, csrfToken: context.csrfToken }),
+    );
+  }, { name: "lookup" });
+
+  // A read, so allowed in read-only mode. Finding an account by its email
+  // shows who it is, so that lookup is audited, as a reveal is: the matches,
+  // never the address.
+  router.add("POST", "/lookup", async (context) => {
+    const raw = context.form?.get("q") ?? undefined;
     const term = normalizeLookupTerm(raw);
     const data = await context.read(async (client) => ({
       matches: term ? await lookupIdentifier(client, term) : null,
       recent: await listRecentAccounts(client, 10),
     }));
+    if (term && term.includes("@")) {
+      const accounts = (data.matches ?? []).filter((match) => match.kind === "account").map((match) => match.id);
+      await context.appendAudit({
+        action: "pii.lookup",
+        targetType: "user",
+        ...(accounts[0] ? { targetId: accounts[0] } : {}),
+        inputSummary: { field: "email", matches: accounts.length, accounts },
+        outcome: "succeeded",
+      });
+    }
     return context.render(
       "Lookup",
-      renderLookup({ term: term ?? raw ?? null, matches: data.matches, invalid: raw !== undefined && term === null, recent: data.recent }),
+      renderLookup({
+        term: term ?? raw ?? null,
+        matches: data.matches,
+        invalid: raw !== undefined && term === null,
+        recent: data.recent,
+        csrfToken: context.csrfToken,
+      }),
     );
-  }, { name: "lookup" });
+  }, { name: "lookup.search", write: false });
 
   router.add("GET", "/accounts/:userId", async (context) => {
     const detail = await context.read((client) => readAccountDetail(client, context.params.userId));
@@ -149,9 +181,7 @@ export function registerReadRoutes(
   router.add("GET", "/jobs/:jobId", async (context) => {
     const job = await context.read((client) => readJob(client, context.params.jobId));
     if (!job) notFound();
-    const actions = extensions.jobActions
-      ? extensions.jobActions(context, job.jobId, job.status, job.providerOutcome)
-      : EMPTY_ACTIONS;
+    const actions = extensions.jobActions ? extensions.jobActions(context, job) : EMPTY_ACTIONS;
     return context.render(`Job ${job.jobId}`, renderJobDetail({ job, actions }));
   }, { name: "job" });
 
@@ -174,7 +204,7 @@ export function registerReadRoutes(
     const alert = await context.read((client) => readAlert(client, context.params.alertId));
     if (!alert) notFound();
     const actions = extensions.alertActions
-      ? extensions.alertActions(context, alert.alertId, alert.status)
+      ? extensions.alertActions(context, alert.alertId, alert.status, alert.alertType)
       : EMPTY_ACTIONS;
     return context.render(`Alert ${alert.alertType}`, renderAlertDetail({ alert, actions }));
   }, { name: "alert" });

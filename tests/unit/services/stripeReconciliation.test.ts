@@ -330,27 +330,62 @@ describe('Stripe Reconciliation Service (US-RECONCILE-01)', () => {
       });
     });
 
-    it('reports a succeeded partial refund the app did not issue as unmatched_partial_refund', async () => {
-      mockSessionsList.mockResolvedValue({ data: [], has_more: false });
-      mockRefundsList.mockResolvedValue({ data: [{
-        id: 're_partial', status: 'succeeded', payment_intent: 'pi_pack', amount: 200
-      }] });
-      mockQuery
-        .mockResolvedValueOnce({ rows: [] })
-        .mockResolvedValueOnce({ rows: [] })
-        .mockResolvedValueOnce({ rows: [{
-          order_id: 'order-pack', order_type: 'letter_pack', status: 'fulfilled',
-          amount_cents: 500, pack_reversal_recorded: false
+    describe('a refund for less than the order (#323, #730)', () => {
+      const ADVICE =
+        "Before deducting letters or refunding, check what it is: the order's alerts (stripe_partial_refund_unmatched, pack_refund_failed), its pack refund commands, and any dispute in Stripe. Letters may already have been revoked or given back, and money a lost chargeback returned is not owed again. Then refund what is still owed, revoke what was paid back, or record the decision (docs/deployment.md)";
+
+      /** One refund of 200 on a 500 pack, and whether a settled panel command names it. */
+      async function reconcileWith(settledCommand: boolean) {
+        mockSessionsList.mockResolvedValue({ data: [], has_more: false });
+        mockRefundsList.mockResolvedValue({ data: [{
+          id: 're_partial', status: 'succeeded', payment_intent: 'pi_pack', amount: 200,
+          metadata: { packRefundId: '11111111-1111-4111-8111-111111111111' }
         }] });
-      const result = await reconcileStripePayments(1);
-      // Still counted as unprocessed - the money moved and no reversal exists -
-      // but named for what it is, so the operator reads the right alert.
-      expect(result.summary.unprocessedRefunds).toBe(1);
-      expect(result.discrepancies).toContainEqual(expect.objectContaining({
-        type: 'unmatched_partial_refund', orderId: 'order-pack', stripeAmount: 200, ourAmount: 500
-      }));
-      expect(result.discrepancies).not.toContainEqual(expect.objectContaining({ type: 'unprocessed_refund' }));
+        mockQuery
+          .mockResolvedValueOnce({ rows: [] })
+          .mockResolvedValueOnce({ rows: [] })
+          .mockResolvedValueOnce({ rows: [{
+            order_id: 'order-pack', order_type: 'letter_pack', status: 'fulfilled',
+            amount_cents: 500, pack_reversal_recorded: false
+          }] })
+          .mockResolvedValueOnce(settledCommand ? { rows: [{ '?column?': 1 }], rowCount: 1 } : { rows: [], rowCount: 0 });
+        return reconcileStripePayments(1);
+      }
+
+      it('reports one with no settled record, saying what to check rather than what it is', async () => {
+        const result = await reconcileWith(false);
+        // Still counted as unprocessed - the money moved and no reversal exists.
+        expect(result.summary.unprocessedRefunds).toBe(1);
+        expect(result.discrepancies).toEqual([expect.objectContaining({
+          type: 'unmatched_partial_refund', orderId: 'order-pack', stripeAmount: 200, ourAmount: 500,
+          message: 'A refund for less than the order exists in Stripe with no settled record in the app',
+          // Not "refund the remainder", nor "the customer keeps the letters": a
+          // panel command may have revoked or given them back, and a lost
+          // chargeback may have returned the rest.
+          suggestedAction: ADVICE,
+        })]);
+        expect(result.recommendations).toContainEqual(
+          'HIGH: 1 refunds in Stripe were not processed. Review each before deducting credits or refunding: some letters may already have been revoked or given back (docs/deployment.md).'
+        );
+      });
+
+      it('asks only for a settled panel command naming this very refund, for this order and amount', async () => {
+        await reconcileWith(false);
+        const lookup = mockQuery.mock.calls[3];
+        expect(String(lookup[0]).replace(/\s+/g, ' ')).toContain(
+          "FROM commerce_pack_refunds WHERE stripe_refund_id = $1 AND order_id = $2 AND amount_cents = $3 AND status = 'succeeded'"
+        );
+        // The refund's metadata is no evidence: it can be copied onto a second refund.
+        expect(lookup[1]).toEqual(['re_partial', 'order-pack', 200]);
+      });
+
+      it('reports nothing for a panel command settled with this refund', async () => {
+        const result = await reconcileWith(true);
+        expect(result.summary.unprocessedRefunds).toBe(0);
+        expect(result.discrepancies).toEqual([]);
+      });
     });
+
     it('requires a pack refund ledger reversal linked through the authoritative order', async () => {
       mockSessionsList.mockResolvedValue({ data: [], has_more: false });
       mockRefundsList.mockResolvedValue({ data: [{

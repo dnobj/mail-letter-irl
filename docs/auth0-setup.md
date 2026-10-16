@@ -1,6 +1,6 @@
 # Auth0 Setup Guide
 
-**Last Updated:** July 23, 2026
+**Last Updated:** September 14, 2026
 
 This guide documents the complete Auth0 configuration for Letter IRL.
 
@@ -12,7 +12,9 @@ method the CIMD document declares - currently `private_key_jwt`, verified on the
 production import 2026-09-05. Its client ID is the OpenAI-hosted HTTPS CIMD
 URL. The dedicated Auth0 MCP API identifier exactly equals that
 environment's canonical `/mcp` resource and grants only `mail:read`,
-`mail:draft`, and `mail:send`. The website/REST audience is unchanged.
+`mail:draft`, and `mail:send`. The website and the REST routes use the same MCP
+API in both environments (switched 2026-09-14); see sections 2d and 2e of
+`docs/auth0-tenant-configuration.md`.
 
 CIMD and the resource-parameter compatibility profile are owner-managed tenant
 settings. DCR and Letter IRL's static `/oauth/register` shim are not the target
@@ -30,8 +32,8 @@ Letter IRL uses **two separate Auth0 tenants** for complete isolation between pr
 
 | Environment | Tenant Domain | Account Email |
 |-------------|---------------|---------------|
-| **Production** | `dev-njmdyqf8n25rqgy7.us.auth0.com` | dnicholl@letterirl.com |
-| **Development** | `dev-ky21dxn3qmi71hjl.us.auth0.com` | dnicholl@objective.works |
+| **Production** | `dev-njmdyqf8n25rqgy7.us.auth0.com` | the production account |
+| **Development** | `dev-ky21dxn3qmi71hjl.us.auth0.com` | the organization account |
 
 Each tenant has the same applications configured:
 
@@ -44,6 +46,30 @@ Each tenant has the same applications configured:
 
 Social login user IDs (Google, GitHub, etc.) are **identical across tenants** because the ID comes from the provider. Only Username-Password users (`auth0|xxx`) have tenant-specific IDs and require sync/import.
 
+A Letter IRL account is still keyed on the Auth0 subject (`users.user_id`), but
+the subject is no longer the identity. Auth0 mints one per sign-in method, and
+a post-login Action links the methods that share a **confirmed** email address
+into a single Auth0 user, whose primary subject is the one Letter IRL sees. The
+identity is therefore the address, which `users.email` holds UNIQUE whatever its case
+(migration 058). The Action's lookup is narrower: Auth0 stores a password user's
+address in lower case but a social provider's as the provider sent it, and its
+users-by-email search matches case. Two confirmed Auth0 users whose addresses
+differ only in case are therefore not linked. Whichever of the two opens a
+Letter IRL account first keeps it, and the other is refused with the
+"already belongs to a Letter IRL account" sentence (a 409 on the REST API, an
+error result in a chat), for support to join the two.
+
+Two consequences worth knowing before touching anything here:
+
+- **A subject list is a list of one method.** `LETTER_IRL_BETA_ALLOWED_SUBJECTS`
+  and `LETTER_IRL_ADMIN_USER_IDS` name subjects, so after a link only the
+  surviving primary subject counts. Check them after linking anyone.
+- **No confirmed address, no account.** A token that carries none is refused
+  with a sentence rather than given an account with an invented address; see
+  [auth0-tenant-configuration.md](auth0-tenant-configuration.md) for the
+  Actions that make this true, and `src/auth/verifiedEmail.ts` for what the
+  server does with what reaches it.
+
 ---
 
 ## Tenant Setup
@@ -51,7 +77,7 @@ Social login user IDs (Google, GitHub, etc.) are **identical across tenants** be
 ### 1. Create Auth0 Account
 
 1. Go to [auth0.com](https://auth0.com)
-2. Sign up with your email (e.g., `dnicholl@letterirl.com`)
+2. Sign up with the account that will own the tenant
 3. Create a new tenant
 
 ### 2. Tenant Configuration
@@ -103,39 +129,39 @@ AUTH0_BASE_URL=https://letterirl.com
 AUTH0_ISSUER_BASE_URL=https://dev-njmdyqf8n25rqgy7.us.auth0.com
 AUTH0_CLIENT_ID=wX17u1wOn3XJRVba1ejIappBNpDno3ER
 AUTH0_CLIENT_SECRET=<from application settings - click eye icon to reveal>
-AUTH0_AUDIENCE=https://letter-irl/api
+AUTH0_AUDIENCE=https://api.letterirl.com/mcp
+AUTH0_SCOPE=openid profile email offline_access mail:read mail:draft mail:send
 ```
-
----
-
-### Application 2: M2M for Sync Script (Optional)
-
-**Purpose:** Management API access for the dev sync script
-
-**Setup Steps:**
-1. Applications → Create Application
-2. **Name:** `Dev Sync Script`
-3. **Type:** Machine to Machine
-4. **Authorized API:** Auth0 Management API
-5. **Permissions:** `read:users`, `create:users`, `delete:users`
 
 ---
 
 ## API (Resource Server)
 
-**Purpose:** Define the API that the MCP server protects
+**Purpose:** Define the one API the MCP server, the REST API and the website all
+use. Its identifier is the environment's canonical MCP URL.
 
 **Setup Steps:**
 1. Applications → APIs → Create API
-2. **Name:** `Letter IRL API`
-3. **Identifier:** `https://letter-irl/api`
+2. **Name:** `Letter IRL MCP`
+3. **Identifier:** `https://api.letterirl.com/mcp` (development: the development
+   API's `/mcp` URL)
 4. **Signing Algorithm:** RS256
+5. **Permissions:** `mail:read`, `mail:draft`, `mail:send`
+6. **Application Access:** authorize `Letter IRL Website` for user-delegated
+   access with all three permissions. Both tenants' MCP APIs use per-app
+   authorization, so an application with no grant cannot get a token for them.
 
 **Settings:**
 | Setting | Value |
 |---------|-------|
 | RBAC | Disabled (not using roles) |
 | Allow Skipping User Consent | Enabled (first-party apps) |
+| Allow Offline Access | Enabled (refresh tokens for ChatGPT and the website) |
+
+The earlier `Letter IRL API` (`https://letter-irl/api`) is retired, and the API
+server accepts only the MCP audience. It was deleted from both tenants on
+2026-09-14, once each environment's website requested the MCP audience and the
+Default Audience below had been repointed. Do not recreate it.
 
 ---
 
@@ -148,15 +174,30 @@ AUTH0_AUDIENCE=https://letter-irl/api
 2. Find "Dynamic Client Registration (DCR)"
 3. Enable the toggle only when the rollback owner approves it
 4. Save
-5. Set `LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY=true`,
+5. Authorize the rollback client for the MCP API: user-delegated `mail:read`,
+   `mail:draft` and `mail:send`. ChatGPT sends the `/mcp` resource, and under
+   per-app authorization Auth0 refuses a client with no grant for it.
+6. Set `LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY=true`,
    `CHATGPT_STATIC_CLIENT_ID` to the inventoried rollback client, and
    `CHATGPT_STATIC_REDIRECT_URIS` to the space-separated exact callback URLs
    already configured on that Auth0 client. Never use a wildcard or infer a
-   per-app callback.
-6. Verify protected-resource discovery names the Letter IRL origin as the
+   per-app callback. `LETTER_IRL_OAUTH_AUDIENCE` stays the single `/mcp`
+   resource; there is no second audience in rollback mode.
+7. Verify protected-resource discovery names the Letter IRL origin as the
    authorization server, its authorization metadata advertises
    `/oauth/register`, and the registration response returns the exact callback
    inventory.
+
+**Restoring CIMD mode:**
+1. Set `LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY=false` and remove
+   `CHATGPT_STATIC_CLIENT_ID` and `CHATGPT_STATIC_REDIRECT_URIS`.
+2. Remove the rollback client's MCP API grant, which undoes step 5. The server
+   does not check which client a token was issued to, so a grant left in place
+   leaves every connector linked through that client able to call every tool,
+   `mail:send` included.
+3. Turn DCR off again.
+4. Redeploy. Then delete and recreate any connector linked during the rollback,
+   because a connector keeps the client it registered with.
 
 ---
 
@@ -193,13 +234,22 @@ separate application/authentication paths.
 
 ## Default Audience
 
-**Purpose:** Ensure tokens include the API audience by default
+**Purpose:** The audience Auth0 uses when a request names neither `audience`
+nor `resource`. The website names its audience (`AUTH0_AUDIENCE`). ChatGPT sends
+`resource`, which Auth0 honours only while the Resource Parameter Compatibility
+Profile is on (see `docs/auth0-tenant-configuration.md`); with the profile off,
+ChatGPT's requests fall back to this value.
 
 **Setup Steps:**
 1. Go to Settings (gear icon) → General
 2. Scroll to "API Authorization Settings"
-3. **Default Audience:** `https://letter-irl/api`
+3. **Default Audience:** the MCP API identifier (`https://api.letterirl.com/mcp`)
 4. Save
+
+Both tenants were repointed on 2026-09-14 (development:
+`https://letter-irl-api-development.up.railway.app/mcp`). Before that they
+pointed at the retired `https://letter-irl/api`, and Auth0 refused a ChatGPT
+request that fell back to it, because the ChatGPT client had no grant there.
 
 ---
 
@@ -281,8 +331,7 @@ LETTER_IRL_OAUTH_JWKS_URI=https://dev-njmdyqf8n25rqgy7.us.auth0.com/.well-known/
 LETTER_IRL_MCP_RESOURCE=https://api.letterirl.com/mcp
 LETTER_IRL_OAUTH_AUDIENCE=https://api.letterirl.com/mcp
 LETTER_IRL_OAUTH_ALLOWED_ALGORITHMS=RS256
-LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl/api
-LETTER_IRL_OAUTH_SCOPES=openid,email,profile
+LETTER_IRL_OAUTH_SCOPES=openid,profile,email,offline_access,mail:read,mail:draft,mail:send
 ```
 
 ### Website (letter-irl-website)
@@ -293,7 +342,8 @@ AUTH0_BASE_URL=https://letterirl.com
 AUTH0_ISSUER_BASE_URL=https://dev-njmdyqf8n25rqgy7.us.auth0.com
 AUTH0_CLIENT_ID=wX17u1wOn3XJRVba1ejIappBNpDno3ER
 AUTH0_CLIENT_SECRET=<from application settings>
-AUTH0_AUDIENCE=https://letter-irl/api
+AUTH0_AUDIENCE=https://api.letterirl.com/mcp
+AUTH0_SCOPE=openid profile email offline_access mail:read mail:draft mail:send
 ```
 
 ---
@@ -301,28 +351,31 @@ AUTH0_AUDIENCE=https://letter-irl/api
 ## Checklist
 
 ### Production Tenant (dev-njmdyqf8n25rqgy7)
-- [x] Account created (dnicholl@letterirl.com)
+- [x] Account created (the production account)
 - [x] Environment tag set to Production
 - [x] Website application created (Regular Web App)
-- [x] Website/REST API created (`https://letter-irl/api`)
-- [ ] Production CIMD/API changes await DEV acceptance and owner approval
+- [x] MCP API created (`https://api.letterirl.com/mcp`)
+- [x] Website application authorized for the MCP API, and website variables switched to it (2026-09-14)
+- [x] Default audience repointed to the MCP API, then `https://letter-irl/api` deleted (2026-09-14)
+- [ ] `Prod-to-Dev Sync (Management API)` deleted (Management API access revoked 2026-09-14; delete once the logs show nothing tried to use it)
 - [x] Legacy DCR state recorded for rollback
 - [x] Domain-level connection inventory recorded
-- [x] Default audience set
 - [x] Google connection configured
 - [ ] Microsoft connection configured
 - [ ] Apple connection configured
 - [ ] GitHub connection configured
 - [x] Username-Password enabled
 - [x] Branding configured (logo, colors)
-- [ ] M2M app created (for sync script)
 - [x] Environment variables configured in Railway
 
 ### Development Tenant (dev-ky21dxn3qmi71hjl)
-- [x] Account exists (dnicholl@objective.works)
-- [x] Website application configured
-- [x] Website/REST API configured
-- [ ] Dedicated DEV `/mcp` API and public CIMD import are owner-gated
+- [x] Account exists (the organization account)
+- [x] Website application configured and authorized for the MCP API (2026-09-14)
+- [x] Dedicated DEV `/mcp` API created and the ChatGPT CIMD client imported
+- [x] Default audience repointed to the MCP API, then `https://letter-irl/api` deleted (2026-09-14)
+- [x] `Letter IRL API (Test Application)` deleted (2026-09-14)
+- [ ] `API Explorer Application` deleted (Management API access revoked 2026-09-14; delete once the logs show nothing tried to use it)
+- [ ] DCR turned off (still enabled; rollback inventory only)
 - [x] Legacy DCR state recorded for rollback
 - [x] Domain-level connection inventory recorded
 - [x] Social connections configured

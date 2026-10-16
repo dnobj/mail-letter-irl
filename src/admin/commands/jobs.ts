@@ -1,13 +1,16 @@
 import { createHash } from "node:crypto";
 
 import {
+  cancelLeftLetterJobAsAdmin,
+  releaseHeldLetterJobAsAdmin,
   resolveAmbiguousLetterJobAsAdmin,
   retryLetterJobAsAdmin,
   type AmbiguousMailDecision,
   type AmbiguousMailResolution,
 } from "../../services/letterJobService.js";
 import { AdminFoundationError } from "../errors.js";
-import { readJob } from "../queries/jobs.js";
+import { isCancellableLeftJob, isFundingHeldMailJob, isHeldMailJob, readJob } from "../queries/jobs.js";
+import { providerPrintsRenderedPdf, providerSellsExtraServices } from "../../services/providers/extraServices.js";
 import { mapDomainError, type CommandDefinition } from "./runner.js";
 
 const PROVIDERS = ["postgrid", "dummy", "diy"] as const;
@@ -99,7 +102,17 @@ export const jobResolveCommand: CommandDefinition<JobResolveInput> = {
       ],
       warnings:
         input.decision === "accepted"
-          ? ["Accepted marks the letter as mailed with this reference. Only use evidence from the provider dashboard."]
+          ? [
+              "Accepted marks the letter as mailed with this reference. Only use evidence from the provider dashboard.",
+              // Certified mail (#625): the service is checked under the lock, when the letter is read there.
+              ...(providerSellsExtraServices(input.providerName)
+                ? []
+                : ["Manual fulfilment cannot send certified mail: accepting a certified letter with this provider is refused."]),
+              // Mail our renderer drew (#698): checked under the lock too.
+              ...(providerPrintsRenderedPdf(input.providerName)
+                ? []
+                : ["This provider does not print what our renderer drew: accepting a letter previewed on our renderer (all mail while LETTER_IRL_PRINT_RENDERER=pdf) is refused."]),
+            ]
           : input.decision === "retry"
             ? ["Retry resends the letter through the outbox; the customer is not charged again."]
             : ["Rejected fails the letter; a prepaid letter's credits return through the failed-send path, and a Pay & Send order moves to refund."],
@@ -196,6 +209,160 @@ export const jobRetryCommand: CommandDefinition<Record<string, never>> = {
         idempotencyKey: execution.idempotencyKey,
       });
       return { jobStatus: "pending", domainReplayed: result.replayed };
+    } catch (error) {
+      throw mapDomainError(error);
+    }
+  },
+};
+
+/**
+ * Send held mail now (#535): a letter held to arrive by a date becomes due at
+ * once, and the next hourly maintenance run sends it instead of waiting for
+ * its mail date. The service refuses anything but mail still held. The
+ * operator's reason travels with the confirmation and becomes the service's
+ * reason, recorded hashed in the operator audit.
+ */
+export const jobDispatchNowCommand: CommandDefinition<Record<string, never>> = {
+  name: "job.dispatch_now",
+  title: "Send held mail now",
+  action: "job.dispatch_now",
+  targetType: "letter_job",
+  transactional: false,
+  verb: () => "DISPATCH",
+  parseInput() {
+    return {};
+  },
+  async preview(client, jobId) {
+    const job = await readJob(client, jobId);
+    if (!job) throw new AdminFoundationError("ADMIN_NOT_FOUND");
+    // Held mail before its date, or mail held for its funding (#696), due or not.
+    const fundingHeld = isFundingHeldMailJob(job);
+    if (!fundingHeld && (!isHeldMailJob(job) || !job.heldUntil)) throw new AdminFoundationError("ADMIN_INVALID_STATE");
+    return {
+      targetId: job.jobId,
+      summary: {
+        letterId: job.letterId,
+        userId: job.userId,
+        fundingOrderId: job.fundingOrderId,
+        heldUntil: job.heldUntil ? job.heldUntil.toISOString() : null,
+        jobStatus: job.status,
+        ...(fundingHeld ? { fundingHold: job.holdReason } : {}),
+      },
+      expectedVersion: job.updatedAt.toISOString(),
+      display: [
+        ["Job", job.jobId],
+        ["Letter", job.letterId],
+        ["Account", job.userId],
+        [
+          "Funding",
+          job.fundingOrderId
+            ? `Pay & Send order ${job.fundingOrderId}`
+            : job.fundingType === "gift_letter"
+              ? "a gift letter"
+              : "prepaid balance",
+        ],
+        ...(job.heldUntil
+          ? [["Held until", `${job.heldUntil.toISOString()} (09:00 New York time on its mail date)`] as [string, string]]
+          : []),
+        ...(fundingHeld
+          ? [["Held because", job.holdReason === "funding_disputed" ? "the pack that paid for it is disputed" : "the pack that paid for it was refunded in full"] as [string, string]]
+          : []),
+      ],
+      warnings: [
+        ...(fundingHeld
+          ? [
+              "The money that paid for this letter went back, or may. Sending it prints a letter nobody may be paying for: release it when a dispute is won, or when you choose to.",
+              "If the account's sending is blocked, the letter still waits until it is unblocked.",
+            ]
+          : []),
+        ...(fundingHeld
+          ? ["It goes to the printer on its mail date, or at the next hourly run if that date has passed or it has none."]
+          : [
+              "The letter goes to the printer at the next hourly maintenance run instead of on its mail date, so it may arrive well before the date the customer chose.",
+              "The customer can still cancel it until that run takes it.",
+            ]),
+        "The reason you give on this page is recorded with the release.",
+      ],
+    };
+  },
+  async execute(execution, jobId, _input, preview) {
+    if (execution.reason.length < 8 || execution.reason.length > 500) {
+      throw new AdminFoundationError("ADMIN_INVALID_REQUEST");
+    }
+    try {
+      const result = await releaseHeldLetterJobAsAdmin({
+        jobId,
+        expectedUserId: String(preview.summary.userId),
+        actorId: execution.actorId,
+        reason: execution.reason,
+        idempotencyKey: execution.idempotencyKey,
+      });
+      return { jobStatus: "pending", domainReplayed: result.replayed };
+    } catch (error) {
+      throw mapDomainError(error);
+    }
+  },
+};
+
+/**
+ * Cancel mail left for the operator (#696, decision D2): a prepaid or gift letter held
+ * because the pack that paid for it was refunded in full or disputed, or of an
+ * account whose sending is blocked. What paid for it goes back as a failed send's would:
+ * nothing from a revoked pack, no gift from a refunded or disputed purchase. A Pay & Send
+ * letter is cancelled by its order's refund instead. The service checks it all again under
+ * its locks.
+ */
+export const jobCancelHeldCommand: CommandDefinition<Record<string, never>> = {
+  name: "job.cancel_held",
+  title: "Cancel mail left for the operator",
+  action: "job.cancel_held",
+  targetType: "letter_job",
+  transactional: false,
+  verb: () => "CANCEL",
+  parseInput() {
+    return {};
+  },
+  async preview(client, jobId) {
+    const job = await readJob(client, jobId);
+    if (!job) throw new AdminFoundationError("ADMIN_NOT_FOUND");
+    if (!isCancellableLeftJob(job)) throw new AdminFoundationError("ADMIN_INVALID_STATE");
+    const why =
+      job.holdReason === "funding_disputed"
+        ? "the pack that paid for it is disputed"
+        : job.holdReason === "funding_reversed"
+          ? "the pack that paid for it was refunded in full"
+          : "the account's sending is blocked";
+    return {
+      targetId: job.jobId,
+      summary: { letterId: job.letterId, userId: job.userId, fundingType: job.fundingType, jobStatus: job.status },
+      expectedVersion: job.updatedAt.toISOString(),
+      display: [
+        ["Job", job.jobId],
+        ["Letter", job.letterId],
+        ["Account", job.userId],
+        ["Funding", job.fundingType === "gift_letter" ? "a gift letter" : "prepaid balance"],
+        ["Held because", why],
+      ],
+      warnings: [
+        "The letter is cancelled and never printed.",
+        "What paid for it goes back only if it can: nothing from a pack refunded or disputed, and no gift from a refunded or disputed purchase. After a dispute is won, release it instead: cancelling it then costs the customer the letter.",
+        "The reason you give on this page is recorded with the cancel.",
+      ],
+    };
+  },
+  async execute(execution, jobId, _input, preview) {
+    if (execution.reason.length < 8 || execution.reason.length > 500) {
+      throw new AdminFoundationError("ADMIN_INVALID_REQUEST");
+    }
+    try {
+      const result = await cancelLeftLetterJobAsAdmin({
+        jobId,
+        expectedUserId: String(preview.summary.userId),
+        actorId: execution.actorId,
+        reason: execution.reason,
+        idempotencyKey: execution.idempotencyKey,
+      });
+      return { jobStatus: "cancelled", domainReplayed: result.replayed };
     } catch (error) {
       throw mapDomainError(error);
     }

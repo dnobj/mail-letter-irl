@@ -1,5 +1,11 @@
 # Functional Requirements
 
+> **Historical (November 2025): the original v1 requirements.** Several no longer describe the
+> system. In particular, the status names (`queued_for_print`, `printing`, `mailed`) are not the real
+> values ([status-labels.md](status-labels.md)), and the **Audit and Traceability** section below is
+> **superseded and must not be followed**: letter text and addresses are never written to logs, and
+> content is deleted on the published schedule ([security-and-policy.md](security-and-policy.md)).
+
 ## Identity and Session Management
 - The server must uniquely identify ChatGPT users; assume Apps SDK will deliver an auth token or user ID.
 - In development, a hard-coded user or simple bearer token is acceptable, provided all state remains scoped per user.
@@ -35,8 +41,12 @@
 - Include recipient and sender summaries plus the first ~200 characters of the letter body in the confirmation payload for user reassurance.
 
 ## Audit and Traceability
-- Log each order with full text, addresses, timestamps, and initiating user ID.
-- Preserve immutable snapshots to support customer service inquiries and fraud investigations.
+
+> Superseded. Do not log letter text or addresses. What is kept for audit, and for how long, is in
+> [security-and-policy.md](security-and-policy.md#auditability-and-retention).
+
+- ~~Log each order with full text, addresses, timestamps, and initiating user ID.~~
+- ~~Preserve immutable snapshots to support customer service inquiries and fraud investigations.~~
 
 ## Observability and Debugging
 - Instrument every MCP tool handler with structured logs that capture tool name, correlation ID, user identifier (hashed/anonymized), request validation results, and high-level outcome (success, validation error, business rule failure) while redacting full PII payloads.

@@ -12,6 +12,8 @@
  */
 
 import { Address, LetterLayoutType } from "../contracts/types.js";
+import { giftLetterPageSvg, type CardFragment, type GiftCardContent } from "./giftCardRenderer.js";
+import { RENDERER_VERSION } from "../render/index.js";
 
 // ============================================================================
 // Character Limits by Layout Type
@@ -24,24 +26,36 @@ export const LAYOUT_CHARACTER_LIMITS: Record<LetterLayoutType, number> = {
 };
 
 // Line limits by layout type
-// SOFT LIMITS: Guidance for ChatGPT (what we tell it to aim for)
-// These appear in tool descriptions to guide content generation
+// SOFT LIMITS: guidance. Neither tools/list nor /manifest.json (generated from the same Zod shapes, #688) states
+// line counts; the refusal sentence does.
 export const LAYOUT_LINE_LIMITS_SOFT: Record<LetterLayoutType, number> = {
   text_only: 24,        // Full page of text
-  header_image: 17,     // Reduced for 2" header image
+  header_image: 15,     // Reduced for 2" header image: with the sign-off it fits our renderer's 16 (#534) and the legacy 17
   inline_image: 12,     // Reduced for 3" inline image
 };
 
-// HARD LIMITS: Actual validation limits (with buffer for edge cases)
-// These are enforced during validation to avoid unnecessary retries
-// Buffer accounts for: sign-off formatting, character wrapping variations
+// HARD LIMITS: the most lines validation accepts. A buffer over the soft
+// limit spares a retry when the sign-off or wrapping adds a line, but a limit
+// must never pass what fits on one printed page: past it, the letter prints,
+// and is billed, a second page. From the print check in PostGrid's test mode on
+// 2026-09-29 (#77), with short lines that do not wrap:
+// - header_image: at 19 lines, lines 18 and 19 printed on page 2 and 17 fit
+//   under the 2" image (18 alone was not printed).
+// - inline_image: at 15 lines the text and the 3" image fit, but a blank
+//   page 2 printed.
+// - text_only: 26 lines printed on one page.
+// At these limits, header_image 17 and inline_image 14 each printed on one
+// page (2026-09-30).
+// Lines are counted on letterPrintText, the text exactly as it prints.
 export const LAYOUT_LINE_LIMITS: Record<LetterLayoutType, number> = {
   text_only: 26,        // Soft limit 24 + 2 buffer
-  header_image: 19,     // Soft limit 17 + 2 buffer
-  inline_image: 15,     // Soft limit 12 + 3 buffer
+  header_image: 17,     // No buffer: 17 is what fits under a 2" header image
+  inline_image: 14,     // Soft limit 12 + 2 buffer
 };
 
-// Characters per line (6.5" width at 12pt Times New Roman)
+// Characters per line, across 6.5" at 12pt. The print HTML names Times New
+// Roman, but PostGrid prints in Open Sans (#526): there a mixed-case line held
+// 74 to 82 characters, and an all-caps line 66 to 70 (2026-09-30).
 const CHARS_PER_LINE = 65;
 
 // ============================================================================
@@ -59,6 +73,17 @@ export interface LayoutPreviewInput extends PreviewInput {
   layoutType: LetterLayoutType;
   headerImageData?: string;   // Base64 data URI
   inlineImageData?: string;   // Base64 data URI
+  /** A gift send's card, drawn by the same renderer print uses. */
+  giftCard?: GiftCardContent;
+}
+
+/**
+ * The gift card page, from giftCardRenderer - the renderer PostGridProvider
+ * prints with - so the preview cannot drift from the print. Empty for every
+ * letter that is not a gift send.
+ */
+function giftPageFor(input: LayoutPreviewInput): CardFragment {
+  return input.giftCard ? giftLetterPageSvg(input.giftCard, input.sender.name) : { css: '', html: '' };
 }
 
 export interface LayoutDetectionInput {
@@ -134,22 +159,37 @@ export function estimateLines(text: string, charsPerLine = CHARS_PER_LINE): numb
   return totalLines;
 }
 
-// ============================================================================
-// Content Validation
-// ============================================================================
-
 /**
- * Get character limit for a given layout type
+ * A letter's text as it prints: the body without trailing blank lines, then
+ * the sign-off on the next line. Validation counts lines on exactly this text
+ * and the provider prints exactly this text (letterJobService), so the count
+ * cannot fall short of the print. The print used to keep a body's trailing
+ * newlines, which validation dropped: a letter at the line limit could still
+ * print a line or two taller, onto a second page (#77).
  */
-export function getCharacterLimit(layoutType: LetterLayoutType): number {
-  return LAYOUT_CHARACTER_LIMITS[layoutType];
+export function letterPrintText(bodyText: string | null | undefined, signOff?: string | null): string {
+  // The print's HTML parser reads \r\n and a lone \r as one line break each;
+  // as \n they are counted the same way.
+  const unix = (text: string) => text.replace(/\r\n?/g, '\n');
+  // A letter row without body text (a malformed or scrubbed one) must not
+  // throw in the outbox: it would fail the job before dispatch.
+  const body = unix(bodyText ?? '').trimEnd();
+  return (signOff ? `${body}\n${unix(signOff)}` : body).trim();
 }
 
 /**
- * Get line limit for a given layout type
+ * The paragraph of letterPrintText's text that holds the sign-off's first
+ * line, which a signature prints under (#608): after the body's paragraphs,
+ * past any blank line the sign-off begins with. Past the text when there is
+ * no sign-off, which puts the signature after the letter. The preview and the
+ * print both ask this, so they draw the signature in the same place.
  */
-export function getLineLimit(layoutType: LetterLayoutType): number {
-  return LAYOUT_LINE_LIMITS[layoutType];
+export function signatureParagraph(bodyText: string | null | undefined, signOff?: string | null): number {
+  const body = letterPrintText(bodyText);
+  const paragraphs = letterPrintText(bodyText, signOff).split('\n');
+  let index = body === '' ? 0 : body.split('\n').length;
+  while (index < paragraphs.length && paragraphs[index].trim() === '') index += 1;
+  return index;
 }
 
 /**
@@ -176,11 +216,8 @@ export function validateCharacterLimit(
   const charLimit = LAYOUT_CHARACTER_LIMITS[layoutType];
   const charsValid = totalChars <= charLimit;
 
-  // Estimate lines for combined content (body + sign-off with spacing)
-  // Trim trailing newlines from body to avoid stacking with the \n separator
-  const trimmedBody = bodyText.replace(/\n+$/, '');
-  const combinedText = signOff ? `${trimmedBody}\n${signOff}` : trimmedBody;
-  const totalLines = estimateLines(combinedText);
+  // Count the lines of the text exactly as it prints.
+  const totalLines = estimateLines(letterPrintText(bodyText, signOff));
   const lineLimit = LAYOUT_LINE_LIMITS[layoutType];
   const linesValid = totalLines <= lineLimit;
 
@@ -217,21 +254,10 @@ export function validateCharacterLimit(
 export function estimateRequiredCredits(
   bodyText: string,
   signOff: string,
-  charsPerPage = LAYOUT_CHARACTER_LIMITS.text_only
+  _charsPerPage = LAYOUT_CHARACTER_LIMITS.text_only
 ): number {
   // Flat rate: All letters cost 2 credits (one page maximum)
   return 2;
-}
-
-// ============================================================================
-// Preview HTML Rendering
-// ============================================================================
-
-/**
- * Render minimal preview HTML for widget display (backward compatible)
- */
-export function renderPreviewHtml(input: PreviewInput): string {
-  return `<!doctype html><html><body><address>${input.sender.name}<br>${input.sender.addressLine1}</address><hr><p>${input.bodyText}</p><p>${input.signOff}</p></body></html>`;
 }
 
 /**
@@ -254,6 +280,7 @@ export function renderLayoutPreviewHtml(input: LayoutPreviewInput): string {
  * Render text-only layout preview
  */
 function renderTextOnlyPreview(input: LayoutPreviewInput): string {
+  const giftPage = giftPageFor(input);
   // Trim trailing newlines from body text to prevent gap before sign-off
   const trimmedBodyText = input.bodyText.replace(/\n+$/, '');
 
@@ -279,7 +306,7 @@ function renderTextOnlyPreview(input: LayoutPreviewInput): string {
     }
     .sign-off {
       white-space: pre-wrap;
-    }
+    }${giftPage.css}
   </style>
 </head>
 <body>
@@ -289,7 +316,7 @@ function renderTextOnlyPreview(input: LayoutPreviewInput): string {
     ${escapeHtml(input.sender.city)}, ${escapeHtml(input.sender.state)} ${escapeHtml(input.sender.postalCode)}
   </div>
   <div class="letter-body">${escapeHtml(trimmedBodyText)}</div>
-  <div class="sign-off">${escapeHtml(input.signOff)}</div>
+  <div class="sign-off">${escapeHtml(input.signOff)}</div>${giftPage.html}
 </body>
 </html>`;
 }
@@ -298,6 +325,7 @@ function renderTextOnlyPreview(input: LayoutPreviewInput): string {
  * Render header image layout preview
  */
 function renderHeaderImagePreview(input: LayoutPreviewInput): string {
+  const giftPage = giftPageFor(input);
   const headerImageHtml = input.headerImageData
     ? `<div class="header-image"><img src="${input.headerImageData}" alt="Header" style="width: 100%; max-height: 2in; object-fit: contain;"></div>`
     : '';
@@ -335,7 +363,7 @@ function renderHeaderImagePreview(input: LayoutPreviewInput): string {
     }
     .sign-off {
       white-space: pre-wrap;
-    }
+    }${giftPage.css}
   </style>
 </head>
 <body>
@@ -346,7 +374,7 @@ function renderHeaderImagePreview(input: LayoutPreviewInput): string {
     ${escapeHtml(input.sender.city)}, ${escapeHtml(input.sender.state)} ${escapeHtml(input.sender.postalCode)}
   </div>
   <div class="letter-body">${escapeHtml(trimmedBodyText)}</div>
-  <div class="sign-off">${escapeHtml(input.signOff)}</div>
+  <div class="sign-off">${escapeHtml(input.signOff)}</div>${giftPage.html}
 </body>
 </html>`;
 }
@@ -355,6 +383,7 @@ function renderHeaderImagePreview(input: LayoutPreviewInput): string {
  * Render inline image layout preview
  */
 function renderInlineImagePreview(input: LayoutPreviewInput): string {
+  const giftPage = giftPageFor(input);
   const inlineImageHtml = input.inlineImageData
     ? `<div class="inline-image"><img src="${input.inlineImageData}" alt="Photo" style="max-width: 100%; max-height: 3in; object-fit: contain;"></div>`
     : '';
@@ -393,7 +422,7 @@ function renderInlineImagePreview(input: LayoutPreviewInput): string {
     .inline-image img {
       max-width: 100%;
       max-height: 3in;
-    }
+    }${giftPage.css}
   </style>
 </head>
 <body>
@@ -404,8 +433,113 @@ function renderInlineImagePreview(input: LayoutPreviewInput): string {
   </div>
   <div class="letter-body">${escapeHtml(trimmedBodyText)}</div>
   <div class="sign-off">${escapeHtml(input.signOff)}</div>
-  ${inlineImageHtml}
+  ${inlineImageHtml}${giftPage.html}
 </body>
+</html>`;
+}
+
+/**
+ * An address as PostGrid stamps it on a letter (probe P6): the name, the
+ * street lines, then "CITY, ST ZIP", in upper case. A preview draws these
+ * where PostGrid will. Whether PostGrid standardises an address further
+ * before stamping it was not probed.
+ */
+export function stampedAddressLines(address: Address): string[] {
+  return [address.name, address.addressLine1, address.addressLine2, `${address.city}, ${address.state} ${address.postalCode}`]
+    .filter((line): line is string => typeof line === 'string' && line.trim() !== '')
+    .map(line => line.trim().toUpperCase());
+}
+
+/** A postcard's return address as PostGrid stamps it: headed "RETURN TO:" (#534 probe P9). */
+export function stampedPostcardReturnLines(address: Address): string[] {
+  return ['RETURN TO:', ...stampedAddressLines(address)];
+}
+
+/**
+ * The preview our own renderer draws (#534): each page as SVG, from the same
+ * layout the PDF is printed from, in a minimal HTML document. The website's
+ * confirm page shows it in a sandboxed iframe, where it scales to the frame's
+ * width.
+ *
+ * `data-renderer` on the body names the renderer version the pages were
+ * drawn as (pdf-2 for a theme, #563), and the letter card shows the pages of
+ * a document that carries it. The text is also repeated, hidden,
+ * in the legacy preview's `letter-body` and `sign-off` elements, which a card
+ * served before #534 Phase 3, still cached by an app, reads instead.
+ */
+export function renderLetterPreviewDocument(
+  pages: string[],
+  text: { bodyText: string; signOff: string },
+  version: string = RENDERER_VERSION
+): string {
+  const trimmedBodyText = text.bodyText.replace(/\n+$/, '');
+
+  return rendererDocument(pages, version, `  <div hidden>
+    <div class="letter-body">${escapeHtml(trimmedBodyText)}</div>
+    <div class="sign-off">${escapeHtml(text.signOff)}</div>
+  </div>
+`);
+}
+
+/**
+ * A postcard our renderer drew (#534 Phase 4): its front and back as SVG, in
+ * the same document as a letter's, which the website's confirm page shows.
+ * No card before Phase 4 reads a postcard's document, so it carries no
+ * hidden text.
+ */
+export function renderPostcardPreviewDocument(pages: string[]): string {
+  return rendererDocument(pages, RENDERER_VERSION, '');
+}
+
+/**
+ * The pages of a document our renderer's pages are shown in, each `<svg>` as
+ * written; none for any other document, the legacy HTML included.
+ * set_stationery (#563) draws a letter's page again and keeps the pages after
+ * it, a gift letter's card, as they were drawn.
+ */
+export function rendererDocumentPages(html: string | null | undefined): string[] {
+  if (!html || !html.includes('<body data-renderer="')) return [];
+  // A page is a top-level <svg>, and may hold one of its own: a bordered
+  // postcard's photo in its viewport (#594). So the split counts depth,
+  // rather than ending a page at the first </svg>. Text and titles are
+  // escaped, and a data URI holds no '<', so every tag here is a real one.
+  const pages: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (const match of html.matchAll(/<svg\s|<\/svg>/g)) {
+    if (match[0] === '</svg>') {
+      if (depth === 0) continue;
+      depth -= 1;
+      if (depth === 0) pages.push(html.slice(start, match.index + match[0].length));
+    } else {
+      if (depth === 0) start = match.index;
+      depth += 1;
+    }
+  }
+  return pages;
+}
+
+/** The picture a rendered page shows, as its data URI: the preview's small copy of the image. */
+export function renderedPageImage(page: string): string | undefined {
+  return /<image href="(data:image\/(?:jpeg|png);base64,[A-Za-z0-9+/=]+)"/.exec(page)?.[1];
+}
+
+/** The minimal document our renderer's pages are shown in, drawn as `version`, `after` closing the body. */
+function rendererDocument(pages: string[], version: string, after: string): string {
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html, body { margin: 0; background: #fff; }
+    body > svg { display: block; width: 100%; height: auto; }
+    body > svg + svg { margin-top: 12px; }
+  </style>
+</head>
+<body data-renderer="${version}">
+${pages.join('\n')}
+${after}</body>
 </html>`;
 }
 

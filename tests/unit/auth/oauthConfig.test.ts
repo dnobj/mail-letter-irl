@@ -30,6 +30,18 @@ describe("OAuth startup validation", () => {
     expect(validateOAuthConfig(getOAuthConfig(env), env)).toEqual([]);
   });
 
+  it("accepts a complete single-audience rollback configuration", () => {
+    // Rollback mode keeps the one-audience rule. This pins that a correct
+    // rollback still validates, so the rule cannot quietly refuse every one.
+    const env = {
+      ...validEnv(),
+      LETTER_IRL_OAUTH_STATIC_DCR_COMPATIBILITY: "true",
+      CHATGPT_STATIC_CLIENT_ID: "rollback-client",
+      CHATGPT_STATIC_REDIRECT_URIS: "https://chatgpt.com/connector/oauth/rollback-callback"
+    };
+    expect(validateOAuthConfig(getOAuthConfig(env), env)).toEqual([]);
+  });
+
   it("rejects cross-environment issuer selection", () => {
     const env = validEnv();
     env.LETTER_IRL_OAUTH_ISSUER = "https://production-tenant.us.auth0.com/";
@@ -64,6 +76,19 @@ describe("OAuth startup validation", () => {
     );
     expect(errors).toContain("LETTER_IRL_OAUTH_SCOPES must include mail:draft");
     expect(errors).toContain("LETTER_IRL_OAUTH_SCOPES must include mail:send");
+  });
+
+  it("rejects a configuration that requests scopes it does not advertise", () => {
+    // The per-tool securitySchemes ask every customer for offline_access and
+    // the identity scopes. A deployment that advertises neither is the
+    // #160 drift in reverse, and it bites hardest in static-DCR mode
+    // where this metadata IS the document ChatGPT reads.
+    const env = validEnv();
+    env.LETTER_IRL_OAUTH_SCOPES = "mail:read mail:draft mail:send";
+    const errors = validateOAuthConfig(getOAuthConfig(env), env);
+    expect(errors).toContain("LETTER_IRL_OAUTH_SCOPES must include offline_access");
+    expect(errors).toContain("LETTER_IRL_OAUTH_SCOPES must include openid");
+    expect(errors).toContain("LETTER_IRL_OAUTH_SCOPES must include email");
   });
 
   it("rejects a development Railway resource in production", () => {

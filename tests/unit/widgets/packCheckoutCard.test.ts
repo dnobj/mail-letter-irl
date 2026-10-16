@@ -1,0 +1,1107 @@
+/**
+ * Behaviour tests for PackCheckoutCard (issue #322).
+ *
+ * Two defects they cover:
+ *
+ * 1. Empty render. ChatGPT drops the first consequential tool call after
+ *    "Allow once", renders this card's template with no tool result, and the
+ *    skeleton sits there indefinitely while the model tells the customer to
+ *    use "the checkout shown above" (production 2026-09-11, development
+ *    2026-09-12; no request reached the API either time). The card waits,
+ *    then offers to create the checkout itself through the bridge, the way
+ *    the preview cards already buy packs. Proven in development by PAY-03.
+ *
+ * 2. Stale link. After payment the card still showed "Open secure checkout"
+ *    for a session Stripe would refuse, and the model never sees a
+ *    widget-initiated result, so nothing else could say the letters had
+ *    landed. The card now polls get_purchase_status, in the preview cards'
+ *    visibility-gated shape, and replaces the link with the outcome.
+ *
+ * Same honest limits as purchaseStatus.test.ts: jsdom runs the same source
+ * but is not ChatGPT. Timer throttling in a hidden iframe does not reproduce
+ * here; these tests guard the logic and the deployed development connector
+ * guards the behaviour.
+ */
+
+import { describe, it, expect } from 'vitest';
+import { JSDOM } from 'jsdom';
+import * as fs from 'fs';
+import * as path from 'path';
+
+const WIDGET_PATH = path.resolve(__dirname, '../../../widgets/PackCheckoutCard.html');
+
+interface ScheduledTimer {
+  fn: () => void;
+  delay: number;
+  cancelled: boolean;
+}
+
+interface MountOptions {
+  toolOutput?: Record<string, unknown> | null;
+  toolInput?: Record<string, unknown>;
+  widgetState?: Record<string, unknown> | null;
+  withoutCallTool?: boolean;
+  withoutOpenExternal?: boolean;
+  withoutSetWidgetState?: boolean;
+  purchaseStatus?: Record<string, unknown>;
+  packCheckoutFails?: boolean;
+  packCheckoutOmitsUrl?: boolean;
+  packListEmpty?: boolean;
+  /** What create_pack_checkout and list_letter_packs reject with, if anything. */
+  packCheckoutError?: Error;
+  packListError?: Error;
+}
+
+interface Harness {
+  calls: Array<{ name: string; args: Record<string, unknown> }>;
+  opened: string[];
+  saves: Array<Record<string, unknown>>;
+  pendingTimers: () => ScheduledTimer[];
+  runNextTimer: () => Promise<void>;
+  deliver: (output: Record<string, unknown> | null) => void;
+  deliverWidgetState: (state: Record<string, unknown> | null) => void;
+  setStatus: (status: Record<string, unknown>) => void;
+  setHidden: (hidden: boolean) => void;
+  fireVisibilityChange: () => void;
+  click: (id: string) => Promise<void>;
+  clickPackOption: (pack: string) => Promise<void>;
+  packOptionLabels: () => string[];
+  text: (id: string) => string;
+  visible: (id: string) => boolean;
+  href: (id: string) => string;
+  disabled: (id: string) => boolean;
+}
+
+/** Let queued promise callbacks settle. */
+async function flush(times = 6): Promise<void> {
+  for (let i = 0; i < times; i += 1) {
+    await new Promise(resolve => setImmediate(resolve));
+  }
+}
+
+function pendingCheckout(overrides: Record<string, unknown> = {}) {
+  return {
+    orderId: 'ord_host_0001',
+    checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_host',
+    letters: 2,
+    amountCents: 500,
+    currency: 'usd',
+    displayAmount: '5.00',
+    productDescription: 'Starter Pack - 2 Letters',
+    status: 'checkout_pending',
+    reused: false,
+    message: 'Checkout created, not opened: show the customer the checkoutUrl as a link to click.',
+    ...overrides
+  };
+}
+
+function mount(options: MountOptions = {}): Harness {
+  const html = fs.readFileSync(WIDGET_PATH, 'utf-8');
+  const timers: ScheduledTimer[] = [];
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const opened: string[] = [];
+  let toolOutput: Record<string, unknown> | null =
+    options.toolOutput === undefined ? null : options.toolOutput;
+  let purchaseStatus: Record<string, unknown> = options.purchaseStatus ?? { purchaseStatus: 'pending_payment' };
+  let hidden = false;
+
+  let widgetState: Record<string, unknown> | null =
+    options.widgetState === undefined ? null : options.widgetState;
+  const saves: Array<Record<string, unknown>> = [];
+
+  const bridge: Record<string, unknown> = {
+    theme: 'light',
+    get toolOutput() {
+      return toolOutput;
+    },
+    get widgetState() {
+      return widgetState;
+    },
+    toolResponseMetadata: null,
+    toolInput: options.toolInput ?? {}
+  };
+  if (!options.withoutSetWidgetState) {
+    // The host keeps what the card saves; a later mount of the same card reads
+    // it back through widgetState.
+    bridge.setWidgetState = async (state: Record<string, unknown>) => {
+      saves.push(state);
+      widgetState = state;
+    };
+  }
+  if (!options.withoutOpenExternal) {
+    bridge.openExternal = async ({ href }: { href: string }) => {
+      opened.push(href);
+    };
+  }
+  if (!options.withoutCallTool) {
+    bridge.callTool = async (name: string, args: Record<string, unknown>) => {
+      calls.push({ name, args });
+      if (name === 'list_letter_packs') {
+        if (options.packListError) throw options.packListError;
+        return {
+          structuredContent: options.packListEmpty
+            ? { packs: [], message: 'Letter packs are temporarily unavailable.' }
+            : {
+                packs: [
+                  { pack: 'starter', letters: 2, amountCents: 500, currency: 'usd', displayAmount: '5.00' },
+                  { pack: 'regular', letters: 5, amountCents: 1000, currency: 'usd', displayAmount: '10.00' },
+                  { pack: 'power', letters: 50, amountCents: 9000, currency: 'usd', displayAmount: '90.00' }
+                ],
+                message: '3 letter packs are available to buy.'
+              }
+        };
+      }
+      if (name === 'create_pack_checkout') {
+        if (options.packCheckoutError) throw options.packCheckoutError;
+        if (options.packCheckoutFails) throw new Error('Purchasing is disabled on this account. Please contact support.');
+        const letters = args.pack === 'regular' ? 5 : args.pack === 'power' ? 50 : 2;
+        return {
+          structuredContent: options.packCheckoutOmitsUrl
+            ? {
+                orderId: 'ord_retry_0001',
+                letters,
+                amountCents: 500,
+                currency: 'usd',
+                displayAmount: '5.00',
+                productDescription: 'Starter Pack - 2 Letters',
+                status: 'fulfilled',
+                reused: true,
+                message: 'This purchase is already paid or being fulfilled. Check its purchase status instead of opening another checkout.'
+              }
+            : pendingCheckout({
+                orderId: 'ord_retry_0001',
+                checkoutUrl: `https://checkout.stripe.com/c/pay/cs_retry_${String(args.pack)}`,
+                letters,
+                productDescription: `${String(args.pack)} pack`
+              })
+        };
+      }
+      if (name === 'get_purchase_status') {
+        return { structuredContent: { orderId: args.orderId, ...purchaseStatus } };
+      }
+      return { structuredContent: {} };
+    };
+  }
+
+  const dom = new JSDOM(html, {
+    runScripts: 'dangerously',
+    beforeParse(window) {
+      Object.defineProperty(window.document, 'hidden', { get: () => hidden });
+      // Timers are captured rather than run, so the wait is observable and
+      // nothing depends on wall-clock time.
+      (window as unknown as Record<string, unknown>).setTimeout = (fn: () => void, delay: number) => {
+        timers.push({ fn, delay, cancelled: false });
+        return timers.length;
+      };
+      (window as unknown as Record<string, unknown>).clearTimeout = (id: number) => {
+        const timer = timers[id - 1];
+        if (timer) timer.cancelled = true;
+      };
+      (window as unknown as Record<string, unknown>).openai = bridge;
+    }
+  });
+
+  const document = dom.window.document;
+  const element = (id: string): HTMLElement => {
+    const el = document.getElementById(id);
+    if (!el) throw new Error(`no element #${id}`);
+    return el;
+  };
+  const isVisible = (el: HTMLElement): boolean => {
+    for (let node: HTMLElement | null = el; node; node = node.parentElement) {
+      if (node.classList.contains('hidden')) return false;
+    }
+    return true;
+  };
+
+  return {
+    calls,
+    opened,
+    saves,
+    pendingTimers: () => timers.filter(timer => !timer.cancelled),
+    runNextTimer: async () => {
+      const timer = timers.find(candidate => !candidate.cancelled);
+      if (!timer) throw new Error('no pending timer');
+      timer.cancelled = true;
+      timer.fn();
+      await flush();
+    },
+    deliver: output => {
+      toolOutput = output;
+      dom.window.dispatchEvent(new dom.window.Event('openai:set_globals'));
+    },
+    deliverWidgetState: state => {
+      widgetState = state;
+      dom.window.dispatchEvent(new dom.window.Event('openai:set_globals'));
+    },
+    setStatus: status => {
+      purchaseStatus = status;
+    },
+    setHidden: value => {
+      hidden = value;
+    },
+    fireVisibilityChange: () => {
+      document.dispatchEvent(new dom.window.Event('visibilitychange'));
+    },
+    click: async id => {
+      element(id).dispatchEvent(new dom.window.Event('click'));
+      await flush();
+    },
+    clickPackOption: async pack => {
+      const el = document.querySelector(`#pack-options button[data-pack="${pack}"]`);
+      if (!el) throw new Error(`no pack option for ${pack}`);
+      el.dispatchEvent(new dom.window.Event('click'));
+      await flush();
+    },
+    packOptionLabels: () =>
+      Array.from(document.querySelectorAll('#pack-options button')).map(el => el.textContent?.trim() ?? ''),
+    text: id => element(id).textContent?.trim() ?? '',
+    visible: id => isVisible(element(id)),
+    href: id => element(id).getAttribute('href') ?? '',
+    disabled: id => (element(id) as HTMLButtonElement).disabled
+  };
+}
+
+const statusCalls = (card: Harness) => card.calls.filter(call => call.name === 'get_purchase_status');
+
+describe('PackCheckoutCard with a tool result', () => {
+  it('renders the checkout straight away and never arms the empty-state wait', () => {
+    const card = mount({ toolOutput: pendingCheckout() });
+
+    expect(card.visible('state-ready')).toBe(true);
+    expect(card.visible('state-loading')).toBe(false);
+    expect(card.visible('state-empty')).toBe(false);
+    expect(card.href('checkout-link')).toBe('https://checkout.stripe.com/c/pay/cs_host');
+    expect(card.text('order-line')).toBe('Order ord_host_0001');
+    // The only timer is the status poll; no 5 s empty-state wait exists.
+    expect(card.pendingTimers().map(timer => timer.delay)).toEqual([3000]);
+  });
+
+  it('swaps the skeleton for the checkout when the result arrives in time, so the retry never appears', () => {
+    // The normal path: toolOutput is null at load and openai:set_globals
+    // delivers it a moment later. The customer must see exactly what the
+    // card showed before this change.
+    const card = mount();
+
+    expect(card.visible('state-loading')).toBe(true);
+    expect(card.pendingTimers().map(timer => timer.delay)).toEqual([5000]);
+
+    card.deliver(pendingCheckout());
+
+    expect(card.visible('state-ready')).toBe(true);
+    expect(card.visible('state-empty')).toBe(false);
+    expect(card.href('checkout-link')).toBe('https://checkout.stripe.com/c/pay/cs_host');
+    expect(card.pendingTimers().map(timer => timer.delay)).toEqual([3000]);
+  });
+});
+
+describe('PackCheckoutCard and the way back into the conversation (#372)', () => {
+  const START_URL = 'https://api.example.test/purchase/start?to=' + encodeURIComponent('https://checkout.stripe.com/c/pay/cs_host');
+
+  it('points the button at the start page when the result carries one, and opens nothing by itself', async () => {
+    // The start page forwards to the same Stripe checkout after keeping the
+    // return link ChatGPT appends; an older result without it still links
+    // straight to Stripe.
+    const card = mount({ toolOutput: pendingCheckout({ checkoutStartUrl: START_URL }) });
+    await flush();
+
+    expect(card.href('checkout-link')).toBe(START_URL);
+    // A payment page opens only when the customer presses the link (#730).
+    expect(card.opened).toEqual([]);
+    expect(card.visible('fallback')).toBe(false);
+  });
+
+  it('routes a tap through the host and offers a plain link if nothing opened', async () => {
+    // Only an openExternal call gets the redirectUrl appended, so the tap
+    // goes through the host; but on 2026-08-29 that call resolved without
+    // opening anything, so a plain fallback link follows after a moment.
+    const card = mount({ toolOutput: pendingCheckout({ checkoutStartUrl: START_URL }) });
+    const timersBefore = card.pendingTimers().length;
+
+    await card.click('checkout-link');
+
+    expect(card.opened).toEqual([START_URL]);
+    const fallbackTimer = card.pendingTimers().find(timer => timer.delay === 1500);
+    expect(fallbackTimer).toBeDefined();
+    expect(card.pendingTimers().length).toBe(timersBefore + 1);
+    expect(card.visible('fallback')).toBe(false);
+
+    fallbackTimer!.cancelled = true;
+    fallbackTimer!.fn();
+
+    expect(card.visible('fallback')).toBe(true);
+    expect(card.href('fallback-link')).toBe(START_URL);
+  });
+
+  it('keeps the plain link when the host cannot open links', async () => {
+    const card = mount({ toolOutput: pendingCheckout({ checkoutStartUrl: START_URL }), withoutOpenExternal: true });
+
+    expect(card.href('checkout-link')).toBe(START_URL);
+    expect(card.opened).toEqual([]);
+    await card.click('checkout-link');
+    // No openExternal on this bridge: the anchor's own navigation is the
+    // path, and no fallback timer is armed.
+    expect(card.pendingTimers().some(timer => timer.delay === 1500)).toBe(false);
+  });
+});
+
+describe('PackCheckoutCard rendered without a tool result', () => {
+  it('keeps the skeleton until the wait elapses, then says no checkout is showing without claiming nothing was charged', async () => {
+    const card = mount({ toolInput: { pack: 'starter' } });
+
+    expect(card.visible('state-empty')).toBe(false);
+    await card.runNextTimer();
+
+    expect(card.visible('state-loading')).toBe(false);
+    expect(card.visible('state-empty')).toBe(true);
+    expect(card.text('empty-message')).toMatch(/no checkout is showing on this card/i);
+    // A reopened conversation with nothing saved lands here too, often after a
+    // payment, so the card must not say that nothing was charged (PAY-05).
+    expect(card.text('empty-message')).not.toMatch(/nothing has been charged/i);
+    expect(card.text('empty-message')).toMatch(/purchase status/i);
+    expect(card.visible('retry-button')).toBe(true);
+    expect(card.text('retry-button')).toBe('Create my checkout');
+    expect(card.calls).toEqual([]);
+  });
+
+  it('suggests a higher thinking effort with the empty state only', async () => {
+    const card = mount({ toolInput: { pack: 'starter' } });
+    expect(card.visible('empty-hint')).toBe(false);
+
+    await card.runNextTimer();
+
+    expect(card.visible('empty-hint')).toBe(true);
+    expect(card.text('empty-hint')).toBe(
+      "Tip: with Instant selected, ChatGPT sometimes doesn't run an action you approved. A higher thinking effort can help."
+    );
+
+    await card.click('retry-button');
+    expect(card.visible('state-ready')).toBe(true);
+    expect(card.visible('empty-hint')).toBe(false);
+  });
+
+  it('creates the requested pack itself and draws the link from the result', async () => {
+    const card = mount({ toolInput: { pack: 'starter' } });
+    await card.runNextTimer();
+
+    await card.click('retry-button');
+
+    expect(card.calls).toEqual([{ name: 'create_pack_checkout', args: { pack: 'starter' } }]);
+    expect(card.visible('state-ready')).toBe(true);
+    expect(card.visible('state-empty')).toBe(false);
+    expect(card.visible('state-loading')).toBe(false);
+    expect(card.visible('checkout-link')).toBe(true);
+    expect(card.href('checkout-link')).toBe('https://checkout.stripe.com/c/pay/cs_retry_starter');
+    expect(card.text('letters')).toBe('2');
+    expect(card.text('price')).toBe('5.00');
+    expect(card.text('message')).toBe('Pay USD 5.00 to add 2 letters to your account.');
+    expect(card.text('order-line')).toBe('Order ord_retry_0001');
+    // Nothing opens until the customer presses the link, even after pressing
+    // the card's own button to make the checkout (#730).
+    expect(card.opened).toEqual([]);
+    await card.click('checkout-link');
+    expect(card.opened).toEqual(['https://checkout.stripe.com/c/pay/cs_retry_starter']);
+  });
+
+  it('offers the pack sizes when the request carried no pack, and buys the one chosen', async () => {
+    const card = mount();
+    await card.runNextTimer();
+
+    expect(card.text('retry-button')).toBe('Choose a pack');
+    await card.click('retry-button');
+
+    expect(card.calls).toEqual([{ name: 'list_letter_packs', args: {} }]);
+    expect(card.visible('retry-button')).toBe(false);
+    expect(card.packOptionLabels()).toEqual([
+      '2 letters · USD 5.00',
+      '5 letters · USD 10.00',
+      '50 letters · USD 90.00'
+    ]);
+
+    await card.clickPackOption('regular');
+
+    expect(card.calls[1]).toEqual({ name: 'create_pack_checkout', args: { pack: 'regular' } });
+    expect(card.visible('state-ready')).toBe(true);
+    expect(card.href('checkout-link')).toBe('https://checkout.stripe.com/c/pay/cs_retry_regular');
+    expect(card.text('letters')).toBe('5');
+    // Choosing a pack makes the checkout; only the link opens it (#730).
+    await flush();
+    expect(card.opened).toEqual([]);
+  });
+
+  it('treats a pack it does not recognise as no pack at all', async () => {
+    // The enum is copied from the tool's input schema; a value outside it
+    // must not be forwarded to the tool, which would refuse it.
+    const card = mount({ toolInput: { pack: 'enormous' } });
+    await card.runNextTimer();
+
+    expect(card.text('retry-button')).toBe('Choose a pack');
+  });
+
+  it('shows an empty catalogue as an error and leaves the button to try again', async () => {
+    const card = mount({ packListEmpty: true });
+    await card.runNextTimer();
+
+    await card.click('retry-button');
+
+    expect(card.visible('retry-error')).toBe(true);
+    expect(card.text('retry-error')).toMatch(/temporarily unavailable/);
+    expect(card.visible('retry-button')).toBe(true);
+    expect(card.disabled('retry-button')).toBe(false);
+    expect(card.text('retry-button')).toBe('Choose a pack');
+  });
+
+  it('keeps the button when the checkout call fails, showing the message the tool wrote', async () => {
+    const card = mount({ toolInput: { pack: 'starter' }, packCheckoutFails: true });
+    await card.runNextTimer();
+
+    await card.click('retry-button');
+
+    expect(card.visible('state-empty')).toBe(true);
+    expect(card.visible('retry-error')).toBe(true);
+    expect(card.text('retry-error')).toMatch(/Purchasing is disabled on this account/);
+    expect(card.disabled('retry-button')).toBe(false);
+    expect(card.text('retry-button')).toBe('Create my checkout');
+
+    await card.click('retry-button');
+    expect(card.calls).toHaveLength(2);
+  });
+
+  describe("shows a refused call's sentence, not the host's wrapper (#434)", () => {
+    // ChatGPT rejects a card's own callTool when the result is an error, and
+    // the rejection's message wraps the result's text in a Python-style repr.
+    const SENTENCE = 'Purchasing is disabled on this account. Please contact support.';
+    const wrapped = () =>
+      new Error(
+        'Error code: INVALID_ARGUMENT; Error: RuntimeException: Error calling MCP tool: ' +
+          `[TextContent(type='text', text='${SENTENCE}', annotations=None, meta=None)]`
+      );
+
+    it('when the packs cannot be listed', async () => {
+      const card = mount({ packListError: wrapped() });
+      await card.runNextTimer();
+
+      await card.click('retry-button');
+
+      expect(card.calls.map(call => call.name)).toEqual(['list_letter_packs']);
+      expect(card.text('retry-error')).toBe(`Unable to load letter packs: ${SENTENCE}`);
+    });
+
+    it('when the checkout is refused', async () => {
+      const card = mount({ toolInput: { pack: 'starter' }, packCheckoutError: wrapped() });
+      await card.runNextTimer();
+
+      await card.click('retry-button');
+
+      expect(card.calls.map(call => call.name)).toEqual(['create_pack_checkout']);
+      expect(card.text('retry-error')).toBe(`Unable to create the checkout: ${SENTENCE}`);
+    });
+
+    it('when a new checkout for an expired one is refused', async () => {
+      const card = mount({ toolOutput: pendingCheckout(), toolInput: { pack: 'starter' }, packCheckoutError: wrapped() });
+      card.setStatus({ purchaseStatus: 'cancelled' });
+      await card.runNextTimer();
+
+      await card.click('new-checkout-button');
+
+      expect(card.calls.at(-1)?.name).toBe('create_pack_checkout');
+      expect(card.visible('err')).toBe(true);
+      expect(card.text('err')).toBe(`Unable to create the checkout: ${SENTENCE}`);
+    });
+  });
+
+  it('renders an already-paid result as done, without a link', async () => {
+    const card = mount({ toolInput: { pack: 'starter' }, packCheckoutOmitsUrl: true });
+    await card.runNextTimer();
+
+    await card.click('retry-button');
+
+    expect(card.visible('state-ready')).toBe(true);
+    expect(card.visible('checkout-link')).toBe(false);
+    expect(card.visible('done')).toBe(true);
+    expect(card.text('done')).toMatch(/already paid or being fulfilled/);
+  });
+
+  it('keeps the checkout it created when the host later delivers nothing', async () => {
+    // A late openai:set_globals with an empty toolOutput is exactly the
+    // state that produced the skeleton in the first place. It must not put
+    // the skeleton back over a link the customer may be paying on.
+    const card = mount({ toolInput: { pack: 'starter' } });
+    await card.runNextTimer();
+    await card.click('retry-button');
+
+    card.deliver(null);
+
+    expect(card.visible('state-ready')).toBe(true);
+    expect(card.href('checkout-link')).toBe('https://checkout.stripe.com/c/pay/cs_retry_starter');
+    expect(card.visible('state-loading')).toBe(false);
+    expect(card.visible('state-empty')).toBe(false);
+  });
+
+  it('prefers the checkout it created over a host result that arrives afterwards', async () => {
+    // Same reason: the customer acted on the retry's link. Swapping it for a
+    // different order under them would be worse than the original defect.
+    const card = mount({ toolInput: { pack: 'starter' } });
+    await card.runNextTimer();
+    await card.click('retry-button');
+
+    card.deliver(pendingCheckout({ checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_late' }));
+
+    expect(card.href('checkout-link')).toBe('https://checkout.stripe.com/c/pay/cs_retry_starter');
+  });
+
+  it.each(['javascript:alert(1)', 'http://checkout.example/pay'])(
+    'makes no link of a checkout address that is not https: %s (#684)',
+    async hostile => {
+      const card = mount();
+      card.deliver(pendingCheckout({ checkoutUrl: hostile }));
+      expect(card.href('checkout-link')).not.toBe(hostile);
+      expect(card.visible('checkout-link')).toBe(false);
+      // Beside an https one, the https one is the link.
+      const both = mount();
+      both.deliver(pendingCheckout({ checkoutStartUrl: hostile }));
+      expect(both.href('checkout-link')).toBe('https://checkout.stripe.com/c/pay/cs_host');
+    }
+  );
+
+  it('gives way to a host result that arrives after the empty state but before any click', async () => {
+    const card = mount({ toolInput: { pack: 'starter' } });
+    await card.runNextTimer();
+    expect(card.visible('state-empty')).toBe(true);
+
+    card.deliver(pendingCheckout());
+
+    expect(card.visible('state-ready')).toBe(true);
+    expect(card.visible('state-empty')).toBe(false);
+    expect(card.href('checkout-link')).toBe('https://checkout.stripe.com/c/pay/cs_host');
+    expect(card.calls).toEqual([]);
+  });
+
+  it('ignores a second click while a call is in flight', async () => {
+    const card = mount({ toolInput: { pack: 'starter' } });
+    await card.runNextTimer();
+
+    // Two clicks in the same tick: the first sets the in-flight guard before
+    // the second handler runs.
+    const first = card.click('retry-button');
+    const second = card.click('retry-button');
+    await Promise.all([first, second]);
+
+    expect(card.calls.filter(call => call.name === 'create_pack_checkout')).toHaveLength(1);
+  });
+
+  it('explains how to recover when the bridge cannot call tools', async () => {
+    // A host that drew the template but exposes no callTool: the card can
+    // still say what happened, which beats placeholder bars.
+    const card = mount({ withoutCallTool: true, toolInput: { pack: 'starter' } });
+    await card.runNextTimer();
+
+    expect(card.visible('state-empty')).toBe(true);
+    expect(card.text('empty-message')).toMatch(/ask for the checkout again/i);
+    expect(card.visible('retry-button')).toBe(false);
+  });
+});
+
+describe('PackCheckoutCard purchase status', () => {
+  it('polls the purchase status while the checkout is open and keeps the link while payment is pending', async () => {
+    const card = mount({ toolOutput: pendingCheckout() });
+
+    expect(card.visible('check-status-button')).toBe(true);
+    await card.runNextTimer();
+
+    expect(statusCalls(card)).toEqual([{ name: 'get_purchase_status', args: { orderId: 'ord_host_0001' } }]);
+    expect(card.visible('checkout-link')).toBe(true);
+    expect(card.pendingTimers().map(timer => timer.delay)).toEqual([3000]);
+  });
+
+  it('shows the paid state and stops polling once the letters are on the account', async () => {
+    const card = mount({ toolOutput: pendingCheckout() });
+    card.setStatus({ purchaseStatus: 'submitted', letters: 2, lettersRemaining: 2 });
+
+    await card.runNextTimer();
+
+    expect(card.text('message')).toBe('Paid. 2 letters added to your account.');
+    expect(card.text('done')).toMatch(/2 of 2 from this pack are still unused/);
+    expect(card.visible('checkout-link')).toBe(false);
+    expect(card.visible('note')).toBe(false);
+    // On demand only after payment (#368): visible, but no timer behind it.
+    expect(card.visible('check-status-button')).toBe(true);
+    expect(card.text('order-line')).toBe('Order ord_host_0001');
+    expect(card.pendingTimers()).toEqual([]);
+  });
+
+  it('shows a refund issued after payment when the customer returns to the tab', async () => {
+    // Polling ends at "paid", by design. On 2026-09-13 a Dashboard refund
+    // then left the card claiming two unused letters against a balance of
+    // zero (#368). One read per return to the tab, no timers, closes that.
+    const card = mount({ toolOutput: pendingCheckout() });
+    card.setStatus({ purchaseStatus: 'submitted', letters: 2, lettersRemaining: 2 });
+    await card.runNextTimer();
+    expect(card.pendingTimers()).toEqual([]);
+
+    card.setStatus({
+      purchaseStatus: 'refunded',
+      letters: 2,
+      lettersRemaining: 0,
+      message: 'This purchase was refunded. Refunds take 5-10 business days to appear on the card.'
+    });
+    card.setHidden(true);
+    card.fireVisibilityChange();
+    card.setHidden(false);
+    card.fireVisibilityChange();
+    await flush();
+
+    expect(statusCalls(card)).toHaveLength(2);
+    expect(card.text('message')).toMatch(/refunded/i);
+    expect(card.visible('done')).toBe(false);
+    expect(card.visible('check-status-button')).toBe(false);
+    expect(card.pendingTimers()).toEqual([]);
+  });
+
+  it('lets the customer check again after payment without restarting the timers', async () => {
+    const card = mount({ toolOutput: pendingCheckout() });
+    card.setStatus({ purchaseStatus: 'submitted', letters: 2, lettersRemaining: 2 });
+    await card.runNextTimer();
+
+    await card.click('check-status-button');
+
+    expect(statusCalls(card)).toHaveLength(2);
+    expect(card.text('message')).toBe('Paid. 2 letters added to your account.');
+    expect(card.text('check-status-button')).toBe('Check status');
+    expect(card.pendingTimers()).toEqual([]);
+  });
+
+  it('reports a confirmed payment that is still being credited, and keeps polling', async () => {
+    const card = mount({ toolOutput: pendingCheckout() });
+    card.setStatus({ purchaseStatus: 'processing', letters: 2 });
+
+    await card.runNextTimer();
+
+    expect(card.text('message')).toBe('Payment confirmed. Adding 2 letters to your account...');
+    expect(card.visible('checkout-link')).toBe(false);
+    expect(card.visible('check-status-button')).toBe(true);
+    expect(card.pendingTimers().map(timer => timer.delay)).toEqual([3000]);
+  });
+
+  it('keeps the paid state when the host re-delivers the pending checkout', async () => {
+    // openai:set_globals only ever knows the checkout. Re-rendering from it
+    // put the payment link back over a paid purchase in the preview cards
+    // on 2026-08-30; the same guard applies here.
+    const card = mount({ toolOutput: pendingCheckout() });
+    card.setStatus({ purchaseStatus: 'submitted', letters: 2, lettersRemaining: 2 });
+    await card.runNextTimer();
+
+    card.deliver(pendingCheckout());
+
+    expect(card.text('message')).toBe('Paid. 2 letters added to your account.');
+    expect(card.visible('checkout-link')).toBe(false);
+    expect(card.pendingTimers()).toEqual([]);
+  });
+
+  it('offers a new checkout when the session expired, and polls the replacement', async () => {
+    const card = mount({ toolOutput: pendingCheckout(), toolInput: { pack: 'starter' } });
+    card.setStatus({ purchaseStatus: 'cancelled' });
+    await card.runNextTimer();
+
+    expect(card.text('message')).toBe('This checkout expired before it was paid. Nothing was charged.');
+    expect(card.visible('checkout-link')).toBe(false);
+    expect(card.visible('new-checkout-button')).toBe(true);
+    expect(card.pendingTimers()).toEqual([]);
+
+    card.setStatus({ purchaseStatus: 'pending_payment' });
+    await card.click('new-checkout-button');
+
+    expect(card.calls.at(-1)).toEqual({ name: 'create_pack_checkout', args: { pack: 'starter' } });
+    expect(card.visible('checkout-link')).toBe(true);
+    expect(card.href('checkout-link')).toBe('https://checkout.stripe.com/c/pay/cs_retry_starter');
+    expect(card.visible('new-checkout-button')).toBe(false);
+    expect(card.text('order-line')).toBe('Order ord_retry_0001');
+    // A new checkout opens only from its link, like the first (#730).
+    await flush();
+    expect(card.opened).toEqual([]);
+
+    await card.runNextTimer();
+    expect(statusCalls(card).at(-1)).toEqual({ name: 'get_purchase_status', args: { orderId: 'ord_retry_0001' } });
+  });
+
+  it('says how to recover from a failed payment when no pack is known', async () => {
+    const card = mount({ toolOutput: pendingCheckout() });
+    card.setStatus({ purchaseStatus: 'payment_failed' });
+
+    await card.runNextTimer();
+
+    expect(card.text('message')).toBe('The payment did not go through. Nothing was charged.');
+    expect(card.visible('new-checkout-button')).toBe(false);
+    expect(card.visible('err')).toBe(true);
+    expect(card.text('err')).toMatch(/ask for a new checkout/i);
+  });
+
+  it('shows the server message for refund and hold states', async () => {
+    const card = mount({ toolOutput: pendingCheckout() });
+    card.setStatus({
+      purchaseStatus: 'refunded',
+      message: 'This purchase was refunded. Refunds take 5-10 business days to appear on the card.'
+    });
+
+    await card.runNextTimer();
+
+    expect(card.text('message')).toMatch(/refunded/i);
+    expect(card.visible('checkout-link')).toBe(false);
+    expect(card.visible('done')).toBe(false);
+    expect(card.pendingTimers()).toEqual([]);
+  });
+
+  it('stops polling while the tab is hidden and refreshes the moment it returns', async () => {
+    const card = mount({ toolOutput: pendingCheckout() });
+    expect(card.pendingTimers()).toHaveLength(1);
+
+    card.setHidden(true);
+    card.fireVisibilityChange();
+    expect(card.pendingTimers()).toEqual([]);
+    expect(statusCalls(card)).toEqual([]);
+
+    card.setHidden(false);
+    card.fireVisibilityChange();
+    await flush();
+
+    expect(statusCalls(card)).toHaveLength(1);
+    expect(card.pendingTimers().map(timer => timer.delay)).toEqual([3000]);
+  });
+
+  it('lets the customer check on demand', async () => {
+    const card = mount({ toolOutput: pendingCheckout() });
+
+    await card.click('check-status-button');
+
+    expect(statusCalls(card)).toHaveLength(1);
+    expect(card.text('check-status-button')).toBe('Check status');
+    expect(card.disabled('check-status-button')).toBe(false);
+  });
+
+  it('starts polling the checkout it created itself', async () => {
+    const card = mount({ toolInput: { pack: 'starter' } });
+    await card.runNextTimer();
+    await card.click('retry-button');
+
+    expect(card.pendingTimers().map(timer => timer.delay)).toEqual([3000]);
+    await card.runNextTimer();
+
+    expect(statusCalls(card)).toEqual([{ name: 'get_purchase_status', args: { orderId: 'ord_retry_0001' } }]);
+  });
+
+  it('does not poll without a bridge to call through', () => {
+    const card = mount({ toolOutput: pendingCheckout(), withoutCallTool: true });
+
+    expect(card.visible('checkout-link')).toBe(true);
+    expect(card.visible('check-status-button')).toBe(false);
+    expect(card.pendingTimers()).toEqual([]);
+  });
+});
+
+/**
+ * A reopened conversation (PAY-05, 2026-09-14).
+ *
+ * Reloading a conversation, or following the return page's link back into it,
+ * mounts this card again. ChatGPT web gives it no toolOutput; other hosts may
+ * replay the original result. The card used to take the #322 empty state and
+ * tell a customer who had just paid that nothing had been charged, beside a
+ * button that starts a second purchase. The card now keeps its order in
+ * widgetState. A mount that finds kept state resumes from it, whether or not
+ * the host replays the result.
+ *
+ * Same honest limit as above: jsdom is not ChatGPT, and only the development
+ * connector proves that the host restores widgetState on a reload.
+ */
+describe('PackCheckoutCard in a reopened conversation', () => {
+  const START_URL =
+    'https://api.example.test/purchase/start?to=' + encodeURIComponent('https://checkout.stripe.com/c/pay/cs_host');
+
+  const KEPT_ORDER = {
+    orderId: 'ord_host_0001',
+    productDescription: 'Starter Pack - 2 Letters',
+    letters: 2,
+    amountCents: 500,
+    currency: 'usd',
+    displayAmount: '5.00',
+    status: 'checkout_pending',
+    checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_host',
+    checkoutStartUrl: START_URL,
+    expiresAt: '2099-01-01T00:00:00.000Z',
+    message: 'Checkout created, not opened: show the customer the checkoutUrl as a link to click.'
+  };
+
+  const PAID_VIEW = { orderId: 'ord_host_0001', purchaseStatus: 'submitted', letters: 2, lettersRemaining: 2 };
+
+  function kept(overrides: Record<string, unknown> = {}) {
+    return { v: 1, order: { ...KEPT_ORDER }, statusView: null, ...overrides };
+  }
+
+  it('keeps exactly the order fields the ready view draws from', async () => {
+    const card = mount({
+      toolOutput: pendingCheckout({ checkoutStartUrl: START_URL, expiresAt: '2099-01-01T00:00:00.000Z' })
+    });
+    await flush();
+
+    expect(card.saves.at(-1)).toEqual({ v: 1, order: KEPT_ORDER, statusView: null });
+  });
+
+  it('keeps only the status fields it draws, once a read moves past payment', async () => {
+    const card = mount({ toolOutput: pendingCheckout() });
+    // The real result carries more fields than the card draws; none of them
+    // is kept.
+    card.setStatus({
+      ...PAID_VIEW,
+      orderStatus: 'fulfilled',
+      updatedAt: '2026-09-14T19:38:30.000Z',
+      productDescription: 'Starter Pack - 2 Letters',
+      amountCents: 500,
+      currency: 'usd'
+    });
+
+    await card.runNextTimer();
+
+    expect(card.saves.at(-1)!.statusView).toEqual(PAID_VIEW);
+  });
+
+  it('resumes from what it kept: the order, no open, one status read at once, then the slow interval', async () => {
+    const card = mount({ toolInput: { pack: 'starter' }, widgetState: kept() });
+    await flush();
+
+    expect(card.visible('state-ready')).toBe(true);
+    expect(card.visible('state-empty')).toBe(false);
+    expect(card.text('order-line')).toBe('Order ord_host_0001');
+    expect(card.href('checkout-link')).toBe(START_URL);
+    // The customer came back to the conversation, not to pay again.
+    expect(card.opened).toEqual([]);
+    expect(statusCalls(card)).toEqual([{ name: 'get_purchase_status', args: { orderId: 'ord_host_0001' } }]);
+    // A reopened conversation can hold several cards sharing one account's
+    // tool budget, so a resumed order skips the fast first minute.
+    expect(card.pendingTimers().map(timer => timer.delay)).toEqual([15000]);
+  });
+
+  it('never opens the checkout on reopen', async () => {
+    const card = mount({ widgetState: kept() });
+    await flush();
+
+    expect(card.visible('checkout-link')).toBe(true);
+    expect(card.opened).toEqual([]);
+  });
+
+  it('draws the paid status it kept at once, without the payment link', () => {
+    const card = mount({ toolInput: { pack: 'starter' }, widgetState: kept({ statusView: PAID_VIEW }) });
+
+    // Synchronously after mount: nothing to click before the fresh read lands.
+    expect(card.text('message')).toBe('Paid. 2 letters added to your account.');
+    expect(card.visible('checkout-link')).toBe(false);
+    expect(card.visible('check-status-button')).toBe(true);
+  });
+
+  it('ignores a kept status that belongs to another order', () => {
+    const card = mount({
+      widgetState: kept({ statusView: { orderId: 'ord_other', purchaseStatus: 'submitted', letters: 5 } })
+    });
+
+    expect(card.visible('checkout-link')).toBe(true);
+    expect(card.text('message')).toBe('Pay USD 5.00 to add 2 letters to your account.');
+  });
+
+  it('asks for the status once, however often the host re-renders a reopened card', async () => {
+    const card = mount({ widgetState: kept() });
+    await flush();
+
+    card.deliverWidgetState(kept());
+    card.deliver(null);
+    await flush();
+
+    expect(statusCalls(card)).toHaveLength(1);
+  });
+
+  it('stays on the resumed order when a later render finds widgetState cleared', async () => {
+    const card = mount({ widgetState: kept() });
+    await flush();
+
+    card.deliverWidgetState(null);
+    await flush();
+
+    expect(card.visible('state-ready')).toBe(true);
+    expect(card.visible('state-empty')).toBe(false);
+    expect(card.text('order-line')).toBe('Order ord_host_0001');
+    expect(card.pendingTimers().some(timer => timer.delay === 5000)).toBe(false);
+  });
+
+  it('replaces the empty state when the kept state arrives late', async () => {
+    const card = mount({ toolInput: { pack: 'starter' } });
+    await card.runNextTimer();
+    expect(card.visible('state-empty')).toBe(true);
+
+    card.deliverWidgetState(kept());
+    await flush();
+
+    expect(card.visible('state-ready')).toBe(true);
+    expect(card.visible('state-empty')).toBe(false);
+    expect(card.text('order-line')).toBe('Order ord_host_0001');
+    expect(card.opened).toEqual([]);
+    expect(statusCalls(card)).toHaveLength(1);
+  });
+
+  it('ignores kept state from another version or without an order', async () => {
+    for (const widgetState of [kept({ v: 2 }), { v: 1, order: {} }, { v: 1 }]) {
+      const card = mount({ toolInput: { pack: 'starter' }, widgetState });
+      await card.runNextTimer();
+
+      expect(card.visible('state-empty')).toBe(true);
+      expect(card.calls).toEqual([]);
+    }
+  });
+
+  it('resumes a kept replacement over the host result it replaced, without opening the old checkout', async () => {
+    // The host replays order A. After A expired, the card created replacement
+    // B, and the customer may have paid for B. Within one card instance the
+    // host result never changes, so a kept order that differs from it can only
+    // be a checkout the card created later. B wins, and nothing overwrites it.
+    const replacement = {
+      ...KEPT_ORDER,
+      orderId: 'ord_retry_0001',
+      checkoutUrl: 'https://checkout.stripe.com/c/pay/cs_retry_starter',
+      checkoutStartUrl: 'https://api.example.test/purchase/start?to=retry'
+    };
+    const card = mount({
+      toolOutput: pendingCheckout(),
+      toolInput: { pack: 'starter' },
+      widgetState: kept({ order: replacement })
+    });
+    await flush();
+
+    expect(card.text('order-line')).toBe('Order ord_retry_0001');
+    expect(card.href('checkout-link')).toBe('https://api.example.test/purchase/start?to=retry');
+    expect(card.opened).toEqual([]);
+    expect(statusCalls(card)).toEqual([{ name: 'get_purchase_status', args: { orderId: 'ord_retry_0001' } }]);
+    // Nothing wrote the replayed order over the kept one.
+    expect(card.saves).toEqual([]);
+  });
+
+  it('applies the kept paid status when the host replays the same order', async () => {
+    const card = mount({
+      toolOutput: pendingCheckout(),
+      widgetState: kept({ statusView: PAID_VIEW }),
+      purchaseStatus: PAID_VIEW
+    });
+
+    // Drawn in the first render: the replayed result does not put the link back.
+    expect(card.text('message')).toBe('Paid. 2 letters added to your account.');
+    expect(card.visible('checkout-link')).toBe(false);
+
+    await flush();
+    expect(card.opened).toEqual([]);
+    expect(statusCalls(card)).toHaveLength(1);
+    expect(card.pendingTimers()).toEqual([]);
+  });
+
+  it('keeps a checkout the card created itself', async () => {
+    const card = mount({ toolInput: { pack: 'starter' } });
+    await card.runNextTimer();
+
+    await card.click('retry-button');
+
+    expect((card.saves.at(-1)!.order as Record<string, unknown>).orderId).toBe('ord_retry_0001');
+  });
+
+  it('starts the kept state clean for a replacement checkout', async () => {
+    const card = mount({ toolOutput: pendingCheckout(), toolInput: { pack: 'starter' } });
+    card.setStatus({ purchaseStatus: 'cancelled' });
+    await card.runNextTimer();
+    expect((card.saves.at(-1)!.statusView as Record<string, unknown>).purchaseStatus).toBe('cancelled');
+
+    card.setStatus({ purchaseStatus: 'pending_payment' });
+    await card.click('new-checkout-button');
+
+    const last = card.saves.at(-1)!;
+    expect((last.order as Record<string, unknown>).orderId).toBe('ord_retry_0001');
+    expect(last.statusView).toBeNull();
+  });
+
+  it('draws a kept order without a bridge to call through, and asks nothing', async () => {
+    const card = mount({ widgetState: kept(), withoutCallTool: true });
+    await flush();
+
+    expect(card.visible('state-ready')).toBe(true);
+    expect(card.visible('check-status-button')).toBe(false);
+    expect(card.calls).toEqual([]);
+  });
+
+  it('offers no status button it cannot act on, for a kept payment still being credited', () => {
+    const card = mount({
+      widgetState: kept({ statusView: { orderId: 'ord_host_0001', purchaseStatus: 'processing', letters: 2 } }),
+      withoutCallTool: true
+    });
+
+    expect(card.text('message')).toBe('Payment confirmed. Adding 2 letters to your account...');
+    expect(card.visible('check-status-button')).toBe(false);
+  });
+
+  it('offers no status button it cannot act on, for a kept paid purchase', () => {
+    const card = mount({ widgetState: kept({ statusView: PAID_VIEW }), withoutCallTool: true });
+
+    expect(card.text('message')).toBe('Paid. 2 letters added to your account.');
+    expect(card.visible('check-status-button')).toBe(false);
+  });
+
+  it('does not adopt kept state that arrives after the card has kept an order', async () => {
+    // The ordering this card assumes: a host that replays the result sends
+    // widgetState with it or before it. Kept state that arrives later is not
+    // adopted, because the card's own order is already on screen. This test
+    // pins that choice so it cannot change silently.
+    const card = mount({ toolOutput: pendingCheckout() });
+    await flush();
+    expect(card.opened).toEqual([]);
+
+    card.deliverWidgetState(kept({ order: { ...KEPT_ORDER, orderId: 'ord_retry_0001' } }));
+    await flush();
+
+    expect(card.text('order-line')).toBe('Order ord_host_0001');
+    expect(statusCalls(card)).toEqual([]);
+    expect(card.pendingTimers().map(timer => timer.delay)).toEqual([3000]);
+  });
+
+  it('still works on a host without setWidgetState', async () => {
+    const card = mount({ toolOutput: pendingCheckout(), withoutSetWidgetState: true });
+    await flush();
+
+    expect(card.visible('checkout-link')).toBe(true);
+    expect(card.opened).toEqual([]);
+    expect(card.saves).toEqual([]);
+  });
+
+  it('keeps every order field the ready view reads', () => {
+    // Nothing else ties the kept copy to renderReady: a field read there but
+    // not kept would be blank on a reopened card.
+    const html = fs.readFileSync(WIDGET_PATH, 'utf-8').replace(/\r\n/g, '\n');
+    const keptList = html.match(/const SAVED_ORDER_FIELDS = \[([\s\S]*?)\];/);
+    const body = html.match(/function renderReady\(state\) \{([\s\S]*?)\n {6}\}\n/);
+    expect(keptList).not.toBeNull();
+    expect(body).not.toBeNull();
+    const keptFields = Array.from(keptList![1].matchAll(/"([A-Za-z]+)"/g), match => match[1]);
+    const reads = Array.from(new Set(Array.from(body![1].matchAll(/\bstate\??\.([A-Za-z]+)/g), match => match[1])));
+    // hasData decides whether a kept order is drawn at all.
+    for (const field of [...reads, 'orderId', 'productDescription', 'message']) {
+      expect(keptFields, `renderReady reads state.${field}`).toContain(field);
+    }
+    expect(reads.length).toBeGreaterThan(5);
+  });
+
+  it('keeps every status field the status view reads', () => {
+    // The same tie for the kept status: a field renderStatusView reads but the
+    // card does not keep would be blank on a reopened card.
+    const html = fs.readFileSync(WIDGET_PATH, 'utf-8').replace(/\r\n/g, '\n');
+    const keptList = html.match(/const SAVED_STATUS_FIELDS = \[([\s\S]*?)\];/);
+    const body = html.match(/function renderStatusView\(\) \{([\s\S]*?)\n {6}\}\n/);
+    expect(keptList).not.toBeNull();
+    expect(body).not.toBeNull();
+    const keptFields = Array.from(keptList![1].matchAll(/"([A-Za-z]+)"/g), match => match[1]);
+    const reads = Array.from(new Set(Array.from(body![1].matchAll(/\bview\??\.([A-Za-z]+)/g), match => match[1])));
+    for (const field of reads) {
+      expect(keptFields, `renderStatusView reads view.${field}`).toContain(field);
+    }
+    expect(reads.length).toBeGreaterThan(3);
+  });
+});

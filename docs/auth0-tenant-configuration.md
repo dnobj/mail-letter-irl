@@ -1,6 +1,6 @@
 # Auth0 Tenant Configuration
 
-**Last Updated:** July 23, 2026
+**Last Updated:** September 28, 2026
 
 This document provides a complete reference of the Auth0 tenant configuration used for the ChatGPT MCP Server with OAuth authentication.
 
@@ -10,7 +10,17 @@ Development and production each use a dedicated Auth0 MCP API whose identifier
 is the exact canonical environment `/mcp` URL. ChatGPT is a manually imported,
 strict third-party CIMD application using authorization code + PKCE S256 and
 `private_key_jwt` client authentication. Grant only `mail:read`, `mail:draft`,
-and `mail:send`. Keep website/REST applications and Claude/PAT paths separate.
+and `mail:send`.
+
+The website uses the same MCP API. Its application (`Letter IRL Website`) is
+authorized for the MCP API with the same three scopes and requests them at
+login. Every REST route the dashboard calls requires the scope its MCP tool
+twin requires (`src/auth/restScopes.ts`). Both environments were switched on
+2026-09-14 (recorded in 2d and 2e below). Personal access tokens remain a
+separate path. The old website/REST API, `https://letter-irl/api`, is retired:
+the API server accepts exactly one audience, the MCP resource. Each tenant's
+Default Audience now names its MCP API, and the old API was deleted from both
+tenants on 2026-09-14.
 
 **Corrected 2026-09-05, on first contact with a real import.** This document
 previously specified a *public* client with `token_endpoint_auth_method: none`,
@@ -36,13 +46,16 @@ unachievable rather than merely unmet:
 
 The DCR/static-client sections below document the temporary rollback baseline,
 not the desired configuration. Do not enable them in a normal CIMD rollout.
+While rollback mode is on, the server treats a token from the static client
+(`CHATGPT_STATIC_CLIENT_ID`) as ChatGPT's (`src/auth/clientProfiles.ts`, #473),
+so that application's callbacks must stay OpenAI's alone.
 
 ## Tenants Overview
 
 | Environment | Tenant Domain | Account |
 |-------------|---------------|---------|
-| **Development** | `dev-ky21dxn3qmi71hjl.us.auth0.com` | dnicholl@objective.works |
-| **Production** | `dev-njmdyqf8n25rqgy7.us.auth0.com` | dnicholl@letterirl.com |
+| **Development** | `dev-ky21dxn3qmi71hjl.us.auth0.com` | the organization account |
+| **Production** | `dev-njmdyqf8n25rqgy7.us.auth0.com` | the production account |
 
 ---
 
@@ -67,7 +80,6 @@ Use this table to verify each application has the correct settings:
 
 | Application | Type | Callbacks Required | Web Origins Required | Domain Connection |
 |-------------|------|-------------------|---------------------|-------------------|
-| **Mail Letter IRL** | SPA | `https://chat.openai.com/aip/auth/callback`<br>`https://chatgpt.com/connector_platform_oauth_redirect`<br>`https://platform.openai.com/apps-manage/oauth` | `https://chat.openai.com`<br>`https://chatgpt.com`<br>`https://platform.openai.com` | N/A |
 | **Letter IRL API** | M2M | None | None | N/A |
 | **ChatGPT CIMD** | Strict third-party, `private_key_jwt` (Auth0 maps `app_type: regular_web`; strict is forced, not chosen) | Exact current `https://chatgpt.com/connector/oauth/{callback_id}` from CIMD | N/A | Domain-level connections |
 
@@ -84,6 +96,26 @@ Use this table to verify each application has the correct settings:
 | Apple Connection | Connections | `is_domain_connection: true` |
 | GitHub Connection | Connections | `is_domain_connection: true` |
 | Username-Password | Connections | `is_domain_connection: true` |
+| Consent screen shows the scope descriptions | No dashboard page. Tenant flag `use_scope_descriptions_for_consent`, set through the Management API | `true`. Development set on 2026-09-28; production at the launch promotion (#267) |
+
+**The consent flag, #267.** Without it, Auth0's consent screen builds labels from the scope names,
+so `mail:read` reads "mail your read". With it, the screen shows each scope's description from the
+API's Permissions tab. The flag changes that wording only, on the consent screen of every app on
+the tenant that shows one; the website is first-party and shows none. To set it:
+1. Install the Auth0 CLI (`scoop install auth0`).
+2. Sign in with `auth0 login --scopes "read:tenant_settings,update:tenant_settings"`. This is a
+   device login: the person confirms the code in the browser and picks the tenant. It creates no
+   application, which matters at the 10-app cap.
+3. Save `auth0 api get "tenants/settings"`.
+4. Run `auth0 api patch "tenants/settings" --data @file`, with
+   `{"flags":{"use_scope_descriptions_for_consent":true}}` in the file. A file avoids PowerShell's
+   quoting.
+5. Read the settings again and compare: on 2026-09-28 only this flag changed.
+
+A consent screen for OpenClaw's client then listed "Read Letter IRL account, balance, order, and
+mail status data" and the other two descriptions. **Decline** on that screen shows Auth0's own error
+page (`access_denied: User did not authorize the request`), because OpenClaw's callback was not
+listening. Whether a real app's decline returns to the app has not been checked.
 
 ### Branding Checklist
 
@@ -120,7 +152,7 @@ This Auth0 tenant is configured to support:
 |----------|-------|
 | **Domain** | `dev-ky21dxn3qmi71hjl.us.auth0.com` |
 | **Region** | US (dev) |
-| **Default Audience** | `https://letter-irl/api` |
+| **Default Audience** | `https://letter-irl-api-development.up.railway.app/mcp` (the MCP API; repointed from the retired `https://letter-irl/api` on 2026-09-14) |
 | **OIDC DCR Enabled** | Rollback inventory only; not required by ChatGPT CIMD |
 
 ### Important Endpoints
@@ -260,7 +292,16 @@ All connections are configured as **domain-level connections** (`is_domain_conne
 
 ## Applications
 
-### 1. Default App
+This section describes the development tenant.
+
+**The free plan allows 10 applications and SSO integrations per tenant.** The
+development tenant reached the limit on 2026-09-26, when the other MCP apps'
+documents were imported (section 6 below). **Create application** is disabled
+at the limit. Each app we import needs a slot in each tenant, and production has
+the same cap. On 2026-09-28 deleting Mail Letter IRL (section 2) made room for
+OpenClaw (section 6), so the tenant is at the limit again.
+
+### 1. Default App - deleted
 
 | Property | Value |
 |----------|-------|
@@ -268,9 +309,10 @@ All connections are configured as **domain-level connections** (`is_domain_conne
 | **Type** | Generic |
 | **Grant Types** | `authorization_code`, `implicit`, `refresh_token`, `client_credentials` |
 
-Default application created by Auth0.
+Default application created by Auth0. Deleted on 2026-09-26 to make room for the
+MCP apps, after the usage review below found nothing that referenced it.
 
-### 2. Mail Letter IRL
+### 2. Mail Letter IRL - deleted
 
 | Property | Value |
 |----------|-------|
@@ -281,11 +323,26 @@ Default application created by Auth0.
 | **Logout URLs** | `https://chat.openai.com/aip/auth/callback`<br>`https://chatgpt.com/connector_platform_oauth_redirect` |
 | **Web Origins** | `https://chat.openai.com`<br>`https://chatgpt.com`<br>`https://platform.openai.com` |
 
-Main application for the Letter IRL project.
+ChatGPT's static client from the first Auth0 integration (326b32e, 2025-11-14),
+from before ChatGPT registered itself. ChatGPT now signs in with its own client
+document (section 5, and the CIMD configuration below), so nothing used this
+application. It was deleted on 2026-09-28 to make room for OpenClaw, after
+these checks:
+- its client id appeared in no branch of either repository except in this
+  document;
+- no development Railway variable held it
+  (`C:\letter-irl-scripts\railway-var-value-match.mjs`).
 
-> **Important:** The `https://platform.openai.com/apps-manage/oauth` callback is required for the OpenAI app review process. See [OpenAI Apps SDK Auth Documentation](https://developers.openai.com/apps-sdk/build/auth/).
+Production may hold a copy of it. Check during the production imports, which
+need the slots.
 
-### 3. Letter IRL API (Test Application)
+Its callbacks included `https://platform.openai.com/apps-manage/oauth`, which
+this document used to call required for OpenAI's app review. That dates from the
+static client. OpenAI's current [auth guide](https://developers.openai.com/apps-sdk/build/auth/),
+read on 2026-09-28, names only `chatgpt.com` redirects, which under CIMD come
+from ChatGPT's own client document. It says nothing about that address.
+
+### 3. Letter IRL API (Test Application) - deleted
 
 | Property | Value |
 |----------|-------|
@@ -293,9 +350,10 @@ Main application for the Letter IRL project.
 | **Type** | Machine to Machine |
 | **Grant Types** | `client_credentials` |
 
-M2M application for testing API access.
+Auth0 created it alongside the retired `Letter IRL API`. It held no grant on
+any API, and it was deleted on 2026-09-14, after that API.
 
-### 4. API Explorer Application
+### 4. API Explorer Application - deleted
 
 | Property | Value |
 |----------|-------|
@@ -303,7 +361,29 @@ M2M application for testing API access.
 | **Type** | Machine to Machine |
 | **Grant Types** | `client_credentials` |
 
-Auth0's API Explorer for Management API access.
+Auth0's API Explorer for Management API access. It was the development
+credential of the prod-to-dev sync, which was removed in #383. Its only copy was
+`AUTH0_DEV_CLIENT_ID` in a local `.env.dev`, which nothing reads any more. Its
+Management API client access was revoked on 2026-09-14, and it was deleted on
+2026-09-26.
+
+**Usage review before the 2026-09-26 deletions.** Four applications were
+deleted: this one, the Default App, a leftover ChatGPT import
+(`tpc_uYsHMmxqs8W7uKdqPt7hyF`, whose document belonged to a temporary
+development host removed on 2026-09-22), and "PKCE probe (temporary)", a
+first-party app from the same investigation (#424). Before deleting, each was
+checked for use in:
+- every branch of both repositories;
+- the local scripts and every checkout;
+- Railway variables in both environments, shared variables included;
+- GitHub secrets and variables;
+- the browser-test agent's repositories;
+- the Auth0 logs (about one day kept on this plan);
+- refresh tokens by user;
+- application grants.
+
+Only the local `.env.dev` line above turned up. Deleting the old ChatGPT import
+also revoked five refresh tokens that one test account still held for it.
 
 ### 5. ChatGPT (Dynamically Registered)
 
@@ -315,6 +395,88 @@ Auth0's API Explorer for Management API access.
 | **Callbacks** | `https://chatgpt.com/connector_platform_oauth_redirect` |
 
 Dynamically registered via RFC 7591 when ChatGPT connects to the MCP server. Multiple instances may exist as users connect/reconnect.
+
+### 6. Other MCP apps, imported from their documents (development, 2026-09-26; OpenClaw 2026-09-28)
+
+The M2 imports in [mcp-multi-client-plan.md](mcp-multi-client-plan.md) (#465).
+Each was imported with **Import from URL**, like ChatGPT (below). Each was then
+authorized for `Letter IRL DEV MCP` with `mail:read`, `mail:draft` and
+`mail:send` as user-delegated access, and nothing else. There is no client
+access, and **Always grant all permissions** is off, so people see a consent
+screen. The server names each app from its document URL
+(`src/auth/clientProfiles.ts`).
+
+OpenClaw publishes no document, so its document is ours: the website serves it,
+with a `client_id` built from the website's `APP_BASE_URL` (website #44,
+[CLIENT-06](manual-tests.md#client-06--openclaw-launch-gate-471)). Production's
+is `https://letterirl.com/oauth/openclaw-client-metadata.json`, served once the
+website is promoted.
+
+| App | Auth0 client | Document | Callbacks |
+|---|---|---|---|
+| Claude | `tpc_nzv1WDzBigLDqccQkDsVx3` | `https://claude.ai/oauth/mcp-oauth-client-metadata` | `https://claude.ai/api/mcp/auth_callback` |
+| Claude Code | `tpc_vaiqGx16ntpvuNWLnCYqSt` | `https://claude.ai/oauth/claude-code-client-metadata` | `http://localhost/callback`, `http://127.0.0.1/callback` |
+| Codex | `tpc_1pVfZCrG4TFNTwhJsrSU1f` | `https://chatgpt.com/oauth/codex/pGLYK3svyYGg/client.json` | `http://127.0.0.1/callback/pGLYK3svyYGg`, `http://localhost/callback/pGLYK3svyYGg` |
+| Visual Studio Code | `tpc_eG8tnoxeEJJknqqBXxPY3Y` | `https://vscode.dev/oauth/client-metadata.json` | `http://127.0.0.1:33418/`, `https://vscode.dev/redirect` |
+| Hermes Agent | `tpc_rgU3u4iFg4SSpyFzikWN2n` | `https://nousresearch.github.io/hermes-agent/docs/oauth/client-metadata.json` | ports 27890-27894 on `127.0.0.1` and `localhost`, path `/callback` |
+| OpenClaw | `tpc_uW9yLTZS9R7MBQSUAg1q96` | `https://mail-letter-irl-website-development.up.railway.app/oauth/openclaw-client-metadata.json` | `http://127.0.0.1:8989/oauth/callback`, `http://localhost:8989/oauth/callback` |
+
+What the imports showed:
+- **Unsupported grants are ignored with a warning.** That covers Claude's
+  `jwt-bearer` and VS Code's `device_code`: only `authorization_code` and
+  `refresh_token` work for these clients.
+- **A loopback callback registered without a port accepts any port.** Checked
+  on 2026-09-26 with `/authorize` probes that sign no one in
+  (`C:\letter-irl-scripts\cimd-authorize-probe.mjs`):
+  - Claude Code and Codex were accepted on a random port.
+  - Hermes, which lists fixed ports, got `403 Callback URL mismatch` on any
+    other port. That is the probe's control.
+  - OpenClaw, on its fixed port 8989, was accepted on both of its callbacks
+    and got the same 403 on port 8990 (2026-09-28).
+- **Our own document's `scope` and `client_uri` are ignored.** OpenClaw's import
+  took neither, so its token carries the scopes OpenClaw asks for. That is why
+  CLIENT-06 passes `--oauth-scope`.
+- **OIDC scopes are dropped, not refused.** Claude asks for `openid profile
+  email`. Auth0 accepts the request, and the consent screen lists only the mail
+  scopes and offline access. So Claude signs in with our advertised scopes as
+  they are (#469).
+- **The consent wording reads "mail your read".** Auth0 builds it from the scope
+  names (#267).
+
+**Codex needs three things to know** (found during the Codex connect):
+- **Its document is derived from our URL.** The id is the first 12 characters
+  of the base64url SHA-256 of the MCP URL, so every Codex user of a URL presents
+  the same document, and one import per tenant covers them all:
+  - development `pGLYK3svyYGg`;
+  - production `IJMOsCBL6i7U`, from `https://api.letterirl.com/mcp`.
+
+  A copy of production's document was imported into development by mistake and
+  deleted the same day. OpenAI would use a single stable document only if the
+  authorization server returned `iss` in its authorization responses (RFC 9207),
+  and Auth0 doesn't.
+- **It asks for the wrong scopes.** Codex requests the authorization server's
+  `scopes_supported` rather than the protected resource's
+  ([openai/codex#15643](https://github.com/openai/codex/issues/15643)). Auth0
+  lists only OpenID scopes there, so the token carries no mail scope, and every
+  tool is refused with "Additional authorization is required for this action".
+  The fix is on the person's side: put
+  `scopes = ["mail:read", "mail:draft", "mail:send", "offline_access"]` on the
+  server's entry in `~/.codex/config.toml` (or pass `--scopes` to
+  `codex mcp login`), then sign in again.
+- **It can also reach us as ChatGPT.** Codex offers the person's installed
+  ChatGPT plugins as `codex_apps`. Those calls use the ChatGPT plugin's
+  connection, so the server sees ChatGPT, not Codex.
+
+All five connected on development on 2026-09-26, recognised by name in the log:
+- Claude: CLIENT-01, with tool calls;
+- Claude Code: `claude_code`, with a tool call;
+- VS Code: `vscode`;
+- Codex: `codex`, with a tool call;
+- Hermes Agent: `hermes`, from a Docker container on a remote host, using the callback relay
+  described in CLIENT-05.
+
+OpenClaw has not connected yet. OpenClaw 2026.9.6 needs Node 24.16 or later, or 26.1 or later
+(CLIENT-06).
 
 ---
 
@@ -329,7 +491,7 @@ Dynamically registered via RFC 7591 when ChatGPT connects to the MCP server. Mul
 
 Auth0's Management API with 200+ scopes for programmatic tenant administration.
 
-### 2. Legacy website/REST Letter IRL API
+### 2. Deleted website/REST API
 
 | Property | Value |
 |----------|-------|
@@ -337,9 +499,18 @@ Auth0's Management API with 200+ scopes for programmatic tenant administration.
 | **Name** | Letter IRL API |
 | **Scopes** | None configured |
 
-This identifier remains for website/REST compatibility. Do not repurpose it for
-ChatGPT. The dedicated MCP API identifier exactly equals the environment's
-canonical `/mcp` resource.
+**Retired, then deleted from both tenants on 2026-09-14.** The website and the
+REST routes moved onto the MCP API in both environments (website PRs #22 and
+#26, API PRs #386 and #388). The server no longer accepts this audience in any
+mode:
+- `LETTER_IRL_OAUTH_LEGACY_AUDIENCES` is gone.
+- The static-DCR flag no longer widens the accepted audience.
+- Token validation refuses to run with more than one configured audience.
+
+Each tenant's Default Audience was repointed to its MCP API identifier before the
+API was deleted. Do not recreate it: the dedicated MCP API, whose identifier
+exactly equals the environment's canonical `/mcp` resource, is the only API
+Letter IRL uses.
 
 ---
 
@@ -356,11 +527,54 @@ Add a Post Login Action containing:
 
 ```javascript
 exports.onExecutePostLogin = async (event, api) => {
-  if (event.user.email) {
-    api.accessToken.setCustomClaim("https://letterirl.com/email", event.user.email);
-  }
+  if (!event.user.email || event.user.email_verified !== true) return;
+  api.accessToken.setCustomClaim("https://letterirl.com/email", event.user.email);
+  api.accessToken.setCustomClaim("https://letterirl.com/email_verified", true);
 };
 ```
+
+**Only a confirmed address, and always both claims.** The address is what a
+Letter IRL account is, and what the linking Action below joins identities on,
+so an unconfirmed one must not reach either.
+
+The server opens an account only when the verdict claim is exactly `true` (the
+boolean, or the string). Anything else refuses: `false` because the customer
+has not confirmed the address, and a **missing** verdict claim because the
+tenant is not saying. The refusal diagnostic distinguishes them (`email_unconfirmed` against
+`email_verdict_unavailable`, and `verified_email_unavailable` for a token
+carrying no address at all). See `src/auth/verifiedEmail.ts`.
+
+Worth knowing when reading those: **on a tenant configured as documented here,
+every one of them is the tenant's fault, not a customer's.** The claim Action
+above sets nothing at all for an unconfirmed address rather than setting the
+verdict to false, and the linking Action denies an unconfirmed login before a
+token exists - so a customer who has not confirmed their address never reaches
+this code. `email_unconfirmed` means some Action is setting the verdict to
+false; the other two mean the claim Action is not setting the verdict, or is
+not running.
+
+**Update this Action BEFORE deploying the API against the tenant.** There is
+no fallback. An earlier revision of the server asked Auth0's `/userinfo` when
+a token carried an address with no verdict; that is gone. `/userinfo` needs
+`openid` on the access token, and a ChatGPT token never carries it - Auth0
+grants no OIDC scope to the strict CIMD client, whatever ChatGPT requests
+(#424) - so the fallback served the website alone, and quietly let the website
+tolerate a missing or broken Action, which is the one surface LINK-01 uses to
+check a tenant. The first reason still holds; the second is the one that
+decided it anyway.
+
+In the window between the API deploying and this Action being updated:
+
+| Who | What happens |
+| --- | --- |
+| Anyone with an account already | Unaffected. An existing account is never refused, whatever the token says. |
+| A new customer, either surface | Refused with the sentence until their token is re-minted - signing in again on the website, reconnecting in ChatGPT - or it expires. Access tokens live 24 hours. |
+
+(The `web 7200` figure recorded further down is the implicit/hybrid-flow
+lifetime. Neither client uses that flow, so both carry the 86400-second one.)
+
+So: set both claims, or set neither. Setting the address alone leaves every new
+customer refused until the verdict claim appears.
 
 **The namespace is load-bearing.** Auth0 silently drops a non-namespaced custom
 claim that collides with a reserved OIDC name, and `email` is reserved - the
@@ -374,24 +588,325 @@ Deploying the Action is not enough on its own - it must also be dragged into
 the **Post Login trigger flow** and applied, or it never runs.
 
 The server reads `LETTER_IRL_OAUTH_EMAIL_CLAIM` (default
-`https://letterirl.com/email`), so the two environments can namespace against
-their own domains. It prefers a standard `email` claim when one is present, and
-still falls back to `/userinfo`.
+`https://letterirl.com/email`) and
+`LETTER_IRL_OAUTH_EMAIL_VERIFIED_CLAIM` (default
+`https://letterirl.com/email_verified`), so the two environments can namespace
+against their own domains. It prefers a standard `email` claim when one is
+present, and with neither claim it opens no account at all - there is nothing
+else to ask.
+
+### Required Post Login Action: linking one person's sign-in methods
+
+**Auth0 mints a subject per sign-in method.** Without this Action, one person
+signing in with Google and with a password is two subjects presenting one
+address - and `users.email` is `NOT NULL` and unique whatever its case (migration 058), so the second one collides,
+is refused, and that person has no account. This Action makes the address the
+identity by joining the identities behind it.
+
+Put it **above** the email-claim Action in the Post Login trigger flow. Not
+because the claim's value depends on it - both identities carry the same
+address by construction, since the Action looks up by `event.user.email` - but
+because a login this Action denies should be denied before anything else runs.
+
+The ordering that IS load-bearing is inside the Action: the Management API
+link must happen **before** `setPrimaryUser`, which requires the identity that
+authenticated this login to already be a secondary of the primary user. The
+code below does them in that order.
+
+**It re-sends the confirmation link, at most once every ten minutes (#428).**
+Auth0 sends a confirmation link only at sign-up, so a refusal with nothing
+behind it is a dead end for anyone who lost that email. A refused password
+sign-in is sent a fresh link, but the sign-up counts as a send, and each
+re-send is recorded in the user's `app_metadata.confirmation_resent_at`, so
+nothing goes out within ten minutes of either. Auth0 keeps that value even
+though the login is refused; the editor cannot show this, and the live run in
+LINK-01 step 5 did (2026-09-25). Until 2026-09-24 the Action re-sent on every
+refused attempt, including the automatic sign-in straight after sign-up, so
+every new account got at least two emails. A social sign-in gets no link,
+because only its provider can confirm the address, and its refusal says so.
+The Management API token is cached in `api.cache`: minting one per login
+spends the tenant's machine-to-machine token quota, and when that runs out
+this Action denies every login.
+
+```javascript
+const { ManagementClient } = require("auth0");
+
+/**
+ * Link a person's sign-in methods onto one confirmed email address.
+ *
+ * Auth0 mints a subject per sign-in method, and Letter IRL keys an account on
+ * the subject, so without this one person signing in with Google and with a
+ * password is two subjects presenting one address - and users.email is UNIQUE.
+ * The second one collides, is refused, and that person has no account at all.
+ *
+ * Runs BEFORE the email-claim Action in the Post Login flow.
+ *
+ * Written against the auth0 SDK v7 (pinned in Dependencies). v7 is not v4:
+ * there is no usersByEmail manager and no users.link, and awaiting a call
+ * returns the payload itself rather than { data }.
+ */
+
+const RESEND_INTERVAL_MS = 10 * 60 * 1000;
+const TOKEN_CACHE_KEY = "linking_management_token";
+
+// One Management API token for many logins (#428). Minting one per login
+// spends the tenant's machine-to-machine token quota, and when that runs out
+// this Action fails, which denies every login.
+async function managementToken(event, api) {
+  const cached = api.cache.get(TOKEN_CACHE_KEY);
+  if (cached && typeof cached.value === "string") return cached.value;
+  const response = await fetch("https://" + event.secrets.AUTH0_DOMAIN + "/oauth/token", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      grant_type: "client_credentials",
+      client_id: event.secrets.LINKING_CLIENT_ID,
+      client_secret: event.secrets.LINKING_CLIENT_SECRET,
+      audience: "https://" + event.secrets.AUTH0_DOMAIN + "/api/v2/"
+    })
+  });
+  if (!response.ok) throw new Error("management token request failed: " + response.status);
+  const body = await response.json();
+  // An hour short of the token's lifetime, and inside the cache's 24-hour
+  // ceiling. A token the cache refuses is simply used for this login.
+  const ttl = Math.min((body.expires_in - 3600) * 1000, 23 * 60 * 60 * 1000);
+  if (ttl > 0) api.cache.set(TOKEN_CACHE_KEY, body.access_token, { ttl });
+  return body.access_token;
+}
+
+async function management(event, api) {
+  return new ManagementClient({
+    domain: event.secrets.AUTH0_DOMAIN,
+    token: await managementToken(event, api)
+  });
+}
+
+// Re-send a password account's confirmation link at most once every ten
+// minutes (#428). Auth0 sends its own link at sign-up, so the sign-up counts
+// as the last send: no second email right after it, however quickly the
+// person tries to sign in again. Best-effort: if the send fails, the refusal
+// still stands.
+async function resendConfirmation(event, api) {
+  const lastSent = Math.max(
+    Number((event.user.app_metadata || {}).confirmation_resent_at || 0),
+    Date.parse(event.user.created_at || "") || 0
+  );
+  if (Date.now() - lastSent < RESEND_INTERVAL_MS) return;
+  try {
+    const client = await management(event, api);
+    await client.jobs.verificationEmail.create({ user_id: event.user.user_id });
+    api.user.setAppMetadata("confirmation_resent_at", Date.now());
+  } catch (error) {
+    console.log("verification resend failed: " + (error && error.message));
+  }
+}
+
+exports.onExecutePostLogin = async (event, api) => {
+  // An address nobody has proved they own is not an identity, so an
+  // unconfirmed sign-in is refused here, at the source, rather than being
+  // allowed to claim someone else's account.
+  //
+  // A refusal with nothing behind it is a dead end, so a password account is
+  // sent a fresh link - but not on top of the one Auth0 sends at sign-up, and
+  // not on every retry (#428). A social provider confirms its own addresses,
+  // so a link from us cannot help there, and its refusal says so.
+  if (event.user.email_verified !== true) {
+    if (!event.user.email) {
+      api.access.deny("This sign-in has no email address on it. Letter IRL needs one to open an account.");
+      return;
+    }
+    if (event.connection.strategy === "auth0") {
+      await resendConfirmation(event, api);
+      api.access.deny(
+        "We've sent a confirmation link to your email address - check your spam " +
+        "folder if it's not in your inbox. Open the link, then sign in again. " +
+        "If nothing arrives within 10 minutes, sign in again for a new link."
+      );
+    } else {
+      api.access.deny(
+        "The service you signed in with hasn't confirmed this email address. " +
+        "Confirm it there, or sign in with email and password, then try again."
+      );
+    }
+    return;
+  }
+
+  try {
+    const client = await management(event, api);
+
+    const matches = await client.users.listUsersByEmail({ email: event.user.email });
+
+    // Only confirmed addresses, and only other accounts.
+    const others = (matches || []).filter(
+      user => user.email_verified === true && user.user_id !== event.user.user_id
+    );
+    if (others.length === 0) return;
+
+    // The oldest account survives: it is the one with the history.
+    const primary = others
+      .concat(event.user)
+      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))[0];
+    if (primary.user_id === event.user.user_id) return;
+
+    // Link first, THEN setPrimaryUser: the identity that authenticated this
+    // login has to already be a secondary of the primary user.
+    const separator = event.user.user_id.indexOf("|");
+    await client.users.identities.link(primary.user_id, {
+      provider: event.user.user_id.slice(0, separator),
+      user_id: event.user.user_id.slice(separator + 1)
+    });
+    api.authentication.setPrimaryUser(primary.user_id);
+  } catch (error) {
+    // Deny rather than let a second account be created. A denied login is
+    // recoverable in a minute; a split account is not recoverable at all
+    // without an operator merging two histories by hand.
+    console.log("link-verified-email failed: " + (error && error.message));
+    api.access.deny("Sign-in is temporarily unavailable. Please try again.");
+  }
+};
+```
+
+**Test it in the Action editor before putting it in the flow.** Set the test
+event's user to a confirmed address that no tenant user holds and Run: the
+result should be an empty `Commands: []`. That one run exercises everything
+that can go wrong at deploy time - the dependency installing, `require`, the
+client constructing, the client-credentials token request, and the response
+shape - and none of it can be checked by reading. Then set
+`email_verified: false`, `connection.strategy: "auth0"` and a `created_at` of a
+minute ago, and Run again: the result should be the "We've sent a confirmation
+link" denial, with no re-send inside the ten minutes. Keep that `created_at`
+recent, because an old one makes the run ask the Management API to email the
+test event's `user_id`. Last, set `connection.strategy` to a social one such as
+`google-oauth2`: the result should be the "The service you signed in with"
+denial. On development, 2026-09-19, the first run is what caught a mistyped
+secret; the Action would otherwise have denied every login on the tenant the
+moment it entered the flow.
+
+**Its credentials are a machine-to-machine application**, named
+`Account Linking (<environment>)`, authorized for the Management API with
+exactly `read:users` and `update:users` - nothing else, because nothing else is
+needed and this secret lives in an Action. Put the domain, client id and secret
+in the Action's own **Secrets**, never in a repository or an env file.
+
+It also needs the `auth0` npm module under the Action's **Dependencies**,
+pinned - not `latest`. Development runs **7.2.0**, deployed 2026-09-19 and
+verified by the test run above. Pin it, because a new major changes these call
+shapes (v4 used `usersByEmail.getByEmail` returning `{ data }` and
+`users.link({ id }, body)`, none of which exist in v7), and an Action that
+throws denies every login on the tenant.
+
+**Confirm the connection sends the email.** Branding -> Email Templates ->
+**Verification Email (Link)** must show *Template enabled*; that is the email
+whose link sets `email_verified`, and without it a new sign-up can never get
+past the deny above. Development has it enabled and sends through **Resend**
+(Branding -> Email Provider, since 2026-09-21), from
+`Letter IRL <support@letterirl.com>` with the subject "Confirm your email
+address for Letter IRL". Auth0's built-in provider is labelled
+development/trial only, so **production needs the same custom provider before
+this Action goes into its flow**, or new password sign-ups will be unable to
+confirm and will be denied. On development these emails have landed in spam
+(#459). Also check
+Authentication -> Database ->
+`Username-Password-Authentication` -> **Requires Username** / email settings,
+and Branding -> Email Templates -> **Verification Email** enabled. Without it
+the deny above locks every new password account out permanently.
+
+**What linking does not join.** An Apple sign-in that hides the address behind
+a private relay address carries a different address, so it stays a different
+account, as documented in `docs/account-switching-guide.md`.
+
+**Before enabling this on a tenant, check who holds the row.** The Action makes
+the OLDEST Auth0 user primary, and that is independent of which subject holds
+the Letter IRL `users` row - the REST layer opened no account row at all until
+2026-09-19, so a person whose first visit was the website has an old Auth0 user
+with no row, and their later ChatGPT identity holds the row with the credits in
+it. Link those two and the surviving primary subject arrives with no row,
+presents an address the other subject still holds, and is answered 409 - with
+no way back, because the secondary identity can no longer sign in on its own.
+
+So, per tenant, before the Action goes into the flow:
+
+1. Page `GET /api/v2/users` and group the confirmed addresses yourself, ignoring
+   case as the database does (migration 058) - the Management API has no
+   group-by, and its users-by-email search matches case. For every address held by more than one
+   Auth0 user, note the oldest by `created_at`.
+2. For each of those, ask the database which subject holds the row:
+   `SELECT user_id FROM users WHERE lower(email) = lower($1)`. The oldest Auth0
+   user must be that subject, or the address must have no row at all.
+3. Where it is not, the two accounts have to be joined **before** the Action is
+   enabled. There is no tool for this yet - the operator `account.merge`
+   command is planned, not built - so today it is SQL, by hand, in one
+   transaction, and it is not simply `UPDATE users SET user_id`:
+
+   - 13 child tables reference `users(user_id)` `ON DELETE CASCADE` and must be
+     re-pointed (`letters`, `orders`, `letter_drafts`, `credit_ledger`,
+     `credit_transactions`, `promo_redemptions`, `personal_access_tokens`,
+     `feature_requests`, `recent_uploads`, `image_entitlements`,
+     `image_generation_reservations`, `gift_letters`,
+     `gift_codes.issued_to_user_id`);
+   - `commerce_pack_refunds` is `ON DELETE RESTRICT`, so the old row cannot be
+     deleted until that one moves;
+   - `stripe_disputes` and `gift_codes.redeemed_by_user_id` are
+     `ON DELETE SET NULL`, so deleting the old row without moving them first
+     silently detaches dispute and redemption history rather than failing;
+   - `promo_redemptions` is unique per campaign and user, and `recent_uploads`
+     is keyed on the user, so a collision there is a decision, not a move.
+
+4. The check is a snapshot. A row opened under the younger subject between the
+   check and the Action going live recreates the hazard, so re-run step 2
+   immediately before enabling it - or keep new accounts out in between, which
+   on production is what `LETTER_IRL_BETA_ALLOWED_SUBJECTS` already does.
+
+5. Since `get_profile` (#424), this hazard is expected to fail the
+   **connect itself**: ChatGPT calls the profile tool with the new
+   connection's token, the wrapper answers with an error result carrying
+   the "already belongs to an account opened with a different sign-in
+   method" sentence (the REST layer's 409, on the MCP path), and ChatGPT
+   would show "We couldn't connect this account" - where before it was a
+   per-tool refusal after a successful connect. The pre-check is
+   load-bearing for connecting at all.
+
+**After anyone is linked, check the subject lists.**
+`LETTER_IRL_BETA_ALLOWED_SUBJECTS` and `LETTER_IRL_ADMIN_USER_IDS` name
+subjects, and only the surviving primary subject counts afterwards.
 
 ### Required Auth0 CIMD Configuration
 
 1. **Client ID Metadata Document registration**
    - Import the current OpenAI-hosted HTTPS CIMD URL manually
      (Applications -> Create Application -> **Import from URL**).
+   - Before importing any other app's document, add its URL to
+     `CLIENT_DOCUMENTS` in `src/auth/clientProfiles.ts` under its own
+     profile (#473). The server names the calling app from the token's client
+     id, which is the document URL, and it gives ChatGPT's trust to any
+     one-segment document on chatgpt.com (`https://chatgpt.com/oauth/<id>/client.json`).
+     A new OpenAI document of that shape imported first would inherit it.
    - Verify authorization code, PKCE S256, and that the callback matches the
      document exactly. The client authentication method is whatever the
      document declares - currently `private_key_jwt` - and is not a choice.
    - `third_party_security_mode: strict` is forced on every CIMD client
      regardless of the tenant's permissive-by-default setting, and cannot be
      changed afterwards. Strict is satisfied by importing, not by configuring.
-   - **The CIMD URL is connector-specific.** Deleting and recreating the ChatGPT
-     connector mints a new `client.json` URL, and `external_client_id` is
-     immutable - so the import is orphaned and must be redone.
+   - Strict also means **no OIDC scopes and no ID token** for this client in
+     Auth0's current release ("Third-party applications with enhanced security
+     controls do not support OIDC scopes"). ChatGPT pre-ticks **OIDC enabled**
+     in a new connector's Advanced OAuth settings and then refuses the first
+     link without an ID token, so every connector must be created with it
+     unticked ([chatgpt-connector-oidc-setting.md](learnings/chatgpt-connector-oidc-setting.md), #424).
+   - **The import survives connector recreation.** An earlier revision said that
+     deleting and recreating the ChatGPT connector mints a new `client.json`
+     URL and orphans the import. Observed three times (development twice on
+     2026-09-09, production on 2026-09-10): for the same developer account and
+     MCP URL, ChatGPT reuses the callback id, the `client.json` URL is
+     therefore the same, and Auth0 sends the login page for the previously
+     imported client with no new import. The development id recorded in issue
+     #160 on 2026-07-18 is still the one in use. The import is required once
+     per callback id, not once per connector: a sign-in that fails with
+     `invalid_request: Unknown client: https://chatgpt.com/oauth/{id}/client.json`
+     is the signal that a genuinely new id appeared, and the Import-from-URL
+     step above is the fix. Conversely, a `client.json` URL that has not been
+     imported into a tenant is refused outright (HTTP 400 from `/authorize`),
+     so the import cannot be skipped.
 
 2. **Dedicated MCP resource/API**
    - Identifier: exact canonical environment `/mcp` URL.
@@ -399,10 +914,12 @@ still falls back to `/userinfo`.
    - **Enable the Resource Parameter Compatibility Profile** (tenant ->
      Settings -> Advanced). Auth0 does require it: ChatGPT sends `resource` and
      no `audience`, and without the profile Auth0 falls back to the tenant
-     Default Audience (`https://letter-irl/api`) and refuses with
-     `Client "tpc_..." is not authorized to access resource server`. The profile
-     is additive - `audience` is still checked first, so every existing flow
-     that sends one is unaffected.
+     Default Audience. While that was the retired `https://letter-irl/api`,
+     Auth0 refused with `Client "tpc_..." is not authorized to access resource
+     server`. Since 2026-09-14 both tenants' Default Audience names the MCP API,
+     so a request that reaches the fallback also gets the right API; keep the
+     profile on regardless. The profile is additive - `audience` is still
+     checked first, so every existing flow that sends one is unaffected.
    - **Allow Offline Access: enabled.** Without it Auth0 issues no refresh token
      however the client asks, and the connection dies at access-token expiry with
      a human re-consent as the only recovery (issue #160).
@@ -431,11 +948,17 @@ still falls back to `/userinfo`.
    sign-in fail. The failure named the URL to import:
    `invalid_request: Unknown client: https://chatgpt.com/oauth/{id}/client.json`.
 
+   On 2026-09-10 the production connector was deleted and recreated after the
+   promotion that carried #353. The recreated connector received the same
+   callback id, so this import was still the client Auth0 resolved, the owner
+   signed in without any tenant change, and the connector's Refresh returned
+   every tool. Nothing in this table needed to be redone.
+
    | Item | State | Verified by |
    |---|---|---|
    | CIMD client `ChatGPT`, id `tpc_3e5dGr4xSikvNzScZkiVhd` | Imported | Applications list; Registration Type reads **CIMD** |
    | Third-party mode | **Strict** (forced by CIMD, not configured) | App header badge reads `Third-party`, not `Permissive mode` |
-   | Callback | `https://chatgpt.com/connector/oauth/{id}` | Settings -> Allowed Callback URLs, exact match to the document |
+   | Callback | `https://chatgpt.com/connector/oauth/{id}`; the same id was reused when the connector was deleted and recreated on 2026-09-10 | Settings -> Allowed Callback URLs, exact match to the document; login page served for this client on the recreated connector's first link |
    | Client authentication | `private_key_jwt`, two pinned RS256 keys | Import preview mapping; see the corrected contract header |
    | `Letter IRL MCP` user-delegated | **3 / 3** (`mail:read`, `mail:draft`, `mail:send`) | API Access tab |
    | `Letter IRL MCP` client access (M2M) | 0 / 3, deliberately | ChatGPT acts for a user, never as a machine |
@@ -494,13 +1017,18 @@ still falls back to `/userinfo`.
      the setting.
    - **`Prod-to-Dev Sync (Management API)`** - client id
      `TZEuAJ6kTYFTXJRtu8fgUlPiqh9FAMMS`. Renamed 2026-08-24 from
-     `Letter IRL API (Test Application)`, which was actively misleading: it holds
-     **Auth0 Management API access (4 of 273 permissions)** and is the client
-     `scripts/dev-sync.ts` authenticates as, via `AUTH0_PROD_CLIENT_ID` /
+     `Letter IRL API (Test Application)`, which was actively misleading: it held
+     **Auth0 Management API access (4 of 273 permissions)** and was the client
+     `scripts/dev-sync.ts` authenticated as, via `AUTH0_PROD_CLIENT_ID` /
      `AUTH0_PROD_CLIENT_SECRET`, to read production users for the prod-to-dev
      sync. Deleting it as the "test app" it appeared to be would have broken that
      script silently - nothing in the repo names it, only an env var holding its
      id, so searching the codebase for the app name finds nothing.
+
+     **The script was removed on 2026-09-13, so this client now has no caller.**
+     Its Management API client access was revoked on 2026-09-14 (now 0 of 273),
+     so it can no longer get a token for any API. Delete it, and this entry with
+     it, once the tenant logs show no failed token exchange from its client id.
 
      Its description now says the same thing inside the dashboard, so the next
      person does not have to reconstruct it from grants.
@@ -541,32 +1069,97 @@ still falls back to `/userinfo`.
    The same settings must be applied to the **production** tenant at cutover
    (#158). They are not inherited from DEV.
 
+2d. **Development tenant: the website on the MCP API** (2026-09-14)
+
+   The development website moved onto the development MCP API on this date. The
+   table below was read from the tenant dashboard and the running deployments,
+   in the same way as 2b and 2c.
+
+   | Item | State | Verified by |
+   |---|---|---|
+   | API `Letter IRL DEV MCP`, identifier `https://letter-irl-api-development.up.railway.app/mcp` | Existing | Dashboard, id `6a6cd3b3486a4ed1b55f42f2` |
+   | API access policy | **Per-app authorization** for user-delegated and client access | API settings |
+   | Allow Skipping User Consent / Allow Offline Access | Both **enabled** | API settings |
+   | `Letter IRL Website` (`ZQF6j9WoG0097thWKnCJwNyeJZtUlqOX`) user-delegated grant | **3 / 3** (`mail:read`, `mail:draft`, `mail:send`); client access 0 / 3 | API Access tab |
+   | Website refresh-token rotation | On; idle 1296000 s, maximum 2592000 s, overlap 30 s | Application settings, saved by the owner |
+   | Website grant types | Implicit and Client Credentials removed | Application settings |
+   | Railway `mail-letter-irl-website` (development) | `AUTH0_AUDIENCE` = the development `/mcp` resource; `AUTH0_SCOPE` = `openid profile email offline_access mail:read mail:draft mail:send` | `/auth/login` redirects with that audience and scope, and Auth0 answers with its login page |
+   | Dashboard end to end | Overview, Letters, Letter Packs, API Tokens and Settings load; the API logs `rest.request` at 200 for each call, with no scope refusals | Signed-in walkthrough and the development API log, after API PR #386 deployed |
+
+   The overlap is 30 s rather than ChatGPT's 0. The dashboard fires parallel
+   API calls and the website's Auth0 SDK does not deduplicate refreshes, so 0
+   would trip reuse detection and sign the customer out.
+
+   Later the same day, the Default Audience was repointed from
+   `https://letter-irl/api` to the development MCP API identifier (read back
+   after a reload), and then `https://letter-irl/api` was deleted. Before the
+   repoint, a ChatGPT authorize request with neither `resource` nor `audience`
+   was refused with `Client "tpc_..." is not authorized to access resource
+   server "https://letter-irl/api"`. After it, and again after the deletion,
+   that request and the website's sign-in, with and without an audience, reach
+   the Auth0 login page with no error.
+
+2e. **Production tenant: the website on the MCP API** (2026-09-14)
+
+   Production followed the same steps on the same day. The table was read back
+   in the same way as 2d.
+
+   | Item | State | Verified by |
+   |---|---|---|
+   | API `Letter IRL MCP`, identifier `https://api.letterirl.com/mcp` | Existing | Dashboard, id `6a8bafc38557d1cb6fa22153` |
+   | API access policy | **Per-app authorization** for user-delegated and client access | API settings |
+   | Allow Skipping User Consent / Allow Offline Access | Both **enabled** | API settings |
+   | `Letter IRL Website` (`wX17u1wOn3XJRVba1ejIappBNpDno3ER`) user-delegated grant | **3 / 3** (`mail:read`, `mail:draft`, `mail:send`); client access 0 / 3 | API Access tab |
+   | Website refresh-token rotation | On; idle 1296000 s, maximum 2592000 s, overlap 30 s | Application settings, saved by the owner |
+   | Website grant types | Implicit and Client Credentials removed | Application settings |
+   | Railway `mail-letter-irl-website` (production) | `AUTH0_AUDIENCE` = `https://api.letterirl.com/mcp`; `AUTH0_SCOPE` as in 2d | `/auth/login` redirects with that audience and scope, and Auth0 answers with its login page |
+   | Dashboard end to end | Overview, Letters, Letter Packs, API Tokens and Settings load; the API logs `rest.request` at 200 for each call, with no scope refusals | Signed-in walkthrough, after API promotion PR #388 deployed |
+   | Default Audience | Repointed from `https://letter-irl/api` to `https://api.letterirl.com/mcp` | Tenant settings, read back after a reload |
+   | `Letter IRL API` (`https://letter-irl/api`) | **Deleted** | APIs list |
+   | `Prod-to-Dev Sync (Management API)` | Management API client access revoked (0 / 273); deletion pending, see 2c | API Access tab, read back after a reload |
+
+   After the repoint and the deletion, the website's sign-in and ChatGPT's
+   authorize request, both with `resource` and with neither `resource` nor
+   `audience`, reach the Auth0 login page with no error.
+
+   **The send rule depends on the website application's grants** (#470). Only a
+   token issued to `Letter IRL Website` may confirm a send on the confirmation
+   page, or make or revoke a personal access token (#730). The API's `LETTER_IRL_WEBSITE_CLIENT_ID` names that application's Client
+   ID: `ZQF6j9WoG0097thWKnCJwNyeJZtUlqOX` on development and
+   `wX17u1wOn3XJRVba1ejIappBNpDno3ER` on production. The check holds because the
+   application stays a confidential client with the `authorization_code` and
+   `refresh_token` grants alone, so only a person signing in can obtain its
+   tokens. Re-enabling Implicit or Client Credentials on it is a change to the
+   send rule and to who may make standing credentials, not a routine setting
+   (docs/letter-send-flow.md).
+
 3. **Domain-Level Connections**
    - **All 5 connections** must have `is_domain_connection: true`
    - **Why:** Third-party clients (like dynamically registered ChatGPT apps) can only use domain-level connections
 
-4. **OpenAI Review Redirect URI** ⚠️
-   - **Location:** Applications → Mail Letter IRL → Settings → Allowed Callback URLs
-   - **Required URI:** `https://platform.openai.com/apps-manage/oauth`
-   - **Why:** OpenAI's app review process uses this redirect URI to test OAuth flows
-   - **Reference:** [OpenAI Apps SDK Auth Docs](https://developers.openai.com/apps-sdk/build/auth/)
+4. **OpenAI review redirect: no longer ours to set**
+   - This item used to put `https://platform.openai.com/apps-manage/oauth` on the static client,
+     Mail Letter IRL, which was deleted from development on 2026-09-28 (section 2 of Applications).
+   - Under CIMD, ChatGPT's redirects come from its own client document. OpenAI's
+     [auth guide](https://developers.openai.com/apps-sdk/build/auth/), read on 2026-09-28, names
+     only `chatgpt.com` redirects and says nothing about this address.
 
 ### Environment Variables (.env)
 
-The MCP server requires these Auth0 configuration values:
+The MCP server reads these (development tenant values; `.env.dev.example` has
+the full list):
 
 ```bash
-# Auth0 Endpoints
-AUTH0_ISSUER=https://dev-ky21dxn3qmi71hjl.us.auth0.com/
-AUTH0_AUTHORIZATION_ENDPOINT=https://dev-ky21dxn3qmi71hjl.us.auth0.com/authorize
-AUTH0_TOKEN_ENDPOINT=https://dev-ky21dxn3qmi71hjl.us.auth0.com/oauth/token
-AUTH0_JWKS_URI=https://dev-ky21dxn3qmi71hjl.us.auth0.com/.well-known/jwks.json
-AUTH0_REGISTRATION_ENDPOINT=https://dev-ky21dxn3qmi71hjl.us.auth0.com/oidc/register
-
-# Auth0 API Configuration
-AUTH0_AUDIENCE=https://letter-irl/api
-AUTH0_SCOPES=openid,email,profile
+LETTER_IRL_OAUTH_ISSUER=https://dev-ky21dxn3qmi71hjl.us.auth0.com/
+LETTER_IRL_OAUTH_AUTH_ENDPOINT=https://dev-ky21dxn3qmi71hjl.us.auth0.com/authorize
+LETTER_IRL_OAUTH_TOKEN_ENDPOINT=https://dev-ky21dxn3qmi71hjl.us.auth0.com/oauth/token
+LETTER_IRL_OAUTH_JWKS_URI=https://dev-ky21dxn3qmi71hjl.us.auth0.com/.well-known/jwks.json
+LETTER_IRL_MCP_RESOURCE=https://letter-irl-api-development.up.railway.app/mcp
+LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl-api-development.up.railway.app/mcp
+LETTER_IRL_OAUTH_SCOPES=openid,profile,email,offline_access,mail:read,mail:draft,mail:send
 ```
+
+`LETTER_IRL_OAUTH_AUDIENCE` must name exactly one audience, the MCP resource.
 
 ---
 
@@ -736,18 +1329,18 @@ Letter IRL uses separate Auth0 tenants for complete environment isolation:
 
 | Environment | Auth0 Tenant | Account | Purpose |
 |-------------|--------------|---------|---------|
-| **Production** | `dev-njmdyqf8n25rqgy7.us.auth0.com` | dnicholl@letterirl.com | Live users, real payments |
-| **Development** | `dev-ky21dxn3qmi71hjl.us.auth0.com` | dnicholl@objective.works | Testing, sync from production |
+| **Production** | `dev-njmdyqf8n25rqgy7.us.auth0.com` | the production account | Live users, real payments |
+| **Development** | `dev-ky21dxn3qmi71hjl.us.auth0.com` | the organization account | Testing, sync from production |
 
 ### Configuration Parity Checklist
 
 When updating development, ensure production is also updated:
 
 1. **Connections** - All 5 identity providers with `is_domain_connection: true`
-2. **DCR** - Dynamic Client Registration enabled
-3. **Default Audience** - Set to `https://letter-irl/api`
-4. **Applications** - Create equivalent apps with appropriate callbacks
-5. **APIs** - Register `https://letter-irl/api` resource server
+2. **DCR** - Off; rollback inventory only (CIMD registration on)
+3. **Default Audience** - The MCP API identifier (both tenants repointed 2026-09-14)
+4. **Applications** - Create equivalent apps with appropriate callbacks; authorize the website application for the MCP API
+5. **APIs** - The MCP API, identifier = the environment's canonical `/mcp` URL, with `mail:read`, `mail:draft` and `mail:send`
 6. **Branding** - Logo, colors, friendly name (see Branding Checklist above)
 
 ### Environment Variables by Tenant
@@ -756,12 +1349,12 @@ When updating development, ensure production is also updated:
 # Production (.env)
 LETTER_IRL_OAUTH_ISSUER=https://dev-njmdyqf8n25rqgy7.us.auth0.com/
 LETTER_IRL_OAUTH_JWKS_URI=https://dev-njmdyqf8n25rqgy7.us.auth0.com/.well-known/jwks.json
-LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl/api
+LETTER_IRL_OAUTH_AUDIENCE=https://api.letterirl.com/mcp
 
 # Development (.env.dev)
 LETTER_IRL_OAUTH_ISSUER=https://dev-ky21dxn3qmi71hjl.us.auth0.com/
 LETTER_IRL_OAUTH_JWKS_URI=https://dev-ky21dxn3qmi71hjl.us.auth0.com/.well-known/jwks.json
-LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl/api
+LETTER_IRL_OAUTH_AUDIENCE=https://letter-irl-api-development.up.railway.app/mcp
 ```
 
 ### Applying Branding to Production

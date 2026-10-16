@@ -1,6 +1,12 @@
 # Letter IRL - Implementation Roadmap
 
-Last Updated: January 14, 2025
+**Last Updated:** September 16, 2026 (roadmap content from December 2025)
+
+> **Historical.** The original phased plan. Most phases shipped in a different form: pg-boss was
+> replaced by a transactional outbox, the admin API by a tailnet-only panel, and purchasing uses
+> Stripe-hosted Checkout. The Agentic Commerce Protocol work is still a future plan, waiting on the
+> platform ([acp-implementation-guide.md](acp-implementation-guide.md)). Current state:
+> [status.md](status.md).
 
 ## Project Vision
 
@@ -31,7 +37,7 @@ Phase 7: Testing & Launch    ░░░░░░░░░░░░░░░░░
 **Status:** ✅ Deployed and working
 
 **What's Working:**
-- MCP server running on HTTP (Streamable HTTP + SSE fallback)
+- MCP server running on HTTP (Streamable HTTP; the SSE fallback was retired in #730)
 - Auth0 OAuth 2.1 + PKCE with 5 identity providers
 - 4 MCP tools: `quote_and_preview_letter`, `send_letter`, `check_status`, `get_balance`
 - Per-user authentication (JWT validation)
@@ -113,7 +119,7 @@ Create `src/services/creditService.ts`:
 - `deductCredits()` - Deduct credits for letter (with balance check)
 - `getBalance()` - Get current balance
 - `getTransactions()` - Get transaction history
-- `refundCredits()` - Refund cancelled orders
+- `refundCredits()` - Refund cancelled orders (removed by #394; refunds go through `requestRefund` in commerceService)
 
 #### Step 3: TypeScript Types
 Create `src/services/types.ts`:

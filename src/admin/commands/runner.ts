@@ -7,7 +7,7 @@ import type { AdminJsonObject } from "../contracts.js";
 import type { AdminSqlClient } from "../database.js";
 import { withTransaction } from "../db.js";
 import { AdminFoundationError, type AdminErrorCode } from "../errors.js";
-import { requireElevation } from "../http/elevation.js";
+import { requireElevation, type ElevationGuard } from "../http/elevation.js";
 import type { AdminSession } from "../http/session.js";
 import type { AdminRuntimeConfig } from "../runtimeConfig.js";
 import { classifyDiagnosticError, writeDiagnostic } from "../../utils/diagnosticLog.js";
@@ -24,6 +24,9 @@ import { createAdminPreviewDigest, normalizeAdminCommandInput, validateAdminComm
  *               changed since the preview is refused as stale
  *            -> full mode, live elevation, exact phrase
  *            -> admin_command_runs row (replay returns the prior outcome)
+ *            -> for a command with lockVersion, the target's row held and its
+ *               version checked again inside the operator transaction, so
+ *               the check and the write are atomic (#730)
  *            -> the domain call, with the run id as its idempotency key
  *            -> admin_audit_events row and the command's completion
  *
@@ -65,10 +68,26 @@ export interface CommandDefinition<I> {
   targetType: string;
   verb(input: I): string;
   parseInput(fields: ReadonlyMap<string, string>): I;
+  /**
+   * For a command whose target does not exist until it runs, so that its form
+   * cannot carry a hidden `target` (promo.create: the code the operator
+   * types). Read only when the request has no `target`; the confirmation form
+   * that follows the preview always carries one.
+   */
+  targetFromFields?(fields: ReadonlyMap<string, string>): string;
   preview(client: AdminSqlClient, targetId: string, input: I): Promise<CommandPreview>;
   execute(execution: CommandExecution, targetId: string, input: I, preview: CommandPreview): Promise<AdminJsonObject>;
   /** True when execute() writes through `execution.client` only. */
   transactional: boolean;
+  /**
+   * For a transactional command whose preview carries an expectedVersion: the
+   * target's version read again inside the operator transaction, holding the
+   * target's row until it ends (null when the row is gone). The preview is
+   * re-derived on the reader, outside that transaction, so without this the
+   * target could change between the check and the write; the runner refuses a
+   * version that moved (#730).
+   */
+  lockVersion?(client: pg.PoolClient, targetId: string): Promise<string | null>;
   /** Extra gate a command may impose (e.g. a feature flag). */
   enabled?(config: AdminRuntimeConfig): boolean;
 }
@@ -97,6 +116,8 @@ export interface CommandRunnerDeps {
   audit: AdminAuditWriter;
   actor: { id: string; name: string; node: string };
   session: AdminSession;
+  /** Holds the elevation lock, which is keyed by login rather than session. */
+  elevation: ElevationGuard;
   sessionIdHash: string;
   correlationId: string;
   now: () => number;
@@ -132,7 +153,10 @@ export async function prepareCommandPreview<I>(
     input,
     normalizedInput,
     preview,
-    previewDigest: previewDigestFor(definition.name, targetId, normalizedInput, preview.summary),
+    // The target as the preview names it, which is what the confirmation form
+    // sends back: a code typed as printed ("k7m2-qx9a") and its canonical form
+    // must bind the same digest, or the confirm is refused as stale (#730).
+    previewDigest: previewDigestFor(definition.name, preview.targetId, normalizedInput, preview.summary),
     idempotencyKey,
     phrase: expectedPhrase(environment, definition.verb(input), preview.targetId),
   };
@@ -196,7 +220,7 @@ export async function runAdminCommand<I>(
   if (definition.enabled && !definition.enabled(deps.config)) {
     throw new AdminFoundationError("ADMIN_COMMAND_DISABLED");
   }
-  requireElevation(deps.session, now);
+  requireElevation(deps.session, deps.elevation, now);
 
   // A confirmation that already ran returns its first outcome, before the
   // preview is re-derived: the target has legitimately changed by then (the
@@ -286,6 +310,18 @@ export async function runAdminCommand<I>(
         return priorOutcome(begun.commandRun);
       }
       await deps.audit.markCommandRunning(client, begun.commandRun.id);
+      // Held from here to the commit: the version the preview was checked at
+      // is the one the write sees. A refusal rolls the run row back with it.
+      if (definition.lockVersion && prepared.preview.expectedVersion !== undefined) {
+        let current: string | null;
+        try {
+          current = await definition.lockVersion(client, prepared.preview.targetId);
+        } catch (error) {
+          // A row held past the statement timeout fails as execute() would.
+          throw mapDomainError(error);
+        }
+        if (current !== prepared.preview.expectedVersion) throw new AdminFoundationError("ADMIN_STALE_PREVIEW");
+      }
       const execution: CommandExecution = {
         commandId: begun.commandRun.id,
         idempotencyKey: `admin:${begun.commandRun.id}`,

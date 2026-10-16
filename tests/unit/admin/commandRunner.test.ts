@@ -12,6 +12,7 @@ import {
   type CommandRunnerDeps,
 } from "../../../src/admin/commands/runner.js";
 import type { AdminJsonObject } from "../../../src/admin/contracts.js";
+import { ElevationGuard } from "../../../src/admin/http/elevation.js";
 import { AdminSessionStore, hashSessionId } from "../../../src/admin/http/session.js";
 import { parseAdminRuntimeConfig } from "../../../src/admin/runtimeConfig.js";
 import { validDevelopmentEnv } from "./runtimeConfig.test.js";
@@ -181,6 +182,7 @@ function deps(database: ReturnType<typeof fakeDatabase>, options: { mode?: "full
     audit: new AdminAuditWriter(),
     actor: { id: "owner@example.com", name: "Owner", node: "laptop" },
     session,
+    elevation: new ElevationGuard(),
     sessionIdHash: hashSessionId(session.id),
     correlationId: randomUUID(),
     now: () => now,
@@ -242,6 +244,25 @@ describe("admin command runner", () => {
     expect(database.audits().at(-1)).toMatchObject({ action: "echo.adjust", outcome: "denied", errorCode: "ADMIN_INVALID_REQUEST" });
     expect(state.executions).toEqual([]);
     expect(database.runs.size).toBe(0);
+  });
+
+  it("binds the target as the preview names it, so a target typed another way confirms (#730)", async () => {
+    const database = fakeDatabase();
+    const state = { version: "v1", executions: [] as Array<{ key: string; reason: string; client: boolean }> };
+    const base = echoCommand(state);
+    // A preview that names its target canonically, as several commands do (an id's case, a code's dashes).
+    const command: CommandDefinition<EchoInput> = {
+      ...base,
+      async preview(client, targetId, input) {
+        return { ...(await base.preview(client, targetId, input)), targetId: targetId.toUpperCase() };
+      },
+    };
+    const runner = deps(database);
+    // Previewed from what was typed; confirmed with the target the preview's form carries.
+    const fields = await confirmationFields(command, runner, {}, "fixture-1");
+    const outcome = await runAdminCommand(runner, command, "FIXTURE-1", fields);
+    expect(outcome).toMatchObject({ status: "succeeded", errorCode: null });
+    expect(state.executions).toHaveLength(1);
   });
 
   it("runs a self-transactional command with the run id as its key, records it, and replays on a second submit", async () => {
@@ -342,6 +363,76 @@ describe("admin command runner", () => {
     await expect(runAdminCommand(runner, command, "fixture-2", again)).rejects.toMatchObject({ code: "ADMIN_NOT_FOUND" });
     expect([...database.runs.values()].map((run) => run.status)).toEqual(["succeeded"]);
     expect(database.audits().filter((audit) => audit.outcome === "failed")).toHaveLength(0);
+  });
+
+  it("holds the target's version through a transactional write, and refuses one that moved after the preview (#730)", async () => {
+    const database = fakeDatabase();
+    const state = { version: "v1", executions: [] as Array<{ key: string; reason: string; client: boolean }> };
+    const held: Array<{ targetId: string; client: boolean }> = [];
+    let locked: string | null = "v1";
+    const command: CommandDefinition<EchoInput> = {
+      ...echoCommand(state, true),
+      async lockVersion(client, targetId) {
+        held.push({ targetId, client: client !== null });
+        return locked;
+      },
+    };
+    const runner = deps(database);
+
+    const fields = await confirmationFields(command, runner);
+    const outcome = await runAdminCommand(runner, command, "fixture-1", fields);
+    expect(outcome.status).toBe("succeeded");
+    expect(held).toEqual([{ targetId: "fixture-1", client: true }]);
+    expect(state.executions).toHaveLength(1);
+
+    // The preview still reads v1, but the row moved before the operator transaction held it.
+    locked = "v2";
+    const moved = await confirmationFields(command, runner, {}, "fixture-2");
+    await expect(runAdminCommand(runner, command, "fixture-2", moved)).rejects.toMatchObject({ code: "ADMIN_STALE_PREVIEW" });
+    // A row gone since the preview is as stale.
+    locked = null;
+    const gone = await confirmationFields(command, runner, {}, "fixture-3");
+    await expect(runAdminCommand(runner, command, "fixture-3", gone)).rejects.toMatchObject({ code: "ADMIN_STALE_PREVIEW" });
+
+    expect(state.executions).toHaveLength(1);
+    expect([...database.runs.values()].map((run) => run.status)).toEqual(["succeeded"]);
+  });
+
+  it("fails a lock that errors as a domain failure, and leaves no run behind", async () => {
+    const database = fakeDatabase();
+    const state = { version: "v1", executions: [] as Array<{ key: string; reason: string; client: boolean }> };
+    const command: CommandDefinition<EchoInput> = {
+      ...echoCommand(state, true),
+      async lockVersion() {
+        // A row held past the statement timeout.
+        throw Object.assign(new Error("canceling statement due to statement timeout"), { code: "57014" });
+      },
+    };
+    const runner = deps(database);
+    const fields = await confirmationFields(command, runner);
+    await expect(runAdminCommand(runner, command, "fixture-1", fields)).rejects.toMatchObject({ code: "ADMIN_INTERNAL_ERROR" });
+    expect(state.executions).toEqual([]);
+    expect(database.runs.size).toBe(0);
+  });
+
+  it("asks for no lock when the preview carries no version", async () => {
+    const database = fakeDatabase();
+    const state = { version: "v1", executions: [] as Array<{ key: string; reason: string; client: boolean }> };
+    const base = echoCommand(state, true);
+    const lockVersion = vi.fn(async () => "v9");
+    const command: CommandDefinition<EchoInput> = {
+      ...base,
+      lockVersion,
+      async preview(client, targetId, input) {
+        const preview = await base.preview(client, targetId, input);
+        delete preview.expectedVersion;
+        return preview;
+      },
+    };
+    const runner = deps(database);
+    const fields = await confirmationFields(command, runner);
+    await expect(runAdminCommand(runner, command, "fixture-1", fields)).resolves.toMatchObject({ status: "succeeded" });
+    expect(lockVersion).not.toHaveBeenCalled();
   });
 
   it("requires the production phrase in production", async () => {

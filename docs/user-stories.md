@@ -1,6 +1,6 @@
 # User Stories
 
-**Last Updated:** January 28, 2026
+**Last Updated:** September 23, 2026
 **Purpose:** Test coverage and acceptance criteria for Letter IRL
 
 ---
@@ -15,6 +15,7 @@ User stories are organized by feature area using semantic prefixes:
 | `US-POSTCARD` | Postcards | Postcard preview, send, image handling |
 | `US-CREDIT` | Credits | Balance, purchases, expiration |
 | `US-PROMO` | Promo Codes | Campaign redemption |
+| `US-GIFT` | Gift Letters | Free sends that print a card with a code for the recipient |
 | `US-ACCT` | Account | Authentication, profile |
 | `US-ADMIN` | Admin | Dashboard, investigation, management |
 | `US-EDGE` | Edge Cases | Error handling, idempotency |
@@ -28,6 +29,19 @@ User stories are organized by feature area using semantic prefixes:
 | `US-INFRA` | Infrastructure | Platform operations and cost optimization |
 
 Each story includes acceptance criteria that can be converted to test cases.
+
+### Areas without stories yet
+
+These shipped areas have no story prefix. Their acceptance criteria live elsewhere until stories are
+written:
+
+| Area | Acceptance criteria today |
+|------|---------------------------|
+| Pay & Send and in-conversation pack checkout | [just-in-time-purchase-plan.md](just-in-time-purchase-plan.md); `PAY-*` cases in [manual-tests.md](manual-tests.md) |
+| Image generation and entitlements (`generate_image_for_mail`) | [learnings/generate-image-removal-decision.md](learnings/generate-image-removal-decision.md) |
+| Refunds, disputes and proportional pack refunds | [security-and-policy.md](security-and-policy.md); `REFUND-*` cases in [manual-tests.md](manual-tests.md) |
+| Content retention and erasure | [security-and-policy.md](security-and-policy.md), [privacy-policy.md](privacy-policy.md) |
+| Operator admin panel | [admin-panel-guide.md](admin-panel-guide.md); `ADMIN-*` cases in [manual-tests.md](manual-tests.md) |
 
 ---
 
@@ -51,7 +65,7 @@ Each story includes acceptance criteria that can be converted to test cases.
 **Error Cases:**
 - [ ] Missing required address fields → Clear error listing missing fields
 - [ ] Non-US address → "Only supports mailing within United States"
-- [ ] Body exceeds 1,800 characters → "Letter exceeds one-page limit"
+- [ ] Body + sign-off over the layout's limit (1,600 characters or 24 lines for text-only) → "Letter exceeds character limit" (or "one-page limit" when both are over), with the count
 - [ ] Invalid address format → Returns corrections/suggestions
 
 ---
@@ -305,7 +319,7 @@ interface ProviderStatus {
 **Technical Details:**
 - Uses Sharp library for image processing
 - Image stored in `front_image_data` column (base64)
-- Original URL stored in `front_image_url` for debugging
+- The photo's address is stored in `front_image_url`: where a new size crops the photo again from, and how a collage (which has none) is told from it
 - PostGrid receives image via `frontHTML` containing base64 img tag
 
 **Error Handling:**
@@ -532,7 +546,7 @@ There is a mobile workaround - ask me about it if you want to try.
 **So that** fraud is tracked and accounts are flagged
 
 **Acceptance Criteria:**
-- [ ] Webhook receives `charge.dispute.created` event
+- [ ] Webhook receives `charge.dispute.created` event, and `charge.dispute.updated` / `charge.dispute.funds_withdrawn` when an inquiry becomes a chargeback (#730)
 - [ ] Dispute recorded in `stripe_disputes` table
 - [ ] Alert created for admin dashboard
 - [ ] User's credits revoked (same as refund)
@@ -592,6 +606,54 @@ There is a mobile workaround - ask me about it if you want to try.
 
 ---
 
+## Gift Letters (GIFT)
+
+See [gift-letters.md](gift-letters.md). Built behind `LETTER_IRL_GIFT_LETTERS_ENABLED`.
+
+### US-GIFT-01: Send a Gift Letter
+**As a** user with a gift letter
+**I want to** send it and have my recipient receive a card with it
+**So that** they can send a letter of their own
+
+**Acceptance Criteria:**
+- [x] A preview uses a gift letter when asked (`sendAsGift`), or when the balance cannot pay
+- [x] Someone who can pay is never switched to a gift without asking
+- [x] The preview shows the extra page and which card will print; Pay & Send is not offered
+- [x] The send uses one gift letter and no credits; a refused send rolls it back
+- [x] With budget left the card carries a single-use code worth one less budget; at zero, the plain card
+- [ ] A test print scans and clears PostGrid's integrity QR (GIFT-01)
+
+**Test Coverage:** `tests/unit/services/mailSendServiceGift.test.ts`, `tests/unit/tools/giftLetterTools.test.ts`, `tests/integration/giftLetters.postgres.test.ts`
+
+### US-GIFT-02: Claim a Gift Code
+**As a** recipient of a gift letter
+**I want to** claim the code on the card, in ChatGPT or on the website
+**So that** a free letter is waiting in my account
+
+**Acceptance Criteria:**
+- [x] The code redeems through `redeem_promo_code` and the website's promo box, typed or scanned
+- [x] Read-alike characters are accepted (O for 0, I and L for 1, any hyphens or spaces)
+- [x] One redemption per code, under concurrency
+- [x] The sender cannot redeem their own code
+- [ ] The website's claim page keeps the code across sign-in (website repository)
+
+**Test Coverage:** `tests/unit/services/giftLetterService.test.ts`, `tests/integration/giftLetters.postgres.test.ts`
+
+### US-GIFT-03: Seed Letters for Press and Influencers
+**As an** operator
+**I want to** grant gift letters, optionally printing a multi-use seed code
+**So that** a letter that is photographed and shared can be claimed by more than one reader
+
+**Acceptance Criteria:**
+- [x] `gift.grant` previews the cost bound and cannot grant twice on replay
+- [x] A seed campaign is a promo campaign with a gift budget; its cap is its cost bound
+- [x] One claim of a seed per normalised email
+- [x] `gift.void_code` voids an issued code
+
+**Test Coverage:** `tests/unit/admin/giftCommands.test.ts`, `tests/unit/services/promoServiceSeed.test.ts`
+
+---
+
 ## Account (ACCT)
 
 ### US-ACCT-00: First-Time User Onboarding
@@ -600,8 +662,9 @@ There is a mobile workaround - ask me about it if you want to try.
 **So that** I can start sending letters without a separate signup process
 
 **Acceptance Criteria:**
-- [ ] User record created on first MCP tool call
-- [ ] Email extracted from OAuth token
+- [ ] User record created on the first authenticated call, from MCP, the REST API or checkout
+- [ ] Confirmed email extracted from the OAuth token, or refused with a sentence that says so
+- [ ] No account is ever opened under a placeholder address
 - [ ] No signup credits by default (must purchase or use promo)
 - [ ] Clear messaging about credit balance (0 credits)
 - [ ] Guidance on how to get credits (purchase or promo code)
@@ -624,6 +687,7 @@ There is a mobile workaround - ask me about it if you want to try.
 - [ ] Uses Auth0 for dynamic client registration
 - [ ] JWT tokens validated via JWKS
 - [ ] User created/retrieved on first MCP tool call
+- [ ] Providers sharing one confirmed address reach ONE account (LINK-01)
 
 ---
 
@@ -636,6 +700,7 @@ There is a mobile workaround - ask me about it if you want to try.
 - [ ] Returns Auth0 logout URL
 - [ ] Lists available auth methods
 - [ ] After logout, can re-authenticate with different provider
+- [ ] Re-authenticating on the same confirmed address returns to the SAME account
 
 ---
 
@@ -654,6 +719,12 @@ There is a mobile workaround - ask me about it if you want to try.
 ---
 
 ## Admin (ADMIN)
+
+> These stories describe the legacy admin dashboard, which was deleted (#162); the public API now
+> returns 404 for every `/admin*` and `/api/admin*` path. The operator surface is the tailnet-only
+> admin panel ([admin-panel-guide.md](admin-panel-guide.md)), whose acceptance cases are
+> `ADMIN-READ-*`, `ADMIN-ACCT-*`, `ADMIN-OPS-*`, `ADMIN-CMD-*`, `ADMIN-STRIPE-*` and `ADMIN-PROD-*` in
+> [manual-tests.md](manual-tests.md). Rewrite these stories against the panel before relying on them.
 
 ### US-ADMIN-01: View Dashboard
 **As an** admin
@@ -776,7 +847,8 @@ There is a mobile workaround - ask me about it if you want to try.
 - [ ] Expired drafts cannot be sent
 - [ ] User gets clear error with instructions to re-preview
 - [ ] Daily job marks pending drafts as expired
-- [ ] Old drafts cleaned up after 7 days
+- [ ] Expired unsent drafts deleted 4 days after their expiry, inside the published 7 (#730)
+- [ ] Old drafts cleaned up after 7 days, except a held letter's, kept until 7 days after its mail date (#564), or 4 days after the cancel once it is cancelled (#701)
 
 ---
 
@@ -840,7 +912,7 @@ There is a mobile workaround - ask me about it if you want to try.
 **So that** pricing is predictable
 
 **Acceptance Criteria:**
-- [ ] Maximum 1,800 characters (body + sign-off)
+- [ ] Maximum per layout (body + sign-off): 1,600 characters / 24 lines text-only, 1,100 / 17 with a header image, 800 / 12 with an enclosed image (the legacy HTML; a letter drawn by our renderer is measured, and holds 26, 16 and 13 lines, #534)
 - [ ] Clear error with current count vs limit
 - [ ] Validation happens at preview time
 
@@ -1000,10 +1072,13 @@ There is a mobile workaround - ask me about it if you want to try.
 - [ ] Case-insensitive code matching (PROMO123 = promo123)
 - [ ] Expired campaigns cannot be redeemed
 
-**Multi-Account Detection (Future):**
-- [ ] Same email across providers detected (google vs github)
+**Multi-Account Detection:**
+- [x] Same email across providers is one account: an Auth0 post-login Action links the
+      identities behind a confirmed address, so a second sign-in method is not a second
+      chance at a campaign
+- [x] No account is opened under `<subject>@unknown.com`, which was invisible to every
+      per-email rule here, including the gift own-code check
 - [ ] Suspicious patterns flagged for admin review
-- [ ] Currently: Auth0 handles identity linking
 
 ---
 
@@ -1056,12 +1131,14 @@ There is a mobile workaround - ask me about it if you want to try.
 
 **Acceptance Criteria:**
 - [ ] Accessible from dashboard after OAuth login
+- [ ] Only the website's own sign-in may create one; a token issued to another app gets 403 `website_only` (#730)
 - [ ] Generates cryptographically secure token
 - [ ] Token shown once at creation (not retrievable later)
 - [ ] User can name/label the token for identification
 - [ ] Token stored as bcrypt hash in database
+- [ ] Token found by the SHA-256 of the whole token, not by its last four characters (#730)
 - [ ] Token associated with user account
-- [ ] Token has optional expiration (default: no expiration)
+- [ ] Token expires: 90 days by default, or a requested date within 365 days; a past date is refused (tokens created before this rule keep their stored expiry)
 - [ ] Returns token in format: `lirl_pat_xxxxxxxxxxxx`
 
 **Token Format:**
@@ -1078,7 +1155,7 @@ There is a mobile workaround - ask me about it if you want to try.
 
 **Acceptance Criteria:**
 - [ ] Can view list of active tokens (name, created date, last used)
-- [ ] Can revoke individual tokens
+- [ ] Can revoke individual tokens, from the website's own sign-in only (#730)
 - [ ] Revocation is immediate
 - [ ] Revoked tokens return 401 on next use
 - [ ] Revocation logged for audit
@@ -1094,7 +1171,7 @@ There is a mobile workaround - ask me about it if you want to try.
 - [ ] Accepts `Authorization: Bearer lirl_pat_xxx` header
 - [ ] Validates token against stored hashes
 - [ ] Looks up user from token
-- [ ] All MCP tools work with PAT auth
+- [ ] The read and draft tools work with PAT auth; a send from a PAT becomes the confirmation link, and paying, redeeming and token management are refused (#470)
 - [ ] Updates `last_used_at` on token record
 - [ ] Invalid/revoked token returns 401
 - [ ] PAT auth logged separately from OAuth (for analytics)
@@ -1192,7 +1269,7 @@ macOS/Linux:
 - [ ] Write tools show as "WRITE" in ChatGPT connector settings
 - [ ] Read-only tools don't require user confirmation
 - [ ] Write tools require user confirmation before execution
-- [ ] Destructive tools (clear_return_address) show additional warning
+- [ ] Destructive tools (the two send tools, `set_return_address`, both checkouts and `clear_return_address`) are served with `destructiveHint: true`, the signal OpenAI's review guidance asks for on irreversible outcomes; ChatGPT's permission prompt is its own contextual judgement
 - [ ] Open-world tools (send_letter) marked with `openWorldHint: true` for real-world effects
 
 **Tool Classification:**
@@ -1202,15 +1279,14 @@ macOS/Linux:
 | `get_order_status` | READ | `readOnlyHint: true` |
 | `get_return_address` | READ | `readOnlyHint: true` |
 | `list_orders` | READ | `readOnlyHint: true` |
-| `quote_and_preview_letter` | READ | `readOnlyHint: true` |
-| `switch_account` | READ | `readOnlyHint: true` |
-| `send_letter` | WRITE | `readOnlyHint: false`, `openWorldHint: true` |
-| `set_return_address` | WRITE | `readOnlyHint: false` |
+| `quote_and_preview_letter` (and the other three preview tools) | WRITE (creates a draft) | `readOnlyHint: false`, `openWorldHint: true` |
+| `send_letter` | WRITE | `readOnlyHint: false`, `openWorldHint: true`, `destructiveHint: true` (mail cannot be recalled) |
+| `set_return_address` | WRITE | `readOnlyHint: false`, `destructiveHint: true` (overwrites the saved address) |
 | `clear_return_address` | WRITE | `readOnlyHint: false`, `destructiveHint: true` |
 
 **Technical Details:**
 - MCP SDK expects annotations in separate `annotations` parameter
-- Not in `_meta` object (current incorrect implementation)
+- The authoritative values are the `annotations` block that `buildAnnotations()` in `src/mcp/registerTools.ts` builds; the tool files' inline `meta` objects mirror the hints and are spread into `_meta` beside the OpenAI display keys. The table for all 23 tools is in [app-submission/openai-test-cases.md](app-submission/openai-test-cases.md#tool-annotations-verification)
 - Annotations: `readOnlyHint`, `destructiveHint`, `openWorldHint`, `idempotentHint`
 
 **Related:**
@@ -1337,12 +1413,12 @@ ChatGPT offered "Track it until delivery" to a user after sending a postcard, bu
 |-------|---------|
 | `none` | No tracking available |
 | `estimated_only` | Status updates via periodic PostGrid sync, delivery is ESTIMATED |
-| `carrier_tracking` | Real-time carrier tracking with confirmed delivery (future) |
+| `carrier_tracking` | USPS's own tracking number is stored for a letter that went out (certified mail, #625): USPS's page shows the scans. The status itself is still the printer's, synced every six hours, and delivery is not confirmed by it |
 
-**Current Value:** `"estimated_only"`
+**Current Value:** `"estimated_only"`, and `"carrier_tracking"` for certified mail that went out, once its USPS number is stored (#625)
 - PostGrid syncs status every 6 hours via `statusSyncService.ts`
 - "Delivered" status is ESTIMATED based on USPS mail timing
-- No USPS tracking numbers or confirmed delivery scans
+- No USPS tracking numbers or confirmed delivery scans, except certified mail's number once the sync has stored it
 
 **Related:**
 - GitHub Issue: #98
@@ -1451,7 +1527,17 @@ ChatGPT offered "Track it until delivery" to a user after sending a postcard, bu
 
 ---
 
-### US-DEV-02: Database Synchronization
+### US-DEV-02: Database Synchronization — WITHDRAWN 2026-09-13
+**Withdrawn.** The implementation (`npm run dev:sync`) was removed: satisfying
+this story meant holding a production Neon API key and a production Auth0
+Management API secret on a workstation, and giving the development environment a
+copy of every letter, recipient address and customer record in production.
+Development is where authentication can be relaxed and the dummy provider is
+normal, so that copy was the largest avoidable concentration of customer data in
+the system. "Realistic data" is to be met with anonymised fixtures instead.
+
+The criteria below are kept as a record of what was built, not as work to do.
+
 **As a** developer
 **I want** to sync production data to development
 **So that** I can test with realistic data
@@ -1510,6 +1596,10 @@ master (production)
 ---
 
 ## OAuth Registration (DCR)
+
+> ChatGPT now authenticates through a manually imported Auth0 CIMD application, not Dynamic Client
+> Registration. The static `/oauth/register` route these stories describe exists only behind the
+> environment-specific rollback flag. See [auth0-setup.md](auth0-setup.md).
 
 ### US-DCR-01: MCP Client OAuth Registration
 **As an** MCP client (ChatGPT, Claude Desktop)
@@ -1707,6 +1797,11 @@ This implementation uses a static client approach aligned with the spec directio
 - Inline image positioned after message content
 - CSS ensures proper sizing and positioning
 
+**Our own renderer (#534).** A letter previewed with `LETTER_IRL_PRINT_RENDERER=pdf` is laid out by
+`src/render` and prints from its PDF instead: the body starts at 3.0" (PostGrid's measured address
+boxes), the images keep the legacy boxes, and the fit is measured, not estimated
+([letter-send-flow.md](letter-send-flow.md)).
+
 ---
 
 ## Feedback (FEEDBACK)
@@ -1824,7 +1919,7 @@ The tool description instructs ChatGPT to suggest this tool when:
 | Category | Prefix | Count |
 |----------|--------|-------|
 | Letter Sending | US-LETTER | 7 |
-| Postcards | US-POSTCARD | 3 |
+| Postcards | US-POSTCARD | 4 |
 | Credits | US-CREDIT | 9 |
 | Promo Codes | US-PROMO | 3 |
 | Account | US-ACCT | 4 |
@@ -1832,13 +1927,13 @@ The tool description instructs ChatGPT to suggest this tool when:
 | Edge Cases | US-EDGE | 8 |
 | Security | US-SEC | 6 |
 | Data Integrity | US-DATA | 3 |
-| MCP Access | US-MCP | 13 |
+| MCP Access | US-MCP | 15 |
 | Development | US-DEV | 3 |
 | OAuth Registration | US-DCR | 2 |
 | Letter Layouts | US-LAYOUT | 6 |
 | Feedback | US-FEEDBACK | 1 |
 | Infrastructure | US-INFRA | 1 |
-| **Total** | | **77** |
+| **Total** | | **80** |
 
 ---
 

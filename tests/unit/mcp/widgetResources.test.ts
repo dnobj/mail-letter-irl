@@ -18,19 +18,31 @@ import {
   ZERO_DECIMAL_CURRENCIES
 } from '../../../src/config/products.js';
 import * as fs from 'fs/promises';
+import { clientProfileNamed } from '../../../src/auth/clientProfiles.js';
+
+// Every tool: ChatGPT's list is the full one, since an app that takes no
+// purchases is not offered the checkouts (#475).
+const allTools = () => new LetterIrlServer().listTools(clientProfileNamed('chatgpt'));
 import * as path from 'path';
 import {
   buildWidgetResourceMeta,
   partitionToolResult,
   normalizeHttpsOrigin,
   getZodOutputShape,
+  PREVIEW_TOOL_BY_TEMPLATE,
+  PREVIEW_TOOL_META_NAME,
+  previewToolFor,
+  stampPreviewTool,
   WIDGET_DEFINITIONS,
+  LETTER_HOME_WIDGET,
   WIDGET_MIME_TYPE,
+  WIDGET_VARIANTS,
   registerWidgetResources
 } from '../../../src/mcp/registerTools.js';
 import type { z } from 'zod';
 import { createHash } from 'crypto';
 import { widgetTemplateUri, WIDGET_TEMPLATE_VERSION } from '../../../src/mcp/widgetUris.js';
+import { inlineHostBridge } from '../../../src/mcp/widgetHost.js';
 import { LetterIrlServer } from '../../../src/server.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -82,8 +94,19 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       }
     );
 
-    it('should have 5 widgets defined', () => {
-      expect(WIDGET_DEFINITIONS.length).toBe(5);
+    it.each(WIDGET_VARIANTS)(
+      '$name serves a widget file that exists ($file)',
+      async ({ file }) => {
+        const exists = await fs
+          .access(path.join(path.resolve(__dirname, '../../../widgets'), `${file}.html`))
+          .then(() => true)
+          .catch(() => false);
+        expect(exists).toBe(true);
+      }
+    );
+
+    it('should have 6 widgets defined', () => {
+      expect(WIDGET_DEFINITIONS.length).toBe(6);
     });
 
     it('does not define the removed GenerateImageCard widget', () => {
@@ -109,17 +132,64 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       // stale widgets to native mobile caches - always bump both.
       const widgetDir = path.resolve(__dirname, '../../../widgets');
       const parts: string[] = [];
-      for (const { name } of [...WIDGET_DEFINITIONS].sort((a, b) => a.name.localeCompare(b.name))) {
+      for (const { name } of [...WIDGET_DEFINITIONS, LETTER_HOME_WIDGET].sort((a, b) => a.name.localeCompare(b.name))) {
         // Normalize line endings: with core.autocrlf a Windows checkout
         // materializes CRLF and the pin must not depend on that.
         const content = (await fs.readFile(path.join(widgetDir, `${name}.html`), 'utf-8')).replace(/\r\n/g, '\n');
         parts.push(`${name}:${createHash('sha256').update(content).digest('hex')}`);
       }
+      // The shared bridge is inlined into cards as they are served (#474), so
+      // a change to it changes what every such card sends.
+      const bridge = (await fs.readFile(path.join(widgetDir, 'shared', 'host.js'), 'utf-8')).replace(/\r\n/g, '\n');
+      parts.push(`shared/host.js:${createHash('sha256').update(bridge).digest('hex')}`);
+      // So is the renderer's page cleaner (#534), in both preview cards.
+      const pages = (await fs.readFile(path.join(widgetDir, 'shared', 'pages.js'), 'utf-8')).replace(/\r\n/g, '\n');
+      parts.push(`shared/pages.js:${createHash('sha256').update(pages).digest('hex')}`);
+      // And the Arrives picker and Cancel (#535), in both preview cards.
+      const arrives = (await fs.readFile(path.join(widgetDir, 'shared', 'arrives.js'), 'utf-8')).replace(/\r\n/g, '\n');
+      parts.push(`shared/arrives.js:${createHash('sha256').update(arrives).digest('hex')}`);
+      // And the Style row (#563), in the letter card.
+      const style = (await fs.readFile(path.join(widgetDir, 'shared', 'style.js'), 'utf-8')).replace(/\r\n/g, '\n');
+      parts.push(`shared/style.js:${createHash('sha256').update(style).digest('hex')}`);
+      // And the envelope reveal (#576), in the letter card.
+      const envelope = (await fs.readFile(path.join(widgetDir, 'shared', 'envelope.js'), 'utf-8')).replace(/\r\n/g, '\n');
+      parts.push(`shared/envelope.js:${createHash('sha256').update(envelope).digest('hex')}`);
+      // And the studio layout (#580), in both preview cards.
+      const studio = (await fs.readFile(path.join(widgetDir, 'shared', 'studio.js'), 'utf-8')).replace(/\r\n/g, '\n');
+      parts.push(`shared/studio.js:${createHash('sha256').update(studio).digest('hex')}`);
       const digest = createHash('sha256').update(parts.join('\n')).digest('hex').slice(0, 12);
       expect({ version: WIDGET_TEMPLATE_VERSION, digest }).toEqual({
-        version: 24,
-        digest: 'c1f86c2f2b6e'
+        version: 87,
+        digest: '481981fb1fc4'
       });
+    });
+  });
+
+  describe('widget header logo', () => {
+    it("shows the website's mark in every widget, exactly as scripts/build-widget-logo.ts wrote it", async () => {
+      // The script writes the two PNGs and inlines them; a widget edited by
+      // hand, or a PNG rebuilt without re-running it, shows up here.
+      const widgetDir = path.resolve(__dirname, '../../../widgets');
+      const brandDir = path.resolve(__dirname, '../../../assets/brand/png');
+      const light = await fs.readFile(path.join(brandDir, 'widget-logo-light.png'));
+      const dark = await fs.readFile(path.join(brandDir, 'widget-logo-dark.png'));
+      // A PNG's width and height sit at bytes 16 and 20; the files are 4x the CSS size.
+      const cssSize = (png: Buffer) => ({ width: png.readUInt32BE(16) / 4, height: png.readUInt32BE(20) / 4 });
+      expect(cssSize(light)).toEqual({ width: 22.5, height: 14 });
+      expect(cssSize(dark)).toEqual(cssSize(light));
+
+      const logoRule =
+        '.logo{width:22.5px;height:14px;flex:none;display:block;' +
+        `background:url("data:image/png;base64,${light.toString('base64')}") center/contain no-repeat}`;
+      const darkRule = `.dark .logo{background-image:url("data:image/png;base64,${dark.toString('base64')}")}`;
+      for (const { name } of WIDGET_DEFINITIONS) {
+        const html = await fs.readFile(path.join(widgetDir, `${name}.html`), 'utf-8');
+        expect(html.split(logoRule), name).toHaveLength(2);
+        expect(html.split(darkRule), name).toHaveLength(2);
+        expect(html, name).toContain('<div class="hd"><span class="logo" aria-hidden="true"></span><b>Letter IRL</b>');
+        // Each card switches themes on the root element, which the dark rule relies on.
+        expect(html, name).toContain('document.documentElement.classList.toggle("dark", theme === "dark")');
+      }
     });
   });
 
@@ -158,7 +228,7 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
 
   describe('tool outputTemplate references', () => {
     const templates = new Map(
-      new LetterIrlServer().listTools().map(tool => [
+      allTools().map(tool => [
         tool.name,
         tool.meta?.['openai/outputTemplate'] as string | undefined
       ])
@@ -166,6 +236,63 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
 
     it('quote_and_preview_letter references the LetterPreviewCard widget', () => {
       expect(templates.get('quote_and_preview_letter')).toBe(widgetTemplateUri('LetterPreviewCard'));
+    });
+
+    it('points each image letter tool at its own template name (#411)', () => {
+      // Literal names, not PREVIEW_TOOL_BY_TEMPLATE: the two tools take
+      // identical input, so a shared template would leave the card unable to
+      // tell which one to repeat.
+      expect(templates.get('quote_and_preview_letter_with_header_image')).toBe(
+        widgetTemplateUri('LetterHeaderImagePreviewCard')
+      );
+      expect(templates.get('quote_and_preview_letter_with_image')).toBe(
+        widgetTemplateUri('LetterInlineImagePreviewCard')
+      );
+      expect(templates.get('quote_and_preview_postcard')).toBe(widgetTemplateUri('PostcardPreviewCard'));
+    });
+
+    it('maps every preview template to the one tool that declares it, both ways (#411)', () => {
+      // The stamp names the tool a card repeats. A template shared by two
+      // tools, or a map entry naming the wrong tool, would make a card repeat
+      // a different preview than the one the customer asked for.
+      const byTemplate = new Map<string, string[]>();
+      for (const [tool, template] of templates) {
+        if (!template) continue;
+        const name = template.replace(/^ui:\/\/widgets\//, '').replace(/\.html@v\d+$/, '');
+        if (!PREVIEW_TOOL_BY_TEMPLATE.has(name)) continue;
+        byTemplate.set(name, [...(byTemplate.get(name) ?? []), tool]);
+      }
+      expect([...byTemplate.keys()].sort()).toEqual([...PREVIEW_TOOL_BY_TEMPLATE.keys()].sort());
+      for (const [name, tools] of byTemplate) {
+        expect(tools, `${name} is declared by`).toEqual([PREVIEW_TOOL_BY_TEMPLATE.get(name)]);
+      }
+    });
+
+    it('stamps only tools the card is willing to repeat (#411)', async () => {
+      // The card ignores a stamp outside its own PREVIEW_TOOLS list. A tool
+      // added on one side only would leave that tool's cards with no retry,
+      // silently.
+      const widgetDir = path.resolve(__dirname, '../../../widgets');
+      const fileOf = (name: string): string =>
+        WIDGET_VARIANTS.find(variant => variant.name === name)?.file ?? name;
+      const stampedByFile = new Map<string, string[]>();
+      for (const [name, tool] of PREVIEW_TOOL_BY_TEMPLATE) {
+        const file = fileOf(name);
+        stampedByFile.set(file, [...(stampedByFile.get(file) ?? []), tool]);
+      }
+      for (const [file, tools] of stampedByFile) {
+        const html = await fs.readFile(path.join(widgetDir, `${file}.html`), 'utf-8');
+        const listed = html.match(/const PREVIEW_TOOLS = \[([^\]]*)\]/);
+        expect(listed, `${file} declares PREVIEW_TOOLS`).not.toBeNull();
+        const names = [...(listed?.[1] ?? '').matchAll(/"([a-z_]+)"/g)].map(match => match[1]);
+        expect(names.sort(), file).toEqual([...tools].sort());
+      }
+    });
+
+    it('create_pack_checkout references the PackCheckoutCard widget (issue #322)', () => {
+      // Without a card the text-prompt path had no anchor: the model relayed
+      // the checkout URL in prose, or claimed a card that did not exist.
+      expect(templates.get('create_pack_checkout')).toBe(widgetTemplateUri('PackCheckoutCard'));
     });
 
     it.each([
@@ -193,21 +320,23 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       }
     );
 
+    // Read as served: a card on the shared bridge (#474) reaches window.openai
+    // through widgets/shared/host.js, which the server inlines.
     it.each(WIDGET_DEFINITIONS)(
-      '$name.html should use window.openai.toolOutput',
+      '$name.html should use window.openai.toolOutput, directly or through the bridge',
       async ({ name }) => {
         const filePath = path.join(widgetDir, `${name}.html`);
-        const content = await fs.readFile(filePath, 'utf-8');
+        const content = inlineHostBridge(await fs.readFile(filePath, 'utf-8'), widgetDir);
         expect(content).toContain('window.openai');
         expect(content).toContain('toolOutput');
       }
     );
 
     it.each(WIDGET_DEFINITIONS)(
-      '$name.html should listen for openai:set_globals event',
+      '$name.html should listen for openai:set_globals event, directly or through the bridge',
       async ({ name }) => {
         const filePath = path.join(widgetDir, `${name}.html`);
-        const content = await fs.readFile(filePath, 'utf-8');
+        const content = inlineHostBridge(await fs.readFile(filePath, 'utf-8'), widgetDir);
         expect(content).toContain('openai:set_globals');
       }
     );
@@ -283,6 +412,8 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
         overview: 'x',
         purchaseStep: 'x',
         examplePrompts: ['x'],
+        // How full a letter's pages are, for the card's fit line (#586).
+        pageFit: { pages: 1 },
         // Control: a field partitionToolResult must leave alone, so this
         // derivation fails loudly if it ever stops removing anything.
         draftId: 'x'
@@ -290,6 +421,7 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       const { structuredContent } = partitionToolResult({ ...probe });
       const removed = Object.keys(probe).filter(key => !(key in structuredContent));
       expect(removed).toContain('generatedImagePreview');
+      expect(removed).toContain('pageFit');
       expect(removed).not.toContain('draftId');
       return new Set(removed);
     })();
@@ -305,9 +437,17 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
      */
     const KNOWN_UNDELIVERABLE: Record<string, string[]> = {};
 
+    /**
+     * The widget file behind a template name: the card itself, or the card a
+     * preview-tool variant serves (#411).
+     */
+    function widgetFile(name: string): string {
+      return WIDGET_VARIANTS.find(variant => variant.name === name)?.file ?? name;
+    }
+
     function widgetToolNames(): Map<string, string> {
       const byWidget = new Map<string, string>();
-      for (const tool of new LetterIrlServer().listTools()) {
+      for (const tool of allTools()) {
         const template = tool.meta?.['openai/outputTemplate'];
         if (typeof template !== 'string') continue;
         // Version suffix is REQUIRED here: an unversioned outputTemplate keeps
@@ -423,8 +563,12 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
     it('binds every widget to a tool that declares it', () => {
       const bound = widgetToolNames();
       expect(bound.size).toBeGreaterThan(0);
+      const served = [
+        ...WIDGET_DEFINITIONS.map(definition => definition.name),
+        ...WIDGET_VARIANTS.map(variant => variant.name)
+      ];
       for (const widget of bound.keys()) {
-        expect(WIDGET_DEFINITIONS.map(definition => definition.name)).toContain(widget);
+        expect(served).toContain(widget);
       }
     });
 
@@ -434,7 +578,7 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       // vacuously green instead of failing.
       const bound = widgetToolNames();
       for (const widget of bound.keys()) {
-        const html = await fs.readFile(path.join(widgetDir, `${widget}.html`), 'utf-8');
+        const html = await fs.readFile(path.join(widgetDir, `${widgetFile(widget)}.html`), 'utf-8');
         const aliases = outputAliases(html);
         expect(aliases.size, `${widget}: no window.openai.toolOutput alias found`).toBeGreaterThan(0);
         expect(
@@ -451,7 +595,7 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
       for (const [widget, toolName] of bound) {
         const shape = getZodOutputShape(toolName);
         if (!shape) continue;
-        const html = await fs.readFile(path.join(widgetDir, `${widget}.html`), 'utf-8');
+        const html = await fs.readFile(path.join(widgetDir, `${widgetFile(widget)}.html`), 'utf-8');
         const missing = [...fieldReads(html, outputAliases(html))]
           .filter(
             dotted =>
@@ -486,13 +630,14 @@ describe('Widget Resource Registration (US-MCP-07)', () => {
 
 describe('registerWidgetResources implementation', () => {
   it('should register all widget resources', () => {
-    expect(WIDGET_DEFINITIONS.length).toBe(5);
+    expect(WIDGET_DEFINITIONS.length).toBe(6);
     expect(WIDGET_DEFINITIONS.map((widget) => widget.name)).toEqual([
       'LetterPreviewCard',
       'PostcardPreviewCard',
       'ImageUploadCard',
       'GetStartedCard',
-      'ImageRoutingCard'
+      'ImageRoutingCard',
+      'PackCheckoutCard'
     ]);
   });
 
@@ -516,12 +661,12 @@ describe('widget image CSP', () => {
     expect(meta.ui.csp).toEqual({
       connectDomains: ['https://chatgpt.com', 'https://api.letterirl.com'],
       resourceDomains: ['https://*.oaistatic.com', 'https://*.oaiusercontent.com', 'https://api.letterirl.com'],
-      redirectDomains: ['https://checkout.stripe.com', 'https://letterirl.com']
+      redirectDomains: ['https://checkout.stripe.com', 'https://letterirl.com', 'https://api.letterirl.com']
     });
     expect(meta['openai/widgetCSP']).toEqual({
       connect_domains: ['https://chatgpt.com', 'https://api.letterirl.com'],
       resource_domains: ['https://*.oaistatic.com', 'https://*.oaiusercontent.com', 'https://api.letterirl.com'],
-      redirect_domains: ['https://checkout.stripe.com', 'https://letterirl.com']
+      redirect_domains: ['https://checkout.stripe.com', 'https://letterirl.com', 'https://api.letterirl.com']
     });
   });
 
@@ -641,8 +786,105 @@ describe('widget resources tolerate any template version (#235)', () => {
     const { resources } = await client.listResources();
     const uris = resources.map((resource) => resource.uri);
 
-    for (const { name } of WIDGET_DEFINITIONS) {
+    for (const { name } of [...WIDGET_DEFINITIONS, ...WIDGET_VARIANTS]) {
       expect(uris).toContain(widgetTemplateUri(name));
+    }
+  });
+
+  it('serves each preview template stamped with the tool that draws it (#411)', async () => {
+    const client = await connectedClient();
+    const widgetDir = path.resolve(__dirname, '../../../widgets');
+    const cases: Array<[string, string, string]> = [
+      ['LetterPreviewCard', 'LetterPreviewCard', 'quote_and_preview_letter'],
+      ['LetterHeaderImagePreviewCard', 'LetterPreviewCard', 'quote_and_preview_letter_with_header_image'],
+      ['LetterInlineImagePreviewCard', 'LetterPreviewCard', 'quote_and_preview_letter_with_image'],
+      ['PostcardPreviewCard', 'PostcardPreviewCard', 'quote_and_preview_postcard']
+    ];
+
+    for (const [name, file, tool] of cases) {
+      const uri = widgetTemplateUri(name);
+      const result = await client.readResource({ uri });
+      const text = String(result.contents[0].text);
+      // The file on disk with the host bridge inlined (#474).
+      const original = inlineHostBridge(await fs.readFile(path.join(widgetDir, `${file}.html`), 'utf-8'), widgetDir);
+
+      expect(result.contents[0].uri).toBe(uri);
+      expect(result.contents[0].mimeType).toBe(WIDGET_MIME_TYPE);
+      expect(text).toContain(`<meta name="letter-irl-preview-tool" content="${tool}" />`);
+      expect(text.match(/<meta name="letter-irl-preview-tool"/g), `${name} carries one stamp`).toHaveLength(1);
+      // The stamp is the only other difference from the file on disk.
+      expect(text.replace(/\n\s*<meta name="letter-irl-preview-tool"[^>]*>/, '')).toBe(original);
+    }
+  });
+
+  it('stamps a preview template requested at an older version too (#411)', async () => {
+    // A client with a cached tool list reaches the variant through the
+    // any-version template, and must still get the right tool.
+    const client = await connectedClient();
+    const stale = `ui://widgets/LetterInlineImagePreviewCard.html@v${WIDGET_TEMPLATE_VERSION - 1}`;
+
+    const result = await client.readResource({ uri: stale });
+
+    expect(String(result.contents[0].text)).toContain(
+      'content="quote_and_preview_letter_with_image"'
+    );
+  });
+
+  it('serves the letter card unstamped where an image letter may have drawn it (#411)', async () => {
+    // Before v32 every letter tool pointed at LetterPreviewCard, and an image
+    // call may carry no image arguments at all (the server then uses the
+    // recent upload). A text-only stamp there would let the card repeat an
+    // image letter as a text-only one, so these pages get no stamp and the
+    // card only advises asking in the chat.
+    const client = await connectedClient();
+
+    for (const uri of [
+      'ui://widgets/LetterPreviewCard.html',
+      'ui://widgets/LetterPreviewCard.html@v31',
+      'ui://widgets/LetterPreviewCard.html@v1',
+      'ui://widgets/LetterPreviewCard.html@vlatest'
+    ]) {
+      const result = await client.readResource({ uri });
+      const text = String(result.contents[0].text);
+      expect(text, uri).toContain('id="retry-button"');
+      expect(text, uri).not.toContain('<meta name="letter-irl-preview-tool"');
+    }
+  });
+
+  it('stamps the letter card at the current version and later ones (#411)', async () => {
+    const client = await connectedClient();
+
+    for (const uri of [
+      widgetTemplateUri('LetterPreviewCard'),
+      `ui://widgets/LetterPreviewCard.html@v${WIDGET_TEMPLATE_VERSION + 1}`
+    ]) {
+      const result = await client.readResource({ uri });
+      expect(String(result.contents[0].text), uri).toContain(
+        '<meta name="letter-irl-preview-tool" content="quote_and_preview_letter" />'
+      );
+    }
+  });
+
+  it('stamps the postcard card at any version, since only one tool ever drew it (#411)', async () => {
+    const client = await connectedClient();
+
+    for (const uri of ['ui://widgets/PostcardPreviewCard.html', 'ui://widgets/PostcardPreviewCard.html@v12']) {
+      const result = await client.readResource({ uri });
+      expect(String(result.contents[0].text), uri).toContain(
+        '<meta name="letter-irl-preview-tool" content="quote_and_preview_postcard" />'
+      );
+    }
+  });
+
+  it('does not stamp widgets that are not preview cards', async () => {
+    const client = await connectedClient();
+
+    for (const { name } of WIDGET_DEFINITIONS) {
+      if (PREVIEW_TOOL_BY_TEMPLATE.has(name)) continue;
+      const result = await client.readResource({ uri: widgetTemplateUri(name) });
+      expect(String(result.contents[0].text), name).not.toContain(
+        `<meta name="${PREVIEW_TOOL_META_NAME}"`
+      );
     }
   });
 
@@ -673,5 +915,75 @@ describe('widget resources tolerate any template version (#235)', () => {
 
     await expect(read).rejects.toThrow(/not found/i);
     await expect(read).rejects.not.toThrow(/ENOENT|no such file/i);
+  });
+});
+
+describe('stampPreviewTool (#411)', () => {
+  const page = '<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="utf-8" />\n  </head>\n  <body></body>\n</html>\n';
+
+  it('adds the tool as a meta tag right after the opening head tag', () => {
+    expect(stampPreviewTool(page, 'quote_and_preview_letter')).toBe(
+      '<!doctype html>\n<html lang="en">\n  <head>\n    <meta name="letter-irl-preview-tool" content="quote_and_preview_letter" />\n    <meta charset="utf-8" />\n  </head>\n  <body></body>\n</html>\n'
+    );
+  });
+
+  it('keeps attributes on the head tag and stamps only the first head', () => {
+    const stamped = stampPreviewTool('<head data-x="1"></head><head></head>', 'send_letter');
+    expect(stamped).toBe(
+      '<head data-x="1">\n    <meta name="letter-irl-preview-tool" content="send_letter" /></head><head></head>'
+    );
+  });
+
+  it('does not mistake a header element for the head tag', () => {
+    expect(stampPreviewTool('<header></header>', 'send_letter')).toBe('<header></header>');
+  });
+
+  it.each([
+    ['no tool', undefined],
+    ['an empty name', ''],
+    ['a name that could break out of the attribute', 'x" onload="alert(1)'],
+    ['a name with markup', 'x/><script>'],
+    ['an upper-case name', 'Quote_And_Preview_Letter'],
+    ['a name with digits', 'tool2']
+  ])('leaves the page alone for %s', (_label, tool) => {
+    expect(stampPreviewTool(page, tool)).toBe(page);
+  });
+
+  it('leaves a page without a head tag alone', () => {
+    expect(stampPreviewTool('<body></body>', 'send_letter')).toBe('<body></body>');
+  });
+});
+
+describe('previewToolFor (#411)', () => {
+  it('names the text-only tool for the letter card only from v32 on', () => {
+    expect(previewToolFor('LetterPreviewCard', 32)).toBe('quote_and_preview_letter');
+    expect(previewToolFor('LetterPreviewCard', 33)).toBe('quote_and_preview_letter');
+    expect(previewToolFor('LetterPreviewCard', WIDGET_TEMPLATE_VERSION)).toBe('quote_and_preview_letter');
+    expect(previewToolFor('LetterPreviewCard', 31)).toBeUndefined();
+    expect(previewToolFor('LetterPreviewCard', 0)).toBeUndefined();
+  });
+
+  it.each([
+    ['the legacy unversioned URI', undefined],
+    ['a version that is not a number', Number.NaN],
+    ['a fractional version', 32.5],
+    ['an unsafe integer', Number.MAX_SAFE_INTEGER + 2]
+  ])('names no tool for the letter card at %s', (_label, version) => {
+    expect(previewToolFor('LetterPreviewCard', version)).toBeUndefined();
+  });
+
+  it('names the other preview tools at any version', () => {
+    expect(previewToolFor('PostcardPreviewCard', undefined)).toBe('quote_and_preview_postcard');
+    expect(previewToolFor('PostcardPreviewCard', 3)).toBe('quote_and_preview_postcard');
+    expect(previewToolFor('LetterHeaderImagePreviewCard', 1)).toBe('quote_and_preview_letter_with_header_image');
+    expect(previewToolFor('LetterInlineImagePreviewCard', undefined)).toBe('quote_and_preview_letter_with_image');
+  });
+
+  it('names no tool for widgets that are not preview cards', () => {
+    for (const { name } of WIDGET_DEFINITIONS) {
+      if (PREVIEW_TOOL_BY_TEMPLATE.has(name)) continue;
+      expect(previewToolFor(name, WIDGET_TEMPLATE_VERSION), name).toBeUndefined();
+    }
+    expect(previewToolFor('NotAWidget', WIDGET_TEMPLATE_VERSION)).toBeUndefined();
   });
 });

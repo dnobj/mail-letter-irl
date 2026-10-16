@@ -5,16 +5,46 @@ import {
   buildSecurityHeaders,
   checkStateChangingRequest,
   createCsrfToken,
+  isCrossSiteSubresource,
   createNonce,
   parseFormBody,
   verifyCsrfToken,
 } from "../../../src/admin/http/security.js";
+import { html } from "../../../src/admin/ui/html.js";
+import { REFERRER_POLICY, renderPage } from "../../../src/admin/ui/layout.js";
 
 function request(headers: Record<string, string>, method = "POST") {
   return { method, header: (name: string) => headers[name.toLowerCase()] };
 }
 
 const ORIGINS = ["https://letter-irl-admin-dev.tail1234.ts.net"];
+
+describe("which requests another site made the browser send (#730)", () => {
+  const ask = (method: string, headers: Record<string, string>) =>
+    isCrossSiteSubresource(method, (name) => headers[name.toLowerCase()]);
+
+  it("leaves requests that are not a browser's, or are the panel's own, alone", () => {
+    expect(ask("GET", {})).toBe(false);
+    expect(ask("GET", { "sec-fetch-site": "none" })).toBe(false);
+    expect(ask("POST", { "sec-fetch-site": "same-origin" })).toBe(false);
+    expect(ask("GET", { "sec-purpose": "prefetch" })).toBe(false);
+  });
+
+  it("names cross-site and same-site subresources, frames, form posts and speculative loads", () => {
+    expect(ask("GET", { "sec-fetch-site": "cross-site", "sec-fetch-mode": "no-cors", "sec-fetch-dest": "image" })).toBe(true);
+    expect(ask("GET", { "sec-fetch-site": "same-site", "sec-fetch-mode": "cors", "sec-fetch-dest": "empty" })).toBe(true);
+    expect(ask("GET", { "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "iframe" })).toBe(true);
+    expect(ask("POST", { "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" })).toBe(true);
+    expect(ask("GET", { "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "document", "sec-purpose": "prefetch;prerender" })).toBe(true);
+    expect(ask("GET", { "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "document", purpose: "Prefetch" })).toBe(true);
+  });
+
+  it("lets a link the operator follows through, by GET or HEAD", () => {
+    for (const method of ["GET", "HEAD"]) {
+      expect(ask(method, { "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" })).toBe(false);
+    }
+  });
+});
 
 describe("admin browser-boundary checks", () => {
   it("accepts a same-origin form post and nothing looser", () => {
@@ -23,25 +53,86 @@ describe("admin browser-boundary checks", () => {
       origin: "https://letter-irl-admin-dev.tail1234.ts.net",
       "content-type": "application/x-www-form-urlencoded",
     };
-    expect(checkStateChangingRequest(request(good), ORIGINS)).toBeNull();
-    expect(checkStateChangingRequest(request({ ...good, "sec-fetch-site": "none" }), ORIGINS)).toBeNull();
-    expect(
-      checkStateChangingRequest(request({ ...good, "sec-fetch-site": "cross-site" }), ORIGINS),
-    ).toBe("ADMIN_CSRF_REJECTED");
-    expect(
-      checkStateChangingRequest(request({ ...good, "sec-fetch-site": "same-site" }), ORIGINS),
-    ).toBe("ADMIN_CSRF_REJECTED");
+    const refusal = (headers: Record<string, string>, method = "POST") =>
+      checkStateChangingRequest(request(headers, method), ORIGINS);
+    expect(refusal(good)).toBeNull();
+    expect(refusal({ ...good, "sec-fetch-site": "none" })).toBeNull();
+    expect(refusal({ ...good, "sec-fetch-site": "cross-site" })).toMatchObject({
+      code: "ADMIN_CSRF_REJECTED",
+      detail: "sec_fetch_site_missing_or_cross_site",
+    });
+    expect(refusal({ ...good, "sec-fetch-site": "same-site" })).toMatchObject({
+      code: "ADMIN_CSRF_REJECTED",
+    });
     const { "sec-fetch-site": _omitted, ...withoutSite } = good;
-    expect(checkStateChangingRequest(request(withoutSite), ORIGINS)).toBe("ADMIN_CSRF_REJECTED");
-    expect(
-      checkStateChangingRequest(request({ ...good, origin: "https://evil.example" }), ORIGINS),
-    ).toBe("ADMIN_CSRF_REJECTED");
+    expect(refusal(withoutSite)).toMatchObject({
+      detail: "sec_fetch_site_missing_or_cross_site",
+    });
+    expect(refusal({ ...good, origin: "https://evil.example" })).toMatchObject({
+      code: "ADMIN_CSRF_REJECTED",
+      detail: "origin_mismatch",
+    });
     const { origin: _origin, ...withoutOrigin } = good;
-    expect(checkStateChangingRequest(request(withoutOrigin), ORIGINS)).toBe("ADMIN_CSRF_REJECTED");
-    expect(
-      checkStateChangingRequest(request({ ...good, "content-type": "application/json" }), ORIGINS),
-    ).toBe("ADMIN_INVALID_REQUEST");
-    expect(checkStateChangingRequest(request(good, "PUT"), ORIGINS)).toBe("ADMIN_METHOD_NOT_ALLOWED");
+    expect(refusal(withoutOrigin)).toMatchObject({ detail: "origin_missing_or_null" });
+    // Chrome sends a literal "null" Origin on a form post when the response
+    // that carried the form set Referrer-Policy: no-referrer. It is reported
+    // apart from a mismatch because the cause is our own headers, not the
+    // caller.
+    expect(refusal({ ...good, origin: "null" })).toMatchObject({
+      code: "ADMIN_CSRF_REJECTED",
+      detail: "origin_missing_or_null",
+    });
+    expect(refusal({ ...good, "content-type": "application/json" })).toMatchObject({
+      code: "ADMIN_INVALID_REQUEST",
+      detail: "content_type_not_form",
+    });
+    expect(refusal(good, "PUT")).toMatchObject({ code: "ADMIN_METHOD_NOT_ALLOWED" });
+  });
+
+  it("sets a referrer policy that leaves the Origin header intact on our own form posts", () => {
+    // Per Fetch, a non-CORS request whose method is not GET or HEAD has its
+    // Origin serialised as `null` under "no-referrer". The panel used to send
+    // that, so every form post arrived with Origin: null and was refused by
+    // the boundary check above: two correct controls that were mutually
+    // exclusive, and no automated test caught it because the request fixtures
+    // set Origin themselves rather than letting a browser compute it.
+    const policy = buildSecurityHeaders(createNonce())["Referrer-Policy"];
+    expect(policy).not.toBe("no-referrer");
+    expect(["same-origin", "strict-origin", "strict-origin-when-cross-origin"]).toContain(policy);
+  });
+
+  it("declares the same referrer policy in the header and the document meta tag", () => {
+    // A meta tag overrides the header for the document, so when the two
+    // disagree the tag wins silently. Changing only the header left every form
+    // post still sending Origin: null and the panel still refusing every write.
+    const policy = buildSecurityHeaders(createNonce())["Referrer-Policy"];
+    expect(policy).toBe(REFERRER_POLICY);
+    const page = renderPage({
+      title: "Elevate",
+      nonce: "NONCE123",
+      banner: {
+        environment: "development",
+        mode: "full",
+        marker: "development",
+        databaseRole: "letter_irl_admin_reader_development",
+        stripeKeyMode: "absent",
+        stripeKeyRestricted: false,
+        letterProvider: "dummy",
+        buildCommit: "abcdef1234567890",
+        nodeName: "letter-irl-admin-dev.tail1234.ts.net",
+        tag: "tag:dev-admin",
+      },
+      nav: [{ href: "/", label: "Overview" }],
+      currentPath: "/",
+      actor: { id: "owner@example.com", name: "Owner", node: "laptop.tail1234.ts.net" },
+      csrfToken: "c".repeat(64),
+      scriptPath: "/assets/client-abc.js",
+      flash: null,
+      elevatedUntil: null,
+      body: html`<p>body</p>`,
+    });
+    expect(page).toContain(`<meta name="referrer" content="${policy}">`);
+    expect(page).not.toContain('content="no-referrer"');
   });
 
   it("binds the CSRF token to the session and the secret", () => {
@@ -63,7 +154,7 @@ describe("admin browser-boundary checks", () => {
     expect(headers["Content-Security-Policy"]).toContain("frame-ancestors 'none'");
     expect(headers["Content-Security-Policy"]).not.toContain("unsafe-inline");
     expect(headers["Cache-Control"]).toBe("no-store");
-    expect(headers["Referrer-Policy"]).toBe("no-referrer");
+    expect(headers["Referrer-Policy"]).toBe("same-origin");
     expect(headers["X-Content-Type-Options"]).toBe("nosniff");
   });
 

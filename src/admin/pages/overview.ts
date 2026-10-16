@@ -3,7 +3,8 @@ import type { JobView } from "../queries/jobs.js";
 import type { MaintenanceHealth } from "../queries/maintenance.js";
 import { html, join, type SafeHtml } from "../ui/html.js";
 import { statusBadge } from "../ui/format.js";
-import { alertLink, card, jobLink, letterLink, orderLink, table, when } from "./common.js";
+import { alertLink, card, jobLink, letterLink, table, when } from "./common.js";
+import { alertSubjectLink } from "./operations.js";
 
 export function renderOverview(input: {
   health: MaintenanceHealth;
@@ -32,13 +33,13 @@ Revenue figures are deliberately absent: Stripe is the ledger of record for mone
 <h2>Alerts needing attention</h2>
 ${table(
   "Open and acknowledged alerts",
-  ["Alert", "Type", "Severity", "Status", "Order", "Raised"],
+  ["Alert", "Type", "Severity", "Status", "Order or account", "Raised"],
   input.alerts.map((alert) => [
     alertLink(alert.alertId),
     html`${alert.alertType}`,
     statusBadge(alert.severity),
     statusBadge(alert.status),
-    orderLink(alert.orderId),
+    alertSubjectLink(alert),
     when(alert.createdAt),
   ]),
   "none open.",

@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  query: vi.fn()
+  query: vi.fn(),
+  transaction: vi.fn()
 }));
 
 vi.mock('../../../src/db/index.js', () => ({
-  query: mocks.query
+  query: mocks.query,
+  transaction: mocks.transaction
 }));
 
 const {
@@ -19,7 +21,13 @@ const {
   previewExpiredLetterContent,
   previewPaidDraftContent,
   previewAbandonedDraftContent,
-  runRetentionPreview
+  previewCancelledHeldLetterContent,
+  purgeCancelledHeldLetterContent,
+  SETTLED_JOB_STATUSES,
+  SETTLED_ORDER_STATUSES,
+  runRetentionPreview,
+  handleRetentionRestore,
+  processRetentionRestores
 } = await import('../../../src/services/retentionService.js');
 
 /**
@@ -62,6 +70,81 @@ describe('retention sweep guards (#153)', () => {
   beforeEach(() => {
     mocks.query.mockReset();
     mocks.query.mockResolvedValue({ rows: [], rowCount: 0 });
+    // A restore runs its statements on one transaction's client.
+    mocks.transaction.mockReset();
+    mocks.transaction.mockImplementation(async (callback: (client: unknown) => unknown) =>
+      callback({ query: mocks.query })
+    );
+  });
+
+  describe('purgeCancelledHeldLetterContent (#701)', () => {
+    it("takes only held mail its customer cancelled, never printed, on the unpaid schedule from the cancel", async () => {
+      await purgeCancelledHeldLetterContent();
+
+      const sql = sqlFrom(mocks.query.mock.calls[0]);
+      const params = mocks.query.mock.calls[0][1] as unknown[];
+      expect(sql).toContain("AND l.status = 'cancelled' AND EXISTS ( SELECT 1 FROM letter_jobs hj WHERE hj.letter_id = l.letter_id AND hj.mail_hold_until IS NOT NULL ) AND l.sent_at IS NULL");
+      // Never letters.mail_on, which the admin panel's reader role may not read (review round 1).
+      expect(sql).not.toContain('mail_on');
+      // The customer's cancel, which nothing rewrites: an operator's (#696) keeps the letter schedule.
+      const cancelledAt =
+        "(SELECT MAX(h.changed_at) FROM letter_status_history h WHERE h.letter_id = l.letter_id AND h.new_status = 'cancelled' AND h.source = 'customer')";
+      expect(sql).toContain(`AND ${cancelledAt} < NOW() - make_interval(days => $1::int)`);
+      // 7 days: 4 live, 3 to recover, from the cancel.
+      expect(params[0]).toBe(4);
+      expect(params[5]).toBe(7);
+      expect(sql).toContain(`GREATEST(${cancelledAt} + make_interval(days => $6::int), NOW() + INTERVAL '1 day')`);
+      // The letter schedule's holds: its job settled, its order, and the money behind it.
+      expect(sql).toContain('AND NOT EXISTS ( SELECT 1 FROM letter_jobs j WHERE j.letter_id = l.letter_id AND NOT (j.status = ANY($2::varchar[])) )');
+      expect(sql).toContain('AND NOT EXISTS ( SELECT 1 FROM orders o WHERE o.letter_id = l.letter_id AND NOT (o.status = ANY($3::varchar[])) )');
+      expect(sql).toContain("lot.status = 'revoked'");
+      expect(sql).toContain('OR (o.order_id IS NULL AND lot.source_type::text = ANY($4::varchar[]))');
+      expect(params.slice(1, 4)).toEqual([SETTLED_JOB_STATUSES, SETTLED_ORDER_STATUSES, ['purchase', 'adjustment', 'refund']]);
+    });
+
+    it('saves the content as any letter is saved, so the restore puts it back, and never replaces a copy', async () => {
+      await purgeCancelledHeldLetterContent();
+
+      const sql = sqlFrom(mocks.query.mock.calls[0]);
+      expect(sql).toContain("SELECT 'letters', l.letter_id,");
+      expect(sql).toContain(
+        "jsonb_build_object( 'content', l.content, 'recipient', l.recipient, 'preview_html', to_jsonb(l.preview_html) )"
+      );
+      expect(sql).toContain('ON CONFLICT (source_table, source_id) DO NOTHING');
+      expect(sql).toContain("SET content = '{}'::jsonb, recipient = '{}'::jsonb, preview_html = NULL, redacted_at = NOW()");
+      expect(sql).toContain('LIMIT $5::int FOR UPDATE OF l SKIP LOCKED');
+    });
+
+    it('counts against the same predicate it enforces', async () => {
+      await previewCancelledHeldLetterContent();
+      const previewSql = sqlFrom(mocks.query.mock.calls[0]);
+      mocks.query.mockClear();
+      await purgeCancelledHeldLetterContent();
+      const enforceSql = sqlFrom(mocks.query.mock.calls[0]);
+      for (const clause of [
+        "AND l.status = 'cancelled' AND EXISTS ( SELECT 1 FROM letter_jobs hj WHERE hj.letter_id = l.letter_id AND hj.mail_hold_until IS NOT NULL ) AND l.sent_at IS NULL",
+        "h.source = 'customer'",
+        'AND NOT (j.status = ANY($2::varchar[]))',
+        "lot.status = 'revoked'"
+      ]) {
+        expect(previewSql).toContain(clause);
+        expect(enforceSql).toContain(clause);
+      }
+    });
+
+    it('reads nothing the admin panel\'s reader role may not, and runs on the client it is given', async () => {
+      const db = { query: vi.fn(async () => ({ rows: [{ past_window: '1', due: '1', oldest_due_days: '5', newest_due_days: '5' }], rowCount: 1 })) };
+      await expect(previewCancelledHeldLetterContent(7, db as never)).resolves.toMatchObject({ due: 1 });
+      expect(mocks.query).not.toHaveBeenCalled();
+      const sql = String((db.query.mock.calls[0] as unknown[])[0]);
+      expect(sql).not.toContain('mail_on');
+      expect(sql).not.toMatch(/l\.(content|recipient|preview_html|arrive_by)/);
+    });
+
+    it('refuses a window it cannot split, and a batch out of range', async () => {
+      await expect(purgeCancelledHeldLetterContent(1)).rejects.toThrow('retentionDays must be an integer of at least 2');
+      await expect(purgeCancelledHeldLetterContent(7, 0)).rejects.toThrow('batchLimit must be an integer');
+    });
   });
 
   describe('purgeExpiredLetterContent', () => {
@@ -78,11 +161,17 @@ describe('retention sweep guards (#153)', () => {
         "jsonb_build_object( 'content', l.content, 'recipient', l.recipient, " +
           "'preview_html', to_jsonb(l.preview_html) )"
       );
-      // The recovery window itself. Collapsing this to NOW() would make the
-      // quarantine purge on its first pass, i.e. destruction with extra steps.
-      expect(sql).toContain('NOW() + make_interval(days => $7::int)');
-      // Re-redacting after a restore replaces the row rather than failing.
-      expect(sql).toContain('ON CONFLICT (source_table, source_id) DO UPDATE');
+      // The recovery window ends where the published period does, on the
+      // letter's own clock, with a floor for a row swept late. Collapsing it to
+      // NOW() would make the quarantine purge on its first pass, i.e.
+      // destruction with extra steps (#153 review round 3).
+      expect(sql).toContain(
+        "GREATEST(COALESCE(l.sent_at, l.created_at) + make_interval(days => $7::int), NOW() + INTERVAL '1 day')"
+      );
+      // A copy already saved is never replaced: re-sweeping a row whose marker
+      // was cleared used to overwrite the good copy with the emptied row.
+      expect(sql).toContain('ON CONFLICT (source_table, source_id) DO NOTHING');
+      expect(sql).not.toContain('DO UPDATE');
     });
 
     it('bounds the UPDATE to the due CTE and to the content columns', async () => {
@@ -102,9 +191,10 @@ describe('retention sweep guards (#153)', () => {
       expect(sqlFrom([sql])).toContain(
         'AND COALESCE(l.sent_at, l.created_at) < NOW() - make_interval(days => $1::int)'
       );
-      // 83 live, not 90: the quarantine carries the remaining 7.
+      // 83 live, not 90: the quarantine carries the rest, and it ends on day 90
+      // of the letter's own clock.
       expect(params[0]).toBe(83);
-      expect(params[6]).toBe(7);
+      expect(params[6]).toBe(90);
     });
 
     it('HOLDS a letter whose mail is still in flight', async () => {
@@ -112,7 +202,9 @@ describe('retention sweep guards (#153)', () => {
 
       expect(sqlFrom(mocks.query.mock.calls[0])).toContain(
         'AND NOT EXISTS ( SELECT 1 FROM letter_jobs j WHERE j.letter_id = l.letter_id ' +
-          'AND NOT (j.status = ANY($3::varchar[])) )'
+          'AND NOT (j.status = ANY($3::varchar[])) ' +
+          // A letter that failed for good is not held by its failed job (#730).
+          "AND NOT (j.status = 'failed' AND NOT (j.provider_outcome = 'not_dispatched' AND j.attempts < j.max_attempts) AND EXISTS (SELECT 1 FROM letters fl WHERE fl.letter_id = j.letter_id AND fl.status = 'failed')) )"
       );
     });
 
@@ -203,7 +295,9 @@ describe('retention sweep guards (#153)', () => {
         'INSERT INTO redacted_content_quarantine (source_table, source_id, content, purge_after)'
       );
       expect(sql).toContain("SELECT 'letter_drafts', d.draft_id::text,");
-      expect(sql).toMatch(/NOW\(\) \+ make_interval\(days => \$\d::int\)/);
+      expect(sql).toMatch(/GREATEST\(.+ \+ make_interval\(days => \$\d::int\), NOW\(\) \+ INTERVAL '1 day'\)/);
+      expect(sql).toContain('ON CONFLICT (source_table, source_id) DO NOTHING');
+      expect(sql).not.toContain('DO UPDATE');
       // Every cleared column is saved, including the layout images an earlier
       // version never cleared at all.
       for (const column of [
@@ -240,7 +334,8 @@ describe('retention sweep guards (#153)', () => {
       // consumed_letter_id NULL, so the clause was vacuously true throughout.
       expect(sqlFrom(mocks.query.mock.calls[0])).toContain(
         'AND NOT EXISTS ( SELECT 1 FROM letter_jobs j WHERE d.consumed_letter_id IS NOT NULL ' +
-          `AND j.letter_id = d.consumed_letter_id AND NOT (j.status = ANY($${jobParam}::varchar[])) )`
+          `AND j.letter_id = d.consumed_letter_id AND NOT (j.status = ANY($${jobParam}::varchar[])) ` +
+          "AND NOT (j.status = 'failed' AND NOT (j.provider_outcome = 'not_dispatched' AND j.attempts < j.max_attempts) AND EXISTS (SELECT 1 FROM letters fl WHERE fl.letter_id = j.letter_id AND fl.status = 'failed')) )"
       );
       const params = mocks.query.mock.calls[0][1] as unknown[];
       expect(params[jobParam - 1]).toEqual(['completed', 'cancelled']);
@@ -268,6 +363,34 @@ describe('retention sweep guards (#153)', () => {
   });
 
   describe('purgePaidDraftContent specifics', () => {
+    it("saves a draft's stationery and keeps only its theme, so migration 044's pair still holds (#563)", async () => {
+      await purgePaidDraftContent();
+
+      const sql = sqlFrom(mocks.query.mock.calls[0]);
+      expect(sql).toContain("'stationery', to_jsonb(d.stationery)");
+      expect(sql).toContain(
+        "stationery = CASE WHEN stationery IS NULL THEN NULL ELSE jsonb_build_object('theme', stationery->'theme') END"
+      );
+    });
+
+    it("saves a postcard's front and keeps only its layout, so migration 048's pair still holds (#594)", async () => {
+      await purgePaidDraftContent();
+
+      const sql = sqlFrom(mocks.query.mock.calls[0]);
+      expect(sql).toContain("'postcard_front', to_jsonb(d.postcard_front)");
+      expect(sql).toContain(
+        "postcard_front = CASE WHEN postcard_front IS NULL THEN NULL ELSE jsonb_build_object('layout', postcard_front->'layout') END"
+      );
+    });
+
+    it("saves a draft's signature and empties it, never NULL, so migration 051's pair still holds (#608)", async () => {
+      await purgePaidDraftContent();
+
+      const sql = sqlFrom(mocks.query.mock.calls[0]);
+      expect(sql).toContain("'signature_image', to_jsonb(d.signature_image)");
+      expect(sql).toContain("signature_image = CASE WHEN signature_image IS NULL THEN NULL ELSE '' END");
+    });
+
     it('requires an order in a PAID state, not merely an order row', async () => {
       await purgePaidDraftContent();
 
@@ -295,6 +418,11 @@ describe('retention sweep guards (#153)', () => {
       expect(sql).toContain(
         'AND COALESCE(d.consumed_at, d.created_at) < NOW() - make_interval(days => $1::int)'
       );
+      // The recovery window runs on the same clock, to the published 90.
+      expect(sql).toContain(
+        "GREATEST(COALESCE(d.consumed_at, d.created_at) + make_interval(days => $6::int), NOW() + INTERVAL '1 day')"
+      );
+      expect((mocks.query.mock.calls[0][1] as unknown[])[5]).toBe(90);
       expect(sql).not.toContain('d.updated_at');
     });
   });
@@ -330,9 +458,13 @@ describe('retention sweep guards (#153)', () => {
       expect(sqlFrom([sql])).toContain(
         'AND d.created_at < NOW() - make_interval(days => $1::int)'
       );
-      // 7 published = 4 live + 3 quarantine.
+      // 7 published = 4 live + the rest in quarantine, ending on day 7 of the
+      // draft's own clock.
       expect(params[0]).toBe(4);
-      expect(params[4]).toBe(3);
+      expect(params[4]).toBe(7);
+      expect(sqlFrom([sql])).toContain(
+        "GREATEST(d.created_at + make_interval(days => $5::int), NOW() + INTERVAL '1 day')"
+      );
     });
   });
 
@@ -361,39 +493,66 @@ describe('retention sweep guards (#153)', () => {
   });
 
   describe('restoreQuarantinedContent', () => {
-    it('puts a letter back and re-opens it to a future sweep', async () => {
-      mocks.query.mockResolvedValue({ rows: [], rowCount: 1 });
+    const SAVED = { rows: [{ quarantine_id: 'q-1' }], rowCount: 1 };
+
+    it('puts a letter back and re-opens it to a future sweep, in one transaction', async () => {
+      mocks.query.mockResolvedValueOnce(SAVED).mockResolvedValue({ rows: [], rowCount: 1 });
 
       expect(await restoreQuarantinedContent('letters', 'letter-1')).toBe(true);
 
-      const sql = sqlFrom(mocks.query.mock.calls[0]);
+      // The saved copy is locked first, so the purge and a second restore wait.
+      expect(sqlFrom(mocks.query.mock.calls[0])).toContain(
+        'FROM redacted_content_quarantine WHERE source_table = $1 AND source_id = $2 FOR UPDATE'
+      );
+      const sql = sqlFrom(mocks.query.mock.calls[1]);
       expect(sql).toContain("content = (SELECT content->'content' FROM saved)");
       expect(sql).toContain("recipient = (SELECT content->'recipient' FROM saved)");
       // Clearing redacted_at is what makes the row eligible again, so a fixed
       // predicate can re-sweep it instead of needing a hand-written backfill.
       expect(sql).toContain('redacted_at = NULL');
+      // Never over content that is live.
+      expect(sql).toContain('WHERE l.letter_id = $1 AND l.redacted_at IS NOT NULL');
+      expect(sqlFrom(mocks.query.mock.calls[2])).toContain('DELETE FROM redacted_content_quarantine');
+      // Write-back and delete commit together (#153 review round 3).
+      expect(mocks.transaction).toHaveBeenCalledTimes(1);
+      expect(mocks.query).toHaveBeenCalledTimes(3);
     });
 
-    it('restores every draft content column it cleared', async () => {
-      mocks.query.mockResolvedValue({ rows: [], rowCount: 1 });
+    it('restores every draft content column it cleared, onto a redacted draft only', async () => {
+      mocks.query.mockResolvedValueOnce(SAVED).mockResolvedValue({ rows: [], rowCount: 1 });
 
       await restoreQuarantinedContent('letter_drafts', 'draft-1');
 
-      const sql = sqlFrom(mocks.query.mock.calls[0]);
+      const sql = sqlFrom(mocks.query.mock.calls[1]);
       for (const jsonColumn of ['sender', 'recipient']) {
         expect(sql).toContain(`${jsonColumn} = (SELECT content->'${jsonColumn}' FROM saved)`);
+      }
+      // A nullable JSON column comes back as SQL NULL, not JSON null: for a
+      // Classic draft's stationery, migration 044's pair check needs it (#563),
+      // and 048's for a full-bleed postcard's front (#594).
+      for (const nullableJson of ['stationery', 'postcard_front', 'sender_validation', 'recipient_validation']) {
+        expect(sql).toContain(`${nullableJson} = NULLIF((SELECT content->'${nullableJson}' FROM saved), 'null'::jsonb)`);
       }
       for (const textColumn of ['body_text', 'header_image_data', 'inline_image_url']) {
         expect(sql).toContain(`${textColumn} = (SELECT content->>'${textColumn}' FROM saved)`);
       }
+      expect(sql).toContain('WHERE d.draft_id = $1::uuid AND d.redacted_at IS NOT NULL');
     });
 
     it('reports false when the recovery window has already expired', async () => {
       mocks.query.mockResolvedValue({ rows: [], rowCount: 0 });
 
       expect(await restoreQuarantinedContent('letters', 'gone')).toBe(false);
-      // No delete is attempted when nothing was restored.
+      // Nothing is written when there is nothing to put back.
       expect(mocks.query).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps the copy when the live row is not redacted', async () => {
+      mocks.query.mockResolvedValueOnce(SAVED).mockResolvedValue({ rows: [], rowCount: 0 });
+
+      expect(await restoreQuarantinedContent('letters', 'letter-live')).toBe(false);
+      // The write-back matched nothing, so the saved copy is not deleted.
+      expect(mocks.query).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -417,6 +576,7 @@ describe('retention sweep guards (#153)', () => {
 
       expect(summary).toEqual({
         lettersRedacted: 1,
+        cancelledHeldLettersRedacted: 1,
         draftsRedacted: 1,
         abandonedDraftsRedacted: 1,
         quarantinePurged: 1,
@@ -456,6 +616,15 @@ describe('retention sweep guards (#153)', () => {
       expect(summary.quarantinePurged).toBe(2);
     });
 
+    it('flags more work when the cancelled held letters fill their batch alone (#701)', async () => {
+      // letters, cancelled held letters, paid drafts, abandoned drafts, quarantine.
+      mocks.query
+        .mockResolvedValueOnce({ rows: [], rowCount: 0 })
+        .mockResolvedValueOnce({ rows: [], rowCount: 5 })
+        .mockResolvedValue({ rows: [], rowCount: 0 });
+      expect(await runRetentionSweep(90, 5)).toMatchObject({ cancelledHeldLettersRedacted: 5, moreWaiting: true });
+    });
+
     it('flags more work when a batch fills OR a sweep failed', async () => {
       mocks.query.mockResolvedValue({ rows: [], rowCount: 5 });
       expect(await runRetentionSweep(90, 5)).toMatchObject({ moreWaiting: true });
@@ -471,9 +640,9 @@ describe('retention sweep guards (#153)', () => {
       await runRetentionSweep(365, 9);
 
       const windows = mocks.query.mock.calls.map(call => (call[1] as unknown[])[0]);
-      // 365 -> 358 live for letters and paid drafts; 7 -> 4 for abandoned;
-      // the quarantine purge takes only a batch limit.
-      expect(windows).toEqual([358, 358, 4, 9]);
+      // 365 -> 358 live for letters and paid drafts; 7 -> 4 for cancelled held
+      // letters (#701) and abandoned drafts; the quarantine purge takes only a batch limit.
+      expect(windows).toEqual([358, 4, 358, 4, 9]);
     });
   });
 
@@ -488,7 +657,8 @@ describe('retention sweep guards (#153)', () => {
     it.each([
       ['letters', () => previewExpiredLetterContent()],
       ['paid drafts', () => previewPaidDraftContent()],
-      ['abandoned drafts', () => previewAbandonedDraftContent()]
+      ['abandoned drafts', () => previewAbandonedDraftContent()],
+      ['cancelled held letters', () => previewCancelledHeldLetterContent()]
     ])('%s preview issues a SELECT with no write verb and no lock', async (_name, run) => {
       await run();
 
@@ -512,7 +682,9 @@ describe('retention sweep guards (#153)', () => {
       for (const clause of [
         'AND l.status = ANY($2::varchar[])',
         'AND NOT EXISTS ( SELECT 1 FROM letter_jobs j WHERE j.letter_id = l.letter_id ' +
-          'AND NOT (j.status = ANY($3::varchar[])) )',
+          'AND NOT (j.status = ANY($3::varchar[])) ' +
+          // A letter that failed for good is not held by its failed job (#730).
+          "AND NOT (j.status = 'failed' AND NOT (j.provider_outcome = 'not_dispatched' AND j.attempts < j.max_attempts) AND EXISTS (SELECT 1 FROM letters fl WHERE fl.letter_id = j.letter_id AND fl.status = 'failed')) )",
         'LEFT JOIN orders o ON o.order_id = lot.source_order_id'
       ]) {
         expect(previewSql).toContain(clause);
@@ -568,9 +740,10 @@ describe('retention sweep guards (#153)', () => {
       expect(result.errors).toEqual([]);
       expect(result.letters.due).toBe(2);
       const windows = mocks.query.mock.calls.map(call => (call[1] as unknown[])[0]);
-      // 365 -> 358 live for letters and paid drafts; the abandoned sweep keeps
-      // its own published 7 -> 4, regardless of the caller.
-      expect(windows).toEqual([358, 358, 4]);
+      // 365 -> 358 live for letters and paid drafts; the cancelled held letters
+      // (#701) and the abandoned drafts keep their own published 7 -> 4, regardless of the caller.
+      expect(windows).toEqual([358, 4, 358, 4]);
+      expect(result.cancelledHeldLetters.due).toBe(2);
     });
 
     it('carries an error class, never a driver message, when a preview fails', async () => {
@@ -585,8 +758,109 @@ describe('retention sweep guards (#153)', () => {
 
       expect(result.errors[0]).toMatch(/^letters:/);
       expect(JSON.stringify(result)).not.toContain('Baker Street');
-      // The other two still ran.
-      expect(mocks.query).toHaveBeenCalledTimes(3);
+      // The others still ran.
+      expect(mocks.query).toHaveBeenCalledTimes(4);
     });
+  });
+});
+
+describe('queued restores (#153)', () => {
+  const COPY = '8f14e45f-ceea-467a-9575-9c2d1f7c0a11';
+
+  function client(script: Array<{ rows: unknown[]; rowCount: number }>) {
+    const query = vi.fn(async () => script.shift() ?? { rows: [], rowCount: 0 });
+    return { query };
+  }
+
+  it('puts back the copy the operator previewed, by its id', async () => {
+    const fake = client([
+      { rows: [{ source_table: 'letters', source_id: 'letter-1' }], rowCount: 1 },
+      { rows: [{ quarantine_id: COPY }], rowCount: 1 },
+      { rows: [], rowCount: 1 },
+      { rows: [], rowCount: 1 }
+    ]);
+
+    expect(await handleRetentionRestore(fake, { quarantineId: COPY })).toEqual({
+      outcome: 'done',
+      result: { sourceTable: 'letters' },
+      diagnostic: { sourceTable: 'letters', alreadyRestored: false }
+    });
+    expect(fake.query.mock.calls[0][1]).toEqual([COPY]);
+    // Locked where it is looked up, so nothing takes it before the restore does
+    // and the outcome is recorded under the right reason (#450 review).
+    expect(sqlFrom(fake.query.mock.calls[0])).toContain('WHERE quarantine_id = $1::uuid FOR UPDATE');
+    // The restore itself works by the source the copy names.
+    expect(fake.query.mock.calls[1][1]).toEqual(['letters', 'letter-1']);
+  });
+
+  it('counts a copy an earlier restore already put back as done (#450 review)', async () => {
+    const fake = client([
+      { rows: [], rowCount: 0 },
+      { rows: [{ '?column?': 1 }], rowCount: 1 }
+    ]);
+
+    expect(await handleRetentionRestore(fake, { quarantineId: COPY })).toEqual({
+      outcome: 'done',
+      result: { alreadyRestored: true },
+      diagnostic: { alreadyRestored: true }
+    });
+    const earlier = sqlFrom(fake.query.mock.calls[1]);
+    expect(earlier).toContain('FROM admin_operations');
+    expect(earlier).toContain("status = 'succeeded'");
+    expect(earlier).toContain("lower(payload_json->>'quarantineId') = lower($2::text)");
+    expect(fake.query.mock.calls[1][1]).toEqual(['retention.restore', COPY]);
+    // Nothing was written.
+    expect(fake.query).toHaveBeenCalledTimes(2);
+  });
+
+  it('refuses, without a query, a payload that names no copy', async () => {
+    for (const payload of [null, {}, { quarantineId: 'not-a-uuid' }, { quarantineId: 42 }]) {
+      const fake = client([]);
+      expect(await handleRetentionRestore(fake, payload)).toEqual({
+        outcome: 'refused',
+        code: 'RETENTION_RESTORE_UNAVAILABLE',
+        result: { reason: 'no_such_copy' }
+      });
+      expect(fake.query).not.toHaveBeenCalled();
+    }
+  });
+
+  it('refuses when the window has closed and the copy is gone', async () => {
+    const fake = client([
+      { rows: [], rowCount: 0 },
+      { rows: [], rowCount: 0 }
+    ]);
+    expect(await handleRetentionRestore(fake, { quarantineId: COPY })).toEqual({
+      outcome: 'refused',
+      code: 'RETENTION_RESTORE_UNAVAILABLE',
+      result: { reason: 'window_closed' }
+    });
+    // It looked for an earlier restore of the copy before calling it purged.
+    expect(sqlFrom(fake.query.mock.calls[1])).toContain('FROM admin_operations');
+  });
+
+  it('refuses when the live row is no longer redacted, keeping the copy', async () => {
+    const fake = client([
+      { rows: [{ source_table: 'letter_drafts', source_id: COPY }], rowCount: 1 },
+      { rows: [{ quarantine_id: COPY }], rowCount: 1 },
+      { rows: [], rowCount: 0 }
+    ]);
+    expect(await handleRetentionRestore(fake, { quarantineId: COPY })).toEqual({
+      outcome: 'refused',
+      code: 'RETENTION_RESTORE_UNAVAILABLE',
+      result: { reason: 'not_redacted' }
+    });
+    expect(fake.query.mock.calls.some(([sql]) => String(sql).includes('DELETE'))).toBe(false);
+  });
+
+  it('claims only restore operations, and reports an empty queue as nothing done', async () => {
+    mocks.query.mockReset().mockResolvedValue({ rows: [], rowCount: 0 });
+    mocks.transaction.mockReset().mockImplementation(async (callback: (c: unknown) => unknown) =>
+      callback({ query: mocks.query })
+    );
+
+    expect(await processRetentionRestores()).toEqual({ done: 0, refused: 0, retrying: 0, failed: 0 });
+    expect(sqlFrom(mocks.query.mock.calls[0])).toContain('FROM admin_operations o');
+    expect(mocks.query.mock.calls[0][1]).toEqual(['retention.restore']);
   });
 });

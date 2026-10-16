@@ -22,7 +22,7 @@
  * the letter card's address window empty on every preview ever rendered.
  *
  * Where the drop happens is worth being precise about, because it dictates
- * what a guard can be. At `@modelcontextprotocol/sdk` 1.29.0 the server does
+ * what a guard can be. At `@modelcontextprotocol/sdk` 1.31.0 the server does
  * NOT strip: `registerTools` hands the SDK a raw zod shape, and the SDK's
  * `validateToolOutput` calls `safeParseAsync` but discards `parseResult.data`,
  * so the unstripped result goes on the wire. The drop is client-side, when
@@ -41,6 +41,7 @@
 
 import type { z } from "zod";
 import type { McpToolDefinition } from "./types.js";
+import type { CardResultField } from "../mcp/toolCatalog.js";
 import type {
   quoteAndPreviewOutputZ,
   quoteAndPreviewPostcardOutputZ,
@@ -61,7 +62,23 @@ import type {
   getStartedOutputZ,
   uploadImageOutputZ,
   generateImageForMailOutputZ,
-  confirmUploadedImageOutputZ
+  confirmUploadedImageOutputZ,
+  setArrivalDateOutputZ,
+  setStationeryOutputZ,
+  setMailServiceOutputZ,
+  setLetterWordsOutputZ,
+  setPostcardStyleOutputZ,
+  cancelScheduledMailOutputZ,
+  requestAddressOutputZ,
+  getAddressRequestOutputZ,
+  cancelAddressRequestOutputZ,
+  setSignatureOutputZ,
+  getSignatureOutputZ,
+  clearSignatureOutputZ,
+  saveStationeryDesignOutputZ,
+  listStationeryDesignsOutputZ,
+  deleteStationeryDesignOutputZ,
+  setLetterSignatureOutputZ
 } from "../zodSchemas.js";
 import type {
   quoteAndPreviewLetterTextOnlyTool,
@@ -85,7 +102,23 @@ import type {
   getStartedTool,
   uploadImageTool,
   generateImageForMailTool,
-  confirmUploadedImageTool
+  confirmUploadedImageTool,
+  setArrivalDateTool,
+  setStationeryTool,
+  setMailServiceTool,
+  setLetterWordsTool,
+  setPostcardStyleTool,
+  cancelScheduledMailTool,
+  requestAddressTool,
+  getAddressRequestTool,
+  cancelAddressRequestTool,
+  setSignatureTool,
+  getSignatureTool,
+  clearSignatureTool,
+  setLetterSignatureTool,
+  saveStationeryDesignTool,
+  listStationeryDesignsTool,
+  deleteStationeryDesignTool
 } from "../tools/index.js";
 
 // ============================================================================
@@ -105,30 +138,14 @@ type MissingKeys<Output, Schema> = Exclude<keyof Schema, keyof Output>;
 
 /**
  * The fields `partitionToolResult` (src/mcp/registerTools.ts) removes from
- * structuredContent. Six are forwarded into `_meta` for the widget; three are
- * full-quality originals the draft already holds and are dropped from both
- * channels. Either way they are deliberately absent from the served schema,
- * so they are the one legitimate way to produce a field the schema omits.
- *
- * Keep in step with partitionToolResult. The widget data-contract test
- * (tests/unit/mcp/widgetResources.test.ts) derives its copy from the runtime
- * function; this list cannot, because types cannot read a value.
+ * structuredContent: the tool catalogue's card fields (CARD_RESULT_FIELDS,
+ * src/mcp/toolCatalog.ts, #687), forwarded into `_meta` for a card or, for
+ * full-quality originals the draft already holds, dropped. Either way they are
+ * deliberately absent from the served schema, so they are the one legitimate
+ * way to produce a field the schema omits. Read from the catalogue's own keys,
+ * so this cannot drift from what the partition does.
  */
-type MetaPartitioned =
-  | "previewHtml"
-  | "previewFrontHtml"
-  | "previewBackHtml"
-  | "headerImagePreview"
-  | "inlineImagePreview"
-  | "generatedImagePreview"
-  | "headerImageData"
-  | "inlineImageData"
-  | "frontImageData"
-  // get_started's card copy
-  | "title"
-  | "overview"
-  | "purchaseStep"
-  | "examplePrompts";
+type MetaPartitioned = CardResultField;
 
 type UndeclaredKeys<Output, Schema> = Exclude<keyof Output, keyof Schema | MetaPartitioned>;
 
@@ -237,4 +254,52 @@ export type GenerateImageForMailConforms = Conforms<
 >;
 export type ConfirmUploadedImageConforms = Conforms<
   BothDirections<z.infer<typeof confirmUploadedImageOutputZ>, typeof confirmUploadedImageTool>
+>;
+export type SetArrivalDateConforms = Conforms<
+  BothDirections<z.infer<typeof setArrivalDateOutputZ>, typeof setArrivalDateTool>
+>;
+export type SetStationeryConforms = Conforms<
+  BothDirections<z.infer<typeof setStationeryOutputZ>, typeof setStationeryTool>
+>;
+export type SetMailServiceConforms = Conforms<
+  BothDirections<z.infer<typeof setMailServiceOutputZ>, typeof setMailServiceTool>
+>;
+export type SetLetterWordsConforms = Conforms<
+  BothDirections<z.infer<typeof setLetterWordsOutputZ>, typeof setLetterWordsTool>
+>;
+export type SetPostcardStyleConforms = Conforms<
+  BothDirections<z.infer<typeof setPostcardStyleOutputZ>, typeof setPostcardStyleTool>
+>;
+export type CancelScheduledMailConforms = Conforms<
+  BothDirections<z.infer<typeof cancelScheduledMailOutputZ>, typeof cancelScheduledMailTool>
+>;
+export type RequestAddressConforms = Conforms<
+  BothDirections<z.infer<typeof requestAddressOutputZ>, typeof requestAddressTool>
+>;
+export type GetAddressRequestConforms = Conforms<
+  BothDirections<z.infer<typeof getAddressRequestOutputZ>, typeof getAddressRequestTool>
+>;
+export type CancelAddressRequestConforms = Conforms<
+  BothDirections<z.infer<typeof cancelAddressRequestOutputZ>, typeof cancelAddressRequestTool>
+>;
+export type SetSignatureConforms = Conforms<
+  BothDirections<z.infer<typeof setSignatureOutputZ>, typeof setSignatureTool>
+>;
+export type GetSignatureConforms = Conforms<
+  BothDirections<z.infer<typeof getSignatureOutputZ>, typeof getSignatureTool>
+>;
+export type ClearSignatureConforms = Conforms<
+  BothDirections<z.infer<typeof clearSignatureOutputZ>, typeof clearSignatureTool>
+>;
+export type SetLetterSignatureConforms = Conforms<
+  BothDirections<z.infer<typeof setLetterSignatureOutputZ>, typeof setLetterSignatureTool>
+>;
+export type SaveStationeryDesignConforms = Conforms<
+  BothDirections<z.infer<typeof saveStationeryDesignOutputZ>, typeof saveStationeryDesignTool>
+>;
+export type ListStationeryDesignsConforms = Conforms<
+  BothDirections<z.infer<typeof listStationeryDesignsOutputZ>, typeof listStationeryDesignsTool>
+>;
+export type DeleteStationeryDesignConforms = Conforms<
+  BothDirections<z.infer<typeof deleteStationeryDesignOutputZ>, typeof deleteStationeryDesignTool>
 >;

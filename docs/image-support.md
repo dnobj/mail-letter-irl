@@ -1,0 +1,520 @@
+# Image Support Documentation
+
+**Last Updated:** September 16, 2026
+**Purpose:** Image sources, processing, print specifications, and platform behavior for letters and postcards
+
+This document describes Letter IRL's image support capabilities for postcards and letters, including technical specifications, processing details, and implementation notes.
+
+## Executive Summary
+
+Letter IRL **fully supports** images in both postcards and letters:
+
+- **Postcards**: Full-image front with custom message on back
+- **Letters with Header Image**: Image at top of letter (letterhead style)
+- **Letters with Inline Image**: Image after signature
+- **Text-Only Letters**: No images (baseline option)
+
+Images reach a preview tool in one of these ways, in the order the server instructions prefer:
+1. **An image already in the conversation**, including one ChatGPT generated, passed through the
+   Apps SDK `fileParams` transform
+2. **A file attachment**, through the same transform
+3. **An `imageUrl`**: a public HTTPS image, or a Letter IRL capability URL (below)
+4. **The upload widget** (`upload_image` -> `ImageUploadCard`), as a fallback after a failed handoff. It
+   uploads through the host (`window.openai.uploadFile`) or picks from the ChatGPT Library
+   (`selectFiles`), then `confirm_uploaded_image` returns the `imageUrl` and records it in
+   `recent_uploads`, so the next preview can use it even if the model drops the URL. That link is
+   readable for at most six hours and deleted 24 hours after the last upload (#282).
+
+   In an app with no file store for cards (Claude), the card sends the photo itself, while
+   `LETTER_IRL_CARD_UPLOAD_ENABLED` is on (#474, phase 3). It shrinks the photo to a JPEG of at most
+   2400 px, sends it in chunks through the card-only `upload_photo_chunk`, and then asks for the
+   preview in the conversation. The server keeps the photo privately as the account's one uploaded
+   photo for 15 minutes and records `letterirl-upload:latest` as its recent upload. The image service
+   resolves that reference only to the photo of the account the preview is for, straight from the
+   store, with no fetch. After 15 minutes the preview says the upload has expired and asks for it
+   again. See [tool-apis.md](tool-apis.md) for the limits.
+
+   A request whose `image` names a picture the server cannot open is stricter (#414). Such a
+   request carries a string other than `""` (a sandbox path such as `/mnt/data/photo.png`, or a mobile
+   placeholder such as `chat_upload://image_0`) or a file object without a download address. It uses a
+   recent upload only if that upload is at most five minutes old, which covers the upload card's own
+   recovery: its follow-up reaches the model within seconds. An older upload may be a different
+   picture, so the tool asks for the image instead. Inside the five minutes, a different picture whose
+   handoff also failed would still get the upload; the preview card shows the picture before anything
+   is sent. The tool also treats a raw string this way when a caller skips the served schema. The
+   served schema's preprocess keeps such a string as a marker file object
+   (`src/utils/imageFileParam.ts`), so the JSON schema ChatGPT reads is unchanged. The resolver is
+   `src/services/previewImageSource.ts`.
+
+**Letter IRL image generation.** `generate_image_for_mail` generates in-turn with the OpenAI Images API
+when the user has Letter IRL image generations left (granted by packs, Pay & Send orders and a
+one-time starter allowance) and the global daily ceiling allows it. The image is stored in the private
+Railway bucket and returned as a `/api/temp-image/<token>` capability URL that expires after 15
+minutes. Otherwise the tool returns routing guidance to ChatGPT's free built-in generator
+(`ImageRoutingCard`). See [ui-widgets.md](ui-widgets.md) and
+[learnings/generate-image-removal-decision.md](learnings/generate-image-removal-decision.md).
+
+All images are validated, resized to print specifications (300 DPI), and optimized for quality. A legacy letter embeds them as base64 in the HTML sent to PostGrid. A letter drawn by our own renderer (#534, [letter-send-flow.md](letter-send-flow.md)) draws them into its PDF, and its preview shows the small copy in the printed image's box.
+
+---
+
+## Current Implementation
+
+### 1. Postcard Images
+
+**Tool**: `quote_and_preview_postcard`
+
+**Image Specifications**:
+
+| Property | Value |
+|----------|-------|
+| Max File Size | 10 MB |
+| Max Resolution | 50 megapixels (about 7000×7000), checked on the header before any decode |
+| Min Resolution | 100×100 pixels |
+| Recommended Resolution | 1872×1248 pixels (optimal for 6×9 at 300 DPI) |
+| Supported Formats | PNG, JPEG, WebP |
+| Output Dimensions | 2700×1800 pixels (9"×6" landscape at 300 DPI) |
+| Output DPI | 300 |
+| JPEG Quality | 85 |
+| Resize Mode | `cover` with `center` position (crops to fill) |
+| Supported Sizes | 6×9 only (currently) |
+
+**Text Specifications**:
+- Message limit: 500 characters on the legacy HTML, 350 on a gift postcard; with `LETTER_IRL_PRINT_RENDERER=pdf`, 16 lines of the back, or 11 above a gift send's card, measured as they print (#534)
+- Printed on back of postcard
+
+**Processing Pipeline**:
+1. Download image from URL or file attachment
+2. Validate file size (≤10 MB)
+3. Validate format (PNG, JPEG, or WebP) from the bytes; the Content-Type header is only an early hint
+4. Validate dimensions (≥100×100 pixels and ≤50 megapixels; the ceiling is enforced on the header read, before any pixel is decoded)
+5. Turn the picture upright by its EXIF orientation, then resize to 2700×1800 using Sharp with `cover` fit (crops and fills). A phone stores a portrait photo's pixels as the sensor read them and records the turn in a tag that re-encoding drops, so the turn is applied first (#617)
+6. Convert to JPEG at quality 85
+7. Encode as base64 data URI
+8. Embed in PostGrid HTML template
+
+**Validation Errors**:
+- File too large: "Image is too large. Please use an image under 10MB."
+- Unsupported format: "Unsupported image format. Please use PNG, JPEG, or WebP."
+- Too small: "Image is too small for print quality. Please use at least 100x100 pixels."
+- Too many pixels: "Image is too large. Please use an image under 50 megapixels."
+- Too large to decode whole: "Image is too large to process. Please use an image under N megapixels, or save it without interlacing or progressive encoding." (N depends on the image's channels and depth: 33 for 8-bit RGB, 25 for 8-bit RGBA, 16 for 16-bit RGB, 12 for 16-bit RGBA.)
+- Busy: "The image service is busy right now. Please try again in a moment." or, when it is the caller's own share of the gates that is full, "You have other images still processing. Please wait for them to finish and try again."
+
+**Collages (#616; `quote_and_preview_postcard` takes them as `images` or `imageUrls` while `LETTER_IRL_POSTCARD_COLLAGES_ENABLED` is on):** `downloadAndProcessCollageWithPreview` (`src/services/imageService.ts`) draws two to four photos on one front, so a collage is stored as a single photo's crop is and nothing downstream learns it was one, except that it keeps the size it was made at (`set_postcard_style` refuses another: the photos are not kept to arrange again).
+
+| Photos | Arrangement (`src/services/collageArrangement.ts`) |
+|--------|-----------------------------------------------------|
+| 2 | side by side, equal |
+| 3 | one large on the left, two thirds of the width, and two stacked on the right |
+| 4 | two by two, in reading order |
+
+- Each photo is cut to fill its cell, so a cell's shape follows its place in the arrangement, not the front's: on a 6×9, two photos are 1314 × 1752 px each (portrait); three are 1752 × 1752 and two of 876 × 864; four are 1314 × 864. A white margin runs round the front and a white gutter between photos, each 24 px (0.08 in at 300 DPI), at every size (4×6, 6×9 and 11×6). The odd pixel of a split goes to the second cell, never to a gutter.
+- The whole of it runs under the collage gate (two at a time, four may wait, one per account), so a set that waits has fetched nothing. The photos are downloaded one at a time, in order, each under the download gate, so the account holds one share of it, not four: the first that will not download is named, and the rest are not fetched. They share one 30 s budget for their downloads, the queue waits and the transfers together: each transfer starts with what is left of it, if that is less than its own 20 s, and one that finds it spent fails as a download that did not finish. Downloads come before pictures.
+- Every photo then gets the checks a single photo gets, from its header (format from the bytes, the pixel ceiling, the progressive budget, the 100 × 100 minimum), before any is drawn, and the first to fail is named. Then, under one decode slot and one at a time, each is turned upright by its EXIF orientation, cropped to fill its cell (`cover`, centred) and encoded as a PNG tile; a photo that passes the header checks but whose pixels will not decode is named when its turn comes. The tiles are laid on a white canvas of the postcard's size, which a transparent picture shows through to, and encoded as a JPEG at quality 85, with the small preview derived from it as for a single photo.
+- Measured at one libvips thread with sharp's cache off (below), a four-photo collage of 33-megapixel progressive JPEGs peaks no higher than one such photo (+125 MB against +163 MB for one photo at 4:2:0; +225 MB against +263 MB at 4:4:4) and holds about 3 MB once it returns, and noise photos, which make the largest tiles, peak lower still (+72 MB for three RGB photos at the 11×6 size, +84 MB for two RGBA and +101 MB for four RGBA). The decodes are one at a time, so a collage's peak is one decode's. (The 4:4:4 figures are above the 165 MB the gates are sized by: see the full-decode budget below.)
+- A photo that cannot be used is named by its place, with the single photo's sentence: "The second photo: Unsupported image format. Please use PNG, JPEG, or WebP." A busy service is not any photo's fault and is said as it is. Fewer than two or more than four photos is refused.
+- `tests/unit/services/collageArrangement.test.ts` proves the geometry (exact cells for the three sizes, and that the cells and gutters tile any front), and `tests/unit/services/imageServiceCollage.test.ts` proves the picture with real bytes: the cells' colours, the white margins and gutters, the order, the crop, the EXIF turn, transparency, WebP and file-parameter photos, every refusal, and the gates (an account's one share of each, the downloads one at a time and stopping at the first that fails, the collage gate's two, its queue and its refusals).
+
+### 2. Letter Header Images
+
+**Tool**: `quote_and_preview_letter_with_header_image`
+
+**Image Specifications**:
+
+| Property | Value |
+|----------|-------|
+| Max File Size | 5 MB |
+| Max Resolution | 50 megapixels (about 7000×7000), checked on the header before any decode |
+| Min Resolution | 100×100 pixels |
+| Supported Formats | PNG, JPEG, WebP |
+| Output Dimensions | 1950×600 pixels (6.5"×2" at 300 DPI) |
+| Output DPI | 300 |
+| JPEG Quality | 85 |
+| Resize Mode | `inside` (fits within bounds, no crop, allows upscale) |
+| Placement | Top of letter (letterhead style) |
+
+**Text Specifications**:
+- Body text limit: 1100 characters OR 15 lines (the legacy HTML takes 17; a letter drawn by our renderer is measured, #534)
+- Sign-off required
+
+**Processing Pipeline**:
+1. Download image from URL or file attachment
+2. Validate file size (≤5 MB)
+3. Validate format (PNG, JPEG, or WebP) from the bytes; the Content-Type header is only an early hint
+4. Validate dimensions (≥100×100 pixels and ≤50 megapixels; the ceiling is enforced on the header read, before any pixel is decoded)
+5. Turn the picture upright by its EXIF orientation (#617), then resize to fit within 1950×600 using Sharp with `inside` fit (maintains aspect ratio)
+6. Convert to JPEG at quality 85
+7. Encode as base64 data URI
+8. Embed at top of letter HTML template
+
+**Validation Errors**:
+- File too large: "Header image is too large. Please use an image under 5MB."
+- Unsupported format: "Unsupported image format. Please use PNG, JPEG, or WebP."
+- Too small: "Image is too small for print quality. Please use at least 100x100 pixels."
+- Too many pixels: "Image is too large. Please use an image under 50 megapixels."
+- Too large to decode whole: "Image is too large to process. Please use an image under N megapixels, or save it without interlacing or progressive encoding." (N depends on the image's channels and depth: 33 for 8-bit RGB, 25 for 8-bit RGBA, 16 for 16-bit RGB, 12 for 16-bit RGBA.)
+- Busy: "The image service is busy right now. Please try again in a moment." or, when it is the caller's own share of the gates that is full, "You have other images still processing. Please wait for them to finish and try again."
+
+### 3. Letter Inline Images
+
+**Tool**: `quote_and_preview_letter_with_image`
+
+**Image Specifications**:
+
+| Property | Value |
+|----------|-------|
+| Max File Size | 5 MB |
+| Max Resolution | 50 megapixels (about 7000×7000), checked on the header before any decode |
+| Min Resolution | 100×100 pixels |
+| Supported Formats | PNG, JPEG, WebP |
+| Output Dimensions | 1950×900 pixels (6.5"×3" at 300 DPI) |
+| Output DPI | 300 |
+| JPEG Quality | 85 |
+| Resize Mode | `inside` (fits within bounds, no crop, allows upscale) |
+| Placement | After signature (inline in body) |
+
+**Text Specifications**:
+- Body text limit: 800 characters OR 12 lines
+- Sign-off required
+
+**Processing Pipeline**:
+Same as header images, but with different output dimensions (1950×900) and placement after signature.
+
+**Validation Errors**:
+- File too large: "Inline image is too large. Please use an image under 5MB."
+- Unsupported format: "Unsupported image format. Please use PNG, JPEG, or WebP."
+- Too small: "Image is too small for print quality. Please use at least 100x100 pixels."
+- Too many pixels: "Image is too large. Please use an image under 50 megapixels."
+- Too large to decode whole: "Image is too large to process. Please use an image under N megapixels, or save it without interlacing or progressive encoding." (N depends on the image's channels and depth: 33 for 8-bit RGB, 25 for 8-bit RGBA, 16 for 16-bit RGB, 12 for 16-bit RGBA.)
+- Busy: "The image service is busy right now. Please try again in a moment." or, when it is the caller's own share of the gates that is full, "You have other images still processing. Please wait for them to finish and try again."
+
+### 4. Text-Only Letters
+
+**Tool**: `quote_and_preview_letter`
+
+**Text Specifications**:
+- Body text limit: 1600 characters OR 24 lines
+- No images
+- Baseline option for pure text letters
+
+---
+
+## Technical Implementation
+
+### Resource limits
+
+Every image byte is customer-controlled, and decoding is where bytes become memory, so `src/services/imageService.ts` bounds the work in eight ways:
+
+- **Format from the first bytes.** Before sharp is asked anything, the buffer must start with a PNG, JPEG or WebP signature; anything else is refused without a parse. libvips picks its loader by the same signatures, so only bytes bound for those three loaders ever reach it. The Content-Type header is still checked as an early hint, but a server that omits or fakes it cannot route SVG (whose "header read" is a full XML parse), GIF, TIFF or AVIF bytes to the other bundled loaders.
+- **Pixel ceiling.** Every `sharp()` call goes through one opener that sets `limitInputPixels` to 50 megapixels. sharp checks the declared size when it reads the header, so a small file claiming huge dimensions is refused before any pixel is decoded. sharp's own default is about five times higher, at which a 10 MB file can decode to about a gigabyte.
+- **Full-decode budget.** Interlaced PNGs and progressive JPEGs cannot be streamed; libvips holds them whole. So an image whose header marks it interlaced or progressive must also fit 100 MB of decoded bytes (width × height × channels × bytes per sample), and the refusal names the size that would fit for that image's channels and depth. Measured through this pipeline at one libvips thread: a 49-megapixel baseline JPEG or plain 8-bit PNG peaks near 60 MB resident and a plain 16-bit RGBA PNG near 130 MB (all streamed); an interlaced or progressive image at the budget boundary peaks near 140 to 165 MB (a progressive JPEG without chroma subsampling, 4:4:4, keeps about twice the coefficient memory and peaked near 265 MB in the #620 review: the budget does not count that yet, #622). Without the budget, a 49-megapixel interlaced 16-bit PNG, a 4 MB file that passes every other check, measured near 500 MB.
+- **One libvips thread.** The service pins `sharp.concurrency(1)`. Every figure above was measured at one thread; sharp's default is one on the glibc build the API runs, but it switches to the core count under `MALLOC_ARENA_MAX` or a musl or jemalloc base image, where the same decodes measured two to three times larger.
+- **No operation cache.** The service turns off sharp's cache (`sharp.cache(false)`). By default sharp keeps recent sources and results (50 MB, 20 files, 100 items), and a cached source keeps its decoder alive, whose memory the cache does not count. With the default, a progressive 33-megapixel JPEG decoded four times in one request peaked at up to three times one photo (+449 MB at 4:2:0 and +849 MB at 4:4:4, against +167 and +265 MB for one photo), and +111 and +211 MB were still held after the request had returned; with the cache off the same requests peaked at +125 and +225 MB and held about 3 MB (measured in the #620 review and again with the fix: Windows, sharp 0.35.4, one libvips thread; the mechanism is not platform-specific). Every image here is opened from bytes seen once, so the cache never hits. `tests/unit/services/imageServiceHardening.test.ts` pins it as it pins the thread.
+- **Decode once.** The widget preview is derived from the processed print image, not from the original, so each original is decoded exactly once. The preview is a scaled copy of the print image; a small letter original is upscaled for print first, so its preview follows the print image rather than the original.
+- **Concurrency gates.** Decodes run through an in-process gate of 3 at a time (12 may wait, 15 s each) and remote downloads through a gate of 8 (24 may wait, 15 s each). Each account may hold at most 2 callers in each gate, so one account cannot fill a gate for everyone else; the tools pass the account, and a refused caller gets a message naming its own in-flight images. Any other caller that cannot get a slot fails fast with the busy message rather than adding to memory pressure. Worst case with these numbers is three decodes near 165 MB, fifteen held input buffers and eight download buffers of at most 10 MB: about 725 MB. A collage (#616) holds up to four input buffers and then their tiles, so it runs under a gate of its own, around its downloads and its drawing alike: 2 at a time, 4 may wait (15 s each), one per account. One that waits has fetched nothing, and one that runs downloads its photos one at a time, each under the download gate, so its account holds one share of it, not four. Two collages add at most six held input buffers and two sets of tiles (about 24 MB each, for noise at the 11×6 size) to the worst case above: about 835 MB, or about 1.13 GB while a 4:4:4 progressive decode is the 265 MB measured and not the 165 MB counted (#622). The downloads of a collage's photos share a budget of 30 s, so its worst case from its call is about 75 s, plus the drawing (15 s waiting for a collage slot, 30 s of downloads and up to 15 s more waiting for the last download slot, then 15 s for a decode slot), beside about 50 s for one photo (15 s, 20 s and 15 s), and a few seconds when nothing is slow. Outside the budget are the reads from our own store for an uploaded photo or a temp-store picture, which the storage client bounds. The generated-image preview in `generate_image_for_mail` uses the same opener, gate and account share.
+- **Bounded links.** An `imageUrl` (and each collage `imageUrls` item, `set_signature`'s and `confirm_uploaded_image`'s) is at most 4096 characters, stated in tools/list as `maxLength`; a file object's `download_url` is at most 8192, checked at run time only, since the file contract's JSON Schema must stay exactly as the Apps SDK reads it (#730, `src/zodSchemas.ts`). A longer one is refused by the SDK's validation before any handler runs, with a sentence pointing to `upload_image` (for a signature, to a shorter link or an attachment). A field withheld while its flag is off (a collage's photos) passes through unchecked and is refused by its tool instead.
+- **One download deadline.** A remote download has one 20 s deadline that covers every redirect hop, the headers and the whole body read; a server that dribbles bytes is cut off at the deadline and the byte cap is enforced whether or not Content-Length was sent. Each hop's host is resolved within the deadline too (#730): c-ares (`dns.promises.Resolver`) asks the nameservers on the event loop, not on libuv's thread pool, and the deadline cancels it. Every address the host resolves to must be public, and the connection is made only to addresses that were checked (an AAAA answer later than a short grace after the A answer is dropped, never connected to), so the name is not resolved a second time (`src/services/imageDownload.ts`). The API's thread pool is 16 threads (`UV_THREADPOOL_SIZE`, a Railway service variable in each environment), for decodes, fs, crypto and the other services' lookups.
+
+`tests/unit/services/imageServiceHardening.test.ts` proves each of these with real image bytes and no sharp mock.
+
+Turning a photo upright by its EXIF orientation (`openUprightImage`, #617) adds nothing to these bounds. sharp resizes first and turns the smaller picture, and for a 90-degree tag it swaps the resize target before choosing how far to shrink on load. Measured in a standalone process (`sharp.concurrency(1)`, a 2700 × 1800 `cover` crop, one file at a time), peak resident memory without the turn and then with it, in megabytes: a 49-megapixel baseline JPEG tagged 1, 112 and 113; the same tagged 6, 113 and 103; a plain 8-bit 49-megapixel PNG tagged 6, 113 and 104; a WebP tagged 6, 132 and 123; and a progressive JPEG tagged 6 at the edge of the full-decode budget (32.5 megapixels), 199 and 197. A 49-megapixel colour progressive JPEG is refused by that budget before any of this. The turn defeats none of the bounds above.
+
+`tests/unit/services/imageServiceOrientation.test.ts` proves with real bytes that a photo tagged 3, 6 or 8 prints upright on every path and that all eight tags (the mirrored 2, 4, 5 and 7 too) print as a viewer sees them in a JPEG, a WebP and a PNG, and that one with no tag, or tagged 1, is unchanged.
+
+### Image Service
+
+**File**: `src/services/imageService.ts`
+
+**Key Functions**:
+
+1. **`downloadAndProcessImage(input, size)`** - Postcard image processing
+   - Accepts OpenAI `fileParams` or URL object
+   - Returns base64 data URI with metadata
+   - Throws `ImageProcessingError` on validation failure
+
+2. **`downloadAndProcessLetterImage(input, imageType)`** - Letter image processing
+   - Accepts OpenAI `fileParams` or URL object
+   - `imageType`: `'header'` or `'inline'`
+   - Returns base64 data URI with metadata
+   - Throws `ImageProcessingError` on validation failure
+
+**Dependencies**:
+- `sharp` - Image processing library for Node.js
+
+### Schema Definitions
+
+**File**: `src/zodSchemas.ts` (the one tool contract, #688)
+
+**Letter Schemas**:
+- `quoteAndPreviewInputZ` - No image parameters
+- `quoteAndPreviewLetterWithHeaderImageInputZ` - Header image parameters
+- `quoteAndPreviewLetterWithImageInputZ` - Inline image parameters
+
+**Postcard Schema**:
+- `quoteAndPreviewPostcardInputZ` - Front image parameters
+
+**Image Parameters** (all schemas with images):
+```typescript
+{
+  // Primary method: file attachment
+  image: {
+    download_url: string,  // OpenAI-provided download URL
+    file_id: string        // OpenAI file identifier
+  },
+  // Fallback method: direct URL
+  imageUrl?: string
+}
+```
+
+### Tool Implementations
+
+**Files**:
+- `src/tools/quoteAndPreviewLetterTextOnly.ts`
+- `src/tools/quoteAndPreviewLetterWithHeaderImage.ts`
+- `src/tools/quoteAndPreviewLetterWithImage.ts`
+- `src/tools/quoteAndPreviewPostcard.ts`
+
+The three letter tools are thin definitions over one pipeline, `src/tools/letterPreviewPipeline.ts` (#689). Each names its layout and its log events. Its header lists the steps in order, and `tests/unit/tools/letterPreviewPipeline.test.ts` pins that order:
+1. The arrival date and the mail service are checked.
+2. An image layout finds its picture's source, and refuses a letter without one. This is a lookup only.
+3. The sender, the addresses, the gift, the stationery, the signature, the length and the printable characters are checked.
+4. The picture is downloaded and processed (validated, resized, encoded) only after those checks, so a refusal costs no image work.
+5. The letter is laid out, the gift settled by its pages, and the addresses checked with the provider.
+6. The draft is created, and the preview returned with a small base64 image (widget) or a lean response (model).
+
+The postcard tool runs its own sequence.
+
+**Performance Optimization** (PR #97):
+- Widget displays full base64 preview
+- Model receives lean response without base64 (reduces token usage)
+- Split implemented via `_meta.openai/outputTemplate` vs. regular response
+
+---
+
+## Platform-Specific Notes
+
+### OpenAI Apps SDK / ChatGPT
+
+**File Attachments** (`fileParams`) — updated August 2026 (issue #227):
+- The handoff of ChatGPT-generated images to Letter IRL tools **works directly** on desktop web, mobile web, and the native mobile app. Verified end-to-end 2026-08-20/21 with real drafts on every surface.
+- This REQUIRED two things that landed in August 2026: the served file-param schemas conforming exactly to the Apps SDK contract (PRs #231–#233 — the earlier `z.any()`/union schemas silently disabled the transform), and a connector **Refresh** (not Reconnect) so ChatGPT re-ingests the schemas.
+- Mechanism note: the model passes a `/mnt/data/...` sandbox path string in its visible tool input; ChatGPT's platform transform swaps in the real `{download_url, file_id}` object on the wire. A path string in the dev panel's Request display does NOT mean the handoff failed — judge by the tool response.
+
+**Superseded guidance** (kept for history — accurate before the August 2026 schema fixes):
+- ~~Generated images "cannot pass directly to MCP tools"; workaround was Code Interpreter resize/crop to mint a passable file reference.~~ No longer needed on any tested surface. The Code Interpreter resize still works and remains harmless if a model chooses it.
+- Desktop timing (app selected before upload) and mobile flakiness remain worth watching; when a handoff DOES fail, the recovery path is `upload_image` — its widget's "Choose from Library" picker lists generated images and preserves the exact image the user approved (PR #234). The original `generate_image` tool was removed in Aug 2026 and replaced by the hybrid `generate_image_for_mail` (docs/learnings/generate-image-removal-decision.md, Addendum 3).
+
+**References**:
+- Issue #227 (full evidence trail: experiments, schema fixes, per-surface verification)
+- [OpenAI Community Discussion - Mobile Issues](https://community.openai.com/t/apps-sdk-on-mobile-devices/1366422)
+- [ChatGPT Images (GPT Image 1.5) Announcement](https://openai.com/index/new-chatgpt-images-is-here/) (December 16, 2025)
+
+### Claude Desktop / MCP Clients
+
+**Image Support**:
+- Accepts file attachments via MCP protocol
+- Base64 image responses work (1MB limit)
+- URL-based images work as fallback
+
+---
+
+## PostGrid Integration
+
+### HTML Template Method
+
+PostGrid accepts HTML content with embedded images via:
+1. **Base64 data URIs**: `<img src="data:image/jpeg;base64,..." />`
+2. **External URLs**: `<img src="https://example.com/photo.jpg" />`
+3. **Merge variables**: `<img src="{{imageUrl}}" />`
+
+Letter IRL uses **base64 data URIs** for reliability and control.
+
+### Print Specifications
+
+**PostGrid Processing**:
+- Converts HTML to PDF for printing
+- Likely renders at 300 DPI (not explicitly documented)
+- Handles CSS styling and layout
+
+**Best Practices** (from PostGrid docs):
+- "For optimal results with custom images, all replacements should have the same size"
+- Inconsistent sizes may cause unpredictable visual behavior
+
+**Letter Margins**:
+- Standard US letter: 8.5"×11"
+- Side margins: 1" each
+- Content area: 6.5" wide (1950px at 300 DPI)
+
+**Color vs B&W**:
+- Color letters cost more than B&W
+- Letter IRL uses color for all letters with images
+
+---
+
+## Known Limitations and Future Enhancements
+
+### Current Limitations
+
+1. **Postcard Size**: Only 6×9 supported (PostGrid supports 6×4 and 6×11 as well)
+2. ~~**Image Processing**: Cannot accept AI-generated images directly~~ — RESOLVED August 2026: direct handoff works on all tested surfaces after the fileParams schema fixes (#231–#233) plus connector Refresh; see issue #227 and Platform-Specific Notes above
+3. **Mobile File Attachments**: Historically unreliable on ChatGPT mobile; direct handoff verified working August 2026, with `upload_image`'s Library picker as the recovery path if it regresses
+4. **Desktop Timing**: App must be selected before uploading images (local path issue)
+5. **File Size**: 5-10 MB limits (reasonable for most use cases)
+
+### GitHub Issue #67 (OpenAI Apps SDK)
+
+**Status**: Superseded for Letter IRL, August 2026 — the scenarios below stopped reproducing once our served file-param schemas conformed to the Apps SDK contract (#231–#233) and the connector was Refreshed; see issue #227. Section kept as the historical record of the pre-fix behavior.
+
+**Problem**: ChatGPT cannot pass certain image types to MCP tools
+
+**Affected Scenarios**:
+
+1. **AI-Generated Images** (ChatGPT Images / GPT Image 1.5, released December 16, 2025):
+   - Relative paths: `/mnt/data/generated-image.png`
+   - NOT the `chatgpt.com/backend-api/estuary/...` URLs visible in browser
+   - Signed URLs created after tool execution, inaccessible to tools
+   - **Workaround**: Have ChatGPT modify the image (resize, crop, etc.) via Code Interpreter - creates new file reference that CAN be passed
+
+2. **Mobile File Attachments**:
+   - File IDs: `file_0000000048e0620a99b5f4a30a7da9ec`
+   - NOT full URLs or accessible content
+   - **Workaround**: Preprocess with Code Interpreter for "print optimization" (US-POSTCARD-04)
+
+3. **Desktop Timing Issues**:
+   - Local paths: `/mnt/data/image-filename.jpg` if image uploaded before app selected
+   - NOT `fileParams` with download URLs
+   - **Workaround**: Select Letter IRL app first, then upload images
+
+**OpenAI Response** (@katia-openai, Oct 23, 2025):
+> "This is a known issue as there are **safety implications**. It's **on the roadmap** to find a way around this."
+
+**ETA**: Not specified
+
+**Fallback**: Users can always upload images to external hosting (Imgur, Dropbox, etc.) and provide URL via `imageUrl` parameter
+
+**References**:
+- GitHub Issue: https://github.com/openai/openai-apps-sdk-examples/issues/67
+- ChatGPT Images (GPT Image 1.5): https://openai.com/index/new-chatgpt-images-is-here/
+- TechCrunch Coverage: https://techcrunch.com/2025/12/16/openai-continues-on-its-code-red-warpath-with-new-image-generation-model/
+
+**Model Timeline**:
+- **DALL-E 3**: Previous external model (legacy)
+- **GPT Image 1 (GPT-4o native)**: April 2025 - first native image generation
+- **GPT Image 1.5 (ChatGPT Images)**: December 16, 2025 - current model (4x faster, better instruction-following, precise editing)
+
+### Potential Future Enhancements
+
+1. **Additional Postcard Sizes**: Support 6×4 and 6×11 PostGrid sizes
+2. ~~**ChatGPT Images Integration**~~: done August 2026 (direct handoff, see above)
+3. ~~**Image URL Generation**~~: done (upload widget and the temporary image bucket)
+4. **Advanced Styling**: Borders, fonts, letterhead templates (HTML/CSS only, no images)
+5. **Color Options**: B&W letters for cost savings
+6. **Multi-page Letters**: Support for longer letters with images
+
+---
+
+## Character Limit Reference
+
+Quick reference for text limits per layout:
+
+| Layout Type | Tool | Max Characters | Max Lines |
+|-------------|------|----------------|-----------|
+| Text-only letter | `quote_and_preview_letter` | 1600 | 24 |
+| Header image letter | `quote_and_preview_letter_with_header_image` | 1100 | 17 |
+| Inline image letter | `quote_and_preview_letter_with_image` | 800 | 12 |
+| Postcard message | `quote_and_preview_postcard` | 500 | N/A |
+
+**Important**: Text limits are enforced as **continuous paragraphs**. Users should NOT add blank lines between sentences - write as flowing text.
+
+---
+
+## Testing Image Support
+
+### Test Cases
+
+See `docs/user-stories.md` for complete acceptance criteria:
+- **US-POSTCARD-01**: Preview a Postcard
+- **US-POSTCARD-02**: Send a Postcard
+- **US-POSTCARD-03**: Postcard Image Processing
+- **US-POSTCARD-04**: Mobile Image Compatibility
+- **US-LAYOUT-01**: Preview Letter with Header Image
+- **US-LAYOUT-02**: Preview Letter with Inline Image
+- **US-LAYOUT-04**: Letter Layout Image Processing
+
+### Error Scenarios
+
+| Scenario | Expected Behavior |
+|----------|-------------------|
+| No image provided (postcard) | Error: "No image provided. Please attach an image or provide imageUrl." |
+| File too large (postcard) | Error: "Image is too large. Please use an image under 10MB." |
+| File too large (letter) | Error: "[Header/Inline] image is too large. Please use an image under 5MB." |
+| Unsupported format | Error: "Unsupported image format. Please use PNG, JPEG, or WebP." |
+| Image too small | Error: "Image is too small for print quality. Please use at least 100x100 pixels." |
+| Mobile file attachment fails | Suggest Code Interpreter preprocessing + URL fallback |
+| Download fails | Error: "Couldn't download the image. Please try again." |
+
+---
+
+## References
+
+### PostGrid Documentation
+- **Letters API**: https://postgrid.readme.io/docs/sending-letters-using-the-api
+- **Postcards API**: https://postgrid.readme.io/docs/sending-postcards-using-the-api
+- **Images in Templates**: https://postgrid.readme.io/docs/customizable-images-and-backgrounds-in-templates
+- **Design Guidelines**: https://postgrid.readme.io/docs/design-and-templates
+
+### OpenAI / ChatGPT
+- **GitHub Issue #67** (Image Passing): https://github.com/openai/openai-apps-sdk-examples/issues/67
+- **Apps SDK Widgets**: https://developers.openai.com/apps-sdk/build/chatgpt-ui
+- **MCP Server Guide**: https://developers.openai.com/apps-sdk/build/mcp-server
+- **Apps SDK Examples**: https://github.com/openai/openai-apps-sdk-examples
+- **Mobile Issues Discussion**: https://community.openai.com/t/apps-sdk-on-mobile-devices/1366422
+
+### Model Context Protocol (MCP)
+- **Tools Specification**: https://modelcontextprotocol.io/specification/2025-06-18/server/tools
+- **MCP Discussions**: https://github.com/orgs/modelcontextprotocol/discussions
+
+### Internal Documentation
+- `docs/user-stories.md` - Acceptance criteria for all image features
+- `docs/status.md` - Current implementation status
+- `docs/ui-widgets.md` - Widget rendering with images
+- `src/services/imageService.ts` - Image processing implementation
+- `src/zodSchemas.ts` - Tool schemas with image parameters
+
+---
+
+## Changelog
+
+**January 2, 2026** (Second Update)
+- Corrected OpenAI image generation model information:
+  - Updated "GPT-4o native image generation" → "ChatGPT Images (GPT Image 1.5)"
+  - Added model timeline: DALL-E 3 → GPT Image 1 (April 2025) → GPT Image 1.5 (December 16, 2025)
+  - Updated all references to current model (GPT Image 1.5)
+  - Added TechCrunch reference and OpenAI announcement link for GPT Image 1.5
+  - Noted key features: 4x faster, better instruction-following, precise editing
+- Core issue and workaround remain unchanged
+
+**January 2, 2026** (First Update)
+- Updated terminology: "DALL-E" → "GPT-4o native image generation" (launched March 2025)
+- Added desktop timing requirement: app must be selected before uploading images
+- Added workaround for AI-generated images: modify via Code Interpreter to create accessible file reference
+- Updated GitHub issue #67 section with three affected scenarios (AI-generated, mobile, desktop timing)
+- Updated status date to January 2026
+
+**January 1, 2026**
+- **MAJOR UPDATE**: Rewrote document to reflect fully implemented image support
+- Changed from "future enhancement" to "current implementation"
+- Added comprehensive specifications for all three image types (postcard, header, inline)
+- Added technical implementation details from `imageService.ts`
+- Added character limit reference table
+- Added mobile compatibility notes (US-POSTCARD-04)
+- Preserved GitHub issue #67 reference material
+- Preserved PostGrid integration notes
+- Updated all sections to reflect production status
+
+**November 21, 2025**
+- Initial research and documentation
+- Confirmed PostGrid supports images in letters and postcards
+- Identified ChatGPT/MCP limitations (issue #67)
+- Decision: Text-only for MVP, revisit when platform supports images

@@ -63,7 +63,7 @@ describe('send_postcard Tool', () => {
     });
 
     it('should queue background job for processing', async () => {
-      // Job should be queued to pg-boss
+      // The job goes to the outbox (letter_jobs)
       const jobData = {
         letterId: 'letter-123',
         mailType: 'postcard',
@@ -260,7 +260,7 @@ describe('send_postcard Tool', () => {
       const expectedTransaction = {
         type: 'deduction',
         amount: -2,
-        description: 'Postcard to John Recipient in New York, NY',
+        description: 'Sent postcard (2 credits)',
         letter_id: 'letter-123',
       };
 
@@ -274,7 +274,7 @@ describe('send_postcard Tool', () => {
   // ==========================================================================
   describe('Worker Routing', () => {
     it('should create job that routes to sendPostcard based on mail_type', async () => {
-      // letterWorker should check mail_type and call appropriate method
+      // The outbox (letterJobService) checks mail_type and calls the matching provider method
       const letterRecord = {
         letter_id: 'letter-123',
         mail_type: 'postcard' as const,

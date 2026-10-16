@@ -2,6 +2,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { prepareAuthenticatedUser } from "../../../src/auth/identity.js";
+import { VerifiedEmailRequiredError } from "../../../src/auth/verifiedEmail.js";
 import {
   classifyDiagnosticError,
   isTerminalDiagnosticClass,
@@ -134,11 +135,12 @@ describe("privacy-safe authentication diagnostics", () => {
       scopes: []
     };
 
-    await prepareAuthenticatedUser(authInfo, {
-      fetchUserInfo: vi.fn(),
-      findExistingUser: vi.fn().mockResolvedValue(null),
-      upsertUser: vi.fn()
-    });
+    await expect(
+      prepareAuthenticatedUser(authInfo, {
+        findExistingUser: vi.fn().mockResolvedValue(null),
+        upsertUser: vi.fn()
+      })
+    ).rejects.toBeInstanceOf(VerifiedEmailRequiredError);
 
     const output = capturedText(warn);
     expect(output).toContain('"event":"auth.account_missing_no_verified_email"');

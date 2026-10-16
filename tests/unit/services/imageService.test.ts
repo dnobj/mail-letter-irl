@@ -25,21 +25,26 @@ import {
   imageProcessingConfig,
 } from '../../fixtures/postcards.js';
 import { _testing as imageServiceTesting } from '../../../src/services/imageService.js';
+import { remoteImageTransport } from '../../../src/services/imageDownload.js';
 
 // Mock fetch for downloading images
 const mockFetch = vi.fn();
-global.fetch = mockFetch;
+remoteImageTransport.fetch = mockFetch as never;
 
 // Mock sharp for image processing (will be implemented later)
 vi.mock('sharp', () => {
-  return {
-    default: vi.fn(() => ({
+  const sharpMock = Object.assign(
+    vi.fn(() => ({
       metadata: vi.fn(),
+      rotate: vi.fn().mockReturnThis(),
       resize: vi.fn().mockReturnThis(),
       jpeg: vi.fn().mockReturnThis(),
       toBuffer: vi.fn(),
     })),
-  };
+    // imageService pins libvips to one thread and turns its cache off when it loads.
+    { concurrency: vi.fn(), cache: vi.fn() }
+  );
+  return { default: sharpMock };
 });
 
 describe('imageService', () => {
@@ -57,7 +62,7 @@ describe('imageService', () => {
   describe('Image Download Validation', () => {
     it('should reject non-HTTPS image URLs before fetching', async () => {
       await expect(
-        imageServiceTesting.validateRemoteImageUrl('http://example.com/image.jpg')
+        imageServiceTesting.validateRemoteImageUrl('http://example.com/image.jpg', new AbortController().signal)
       ).rejects.toThrow("Couldn't download the image");
     });
 
@@ -71,17 +76,17 @@ describe('imageService', () => {
       expect(imageServiceTesting.isUnsafeIpAddress('::ffff:7f00:1')).toBe(true);
 
       await expect(
-        imageServiceTesting.validateRemoteImageUrl('https://127.0.0.1/image.jpg')
+        imageServiceTesting.validateRemoteImageUrl('https://127.0.0.1/image.jpg', new AbortController().signal)
       ).rejects.toThrow("Couldn't download the image");
       await expect(
-        imageServiceTesting.validateRemoteImageUrl('https://[::1]/image.jpg')
+        imageServiceTesting.validateRemoteImageUrl('https://[::1]/image.jpg', new AbortController().signal)
       ).rejects.toThrow("Couldn't download the image");
     });
 
     it('should allow public HTTPS IP image URLs', async () => {
       await expect(
-        imageServiceTesting.validateRemoteImageUrl('https://8.8.8.8/image.jpg')
-      ).resolves.toBeInstanceOf(URL);
+        imageServiceTesting.validateRemoteImageUrl('https://8.8.8.8/image.jpg', new AbortController().signal)
+      ).resolves.toMatchObject({ parsed: expect.any(URL), pinned: [{ address: '8.8.8.8', family: 4 }] });
     });
 
     it('should reject images larger than 10MB based on Content-Length header', async () => {

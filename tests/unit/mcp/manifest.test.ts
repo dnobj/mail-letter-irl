@@ -1,18 +1,66 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { LetterIrlServer } from "../../../src/server.js";
 import { buildManifest, stringifyManifest } from "../../../src/mcp/manifest.js";
 import { WIDGET_DEFINITIONS } from "../../../src/mcp/registerTools.js";
+import { clientProfileNamed } from "../../../src/auth/clientProfiles.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const manifestPath = path.resolve(__dirname, "../../../manifest.json");
 
 describe("Compatibility manifest", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("offers the previews' arriveBy only while the flag is on, as tools/list does (#535)", () => {
+    const letterInput = () =>
+      (buildManifest().tools.find((tool) => tool.name === "quote_and_preview_letter")!.inputSchema as {
+        properties: Record<string, unknown>;
+      }).properties;
+    vi.stubEnv("LETTER_IRL_ARRIVE_BY_ENABLED", "");
+    expect(letterInput()).not.toHaveProperty("arriveBy");
+    expect(letterInput()).toHaveProperty("sendAsGift");
+    vi.stubEnv("LETTER_IRL_ARRIVE_BY_ENABLED", "true");
+    expect(letterInput()).toHaveProperty("arriveBy");
+  });
+
+  it("offers the letter previews' stationery only while it is offered, as tools/list does (#563)", () => {
+    const input = (name: string) =>
+      (buildManifest().tools.find((tool) => tool.name === name)!.inputSchema as {
+        properties: Record<string, { enum?: string[] }>;
+      }).properties;
+    const LETTERS = ["quote_and_preview_letter", "quote_and_preview_letter_with_header_image", "quote_and_preview_letter_with_image"];
+    // Off, and on without our renderer: none of the three.
+    for (const [enabled, renderer] of [["", "pdf"], ["true", ""]]) {
+      vi.stubEnv("LETTER_IRL_STATIONERY_ENABLED", enabled);
+      vi.stubEnv("LETTER_IRL_PRINT_RENDERER", renderer);
+      for (const name of LETTERS) {
+        for (const key of ["stationery", "monogram", "headline"]) expect(input(name), `${name} ${key}`).not.toHaveProperty(key);
+        expect(input(name), name).toHaveProperty("sendAsGift");
+      }
+    }
+    vi.stubEnv("LETTER_IRL_STATIONERY_ENABLED", "true");
+    vi.stubEnv("LETTER_IRL_PRINT_RENDERER", "pdf");
+    for (const name of LETTERS) {
+      expect(input(name).stationery.enum, name).toEqual(["classic", "monogram", "botanical", "celebration", "typewriter", "handwritten"]);
+      expect(input(name), name).toHaveProperty("monogram");
+      expect(input(name), name).toHaveProperty("headline");
+    }
+    // A postcard takes none, offered or not.
+    for (const key of ["stationery", "monogram", "headline"]) expect(input("quote_and_preview_postcard")).not.toHaveProperty(key);
+  });
+
   it("should mirror the runtime tool registry", () => {
-    const runtimeTools = new LetterIrlServer().listTools().map((tool) => tool.name).sort();
+    // The manifest is ChatGPT's, and ChatGPT's list is the full one: an app
+    // that takes no purchases is not offered the checkouts (#475).
+    const runtimeTools = new LetterIrlServer()
+      .listTools(clientProfileNamed("chatgpt"))
+      .map((tool) => tool.name)
+      .sort();
     const manifestTools = buildManifest().tools.map((tool) => tool.name).sort();
 
     expect(manifestTools).toEqual(runtimeTools);
@@ -26,6 +74,26 @@ describe("Compatibility manifest", () => {
   });
 
   it("should keep the checked-in manifest.json snapshot in sync", () => {
+    // Generated as production is: arrive-by (#535), stationery (#563), room to
+    // write (#586), the postcard sizes (#594), address requests (#604) and
+    // signatures (#608) and certified mail (#625) off.
+    vi.stubEnv("LETTER_IRL_ARRIVE_BY_ENABLED", "");
+    vi.stubEnv("LETTER_IRL_STATIONERY_ENABLED", "");
+    vi.stubEnv("LETTER_IRL_ROOM_TO_WRITE_ENABLED", "");
+    vi.stubEnv("LETTER_IRL_POSTCARD_SIZES_ENABLED", "");
+    vi.stubEnv("LETTER_IRL_POSTCARD_LAYOUTS_ENABLED", "");
+    vi.stubEnv("LETTER_IRL_POSTCARD_COLLAGES_ENABLED", "");
+    vi.stubEnv("LETTER_IRL_ADDRESS_REQUESTS_ENABLED", "");
+    vi.stubEnv("LETTER_IRL_SIGNATURES_ENABLED", "");
+    vi.stubEnv("LETTER_IRL_CERTIFIED_MAIL_ENABLED", "");
+    // And the send rule on, which production requires (#730); the rest as
+    // scripts/write-manifest.ts sets them, so a developer's environment
+    // cannot change the snapshot.
+    vi.stubEnv("LETTER_IRL_SEND_CONFIRMATION_ENABLED", "true");
+    vi.stubEnv("LETTER_IRL_WORDS_EDITOR_ENABLED", "false");
+    vi.stubEnv("LETTER_IRL_HOME_ENABLED", "false");
+    vi.stubEnv("LETTER_IRL_IMAGE_GEN_MODE", "off");
+    vi.stubEnv("LETTER_IRL_CARD_UPLOAD_ENABLED", "false");
     const snapshot = fs.readFileSync(manifestPath, "utf-8");
     const previousPublicBaseUrl = process.env.LETTER_IRL_PUBLIC_BASE_URL;
     process.env.LETTER_IRL_PUBLIC_BASE_URL = "https://api.letterirl.com";
@@ -70,6 +138,8 @@ describe("Compatibility manifest", () => {
     // to built-in generation. Both halves must stay stated.
     expect(tool?.description).toContain("Letter IRL image generations");
     expect(tool?.description).toContain("built-in image generation");
-    expect(tool?.description).toContain("Never refuse an image request");
+    // No order to the model, and no claim that a purchase includes images
+    // (#476, the Plugin Directory).
+    expect(tool?.description).not.toMatch(/Never refuse|letter packs|letter purchases/);
   });
 });

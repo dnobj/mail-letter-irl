@@ -1,5 +1,11 @@
 # Railway service configuration, in version control rather than the dashboard.
 #
+# DEADLINE 2026-12-01. Railway has deprecated config-as-code and stops reading
+# this file on that date. From then on nothing applies migrations at deploy time
+# unless the pre-deploy command has moved to Railway's Infrastructure as Code or
+# the dashboard first - the same silent failure described below. See the
+# deadline note in docs/deployment.md.
+#
 # WHY THIS FILE EXISTS (#300).
 #
 # Six places across four documents stated that Railway runs

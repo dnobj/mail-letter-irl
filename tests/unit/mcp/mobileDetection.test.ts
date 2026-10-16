@@ -15,7 +15,6 @@
  * We detect mobile clients to provide helpful error messages.
  *
  * @see docs/user-stories.md#us-postcard-04
- * @see /home/dnicholl/.claude/plans/sprightly-baking-falcon.md
  */
 
 import { describe, it, expect } from 'vitest';

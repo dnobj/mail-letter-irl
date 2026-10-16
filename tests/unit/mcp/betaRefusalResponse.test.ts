@@ -1,4 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+// The first test in this file pays for importing a whole server module graph
+// (every tool, the commerce and Stripe code, the database client, the auth
+// stack). On a cold transform cache or a busy disk that import alone took
+// about 12 s on 2026-09-13, over vitest's 10 s default, while CI does it in a
+// few seconds. Raised from 30 s to 60 s later the same day: under a full
+// parallel run on a loaded workstation three of these files still timed out
+// while each passed alone. The limit is per test and says nothing about how
+// fast the app boots; nothing here measures boot time.
+vi.setConfig({ testTimeout: 60_000 });
+
 import { BetaAccessDeniedError, BETA_ACCESS_MESSAGE } from '../../../src/auth/betaAccess.js';
 
 /**
@@ -30,7 +41,13 @@ vi.mock('../../../src/auth/tokenValidator.js', () => ({
 }));
 
 import { validateAuthorizationHeader } from '../../../src/auth/tokenValidator.js';
-import { authenticateRequest, writeBetaRefusal } from '../../../src/mcp/httpServer.js';
+import {
+  authenticateRequest,
+  authFailureLogFields,
+  publicAuthFailureMessage,
+  writeBetaRefusal
+} from '../../../src/mcp/httpServer.js';
+import { InsufficientScopeError } from '../../../src/auth/oauthChallenge.js';
 
 /** Minimal ServerResponse capturing what was written. */
 function fakeResponse() {
@@ -86,6 +103,67 @@ describe('writeBetaRefusal', () => {
   });
 });
 
+describe('what a 401 says (#730)', () => {
+  beforeEach(() => {
+    vi.mocked(validateAuthorizationHeader).mockReset();
+  });
+
+  it.each([
+    ['a database fault', new Error('connection terminated: password authentication failed for user "x" at 10.0.0.4:5432')],
+    ['a revoked token', new Error('Token has been revoked')],
+    ['an expired token', new Error('Token expired')],
+    ['a token not found', new Error('Token not found')],
+    ['something not an Error', 'raw string'],
+  ])('says one fixed sentence for %s, in the body and the challenge', async (_label, failure) => {
+    vi.mocked(validateAuthorizationHeader).mockRejectedValue(failure);
+    const { captured, res } = fakeResponse();
+    await authenticateRequest(request('Bearer token'), res, 'https://api.example');
+    expect(captured.status).toBe(401);
+    const said = JSON.parse(captured.body).error.message;
+    expect(said).toBe('The access token is not valid. Sign in again, or make a new access token.');
+    const challenge = String(Object.entries(captured.headers).find(([name]) => name.toLowerCase() === 'www-authenticate')?.[1]);
+    expect(challenge).toContain('error_description="The access token is not valid. Sign in again, or make a new access token."');
+    expect(challenge).toContain('error="invalid_token"');
+    expect(`${captured.body} ${challenge}`).not.toMatch(/revoked|expired|not found|password|10\.0\.0\.4/i);
+  });
+
+  it('writes why to the log, without the text', async () => {
+    vi.mocked(validateAuthorizationHeader).mockRejectedValue(new Error('Token has been revoked'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { res } = fakeResponse();
+    await authenticateRequest(request('Bearer lirl_pat_abc'), res, 'https://api.example');
+    const lines = warn.mock.calls.map(([line]) => String(line)).filter(line => line.includes('"event":"auth.mcp_rejected"'));
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0])).toMatchObject({ authType: 'pat', reason: 'revoked' });
+    expect(lines[0]).not.toContain('Token has been revoked');
+    warn.mockRestore();
+  });
+
+  it('keeps the words for a missing header, which a client acts on', async () => {
+    vi.mocked(validateAuthorizationHeader).mockRejectedValue(new Error('Missing Authorization header'));
+    const { captured, res } = fakeResponse();
+    await authenticateRequest(request(), res, 'https://api.example');
+    expect(JSON.parse(captured.body).error.message).toBe('Missing Authorization header');
+    const challenge = String(Object.entries(captured.headers).find(([name]) => name.toLowerCase() === 'www-authenticate')?.[1]);
+    expect(challenge).toContain('error_description="Missing Authorization header"');
+  });
+
+  it("keeps a scope refusal's own words, which name only scopes", () => {
+    const error = new InsufficientScopeError(['mail:send']);
+    expect(publicAuthFailureMessage(error)).toBe(error.message);
+  });
+
+  it('logs why, from a fixed set, never the text', () => {
+    expect(authFailureLogFields(new Error('Missing Authorization header'), undefined)).toEqual({ authType: 'none', reason: 'header' });
+    expect(authFailureLogFields(new Error('Token has been revoked'), 'Bearer lirl_pat_abc')).toEqual({ authType: 'pat', reason: 'revoked' });
+    expect(authFailureLogFields(new Error('Token expired'), 'Bearer lirl_pat_abc')).toEqual({ authType: 'pat', reason: 'expired' });
+    expect(authFailureLogFields(new Error('Token not found'), 'Bearer lirl_pat_abc')).toEqual({ authType: 'pat', reason: 'not_found' });
+    expect(authFailureLogFields(new Error('"exp" claim timestamp check failed'), 'Bearer eyJ.a.b')).toEqual({ authType: 'jwt', reason: 'expired' });
+    expect(authFailureLogFields(new Error('Invalid Compact JWS'), 'Bearer junk')).toEqual({ authType: 'jwt', reason: 'format' });
+    expect(authFailureLogFields(new Error('connection terminated'), 'Bearer junk')).toEqual({ authType: 'jwt', reason: 'other' });
+  });
+});
+
 describe('authenticateRequest reaches the branch', () => {
   beforeEach(() => {
     vi.mocked(validateAuthorizationHeader).mockReset();
@@ -121,6 +199,35 @@ describe('authenticateRequest reaches the branch', () => {
         'www-authenticate'
       );
     })();
+  });
+
+  it('answers 503 with no challenge when the server cannot validate tokens', async () => {
+    // Authorizing again cannot fix a server with no usable OAuth configuration,
+    // so a challenge would send the client round the same loop as a beta
+    // refusal. The REST routes already answer 503 for this.
+    vi.mocked(validateAuthorizationHeader).mockRejectedValue(
+      new Error('OAuth validation not configured')
+    );
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    const { captured, res } = fakeResponse();
+    const result = await authenticateRequest(request('Bearer token'), res, 'https://api.example');
+
+    expect(result).toBeNull();
+    expect(captured.status).toBe(503);
+    expect(Object.keys(captured.headers).map(h => h.toLowerCase())).not.toContain(
+      'www-authenticate'
+    );
+    expect(captured.body).not.toContain('www_authenticate');
+    // Exactly one line, with no fields, so a dropped call or an added
+    // request-derived value fails this.
+    expect(
+      error.mock.calls
+        .map(([line]) => String(line))
+        .filter(line => line.includes('"event":"auth.validation_not_configured"'))
+        .map(line => JSON.parse(line))
+    ).toEqual([{ event: 'auth.validation_not_configured', msg: 'auth.validation_not_configured' }]);
+    error.mockRestore();
   });
 
   it('does not leak the refusal into the challenge path', async () => {

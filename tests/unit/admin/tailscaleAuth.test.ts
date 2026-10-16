@@ -39,6 +39,61 @@ function harness(whoisResult: { login: string; nodeName: string } | null = { log
   return { whois, sessions, options };
 }
 
+describe("a request another site sent may use a live session, never start one (#730)", () => {
+  const crossSite = (options: ReturnType<typeof harness>["options"]) => ({ ...options, allowNewSession: false });
+
+  it("refuses quietly with no cookie or an unknown one, before whois", async () => {
+    const { options, whois, sessions } = harness();
+    for (const cookie of [undefined, "forged-or-gone"]) {
+      expect(await authenticateAdminRequest(view(goodHeaders, { cookie }), crossSite(options))).toMatchObject({
+        ok: false,
+        code: "ADMIN_UNAUTHENTICATED",
+        reason: "cross_site_new_session",
+        quiet: true,
+      });
+    }
+    expect(whois.whois).not.toHaveBeenCalled();
+    expect(sessions.size).toBe(0);
+  });
+
+  it("refuses quietly with an expired session's cookie", async () => {
+    const clock = { value: 0 };
+    const { options, whois } = harness();
+    const sessions = new AdminSessionStore({ idleTtlMs: 10, absoluteTtlMs: 600_000, now: () => clock.value });
+    const old = sessions.create({ login: "owner@example.com", name: "Owner", node: "laptop", peerAddress: "100.64.0.5" });
+    clock.value = 1000;
+    expect(await authenticateAdminRequest(view(goodHeaders, { cookie: old.id }), { ...crossSite(options), sessions })).toMatchObject({ quiet: true });
+    expect(whois.whois).not.toHaveBeenCalled();
+  });
+
+  it("uses a live session", async () => {
+    const { options } = harness();
+    const first = await authenticateAdminRequest(view(goodHeaders), options);
+    if (!first.ok) throw new Error("unreachable");
+    expect(await authenticateAdminRequest(view(goodHeaders, { cookie: first.session.id }), crossSite(options))).toMatchObject({ ok: true, created: false });
+  });
+
+  it("records a cookie presented from another peer as before, not quietly", async () => {
+    const { options, sessions, whois } = harness();
+    const theirs = sessions.create({ login: "owner@example.com", name: "Owner", node: "laptop", peerAddress: "100.64.0.9" });
+    const outcome = await authenticateAdminRequest(view(goodHeaders, { cookie: theirs.id }), crossSite(options));
+    expect(outcome).not.toMatchObject({ quiet: true });
+    expect(outcome).toMatchObject({ ok: true, created: true, replaced: "binding_mismatch" });
+    expect(whois.whois).toHaveBeenCalled();
+  });
+
+  it("still runs the proxy and login checks first, and audits them", async () => {
+    const { options } = harness();
+    expect(await authenticateAdminRequest(view({ ...goodHeaders, "x-forwarded-host": "elsewhere.ts.net" }), crossSite(options))).toMatchObject({
+      reason: "host_mismatch",
+    });
+    expect(await authenticateAdminRequest(view({ ...goodHeaders, "x-forwarded-host": "elsewhere.ts.net" }), crossSite(options))).not.toMatchObject({ quiet: true });
+    expect(await authenticateAdminRequest(view({ ...goodHeaders, "tailscale-user-login": "stranger@example.com" }), crossSite(options))).toMatchObject({
+      code: "ADMIN_FORBIDDEN",
+    });
+  });
+});
+
 describe("tailnet request authentication", () => {
   it("creates a session for an allowlisted login whose whois agrees, then reuses it by cookie", async () => {
     const { options, whois } = harness();
@@ -98,7 +153,7 @@ describe("tailnet request authentication", () => {
     });
   });
 
-  it("refuses when whois disagrees with the header, fails, or names a tagged peer", async () => {
+  it("tells a whois that disagrees or names a tagged peer apart from one that fails", async () => {
     const disagree = harness({ login: "other@example.com", nodeName: "x.ts.net" });
     expect(await authenticateAdminRequest(view(goodHeaders), disagree.options)).toMatchObject({
       ok: false,
@@ -109,12 +164,32 @@ describe("tailnet request authentication", () => {
       ok: false,
       reason: "whois_disagrees",
     });
+    // A daemon that cannot answer is a different operational problem from a
+    // peer that does not match, and the audit row should not conflate them.
     const failing = harness();
     (failing.whois.whois as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("socket"));
     expect(await authenticateAdminRequest(view(goodHeaders), failing.options)).toMatchObject({
       ok: false,
-      reason: "whois_disagrees",
+      reason: "whois_failed",
     });
+  });
+
+  it("refuses a request that does not carry the proxy's forwarded-proto header", async () => {
+    // Serve terminates TLS and sets this. Userspace networking forwards an
+    // inbound tunnel connection to the same port on localhost, so a peer the
+    // policy lets reach the app port arrives on the loopback listener able to
+    // choose its own headers; requiring the whole set the proxy sends raises
+    // what such a caller has to reproduce.
+    const { options } = harness();
+    const { "x-forwarded-proto": _proto, ...withoutProto } = goodHeaders;
+    expect(await authenticateAdminRequest(view(withoutProto), options)).toMatchObject({
+      ok: false,
+      code: "ADMIN_UNAUTHENTICATED",
+      reason: "forwarded_proto_missing",
+    });
+    expect(
+      await authenticateAdminRequest(view({ ...goodHeaders, "x-forwarded-proto": "http" }), options),
+    ).toMatchObject({ ok: false, reason: "forwarded_proto_missing" });
   });
 
   it("re-evaluates a cookie from another peer as a new session after destroying the old one", async () => {
@@ -143,13 +218,34 @@ describe("tailnet request authentication", () => {
     });
   });
 
+  const LOCAL_DEV = { login: "owner@example.com", name: "local developer", hosts: ["localhost:8790", "127.0.0.1:8790"] };
+
   it("uses the configured login in local-dev mode and ignores inbound identity headers", async () => {
     const { options, whois } = harness();
     const result = await authenticateAdminRequest(
-      view({ "tailscale-user-login": "attacker@example.com" }),
-      { ...options, expectedHost: null, localDev: { login: "owner@example.com", name: "local developer" } },
+      view({ "tailscale-user-login": "attacker@example.com", host: "localhost:8790" }),
+      { ...options, expectedHost: null, localDev: LOCAL_DEV },
     );
     expect(result).toMatchObject({ ok: true, actor: { id: "owner@example.com", node: "local-dev" } });
     expect(whois.whois).not.toHaveBeenCalled();
   });
+
+  it.each(["127.0.0.1:8790", "LOCALHOST:8790"])("answers to the workstation's own name in local-dev mode (%s)", async (host) => {
+    const { options } = harness();
+    const result = await authenticateAdminRequest(view({ host }), { ...options, expectedHost: null, localDev: LOCAL_DEV });
+    expect(result).toMatchObject({ ok: true });
+  });
+
+  it.each([["a rebinding page's name", "evil.test:8790"], ["another port", "localhost:9999"], ["no Host", undefined]])(
+    "refuses %s in local-dev mode, so a DNS-rebinding page reads nothing (#730)",
+    async (_label, host) => {
+      const { options } = harness();
+      const result = await authenticateAdminRequest(view(host === undefined ? {} : { host }), {
+        ...options,
+        expectedHost: null,
+        localDev: LOCAL_DEV,
+      });
+      expect(result).toMatchObject({ ok: false, code: "ADMIN_UNAUTHENTICATED", reason: "host_mismatch" });
+    },
+  );
 });

@@ -172,7 +172,7 @@ describePostgres('Pay & Send fulfilment idempotency (#287, #286)', () => {
     return { userId, orderId, sessionId, draftId };
   }
 
-  function paidEvent(options: { eventId: string; sessionId: string }): unknown {
+  function paidEvent(options: { eventId: string; sessionId: string; amountTotal?: number }): unknown {
     return {
       id: options.eventId,
       type: 'checkout.session.completed',
@@ -185,7 +185,7 @@ describePostgres('Pay & Send fulfilment idempotency (#287, #286)', () => {
           payment_status: 'paid',
           // Must equal the order's amount_cents, or the paid-amount check files
           // a legitimate purchase as PAYMENT_AMOUNT_MISMATCH.
-          amount_total: JIT_AMOUNT_CENTS,
+          amount_total: options.amountTotal ?? JIT_AMOUNT_CENTS,
           currency: 'usd',
           expires_at: Math.floor(Date.now() / 1000) + 3600
         }
@@ -231,6 +231,52 @@ describePostgres('Pay & Send fulfilment idempotency (#287, #286)', () => {
     await expect(
       commerce.processStripeWebhookEvent(
         paidEvent({ eventId: `evt_${sessionId}`, sessionId }) as never
+      )
+    ).resolves.toEqual({ duplicate: false, orderId, status: 'fulfillment_pending' });
+
+    await expectExactlyOneFulfilment(orderId);
+  });
+
+  it('refunds an order whose draft is no longer the mail it paid for, and mails nothing (#586)', async () => {
+    // The order paid for a one-page letter; its draft now prints on two pages.
+    // Sending it would mail a two-page letter at the one-page price.
+    const { orderId, sessionId, draftId } = await seedPendingJitOrder();
+    await pool.query(
+      `UPDATE letter_drafts SET renderer_version = 'pdf-1', pages = 2 WHERE draft_id = $1`,
+      [draftId]
+    );
+
+    await expect(
+      commerce.processStripeWebhookEvent(
+        paidEvent({ eventId: `evt_${sessionId}`, sessionId }) as never
+      )
+    ).resolves.toEqual({ duplicate: false, orderId, status: 'refund_pending' });
+
+    expect(await lettersForOrder(orderId)).toBe(0);
+    expect(await orderColumn<string>(orderId, 'last_error_code')).toBe('JIT_FULFILLMENT_REJECTED');
+    expect(await orderColumn<string>(orderId, 'last_error')).toBe('JIT_PRODUCT_MISMATCH');
+    expect(
+      await scalar(
+        `SELECT COUNT(*)::text AS value FROM letter_drafts WHERE draft_id = $1 AND status = 'pending'`,
+        [draftId]
+      )
+    ).toBe(1);
+  });
+
+  it('mails a two-page letter its two-page order paid for (#586)', async () => {
+    const { orderId, sessionId, draftId } = await seedPendingJitOrder();
+    await pool.query(
+      `UPDATE letter_drafts SET renderer_version = 'pdf-1', pages = 2 WHERE draft_id = $1`,
+      [draftId]
+    );
+    await pool.query(
+      `UPDATE orders SET product_code = 'jit-letter-2-pages', amount_cents = 599 WHERE order_id = $1`,
+      [orderId]
+    );
+
+    await expect(
+      commerce.processStripeWebhookEvent(
+        paidEvent({ eventId: `evt_${sessionId}`, sessionId, amountTotal: 599 }) as never
       )
     ).resolves.toEqual({ duplicate: false, orderId, status: 'fulfillment_pending' });
 

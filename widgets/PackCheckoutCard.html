@@ -1,0 +1,800 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Letter IRL Pack Checkout</title>
+    <style>
+      /* Letter IRL design system (widget-design-package, Aug 2026): system-ui
+         chrome, Georgia only inside paper artifacts, paper stays cream in
+         both themes. Shell copied from GetStartedCard so the two cards match. */
+      :root{--sf:#fff;--sf2:#fafafa;--bd:#e4e4e7;--bd2:#f0f0f2;--tx:#111113;--tb:#3f3f46;--mut:#71717a;--faint:#a1a1aa;--ok:#15803d;--okbg:#ecfdf3;--er:#b91c1c;--erbg:#fef2f2;--btn:#2563eb;--btntx:#fff}
+      .dark{--sf:#2a2a2e;--sf2:#232327;--bd:#3a3a40;--bd2:#323238;--tx:#f4f4f5;--tb:#d4d4d8;--mut:#a1a1aa;--faint:#71717a;--ok:#4ade80;--okbg:#143622;--er:#f87171;--erbg:#3b1d1d;--btn:#3b82f6;--btntx:#fff}
+      *{box-sizing:border-box}
+      body{margin:0;padding:0;background:transparent;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+      .w{background:var(--sf);border:1px solid var(--bd);border-radius:16px;color:var(--tb);overflow:hidden}
+      .hd{display:flex;align-items:center;gap:7px;padding:11px 14px 10px;border-bottom:1px solid var(--bd2)}
+      .logo{width:22.5px;height:14px;flex:none;display:block;background:url("data:image/png;base64,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") center/contain no-repeat}
+      .dark .logo{background-image:url("data:image/png;base64,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")}
+      .hd b{font-size:12.5px;font-weight:600;color:var(--tx)}
+      .hd span.ctx{margin-left:auto;font-size:11.5px;color:var(--mut)}
+      .bd{padding:14px}
+      .title{margin:0;font-family:Georgia,"Times New Roman",serif;font-size:18px;font-weight:600;color:var(--tx);letter-spacing:-.01em}
+      .ov{font-size:13px;line-height:1.55;color:var(--tb);margin:7px 0 0}
+      .facts{display:flex;gap:14px;margin:12px 0 0;padding:0;list-style:none}
+      .facts li{font-size:12.5px;line-height:1.5;color:var(--tb)}
+      .facts b{display:block;font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}
+      /* The anchor is the payment path. A real anchor is a user gesture in a
+         way a window.open issued after a tool call is not, so it is always
+         rendered when a checkout URL exists and stays until the purchase
+         status says the session is no longer payable. */
+      .checkout-link{display:flex;align-items:center;justify-content:center;margin-top:14px;padding:10px 14px;border-radius:10px;background:var(--btn);color:var(--btntx);font-size:13px;font-weight:600;text-decoration:none}
+      .checkout-link:hover{opacity:.9}
+      .btn{display:flex;align-items:center;justify-content:center;width:100%;margin-top:14px;padding:10px 14px;border:0;border-radius:10px;background:var(--btn);color:var(--btntx);font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+      .btn:hover{opacity:.9}
+      .btn:disabled{opacity:.6;cursor:default}
+      .btn2{display:flex;align-items:center;justify-content:center;width:100%;margin-top:8px;padding:8px 12px;border:1px solid var(--bd);border-radius:10px;background:var(--sf2);color:var(--tx);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer}
+      .btn2:hover{border-color:var(--btn)}
+      .btn2:disabled{opacity:.6;cursor:default}
+      .opts{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+      .opt{padding:9px 12px;border:1px solid var(--bd);border-radius:10px;background:var(--sf2);color:var(--tx);font:inherit;font-size:13px;font-weight:600;cursor:pointer;text-align:left}
+      .opt:hover{border-color:var(--btn)}
+      .opt:disabled{opacity:.6;cursor:default}
+      .note{font-size:11.5px;line-height:1.5;color:var(--mut);margin:8px 0 0}
+      .done{border-radius:8px;font-size:12.5px;line-height:1.5;padding:9px 11px;margin-top:12px;background:var(--okbg);color:var(--ok)}
+      .err{border-radius:8px;font-size:12.5px;line-height:1.5;padding:9px 11px;margin-top:12px;background:var(--erbg);color:var(--er)}
+      .oid{font-size:11px;line-height:1.5;color:var(--mut);margin:10px 0 0;word-break:break-all}
+      .rev{font-size:10px;opacity:.5;text-align:right;color:var(--mut);padding:0 14px 9px;margin:0}
+      .sk{background:linear-gradient(90deg,var(--bd2) 25%,var(--bd) 50%,var(--bd2) 75%);background-size:200% 100%;animation:sh 1.4s infinite;border-radius:6px}
+      @keyframes sh{to{background-position:-200% 0}}
+      .hidden{display:none !important}
+    </style>
+  </head>
+  <body>
+    <div class="w">
+      <div class="hd"><span class="logo" aria-hidden="true"></span><b>Letter IRL</b><span class="ctx">Letter pack</span></div>
+      <div class="bd">
+        <!-- Skeleton until toolOutput arrives, or until EMPTY_AFTER_MS says it never will -->
+        <div id="state-loading">
+          <div class="sk" style="height:20px;width:60%"></div>
+          <div class="sk" style="height:12px;margin-top:10px"></div>
+          <div class="sk" style="height:12px;width:80%;margin-top:6px"></div>
+          <div class="sk" style="height:38px;margin-top:16px;border-radius:10px"></div>
+        </div>
+        <!-- Rendered with no tool result: the host drew this template but the
+             call behind it never reached the server (issue #322). -->
+        <div id="state-empty" class="hidden">
+          <h1 class="title">Letter pack</h1>
+          <p class="ov" id="empty-message"></p>
+          <button type="button" class="btn hidden" id="retry-button">Create my checkout</button>
+          <div class="opts hidden" id="pack-options"></div>
+          <div class="err hidden" id="retry-error"></div>
+          <!-- A card cannot tell which model is selected (neither
+               window.openai nor the request metadata says), so the tip
+               names the setting where the loss shows up. -->
+          <p class="note" id="empty-hint">Tip: with Instant selected, ChatGPT sometimes doesn't run an action you approved. A higher thinking effort can help.</p>
+        </div>
+        <div id="state-ready" class="hidden">
+          <h1 class="title" id="title">Letter pack</h1>
+          <p class="ov" id="message"></p>
+          <ul class="facts">
+            <li><b>Letters</b><span id="letters"></span></li>
+            <li><b>Price</b><span id="price"></span></li>
+          </ul>
+          <a
+            class="checkout-link hidden"
+            id="checkout-link"
+            href="#"
+            target="_blank"
+            rel="noopener noreferrer"
+          >Open secure checkout</a>
+          <p class="note hidden" id="note"></p>
+          <p class="note hidden" id="fallback"><a id="fallback-link" href="#" target="_blank" rel="noopener noreferrer">If the checkout did not open, tap here.</a></p>
+          <button type="button" class="btn2 hidden" id="check-status-button">Check status</button>
+          <div class="done hidden" id="done"></div>
+          <div class="err hidden" id="err"></div>
+          <button type="button" class="btn hidden" id="new-checkout-button">Create a new checkout</button>
+          <p class="oid hidden" id="order-line"></p>
+        </div>
+      </div>
+      <p class="rev">pack t9</p>
+    </div>
+
+    <script>
+      function applyTheme() {
+        const theme = window.openai?.theme ?? "light";
+        document.documentElement.classList.toggle("dark", theme === "dark");
+      }
+
+      // Hand-copied from products.ts (no import mechanism exists into
+      // standalone widget HTML); tests/unit/mcp/widgetResources.test.ts
+      // compares the copies so they cannot drift.
+      function formatAmount(amountCents, currency) {
+        const zeroDecimal = ['bif','clp','djf','gnf','jpy','kmf','krw','mga','pyg','rwf','ugx','vnd','vuv','xaf','xof','xpf'];
+        const threeDecimal = ['bhd','jod','kwd','omr','tnd'];
+        const ccy = String(currency || 'usd').toLowerCase();
+        const decimals = zeroDecimal.includes(ccy) ? 0 : threeDecimal.includes(ccy) ? 3 : 2;
+        return `${ccy.toUpperCase()} ${((amountCents || 0) / Math.pow(10, decimals)).toFixed(decimals)}`;
+      }
+
+      function formatExpiry(iso) {
+        const at = Date.parse(iso || "");
+        if (Number.isNaN(at)) return "";
+        const minutes = Math.round((at - Date.now()) / 60000);
+        if (minutes <= 0) return "This checkout has expired; ask for a new one.";
+        if (minutes < 120) return `This checkout stays open for about ${minutes} minutes.`;
+        return `This checkout stays open for about ${Math.round(minutes / 60)} hours.`;
+      }
+
+      function plural(count, noun) {
+        return `${count} ${count === 1 ? noun : `${noun}s`}`;
+      }
+
+      // Mirrors the pack enum in the tool's input schema. Anything else in
+      // toolInput is treated as "unknown" and the customer chooses.
+      const PACK_CHOICES = ["starter", "regular", "power"];
+
+      // How long the skeleton may wait for a result before this card decides
+      // the call behind it was never made. Under a real call the result follows
+      // the render within a moment (toolOutput is null at load, then
+      // openai:set_globals delivers it). On 2026-09-11 and 2026-09-12 ChatGPT
+      // dropped the first create_pack_checkout after "Allow once", drew this
+      // template with no result, and the skeleton sat there indefinitely while
+      // the model told the customer to use "the checkout shown above"
+      // (issue #322). After this wait the card offers to create the checkout
+      // itself, through the same bridge call the preview cards already use.
+      const EMPTY_AFTER_MS = 5000;
+
+      // Purchase-status polling, copied in shape from LetterPreviewCard: poll
+      // only while the document is visible, refresh the instant it becomes
+      // visible again, fast for the first minute, then slowly, for at most ten
+      // minutes; a "Check status" button covers anything later. Paying means
+      // switching to the Stripe tab, and browsers throttle timers in a hidden
+      // iframe, so coming back to the tab is what drives the refresh.
+      const POLL_FAST_MS = 3000;
+      const POLL_SLOW_MS = 15000;
+      const POLL_FAST_WINDOW_MS = 60000;
+      const POLL_BUDGET_MS = 600000;
+      const CHECK_STATUS_LABEL = "Check status";
+
+      let emptyTimer = null;
+      let emptyShown = false;
+      let retryBusy = false;
+      // A checkout this card created itself. Once set it wins over anything
+      // the host delivers afterwards: the customer may already be paying on
+      // that link, and a late host result would swap it for another order.
+      let retryResult = null;
+
+      let trackedOrderId = null;
+      let pollingActive = false;
+      let statusTimer = null;
+      let pollStartedAt = 0;
+      let pollDeadline = 0;
+      let statusCheckInFlight = false;
+      // The last purchase status that moved the card past "pay here". Kept so
+      // a later openai:set_globals re-render (which only knows the pending
+      // checkout) cannot put the payment link back over a paid purchase.
+      let statusView = null;
+      let currentLetters = 0;
+
+      // ---- Saved state: reopened conversations ------------------------------
+      //
+      // A reopened conversation (a reload, or the return page's link back into
+      // the chat) mounts this card again. ChatGPT web does not replay its tool
+      // result, though other hosts may. With no result, the card took the #322
+      // empty state and offered a second checkout over one already paid
+      // (PAY-05, 2026-09-14). What the card showed is kept in widgetState, which
+      // the host restores on mount, so a reopened card resumes from it: it shows
+      // the order, asks for its status at once, and never opens the checkout by
+      // itself.
+      const SAVED_STATE_VERSION = 1;
+      const SAVED_ORDER_FIELDS = [
+        "orderId", "productDescription", "letters", "amountCents", "currency",
+        "displayAmount", "status", "checkoutUrl", "checkoutStartUrl", "expiresAt", "message"
+      ];
+      const SAVED_STATUS_FIELDS = ["orderId", "purchaseStatus", "letters", "lettersRemaining", "message"];
+
+      // This card's own copy of what it keeps, so consecutive saves build on
+      // each other even when the host updates widgetState asynchronously.
+      let saved = null;
+
+      function pick(source, fields) {
+        const out = {};
+        for (const field of fields) {
+          if (source && source[field] !== undefined) out[field] = source[field];
+        }
+        return out;
+      }
+
+      function readSaved() {
+        const value = window.openai?.widgetState;
+        if (!value || value.v !== SAVED_STATE_VERSION) return null;
+        const order = value.order;
+        if (!order || typeof order.orderId !== "string" || !order.orderId) return null;
+        return value;
+      }
+
+      function keep(patch) {
+        saved = { ...(saved || readSaved() || {}), ...patch, v: SAVED_STATE_VERSION };
+        if (typeof window.openai?.setWidgetState !== "function") return;
+        const snapshot = saved;
+        Promise.resolve()
+          .then(() => window.openai.setWidgetState(snapshot))
+          .catch(() => {});
+      }
+
+      // The kept state a reopened card resumed from, or null for a live card.
+      let resumed = null;
+
+      // A card instance that finds kept state before it has kept anything itself
+      // was reopened. It adopts the kept order the way it adopts a checkout it
+      // created, so that order wins over the host result from then on:
+      // - Within one instance the host result never changes. A kept order that
+      //   differs from it is a checkout this card created later (a retry or a
+      //   replacement).
+      // - A kept order that matches it carries the status an earlier mount saw.
+      // - Adoption also survives a later render that finds widgetState cleared.
+      // Kept state that arrives after this mount has kept an order is not
+      // adopted: by then that order is already on screen. This assumes that a
+      // host which replays the tool result delivers widgetState with it or
+      // before it. ChatGPT web replays no result, so it cannot split the two.
+      // A host that did split them would leave the replayed order in place of a
+      // kept replacement.
+      function adoptKeptState() {
+        if (retryResult || saved) return;
+        const kept = readSaved();
+        if (!kept) return;
+        saved = kept;
+        resumed = kept;
+        retryResult = kept.order;
+      }
+
+      function isResumedOrder(state) {
+        return Boolean(resumed && state.orderId && resumed.order.orderId === state.orderId);
+      }
+
+      function el(id) {
+        return document.getElementById(id);
+      }
+
+      function show(id, visible) {
+        el(id).classList.toggle("hidden", !visible);
+      }
+
+      function toolData(result) {
+        return result?.structuredContent || result || {};
+      }
+
+      // A refusal reaches this card's own callTool as a rejection whose
+      // message wraps the server's sentence in the host's Python-style repr
+      // (#434), for example:
+      //   Error code: INVALID_ARGUMENT; Error: RuntimeException: Error calling
+      //   MCP tool: [TextContent(type='text', text='<sentence>', annotations=None, meta=None)]
+      // Show the first sentence alone, read as Python writes a string: in
+      // double quotes when it holds a ' and no ", otherwise in single quotes
+      // with a backslash before each '; with \\, \n, \t and \r escaped, and
+      // \x, \u or \U hex for a character that does not print. Anything else
+      // shows as it came.
+      function readableError(error) {
+        const message =
+          typeof error === "string" ? error : typeof error?.message === "string" ? error.message : "";
+        const wrapped = message.match(/TextContent\(type=['"]text['"], text=(['"])((?:\\[\s\S]|(?!\1)[^\\])*)\1/);
+        if (wrapped) {
+          const sentence = wrapped[2]
+            .replace(/\\(x[0-9a-f]{2}|u[0-9a-f]{4}|U[0-9a-f]{8}|[\s\S])/g, (_, escape) => {
+              if (escape.length > 1) {
+                const point = parseInt(escape.slice(1), 16);
+                return point <= 0x10ffff ? String.fromCodePoint(point) : "";
+              }
+              return escape === "n" || escape === "t" ? " " : escape === "r" ? "" : escape;
+            })
+            .trim();
+          if (sentence) return sentence;
+        }
+        return message || "Unknown error";
+      }
+
+      function canCallTools() {
+        return typeof window.openai?.callTool === "function";
+      }
+
+      function hostState() {
+        const output = window.openai?.toolOutput ?? {};
+        const responseMeta = window.openai?.toolResponseMetadata ?? {};
+        return { ...responseMeta, ...output };
+      }
+
+      function hasData(state) {
+        return Boolean(state && (state.orderId || state.productDescription || state.message));
+      }
+
+      function requestedPack() {
+        const pack = window.openai?.toolInput?.pack;
+        return PACK_CHOICES.includes(pack) ? pack : null;
+      }
+
+      // ---- Empty render: the dropped call ---------------------------------
+
+      function armEmptyTimer() {
+        if (emptyTimer !== null || emptyShown) return;
+        emptyTimer = setTimeout(() => {
+          emptyTimer = null;
+          if (retryResult || hasData(hostState())) return;
+          emptyShown = true;
+          prepareEmptyState();
+          render();
+        }, EMPTY_AFTER_MS);
+      }
+
+      function cancelEmptyTimer() {
+        if (emptyTimer === null) return;
+        clearTimeout(emptyTimer);
+        emptyTimer = null;
+      }
+
+      function prepareEmptyState() {
+        const message = el("empty-message");
+        const button = el("retry-button");
+        // Worded for both ways a card lands here: a call that never reached the
+        // server (#322), and a reopened conversation with nothing saved. In the
+        // second case the purchase may well be paid, so the card must not say
+        // that nothing was charged (PAY-05, 2026-09-14).
+        if (!canCallTools()) {
+          // No bridge to call through: say what happened and how to recover,
+          // which still beats grey placeholder bars.
+          message.textContent =
+            "No checkout is showing on this card. Ask for the checkout again, or for your purchase status if you have already paid.";
+          button.classList.add("hidden");
+          return;
+        }
+        message.textContent =
+          "No checkout is showing on this card. If you have already paid for a pack, ask for your purchase status before buying another.";
+        button.textContent = requestedPack() ? "Create my checkout" : "Choose a pack";
+        button.classList.remove("hidden");
+      }
+
+      function showRetryError(text) {
+        const error = el("retry-error");
+        error.textContent = text;
+        error.classList.remove("hidden");
+      }
+
+      async function onRetryClick() {
+        if (retryBusy) return;
+        const pack = requestedPack();
+        if (pack) {
+          await createCheckout(pack);
+        } else {
+          await loadPackOptions();
+        }
+      }
+
+      async function loadPackOptions() {
+        const button = el("retry-button");
+        retryBusy = true;
+        button.disabled = true;
+        button.textContent = "Loading packs...";
+        el("retry-error").classList.add("hidden");
+        try {
+          const listed = toolData(await window.openai.callTool("list_letter_packs", {}));
+          const packs = Array.isArray(listed.packs) ? listed.packs : [];
+          if (!packs.length) {
+            throw new Error(listed.message || "No letter packs are available right now.");
+          }
+          renderPackOptions(packs);
+          button.classList.add("hidden");
+        } catch (error) {
+          // Not a fallback to the smallest pack: after a click that means
+          // "show me the options", a surprise purchase is the worst outcome.
+          showRetryError(`Unable to load letter packs: ${readableError(error)}`);
+          button.textContent = "Choose a pack";
+        } finally {
+          retryBusy = false;
+          button.disabled = false;
+        }
+      }
+
+      function renderPackOptions(packs) {
+        const container = el("pack-options");
+        container.textContent = "";
+        for (const option of packs) {
+          if (!PACK_CHOICES.includes(option.pack)) continue;
+          const choice = document.createElement("button");
+          choice.type = "button";
+          choice.className = "opt";
+          choice.setAttribute("data-pack", option.pack);
+          const letters = Number(option.letters) || 0;
+          // Server-formatted price when present; the local table only stands
+          // in for a stale connector that predates displayAmount.
+          const price = option.displayAmount
+            ? `${String(option.currency || "usd").toUpperCase()} ${option.displayAmount}`
+            : formatAmount(option.amountCents, option.currency);
+          choice.textContent = `${plural(letters, "letter")} · ${price}`;
+          choice.addEventListener("click", () => {
+            void createCheckout(option.pack);
+          });
+          container.appendChild(choice);
+        }
+        container.classList.remove("hidden");
+      }
+
+      async function requestCheckout(pack) {
+        const result = toolData(await window.openai.callTool("create_pack_checkout", { pack }));
+        if (!hasData(result)) {
+          throw new Error(result.message || "The checkout was not returned.");
+        }
+        return result;
+      }
+
+      async function createCheckout(pack) {
+        if (retryBusy) return;
+        const button = el("retry-button");
+        const options = Array.from(document.querySelectorAll("#pack-options button"));
+        const label = button.textContent;
+        retryBusy = true;
+        button.disabled = true;
+        button.textContent = "Creating checkout...";
+        options.forEach(option => { option.disabled = true; });
+        el("retry-error").classList.add("hidden");
+        try {
+          retryResult = await requestCheckout(pack);
+          render();
+        } catch (error) {
+          // The button stays: the customer can try again, and the message the
+          // tool returns is already written for them.
+          showRetryError(`Unable to create the checkout: ${readableError(error)}`);
+          button.textContent = label;
+        } finally {
+          retryBusy = false;
+          button.disabled = false;
+          options.forEach(option => { option.disabled = false; });
+        }
+      }
+
+      // A checkout that expired or failed is replaced, not reopened: Stripe
+      // will not take a payment on such a session either way.
+      async function createAnotherCheckout() {
+        const pack = requestedPack();
+        if (retryBusy || !pack) return;
+        const button = el("new-checkout-button");
+        retryBusy = true;
+        button.disabled = true;
+        button.textContent = "Creating checkout...";
+        el("err").classList.add("hidden");
+        try {
+          const result = await requestCheckout(pack);
+          statusView = null;
+          pollingActive = false;
+          stopStatusPolling();
+          trackedOrderId = null;
+          retryResult = result;
+          render();
+        } catch (error) {
+          el("err").textContent = `Unable to create the checkout: ${readableError(error)}`;
+          el("err").classList.remove("hidden");
+        } finally {
+          retryBusy = false;
+          button.disabled = false;
+          button.textContent = "Create a new checkout";
+        }
+      }
+
+      // ---- Purchase status ------------------------------------------------
+
+      function stopStatusPolling() {
+        if (statusTimer !== null) {
+          clearTimeout(statusTimer);
+          statusTimer = null;
+        }
+      }
+
+      // Always clears before arming, so repeated visibilitychange events
+      // cannot stack timers - a leak here would mean unbounded callTool
+      // traffic from a card left open.
+      function scheduleStatusPoll() {
+        stopStatusPolling();
+        if (!pollingActive || !trackedOrderId || document.hidden) return;
+        if (Date.now() >= pollDeadline) return;
+        const elapsed = Date.now() - pollStartedAt;
+        const delay = elapsed < POLL_FAST_WINDOW_MS ? POLL_FAST_MS : POLL_SLOW_MS;
+        statusTimer = setTimeout(() => {
+          statusTimer = null;
+          void refreshPurchaseStatus().then(settled => {
+            if (!settled) scheduleStatusPoll();
+          });
+        }, delay);
+      }
+
+      function startStatusPolling(orderId, { slow = false } = {}) {
+        if (!canCallTools() || !orderId || trackedOrderId === orderId) return;
+        trackedOrderId = orderId;
+        statusView = null;
+        pollingActive = true;
+        // A resumed order starts in the slow interval. The fast first minute is
+        // for a customer paying right now, and a reopened conversation can hold
+        // several cards that share the account's tool budget.
+        pollStartedAt = slow ? Date.now() - POLL_FAST_WINDOW_MS : Date.now();
+        pollDeadline = pollStartedAt + POLL_BUDGET_MS;
+        show("check-status-button", true);
+        scheduleStatusPoll();
+      }
+
+      // Resolves true when the purchase reached a state with nothing left to
+      // poll for.
+      async function refreshPurchaseStatus({ userInitiated = false } = {}) {
+        if (statusCheckInFlight || !trackedOrderId) return false;
+        statusCheckInFlight = true;
+        const button = el("check-status-button");
+        if (userInitiated) {
+          button.disabled = true;
+          button.textContent = "Checking...";
+        }
+        const orderId = trackedOrderId;
+        try {
+          const result = toolData(
+            await window.openai.callTool("get_purchase_status", { orderId })
+          );
+          // A reply for an order this card no longer tracks is stale.
+          if (trackedOrderId !== orderId) return true;
+          if (result.orderId && result.orderId !== orderId) return false;
+          return applyStatus(result);
+        } catch {
+          // A failed check is not worth an alarming message: the purchase is
+          // unaffected, and the button is still there to try again.
+          return false;
+        } finally {
+          statusCheckInFlight = false;
+          if (userInitiated) {
+            button.disabled = false;
+            button.textContent = CHECK_STATUS_LABEL;
+          }
+        }
+      }
+
+      function applyStatus(result) {
+        const status = result?.purchaseStatus;
+        if (!status) return false;
+        if (status === "pending_payment") {
+          statusView = null;
+          return false;
+        }
+        statusView = result;
+        // Kept so a reopened card can show it before asking again.
+        keep({ statusView: pick(result, SAVED_STATUS_FIELDS) });
+        const terminal = status !== "processing";
+        if (terminal) {
+          pollingActive = false;
+          stopStatusPolling();
+        }
+        renderStatusView();
+        return terminal;
+      }
+
+      function renderStatusView() {
+        const view = statusView;
+        if (!view) return;
+        const letters = Number(view.letters) || currentLetters;
+        const message = el("message");
+        const done = el("done");
+        const error = el("err");
+        const again = el("new-checkout-button");
+        el("checkout-link").classList.add("hidden");
+        el("note").classList.add("hidden");
+        show("fallback", false);
+        error.classList.add("hidden");
+        again.classList.add("hidden");
+        switch (view.purchaseStatus) {
+          case "processing":
+            message.textContent = `Payment confirmed. Adding ${plural(letters, "letter")} to your account...`;
+            done.classList.add("hidden");
+            // Only when a click can ask: a resumed card without a bridge draws
+            // the status it kept, but has nothing to call through.
+            show("check-status-button", canCallTools() && Boolean(trackedOrderId));
+            break;
+          case "submitted":
+            message.textContent = `Paid. ${plural(letters, "letter")} added to your account.`;
+            done.textContent =
+              typeof view.lettersRemaining === "number"
+                ? `${view.lettersRemaining} of ${letters} from this pack ${view.lettersRemaining === 1 ? "is" : "are"} still unused. Nothing is sent until you choose what to mail.`
+                : "Nothing is sent until you choose what to mail.";
+            done.classList.remove("hidden");
+            // Stays available after payment: a refund issued later is only
+            // visible through a fresh status read, and this card kept
+            // claiming two unused letters against a balance of zero on
+            // 2026-09-13 (#368). No timers restart; this is on demand.
+            show("check-status-button", canCallTools() && Boolean(trackedOrderId));
+            break;
+          case "cancelled":
+          case "payment_failed":
+            message.textContent =
+              view.purchaseStatus === "cancelled"
+                ? "This checkout expired before it was paid. Nothing was charged."
+                : "The payment did not go through. Nothing was charged.";
+            done.classList.add("hidden");
+            show("check-status-button", false);
+            if (canCallTools() && requestedPack()) {
+              again.classList.remove("hidden");
+            } else {
+              error.textContent = "Ask for a new checkout and it will appear here.";
+              error.classList.remove("hidden");
+            }
+            break;
+          default:
+            // refund_pending, refunded, on_hold: the server's message is
+            // written for the customer and says what is being done.
+            message.textContent = view.message || "";
+            done.classList.add("hidden");
+            show("check-status-button", false);
+        }
+        el("order-line").textContent = `Order ${view.orderId || trackedOrderId}`;
+        show("order-line", true);
+      }
+
+      // ---- Render -----------------------------------------------------------
+
+      function render() {
+        applyTheme();
+        // Before reading the host result: a reopened card's kept order wins
+        // over it, and adopting sets retryResult.
+        adoptKeptState();
+        const output = window.openai?.toolOutput ?? {};
+        const responseMeta = window.openai?.toolResponseMetadata ?? {};
+        // The merge stays a declaration here, not in hostState(): the data
+        // contract test follows the toolOutput alias through spreads to learn
+        // which fields this card reads, and checks them against the schema.
+        const state = retryResult || { ...responseMeta, ...output };
+
+        if (!hasData(state)) {
+          show("state-ready", false);
+          show("state-loading", !emptyShown);
+          show("state-empty", emptyShown);
+          armEmptyTimer();
+          return;
+        }
+
+        cancelEmptyTimer();
+        show("state-loading", false);
+        show("state-empty", false);
+        show("state-ready", true);
+        renderReady(state);
+      }
+
+      // The order a reopened card has already resumed, so the renders that
+      // follow every openai:set_globals do not ask for its status again.
+      let resumedOrderId = null;
+
+      function renderReady(state) {
+        if (state.orderId && (saved || readSaved())?.order?.orderId !== state.orderId) {
+          // A different order starts clean: a status recorded for the previous
+          // order says nothing about this one.
+          keep({ order: pick(state, SAVED_ORDER_FIELDS), statusView: null });
+        }
+        el("title").textContent = state.productDescription || "Letter pack";
+        // Only a status view offers a replacement checkout; a fresh checkout
+        // render (host-delivered or created here) starts without the offer.
+        show("new-checkout-button", false);
+        const letters = Number(state.letters) || 0;
+        currentLetters = letters;
+        el("letters").textContent = letters ? String(letters) : "—";
+        el("price").textContent =
+          state.displayAmount || (state.amountCents ? formatAmount(state.amountCents, state.currency) : "—");
+        if (state.orderId) {
+          el("order-line").textContent = `Order ${state.orderId}`;
+          show("order-line", true);
+        }
+
+        const link = el("checkout-link");
+        const note = el("note");
+        const done = el("done");
+        // Only an https link becomes the card's link (#684): anything else is no link.
+        const isHttps = (value) => typeof value === "string" && /^https:\/\//i.test(value);
+        const checkoutHref = [state.checkoutStartUrl, state.checkoutUrl].find(isHttps);
+        const pending = Boolean(checkoutHref) && state.status === "checkout_pending";
+
+        // The tool's message field is written for the model (it says to show
+        // the customer the link). The customer reads this card, so the
+        // pending line is composed from the figures instead.
+        el("message").textContent = pending
+          ? `Pay ${formatAmount(state.amountCents, state.currency)} to add ${plural(letters, "letter")} to your account.`
+          : state.message || "";
+
+        if (pending) {
+          // The link is the payment path and stays until the purchase status
+          // says otherwise: on 2026-08-29 openExternal resolved without
+          // opening anything, and on 2026-09-11 the text-only path left the
+          // customer with no link at all (issue #322). The anchor is correct
+          // either way.
+          // The start page records the way back into the conversation and
+          // forwards to the same Stripe checkout (#372); a result from an
+          // older server carries only the Stripe URL, which still works.
+          link.href = checkoutHref;
+          link.textContent = `Open secure checkout — ${formatAmount(state.amountCents, state.currency)}`;
+          link.classList.remove("hidden");
+          const expiry = formatExpiry(state.expiresAt);
+          note.textContent = `Stripe handles the payment. Nothing is sent until you choose what to mail. ${expiry}`.trim();
+          note.classList.remove("hidden");
+          done.classList.add("hidden");
+          // The card never opens the checkout by itself (#730): a payment page
+          // opens only when the customer presses the link above.
+          startStatusPolling(state.orderId, { slow: isResumedOrder(state) });
+        } else {
+          link.classList.add("hidden");
+          note.classList.add("hidden");
+          done.textContent = state.message ||
+            "This purchase is already paid or being fulfilled. Ask for its purchase status instead of opening another checkout.";
+          done.classList.remove("hidden");
+        }
+
+        if (isResumedOrder(state) && resumedOrderId !== state.orderId) {
+          resumedOrderId = state.orderId;
+          // The last status an earlier mount saw, shown at once so a paid
+          // purchase does not flash its payment link while the card asks.
+          const savedView = resumed.statusView;
+          if (savedView?.purchaseStatus && (!savedView.orderId || savedView.orderId === state.orderId)) {
+            statusView = savedView;
+          }
+          // Then one fresh read straight away: the purchase has usually moved
+          // on while the conversation was closed, by a payment or a refund.
+          if (trackedOrderId === state.orderId) {
+            void refreshPurchaseStatus().then(settled => {
+              if (!settled && pollingActive) scheduleStatusPoll();
+            });
+          }
+        }
+
+        // A re-render only knows the checkout; the purchase may have moved on.
+        if (statusView) renderStatusView();
+      }
+
+      // A tap on the link goes through the host when it can (#372): only an
+      // openExternal call to an allowlisted origin gets the redirectUrl that
+      // the start page keeps as the way back into the conversation. The
+      // anchor stays a real link for hosts without the call, and a plain
+      // fallback link appears in case the call resolves without opening
+      // anything, which it did on 2026-08-29.
+      const FALLBACK_AFTER_MS = 1500;
+      function showFallbackLink(href) {
+        el("fallback-link").href = href;
+        setTimeout(() => show("fallback", true), FALLBACK_AFTER_MS);
+      }
+      el("checkout-link").addEventListener("click", event => {
+        if (typeof window.openai?.openExternal !== "function") return;
+        event.preventDefault();
+        const href = el("checkout-link").getAttribute("href");
+        Promise.resolve()
+          .then(() => window.openai.openExternal({ href }))
+          .catch(() => {});
+        showFallbackLink(href);
+      });
+      el("retry-button").addEventListener("click", () => {
+        void onRetryClick();
+      });
+      el("new-checkout-button").addEventListener("click", () => {
+        void createAnotherCheckout();
+      });
+      el("check-status-button").addEventListener("click", () => {
+        void refreshPurchaseStatus({ userInitiated: true }).then(settled => {
+          if (!settled) scheduleStatusPoll();
+        });
+      });
+      // Coming back from the checkout tab is the moment the answer is wanted,
+      // and the first moment a hidden iframe is allowed to run again. The
+      // refresh also runs after a final state, once per return and with no
+      // timer behind it: polling ends at "paid", so a refund issued while the
+      // customer was away was otherwise never seen (#368). Only an active
+      // budget reschedules.
+      document.addEventListener("visibilitychange", () => {
+        if (!trackedOrderId) return;
+        if (document.hidden) {
+          stopStatusPolling();
+          return;
+        }
+        void refreshPurchaseStatus().then(settled => {
+          if (!settled && pollingActive) scheduleStatusPoll();
+        });
+      });
+      window.addEventListener("openai:set_globals", render);
+      render();
+    </script>
+  </body>
+</html>

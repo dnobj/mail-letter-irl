@@ -1,13 +1,20 @@
 import { createHash } from 'node:crypto';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   query: vi.fn(),
   clientQuery: vi.fn(),
   transaction: vi.fn(),
   sendLetter: vi.fn(),
+  sendPostcard: vi.fn(),
 }));
 const { query, clientQuery, sendLetter } = mocks;
+
+// The operator's notices (#699): spied, never posted.
+vi.mock('../../../src/services/operatorNotify.js', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../../src/services/operatorNotify.js')>()),
+  reportToOperator: vi.fn(async () => 'sent')
+}));
 
 vi.mock('../../../src/db/index.js', () => ({
   query: mocks.query,
@@ -16,18 +23,27 @@ vi.mock('../../../src/db/index.js', () => ({
 vi.mock('../../../src/services/providers/index.js', () => ({
   getProviderForMailType: vi.fn(async () => ({
     config: { name: 'postgrid', displayName: 'PostGrid' },
+    // As PostGrid does: it prints the PDF our renderer drew (#698).
+    printsRenderedPdf: true,
     sendLetter: mocks.sendLetter,
+    sendPostcard: mocks.sendPostcard,
   })),
 }));
 
 import {
+  createLetterJobWithClient,
+  lettersWaitingBehindPause,
   processDueLetterJobs,
   processLetterJob,
+  cancelLeftLetterJobAsAdmin,
+  releaseHeldLetterJobAsAdmin,
   resolveAmbiguousLetterJobAsAdmin,
   retryLetterJobAsAdmin,
   submitToProviderOnce,
 } from '../../../src/services/letterJobService.js';
+import { OPERATOR_NOTICES, reportToOperator } from '../../../src/services/operatorNotify.js';
 import { getProviderForMailType } from '../../../src/services/providers/index.js';
+import { estimateLines, validateCharacterLimit } from '../../../src/services/previewService.js';
 
 const job = {
   job_id: 'job-1',
@@ -71,6 +87,22 @@ const letter = {
   status: 'queued',
   mail_type: 'letter',
 };
+
+/**
+ * The suite's database, with the job's locked row at the given attempts: a
+ * claim at those attempts holds it (#730), and the dispatch marker checks so.
+ * Returns the undo.
+ */
+function lockedJobAt(attempts: number, extra: (sql: string) => { rows: unknown[] } | undefined = () => undefined) {
+  const base = clientQuery.getMockImplementation()! as (...args: unknown[]) => Promise<{ rows: Array<Record<string, unknown>> }>;
+  clientQuery.mockImplementation(async (sql: string, ...rest: unknown[]) => {
+    const own = extra(sql);
+    if (own) return own;
+    const answer = await base(sql, ...rest);
+    return sql.startsWith('SELECT * FROM letter_jobs') ? { ...answer, rows: answer.rows.map(row => ({ ...row, attempts })) } : answer;
+  });
+  return () => clientQuery.mockImplementation(base as never);
+}
 
 function mockClaims(numberOfClaims = 1) {
   let claims = 0;
@@ -161,6 +193,495 @@ describe('mail outbox retries', () => {
     }));
   });
 
+  it("hands a gift letter's card to the provider, exactly as the send wrote it", async () => {
+    // docs/gift-letters.md: the card is written into the letter at send time
+    // so a retry from the maintenance run prints the same code and link.
+    const giftCard = {
+      state: 'funded',
+      code: 'K7M2QX9A',
+      url: 'https://letterirl.com/g/K7M2QX9A',
+      displayUrl: 'letterirl.com/g',
+      redeemBy: '2026-12-16',
+    };
+    const giftLetter = { ...letter, funding_type: 'gift_letter', content: { ...letter.content, giftCard } };
+    query.mockImplementation(async (sql: string) => {
+      if (sql.includes('WITH candidate')) return { rows: [{ ...job }] };
+      if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...giftLetter }] };
+      return { rows: [] };
+    });
+    const base = clientQuery.getMockImplementation()!;
+    clientQuery.mockImplementation(async (sql: string, params?: unknown[]) =>
+      sql.startsWith('SELECT * FROM letters') ? { rows: [{ ...giftLetter }] } : base(sql, params)
+    );
+
+    await processLetterJob('job-1', {});
+
+    expect(sendLetter).toHaveBeenCalledWith(expect.objectContaining({ giftCard, color: false }));
+  });
+
+  it('hands the provider the renderer the letter was previewed with (#534)', async () => {
+    const rendered = { ...letter, content: { ...letter.content, rendererVersion: 'pdf-1' } };
+    query.mockImplementation(async (sql: string) => {
+      if (sql.includes('WITH candidate')) return { rows: [{ ...job }] };
+      if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...rendered }] };
+      return { rows: [] };
+    });
+    const base = clientQuery.getMockImplementation()!;
+    clientQuery.mockImplementation(async (sql: string, params?: unknown[]) =>
+      sql.startsWith('SELECT * FROM letters') ? { rows: [{ ...rendered }] } : base(sql, params)
+    );
+
+    await processLetterJob('job-1', {});
+
+    expect(sendLetter).toHaveBeenCalledWith(expect.objectContaining({ rendererVersion: 'pdf-1' }));
+  });
+
+  it.each([
+    // The message is "Hello\nRegards": the sign-off's first line is paragraph 1.
+    ['under the sign-off\'s first line', { bodyText: 'Hello', signOff: 'Regards' }, 1],
+    // A body ending in blank lines: they are trimmed, so the closing follows the last word.
+    ['after a body ending in blank lines', { bodyText: 'Line one\nLine two\n\n\n', signOff: 'Love,\nPat' }, 2]
+  ])('hands the provider the signature, %s (#608)', async (_label, words, closingParagraph) => {
+    const image = 'data:image/png;base64,iVBORw0KGgo=';
+    const signed = { ...letter, content: { ...letter.content, ...words, rendererVersion: 'pdf-4', signatureImage: image } };
+    query.mockImplementation(async (sql: string) => {
+      if (sql.includes('WITH candidate')) return { rows: [{ ...job }] };
+      if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...signed }] };
+      return { rows: [] };
+    });
+    const base = clientQuery.getMockImplementation()!;
+    clientQuery.mockImplementation(async (sql: string, params?: unknown[]) =>
+      sql.startsWith('SELECT * FROM letters') ? { rows: [{ ...signed }] } : base(sql, params)
+    );
+
+    await processLetterJob('job-1', {});
+
+    expect(sendLetter).toHaveBeenCalledWith(expect.objectContaining({ rendererVersion: 'pdf-4', signature: { image, closingParagraph } }));
+  });
+
+  it.each([['none', undefined], ['an emptied one', ''], ['one that is not text', 42]])(
+    'hands the provider no signature for a letter with %s (#608)',
+    async (_label, signatureImage) => {
+      const content = { ...letter.content, rendererVersion: 'pdf-4', ...(signatureImage === undefined ? {} : { signatureImage }) };
+      const unsigned = { ...letter, content };
+      query.mockImplementation(async (sql: string) => {
+        if (sql.includes('WITH candidate')) return { rows: [{ ...job }] };
+        if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...unsigned }] };
+        return { rows: [] };
+      });
+      const base = clientQuery.getMockImplementation()!;
+      clientQuery.mockImplementation(async (sql: string, params?: unknown[]) =>
+        sql.startsWith('SELECT * FROM letters') ? { rows: [{ ...unsigned }] } : base(sql, params)
+      );
+
+      await processLetterJob('job-1', {});
+
+      // The print holds a pdf-4 letter without one (postGridPdfLetters.test.ts).
+      expect(sendLetter).toHaveBeenCalledWith(expect.objectContaining({ rendererVersion: 'pdf-4', signature: undefined }));
+    }
+  );
+
+  it('hands the provider the stationery the letter was drawn in (#563)', async () => {
+    const stationery = { theme: 'botanical', dateLine: 'October 1, 2026' };
+    const themed = { ...letter, content: { ...letter.content, rendererVersion: 'pdf-2', stationery } };
+    query.mockImplementation(async (sql: string) => {
+      if (sql.includes('WITH candidate')) return { rows: [{ ...job }] };
+      if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...themed }] };
+      return { rows: [] };
+    });
+    const base = clientQuery.getMockImplementation()!;
+    clientQuery.mockImplementation(async (sql: string, params?: unknown[]) =>
+      sql.startsWith('SELECT * FROM letters') ? { rows: [{ ...themed }] } : base(sql, params)
+    );
+
+    await processLetterJob('job-1', {});
+
+    expect(sendLetter).toHaveBeenCalledWith(expect.objectContaining({ rendererVersion: 'pdf-2', stationery }));
+  });
+
+  it.each([
+    [3, true],
+    [2, true],
+    [undefined, false]
+  ] as const)('hands the provider the pages a letter was laid out on (%s), double-sided past one (#586)', async (pages, doubleSided) => {
+    const long = { ...letter, content: { ...letter.content, rendererVersion: 'pdf-1', ...(pages ? { pages } : {}) } };
+    query.mockImplementation(async (sql: string) => {
+      if (sql.includes('WITH candidate')) return { rows: [{ ...job }] };
+      if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...long }] };
+      return { rows: [] };
+    });
+    const base = clientQuery.getMockImplementation()!;
+    clientQuery.mockImplementation(async (sql: string, params?: unknown[]) =>
+      sql.startsWith('SELECT * FROM letters') ? { rows: [{ ...long }] } : base(sql, params)
+    );
+
+    await processLetterJob('job-1', {});
+
+    expect(sendLetter).toHaveBeenCalledWith(expect.objectContaining({ pages, doubleSided }));
+  });
+
+  describe('certified mail (#625)', () => {
+    const providerWith = (capability: Record<string, unknown> = {}) =>
+      ({
+        config: { name: 'postgrid', displayName: 'PostGrid' },
+        sendLetter: mocks.sendLetter,
+        sendPostcard: mocks.sendPostcard,
+        ...capability,
+      }) as never;
+    const asRow = (over: Record<string, unknown>) => {
+      const row = { ...letter, ...over };
+      query.mockImplementation(async (sql: string) => {
+        if (sql.includes('WITH candidate')) return { rows: [{ ...job }] };
+        if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...row }] };
+        return { rows: [] };
+      });
+      const base = clientQuery.getMockImplementation()!;
+      clientQuery.mockImplementation(async (sql: string, params?: unknown[]) =>
+        sql.startsWith('SELECT * FROM letters') ? { rows: [{ ...row }] } : base(sql, params)
+      );
+    };
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it.each(['certified', 'certified_return_receipt'] as const)(
+      'hands the provider the service the letter travels by: %s',
+      async (service) => {
+        asRow({ mail_service: service });
+        vi.mocked(getProviderForMailType).mockResolvedValueOnce(providerWith({ supportsExtraServices: true }));
+
+        await processLetterJob('job-1', {});
+
+        expect(sendLetter).toHaveBeenCalledTimes(1);
+        expect(sendLetter.mock.calls[0][0].extraService).toBe(service);
+      }
+    );
+
+    // A standard letter asks for nothing, so no capability is needed to send it:
+    // the provider mock here says nothing about services.
+    it.each([undefined, null, '', 'standard'])(
+      'sends a standard letter (%j) with no service, through a provider that sells none',
+      async (service) => {
+        asRow(service === undefined ? {} : { mail_service: service });
+
+        await processLetterJob('job-1', {});
+
+        expect(sendLetter).toHaveBeenCalledTimes(1);
+        expect(sendLetter.mock.calls[0][0].extraService).toBeUndefined();
+      }
+    );
+
+    describe('refuses what the provider cannot send as asked, before anything is submitted', () => {
+      const fundedLetter = () => {
+        const base = clientQuery.getMockImplementation()!;
+        clientQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
+          if (sql.includes('SELECT jobs.letter_id')) {
+            return { rows: [{ letter_id: 'letter-1', funding_order_id: 'order-1' }] };
+          }
+          if (sql.includes('SELECT funding_order_id FROM letters')) return { rows: [{ funding_order_id: 'order-1' }] };
+          if (sql.includes('SELECT status FROM orders')) return { rows: [{ status: 'fulfillment_pending' }] };
+          if (sql.includes('SELECT order_id FROM orders')) return { rows: [{ order_id: 'order-1' }] };
+          if (sql.includes('SELECT letter_id FROM letter_jobs')) return { rows: [{ letter_id: 'letter-1' }] };
+          if (sql.includes("SET status = 'refund_pending'")) return { rows: [{ order_id: 'order-1' }] };
+          if (sql.includes('SET status = $1::varchar')) return { rows: [], rowCount: 1 };
+          return base(sql, params);
+        });
+      };
+
+      it.each([
+        ['text this code does not know', { mail_service: 'express' }, { supportsExtraServices: true }, 'unknown_service'],
+        ['text that differs only by case', { mail_service: 'Certified' }, { supportsExtraServices: true }, 'unknown_service'],
+        ['a provider that does not say it can sell it', { mail_service: 'certified' }, {}, 'provider_cannot_sell'],
+        [
+          'a provider that says it cannot',
+          { mail_service: 'certified_return_receipt' },
+          { supportsExtraServices: false },
+          'provider_cannot_sell',
+        ],
+        ['a postcard', { mail_type: 'postcard', mail_service: 'certified' }, { supportsExtraServices: true }, 'postcard'],
+      ])('%s', async (_name, row, capability, reason) => {
+        const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+        asRow(row);
+        fundedLetter();
+        vi.mocked(getProviderForMailType).mockResolvedValueOnce(providerWith(capability));
+
+        const result = await processLetterJob('job-1', {});
+
+        // Nothing was sent, as the letter or as a postcard.
+        expect(sendLetter).not.toHaveBeenCalled();
+        expect(mocks.sendPostcard).not.toHaveBeenCalled();
+        expect(result).toMatchObject({ completed: false, retryScheduled: false });
+        // What paid for it comes back, by the same road as any definite rejection,
+        // with the data-free class and not a word of the refusal's text.
+        expect(clientQuery).toHaveBeenCalledWith(
+          expect.stringContaining('WHERE order_id = $1'),
+          ['order-1', 'extra_service_refused']
+        );
+        expect(clientQuery).toHaveBeenCalledWith(
+          expect.stringContaining("'provider.terminal_failure'"),
+          ['order-1', JSON.stringify({ errorClass: 'extra_service_refused' })]
+        );
+        // The operator is told why, in a fixed word and nothing of the letter.
+        const logged = errorLog.mock.calls
+          .map((call) => String(call[0]))
+          .find((line) => line.includes('outbox.extra_service_refused'));
+        expect(JSON.parse(logged!)).toMatchObject({
+          event: 'outbox.extra_service_refused',
+          reason,
+          jobId: 'job-1',
+          provider: 'postgrid',
+        });
+      });
+
+      it('stops a letter no order funds the same way: a definite failure, never a hold', async () => {
+        // The refusal does not depend on how the letter was paid for.
+        asRow({ mail_service: 'certified' });
+        const base = clientQuery.getMockImplementation()!;
+        clientQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
+          // The funding graph of a letter no order funds, as the terminal transition reads it.
+          if (sql.includes('SELECT jobs.letter_id')) return { rows: [{ letter_id: 'letter-1', funding_order_id: null }] };
+          if (sql.includes('SELECT funding_order_id FROM letters')) return { rows: [{ funding_order_id: null }] };
+          if (sql.includes('SELECT letter_id FROM letter_jobs')) return { rows: [{ letter_id: 'letter-1' }] };
+          if (sql.includes('SET status = $1::varchar')) return { rows: [], rowCount: 1 };
+          return base(sql, params);
+        });
+        vi.mocked(getProviderForMailType).mockResolvedValueOnce(providerWith());
+
+        const result = await processLetterJob('job-1', {});
+
+        expect(sendLetter).not.toHaveBeenCalled();
+        expect(result).toMatchObject({ completed: false, retryScheduled: false });
+        // The job ends as a definite failure, with our own class in the columns an operator reads...
+        expect(clientQuery).toHaveBeenCalledWith(
+          expect.stringContaining('SET status = $1::varchar'),
+          ['failed', expect.any(Date), 'extra_service_refused', 'job-1']
+        );
+        // ...and nothing was held for an operator as an ambiguous outcome.
+        const statements = clientQuery.mock.calls.map(call => String(call[0]));
+        expect(statements.some(sql => sql.includes("SET status = 'held'"))).toBe(false);
+        expect(statements.some(sql => sql.includes("provider_outcome = 'ambiguous'"))).toBe(false);
+      });
+    });
+  });
+
+  describe('mail our renderer drew goes only to a provider that prints it (#698)', () => {
+    const providerWith = (capability: Record<string, unknown> = {}) =>
+      ({
+        config: { name: 'diy', displayName: 'DIY' },
+        sendLetter: mocks.sendLetter,
+        sendPostcard: mocks.sendPostcard,
+        ...capability,
+      }) as never;
+    const asRow = (over: Record<string, unknown>) => {
+      const row = { ...letter, ...over };
+      query.mockImplementation(async (sql: string) => {
+        if (sql.includes('WITH candidate')) return { rows: [{ ...job }] };
+        if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...row }] };
+        return { rows: [] };
+      });
+      const base = clientQuery.getMockImplementation()!;
+      clientQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
+        if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...row }] };
+        if (sql.includes('SELECT jobs.letter_id')) return { rows: [{ letter_id: 'letter-1', funding_order_id: 'order-1' }] };
+        if (sql.includes('SELECT funding_order_id FROM letters')) return { rows: [{ funding_order_id: 'order-1' }] };
+        if (sql.includes('SELECT status FROM orders')) return { rows: [{ status: 'fulfillment_pending' }] };
+        if (sql.includes('SELECT order_id FROM orders')) return { rows: [{ order_id: 'order-1' }] };
+        if (sql.includes('SELECT letter_id FROM letter_jobs')) return { rows: [{ letter_id: 'letter-1' }] };
+        if (sql.includes("SET status = 'refund_pending'")) return { rows: [{ order_id: 'order-1' }] };
+        if (sql.includes('SET status = $1::varchar')) return { rows: [], rowCount: 1 };
+        return base(sql, params);
+      });
+    };
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it.each([
+      ['a letter', { content: { ...letter.content, rendererVersion: 'pdf-1' } }, {}],
+      ['a letter with stationery', { content: { ...letter.content, rendererVersion: 'pdf-2' } }, { printsRenderedPdf: false }],
+      // An empty version is drawn too, as the print reads it (it would refuse to print it).
+      ['a letter with an empty version', { content: { ...letter.content, rendererVersion: '' } }, {}],
+      [
+        'a postcard',
+        { mail_type: 'postcard', content: { message: 'Hi', frontImageData: 'data:image/jpeg;base64,AAAA', postcardSize: '6x9', rendererVersion: 'pdf-1' } },
+        {}
+      ]
+    ])('refuses %s it drew to a provider that does not say it prints it, before anything is submitted', async (_name, row, capability) => {
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+      asRow(row);
+      vi.mocked(getProviderForMailType).mockResolvedValueOnce(providerWith(capability));
+
+      const result = await processLetterJob('job-1', {});
+
+      expect(sendLetter).not.toHaveBeenCalled();
+      expect(mocks.sendPostcard).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ completed: false, retryScheduled: false });
+      // What paid for it comes back, by the road any definite rejection takes, with its own class.
+      expect(clientQuery).toHaveBeenCalledWith(expect.stringContaining('WHERE order_id = $1'), ['order-1', 'renderer_refused']);
+      const statements = clientQuery.mock.calls.map(call => String(call[0]));
+      expect(statements.some(sql => sql.includes("SET status = 'held'"))).toBe(false);
+      const logged = errorLog.mock.calls.map(call => String(call[0])).find(line => line.includes('outbox.renderer_refused'));
+      expect(JSON.parse(logged!)).toMatchObject({
+        event: 'outbox.renderer_refused',
+        reason: 'provider_cannot_print_rendered',
+        jobId: 'job-1',
+        provider: 'diy'
+      });
+    });
+
+    it.each([undefined, null])('sends mail the legacy HTML drew (rendererVersion %j) to any provider', async renderer => {
+      asRow({ content: { ...letter.content, ...(renderer === undefined ? {} : { rendererVersion: renderer }) } });
+      vi.mocked(getProviderForMailType).mockResolvedValueOnce(providerWith());
+
+      await processLetterJob('job-1', {});
+
+      expect(sendLetter).toHaveBeenCalledTimes(1);
+    });
+
+    it('sends what it drew to a provider that prints it', async () => {
+      asRow({ content: { ...letter.content, rendererVersion: 'pdf-4' } });
+      vi.mocked(getProviderForMailType).mockResolvedValueOnce(providerWith({ printsRenderedPdf: true }));
+
+      await processLetterJob('job-1', {});
+
+      expect(sendLetter).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('hands the provider the renderer a postcard was previewed with (#534 Phase 4)', async () => {
+    const postcard = {
+      ...letter,
+      mail_type: 'postcard',
+      content: {
+        message: 'Wish you were here.',
+        sender: letter.content.sender,
+        frontImageData: 'data:image/jpeg;base64,AAAA',
+        postcardSize: '6x9',
+        rendererVersion: 'pdf-1'
+      }
+    };
+    query.mockImplementation(async (sql: string) => {
+      if (sql.includes('WITH candidate')) return { rows: [{ ...job }] };
+      if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...postcard }] };
+      return { rows: [] };
+    });
+    const base = clientQuery.getMockImplementation()!;
+    clientQuery.mockImplementation(async (sql: string, params?: unknown[]) =>
+      sql.startsWith('SELECT * FROM letters') ? { rows: [{ ...postcard }] } : base(sql, params)
+    );
+    mocks.sendPostcard.mockResolvedValue({ success: true, trackingId: 'provider-1', costCents: 100 });
+
+    await processLetterJob('job-1', {});
+
+    expect(mocks.sendPostcard).toHaveBeenCalledWith(expect.objectContaining({
+      backMessage: 'Wish you were here.',
+      size: '6x9',
+      rendererVersion: 'pdf-1'
+    }));
+    expect(mocks.sendPostcard.mock.calls[0][0].front).toBeUndefined();
+    expect(sendLetter).not.toHaveBeenCalled();
+  });
+
+  it('hands the provider the front a postcard was drawn with (#594)', async () => {
+    const postcardFront = { layout: 'border', caption: 'Cape Cod, August 2026' };
+    const postcard = {
+      ...letter,
+      mail_type: 'postcard',
+      content: {
+        message: 'Wish you were here.',
+        sender: letter.content.sender,
+        frontImageData: 'data:image/jpeg;base64,AAAA',
+        postcardSize: '6x4',
+        rendererVersion: 'pdf-3',
+        postcardFront
+      }
+    };
+    query.mockImplementation(async (sql: string) => {
+      if (sql.includes('WITH candidate')) return { rows: [{ ...job }] };
+      if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...postcard }] };
+      return { rows: [] };
+    });
+    const base = clientQuery.getMockImplementation()!;
+    clientQuery.mockImplementation(async (sql: string, params?: unknown[]) =>
+      sql.startsWith('SELECT * FROM letters') ? { rows: [{ ...postcard }] } : base(sql, params)
+    );
+    mocks.sendPostcard.mockResolvedValue({ success: true, trackingId: 'provider-1', costCents: 100 });
+
+    await processLetterJob('job-1', {});
+
+    expect(mocks.sendPostcard).toHaveBeenCalledWith(expect.objectContaining({ size: '6x4', rendererVersion: 'pdf-3', front: postcardFront }));
+  });
+
+  it('prints the text validation counted: no trailing blank lines before the sign-off (#77)', async () => {
+    // The print used to keep a body's trailing newlines, which validation
+    // dropped, so a letter at the line limit could print taller than counted.
+    const bodyText = 'Line one\nLine two\n\n\n';
+    const trailing = { ...letter, content: { ...letter.content, bodyText } };
+    query.mockImplementation(async (sql: string) => {
+      if (sql.includes('WITH candidate')) return { rows: [{ ...job }] };
+      if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...trailing }] };
+      return { rows: [] };
+    });
+    const base = clientQuery.getMockImplementation()!;
+    clientQuery.mockImplementation(async (sql: string, params?: unknown[]) =>
+      sql.startsWith('SELECT * FROM letters') ? { rows: [{ ...trailing }] } : base(sql, params)
+    );
+
+    await processLetterJob('job-1', {});
+
+    const message = sendLetter.mock.calls[0][0].message;
+    expect(message).toBe('Line one\nLine two\nRegards');
+    expect(estimateLines(message)).toBe(validateCharacterLimit(bodyText, 'Regards', 'text_only').totalLines);
+  });
+
+  it('still dispatches a letter whose content has no body text', async () => {
+    // The integration fixtures store content as { body: 'test' }. The print
+    // text must not throw on it, or the job fails before dispatch.
+    const bodiless = { ...letter, content: { body: 'test' } };
+    query.mockImplementation(async (sql: string) => {
+      if (sql.includes('WITH candidate')) return { rows: [{ ...job }] };
+      if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...bodiless }] };
+      return { rows: [] };
+    });
+    const base = clientQuery.getMockImplementation()!;
+    clientQuery.mockImplementation(async (sql: string, params?: unknown[]) =>
+      sql.startsWith('SELECT * FROM letters') ? { rows: [{ ...bodiless }] } : base(sql, params)
+    );
+
+    await processLetterJob('job-1', {});
+
+    expect(sendLetter).toHaveBeenCalledTimes(1);
+    expect(sendLetter.mock.calls[0][0].message).toBe('');
+  });
+
+  it('hands no card for an ordinary letter', async () => {
+    mockClaims();
+    await processLetterJob('job-1', {});
+    expect(sendLetter.mock.calls[0][0].giftCard).toBeUndefined();
+  });
+
+  it('marks nothing and sends nothing for a claimant whose job a later claim now holds (#730)', async () => {
+    let dispatchMarked = false;
+    // The job's row now holds a later claim's attempts; the funding graph locks as it is.
+    const undo = lockedJobAt(job.attempts + 1, (sql) => {
+      if (sql.includes("SET provider_outcome = 'dispatching'")) dispatchMarked = true;
+      if (sql.startsWith('SELECT funding_order_id FROM letters')) return { rows: [{ funding_order_id: null }] };
+      if (sql.startsWith('SELECT letter_id FROM letter_jobs WHERE job_id = $1 FOR UPDATE')) return { rows: [{ letter_id: 'letter-1' }] };
+      return undefined;
+    });
+    mockClaims();
+    try {
+      await expect(processLetterJob('job-1')).resolves.toMatchObject({ completed: false, retryScheduled: false });
+      expect(dispatchMarked).toBe(false);
+      expect(sendLetter).not.toHaveBeenCalled();
+      expect(clientQuery).not.toHaveBeenCalledWith(expect.stringContaining('attempts = GREATEST(attempts - 1, 0)'), expect.anything());
+    } finally {
+      undo();
+    }
+  });
+
   it('retries, not holds, when the provider cannot even be resolved', async () => {
     // Issue #155's runtime guards make getProviderForMailType throw in
     // production (dummy refused, construction failure rethrown). The provider
@@ -198,6 +719,13 @@ describe('mail outbox retries', () => {
     // first and this counter stays at zero.
     expect(getProviderForMailType).toHaveBeenCalledTimes(1);
     expect(sendLetter).not.toHaveBeenCalled();
+    // Only the claim that holds the job settles it (#730): a claimant that lost
+    // it to a cancel (#535) or to another worker never brings it back to pending.
+    const failedCall = clientQuery.mock.calls.find(([sql]) => String(sql).includes('UPDATE letter_jobs SET status = $2::varchar'));
+    const failed = String(failedCall?.[0]).replace(/\s+/g, ' ');
+    expect(failed).toContain("WHERE job_id = $1 AND provider_outcome = 'not_dispatched' AND status = 'processing' AND attempts = $5::int");
+    // The attempts this claim set: the claimed job's own.
+    expect((failedCall?.[1] as unknown[])[4]).toEqual(expect.any(Number));
     expect(clientQuery).not.toHaveBeenCalledWith(
       expect.stringContaining("SET status = 'held'"),
       expect.anything()
@@ -206,6 +734,29 @@ describe('mail outbox retries', () => {
       expect.stringContaining("'mail_provider_outcome_ambiguous'"),
       expect.anything()
     );
+  });
+
+  it('fails a job whose letter is gone with the LETTER_NOT_FOUND class, never the id-bearing message (#394)', async () => {
+    query.mockImplementation(async (sql: string) => {
+      if (sql.includes('WITH candidate')) return { rows: [{ ...job }] };
+      if (sql.startsWith('SELECT * FROM letters')) return { rows: [] };
+      return { rows: [] };
+    });
+    clientQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT funding_order_id FROM letters')) return { rows: [{ funding_order_id: null }] };
+      if (sql.includes('SELECT letter_id FROM letter_jobs')) return { rows: [{ letter_id: 'letter-1' }] };
+      if (sql.includes('UPDATE letter_jobs SET status =')) return { rows: [{ job_id: 'job-1' }], rowCount: 1 };
+      return { rows: [] };
+    });
+
+    const result = await processLetterJob('job-1', {});
+
+    expect(result).toMatchObject({ claimed: true, completed: false });
+    expect(sendLetter).not.toHaveBeenCalled();
+    const failure = clientQuery.mock.calls.find(([sql]) => String(sql).includes('UPDATE letter_jobs SET status ='));
+    expect(failure).toBeDefined();
+    expect((failure![1] as unknown[])[3]).toBe('LETTER_NOT_FOUND');
+    expect(JSON.stringify(clientQuery.mock.calls.map(([, params]) => params))).not.toContain('Letter not found');
   });
 
   it('allows only one concurrent claimant to create a provider order', async () => {
@@ -312,9 +863,11 @@ describe('mail outbox retries', () => {
       metadata: { retryable: true },
     });
 
+    // The claimed job's own row: the claim set its attempts.
+    const undo = lockedJobAt(5);
     const result = await processLetterJob('job-1', {
       random: () => 0,
-    });
+    }).finally(undo);
 
     expect(result).toMatchObject({ completed: false, retryScheduled: false });
     expect(clientQuery).toHaveBeenCalledWith(
@@ -380,7 +933,7 @@ describe('mail outbox retries', () => {
     // canonical order -> letter -> job sequence, never a re-derived letter_id.
     expect(clientQuery).toHaveBeenCalledWith(
       expect.stringContaining('WHERE order_id = $1'),
-      ['order-1', 'HTTP 400 invalid address']
+      ['order-1', 'provider_rejected http_400']
     );
     expect(clientQuery).not.toHaveBeenCalledWith(
       expect.stringContaining("SET status = 'refund_pending'"),
@@ -389,6 +942,17 @@ describe('mail outbox retries', () => {
     expect(clientQuery).toHaveBeenCalledWith(
       expect.stringContaining("'provider.terminal_failure'"),
       expect.arrayContaining(['order-1'])
+    );
+    // Audit A-08: the provider's message text reaches no column. Only the
+    // class and status do, on the job, the order and the order event.
+    for (const [, params] of clientQuery.mock.calls) {
+      for (const value of params ?? []) {
+        expect(String(value)).not.toContain('invalid address');
+      }
+    }
+    expect(clientQuery).toHaveBeenCalledWith(
+      expect.stringContaining("'provider.terminal_failure'"),
+      ['order-1', JSON.stringify({ errorClass: 'provider_rejected http_400' })]
     );
   });
 
@@ -438,6 +1002,62 @@ describe('mail outbox retries', () => {
       expect.stringContaining("'mail_provider_outcome_ambiguous'"),
       expect.anything()
     );
+    // The operator is told, once the hold's transaction has finished (#699).
+    expect(reportToOperator).toHaveBeenCalledWith('ambiguous_outcome', OPERATOR_NOTICES.ambiguousOutcome());
+    const alertAt = clientQuery.mock.invocationCallOrder[
+      clientQuery.mock.calls.findIndex(([sql]) => String(sql).includes("'mail_provider_outcome_ambiguous'"))
+    ];
+    expect(vi.mocked(reportToOperator).mock.invocationCallOrder[0]).toBeGreaterThan(alertAt);
+  });
+
+  it.each([
+    ['render_refused', 'render_refused'],
+    ['provider message: 123 Main St', 'provider_error'],
+  ])('holds with the class the provider names only when it is safe: %s -> %s (#534)', async (reported, stored) => {
+    mockClaims();
+    clientQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT jobs.letter_id')) {
+        return { rows: [{ letter_id: 'letter-1', funding_order_id: 'order-1' }] };
+      }
+      if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...letter }] };
+      if (sql.startsWith('SELECT * FROM letter_jobs')) return { rows: [{ ...job }] };
+      if (sql.includes('SELECT funding_order_id FROM letters')) {
+        return { rows: [{ funding_order_id: 'order-1' }] };
+      }
+      if (sql.includes('SELECT status FROM orders')) {
+        return { rows: [{ status: 'fulfillment_pending' }] };
+      }
+      if (sql.includes('SELECT order_id FROM orders')) {
+        return { rows: [{ order_id: 'order-1' }] };
+      }
+      if (sql.includes('SELECT letter_id FROM letter_jobs')) {
+        return { rows: [{ letter_id: 'letter-1' }] };
+      }
+      return { rows: [] };
+    });
+    // Our renderer refused before any request: held, never refunded, and
+    // named so an operator resolves it with a retry.
+    sendLetter.mockResolvedValue({
+      success: false,
+      trackingId: '',
+      error: 'The letter runs 2 line(s) past the page.',
+      metadata: { retryable: false, submissionOutcome: 'ambiguous', errorClass: reported },
+    });
+
+    await processLetterJob('job-1', {});
+
+    expect(clientQuery).toHaveBeenCalledWith(
+      expect.stringContaining("hold_reason = 'provider_outcome_ambiguous'"),
+      [expect.any(String), stored]
+    );
+    expect(clientQuery).toHaveBeenCalledWith(
+      expect.stringContaining("'mail_provider_outcome_ambiguous'"),
+      ['order-1', JSON.stringify({ jobId: job.job_id, errorClass: stored })]
+    );
+    expect(clientQuery).not.toHaveBeenCalledWith(
+      expect.stringContaining("SET status = 'refund_pending'"),
+      expect.anything()
+    );
   });
 
   it('recovers a due or stale job during a one-shot maintenance batch', async () => {
@@ -445,6 +1065,44 @@ describe('mail outbox retries', () => {
     const result = await processDueLetterJobs(25, {});
     expect(result).toEqual({ processed: 1, completed: 1, retryScheduled: 0, failed: 0 });
     expect(sendLetter).toHaveBeenCalledTimes(1);
+  });
+
+  describe('the time budget of a run (#700)', () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    const claimQueries = () => query.mock.calls.filter(([sql]) => String(sql).includes('WITH candidate'));
+
+    it('claims until the outbox is empty while time is left', async () => {
+      vi.spyOn(Date, 'now').mockReturnValue(999);
+      mockClaims(1);
+      await expect(processDueLetterJobs(3, { stopAt: 1_000 })).resolves.toEqual({ processed: 1, completed: 1, retryScheduled: 0, failed: 0 });
+      expect(claimQueries()).toHaveLength(2);
+    });
+
+    it('claims nothing once it has passed, though its sweeps still run', async () => {
+      vi.spyOn(Date, 'now').mockReturnValue(1_000);
+      mockClaims(5);
+      await expect(processDueLetterJobs(3, { stopAt: 1_000 })).resolves.toEqual({ processed: 0, completed: 0, retryScheduled: 0, failed: 0 });
+      expect(claimQueries()).toEqual([]);
+      expect(query.mock.calls.some(([sql]) => String(sql).includes("provider_outcome = 'dispatching'"))).toBe(true);
+    });
+
+    it('stops claiming in the middle of a batch when it passes', async () => {
+      let clock = 0;
+      vi.spyOn(Date, 'now').mockImplementation(() => clock);
+      mockClaims(5);
+      sendLetter.mockImplementationOnce(async (...args: unknown[]) => {
+        clock = 1_000;
+        return (sendLetter.getMockImplementation() as (...a: unknown[]) => unknown)(...args);
+      });
+
+      const result = await processDueLetterJobs(3, { stopAt: 1_000 });
+
+      expect(result.processed).toBe(1);
+      expect(claimQueries()).toHaveLength(1);
+    });
   });
 
   it('replays an exact admin retry but rejects reuse by a different actor or reason', async () => {
@@ -476,6 +1134,39 @@ describe('mail outbox retries', () => {
       jobId: 'job-1', expectedUserId: 'other-user', actorId: 'admin-1',
       reason: 'provider confirmed rejection', idempotencyKey: 'retry-job-exact-001'
     })).rejects.toMatchObject({ code: 'idempotency_conflict' });
+  });
+
+  /** #730: a letter content retention emptied has nothing left to print. */
+  it('never dispatches a letter whose content retention redacted', async () => {
+    mockClaims(1);
+    const base = clientQuery.getMockImplementation() as (sql: string, ...rest: unknown[]) => Promise<unknown>;
+    clientQuery.mockImplementation((async (sql: string, ...rest: unknown[]) =>
+      sql.startsWith('SELECT * FROM letters')
+        ? { rows: [{ ...letter, redacted_at: new Date('2026-01-01T00:00:00Z') }] }
+        : base(sql, ...rest)) as never);
+
+    await processDueLetterJobs(1).catch(() => undefined);
+    expect(sendLetter).not.toHaveBeenCalled();
+  });
+
+  it('refuses to retry a letter whose content retention redacted', async () => {
+    clientQuery.mockImplementation((async (sql: string) => {
+      if (sql.includes('FROM commerce_operator_audit_events')) return { rows: [] };
+      if (sql.includes('SELECT jobs.letter_id')) return { rows: [{ letter_id: 'letter-1', funding_order_id: null }] };
+      if (sql.includes('FROM letters WHERE letter_id = $1 FOR UPDATE')) {
+        return { rows: [{ status: 'failed', user_id: 'user-1', funding_order_id: null, redacted_at: new Date('2026-01-01T00:00:00Z') }] };
+      }
+      if (sql.includes('FROM letter_jobs WHERE job_id = $1 FOR UPDATE')) {
+        return { rows: [{ ...job, letter_id: 'letter-1', status: 'failed', provider_outcome: 'definite_failure', operator_resolution: null }] };
+      }
+      return { rows: [] };
+    }) as never);
+
+    await expect(retryLetterJobAsAdmin({
+      jobId: 'job-1', expectedUserId: 'user-1', actorId: 'admin-1', reason: 'provider confirmed rejection',
+      idempotencyKey: 'retry-job-redacted-001'
+    })).rejects.toMatchObject({ code: 'invalid_state' });
+    expect(clientQuery.mock.calls.some(([sql]) => String(sql).includes("SET status = 'pending'"))).toBe(false);
   });
 
   it('records a confirmed ambiguous acceptance without calling the mail provider again', async () => {
@@ -514,6 +1205,87 @@ describe('mail outbox retries', () => {
     );
   });
 
+  describe('certified mail (#625)', () => {
+    const jobId = '00000000-0000-4000-8000-000000000311';
+    const held = (mail_service: string | undefined, content: Record<string, unknown> = {}) => {
+      clientQuery.mockImplementation(async (sql: string) => {
+        if (sql.includes('FROM commerce_operator_audit_events')) return { rows: [] };
+        if (sql.includes('SELECT jobs.letter_id')) return { rows: [{ letter_id: 'letter-1', funding_order_id: null }] };
+        if (sql.startsWith('SELECT user_id, status, funding_order_id FROM letters')) {
+          return { rows: [{ user_id: 'user-1', status: 'held', funding_order_id: null }] };
+        }
+        if (sql.startsWith("SELECT mail_service, content->'rendererVersion' AS renderer_version FROM letters")) {
+          return { rows: [{ mail_service, renderer_version: content.rendererVersion ?? null }] };
+        }
+        if (sql.startsWith('SELECT * FROM letter_jobs')) {
+          return { rows: [{ ...job, job_id: jobId, status: 'held', provider_outcome: 'ambiguous' }] };
+        }
+        return { rows: [] };
+      });
+    };
+    const resolve = (decision: 'accepted' | 'retry' | 'rejected', providerName: string) =>
+      resolveAmbiguousLetterJobAsAdmin({
+        jobId,
+        expectedUserId: 'user-1',
+        actorId: 'admin-1',
+        idempotencyKey: `resolve-certified-${decision}-${providerName}`,
+        decision,
+        resolution:
+          decision === 'accepted'
+            ? 'provider_confirmed_accepted'
+            : decision === 'retry'
+              ? 'provider_confirmed_rejected_retry'
+              : 'provider_confirmed_rejected_refund',
+        providerName: providerName as never,
+        ...(decision === 'accepted' ? { providerTrackingId: 'provider-confirmed-311' } : {})
+      });
+    const writes = () => clientQuery.mock.calls.filter(call => /^\s*(UPDATE|INSERT)/.test(String(call[0])));
+
+    it.each(['certified', 'certified_return_receipt'])(
+      'refuses to resolve a %s letter as accepted by manual fulfilment, which would print it as ordinary mail, and writes nothing',
+      async service => {
+        held(service);
+        await expect(resolve('accepted', 'diy')).rejects.toMatchObject({ code: 'invalid_state' });
+        expect(writes()).toEqual([]);
+      }
+    );
+
+    it.each(['postgrid', 'dummy'])('lets a certified letter be resolved as accepted by %s', async providerName => {
+      held('certified');
+      await expect(resolve('accepted', providerName)).resolves.toMatchObject({ jobStatus: 'completed', letterStatus: 'accepted' });
+    });
+
+    it.each([
+      ['a standard letter', 'standard'],
+      ['a letter with no service', undefined]
+    ])('lets %s be resolved as accepted by manual fulfilment', async (_name, service) => {
+      held(service);
+      await expect(resolve('accepted', 'diy')).resolves.toMatchObject({ letterStatus: 'accepted' });
+    });
+
+    it.each(['retry', 'rejected'] as const)('lets a certified letter be resolved as %s whatever the provider named', async decision => {
+      held('certified');
+      await expect(resolve(decision, 'diy')).resolves.toBeDefined();
+    });
+
+    // #698: the dispatch refuses drawn mail for a provider that does not print it; so does the resolution.
+    it.each(['pdf-1', 'pdf-2', 'pdf-4', ''])(
+      'refuses to resolve a letter our renderer drew (%j) as accepted by manual fulfilment, and writes nothing',
+      async version => {
+        held('standard', { rendererVersion: version });
+        await expect(resolve('accepted', 'diy')).rejects.toMatchObject({ code: 'invalid_state' });
+        expect(writes()).toEqual([]);
+      }
+    );
+
+    it('lets a letter our renderer drew be resolved as accepted by PostGrid, or as retry or rejected by anyone', async () => {
+      held('standard', { rendererVersion: 'pdf-2' });
+      await expect(resolve('accepted', 'postgrid')).resolves.toMatchObject({ letterStatus: 'accepted' });
+      held('standard', { rendererVersion: 'pdf-2' });
+      await expect(resolve('retry', 'diy')).resolves.toBeDefined();
+    });
+  });
+
   it('rejects an ambiguous mail resolution bound to another account', async () => {
     const jobId = '00000000-0000-4000-8000-000000000302';
     clientQuery.mockImplementation(async (sql: string) => {
@@ -543,5 +1315,628 @@ describe('mail outbox retries', () => {
       expect.stringContaining('UPDATE letter_jobs SET status'),
       expect.anything()
     );
+  });
+});
+
+describe("the outbox's stop (#444)", () => {
+  beforeEach(() => {
+    query.mockReset();
+    clientQuery.mockReset();
+    sendLetter.mockReset();
+    vi.unstubAllEnvs();
+  });
+
+  it.each(['false', '0', 'off', 'fasle'])('claims nothing while LETTER_IRL_OUTBOX_DISPATCH_ENABLED is %j', async (value) => {
+    vi.stubEnv('LETTER_IRL_OUTBOX_DISPATCH_ENABLED', value);
+
+    expect(await processLetterJob('job-1')).toEqual({ claimed: false, completed: false, retryScheduled: false });
+
+    // Not even the claim: the job keeps its status, attempts and backoff.
+    expect(query).not.toHaveBeenCalled();
+    expect(sendLetter).not.toHaveBeenCalled();
+    vi.unstubAllEnvs();
+  });
+
+  // Held mail as the shared predicate reads it (heldMailJobSql, #693).
+  const HELD_NOT_DUE =
+    "AND NOT ((letter_jobs.status = 'pending' AND letter_jobs.provider_outcome = 'not_dispatched' AND letter_jobs.attempts = 0 " +
+    "AND letter_jobs.mail_hold_until IS NOT NULL AND letter_jobs.next_attempt_at > NOW()))";
+
+  it('still settles what a crash left behind, then says how much is waiting and claims nothing', async () => {
+    vi.stubEnv('LETTER_IRL_OUTBOX_DISPATCH_ENABLED', 'false');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    query
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ count: '3' }] });
+
+    expect(await processDueLetterJobs(25)).toEqual({
+      processed: 0,
+      completed: 0,
+      retryScheduled: 0,
+      failed: 0,
+      paused: true,
+      waiting: 3
+    });
+
+    const statements = query.mock.calls.map(([sql]) => String(sql).replace(/\s+/g, ' '));
+    expect(statements).toHaveLength(4);
+    expect(statements[0]).toContain("provider_outcome = 'dispatching'");
+    // The last attempt's crash: mail left for the operator put back (#696), the rest settled.
+    expect(statements[1]).toContain("UPDATE letter_jobs SET status = 'pending', attempts = GREATEST(attempts - 1, 0)");
+    expect(statements[2]).toContain("provider_outcome = 'not_dispatched'");
+    expect(statements[2]).toContain('AND NOT ((letter_jobs.provider_outcome');
+    statements.splice(1, 1);
+    expect(statements[2]).toContain('SELECT COUNT(*)::text AS count FROM letter_jobs');
+    // What claimJob would take once resumed, a claim a crash left behind
+    // included (#451 review).
+    expect(statements[2]).toContain("status IN ('pending', 'failed')");
+    expect(statements[2]).toContain("status = 'processing' AND locked_at < NOW() - INTERVAL '15 minutes'");
+    expect(statements[2]).toContain('attempts < max_attempts');
+    // Held mail not yet due is not waiting behind the pause (#535); nothing
+    // else in the count filters on time.
+    expect(statements[2]).toContain(HELD_NOT_DUE);
+    expect(statements[2].replace(HELD_NOT_DUE, '')).not.toContain('next_attempt_at');
+    expect(statements.some((sql) => sql.includes("SET status = 'processing'"))).toBe(false);
+    const logged = warn.mock.calls.flat().map(String).join('\n');
+    expect(logged).toContain('"event":"outbox.dispatch_paused"');
+    expect(logged).toContain('"waiting":3');
+    warn.mockRestore();
+    vi.unstubAllEnvs();
+  });
+
+  it('says how many letters wait behind a pause, for the heartbeat, and asks nothing while dispatching (#451 review)', async () => {
+    query.mockResolvedValue({ rows: [{ count: '2' }] });
+    expect(await lettersWaitingBehindPause()).toBe(0);
+    expect(query).not.toHaveBeenCalled();
+
+    vi.stubEnv('LETTER_IRL_OUTBOX_DISPATCH_ENABLED', 'false');
+    expect(await lettersWaitingBehindPause()).toBe(2);
+    const sql = String(query.mock.calls[0]?.[0]).replace(/\s+/g, ' ');
+    // The same count the paused batch logs.
+    expect(sql).toContain("status = 'processing' AND locked_at < NOW() - INTERVAL '15 minutes'");
+    expect(sql).toContain(HELD_NOT_DUE);
+    expect(sql.replace(HELD_NOT_DUE, '')).not.toContain('next_attempt_at');
+    vi.unstubAllEnvs();
+  });
+
+  it('answers unknown, and never throws, when the count behind a pause fails (#451 delta review)', async () => {
+    vi.stubEnv('LETTER_IRL_OUTBOX_DISPATCH_ENABLED', 'false');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    query.mockRejectedValueOnce(Object.assign(new Error('connection terminated: 221B Baker Street'), { code: '57P01' }));
+
+    expect(await lettersWaitingBehindPause()).toBe('unknown');
+
+    const logged = warn.mock.calls.flat().map(String).join('\n');
+    expect(logged).toContain('"event":"outbox.waiting_count_failed"');
+    expect(logged).not.toContain('Baker Street');
+    warn.mockRestore();
+    vi.unstubAllEnvs();
+  });
+
+  it('claims as before when the switch is unset or on', async () => {
+    for (const value of [undefined, 'true', 'on']) {
+      query.mockReset().mockResolvedValue({ rows: [] });
+      if (value === undefined) vi.unstubAllEnvs();
+      else vi.stubEnv('LETTER_IRL_OUTBOX_DISPATCH_ENABLED', value);
+
+      await processLetterJob('job-1');
+
+      expect(String(query.mock.calls[0]?.[0])).toContain("SET status = 'processing'");
+    }
+    vi.unstubAllEnvs();
+  });
+});
+
+describe('createLetterJobWithClient: arrive-by holds (#535)', () => {
+  const letter = { letter_id: 'letter-1' } as Parameters<typeof createLetterJobWithClient>[1];
+  function jobClient() {
+    const calls: Array<{ sql: string; params: unknown[] }> = [];
+    const client = {
+      query: vi.fn(async (sql: string, params: unknown[] = []) => {
+        calls.push({ sql, params });
+        return { rows: sql.includes('INSERT INTO letter_jobs') ? [{ job_id: 'job-1', letter_id: 'letter-1' }] : [] };
+      })
+    };
+    return { client: client as unknown as Parameters<typeof createLetterJobWithClient>[0], calls };
+  }
+
+  it('holds a job until its release: both its schedule and its first attempt', async () => {
+    const { client, calls } = jobClient();
+    const notBefore = new Date('2026-10-06T13:00:00Z');
+
+    await createLetterJobWithClient(client, letter, { notBefore });
+
+    const insert = calls.find(call => call.sql.includes('INSERT INTO letter_jobs'))!;
+    expect(insert.sql).toMatch(/max_attempts, scheduled_at,\s+idempotency_key, next_attempt_at, metadata, mail_hold_until/);
+    // The hold is its column (055, #693): the same time as its schedule and its first attempt.
+    expect(insert.sql).toMatch(/\$3, COALESCE\(\$5::timestamptz, NOW\(\)\), \$2,\s+COALESCE\(\$5::timestamptz, NOW\(\)\), \$4, \$5::timestamptz\)/);
+    expect(insert.params[4]).toBe(notBefore);
+    // And in the metadata for one release, where code from before 055 reads it after a rollback.
+    expect(JSON.parse(insert.params[3] as string)).toEqual({ source: 'transactional-outbox', heldUntil: '2026-10-06T13:00:00.000Z' });
+    // The letter is queued either way.
+    expect(calls.some(call => call.sql.includes("UPDATE letters SET status = 'queued'"))).toBe(true);
+  });
+
+  it('makes a job due now when nothing holds it', async () => {
+    const { client, calls } = jobClient();
+
+    await createLetterJobWithClient(client, letter);
+
+    const insert = calls.find(call => call.sql.includes('INSERT INTO letter_jobs'))!;
+    expect(insert.params[4]).toBeNull();
+    expect(JSON.parse(insert.params[3] as string)).toEqual({ source: 'transactional-outbox' });
+  });
+});
+
+describe('releaseHeldLetterJobAsAdmin: sending held mail now (#535)', () => {
+  const sha = (value: string) => createHash('sha256').update(value).digest('hex');
+  const params = {
+    jobId: 'job-held',
+    expectedUserId: 'user-1',
+    actorId: 'admin-1',
+    reason: 'customer asked to send it now',
+    idempotencyKey: 'release-held-001'
+  };
+  const HELD_JOB = {
+    letter_id: 'letter-1',
+    status: 'pending',
+    provider_outcome: 'not_dispatched',
+    attempts: 0,
+    operator_resolution: null,
+    mail_hold_until: new Date('2026-10-16T13:00:00.000Z'),
+    next_attempt_at: new Date('2026-10-16T13:00:00.000Z'),
+    still_held: true
+  };
+  const RELEASED_AT = new Date('2026-10-01T15:00:00.000Z');
+
+  interface Script {
+    fundingOrderId?: string | null;
+    order?: { status: string; user_id: string } | null;
+    letter?: Record<string, unknown>;
+    job?: Record<string, unknown>;
+    replay?: Record<string, unknown>;
+  }
+
+  function heldClient(script: Script = {}) {
+    const calls: Array<{ sql: string; params: unknown[] }> = [];
+    const fundingOrderId = script.fundingOrderId ?? null;
+    clientQuery.mockImplementation(async (sql: string, values: unknown[] = []) => {
+      calls.push({ sql, params: values });
+      if (sql.includes('FROM commerce_operator_audit_events')) return { rows: script.replay ? [script.replay] : [] };
+      if (sql.includes('SELECT jobs.letter_id')) {
+        return { rows: [{ letter_id: 'letter-1', funding_order_id: fundingOrderId }] };
+      }
+      if (sql.startsWith('SELECT status, user_id FROM orders')) {
+        return { rows: script.order === null ? [] : [script.order ?? { status: 'fulfillment_pending', user_id: 'user-1' }] };
+      }
+      if (sql.startsWith('SELECT status, user_id, funding_order_id FROM letters')) {
+        return { rows: [{ status: 'queued', user_id: 'user-1', funding_order_id: fundingOrderId, ...script.letter }] };
+      }
+      if (sql.includes('FROM letter_jobs WHERE job_id = $1 FOR UPDATE')) return { rows: [{ ...HELD_JOB, ...script.job }] };
+      if (sql.startsWith('UPDATE letter_jobs')) return { rows: [{ next_attempt_at: RELEASED_AT }] };
+      return { rows: [] };
+    });
+    return calls;
+  }
+  const writes = (calls: Array<{ sql: string }>) =>
+    calls.filter(call => /^\s*(UPDATE|INSERT|DELETE)/.test(call.sql)).map(call => call.sql.trim().split(/\s+/).slice(0, 3).join(' '));
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.transaction.mockImplementation(
+      async (callback: (client: { query: typeof clientQuery }) => Promise<unknown>) => callback({ query: clientQuery })
+    );
+  });
+
+  it('makes the job due now, moves nothing else, and records the release', async () => {
+    const calls = heldClient();
+
+    await expect(releaseHeldLetterJobAsAdmin(params)).resolves.toEqual({ jobId: 'job-held', replayed: false });
+
+    // Held or not by the database's clock, and by the hold the job carries.
+    const read = calls.find(call => call.sql.includes('FROM letter_jobs WHERE job_id = $1 FOR UPDATE'))!;
+    expect(read.sql).toContain('mail_hold_until, next_attempt_at,');
+    // Held as every reader of held mail reads it (heldMailJobSql, #693).
+    expect(read.sql.replace(/\s+/g, ' ')).toContain(
+      "((letter_jobs.status = 'pending' AND letter_jobs.provider_outcome = 'not_dispatched' AND letter_jobs.attempts = 0 " +
+        "AND letter_jobs.mail_hold_until IS NOT NULL AND letter_jobs.next_attempt_at > NOW())) AS still_held"
+    );
+    const update = calls.find(call => call.sql.startsWith('UPDATE letter_jobs'))!;
+    expect(update.sql.replace(/\s+/g, ' ')).toBe(
+      'UPDATE letter_jobs SET next_attempt_at = CASE WHEN $2::boolean THEN GREATEST(next_attempt_at, NOW()) ELSE NOW() END, scheduled_at = CASE WHEN $2::boolean THEN GREATEST(scheduled_at, NOW()) ELSE NOW() END, hold_reason = NULL, updated_at = NOW() WHERE job_id = $1 RETURNING next_attempt_at'
+    );
+    // Held mail, not a funding hold (#696): due now.
+    expect(update.params).toEqual(['job-held', false]);
+    // Nothing else: not the letter, not the order, not the job's metadata.
+    expect(writes(calls)).toEqual(['UPDATE letter_jobs SET', 'INSERT INTO commerce_operator_audit_events']);
+
+    const audit = calls.find(call => call.sql.includes('INSERT INTO commerce_operator_audit_events'))!;
+    expect(audit.sql).toContain("VALUES ($1, $2, 'mail_job_release', 'letter_job', $3, 'operator_released_hold', $4, $5, $6)");
+    expect(audit.params.slice(0, 3)).toEqual([sha('release-held-001'), sha('admin-1'), sha('job-held')]);
+    expect(JSON.parse(audit.params[3] as string)).toEqual({
+      jobStatus: 'pending',
+      heldUntil: '2026-10-16T13:00:00.000Z',
+      nextAttemptAt: '2026-10-16T13:00:00.000Z'
+    });
+    expect(JSON.parse(audit.params[4] as string)).toEqual({ jobStatus: 'pending', nextAttemptAt: RELEASED_AT.toISOString() });
+    expect(JSON.parse(audit.params[5] as string)).toEqual({
+      operatorReasonHash: sha('customer asked to send it now'),
+      expectedUserHash: sha('user-1')
+    });
+  });
+
+  it("takes the idempotency key's lock first, then locks the order, the letter and the job, in the outbox's order", async () => {
+    const calls = heldClient({ fundingOrderId: 'order-1' });
+
+    await releaseHeldLetterJobAsAdmin(params);
+
+    expect(calls[0]).toEqual({ sql: 'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', params: ['release-held-001'] });
+    const at = (pattern: string) => calls.findIndex(call => call.sql.includes(pattern));
+    const order = at('FROM orders WHERE order_id = $1 FOR UPDATE');
+    const letterLock = at('FROM letters WHERE letter_id = $1 FOR UPDATE');
+    const jobLock = at('FROM letter_jobs WHERE job_id = $1 FOR UPDATE');
+    expect(order).toBeGreaterThan(at('FROM commerce_operator_audit_events'));
+    expect(order).toBeLessThan(letterLock);
+    expect(letterLock).toBeLessThan(jobLock);
+    expect(jobLock).toBeLessThan(at('UPDATE letter_jobs'));
+    expect(calls[order].params).toEqual(['order-1']);
+  });
+
+  it('releases Pay & Send held mail only while its order awaits fulfilment, and only for its account', async () => {
+    let calls = heldClient({ fundingOrderId: 'order-1', order: { status: 'refund_pending', user_id: 'user-1' } });
+    await expect(releaseHeldLetterJobAsAdmin(params)).rejects.toMatchObject({ code: 'invalid_state' });
+    expect(writes(calls)).toEqual([]);
+
+    calls = heldClient({ fundingOrderId: 'order-1', order: { status: 'fulfillment_pending', user_id: 'someone-else' } });
+    await expect(releaseHeldLetterJobAsAdmin(params)).rejects.toMatchObject({ code: 'not_found' });
+    expect(writes(calls)).toEqual([]);
+
+    calls = heldClient({ fundingOrderId: 'order-1', order: null });
+    await expect(releaseHeldLetterJobAsAdmin(params)).rejects.toMatchObject({ code: 'not_found' });
+    expect(writes(calls)).toEqual([]);
+  });
+
+  it.each([
+    ['due already: released, or past its 09:00', { job: { still_held: false } }],
+    ['not held mail at all', { job: { mail_hold_until: null } }],
+    ['attempted', { job: { attempts: 1 } }],
+    ['taken by the outbox', { job: { status: 'processing' } }],
+    ['dispatched', { job: { provider_outcome: 'dispatching' } }],
+    ['resolved by an operator', { job: { operator_resolution: 'account_erased' } }],
+    ['the job of another letter', { job: { letter_id: 'letter-2' } }],
+    ['cancelled', { letter: { status: 'cancelled' } }],
+    ["another account's", { letter: { user_id: 'someone-else' } }],
+    ['funded differently since', { letter: { funding_order_id: 'order-9' } }],
+  ])('refuses mail that is %s, writing nothing', async (_label, script) => {
+    const calls = heldClient(script as Script);
+    await expect(releaseHeldLetterJobAsAdmin(params)).rejects.toMatchObject({ code: 'invalid_state' });
+    expect(writes(calls)).toEqual([]);
+  });
+
+  it('releases mail held for its funding, due or not, attempts spent or not, keeping its date, and ends the hold (#696)', async () => {
+    for (const [hold, attempts] of [['funding_reversed', 0], ['funding_disputed', 2]] as const) {
+      // A pack's letter sent for now, or one whose mail date passed while it was held; one retried before it was held.
+      const calls = heldClient({ job: { hold_reason: hold, mail_hold_until: null, still_held: false, attempts, max_attempts: 5 } });
+      await expect(releaseHeldLetterJobAsAdmin(params), hold).resolves.toEqual({ jobId: 'job-held', replayed: false });
+      const release = calls.find(call => call.sql.startsWith('UPDATE letter_jobs'))!;
+      expect(release.sql).toContain('hold_reason = NULL');
+      // Its own date kept: due now only if that has passed.
+      expect(release.params).toEqual(['job-held', true]);
+      const audit = calls.find(call => call.sql.includes('INSERT INTO commerce_operator_audit_events'))!;
+      expect(JSON.parse(String(audit.params[3]))).toMatchObject({ fundingHold: hold });
+    }
+  });
+
+  it('releases mail held for its funding after an operator resolved it for retry (#696 review round 3)', async () => {
+    heldClient({ job: { hold_reason: 'funding_reversed', mail_hold_until: null, still_held: false, max_attempts: 5, operator_resolution: 'provider_confirmed_rejected_retry' } });
+    await expect(releaseHeldLetterJobAsAdmin(params)).resolves.toMatchObject({ replayed: false });
+  });
+
+  it.each([
+    ['another hold', { hold_reason: 'provider_outcome_ambiguous' }],
+    ['out of attempts', { attempts: 5 }],
+    ['dispatched', { provider_outcome: 'dispatching' }],
+  ])('refuses mail held for its funding that is %s, writing nothing (#696)', async (_label, job) => {
+    const calls = heldClient({ job: { hold_reason: 'funding_reversed', mail_hold_until: null, still_held: false, max_attempts: 5, ...job } });
+    await expect(releaseHeldLetterJobAsAdmin(params)).rejects.toMatchObject({ code: 'invalid_state' });
+    expect(writes(calls)).toEqual([]);
+  });
+
+  it('refuses a job that does not exist', async () => {
+    clientQuery.mockImplementation(async () => ({ rows: [] }));
+    await expect(releaseHeldLetterJobAsAdmin(params)).rejects.toMatchObject({ code: 'not_found' });
+  });
+
+  it('replays an exact release without writing, and refuses the key reused for anything else', async () => {
+    const replay = {
+      operation: 'mail_job_release',
+      target_type: 'letter_job',
+      target_reference_hash: sha('job-held'),
+      actor_subject_hash: sha('admin-1'),
+      operator_reason_hash: sha('customer asked to send it now'),
+      expected_user_hash: sha('user-1')
+    };
+    const calls = heldClient({ replay });
+    await expect(releaseHeldLetterJobAsAdmin(params)).resolves.toEqual({ jobId: 'job-held', replayed: true });
+    expect(writes(calls)).toEqual([]);
+
+    for (const different of [
+      { operation: 'mail_job_retry' },
+      { target_type: 'order' },
+      { target_reference_hash: sha('job-other') },
+      { actor_subject_hash: sha('admin-2') },
+      { operator_reason_hash: sha('another reason') },
+      { expected_user_hash: sha('user-2') },
+    ]) {
+      heldClient({ replay: { ...replay, ...different } });
+      await expect(releaseHeldLetterJobAsAdmin(params), JSON.stringify(different)).rejects.toMatchObject({
+        code: 'idempotency_conflict'
+      });
+    }
+  });
+});
+
+describe('mail left for the operator (#696)', () => {
+  const flat = (text: string) => text.replace(/\s+/g, ' ');
+  const LEFT =
+    "(j_alias.provider_outcome = 'not_dispatched' AND j_alias.hold_reason IS NOT NULL " +
+    "AND j_alias.hold_reason IN ('funding_reversed', 'funding_disputed'))";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.transaction.mockImplementation(
+      async (callback: (client: { query: typeof clientQuery }) => Promise<unknown>) => callback({ query: clientQuery })
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('is not claimed when due: held for its funding, or of an account whose sending is blocked', async () => {
+    query.mockReset().mockResolvedValue({ rows: [] });
+    await processLetterJob('job-1');
+    const claim = flat(String(query.mock.calls[0]?.[0]));
+    const due = "(status IN ('pending', 'failed') AND next_attempt_at <= NOW() AND NOT (";
+    expect(claim).toContain(due + LEFT.replace(/j_alias/g, 'letter_jobs'));
+    expect(claim).toContain(
+      'OR EXISTS ( SELECT 1 FROM letters held_letter JOIN users held_user ON held_user.user_id = held_letter.user_id ' +
+        'WHERE held_letter.letter_id = letter_jobs.letter_id AND held_user.sends_blocked_reason IS NOT NULL ))'
+    );
+    // A claim a crash left behind is taken back whatever it is: the marker puts it back.
+    const stale = claim.slice(claim.indexOf("status = 'processing' AND locked_at"));
+    expect(stale).not.toContain('hold_reason');
+    expect(stale).not.toContain('sends_blocked_reason');
+  });
+
+  it('is not counted as waiting behind a pause', async () => {
+    vi.stubEnv('LETTER_IRL_OUTBOX_DISPATCH_ENABLED', 'false');
+    query.mockReset().mockResolvedValue({ rows: [{ count: '0' }] });
+    await lettersWaitingBehindPause();
+    const count = flat(String(query.mock.calls.map(call => String(call[0])).find(sql => sql.includes('COUNT(*)'))));
+    expect(count).toContain('AND NOT (' + LEFT.replace(/j_alias/g, 'letter_jobs'));
+    expect(count).toContain('held_user.sends_blocked_reason IS NOT NULL');
+    vi.unstubAllEnvs();
+  });
+
+  function markerClient(options: { holdReason?: string | null; blocked?: string | null }) {
+    const calls: Array<{ sql: string; params: unknown[] }> = [];
+    clientQuery.mockImplementation(async (sql: string, values: unknown[] = []) => {
+      calls.push({ sql, params: values });
+      if (sql.includes('SELECT jobs.letter_id')) return { rows: [{ letter_id: 'letter-1', funding_order_id: null }] };
+      if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...letter, user_id: 'user-1' }] };
+      if (sql.startsWith('SELECT * FROM letter_jobs')) return { rows: [{ ...job, hold_reason: options.holdReason ?? null }] };
+      if (sql.startsWith('SELECT sends_blocked_reason FROM users')) return { rows: [{ sends_blocked_reason: options.blocked ?? null }] };
+      return { rows: [] };
+    });
+    return calls;
+  }
+
+  it.each([
+    ['held for its funding since the claim', { holdReason: 'funding_reversed' }],
+    ['held for a dispute since the claim', { holdReason: 'funding_disputed' }],
+    ['of an account blocked since the claim', { blocked: 'payment_disputed' }],
+  ])('is put back by the dispatch marker when %s: pending, its attempt given back, nothing sent or failed', async (_label, options) => {
+    mockClaims();
+    const calls = markerClient(options);
+    const result = await processLetterJob('job-1');
+    expect(result).toMatchObject({ claimed: true, completed: false, retryScheduled: false, error: 'Left for the operator' });
+    expect(sendLetter).not.toHaveBeenCalled();
+    const back = calls.find(call => call.sql.includes("SET status = 'pending', attempts = GREATEST(attempts - 1, 0)"));
+    expect(back?.params).toEqual(['job-1']);
+    expect(calls.some(call => call.sql.includes("SET provider_outcome = 'dispatching'"))).toBe(false);
+    expect(calls.some(call => call.sql.includes('last_error'))).toBe(false);
+    // Read for its user, as the letter names it, under a share lock after the letter and the job.
+    const block = calls.find(call => call.sql.startsWith('SELECT sends_blocked_reason FROM users'))!;
+    expect(block.params).toEqual(['user-1']);
+    expect(block.sql).toContain('FOR SHARE');
+  });
+
+  it.each([false, true])('is put back, not failed, when it fails before dispatch on its last attempt (superseded meanwhile: %s)', async superseded => {
+    // Its last attempt: a failure would be final.
+    query.mockImplementation(async (sql: string) => {
+      if (sql.includes('WITH candidate')) return { rows: [{ ...job, attempts: 5, max_attempts: 5 }] };
+      if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...letter }] };
+      return { rows: [] };
+    });
+    vi.mocked(getProviderForMailType).mockRejectedValueOnce(new Error('provider unavailable'));
+    const calls: Array<{ sql: string; params: unknown[] }> = [];
+    clientQuery.mockImplementation(async (sql: string, values: unknown[] = []) => {
+      calls.push({ sql, params: values });
+      if (sql.includes('SELECT j.hold_reason, u.sends_blocked_reason')) return { rows: [{ hold_reason: 'funding_disputed', sends_blocked_reason: null }] };
+      if (sql.includes("UPDATE letter_jobs SET status = 'pending', attempts = GREATEST(attempts - 1, 0)")) return { rows: [], rowCount: superseded ? 0 : 1 };
+      if (sql.startsWith('SELECT funding_order_id FROM letters')) return { rows: [{ funding_order_id: null }] };
+      if (sql.startsWith('SELECT letter_id FROM letter_jobs WHERE job_id = $1 FOR UPDATE')) return { rows: [{ letter_id: 'letter-1' }] };
+      return { rows: [] };
+    });
+    // Waiting again, as a scheduled retry is: no failure in the run. A job another worker put back
+    // or settled meanwhile is not this claimant's to report.
+    expect(await processLetterJob('job-1')).toMatchObject({ completed: false, retryScheduled: !superseded });
+    const left = calls.find(call => call.sql.includes('SELECT j.hold_reason, u.sends_blocked_reason'))!;
+    expect(left.sql).toContain('FOR SHARE OF u');
+    expect(left.params).toEqual(['job-1']);
+    const back = calls.find(call => call.sql.includes("UPDATE letter_jobs SET status = 'pending', attempts = GREATEST(attempts - 1, 0)"))!;
+    // Held to this claim (#730): still processing, at the attempts it set.
+    expect(back.sql).toContain("status = 'processing' AND attempts = $3::int");
+    expect(back.params[2]).toBe(5);
+    // Not failed, and nothing given back.
+    expect(calls.some(call => call.sql.includes('SET status = $2::varchar'))).toBe(false);
+    expect(calls.some(call => call.sql.includes('UPDATE letters SET status'))).toBe(false);
+  });
+
+  it.each([false, true])('schedules a retry only for the claim that still holds the job (superseded meanwhile: %s) (#730)', async superseded => {
+    // A retry left by this claim's own count.
+    query.mockImplementation(async (sql: string) => {
+      if (sql.includes('WITH candidate')) return { rows: [{ ...job, attempts: 1, max_attempts: 5 }] };
+      if (sql.startsWith('SELECT * FROM letters')) return { rows: [{ ...letter }] };
+      return { rows: [] };
+    });
+    vi.mocked(getProviderForMailType).mockRejectedValueOnce(new Error('provider unavailable'));
+    const calls: Array<{ sql: string; params: unknown[] }> = [];
+    clientQuery.mockImplementation(async (sql: string, values: unknown[] = []) => {
+      calls.push({ sql, params: values });
+      if (sql.includes('UPDATE letter_jobs SET status = $2::varchar')) return { rows: [], rowCount: superseded ? 0 : 1 };
+      if (sql.startsWith('SELECT funding_order_id FROM letters')) return { rows: [{ funding_order_id: null }] };
+      if (sql.startsWith('SELECT letter_id FROM letter_jobs WHERE job_id = $1 FOR UPDATE')) return { rows: [{ letter_id: 'letter-1' }] };
+      return { rows: [] };
+    });
+    expect(await processLetterJob('job-1')).toMatchObject({ completed: false, retryScheduled: !superseded });
+    const settle = calls.find(call => call.sql.includes('UPDATE letter_jobs SET status = $2::varchar'))!;
+    // Held to the claim: the attempts it set.
+    expect(settle.params[4]).toBe(1);
+    // A superseded claimant touches nothing else.
+    expect(calls.some(call => call.sql.includes('UPDATE letters SET status'))).toBe(!superseded);
+  });
+
+  it('counts a put-back as neither sent nor failed in a run', async () => {
+    mockClaims();
+    markerClient({ holdReason: 'funding_reversed' });
+    expect(await processDueLetterJobs(25)).toMatchObject({ processed: 1, completed: 0, retryScheduled: 0, failed: 0 });
+  });
+
+  it('is dispatched as before when neither', async () => {
+    mockClaims();
+    sendLetter.mockResolvedValue({ success: true, trackingId: 'provider-1', costCents: 100 });
+    const calls = markerClient({});
+    await processLetterJob('job-1');
+    expect(calls.some(call => call.sql.includes("SET provider_outcome = 'dispatching'"))).toBe(true);
+    expect(calls.some(call => call.sql.includes('GREATEST(attempts - 1, 0)'))).toBe(false);
+  });
+});
+
+describe('cancelLeftLetterJobAsAdmin: the operator cancels mail left for them (#696)', () => {
+  const sha = (value: string) => createHash('sha256').update(value).digest('hex');
+  const params = {
+    jobId: 'job-left',
+    expectedUserId: 'user-1',
+    actorId: 'admin-1',
+    reason: 'the dispute was lost for good',
+    idempotencyKey: 'cancel-left-001'
+  };
+  const LEFT_JOB = {
+    letter_id: 'letter-1', status: 'pending', provider_outcome: 'not_dispatched', attempts: 1, max_attempts: 5,
+    hold_reason: 'funding_disputed', operator_resolution: null
+  };
+  interface Script { letter?: Record<string, unknown>; job?: Record<string, unknown>; blocked?: string | null; replay?: Record<string, unknown> }
+  function leftClient(script: Script = {}) {
+    const calls: Array<{ sql: string; params: unknown[] }> = [];
+    clientQuery.mockImplementation(async (sql: string, values: unknown[] = []) => {
+      calls.push({ sql, params: values });
+      if (sql.includes('FROM commerce_operator_audit_events')) return { rows: script.replay ? [script.replay] : [] };
+      if (sql.startsWith('SELECT letter_id FROM letter_jobs WHERE job_id')) return { rows: [{ letter_id: 'letter-1' }] };
+      if (sql.startsWith('SELECT status, user_id, funding_type, funding_order_id FROM letters')) {
+        return { rows: [{ status: 'queued', user_id: 'user-1', funding_type: 'prepaid_balance', funding_order_id: null, ...script.letter }] };
+      }
+      if (sql.includes('FROM letter_jobs WHERE job_id = $1 FOR UPDATE')) return { rows: [{ ...LEFT_JOB, ...script.job }] };
+      if (sql.startsWith('SELECT sends_blocked_reason FROM users')) return { rows: [{ sends_blocked_reason: script.blocked ?? null }] };
+      if (sql.startsWith('SELECT user_id, funding_type FROM letters')) return { rows: [{ user_id: 'user-1', funding_type: 'prepaid_balance', ...script.letter }] };
+      return { rows: [] };
+    });
+    return calls;
+  }
+  const writes = (calls: Array<{ sql: string }>) =>
+    calls.filter(call => /^\s*(UPDATE|INSERT|DELETE)/.test(call.sql)).map(call => call.sql.trim().split(/\s+/).slice(0, 3).join(' '));
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.transaction.mockImplementation(
+      async (callback: (client: { query: typeof clientQuery }) => Promise<unknown>) => callback({ query: clientQuery })
+    );
+  });
+
+  it('cancels the job and the letter, gives back what it can, and records the cancel', async () => {
+    const calls = leftClient();
+    await expect(cancelLeftLetterJobAsAdmin(params)).resolves.toEqual({ jobId: 'job-left', replayed: false });
+    const job = calls.find(call => call.sql.includes("UPDATE letter_jobs SET status = 'cancelled'"))!;
+    expect(job.sql).toContain("operator_resolution = 'operator_cancelled'");
+    expect(job.params).toEqual(['job-left']);
+    expect(calls.find(call => call.sql.includes("UPDATE letters SET status = 'cancelled'"))!.params).toEqual(['letter-1']);
+    // What paid for it, as a failed send's: read for the return.
+    expect(calls.some(call => call.sql.startsWith('SELECT user_id, funding_type FROM letters'))).toBe(true);
+    const audit = calls.find(call => call.sql.includes('INSERT INTO commerce_operator_audit_events'))!;
+    expect(audit.sql).toContain("'mail_job_cancel', 'letter_job'");
+    expect(audit.params.slice(0, 3)).toEqual([sha('cancel-left-001'), sha('admin-1'), sha('job-left')]);
+    expect(JSON.parse(String(audit.params[3]))).toEqual({ jobStatus: 'pending', fundingHold: 'funding_disputed' });
+    // Locks: the key, the letter, then the job, then the account's block.
+    const order = (fragment: string) => calls.findIndex(call => call.sql.includes(fragment));
+    expect(order('pg_advisory_xact_lock')).toBeLessThan(order('FROM letters WHERE letter_id = $1 FOR UPDATE'));
+    expect(order('FROM letters WHERE letter_id = $1 FOR UPDATE')).toBeLessThan(order('FROM letter_jobs WHERE job_id = $1 FOR UPDATE'));
+    // The account for update: the return changes its balance (#696 review round 2).
+    const account = calls.find(call => call.sql.startsWith('SELECT sends_blocked_reason FROM users'))!;
+    expect(account.sql).toContain('FOR UPDATE');
+    expect(order('FROM letter_jobs WHERE job_id = $1 FOR UPDATE')).toBeLessThan(calls.indexOf(account));
+    // And its history, as the customer's cancel writes it.
+    const history = calls.find(call => call.sql.includes('INSERT INTO letter_status_history'))!;
+    expect(history.sql).toContain("'queued', 'cancelled', 'operator'");
+    expect(history.params).toEqual(['letter-1']);
+  });
+
+  it('cancels mail held for its funding after an operator resolved it for retry (#696 review round 3)', async () => {
+    leftClient({ job: { operator_resolution: 'provider_confirmed_rejected_retry' } });
+    await expect(cancelLeftLetterJobAsAdmin(params)).resolves.toMatchObject({ replayed: false });
+  });
+
+  it("cancels a blocked account's mail, held for nothing else", async () => {
+    const calls = leftClient({ job: { hold_reason: null }, blocked: 'payment_disputed' });
+    await expect(cancelLeftLetterJobAsAdmin(params)).resolves.toMatchObject({ replayed: false });
+    const audit = calls.find(call => call.sql.includes('INSERT INTO commerce_operator_audit_events'))!;
+    expect(JSON.parse(String(audit.params[3]))).toEqual({ jobStatus: 'pending', accountBlocked: true });
+  });
+
+  it.each([
+    ['not left for the operator', { job: { hold_reason: null } }],
+    ['Pay & Send, which its refund cancels', { letter: { funding_order_id: 'order-9', funding_type: 'jit_order' } }],
+    // Each mark of Pay & Send refuses on its own.
+    ['tied to an order', { letter: { funding_order_id: 'order-9' } }],
+    ['funded by an order', { letter: { funding_type: 'jit_order' } }],
+    ['no longer queued', { letter: { status: 'cancelled' } }],
+    ['taken by the outbox', { job: { status: 'processing' } }],
+    ['dispatched', { job: { provider_outcome: 'dispatching' } }],
+    ['out of attempts', { job: { attempts: 5 } }],
+    ["a blocked account's, resolved by an operator", { job: { hold_reason: null, operator_resolution: 'account_erased' }, blocked: 'payment_disputed' }],
+  ])('refuses mail that is %s, writing nothing', async (_label, script) => {
+    const calls = leftClient(script as Script);
+    await expect(cancelLeftLetterJobAsAdmin(params)).rejects.toMatchObject({ code: 'invalid_state' });
+    expect(writes(calls)).toEqual([]);
+  });
+
+  it("refuses another account's mail as not found", async () => {
+    const calls = leftClient({ letter: { user_id: 'someone-else' } });
+    await expect(cancelLeftLetterJobAsAdmin(params)).rejects.toMatchObject({ code: 'not_found' });
+    expect(writes(calls)).toEqual([]);
+  });
+
+  it('replays an exact cancel without writing, and refuses the key reused for anything else', async () => {
+    const replay = {
+      operation: 'mail_job_cancel', target_type: 'letter_job', target_reference_hash: sha('job-left'),
+      actor_subject_hash: sha('admin-1'), operator_reason_hash: sha('the dispute was lost for good'), expected_user_hash: sha('user-1')
+    };
+    const calls = leftClient({ replay });
+    await expect(cancelLeftLetterJobAsAdmin(params)).resolves.toEqual({ jobId: 'job-left', replayed: true });
+    expect(writes(calls)).toEqual([]);
+    leftClient({ replay: { ...replay, operation: 'mail_job_release' } });
+    await expect(cancelLeftLetterJobAsAdmin(params)).rejects.toMatchObject({ code: 'idempotency_conflict' });
   });
 });

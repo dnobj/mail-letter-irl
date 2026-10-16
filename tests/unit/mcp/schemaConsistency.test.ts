@@ -1,149 +1,101 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
 /**
- * Schema consistency tests for runtime MCP tools and the compatibility manifest.
+ * One tool contract (#688). src/zodSchemas.ts is the only definition of a tool's schemas: tools/list serves it, and
+ * /manifest.json is generated from the same served shapes with the SDK's own converter. These used to compare a
+ * hand-written JSON copy with the Zod one, field by field; now the manifest is shown equal to tools/list for every
+ * tool, and the few facts worth pinning are read from what is served.
  */
 
-import { describe, it, expect } from "vitest";
-import {
-  createMailCheckoutInputZ,
-  getPurchaseStatusInputZ,
-  sendLetterInputZ,
-  quoteAndPreviewInputZ,
-  sendEligibilityZ, getPurchaseStatusOutputZ } from "../../../src/zodSchemas.js";
-import { toolInputSchemas } from "../../../src/mcp/toolSchemas.js";
-import { buildManifest } from "../../../src/mcp/manifest.js";
+vi.mock('../../../src/auth/identity.js', () => ({
+  prepareAuthenticatedUser: vi.fn().mockResolvedValue('person@example.com')
+}));
 
-const manifest = buildManifest();
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { createMcpServer } from '../../../src/mcp/httpServer.js';
+import { buildManifest, servedToolJsonSchemas } from '../../../src/mcp/manifest.js';
+import { LetterIrlServer } from '../../../src/server.js';
 
-function getManifestTool(name: string) {
-  return manifest.tools.find((tool) => tool.name === name);
+const ALL_ON: Record<string, string> = {
+  LETTER_IRL_SEND_CONFIRMATION_ENABLED: 'true',
+  LETTER_IRL_ARRIVE_BY_ENABLED: 'true',
+  LETTER_IRL_STATIONERY_ENABLED: 'true',
+  LETTER_IRL_PRINT_RENDERER: 'pdf',
+  LETTER_IRL_CERTIFIED_MAIL_ENABLED: 'true',
+  JIT_PURCHASE_ENABLED: 'true',
+  LETTER_IRL_WORDS_EDITOR_ENABLED: 'true',
+  LETTER_IRL_POSTCARD_SIZES_ENABLED: 'true',
+  LETTER_IRL_POSTCARD_LAYOUTS_ENABLED: 'true',
+  LETTER_IRL_POSTCARD_COLLAGES_ENABLED: 'true',
+  LETTER_IRL_ADDRESS_REQUESTS_ENABLED: 'true',
+  LETTER_IRL_SIGNATURES_ENABLED: 'true',
+  LETTER_IRL_CUSTOM_STATIONERY_ENABLED: 'true',
+  LETTER_IRL_HOME_ENABLED: 'true'
+};
+const ALL_OFF = Object.fromEntries(Object.keys(ALL_ON).map(key => [key, '']));
+
+async function servedTools() {
+  vi.stubEnv('LETTER_IRL_REQUIRE_AUTH', 'true');
+  vi.stubEnv('LETTER_IRL_OAUTH_SCOPES', 'openid email offline_access mail:read mail:draft mail:send');
+  const server = await createMcpServer(new LetterIrlServer(), {
+    userId: 'auth0|contract',
+    claims: { azp: 'https://chatgpt.com/oauth/abc/client.json' },
+    token: 'token',
+    authType: 'jwt',
+    scopes: ['mail:read', 'mail:draft', 'mail:send']
+  });
+  const client = new Client({ name: 'contract', version: '0.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  const { tools } = await client.listTools();
+  await client.close();
+  return new Map(tools.map(tool => [tool.name, tool]));
 }
 
-describe("Schema Consistency", () => {
-  describe("send_letter schema", () => {
-    it("should have draftId and confirm in the runtime Zod schema", () => {
-      const shape = sendLetterInputZ.shape;
-      expect(shape).toHaveProperty("draftId");
-      expect(shape).toHaveProperty("confirm");
-      expect(shape).not.toHaveProperty("sender");
-      expect(shape).not.toHaveProperty("recipient");
-      expect(shape).not.toHaveProperty("bodyText");
-    });
-
-    it("should have draftId and confirm in MCP toolSchemas", () => {
-      const shape = toolInputSchemas.send_letter.shape;
-      expect(shape).toHaveProperty("draftId");
-      expect(shape).toHaveProperty("confirm");
-      expect(shape).not.toHaveProperty("sender");
-      expect(shape).not.toHaveProperty("recipient");
-      expect(shape).not.toHaveProperty("bodyText");
-    });
-
-    it("should have draftId and confirm in the compatibility manifest", () => {
-      const sendLetterTool = getManifestTool("send_letter");
-      const inputSchema = sendLetterTool?.inputSchema as Record<string, unknown>;
-      const properties = inputSchema.properties as Record<string, unknown>;
-      const required = inputSchema.required as string[];
-
-      expect(sendLetterTool).toBeDefined();
-      expect(required).toContain("draftId");
-      expect(required).toContain("confirm");
-      expect(properties).toHaveProperty("draftId");
-      expect(properties).toHaveProperty("confirm");
-      expect(properties).not.toHaveProperty("sender");
-      expect(properties).not.toHaveProperty("recipient");
-      expect(properties).not.toHaveProperty("bodyText");
-    });
-
-    it("should match required fields across runtime, MCP schemas, and manifest", () => {
-      const zodRequired = Object.keys(sendLetterInputZ.shape);
-      const mcpRequired = Object.keys(toolInputSchemas.send_letter.shape);
-      const manifestRequired = (getManifestTool("send_letter")?.inputSchema as Record<string, unknown>)
-        .required as string[];
-
-      expect(zodRequired.sort()).toEqual(["confirm", "draftId"]);
-      expect(mcpRequired.sort()).toEqual(["confirm", "draftId"]);
-      expect([...manifestRequired].sort()).toEqual(["confirm", "draftId"]);
-    });
-  });
-
-  describe("quote_and_preview_letter schema", () => {
-    it("should have consistent fields across Zod and MCP schemas", () => {
-      const zodShape = quoteAndPreviewInputZ.shape;
-      const mcpShape = toolInputSchemas.quote_and_preview_letter.shape;
-
-      expect(zodShape).toHaveProperty("recipient");
-      expect(zodShape).toHaveProperty("bodyText");
-      expect(zodShape).toHaveProperty("signOff");
-
-      expect(mcpShape).toHaveProperty("recipient");
-      expect(mcpShape).toHaveProperty("bodyText");
-      expect(mcpShape).toHaveProperty("signOff");
-    });
-
-    it("should define quote_and_preview_letter in the compatibility manifest", () => {
-      const previewTool = getManifestTool("quote_and_preview_letter");
-      expect(previewTool).toBeDefined();
-      expect(previewTool?.inputSchema).toBeDefined();
-    });
-  });
-
-  describe("JIT commerce schemas", () => {
-    it("registers create_mail_checkout with only the server-priced draft ID", () => {
-      expect(Object.keys(createMailCheckoutInputZ.shape)).toEqual(["draftId"]);
-      expect(Object.keys(toolInputSchemas.create_mail_checkout.shape)).toEqual(["draftId"]);
-      const manifestTool = getManifestTool("create_mail_checkout");
-      expect(manifestTool).toBeDefined();
-      expect((manifestTool?.inputSchema as any).properties).not.toHaveProperty("amountCents");
-      expect((manifestTool?.inputSchema as any).properties).not.toHaveProperty("priceId");
-    });
-
-    it("registers owned purchase status lookup by order ID", () => {
-      expect(Object.keys(getPurchaseStatusInputZ.shape)).toEqual(["orderId"]);
-      expect(Object.keys(toolInputSchemas.get_purchase_status.shape)).toEqual(["orderId"]);
-      expect(getManifestTool("get_purchase_status")).toBeDefined();
-    });
-  });
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
-/**
- * OUTPUT-schema parity between the two PUBLISHED layers.
- *
- * The cases above compare INPUT schemas only, and that gap let #278 ship
- * `displayAmount` into the MCP layer (zodSchemas.ts, served via
- * registerTools) while the JSON Schema that /manifest.json publishes
- * (schemas.ts, via LetterIrlServer.listTools) still described the old shape.
- * A consumer deriving the tool's output from the manifest dropped the field
- * and fell back to amountCents/100 - 100x wrong for a zero-decimal currency,
- * the exact bug the server-side formatting exists to prevent, live on the
- * second surface with nothing comparing them (#278 round 10, four angles).
- */
-describe("published output-schema parity (#278)", () => {
-  it("declares the same get_purchase_status output fields on both served layers", () => {
-    // #323 added the pack figures (letters, lettersRemaining, lettersRefunded,
-    // perLetterCents, refundableAmountCents, amountRefundedCents) to the MCP
-    // layer; a manifest consumer that never saw them would have no way to show
-    // an operator what is left before a refund.
-    const manifestTool = getManifestTool("get_purchase_status");
-    const manifestKeys = Object.keys(
-      (manifestTool?.outputSchema as { properties: Record<string, unknown> }).properties
-    ).sort();
-
-    expect(manifestKeys).toEqual(Object.keys(getPurchaseStatusOutputZ.shape).sort());
-  });
-  it("declares the same sendEligibility.payAndSend fields on both served layers", () => {
-    const manifestTool = getManifestTool("quote_and_preview_letter");
-    const payAndSend = (
-      manifestTool?.outputSchema as {
-        properties: {
-          sendEligibility: {
-            properties: { payAndSend: { properties: Record<string, unknown> } };
-          };
-        };
+describe('one tool contract (#688)', () => {
+  it.each([['all off', ALL_OFF], ['all on', ALL_ON]])(
+    'serves each tool in /manifest.json exactly as tools/list does: %s',
+    async (_label, env) => {
+      for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
+      const served = await servedTools();
+      const manifest = buildManifest().tools as Array<{ name: string; inputSchema: unknown; outputSchema: unknown }>;
+      expect(manifest.map(tool => tool.name)).toEqual([...served.keys()]);
+      for (const tool of manifest) {
+        expect(tool.inputSchema, `${tool.name} input`).toEqual(served.get(tool.name)!.inputSchema);
+        expect(tool.outputSchema, `${tool.name} output`).toEqual(served.get(tool.name)!.outputSchema);
       }
-    ).properties.sendEligibility.properties.payAndSend.properties;
+    },
+    60_000
+  );
 
-    const zodKeys = Object.keys(sendEligibilityZ.shape.payAndSend.shape).sort();
+  it('asks send_letter for the draft and a confirmation, and the checkout for a draft alone, never a price', () => {
+    const send = servedToolJsonSchemas('send_letter').inputSchema;
+    expect(send.required).toEqual(expect.arrayContaining(['draftId', 'confirm']));
+    const checkout = servedToolJsonSchemas('create_mail_checkout').inputSchema;
+    expect(Object.keys(checkout.properties)).toEqual(['draftId', 'contentVersion', 'sendAnotherCopy']);
+    expect(checkout.required).toEqual(['draftId']);
+    // The version the person was shown (#695): asked for, never required, for one release.
+    for (const schema of [send, checkout, servedToolJsonSchemas('send_postcard').inputSchema]) {
+      expect(schema.properties.contentVersion).toMatchObject({ type: 'string' });
+      expect(schema.required).not.toContain('contentVersion');
+    }
+    expect(Object.keys(servedToolJsonSchemas('get_purchase_status').inputSchema.properties)).toEqual(['orderId']);
+  });
 
-    expect(Object.keys(payAndSend).sort()).toEqual(zodKeys);
+  it("requires set_arrival_date's draft alone and both of cancel_scheduled_mail's inputs", () => {
+    expect(servedToolJsonSchemas('set_arrival_date').inputSchema.required).toEqual(['draftId']);
+    expect([...servedToolJsonSchemas('cancel_scheduled_mail').inputSchema.required].sort()).toEqual(['confirm', 'orderId']);
+  });
+
+  it('leaves the arrival-date tools out of the manifest while arrival dates are off', () => {
+    vi.stubEnv('LETTER_IRL_ARRIVE_BY_ENABLED', '');
+    const names = (buildManifest().tools as Array<{ name: string }>).map(tool => tool.name);
+    expect(names).not.toContain('set_arrival_date');
+    expect(names).not.toContain('cancel_scheduled_mail');
   });
 });

@@ -595,7 +595,7 @@ export async function ensurePriceCatalog(productCode?: string): Promise<void> {
     // shipped default (Pay & Send off, so the eligibility kick always passes
     // an unsold code), and building the full table plus walking three maps to
     // prune nothing cost more per quote than the enabled warm path two rounds
-    // went to trim. The maps hold at most five keys and the membership check
+    // went to trim. The maps hold at most nine keys (#578) and the membership check
     // is a static array scan plus one env read (#278 round 9).
     const holdsUnsoldState = [
       ...resolved.keys(),

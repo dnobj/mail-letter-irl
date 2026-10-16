@@ -3,9 +3,12 @@
 import pg from 'pg';
 
 import { isWakeConnectionError } from './wakeRetry.js';
+import { readDatesAsStrings } from './dateParser.js';
 import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog.js';
 
 const { Pool } = pg;
+
+readDatesAsStrings();
 
 function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));

@@ -13,9 +13,133 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  * The newest migration the grant statements depend on. Provisioning refuses a
  * database that has not reached it, because a GRANT on a table that does not
  * exist yet fails the whole transaction.
+ *
+ * 035 adds users.erased_at, which neither role is granted: the panel tells an
+ * erased account by its placeholder email (src/services/accountErasureService.ts),
+ * so the grants are unchanged and provisioning need not be re-run for it.
+ *
+ * 036 adds an alert type to a table the reader already reads, so the same
+ * holds for it.
+ *
+ * 037 adds personal_access_tokens.scopes, which neither role is granted (the
+ * column list below is explicit), so again nothing to re-run.
+ *
+ * 038 adds the daily limits' three tables: both roles read them, and the
+ * operator writes daily_limit_overrides through limit.set and limit.clear.
+ * Provisioning MUST be re-run after it, or the Limits page and both commands
+ * fail with permission denied.
+ *
+ * 039 adds letter_drafts.renderer_version (#534). The reader role's column
+ * list below leaves it out, and the operator role reads it through its
+ * table-wide SELECT on letter_drafts, which covers new columns, so nothing
+ * to re-run.
+ *
+ * 040 adds arrive_by and mail_on to letter_drafts and letters (#535). The same
+ * holds: the reader's lists leave them out, and the operator reads both tables
+ * whole. The admin panel's letter view gains them later, with a re-run.
+ *
+ * 041 adds the alert type schedule_missed_mail_day (#535). The roles read
+ * commerce_operational_alerts whole, so nothing to re-run.
+ *
+ * 042 adds the operator audit operation mail_job_release (#535), which
+ * job.dispatch_now writes. The operator role inserts into
+ * commerce_operator_audit_events table-wide, and the release updates only
+ * letter_jobs columns already in its list (next_attempt_at, scheduled_at,
+ * updated_at), so nothing to re-run.
+ *
+ * 043 adds the alert type provider_cancelled_mail (#566). The roles read
+ * commerce_operational_alerts whole, so nothing to re-run.
+ *
+ * 044 adds letter_drafts.stationery (#563). As for 039, the reader role's
+ * column list leaves it out and the operator role reads letter_drafts whole,
+ * so nothing to re-run.
+ *
+ * 045 adds users.stationery_theme (#563), an account's remembered theme. The
+ * reader's users column list leaves it out; the operator reads users whole
+ * and writes only the columns listed, none of them this. Erasure, which
+ * clears it, runs as the database owner. So nothing to re-run.
+ *
+ * 046 widens two CHECKs to admit Typewriter and Handwritten (#563): no column
+ * or grant changes, so nothing to re-run.
+ *
+ * 047 adds letter_drafts.pages (#586), with two CHECKs. As for 039, the
+ * reader role's column list leaves it out and the operator role reads
+ * letter_drafts whole, so nothing to re-run.
+ *
+ * 048 adds letter_drafts.postcard_front (#594), with two CHECKs, and admits
+ * renderer version pdf-3. As for 039, the reader role's column list leaves
+ * it out and the operator role reads letter_drafts whole, so nothing to
+ * re-run.
+ *
+ * 049 adds address_requests (#604), which neither role is granted: it holds a
+ * third party's address, and the panel does not show it. Erasure, which
+ * deletes an account's requests, runs as the database owner. So nothing to
+ * re-run.
+ *
+ * 050 adds user_signatures (#608), which neither role is granted either: a
+ * picture of a person's handwriting, which the panel does not show. Erasure
+ * deletes it as the database owner. So nothing to re-run.
+ *
+ * 051 adds letter_drafts.signature_image (#608) and admits pdf-4. As for 039,
+ * the reader role's column list leaves it out; the operator role reads
+ * letter_drafts whole, and letters.content, so it can read a letter's copy of
+ * the signature, as it can the letter's words and addresses. Nothing to
+ * re-run.
+ *
+ * 052 adds letter_drafts.mail_service (#625), with two CHECKs. As for 039, the
+ * reader role's column list leaves it out and the operator role reads
+ * letter_drafts whole, so nothing to re-run.
+ *
+ * 053 adds letters.mail_service and letters.carrier_tracking_number (#625), with
+ * four CHECKs. As for 040, the reader role's letters column list leaves them
+ * out and the operator role reads letters whole. But the operator role's
+ * letters UPDATE list gains carrier_tracking_number, because the admin panel's
+ * provider status sync writes it (as the operator role, in full mode): re-run
+ * `npm run admin:provision-access` in each environment after 053 is applied.
+ * The admin panel's letter view gains the two columns later, with another re-run.
+ *
+ * 054 adds stationery_designs and users.stationery_design_id (#649). Neither
+ * role is granted the table: a design's name is the person's own words, which
+ * the panel does not show. The reader's users column list leaves the new
+ * column out; the operator reads users whole and writes only the columns
+ * listed, none of them this. Erasure, which deletes the designs, runs as the
+ * database owner. So nothing to re-run.
+ *
+ * 055 adds letter_jobs.mail_hold_until (#693), the end of an arrive-by hold,
+ * which the panel now reads in place of metadata.heldUntil: required, so the
+ * panel never reads a column that is not there. Both roles read letter_jobs
+ * whole, and the release (job.dispatch_now) leaves the column as it is, so the
+ * operator needs no new column. Nothing to re-run.
+ *
+ * 056 adds the alert type held_mail_funding_reversed (#696), with a partial
+ * unique index on its order. The roles read commerce_operational_alerts whole,
+ * and the release (job.dispatch_now) now also clears letter_jobs.hold_reason,
+ * already in the operator's list. Nothing to re-run.
+ *
+ * 057 gives every personal access token an expiry and holds the column NOT
+ * NULL with a default (#730). The reader already reads expires_at, and neither
+ * role writes the table. Nothing to re-run; required, as the newest is.
+ *
+ * 058 makes users.email unique whatever its case (#730): an index on
+ * lower(email) replaces the inline UNIQUE and the plain email index. Indexes
+ * carry no grants, and the panel's lookup already compares lower(email).
+ * Nothing to re-run; required, as the newest is.
+ *
+ * 059 adds personal_access_tokens.token_lookup (#730), the SHA-256 a token is
+ * found by. The reader's column list on that table is explicit and leaves it
+ * out, and neither role writes the table. Nothing to re-run; required, as the
+ * newest is.
+ *
+ * 060 adds the alert type refund_not_completed (#730), with a partial unique
+ * index on its order while open. The roles read commerce_operational_alerts
+ * whole, and the panel's alert commands already transition any type. Nothing
+ * to re-run.
+ *
+ * 061 adds the alert type address_request_reported (#730). As 060: nothing to
+ * re-run; required, as the newest is.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
-  "029_proportional_pack_refunds.sql";
+  "061_address_request_reported_alert.sql";
 
 export interface AdminProvisioningArguments {
   environment: "development" | "production";
@@ -40,8 +164,6 @@ export interface AdminProvisioningRole {
  * content, a postal address, or a credential.
  */
 export const ADMIN_READER_TABLES = [
-  "credit_transactions",
-  "credit_ledger",
   "credit_consumption",
   "promo_campaigns",
   "promo_redemptions",
@@ -59,6 +181,15 @@ export const ADMIN_READER_TABLES = [
   "stripe_disputes",
   "image_entitlements",
   "image_generation_reservations",
+  // Gift letters and their codes (033). No content or address; a code is a
+  // bearer value like a promo code, which this list already includes.
+  "gift_letters",
+  "gift_codes",
+  // The daily limits (038): values, refusal counts and the API's configured
+  // values. Limit keys, numbers, dates and account ids only.
+  "daily_limit_overrides",
+  "daily_limit_refusals",
+  "daily_limit_defaults",
   "admin_environment_marker",
   "admin_audit_events",
   "admin_command_runs",
@@ -69,8 +200,10 @@ export const ADMIN_READER_TABLES = [
  * Tables the reader may read only column by column. The omitted columns are
  * the ones a privileged page must never be able to select: letter content and
  * recipients, draft bodies and images, return addresses, token hashes, the
- * quarantined content itself, and a customer's contact email on a feature
- * request.
+ * quarantined content itself, a customer's contact email on a feature
+ * request, and the two free-text ledger descriptions, which have carried a
+ * recipient's name and an operator's reason (issue #162 security review,
+ * A-01 and A-13).
  */
 export const ADMIN_READER_COLUMN_GRANTS: Readonly<
   Record<string, readonly string[]>
@@ -124,6 +257,7 @@ export const ADMIN_READER_COLUMN_GRANTS: Readonly<
     "postcard_size",
     "layout_type",
     "redacted_at",
+    "is_gift_send",
   ],
   personal_access_tokens: [
     "token_id",
@@ -158,6 +292,39 @@ export const ADMIN_READER_COLUMN_GRANTS: Readonly<
     "quarantined_at",
     "purge_after",
   ],
+  // Every column except `description`. Both ledger tables were whole-table
+  // readable until the security review: the send path wrote the recipient's
+  // name into the transaction description, and an operator adjustment wrote
+  // the operator's reason into both. Adding a column to either table no
+  // longer grants it by accident, which is the point of the column list.
+  credit_transactions: [
+    "transaction_id",
+    "user_id",
+    "amount",
+    "balance_after",
+    "type",
+    "reference_type",
+    "reference_id",
+    "created_at",
+  ],
+  credit_ledger: [
+    "ledger_id",
+    "user_id",
+    "initial_amount",
+    "remaining_amount",
+    "source_type",
+    "source_reference_id",
+    "source_order_id",
+    "source_metadata",
+    "activated_at",
+    "expires_at",
+    "expiration_policy",
+    "expiration_days",
+    "status",
+    "related_ledger_id",
+    "created_at",
+    "updated_at",
+  ],
 };
 
 /**
@@ -173,34 +340,125 @@ export const ADMIN_OPERATOR_FULL_SELECT_TABLES = [
 ] as const;
 
 /**
- * Exactly the writes the enabled commands perform, per table. Anything not
- * listed fails at PostgreSQL with `permission denied`, which is the last line
- * of defence behind the route-level mode gate.
+ * Exactly the writes the enabled commands perform, per table and, where the
+ * statements are known, per column. Anything not listed fails at PostgreSQL
+ * with `permission denied`, which is the last line of defence behind the
+ * route-level mode gate.
+ *
+ * The column lists were derived by following every command's `execute` into
+ * the domain service it calls and collecting the SET and INSERT lists it
+ * reaches. `tests/integration/adminCommands.postgres.test.ts` runs the real
+ * commands against these grants, so a missing column fails there rather than
+ * in production. A table-level entry means the statement shape needs it: the
+ * admin queues, the ledger inserts and the audit tables are written whole.
+ *
+ * PostgreSQL has no column form of DELETE, so `delete` stays a table grant.
  */
+export interface AdminOperatorTableWrites {
+  insert?: readonly string[] | "table";
+  update?: readonly string[] | "table";
+  delete?: true;
+}
+
 export const ADMIN_OPERATOR_WRITE_GRANTS: Readonly<
-  Record<string, readonly ("INSERT" | "UPDATE" | "DELETE")[]>
+  Record<string, AdminOperatorTableWrites>
 > = {
-  // INSERT because the ledger grant (addCreditsToLedgerWithClient) upserts
-  // the account row; PostgreSQL needs INSERT for ON CONFLICT DO UPDATE even
-  // when the row exists.
-  users: ["INSERT", "UPDATE"],
-  orders: ["UPDATE"],
-  credit_ledger: ["INSERT", "UPDATE"],
-  credit_transactions: ["INSERT"],
-  credit_consumption: ["INSERT"],
-  letters: ["UPDATE"],
-  letter_jobs: ["UPDATE"],
-  letter_status_history: ["INSERT"],
-  commerce_operational_alerts: ["INSERT", "UPDATE"],
-  commerce_operator_audit_events: ["INSERT"],
-  commerce_order_events: ["INSERT"],
-  commerce_pack_refunds: ["INSERT", "UPDATE"],
-  stripe_webhook_events: ["UPDATE"],
-  image_entitlements: ["INSERT", "UPDATE"],
-  image_generation_reservations: ["UPDATE"],
-  promo_campaigns: ["INSERT", "UPDATE", "DELETE"],
-  provider_routing: ["UPDATE"],
-  admin_operations: ["INSERT"],
+  users: {
+    // INSERT because the ledger grant upserts the account row, and PostgreSQL
+    // needs INSERT for ON CONFLICT DO UPDATE even when the row exists. `email`
+    // and `credits_used` appear only in that INSERT list and never in a SET
+    // list, so the operator cannot rewrite either on an account that exists.
+    insert: ["user_id", "email", "credits", "credits_purchased", "credits_used"],
+    update: [
+      "credits",
+      "credits_purchased",
+      "image_generations_used",
+      "sends_blocked_at",
+      "sends_blocked_reason",
+      "tier_override",
+      "updated_at",
+    ],
+  },
+  orders: {
+    update: [
+      "amount_refunded_cents",
+      "completed_at",
+      "credits_refunded",
+      "fulfilled_at",
+      "held_at",
+      "hold_previous_status",
+      "hold_reason",
+      "last_error",
+      "last_error_code",
+      "refund_pending_at",
+      "status",
+      "updated_at",
+    ],
+  },
+  letters: {
+    // Never content, recipient, preview_html or redacted_at: the retention
+    // sweep owns those and no command touches them.
+    update: [
+      // The USPS number of a certified letter (053, #625), written by the
+      // provider status sync.
+      "carrier_tracking_number",
+      "provider",
+      "provider_raw_status",
+      "sent_at",
+      "status",
+      "status_updated_at",
+      "tracking_id",
+      "updated_at",
+    ],
+  },
+  letter_jobs: {
+    update: [
+      "attempts",
+      "completed_at",
+      "error_message",
+      "held_at",
+      "hold_reason",
+      "last_error",
+      "locked_at",
+      "max_attempts",
+      "next_attempt_at",
+      "operator_resolution",
+      "provider_order_id",
+      "provider_outcome",
+      "resolved_at",
+      "scheduled_at",
+      "status",
+      "updated_at",
+    ],
+  },
+  credit_ledger: { insert: "table", update: "table" },
+  credit_transactions: { insert: "table" },
+  credit_consumption: { insert: "table" },
+  letter_status_history: { insert: "table" },
+  commerce_operational_alerts: { insert: "table", update: "table" },
+  commerce_operator_audit_events: { insert: "table" },
+  commerce_order_events: { insert: "table" },
+  commerce_pack_refunds: { insert: "table", update: "table" },
+  image_entitlements: { insert: "table", update: "table" },
+  image_generation_reservations: { update: "table" },
+  // gift.grant inserts; a pack refund or dispute (revokePackLots) revokes and
+  // marks rows; a job resolved as rejected returns the gift as a new row.
+  gift_letters: { insert: "table", update: "table" },
+  // gift.void_code, the dispute path and the failed-send return void codes.
+  gift_codes: { update: ["status", "voided_at", "void_reason", "updated_at"] },
+  promo_campaigns: { insert: "table", update: "table", delete: true },
+  // limit.set inserts a value and clears the one it replaces; limit.clear
+  // clears. Never deleted: clearing stamps the row, which keeps the history.
+  daily_limit_overrides: {
+    insert: "table",
+    update: ["cleared_at", "cleared_by_command_id", "updated_at"],
+  },
+  provider_routing: { update: "table" },
+  admin_operations: { insert: "table" },
+  // stripe_webhook_events held a table-level UPDATE until the security review.
+  // Every write to it happens inside Stripe webhook processing, which the
+  // panel never enters; the panel only reads it, through the reader role. Dead
+  // grant surface, so it is gone rather than narrowed.
 };
 
 function invalidProvisioningConfiguration(
@@ -361,13 +619,18 @@ export function buildAdminGrantStatements(
   );
 
   // One statement per privilege so each grant is reviewable on its own line.
-  for (const [name, privileges] of Object.entries(
-    ADMIN_OPERATOR_WRITE_GRANTS,
-  )) {
-    for (const privilege of privileges) {
+  for (const [name, writes] of Object.entries(ADMIN_OPERATOR_WRITE_GRANTS)) {
+    for (const privilege of ["INSERT", "UPDATE"] as const) {
+      const columns = privilege === "INSERT" ? writes.insert : writes.update;
+      if (!columns) continue;
+      const scope = columns === "table" ? "" : ` (${quoteColumns(columns)})`;
       statements.push(
-        `GRANT ${privilege} ON TABLE ${table(name)} TO ${operatorRole}`,
+        `GRANT ${privilege}${scope} ON TABLE ${table(name)} TO ${operatorRole}`,
       );
+    }
+    if (writes.delete) {
+      // PostgreSQL has no column form of DELETE.
+      statements.push(`GRANT DELETE ON TABLE ${table(name)} TO ${operatorRole}`);
     }
   }
   // SERIAL columns (credit_transactions, letter_status_history) need the
@@ -375,6 +638,12 @@ export function buildAdminGrantStatements(
   statements.push(
     `GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA ${schemaIdentifier} TO ${operatorRole}`,
     `REVOKE UPDATE, DELETE, TRUNCATE ON TABLE ${table("admin_audit_events")} FROM ${roles}`,
+    // The revoke above takes EXECUTE from the two roles, but PostgreSQL grants
+    // it to PUBLIC by default and both roles inherit that. No SECURITY DEFINER
+    // function exists today, so nothing is reachable; this is here so the first
+    // one added later is not silently callable by the reader (A-24).
+    `REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA ${schemaIdentifier} FROM PUBLIC`,
+    `ALTER DEFAULT PRIVILEGES IN SCHEMA ${schemaIdentifier} REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC`,
   );
   return statements;
 }

@@ -112,7 +112,7 @@ describe('get_order_status tool', () => {
       });
     });
 
-    it('should include canSendFollowUp and followUpSuggestedPrompt', async () => {
+    it('should include canSendFollowUp, and no prompt built from the recipient\'s name (#730)', async () => {
       // Arrange
       const mockOrder = createMockOrder('order-123', true);
       const context = createMockContext([mockOrder]);
@@ -122,7 +122,8 @@ describe('get_order_status tool', () => {
 
       // Assert
       expect(result.canSendFollowUp).toBe(true);
-      expect(result.followUpSuggestedPrompt).toContain('Jane Recipient');
+      expect(result).not.toHaveProperty('followUpSuggestedPrompt');
+      expect(JSON.stringify(result)).not.toMatch(/Write a follow-up letter/);
     });
   });
 
@@ -194,5 +195,25 @@ describe('get_order_status tool', () => {
       expect(result.trackingSupport).toBe('estimated_only');
       expect(result.currentStatus).toBe('delivered');
     });
+  });
+});
+
+describe('get_order_status with an arrival date (#535)', () => {
+  it('says the dates of mail sent with them, and whether it can still be cancelled free', async () => {
+    const order = createMockOrder('order-held', false);
+    order.currentStatus = 'scheduled';
+    order.schedule = { arriveBy: '2026-10-16', mailOn: '2026-10-06' };
+    order.cancellable = true;
+
+    const result = await getOrderStatusTool.handler({ orderId: 'order-held' }, createMockContext([order]));
+
+    expect(result).toMatchObject({ currentStatus: 'scheduled', arriveBy: '2026-10-16', mailOn: '2026-10-06', cancellable: true });
+  });
+
+  it('says nothing of dates for mail sent without them', async () => {
+    const result = await getOrderStatusTool.handler({ orderId: 'order-plain' }, createMockContext([createMockOrder('order-plain', false)]));
+    expect(result).not.toHaveProperty('arriveBy');
+    expect(result).not.toHaveProperty('mailOn');
+    expect(result).not.toHaveProperty('cancellable');
   });
 });

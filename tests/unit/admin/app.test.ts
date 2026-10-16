@@ -9,9 +9,12 @@ import { clientScriptPath, createAdminRequestListener, type RouteHandler } from 
 import { AdminRouter } from "../../../src/admin/http/router.js";
 import { NAV_ITEMS, registerReadRoutes } from "../../../src/admin/http/routes.js";
 import { createCsrfToken } from "../../../src/admin/http/security.js";
+import { ElevationGuard } from "../../../src/admin/http/elevation.js";
 import { AdminSessionStore, SESSION_COOKIE_NAME } from "../../../src/admin/http/session.js";
 import { parseAdminRuntimeConfig } from "../../../src/admin/runtimeConfig.js";
 import { validDevelopmentEnv } from "./runtimeConfig.test.js";
+import { DenialAuditBudget } from "../../../src/admin/http/denialAuditBudget.js";
+import { AdminFoundationError } from "../../../src/admin/errors.js";
 
 /**
  * The request pipeline end to end over a real socket: identity checks,
@@ -43,6 +46,10 @@ function scriptedPool(audits: Array<Record<string, unknown>>) {
     if (text.includes("INSERT INTO admin_audit_events")) {
       audits.push({ actor: values[0], action: values[6], targetId: values[8], outcome: values[13], errorCode: values[14], input: values[10] });
       return { rows: [{ id: "audit-1", occurredAt: new Date() }] };
+    }
+    // The lookup by an exact email (src/admin/queries/lookup.ts).
+    if (text.includes("lower(email) = lower($1)")) {
+      return { rows: values[0] === "customer@example.com" || values[0] === USER_ROW.user_id ? [{ user_id: USER_ROW.user_id }] : [] };
     }
     if (/FROM users WHERE user_id = \$1/.test(text) && values[0] === USER_ROW.user_id) {
       return { rows: [USER_ROW] };
@@ -82,6 +89,7 @@ const identity = {
   "tailscale-user-name": "Owner",
   "x-forwarded-host": HOST,
   "x-forwarded-for": "100.64.0.5",
+  "x-forwarded-proto": "https",
 };
 
 describe("admin request pipeline", () => {
@@ -96,6 +104,13 @@ describe("admin request pipeline", () => {
   router.add("POST", "/writes/echo", async (context) => context.render("Echo", { value: "<p>echo</p>" } as never), {
     name: "writes.echo",
   });
+  // A stand-in for the real elevation route: the limiter is keyed on the route
+  // name, so this exercises the wiring without the command machinery.
+  router.add("POST", "/elevate", async (context) => context.render("Elevate", { value: "<p>elevate</p>" } as never), {
+    name: "elevate",
+    write: true,
+  });
+  const whoisCalls = vi.fn(async () => ({ login: "owner@example.com", displayName: "Owner", nodeName: "laptop.tail1234.ts.net" }));
   let server: http.Server;
   let port = 0;
 
@@ -104,7 +119,8 @@ describe("admin request pipeline", () => {
       config,
       pools,
       sessions,
-      whois: { whois: async () => ({ login: "owner@example.com", displayName: "Owner", nodeName: "laptop.tail1234.ts.net" }) },
+      elevation: new ElevationGuard(),
+      whois: { whois: whoisCalls },
       audit: new AdminAuditWriter(),
       router,
       nodeName: HOST,
@@ -180,7 +196,7 @@ describe("admin request pipeline", () => {
     const missing = await send(port, "GET", "/nope", identity);
     expect(missing.status).toBe(404);
     expect(missing.body).toContain("ADMIN_NOT_FOUND");
-    const wrongMethod = await send(port, "POST", "/lookup", identity);
+    const wrongMethod = await send(port, "POST", "/", identity);
     expect(wrongMethod.status).toBe(405);
   });
 
@@ -206,6 +222,87 @@ describe("admin request pipeline", () => {
     }, "reason=support+ticket+123&_csrf=" + "0".repeat(64));
     expect(badToken.status).toBe(403);
     expect(audits.at(-1)).toMatchObject({ errorCode: "ADMIN_CSRF_REJECTED" });
+  });
+
+  it("refuses a cross-site request with no session before sign-in: no session, no whois, no audit row (#730)", async () => {
+    const sessionsBefore = sessions.size;
+    const auditsBefore = audits.length;
+    const whoisBefore = whoisCalls.mock.calls.length;
+    for (const dest of ["image", "script", "empty"]) {
+      const reply = await send(port, "GET", "/", { ...identity, "sec-fetch-site": "cross-site", "sec-fetch-mode": "no-cors", "sec-fetch-dest": dest });
+      expect(reply.status, dest).toBe(403);
+      expect(reply.headers["set-cookie"], dest).toBeUndefined();
+    }
+    const sameSite = await send(port, "POST", "/writes/echo", { ...identity, "sec-fetch-site": "same-site", "sec-fetch-mode": "cors", "sec-fetch-dest": "empty" }, "x=1");
+    expect(sameSite.status).toBe(403);
+    // Navigated, but into a frame: not the operator following a link.
+    const framed = await send(port, "GET", "/", { ...identity, "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "iframe" });
+    expect(framed.status).toBe(403);
+    // A form another site submits, as a top-level navigation: still refused.
+    const posted = await send(port, "POST", "/writes/echo", { ...identity, "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" }, "x=1");
+    expect(posted.status).toBe(403);
+    // Shaped like a navigation, but a page's own speculation rules sent it.
+    for (const purpose of [{ "sec-purpose": "prefetch" }, { "sec-purpose": "prefetch;prerender" }, { purpose: "prefetch" }] as Array<Record<string, string>>) {
+      const speculative = await send(port, "GET", "/", { ...identity, "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "document", ...purpose });
+      expect(speculative.status, JSON.stringify(purpose)).toBe(403);
+    }
+    const head = await send(port, "HEAD", "/", { ...identity, "sec-fetch-site": "cross-site", "sec-fetch-mode": "no-cors", "sec-fetch-dest": "image" });
+    expect(head.status).toBe(403);
+    // Another tailnet node is same-site and sends the cookie: a stale one is not a live session.
+    const stale = await send(port, "GET", "/", { ...identity, cookie: `${SESSION_COOKIE_NAME}=stale-or-forged`, "sec-fetch-site": "same-site", "sec-fetch-mode": "no-cors", "sec-fetch-dest": "image" });
+    expect(stale.status).toBe(403);
+    expect(String(stale.headers["set-cookie"])).toContain("Max-Age=0");
+    expect(sessions.size).toBe(sessionsBefore);
+    expect(audits.length).toBe(auditsBefore);
+    expect(whoisCalls.mock.calls.length).toBe(whoisBefore);
+  });
+
+  it("lets a request another site sent use a live session, and still audits a CSRF attempt with it", async () => {
+    const first = await send(port, "GET", "/", identity);
+    const sessionId = String(first.headers["set-cookie"]).split(";")[0].split("=")[1];
+    const live = { ...identity, cookie: `${SESSION_COOKIE_NAME}=${sessionId}` };
+    const image = await send(port, "GET", "/lookup", { ...live, "sec-fetch-site": "same-site", "sec-fetch-mode": "no-cors", "sec-fetch-dest": "image" });
+    expect(image.status).toBe(200);
+    const auditsBefore = audits.length;
+    const posted = await send(port, "POST", "/writes/echo", {
+      ...live,
+      "content-type": "application/x-www-form-urlencoded",
+      "sec-fetch-site": "cross-site",
+      "sec-fetch-mode": "cors",
+      "sec-fetch-dest": "empty",
+      origin: `https://${HOST}`,
+    }, "x=1");
+    expect(posted.status).toBe(403);
+    expect(audits.length).toBeGreaterThan(auditsBefore);
+    expect(audits.at(-1)).toMatchObject({ errorCode: "ADMIN_CSRF_REJECTED" });
+  });
+
+  it("records a cookie presented from another peer, even on a request another site sent", async () => {
+    const theirs = sessions.create({ login: "owner@example.com", name: "Owner", node: "laptop", peerAddress: "100.64.0.99" });
+    const auditsBefore = audits.length;
+    const reply = await send(port, "GET", "/", {
+      ...identity,
+      cookie: `${SESSION_COOKIE_NAME}=${theirs.id}`,
+      "sec-fetch-site": "same-site",
+      "sec-fetch-mode": "no-cors",
+      "sec-fetch-dest": "image",
+    });
+    expect(reply.status).toBe(200);
+    expect(audits.slice(auditsBefore)).toContainEqual(
+      expect.objectContaining({ action: "admin.session_start", input: expect.stringContaining('"replaced":"binding_mismatch"') }),
+    );
+  });
+
+  it("still audits a direct connection that fails the proxy checks, whatever its Sec-Fetch headers", async () => {
+    const auditsBefore = audits.length;
+    const reply = await send(port, "GET", "/", { "sec-fetch-site": "cross-site", "sec-fetch-mode": "no-cors", "sec-fetch-dest": "image" });
+    expect(reply.status).toBe(401);
+    expect(audits.length).toBeGreaterThan(auditsBefore);
+  });
+
+  it("lets a link the operator follows from another site open the page", async () => {
+    const reply = await send(port, "GET", "/", { ...identity, "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" });
+    expect(reply.status).toBe(200);
   });
 
   it("performs the audited email reveal with a valid token and refuses a thin reason", async () => {
@@ -234,6 +331,52 @@ describe("admin request pipeline", () => {
     expect(masked.body).not.toContain("customer@example.com");
   });
 
+  it("looks up by POST only, and audits a lookup by email with its matches, never the address (#730)", async () => {
+    const first = await send(port, "GET", "/", identity);
+    const sessionId = String(first.headers["set-cookie"]).split(";")[0].split("=")[1];
+    const token = createCsrfToken(config.sessionSecret, sessionId);
+    const headers = {
+      ...identity,
+      cookie: `${SESSION_COOKIE_NAME}=${sessionId}`,
+      "content-type": "application/x-www-form-urlencoded",
+      "sec-fetch-site": "same-origin",
+      origin: `https://${HOST}`,
+    };
+    // An old link's query is not run: the address would sit in the URL.
+    const linked = await send(port, "GET", "/lookup?q=customer%40example.com", { ...identity, cookie: headers.cookie });
+    expect(linked.status).toBe(200);
+    expect(linked.body).not.toContain("auth0|user1</a>");
+    expect(linked.body).toContain('method="post" action="/lookup"');
+    expect(linked.body).toContain('name="_csrf"');
+
+    const auditsBefore = audits.length;
+    const found = await send(port, "POST", "/lookup", headers, `q=customer%40example.com&_csrf=${token}`);
+    expect(found.status).toBe(200);
+    expect(found.body).toContain("Account auth0|user1");
+    const lookup = audits.slice(auditsBefore).find((audit) => audit.action === "pii.lookup");
+    expect(lookup).toMatchObject({ targetId: "auth0|user1", outcome: "succeeded" });
+    expect(JSON.parse(String(lookup?.input))).toMatchObject({ field: "email", matches: 1, accounts: ["auth0|user1"] });
+    expect(JSON.stringify(audits)).not.toContain("customer@example.com");
+
+    // An identifier that is not an email is not personal data: no row.
+    const byId = audits.length;
+    const plain = await send(port, "POST", "/lookup", headers, `q=auth0%7Cuser1&_csrf=${token}`);
+    expect(plain.status).toBe(200);
+    expect(audits.slice(byId).some((audit) => audit.action === "pii.lookup")).toBe(false);
+
+    // An email that matches nothing is still a lookup of that address.
+    const none = audits.length;
+    await send(port, "POST", "/lookup", headers, `q=nobody%40example.com&_csrf=${token}`);
+    const miss = audits.slice(none).find((audit) => audit.action === "pii.lookup");
+    expect(miss).toMatchObject({ outcome: "succeeded" });
+    expect(miss?.targetId ?? null).toBeNull();
+    expect(JSON.parse(String(miss?.input))).toMatchObject({ field: "email", matches: 0, accounts: [] });
+
+    // And it is a POST with the token, like any other.
+    const forged = await send(port, "POST", "/lookup", headers, "q=customer%40example.com&_csrf=" + "0".repeat(64));
+    expect(forged.status).toBe(403);
+  });
+
   it("refuses write routes in read-only mode before the handler runs", async () => {
     const first = await send(port, "GET", "/", identity);
     const sessionId = String(first.headers["set-cookie"]).split(";")[0].split("=")[1];
@@ -249,5 +392,194 @@ describe("admin request pipeline", () => {
     expect(reply.body).toContain("ADMIN_READ_ONLY_MODE");
     expect(reply.body).not.toContain("echo");
     expect(audits.at(-1)).toMatchObject({ errorCode: "ADMIN_READ_ONLY_MODE", outcome: "denied" });
+  });
+
+  it("rate limits the elevation route per login, whether or not the session cookie is presented", async () => {
+    // The lock that bounds code guessing is keyed by login; so is this, and
+    // for the same reason. A caller that drops its cookie gets a new session
+    // on every request, so a limiter keyed on the session would never bite.
+    const first = await send(port, "GET", "/", identity);
+    const sessionId = String(first.headers["set-cookie"]).split(";")[0].split("=")[1];
+    const token = createCsrfToken(config.sessionSecret, sessionId);
+    const headers = {
+      ...identity,
+      cookie: `${SESSION_COOKIE_NAME}=${sessionId}`,
+      "content-type": "application/x-www-form-urlencoded",
+      "sec-fetch-site": "same-origin",
+      origin: `https://${HOST}`,
+    };
+
+    const statuses: number[] = [];
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const reply = await send(port, "POST", "/elevate", headers, `_csrf=${token}`);
+      statuses.push(reply.status);
+    }
+    // Ten get through to the read-only refusal; the rest are limited. The
+    // limiter deliberately sits ahead of that refusal so the same budget
+    // applies in full mode, where the handler would verify a code.
+    expect(statuses.slice(0, 10).every((status) => status === 403)).toBe(true);
+    expect(statuses.slice(10)).toEqual([429, 429]);
+    expect(audits.at(-1)).toMatchObject({
+      errorCode: "ADMIN_RATE_LIMITED",
+      outcome: "denied",
+      targetId: "elevate",
+    });
+
+    // Starting a fresh session does not restore the budget. A POST with no
+    // cookie at all is refused earlier, by the CSRF check, because the token
+    // is bound to a session id the caller cannot predict; the way to get a
+    // clean session is a GET, which mints both. That is the shape of the
+    // attack this limiter and the per-login lock exist to bound, so it is the
+    // shape the test uses.
+    const second = await send(port, "GET", "/", identity);
+    const freshId = String(second.headers["set-cookie"]).split(";")[0].split("=")[1];
+    expect(freshId).not.toBe(sessionId);
+    const onFreshSession = await send(port, "POST", "/elevate", {
+      ...headers,
+      cookie: `${SESSION_COOKIE_NAME}=${freshId}`,
+    }, `_csrf=${createCsrfToken(config.sessionSecret, freshId)}`);
+    expect(onFreshSession.status).toBe(429);
+  });
+});
+
+describe("admin audit completeness", () => {
+  // Audit A-15: denials beyond the per-minute budget are aggregated rather
+  // than dropped, a rate-limited authenticated request is a denial like any
+  // other, and every failure of a write route is audited whatever its status.
+  // Full mode, so write routes reach their handlers.
+  const audits: Array<Record<string, unknown>> = [];
+  const config = parseAdminRuntimeConfig({
+    ...validDevelopmentEnv,
+    ADMIN_MODE: "full",
+    ADMIN_TOTP_SECRET: "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP",
+    // Full mode requires the primary connection to be the operator role.
+    DATABASE_URL: String(validDevelopmentEnv.DATABASE_URL).replace(
+      "letter_irl_admin_reader_development",
+      "letter_irl_admin_operator_development",
+    ),
+  });
+  const reader = scriptedPool(audits);
+  const pools = { reader, operator: null } as unknown as AdminPools;
+  const sessions = new AdminSessionStore({ idleTtlMs: 600_000, absoluteTtlMs: 6_000_000 });
+  const clientScript = { body: "(() => {})();", path: "" };
+  clientScript.path = clientScriptPath(clientScript.body);
+  const router = registerReadRoutes(new AdminRouter<RouteHandler>(), clientScript);
+  router.add(
+    "POST",
+    "/writes/invalid",
+    async () => {
+      throw new AdminFoundationError("ADMIN_INVALID_REQUEST");
+    },
+    { name: "writes.invalid", write: true },
+  );
+  let clock = Date.parse("2026-09-08T12:00:00Z");
+  const now = () => clock;
+  const denialBudget = new DenialAuditBudget({ limit: 3, windowMs: 60_000, now });
+  let server: http.Server;
+  let port = 0;
+
+  beforeAll(async () => {
+    const listener = createAdminRequestListener({
+      config,
+      pools,
+      sessions,
+      elevation: new ElevationGuard(),
+      whois: { whois: async () => ({ login: "owner@example.com", displayName: "Owner", nodeName: "laptop.tail1234.ts.net" }) },
+      audit: new AdminAuditWriter(),
+      router,
+      nodeName: HOST,
+      banner: {
+        environment: "development",
+        mode: "full",
+        marker: "development",
+        databaseRole: "letter_irl_admin_reader_development",
+        stripeKeyMode: "test",
+        stripeKeyRestricted: true,
+        letterProvider: "dummy",
+        buildCommit: "abc",
+        tag: "tag:dev-admin",
+      },
+      nav: NAV_ITEMS,
+      clientScript,
+      now,
+      denialBudget,
+    });
+    server = http.createServer(listener);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    port = (server.address() as AddressInfo).port;
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
+  function summaryOf(row: Record<string, unknown>): Record<string, unknown> {
+    return typeof row.input === "string" ? JSON.parse(row.input) : (row.input as Record<string, unknown>);
+  }
+
+  it("counts denials beyond the per-minute budget into one aggregate row instead of dropping them", async () => {
+    for (let i = 0; i < 5; i += 1) {
+      const reply = await send(port, "GET", "/", { ...identity, "tailscale-user-login": `stranger${i}@example.com` });
+      expect(reply.status).toBe(403);
+    }
+    expect(audits.filter((row) => row.action === "admin.request_denied")).toHaveLength(3);
+    expect(audits.some((row) => row.action === "admin.request_denied_burst")).toBe(false);
+
+    clock += 60_001;
+    const later = await send(port, "GET", "/", { ...identity, "tailscale-user-login": "stranger9@example.com" });
+    expect(later.status).toBe(403);
+    const burst = audits.find((row) => row.action === "admin.request_denied_burst");
+    expect(burst).toMatchObject({ actor: "aggregate@admin-panel", outcome: "denied", errorCode: "ADMIN_DENIAL_BURST" });
+    expect(summaryOf(burst!)).toMatchObject({
+      limit: 3,
+      written: 3,
+      suppressed: 2,
+      distinctActors: 2,
+      byCode: { ADMIN_FORBIDDEN: 2 },
+      windowStartedAt: "2026-09-08T12:00:00.000Z",
+    });
+    // The new window writes individually again.
+    expect(audits.filter((row) => row.action === "admin.request_denied")).toHaveLength(4);
+  });
+
+  it("audits a rate-limited authenticated request", async () => {
+    clock += 60_001;
+    let last: Reply | undefined;
+    for (let i = 0; i < 241; i += 1) last = await send(port, "GET", "/", identity);
+    expect(last?.status).toBe(429);
+    expect(last?.body).toBe("too many requests");
+    expect(audits.at(-1)).toMatchObject({
+      action: "admin.request_denied",
+      actor: "owner@example.com",
+      errorCode: "ADMIN_RATE_LIMITED",
+      outcome: "denied",
+    });
+  });
+
+  it("audits a write-route failure whatever its status", async () => {
+    clock += 60_001;
+    const first = await send(port, "GET", "/", identity);
+    const sessionId = String(first.headers["set-cookie"]).split(";")[0].split("=")[1];
+    const token = createCsrfToken(config.sessionSecret, sessionId);
+    const reply = await send(
+      port,
+      "POST",
+      "/writes/invalid",
+      {
+        ...identity,
+        cookie: `${SESSION_COOKIE_NAME}=${sessionId}`,
+        "content-type": "application/x-www-form-urlencoded",
+        "sec-fetch-site": "same-origin",
+        origin: `https://${HOST}`,
+      },
+      `_csrf=${token}`,
+    );
+    expect(reply.status).toBe(400);
+    expect(audits.at(-1)).toMatchObject({
+      action: "admin.request_failed",
+      targetId: "writes.invalid",
+      outcome: "failed",
+      errorCode: "ADMIN_INVALID_REQUEST",
+    });
   });
 });
