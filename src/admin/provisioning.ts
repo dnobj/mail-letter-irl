@@ -147,10 +147,15 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  * 063 adds admin_totp_counters (#730), the last accepted TOTP counter per
  * operator, which write elevation keeps through the operator role. The
  * operator is granted it below: provisioning MUST be re-run once after 063,
- * or elevation is refused. Required, as the newest is.
+ * or elevation is refused.
+ *
+ * 064 adds purge_expired_admin_command_records (#771), which deletes admin
+ * command runs and their operations two years after they finished. EXECUTE is
+ * revoked from PUBLIC and the roles are granted none; they hold no DELETE on
+ * either table. Nothing to re-run; required, as the newest is.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
-  "063_admin_totp_counters.sql";
+  "064_admin_command_retention.sql";
 
 export interface AdminProvisioningArguments {
   environment: "development" | "production";
