@@ -453,7 +453,7 @@ export type ErasureOutcome =
  * through the drafts, so they are deleted before the drafts are.
  */
 export async function eraseAccountWithClient(client: SqlClient, userId: string): Promise<ErasureOutcome> {
-  await client.query(`SELECT draft_id FROM letter_drafts WHERE user_id = $1 ORDER BY draft_id FOR UPDATE`, [userId]);
+  await client.query(`SELECT draft_id FROM letter_drafts WHERE user_id = $1 ORDER BY draft_id FOR NO KEY UPDATE`, [userId]);
   await client.query(`SELECT order_id FROM orders WHERE user_id = $1 ORDER BY order_id FOR UPDATE`, [userId]);
   await client.query(`SELECT letter_id FROM letters WHERE user_id = $1 ORDER BY letter_id FOR UPDATE`, [userId]);
   await client.query(

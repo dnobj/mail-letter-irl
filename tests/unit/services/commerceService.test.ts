@@ -2768,7 +2768,7 @@ describe('commerceService', () => {
     };
     mocks.query
       // The draft-type peek runs first (unlocked, advisory), then the #150
-      // send-block lookup, then the FOR UPDATE draft read.
+      // send-block lookup, then the locked draft read.
       .mockResolvedValueOnce({ rows: [{ mail_type: 'letter' }] })
       .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
       .mockResolvedValueOnce({
@@ -4047,7 +4047,7 @@ describe('commerceService', () => {
       await fulfillPaidOrder('order-1');
 
       const statements = mocks.query.mock.calls.map(([sql]) => String(sql).replace(/\s+/g, ' '));
-      const draftLock = statements.indexOf('SELECT draft_id FROM letter_drafts WHERE draft_id = $1 FOR UPDATE');
+      const draftLock = statements.indexOf('SELECT draft_id FROM letter_drafts WHERE draft_id = $1 FOR NO KEY UPDATE');
       const orderLock = statements.indexOf('SELECT * FROM orders WHERE order_id = $1 FOR UPDATE');
       expect(statements[0]).toBe('SELECT * FROM orders WHERE order_id = $1');
       expect(draftLock).toBeGreaterThan(0);
@@ -4554,7 +4554,7 @@ describe('commerceService', () => {
       await expect(mocks.transaction.mock.results[0].value).rejects.toMatchObject({ code: 'DUPLICATE_RECENT_MAIL' });
       // After the draft lock, the look for an order to reuse, and the balance.
       const check = position('duplicate mail check: draft');
-      expect(position('SELECT * FROM letter_drafts WHERE draft_id = $1 FOR UPDATE')).toBeLessThan(check);
+      expect(position('SELECT * FROM letter_drafts WHERE draft_id = $1 FOR NO KEY UPDATE')).toBeLessThan(check);
       expect(position('status = ANY($2::varchar[])')).toBeLessThan(check);
       expect(position('SELECT credits FROM users')).toBeLessThan(check);
       expect(tagged('draft')[0].params).toEqual(['draft-1', 'user-1']);
@@ -4711,7 +4711,7 @@ describe('commerceService', () => {
         expect(inserted()).toBe(false);
         expect(mocks.createJitSession).not.toHaveBeenCalled();
         // Under the draft's lock, by a plain count: no date lock is held across the payment.
-        expect(position('AS held FROM letters')).toBeGreaterThan(position('SELECT * FROM letter_drafts WHERE draft_id = $1 FOR UPDATE'));
+        expect(position('AS held FROM letters')).toBeGreaterThan(position('SELECT * FROM letter_drafts WHERE draft_id = $1 FOR NO KEY UPDATE'));
         expect(trail.some(sql => sql.includes('pg_advisory_xact_lock'))).toBe(false);
         // Its own mail date's count.
         const count = mocks.query.mock.calls.find(([sql]) => String(sql).includes('AS held FROM letters'))!;
@@ -4798,7 +4798,7 @@ describe('commerceService', () => {
         expect(inserted()).toBe(false);
         expect(mocks.createJitSession).not.toHaveBeenCalled();
         // Under the draft's lock, so no edit lands between the comparison and the order.
-        expect(position('SELECT * FROM letter_drafts WHERE draft_id = $1 FOR UPDATE')).toBeGreaterThanOrEqual(0);
+        expect(position('SELECT * FROM letter_drafts WHERE draft_id = $1 FOR NO KEY UPDATE')).toBeGreaterThanOrEqual(0);
       });
 
       it('compares the draft as its lock reads it, not as any earlier read saw it', async () => {
@@ -4806,7 +4806,7 @@ describe('commerceService', () => {
         const before = mocks.query.getMockImplementation()!;
         // Only the locked read sees the change: a comparison against anything read before the lock would pass.
         mocks.query.mockImplementation(async (sql: string, params: unknown[] = []) =>
-          sql.includes('SELECT * FROM letter_drafts WHERE draft_id = $1 FOR UPDATE')
+          sql.includes('SELECT * FROM letter_drafts WHERE draft_id = $1 FOR NO KEY UPDATE')
             ? { rows: [{ ...draftRow, body_text: 'Changed under the lock.' }] }
             : before(sql, params)
         );
