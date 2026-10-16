@@ -802,7 +802,8 @@ guess or seed it. A constant unique index enforces at most one row.
 
 Append-only actor/action/target/outcome history. UUIDs, stable error codes, session hashes, reasons, and
 three bounded JSONB summaries support later authenticated reads, reveals, and commands. A trigger rejects
-every `UPDATE`, and every `DELETE` but the retention purge's (below); public privileges are revoked and provisioned application roles receive no
+every `UPDATE` and `DELETE`; only the retention purge (below), which switches it off inside its own
+transaction, deletes. Public privileges are revoked and provisioned application roles receive no
 mutation privilege beyond `INSERT`.
 
 Indexes cover environment plus actor/time, environment plus target/time, and correlation ID. Rows are
