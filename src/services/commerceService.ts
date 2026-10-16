@@ -2563,6 +2563,8 @@ async function recordUnmatchedPartialRefund(
   const evidence = {
     eventId,
     eventType,
+    // Each event's own reason: an event folded into an open alert keeps it.
+    reason,
     stripeRefundId,
     chargeId,
     refundStatus,
@@ -2705,6 +2707,19 @@ export async function settlePackRefund(
   outcome: StripeRefundOutcome,
   source: string
 ): Promise<PackRefundStatus> {
+  // A command belongs to the Stripe refund it recorded (#730): another
+  // refund's outcome changes nothing here, whichever path reports it. The
+  // webhook records such a refund as money the app did not issue before it
+  // gets this far; the sweep can meet one only in a race with the webhook.
+  if (row.stripe_refund_id && outcome.id && outcome.id !== row.stripe_refund_id) {
+    await recordOrderEvent(client, row.order_id, source, null, null, {
+      packRefundId: row.pack_refund_id,
+      ignored: true,
+      reason: 'another_refund',
+      stripeRefundId: outcome.id
+    });
+    return row.status;
+  }
   const status = outcome.status ?? 'pending';
   if (row.status === 'letters_revoked') await resolveUnconfirmedPackRefundAlert(client, row.pack_refund_id);
   if (status === 'failed' || status === 'canceled') {
@@ -2781,7 +2796,7 @@ export async function settlePackRefund(
 export async function raisePackRefundAlertOnce(
   client: Pick<pg.PoolClient, 'query'>,
   row: Pick<PackRefundRow, 'pack_refund_id' | 'order_id'>,
-  kind: 'stripe_unconfirmed' | 'refunded_after_compensation' | 'refunded_after_withheld' | 'stripe_amount_mismatch',
+  kind: 'stripe_unconfirmed' | 'refunded_after_compensation' | 'refunded_after_withheld',
   details: Record<string, unknown>
 ): Promise<void> {
   await client.query(

@@ -674,11 +674,11 @@ compensation was withheld for a dispute or a hold, it is
 by hand. A command belongs to the one Stripe refund it records (#730): a
 second refund carrying its metadata is money the app did not issue, an
 open `stripe_partial_refund_unmatched` alert with `reason` `another_refund`,
-and the command is left as it was. A refund that names a command still
-waiting for Stripe's answer, but for another amount, is not adopted: the
-command waits, its letters still taken, with one alert (`kind`
-`stripe_amount_mismatch`), until a person settles both in Stripe and on the
-panel. `PACK_REFUND_RETRY_DELAY_SECONDS` and
+and the command is left as it was, whichever path hears of it. The sweep
+adopts only a refund for the command's own amount: one that names it for
+another amount is not its money, so the sweep goes on as if Stripe held none
+(it makes the command's refund, or compensates at the attempt limit), and
+that refund's own events open the unmatched-refund alert. `PACK_REFUND_RETRY_DELAY_SECONDS` and
 `PACK_REFUND_STRIPE_ATTEMPT_LIMIT` are not in the preflight manifest; both
 are optional.
 

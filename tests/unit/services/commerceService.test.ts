@@ -244,6 +244,7 @@ import {
   repairFulfilledPackGrant,
   requestRefund,
   revokePackLots,
+  settlePackRefund,
   runCommerceMaintenance
 } from '../../../src/services/commerceService.js';
 import { OPERATOR_NOTICES, reportToOperator } from '../../../src/services/operatorNotify.js';
@@ -3543,6 +3544,22 @@ describe('commerceService', () => {
       );
       expect(mocks.query, status).not.toHaveBeenCalledWith(expect.stringContaining('UPDATE commerce_pack_refunds'), expect.anything());
     }
+  });
+
+  it("settles a command only with the refund it recorded, whichever path reports another (#730)", async () => {
+    mocks.query.mockReset();
+    mocks.query.mockResolvedValue({ rows: [] });
+    const row = {
+      pack_refund_id: 'pr-1', order_id: 'order-1', status: 'stripe_pending', amount_cents: 250,
+      stripe_payment_intent_id: 'pi-1', stripe_refund_id: 're-first'
+    } as any;
+    for (const status of ['succeeded', 'failed']) {
+      await expect(settlePackRefund({ query: mocks.query } as any, row, { id: 're-second', status }, 'pack_refund.sweep_adopted')).resolves.toBe('stripe_pending');
+    }
+    expect(mocks.query).not.toHaveBeenCalledWith(expect.stringContaining('UPDATE commerce_pack_refunds'), expect.anything());
+    expect(mocks.query).not.toHaveBeenCalledWith(expect.stringContaining('UPDATE orders'), expect.anything());
+    // Its own refund still settles it.
+    await expect(settlePackRefund({ query: mocks.query } as any, row, { id: 're-first', status: 'succeeded' }, 'refund.updated')).resolves.toBe('succeeded');
   });
 
   it('a charge.refunded within what the app already issued is a confirmation, not an alert', async () => {

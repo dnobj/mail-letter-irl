@@ -573,8 +573,8 @@ describePostgres('proportional pack refund command', () => {
     }
   }, 60_000);
 
-  it('holds a command whose Stripe refund names it for another amount, with one alert (#730)', async () => {
-    const { userId, orderId } = await seedPackHolder({ credits: 10, amountCents: 1000 });
+  it('does not adopt a refund that names the command for another amount, and makes its own (#730)', async () => {
+    const { orderId } = await seedPackHolder({ credits: 10, amountCents: 1000 });
     const flaky = stubStripe({
       createError: Object.assign(new Error('socket hang up'), { type: 'StripeConnectionError' })
     });
@@ -582,17 +582,14 @@ describePostgres('proportional pack refund command', () => {
     const odd = { ...refundFor(flaky.created[0], 'succeeded'), amount: 900 } as Stripe.Refund;
     const sweepSeam = stubStripe({ createStatus: 'succeeded', listed: [odd] });
 
-    for (let pass = 0; pass < 2; pass += 1) {
-      const swept = await packRefund.reconcilePackRefunds(sweepSeam.seam, { retryDelaySeconds: 0 });
-      expect(swept).toMatchObject({ adopted: 0, retried: 0, compensated: 0, held: 1 });
-    }
-    expect(sweepSeam.created).toHaveLength(0);
-    expect((await commandRows(orderId))[0]).toMatchObject({ status: 'letters_revoked', stripe_refund_id: null });
-    expect((await readUser(userId)).credits).toBe(6);
-    expect((await readOrder(orderId)).amount_refunded_cents).toBe(0);
-    const held = (await alerts(orderId)).filter(alert => (alert.details as { kind?: string }).kind === 'stripe_amount_mismatch');
-    expect(held).toHaveLength(1);
-    expect(held[0].details).toMatchObject({ stripeRefundId: odd.id, stripeAmountCents: 900, amountCents: 400 });
+    const swept = await packRefund.reconcilePackRefunds(sweepSeam.seam, { retryDelaySeconds: 0 });
+    expect(swept).toMatchObject({ adopted: 0, retried: 1, compensated: 0 });
+    expect(sweepSeam.created).toHaveLength(1);
+    expect(sweepSeam.created[0]).toMatchObject({ amountCents: 400 });
+    const settled = (await commandRows(orderId))[0];
+    expect(settled.status).toBe('succeeded');
+    expect(settled.stripe_refund_id).not.toBe(odd.id);
+    expect((await readOrder(orderId)).amount_refunded_cents).toBe(400);
   }, 60_000);
 
   it('a refund that succeeds after it was compensated raises one alert (#730)', async () => {

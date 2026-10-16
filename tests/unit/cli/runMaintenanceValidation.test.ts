@@ -58,7 +58,7 @@ vi.mock('../../../src/services/retentionService.js', async importOriginal => ({
   runRetentionPreview: services.runRetentionPreview
 }));
 vi.mock('../../../src/services/packRefundService.js', () => ({
-  reconcilePackRefunds: async () => ({ retried: 0, adopted: 0, settled: 0, compensated: 0, held: 0 })
+  reconcilePackRefunds: async () => ({ retried: 0, adopted: 0, settled: 0, compensated: 0 })
 }));
 vi.mock('../../../src/services/commerceService.js', () => ({
   runCommerceMaintenance: services.runCommerceMaintenance

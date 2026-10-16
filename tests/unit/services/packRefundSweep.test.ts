@@ -72,15 +72,12 @@ describe('the pack-refund sweep asks Stripe before it compensates (#730)', () =>
     expect(stripe.createPartialPaymentRefund).not.toHaveBeenCalled();
   });
 
-  it('holds a command a refund names for another amount, with one alert, and neither adopts, compensates nor makes one (#730)', async () => {
+  it("does not adopt a refund that names the command for another amount: at the limit it is as if Stripe held none (#730)", async () => {
     const stripe = stripeSeam(async () => [{ id: 're_odd', status: 'succeeded', amount: 900, metadata: { packRefundId: 'pr-1' } }]);
     const result = await reconcilePackRefunds(stripe as never, { retryDelaySeconds: 60 });
-    expect(result).toMatchObject({ adopted: 0, compensated: 0, retried: 0, held: 1 });
+    expect(result).toMatchObject({ adopted: 0, compensated: 1 });
     expect(settlePackRefund).not.toHaveBeenCalled();
-    expect(compensatePackRefund).not.toHaveBeenCalled();
-    expect(stripe.createPartialPaymentRefund).not.toHaveBeenCalled();
-    expect(raisePackRefundAlertOnce).toHaveBeenCalledWith(client, expect.objectContaining({ pack_refund_id: 'pr-1' }), 'stripe_amount_mismatch', { stripeRefundId: 're_odd', stripeAmountCents: 900, amountCents: 400 });
-    expect(client.query).toHaveBeenCalledWith(expect.stringContaining('SET updated_at = NOW()'), ['pr-1']);
+    expect(compensatePackRefund).toHaveBeenCalledWith(client, expect.objectContaining({ pack_refund_id: 'pr-1' }), expect.objectContaining({ lastErrorCode: 'PACK_REFUND_NOT_AT_STRIPE' }));
   });
 
   it('adopts the refund for its amount when another names it too (#730)', async () => {
@@ -89,7 +86,7 @@ describe('the pack-refund sweep asks Stripe before it compensates (#730)', () =>
       { id: 're_ours', status: 'succeeded', amount: 400, metadata: { packRefundId: 'pr-1' } }
     ]);
     const result = await reconcilePackRefunds(stripe as never, { retryDelaySeconds: 60 });
-    expect(result).toMatchObject({ adopted: 1, held: 0 });
+    expect(result).toMatchObject({ adopted: 1, compensated: 0 });
     expect(settlePackRefund).toHaveBeenCalledWith(client, expect.anything(), expect.objectContaining({ id: 're_ours' }), 'pack_refund.sweep_adopted');
   });
 

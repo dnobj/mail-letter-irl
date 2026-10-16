@@ -163,8 +163,6 @@ export interface PackRefundSweepResult {
   adopted: number;
   settled: number;
   compensated: number;
-  /** Named by a refund for another amount, and held for a person (#730). */
-  held: number;
 }
 
 function hash(value: string): string {
@@ -559,7 +557,7 @@ export async function reconcilePackRefunds(
   stripeRefunds: PackRefundOperations = livePackRefundOperations,
   options: { retryDelaySeconds?: number } = {}
 ): Promise<PackRefundSweepResult> {
-  const result: PackRefundSweepResult = { retried: 0, adopted: 0, settled: 0, compensated: 0, held: 0 };
+  const result: PackRefundSweepResult = { retried: 0, adopted: 0, settled: 0, compensated: 0 };
   const delaySeconds =
     options.retryDelaySeconds ?? positiveIntegerSetting('PACK_REFUND_RETRY_DELAY_SECONDS', 300, 60);
   const attemptLimit = positiveIntegerSetting('PACK_REFUND_STRIPE_ATTEMPT_LIMIT', 5, 1);
@@ -606,30 +604,15 @@ export async function reconcilePackRefunds(
     }
     try {
       // This command's refund names it and is for its amount (#730). One that
-      // names it for another amount is not its money: it is held for a person
-      // (one alert), neither adopted, made again, nor compensated.
-      const named = refunds.filter(refund => refund.metadata?.packRefundId === row.pack_refund_id);
-      const found = named.find(refund => refund.amount === row.amount_cents);
+      // names it for another amount is not its money: the sweep goes on as if
+      // Stripe held none, and that refund's own webhook opens the alert for
+      // money the app did not issue.
+      const found = refunds.find(
+        refund => refund.metadata?.packRefundId === row.pack_refund_id && refund.amount === row.amount_cents
+      );
       if (found) {
         await finalizeWithStripe(row, found, 'pack_refund.sweep_adopted');
         result.adopted += 1;
-      } else if (named.length > 0) {
-        const other = named[0];
-        await transaction(async client => {
-          await client.query('SELECT order_id FROM orders WHERE order_id = $1 FOR UPDATE', [row.order_id]);
-          const locked = await lockPackRefund(client, row.pack_refund_id);
-          if (!locked || locked.status !== 'letters_revoked') return;
-          await client.query(
-            `UPDATE commerce_pack_refunds SET updated_at = NOW() WHERE pack_refund_id = $1`,
-            [row.pack_refund_id]
-          );
-          await raisePackRefundAlertOnce(client, locked, 'stripe_amount_mismatch', {
-            stripeRefundId: other.id,
-            stripeAmountCents: other.amount,
-            amountCents: locked.amount_cents
-          });
-        });
-        result.held += 1;
       } else if (atLimit) {
         const outcome = await transaction(async client => {
           await client.query('SELECT order_id FROM orders WHERE order_id = $1 FOR UPDATE', [row.order_id]);
