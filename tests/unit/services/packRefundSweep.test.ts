@@ -15,6 +15,7 @@ import {
   compensatePackRefund,
   lockPackRefund,
   raisePackRefundAlertOnce,
+  recordOrderEvent,
   settlePackRefund,
   type PackRefundRow
 } from '../../../src/services/commerceService.js';
@@ -78,6 +79,12 @@ describe('the pack-refund sweep asks Stripe before it compensates (#730)', () =>
     expect(result).toMatchObject({ adopted: 0, compensated: 1 });
     expect(settlePackRefund).not.toHaveBeenCalled();
     expect(compensatePackRefund).toHaveBeenCalledWith(client, expect.objectContaining({ pack_refund_id: 'pr-1' }), expect.objectContaining({ lastErrorCode: 'PACK_REFUND_NOT_AT_STRIPE' }));
+    // The order says Stripe held a refund naming it, passed over.
+    expect(recordOrderEvent).toHaveBeenCalledWith(client, 'order-1', 'pack_refund.sweep_passed_over', null, null, {
+      packRefundId: 'pr-1',
+      amountCents: 400,
+      refunds: [{ stripeRefundId: 're_odd', amountCents: 900, status: 'succeeded' }]
+    });
   });
 
   it('adopts the refund for its amount when another names it too (#730)', async () => {

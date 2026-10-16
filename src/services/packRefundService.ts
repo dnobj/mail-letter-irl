@@ -610,6 +610,21 @@ export async function reconcilePackRefunds(
       const found = refunds.find(
         refund => refund.metadata?.packRefundId === row.pack_refund_id && refund.amount === row.amount_cents
       );
+      const passedOver = refunds.filter(
+        refund => refund.metadata?.packRefundId === row.pack_refund_id && refund.amount !== row.amount_cents
+      );
+      if (passedOver.length > 0) {
+        // On the order, so whoever reads the compensation or the retry that
+        // follows sees Stripe did hold a refund naming this command.
+        await transaction(async client => {
+          await client.query('SELECT order_id FROM orders WHERE order_id = $1 FOR UPDATE', [row.order_id]);
+          await recordOrderEvent(client, row.order_id, 'pack_refund.sweep_passed_over', null, null, {
+            packRefundId: row.pack_refund_id,
+            amountCents: row.amount_cents,
+            refunds: passedOver.map(refund => ({ stripeRefundId: refund.id, amountCents: refund.amount, status: refund.status }))
+          });
+        });
+      }
       if (found) {
         await finalizeWithStripe(row, found, 'pack_refund.sweep_adopted');
         result.adopted += 1;
