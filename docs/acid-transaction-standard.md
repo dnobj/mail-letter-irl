@@ -145,7 +145,8 @@ ledger or entitlement statement.
 
 Foreign keys take implicit locks too. Inserting a row, changing a foreign-key column, or updating a
 row the transaction already changed takes a share lock (`FOR KEY SHARE`) on each row its foreign keys
-reference, held to the end of the transaction and taken after the row itself. Only `FOR UPDATE`, a
+reference, held to the end of the transaction (or of the savepoint it was taken in) and taken after
+the row itself. Only `FOR UPDATE`, a
 `DELETE`, or an `UPDATE` that changes a key blocks it. Account for these locks when you add or move a
 lock. The code handles them in these places:
 
@@ -156,15 +157,15 @@ lock. The code handles them in these places:
   every path that writes an order's `draft_id` takes the draft's lock first; `prepareJitOrder` is the
   only one.
 - **A send takes the account before inserting its letter** (#730). The letter's insert share-locks
-  the account; taken first, it would make two sends from one account each wait for the other's
-  share lock to take the account `FOR UPDATE`.
+  the account; inserted first, the letter would make two sends from one account each wait for the
+  other's share lock to take the account `FOR UPDATE`.
 - **A payment's fulfilment takes the account before its second update of the order** (#288), for
   the same reason.
 - **The account stays `FOR UPDATE`.** It is what makes a checkout's order insert wait while an
   account is erased (#449). One crossing is accepted: a draft made after an erasure's first statement
-  is not held by the erasure, so a send or checkout holding that draft can meet the erasure at the
-  account row. PostgreSQL fails one, and the erasure is tried again at the next run
-  (`src/services/accountErasureService.ts`).
+  is not held by the erasure, so a send, checkout or draft edit holding that draft can meet the
+  erasure at the account row. PostgreSQL fails one of the two; an erasure failed that way is tried
+  again at the next run (`src/services/adminOperationsQueue.ts`).
 
 Within the mail graph, take the funding order lock from `lockFundingGraph` and then address that
 order by its `order_id`. Re-deriving the order from `letter_id` in a later `UPDATE ... WHERE
