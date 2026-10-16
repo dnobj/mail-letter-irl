@@ -45,6 +45,7 @@ RUN test -f dist/mcp/httpServer.js && test -f dist/cli/runMaintenance.js && test
   && test -f dist/services/signatureAnalysisWorker.js \
   && ls db/migrations/*.sql > /dev/null && ls widgets/*.html > /dev/null && ls widgets/shared/*.js > /dev/null \
   && ls assets/fonts/*.ttf > /dev/null
+RUN chown node /app
 USER node
 # The base image's entrypoint (docker-entrypoint.sh) stays: it runs a command
 # it is given with exec, so Node, or npm for an npm script, is the first
