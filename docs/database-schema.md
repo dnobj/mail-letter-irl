@@ -805,8 +805,9 @@ Indexes cover environment plus actor/time, environment plus target/time, and cor
 kept for 2 years after the action they record and are exempt from account erasure for that period
 (#395). The daily `audit-retention-sweep` deletes them once `occurred_at` is two years past (#398),
 through migration 062's `purge_expired_audit_records(batch_size)`: inside its own transaction it
-switches each audit table's append-only trigger off, deletes only rows past their two years (oldest
-first, at most `batch_size` from each), and switches it back on. Only the owner can run it. The triggers
+locks both audit tables against writers (waiting at most 5 seconds), switches each append-only trigger
+off, deletes only rows due (two days before their two years are up, so a late run stays inside the
+policy; oldest first, at most `batch_size` from each), and switches it back on. Only the owner can run it. The triggers
 themselves are unchanged and refuse every other `UPDATE` and `DELETE`. Application rollback retains all
 rows.
 

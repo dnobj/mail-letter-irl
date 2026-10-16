@@ -31,8 +31,15 @@ function databaseUrlForSchema(baseUrl: string, schema: string): string {
 
 const HEX = 'a'.repeat(64);
 /** Fixed SQL clocks around the two years; two days of margin either side. */
-const EXPIRED = `NOW() - INTERVAL '2 years' - INTERVAL '2 days'`;
-const NOT_YET = `NOW() - INTERVAL '2 years' + INTERVAL '2 days'`;
+/**
+ * Fixed SQL clocks around the due date: two days before the two years are up,
+ * so a sweep that runs late still deletes inside "up to 2 years". A day of
+ * margin either side of it.
+ */
+const EXPIRED = `NOW() - INTERVAL '2 years' + INTERVAL '1 day'`;
+const NOT_YET = `NOW() - INTERVAL '2 years' + INTERVAL '3 days'`;
+const COMMERCE_DUE = `NOW() + INTERVAL '1 day'`;
+const COMMERCE_NOT_YET = `NOW() + INTERVAL '3 days'`;
 
 describePostgres('operator audit retention', () => {
   let adminPool: pg.Pool;
@@ -109,8 +116,8 @@ describePostgres('operator audit retention', () => {
   it('deletes only records past their two years, from both tables', async () => {
     await adminRow(EXPIRED);
     const keptAdmin = [await adminRow(NOT_YET), await adminRow('NOW()')].sort();
-    await commerceRow(`NOW() - INTERVAL '1 day'`);
-    const keptCommerce = [await commerceRow(`NOW() + INTERVAL '1 day'`), await commerceRow(`NOW() + INTERVAL '2 years'`)].sort();
+    await commerceRow(COMMERCE_DUE);
+    const keptCommerce = [await commerceRow(COMMERCE_NOT_YET), await commerceRow(`NOW() + INTERVAL '2 years'`)].sort();
 
     await expect(service.purgeExpiredAuditRecords()).resolves.toEqual({ adminDeleted: 1, commerceDeleted: 1 });
     expect(await adminIds()).toEqual(keptAdmin);
@@ -119,17 +126,47 @@ describePostgres('operator audit retention', () => {
     await expect(service.purgeExpiredAuditRecords()).resolves.toEqual({ adminDeleted: 0, commerceDeleted: 0 });
   });
 
-  it('works in batches, a bounded number per run', async () => {
-    for (let i = 0; i < 3; i += 1) await adminRow(EXPIRED);
+  it('works in batches, oldest first, a bounded number per run', async () => {
+    const oldest = await adminRow(`NOW() - INTERVAL '2 years' - INTERVAL '30 days'`);
+    const middle = await adminRow(`NOW() - INTERVAL '2 years' - INTERVAL '20 days'`);
+    const newest = await adminRow(`NOW() - INTERVAL '2 years' - INTERVAL '10 days'`);
     await expect(service.purgeExpiredAuditRecords(1, 2)).resolves.toEqual({ adminDeleted: 2, commerceDeleted: 0 });
-    expect(await adminIds()).toHaveLength(1);
+    expect(await adminIds()).toEqual([newest]);
+    expect([oldest, middle]).not.toContain(newest);
     await expect(service.purgeExpiredAuditRecords(1, 2)).resolves.toEqual({ adminDeleted: 1, commerceDeleted: 0 });
     expect(await adminIds()).toHaveLength(0);
   });
 
+  it('gives up after a few seconds when a writer holds a table, and leaves it as it was (#398 review)', async () => {
+    const due = await adminRow(EXPIRED);
+    const writer = await pool.connect();
+    try {
+      await writer.query('BEGIN');
+      // An open writer on the commerce table: the purge must not wait on it for ever.
+      await writer.query(
+        `INSERT INTO commerce_operator_audit_events
+           (idempotency_key_hash, actor_subject_hash, operation, target_type,
+            target_reference_hash, reason_code, before_state, after_state)
+         VALUES (encode(sha256(gen_random_uuid()::text::bytea), 'hex'), $1, 'commerce_alert_transition',
+                 'commerce_alert', $1, 'operator_acknowledged', '{}', '{}')`,
+        [HEX]
+      );
+      const started = Date.now();
+      await expect(service.purgeExpiredAuditRecords()).rejects.toMatchObject({ code: '55P03' });
+      expect(Date.now() - started).toBeLessThan(15_000);
+      // Nothing was deleted, and the admin table's writers were not held.
+      expect(await adminIds()).toEqual([due]);
+      await expect(adminRow('NOW()')).resolves.toBeTruthy();
+    } finally {
+      await writer.query('ROLLBACK').catch(() => undefined);
+      writer.release();
+    }
+    await expect(service.purgeExpiredAuditRecords()).resolves.toEqual({ adminDeleted: 1, commerceDeleted: 0 });
+  }, 30_000);
+
   it('leaves the triggers refusing every other delete and every update, before and after a purge', async () => {
     const oldAdmin = await adminRow(EXPIRED);
-    const oldCommerce = await commerceRow(`NOW() - INTERVAL '1 day'`);
+    const oldCommerce = await commerceRow(COMMERCE_DUE);
     const refusals = async () => {
       await expect(pool.query('DELETE FROM admin_audit_events WHERE id = $1', [oldAdmin]))
         .rejects.toMatchObject({ code: '55000', message: 'admin_audit_events is append-only' });
@@ -163,8 +200,10 @@ describePostgres('operator audit retention', () => {
         WHERE oid = to_regprocedure('purge_expired_audit_records(integer)')`
     );
     expect(acl.rows).toHaveLength(1);
-    // An ACL with no PUBLIC entry ("=X/...") grants execute to the owner only.
-    expect(acl.rows[0].proacl ?? '').not.toMatch(/(^|[{,])=X/);
+    // A NULL ACL is the default, which grants PUBLIC execute: it must have been
+    // set, and without a PUBLIC entry ("=X/..."), so only the owner may run it.
+    expect(acl.rows[0].proacl).not.toBeNull();
+    expect(acl.rows[0].proacl).not.toMatch(/(^|[{,])=X/);
     await expect(pool.query('SELECT * FROM purge_expired_audit_records(0)')).rejects.toThrow(/positive integer/);
   });
 });

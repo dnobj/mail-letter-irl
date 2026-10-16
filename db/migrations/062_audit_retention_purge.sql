@@ -5,15 +5,24 @@
 -- a BEFORE UPDATE OR DELETE trigger that refuses every change, the owner's
 -- included. Those triggers stay exactly as they are: this adds one function,
 -- purge_expired_audit_records(batch_size), that in its caller's transaction
--- switches each trigger off, deletes only rows past their two years (oldest
--- first, at most batch_size from each table), and switches it back on. ALTER
--- TABLE holds the table's ACCESS EXCLUSIVE lock to the end of that transaction,
--- so no other session can change a row while the trigger is off, and an error
--- rolls the switch back with the deletes.
+-- switches each trigger off, deletes only rows due (oldest first, at most
+-- batch_size from each table), and switches it back on.
 --
--- The two years: admin_audit_events.occurred_at plus two years (it has no
--- expiry column); commerce_operator_audit_events.retention_expires_at (023's
--- default, two years after the row).
+-- Locks: ALTER TABLE ... DISABLE TRIGGER takes SHARE ROW EXCLUSIVE, which
+-- blocks every writer (not readers) to the end of the caller's transaction,
+-- so no other session can change a row while the trigger is off, and an
+-- error rolls the switch back with the deletes. Both tables are locked first,
+-- in one statement, so the function never holds one while waiting for the
+-- other; and it waits at most 5 seconds for them (lock_timeout), so a writer
+-- left open elsewhere makes this run fail and the next one try again, rather
+-- than holding the admin panel's audit inserts, or the maintenance run, behind
+-- it.
+--
+-- Due: two days before the two years are up, so a daily sweep that runs late
+-- still deletes inside the policy's "up to 2 years" (docs/privacy-policy.md):
+-- admin_audit_events.occurred_at plus two years (it has no expiry column);
+-- commerce_operator_audit_events.retention_expires_at (023's default, two
+-- years after the row).
 --
 -- Why a function and not a change to the triggers: no migration after 022
 -- changes 022's objects, so that a database which applied 022 after the later
@@ -30,17 +39,24 @@ AS $$
 DECLARE
   admin_count integer := 0;
   commerce_count integer := 0;
+  has_admin boolean := to_regclass('admin_audit_events') IS NOT NULL;
+  has_commerce boolean := to_regclass('commerce_operator_audit_events') IS NOT NULL;
 BEGIN
   IF batch_size IS NULL OR batch_size < 1 THEN
     RAISE EXCEPTION 'batch_size must be a positive integer';
   END IF;
 
-  IF to_regclass('admin_audit_events') IS NOT NULL THEN
+  PERFORM set_config('lock_timeout', '5s', true);
+  IF has_admin AND has_commerce THEN
+    LOCK TABLE commerce_operator_audit_events, admin_audit_events IN SHARE ROW EXCLUSIVE MODE;
+  END IF;
+
+  IF has_admin THEN
     ALTER TABLE admin_audit_events DISABLE TRIGGER admin_audit_events_append_only;
     DELETE FROM admin_audit_events
      WHERE id IN (
        SELECT id FROM admin_audit_events
-        WHERE occurred_at < NOW() - INTERVAL '2 years'
+        WHERE occurred_at < NOW() - INTERVAL '2 years' + INTERVAL '2 days'
         ORDER BY occurred_at
         LIMIT batch_size
      );
@@ -48,12 +64,12 @@ BEGIN
     ALTER TABLE admin_audit_events ENABLE TRIGGER admin_audit_events_append_only;
   END IF;
 
-  IF to_regclass('commerce_operator_audit_events') IS NOT NULL THEN
+  IF has_commerce THEN
     ALTER TABLE commerce_operator_audit_events DISABLE TRIGGER commerce_operator_audit_events_append_only;
     DELETE FROM commerce_operator_audit_events
      WHERE audit_event_id IN (
        SELECT audit_event_id FROM commerce_operator_audit_events
-        WHERE retention_expires_at < NOW()
+        WHERE retention_expires_at < NOW() + INTERVAL '2 days'
         ORDER BY retention_expires_at
         LIMIT batch_size
      );
@@ -68,4 +84,4 @@ $$;
 REVOKE ALL ON FUNCTION purge_expired_audit_records(integer) FROM PUBLIC;
 
 COMMENT ON FUNCTION purge_expired_audit_records(integer) IS
-  'Deletes operator audit records past their two years (#398), at most batch_size from each table; the append-only triggers are off only inside the caller''s transaction.';
+  'Deletes operator audit records due under the 2-year policy (#398), at most batch_size from each table; the append-only triggers are off only inside the caller''s transaction.';

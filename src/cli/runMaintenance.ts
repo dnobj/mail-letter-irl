@@ -265,9 +265,11 @@ async function runFeatureRequestsSweep(): Promise<void> {
 /**
  * Delete operator audit records 2 years after the action they record (#398).
  *
- * Same shape as runFeatureRequestsSweep, for the same reasons. Once a day:
- * a record expires to the second two years on, and a day's lag is inside what
- * the privacy policy states ("up to 2 years"); nothing expires before July 2028.
+ * Same shape as runFeatureRequestsSweep, for the same reasons. Once a day: the
+ * function deletes records two days before their two years are up, so a run a
+ * day late still deletes inside the privacy policy's "up to 2 years"; nothing
+ * is due before July 2028. A writer holding an audit table makes the function
+ * give up after 5 seconds, and the next run tries again.
  */
 const AUDIT_RETENTION_SWEEP_INTERVAL_MS = 23 * 60 * 60 * 1000;
 
