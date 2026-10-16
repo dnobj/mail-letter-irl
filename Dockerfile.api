@@ -34,7 +34,7 @@ ENV HOME=/home/node
 # Owned by root and readable by all: the node user reads them, and cannot
 # change them.
 COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/dist ./dist
+COPY --from=build --chown=node:node /app/dist ./dist
 COPY package.json package-lock.json ./
 COPY db/migrations ./db/migrations
 COPY widgets ./widgets
