@@ -677,7 +677,7 @@ async function lockChangeableDraft(
   now: Date
 ): Promise<DraftScheduleRefusal | null> {
   const locked = await client.query<Pick<LetterDraft, 'status' | 'expires_at' | 'redacted_at'>>(
-    'SELECT status, expires_at, redacted_at FROM letter_drafts WHERE draft_id = $1 AND user_id = $2 FOR UPDATE',
+    'SELECT status, expires_at, redacted_at FROM letter_drafts WHERE draft_id = $1 AND user_id = $2 FOR NO KEY UPDATE',
     [draftId, userId]
   );
   const draft = locked.rows[0];

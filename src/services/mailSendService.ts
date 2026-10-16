@@ -158,7 +158,7 @@ export async function createMailOrderFromDraftWithClient(
 ): Promise<CreateMailOrderResult> {
   const funding = params.funding || { type: 'prepaid_balance' as const };
   const draftResult = await client.query<MailDraftRow>(
-    'SELECT * FROM letter_drafts WHERE draft_id = $1 FOR UPDATE',
+    'SELECT * FROM letter_drafts WHERE draft_id = $1 FOR NO KEY UPDATE',
     [params.draftId]
   );
   const draft = draftResult.rows[0];
@@ -343,7 +343,7 @@ export async function createMailOrderFromDraftWithClient(
     // the date, so two sends cannot both take its last place. The lock comes
     // after the draft's and its orders', and before the account's, which the
     // deduction and the gift take below; the paid fulfilment, which holds the
-    // account first, takes none. Pay & Send is not refused for a full date: it
+    // account before it would get here, takes none. Pay & Send is not refused for a full date: it
     // has been charged, and its checkout refused one before the charge, so a
     // date filled since takes it over the cap.
     if (schedule) {

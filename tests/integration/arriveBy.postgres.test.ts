@@ -390,7 +390,7 @@ describePostgres('arrive-by (migration 040, #535)', () => {
       for (let attempt = 0; attempt < 50 && !waiting; attempt += 1) {
         const blocked = await pool.query(
           `SELECT count(*)::int AS n FROM pg_stat_activity
-           WHERE wait_event_type = 'Lock' AND query LIKE '%FROM letter_drafts WHERE draft_id = $1 AND user_id = $2 FOR UPDATE%'`
+           WHERE wait_event_type = 'Lock' AND query LIKE '%FROM letter_drafts WHERE draft_id = $1 AND user_id = $2 FOR NO KEY UPDATE%'`
         );
         waiting = blocked.rows[0].n > 0;
         if (!waiting) await new Promise(resolve => setTimeout(resolve, 100));

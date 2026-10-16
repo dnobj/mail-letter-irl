@@ -133,12 +133,15 @@ letter_drafts -> orders -> letters -> letter_jobs -> image_generation_reservatio
 
 A draft comes before its orders (#730): a prepaid send, a checkout's preparation, a payment's
 fulfilment and its recovery, and the account erasure all lock the draft (or the account's drafts)
-before any order.
+before any order, and lock it `FOR NO KEY UPDATE`: a foreign-key check's share lock on the draft,
+which PostgreSQL takes when a transaction updates the same order twice, is then not blocked by it.
 
 `users` is the account aggregate root: holding it first is what makes the ledger and entitlement
 rows below it safe. Note that a bare `UPDATE` takes the same row lock as `SELECT ... FOR UPDATE`,
 so an unguarded `UPDATE credit_ledger` or `UPDATE image_entitlements` counts as taking that lock
-first and inverts the order. Call `lockAccountForBalanceChange` (`src/services/accountLock.ts`)
+first and inverts the order. A second `UPDATE` of a row the transaction already changed re-checks its
+foreign keys, a share lock on each referenced row (the order's draft, the order's account), taken
+after the row itself. Call `lockAccountForBalanceChange` (`src/services/accountLock.ts`)
 before the first ledger or entitlement statement.
 
 Within the mail graph, take the funding order lock from `lockFundingGraph` and then address that
