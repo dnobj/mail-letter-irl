@@ -79,8 +79,8 @@
   (migration 062), which only the database owner can run. It switches the append-only triggers off
   only inside its own transaction. The triggers refuse every other change. The admin panel's
   command runs and their queued operations go on the same schedule, after the audit rows that name
-  them (#771, `purge_expired_admin_command_records`, migration 064), never while their work is
-  unfinished.
+  them (#771, `purge_expired_admin_command_records`, migration 064), never while a queued operation
+  is unfinished; a command left unfinished goes two years after it was requested.
 
 ## Future Compliance Hooks
 

@@ -358,26 +358,29 @@ describePostgres('operator audit retention', () => {
   // #771: the admin panel's command runs and their operations, migration 064.
 
   /** A command run in `status`, finished at `when` (or, unfinished, requested then). */
-  async function commandRun(when: string, status: 'succeeded' | 'failed' | 'running' = 'succeeded'): Promise<string> {
-    const finished = status !== 'running';
+  async function commandRun(
+    when: string,
+    status: 'succeeded' | 'failed' | 'rejected' | 'pending' | 'running' = 'succeeded'
+  ): Promise<string> {
+    const finished = status !== 'running' && status !== 'pending';
     const result = await pool.query<{ id: string }>(
       `INSERT INTO admin_command_runs
          (idempotency_key, actor_sid, environment, action, target_type, target_id, preview_digest,
           status, requested_at, started_at, completed_at, correlation_id, error_code)
        VALUES (gen_random_uuid()::text, 'operator', 'development', 'account.erase', 'account', 'auth0|someone', $1,
-               $2, ${when}, ${when}, ${finished ? when : 'NULL'}, gen_random_uuid(), $3)
+               $2, ${when}, ${status === 'pending' ? 'NULL' : when}, ${finished ? when : 'NULL'}, gen_random_uuid(), $3)
        RETURNING id`,
-      [HEX, status, status === 'failed' ? 'TEST_FAILED' : null]
+      [HEX, status, status === 'failed' || status === 'rejected' ? 'TEST_FAILED' : null]
     );
     return result.rows[0].id;
   }
 
   /** The run's queued operation, in `status`, finished at `when` when it has. */
-  async function operation(commandId: string, status: 'succeeded' | 'pending', when = 'NULL'): Promise<void> {
+  async function operation(commandId: string, status: 'succeeded' | 'failed' | 'pending', when = 'NULL'): Promise<void> {
     await pool.query(
-      `INSERT INTO admin_operations (command_id, operation_type, environment, payload_json, status, completed_at)
-       VALUES ($1, 'account.erase', 'development', '{"userId":"auth0|someone"}', $2, ${status === 'pending' ? 'NULL' : when})`,
-      [commandId, status]
+      `INSERT INTO admin_operations (command_id, operation_type, environment, payload_json, status, completed_at, error_code)
+       VALUES ($1, 'account.erase', 'development', '{"userId":"auth0|someone"}', $2, ${status === 'pending' ? 'NULL' : when}, $3)`,
+      [commandId, status, status === 'failed' ? 'ACCOUNT_ERASURE_ERROR' : null]
     );
   }
 
@@ -389,30 +392,35 @@ describePostgres('operator audit retention', () => {
     return (await pool.query<{ n: number }>('SELECT COUNT(*)::int AS n FROM admin_operations')).rows[0].n;
   }
 
-  it('deletes finished command runs and their operations once due, and keeps any whose work is not done or not due (#771)', async () => {
+  it('deletes command runs, finished or long left unfinished, and their operations once due, and keeps any whose work is not done or not due (#771)', async () => {
     const due = await commandRun(EXPIRED);
     await operation(due, 'succeeded', EXPIRED);
     const dueFailed = await commandRun(EXPIRED, 'failed');
+    await operation(dueFailed, 'failed', EXPIRED);
+    const dueRejected = await commandRun(EXPIRED, 'rejected');
+    // Left unfinished two years ago: no session can finish it now.
+    const stale = [await commandRun(EXPIRED, 'running'), await commandRun(EXPIRED, 'pending')];
     const kept = [
       await commandRun(NOT_YET),
       await commandRun('NOW()'),
-      // Unfinished, however old.
-      await commandRun(EXPIRED, 'running'),
+      await commandRun(NOT_YET, 'running'),
     ];
     const pendingWork = await commandRun(EXPIRED);
     await operation(pendingWork, 'pending');
+    // Unfinished, and its work not done either.
+    const stalePendingWork = await commandRun(EXPIRED, 'running');
+    await operation(stalePendingWork, 'pending');
     // Its operation finished later, and is not due yet.
     const laterWork = await commandRun(EXPIRED);
     await operation(laterWork, 'succeeded', NOT_YET);
-    kept.push(pendingWork, laterWork);
+    kept.push(pendingWork, stalePendingWork, laterWork);
 
     await expect(service.purgeExpiredAuditRecords()).resolves.toEqual({
-      adminDeleted: 0, commerceDeleted: 0, commandRunsDeleted: 2, operationsDeleted: 1
+      adminDeleted: 0, commerceDeleted: 0, commandRunsDeleted: 5, operationsDeleted: 2
     });
     expect(await runIds()).toEqual(kept.sort());
-    expect(await runIds()).not.toContain(due);
-    expect(await runIds()).not.toContain(dueFailed);
-    expect(await operationCount()).toBe(2);
+    for (const gone of [due, dueFailed, dueRejected, ...stale]) expect(await runIds()).not.toContain(gone);
+    expect(await operationCount()).toBe(3);
     await expect(service.purgeExpiredAuditRecords()).resolves.toMatchObject({ commandRunsDeleted: 0, operationsDeleted: 0 });
   });
 
@@ -447,13 +455,24 @@ describePostgres('operator audit retention', () => {
       await holder.query('SELECT 1 FROM admin_command_runs WHERE id = $1 FOR UPDATE', [held]);
       await expect(service.purgeExpiredAuditRecords()).resolves.toMatchObject({ commandRunsDeleted: 1 });
       expect(await runIds()).toEqual([held]);
+      expect(await runIds()).not.toContain(free);
     } finally {
       await holder.query('ROLLBACK').catch(() => undefined);
       holder.release();
     }
     await expect(service.purgeExpiredAuditRecords()).resolves.toMatchObject({ commandRunsDeleted: 1 });
     expect(await runIds()).toEqual([]);
-    expect(free).toBeTruthy();
+  });
+
+  it('deletes command runs in batches, oldest first (#771)', async () => {
+    // Inserted newest first, so the order they went in is not their age.
+    const newest = await commandRun(`NOW() - INTERVAL '2 years' - INTERVAL '10 days'`);
+    await commandRun(`NOW() - INTERVAL '2 years' - INTERVAL '30 days'`);
+    await commandRun(`NOW() - INTERVAL '2 years' - INTERVAL '20 days'`);
+    await expect(service.purgeExpiredAuditRecords(1, 2)).resolves.toMatchObject({ commandRunsDeleted: 2 });
+    expect(await runIds()).toEqual([newest]);
+    await expect(service.purgeExpiredAuditRecords(1, 2)).resolves.toMatchObject({ commandRunsDeleted: 1 });
+    expect(await runIds()).toEqual([]);
   });
 
   it("is the owner's alone too, and refuses a batch below one (#771)", async () => {

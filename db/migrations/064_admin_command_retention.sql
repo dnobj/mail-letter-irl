@@ -10,25 +10,29 @@
 -- (batch_size) deletes, in its caller's transaction, at most batch_size runs
 -- that are due, oldest first, and their operations first.
 --
--- Due: a run that finished (succeeded, failed or rejected) two days before two
--- years ago, as 062 counts, so a daily sweep that runs late still deletes
--- inside the policy. A run still pending or running, or with an operation
--- still pending or processing, is never deleted: its work is not done. One
--- whose operation finished later (an erasure the next maintenance run carried
--- out) waits until the operation is due too. Nor is
--- a run an audit row still names (admin_audit_events.command_id is ON DELETE
--- RESTRICT): 062 deletes those rows on the same schedule, and the run, which
--- finished after them, goes on a later pass.
+-- Due: two days before two years after the run finished (succeeded, failed
+-- or rejected), as 062 counts, so a daily sweep that runs late still deletes
+-- inside the policy. A run left pending or running (a command whose process
+-- stopped between its provider call and its completion) is due two years
+-- after it was requested: by then no session, CSRF token or elevation that
+-- could finish it is left, and it may be the only record of the action. Never
+-- deleted: a run with an operation still pending or processing, whose work is
+-- not done; one whose operation finished later (an erasure the next
+-- maintenance run carried out), until the operation is due too; and a run an
+-- audit row still names (admin_audit_events.command_id is ON DELETE
+-- RESTRICT), which 062 deletes on the same schedule, the run going on the
+-- same or a later pass.
 --
 -- Locks: the due runs are taken FOR UPDATE SKIP LOCKED, so a run anything else
 -- holds is left for the next pass and this waits on nothing; lock_timeout
--- bounds any wait at 5 seconds all the same. A finished run is
--- not written again (the runner writes a run only until it finishes, and the
--- operations queue claims only pending operations).
+-- bounds any wait at 5 seconds all the same. A finished run is not written
+-- again (the runner writes a run only until it finishes, and the operations
+-- queue claims only pending operations).
 --
 -- Replay: admin_command_runs is what stops a panel confirmation from running
 -- twice (UNIQUE (environment, idempotency_key)). A key freed here belongs to a
--- confirmation two years old, whose preview expired long before.
+-- confirmation two years old, which cannot be sent again: a confirmation needs
+-- the session's CSRF token and a live elevation, both long gone.
 --
 -- Like 062: the tables are named only inside the body, resolved when it runs,
 -- and a missing table is skipped, so the function is created the same way in
@@ -62,8 +66,10 @@ BEGIN
     FROM (
       SELECT r.id
         FROM admin_command_runs r
-       WHERE r.status IN ('succeeded', 'failed', 'rejected')
-         AND r.completed_at < NOW() - INTERVAL '2 years' + INTERVAL '2 days'
+       WHERE ((r.status IN ('succeeded', 'failed', 'rejected')
+               AND r.completed_at < NOW() - INTERVAL '2 years' + INTERVAL '2 days')
+              OR (r.status IN ('pending', 'running')
+               AND r.requested_at < NOW() - INTERVAL '2 years' + INTERVAL '2 days'))
          AND NOT EXISTS (SELECT 1 FROM admin_audit_events a WHERE a.command_id = r.id)
          AND NOT EXISTS (
            SELECT 1 FROM admin_operations o
@@ -71,7 +77,7 @@ BEGIN
               AND (o.status IN ('pending', 'processing')
                    OR o.completed_at >= NOW() - INTERVAL '2 years' + INTERVAL '2 days')
          )
-       ORDER BY r.completed_at
+       ORDER BY COALESCE(r.completed_at, r.requested_at)
        LIMIT batch_size
        FOR UPDATE OF r SKIP LOCKED
     ) AS due;
@@ -94,4 +100,4 @@ $$;
 REVOKE ALL ON FUNCTION purge_expired_admin_command_records(integer) FROM PUBLIC;
 
 COMMENT ON FUNCTION purge_expired_admin_command_records(integer) IS
-  'Deletes admin command runs, and their operations, due under the 2-year policy (#771), at most batch_size runs a call; never one still running, with work pending, or named by an audit row.';
+  'Deletes admin command runs, and their operations, due under the 2-year policy (#771), at most batch_size runs a call; never one with work pending or named by an audit row.';
