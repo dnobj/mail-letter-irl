@@ -136,10 +136,16 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  * to re-run.
  *
  * 061 adds the alert type address_request_reported (#730). As 060: nothing to
- * re-run; required, as the newest is.
+ * re-run.
+ *
+ * 062 adds purge_expired_audit_records (#398), which deletes the audit records
+ * due under the two-year policy with the append-only triggers off inside its own
+ * transaction. EXECUTE is revoked from PUBLIC and the roles are granted none,
+ * and they still hold SELECT and INSERT only on the audit tables, so they can
+ * delete nothing. Nothing to re-run; required, as the newest is.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
-  "061_address_request_reported_alert.sql";
+  "062_audit_retention_purge.sql";
 
 export interface AdminProvisioningArguments {
   environment: "development" | "production";
