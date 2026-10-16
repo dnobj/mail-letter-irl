@@ -608,7 +608,7 @@ export async function reconcilePackRefunds(
       // Stripe held none, and that refund's own webhook opens the alert for
       // money the app did not issue.
       const found = refunds.find(
-        refund => refund.metadata?.packRefundId === row.pack_refund_id && refund.amount === row.amount_cents
+        refund => refund.metadata?.packRefundId === row.pack_refund_id
       );
       if (found) {
         await finalizeWithStripe(row, found, 'pack_refund.sweep_adopted');
