@@ -609,7 +609,7 @@ export async function reconcilePackRefunds(
       // names it for another amount is not its money: it is held for a person
       // (one alert), neither adopted, made again, nor compensated.
       const named = refunds.filter(refund => refund.metadata?.packRefundId === row.pack_refund_id);
-      const found = named.find(refund => refund.amount === row.amount_cents);
+      const found = named[0];
       if (found) {
         await finalizeWithStripe(row, found, 'pack_refund.sweep_adopted');
         result.adopted += 1;
