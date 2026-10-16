@@ -263,7 +263,8 @@ async function runFeatureRequestsSweep(): Promise<void> {
 }
 
 /**
- * Delete operator audit records 2 years after the action they record (#398).
+ * Delete operator audit records as the 2 years after the action they record
+ * run out (#398).
  *
  * Same shape as runFeatureRequestsSweep, for the same reasons. Once a day: the
  * function deletes records two days before their two years are up, so a run a
