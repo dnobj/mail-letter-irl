@@ -575,7 +575,11 @@ raise them (each type below names its own).
 
 The older operator audit table from the commerce recovery work: hashed idempotency key, actor and
 target, a reason code, before and after state, provider evidence and an outcome. `retention_expires_at`
-marks two years from the row (#395); nothing enforces it yet, and the purge is designed under #398.
+marks two years from the row (#395). The hourly maintenance's daily `audit-retention-sweep` deletes a row two days before it
+(#398, migration 062). This table is also the replay record for the operator commands that write it: a repeated
+`idempotency_key_hash` returns the first outcome. Once the purge deletes a row its key is free again. The admin
+panel's own replays are stopped by `admin_command_runs`, which the same sweep deletes on about the same schedule
+(#771), so both keys are freed together; a freed panel key belongs to a confirmation two years old.
 The admin panel writes `admin_audit_events` for every command; the services behind some commands also
 write a row here: a retried or released mail job, a resolved ambiguous job or reservation, an alert
 transition, a pack refund. `valid_commerce_operator_audit_operation` lists them; 042 added
@@ -799,13 +803,20 @@ guess or seed it. A constant unique index enforces at most one row.
 
 Append-only actor/action/target/outcome history. UUIDs, stable error codes, session hashes, reasons, and
 three bounded JSONB summaries support later authenticated reads, reveals, and commands. A trigger rejects
-every `UPDATE` and `DELETE`; public privileges are revoked and provisioned application roles receive no
+every `UPDATE` and `DELETE`; only the retention purge (below), which switches it off inside its own
+transaction, deletes. Public privileges are revoked and provisioned application roles receive no
 mutation privilege beyond `INSERT`.
 
 Indexes cover environment plus actor/time, environment plus target/time, and correlation ID. Rows are
-kept for 2 years after the action they record and are exempt from account erasure for that period
-(#395); nothing enforces the period yet, and the purge is designed under #398. Application rollback
-retains all rows.
+kept for at most 2 years after the action they record and are exempt from account erasure while they are
+kept (#395). The daily `audit-retention-sweep` deletes them as the two years run out (#398),
+through migration 062's `purge_expired_audit_records(batch_size)`: inside its own transaction it
+locks both audit tables against writers (the commerce table first, as an admin command writes them,
+waiting at most 5 seconds for each), switches each append-only trigger
+off, deletes only rows due (two days before their two years are up, so a late run stays inside the
+policy; oldest first, at most `batch_size` from each), and switches it back on. Only the owner can run it. The triggers
+themselves are unchanged and refuse every other `UPDATE` and `DELETE`. Application rollback retains all
+rows.
 
 ### admin_command_runs
 
@@ -813,6 +824,26 @@ Durable command state keyed uniquely by `(environment, idempotency_key)`. The ta
 (the `actor_sid` column now holds the operator's tailnet login; the column name is historical), preview
 digest, expected version, timestamps, correlation ID, bounded sanitized result, and stable error code.
 Status and timing constraints reject inconsistent outcomes.
+
+A run is kept for at most 2 years after it finished (#771): the daily `audit-retention-sweep`, after
+the audit rows, calls migration 064's `purge_expired_admin_command_records(batch_size)`, which deletes a
+finished run, and its operation first, two days before its two years are up; a run left pending or
+running (a command interrupted between its provider call and its completion) on the same schedule
+counted from when it was requested. It never deletes a run whose operation is pending, processing or not yet due itself, or one
+an audit row still names. Only the owner can run it. The run is also what stops a panel confirmation
+running twice; a key it frees belongs to a confirmation two years old, whose own form cannot be sent
+again (its CSRF token was bound to a session long gone). A row that names a run and outlives it
+(`commerce_pack_refunds.admin_command_id`, `daily_limit_overrides.created_by_command_id` and
+`cleared_by_command_id`) then links to a command the panel no longer finds.
+
+### admin_totp_counters
+
+The last TOTP counter (a 30-second step) accepted for the admin panel's write elevation, by
+`counter_key`: an operator's tailnet login, since each has a secret of their own (`ADMIN_TOTP_SECRETS`),
+or one shared key under the development-only shared secret (migration 063, #730). A code is accepted
+only for a counter above the stored one, raised in one upsert, so a code cannot be used twice, even
+across a restart or a second process. `last_counter` and `updated_at` only; no customer data. The
+operator role reads, inserts and updates it; the reader has no access. `PUBLIC` is revoked.
 
 ### admin_operations
 
@@ -826,6 +857,8 @@ environment (the admin marker) with `SKIP LOCKED` and erases each account in one
 role. It records `succeeded` with counts, or `failed` with `ACCOUNT_ERASURE_BLOCKED`,
 `ACCOUNT_ERASURE_NOT_FOUND` or, after three attempts an hour apart, `ACCOUNT_ERASURE_ERROR`
 (`src/services/accountErasureService.ts`).
+
+An operation goes with its command run, at most 2 years after both finished (#771, above).
 
 ### Admin grants and provisioning
 
@@ -921,6 +954,9 @@ Production provisioning and the first production connection remain separate owne
 | 59 | 059_personal_tokens_lookup.sql | `personal_access_tokens.token_lookup` (#730): the SHA-256 of the whole token, unique where set (`idx_pat_token_lookup`), so a token is found by one indexed read, not by its last four characters and a bcrypt compare per match. Tokens made without it are found the old way and given the hash on first use; one can last up to 365 days, so the old way stays until none is left without a hash. Provisioning: no re-run (the reader's column list leaves it out, and neither role writes the table); `ADMIN_LATEST_REQUIRED_MIGRATION` is 059 |
 | 60 | 060_refund_not_completed_alert.sql | The `refund_not_completed` alert type (#730), restated inside the `to_regclass` guard as 056 does, with a partial unique index on its order while it is open (`idx_commerce_alerts_refund_not_completed_order`). Provisioning: no re-run (the roles read the alerts table whole); `ADMIN_LATEST_REQUIRED_MIGRATION` is 060 |
 | 61 | 061_address_request_reported_alert.sql | The `address_request_reported` alert type (#730), restated inside the `to_regclass` guard as 060 does. Provisioning: no re-run (the roles read the alerts table whole); `ADMIN_LATEST_REQUIRED_MIGRATION` is 061 |
+| 62 | 062_audit_retention_purge.sql | Operator audit retention (#398): `purge_expired_audit_records(batch_size)` switches each audit table's append-only trigger off inside its caller's transaction, deletes only rows due, two days before their two years are up (`admin_audit_events.occurred_at` plus two years, `commerce_operator_audit_events.retention_expires_at`), oldest first, and switches it back on. The triggers are not changed, so a database that applies 022 late converges; the body resolves each table when it runs and skips one that is absent. `EXECUTE` revoked from `PUBLIC`. Provisioning: no re-run; `ADMIN_LATEST_REQUIRED_MIGRATION` is 062 |
+| 63 | 063_admin_totp_counters.sql | `admin_totp_counters` (#730): write elevation's last accepted TOTP counter per operator, in the database instead of the admin process's memory. Provisioning: **re-run once** (the operator role is granted `SELECT`, `INSERT` and `UPDATE (last_counter, updated_at)`); `ADMIN_LATEST_REQUIRED_MIGRATION` is 063 |
+| 64 | 064_admin_command_retention.sql | Admin command retention (#771): `purge_expired_admin_command_records(batch_size)` deletes `admin_command_runs`, and their `admin_operations` first, two days before two years after they finished (or, left unfinished, were requested), oldest first, taken `FOR UPDATE SKIP LOCKED`; never a run with an operation pending, processing or not yet due, or named by an audit row. Skips when a 022 table is absent. `EXECUTE` revoked from `PUBLIC`. Provisioning: no re-run; `ADMIN_LATEST_REQUIRED_MIGRATION` is 064 |
 
 ---
 

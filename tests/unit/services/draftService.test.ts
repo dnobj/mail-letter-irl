@@ -944,7 +944,7 @@ describe('draftService', () => {
       await expect(setDraftSchedule('draft-1', 'auth0|owner', DATES, NOW)).resolves.toBeNull();
 
       const [lock, live, update] = client.query.mock.calls as Array<[string, unknown[]]>;
-      expect(lock[0]).toMatch(/SELECT status, expires_at, redacted_at FROM letter_drafts WHERE draft_id = \$1 AND user_id = \$2 FOR UPDATE/);
+      expect(lock[0]).toMatch(/SELECT status, expires_at, redacted_at FROM letter_drafts WHERE draft_id = \$1 AND user_id = \$2 FOR NO KEY UPDATE/);
       expect(lock[1]).toEqual(['draft-1', 'auth0|owner']);
       expect(live[0]).toMatch(/FROM orders/);
       expect(live[0]).toMatch(/order_type = 'jit_mail'/);
@@ -1053,7 +1053,7 @@ describe('draftService', () => {
       await expect(setDraftMailService('draft-1', 'auth0|owner', 'certified', NOW)).resolves.toBeNull();
 
       const [lock, live, read, update] = client.query.mock.calls as Array<[string, unknown[]]>;
-      expect(lock[0]).toMatch(/FROM letter_drafts WHERE draft_id = \$1 AND user_id = \$2 FOR UPDATE/);
+      expect(lock[0]).toMatch(/FROM letter_drafts WHERE draft_id = \$1 AND user_id = \$2 FOR NO KEY UPDATE/);
       expect(live[0]).toMatch(/FROM orders/);
       expect(read[0]).toMatch(/SELECT mail_type, is_gift_send FROM letter_drafts WHERE draft_id = \$1/);
       expect(read[1]).toEqual(['draft-1']);
@@ -1210,7 +1210,7 @@ describe('draftService stationery (#563)', () => {
       ).resolves.toBeNull();
 
       const [lock, live, read, update, remember] = client.query.mock.calls as Array<[string, unknown[]]>;
-      expect(lock[0]).toMatch(/FROM letter_drafts WHERE draft_id = \$1 AND user_id = \$2 FOR UPDATE/);
+      expect(lock[0]).toMatch(/FROM letter_drafts WHERE draft_id = \$1 AND user_id = \$2 FOR NO KEY UPDATE/);
       expect(live[0]).toMatch(/FROM orders/);
       expect(live[1]).toEqual(['draft-1', [...LIVE_PAY_AND_SEND_STATUSES]]);
       // What the page was drawn from, read again under the lock (#586).
@@ -1336,7 +1336,7 @@ describe('draftService stationery (#563)', () => {
       ).resolves.toBeNull();
 
       const [lock, live, read, update, remember] = client.query.mock.calls as Array<[string, unknown[]]>;
-      expect(lock[0]).toMatch(/FROM letter_drafts WHERE draft_id = \$1 AND user_id = \$2 FOR UPDATE/);
+      expect(lock[0]).toMatch(/FROM letter_drafts WHERE draft_id = \$1 AND user_id = \$2 FOR NO KEY UPDATE/);
       expect(live[0]).toMatch(/FROM orders/);
       expect(read).toEqual(['SELECT body_text, sign_off, stationery, signature_image FROM letter_drafts WHERE draft_id = $1', ['draft-1']]);
       // The version from the row's own stationery, under the lock, so 044's and 051's pairs hold.
@@ -1405,7 +1405,7 @@ describe('draftService stationery (#563)', () => {
       await expect(setDraftWords('draft-1', 'auth0|owner', { ...NEW, drawnIn: { ...BOTANICAL } }, NOW)).resolves.toBeNull();
 
       const [lock, live, read, update] = client.query.mock.calls as Array<[string, unknown[]]>;
-      expect(lock[0]).toMatch(/FROM letter_drafts WHERE draft_id = \$1 AND user_id = \$2 FOR UPDATE/);
+      expect(lock[0]).toMatch(/FROM letter_drafts WHERE draft_id = \$1 AND user_id = \$2 FOR NO KEY UPDATE/);
       expect(live[0]).toMatch(/FROM orders/);
       expect(read).toEqual(['SELECT body_text, sign_off, stationery, signature_image FROM letter_drafts WHERE draft_id = $1', ['draft-1']]);
       expect(update[0]).toMatch(
@@ -1519,7 +1519,7 @@ describe('draftService postcard style (#594)', () => {
       ).resolves.toBeNull();
 
       const [lock, live, read, update] = client.query.mock.calls as Array<[string, unknown[]]>;
-      expect(lock[0]).toMatch(/FROM letter_drafts WHERE draft_id = \$1 AND user_id = \$2 FOR UPDATE/);
+      expect(lock[0]).toMatch(/FROM letter_drafts WHERE draft_id = \$1 AND user_id = \$2 FOR NO KEY UPDATE/);
       expect(live[0]).toMatch(/FROM orders/);
       expect(live[1]).toEqual(['draft-1', [...LIVE_PAY_AND_SEND_STATUSES]]);
       expect(read).toEqual(['SELECT md5(preview_html) AS preview_md5, is_gift_send FROM letter_drafts WHERE draft_id = $1', ['draft-1']]);

@@ -53,9 +53,10 @@ export const MAX_OPERATION_ATTEMPTS = 3;
 
 /**
  * Lock conflicts, not failures of the work: another transaction held a row it
- * needed (deadlock_detected, lock_not_available, serialization_failure). The
- * send paths take their locks in an order no single order serves, so an
- * erasure can meet one (#446 review). Tried again at the next run without
+ * needed (deadlock_detected, lock_not_available, serialization_failure).
+ * Erasure takes the canonical lock order, drafts first (#730), but a draft
+ * made while it runs, or another maintenance run's restores overlapping it,
+ * can still cross it (#446 review). Tried again at the next run without
  * spending an attempt.
  */
 const LOCK_CONFLICTS = new Set(['40P01', '55P03', '40001']);

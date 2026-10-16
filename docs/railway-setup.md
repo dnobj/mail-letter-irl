@@ -1,6 +1,6 @@
 # Railway Setup Guide
 
-**Last Updated:** September 23, 2026
+**Last Updated:** October 15, 2026
 **Purpose:** Exact Railway services, commands, branches, variables, and Serverless policy
 
 Letter IRL uses one Railway project with `production` and `development` environments. Environment isolation is achieved with per-environment variables and branch deployment settings, not separate Railway projects.
@@ -41,6 +41,12 @@ Healthcheck path: /healthz
 Production region: US East
 Development region: US West (current; review separately before changing)
 ```
+
+The API and maintenance services can instead build from `Dockerfile.api`, which runs
+as an unprivileged user (#730): set `RAILWAY_DOCKERFILE_PATH=Dockerfile.api` on each.
+The block above is then not quite what runs: the Dockerfile does the build, and the
+API's start command is the image's own. The steps, and how to go back, are in
+[deployment.md](deployment.md).
 
 Important API variables:
 
@@ -353,6 +359,7 @@ Current development placement is API and website in Railway US West, maintenance
 - Maintenance logs show one short run and clean process exit.
 - Maintenance logs show `recent_uploads.swept` and no `recent_uploads.sweep_failed`.
 - Maintenance logs show `feature_requests.swept` and no `feature_requests.sweep_failed`.
+- Maintenance logs show `audit_retention.swept` once a day and no `audit_retention.sweep_failed`.
 - An image remains retrievable after API restart for its documented 15 minutes.
 - Development sleeps after ten idle minutes.
 - Neon suspends after five database-idle minutes.

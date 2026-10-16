@@ -244,6 +244,7 @@ import {
   repairFulfilledPackGrant,
   requestRefund,
   revokePackLots,
+  settlePackRefund,
   runCommerceMaintenance
 } from '../../../src/services/commerceService.js';
 import { OPERATOR_NOTICES, reportToOperator } from '../../../src/services/operatorNotify.js';
@@ -851,7 +852,7 @@ describe('commerceService', () => {
 
     function recoverPayAndSend() {
       mocks.query.mockImplementation(async (sql: string) => {
-        if (sql.includes('SELECT * FROM orders WHERE order_id = $1 FOR UPDATE')) {
+        if (sql.startsWith('SELECT * FROM orders WHERE order_id = $1')) {
           return { rows: [{ ...baseOrder, status: 'paid' }] };
         }
         return { rows: [] };
@@ -2768,7 +2769,7 @@ describe('commerceService', () => {
     };
     mocks.query
       // The draft-type peek runs first (unlocked, advisory), then the #150
-      // send-block lookup, then the FOR UPDATE draft read.
+      // send-block lookup, then the locked draft read.
       .mockResolvedValueOnce({ rows: [{ mail_type: 'letter' }] })
       .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
       .mockResolvedValueOnce({
@@ -3501,6 +3502,66 @@ describe('commerceService', () => {
     );
   });
 
+  it('a second refund carrying a command that already names its refund is an alert, and leaves the command alone (#730)', async () => {
+    for (const status of ['succeeded', 'stripe_pending']) {
+      mocks.query.mockReset();
+      mocks.query.mockImplementation(async (sql: string) => {
+        if (sql.includes('INSERT INTO stripe_webhook_events')) {
+          return { rows: [{ event_id: 'evt-second' }] };
+        }
+        if (sql.includes('SELECT * FROM orders')) {
+          return {
+            rows: [{ ...baseOrder, order_type: 'letter_pack', credits: 4, amount_cents: 500, status: 'fulfilled' }]
+          };
+        }
+        if (sql.includes('FROM commerce_pack_refunds WHERE pack_refund_id = $1')) {
+          // Same order, payment intent and amount: only the refund differs.
+          return {
+            rows: [{ pack_refund_id: 'pr-1', order_id: 'order-1', status, amount_cents: 250, stripe_payment_intent_id: 'pi-1', stripe_refund_id: 're-first' }]
+          };
+        }
+        return { rows: [] };
+      });
+
+      await processStripeWebhookEvent({
+        id: 'evt-second',
+        type: 'refund.updated',
+        data: {
+          object: {
+            id: 're-second',
+            payment_intent: 'pi-1',
+            charge: 'ch-1',
+            status: 'succeeded',
+            amount: 250,
+            metadata: { orderId: 'order-1', packRefundId: 'pr-1' }
+          }
+        }
+      } as any);
+
+      expect(mocks.query, status).toHaveBeenCalledWith(
+        expect.stringContaining("'stripe_partial_refund_unmatched', 'critical'"),
+        ['evt-second', 'order-1', expect.stringContaining('"reason":"another_refund"')]
+      );
+      expect(mocks.query, status).not.toHaveBeenCalledWith(expect.stringContaining('UPDATE commerce_pack_refunds'), expect.anything());
+    }
+  });
+
+  it("settles a command only with the refund it recorded, whichever path reports another (#730)", async () => {
+    mocks.query.mockReset();
+    mocks.query.mockResolvedValue({ rows: [] });
+    const row = {
+      pack_refund_id: 'pr-1', order_id: 'order-1', status: 'stripe_pending', amount_cents: 250,
+      stripe_payment_intent_id: 'pi-1', stripe_refund_id: 're-first'
+    } as any;
+    for (const status of ['succeeded', 'failed']) {
+      await expect(settlePackRefund({ query: mocks.query } as any, row, { id: 're-second', status }, 'pack_refund.sweep_adopted')).resolves.toBe('stripe_pending');
+    }
+    expect(mocks.query).not.toHaveBeenCalledWith(expect.stringContaining('UPDATE commerce_pack_refunds'), expect.anything());
+    expect(mocks.query).not.toHaveBeenCalledWith(expect.stringContaining('UPDATE orders'), expect.anything());
+    // Its own refund still settles it.
+    await expect(settlePackRefund({ query: mocks.query } as any, row, { id: 're-first', status: 'succeeded' }, 'refund.updated')).resolves.toBe('succeeded');
+  });
+
   it('a charge.refunded within what the app already issued is a confirmation, not an alert', async () => {
     mocks.query.mockImplementation(async (sql: string) => {
       if (sql.includes('INSERT INTO stripe_webhook_events')) {
@@ -4035,9 +4096,29 @@ describe('commerceService', () => {
       expect(paramsRecorded()).not.toContain('does not belong');
     });
 
+    it('locks the order\'s draft before the order when recovering it, as every path does (#730)', async () => {
+      mocks.query.mockImplementation(async (sql: string) => {
+        if (sql.startsWith('SELECT * FROM orders WHERE order_id = $1')) {
+          return { rows: [{ ...baseOrder, status: 'paid' }] };
+        }
+        return { rows: [] };
+      });
+      mocks.createMail.mockRejectedValueOnce(Object.assign(new Error('stop here'), { code: 'DRAFT_EXPIRED' }));
+
+      await fulfillPaidOrder('order-1');
+
+      const statements = mocks.query.mock.calls.map(([sql]) => String(sql).replace(/\s+/g, ' '));
+      const draftLock = statements.indexOf('SELECT draft_id FROM letter_drafts WHERE draft_id = $1 FOR NO KEY UPDATE');
+      const orderLock = statements.indexOf('SELECT * FROM orders WHERE order_id = $1 FOR UPDATE');
+      expect(statements[0]).toBe('SELECT * FROM orders WHERE order_id = $1');
+      expect(draftLock).toBeGreaterThan(0);
+      expect(orderLock).toBeGreaterThan(draftLock);
+      expect(mocks.query.mock.calls[draftLock][1]).toEqual([baseOrder.draft_id]);
+    });
+
     it('stores a class, never the message, when recovery of a paid order is rejected', async () => {
       mocks.query.mockImplementation(async (sql: string) => {
-        if (sql.includes('SELECT * FROM orders WHERE order_id = $1 FOR UPDATE')) {
+        if (sql.startsWith('SELECT * FROM orders WHERE order_id = $1')) {
           return { rows: [{ ...baseOrder, status: 'paid' }] };
         }
         return { rows: [] };
@@ -4059,7 +4140,7 @@ describe('commerceService', () => {
 
     it('refunds a paid order whose draft is no longer the mail it paid for, as recovery finds it (#586)', async () => {
       mocks.query.mockImplementation(async (sql: string) => {
-        if (sql.includes('SELECT * FROM orders WHERE order_id = $1 FOR UPDATE')) {
+        if (sql.startsWith('SELECT * FROM orders WHERE order_id = $1')) {
           return { rows: [{ ...baseOrder, status: 'paid' }] };
         }
         return { rows: [] };
@@ -4081,7 +4162,7 @@ describe('commerceService', () => {
 
     it('labels an unclassified recovery failure database_error, the savepoint fallback', async () => {
       mocks.query.mockImplementation(async (sql: string) => {
-        if (sql.includes('SELECT * FROM orders WHERE order_id = $1 FOR UPDATE')) {
+        if (sql.startsWith('SELECT * FROM orders WHERE order_id = $1')) {
           return { rows: [{ ...baseOrder, status: 'paid' }] };
         }
         return { rows: [] };
@@ -4276,7 +4357,7 @@ describe('commerceService', () => {
             rows: [{ ...baseOrder, order_id: params[0], stripe_checkout_session_id: params[1], checkout_url: params[2] }]
           };
         }
-        if (sql.includes('SELECT * FROM orders WHERE order_id = $1 FOR UPDATE')) {
+        if (sql.startsWith('SELECT * FROM orders WHERE order_id = $1')) {
           return { rows: [{ ...baseOrder, order_id: params[0] }] };
         }
         return { rows: [] };
@@ -4506,7 +4587,7 @@ describe('commerceService', () => {
             rows: [{ ...baseOrder, order_id: params[0], stripe_checkout_session_id: params[1], checkout_url: params[2] }]
           };
         }
-        if (sql.includes('SELECT * FROM orders WHERE order_id = $1 FOR UPDATE')) {
+        if (sql.startsWith('SELECT * FROM orders WHERE order_id = $1')) {
           return { rows: [{ ...baseOrder, order_id: params[0] }] };
         }
         return { rows: [] };
@@ -4534,7 +4615,7 @@ describe('commerceService', () => {
       await expect(mocks.transaction.mock.results[0].value).rejects.toMatchObject({ code: 'DUPLICATE_RECENT_MAIL' });
       // After the draft lock, the look for an order to reuse, and the balance.
       const check = position('duplicate mail check: draft');
-      expect(position('SELECT * FROM letter_drafts WHERE draft_id = $1 FOR UPDATE')).toBeLessThan(check);
+      expect(position('SELECT * FROM letter_drafts WHERE draft_id = $1 FOR NO KEY UPDATE')).toBeLessThan(check);
       expect(position('status = ANY($2::varchar[])')).toBeLessThan(check);
       expect(position('SELECT credits FROM users')).toBeLessThan(check);
       expect(tagged('draft')[0].params).toEqual(['draft-1', 'user-1']);
@@ -4691,7 +4772,7 @@ describe('commerceService', () => {
         expect(inserted()).toBe(false);
         expect(mocks.createJitSession).not.toHaveBeenCalled();
         // Under the draft's lock, by a plain count: no date lock is held across the payment.
-        expect(position('AS held FROM letters')).toBeGreaterThan(position('SELECT * FROM letter_drafts WHERE draft_id = $1 FOR UPDATE'));
+        expect(position('AS held FROM letters')).toBeGreaterThan(position('SELECT * FROM letter_drafts WHERE draft_id = $1 FOR NO KEY UPDATE'));
         expect(trail.some(sql => sql.includes('pg_advisory_xact_lock'))).toBe(false);
         // Its own mail date's count.
         const count = mocks.query.mock.calls.find(([sql]) => String(sql).includes('AS held FROM letters'))!;
@@ -4778,7 +4859,7 @@ describe('commerceService', () => {
         expect(inserted()).toBe(false);
         expect(mocks.createJitSession).not.toHaveBeenCalled();
         // Under the draft's lock, so no edit lands between the comparison and the order.
-        expect(position('SELECT * FROM letter_drafts WHERE draft_id = $1 FOR UPDATE')).toBeGreaterThanOrEqual(0);
+        expect(position('SELECT * FROM letter_drafts WHERE draft_id = $1 FOR NO KEY UPDATE')).toBeGreaterThanOrEqual(0);
       });
 
       it('compares the draft as its lock reads it, not as any earlier read saw it', async () => {
@@ -4786,7 +4867,7 @@ describe('commerceService', () => {
         const before = mocks.query.getMockImplementation()!;
         // Only the locked read sees the change: a comparison against anything read before the lock would pass.
         mocks.query.mockImplementation(async (sql: string, params: unknown[] = []) =>
-          sql.includes('SELECT * FROM letter_drafts WHERE draft_id = $1 FOR UPDATE')
+          sql.includes('SELECT * FROM letter_drafts WHERE draft_id = $1 FOR NO KEY UPDATE')
             ? { rows: [{ ...draftRow, body_text: 'Changed under the lock.' }] }
             : before(sql, params)
         );
@@ -4965,7 +5046,7 @@ describe('commerceService', () => {
         if (sql.includes('SET stripe_checkout_session_id = $2')) {
           return { rows: [{ ...baseOrder, order_id: params[0], order_type: 'letter_pack', stripe_checkout_session_id: params[1] }] };
         }
-        if (sql.includes('SELECT * FROM orders WHERE order_id = $1 FOR UPDATE')) {
+        if (sql.startsWith('SELECT * FROM orders WHERE order_id = $1')) {
           return { rows: [{ ...baseOrder, order_id: params[0], order_type: 'letter_pack' }] };
         }
         return { rows: [] };

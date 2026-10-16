@@ -72,9 +72,16 @@
   `admin_audit_events` is append-only by trigger (migration 022).
 - Every state transition records what initiated it: the system, the worker, the provider sync,
   or the operator's identity for admin actions.
-- Operator audit records are kept for 2 years after the action they record and are exempt from
-  account erasure for that period (#395). `commerce_operator_audit_events.retention_expires_at`
-  marks the date; the purge that enforces it is tracked in #398.
+- Operator audit records are kept for at most 2 years after the action they record, and are exempt
+  from account erasure while they are kept (#395). The maintenance run's daily
+  `audit-retention-sweep` deletes each one two days before its two years are up (#398), so a run
+  that comes late still deletes inside "up to 2 years", through `purge_expired_audit_records`
+  (migration 062), which only the database owner can run. It switches the append-only triggers off
+  only inside its own transaction. The triggers refuse every other change. The admin panel's
+  command runs and their queued operations go on the same schedule, after the audit rows that name
+  them (#771, `purge_expired_admin_command_records`, migration 064), never while a queued operation
+  is unfinished; a command left unfinished goes on the same schedule, counted from when it was
+  requested.
 
 ## Future Compliance Hooks
 

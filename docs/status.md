@@ -163,7 +163,7 @@ ahead on 2026-09-28, with migrations `033` to `037`:
 - **Content retention enforcement:** development enforces (`CONTENT_RETENTION_MODE=enforce`,
   `RETENTION-01` passed 2026-09-24); production switches at the launch promotion (#153). The
   upload-link and feature-request sweeps are separate and always enforce.
-- **Operator audit purge:** the 2-year purge of operator audit rows is tracked in #398.
+- **Operator audit purge:** the maintenance run's daily `audit-retention-sweep` deletes operator audit rows two days before their two years are up (#398, migration 062), then the admin command runs and operations (#771, migration 064).
 - **Gift letters:** GIFT-01 step 4 (the paper print and an iPhone scan) and the printed card's
   copy (#487) before production switches the programme on; the website's claim page ships with the
   website's promotion.

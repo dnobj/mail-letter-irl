@@ -603,7 +603,35 @@ export async function reconcilePackRefunds(
       continue;
     }
     try {
-      const found = refunds.find(refund => refund.metadata?.packRefundId === row.pack_refund_id);
+      // This command's refund names it and is for its amount (#730). One that
+      // names it for another amount is not its money: the sweep goes on as if
+      // Stripe held none, and that refund's own webhook opens the alert for
+      // money the app did not issue.
+      // Of several, the one that went through, then one still on its way, then
+      // the newest: Stripe lists the newest first, and a newer pending or
+      // failed one must not hide the refund that went through (#730).
+      const candidates = refunds.filter(
+        refund => refund.metadata?.packRefundId === row.pack_refund_id && refund.amount === row.amount_cents
+      );
+      const found =
+        candidates.find(refund => refund.status === 'succeeded') ??
+        candidates.find(refund => refund.status !== 'failed' && refund.status !== 'canceled') ??
+        candidates[0];
+      const passedOver = refunds.filter(
+        refund => refund.metadata?.packRefundId === row.pack_refund_id && refund.amount !== row.amount_cents
+      );
+      if (passedOver.length > 0) {
+        // On the order, so whoever reads the compensation or the retry that
+        // follows sees Stripe did hold a refund naming this command.
+        await transaction(async client => {
+          await client.query('SELECT order_id FROM orders WHERE order_id = $1 FOR UPDATE', [row.order_id]);
+          await recordOrderEvent(client, row.order_id, 'pack_refund.sweep_passed_over', null, null, {
+            packRefundId: row.pack_refund_id,
+            amountCents: row.amount_cents,
+            refunds: passedOver.map(refund => ({ stripeRefundId: refund.id, amountCents: refund.amount, status: refund.status }))
+          });
+        });
+      }
       if (found) {
         await finalizeWithStripe(row, found, 'pack_refund.sweep_adopted');
         result.adopted += 1;

@@ -1,6 +1,6 @@
 # Deployment Guide
 
-**Last Updated:** October 4, 2026
+**Last Updated:** October 15, 2026
 **Purpose:** Release process, environment checks, boot validation rules, and migration safety
 
 Letter IRL deploys development first. Production is promoted only after automated and manual verification succeeds in development.
@@ -49,6 +49,41 @@ the pre-deploy command; Railway's config-as-code overrides dashboard values, and
 fields absent from it keep theirs. Runtime settings, such as
 `UV_THREADPOOL_SIZE=16` (#730), are Railway service variables in each
 environment.
+
+**Building from `Dockerfile.api` instead (#730).** Railpack's image runs the
+process as root. `Dockerfile.api` builds the same code into an image that runs as
+the unprivileged `node` user, owns none of its own files, and holds only the
+compiled output, production dependencies, `db/migrations`, `widgets` and
+`assets/fonts`. A service uses it once its `RAILWAY_DOCKERFILE_PATH` variable is
+`Dockerfile.api`; until then it builds with Railpack as above, so the file
+changes nothing on its own. CI's "API image" job builds it on every pull request,
+checks that it runs unprivileged and cannot change its own files, that the API's
+and the cron's entry points import with every module they need, and that its
+native modules and fonts load, and runs the pre-deploy migration in it. To move an environment:
+
+1. Set `RAILWAY_DOCKERFILE_PATH=Dockerfile.api` on the API service and on the
+   maintenance service. The image is built by the Dockerfile alone: a build
+   command in the dashboard (the maintenance service has one) is not run.
+   The pre-deploy command and the maintenance service's start command
+   (`npm run maintenance`) stay as they are. Clear the API's start command in
+   the dashboard, so the image's own, `node dist/mcp/httpServer.js`, runs as
+   the container's first process and receives Railway's stop signal itself
+   rather than through npm.
+2. Redeploy each (a variable change alone does not always start a build), and
+   check the deploy log shows the pre-deploy migration, `/readyz` answers with
+   the new build commit, a preview renders, a signature upload is analysed (the
+   one runtime file only a request reaches: the analysis worker), and the next
+   maintenance run logs as before.
+3. To go back, delete the variable and redeploy: Railpack builds it again, and
+   runs `npm start` with no start command set, so a cleared one needs no
+   restoring. In an incident, Railway's Rollback to the previous deployment is
+   faster: it restores the previous image and its variables. Before the next
+   deploy, check `RAILWAY_DOCKERFILE_PATH` is gone, and delete it if not, or
+   that deploy builds from the Dockerfile again. Rollback is offered only
+   while the previous deployment's image is still kept; after that, delete the
+   variable and redeploy.
+
+Development first; production at a promotion, on the owner's word.
 
 Until 2026-10-13 this said a `nixpacks.toml` set install, build, start and the
 thread pool. Railway had been building with Railpack, which never reads that
@@ -636,7 +671,23 @@ compensated opens one alert too (`refunded_after_compensation`): the
 customer then holds the money and the letters. After a command whose
 compensation was withheld for a dispute or a hold, it is
 `refunded_after_withheld`: the letters stay revoked, so do not compensate
-by hand. `PACK_REFUND_RETRY_DELAY_SECONDS` and
+by hand. A command belongs to the one Stripe refund it records (#730): a
+second refund carrying its metadata is money the app did not issue. Its
+webhook opens a `stripe_partial_refund_unmatched` alert (`reason`
+`another_refund` for the command's amount, `command_mismatch` for another),
+and the command is left as it was; the sweep, meeting one in a race, only
+records it as ignored. Of several refunds for the command's amount, the sweep
+adopts the one that succeeded, else one still pending, else the newest (all
+failed or cancelled: the command is compensated). The sweep
+adopts only a refund for the command's own amount: one that names it for
+another amount is not its money, so the sweep goes on as if Stripe held none
+(it makes the command's refund, or compensates at the attempt limit), records
+the refund it passed over on the order (`pack_refund.sweep_passed_over`), and
+that refund's own events open the unmatched-refund alert. Stripe cannot tell
+the app's refund from another for the same amount carrying the same metadata:
+if such a refund reaches a command before the app's own, it settles the
+command, and the alert names the app's own refund. Check both in Stripe.
+`PACK_REFUND_RETRY_DELAY_SECONDS` and
 `PACK_REFUND_STRIPE_ATTEMPT_LIMIT` are not in the preflight manifest; both
 are optional.
 

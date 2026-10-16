@@ -65,7 +65,7 @@ describe('the draft columns a price is read from (#625)', () => {
   });
 
   it('selects the whole row where it prices a draft by SELECT *', () => {
-    // The checkout and the send lock the row with SELECT * ... FOR UPDATE: a column list there would be the same defect.
+    // The checkout and the send lock the row with SELECT * ... FOR NO KEY UPDATE: a column list there would be the same defect.
     const whole = draftSelects().filter(select => select.columns.trim() === '*').map(select => select.file);
     expect(whole).toContain('src/services/commerceService.ts');
     expect(whole).toContain('src/services/mailSendService.ts');
@@ -84,7 +84,7 @@ describe('the draft columns a price is read from (#625)', () => {
       // The function's own read: up to the next top-level function.
       const end = text.slice(start + fn.length).search(/\n(export )?(async )?function /);
       const body = end < 0 ? text.slice(start) : text.slice(start, start + fn.length + end);
-      expect(body, file).toContain("'SELECT * FROM letter_drafts WHERE draft_id = $1 FOR UPDATE'");
+      expect(body, file).toContain("'SELECT * FROM letter_drafts WHERE draft_id = $1 FOR NO KEY UPDATE'");
     }
   });
 

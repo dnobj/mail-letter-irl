@@ -413,6 +413,26 @@ describePostgres('admin commands through the operator role', () => {
     await expect(confirmation('job.cancel_held', leftJobId, {})).rejects.toMatchObject({ code: 'ADMIN_INVALID_STATE' });
   }, 60_000);
 
+  it('keeps write elevation\'s TOTP counter through the operator role, raising it once (#730)', async () => {
+    const { databaseTotpCounterStore } = await import('../../src/admin/http/totpCounters.js');
+    const store = databaseTotpCounterStore(operator);
+    const key = `owner-${randomUUID().slice(0, 8)}@example.test`;
+    await expect(store.lastCounter(key)).resolves.toBeNull();
+    await expect(store.claim(key, 100)).resolves.toBe(true);
+    // The same counter, or an older one, again: a replay.
+    await expect(store.claim(key, 100)).resolves.toBe(false);
+    await expect(store.claim(key, 99)).resolves.toBe(false);
+    await expect(store.claim(key, 101)).resolves.toBe(true);
+    await expect(store.lastCounter(key)).resolves.toBe(101);
+    // Two processes accepting the same code at once: one wins.
+    const raced = await Promise.all([store.claim(key, 200), store.claim(key, 200), store.claim(key, 200)]);
+    expect(raced.filter(Boolean)).toHaveLength(1);
+    await expect(store.lastCounter(key)).resolves.toBe(200);
+    // The reader can neither read nor write it.
+    await expect(reader.query('SELECT last_counter FROM admin_totp_counters')).rejects.toMatchObject({ code: '42501' });
+    await expect(databaseTotpCounterStore(reader).claim(key, 300)).rejects.toMatchObject({ code: '42501' });
+  });
+
   it('refuses in read-only mode and without elevation, touching nothing', async () => {
     const { command, fields } = await confirmation('job.resolve', heldJobId, { decision: 'rejected', providerName: 'dummy' }).catch(() => ({
       command: commands.findAdminCommand('job.resolve')!,

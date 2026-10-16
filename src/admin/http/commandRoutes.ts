@@ -10,6 +10,8 @@ import {
 } from "../pages/commands.js";
 import type { RequestContext, RouteHandler } from "./app.js";
 import { attemptElevation, dropElevation, isElevated } from "./elevation.js";
+import { databaseTotpCounterStore } from "./totpCounters.js";
+import { totpSecretFor } from "../runtimeConfig.js";
 import type { AdminRouter } from "./router.js";
 import type { RouteExtensions } from "./routes.js";
 import { hashSessionId } from "./session.js";
@@ -108,11 +110,37 @@ export function registerCommandRoutes(
   router.add("POST", "/elevate", async (context) => {
     const now = Date.now();
     const returnTo = safeReturn(context.form?.get("return"));
-    if (!context.config.totpSecret) throw new AdminFoundationError("ADMIN_COMMAND_DISABLED");
-    const attempt = attemptElevation(
+    if (context.config.mode !== "full") throw new AdminFoundationError("ADMIN_COMMAND_DISABLED");
+    // This operator's own secret (#730); in development, the shared one if
+    // they have none.
+    const totp = totpSecretFor(context.config, context.session.login);
+    if (!totp) {
+      // Denied, so audited as every denied elevation is (#730 review).
+      await context.appendAudit({
+        action: "admin.elevation_denied",
+        targetType: "session",
+        inputSummary: { reason: "no_secret" },
+        outcome: "denied",
+        errorCode: "ADMIN_FORBIDDEN",
+      });
+      return context.render(
+        "Elevate",
+        renderElevationForm({
+          csrfToken: context.csrfToken,
+          returnTo,
+          elevatedUntil: null,
+          lockedUntil: null,
+          message: `No TOTP secret is set for ${context.session.login}. An entry for this login in ADMIN_TOTP_SECRETS is needed before it can elevate.`,
+          ttlMinutes: Math.round(context.config.session.elevationTtlMs / 60_000),
+          mode: context.config.mode,
+        }),
+        { status: 403 },
+      );
+    }
+    const attempt = await attemptElevation(
       context.session,
       context.elevation,
-      context.config.totpSecret,
+      totp.secret,
       context.form?.get("code") ?? "",
       {
         ttlMs: context.config.session.elevationTtlMs,
@@ -120,6 +148,9 @@ export function registerCommandRoutes(
         failureWindowMs: context.config.session.elevationFailureWindowMs,
       },
       now,
+      // The accepted counter in the database, so a restart or a second
+      // process cannot accept the same code again (#730).
+      { counters: databaseTotpCounterStore(context.requireOperatorPool()), counterKey: totp.counterKey },
     );
     if (attempt.ok) {
       // Renew the session id after the privilege change; the store keeps the

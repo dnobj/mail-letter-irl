@@ -1,0 +1,55 @@
+# Letter IRL API and maintenance image (#730). Selected by each service's
+# RAILWAY_DOCKERFILE_PATH variable (Dockerfile.api); a service without it keeps
+# building with Railpack, so this file changes nothing until that is set. It is
+# not named "Dockerfile", which Railway would pick up on its own.
+#
+# Two stages: compile the TypeScript and keep only production dependencies,
+# then a runtime holding the compiled output, those dependencies, and the three
+# directories the code reads at runtime: db/migrations (the pre-deploy
+# `npm run db:migrate:prod`, from the working directory), widgets (the card
+# HTML) and assets/fonts (the letter renderer). Nothing else from the
+# repository is copied.
+#
+# The runtime runs as the base image's unprivileged `node` user, and owns none
+# of its own files: the code cannot rewrite itself, its migrations or its
+# widgets. Nothing writes to the app's directory at runtime (images go to
+# the bucket; a very large decode may spill to /tmp, which anyone may write),
+# and HOME is /home/node, which npm needs for its logs when Railway runs an npm
+# script (the pre-deploy, or the cron's `npm run maintenance`).
+
+# Pinned by digest as well as tag, as Dockerfile.admin is: a moved tag cannot
+# change what is built. Upgrades bump the tag and the digest together, in both
+# files.
+FROM node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392 AS build
+WORKDIR /app
+COPY package.json package-lock.json tsconfig.json ./
+# npm ci installs exactly the lockfile and fails if package.json disagrees.
+RUN npm ci
+COPY src ./src
+RUN npm run build && npm prune --omit=dev
+
+FROM node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392
+WORKDIR /app
+ENV NODE_ENV=production
+ENV HOME=/home/node
+# Owned by root and readable by all: the node user reads them, and cannot
+# change them.
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+COPY package.json package-lock.json ./
+COPY db/migrations ./db/migrations
+COPY widgets ./widgets
+COPY assets/fonts ./assets/fonts
+# Fails the build, not the boot, if a directory the code reads is missing.
+RUN test -f dist/mcp/httpServer.js && test -f dist/cli/runMaintenance.js && test -f dist/cli/migrate.js \
+  && test -f dist/services/signatureAnalysisWorker.js \
+  && ls db/migrations/*.sql > /dev/null && ls widgets/*.html > /dev/null && ls widgets/shared/*.js > /dev/null \
+  && ls assets/fonts/*.ttf > /dev/null
+USER node
+# The base image's entrypoint (docker-entrypoint.sh) stays: it runs the
+# command below with exec, so Node is the first process and receives the stop
+# signal. A start command set on the service (the maintenance service's) runs
+# as that service's first process too, through the entrypoint or not.
+# The API. The maintenance service sets its own start command
+# (`npm run maintenance`), which Railway runs in place of this one.
+CMD ["node", "dist/mcp/httpServer.js"]

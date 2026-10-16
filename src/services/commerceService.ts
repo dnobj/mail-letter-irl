@@ -907,7 +907,7 @@ async function prepareJitOrder(
 ): Promise<{ order: Order; reused: boolean }> {
   return transaction(async client => {
     const draftResult = await client.query<LetterDraft>(
-      'SELECT * FROM letter_drafts WHERE draft_id = $1 FOR UPDATE',
+      'SELECT * FROM letter_drafts WHERE draft_id = $1 FOR NO KEY UPDATE',
       [params.draftId]
     );
     const draft = draftResult.rows[0];
@@ -1292,7 +1292,7 @@ export async function createJitCheckout(
   // (#278 round 5). USER-SCOPED and AFTER the send-block gate: an unscoped
   // peek let any authenticated caller make another user's draft id steer
   // catalog work before authorization said no (#278 round 7). Advisory only -
-  // prepareJitOrder re-reads FOR UPDATE and owns the real ownership check,
+  // prepareJitOrder re-reads under its lock and owns the real ownership check,
   // and refuses an option this deployment does not sell (#578).
   // With its pages (#586): without them a long letter would warm the one-page
   // price and meet the charge cap at the one-page amount. A restyle can change
@@ -1431,18 +1431,48 @@ async function findCheckoutOrder(
   session: Stripe.Checkout.Session
 ): Promise<Order | null> {
   const orderId = session.metadata?.orderId || session.client_reference_id;
-  const result = orderId
+  // Found first without a lock, so that a Pay & Send order's draft is locked
+  // before the order (lockDraftThenOrder): the order every path takes (#730).
+  const located = orderId
     ? await client.query<Order>(
         `SELECT * FROM orders
          WHERE order_id = $1 OR stripe_checkout_session_id = $2
          ORDER BY CASE WHEN order_id = $1 THEN 0 ELSE 1 END
-         LIMIT 1 FOR UPDATE`,
+         LIMIT 1`,
         [orderId, session.id]
       )
     : await client.query<Order>(
-        'SELECT * FROM orders WHERE stripe_checkout_session_id = $1 LIMIT 1 FOR UPDATE',
+        'SELECT * FROM orders WHERE stripe_checkout_session_id = $1 LIMIT 1',
         [session.id]
       );
+  const found = located.rows[0];
+  if (!found) return null;
+  return lockDraftThenOrder(client, found.order_id, found.draft_id);
+}
+
+/**
+ * Locks a Pay & Send order's draft, then the order (#730). Every path that
+ * holds both takes the draft first: a prepaid send and a checkout's
+ * preparation lock the draft, then the draft's orders, then the account. The
+ * paid fulfilment and its recovery used to lock the order first and the draft
+ * last, after the account, so a prepaid send of the same draft and a payment
+ * arriving for it could each hold what the other wanted; PostgreSQL broke the
+ * cycle by failing one, and Stripe's retry finished it. A Pay & Send order's
+ * draft_id cannot change: it is set when the order is made, and the
+ * valid_order_draft CHECK refuses the NULL a draft's delete would set, so the
+ * unlocked read that found it stays true. A pack order has no draft and locks
+ * only the order. The draft is taken FOR NO KEY UPDATE, as every draft holder
+ * takes it (src/services/accountLock.ts).
+ */
+async function lockDraftThenOrder(
+  client: Pick<pg.PoolClient, 'query'>,
+  orderId: string,
+  draftId: string | null | undefined
+): Promise<Order | null> {
+  if (draftId) {
+    await client.query('SELECT draft_id FROM letter_drafts WHERE draft_id = $1 FOR NO KEY UPDATE', [draftId]);
+  }
+  const result = await client.query<Order>('SELECT * FROM orders WHERE order_id = $1 FOR UPDATE', [orderId]);
   return result.rows[0] || null;
 }
 
@@ -1704,8 +1734,9 @@ async function transitionPaidCheckout(
   // ahead of both UPDATEs.
   //
   // It stays AFTER findCheckoutOrder on purpose. Acquisition order remains
-  // orders -> users, matching the refund and dispute paths, which all receive an
-  // already-fetched order and then lock the account. Hoisting this above the
+  // drafts -> orders -> users, matching the refund and dispute paths (orders ->
+  // users), which all receive an already-fetched order and then lock the
+  // account. Hoisting this above the
   // order lock would invert against them and trade one cycle for another.
   await lockAccountForBalanceChange(client, order.user_id);
 
@@ -2522,7 +2553,7 @@ async function recordUnmatchedPartialRefund(
     amountCents: number;
     cumulative: boolean;
     knownRefundedCents?: number;
-    reason?: 'no_matching_command' | 'command_mismatch';
+    reason?: 'no_matching_command' | 'command_mismatch' | 'another_refund';
   }
 ): Promise<void> {
   const { eventId, eventType, order, stripeRefundId, chargeId, refundStatus, amountCents, cumulative } =
@@ -2532,6 +2563,8 @@ async function recordUnmatchedPartialRefund(
   const evidence = {
     eventId,
     eventType,
+    // Each event's own reason: an event folded into an open alert keeps it.
+    reason,
     stripeRefundId,
     chargeId,
     refundStatus,
@@ -2674,6 +2707,19 @@ export async function settlePackRefund(
   outcome: StripeRefundOutcome,
   source: string
 ): Promise<PackRefundStatus> {
+  // A command belongs to the Stripe refund it recorded (#730): another
+  // refund's outcome changes nothing here, whichever path reports it. The
+  // webhook records such a refund as money the app did not issue before it
+  // gets this far; the sweep can meet one only in a race with the webhook.
+  if (row.stripe_refund_id && outcome.id && outcome.id !== row.stripe_refund_id) {
+    await recordOrderEvent(client, row.order_id, source, null, null, {
+      packRefundId: row.pack_refund_id,
+      ignored: true,
+      reason: 'another_refund',
+      stripeRefundId: outcome.id
+    });
+    return row.status;
+  }
   const status = outcome.status ?? 'pending';
   if (row.status === 'letters_revoked') await resolveUnconfirmedPackRefundAlert(client, row.pack_refund_id);
   if (status === 'failed' || status === 'canceled') {
@@ -3018,7 +3064,12 @@ async function processRefundEvent(
         command.order_id === order.order_id &&
         command.stripe_payment_intent_id === intent &&
         command.amount_cents === refundedAmount;
-      if (!matches) {
+      // A command that already names a Stripe refund is that refund's (#730):
+      // another refund carrying its metadata is money the app did not issue,
+      // not a settlement of it, and must not replace the refund it recorded.
+      const anotherRefund =
+        matches && Boolean(command.stripe_refund_id) && command.stripe_refund_id !== refundObject!.id;
+      if (!matches || anotherRefund) {
         await recordUnmatchedPartialRefund(client, {
           eventId,
           eventType,
@@ -3029,7 +3080,7 @@ async function processRefundEvent(
           amountCents: refundedAmount,
           cumulative: false,
           knownRefundedCents: await knownRefundedCents(client, order),
-          reason: 'command_mismatch'
+          reason: anotherRefund ? 'another_refund' : 'command_mismatch'
         });
         return { duplicate: false, orderId: order.order_id, status: order.status };
       }
@@ -4022,11 +4073,13 @@ export async function listPackPurchases(
 
 export async function fulfillPaidOrder(orderId: string): Promise<boolean> {
   return transaction(async client => {
-    const result = await client.query<Order>(
-      'SELECT * FROM orders WHERE order_id = $1 FOR UPDATE',
+    // The draft before the order, as every path takes them (lockDraftThenOrder).
+    const located = await client.query<Order>(
+      'SELECT * FROM orders WHERE order_id = $1',
       [orderId]
     );
-    const order = result.rows[0];
+    if (!located.rows[0]) return false;
+    const order = await lockDraftThenOrder(client, orderId, located.rows[0].draft_id);
     if (!order || order.order_type !== 'jit_mail' || order.status !== 'paid') return false;
     await client.query('SAVEPOINT recovery_fulfillment');
     try {

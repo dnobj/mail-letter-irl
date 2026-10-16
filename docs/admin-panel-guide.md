@@ -304,7 +304,8 @@ problem, not a Tailscale one.
 | `ADMIN_READER_DATABASE_URL` | reader role, pooled Neon hostname of the development branch |
 | `DATABASE_URL` | the same reader URL in read-only mode; the operator URL in full mode |
 | `ADMIN_SESSION_SECRET` | 32 or more random characters, different per environment |
-| `ADMIN_TOTP_SECRET` | required in full mode only; from `npm run admin:totp-enrol` |
+| `ADMIN_TOTP_SECRETS` | required in full mode only: each operator's own secret, `login=SECRET` entries separated by commas, from `npm run admin:totp-enrol -- <environment> <login>` (#730) |
+| `ADMIN_TOTP_SECRET` | development only, and only until each operator has an entry above: the old shared secret, used by an operator with none. Production never uses it, and warns at boot to delete it |
 | `PORT` | `8080` (the health listener; set it if Railway does not inject one) |
 | `ADMIN_APP_PORT` | `8790` |
 | `ADMIN_TS_HOSTNAME`, `ADMIN_TS_TAG`, `ADMIN_TS_STATE_DIR` | optional; default to `letter-irl-admin-dev`, `tag:dev-admin`, `/data/tailscale` |
@@ -344,15 +345,30 @@ tunnel, which changes only `src/admin/http/tailscaleAuth.ts` and the ingress.
 
 Commands exist only in full mode. To enable it in development:
 
-1. Generate the elevation secret and enrol the authenticator:
+1. Generate each operator's elevation secret and enrol their authenticator, once per operator:
 
    ```bash
-   npm run admin:totp-enrol -- development
+   npm run admin:totp-enrol -- development <operator tailnet login>
    ```
 
-   Set the printed base32 value as `ADMIN_TOTP_SECRET` on the service and add the account to an
-   authenticator app on a device other than the one you browse from, then clear the terminal. The secret
-   is never written to disk and never printed anywhere else.
+   Add the printed `login=SECRET` line to `ADMIN_TOTP_SECRETS` on the service (entries separated by
+   commas), and the account to that operator's authenticator app on a device other than the one they
+   browse from, then clear the terminal. The secret is never written to disk and never printed anywhere
+   else. An operator whose authenticator already holds the old shared `ADMIN_TOTP_SECRET` may keep it
+   as their entry (`login=<that secret>`) only if no one else ever held that secret, as when one
+   operator is all there has been; otherwise everyone who had it could still make their codes, so
+   enrol a new one. Once every operator has an entry, remove `ADMIN_TOTP_SECRET`.
+   In production, where the shared secret is never used, set `ADMIN_TOTP_SECRETS` before the code that
+   reads it is deployed, and check it on development first: a login in it that is not in
+   `ADMIN_OPERATOR_LOGINS` stops the boot. The boot log then warns (`admin.legacy_totp_secret_ignored`)
+   that `ADMIN_TOTP_SECRET` is unused; delete it once the promotion has settled, since the release
+   before needs it to boot if it is rolled back to.
+   To remove an operator, take their login out of `ADMIN_OPERATOR_LOGINS` and their entry out of
+   `ADMIN_TOTP_SECRETS` in the same variable edit, or the boot is refused. Their row in
+   `admin_totp_counters` (their login and a counter) can then be deleted by the database owner.
+   Each code is accepted once: the last accepted counter is kept per operator in
+   `admin_totp_counters` (migration 063), so a restart does not forget it, and the admin provisioning
+   (`npm run admin:provision-access`) must be re-run once after 063 to grant it.
 2. Switch `DATABASE_URL` to the operator role (`letter_irl_admin_operator_development`), set
    `ADMIN_MODE=full`, redeploy. The boot audit event records the mode.
 

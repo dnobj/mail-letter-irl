@@ -16,6 +16,7 @@ import {
 import { purgeExpiredRecentUploads } from '../services/recentUploadStore.js';
 import { purgeExpiredFeatureRequests } from '../services/featureRequestService.js';
 import { purgeClosedAddressRequests } from '../services/addressRequestService.js';
+import { purgeExpiredAuditRecords } from '../services/auditRetentionService.js';
 import { addressRequestRetentionDays } from '../config/addressRequests.js';
 import { processAccountErasures } from '../services/accountErasureService.js';
 import { lettersPastMailDay, raiseMissedMailDayAlerts } from '../services/scheduledMailService.js';
@@ -262,6 +263,52 @@ async function runFeatureRequestsSweep(): Promise<void> {
 }
 
 /**
+ * Delete operator audit records as the 2 years after the action they record
+ * run out (#398).
+ *
+ * Same shape as runFeatureRequestsSweep, for the same reasons. Once a day: the
+ * function deletes records two days before their two years are up, so a run a
+ * day late still deletes inside the privacy policy's "up to 2 years"; nothing
+ * is due before July 2028. A writer holding an audit table makes the function
+ * give up after 5 seconds, and the next run tries again.
+ */
+const AUDIT_RETENTION_SWEEP_INTERVAL_MS = 23 * 60 * 60 * 1000;
+
+async function runAuditRetentionSweep(): Promise<void> {
+  try {
+    const sweep = await runMaintenanceTaskIfDue(
+      'audit-retention-sweep',
+      AUDIT_RETENTION_SWEEP_INTERVAL_MS,
+      async () => {
+        try {
+          return await purgeExpiredAuditRecords();
+        } catch (error) {
+          const errorClass =
+            carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error');
+          throw Object.assign(new Error(`audit retention sweep failed: ${errorClass}`), {
+            diagnosticClass: errorClass
+          });
+        }
+      }
+    );
+    console.log(`[Maintenance] Audit retention sweep ${sweep.ran ? 'completed' : 'not due'}`);
+    if (sweep.ran) {
+      // Counts only - never an actor, a target or a summary.
+      writeDiagnostic('info', 'audit_retention.swept', {
+        adminDeleted: sweep.result?.adminDeleted ?? 0,
+        commerceDeleted: sweep.result?.commerceDeleted ?? 0,
+        commandRunsDeleted: sweep.result?.commandRunsDeleted ?? 0,
+        operationsDeleted: sweep.result?.operationsDeleted ?? 0
+      });
+    }
+  } catch (error) {
+    writeDiagnostic('error', 'audit_retention.sweep_failed', {
+      errorClass: carriedDiagnosticClass(error) ?? classifyDiagnosticError(error, 'unknown_error')
+    });
+  }
+}
+
+/**
  * Delete address requests, and any address a recipient gave with them, the
  * configured number of days after they close (#604). Whatever the feature's
  * flag says: a request made while it was on is a third party's address, and
@@ -449,6 +496,8 @@ export async function runMaintenance(): Promise<void> {
   await runFeatureRequestsSweep();
   // Same wrapper; it deletes closed address requests (#604).
   await runAddressRequestsSweep();
+  // Same wrapper; it deletes operator audit records past 2 years (#398).
+  await runAuditRetentionSweep();
   // Also wrapped. Its gate holds back any account with mail still queued, so
   // running before the outbox cannot race a send (#289).
   await runAccountErasures();
