@@ -753,6 +753,15 @@ when the payment or provider evidence is conclusive, with a stable non-PII resol
 transition and its audit row commit in one transaction; Stripe dispute-close events still auto-resolve the
 matching dispute alert.
 
+**A reported address request** (an `address_request_reported` alert, #730). A recipient who did not
+know who sent them an address request link pressed "I don't know who sent this": the link closed and
+nothing was shared. The alert names the account that made the link. One report can be a recipient who
+forgot the sender; several against one account, or one against an account with many requests, suggests
+someone collecting addresses. There is no panel command to block an account's requests: an engineer
+looks at the account's other `address_requests` within their retention (7 days after they close), and
+`LETTER_IRL_ADDRESS_REQUESTS_ENABLED=false` turns the feature off for everyone. Resolve the alert once
+reviewed.
+
 **Ambiguous mail** (`/jobs`, a job `held / ambiguous`). Reconcile the job against the provider using
 its reference, then resolve with one conclusive pair:
 

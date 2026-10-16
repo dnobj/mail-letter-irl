@@ -133,10 +133,13 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  * 060 adds the alert type refund_not_completed (#730), with a partial unique
  * index on its order while open. The roles read commerce_operational_alerts
  * whole, and the panel's alert commands already transition any type. Nothing
- * to re-run; required, as the newest is.
+ * to re-run.
+ *
+ * 061 adds the alert type address_request_reported (#730). As 060: nothing to
+ * re-run; required, as the newest is.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
-  "060_refund_not_completed_alert.sql";
+  "061_address_request_reported_alert.sql";
 
 export interface AdminProvisioningArguments {
   environment: "development" | "production";

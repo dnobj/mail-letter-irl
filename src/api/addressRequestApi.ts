@@ -316,14 +316,14 @@ export async function handleAddressRequestApiRequest(
 
     if (route === 'decline') {
       const report = body.report === true;
-      const result = await declineAddressRequest(token);
+      const result = await declineAddressRequest(token, { report });
       // `reported` tells the page the report was taken, which an API without
       // reports would never say.
       if (result.ok) sendJson(res, 200, report ? { ok: true, reported: true } : { ok: true });
       else refused(res, result.refusal);
       writeDiagnostic('info', 'address_request.decline', { outcome: result.ok ? 'declined' : result.refusal, report });
-      // The request's id alone, never the sender's: an operator finds the
-      // account from it while the row is kept.
+      // The request's id alone, never the sender's. The decline also opened
+      // an address_request_reported alert naming the account (#730).
       if (report && result.ok) writeDiagnostic('warn', 'address_request.reported', { requestId: result.requestId });
       return true;
     }

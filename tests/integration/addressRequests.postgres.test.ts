@@ -100,6 +100,16 @@ describePostgres('address requests (#604)', () => {
     );
   }
 
+  /** The address_request_reported alerts that name a request (#730). */
+  async function reportedAlerts(requestId: string) {
+    const result = await pool.query<{ alert_type: string; severity: string; status: string; details: unknown }>(
+      `SELECT alert_type, severity, status, details FROM commerce_operational_alerts
+        WHERE alert_type = 'address_request_reported' AND details->>'requestId' = $1`,
+      [requestId]
+    );
+    return result.rows.map(row => ({ ...row, details: typeof row.details === 'string' ? JSON.parse(row.details) : row.details }));
+  }
+
   it('keeps the token only as its SHA-256, and the link lasts the days configured', async () => {
     vi.stubEnv('LETTER_IRL_ADDRESS_REQUEST_LINK_DAYS', '3');
     const userId = await seedUser();
@@ -221,6 +231,25 @@ describePostgres('address requests (#604)', () => {
     await expect(service.answerAddressRequest(token, ADDRESS)).resolves.toEqual({ ok: false, refusal: 'declined' });
     const stored = await service.getAddressRequest({ userId, requestId: request.requestId });
     expect(stored).toMatchObject({ state: 'declined', address: null });
+    // A plain decline opens no alert.
+    expect(await reportedAlerts(request.requestId)).toEqual([]);
+  });
+
+  it('opens one warning alert naming the account and the request when the recipient reports the link (#730)', async () => {
+    const userId = await seedUser();
+    const { request, token } = await made(userId);
+    await expect(service.declineAddressRequest(token, { report: true })).resolves.toEqual({ ok: true, requestId: request.requestId });
+    expect(await reportedAlerts(request.requestId)).toEqual([
+      { alert_type: 'address_request_reported', severity: 'warning', status: 'open', details: { userId, requestId: request.requestId } }
+    ]);
+    // A link already closed is not reported again: no second alert.
+    await expect(service.declineAddressRequest(token, { report: true })).resolves.toEqual({ ok: false, refusal: 'declined' });
+    expect(await reportedAlerts(request.requestId)).toHaveLength(1);
+    // Nor is an expired one, or one never made.
+    const late = await made(userId);
+    await age(late.request.requestId, 8);
+    await expect(service.declineAddressRequest(late.token, { report: true })).resolves.toEqual({ ok: false, refusal: 'expired' });
+    expect(await reportedAlerts(late.request.requestId)).toEqual([]);
   });
 
   it('reads a waiting request past its expiry as expired, and refuses an answer or a cancel then', async () => {

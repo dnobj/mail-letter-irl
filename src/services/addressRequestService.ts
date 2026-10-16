@@ -215,29 +215,47 @@ export type CloseByTokenResult =
   | { ok: true; requestId: string }
   | { ok: false; refusal: 'not_found' | Exclude<AddressRequestState, 'waiting'> };
 
+/** The alert a reported request opens (migration 061, #730). */
+export const ADDRESS_REQUEST_REPORTED_ALERT = 'address_request_reported';
+
 /**
  * Closes a request by its link: answered with the address given (already
  * checked by the caller), or declined. Once only: the UPDATE requires a
  * waiting, unexpired request, and a request it does not change is said to be
  * in the state it is in.
+ *
+ * A decline the recipient reports ("I don't know who sent this") also opens a
+ * warning alert naming the account that made the link and the request (#730),
+ * in the same statement, so the alert exists exactly when the decline does.
+ * The ids are all it carries: no name or address.
  */
 async function closeByToken(
   token: unknown,
-  closing: { status: 'answered'; address: GivenAddress } | { status: 'declined' }
+  closing: { status: 'answered'; address: GivenAddress } | { status: 'declined'; reported: boolean }
 ): Promise<CloseByTokenResult> {
   const hash = addressRequestTokenHash(token);
   if (!hash) return { ok: false, refusal: 'not_found' };
   const { name, ...rest } = closing.status === 'answered' ? closing.address : { name: undefined };
   const address = closing.status === 'answered' ? JSON.stringify(rest) : null;
+  const reported = closing.status === 'declined' && closing.reported;
   // The name the recipient gave, else the sender's for them: the envelope's.
   const closed = await query<{ request_id: string }>(
-    `UPDATE address_requests
-        SET status = $2,
-            address = $3::jsonb || jsonb_build_object('name', COALESCE($4::text, recipient_name)),
-            closed_at = NOW()
-      WHERE token_hash = $1 AND status = 'waiting' AND expires_at > NOW()
-      RETURNING request_id`,
-    [hash, closing.status, address, name ?? null]
+    `WITH closed AS (
+       UPDATE address_requests
+          SET status = $2,
+              address = $3::jsonb || jsonb_build_object('name', COALESCE($4::text, recipient_name)),
+              closed_at = NOW()
+        WHERE token_hash = $1 AND status = 'waiting' AND expires_at > NOW()
+        RETURNING request_id, user_id
+     ), alerted AS (
+       INSERT INTO commerce_operational_alerts (alert_type, severity, details)
+       SELECT $6, 'warning', jsonb_build_object('userId', closed.user_id, 'requestId', closed.request_id)
+         FROM closed
+        WHERE $5::boolean
+       RETURNING alert_id
+     )
+     SELECT request_id FROM closed`,
+    [hash, closing.status, address, name ?? null, reported, ADDRESS_REQUEST_REPORTED_ALERT]
   );
   if (closed.rows[0]) return { ok: true, requestId: closed.rows[0].request_id };
   const page = await readAddressRequestPage(token);
@@ -254,9 +272,12 @@ export function answerAddressRequest(token: unknown, address: GivenAddress): Pro
   return closeByToken(token, { status: 'answered', address });
 }
 
-/** The recipient declines. */
-export function declineAddressRequest(token: unknown): Promise<CloseByTokenResult> {
-  return closeByToken(token, { status: 'declined' });
+/**
+ * The recipient declines; `report` when they do not know who sent the link,
+ * which also opens an alert for a person (#730).
+ */
+export function declineAddressRequest(token: unknown, options: { report?: boolean } = {}): Promise<CloseByTokenResult> {
+  return closeByToken(token, { status: 'declined', reported: options.report === true });
 }
 
 /**

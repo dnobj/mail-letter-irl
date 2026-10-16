@@ -147,7 +147,7 @@ describe('the address request routes (#604)', () => {
 
   it('takes a decline, and says why a link it could not change was refused', async () => {
     await expect(call('decline', { token: TOKEN })).resolves.toMatchObject({ status: 200, json: { ok: true } });
-    expect(declineAddressRequest).toHaveBeenCalledWith(TOKEN);
+    expect(declineAddressRequest).toHaveBeenCalledWith(TOKEN, { report: false });
     vi.mocked(declineAddressRequest).mockResolvedValueOnce({ ok: false, refusal: 'answered' });
     await expect(call('decline', { token: TOKEN })).resolves.toMatchObject({ status: 409, json: { reason: 'answered' } });
     vi.mocked(declineAddressRequest).mockResolvedValueOnce({ ok: false, refusal: 'not_found' });
@@ -160,12 +160,15 @@ describe('the address request routes (#604)', () => {
     expect(reported.status).toBe(200);
     // Exactly this: nothing of the request or its sender.
     expect(reported.json).toEqual({ ok: true, reported: true });
-    expect(declineAddressRequest).toHaveBeenCalledWith(TOKEN);
+    // The service opens the alert with the decline (#730).
+    expect(declineAddressRequest).toHaveBeenCalledWith(TOKEN, { report: true });
     expect(writeDiagnostic).toHaveBeenCalledWith('info', 'address_request.decline', { outcome: 'declined', report: true });
     expect(writeDiagnostic).toHaveBeenCalledWith('warn', 'address_request.reported', { requestId: REQUEST_ID });
     // Only true reports: anything else is a plain decline.
     vi.mocked(writeDiagnostic).mockClear();
+    vi.mocked(declineAddressRequest).mockClear();
     expect((await call('decline', { token: TOKEN, report: 'yes' })).json).toEqual({ ok: true });
+    expect(declineAddressRequest).toHaveBeenCalledWith(TOKEN, { report: false });
     expect((await call('decline', { token: TOKEN })).json).toEqual({ ok: true });
     expect(writeDiagnostic).toHaveBeenCalledWith('info', 'address_request.decline', { outcome: 'declined', report: false });
     expect(writeDiagnostic).not.toHaveBeenCalledWith('warn', 'address_request.reported', expect.anything());
