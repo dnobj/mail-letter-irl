@@ -140,14 +140,32 @@ which PostgreSQL takes when a transaction updates the same order twice, is then 
 rows below it safe. Note that a bare `UPDATE` takes a row lock (`FOR NO KEY UPDATE` when it changes
 no key column, which conflicts with every other writer's lock on the row), so an unguarded
 `UPDATE credit_ledger` or `UPDATE image_entitlements` counts as taking that lock first and inverts
-the order. A second `UPDATE` of a row the transaction already changed re-checks its foreign keys, a
-share lock (`FOR KEY SHARE`) on each referenced row, taken after the row itself: the order's draft
-and account, a letter's funding order, a job's letter, a ledger lot's order. Only `FOR UPDATE`
-blocks that share lock. So a parent row a path holds while it waits for one of its children is taken
-`FOR NO KEY UPDATE` (as every draft is), unless every path that updates that child twice already
-holds the parent; orders and letters are held `FOR UPDATE` today under that second rule, since the
-mail paths take the order, then the letter, then the job (`lockFundingGraph`). Call `lockAccountForBalanceChange` (`src/services/accountLock.ts`)
-before the first ledger or entitlement statement.
+the order. Call `lockAccountForBalanceChange` (`src/services/accountLock.ts`) before the first
+ledger or entitlement statement.
+
+Foreign keys take implicit locks too. Inserting a row, changing a foreign-key column, or updating a
+row the transaction already changed takes a share lock (`FOR KEY SHARE`) on each row its foreign keys
+reference, held to the end of the transaction (or of the savepoint it was taken in) and taken after
+the row itself. Only `FOR UPDATE`, a
+`DELETE`, or an `UPDATE` that changes a key blocks it. Account for these locks when you add or move a
+lock. The code handles them in these places:
+
+- **Drafts are held `FOR NO KEY UPDATE`** (#730), apart from the statements that delete drafts and
+  the retention sweeps, which skip a locked draft. A refund holding its order updates the order twice,
+  which re-checks the order's key to its draft; a draft held `FOR UPDATE` by a path waiting for that
+  order would deadlock with it. Because a draft holder then no longer blocks a check on the draft,
+  every path that writes an order's `draft_id` takes the draft's lock first; `prepareJitOrder` is the
+  only one.
+- **A send takes the account before inserting its letter** (#730). The letter's insert share-locks
+  the account; inserted first, the letter would make two sends from one account each wait for the
+  other's share lock to take the account `FOR UPDATE`.
+- **A payment's fulfilment takes the account before its second update of the order** (#288), for
+  the same reason.
+- **The account stays `FOR UPDATE`.** It is what makes a checkout's order insert wait while an
+  account is erased (#449). One crossing is accepted: a draft made after an erasure's first statement
+  is not held by the erasure, so a send, checkout or draft edit holding that draft can meet the
+  erasure at the account row. PostgreSQL fails one of the two; an erasure failed that way is tried
+  again at the next run (`src/services/adminOperationsQueue.ts`).
 
 Within the mail graph, take the funding order lock from `lockFundingGraph` and then address that
 order by its `order_id`. Re-deriving the order from `letter_id` in a later `UPDATE ... WHERE

@@ -283,8 +283,11 @@ describePostgres('operator audit retention', () => {
       purge.catch(() => undefined);
       const purgePid = await sessionBlockedBy(prober, holderPid);
       expect(purgePid).not.toBeNull();
-      // Where it waits: it holds both tables, and waits for the holder's row, a
-      // wait only its DELETE makes, after the trigger is switched off.
+      // Where it waits: it holds both tables, and waits for the holder's row,
+      // at its DELETE, which the code runs after switching the trigger off. A
+      // purge that never switched it off would wait there too (the trigger
+      // locks the row first); the deletion tests above catch that one, since
+      // the trigger would refuse their deletes.
       const locks = await prober.query<{ locktype: string; relation: string | null; mode: string; granted: boolean }>(
         `SELECT locktype, relation::regclass::text AS relation, mode, granted FROM pg_locks WHERE pid = $1`,
         [purgePid]
