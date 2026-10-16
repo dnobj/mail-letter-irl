@@ -106,6 +106,14 @@ describe("admin grant statements", () => {
     expect(sql).toContain(
       'GRANT INSERT ON TABLE "public".commerce_operator_audit_events TO "letter_irl_admin_operator_development"',
     );
+    // Write elevation's TOTP counter (#730): the operator keeps it, the reader never sees it.
+    expect(sql).toContain(
+      'GRANT SELECT, INSERT ON TABLE "public".admin_totp_counters TO "letter_irl_admin_operator_development"',
+    );
+    expect(sql).toContain(
+      'GRANT UPDATE (last_counter, updated_at) ON TABLE "public".admin_totp_counters TO "letter_irl_admin_operator_development"',
+    );
+    expect(sql).not.toMatch(/admin_totp_counters TO "letter_irl_admin_reader_development/);
     // The reader writes nothing but its own audit rows.
     for (const line of statements) {
       if (

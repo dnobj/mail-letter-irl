@@ -142,10 +142,15 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  * due under the two-year policy with the append-only triggers off inside its own
  * transaction. EXECUTE is revoked from PUBLIC and the roles are granted none,
  * and they still hold SELECT and INSERT only on the audit tables, so they can
- * delete nothing. Nothing to re-run; required, as the newest is.
+ * delete nothing. Nothing to re-run.
+ *
+ * 063 adds admin_totp_counters (#730), the last accepted TOTP counter per
+ * operator, which write elevation keeps through the operator role. The
+ * operator is granted it below: provisioning MUST be re-run once after 063,
+ * or elevation is refused. Required, as the newest is.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
-  "062_audit_retention_purge.sql";
+  "063_admin_totp_counters.sql";
 
 export interface AdminProvisioningArguments {
   environment: "development" | "production";
@@ -622,6 +627,10 @@ export function buildAdminGrantStatements(
     `GRANT INSERT ON TABLE ${table("admin_command_runs")} TO ${operatorRole}`,
     `GRANT UPDATE (status, started_at, completed_at, sanitized_result_json, error_code) ON TABLE ${table("admin_command_runs")} TO ${operatorRole}`,
     `GRANT UPDATE (status, attempts, locked_at, locked_by, completed_at, sanitized_result_json, error_code) ON TABLE ${table("admin_operations")} TO ${operatorRole}`,
+    // Write elevation's last accepted TOTP counter (063, #730): read, then
+    // raised in one upsert. The operator only: the reader never elevates.
+    `GRANT SELECT, INSERT ON TABLE ${table("admin_totp_counters")} TO ${operatorRole}`,
+    `GRANT UPDATE (last_counter, updated_at) ON TABLE ${table("admin_totp_counters")} TO ${operatorRole}`,
   );
 
   // One statement per privilege so each grant is reviewable on its own line.

@@ -121,6 +121,11 @@ export async function main(): Promise<void> {
     whois = { whois: async () => null };
     writeDiagnostic("warn", "admin.local_dev_mode", { environment: config.environment });
   }
+  if (config.legacyTotpSecretIgnored) {
+    // Delete the variable once the promotion has settled: until then the
+    // release before this one, which needs it, can still be rolled back to.
+    writeDiagnostic("warn", "admin.legacy_totp_secret_ignored", { environment: config.environment });
+  }
 
   const health = startHealthListener(config.healthPort, state, supervisor);
   const shutdown = async (code: number) => {
