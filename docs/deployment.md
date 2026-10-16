@@ -763,7 +763,7 @@ service, 7 by default) after it closes, the account's earlier requests sooner, a
 if the account is erased. Review soon. There is no
 panel command to block an account's requests: an engineer looks at the account's other
 `address_requests` while they are kept, and `LETTER_IRL_ADDRESS_REQUESTS_ENABLED=false` turns the
-feature off for everyone. Resolve the alert once reviewed.
+feature off for everyone. Resolve the alert once reviewed, with a code such as `report_reviewed`.
 
 **Ambiguous mail** (`/jobs`, a job `held / ambiguous`). Reconcile the job against the provider using
 its reference, then resolve with one conclusive pair:

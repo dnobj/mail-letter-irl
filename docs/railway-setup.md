@@ -109,7 +109,7 @@ LETTER_IRL_BETA_ACCOUNT_DAILY_CHARGE_CENTS=<spend per account per day, in cents;
 # Where the operator is told what needs a person (src/services/operatorNotify.ts): a daily limit that
 # refused someone, held mail that missed its mail day, letters the provider cancelled, a dispatch whose
 # outcome is unknown, mail held for its funding, a Pay & Send order refunded or disputed after its letter
-# went, or may have gone, to the provider, a refund that failed at Stripe, an address request link its
+# went, or may have gone, to the provider, a refund that failed or was cancelled at Stripe, an address request link its
 # recipient reported (#730). An https URL that takes a plain-text POST and tells the
 # owner of EVERY post, such as an ntfy topic (https://ntfy.sh/<topic>). Not a healthchecks.io /fail URL:
 # a check emails only when it changes state, so it tells the first notice and then nothing until it is

@@ -173,5 +173,5 @@ export const OPERATOR_NOTICES = {
   // No day count: the maintenance service, which deletes requests, sets it,
   // and the API that sends this need not know it (#730 review round 2).
   addressRequestReported: () =>
-    'A recipient reported an address request link as from someone they do not know. Review the account that made it soon: the reported request is deleted a few days after it closes, and at once if the account is erased. See the Alerts page on the admin panel.'
+    'A recipient reported an address request link as from someone they do not know. Review the account that made it soon: the reported request is deleted soon after it closes, and at once if the account is erased. See the Alerts page on the admin panel.'
 } as const;

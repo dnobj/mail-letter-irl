@@ -161,7 +161,7 @@ describe('the words', () => {
     // The evidence does not last: the notice says to look soon, and names no
     // day count, which only the maintenance service knows (#730).
     expect(OPERATOR_NOTICES.addressRequestReported()).toBe(
-      'A recipient reported an address request link as from someone they do not know. Review the account that made it soon: the reported request is deleted a few days after it closes, and at once if the account is erased. See the Alerts page on the admin panel.'
+      'A recipient reported an address request link as from someone they do not know. Review the account that made it soon: the reported request is deleted soon after it closes, and at once if the account is erased. See the Alerts page on the admin panel.'
     );
   });
 

@@ -90,6 +90,7 @@ const validateAddress = vi.fn();
 
 beforeEach(() => {
   vi.stubEnv('LETTER_IRL_ADDRESS_REQUESTS_ENABLED', 'true');
+  vi.mocked(reportToOperator).mockClear();
   vi.mocked(readAddressRequestPage).mockReset().mockResolvedValue(WAITING as never);
   vi.mocked(answerAddressRequest).mockReset().mockResolvedValue({ ok: true, requestId: REQUEST_ID });
   vi.mocked(declineAddressRequest).mockReset().mockResolvedValue({ ok: true, requestId: REQUEST_ID });

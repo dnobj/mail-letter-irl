@@ -240,7 +240,7 @@ describePostgres('address requests (#604)', () => {
     const { request, token } = await made(userId);
     await expect(service.declineAddressRequest(token, { report: true })).resolves.toEqual({ ok: true, requestId: request.requestId });
     expect(await reportedAlerts(request.requestId)).toEqual([
-      { alert_type: 'address_request_reported', severity: 'warning', status: 'open', details: { userId, requestId: request.requestId } }
+      { alert_type: service.ADDRESS_REQUEST_REPORTED_ALERT, severity: 'warning', status: 'open', details: { userId, requestId: request.requestId } }
     ]);
     // A link already closed is not reported again: no second alert.
     await expect(service.declineAddressRequest(token, { report: true })).resolves.toEqual({ ok: false, refusal: 'declined' });
