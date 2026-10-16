@@ -4,8 +4,20 @@ import type pg from 'pg';
  * Canonical lock order for every transaction that mutates account balances,
  * grants, or entitlements:
  *
- *   orders -> letters -> letter_jobs -> image_generation_reservations
- *          -> users -> credit_ledger -> image_entitlements
+ *   letter_drafts -> orders -> letters -> letter_jobs
+ *          -> image_generation_reservations -> users -> credit_ledger
+ *          -> image_entitlements
+ *
+ * A draft comes before its orders (#730): a prepaid send and a checkout's
+ * preparation lock the draft and then the draft's orders, and the paid
+ * fulfilment finds its order unlocked, locks the draft, then the order
+ * (commerceService lockDraftThenOrder).
+ *
+ * One path runs against it: restoring quarantined content (retentionService)
+ * locks the saved copy in redacted_content_quarantine before its draft or
+ * letter. It runs only in the maintenance run, before that run's erasures,
+ * so it meets an erasure only if two runs overlap, and both retry a lock
+ * conflict.
  *
  * `users` is the account aggregate root. Locking it first is what makes the
  * rest of the order safe: `credit_ledger` and `image_entitlements` rows are
