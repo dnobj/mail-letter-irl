@@ -71,7 +71,7 @@ describePostgres('operator audit retention', () => {
 
   beforeEach(async () => {
     // TRUNCATE is not a row DELETE, so the triggers let it clear the tables.
-    await pool.query('TRUNCATE admin_audit_events, commerce_operator_audit_events');
+    await pool.query('TRUNCATE admin_audit_events, commerce_operator_audit_events, admin_operations, admin_command_runs');
   });
 
   /** An admin audit row whose action happened at `when` (a fixed SQL clock). */
@@ -117,11 +117,11 @@ describePostgres('operator audit retention', () => {
     await commerceRow(COMMERCE_DUE);
     const keptCommerce = [await commerceRow(COMMERCE_NOT_YET), await commerceRow(`NOW() + INTERVAL '2 years'`)].sort();
 
-    await expect(service.purgeExpiredAuditRecords()).resolves.toEqual({ adminDeleted: 1, commerceDeleted: 1 });
+    await expect(service.purgeExpiredAuditRecords()).resolves.toEqual({ adminDeleted: 1, commerceDeleted: 1, commandRunsDeleted: 0, operationsDeleted: 0 });
     expect(await adminIds()).toEqual(keptAdmin);
     expect(await commerceIds()).toEqual(keptCommerce);
     // Nothing left to do: a second run deletes nothing.
-    await expect(service.purgeExpiredAuditRecords()).resolves.toEqual({ adminDeleted: 0, commerceDeleted: 0 });
+    await expect(service.purgeExpiredAuditRecords()).resolves.toEqual({ adminDeleted: 0, commerceDeleted: 0, commandRunsDeleted: 0, operationsDeleted: 0 });
   });
 
   it('works in batches, oldest first, a bounded number per run', async () => {
@@ -132,10 +132,10 @@ describePostgres('operator audit retention', () => {
     const newestCommerce = await commerceRow(`NOW() - INTERVAL '10 days'`);
     await commerceRow(`NOW() - INTERVAL '30 days'`);
     await commerceRow(`NOW() - INTERVAL '20 days'`);
-    await expect(service.purgeExpiredAuditRecords(1, 2)).resolves.toEqual({ adminDeleted: 2, commerceDeleted: 2 });
+    await expect(service.purgeExpiredAuditRecords(1, 2)).resolves.toEqual({ adminDeleted: 2, commerceDeleted: 2, commandRunsDeleted: 0, operationsDeleted: 0 });
     expect(await adminIds()).toEqual([newest]);
     expect(await commerceIds()).toEqual([newestCommerce]);
-    await expect(service.purgeExpiredAuditRecords(1, 2)).resolves.toEqual({ adminDeleted: 1, commerceDeleted: 1 });
+    await expect(service.purgeExpiredAuditRecords(1, 2)).resolves.toEqual({ adminDeleted: 1, commerceDeleted: 1, commandRunsDeleted: 0, operationsDeleted: 0 });
     expect(await adminIds()).toHaveLength(0);
     expect(await commerceIds()).toHaveLength(0);
   });
@@ -176,7 +176,7 @@ describePostgres('operator audit retention', () => {
       await writer.query('ROLLBACK').catch(() => undefined);
       writer.release();
     }
-    await expect(service.purgeExpiredAuditRecords()).resolves.toEqual({ adminDeleted: 0, commerceDeleted: 1 });
+    await expect(service.purgeExpiredAuditRecords()).resolves.toEqual({ adminDeleted: 0, commerceDeleted: 1, commandRunsDeleted: 0, operationsDeleted: 0 });
   }, 30_000);
 
   it('gives up after a few seconds when a writer holds a table, and leaves it as it was (#398 review)', async () => {
@@ -204,7 +204,7 @@ describePostgres('operator audit retention', () => {
       await writer.query('ROLLBACK').catch(() => undefined);
       writer.release();
     }
-    await expect(service.purgeExpiredAuditRecords()).resolves.toEqual({ adminDeleted: 1, commerceDeleted: 0 });
+    await expect(service.purgeExpiredAuditRecords()).resolves.toEqual({ adminDeleted: 1, commerceDeleted: 0, commandRunsDeleted: 0, operationsDeleted: 0 });
   }, 30_000);
 
   /**
@@ -258,7 +258,7 @@ describePostgres('operator audit retention', () => {
         [HEX]
       );
       await command.query('COMMIT');
-      await expect(purge).resolves.toEqual({ adminDeleted: 0, commerceDeleted: 0 });
+      await expect(purge).resolves.toEqual({ adminDeleted: 0, commerceDeleted: 0, commandRunsDeleted: 0, operationsDeleted: 0 });
     } finally {
       await command.query('ROLLBACK').catch(() => undefined);
       // On a failure above, let the purge end before the next test.
@@ -328,7 +328,7 @@ describePostgres('operator audit retention', () => {
 
     // After a purge the triggers are on again, and refuse a row it kept.
     const youngAdmin = await adminRow(NOT_YET);
-    await expect(service.purgeExpiredAuditRecords()).resolves.toEqual({ adminDeleted: 1, commerceDeleted: 1 });
+    await expect(service.purgeExpiredAuditRecords()).resolves.toEqual({ adminDeleted: 1, commerceDeleted: 1, commandRunsDeleted: 0, operationsDeleted: 0 });
     const triggers = await pool.query<{ tgname: string; tgenabled: string }>(
       `SELECT tgname, tgenabled FROM pg_trigger
         WHERE tgname IN ('admin_audit_events_append_only', 'commerce_operator_audit_events_append_only')
@@ -354,5 +354,117 @@ describePostgres('operator audit retention', () => {
     expect(acl.rows[0].proacl).not.toBeNull();
     expect(acl.rows[0].proacl).not.toMatch(/(^|[{,])=X/);
     await expect(pool.query('SELECT * FROM purge_expired_audit_records(0)')).rejects.toThrow(/positive integer/);
+  });
+  // #771: the admin panel's command runs and their operations, migration 064.
+
+  /** A command run in `status`, finished at `when` (or, unfinished, requested then). */
+  async function commandRun(when: string, status: 'succeeded' | 'failed' | 'running' = 'succeeded'): Promise<string> {
+    const finished = status !== 'running';
+    const result = await pool.query<{ id: string }>(
+      `INSERT INTO admin_command_runs
+         (idempotency_key, actor_sid, environment, action, target_type, target_id, preview_digest,
+          status, requested_at, started_at, completed_at, correlation_id, error_code)
+       VALUES (gen_random_uuid()::text, 'operator', 'development', 'account.erase', 'account', 'auth0|someone', $1,
+               $2, ${when}, ${when}, ${finished ? when : 'NULL'}, gen_random_uuid(), $3)
+       RETURNING id`,
+      [HEX, status, status === 'failed' ? 'TEST_FAILED' : null]
+    );
+    return result.rows[0].id;
+  }
+
+  /** The run's queued operation, in `status`, finished at `when` when it has. */
+  async function operation(commandId: string, status: 'succeeded' | 'pending', when = 'NULL'): Promise<void> {
+    await pool.query(
+      `INSERT INTO admin_operations (command_id, operation_type, environment, payload_json, status, completed_at)
+       VALUES ($1, 'account.erase', 'development', '{"userId":"auth0|someone"}', $2, ${status === 'pending' ? 'NULL' : when})`,
+      [commandId, status]
+    );
+  }
+
+  async function runIds(): Promise<string[]> {
+    return (await pool.query<{ id: string }>('SELECT id FROM admin_command_runs')).rows.map(row => row.id).sort();
+  }
+
+  async function operationCount(): Promise<number> {
+    return (await pool.query<{ n: number }>('SELECT COUNT(*)::int AS n FROM admin_operations')).rows[0].n;
+  }
+
+  it('deletes finished command runs and their operations once due, and keeps any whose work is not done or not due (#771)', async () => {
+    const due = await commandRun(EXPIRED);
+    await operation(due, 'succeeded', EXPIRED);
+    const dueFailed = await commandRun(EXPIRED, 'failed');
+    const kept = [
+      await commandRun(NOT_YET),
+      await commandRun('NOW()'),
+      // Unfinished, however old.
+      await commandRun(EXPIRED, 'running'),
+    ];
+    const pendingWork = await commandRun(EXPIRED);
+    await operation(pendingWork, 'pending');
+    // Its operation finished later, and is not due yet.
+    const laterWork = await commandRun(EXPIRED);
+    await operation(laterWork, 'succeeded', NOT_YET);
+    kept.push(pendingWork, laterWork);
+
+    await expect(service.purgeExpiredAuditRecords()).resolves.toEqual({
+      adminDeleted: 0, commerceDeleted: 0, commandRunsDeleted: 2, operationsDeleted: 1
+    });
+    expect(await runIds()).toEqual(kept.sort());
+    expect(await runIds()).not.toContain(due);
+    expect(await runIds()).not.toContain(dueFailed);
+    expect(await operationCount()).toBe(2);
+    await expect(service.purgeExpiredAuditRecords()).resolves.toMatchObject({ commandRunsDeleted: 0, operationsDeleted: 0 });
+  });
+
+  it('keeps a command run while an audit row names it, and deletes both once the row is due (#771)', async () => {
+    const auditRowFor = async (commandId: string, when: string) =>
+      pool.query(
+        `INSERT INTO admin_audit_events
+           (occurred_at, actor_sid, actor_name, environment, mode, session_id_hash,
+            correlation_id, action, target_type, outcome, command_id)
+         VALUES (${when}, 'operator', 'Operator', 'development', 'full', $1,
+                 gen_random_uuid(), 'account.erase', 'account', 'succeeded', $2)`,
+        [HEX, commandId]
+      );
+    const named = await commandRun(EXPIRED);
+    await auditRowFor(named, EXPIRED);
+    const stillNamed = await commandRun(EXPIRED);
+    await auditRowFor(stillNamed, NOT_YET);
+
+    // The audit rows go first, in the same sweep, so the first run goes with its row.
+    await expect(service.purgeExpiredAuditRecords()).resolves.toEqual({
+      adminDeleted: 1, commerceDeleted: 0, commandRunsDeleted: 1, operationsDeleted: 0
+    });
+    expect(await runIds()).toEqual([stillNamed]);
+  });
+
+  it('takes a command run nobody else holds, and leaves a held one for the next pass (#771)', async () => {
+    const held = await commandRun(EXPIRED);
+    const free = await commandRun(EXPIRED);
+    const holder = await pool.connect();
+    try {
+      await holder.query('BEGIN');
+      await holder.query('SELECT 1 FROM admin_command_runs WHERE id = $1 FOR UPDATE', [held]);
+      await expect(service.purgeExpiredAuditRecords()).resolves.toMatchObject({ commandRunsDeleted: 1 });
+      expect(await runIds()).toEqual([held]);
+    } finally {
+      await holder.query('ROLLBACK').catch(() => undefined);
+      holder.release();
+    }
+    await expect(service.purgeExpiredAuditRecords()).resolves.toMatchObject({ commandRunsDeleted: 1 });
+    expect(await runIds()).toEqual([]);
+    expect(free).toBeTruthy();
+  });
+
+  it("is the owner's alone too, and refuses a batch below one (#771)", async () => {
+    const acl = await pool.query<{ proacl: string | null }>(
+      `SELECT proacl::text AS proacl FROM pg_proc
+        WHERE oid = to_regprocedure('purge_expired_admin_command_records(integer)')`
+    );
+    expect(acl.rows).toHaveLength(1);
+    expect(acl.rows[0].proacl).not.toBeNull();
+    expect(acl.rows[0].proacl).not.toMatch(/(^|[{,])=X/);
+    await expect(pool.query('SELECT * FROM purge_expired_admin_command_records(0)')).rejects.toThrow(/positive integer/);
+    await expect(pool.query('SELECT * FROM purge_expired_admin_command_records(NULL)')).rejects.toThrow(/positive integer/);
   });
 });

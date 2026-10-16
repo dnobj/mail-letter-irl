@@ -77,7 +77,10 @@
   `audit-retention-sweep` deletes each one two days before its two years are up (#398), so a run
   that comes late still deletes inside "up to 2 years", through `purge_expired_audit_records`
   (migration 062), which only the database owner can run. It switches the append-only triggers off
-  only inside its own transaction. The triggers refuse every other change.
+  only inside its own transaction. The triggers refuse every other change. The admin panel's
+  command runs and their queued operations go on the same schedule, after the audit rows that name
+  them (#771, `purge_expired_admin_command_records`, migration 064), never while their work is
+  unfinished.
 
 ## Future Compliance Hooks
 
