@@ -394,8 +394,9 @@ export async function createMailOrderFromDraftWithClient(
   // different drafts from one account, each holding the share lock its insert
   // took, would each wait for the other's to take the row. Held first, the
   // second send waits here holding nothing the first needs. A payment's
-  // fulfilment already holds it (transitionPaidCheckout), so this costs it
-  // nothing.
+  // fulfilment from its webhook already holds it (transitionPaidCheckout);
+  // the hourly recovery (fulfillPaidOrder) takes it here, after the draft and
+  // the order, as the canonical order has it.
   await lockAccountForBalanceChange(client, params.userId);
 
   const letterId = randomUUID();
@@ -481,8 +482,8 @@ export async function createMailOrderFromDraftWithClient(
     creditsRemaining = deduction.user.credits;
 
     // After the deduction, under the account row held since before the
-    // letter's insert (above), so the per-account count is serialised and
-    // needs no second lock.
+    // letter's insert (above), so the per-account count is serialised; the
+    // caps take their own advisory locks as well (#730).
     //
     // An earlier revision of this comment justified the placement by claiming
     // that taking the lock sooner would invert into users -> orders against the

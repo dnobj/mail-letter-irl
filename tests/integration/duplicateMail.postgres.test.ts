@@ -574,8 +574,8 @@ describePostgres('duplicate mail check (#412)', () => {
     const userId = await seedUser();
     const first = await seedDraft(userId);
     const second = await seedDraft(userId, { body: 'Hi Sam, see you on Friday.' });
-    // Another session holds the account the way a draft edit or an image
-    // reservation might, FOR NO KEY UPDATE, which a letter's foreign-key check
+    // Another session holds the account the way a draft edit might, FOR NO
+    // KEY UPDATE, which a letter's foreign-key check
     // does not wait for. Both sends get as far as they can and queue on the
     // account; then it lets go. Had each inserted its letter first, each would
     // hold the share lock that check takes, and each would wait for the other's
@@ -592,7 +592,10 @@ describePostgres('duplicate mail check (#412)', () => {
         send.catch(() => undefined);
         sends.push(send);
       }
-      // Until both wait, directly or behind each other, on the holder.
+      // Until both wait: the first on the holder, the second on the holder or
+      // queued behind the first, so any blocked session other than the holder
+      // counts. The integration suites run one at a time, so no other test's
+      // session is waiting in this database meanwhile.
       let waiting = 0;
       for (let attempt = 0; attempt < 100 && waiting < 2; attempt += 1) {
         const { rows } = await prober.query<{ n: number }>(
