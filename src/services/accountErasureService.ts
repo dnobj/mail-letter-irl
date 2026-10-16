@@ -418,10 +418,19 @@ export type ErasureOutcome =
 /**
  * Erase one account, inside the caller's transaction, as the database owner.
  *
- * Locks first, in the canonical order (src/services/accountLock.ts): orders,
- * letters, letter_jobs, image_generation_reservations, then the account row,
- * and the gate is read after the account row is locked. What that guarantees,
- * and what it does not (#446 review):
+ * Locks first, in the canonical order (src/services/accountLock.ts): the
+ * account's drafts, orders, letters, letter_jobs,
+ * image_generation_reservations, then the account row, and the gate is read
+ * after the account row is locked. The drafts come first (#730): every path
+ * that holds a draft and an order or the account takes the draft first (a
+ * send, a checkout, a payment's fulfilment), so this one does too, and none
+ * of them can hold a draft this waits for while waiting for what this holds.
+ * That covers the drafts there when the first statement runs. A draft made in
+ * the moments after it (a preview committed before this locks the account) is
+ * not held, so a send or restyle of it can still cross this at the account
+ * row; PostgreSQL then fails one, and an erasure failed that way is tried
+ * again at the next run without spending an attempt (adminOperationsQueue).
+ * What that guarantees, and what it does not (#446 review):
  *   - a send or fulfilment that reaches the account row after this took it
  *     waits, and then finds the account blocked (the tombstone sets a send
  *     block) or its caller refused at sign-in;
@@ -432,11 +441,9 @@ export type ErasureOutcome =
  *     row being locked FOR UPDATE BEFORE the gate is read: with a weaker lock
  *     there (FOR NO KEY UPDATE, or none), a checkout could insert and commit
  *     between the gate and the tombstone, and the window would reopen;
- *   - one that already holds its draft when this runs can deadlock with it
- *     instead, because the send paths take the draft first and no order
- *     serves both. PostgreSQL aborts one side. If it is this one, the worker
- *     rolls back to its savepoint and tries again at the next run without
- *     spending an attempt; the gate then sees whatever the send left behind.
+ *   - one that already holds its draft when this runs makes this wait for
+ *     it, before this holds anything the send needs, and the gate then sees
+ *     whatever the send left behind (#730; before, the two could deadlock).
  *   - a tool call already past sign-in when this commits can still write one
  *     draft to the tombstone. Nothing reads it, and the draft cleanup deletes
  *     it within about six days (it expires a day after it is written, and goes
@@ -446,6 +453,7 @@ export type ErasureOutcome =
  * through the drafts, so they are deleted before the drafts are.
  */
 export async function eraseAccountWithClient(client: SqlClient, userId: string): Promise<ErasureOutcome> {
+  await client.query(`SELECT draft_id FROM letter_drafts WHERE user_id = $1 ORDER BY draft_id FOR UPDATE`, [userId]);
   await client.query(`SELECT order_id FROM orders WHERE user_id = $1 ORDER BY order_id FOR UPDATE`, [userId]);
   await client.query(`SELECT letter_id FROM letters WHERE user_id = $1 ORDER BY letter_id FOR UPDATE`, [userId]);
   await client.query(

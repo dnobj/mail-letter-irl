@@ -6,7 +6,7 @@ import type pg from "pg";
  * #730). It is the same updated_at the account previews read, through a JS
  * Date as theirs is, so the two compare at the same precision.
  *
- * In the canonical lock order (src/services/accountLock.ts) only order,
+ * In the canonical lock order (src/services/accountLock.ts) only draft, order,
  * letter, job and reservation rows come before `users`, and no account command
  * locks any of those: each one takes this row first anyway, or touches the
  * ledger, entitlements or gift letters after it.
