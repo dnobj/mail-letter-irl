@@ -297,7 +297,6 @@ async function runAuditRetentionSweep(): Promise<void> {
       writeDiagnostic('info', 'audit_retention.swept', {
         adminDeleted: sweep.result?.adminDeleted ?? 0,
         commerceDeleted: sweep.result?.commerceDeleted ?? 0,
-        commandRunsDeleted: sweep.result?.commandRunsDeleted ?? 0,
         operationsDeleted: sweep.result?.operationsDeleted ?? 0
       });
     }
