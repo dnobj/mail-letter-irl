@@ -553,6 +553,45 @@ describePostgres('proportional pack refund command', () => {
     }
   }, 60_000);
 
+  it("records a second refund carrying a command's metadata as one the app did not issue, and leaves the command as it was (#730)", async () => {
+    for (const createStatus of ['succeeded', 'pending']) {
+      const { orderId } = await seedPackHolder({ credits: 10, amountCents: 1000 });
+      const stripe = stubStripe({ createStatus });
+      await packRefund.refundPackLetters(command(orderId, 2), stripe.seam, COMMAND_ENV);
+      const before = (await commandRows(orderId))[0];
+      expect(before.stripe_refund_id, createStatus).toBeTruthy();
+
+      // Same order, payment intent, amount and metadata; another refund.
+      const second = refundFor(stripe.created[0], 'succeeded');
+      await commerce.processStripeWebhookEvent(refundEvent('refund.updated', second));
+
+      expect((await commandRows(orderId))[0], createStatus).toEqual(before);
+      expect((await readOrder(orderId)).amount_refunded_cents, createStatus).toBe(createStatus === 'succeeded' ? 400 : 0);
+      const unmatched = (await alerts(orderId)).filter(alert => alert.alert_type === 'stripe_partial_refund_unmatched');
+      expect(unmatched, createStatus).toHaveLength(1);
+      expect(unmatched[0].details, createStatus).toMatchObject({ reason: 'another_refund', stripeRefundId: second.id });
+    }
+  }, 60_000);
+
+  it('does not adopt a refund that names the command for another amount, and makes its own (#730)', async () => {
+    const { orderId } = await seedPackHolder({ credits: 10, amountCents: 1000 });
+    const flaky = stubStripe({
+      createError: Object.assign(new Error('socket hang up'), { type: 'StripeConnectionError' })
+    });
+    await packRefund.refundPackLetters(command(orderId, 2), flaky.seam, COMMAND_ENV);
+    const odd = { ...refundFor(flaky.created[0], 'succeeded'), amount: 900 } as Stripe.Refund;
+    const sweepSeam = stubStripe({ createStatus: 'succeeded', listed: [odd] });
+
+    const swept = await packRefund.reconcilePackRefunds(sweepSeam.seam, { retryDelaySeconds: 0 });
+    expect(swept).toMatchObject({ adopted: 0, retried: 1, compensated: 0 });
+    expect(sweepSeam.created).toHaveLength(1);
+    expect(sweepSeam.created[0]).toMatchObject({ amountCents: 400 });
+    const settled = (await commandRows(orderId))[0];
+    expect(settled.status).toBe('succeeded');
+    expect(settled.stripe_refund_id).not.toBe(odd.id);
+    expect((await readOrder(orderId)).amount_refunded_cents).toBe(400);
+  }, 60_000);
+
   it('a refund that succeeds after it was compensated raises one alert (#730)', async () => {
     const { orderId } = await seedPackHolder({ credits: 10, amountCents: 1000 });
     const stripe = stubStripe({ createStatus: 'succeeded' });

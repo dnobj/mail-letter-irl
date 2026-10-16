@@ -2553,7 +2553,7 @@ async function recordUnmatchedPartialRefund(
     amountCents: number;
     cumulative: boolean;
     knownRefundedCents?: number;
-    reason?: 'no_matching_command' | 'command_mismatch';
+    reason?: 'no_matching_command' | 'command_mismatch' | 'another_refund';
   }
 ): Promise<void> {
   const { eventId, eventType, order, stripeRefundId, chargeId, refundStatus, amountCents, cumulative } =
@@ -2563,6 +2563,8 @@ async function recordUnmatchedPartialRefund(
   const evidence = {
     eventId,
     eventType,
+    // Each event's own reason: an event folded into an open alert keeps it.
+    reason,
     stripeRefundId,
     chargeId,
     refundStatus,
@@ -2705,6 +2707,19 @@ export async function settlePackRefund(
   outcome: StripeRefundOutcome,
   source: string
 ): Promise<PackRefundStatus> {
+  // A command belongs to the Stripe refund it recorded (#730): another
+  // refund's outcome changes nothing here, whichever path reports it. The
+  // webhook records such a refund as money the app did not issue before it
+  // gets this far; the sweep can meet one only in a race with the webhook.
+  if (row.stripe_refund_id && outcome.id && outcome.id !== row.stripe_refund_id) {
+    await recordOrderEvent(client, row.order_id, source, null, null, {
+      packRefundId: row.pack_refund_id,
+      ignored: true,
+      reason: 'another_refund',
+      stripeRefundId: outcome.id
+    });
+    return row.status;
+  }
   const status = outcome.status ?? 'pending';
   if (row.status === 'letters_revoked') await resolveUnconfirmedPackRefundAlert(client, row.pack_refund_id);
   if (status === 'failed' || status === 'canceled') {
@@ -3049,7 +3064,12 @@ async function processRefundEvent(
         command.order_id === order.order_id &&
         command.stripe_payment_intent_id === intent &&
         command.amount_cents === refundedAmount;
-      if (!matches) {
+      // A command that already names a Stripe refund is that refund's (#730):
+      // another refund carrying its metadata is money the app did not issue,
+      // not a settlement of it, and must not replace the refund it recorded.
+      const anotherRefund =
+        matches && Boolean(command.stripe_refund_id) && command.stripe_refund_id !== refundObject!.id;
+      if (!matches || anotherRefund) {
         await recordUnmatchedPartialRefund(client, {
           eventId,
           eventType,
@@ -3060,7 +3080,7 @@ async function processRefundEvent(
           amountCents: refundedAmount,
           cumulative: false,
           knownRefundedCents: await knownRefundedCents(client, order),
-          reason: 'command_mismatch'
+          reason: anotherRefund ? 'another_refund' : 'command_mismatch'
         });
         return { duplicate: false, orderId: order.order_id, status: order.status };
       }

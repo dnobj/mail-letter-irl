@@ -671,7 +671,18 @@ compensated opens one alert too (`refunded_after_compensation`): the
 customer then holds the money and the letters. After a command whose
 compensation was withheld for a dispute or a hold, it is
 `refunded_after_withheld`: the letters stay revoked, so do not compensate
-by hand. `PACK_REFUND_RETRY_DELAY_SECONDS` and
+by hand. A command belongs to the one Stripe refund it records (#730): a
+second refund carrying its metadata is money the app did not issue, an
+open `stripe_partial_refund_unmatched` alert with `reason` `another_refund`,
+and the command is left as it was, whichever path hears of it. The sweep
+adopts only a refund for the command's own amount: one that names it for
+another amount is not its money, so the sweep goes on as if Stripe held none
+(it makes the command's refund, or compensates at the attempt limit), records
+the refund it passed over on the order (`pack_refund.sweep_passed_over`), and
+that refund's own events open the unmatched-refund alert. Stripe cannot tell
+the app's refund from another for the same amount carrying the same metadata:
+if such a refund reaches a command before the app's own, it settles the
+command, and the alert names the app's own refund. Check both in Stripe. `PACK_REFUND_RETRY_DELAY_SECONDS` and
 `PACK_REFUND_STRIPE_ATTEMPT_LIMIT` are not in the preflight manifest; both
 are optional.
 
