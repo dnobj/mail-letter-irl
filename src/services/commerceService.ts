@@ -1432,7 +1432,7 @@ async function findCheckoutOrder(
 ): Promise<Order | null> {
   const orderId = session.metadata?.orderId || session.client_reference_id;
   // Found first without a lock, so that a Pay & Send order's draft is locked
-  // before the order (lockDraftOfOrder): the order every path takes (#730).
+  // before the order (lockDraftThenOrder): the order every path takes (#730).
   const located = orderId
     ? await client.query<Order>(
         `SELECT * FROM orders
