@@ -802,12 +802,13 @@ guess or seed it. A constant unique index enforces at most one row.
 
 Append-only actor/action/target/outcome history. UUIDs, stable error codes, session hashes, reasons, and
 three bounded JSONB summaries support later authenticated reads, reveals, and commands. A trigger rejects
-every `UPDATE` and `DELETE`; public privileges are revoked and provisioned application roles receive no
+every `UPDATE` and `DELETE`; only the retention purge (below), which switches it off inside its own
+transaction, deletes. Public privileges are revoked and provisioned application roles receive no
 mutation privilege beyond `INSERT`.
 
 Indexes cover environment plus actor/time, environment plus target/time, and correlation ID. Rows are
-kept for 2 years after the action they record and are exempt from account erasure for that period
-(#395). The daily `audit-retention-sweep` deletes them as the two years run out (#398),
+kept for at most 2 years after the action they record and are exempt from account erasure while they are
+kept (#395). The daily `audit-retention-sweep` deletes them as the two years run out (#398),
 through migration 062's `purge_expired_audit_records(batch_size)`: inside its own transaction it
 locks both audit tables against writers (the commerce table first, as an admin command writes them,
 waiting at most 5 seconds for each), switches each append-only trigger
@@ -822,6 +823,15 @@ Durable command state keyed uniquely by `(environment, idempotency_key)`. The ta
 (the `actor_sid` column now holds the operator's tailnet login; the column name is historical), preview
 digest, expected version, timestamps, correlation ID, bounded sanitized result, and stable error code.
 Status and timing constraints reject inconsistent outcomes.
+
+### admin_totp_counters
+
+The last TOTP counter (a 30-second step) accepted for the admin panel's write elevation, by
+`counter_key`: an operator's tailnet login, since each has a secret of their own (`ADMIN_TOTP_SECRETS`),
+or one shared key under the development-only shared secret (migration 063, #730). A code is accepted
+only for a counter above the stored one, raised in one upsert, so a code cannot be used twice, even
+across a restart or a second process. `last_counter` and `updated_at` only; no customer data. The
+operator role reads, inserts and updates it; the reader has no access. `PUBLIC` is revoked.
 
 ### admin_operations
 
@@ -931,6 +941,7 @@ Production provisioning and the first production connection remain separate owne
 | 60 | 060_refund_not_completed_alert.sql | The `refund_not_completed` alert type (#730), restated inside the `to_regclass` guard as 056 does, with a partial unique index on its order while it is open (`idx_commerce_alerts_refund_not_completed_order`). Provisioning: no re-run (the roles read the alerts table whole); `ADMIN_LATEST_REQUIRED_MIGRATION` is 060 |
 | 61 | 061_address_request_reported_alert.sql | The `address_request_reported` alert type (#730), restated inside the `to_regclass` guard as 060 does. Provisioning: no re-run (the roles read the alerts table whole); `ADMIN_LATEST_REQUIRED_MIGRATION` is 061 |
 | 62 | 062_audit_retention_purge.sql | Operator audit retention (#398): `purge_expired_audit_records(batch_size)` switches each audit table's append-only trigger off inside its caller's transaction, deletes only rows due, two days before their two years are up (`admin_audit_events.occurred_at` plus two years, `commerce_operator_audit_events.retention_expires_at`), oldest first, and switches it back on. The triggers are not changed, so a database that applies 022 late converges; the body resolves each table when it runs and skips one that is absent. `EXECUTE` revoked from `PUBLIC`. Provisioning: no re-run; `ADMIN_LATEST_REQUIRED_MIGRATION` is 062 |
+| 63 | 063_admin_totp_counters.sql | `admin_totp_counters` (#730): write elevation's last accepted TOTP counter per operator, in the database instead of the admin process's memory. Provisioning: **re-run once** (the operator role is granted `SELECT`, `INSERT` and `UPDATE (last_counter, updated_at)`); `ADMIN_LATEST_REQUIRED_MIGRATION` is 063 |
 
 ---
 

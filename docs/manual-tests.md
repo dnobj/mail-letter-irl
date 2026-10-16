@@ -2411,7 +2411,8 @@ between the two runs of step 4.
 
 **Preconditions:** `ADMIN-PROD-RO-01` passed; a restricted **live** Stripe key created for this service
 (Charges and Refunds write, Payment Intents read, Payment Disputes read, Checkout Sessions read);
-`ADMIN_TOTP_SECRET` enrolled with `npx tsx scripts/adminTotpEnrol.ts production`; `DATABASE_URL` switched
+each operator's entry in `ADMIN_TOTP_SECRETS` enrolled with `npx tsx scripts/adminTotpEnrol.ts production <login>`
+(the shared `ADMIN_TOTP_SECRET` of before is never used in production since #730); `DATABASE_URL` switched
 to `letter_irl_admin_operator_production` and `ADMIN_MODE=full` in the same variable edit; the provider
 variables wired as references to the API service.
 
@@ -2451,7 +2452,7 @@ as denied, and a five-character reason was accepted, because the eight-character
 the form until the pull request that carries this record.
 
 **Preconditions:** The development panel runs in full mode (`ADMIN_MODE=full`, `DATABASE_URL` on the
-operator role, `ADMIN_TOTP_SECRET` from `npm run admin:totp-enrol -- development`, the authenticator
+operator role, your entry in `ADMIN_TOTP_SECRETS` from `npm run admin:totp-enrol -- development <login>`, the authenticator
 enrolled on a different device); an open alert exists (REFUND-02 raises one).
 
 **Steps:**
@@ -2459,7 +2460,9 @@ enrolled on a different device); an open alert exists (REFUND-02 raises one).
 1. [ ] Open the alert and preview "acknowledge" without elevating; verify the page says elevation is
    needed and the execute button is disabled.
 2. [ ] Open `/elevate`, enter a code; verify the banner shows "elevated until", a new session cookie was
-   issued, and `/audit` shows `admin.elevate`.
+   issued, and `/audit` shows `admin.elevate`. Drop the elevation and enter the same code again before it
+   changes; verify the page says the code was already used (the accepted code is kept in the database, so
+   a redeploy between the two does not reset it).
 3. [ ] Preview "acknowledge" again; type the phrase shown (`CONFIRM <alert id>` in development); execute.
    Verify the outcome page says succeeded, the alert shows `acknowledged`, `/commands` lists the run, and
    `/audit` shows `alert.transition` with your reason and the command id.

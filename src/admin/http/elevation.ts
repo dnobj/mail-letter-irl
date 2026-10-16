@@ -1,8 +1,7 @@
-import { createHash } from "node:crypto";
-
 import { AdminFoundationError } from "../errors.js";
 import type { AdminSession } from "./session.js";
 import { decodeBase32, verifyTotp } from "./totp.js";
+import { MemoryTotpCounterStore, type TotpCounterStore } from "./totpCounters.js";
 
 /**
  * Step-up for writes. Tailnet membership is continuous, so the application
@@ -51,20 +50,17 @@ interface LoginElevationState {
  * A code accepted by one session likewise stayed acceptable to the next inside
  * its window.
  *
- * Neither piece of state describes a session: the failure history belongs to
- * the operator, and the accepted counter belongs to the environment's TOTP
- * secret. Both live here, for the life of the process, which is the same
+ * Neither piece of state describes a session. The failure history belongs to
+ * the operator and lives here, for the life of the process, which is the same
  * lifetime as the session store and the same "revoke everything" lever: a
- * restart.
+ * restart. The accepted counter belongs to the operator's secret and lives in
+ * the database (TotpCounterStore, #730), so a restart does not forget it; this
+ * in-memory store is only the default for callers that pass none.
  */
 export class ElevationGuard {
   private readonly byLogin = new Map<string, LoginElevationState>();
-  private readonly counterBySecret = new Map<string, number>();
-
-  /** Identify a secret without holding it as a map key. */
-  private static secretKey(secretBase32: string): string {
-    return createHash("sha256").update(secretBase32).digest("hex").slice(0, 32);
-  }
+  /** The accepted counters when no store is passed: tests, and nothing else. */
+  readonly counters: TotpCounterStore = new MemoryTotpCounterStore();
 
   /** The lock standing against this login, or null. Clears an expired one. */
   lockedUntil(login: string, now: number): number | null {
@@ -107,14 +103,6 @@ export class ElevationGuard {
   clearFailures(login: string): void {
     this.byLogin.delete(login);
   }
-
-  lastAcceptedCounter(secretBase32: string): number | null {
-    return this.counterBySecret.get(ElevationGuard.secretKey(secretBase32)) ?? null;
-  }
-
-  rememberCounter(secretBase32: string, counter: number): void {
-    this.counterBySecret.set(ElevationGuard.secretKey(secretBase32), counter);
-  }
 }
 
 export function isElevated(session: AdminSession, now: number): boolean {
@@ -142,29 +130,51 @@ export function dropElevation(session: AdminSession): void {
 }
 
 /**
- * Verify a code against the guard's replay state and the operator's failure
+ * Verify a code against the stored replay state and the operator's failure
  * history. Elevation itself stays on the session, because it is a property of
  * this browser; the failure memory and the accepted counter do not.
+ *
+ * `counters` is where the accepted counter is kept and `counterKey` its key:
+ * the operator's login while each has a secret of their own, one shared key
+ * under the legacy shared secret (#730). A code is accepted only if its
+ * counter is above the stored one and the store takes it, in one statement,
+ * so two processes cannot both accept the same code.
  */
-export function attemptElevation(
+export async function attemptElevation(
   session: AdminSession,
   guard: ElevationGuard,
   secretBase32: string,
   code: string,
   policy: ElevationPolicy,
   now: number,
-): ElevationAttempt {
+  options: { counters?: TotpCounterStore; counterKey?: string } = {},
+): Promise<ElevationAttempt> {
   const standingLock = guard.lockedUntil(session.login, now);
   if (standingLock !== null) {
     return { ok: false, reason: "locked", lockedUntil: standingLock, failuresLeft: 0 };
   }
 
-  const verification = verifyTotp(decodeBase32(secretBase32), code, {
+  const counters = options.counters ?? guard.counters;
+  const counterKey = options.counterKey ?? session.login;
+  const lastCounter = await counters.lastCounter(counterKey);
+  // The lock again, after the wait: nothing is awaited from here to a failed
+  // code's count below, so attempts in flight together cannot all pass a lock
+  // the first of them to fail sets (#730 review).
+  const lockedSince = guard.lockedUntil(session.login, now);
+  if (lockedSince !== null) {
+    return { ok: false, reason: "locked", lockedUntil: lockedSince, failuresLeft: 0 };
+  }
+  const checked = verifyTotp(decodeBase32(secretBase32), code, {
     nowSeconds: Math.floor(now / 1000),
-    lastCounter: guard.lastAcceptedCounter(secretBase32),
+    lastCounter,
   });
+  // A counter another process accepted between the read and the claim is a
+  // replay too.
+  const verification =
+    checked.ok && !(await counters.claim(counterKey, checked.counter))
+      ? ({ ok: false, reason: "replayed" } as const)
+      : checked;
   if (verification.ok) {
-    guard.rememberCounter(secretBase32, verification.counter);
     guard.clearFailures(session.login);
     session.elevatedUntil = now + policy.ttlMs;
     return { ok: true, elevatedUntil: session.elevatedUntil };
