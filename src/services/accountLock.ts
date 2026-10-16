@@ -13,10 +13,10 @@ import type pg from 'pg';
  * references, and any unique key it could collide on, is already held by the
  * transaction: no other transaction can hold the new row, and its foreign-key
  * share lock on the account is covered by the account lock held. A send's
- * letter qualifies: its funding order is locked first. A send takes the account before
- * inserting its letter for that reason (#730): inserted first, the letter's
- * share lock on the account would make two sends from one account each wait
- * for the other's to take it FOR UPDATE.
+ * letter qualifies (a Pay & Send letter's funding order is locked first), and
+ * a send takes the account before inserting it for that reason (#730):
+ * inserted first, the letter's share lock on the account would make two sends
+ * from one account each wait for the other's to take it FOR UPDATE.
  *
  * A draft comes before its orders (#730): a prepaid send and a checkout's
  * preparation lock the draft and then the draft's orders, and the paid
