@@ -3054,7 +3054,7 @@ async function processRefundEvent(
       // not a settlement of it, and must not replace the refund it recorded.
       const anotherRefund =
         matches && Boolean(command.stripe_refund_id) && command.stripe_refund_id !== refundObject!.id;
-      if (!matches || anotherRefund) {
+      if (!matches) {
         await recordUnmatchedPartialRefund(client, {
           eventId,
           eventType,
