@@ -61,6 +61,7 @@ BEGIN
 
   IF has_admin THEN
     ALTER TABLE admin_audit_events DISABLE TRIGGER admin_audit_events_append_only;
+    BEGIN
     DELETE FROM admin_audit_events
      WHERE id IN (
        SELECT id FROM admin_audit_events
@@ -69,6 +70,8 @@ BEGIN
         LIMIT batch_size
      );
     GET DIAGNOSTICS admin_count = ROW_COUNT;
+    EXCEPTION WHEN lock_not_available THEN admin_count := 0;
+    END;
     ALTER TABLE admin_audit_events ENABLE TRIGGER admin_audit_events_append_only;
   END IF;
 
