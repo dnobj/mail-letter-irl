@@ -424,6 +424,9 @@ describe('PackCheckoutCard rendered without a tool result', () => {
     expect(card.visible('state-ready')).toBe(true);
     expect(card.href('checkout-link')).toBe('https://checkout.stripe.com/c/pay/cs_retry_regular');
     expect(card.text('letters')).toBe('5');
+    // Choosing a pack makes the checkout; only the link opens it (#730).
+    await flush();
+    expect(card.opened).toEqual([]);
   });
 
   it('treats a pack it does not recognise as no pack at all', async () => {
@@ -713,6 +716,9 @@ describe('PackCheckoutCard purchase status', () => {
     expect(card.href('checkout-link')).toBe('https://checkout.stripe.com/c/pay/cs_retry_starter');
     expect(card.visible('new-checkout-button')).toBe(false);
     expect(card.text('order-line')).toBe('Order ord_retry_0001');
+    // A new checkout opens only from its link, like the first (#730).
+    await flush();
+    expect(card.opened).toEqual([]);
 
     await card.runNextTimer();
     expect(statusCalls(card).at(-1)).toEqual({ name: 'get_purchase_status', args: { orderId: 'ord_retry_0001' } });
@@ -986,7 +992,6 @@ describe('PackCheckoutCard in a reopened conversation', () => {
     expect(card.visible('checkout-link')).toBe(false);
 
     await flush();
-    // Checked after the flush, because the convenience open is a microtask.
     expect(card.opened).toEqual([]);
     expect(statusCalls(card)).toHaveLength(1);
     expect(card.pendingTimers()).toEqual([]);

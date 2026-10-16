@@ -958,6 +958,8 @@ request log's list of known names comes from the tool list of an app that takes 
       the reply claimed a card that this tool does not render. The genuine URL
       was reachable only in the developer-mode "Called tool" response panel.
       Live Stripe Checkout URLs now use the `/g/pay/` path.)
+- [ ] With the card at "pack t9" (widget v87, #730), no checkout tab opens until the card's link is
+      pressed: the card shows the link and waits.
 - [x] Open the link. Stripe Checkout shows the pack name, the price, and the
       account email already filled in. The prefilled email proves the `users`
       row exists; a blank email field means it does not (#319).
@@ -1010,7 +1012,7 @@ the preview cards already buy packs.
       call, and whether the card then fills in with the link. The Railway dev log shows the
       `create_pack_checkout` request only for this second attempt. (No prompt at all.
       `tools/call create_pack_checkout` logged at 16:44:06Z, invocation succeeded, and the card
-      filled in with the pack, the price and the link. The card's one convenience `openExternal` was
+      filled in with the pack, the price and the link. The card's one convenience `openExternal` (removed in v87, #730) was
       blocked by the embedded browser because the click was automated; the anchor remained.)
 - [x] Open the link and pay with a Stripe test card, typed by the owner. Balance reads 2 letters;
       `stripe.webhook_received` with `checkout.session.completed` appears in the dev log. (Webhook

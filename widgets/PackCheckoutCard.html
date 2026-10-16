@@ -97,7 +97,7 @@
           <p class="oid hidden" id="order-line"></p>
         </div>
       </div>
-      <p class="rev">pack t8</p>
+      <p class="rev">pack t9</p>
     </div>
 
     <script>
@@ -707,8 +707,7 @@
           // The start page records the way back into the conversation and
           // forwards to the same Stripe checkout (#372); a result from an
           // older server carries only the Stripe URL, which still works.
-          const openHref = checkoutHref;
-          link.href = openHref;
+          link.href = checkoutHref;
           link.textContent = `Open secure checkout — ${formatAmount(state.amountCents, state.currency)}`;
           link.classList.remove("hidden");
           const expiry = formatExpiry(state.expiresAt);
