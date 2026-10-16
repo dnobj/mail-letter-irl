@@ -37,7 +37,6 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json package-lock.json ./
 COPY db/migrations ./db/migrations
-COPY widgets ./widgets
 COPY assets/fonts ./assets/fonts
 # Fails the build, not the boot, if a directory the code reads is missing.
 RUN test -f dist/mcp/httpServer.js && test -f dist/cli/runMaintenance.js && test -f dist/cli/migrate.js \
