@@ -227,6 +227,16 @@ describe('createMailOrderFromDraft', () => {
     expect(result.job?.idempotency_key).toBe(result.letter.letter_id);
   });
 
+  it('takes the account before inserting the letter, so two sends from one account cannot deadlock (#730 review)', async () => {
+    await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter' });
+    const statements = client.query.mock.calls.map(([sql]) => String(sql));
+    const accountLock = statements.indexOf('SELECT user_id FROM users WHERE user_id = $1 FOR UPDATE');
+    const letterInsert = statements.findIndex((sql) => sql.includes('INSERT INTO letters'));
+    expect(accountLock).toBeGreaterThanOrEqual(0);
+    expect(letterInsert).toBeGreaterThan(accountLock);
+    expect(client.query.mock.calls[accountLock][1]).toEqual(['user-1']);
+  });
+
   it('copies the renderer the preview was drawn with into the letter (#534)', async () => {
     draft.renderer_version = 'pdf-1';
     await createMailOrderFromDraft({ draftId: 'draft-1', userId: 'user-1', mailType: 'letter' });
