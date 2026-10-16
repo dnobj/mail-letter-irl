@@ -157,7 +157,7 @@ describe('send_postcard Tool', () => {
     });
 
     it('should handle concurrent requests safely via row locking', async () => {
-      // Database should use SELECT FOR UPDATE to lock draft row
+      // The database locks the draft row (FOR NO KEY UPDATE)
       // This prevents race conditions
       const draft = testPostcardDrafts.pending();
 

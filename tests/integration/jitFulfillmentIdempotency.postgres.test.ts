@@ -305,6 +305,85 @@ describePostgres('Pay & Send fulfilment idempotency (#287, #286)', () => {
     expect(await lettersForOrder(orderId)).toBe(1);
   });
 
+  /**
+   * A path that holds the draft must not block the share lock a foreign-key
+   * check takes on it (#730 review): a refund that updates its order twice
+   * re-checks the order's key to its draft, holding the order, and a draft
+   * held FOR UPDATE would make that refund and this path wait on each other.
+   * Here another session holds the order, so the run takes the draft and
+   * waits; while it waits, the draft is held (a NO KEY UPDATE NOWAIT fails)
+   * and its key share is free (a KEY SHARE NOWAIT succeeds).
+   */
+  async function holdsTheDraftLeavingItsKeyShare(orderId: string, draftId: string, run: () => Promise<unknown>) {
+    const holder = await pool.connect();
+    const prober = await pool.connect();
+    let running: Promise<unknown> | undefined;
+    try {
+      await holder.query('BEGIN');
+      await holder.query('SELECT 1 FROM orders WHERE order_id = $1 FOR UPDATE', [orderId]);
+      const holderPid = (await holder.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+      running = run();
+      let settled = false;
+      const settle = () => {
+        settled = true;
+      };
+      running.then(settle, settle);
+      let waiting = false;
+      for (let attempt = 0; attempt < 100 && !waiting && !settled; attempt += 1) {
+        const { rows } = await prober.query<{ waiting: boolean }>(
+          `SELECT EXISTS (
+             SELECT 1 FROM pg_stat_activity
+              WHERE datname = current_database() AND pid <> pg_backend_pid()
+                AND pg_blocking_pids(pid) @> ARRAY[$1::int]
+           ) AS waiting`,
+          [holderPid]
+        );
+        waiting = rows[0].waiting;
+        if (!waiting) await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      if (!waiting && settled) await running;
+      expect(waiting).toBe(true);
+      await expect(
+        prober.query('SELECT 1 FROM letter_drafts WHERE draft_id = $1 FOR NO KEY UPDATE NOWAIT', [draftId])
+      ).rejects.toMatchObject({ code: '55P03' });
+      await expect(
+        prober.query('SELECT 1 FROM letter_drafts WHERE draft_id = $1 FOR KEY SHARE NOWAIT', [draftId])
+      ).resolves.toMatchObject({ rowCount: 1 });
+      await holder.query('ROLLBACK');
+      return await running;
+    } finally {
+      await holder.query('ROLLBACK').catch(() => undefined);
+      await running?.catch(() => undefined);
+      prober.release();
+      holder.release(true);
+    }
+  }
+
+  it("leaves a held draft's key share free on a payment's fulfilment (#730 review)", async () => {
+    const { orderId, sessionId, draftId } = await seedPendingJitOrder();
+    await expect(
+      holdsTheDraftLeavingItsKeyShare(orderId, draftId, () =>
+        commerce.processStripeWebhookEvent(paidEvent({ eventId: `evt_${sessionId}`, sessionId }) as never)
+      )
+    ).resolves.toEqual({ duplicate: false, orderId, status: 'fulfillment_pending' });
+  });
+
+  it("leaves a held draft's key share free on the hourly recovery (#730 review)", async () => {
+    const { orderId, draftId } = await seedPendingJitOrder();
+    await pool.query(`UPDATE orders SET status = 'paid', paid_at = NOW() WHERE order_id = $1`, [orderId]);
+    await expect(holdsTheDraftLeavingItsKeyShare(orderId, draftId, () => commerce.fulfillPaidOrder(orderId))).resolves.toBe(true);
+  });
+
+  it("leaves a held draft's key share free on an account's erasure (#730 review)", async () => {
+    const { orderId, draftId, userId } = await seedPendingJitOrder();
+    await pool.query(`UPDATE orders SET status = 'cancelled' WHERE order_id = $1`, [orderId]);
+    const erasure = await import('../../src/services/accountErasureService.js');
+    const { transaction } = await import('../../src/db/index.js');
+    await expect(
+      holdsTheDraftLeavingItsKeyShare(orderId, draftId, () => transaction(client => erasure.eraseAccountWithClient(client, userId)))
+    ).resolves.toMatchObject({ outcome: 'erased' });
+  });
+
   it('erases an account taking its drafts before its orders, as every path does (#730 review)', async () => {
     const { orderId, draftId, userId } = await seedPendingJitOrder();
     await pool.query(`UPDATE orders SET status = 'cancelled' WHERE order_id = $1`, [orderId]);

@@ -214,7 +214,7 @@ export async function createPostcardDraft(params: CreatePostcardDraftParams): Pr
  * Consume a draft when sending a letter.
  * This is the core idempotency mechanism.
  *
- * - Uses SELECT FOR UPDATE to prevent race conditions
+ * - Locks the draft (FOR NO KEY UPDATE, as every draft holder) to prevent race conditions
  * - If draft is pending: marks as consumed (letter ID set later via linkDraftToLetter)
  * - If draft is already consumed: returns existing letter_id (idempotent retry)
  * - If draft is expired/not found: throws descriptive error
@@ -228,7 +228,7 @@ export async function consumeDraft(params: ConsumeDraftParams): Promise<ConsumeD
     const selectResult = await client.query<LetterDraft>(
       `SELECT * FROM letter_drafts
        WHERE draft_id = $1
-       FOR UPDATE`,
+       FOR NO KEY UPDATE`,
       [params.draftId]
     );
 
@@ -677,7 +677,7 @@ async function lockChangeableDraft(
   now: Date
 ): Promise<DraftScheduleRefusal | null> {
   const locked = await client.query<Pick<LetterDraft, 'status' | 'expires_at' | 'redacted_at'>>(
-    'SELECT status, expires_at, redacted_at FROM letter_drafts WHERE draft_id = $1 AND user_id = $2 FOR UPDATE',
+    'SELECT status, expires_at, redacted_at FROM letter_drafts WHERE draft_id = $1 AND user_id = $2 FOR NO KEY UPDATE',
     [draftId, userId]
   );
   const draft = locked.rows[0];

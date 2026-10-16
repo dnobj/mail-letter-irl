@@ -907,7 +907,7 @@ async function prepareJitOrder(
 ): Promise<{ order: Order; reused: boolean }> {
   return transaction(async client => {
     const draftResult = await client.query<LetterDraft>(
-      'SELECT * FROM letter_drafts WHERE draft_id = $1 FOR UPDATE',
+      'SELECT * FROM letter_drafts WHERE draft_id = $1 FOR NO KEY UPDATE',
       [params.draftId]
     );
     const draft = draftResult.rows[0];
@@ -1292,7 +1292,7 @@ export async function createJitCheckout(
   // (#278 round 5). USER-SCOPED and AFTER the send-block gate: an unscoped
   // peek let any authenticated caller make another user's draft id steer
   // catalog work before authorization said no (#278 round 7). Advisory only -
-  // prepareJitOrder re-reads FOR UPDATE and owns the real ownership check,
+  // prepareJitOrder re-reads under its lock and owns the real ownership check,
   // and refuses an option this deployment does not sell (#578).
   // With its pages (#586): without them a long letter would warm the one-page
   // price and meet the charge cap at the one-page amount. A restyle can change
@@ -1461,7 +1461,8 @@ async function findCheckoutOrder(
  * draft_id cannot change: it is set when the order is made, and the
  * valid_order_draft CHECK refuses the NULL a draft's delete would set, so the
  * unlocked read that found it stays true. A pack order has no draft and locks
- * only the order.
+ * only the order. The draft is taken FOR NO KEY UPDATE, as every draft holder
+ * takes it (src/services/accountLock.ts).
  */
 async function lockDraftThenOrder(
   client: Pick<pg.PoolClient, 'query'>,
@@ -1469,7 +1470,7 @@ async function lockDraftThenOrder(
   draftId: string | null | undefined
 ): Promise<Order | null> {
   if (draftId) {
-    await client.query('SELECT draft_id FROM letter_drafts WHERE draft_id = $1 FOR UPDATE', [draftId]);
+    await client.query('SELECT draft_id FROM letter_drafts WHERE draft_id = $1 FOR NO KEY UPDATE', [draftId]);
   }
   const result = await client.query<Order>('SELECT * FROM orders WHERE order_id = $1 FOR UPDATE', [orderId]);
   return result.rows[0] || null;
@@ -1734,8 +1735,8 @@ async function transitionPaidCheckout(
   //
   // It stays AFTER findCheckoutOrder on purpose. Acquisition order remains
   // drafts -> orders -> users, matching the refund and dispute paths (orders ->
-  // users), which all receive an
-  // already-fetched order and then lock the account. Hoisting this above the
+  // users), which all receive an already-fetched order and then lock the
+  // account. Hoisting this above the
   // order lock would invert against them and trade one cycle for another.
   await lockAccountForBalanceChange(client, order.user_id);
 
