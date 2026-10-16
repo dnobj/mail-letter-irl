@@ -97,7 +97,7 @@
           <p class="oid hidden" id="order-line"></p>
         </div>
       </div>
-      <p class="rev">pack t8</p>
+      <p class="rev">pack t9</p>
     </div>
 
     <script>
@@ -157,7 +157,6 @@
       const POLL_BUDGET_MS = 600000;
       const CHECK_STATUS_LABEL = "Check status";
 
-      let opened = false;
       let emptyTimer = null;
       let emptyShown = false;
       let retryBusy = false;
@@ -708,25 +707,15 @@
           // The start page records the way back into the conversation and
           // forwards to the same Stripe checkout (#372); a result from an
           // older server carries only the Stripe URL, which still works.
-          const openHref = checkoutHref;
-          link.href = openHref;
+          link.href = checkoutHref;
           link.textContent = `Open secure checkout — ${formatAmount(state.amountCents, state.currency)}`;
           link.classList.remove("hidden");
           const expiry = formatExpiry(state.expiresAt);
           note.textContent = `Stripe handles the payment. Nothing is sent until you choose what to mail. ${expiry}`.trim();
           note.classList.remove("hidden");
           done.classList.add("hidden");
-          // A reopened card never opens the checkout by itself: the customer
-          // came back to the conversation, not to pay again.
-          if (resumed) opened = true;
-          if (!opened && window.openai?.openExternal) {
-            // Ask the host to open the checkout once, as a convenience. The
-            // anchor above is what the customer relies on if the host declines.
-            opened = true;
-            Promise.resolve()
-              .then(() => window.openai.openExternal({ href: openHref }))
-              .catch(() => {});
-          }
+          // The card never opens the checkout by itself (#730): a payment page
+          // opens only when the customer presses the link above.
           startStatusPolling(state.orderId, { slow: isResumedOrder(state) });
         } else {
           link.classList.add("hidden");
