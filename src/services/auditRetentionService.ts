@@ -16,8 +16,9 @@ import { query } from '../db/index.js';
  *   row, migration 023's default) less than 2 days away.
  *
  * Then the admin command runs and their operations (#771): migration 064's
- * purge_expired_admin_command_records deletes a finished run, with its
- * operation, on the same schedule, once no audit row names it.
+ * purge_expired_admin_command_records deletes a run, finished or long left
+ * unfinished, with its operation, on the same schedule, once no audit row
+ * names it and its operation, if any, has finished and is due too.
  *
  * The rules live in those functions, in the database: nothing here chooses which
  * rows go. In batches, oldest first, a bounded number per run: nothing falls

@@ -577,8 +577,9 @@ The older operator audit table from the commerce recovery work: hashed idempoten
 target, a reason code, before and after state, provider evidence and an outcome. `retention_expires_at`
 marks two years from the row (#395). The hourly maintenance's daily `audit-retention-sweep` deletes a row two days before it
 (#398, migration 062). This table is also the replay record for the operator commands that write it: a repeated
-`idempotency_key_hash` returns the first outcome. Once the purge deletes a row its key is free again; the admin
-panel's own replays are stopped first by `admin_command_runs`, which the purge keeps.
+`idempotency_key_hash` returns the first outcome. Once the purge deletes a row its key is free again. The admin
+panel's own replays are stopped by `admin_command_runs`, which the same sweep deletes on about the same schedule
+(#771), so both keys are freed together; a freed panel key belongs to a confirmation two years old.
 The admin panel writes `admin_audit_events` for every command; the services behind some commands also
 write a row here: a retried or released mail job, a resolved ambiguous job or reservation, an alert
 transition, a pack refund. `valid_commerce_operator_audit_operation` lists them; 042 added
