@@ -145,19 +145,30 @@ describe("admin runtime configuration", () => {
       expect(totpSecretFor(config, "second@github")).toEqual({ secret: SECOND_SECRET, counterKey: SHARED_TOTP_COUNTER_KEY });
     });
 
-    it("refuses the shared secret in production, so every operator there has one no one else holds", () => {
+    it("never uses the shared secret in production, so every operator there has one no one else holds", () => {
       const production = {
         ...full,
         NODE_ENV: "production",
         LETTER_IRL_DEPLOYMENT_ENVIRONMENT: "production",
         ADMIN_TOTP_SECRET: SECOND_SECRET,
       };
+      // Alone it does not make full mode: each operator needs their own.
       expect(problemsOf(production)).toEqual(
-        expect.arrayContaining([
-          expect.stringContaining("ADMIN_TOTP_SECRET is not used in production"),
-          expect.stringContaining("ADMIN_TOTP_SECRETS is required in full mode"),
-        ]),
+        expect.arrayContaining([expect.stringContaining("ADMIN_TOTP_SECRETS is required in full mode")]),
       );
+      // Beside the operators' own secrets it boots, ignored, so a panel that
+      // still has it can take this code before the variable is deleted.
+      const config = parseAdminRuntimeConfig({
+        ...production,
+        ADMIN_READER_DATABASE_URL: READER.replace(/development/g, "production"),
+        DATABASE_URL: OPERATOR.replace(/development/g, "production"),
+        STRIPE_SECRET_KEY: "rk_live_placeholder",
+        ADMIN_TOTP_SECRETS: `owner@example.com=${OWNER_SECRET}`,
+      });
+      expect(config.totpSecret).toBeNull();
+      expect(config.legacyTotpSecretIgnored).toBe(true);
+      expect(totpSecretFor(config, "owner@example.com")).toEqual({ secret: OWNER_SECRET, counterKey: "owner@example.com" });
+      expect(totpSecretFor(config, "second@github")).toBeNull();
     });
   });
 

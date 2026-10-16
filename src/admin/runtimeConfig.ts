@@ -44,6 +44,13 @@ export interface AdminRuntimeConfig {
    * operator with no secret of their own; null otherwise.
    */
   totpSecret: string | null;
+  /**
+   * ADMIN_TOTP_SECRET is set in production, where it is never used: the boot
+   * warns to delete it. Ignored rather than refused, so that a panel which has
+   * it can take this code once ADMIN_TOTP_SECRETS is set, with no variable
+   * edit and deploy that must land together.
+   */
+  legacyTotpSecretIgnored: boolean;
   readerDatabaseUrl: string;
   readerRole: string;
   operatorDatabaseUrl: string | null;
@@ -241,13 +248,14 @@ export function parseAdminRuntimeConfig(
   }
 
   // The shared secret of before: development only, for an operator with no
-  // secret of their own. Production refuses it, so every production operator
-  // has a secret no one else holds.
+  // secret of their own. Production never uses it, so every production
+  // operator has a secret no one else holds.
   const totpRaw = env.ADMIN_TOTP_SECRET ?? "";
   let totpSecret: string | null = null;
+  let legacyTotpSecretIgnored = false;
   if (totpRaw) {
     if (environment === "production") {
-      problems.push("ADMIN_TOTP_SECRET is not used in production: give each operator a secret in ADMIN_TOTP_SECRETS");
+      legacyTotpSecretIgnored = true;
     } else if (base32Length(totpRaw) < 16) {
       problems.push(
         "ADMIN_TOTP_SECRET must be base32 and decode to at least 16 bytes",
@@ -372,6 +380,7 @@ export function parseAdminRuntimeConfig(
     sessionSecret,
     totpSecrets,
     totpSecret,
+    legacyTotpSecretIgnored,
     readerDatabaseUrl: env.ADMIN_READER_DATABASE_URL as string,
     readerRole,
     operatorDatabaseUrl: mode === "full" ? (env.DATABASE_URL as string) : null,

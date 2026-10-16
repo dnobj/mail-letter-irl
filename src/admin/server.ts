@@ -121,6 +121,9 @@ export async function main(): Promise<void> {
     whois = { whois: async () => null };
     writeDiagnostic("warn", "admin.local_dev_mode", { environment: config.environment });
   }
+  if (config.legacyTotpSecretIgnored) {
+    console.warn("[admin] ADMIN_TOTP_SECRET is not used in production; delete the variable (each operator's secret is in ADMIN_TOTP_SECRETS).");
+  }
 
   const health = startHealthListener(config.healthPort, state, supervisor);
   const shutdown = async (code: number) => {

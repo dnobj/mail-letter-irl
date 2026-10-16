@@ -305,7 +305,7 @@ problem, not a Tailscale one.
 | `DATABASE_URL` | the same reader URL in read-only mode; the operator URL in full mode |
 | `ADMIN_SESSION_SECRET` | 32 or more random characters, different per environment |
 | `ADMIN_TOTP_SECRETS` | required in full mode only: each operator's own secret, `login=SECRET` entries separated by commas, from `npm run admin:totp-enrol -- <environment> <login>` (#730) |
-| `ADMIN_TOTP_SECRET` | development only, and only until each operator has an entry above: the old shared secret, used by an operator with none. Production refuses to boot with it |
+| `ADMIN_TOTP_SECRET` | development only, and only until each operator has an entry above: the old shared secret, used by an operator with none. Production never uses it, and warns at boot to delete it |
 | `PORT` | `8080` (the health listener; set it if Railway does not inject one) |
 | `ADMIN_APP_PORT` | `8790` |
 | `ADMIN_TS_HOSTNAME`, `ADMIN_TS_TAG`, `ADMIN_TS_STATE_DIR` | optional; default to `letter-irl-admin-dev`, `tag:dev-admin`, `/data/tailscale` |
@@ -356,6 +356,8 @@ Commands exist only in full mode. To enable it in development:
    browse from, then clear the terminal. The secret is never written to disk and never printed anywhere
    else. An operator whose authenticator already holds the old shared `ADMIN_TOTP_SECRET` can keep it:
    their entry is `login=<that secret>`. Once every operator has an entry, remove `ADMIN_TOTP_SECRET`.
+   In production, where the shared secret is never used, set `ADMIN_TOTP_SECRETS` before the code that
+   reads it is deployed, then delete `ADMIN_TOTP_SECRET` when the boot log warns about it.
    Each code is accepted once: the last accepted counter is kept per operator in
    `admin_totp_counters` (migration 063), so a restart does not forget it, and the admin provisioning
    (`npm run admin:provision-access`) must be re-run once after 063 to grant it.
