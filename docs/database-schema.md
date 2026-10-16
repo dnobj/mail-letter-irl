@@ -824,6 +824,17 @@ Durable command state keyed uniquely by `(environment, idempotency_key)`. The ta
 digest, expected version, timestamps, correlation ID, bounded sanitized result, and stable error code.
 Status and timing constraints reject inconsistent outcomes.
 
+A run is kept for at most 2 years after it finished (#771): the daily `audit-retention-sweep`, after
+the audit rows, calls migration 064's `purge_expired_admin_command_records(batch_size)`, which deletes a
+finished run, and its operation first, two days before its two years are up; a run left pending or
+running (a command interrupted between its provider call and its completion) on the same schedule
+counted from when it was requested. It never deletes a run whose operation is pending, processing or not yet due itself, or one
+an audit row still names. Only the owner can run it. The run is also what stops a panel confirmation
+running twice; a key it frees belongs to a confirmation two years old, whose own form cannot be sent
+again (its CSRF token was bound to a session long gone). A row that names a run and outlives it
+(`commerce_pack_refunds.admin_command_id`, `daily_limit_overrides.created_by_command_id` and
+`cleared_by_command_id`) then links to a command the panel no longer finds.
+
 ### admin_totp_counters
 
 The last TOTP counter (a 30-second step) accepted for the admin panel's write elevation, by
@@ -845,6 +856,8 @@ environment (the admin marker) with `SKIP LOCKED` and erases each account in one
 role. It records `succeeded` with counts, or `failed` with `ACCOUNT_ERASURE_BLOCKED`,
 `ACCOUNT_ERASURE_NOT_FOUND` or, after three attempts an hour apart, `ACCOUNT_ERASURE_ERROR`
 (`src/services/accountErasureService.ts`).
+
+An operation goes with its command run, at most 2 years after both finished (#771, above).
 
 ### Admin grants and provisioning
 
@@ -942,6 +955,7 @@ Production provisioning and the first production connection remain separate owne
 | 61 | 061_address_request_reported_alert.sql | The `address_request_reported` alert type (#730), restated inside the `to_regclass` guard as 060 does. Provisioning: no re-run (the roles read the alerts table whole); `ADMIN_LATEST_REQUIRED_MIGRATION` is 061 |
 | 62 | 062_audit_retention_purge.sql | Operator audit retention (#398): `purge_expired_audit_records(batch_size)` switches each audit table's append-only trigger off inside its caller's transaction, deletes only rows due, two days before their two years are up (`admin_audit_events.occurred_at` plus two years, `commerce_operator_audit_events.retention_expires_at`), oldest first, and switches it back on. The triggers are not changed, so a database that applies 022 late converges; the body resolves each table when it runs and skips one that is absent. `EXECUTE` revoked from `PUBLIC`. Provisioning: no re-run; `ADMIN_LATEST_REQUIRED_MIGRATION` is 062 |
 | 63 | 063_admin_totp_counters.sql | `admin_totp_counters` (#730): write elevation's last accepted TOTP counter per operator, in the database instead of the admin process's memory. Provisioning: **re-run once** (the operator role is granted `SELECT`, `INSERT` and `UPDATE (last_counter, updated_at)`); `ADMIN_LATEST_REQUIRED_MIGRATION` is 063 |
+| 64 | 064_admin_command_retention.sql | Admin command retention (#771): `purge_expired_admin_command_records(batch_size)` deletes `admin_command_runs`, and their `admin_operations` first, two days before two years after they finished (or, left unfinished, were requested), oldest first, taken `FOR UPDATE SKIP LOCKED`; never a run with an operation pending, processing or not yet due, or named by an audit row. Skips when a 022 table is absent. `EXECUTE` revoked from `PUBLIC`. Provisioning: no re-run; `ADMIN_LATEST_REQUIRED_MIGRATION` is 064 |
 
 ---
 

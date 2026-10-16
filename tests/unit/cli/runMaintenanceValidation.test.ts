@@ -597,7 +597,7 @@ describe('maintenance deployment validation', () => {
   describe('audit retention sweep', () => {
     afterEach(() => {
       services.runMaintenanceTaskIfDue.mockReset().mockResolvedValue({ ran: false });
-      services.purgeExpiredAuditRecords.mockReset().mockResolvedValue({ adminDeleted: 0, commerceDeleted: 0 });
+      services.purgeExpiredAuditRecords.mockReset().mockResolvedValue({ adminDeleted: 0, commerceDeleted: 0, commandRunsDeleted: 0, operationsDeleted: 0 });
     });
 
     it('is scheduled about daily, after the address requests sweep and before the unwrapped tasks', async () => {
@@ -612,10 +612,10 @@ describe('maintenance deployment validation', () => {
       expect(names.indexOf('audit-retention-sweep')).toBeLessThan(names.indexOf('provider-status-sync'));
     });
 
-    it('logs the two counts only when it runs', async () => {
+    it('logs the counts only when it runs', async () => {
       stubValidDevelopment();
       const output = captureOutput();
-      services.purgeExpiredAuditRecords.mockResolvedValueOnce({ adminDeleted: 4, commerceDeleted: 1 });
+      services.purgeExpiredAuditRecords.mockResolvedValueOnce({ adminDeleted: 4, commerceDeleted: 1, commandRunsDeleted: 3, operationsDeleted: 2 });
       services.runMaintenanceTaskIfDue.mockImplementation((async (name, _interval, task) =>
         name === 'audit-retention-sweep' ? { ran: true, result: await task() } : { ran: false }) as TaskRunner);
 
@@ -626,6 +626,8 @@ describe('maintenance deployment validation', () => {
       expect(logged).toContain('"event":"audit_retention.swept"');
       expect(logged).toContain('"adminDeleted":4');
       expect(logged).toContain('"commerceDeleted":1');
+      expect(logged).toContain('"commandRunsDeleted":3');
+      expect(logged).toContain('"operationsDeleted":2');
       expect(logged).not.toContain('audit_retention.sweep_failed');
     });
 
