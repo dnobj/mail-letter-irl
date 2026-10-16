@@ -22,7 +22,7 @@ the owner's decision on #289 (2026-09-23).
 | The saved signature (#608), a picture of the person's handwriting. The preview does not count it either: neither admin role reads the table | |
 | Saved stationery designs (#649), with the names the person gave them, and the remembered design. The preview does not count them: neither admin role reads the table. A draft's or a letter's copy of a design goes with the draft or the letter | |
 | The photo uploaded through the card, from the image store (#474) | |
-| Gift codes nobody has redeemed, so a card already in the post stops working | The admin audit trail, kept two years as the privacy policy says |
+| Gift codes nobody has redeemed, so a card already in the post stops working | The admin audit trail, kept up to two years as the privacy policy says |
 | The address a seed code was claimed with | |
 
 Failed mail jobs that an operator could still retry are cancelled, so nothing can mail an empty letter.
@@ -72,7 +72,7 @@ The unspent balance and unused gift letters are forfeited. If the customer wants
    those first, because nothing owed can reach the account after it is erased.
 3. Elevate, then type the phrase (`CONFIRM <id>` in development, `PRODUCTION ERASE <id>` in production)
    and a reason. **Keep the customer's name and email out of the reason:** the audit trail keeps it for
-   two years.
+   up to two years.
 4. Confirming **queues** the erasure. The next hourly maintenance run carries it out. The account page
    then shows one of three things:
    - queued;

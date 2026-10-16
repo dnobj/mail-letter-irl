@@ -802,12 +802,12 @@ guess or seed it. A constant unique index enforces at most one row.
 
 Append-only actor/action/target/outcome history. UUIDs, stable error codes, session hashes, reasons, and
 three bounded JSONB summaries support later authenticated reads, reveals, and commands. A trigger rejects
-every `UPDATE` and `DELETE`; public privileges are revoked and provisioned application roles receive no
+every `UPDATE`, and every `DELETE` but the retention purge's (below); public privileges are revoked and provisioned application roles receive no
 mutation privilege beyond `INSERT`.
 
 Indexes cover environment plus actor/time, environment plus target/time, and correlation ID. Rows are
-kept for 2 years after the action they record and are exempt from account erasure for that period
-(#395). The daily `audit-retention-sweep` deletes them as the two years run out (#398),
+kept for at most 2 years after the action they record and are exempt from account erasure while they are
+kept (#395). The daily `audit-retention-sweep` deletes them as the two years run out (#398),
 through migration 062's `purge_expired_audit_records(batch_size)`: inside its own transaction it
 locks both audit tables against writers (the commerce table first, as an admin command writes them,
 waiting at most 5 seconds for each), switches each append-only trigger

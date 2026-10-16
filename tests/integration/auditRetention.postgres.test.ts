@@ -207,6 +207,84 @@ describePostgres('operator audit retention', () => {
     await expect(service.purgeExpiredAuditRecords()).resolves.toEqual({ adminDeleted: 1, commerceDeleted: 0 });
   }, 30_000);
 
+  /** Until a session in this database is blocked by `pid`'s locks. */
+  async function waitUntilBlockedBy(prober: pg.PoolClient, pid: number): Promise<boolean> {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const { rows } = await prober.query<{ waiting: boolean }>(
+        `SELECT EXISTS (
+           SELECT 1 FROM pg_stat_activity
+            WHERE datname = current_database() AND pg_blocking_pids(pid) @> ARRAY[$1::int]
+         ) AS waiting`,
+        [pid]
+      );
+      if (rows[0].waiting) return true;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    return false;
+  }
+
+  it('waits behind an admin command writing commerce then admin, rather than deadlocking it (#398 review)', async () => {
+    const command = await pool.connect();
+    const prober = await pool.connect();
+    try {
+      await command.query('BEGIN');
+      // As src/admin/commands/runner.ts writes them: the command's commerce row first...
+      await command.query(
+        `INSERT INTO commerce_operator_audit_events
+           (idempotency_key_hash, actor_subject_hash, operation, target_type,
+            target_reference_hash, reason_code, before_state, after_state)
+         VALUES (encode(sha256(gen_random_uuid()::text::bytea), 'hex'), $1, 'commerce_alert_transition',
+                 'commerce_alert', $1, 'operator_acknowledged', '{}', '{}')`,
+        [HEX]
+      );
+      const commandPid = (await command.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+      const purge = service.purgeExpiredAuditRecords();
+      purge.catch(() => undefined);
+      // ...the purge waits for it...
+      expect(await waitUntilBlockedBy(prober, commandPid)).toBe(true);
+      // ...and the command's admin row is not behind the purge. Taken in the
+      // other order, the purge would hold the admin table here, and PostgreSQL
+      // would fail one of the two as a deadlock.
+      await command.query(
+        `INSERT INTO admin_audit_events
+           (occurred_at, actor_sid, actor_name, environment, mode, session_id_hash,
+            correlation_id, action, target_type, outcome)
+         VALUES (NOW(), 'operator', 'Operator', 'development', 'full', $1,
+                 gen_random_uuid(), 'test.action', 'account', 'succeeded')`,
+        [HEX]
+      );
+      await command.query('COMMIT');
+      await expect(purge).resolves.toEqual({ adminDeleted: 0, commerceDeleted: 0 });
+    } finally {
+      await command.query('ROLLBACK').catch(() => undefined);
+      command.release();
+      prober.release();
+    }
+  }, 30_000);
+
+  it('rolls the triggers back on with the deletes when it fails after switching them off (#398 review)', async () => {
+    const due = await adminRow(EXPIRED);
+    const holder = await pool.connect();
+    try {
+      await holder.query('BEGIN');
+      // A row lock does not conflict with the purge's table locks, so the purge
+      // switches the trigger off, then waits at its DELETE until lock_timeout.
+      await holder.query('SELECT 1 FROM admin_audit_events WHERE id = $1 FOR UPDATE', [due]);
+      await expect(service.purgeExpiredAuditRecords()).rejects.toMatchObject({ code: '55P03' });
+    } finally {
+      await holder.query('ROLLBACK').catch(() => undefined);
+      holder.release();
+    }
+    const triggers = await pool.query<{ tgenabled: string }>(
+      `SELECT tgenabled FROM pg_trigger
+        WHERE tgname IN ('admin_audit_events_append_only', 'commerce_operator_audit_events_append_only')
+          AND tgrelid IN (to_regclass('admin_audit_events'), to_regclass('commerce_operator_audit_events'))`
+    );
+    expect(triggers.rows).toEqual([{ tgenabled: 'O' }, { tgenabled: 'O' }]);
+    expect(await adminIds()).toEqual([due]);
+    await expect(pool.query('DELETE FROM admin_audit_events WHERE id = $1', [due])).rejects.toMatchObject({ code: '55000' });
+  }, 30_000);
+
   it('leaves the triggers refusing every other delete and every update, before and after a purge', async () => {
     const oldAdmin = await adminRow(EXPIRED);
     const oldCommerce = await commerceRow(COMMERCE_DUE);
