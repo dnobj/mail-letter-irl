@@ -225,6 +225,65 @@ describePostgres('Pay & Send fulfilment idempotency (#287, #286)', () => {
     expect(await orderColumn<string | null>(orderId, 'last_error_code')).toBeNull();
   }
 
+  /**
+   * #730: every path takes a Pay & Send order's draft before the order. A
+   * prepaid send of the same draft locks the draft and then its orders, so a
+   * fulfilment that held the order while waiting for the draft could deadlock
+   * against it. Here another session holds the draft: the fulfilment must wait
+   * for it while holding NOT the order, which a NOWAIT lock on the order proves.
+   */
+  async function waitsForDraftWithoutTheOrder(orderId: string, draftId: string, run: () => Promise<unknown>) {
+    const holder = await pool.connect();
+    const prober = await pool.connect();
+    try {
+      await holder.query('BEGIN');
+      await holder.query('SELECT 1 FROM letter_drafts WHERE draft_id = $1 FOR UPDATE', [draftId]);
+      const running = run();
+      // Until the run is blocked on a row lock of letter_drafts.
+      let waiting = false;
+      for (let attempt = 0; attempt < 100 && !waiting; attempt += 1) {
+        const { rows } = await prober.query<{ waiting: boolean }>(
+          `SELECT EXISTS (
+             SELECT 1 FROM pg_stat_activity
+              WHERE pid <> pg_backend_pid() AND pid <> $1
+                AND wait_event_type = 'Lock' AND query ILIKE '%FROM letter_drafts%FOR UPDATE%'
+           ) AS waiting`,
+          [(await holder.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0].pid]
+        );
+        waiting = rows[0].waiting;
+        if (!waiting) await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      expect(waiting).toBe(true);
+      // The order is free: nothing holds it while the draft is waited for.
+      await prober.query('BEGIN');
+      await expect(prober.query('SELECT 1 FROM orders WHERE order_id = $1 FOR UPDATE NOWAIT', [orderId])).resolves.toMatchObject({ rowCount: 1 });
+      await prober.query('ROLLBACK');
+      await holder.query('ROLLBACK');
+      return await running;
+    } finally {
+      await prober.query('ROLLBACK').catch(() => undefined);
+      prober.release();
+      holder.release();
+    }
+  }
+
+  it('takes the draft before the order when a payment arrives (#730)', async () => {
+    const { orderId, sessionId, draftId } = await seedPendingJitOrder();
+    await expect(
+      waitsForDraftWithoutTheOrder(orderId, draftId, () =>
+        commerce.processStripeWebhookEvent(paidEvent({ eventId: `evt_${sessionId}`, sessionId }) as never)
+      )
+    ).resolves.toEqual({ duplicate: false, orderId, status: 'fulfillment_pending' });
+    await expectExactlyOneFulfilment(orderId);
+  });
+
+  it('takes the draft before the order when the hourly recovery fulfils a paid order (#730)', async () => {
+    const { orderId, draftId } = await seedPendingJitOrder();
+    await pool.query(`UPDATE orders SET status = 'paid', paid_at = NOW() WHERE order_id = $1`, [orderId]);
+    await expect(waitsForDraftWithoutTheOrder(orderId, draftId, () => commerce.fulfillPaidOrder(orderId))).resolves.toBe(true);
+    expect(await lettersForOrder(orderId)).toBe(1);
+  });
+
   it('fulfils exactly once for a single delivery, as the baseline', async () => {
     const { orderId, sessionId } = await seedPendingJitOrder();
 

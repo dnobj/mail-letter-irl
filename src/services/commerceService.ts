@@ -1431,18 +1431,45 @@ async function findCheckoutOrder(
   session: Stripe.Checkout.Session
 ): Promise<Order | null> {
   const orderId = session.metadata?.orderId || session.client_reference_id;
-  const result = orderId
+  // Found first without a lock, so that a Pay & Send order's draft is locked
+  // before the order (lockDraftOfOrder): the order every path takes (#730).
+  const located = orderId
     ? await client.query<Order>(
         `SELECT * FROM orders
          WHERE order_id = $1 OR stripe_checkout_session_id = $2
          ORDER BY CASE WHEN order_id = $1 THEN 0 ELSE 1 END
-         LIMIT 1 FOR UPDATE`,
+         LIMIT 1`,
         [orderId, session.id]
       )
     : await client.query<Order>(
-        'SELECT * FROM orders WHERE stripe_checkout_session_id = $1 LIMIT 1 FOR UPDATE',
+        'SELECT * FROM orders WHERE stripe_checkout_session_id = $1 LIMIT 1',
         [session.id]
       );
+  const found = located.rows[0];
+  if (!found) return null;
+  return lockDraftThenOrder(client, found.order_id, found.draft_id);
+}
+
+/**
+ * Locks a Pay & Send order's draft, then the order (#730). Every path that
+ * holds both takes the draft first: a prepaid send and a checkout's
+ * preparation lock the draft, then the draft's orders, then the account. The
+ * paid fulfilment and its recovery used to lock the order first and the draft
+ * last, after the account, so a prepaid send of the same draft and a payment
+ * arriving for it could each hold what the other wanted; PostgreSQL broke the
+ * cycle by failing one, and Stripe's retry finished it. An order's draft_id
+ * never changes, so the unlocked read that found it stays true. A pack order
+ * has no draft and locks only the order.
+ */
+async function lockDraftThenOrder(
+  client: Pick<pg.PoolClient, 'query'>,
+  orderId: string,
+  draftId: string | null | undefined
+): Promise<Order | null> {
+  if (draftId) {
+    await client.query('SELECT draft_id FROM letter_drafts WHERE draft_id = $1 FOR UPDATE', [draftId]);
+  }
+  const result = await client.query<Order>('SELECT * FROM orders WHERE order_id = $1 FOR UPDATE', [orderId]);
   return result.rows[0] || null;
 }
 
@@ -4022,11 +4049,13 @@ export async function listPackPurchases(
 
 export async function fulfillPaidOrder(orderId: string): Promise<boolean> {
   return transaction(async client => {
-    const result = await client.query<Order>(
-      'SELECT * FROM orders WHERE order_id = $1 FOR UPDATE',
+    // The draft before the order, as every path takes them (lockDraftThenOrder).
+    const located = await client.query<Order>(
+      'SELECT * FROM orders WHERE order_id = $1',
       [orderId]
     );
-    const order = result.rows[0];
+    if (!located.rows[0]) return false;
+    const order = await lockDraftThenOrder(client, orderId, located.rows[0].draft_id);
     if (!order || order.order_type !== 'jit_mail' || order.status !== 'paid') return false;
     await client.query('SAVEPOINT recovery_fulfillment');
     try {
