@@ -3,6 +3,10 @@
 // and that the native modules and the files the code reads at runtime load.
 // The pre-deploy migration is proven by the step after this one.
 import { access, constants } from 'node:fs/promises';
+import { createRequire } from 'node:module';
+
+// This file is mounted outside the app, so the app's packages are resolved from it.
+const fromApp = createRequire('/app/package.json');
 
 function fail(message) {
   console.error(`FAIL: ${message}`);
@@ -20,11 +24,11 @@ for (const path of ['dist', 'dist/mcp/httpServer.js', 'node_modules', 'db/migrat
   }
 }
 
-const sharp = (await import('sharp')).default;
+const sharp = (await import(fromApp.resolve('sharp'))).default;
 const png = await sharp({ create: { width: 2, height: 2, channels: 3, background: '#ffffff' } }).png().toBuffer();
 if (png.length === 0) fail('sharp made an empty image');
 
-const bcrypt = (await import('bcrypt')).default;
+const bcrypt = (await import(fromApp.resolve('bcrypt'))).default;
 if (!(await bcrypt.compare('letter', await bcrypt.hash('letter', 4)))) fail('bcrypt did not verify its own hash');
 
 const { FONT_FILES, fontBytes } = await import('/app/dist/render/fonts.js');
