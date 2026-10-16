@@ -8,6 +8,14 @@ import type pg from 'pg';
  *          -> image_generation_reservations -> users -> credit_ledger
  *          -> image_entitlements
  *
+ * The order is for rows that already exist. Inserting a new row (a letter, its
+ * job, a ledger lot) may follow the account lock: no other transaction can
+ * hold the new row, and its foreign-key share lock on the account is then
+ * already covered by the account lock held. A send takes the account before
+ * inserting its letter for that reason (#730): inserted first, the letter's
+ * share lock on the account would make two sends from one account each wait
+ * for the other's to take it FOR UPDATE.
+ *
  * A draft comes before its orders (#730): a prepaid send and a checkout's
  * preparation lock the draft and then the draft's orders, and the paid
  * fulfilment finds its order unlocked, locks the draft, then the order
