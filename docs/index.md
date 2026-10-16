@@ -133,6 +133,7 @@ Not built yet.
 - [ACP Quickstart](acp-quickstart.md) - the phased ACP plan
 - [ACP Stripe Integration](acp-stripe-integration.md) - Shared Payment Token handling for ACP
 - [ACP Purchase Flow](credit-purchase-flow.md) - the planned in-ChatGPT purchase flow
+- [September 2026 Architecture Review](architecture-review-2026-09.md) - modularization recommendations to evaluate, with their status on 2026-10-15; not an implementation mandate
 
 ---
 
