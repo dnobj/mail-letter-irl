@@ -77,7 +77,11 @@ native modules and fonts load, and runs the pre-deploy migration in it. To move 
 3. To go back, delete the variable and redeploy: Railpack builds it again, and
    runs `npm start` with no start command set, so a cleared one needs no
    restoring. In an incident, Railway's Rollback to the previous deployment is
-   faster, and the variable can be deleted after.
+   faster: it restores the previous image and its variables. Before the next
+   deploy, check `RAILWAY_DOCKERFILE_PATH` is gone, and delete it if not, or
+   that deploy builds from the Dockerfile again. Rollback is offered only
+   while the previous deployment's image is still kept; after that, delete the
+   variable and redeploy.
 
 Development first; production at a promotion, on the owner's word.
 

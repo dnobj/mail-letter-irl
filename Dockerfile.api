@@ -46,9 +46,10 @@ RUN test -f dist/mcp/httpServer.js && test -f dist/cli/runMaintenance.js && test
   && ls db/migrations/*.sql > /dev/null && ls widgets/*.html > /dev/null && ls widgets/shared/*.js > /dev/null \
   && ls assets/fonts/*.ttf > /dev/null
 USER node
-# The base image's entrypoint (docker-entrypoint.sh) stays: it runs a command
-# it is given with exec, so Node, or npm for an npm script, is the first
-# process and receives the stop signal.
+# The base image's entrypoint (docker-entrypoint.sh) stays: it runs the
+# command below with exec, so Node is the first process and receives the stop
+# signal. A start command set on the service (the maintenance service's) runs
+# as that service's first process too, through the entrypoint or not.
 # The API. The maintenance service sets its own start command
 # (`npm run maintenance`), which Railway runs in place of this one.
 CMD ["node", "dist/mcp/httpServer.js"]

@@ -2,6 +2,7 @@
 // user. It proves the runtime is unprivileged and cannot change its own code,
 // and that the native modules and the files the code reads at runtime load.
 // The pre-deploy migration is proven by the step after this one.
+import { readdirSync } from 'node:fs';
 import { access, constants } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 
@@ -15,9 +16,14 @@ function fail(message) {
 
 if (process.getuid() === 0) fail('the image runs as root');
 
-// The app's own directory too: write access on a directory lets its entries be
-// renamed or replaced whoever owns them.
-for (const path of ['.', 'package.json', 'dist', 'dist/mcp/httpServer.js', 'node_modules', 'db/migrations', 'widgets', 'assets/fonts']) {
+// Every directory and file under /app, the app's own directory included: write
+// access on a directory lets its entries be renamed or replaced whoever owns
+// them. The paths the code reads must be there first.
+for (const path of ['package.json', 'dist/mcp/httpServer.js', 'dist/cli/runMaintenance.js', 'db/migrations', 'widgets/shared', 'assets/fonts']) {
+  await access(path, constants.R_OK);
+}
+const everything = ['.', ...readdirSync('.', { recursive: true })];
+for (const path of everything) {
   try {
     await access(path, constants.W_OK);
     fail(`${path} is writable by the runtime user`);
@@ -36,7 +42,7 @@ if (!(await bcrypt.compare('letter', await bcrypt.hash('letter', 4)))) fail('bcr
 // The API's and the cron's entry points, with every module they import: a
 // package or file missing from the image fails here, not on the first deploy.
 // Each starts only when run directly: importing it loads its configuration,
-// makes its pool (which connects on its first query) and starts a timer, so
+// makes its pool (which connects on its first query) and the API's starts a rate-limit timer, so
 // the check ends with an explicit exit.
 await import('/app/dist/mcp/httpServer.js');
 await import('/app/dist/cli/runMaintenance.js');
