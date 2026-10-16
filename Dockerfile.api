@@ -42,7 +42,6 @@ COPY assets/fonts ./assets/fonts
 # Fails the build, not the boot, if a directory the code reads is missing.
 RUN test -f dist/mcp/httpServer.js && test -f dist/cli/runMaintenance.js && test -f dist/cli/migrate.js \
   && ls db/migrations/*.sql > /dev/null && ls widgets/*.html > /dev/null && ls assets/fonts/*.ttf > /dev/null
-USER node
 # The API. The maintenance service sets its own start command
 # (`npm run maintenance`), which Railway runs in place of this one.
 CMD ["node", "dist/mcp/httpServer.js"]
