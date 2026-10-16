@@ -232,8 +232,8 @@ describe("POST /elevate in full mode", () => {
     expect(reply.status).toBe(500);
     expect(reply.body).not.toContain("Elevated.");
     expect(claims()).toHaveLength(1);
-    // This request's own audit row, not the previous test's (the GET that
-    // opened its session wrote a session_start).
+    // Exactly one audit row from this request besides the session_start its
+    // GET wrote.
     expect(audits.slice(auditsBefore).filter((audit) => audit.action !== "admin.session_start")).toEqual([expect.objectContaining({ action: "admin.request_failed", outcome: "failed" })]);
     // The session itself is not elevated.
     const resolved = sessions.resolve(lastSessionId, { login: "owner@example.com", peerAddress: PEERS["owner@example.com"] });

@@ -87,6 +87,22 @@ describe('the pack-refund sweep asks Stripe before it compensates (#730)', () =>
     });
   });
 
+  it('prefers the refund that went through to a newer pending one, and a pending one to a newer cancelled one (#730)', async () => {
+    const cases: Array<[Array<{ id: string; status: string }>, string]> = [
+      [[{ id: 're_newer_pending', status: 'pending' }, { id: 're_ours', status: 'succeeded' }], 're_ours'],
+      [[{ id: 're_newer_canceled', status: 'canceled' }, { id: 're_pending', status: 'pending' }], 're_pending'],
+      // All failed or cancelled: the newest, which compensates.
+      [[{ id: 're_newest_failed', status: 'failed' }, { id: 're_older_canceled', status: 'canceled' }], 're_newest_failed'],
+    ];
+    for (const [listed, expected] of cases) {
+      vi.mocked(settlePackRefund).mockClear();
+      const stripe = stripeSeam(async () => listed.map(refund => ({ ...refund, amount: 400, metadata: { packRefundId: 'pr-1' } })));
+      await expect(reconcilePackRefunds(stripe as never, { retryDelaySeconds: 60 })).resolves.toMatchObject({ adopted: 1 });
+      expect(settlePackRefund, expected).toHaveBeenCalledWith(client, expect.anything(), expect.objectContaining({ id: expected }), 'pack_refund.sweep_adopted');
+      expect(stripe.createPartialPaymentRefund).not.toHaveBeenCalled();
+    }
+  });
+
   it('adopts the refund that went through when a newer one for its amount failed (#730)', async () => {
     const stripe = stripeSeam(async () => [
       { id: 're_newer_failed', status: 'failed', amount: 400, metadata: { packRefundId: 'pr-1' } },

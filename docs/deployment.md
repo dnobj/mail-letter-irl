@@ -677,7 +677,8 @@ webhook opens a `stripe_partial_refund_unmatched` alert (`reason`
 `another_refund` for the command's amount, `command_mismatch` for another),
 and the command is left as it was; the sweep, meeting one in a race, only
 records it as ignored. Of several refunds for the command's amount, the sweep
-adopts one that did not fail. The sweep
+adopts the one that succeeded, else one still pending, else the newest (all
+failed or cancelled: the command is compensated). The sweep
 adopts only a refund for the command's own amount: one that names it for
 another amount is not its money, so the sweep goes on as if Stripe held none
 (it makes the command's refund, or compensates at the attempt limit), records
