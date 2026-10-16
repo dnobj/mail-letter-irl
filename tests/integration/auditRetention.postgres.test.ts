@@ -171,7 +171,7 @@ describePostgres('operator audit retention', () => {
       expect(Date.now() - started).toBeGreaterThanOrEqual(4_000);
       // Nothing was deleted, and the commerce lock it held while waiting is gone.
       expect(await commerceIds()).toEqual([due]);
-      await expect(commerceRow('NOW()')).resolves.toBeTruthy();
+      await expect(commerceRow(COMMERCE_NOT_YET)).resolves.toBeTruthy();
     } finally {
       await writer.query('ROLLBACK').catch(() => undefined);
       writer.release();
