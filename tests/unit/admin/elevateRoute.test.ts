@@ -108,6 +108,9 @@ describe("POST /elevate in full mode", () => {
   clientScript.path = clientScriptPath(clientScript.body);
   const router = new AdminRouter<RouteHandler>();
   registerReadRoutes(router, clientScript, registerCommandRoutes(router, ADMIN_COMMANDS));
+  const sessions = new AdminSessionStore({ idleTtlMs: 60_000, absoluteTtlMs: 600_000 });
+  // The session id of the last POST /elevate, before any rotation.
+  let lastSessionId = "";
   let server: http.Server;
   let port = 0;
 
@@ -115,7 +118,7 @@ describe("POST /elevate in full mode", () => {
     const listener = createAdminRequestListener({
       config,
       pools,
-      sessions: new AdminSessionStore({ idleTtlMs: 60_000, absoluteTtlMs: 600_000 }),
+      sessions,
       elevation: new ElevationGuard(),
       whois: {
         whois: async (peer: string) => ({
@@ -161,6 +164,7 @@ describe("POST /elevate in full mode", () => {
     const first = await send(port, "GET", "/", identity(login));
     const sessionId = String(first.headers["set-cookie"]).split(";")[0].split("=")[1];
     const token = createCsrfToken(config.sessionSecret, sessionId);
+    lastSessionId = sessionId;
     return send(
       port,
       "POST",
@@ -228,5 +232,8 @@ describe("POST /elevate in full mode", () => {
     expect(reply.body).not.toContain("Elevated.");
     expect(claims()).toHaveLength(1);
     expect(audits.at(-1)).toMatchObject({ action: "admin.request_failed", outcome: "failed" });
+    // The session itself is not elevated.
+    const resolved = sessions.resolve(lastSessionId, { login: "owner@example.com", peerAddress: PEERS["owner@example.com"] });
+    expect(resolved).toMatchObject({ kind: "ok", session: { elevatedUntil: null } });
   });
 });

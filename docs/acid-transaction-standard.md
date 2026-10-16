@@ -143,23 +143,28 @@ no key column, which conflicts with every other writer's lock on the row), so an
 the order. Call `lockAccountForBalanceChange` (`src/services/accountLock.ts`) before the first
 ledger or entitlement statement.
 
-Foreign keys take implicit locks too. Inserting a row, or updating a row the transaction already
-changed, checks each of its foreign keys with a share lock (`FOR KEY SHARE`) on the referenced row,
-held to the end of the transaction and taken after the row itself: an order's draft, account and
-letter; a letter's account and funding order; a job's letter; a ledger lot's order; a draft's account
-and letter. Only `FOR UPDATE`, a `DELETE`, or an `UPDATE` that changes a key blocks that share lock.
-Two consequences:
+Foreign keys take implicit locks too. Inserting a row, changing a foreign-key column, or updating a
+row the transaction already changed checks the row's foreign keys with a share lock (`FOR KEY
+SHARE`) on each referenced row, held to the end of the transaction and taken after the row itself.
+Nearly every table here references the account, and the mail graph references up the canonical
+order (a letter its funding order, a job its letter, an order its draft and letter, a ledger lot its
+order). Only `FOR UPDATE`, a `DELETE`, or an `UPDATE` that changes a key blocks that share lock.
+Three rules follow:
 
-- A row a path holds while it waits for a row that references it is taken `FOR NO KEY UPDATE`, as
-  every draft is (#730), so the referencing row's check is not blocked by it.
-- A path that will take a row `FOR UPDATE` takes it before inserting a row that references it, as a
-  send takes the account before inserting its letter (#730): otherwise two such paths each hold the
-  share lock their insert took and each wait for the other's.
-
-What keeps orders, letters and jobs safe is the canonical direction above and the account lock: no
-path holds a letter, job or account while waiting for an order another path holds and re-checks.
-And because a draft holder no longer blocks a foreign-key check on the draft, every path that writes
-an order's `draft_id` must take the draft's lock first; `prepareJitOrder` is the only one today.
+- **A path that will take a row `FOR UPDATE` takes it before inserting a row that references it.**
+  A send takes the account before inserting its letter (#730): otherwise two sends each hold the
+  share lock their insert took, and each waits for the other's to take the account.
+- **A row is held `FOR NO KEY UPDATE` when some other path, while holding a row this one waits for,
+  checks a key to it.** Drafts are held that way (#730), apart from the retention sweeps, which skip
+  a locked draft and wait on nothing: a refund holding its order re-checks the order's key to its
+  draft. Every path that writes an order's `draft_id` then has to take the draft's lock first, or it
+  would slip past the holders' checks for a live order; `prepareJitOrder` is the only one.
+- **Otherwise the parent stays `FOR UPDATE`,** which is safe when no path checks a key to it
+  without already holding it. Orders, letters and the account are held `FOR UPDATE` on that rule:
+  the mail paths take the order, then the letter, then the job (`lockFundingGraph`), and a send
+  takes its order before inserting the letter that names it. The account's `FOR UPDATE` is also
+  what makes a checkout's order insert wait during an account erasure (#449), so it must not be
+  weakened.
 
 Within the mail graph, take the funding order lock from `lockFundingGraph` and then address that
 order by its `order_id`. Re-deriving the order from `letter_id` in a later `UPDATE ... WHERE

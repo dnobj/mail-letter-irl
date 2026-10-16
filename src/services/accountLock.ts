@@ -9,9 +9,11 @@ import type pg from 'pg';
  *          -> image_entitlements
  *
  * The order is for rows that already exist. Inserting a new row (a letter, its
- * job, a ledger lot) may follow the account lock: no other transaction can
- * hold the new row, and its foreign-key share lock on the account is then
- * already covered by the account lock held. A send takes the account before
+ * job, a ledger lot) may follow the account lock when every other row it
+ * references, and any unique key it could collide on, is already held by the
+ * transaction: no other transaction can hold the new row, and its foreign-key
+ * share lock on the account is covered by the account lock held. A send's
+ * letter qualifies: its funding order is locked first. A send takes the account before
  * inserting its letter for that reason (#730): inserted first, the letter's
  * share lock on the account would make two sends from one account each wait
  * for the other's to take it FOR UPDATE.
@@ -34,10 +36,9 @@ import type pg from 'pg';
  * draft holder no longer blocks a foreign-key check on the draft, every path
  * that writes an order's draft_id takes the draft's lock first
  * (prepareJitOrder, the only one), or it would slip past the holders' checks
- * for a live order. The stronger
- * lock is left to a statement that deletes drafts, when it runs, and to the
- * retention sweeps, which skip a locked draft and wait on nothing while they
- * hold one.
+ * for a live order. The stronger lock is left to a statement that deletes
+ * drafts, when it runs, and to the retention sweeps, which skip a locked
+ * draft and wait on nothing while they hold one.
  *
  * One path runs against it: restoring quarantined content (retentionService)
  * locks the saved copy in redacted_content_quarantine before its draft or
