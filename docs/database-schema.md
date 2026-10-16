@@ -813,6 +813,15 @@ Durable command state keyed uniquely by `(environment, idempotency_key)`. The ta
 digest, expected version, timestamps, correlation ID, bounded sanitized result, and stable error code.
 Status and timing constraints reject inconsistent outcomes.
 
+### admin_totp_counters
+
+The last TOTP counter (a 30-second step) accepted for the admin panel's write elevation, by
+`counter_key`: an operator's tailnet login, since each has a secret of their own (`ADMIN_TOTP_SECRETS`),
+or one shared key under the development-only shared secret (migration 063, #730). A code is accepted
+only for a counter above the stored one, raised in one upsert, so a code cannot be used twice, even
+across a restart or a second process. `last_counter` and `updated_at` only; no customer data. The
+operator role reads, inserts and updates it; the reader has no access. `PUBLIC` is revoked.
+
 ### admin_operations
 
 Environment-scoped queue of work a command asks for and a deployed worker performs. Each command can
@@ -919,6 +928,7 @@ Production provisioning and the first production connection remain separate owne
 | 58 | 058_users_email_case_insensitive.sql | `users.email` is unique whatever its case (#730): `users_email_lower_key`, a unique index on `lower(email)`, replaces 001's inline `users_email_key`, and the plain `idx_users_email` goes. Addresses that already differ only in case stop the migration with a unique_violation (23505 in the deploy log) whose message names the problem, for an operator to join or correct the accounts first; development and production had none. `EMAIL_UNIQUE_CONSTRAINT` names the new index. Code from before 058 (the old image while the pre-deploy runs, or a rollback across 058) still names `users_email_key`: a collision is still refused, but reaches the customer as a generic error instead of the "already belongs" sentence. Provisioning: no re-run (indexes carry no grants); `ADMIN_LATEST_REQUIRED_MIGRATION` is 058 |
 | 59 | 059_personal_tokens_lookup.sql | `personal_access_tokens.token_lookup` (#730): the SHA-256 of the whole token, unique where set (`idx_pat_token_lookup`), so a token is found by one indexed read, not by its last four characters and a bcrypt compare per match. Tokens made without it are found the old way and given the hash on first use; one can last up to 365 days, so the old way stays until none is left without a hash. Provisioning: no re-run (the reader's column list leaves it out, and neither role writes the table); `ADMIN_LATEST_REQUIRED_MIGRATION` is 059 |
 | 60 | 060_refund_not_completed_alert.sql | The `refund_not_completed` alert type (#730), restated inside the `to_regclass` guard as 056 does, with a partial unique index on its order while it is open (`idx_commerce_alerts_refund_not_completed_order`). Provisioning: no re-run (the roles read the alerts table whole); `ADMIN_LATEST_REQUIRED_MIGRATION` is 060 |
+| 63 | 063_admin_totp_counters.sql | `admin_totp_counters` (#730): write elevation's last accepted TOTP counter per operator, in the database instead of the admin process's memory. Provisioning: **re-run once** (the operator role is granted `SELECT`, `INSERT` and `UPDATE (last_counter, updated_at)`); `ADMIN_LATEST_REQUIRED_MIGRATION` is 063 |
 
 ---
 

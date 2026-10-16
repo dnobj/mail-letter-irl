@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { AdminConfigurationError } from "../../../src/admin/errors.js";
-import { base32Length, parseAdminRuntimeConfig } from "../../../src/admin/runtimeConfig.js";
+import { base32Length, parseAdminRuntimeConfig, SHARED_TOTP_COUNTER_KEY, totpSecretFor } from "../../../src/admin/runtimeConfig.js";
 
 const READER = "postgres://letter_irl_admin_reader_development:pw@db.example.test/letter_irl_dev";
 const OPERATOR = "postgres://letter_irl_admin_operator_development:pw@db.example.test/letter_irl_dev";
@@ -74,7 +74,7 @@ describe("admin runtime configuration", () => {
     expect(problemsOf({ ...validDevelopmentEnv, ADMIN_MODE: "full", DATABASE_URL: READER })).toEqual(
       expect.arrayContaining([
         expect.stringContaining("DATABASE_URL must connect as letter_irl_admin_operator_development in full mode"),
-        expect.stringContaining("ADMIN_TOTP_SECRET is required in full mode"),
+        expect.stringContaining("ADMIN_TOTP_SECRETS is required in full mode"),
       ]),
     );
     const config = parseAdminRuntimeConfig({
@@ -99,6 +99,66 @@ describe("admin runtime configuration", () => {
         expect.stringContaining("must name the same host"),
       ]),
     );
+  });
+
+  describe("each operator's own TOTP secret (#730)", () => {
+    const OWNER_SECRET = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
+    const SECOND_SECRET = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP";
+    const full = { ...validDevelopmentEnv, ADMIN_MODE: "full", DATABASE_URL: OPERATOR };
+
+    it("reads login=SECRET entries, by comma or new line, and gives each login its own", () => {
+      const config = parseAdminRuntimeConfig({
+        ...full,
+        ADMIN_TOTP_SECRETS: `owner@example.com=${OWNER_SECRET.toLowerCase()},\n second@github = ${SECOND_SECRET}`,
+      });
+      expect([...config.totpSecrets.entries()]).toEqual([
+        ["owner@example.com", OWNER_SECRET],
+        ["second@github", SECOND_SECRET],
+      ]);
+      expect(config.totpSecret).toBeNull();
+      expect(totpSecretFor(config, "owner@example.com")).toEqual({ secret: OWNER_SECRET, counterKey: "owner@example.com" });
+      expect(totpSecretFor(config, "second@github")).toEqual({ secret: SECOND_SECRET, counterKey: "second@github" });
+      expect(totpSecretFor(config, "stranger@github")).toBeNull();
+    });
+
+    it("refuses a malformed entry, a login not allowed in, one named twice, a short secret, or a shared one", () => {
+      for (const [value, problem] of [
+        [OWNER_SECRET, 'entries must read "login=SECRET"'],
+        [`stranger@github=${OWNER_SECRET}`, "not in ADMIN_OPERATOR_LOGINS"],
+        [`owner@example.com=${OWNER_SECRET},owner@example.com=${SECOND_SECRET}`, "names a login twice"],
+        ["owner@example.com=JBSWY3DP", "must be base32 and decode to at least 16 bytes"],
+        [`owner@example.com=${OWNER_SECRET},second@github=${OWNER_SECRET}`, "gives two operators the same secret"],
+      ] as const) {
+        expect(problemsOf({ ...full, ADMIN_TOTP_SECRETS: value }), value).toEqual(
+          expect.arrayContaining([expect.stringContaining(problem)]),
+        );
+      }
+    });
+
+    it("keeps the shared secret in development for an operator with none, under one shared counter key", () => {
+      const config = parseAdminRuntimeConfig({
+        ...full,
+        ADMIN_TOTP_SECRETS: `owner@example.com=${OWNER_SECRET}`,
+        ADMIN_TOTP_SECRET: SECOND_SECRET,
+      });
+      expect(totpSecretFor(config, "owner@example.com")).toEqual({ secret: OWNER_SECRET, counterKey: "owner@example.com" });
+      expect(totpSecretFor(config, "second@github")).toEqual({ secret: SECOND_SECRET, counterKey: SHARED_TOTP_COUNTER_KEY });
+    });
+
+    it("refuses the shared secret in production, so every operator there has one no one else holds", () => {
+      const production = {
+        ...full,
+        NODE_ENV: "production",
+        LETTER_IRL_DEPLOYMENT_ENVIRONMENT: "production",
+        ADMIN_TOTP_SECRET: SECOND_SECRET,
+      };
+      expect(problemsOf(production)).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("ADMIN_TOTP_SECRET is not used in production"),
+          expect.stringContaining("ADMIN_TOTP_SECRETS is required in full mode"),
+        ]),
+      );
+    });
   });
 
   it("refuses production without NODE_ENV=production and with a test Stripe key", () => {

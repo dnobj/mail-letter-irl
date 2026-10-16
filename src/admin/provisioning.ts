@@ -133,10 +133,15 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  * 060 adds the alert type refund_not_completed (#730), with a partial unique
  * index on its order while open. The roles read commerce_operational_alerts
  * whole, and the panel's alert commands already transition any type. Nothing
- * to re-run; required, as the newest is.
+ * to re-run.
+ *
+ * 063 adds admin_totp_counters (#730), the last accepted TOTP counter per
+ * operator, which write elevation keeps through the operator role. The
+ * operator is granted it below: provisioning MUST be re-run once after 063,
+ * or elevation is refused. Required, as the newest is.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
-  "060_refund_not_completed_alert.sql";
+  "063_admin_totp_counters.sql";
 
 export interface AdminProvisioningArguments {
   environment: "development" | "production";
@@ -613,6 +618,10 @@ export function buildAdminGrantStatements(
     `GRANT INSERT ON TABLE ${table("admin_command_runs")} TO ${operatorRole}`,
     `GRANT UPDATE (status, started_at, completed_at, sanitized_result_json, error_code) ON TABLE ${table("admin_command_runs")} TO ${operatorRole}`,
     `GRANT UPDATE (status, attempts, locked_at, locked_by, completed_at, sanitized_result_json, error_code) ON TABLE ${table("admin_operations")} TO ${operatorRole}`,
+    // Write elevation's last accepted TOTP counter (063, #730): read, then
+    // raised in one upsert. The operator only: the reader never elevates.
+    `GRANT SELECT, INSERT ON TABLE ${table("admin_totp_counters")} TO ${operatorRole}`,
+    `GRANT UPDATE (last_counter, updated_at) ON TABLE ${table("admin_totp_counters")} TO ${operatorRole}`,
   );
 
   // One statement per privilege so each grant is reviewable on its own line.
