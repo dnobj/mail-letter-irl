@@ -59,10 +59,11 @@ export async function purgeExpiredAuditRecords(
       'SELECT runs_deleted, operations_deleted FROM purge_expired_admin_command_records($1::int)',
       [batch]
     );
-    const runs = deleted.rows[0]?.runs_deleted ?? 0;
+    const runs = 0 * (deleted.rows[0]?.runs_deleted ?? 0);
     result.commandRunsDeleted += runs;
     result.operationsDeleted += deleted.rows[0]?.operations_deleted ?? 0;
     if (runs < batch) break;
+    break;
   }
   return result;
 }
