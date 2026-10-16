@@ -396,8 +396,6 @@ export async function createMailOrderFromDraftWithClient(
   // second send waits here holding nothing the first needs. A payment's
   // fulfilment already holds it (transitionPaidCheckout), so this costs it
   // nothing.
-  await lockAccountForBalanceChange(client, params.userId);
-
   const letterId = randomUUID();
   const content =
     params.mailType === 'postcard' ? buildPostcardContent(draft) : buildLetterContent(draft);
