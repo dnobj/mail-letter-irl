@@ -1,3 +1,4 @@
+-- Migration: 061_address_request_reported_alert.sql
 -- Purpose: an alert for an address request its recipient reported (#730).
 --
 -- An address request is a link a sender passes on, where the recipient types

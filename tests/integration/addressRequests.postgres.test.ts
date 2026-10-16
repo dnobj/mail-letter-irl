@@ -250,6 +250,11 @@ describePostgres('address requests (#604)', () => {
     await age(late.request.requestId, 8);
     await expect(service.declineAddressRequest(late.token, { report: true })).resolves.toEqual({ ok: false, refusal: 'expired' });
     expect(await reportedAlerts(late.request.requestId)).toEqual([]);
+    // A link its sender cancelled is refused, and opens none.
+    const cancelled = await made(userId);
+    await expect(service.cancelAddressRequest({ userId, requestId: cancelled.request.requestId })).resolves.toMatchObject({ ok: true });
+    await expect(service.declineAddressRequest(cancelled.token, { report: true })).resolves.toEqual({ ok: false, refusal: 'cancelled' });
+    expect(await reportedAlerts(cancelled.request.requestId)).toEqual([]);
     // An answer opens none.
     const answered = await made(userId);
     await expect(service.answerAddressRequest(answered.token, ADDRESS)).resolves.toMatchObject({ ok: true });

@@ -425,8 +425,9 @@ that day only add to the count on the Limits page. The API also posts a one-line
 phone. (A healthchecks.io `/fail` URL emails only the first notice until its check is pinged up again, so
 it is not recommended.) The same URL carries the other
 notices (#699): held mail that missed its mail day, letters the provider cancelled, a dispatch whose outcome
-is unknown, mail held for its funding, and a Pay & Send order refunded or disputed after its letter went, or
-may have gone, to the provider. Each names no customer; the Alerts page has the detail. Review the alert, then raise the
+is unknown, mail held for its funding, a Pay & Send order refunded or disputed after its letter went, or
+may have gone, to the provider, a refund that failed or was cancelled at Stripe, and an address request link
+its recipient reported (#730). Each names no customer; the Alerts page has the detail. Review the alert, then raise the
 limit here if everything looks right, or leave it. Resolve the alert with a code such as
 `limit_reviewed` or `limit_raised`.
 

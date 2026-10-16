@@ -171,7 +171,7 @@ describe('the address request routes (#604)', () => {
     expect(writeDiagnostic).toHaveBeenCalledWith('warn', 'address_request.reported', { requestId: REQUEST_ID });
     // And a notice, so the account is reviewed while its requests are kept (#730).
     expect(reportToOperator).toHaveBeenCalledTimes(1);
-    expect(reportToOperator).toHaveBeenCalledWith('address_request_reported', OPERATOR_NOTICES.addressRequestReported(7));
+    expect(reportToOperator).toHaveBeenCalledWith('address_request_reported', OPERATOR_NOTICES.addressRequestReported());
     vi.mocked(reportToOperator).mockClear();
     // Only true reports: anything else is a plain decline.
     vi.mocked(writeDiagnostic).mockClear();

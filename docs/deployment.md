@@ -758,8 +758,9 @@ know who sent them an address request link pressed "I don't know who sent this":
 nothing was shared. The alert names the account that made the link. One report can be a recipient who
 forgot the sender; several against one account, or one against an account with many requests, suggests
 someone collecting addresses. An operator notice is posted too, since the evidence does not last:
-the account's requests are deleted `LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS` (7 by default) after
-they close, or after the link expires for one never answered. Review within that window. There is no
+the reported request is deleted `LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS` (set on the maintenance
+service, 7 by default) after it closes, the account's earlier requests sooner, and all of them at once
+if the account is erased. Review soon. There is no
 panel command to block an account's requests: an engineer looks at the account's other
 `address_requests` while they are kept, and `LETTER_IRL_ADDRESS_REQUESTS_ENABLED=false` turns the
 feature off for everyone. Resolve the alert once reviewed.
