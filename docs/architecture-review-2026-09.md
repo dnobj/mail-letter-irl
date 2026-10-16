@@ -12,10 +12,10 @@ revision. Line counts are a rough signal, as the review says, not a measure.
 
 | Priority | Status | What is there now |
 | --- | --- | --- |
-| 1 | Done | One schema layer since #688: `src/zodSchemas.ts` serves `tools/list` and generates the manifest; `src/schemas.ts` and `src/mcp/toolSchemas.ts` are gone. |
+| 1 | Done | One schema layer since #688 (landed in #713): `src/zodSchemas.ts` serves `tools/list` and generates the manifest; `src/schemas.ts` and `src/mcp/toolSchemas.ts` are gone. |
 | 2 | Open | `src/services/commerceService.ts` still holds checkout, payment events, refunds, disputes and recovery, and has grown from about 2,800 lines to about 4,500. |
-| 3 | Partly | `widgets/shared/` now holds the host bridge (`host.js`), shared styles and page helpers, built into each card. The two preview cards are still large (about 3,300 lines each, up from about 1,060), mostly from features added since. |
-| 4 | Open | `src/mcp/httpServer.ts` (about 1,160 lines) and `src/mcp/registerTools.ts` (about 1,970, up from about 850) still combine the responsibilities listed. |
+| 3 | Partly | `widgets/shared/` now holds the host bridge (`host.js`), page rendering, the Arrives picker, the stationery Style row, the envelope and the studio layout, which the server inlines into the cards that ask for them. Design tokens and the purchase-status controller are not shared yet. The two preview cards are still large (about 3,300 lines each, up from about 1,060), mostly from features added since. |
+| 4 | Open | `src/mcp/httpServer.ts` (about 1,160 lines, up from about 1,060) and `src/mcp/registerTools.ts` (about 1,970, up from about 850) still combine the responsibilities listed. |
 | 5 | Open | `src/store/fileAccountStore.ts` still queries PostgreSQL under its file-store name, and `persist()` is still a no-op. |
 | 6 | Done | `src/api/adminApiHandler.ts` is gone, and the hardened panel in `src/admin/` is the operator interface (#162, closed). |
 
