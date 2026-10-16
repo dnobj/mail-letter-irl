@@ -227,11 +227,14 @@ describe("POST /elevate in full mode", () => {
 
   it("does not elevate when the claim of a correct code fails", async () => {
     claimThrows = true;
+    const auditsBefore = audits.length;
     const reply = await postElevate("owner@example.com", currentCode());
     expect(reply.status).toBe(500);
     expect(reply.body).not.toContain("Elevated.");
     expect(claims()).toHaveLength(1);
-    expect(audits.at(-1)).toMatchObject({ action: "admin.request_failed", outcome: "failed" });
+    // This request's own audit row, not the previous test's (the GET that
+    // opened its session wrote a session_start).
+    expect(audits.slice(auditsBefore).filter((audit) => audit.action !== "admin.session_start")).toEqual([expect.objectContaining({ action: "admin.request_failed", outcome: "failed" })]);
     // The session itself is not elevated.
     const resolved = sessions.resolve(lastSessionId, { login: "owner@example.com", peerAddress: PEERS["owner@example.com"] });
     expect(resolved).toMatchObject({ kind: "ok", session: { elevatedUntil: null } });

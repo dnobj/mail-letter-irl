@@ -145,13 +145,13 @@ ledger or entitlement statement.
 
 Foreign keys take implicit locks too. Inserting a row, changing a foreign-key column, or updating a
 row the transaction already changed takes a share lock (`FOR KEY SHARE`) on each row its foreign keys
-reference, held to the end of the transaction (or of the savepoint it was taken in) and taken after
-the row itself. Only `FOR UPDATE`, a
-`DELETE`, or an `UPDATE` that changes a key blocks it. Account for these locks when you add or move a
+reference (none for a null key), held to the end of the transaction (a rollback to a savepoint
+releases one taken after it; releasing the savepoint does not) and taken after the row itself. Only
+`FOR UPDATE`, a `DELETE`, or an `UPDATE` that changes a key blocks it. Account for these locks when you add or move a
 lock. The code handles them in these places:
 
 - **Drafts are held `FOR NO KEY UPDATE`** (#730), apart from the statements that delete drafts and
-  the retention sweeps, which skip a locked draft. A refund holding its order updates the order twice,
+  the retention sweeps (the deletes wait for a locked draft; the sweeps skip it). A refund holding its order updates the order twice,
   which re-checks the order's key to its draft; a draft held `FOR UPDATE` by a path waiting for that
   order would deadlock with it. Because a draft holder then no longer blocks a check on the draft,
   every path that writes an order's `draft_id` takes the draft's lock first; `prepareJitOrder` is the
@@ -164,7 +164,8 @@ lock. The code handles them in these places:
 - **The account stays `FOR UPDATE`.** It is what makes a checkout's order insert wait while an
   account is erased (#449). One crossing is accepted: a draft made after an erasure's first statement
   is not held by the erasure, so a send, checkout or draft edit holding that draft can meet the
-  erasure at the account row. PostgreSQL fails one of the two; an erasure failed that way is tried
+  erasure at the account row, or, for a draft and checkout order both made between the erasure's
+  first two statements, at the order. PostgreSQL fails one of the two; an erasure failed that way is tried
   again at the next run (`src/services/adminOperationsQueue.ts`).
 
 Within the mail graph, take the funding order lock from `lockFundingGraph` and then address that
