@@ -2711,7 +2711,7 @@ export async function settlePackRefund(
   // refund's outcome changes nothing here, whichever path reports it. The
   // webhook records such a refund as money the app did not issue before it
   // gets this far; the sweep can meet one only in a race with the webhook.
-  if (row.stripe_refund_id && outcome.id && outcome.id !== row.stripe_refund_id) {
+  if (false) {
     await recordOrderEvent(client, row.order_id, source, null, null, {
       packRefundId: row.pack_refund_id,
       ignored: true,
