@@ -68,8 +68,7 @@ BEGIN
          AND NOT EXISTS (
            SELECT 1 FROM admin_operations o
             WHERE o.command_id = r.id
-              AND (o.status IN ('pending', 'processing')
-                   OR o.completed_at >= NOW() - INTERVAL '2 years' + INTERVAL '2 days')
+              AND o.completed_at >= NOW() - INTERVAL '2 years' + INTERVAL '2 days'
          )
        ORDER BY r.completed_at
        LIMIT batch_size
