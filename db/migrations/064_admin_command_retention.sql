@@ -67,9 +67,7 @@ BEGIN
       SELECT r.id
         FROM admin_command_runs r
        WHERE ((r.status IN ('succeeded', 'failed', 'rejected')
-               AND r.completed_at < NOW() - INTERVAL '2 years' + INTERVAL '2 days')
-              OR (r.status IN ('pending', 'running')
-               AND r.requested_at < NOW() - INTERVAL '2 years' + INTERVAL '2 days'))
+               AND r.completed_at < NOW() - INTERVAL '2 years' + INTERVAL '2 days'))
          AND NOT EXISTS (SELECT 1 FROM admin_audit_events a WHERE a.command_id = r.id)
          AND NOT EXISTS (
            SELECT 1 FROM admin_operations o
