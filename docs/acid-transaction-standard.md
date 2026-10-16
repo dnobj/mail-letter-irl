@@ -127,9 +127,13 @@ Every transaction that mutates account balances, grants, or entitlements acquire
 this order:
 
 ```
-orders -> letters -> letter_jobs -> image_generation_reservations
-       -> users -> credit_ledger -> image_entitlements
+letter_drafts -> orders -> letters -> letter_jobs -> image_generation_reservations
+              -> users -> credit_ledger -> image_entitlements
 ```
+
+A draft comes before its orders (#730): a prepaid send, a checkout's preparation, a payment's
+fulfilment and its recovery, and the account erasure all lock the draft (or the account's drafts)
+before any order.
 
 `users` is the account aggregate root: holding it first is what makes the ledger and entitlement
 rows below it safe. Note that a bare `UPDATE` takes the same row lock as `SELECT ... FOR UPDATE`,

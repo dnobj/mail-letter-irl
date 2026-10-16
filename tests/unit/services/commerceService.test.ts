@@ -851,7 +851,7 @@ describe('commerceService', () => {
 
     function recoverPayAndSend() {
       mocks.query.mockImplementation(async (sql: string) => {
-        if (sql.includes('SELECT * FROM orders WHERE order_id = $1 FOR UPDATE')) {
+        if (sql.startsWith('SELECT * FROM orders WHERE order_id = $1')) {
           return { rows: [{ ...baseOrder, status: 'paid' }] };
         }
         return { rows: [] };
@@ -4035,9 +4035,29 @@ describe('commerceService', () => {
       expect(paramsRecorded()).not.toContain('does not belong');
     });
 
+    it('locks the order\'s draft before the order when recovering it, as every path does (#730)', async () => {
+      mocks.query.mockImplementation(async (sql: string) => {
+        if (sql.startsWith('SELECT * FROM orders WHERE order_id = $1')) {
+          return { rows: [{ ...baseOrder, status: 'paid' }] };
+        }
+        return { rows: [] };
+      });
+      mocks.createMail.mockRejectedValueOnce(Object.assign(new Error('stop here'), { code: 'DRAFT_EXPIRED' }));
+
+      await fulfillPaidOrder('order-1');
+
+      const statements = mocks.query.mock.calls.map(([sql]) => String(sql).replace(/\s+/g, ' '));
+      const draftLock = statements.indexOf('SELECT draft_id FROM letter_drafts WHERE draft_id = $1 FOR UPDATE');
+      const orderLock = statements.indexOf('SELECT * FROM orders WHERE order_id = $1 FOR UPDATE');
+      expect(statements[0]).toBe('SELECT * FROM orders WHERE order_id = $1');
+      expect(draftLock).toBeGreaterThan(0);
+      expect(orderLock).toBeGreaterThan(draftLock);
+      expect(mocks.query.mock.calls[draftLock][1]).toEqual([baseOrder.draft_id]);
+    });
+
     it('stores a class, never the message, when recovery of a paid order is rejected', async () => {
       mocks.query.mockImplementation(async (sql: string) => {
-        if (sql.includes('SELECT * FROM orders WHERE order_id = $1 FOR UPDATE')) {
+        if (sql.startsWith('SELECT * FROM orders WHERE order_id = $1')) {
           return { rows: [{ ...baseOrder, status: 'paid' }] };
         }
         return { rows: [] };
@@ -4059,7 +4079,7 @@ describe('commerceService', () => {
 
     it('refunds a paid order whose draft is no longer the mail it paid for, as recovery finds it (#586)', async () => {
       mocks.query.mockImplementation(async (sql: string) => {
-        if (sql.includes('SELECT * FROM orders WHERE order_id = $1 FOR UPDATE')) {
+        if (sql.startsWith('SELECT * FROM orders WHERE order_id = $1')) {
           return { rows: [{ ...baseOrder, status: 'paid' }] };
         }
         return { rows: [] };
@@ -4081,7 +4101,7 @@ describe('commerceService', () => {
 
     it('labels an unclassified recovery failure database_error, the savepoint fallback', async () => {
       mocks.query.mockImplementation(async (sql: string) => {
-        if (sql.includes('SELECT * FROM orders WHERE order_id = $1 FOR UPDATE')) {
+        if (sql.startsWith('SELECT * FROM orders WHERE order_id = $1')) {
           return { rows: [{ ...baseOrder, status: 'paid' }] };
         }
         return { rows: [] };
@@ -4276,7 +4296,7 @@ describe('commerceService', () => {
             rows: [{ ...baseOrder, order_id: params[0], stripe_checkout_session_id: params[1], checkout_url: params[2] }]
           };
         }
-        if (sql.includes('SELECT * FROM orders WHERE order_id = $1 FOR UPDATE')) {
+        if (sql.startsWith('SELECT * FROM orders WHERE order_id = $1')) {
           return { rows: [{ ...baseOrder, order_id: params[0] }] };
         }
         return { rows: [] };
@@ -4506,7 +4526,7 @@ describe('commerceService', () => {
             rows: [{ ...baseOrder, order_id: params[0], stripe_checkout_session_id: params[1], checkout_url: params[2] }]
           };
         }
-        if (sql.includes('SELECT * FROM orders WHERE order_id = $1 FOR UPDATE')) {
+        if (sql.startsWith('SELECT * FROM orders WHERE order_id = $1')) {
           return { rows: [{ ...baseOrder, order_id: params[0] }] };
         }
         return { rows: [] };
@@ -4965,7 +4985,7 @@ describe('commerceService', () => {
         if (sql.includes('SET stripe_checkout_session_id = $2')) {
           return { rows: [{ ...baseOrder, order_id: params[0], order_type: 'letter_pack', stripe_checkout_session_id: params[1] }] };
         }
-        if (sql.includes('SELECT * FROM orders WHERE order_id = $1 FOR UPDATE')) {
+        if (sql.startsWith('SELECT * FROM orders WHERE order_id = $1')) {
           return { rows: [{ ...baseOrder, order_id: params[0], order_type: 'letter_pack' }] };
         }
         return { rows: [] };

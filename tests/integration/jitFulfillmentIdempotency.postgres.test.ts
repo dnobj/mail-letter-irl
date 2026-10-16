@@ -11,7 +11,7 @@ import { repositoryMigrations, validateDisposableDatabaseUrl } from './support/d
  * replayed Stripe event by five layers, none of which had a test:
  *
  *   1. claimStripeEvent  INSERT ... ON CONFLICT (event_id) DO NOTHING
- *   2. findCheckoutOrder SELECT ... FOR UPDATE on the order row
+ *   2. findCheckoutOrder locks the order's draft, then the order row (#730)
  *   3. the early return for FUNDED_OR_REVERSED statuses - both JIT terminal
  *      statuses, fulfillment_pending and refund_pending, are in that list
  *   4. the consumed-draft branch of createMailOrderFromDraftWithClient
@@ -224,6 +224,98 @@ describePostgres('Pay & Send fulfilment idempotency (#287, #286)', () => {
     expect(await orderColumn<string>(orderId, 'status')).toBe('fulfillment_pending');
     expect(await orderColumn<string | null>(orderId, 'last_error_code')).toBeNull();
   }
+
+  /**
+   * #730: every path takes a Pay & Send order's draft before the order. A
+   * prepaid send of the same draft locks the draft and then its orders, so a
+   * fulfilment that held the order while waiting for the draft could deadlock
+   * against it. Here another session holds the draft: the run must wait for it
+   * while holding neither the order nor the account, which NOWAIT locks prove.
+   */
+  async function waitsForDraftWithoutTheOrder(
+    orderId: string,
+    draftId: string,
+    run: () => Promise<unknown>,
+    userId?: string
+  ) {
+    const holder = await pool.connect();
+    const prober = await pool.connect();
+    let running: Promise<unknown> | undefined;
+    try {
+      await holder.query('BEGIN');
+      await holder.query('SELECT 1 FROM letter_drafts WHERE draft_id = $1 FOR UPDATE', [draftId]);
+      const holderPid = (await holder.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+      running = run();
+      let settled = false;
+      const settle = () => {
+        settled = true;
+      };
+      running.then(settle, settle);
+      // Until a session in this database is blocked by the holder's lock.
+      let waiting = false;
+      for (let attempt = 0; attempt < 100 && !waiting && !settled; attempt += 1) {
+        const { rows } = await prober.query<{ waiting: boolean }>(
+          `SELECT EXISTS (
+             SELECT 1 FROM pg_stat_activity
+              WHERE datname = current_database() AND pid <> pg_backend_pid()
+                AND pg_blocking_pids(pid) @> ARRAY[$1::int]
+           ) AS waiting`,
+          [holderPid]
+        );
+        waiting = rows[0].waiting;
+        if (!waiting) await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      // A run that ended without waiting shows its own error, if it had one.
+      if (!waiting && settled) await running;
+      expect(waiting).toBe(true);
+      // The order, and the account, are free while the draft is waited for.
+      await prober.query('BEGIN');
+      await expect(prober.query('SELECT 1 FROM orders WHERE order_id = $1 FOR UPDATE NOWAIT', [orderId])).resolves.toMatchObject({ rowCount: 1 });
+      if (userId) {
+        await expect(prober.query('SELECT 1 FROM users WHERE user_id = $1 FOR UPDATE NOWAIT', [userId])).resolves.toMatchObject({ rowCount: 1 });
+      }
+      await prober.query('ROLLBACK');
+      await holder.query('ROLLBACK');
+      return await running;
+    } finally {
+      // On any failure above, let the run finish rather than leave a lock for the next test.
+      await prober.query('ROLLBACK').catch(() => undefined);
+      await holder.query('ROLLBACK').catch(() => undefined);
+      await running?.catch(() => undefined);
+      prober.release();
+      holder.release(true);
+    }
+  }
+
+  it('takes the draft before the order when a payment arrives (#730)', async () => {
+    const { orderId, sessionId, draftId, userId } = await seedPendingJitOrder();
+    await expect(
+      waitsForDraftWithoutTheOrder(orderId, draftId, () =>
+        commerce.processStripeWebhookEvent(paidEvent({ eventId: `evt_${sessionId}`, sessionId }) as never),
+        userId
+      )
+    ).resolves.toEqual({ duplicate: false, orderId, status: 'fulfillment_pending' });
+    await expectExactlyOneFulfilment(orderId);
+  });
+
+  it('takes the draft before the order when the hourly recovery fulfils a paid order (#730)', async () => {
+    const { orderId, draftId, userId } = await seedPendingJitOrder();
+    await pool.query(`UPDATE orders SET status = 'paid', paid_at = NOW() WHERE order_id = $1`, [orderId]);
+    await expect(waitsForDraftWithoutTheOrder(orderId, draftId, () => commerce.fulfillPaidOrder(orderId), userId)).resolves.toBe(true);
+    expect(await lettersForOrder(orderId)).toBe(1);
+  });
+
+  it('erases an account taking its drafts before its orders, as every path does (#730 review)', async () => {
+    const { orderId, draftId, userId } = await seedPendingJitOrder();
+    await pool.query(`UPDATE orders SET status = 'cancelled' WHERE order_id = $1`, [orderId]);
+    const erasure = await import('../../src/services/accountErasureService.js');
+    const { transaction } = await import('../../src/db/index.js');
+    const outcome = await waitsForDraftWithoutTheOrder(orderId, draftId, () =>
+      transaction(client => erasure.eraseAccountWithClient(client, userId)),
+      userId
+    );
+    expect(outcome).toMatchObject({ outcome: 'erased' });
+  });
 
   it('fulfils exactly once for a single delivery, as the baseline', async () => {
     const { orderId, sessionId } = await seedPendingJitOrder();

@@ -1,0 +1,25 @@
+# Ignore file for Dockerfile.api ONLY (#730). BuildKit reads <Dockerfile name>.dockerignore
+# before .dockerignore, so this cannot change what the admin build or a Railpack build
+# sees. Keep this file named after the Dockerfile; a ROOT .dockerignore would apply to
+# every service (see Dockerfile.admin.dockerignore).
+# The build copies package.json, package-lock.json, tsconfig.json, src, db/migrations,
+# widgets and assets/fonts by name; everything else is left out of the context, and
+# .env files must never reach an image layer.
+.git
+node_modules
+dist
+coverage
+tests
+test
+docs
+snapshots
+scripts
+examples
+example_layouts
+browser-test-procedures
+assets/brand
+.github
+.env
+**/.env
+.env.*
+**/.env.*
