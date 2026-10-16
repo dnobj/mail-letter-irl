@@ -3501,6 +3501,50 @@ describe('commerceService', () => {
     );
   });
 
+  it('a second refund carrying a command that already names its refund is an alert, and leaves the command alone (#730)', async () => {
+    for (const status of ['succeeded', 'stripe_pending']) {
+      mocks.query.mockReset();
+      mocks.query.mockImplementation(async (sql: string) => {
+        if (sql.includes('INSERT INTO stripe_webhook_events')) {
+          return { rows: [{ event_id: 'evt-second' }] };
+        }
+        if (sql.includes('SELECT * FROM orders')) {
+          return {
+            rows: [{ ...baseOrder, order_type: 'letter_pack', credits: 4, amount_cents: 500, status: 'fulfilled' }]
+          };
+        }
+        if (sql.includes('FROM commerce_pack_refunds WHERE pack_refund_id = $1')) {
+          // Same order, payment intent and amount: only the refund differs.
+          return {
+            rows: [{ pack_refund_id: 'pr-1', order_id: 'order-1', status, amount_cents: 250, stripe_payment_intent_id: 'pi-1', stripe_refund_id: 're-first' }]
+          };
+        }
+        return { rows: [] };
+      });
+
+      await processStripeWebhookEvent({
+        id: 'evt-second',
+        type: 'refund.updated',
+        data: {
+          object: {
+            id: 're-second',
+            payment_intent: 'pi-1',
+            charge: 'ch-1',
+            status: 'succeeded',
+            amount: 250,
+            metadata: { orderId: 'order-1', packRefundId: 'pr-1' }
+          }
+        }
+      } as any);
+
+      expect(mocks.query, status).toHaveBeenCalledWith(
+        expect.stringContaining("'stripe_partial_refund_unmatched', 'critical'"),
+        ['evt-second', 'order-1', expect.stringContaining('"reason":"another_refund"')]
+      );
+      expect(mocks.query, status).not.toHaveBeenCalledWith(expect.stringContaining('UPDATE commerce_pack_refunds'), expect.anything());
+    }
+  });
+
   it('a charge.refunded within what the app already issued is a confirmation, not an alert', async () => {
     mocks.query.mockImplementation(async (sql: string) => {
       if (sql.includes('INSERT INTO stripe_webhook_events')) {

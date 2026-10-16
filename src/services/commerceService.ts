@@ -2553,7 +2553,7 @@ async function recordUnmatchedPartialRefund(
     amountCents: number;
     cumulative: boolean;
     knownRefundedCents?: number;
-    reason?: 'no_matching_command' | 'command_mismatch';
+    reason?: 'no_matching_command' | 'command_mismatch' | 'another_refund';
   }
 ): Promise<void> {
   const { eventId, eventType, order, stripeRefundId, chargeId, refundStatus, amountCents, cumulative } =
@@ -2781,7 +2781,7 @@ export async function settlePackRefund(
 export async function raisePackRefundAlertOnce(
   client: Pick<pg.PoolClient, 'query'>,
   row: Pick<PackRefundRow, 'pack_refund_id' | 'order_id'>,
-  kind: 'stripe_unconfirmed' | 'refunded_after_compensation' | 'refunded_after_withheld',
+  kind: 'stripe_unconfirmed' | 'refunded_after_compensation' | 'refunded_after_withheld' | 'stripe_amount_mismatch',
   details: Record<string, unknown>
 ): Promise<void> {
   await client.query(
@@ -3049,7 +3049,12 @@ async function processRefundEvent(
         command.order_id === order.order_id &&
         command.stripe_payment_intent_id === intent &&
         command.amount_cents === refundedAmount;
-      if (!matches) {
+      // A command that already names a Stripe refund is that refund's (#730):
+      // another refund carrying its metadata is money the app did not issue,
+      // not a settlement of it, and must not replace the refund it recorded.
+      const anotherRefund =
+        matches && Boolean(command.stripe_refund_id) && command.stripe_refund_id !== refundObject!.id;
+      if (!matches || anotherRefund) {
         await recordUnmatchedPartialRefund(client, {
           eventId,
           eventType,
@@ -3060,7 +3065,7 @@ async function processRefundEvent(
           amountCents: refundedAmount,
           cumulative: false,
           knownRefundedCents: await knownRefundedCents(client, order),
-          reason: 'command_mismatch'
+          reason: anotherRefund ? 'another_refund' : 'command_mismatch'
         });
         return { duplicate: false, orderId: order.order_id, status: order.status };
       }
