@@ -15,6 +15,10 @@ vi.mock('../../../src/services/addressRequestService.js', () => ({
   declineAddressRequest: vi.fn()
 }));
 vi.mock('../../../src/services/providers/index.js', () => ({ getLetterProvider: vi.fn() }));
+vi.mock('../../../src/services/operatorNotify.js', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../../src/services/operatorNotify.js')>()),
+  reportToOperator: vi.fn()
+}));
 vi.mock('../../../src/api/middleware/rateLimit.js', () => ({ rateLimitMiddlewareWithGlobal: vi.fn(() => false) }));
 vi.mock('../../../src/utils/requestBody.js', async importOriginal => {
   const actual = await importOriginal<typeof import('../../../src/utils/requestBody.js')>();
@@ -33,6 +37,7 @@ import {
 import { getLetterProvider } from '../../../src/services/providers/index.js';
 import { rateLimitMiddlewareWithGlobal } from '../../../src/api/middleware/rateLimit.js';
 import { writeDiagnostic } from '../../../src/utils/diagnosticLog.js';
+import { OPERATOR_NOTICES, reportToOperator } from '../../../src/services/operatorNotify.js';
 import {
   givenAddressOf,
   handleAddressRequestApiRequest,
@@ -164,6 +169,10 @@ describe('the address request routes (#604)', () => {
     expect(declineAddressRequest).toHaveBeenCalledWith(TOKEN, { report: true });
     expect(writeDiagnostic).toHaveBeenCalledWith('info', 'address_request.decline', { outcome: 'declined', report: true });
     expect(writeDiagnostic).toHaveBeenCalledWith('warn', 'address_request.reported', { requestId: REQUEST_ID });
+    // And a notice, so the account is reviewed while its requests are kept (#730).
+    expect(reportToOperator).toHaveBeenCalledTimes(1);
+    expect(reportToOperator).toHaveBeenCalledWith('address_request_reported', OPERATOR_NOTICES.addressRequestReported(7));
+    vi.mocked(reportToOperator).mockClear();
     // Only true reports: anything else is a plain decline.
     vi.mocked(writeDiagnostic).mockClear();
     vi.mocked(declineAddressRequest).mockClear();
@@ -176,6 +185,7 @@ describe('the address request routes (#604)', () => {
     vi.mocked(declineAddressRequest).mockResolvedValueOnce({ ok: false, refusal: 'answered' });
     await expect(call('decline', { token: TOKEN, report: true })).resolves.toMatchObject({ status: 409 });
     expect(writeDiagnostic).not.toHaveBeenCalledWith('warn', 'address_request.reported', expect.anything());
+    expect(reportToOperator).not.toHaveBeenCalled();
   });
 
   it('keeps a verified answer trimmed, with no name or empty line of its own', async () => {

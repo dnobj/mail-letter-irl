@@ -250,6 +250,22 @@ describePostgres('address requests (#604)', () => {
     await age(late.request.requestId, 8);
     await expect(service.declineAddressRequest(late.token, { report: true })).resolves.toEqual({ ok: false, refusal: 'expired' });
     expect(await reportedAlerts(late.request.requestId)).toEqual([]);
+    // An answer opens none.
+    const answered = await made(userId);
+    await expect(service.answerAddressRequest(answered.token, ADDRESS)).resolves.toMatchObject({ ok: true });
+    expect(await reportedAlerts(answered.request.requestId)).toEqual([]);
+  });
+
+  it('opens one alert when two reports of the same link race (#730)', async () => {
+    const userId = await seedUser();
+    const { request, token } = await made(userId);
+    const outcomes = await Promise.all([
+      service.declineAddressRequest(token, { report: true }),
+      service.declineAddressRequest(token, { report: true })
+    ]);
+    expect(outcomes.filter(outcome => outcome.ok)).toHaveLength(1);
+    expect(outcomes).toContainEqual({ ok: false, refusal: 'declined' });
+    expect(await reportedAlerts(request.requestId)).toHaveLength(1);
   });
 
   it('reads a waiting request past its expiry as expired, and refuses an answer or a cancel then', async () => {

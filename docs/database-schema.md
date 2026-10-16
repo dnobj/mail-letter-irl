@@ -565,9 +565,10 @@ when a refund waits for a person (a Pay & Send letter, or one our record had alr
 before the cancel), and its order is the Pay & Send order, else none. Each alert has a severity and a three-state lifecycle
 (`open`, `acknowledged`, `resolved`) whose timestamps and resolution code the constraints keep
 consistent, and the acknowledging or resolving actor is stored as a hash. One alert per source event
-and type. The panel's acknowledge and resolve commands are the only writers besides the sweeps and the
-account erasure that raise them.
-`address_request_reported` (migration 061, #730), warning, once per request: the recipient of an address request link said they do not know who sent it, and the link closed as declined. Raised in the decline's own statement, so it exists exactly when the decline does. Its `details` hold the account that made the link (`userId`) and the request id, nothing else (docs/deployment.md).
+and type. Besides the panel's acknowledge and resolve commands, alerts are written by what raises them:
+the sweeps, the payment and refund webhooks, the account erasure, and a reported address request's
+decline.
+`address_request_reported` (migration 061, #730), warning, once per request: the recipient of an address request link said they do not know who sent it, and the link closed as declined. Raised in the decline's own statement, so it exists exactly when the decline does. "Once" rests on the request's state machine (a request closes once and never waits again), not on a unique index. Its `details` hold the account that made the link (`userId`) and the request id, nothing else (docs/deployment.md).
 `refund_not_completed` (migration 060, #730), critical, at most one open per order: a full refund failed or was cancelled at Stripe, and the hourly sweep holds the order (`last_error_code` `REFUND_NOT_COMPLETED`, which it and the refund claim skip) instead of refunding again, and so does the webhook when a full refund comes back failed or cancelled; its `details` hold the refund id and status. A person checks the order's refunds and any dispute in Stripe and refunds what is still owed (a refund whose webhook completes the order clears the hold's code), or settles it by hand when the card can't take a refund, and resolves the alert once Stripe shows the money went back or it was settled by hand (docs/deployment.md).
 `held_mail_funding_reversed` (migration 056, #696), once per order: a warning that mail a letter pack paid for is held because the pack was refunded in full or disputed; its `details` hold the reason and how many letters.
 
