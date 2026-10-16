@@ -11,8 +11,9 @@
  * A refused answer names the fields it refused, and among them the ones that
  * hold a character the printer cannot print, so the page names the printer
  * only then. A decline with `report: true` is the recipient saying they do
- * not know the sender (#730): the link closes as declined, and the request's
- * id is logged for an operator to look at.
+ * not know the sender (#730): the link closes as declined, an
+ * address_request_reported alert names the account that made it, and an
+ * operator notice says to review it soon, before the request is deleted.
  *
  * Each route is rate-limited per IP and in all, answers only the sender's
  * first name and the request's state, and logs nothing of the token, the names
@@ -31,6 +32,7 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 import { createHash } from 'node:crypto';
 import { isAddressRequestsEnabled } from '../config/addressRequests.js';
+import { OPERATOR_NOTICES, reportToOperator } from '../services/operatorNotify.js';
 import {
   answerAddressRequest,
   declineAddressRequest,
@@ -316,15 +318,19 @@ export async function handleAddressRequestApiRequest(
 
     if (route === 'decline') {
       const report = body.report === true;
-      const result = await declineAddressRequest(token);
+      const result = await declineAddressRequest(token, { report });
       // `reported` tells the page the report was taken, which an API without
       // reports would never say.
       if (result.ok) sendJson(res, 200, report ? { ok: true, reported: true } : { ok: true });
       else refused(res, result.refusal);
       writeDiagnostic('info', 'address_request.decline', { outcome: result.ok ? 'declined' : result.refusal, report });
-      // The request's id alone, never the sender's: an operator finds the
-      // account from it while the row is kept.
-      if (report && result.ok) writeDiagnostic('warn', 'address_request.reported', { requestId: result.requestId });
+      // The request's id alone, never the sender's. The decline also opened
+      // an address_request_reported alert naming the account (#730), and the
+      // notice says to review it soon, while the request is kept.
+      if (report && result.ok) {
+        writeDiagnostic('warn', 'address_request.reported', { requestId: result.requestId });
+        reportToOperator('address_request_reported', OPERATOR_NOTICES.addressRequestReported());
+      }
       return true;
     }
 

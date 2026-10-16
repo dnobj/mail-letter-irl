@@ -34,7 +34,9 @@ The daily ceilings (`LETTER_IRL_BETA_GLOBAL_DAILY_MAIL_CEILING`, `LETTER_IRL_BET
   - letters the provider cancelled;
   - a dispatch whose outcome is unknown;
   - mail held because its funding was refunded or disputed;
-  - a Pay & Send order refunded or disputed after its letter went, or may have gone, to the provider.
+  - a Pay & Send order refunded or disputed after its letter went, or may have gone, to the provider;
+  - a refund that failed or was cancelled at Stripe (#730);
+  - an address request link its recipient reported as from someone they do not know (#730).
 
   A notice names no customer, letter or order: the Alerts page has them. A second notice of a kind within the hour is not posted (the Alerts page has it), so check the page after each one. A post that fails is not tried again: its letters' alerts are on the page, and are raised once. A refund the operator makes on purpose, of mail the provider has (a cancelled letter's, say), posts the refunded-after-dispatch notice too, as a dispute on such an order does when it opens, closes, or becomes a chargeback (once; its other updates are only recorded, #730): its alert is critical by design, and the notice asks only that it be looked at. A status sync run from the admin panel posts nothing, since the panel's service has no alert URL; the operator who ran it sees what it changed.
 

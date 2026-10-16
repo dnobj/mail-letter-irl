@@ -158,6 +158,11 @@ describe('the words', () => {
     expect(OPERATOR_NOTICES.refundNotCompleted()).toBe(
       'A refund failed or was cancelled at Stripe, and the order waits for a person instead of being refunded again. Check its refunds and any dispute in Stripe before refunding it again. See the order page on the admin panel, linked from its alert on the Alerts page.'
     );
+    // The evidence does not last: the notice says to look soon, and names no
+    // day count, which only the maintenance service knows (#730).
+    expect(OPERATOR_NOTICES.addressRequestReported()).toBe(
+      'A recipient reported an address request link as from someone they do not know. Review the account that made it soon: the reported request is deleted soon after it closes, and at once if the account is erased. See the Alerts page on the admin panel.'
+    );
   });
 
   it('prefix the environment only when one is named', () => {

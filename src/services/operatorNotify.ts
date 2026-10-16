@@ -19,7 +19,8 @@ export type OperatorNoticeKind =
   | 'ambiguous_outcome'
   | 'held_mail_funding'
   | 'refunded_mail_dispatched'
-  | 'refund_not_completed';
+  | 'refund_not_completed'
+  | 'address_request_reported';
 
 export const OPERATOR_ALERT_TIMEOUT_MS = 10_000;
 
@@ -168,5 +169,9 @@ export const OPERATOR_NOTICES = {
   heldMailFunding: () =>
     'Mail paid for by a purchase that was refunded or disputed is held until a person sends or cancels it. See the Alerts page on the admin panel.',
   refundNotCompleted: () =>
-    'A refund failed or was cancelled at Stripe, and the order waits for a person instead of being refunded again. Check its refunds and any dispute in Stripe before refunding it again. See the order page on the admin panel, linked from its alert on the Alerts page.'
+    'A refund failed or was cancelled at Stripe, and the order waits for a person instead of being refunded again. Check its refunds and any dispute in Stripe before refunding it again. See the order page on the admin panel, linked from its alert on the Alerts page.',
+  // No day count: the maintenance service, which deletes requests, sets it,
+  // and the API that sends this need not know it (#730 review round 2).
+  addressRequestReported: () =>
+    'A recipient reported an address request link as from someone they do not know. Review the account that made it soon: the reported request is deleted soon after it closes, and at once if the account is erased. See the Alerts page on the admin panel.'
 } as const;

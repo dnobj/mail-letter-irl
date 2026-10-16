@@ -15,6 +15,10 @@ vi.mock('../../../src/services/addressRequestService.js', () => ({
   declineAddressRequest: vi.fn()
 }));
 vi.mock('../../../src/services/providers/index.js', () => ({ getLetterProvider: vi.fn() }));
+vi.mock('../../../src/services/operatorNotify.js', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../../src/services/operatorNotify.js')>()),
+  reportToOperator: vi.fn()
+}));
 vi.mock('../../../src/api/middleware/rateLimit.js', () => ({ rateLimitMiddlewareWithGlobal: vi.fn(() => false) }));
 vi.mock('../../../src/utils/requestBody.js', async importOriginal => {
   const actual = await importOriginal<typeof import('../../../src/utils/requestBody.js')>();
@@ -33,6 +37,7 @@ import {
 import { getLetterProvider } from '../../../src/services/providers/index.js';
 import { rateLimitMiddlewareWithGlobal } from '../../../src/api/middleware/rateLimit.js';
 import { writeDiagnostic } from '../../../src/utils/diagnosticLog.js';
+import { OPERATOR_NOTICES, reportToOperator } from '../../../src/services/operatorNotify.js';
 import {
   givenAddressOf,
   handleAddressRequestApiRequest,
@@ -85,6 +90,7 @@ const validateAddress = vi.fn();
 
 beforeEach(() => {
   vi.stubEnv('LETTER_IRL_ADDRESS_REQUESTS_ENABLED', 'true');
+  vi.mocked(reportToOperator).mockClear();
   vi.mocked(readAddressRequestPage).mockReset().mockResolvedValue(WAITING as never);
   vi.mocked(answerAddressRequest).mockReset().mockResolvedValue({ ok: true, requestId: REQUEST_ID });
   vi.mocked(declineAddressRequest).mockReset().mockResolvedValue({ ok: true, requestId: REQUEST_ID });
@@ -147,7 +153,7 @@ describe('the address request routes (#604)', () => {
 
   it('takes a decline, and says why a link it could not change was refused', async () => {
     await expect(call('decline', { token: TOKEN })).resolves.toMatchObject({ status: 200, json: { ok: true } });
-    expect(declineAddressRequest).toHaveBeenCalledWith(TOKEN);
+    expect(declineAddressRequest).toHaveBeenCalledWith(TOKEN, { report: false });
     vi.mocked(declineAddressRequest).mockResolvedValueOnce({ ok: false, refusal: 'answered' });
     await expect(call('decline', { token: TOKEN })).resolves.toMatchObject({ status: 409, json: { reason: 'answered' } });
     vi.mocked(declineAddressRequest).mockResolvedValueOnce({ ok: false, refusal: 'not_found' });
@@ -160,12 +166,19 @@ describe('the address request routes (#604)', () => {
     expect(reported.status).toBe(200);
     // Exactly this: nothing of the request or its sender.
     expect(reported.json).toEqual({ ok: true, reported: true });
-    expect(declineAddressRequest).toHaveBeenCalledWith(TOKEN);
+    // The service opens the alert with the decline (#730).
+    expect(declineAddressRequest).toHaveBeenCalledWith(TOKEN, { report: true });
     expect(writeDiagnostic).toHaveBeenCalledWith('info', 'address_request.decline', { outcome: 'declined', report: true });
     expect(writeDiagnostic).toHaveBeenCalledWith('warn', 'address_request.reported', { requestId: REQUEST_ID });
+    // And a notice, so the account is reviewed while its requests are kept (#730).
+    expect(reportToOperator).toHaveBeenCalledTimes(1);
+    expect(reportToOperator).toHaveBeenCalledWith('address_request_reported', OPERATOR_NOTICES.addressRequestReported());
+    vi.mocked(reportToOperator).mockClear();
     // Only true reports: anything else is a plain decline.
     vi.mocked(writeDiagnostic).mockClear();
+    vi.mocked(declineAddressRequest).mockClear();
     expect((await call('decline', { token: TOKEN, report: 'yes' })).json).toEqual({ ok: true });
+    expect(declineAddressRequest).toHaveBeenCalledWith(TOKEN, { report: false });
     expect((await call('decline', { token: TOKEN })).json).toEqual({ ok: true });
     expect(writeDiagnostic).toHaveBeenCalledWith('info', 'address_request.decline', { outcome: 'declined', report: false });
     expect(writeDiagnostic).not.toHaveBeenCalledWith('warn', 'address_request.reported', expect.anything());
@@ -173,6 +186,7 @@ describe('the address request routes (#604)', () => {
     vi.mocked(declineAddressRequest).mockResolvedValueOnce({ ok: false, refusal: 'answered' });
     await expect(call('decline', { token: TOKEN, report: true })).resolves.toMatchObject({ status: 409 });
     expect(writeDiagnostic).not.toHaveBeenCalledWith('warn', 'address_request.reported', expect.anything());
+    expect(reportToOperator).not.toHaveBeenCalled();
   });
 
   it('keeps a verified answer trimmed, with no name or empty line of its own', async () => {
