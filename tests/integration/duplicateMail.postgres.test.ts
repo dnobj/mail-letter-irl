@@ -570,4 +570,53 @@ describePostgres('duplicate mail check (#412)', () => {
       expect(await ordersOf(userId)).toEqual([]);
     });
   });
+  it('sends two different letters from one account at once without a deadlock (#730 review)', async () => {
+    const userId = await seedUser();
+    const first = await seedDraft(userId);
+    const second = await seedDraft(userId, { body: 'Hi Sam, see you on Friday.' });
+    // Another session holds the account the way a draft edit or an image
+    // reservation might, FOR NO KEY UPDATE, which a letter's foreign-key check
+    // does not wait for. Both sends get as far as they can and queue on the
+    // account; then it lets go. Had each inserted its letter first, each would
+    // hold the share lock that check takes, and each would wait for the other's
+    // to take the account FOR UPDATE: a deadlock, and one send refused.
+    const holder = await pool.connect();
+    const prober = await pool.connect();
+    const sends: Array<Promise<unknown>> = [];
+    try {
+      await holder.query('BEGIN');
+      await holder.query('SELECT 1 FROM users WHERE user_id = $1 FOR NO KEY UPDATE', [userId]);
+      const holderPid = (await holder.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+      for (const draftId of [first, second]) {
+        const send = mailSend.createMailOrderFromDraft({ draftId, userId, mailType: 'letter' });
+        send.catch(() => undefined);
+        sends.push(send);
+      }
+      // Until both wait, directly or behind each other, on the holder.
+      let waiting = 0;
+      for (let attempt = 0; attempt < 100 && waiting < 2; attempt += 1) {
+        const { rows } = await prober.query<{ n: number }>(
+          `SELECT COUNT(*)::int AS n FROM pg_stat_activity
+            WHERE datname = current_database() AND cardinality(pg_blocking_pids(pid)) > 0
+              AND pid <> $1`,
+          [holderPid]
+        );
+        waiting = rows[0].n;
+        if (waiting < 2) await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      expect(waiting).toBe(2);
+      await holder.query('ROLLBACK');
+      await expect(Promise.all(sends)).resolves.toEqual([
+        expect.objectContaining({ alreadyConsumed: false }),
+        expect.objectContaining({ alreadyConsumed: false })
+      ]);
+    } finally {
+      await holder.query('ROLLBACK').catch(() => undefined);
+      await Promise.allSettled(sends);
+      prober.release();
+      holder.release();
+    }
+    const letters = await pool.query<{ n: number }>('SELECT COUNT(*)::int AS n FROM letters WHERE user_id = $1', [userId]);
+    expect(letters.rows[0].n).toBe(2);
+  }, 30_000);
 });

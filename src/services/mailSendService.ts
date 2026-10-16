@@ -4,6 +4,7 @@ import { contentVersionMatches } from './contentVersion.js';
 import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 import { transaction } from '../db/index.js';
+import { lockAccountForBalanceChange } from './accountLock.js';
 import { deductCreditsFromLedgerWithClient } from './creditLedgerService.js';
 import { isBetaAccessAllowed, BETA_ACCESS_MESSAGE } from '../auth/betaAccess.js';
 import { assertGiftSendWithinDailyCap, assertMailWithinDailyCaps } from './betaSpendLimits.js';
@@ -341,8 +342,8 @@ export async function createMailOrderFromDraftWithClient(
     // Room on its mail date (#700), for a prepaid or gift send, after the open
     // checkout's refusal, which says what can be done. Counted under a lock on
     // the date, so two sends cannot both take its last place. The lock comes
-    // after the draft's and its orders', and before the account's, which the
-    // deduction and the gift take below; the paid fulfilment, which holds the
+    // after the draft's and its orders', and before the account's, taken just
+    // before the letter's insert below; the paid fulfilment, which holds the
     // account before it would get here, takes none. Pay & Send is not refused for a full date: it
     // has been charged, and its checkout refused one before the charge, so a
     // date filled since takes it over the cap.
@@ -387,6 +388,16 @@ export async function createMailOrderFromDraftWithClient(
     }
   }
 
+  // The account before the letter (#730 review): the letter's insert checks
+  // its foreign key to the account with a share lock on the account row, and
+  // the deduction or the gift then takes that row FOR UPDATE. Two sends of
+  // different drafts from one account, each holding the share lock its insert
+  // took, would each wait for the other's to take the row. Held first, the
+  // second send waits here holding nothing the first needs. A payment's
+  // fulfilment already holds it (transitionPaidCheckout), so this costs it
+  // nothing.
+  await lockAccountForBalanceChange(client, params.userId);
+
   const letterId = randomUUID();
   const content =
     params.mailType === 'postcard' ? buildPostcardContent(draft) : buildLetterContent(draft);
@@ -421,8 +432,9 @@ export async function createMailOrderFromDraftWithClient(
   let creditsRemaining: number;
   let giftCard: GiftCardContent | undefined;
   if (useGift) {
-    // Takes the account lock, so the caps and the duplicate check below are
-    // serialised per account exactly as on the prepaid path.
+    // Under the account lock taken before the letter's insert, so the caps
+    // and the duplicate check below are serialised per account exactly as on
+    // the prepaid path.
     const consumed = await consumeGiftLetterForSendWithClient(client, {
       userId: params.userId,
       letterId,
@@ -468,9 +480,9 @@ export async function createMailOrderFromDraftWithClient(
     });
     creditsRemaining = deduction.user.credits;
 
-    // AFTER the deduction, on purpose: deductCreditsFromLedgerWithClient has
-    // already taken users FOR UPDATE, so the per-account count is serialised
-    // for free and needs no second lock.
+    // After the deduction, under the account row held since before the
+    // letter's insert (above), so the per-account count is serialised and
+    // needs no second lock.
     //
     // An earlier revision of this comment justified the placement by claiming
     // that taking the lock sooner would invert into users -> orders against the
