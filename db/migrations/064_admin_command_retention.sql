@@ -73,7 +73,7 @@ BEGIN
          )
        ORDER BY r.completed_at
        LIMIT batch_size
-       FOR UPDATE OF r SKIP LOCKED
+       FOR UPDATE OF r
     ) AS due;
 
   IF cardinality(due_ids) = 0 THEN
