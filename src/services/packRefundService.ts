@@ -607,9 +607,13 @@ export async function reconcilePackRefunds(
       // names it for another amount is not its money: the sweep goes on as if
       // Stripe held none, and that refund's own webhook opens the alert for
       // money the app did not issue.
-      const found = refunds.find(
+      // Of several, one that did not fail: Stripe lists the newest first, and a
+      // failed newer one must not hide the refund that went through (#730).
+      const candidates = refunds.filter(
         refund => refund.metadata?.packRefundId === row.pack_refund_id && refund.amount === row.amount_cents
       );
+      const found =
+        candidates.find(refund => refund.status !== 'failed' && refund.status !== 'canceled') ?? candidates[0];
       const passedOver = refunds.filter(
         refund => refund.metadata?.packRefundId === row.pack_refund_id && refund.amount !== row.amount_cents
       );

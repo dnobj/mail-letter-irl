@@ -87,6 +87,16 @@ describe('the pack-refund sweep asks Stripe before it compensates (#730)', () =>
     });
   });
 
+  it('adopts the refund that went through when a newer one for its amount failed (#730)', async () => {
+    const stripe = stripeSeam(async () => [
+      { id: 're_newer_failed', status: 'failed', amount: 400, metadata: { packRefundId: 'pr-1' } },
+      { id: 're_ours', status: 'succeeded', amount: 400, metadata: { packRefundId: 'pr-1' } }
+    ]);
+    const result = await reconcilePackRefunds(stripe as never, { retryDelaySeconds: 60 });
+    expect(result).toMatchObject({ adopted: 1, compensated: 0 });
+    expect(settlePackRefund).toHaveBeenCalledWith(client, expect.anything(), expect.objectContaining({ id: 're_ours', status: 'succeeded' }), 'pack_refund.sweep_adopted');
+  });
+
   it('adopts the refund for its amount when another names it too (#730)', async () => {
     const stripe = stripeSeam(async () => [
       { id: 're_odd', status: 'succeeded', amount: 900, metadata: { packRefundId: 'pr-1' } },
