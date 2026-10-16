@@ -31,10 +31,6 @@ it is not a list of things to type in. Railway stops reading `railway.toml` on
 
 Healthcheck path and region are dashboard settings and do have to be set here.
 
-The API and maintenance services can instead build from `Dockerfile.api`, which runs
-as an unprivileged user (#730): set `RAILWAY_DOCKERFILE_PATH=Dockerfile.api` on each.
-The steps, and how to go back, are in [deployment.md](deployment.md).
-
 
 ```text
 Build command: npm run build
@@ -45,6 +41,12 @@ Healthcheck path: /healthz
 Production region: US East
 Development region: US West (current; review separately before changing)
 ```
+
+The API and maintenance services can instead build from `Dockerfile.api`, which runs
+as an unprivileged user (#730): set `RAILWAY_DOCKERFILE_PATH=Dockerfile.api` on each.
+The block above is then not quite what runs: the Dockerfile does the build, and the
+API's start command is the image's own. The steps, and how to go back, are in
+[deployment.md](deployment.md).
 
 Important API variables:
 

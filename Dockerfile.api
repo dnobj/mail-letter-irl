@@ -12,8 +12,9 @@
 #
 # The runtime runs as the base image's unprivileged `node` user, and owns none
 # of its own files: the code cannot rewrite itself, its migrations or its
-# widgets. Nothing writes to disk at runtime (images go to the bucket), and
-# HOME is /home/node, which npm needs for its logs when Railway runs an npm
+# widgets. Nothing writes to the app's directory at runtime (images go to
+# the bucket; a very large decode may spill to /tmp, which anyone may write),
+# and HOME is /home/node, which npm needs for its logs when Railway runs an npm
 # script (the pre-deploy, or the cron's `npm run maintenance`).
 
 # Pinned by digest as well as tag, as Dockerfile.admin is: a moved tag cannot
@@ -41,7 +42,9 @@ COPY widgets ./widgets
 COPY assets/fonts ./assets/fonts
 # Fails the build, not the boot, if a directory the code reads is missing.
 RUN test -f dist/mcp/httpServer.js && test -f dist/cli/runMaintenance.js && test -f dist/cli/migrate.js \
-  && ls db/migrations/*.sql > /dev/null && ls widgets/*.html > /dev/null && ls assets/fonts/*.ttf > /dev/null
+  && test -f dist/services/signatureAnalysisWorker.js \
+  && ls db/migrations/*.sql > /dev/null && ls widgets/*.html > /dev/null && ls widgets/shared/*.js > /dev/null \
+  && ls assets/fonts/*.ttf > /dev/null
 USER node
 # The API. The maintenance service sets its own start command
 # (`npm run maintenance`), which Railway runs in place of this one.

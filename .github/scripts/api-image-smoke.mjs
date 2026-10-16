@@ -31,9 +31,17 @@ if (png.length === 0) fail('sharp made an empty image');
 const bcrypt = (await import(fromApp.resolve('bcrypt'))).default;
 if (!(await bcrypt.compare('letter', await bcrypt.hash('letter', 4)))) fail('bcrypt did not verify its own hash');
 
+// The API's and the cron's entry points, with every module they import: a
+// package or file missing from the image fails here, not on the first deploy.
+// Each starts only when run directly, so importing it runs nothing.
+await import('/app/dist/mcp/httpServer.js');
+await import('/app/dist/cli/runMaintenance.js');
+
 const { FONT_FILES, fontBytes } = await import('/app/dist/render/fonts.js');
 for (const name of Object.keys(FONT_FILES)) {
   if (fontBytes(name).length === 0) fail(`the font ${name} is empty`);
 }
 
-console.log(`OK: uid ${process.getuid()}, code read-only, sharp, bcrypt and ${Object.keys(FONT_FILES).length} fonts load`);
+console.log(`OK: uid ${process.getuid()}, code read-only, the API and cron entry points, sharp, bcrypt and ${Object.keys(FONT_FILES).length} fonts load`);
+// An imported module may hold a pool or a timer open.
+process.exit(0);

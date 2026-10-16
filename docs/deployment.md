@@ -61,14 +61,18 @@ checks that it runs unprivileged and that its native modules and fonts load, and
 runs the pre-deploy migration in it. To move an environment:
 
 1. Set `RAILWAY_DOCKERFILE_PATH=Dockerfile.api` on the API service and on the
-   maintenance service. The pre-deploy command and the maintenance service's
-   start command (`npm run maintenance`) stay as they are; the API's start
-   command in the dashboard may be cleared, since the image's own is
-   `node dist/mcp/httpServer.js`, the same as `npm start`.
+   maintenance service. The image is built by the Dockerfile alone: a build
+   command in the dashboard (the maintenance service has one) is not run.
+   The pre-deploy command and the maintenance service's start command
+   (`npm run maintenance`) stay as they are. Clear the API's start command in
+   the dashboard, so the image's own, `node dist/mcp/httpServer.js`, runs as
+   the container's first process and receives Railway's stop signal itself
+   rather than through npm.
 2. Redeploy each (a variable change alone does not always start a build), and
-   check the deploy log shows the
-   pre-deploy migration, `/readyz` answers with the new build commit, a preview
-   renders, and the next maintenance run logs as before.
+   check the deploy log shows the pre-deploy migration, `/readyz` answers with
+   the new build commit, a preview renders, a signature upload is analysed (the
+   one runtime file only a request reaches: the analysis worker), and the next
+   maintenance run logs as before.
 3. To go back, delete the variable and redeploy: Railpack builds it again.
 
 Development first; production at a promotion, on the owner's word.
