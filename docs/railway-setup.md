@@ -1,6 +1,6 @@
 # Railway Setup Guide
 
-**Last Updated:** September 23, 2026
+**Last Updated:** October 15, 2026
 **Purpose:** Exact Railway services, commands, branches, variables, and Serverless policy
 
 Letter IRL uses one Railway project with `production` and `development` environments. Environment isolation is achieved with per-environment variables and branch deployment settings, not separate Railway projects.

@@ -15,7 +15,9 @@ function fail(message) {
 
 if (process.getuid() === 0) fail('the image runs as root');
 
-for (const path of ['dist', 'dist/mcp/httpServer.js', 'node_modules', 'db/migrations', 'widgets', 'assets/fonts']) {
+// The app's own directory too: write access on a directory lets its entries be
+// renamed or replaced whoever owns them.
+for (const path of ['.', 'package.json', 'dist', 'dist/mcp/httpServer.js', 'node_modules', 'db/migrations', 'widgets', 'assets/fonts']) {
   try {
     await access(path, constants.W_OK);
     fail(`${path} is writable by the runtime user`);
@@ -33,7 +35,9 @@ if (!(await bcrypt.compare('letter', await bcrypt.hash('letter', 4)))) fail('bcr
 
 // The API's and the cron's entry points, with every module they import: a
 // package or file missing from the image fails here, not on the first deploy.
-// Each starts only when run directly, so importing it runs nothing.
+// Each starts only when run directly: importing it loads its configuration,
+// makes its pool (which connects on its first query) and starts a timer, so
+// the check ends with an explicit exit.
 await import('/app/dist/mcp/httpServer.js');
 await import('/app/dist/cli/runMaintenance.js');
 

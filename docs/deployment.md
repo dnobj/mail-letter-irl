@@ -1,6 +1,6 @@
 # Deployment Guide
 
-**Last Updated:** October 4, 2026
+**Last Updated:** October 15, 2026
 **Purpose:** Release process, environment checks, boot validation rules, and migration safety
 
 Letter IRL deploys development first. Production is promoted only after automated and manual verification succeeds in development.
@@ -57,8 +57,9 @@ compiled output, production dependencies, `db/migrations`, `widgets` and
 `assets/fonts`. A service uses it once its `RAILWAY_DOCKERFILE_PATH` variable is
 `Dockerfile.api`; until then it builds with Railpack as above, so the file
 changes nothing on its own. CI's "API image" job builds it on every pull request,
-checks that it runs unprivileged and that its native modules and fonts load, and
-runs the pre-deploy migration in it. To move an environment:
+checks that it runs unprivileged and cannot change its own files, that the API's
+and the cron's entry points import with every module they need, and that its
+native modules and fonts load, and runs the pre-deploy migration in it. To move an environment:
 
 1. Set `RAILWAY_DOCKERFILE_PATH=Dockerfile.api` on the API service and on the
    maintenance service. The image is built by the Dockerfile alone: a build
@@ -73,7 +74,10 @@ runs the pre-deploy migration in it. To move an environment:
    the new build commit, a preview renders, a signature upload is analysed (the
    one runtime file only a request reaches: the analysis worker), and the next
    maintenance run logs as before.
-3. To go back, delete the variable and redeploy: Railpack builds it again.
+3. To go back, delete the variable and redeploy: Railpack builds it again, and
+   runs `npm start` with no start command set, so a cleared one needs no
+   restoring. In an incident, Railway's Rollback to the previous deployment is
+   faster, and the variable can be deleted after.
 
 Development first; production at a promotion, on the owner's word.
 
