@@ -208,20 +208,31 @@ describe('answering and declining by the link (#604)', () => {
     expect(flat(sql)).toContain("address = $3::jsonb || jsonb_build_object('name', COALESCE($4::text, recipient_name))");
     expect(flat(sql)).toContain("WHERE token_hash = $1 AND status = 'waiting' AND expires_at > NOW()");
     const { name, ...rest } = ADDRESS;
-    expect(params).toEqual([hash, 'answered', JSON.stringify(rest), name]);
+    // An answer never opens a report's alert (#730).
+    expect(params).toEqual([hash, 'answered', JSON.stringify(rest), name, false, 'address_request_reported']);
   });
 
   it("takes the sender's name for the recipient when the recipient gives none", async () => {
     vi.mocked(query).mockResolvedValueOnce(result([{ request_id: REQUEST_ID }]));
     const { name: _name, ...unnamed } = ADDRESS;
     await answerAddressRequest(token, unnamed);
-    expect(vi.mocked(query).mock.calls[0][1]).toEqual([hash, 'answered', JSON.stringify(unnamed), null]);
+    expect(vi.mocked(query).mock.calls[0][1]).toEqual([hash, 'answered', JSON.stringify(unnamed), null, false, 'address_request_reported']);
   });
 
   it('declines with no address', async () => {
     vi.mocked(query).mockResolvedValueOnce(result([{ request_id: REQUEST_ID }]));
     await expect(declineAddressRequest(token)).resolves.toEqual({ ok: true, requestId: REQUEST_ID });
-    expect(vi.mocked(query).mock.calls[0][1]).toEqual([hash, 'declined', null, null]);
+    expect(vi.mocked(query).mock.calls[0][1]).toEqual([hash, 'declined', null, null, false, 'address_request_reported']);
+  });
+
+  it('opens the alert in the same statement only for a reported decline (#730)', async () => {
+    vi.mocked(query).mockResolvedValueOnce(result([{ request_id: REQUEST_ID }]));
+    await expect(declineAddressRequest(token, { report: true })).resolves.toEqual({ ok: true, requestId: REQUEST_ID });
+    const [sql, params] = vi.mocked(query).mock.calls[0];
+    expect(flat(sql)).toContain(
+      "INSERT INTO commerce_operational_alerts (alert_type, severity, details) SELECT $6, 'warning', jsonb_build_object('userId', closed.user_id, 'requestId', closed.request_id) FROM closed WHERE $5::boolean"
+    );
+    expect(params).toEqual([hash, 'declined', null, null, true, 'address_request_reported']);
   });
 
   it('says why a link it did not change was refused', async () => {
