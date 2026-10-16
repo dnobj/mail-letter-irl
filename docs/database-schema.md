@@ -803,10 +803,12 @@ mutation privilege beyond `INSERT`.
 
 Indexes cover environment plus actor/time, environment plus target/time, and correlation ID. Rows are
 kept for 2 years after the action they record and are exempt from account erasure for that period
-(#395). The daily `audit-retention-sweep` deletes them once `occurred_at` is two years past (#398):
-since migration 062 both audit triggers let a `DELETE` through only for a row past its two years, in a
-transaction that has set `letter_irl.audit_retention_purge` (`SET LOCAL`); every `UPDATE`, and every
-`DELETE` of a younger row, is still refused. Application rollback retains all rows.
+(#395). The daily `audit-retention-sweep` deletes them once `occurred_at` is two years past (#398),
+through migration 062's `purge_expired_audit_records(batch_size)`: inside its own transaction it
+switches each audit table's append-only trigger off, deletes only rows past their two years (oldest
+first, at most `batch_size` from each), and switches it back on. Only the owner can run it. The triggers
+themselves are unchanged and refuse every other `UPDATE` and `DELETE`. Application rollback retains all
+rows.
 
 ### admin_command_runs
 
@@ -921,7 +923,7 @@ Production provisioning and the first production connection remain separate owne
 | 58 | 058_users_email_case_insensitive.sql | `users.email` is unique whatever its case (#730): `users_email_lower_key`, a unique index on `lower(email)`, replaces 001's inline `users_email_key`, and the plain `idx_users_email` goes. Addresses that already differ only in case stop the migration with a unique_violation (23505 in the deploy log) whose message names the problem, for an operator to join or correct the accounts first; development and production had none. `EMAIL_UNIQUE_CONSTRAINT` names the new index. Code from before 058 (the old image while the pre-deploy runs, or a rollback across 058) still names `users_email_key`: a collision is still refused, but reaches the customer as a generic error instead of the "already belongs" sentence. Provisioning: no re-run (indexes carry no grants); `ADMIN_LATEST_REQUIRED_MIGRATION` is 058 |
 | 59 | 059_personal_tokens_lookup.sql | `personal_access_tokens.token_lookup` (#730): the SHA-256 of the whole token, unique where set (`idx_pat_token_lookup`), so a token is found by one indexed read, not by its last four characters and a bcrypt compare per match. Tokens made without it are found the old way and given the hash on first use; one can last up to 365 days, so the old way stays until none is left without a hash. Provisioning: no re-run (the reader's column list leaves it out, and neither role writes the table); `ADMIN_LATEST_REQUIRED_MIGRATION` is 059 |
 | 60 | 060_refund_not_completed_alert.sql | The `refund_not_completed` alert type (#730), restated inside the `to_regclass` guard as 056 does, with a partial unique index on its order while it is open (`idx_commerce_alerts_refund_not_completed_order`). Provisioning: no re-run (the roles read the alerts table whole); `ADMIN_LATEST_REQUIRED_MIGRATION` is 060 |
-| 62 | 062_audit_retention_purge.sql | Operator audit retention (#398): both audit tables' trigger functions let a `DELETE` through only for a row past its two years (`admin_audit_events.occurred_at` plus two years, `commerce_operator_audit_events.retention_expires_at`) while `letter_irl.audit_retention_purge` is on; every `UPDATE`, and every `DELETE` of a younger row, is refused as before. Guarded by `to_regclass`. Provisioning: no re-run; `ADMIN_LATEST_REQUIRED_MIGRATION` is 062 |
+| 62 | 062_audit_retention_purge.sql | Operator audit retention (#398): `purge_expired_audit_records(batch_size)` switches each audit table's append-only trigger off inside its caller's transaction, deletes only rows past their two years (`admin_audit_events.occurred_at` plus two years, `commerce_operator_audit_events.retention_expires_at`), oldest first, and switches it back on. The triggers are not changed, so a database that applies 022 late converges; the body resolves each table when it runs and skips one that is absent. `EXECUTE` revoked from `PUBLIC`. Provisioning: no re-run; `ADMIN_LATEST_REQUIRED_MIGRATION` is 062 |
 
 ---
 

@@ -74,9 +74,10 @@
   or the operator's identity for admin actions.
 - Operator audit records are kept for 2 years after the action they record and are exempt from
   account erasure for that period (#395). The maintenance run's daily `audit-retention-sweep`
-  deletes them once the two years are up (#398). Both audit tables' triggers still refuse every
-  change but that one: a `DELETE` of a row past its two years, in a transaction that has set
-  `letter_irl.audit_retention_purge` (migration 062).
+  deletes them once the two years are up (#398), through `purge_expired_audit_records` (migration
+  062), which only the database owner can run. It switches the append-only triggers off only inside
+  its own transaction, and deletes only rows past their two years; the triggers refuse every other
+  change.
 
 ## Future Compliance Hooks
 

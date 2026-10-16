@@ -8,11 +8,11 @@ import { repositoryMigrations, validateDisposableDatabaseUrl } from './support/d
  * Issue #398 - operator audit records are deleted 2 years after the action
  * they record, and not a moment before.
  *
- * Both audit tables refuse UPDATE and DELETE through a trigger (022, 023).
- * Migration 062 lets one DELETE through: of a row past its two years, in a
- * transaction with letter_irl.audit_retention_purge on. These run against real
- * PostgreSQL because the guarantee is the trigger's, not the sweep's WHERE
- * clause: a mocked query() would accept a purge that deleted every row.
+ * Both audit tables refuse UPDATE and DELETE through a trigger (022, 023),
+ * and still do. Migration 062's purge_expired_audit_records switches the
+ * triggers off inside its own transaction and deletes only rows past their two
+ * years. These run against real PostgreSQL because the rule is in that
+ * function: a mocked query() would accept a purge that deleted every row.
  */
 
 const { Pool } = pg;
@@ -127,53 +127,44 @@ describePostgres('operator audit retention', () => {
     expect(await adminIds()).toHaveLength(0);
   });
 
-  it('still refuses a delete without the purge setting, even of an expired record', async () => {
-    const admin = await adminRow(EXPIRED);
-    const commerce = await commerceRow(`NOW() - INTERVAL '1 day'`);
-    await expect(pool.query('DELETE FROM admin_audit_events WHERE id = $1', [admin]))
-      .rejects.toMatchObject({ code: '55000', message: 'admin_audit_events is append-only' });
-    await expect(pool.query('DELETE FROM commerce_operator_audit_events WHERE audit_event_id = $1', [commerce]))
-      .rejects.toMatchObject({ code: '55000', message: 'commerce_operator_audit_events is append-only' });
-  });
-
-  it('refuses, with the setting on, to delete a record inside its two years, or to change any record', async () => {
-    const youngAdmin = await adminRow(NOT_YET);
-    const youngCommerce = await commerceRow(`NOW() + INTERVAL '1 day'`);
+  it('leaves the triggers refusing every other delete and every update, before and after a purge', async () => {
     const oldAdmin = await adminRow(EXPIRED);
-    const client = await pool.connect();
-    try {
-      for (const [statement, id] of [
-        ['DELETE FROM admin_audit_events WHERE id = $1', youngAdmin],
-        ['DELETE FROM commerce_operator_audit_events WHERE audit_event_id = $1', youngCommerce],
-        ["UPDATE admin_audit_events SET actor_name = 'Changed' WHERE id = $1", oldAdmin],
-        ["UPDATE commerce_operator_audit_events SET reason_code = 'changed' WHERE audit_event_id = $1", youngCommerce],
-      ] as const) {
-        await client.query('BEGIN');
-        await client.query("SET LOCAL letter_irl.audit_retention_purge = 'on'");
-        await expect(client.query(statement, [id]), statement).rejects.toMatchObject({ code: '55000' });
-        await client.query('ROLLBACK');
-      }
-    } finally {
-      client.release();
-    }
-    expect(await adminIds()).toEqual([youngAdmin, oldAdmin].sort());
-    expect(await commerceIds()).toEqual([youngCommerce]);
+    const oldCommerce = await commerceRow(`NOW() - INTERVAL '1 day'`);
+    const refusals = async () => {
+      await expect(pool.query('DELETE FROM admin_audit_events WHERE id = $1', [oldAdmin]))
+        .rejects.toMatchObject({ code: '55000', message: 'admin_audit_events is append-only' });
+      await expect(pool.query('DELETE FROM commerce_operator_audit_events WHERE audit_event_id = $1', [oldCommerce]))
+        .rejects.toMatchObject({ code: '55000', message: 'commerce_operator_audit_events is append-only' });
+      await expect(pool.query("UPDATE admin_audit_events SET actor_name = 'Changed' WHERE id = $1", [oldAdmin]))
+        .rejects.toMatchObject({ code: '55000' });
+    };
+    await refusals();
+
+    // After a purge the triggers are on again, and refuse a row it kept.
+    const youngAdmin = await adminRow(NOT_YET);
+    await expect(service.purgeExpiredAuditRecords()).resolves.toEqual({ adminDeleted: 1, commerceDeleted: 1 });
+    const triggers = await pool.query<{ tgname: string; tgenabled: string }>(
+      `SELECT tgname, tgenabled FROM pg_trigger
+        WHERE tgname IN ('admin_audit_events_append_only', 'commerce_operator_audit_events_append_only')
+          AND tgrelid IN (to_regclass('admin_audit_events'), to_regclass('commerce_operator_audit_events'))
+        ORDER BY tgname`
+    );
+    expect(triggers.rows).toEqual([
+      { tgname: 'admin_audit_events_append_only', tgenabled: 'O' },
+      { tgname: 'commerce_operator_audit_events_append_only', tgenabled: 'O' }
+    ]);
+    await expect(pool.query('DELETE FROM admin_audit_events WHERE id = $1', [youngAdmin]))
+      .rejects.toMatchObject({ code: '55000' });
   });
 
-  it('does not leave the setting on after the purge', async () => {
-    await adminRow(EXPIRED);
-    await service.purgeExpiredAuditRecords();
-    // SET LOCAL ends with its transaction: a later delete on any connection is refused.
-    const old = await adminRow(EXPIRED);
-    const client = await pool.connect();
-    try {
-      const setting = await client.query<{ value: string | null }>(
-        "SELECT current_setting('letter_irl.audit_retention_purge', true) AS value"
-      );
-      expect(setting.rows[0].value === null || setting.rows[0].value === '').toBe(true);
-      await expect(client.query('DELETE FROM admin_audit_events WHERE id = $1', [old])).rejects.toMatchObject({ code: '55000' });
-    } finally {
-      client.release();
-    }
+  it('is the owner\'s alone: nobody else may run it', async () => {
+    const acl = await pool.query<{ proacl: string | null }>(
+      `SELECT proacl::text AS proacl FROM pg_proc
+        WHERE oid = to_regprocedure('purge_expired_audit_records(integer)')`
+    );
+    expect(acl.rows).toHaveLength(1);
+    // An ACL with no PUBLIC entry ("=X/...") grants execute to the owner only.
+    expect(acl.rows[0].proacl ?? '').not.toMatch(/(^|[{,])=X/);
+    await expect(pool.query('SELECT * FROM purge_expired_audit_records(0)')).rejects.toThrow(/positive integer/);
   });
 });
