@@ -1292,7 +1292,7 @@ export async function createJitCheckout(
   // (#278 round 5). USER-SCOPED and AFTER the send-block gate: an unscoped
   // peek let any authenticated caller make another user's draft id steer
   // catalog work before authorization said no (#278 round 7). Advisory only -
-  // prepareJitOrder re-reads FOR UPDATE and owns the real ownership check,
+  // prepareJitOrder re-reads under its lock and owns the real ownership check,
   // and refuses an option this deployment does not sell (#578).
   // With its pages (#586): without them a long letter would warm the one-page
   // price and meet the charge cap at the one-page amount. A restyle can change

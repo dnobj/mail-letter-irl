@@ -17,8 +17,10 @@ import type pg from 'pg';
  * draft's holders still take turns, but the share lock a foreign-key check
  * takes on it is not blocked. PostgreSQL re-checks an order's key to its
  * draft when a transaction updates the same order row twice (a refund, then
- * clearing its hold), and that check comes after the order; against a draft
- * held FOR UPDATE by a path waiting for the order, the two would deadlock.
+ * clearing its hold), and that check comes after the order and the account;
+ * against a draft held FOR UPDATE by a path waiting for the order (a payment's
+ * fulfilment, an erasure) or the account (a draft edit), the two would
+ * deadlock.
  * The same holds for every implicit lock: an UPDATE's foreign-key re-check
  * counts as taking the referenced row after the row it updates. The stronger
  * lock is left to a statement that deletes drafts, when it runs, and to the

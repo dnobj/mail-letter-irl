@@ -65,7 +65,7 @@ describe('the draft columns a price is read from (#625)', () => {
   });
 
   it('selects the whole row where it prices a draft by SELECT *', () => {
-    // The checkout and the send lock the row with SELECT * ... FOR UPDATE: a column list there would be the same defect.
+    // The checkout and the send lock the row with SELECT * ... FOR NO KEY UPDATE: a column list there would be the same defect.
     const whole = draftSelects().filter(select => select.columns.trim() === '*').map(select => select.file);
     expect(whole).toContain('src/services/commerceService.ts');
     expect(whole).toContain('src/services/mailSendService.ts');

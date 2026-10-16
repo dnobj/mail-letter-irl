@@ -2768,7 +2768,7 @@ describe('commerceService', () => {
     };
     mocks.query
       // The draft-type peek runs first (unlocked, advisory), then the #150
-      // send-block lookup, then the FOR UPDATE draft read.
+      // send-block lookup, then the locked draft read.
       .mockResolvedValueOnce({ rows: [{ mail_type: 'letter' }] })
       .mockResolvedValueOnce({ rows: [{ sends_blocked_reason: null }] })
       .mockResolvedValueOnce({
