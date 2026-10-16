@@ -2,7 +2,7 @@
 // user. It proves the runtime is unprivileged and cannot change its own code,
 // and that the native modules and the files the code reads at runtime load.
 // The pre-deploy migration is proven by the step after this one.
-import { readdirSync } from 'node:fs';
+import { lstatSync, readdirSync } from 'node:fs';
 import { access, constants } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 
@@ -24,6 +24,8 @@ for (const path of ['package.json', 'dist/mcp/httpServer.js', 'dist/cli/runMaint
 }
 const everything = ['.', ...readdirSync('.', { recursive: true })];
 for (const path of everything) {
+  // Owned is as good as writable: an owner can make its file writable again.
+  if (lstatSync(path).uid === process.getuid()) fail(`${path} is owned by the runtime user`);
   try {
     await access(path, constants.W_OK);
     fail(`${path} is writable by the runtime user`);

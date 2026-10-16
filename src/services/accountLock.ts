@@ -22,7 +22,11 @@ import type pg from 'pg';
  * fulfilment, an erasure) or the account (a draft edit), the two would
  * deadlock.
  * The same holds for every implicit lock: an UPDATE's foreign-key re-check
- * counts as taking the referenced row after the row it updates. The stronger
+ * counts as taking the referenced row after the row it updates. And since a
+ * draft holder no longer blocks a foreign-key check on the draft, every path
+ * that writes an order's draft_id takes the draft's lock first
+ * (prepareJitOrder, the only one), or it would slip past the holders' checks
+ * for a live order. The stronger
  * lock is left to a statement that deletes drafts, when it runs, and to the
  * retention sweeps, which skip a locked draft and wait on nothing while they
  * hold one.

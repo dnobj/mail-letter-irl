@@ -89,10 +89,13 @@ describe("POST /elevate in full mode", () => {
   let claimWins = true;
   // Whether the table is out of the operator's reach, as before provisioning is re-run.
   let storeRefuses = false;
+  // Whether the claim itself fails, after the read and a correct code.
+  let claimThrows = false;
   const operatorQuery = vi.fn(async (text: string) => {
     if (storeRefuses) throw Object.assign(new Error("permission denied for table admin_totp_counters"), { code: "42501" });
     if (text.includes("FROM admin_totp_counters")) return { rows: [], rowCount: 0 };
     if (text.includes("INSERT INTO admin_totp_counters")) {
+      if (claimThrows) throw Object.assign(new Error("connection terminated"), { code: "57P01" });
       return claimWins ? { rows: [{ counter_key: "x" }], rowCount: 1 } : { rows: [], rowCount: 0 };
     }
     return { rows: [], rowCount: 0 };
@@ -150,6 +153,7 @@ describe("POST /elevate in full mode", () => {
   beforeEach(() => {
     claimWins = true;
     storeRefuses = false;
+    claimThrows = false;
     operatorQuery.mockClear();
   });
 
@@ -214,6 +218,15 @@ describe("POST /elevate in full mode", () => {
     const reply = await postElevate("owner@example.com", currentCode());
     expect(reply.status).toBe(500);
     expect(reply.body).not.toContain("Elevated.");
+    expect(audits.at(-1)).toMatchObject({ action: "admin.request_failed", outcome: "failed" });
+  });
+
+  it("does not elevate when the claim of a correct code fails", async () => {
+    claimThrows = true;
+    const reply = await postElevate("owner@example.com", currentCode());
+    expect(reply.status).toBe(500);
+    expect(reply.body).not.toContain("Elevated.");
+    expect(claims()).toHaveLength(1);
     expect(audits.at(-1)).toMatchObject({ action: "admin.request_failed", outcome: "failed" });
   });
 });
