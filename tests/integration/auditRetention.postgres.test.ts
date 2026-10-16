@@ -5,13 +5,12 @@ import { migrate } from '../../src/cli/migrate.js';
 import { repositoryMigrations, validateDisposableDatabaseUrl } from './support/disposableDatabase.js';
 
 /**
- * Issue #398 - operator audit records are deleted 2 years after the action
- * they record, and not a moment before.
+ * Issue #398 - operator audit records are deleted as the 2 years after the
+ * action they record run out: two days before, and not sooner.
  *
  * Both audit tables refuse UPDATE and DELETE through a trigger (022, 023),
  * and still do. Migration 062's purge_expired_audit_records switches the
- * triggers off inside its own transaction and deletes only rows past their two
- * years. These run against real PostgreSQL because the rule is in that
+ * triggers off inside its own transaction and deletes only rows due. These run against real PostgreSQL because the rule is in that
  * function: a mocked query() would accept a purge that deleted every row.
  */
 
@@ -30,7 +29,6 @@ function databaseUrlForSchema(baseUrl: string, schema: string): string {
 }
 
 const HEX = 'a'.repeat(64);
-/** Fixed SQL clocks around the two years; two days of margin either side. */
 /**
  * Fixed SQL clocks around the due date: two days before the two years are up,
  * so a sweep that runs late still deletes inside "up to 2 years". A day of
@@ -127,15 +125,59 @@ describePostgres('operator audit retention', () => {
   });
 
   it('works in batches, oldest first, a bounded number per run', async () => {
-    const oldest = await adminRow(`NOW() - INTERVAL '2 years' - INTERVAL '30 days'`);
-    const middle = await adminRow(`NOW() - INTERVAL '2 years' - INTERVAL '20 days'`);
+    // Inserted newest first, so the order the rows went in is not their age.
     const newest = await adminRow(`NOW() - INTERVAL '2 years' - INTERVAL '10 days'`);
-    await expect(service.purgeExpiredAuditRecords(1, 2)).resolves.toEqual({ adminDeleted: 2, commerceDeleted: 0 });
+    await adminRow(`NOW() - INTERVAL '2 years' - INTERVAL '30 days'`);
+    await adminRow(`NOW() - INTERVAL '2 years' - INTERVAL '20 days'`);
+    const newestCommerce = await commerceRow(`NOW() - INTERVAL '10 days'`);
+    await commerceRow(`NOW() - INTERVAL '30 days'`);
+    await commerceRow(`NOW() - INTERVAL '20 days'`);
+    await expect(service.purgeExpiredAuditRecords(1, 2)).resolves.toEqual({ adminDeleted: 2, commerceDeleted: 2 });
     expect(await adminIds()).toEqual([newest]);
-    expect([oldest, middle]).not.toContain(newest);
-    await expect(service.purgeExpiredAuditRecords(1, 2)).resolves.toEqual({ adminDeleted: 1, commerceDeleted: 0 });
+    expect(await commerceIds()).toEqual([newestCommerce]);
+    await expect(service.purgeExpiredAuditRecords(1, 2)).resolves.toEqual({ adminDeleted: 1, commerceDeleted: 1 });
     expect(await adminIds()).toHaveLength(0);
+    expect(await commerceIds()).toHaveLength(0);
   });
+
+  it("leaves the connection's lock_timeout as it was, after a purge and after a refusal", async () => {
+    const client = await pool.connect();
+    try {
+      await client.query('SELECT * FROM purge_expired_audit_records(10)');
+      expect((await client.query<{ lock_timeout: string }>('SHOW lock_timeout')).rows[0].lock_timeout).toBe('0');
+      await expect(client.query('SELECT * FROM purge_expired_audit_records(NULL)')).rejects.toThrow(/positive integer/);
+      expect((await client.query<{ lock_timeout: string }>('SHOW lock_timeout')).rows[0].lock_timeout).toBe('0');
+    } finally {
+      client.release();
+    }
+  });
+
+  it('gives up on an open writer on the admin table too, holding nothing afterwards (#398 review)', async () => {
+    const due = await commerceRow(COMMERCE_DUE);
+    const writer = await pool.connect();
+    try {
+      await writer.query('BEGIN');
+      await writer.query(
+        `INSERT INTO admin_audit_events
+           (occurred_at, actor_sid, actor_name, environment, mode, session_id_hash,
+            correlation_id, action, target_type, outcome)
+         VALUES (NOW(), 'operator', 'Operator', 'development', 'full', $1,
+                 gen_random_uuid(), 'test.action', 'account', 'succeeded')`,
+        [HEX]
+      );
+      const started = Date.now();
+      await expect(service.purgeExpiredAuditRecords()).rejects.toMatchObject({ code: '55P03' });
+      // It waited for the lock rather than failing at once.
+      expect(Date.now() - started).toBeGreaterThanOrEqual(4_000);
+      // Nothing was deleted, and the commerce lock it held while waiting is gone.
+      expect(await commerceIds()).toEqual([due]);
+      await expect(commerceRow('NOW()')).resolves.toBeTruthy();
+    } finally {
+      await writer.query('ROLLBACK').catch(() => undefined);
+      writer.release();
+    }
+    await expect(service.purgeExpiredAuditRecords()).resolves.toEqual({ adminDeleted: 0, commerceDeleted: 1 });
+  }, 30_000);
 
   it('gives up after a few seconds when a writer holds a table, and leaves it as it was (#398 review)', async () => {
     const due = await adminRow(EXPIRED);
@@ -153,6 +195,7 @@ describePostgres('operator audit retention', () => {
       );
       const started = Date.now();
       await expect(service.purgeExpiredAuditRecords()).rejects.toMatchObject({ code: '55P03' });
+      expect(Date.now() - started).toBeGreaterThanOrEqual(4_000);
       expect(Date.now() - started).toBeLessThan(15_000);
       // Nothing was deleted, and the admin table's writers were not held.
       expect(await adminIds()).toEqual([due]);

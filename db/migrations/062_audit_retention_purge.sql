@@ -1,5 +1,5 @@
--- Purpose: operator audit records are deleted 2 years after the action they
--- record (#398), as docs/privacy-policy.md and docs/security-and-policy.md say.
+-- Purpose: operator audit records are kept for no more than 2 years after the
+-- action they record (#398), as docs/privacy-policy.md says ("up to 2 years").
 --
 -- admin_audit_events (022) and commerce_operator_audit_events (023) each carry
 -- a BEFORE UPDATE OR DELETE trigger that refuses every change, the owner's
@@ -11,12 +11,20 @@
 -- Locks: ALTER TABLE ... DISABLE TRIGGER takes SHARE ROW EXCLUSIVE, which
 -- blocks every writer (not readers) to the end of the caller's transaction,
 -- so no other session can change a row while the trigger is off, and an
--- error rolls the switch back with the deletes. Both tables are locked first,
--- in one statement, so the function never holds one while waiting for the
--- other; and it waits at most 5 seconds for them (lock_timeout), so a writer
--- left open elsewhere makes this run fail and the next one try again, rather
--- than holding the admin panel's audit inserts, or the maintenance run, behind
--- it.
+-- error rolls the switch back with the deletes. Both tables are locked up
+-- front, one after the other: commerce_operator_audit_events first, then
+-- admin_audit_events, the order the one transaction that writes both (an
+-- admin command, src/admin/commands/runner.ts) writes them, so the two cannot
+-- deadlock. Keep that order. Each lock waits at most 5 seconds (lock_timeout,
+-- per lock), so a writer left open elsewhere makes this run fail and the next
+-- one try again; while it waits on the admin table it already holds the
+-- commerce one, so commerce audit writers can queue behind it for those
+-- seconds.
+--
+-- It takes the locks and switches the triggers even when no row is due, as it
+-- will every day until the first records fall due in mid-2028: that is cheap,
+-- and a database whose tables have another owner fails (42501) on the first
+-- run rather than the first due one.
 --
 -- Due: two days before the two years are up, so a daily sweep that runs late
 -- still deletes inside the policy's "up to 2 years" (docs/privacy-policy.md):
