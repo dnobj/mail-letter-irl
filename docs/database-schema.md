@@ -827,11 +827,11 @@ Status and timing constraints reject inconsistent outcomes.
 A run is kept for at most 2 years after it finished (#771): the daily `audit-retention-sweep`, after
 the audit rows, calls migration 064's `purge_expired_admin_command_records(batch_size)`, which deletes a
 finished run, and its operation first, two days before its two years are up; a run left pending or
-running (a command interrupted between its provider call and its completion) two years after it was
-requested. It never deletes a run whose operation is pending, processing or not yet due itself, or one
+running (a command interrupted between its provider call and its completion) on the same schedule
+counted from when it was requested. It never deletes a run whose operation is pending, processing or not yet due itself, or one
 an audit row still names. Only the owner can run it. The run is also what stops a panel confirmation
-running twice; a key it frees belongs to a confirmation two years old, which cannot be sent again
-without the session's CSRF token and a live elevation. A row that names a run and outlives it
+running twice; a key it frees belongs to a confirmation two years old, whose own form cannot be sent
+again (its CSRF token was bound to a session long gone). A row that names a run and outlives it
 (`commerce_pack_refunds.admin_command_id`, `daily_limit_overrides.created_by_command_id` and
 `cleared_by_command_id`) then links to a command the panel no longer finds.
 

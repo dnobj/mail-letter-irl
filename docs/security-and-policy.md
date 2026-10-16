@@ -80,7 +80,8 @@
   only inside its own transaction. The triggers refuse every other change. The admin panel's
   command runs and their queued operations go on the same schedule, after the audit rows that name
   them (#771, `purge_expired_admin_command_records`, migration 064), never while a queued operation
-  is unfinished; a command left unfinished goes two years after it was requested.
+  is unfinished; a command left unfinished goes on the same schedule, counted from when it was
+  requested.
 
 ## Future Compliance Hooks
 

@@ -13,9 +13,11 @@
 -- Due: two days before two years after the run finished (succeeded, failed
 -- or rejected), as 062 counts, so a daily sweep that runs late still deletes
 -- inside the policy. A run left pending or running (a command whose process
--- stopped between its provider call and its completion) is due two years
--- after it was requested: by then no session, CSRF token or elevation that
--- could finish it is left, and it may be the only record of the action. Never
+-- stopped between its provider call and its completion) is due on the same
+-- schedule counted from when it was requested. It is treated as abandoned:
+-- finishing it would take a new session, elevation and confirmation of the
+-- same command, unchanged, two years on. And it may be the only record of
+-- the action. Never
 -- deleted: a run with an operation still pending or processing, whose work is
 -- not done; one whose operation finished later (an erasure the next
 -- maintenance run carried out), until the operation is due too; and a run an
@@ -31,8 +33,9 @@
 --
 -- Replay: admin_command_runs is what stops a panel confirmation from running
 -- twice (UNIQUE (environment, idempotency_key)). A key freed here belongs to a
--- confirmation two years old, which cannot be sent again: a confirmation needs
--- the session's CSRF token and a live elevation, both long gone.
+-- confirmation two years old. Its own form cannot be sent again (its CSRF token
+-- was bound to a session long gone); an operator who deliberately re-posted
+-- its key would still need a live elevation and a preview that matches.
 --
 -- Like 062: the tables are named only inside the body, resolved when it runs,
 -- and a missing table is skipped, so the function is created the same way in
