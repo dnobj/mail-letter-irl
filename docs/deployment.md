@@ -50,6 +50,29 @@ fields absent from it keep theirs. Runtime settings, such as
 `UV_THREADPOOL_SIZE=16` (#730), are Railway service variables in each
 environment.
 
+**Building from `Dockerfile.api` instead (#730).** Railpack's image runs the
+process as root. `Dockerfile.api` builds the same code into an image that runs as
+the unprivileged `node` user, owns none of its own files, and holds only the
+compiled output, production dependencies, `db/migrations`, `widgets` and
+`assets/fonts`. A service uses it once its `RAILWAY_DOCKERFILE_PATH` variable is
+`Dockerfile.api`; until then it builds with Railpack as above, so the file
+changes nothing on its own. CI's "API image" job builds it on every pull request,
+checks that it runs unprivileged and that its native modules and fonts load, and
+runs the pre-deploy migration in it. To move an environment:
+
+1. Set `RAILWAY_DOCKERFILE_PATH=Dockerfile.api` on the API service and on the
+   maintenance service. The pre-deploy command and the maintenance service's
+   start command (`npm run maintenance`) stay as they are; the API's start
+   command in the dashboard may be cleared, since the image's own is
+   `node dist/mcp/httpServer.js`, the same as `npm start`.
+2. Redeploy each (a variable change alone does not always start a build), and
+   check the deploy log shows the
+   pre-deploy migration, `/readyz` answers with the new build commit, a preview
+   renders, and the next maintenance run logs as before.
+3. To go back, delete the variable and redeploy: Railpack builds it again.
+
+Development first; production at a promotion, on the owner's word.
+
 Until 2026-10-13 this said a `nixpacks.toml` set install, build, start and the
 thread pool. Railway had been building with Railpack, which never reads that
 file, so the file was deleted, the thread pool became a service variable, and

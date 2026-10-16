@@ -5,6 +5,7 @@ name: CI
 # Two jobs on purpose: `checks` is fast and needs nothing external, so it gives a
 # signal in ~1 minute. `postgres-integration` provisions a real database, because
 # financial and concurrency invariants cannot be proven against mocks.
+# `api-image` (#730) builds Dockerfile.api and checks the image it makes.
 
 # Active. Actions is free and unlimited for public repositories, which this now
 # is, so these run automatically again.
@@ -84,6 +85,49 @@ jobs:
       # test:submission directly rather than check:submission.
       - name: Apps SDK submission checks
         run: npm run test:submission
+
+  # The image Dockerfile.api builds (#730), which the API and maintenance
+  # services run once their RAILWAY_DOCKERFILE_PATH names it. Built here so a
+  # change that breaks it fails a pull request rather than a deploy.
+  api-image:
+    name: API image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:17@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3 # 17, 2026-10-07
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Build the image
+        run: docker build -f Dockerfile.api -t letter-irl-api:ci .
+
+      - name: Runs unprivileged, and its modules and files load
+        run: docker run --rm -v "$PWD/.github/scripts:/smoke:ro" letter-irl-api:ci node /smoke/api-image-smoke.mjs
+
+      # What Railway's pre-deploy runs, in the image, as its user. The URL names
+      # sslmode because the image sets NODE_ENV=production, which otherwise
+      # requires TLS, and this database is the job's own.
+      - name: The pre-deploy migration runs
+        run: |
+          docker run --rm --network host \
+            -e DATABASE_URL='postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable' \
+            letter-irl-api:ci npm run db:migrate:prod
 
   postgres-integration:
     name: PostgreSQL integration
