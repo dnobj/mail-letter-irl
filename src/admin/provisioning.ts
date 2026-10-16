@@ -133,10 +133,15 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  * 060 adds the alert type refund_not_completed (#730), with a partial unique
  * index on its order while open. The roles read commerce_operational_alerts
  * whole, and the panel's alert commands already transition any type. Nothing
- * to re-run; required, as the newest is.
+ * to re-run.
+ *
+ * 062 lets the maintenance sweep delete audit records past their two years
+ * (#398) by replacing the two audit tables' trigger functions. The roles still
+ * hold SELECT and INSERT only, so they can delete nothing. Nothing to re-run;
+ * required, as the newest is.
  */
 export const ADMIN_LATEST_REQUIRED_MIGRATION =
-  "060_refund_not_completed_alert.sql";
+  "062_audit_retention_purge.sql";
 
 export interface AdminProvisioningArguments {
   environment: "development" | "production";

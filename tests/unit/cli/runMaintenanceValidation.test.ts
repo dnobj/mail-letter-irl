@@ -24,6 +24,7 @@ const services = vi.hoisted(() => ({
   purgeExpiredRecentUploads: vi.fn().mockResolvedValue(0),
   purgeExpiredFeatureRequests: vi.fn().mockResolvedValue(0),
   purgeClosedAddressRequests: vi.fn().mockResolvedValue(0),
+  purgeExpiredAuditRecords: vi.fn().mockResolvedValue({ adminDeleted: 0, commerceDeleted: 0 }),
   sendMaintenanceHeartbeat: vi.fn().mockResolvedValue('sent'),
   lettersWaitingBehindPause: vi.fn().mockResolvedValue(0),
   raiseMissedMailDayAlerts: vi.fn().mockResolvedValue(0),
@@ -86,6 +87,9 @@ vi.mock('../../../src/services/addressRequestService.js', () => ({
 }));
 vi.mock('../../../src/services/featureRequestService.js', () => ({
   purgeExpiredFeatureRequests: services.purgeExpiredFeatureRequests
+}));
+vi.mock('../../../src/services/auditRetentionService.js', () => ({
+  purgeExpiredAuditRecords: services.purgeExpiredAuditRecords
 }));
 vi.mock('../../../src/db/index.js', () => ({
   closePool: services.closePool
@@ -583,6 +587,72 @@ describe('maintenance deployment validation', () => {
       releaseSweep?.();
       await expect(entry).resolves.toBeUndefined();
       expect(services.processDueLetterJobs).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  /**
+   * Issue #398. Operator audit records go 2 years after the action they record:
+   * same wrapper and position rule as the sweeps above, once a day.
+   */
+  describe('audit retention sweep', () => {
+    afterEach(() => {
+      services.runMaintenanceTaskIfDue.mockReset().mockResolvedValue({ ran: false });
+      services.purgeExpiredAuditRecords.mockReset().mockResolvedValue({ adminDeleted: 0, commerceDeleted: 0 });
+    });
+
+    it('is scheduled about daily, after the address requests sweep and before the unwrapped tasks', async () => {
+      stubValidDevelopment();
+
+      await expect(maintenanceEntry()).resolves.toBeUndefined();
+
+      const names = services.runMaintenanceTaskIfDue.mock.calls.map(([name]) => name);
+      const call = services.runMaintenanceTaskIfDue.mock.calls.find(([name]) => name === 'audit-retention-sweep');
+      expect(call?.[1]).toBe(23 * 60 * 60 * 1000);
+      expect(names.indexOf('audit-retention-sweep')).toBeGreaterThan(names.indexOf('address-requests-sweep'));
+      expect(names.indexOf('audit-retention-sweep')).toBeLessThan(names.indexOf('provider-status-sync'));
+    });
+
+    it('logs the two counts only when it runs', async () => {
+      stubValidDevelopment();
+      const output = captureOutput();
+      services.purgeExpiredAuditRecords.mockResolvedValueOnce({ adminDeleted: 4, commerceDeleted: 1 });
+      services.runMaintenanceTaskIfDue.mockImplementation((async (name, _interval, task) =>
+        name === 'audit-retention-sweep' ? { ran: true, result: await task() } : { ran: false }) as TaskRunner);
+
+      await expect(maintenanceEntry()).resolves.toBeUndefined();
+
+      expect(services.purgeExpiredAuditRecords).toHaveBeenCalledTimes(1);
+      const logged = output();
+      expect(logged).toContain('"event":"audit_retention.swept"');
+      expect(logged).toContain('"adminDeleted":4');
+      expect(logged).toContain('"commerceDeleted":1');
+      expect(logged).not.toContain('audit_retention.sweep_failed');
+    });
+
+    it('cannot stop the rest of maintenance, or leak what the driver said, when it fails', async () => {
+      stubValidDevelopment();
+      const output = captureOutput();
+      services.purgeExpiredAuditRecords.mockRejectedValueOnce(
+        Object.assign(new Error('admin_audit_events is append-only for actor "auth0|secret"'), { code: '55000' })
+      );
+      let rethrown: unknown;
+      services.runMaintenanceTaskIfDue.mockImplementation((async (name, _interval, task) => {
+        if (name !== 'audit-retention-sweep') return { ran: false };
+        try {
+          return { ran: true, result: await task() };
+        } catch (error) {
+          rethrown = error;
+          throw error;
+        }
+      }) as TaskRunner);
+
+      await expect(maintenanceEntry()).resolves.toBeUndefined();
+
+      expect(services.processDueLetterJobs).toHaveBeenCalledTimes(1);
+      expect((rethrown as Error).message).not.toContain('auth0|secret');
+      const logged = output();
+      expect(logged).toContain('"event":"audit_retention.sweep_failed"');
+      expect(logged).not.toContain('auth0|secret');
     });
   });
 

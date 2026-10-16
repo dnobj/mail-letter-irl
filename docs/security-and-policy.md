@@ -73,8 +73,10 @@
 - Every state transition records what initiated it: the system, the worker, the provider sync,
   or the operator's identity for admin actions.
 - Operator audit records are kept for 2 years after the action they record and are exempt from
-  account erasure for that period (#395). `commerce_operator_audit_events.retention_expires_at`
-  marks the date; the purge that enforces it is tracked in #398.
+  account erasure for that period (#395). The maintenance run's daily `audit-retention-sweep`
+  deletes them once the two years are up (#398). Both audit tables' triggers still refuse every
+  change but that one: a `DELETE` of a row past its two years, in a transaction that has set
+  `letter_irl.audit_retention_purge` (migration 062).
 
 ## Future Compliance Hooks
 
