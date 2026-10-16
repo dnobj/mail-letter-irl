@@ -36,6 +36,33 @@ function codeAt(nowMs: number, offset = 0): string {
 }
 
 describe("the accepted counter, kept outside the process (#730)", () => {
+  it("checks no more codes than the lock allows when many arrive at once (#730 review)", async () => {
+    const { guard, newSession } = harness();
+    const now = 1_700_000_000_000;
+    // A store that answers only after every attempt has started waiting on it.
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const slow: TotpCounterStore = {
+      lastCounter: async () => {
+        await gate;
+        return null;
+      },
+      claim: async () => true,
+    };
+    const session = newSession();
+    const attempts = Array.from({ length: 10 }, () =>
+      attemptElevation(session, guard, SECRET, codeAt(now, 50), policy, now, { counters: slow, counterKey: "owner@example.com" }),
+    );
+    release();
+    const outcomes = await Promise.all(attempts);
+    // Five wrong codes are counted and set the lock; the other five are refused on it unchecked.
+    expect(outcomes.filter((outcome) => !outcome.ok && outcome.reason === "invalid")).toHaveLength(4);
+    expect(outcomes.filter((outcome) => !outcome.ok && outcome.reason === "locked")).toHaveLength(6);
+    expect(guard.lockedUntil("owner@example.com", now)).not.toBeNull();
+  });
+
   it("refuses a code another process accepted between the read and the claim, as a replay", async () => {
     const { guard, newSession } = harness();
     const now = 1_700_000_000_000;

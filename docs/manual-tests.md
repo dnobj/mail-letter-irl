@@ -2412,7 +2412,7 @@ between the two runs of step 4.
 **Preconditions:** `ADMIN-PROD-RO-01` passed; a restricted **live** Stripe key created for this service
 (Charges and Refunds write, Payment Intents read, Payment Disputes read, Checkout Sessions read);
 each operator's entry in `ADMIN_TOTP_SECRETS` enrolled with `npx tsx scripts/adminTotpEnrol.ts production <login>`
-(the shared `ADMIN_TOTP_SECRET` of before is refused in production since #730); `DATABASE_URL` switched
+(the shared `ADMIN_TOTP_SECRET` of before is never used in production since #730); `DATABASE_URL` switched
 to `letter_irl_admin_operator_production` and `ADMIN_MODE=full` in the same variable edit; the provider
 variables wired as references to the API service.
 

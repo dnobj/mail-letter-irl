@@ -128,11 +128,34 @@ describe("admin runtime configuration", () => {
         [`owner@example.com=${OWNER_SECRET},owner@example.com=${SECOND_SECRET}`, "names a login twice"],
         ["owner@example.com=JBSWY3DP", "must be base32 and decode to at least 16 bytes"],
         [`owner@example.com=${OWNER_SECRET},second@github=${OWNER_SECRET}`, "gives two operators the same secret"],
+        // The same secret padded: decoded, it is the same key (#730 review).
+        [`owner@example.com=${OWNER_SECRET},second@github=${OWNER_SECRET}====`, "gives two operators the same secret"],
       ] as const) {
         expect(problemsOf({ ...full, ADMIN_TOTP_SECRETS: value }), value).toEqual(
           expect.arrayContaining([expect.stringContaining(problem)]),
         );
       }
+    });
+
+    it("reads entries separated by CRLF, with the login trimmed, and stores a secret without its padding", () => {
+      const config = parseAdminRuntimeConfig({
+        ...full,
+        ADMIN_TOTP_SECRETS: ["  owner@example.com =" + OWNER_SECRET + "==", "second@github=" + SECOND_SECRET].join(String.fromCharCode(13, 10)),
+      });
+      expect([...config.totpSecrets.entries()]).toEqual([
+        ["owner@example.com", OWNER_SECRET],
+        ["second@github", SECOND_SECRET],
+      ]);
+    });
+
+    it("keeps an own secret that is the shared one under the shared key, so a code is accepted once (#730 review)", () => {
+      const config = parseAdminRuntimeConfig({
+        ...full,
+        ADMIN_TOTP_SECRETS: `owner@example.com=${SECOND_SECRET}`,
+        ADMIN_TOTP_SECRET: SECOND_SECRET,
+      });
+      expect(totpSecretFor(config, "owner@example.com")).toEqual({ secret: SECOND_SECRET, counterKey: SHARED_TOTP_COUNTER_KEY });
+      expect(totpSecretFor(config, "second@github")).toEqual({ secret: SECOND_SECRET, counterKey: SHARED_TOTP_COUNTER_KEY });
     });
 
     it("keeps the shared secret in development for an operator with none, under one shared counter key", () => {

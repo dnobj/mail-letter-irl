@@ -122,7 +122,9 @@ export async function main(): Promise<void> {
     writeDiagnostic("warn", "admin.local_dev_mode", { environment: config.environment });
   }
   if (config.legacyTotpSecretIgnored) {
-    console.warn("[admin] ADMIN_TOTP_SECRET is not used in production; delete the variable (each operator's secret is in ADMIN_TOTP_SECRETS).");
+    // Delete the variable once the promotion has settled: until then the
+    // release before this one, which needs it, can still be rolled back to.
+    writeDiagnostic("warn", "admin.legacy_totp_secret_ignored", { environment: config.environment });
   }
 
   const health = startHealthListener(config.healthPort, state, supervisor);

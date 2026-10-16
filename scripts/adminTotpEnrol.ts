@@ -14,8 +14,9 @@
  * the authenticator. Nothing is written to disk.
  *
  * An operator who already has the old shared ADMIN_TOTP_SECRET in their
- * authenticator can keep it: set "login=<that secret>" as their entry instead
- * of enrolling a new one, then remove ADMIN_TOTP_SECRET.
+ * authenticator may keep it as their entry ("login=<that secret>") only if no
+ * one else ever held it; otherwise enrol a new one. Then remove
+ * ADMIN_TOTP_SECRET (in production, once the promotion has settled).
  */
 
 import { randomBytes } from "node:crypto";

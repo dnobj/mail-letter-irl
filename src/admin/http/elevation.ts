@@ -156,9 +156,17 @@ export async function attemptElevation(
 
   const counters = options.counters ?? guard.counters;
   const counterKey = options.counterKey ?? session.login;
+  const lastCounter = await counters.lastCounter(counterKey);
+  // The lock again, after the wait: nothing is awaited from here to a failed
+  // code's count below, so attempts in flight together cannot all pass a lock
+  // the first of them to fail sets (#730 review).
+  const lockedSince = guard.lockedUntil(session.login, now);
+  if (lockedSince !== null) {
+    return { ok: false, reason: "locked", lockedUntil: lockedSince, failuresLeft: 0 };
+  }
   const checked = verifyTotp(decodeBase32(secretBase32), code, {
     nowSeconds: Math.floor(now / 1000),
-    lastCounter: await counters.lastCounter(counterKey),
+    lastCounter,
   });
   // A counter another process accepted between the read and the claim is a
   // replay too.

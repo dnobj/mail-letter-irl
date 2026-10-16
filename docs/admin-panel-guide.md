@@ -354,10 +354,18 @@ Commands exist only in full mode. To enable it in development:
    Add the printed `login=SECRET` line to `ADMIN_TOTP_SECRETS` on the service (entries separated by
    commas), and the account to that operator's authenticator app on a device other than the one they
    browse from, then clear the terminal. The secret is never written to disk and never printed anywhere
-   else. An operator whose authenticator already holds the old shared `ADMIN_TOTP_SECRET` can keep it:
-   their entry is `login=<that secret>`. Once every operator has an entry, remove `ADMIN_TOTP_SECRET`.
+   else. An operator whose authenticator already holds the old shared `ADMIN_TOTP_SECRET` may keep it
+   as their entry (`login=<that secret>`) only if no one else ever held that secret, as when one
+   operator is all there has been; otherwise everyone who had it could still make their codes, so
+   enrol a new one. Once every operator has an entry, remove `ADMIN_TOTP_SECRET`.
    In production, where the shared secret is never used, set `ADMIN_TOTP_SECRETS` before the code that
-   reads it is deployed, then delete `ADMIN_TOTP_SECRET` when the boot log warns about it.
+   reads it is deployed, and check it on development first: a login in it that is not in
+   `ADMIN_OPERATOR_LOGINS` stops the boot. The boot log then warns (`admin.legacy_totp_secret_ignored`)
+   that `ADMIN_TOTP_SECRET` is unused; delete it once the promotion has settled, since the release
+   before needs it to boot if it is rolled back to.
+   To remove an operator, take their login out of `ADMIN_OPERATOR_LOGINS` and their entry out of
+   `ADMIN_TOTP_SECRETS` in the same variable edit, or the boot is refused. Their row in
+   `admin_totp_counters` (their login and a counter) can then be deleted by the database owner.
    Each code is accepted once: the last accepted counter is kept per operator in
    `admin_totp_counters` (migration 063), so a restart does not forget it, and the admin provisioning
    (`npm run admin:provision-access`) must be re-run once after 063 to grant it.

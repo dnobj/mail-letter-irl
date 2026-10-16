@@ -26,6 +26,7 @@ import { validDevelopmentEnv } from "./runtimeConfig.test.js";
 const HOST = "letter-irl-admin-dev.tail1234.ts.net";
 const OPERATOR = "postgres://letter_irl_admin_operator_development:pw@db.example.test/letter_irl_dev";
 const OWNER_SECRET = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
+const THIRD_SECRET = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP";
 
 interface Reply {
   status: number;
@@ -47,7 +48,11 @@ function send(port: number, method: string, path: string, headers: Record<string
 }
 
 // Each operator's laptop, as the Tailscale daemon names it.
-const PEERS: Record<string, string> = { "owner@example.com": "100.64.0.5", "second@github": "100.64.0.6" };
+const PEERS: Record<string, string> = {
+  "owner@example.com": "100.64.0.5",
+  "second@github": "100.64.0.6",
+  "third@github": "100.64.0.7",
+};
 
 function identity(login: string) {
   return {
@@ -68,19 +73,24 @@ describe("POST /elevate in full mode", () => {
     ...validDevelopmentEnv,
     ADMIN_MODE: "full",
     DATABASE_URL: OPERATOR,
-    ADMIN_TOTP_SECRETS: `owner@example.com=${OWNER_SECRET}`,
+    ADMIN_OPERATOR_LOGINS: "owner@example.com, second@github, third@github",
+    // second@github has no secret of its own.
+    ADMIN_TOTP_SECRETS: `owner@example.com=${OWNER_SECRET},third@github=${THIRD_SECRET}`,
   });
-  const audits: Array<{ action: unknown; outcome: unknown }> = [];
+  const audits: Array<{ action: unknown; outcome: unknown; input: unknown }> = [];
   const readerQuery = vi.fn(async (text: string, values: unknown[] = []) => {
     if (text.includes("INSERT INTO admin_audit_events")) {
-      audits.push({ action: values[6], outcome: values[13] });
+      audits.push({ action: values[6], outcome: values[13], input: values[10] });
       return { rows: [{ id: "audit-1", occurredAt: new Date() }] };
     }
     return { rows: [] };
   });
   // Whether the next claim of a counter wins, as the database would decide.
   let claimWins = true;
+  // Whether the table is out of the operator's reach, as before provisioning is re-run.
+  let storeRefuses = false;
   const operatorQuery = vi.fn(async (text: string) => {
+    if (storeRefuses) throw Object.assign(new Error("permission denied for table admin_totp_counters"), { code: "42501" });
     if (text.includes("FROM admin_totp_counters")) return { rows: [], rowCount: 0 };
     if (text.includes("INSERT INTO admin_totp_counters")) {
       return claimWins ? { rows: [{ counter_key: "x" }], rowCount: 1 } : { rows: [], rowCount: 0 };
@@ -139,6 +149,7 @@ describe("POST /elevate in full mode", () => {
 
   beforeEach(() => {
     claimWins = true;
+    storeRefuses = false;
     operatorQuery.mockClear();
   });
 
@@ -182,10 +193,27 @@ describe("POST /elevate in full mode", () => {
     expect(claims()).toHaveLength(1);
   });
 
-  it("refuses an operator with no secret of their own, without checking any code", async () => {
+  it("refuses an operator with no secret of their own, without checking any code, and audits it", async () => {
     const reply = await postElevate("second@github", currentCode());
     expect(reply.status).toBe(403);
     expect(reply.body).toContain("No TOTP secret is set for second@github");
     expect(operatorQuery).not.toHaveBeenCalled();
+    expect(audits.at(-1)).toMatchObject({ action: "admin.elevation_denied", outcome: "denied" });
+    expect(JSON.parse(String(audits.at(-1)?.input))).toMatchObject({ reason: "no_secret" });
+  });
+
+  it("refuses one operator the current code of another's secret", async () => {
+    const reply = await postElevate("third@github", currentCode());
+    expect(reply.status).toBe(403);
+    expect(reply.body).toContain("The code was not accepted");
+    expect(claims()).toHaveLength(0);
+  });
+
+  it("fails closed, audited, when the counter table is out of reach", async () => {
+    storeRefuses = true;
+    const reply = await postElevate("owner@example.com", currentCode());
+    expect(reply.status).toBe(500);
+    expect(reply.body).not.toContain("Elevated.");
+    expect(audits.at(-1)).toMatchObject({ action: "admin.request_failed", outcome: "failed" });
   });
 });

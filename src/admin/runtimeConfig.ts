@@ -86,7 +86,9 @@ export function totpSecretFor(
   login: string,
 ): { secret: string; counterKey: string } | null {
   const own = config.totpSecrets.get(login);
-  if (own) return { secret: own, counterKey: login };
+  // An own secret that is the shared one shares its key too, so one code is
+  // not accepted once under each.
+  if (own) return { secret: own, counterKey: own === config.totpSecret ? SHARED_TOTP_COUNTER_KEY : login };
   if (config.totpSecret) return { secret: config.totpSecret, counterKey: SHARED_TOTP_COUNTER_KEY };
   return null;
 }
@@ -230,7 +232,8 @@ export function parseAdminRuntimeConfig(
     if (!trimmed) continue;
     const split = trimmed.indexOf("=");
     const login = split > 0 ? trimmed.slice(0, split).trim() : "";
-    const secret = split > 0 ? trimmed.slice(split + 1).replace(/\s+/g, "").toUpperCase() : "";
+    // Without its padding, so the same secret padded differently compares equal.
+    const secret = split > 0 ? trimmed.slice(split + 1).replace(/\s+/g, "").toUpperCase().replace(/=+$/, "") : "";
     if (!login || !secret) {
       problems.push('ADMIN_TOTP_SECRETS entries must read "login=SECRET"');
     } else if (!operatorLogins.includes(login)) {
@@ -261,7 +264,7 @@ export function parseAdminRuntimeConfig(
         "ADMIN_TOTP_SECRET must be base32 and decode to at least 16 bytes",
       );
     } else {
-      totpSecret = totpRaw.replace(/\s+/g, "").toUpperCase();
+      totpSecret = totpRaw.replace(/\s+/g, "").toUpperCase().replace(/=+$/, "");
     }
   }
   if (mode === "full" && totpSecrets.size === 0 && !totpSecret) {

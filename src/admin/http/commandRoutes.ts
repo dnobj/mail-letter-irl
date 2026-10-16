@@ -115,6 +115,14 @@ export function registerCommandRoutes(
     // they have none.
     const totp = totpSecretFor(context.config, context.session.login);
     if (!totp) {
+      // Denied, so audited as every denied elevation is (#730 review).
+      await context.appendAudit({
+        action: "admin.elevation_denied",
+        targetType: "session",
+        inputSummary: { reason: "no_secret" },
+        outcome: "denied",
+        errorCode: "ADMIN_FORBIDDEN",
+      });
       return context.render(
         "Elevate",
         renderElevationForm({
