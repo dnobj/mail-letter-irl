@@ -89,10 +89,13 @@ describe("POST /elevate in full mode", () => {
   let claimWins = true;
   // Whether the table is out of the operator's reach, as before provisioning is re-run.
   let storeRefuses = false;
+  // Whether the claim itself fails, after the read and a correct code.
+  let claimThrows = false;
   const operatorQuery = vi.fn(async (text: string) => {
     if (storeRefuses) throw Object.assign(new Error("permission denied for table admin_totp_counters"), { code: "42501" });
     if (text.includes("FROM admin_totp_counters")) return { rows: [], rowCount: 0 };
     if (text.includes("INSERT INTO admin_totp_counters")) {
+      if (claimThrows) throw Object.assign(new Error("connection terminated"), { code: "57P01" });
       return claimWins ? { rows: [{ counter_key: "x" }], rowCount: 1 } : { rows: [], rowCount: 0 };
     }
     return { rows: [], rowCount: 0 };
@@ -105,6 +108,9 @@ describe("POST /elevate in full mode", () => {
   clientScript.path = clientScriptPath(clientScript.body);
   const router = new AdminRouter<RouteHandler>();
   registerReadRoutes(router, clientScript, registerCommandRoutes(router, ADMIN_COMMANDS));
+  const sessions = new AdminSessionStore({ idleTtlMs: 60_000, absoluteTtlMs: 600_000 });
+  // The session id of the last POST /elevate, before any rotation.
+  let lastSessionId = "";
   let server: http.Server;
   let port = 0;
 
@@ -112,7 +118,7 @@ describe("POST /elevate in full mode", () => {
     const listener = createAdminRequestListener({
       config,
       pools,
-      sessions: new AdminSessionStore({ idleTtlMs: 60_000, absoluteTtlMs: 600_000 }),
+      sessions,
       elevation: new ElevationGuard(),
       whois: {
         whois: async (peer: string) => ({
@@ -150,6 +156,7 @@ describe("POST /elevate in full mode", () => {
   beforeEach(() => {
     claimWins = true;
     storeRefuses = false;
+    claimThrows = false;
     operatorQuery.mockClear();
   });
 
@@ -157,6 +164,7 @@ describe("POST /elevate in full mode", () => {
     const first = await send(port, "GET", "/", identity(login));
     const sessionId = String(first.headers["set-cookie"]).split(";")[0].split("=")[1];
     const token = createCsrfToken(config.sessionSecret, sessionId);
+    lastSessionId = sessionId;
     return send(
       port,
       "POST",
@@ -215,5 +223,17 @@ describe("POST /elevate in full mode", () => {
     expect(reply.status).toBe(500);
     expect(reply.body).not.toContain("Elevated.");
     expect(audits.at(-1)).toMatchObject({ action: "admin.request_failed", outcome: "failed" });
+  });
+
+  it("does not elevate when the claim of a correct code fails", async () => {
+    claimThrows = true;
+    const reply = await postElevate("owner@example.com", currentCode());
+    expect(reply.status).toBe(500);
+    expect(reply.body).not.toContain("Elevated.");
+    expect(claims()).toHaveLength(1);
+    expect(audits.at(-1)).toMatchObject({ action: "admin.request_failed", outcome: "failed" });
+    // The session itself is not elevated.
+    const resolved = sessions.resolve(lastSessionId, { login: "owner@example.com", peerAddress: PEERS["owner@example.com"] });
+    expect(resolved).toMatchObject({ kind: "ok", session: { elevatedUntil: null } });
   });
 });

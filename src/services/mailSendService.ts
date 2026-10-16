@@ -343,8 +343,8 @@ export async function createMailOrderFromDraftWithClient(
     // checkout's refusal, which says what can be done. Counted under a lock on
     // the date, so two sends cannot both take its last place. The lock comes
     // after the draft's and its orders', and before the account's, taken just
-    // before the letter's insert below; the paid fulfilment, which holds the
-    // account before it would get here, takes none. Pay & Send is not refused for a full date: it
+    // before the letter's insert below; the paid fulfilment takes the other
+    // branch and takes none. Pay & Send is not refused for a full date: it
     // has been charged, and its checkout refused one before the charge, so a
     // date filled since takes it over the cap.
     if (schedule) {
