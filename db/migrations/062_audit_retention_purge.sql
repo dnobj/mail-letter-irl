@@ -56,7 +56,7 @@ BEGIN
 
   PERFORM set_config('lock_timeout', '5s', true);
   IF has_admin AND has_commerce THEN
-    LOCK TABLE commerce_operator_audit_events, admin_audit_events IN SHARE ROW EXCLUSIVE MODE;
+    LOCK TABLE admin_audit_events, commerce_operator_audit_events IN SHARE ROW EXCLUSIVE MODE;
   END IF;
 
   IF has_admin THEN
