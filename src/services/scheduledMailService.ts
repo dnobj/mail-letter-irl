@@ -249,7 +249,7 @@ export async function cancelScheduledMailWithClient(
   }
   if (letter.status !== 'queued') return refuse('too_late');
   // Refused here, holding only the letter and waiting on nothing after it, so
-  // the order-first lock order of Pay & Send's fulfilment cannot deadlock it.
+  // the draft-then-order lock order of Pay & Send's fulfilment cannot deadlock it.
   if (letter.funding_type === 'jit_order') return refuse('pay_and_send');
   if (letter.mail_on === null) return refuse('not_scheduled');
 

@@ -1457,9 +1457,11 @@ async function findCheckoutOrder(
  * paid fulfilment and its recovery used to lock the order first and the draft
  * last, after the account, so a prepaid send of the same draft and a payment
  * arriving for it could each hold what the other wanted; PostgreSQL broke the
- * cycle by failing one, and Stripe's retry finished it. An order's draft_id
- * never changes, so the unlocked read that found it stays true. A pack order
- * has no draft and locks only the order.
+ * cycle by failing one, and Stripe's retry finished it. A Pay & Send order's
+ * draft_id cannot change: it is set when the order is made, and the
+ * valid_order_draft CHECK refuses the NULL a draft's delete would set, so the
+ * unlocked read that found it stays true. A pack order has no draft and locks
+ * only the order.
  */
 async function lockDraftThenOrder(
   client: Pick<pg.PoolClient, 'query'>,
@@ -1731,7 +1733,8 @@ async function transitionPaidCheckout(
   // ahead of both UPDATEs.
   //
   // It stays AFTER findCheckoutOrder on purpose. Acquisition order remains
-  // orders -> users, matching the refund and dispute paths, which all receive an
+  // drafts -> orders -> users, matching the refund and dispute paths (orders ->
+  // users), which all receive an
   // already-fetched order and then lock the account. Hoisting this above the
   // order lock would invert against them and trade one cycle for another.
   await lockAccountForBalanceChange(client, order.user_id);

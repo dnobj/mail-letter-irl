@@ -424,7 +424,12 @@ export type ErasureOutcome =
  * after the account row is locked. The drafts come first (#730): every path
  * that holds a draft and an order or the account takes the draft first (a
  * send, a checkout, a payment's fulfilment), so this one does too, and none
- * of them can hold what this waits for while waiting for what this holds.
+ * of them can hold a draft this waits for while waiting for what this holds.
+ * That covers the drafts there when the first statement runs. A draft made in
+ * the moments after it (a preview committed before this locks the account) is
+ * not held, so a send or restyle of it can still cross this at the account
+ * row; PostgreSQL then fails one, and an erasure failed that way is tried
+ * again at the next run without spending an attempt (adminOperationsQueue).
  * What that guarantees, and what it does not (#446 review):
  *   - a send or fulfilment that reaches the account row after this took it
  *     waits, and then finds the account blocked (the tombstone sets a send

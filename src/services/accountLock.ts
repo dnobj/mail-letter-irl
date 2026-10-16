@@ -13,6 +13,12 @@ import type pg from 'pg';
  * fulfilment finds its order unlocked, locks the draft, then the order
  * (commerceService lockDraftThenOrder).
  *
+ * One path runs against it: restoring quarantined content (retentionService)
+ * locks the saved copy in redacted_content_quarantine before its draft or
+ * letter. It runs only in the maintenance run, before that run's erasures,
+ * so it meets an erasure only if two runs overlap, and both retry a lock
+ * conflict.
+ *
  * `users` is the account aggregate root. Locking it first is what makes the
  * rest of the order safe: `credit_ledger` and `image_entitlements` rows are
  * only ever reached while the owning account row is already held, so two

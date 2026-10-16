@@ -246,10 +246,14 @@ describePostgres('Pay & Send fulfilment idempotency (#287, #286)', () => {
       await holder.query('SELECT 1 FROM letter_drafts WHERE draft_id = $1 FOR UPDATE', [draftId]);
       const holderPid = (await holder.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0].pid;
       running = run();
-      running.catch(() => undefined);
+      let settled = false;
+      const settle = () => {
+        settled = true;
+      };
+      running.then(settle, settle);
       // Until a session in this database is blocked by the holder's lock.
       let waiting = false;
-      for (let attempt = 0; attempt < 100 && !waiting; attempt += 1) {
+      for (let attempt = 0; attempt < 100 && !waiting && !settled; attempt += 1) {
         const { rows } = await prober.query<{ waiting: boolean }>(
           `SELECT EXISTS (
              SELECT 1 FROM pg_stat_activity
@@ -261,6 +265,8 @@ describePostgres('Pay & Send fulfilment idempotency (#287, #286)', () => {
         waiting = rows[0].waiting;
         if (!waiting) await new Promise(resolve => setTimeout(resolve, 50));
       }
+      // A run that ended without waiting shows its own error, if it had one.
+      if (!waiting && settled) await running;
       expect(waiting).toBe(true);
       // The order, and the account, are free while the draft is waited for.
       await prober.query('BEGIN');
@@ -308,7 +314,7 @@ describePostgres('Pay & Send fulfilment idempotency (#287, #286)', () => {
       transaction(client => erasure.eraseAccountWithClient(client, userId)),
       userId
     );
-    expect(outcome).toMatchObject({ outcome: expect.any(String) });
+    expect(outcome).toMatchObject({ outcome: 'erased' });
   });
 
   it('fulfils exactly once for a single delivery, as the baseline', async () => {
