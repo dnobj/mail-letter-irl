@@ -8,8 +8,9 @@
  * the same scopes (src/auth/restScopes.ts). While signatures are not offered
  * the tools are not listed and nothing new can be saved, but a signature saved
  * while they were stays the person's to see and remove: GET shows it, marked
- * `offered: false`, and DELETE removes it. Without one, every route answers
- * 404, so the page shows nothing of signatures.
+ * `offered: false`, and DELETE removes it. POST and any other method answer
+ * 404 before authenticating, and GET without one answers 404, so the page
+ * shows nothing of signatures.
  */
 
 import type { IncomingMessage, ServerResponse } from 'http';

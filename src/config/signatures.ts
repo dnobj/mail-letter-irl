@@ -14,7 +14,8 @@ import { offUnlessExplicitlyEnabled } from '../utils/envSettings.js';
 /**
  * Off unless explicitly on: production waits for the owner's word, and the
  * privacy policy's wording for a saved signature (#608). While off, the tools
- * are not listed and refuse if called, and the REST routes answer 404.
+ * are not listed and refuse if called, and the REST routes save nothing: GET
+ * shows a signature saved while they were on, and DELETE removes it.
  */
 export function isSignaturesEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return offUnlessExplicitlyEnabled('LETTER_IRL_SIGNATURES_ENABLED', env);

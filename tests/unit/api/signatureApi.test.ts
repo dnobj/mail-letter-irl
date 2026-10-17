@@ -105,7 +105,7 @@ describe('/api/signature (#608)', () => {
     });
 
     it('refuses a save, and any other method but GET and DELETE, with 404 before authenticating', async () => {
-      for (const method of ['POST', 'PUT', 'PATCH']) {
+      for (const method of ['POST', 'PUT', 'PATCH', 'HEAD']) {
         expect(await call(method), method).toMatchObject({ handled: true, status: 404 });
       }
       expect(authenticateRestRequest).not.toHaveBeenCalled();
@@ -126,7 +126,9 @@ describe('/api/signature (#608)', () => {
       expect(await call('GET')).toMatchObject({ status: 404 });
     });
 
-    it('still removes a saved signature', async () => {
+    it('still removes a saved signature, and says when there was none', async () => {
+      vi.mocked(clearSignature).mockResolvedValueOnce(false);
+      expect(await call('DELETE')).toMatchObject({ status: 200, body: { removed: false } });
       vi.mocked(clearSignature).mockResolvedValueOnce(true);
       expect(await call('DELETE')).toMatchObject({ status: 200, body: { removed: true } });
       expect(clearSignature).toHaveBeenCalledWith(USER);
