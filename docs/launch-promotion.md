@@ -371,14 +371,14 @@ stage B allows (see "Rollback").
 | `LETTER_IRL_GIFT_LETTERS_ENABLED` | API | on, stage C | GIFT-01; the website's `/g` page | queued gift letters still print their card |
 | `LETTER_IRL_PRINT_RENDERER` | API | `pdf`, stage D | PRINT-02 sends | floor: migration `039` while rendered mail is live |
 | `LETTER_IRL_ARRIVE_BY_ENABLED` | API | stage F | #697 and #726 in production, #697's object storage, SCHEDULE-01, ADMIN-CMD-04, its privacy row | held mail still goes out with it off |
-| `LETTER_IRL_ROOM_TO_WRITE_ENABLED` | API, maintenance | stage G | its two prices, terms, its DEV test | under the renderer floor |
-| `LETTER_IRL_POSTCARD_SIZES_ENABLED` | API, maintenance | stage G | its two prices, terms, its DEV test | not below #596's build while such postcards are live |
+| `LETTER_IRL_ROOM_TO_WRITE_ENABLED` | API, maintenance | stage G | its two prices, terms, PAGES-01 | under the renderer floor |
+| `LETTER_IRL_POSTCARD_SIZES_ENABLED` | API, maintenance | stage G | its two prices, terms, POSTCARD-01 | not below #596's build while such postcards are live |
 | `LETTER_IRL_CERTIFIED_MAIL_ENABLED` | API, maintenance | stage G | its prices, terms, PostGrid's confirmation, CERTIFIED-01, provisioning | certified letters must be sent before rolling back |
-| `LETTER_IRL_STATIONERY_ENABLED`, `..._CUSTOM_STATIONERY_ENABLED` | API | stage E | its DEV test; saved designs also need stationery on and their privacy row | `pdf-2` mail must be gone before rolling back |
+| `LETTER_IRL_STATIONERY_ENABLED`, `..._CUSTOM_STATIONERY_ENABLED` | API | stage E | STATIONERY-01; saved designs STATIONERY-02, with stationery on and their privacy row | `pdf-2` mail must be gone before rolling back |
 | `LETTER_IRL_SIGNATURES_ENABLED` | API | stage E | SIGNATURE-01, its privacy row | `pdf-4` mail |
-| `LETTER_IRL_POSTCARD_LAYOUTS_ENABLED` | API | stage E | its DEV test | `pdf-3` postcards |
+| `LETTER_IRL_POSTCARD_LAYOUTS_ENABLED` | API | stage E | POSTCARD-01 | `pdf-3` postcards |
 | `LETTER_IRL_ADDRESS_REQUESTS_ENABLED` | API | stage E | ADDRESS-01, its privacy row; the website's `/address` page; `LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS` on the maintenance service matching the row | the old build does not sweep requests |
-| `LETTER_IRL_HOME_ENABLED`, `..._WORDS_EDITOR_ENABLED`, `..._POSTCARD_COLLAGES_ENABLED`, `..._CARD_UPLOAD_ENABLED`, `..._ENVELOPE_REVEAL_ENABLED`, `..._STUDIO_CARD_ENABLED` | API | stage E | each one's DEV test; the home after #651 (`LETTER_IRL_CHATGPT_PLUGIN_ID` only once the production plugin exists and HOME-03 passes) | none |
+| `LETTER_IRL_HOME_ENABLED`, `..._WORDS_EDITOR_ENABLED`, `..._POSTCARD_COLLAGES_ENABLED`, `..._CARD_UPLOAD_ENABLED`, `..._ENVELOPE_REVEAL_ENABLED`, `..._STUDIO_CARD_ENABLED` | API | stage E | each one's DEV test: HOME-01 to HOME-04, the words editor alone in STUDIO-01 step 3 and with room to write in PAGES-01, COLLAGE-01, CLIENT-01's upload steps, ENVELOPE-01, STUDIO-01; the home after #651 (`LETTER_IRL_CHATGPT_PLUGIN_ID` only once the production plugin exists and HOME-03 passes) | none |
 | `LETTER_IRL_IMAGE_GEN_MODE` | API | `off` | check the current value first | meaning differs between builds |
 | `CONTENT_RETENTION_MODE` | maintenance | `report`, then `enforce` in stage C | the rule below | never `enforce` while the old build is a rollback target |
 | `LETTER_IRL_OUTBOX_DISPATCH_ENABLED` | API, maintenance | `true` | | `false` pauses the printer queue (new build only) |
