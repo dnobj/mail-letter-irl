@@ -1391,6 +1391,23 @@ describe("the Words tab's editor (#586)", () => {
     expect(text(card, 'studio-summary')).toContain('mailed in 1-2 business days');
   });
 
+  it('draws no status answer asked before the card set a date (review round 1)', async () => {
+    const card = mount();
+    const DATED = { arriveBy: '2026-10-20', mailOn: '2026-10-09' };
+    await card.show(output({ ...CLASSIC, arrivalWindow: WINDOW, schedule: DATED }), { ...ON, pageFit: FIT });
+    // The ask made on opening waits while the person clears the date.
+    const opening = card.lastRequest('tools/call', 'get_draft_status')!;
+    await card.click(card.byId('arrives-asap'));
+    await card.answer(
+      { result: { content: [], structuredContent: { draftId: 'draft_0001', schedule: null, deliveryEstimate: 'Mailed in 1-2 business days', message: 'Cleared.' } } },
+      'set_arrival_date'
+    );
+    await card.answerTo(opening, status({ ...CHAT_WORDS, schedule: DATED }, TWO_PAGES));
+    expect(card.document.querySelectorAll('#mockup-container svg')).toHaveLength(1);
+    await card.click(card.tab('words'));
+    expect(box(card, 'studio-words-body')).toBe(ARGS.bodyText);
+  });
+
   it("keeps each box on its own: one typed in keeps what was typed, one not typed in takes the chat's (review round 1)", async () => {
     const card = mount();
     await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
@@ -1423,12 +1440,21 @@ describe("the Words tab's editor (#586)", () => {
     const card = mount();
     await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
     await card.click(card.tab('words'));
+    // The card's clock, so the throttle does not hide what focus does.
+    let now = 100000;
+    card.window.Date.now = () => now;
     await type(card, 'studio-words-body', 'Dear Sam,\n\nMuch longer.');
+    const before = card.requests('tools/call', 'get_draft_status').length;
     (card.byId('studio-words-body') as HTMLTextAreaElement).focus();
     await flush();
+    // Focus coming into the Words tab is a coming back: the card asks.
+    expect(card.requests('tools/call', 'get_draft_status')).toHaveLength(before + 1);
+    now += 10000;
     const asked = card.requests('tools/call', 'get_draft_status').length;
     (card.byId('studio-words-update') as HTMLButtonElement).focus();
     await flush();
+    // Focus moving within it, well after, is not.
+    expect(card.requests('tools/call', 'get_draft_status')).toHaveLength(asked);
     await card.click(card.byId('studio-words-update'));
     await card.answer(
       { result: { isError: true, content: [{ type: 'text', text: 'This preview has expired. Make a new preview with the words.' }] } },
