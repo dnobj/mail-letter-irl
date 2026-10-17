@@ -476,7 +476,10 @@ async function checkoutDraft(req: IncomingMessage, res: ServerResponse, draft: L
       amountCents: result.amountCents,
       currency: result.currency,
       expiresAt: result.expiresAt ?? null,
-      reused: result.reused
+      reused: result.reused,
+      // An open checkout whose mail date has passed since it opened (#726): the
+      // page says so, and waits for the person, before it opens the payment.
+      ...(result.status === 'checkout_pending' && result.scheduleMissed ? { scheduleMissed: result.scheduleMissed } : {})
     });
   } catch (error) {
     const refusal = checkoutRefusalFor(error);

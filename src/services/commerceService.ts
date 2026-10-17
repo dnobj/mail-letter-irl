@@ -104,6 +104,13 @@ export interface CommerceCheckoutResult {
   expiresAt?: string;
   status: OrderStatus;
   reused: boolean;
+  /**
+   * Arrive-by (#726): an open Pay & Send session handed back for a draft whose
+   * mail date has passed since it was opened. Paid, the letter goes to the
+   * printer as soon as it can and may arrive after its date, which the tool and
+   * the send page say before the person pays.
+   */
+  scheduleMissed?: DraftSchedule;
 }
 
 export interface CreatePackCheckoutParams {
@@ -178,6 +185,12 @@ export interface PurchaseStatusResult {
   amountRefundedCents?: number;
   updatedAt: string;
   message: string;
+  /**
+   * Arrive-by (#726): an unpaid Pay & Send order whose mail date has passed.
+   * Paid now, it goes to the printer as soon as it can and may arrive late, so
+   * a card following the order, reopened later too, says so before payment.
+   */
+  scheduleMissed?: DraftSchedule;
 }
 
 export interface StripeEventProcessingResult {
@@ -567,8 +580,9 @@ function recordedStripeRequest(order: Order): JitStripeRequest | null {
   return { priceId: recorded.priceId, successUrl: recorded.successUrl, cancelUrl: recorded.cancelUrl };
 }
 
-function asCheckoutResult(order: Order, reused: boolean): CommerceCheckoutResult {
+function asCheckoutResult(order: Order, reused: boolean, scheduleMissed?: DraftSchedule): CommerceCheckoutResult {
   return {
+    ...(scheduleMissed ? { scheduleMissed } : {}),
     success: true,
     orderId: order.order_id,
     sessionId: order.stripe_checkout_session_id,
@@ -900,11 +914,18 @@ export async function createPackCheckout(
   return asCheckoutResult(order || inserted.rows[0], false);
 }
 
+/**
+ * What prepareJitOrder decided: an order to open or hand back, or an arrive-by
+ * refusal to raise once its transaction has committed the cancel of the
+ * sessionless order it found (#726).
+ */
+type PreparedJitOrder = { order: Order; reused: boolean; scheduleMissed?: DraftSchedule } | { refusal: Error };
+
 async function prepareJitOrder(
   params: CreateJitCheckoutParams,
   /** The price the caps were checked at, from the peek (#586). */
   checkedCents: number
-): Promise<{ order: Order; reused: boolean }> {
+): Promise<PreparedJitOrder> {
   return transaction(async client => {
     const draftResult = await client.query<LetterDraft>(
       'SELECT * FROM letter_drafts WHERE draft_id = $1 FOR NO KEY UPDATE',
@@ -1003,9 +1024,11 @@ async function prepareJitOrder(
     const opensSession =
       !existing ||
       (existing.status === 'checkout_pending' && !existing.stripe_checkout_session_id && !existing.checkout_url);
+    const missed = schedule !== null && schedule.mailOn < earliestMailOn(new Date());
+    let scheduleRefusal: Error | undefined;
     // A mail date already past.
-    if (schedule && opensSession && schedule.mailOn < earliestMailOn(new Date())) {
-      throw Object.assign(new Error('Draft has missed its mail date'), {
+    if (schedule && opensSession && missed) {
+      scheduleRefusal = Object.assign(new Error('Draft has missed its mail date'), {
         code: 'SCHEDULE_PASSED',
         diagnosticClass: 'SCHEDULE_PASSED'
       });
@@ -1013,15 +1036,43 @@ async function prepareJitOrder(
     // A full one, checked when a session is made: a session holds no place on
     // the date, so its paid fulfilment can take the date over the cap. The
     // count is read without the send's lock.
-    if (schedule && opensSession) {
+    if (schedule && opensSession && !scheduleRefusal) {
       const full = await fullMailDate(client, schedule, new Date());
       if (full) {
-        throw Object.assign(new Error('Draft mail date is full'), {
+        scheduleRefusal = Object.assign(new Error('Draft mail date is full'), {
           code: 'SCHEDULE_FULL',
           diagnosticClass: 'SCHEDULE_FULL',
           openArrivals: full.openArrivals
         });
       }
+    }
+    if (scheduleRefusal) {
+      // An order whose session was never made (a Stripe call that failed) would
+      // hold the draft until its window ended, up to about 40 minutes, so the
+      // refusal's advice, another date, could not be followed: set_arrival_date
+      // and a prepaid send refuse a draft with a pending checkout (#726). Nothing
+      // was paid on it, so it is cancelled, and the cancel commits before the
+      // refusal is raised.
+      if (existing) {
+        const code = (scheduleRefusal as Error & { code: string }).code;
+        const cancelled = await client.query(
+          `UPDATE orders SET status = 'cancelled',
+             last_error_code = $2, last_error = $3, updated_at = NOW()
+           WHERE order_id = $1 AND status = 'checkout_pending'`,
+          [
+            existing.order_id,
+            code,
+            code === 'SCHEDULE_PASSED'
+              ? 'Mail date passed before a session was opened'
+              : 'Mail date full before a session was opened'
+          ]
+        );
+        if ((cancelled.rowCount ?? 0) > 0) {
+          await recordOrderEvent(client, existing.order_id, 'checkout.schedule_refused', existing.status, 'cancelled');
+        }
+        return { refusal: scheduleRefusal };
+      }
+      throw scheduleRefusal;
     }
     if (existing) {
       if (
@@ -1087,7 +1138,13 @@ async function prepareJitOrder(
             code: 'PREVIOUS_CHECKOUT_CLOSING'
           });
         }
-        return { order: existing, reused: true };
+        // Still payable though its mail date has passed (#726): handed back, and
+        // marked, so the person hears before paying that it goes as soon as it can.
+        return {
+          order: existing,
+          reused: true,
+          ...(existing.status === 'checkout_pending' && missed && schedule ? { scheduleMissed: schedule } : {})
+        };
       } else if (existing.status !== 'checkout_pending') {
         // A sessionless row in a funded/held state exists only via operator
         // surgery, but the reprice-cancel below must NEVER be the thing that
@@ -1331,7 +1388,10 @@ export async function createJitCheckout(
 
   // The same-mail check (#412) runs inside prepareJitOrder, just before a new
   // order is inserted: only there is it known that the call buys something.
-  const prepared = await prepareJitOrder(params, checkedCents);
+  const decided = await prepareJitOrder(params, checkedCents);
+  // Raised here, after its transaction committed the cancel it made (#726).
+  if ('refusal' in decided) throw decided.refusal;
+  const prepared = decided;
   // The asymmetry with prepareJitOrder's reuse branch is DELIBERATE (#279).
   //
   // That branch accepts `stripe_checkout_session_id || checkout_url`; this one
@@ -1364,7 +1424,7 @@ export async function createJitCheckout(
   // it sends Stripe (jitStripeRequest), and prepareJitOrder reuses a
   // sessionless order only when a retry would send the same request.
   if (prepared.order.status !== 'checkout_pending' || prepared.order.checkout_url) {
-    return asCheckoutResult(prepared.order, true);
+    return asCheckoutResult(prepared.order, true, prepared.scheduleMissed);
   }
 
   // ONE fresh derivation, as it was through round 10. Rounds 11-12 spliced
@@ -1418,7 +1478,7 @@ export async function createJitCheckout(
     checkout.sessionUrl,
     checkout.expiresAt
   );
-  return asCheckoutResult(order, prepared.reused);
+  return asCheckoutResult(order, prepared.reused, prepared.scheduleMissed);
 }
 
 function paymentIntentId(session: Stripe.Checkout.Session): string | null {
@@ -3932,6 +3992,32 @@ async function readMissedSchedule(order: Order): Promise<DraftSchedule | undefin
 }
 
 /**
+ * An unpaid Pay & Send order whose draft's mail date has passed (#726), read
+ * by the send's own reader and clock, or undefined. A draft whose dates cannot
+ * be read says nothing here: its checkout refuses it before the charge.
+ */
+async function readPendingMissedSchedule(order: Order): Promise<DraftSchedule | undefined> {
+  if (order.order_type !== 'jit_mail' || order.status !== 'checkout_pending' || !order.draft_id) return undefined;
+  // Only one that can be paid now: a session open, its window not over. Without one there is
+  // nothing to pay, and the next checkout cancels it (#726).
+  if (!order.stripe_checkout_session_id && !order.checkout_url) return undefined;
+  if (order.checkout_expires_at && new Date(order.checkout_expires_at).getTime() <= Date.now()) return undefined;
+  const result = await query<Pick<LetterDraft, 'arrive_by' | 'mail_on'>>(
+    'SELECT arrive_by, mail_on FROM letter_drafts WHERE draft_id = $1',
+    [order.draft_id]
+  );
+  const row = result.rows[0];
+  if (!row) return undefined;
+  let schedule: DraftSchedule | null;
+  try {
+    schedule = draftScheduleOf(row);
+  } catch {
+    return undefined;
+  }
+  return schedule && schedule.mailOn < earliestMailOn(new Date()) ? schedule : undefined;
+}
+
+/**
  * What a Pay & Send order whose mail date passed before it was paid adds to
  * its status (#700), while it is being prepared or once it is with the
  * printer. Nothing once it is refunded or held: its mail no longer goes.
@@ -3981,6 +4067,11 @@ export async function getPurchaseStatus(
   const pack = await readPackPurchaseFigures(order);
   const missed = await readMissedSchedule(order);
   const missedSentence = missed ? missedScheduleSentence(purchaseStatus, missed, new Date()) : undefined;
+  // Unpaid and its date passed (#726): said before payment, to the model and to the card.
+  const pendingMissed = await readPendingMissedSchedule(order);
+  const pendingMissedSentence = pendingMissed
+    ? `Its day to go to the printer, ${describeDate(pendingMissed.mailOn, new Date())}, has passed: if it is paid now, it goes to the printer as soon as it can and may arrive after ${describeDate(pendingMissed.arriveBy, new Date())}. Tell the person before they pay; to choose a new date instead, leave it unpaid until it closes, then set the arrival date again.`
+    : undefined;
   return {
     orderId: order.order_id,
     purchaseStatus,
@@ -4001,9 +4092,10 @@ export async function getPurchaseStatus(
     // Letter packs only; every field absent (never null) on Pay & Send orders.
     ...(pack ?? {}),
     updatedAt: new Date(order.updated_at).toISOString(),
+    ...(pendingMissed ? { scheduleMissed: pendingMissed } : {}),
     message: pack
       ? packPurchaseMessage(purchaseStatus, order, pack)
-      : [purchaseMessage(purchaseStatus), missedSentence].filter(Boolean).join(' ')
+      : [purchaseMessage(purchaseStatus), missedSentence, pendingMissedSentence].filter(Boolean).join(' ')
   };
 }
 
