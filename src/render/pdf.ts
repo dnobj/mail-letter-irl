@@ -57,6 +57,14 @@ export function rendererVersionFor(stationery?: Stationery | null, signed = fals
 }
 
 /**
+ * The date every PDF this renderer draws carries, so the same layout gives the
+ * same bytes within one build (#697). Not across builds: the compressed
+ * streams depend on the bundled pdfkit and zlib, so a stored PDF is checked
+ * against the hash recorded when it was stored, never a re-render against it.
+ */
+export const PDF_CREATION_DATE = new Date('2026-01-01T00:00:00.000Z');
+
+/**
  * Draws a layout as a PDF: images as given, and every glyph filled as its
  * outline at the position glyphs.ts gives it, the same positions the SVG
  * preview uses. No text is handed to pdfkit, which would re-shape it word by
@@ -70,7 +78,9 @@ export async function renderPdf(layout: Layout, version: string = RENDERER_VERSI
     size: [layout.width, layout.height],
     margin: 0,
     autoFirstPage: false,
-    info: { Title: layout.title ?? 'Letter', Creator: 'Letter IRL', Producer: `Letter IRL renderer ${version}` }
+    // A fixed date: pdfkit would stamp the time, and derive the file's ID from it, so two renders of
+    // one layout would differ. Held mail's stored PDF is checked by its hash (#697).
+    info: { Title: layout.title ?? 'Letter', Creator: 'Letter IRL', Producer: `Letter IRL renderer ${version}`, CreationDate: PDF_CREATION_DATE }
   });
   const chunks: Buffer[] = [];
   const done = new Promise<Buffer>((resolve, reject) => {

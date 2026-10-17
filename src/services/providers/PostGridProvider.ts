@@ -33,45 +33,16 @@ import { mailServiceOf } from '../../config/products.js';
 import {
   buildGiftLetterPage,
   buildGiftPostcardBlock,
-  giftLetterPageCopy,
-  giftPostcardStripCopy,
   type CardFragment
 } from '../giftCardRenderer.js';
 import { giftQrFormat } from '../../config/giftLetters.js';
+import { drawPrintPdf, letterPages, letterPrintLayout, postcardPrintLayout, RenderRefusal } from '../printDocument.js';
 import {
-  layoutGiftPage,
-  layoutLetter,
-  layoutPostcard,
-  MAX_LETTER_PAGES,
   POSTCARD_FRONT_RENDERER_VERSION,
-  postcardFrontOf,
-  PostcardFrontOverflow,
   PRINTABLE_RENDERER_VERSIONS,
-  readImageDataUri,
-  renderPdf,
-  RENDERER_VERSION,
-  rendererVersionFor,
   STATIONERY_RENDERER_VERSION,
   SIGNATURE_RENDERER_VERSION,
-  stationeryOf,
-  type PostcardFront,
-  type Stationery
 } from '../../render/index.js';
-
-/**
- * Our own refusal to draw a letter or postcard, before anything is sent to
- * PostGrid (#534). It is held like every failure that is not an explicit provider
- * rejection (a retry after an ambiguous first attempt must never refund mail
- * that may have printed), but it is logged with its reason and held with the
- * class `render_refused`, so an operator can see that no request left and
- * resolve it with a retry once a build that can print it is deployed.
- */
-class RenderRefusal extends Error {
-  constructor(readonly reason: 'unknown_version' | 'image' | 'overflow' | 'size' | 'render' | 'pages', message: string) {
-    super(message);
-    this.name = 'RenderRefusal';
-  }
-}
 
 /**
  * A stored postcard size as an operator should read it (#596 review round 2):
@@ -80,25 +51,6 @@ class RenderRefusal extends Error {
  */
 function storedSize(size: unknown): string {
   return (typeof size === 'string' ? size : JSON.stringify(size) ?? String(size)).slice(0, 20);
-}
-
-/**
- * The pages a letter prints on (#586): one unless its content says more. Only
- * our renderer lays out more than one, and never beside a gift card, which
- * takes a sheet of its own. Anything else is refused before any request.
- */
-function letterPages(params: LetterParams, usePdf: boolean): number {
-  const pages = params.pages ?? 1;
-  if (!Number.isInteger(pages) || pages < 1 || pages > MAX_LETTER_PAGES) {
-    throw new RenderRefusal('pages', `The letter's page count is not a whole number from 1 to ${MAX_LETTER_PAGES}.`);
-  }
-  if (pages > 1 && !usePdf) {
-    throw new RenderRefusal('pages', 'A letter of more than one page prints only from our renderer, not the legacy HTML.');
-  }
-  if (pages > 1 && params.giftCard) {
-    throw new RenderRefusal('pages', 'A gift letter prints on one page, its card on a sheet of its own.');
-  }
-  return pages;
 }
 
 /**
@@ -963,77 +915,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
    * failure here happens before any request, and is a RenderRefusal.
    */
   private async renderForPrint(params: LetterParams, pages: number): Promise<Buffer> {
-    const layoutType = params.layoutType ?? 'text_only';
-    const imageData = layoutType === 'header_image'
-      ? params.headerImageData
-      : layoutType === 'inline_image' ? params.inlineImageData : undefined;
-    const reason = (error: unknown) => (error instanceof Error ? error.message : String(error));
-    let image;
-    try {
-      image = imageData ? readImageDataUri(imageData) : undefined;
-    } catch (error) {
-      throw new RenderRefusal('image', `The letter's image could not be read: ${reason(error)}`);
-    }
-    // A letter drawn in stationery (#563) prints in it: pdf-2, or pdf-4 with a
-    // theme beside its signature (#608). One whose stored theme this build
-    // cannot read is refused, never printed as Classic.
-    let stationery: Stationery | undefined;
-    const signed = params.rendererVersion === SIGNATURE_RENDERER_VERSION;
-    if (params.rendererVersion === STATIONERY_RENDERER_VERSION || (signed && params.stationery != null)) {
-      const stored = stationeryOf(params.stationery);
-      if (!stored) {
-        throw new RenderRefusal('render', 'The letter was drawn in stationery this build cannot read.');
-      }
-      stationery = stored;
-    }
-    // A letter drawn with a signature (#608) prints with it, under the sign-off's
-    // first line; one that no longer has it is held, never printed unsigned.
-    let signature: { image: ReturnType<typeof readImageDataUri>; closingParagraph: number } | undefined;
-    if (signed) {
-      if (!params.signature) {
-        throw new RenderRefusal('render', 'The letter was drawn with a signature it no longer has.');
-      }
-      try {
-        signature = { image: readImageDataUri(params.signature.image), closingParagraph: params.signature.closingParagraph };
-      } catch (error) {
-        throw new RenderRefusal('image', `The letter's signature could not be read: ${reason(error)}`);
-      }
-    }
-    let layout;
-    try {
-      // Laid out as a preview lays it out, on up to the most pages (#586), so
-      // the letter prints as it was drawn by construction: a page count of its
-      // own would treat a last line of invisible characters otherwise (#589
-      // review round 3). A letter that fits one page is laid out as ever.
-      layout = layoutLetter({ text: params.message, layoutType, image, stationery, signature }, { maxPages: MAX_LETTER_PAGES });
-    } catch (error) {
-      throw new RenderRefusal('render', `The letter could not be laid out: ${reason(error)}`);
-    }
-    if (layout.overflowLines > 0) {
-      throw new RenderRefusal('overflow', `The letter runs ${layout.overflowLines} line(s) past ${MAX_LETTER_PAGES} pages.`);
-    }
-    // On exactly the pages it was previewed and priced on (#586): one that now
-    // lays out on more would print pages nobody paid for, and on fewer was sold
-    // for pages it would not fill. Its layout changed since the preview, as an
-    // overflow's does, so it is held as one: the reason alone tells an operator
-    // to fix the renderer and retry (#589 review round 1), where `pages` means a
-    // count no writer stores.
-    if (layout.pages.length !== pages) {
-      throw new RenderRefusal('overflow', `The letter lays out on ${layout.pages.length} page(s), not the ${pages} it was previewed on.`);
-    }
-    // A gift send's card, with the code the send minted, is the second page.
-    if (params.giftCard) {
-      try {
-        layout.pages.push(layoutGiftPage(giftLetterPageCopy(params.giftCard, params.senderName || '')));
-      } catch (error) {
-        throw new RenderRefusal('render', `The gift card could not be laid out: ${reason(error)}`);
-      }
-    }
-    try {
-      return await renderPdf(layout, rendererVersionFor(stationery, signature !== undefined));
-    } catch (error) {
-      throw new RenderRefusal('render', `The letter could not be drawn: ${reason(error)}`);
-    }
+    return drawPrintPdf(letterPrintLayout(params, pages), 'letter');
   }
 
   /**
@@ -1663,48 +1545,7 @@ export class PostGridProvider implements LetterFulfillmentProvider {
    * before any request, and is a RenderRefusal.
    */
   private async renderPostcardForPrint(params: PostcardParams, size: PostcardSize): Promise<Buffer> {
-    const reason = (error: unknown) => (error instanceof Error ? error.message : String(error));
-    // A gift card prints only on a 6x9 (#579): refused before it is drawn.
-    if (params.giftCard && size !== '6x9') {
-      throw new RenderRefusal('size', `A gift postcard is 6x9, not ${size}.`);
-    }
-    // A front other than full bleed (#594) prints as it was drawn. One whose
-    // stored front this build cannot read is refused, never printed full bleed.
-    let front: PostcardFront | undefined;
-    if (params.rendererVersion === POSTCARD_FRONT_RENDERER_VERSION) {
-      const stored = postcardFrontOf(params.front);
-      if (!stored) {
-        throw new RenderRefusal('render', 'The postcard was drawn with a front this build cannot read.');
-      }
-      front = stored;
-    }
-    let image;
-    try {
-      image = readImageDataUri(params.frontImageBase64);
-    } catch (error) {
-      throw new RenderRefusal('image', `The postcard's image could not be read: ${reason(error)}`);
-    }
-    let layout;
-    try {
-      // A gift send's card, with the code the send minted. A strip its words
-      // overflow (GiftStripOverflow) is held here.
-      const strip = params.giftCard ? giftPostcardStripCopy(params.giftCard, params.senderName || '') : undefined;
-      layout = layoutPostcard({ message: params.backMessage, image, strip, size, ...front });
-    } catch (error) {
-      // A caption or place that no longer fits was measured to fit when it
-      // was previewed, under the same version: the layout changed, as an
-      // overflow of the message means.
-      if (error instanceof PostcardFrontOverflow) throw new RenderRefusal('overflow', error.message);
-      throw new RenderRefusal('render', `The postcard could not be laid out: ${reason(error)}`);
-    }
-    if (layout.overflowLines > 0) {
-      throw new RenderRefusal('overflow', `The postcard's message runs ${layout.overflowLines} line(s) past its room on the back.`);
-    }
-    try {
-      return await renderPdf(layout, front ? POSTCARD_FRONT_RENDERER_VERSION : RENDERER_VERSION);
-    } catch (error) {
-      throw new RenderRefusal('render', `The postcard could not be drawn: ${reason(error)}`);
-    }
+    return drawPrintPdf(postcardPrintLayout(params, size), 'postcard');
   }
 
   /**

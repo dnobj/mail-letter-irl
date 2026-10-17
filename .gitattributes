@@ -5,3 +5,6 @@ widgets/*.html text eol=lf
 *.sh text eol=lf
 # Vitest compares a file snapshot as written, so it keeps vitest's own LF on every checkout.
 tests/**/__snapshots__/*.json text eol=lf
+
+# The renderer's fonts are pinned by their hash (#697): never converted on checkout.
+assets/fonts/*.ttf binary

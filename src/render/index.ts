@@ -13,7 +13,7 @@ export {
 } from './stationery.js';
 export type { Face, Stationery, StationeryDesign, StationeryTheme, ThemeStationery } from './stationery.js';
 export {
-  POSTCARD_FRONT_RENDERER_VERSION, PRINTABLE_RENDERER_VERSIONS, renderPdf, RENDERER_VERSION, rendererVersionFor, SIGNATURE_RENDERER_VERSION,
+  PDF_CREATION_DATE, POSTCARD_FRONT_RENDERER_VERSION, PRINTABLE_RENDERER_VERSIONS, renderPdf, RENDERER_VERSION, rendererVersionFor, SIGNATURE_RENDERER_VERSION,
   STATIONERY_RENDERER_VERSION
 } from './pdf.js';
 export { GiftPageOverflow, layoutGiftPage } from './giftPage.js';
@@ -24,6 +24,7 @@ export {
 export { CONTINUATION_TOP, MAX_LETTER_PAGES, POSTCARD_GEOMETRY, POSTCARD_STAMP, SIGNATURE_LINES } from './geometry.js';
 export type { PostcardGeometry, PostcardLayoutName, PostcardSizeName, StampGeometry } from './geometry.js';
 export type { GiftStripCopy, PostcardContent, PostcardFront } from './postcard.js';
+export { fingerprintScheme, isLayoutFingerprint, LAYOUT_ENGINE_VERSION, LAYOUT_FINGERPRINT_SCHEME, layoutFingerprint } from './fingerprint.js';
 export { renderPreviewSvg } from './preview.js';
 export type { PreviewOptions } from './preview.js';
 export { readImage, readImageDataUri } from './images.js';
