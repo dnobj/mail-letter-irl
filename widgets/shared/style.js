@@ -666,16 +666,19 @@
       var current = words.current;
       var body = element("studio-words-body");
       var signOff = element("studio-words-signoff");
-      if (words.base && sameWords(words.base, current)) return;
-      var kept = typed() && (body.value !== current.bodyText || signOff.value !== current.signOff);
+      var base = words.base;
+      if (base && sameWords(base, current)) return;
+      // Box by box: one not typed in (it holds the words it was filled from) takes the draft's words now; one typed in
+      // keeps what was typed, and the card says so, unless it is what the draft has now.
+      var bodyKept = Boolean(base) && body.value !== base.bodyText && body.value !== current.bodyText;
+      var signOffKept = Boolean(base) && signOff.value !== base.signOff && signOff.value !== current.signOff;
+      if (!bodyKept) body.value = current.bodyText;
+      if (!signOffKept) signOff.value = current.signOff;
       words.base = current;
-      if (kept) {
+      if (bodyKept || signOffKept) {
         words.message = KEPT;
         words.error = false;
-        return;
       }
-      body.value = current.bodyText;
-      signOff.value = current.signOff;
     }
 
     // Whether the boxes held other words when the card last drew them: the
@@ -727,8 +730,9 @@
       }
     }
 
-    // Focus goes back to the letter's box when the buttons it was on go.
+    // Focus goes back to the letter's box when the buttons it was on go, and only then: a refused Update keeps them.
     function focusBody() {
+      if (typed() || words.updating) return;
       var body = element("studio-words-body");
       var active = typeof document !== "undefined" ? document.activeElement : null;
       var actions = element("studio-words-actions");
@@ -955,8 +959,16 @@
           state.draftId === draftId &&
           options.row.style.display !== "none" &&
           typeof host.callTool === "function";
+        var was = wordsTyped;
         if (words.editable) fillWords();
         drawWords();
+        // The draft's words reaching what was typed (the chat made the same change) ends the wait for them: the card
+        // is told, once its own drawing is over, as it holds Send by them.
+        if (wordsTyped !== was) {
+          Promise.resolve().then(function () {
+            options.onBusy();
+          });
+        }
       },
       // The words this card set on the draft (#586), or null for the preview's.
       words: function (draftId) {

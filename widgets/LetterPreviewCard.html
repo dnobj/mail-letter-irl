@@ -642,9 +642,10 @@
         },
         readableError,
         resultText,
-        // Not while this card sends the letter or starts paying for it.
+        // Not while this card sends the letter or starts paying for it, nor while a send refused for a change since
+        // asks for the draft as it is now (#695): its answer is taken whatever the card has set.
         idle() {
-          return !sendInProgress && !checkoutInProgress;
+          return !sendInProgress && !checkoutInProgress && changed === null;
         },
         onSet() {
           draftActedOn = true;
@@ -1356,11 +1357,16 @@
       // force (#695): asked again after a send refused for a change since, the answer is taken whatever this card
       // has set, and its version with it. "catchUp": asked again to hear what the chat changed (catchUp), the answer is
       // taken the same way, unless the card started a change of its own since it asked, or is making one.
+      // Asks are numbered: a ready answer from an older ask than the last one taken is older than what the card shows,
+      // as a host may answer them out of order (MCP Apps hosts do not queue them).
+      let draftAsks = 0;
+      let draftAskTaken = 0;
       function askDraftState(draftId, force) {
         if (typeof host.callTool !== "function") return;
         if (typeof draftId !== "string" || !draftId || (!force && draftStateAsked.has(draftId))) return;
         draftStateAsked.add(draftId);
         const changesAsked = draftChanges;
+        const ask = ++draftAsks;
         host.callTool("get_draft_status", { draftId }).then(
           (result) => {
             const answer = toolData(result);
@@ -1385,6 +1391,9 @@
             // now: this card may have changed them since that preview (#535).
             if (answer.status === "ready") {
               statusReadyFor = draftId;
+              // Ready all the same; but an answer older than one taken, or than a change the card started since it
+              // asked, is not drawn (a refused send's, force, is asked to be taken: it governs).
+              if (force !== true && (ask < draftAskTaken || draftChanges !== changesAsked)) return;
               // And the style it is in now, with its page (#563): this card,
               // or the chat, may have restyled it since that preview.
               // How full its pages are (#592 review round 1): the preview's own
@@ -1397,13 +1406,16 @@
               // refuses an answer for another draft, while the card sets a style, and for a preview that named no stationery.
               const styleTaken = styleRow.adopt(draftId, answer.stationery, statusPage, answer, statusFit, force === true || force === "catchUp");
               // And what they mean for delivery, for the Delivery line.
-              const datesTaken = picker.adopt(draftId, answer.schedule, force === true);
+              // A catch-up takes the dates too: one the card set before it asked is in the answer, and one set after
+              // drops the answer (draftChanges), so the version it shows is the version of all it shows.
+              const datesTaken = picker.adopt(draftId, answer.schedule, force === true || force === "catchUp");
               if (datesTaken && typeof answer.deliveryEstimate === "string" && answer.deliveryEstimate) {
                 arrivalChange = { draftId, schedule: picker.schedule(), deliveryEstimate: answer.deliveryEstimate };
               }
               // Its version, once the card shows all it says (#695): its page, drawn from this answer, and its dates.
               const drawnWhole =
                 styleTaken && typeof statusPage === "string" && statusPage !== "" && (datesTaken || !picker.follows(draftId));
+              if (styleTaken) draftAskTaken = Math.max(draftAskTaken, ask);
               if (drawnWhole) showVersion(draftId, answer.contentVersion);
               if (drawnWhole && changed === null && changedNotice) {
                 changedNotice = false;
@@ -1459,7 +1471,10 @@
       document.addEventListener("visibilitychange", () => {
         if (!document.hidden) catchUp();
       });
+      // Focus moving within the Words tab (from a box to its buttons, or the card's own move after an Update) is not
+      // a coming back.
       document.addEventListener("focusin", (event) => {
+        if (event.relatedTarget?.closest?.("#studio-panel-words")) return;
         if (event.target?.closest?.("#studio-panel-words, #studio-tab-words")) catchUp();
       });
 
@@ -2779,7 +2794,7 @@
           scheduleMissedShown = false;
           document.getElementById("checkout-note").style.display = "none";
         }
-        // A checkout cancelled, or left until it expired, cancels its draft: nothing can be paid on this card now, so
+        // A checkout cancelled, or left until it expired, cancels its order: nothing can be paid on this card now, so
         // its checkout link, the button that opened it, Check status and the note about paying go. The pill says what
         // happened, and a new preview is the way to send it.
         if (state === "cancelled") {

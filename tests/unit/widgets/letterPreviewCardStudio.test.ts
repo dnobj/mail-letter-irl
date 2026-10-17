@@ -1076,6 +1076,9 @@ describe("the Words tab's editor (#586)", () => {
     // Nothing to update or put back yet, and nothing held.
     expect(card.byId('studio-words-actions').hidden).toBe(true);
     expect((card.byId('send-button') as HTMLButtonElement).disabled).toBe(false);
+    // A press a host still delivers to the hidden Update sends nothing: there is nothing to update.
+    await card.click(card.byId('studio-words-update'));
+    expect(card.lastRequest('tools/call', 'set_letter_words')).toBeUndefined();
 
     await type(card, 'studio-words-body', `${ARGS.bodyText} And the roses.`);
     expect(card.byId('studio-words-actions').hidden).toBe(false);
@@ -1093,6 +1096,9 @@ describe("the Words tab's editor (#586)", () => {
     expect(text(card, 'studio-words-count')).toBe('About 97 characters left on this page.');
     // A line ended takes the whole line, however short: two more run past the page.
     await type(card, 'studio-words-body', `${lines}\nA\nB`);
+    expect(text(card, 'studio-words-count')).toBe('About 79 characters past this page: Update the page to see how it runs on.');
+    // A blank line takes a line too.
+    await type(card, 'studio-words-body', `${lines}\n\nA`);
     expect(text(card, 'studio-words-count')).toBe('About 79 characters past this page: Update the page to see how it runs on.');
     // The same characters as prose take thirteen lines, not twenty-four: room for about eleven more lines.
     const prose = 'x'.repeat(1239);
@@ -1122,7 +1128,10 @@ describe("the Words tab's editor (#586)", () => {
     expect((card.byId('studio-words-body') as HTMLTextAreaElement).readOnly).toBe(true);
     expect(card.document.querySelector('#style-row [data-theme="botanical"]')!.getAttribute('aria-disabled')).toBe('true');
 
+    (card.byId('studio-words-update') as HTMLButtonElement).focus();
     await card.answer(ranOn, 'set_letter_words');
+    // Focus leaves the Update button, which goes, for the letter's box.
+    expect(card.document.activeElement).toBe(card.byId('studio-words-body'));
     // The boxes stay open with the words set, and there is nothing to update now.
     expect(card.byId('studio-words-edit').hidden).toBe(false);
     expect((card.byId('studio-words-body') as HTMLTextAreaElement).readOnly).toBe(false);
@@ -1167,6 +1176,9 @@ describe("the Words tab's editor (#586)", () => {
     const card = mount();
     await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
     await card.click(card.tab('words'));
+    // The person came back a moment ago: the card asked then, and still asks at once after the refusal.
+    await comeBack(card);
+    await card.answer(status({ bodyText: ARGS.bodyText, signOff: ARGS.signOff, wordsVersion: VERSION }), 'get_draft_status');
     await type(card, 'studio-words-body', 'Dear Sam,\n\nMy own change.');
     const asked = card.requests('tools/call', 'get_draft_status').length;
     await card.click(card.byId('studio-words-update'));
@@ -1313,6 +1325,142 @@ describe("the Words tab's editor (#586)", () => {
     expect(box(card, 'studio-words-body')).toBe('Dear Sam,\n\nLonger now.');
     expect(card.document.querySelectorAll('#mockup-container svg')).toHaveLength(2);
     expect(text(card, 'studio-cost')).toBe('Pay & Send USD 5.99');
+  });
+
+  it('takes a catch-up over words the card set itself before it asked: the chat changed them since', async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
+    await card.answer(status({ bodyText: ARGS.bodyText, signOff: ARGS.signOff, wordsVersion: VERSION }), 'get_draft_status');
+    await card.click(card.tab('words'));
+    await type(card, 'studio-words-body', 'Dear Sam,\n\nLonger now.');
+    await card.click(card.byId('studio-words-update'));
+    await card.answer(ranOn, 'set_letter_words');
+    await comeBack(card);
+    await card.answer(status(CHAT_WORDS), 'get_draft_status');
+    expect(box(card, 'studio-words-body')).toBe('Dear Sam,\n\nThe chat wrote this.');
+    expect(card.document.querySelectorAll('#mockup-container svg')).toHaveLength(1);
+  });
+
+  it('draws no status answer older than one it took, as a host may answer them out of order (review round 1)', async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
+    // The ask made on opening goes unanswered; the person comes back, and that ask is answered first.
+    const opening = card.lastRequest('tools/call', 'get_draft_status')!;
+    await card.click(card.tab('words'));
+    await comeBack(card);
+    await card.answer(status(CHAT_WORDS, TWO_PAGES), 'get_draft_status');
+    expect(box(card, 'studio-words-body')).toBe('Dear Sam,\n\nThe chat wrote this.');
+    // Then the opening ask's answer, with the words before the chat's.
+    await card.answerTo(opening, status({ bodyText: ARGS.bodyText, signOff: ARGS.signOff, wordsVersion: VERSION }));
+    expect(box(card, 'studio-words-body')).toBe('Dear Sam,\n\nThe chat wrote this.');
+    expect(card.document.querySelectorAll('#mockup-container svg')).toHaveLength(2);
+  });
+
+  it('takes the dates with a catch-up, so a card that set a date sends the version of all it shows (review round 1)', async () => {
+    const card = mount();
+    const DATED = { arriveBy: '2026-10-20', mailOn: '2026-10-09' };
+    await card.show(output({ ...CLASSIC, contentVersion: 'v_preview', arrivalWindow: WINDOW, schedule: DATED }), { ...ON, pageFit: FIT });
+    await card.answer(status({ bodyText: ARGS.bodyText, signOff: ARGS.signOff, wordsVersion: VERSION, contentVersion: 'v_preview', schedule: DATED }), 'get_draft_status');
+    await card.click(card.byId('arrives-asap'));
+    await card.answer(
+      { result: { content: [], structuredContent: { draftId: 'draft_0001', schedule: null, deliveryEstimate: 'Mailed in 1-2 business days', contentVersion: 'v_date', contentVersionBefore: 'v_preview', message: 'Cleared.' } } },
+      'set_arrival_date'
+    );
+    // The chat changes the words; the person comes back.
+    await comeBack(card);
+    await card.answer(status({ ...CHAT_WORDS, schedule: null, contentVersion: 'v_chat' }, TWO_PAGES), 'get_draft_status');
+    expect(card.document.querySelectorAll('#mockup-container svg')).toHaveLength(2);
+    await card.click(card.byId('send-button'));
+    expect(card.lastRequest('tools/call', 'send_letter')!.params.arguments.contentVersion).toBe('v_chat');
+  });
+
+  it('drops a catch-up asked before the card set a date', async () => {
+    const card = mount();
+    const DATED = { arriveBy: '2026-10-20', mailOn: '2026-10-09' };
+    await card.show(output({ ...CLASSIC, arrivalWindow: WINDOW, schedule: DATED }), { ...ON, pageFit: FIT });
+    await card.answer(status({ bodyText: ARGS.bodyText, signOff: ARGS.signOff, wordsVersion: VERSION, schedule: DATED }), 'get_draft_status');
+    await comeBack(card);
+    const catchUp = card.lastRequest('tools/call', 'get_draft_status')!;
+    await card.click(card.byId('arrives-asap'));
+    await card.answer(
+      { result: { content: [], structuredContent: { draftId: 'draft_0001', schedule: null, deliveryEstimate: 'Mailed in 1-2 business days', message: 'Cleared.' } } },
+      'set_arrival_date'
+    );
+    await card.answerTo(catchUp, status({ ...CHAT_WORDS, schedule: DATED }, TWO_PAGES));
+    expect(card.document.querySelectorAll('#mockup-container svg')).toHaveLength(1);
+    expect(text(card, 'studio-summary')).toContain('mailed in 1-2 business days');
+  });
+
+  it("keeps each box on its own: one typed in keeps what was typed, one not typed in takes the chat's (review round 1)", async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
+    await card.answer(status({ bodyText: ARGS.bodyText, signOff: ARGS.signOff, wordsVersion: VERSION }), 'get_draft_status');
+    await card.click(card.tab('words'));
+    await type(card, 'studio-words-body', 'Dear Sam,\n\nMine.');
+    await comeBack(card);
+    // The chat changed only the sign-off.
+    await card.answer(status({ bodyText: ARGS.bodyText, signOff: 'Pat', wordsVersion: 'chat00000000' }), 'get_draft_status');
+    expect(box(card, 'studio-words-body')).toBe('Dear Sam,\n\nMine.');
+    expect(box(card, 'studio-words-signoff')).toBe('Pat');
+    expect(text(card, 'studio-words-note')).toBe(KEPT);
+  });
+
+  it("says nothing of keeping words typed that are the chat's own", async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
+    await card.answer(status({ bodyText: ARGS.bodyText, signOff: ARGS.signOff, wordsVersion: VERSION }), 'get_draft_status');
+    await card.click(card.tab('words'));
+    await type(card, 'studio-words-body', CHAT_WORDS.bodyText);
+    await type(card, 'studio-words-signoff', CHAT_WORDS.signOff);
+    await comeBack(card);
+    await card.answer(status(CHAT_WORDS), 'get_draft_status');
+    expect(card.byId('studio-words-note').hidden).toBe(true);
+    expect(card.byId('studio-words-actions').hidden).toBe(true);
+    expect((card.byId('send-button') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('leaves focus on Update when it is refused, and asks nothing when focus moves within the Words tab (review round 1)', async () => {
+    const card = mount();
+    await card.show(output(CLASSIC), { ...ON, pageFit: FIT });
+    await card.click(card.tab('words'));
+    await type(card, 'studio-words-body', 'Dear Sam,\n\nMuch longer.');
+    (card.byId('studio-words-body') as HTMLTextAreaElement).focus();
+    await flush();
+    const asked = card.requests('tools/call', 'get_draft_status').length;
+    (card.byId('studio-words-update') as HTMLButtonElement).focus();
+    await flush();
+    await card.click(card.byId('studio-words-update'));
+    await card.answer(
+      { result: { isError: true, content: [{ type: 'text', text: 'This preview has expired. Make a new preview with the words.' }] } },
+      'set_letter_words'
+    );
+    expect(card.document.activeElement).toBe(card.byId('studio-words-update'));
+    expect(card.requests('tools/call', 'get_draft_status')).toHaveLength(asked);
+  });
+
+  it('holds Update while a send refused for a change since asks for the draft as it is now (#695, review round 1)', async () => {
+    const card = mount();
+    await card.show(output({ ...CLASSIC, contentVersion: 'v_preview' }), { ...ON, pageFit: FIT });
+    await card.answer(status({ bodyText: ARGS.bodyText, signOff: ARGS.signOff, wordsVersion: VERSION, contentVersion: 'v_preview' }), 'get_draft_status');
+    await card.click(card.byId('send-button'));
+    await card.answer(
+      {
+        result: {
+          isError: true,
+          content: [{ type: 'text', text: 'This letter changed after it was shown, so nothing was sent. Show the person the letter as it is now (its preview card, or a new preview), and send it once they have seen it.' }]
+        }
+      },
+      'send_letter'
+    );
+    const reAsk = card.lastRequest('tools/call', 'get_draft_status')!;
+    await card.click(card.tab('words'));
+    await type(card, 'studio-words-body', 'Dear Sam,\n\nMine.');
+    await card.click(card.byId('studio-words-update'));
+    expect(card.lastRequest('tools/call', 'set_letter_words')).toBeUndefined();
+    // Once the draft as it is now is drawn, the words can be set.
+    await card.answerTo(reAsk, status({ ...CHAT_WORDS, contentVersion: 'v_chat' }, TWO_PAGES));
+    await card.click(card.byId('studio-words-update'));
+    expect(card.lastRequest('tools/call', 'set_letter_words')!.params.arguments).toMatchObject({ bodyText: 'Dear Sam,\n\nMine.', wordsVersion: 'chat00000000' });
   });
 
   it('asks nothing to catch up once the letter is sent', async () => {
