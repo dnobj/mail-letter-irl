@@ -107,7 +107,8 @@
    *
    * options: host, row, input, asap, note, readableError(error),
    *   resultText(result), onSet() (a date is being set on the draft),
-   *   onChange({ draftId, schedule, deliveryEstimate }), onBusy()
+   *   onChange({ draftId, schedule, deliveryEstimate }), onBusy(), and idle(),
+   *   where the card gives one (whether it may change the draft now)
    */
   function createPicker(options) {
     var host = options.host;

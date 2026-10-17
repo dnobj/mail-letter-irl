@@ -1397,8 +1397,9 @@
             if (answer.status === "ready") {
               statusReadyFor = draftId;
               // Ready all the same; but no answer older than one taken is drawn, however it was asked: the one taken is
-              // the draft as it is later. Dropped, it ends no wait: a refused send's ask is the latest there is, since
-              // nothing asks while it waits (cardIdle, catchUp), and its own answer ends it. Nor is an answer drawn that
+              // the draft as it is later. Dropped, it ends no wait: nothing asks while a refused send waits (cardIdle,
+              // catchUp), so no answer newer than its ask can drop it, and its own answer ends the wait (an edit's ask made
+              // before the refusal may answer first and end it early; the refused send's own then draws again). Nor is an answer drawn that
               // was asked before a change the card started since, unless it was asked to be taken whatever the card has
               // set (force: a refused send's, or an edit's made to another version).
               if (ask < draftAskTaken || (force !== true && draftChanges !== changesAsked)) return;

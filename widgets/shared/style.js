@@ -64,7 +64,8 @@
    * options: host, row, buttons (one per theme, each with data-theme), note,
    *   readableError(error), resultText(result), idle() (whether the card may
    *   change the draft now: not while it sends or starts a payment, which it
-   *   also says with hold()), onSet()
+   *   also says with hold(), nor while a send refused for a change since asks
+   *   for the draft as it is now), onSet()
    *   (a style is being set on the draft), onChange({ draftId, stationery }),
    *   onBusy(), and wordsElement(id), which finds the Words tab's editor
    *   (#586) once the studio has drawn it; and signatureRow and
