@@ -1996,7 +1996,7 @@ The studio rearranges both preview cards. The letter card becomes a header, the 
 - For step 7: `LETTER_IRL_ROOM_TO_WRITE_ENABLED` on the maintenance service too, and `STRIPE_JIT_LETTER_TWO_PAGES_PRICE_ID` and `STRIPE_JIT_LETTER_THREE_PAGES_PRICE_ID` set to the Stripe test prices (as in PAGES-01).
 - `LETTER_IRL_GIFT_LETTERS_ENABLED` and a gift letter on the account for step 9 (without one, `sendAsGift` is refused).
 
-Refresh the ChatGPT (DEV) and Claude connectors after the deploy (widgets v88). The test account needs a saved return address and at least one letter in its balance (a test-mode pack or an admin grant). PostGrid is in test mode on development.
+Refresh the ChatGPT (DEV) and Claude connectors after the deploy (widgets v88). The test account needs a saved return address and at least one letter in its balance (a test-mode pack or an admin grant), and step 10 a photo by link for the postcard. PostGrid is in test mode on development.
 
 **Steps:**
 
@@ -2006,7 +2006,7 @@ Refresh the ChatGPT (DEV) and Claude connectors after the deploy (widgets v88). 
    - the footer shows the cost "1 letter", a summary such as "Classic · black and white · mailed in 1-2 business days; usually arrives in 1-2 weeks", and **Send Letter**.
 
    Narrow the frame below 560 px: verify the tabs stack below the page.
-2. [ ] On **Style**, verify the row is labelled "Stationery" (not "Style"), with **Classic**, **Monogram**, **Botanical**, **Celebration**, **Typewriter** and **Handwritten**, and Classic pressed. Verify the Layout row reads "Text Only". If a signature is saved, verify the **Signature** switch reads On or Off. Press **Botanical**. Verify:
+2. [ ] On **Style**, verify the row is labelled "Stationery" (shown in capitals, STATIONERY; not "Style"), with **Classic**, **Monogram**, **Botanical**, **Celebration**, **Typewriter** and **Handwritten**, and Classic pressed. Verify the Layout row reads "Text Only". If a signature is saved, verify the **Signature** switch reads On or Off. Press **Botanical**. Verify:
    - the call is `set_stationery`;
    - the page is drawn again with the sprig and the date line;
    - Botanical is pressed and the summary starts "Botanical".
@@ -2052,7 +2052,7 @@ Refresh the ChatGPT (DEV) and Claude connectors after the deploy (widgets v88). 
 
 **Preconditions:** Development, with `LETTER_IRL_STATIONERY_ENABLED` on (off unless set) and `LETTER_IRL_PRINT_RENDERER=pdf` in the API: only our renderer draws a theme. `LETTER_IRL_STUDIO_CARD_ENABLED` is optional (the Style row shows either way). Refresh the ChatGPT (DEV) and Claude connectors so `set_stationery` is listed.
 
-The account needs a saved return address whose name has initials (such as "Pat Example"), and letters in its balance for the sends. **Use an account with no saved signature, or `LETTER_IRL_SIGNATURES_ENABLED` off:** a signed letter records `pdf-4`, not `pdf-2`. `LETTER_IRL_GIFT_LETTERS_ENABLED` and a gift letter are needed for step 10, and `LETTER_IRL_SEND_CONFIRMATION_ENABLED` (on in every deployed environment) for step 8's `request_send`. PostGrid is in test mode on development.
+The account needs a saved return address whose name has initials (such as "Pat Example"), letters in its balance for the sends, and a photo by link for step 5's postcard draft. **Use an account with no saved signature, or `LETTER_IRL_SIGNATURES_ENABLED` off:** a signed letter records `pdf-4`, not `pdf-2`. `LETTER_IRL_GIFT_LETTERS_ENABLED` and a gift letter are needed for step 10, and `LETTER_IRL_SEND_CONFIRMATION_ENABLED` (on in every deployed environment) for step 8's `request_send`. PostGrid is in test mode on development.
 
 **Steps:**
 
@@ -2083,7 +2083,7 @@ The account needs a saved return address whose name has initials (such as "Pat E
 
    Also verify `stationery: "Botanical"` (capital B) is accepted.
 6. [ ] With room to write off, take a letter that nearly fills one page in Classic and ask `set_stationery` for typewriter. Verify the refusal: "Letter is N lines too long for one page on the typewriter stationery: … The typewriter stationery sets the text in its own typeface: shorten the message, or choose the classic stationery." (With room to write on, PAGES-01 step 7 applies instead.)
-7. [ ] Remembering. Make a new preview without `stationery`. Verify it is drawn in the last theme chosen, and the narration says "Stationery: <theme>, the account's last choice; stationery in the call or set_stationery changes it." Then make a preview whose theme is refused (step 5), and another without a theme: verify the refused one changed nothing remembered. Ask for Classic, then preview without a theme: verify Classic, which is remembered too.
+7. [ ] Remembering. Make a new preview without `stationery`. Verify it is drawn in the last theme chosen, and the narration says "Stationery: <theme>, the account's last choice; stationery in the call or set_stationery changes it." Then make a preview whose theme is refused (step 5), and another without a theme: verify the refused one changed nothing remembered. Ask for Typewriter, then Classic, then preview without a theme: verify Classic, which is remembered too.
 8. [ ] Open the confirmation page for a themed preview (`request_send`). Verify it shows the page in its theme. Send one themed letter of each kind (Monogram, Celebration with a headline, Handwritten) in test mode. In PostGrid's test dashboard, verify each PDF prints as previewed: the corner art in black and greys beside the address window, clear of PostGrid's address area; the date line; the face. **Record how the greys look on the test print.**
 9. [ ] With arrive-by on, preview a themed letter with a later arrival date. Verify its print, once sent, keeps the date line of the day it was previewed. It prints on its mail date, by default seven business days before the arrival date (`LETTER_IRL_SCHEDULE_LEAD_DAYS`); lower that on DEV or come back on the date, but keep the mail date on a later day than the preview, or the date line proves nothing.
 10. [ ] Preview a gift letter in Botanical. Verify page 1 is the themed letter and page 2 is the plain card.
@@ -2242,7 +2242,7 @@ The envelope is drawn on the card only: nothing prints differently, and postcard
    - a cream window envelope covers the page's top third, with two windows over the address boxes and a dashed stamp outline at top right;
    - the page unfolds out of it in under a second and the envelope fades;
    - the card does not grow.
-2. [ ] Press a style, set an arrival date, and scroll the chat so the host draws the card again. Verify the opening does not play again.
+2. [ ] Press a style, and scroll the chat so the host draws the card again. Verify the opening does not play again. (Leave the arrival date alone here: a dated card sends with **Schedule Letter**, which step 4 covers.)
 3. [ ] Press **Send Letter**. Verify:
    - the page folds back into the envelope;
    - the sealed envelope stays, its windows showing the two addresses, and the page's box shrinks to the envelope's height;
