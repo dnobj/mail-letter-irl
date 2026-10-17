@@ -14,7 +14,8 @@
 import { McpToolDefinition, ToolContext } from "../contracts/types.js";
 import { widgetTemplateUri } from "../mcp/widgetUris.js";
 import { isDebugEnabled } from "../utils/debug.js";
-import { isCardUploadEnabled, uploadsThroughCard } from "../config/cardUpload.js";
+import { uploadsThroughCard } from "../config/cardUpload.js";
+import { callingApp } from "../auth/clientProfiles.js";
 import { normalizeUploadContext } from "../utils/uploadContext.js";
 
 interface UploadImageInput {
@@ -81,7 +82,9 @@ async function handler(
     context: hint,
     debugEnabled: isDebugEnabled(),
     debugEndpoint: buildDebugEndpoint(),
-    cardUploadAvailable: isCardUploadEnabled()
+    // Exactly where upload_photo_chunk is listed (toolCatalog.ts): an app whose card sends the photo
+    // itself, with card upload on. Anywhere else the card would offer an upload its first chunk could not make.
+    cardUploadAvailable: uploadsThroughCard(callingApp(context))
   };
 }
 

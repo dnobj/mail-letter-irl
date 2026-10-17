@@ -42,8 +42,8 @@ maintenance job.
 
 ## MCP Tools, Widgets and the Apps SDK
 
-- [MCP Tool APIs](tool-apis.md) - the 23 tools, schemas, and how to add one
-- [UI Widgets](ui-widgets.md) - the 6 widgets, bridge notes, CSP
+- [MCP Tool APIs](tool-apis.md) - the tools, schemas, and how to add one
+- [UI Widgets](ui-widgets.md) - the widgets, bridge notes, CSP
 - [Status Labels](status-labels.md) - letter status values across database, API, dashboard, PostGrid
 - [OpenAI Apps SDK Guidelines](apps-sdk-guidelines.md) - Apps SDK guidance that affects Letter IRL
 - [App Instructions](app-instructions.md) - app description, onboarding copy, assistant instructions

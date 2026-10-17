@@ -49,7 +49,7 @@ Taken on 2026-10-16 (recorded on #680):
 
 - **The launch set is everything** (D1 widened): every studio feature goes on at launch, each after
   its test passes on DEV and its prerequisites below, in stages C to G. Any can be switched off
-  afterwards. The ChatGPT submission describes the whole set (42 tools), so it is submitted after
+  afterwards. The ChatGPT submission describes the whole set (41 tools), so it is submitted after
   the set is fixed.
 - D2 to D8 as written on #680. The scheduled-mail privacy row (D6, #701) is approved; it is
   published with arrive-by.

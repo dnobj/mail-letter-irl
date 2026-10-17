@@ -13,7 +13,7 @@
 import type { ClientProfile } from "../auth/clientProfiles.js";
 import { isAddressRequestsEnabled } from "../config/addressRequests.js";
 import { isArriveByEnabled } from "../config/arriveBy.js";
-import { isCardUploadEnabled } from "../config/cardUpload.js";
+import { uploadsThroughCard } from "../config/cardUpload.js";
 import { isCertifiedMailOffered } from "../config/certifiedMail.js";
 import { isCustomStationeryOffered } from "../config/customStationery.js";
 import { offersImageGeneration } from "../config/imageGeneration.js";
@@ -160,8 +160,9 @@ export const TOOL_CATALOG: Readonly<Record<string, ToolCatalogEntry>> = {
   get_started: {},
   upload_image: {},
   confirm_uploaded_image: {},
-  // The upload card's photo (#474, phase 3): card-only, and listed only while card uploads are on.
-  upload_photo_chunk: { appOnly: true, offered: () => isCardUploadEnabled() }
+  // The upload card's photo (#474, phase 3): card-only, and listed only where the card sends the photo itself,
+  // while card uploads are on. Never in ChatGPT, whose card hands its own file store's link instead.
+  upload_photo_chunk: { appOnly: true, offered: (client) => uploadsThroughCard(client) }
 };
 
 /** A tool's entry. A tool without one is a tool this file was not told of: an error, not a tool served by default. */
