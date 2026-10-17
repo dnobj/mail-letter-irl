@@ -95,22 +95,27 @@ must be ready before the API deploys against it
    `update:users` on the Management API.
 3. Create the temporary application `Tenant check (temporary)` (the tenant doc's "Checking a
    tenant"), with `read:users` added for the row-holder check the tenant doc describes; run that
-   check, then delete the application, so it does not hold a slot during step 6. Then add the two
+   check, then delete the application, so it does not hold a slot during step 8. Then add the two
    Post Login Actions from [`docs/auth0/actions/`](auth0/actions/), the linking Action above the
    email-claim Action. Production already has an email-claim Action (deployed 2026-09-05): replace
    its code with the file's rather than adding a second, so the flow binds one of each.
 4. The consent setting (`use_scope_descriptions_for_consent`, #267).
 5. The ChatGPT client's refresh-token settings (they are not inherited from development).
-6. The applications: remove legacy entries within the tenant's application limit, then import the
-   apps chosen for launch. OpenClaw's client document is served by the production website, so it is
-   imported after stage A.
-7. Run `scripts/check-auth0-tenant.ts` on both tenants (each with its own temporary application)
-   and record the result in the tenant doc.
+6. The sign-in methods decided (Google, GitHub, and email and password; Microsoft only after LINK-02
+   with it): each social connection with our own OAuth application's credentials, not Auth0's
+   developer keys, and every other connection (Apple, Microsoft until then) disabled for the apps.
+7. Run `scripts/check-auth0-tenant.ts` and record the result in the tenant doc. On production, run it
+   here, before the imports of step 8 take the free application slots (none of them holds a
+   Management API grant, so the check loses nothing). On development, which is at the free plan's
+   10-application limit, free a slot first.
    Its token comes from a new temporary application holding only the five read scopes (step 3's
    was deleted, with its `read:users`), deleted again after the run. **Not** from the Management API's API Explorer tab: on a tenant
    without the API Explorer Application, that tab creates it, with every Management API scope (the
    development tenant's was deleted on 2026-09-26; if production still has one, the check reports
    its grant).
+8. The applications: remove legacy entries within the tenant's application limit, then import the
+   apps chosen for launch, keeping one slot for OpenClaw: its client document is served by the
+   production website, so it is imported after stage A.
 
 ### Production variables set ahead (owner, or an agent with approval)
 
@@ -240,11 +245,14 @@ SELECT pid, state, now() - xact_start AS age, left(query, 60) AS query FROM pg_s
    build against the old schema, so roll it back to its previous deployment until the run succeeds.
    If the run succeeds but the new build fails its health check (a variable the preflight cannot
    see, such as the OAuth scopes), the old build keeps serving on the new schema, which it
-   tolerates. Fix the variable and redeploy; do not roll back the migrations.
+   tolerates. Fix the variable and redeploy; do not roll back the migrations. If the API's run
+   succeeds and the maintenance service's fails, redeploy the maintenance service: the ledger is
+   already at `064`.
 3. Check:
    - `/readyz` answers 200 with the new `X-Build-Commit`;
    - the boot log shows `boot.thread_pool` with size 16;
    - the ledger's newest row is `064_admin_command_retention.sql`;
+   - one production sign-in with each method chosen in stage 0, through the website;
    - the maintenance and admin services are on the new build.
 4. Re-run the admin provisioning for production **from a checkout at the promoted commit**, never
    from an older one: it applies the grants of the code it runs (`038`, `053` and `063` need it).
@@ -268,8 +276,9 @@ Stage C starts once stage B has settled (a day without a rollback). From its fir
 build is no longer a rollback target (see "Rollback"). One change at a time, each with its check, in
 this order:
 
-- `LETTER_IRL_GIFT_LETTERS_ENABLED=true` (on at launch, after GIFT-01). First load the website's
-  `/g/` page with a made-up code: the not-found sentence must appear. If nothing appears, the
+- `LETTER_IRL_GIFT_LETTERS_ENABLED=true` (on at launch, after GIFT-01). Once the flag's redeploy is
+  live (before it, every code answers that gifts are not available), load the website's `/g/` page
+  with a made-up code: the not-found sentence must appear. If nothing appears, the
   browser cannot reach the API: check `LETTER_IRL_ALLOWED_ORIGINS` and the website's public API URL.
   Then buy a pack (packs
   grant gift letters only while the flag is on), send a gift letter, and claim its code when the
@@ -288,9 +297,20 @@ this order:
 (its floor is migration `039`, [deployment.md](deployment.md)); by this stage it is no longer a
 rollback target.
 
+## Code owed before stages E to G
+
+Several features still need code that is not in the head promoted at stage B (#680, 2026-10-16):
+approved-PDF storage for held mail (#697), the address-request retention cap and delete (#701 part
+2), the collage decode budget (#622), the arrive-by checkout fixes (#726), the certified mail
+follow-ups (#625), and the home's fixes (#651, #665). A feature goes on only once its code is **in
+production**, not only on `dev`: each needs a later promotion of `dev` to `master`, run like stage
+B (the merge window, the preflight from the promoted commit, provisioning when a change grants, a
+connector refresh) without the stage B rollback, which no longer applies.
+
 ## Stage E: the studio features without a price
 
-One per deploy, each after its test on DEV, then a connector refresh:
+One per deploy, each after its test on DEV and once its owed code is in production, then a
+connector refresh:
 
 1. The card features, with no floor: the studio card, the envelope reveal, the
    words editor, card upload.
@@ -301,7 +321,8 @@ One per deploy, each after its test on DEV, then a connector refresh:
 
 ## Stage F: arrive-by
 
-`LETTER_IRL_ARRIVE_BY_ENABLED=true`, after #697 and SCHEDULE-01, once the operator alert and
+`LETTER_IRL_ARRIVE_BY_ENABLED=true`, after #697 is in production, with the object storage it needs
+configured there (the owner's step), after SCHEDULE-01 and ADMIN-CMD-04, once the operator alert and
 heartbeat URLs are proven, and with its privacy row published. Then refresh the connectors: it adds
 tools and an input.
 
@@ -317,7 +338,8 @@ they need `JIT_PURCHASE_ENABLED=true`; room to write and the postcard sizes also
    while it has `JIT_PURCHASE_ENABLED=true`), and a maintenance service with the flag but not the
    prices fails every hourly run.
 2. Turn its flag on, on both services.
-3. Re-run the preflight: it asks for an option's prices only once that flag is set.
+3. Re-run the preflight from the promoted commit: it asks for an option's prices only once that flag
+   is set.
 4. Confirm the next maintenance run completes, and refresh the connectors (the option adds an input
    or a tool).
 
@@ -331,7 +353,7 @@ stage B allows (see "Rollback").
 | `LETTER_IRL_SEND_CONFIRMATION_ENABLED` | API | `true` (required) | website stage A | cannot be off in production |
 | `LETTER_IRL_GIFT_LETTERS_ENABLED` | API | on, stage C | GIFT-01; the website's `/g` page | queued gift letters still print their card |
 | `LETTER_IRL_PRINT_RENDERER` | API | `pdf`, stage D | PRINT-02 sends | floor: migration `039` while rendered mail is live |
-| `LETTER_IRL_ARRIVE_BY_ENABLED` | API | stage F | #697, SCHEDULE-01, its privacy row | held mail still goes out with it off |
+| `LETTER_IRL_ARRIVE_BY_ENABLED` | API | stage F | #697 in production with its object storage, SCHEDULE-01, ADMIN-CMD-04, its privacy row | held mail still goes out with it off |
 | `LETTER_IRL_ROOM_TO_WRITE_ENABLED` | API, maintenance | stage G | its two prices, terms, its DEV test | under the renderer floor |
 | `LETTER_IRL_POSTCARD_SIZES_ENABLED` | API, maintenance | stage G | its two prices, terms, its DEV test | not below #596's build while such postcards are live |
 | `LETTER_IRL_CERTIFIED_MAIL_ENABLED` | API, maintenance | stage G | its prices, terms, PostGrid's confirmation, CERTIFIED-01, provisioning | certified letters must be sent before rolling back |
@@ -403,7 +425,7 @@ mail it would mishandle, so:
      sending must stop meanwhile, and check `/readyz`'s `X-Build-Commit` afterwards, since a
      variable change redeploys.
 - **From stage C on, never roll back to the old build.** To undo a switch, change that one
-  variable back, with two exceptions. `STRIPE_CHECKOUT_DOMAIN`: once Stripe serves the domain, undo
+  variable back, with these exceptions. `STRIPE_CHECKOUT_DOMAIN`: once Stripe serves the domain, undo
   it in Stripe first ([stripe-custom-domain.md](stripe-custom-domain.md), "Removing it"), and the
   variable stays. And two switches with side effects: turning gift letters off means printed gift
   codes answer that gifts are not available until it is back on; turning the renderer off stops

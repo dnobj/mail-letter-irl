@@ -524,7 +524,7 @@ provisions the `users` row from a verified email, and Auth0 does not put
 `email` on an access token minted for a custom API. Every write then fails on
 `REFERENCES users(user_id)` in whichever table the customer reaches first.
 
-Add a Post Login Action whose code is [`docs/auth0/actions/email-claim.js`](auth0/actions/email-claim.js),
+Add a Post Login Action (or, on a tenant that already has one, replace its code) whose code is [`docs/auth0/actions/email-claim.js`](auth0/actions/email-claim.js),
 pasted whole. For a confirmed address it sets the two claims (an excerpt, not something to paste on
 its own: the file adds the guard and the export around it):
 
