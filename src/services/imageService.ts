@@ -96,8 +96,8 @@ const UNSUPPORTED_FORMAT_MESSAGE = 'Unsupported image format. Please use PNG, JP
  * #622). Measured through this pipeline at one libvips thread (pinned
  * below): a 49 MP baseline JPEG or plain 8-bit PNG peaks near 60 MB resident
  * and a plain 16-bit RGBA PNG near 130 MB, all streamed; an interlaced or
- * progressive image at this budget peaks near 140 to 167 MB, a 4:4:4
- * progressive JPEG at its 16 MP limit near 152 MB. Without the budget, a
+ * progressive image at this budget peaks near 140 to 167 MB, a 4:2:2 or
+ * 4:4:4 progressive JPEG at its limit (25 or 16 MP) near 153 MB. Without the budget, a
  * 49 MP interlaced 16-bit PNG, a 4 MB file that passes every other check,
  * measured near 500 MB, and before #622 a 33 MP 4:4:4 progressive JPEG near
  * 269 MB.
@@ -108,35 +108,74 @@ const BYTES_PER_SAMPLE: Record<string, number> = {
   char: 1, uchar: 1, short: 2, ushort: 2, int: 4, uint: 4, float: 4, complex: 8, double: 8, dpcomplex: 16,
 };
 
+/** The JPEG start-of-frame markers, whose segment names each component's sampling factors. */
+const JPEG_SOF_MARKERS = new Set([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf]);
+
 /**
- * Samples per pixel of a JPEG's components, from its chroma subsampling
- * (`J:a:b`, as sharp reports it): luma is one, and each of the two chroma
- * components is `a/J` across and, when `b` is 0, half down. 1.5 at 4:2:0,
- * 2 at 4:2:2 and 4:4:0, 3 at 4:4:4. One that cannot be read, and CMYK (a
- * fourth part), count every component at full resolution: the most it can be.
+ * Samples per pixel of a JPEG's components, from the sampling factors in its
+ * frame header: each component holds (h / max h) x (v / max v) of a sample a
+ * pixel. 1.5 at 4:2:0, 2 at 4:2:2 and 4:4:0, 2.5 when two components are full
+ * and one is halved, 3 at 4:4:4. Read from the bytes because libvips reports
+ * only `4:4:4` or `4:2:0` (#622 review: 4:2:2 and mixed factors read as
+ * 4:2:0). Null when no frame header is found before the first scan.
  */
-function jpegSamplesPerPixel(channels: number, chromaSubsampling: string | undefined): number {
-  const parts = (chromaSubsampling ?? '').split(':').map(Number);
-  if (channels !== 3 || parts.length !== 3 || parts.some((part) => !Number.isFinite(part))) return Math.max(channels, 1);
-  const [j, a, b] = parts;
-  if (!(j > 0) || !(a > 0) || a > j || (b !== 0 && b !== a)) return 3;
-  return 1 + 2 * (a / j) * (b === 0 ? 0.5 : 1);
+function jpegSamplesPerPixel(buffer: Buffer): number | null {
+  let offset = 2; // past SOI
+  while (offset + 4 <= buffer.length) {
+    if (buffer[offset] !== 0xff) return null;
+    const marker = buffer[offset + 1];
+    // Fill bytes before a marker.
+    if (marker === 0xff) {
+      offset += 1;
+      continue;
+    }
+    // Markers without a segment.
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd8)) {
+      offset += 2;
+      continue;
+    }
+    // The first scan, or the end, with no frame header before it.
+    if (marker === 0xda || marker === 0xd9) return null;
+    const length = buffer.readUInt16BE(offset + 2);
+    if (length < 2) return null;
+    if (JPEG_SOF_MARKERS.has(marker)) {
+      const components = buffer[offset + 9];
+      // A frame header cut short reads past the end as undefined, a factor of 0: refused below.
+      if (!components) return null;
+      const factors: Array<{ h: number; v: number }> = [];
+      for (let index = 0; index < components; index += 1) {
+        const sampling = buffer[offset + 11 + 3 * index];
+        factors.push({ h: sampling >> 4, v: sampling & 0x0f });
+      }
+      const maxH = Math.max(...factors.map((factor) => factor.h));
+      const maxV = Math.max(...factors.map((factor) => factor.v));
+      if (!(maxH > 0) || !(maxV > 0) || factors.some((factor) => !(factor.h > 0) || !(factor.v > 0))) return null;
+      return factors.reduce((sum, factor) => sum + (factor.h / maxH) * (factor.v / maxV), 0);
+    }
+    offset += 2 + length;
+  }
+  return null;
 }
 
 /**
  * The bytes a whole decode holds per pixel, which the full-decode budget
  * counts: the decoded image's (channels by bytes per sample) and, for a
- * progressive JPEG, its DCT coefficients too, which libjpeg holds for every
+ * JPEG held whole, its DCT coefficients too, which libjpeg holds for every
  * scan before it makes a pixel: two bytes a sample of each component at its
  * own resolution (#622). At 4:2:0 that is 3 bytes a pixel, as the image's
- * own; at 4:4:4 it is 6, twice as much, which is why a 4:4:4 photo peaked
- * near 265 MB where 4:2:0 at the same size peaked near 165 MB. The larger of
- * the two is counted.
+ * own; at 4:2:2 it is 4, and at 4:4:4 it is 6, which is why a 4:4:4 photo
+ * peaked near 265 MB where 4:2:0 at the same size peaked near 165 MB. The
+ * larger of the two is counted. A JPEG whose frame header cannot be read
+ * counts every component at full resolution: the most it can be.
  */
-function fullDecodeBytesPerPixel(metadata: Pick<Metadata, 'format' | 'channels' | 'depth' | 'chromaSubsampling'>): number {
+function fullDecodeBytesPerPixel(
+  metadata: Pick<Metadata, 'format' | 'channels' | 'depth'>,
+  buffer: Buffer
+): number {
   const decoded = (metadata.channels ?? 4) * (BYTES_PER_SAMPLE[metadata.depth ?? ''] ?? 2);
   if (metadata.format !== 'jpeg') return decoded;
-  return Math.max(decoded, 2 * jpegSamplesPerPixel(metadata.channels ?? 3, metadata.chromaSubsampling));
+  const samples = jpegSamplesPerPixel(buffer) ?? Math.max(metadata.channels ?? 3, 1);
+  return Math.max(decoded, 2 * samples);
 }
 
 /** Names the size that would fit, for this image's channels and depth. */
@@ -1153,7 +1192,7 @@ async function getImageMetadata(buffer: Buffer): Promise<{ width: number; height
   }
 
   if (metadata.isProgressive) {
-    const bytesPerPixel = fullDecodeBytesPerPixel(metadata);
+    const bytesPerPixel = fullDecodeBytesPerPixel(metadata, buffer);
     if (metadata.width * metadata.height * bytesPerPixel > MAX_FULL_DECODE_BYTES) {
       throw new ImageProcessingError('IMAGE_TOO_LARGE', tooLargeToDecodeMessage(bytesPerPixel));
     }
@@ -1207,6 +1246,7 @@ export const _testing = {
   MAX_INPUT_PIXELS,
   MAX_FULL_DECODE_BYTES,
   fullDecodeBytesPerPixel,
+  jpegSamplesPerPixel,
   GATE_CONFIG,
   REMOTE_IMAGE_FETCH_CONFIG,
   decodeGate,

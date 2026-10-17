@@ -280,25 +280,51 @@ describe('image pipeline hardening', () => {
       expect(_testing.MAX_FULL_DECODE_BYTES).toBe(100_000_000);
     });
 
-    it("counts a progressive JPEG's coefficients by its chroma subsampling (#622)", () => {
-      const jpeg = (chromaSubsampling: string | undefined, channels = 3) =>
-        _testing.fullDecodeBytesPerPixel({ format: 'jpeg', channels, depth: 'uchar', chromaSubsampling } as never);
-      // Two bytes a sample: 1.5 samples at 4:2:0 is the image's own 3 bytes; 3 samples at 4:4:4 is 6.
-      expect(jpeg('4:2:0')).toBe(3);
-      expect(jpeg('4:1:1')).toBe(3);
-      expect(jpeg('4:2:2')).toBe(4);
-      expect(jpeg('4:4:0')).toBe(4);
-      expect(jpeg('4:4:4')).toBe(6);
-      // One it cannot read, and CMYK, count every component at full resolution.
-      expect(jpeg(undefined)).toBe(6);
-      expect(jpeg('odd')).toBe(6);
-      expect(jpeg('4:3:1')).toBe(6);
-      expect(jpeg('4:4:4:4', 4)).toBe(8);
-      expect(jpeg('4:2:0:4', 4)).toBe(8);
-      expect(jpeg(undefined, 1)).toBe(2);
+    /** A JPEG's first bytes up to its first scan: SOI, an APP0, a frame header with these factors, SOS. */
+    function jpegHeader(factors: Array<[number, number]>, { marker = 0xc2, width = 7000, height = 4750 } = {}): Buffer {
+      const app0 = Buffer.from([0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00]);
+      const sofBody = [0x08, height >> 8, height & 0xff, width >> 8, width & 0xff, factors.length];
+      factors.forEach(([h, v], index) => sofBody.push(index + 1, (h << 4) | v, 0));
+      const sof = Buffer.from([0xff, marker, 0x00, sofBody.length + 2, ...sofBody]);
+      return Buffer.concat([Buffer.from([0xff, 0xd8]), app0, Buffer.from([0xff, 0xff]), sof, Buffer.from([0xff, 0xda, 0x00, 0x08])]);
+    }
+
+    it("counts a JPEG's coefficients by the sampling factors in its frame header (#622)", () => {
+      const samples = (factors: Array<[number, number]>, options?: { marker?: number }) => _testing.jpegSamplesPerPixel(jpegHeader(factors, options));
+      expect(samples([[2, 2], [1, 1], [1, 1]])).toBe(1.5); // 4:2:0
+      expect(samples([[2, 1], [1, 1], [1, 1]])).toBe(2); // 4:2:2, which libvips calls 4:2:0
+      expect(samples([[1, 2], [1, 1], [1, 1]])).toBe(2); // 4:4:0
+      expect(samples([[1, 2], [1, 2], [1, 1]])).toBe(2.5); // two full, one halved
+      expect(samples([[2, 2], [2, 2], [2, 1]])).toBe(2.5);
+      expect(samples([[2, 2], [2, 2], [1, 1]])).toBe(2.25);
+      expect(samples([[1, 1], [1, 1], [1, 1]])).toBe(3); // 4:4:4
+      expect(samples([[4, 1], [1, 1], [1, 1]])).toBe(1.5); // 4:1:1
+      expect(samples([[1, 1]])).toBe(1); // grayscale
+      expect(samples([[1, 1], [1, 1], [1, 1], [1, 1]])).toBe(4); // CMYK
+      // Every frame type that names factors, baseline (C0) as well as progressive (C2).
+      expect(samples([[2, 1], [1, 1], [1, 1]], { marker: 0xc0 })).toBe(2);
+      expect(samples([[2, 1], [1, 1], [1, 1]], { marker: 0xc1 })).toBe(2);
+      // No frame header before the scan, a broken one, or no JPEG: unknown.
+      expect(_testing.jpegSamplesPerPixel(Buffer.from([0xff, 0xd8, 0xff, 0xda, 0x00, 0x08]))).toBeNull();
+      expect(samples([[0, 1], [1, 1], [1, 1]])).toBeNull();
+      expect(_testing.jpegSamplesPerPixel(Buffer.from([0xff, 0xd8, 0x00, 0x00, 0x00, 0x00]))).toBeNull();
+      expect(_testing.jpegSamplesPerPixel(jpegHeader([[2, 2], [1, 1], [1, 1]]).subarray(0, 30))).toBeNull();
+
+      const bytes = (factors: Array<[number, number]> | null, channels = 3) =>
+        _testing.fullDecodeBytesPerPixel({ format: 'jpeg', channels, depth: 'uchar' } as never, factors ? jpegHeader(factors) : Buffer.from([0xff, 0xd8, 0xff, 0xda, 0x00, 0x08]));
+      // Two bytes a sample, or the image's own bytes when that is more.
+      expect(bytes([[2, 2], [1, 1], [1, 1]])).toBe(3);
+      expect(bytes([[2, 1], [1, 1], [1, 1]])).toBe(4);
+      expect(bytes([[1, 2], [1, 2], [1, 1]])).toBe(5);
+      expect(bytes([[1, 1], [1, 1], [1, 1]])).toBe(6);
+      expect(bytes([[1, 1], [1, 1], [1, 1], [1, 1]], 4)).toBe(8);
+      expect(bytes([[1, 1]], 1)).toBe(2);
+      // Unread factors: every component at full resolution.
+      expect(bytes(null)).toBe(6);
+      expect(bytes(null, 4)).toBe(8);
       // A PNG holds no coefficients: its decoded bytes only.
-      expect(_testing.fullDecodeBytesPerPixel({ format: 'png', channels: 3, depth: 'uchar' } as never)).toBe(3);
-      expect(_testing.fullDecodeBytesPerPixel({ format: 'png', channels: 4, depth: 'ushort' } as never)).toBe(8);
+      expect(_testing.fullDecodeBytesPerPixel({ format: 'png', channels: 3, depth: 'uchar' } as never, Buffer.alloc(0))).toBe(3);
+      expect(_testing.fullDecodeBytesPerPixel({ format: 'png', channels: 4, depth: 'ushort' } as never, Buffer.alloc(0))).toBe(8);
     });
 
     it('refuses a 33 MP progressive JPEG at 4:4:4, naming the size that fits, and passes it at 4:2:0 (#622)', async () => {
@@ -313,7 +339,19 @@ describe('image pipeline hardening', () => {
         userMessage:
           'Image is too large to process. Please use an image under 16 megapixels, or save it without interlacing or progressive encoding.'
       });
-      await expect(_testing.getImageMetadata(await photo('4:2:0'))).resolves.toEqual({ width: 7000, height: 4750, format: 'jpeg' });
+      const halved = await photo('4:2:0');
+      await expect(_testing.getImageMetadata(halved)).resolves.toEqual({ width: 7000, height: 4750, format: 'jpeg' });
+      // The same bytes with its luma's factors made 2x1, 4:2:2, which libvips still calls 4:2:0:
+      // counted at 4 bytes a pixel from the frame header, so refused, naming 25 megapixels.
+      const sof = halved.indexOf(Buffer.from([0xff, 0xc2]));
+      expect(halved[sof + 11]).toBe(0x22);
+      const fourTwoTwo = Buffer.from(halved);
+      fourTwoTwo[sof + 11] = 0x21;
+      await expect(_testing.getImageMetadata(fourTwoTwo)).rejects.toMatchObject({
+        code: 'IMAGE_TOO_LARGE',
+        userMessage:
+          'Image is too large to process. Please use an image under 25 megapixels, or save it without interlacing or progressive encoding.'
+      });
       // The same photo at 4:4:4 without progressive encoding is streamed, and not counted.
       const baseline = await sharp({ create: { width: 7000, height: 4750, channels: 3, background: { r: 30, g: 60, b: 90 } } })
         .jpeg({ chromaSubsampling: '4:4:4' })
