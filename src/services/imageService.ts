@@ -112,6 +112,17 @@ const BYTES_PER_SAMPLE: Record<string, number> = {
 const JPEG_SOF_MARKERS = new Set([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf]);
 
 /**
+ * The segments libjpeg passes over by their length before the frame header:
+ * APPn, COM, DQT, DHT, DRI, DAC and DNL. Anything else ends the walk unread,
+ * so the reader never takes a path through the bytes that libjpeg does not
+ * (#622 review: libjpeg discards a stray pair it does not know, and a walk that
+ * jumped by its "length" could land on a frame header libjpeg never reads).
+ */
+function jpegSkipsByLength(marker: number): boolean {
+  return (marker >= 0xe0 && marker <= 0xef) || [0xfe, 0xdb, 0xc4, 0xdd, 0xcc, 0xdc].includes(marker);
+}
+
+/**
  * Samples per pixel of a JPEG's components, from the sampling factors in its
  * frame header: each component holds (h / max h) x (v / max v) of a sample a
  * pixel. 1.5 at 4:2:0, 2 at 4:2:2 and 4:4:0, 2.5 when two components are full
@@ -134,10 +145,11 @@ function jpegSamplesPerPixel(buffer: Buffer): number | null {
       offset += 2;
       continue;
     }
-    // The first scan, or the end, with no frame header before it.
-    if (marker === 0xda || marker === 0xd9) return null;
+    // Anything but a frame header or a segment libjpeg skips by length (the first scan, the end,
+    // or a marker it does not know): no frame header was found.
+    if (!JPEG_SOF_MARKERS.has(marker) && !jpegSkipsByLength(marker)) return null;
+    // A length under 2 lands inside the length field, on a byte that is not a marker: the walk ends there.
     const length = buffer.readUInt16BE(offset + 2);
-    if (length < 2) return null;
     if (JPEG_SOF_MARKERS.has(marker)) {
       const components = buffer[offset + 9];
       // A frame header cut short reads past the end as undefined, a factor of 0: refused below.

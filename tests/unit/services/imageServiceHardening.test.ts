@@ -304,6 +304,24 @@ describe('image pipeline hardening', () => {
       // Every frame type that names factors, baseline (C0) as well as progressive (C2).
       expect(samples([[2, 1], [1, 1], [1, 1]], { marker: 0xc0 })).toBe(2);
       expect(samples([[2, 1], [1, 1], [1, 1]], { marker: 0xc1 })).toBe(2);
+      // A frame header after the segments libjpeg passes by length, a restart or TEM marker, or an
+      // EXIF thumbnail (whose own SOI and frame header in APP1 are not read): the image's own.
+      const segment = (marker: number, payload: number[]) => Buffer.from([0xff, marker, 0x00, payload.length + 2, ...payload]);
+      const after = (before: Buffer[], factors: Array<[number, number]>) => {
+        const header = jpegHeader(factors);
+        return _testing.jpegSamplesPerPixel(Buffer.concat([header.subarray(0, 2), ...before, header.subarray(2)]));
+      };
+      const thumbnail = [...jpegHeader([[2, 2], [1, 1], [1, 1]]).subarray(0, 40)];
+      expect(after([segment(0xe1, [0x45, 0x78, 0x69, 0x66, 0x00, 0x00, ...thumbnail])], [[1, 1], [1, 1], [1, 1]])).toBe(3);
+      expect(after([segment(0xfe, [0x41]), segment(0xdb, [0x00]), segment(0xc4, [0x00]), segment(0xdd, [0x00, 0x00])], [[2, 1], [1, 1], [1, 1]])).toBe(2);
+      expect(after([Buffer.from([0xff, 0xd0]), Buffer.from([0xff, 0x01])], [[1, 1], [1, 1], [1, 1]])).toBe(3);
+      // A pair libjpeg discards as stray data, and a marker it does not walk by length, end the walk
+      // unread rather than jump to wherever their bytes point: a frame header hidden after them is not read.
+      const hidden = segment(0xef, [...jpegHeader([[2, 2], [1, 1], [1, 1]]).subarray(22, 41)]);
+      expect(after([Buffer.from([0xff, 0x00, 0x00, 0x06]), hidden], [[1, 1], [1, 1], [1, 1]])).toBeNull();
+      expect(after([segment(0xf7, [0x00])], [[1, 1], [1, 1], [1, 1]])).toBeNull();
+      // A length of 0 or 1: unread.
+      expect(after([Buffer.from([0xff, 0xe0, 0x00, 0x01])], [[1, 1], [1, 1], [1, 1]])).toBeNull();
       // No frame header before the scan, a broken one, or no JPEG: unknown.
       expect(_testing.jpegSamplesPerPixel(Buffer.from([0xff, 0xd8, 0xff, 0xda, 0x00, 0x08]))).toBeNull();
       expect(samples([[0, 1], [1, 1], [1, 1]])).toBeNull();
