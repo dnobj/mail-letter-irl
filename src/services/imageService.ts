@@ -91,19 +91,53 @@ const UNSUPPORTED_FORMAT_MESSAGE = 'Unsupported image format. Please use PNG, JP
 
 /**
  * Images that libvips must hold whole rather than stream (interlaced PNG,
- * progressive JPEG) are bounded by their decoded size as well as by pixels.
- * Measured through this pipeline at one libvips thread (pinned below): a
- * 49 MP baseline JPEG or plain 8-bit PNG peaks near 60 MB resident and a
- * plain 16-bit RGBA PNG near 130 MB, all streamed; an interlaced or
- * progressive image at this budget peaks near 140 to 165 MB. Without the
- * budget, a 49 MP interlaced 16-bit PNG, a 4 MB file that passes every
- * other check, measured near 500 MB.
+ * progressive JPEG) are bounded by their decoded size as well as by pixels,
+ * and a progressive JPEG by its coefficients too (fullDecodeBytesPerPixel,
+ * #622). Measured through this pipeline at one libvips thread (pinned
+ * below): a 49 MP baseline JPEG or plain 8-bit PNG peaks near 60 MB resident
+ * and a plain 16-bit RGBA PNG near 130 MB, all streamed; an interlaced or
+ * progressive image at this budget peaks near 140 to 167 MB, a 4:4:4
+ * progressive JPEG at its 16 MP limit near 152 MB. Without the budget, a
+ * 49 MP interlaced 16-bit PNG, a 4 MB file that passes every other check,
+ * measured near 500 MB, and before #622 a 33 MP 4:4:4 progressive JPEG near
+ * 269 MB.
  */
 const MAX_FULL_DECODE_BYTES = 100_000_000;
 
 const BYTES_PER_SAMPLE: Record<string, number> = {
   char: 1, uchar: 1, short: 2, ushort: 2, int: 4, uint: 4, float: 4, complex: 8, double: 8, dpcomplex: 16,
 };
+
+/**
+ * Samples per pixel of a JPEG's components, from its chroma subsampling
+ * (`J:a:b`, as sharp reports it): luma is one, and each of the two chroma
+ * components is `a/J` across and, when `b` is 0, half down. 1.5 at 4:2:0,
+ * 2 at 4:2:2 and 4:4:0, 3 at 4:4:4. One that cannot be read, and CMYK (a
+ * fourth part), count every component at full resolution: the most it can be.
+ */
+function jpegSamplesPerPixel(channels: number, chromaSubsampling: string | undefined): number {
+  const parts = (chromaSubsampling ?? '').split(':').map(Number);
+  if (channels !== 3 || parts.length !== 3 || parts.some((part) => !Number.isFinite(part))) return Math.max(channels, 1);
+  const [j, a, b] = parts;
+  if (!(j > 0) || !(a > 0) || a > j || (b !== 0 && b !== a)) return 3;
+  return 1 + 2 * (a / j) * (b === 0 ? 0.5 : 1);
+}
+
+/**
+ * The bytes a whole decode holds per pixel, which the full-decode budget
+ * counts: the decoded image's (channels by bytes per sample) and, for a
+ * progressive JPEG, its DCT coefficients too, which libjpeg holds for every
+ * scan before it makes a pixel: two bytes a sample of each component at its
+ * own resolution (#622). At 4:2:0 that is 3 bytes a pixel, as the image's
+ * own; at 4:4:4 it is 6, twice as much, which is why a 4:4:4 photo peaked
+ * near 265 MB where 4:2:0 at the same size peaked near 165 MB. The larger of
+ * the two is counted.
+ */
+function fullDecodeBytesPerPixel(metadata: Pick<Metadata, 'format' | 'channels' | 'depth' | 'chromaSubsampling'>): number {
+  const decoded = (metadata.channels ?? 4) * (BYTES_PER_SAMPLE[metadata.depth ?? ''] ?? 2);
+  if (metadata.format !== 'jpeg') return decoded;
+  return Math.max(decoded, 2 * jpegSamplesPerPixel(metadata.channels ?? 3, metadata.chromaSubsampling));
+}
 
 /** Names the size that would fit, for this image's channels and depth. */
 function tooLargeToDecodeMessage(bytesPerPixel: number): string {
@@ -146,9 +180,9 @@ const REMOTE_IMAGE_FETCH_CONFIG = {
  * downloads included: two at a time and one per account, and one that waits
  * has fetched nothing. The two add at most six held input buffers and two
  * sets of tiles (about 24 MB each at worst) to the figure above: about
- * 835 MB, or about 1.13 GB while a progressive JPEG without chroma
- * subsampling decodes at the 265 MB measured and not the 165 MB counted
- * (#622). Its photos share one budget for their downloads
+ * 835 MB. (Before #622 counted a progressive JPEG's coefficients, a 4:4:4
+ * one decoded at about 265 MB, and the figure was about 1.13 GB.) Its photos
+ * share one budget for their downloads
  * (COLLAGE_DOWNLOAD_BUDGET_MS), the queue waits and the transfers together,
  * so a collage cannot hold its slot four times as long as one photo.
  */
@@ -1119,7 +1153,7 @@ async function getImageMetadata(buffer: Buffer): Promise<{ width: number; height
   }
 
   if (metadata.isProgressive) {
-    const bytesPerPixel = (metadata.channels ?? 4) * (BYTES_PER_SAMPLE[metadata.depth ?? ''] ?? 2);
+    const bytesPerPixel = fullDecodeBytesPerPixel(metadata);
     if (metadata.width * metadata.height * bytesPerPixel > MAX_FULL_DECODE_BYTES) {
       throw new ImageProcessingError('IMAGE_TOO_LARGE', tooLargeToDecodeMessage(bytesPerPixel));
     }
@@ -1172,6 +1206,7 @@ export const _testing = {
   LETTER_IMAGE_CONFIG,
   MAX_INPUT_PIXELS,
   MAX_FULL_DECODE_BYTES,
+  fullDecodeBytesPerPixel,
   GATE_CONFIG,
   REMOTE_IMAGE_FETCH_CONFIG,
   decodeGate,

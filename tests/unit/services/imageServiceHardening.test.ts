@@ -279,6 +279,47 @@ describe('image pipeline hardening', () => {
     it('keeps the budget at 100 MB of decoded bytes', () => {
       expect(_testing.MAX_FULL_DECODE_BYTES).toBe(100_000_000);
     });
+
+    it("counts a progressive JPEG's coefficients by its chroma subsampling (#622)", () => {
+      const jpeg = (chromaSubsampling: string | undefined, channels = 3) =>
+        _testing.fullDecodeBytesPerPixel({ format: 'jpeg', channels, depth: 'uchar', chromaSubsampling } as never);
+      // Two bytes a sample: 1.5 samples at 4:2:0 is the image's own 3 bytes; 3 samples at 4:4:4 is 6.
+      expect(jpeg('4:2:0')).toBe(3);
+      expect(jpeg('4:1:1')).toBe(3);
+      expect(jpeg('4:2:2')).toBe(4);
+      expect(jpeg('4:4:0')).toBe(4);
+      expect(jpeg('4:4:4')).toBe(6);
+      // One it cannot read, and CMYK, count every component at full resolution.
+      expect(jpeg(undefined)).toBe(6);
+      expect(jpeg('odd')).toBe(6);
+      expect(jpeg('4:3:1')).toBe(6);
+      expect(jpeg('4:4:4:4', 4)).toBe(8);
+      expect(jpeg('4:2:0:4', 4)).toBe(8);
+      expect(jpeg(undefined, 1)).toBe(2);
+      // A PNG holds no coefficients: its decoded bytes only.
+      expect(_testing.fullDecodeBytesPerPixel({ format: 'png', channels: 3, depth: 'uchar' } as never)).toBe(3);
+      expect(_testing.fullDecodeBytesPerPixel({ format: 'png', channels: 4, depth: 'ushort' } as never)).toBe(8);
+    });
+
+    it('refuses a 33 MP progressive JPEG at 4:4:4, naming the size that fits, and passes it at 4:2:0 (#622)', async () => {
+      // 7000 x 4750: 33.25 MP, 99.75 MB decoded, inside the old count. Real bytes, one colour, so small.
+      const photo = (chromaSubsampling: '4:2:0' | '4:4:4') =>
+        sharp({ create: { width: 7000, height: 4750, channels: 3, background: { r: 30, g: 60, b: 90 } } })
+          .jpeg({ progressive: true, chromaSubsampling })
+          .toBuffer();
+      const full = await photo('4:4:4');
+      await expect(_testing.getImageMetadata(full)).rejects.toMatchObject({
+        code: 'IMAGE_TOO_LARGE',
+        userMessage:
+          'Image is too large to process. Please use an image under 16 megapixels, or save it without interlacing or progressive encoding.'
+      });
+      await expect(_testing.getImageMetadata(await photo('4:2:0'))).resolves.toEqual({ width: 7000, height: 4750, format: 'jpeg' });
+      // The same photo at 4:4:4 without progressive encoding is streamed, and not counted.
+      const baseline = await sharp({ create: { width: 7000, height: 4750, channels: 3, background: { r: 30, g: 60, b: 90 } } })
+        .jpeg({ chromaSubsampling: '4:4:4' })
+        .toBuffer();
+      await expect(_testing.getImageMetadata(baseline)).resolves.toEqual({ width: 7000, height: 4750, format: 'jpeg' });
+    }, 30_000);
   });
 
   describe('one download deadline covers the body', () => {
