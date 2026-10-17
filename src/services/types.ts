@@ -177,6 +177,15 @@ export interface Letter {
   sent_at?: Date;
   /** When content retention emptied the letter (migration 026): set, there is nothing left to print. */
   redacted_at?: Date | null;
+  /**
+   * Held mail's print (migration 065, #697): the SHA-256 of the PDF stored at
+   * held-pdf/<letter_id>.pdf once its upload succeeded, the fingerprint of
+   * what the print lays out, and the layout engine that laid it out. NULL for
+   * mail not held, and for mail our renderer does not draw.
+   */
+  print_pdf_sha256?: string | null;
+  print_layout_fingerprint?: string | null;
+  print_layout_engine?: string | null;
 }
 
 // ============================================================================

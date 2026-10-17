@@ -16,6 +16,7 @@ import { classifyDiagnosticError, writeDiagnostic } from '../utils/diagnosticLog
 import { returnConsumedCreditsForLetter } from './creditLedgerService.js';
 import { returnGiftLetterForFailedSendWithClient } from './giftLetterService.js';
 import { leftForOperatorSql } from './heldMail.js';
+import { forgetHeldPdf } from './heldPrintPdf.js';
 
 /** The failure code a cancel's return records (source_metadata.failure_code). */
 export const CANCELLED_BY_CUSTOMER = 'cancelled_by_customer';
@@ -203,7 +204,11 @@ export async function cancelScheduledMail(params: {
   userId: string;
 }): Promise<CancelScheduledMailResult> {
   try {
-    return await transaction(client => cancelScheduledMailWithClient(client, params));
+    const result = await transaction(client => cancelScheduledMailWithClient(client, params));
+    // A cancelled letter's held PDF (#697), once the cancel has committed; the
+    // hourly sweep deletes any this cannot.
+    if (result.ok) await forgetHeldPdf(params.letterId);
+    return result;
   } catch (error) {
     if (lockConflict(error)) {
       writeDiagnostic('info', 'schedule.cancel_refused', { reason: 'busy' });

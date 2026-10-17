@@ -1,4 +1,7 @@
-/** Restart-safe temporary image storage backed by a private S3-compatible bucket. */
+/**
+ * Restart-safe temporary image storage backed by a private S3-compatible
+ * bucket, and the PDFs of mail held for its date (#697), in the same bucket.
+ */
 
 import { createHash, randomBytes } from 'node:crypto';
 import {
@@ -310,6 +313,126 @@ export async function deleteUploadedPhoto(userId: string): Promise<void> {
   } catch (error) {
     if (!isNotFound(error)) throw error;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Held mail's print (#697, decision D3): the PDF drawn at the send of mail
+// held for its date, kept until the provider accepts it, so the mail prints
+// as it was approved. Never served by URL, and outside the prefixes
+// cleanupExpiredImages sweeps: heldPrintService deletes these.
+// ---------------------------------------------------------------------------
+
+const HELD_PDF_PREFIX = 'held-pdf/';
+const HELD_PDF_KEY = /^held-pdf\/([A-Za-z0-9_-]{1,128})\.pdf$/;
+/**
+ * Each held-PDF request gives up after this, whatever the SDK's own retries:
+ * a send stores one after its commit, and a dispatch reads one before it
+ * prints, and neither may wait the minute and a half BUCKET_REQUEST_LIMITS
+ * allows. A request given up counts as no PDF.
+ */
+export const HELD_PDF_REQUEST_TIMEOUT_MS = 20_000;
+
+const heldPdfMemory = new Map<string, { pdf: Buffer; storedAt: Date }>();
+
+/** The object key of a letter's held PDF, or null for an id no key may carry. */
+export function heldPdfKey(letterId: string): string | null {
+  const key = `${HELD_PDF_PREFIX}${letterId}.pdf`;
+  return HELD_PDF_KEY.test(key) ? key : null;
+}
+
+function heldPdfSignal(): AbortSignal {
+  return AbortSignal.timeout(HELD_PDF_REQUEST_TIMEOUT_MS);
+}
+
+/** Keep a held letter's PDF, replacing any it had. False when its id can name no object. */
+export async function storeHeldPdf(letterId: string, pdf: Buffer): Promise<boolean> {
+  const key = heldPdfKey(letterId);
+  if (!key) return false;
+  if (storageMode() === 'memory') {
+    heldPdfMemory.set(key, { pdf: Buffer.from(pdf), storedAt: new Date() });
+    return true;
+  }
+  const config = bucketConfig()!;
+  await client(config).send(
+    new PutObjectCommand({
+      Bucket: config.bucket,
+      Key: key,
+      Body: pdf,
+      ContentType: 'application/pdf',
+      CacheControl: 'private, no-store',
+    }),
+    { abortSignal: heldPdfSignal() }
+  );
+  return true;
+}
+
+/** A held letter's PDF, or null when there is none. */
+export async function getHeldPdf(letterId: string): Promise<Buffer | null> {
+  const key = heldPdfKey(letterId);
+  if (!key) return null;
+  if (storageMode() === 'memory') {
+    const entry = heldPdfMemory.get(key);
+    return entry ? Buffer.from(entry.pdf) : null;
+  }
+  const config = bucketConfig()!;
+  try {
+    const response = await client(config).send(
+      new GetObjectCommand({ Bucket: config.bucket, Key: key }),
+      { abortSignal: heldPdfSignal() }
+    );
+    if (!response.Body) return null;
+    return Buffer.from(await response.Body.transformToByteArray());
+  } catch (error) {
+    if (isNotFound(error)) return null;
+    throw error;
+  }
+}
+
+/** Forget a held letter's PDF, if there is one. */
+export async function deleteHeldPdf(letterId: string): Promise<void> {
+  const key = heldPdfKey(letterId);
+  if (!key) return;
+  if (storageMode() === 'memory') {
+    heldPdfMemory.delete(key);
+    return;
+  }
+  const config = bucketConfig()!;
+  try {
+    await client(config).send(
+      new DeleteObjectCommand({ Bucket: config.bucket, Key: key }),
+      { abortSignal: heldPdfSignal() }
+    );
+  } catch (error) {
+    if (!isNotFound(error)) throw error;
+  }
+}
+
+/** Every held PDF in the store: the letter it is for, and when it was stored. */
+export async function listHeldPdfs(): Promise<Array<{ letterId: string; storedAt: Date }>> {
+  const held: Array<{ letterId: string; storedAt: Date }> = [];
+  if (storageMode() === 'memory') {
+    for (const [key, entry] of heldPdfMemory) {
+      const match = HELD_PDF_KEY.exec(key);
+      if (match) held.push({ letterId: match[1], storedAt: entry.storedAt });
+    }
+    return held;
+  }
+  const config = bucketConfig()!;
+  let continuationToken: string | undefined;
+  do {
+    const listed = await client(config).send(
+      new ListObjectsV2Command({ Bucket: config.bucket, Prefix: HELD_PDF_PREFIX, ContinuationToken: continuationToken }),
+      { abortSignal: heldPdfSignal() }
+    );
+    for (const object of listed.Contents || []) {
+      const match = object.Key ? HELD_PDF_KEY.exec(object.Key) : null;
+      // An object that is not one of ours, or has no date, is never read as a letter's.
+      if (!match || !object.LastModified) continue;
+      held.push({ letterId: match[1], storedAt: object.LastModified });
+    }
+    continuationToken = listed.NextContinuationToken;
+  } while (continuationToken);
+  return held;
 }
 
 export function getStoreSize(): number {

@@ -111,7 +111,7 @@ describe('retention sweep guards (#153)', () => {
         "jsonb_build_object( 'content', l.content, 'recipient', l.recipient, 'preview_html', to_jsonb(l.preview_html) )"
       );
       expect(sql).toContain('ON CONFLICT (source_table, source_id) DO NOTHING');
-      expect(sql).toContain("SET content = '{}'::jsonb, recipient = '{}'::jsonb, preview_html = NULL, redacted_at = NOW()");
+      expect(sql).toContain("SET content = '{}'::jsonb, recipient = '{}'::jsonb, preview_html = NULL, print_pdf_sha256 = NULL, print_layout_fingerprint = NULL, print_layout_engine = NULL, redacted_at = NOW()");
       expect(sql).toContain('LIMIT $5::int FOR UPDATE OF l SKIP LOCKED');
     });
 
@@ -179,7 +179,7 @@ describe('retention sweep guards (#153)', () => {
 
       expect(sqlFrom(mocks.query.mock.calls[0])).toContain(
         "UPDATE letters SET content = '{}'::jsonb, recipient = '{}'::jsonb, " +
-          'preview_html = NULL, redacted_at = NOW() ' +
+          'preview_html = NULL, print_pdf_sha256 = NULL, print_layout_fingerprint = NULL, print_layout_engine = NULL, redacted_at = NOW() ' +
           'WHERE letter_id IN (SELECT letter_id FROM due)'
       );
     });

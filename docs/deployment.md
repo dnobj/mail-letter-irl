@@ -864,6 +864,10 @@ draw the letter or postcard before any request was made. The reason is one of:
 - `size`: a postcard size no writer stores, on either print path, or a gift postcard at any size but 6x9
   (#579). The sizes are `6x4`, `6x9` and `6x11`, which PostGrid calls 6x4, 9x6 and 11x6, and our renderer
   draws all three (#594);
+- `layout_changed`: held mail (#697) that lays out otherwise than when it was sent, with no stored PDF to print
+  from ("The letter lays out differently from when it was sent.", or the postcard's). A fingerprint this build
+  cannot compare, a newer build's scheme, is `unknown_version` ("This build cannot compare the letter's
+  recorded layout.");
 - `render`: anything else that failed to lay out or draw: a letter's gift card, or its stationery (#563), included.
   "The postcard was drawn with a front this build cannot read." means a `pdf-3` postcard's
   `content.postcardFront` is not one this build reads (`postcardFrontOf`, #594).
@@ -897,6 +901,17 @@ and where a reason has more than one case, by the letter's stored content (`cont
     stationery is refused when the draft is made unless the print reads it back, so this means the
     build changed, not the letter. A front this build cannot read is the same case (#594), and so is a
     front's caption or place that no longer fits: it was measured to fit when it was previewed.
+- **A `layout_changed` hold (#697)** means a deploy since the send moved what the print draws: a layout rule,
+  the renderer, a font or the layout engine's version. Its stored PDF was missing or not the bytes recorded
+  (`held_print.pdf_missing` or `held_print.pdf_mismatch`), or was never stored (`held_print.store_failed`).
+  Either roll back the change and retry, or, when the change is meant to stay, let the letter print as it
+  now lays out: clear what the send recorded, then retry. The three columns go together (a stored PDF needs
+  a fingerprint, and the engine goes with it):
+  `UPDATE letters SET print_pdf_sha256 = NULL, print_layout_fingerprint = NULL, print_layout_engine = NULL WHERE letter_id = '...'`.
+  Look at the new preview first, and tell the customer when it visibly differs. A letter whose `content.pages`
+  you change (the `overflow` case above) needs the same: otherwise it is held as `layout_changed` next.
+  A `held_print.layout_changed` error from the maintenance run's backfill names a letter that will be held
+  this way on its date: the same choice, made before then.
 - **Reject** when the content itself cannot print, resolving it as rejected
   (`provider_confirmed_rejected_refund`):
   - a postcard message that is too long in any build;
@@ -929,6 +944,12 @@ before refunding: the job page shows only the latest class, because a retry clea
 A retry of a letter whose earlier attempt did reach PostGrid reuses that attempt's `Idempotency-Key`.
 Probe P7 showed PostGrid replaying the first letter for a reused key whatever the body, for requests
 seconds apart. How long PostGrid keeps a key is not documented (`docs/learnings/postgrid-pdf-rendering.md`).
+
+**Rolling back below migration 065** (#697). An older build ignores what the send recorded: it prints held
+mail as it lays out on the day, unchecked, as before #697, and never deletes `held-pdf/` objects. Those stay
+in the bucket until this build's sweep runs again. Its retention sweeps and erasure leave the three columns
+set on emptied rows, which is harmless: they describe content that is gone, and this build's sweep deletes
+the PDFs.
 
 **Rolling back below migration 039.** Do not roll the API back to a build older than migration 039 while
 letters with `content.rendererVersion` are queued or held, or while drafts with `renderer_version` are
@@ -1090,7 +1111,9 @@ only:
   rolling 24 hours; default 20, from 1 to 1000.
 
 The finished photo goes to the same private bucket as generated images, under
-`uploaded-photos/` and a key made from a hash of the account id. It is never
+`uploaded-photos/` and a key made from a hash of the account id. (Held mail's
+print PDFs share the bucket under `held-pdf/`, #697; `cleanupExpiredImages`
+never lists that prefix.) It is never
 served at an address. There is one per account, so a new upload replaces the
 one before. It is readable for 15 minutes: a read after that deletes it, and
 otherwise the hourly maintenance run's `cleanupExpiredImages` does. Account
