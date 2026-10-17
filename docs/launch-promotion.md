@@ -110,9 +110,9 @@ must be ready before the API deploys against it
    that exactly these are offered and each works:
    - each social connection uses our own OAuth application's credentials, not Auth0's developer
      keys, and asks for the email address (the linking Action needs it);
-   - each chosen connection is promoted to the domain level, since the connected apps are
-     third-party clients that use domain-level connections only (production's record has only
-     Google and the password connection promoted);
+   - each chosen connection is ticked on the website's application and promoted to the domain
+     level, since the connected apps are third-party clients that use domain-level connections
+     only (production's record has only Google and the password connection promoted);
    - each connection left out (Apple, Microsoft until then) has that promotion off and is unticked
      on the website's application. **Never delete a connection**: Auth0 deletes its users with it,
      past undoing. If step 3 counted users on one left out, decide first what becomes of them.
@@ -266,7 +266,9 @@ SELECT pid, state, now() - xact_start AS age, left(query, 60) AS query FROM pg_s
    - the boot log shows `boot.thread_pool` with size 16;
    - the ledger's newest row is `064_admin_command_retention.sql`;
    - one production sign-in with each method chosen in stage 0, through the website and through a
-     connected app (the ChatGPT connector), each sign-in page offering exactly the chosen methods;
+     connected app (the ChatGPT connector, with "Connect another account"), each sign-in page
+     offering exactly the chosen methods; sign out on the website between methods, so a remembered
+     session does not skip the sign-in page;
    - the maintenance and admin services are on the new build.
 4. Re-run the admin provisioning for production **from a checkout at the promoted commit**, never
    from an older one: it applies the grants of the code it runs (`038`, `053` and `063` need it).

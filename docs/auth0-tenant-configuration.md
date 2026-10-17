@@ -1214,7 +1214,7 @@ auth0 api get connections/CONNECTION_ID | jq '{name, is_domain_connection}'
 **Check:**
 1. Auth0 logs: Auth0 Dashboard → Monitoring → Logs
 2. MCP server logs: Check terminal output or `/debug/logs` endpoint
-3. Verify all 5 connections are domain-level
+3. Verify every connection offered is domain-level (all 5 on development; production's are decided in [launch-promotion.md](launch-promotion.md), stage 0 step 6)
 
 ### Issue: Social login not appearing in Auth0 Universal Login
 
@@ -1263,7 +1263,7 @@ Letter IRL uses separate Auth0 tenants for complete environment isolation:
 
 When updating development, ensure production is also updated:
 
-1. **Connections** - All 5 identity providers with `is_domain_connection: true`
+1. **Connections** - Every identity provider offered with `is_domain_connection: true` (all 5 on development; production offers the ones decided in [launch-promotion.md](launch-promotion.md), stage 0 step 6, and has the others' promotion off)
 2. **DCR** - Off; rollback inventory only (CIMD registration on)
 3. **Default Audience** - The MCP API identifier (both tenants repointed 2026-09-14)
 4. **Applications** - Create equivalent apps with appropriate callbacks; authorize the website application for the MCP API
