@@ -324,7 +324,7 @@
           style="display: none"
         ></div>
       </div>
-      <p class="rev">postcard t34</p>
+      <p class="rev">postcard t35</p>
     </div>
 
     <!-- The postcard maker (#580): widgets/shared/studio.js lays the card out
@@ -2733,6 +2733,14 @@
         if (typeof state === "string" && state !== "pending_payment" && scheduleMissedShown) {
           scheduleMissedShown = false;
           document.getElementById("checkout-note").style.display = "none";
+        }
+        // A checkout cancelled, or left until it expired, cancels its draft: nothing can be paid on this card now, so
+        // its checkout link, the button that opened it, Check status and the note about paying go. The pill says what
+        // happened, and a new preview is the way to send it.
+        if (state === "cancelled") {
+          for (const id of ["pay-send-button", "checkout-link", "check-status-button", "checkout-note"]) {
+            document.getElementById(id).style.display = "none";
+          }
         }
         // "Settled" means nothing further will change SOON - not that nothing
         // will ever change. "processing" counts, and that is the point:

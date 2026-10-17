@@ -12,7 +12,10 @@
  * the letter's words the same way, through set_letter_words. The two share
  * one draft, one wait and one page: a single change to the draft at a time,
  * none while the card sends or pays, and the page and price the last change
- * gave are the card's.
+ * gave are the card's. The words stand in their boxes, ready to type in: Update
+ * the page and Put back show once they differ from the draft's. The chat can
+ * change them too, and the card hears of it when it asks the server again
+ * (onStale): words typed meanwhile are kept, never written over.
  *
  * While signatures are offered (#608), a letter preview also says whether it
  * prints the person's saved signature (signature). With one saved, the row
@@ -120,19 +123,22 @@
       slots: {}
     };
 
-    // The Words tab's editor (#586). editing: it is open. updating: its words
-    // are being set. set: the words this card last set on the draft, or the
-    // server last gave it, or null for the preview's; each { bodyText,
-    // signOff, version }, the version a change of them names (#593 review
-    // round 1). current: the words shown now. fit: how full the page
-    // is for them. editable: the card may change them now. gift: a gift
-    // letter, which stays on one page.
+    // The Words tab's editor (#586). updating: its words are being set. set:
+    // the words this card last set on the draft, or the server last gave it,
+    // or null for the preview's; each { bodyText, signOff, version }, the
+    // version a change of them names (#593 review round 1). current: the
+    // words the draft has now. base: the words the boxes were filled from,
+    // which an Update replaces. measured: the last count of how full the
+    // pages are ({ fit, bodyText, signOff }), with the words it counted, so
+    // the room for other words, the chat's among them, is reckoned from it.
+    // editable: the card may change them now. gift: a gift letter, which
+    // stays on one page.
     var words = {
-      editing: false,
       updating: false,
       set: null,
       current: null,
-      fit: null,
+      base: null,
+      measured: null,
       editable: false,
       gift: false,
       message: "",
@@ -464,8 +470,8 @@
             state.message = "There's no saved signature to add now. Save one in the chat, or on your Letter IRL settings page.";
             signature.offered = false;
             signature.on = false;
-            // Focus leaves with the switch: to the first style, as closeWords
-            // returns it (#615 review round 2).
+            // Focus leaves with the switch: to the first style (#615 review
+            // round 2).
             var focused = typeof document !== "undefined" && document.activeElement === signatureSwitch;
             if (signatureRow) signatureRow.style.display = "none";
             if (focused && options.buttons[0] && typeof options.buttons[0].focus === "function") options.buttons[0].focus();
@@ -566,20 +572,47 @@
     // The page the room is counted on, by how many the letter takes.
     var ROOM_ON = ["", "this page", "the back of the page", "the third page"];
 
-    // How much room the words being written leave (#586): the room the last
-    // count gave, less what was typed since. "About": a line ends at a word,
-    // and a new paragraph takes a line of its own.
+    // About how much of the page some words take, in characters: every line
+    // but the last ends where it ends, and takes the whole width of the page
+    // all the same, so twenty short lines take twenty lines, not their few
+    // characters (as the room was counted before, which put prose written over
+    // short lines hundreds of characters past a page it fitted). Without a
+    // width to count by, the characters themselves.
+    function pageCharacters(text, perLine) {
+      if (!(perLine > 0)) return text.length;
+      var lines = text.split("\n");
+      var taken = 0;
+      for (var i = 0; i < lines.length - 1; i++) {
+        taken += Math.max(1, Math.ceil(lines[i].length / perLine)) * perLine;
+      }
+      return taken + lines[lines.length - 1].length;
+    }
+
+    function wordsCharacters(bodyText, signOff, perLine) {
+      return pageCharacters(bodyText, perLine) + pageCharacters(signOff, perLine);
+    }
+
+    // How much room the words in the boxes leave (#586): the room the last
+    // count gave, less what they take beyond the words it counted. "About": a
+    // line ends at a word, and the count's lines are of an average width.
     function roomText() {
-      var fit = words.fit;
+      var measured = words.measured;
       var body = element("studio-words-body");
       var signOff = element("studio-words-signoff");
-      if (!fit || typeof fit !== "object" || !words.current || !body || !signOff) return "";
+      if (!measured || !body || !signOff) return "";
+      var fit = measured.fit;
       var room = Number(fit.roomCharacters);
       if (!isFinite(room)) return "";
+      // A count of another number of pages than the letter has now (the chat, or a change of service, ran it on or
+      // back since) is no count of these: the room is not said.
+      if (state.terms && state.terms.pages !== (fit.pages === 2 || fit.pages === 3 ? fit.pages : 1)) return "";
+      // Nor is one counted in another style, or with the signature as it was not (the chat changed it since).
+      if (measured.style !== keyOf(state.stationery) || measured.signed !== signature.on) return "";
+      var perLine = Number(fit.charactersPerLine);
       var pages = fit.pages === 2 || fit.pages === 3 ? fit.pages : 1;
-      var typed = body.value.length + signOff.value.length;
-      var before = words.current.bodyText.length + words.current.signOff.length;
-      var left = Math.round(room - (typed - before));
+      var typed = wordsCharacters(body.value, signOff.value, perLine);
+      var counted = wordsCharacters(measured.bodyText, measured.signOff, perLine);
+      var left = Math.round(room - (typed - counted));
       var count = Math.abs(left).toLocaleString("en-US");
       if (left >= 0) return "About " + count + " characters left on " + ROOM_ON[pages] + ".";
       if (words.gift) return "About " + count + " characters past this page, and a gift letter is one page.";
@@ -589,42 +622,100 @@
       return "About " + count + " characters past " + ROOM_ON[pages] + ": Update the page to see how it runs on.";
     }
 
+    // Said when the chat changed the words while others were being typed here.
+    var KEPT =
+      "The words were changed in the chat. Yours are kept here, and the page shows the chat's: " +
+      "Update the page to use yours instead, or Put back to take the chat's.";
+    // Said when an Update was refused for words changed elsewhere, until the card has the new ones.
+    var STALE = "The words were not changed: this card's copy of them is out of date. Ask in the chat to change them, or make the preview again.";
+
     // The editor's elements live in the studio, which draws them after the
     // card starts: found, and listened to, once they are there.
     function bindWords() {
       if (wordsBound) return true;
-      var open = element("studio-words-open");
       var update = element("studio-words-update");
-      var cancel = element("studio-words-cancel");
+      var putBackButton = element("studio-words-cancel");
       var body = element("studio-words-body");
       var signOff = element("studio-words-signoff");
-      if (!open || !update || !cancel || !body || !signOff) return false;
-      open.addEventListener("click", openWords);
+      if (!update || !putBackButton || !body || !signOff) return false;
       update.addEventListener("click", setWords);
-      cancel.addEventListener("click", closeWords);
-      body.addEventListener("input", drawWords);
-      signOff.addEventListener("input", drawWords);
+      putBackButton.addEventListener("click", putBack);
+      body.addEventListener("input", typedWords);
+      signOff.addEventListener("input", typedWords);
       wordsBound = true;
       return true;
     }
 
+    // The boxes hold other words than the ones they were filled from.
+    function typed() {
+      var body = element("studio-words-body");
+      var signOff = element("studio-words-signoff");
+      return Boolean(words.base && body && signOff) && (body.value !== words.base.bodyText || signOff.value !== words.base.signOff);
+    }
+
+    function sameWords(a, b) {
+      return a.bodyText === b.bodyText && a.signOff === b.signOff && a.version === b.version;
+    }
+
+    // The boxes follow the draft's words while nothing is typed in them. Words
+    // typed when the draft's change under them (the chat changed them) are
+    // kept, and the card says so: an Update then replaces the chat's, which the
+    // page shows. Never while words are being set: their answer fills the boxes.
+    function fillWords() {
+      if (words.updating || !words.current || !bindWords()) return;
+      var current = words.current;
+      var body = element("studio-words-body");
+      var signOff = element("studio-words-signoff");
+      if (words.base && sameWords(words.base, current)) return;
+      var kept = typed() && (body.value !== current.bodyText || signOff.value !== current.signOff);
+      words.base = current;
+      if (kept) {
+        words.message = KEPT;
+        words.error = false;
+        return;
+      }
+      body.value = current.bodyText;
+      signOff.value = current.signOff;
+    }
+
+    // Whether the boxes held other words when the card last drew them: the
+    // card holds its Send buttons while they do, and is told when that turns.
+    var wordsTyped = false;
+
+    function typedWords() {
+      var was = wordsTyped;
+      var now = typed();
+      // What the last change said is about words the person is now changing.
+      if (now && !was && !words.error) words.message = "";
+      drawWords();
+      if (now !== was) options.onBusy();
+    }
+
     function drawWords() {
       if (!bindWords()) return;
-      var editing = words.editable && words.editing;
+      var editable = words.editable;
+      var body = element("studio-words-body");
+      var signOff = element("studio-words-signoff");
       var view = element("studio-words");
       var chat = element("studio-words-chat");
+      var actions = element("studio-words-actions");
       var count = element("studio-words-count");
       var note = element("studio-words-note");
       var update = element("studio-words-update");
-      element("studio-words-edit").hidden = !editing;
-      if (view) view.hidden = editing;
-      element("studio-words-open").hidden = !words.editable || editing;
-      if (chat) chat.hidden = words.editable;
+      wordsTyped = editable && typed();
+      element("studio-words-edit").hidden = !editable;
+      if (view) view.hidden = editable;
+      if (chat) chat.hidden = editable;
+      // Update the page and Put back, once there is something to update or put back.
+      if (actions) actions.hidden = !(wordsTyped || words.updating);
+      // The words being set stay as they are sent until the answer comes.
+      body.readOnly = words.updating;
+      signOff.readOnly = words.updating;
       // aria-disabled, as the Style row's: a press meanwhile is ignored.
       update.setAttribute("aria-disabled", state.busy || state.held ? "true" : "false");
       element("studio-words-cancel").setAttribute("aria-disabled", words.updating ? "true" : "false");
       update.textContent = words.updating ? "Updating the page\u2026" : "Update the page";
-      var room = editing ? roomText() : "";
+      var room = editable ? roomText() : "";
       if (count) {
         count.textContent = room;
         count.hidden = !room;
@@ -636,52 +727,38 @@
       }
     }
 
-    function openWords() {
-      if (!words.editable || !words.current || state.busy || state.held) return;
+    // Focus goes back to the letter's box when the buttons it was on go.
+    function focusBody() {
       var body = element("studio-words-body");
-      var signOff = element("studio-words-signoff");
-      body.value = words.current.bodyText;
-      signOff.value = words.current.signOff;
-      // What these words were written from (#695 review round 1): a status answer taken while they are written does not
-      // change which words they replace.
-      words.openedFrom = words.current;
-      words.editing = true;
+      var active = typeof document !== "undefined" ? document.activeElement : null;
+      var actions = element("studio-words-actions");
+      if (body && actions && active && actions.contains(active) && typeof body.focus === "function") body.focus();
+    }
+
+    // Put back: the boxes take the draft's words again, and what was typed goes.
+    function putBack() {
+      if (words.updating || !words.current || !bindWords()) return;
+      element("studio-words-body").value = words.current.bodyText;
+      element("studio-words-signoff").value = words.current.signOff;
+      words.base = words.current;
       words.message = "";
       words.error = false;
-      drawWords();
-      // The card holds its Send buttons while words are being written.
-      options.onBusy();
-      if (typeof body.focus === "function") body.focus();
-    }
-
-    // Focus goes back to Change the words, the boxes having gone.
-    function focusOpen() {
-      var open = element("studio-words-open");
-      if (open && !open.hidden && typeof open.focus === "function") open.focus();
-    }
-
-    function closeWords() {
-      if (words.updating) return;
-      words.editing = false;
-      words.openedFrom = null;
-      words.message = "";
-      words.error = false;
+      focusBody();
       drawWords();
       options.onBusy();
-      focusOpen();
     }
 
-    // The words as written in the editor, set on the draft (#586). The page
+    // The words as written in the boxes, set on the draft (#586). The page
     // comes back drawn again with them, and what the letter costs now.
     function setWords() {
-      if (!words.editable || !words.editing || state.busy || state.held || !state.draftId || typeof host.callTool !== "function") return;
+      if (!words.editable || words.updating || !typed() || state.busy || state.held || !state.draftId || typeof host.callTool !== "function") return;
       if (typeof options.idle === "function" && !options.idle()) return;
       var draftId = state.draftId;
       var bodyText = element("studio-words-body").value;
       var signOff = element("studio-words-signoff").value;
       // The words it replaces: their version, so a change made elsewhere since
       // is not overwritten unseen (#593 review round 1).
-      var startedFrom = words.openedFrom || words.current;
+      var startedFrom = words.base;
       var args = { draftId: draftId, bodyText: bodyText, signOff: signOff };
       if (startedFrom && typeof startedFrom.version === "string") args.wordsVersion = startedFrom.version;
       state.busy = true;
@@ -693,6 +770,8 @@
       // Changing the words is acting on the draft (the card keeps it).
       if (typeof options.onSet === "function") options.onSet();
       options.onBusy();
+      // Refused for words changed elsewhere: the card is asked for them once this change is over.
+      var stale = false;
       Promise.resolve()
         .then(function () {
           return host.callTool("set_letter_words", args);
@@ -714,7 +793,8 @@
             signOff: signOff,
             version: typeof data.wordsVersion === "string" ? data.wordsVersion : undefined
           };
-          words.editing = false;
+          // The boxes hold these words, as sent.
+          words.base = words.set;
           // What it costs now, and how full its pages are.
           var said = termsOf(data, result && result._meta && result._meta.pageFit);
           if (said) adoptTerms(said);
@@ -739,17 +819,20 @@
           // its own words, and keeps what was typed (#593 review rounds 2 and
           // 3). Found anywhere in the text, as a host may wrap it (#434). The
           // server's version check is what keeps a change made elsewhere
-          // from being overwritten; the card fetches nothing to catch up.
-          words.message = said.indexOf("Nothing was changed:") !== -1 ? "The words were not changed: this card's copy of them is out of date. Ask in the chat to change them, or make the preview again." : said;
+          // from being overwritten; the card asks for the words as they are
+          // now (onStale), and says KEPT once it has them.
+          stale = said.indexOf("Nothing was changed:") !== -1;
+          words.message = stale ? STALE : said;
         })
         .then(function () {
           if (state.draftId !== draftId) return;
           state.busy = false;
           words.updating = false;
+          focusBody();
           draw();
           drawWords();
           options.onBusy();
-          if (!words.editing) focusOpen();
+          if (stale && typeof options.onStale === "function") options.onStale(draftId);
         });
     }
 
@@ -809,9 +892,11 @@
           state.message = "";
           state.error = false;
           state.slots = {};
-          words.editing = false;
           words.updating = false;
           words.set = null;
+          // The boxes are filled afresh from this draft's words, and its room counted from its own count.
+          words.base = null;
+          words.measured = null;
           words.message = "";
           words.error = false;
           keepSlots(offered);
@@ -841,15 +926,28 @@
         if (state.draftId !== null && options.row.style.display !== "none") draw();
         drawWords();
       },
-      // The Words tab's editor (#586): the words shown now, as the card set
-      // them or the preview gave them ({ bodyText, signOff }); how full the
-      // page is for them (fit, or null); whether the card may change them now
-      // (editable: room to write is offered and the draft can still change);
-      // and whether it is a gift letter. Only while the row is the draft's.
+      // The Words tab's editor (#586): the draft's words now, as the card set
+      // them, the server last gave them or the preview did ({ bodyText,
+      // signOff }); how full the page is for them (fit, or null when the card
+      // does not know: a status counts nothing); whether the card may change
+      // them now (editable: room to write is offered and the draft can still
+      // change); and whether it is a gift letter. Only while the row is the
+      // draft's.
       showWords: function (draftId, current, fit, editable, gift) {
         // { bodyText, signOff, version }: the version is the preview's, or the last change's.
         words.current = current && typeof current.bodyText === "string" && typeof current.signOff === "string" ? current : null;
-        words.fit = fit && typeof fit === "object" ? fit : null;
+        // A count the card has not seen is a count of the words it has now: the preview's, or a change's answer's. With
+        // none, the last count stands, and the room for these words is reckoned from the words it counted.
+        if (fit && typeof fit === "object" && words.current && state.draftId === draftId && (!words.measured || words.measured.fit !== fit)) {
+          words.measured = {
+            fit: fit,
+            bodyText: words.current.bodyText,
+            signOff: words.current.signOff,
+            // What it was counted in: another style, or the signature's band, holds other lines.
+            style: keyOf(state.stationery),
+            signed: signature.on
+          };
+        }
         words.gift = gift === true;
         words.editable =
           Boolean(editable) &&
@@ -857,7 +955,7 @@
           state.draftId === draftId &&
           options.row.style.display !== "none" &&
           typeof host.callTool === "function";
-        if (!words.editable && !words.updating) words.editing = false;
+        if (words.editable) fillWords();
         drawWords();
       },
       // The words this card set on the draft (#586), or null for the preview's.
@@ -910,10 +1008,15 @@
       busy: function () {
         return state.busy;
       },
-      // Words are being written in the editor (#586): until they are set or
-      // put back, sending would mail the words the draft has, not these.
+      // Other words are in the editor's boxes than the draft's, or are being
+      // set (#586): until they are set or put back, sending would mail the
+      // words the draft has, not these.
       editing: function () {
-        return words.editable && words.editing;
+        return words.editable && (typed() || words.updating);
+      },
+      // The editor is shown, its boxes open to type in.
+      wordsEditable: function () {
+        return words.editable;
       }
     };
   }
