@@ -91,11 +91,14 @@ must be ready before the API deploys against it
 
 1. A custom email provider (Resend) and the verification email template enabled, **before** the
    linking Action goes into the flow, or new password sign-ups cannot confirm.
-2. The `Account Linking (production)` machine-to-machine application, with exactly `read:users` and
-   `update:users` on the Management API.
+2. Count production's applications first: at the free plan's limit of 10, "Create application" is
+   off, so remove a legacy entry now (step 8 removes the rest). Then the `Account Linking
+   (production)` machine-to-machine application, with exactly `read:users` and `update:users` on
+   the Management API.
 3. Create the temporary application `Tenant check (temporary)` (the tenant doc's "Checking a
    tenant"), with `read:users` added for the row-holder check the tenant doc describes; run that
-   check, then delete the application, so it does not hold a slot during step 8. Then add the two
+   check, and from the same pass count the users of each connection (`identities[].connection`),
+   for step 6. Then delete the application, so it does not hold a slot during step 8. Then add the two
    Post Login Actions from [`docs/auth0/actions/`](auth0/actions/), the linking Action above the
    email-claim Action. Production already has an email-claim Action (deployed 2026-09-05): replace
    its code with the file's rather than adding a second, so the flow binds one of each.
@@ -103,11 +106,17 @@ must be ready before the API deploys against it
 5. The ChatGPT client's refresh-token settings (they are not inherited from development).
 6. The sign-in methods decided (Google, GitHub, and email and password; Microsoft only after LINK-02
    with it): each social connection with our own OAuth application's credentials, not Auth0's
-   developer keys, and every other connection (Apple, Microsoft until then) disabled for the apps.
+   developer keys. The apps that connect to Letter IRL (ChatGPT, Claude and the others) are
+   third-party clients, which sign in through every **domain-level** connection, with no per-app
+   switch. So a connection left out (Apple, and Microsoft until LINK-02) is taken off the tenant
+   level ("Promote Connection to Domain Level" off) or disabled, not only unticked on an app. If
+   step 3 counted users on it, decide first what becomes of them: turning it off locks them out
+   of their accounts and their letters.
 7. Run `scripts/check-auth0-tenant.ts` and record the result in the tenant doc. On production, run it
    here, before the imports of step 8 take the free application slots (none of them holds a
    Management API grant, so the check loses nothing). On development, which is at the free plan's
-   10-application limit, free a slot first.
+   10-application limit, free a slot first: remove an app you can import again from its client
+   document afterwards, never `Account Linking` or the website's.
    Its token comes from a new temporary application holding only the five read scopes (step 3's
    was deleted, with its `read:users`), deleted again after the run. **Not** from the Management API's API Explorer tab: on a tenant
    without the API Explorer Application, that tab creates it, with every Management API scope (the
@@ -252,7 +261,9 @@ SELECT pid, state, now() - xact_start AS age, left(query, 60) AS query FROM pg_s
    - `/readyz` answers 200 with the new `X-Build-Commit`;
    - the boot log shows `boot.thread_pool` with size 16;
    - the ledger's newest row is `064_admin_command_retention.sql`;
-   - one production sign-in with each method chosen in stage 0, through the website;
+   - one production sign-in with each method chosen in stage 0, through the website, and one
+     through a connected app (the ChatGPT connector), whose sign-in page offers only the chosen
+     methods;
    - the maintenance and admin services are on the new build.
 4. Re-run the admin provisioning for production **from a checkout at the promoted commit**, never
    from an older one: it applies the grants of the code it runs (`038`, `053` and `063` need it).
@@ -321,8 +332,8 @@ connector refresh:
 
 ## Stage F: arrive-by
 
-`LETTER_IRL_ARRIVE_BY_ENABLED=true`, after #697 is in production, with the object storage it needs
-configured there (the owner's step), after SCHEDULE-01 and ADMIN-CMD-04, once the operator alert and
+`LETTER_IRL_ARRIVE_BY_ENABLED=true`, after #697 and #726 are in production, with the object
+storage #697 needs configured on each service its docs name (the owner's step), after SCHEDULE-01 and ADMIN-CMD-04, once the operator alert and
 heartbeat URLs are proven, and with its privacy row published. Then refresh the connectors: it adds
 tools and an input.
 
@@ -330,7 +341,8 @@ tools and an input.
 
 One per deploy, each after its live prices exist, its terms are published and its test has passed
 on DEV: room to write (two and three pages), postcard sizes, certified mail (also PostGrid's
-confirmation, the website's part and a provisioning re-run). All three are sold by Pay & Send, so
+confirmation, its follow-ups from #625 in production, the website's part and a provisioning
+re-run). All three are sold by Pay & Send, so
 they need `JIT_PURCHASE_ENABLED=true`; room to write and the postcard sizes also need the renderer
 (stage D). For each option, in this order:
 

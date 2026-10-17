@@ -1000,8 +1000,9 @@ subjects, and only the surviving primary subject counts afterwards.
    (docs/letter-send-flow.md).
 
 3. **Domain-Level Connections**
-   - **All 5 connections** must have `is_domain_connection: true`
+   - **Every connection offered** must have `is_domain_connection: true` (all 5 on development)
    - **Why:** Third-party clients (like dynamically registered ChatGPT apps) can only use domain-level connections
+   - **And so the reverse:** a connection not offered in production (Apple, and Microsoft until LINK-02 passes with it; [launch-promotion.md](launch-promotion.md), stage 0 step 6) is taken off the domain level or disabled. Unticking it on an app does not reach third-party clients
 
 4. **OpenAI review redirect: no longer ours to set**
    - This item used to put `https://platform.openai.com/apps-manage/oauth` on the static client,
