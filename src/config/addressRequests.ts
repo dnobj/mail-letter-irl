@@ -50,8 +50,8 @@ export function addressRequestWaitingCap(env: NodeJS.ProcessEnv = process.env): 
 }
 
 /**
- * The most a closed request may be kept (#701, decision D6): the privacy
- * policy states this upper limit, so no setting may keep a request longer.
+ * The most a closed request may be kept (#701, decision D6): the upper limit
+ * the privacy policy's row will state, so no setting may keep a request longer.
  */
 export const ADDRESS_REQUEST_MAX_RETENTION_DAYS = 30;
 

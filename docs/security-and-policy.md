@@ -45,7 +45,7 @@
   content deleted within 7 days: `cleanupOldDrafts` deletes it 4 days after the expiry, #730; uploaded image links within 48 hours of the last upload, which the
   `recent-uploads-sweep` meets by deleting them at 24 hours; feature requests 12 months). An
   address request (#604), with any address a recipient gave through it, goes
-  `LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS` (7) days after it closes, or after its link expires
+  `LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS` (7, at most 30) days after it closes, or after its link expires
   unanswered (`address-requests-sweep`); the policy's wording for it is the owner's, and production
   waits for it. A saved signature (#608) is account data: kept until the person removes it or the
   account is erased, which the policy does not yet say; its wording is the owner's too, and production

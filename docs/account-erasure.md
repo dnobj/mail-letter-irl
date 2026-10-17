@@ -18,7 +18,7 @@ the owner's decision on #289 (2026-09-23).
 | Drafts (emptied instead when an order refers to one) | Orders, ledger lots and transactions, with their descriptions cleared |
 | Retention copies of letters and drafts | Disputes and refunds |
 | Personal access tokens, the upload link and feature requests | Gift letters, and gift codes another account redeemed |
-| Address requests (#604), with any address a recipient gave. The preview does not count them: neither admin role reads the table | |
+| Address requests (#604), with any address a recipient gave. The preview does not count them: the reader role has nothing of the table, and the operator role only what `address_request.delete` names (#701), never the address | |
 | The saved signature (#608), a picture of the person's handwriting. The preview does not count it either: neither admin role reads the table | |
 | Saved stationery designs (#649), with the names the person gave them, and the remembered design. The preview does not count them: neither admin role reads the table. A draft's or a letter's copy of a design goes with the draft or the letter | |
 | The photo uploaded through the card, from the image store (#474) | |
@@ -104,7 +104,7 @@ The unspent balance and unused gift letters are forfeited. If the customer wants
 ## Why it is queued
 
 The panel's operator database role cannot read or change a customer's email, address or letter content
-(`src/admin/provisioning.ts`). That is deliberate, and erasure keeps it that way: the panel can only
+(`src/admin/provisioning.ts`). Since #701 it can delete one address request on request, without reading it. That is deliberate, and erasure keeps it that way: the panel can only
 **ask** for a whole account to be erased, behind the preview, elevation, phrase and audit row, by adding
 an `admin_operations` row. The maintenance service carries it out as the database owner, the role the
 retention sweep already scrubs content with (`src/services/accountErasureService.ts`). It reads the gate

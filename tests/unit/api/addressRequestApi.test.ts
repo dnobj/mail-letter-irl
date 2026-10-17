@@ -246,14 +246,17 @@ describe('the address request routes (#604)', () => {
   });
 
   it('says the retention days the setting holds, within the 30 the policy states (#701)', async () => {
-    vi.stubEnv('LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS', '12');
-    expect((await call('page', { token: TOKEN })).json).toMatchObject({ retentionDays: 12 });
-    vi.stubEnv('LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS', '30');
-    expect((await call('page', { token: TOKEN })).json).toMatchObject({ retentionDays: 30 });
-    // Past the stated limit, the setting is not honoured: the default stands.
-    vi.stubEnv('LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS', '31');
-    expect((await call('page', { token: TOKEN })).json).toMatchObject({ retentionDays: 7 });
-    vi.unstubAllEnvs();
+    try {
+      vi.stubEnv('LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS', '12');
+      expect((await call('page', { token: TOKEN })).json).toMatchObject({ retentionDays: 12 });
+      vi.stubEnv('LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS', '30');
+      expect((await call('page', { token: TOKEN })).json).toMatchObject({ retentionDays: 30 });
+      // Past the stated limit, the setting is not honoured: the default stands.
+      vi.stubEnv('LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS', '31');
+      expect((await call('page', { token: TOKEN })).json).toMatchObject({ retentionDays: 7 });
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it('checks the link before the address: a used or unknown one costs no verification', async () => {

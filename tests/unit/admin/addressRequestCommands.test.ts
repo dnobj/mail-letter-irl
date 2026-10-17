@@ -60,10 +60,25 @@ describe("what names an address request (#701)", () => {
       tokenStats: { total: 0, active: 0, revoked: 0, usedToday: 0, usedLast7Days: 0 },
       featureRequests: [],
       csrfToken: "c".repeat(64),
+      mode: "full",
     } as never).value;
     expect(page).toContain('<form method="post" action="/support/address-request">');
     expect(page).toContain(`name="_csrf" value="${"c".repeat(64)}"`);
     expect(page).toContain('name="request"');
+    // Read-only mode offers no form it would refuse.
+    const readOnly = renderSupport({
+      tokenStats: { total: 0, active: 0, revoked: 0, usedToday: 0, usedLast7Days: 0 },
+      featureRequests: [],
+      csrfToken: null,
+      mode: "read-only",
+    } as never).value;
+    expect(readOnly).not.toContain("/support/address-request");
+    expect(readOnly).toContain("needs full mode");
+  });
+
+  it("warns the operator to keep the link, names and address out of the reason, which the audit keeps", async () => {
+    const preview = await addressRequestDeleteCommand.preview({ query: vi.fn() } as unknown as AdminSqlClient, `link:${HASH}`, {});
+    expect(preview.warnings[0]).toContain("Keep the link, names and address out of the reason");
   });
 });
 

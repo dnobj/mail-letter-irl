@@ -67,7 +67,7 @@ export function registerOpsRoutes(
       tokenStats: await readTokenStats(client),
       featureRequests: await listFeatureRequests(client, 100),
     }));
-    return context.render("Support", renderSupport({ ...data, csrfToken: context.csrfToken }));
+    return context.render("Support", renderSupport({ ...data, csrfToken: context.csrfToken, mode: context.config.mode }));
   }, { name: "support" });
 
   // An address request to delete (#701), named by a pasted link or an id. A

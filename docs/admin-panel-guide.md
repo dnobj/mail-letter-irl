@@ -419,7 +419,7 @@ row, queued for the next hourly run; a search by letter, draft or account id for
 100; and **Recent restores**, where each queued restore's outcome shows, since a copy that went back leaves
 the quarantine; a redacted letter's own page also shows its copy and the restore, and an account page links to
 its copies), **Routing** (the routing table, the
-registry, stuck letters), **Support** (token counts, feature requests without contact emails). Manual
+registry, stuck letters), **Support** (token counts, feature requests without contact emails, and the form that names an address request to delete, in full mode). Manual
 cases: `ADMIN-OPS-01` to `ADMIN-OPS-03` and `ADMIN-LEGACY-01`.
 
 The **Stripe** page runs the reconciliation (`reconcileStripePayments`) with the service's restricted key

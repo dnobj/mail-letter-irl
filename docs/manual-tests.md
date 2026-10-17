@@ -1787,7 +1787,9 @@ PostGrid test-mode verification; a refused field costs none.
 9. [ ] Change one character of a link: the page says "This link isn't valid".
 10. [ ] Seven days after a request closes, the maintenance run's `address-requests-sweep` deletes it.
     To see it sooner, set `LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS=1` on the maintenance service
-    (`letter-irl-maintenance-dev`): its floor is 1 day, and 0 or a non-integer falls back to 7. Then
+    (`letter-irl-maintenance-dev`) **and** the API, which tells the page: check the page now says "1 day
+    after you answer". Its floor is 1 day, its ceiling 30 (#701), and 0, a value over 30 or a non-integer
+    falls back to 7. Then
     `get_address_request` says "That address request wasn't found on this account. request_address
     makes a new one." Put the variable back afterwards.
 11. [ ] Last, make a fourth request and leave it waiting. Then turn the flag off: set it to `false` and

@@ -459,7 +459,8 @@ describeWithDatabase("admin foundation database migration", () => {
     await insert(hash);
     const byId = (await insert(createHash("sha256").update("ZyXwVuTsRqPoNmLkJiHgFeDc", "utf8").digest())).rows[0].request_id;
 
-    // The reader holds nothing of the table.
+    // The reader holds nothing of the table. Each role change is undone whatever an assertion does.
+    try {
     await client.query(`SET ROLE "${config.database.readerRole}"`);
     await expect(client.query("SELECT status FROM address_requests")).rejects.toMatchObject({ code: "42501" });
     await client.query("RESET ROLE");
@@ -486,7 +487,9 @@ describeWithDatabase("admin foundation database migration", () => {
     await expect(execution(`link:${hash.toString("hex")}`)).resolves.toMatchObject({ deleted: true, status: "answered" });
     await expect(execution(`link:${hash.toString("hex")}`)).resolves.toEqual({ deleted: false });
     await expect(execution(`request:${byId}`)).resolves.toMatchObject({ deleted: true, status: "answered" });
-    await client.query("RESET ROLE");
+    } finally {
+      await client.query("RESET ROLE");
+    }
 
     const left = await client.query("SELECT count(*)::int AS n FROM address_requests WHERE user_id = 'address-fixture'");
     expect(left.rows[0].n).toBe(0);
