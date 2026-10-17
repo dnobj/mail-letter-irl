@@ -63,6 +63,7 @@ maintenance job.
 - [Infrastructure](infrastructure.md) - cloud topology, runtime architecture, maintenance tasks
 - [Stripe custom checkout domain](stripe-custom-domain.md) - serving Checkout on pay.letterirl.com, and the order to set it up in (#373)
 - [Deployment](deployment.md) - release process and boot validation rules
+- [Launch Promotion Plan](launch-promotion.md) - the launch promotion: order, per-system steps, checks and rollback floors (#702)
 - [Railway Setup](railway-setup.md) - services, commands, variables, Serverless policy
 - [Idle-Cost Operations](idle-cost-operations.md) - cost controls and rollback runbook
 - [Admin Panel Guide](admin-panel-guide.md) - the tailnet-only operator panel in both environments
