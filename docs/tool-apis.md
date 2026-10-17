@@ -242,8 +242,8 @@ Listed only while signatures are offered (#608, concept 3 in [letter-creator-vis
   - **Refused**, as `set_stationery` is, for a draft that is not the caller's, already sent, expired, or with a live Pay & Send order; for a postcard or a preview the legacy HTML drew; and when its words, stationery or signature changed while its page was drawn (`DRAFT_CHANGED`: try again).
   - Sends nothing. Not read-only, not destructive, and idempotent, on `mail:draft`. The letter card may call it (`openai/widgetAccessible`).
 
-**The website's routes** (`src/api/signatureApiHandler.ts`), the same service and scopes as the tools, and 404 while signatures are not offered:
-- `GET /api/signature` (`mail:read`): `{ saved: false }`, or `{ saved: true, width, height, savedAt, image }` with the picture as a PNG data URI. `no-store`.
+**The website's routes** (`src/api/signatureApiHandler.ts`), the same service and scopes as the tools. While signatures are not offered, nothing new can be saved, but a signature saved while they were is still the person's to see and remove: GET shows it with `offered: false` and DELETE removes it. Every other answer then is 404, as is GET without a saved signature, so the website shows nothing of signatures.
+- `GET /api/signature` (`mail:read`): `{ saved: false }`, or `{ saved: true, width, height, savedAt, image }` with the picture as a PNG data URI, carrying `offered: false` while signatures are not offered. `no-store`.
 - `POST /api/signature` (`mail:draft`) with `{ image: <PNG, JPEG or WebP data URI> }`, a body of at most `LETTER_IRL_SIGNATURE_BODY_LIMIT_BYTES` (4 MB): cleans and saves it, and answers as GET does with `replaced`. 400 for a body that is not a picture; 422 `{ reason, message }` for a cleaning refusal or a picture that cannot be opened; 413 too large; 408 too slow; 503 when the image service is busy.
 - `DELETE /api/signature` (`mail:draft`): `{ removed }`.
 
