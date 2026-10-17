@@ -63,7 +63,7 @@ The setup itself:
 > - Text-only letters, letters with header images (letterhead), or letters with enclosed photos, up to three pages
 > - Stationery themes, your own saved designs, and your signature
 > - Postcards in 4×6, 6×9 and 11×6, with a border, a greeting or a collage of photos
-> - Mail that arrives by a date you choose, and USPS Certified Mail
+> - Mail timed to arrive by a date you choose (USPS does not guarantee First-Class dates), and USPS Certified Mail
 > - A private link that asks someone for their address
 > - Address validation to ensure deliverability
 > - Saved return address for convenience
@@ -231,8 +231,9 @@ and stays out when it should not (precision).
 **Expected Behavior**
 - Tool: `quote_and_preview_letter_with_image` (inline) or `quote_and_preview_letter_with_header_image` (header)
 - The image is processed and shown in the widget preview
-- The text limit is shorter with an image: 800 characters inline, 1,100 with a header, against
-  1,600 for text only
+- The text limit is the page: on our renderer the letter's lines, with the image, must fit one page,
+  or up to three with room to write (a 10,000-character cap a page); the legacy HTML's limits were
+  800 characters inline, 1,100 with a header and 1,600 for text only
 
 ### Use Case 3: Send a Postcard
 
@@ -281,8 +282,8 @@ and stays out when it should not (precision).
 - Tool: `get_account_balance`, `get_order_status`, or `list_orders`
 - Read-only operations, no confirmation needed
 - Shows letters remaining, order and purchase history, and each order's status and timeline. There
-  is no carrier tracking, so a question about delivery gets the status, never a claim that the item
-  arrived.
+  is no carrier tracking for a standard letter, so a question about delivery gets the status, never a
+  claim that the item arrived; certified mail has a USPS tracking number.
 
 ### Use Case 5: Manage Return Address
 
