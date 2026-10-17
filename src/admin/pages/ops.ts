@@ -9,6 +9,7 @@ import type {
   TokenStatsView,
 } from "../queries/ops.js";
 import { html, join, type SafeHtml } from "../ui/html.js";
+import { csrfField } from "../ui/layout.js";
 import { statusBadge } from "../ui/format.js";
 import { accountLink, card, definitionList, letterLink, table, when } from "./common.js";
 
@@ -168,7 +169,7 @@ ${table(
 )}`;
 }
 
-export function renderSupport(input: { tokenStats: TokenStatsView; featureRequests: FeatureRequestView[] }): SafeHtml {
+export function renderSupport(input: { tokenStats: TokenStatsView; featureRequests: FeatureRequestView[]; csrfToken?: string | null }): SafeHtml {
   const { tokenStats } = input;
   return html`<h1>Support</h1>
 <h2>Personal access tokens</h2>
@@ -195,5 +196,12 @@ ${table(
     when(request.resolvedAt),
   ]),
   "none.",
-)}`;
+)}
+<h2>Delete an address request</h2>
+<p class="muted">When the person an address request was sent to, or its sender, asks for it to be deleted (#701). The panel cannot read address requests: paste the whole link the person was sent, or the request id, and the next page confirms the delete. The link is reduced to its fingerprint before anything else sees it.</p>
+<form method="post" action="/support/address-request">
+  ${csrfField(input.csrfToken ?? null)}
+  <label>Link or request id <input type="text" name="request" autocomplete="off" spellcheck="false" required></label>
+  <button type="submit" class="danger">Preview the delete…</button>
+</form>`;
 }

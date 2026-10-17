@@ -1,4 +1,5 @@
 import { createAccountCommands } from "./accounts.js";
+import { addressRequestDeleteCommand } from "./addressRequests.js";
 import { alertTransitionCommand } from "./alerts.js";
 import { createGiftCommands } from "./gifts.js";
 import { createImageCommands } from "./images.js";
@@ -45,6 +46,7 @@ export const ADMIN_COMMANDS: ReadonlyArray<CommandDefinition<any>> = [
   ops.statusSync,
   limits.set,
   limits.clear,
+  addressRequestDeleteCommand,
 ];
 
 export function findAdminCommand(name: string): CommandDefinition<any> | undefined {

@@ -25,6 +25,16 @@ describe("admin grant statements", () => {
   const statements = buildAdminGrantStatements(config);
   const sql = statements.join("\n");
 
+  it("lets the operator delete an address request and read only what the delete names, and the reader nothing of them (#701)", () => {
+    const onRequests = statements.filter((statement) => statement.includes("address_requests"));
+    expect(onRequests).toEqual([
+      'GRANT SELECT (request_id, token_hash, status, created_at) ON TABLE "public".address_requests TO "letter_irl_admin_operator_development"',
+      'GRANT DELETE ON TABLE "public".address_requests TO "letter_irl_admin_operator_development"',
+    ]);
+    expect(ADMIN_READER_TABLES).not.toContain("address_requests");
+    expect(ADMIN_READER_COLUMN_GRANTS).not.toHaveProperty("address_requests");
+  });
+
   it("never grants the reader whole-row access to a table with content or addresses", () => {
     for (const restricted of [
       "users",

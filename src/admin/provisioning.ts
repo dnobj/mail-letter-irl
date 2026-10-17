@@ -71,10 +71,13 @@ export const ADMIN_FOUNDATION_MIGRATION = "022_admin_audit.sql";
  * it out and the operator role reads letter_drafts whole, so nothing to
  * re-run.
  *
- * 049 adds address_requests (#604), which neither role is granted: it holds a
- * third party's address, and the panel does not show it. Erasure, which
- * deletes an account's requests, runs as the database owner. So nothing to
- * re-run.
+ * 049 adds address_requests (#604), which the reader is never granted: it
+ * holds a third party's address, and the panel does not show it. Erasure, which
+ * deletes an account's requests, runs as the database owner. Since #701 the
+ * operator may delete one on request (address_request.delete), reading only
+ * the columns that delete names and returns, never the names or the address:
+ * re-run `npm run admin:provision-access` in each environment after that
+ * release.
  *
  * 050 adds user_signatures (#608), which neither role is granted either: a
  * picture of a person's handwriting, which the panel does not show. Erasure
@@ -636,6 +639,11 @@ export function buildAdminGrantStatements(
     // raised in one upsert. The operator only: the reader never elevates.
     `GRANT SELECT, INSERT ON TABLE ${table("admin_totp_counters")} TO ${operatorRole}`,
     `GRANT UPDATE (last_counter, updated_at) ON TABLE ${table("admin_totp_counters")} TO ${operatorRole}`,
+    // address_request.delete (#701): the operator deletes a request by its
+    // link's hash or its id, and reads back only its status and when it was
+    // made. Never the names or the address, and the reader nothing at all.
+    `GRANT SELECT (request_id, token_hash, status, created_at) ON TABLE ${table("address_requests")} TO ${operatorRole}`,
+    `GRANT DELETE ON TABLE ${table("address_requests")} TO ${operatorRole}`,
   );
 
   // One statement per privilege so each grant is reviewable on its own line.

@@ -1,10 +1,11 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { access, readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 
 import pg, { type PoolClient } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { addressRequestDeleteCommand } from "../../../src/admin/commands/addressRequests.js";
 import { parseAdminEnvironmentConfig } from "../../../src/admin/config.js";
 import { buildAdminGrantStatements } from "../../../src/admin/provisioning.js";
 import {
@@ -437,5 +438,57 @@ describeWithDatabase("admin foundation database migration", () => {
       insertCommand("operator-foundation-command"),
     ).resolves.toBeTruthy();
     await client.query("RESET ROLE");
+  });
+
+  it("lets the operator delete an address request by its link's hash or its id, reading nothing of its names or address (#701)", async () => {
+    // The roles and grants of the test above.
+    const config = parseAdminEnvironmentConfig(validDevelopmentAdminConfig);
+    await client.query(
+      "INSERT INTO users (user_id, email) VALUES ('address-fixture', 'address-fixture@example.test') ON CONFLICT DO NOTHING",
+    );
+    const token = "AbCdEfGhIjKlMnOpQrStUvWx";
+    const hash = createHash("sha256").update(token, "utf8").digest();
+    const insert = (tokenHash: Buffer) =>
+      client.query<{ request_id: string }>(
+        `INSERT INTO address_requests (user_id, token_hash, recipient_name, sender_first_name, status, address, expires_at, closed_at)
+         VALUES ('address-fixture', $1, 'Sam Rivera', 'Pat', 'answered', '{"name":"Sam Rivera","addressLine1":"1 Main St"}'::jsonb,
+                 NOW() + INTERVAL '7 days', NOW())
+         RETURNING request_id`,
+        [tokenHash],
+      );
+    await insert(hash);
+    const byId = (await insert(createHash("sha256").update("ZyXwVuTsRqPoNmLkJiHgFeDc", "utf8").digest())).rows[0].request_id;
+
+    // The reader holds nothing of the table.
+    await client.query(`SET ROLE "${config.database.readerRole}"`);
+    await expect(client.query("SELECT status FROM address_requests")).rejects.toMatchObject({ code: "42501" });
+    await client.query("RESET ROLE");
+
+    await client.query(`SET ROLE "${config.database.operatorRole}"`);
+    // The operator reads no names and no address.
+    for (const column of ["address", "recipient_name", "sender_first_name"]) {
+      await expect(client.query(`SELECT ${column} FROM address_requests`), column).rejects.toMatchObject({ code: "42501" });
+    }
+    const execution = (target: string) =>
+      addressRequestDeleteCommand.execute(
+        {
+          commandId: randomUUID(),
+          idempotencyKey: `admin:${randomUUID()}`,
+          actorId: "owner@example.com",
+          environment: "development",
+          reason: "the recipient asked",
+          client: client as never,
+        },
+        target,
+        {},
+        {} as never,
+      );
+    await expect(execution(`link:${hash.toString("hex")}`)).resolves.toMatchObject({ deleted: true, status: "answered" });
+    await expect(execution(`link:${hash.toString("hex")}`)).resolves.toEqual({ deleted: false });
+    await expect(execution(`request:${byId}`)).resolves.toMatchObject({ deleted: true, status: "answered" });
+    await client.query("RESET ROLE");
+
+    const left = await client.query("SELECT count(*)::int AS n FROM address_requests WHERE user_id = 'address-fixture'");
+    expect(left.rows[0].n).toBe(0);
   });
 });
