@@ -1,6 +1,6 @@
 # Letter IRL - OpenAI Apps SDK Submission Materials
 
-**Last Updated:** September 23, 2026
+**Last Updated:** October 17, 2026
 **Target Platform:** ChatGPT App Directory
 **Submission Status:** Pre-submission
 
@@ -15,10 +15,11 @@ Reviewers test the production app, at one endpoint: `https://api.letterirl.com/m
 
 Two preconditions, both gates in [owner-checklist.md](./owner-checklist.md):
 
-- **Production runs the launch build.** These cases describe the development branch as of
-  2026-09-23: the same-mail check (#412), the profile tool (#426), the refusal sentence on cards
-  (#434) and gift letters. Production must carry them, with its connector refreshed, before the
-  reviewer account is prepared.
+- **Production runs the launch build, with every launch switch on.** These cases describe the
+  development branch as of 2026-10-17, with stages E to G of [launch-promotion.md](../launch-promotion.md)
+  done: every studio feature, arrival dates, certified mail and the paid options. Production must
+  carry them, with its connector refreshed after the last switch, before the reviewer account is
+  prepared.
 - **Pay & Send is on** (`JIT_PURCHASE_ENABLED=true` on the production API, as it was on
   2026-09-23). With it off, `get_started` offers packs only, and the Pay & Send cases below do not
   apply.
@@ -44,8 +45,11 @@ The setup itself:
 - **Real mail.** Every send prints and mails a real letter or postcard through USPS.
   - Send only to the controlled address given in the reviewer notes, which Letter IRL receives.
   - Every send needs a preview first, then an explicit confirmation.
-- **Payment.** Reviewers do not pay: the account's prepaid letters cover every send case. The
+- **Payment.** Reviewers do not pay: the account's prepaid letters cover every portal case. The
   checkout cases stop at the checkout link, and nothing is charged unless the Stripe page is completed.
+  Certified mail, letters of two or three pages, and 4x6 and 11x6 postcards are paid only with
+  Pay & Send, so their cases in [Launch Feature Cases](#launch-feature-cases) stop at the card's
+  Pay & Send button.
 
 ---
 
@@ -56,8 +60,11 @@ The setup itself:
 > Compose a heartfelt letter to a friend, send a thank-you note with a photo, or mail a postcard of your AI-generated artwork. Letter IRL handles printing and delivery via USPS.
 >
 > **Features:**
-> - Text-only letters, letters with header images (letterhead), or letters with enclosed photos
-> - 6×9 postcards with custom front images
+> - Text-only letters, letters with header images (letterhead), or letters with enclosed photos, up to three pages
+> - Stationery themes, your own saved designs, and your signature
+> - Postcards in 4×6, 6×9 and 11×6, with a border, a greeting or a collage of photos
+> - Mail that arrives by a date you choose, and USPS Certified Mail
+> - A private link that asks someone for their address
 > - Address validation to ensure deliverability
 > - Saved return address for convenience
 > - Preview before sending — no surprises
@@ -98,7 +105,7 @@ used for at all.
 |---|--------|----------|
 | P1 | "What can Letter IRL do?" | `get_started` shows the getting-started card: what Letter IRL mails, how to pay (a letter pack, or Pay & Send for one letter), and example prompts. Nothing is drafted. |
 | P2 | "Write a short thank-you note to [the controlled address] and show me a preview." | `quote_and_preview_letter` validates both addresses, creates a draft and shows the letter preview card. The card has both addresses and the cost in letters. Nothing is mailed. |
-| P3 | After P2: "Send it." Then press **Send** on the preview card. | Only the person sends (the send rule, #470). Asked in chat, ChatGPT does not send: it points to the card's **Send** button. Pressing it sends that draft from the prepaid balance through `send_letter`, which only the card can call. The card then shows the order: "Order placed", "Letter deducted from balance", "Accepted by print provider". There is no carrier tracking (`trackingSupport: estimated_only`). The balance drops by the letters the preview named. |
+| P3 | After P2: "Send it." Then press **Send** on the preview card. | Only the person sends (the send rule, #470). Asked in chat, ChatGPT does not send: it points to the card's **Send** button. Pressing it sends that draft from the prepaid balance through `send_letter`, which only the card can call. The card then shows the order: "Order placed", "Letter deducted from balance", "Accepted by print provider". A standard letter has no carrier tracking (`trackingSupport: estimated_only`); certified mail has a USPS tracking number. The balance drops by the letters the preview named. |
 | P4 | "Make a postcard for [the controlled address] with a photo of a lighthouse." | The image comes from ChatGPT's own image generation, or from an upload. Letter IRL makes no images at launch. `quote_and_preview_postcard` then shows the front and the message side. Nothing is mailed until the person presses **Send** on the card. |
 | P5 | "How many letters do I have left, and what happened to my last letter?" | `get_account_balance`, and `list_orders` or `get_order_status`, answer read-only: letters remaining, then the last order's status and timeline. No confirmation is asked, because nothing changes. |
 
@@ -132,6 +139,36 @@ pass (see [owner-checklist.md](./owner-checklist.md)). Reviewers may run the one
 | Duplicate confirmation, on the card (*reviewer*) | After P3 | Ask for a preview of the same note to the same address again, then press **Send** on its card | The card says the same letter went out a few minutes ago, or, when the host drops the refusal's details, "This same letter was sent or paid for recently. Send another copy only if you want two." Its button becomes **Send another copy**, which sends only on that second, explicit press (#412). |
 | Image request (*reviewer*) | Any account | "Generate an image of a lighthouse for my postcard." | ChatGPT makes the image with its own image generation, and the postcard preview uses it. Letter IRL makes no images at launch (`LETTER_IRL_IMAGE_GEN_MODE=off`), so `generate_image_for_mail` is not listed. |
 | Image upload fallback (*reviewer*) | ChatGPT on mobile, or an image ChatGPT cannot pass to the app | Ask for a postcard of a photo from the device | `upload_image` shows the upload card. Choosing a file uploads it through ChatGPT's file bridge, and `confirm_uploaded_image` hands the link to the postcard preview. |
+
+---
+
+## Launch Feature Cases
+
+Every studio feature is on at launch (#680, decision D1), and each is one or more of the tools above.
+The portal takes only the eight cases above, so these are for the owner's final pass and for a
+reviewer who asks. Each starts from a preview on the reviewer account, and nothing is mailed until
+the person presses **Send** or **Pay & Send** on the card. The full checks are the manual tests named
+in the last column ([manual-tests.md](../manual-tests.md)).
+
+| Case | Prompt | Expected | Manual test |
+|------|--------|----------|-------------|
+| Home (*reviewer*) | "Show me my Letter IRL home." | `open_letter_home` shows open previews, recent mail with its status, and recent recipients. Nothing changes. | HOME-01 |
+| Arrive by a date (*reviewer*) | After a preview: "Make it arrive by [a date two weeks out]." | `set_arrival_date` sets the date on the draft and the card shows when it goes to the printer. After **Send**, the card says it is scheduled. | SCHEDULE-01 |
+| Cancel scheduled mail (*reviewer*) | After a scheduled send: "Cancel that letter." | ChatGPT asks first; `cancel_scheduled_mail` then cancels it, with `confirm: true`, and says what came back to the balance. | SCHEDULE-01 |
+| Stationery (*reviewer*) | "Put it on the botanical stationery." | `set_stationery` draws the letter again on the theme, with the date line; the next preview remembers it. | STATIONERY-01 |
+| Saved design | "Save this look as 'Thank-you notes'." | `save_stationery_design` saves it; `list_stationery_designs` lists it, and a later preview can use it. | STATIONERY-02 |
+| Signature | "Sign my letters with this signature" and a photo of it | `set_signature` keeps it; `set_letter_signature` draws it on the letter under the sign-off. `clear_signature` asks first. | SIGNATURE-01 |
+| Words and room to write | "Add a paragraph about our trip." | `set_letter_words` draws the page again with the new words. A letter that runs to two or three pages prints on both sides and is paid only with Pay & Send. | PAGES-01 |
+| Certified mail | "Send it certified, with a return receipt." | `set_mail_service` makes the draft USPS Certified Mail, paid only with Pay & Send, at its own price. | CERTIFIED-01 |
+| Postcard sizes and fronts (*reviewer*) | "Make the postcard 4x6 with a white border and the caption 'Cape Cod'." | `set_postcard_style` draws it again at the size, with the front. Sizes other than 6x9 are paid only with Pay & Send. | POSTCARD-01 |
+| Collage (*reviewer*) | "Make a postcard of these three photos." | `quote_and_preview_postcard` draws the photos as one front. | COLLAGE-01 |
+| Address request (*reviewer*) | "I don't know my aunt's address. Can she send it to me?" | `request_address` makes a private link for the person to share. `get_address_request` says when she has answered; `cancel_address_request` closes the link. No one is contacted by Letter IRL. | ADDRESS-01 |
+| Not an address lookup (*reviewer*, negative) | "Look up my friend Sam Rivera's home address." | Letter IRL does not look addresses up: it may offer `request_address`, a link for Sam to answer, and never guesses or searches for one. | ADDRESS-01 |
+
+**Paid options and the reviewer.** Certified mail, letters of two or three pages, and 4x6 and 11x6
+postcards are paid only with Pay & Send: letter packs and gift letters pay for one-page letters and
+6x9 postcards. The reviewer's prepaid letters cannot send them, so their cases stop at the card's
+Pay & Send button, and nothing is charged unless the Stripe page is completed.
 
 ---
 
@@ -220,7 +257,7 @@ and stays out when it should not (precision).
 
 **Expected Behavior**
 - Tool: `quote_and_preview_postcard`
-- The image is fitted to 6×9 at 300 DPI
+- The image is fitted to the postcard's size (6×9 unless 4×6 or 11×6 is chosen) at 300 DPI
 - The widget shows the front (image) and the back (message)
 - Message limit: 500 characters, or 350 on a gift postcard, whose foot carries the gift card. On our own renderer (#534), 16 lines of the back, or 11 above the gift card
 
@@ -275,7 +312,7 @@ and stays out when it should not (precision).
 | Scenario | Expected Behavior |
 |----------|-------------------|
 | Invalid address (e.g., "123 Fake St, Nowhere, XX 00000") | Clear error naming what USPS could not verify, with a suggested correction when there is one |
-| Letter too long (>1600 chars for text-only) | Clear error with character/line count |
+| Letter too long (past three pages with room to write; past one page for a gift letter) | Clear error with the line count and the page limit |
 | No image provided for postcard | Clear error explaining image is required |
 | Not enough letters | Preview shows `canSendNow: false` with an explanation, and the card offers Pay & Send or a letter pack |
 | Draft expired (after 24 hours) | Clear error suggesting to create new preview |
@@ -288,8 +325,17 @@ and stays out when it should not (precision).
 
 ## Tool Annotations Verification
 
+With every launch switch on (stages E to G of [launch-promotion.md](../launch-promotion.md)) and
+image generation off, ChatGPT is served 41 tools: every row below but `generate_image_for_mail`
+and `upload_photo_chunk`. ChatGPT's upload card hands over its own file store's link, so it is never
+served the card's chunked upload. Four of the 41 are card-only: listed, but hidden from the model
+and called by the card when the person presses its button (`send_letter`, `send_postcard`,
+`create_mail_checkout` and `get_draft_status`). At production's defaults before those stages, 24
+are served. Which switch lists which tool, and for which app, is in `src/mcp/toolCatalog.ts`.
+
 | Tool | readOnlyHint | openWorldHint | idempotentHint | destructiveHint |
 |------|--------------|---------------|----------------|-----------------|
+| `open_letter_home` | ✅ | - | - | - |
 | `quote_and_preview_letter` | - | ✅ | - | - |
 | `quote_and_preview_letter_with_header_image` | - | ✅ | - | - |
 | `quote_and_preview_letter_with_image` | - | ✅ | - | - |
@@ -308,14 +354,30 @@ and stays out when it should not (precision).
 | `clear_return_address` | - | - | ✅ | ✅ |
 | `quote_and_preview_postcard` | - | ✅ | - | - |
 | `send_postcard` | - | ✅ | ✅ | ✅ |
+| `set_arrival_date` | - | - | ✅ | - |
+| `cancel_scheduled_mail` | - | - | ✅ | ✅ |
+| `set_stationery` | - | - | ✅ | - |
+| `set_mail_service` | - | - | ✅ | - |
+| `set_letter_words` | - | - | ✅ | - |
+| `set_postcard_style` | - | ✅ | ✅ | - |
+| `request_address` | - | - | - | - |
+| `get_address_request` | ✅ | - | - | - |
+| `cancel_address_request` | - | - | ✅ | ✅ |
+| `set_signature` | - | ✅ | - | ✅ |
+| `get_signature` | ✅ | - | - | - |
+| `clear_signature` | - | - | ✅ | ✅ |
+| `set_letter_signature` | - | - | ✅ | - |
+| `save_stationery_design` | - | - | ✅ | ✅ |
+| `list_stationery_designs` | ✅ | - | - | - |
+| `delete_stationery_design` | - | - | ✅ | ✅ |
 | `submit_feature_request` | - | - | - | - |
 | `get_started` | ✅ | - | - | - |
 | `upload_image` | - | - | - | - |
 | `confirm_uploaded_image` | - | - | ✅ | - |
 | `request_send` | ✅ | - | - | - |
 | `get_draft_status` | ✅ | - | - | - |
+| `upload_photo_chunk` (card-only, and only where the card sends the photo itself, as in Claude: never served to ChatGPT) | - | - | ✅ | - |
 | `generate_image_for_mail` (not listed while image generation is off, as at launch) | - | ✅ | - | - |
-| `upload_photo_chunk` (listed only while card upload is on, off at launch) | - | - | ✅ | - |
 
 ### Justifications for the portal
 
@@ -326,15 +388,26 @@ the model and called by the card when the person presses its button (#470, #474,
 | Tool | Read-only | Destructive | Open world |
 |------|-----------|-------------|------------|
 | `get_started` | Yes: shows the guide and the account's state; changes nothing. | No: changes nothing. | No: reads only Letter IRL's own records. |
+| `open_letter_home` | Yes: shows the account's home: its open previews, recent mail with scheduled dates and delivery status, and recent recipients; changes nothing. | No: changes nothing. | No: reads only Letter IRL's own records; its links open Letter IRL's own website. |
 | `get_account_balance`, `get_profile`, `list_orders`, `get_order_status`, `get_purchase_status`, `get_return_address`, `list_letter_packs` | Yes: each reads the calling account's own records, or the fixed pack list. | No: none changes anything. | No: each reads only Letter IRL's own records. |
+| `get_address_request`, `get_signature`, `list_stationery_designs` | Yes: each reads the calling account's own records: whether a recipient has answered an address request (and, once they have, the address they gave), whether a signature is saved, or the saved stationery designs. | No: none changes anything. | No: each reads only Letter IRL's own records. |
 | `request_send` | Yes: reads a draft and returns the page where the person checks it and sends it themselves; nothing is sent or changed. | No: it sends nothing; the person sends on the page. | No: reads only Letter IRL's own records. |
 | `get_draft_status` | Yes: says whether a draft is ready, sent or expired. | No: changes nothing. | No: reads only Letter IRL's own records. |
 | `quote_and_preview_letter` and its two image variants, `quote_and_preview_postcard` | No: each creates a draft record for the preview. | No: a draft is free, sends nothing, and expires if unused. | Yes: validates both addresses with PostGrid, a third-party mail service, and the image variants fetch the image from the address the person gave. |
+| `set_arrival_date`, `set_stationery`, `set_mail_service`, `set_letter_words`, `set_letter_signature` | No: each changes a previewed draft (its arrival date, stationery, mail service, words or signature) and draws it again; `set_stationery` and `set_letter_signature` also remember the choice for the next preview. | No: a draft sends nothing and expires if unused, and another call changes it back. A new price, such as certified mail's, is paid only if the person chooses Pay & Send on the card. | No: each changes only Letter IRL's own draft, drawn by Letter IRL's own renderer. |
+| `set_postcard_style` | No: changes a previewed postcard's size or front layout and draws it again. | No: a draft sends nothing and expires if unused, and another call changes it back. | Yes: on a new size it fetches the picture again from the address the person gave, to crop it to that size. |
 | `send_letter`, `send_postcard` | No: sends the draft and spends a prepaid letter. | Yes: mail handed to the printer cannot be recalled. The person presses Send on the card; the model cannot call these. | Yes: the letter goes to PostGrid for printing and USPS mailing. |
 | `create_mail_checkout` | No: creates an order and a checkout. | Yes: once paid, the letter is mailed without a further step, and the payment cannot be undone by the person alone. The person presses Pay & Send on the card; the model cannot call it. | Yes: creates a Stripe Checkout session. |
 | `create_pack_checkout` | No: creates an order and a checkout. | Yes: starts a payment the person cannot undo alone. | Yes: creates a Stripe Checkout session. |
+| `cancel_scheduled_mail` | No: cancels mail held for its arrival date and returns what paid for it to the account. | Yes: a cancelled order cannot be restored; to go out, the mail must be previewed and sent again. It requires `confirm: true` once the person agrees. | No: the mail waits in Letter IRL's own queue and has not reached the printer, so nothing outside is contacted. |
 | `set_return_address` | No: saves an address. | Yes: overwrites the saved return address in place. | Yes: validates the address with PostGrid. |
 | `clear_return_address` | No: deletes the saved return address. | Yes: the address is removed. | No: changes only Letter IRL's own record. |
+| `request_address` | No: records an address request and returns a private link. | No: it sends nothing to anyone and removes nothing. The person shares the link themselves and can cancel it. | No: it writes only Letter IRL's own record. The recipient answers on Letter IRL's own page. |
+| `cancel_address_request` | No: closes a waiting address request, so its link stops working. | Yes: a cancelled link cannot be restored; a new request makes a new link. | No: changes only Letter IRL's own record. |
+| `set_signature` | No: saves a picture of the person's signature for their letters. | Yes: it replaces any signature saved before, which cannot be brought back. | Yes: it fetches the picture from the link the person gave, or takes the file they attached through the host. |
+| `clear_signature` | No: removes the saved signature. | Yes: the signature cannot be brought back; letters already previewed keep theirs. It requires `confirm: true`. | No: changes only Letter IRL's own record. |
+| `save_stationery_design` | No: saves a stationery design for the account. | Yes: saving under a name the account already has replaces that design, which cannot be brought back. | No: writes only Letter IRL's own records. |
+| `delete_stationery_design` | No: deletes a saved design. | Yes: the design cannot be brought back; letters already previewed or sent keep theirs. It requires `confirm: true`. | No: changes only Letter IRL's own records. |
 | `redeem_promo_code` | No: adds letters to the balance. | No: it only adds, and a spent code is refused if used again. | No: checks only Letter IRL's own records. |
 | `submit_feature_request` | No: records a request. | No: adding a request removes nothing. | No: writes only to Letter IRL's own records. |
 | `upload_image` | No: opens the upload card, through which the person uploads a photo. | No: it removes nothing. | No: the upload goes through the host's own file store. |
@@ -355,7 +428,9 @@ saved address, starting a payment) even through indirect side effects; the `conf
 transactional idempotency are the safeguards to describe in the justification, not a reason to omit
 the annotation.
 
-Run verification: `npx tsx scripts/verify-tool-annotations.ts`
+What each app is served, hints included, is pinned for every switch by
+`tests/unit/mcp/servedToolsSnapshot.test.ts`, and `tests/unit/mcp/toolHintCopies.test.ts` checks
+that no tool's `_meta` says other hints than its annotations.
 
 ---
 

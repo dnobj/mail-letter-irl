@@ -93,11 +93,14 @@ describe('upload_photo_chunk (#474)', () => {
     expect(JSON.stringify(logged)).not.toContain('bucket.internal');
   });
 
-  it('is listed only while its switch is on', () => {
-    const names = () => new LetterIrlServer().listTools().map((tool) => tool.name);
-    expect(names()).not.toContain('upload_photo_chunk');
+  it('is listed only while its switch is on, and only where the card sends the photo itself', () => {
+    const names = (app: 'claude' | 'chatgpt') =>
+      new LetterIrlServer().listTools(clientProfileNamed(app)).map((tool) => tool.name);
+    expect(names('claude')).not.toContain('upload_photo_chunk');
     vi.stubEnv('LETTER_IRL_CARD_UPLOAD_ENABLED', 'true');
-    expect(names()).toContain('upload_photo_chunk');
+    expect(names('claude')).toContain('upload_photo_chunk');
+    // ChatGPT's upload card hands over its own file store's link instead.
+    expect(names('chatgpt')).not.toContain('upload_photo_chunk');
   });
 
   it('is hidden from the model in every app, asks for no person, and needs the drafting scope', () => {

@@ -7,7 +7,7 @@ The runtime MCP registry is the source of truth. The checked-in `manifest.json` 
 
 Which tools an app is offered, which only a card may call, which input fields are withheld while their feature is off, and which result fields are the card's and never the model's are all in one place: the tool catalogue, `src/mcp/toolCatalog.ts` (#687). Every tool the server defines has an entry, and a tool without both Zod shapes fails every connection that lists it (CI registers them all first). `tests/unit/mcp/servedToolsSnapshot.test.ts` holds what `tools/list` and the manifest serve, for every flag and kind of app, so a change to what is served is made on purpose.
 
-Letter IRL currently exposes **24 tools** and **6 widgets**. Four more are listed only while their switch is on: `request_send` while the send rule is on, `upload_photo_chunk` while card upload is on, and `set_arrival_date` and `cancel_scheduled_mail` while arrival dates are on. So are `request_address`, `get_address_request` and `cancel_address_request`, while address requests are on (#604). The tools are:
+Letter IRL exposes **24 tools** and **6 widgets** at production's defaults. Each feature switch lists its own tools as well (`src/mcp/toolCatalog.ts`): with every launch switch on and image generation off, ChatGPT is served 41 ([openai-test-cases.md](app-submission/openai-test-cases.md#tool-annotations-verification)). `upload_photo_chunk` is listed only while card upload is on, and only where the card sends the photo itself, as in Claude; never in ChatGPT, whose card hands its own file store's link. The tools are:
 
 ## Onboarding
 
