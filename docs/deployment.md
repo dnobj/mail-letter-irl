@@ -914,7 +914,9 @@ and where a reason has more than one case, by the letter's stored content (`cont
   Look at the new preview first, and tell the customer when it visibly differs. A letter whose `content.pages`
   you change (the `overflow` case above) needs the same: otherwise it is held as `layout_changed` next.
   A `held_print.layout_changed` error from the maintenance run's backfill names a letter that will be held
-  this way on its date: the same choice, made before then.
+  this way on its date: the same choice, made before then. A `held_print.unprintable` error names one our
+  renderer now refuses outright (its `errorClass` is the refusal's reason): it will be held as
+  `render_refused` with that reason on its date, and the bullets above say what each reason calls for.
 - **Reject** when the content itself cannot print, resolving it as rejected
   (`provider_confirmed_rejected_refund`):
   - a postcard message that is too long in any build;

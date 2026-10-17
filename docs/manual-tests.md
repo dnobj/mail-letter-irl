@@ -1982,6 +1982,285 @@ Not run: step 1 (two photos, with the dev CLI), step 2 (the four-photo case), st
 
 ---
 
+### STUDIO-01 — The studio card: the letter's Style, Words and Delivery tabs, and the postcard maker (#580)
+
+**Status:** Not run.
+
+The studio rearranges both preview cards. The letter card becomes a header, the page beside three tabs, and a footer with the cost and Send. The postcard card becomes a "postcard maker". The studio adds no control of its own: every button is one the card already had, and it calls the same tool a model would. Nothing prints or sends differently.
+
+**Preconditions:** Development, with `LETTER_IRL_STUDIO_CARD_ENABLED` on in the API (off unless set to `true`, `1`, `yes`, `on` or `enabled`). For the tabs to have something in them:
+- `LETTER_IRL_PRINT_RENDERER=pdf` (the default is the legacy HTML) and `LETTER_IRL_STATIONERY_ENABLED` for the Style row.
+- `LETTER_IRL_ROOM_TO_WRITE_ENABLED` (with `JIT_PURCHASE_ENABLED=true`) or `LETTER_IRL_WORDS_EDITOR_ENABLED` for the Words tab's editor.
+- `LETTER_IRL_ARRIVE_BY_ENABLED` for the Arrives row.
+- `LETTER_IRL_CERTIFIED_MAIL_ENABLED`, with `JIT_PURCHASE_ENABLED=true`, for the Mail row.
+- For step 7: `LETTER_IRL_ROOM_TO_WRITE_ENABLED` on the maintenance service too, and `STRIPE_JIT_LETTER_TWO_PAGES_PRICE_ID` and `STRIPE_JIT_LETTER_THREE_PAGES_PRICE_ID` set to the Stripe test prices (as in PAGES-01).
+- `LETTER_IRL_GIFT_LETTERS_ENABLED` and a gift letter on the account for step 9 (without one, `sendAsGift` is refused).
+
+Refresh the ChatGPT (DEV) and Claude connectors after the deploy (widgets v88). The test account needs a saved return address and at least one letter in its balance (a test-mode pack or an admin grant), and step 10 a photo by link for the postcard. PostGrid is in test mode on development.
+
+**Steps:**
+
+1. [ ] In ChatGPT (DEV), preview a one-page text-only letter to a named recipient. Verify:
+   - the header reads "Letter to <name>" with the status pill, and under it "Draft · <City>, <ST> <ZIP>";
+   - the page sits beside three tabs, **Style**, **Words** and **Delivery**, and Style is selected (use an account that remembers no stationery, or Classic, for this step and the next: a remembered theme draws the letter in it);
+   - the footer shows the cost "1 letter", a summary such as "Classic · black and white · mailed in 1-2 business days; usually arrives in 1-2 weeks", and **Send Letter**.
+
+   Narrow the frame below 560 px: verify the tabs stack below the page.
+2. [ ] On **Style**, verify the row is labelled "Stationery" (shown in capitals, STATIONERY; not "Style"), with **Classic**, **Monogram**, **Botanical**, **Celebration**, **Typewriter** and **Handwritten**, and Classic pressed. Verify the Layout row reads "Text Only". If a signature is saved, verify the **Signature** switch reads On or Off. Press **Botanical**. Verify:
+   - the call is `set_stationery`;
+   - the page is drawn again with the sprig and the date line;
+   - Botanical is pressed and the summary starts "Botanical".
+
+   With stationery off, verify there is no row, only "Printed in black and white."
+3. [ ] On **Words**, verify the letter's text as the call gave it.
+   - With no editor offered: verify "To change the words, ask in the chat."
+   - With the editor offered: verify the fit line "Fits on one page, with room for about N more characters." and a **Change the words** button. Press it. Verify two boxes, "The letter" and "Signed" (labels shown in capitals), with a line under them, "About N characters left on this page.", that counts down as you type. Press **Cancel**: verify the words come back and focus returns to **Change the words**. Open it again, change a word, and press **Update the page**. Verify the call is `set_letter_words`, the page is drawn again, and the note says the words are changed and nothing has been sent.
+4. [ ] On **Delivery**, verify, in order: the Arrives by row (**As soon as possible** pressed; the row labels show in capitals), the Mail row (**First-Class** pressed, while certified mail is on), the Delivery line "USPS First-Class Mail - Mailed in 1-2 business days; usually arrives in 1-2 weeks - USPS timing varies and can take longer.", and the Draft id. Then ask in the chat for a new preview with an arrival date. Verify the new card opens on Delivery, and the summary says "held until <the mail date>".
+5. [ ] Keyboard: Tab into the tabs. Verify the tabs take only one stop in the tab order, the arrow keys move between them, and Home and End jump to Style and Delivery.
+6. [ ] Press **Send Letter**. Verify:
+   - the pill reads "With the printer" and the subtitle starts "Sent";
+   - the summary ends "with the printer", the Style row is gone, and the id row reads "Order".
+
+   Repeat with a dated letter, whose button reads **Schedule Letter**: verify the pill reads "Scheduled", Delivery is shown, and **Cancel this letter** is there.
+7. [ ] (Room to write) Preview a two-page letter. Verify:
+   - the page reads "Page 1 of 2" with **Next page**, which turns to "First page" on page 2;
+   - **Enlarge** turns to "Show smaller";
+   - the summary has "2 pages, both sides";
+   - the cost reads "Pay & Send USD 5.99".
+
+   Restyle it: verify the page you were on stays shown.
+8. [ ] In Claude (DEV), preview the same letter. Verify the same layout, at about 580 px tall at Claude's 736 px width with no inner scroll bar, and that the card sends with **Send Letter** as in ChatGPT (Claude lets the card send; **Open the confirmation page** is for apps that do not, such as VS Code). Reopen the conversation. Verify the card asks `get_draft_status` and shows the letter as it is now.
+9. [ ] Preview a gift letter (`sendAsGift: true`). Verify the cost reads "Free: a gift letter" and the card page is page 2.
+10. [ ] Preview a postcard. Verify the maker:
+    - the header reads "Postcard to <name>" with "Draft · <City>, <ST> <ZIP>", and there are no tabs;
+    - under the postcard, "Drawn to scale: 6 x 9 in." with **Flip to the back**;
+    - pressing it shows the back, "Show the front", and "The right side is for the address and postage.";
+    - Size reads "6 x 9 in" (with postcard sizes on, the size buttons take this line's place: POSTCARD-01);
+    - "Message on the back" (shown in capitals) is read-only, with "N characters · the back holds 16 lines, about 500 characters of prose";
+    - the footer reads "1 letter" and "6 x 9 in · mailed in …".
+
+    On a gift postcard, verify the count reads "beside the gift card, the back holds 11 lines".
+11. [ ] Turn `LETTER_IRL_STUDIO_CARD_ENABLED` off and deploy the API. Verify a new letter preview and a new postcard preview are laid out as before: no tabs, and the row labelled "Style". Turn the flag back on.
+
+**Pass criteria:** Both cards lay themselves out as a studio only while the flag is on. Every control in a tab calls the tool it called before, and the header, cost and summary match the draft. With the flag off, the cards are exactly as before.
+
+---
+
+### STATIONERY-01 — Stationery themes: choosing, previewing, printing and remembering (#563)
+
+**Status:** Not run. STATIONERY-02 covers saved designs (#649).
+
+**Preconditions:** Development, with `LETTER_IRL_STATIONERY_ENABLED` on (off unless set) and `LETTER_IRL_PRINT_RENDERER=pdf` in the API: only our renderer draws a theme. `LETTER_IRL_STUDIO_CARD_ENABLED` is optional (the Style row shows either way). Refresh the ChatGPT (DEV) and Claude connectors so `set_stationery` is listed.
+
+The account needs a saved return address whose name has initials (such as "Pat Example"), letters in its balance for the sends, and a photo by link for step 5's postcard draft. **Use an account with no saved signature, or `LETTER_IRL_SIGNATURES_ENABLED` off:** a signed letter records `pdf-4`, not `pdf-2`. `LETTER_IRL_GIFT_LETTERS_ENABLED` and a gift letter are needed for step 10, and `LETTER_IRL_SEND_CONFIRMATION_ENABLED` (on in every deployed environment) for step 8's `request_send`. PostGrid is in test mode on development.
+
+**Steps:**
+
+1. [ ] List the tools. Verify the three letter previews take `stationery`, `monogram` and `headline`, and `set_stationery` ("Change the stationery") is listed.
+2. [ ] Preview a letter with `stationery: "botanical"`. Verify:
+   - the answer's `stationery` has `theme: botanical` and `source: asked`, and the narration says "Stationery: botanical.";
+   - the page shows a line-drawn sprig in the top-right corner, clear of the address window, and above it the date line: today on the New York calendar, written out ("October 17, 2026");
+   - the API log's `draft.created` line has `"renderer":"pdf-2"`.
+3. [ ] On the card's Style row, press each theme in turn. Verify each is drawn again, pressed, with its own look:
+   - **Monogram**: the return address's initials in a ring ("PE");
+   - **Celebration**: confetti;
+   - **Typewriter**: the whole letter in a monospace face, so it fits fewer words;
+   - **Handwritten**: a handwriting face on faint ruled lines;
+   - **Classic**: a plain page with no date line.
+
+   From the chat, `set_stationery` with `typewriter` answers "The letter is now on the typewriter stationery, and the account remembers it for its next letter preview. Nothing has been sent." For Classic it says "on a plain page, the classic stationery".
+4. [ ] Preview with `stationery: "monogram", monogram: "JMS"`: verify JMS prints in the ring. Preview with `stationery: "celebration", headline: "Happy Birthday, Sam!"`: verify the headline prints large above the letter. On that card, press Botanical, then Celebration: verify the headline comes back (the card sends it again).
+5. [ ] Verify each of these is refused, and that none creates a draft:
+   - `monogram` with `botanical`: "Initials print only on the monogram stationery. Choose stationery "monogram", or leave monogram out.";
+   - `headline` with `classic`: "A headline prints only on the celebration stationery. …";
+   - `stationery: "monogram", monogram: "ABCD"`: "monogram must be one to three letters, such as "JMS". …";
+   - `stationery: "celebration"` with a headline of more than 200 characters: "The headline is too long: it may hold at most 200 characters. …";
+   - `stationery: "celebration"` with a shorter headline too wide for its line: "The headline is too long for its line: about N of its M characters fit. …";
+   - `stationery: "floral"`: refused by the tool's input check, which lists the six themes;
+   - a Greek word in Handwritten: refused, naming the handwritten stationery;
+   - `set_stationery` with no theme: with saved designs off, refused by the input check ("Required: one of classic, monogram, botanical, celebration, typewriter, handwritten"); with them on, "Name the stationery: classic, monogram, botanical, celebration, typewriter or handwritten, or a saved design's stationeryDesignId.";
+   - `set_stationery` on a postcard draft: "Stationery is for letters. A postcard keeps its own design."
+
+   Also verify `stationery: "Botanical"` (capital B) is accepted.
+6. [ ] With room to write off, take a letter that nearly fills one page in Classic and ask `set_stationery` for typewriter. Verify the refusal: "Letter is N lines too long for one page on the typewriter stationery: … The typewriter stationery sets the text in its own typeface: shorten the message, or choose the classic stationery." (With room to write on, PAGES-01 step 7 applies instead.)
+7. [ ] Remembering. Make a new preview without `stationery`. Verify it is drawn in the last theme chosen, and the narration says "Stationery: <theme>, the account's last choice; stationery in the call or set_stationery changes it." Then make a preview whose theme is refused (step 5), and another without a theme: verify the refused one changed nothing remembered. Ask for Typewriter, then Classic, then preview without a theme: verify Classic, which is remembered too.
+8. [ ] Open the confirmation page for a themed preview (`request_send`). Verify it shows the page in its theme. Send one themed letter of each kind (Monogram, Celebration with a headline, Handwritten) in test mode. In PostGrid's test dashboard, verify each PDF prints as previewed: the corner art in black and greys beside the address window, clear of PostGrid's address area; the date line; the face. **Record how the greys look on the test print.**
+9. [ ] With arrive-by on, preview a themed letter with a later arrival date. Verify its print, once sent, keeps the date line of the day it was previewed. It prints on its mail date, by default seven business days before the arrival date (`LETTER_IRL_SCHEDULE_LEAD_DAYS`); lower that on DEV or come back on the date, but keep the mail date on a later day than the preview, or the date line proves nothing.
+10. [ ] Preview a gift letter in Botanical. Verify page 1 is the themed letter and page 2 is the plain card.
+11. [ ] Turn `LETTER_IRL_STATIONERY_ENABLED` off, deploy the API and refresh the tool lists. Verify:
+    - `set_stationery` is gone, the previews take no `stationery`, `monogram` or `headline`, and the card has no Style row;
+    - a preview that passes `stationery: "botanical"` anyway is refused with "Stationery is not available yet. Leave stationery, monogram and headline out, and the letter prints on a plain page.", while `"classic"` is accepted;
+    - a new preview is Classic whatever was remembered;
+    - a `set_stationery` call from a client that still has the old tool list is answered "Tool set_stationery not found": a tool not offered is not registered;
+    - a letter already previewed in a theme still sends and prints in it.
+
+    Turn the flag back on.
+
+**Pass criteria:** Each theme looks the same in the preview, on the card and on the paper, and the date line is the day the letter was previewed. The account remembers the last theme chosen, and nothing else. While the flag is off nothing offers or takes a theme, but a letter already themed still prints in its theme.
+
+---
+
+### PAGES-01 — Room to write: letters of two and three pages (#586, #578, #579)
+
+**Status:** Not run.
+
+**Preconditions:** Development, with these on in the API **and** the maintenance service:
+- `LETTER_IRL_ROOM_TO_WRITE_ENABLED` (off unless set);
+- `JIT_PURCHASE_ENABLED=true` (Pay & Send is on only for exactly `true`);
+- `STRIPE_JIT_LETTER_TWO_PAGES_PRICE_ID` and `STRIPE_JIT_LETTER_THREE_PAGES_PRICE_ID`, set to the Stripe test prices from `scripts/create-option-prices.ts` (#624): USD 5.99 and USD 6.99, the amounts the product table pins.
+
+Also `LETTER_IRL_PRINT_RENDERER=pdf` in the API. For the card's editor, `LETTER_IRL_STATIONERY_ENABLED` and `LETTER_IRL_STUDIO_CARD_ENABLED` (the editor shows only where the Style row does). For steps 8 and 9, `LETTER_IRL_GIFT_LETTERS_ENABLED`, and an account with a gift letter. The account needs no saved signature (the signature's band takes three lines), a saved return address, and at least one letter in its balance. Paying uses the Stripe test card 4242 (the owner's step unless they have said the loop may pay). Refresh the connectors so `set_letter_words` is listed.
+
+For lengths, use short numbered lines, one to a line with no blank lines. Page 1 holds 26 lines and pages 2 and 3 hold 33 each, with the sign-off counted.
+
+**Steps:**
+
+1. [ ] List the tools. Verify the letter previews' descriptions say "A letter too long for one page runs on to a second or third page, printed on both sides and paid with Pay & Send; three pages is the longest." Verify `set_letter_words` says the letter is laid out "on up to three pages".
+2. [ ] Preview a one-page letter. Verify:
+   - `canSendNow: true`;
+   - the card's cost reads "1 letter" with **Send Letter**;
+   - the Words tab reads "Fits on one page, with room for about N more characters."
+3. [ ] Preview a letter of about 40 lines. Verify:
+   - the answer has `pages: 2`, and the narration says "A two-page letter, printed on both sides of one sheet.";
+   - `canSendNow: false`, with "Letter packs and gift letters pay for one-page letters and 6x9 postcards; this one is paid with Pay & Send.";
+   - `sendEligibility.packPays: false`, and Pay & Send at 599;
+   - the API log's `draft.created` has `pages: 2`.
+
+   On the card (ChatGPT), verify:
+   - the cost reads "Pay & Send USD 5.99", and the button "Pay & Send (USD 5.99)";
+   - there is no letter pack button, though the balance has letters;
+   - the summary and the Layout row say "2 pages, both sides";
+   - the Words tab says "Runs on to the back of the page: printed on both sides of one sheet.";
+   - the page shows "Page 1 of 2".
+4. [ ] Preview about 70 lines. Verify "A three-page letter, printed on both sides of two sheets.", "Pay & Send USD 6.99", and the Words tab's "Three pages, on two sheets: the longest letter we print."
+5. [ ] Preview 93 lines or more. Verify it is refused with "Letter is N lines too long for three pages: three pages is the longest letter we print. Please shorten your message to fit on three pages." and no draft is made. A body over 30,000 characters is refused at once: "Letter is far too long for three pages: N/30000 characters. …"
+6. [ ] On the two-page card, use **Change the words**. Cut it to one page: verify the room line, then **Update the page**. Verify the note says the page is drawn again and "It now fits on one page, which a letter pack pays for.", the cost turns to "1 letter" and **Send Letter** returns. Lengthen it past one page: verify "It now runs to two pages, printed on both sides, and is paid with Pay & Send." While writing past the back of the page on the two-page card, verify the room line says "About N characters past the back of the page: Update the page to see how it runs on." On a three-page card, write past the third page: verify "About N characters past the third page, more than we print.", and that **Update the page** is refused under the boxes, which keep the words. Change the words in the chat (`set_letter_words`), then press **Update the page** on the card. Verify "The words were not changed: this card's copy of them is out of date. Ask in the chat to change them, or make the preview again."
+7. [ ] Take a one-page letter that nearly fills its page and press **Typewriter** on the card. Verify it runs to two pages: "Page 1 of 2", the Layout row's "2 pages, both sides" and "Pay & Send USD 5.99" (the card shows no note for a restyle that works). Press **Classic**: verify it is one page, paid by a pack, again. Then ask in the chat for `set_stationery` with `typewriter`: verify its answer says "It now runs to two pages, printed on both sides, and is paid with Pay & Send."
+8. [ ] Gift letters:
+   - preview a two-page letter with `sendAsGift: true`: verify the refusal "A gift letter pays for a one-page letter or a 6x9 postcard, not for this one. Leave sendAsGift out and pay for it with Pay & Send, or send a 6x9 postcard or a one-page letter as the gift.";
+   - with the gift letter on the account, preview a two-page letter without `sendAsGift`: verify it is not a gift (no gift card) and is paid with Pay & Send, whatever the balance;
+   - on a one-page gift letter's card, write past the page: verify the room line says "About N characters past this page, and a gift letter is one page.", and **Update the page** is refused with "This letter is sent as a gift letter, which is one page, and these words run past it. Shorten them to fit one page, or make a new preview to send it another way.";
+   - press **Typewriter** on a full gift letter: verify it is refused as too long for one page.
+9. [ ] Pay & Send in ChatGPT: press **Pay & Send (USD 5.99)** and pay with the test card. Verify:
+   - the order is `jit-letter-2-pages` at USD 5.99, and the balance is unchanged;
+   - the card shows "Paid USD 5.99" and "paid, going to the printer";
+   - after the next maintenance run, the letter is with the printer.
+
+   In PostGrid's test dashboard, verify the letter is double-sided, the PDF shows both pages as previewed, and the addresses sit on page 1 alone. **Record PostGrid's `pageCount`** (the probe says it counts sides, so 2). Repeat with a three-page letter (USD 6.99, two sheets).
+10. [ ] In Claude (DEV), preview a two-page letter. Verify the note under the button reads "Letter packs pay for one-page letters and 6x9 postcards. This one is paid with Pay & Send on Letter IRL's page, which sends it once you pay." and the button is **Pay & Send on letterirl.com** (Claude takes no in-app purchases; the button needs the confirmation page, `LETTER_IRL_SEND_CONFIRMATION_ENABLED`). Verify the page shows the pages, the price and only Pay & Send.
+11. [ ] Turn `LETTER_IRL_ROOM_TO_WRITE_ENABLED` off and deploy the API and maintenance, then refresh. Verify:
+    - a 40-line letter is refused with "Letter is N lines too long for one page: it takes X lines and the page holds 26. Please shorten your message to fit on one page.";
+    - `set_letter_words` is gone, unless `LETTER_IRL_WORDS_EDITOR_ENABLED` is on;
+    - a two-page letter paid before the change still prints on two pages.
+
+    **Record** what Pay & Send says for a two-page draft that was previewed but not paid (the code expects "Pay & Send isn't available for this mail."). Turn the flag back on.
+
+**Pass criteria:** A letter runs to two or three pages, prints double-sided exactly as previewed, and is paid only with Pay & Send at USD 5.99 or 6.99. A pack pays for one-page letters only. A gift letter stays on one page. Nothing past three pages is made.
+
+---
+
+### POSTCARD-01 — Postcard sizes and fronts: 4x6, 11x6, border and greetings (#594)
+
+**Status:** Not run. COLLAGE-01 covers collages.
+
+**Preconditions:** Development.
+- **API and maintenance:** `LETTER_IRL_POSTCARD_SIZES_ENABLED` (off unless set), `JIT_PURCHASE_ENABLED=true`, and `STRIPE_JIT_POSTCARD_4X6_PRICE_ID` and `STRIPE_JIT_POSTCARD_11X6_PRICE_ID` set to the Stripe test prices from `scripts/create-option-prices.ts` (USD 3.99 and USD 5.99).
+- **API only:** `LETTER_IRL_POSTCARD_LAYOUTS_ENABLED` (off unless set) and `LETTER_IRL_PRINT_RENDERER=pdf`. `LETTER_IRL_STUDIO_CARD_ENABLED` for the maker. `LETTER_IRL_GIFT_LETTERS_ENABLED` and a gift letter for step 9.
+
+Refresh the connectors (`set_postcard_style` is new). You need a landscape photo by link, a saved return address, letters in the balance, and the Stripe test card (the owner's step). PostGrid is in test mode.
+
+The tools name sizes the PostGrid way: `6x4` is the 4x6 and `6x11` is the 11x6.
+
+**Steps:**
+
+1. [ ] List the tools. Verify `quote_and_preview_postcard` takes `size` (`6x9`, `6x4`, `6x11`) and `layout` (`full_bleed`, `border`, `greetings`) with `caption` and `place`, and `set_postcard_style` ("Change the postcard style") is listed.
+2. [ ] Preview a 6x9 postcard with no size or layout. Verify:
+   - the answer has `size: 6x9` and `layout: full_bleed`;
+   - the API log has `draft.postcard_created` with `postcardSize` 6x9, `renderer` pdf-1 and `layout` full_bleed;
+   - the maker shows **4 x 6 in**, **6 x 9 in** (pressed) and **6 x 11 in**, and the Front buttons **Full** (pressed), **Border** and **Greetings**;
+   - the cost reads "1 letter".
+3. [ ] Preview with `size: "6x4"`. Verify:
+   - "Drawn to scale: 4 x 6 in.", and the message count reads "… the back holds 11 lines, about 350 characters of prose";
+   - the cost reads "Pay & Send USD 3.99", with `canSendNow: false` and "Letter packs and gift letters pay for one-page letters and 6x9 postcards; this one is paid with Pay & Send.", and no pack button.
+
+   A 12-line message at 4x6 is refused with "Postcard message is 1 line too long for the back: it takes 12 lines and the back holds 11. Please shorten your message to fit on the postcard back."
+4. [ ] Preview with `size: "6x11"`. Verify "6 x 11 in", "16 lines, about 900", and "Pay & Send USD 5.99".
+5. [ ] Fronts:
+   - `layout: "border", caption: "Cape Cod, August 2026"`: verify the photo inside a white border with the caption below in a handwriting face;
+   - a border without a caption: verify it previews;
+   - `layout: "greetings", place: "Asheville"`: verify the photo across the front, "Greetings from" over it and ASHEVILLE in capitals;
+   - for both, verify the log has `renderer` pdf-3 and the layout, and the price does not change.
+6. [ ] Verify each of these front refusals:
+   - a caption with full bleed: "A caption goes with the border layout: set layout to border, or leave caption out.";
+   - a place on a border: "A border takes a caption, not a place: …";
+   - a caption with greetings: "A greeting takes a place, not a caption: …";
+   - greetings with no place: "The greetings layout needs a place: "Greetings from" where?";
+   - `layout: "polaroid"`: refused by the input check;
+   - a caption of 61 characters: "The caption is too long: it may hold at most 60 characters. Shorten it." (a place: at most 30);
+   - a 60-character caption of wide letters at 4x6: "The caption is too long for its line on the front of a 4x6 postcard: about N of its M characters fit. Shorten it."
+7. [ ] From the chat, `set_postcard_style` on a 6x9:
+   - `size: "6x4"`: verify "The postcard is now a 4x6, with the photo across the front. This size is paid per send with Pay & Send, at its own price. Nothing has been sent.";
+   - back to `6x9`: verify "… A letter pack pays for this size. …";
+   - the same again: verify "The postcard is already a 6x9, with the photo across the front. Nothing has changed, and nothing has been sent.";
+   - a 6x9 with a 16-line message, to `6x4`: verify "The message is too long for the back of a 4x6 postcard: it takes 16 lines and the back holds 11. Keep its size, or make a new preview with a shorter message.";
+   - a border whose caption fits a 6x9 but not a 4x6, to `6x4`: verify "The postcard's caption is too long … To change the size, give layout border and a shorter caption with it.";
+   - no arguments: verify "Name what to change: the size, or the layout with its caption or place.";
+   - a letter draft: verify "Sizes and layouts are for postcards. A letter changes its look with set_stationery."
+8. [ ] On the maker, press **4 x 6 in**. Verify "Drawing the postcard again.", then the server's sentence; the page, the size, the count and the cost follow. Press **Border** and type a caption. Verify the hint says "Up to 60 characters, or none. Sending waits until you Update or Put back.", Send waits, and **Put back** restores the line. Press **Greetings**. Verify "Write the place it greets from, then Update." and the line is labelled "Place". Type a place and press **Update**: verify the greeting is drawn. Press **Full**: verify the front goes back to full bleed.
+9. [ ] Gift postcards:
+   - preview a 4x6 with `sendAsGift: true`: verify "A gift letter pays for a one-page letter or a 6x9 postcard, not for this one. …";
+   - on a 6x9 gift postcard, verify the maker shows the plain size line, not the size buttons, and that `set_postcard_style` to `6x4` is refused with "A gift postcard is a 6x9: the gift letter pays for that size only. To send another size, make a new preview with sendAsGift set to false.";
+   - verify a gift postcard can take a border or greeting front.
+10. [ ] Pay & Send a 4x6 with a greeting, and an 11x6 with a border, in test mode. Verify the orders are `jit-postcard-4x6` (USD 3.99) and `jit-postcard-11x6` (USD 5.99), and the balance is unchanged. In PostGrid's test dashboard, verify each prints from our two-page PDF (6.25 x 4.25 in and 11.25 x 6.25 in with bleed), front as previewed, message in the back's left part and the address side empty, and that each stays `ready`.
+11. [ ] Turn `LETTER_IRL_POSTCARD_SIZES_ENABLED` off and deploy the API and maintenance, then refresh. Verify:
+    - `size` takes `6x9` alone, and a `6x4` sent anyway is refused by the input check;
+    - `set_postcard_style` to `6x4` says "The size must be 6x9.";
+    - the maker shows no size buttons.
+
+    Turn `LETTER_IRL_POSTCARD_LAYOUTS_ENABLED` off as well and deploy. Verify:
+    - `layout`, `caption` and `place` are gone, and one sent anyway is refused with "Postcard layouts are not offered here: the front is the photo alone. Leave layout, caption and place out.";
+    - `set_postcard_style` is gone, and a call from a client with the old tool list is answered "Tool set_postcard_style not found";
+    - postcards paid before still print at their size and front.
+
+    Turn both back on.
+
+**Pass criteria:** Each size and front prints as previewed. A 4x6 is paid only with Pay & Send at USD 3.99 and an 11x6 at USD 5.99. A pack and a gift letter pay for a 6x9 alone. A front costs nothing more. With the flags off, nothing offers a size or front, and mail already made still prints as it was made.
+
+---
+
+### ENVELOPE-01 — The envelope reveal on the letter card (#576)
+
+**Status:** Not run.
+
+The envelope is drawn on the card only: nothing prints differently, and postcards have none.
+
+**Preconditions:** Development, with `LETTER_IRL_ENVELOPE_REVEAL_ENABLED` on in the API (off unless set) and `LETTER_IRL_PRINT_RENDERER=pdf`: the envelope dresses our renderer's page. `LETTER_IRL_STATIONERY_ENABLED` and `LETTER_IRL_ARRIVE_BY_ENABLED` for steps 2 and 4, `LETTER_IRL_WORDS_EDITOR_ENABLED` (or room to write) for step 5, and `LETTER_IRL_STUDIO_CARD_ENABLED`, `LETTER_IRL_GIFT_LETTERS_ENABLED` and a gift letter on the account for step 6. Refresh the ChatGPT (DEV) and Claude connectors (widgets v88). The account needs letters in its balance.
+
+**Steps:**
+
+1. [ ] Preview a letter in ChatGPT (DEV). The first time the card shows the page, verify:
+   - a cream window envelope covers the page's top third, with two windows over the address boxes and a dashed stamp outline at top right;
+   - the page unfolds out of it in under a second and the envelope fades;
+   - the card does not grow.
+2. [ ] Press a style, and scroll the chat so the host draws the card again. Verify the opening does not play again. (Leave the arrival date alone here: a dated card sends with **Schedule Letter**, which step 4 covers.)
+3. [ ] Press **Send Letter**. Verify:
+   - the page folds back into the envelope;
+   - the sealed envelope stays, its windows showing the two addresses, and the page's box shrinks to the envelope's height;
+   - the button under it reads **Show the letter**.
+
+   Press it, or the envelope: verify the page shows again.
+4. [ ] Press **Schedule Letter** on a letter with an arrival date. Verify it seals as in step 3, and the pill reads "Scheduled" with **Cancel this letter**.
+5. [ ] Make a refused send: change the words in the chat after the preview, then press **Send Letter** on the card. Verify the card says "This letter changed after it was shown here, so nothing was sent.", and the page is not sealed.
+6. [ ] (Studio) Send a gift letter, whose card is its second page (a two-page letter is paid with Pay & Send, which does not seal the card: step 9). Verify the pages fold into one envelope, the sealed card shows page 1, and "Page 1 of 2" and **Next page** are hidden while sealed.
+7. [ ] Turn on reduced motion (Windows: Settings > Accessibility > Visual effects > Animation effects off) and reload. Verify nothing moves: the page shows at once, and a sent letter is sealed at once.
+8. [ ] Repeat steps 1 and 3 in Claude (DEV). Verify the same. Verify a postcard preview has no envelope.
+9. [ ] **Record** what the card shows after a Pay & Send letter is paid (the code seals only after the card's own send or schedule). Also record what a reopened conversation shows for a letter the card sent (the sealed state is not kept with the card).
+10. [ ] Turn `LETTER_IRL_ENVELOPE_REVEAL_ENABLED` off and deploy the API. Verify a new preview shows the page with no envelope, and that the PDF of a letter sent with the reveal on matches its preview. Turn the flag back on.
+
+**Pass criteria:** The page opens from the envelope once per draft and folds back in after a successful send or schedule. The card never grows, Send works throughout, reduced motion is respected, and nothing prints differently.
+
+---
+
 ## Image Generation Routing
 
 `generate_image_for_mail` is a HYBRID (decision record Addendum 3): with
