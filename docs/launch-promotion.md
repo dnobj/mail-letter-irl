@@ -105,16 +105,17 @@ must be ready before the API deploys against it
    its code with the file's rather than adding a second, so the flow binds one of each.
 4. The consent setting (`use_scope_descriptions_for_consent`, #267).
 5. The ChatGPT client's refresh-token settings (they are not inherited from development).
-6. The sign-in methods decided (Google, GitHub, and email and password; Microsoft only after LINK-02
-   with it): each social connection with our own OAuth application's credentials, not Auth0's
-   developer keys. The apps that connect to Letter IRL (ChatGPT, Claude and the others) are
-   third-party clients, which sign in through every **domain-level** connection and only those,
-   with no per-app switch. So each chosen connection is promoted to the domain level ("Promote
-   Connection to Domain Level" on: GitHub at least, since production's record has only Google and
-   the password connection promoted), and each one left out (Apple, and Microsoft until LINK-02)
-   has that switch off, or is deleted, not only unticked on an app. If step 3 counted users on a
-   connection left out, decide first what becomes of them: turning it off locks out those with no
-   other sign-in method.
+6. The sign-in methods decided: Google, GitHub, and email and password (Microsoft only after
+   LINK-02 with it). The outcome, which stage B checks on the website and on a connected app, is
+   that exactly these are offered and each works:
+   - each social connection uses our own OAuth application's credentials, not Auth0's developer
+     keys, and asks for the email address (the linking Action needs it);
+   - each chosen connection is promoted to the domain level, since the connected apps are
+     third-party clients that use domain-level connections only (production's record has only
+     Google and the password connection promoted);
+   - each connection left out (Apple, Microsoft until then) has that promotion off and is unticked
+     on the website's application. **Never delete a connection**: Auth0 deletes its users with it,
+     past undoing. If step 3 counted users on one left out, decide first what becomes of them.
 7. Run `scripts/check-auth0-tenant.ts` and record the result in the tenant doc. On production, run it
    here, before the imports of step 8 take the free application slots (none of them holds a
    Management API grant, so the check loses nothing). On development, which is at the free plan's
@@ -264,9 +265,8 @@ SELECT pid, state, now() - xact_start AS age, left(query, 60) AS query FROM pg_s
    - `/readyz` answers 200 with the new `X-Build-Commit`;
    - the boot log shows `boot.thread_pool` with size 16;
    - the ledger's newest row is `064_admin_command_retention.sql`;
-   - one production sign-in with each method chosen in stage 0, through the website, and one
-     through a connected app (the ChatGPT connector), whose sign-in page offers exactly the chosen
-     methods;
+   - one production sign-in with each method chosen in stage 0, through the website and through a
+     connected app (the ChatGPT connector), each sign-in page offering exactly the chosen methods;
    - the maintenance and admin services are on the new build.
 4. Re-run the admin provisioning for production **from a checkout at the promoted commit**, never
    from an older one: it applies the grants of the code it runs (`038`, `053` and `063` need it).
