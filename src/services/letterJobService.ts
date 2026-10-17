@@ -12,6 +12,7 @@ import type pg from 'pg';
 import { query, transaction } from '../db/index.js';
 import { getProviderForMailType, type MailType } from './providers/index.js';
 import type {
+  HeldPrint,
   LetterParams,
   LetterResult,
   PostcardParams,
@@ -32,6 +33,7 @@ import { enabledUnlessDisabled } from '../utils/envSettings.js';
 import { letterPrintText, signatureParagraph } from './previewService.js';
 import { heldMailJobSql, isFundingHoldReason, leftForOperatorSql } from './heldMail.js';
 import { OPERATOR_NOTICES, reportToOperator } from './operatorNotify.js';
+import { forgetHeldPdf, storedHeldPdf } from './heldPrintPdf.js';
 
 const DEFAULT_MAX_ATTEMPTS = 5;
 const STALE_LOCK_MINUTES = 15;
@@ -374,7 +376,8 @@ async function loadLetter(letterId: string): Promise<Letter> {
   return result.rows[0];
 }
 
-function letterParams(letter: Letter, job: LetterJob): LetterParams {
+/** What the print hands the provider for a letter (heldPrintService lays held mail out from it too, #697). */
+export function letterParams(letter: Letter, job: Pick<LetterJob, 'idempotency_key'>): LetterParams {
   const content = letter.content as Record<string, any>;
   const recipient = letter.recipient as Record<string, any>;
   return {
@@ -467,7 +470,8 @@ function rendererRefusal(
   return provider.printsRenderedPdf ? undefined : 'provider_cannot_print_rendered';
 }
 
-function postcardParams(letter: Letter, job: LetterJob): PostcardParams {
+/** What the print hands the provider for a postcard (heldPrintService lays held mail out from it too, #697). */
+export function postcardParams(letter: Letter, job: Pick<LetterJob, 'idempotency_key'>): PostcardParams {
   const content = letter.content as Record<string, any>;
   const recipient = letter.recipient as Record<string, any>;
   return {
@@ -524,11 +528,23 @@ async function resolveProviderForLetter(letter: Letter) {
   return getProviderForMailType(routingType);
 }
 
+/**
+ * What the send recorded of held mail's print (#697): the fingerprint the
+ * print must lay out to, and the PDF stored for it when its bytes are the
+ * ones recorded. Undefined for mail with neither, which prints as it lays out.
+ */
+function heldPrintOf(letter: Letter, pdf: Buffer | undefined): HeldPrint | undefined {
+  const layoutFingerprint = letter.print_layout_fingerprint ?? undefined;
+  if (!layoutFingerprint && !pdf) return undefined;
+  return { ...(layoutFingerprint ? { layoutFingerprint } : {}), ...(pdf ? { pdf } : {}) };
+}
+
 async function submitToProvider(
   provider: Awaited<ReturnType<typeof getProviderForMailType>>,
   letter: Letter,
   job: LetterJob,
-  _options: ProcessLetterJobOptions
+  _options: ProcessLetterJobOptions,
+  heldPrint?: HeldPrint
 ): Promise<{ result: ProviderResult; providerName: string }> {
   const mailType = letter.mail_type || 'letter';
 
@@ -580,9 +596,9 @@ async function submitToProvider(
           metadata: { retryable: false, submissionOutcome: 'definite_rejection' },
         };
       }
-      return provider.sendPostcard(postcardParams(letter, job));
+      return provider.sendPostcard({ ...postcardParams(letter, job), ...(heldPrint ? { heldPrint } : {}) });
     }
-    return provider.sendLetter(letterParams(letter, job));
+    return provider.sendLetter({ ...letterParams(letter, job), ...(heldPrint ? { heldPrint } : {}) });
   });
 
   return { result, providerName: provider.config.name };
@@ -1110,21 +1126,30 @@ async function processClaimedJob(
     // it belongs on the retryable failBeforeDispatch path below, not in an
     // ambiguous hold.
     const provider = await resolveProviderForLetter(preview);
+    // Held mail's stored PDF (#697), read before the dispatch marker: a store
+    // that cannot be read counts as none, never as a failed dispatch.
+    const storedPdf = await storedHeldPdf(preview);
     const marked = await markProviderDispatch(job);
     if (marked === LEFT_FOR_OPERATOR) {
       return { claimed: true, completed: false, retryScheduled: false, job, error: 'Left for the operator', leftForOperator: true };
     }
     const letter = marked;
     dispatched = true;
-    const { result, providerName } = await submitToProvider(provider, letter, job, options);
+    // Checked against the row as marked, which the send's record is part of.
+    const pdf = storedPdf && letter.print_pdf_sha256 === preview.print_pdf_sha256 ? storedPdf : undefined;
+    const { result, providerName } = await submitToProvider(provider, letter, job, options, heldPrintOf(letter, pdf));
 
     if (result.success) {
       try {
         await completeJob(job, letter, providerName, result);
+        // The provider has it: the stored PDF has done its work (#697). Only where one is recorded, so a bucket
+        // that is down slows no other letter; the hourly sweep deletes one stored without its record.
+        if (letter.print_pdf_sha256) await forgetHeldPdf(letter.letter_id);
         return { claimed: true, completed: true, retryScheduled: false, job };
       } catch (error) {
         const recovery = await recoverProviderAcceptancePersistence(job, error);
         if (recovery === 'completed') {
+          if (letter.print_pdf_sha256) await forgetHeldPdf(letter.letter_id);
           return { claimed: true, completed: true, retryScheduled: false, job };
         }
         return {

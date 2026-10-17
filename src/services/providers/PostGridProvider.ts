@@ -36,7 +36,7 @@ import {
   type CardFragment
 } from '../giftCardRenderer.js';
 import { giftQrFormat } from '../../config/giftLetters.js';
-import { drawPrintPdf, letterPages, letterPrintLayout, postcardPrintLayout, RenderRefusal } from '../printDocument.js';
+import { letterPages, letterPrintLayout, postcardPrintLayout, printPdfFor, RenderRefusal } from '../printDocument.js';
 import {
   POSTCARD_FRONT_RENDERER_VERSION,
   PRINTABLE_RENDERER_VERSIONS,
@@ -915,7 +915,8 @@ export class PostGridProvider implements LetterFulfillmentProvider {
    * failure here happens before any request, and is a RenderRefusal.
    */
   private async renderForPrint(params: LetterParams, pages: number): Promise<Buffer> {
-    return drawPrintPdf(letterPrintLayout(params, pages), 'letter');
+    // Held mail prints the PDF stored at its send, or as it was laid out then (#697).
+    return printPdfFor(() => letterPrintLayout(params, pages), params.heldPrint, 'letter');
   }
 
   /**
@@ -1545,7 +1546,8 @@ export class PostGridProvider implements LetterFulfillmentProvider {
    * before any request, and is a RenderRefusal.
    */
   private async renderPostcardForPrint(params: PostcardParams, size: PostcardSize): Promise<Buffer> {
-    return drawPrintPdf(postcardPrintLayout(params, size), 'postcard');
+    // Held mail prints the PDF stored at its send, or as it was laid out then (#697).
+    return printPdfFor(() => postcardPrintLayout(params, size), params.heldPrint, 'postcard');
   }
 
   /**

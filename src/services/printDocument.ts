@@ -8,7 +8,7 @@
  * failure is a RenderRefusal, raised before any request leaves for a provider.
  */
 
-import type { LetterParams, PostcardParams, PostcardSize } from './providers/types.js';
+import type { HeldPrint, LetterParams, PostcardParams, PostcardSize } from './providers/types.js';
 import { giftLetterPageCopy, giftPostcardStripCopy } from './giftCardRenderer.js';
 import {
   layoutGiftPage,
@@ -29,6 +29,7 @@ import {
   type PostcardFront,
   type Stationery
 } from '../render/index.js';
+import { fingerprintScheme, isLayoutFingerprint, LAYOUT_FINGERPRINT_SCHEME, layoutFingerprint } from '../render/fingerprint.js';
 
 /**
  * Our own refusal to draw a letter or postcard, before anything is sent to
@@ -39,7 +40,10 @@ import {
  * resolve it with a retry once a build that can print it is deployed.
  */
 export class RenderRefusal extends Error {
-  constructor(readonly reason: 'unknown_version' | 'image' | 'overflow' | 'size' | 'render' | 'pages', message: string) {
+  constructor(
+    readonly reason: 'unknown_version' | 'image' | 'overflow' | 'size' | 'render' | 'pages' | 'layout_changed',
+    message: string
+  ) {
     super(message);
     this.name = 'RenderRefusal';
   }
@@ -189,6 +193,40 @@ export function postcardPrintLayout(params: PostcardParams, size: PostcardSize):
     throw new RenderRefusal('overflow', `The postcard's message runs ${layout.overflowLines} line(s) past its room on the back.`);
   }
   return { layout, rendererVersion: front ? POSTCARD_FRONT_RENDERER_VERSION : RENDERER_VERSION };
+}
+
+/**
+ * Held mail lays out as the send recorded it (#697), or is refused: a
+ * renderer, font or layout rule deployed while it waited would otherwise print
+ * line breaks nobody saw. A fingerprint of a scheme this build does not make
+ * (a newer deploy's, then rolled back) cannot be compared, so it is refused
+ * too, as a renderer version this build cannot draw is. Mail with no
+ * fingerprint, as all mail not held has, prints as it lays out.
+ */
+export function assertLayoutAsRecorded(print: PrintLayout, recorded: string | undefined, kind: 'letter' | 'postcard'): void {
+  if (recorded == null) return;
+  if (!isLayoutFingerprint(recorded) || fingerprintScheme(recorded) !== LAYOUT_FINGERPRINT_SCHEME) {
+    throw new RenderRefusal('unknown_version', `This build cannot compare the ${kind}'s recorded layout.`);
+  }
+  if (layoutFingerprint(print.layout, print.rendererVersion) !== recorded) {
+    throw new RenderRefusal('layout_changed', `The ${kind} lays out differently from when it was sent.`);
+  }
+}
+
+/**
+ * The PDF a print uploads (#697): the one stored for held mail at its send,
+ * as it is, or else the mail laid out again (`lay`, whose refusals stand),
+ * checked against the fingerprint the send recorded, and drawn.
+ */
+export async function printPdfFor(
+  lay: () => PrintLayout,
+  held: HeldPrint | undefined,
+  kind: 'letter' | 'postcard'
+): Promise<Buffer> {
+  if (held?.pdf) return held.pdf;
+  const print = lay();
+  assertLayoutAsRecorded(print, held?.layoutFingerprint, kind);
+  return drawPrintPdf(print, kind);
 }
 
 /** The PDF of a print layout. A failure is a RenderRefusal, before any request. */

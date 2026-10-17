@@ -515,11 +515,16 @@ export async function eraseAccountWithClient(client: SqlClient, userId: string):
   );
   // Every letter, sent or not: the gate has already held back any still on its
   // way. redacted_at keeps the retention sweep from quarantining the empty row.
+  // Held mail's print (#697) is derived from the content and goes with it; the
+  // hourly sweep deletes a stored PDF no letter records.
   const letters = await client.query(
     `UPDATE letters
         SET content = '{}'::jsonb,
             recipient = '{}'::jsonb,
             preview_html = NULL,
+            print_pdf_sha256 = NULL,
+            print_layout_fingerprint = NULL,
+            print_layout_engine = NULL,
             redacted_at = COALESCE(redacted_at, NOW()),
             updated_at = NOW()
       WHERE user_id = $1`,

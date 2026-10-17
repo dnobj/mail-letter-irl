@@ -276,6 +276,9 @@ describe("held mail (#535)", () => {
     expect(history.values).toEqual([["ltr-1", "ltr-2"]]);
     // Before the content scrub, which finds every letter of the account.
     expect(cancelAt).toBeLessThan(texts.findIndex((t) => t.includes("SET content = '{}'::jsonb")));
+    // The scrub clears held mail's print with the content it derives from (#697).
+    const scrub = flat(texts.find((t) => t.includes("SET content = '{}'::jsonb") && t.includes("UPDATE letters"))!);
+    expect(scrub).toContain("preview_html = NULL, print_pdf_sha256 = NULL, print_layout_fingerprint = NULL, print_layout_engine = NULL, redacted_at = COALESCE(redacted_at, NOW())");
 
     const counts = JSON.parse(String(operationUpdates(client)[0].values?.[1]));
     expect(counts).toMatchObject({ heldMailCancelled: 2 });

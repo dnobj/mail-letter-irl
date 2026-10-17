@@ -15,6 +15,19 @@ import type { CertifiedMailService } from '../types.js';
 export type LetterLayoutType = 'text_only' | 'header_image' | 'inline_image';
 
 /**
+ * What the send recorded of mail held for its date (#697, decision D3), for a
+ * print our renderer draws. The print uploads `pdf` when it is there, and
+ * otherwise lays the mail out again and holds it when the layout's fingerprint
+ * is not `layoutFingerprint`.
+ */
+export interface HeldPrint {
+  /** letters.print_layout_fingerprint: what the print lays out (src/render/fingerprint.ts). */
+  layoutFingerprint?: string;
+  /** The PDF stored at the send, its bytes already checked against letters.print_pdf_sha256. */
+  pdf?: Buffer;
+}
+
+/**
  * Letter parameters for sending
  */
 export interface LetterParams {
@@ -111,6 +124,9 @@ export interface LetterParams {
    * which it prints under. The print draws it for a 'pdf-4' letter only.
    */
   signature?: { image: string; closingParagraph: number };
+
+  /** Held mail's print as the send recorded it (#697). */
+  heldPrint?: HeldPrint;
 }
 
 /**
@@ -441,6 +457,9 @@ export interface PostcardParams {
    * postcard only. Absent for full bleed.
    */
   front?: unknown;
+
+  /** Held mail's print as the send recorded it (#697). */
+  heldPrint?: HeldPrint;
 }
 
 /**
