@@ -63,6 +63,7 @@ export const addressRequestDeleteCommand: CommandDefinition<Record<string, never
       warnings: [
         "Keep the link, names and address out of the reason: the audit keeps it for two years. Write who asked and how, such as \"the recipient, by email\".",
         "The panel cannot read address requests, so this preview cannot say whether one exists: the result says whether one was found and deleted.",
+        "If the request was reported as unwanted (an operator notice and an alert), review that first: deleting it deletes the evidence the alert points to.",
         "Deletion is permanent: the request and any address given with it go. A letter already previewed or mailed with that address keeps its own copy, on the letter's schedule.",
       ],
     };

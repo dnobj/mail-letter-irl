@@ -2863,6 +2863,28 @@ put a copy back.
 **Pass criteria:** Routing changes are validated against the runtime registry and versioned; the sync is
 explicit about dry run versus apply.
 
+### ADMIN-OPS-04 — Delete an address request on request (#701)
+
+**Preconditions:** Development, full mode, elevated; `npm run admin:provision-access` re-run after the
+release that brings `address_request.delete` (without it the delete fails with `ADMIN_INTERNAL_ERROR`,
+safely). Address requests on, and a request answered with a test address
+([ADDRESS-01](#address-01--an-address-request-link-given-declined-cancelled-604)).
+
+**Steps:**
+
+1. [ ] On **Support**, paste the whole link the recipient was sent and press **Preview the delete…**. Verify
+   the preview's URL carries `target=link:` and a 64-character fingerprint, never the link's token, and
+   that the preview names the fingerprint and warns to keep the link, names and address out of the reason.
+2. [ ] Give a reason without them (for example "the recipient, by email"), type the phrase and confirm.
+   Verify the result says `deleted: true` with the request's status, and `/audit` shows
+   `address_request.delete` with the fingerprint as its target and nothing of the request.
+3. [ ] Preview and confirm the same link again: the result says `deleted: false`. The sender's
+   `get_address_request` now says the request wasn't found.
+4. [ ] Paste something that is not a link or id: the Support page says so and offers the form again.
+
+**Pass criteria:** A request is deleted by its fingerprint or id without the panel reading it, and the
+token, names and address appear in no URL, audit row or command run.
+
 ### ADMIN-LIMITS-01 — Set a daily limit, refuse once, one alert, clear (#514)
 
 **Status:** Passed on development on 2026-09-28 (8a169db), elevated by the owner. It came after

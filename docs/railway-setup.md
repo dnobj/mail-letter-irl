@@ -144,7 +144,7 @@ LETTER_IRL_ADDRESS_REQUESTS_ENABLED=<true to list request_address, get_address_r
 LETTER_IRL_ADDRESS_REQUEST_LINK_DAYS=<days a link works, 1 to 30; default 7>
 LETTER_IRL_ADDRESS_REQUEST_WAITING_CAP=<requests an account may have waiting, 1 to 100; default 10>
 LETTER_IRL_ADDRESS_REQUEST_DAILY_CAP=<requests an account may make in 24 hours, 1 to 500; default 20>
-# Maintenance service: how long a closed address request, and any address given, is kept (#604; the owner's value).
+# The API and the maintenance service, the same value on both: how long a closed address request, and any address given, is kept (#604, #701; the owner's value).
 LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS=<days after it closes, or after its link expires unanswered, 1 to 30 (the limit the privacy row will state, #701); a value over 30 is not honoured and 7 stands; default 7; the same value on the API, which tells the recipient's page, and the maintenance service, which sweeps>
 # Signatures (#608, docs/tool-apis.md#signatures): a saved picture of the person's signature, and /api/signature for the
 # website. Offered only while LETTER_IRL_PRINT_RENDERER is pdf. API service only; production waits for the owner.
