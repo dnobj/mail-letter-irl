@@ -13,9 +13,9 @@
 //   Remove-Item Env:AUTH0_CHECK_TOKEN; Remove-Variable token
 //
 // The token needs read:actions, read:clients, read:client_grants,
-// read:email_provider and read:email_templates, and nothing else: take it
-// from a temporary machine-to-machine application holding only those, and
-// delete the application afterwards. Not from the Management API's "API
+// read:email_provider and read:email_templates: take it from a temporary
+// machine-to-machine application holding only those (docs/launch-promotion.md
+// stage 0), and delete the application afterwards. Not from the Management API's "API
 // Explorer" tab, which creates a lasting application with every scope.
 //
 // What it checks:
@@ -155,7 +155,9 @@ export function checkLinkingGrant(clients: Auth0Client[], grants: Auth0Grant[], 
   if (linking.length !== 1) {
     results.push({ ok: false, line: `"Account Linking" applications: ${linking.length} (expected exactly 1)` });
   } else {
-    const grant = managementGrants.find((candidate) => candidate.client_id === linking[0].client_id);
+    const grant = managementGrants.find(
+      (candidate) => candidate.client_id === linking[0].client_id && candidate.subject_type !== "user",
+    );
     if (!grant) {
       results.push({ ok: false, line: `"${linking[0].name}" has no Management API grant` });
     } else {
@@ -172,9 +174,14 @@ export function checkLinkingGrant(clients: Auth0Client[], grants: Auth0Grant[], 
     if (linkingIds.has(grant.client_id)) continue;
     const name = clients.find((client) => client.client_id === grant.client_id)?.name ?? "an unlisted application";
     if (grant.subject_type === "user") {
+      // Legacy clients carry these: scopes on the signed-in user's own record only.
+      const beyondSelf = (grant.scope ?? []).filter((scope) => !scope.includes("current_user"));
       results.push({
-        ok: true,
-        line: `"${name}" holds a user-delegated Management API grant (${(grant.scope ?? []).length} scopes, acting for the signed-in user only)`,
+        ok: beyondSelf.length === 0,
+        line:
+          beyondSelf.length === 0
+            ? `"${name}" holds a user-delegated Management API grant (${(grant.scope ?? []).length} scopes, on the signed-in user only)`
+            : `"${name}" holds a user-delegated Management API grant reaching past the signed-in user (${beyondSelf.length} of ${(grant.scope ?? []).length} scopes)`,
       });
       continue;
     }

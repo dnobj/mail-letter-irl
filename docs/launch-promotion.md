@@ -25,7 +25,7 @@ Revalidate before acting: numbers below are as of `dev` at `3db2f57` (2026-10-16
 2. **Stage A, the website** (`dev` to `main`).
 3. **Stage B, the API** (`dev` to `master`), in the merge window, the same day as stage A.
 4. **Stage C, the decided switches,** one change at a time.
-5. **Stage D, the renderer:** the first switch with a rollback floor.
+5. **Stage D, the renderer.**
 6. **Stage E, arrive-by.**
 7. **Stage F, the paid options,** one per deploy.
 
@@ -83,8 +83,9 @@ must be ready before the API deploys against it
    linking Action goes into the flow, or new password sign-ups cannot confirm.
 2. The `Account Linking (production)` machine-to-machine application, with exactly `read:users` and
    `update:users` on the Management API.
-3. The row-holder check the tenant doc describes (it reads users: add `read:users` to the temporary
-   application of step 7 for it), then the two Post Login Actions from
+3. Create the temporary application `Tenant check (temporary)` (the tenant doc's "Checking a
+   tenant"), with `read:users` added for the row-holder check the tenant doc describes; run that
+   check, then remove `read:users` from the application. Then add the two Post Login Actions from
    [`docs/auth0/actions/`](auth0/actions/): the linking Action above the email-claim Action.
 4. The consent setting (`use_scope_descriptions_for_consent`, #267).
 5. The ChatGPT client's refresh-token settings (they are not inherited from development).
@@ -92,8 +93,8 @@ must be ready before the API deploys against it
    apps chosen for launch. OpenClaw's client document is served by the production website, so it is
    imported after stage A.
 7. Run `scripts/check-auth0-tenant.ts` on both tenants and record the result in the tenant doc.
-   Its token comes from a temporary application with only the five read scopes, deleted after the
-   run. **Not** from the Management API's API Explorer tab: on a tenant without the API Explorer
+   Its token comes from the temporary application of step 3, now holding only the five read scopes;
+   delete the application after the run. **Not** from the Management API's API Explorer tab: on a tenant without the API Explorer
    Application, that tab creates it, with every Management API scope (the development tenant's was
    deleted on 2026-09-26; if production still has one, the check reports its grant).
 
@@ -141,9 +142,10 @@ Also before stage B:
   same migrating pre-deploy (safe: the second waits on the advisory lock and finds nothing to
   apply). Note what each production service actually has, and whether the admin service has none,
   for stage B step 2.
-- Run `npm run preflight:cutover -- --env production` **from a checkout at the `dev` head being
-  promoted** (run from `master`, it checks the old variable list) and close its gaps
-  ([deployment.md](deployment.md)).
+- Run `RAILWAY_API_TOKEN=... npm run preflight:cutover -- --env production` **from a checkout at
+  the `dev` head being promoted** (run from `master`, it checks the old variable list) and close
+  its gaps ([deployment.md](deployment.md)). It reads the API and maintenance services only, so check
+  `ADMIN_TOTP_SECRETS` on the admin service by hand.
 - Keep `ADMIN_TOTP_SECRET` on the admin service: the current release needs it, and so does a
   rollback.
 
@@ -172,6 +174,7 @@ SELECT count(*) AS collision_groups FROM (
   SELECT 1 FROM users GROUP BY lower(email) HAVING count(*) > 1) g;
 
 -- Ownership: every table must belong to the DATABASE_URL role (062 and 064 need it for the purges).
+-- Expect 12 rows: a missing table is a finding too.
 SELECT c.relname, pg_get_userbyid(c.relowner) AS owner FROM pg_class c
  WHERE c.relkind = 'r' AND c.relname IN ('users', 'letters', 'letter_drafts', 'letter_jobs',
    'personal_access_tokens', 'promo_campaigns', 'promo_redemptions', 'commerce_operational_alerts',
@@ -204,7 +207,8 @@ SELECT pid, state, now() - xact_start AS age, left(query, 60) AS query FROM pg_s
 ## Stage B: the API
 
 1. Between :10 and :40, merge `dev` into `master` (a pull request, the owner's merge).
-2. Watch the API's deploy log: the pre-deploy applies `033` to `064` in one transaction, then the
+2. Watch the API's and the maintenance service's deploy logs (either may run the migrations first;
+   the other then finds nothing to apply): the pre-deploy applies `033` to `064` in one transaction, then the
    new build starts. If the pre-deploy fails, the old API build keeps serving and nothing was
    applied; fix the cause and redeploy. The maintenance and admin services deploy from the same
    merge without waiting for it, so they can be left on the new build against the old schema: roll
@@ -225,19 +229,23 @@ SELECT pid, state, now() - xact_start AS age, left(query, 60) AS query FROM pg_s
 6. Refresh the production connectors (ChatGPT, then each other app), and re-paste the app
    instructions in the OpenAI portal.
 7. A canary: buy a Starter pack, send one real letter from the card and one from the confirmation
-   page, refund the pack. (Claiming a gift code waits for stage C: gift letters are still off.)
+   page, and refund the pack only once both letters show as accepted by PostGrid (a full refund holds
+   any letter still queued). Claiming a gift code waits for stage C: gift letters are still off.
 8. Once it has settled (a day without a rollback), delete `ADMIN_TOTP_SECRET` from the admin
    service.
 
 ## Stage C: the decided switches
 
-One change at a time, each with its check, in this order:
+Stage C starts once stage B has settled (a day without a rollback). From its first switch, the old
+build is no longer a rollback target (see "Rollback"). One change at a time, each with its check, in
+this order:
 
 - `LETTER_IRL_GIFT_LETTERS_ENABLED=true` (on at launch, after GIFT-01). Then buy a pack (packs
-  grant gift letters only while the flag is on), send a gift letter, and claim its code.
+  grant gift letters only while the flag is on), send a gift letter, and claim its code when the
+  printed card arrives, as GIFT-01 does.
 - `STRIPE_CHECKOUT_DOMAIN`, then refresh the connector, then switch the domain on in Stripe
   ([stripe-custom-domain.md](stripe-custom-domain.md)).
-- `CONTENT_RETENTION_MODE=enforce`, only once a rollback to the old build is ruled out, then watch
+- `CONTENT_RETENTION_MODE=enforce` (the old build is no longer a rollback target), then watch
   the first enforced run and check the quarantine the same day.
 - The non-root image (`RAILWAY_DOCKERFILE_PATH=Dockerfile.api` on the API and maintenance, the API's
   start command cleared), if decided; the steps are in [deployment.md](deployment.md).
@@ -245,9 +253,9 @@ One change at a time, each with its check, in this order:
 
 ## Stage D: the renderer
 
-`LETTER_IRL_PRINT_RENDERER=pdf`, after PRINT-02's sends pass. From here the rollback floor is
-migration `039`: never roll back below it while a queued or held letter, or an unexpired draft,
-carries a renderer version ([deployment.md](deployment.md)).
+`LETTER_IRL_PRINT_RENDERER=pdf`, after PRINT-02's sends pass. The old build cannot print this mail
+(its floor is migration `039`, [deployment.md](deployment.md)); by this stage it is no longer a
+rollback target.
 
 ## Stage E: arrive-by
 
@@ -264,6 +272,9 @@ their owner's word.
 
 ## The flags
 
+The last column is what each flag's mail needs of a rollback below the promoted commit, which only
+stage B allows (see "Rollback").
+
 | Flag | Service | Launch | Before turning on | Rollback |
 | --- | --- | --- | --- | --- |
 | `LETTER_IRL_SEND_CONFIRMATION_ENABLED` | API | `true` (required) | website stage A | cannot be off in production |
@@ -279,7 +290,7 @@ their owner's word.
 | `LETTER_IRL_ADDRESS_REQUESTS_ENABLED` | API | unset | retention wording; the website's `/address` page | the old build does not sweep requests |
 | `LETTER_IRL_HOME_ENABLED`, `..._WORDS_EDITOR_ENABLED`, `..._POSTCARD_COLLAGES_ENABLED`, `..._CARD_UPLOAD_ENABLED`, `..._ENVELOPE_REVEAL_ENABLED`, `..._STUDIO_CARD_ENABLED` | API | unset | the owner's word | none |
 | `LETTER_IRL_IMAGE_GEN_MODE` | API | `off` | check the current value first | meaning differs between builds |
-| `CONTENT_RETENTION_MODE` | maintenance | `report`, then `enforce` in stage C | the rule below | never `enforce` while a rollback is possible |
+| `CONTENT_RETENTION_MODE` | maintenance | `report`, then `enforce` in stage C | the rule below | never `enforce` while the old build is a rollback target |
 | `LETTER_IRL_OUTBOX_DISPATCH_ENABLED` | API, maintenance | `true` | | `false` pauses the printer queue (new build only) |
 
 ## Migrations
@@ -302,34 +313,48 @@ know:
 
 ## Rollback
 
-- **Before stage D,** rolling back means redeploying `master`'s previous build on the API **and the
-  maintenance service together** (the maintenance run is what dispatches the queue). The schema
-  stays at `064`, which the old build tolerates. The old build has no send rule, so the model can
-  call the send tools itself again, and tokens could send (it ignores token scopes). It does not
-  handle gift letters, so keep gift letters off if a rollback is likely.
-- **Release or cancel the mail the new build is holding, first.** The old build dispatches every
-  pending job, including mail the new build leaves for the operator: letters whose pack was refunded
-  in full or disputed (#696), and letters of an account whose sending is blocked. Release or cancel
-  each from the admin panel, and roll back only when this read-only count is 0 in both columns:
+**The old build is a rollback target only during stage B.** `master`'s previous build (September,
+migration `032`) knows nothing the launch version makes: gift cards, mail held for its funding or
+for a blocked account, refunds held for a person, renderer versions, certified mail. It also ignores
+`LETTER_IRL_OUTBOX_DISPATCH_ENABLED` and has no send rule. Every switch from stage C on makes more
+mail it would mishandle, so:
 
-  ```sql
-  SELECT count(*) FILTER (WHERE j.hold_reason IN ('funding_reversed', 'funding_disputed')) AS funding_held,
-         count(*) FILTER (WHERE u.sends_blocked_reason IS NOT NULL) AS blocked_account
-    FROM letter_jobs j JOIN letters l ON l.letter_id = j.letter_id JOIN users u ON u.user_id = l.user_id
-   WHERE j.status = 'pending' AND j.provider_outcome = 'not_dispatched';
-  ```
-- **Empty the queue before rolling back below a floor.** The old build ignores
-  `LETTER_IRL_OUTBOX_DISPATCH_ENABLED` and dispatches every queued letter it finds, so a paused
-  queue does not protect a rollback: certified letters would go as ordinary mail, and letters
-  previewed by the renderer would print from the old layout. First switch off the flag that makes
-  such mail, and let the new build send (or an operator cancel) the letters already queued or held.
-  Then wait until no draft that carries it keeps its content: drafts expire in 24 hours, but some
-  floors last until the sweep redacts them, days later ([deployment.md](deployment.md) gives each
-  floor's rule). Only then roll back. The pause is for stopping mail while the new build stays.
-- **Never leave `CONTENT_RETENTION_MODE=enforce` set while a rollback to the old build is
-  possible:** the old build's enforce path has known defects.
-- **The admin panel:** `ADMIN_TOTP_SECRET` stays until the promotion has settled, because the old
-  panel needs it.
+- **During stage B, until stage C's first switch,** a broken new build may be rolled back to the old
+  one:
+  1. Roll back the API **and the maintenance service together**, with Railway's Rollback (it restores
+     the previous image and its variables, rather than building the old commit again). The
+     maintenance run is what dispatches the queue. The admin service stays on the new build: it reads
+     the `064` schema and holds the commands below.
+  2. Do it between maintenance runs, and only when this read-only count is 0 in every column; run it
+     again right before:
+
+     ```sql
+     SELECT count(*) FILTER (WHERE j.hold_reason IN ('funding_reversed', 'funding_disputed')) AS funding_held,
+            count(*) FILTER (WHERE u.sends_blocked_reason IS NOT NULL) AS blocked_account,
+            count(*) FILTER (WHERE l.content ? 'giftCard') AS gift_card
+       FROM letter_jobs j JOIN letters l ON l.letter_id = j.letter_id JOIN users u ON u.user_id = l.user_id
+      WHERE j.status IN ('pending', 'processing') AND j.provider_outcome = 'not_dispatched';
+     SELECT count(*) AS refunds_held FROM orders
+      WHERE status = 'refund_pending' AND last_error_code = 'REFUND_NOT_COMPLETED';
+     ```
+
+     Bring a column to 0 from the admin panel: release or cancel the held letter, lift the account's
+     block, or settle the order. **If no command applies, do not roll back:** fix forward.
+  3. After it: the website stays on its new version, and its confirmation, gift and address pages
+     fail until the API is promoted again; refresh the connectors, which still list the new tools.
+     The old build has no send rule, so the model can call the send tools itself and tokens can send;
+     set `LETTER_IRL_MAIL_SENDING_ENABLED=false` on the old API if sending must stop meanwhile.
+- **From stage C on, never roll back to the old build.** A bad deploy is rolled back to the previous
+  launch-version deployment (Railway's Rollback), which understands all of the above, or is fixed
+  forward. The floors in [deployment.md](deployment.md) and the flag table only constrain a rollback
+  below the promoted commit, so they are already met.
+- **To stop something, switch it off.** `LETTER_IRL_OUTBOX_DISPATCH_ENABLED=false` on the API and the
+  maintenance service pauses all mail on any launch-version build; each feature's flag stops new mail
+  of its kind.
+- **`CONTENT_RETENTION_MODE=enforce` only from stage C,** once the old build is no longer a target:
+  its enforce path has known defects.
+- **The admin panel:** `ADMIN_TOTP_SECRET` stays until stage B has settled, because the old panel
+  needs it.
 
 ## After the promotion
 

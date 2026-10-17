@@ -124,8 +124,15 @@ describe("the linking application's grant", () => {
     const results = checkLinkingGrant(others, [linkGrant, delegated], audience);
     expect(failures(results)).toEqual([]);
     expect(results.map((result) => result.line)).toContain(
-      '"Old sync" holds a user-delegated Management API grant (1 scopes, acting for the signed-in user only)',
+      '"Old sync" holds a user-delegated Management API grant (1 scopes, on the signed-in user only)',
     );
+    const wide = { client_id: "c-old", audience, scope: ["update:current_user_metadata", "update:users"], subject_type: "user" };
+    expect(failures(checkLinkingGrant(others, [linkGrant, wide], audience))).toEqual([
+      '"Old sync" holds a user-delegated Management API grant reaching past the signed-in user (1 of 2 scopes)',
+    ]);
+    // A user-delegated grant on the linking application is not its grant.
+    const linkDelegated = { client_id: "c-link", audience, scope: ["read:current_user"], subject_type: "user" };
+    expect(failures(checkLinkingGrant(others, [linkDelegated, linkGrant], audience))).toEqual([]);
   });
 });
 
