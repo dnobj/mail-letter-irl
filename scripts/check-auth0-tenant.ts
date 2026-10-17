@@ -224,6 +224,8 @@ async function main(): Promise<void> {
   async function get(pathAndQuery: string): Promise<any> {
     const response = await fetch(base + pathAndQuery, {
       headers: { authorization: `Bearer ${token}` },
+      // The token goes to the tenant's own host only: a redirect elsewhere is refused, not followed.
+      redirect: "error",
       signal: AbortSignal.timeout(30_000),
     });
     if (!response.ok) {

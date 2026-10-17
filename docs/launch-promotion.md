@@ -74,7 +74,9 @@ Owed before stage A, on DEV at the head being promoted:
 - **REFUND-01.**
 - **A card smoke test:** ChatGPT web, desktop, Android and iOS; Claude web, desktop and Android;
   VS Code.
-- **GIFT-01** steps 4 and 8: a paper reprint and an iPhone scan.
+- **GIFT-01** steps 4 and 8: a paper reprint and an iPhone scan, once with the renderer and once
+  with `LETTER_IRL_PRINT_RENDERER` unset, since production prints gift cards from the old layout
+  between stage C and stage D.
 - **LINK-02** with each sign-in method chosen for production.
 - **ERASE-01**'s alert steps, and the admin order page's held-refund note (needs elevation).
 - **The other app gates:** CLIENT-02, CLIENT-04 (Codex), CLIENT-06, and the Hermes and VS Code gates.
@@ -100,7 +102,8 @@ must be ready before the API deploys against it
 6. The applications: remove legacy entries within the tenant's application limit, then import the
    apps chosen for launch. OpenClaw's client document is served by the production website, so it is
    imported after stage A.
-7. Run `scripts/check-auth0-tenant.ts` on both tenants and record the result in the tenant doc.
+7. Run `scripts/check-auth0-tenant.ts` on both tenants (each with its own temporary application)
+   and record the result in the tenant doc.
    Its token comes from the temporary application of step 3, now holding only the five read scopes;
    delete the application after the run. **Not** from the Management API's API Explorer tab: on a tenant without the API Explorer
    Application, that tab creates it, with every Management API scope (the development tenant's was
@@ -150,8 +153,9 @@ Also before stage B:
   same migrating pre-deploy (safe: the second waits on the advisory lock and finds nothing to
   apply). Note what each production service actually has, and whether the admin service has none,
   for stage B step 2.
-- Run `RAILWAY_API_TOKEN=... npm run preflight:cutover -- --env production` **from a checkout at
-  the `dev` head being promoted** (run from `master`, it checks the old variable list) and close
+- Run the preflight **from a checkout at the `dev` head being promoted**, with
+  `$env:RAILWAY_API_TOKEN` set in PowerShell the way the tenant check sets its token (a hidden
+  prompt, removed afterwards), then `npm run preflight:cutover -- --env production` (run from `master`, it checks the old variable list) and close
   its gaps ([deployment.md](deployment.md)). It reads the API and maintenance services only, so check
   `ADMIN_TOTP_SECRETS` on the admin service by hand.
 - Keep `ADMIN_TOTP_SECRET` on the admin service: the current release needs it, and so does a
@@ -217,7 +221,9 @@ SELECT pid, state, now() - xact_start AS age, left(query, 60) AS query FROM pg_s
 1. Between :10 and :40, merge `dev` into `master` (a pull request, the owner's merge).
 2. Watch the API's and the maintenance service's deploy logs (either may run the migrations first;
    the other then finds nothing to apply): the pre-deploy applies `033` to `064` in one transaction, then the
-   new build starts. If the pre-deploy fails, the old API build keeps serving and nothing was
+   new build starts. If the API's pre-deploy fails, read the migration ledger first: the
+   maintenance service's run may have applied them while the API's waited on the lock. Otherwise
+   the old API build keeps serving and nothing was
    applied; fix the cause and redeploy. The maintenance and admin services deploy from the same
    merge without waiting for it, so they can be left on the new build against the old schema: roll
    each back to its previous deployment until the API's run succeeds.
@@ -256,7 +262,7 @@ this order:
 - `CONTENT_RETENTION_MODE=enforce` (the old build is no longer a rollback target), then watch
   the first enforced run and check the quarantine the same day.
 - The non-root image (`RAILWAY_DOCKERFILE_PATH=Dockerfile.api` on the API and maintenance, the API's
-  start command cleared), if decided; the steps are in [deployment.md](deployment.md).
+  start command cleared); the steps are in [deployment.md](deployment.md).
 - `LETTER_IRL_CONNECT_APPS` on the website, one app at a time as each passes its production gate.
 
 ## Stage D: the renderer
@@ -269,7 +275,7 @@ rollback target.
 
 One per deploy, each after its test on DEV, then a connector refresh:
 
-1. The card features, which carry no data and no floor: the studio card, the envelope reveal, the
+1. The card features, with no floor: the studio card, the envelope reveal, the
    words editor, card upload.
 2. Postcard layouts and stationery (each prints a newer renderer version), then collages.
 3. Saved designs and signatures, once their privacy rows are published on both privacy pages.
@@ -285,7 +291,9 @@ heartbeat URLs are proven, and with its privacy row published.
 
 One per deploy, each after its live prices exist, its terms are published and its test has passed
 on DEV: room to write (two and three pages), postcard sizes, certified mail (also PostGrid's
-confirmation, the website's part and a provisioning re-run).
+confirmation, the website's part and a provisioning re-run). All three are sold by Pay & Send, so
+they need `JIT_PURCHASE_ENABLED=true` (without it a flag does nothing and the preflight asks for no
+price); room to write and the postcard sizes also need the renderer (stage D).
 
 ## The flags
 
@@ -301,11 +309,11 @@ stage B allows (see "Rollback").
 | `LETTER_IRL_ROOM_TO_WRITE_ENABLED` | API, maintenance | stage G | its two prices, terms, its DEV test | under the renderer floor |
 | `LETTER_IRL_POSTCARD_SIZES_ENABLED` | API, maintenance | stage G | its two prices, terms, its DEV test | not below #596's build while such postcards are live |
 | `LETTER_IRL_CERTIFIED_MAIL_ENABLED` | API, maintenance | stage G | its prices, terms, PostGrid's confirmation, CERTIFIED-01, provisioning | certified letters must be sent before rolling back |
-| `LETTER_IRL_STATIONERY_ENABLED`, `..._CUSTOM_STATIONERY_ENABLED` | API | stage E | its DEV test; the designs' privacy row | `pdf-2` mail must be gone before rolling back |
+| `LETTER_IRL_STATIONERY_ENABLED`, `..._CUSTOM_STATIONERY_ENABLED` | API | stage E | its DEV test; saved designs also need stationery on and their privacy row | `pdf-2` mail must be gone before rolling back |
 | `LETTER_IRL_SIGNATURES_ENABLED` | API | stage E | SIGNATURE-01, its privacy row | `pdf-4` mail |
 | `LETTER_IRL_POSTCARD_LAYOUTS_ENABLED` | API | stage E | its DEV test | `pdf-3` postcards |
-| `LETTER_IRL_ADDRESS_REQUESTS_ENABLED` | API | stage E | ADDRESS-01, its privacy row; the website's `/address` page | the old build does not sweep requests |
-| `LETTER_IRL_HOME_ENABLED`, `..._WORDS_EDITOR_ENABLED`, `..._POSTCARD_COLLAGES_ENABLED`, `..._CARD_UPLOAD_ENABLED`, `..._ENVELOPE_REVEAL_ENABLED`, `..._STUDIO_CARD_ENABLED` | API | stage E | each one's DEV test; the home after #651 | none |
+| `LETTER_IRL_ADDRESS_REQUESTS_ENABLED` | API | stage E | ADDRESS-01, its privacy row; the website's `/address` page; `LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS` on the maintenance service matching the row | the old build does not sweep requests |
+| `LETTER_IRL_HOME_ENABLED`, `..._WORDS_EDITOR_ENABLED`, `..._POSTCARD_COLLAGES_ENABLED`, `..._CARD_UPLOAD_ENABLED`, `..._ENVELOPE_REVEAL_ENABLED`, `..._STUDIO_CARD_ENABLED` | API | stage E | each one's DEV test; the home after #651, with `LETTER_IRL_CHATGPT_PLUGIN_ID` set | none |
 | `LETTER_IRL_IMAGE_GEN_MODE` | API | `off` | check the current value first | meaning differs between builds |
 | `CONTENT_RETENTION_MODE` | maintenance | `report`, then `enforce` in stage C | the rule below | never `enforce` while the old build is a rollback target |
 | `LETTER_IRL_OUTBOX_DISPATCH_ENABLED` | API, maintenance | `true` | | `false` pauses the printer queue (new build only) |
@@ -342,8 +350,9 @@ mail it would mishandle, so:
      the previous image and its variables, rather than building the old commit again). The
      maintenance run is what dispatches the queue. The admin service stays on the new build: it reads
      the `064` schema and holds the commands below.
-  2. Do it between maintenance runs, and only when this read-only count is 0 in every column; run it
-     again right before:
+  2. Do it between maintenance runs, and only when this read-only count, run as the owner role
+     (the admin roles cannot read `letters.content`), is 0 in every column; run it again right
+     before:
 
      ```sql
      SELECT count(*) FILTER (WHERE j.hold_reason IN ('funding_reversed', 'funding_disputed')) AS funding_held,
@@ -351,20 +360,32 @@ mail it would mishandle, so:
             count(*) FILTER (WHERE l.content ? 'giftCard') AS gift_card
        FROM letter_jobs j JOIN letters l ON l.letter_id = j.letter_id JOIN users u ON u.user_id = l.user_id
       WHERE j.status IN ('pending', 'processing') AND j.provider_outcome = 'not_dispatched';
-     SELECT count(*) AS refunds_held FROM orders
-      WHERE status = 'refund_pending' AND last_error_code = 'REFUND_NOT_COMPLETED';
+     SELECT count(*) AS refunds_held FROM orders WHERE last_error_code = 'REFUND_NOT_COMPLETED';
+     SELECT count(*) AS pack_refunds_open FROM commerce_pack_refunds WHERE status = 'letters_revoked';
      ```
 
-     Bring a column to 0 from the admin panel: release or cancel the held letter, lift the account's
-     block, or settle the order. **If no command applies, do not roll back:** fix forward.
+     Decide each on its own merits, never to make a rollback possible: a held letter is released
+     (`job.dispatch_now`) or cancelled (`job.cancel_held`; a Pay & Send letter of a blocked account
+     by refunding its order), a block lifted (`account.unblock_sends`, refused while a dispute
+     stands), a held refund settled as [deployment.md](deployment.md) says (a new Stripe refund, no
+     panel command), and an open pack refund left to the new maintenance run to finish. **If a
+     column cannot honestly reach 0, do not roll back:** fix forward.
   3. After it: the website stays on its new version, and its confirmation, gift and address pages
      fail until the API is promoted again; refresh the connectors, which still list the new tools.
-     The old build has no send rule, so the model can call the send tools itself and tokens can send;
-     set `LETTER_IRL_MAIL_SENDING_ENABLED=false` on the old API if sending must stop meanwhile.
-- **From stage C on, never roll back to the old build.** A bad deploy is rolled back to the previous
-  launch-version deployment (Railway's Rollback), which understands all of the above, or is fixed
-  forward. The floors in [deployment.md](deployment.md) and the flag table only constrain a rollback
-  below the promoted commit, so they are already met.
+     The old build has no send rule, so the model can call the send tools itself and every
+     personal access token can send; set `LETTER_IRL_MAIL_SENDING_ENABLED=false` on the old API if
+     sending must stop meanwhile, and check `/readyz`'s `X-Build-Commit` afterwards, since a
+     variable change redeploys.
+- **From stage C on, never roll back to the old build.** To undo a switch, change that one
+  variable back. A code regression is fixed forward, or rolled back to an earlier launch-version
+  deployment with Railway's Rollback, which also restores **that deployment's variables**: compare
+  them with the current ones first, and never roll the API back across `STRIPE_CHECKOUT_DOMAIN` once
+  Stripe serves the domain (every new checkout would be refused), nor across a feature switch whose
+  mail or links are live. The floors in [deployment.md](deployment.md) and the flag table are met by
+  any deployment at or after the promoted commit; a later commit that adds a migration or a
+  renderer version brings its own.
+- **The website:** before stage B, roll it back with Railway's Rollback if it breaks. From stage B on
+  it stays on the new version (the API's send rule needs its confirmation page): fix forward.
 - **To stop something, switch it off.** `LETTER_IRL_OUTBOX_DISPATCH_ENABLED=false` on the API and the
   maintenance service pauses all mail on any launch-version build; each feature's flag stops new mail
   of its kind.
