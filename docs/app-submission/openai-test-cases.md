@@ -312,7 +312,7 @@ and stays out when it should not (precision).
 | Scenario | Expected Behavior |
 |----------|-------------------|
 | Invalid address (e.g., "123 Fake St, Nowhere, XX 00000") | Clear error naming what USPS could not verify, with a suggested correction when there is one |
-| Letter too long (past three pages with room to write; past one page for a gift letter) | Clear error with the line count and the page limit |
+| Letter too long (past three pages with room to write; past one page for a gift letter) | Clear error with the line count and the page limit, or, for a gift letter past one page, that a gift letter pays for one page |
 | No image provided for postcard | Clear error explaining image is required |
 | Not enough letters | Preview shows `canSendNow: false` with an explanation, and the card offers Pay & Send or a letter pack |
 | Draft expired (after 24 hours) | Clear error suggesting to create new preview |
@@ -388,7 +388,7 @@ the model and called by the card when the person presses its button (#470, #474,
 | Tool | Read-only | Destructive | Open world |
 |------|-----------|-------------|------------|
 | `get_started` | Yes: shows the guide and the account's state; changes nothing. | No: changes nothing. | No: reads only Letter IRL's own records. |
-| `open_letter_home` | Yes: shows the account's home: its open previews, recent mail with scheduled dates and delivery status, and recent recipients; changes nothing. | No: changes nothing. | No: reads only Letter IRL's own records and contacts no one; its links open Letter IRL's own website, or USPS's tracking page for certified mail. |
+| `open_letter_home` | Yes: shows the account's home: its open previews, recent mail with scheduled dates and delivery status, and recent recipients; changes nothing. | No: changes nothing. | No: reads only Letter IRL's own records and contacts no one; its links open Letter IRL's own website, USPS's tracking page for certified mail, or this home again in ChatGPT. |
 | `get_account_balance`, `get_profile`, `list_orders`, `get_order_status`, `get_purchase_status`, `get_return_address`, `list_letter_packs` | Yes: each reads the calling account's own records, or the fixed pack list. | No: none changes anything. | No: each reads only Letter IRL's own records. |
 | `get_address_request`, `get_signature`, `list_stationery_designs` | Yes: each reads the calling account's own records: whether a recipient has answered an address request (and, once they have, the address they gave), whether a signature is saved, or the saved stationery designs. | No: none changes anything. | No: each reads only Letter IRL's own records. |
 | `request_send` | Yes: reads a draft and returns the page where the person checks it and sends it themselves; nothing is sent or changed. | No: it sends nothing; the person sends on the page. | No: reads only Letter IRL's own records. |
