@@ -26,8 +26,9 @@ Revalidate before acting: numbers below are as of `dev` at `3db2f57` (2026-10-16
 3. **Stage B, the API** (`dev` to `master`), in the merge window, the same day as stage A.
 4. **Stage C, the decided switches,** one change at a time.
 5. **Stage D, the renderer.**
-6. **Stage E, arrive-by.**
-7. **Stage F, the paid options,** one per deploy.
+6. **Stage E, the studio features without a price,** one per deploy.
+7. **Stage F, arrive-by.**
+8. **Stage G, the paid options,** one per deploy.
 
 **The website goes first.** The API no longer boots in production without the send rule
 (`LETTER_IRL_SEND_CONFIRMATION_ENABLED=true`, #731), and the send rule sends people to the
@@ -44,15 +45,22 @@ run at :00 must not overlap it (see "Migrations").
 
 ### Decisions (owner)
 
-- Confirm or override D1 to D8 on #680.
-- The scheduled-mail privacy row (D6, #701).
-- Arrive-by at launch: D1 says on, but approved-PDF storage (#697) is open and SCHEDULE-01 has not
-  run, so it launches dark unless both close first (stage E).
-- `CONTENT_RETENTION_MODE`: `report` through the promotion, `enforce` in stage C (see the rule under
-  "Rollback").
-- Whether production moves to the non-root image (`Dockerfile.api`, #772) in stage C or later.
-- Sign-in methods for production (Microsoft, the social OAuth apps) and the app list within Auth0's
-  application limit.
+Taken on 2026-10-16 (recorded on #680):
+
+- **The launch set is everything** (D1 widened): every studio feature goes on at launch, each after
+  its test passes on DEV and its prerequisites below, in stages C to G. Any can be switched off
+  afterwards. The ChatGPT submission describes the whole set (42 tools), so it is submitted after
+  the set is fixed.
+- D2 to D8 as written on #680. The scheduled-mail privacy row (D6, #701) is approved; it is
+  published with arrive-by.
+- `CONTENT_RETENTION_MODE`: `report` through the promotion, `enforce` in stage C (see "Rollback").
+- The non-root image (`Dockerfile.api`, #772) in stage C, as its own change.
+- Sign-in methods: what has passed on DEV (Google, GitHub, email and password; Microsoft only after
+  LINK-02 with it), with our own OAuth applications.
+
+Still the owner's, before the stage that needs it: the option prices (#578) and their terms (#579),
+PostGrid's confirmation of certified mail, the privacy rows for signatures, saved designs and
+address requests, and the home's sharing (#651).
 
 ### Manual tests on DEV (owner, with an agent driving)
 
@@ -257,18 +265,27 @@ this order:
 (its floor is migration `039`, [deployment.md](deployment.md)); by this stage it is no longer a
 rollback target.
 
-## Stage E: arrive-by
+## Stage E: the studio features without a price
 
-`LETTER_IRL_ARRIVE_BY_ENABLED=true`, after #697 and SCHEDULE-01, and once the operator alert and
-heartbeat URLs are proven.
+One per deploy, each after its test on DEV, then a connector refresh:
 
-## Stage F: the paid options
+1. The card features, which carry no data and no floor: the studio card, the envelope reveal, the
+   words editor, card upload.
+2. Postcard layouts and stationery (each prints a newer renderer version), then collages.
+3. Saved designs and signatures, once their privacy rows are published on both privacy pages.
+4. The home, after the owner's call on what it shares (#651).
+5. Address requests, once their privacy row is published.
 
-One per deploy, each after its live prices exist and its test has passed on DEV: room to write
-(two and three pages), postcard sizes, certified mail (also the website's part and a provisioning
-re-run). Stationery, saved designs, signatures, the words editor, postcard layouts and collages,
-address requests, the home, card upload, the envelope reveal and the studio card stay unset until
-their owner's word.
+## Stage F: arrive-by
+
+`LETTER_IRL_ARRIVE_BY_ENABLED=true`, after #697 and SCHEDULE-01, once the operator alert and
+heartbeat URLs are proven, and with its privacy row published.
+
+## Stage G: the paid options
+
+One per deploy, each after its live prices exist, its terms are published and its test has passed
+on DEV: room to write (two and three pages), postcard sizes, certified mail (also PostGrid's
+confirmation, the website's part and a provisioning re-run).
 
 ## The flags
 
@@ -280,15 +297,15 @@ stage B allows (see "Rollback").
 | `LETTER_IRL_SEND_CONFIRMATION_ENABLED` | API | `true` (required) | website stage A | cannot be off in production |
 | `LETTER_IRL_GIFT_LETTERS_ENABLED` | API | on, stage C | GIFT-01; the website's `/g` page | queued gift letters still print their card |
 | `LETTER_IRL_PRINT_RENDERER` | API | `pdf`, stage D | PRINT-02 sends | floor: migration `039` while rendered mail is live |
-| `LETTER_IRL_ARRIVE_BY_ENABLED` | API | stage E | #697, SCHEDULE-01 | held mail still goes out with it off |
-| `LETTER_IRL_ROOM_TO_WRITE_ENABLED` | API, maintenance | stage F | its two prices | under the renderer floor |
-| `LETTER_IRL_POSTCARD_SIZES_ENABLED` | API, maintenance | stage F | its two prices | not below #596's build while such postcards are live |
-| `LETTER_IRL_CERTIFIED_MAIL_ENABLED` | API, maintenance | stage F | its prices, the website's part, provisioning | certified letters must be sent before rolling back |
-| `LETTER_IRL_STATIONERY_ENABLED`, `..._CUSTOM_STATIONERY_ENABLED` | API | unset | the owner's word | `pdf-2` mail must be gone before rolling back |
-| `LETTER_IRL_SIGNATURES_ENABLED` | API | unset | the owner's word, the policy wording | `pdf-4` mail |
-| `LETTER_IRL_POSTCARD_LAYOUTS_ENABLED` | API | unset | the owner's word | `pdf-3` postcards |
-| `LETTER_IRL_ADDRESS_REQUESTS_ENABLED` | API | unset | retention wording; the website's `/address` page | the old build does not sweep requests |
-| `LETTER_IRL_HOME_ENABLED`, `..._WORDS_EDITOR_ENABLED`, `..._POSTCARD_COLLAGES_ENABLED`, `..._CARD_UPLOAD_ENABLED`, `..._ENVELOPE_REVEAL_ENABLED`, `..._STUDIO_CARD_ENABLED` | API | unset | the owner's word | none |
+| `LETTER_IRL_ARRIVE_BY_ENABLED` | API | stage F | #697, SCHEDULE-01, its privacy row | held mail still goes out with it off |
+| `LETTER_IRL_ROOM_TO_WRITE_ENABLED` | API, maintenance | stage G | its two prices, terms, its DEV test | under the renderer floor |
+| `LETTER_IRL_POSTCARD_SIZES_ENABLED` | API, maintenance | stage G | its two prices, terms, its DEV test | not below #596's build while such postcards are live |
+| `LETTER_IRL_CERTIFIED_MAIL_ENABLED` | API, maintenance | stage G | its prices, terms, PostGrid's confirmation, CERTIFIED-01, provisioning | certified letters must be sent before rolling back |
+| `LETTER_IRL_STATIONERY_ENABLED`, `..._CUSTOM_STATIONERY_ENABLED` | API | stage E | its DEV test; the designs' privacy row | `pdf-2` mail must be gone before rolling back |
+| `LETTER_IRL_SIGNATURES_ENABLED` | API | stage E | SIGNATURE-01, its privacy row | `pdf-4` mail |
+| `LETTER_IRL_POSTCARD_LAYOUTS_ENABLED` | API | stage E | its DEV test | `pdf-3` postcards |
+| `LETTER_IRL_ADDRESS_REQUESTS_ENABLED` | API | stage E | ADDRESS-01, its privacy row; the website's `/address` page | the old build does not sweep requests |
+| `LETTER_IRL_HOME_ENABLED`, `..._WORDS_EDITOR_ENABLED`, `..._POSTCARD_COLLAGES_ENABLED`, `..._CARD_UPLOAD_ENABLED`, `..._ENVELOPE_REVEAL_ENABLED`, `..._STUDIO_CARD_ENABLED` | API | stage E | each one's DEV test; the home after #651 | none |
 | `LETTER_IRL_IMAGE_GEN_MODE` | API | `off` | check the current value first | meaning differs between builds |
 | `CONTENT_RETENTION_MODE` | maintenance | `report`, then `enforce` in stage C | the rule below | never `enforce` while the old build is a rollback target |
 | `LETTER_IRL_OUTBOX_DISPATCH_ENABLED` | API, maintenance | `true` | | `false` pauses the printer queue (new build only) |
