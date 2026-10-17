@@ -92,7 +92,8 @@ must be ready before the API deploys against it
 1. A custom email provider (Resend) and the verification email template enabled, **before** the
    linking Action goes into the flow, or new password sign-ups cannot confirm.
 2. Count production's applications first: at the free plan's limit of 10, "Create application" is
-   off, so remove a legacy entry now (step 8 removes the rest). Then the `Account Linking
+   off, and this step and step 3 need two slots at once, so free two legacy entries now (step 8
+   removes the rest). Then the `Account Linking
    (production)` machine-to-machine application, with exactly `read:users` and `update:users` on
    the Management API.
 3. Create the temporary application `Tenant check (temporary)` (the tenant doc's "Checking a
@@ -107,11 +108,13 @@ must be ready before the API deploys against it
 6. The sign-in methods decided (Google, GitHub, and email and password; Microsoft only after LINK-02
    with it): each social connection with our own OAuth application's credentials, not Auth0's
    developer keys. The apps that connect to Letter IRL (ChatGPT, Claude and the others) are
-   third-party clients, which sign in through every **domain-level** connection, with no per-app
-   switch. So a connection left out (Apple, and Microsoft until LINK-02) is taken off the tenant
-   level ("Promote Connection to Domain Level" off) or disabled, not only unticked on an app. If
-   step 3 counted users on it, decide first what becomes of them: turning it off locks them out
-   of their accounts and their letters.
+   third-party clients, which sign in through every **domain-level** connection and only those,
+   with no per-app switch. So each chosen connection is promoted to the domain level ("Promote
+   Connection to Domain Level" on: GitHub at least, since production's record has only Google and
+   the password connection promoted), and each one left out (Apple, and Microsoft until LINK-02)
+   has that switch off, or is deleted, not only unticked on an app. If step 3 counted users on a
+   connection left out, decide first what becomes of them: turning it off locks out those with no
+   other sign-in method.
 7. Run `scripts/check-auth0-tenant.ts` and record the result in the tenant doc. On production, run it
    here, before the imports of step 8 take the free application slots (none of them holds a
    Management API grant, so the check loses nothing). On development, which is at the free plan's
@@ -262,7 +265,7 @@ SELECT pid, state, now() - xact_start AS age, left(query, 60) AS query FROM pg_s
    - the boot log shows `boot.thread_pool` with size 16;
    - the ledger's newest row is `064_admin_command_retention.sql`;
    - one production sign-in with each method chosen in stage 0, through the website, and one
-     through a connected app (the ChatGPT connector), whose sign-in page offers only the chosen
+     through a connected app (the ChatGPT connector), whose sign-in page offers exactly the chosen
      methods;
    - the maintenance and admin services are on the new build.
 4. Re-run the admin provisioning for production **from a checkout at the promoted commit**, never
@@ -365,7 +368,7 @@ stage B allows (see "Rollback").
 | `LETTER_IRL_SEND_CONFIRMATION_ENABLED` | API | `true` (required) | website stage A | cannot be off in production |
 | `LETTER_IRL_GIFT_LETTERS_ENABLED` | API | on, stage C | GIFT-01; the website's `/g` page | queued gift letters still print their card |
 | `LETTER_IRL_PRINT_RENDERER` | API | `pdf`, stage D | PRINT-02 sends | floor: migration `039` while rendered mail is live |
-| `LETTER_IRL_ARRIVE_BY_ENABLED` | API | stage F | #697 in production with its object storage, SCHEDULE-01, ADMIN-CMD-04, its privacy row | held mail still goes out with it off |
+| `LETTER_IRL_ARRIVE_BY_ENABLED` | API | stage F | #697 and #726 in production, #697's object storage, SCHEDULE-01, ADMIN-CMD-04, its privacy row | held mail still goes out with it off |
 | `LETTER_IRL_ROOM_TO_WRITE_ENABLED` | API, maintenance | stage G | its two prices, terms, its DEV test | under the renderer floor |
 | `LETTER_IRL_POSTCARD_SIZES_ENABLED` | API, maintenance | stage G | its two prices, terms, its DEV test | not below #596's build while such postcards are live |
 | `LETTER_IRL_CERTIFIED_MAIL_ENABLED` | API, maintenance | stage G | its prices, terms, PostGrid's confirmation, CERTIFIED-01, provisioning | certified letters must be sent before rolling back |
