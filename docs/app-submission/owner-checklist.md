@@ -139,9 +139,10 @@ The portal's submission steps as of September 2026 (With MCP, Universal endpoint
 `https://developers.openai.com/plugins/deploy/submission`). Record each gate's outcome in the
 [release record](#release-record) below.
 
-- [ ] **Launch build.** Production runs the launch promotion from `dev` (#158), which carries
-      #412, #426, #434 and gift letters, and the production connector has been refreshed. The
-      reviewer materials describe that build, so this comes before preparing the reviewer account.
+- [ ] **Launch build.** Production runs the launch promotion from `dev` (#158) with stages E to G of
+      [launch-promotion.md](../launch-promotion.md) done, so every launch switch is on, and the
+      production connector has been refreshed after the last switch. The reviewer materials describe
+      that build, so this comes before preparing the reviewer account.
 - [ ] **Pay & Send on.** `JIT_PURCHASE_ENABLED=true` on the production API. The reviewer
       materials promise it; it was on on 2026-09-23.
 - [ ] **Access.** The submitting account has Apps Management write access in `Objective Works` /
