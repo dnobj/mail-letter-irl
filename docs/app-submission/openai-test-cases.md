@@ -144,7 +144,7 @@ pass (see [owner-checklist.md](./owner-checklist.md)). Reviewers may run the one
 
 ## Launch Feature Cases
 
-Every studio feature is on at launch (#680, decision D1), and each is one or more of the tools above.
+Every studio feature is on at launch (#680, decision D1). Most are tools above; some are inputs of the previews (collages, letters of more pages) or the cards alone (the studio card, the envelope).
 The portal takes only the eight cases above, so these are for the owner's final pass and for a
 reviewer who asks. Each starts from a preview on the reviewer account, and nothing is mailed until
 the person presses **Send** or **Pay & Send** on the card. The full checks are the manual tests named
@@ -259,7 +259,7 @@ and stays out when it should not (precision).
 - Tool: `quote_and_preview_postcard`
 - The image is fitted to the postcard's size (6×9 unless 4×6 or 11×6 is chosen) at 300 DPI
 - The widget shows the front (image) and the back (message)
-- Message limit: 500 characters, or 350 on a gift postcard, whose foot carries the gift card. On our own renderer (#534), 16 lines of the back, or 11 above the gift card
+- Message limit at 6×9: 500 characters, or 350 on a gift postcard, whose foot carries the gift card. On our own renderer (#534), 16 lines of the back, or 11 above the gift card. A 4×6 back holds 11 lines (about 350 characters) and an 11×6 back 16 (about 900)
 
 ### Use Case 4: Check Account & Order Status
 
@@ -394,7 +394,8 @@ the model and called by the card when the person presses its button (#470, #474,
 | `request_send` | Yes: reads a draft and returns the page where the person checks it and sends it themselves; nothing is sent or changed. | No: it sends nothing; the person sends on the page. | No: reads only Letter IRL's own records. |
 | `get_draft_status` | Yes: says whether a draft is ready, sent or expired. | No: changes nothing. | No: reads only Letter IRL's own records. |
 | `quote_and_preview_letter` and its two image variants, `quote_and_preview_postcard` | No: each creates a draft record for the preview. | No: a draft is free, sends nothing, and expires if unused. | Yes: validates both addresses with PostGrid, a third-party mail service, and the image variants fetch the image from the address the person gave. |
-| `set_arrival_date`, `set_stationery`, `set_mail_service`, `set_letter_words`, `set_letter_signature` | No: each changes a previewed draft (its arrival date, stationery, mail service, words or signature) and draws it again; `set_stationery` and `set_letter_signature` also remember the choice for the next preview. | No: a draft sends nothing and expires if unused, and another call changes it back. A new price, such as certified mail's, is paid only if the person chooses Pay & Send on the card. | No: each changes only Letter IRL's own draft, drawn by Letter IRL's own renderer. |
+| `set_stationery`, `set_letter_words`, `set_letter_signature` | No: each changes a previewed draft (its stationery, words or signature) and draws it again; `set_stationery` and `set_letter_signature` also remember the choice for the next preview. | No: a draft sends nothing and expires if unused, and another call changes it back. A letter that grows to two or three pages is paid only if the person chooses Pay & Send on the card. | No: each changes only Letter IRL's own draft, drawn by Letter IRL's own renderer. |
+| `set_arrival_date`, `set_mail_service` | No: each changes a previewed draft's arrival date or mail service, without drawing it again. | No: a draft sends nothing and expires if unused, and another call changes it back. Certified mail's price is paid only if the person chooses Pay & Send on the card. | No: each changes only Letter IRL's own draft. |
 | `set_postcard_style` | No: changes a previewed postcard's size or front layout and draws it again. | No: a draft sends nothing and expires if unused, and another call changes it back. | Yes: on a new size it fetches the picture again from the address the person gave, to crop it to that size. |
 | `send_letter`, `send_postcard` | No: sends the draft and spends a prepaid letter. | Yes: mail handed to the printer cannot be recalled. The person presses Send on the card; the model cannot call these. | Yes: the letter goes to PostGrid for printing and USPS mailing. |
 | `create_mail_checkout` | No: creates an order and a checkout. | Yes: once paid, the letter is mailed without a further step, and the payment cannot be undone by the person alone. The person presses Pay & Send on the card; the model cannot call it. | Yes: creates a Stripe Checkout session. |

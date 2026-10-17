@@ -152,8 +152,9 @@ describe('upload_image tells its card whether it may send the photo itself (#474
     // Elsewhere the card would offer an upload its first chunk could not make.
     for (const app of ['chatgpt', 'vscode', 'claude_code'] as const) {
       const listed = new LetterIrlServer().listTools(clientProfileNamed(app)).some((tool) => tool.name === 'upload_photo_chunk');
+      expect(listed, app).toBe(false);
       await expect(uploadImageTool.handler({ context: 'postcard' }, inApp(app)), app).resolves.toMatchObject({
-        cardUploadAvailable: listed
+        cardUploadAvailable: false
       });
     }
     await expect(uploadImageTool.handler({ context: 'postcard' }, context())).resolves.toMatchObject({
