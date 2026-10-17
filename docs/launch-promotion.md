@@ -95,8 +95,10 @@ must be ready before the API deploys against it
    `update:users` on the Management API.
 3. Create the temporary application `Tenant check (temporary)` (the tenant doc's "Checking a
    tenant"), with `read:users` added for the row-holder check the tenant doc describes; run that
-   check, then remove `read:users` from the application. Then add the two Post Login Actions from
-   [`docs/auth0/actions/`](auth0/actions/): the linking Action above the email-claim Action.
+   check, then delete the application, so it does not hold a slot during step 6. Then add the two
+   Post Login Actions from [`docs/auth0/actions/`](auth0/actions/), the linking Action above the
+   email-claim Action. Production already has an email-claim Action (deployed 2026-09-05): replace
+   its code with the file's rather than adding a second, so the flow binds one of each.
 4. The consent setting (`use_scope_descriptions_for_consent`, #267).
 5. The ChatGPT client's refresh-token settings (they are not inherited from development).
 6. The applications: remove legacy entries within the tenant's application limit, then import the
@@ -104,9 +106,8 @@ must be ready before the API deploys against it
    imported after stage A.
 7. Run `scripts/check-auth0-tenant.ts` on both tenants (each with its own temporary application)
    and record the result in the tenant doc.
-   Its token comes from the temporary application of step 3, now holding only the five read scopes:
-   mint a fresh token after removing `read:users` (the earlier one still carries it), and delete the
-   application after the run. **Not** from the Management API's API Explorer tab: on a tenant
+   Its token comes from a new temporary application holding only the five read scopes (step 3's
+   was deleted, with its `read:users`), deleted again after the run. **Not** from the Management API's API Explorer tab: on a tenant
    without the API Explorer Application, that tab creates it, with every Management API scope (the
    development tenant's was deleted on 2026-09-26; if production still has one, the check reports
    its grant).
@@ -159,8 +160,9 @@ Also before stage B:
   for stage B step 2.
 - Run the preflight **from a checkout at the `dev` head being promoted**, with
   `$env:RAILWAY_API_TOKEN` set in PowerShell the way the tenant check sets its token (a hidden
-  prompt, removed afterwards), then `npm run preflight:cutover -- --env production` (run from `master`, it checks the old variable list) and close
-  its gaps ([deployment.md](deployment.md)). It reads the API and maintenance services only, so check
+  prompt, removed afterwards), then `npx tsx scripts/preflight-cutover.ts --env production`
+  (PowerShell's npm shim drops the `--` of `npm run preflight:cutover -- --env production`; run from
+  `master`, it checks the old variable list) and close its gaps ([deployment.md](deployment.md)). It reads the API and maintenance services only, so check
   `ADMIN_TOTP_SECRETS` on the admin service by hand.
 - Keep `ADMIN_TOTP_SECRET` on the admin service: the current release needs it, and so does a
   rollback.
@@ -232,9 +234,10 @@ SELECT pid, state, now() - xact_start AS age, left(query, 60) AS query FROM pg_s
    maintenance service's run may have applied them while the API's waited on the lock. If the
    ledger's newest row is `064`, they did: redeploy the API, and leave the maintenance service on
    the new build. Otherwise the old API build keeps serving and nothing was applied; fix the cause
-   and redeploy. The maintenance and admin services deploy from the same
-   merge without waiting for it, so they can be left on the new build against the old schema: roll
-   each back to its previous deployment until the API's run succeeds.
+   and redeploy, the maintenance service too. A service with its own migrating pre-deploy (the
+   maintenance service, by `railway.toml`) stays on its old deployment when that run fails; one
+   without (the admin service, or a maintenance service whose pre-deploy is not set) starts the new
+   build against the old schema, so roll it back to its previous deployment until the run succeeds.
    If the run succeeds but the new build fails its health check (a variable the preflight cannot
    see, such as the OAuth scopes), the old build keeps serving on the new schema, which it
    tolerates. Fix the variable and redeploy; do not roll back the migrations.
@@ -266,8 +269,9 @@ build is no longer a rollback target (see "Rollback"). One change at a time, eac
 this order:
 
 - `LETTER_IRL_GIFT_LETTERS_ENABLED=true` (on at launch, after GIFT-01). First load the website's
-  `/g/` page with a made-up code: it must say the code was not found, not that it cannot reach
-  Letter IRL (the browser could not reach the API). Then buy a pack (packs
+  `/g/` page with a made-up code: the not-found sentence must appear. If nothing appears, the
+  browser cannot reach the API: check `LETTER_IRL_ALLOWED_ORIGINS` and the website's public API URL.
+  Then buy a pack (packs
   grant gift letters only while the flag is on), send a gift letter, and claim its code when the
   printed card arrives, as GIFT-01 does.
 - `STRIPE_CHECKOUT_DOMAIN`, then refresh the connector, then switch the domain on in Stripe
@@ -298,7 +302,8 @@ One per deploy, each after its test on DEV, then a connector refresh:
 ## Stage F: arrive-by
 
 `LETTER_IRL_ARRIVE_BY_ENABLED=true`, after #697 and SCHEDULE-01, once the operator alert and
-heartbeat URLs are proven, and with its privacy row published.
+heartbeat URLs are proven, and with its privacy row published. Then refresh the connectors: it adds
+tools and an input.
 
 ## Stage G: the paid options
 
@@ -308,11 +313,13 @@ confirmation, the website's part and a provisioning re-run). All three are sold 
 they need `JIT_PURCHASE_ENABLED=true`; room to write and the postcard sizes also need the renderer
 (stage D). For each option, in this order:
 
-1. Set its price ids on the API **and the maintenance service**: both validate them at start, and a
-   maintenance service with the flag but not the prices fails every hourly run.
-2. Re-run the preflight.
-3. Turn its flag on, on both services.
-4. Confirm the next maintenance run completes.
+1. Set its price ids on the API **and the maintenance service**: both validate them at start (each
+   while it has `JIT_PURCHASE_ENABLED=true`), and a maintenance service with the flag but not the
+   prices fails every hourly run.
+2. Turn its flag on, on both services.
+3. Re-run the preflight: it asks for an option's prices only once that flag is set.
+4. Confirm the next maintenance run completes, and refresh the connectors (the option adds an input
+   or a tool).
 
 ## The flags
 
@@ -398,9 +405,9 @@ mail it would mishandle, so:
 - **From stage C on, never roll back to the old build.** To undo a switch, change that one
   variable back, with two exceptions. `STRIPE_CHECKOUT_DOMAIN`: once Stripe serves the domain, undo
   it in Stripe first ([stripe-custom-domain.md](stripe-custom-domain.md), "Removing it"), and the
-  variable stays. Gift letters and the renderer: switching them off has side effects (printed gift
-  codes stop redeeming; every feature that needs the renderer stops), so switch off the feature
-  itself instead. A code regression is fixed forward, or rolled back to an earlier launch-version
+  variable stays. And two switches with side effects: turning gift letters off means printed gift
+  codes answer that gifts are not available until it is back on; turning the renderer off stops
+  every feature that needs it, so turn off the feature at fault instead. A code regression is fixed forward, or rolled back to an earlier launch-version
   deployment with Railway's Rollback, which also restores **that deployment's variables**: compare
   them with the current ones first, and never roll the API back across `STRIPE_CHECKOUT_DOMAIN` once
   Stripe serves the domain (every new checkout would be refused), nor across a feature switch whose
