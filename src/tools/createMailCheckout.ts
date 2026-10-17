@@ -37,7 +37,7 @@ interface CreateMailCheckoutOutput {
  * after its date. Dates as the schedule carries them, YYYY-MM-DD.
  */
 export function scheduleMissedSentence(schedule: { arriveBy: string; mailOn: string }): string {
-  return `This checkout was opened for mail to arrive by ${schedule.arriveBy}, but its day to go to the printer (${schedule.mailOn}) has passed. If it is paid, it goes to the printer as soon as it can and may arrive after ${schedule.arriveBy}. Tell the person this before they pay; to choose a new date instead, leave it unpaid until it closes (it can take up to an hour), then set the arrival date again.`;
+  return `This checkout was opened for mail to arrive by ${schedule.arriveBy}, but its day to go to the printer (${schedule.mailOn}) has passed. If it is paid, it goes to the printer as soon as it can and may arrive after ${schedule.arriveBy}. Tell the person this before they pay; to choose a new date instead, leave it unpaid until it closes, then set the arrival date again.`;
 }
 
 export function friendlyCheckoutError(error: unknown): Error {

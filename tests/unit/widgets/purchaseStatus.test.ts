@@ -297,6 +297,23 @@ describe.each(CARDS)('%s: an open checkout whose mail date has passed (#726)', c
     expect(harness.text('status-pill')).toBe('Checkout open - waiting for payment');
   });
 
+  it('says so when a status answer marks it, as on a card reopened after the date passed', async () => {
+    const harness = mount(card);
+    await checkout(harness);
+    expect(harness.text('checkout-note')).not.toContain('has passed');
+    harness.setStatus({ purchaseStatus: 'pending_payment', scheduleMissed: { arriveBy: '2020-01-13', mailOn: '2020-01-02' } });
+    await harness.click('check-status-button');
+    await flush();
+    expect(harness.text('checkout-note')).toContain('to arrive by Mon, Jan 13, 2020, and that day has passed.');
+    // Not once it is paid.
+    const paid = mount(card);
+    await checkout(paid);
+    paid.setStatus({ purchaseStatus: 'processing', scheduleMissed: { arriveBy: '2020-01-13', mailOn: '2020-01-02' } });
+    await paid.click('check-status-button');
+    await flush();
+    expect(paid.text('checkout-note')).not.toContain('has passed');
+  });
+
   it('opens the checkout as before when nothing is marked, or the mark is not a pair of dates', async () => {
     for (const scheduleMissed of [undefined, { arriveBy: 'soon', mailOn: '2020-01-02' }, 'yes']) {
       const harness = mount(card, { scheduleMissed });

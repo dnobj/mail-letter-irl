@@ -203,6 +203,48 @@ describe('a Pay & Send order whose mail date passed before it was paid (#700)', 
     expect(output.message).not.toContain('confirmed too late');
   });
 
+  describe('an unpaid order whose mail date has passed (#726)', () => {
+    const pending = (draft: Record<string, unknown> | null, status = 'checkout_pending') => {
+      mocks.query
+        .mockResolvedValueOnce({
+          rows: [orderRow({ order_type: 'jit_mail', letter_id: null, draft_id: 'draft-1', credits: null, product_snapshot: { name: 'Pay & Send One Physical Letter', mailType: 'letter' }, status })]
+        })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: draft ? [draft] : [] });
+      return getPurchaseStatus('user-1', 'order-1');
+    };
+
+    it('says so before payment, and gives the card the dates', async () => {
+      // Thursday Oct 8: Tue Oct 6 has passed.
+      const output = await pending({ arrive_by: '2026-10-16', mail_on: '2026-10-06' });
+      expect(output.scheduleMissed).toEqual({ arriveBy: '2026-10-16', mailOn: '2026-10-06' });
+      expect(output.message).toContain(
+        'Its day to go to the printer, Tue, Oct 6, has passed: if it is paid now, it goes to the printer as soon as it can and may arrive after Fri, Oct 16. Tell the person before they pay.'
+      );
+      expect(issues(getPurchaseStatusOutputZ.safeParse(output))).toBe('ok');
+      const [sql, params] = mocks.query.mock.calls[2];
+      expect(sql).toBe('SELECT arrive_by, mail_on FROM letter_drafts WHERE draft_id = $1');
+      expect(params).toEqual(['draft-1']);
+    });
+
+    it('says nothing for a date still ahead, a draft without dates or with dates it cannot read, or one gone', async () => {
+      for (const draft of [{ arrive_by: '2026-10-23', mail_on: '2026-10-13' }, { arrive_by: null, mail_on: null }, { arrive_by: null, mail_on: '2026-10-06' }, null]) {
+        const output = await pending(draft);
+        expect(output, JSON.stringify(draft)).not.toHaveProperty('scheduleMissed');
+        expect(output.message).not.toContain('has passed');
+      }
+    });
+
+    it('never asks once the order is paid or closed', async () => {
+      for (const status of ['paid', 'fulfillment_pending', 'cancelled', 'expired']) {
+        mocks.query.mockReset();
+        const output = await pending({ arrive_by: '2026-10-16', mail_on: '2026-10-06' }, status);
+        expect(output, status).not.toHaveProperty('scheduleMissed');
+        expect(mocks.query.mock.calls.some(([sql]) => String(sql).includes('FROM letter_drafts')), status).toBe(false);
+      }
+    });
+  });
+
   it('says nothing of it without the event, or with dates it cannot read', async () => {
     expect((await payAndSend('fulfillment_pending', null)).message).toBe('Payment is confirmed and the mail item is being prepared.');
     expect((await payAndSend('fulfillment_pending', { arrive_by: null, mail_on: '2026-10-06' })).message).toBe(

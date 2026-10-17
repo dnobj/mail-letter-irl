@@ -185,6 +185,12 @@ export interface PurchaseStatusResult {
   amountRefundedCents?: number;
   updatedAt: string;
   message: string;
+  /**
+   * Arrive-by (#726): an unpaid Pay & Send order whose mail date has passed.
+   * Paid now, it goes to the printer as soon as it can and may arrive late, so
+   * a card following the order, reopened later too, says so before payment.
+   */
+  scheduleMissed?: DraftSchedule;
 }
 
 export interface StripeEventProcessingResult {
@@ -3984,6 +3990,28 @@ async function readMissedSchedule(order: Order): Promise<DraftSchedule | undefin
 }
 
 /**
+ * An unpaid Pay & Send order whose draft's mail date has passed (#726), read
+ * by the send's own reader and clock, or undefined. A draft whose dates cannot
+ * be read says nothing here: its checkout refuses it before the charge.
+ */
+async function readPendingMissedSchedule(order: Order): Promise<DraftSchedule | undefined> {
+  if (order.order_type !== 'jit_mail' || order.status !== 'checkout_pending' || !order.draft_id) return undefined;
+  const result = await query<Pick<LetterDraft, 'arrive_by' | 'mail_on'>>(
+    'SELECT arrive_by, mail_on FROM letter_drafts WHERE draft_id = $1',
+    [order.draft_id]
+  );
+  const row = result.rows[0];
+  if (!row) return undefined;
+  let schedule: DraftSchedule | null;
+  try {
+    schedule = draftScheduleOf(row);
+  } catch {
+    return undefined;
+  }
+  return schedule && schedule.mailOn < earliestMailOn(new Date()) ? schedule : undefined;
+}
+
+/**
  * What a Pay & Send order whose mail date passed before it was paid adds to
  * its status (#700), while it is being prepared or once it is with the
  * printer. Nothing once it is refunded or held: its mail no longer goes.
@@ -4033,6 +4061,11 @@ export async function getPurchaseStatus(
   const pack = await readPackPurchaseFigures(order);
   const missed = await readMissedSchedule(order);
   const missedSentence = missed ? missedScheduleSentence(purchaseStatus, missed, new Date()) : undefined;
+  // Unpaid and its date passed (#726): said before payment, to the model and to the card.
+  const pendingMissed = await readPendingMissedSchedule(order);
+  const pendingMissedSentence = pendingMissed
+    ? `Its day to go to the printer, ${describeDate(pendingMissed.mailOn, new Date())}, has passed: if it is paid now, it goes to the printer as soon as it can and may arrive after ${describeDate(pendingMissed.arriveBy, new Date())}. Tell the person before they pay.`
+    : undefined;
   return {
     orderId: order.order_id,
     purchaseStatus,
@@ -4053,9 +4086,10 @@ export async function getPurchaseStatus(
     // Letter packs only; every field absent (never null) on Pay & Send orders.
     ...(pack ?? {}),
     updatedAt: new Date(order.updated_at).toISOString(),
+    ...(pendingMissed ? { scheduleMissed: pendingMissed } : {}),
     message: pack
       ? packPurchaseMessage(purchaseStatus, order, pack)
-      : [purchaseMessage(purchaseStatus), missedSentence].filter(Boolean).join(' ')
+      : [purchaseMessage(purchaseStatus), missedSentence, pendingMissedSentence].filter(Boolean).join(' ')
   };
 }
 

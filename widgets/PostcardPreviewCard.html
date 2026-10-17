@@ -2725,6 +2725,8 @@
           statusPill.textContent = status.message || state;
         } else {
           statusPill.textContent = "Checkout open - waiting for payment";
+          // Its mail date passed while it waits (#726), on a reopened card too.
+          if (state === "pending_payment") showScheduleMissed(status.scheduleMissed);
         }
         // "Settled" means nothing further will change SOON - not that nothing
         // will ever change. "processing" counts, and that is the point:
@@ -2902,6 +2904,19 @@
 
       // Reveal the checkout link, the customer's route to paying when the
       // host does not open a tab. See handlePayAndSend for why it exists.
+      // An unpaid checkout whose mail date has passed (#726), from the checkout or a status answer:
+      // said in place of the checkout note. True when it was shown.
+      function showScheduleMissed(value) {
+        const missed = arrives.scheduleOf(value);
+        if (!missed) return false;
+        const note = document.getElementById("checkout-note");
+        note.textContent =
+          `This was to go to the printer on ${arrives.describeDate(missed.mailOn)} to arrive by ${arrives.describeDate(missed.arriveBy)}, and that day has passed. ` +
+          `If you pay, it goes to the printer as soon as it can and may arrive after ${arrives.describeDate(missed.arriveBy)}.`;
+        note.style.display = "block";
+        return true;
+      }
+
       function showCheckoutLink(href, label) {
         // Only an https link becomes the card's link (#684); the order is still followed.
         if (!isHttpsUrl(href)) return;
@@ -2998,13 +3013,7 @@
 
           // An open checkout whose mail date has passed since it opened (#726): said
           // first, and opened only from the link, so nothing is paid unread.
-          const missed = arrives.scheduleOf(result.scheduleMissed);
-          if (missed) {
-            const note = document.getElementById("checkout-note");
-            note.textContent =
-              `This was to go to the printer on ${arrives.describeDate(missed.mailOn)} to arrive by ${arrives.describeDate(missed.arriveBy)}, and that day has passed. ` +
-              `If you pay, it goes to the printer as soon as it can and may arrive after ${arrives.describeDate(missed.arriveBy)}.`;
-            note.style.display = "block";
+          if (showScheduleMissed(result.scheduleMissed)) {
             buttonText.textContent = "Read the note, then use the checkout link below";
             return;
           }

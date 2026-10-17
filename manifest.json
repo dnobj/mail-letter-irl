@@ -1916,6 +1916,22 @@
           },
           "message": {
             "type": "string"
+          },
+          "scheduleMissed": {
+            "type": "object",
+            "properties": {
+              "arriveBy": {
+                "type": "string"
+              },
+              "mailOn": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "arriveBy",
+              "mailOn"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [

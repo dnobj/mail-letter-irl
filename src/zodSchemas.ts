@@ -926,7 +926,9 @@ export const getPurchaseStatusOutputZ = z.object({
   refundableAmountCents: z.number().int().nonnegative().optional(),
   amountRefundedCents: z.number().int().nonnegative().optional(),
   updatedAt: z.string(),
-  message: z.string()
+  message: z.string(),
+  // Arrive-by (#726): an unpaid Pay & Send order whose mail date has passed.
+  scheduleMissed: z.object({ arriveBy: z.string(), mailOn: z.string() }).optional()
 });
 
 export const getOrderStatusOutputZ = z.object({
