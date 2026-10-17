@@ -115,6 +115,11 @@ function goldenDigest(): string {
   const recorded = /const RECORDED: Record<string, string> = \{\n([\s\S]*?)\n\};/.exec(source);
   if (!recorded) throw new Error('layoutPages.test.ts no longer records its layouts as RECORDED');
   const entries = [...recorded[1].matchAll(/'([^']+)': '([0-9a-f]{16})'/g)].map((match) => `${match[1]}=${match[2]}`).sort();
+  // Every recorded line read, so a reformatted RECORDED cannot drop out of the digest unnoticed.
+  const lines = recorded[1].split('\n').filter((line) => line.trim() !== '' && !line.trim().startsWith('//'));
+  if (entries.length === 0 || entries.length !== lines.length) {
+    throw new Error(`layoutPages.test.ts records ${lines.length} layouts, and ${entries.length} were read`);
+  }
   const postcards = readFileSync(new URL('../../fixtures/postcardBacks6x9.497afe2.json', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
   const wider = Object.entries(widerLayouts())
     .map(([name, layout]) => `${name}=${layoutFingerprint(layout, 'golden')}`)

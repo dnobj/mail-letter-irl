@@ -56,7 +56,12 @@ export function rendererVersionFor(stationery?: Stationery | null, signed = fals
   return stationery && stationery.theme !== 'classic' ? STATIONERY_RENDERER_VERSION : RENDERER_VERSION;
 }
 
-/** The date every PDF this renderer draws carries, so the same layout gives the same bytes (#697). */
+/**
+ * The date every PDF this renderer draws carries, so the same layout gives the
+ * same bytes within one build (#697). Not across builds: the compressed
+ * streams depend on the bundled pdfkit and zlib, so a stored PDF is checked
+ * against the hash recorded when it was stored, never a re-render against it.
+ */
 export const PDF_CREATION_DATE = new Date('2026-01-01T00:00:00.000Z');
 
 /**

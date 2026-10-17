@@ -66,6 +66,8 @@ describe('layoutFingerprint (#697)', () => {
     expect(layoutFingerprint(longer, RENDERER_VERSION)).not.toBe(fingerprint);
 
     expect(layoutFingerprint(base, 'pdf-2')).not.toBe(fingerprint);
+    expect(layoutFingerprint({ ...base, width: base.width + 1 }, RENDERER_VERSION)).not.toBe(fingerprint);
+    expect(layoutFingerprint({ ...base, height: base.height + 1 }, RENDERER_VERSION)).not.toBe(fingerprint);
 
     const picture = (bytes: Buffer): Layout => ({
       ...structuredClone(base),
@@ -85,6 +87,18 @@ describe('layoutFingerprint (#697)', () => {
     const fromBuffer = layoutFingerprint(picture(Buffer.from([1, 2, 3])), RENDERER_VERSION);
     expect(layoutFingerprint(picture(new Uint8Array([1, 2, 3])), RENDERER_VERSION)).toBe(fromBuffer);
     expect(layoutFingerprint(picture(new Uint8Array([1, 2, 4])), RENDERER_VERSION)).not.toBe(fromBuffer);
+  });
+
+  it('tells a position that is not a number from zero, and from each other', () => {
+    const base = letter('Hello Sam');
+    const at = (x: number) => {
+      const layout = structuredClone(base);
+      (layout.pages[0].items.find((item) => item.kind === 'text') as { x: number }).x = x;
+      return layoutFingerprint(layout, RENDERER_VERSION);
+    };
+    const prints = [at(0), at(Number.NaN), at(Number.POSITIVE_INFINITY), at(Number.NEGATIVE_INFINITY)];
+    expect(new Set(prints).size).toBe(4);
+    expect(at(-0)).toBe(at(0));
   });
 
   it('names no scheme for a value with no colon', () => {

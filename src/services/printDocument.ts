@@ -4,8 +4,8 @@
  * print, and the send that records what the print will draw for mail held
  * for its date (#697), lay a letter out the same way by construction.
  *
- * Pure but for the PDF: no I/O, and every failure is a RenderRefusal, raised
- * before any request leaves for a provider.
+ * No I/O but the renderer's own: the font files, read once from disk. Every
+ * failure is a RenderRefusal, raised before any request leaves for a provider.
  */
 
 import type { LetterParams, PostcardParams, PostcardSize } from './providers/types.js';
