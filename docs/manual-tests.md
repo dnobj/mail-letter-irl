@@ -1787,7 +1787,9 @@ PostGrid test-mode verification; a refused field costs none.
 9. [ ] Change one character of a link: the page says "This link isn't valid".
 10. [ ] Seven days after a request closes, the maintenance run's `address-requests-sweep` deletes it.
     To see it sooner, set `LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS=1` on the maintenance service
-    (`letter-irl-maintenance-dev`): its floor is 1 day, and 0 or a non-integer falls back to 7. Then
+    (`letter-irl-maintenance-dev`) **and** the API, which tells the page: check the page now says "1 day
+    after you answer". Its floor is 1 day, its ceiling 30 (#701), and 0, a value over 30 or a non-integer
+    falls back to 7. Then
     `get_address_request` says "That address request wasn't found on this account. request_address
     makes a new one." Put the variable back afterwards.
 11. [ ] Last, make a fourth request and leave it waiting. Then turn the flag off: set it to `false` and
@@ -2860,6 +2862,28 @@ put a copy back.
 
 **Pass criteria:** Routing changes are validated against the runtime registry and versioned; the sync is
 explicit about dry run versus apply.
+
+### ADMIN-OPS-04 — Delete an address request on request (#701)
+
+**Preconditions:** Development, full mode, elevated; `npm run admin:provision-access` re-run after the
+release that brings `address_request.delete` (without it the delete fails with `ADMIN_INTERNAL_ERROR`,
+safely). Address requests on, and a request answered with a test address
+([ADDRESS-01](#address-01--an-address-request-link-given-declined-cancelled-604)).
+
+**Steps:**
+
+1. [ ] On **Support**, paste the whole link the recipient was sent and press **Preview the delete…**. Verify
+   the preview's URL carries `target=link:` and a 64-character fingerprint, never the link's token, and
+   that the preview names the fingerprint and warns to keep the link, names and address out of the reason.
+2. [ ] Give a reason without them (for example "the recipient, by email"), type the phrase and confirm.
+   Verify the result says `deleted: true` with the request's status, and `/audit` shows
+   `address_request.delete` with the fingerprint as its target and nothing of the request.
+3. [ ] Preview and confirm the same link again: the result says `deleted: false`. The sender's
+   `get_address_request` now says the request wasn't found.
+4. [ ] Paste something that is not a link or id: the Support page says so and offers the form again.
+
+**Pass criteria:** A request is deleted by its fingerprint or id without the panel reading it, and the
+token, names and address appear in no URL, audit row or command run.
 
 ### ADMIN-LIMITS-01 — Set a daily limit, refuse once, one alert, clear (#514)
 

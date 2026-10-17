@@ -11,6 +11,7 @@ import {
   readRetentionCounts,
   readTokenStats,
 } from "../queries/ops.js";
+import { addressRequestPreviewPath } from "../commands/addressRequests.js";
 import type { RouteHandler } from "./app.js";
 import type { AdminRouter } from "./router.js";
 
@@ -66,6 +67,20 @@ export function registerOpsRoutes(
       tokenStats: await readTokenStats(client),
       featureRequests: await listFeatureRequests(client, 100),
     }));
-    return context.render("Support", renderSupport(data));
+    return context.render("Support", renderSupport({ ...data, csrfToken: context.csrfToken, mode: context.config.mode }));
   }, { name: "support" });
+
+  // An address request to delete (#701), named by a pasted link or an id. A
+  // POST, so the link's token never travels in a URL: it is reduced to its
+  // fingerprint here, and the preview is reached with that.
+  router.add("POST", "/support/address-request", async (context) => {
+    const preview = addressRequestPreviewPath(context.form?.get("request") ?? "");
+    if (!preview) {
+      return context.redirect("/support", {
+        tone: "bad",
+        text: "That is not an address request link or id. Paste the whole link the person was sent, or the request id.",
+      });
+    }
+    return context.redirect(preview);
+  }, { name: "support.address_request" });
 }

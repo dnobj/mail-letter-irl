@@ -128,11 +128,11 @@ describe('the address request routes (#604)', () => {
     expect(readAddressRequestPage).not.toHaveBeenCalled();
   });
 
-  it("gives the page the sender's first name, the state and the expiry, uncached and without a referrer", async () => {
+  it("gives the page the sender's first name, the state, the expiry and how long it is kept, uncached and without a referrer", async () => {
     const answer = await call('page', { token: TOKEN });
-    // Exactly these three: nothing more of the request reaches the page.
+    // Exactly these, and the retention days the setting holds (#701): nothing more of the request reaches the page.
     expect(answer.status).toBe(200);
-    expect(answer.json).toEqual(WAITING);
+    expect(answer.json).toEqual({ ...WAITING, retentionDays: 7 });
     expect(answer.headers).toMatchObject({
       'access-control-allow-origin': ORIGIN,
       'cache-control': 'no-store',
@@ -243,6 +243,20 @@ describe('the address request routes (#604)', () => {
     validateAddress.mockResolvedValueOnce({ status: 'failed', originalAddress: {}, errors: [], transportError: true });
     await expect(call('answer', { token: TOKEN, address: ADDRESS })).resolves.toMatchObject({ status: 200 });
     expect(answerAddressRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it('says the retention days the setting holds, within the 30 the policy states (#701)', async () => {
+    try {
+      vi.stubEnv('LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS', '12');
+      expect((await call('page', { token: TOKEN })).json).toMatchObject({ retentionDays: 12 });
+      vi.stubEnv('LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS', '30');
+      expect((await call('page', { token: TOKEN })).json).toMatchObject({ retentionDays: 30 });
+      // Past the stated limit, the setting is not honoured: the default stands.
+      vi.stubEnv('LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS', '31');
+      expect((await call('page', { token: TOKEN })).json).toMatchObject({ retentionDays: 7 });
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it('checks the link before the address: a used or unknown one costs no verification', async () => {

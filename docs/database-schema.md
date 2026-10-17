@@ -350,7 +350,8 @@ order's checkout sends (#279). A retry of an order whose session creation failed
 and its idempotency key, only when it would send the same request; otherwise it cancels the order
 (`PRICE_CHANGED_BEFORE_SESSION` or `CHECKOUT_REQUEST_CHANGED_BEFORE_SESSION`) and opens a fresh one
 with a fresh key, because Stripe refuses a key it has seen with different parameters. Orders from
-before the field are compared on amount and currency alone.
+before the field are compared on amount and currency alone. An arrive-by refusal (#726) cancels such an order too, with
+`SCHEDULE_PASSED` or `SCHEDULE_FULL`, and opens none: nothing was paid on it, and it held the draft.
 
 ### stripe_disputes
 
@@ -675,11 +676,14 @@ and 20 a day per account (`LETTER_IRL_ADDRESS_REQUEST_WAITING_CAP`, `LETTER_IRL_
 A request is answered or declined once: one UPDATE that requires `waiting` and an unexpired link.
 An answer's `address` holds the recipient's own name for the envelope, or else `recipient_name`.
 Account erasure deletes the account's requests ([account-erasure.md](account-erasure.md)). Erasure keeps
-the `users` row, so the cascade does not reach them. Neither admin role is granted the table.
+the `users` row, so the cascade does not reach them. The reader role is never granted the table; the
+operator role only what the delete below needs.
 
 **Retention (#604):** the maintenance task `address-requests-sweep` deletes a request, address included,
-`LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS` (default 7) days after `COALESCE(closed_at, expires_at)`: when
+`LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS` (default 7, at most 30, #701) days after `COALESCE(closed_at, expires_at)`: when
 it closed, or for one never answered, when its link expired. It runs whatever the feature's flag says.
+On request, an operator deletes one sooner with `address_request.delete` (#701): the operator role holds
+`SELECT (request_id, token_hash, status, created_at)` and `DELETE` on the table, never its names or address.
 
 ### user_signatures
 

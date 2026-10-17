@@ -488,6 +488,38 @@ describePostgres('duplicate mail check (#412)', () => {
       return result.rows;
     }
 
+    it('cancels a sessionless order for a draft whose mail date has passed, commits that, then refuses, and the draft is free again (#726)', async () => {
+      const userId = await seedUser(0);
+      const draftId = await seedDraft(userId);
+      await pool.query("UPDATE letter_drafts SET arrive_by = '2020-01-13', mail_on = '2020-01-02' WHERE draft_id = $1", [draftId]);
+      // An order whose Stripe session was never made: a session call that failed.
+      const orderId = `order-${randomUUID()}`;
+      await pool.query(
+        `INSERT INTO orders (order_id, user_id, credits, amount_cents, currency, status, order_type, product_code,
+           idempotency_key, draft_id, checkout_expires_at)
+         VALUES ($1, $2, NULL, 499, 'usd', 'checkout_pending', 'jit_mail', 'jit-letter', $3, $4, NOW() + INTERVAL '50 minutes')`,
+        [orderId, userId, `jit-checkout:${orderId}`, draftId]
+      );
+      const sessions = stripeDouble.sessions.length;
+
+      await expect(commerce.createJitCheckout({ userId, draftId })).rejects.toMatchObject({
+        code: 'SCHEDULE_PASSED',
+        diagnosticClass: 'SCHEDULE_PASSED'
+      });
+
+      const order = (await pool.query('SELECT status, last_error_code FROM orders WHERE order_id = $1', [orderId])).rows[0];
+      expect(order).toEqual({ status: 'cancelled', last_error_code: 'SCHEDULE_PASSED' });
+      const events = await pool.query('SELECT event_type, from_status, to_status FROM commerce_order_events WHERE order_id = $1', [orderId]);
+      expect(events.rows).toContainEqual({ event_type: 'checkout.schedule_refused', from_status: 'checkout_pending', to_status: 'cancelled' });
+      expect(stripeDouble.sessions).toHaveLength(sessions);
+
+      // The refusal's advice can be followed at once: a new date for the draft.
+      const drafts = await import('../../src/services/draftService.js');
+      const schedule = await import('../../src/services/deliverySchedule.js');
+      const arriveBy = schedule.addCalendarDays(schedule.newYorkDate(new Date()), 35);
+      await expect(drafts.setDraftSchedule(draftId, userId, { arriveBy, mailOn: schedule.mailOnFor(arriveBy, 7) })).resolves.toBeNull();
+    });
+
     it('refuses a new checkout for a letter already sent, before any order or session exists', async () => {
       const userId = await seedUser(0);
       await seedLetter(userId);

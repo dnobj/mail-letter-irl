@@ -4,7 +4,7 @@
  * the link's fragment and posts it here in the body, never in the path or the
  * query, so it stays out of every access log.
  *
- *   POST /api/public/address-requests/page     { token }                    -> { state, senderFirstName, expiresAt }
+ *   POST /api/public/address-requests/page     { token }                    -> { state, senderFirstName, expiresAt, retentionDays }
  *   POST /api/public/address-requests/answer   { token, address: { name?, addressLine1, addressLine2?, city, state, postalCode } }
  *   POST /api/public/address-requests/decline  { token, report? }
  *
@@ -31,7 +31,7 @@
 
 import type { IncomingMessage, ServerResponse } from 'http';
 import { createHash } from 'node:crypto';
-import { isAddressRequestsEnabled } from '../config/addressRequests.js';
+import { addressRequestRetentionDays, isAddressRequestsEnabled } from '../config/addressRequests.js';
 import { OPERATOR_NOTICES, reportToOperator } from '../services/operatorNotify.js';
 import {
   answerAddressRequest,
@@ -312,7 +312,8 @@ export async function handleAddressRequestApiRequest(
     if (route === 'page') {
       const page = await readAddressRequestPage(token);
       if (!page) sendJson(res, 404, NOT_FOUND);
-      else sendJson(res, 200, { state: page.state, senderFirstName: page.senderFirstName, expiresAt: page.expiresAt });
+      // How long the request is kept once closed (#701): the page says it, so the number is the setting's.
+      else sendJson(res, 200, { state: page.state, senderFirstName: page.senderFirstName, expiresAt: page.expiresAt, retentionDays: addressRequestRetentionDays() });
       return true;
     }
 

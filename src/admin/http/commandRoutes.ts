@@ -58,6 +58,8 @@ function backHrefFor(command: CommandDefinition<any>, targetId: string): string 
       return "/routing";
     case "daily_limit":
       return "/limits";
+    case "address_request":
+      return "/support";
     default:
       return "/";
   }

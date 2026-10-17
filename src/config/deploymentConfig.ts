@@ -703,15 +703,16 @@ export const ENV_VAR_MANIFEST: readonly EnvVarRequirement[] = [
   },
   /**
    * How many days a closed address request, and any address given with it,
-   * is kept (#604): read by the maintenance sweep, whatever the feature's flag.
-   * The value is the owner's, with the privacy policy's wording; 7 by default.
+   * is kept (#604): read by the maintenance sweep, whatever the feature's flag,
+   * and by the API, which tells the recipient's page. The value is the owner's,
+   * with the privacy policy's wording; 7 by default, at most 30 (#701).
    */
   {
     name: 'LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS',
     requiredIn: 'production',
     advisory: true,
     secret: false,
-    services: ['maintenance']
+    services: ['api', 'maintenance']
   },
   /**
    * The envelope reveal (#576, src/config/envelope.ts): the letter previews

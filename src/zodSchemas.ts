@@ -849,7 +849,9 @@ export const createMailCheckoutOutputZ = z.object({
   expiresAt: z.string().optional(),
   status: z.string(),
   reused: z.boolean(),
-  message: z.string()
+  message: z.string(),
+  // Arrive-by (#726): an open checkout whose mail date has passed since it opened.
+  scheduleMissed: z.object({ arriveBy: z.string(), mailOn: z.string() }).optional()
 });
 
 export const redeemPromoCodeOutputZ = z.object({
@@ -924,7 +926,9 @@ export const getPurchaseStatusOutputZ = z.object({
   refundableAmountCents: z.number().int().nonnegative().optional(),
   amountRefundedCents: z.number().int().nonnegative().optional(),
   updatedAt: z.string(),
-  message: z.string()
+  message: z.string(),
+  // Arrive-by (#726): an unpaid Pay & Send order whose mail date has passed.
+  scheduleMissed: z.object({ arriveBy: z.string(), mailOn: z.string() }).optional()
 });
 
 export const getOrderStatusOutputZ = z.object({

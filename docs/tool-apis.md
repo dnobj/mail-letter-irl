@@ -203,7 +203,7 @@ Listed only while `LETTER_IRL_ADDRESS_REQUESTS_ENABLED` is on (#604, concept 10 
 The server instructions add, while these are listed, that `request_address` is the way when the person does not know the recipient's address, and never to guess one (steering r35).
 
 **The page's public routes** (`src/api/addressRequestApi.ts`, #604). They need no sign-in, and each takes the token in a JSON body, never in the path or the query. The page reads the token from the link's fragment.
-- `POST /api/public/address-requests/page` with `{ token }` answers `{ state, senderFirstName, expiresAt }`, nothing else.
+- `POST /api/public/address-requests/page` with `{ token }` answers `{ state, senderFirstName, expiresAt, retentionDays }`, nothing else. `retentionDays` is `LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS` as the API reads it (at most 30, #701), for the page to say how long the request is kept.
 - `POST /api/public/address-requests/answer` with `{ token, address: { name?, addressLine1, addressLine2?, city, state, postalCode } }`:
   - **The link is checked first,** so a used or expired one costs no verification.
   - **The fields** are trimmed and bounded (name, lines 100 characters, city 60), with no hidden characters and nothing Open Sans cannot print. The name takes letters, marks, digits, spaces and `. , ' " ! & # ( ) / + - ´ ‘ ’ “ ”` and dashes only (#730): it reaches the model, so no markup and no link with a scheme. `state` is a USPS state, territory or freely associated state code (FM, MH, PW), or a military post office's. `postalCode` is a ZIP or ZIP+4; nine digits without the hyphen are taken as ZIP+4. A wrong field answers 400 `{ reason: "invalid", fields, unprintable }`: `unprintable` lists those of `fields` among the name, the address lines and the city that hold a character Open Sans cannot print and a person can see (#730), so the page names the printer only for them. An emoji newer than the server's Unicode tables, or a private-use character, is taken for a hidden one: its field is refused without the note.
@@ -320,6 +320,10 @@ Input: `{ orderId: string }`.
 Returns sanitized, owner-scoped purchase state: `pending_payment`, `processing`,
 `submitted`, `payment_failed`, `refund_pending`, `refunded`, `on_hold`, or
 `cancelled`. It exposes no card, billing, address, content, or raw Stripe data.
+
+An unpaid Pay & Send order that can still be paid (a session open, its window not over) whose
+mail date has passed also carries `scheduleMissed` (`arriveBy`, `mailOn`), and its message says
+that paid now it goes to the printer as soon as it can and may arrive late (#726).
 
 For a letter-pack order it also returns the pack's figures, absent (never
 null) on Pay & Send orders: `letters` in the pack, `lettersRemaining` still on

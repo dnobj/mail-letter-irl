@@ -147,8 +147,11 @@ export async function readReaderSeparation(
        has_column_privilege(r.oid, 'personal_access_tokens', 'token_hash', 'SELECT') AS token_hash,
        has_column_privilege(r.oid, 'letters', 'preview_html', 'SELECT') AS letter_preview,
        -- A table the reader is never granted: one that exists on every branch
-       -- this panel runs against, read safely where it does not.
-       COALESCE((SELECT has_table_privilege(r.oid, c.oid, 'SELECT') FROM pg_class AS c
+       -- this panel runs against, read safely where it does not. Any column
+       -- of it too (#701): the operator holds column grants on it, and one
+       -- copied to the reader would read past the table check.
+       COALESCE((SELECT has_table_privilege(r.oid, c.oid, 'SELECT') OR has_any_column_privilege(r.oid, c.oid, 'SELECT')
+                   FROM pg_class AS c
                   WHERE c.oid = to_regclass('address_requests')), false) AS address_requests,
        (r.rolsuper OR r.rolbypassrls) AS unrestricted,
        EXISTS (
