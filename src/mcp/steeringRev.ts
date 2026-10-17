@@ -202,4 +202,7 @@
 // tools say where the person sends instead; save_stationery_design leaves its choices to the input schema. "Safe retries",
 // get_purchase_status's "never exposes payment-card details", request_address's "never contacts them" and the
 // instructions' "they do not send mail" are reworded too.
-export const STEERING_COPY_REV = 50;
+// r51: the hints and listing the launch submission names: set_postcard_style is open world (on a new size it fetches the
+// picture again from its link), get_address_request's _meta says idempotentHint false as its annotations do, and
+// upload_photo_chunk is listed only where the card sends the photo itself, never in ChatGPT.
+export const STEERING_COPY_REV = 51;

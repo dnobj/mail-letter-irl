@@ -52,8 +52,8 @@ ChatGPT, Claude and other MCP apps, and manage their account on letterirl.com.
   is carried out as an erasure. The operator queues it from the admin panel, and maintenance removes
   the content and identity and keeps the money records, anonymised ([account-erasure.md](account-erasure.md)).
 
-The MCP surface is 24 tools and 6 widgets. Two more are listed only while their switch is on:
-`request_send` with the send rule, and `upload_photo_chunk` with card upload
+The MCP surface is 24 tools and 6 widgets at production's defaults, and each feature switch lists
+its own tools as well: with every launch switch on and image generation off, ChatGPT is served 41
 ([tool-apis.md](tool-apis.md), [ui-widgets.md](ui-widgets.md)). Each app gets its own words and tool
 list from its profile, which the server reads from the sign-in token (#473, #484, #475).
 Tool names and schemas are treated as stable compatibility contracts. Widget template URIs are

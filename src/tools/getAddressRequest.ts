@@ -65,7 +65,7 @@ export const getAddressRequestTool: McpToolDefinition<GetAddressRequestInput, Ge
     'openai/toolInvocation/invoked': 'Address request checked',
     readOnlyHint: true,
     destructiveHint: false,
-    idempotentHint: true
+    idempotentHint: false
   },
   handler
 };

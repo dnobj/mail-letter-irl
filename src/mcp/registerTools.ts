@@ -208,7 +208,8 @@ export function buildAnnotations(tool: { name: string; readOnly: boolean }): Too
     'create_pack_checkout',
     'set_return_address',  // Validates address via PostGrid
     'generate_image_for_mail', // Calls the OpenAI Images API when credits allow
-    'set_signature'        // Fetches the picture from its link (#608)
+    'set_signature',       // Fetches the picture from its link (#608)
+    'set_postcard_style'   // On a new size, fetches the picture again from its link (#594)
   ];
 
   // Tools where repeated calls with same args have no additional effect
