@@ -44,7 +44,8 @@ describe("the Post Login flow", () => {
   });
 
   it("ignores line endings and trailing whitespace, and nothing else", () => {
-    const windows = link.replace(/\n/g, "  \r\n") + "\r\n\r\n";
+    // A checkout with core.autocrlf reads the file with CRLF already.
+    const windows = link.replace(/\r?\n/g, "  \r\n") + "\r\n\r\n";
     expect(normalizeCode(windows)).toBe(normalizeCode(link));
     expect(failures(checkPostLoginFlow([linking({ code: windows }), claiming()], expected))).toEqual([]);
     const edited = link.replace("10 * 60 * 1000", "5 * 60 * 1000");
@@ -104,8 +105,24 @@ describe("the linking application's grant", () => {
       '"Account Linking" applications: 2 (expected exactly 1)',
     ]);
   });
+
+  it("reports any other application whose Management API grant writes, and passes one that only reads", () => {
+    const linkGrant = { client_id: "c-link", audience, scope: ["read:users", "update:users"] };
+    const others = [...clients, { client_id: "c-check", name: "Tenant check (temporary)" }, { client_id: "c-old", name: "Old sync" }];
+    expect(
+      failures(checkLinkingGrant(others, [linkGrant, { client_id: "c-check", audience, scope: ["read:clients", "read:actions"] }], audience)),
+    ).toEqual([]);
+    expect(failures(checkLinkingGrant(others, [linkGrant, { client_id: "c-old", audience, scope: ["read:users", "update:users"] }], audience))).toEqual([
+      '"Old sync" also holds a Management API grant that writes (1 of 2 scopes)',
+    ]);
+    expect(
+      failures(checkLinkingGrant(others, [linkGrant, { client_id: "c-old", audience: "https://api.example/", scope: ["write:x"] }], audience)),
+    ).toEqual([]);
+  });
 });
 
-it("counts applications by type", () => {
-  expect(countApplications([{ app_type: "spa" }, { app_type: "regular_web" }, { app_type: "spa" }, {}])).toBe("regular_web: 1, spa: 2, unset: 1");
+it("counts applications by type, leaving out Auth0's built-in All Applications entry", () => {
+  expect(countApplications([{ app_type: "spa" }, { app_type: "regular_web" }, { app_type: "spa" }, {}, { name: "All Applications", global: true }])).toBe(
+    "regular_web: 1, spa: 2, unset: 1",
+  );
 });

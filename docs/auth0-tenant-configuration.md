@@ -525,7 +525,8 @@ provisions the `users` row from a verified email, and Auth0 does not put
 `REFERENCES users(user_id)` in whichever table the customer reaches first.
 
 Add a Post Login Action whose code is [`docs/auth0/actions/email-claim.js`](auth0/actions/email-claim.js),
-pasted whole. For a confirmed address it sets the two claims:
+pasted whole. For a confirmed address it sets the two claims (an excerpt, not something to paste on
+its own: the file adds the guard and the export around it):
 
 ```javascript
 api.accessToken.setCustomClaim("https://letterirl.com/email", event.user.email);
@@ -1042,23 +1043,39 @@ It checks that:
   Action must run before the email-claim one;
 - the linking Action's `auth0` dependency is pinned to 7.2.0, and its three secrets
   (`AUTH0_DOMAIN`, `LINKING_CLIENT_ID`, `LINKING_CLIENT_SECRET`) exist, by name;
-- exactly one `Account Linking (<environment>)` application holds a Management API grant, with
-  exactly `read:users` and `update:users`;
+- exactly one `Account Linking (<environment>)` application exists, its Management API grant is
+  exactly `read:users` and `update:users`, and no other application holds a Management API scope
+  that writes;
 - a custom email provider is configured and enabled, and the verification email template is
   enabled;
 
-and it counts the tenant's applications by type.
+and it counts the tenant's applications by type, leaving out Auth0's built-in "All Applications"
+entry.
 
 It needs a short-lived Management API token with `read:actions`, `read:clients`,
-`read:client_grants`, `read:email_provider` and `read:email_templates`. The dashboard's
-Applications -> APIs -> Auth0 Management API -> **API Explorer** tab gives one. Use the tenant's own
-`*.auth0.com` domain, not a custom domain: the Management API's audience is named after it.
+`read:client_grants`, `read:email_provider` and `read:email_templates`, and nothing more:
+
+1. Create a machine-to-machine application named `Tenant check (temporary)`, authorised for the
+   Auth0 Management API with exactly those five scopes.
+2. Get a token from Applications -> APIs -> Auth0 Management API -> **Test**, with that application
+   selected (it expires on its own, after 24 hours by default).
+3. Run the check (below), then delete the application. That frees its slot in the application
+   limit and leaves no credential behind.
+
+**Do not use the Management API's API Explorer tab.** On a tenant without the API Explorer
+Application, opening it creates one, a lasting application holding every Management API scope; the
+project deleted it on 2026-09-26 (above).
+
+Use the tenant's own `*.auth0.com` domain, not a custom domain: the Management API's audience is
+named after it. The prompt hides what is typed:
 
 ```powershell
 $env:AUTH0_CHECK_DOMAIN = "<tenant>.us.auth0.com"
-$env:AUTH0_CHECK_TOKEN = Read-Host "Management API token"
+$token = Read-Host "Management API token" -AsSecureString
+$env:AUTH0_CHECK_TOKEN = [Runtime.InteropServices.Marshal]::PtrToStringBSTR(
+  [Runtime.InteropServices.Marshal]::SecureStringToBSTR($token))
 npx tsx scripts/check-auth0-tenant.ts
-Remove-Item Env:AUTH0_CHECK_TOKEN
+Remove-Item Env:AUTH0_CHECK_TOKEN; Remove-Variable token
 ```
 
 A changed Action is changed in its file first, reviewed, then pasted into each tenant and checked

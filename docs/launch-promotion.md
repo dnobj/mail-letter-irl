@@ -36,8 +36,9 @@ order, "API dark, then the website", is obsolete for that reason. The website's 
 nothing useful until the API is promoted (the gift, address and confirmation pages call new API
 routes), so keep the gap between stages A and B short. Nothing links to those pages before stage B.
 
-**The merge window is :10 to :50 past the hour.** The API's pre-deploy runs every pending migration
-in one transaction, and the hourly maintenance run must not overlap it (see "Migrations").
+**Merge between :10 and :40 past the hour.** The API's pre-deploy runs every pending migration in
+one transaction once the image is built, a few minutes after the merge, and the hourly maintenance
+run at :00 must not overlap it (see "Migrations").
 
 ## Stage 0: preparation
 
@@ -90,12 +91,15 @@ must be ready before the API deploys against it
    apps chosen for launch. OpenClaw's client document is served by the production website, so it is
    imported after stage A.
 7. Run `scripts/check-auth0-tenant.ts` on both tenants and record the result in the tenant doc.
+   Its token comes from a temporary application with only the five read scopes, deleted after the
+   run. **Not** from the Management API's API Explorer tab: on a tenant without the API Explorer
+   Application, that tab creates it, with every Management API scope (it was deleted on 2026-09-26).
 
 ### Production variables set ahead (owner, or an agent with approval)
 
-The current production code ignores every variable below except `CONTENT_RETENTION_MODE`, so they
-can be set before the merge; a variable change redeploys the current build, which is harmless.
-Names only; values come from the owner's records.
+The current production code ignores every variable below except `CONTENT_RETENTION_MODE` (it acts
+only on `enforce`), so they can be set before the merge; a variable change redeploys the current
+build, which is harmless. Names only; values come from the owner's records.
 
 | Service | Variable | Value | Why before |
 | --- | --- | --- | --- |
@@ -113,6 +117,24 @@ Also before stage B:
   Check the production value, and set the one the launch wants (`off`, 24 tools).
 - **Option flags stay unset, never `false`.** The preflight reads names, so a flag present as
   `false` still demands its prices.
+- **Values the preflight cannot see.** It reads names only, so check these values by hand:
+  - `LETTER_IRL_OAUTH_SCOPES`, if set, must include `mail:read`, `mail:draft`, `mail:send`,
+    `offline_access`, `openid` and `email` (#425), or the new API refuses to boot after the
+    migrations have committed. Unset, the default carries all six.
+  - `UV_THREADPOOL_SIZE=16` on the API ([railway-setup.md](railway-setup.md)); stage B checks it.
+  - `LETTER_IRL_ALLOWED_ORIGINS` includes the website's origin: the gift page (stage C) and later
+    the address form call the API from the browser.
+- **The Stripe webhook.** The production endpoint must subscribe to every event in
+  [railway-setup.md](railway-setup.md), including `charge.dispute.updated` and
+  `charge.dispute.funds_withdrawn`, which only the new build handles. Without them, an inquiry that
+  becomes a chargeback leaves its letters spendable until the dispute closes. Adding them ahead is
+  harmless: the current build records events it does not handle and does nothing with them.
+- **The admin reader role.** The new panel refuses to start (`ADMIN_READER_ROLE_TOO_WIDE`, 503)
+  if the production reader can read past its column grants. Run the check in
+  [admin-panel-guide.md](admin-panel-guide.md) against the production reader, as the owner, and
+  revoke what it lists before stage B.
+- **Which services run a pre-deploy.** Only the API's should migrate. Note whether the maintenance
+  and admin services have one, for the rollback in stage B.
 - Run `npm run preflight:cutover -- --env production` and close its gaps
   ([deployment.md](deployment.md)).
 - Keep `ADMIN_TOTP_SECRET` on the admin service: the current release needs it, and so does a
@@ -130,7 +152,8 @@ SELECT name FROM migrations WHERE name > '032_error_text_minimisation.sql' ORDER
 
 -- The server: 054 needs PostgreSQL 15 or later; 058 folds case by the database's locale.
 SELECT current_setting('server_version_num')::int AS server_version_num, current_user;
-SELECT datname, datlocprovider, datcollate, datctype FROM pg_database WHERE datname = current_database();
+-- Expect the same answer as on the development branch, where 058 has run.
+SELECT datname, datlocprovider, datcollate, datctype, datlocale FROM pg_database WHERE datname = current_database();
 
 -- Constraints 033 and 058 drop without IF EXISTS: expect three rows.
 SELECT conrelid::regclass AS tbl, conname FROM pg_constraint
@@ -156,7 +179,9 @@ SELECT token_id, status, created_at FROM personal_access_tokens WHERE expires_at
 -- 055's input: expect 0.
 SELECT count(*) AS jobs_with_held_until FROM letter_jobs WHERE metadata ? 'heldUntil';
 
--- Right before merging: transactions open longer than five seconds would hold up the run.
+-- Right before merging, as the owner role (another role sees no start time for other roles'
+-- transactions): transactions open longer than five seconds would hold up the run. Look again
+-- when the build finishes, just before the pre-deploy starts.
 SELECT pid, state, now() - xact_start AS age, left(query, 60) AS query FROM pg_stat_activity
  WHERE datname = current_database() AND xact_start IS NOT NULL AND now() - xact_start > INTERVAL '5 seconds';
 ```
@@ -170,10 +195,12 @@ SELECT pid, state, now() - xact_start AS age, left(query, 60) AS query FROM pg_s
 
 ## Stage B: the API
 
-1. In the merge window (:10 to :50), merge `dev` into `master` (a pull request, the owner's merge).
+1. Between :10 and :40, merge `dev` into `master` (a pull request, the owner's merge).
 2. Watch the API's deploy log: the pre-deploy applies `033` to `064` in one transaction, then the
-   new build starts. If the pre-deploy fails, the old build keeps serving and nothing was applied;
-   fix the cause and redeploy.
+   new build starts. If the pre-deploy fails, the old API build keeps serving and nothing was
+   applied; fix the cause and redeploy. The maintenance and admin services deploy from the same
+   merge without waiting for it, so they can be left on the new build against the old schema: roll
+   each back to its previous deployment until the API's run succeeds.
 3. Check:
    - `/readyz` answers 200 with the new `X-Build-Commit`;
    - the boot log shows `boot.thread_pool` with size 16;
@@ -187,7 +214,7 @@ SELECT pid, state, now() - xact_start AS age, left(query, 60) AS query FROM pg_s
 6. Refresh the production connectors (ChatGPT, then each other app), and re-paste the app
    instructions in the OpenAI portal.
 7. A canary: buy a Starter pack, send one real letter from the card and one from the confirmation
-   page, claim a gift code, refund the pack.
+   page, refund the pack. (Claiming a gift code waits for stage C: gift letters are still off.)
 8. Once it has settled (a day without a rollback), delete `ADMIN_TOTP_SECRET` from the admin
    service.
 
@@ -195,7 +222,8 @@ SELECT pid, state, now() - xact_start AS age, left(query, 60) AS query FROM pg_s
 
 One change at a time, each with its check, in this order:
 
-- `LETTER_IRL_GIFT_LETTERS_ENABLED=true` (on at launch, after GIFT-01).
+- `LETTER_IRL_GIFT_LETTERS_ENABLED=true` (on at launch, after GIFT-01), then claim a gift code from
+  a canary letter.
 - `STRIPE_CHECKOUT_DOMAIN`, then refresh the connector, then switch the domain on in Stripe
   ([stripe-custom-domain.md](stripe-custom-domain.md)).
 - `CONTENT_RETENTION_MODE=enforce`, only once a rollback to the old build is ruled out, then watch
@@ -233,7 +261,7 @@ their owner's word.
 | `LETTER_IRL_ARRIVE_BY_ENABLED` | API | stage E | #697, SCHEDULE-01 | held mail still goes out with it off |
 | `LETTER_IRL_ROOM_TO_WRITE_ENABLED` | API, maintenance | stage F | its two prices | under the renderer floor |
 | `LETTER_IRL_POSTCARD_SIZES_ENABLED` | API, maintenance | stage F | its two prices | not below #596's build while such postcards are live |
-| `LETTER_IRL_CERTIFIED_MAIL_ENABLED` | API, maintenance | stage F | its prices, the website's part, provisioning | pause the outbox before rolling back while certified letters wait |
+| `LETTER_IRL_CERTIFIED_MAIL_ENABLED` | API, maintenance | stage F | its prices, the website's part, provisioning | certified letters must be sent before rolling back |
 | `LETTER_IRL_STATIONERY_ENABLED`, `..._CUSTOM_STATIONERY_ENABLED` | API | unset | the owner's word | `pdf-2` mail must be gone before rolling back |
 | `LETTER_IRL_SIGNATURES_ENABLED` | API | unset | the owner's word, the policy wording | `pdf-4` mail |
 | `LETTER_IRL_POSTCARD_LAYOUTS_ENABLED` | API | unset | the owner's word | `pdf-3` postcards |
@@ -267,9 +295,13 @@ know:
   stays at `064`, which the old build tolerates. Tokens could send again (the old build ignores
   token scopes), and gift letters would not be handled, so keep gift letters off if a rollback is
   likely.
-- **Pause before rolling back below a floor:** set `LETTER_IRL_OUTBOX_DISPATCH_ENABLED=false` on the
-  API and maintenance while the new build still runs, so nothing is sent by a build that cannot
-  print it.
+- **Empty the queue before rolling back below a floor.** The old build ignores
+  `LETTER_IRL_OUTBOX_DISPATCH_ENABLED` and dispatches every queued letter it finds, so a paused
+  queue does not protect a rollback: certified letters would go as ordinary mail, and letters
+  previewed by the renderer would print from the old layout. First switch off the flag that makes
+  such mail, let the new build send (or an operator cancel) the letters already queued or held, and let drafts that carry
+  it expire (24 hours). Only then roll back. The pause is for stopping mail while the new build
+  stays.
 - **Never leave `CONTENT_RETENTION_MODE=enforce` set while a rollback to the old build is
   possible:** the old build's enforce path has known defects.
 - **The admin panel:** `ADMIN_TOTP_SECRET` stays until the promotion has settled, because the old

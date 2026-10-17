@@ -6,13 +6,17 @@
 // any Action code.
 //
 //   $env:AUTH0_CHECK_DOMAIN = "<tenant>.us.auth0.com"
-//   $env:AUTH0_CHECK_TOKEN = Read-Host "Management API token"
+//   $token = Read-Host "Management API token" -AsSecureString
+//   $env:AUTH0_CHECK_TOKEN = [Runtime.InteropServices.Marshal]::PtrToStringBSTR(
+//     [Runtime.InteropServices.Marshal]::SecureStringToBSTR($token))
 //   npx tsx scripts/check-auth0-tenant.ts
-//   Remove-Item Env:AUTH0_CHECK_TOKEN
+//   Remove-Item Env:AUTH0_CHECK_TOKEN; Remove-Variable token
 //
 // The token needs read:actions, read:clients, read:client_grants,
-// read:email_provider and read:email_templates. One from the dashboard's
-// Management API "API Explorer" tab will do; it expires on its own.
+// read:email_provider and read:email_templates, and nothing else: take it
+// from a temporary machine-to-machine application holding only those, and
+// delete the application afterwards. Not from the Management API's "API
+// Explorer" tab, which creates a lasting application with every scope.
 //
 // What it checks:
 //   - the Post Login flow binds both Actions whose source is in
@@ -21,11 +25,13 @@
 //     with nothing left undeployed;
 //   - the linking Action's auth0 dependency is pinned to 7.2.0 and its three
 //     secrets are present (by name);
-//   - exactly one "Account Linking" application holds a Management API grant,
-//     with exactly read:users and update:users;
+//   - exactly one "Account Linking" application, whose Management API grant
+//     is exactly read:users and update:users, and no other application holding
+//     a Management API scope that writes;
 //   - a custom email provider is configured and enabled, and the
 //     verification email template is enabled;
-//   - how many applications the tenant has, by type.
+//   - how many applications the tenant has, by type (Auth0's built-in "All
+//     Applications" entry aside).
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -57,6 +63,7 @@ export interface Auth0Client {
   client_id?: string;
   name?: string;
   app_type?: string;
+  global?: boolean;
 }
 
 export interface Auth0Grant {
@@ -124,27 +131,48 @@ export function checkPostLoginFlow(bound: BoundAction[], expected: { link: strin
   return results;
 }
 
-/** The linking application's Management API grant, from the clients and grants lists. */
+/**
+ * The linking application's Management API grant, and every other application
+ * holding one: those may only read (the check's own temporary application does).
+ */
 export function checkLinkingGrant(clients: Auth0Client[], grants: Auth0Grant[], managementAudience: string): CheckResult[] {
+  const results: CheckResult[] = [];
   const linking = clients.filter((client) => /^Account Linking\b/.test(client.name ?? ""));
+  const managementGrants = grants.filter((candidate) => candidate.audience === managementAudience);
   if (linking.length !== 1) {
-    return [{ ok: false, line: `"Account Linking" applications: ${linking.length} (expected exactly 1)` }];
+    results.push({ ok: false, line: `"Account Linking" applications: ${linking.length} (expected exactly 1)` });
+  } else {
+    const grant = managementGrants.find((candidate) => candidate.client_id === linking[0].client_id);
+    if (!grant) {
+      results.push({ ok: false, line: `"${linking[0].name}" has no Management API grant` });
+    } else {
+      const scopes = [...(grant.scope ?? [])].sort();
+      const exact = scopes.length === LINKING_SCOPES.length && LINKING_SCOPES.every((scope) => scopes.includes(scope));
+      results.push({
+        ok: exact,
+        line: `"${linking[0].name}" Management API scopes: ${scopes.join(" ") || "(none)"}${exact ? "" : ` (expected exactly ${LINKING_SCOPES.join(" ")})`}`,
+      });
+    }
   }
-  const grant = grants.find((candidate) => candidate.client_id === linking[0].client_id && candidate.audience === managementAudience);
-  if (!grant) return [{ ok: false, line: `"${linking[0].name}" has no Management API grant` }];
-  const scopes = [...(grant.scope ?? [])].sort();
-  const exact = scopes.length === LINKING_SCOPES.length && LINKING_SCOPES.every((scope) => scopes.includes(scope));
-  return [
-    {
-      ok: exact,
-      line: `"${linking[0].name}" Management API scopes: ${scopes.join(" ") || "(none)"}${exact ? "" : ` (expected exactly ${LINKING_SCOPES.join(" ")})`}`,
-    },
-  ];
+  const linkingIds = new Set(linking.map((client) => client.client_id));
+  for (const grant of managementGrants) {
+    if (linkingIds.has(grant.client_id)) continue;
+    const name = clients.find((client) => client.client_id === grant.client_id)?.name ?? "an unlisted application";
+    const writes = (grant.scope ?? []).filter((scope) => !scope.startsWith("read:"));
+    results.push({
+      ok: writes.length === 0,
+      line:
+        writes.length === 0
+          ? `"${name}" also holds a Management API grant, read only (${(grant.scope ?? []).length} scopes)`
+          : `"${name}" also holds a Management API grant that writes (${writes.length} of ${(grant.scope ?? []).length} scopes)`,
+    });
+  }
+  return results;
 }
 
 export function countApplications(clients: Auth0Client[]): string {
   const byType = new Map<string, number>();
-  for (const client of clients) {
+  for (const client of clients.filter((candidate) => candidate.global !== true)) {
     const type = client.app_type ?? "unset";
     byType.set(type, (byType.get(type) ?? 0) + 1);
   }
@@ -214,7 +242,7 @@ async function main(): Promise<void> {
   results.push(...checkPostLoginFlow(bound, expected));
 
   const managementAudience = `https://${domain}/api/v2/`;
-  const clients = await getAll<Auth0Client>("/clients?fields=client_id,name,app_type&include_fields=true", "clients");
+  const clients = await getAll<Auth0Client>("/clients?fields=client_id,name,app_type,global&include_fields=true", "clients");
   const grants = await getAll<Auth0Grant>(`/client-grants?audience=${encodeURIComponent(managementAudience)}`, "client_grants");
   results.push(...checkLinkingGrant(clients, grants, managementAudience));
 
@@ -225,13 +253,18 @@ async function main(): Promise<void> {
     const message = error instanceof Error ? error.message : String(error);
     results.push({ ok: false, line: `email provider: ${message.includes("404") ? "none configured (Auth0's built-in, trial only)" : message}` });
   }
-  const template = await get("/email-templates/verify_email");
-  results.push({ ok: template.enabled === true, line: `verification email template: ${template.enabled ? "enabled" : "NOT enabled"}` });
+  try {
+    const template = await get("/email-templates/verify_email");
+    results.push({ ok: template.enabled === true, line: `verification email template: ${template.enabled ? "enabled" : "NOT enabled"}` });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    results.push({ ok: false, line: `verification email template: ${message.includes("404") ? "not configured" : message}` });
+  }
 
   console.log(`Auth0 tenant ${domain}, ${new Date().toISOString()}`);
   console.log(`  repository files: link-verified-email.js ${expected.link.slice(0, 12)}, email-claim.js ${expected.claim.slice(0, 12)}`);
   for (const result of results) console.log(`  ${result.ok ? "ok   " : "CHECK"} ${result.line}`);
-  console.log(`  applications: ${clients.length} (${countApplications(clients)})`);
+  console.log(`  applications: ${clients.filter((client) => client.global !== true).length} (${countApplications(clients)})`);
   const failures = results.filter((result) => !result.ok).length;
   console.log(failures === 0 ? "All checks passed." : `${failures} check(s) need attention.`);
   process.exitCode = failures === 0 ? 0 : 1;
