@@ -114,14 +114,19 @@
     // pending: the date being set while the server answers ("" for as soon
     // as possible), so the field keeps what the person chose meanwhile.
     var state = { draftId: null, schedule: null, min: "", max: "", busy: false, pending: null, message: "", error: false, set: false };
+    // Whether the card may change the draft now (options.idle, where the card gives one): not while it sends or pays,
+    // nor while a send refused for a change since asks for the draft as it is now.
+    function idle() {
+      return typeof options.idle !== "function" || options.idle();
+    }
 
     function draw() {
       options.input.min = state.min;
       options.input.max = state.max;
       options.input.value =
         state.busy && state.pending !== null ? state.pending : state.schedule ? state.schedule.arriveBy : "";
-      options.input.disabled = state.busy;
-      options.asap.disabled = state.busy || !state.schedule;
+      options.input.disabled = state.busy || !idle();
+      options.asap.disabled = state.busy || !idle() || !state.schedule;
       options.asap.setAttribute("aria-pressed", state.schedule ? "false" : "true");
       var text = state.message || (state.schedule ? mailsLine(state.schedule) : "");
       options.note.textContent = text;
@@ -130,7 +135,7 @@
     }
 
     function set(arriveBy) {
-      if (state.busy || !state.draftId || typeof host.callTool !== "function") return;
+      if (state.busy || !state.draftId || typeof host.callTool !== "function" || !idle()) return;
       var draftId = state.draftId;
       state.busy = true;
       state.pending = arriveBy || "";

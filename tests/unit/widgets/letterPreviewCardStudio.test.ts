@@ -983,7 +983,7 @@ describe("the Words tab's editor (#586)", () => {
   const TWO_PAGES = document1('Dear Sam,\nPat', 'And more,\nPat');
   const STALE = "The words were not changed: this card's copy of them is out of date. Ask in the chat to change them, or make the preview again.";
   const KEPT =
-    "The words were changed in the chat. Yours are kept here, and the page shows the chat's: Update the page to use yours instead, or Put back to take the chat's.";
+    "The words were changed in the chat. What you typed is kept here, and the page shows the chat's: Update the page to use yours instead, or Put back to take the chat's.";
   /** set_letter_words' refusal of unseen words, as the model reads it: with the whole letter. */
   const UNSEEN =
     "Nothing was changed: the letter's words now are not the ones that wordsVersion names. The letter card can change them too. " +
@@ -2592,6 +2592,55 @@ describe('the content version the letter card sends (#695)', () => {
     await pageless.click(pageless.byId('send-button'));
     // The card still shows the classic page: what it sends is that, which the server refuses and the card draws again.
     expect(sentWith(pageless).contentVersion).toBe('v_preview');
+  });
+
+  it("draws no answer to an edit's ask that comes after a later catch-up was drawn (words review round 2)", async () => {
+    const card = mount();
+    await card.show(output({ ...STYLED, contentVersion: 'v_preview' }), ON);
+    await card.answer(ready('v_preview', PAGE), 'get_draft_status');
+    // A restyle made to words the chat changed unseen: the card asks for the draft as it is now.
+    await restyle(card, 'botanical');
+    await card.answer(restyled('botanical', 'v_both', PAGE, 'v_chat'), 'set_stationery');
+    const editAsk = card.lastRequest('tools/call', 'get_draft_status')!;
+    // The person comes back before that ask is answered; the chat changed the letter again meanwhile.
+    card.window.dispatchEvent(new card.window.Event('focus'));
+    await flush();
+    const LATER = document1('Dear Sam, later,\nPat');
+    await card.answer(ready('v_later', LATER, { stationery: { theme: 'botanical', dateLine: 'October 1, 2026' } }), 'get_draft_status');
+    expect(card.byId('mockup-container').innerHTML).toContain('<title>Dear Sam, later,\nPat</title>');
+    // Then the edit's ask is answered, with the letter as it was before.
+    await card.answerTo(editAsk, ready('v_both', document1('Dear Sam, before,\nPat'), { stationery: { theme: 'botanical', dateLine: 'October 1, 2026' } }));
+    expect(card.byId('mockup-container').innerHTML).toContain('<title>Dear Sam, later,\nPat</title>');
+    await card.click(card.byId('send-button'));
+    expect(sentWith(card).contentVersion).toBe('v_later');
+  });
+
+  it("holds the styles, the Arrives row and the words while a refused send asks for the draft, and says so on the buttons (words review round 2)", async () => {
+    const card = mount();
+    await card.show(output({ ...STYLED, contentVersion: 'v_preview', arrivalWindow: WINDOW, schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' } }), ON);
+    await card.answer(ready('v_preview', PAGE), 'get_draft_status');
+    await card.click(card.byId('send-button'));
+    await card.answer(CHANGED, 'send_letter');
+    const botanical = card.byId('style-row').querySelector('[data-theme="botanical"]')!;
+    expect(botanical.getAttribute('aria-disabled')).toBe('true');
+    expect((card.byId('arrives-asap') as HTMLButtonElement).disabled).toBe(true);
+    await card.click(card.byId('arrives-asap'));
+    expect(card.lastRequest('tools/call', 'set_arrival_date')).toBeUndefined();
+    await card.answer(ready('v_now', PAGE, { schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' } }), 'get_draft_status');
+    expect(botanical.getAttribute('aria-disabled')).toBe('false');
+    expect((card.byId('arrives-asap') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('draws no dates from an ask older than one taken, where the letter offers no stationery (words review round 2)', async () => {
+    const card = mount();
+    await card.show(output({ contentVersion: 'v_preview', arrivalWindow: WINDOW }), ON);
+    const opening = card.lastRequest('tools/call', 'get_draft_status')!;
+    card.window.dispatchEvent(new card.window.Event('focus'));
+    await flush();
+    await card.answer(ready('v_later', null, { stationery: undefined, schedule: { arriveBy: '2026-10-30', mailOn: '2026-10-19' } }), 'get_draft_status');
+    expect((card.byId('arrives-date') as HTMLInputElement).value).toBe('2026-10-30');
+    await card.answerTo(opening, ready('v_preview', null, { stationery: undefined, schedule: { arriveBy: '2026-10-20', mailOn: '2026-10-09' } }));
+    expect((card.byId('arrives-date') as HTMLInputElement).value).toBe('2026-10-30');
   });
 
   it('takes no version from an edit made to another, and draws the draft as it is now instead (#695 review round 1)', async () => {

@@ -560,8 +560,15 @@
       // The changes this card has started on its draft, counted: an answer to a catch-up asked before one of them is
       // older than it (catchUp).
       let draftChanges = 0;
+      // Whether the card may change its draft now: not while it sends the letter or starts paying for it, nor while a
+      // send refused for a change since asks for the draft as it is now (#695), whose answer is taken whatever the card
+      // has set. The Style row, the Words tab and the Arrives row each ask, and show it.
+      function cardIdle() {
+        return !sendInProgress && !checkoutInProgress && changed === null;
+      }
       const picker = arrives.createPicker({
         host,
+        idle: () => cardIdle(),
         onVersion: (draftId, version, before) => takeEditVersion(draftId, version, before),
         row: document.getElementById("arrives-row"),
         input: document.getElementById("arrives-date"),
@@ -642,10 +649,8 @@
         },
         readableError,
         resultText,
-        // Not while this card sends the letter or starts paying for it, nor while a send refused for a change since
-        // asks for the draft as it is now (#695): its answer is taken whatever the card has set.
         idle() {
-          return !sendInProgress && !checkoutInProgress && changed === null;
+          return cardIdle();
         },
         onSet() {
           draftActedOn = true;
@@ -1361,6 +1366,8 @@
       // as a host may answer them out of order (MCP Apps hosts do not queue them).
       let draftAsks = 0;
       let draftAskTaken = 0;
+      // Whether the answer last taken drew the draft whole: what a refused send's ask, answered after it, is told.
+      let draftAskTakenWhole = false;
       function askDraftState(draftId, force) {
         if (typeof host.callTool !== "function") return;
         if (typeof draftId !== "string" || !draftId || (!force && draftStateAsked.has(draftId))) return;
@@ -1391,9 +1398,14 @@
             // now: this card may have changed them since that preview (#535).
             if (answer.status === "ready") {
               statusReadyFor = draftId;
-              // Ready all the same; but an answer older than one taken, or than a change the card started since it
-              // asked, is not drawn (a refused send's, force, is asked to be taken: it governs).
-              if (force !== true && (ask < draftAskTaken || draftChanges !== changesAsked)) return;
+              // Ready all the same; but no answer older than one taken is drawn, however it was asked: the one taken is
+              // the draft as it is later. A refused send's (force) is told how that one was drawn, and ends its wait. Nor
+              // is an answer drawn that was asked before a change the card started since, unless a refused send asked
+              // it, which is asked to be taken whatever the card has set.
+              if (ask < draftAskTaken || (force !== true && draftChanges !== changesAsked)) {
+                if (force === true) changedRedrawn(draftId, draftAskTakenWhole);
+                return;
+              }
               // And the style it is in now, with its page (#563): this card,
               // or the chat, may have restyled it since that preview.
               // How full its pages are (#592 review round 1): the preview's own
@@ -1415,7 +1427,11 @@
               // Its version, once the card shows all it says (#695): its page, drawn from this answer, and its dates.
               const drawnWhole =
                 styleTaken && typeof statusPage === "string" && statusPage !== "" && (datesTaken || !picker.follows(draftId));
-              if (styleTaken) draftAskTaken = Math.max(draftAskTaken, ask);
+              // Anything taken from it, its style or its dates, makes it the latest answer drawn.
+              if (styleTaken || datesTaken) {
+                draftAskTaken = ask;
+                draftAskTakenWhole = drawnWhole;
+              }
               if (drawnWhole) showVersion(draftId, answer.contentVersion);
               if (drawnWhole && changed === null && changedNotice) {
                 changedNotice = false;
