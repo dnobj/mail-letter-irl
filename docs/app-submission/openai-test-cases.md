@@ -329,7 +329,7 @@ With every launch switch on (stages E to G of [launch-promotion.md](../launch-pr
 image generation off, ChatGPT is served 41 tools: every row below but `generate_image_for_mail`
 and `upload_photo_chunk`. ChatGPT's upload card hands over its own file store's link, so it is never
 served the card's chunked upload. Four of the 41 are card-only: listed, but hidden from the model
-and called by the card when the person presses its button (`send_letter`, `send_postcard`,
+and called only by the card (`send_letter`, `send_postcard`,
 `create_mail_checkout` and `get_draft_status`). At production's defaults before those stages, 24
 are served. Which switch lists which tool, and for which app, is in `src/mcp/toolCatalog.ts`.
 

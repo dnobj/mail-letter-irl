@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { clientProfileNamed } from '../../../src/auth/clientProfiles.js';
 import { buildAnnotations } from '../../../src/mcp/registerTools.js';
-import { isToolOffered } from '../../../src/mcp/toolCatalog.js';
+import { isToolOffered, TOOL_CATALOG } from '../../../src/mcp/toolCatalog.js';
 import * as tools from '../../../src/tools/index.js';
 
 /**
@@ -23,8 +23,8 @@ const definitions = (Object.values(tools) as unknown[]).filter(
 );
 
 describe("the hints a tool's _meta copies (launch submission)", () => {
-  it('finds the tools', () => {
-    expect(definitions.length).toBeGreaterThan(30);
+  it('finds every tool the catalogue knows', () => {
+    expect(definitions.map((tool) => tool.name).sort()).toEqual(Object.keys(TOOL_CATALOG).sort());
   });
 
   it.each(definitions.map((tool) => [tool.name, tool] as const))('%s copies its annotations exactly, where it copies them', (_name, tool) => {

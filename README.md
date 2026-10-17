@@ -1,7 +1,7 @@
 # Letter IRL API
 
 Letter IRL prints and mails real US letters and postcards that people compose in ChatGPT. This
-repository is the production API: an MCP server for the OpenAI Apps SDK (22 tools, 6 widgets), the
+repository is the production API: an MCP server for the OpenAI Apps SDK (24 tools at production's defaults and up to 43 with every switch on, 6 widgets), the
 REST API behind the letterirl.com dashboard, Stripe webhooks, and the hourly maintenance job.
 PostGrid prints and mails; Neon PostgreSQL stores everything; Auth0 authenticates; Railway hosts.
 

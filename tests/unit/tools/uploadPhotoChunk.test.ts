@@ -139,13 +139,25 @@ describe('upload_image tells its card whether it may send the photo itself (#474
     expect(summarizeToolResult('upload_image', output, chatgpt)).toBe('Select a photo for your postcard.');
   });
 
-  it('says no while the switch is off, and yes once it is on', async () => {
-    await expect(uploadImageTool.handler({ context: 'postcard' }, context())).resolves.toMatchObject({
+  it('says no while the switch is off, and yes once it is on, only where upload_photo_chunk is listed', async () => {
+    const inApp = (app: 'claude' | 'chatgpt' | 'vscode' | 'claude_code') =>
+      ({ ...context(), client: clientProfileNamed(app) }) as ToolContext;
+    await expect(uploadImageTool.handler({ context: 'postcard' }, inApp('claude'))).resolves.toMatchObject({
       cardUploadAvailable: false
     });
     vi.stubEnv('LETTER_IRL_CARD_UPLOAD_ENABLED', 'true');
-    await expect(uploadImageTool.handler({ context: 'postcard' }, context())).resolves.toMatchObject({
+    await expect(uploadImageTool.handler({ context: 'postcard' }, inApp('claude'))).resolves.toMatchObject({
       cardUploadAvailable: true
+    });
+    // Elsewhere the card would offer an upload its first chunk could not make.
+    for (const app of ['chatgpt', 'vscode', 'claude_code'] as const) {
+      const listed = new LetterIrlServer().listTools(clientProfileNamed(app)).some((tool) => tool.name === 'upload_photo_chunk');
+      await expect(uploadImageTool.handler({ context: 'postcard' }, inApp(app)), app).resolves.toMatchObject({
+        cardUploadAvailable: listed
+      });
+    }
+    await expect(uploadImageTool.handler({ context: 'postcard' }, context())).resolves.toMatchObject({
+      cardUploadAvailable: false
     });
   });
 });
