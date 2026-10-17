@@ -1993,7 +1993,7 @@ The studio rearranges both preview cards. The letter card becomes a header, the 
 - `LETTER_IRL_ROOM_TO_WRITE_ENABLED` (with `JIT_PURCHASE_ENABLED=true`) or `LETTER_IRL_WORDS_EDITOR_ENABLED` for the Words tab's editor.
 - `LETTER_IRL_ARRIVE_BY_ENABLED` for the Arrives row.
 - `LETTER_IRL_CERTIFIED_MAIL_ENABLED`, with `JIT_PURCHASE_ENABLED=true`, for the Mail row.
-- For step 7: `LETTER_IRL_ROOM_TO_WRITE_ENABLED` on the maintenance service too, and `STRIPE_JIT_LETTER_TWO_PAGES_PRICE_ID` set to the Stripe test price (as in PAGES-01).
+- For step 7: `LETTER_IRL_ROOM_TO_WRITE_ENABLED` on the maintenance service too, and `STRIPE_JIT_LETTER_TWO_PAGES_PRICE_ID` and `STRIPE_JIT_LETTER_THREE_PAGES_PRICE_ID` set to the Stripe test prices (as in PAGES-01).
 - `LETTER_IRL_GIFT_LETTERS_ENABLED` and a gift letter on the account for step 9 (without one, `sendAsGift` is refused).
 
 Refresh the ChatGPT (DEV) and Claude connectors after the deploy (widgets v88). The test account needs a saved return address and at least one letter in its balance (a test-mode pack or an admin grant). PostGrid is in test mode on development.
@@ -2002,7 +2002,7 @@ Refresh the ChatGPT (DEV) and Claude connectors after the deploy (widgets v88). 
 
 1. [ ] In ChatGPT (DEV), preview a one-page text-only letter to a named recipient. Verify:
    - the header reads "Letter to <name>" with the status pill, and under it "Draft · <City>, <ST> <ZIP>";
-   - the page sits beside three tabs, **Style**, **Words** and **Delivery**, and Style is selected;
+   - the page sits beside three tabs, **Style**, **Words** and **Delivery**, and Style is selected (use an account that remembers no stationery, or Classic, for this step and the next: a remembered theme draws the letter in it);
    - the footer shows the cost "1 letter", a summary such as "Classic · black and white · mailed in 1-2 business days; usually arrives in 1-2 weeks", and **Send Letter**.
 
    Narrow the frame below 560 px: verify the tabs stack below the page.
@@ -2021,7 +2021,7 @@ Refresh the ChatGPT (DEV) and Claude connectors after the deploy (widgets v88). 
    - the pill reads "With the printer" and the subtitle starts "Sent";
    - the summary ends "with the printer", the Style row is gone, and the id row reads "Order".
 
-   Repeat with a dated letter: verify the pill reads "Scheduled", Delivery is shown, and **Cancel this letter** is there.
+   Repeat with a dated letter, whose button reads **Schedule Letter**: verify the pill reads "Scheduled", Delivery is shown, and **Cancel this letter** is there.
 7. [ ] (Room to write) Preview a two-page letter. Verify:
    - the page reads "Page 1 of 2" with **Next page**, which turns to "First page" on page 2;
    - **Enlarge** turns to "Show smaller";
@@ -2052,7 +2052,7 @@ Refresh the ChatGPT (DEV) and Claude connectors after the deploy (widgets v88). 
 
 **Preconditions:** Development, with `LETTER_IRL_STATIONERY_ENABLED` on (off unless set) and `LETTER_IRL_PRINT_RENDERER=pdf` in the API: only our renderer draws a theme. `LETTER_IRL_STUDIO_CARD_ENABLED` is optional (the Style row shows either way). Refresh the ChatGPT (DEV) and Claude connectors so `set_stationery` is listed.
 
-The account needs a saved return address whose name has initials (such as "Pat Example"), and letters in its balance for the sends. **Use an account with no saved signature, or `LETTER_IRL_SIGNATURES_ENABLED` off:** a signed letter records `pdf-4`, not `pdf-2`. `LETTER_IRL_GIFT_LETTERS_ENABLED` and a gift letter are needed for step 10. PostGrid is in test mode on development.
+The account needs a saved return address whose name has initials (such as "Pat Example"), and letters in its balance for the sends. **Use an account with no saved signature, or `LETTER_IRL_SIGNATURES_ENABLED` off:** a signed letter records `pdf-4`, not `pdf-2`. `LETTER_IRL_GIFT_LETTERS_ENABLED` and a gift letter are needed for step 10, and `LETTER_IRL_SEND_CONFIRMATION_ENABLED` (on in every deployed environment) for step 8's `request_send`. PostGrid is in test mode on development.
 
 **Steps:**
 
@@ -2073,9 +2073,9 @@ The account needs a saved return address whose name has initials (such as "Pat E
 5. [ ] Verify each of these is refused, and that none creates a draft:
    - `monogram` with `botanical`: "Initials print only on the monogram stationery. Choose stationery "monogram", or leave monogram out.";
    - `headline` with `classic`: "A headline prints only on the celebration stationery. …";
-   - `monogram: "ABCD"`: "monogram must be one to three letters, such as "JMS". …";
-   - a headline of more than 200 characters: "The headline is too long: it may hold at most 200 characters. …";
-   - a shorter headline too wide for its line: "The headline is too long for its line: about N of its M characters fit. …";
+   - `stationery: "monogram", monogram: "ABCD"`: "monogram must be one to three letters, such as "JMS". …";
+   - `stationery: "celebration"` with a headline of more than 200 characters: "The headline is too long: it may hold at most 200 characters. …";
+   - `stationery: "celebration"` with a shorter headline too wide for its line: "The headline is too long for its line: about N of its M characters fit. …";
    - `stationery: "floral"`: refused by the tool's input check, which lists the six themes;
    - a Greek word in Handwritten: refused, naming the handwritten stationery;
    - `set_stationery` with no theme: with saved designs off, refused by the input check ("Required: one of classic, monogram, botanical, celebration, typewriter, handwritten"); with them on, "Name the stationery: classic, monogram, botanical, celebration, typewriter or handwritten, or a saved design's stationeryDesignId.";
@@ -2085,7 +2085,7 @@ The account needs a saved return address whose name has initials (such as "Pat E
 6. [ ] With room to write off, take a letter that nearly fills one page in Classic and ask `set_stationery` for typewriter. Verify the refusal: "Letter is N lines too long for one page on the typewriter stationery: … The typewriter stationery sets the text in its own typeface: shorten the message, or choose the classic stationery." (With room to write on, PAGES-01 step 7 applies instead.)
 7. [ ] Remembering. Make a new preview without `stationery`. Verify it is drawn in the last theme chosen, and the narration says "Stationery: <theme>, the account's last choice; stationery in the call or set_stationery changes it." Then make a preview whose theme is refused (step 5), and another without a theme: verify the refused one changed nothing remembered. Ask for Classic, then preview without a theme: verify Classic, which is remembered too.
 8. [ ] Open the confirmation page for a themed preview (`request_send`). Verify it shows the page in its theme. Send one themed letter of each kind (Monogram, Celebration with a headline, Handwritten) in test mode. In PostGrid's test dashboard, verify each PDF prints as previewed: the corner art in black and greys beside the address window, clear of PostGrid's address area; the date line; the face. **Record how the greys look on the test print.**
-9. [ ] With arrive-by on, preview a themed letter with a later arrival date. Verify its print, once sent, keeps the date line of the day it was previewed. It prints on its mail date, by default seven days before the arrival date (`LETTER_IRL_SCHEDULE_LEAD_DAYS`); lower that on DEV, or come back on the date.
+9. [ ] With arrive-by on, preview a themed letter with a later arrival date. Verify its print, once sent, keeps the date line of the day it was previewed. It prints on its mail date, by default seven business days before the arrival date (`LETTER_IRL_SCHEDULE_LEAD_DAYS`); lower that on DEV or come back on the date, but keep the mail date on a later day than the preview, or the date line proves nothing.
 10. [ ] Preview a gift letter in Botanical. Verify page 1 is the themed letter and page 2 is the plain card.
 11. [ ] Turn `LETTER_IRL_STATIONERY_ENABLED` off, deploy the API and refresh the tool lists. Verify:
     - `set_stationery` is gone, the previews take no `stationery`, `monogram` or `headline`, and the card has no Style row;
@@ -2138,7 +2138,7 @@ For lengths, use short numbered lines, one to a line with no blank lines. Page 1
 7. [ ] Take a one-page letter that nearly fills its page and press **Typewriter**. Verify it runs to two pages, the note says "It now runs to two pages, printed on both sides, and is paid with Pay & Send.", and the price follows. Press **Classic**: verify it is one page, paid by a pack, again.
 8. [ ] Gift letters:
    - preview a two-page letter with `sendAsGift: true`: verify the refusal "A gift letter pays for a one-page letter or a 6x9 postcard, not for this one. Leave sendAsGift out and pay for it with Pay & Send, or send a 6x9 postcard or a one-page letter as the gift.";
-   - with the gift letter and an empty balance, preview a two-page letter without `sendAsGift`: verify it is not a gift (no gift card) and is paid with Pay & Send;
+   - with the gift letter on the account, preview a two-page letter without `sendAsGift`: verify it is not a gift (no gift card) and is paid with Pay & Send, whatever the balance;
    - on a one-page gift letter's card, write past the page: verify the room line says "About N characters past this page, and a gift letter is one page.", and **Update the page** is refused with "This letter is sent as a gift letter, which is one page, and these words run past it. Shorten them to fit one page, or make a new preview to send it another way.";
    - press **Typewriter** on a full gift letter: verify it is refused as too long for one page.
 9. [ ] Pay & Send in ChatGPT: press **Pay & Send (USD 5.99)** and pay with the test card. Verify:
@@ -2249,7 +2249,7 @@ The envelope is drawn on the card only: nothing prints differently, and postcard
    - the button under it reads **Show the letter**.
 
    Press it, or the envelope: verify the page shows again.
-4. [ ] Send a letter with an arrival date. Verify it seals as in step 3, and the pill reads "Scheduled" with **Cancel this letter**.
+4. [ ] Press **Schedule Letter** on a letter with an arrival date. Verify it seals as in step 3, and the pill reads "Scheduled" with **Cancel this letter**.
 5. [ ] Make a refused send: change the words in the chat after the preview, then press **Send Letter** on the card. Verify the card says "This letter changed after it was shown here, so nothing was sent.", and the page is not sealed.
 6. [ ] (Studio) Send a gift letter, whose card is its second page (a two-page letter is paid with Pay & Send, which does not seal the card: step 9). Verify the pages fold into one envelope, the sealed card shows page 1, and "Page 1 of 2" and **Next page** are hidden while sealed.
 7. [ ] Turn on reduced motion (Windows: Settings > Accessibility > Visual effects > Animation effects off) and reload. Verify nothing moves: the page shows at once, and a sent letter is sealed at once.
