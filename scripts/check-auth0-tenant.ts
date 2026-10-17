@@ -1,0 +1,245 @@
+// Read-only check of an Auth0 tenant against what Letter IRL needs (#702).
+//
+// The owner runs it before a promotion, with their own short-lived Management
+// API token, and records the result in docs/auth0-tenant-configuration.md. It
+// only reads; it prints names, counts and verdicts, never a token, a secret or
+// any Action code.
+//
+//   $env:AUTH0_CHECK_DOMAIN = "<tenant>.us.auth0.com"
+//   $env:AUTH0_CHECK_TOKEN = Read-Host "Management API token"
+//   npx tsx scripts/check-auth0-tenant.ts
+//   Remove-Item Env:AUTH0_CHECK_TOKEN
+//
+// The token needs read:actions, read:clients, read:client_grants,
+// read:email_provider and read:email_templates. One from the dashboard's
+// Management API "API Explorer" tab will do; it expires on its own.
+//
+// What it checks:
+//   - the Post Login flow binds both Actions whose source is in
+//     docs/auth0/actions/, the linking one before the email-claim one, each
+//     deployed exactly as the file (compared by hash, whitespace-normalised),
+//     with nothing left undeployed;
+//   - the linking Action's auth0 dependency is pinned to 7.2.0 and its three
+//     secrets are present (by name);
+//   - exactly one "Account Linking" application holds a Management API grant,
+//     with exactly read:users and update:users;
+//   - a custom email provider is configured and enabled, and the
+//     verification email template is enabled;
+//   - how many applications the tenant has, by type.
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+export const ACTION_FILES = {
+  link: path.join(HERE, "..", "docs", "auth0", "actions", "link-verified-email.js"),
+  claim: path.join(HERE, "..", "docs", "auth0", "actions", "email-claim.js"),
+};
+export const LINKING_SECRETS = ["AUTH0_DOMAIN", "LINKING_CLIENT_ID", "LINKING_CLIENT_SECRET"];
+export const LINKING_SCOPES = ["read:users", "update:users"];
+export const AUTH0_SDK_VERSION = "7.2.0";
+
+export interface CheckResult {
+  ok: boolean;
+  line: string;
+}
+
+export interface BoundAction {
+  name: string;
+  code: string;
+  allChangesDeployed?: boolean;
+  dependencies?: Array<{ name: string; version?: string }>;
+  secretNames?: string[];
+}
+
+export interface Auth0Client {
+  client_id?: string;
+  name?: string;
+  app_type?: string;
+}
+
+export interface Auth0Grant {
+  client_id: string;
+  audience: string;
+  scope?: string[];
+}
+
+/** Line endings and trailing whitespace do not count: the editor may change them. */
+export function normalizeCode(code: string): string {
+  return (
+    String(code)
+      .replace(/\r\n?/g, "\n")
+      .split("\n")
+      .map((line) => line.replace(/\s+$/, ""))
+      .join("\n")
+      .replace(/\n+$/, "") + "\n"
+  );
+}
+
+export function codeHash(code: string): string {
+  return createHash("sha256").update(normalizeCode(code)).digest("hex");
+}
+
+/** The verdicts for the Post Login flow, from the bound Actions in order and the files' hashes. */
+export function checkPostLoginFlow(bound: BoundAction[], expected: { link: string; claim: string }): CheckResult[] {
+  const results: CheckResult[] = [];
+  const position = { link: -1, claim: -1 };
+  bound.forEach((action, index) => {
+    const hash = codeHash(action.code ?? "");
+    const kind = hash === expected.link ? "link" : hash === expected.claim ? "claim" : null;
+    if (kind && position[kind] === -1) position[kind] = index;
+    const file = kind === "link" ? "link-verified-email.js" : "email-claim.js";
+    results.push({
+      ok: kind !== null,
+      line: `bound #${index + 1} "${action.name}": ${kind ? `matches ${file}` : "matches neither file in docs/auth0/actions"}`,
+    });
+    if (action.allChangesDeployed === false) {
+      results.push({ ok: false, line: `bound #${index + 1} "${action.name}": has changes saved but not deployed` });
+    }
+    if (kind === "link") {
+      const sdk = (action.dependencies ?? []).find((dependency) => dependency.name === "auth0");
+      results.push({
+        ok: sdk?.version === AUTH0_SDK_VERSION,
+        line: `linking Action's auth0 dependency: ${sdk ? sdk.version : "absent"} (expected ${AUTH0_SDK_VERSION})`,
+      });
+      const missing = LINKING_SECRETS.filter((name) => !(action.secretNames ?? []).includes(name));
+      results.push({
+        ok: missing.length === 0,
+        line: missing.length === 0 ? "linking Action's secrets: all three present" : `linking Action's secrets missing: ${missing.join(", ")}`,
+      });
+    }
+  });
+  results.push({ ok: position.link !== -1, line: `the linking Action is ${position.link !== -1 ? "" : "NOT "}in the Post Login flow` });
+  results.push({ ok: position.claim !== -1, line: `the email-claim Action is ${position.claim !== -1 ? "" : "NOT "}in the Post Login flow` });
+  if (position.link !== -1 && position.claim !== -1) {
+    results.push({
+      ok: position.link < position.claim,
+      line:
+        position.link < position.claim
+          ? "the linking Action runs before the email-claim Action"
+          : "the email-claim Action runs BEFORE the linking Action",
+    });
+  }
+  return results;
+}
+
+/** The linking application's Management API grant, from the clients and grants lists. */
+export function checkLinkingGrant(clients: Auth0Client[], grants: Auth0Grant[], managementAudience: string): CheckResult[] {
+  const linking = clients.filter((client) => /^Account Linking\b/.test(client.name ?? ""));
+  if (linking.length !== 1) {
+    return [{ ok: false, line: `"Account Linking" applications: ${linking.length} (expected exactly 1)` }];
+  }
+  const grant = grants.find((candidate) => candidate.client_id === linking[0].client_id && candidate.audience === managementAudience);
+  if (!grant) return [{ ok: false, line: `"${linking[0].name}" has no Management API grant` }];
+  const scopes = [...(grant.scope ?? [])].sort();
+  const exact = scopes.length === LINKING_SCOPES.length && LINKING_SCOPES.every((scope) => scopes.includes(scope));
+  return [
+    {
+      ok: exact,
+      line: `"${linking[0].name}" Management API scopes: ${scopes.join(" ") || "(none)"}${exact ? "" : ` (expected exactly ${LINKING_SCOPES.join(" ")})`}`,
+    },
+  ];
+}
+
+export function countApplications(clients: Auth0Client[]): string {
+  const byType = new Map<string, number>();
+  for (const client of clients) {
+    const type = client.app_type ?? "unset";
+    byType.set(type, (byType.get(type) ?? 0) + 1);
+  }
+  return [...byType.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([type, count]) => `${type}: ${count}`)
+    .join(", ");
+}
+
+async function main(): Promise<void> {
+  const domain = (process.env.AUTH0_CHECK_DOMAIN ?? "").trim().replace(/^https?:\/\//, "").replace(/\/+$/, "");
+  const token = process.env.AUTH0_CHECK_TOKEN ?? "";
+  if (!domain || !token) {
+    console.error("Set AUTH0_CHECK_DOMAIN and AUTH0_CHECK_TOKEN first (see the header of this file).");
+    process.exit(2);
+  }
+  const base = `https://${domain}/api/v2`;
+  async function get(pathAndQuery: string): Promise<any> {
+    const response = await fetch(base + pathAndQuery, {
+      headers: { authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!response.ok) {
+      // The status only: a body could echo request details.
+      throw new Error(`GET ${pathAndQuery.split("?")[0]} answered ${response.status}`);
+    }
+    return response.json();
+  }
+  async function getAll<T>(pathAndQuery: string, key: string): Promise<T[]> {
+    const items: T[] = [];
+    for (let page = 0; page < 50; page += 1) {
+      const separator = pathAndQuery.includes("?") ? "&" : "?";
+      const body = await get(`${pathAndQuery}${separator}per_page=100&page=${page}&include_totals=true`);
+      const batch: T[] = body[key] ?? [];
+      items.push(...batch);
+      if (batch.length < 100) break;
+    }
+    return items;
+  }
+
+  const results: CheckResult[] = [];
+  const expected = {
+    link: codeHash(readFileSync(ACTION_FILES.link, "utf8")),
+    claim: codeHash(readFileSync(ACTION_FILES.claim, "utf8")),
+  };
+
+  const bindings: Array<{ display_name?: string; action: { id: string } }> =
+    (await get("/actions/triggers/post-login/bindings")).bindings ?? [];
+  const bound: BoundAction[] = [];
+  for (const binding of bindings) {
+    const action = await get(`/actions/actions/${encodeURIComponent(binding.action.id)}`);
+    let code: string | undefined = action.deployed_version?.code;
+    if (code === undefined && action.deployed_version?.id) {
+      const version = await get(
+        `/actions/actions/${encodeURIComponent(action.id)}/versions/${encodeURIComponent(action.deployed_version.id)}`,
+      );
+      code = version.code;
+    }
+    bound.push({
+      name: binding.display_name || action.name,
+      code: code ?? "",
+      allChangesDeployed: action.all_changes_deployed,
+      dependencies: action.deployed_version?.dependencies ?? action.dependencies ?? [],
+      secretNames: (action.secrets ?? []).map((secret: { name: string }) => secret.name),
+    });
+  }
+  results.push(...checkPostLoginFlow(bound, expected));
+
+  const managementAudience = `https://${domain}/api/v2/`;
+  const clients = await getAll<Auth0Client>("/clients?fields=client_id,name,app_type&include_fields=true", "clients");
+  const grants = await getAll<Auth0Grant>(`/client-grants?audience=${encodeURIComponent(managementAudience)}`, "client_grants");
+  results.push(...checkLinkingGrant(clients, grants, managementAudience));
+
+  try {
+    const provider = await get("/emails/provider?fields=name,enabled&include_fields=true");
+    results.push({ ok: provider.enabled === true, line: `email provider: ${provider.name ?? "unknown"}, ${provider.enabled ? "enabled" : "NOT enabled"}` });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    results.push({ ok: false, line: `email provider: ${message.includes("404") ? "none configured (Auth0's built-in, trial only)" : message}` });
+  }
+  const template = await get("/email-templates/verify_email");
+  results.push({ ok: template.enabled === true, line: `verification email template: ${template.enabled ? "enabled" : "NOT enabled"}` });
+
+  console.log(`Auth0 tenant ${domain}, ${new Date().toISOString()}`);
+  console.log(`  repository files: link-verified-email.js ${expected.link.slice(0, 12)}, email-claim.js ${expected.claim.slice(0, 12)}`);
+  for (const result of results) console.log(`  ${result.ok ? "ok   " : "CHECK"} ${result.line}`);
+  console.log(`  applications: ${clients.length} (${countApplications(clients)})`);
+  const failures = results.filter((result) => !result.ok).length;
+  console.log(failures === 0 ? "All checks passed." : `${failures} check(s) need attention.`);
+  process.exitCode = failures === 0 ? 0 : 1;
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error: unknown) => {
+    console.error(`check failed: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  });
+}
