@@ -118,8 +118,10 @@ const JPEG_SOF_MARKERS = new Set([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9
  * (#622 review: libjpeg discards a stray pair it does not know, and a walk that
  * jumped by its "length" could land on a frame header libjpeg never reads).
  */
+const JPEG_LENGTH_SKIPPED = new Set([0xfe, 0xdb, 0xc4, 0xdd, 0xcc, 0xdc]);
+
 function jpegSkipsByLength(marker: number): boolean {
-  return (marker >= 0xe0 && marker <= 0xef) || [0xfe, 0xdb, 0xc4, 0xdd, 0xcc, 0xdc].includes(marker);
+  return (marker >= 0xe0 && marker <= 0xef) || JPEG_LENGTH_SKIPPED.has(marker);
 }
 
 /**
@@ -148,7 +150,9 @@ function jpegSamplesPerPixel(buffer: Buffer): number | null {
     // Anything but a frame header or a segment libjpeg skips by length (the first scan, the end,
     // or a marker it does not know): no frame header was found.
     if (!JPEG_SOF_MARKERS.has(marker) && !jpegSkipsByLength(marker)) return null;
-    // A length under 2 lands inside the length field, on a byte that is not a marker: the walk ends there.
+    // A segment's length under 2 lands inside the length field, on a byte that is not a marker: the
+    // walk ends there. A frame header's own length is libjpeg's to check: it refuses a wrong one
+    // before the metadata this budget follows is read.
     const length = buffer.readUInt16BE(offset + 2);
     if (JPEG_SOF_MARKERS.has(marker)) {
       const components = buffer[offset + 9];
