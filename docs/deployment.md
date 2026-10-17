@@ -810,7 +810,7 @@ nothing was shared. The alert names the account that made the link. One report c
 forgot the sender; several against one account, or one against an account with many requests, suggests
 someone collecting addresses. An operator notice is posted too, since the evidence does not last:
 the reported request is deleted `LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS` (set on the maintenance
-service, 7 by default) after it closes, the account's earlier requests sooner, and all of them at once
+service and the API, the same value on both, 7 by default, at most 30) after it closes, the account's earlier requests sooner, and all of them at once
 if the account is erased. Review soon. There is no
 panel command to block an account's requests: an engineer looks at the account's other
 `address_requests` while they are kept, and `LETTER_IRL_ADDRESS_REQUESTS_ENABLED=false` turns the

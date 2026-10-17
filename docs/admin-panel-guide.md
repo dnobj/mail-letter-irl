@@ -410,6 +410,7 @@ Commands available:
 | Provider status sync | letters of the last N days | `syncLetterStatuses` (dry run by default; apply updates statuses and history, and stores a certified letter's carrier tracking number, which needs the operator role's grant from `npm run admin:provision-access` after migration 053, #625) |
 | Set a daily limit | a daily limit, for everyone or (the two per-account limits) one account | writes a `daily_limit_overrides` row and clears the one it replaces; for the rest of the UTC day or until cleared; letters, or whole dollars for spending. The API reads it on the next send or checkout, with no redeploy (see **Limits**, below) |
 | Clear a daily limit's value | a `daily_limit_overrides` row not yet cleared | stamps it cleared (kept as history); the limit returns to the value for everyone, or the configured one |
+| Delete an address request | an `address_requests` row, named on the **Support** page by the link the person was sent (reduced to its fingerprint before anything else sees it) or by its request id (#701) | `address_request.delete`: deletes the request and any address given with it, reading back only its status and when it was made. The panel reads no address request, so the preview cannot say whether it exists; the result says whether one was found. Needs the operator role's grant from `npm run admin:provision-access` after the release that brings it |
 
 Read-only pages beyond the P0 set: **Gifts** (unsent gift letters, gift sends today, outstanding and
 redeemed chain codes, the newest codes with a void action; an account page adds that account's gift
@@ -418,7 +419,7 @@ row, queued for the next hourly run; a search by letter, draft or account id for
 100; and **Recent restores**, where each queued restore's outcome shows, since a copy that went back leaves
 the quarantine; a redacted letter's own page also shows its copy and the restore, and an account page links to
 its copies), **Routing** (the routing table, the
-registry, stuck letters), **Support** (token counts, feature requests without contact emails). Manual
+registry, stuck letters), **Support** (token counts, feature requests without contact emails, and the form that names an address request to delete, in full mode). Manual
 cases: `ADMIN-OPS-01` to `ADMIN-OPS-03` and `ADMIN-LEGACY-01`.
 
 The **Stripe** page runs the reconciliation (`reconcileStripePayments`) with the service's restricted key

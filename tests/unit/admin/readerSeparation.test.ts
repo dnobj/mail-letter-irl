@@ -37,6 +37,8 @@ describe("the admin reader role's column separation (#730)", () => {
       "OR has_column_privilege(member_of.oid, 'personal_access_tokens', 'token_hash', 'SELECT')",
       "has_column_privilege(r.oid, 'letters', 'preview_html', 'SELECT')",
       "to_regclass('address_requests')",
+      // A column grant to the reader is caught as a table grant is (#701).
+      "has_any_column_privilege(r.oid, c.oid, 'SELECT')",
       "member_of.oid <> r.oid",
       "pg_has_role(r.oid, (SELECT relowner FROM pg_class WHERE oid = 'letters'::regclass), 'MEMBER')",
     ]) {
