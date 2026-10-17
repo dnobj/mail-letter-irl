@@ -27,6 +27,17 @@ interface CreateMailCheckoutOutput {
   status: string;
   reused: boolean;
   message: string;
+  /** Arrive-by (#726): an open checkout whose mail date has passed since it was opened. */
+  scheduleMissed?: { arriveBy: string; mailOn: string };
+}
+
+/**
+ * Said before the person pays an open checkout whose mail date has passed
+ * (#726): paid, it goes to the printer as soon as it can, so it may arrive
+ * after its date. Dates as the schedule carries them, YYYY-MM-DD.
+ */
+export function scheduleMissedSentence(schedule: { arriveBy: string; mailOn: string }): string {
+  return `This checkout was opened for mail to arrive by ${schedule.arriveBy}, but its day to go to the printer (${schedule.mailOn}) has passed. If it is paid, it goes to the printer as soon as it can and may arrive after ${schedule.arriveBy}. Tell the person this before they pay; to choose a new date instead, leave it unpaid until it closes (it can take up to an hour), then set the arrival date again.`;
 }
 
 export function friendlyCheckoutError(error: unknown): Error {
@@ -184,8 +195,9 @@ async function handler(
       expiresAt: result.expiresAt,
       status: result.status,
       reused: result.reused,
+      ...(pending && result.scheduleMissed ? { scheduleMissed: result.scheduleMissed } : {}),
       message: pending
-        ? `Pay ${result.currency.toUpperCase()} ${formatAmountForCurrency(result.amountCents, result.currency)} to authorize printing and mailing this exact physical item.`
+        ? `Pay ${result.currency.toUpperCase()} ${formatAmountForCurrency(result.amountCents, result.currency)} to authorize printing and mailing this exact physical item.${result.scheduleMissed ? ` ${scheduleMissedSentence(result.scheduleMissed)}` : ''}`
         : 'This purchase is already paid or being fulfilled. Check its purchase status instead of opening another checkout.'
     };
   } catch (error) {

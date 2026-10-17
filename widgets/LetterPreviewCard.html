@@ -2998,6 +2998,19 @@
           // the link above, and this card has to update on that path too.
           startStatusPolling("Checkout open - waiting for payment");
 
+          // An open checkout whose mail date has passed since it opened (#726): said
+          // first, and opened only from the link, so nothing is paid unread.
+          const missed = arrives.scheduleOf(result.scheduleMissed);
+          if (missed) {
+            const note = document.getElementById("checkout-note");
+            note.textContent =
+              `This was to go to the printer on ${arrives.describeDate(missed.mailOn)} to arrive by ${arrives.describeDate(missed.arriveBy)}, and that day has passed. ` +
+              `If you pay, it goes to the printer as soon as it can and may arrive after ${arrives.describeDate(missed.arriveBy)}.`;
+            note.style.display = "block";
+            buttonText.textContent = "Read the note, then use the checkout link below";
+            return;
+          }
+
           try {
             if (isHttpsUrl(result.checkoutUrl)) await host.openLink(result.checkoutUrl);
             buttonText.textContent = "Checkout Opened";

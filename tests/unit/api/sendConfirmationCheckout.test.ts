@@ -232,6 +232,22 @@ describe('the confirmation page takes Pay & Send for mail no pack pays for (#579
       expect(json()).toMatchObject({ status: 'paid', checkoutUrl: null, expiresAt: null, reused: true });
     });
 
+    it('hands the page the dates of an open checkout whose mail date has passed, and only while it can be paid (#726)', async () => {
+      vi.mocked(getDraft).mockResolvedValue(draft() as never);
+      const missed = { arriveBy: '2026-10-12', mailOn: '2026-09-30' };
+      vi.mocked(createJitCheckout).mockResolvedValueOnce({
+        success: true, orderId: 'order-1', checkoutUrl: 'https://checkout.stripe.test/cs-1', amountCents: 399,
+        currency: 'usd', productDescription: 'x', status: 'checkout_pending', reused: true, scheduleMissed: missed
+      } as never);
+      expect((await call('POST', CHECKOUT)).json()).toMatchObject({ status: 'checkout_pending', scheduleMissed: missed });
+
+      vi.mocked(createJitCheckout).mockResolvedValueOnce({
+        success: true, orderId: 'order-1', amountCents: 399, currency: 'usd', productDescription: 'x',
+        status: 'paid', reused: true, scheduleMissed: missed
+      } as never);
+      expect((await call('POST', CHECKOUT)).json()).not.toHaveProperty('scheduleMissed');
+    });
+
     it('opens the checkout with the content version the page drew (#695)', async () => {
       vi.mocked(getDraft).mockResolvedValue(draft() as never);
       await call('POST', CHECKOUT, JSON.stringify({ contentVersion: '0123456789abcdef' }));

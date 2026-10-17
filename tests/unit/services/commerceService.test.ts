@@ -4821,6 +4821,53 @@ describe('commerceService', () => {
         expect(position('AS held FROM letters')).toBeGreaterThan(position('status = ANY($2::varchar[])'));
       });
 
+      it.each<[string, Record<string, unknown>, string]>([
+        ['full', {}, 'SCHEDULE_FULL'],
+        ['passed', { arrive_by: '2026-10-12', mail_on: '2026-09-30' }, 'SCHEDULE_PASSED']
+      ])('cancels an order whose session was never made when its date is %s, and commits that before refusing (#726)', async (_label, dates, code) => {
+        activeRows = [currentOrder()];
+        draftRow = { ...draftRow, ...dates };
+        await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).rejects.toMatchObject({ code, diagnosticClass: code });
+        const cancel = mocks.query.mock.calls.find(([sql]) => String(sql).includes("SET status = 'cancelled'"))!;
+        expect(cancel).toBeDefined();
+        expect(String(cancel[0])).toContain("status = 'checkout_pending'");
+        expect(cancel[1]).toEqual(['order-1', code, expect.stringContaining('before a session was opened')]);
+        const event = mocks.query.mock.calls.find(([sql, params]) => String(sql).includes('commerce_order_events') && (params as unknown[])?.[1] === 'checkout.schedule_refused');
+        expect(event?.[1]).toEqual(['order-1', 'checkout.schedule_refused', 'checkout_pending', 'cancelled', '{}']);
+        // The transaction itself succeeded, so the cancel committed; the refusal came after it.
+        await expect(mocks.transaction.mock.results[0].value).resolves.toEqual({ refusal: expect.objectContaining({ code }) });
+        expect(inserted()).toBe(false);
+        expect(mocks.createJitSession).not.toHaveBeenCalled();
+      });
+
+      it('cancels nothing when there is no order yet, and refuses inside the transaction (#726)', async () => {
+        draftRow = { ...draftRow, arrive_by: '2026-10-12', mail_on: '2026-09-30' };
+        await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).rejects.toMatchObject({ code: 'SCHEDULE_PASSED' });
+        expect(mocks.query.mock.calls.some(([sql]) => String(sql).includes("SET status = 'cancelled'"))).toBe(false);
+        await expect(mocks.transaction.mock.results[0].value).rejects.toMatchObject({ code: 'SCHEDULE_PASSED' });
+      });
+
+      it('marks an open session handed back after its mail date passed, with the dates, so it is said before payment (#726)', async () => {
+        activeRows = [currentOrder({ stripe_checkout_session_id: 'cs-open', checkout_url: 'https://checkout.stripe.test/cs-open' })];
+        draftRow = { ...draftRow, arrive_by: '2026-10-12', mail_on: '2026-09-30' };
+        await expect(createJitCheckout({ userId: 'user-1', draftId: 'draft-1' })).resolves.toMatchObject({
+          reused: true,
+          status: 'checkout_pending',
+          scheduleMissed: { arriveBy: '2026-10-12', mailOn: '2026-09-30' }
+        });
+      });
+
+      it('marks nothing for an open session whose date is still ahead, though full, nor for an order already paid (#726)', async () => {
+        activeRows = [currentOrder({ stripe_checkout_session_id: 'cs-open', checkout_url: 'https://checkout.stripe.test/cs-open' })];
+        const ahead = await createJitCheckout({ userId: 'user-1', draftId: 'draft-1' });
+        expect(ahead).not.toHaveProperty('scheduleMissed');
+        activeRows = [currentOrder({ status: 'paid', stripe_checkout_session_id: 'cs-paid', checkout_url: 'https://checkout.stripe.test/cs-paid' })];
+        draftRow = { ...draftRow, arrive_by: '2026-10-12', mail_on: '2026-09-30' };
+        const paid = await createJitCheckout({ userId: 'user-1', draftId: 'draft-1' });
+        expect(paid).toMatchObject({ reused: true });
+        expect(paid).not.toHaveProperty('scheduleMissed');
+      });
+
       it('reuses an order whose session was never made when its date has room', async () => {
         held = 1;
         activeRows = [currentOrder()];
