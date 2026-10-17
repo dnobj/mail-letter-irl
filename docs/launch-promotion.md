@@ -83,7 +83,8 @@ must be ready before the API deploys against it
    linking Action goes into the flow, or new password sign-ups cannot confirm.
 2. The `Account Linking (production)` machine-to-machine application, with exactly `read:users` and
    `update:users` on the Management API.
-3. The row-holder check the tenant doc describes, then the two Post Login Actions from
+3. The row-holder check the tenant doc describes (it reads users: add `read:users` to the temporary
+   application of step 7 for it), then the two Post Login Actions from
    [`docs/auth0/actions/`](auth0/actions/): the linking Action above the email-claim Action.
 4. The consent setting (`use_scope_descriptions_for_consent`, #267).
 5. The ChatGPT client's refresh-token settings (they are not inherited from development).
@@ -93,7 +94,8 @@ must be ready before the API deploys against it
 7. Run `scripts/check-auth0-tenant.ts` on both tenants and record the result in the tenant doc.
    Its token comes from a temporary application with only the five read scopes, deleted after the
    run. **Not** from the Management API's API Explorer tab: on a tenant without the API Explorer
-   Application, that tab creates it, with every Management API scope (it was deleted on 2026-09-26).
+   Application, that tab creates it, with every Management API scope (the development tenant's was
+   deleted on 2026-09-26; if production still has one, the check reports its grant).
 
 ### Production variables set ahead (owner, or an agent with approval)
 
@@ -130,12 +132,17 @@ Also before stage B:
   becomes a chargeback leaves its letters spendable until the dispute closes. Adding them ahead is
   harmless: the current build records events it does not handle and does nothing with them.
 - **The admin reader role.** The new panel refuses to start (`ADMIN_READER_ROLE_TOO_WIDE`, 503)
-  if the production reader can read past its column grants. Run the check in
-  [admin-panel-guide.md](admin-panel-guide.md) against the production reader, as the owner, and
-  revoke what it lists before stage B.
-- **Which services run a pre-deploy.** Only the API's should migrate. Note whether the maintenance
-  and admin services have one, for the rollback in stage B.
-- Run `npm run preflight:cutover -- --env production` and close its gaps
+  if the production reader can read past its column grants. As the owner, run the query in
+  `readReaderSeparation` (`src/admin/db.ts`) with the production reader's name: every column must
+  be false (`address_requests` reads false before stage B). It covers table-wide grants, which the
+  shorter query in [admin-panel-guide.md](admin-panel-guide.md) does not. Revoke what it finds
+  before stage B.
+- **Which services run a pre-deploy.** `railway.toml` gives the API and the maintenance service the
+  same migrating pre-deploy (safe: the second waits on the advisory lock and finds nothing to
+  apply). Note what each production service actually has, and whether the admin service has none,
+  for stage B step 2.
+- Run `npm run preflight:cutover -- --env production` **from a checkout at the `dev` head being
+  promoted** (run from `master`, it checks the old variable list) and close its gaps
   ([deployment.md](deployment.md)).
 - Keep `ADMIN_TOTP_SECRET` on the admin service: the current release needs it, and so does a
   rollback.
@@ -151,6 +158,7 @@ SELECT count(*) AS applied, max(name) AS newest FROM migrations;
 SELECT name FROM migrations WHERE name > '032_error_text_minimisation.sql' ORDER BY name;
 
 -- The server: 054 needs PostgreSQL 15 or later; 058 folds case by the database's locale.
+-- datlocale exists from PostgreSQL 17 (Neon's version here); on an older server, drop it.
 SELECT current_setting('server_version_num')::int AS server_version_num, current_user;
 -- Expect the same answer as on the development branch, where 058 has run.
 SELECT datname, datlocprovider, datcollate, datctype, datlocale FROM pg_database WHERE datname = current_database();
@@ -170,8 +178,8 @@ SELECT c.relname, pg_get_userbyid(c.relowner) AS owner FROM pg_class c
    'commerce_operator_audit_events', 'admin_audit_events', 'admin_command_runs', 'admin_operations')
  ORDER BY 1;
 
--- Snapshots of the two data changes (keep the output): 034 ends these campaigns,
--- 057 gives these tokens an expiry.
+-- Snapshots of the two data changes (keep the output): 034 ends these campaigns (a superset:
+-- 034 also requires a column 033 adds), 057 gives these tokens an expiry.
 SELECT campaign_id, code, status, credits_amount FROM promo_campaigns
  WHERE credits_amount = 0 AND status <> 'ended';
 SELECT token_id, status, created_at FROM personal_access_tokens WHERE expires_at IS NULL ORDER BY token_id;
@@ -201,6 +209,9 @@ SELECT pid, state, now() - xact_start AS age, left(query, 60) AS query FROM pg_s
    applied; fix the cause and redeploy. The maintenance and admin services deploy from the same
    merge without waiting for it, so they can be left on the new build against the old schema: roll
    each back to its previous deployment until the API's run succeeds.
+   If the run succeeds but the new build fails its health check (a variable the preflight cannot
+   see, such as the OAuth scopes), the old build keeps serving on the new schema, which it
+   tolerates. Fix the variable and redeploy; do not roll back the migrations.
 3. Check:
    - `/readyz` answers 200 with the new `X-Build-Commit`;
    - the boot log shows `boot.thread_pool` with size 16;
@@ -222,8 +233,8 @@ SELECT pid, state, now() - xact_start AS age, left(query, 60) AS query FROM pg_s
 
 One change at a time, each with its check, in this order:
 
-- `LETTER_IRL_GIFT_LETTERS_ENABLED=true` (on at launch, after GIFT-01), then claim a gift code from
-  a canary letter.
+- `LETTER_IRL_GIFT_LETTERS_ENABLED=true` (on at launch, after GIFT-01). Then buy a pack (packs
+  grant gift letters only while the flag is on), send a gift letter, and claim its code.
 - `STRIPE_CHECKOUT_DOMAIN`, then refresh the connector, then switch the domain on in Stripe
   ([stripe-custom-domain.md](stripe-custom-domain.md)).
 - `CONTENT_RETENTION_MODE=enforce`, only once a rollback to the old build is ruled out, then watch
@@ -291,17 +302,30 @@ know:
 
 ## Rollback
 
-- **Before stage D,** rolling back the API means redeploying `master`'s previous build. The schema
-  stays at `064`, which the old build tolerates. Tokens could send again (the old build ignores
-  token scopes), and gift letters would not be handled, so keep gift letters off if a rollback is
-  likely.
+- **Before stage D,** rolling back means redeploying `master`'s previous build on the API **and the
+  maintenance service together** (the maintenance run is what dispatches the queue). The schema
+  stays at `064`, which the old build tolerates. The old build has no send rule, so the model can
+  call the send tools itself again, and tokens could send (it ignores token scopes). It does not
+  handle gift letters, so keep gift letters off if a rollback is likely.
+- **Release or cancel the mail the new build is holding, first.** The old build dispatches every
+  pending job, including mail the new build leaves for the operator: letters whose pack was refunded
+  in full or disputed (#696), and letters of an account whose sending is blocked. Release or cancel
+  each from the admin panel, and roll back only when this read-only count is 0 in both columns:
+
+  ```sql
+  SELECT count(*) FILTER (WHERE j.hold_reason IN ('funding_reversed', 'funding_disputed')) AS funding_held,
+         count(*) FILTER (WHERE u.sends_blocked_reason IS NOT NULL) AS blocked_account
+    FROM letter_jobs j JOIN letters l ON l.letter_id = j.letter_id JOIN users u ON u.user_id = l.user_id
+   WHERE j.status = 'pending' AND j.provider_outcome = 'not_dispatched';
+  ```
 - **Empty the queue before rolling back below a floor.** The old build ignores
   `LETTER_IRL_OUTBOX_DISPATCH_ENABLED` and dispatches every queued letter it finds, so a paused
   queue does not protect a rollback: certified letters would go as ordinary mail, and letters
   previewed by the renderer would print from the old layout. First switch off the flag that makes
-  such mail, let the new build send (or an operator cancel) the letters already queued or held, and let drafts that carry
-  it expire (24 hours). Only then roll back. The pause is for stopping mail while the new build
-  stays.
+  such mail, and let the new build send (or an operator cancel) the letters already queued or held.
+  Then wait until no draft that carries it keeps its content: drafts expire in 24 hours, but some
+  floors last until the sweep redacts them, days later ([deployment.md](deployment.md) gives each
+  floor's rule). Only then roll back. The pause is for stopping mail while the new build stays.
 - **Never leave `CONTENT_RETENTION_MODE=enforce` set while a rollback to the old build is
   possible:** the old build's enforce path has known defects.
 - **The admin panel:** `ADMIN_TOTP_SECRET` stays until the promotion has settled, because the old

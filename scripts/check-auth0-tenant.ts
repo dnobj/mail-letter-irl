@@ -70,6 +70,19 @@ export interface Auth0Grant {
   client_id: string;
   audience: string;
   scope?: string[];
+  /** "user" for a user-delegated grant, whose scopes act for the signed-in user only. */
+  subject_type?: string;
+}
+
+/** The tenant's own Auth0 host, or null: the token goes nowhere else. */
+export function checkDomain(raw: string): string | null {
+  const domain = raw.trim().replace(/^https?:\/\//, "").replace(/\/+$/, "").toLowerCase();
+  return /^[a-z0-9-]+(\.[a-z0-9-]+)*\.auth0\.com$/.test(domain) ? domain : null;
+}
+
+/** A bearer token fetch can carry: anything else would be echoed in fetch's own error. */
+export function tokenLooksValid(token: string): boolean {
+  return /^[A-Za-z0-9._~+/=-]+$/.test(token);
 }
 
 /** Line endings and trailing whitespace do not count: the editor may change them. */
@@ -158,6 +171,13 @@ export function checkLinkingGrant(clients: Auth0Client[], grants: Auth0Grant[], 
   for (const grant of managementGrants) {
     if (linkingIds.has(grant.client_id)) continue;
     const name = clients.find((client) => client.client_id === grant.client_id)?.name ?? "an unlisted application";
+    if (grant.subject_type === "user") {
+      results.push({
+        ok: true,
+        line: `"${name}" holds a user-delegated Management API grant (${(grant.scope ?? []).length} scopes, acting for the signed-in user only)`,
+      });
+      continue;
+    }
     const writes = (grant.scope ?? []).filter((scope) => !scope.startsWith("read:"));
     results.push({
       ok: writes.length === 0,
@@ -183,10 +203,14 @@ export function countApplications(clients: Auth0Client[]): string {
 }
 
 async function main(): Promise<void> {
-  const domain = (process.env.AUTH0_CHECK_DOMAIN ?? "").trim().replace(/^https?:\/\//, "").replace(/\/+$/, "");
-  const token = process.env.AUTH0_CHECK_TOKEN ?? "";
+  const domain = checkDomain(process.env.AUTH0_CHECK_DOMAIN ?? "");
+  const token = (process.env.AUTH0_CHECK_TOKEN ?? "").trim();
   if (!domain || !token) {
-    console.error("Set AUTH0_CHECK_DOMAIN and AUTH0_CHECK_TOKEN first (see the header of this file).");
+    console.error("Set AUTH0_CHECK_DOMAIN to the tenant's own *.auth0.com host, and AUTH0_CHECK_TOKEN (see the header of this file).");
+    process.exit(2);
+  }
+  if (!tokenLooksValid(token)) {
+    console.error("AUTH0_CHECK_TOKEN holds characters a token does not have; set it again (see the header of this file).");
     process.exit(2);
   }
   const base = `https://${domain}/api/v2`;

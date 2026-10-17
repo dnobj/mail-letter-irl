@@ -4,11 +4,13 @@ import { describe, expect, it } from "vitest";
 
 import {
   ACTION_FILES,
+  checkDomain,
   checkLinkingGrant,
   checkPostLoginFlow,
   codeHash,
   countApplications,
   normalizeCode,
+  tokenLooksValid,
 } from "../../../scripts/check-auth0-tenant.js";
 
 /**
@@ -118,6 +120,28 @@ describe("the linking application's grant", () => {
     expect(
       failures(checkLinkingGrant(others, [linkGrant, { client_id: "c-old", audience: "https://api.example/", scope: ["write:x"] }], audience)),
     ).toEqual([]);
+    const delegated = { client_id: "c-old", audience, scope: ["update:current_user_metadata"], subject_type: "user" };
+    const results = checkLinkingGrant(others, [linkGrant, delegated], audience);
+    expect(failures(results)).toEqual([]);
+    expect(results.map((result) => result.line)).toContain(
+      '"Old sync" holds a user-delegated Management API grant (1 scopes, acting for the signed-in user only)',
+    );
+  });
+});
+
+describe("where the token goes", () => {
+  it("accepts only the tenant's own auth0.com host", () => {
+    expect(checkDomain(" https://Tenant.us.auth0.com/ ")).toBe("tenant.us.auth0.com");
+    expect(checkDomain("tenant.us.auth0.com.example.net")).toBeNull();
+    expect(checkDomain("login.example.com")).toBeNull();
+    expect(checkDomain("")).toBeNull();
+  });
+
+  it("refuses a token with characters fetch would echo in its error", () => {
+    expect(tokenLooksValid("eyJhbGciOi.eyJzdWIi-_x.sig+/=")).toBe(true);
+    expect(tokenLooksValid("abc\rdef")).toBe(false);
+    expect(tokenLooksValid("abc def")).toBe(false);
+    expect(tokenLooksValid("")).toBe(false);
   });
 });
 

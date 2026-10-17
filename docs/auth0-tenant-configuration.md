@@ -1045,7 +1045,8 @@ It checks that:
   (`AUTH0_DOMAIN`, `LINKING_CLIENT_ID`, `LINKING_CLIENT_SECRET`) exist, by name;
 - exactly one `Account Linking (<environment>)` application exists, its Management API grant is
   exactly `read:users` and `update:users`, and no other application holds a Management API scope
-  that writes;
+  that writes (a user-delegated grant, such as the legacy clients' `current_user` scopes, is
+  listed but passes: it acts only for the signed-in user);
 - a custom email provider is configured and enabled, and the verification email template is
   enabled;
 
@@ -1059,15 +1060,16 @@ It needs a short-lived Management API token with `read:actions`, `read:clients`,
    Auth0 Management API with exactly those five scopes.
 2. Get a token from Applications -> APIs -> Auth0 Management API -> **Test**, with that application
    selected (it expires on its own, after 24 hours by default).
-3. Run the check (below), then delete the application. That frees its slot in the application
-   limit and leaves no credential behind.
+3. Run the check (below), then delete the application, which frees its slot in the application
+   limit. A token already issued may stay valid until it expires, so clear it from the clipboard
+   too.
 
 **Do not use the Management API's API Explorer tab.** On a tenant without the API Explorer
 Application, opening it creates one, a lasting application holding every Management API scope; the
 project deleted it on 2026-09-26 (above).
 
 Use the tenant's own `*.auth0.com` domain, not a custom domain: the Management API's audience is
-named after it. The prompt hides what is typed:
+named after it, and the script refuses any other host so the token cannot go elsewhere. The prompt hides what is typed:
 
 ```powershell
 $env:AUTH0_CHECK_DOMAIN = "<tenant>.us.auth0.com"
