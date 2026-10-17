@@ -70,7 +70,7 @@ Owed before stage A, on DEV at the head being promoted:
   before the content-version changes (#695).
 - **The words changed after the card was shown (#723):** change the letter in the chat, then press
   Send on the old card; it must refuse.
-- **PRINT-02's sends** (its previews passed), before stage D.
+- **PRINT-02's sends** (its previews passed): before stage D, not before stage A.
 - **REFUND-01.**
 - **A card smoke test:** ChatGPT web, desktop, Android and iOS; Claude web, desktop and Android;
   VS Code.
@@ -104,10 +104,12 @@ must be ready before the API deploys against it
    imported after stage A.
 7. Run `scripts/check-auth0-tenant.ts` on both tenants (each with its own temporary application)
    and record the result in the tenant doc.
-   Its token comes from the temporary application of step 3, now holding only the five read scopes;
-   delete the application after the run. **Not** from the Management API's API Explorer tab: on a tenant without the API Explorer
-   Application, that tab creates it, with every Management API scope (the development tenant's was
-   deleted on 2026-09-26; if production still has one, the check reports its grant).
+   Its token comes from the temporary application of step 3, now holding only the five read scopes:
+   mint a fresh token after removing `read:users` (the earlier one still carries it), and delete the
+   application after the run. **Not** from the Management API's API Explorer tab: on a tenant
+   without the API Explorer Application, that tab creates it, with every Management API scope (the
+   development tenant's was deleted on 2026-09-26; if production still has one, the check reports
+   its grant).
 
 ### Production variables set ahead (owner, or an agent with approval)
 
@@ -138,6 +140,8 @@ Also before stage B:
   - `UV_THREADPOOL_SIZE=16` on the API ([railway-setup.md](railway-setup.md)); stage B checks it.
   - `LETTER_IRL_ALLOWED_ORIGINS` includes the website's origin: the gift page (stage C) and later
     the address form call the API from the browser.
+  - On the website, `LETTER_IRL_PUBLIC_API_URL` names the public API when `LETTER_IRL_API_URL` is a
+    private address: the browser calls of the gift and address pages use it. Stage C checks it.
 - **The Stripe webhook.** The production endpoint must subscribe to every event in
   [railway-setup.md](railway-setup.md), including `charge.dispute.updated` and
   `charge.dispute.funds_withdrawn`, which only the new build handles. Without them, an inquiry that
@@ -161,7 +165,10 @@ Also before stage B:
 - Keep `ADMIN_TOTP_SECRET` on the admin service: the current release needs it, and so does a
   rollback.
 
-### Read-only database checks (owner, or an agent with read access)
+### Read-only database checks (owner)
+
+The owner role can write, so its connection string is never handed to an agent; an agent may only
+read the output the owner pastes.
 
 Run on the production branch, with the role the API's `DATABASE_URL` uses, the day of the
 promotion. Each query only reads.
@@ -222,9 +229,10 @@ SELECT pid, state, now() - xact_start AS age, left(query, 60) AS query FROM pg_s
 2. Watch the API's and the maintenance service's deploy logs (either may run the migrations first;
    the other then finds nothing to apply): the pre-deploy applies `033` to `064` in one transaction, then the
    new build starts. If the API's pre-deploy fails, read the migration ledger first: the
-   maintenance service's run may have applied them while the API's waited on the lock. Otherwise
-   the old API build keeps serving and nothing was
-   applied; fix the cause and redeploy. The maintenance and admin services deploy from the same
+   maintenance service's run may have applied them while the API's waited on the lock. If the
+   ledger's newest row is `064`, they did: redeploy the API, and leave the maintenance service on
+   the new build. Otherwise the old API build keeps serving and nothing was applied; fix the cause
+   and redeploy. The maintenance and admin services deploy from the same
    merge without waiting for it, so they can be left on the new build against the old schema: roll
    each back to its previous deployment until the API's run succeeds.
    If the run succeeds but the new build fails its health check (a variable the preflight cannot
@@ -237,6 +245,9 @@ SELECT pid, state, now() - xact_start AS age, left(query, 60) AS query FROM pg_s
    - the maintenance and admin services are on the new build.
 4. Re-run the admin provisioning for production **from a checkout at the promoted commit**, never
    from an older one: it applies the grants of the code it runs (`038`, `053` and `063` need it).
+   The command is `npx tsx scripts/provisionAdminDatabaseAccess.ts --environment production
+   --confirm-production-access --config <the production profile> --apply`
+   ([admin-panel-guide.md](admin-panel-guide.md)).
    Then elevate on the production panel with an operator's own secret.
 5. The first maintenance run on the new build: every task completes, and the refund sweep holds
    any `refund_pending` order whose refund already ended, with one alert each (#759).
@@ -254,7 +265,9 @@ Stage C starts once stage B has settled (a day without a rollback). From its fir
 build is no longer a rollback target (see "Rollback"). One change at a time, each with its check, in
 this order:
 
-- `LETTER_IRL_GIFT_LETTERS_ENABLED=true` (on at launch, after GIFT-01). Then buy a pack (packs
+- `LETTER_IRL_GIFT_LETTERS_ENABLED=true` (on at launch, after GIFT-01). First load the website's
+  `/g/` page with a made-up code: it must say the code was not found, not that it cannot reach
+  Letter IRL (the browser could not reach the API). Then buy a pack (packs
   grant gift letters only while the flag is on), send a gift letter, and claim its code when the
   printed card arrives, as GIFT-01 does.
 - `STRIPE_CHECKOUT_DOMAIN`, then refresh the connector, then switch the domain on in Stripe
@@ -292,8 +305,14 @@ heartbeat URLs are proven, and with its privacy row published.
 One per deploy, each after its live prices exist, its terms are published and its test has passed
 on DEV: room to write (two and three pages), postcard sizes, certified mail (also PostGrid's
 confirmation, the website's part and a provisioning re-run). All three are sold by Pay & Send, so
-they need `JIT_PURCHASE_ENABLED=true` (without it a flag does nothing and the preflight asks for no
-price); room to write and the postcard sizes also need the renderer (stage D).
+they need `JIT_PURCHASE_ENABLED=true`; room to write and the postcard sizes also need the renderer
+(stage D). For each option, in this order:
+
+1. Set its price ids on the API **and the maintenance service**: both validate them at start, and a
+   maintenance service with the flag but not the prices fails every hourly run.
+2. Re-run the preflight.
+3. Turn its flag on, on both services.
+4. Confirm the next maintenance run completes.
 
 ## The flags
 
@@ -313,7 +332,7 @@ stage B allows (see "Rollback").
 | `LETTER_IRL_SIGNATURES_ENABLED` | API | stage E | SIGNATURE-01, its privacy row | `pdf-4` mail |
 | `LETTER_IRL_POSTCARD_LAYOUTS_ENABLED` | API | stage E | its DEV test | `pdf-3` postcards |
 | `LETTER_IRL_ADDRESS_REQUESTS_ENABLED` | API | stage E | ADDRESS-01, its privacy row; the website's `/address` page; `LETTER_IRL_ADDRESS_REQUEST_RETENTION_DAYS` on the maintenance service matching the row | the old build does not sweep requests |
-| `LETTER_IRL_HOME_ENABLED`, `..._WORDS_EDITOR_ENABLED`, `..._POSTCARD_COLLAGES_ENABLED`, `..._CARD_UPLOAD_ENABLED`, `..._ENVELOPE_REVEAL_ENABLED`, `..._STUDIO_CARD_ENABLED` | API | stage E | each one's DEV test; the home after #651, with `LETTER_IRL_CHATGPT_PLUGIN_ID` set | none |
+| `LETTER_IRL_HOME_ENABLED`, `..._WORDS_EDITOR_ENABLED`, `..._POSTCARD_COLLAGES_ENABLED`, `..._CARD_UPLOAD_ENABLED`, `..._ENVELOPE_REVEAL_ENABLED`, `..._STUDIO_CARD_ENABLED` | API | stage E | each one's DEV test; the home after #651 (`LETTER_IRL_CHATGPT_PLUGIN_ID` only once the production plugin exists and HOME-03 passes) | none |
 | `LETTER_IRL_IMAGE_GEN_MODE` | API | `off` | check the current value first | meaning differs between builds |
 | `CONTENT_RETENTION_MODE` | maintenance | `report`, then `enforce` in stage C | the rule below | never `enforce` while the old build is a rollback target |
 | `LETTER_IRL_OUTBOX_DISPATCH_ENABLED` | API, maintenance | `true` | | `false` pauses the printer queue (new build only) |
@@ -377,7 +396,11 @@ mail it would mishandle, so:
      sending must stop meanwhile, and check `/readyz`'s `X-Build-Commit` afterwards, since a
      variable change redeploys.
 - **From stage C on, never roll back to the old build.** To undo a switch, change that one
-  variable back. A code regression is fixed forward, or rolled back to an earlier launch-version
+  variable back, with two exceptions. `STRIPE_CHECKOUT_DOMAIN`: once Stripe serves the domain, undo
+  it in Stripe first ([stripe-custom-domain.md](stripe-custom-domain.md), "Removing it"), and the
+  variable stays. Gift letters and the renderer: switching them off has side effects (printed gift
+  codes stop redeeming; every feature that needs the renderer stops), so switch off the feature
+  itself instead. A code regression is fixed forward, or rolled back to an earlier launch-version
   deployment with Railway's Rollback, which also restores **that deployment's variables**: compare
   them with the current ones first, and never roll the API back across `STRIPE_CHECKOUT_DOMAIN` once
   Stripe serves the domain (every new checkout would be refused), nor across a feature switch whose
