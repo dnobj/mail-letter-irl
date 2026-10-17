@@ -1847,9 +1847,13 @@ Steps 9 to 11, and the Settings page check in step 12, need a signed-in session 
     draw, then **Cancel**: nothing changes. Press **Remove**, then **Keep it**: it stays. Press **Remove**, then
     **Remove it**: "Removed. New letters print no signature; letters already previewed keep theirs." and "No
     signature is saved."
-12. [ ] Turn the flag off and deploy the API, then refresh the tool list. Verify the previews no
-    longer list `signature`, the four signature tools are gone, and the Settings page no longer shows
-    **Your signature**. Turn the flag back on.
+12. [ ] Save a signature again (a photo or a drawing). Turn the flag off and deploy the API, then
+    refresh the tool list. Verify the previews no longer list `signature` and the four signature tools are
+    gone. On the Settings page, verify **Your signature** shows the saved signature with "Signatures are
+    switched off for now, so new letters don't print one. The signature you saved is kept until you remove
+    it." and **Remove** only (no upload, no drawing). Press **Remove**, then **Remove it**: "Removed.
+    Letters already previewed keep theirs." Refresh: the page no longer shows **Your signature**. Turn the
+    flag back on.
 
 **Pass criteria:** A letter prints the signature its preview showed, under the sign-off's first line;
 a preview's choice is remembered; the Settings page shows and changes the signature a letter would

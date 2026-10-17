@@ -95,16 +95,45 @@ describe('/api/signature (#608)', () => {
     expect(authenticateRestRequest).not.toHaveBeenCalled();
   });
 
-  it.each([
+  describe.each([
     ['the flag off', '', 'pdf'],
     ['the legacy renderer', 'true', 'html']
-  ])('answers 404 with %s, before authenticating', async (_name, flag, renderer) => {
-    vi.stubEnv('LETTER_IRL_SIGNATURES_ENABLED', flag);
-    vi.stubEnv('LETTER_IRL_PRINT_RENDERER', renderer);
-    for (const method of ['GET', 'POST', 'DELETE']) {
-      expect(await call(method), method).toMatchObject({ handled: true, status: 404 });
-    }
-    expect(authenticateRestRequest).not.toHaveBeenCalled();
+  ])('while not offered (%s)', (_name, flag, renderer) => {
+    beforeEach(() => {
+      vi.stubEnv('LETTER_IRL_SIGNATURES_ENABLED', flag);
+      vi.stubEnv('LETTER_IRL_PRINT_RENDERER', renderer);
+    });
+
+    it('refuses a save, and any other method but GET and DELETE, with 404 before authenticating', async () => {
+      for (const method of ['POST', 'PUT', 'PATCH', 'HEAD']) {
+        expect(await call(method), method).toMatchObject({ handled: true, status: 404 });
+      }
+      expect(authenticateRestRequest).not.toHaveBeenCalled();
+      expect(saveSignature).not.toHaveBeenCalled();
+    });
+
+    it('shows a signature saved while they were offered, marked as not offered', async () => {
+      vi.mocked(getSignature).mockResolvedValue({ ...SAVED, png: PNG });
+      expect(await call('GET')).toMatchObject({
+        status: 200,
+        body: { saved: true, offered: false, width: 300, height: 90, savedAt: SAVED.updatedAt, image: PNG_URI }
+      });
+      expect(authenticateRestRequest).toHaveBeenCalledWith(expect.anything(), requiredRestScopes('GET', '/api/signature'));
+    });
+
+    it('answers 404 to GET when none is saved, so the page shows nothing of signatures', async () => {
+      vi.mocked(getSignature).mockResolvedValue(null);
+      expect(await call('GET')).toMatchObject({ status: 404 });
+    });
+
+    it('still removes a saved signature, and says when there was none', async () => {
+      vi.mocked(clearSignature).mockResolvedValueOnce(false);
+      expect(await call('DELETE')).toMatchObject({ status: 200, body: { removed: false } });
+      vi.mocked(clearSignature).mockResolvedValueOnce(true);
+      expect(await call('DELETE')).toMatchObject({ status: 200, body: { removed: true } });
+      expect(clearSignature).toHaveBeenCalledWith(USER);
+      expect(authenticateRestRequest).toHaveBeenCalledWith(expect.anything(), requiredRestScopes('DELETE', '/api/signature'));
+    });
   });
 
   it("authenticates with each route's scope, and stops on a refusal or the account's rate limit", async () => {

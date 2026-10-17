@@ -5,8 +5,12 @@
  * - DELETE /api/signature: remove it
  *
  * The same service as set_signature, get_signature and clear_signature, and
- * the same scopes (src/auth/restScopes.ts). While signatures are not offered,
- * every route answers 404, as the tools are not listed.
+ * the same scopes (src/auth/restScopes.ts). While signatures are not offered
+ * the tools are not listed and nothing new can be saved, but a signature saved
+ * while they were stays the person's to see and remove: GET shows it, marked
+ * `offered: false`, and DELETE removes it. POST and any other method answer
+ * 404 before authenticating; GET, once authenticated, answers 404 when none
+ * is saved, so the page shows nothing of signatures.
  */
 
 import type { IncomingMessage, ServerResponse } from 'http';
@@ -61,7 +65,8 @@ export async function handleSignatureApiRequest(
   pathname: string
 ): Promise<boolean> {
   if (pathname !== SIGNATURE_API_PATH) return false;
-  if (!isSignaturesOffered()) {
+  const offered = isSignaturesOffered();
+  if (!offered && req.method !== 'GET' && req.method !== 'DELETE') {
     sendJson(res, 404, { error: 'Not found' });
     return true;
   }
@@ -77,12 +82,17 @@ export async function handleSignatureApiRequest(
   try {
     if (req.method === 'GET') {
       const signature = await getSignature(userId);
+      if (!offered && !signature) {
+        sendJson(res, 404, { error: 'Not found' });
+        return true;
+      }
       sendJson(
         res,
         200,
         signature
           ? {
               saved: true,
+              ...(offered ? {} : { offered: false }),
               width: signature.width,
               height: signature.height,
               savedAt: signature.updatedAt,
@@ -119,7 +129,7 @@ export async function handleSignatureApiRequest(
 
     if (req.method === 'DELETE') {
       const removed = await clearSignature(userId);
-      writeDiagnostic('info', 'signature.cleared', { route: 'rest', removed });
+      writeDiagnostic('info', 'signature.cleared', { route: 'rest', removed, offered });
       sendJson(res, 200, { removed });
       return true;
     }
