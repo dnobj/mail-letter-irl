@@ -305,6 +305,11 @@ describe.each(CARDS)('%s: an open checkout whose mail date has passed (#726)', c
     await harness.click('check-status-button');
     await flush();
     expect(harness.text('checkout-note')).toContain('to arrive by Mon, Jan 13, 2020, and that day has passed.');
+    // Paid afterwards, through the link: the note about paying goes.
+    harness.setStatus({ purchaseStatus: 'processing' });
+    await harness.click('check-status-button');
+    await flush();
+    expect(harness.visible('checkout-note')).toBe(false);
     // Not once it is paid.
     const paid = mount(card);
     await checkout(paid);

@@ -2727,6 +2727,11 @@
           // Its mail date passed while it waits (#726), on a reopened card too.
           if (state === "pending_payment") showScheduleMissed(status.scheduleMissed);
         }
+        // Paid, or closed: the note about paying no longer applies.
+        if (state !== "pending_payment" && scheduleMissedShown) {
+          scheduleMissedShown = false;
+          document.getElementById("checkout-note").style.display = "none";
+        }
         // "Settled" means nothing further will change SOON - not that nothing
         // will ever change. "processing" counts, and that is the point:
         //
@@ -2905,9 +2910,11 @@
       // host does not open a tab. See handlePayAndSend for why it exists.
       // An unpaid checkout whose mail date has passed (#726), from the checkout or a status answer:
       // said in place of the checkout note. True when it was shown.
+      let scheduleMissedShown = false;
       function showScheduleMissed(value) {
         const missed = arrives.scheduleOf(value);
         if (!missed) return false;
+        scheduleMissedShown = true;
         const note = document.getElementById("checkout-note");
         note.textContent =
           `This was to go to the printer on ${arrives.describeDate(missed.mailOn)} to arrive by ${arrives.describeDate(missed.arriveBy)}, and that day has passed. ` +

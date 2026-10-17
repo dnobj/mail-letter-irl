@@ -3996,6 +3996,10 @@ async function readMissedSchedule(order: Order): Promise<DraftSchedule | undefin
  */
 async function readPendingMissedSchedule(order: Order): Promise<DraftSchedule | undefined> {
   if (order.order_type !== 'jit_mail' || order.status !== 'checkout_pending' || !order.draft_id) return undefined;
+  // Only one that can be paid now: a session open, its window not over. Without one there is
+  // nothing to pay, and the next checkout cancels it (#726).
+  if (!order.stripe_checkout_session_id && !order.checkout_url) return undefined;
+  if (order.checkout_expires_at && new Date(order.checkout_expires_at).getTime() <= Date.now()) return undefined;
   const result = await query<Pick<LetterDraft, 'arrive_by' | 'mail_on'>>(
     'SELECT arrive_by, mail_on FROM letter_drafts WHERE draft_id = $1',
     [order.draft_id]
@@ -4064,7 +4068,7 @@ export async function getPurchaseStatus(
   // Unpaid and its date passed (#726): said before payment, to the model and to the card.
   const pendingMissed = await readPendingMissedSchedule(order);
   const pendingMissedSentence = pendingMissed
-    ? `Its day to go to the printer, ${describeDate(pendingMissed.mailOn, new Date())}, has passed: if it is paid now, it goes to the printer as soon as it can and may arrive after ${describeDate(pendingMissed.arriveBy, new Date())}. Tell the person before they pay.`
+    ? `Its day to go to the printer, ${describeDate(pendingMissed.mailOn, new Date())}, has passed: if it is paid now, it goes to the printer as soon as it can and may arrive after ${describeDate(pendingMissed.arriveBy, new Date())}. Tell the person before they pay; to choose a new date instead, leave it unpaid until it closes, then set the arrival date again.`
     : undefined;
   return {
     orderId: order.order_id,

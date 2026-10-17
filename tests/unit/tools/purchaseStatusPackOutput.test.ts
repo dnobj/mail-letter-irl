@@ -204,10 +204,10 @@ describe('a Pay & Send order whose mail date passed before it was paid (#700)', 
   });
 
   describe('an unpaid order whose mail date has passed (#726)', () => {
-    const pending = (draft: Record<string, unknown> | null, status = 'checkout_pending') => {
+    const pending = (draft: Record<string, unknown> | null, status = 'checkout_pending', extra: Record<string, unknown> = {}) => {
       mocks.query
         .mockResolvedValueOnce({
-          rows: [orderRow({ order_type: 'jit_mail', letter_id: null, draft_id: 'draft-1', credits: null, product_snapshot: { name: 'Pay & Send One Physical Letter', mailType: 'letter' }, status })]
+          rows: [orderRow({ order_type: 'jit_mail', letter_id: null, draft_id: 'draft-1', credits: null, product_snapshot: { name: 'Pay & Send One Physical Letter', mailType: 'letter' }, status, checkout_url: 'https://checkout.stripe.test/cs-1', checkout_expires_at: new Date('2026-10-08T14:30:00Z'), ...extra })]
         })
         .mockResolvedValueOnce({ rows: [] })
         .mockResolvedValueOnce({ rows: draft ? [draft] : [] });
@@ -219,7 +219,7 @@ describe('a Pay & Send order whose mail date passed before it was paid (#700)', 
       const output = await pending({ arrive_by: '2026-10-16', mail_on: '2026-10-06' });
       expect(output.scheduleMissed).toEqual({ arriveBy: '2026-10-16', mailOn: '2026-10-06' });
       expect(output.message).toContain(
-        'Its day to go to the printer, Tue, Oct 6, has passed: if it is paid now, it goes to the printer as soon as it can and may arrive after Fri, Oct 16. Tell the person before they pay.'
+        'Its day to go to the printer, Tue, Oct 6, has passed: if it is paid now, it goes to the printer as soon as it can and may arrive after Fri, Oct 16. Tell the person before they pay; to choose a new date instead, leave it unpaid until it closes, then set the arrival date again.'
       );
       expect(issues(getPurchaseStatusOutputZ.safeParse(output))).toBe('ok');
       const [sql, params] = mocks.query.mock.calls[2];
@@ -235,8 +235,17 @@ describe('a Pay & Send order whose mail date passed before it was paid (#700)', 
       }
     });
 
+    it('says nothing for an order that cannot be paid now: no session, or its window over', async () => {
+      for (const extra of [{ stripe_checkout_session_id: null, checkout_url: null }, { checkout_expires_at: new Date('2026-10-08T13:00:00Z') }]) {
+        mocks.query.mockReset();
+        const output = await pending({ arrive_by: '2026-10-16', mail_on: '2026-10-06' }, 'checkout_pending', extra);
+        expect(output, JSON.stringify(extra)).not.toHaveProperty('scheduleMissed');
+        expect(mocks.query.mock.calls.some(([sql]) => String(sql).includes('FROM letter_drafts'))).toBe(false);
+      }
+    });
+
     it('never asks once the order is paid or closed', async () => {
-      for (const status of ['paid', 'fulfillment_pending', 'cancelled', 'expired']) {
+      for (const status of ['paid', 'fulfillment_pending', 'cancelled', 'refunded']) {
         mocks.query.mockReset();
         const output = await pending({ arrive_by: '2026-10-16', mail_on: '2026-10-06' }, status);
         expect(output, status).not.toHaveProperty('scheduleMissed');
