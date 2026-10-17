@@ -86,8 +86,11 @@ See [infrastructure.md](infrastructure.md) for identifiers and URLs.
 ### What is promoted
 
 Production (`master`) was last promoted on 2026-09-16 (#416, `27e160a`) and carries migrations
-through `032_error_text_minimisation.sql`. The next promotion is the launch version (#158), 49 commits
-ahead on 2026-09-28, with migrations `033` to `037`:
+through `032_error_text_minimisation.sql`. The next promotion is the launch version (#158): on
+2026-10-16, 248 pull requests ahead (#336, #415 to #782) with migrations `033` to `064`, and the
+website 31 commits ahead. [launch-promotion.md](launch-promotion.md) is the plan: the order (website
+first), each system's steps, the checks and the rollback floors. Among what it carries, from the
+first weeks:
 
 - ChatGPT card hardening: the website's logo and the Instant tip (#417), chat-image recovery (#418),
   the same-mail check (#419), and the server's sentence on a refused call (#434);

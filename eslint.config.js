@@ -11,7 +11,10 @@ export default tseslint.config(
       "widgets/**",
       "snapshots/**",
       "admin-panel.html",
-      "admin-panel.html.backup"
+      "admin-panel.html.backup",
+      // Auth0 Post Login Actions (#702): CommonJS run by Auth0's runtime, pasted
+      // into each tenant as written; scripts/check-auth0-tenant.ts compares them.
+      "docs/auth0/actions/**"
     ]
   },
   js.configs.recommended,
