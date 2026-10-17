@@ -1142,13 +1142,14 @@ async function processClaimedJob(
     if (result.success) {
       try {
         await completeJob(job, letter, providerName, result);
-        // The provider has it: the stored PDF has done its work (#697).
-        if (letter.mail_on) await forgetHeldPdf(letter.letter_id);
+        // The provider has it: the stored PDF has done its work (#697). Only where one is recorded, so a bucket
+        // that is down slows no other letter; the hourly sweep deletes one stored without its record.
+        if (letter.print_pdf_sha256) await forgetHeldPdf(letter.letter_id);
         return { claimed: true, completed: true, retryScheduled: false, job };
       } catch (error) {
         const recovery = await recoverProviderAcceptancePersistence(job, error);
         if (recovery === 'completed') {
-          if (letter.mail_on) await forgetHeldPdf(letter.letter_id);
+          if (letter.print_pdf_sha256) await forgetHeldPdf(letter.letter_id);
           return { claimed: true, completed: true, retryScheduled: false, job };
         }
         return {

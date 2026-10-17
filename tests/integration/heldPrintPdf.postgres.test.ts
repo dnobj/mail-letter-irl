@@ -160,30 +160,39 @@ describePostgres('held mail prints as previewed (migration 065, #697)', () => {
 
   it('checks each value, the engine with the fingerprint, and a PDF only with a fingerprint, of held mail', async () => {
     const userId = await seedUser();
-    const letterId = randomUUID();
-    await pool.query(
-      `INSERT INTO letters (letter_id, user_id, content, recipient, credits_cost, status, mail_type, funding_type)
-       VALUES ($1, $2, '{}', $3, 2, 'draft', 'letter', 'prepaid_balance')`,
-      [letterId, userId, JSON.stringify(RECIPIENT)]
-    );
+    // One letter with a mail date and one without. PostgreSQL reports the first CHECK a row fails,
+    // in the order of their names, so each case below fails exactly the one it names.
+    const insert = async (dated: boolean) => {
+      const letterId = randomUUID();
+      await pool.query(
+        `INSERT INTO letters (letter_id, user_id, content, recipient, credits_cost, status, mail_type, funding_type, arrive_by, mail_on)
+         VALUES ($1, $2, '{}', $3, 2, 'draft', 'letter', 'prepaid_balance', $4::date, $5::date)`,
+        [letterId, userId, JSON.stringify(RECIPIENT), dated ? '2026-12-16' : null, dated ? '2026-12-09' : null]
+      );
+      return letterId;
+    };
+    const undated = await insert(false);
+    const dated = await insert(true);
     const fingerprint = `fp1:${'a'.repeat(64)}`;
-    const attempt = (sets: string, values: unknown[]) =>
+    const attempt = (letterId: string, sets: string, values: unknown[]) =>
       pool.query(`UPDATE letters SET ${sets} WHERE letter_id = $1`, [letterId, ...values]);
-    for (const [sets, values, constraint] of [
-      ['print_layout_fingerprint = $2, print_layout_engine = $3', ['fp1:short', 'layout-1'], 'letters_print_layout_fingerprint_shape'],
-      ['print_layout_fingerprint = $2, print_layout_engine = $3', [fingerprint, 'layout-0'], 'letters_print_layout_engine_shape'],
-      ['print_layout_fingerprint = $2', [fingerprint], 'letters_print_layout_engine_with_fingerprint'],
-      ['print_layout_engine = $2', ['layout-1'], 'letters_print_layout_engine_with_fingerprint'],
-      ['print_pdf_sha256 = $2', ['B'.repeat(64)], 'letters_print_pdf_sha256_shape'],
-      ['print_pdf_sha256 = $2', ['b'.repeat(64)], 'letters_print_pdf_needs_fingerprint'],
-      ['print_pdf_sha256 = $2, print_layout_fingerprint = $3, print_layout_engine = $4', ['b'.repeat(64), fingerprint, 'layout-1'], 'letters_print_pdf_held_only']
+    const withPrint = 'print_pdf_sha256 = $2, print_layout_fingerprint = $3, print_layout_engine = $4';
+    for (const [letterId, sets, values, constraint] of [
+      [undated, 'print_layout_fingerprint = $2, print_layout_engine = $3', ['fp1:short', 'layout-1'], 'letters_print_layout_fingerprint_shape'],
+      [undated, 'print_layout_fingerprint = $2, print_layout_engine = $3', [fingerprint, 'layout-0'], 'letters_print_layout_engine_shape'],
+      [undated, 'print_layout_fingerprint = $2', [fingerprint], 'letters_print_layout_engine_with_fingerprint'],
+      [undated, 'print_layout_engine = $2', ['layout-1'], 'letters_print_layout_engine_with_fingerprint'],
+      [dated, withPrint, ['B'.repeat(64), fingerprint, 'layout-1'], 'letters_print_pdf_sha256_shape'],
+      [dated, 'print_pdf_sha256 = $2', ['b'.repeat(64)], 'letters_print_pdf_needs_fingerprint'],
+      [undated, withPrint, ['b'.repeat(64), fingerprint, 'layout-1'], 'letters_print_pdf_held_only']
     ] as const) {
-      await expect(attempt(sets, [...values])).rejects.toMatchObject({ code: '23514', constraint });
+      await expect(attempt(letterId, sets, [...values]), constraint).rejects.toMatchObject({ code: '23514', constraint });
     }
     // A fingerprint alone is any letter's; a PDF with it, held mail's.
-    await attempt('print_layout_fingerprint = $2, print_layout_engine = $3', [fingerprint, 'layout-1']);
-    await attempt("arrive_by = '2026-12-16', mail_on = '2026-12-09', print_pdf_sha256 = $2", ['b'.repeat(64)]);
-    expect((await letterRow(letterId)).print_pdf_sha256).toBe('b'.repeat(64));
+    await attempt(undated, 'print_layout_fingerprint = $2, print_layout_engine = $3', [fingerprint, 'layout-1']);
+    await attempt(dated, withPrint, ['b'.repeat(64), fingerprint, 'layout-1']);
+    expect((await letterRow(dated)).print_pdf_sha256).toBe('b'.repeat(64));
+    expect((await letterRow(undated)).print_layout_engine).toBe('layout-1');
   }, 60_000);
 
   it("records a held letter's layout in the send, then stores its PDF and the SHA-256 of the stored bytes", async () => {

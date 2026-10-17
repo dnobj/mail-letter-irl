@@ -152,6 +152,13 @@ describe("held mail's print in the outbox (#697)", () => {
     expect(forgetHeldPdf).not.toHaveBeenCalled();
   });
 
+  it('asks the bucket nothing after acceptance for held mail that records no PDF', async () => {
+    storedHeldPdf.mockResolvedValue(undefined);
+    rows({ ...baseLetter, print_pdf_sha256: null });
+    await expect(processLetterJob('job-1', {})).resolves.toMatchObject({ completed: true });
+    expect(forgetHeldPdf).not.toHaveBeenCalled();
+  });
+
   it('keeps the PDF when the provider did not accept the mail', async () => {
     sendLetter.mockResolvedValue({
       success: false,

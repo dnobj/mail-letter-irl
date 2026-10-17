@@ -172,7 +172,7 @@ describe('storeHeldPrint (#697)', () => {
     const update = vi.mocked(query).mock.calls.find(call => String(call[0]).includes('UPDATE letters SET print_pdf_sha256'))!;
     expect(update[1]).toEqual([LETTER_ID, sha256(stored!), letter.print_layout_fingerprint]);
     // Only for a letter that still waits, as it was read, and still has none.
-    for (const clause of ["status = 'queued'", 'print_pdf_sha256 IS NULL', 'print_layout_fingerprint = $3', 'mail_on IS NOT NULL', 'redacted_at IS NULL']) {
+    for (const clause of ["status = 'queued'", '(print_pdf_sha256 IS NULL OR print_pdf_sha256 = $2)', 'print_layout_fingerprint = $3', 'mail_on IS NOT NULL', 'redacted_at IS NULL']) {
       expect(String(update[0])).toContain(clause);
     }
   });

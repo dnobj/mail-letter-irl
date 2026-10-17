@@ -150,10 +150,12 @@ export async function storeHeldPrint(letterId: string): Promise<StoreHeldPrintOu
     const pdf = await drawPrintPdf(print, kindOf(letter));
     const digest = sha256(pdf);
     if (!(await storeHeldPdf(letterId, pdf))) return 'skipped';
+    // A store running beside another (the send's, late, and the backfill's) draws the same bytes, so a
+    // row already recording this digest is this object's too, and keeps it.
     const recorded = await query(
       `UPDATE letters SET print_pdf_sha256 = $2
         WHERE letter_id = $1
-          AND print_pdf_sha256 IS NULL
+          AND (print_pdf_sha256 IS NULL OR print_pdf_sha256 = $2)
           AND print_layout_fingerprint = $3
           AND status = 'queued'
           AND mail_on IS NOT NULL
@@ -161,7 +163,7 @@ export async function storeHeldPrint(letterId: string): Promise<StoreHeldPrintOu
       [letterId, digest, letter.print_layout_fingerprint]
     );
     if ((recorded.rowCount ?? 0) === 0) {
-      // It stopped waiting, or changed, between the read and the upload.
+      // It stopped waiting, or changed, between the read and the upload, or records other bytes.
       await deleteHeldPdf(letterId);
       return 'skipped';
     }
