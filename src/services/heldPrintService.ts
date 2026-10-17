@@ -204,7 +204,12 @@ export async function backfillHeldPrints(): Promise<{ stored: number; layoutChan
     const outcome = await storeHeldPrint(row.letter_id);
     if (outcome === 'stored') summary.stored += 1;
     else if (outcome === 'layout_changed') summary.layoutChanged += 1;
-    else if (outcome === 'failed') summary.failed += 1;
+    else if (outcome === 'failed') {
+      // A bucket or database that failed once fails the rest the same way, each after its time limit:
+      // the next run tries again, rather than this one holding up the tasks after it.
+      summary.failed += 1;
+      break;
+    }
   }
   return summary;
 }

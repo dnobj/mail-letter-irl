@@ -278,6 +278,16 @@ describe('sweepHeldPdfs (#697)', () => {
 });
 
 describe('backfillHeldPrints (#697)', () => {
+  it('stops at the first failed store, for the next run to try again', async () => {
+    vi.mocked(query).mockImplementation(async (sql: string) => {
+      if (sql.includes('FROM letters l')) return { rows: [{ letter_id: LETTER_ID }, { letter_id: '44444444-4444-4444-8444-444444444444' }], rowCount: 2 } as never;
+      throw new Error('connection terminated');
+    });
+    expect(await backfillHeldPrints()).toEqual({ stored: 0, layoutChanged: 0, failed: 1 });
+    // The list, then one letter's read: the second letter is left for the next run.
+    expect(vi.mocked(query)).toHaveBeenCalledTimes(2);
+  });
+
   it('stores a PDF for each held letter the send left without one, and counts what it found', async () => {
     const letter = heldLetter();
     letter.print_layout_fingerprint = fingerprintOf(letter);

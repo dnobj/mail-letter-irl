@@ -905,7 +905,9 @@ and where a reason has more than one case, by the letter's stored content (`cont
   the renderer, a font or the layout engine's version. Its stored PDF was missing or not the bytes recorded
   (`held_print.pdf_missing` or `held_print.pdf_mismatch`), could not be read in time (`held_print.pdf_unreadable`),
   or was never stored (`held_print.store_failed`, or a Pay & Send letter the hourly backfill had not reached).
-  Either roll back the change and retry, or, when the change is meant to stay, let the letter print as it
+  When the cause was `held_print.pdf_unreadable`, retry first: the row still records the approved PDF,
+  the sweep keeps it while the letter is held, and a retry once the bucket answers prints those bytes.
+  Otherwise, either roll back the change and retry, or, when the change is meant to stay, let the letter print as it
   now lays out: clear what the send recorded, then retry. The three columns go together (a stored PDF needs
   a fingerprint, and the engine goes with it):
   `UPDATE letters SET print_pdf_sha256 = NULL, print_layout_fingerprint = NULL, print_layout_engine = NULL WHERE letter_id = '...'`.
